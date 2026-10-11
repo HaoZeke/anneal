@@ -45,8 +45,8 @@
 //! charged evaluations, so its proposals cost only their acceptance
 //! tests.
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use ndarray::{Array1, Array2, ArrayView1};
 use rand::rngs::StdRng;
@@ -545,25 +545,18 @@ struct LedgerInner {
     archive_y: Vec<f64>,
 }
 
-struct BudgetLedger {
-    cap: AtomicUsize,
-    used: AtomicUsize,
-    n_evals: AtomicUsize,
-    n_grads: AtomicUsize,
+/// The evaluation archive and the incumbent it holds. A ledger owns one;
+/// batch replicas may share one between their ledgers.
+struct Archive {
     best_val: AtomicU64,
     inner: Mutex<LedgerInner>,
-    archive_cap: usize,
-    dim: usize,
-    peer: Option<ensemble::Peer>,
+    cap: usize,
 }
 
-impl BudgetLedger {
-    fn new(budget: usize, dim: usize) -> Self {
+impl Archive {
+    /// An empty archive of at most `cap` entries.
+    fn new(cap: usize) -> Self {
         Self {
-            cap: AtomicUsize::new(budget),
-            used: AtomicUsize::new(0),
-            n_evals: AtomicUsize::new(0),
-            n_grads: AtomicUsize::new(0),
             best_val: AtomicU64::new(f64::INFINITY.to_bits()),
             inner: Mutex::new(LedgerInner {
                 best_pos: None,
@@ -571,9 +564,90 @@ impl BudgetLedger {
                 archive_x: Vec::new(),
                 archive_y: Vec::new(),
             }),
-            // Every archive entry costs one budget unit, so the budget
-            // itself bounds the archive.
-            archive_cap: budget,
+            cap,
+        }
+    }
+
+    fn best_get(&self) -> f64 {
+        f64::from_bits(self.best_val.load(Ordering::Relaxed))
+    }
+
+    /// Archive a candidate only if `value` is finite **and** `x` lies inside
+    /// `bounds` (GJQ-style feasibility choke-point: never promote OOB bests).
+    fn record(&self, x: ArrayView1<f64>, value: f64, bounds: &Bounds<f64>) {
+        if !bounds.contains(x) {
+            return;
+        }
+        let mut inner = self.inner.lock().expect("ledger lock");
+        if inner.first_pos.is_none() {
+            inner.first_pos = Some(x.to_owned());
+        }
+        if !value.is_finite() {
+            return;
+        }
+        // Re-read under the lock so two sequential records cannot promote a
+        // worse best_val after a better one (relaxed atomic alone is racy
+        // with the mutex-held position write).
+        let current = f64::from_bits(self.best_val.load(Ordering::Relaxed));
+        if value < current {
+            self.best_val.store(value.to_bits(), Ordering::Relaxed);
+            inner.best_pos = Some(x.to_owned());
+        }
+        if inner.archive_y.len() < self.cap {
+            inner.archive_x.extend(x.iter().copied());
+            inner.archive_y.push(value);
+        }
+    }
+
+    fn incumbent(&self, bounds: &Bounds<f64>) -> Array1<f64> {
+        let inner = self.inner.lock().expect("ledger lock");
+        match inner.best_pos.as_ref().or(inner.first_pos.as_ref()) {
+            // Defensive clip: both positions are only written in bounds.
+            Some(pos) => bounds.clip(pos.view()),
+            None => (&bounds.low + &bounds.high) * 0.5,
+        }
+    }
+
+    fn incumbent_value(&self) -> Option<f64> {
+        let inner = self.inner.lock().expect("ledger lock");
+        if inner.best_pos.is_some() {
+            Some(self.best_get())
+        } else {
+            inner.first_pos.as_ref().map(|_| f64::INFINITY)
+        }
+    }
+}
+
+struct BudgetLedger {
+    cap: AtomicUsize,
+    used: AtomicUsize,
+    n_evals: AtomicUsize,
+    n_grads: AtomicUsize,
+    archive: Arc<Archive>,
+    /// Whether the budgeted objectives record what they evaluate. A batch
+    /// coordinator that answers a replica's evaluations records them itself.
+    records: bool,
+    dim: usize,
+    peer: Option<ensemble::Peer>,
+}
+
+impl BudgetLedger {
+    fn new(budget: usize, dim: usize) -> Self {
+        // Every archive entry costs one budget unit, so the budget itself
+        // bounds the archive.
+        Self::with_archive(budget, dim, Arc::new(Archive::new(budget)), true)
+    }
+
+    /// A ledger of `budget` units over `archive`, recording its own
+    /// evaluations there only if `records`.
+    fn with_archive(budget: usize, dim: usize, archive: Arc<Archive>, records: bool) -> Self {
+        Self {
+            cap: AtomicUsize::new(budget),
+            used: AtomicUsize::new(0),
+            n_evals: AtomicUsize::new(0),
+            n_grads: AtomicUsize::new(0),
+            archive,
+            records,
             dim,
             peer: None,
         }
@@ -598,7 +672,7 @@ impl BudgetLedger {
     }
 
     fn best_get(&self) -> f64 {
-        f64::from_bits(self.best_val.load(Ordering::Relaxed))
+        self.archive.best_get()
     }
 
     fn remaining(&self) -> usize {
@@ -645,43 +719,19 @@ impl BudgetLedger {
         true
     }
 
-    /// Archive a candidate only if `value` is finite **and** `x` lies inside
-    /// `bounds` (GJQ-style feasibility choke-point: never promote OOB bests).
+    /// Records an evaluation in the archive ([`Archive::record`]) unless a
+    /// batch coordinator records this ledger's evaluations.
     fn record(&self, x: ArrayView1<f64>, value: f64, bounds: &Bounds<f64>) {
         if let Some(peer) = &self.peer {
             peer.evaluated(x, value);
         }
-        if !bounds.contains(x) {
-            return;
-        }
-        let mut inner = self.inner.lock().expect("ledger lock");
-        if inner.first_pos.is_none() {
-            inner.first_pos = Some(x.to_owned());
-        }
-        if !value.is_finite() {
-            return;
-        }
-        // Re-read under the lock so two sequential records cannot promote a
-        // worse best_val after a better one (relaxed atomic alone is racy
-        // with the mutex-held position write).
-        let current = f64::from_bits(self.best_val.load(Ordering::Relaxed));
-        if value < current {
-            self.best_val.store(value.to_bits(), Ordering::Relaxed);
-            inner.best_pos = Some(x.to_owned());
-        }
-        if inner.archive_y.len() < self.archive_cap {
-            inner.archive_x.extend(x.iter().copied());
-            inner.archive_y.push(value);
+        if self.records {
+            self.archive.record(x, value, bounds);
         }
     }
 
     fn incumbent(&self, bounds: &Bounds<f64>) -> Array1<f64> {
-        let inner = self.inner.lock().expect("ledger lock");
-        match inner.best_pos.as_ref().or(inner.first_pos.as_ref()) {
-            // Defensive clip: both positions are only written in bounds.
-            Some(pos) => bounds.clip(pos.view()),
-            None => (&bounds.low + &bounds.high) * 0.5,
-        }
+        self.archive.incumbent(bounds)
     }
 
     /// Value at [`BudgetLedger::incumbent`] once that point has been
@@ -689,12 +739,7 @@ impl BudgetLedger {
     /// finite. `None` before any evaluation, when the incumbent is the box
     /// centre.
     fn incumbent_value(&self) -> Option<f64> {
-        let inner = self.inner.lock().expect("ledger lock");
-        if inner.best_pos.is_some() {
-            Some(self.best_get())
-        } else {
-            inner.first_pos.as_ref().map(|_| f64::INFINITY)
-        }
+        self.archive.incumbent_value()
     }
 }
 
@@ -1443,7 +1488,7 @@ fn archive_temp0(ledger: &BudgetLedger) -> f64 {
 /// [`archive_temp0`] in units of `unit`, a power of two, with its floor and
 /// its fallback in that unit.
 fn archive_temp0_in(ledger: &BudgetLedger, unit: f64) -> f64 {
-    let inner = ledger.inner.lock().expect("ledger lock");
+    let inner = ledger.archive.inner.lock().expect("ledger lock");
     let mut finite: Vec<f64> = inner
         .archive_y
         .iter()
@@ -2378,7 +2423,7 @@ fn run_persistent_gsa<O, G>(
 }
 
 fn elite_archive_anchor(ledger: &BudgetLedger, bounds: &Bounds<f64>) -> Option<Array1<f64>> {
-    let inner = ledger.inner.lock().expect("ledger lock");
+    let inner = ledger.archive.inner.lock().expect("ledger lock");
     let dim = bounds.dims;
     let (mut best_idx, mut best_val) = (None, f64::INFINITY);
     for (idx, value) in inner.archive_y.iter().copied().enumerate() {
@@ -2786,7 +2831,7 @@ fn run_arm<O, G>(
             // dimension-free acceptance bound.
             let min_points = (SURROGATE_DEGREE + 2).max(4 * dim);
             let (xs, ys) = {
-                let inner = ledger.inner.lock().expect("ledger lock");
+                let inner = ledger.archive.inner.lock().expect("ledger lock");
                 let n = inner.archive_y.len();
                 if n < min_points {
                     return;
@@ -4392,7 +4437,7 @@ fn try_sketchmap_metad_bias(
     use crate::methods::sketchmap::{SketchMap2d, farthest_point_landmarks};
     use ndarray::Array2;
 
-    let inner = ledger.inner.lock().ok()?;
+    let inner = ledger.archive.inner.lock().ok()?;
     let n = inner.archive_y.len();
     if n < 6 {
         return None;
@@ -4514,7 +4559,7 @@ fn archive_basin_pair(
     ledger: &BudgetLedger,
     bounds: &Bounds<f64>,
 ) -> Option<(Array1<f64>, f64, Array1<f64>, f64)> {
-    let inner = ledger.inner.lock().expect("ledger lock");
+    let inner = ledger.archive.inner.lock().expect("ledger lock");
     let dim = ledger.dim;
     let n = inner.archive_y.len();
     if n < 2 {
@@ -6101,7 +6146,16 @@ mod tests {
         assert_eq!(ledger.used_get(), 2);
         assert_eq!(ledger.n_evals.load(Ordering::Relaxed), 1);
         assert_eq!(ledger.n_grads.load(Ordering::Relaxed), 1);
-        assert_eq!(ledger.inner.lock().expect("ledger lock").archive_y.len(), 0);
+        assert_eq!(
+            ledger
+                .archive
+                .inner
+                .lock()
+                .expect("ledger lock")
+                .archive_y
+                .len(),
+            0
+        );
         assert!(!ledger.charge_probe(1, 0));
     }
 
