@@ -120,6 +120,8 @@ pub enum FdScheme {
 }
 
 struct GradientWork {
+    /// Coordinates whose component is known.
+    done: usize,
     coord: usize,
     point: usize,
     offsets: Vec<f64>,
@@ -175,6 +177,8 @@ pub struct FdBfgs {
     used_intervals: Vec<f64>,
     /// Gradients re-differenced at the current iterate.
     redifferences: usize,
+    /// Coordinate each gradient differences first.
+    first: usize,
 }
 
 impl FdBfgs {
@@ -212,11 +216,25 @@ impl FdBfgs {
             intervals: vec![None; n],
             used_intervals: vec![0.0; n],
             redifferences: 0,
+            first: 0,
         };
         if let Some(f0) = f0 {
             engine.set_start_value(f0);
         }
         engine
+    }
+
+    /// Differences every gradient from coordinate `first` (modulo the
+    /// dimension) on, cyclically, instead of from coordinate 0, and starts a
+    /// gradient under way again in that order. The gradient is the same in
+    /// any order, so descents that share their evaluations can each start
+    /// at a different coordinate and ask for different stencil points.
+    pub fn with_first_coordinate(mut self, first: usize) -> Self {
+        self.first = first % self.n;
+        if matches!(self.phase, Phase::Gradient(_)) {
+            self.phase = Phase::Gradient(self.gradient_work());
+        }
+        self
     }
 
     /// Moves the descent to `x`, keeping the curvature model when
@@ -355,7 +373,8 @@ impl FdBfgs {
 
     fn gradient_work(&self) -> GradientWork {
         let mut work = GradientWork {
-            coord: 0,
+            done: 0,
+            coord: self.first,
             point: 0,
             offsets: Vec::new(),
             weights: Vec::new(),
@@ -369,9 +388,11 @@ impl FdBfgs {
         work
     }
 
-    /// Loads the stencil of `work.coord`, skipping degenerate coordinates.
+    /// Loads the stencil of the next coordinate in the gradient's order,
+    /// skipping degenerate coordinates.
     fn load_coord(&self, work: &mut GradientWork) {
-        while work.coord < self.n {
+        while work.done < self.n {
+            work.coord = (self.first + work.done) % self.n;
             let (offsets, weights, base) = self.stencil(work.coord);
             if !offsets.is_empty() {
                 work.offsets = offsets;
@@ -384,7 +405,7 @@ impl FdBfgs {
                 return;
             }
             work.grad[work.coord] = 0.0;
-            work.coord += 1;
+            work.done += 1;
         }
     }
 
@@ -409,9 +430,9 @@ impl FdBfgs {
         if self.scheme == FdScheme::Central && work.offsets.len() == 2 {
             self.adapt_interval(&work, component);
         }
-        work.coord += 1;
+        work.done += 1;
         self.load_coord(&mut work);
-        if work.coord < self.n {
+        if work.done < self.n {
             self.phase = Phase::Gradient(work);
         } else {
             self.finish_gradient(work.grad);
@@ -784,6 +805,42 @@ mod tests {
             }
         }
         assert_eq!(trace_whole, trace_parts);
+    }
+
+    #[test]
+    fn the_first_coordinate_reorders_the_stencils_but_not_the_descent() {
+        let bounds = boxed(-2.0, 2.0, 5);
+        let start = Array1::from_vec(vec![0.5, -1.0, 1.5, 0.0, 2.0]);
+        let run = |first: usize| {
+            let f0 = Some(rosenbrock(start.view()));
+            let mut engine = FdBfgs::new(start.view(), f0, &bounds, FdBfgsOptions::default())
+                .with_first_coordinate(first);
+            let mut asked = Vec::new();
+            while asked.len() < 2000 && !engine.is_done() {
+                let x = engine.ask();
+                engine.tell(rosenbrock(x.view()));
+                asked.push(x);
+            }
+            (asked, engine.position().to_owned(), engine.value())
+        };
+        let sorted = |points: &[Array1<f64>]| {
+            let mut keys: Vec<Vec<u64>> = points
+                .iter()
+                .map(|x| x.iter().map(|v| v.to_bits()).collect())
+                .collect();
+            keys.sort();
+            keys
+        };
+        let (plain, x, f) = run(0);
+        assert!(plain.len() > 200, "descent ended after {}", plain.len());
+        for first in [1usize, 3, 7] {
+            let (rotated, rotated_x, rotated_f) = run(first);
+            let moved: Vec<usize> = (0..5).filter(|&i| rotated[0][i] != start[i]).collect();
+            assert_eq!(moved, vec![first % 5], "first {first}");
+            assert_ne!(rotated, plain, "first {first}");
+            assert_eq!(sorted(&rotated), sorted(&plain), "first {first}");
+            assert_eq!((rotated_x, rotated_f), (x.clone(), f), "first {first}");
+        }
     }
 
     #[test]
