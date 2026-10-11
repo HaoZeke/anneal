@@ -55,6 +55,29 @@ def test_box_ensemble_requires_a_gradient():
 
 
 @pytest.mark.parametrize(
+    "entry", ["box_ensemble_optimize", "ensemble_optimize", "minimize"]
+)
+def test_an_unknown_membership_is_named_before_any_call(entry):
+    fn, grad, low, high = _two_well()
+    calls = []
+
+    def recorded(x):
+        calls.append(np.array(x, copy=True))
+        return fn(x)
+
+    message = "membership must be accepted or observed-exclusion, got 'everything'"
+    with pytest.raises(ValueError, match=message):
+        if entry == "minimize":
+            box = np.column_stack((low, high))
+            anneal.minimize(recorded, np.zeros(2), box, membership="everything")
+        else:
+            getattr(anneal, entry)(
+                recorded, low, high, 20, grad_fn=grad, membership="everything"
+            )
+    assert calls == []
+
+
+@pytest.mark.parametrize(
     "entry, replicas",
     [("box_ensemble_optimize", 2), ("ensemble_optimize", 2), ("ensemble_optimize", 1)],
 )
