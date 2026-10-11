@@ -1,7 +1,5 @@
 #+TITLE: GLE Colored-Noise Langevin
-#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
-
-* GLE Colored-Noise Langevin
+#+OPTIONS: toc:nil todo:nil num:nil author:nil ^:nil
 
 GLE-Langevin combines gradient-driven motion with a generalized Langevin
 equation thermostat. Auxiliary momenta give its friction frequency dependence.
