@@ -108,6 +108,38 @@ class BudgetOnlyFitter(Handed):
         return self._minimize(budget, seed=0)
 
 
+class PositionalBudgetFitter(Handed):
+    """Runs ``run_benchmark``, taking the budget only by position."""
+
+    def fit_anneal(self, budget, /, *, method="portfolio", seed=0):
+        self.handed.append({"budget": budget, "method": method, "seed": seed})
+        return self._benchmark(budget, method=method, seed=seed)
+
+
+class PositionalBudgetKwargsFitter(Handed):
+    """Runs ``run_benchmark`` with what ``**options`` gets, taking the budget only by position."""
+
+    def fit_anneal(self, budget, /, **options):
+        self.handed.append({"budget": budget, **options})
+        return self._benchmark(budget, **options)
+
+
+class PositionalSeedFitter(Handed):
+    """Takes the budget and the seed only by position, and anything else as ``**options``."""
+
+    def fit_anneal(self, budget, seed=0, /, **options):
+        self.handed.append({"budget": budget, "seed": seed, **options})
+        return self._minimize(budget, seed)
+
+
+class LateBudgetFitter(Handed):
+    """Takes the budget only by position, after a scale."""
+
+    def fit_anneal(self, scale, budget, /):
+        self.handed.append({"scale": scale, "budget": budget})
+        return self._minimize(budget, seed=0)
+
+
 def _fitter(kind=ReleasedFitter, bounds=None):
     return kind(
         {"x": np.array([0.2, -0.1]), "eps": 1.0},
@@ -303,6 +335,39 @@ def test_a_fit_anneal_without_seed_runs_on_the_defaults():
     assert 1 < len(fitter.evaluated) <= 60
 
 
+def _benchmarked(budget, **options):
+    """A fitter without ``fit_anneal``, run by ``run_benchmark`` with ``options``."""
+    fitter = _fitter(NextFitter)
+    context = {"fitter": fitter, "budget": budget, "initial_params": fitter.initial_parameters}
+    run_benchmark(context, **options)
+    return fitter
+
+
+@pytest.mark.parametrize(
+    "kind, options, handed",
+    [
+        (PositionalBudgetFitter, {}, {"method": "portfolio", "seed": 42}),
+        (PositionalBudgetFitter, {"method": "sa", "seed": 3}, {"method": "boltzmann", "seed": 3}),
+        (PositionalBudgetKwargsFitter, {}, {}),
+        (PositionalBudgetKwargsFitter, {"method": "gsa", "seed": 3}, {"method": "gsa", "seed": 3}),
+    ],
+    ids=["keyword-only-defaults", "keyword-only-sa", "kwargs-defaults", "kwargs-gsa"],
+)
+def test_a_positional_only_budget_goes_by_position(kind, options, handed):
+    own = _fitter(kind)
+    run_fitter(own, 60, **options)
+    assert own.handed == [{"budget": 60, **handed}]
+    assert 1 < len(own.evaluated) <= 60
+    assert _same_run(own, _benchmarked(60, **handed))
+
+
+def test_a_positional_only_seed_gets_nothing_by_default():
+    fitter = _fitter(PositionalSeedFitter)
+    run_fitter(fitter, 60)
+    assert fitter.handed == [{"budget": 60, "seed": 0}]
+    assert 1 < len(fitter.evaluated) <= 60
+
+
 @pytest.mark.parametrize(
     "kind, options, message",
     [
@@ -365,6 +430,30 @@ def test_a_fit_anneal_without_seed_runs_on_the_defaults():
             {"method": "boltzmann", "preset": Fast(), "x0": 1.0},
             "run_fitter() cannot pass x0 to NoPresetFitter.fit_anneal(), which takes no 'x0'",
         ),
+        (
+            LateBudgetFitter,
+            {},
+            (
+                "run_fitter() cannot pass budget to LateBudgetFitter.fit_anneal(), which "
+                "takes 'budget' only by position"
+            ),
+        ),
+        (
+            LateBudgetFitter,
+            {"x0": 1.0},
+            (
+                "run_fitter() cannot pass budget and x0 to LateBudgetFitter.fit_anneal(), "
+                "which takes no 'x0' and takes 'budget' only by position"
+            ),
+        ),
+        (
+            PositionalSeedFitter,
+            {"seed": 7},
+            (
+                "run_fitter() cannot pass seed 7 to PositionalSeedFitter.fit_anneal(), which "
+                "takes 'seed' only by position"
+            ),
+        ),
     ],
     ids=[
         "preset",
@@ -375,6 +464,9 @@ def test_a_fit_anneal_without_seed_runs_on_the_defaults():
         "seed",
         "x0-preset-the-portfolio-ignores",
         "x0-preset-boltzmann-ignores",
+        "budget-after-a-positional-parameter",
+        "budget-after-a-positional-parameter-and-x0",
+        "positional-only-seed-beside-kwargs",
     ],
 )
 def test_an_option_a_fit_anneal_cannot_take_is_refused_before_anything_is_evaluated(
