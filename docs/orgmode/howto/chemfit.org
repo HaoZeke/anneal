@@ -141,9 +141,11 @@ each batch goes to one =evaluate= of a list, which ChemFit's schedule may run
 concurrently, and one =step=. The budget stays the total number of
 evaluations.
 
-Batches need a =Fitter= with =evaluate= and =step= whose =init= takes
-=batch_size=, which no ChemFit release has yet; for any other fitter the
-bridges refuse =batch_size= above one before =init=, naming what it lacks.
+Batches need the portfolio and a =Fitter= with =evaluate= and =step= whose
+=init= takes =batch_size=, which no ChemFit release has yet. When every
+other check passes, the bridges refuse =batch_size= above one before =init=
+under another driver, naming the driver, and under the portfolio for a
+fitter lacking any of these, naming what it lacks.
 Whether =evaluate= takes a list shows only when it is called: one that takes
 a single candidate gets the start as a list of one, after =init=, and the
 fit stops there with what it raises, or with a =TypeError= when its reply is

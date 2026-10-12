@@ -8,8 +8,10 @@ concurrently evaluates them together. The start is the first evaluation, as
 a batch of one, and the budget stays the total number of evaluations.
 ``fit_chemfit`` then steps the fitter once per batch instead of every
 ``tell_every`` evaluations. A batch needs the portfolio and a fitter with
-``evaluate``, ``step`` and an ``init`` that takes ``batch_size``; anything
-else is refused before ``init``, by a message naming what the fitter lacks.
+``evaluate``, ``step`` and an ``init`` that takes ``batch_size``. When every
+other check passes, a batch under another driver is refused before ``init``,
+by a message naming the driver, and under the portfolio a fitter lacking any
+of the three is refused before ``init``, by a message naming what it lacks.
 No ChemFit release has all three yet: ChemFit 3.1.1 has ``ask`` and ``tell``,
 ChemFit's source has ``evaluate`` and ``step`` from commit c57d6f5, and it
 takes batches from commit 3b65fe0 on. Whether ``evaluate`` takes a list
