@@ -1927,6 +1927,7 @@ _FITTER_METHODS = {
     "gsa": "gsa",
 }
 _FITTER_OPTIONS = ("x0", "low", "high", "bound_span", "steps_per_epoch", "preset_kwargs")
+_FITTER_SEED = 42
 
 
 def _fitter_keyword_error(key: str) -> TypeError:
@@ -1969,12 +1970,79 @@ def _fitter_driver(key: str, method: Any, preset: Any) -> tuple[str, Any]:
     return driver, preset
 
 
+def _keywords(function: Any) -> tuple[frozenset[str], bool]:
+    """The parameters ``function`` takes by keyword, and whether it takes ``**kwargs``.
+
+    A function whose signature cannot be read counts as taking ``**kwargs``:
+    what it does not take shows only at its call.
+    """
+    try:
+        parameters = inspect.signature(function).parameters.values()
+    except (TypeError, ValueError):
+        return frozenset(), True
+    named = frozenset(
+        p.name for p in parameters if p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
+    )
+    return named, any(p.kind is p.VAR_KEYWORD for p in parameters)
+
+
+def _own_fit_anneal(
+    fitter: Any,
+    budget: Any,
+    key: str,
+    method: Any,
+    preset: Any,
+    seed: Any,
+    kwargs: dict[str, Any],
+) -> Any:
+    """Hand ``fitter`` to its own ``fit_anneal`` with what that method takes.
+
+    :func:`run_fitter` says what goes; anything that its signature cannot
+    take is refused here, before ``fit_anneal`` is called.
+    """
+    fit = fitter.fit_anneal
+    named, takes_any = _keywords(fit)
+    call: dict[str, Any] = {}
+    refused: dict[str, str] = {}
+
+    def offer(name: str, value: Any, given: bool, shown: str) -> None:
+        if name in named or (given and takes_any):
+            call[name] = value
+        elif given:
+            refused[name] = shown
+
+    offer("budget", budget, True, "budget")
+    default = key == "global_optimize"
+    if "method" in named or (takes_any and not default):
+        driver, preset = _fitter_driver(key, method, preset)
+        call["method"] = driver
+    elif not default:
+        refused["method"] = f"method {method!r}"
+    if preset is not None:
+        offer("preset", preset, True, f"the {type(preset).__name__} preset")
+    offer("seed", seed, not (_is_number(seed) and seed == _FITTER_SEED), f"seed {seed!r}")
+    for name, value in kwargs.items():
+        offer(name, value, True, name)
+    if refused:
+        owner = f"{type(fitter).__name__}.fit_anneal()"
+        names = [repr(name) for name in refused]
+        takes_no = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} or {names[-1]}"
+        message = (
+            f"run_fitter() cannot pass {_listed(refused.values())} to {owner}, "
+            f"which takes no {takes_no}"
+        )
+        if "method" in refused:
+            message += "; leave method out to run it as it stands"
+        raise TypeError(message)
+    return fit(**call)
+
+
 def run_fitter(
     fitter: Any,
     budget: int,
     method: str = "global_optimize",
     preset: Any = None,
-    seed: int = 42,
+    seed: int = _FITTER_SEED,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Run a ChemFit fitter with the gradient-free bridges.
@@ -1987,19 +2055,37 @@ def run_fitter(
     ``x0``, ``low``, ``high``, ``bound_span``, ``steps_per_epoch`` and
     ``preset_kwargs`` go to it, and any other keyword is a TypeError.
 
-    A fitter that has its own ``fit_anneal`` is handed to it as
-    ``fitter.fit_anneal(budget=budget, method=..., preset=preset,
-    seed=seed, **kwargs)``, with the method under :func:`run_benchmark`'s
-    names, which a ``fit_anneal`` that runs :func:`run_benchmark` takes:
-    ``"portfolio"`` for ``"global_optimize"``, the preset's driver, or
-    ``"boltzmann"`` without one, for ``"sa"``, and the four driver names as
-    they are.
+    A fitter that has its own ``fit_anneal`` is handed to it with what the
+    signature of that method takes. ``budget`` goes as ``budget=``, each
+    keyword as it is, and ``preset`` only when one is given. The method
+    goes to a ``fit_anneal`` that has a ``method`` parameter, under
+    :func:`run_benchmark`'s names, which a ``fit_anneal`` that runs
+    :func:`run_benchmark` takes: ``"portfolio"`` for ``"global_optimize"``,
+    the preset's driver, or ``"boltzmann"`` without one, for ``"sa"``, and
+    the four driver names as they are. ``seed`` goes to a ``fit_anneal``
+    that has a ``seed`` parameter. The default method stays out of a
+    ``fit_anneal`` without a ``method`` parameter, and the default seed of
+    42 out of one without a ``seed`` parameter: the default method asks for
+    a global optimizer without naming a driver, so a ``fit_anneal`` without
+    ``method`` runs as it stands. Anything else that ``fit_anneal`` has no
+    parameter for, be it ``budget``, a method or seed other than the
+    defaults, a preset or a keyword, goes to it only when it takes
+    ``**kwargs`` or its signature cannot be read, and is otherwise a
+    TypeError naming it and the fitter's ``fit_anneal``, raised before
+    anything is evaluated. So, with ``fitter`` a ChemFit ``Fitter``, ::
+
+        best = run_fitter(fitter, 500)
+
+    runs the portfolio with seed 42 on a ``Fitter`` without ``fit_anneal``
+    and on one whose ``fit_anneal`` runs :func:`run_benchmark`, and runs a
+    ``fit_anneal`` without a ``method`` parameter as it stands.
 
     As in anneal 0.10.0, a preset is ignored under the portfolio or with a
     classical method of another kind, and so is ``preset_kwargs`` under the
     portfolio on a fitter without ``fit_anneal``. Each gives a FutureWarning
-    and will raise in a future release. An ignored preset reaches a
-    fitter's own ``fit_anneal`` as ``preset=None``.
+    and will raise in a future release. A preset ignored so is not passed to
+    a fitter's own ``fit_anneal``; a preset given to a ``fit_anneal`` that
+    gets no method is passed, or refused, as any option is.
     """
     own = hasattr(fitter, "fit_anneal")
     if not own:
@@ -2013,10 +2099,7 @@ def run_fitter(
             f"got {method!r}"
         )
     if own:
-        driver, preset = _fitter_driver(key, method, preset)
-        return fitter.fit_anneal(
-            budget=budget, method=driver, preset=preset, seed=seed, **kwargs
-        )
+        return _own_fit_anneal(fitter, budget, key, method, preset, seed, kwargs)
     options = dict(kwargs)
     preset_kwargs = _preset_kwargs(options.pop("preset_kwargs", None))
     driver, preset = _fitter_driver(key, method, preset)

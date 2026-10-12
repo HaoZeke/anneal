@@ -1,10 +1,20 @@
-``anneal.chemfit.run_fitter`` passed its own method names to a fitter that
-has its own ``fit_anneal``, so its default ``method="global_optimize"``, and
-``method="sa"``, failed on a ``fit_anneal`` that runs ``run_benchmark`` and
-takes that function's names: ``"portfolio"``, ``"boltzmann"``, ``"fast"`` and
-``"gsa"``. ``run_fitter`` now passes ``"portfolio"`` for
-``"global_optimize"`` and the preset's driver, or ``"boltzmann"`` without
-one, for ``"sa"``, the drivers it runs for those names on a fitter without
-``fit_anneal``. As there, an unknown method is refused before ``fit_anneal``
-is called, and a preset that the method's driver does not run is ignored
-with a FutureWarning.
+``anneal.chemfit.run_fitter`` called a fitter that has its own ``fit_anneal``
+with its own method names, and with ``method``, ``preset`` and ``seed``
+whatever the signature of ``fit_anneal``. So ``run_fitter(fitter, budget)``
+failed on a ``fit_anneal`` that runs ``run_benchmark`` and takes that
+function's names, ``"portfolio"``, ``"boltzmann"``, ``"fast"`` and ``"gsa"``,
+as did ``method="sa"``; a ``fit_anneal`` without a ``preset`` parameter
+refused every call, and one without ``method`` refused the default call too.
+``run_fitter`` now passes ``"portfolio"`` for ``"global_optimize"`` and the
+preset's driver, or ``"boltzmann"`` without one, for ``"sa"``, the drivers
+it runs for those names on a fitter without ``fit_anneal``, and passes only
+what the signature of ``fit_anneal`` takes: the method and ``seed`` when it
+has those parameters, a preset only when one is given, and each keyword as
+it is. The default method and seed stay out of a ``fit_anneal`` without such
+a parameter, so one without ``method`` runs as it stands. A method or seed
+other than the defaults, a preset, or a keyword that ``fit_anneal`` has no
+parameter for, and that it cannot take through ``**kwargs``, is a TypeError
+naming it and the fitter's ``fit_anneal``, raised before anything is
+evaluated. As on a fitter without ``fit_anneal``, an unknown method is
+refused before ``fit_anneal`` is called, and a preset that the driver
+passed as ``method`` does not run is ignored with a FutureWarning.
