@@ -21,30 +21,31 @@ lowered the incumbent in few runs, and before its second curvature pair per
 coordinate the model of the values missed the values of the descent's
 accepted steps by a median of 39%, against 7.5% for a model of their
 logarithm. Over 40 paired seeds from starts in the middle 60% of the box, at
-1000 evaluations that fit now ends at a median of 0.0137 against 0.0332 for
+1000 evaluations that fit now ends at a median of 0.0146 against 0.0332 for
 ``NgIohTuned`` (28/0/12) and 0.0331 for the loop before (25/10/5), a
-twelve-parameter fit of three species at 2.63 against 6.88 (29/0/11) and 2.67
-(7/33/0), and a two-parameter pair fit at 0, level with both (0/40/0); at 50
-evaluations the pair fit ends at 0.789 against 0.993 (27/0/13) and 3.55
-(34/5/1), and at 500 the binary fit at 0.0728 against 0.0783 (21/0/19) and
-0.129 (22/11/7). On 13-atom Lennard-Jones positions, the six-parameter fit
-with the logarithm of its error as the loss, and ten-dimensional Rastrigin and
-Rosenbrock, at 1000 and 5000 evaluations, the loop stays level with the loop
-before, and ahead of ``NgIohTuned`` except on Rosenbrock at 5000, where the
-two are level. ``NgIohTuned`` still ends lower on more seeds of the pair fit
-at 200 evaluations, on 12 of the 14 that do not tie, where both medians are
-below ``1e-14`` (the one-sided Wilcoxon probability that the loop is not
-worse is 0.015), and of the twelve-parameter fit at 200, on 21 of 40 (0.11),
-and at 1000 on 12 of the 40 seeds of the binary fit and 11 of the
-twelve-parameter one. Four shared batch replicas stay level with those before
-on every cell of those four problems, but now trail one replica on the fit of
-the logarithm at 5000 evaluations (17/3/20, 0.043), where the two were level
-(19/3/18). Runs
-in which the descent steps on the logarithm, which it cannot before
-``2 d (d + 1)`` evaluations for ``d`` free coordinates, no longer repeat those
-of 0.11.1: over 40 seeds at 1000 and at 5000 evaluations, those on the
-Lennard-Jones positions and Rastrigin all repeat the loop before, seven change
-on each of the log-loss fit and Rosenbrock, and 30 on the plain-loss binary
-fit. Multiplying the objective by a power of two still leaves a run unchanged,
-while a constant added to a positive objective changes its logarithm and so
-can now change the descent's steps.
+twelve-parameter fit of three species at 2.53 against 6.88 (29/0/11) and 2.67
+(19/12/9), and a two-parameter pair fit at 0, level with both (0/40/0); at 50
+evaluations the pair fit ends at 0.817 against 0.993 (28/0/12) and 3.55
+(35/4/1), and at 500 the binary fit at 0.0725 against 0.0783 (21/0/19) and
+0.129 (22/11/7). These figures and those below are of the loop with the hold
+this release also puts on the descent's extrapolated trials. On 13-atom
+Lennard-Jones positions, the six-parameter fit with the logarithm of its error
+as the loss, and ten-dimensional Rastrigin and Rosenbrock, at 1000 and 5000
+evaluations, the loop stays level with the loop before, and ahead of
+``NgIohTuned`` except on Rosenbrock at 5000, where the two are level.
+``NgIohTuned`` still ends lower
+on more seeds of the pair fit at 200 evaluations, on 8 of the 10 that do not
+tie, where both medians are below ``1e-14`` (the one-sided Wilcoxon
+probability that the loop is not worse is 0.024, against 0.046 for the loop
+before), has the lower median on the twelve-parameter fit at 200 (2.68e4
+against 3.12e4, though the loop ends lower on 21 of 40 seeds), and at 1000
+ends lower on 12 of the 40 seeds of the binary fit and 11 of the
+twelve-parameter one. Four shared batch replicas stay level with those
+before on every cell of those four problems, but on the fit of the
+logarithm at 5000 evaluations they now trail one replica (15/4/21, 0.024
+that they are not worse), where the two were level (19/3/18). Runs in
+which the descent steps on the logarithm, which it cannot before
+``2 d (d + 1)`` evaluations for ``d`` free coordinates, no longer repeat
+those of 0.11.1. Multiplying the objective by a power of two still leaves
+a run unchanged, while a constant added to a positive objective changes
+its logarithm and so can now change the descent's steps.

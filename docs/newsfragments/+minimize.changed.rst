@@ -31,12 +31,12 @@ fit. The default budget replaces ``max(32, 80 n)``, in which ``n``
 counted fixed coordinates as well as free ones. Over 20 seeds from a
 start drawn in the box, every run spending its budget, it ended better
 on three-dimensional Rastrigin (median 0 against 2.49, 1000 evaluations
-against 240), the six-parameter fit (-4.90 against -1.76, 1000 against
-480), ten-dimensional Rastrigin (3.98 against 5.97) and Rosenbrock
-(1.7e-18 against 2.7e-4, 1100 against 800 for both) and 13-atom
-Lennard-Jones (-40.7 against -39.4, 15600 against 3120),
-at a one-sided Wilcoxon ``p`` below 0.05 on each, and level on
-three-dimensional Rosenbrock, which both solve. Both open with the
-finite-difference descent from ``x0`` up to 15 free coordinates; on the 39
-of Lennard-Jones only the new default reaches the ``5 n (n + 1)``
-evaluations the opening needs.
+against 240), the six-parameter fit (-4.81 against -1.78, 1000 against
+480), ten-dimensional Rastrigin (3.98 against 5.47) and Rosenbrock
+(1.7e-18 against 2.7e-4, 1100 against 800 for both), at a one-sided
+Wilcoxon ``p`` below 0.05 on each, ended lower on 13 of the 20 seeds of
+13-atom Lennard-Jones (median -40.6 against -39.4, 15600 against 3120,
+``p`` 0.062), and was level on three-dimensional Rosenbrock, which both
+solve. Both open with the finite-difference descent from ``x0`` up to 15
+free coordinates; on the 39 of Lennard-Jones only the new default
+reaches the ``5 n (n + 1)`` evaluations the opening needs.
