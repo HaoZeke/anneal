@@ -34,9 +34,19 @@
 //! accepts the Armijo condition, shrinking by safeguarded quadratic
 //! interpolation. A first trial that is accepted while the decrease is still
 //! nearly linear gets one longer trial at the minimiser of the quadratic
-//! through the two values and the slope: the long steps a Wolfe search finds
-//! by extrapolation, without paying for a gradient at every trial. Pairs that
-//! violate the curvature condition are skipped.
+//! through the two values and the slope, at most sixteen times the accepted
+//! step: the long steps a Wolfe search finds by extrapolation, without paying
+//! for a gradient at every trial. A first trial that falls at least as far
+//! as the slope predicts leaves the quadratic without a minimiser, and the
+//! longest trial then goes at most halfway from the iterate to the nearest
+//! bound along the direction. Far from its fit, the logarithm of a squared
+//! error is concave along a line, and sixteen times the accepted step can
+//! cross most of the box. Projected onto a face and accepted there, such a
+//! trial would leave the coordinates it clamped held at their bounds while
+//! descending would carry them out of the box, and the descent could settle
+//! in a minimum of the face rather than of the fit. A trial at the minimiser
+//! of the quadratic is not held: on a quadratic objective it is the minimum
+//! along the line. Pairs that violate the curvature condition are skipped.
 //!
 //! The initial inverse Hessian is the box metric `D = diag(w^2)`, the identity
 //! in box-normalised coordinates, so a side that spans decades moves as far,
@@ -86,6 +96,17 @@ const MAX_LINE_TRIALS: usize = 40;
 const EXTRAPOLATE_RATIO: f64 = 0.6;
 /// Longest extrapolated trial, as a multiple of the accepted step.
 const MAX_EXTRAPOLATION: f64 = 16.0;
+/// Fraction of the room from the iterate to the nearest bound along the
+/// direction that an extrapolated trial may cover when the quadratic has no
+/// minimiser. On a six-parameter Lennard-Jones fit with a logarithmic loss
+/// and minima on its faces, 26 of 40 runs of the portfolio ended with a mean
+/// squared error below `1e-9` in 1000 evaluations with half the room and 4
+/// with no cap. Holding every extrapolated trial, 25, 22 and 27 did with a
+/// quarter, two fifths and a half of the room, 19 with three fifths and 8
+/// with three quarters; with half the room the portfolio then ended higher
+/// on rotated ellipsoids of 30 and 50 coordinates in 1000 evaluations and of
+/// 50 and 100 in 5000.
+const EXTRAPOLATION_ROOM: f64 = 0.5;
 /// Until a curvature pair has scaled the inverse Hessian, each line search's
 /// first trial moves the coordinate that moves most by this fraction of its
 /// box width, whatever the gradient's size, so the descent does not depend on
@@ -755,6 +776,23 @@ impl FdBfgs {
         )
     }
 
+    /// Longest step along `direction` from the iterate that stays in the box,
+    /// where the projected arc first bends.
+    fn room(&self, direction: &Array1<f64>) -> f64 {
+        (0..self.n)
+            .map(|i| {
+                let d = direction[i];
+                if d > 0.0 {
+                    (self.high[i] - self.x[i]) / d
+                } else if d < 0.0 {
+                    (self.low[i] - self.x[i]) / d
+                } else {
+                    f64::INFINITY
+                }
+            })
+            .fold(f64::INFINITY, f64::min)
+    }
+
     fn tell_line(&mut self, mut work: LineWork, value: f64) {
         if let Some((point, best)) = work.fallback.take() {
             if value.is_finite() && value < best {
@@ -782,12 +820,12 @@ impl FdBfgs {
                 };
                 let ratio = realised / predicted;
                 if predicted > 0.0 && ratio > EXTRAPOLATE_RATIO {
-                    let factor = if ratio >= 1.0 {
-                        MAX_EXTRAPOLATION
+                    let next = if ratio >= 1.0 {
+                        let reach = EXTRAPOLATION_ROOM * self.room(&work.direction);
+                        (work.alpha * MAX_EXTRAPOLATION).min(reach.max(work.alpha))
                     } else {
-                        (0.5 / (1.0 - ratio)).min(MAX_EXTRAPOLATION)
+                        work.alpha * (0.5 / (1.0 - ratio)).min(MAX_EXTRAPOLATION)
                     };
-                    let next = work.alpha * factor;
                     let trial = self.projected(&work.direction, next);
                     if trial != work.trial {
                         work.fallback = Some((std::mem::replace(&mut work.trial, trial), value));
@@ -1180,6 +1218,55 @@ mod tests {
         assert!(engine.is_done(), "used {used}");
         assert!((engine.position()[0] - 1.0).abs() < 1e-12);
         assert!((engine.position()[1] + 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn extrapolations_without_a_minimiser_stop_halfway_to_the_nearest_bound() {
+        // Falling ever faster towards the upper bound, each accepted first
+        // trial realises more than its predicted decrease and asks for the
+        // longest extrapolation: from 0.1 the first would reach 0.9.
+        let bounds = boxed(0.0, 1.0, 1);
+        let f = |x: ArrayView1<f64>| -x[0] * x[0];
+        let mut engine = FdBfgs::new(
+            Array1::from_elem(1, 0.1).view(),
+            None,
+            &bounds,
+            FdBfgsOptions::default(),
+        );
+        let mut asked = Vec::new();
+        while asked.len() < 500 && !engine.is_done() {
+            let x = engine.ask();
+            asked.push(x[0]);
+            engine.tell(f(x.view()));
+        }
+        let first_long = asked.iter().copied().find(|&x| x > 0.2).unwrap();
+        assert!((first_long - 0.55).abs() < 1e-12, "{asked:?}");
+        assert!(engine.is_done(), "asked {}", asked.len());
+        assert_eq!(engine.position()[0], 1.0);
+    }
+
+    #[test]
+    fn extrapolations_to_a_minimiser_go_past_halfway_to_the_nearest_bound() {
+        // Up to the error of the forward difference, the quadratic through
+        // the values at 0.1 and 0.15 and the slope is the objective, so the
+        // longer trial goes to its minimum at 0.7, past halfway to the bound.
+        let bounds = boxed(0.0, 1.0, 1);
+        let f = |x: ArrayView1<f64>| (x[0] - 0.7).powi(2);
+        let mut engine = FdBfgs::new(
+            Array1::from_elem(1, 0.1).view(),
+            None,
+            &bounds,
+            FdBfgsOptions::default(),
+        );
+        let mut asked = Vec::new();
+        while asked.len() < 500 && !engine.is_done() {
+            let x = engine.ask();
+            asked.push(x[0]);
+            engine.tell(f(x.view()));
+        }
+        let first_long = asked.iter().copied().find(|&x| x > 0.2).unwrap();
+        assert!((first_long - 0.7).abs() < 1e-5, "{asked:?}");
+        assert!((engine.position()[0] - 0.7).abs() < 1e-6);
     }
 
     #[test]

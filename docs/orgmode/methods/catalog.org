@@ -1569,7 +1569,7 @@ split as evenly as it goes; replica =r= runs the loop as the solo run of
 its share from =x0= would, seeded with =seed= mixed with =r=, its descent
 differencing each gradient from coordinate =r d / R= on, and replica 0
 keeps =seed= and coordinate 0 (replicas.rs:361-367, 456-457;
-=FdBfgs::with_first_coordinate=, fd_bfgs.rs:388). Each replica plays on
+=FdBfgs::with_first_coordinate=, fd_bfgs.rs:409). Each replica plays on
 a scoped thread, and the coordinator on the calling thread (=coordinate=,
 replicas.rs:242) gathers one point from every replica still running,
 evaluates them as one batch through =Objective::eval_batch=
@@ -2179,8 +2179,15 @@ straddled; a failed central line search re-differences once an interval
 has moved by more than a factor of two, at most twice per iterate.
 Directions come from a projected BFGS inverse Hessian, with
 curvature-checked updates, followed by a projected backtracking Armijo
-line search that may extrapolate once. The initial inverse Hessian is
-the box metric \(D = \mathrm{diag}(w^2)\), scaled to
+line search that may extrapolate once, to the minimiser of the
+quadratic through the two values and the slope, at most sixteen times
+the accepted step. When that quadratic has no minimiser, as along a line
+on which the logarithm of a squared error far from its fit is concave,
+the extrapolated trial, the longest, goes at most halfway from the
+iterate to the nearest bound along the direction: carried onto a face,
+it would hold the coordinates it clamped at their bounds, and the
+descent could settle in a minimum of the face. The initial inverse
+Hessian is the box metric \(D = \mathrm{diag}(w^2)\), scaled to
 \((s^\top y / y^\top D y) D\) by the first accepted pair, so sides that
 span decades move as far, relative to their width, as unit ones. Until
 then each line search's first trial moves the coordinate that moves
@@ -2211,14 +2218,15 @@ descent unchanged, while a constant added to it changes the logarithm.
 A descent ends on a slow iteration, a projected-gradient tolerance when
 one is set, or a failed line search.
 
-Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:291);
-=FdBfgsOptions= (fd_bfgs.rs:117); the portfolio's =QnArmState= and
+Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:312);
+=FdBfgsOptions= (fd_bfgs.rs:138); the portfolio's =QnArmState= and
 =run_qn_arm= (src/methods/portfolio.rs:1208/3570).
 
 Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
+=MAX_EXTRAPOLATION = 16=, =EXTRAPOLATION_ROOM = 0.5=,
 =FIRST_STEP_FRACTION = 0.05=, =CENTRAL_INTERVAL_FRACTION = 0.1=,
 =INTERVAL_MOVE = 2=, =MAX_REDIFFERENCES = 2=, =LOG_MODEL_MARGIN = 4=,
-=LOG_MODEL_PAIRS = 2= (fd_bfgs.rs:79-113). The default options have
+=LOG_MODEL_PAIRS = 2= (fd_bfgs.rs:89-134). The default options have
 =ftol = 1e-12=, three slow iterations of patience, the value floor
 =f64::MIN_POSITIVE= in the slow-iteration test, no absolute floor on
 it (=fatol = 0=), no gradient tolerance and no model of the logarithm;
