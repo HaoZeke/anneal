@@ -4,12 +4,15 @@ The bridges run the portfolio of :func:`anneal.global_optimize` without a
 gradient. A docstring of the bridges, or of the examples that drive them,
 that names arms of the portfolio names every arm of that run and no other;
 the ones that describe the default portfolio name none and point to
-:func:`anneal.global_optimize`, whose documentation names them. ``ARMS``
-gives the words that name each arm the portfolio defines, and is held to the
-names of ``ArmKind`` in ``src/methods/portfolio.rs``.
+:func:`anneal.global_optimize`, whose documentation lists them where it
+introduces the values-only loop such a run takes. That list names every arm
+such a run reports and no other. ``ARMS`` gives the words that name each arm
+the portfolio defines, and is held to the names of ``ArmKind`` in
+``src/methods/portfolio.rs``.
 """
 
 import ast
+import inspect
 import re
 from pathlib import Path
 
@@ -54,6 +57,19 @@ def named(text: str) -> set[str]:
     return {arm for arm, words in ARMS.items() if re.search(words, text)}
 
 
+def values_only_list(doc: str) -> str:
+    """The list of arms that ``doc`` gives for the values-only loop.
+
+    It is the rest of the sentence of the description, before ``Args:``,
+    that introduces the values-only loop, from its colon on: "the run takes
+    a values-only loop instead, whatever the box: CMA-ES, ...".
+    """
+    description = inspect.cleandoc(doc).split("\nArgs:\n")[0]
+    lists = re.findall(r"values-only loop[^.:]*:([^.]*)\.", " ".join(description.split()))
+    assert len(lists) == 1, lists
+    return lists[0]
+
+
 def docstrings() -> dict[str, str]:
     """Every docstring of the bridges and the examples, by file and name."""
     found = {}
@@ -86,9 +102,9 @@ def test_the_words_name_each_arm_the_portfolio_defines():
     assert set(re.findall(r'ArmKind::\w+ => "(\w+)"', source)) == set(ARMS)
 
 
-def test_the_portfolio_documentation_names_every_arm_the_bridges_run(run):
+def test_the_portfolio_documentation_lists_exactly_the_arms_the_bridges_run(run):
     assert run < set(ARMS)
-    assert run <= named(anneal.global_optimize.__doc__)
+    assert named(values_only_list(anneal.global_optimize.__doc__)) == run
 
 
 def test_a_partial_list_is_not_every_arm_of_the_run(run):
