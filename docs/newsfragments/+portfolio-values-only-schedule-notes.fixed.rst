@@ -10,10 +10,13 @@ The opening's bar and lending from any slow slice or at a quarter of the
 phase's pace were measured with the floor, the other rules put back and
 alternatives before it. With the floor the rate hand-over leaves
 ``rastS100@20000`` at 9.95 against 7.96 (9/3/28), and the loop trails 0.10.0
-on ``rastR30@1000`` at 280 against 173 (3/0/37). The opening's bar leaves
-``ellR30@5000`` at 4.8e-23 against 0 (0/29/11), and dropping the bar alone
-brings that row and its x1e-6 and x2^-20 copies level (0, 0/38/2), where
-without the floor it took the descent's ``1e-12`` tolerance as well. Lending
+on ``rastR30@1000`` at 280 against 173 (3/0/37). While the opening read
+every gain as a difference, its bar left ``ellR30@5000`` at 4.8e-23 against
+0 (0/29/11), and dropping the bar alone brought that row and its x1e-6 and
+x2^-20 copies level (0, 0/38/2), where without the floor it took the
+descent's ``1e-12`` tolerance as well; with its later gains read as log
+ratios the loop ends that row at a median of 0 and ties the opening without
+the bar on every seed. Lending
 from a GSA phase's fifth slice leaves ``mich10@5000`` at -9.655 against -9.66
 (1/31/8, p 0.020). Lending from any slow slice brings it level but puts
 ``styb10_45@1000`` and ``mich10@1000`` without ``x0`` behind; a lent slice

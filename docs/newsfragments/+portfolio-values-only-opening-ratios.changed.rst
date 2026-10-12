@@ -10,4 +10,10 @@ its valley floor, held to the gains of the slices that came down the wall.
 The ratios keep every slice that differences keep, so a run takes
 another course only where differences would have ended its opening, after its
 first slice from below the start, on a slice that left every value positive,
-and there it no longer repeats the run of 0.11.1.
+and there it no longer repeats the run of 0.11.1. Over 40 paired seeds the
+bar no longer leaves the shifted and rotated ellipsoids and Rosenbrock in 30
+dimensions at 5000 evaluations, nor Rosenbrock's copies with 1e2 added and
+multiplied by 1e-6, behind an opening that goes on while each slice
+succeeds, and it still keeps shifted Ackley, Levy and rotated Levy in 30
+dimensions at 5000 ahead of that opening (medians 5.1e-7 against 4.0e-6,
+3.7e-11 against 1.5e-6 and 0.633 against 3.15).

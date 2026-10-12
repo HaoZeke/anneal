@@ -1841,16 +1841,14 @@ def global_optimize(
     ellipsoids at 30 dimensions and 1000 evaluations, 50 and 100 at 5000
     and 100 at 20000, on the 100-dimensional rotated ellipsoid,
     Rosenbrock, Levy and shifted Rastrigin rows at 20000 and on rotated
-    Styblinski-Tang at 30 and 1000; the opening's bar on the shifted
-    and rotated ellipsoids and Rosenbrock at 30 dimensions and 5000;
-    the descent's resolution test and its floor on Griewank at 10
-    dimensions and 5000 without ``x0``; the threshold on the last
-    gain on rotated Rastrigin at 100 dimensions and 20000 and on Levy
-    at 30 and 5000 with 100 added to it; lending from an annealing
-    phase's fifth slice on Michalewicz at 10 dimensions and 5000; and
-    copies and controls of these rows. Rotated ellipsoids short of the
-    opening budget trail an earlier form of the loop, and rotated
-    Rastrigin and Levy trail 0.10.0.
+    Styblinski-Tang at 30 and 1000; the descent's resolution test and
+    its floor on Griewank at 10 dimensions and 5000 without ``x0``;
+    the threshold on the last gain on rotated Rastrigin at 100
+    dimensions and 20000 and on Levy at 30 and 5000 with 100 added to
+    it; lending from an annealing phase's fifth slice on Michalewicz at
+    10 dimensions and 5000; and copies and controls of these rows.
+    Rotated ellipsoids short of the opening budget trail an earlier
+    form of the loop, and rotated Rastrigin and Levy trail 0.10.0.
 
     Args:
       obj_fn: callable ``f(numpy.ndarray) -> float``.

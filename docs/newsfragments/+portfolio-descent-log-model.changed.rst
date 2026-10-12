@@ -23,25 +23,26 @@ lowered the incumbent in few runs, and before its second curvature pair per
 coordinate the model of the values missed the values of the descent's
 accepted steps by a median of 39%, against 7.5% for a model of their
 logarithm. Over 40 paired seeds from starts in the middle 60% of the box, at
-1000 evaluations that fit now ends at a median of 0.0146 against 0.0332 for
-``NgIohTuned`` (28/0/12) and 0.0331 for the loop before (25/10/5), a
-twelve-parameter fit of three species at 2.53 against 6.88 (29/0/11) and 2.67
-(19/12/9), and a two-parameter pair fit at 0, level with both (0/40/0); at 50
-evaluations the pair fit ends at 0.817 against 0.993 (28/0/12) and 3.55
-(35/4/1), and at 500 the binary fit at 0.0725 against 0.0783 (21/0/19) and
-0.129 (22/11/7). These figures and those below are of the loop with the hold
-this release also puts on the descent's extrapolated trials. On 13-atom
+1000 evaluations that fit now ends at a median of 9.78e-5 against 0.0332 for
+``NgIohTuned`` (36/0/4) and 0.0331 for the loop before (37/3/0), a
+twelve-parameter fit of three species at 1.5 against 6.88 (36/0/4) and 2.67
+(33/5/2), and a two-parameter pair fit at 0, level with both (0/40/0); at 50
+evaluations the pair fit ends at 0.767 against 0.993 (28/0/12) and 3.55
+(35/3/2), and at 500 the binary fit at 0.014 against 0.0783 (35/0/5) and
+0.129 (37/3/0). These figures and those below are of the loop with the hold
+this release also puts on the descent's extrapolated trials and with the log
+ratios its opening now reads. On 13-atom
 Lennard-Jones positions, the six-parameter fit with the logarithm of its error
 as the loss, and ten-dimensional Rastrigin and Rosenbrock, at 1000 and 5000
 evaluations, the loop stays level with the loop before, and ahead of
 ``NgIohTuned`` except on Rosenbrock at 5000, where the two are level.
 ``NgIohTuned`` still ends lower
-on more seeds of the pair fit at 200 evaluations, on 8 of the 10 that do not
+on more seeds of the pair fit at 200 evaluations, on 6 of the 8 that do not
 tie, where both medians are below ``1e-14`` (the one-sided Wilcoxon
-probability that the loop is not worse is 0.024, against 0.046 for the loop
+probability that the loop is not worse is 0.074, against 0.046 for the loop
 before), has the lower median on the twelve-parameter fit at 200 (2.68e4
 against 3.12e4, though the loop ends lower on 21 of 40 seeds), and at 1000
-ends lower on 12 of the 40 seeds of the binary fit and 11 of the
+ends lower on 4 of the 40 seeds of the binary fit and 4 of the
 twelve-parameter one. Four shared batch replicas stay level with those
 before on every cell of those four problems, but on the fit of the
 logarithm at 5000 evaluations they now trail one replica (15/4/21, 0.024
