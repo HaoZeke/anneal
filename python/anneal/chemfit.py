@@ -397,7 +397,7 @@ def _batch_lacks(fitter: Any, size: int) -> list[str]:
     is lacking; one whose signature cannot be read is left to the call.
     Whether ``evaluate`` takes a list shows only when it is called.
     """
-    lacks = []
+    lacks = [name for name in _PROTOCOLS[0] if not callable(getattr(fitter, name, None))]
     init = getattr(fitter, "init", None)
     if not callable(init):
         lacks.append("an init that takes batch_size")
@@ -411,7 +411,6 @@ def _batch_lacks(fitter: Any, size: int) -> list[str]:
                 signature.bind(batch_size=size)
             except TypeError:
                 lacks.append("an init that takes batch_size")
-    lacks.extend(name for name in _PROTOCOLS[0] if not callable(getattr(fitter, name, None)))
     return lacks
 
 
