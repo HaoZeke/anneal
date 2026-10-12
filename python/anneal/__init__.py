@@ -1793,8 +1793,9 @@ def global_optimize(
     pairs per coordinate on, once more of the pairs since the descent
     last started afresh have counted for the logarithm than for the
     values, as they do for a squared error far from its fit, it steps on
-    that model while the model predicts each accepted value at least as
-    closely as the model of the values. Multiplying the objective by a
+    that model, and from then until it next starts afresh each accepted
+    step puts the next line search on whichever model predicted the
+    step's value more closely. Multiplying the objective by a
     power of two leaves a run unchanged, while adding a constant to a
     positive objective can change the descent's steps. When the budget lets
     a descent converge, one from the start opens the run while it pays

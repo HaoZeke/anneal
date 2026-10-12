@@ -1571,7 +1571,7 @@ split as evenly as it goes; replica =r= runs the loop as the solo run of
 its share from =x0= would, seeded with =seed= mixed with =r=, its descent
 differencing each gradient from coordinate =r d / R= on, and replica 0
 keeps =seed= and coordinate 0 (replicas.rs:361-367, 456-457;
-=FdBfgs::with_first_coordinate=, fd_bfgs.rs:409). Each replica plays on
+=FdBfgs::with_first_coordinate=, fd_bfgs.rs:421). Each replica plays on
 a scoped thread, and the coordinator on the calling thread (=coordinate=,
 replicas.rs:242) gathers one point from every replica still running,
 evaluates them as one batch through =Objective::eval_batch=
@@ -2205,9 +2205,12 @@ Once the model of \(f\) has taken two curvature pairs per coordinate, a
 pair after which more of the pairs since the models were last reset
 count for \(\ln f\) than for \(f\) moves the line searches onto
 \(\ln f\) (direction, Armijo test, extrapolation and interpolation).
-They stay there while the model of \(\ln f\) predicts each accepted
-value at least as closely as the model of \(f\), and a value at or
-below zero retires it. A loss falling through decades along a curved
+From then until the models are next reset the count no longer decides:
+each accepted step puts the next line search on the model that
+predicted its value more closely, \(\ln f\)'s on a tie, so a step
+that the model of \(\ln f\) predicts less closely moves the next line
+search back onto \(f\). A value at or below zero retires the model of
+\(\ln f\). A loss falling through decades along a curved
 valley, as a squared error far from its fit does, is closer to
 quadratic in \(\ln f\). The test reads no model's curvature, so a model
 of \(f\) still learning an ill-conditioned quadratic's curvature does
@@ -2220,15 +2223,15 @@ descent unchanged, while a constant added to it changes the logarithm.
 A descent ends on a slow iteration, a projected-gradient tolerance when
 one is set, or a failed line search.
 
-Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:312);
-=FdBfgsOptions= (fd_bfgs.rs:138); the portfolio's =QnArmState= and
+Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:319);
+=FdBfgsOptions= (fd_bfgs.rs:144); the portfolio's =QnArmState= and
 =run_qn_arm= (src/methods/portfolio.rs:1208/3588).
 
 Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
 =MAX_EXTRAPOLATION = 16=, =EXTRAPOLATION_ROOM = 0.5=,
 =FIRST_STEP_FRACTION = 0.05=, =CENTRAL_INTERVAL_FRACTION = 0.1=,
 =INTERVAL_MOVE = 2=, =MAX_REDIFFERENCES = 2=, =LOG_MODEL_MARGIN = 4=,
-=LOG_MODEL_PAIRS = 2= (fd_bfgs.rs:89-134). The default options have
+=LOG_MODEL_PAIRS = 2= (fd_bfgs.rs:95-140). The default options have
 =ftol = 1e-12=, three slow iterations of patience, the value floor
 =f64::MIN_POSITIVE= in the slow-iteration test, no absolute floor on
 it (=fatol = 0=), no gradient tolerance and no model of the logarithm;

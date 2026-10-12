@@ -9,10 +9,12 @@ logarithm when that rule misses the change of the values more than four times
 as far as the change of their logarithm, and for the values when it misses the
 logarithm's that much further. From two pairs per coordinate on, once more of
 the pairs since the descent last started afresh have counted for the logarithm
-than for the values, the line searches step on its model while it predicts
-each accepted value at least as closely as the model of the values, and a
-value at or below zero retires it. A squared error far from its fit falls
-through decades and is nearer quadratic in its logarithm. With the mean
+than for the values, the line searches step on its model; from then until
+the descent next starts afresh, each accepted step puts the next line search
+on whichever model predicted its value more closely, the logarithm's on a
+tie, and a value at or below zero retires the model of the logarithm. A
+squared error far from its fit falls through decades and is nearer quadratic
+in its logarithm. With the mean
 squared energy error per atom of a six-parameter binary Lennard-Jones fit as
 the loss, the loop ended lower than nevergrad's ``NgIohTuned`` on 17 of 40
 seeds at 1000 evaluations: the descent had 10 of the loop's 25 turns per run,

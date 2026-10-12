@@ -207,27 +207,35 @@ further. Once the model of the values has taken two curvature pairs per
 coordinate, a pair after which more of the pairs since the models were
 last reset count for the logarithm than for the values moves the line
 searches onto the model of the logarithm (direction, Armijo test,
-extrapolation and interpolation), and they stay there while that model
-predicts the value of each step the descent accepts at least as closely
-as the model of the values. A value at or below zero retires the model
-of the logarithm for the rest of the run. A squared error far from its
-fit falls through decades along a curved valley, as the mean squared
-energy error of a Lennard-Jones parameter fit does, and is far from
-quadratic in its values and closer to it in their logarithm. On a
+extrapolation and interpolation). From then until the models are next
+reset the count no longer decides: each step the descent accepts puts
+the next line search on the model that predicted the step's value more
+closely, the logarithm's on a tie, so a step that the model of the
+logarithm predicts less closely moves the line searches back onto the
+values, and a later step that it predicts at least as closely moves
+them onto the logarithm again. A value at or below zero retires the
+model of the logarithm for the rest of the run. A squared error far
+from its fit falls through decades along a curved valley, as the mean
+squared energy error of a Lennard-Jones parameter fit does, and is far
+from quadratic in its values and closer to it in their logarithm. On a
 quadratic the rule holds for the values up to the error of the finite
 differences, and near a minimum whose value is zero the logarithm is far
 from quadratic, so the pairs count for the values; on a loss already on
-a logarithmic scale most count for neither. The test reads neither
-model: on an ill-conditioned quadratic, while the model of the values is
-still learning the curvature, the model of the logarithm predicts many
-steps more closely without stepping better. Counting every pair keeps
-the early pairs of a squared error far from its fit, and keeps one step
-along which the logarithm happens to be nearer quadratic from moving the
-steps of a descent whose pairs found the values so. Each pair costs the
-descent at least one evaluation more than it has free coordinates, so
-below =2d(d+1)= evaluations for =d= free coordinates no line search
-steps on the logarithm and a run repeats the loop without that model
-call for call.
+a logarithmic scale most count for neither. Near such a minimum, as
+where a squared error fits exactly, the model of the values can predict
+the steps more closely while the count still holds the pairs that came
+down the valley, and the steps then move back onto it without waiting
+for the count. The test that moves the steps onto the logarithm reads
+neither model: on an ill-conditioned quadratic, while the model of the
+values is still learning the curvature, the model of the logarithm
+predicts many steps more closely without stepping better. Counting
+every pair keeps the early pairs of a squared error far from its fit,
+and keeps one step along which the logarithm happens to be nearer
+quadratic from moving the steps of a descent whose pairs found the
+values so. Each pair costs the descent at least one evaluation more
+than it has free coordinates, so below =2d(d+1)= evaluations for =d=
+free coordinates no line search steps on the logarithm and a run
+repeats the loop without that model call for call.
 The logarithm enters only through ratios of values, so multiplying the
 objective by a power of two still leaves the descent unchanged, while a
 constant added to a positive objective changes its logarithm and so can
