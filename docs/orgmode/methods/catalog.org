@@ -1569,7 +1569,7 @@ split as evenly as it goes; replica =r= runs the loop as the solo run of
 its share from =x0= would, seeded with =seed= mixed with =r=, its descent
 differencing each gradient from coordinate =r d / R= on, and replica 0
 keeps =seed= and coordinate 0 (replicas.rs:361-367, 456-457;
-=FdBfgs::with_first_coordinate=, fd_bfgs.rs:232). Each replica plays on
+=FdBfgs::with_first_coordinate=, fd_bfgs.rs:367). Each replica plays on
 a scoped thread, and the coordinator on the calling thread (=coordinate=,
 replicas.rs:242) gathers one point from every replica still running,
 evaluates them as one batch through =Objective::eval_batch=
@@ -2185,20 +2185,34 @@ the box metric \(D = \mathrm{diag}(w^2)\), scaled to
 span decades move as far, relative to their width, as unit ones. Until
 then each line search's first trial moves the coordinate that moves
 most by 5% of its side, whatever the gradient's size, so the descent
-does not depend on the objective's scale. A descent ends on a slow
-iteration, a projected-gradient tolerance when one is set, or a failed
-line search.
+does not depend on the objective's scale. With =log_model= the descent
+also keeps a BFGS model of \(\ln f\), from the same steps and the
+gradient \(g / f\), while every value it has started from or accepted
+is positive. Once the model of \(f\) has taken two curvature pairs per
+coordinate, both models predict each accepted step's value, and a step
+that the model of \(\ln f\) predicts four times closer moves the line
+searches onto \(\ln f\) (direction, Armijo test, extrapolation and
+interpolation) until it predicts a step less closely; a value at or
+below zero retires it. A loss falling through decades along a
+curved valley, as a squared error far from its fit does, is closer to
+quadratic in \(\ln f\). Gradients, intervals and the slow test still
+read the values, and the logarithm enters only through ratios of
+values, so a power of two multiplying the objective leaves the descent
+unchanged, while a constant added to it changes the logarithm. A
+descent ends on a slow iteration, a projected-gradient tolerance when
+one is set, or a failed line search.
 
-Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:154);
-=FdBfgsOptions= (fd_bfgs.rs:76); the portfolio's =QnArmState= and
+Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:279);
+=FdBfgsOptions= (fd_bfgs.rs:107); the portfolio's =QnArmState= and
 =run_qn_arm= (src/methods/portfolio.rs:1208/3570).
 
 Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
 =FIRST_STEP_FRACTION = 0.05=, =CENTRAL_INTERVAL_FRACTION = 0.1=,
-=INTERVAL_MOVE = 2=, =MAX_REDIFFERENCES = 2= (fd_bfgs.rs:50-72). The
-default options have =ftol = 1e-12=, three slow iterations of
-patience, the value floor =f64::MIN_POSITIVE= in the slow-iteration
-test, no absolute floor on it (=fatol = 0=) and no gradient tolerance;
+=INTERVAL_MOVE = 2=, =MAX_REDIFFERENCES = 2=, =LOG_MODEL_MARGIN = 4=,
+=LOG_MODEL_PAIRS = 2= (fd_bfgs.rs:69-103). The default options have
+=ftol = 1e-12=, three slow iterations of patience, the value floor
+=f64::MIN_POSITIVE= in the slow-iteration test, no absolute floor on
+it (=fatol = 0=), no gradient tolerance and no model of the logarithm;
 the portfolio's values-only descents use =ftol = 8 eps= (=QN_FTOL=)
 and, from each slice, =fatol= at =1e-7= of the success threshold
 (=QN_FATOL_RTOL=, set through =FdBfgs::set_fatol=), so an iteration is
