@@ -486,6 +486,24 @@ def test_a_fit_anneal_decides_what_becomes_of_an_exception_the_fitter_raises():
     assert best is scored.finished_with
 
 
+def test_run_fitter_passes_on_an_exception_from_init_inside_a_fit_anneal():
+    error = RuntimeError("init failed")
+    fitter = _fitter(OwnLoopFitter)
+
+    def init():
+        fitter.calls.append("init")
+        raise error
+
+    fitter.init = init
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        with pytest.raises(RuntimeError) as caught:
+            run_fitter(fitter, 60)
+    assert caught.value is error and record == []
+    assert fitter.handed == [{"budget": 60, "replicas": 4, "seed": 42}]
+    assert fitter.calls == ["init"] and fitter.evaluated == []
+
+
 def test_a_fit_anneal_decides_what_becomes_of_a_loss_that_is_not_a_real_number():
     refusal = "the fitter returned a loss of type bool; a loss must be one real number"
     stopped = _fitter(BenchmarkFitter)
