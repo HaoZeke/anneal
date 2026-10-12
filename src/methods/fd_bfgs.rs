@@ -790,8 +790,19 @@ impl FdBfgs {
         )
     }
 
-    /// Longest step along `direction` from the iterate that stays in the box,
-    /// where the projected arc first bends.
+    /// Smallest step along `direction` from the iterate at which a coordinate
+    /// reaches the bound its component heads for, lower or upper, over every
+    /// coordinate the direction moves. A coordinate already on that bound
+    /// makes it zero, as a free coordinate on its bound does when the
+    /// quasi-Newton direction points out of the box there, and as the
+    /// extrapolated step is never shorter than the first trial's, no longer
+    /// trial is then asked. Measured instead to the first positive breakpoint
+    /// of the projected arc, which runs on along the face with that
+    /// coordinate clamped, the room would let the trial carry the descent
+    /// along the face, where it could settle in a minimum of the face: on a
+    /// six-parameter Lennard-Jones fit whose loss is the logarithm of a mean
+    /// squared error, one of 40 runs of the portfolio then ended at -1.43 in
+    /// 1000 evaluations, as with no cap, rather than at -4.82.
     fn room(&self, direction: &Array1<f64>) -> f64 {
         (0..self.n)
             .map(|i| {
@@ -1419,6 +1430,96 @@ mod tests {
         let first_long = asked.iter().copied().find(|&x| x > 0.2).unwrap();
         assert!((first_long - 0.7).abs() < 1e-5, "{asked:?}");
         assert!((engine.position()[0] - 0.7).abs() < 1e-6);
+    }
+
+    #[test]
+    fn extrapolations_stop_halfway_to_the_nearest_bound_when_it_is_a_lower_one() {
+        // Falling ever faster towards the corner (0, 1), the first trial from
+        // (0.7, 0.1) lowers the first coordinate by 0.05 and raises the second
+        // by a third of that. Along the direction the first coordinate's lower
+        // bound is nearer than the second's upper bound, so the longer trial
+        // takes the first coordinate halfway to zero.
+        let bounds = boxed(0.0, 1.0, 2);
+        let f = |x: ArrayView1<f64>| -(x[0] - 1.0).powi(2) - x[1] * x[1];
+        let mut engine = FdBfgs::new(
+            Array1::from_vec(vec![0.7, 0.1]).view(),
+            None,
+            &bounds,
+            FdBfgsOptions::default(),
+        );
+        let mut asked = Vec::new();
+        while asked.len() < 500 && !engine.is_done() {
+            let x = engine.ask();
+            engine.tell(f(x.view()));
+            asked.push(x);
+        }
+        let long = asked.iter().find(|x| x[0] < 0.6).unwrap();
+        assert!((long[0] - 0.35).abs() < 1e-12, "{long}");
+        assert!((long[1] - (0.1 + 0.35 / 3.0)).abs() < 1e-6, "{long}");
+        assert!(engine.is_done(), "asked {}", asked.len());
+        assert_eq!(engine.position(), Array1::from_vec(vec![0.0, 1.0]));
+    }
+
+    #[test]
+    fn extrapolations_never_ask_for_less_than_the_first_trial() {
+        // From 0.92 the first trial reaches 0.97 and realises more than its
+        // predicted decrease, but halfway to the bound is 0.96, short of it:
+        // the longer trial would be the first trial itself, so none is asked,
+        // and no point below 0.97 is asked after it.
+        let bounds = boxed(0.0, 1.0, 1);
+        let f = |x: ArrayView1<f64>| -x[0] * x[0];
+        let mut engine = FdBfgs::new(
+            Array1::from_elem(1, 0.92).view(),
+            None,
+            &bounds,
+            FdBfgsOptions::default(),
+        );
+        let mut asked = Vec::new();
+        while asked.len() < 500 && !engine.is_done() {
+            let x = engine.ask();
+            asked.push(x[0]);
+            engine.tell(f(x.view()));
+        }
+        let first = asked.iter().position(|&x| x > 0.95).unwrap();
+        assert!((asked[first] - 0.97).abs() < 1e-12, "{asked:?}");
+        assert!(
+            asked[first..].iter().all(|&x| x >= asked[first]),
+            "{asked:?}"
+        );
+        assert!(engine.is_done(), "asked {}", asked.len());
+        assert_eq!(engine.position()[0], 1.0);
+    }
+
+    #[test]
+    fn a_direction_out_of_the_box_on_a_free_coordinate_leaves_no_room() {
+        // The first coordinate sits on its lower bound where the objective
+        // falls inwards, so it is free, but the model's cross term turns the
+        // direction out of the box there. The full step keeps that coordinate
+        // on its bound and realises more than its predicted decrease; with no
+        // room, no longer trial is asked, and the next point is a difference
+        // step from the accepted trial.
+        let bounds = boxed(0.0, 1.0, 2);
+        let f = |x: ArrayView1<f64>| -0.1 * x[0] - (x[1] - 0.9).powi(2);
+        let start = Array1::from_vec(vec![0.0, 0.5]);
+        let mut engine = FdBfgs::new(
+            start.view(),
+            Some(f(start.view())),
+            &bounds,
+            FdBfgsOptions::default(),
+        );
+        engine.curvature.inv_hessian =
+            Array2::from_shape_vec((2, 2), vec![0.05, 0.1, 0.1, 0.25]).unwrap();
+        engine.curvature.scaled = true;
+        engine.finish_gradient(Array1::from_vec(vec![-0.1, 0.8]));
+        let first = engine.ask();
+        assert_eq!(first[0], 0.0);
+        assert!((first[1] - 0.31).abs() < 1e-12, "{first}");
+        engine.tell(f(first.view()));
+        assert_eq!(engine.position(), first.view());
+        let next = engine.ask();
+        let moved: Vec<f64> = (0..2).map(|i| (next[i] - first[i]).abs()).collect();
+        assert_eq!(moved.iter().filter(|&&d| d > 0.0).count(), 1, "{next}");
+        assert!(moved.iter().all(|&d| d < 1e-6), "{next}");
     }
 
     #[test]
