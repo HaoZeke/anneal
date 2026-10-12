@@ -114,7 +114,11 @@ const MAX_EXTRAPOLATION: f64 = 16.0;
 /// quarter, two fifths and a half of the room, 19 with three fifths and 8
 /// with three quarters; with half the room the portfolio then ended higher
 /// on rotated ellipsoids of 30 and 50 coordinates in 1000 evaluations and of
-/// 50 and 100 in 5000.
+/// 50 and 100 in 5000. Where a face holds the minimum over the box, half the
+/// room usually brings the descent there later than no cap: on the base-10
+/// logarithm of a quadratic form in ten coordinates centred outside the unit
+/// cube, the portfolio ended higher in 200 evaluations with half the room
+/// than with no cap from 77 of 80 starts, and level with it in 500.
 const EXTRAPOLATION_ROOM: f64 = 0.5;
 /// Until a curvature pair has scaled the inverse Hessian, each line search's
 /// first trial moves the coordinate that moves most by this fraction of its
