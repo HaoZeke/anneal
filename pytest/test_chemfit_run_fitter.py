@@ -1,29 +1,59 @@
 """``run_fitter``: the options it passes on to ``fit_anneal``, and no others.
 
-A fitter with its own ``fit_anneal`` is handed to it under the method names
-of ``run_benchmark``, which a ``fit_anneal`` that runs ``run_benchmark``
-takes.
+A fitter with its own ``fit_anneal`` is handed to it with what the signature
+of that method takes, the method under the names of ``run_benchmark``, which
+a ``fit_anneal`` that runs ``run_benchmark`` takes. The doubles below have
+the signatures such methods have had: one that runs ``run_benchmark`` with a
+``preset`` parameter, one without it, and one with neither ``method`` nor
+``preset`` that runs ``anneal.minimize`` itself.
 """
+
+import functools
 
 import numpy as np
 import pytest
 
 pytest.importorskip("anneal")
 
-from anneal import Fast  # noqa: E402
+from anneal import Fast, minimize  # noqa: E402
 from anneal.chemfit import fit_anneal, run_benchmark, run_fitter  # noqa: E402
 from chemfit_doubles import NextFitter, ReleasedFitter, same_params  # noqa: E402
 
 
-class BenchmarkFitter(NextFitter):
-    """A fitter whose own ``fit_anneal`` runs ``run_benchmark`` and takes a preset.
-
-    ``handed`` logs the method, preset and seed each call received.
-    """
+class Handed(NextFitter):
+    """A fitter whose own ``fit_anneal`` logs what each call received in ``handed``."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.handed = []
+
+    def _benchmark(self, budget, **options):
+        context = {"fitter": self, "budget": budget, "initial_params": self.initial_parameters}
+        return run_benchmark(context, **options)
+
+    def _minimize(self, budget, seed, replicas=1, history="shared"):
+        self.init()
+        start = np.append(self.initial_parameters["x"], self.initial_parameters["eps"])
+        bounds = [self.bounds["x"], self.bounds["x"], self.bounds["eps"]]
+
+        def loss(v):
+            return self.evaluate({"x": v[:2], "eps": float(v[2])})
+
+        res = minimize(
+            loss,
+            start,
+            bounds=bounds,
+            jac=None,
+            budget=budget,
+            seed=seed,
+            replicas=replicas,
+            history=history,
+        )
+        return self.finish({"x": res.x[:2], "eps": float(res.x[2])})
+
+
+class BenchmarkFitter(Handed):
+    """Runs ``run_benchmark`` and takes a preset."""
 
     def fit_anneal(
         self,
@@ -36,11 +66,45 @@ class BenchmarkFitter(NextFitter):
         contexts=None,
         steps_per_epoch=100,
     ):
-        self.handed.append((method, preset, seed))
-        context = {"fitter": self, "budget": budget, "initial_params": self.initial_parameters}
-        return run_benchmark(
-            context, method=method, preset=preset, seed=seed, steps_per_epoch=steps_per_epoch
+        self.handed.append({"method": method, "preset": preset, "seed": seed})
+        return self._benchmark(
+            budget, method=method, preset=preset, seed=seed, steps_per_epoch=steps_per_epoch
         )
+
+
+class NoPresetFitter(Handed):
+    """Runs ``run_benchmark`` but takes no preset."""
+
+    def fit_anneal(
+        self,
+        budget,
+        *,
+        method="portfolio",
+        seed=0,
+        batch_size=1,
+        contexts=None,
+        steps_per_epoch=100,
+    ):
+        self.handed.append({"method": method, "seed": seed})
+        return self._benchmark(budget, method=method, seed=seed, steps_per_epoch=steps_per_epoch)
+
+
+class OwnLoopFitter(Handed):
+    """Takes neither method nor preset, and runs ``anneal.minimize`` itself."""
+
+    def fit_anneal(
+        self, budget, replicas=4, store=None, seed=0, history="shared", jac=None, ctx=None
+    ):
+        self.handed.append({"budget": budget, "replicas": replicas, "seed": seed})
+        return self._minimize(budget, seed, replicas, history)
+
+
+class BudgetOnlyFitter(Handed):
+    """Takes the budget alone."""
+
+    def fit_anneal(self, budget):
+        self.handed.append({"budget": budget})
+        return self._minimize(budget, seed=0)
 
 
 def _fitter(kind=ReleasedFitter, bounds=None):
@@ -122,17 +186,17 @@ def test_run_fitter_names_itself_for_a_keyword_it_does_not_pass_on(keyword, hint
     assert fitter.calls == []
 
 
-def test_a_fitter_with_its_own_fit_anneal_gets_every_keyword():
+def test_a_fit_anneal_that_takes_kwargs_gets_what_the_caller_gave():
     class OwnFitAnneal:
         def fit_anneal(self, **kwargs):
             return kwargs
 
-    got = run_fitter(OwnFitAnneal(), 60, method="sa", tell_every=5, n_epochs=3)
+    assert run_fitter(OwnFitAnneal(), 60) == {"budget": 60}
+    got = run_fitter(OwnFitAnneal(), 60, method="sa", seed=7, tell_every=5, n_epochs=3)
     assert got == {
         "budget": 60,
         "method": "boltzmann",
-        "preset": None,
-        "seed": 42,
+        "seed": 7,
         "tell_every": 5,
         "n_epochs": 3,
     }
@@ -141,34 +205,184 @@ def test_a_fitter_with_its_own_fit_anneal_gets_every_keyword():
 SLOW_FAST = Fast(t_init=2.0)
 
 
+@pytest.mark.parametrize("kind", [BenchmarkFitter, NoPresetFitter], ids=["preset", "no-preset"])
 @pytest.mark.parametrize(
-    "options, handed",
+    "options, method, seed",
     [
-        ({}, ("portfolio", None, 42)),
-        ({"method": "portfolio", "seed": 3}, ("portfolio", None, 3)),
-        ({"method": "sa"}, ("boltzmann", None, 42)),
-        ({"method": "gsa", "steps_per_epoch": 10}, ("gsa", None, 42)),
-        ({"method": "sa", "preset": SLOW_FAST, "steps_per_epoch": 10}, ("fast", SLOW_FAST, 42)),
+        ({}, "portfolio", 42),
+        ({"method": "portfolio", "seed": 3}, "portfolio", 3),
+        ({"method": "sa"}, "boltzmann", 42),
+        ({"method": "gsa", "steps_per_epoch": 10}, "gsa", 42),
     ],
-    ids=["defaults", "portfolio", "sa", "gsa", "sa-preset"],
+    ids=["defaults", "portfolio", "sa", "gsa"],
 )
-def test_a_fit_anneal_over_run_benchmark_runs_each_method_as_the_bridges_do(options, handed):
-    own, plain = _fitter(BenchmarkFitter), _fitter(NextFitter)
+def test_a_fit_anneal_over_run_benchmark_runs_each_method_as_the_bridges_do(
+    kind, options, method, seed
+):
+    own, plain = _fitter(kind), _fitter(NextFitter)
     run_fitter(own, 60, **options)
     run_fitter(plain, 60, **options)
-    assert len(own.handed) == 1
-    assert own.handed[0][0] == handed[0] and own.handed[0][2] == handed[2]
-    assert own.handed[0][1] is handed[1]
+    assert [(h["method"], h["seed"], h.get("preset")) for h in own.handed] == [
+        (method, seed, None)
+    ]
     assert 1 < len(own.evaluated) <= 60
     assert _same_run(own, plain)
 
 
-def test_a_preset_another_driver_runs_is_ignored_for_a_fit_anneal_too():
-    own = _fitter(BenchmarkFitter)
-    with pytest.warns(FutureWarning, match="ignores the Fast preset under method 'boltzmann'"):
-        run_fitter(own, 60, method="boltzmann", preset=Fast())
-    assert [(method, preset) for method, preset, _ in own.handed] == [("boltzmann", None)]
+def test_a_fit_anneal_that_takes_a_preset_runs_the_one_given():
+    own, plain = _fitter(BenchmarkFitter), _fitter(NextFitter)
+    run_fitter(own, 60, method="sa", preset=SLOW_FAST, steps_per_epoch=10)
+    run_fitter(plain, 60, method="sa", preset=SLOW_FAST, steps_per_epoch=10)
+    assert own.handed == [{"method": "fast", "preset": SLOW_FAST, "seed": 42}]
     assert 1 < len(own.evaluated) <= 60
+    assert _same_run(own, plain)
+
+
+@pytest.mark.parametrize("kind", [BenchmarkFitter, NoPresetFitter], ids=["preset", "no-preset"])
+def test_a_preset_the_method_does_not_run_is_ignored_for_a_fit_anneal_too(kind):
+    own, plain = _fitter(kind), _fitter(NextFitter)
+    for fitter in (own, plain):
+        with pytest.warns(FutureWarning, match="ignores the Fast preset under method 'boltzmann'"):
+            run_fitter(fitter, 60, method="boltzmann", preset=Fast())
+    assert [(h["method"], h.get("preset")) for h in own.handed] == [("boltzmann", None)]
+    assert 1 < len(own.evaluated) <= 60
+    assert _same_run(own, plain)
+
+
+def test_a_fit_anneal_without_method_or_preset_runs_as_it_stands():
+    fitter = _fitter(OwnLoopFitter)
+    run_fitter(fitter, 60)
+    assert fitter.handed == [{"budget": 60, "replicas": 4, "seed": 42}]
+    assert 1 < len(fitter.evaluated) <= 60
+    other = _fitter(OwnLoopFitter)
+    run_fitter(other, 60, seed=5, replicas=1)
+    assert other.handed == [{"budget": 60, "replicas": 1, "seed": 5}]
+    assert 1 < len(other.evaluated) <= 60
+
+
+def test_a_fit_anneal_without_seed_runs_on_the_defaults():
+    fitter = _fitter(BudgetOnlyFitter)
+    run_fitter(fitter, 60)
+    assert fitter.handed == [{"budget": 60}]
+    assert 1 < len(fitter.evaluated) <= 60
+
+
+@pytest.mark.parametrize(
+    "kind, options, message",
+    [
+        (
+            NoPresetFitter,
+            {"method": "sa", "preset": SLOW_FAST},
+            (
+                "run_fitter() cannot pass the Fast preset to NoPresetFitter.fit_anneal(), "
+                "which takes no 'preset'"
+            ),
+        ),
+        (
+            BenchmarkFitter,
+            {"x0": {"x": np.zeros(2), "eps": 1.0}, "bound_span": 0.5},
+            (
+                "run_fitter() cannot pass x0 and bound_span to BenchmarkFitter.fit_anneal(), "
+                "which takes no 'x0' or 'bound_span'"
+            ),
+        ),
+        (
+            OwnLoopFitter,
+            {"method": "sa"},
+            (
+                "run_fitter() cannot pass method 'sa' to OwnLoopFitter.fit_anneal(), which "
+                "takes no 'method'; leave method out to run it as it stands"
+            ),
+        ),
+        (
+            OwnLoopFitter,
+            {"method": "portfolio", "preset": SLOW_FAST, "steps_per_epoch": 10},
+            (
+                "run_fitter() cannot pass method 'portfolio', the Fast preset and "
+                "steps_per_epoch to OwnLoopFitter.fit_anneal(), which takes no 'method', "
+                "'preset' or 'steps_per_epoch'; leave method out to run it as it stands"
+            ),
+        ),
+        (
+            OwnLoopFitter,
+            {"preset": SLOW_FAST},
+            (
+                "run_fitter() cannot pass the Fast preset to OwnLoopFitter.fit_anneal(), "
+                "which takes no 'preset'"
+            ),
+        ),
+        (
+            BudgetOnlyFitter,
+            {"seed": 7},
+            (
+                "run_fitter() cannot pass seed 7 to BudgetOnlyFitter.fit_anneal(), which "
+                "takes no 'seed'"
+            ),
+        ),
+    ],
+    ids=["preset", "keywords", "method", "all-three", "preset-default-method", "seed"],
+)
+def test_an_option_a_fit_anneal_cannot_take_is_refused_before_anything_is_evaluated(
+    kind, options, message
+):
+    fitter = _fitter(kind)
+    with pytest.raises(TypeError) as caught:
+        run_fitter(fitter, 60, **options)
+    assert str(caught.value) == message
+    assert fitter.handed == [] and fitter.calls == [] and fitter.evaluated == []
+
+
+def _logged(method):
+    def wrapper(self, *args, **kwargs):
+        self.calls.append("wrapper")
+        return method(self, *args, **kwargs)
+
+    return wrapper
+
+
+def test_a_wrapper_made_with_functools_wraps_is_read_through():
+    class Wrapped(NoPresetFitter):
+        fit_anneal = functools.wraps(NoPresetFitter.fit_anneal)(_logged(NoPresetFitter.fit_anneal))
+
+    fitter = _fitter(Wrapped)
+    with pytest.raises(TypeError) as caught:
+        run_fitter(fitter, 60, method="sa", preset=SLOW_FAST)
+    assert str(caught.value) == (
+        "run_fitter() cannot pass the Fast preset to Wrapped.fit_anneal(), which takes no 'preset'"
+    )
+    assert fitter.calls == [] and fitter.handed == []
+    run_fitter(fitter, 60)
+    assert fitter.handed == [{"method": "portfolio", "seed": 42}]
+    assert fitter.calls[0] == "wrapper" and 1 < len(fitter.evaluated) <= 60
+
+
+def test_a_wrapper_without_functools_wraps_gets_what_the_caller_gave():
+    class Unwrapped(NoPresetFitter):
+        fit_anneal = _logged(NoPresetFitter.fit_anneal)
+
+    fitter = _fitter(Unwrapped)
+    run_fitter(fitter, 60)
+    assert fitter.handed == [{"method": "portfolio", "seed": 0}]
+    assert fitter.calls[0] == "wrapper" and 1 < len(fitter.evaluated) <= 60
+
+
+def test_a_fit_anneal_whose_signature_cannot_be_read_gets_what_the_caller_gave():
+    class Unreadable:
+        __signature__ = 0
+
+        def __call__(self, **kwargs):
+            return kwargs
+
+    class Opaque:
+        fit_anneal = Unreadable()
+
+    assert run_fitter(Opaque(), 60) == {"budget": 60}
+    assert run_fitter(Opaque(), 60, method="sa", preset=SLOW_FAST, x0=1.0) == {
+        "budget": 60,
+        "method": "fast",
+        "preset": SLOW_FAST,
+        "x0": 1.0,
+    }
 
 
 def test_an_unknown_method_is_refused_before_a_fit_anneal_is_called():
