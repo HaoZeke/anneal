@@ -1256,11 +1256,11 @@ def fit_anneal(
         is followed by one ``step`` (or ``tell``).
       budget: total objective-evaluation budget, the start included; it is
         never exceeded.
-      driver: ``"portfolio"`` (default; Thompson-allocated SOTA driver
-        over the gradient-free arms — QMC restarts, basin hopping,
-        differential evolution, GSA, parallel tempering — with no
-        gradient), or one of ``"boltzmann"``, ``"fast"``, ``"gsa"`` for
-        single-chain ablation runs.
+      driver: ``"portfolio"`` (default), the Thompson-allocated portfolio
+        of :func:`anneal.global_optimize` run without a gradient, whose
+        documentation names the arms it then runs; or one of
+        ``"boltzmann"``, ``"fast"``, ``"gsa"`` for single-chain ablation
+        runs.
       seed: RNG seed.
       x0: warm start. ``None`` (default) uses the fitter's
         ``initial_parameters``; a nested dict with the same structure and
@@ -1595,8 +1595,9 @@ def fit_chemfit(
             it will raise in a future release.
         budget: total objective evaluations, the start included; it is
             never exceeded.
-        method: ``"portfolio"`` (default; Thompson-allocated SOTA including
-            parallel-tempering communicating chains), or ``"boltzmann"``,
+        method: ``"portfolio"`` (default), the Thompson-allocated portfolio
+            of :func:`anneal.global_optimize` run without a gradient, whose
+            documentation names the arms it then runs; or ``"boltzmann"``,
             ``"fast"``, ``"gsa"`` for the bound-respecting classical chain.
             Every method starts from the initial parameters, moved onto the
             box when they lie outside it.
