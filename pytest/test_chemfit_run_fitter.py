@@ -366,6 +366,49 @@ def test_a_preset_the_method_does_not_run_is_ignored_for_a_fit_anneal_too(
     assert _same_run(own, plain)
 
 
+@pytest.mark.parametrize(
+    "kind, why_not",
+    [(BenchmarkFitter, None), (NoPresetFitter, "NoPresetFitter.fit_anneal() takes no 'preset'")],
+    ids=["preset", "no-preset"],
+)
+@pytest.mark.parametrize(
+    "budget, options, bounds, message",
+    [
+        (0, {}, None, "budget must be positive, got 0"),
+        (60, {"seed": -1}, None, "seed must be at least 0, got -1"),
+        (60, {"steps_per_epoch": 0}, None, "steps_per_epoch must be positive, got 0"),
+        (
+            60,
+            {},
+            {"x": (1.0, -1.0), "eps": (0.5, 2.0)},
+            "the bounds of x[0] are empty, the lower above the upper: lower=1.0, upper=-1.0",
+        ),
+    ],
+    ids=["budget-0", "seed-minus-1", "steps-per-epoch-0", "empty-bounds"],
+)
+def test_a_refusal_inside_a_fit_anneal_follows_the_warning_given_before_the_call(
+    kind, why_not, budget, options, bounds, message
+):
+    warning = _ignored_fast("global_optimize", "the portfolio", why_not)
+    own, plain = _fitter(kind, bounds), _fitter(NextFitter, bounds)
+    for fitter, warned in ((own, [(FutureWarning, warning)]), (plain, [])):
+        with warnings.catch_warnings(record=True) as record:
+            warnings.simplefilter("always")
+            with pytest.raises(ValueError) as caught:
+                run_fitter(fitter, budget, preset=Fast(), **options)
+        assert str(caught.value) == message
+        assert [(w.category, str(w.message)) for w in record] == warned
+        assert fitter.calls == [] and fitter.evaluated == []
+    assert [h["method"] for h in own.handed] == ["portfolio"]
+    first = _fitter(kind, bounds)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(FutureWarning) as caught:
+            run_fitter(first, budget, preset=Fast(), **options)
+    assert str(caught.value) == warning
+    assert first.handed == [] and first.calls == []
+
+
 def test_a_fit_anneal_without_method_or_preset_runs_as_it_stands():
     fitter = _fitter(OwnLoopFitter)
     run_fitter(fitter, 60)
