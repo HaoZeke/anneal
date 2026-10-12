@@ -2174,7 +2174,6 @@ fn box_ensemble_optimize(
     let result = with_replica_threads(py, || {
         crate::methods::box_hopping::box_ensemble_optimize(&obj, &grad, seed, seed_view, &config)
     });
-    errors.finish(py)?;
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
     out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
@@ -2245,6 +2244,7 @@ fn box_ensemble_optimize(
         "coverage_decisions",
         coverage_decisions_dict(py, &result.coverage_decisions)?,
     )?;
+    errors.finish(py)?;
     Ok(out.into())
 }
 
@@ -2327,7 +2327,6 @@ fn ensemble_optimize(
             )
         }
     });
-    errors.finish(py)?;
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
     out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
@@ -2398,6 +2397,7 @@ fn ensemble_optimize(
         "coverage_decisions",
         coverage_decisions_dict(py, &result.coverage_decisions)?,
     )?;
+    errors.finish(py)?;
     Ok(out.into())
 }
 
