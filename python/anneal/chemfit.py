@@ -32,8 +32,10 @@ is initialised with ``init(batch_size=batch_size)``, and each batch of at
 most ``batch_size`` candidates is one ``evaluate`` of a list, which
 ChemFit's schedule may run concurrently, and one ``step``; the start is a
 batch of one. Batches need the portfolio and a fitter with ``evaluate``,
-``step`` and an ``init`` that takes ``batch_size``; a fitter lacking any of
-them is refused before ``init``, by a message naming what it lacks. No
+``step`` and an ``init`` that takes ``batch_size``. When every other check
+passes, a batch under another driver is refused before ``init``, by a
+message naming the driver, and under the portfolio a fitter lacking any of
+the three is refused before ``init``, by a message naming what it lacks. No
 ChemFit release has all three yet: 3.1.1, the latest, has ``ask`` and
 ``tell``, and ChemFit's source has ``evaluate`` and ``step`` from commit
 c57d6f5 but an ``init`` that takes ``num_workers`` until 3b65fe0. ChemFit

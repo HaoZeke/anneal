@@ -3,11 +3,14 @@
 With ``batch_size`` above one, ``fit_anneal``, ``fit_chemfit`` and
 ``run_benchmark`` run the portfolio as that many batch replicas of
 ``anneal.minimize``: the fitter is initialised with ``init(batch_size=...)``
-and each batch is one ``evaluate`` of a list and one ``step``. A fitter that
-lacks ``evaluate``, ``step`` or an ``init`` that takes ``batch_size``, as
-ChemFit 3.1.1's lacks all three and the one of ChemFit's source from commit
-c57d6f5 until 3b65fe0 lacks the ``init``, has its batch refused before
-``init`` by a message naming what it lacks, and ``batch_size=1`` still fits.
+and each batch is one ``evaluate`` of a list and one ``step``. When every
+other check passes, a batch under a classical driver is refused before
+``init`` by a message naming the driver, whatever the fitter has of the
+three. Under the portfolio, a fitter that lacks ``evaluate``, ``step`` or an
+``init`` that takes ``batch_size``, as ChemFit 3.1.1's lacks all three and the
+one of ChemFit's source from commit c57d6f5 until 3b65fe0 lacks the ``init``,
+has its batch refused before ``init`` by a message naming what it lacks, and
+``batch_size=1`` still fits.
 An ``evaluate`` that takes a single candidate shows only when it is called:
 it gets the start as a list of one, after ``init``, and the fit stops there.
 """
@@ -184,12 +187,19 @@ def test_a_fit_with_every_parameter_fixed_is_one_batch_of_one():
     assert result["x"].tobytes() == np.array([0.5, -0.5]).tobytes()
 
 
+@pytest.mark.parametrize("kind", [BatchFitter, ReleasedFitter])
 @pytest.mark.parametrize("driver", CLASSICAL)
 @pytest.mark.parametrize("entry", BATCH_ENTRIES)
-def test_batches_need_the_portfolio(entry, driver):
-    fitter = _fitter()
-    with pytest.raises(ValueError, match="batch_size above one needs the portfolio"):
+def test_a_batch_under_a_classical_driver_is_refused_before_init_naming_the_driver(
+    entry, driver, kind
+):
+    fitter = _fitter(kind)
+    with pytest.raises(ValueError) as refused:
         drive(entry, fitter, 50, driver=driver, batch_size=2)
+    assert str(refused.value) == (
+        "batch_size above one needs the portfolio, the one driver that runs "
+        f"batch replicas; {driver} runs one chain"
+    )
     assert fitter.calls == []
 
 
