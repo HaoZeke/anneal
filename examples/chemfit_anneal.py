@@ -29,11 +29,10 @@ from anneal.chemfit import fit_chemfit
 def run_anneal(benchmark_context: dict[str, Any]) -> dict[str, Any]:
     """Fit ``benchmark_context["fitter"]`` within ``budget`` evaluations.
 
-    The default ``method="portfolio"`` is the SOTA gradient-free driver:
-    Thompson-allocated QMC restarts, basin hopping, differential evolution,
-    GSA, parallel-tempering communicating chains, and trust-region polls.
-    Pass ``method="boltzmann"`` for the single-chain ablation from the
-    ChemFit initial parameters.
+    The default ``method="portfolio"`` is the Thompson-allocated portfolio
+    of :func:`anneal.global_optimize` run without a gradient, whose
+    documentation names the arms it then runs. Pass ``method="boltzmann"``
+    for the single-chain ablation from the ChemFit initial parameters.
     """
     fitter = benchmark_context["fitter"]
     budget = int(benchmark_context["budget"])
