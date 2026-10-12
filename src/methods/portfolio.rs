@@ -3582,6 +3582,7 @@ fn run_qn_arm<O>(
     let options = if states.values_only {
         FdBfgsOptions {
             ftol: QN_FTOL,
+            log_model: true,
             ..FdBfgsOptions::default()
         }
     } else {
