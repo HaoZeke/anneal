@@ -177,6 +177,28 @@ takes_batches = "batch_size" in inspect.signature(fitter.init).parameters
 best = fit_chemfit(fitter, 256, batch_size=4 if takes_batches else 1)
 #+end_src
 
+=run_fitter= runs a =Fitter= by method name: ="global_optimize"=, the
+default, runs the portfolio, and ="sa"= runs its =preset=, =Boltzmann()=
+when none is given. A =Fitter= without a =fit_anneal= method of its own,
+such as that of ChemFit 3.1.1, runs through the =fit_anneal= function. One
+with its own =fit_anneal= is handed to that method with what its signature
+takes: =budget=, the method under =run_benchmark='s names when it has a
+=method= parameter (="portfolio"= for ="global_optimize"=, and the preset's
+driver, or ="boltzmann"= without one, for ="sa"=), =seed= when it has a
+=seed= parameter, a preset only when one is given, and each keyword as it
+is. The default method and seed stay out of a =fit_anneal= without such a
+parameter, so one without =method= runs as it stands; anything else it
+cannot take is a =TypeError=, raised before anything is evaluated. With
+=fitter= as above, this runs the portfolio with seed 42 on a =Fitter=
+without =fit_anneal= and on one whose =fit_anneal= passes =method= and
+=seed= to =run_benchmark=:
+
+#+begin_src python
+from anneal.chemfit import run_fitter
+
+best = run_fitter(fitter, 256)
+#+end_src
+
 A hand-written adapter flattens the parameter dictionary, calls
 =anneal.minimize=, and unflattens =res.x=. It forwards =replicas=,
 =history= and =store= explicitly. For an energy-only loss it forwards

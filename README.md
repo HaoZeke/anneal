@@ -375,7 +375,7 @@ makes `1 + n_epochs * steps_per_epoch` evaluations.
 
 ## ChemFit
 
-Gradient-free fits go through `anneal.chemfit`. The chain starts at the fitter's initial parameters, and every candidate stays inside the box. `fit_anneal`, `fit_chemfit`, `run_benchmark`, and `run_fitter` drive the fitter's session: `init`, then `ask` / `tell` (ChemFit 3.1.1, the first release with them) or `evaluate` / `step` (ChemFit's source from commit c57d6f5, in no release yet), then `finish` with the best evaluated parameters. A fitter with neither pair, such as that of ChemFit 3.1.0, is refused before `init`, and so is any invalid argument; `run_benchmark` with `evaluate` or `ask` alone, and the few calls 0.10.0 accepted while ignoring an argument, still run with a `FutureWarning`. The first exception the fitter raises, or a loss that is not a real number, stops the fit and reaches the caller without `finish`. `fit_anneal` names its driver with `driver=`: `"portfolio"`, the default, is the budget-only global optimizer, and `"boltzmann"`, `"fast"`, and `"gsa"` are the classical presets. `fit_chemfit`, `run_benchmark`, and `run_fitter` take `method=` instead and refuse `driver=`. The first two take the same four names, with `"portfolio"` the default; `run_fitter` takes them too, besides `"global_optimize"`, its default, which runs the portfolio, and `"sa"`, which runs its `preset`.
+Gradient-free fits go through `anneal.chemfit`. The chain starts at the fitter's initial parameters, and every candidate stays inside the box. `fit_anneal`, `fit_chemfit`, `run_benchmark`, and `run_fitter` drive the fitter's session: `init`, then `ask` / `tell` (ChemFit 3.1.1, the first release with them) or `evaluate` / `step` (ChemFit's source from commit c57d6f5, in no release yet), then `finish` with the best evaluated parameters. A fitter with neither pair, such as that of ChemFit 3.1.0, is refused before `init`, and so is any invalid argument; `run_benchmark` with `evaluate` or `ask` alone, and the few calls 0.10.0 accepted while ignoring an argument, still run with a `FutureWarning`. The first exception the fitter raises, or a loss that is not a real number, stops the fit and reaches the caller without `finish`. `fit_anneal` names its driver with `driver=`: `"portfolio"`, the default, is the budget-only global optimizer, and `"boltzmann"`, `"fast"`, and `"gsa"` are the classical presets. `fit_chemfit`, `run_benchmark`, and `run_fitter` take `method=` instead; the first two refuse `driver=`, and so does `run_fitter` on a fitter without a `fit_anneal` method of its own. The first two take the same four names, with `"portfolio"` the default; `run_fitter` takes them too, besides `"global_optimize"`, its default, which runs the portfolio, and `"sa"`, which runs its `preset`.
 
 ```python
 from anneal.chemfit import run_benchmark
@@ -390,6 +390,15 @@ def run_anneal(benchmark_context):
 ```
 
 A scalar `low` or `high` is broadcast across the flattened parameters. Bounds may also live on `benchmark_context["bounds"]` or `fitter.bounds`, as `(lower, upper)` pairs mirroring the parameters; each side is a scalar or an array of the parameter's shape. A parameter whose two bounds are equal is held fixed.
+
+`run_fitter` runs a fitter without a `fit_anneal` method of its own, such as a ChemFit 3.1.1 `Fitter`, through the `fit_anneal` function. A fitter with one is handed to that method with what its signature takes: `budget`, the method under `run_benchmark`'s names when it has a `method` parameter (`"portfolio"` for `"global_optimize"`, and the preset's driver, or `"boltzmann"` without one, for `"sa"`), `seed` when it has a `seed` parameter, a preset only when one is given, and each keyword as it is. The default method and seed stay out of a `fit_anneal` without such a parameter, so one without `method` runs as it stands; anything else it cannot take is a `TypeError`, raised before anything is evaluated. This runs the portfolio with seed 42 on a fitter without `fit_anneal` and on one whose `fit_anneal` passes `method` and `seed` to `run_benchmark`:
+
+```python
+from anneal.chemfit import run_fitter
+
+def fit(fitter):
+    return run_fitter(fitter, 500)
+```
 
 ## Optional arms (additive independence + QMC polish)
 
