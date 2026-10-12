@@ -1977,20 +1977,23 @@ def _ignored_preset(method: Any, driver: str, preset: Any, takes_preset: bool = 
     )
 
 
-def _keywords(function: Any) -> tuple[frozenset[str], bool]:
-    """The parameters ``function`` takes by keyword, and whether it takes ``**kwargs``.
+def _keywords(function: Any) -> tuple[frozenset[str], tuple[str, ...], bool]:
+    """How ``function`` takes its parameters: by keyword, only by position, or as ``**kwargs``.
 
-    A function whose signature cannot be read counts as taking ``**kwargs``:
-    what it does not take shows only at its call.
+    The first is the set of parameters it takes by keyword, the second those
+    it takes only by position, in order, and the third whether it takes
+    ``**kwargs``. A function whose signature cannot be read counts as taking
+    ``**kwargs``: what it does not take shows only at its call.
     """
     try:
         parameters = inspect.signature(function).parameters.values()
     except (TypeError, ValueError):
-        return frozenset(), True
+        return frozenset(), (), True
     named = frozenset(
         p.name for p in parameters if p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
     )
-    return named, any(p.kind is p.VAR_KEYWORD for p in parameters)
+    positional = tuple(p.name for p in parameters if p.kind is p.POSITIONAL_ONLY)
+    return named, positional, any(p.kind is p.VAR_KEYWORD for p in parameters)
 
 
 def _own_fit_anneal(
@@ -2009,20 +2012,27 @@ def _own_fit_anneal(
     preset it ignores is warned of.
     """
     fit = fitter.fit_anneal
-    named, takes_any = _keywords(fit)
+    named, positional, takes_any = _keywords(fit)
+    args: tuple[Any, ...] = ()
     call: dict[str, Any] = {}
     refused: dict[str, str] = {}
 
+    def by_keyword(name: str) -> bool:
+        return name in named or (takes_any and name not in positional)
+
     def offer(name: str, value: Any, given: bool, shown: str) -> None:
-        if name in named or (given and takes_any):
+        if name in named or (given and by_keyword(name)):
             call[name] = value
         elif given:
             refused[name] = shown
 
-    offer("budget", budget, True, "budget")
+    if positional[:1] == ("budget",):
+        args = (budget,)
+    else:
+        offer("budget", budget, True, "budget")
     default = key == "global_optimize"
     ignored = None
-    if "method" in named or (takes_any and not default):
+    if "method" in named or (not default and by_keyword("method")):
         driver, preset, ignored = _fitter_driver(key, preset)
         call["method"] = driver
     elif not default:
@@ -2034,18 +2044,26 @@ def _own_fit_anneal(
         offer(name, value, True, name)
     if refused:
         owner = f"{type(fitter).__name__}.fit_anneal()"
-        names = [repr(name) for name in refused]
-        takes_no = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} or {names[-1]}"
+        lacking = [repr(name) for name in refused if name not in positional]
+        by_position = [repr(name) for name in refused if name in positional]
+        reasons = []
+        if lacking:
+            either = lacking[0]
+            if len(lacking) > 1:
+                either = f"{', '.join(lacking[:-1])} or {lacking[-1]}"
+            reasons.append(f"takes no {either}")
+        if by_position:
+            reasons.append(f"takes {_listed(by_position)} only by position")
         message = (
             f"run_fitter() cannot pass {_listed(refused.values())} to {owner}, "
-            f"which takes no {takes_no}"
+            f"which {' and '.join(reasons)}"
         )
         if "method" in refused:
             message += "; leave method out to run it as it stands"
         raise TypeError(message)
     if ignored is not None:
-        _ignored_preset(method, call["method"], ignored, "preset" in named or takes_any)
-    return fit(**call)
+        _ignored_preset(method, call["method"], ignored, by_keyword("preset"))
+    return fit(*args, **call)
 
 
 def run_fitter(
@@ -2067,23 +2085,27 @@ def run_fitter(
     ``preset_kwargs`` go to it, and any other keyword is a TypeError.
 
     A fitter that has its own ``fit_anneal`` is handed to it with what the
-    signature of that method takes. ``budget`` goes as ``budget=``, each
-    keyword as it is, and ``preset`` only when one is given. The method
-    goes to a ``fit_anneal`` that has a ``method`` parameter, under
-    :func:`run_benchmark`'s names, which a ``fit_anneal`` that runs
-    :func:`run_benchmark` takes: ``"portfolio"`` for ``"global_optimize"``,
-    the preset's driver, or ``"boltzmann"`` without one, for ``"sa"``, and
-    the four driver names as they are. ``seed`` goes to a ``fit_anneal``
-    that has a ``seed`` parameter. The default method stays out of a
-    ``fit_anneal`` without a ``method`` parameter, and the default seed of
-    42 out of one without a ``seed`` parameter: the default method asks for
-    a global optimizer without naming a driver, so a ``fit_anneal`` without
-    ``method`` runs as it stands. Anything else that ``fit_anneal`` has no
-    parameter for, be it ``budget``, a method or seed other than the
-    defaults, a preset or a keyword, goes to it only when it takes
-    ``**kwargs`` or its signature cannot be read, and is otherwise a
+    signature of that method takes. ``budget`` goes as ``budget=``, or by
+    position when the first parameter of ``fit_anneal`` is a positional-only
+    ``budget``; each keyword goes as it is, and ``preset`` only when one is
+    given. The method goes to a ``fit_anneal`` that has a ``method``
+    parameter, under :func:`run_benchmark`'s names, which a ``fit_anneal``
+    that runs :func:`run_benchmark` takes: ``"portfolio"`` for
+    ``"global_optimize"``, the preset's driver, or ``"boltzmann"`` without
+    one, for ``"sa"``, and the four driver names as they are. ``seed`` goes
+    to a ``fit_anneal`` that has a ``seed`` parameter. The default method
+    stays out of a ``fit_anneal`` without a ``method`` parameter, and the
+    default seed of 42 out of one without a ``seed`` parameter: the default
+    method asks for a global optimizer without naming a driver, so a
+    ``fit_anneal`` without ``method`` runs as it stands. Anything else that
+    ``fit_anneal`` has no parameter for, be it ``budget``, a method or seed
+    other than the defaults, a preset or a keyword, goes to it only when it
+    takes ``**kwargs`` or its signature cannot be read, and is otherwise a
     TypeError naming it and the fitter's ``fit_anneal``, raised before
-    anything is evaluated. So, with ``fitter`` a ChemFit ``Fitter``, ::
+    anything is evaluated. A parameter that it takes only by position, a
+    first ``budget`` aside, gets nothing, even when it takes ``**kwargs``:
+    a value given for one is a TypeError saying that ``fit_anneal`` takes
+    it only by position. So, with ``fitter`` a ChemFit ``Fitter``, ::
 
         best = run_fitter(fitter, 500)
 
