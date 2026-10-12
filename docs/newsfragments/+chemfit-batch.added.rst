@@ -7,10 +7,13 @@ of a list and one ``step``, so a fitter whose schedule runs candidates
 concurrently evaluates them together. The start is the first evaluation, as
 a batch of one, and the budget stays the total number of evaluations.
 ``fit_chemfit`` then steps the fitter once per batch instead of every
-``tell_every`` evaluations. A batch needs the portfolio and a fitter with an
-``init`` that takes ``batch_size``, an ``evaluate`` that takes a list and
-``step``; anything else is refused before ``init``, by a message naming what
-the fitter lacks. No ChemFit release has them yet: ChemFit 3.1.1 has ``ask``
-and ``tell``, ChemFit's source has ``evaluate`` and ``step`` from commit
-c57d6f5, and it takes batches from commit 3b65fe0 on. The default of one
-keeps the single-candidate path.
+``tell_every`` evaluations. A batch needs the portfolio and a fitter with
+``evaluate``, ``step`` and an ``init`` that takes ``batch_size``; anything
+else is refused before ``init``, by a message naming what the fitter lacks.
+No ChemFit release has all three yet: ChemFit 3.1.1 has ``ask`` and ``tell``,
+ChemFit's source has ``evaluate`` and ``step`` from commit c57d6f5, and it
+takes batches from commit 3b65fe0 on. Whether ``evaluate`` takes a list
+shows only when it is called: one that takes a single candidate gets the
+start as a list of one, after ``init``, and what it raises, or a TypeError
+when its reply is not one real loss per candidate, ends the fit without
+``finish``. The default of one keeps the single-candidate path.

@@ -144,6 +144,10 @@ evaluations.
 Batches need a =Fitter= with =evaluate= and =step= whose =init= takes
 =batch_size=, which no ChemFit release has yet; for any other fitter the
 bridges refuse =batch_size= above one before =init=, naming what it lacks.
+Whether =evaluate= takes a list shows only when it is called: one that takes
+a single candidate gets the start as a list of one, after =init=, and the
+fit stops there with what it raises, or with a =TypeError= when its reply is
+not one real loss per candidate, without =finish=.
 ChemFit 3.1.1, the latest release, has =ask= and =tell=, which the bridges
 drive one candidate at a time, and ChemFit's source has =evaluate= and
 =step= from commit c57d6f5 but an =init= that takes =num_workers= until

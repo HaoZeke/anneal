@@ -4,10 +4,10 @@ With ``batch_size`` above one, ``fit_anneal``, ``fit_chemfit`` and
 ``run_benchmark`` run the portfolio as that many batch replicas of
 ``anneal.minimize``: the fitter is initialised with ``init(batch_size=...)``
 and each batch is one ``evaluate`` of a list and one ``step``. A fitter that
-lacks any of the three, as ChemFit 3.1.1's lacks all of them and the one of
-ChemFit's source from commit c57d6f5 until 3b65fe0 lacks an ``init`` that
-takes ``batch_size``, has its batch refused before ``init`` by a message
-naming what it lacks, and ``batch_size=1`` still fits.
+lacks ``evaluate``, ``step`` or an ``init`` that takes ``batch_size``, as
+ChemFit 3.1.1's lacks all three and the one of ChemFit's source from commit
+c57d6f5 until 3b65fe0 lacks the ``init``, has its batch refused before
+``init`` by a message naming what it lacks, and ``batch_size=1`` still fits.
 """
 
 import functools
@@ -41,9 +41,9 @@ def _listed(names):
 
 def _refusal(name, lacks):
     return (
-        "batch_size above one needs a fitter with an init that takes batch_size, "
-        "an evaluate that takes a list of candidates, and step, which ChemFit's "
-        f"source has from commit 3b65fe0 and no release has yet; {name} lacks {lacks}"
+        "batch_size above one needs a fitter with evaluate, step and an init "
+        "that takes batch_size, which ChemFit's source has from commit 3b65fe0 "
+        f"and no release has yet; {name} lacks {lacks}"
     )
 
 
