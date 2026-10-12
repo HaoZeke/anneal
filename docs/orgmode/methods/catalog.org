@@ -1569,7 +1569,7 @@ split as evenly as it goes; replica =r= runs the loop as the solo run of
 its share from =x0= would, seeded with =seed= mixed with =r=, its descent
 differencing each gradient from coordinate =r d / R= on, and replica 0
 keeps =seed= and coordinate 0 (replicas.rs:361-367, 456-457;
-=FdBfgs::with_first_coordinate=, fd_bfgs.rs:372). Each replica plays on
+=FdBfgs::with_first_coordinate=, fd_bfgs.rs:388). Each replica plays on
 a scoped thread, and the coordinator on the calling thread (=coordinate=,
 replicas.rs:242) gathers one point from every replica still running,
 evaluates them as one batch through =Objective::eval_batch=
@@ -2188,10 +2188,13 @@ most by 5% of its side, whatever the gradient's size, so the descent
 does not depend on the objective's scale. With =log_model= the descent
 also keeps a BFGS model of \(\ln f\), from the same steps and the
 gradient \(g / f\), while every value it has started from or accepted
-is positive. Once the model of \(f\) has taken two curvature pairs per
-coordinate, a step along which the trapezoid rule through its end
-slopes, exact for a quadratic, misses the change of \(f\) more than four
-times its miss on the change of \(\ln f\) moves the line searches onto
+is positive. Each curvature pair counts for \(\ln f\) when the
+trapezoid rule through its end slopes, exact for a quadratic, misses the
+change of \(f\) more than four times as far as the change of \(\ln f\),
+and for \(f\) when it misses the change of \(\ln f\) that much further.
+Once the model of \(f\) has taken two curvature pairs per coordinate, a
+pair after which more of the pairs since the models were last reset
+count for \(\ln f\) than for \(f\) moves the line searches onto
 \(\ln f\) (direction, Armijo test, extrapolation and interpolation).
 They stay there while the model of \(\ln f\) predicts each accepted
 value at least as closely as the model of \(f\), and a value at or
@@ -2199,21 +2202,23 @@ below zero retires it. A loss falling through decades along a curved
 valley, as a squared error far from its fit does, is closer to
 quadratic in \(\ln f\). The test reads no model's curvature, so a model
 of \(f\) still learning an ill-conditioned quadratic's curvature does
-not move the steps by mispredicting them. Gradients, intervals and the
+not move the steps by mispredicting them, and it counts every pair, so
+one step along which \(\ln f\) happens to be nearer quadratic does not
+move them either. Gradients, intervals and the
 slow test still read the values, and the logarithm enters only through
 ratios of values, so a power of two multiplying the objective leaves the
 descent unchanged, while a constant added to it changes the logarithm.
 A descent ends on a slow iteration, a projected-gradient tolerance when
 one is set, or a failed line search.
 
-Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:284);
-=FdBfgsOptions= (fd_bfgs.rs:110); the portfolio's =QnArmState= and
+Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:291);
+=FdBfgsOptions= (fd_bfgs.rs:117); the portfolio's =QnArmState= and
 =run_qn_arm= (src/methods/portfolio.rs:1208/3570).
 
 Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
 =FIRST_STEP_FRACTION = 0.05=, =CENTRAL_INTERVAL_FRACTION = 0.1=,
 =INTERVAL_MOVE = 2=, =MAX_REDIFFERENCES = 2=, =LOG_MODEL_MARGIN = 4=,
-=LOG_MODEL_PAIRS = 2= (fd_bfgs.rs:72-106). The default options have
+=LOG_MODEL_PAIRS = 2= (fd_bfgs.rs:79-113). The default options have
 =ftol = 1e-12=, three slow iterations of patience, the value floor
 =f64::MIN_POSITIVE= in the slow-iteration test, no absolute floor on
 it (=fatol = 0=), no gradient tolerance and no model of the logarithm;
