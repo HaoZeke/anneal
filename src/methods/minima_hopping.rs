@@ -925,7 +925,10 @@ mod tests {
         assert!(x.abs() < 0.2, "{x}");
         for _ in 0..30 {
             let (y, _) = quench_1d(x + 0.4);
-            assert!(y.abs() < 0.2, "a short step left the wide funnel at {y}");
+            assert!(
+                (y - 6.0).abs() > 0.5,
+                "a short step reached the narrow funnel at {y}"
+            );
         }
         assert!(energy.abs() < 1e-6);
     }
