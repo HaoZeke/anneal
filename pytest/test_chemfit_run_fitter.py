@@ -486,6 +486,26 @@ def test_a_fit_anneal_decides_what_becomes_of_an_exception_the_fitter_raises():
     assert best is scored.finished_with
 
 
+def test_a_fit_anneal_decides_what_becomes_of_a_loss_that_is_not_a_real_number():
+    refusal = "the fitter returned a loss of type bool; a loss must be one real number"
+    stopped = _fitter(BenchmarkFitter)
+    plain = _fitter(NextFitter)
+    read = _fitter(OwnLoopFitter)
+    for fitter in (stopped, plain, read):
+        fitter.loss = lambda params: True
+    for fitter in (stopped, plain):
+        with pytest.raises(TypeError) as caught:
+            run_fitter(fitter, 60)
+        assert str(caught.value) == refusal
+        assert fitter.calls.count("evaluate") == 1 and "finish" not in fitter.calls
+    assert [h["method"] for h in stopped.handed] == ["portfolio"]
+    best = run_fitter(read, 60)
+    assert read.handed == [{"budget": 60, "replicas": 4, "seed": 42}]
+    assert read.calls[0] == "init" and read.calls[-1] == "finish"
+    assert 1 < read.calls.count("evaluate") <= 60
+    assert best is read.finished_with
+
+
 def test_a_fit_anneal_without_method_or_preset_runs_as_it_stands():
     fitter = _fitter(OwnLoopFitter)
     run_fitter(fitter, 60)
