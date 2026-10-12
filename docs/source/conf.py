@@ -3,7 +3,9 @@ import os
 import re
 
 from sphinx.application import Sphinx
+from sphinx.environment import BuildEnvironment
 from sphinx.locale import __
+from sphinx.util import logging as sphinx_logging
 
 # -- Project information -----------------------------------------------------
 project = "anneal"
@@ -137,6 +139,29 @@ html_sidebars = {
 
 html_baseurl = "https://anneal.rgoswami.me/"
 
+_LOG = sphinx_logging.getLogger("conf")
+
+
+def _refuse_shared_titles(app: Sphinx, env: BuildEnvironment) -> None:
+    # Pages of one title read alike in the navigation, the browser tab and the
+    # search. The Rust API pages exist only once the build has run
+    # sphinx-rustdocgen, so the build itself compares the titles of every page
+    # it read, and docbld's -W makes each warning here fail it.
+    pages: dict[str, list[str]] = {}
+    for docname in sorted(env.titles):
+        title = " ".join(env.titles[docname].astext().casefold().split())
+        pages.setdefault(title, []).append(docname)
+    for docnames in pages.values():
+        if len(docnames) > 1:
+            _LOG.warning(
+                "%s and %s share the title %r; give each page a title of its own",
+                ", ".join(docnames[:-1]),
+                docnames[-1],
+                env.titles[docnames[0]].astext(),
+                location=docnames[0],
+            )
+
 
 def setup(app: Sphinx) -> None:
     app.connect("source-read", _title_module_page)
+    app.connect("env-check-consistency", _refuse_shared_titles)
