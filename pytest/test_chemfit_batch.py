@@ -59,8 +59,8 @@ def _installed_fitter():
     fitter_type = installed_fitter_type()
     init = getattr(fitter_type, "init", None)
     takes = callable(init) and "batch_size" in inspect.signature(init).parameters
-    lacks = [] if takes else ["an init that takes batch_size"]
-    lacks += [name for name in ("evaluate", "step") if not callable(getattr(fitter_type, name, None))]
+    lacks = [name for name in ("evaluate", "step") if not callable(getattr(fitter_type, name, None))]
+    lacks += [] if takes else ["an init that takes batch_size"]
     return fitter_type, lacks
 
 
@@ -196,7 +196,7 @@ def test_batches_need_the_portfolio(entry, driver):
 @pytest.mark.parametrize(
     "kind, lacks",
     [
-        (ReleasedFitter, "an init that takes batch_size, evaluate and step"),
+        (ReleasedFitter, "evaluate, step and an init that takes batch_size"),
         (NextFitter, "an init that takes batch_size"),
         (WorkersFitter, "an init that takes batch_size"),
     ],
