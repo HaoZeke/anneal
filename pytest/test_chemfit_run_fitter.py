@@ -158,6 +158,14 @@ class LateBudgetFitter(Handed):
         return self._minimize(budget, seed=0)
 
 
+class LateBudgetKwargsFitter(Handed):
+    """Takes a scale, a shift, the budget and the seed only by position, and ``**options``."""
+
+    def fit_anneal(self, scale, shift, budget, seed=0, /, **options):
+        self.handed.append({"scale": scale, "shift": shift, "budget": budget, "seed": seed})
+        return self._minimize(budget, seed)
+
+
 def _fitter(kind=ReleasedFitter, bounds=None):
     return kind(
         {"x": np.array([0.2, -0.1]), "eps": 1.0},
@@ -478,7 +486,8 @@ def test_a_positional_only_seed_gets_nothing_by_default():
             {},
             (
                 "run_fitter() cannot pass budget to LateBudgetFitter.fit_anneal(), which "
-                "takes 'budget' only by position"
+                "takes 'budget' only by position; 'budget' comes after 'scale', so a "
+                "budget passed by position would fill 'scale'"
             ),
         ),
         (
@@ -486,7 +495,18 @@ def test_a_positional_only_seed_gets_nothing_by_default():
             {"x0": 1.0},
             (
                 "run_fitter() cannot pass budget and x0 to LateBudgetFitter.fit_anneal(), "
-                "which takes no 'x0' and takes 'budget' only by position"
+                "which takes no 'x0' and takes 'budget' only by position; 'budget' comes "
+                "after 'scale', so a budget passed by position would fill 'scale'"
+            ),
+        ),
+        (
+            LateBudgetKwargsFitter,
+            {"seed": 7},
+            (
+                "run_fitter() cannot pass budget and seed 7 to "
+                "LateBudgetKwargsFitter.fit_anneal(), which takes 'budget' and 'seed' only "
+                "by position; 'budget' comes after 'scale' and 'shift', so a budget passed "
+                "by position would fill 'scale'"
             ),
         ),
         (
@@ -517,6 +537,7 @@ def test_a_positional_only_seed_gets_nothing_by_default():
         "x0-preset-boltzmann-ignores",
         "budget-after-a-positional-parameter",
         "budget-after-a-positional-parameter-and-x0",
+        "budget-and-seed-after-two-positional-parameters",
         "positional-only-seed-beside-kwargs",
         "positional-only-preset",
     ],

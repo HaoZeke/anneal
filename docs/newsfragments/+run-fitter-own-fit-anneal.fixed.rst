@@ -18,9 +18,11 @@ seed stay out of a ``fit_anneal`` without such a parameter, so one without
 preset, or a keyword that ``fit_anneal`` has no parameter for, and that it
 cannot take through ``**kwargs``, or that it takes only by position, is a
 TypeError naming it and the fitter's ``fit_anneal``, raised before anything
-is evaluated. As on a fitter without ``fit_anneal``, an unknown method is
-refused before ``fit_anneal`` is called, and a preset that the driver
-passed as ``method`` does not run is ignored with a FutureWarning. Where
-``fit_anneal`` takes no ``preset``, or takes it only by position, that
-warning says so in place of advising ``method="sa"``, under which
-``run_fitter`` would refuse the preset.
+is evaluated. So is every call to a ``fit_anneal`` whose positional-only
+``budget`` comes after another parameter, and the TypeError says which
+parameter a budget passed by position would fill. As on a fitter without
+``fit_anneal``, an unknown method is refused before ``fit_anneal`` is
+called, and a preset that the driver passed as ``method`` does not run is
+ignored with a FutureWarning. Where ``fit_anneal`` takes no ``preset``, or
+takes it only by position, that warning says so in place of advising
+``method="sa"``, under which ``run_fitter`` would refuse the preset.
