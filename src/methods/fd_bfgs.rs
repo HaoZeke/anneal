@@ -45,22 +45,25 @@
 //!
 //! With [`FdBfgsOptions::log_model`] the engine keeps a second model, of
 //! `ln f`, from the same steps and the gradient `g / f`, while every value
-//! it has started from or accepted is positive. Until the model of `f` has
-//! taken [`LOG_MODEL_PAIRS`] curvature pairs per coordinate, BFGS is still
-//! learning even a quadratic's Hessian and its misses say little about the
-//! loss. From then on both models predict each accepted step's value, and
-//! once the model of `ln f` predicts one [`LOG_MODEL_MARGIN`] times closer
-//! than the model of `f`, the line searches step on `ln f` (its direction,
-//! Armijo test, extrapolation and interpolation) until it predicts a step
-//! less closely. A loss that falls through decades along a curved valley,
-//! as a squared error far from its fit does, is far from quadratic in `f`
-//! and closer to it in `ln f`. Near a minimum whose value is zero the model
-//! of `f` predicts better, and for a loss already on a logarithmic scale
-//! the two mostly predict about as well, so the margin leaves the steps on
-//! `f` there. Gradients, intervals and the slow test read the values
-//! themselves, and the logarithm enters only through ratios of values, so a
-//! power of two multiplying the objective still leaves the descent
-//! unchanged; a constant added to it changes the logarithm.
+//! it has started from or accepted is positive. Once the model of `f` has
+//! taken [`LOG_MODEL_PAIRS`] curvature pairs per coordinate, each new pair
+//! also tells which reading is nearer quadratic along its step: the
+//! trapezoid rule through the two end slopes is exact for a quadratic, and
+//! when it misses the change of `f` more than [`LOG_MODEL_MARGIN`] times its
+//! miss on the change of `ln f` (read back as a value), the line searches
+//! step on `ln f` (its direction, Armijo test, extrapolation and
+//! interpolation). They stay there while the model of `ln f` predicts each
+//! accepted step's value at least as closely as the model of `f`. A loss
+//! that falls through decades along a curved valley, as a squared error far
+//! from its fit does, is far from quadratic in `f` and closer to it in
+//! `ln f`. The test that moves the steps reads neither model's curvature: on
+//! an ill-conditioned quadratic, while the model of `f` is still learning
+//! the curvature, the model of `ln f` predicts many steps more closely
+//! without stepping better, yet the trapezoid rule finds `f` quadratic.
+//! Gradients, intervals and the slow test read the values themselves, and
+//! the logarithm enters only through ratios of values, so a power of two
+//! multiplying the objective still leaves the descent unchanged; a constant
+//! added to it changes the logarithm.
 
 use eindir_core::Bounds;
 use ndarray::{Array1, Array2, ArrayView1};
@@ -89,17 +92,17 @@ const CENTRAL_INTERVAL_FRACTION: f64 = 0.1;
 const INTERVAL_MOVE: f64 = 2.0;
 /// Re-differenced gradients allowed at one iterate.
 const MAX_REDIFFERENCES: usize = 2;
-/// Factor by which the model of the values must mispredict an accepted
-/// step's value more than the model of their logarithm before a descent with
-/// [`FdBfgsOptions::log_model`] steps on the logarithm. Two models that
-/// predict about as well, as for a loss already on a logarithmic scale,
+/// Factor by which the trapezoid rule along an accepted step must miss the
+/// change of the values more than the change of their logarithm before a
+/// descent with [`FdBfgsOptions::log_model`] steps on the logarithm. Readings
+/// about as near quadratic, as for a loss already on a logarithmic scale,
 /// leave the steps on the values.
 const LOG_MODEL_MARGIN: f64 = 4.0;
-/// Curvature pairs per coordinate the model of the values takes before its
-/// misses count against it. Exact line searches would give a quadratic's
-/// Hessian in one pair per coordinate; with these Armijo searches the
-/// descent of a quadratic in 12 dimensions with condition number `1e3`
-/// turned superlinear only after about two.
+/// Curvature pairs per coordinate the model of the values takes before the
+/// steps may move to the logarithm. Exact line searches would give a
+/// quadratic's Hessian in one pair per coordinate; with these Armijo
+/// searches the descent of a quadratic in 12 dimensions with condition
+/// number `1e3` turned superlinear only after about two.
 const LOG_MODEL_PAIRS: usize = 2;
 
 /// Termination controls for one descent.
@@ -125,8 +128,10 @@ pub struct FdBfgsOptions {
     /// whatever the value's scale; zero leaves only the relative test.
     pub fatol: f64,
     /// Whether the descent also models the logarithm of its values while
-    /// they stay positive, and steps on that model while it predicts the
-    /// accepted values markedly better (see the module notes).
+    /// they stay positive, and steps on that model from a step along which
+    /// the logarithm is markedly nearer quadratic than the values, while it
+    /// predicts the accepted values at least as closely (see the module
+    /// notes).
     pub log_model: bool,
 }
 
@@ -621,6 +626,9 @@ impl FdBfgs {
             if direct && self.log_valid {
                 let y = &self.grad / self.f - &g_prev / self.pair_value;
                 self.log_curvature.update(&self.metric, &s, &y, true);
+                if !self.log_active && self.curvature.pairs >= LOG_MODEL_PAIRS * self.n {
+                    self.log_active = self.log_nearer_quadratic(&s, &g_prev);
+                }
             }
         }
         if self.options.max_iter > 0 && self.iterations >= self.options.max_iter {
@@ -800,20 +808,28 @@ impl FdBfgs {
         self.phase = Phase::Line(work);
     }
 
-    /// Lets the model that predicted the accepted step's value more closely
-    /// take the next steps: the model of the logarithm only by
-    /// [`LOG_MODEL_MARGIN`], and only once the model of the values has taken
-    /// [`LOG_MODEL_PAIRS`] pairs per coordinate. A value at or below zero
-    /// retires it.
-    fn choose_model(&mut self, trial: &Array1<f64>, value: f64) {
+    /// Whether the trapezoid rule through the end slopes of the step `s`
+    /// just taken, exact for a quadratic, misses the change of the values
+    /// more than [`LOG_MODEL_MARGIN`] times its miss on the change of their
+    /// logarithm, read back as a value. `g_prev` is the gradient at the
+    /// step's start.
+    fn log_nearer_quadratic(&self, s: &Array1<f64>, g_prev: &Array1<f64>) -> bool {
+        let (from, to) = (g_prev.dot(s), self.grad.dot(s));
+        let miss = (self.f - self.pair_value - 0.5 * (from + to)).abs();
+        let log_slope = 0.5 * (from / self.pair_value + to / self.f);
+        let log_miss = (self.f - self.pair_value * log_slope.exp()).abs();
+        miss > LOG_MODEL_MARGIN * log_miss
+    }
+
+    /// Keeps the steps on the model of the logarithm while it predicts the
+    /// accepted step's value at least as closely as the model of the values.
+    /// A value at or below zero retires it.
+    fn keep_log_steps(&mut self, trial: &Array1<f64>, value: f64) {
         if !(value > 0.0) {
             self.log_valid = false;
         }
-        if !self.log_valid {
+        if !(self.log_valid && self.log_active) {
             self.log_active = false;
-            return;
-        }
-        if !self.log_active && self.curvature.pairs < LOG_MODEL_PAIRS * self.n {
             return;
         }
         let s = trial - &self.x;
@@ -826,18 +842,12 @@ impl FdBfgs {
         let linear = self.grad.dot(&s);
         let predicted = self.f + linear + term;
         let log_predicted = self.f * (linear / self.f + log_term).exp();
-        let miss = (predicted - value).abs();
-        let log_miss = (log_predicted - value).abs();
-        self.log_active = if self.log_active {
-            log_miss <= miss
-        } else {
-            miss > LOG_MODEL_MARGIN * log_miss
-        };
+        self.log_active = (log_predicted - value).abs() <= (predicted - value).abs();
     }
 
     fn accept(&mut self, trial: Array1<f64>, value: f64) {
         if self.options.log_model {
-            self.choose_model(&trial, value);
+            self.keep_log_steps(&trial, value);
         }
         self.redifferences = 0;
         let previous = self.f;
@@ -974,7 +984,7 @@ mod tests {
     }
 
     #[test]
-    fn the_logarithm_model_takes_over_where_it_predicts_better() {
+    fn the_logarithm_takes_the_steps_where_it_is_nearer_quadratic() {
         let bounds = boxed(-2.0, 2.0, 4);
         let start = Array1::from_vec(vec![-1.5, 1.5, -1.5, 1.5]);
         let run = |log_model: bool| {
@@ -993,6 +1003,42 @@ mod tests {
             3 * dual < plain,
             "{dual} evaluations with the model, {plain} without"
         );
+    }
+
+    #[test]
+    fn an_ill_conditioned_quadratic_keeps_the_steps_on_the_values() {
+        // Its minimum value is zero, and its condition number of 1e6 keeps
+        // BFGS learning the curvature for many steps.
+        let n = 12;
+        let bounds = boxed(-5.0, 5.0, n);
+        let start = Array1::from_iter((0..n).map(|i| if i % 2 == 0 { -4.0 } else { 4.5 }));
+        let ellipsoid = |x: ArrayView1<f64>| {
+            x.iter()
+                .enumerate()
+                .map(|(i, v)| 10f64.powf(6.0 * i as f64 / (n - 1) as f64) * (v - 0.3).powi(2))
+                .sum::<f64>()
+        };
+        let trace = |log_model: bool| {
+            let options = FdBfgsOptions {
+                log_model,
+                ..FdBfgsOptions::default()
+            };
+            let mut engine = FdBfgs::new(start.view(), None, &bounds, options);
+            let (mut asked, mut log) = (Vec::new(), false);
+            while asked.len() < 4000 && !engine.is_done() {
+                let x = engine.ask();
+                engine.tell(ellipsoid(x.view()));
+                log |= engine.log_active;
+                asked.push(x);
+            }
+            (asked, engine.value(), log)
+        };
+        let (plain, value, _) = trace(false);
+        let (dual, dual_value, log) = trace(true);
+        assert!(!log, "the logarithm took the steps");
+        assert_eq!(dual, plain);
+        assert_eq!(dual_value, value);
+        assert!(value < 1e-10, "value {value}");
     }
 
     #[test]
