@@ -7,7 +7,9 @@ navigation, the browser tab and links to it, and each other one becomes an
 entry of its own wherever a toctree lists the page. So a page must give Sphinx
 exactly one outermost title, its sections under it, and that title must name
 the page as its ``#+TITLE`` does: hold the words of the ``#+TITLE``, compared
-without case or Org and reST code marks.
+without case or Org and reST code marks. Every page is in a toctree the index
+reaches, so the navigation lists each by that title, and no two pages may
+share one, compared the same way.
 
 ox-rst writes the ``#+TITLE`` as a title over- and underlined with ``=``,
 unless ``#+OPTIONS`` sets ``title:nil``, and underlines each headline with the
@@ -173,6 +175,25 @@ def test_every_page_gives_sphinx_one_title_of_its_own(page):
     assert name and _words(name) in _words(found[0]), (
         f"docs/orgmode/{page}.org gives Sphinx the title {found[0]!r}, which "
         f"does not name the page as its #+TITLE {name!r} does"
+    )
+
+
+def test_no_two_pages_share_a_title():
+    named: dict[str, list[tuple[str, str]]] = {}
+    for page in pages():
+        found = outermost(_source(page))
+        if found:
+            named.setdefault(_words(found[0]), []).append((page, found[0]))
+    shared = [
+        " and ".join(f"docs/orgmode/{page}.org" for page, _ in held)
+        + f" share the title {held[0][1]!r}"
+        for held in named.values()
+        if len(held) > 1
+    ]
+    assert not shared, (
+        "pages the navigation lists under one title:\n"
+        + "\n".join(shared)
+        + "\ngive each a #+TITLE of its own"
     )
 
 
