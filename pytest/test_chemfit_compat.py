@@ -13,7 +13,10 @@ that error without them.
 An argument 0.10.0 coerced, or dropped without a word, now raises an error
 that names it before the fitter's session starts. Bounds 0.10.0 ignored in
 favour of others, such as a NumPy pair in ``run_benchmark``'s context
-bounds, are now read.
+bounds, are now read. On a fitter with its own ``fit_anneal``,
+``run_fitter`` refuses only what it cannot pass to that method, and the
+budget, the seed, the fitter's bounds and the rest are the method's to
+check; ``test_chemfit_run_fitter.py`` covers that path.
 """
 
 import functools

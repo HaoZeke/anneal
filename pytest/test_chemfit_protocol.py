@@ -4,10 +4,12 @@ ChemFit 3.1.1, the first release with a session, drives a ``Fitter`` with
 ``ask`` / ``tell``; ChemFit's source from commit c57d6f5, in no release yet,
 with ``evaluate`` / ``step``. Every bridge must speak whichever pair the
 fitter has, and refuse a fitter with neither, as ChemFit 3.1.0's is, before
-starting its session, by a message naming where each pair ships; only
-``run_benchmark`` still drives half a pair, as anneal 0.10.0 did. An
-exception raised by the fitter, or a loss that is not a real number, must
-reach the caller unchanged, with no further fitter call and no ``finish``.
+starting its session, by a message naming where each pair ships, except
+that ``run_fitter`` hands a fitter with its own ``fit_anneal`` to that
+method without the check; only ``run_benchmark`` still drives half a pair,
+as anneal 0.10.0 did. An exception raised by the fitter, or a loss that is
+not a real number, must reach the caller unchanged, with no further fitter
+call and no ``finish``.
 """
 
 import warnings
