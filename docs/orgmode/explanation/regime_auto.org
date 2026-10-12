@@ -54,7 +54,13 @@ descent that creeps along the floor of a side basin, gaining a little
 less on every slice, still ends instead of holding the whole run. The
 first slice from below the start is held to the gain of the slice from
 the start, which ends a descent into a side basin of a multimodal
-objective. Until the descent has lowered its own
+objective. Those two gains are differences; while every value the run
+has found is positive, every later gain, and the gains it is held to,
+is a log ratio, =ln(before / after)=, and from the first value at or
+below zero every gain is a difference again. A positive loss that
+falls by decades from a far start, as a squared error does, then does
+not end its opening on the valley floor, held to the gains of the
+slices that came down the wall. Until the descent has lowered its own
 value from below the start's, a slice in which it stalls short of
 convergence, as when its first curvature pair spans a steep wall, or
 stops at the start's value, as when every neighbour of a start behind

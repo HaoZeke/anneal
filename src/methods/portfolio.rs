@@ -1650,6 +1650,24 @@ fn gain_rate(before: f64, after: f64, used: usize) -> f64 {
     }
 }
 
+/// Gain of an opening slice that took the incumbent's value from `before`
+/// to `after`, as the opening's bar reads it: `ln(before / after)` with
+/// `ratios`, which the opening sets while every value the run has found
+/// is positive, and `before - after` otherwise. Multiplying the objective
+/// by a power of two leaves the log ratio unchanged short of overflow or
+/// underflow.
+fn opening_gain(before: f64, after: f64, ratios: bool) -> f64 {
+    if !ratios {
+        return before - after;
+    }
+    let relative = (before - after) / after;
+    if relative.is_finite() {
+        relative.ln_1p()
+    } else {
+        before.ln() - after.ln()
+    }
+}
+
 /// Pace of the values-only descent short of the opening budget, timed slice
 /// by slice on the descent's own values (a kick climbs before it descends,
 /// so its gains count from where it starts). It decides when the descent
@@ -3684,7 +3702,10 @@ fn values_only_slice(dim: usize, budget: usize) -> usize {
 /// of the last [`OPENING_GAINS`] gains opening slices have made from below
 /// the start's value, and leaves the last [`OPENING_SPAN`] slices with more,
 /// together, than that times the largest such gain (the first slice from
-/// below the start is held to the gain from the start).
+/// below the start is held to the gain from the start, both read as
+/// differences). Every later gain is a log ratio while every value the run
+/// has found is positive ([`opening_gain`]); from the first value at or
+/// below zero every gain, the earlier slices' included, is a difference.
 /// Short of that budget the descent would converge only by
 /// taking most of the run: CMA-ES takes one slice from the start, the
 /// descent keeps the turn until a slice gains less per evaluation than the
@@ -3926,8 +3947,18 @@ where
         // all at once. From a far start on a curved valley the slice from
         // the start can also gain more than `1 / IMPROVEMENT_RTOL` times the
         // next, though the descent is far from converged; the phases below
-        // hand such a descent the turn back.
-        let mut gains: Vec<f64> = Vec::new();
+        // hand such a descent the turn back. Those two gains are
+        // differences: from a start high on a steep wall (overlapping atoms)
+        // the slice from the start makes nearly all of the drop, and the bar
+        // hands the turn to the phases as it does from a side basin. While
+        // every value is positive the later gains are log ratios
+        // ([`opening_gain`]): a positive loss that falls by decades from a
+        // far start (a squared error) would otherwise hold each slice on the
+        // valley floor to the gains of the slices that came down the wall.
+        // The bar keeps each slice's values, so from the first value at or
+        // below zero it reads every gain, the earlier slices' included, as a
+        // difference.
+        let mut slices: Vec<(f64, f64)> = Vec::new();
         let mut from_start = None;
         let (mut descended, mut retried) = (false, false);
         while ledger.remaining() > 0 {
@@ -3945,6 +3976,14 @@ where
             let after = ledger.best_get();
             states.success.record(before, after);
             let improved = after.is_finite() && after < before - threshold;
+            let ratios = after > 0.0;
+            let read = |pair: &(f64, f64)| opening_gain(pair.0, pair.1, ratios).max(0.0);
+            let gains: Vec<f64> = slices.iter().map(read).collect();
+            let gain = if gains.is_empty() {
+                before - after
+            } else {
+                opening_gain(before, after, ratios)
+            };
             let largest = |gains: &[f64]| {
                 if gains.is_empty() {
                     from_start.unwrap_or(0.0)
@@ -3961,12 +4000,11 @@ where
             let span = gains[gains.len().saturating_sub(OPENING_SPAN - 1)..]
                 .iter()
                 .sum::<f64>()
-                + (before - after);
-            let keep = improved
-                && before - after > IMPROVEMENT_RTOL * recent
-                && span > IMPROVEMENT_RTOL * all;
+                + gain;
+            let keep =
+                improved && gain > IMPROVEMENT_RTOL * recent && span > IMPROVEMENT_RTOL * all;
             if states.success.below_start(before) && after.is_finite() {
-                gains.push((before - after).max(0.0));
+                slices.push((before, after));
             }
             posteriors[qn].update(improved);
             winner = improved.then_some(qn);
@@ -8253,20 +8291,20 @@ mod tests {
         }
     }
 
-    #[test]
-    fn values_only_opening_ends_once_its_recent_gains_fall_to_a_sliver() {
-        // Along Rosenbrock's valley each slice gains a little less than the
-        // one before, so every slice would beat the success threshold that
-        // its predecessor sets until the descent converged. The opening
-        // ends at the first slice that gains no more than a sliver of the
-        // largest of its last few gains from below the start's value, or
-        // after which its last few slices together gain no more than a
-        // sliver of its largest such gain; the first slice from below the
-        // start is held to the gain from it. A slice that gains less than
-        // a sliver of the largest gain does not end it while the slices
-        // just before it gained more.
+    fn rosenbrock_below_zero(x: ArrayView1<f64>) -> f64 {
+        rosenbrock(x) - 4096.0
+    }
+
+    fn rosenbrock_squared(x: ArrayView1<f64>) -> f64 {
+        rosenbrock(x).powi(2)
+    }
+
+    /// Runs the values-only loop on `f` from Rosenbrock's usual start in
+    /// `[-2, 2]^10` and returns the incumbent's value at the start and after
+    /// each slice of the opening.
+    fn opening_values(f: fn(ArrayView1<f64>) -> f64) -> Vec<f64> {
         let (dim, budget) = (10usize, 2000usize);
-        let obj = Traced::new(-2.0, 2.0, dim, rosenbrock);
+        let obj = Traced::new(-2.0, 2.0, dim, f);
         let ledger = BudgetLedger::new(budget, dim);
         let budgeted = BudgetedObjective {
             inner: &obj,
@@ -8279,41 +8317,149 @@ mod tests {
         let slice = values_only_slice(dim, budget);
         let end = states.turns[0].1;
         assert_eq!((end - 1) % slice, 0, "the opening converged at {end}");
-        let values: Vec<f64> = obj.points().iter().map(|x| rosenbrock(x.view())).collect();
+        let values: Vec<f64> = obj.points().iter().map(|x| f(x.view())).collect();
         let best = |n: usize| values[..n].iter().copied().fold(f64::INFINITY, f64::min);
-        let gains: Vec<f64> = (1..end)
-            .step_by(slice)
-            .map(|from| best(from) - best(from + slice))
+        (1..=end).step_by(slice).map(best).collect()
+    }
+
+    /// The slice on which the opening ends an opening whose incumbent took
+    /// the `values` of [`opening_values`], if a slice that is no success or
+    /// the opening's bar ends it, and whether the bar keeps a slice before
+    /// then that gains no more than a sliver of its largest gain. The first
+    /// slice from below the start is held to the slice from the start in
+    /// differences, and every later slice's gain, and those it is held to,
+    /// are read with `gain`.
+    fn bar_end(values: &[f64], gain: fn(f64, f64) -> f64) -> (Option<usize>, bool) {
+        let mut success = SuccessScale::new(Some(values[0]));
+        let failed: Vec<bool> = values
+            .windows(2)
+            .map(|w| {
+                let threshold = success.threshold();
+                success.record(w[0], w[1]);
+                w[1] >= w[0] - threshold
+            })
             .collect();
-        let (from_start, rest) = gains.split_first().expect("an opening slice");
-        let (last, kept) = rest.split_last().expect("two opening slices");
-        let largest = |gains: &[f64]| match gains {
-            [] => *from_start,
-            gains => gains.iter().copied().fold(0.0f64, f64::max),
-        };
-        let recent =
-            |k: usize| IMPROVEMENT_RTOL * largest(&kept[k.saturating_sub(OPENING_GAINS)..k]);
-        let all = |k: usize| IMPROVEMENT_RTOL * largest(&kept[..k]);
-        let span = |k: usize, gain: f64| {
-            kept[k.saturating_sub(OPENING_SPAN - 1)..k]
+        if failed[0] {
+            return (Some(1), false);
+        }
+        if failed[1] || values[1] - values[2] <= IMPROVEMENT_RTOL * (values[0] - values[1]) {
+            return (Some(2), false);
+        }
+        let gains: Vec<f64> = values[1..].windows(2).map(|w| gain(w[0], w[1])).collect();
+        let largest = |gains: &[f64]| gains.iter().copied().fold(0.0f64, f64::max);
+        let mut slow = false;
+        for (k, &gain) in gains.iter().enumerate().skip(1) {
+            let kept = &gains[..k];
+            let recent = IMPROVEMENT_RTOL * largest(&kept[k.saturating_sub(OPENING_GAINS)..]);
+            let all = IMPROVEMENT_RTOL * largest(kept);
+            let span = kept[k.saturating_sub(OPENING_SPAN - 1)..]
                 .iter()
                 .sum::<f64>()
-                + gain
-        };
-        for (k, &gain) in kept.iter().enumerate() {
-            assert!(gain > recent(k), "slice {k} kept {gain}");
-            assert!(span(k, gain) > all(k), "slice {k} kept after a creep");
+                + gain;
+            if failed[k + 1] || gain <= recent || span <= all {
+                return (Some(k + 2), slow);
+            }
+            slow |= gain <= all;
         }
+        (None, slow)
+    }
+
+    #[test]
+    fn values_only_opening_ends_once_its_recent_gains_fall_to_a_sliver() {
+        // Along Rosenbrock's valley each slice gains a little less than the
+        // one before, so every slice would beat the success threshold that
+        // its predecessor sets until the descent converged. The opening
+        // ends at the first slice that gains no more than a sliver of the
+        // largest of its last few gains from below the start's value, or
+        // after which its last few slices together gain no more than a
+        // sliver of its largest such gain; the first slice from below the
+        // start is held to the gain from it. A slice that gains less than
+        // a sliver of the largest gain does not end it while the slices
+        // just before it gained more. Below zero the gains are differences.
+        let values = opening_values(rosenbrock_below_zero);
+        let n = values.len() - 1;
+        assert!(values[n - 1] > values[n], "the last slice still gained");
+        let (end, slow) = bar_end(&values, |before, after| before - after);
+        assert_eq!(end, Some(n));
+        assert!(slow, "no slow slice was kept");
+    }
+
+    #[test]
+    fn values_only_opening_reads_a_positive_loss_in_log_ratios() {
+        // Rosenbrock's square falls by many decades from the usual start.
+        // While the values are positive the bar reads the gain of each slice
+        // after the first from below the start as a log ratio, and the
+        // opening goes on until a slice gains no more than the success
+        // threshold, which still reads differences, near the resolution of
+        // the run's values. Read as differences, the gains of the slices
+        // that came down the wall would have ended the opening on the
+        // valley floor far above the minimum.
+        let values = opening_values(rosenbrock_squared);
+        let n = values.len() - 1;
+        assert!(values[n - 1] > values[n], "the last slice still gained");
+        let (end, _) = bar_end(&values, |before, after| (before / after).ln());
+        assert_eq!(end, Some(n));
+        assert!(values[n] < 1e-12, "the opening ended at {}", values[n]);
+        let (short, _) = bar_end(&values, |before, after| before - after);
+        let short = short.expect("differences end the opening");
         assert!(
-            kept.iter().enumerate().any(|(k, &gain)| gain <= all(k)),
-            "no slow slice was kept"
+            short < n && values[short] > 1e-3,
+            "differences end it at {} after slice {short}",
+            values[short]
         );
-        let n = kept.len();
-        assert!(
-            *last <= recent(n) || span(n, *last) <= all(n),
-            "ended on {last}"
-        );
-        assert!(*last > 0.0, "the last slice still gained");
+    }
+
+    fn rosenbrock_fourth_less(x: ArrayView1<f64>) -> f64 {
+        rosenbrock(x).powi(4) - 3.77e6
+    }
+
+    fn rosenbrock_sixteenth(x: ArrayView1<f64>) -> f64 {
+        rosenbrock(x).powi(16)
+    }
+
+    #[test]
+    fn values_only_opening_holds_the_first_slice_from_below_to_the_drop_from_the_start() {
+        // Rosenbrock's sixteenth power comes down a steep wall from the usual
+        // start: the slice from the start makes nearly all of the drop, and
+        // the next still falls by two decades but gains less than a sliver
+        // of that drop. The bar holds that slice to the drop from the start
+        // in differences, as it does below zero, and the opening ends there.
+        let values = opening_values(rosenbrock_sixteenth);
+        assert_eq!(values.len(), 3, "the values were {values:?}");
+        assert!(values[1] > 100.0 * values[2], "the values were {values:?}");
+        assert!(values[1] - values[2] <= IMPROVEMENT_RTOL * (values[0] - values[1]));
+    }
+
+    #[test]
+    fn values_only_opening_reads_differences_from_a_value_at_or_below_zero() {
+        // Rosenbrock's fourth power falls by seven decades in the opening's
+        // first five slices; less a constant, the sixth takes it below zero
+        // with a gain far under those of the slices before. From there the
+        // bar reads every gain as a difference, the earlier slices'
+        // included, and ends the opening where differences alone end it.
+        let values = opening_values(rosenbrock_fourth_less);
+        let n = values.len() - 1;
+        let below = values.iter().position(|&v| v <= 0.0);
+        assert_eq!(below, Some(n), "the values were {values:?}");
+        let (end, _) = bar_end(&values, |before, after| before - after);
+        assert_eq!(end, Some(n));
+    }
+
+    #[test]
+    fn opening_gain_reads_log_ratios_while_values_are_positive() {
+        assert_eq!(opening_gain(3.0, 1.0, false), 2.0);
+        assert_eq!(opening_gain(-1.0, -3.0, false), 2.0);
+        for (before, after) in [(2057.0, 1e-3), (1.5, 1.4999)] {
+            let gain = opening_gain(before, after, true);
+            let ratio = before.ln() - after.ln();
+            assert!((gain - ratio).abs() <= 1e-10 * ratio, "{before} to {after}");
+            for scale in [2f64.powi(-20), 2f64.powi(20)] {
+                assert_eq!(opening_gain(scale * before, scale * after, true), gain);
+            }
+        }
+        // The relative gain overflows.
+        let gain = opening_gain(1e300, 1e-300, true);
+        assert!((gain - 600.0 * 10f64.ln()).abs() <= 1e-12 * gain);
     }
 
     #[test]
