@@ -2,10 +2,12 @@
 
 A fitter with its own ``fit_anneal`` is handed to it with what the signature
 of that method takes, the method under the names of ``run_benchmark``, which
-a ``fit_anneal`` that runs ``run_benchmark`` takes. The doubles below have
-the signatures such methods have had: one that runs ``run_benchmark`` with a
-``preset`` parameter, one without it, and one with neither ``method`` nor
-``preset`` that runs ``anneal.minimize`` itself.
+a ``fit_anneal`` that runs ``run_benchmark`` takes. The first three doubles
+below have the signatures such methods have had: one that runs
+``run_benchmark`` with a ``preset`` parameter, one without it, and one with
+neither ``method`` nor ``preset`` that runs ``anneal.minimize`` itself. The
+others try what else a signature can do: take the budget alone, leave out
+the seed, or take parameters only by position.
 """
 
 import functools
@@ -106,6 +108,14 @@ class BudgetOnlyFitter(Handed):
     def fit_anneal(self, budget):
         self.handed.append({"budget": budget})
         return self._minimize(budget, seed=0)
+
+
+class NoSeedFitter(Handed):
+    """Runs ``run_benchmark`` with the method it is given, and has no seed parameter."""
+
+    def fit_anneal(self, budget, method="portfolio"):
+        self.handed.append({"method": method})
+        return self._benchmark(budget, method=method)
 
 
 class PositionalBudgetFitter(Handed):
@@ -359,6 +369,16 @@ def test_a_positional_only_budget_goes_by_position(kind, options, handed):
     assert own.handed == [{"budget": 60, **handed}]
     assert 1 < len(own.evaluated) <= 60
     assert _same_run(own, _benchmarked(60, **handed))
+
+
+def test_a_fit_anneal_over_run_benchmark_without_seed_runs_its_own_seed():
+    own, plain = _fitter(NoSeedFitter), _fitter(NextFitter)
+    run_fitter(own, 60)
+    run_fitter(plain, 60)
+    assert own.handed == [{"method": "portfolio"}]
+    assert 1 < len(own.evaluated) <= 60
+    assert _same_run(own, _benchmarked(60, method="portfolio", seed=0))
+    assert not _same_run(own, plain)
 
 
 def test_a_positional_only_seed_gets_nothing_by_default():
