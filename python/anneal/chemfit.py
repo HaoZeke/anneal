@@ -2099,6 +2099,12 @@ def _own_fit_anneal(
             f"run_fitter() cannot pass {_listed(refused.values())} to {owner}, "
             f"which {' and '.join(reasons)}"
         )
+        if "budget" in refused and "budget" in positional:
+            before = [repr(name) for name in positional[: positional.index("budget")]]
+            message += (
+                f"; 'budget' comes after {_listed(before)}, so a budget passed by "
+                f"position would fill {before[0]}"
+            )
         if "method" in refused:
             message += "; leave method out to run it as it stands"
         raise TypeError(message)
@@ -2150,7 +2156,9 @@ def run_fitter(
     anything is evaluated. A parameter that it takes only by position, a
     first ``budget`` aside, gets nothing, even when it takes ``**kwargs``:
     a value given for one is a TypeError saying that ``fit_anneal`` takes
-    it only by position. So, with ``fitter`` a ChemFit ``Fitter``, ::
+    it only by position, and for a ``budget`` that is not first, that a
+    budget passed by position would fill the first parameter. So, with
+    ``fitter`` a ChemFit ``Fitter``, ::
 
         best = run_fitter(fitter, 500)
 
