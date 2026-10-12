@@ -31,14 +31,17 @@ With ``batch_size`` above one, :func:`fit_anneal`, :func:`fit_chemfit` and
 is initialised with ``init(batch_size=batch_size)``, and each batch of at
 most ``batch_size`` candidates is one ``evaluate`` of a list, which
 ChemFit's schedule may run concurrently, and one ``step``; the start is a
-batch of one. Batches need the portfolio and a fitter with an ``init`` that
-takes ``batch_size``, an ``evaluate`` that takes a list and ``step``; a
-fitter lacking any of them is refused before ``init``, by a message naming
-what it lacks. No ChemFit release has all three yet: 3.1.1, the latest, has
-``ask`` and ``tell``, and ChemFit's source has ``evaluate`` and ``step``
-from commit c57d6f5 but an ``init`` that takes ``num_workers`` until
-3b65fe0. ChemFit built from its source at commit 3b65fe0 or later takes
-batches, though it still reports version 3.1.1.
+batch of one. Batches need the portfolio and a fitter with ``evaluate``,
+``step`` and an ``init`` that takes ``batch_size``; a fitter lacking any of
+them is refused before ``init``, by a message naming what it lacks. No
+ChemFit release has all three yet: 3.1.1, the latest, has ``ask`` and
+``tell``, and ChemFit's source has ``evaluate`` and ``step`` from commit
+c57d6f5 but an ``init`` that takes ``num_workers`` until 3b65fe0. ChemFit
+built from its source at commit 3b65fe0 or later takes batches, though it
+still reports version 3.1.1. Whether ``evaluate`` takes a list shows only
+when it is called: one that takes a single candidate gets the start as a
+list of one, after ``init``, and what it raises, or a TypeError when its
+reply is not one real loss per candidate, ends the drive as below.
 
 Every argument is checked before ``fitter.init()``. The first exception the
 fitter raises, or a loss that is not a real number, ends the drive: the
@@ -416,8 +419,8 @@ def _batch_size(value: Any, driver: str, fitter: Any) -> int:
     """``batch_size`` as a positive whole number, checked against the drive.
 
     Above one it needs the portfolio, the one driver that runs batch
-    replicas, and a fitter with an ``init`` that takes ``batch_size``, an
-    ``evaluate`` that takes a list of candidates, and ``step``.
+    replicas, and a fitter with ``evaluate``, ``step`` and an ``init`` that
+    takes ``batch_size``, as :func:`_batch_lacks` reads them.
     """
     size = _whole("batch_size", value, 1)
     if size > 1 and driver != "portfolio":
@@ -428,9 +431,9 @@ def _batch_size(value: Any, driver: str, fitter: Any) -> int:
     lacks = _batch_lacks(fitter, size) if size > 1 else []
     if lacks:
         raise TypeError(
-            "batch_size above one needs a fitter with an init that takes batch_size, "
-            "an evaluate that takes a list of candidates, and step, which ChemFit's "
-            "source has from commit 3b65fe0 and no release has yet; "
+            "batch_size above one needs a fitter with evaluate, step and an init "
+            "that takes batch_size, which ChemFit's source has from commit 3b65fe0 "
+            "and no release has yet; "
             f"{type(fitter).__name__} lacks {_listed(lacks)}"
         )
     return size
@@ -1288,7 +1291,10 @@ def fit_anneal(
         ``step``: ChemFit built from its source at commit 3b65fe0 or later,
         not ChemFit 3.1.1, the latest release, which has ``ask`` and
         ``tell``, nor the commits from c57d6f5 that precede 3b65fe0, whose
-        ``init`` takes ``num_workers``.
+        ``init`` takes ``num_workers``. Whether ``evaluate`` takes a list
+        shows only when it is called: one that takes a single candidate
+        gets the start as a list of one, after ``init``, and stops the fit
+        there.
 
     Every argument is checked before ``fitter.init()``. Returns what
     ``fitter.finish`` returns for the best evaluated parameters (ChemFit
@@ -1610,7 +1616,10 @@ def fit_chemfit(
             ``step``: ChemFit built from its source at commit 3b65fe0 or
             later, not ChemFit 3.1.1, the latest release, which has ``ask``
             and ``tell``, nor the commits from c57d6f5 that precede 3b65fe0,
-            whose ``init`` takes ``num_workers``.
+            whose ``init`` takes ``num_workers``. Whether ``evaluate`` takes
+            a list shows only when it is called: one that takes a single
+            candidate gets the start as a list of one, after ``init``, and
+            stops the fit there.
         **preset_kwargs: ``t_init`` / ``sigma`` (boltzmann), ``t_init`` /
             ``gamma`` (fast), ``t_init`` / ``q_v`` / ``q_a`` (gsa) for the
             classical preset constructors. One of these that the method
@@ -1863,7 +1872,10 @@ def run_benchmark(
     ``batch_size``, besides ``evaluate`` and ``step``: ChemFit built from
     its source at commit 3b65fe0 or later, not ChemFit 3.1.1, the latest
     release, which has ``ask`` and ``tell``, nor the commits from c57d6f5
-    that precede 3b65fe0, whose ``init`` takes ``num_workers``.
+    that precede 3b65fe0, whose ``init`` takes ``num_workers``. Whether
+    ``evaluate`` takes a list shows only when it is called: one that takes a
+    single candidate gets the start as a list of one, after ``init``, and
+    stops the fit there.
     """
     fitter = benchmark_context["fitter"]
     evaluate, step = _protocol(fitter, without_step="run_benchmark")
