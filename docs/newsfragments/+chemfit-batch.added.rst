@@ -10,8 +10,13 @@ a batch of one, and the budget stays the total number of evaluations.
 ``tell_every`` evaluations. A batch needs the portfolio and a fitter with
 ``evaluate``, ``step`` and an ``init`` that takes ``batch_size``. When every
 other check passes, a batch under another driver is refused before ``init``,
-by a message naming the driver, and under the portfolio a fitter lacking any
-of the three is refused before ``init``, by a message naming what it lacks.
+by a message naming the driver, and under the portfolio a fitter without
+``evaluate``, ``step`` or ``init``, or whose ``init`` has a signature that can
+be read and cannot take ``batch_size``, is refused before ``init``, by a
+message naming what it lacks. Any other ``init``, such as one whose signature
+cannot be read or one behind a wrapper of ``(*args, **kwargs)`` written
+without ``functools.wraps``, is not named there and meets ``batch_size`` only
+at its call, where what it raises ends the fit without ``finish``.
 No ChemFit release has all three yet: ChemFit 3.1.1 has ``ask`` and ``tell``,
 ChemFit's source has ``evaluate`` and ``step`` from commit c57d6f5, and it
 takes batches from commit 3b65fe0 on. Whether ``evaluate`` takes a list

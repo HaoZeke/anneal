@@ -6,13 +6,18 @@ With ``batch_size`` above one, ``fit_anneal``, ``fit_chemfit`` and
 and each batch is one ``evaluate`` of a list and one ``step``. When every
 other check passes, a batch under a classical driver is refused before
 ``init`` by a message naming the driver, whatever the fitter has of the
-three. Under the portfolio, a fitter that lacks ``evaluate``, ``step`` or an
-``init`` that takes ``batch_size``, as ChemFit 3.1.1's lacks all three and the
-one of ChemFit's source from commit c57d6f5 until 3b65fe0 lacks the ``init``,
-has its batch refused before ``init`` by a message naming what it lacks, and
-``batch_size=1`` still fits.
-An ``evaluate`` that takes a single candidate shows only when it is called:
-it gets the start as a list of one, after ``init``, and the fit stops there.
+three. Under the portfolio, a fitter without ``evaluate``, ``step`` or
+``init``, or whose ``init`` has a signature that can be read and cannot take
+``batch_size``, has its batch refused before ``init`` by a message naming
+what it lacks, as ChemFit 3.1.1's lacks all three and the one of ChemFit's
+source from commit c57d6f5 until 3b65fe0 lacks an ``init`` that takes
+``batch_size``, and ``batch_size=1`` still fits. Any other ``init``, such as
+one whose signature cannot be read or one behind a wrapper of
+``(*args, **kwargs)`` written without ``functools.wraps``, is not named there
+and meets ``batch_size`` only at its call, where what it raises stops the
+fit. An ``evaluate`` that takes a single candidate shows only when it is
+called: it gets the start as a list of one, after ``init``, and the fit stops
+there.
 """
 
 import functools
@@ -50,6 +55,9 @@ def _refusal(name, lacks):
         "that takes batch_size, which ChemFit's source has from commit 3b65fe0 "
         f"and no release has yet; {name} lacks {lacks}"
     )
+
+
+_UNEXPECTED_BATCH_SIZE = "init() got an unexpected keyword argument 'batch_size'"
 
 
 def _installed_fitter():
@@ -238,6 +246,69 @@ def test_a_fitter_without_init_cannot_take_a_batch():
     with pytest.raises(TypeError, match=re.escape(_refusal("NoInit", "an init that takes batch_size"))):
         fit_anneal(fitter, 50, batch_size=2)
     assert fitter.calls == []
+
+
+def _recorded_init(fitter, wraps):
+    """Put ``fitter.init`` behind a wrapper of ``(*args, **kwargs)``.
+
+    The wrapper is written with ``functools.wraps`` or without it, and logs
+    the keywords of each call in the list returned.
+    """
+    inits = []
+    init = fitter.init
+
+    def recorded_init(*args, **kwargs):
+        inits.append(kwargs)
+        return init(*args, **kwargs)
+
+    fitter.init = functools.wraps(init)(recorded_init) if wraps else recorded_init
+    return inits
+
+
+@pytest.mark.parametrize("entry", BATCH_ENTRIES)
+def test_the_batch_check_reads_an_init_through_functools_wraps(entry):
+    fitter = _fitter(WorkersFitter)
+    inits = _recorded_init(fitter, wraps=True)
+    with pytest.raises(TypeError) as refused:
+        drive(entry, fitter, 50, batch_size=2)
+    assert str(refused.value) == _refusal("WorkersFitter", "an init that takes batch_size")
+    assert inits == [] and fitter.calls == []
+
+
+@pytest.mark.parametrize("entry", BATCH_ENTRIES)
+def test_an_init_behind_a_wrapper_without_functools_wraps_meets_batch_size_at_its_call(entry):
+    fitter = _fitter(WorkersFitter)
+    inits = _recorded_init(fitter, wraps=False)
+    with pytest.raises(TypeError, match=re.escape(_UNEXPECTED_BATCH_SIZE)):
+        drive(entry, fitter, 50, batch_size=2)
+    assert inits == [{"batch_size": 2}]
+    assert fitter.calls == []
+
+
+@pytest.mark.parametrize("entry", BATCH_ENTRIES)
+def test_an_init_whose_signature_cannot_be_read_meets_batch_size_at_its_call(entry):
+    class UnreadableInit(WorkersFitter):
+        def init(self, num_workers=1, contexts=None):
+            super().init(num_workers, contexts)
+
+        init.__signature__ = object()
+
+    fitter = _fitter(UnreadableInit)
+    with pytest.raises((TypeError, ValueError)):
+        inspect.signature(fitter.init)
+    with pytest.raises(TypeError, match=re.escape(_UNEXPECTED_BATCH_SIZE)):
+        drive(entry, fitter, 50, batch_size=2)
+    assert fitter.calls == []
+
+
+@pytest.mark.parametrize("entry", BATCH_ENTRIES)
+def test_a_refusal_before_init_does_not_name_an_init_behind_a_wrapper(entry):
+    fitter = _fitter(ReleasedFitter)
+    inits = _recorded_init(fitter, wraps=False)
+    with pytest.raises(TypeError) as refused:
+        drive(entry, fitter, 50, batch_size=2)
+    assert str(refused.value) == _refusal("ReleasedFitter", "evaluate and step")
+    assert inits == [] and fitter.calls == []
 
 
 def _one_loss(params):
