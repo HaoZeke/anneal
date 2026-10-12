@@ -25,8 +25,16 @@ all of them seeds on which the loop ends above a log error of -5, and at 5000
 the two are level, both reaching the floor of the loss on most seeds. On
 13-atom Lennard-Jones positions, the same fit to clusters drawn without that
 separation, and ten-dimensional Rastrigin and Rosenbrock, each at 1000 and
-5000 evaluations, on the plain-loss fits and on the other problems of the
-regime notes, no cell trails the loop without the hold. Runs in which such a
-trial would have gone more than halfway to a bound no longer repeat those
-before; runs with a gradient, a declared noise scale or the ``legacy`` policy
-are unchanged.
+5000 evaluations, on the plain-loss fits and on the benchmark rows of the
+regime notes, no cell trails the loop without the hold. Where a face does
+hold the minimum over the box, holding the trial short of it usually brings
+the descent there later, so at small budgets it can end higher. On the
+base-10 logarithm of a quadratic form centred outside the unit cube, one
+replica ends higher than before at 200 evaluations on 77 of 80 seeds in ten
+coordinates, by a median of 0.018, and on 58 in six; at 1000 it is level in
+ten coordinates and in six ends higher on 6 seeds, by at most 0.0043, and
+lower on none. Where the minimum lies on a wall beyond which the values are
+NaN, in five coordinates, it ends higher at 200 and 500 evaluations and is
+level at 1000. Runs in which such a trial would have gone more than halfway
+to a bound no longer repeat those before; runs with a gradient, a declared
+noise scale or the ``legacy`` policy are unchanged.
