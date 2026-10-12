@@ -1944,31 +1944,31 @@ def _fitter_keyword_error(key: str) -> TypeError:
     return TypeError(message)
 
 
-def _fitter_driver(key: str, method: Any, preset: Any) -> tuple[str, Any]:
-    """The driver and preset :func:`run_fitter` runs for its method ``key``.
+def _fitter_driver(key: str, preset: Any) -> tuple[str, Any, Any]:
+    """The driver :func:`run_fitter` runs for ``key``, the preset it runs and the one it ignores.
 
     ``"global_optimize"`` is the portfolio and ``"sa"`` the preset's driver,
     Boltzmann without one. A preset that a named driver does not run is left
-    out with a FutureWarning, as anneal 0.10.0 ignored it.
+    out, as anneal 0.10.0 ignored it, and comes back third, for the caller
+    to warn of with :func:`_ignored_preset`.
     """
     driver = _FITTER_METHODS[key]
-    if preset is not None:
-        own = _preset_driver(preset)
-        if driver is None:
-            driver = own
-        elif driver != own:
-            runs = "the portfolio"
-            if driver != "portfolio":
-                runs = f"its own {driver} preset"
-            _deprecated(
-                f"run_fitter ignores the {type(preset).__name__} preset under method "
-                f"{method!r}, which runs {runs}; leave it out, or pass method='sa' "
-                "to run it. This will raise in a future release."
-            )
-            preset = None
-    elif driver is None:
-        driver = "boltzmann"
-    return driver, preset
+    if preset is None:
+        return driver or "boltzmann", None, None
+    own = _preset_driver(preset)
+    if driver in (None, own):
+        return own, preset, None
+    return driver, None, preset
+
+
+def _ignored_preset(method: Any, driver: str, preset: Any) -> None:
+    """Warn that :func:`run_fitter` ignores ``preset`` under ``method``, which runs ``driver``."""
+    runs = "the portfolio" if driver == "portfolio" else f"its own {driver} preset"
+    _deprecated(
+        f"run_fitter ignores the {type(preset).__name__} preset under method "
+        f"{method!r}, which runs {runs}; leave it out, or pass method='sa' to run "
+        "it. This will raise in a future release."
+    )
 
 
 def _keywords(function: Any) -> tuple[frozenset[str], bool]:
@@ -1999,7 +1999,8 @@ def _own_fit_anneal(
     """Hand ``fitter`` to its own ``fit_anneal`` with what that method takes.
 
     :func:`run_fitter` says what goes; anything that its signature cannot
-    take is refused here, before ``fit_anneal`` is called.
+    take is refused here, before ``fit_anneal`` is called and before a
+    preset it ignores is warned of.
     """
     fit = fitter.fit_anneal
     named, takes_any = _keywords(fit)
@@ -2014,8 +2015,9 @@ def _own_fit_anneal(
 
     offer("budget", budget, True, "budget")
     default = key == "global_optimize"
+    ignored = None
     if "method" in named or (takes_any and not default):
-        driver, preset = _fitter_driver(key, method, preset)
+        driver, preset, ignored = _fitter_driver(key, preset)
         call["method"] = driver
     elif not default:
         refused["method"] = f"method {method!r}"
@@ -2035,6 +2037,8 @@ def _own_fit_anneal(
         if "method" in refused:
             message += "; leave method out to run it as it stands"
         raise TypeError(message)
+    if ignored is not None:
+        _ignored_preset(method, call["method"], ignored)
     return fit(**call)
 
 
@@ -2085,8 +2089,10 @@ def run_fitter(
     classical method of another kind, and so is ``preset_kwargs`` under the
     portfolio on a fitter without ``fit_anneal``. Each gives a FutureWarning
     and will raise in a future release. A preset ignored so is not passed to
-    a fitter's own ``fit_anneal``; a preset given to a ``fit_anneal`` that
-    gets no method is passed, or refused, as any option is.
+    a fitter's own ``fit_anneal``; there the warning comes only once nothing
+    is refused, so a refused call raises its TypeError alone. A preset given
+    to a ``fit_anneal`` that gets no method is passed, or refused, as any
+    option is.
     """
     own = hasattr(fitter, "fit_anneal")
     if not own:
@@ -2103,7 +2109,9 @@ def run_fitter(
         return _own_fit_anneal(fitter, budget, key, method, preset, seed, kwargs)
     options = dict(kwargs)
     preset_kwargs = _preset_kwargs(options.pop("preset_kwargs", None))
-    driver, preset = _fitter_driver(key, method, preset)
+    driver, preset, ignored = _fitter_driver(key, preset)
+    if ignored is not None:
+        _ignored_preset(method, driver, ignored)
     if driver == "portfolio" and preset_kwargs:
         _deprecated(
             f"run_fitter ignores preset_kwargs under method {method!r}, which runs "

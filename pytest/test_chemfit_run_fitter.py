@@ -9,13 +9,14 @@ the signatures such methods have had: one that runs ``run_benchmark`` with a
 """
 
 import functools
+import warnings
 
 import numpy as np
 import pytest
 
 pytest.importorskip("anneal")
 
-from anneal import Fast, minimize  # noqa: E402
+from anneal import Boltzmann, Fast, minimize  # noqa: E402
 from anneal.chemfit import fit_anneal, run_benchmark, run_fitter  # noqa: E402
 from chemfit_doubles import NextFitter, ReleasedFitter, same_params  # noqa: E402
 
@@ -319,16 +320,38 @@ def test_a_fit_anneal_without_seed_runs_on_the_defaults():
                 "takes no 'seed'"
             ),
         ),
+        (
+            BenchmarkFitter,
+            {"preset": Boltzmann(), "x0": 1.0},
+            "run_fitter() cannot pass x0 to BenchmarkFitter.fit_anneal(), which takes no 'x0'",
+        ),
+        (
+            NoPresetFitter,
+            {"method": "boltzmann", "preset": Fast(), "x0": 1.0},
+            "run_fitter() cannot pass x0 to NoPresetFitter.fit_anneal(), which takes no 'x0'",
+        ),
     ],
-    ids=["preset", "keywords", "method", "all-three", "preset-default-method", "seed"],
+    ids=[
+        "preset",
+        "keywords",
+        "method",
+        "all-three",
+        "preset-default-method",
+        "seed",
+        "x0-preset-the-portfolio-ignores",
+        "x0-preset-boltzmann-ignores",
+    ],
 )
 def test_an_option_a_fit_anneal_cannot_take_is_refused_before_anything_is_evaluated(
     kind, options, message
 ):
     fitter = _fitter(kind)
-    with pytest.raises(TypeError) as caught:
-        run_fitter(fitter, 60, **options)
+    with warnings.catch_warnings(record=True) as warned:
+        warnings.simplefilter("always")
+        with pytest.raises(TypeError) as caught:
+            run_fitter(fitter, 60, **options)
     assert str(caught.value) == message
+    assert [str(w.message) for w in warned] == []
     assert fitter.handed == [] and fitter.calls == [] and fitter.evaluated == []
 
 
