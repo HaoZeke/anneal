@@ -1130,6 +1130,78 @@ mod tests {
         assert_eq!(counts(|x| x.powi(3), |x| 3.0 * x * x, 2.0, 1.5), (0, 0));
     }
 
+    /// The point, value and slope before and after a step along the first
+    /// coordinate of a descent in two, along which the trapezoid rule finds
+    /// the logarithm nearer quadratic (`exp(x^2)`, `'l'`), the values (`x^2`,
+    /// `'v'`) or neither (`x^3`, `'n'`), as in the test above.
+    fn pair(kind: char) -> ([f64; 3], [f64; 3]) {
+        match kind {
+            'l' => {
+                let (e, root) = (1f64.exp(), 0.25f64.exp());
+                ([1.0, e, 2.0 * e], [0.5, root, root])
+            }
+            'v' => ([2.0, 4.0, 4.0], [1.0, 1.0, 2.0]),
+            _ => ([2.0, 8.0, 12.0], [1.5, 3.375, 6.75]),
+        }
+    }
+
+    fn two_coordinate_descent() -> FdBfgs {
+        let options = FdBfgsOptions {
+            log_model: true,
+            ..FdBfgsOptions::default()
+        };
+        let start = Array1::zeros(2);
+        FdBfgs::new(start.view(), Some(1.0), &boxed(-5.0, 5.0, 2), options)
+    }
+
+    /// Closes the curvature pair of each of `kinds` ([`pair`]) as the
+    /// gradient after an accepted step does, and says after each whether
+    /// the line search that follows steps on the logarithm.
+    fn steps_after(engine: &mut FdBfgs, kinds: &str) -> Vec<bool> {
+        let along = |a: f64| Array1::from_vec(vec![a, 0.0]);
+        kinds
+            .chars()
+            .map(|kind| {
+                let (from, to) = pair(kind);
+                engine.pair_from = Some((along(from[0]), along(from[2])));
+                engine.pair_value = from[1];
+                engine.x = along(to[0]);
+                engine.f = to[1];
+                engine.finish_gradient(along(to[2]));
+                match &engine.phase {
+                    Phase::Line(work) => work.log,
+                    _ => panic!("no line search followed the pair"),
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_steps_reach_the_logarithm_from_two_pairs_per_coordinate() {
+        // In two coordinates the fourth pair is the first that may move the
+        // steps; from one pair per coordinate the second would, and the
+        // first with none.
+        let mut engine = two_coordinate_descent();
+        let log = steps_after(&mut engine, "llln");
+        assert_eq!(log, [false, false, false, true]);
+    }
+
+    #[test]
+    fn every_pair_since_the_models_were_reset_counts_not_the_latest_alone() {
+        // Above, three pairs for the logarithm before two per coordinate
+        // move the steps at a fourth for neither. Here two for the values
+        // and one for neither leave the count with the values at a fourth
+        // for the logarithm and level at a fifth, and a sixth tips it.
+        let mut engine = two_coordinate_descent();
+        let log = steps_after(&mut engine, "vvnlll");
+        assert_eq!(log, [false, false, false, false, false, true]);
+        // A reset clears the count: four pairs for neither then leave the
+        // steps on the values, where the count kept would have moved them.
+        let at = Array1::from_vec(vec![0.5, 0.0]);
+        engine.restart_at(at.view(), Some(1.0), false);
+        assert_eq!(steps_after(&mut engine, "nnnn"), [false; 4]);
+    }
+
     #[test]
     fn a_value_at_or_below_zero_retires_the_logarithm_model() {
         let bounds = boxed(-2.0, 2.0, 4);
