@@ -8,6 +8,8 @@ lacks ``evaluate``, ``step`` or an ``init`` that takes ``batch_size``, as
 ChemFit 3.1.1's lacks all three and the one of ChemFit's source from commit
 c57d6f5 until 3b65fe0 lacks the ``init``, has its batch refused before
 ``init`` by a message naming what it lacks, and ``batch_size=1`` still fits.
+An ``evaluate`` that takes a single candidate shows only when it is called:
+it gets the start as a list of one, after ``init``, and the fit stops there.
 """
 
 import functools
@@ -226,6 +228,32 @@ def test_a_fitter_without_init_cannot_take_a_batch():
     with pytest.raises(TypeError, match=re.escape(_refusal("NoInit", "an init that takes batch_size"))):
         fit_anneal(fitter, 50, batch_size=2)
     assert fitter.calls == []
+
+
+def _one_loss(params):
+    return 1.0
+
+
+@pytest.mark.parametrize(
+    "loss, error, match",
+    [
+        (sum_of_squares, AttributeError, "'list' object has no attribute 'values'"),
+        (_one_loss, TypeError, "the fitter returned float for a batch of 1"),
+    ],
+    ids=["raising", "one loss"],
+)
+@pytest.mark.parametrize("entry", BATCH_ENTRIES)
+def test_an_evaluate_of_one_candidate_stops_the_fit_at_its_first_call(entry, loss, error, match):
+    class OneCandidate(BatchFitter):
+        evaluate = NextFitter.evaluate
+
+    fitter = _fitter(OneCandidate, loss=loss)
+    with pytest.raises(error, match=re.escape(match)):
+        drive(entry, fitter, 50, batch_size=2)
+    assert fitter.batch_size == 2
+    assert fitter.calls == ["init", "evaluate"]
+    [[start]] = fitter.evaluated
+    assert same_params(start, fitter.initial_parameters)
 
 
 @pytest.mark.parametrize(
