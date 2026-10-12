@@ -1896,9 +1896,9 @@ def global_optimize(
         starts, replica 0 goes on from it and the others start from seeded
         uniform points. Persistent replicas keep private archives, so
         starting every one from ``x0`` repeats one opening descent ``R``
-        times. From a start, at equal evaluations, the batch replicas beat
-        persistent ones with replica 0 at ``x0`` on 10 of the 16 cells of
-        the regime auto-selection notes and were level on the rest.
+        times. At equal evaluations, four batch replicas from ``x0`` beat
+        four persistent ones without it on 13 of the 16 cells of the regime
+        auto-selection notes and were level on the rest.
       coverage_shared: share paid global proposal positions at arm checkpoints.
         False gives independent portfolios with the same starts and work split.
         Batch replicas keep one archive and incumbent with True and one each

@@ -515,29 +515,22 @@ still runs them without =x0= or with a gradient, declared noise or Legacy,
 and there =x0= is evaluated once before any replica starts, replica 0
 going on from it and the others starting from seeded uniform points. The
 persistent controllers keep private archives, so started all from =x0=
-they play one opening descent =R= times: over the same 40 paired seeds
-that trails the run that dropped =x0= on =binary_lj_fit= at 1000
-(14/0/26, =p= 0.019) and 5000 (12/0/28, =p= 0.0018) and on
-=rosenbrock10@1000= (17/0/23, =p= 0.0096). The comparison adds four
-problems whose seeds draw the start near the minimum: the 13-atom
-icosahedron with noise of 0.05 on each coordinate (=lj13_near=), the
-fit's true parameters within 5% (=binary_lj_fit_near=), and Rastrigin
-within 0.3 of its minimum and Rosenbrock with noise of 0.1 about its own
-(=rastrigin10_near=, =rosenbrock10_near=). On its 16 cells four batch
-replicas beat four persistent ones with replica 0 alone at =x0= on 10,
-among them =lj13@1000= (40/0/0, -25.7 against -19.0), =binary_lj_fit@5000=
-(36/0/4, -12.5 against -6.02), =rosenbrock10@1000= (39/0/1, 0.86 against
-6.40) and =rosenbrock10_near@1000= (40/0/0, 6.9e-22 against 5.3e-5), and
-are level on the other six, =rastrigin10@1000= among them (17/2/21, 14.4
-against 13.9, =p= 0.27 that they trail). Against the run that dropped =x0=
-they win 13 cells and are level on =rastrigin10@1000= (19/2/19, 14.4
-against 14.9) and on =rosenbrock10= and =rosenbrock10_near= at 5000, where
-both reach the minimum (0/40/0). The start pays most where it is good: at
-1000 the medians on the near cells are -44.3 against -8.62 on =lj13_near=,
--9.05 against -1.20 on =binary_lj_fit_near=, 0 against 14.9 on
-=rastrigin10_near= and 6.9e-22 against 6.17 on =rosenbrock10_near=.
-These comparisons with the persistent controllers were measured before
-the descent modelled the logarithm of its values.
+they play one opening descent =R= times. Four problems whose seeds draw
+the start near the minimum join the four above: the 13-atom icosahedron
+with noise of 0.05 on each coordinate (=lj13_near=), the fit's true
+parameters within 5% (=binary_lj_fit_near=), and Rastrigin within 0.3 of
+its minimum and Rosenbrock with noise of 0.1 about its own
+(=rastrigin10_near=, =rosenbrock10_near=). Over the same 40 paired seeds
+on these 16 cells, four batch replicas beat four persistent controllers
+without =x0= on 13, among them =lj13@1000= (40/0/0, -25.7 against -8.62),
+=binary_lj_fit@5000= (38/0/2, -12.6 against -5.91) and
+=rosenbrock10@1000= (38/0/2, 0.928 against 6.17), and are level on
+=rastrigin10@1000= (19/2/19, 14.4 against 14.9) and on =rosenbrock10= and
+=rosenbrock10_near= at 5000, where both reach the minimum (0/40/0). The
+start pays most where it is good: at 1000 the medians on the near cells
+are -44.3 against -8.62 on =lj13_near=, -9.05 against -1.11 on
+=binary_lj_fit_near=, 0 against 14.9 on =rastrigin10_near= and 6.9e-22
+against 6.17 on =rosenbrock10_near=.
 
 ** Plain-loss parameter fits
 
