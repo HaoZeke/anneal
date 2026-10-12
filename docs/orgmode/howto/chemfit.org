@@ -144,7 +144,7 @@ evaluations.
 
 Batches need the portfolio and a =Fitter= with =evaluate= and =step= whose
 =init= takes =batch_size=, which no ChemFit release has yet. When every
-other check passes, the bridges refuse =batch_size= above one before =init=
+other check passes, these three refuse =batch_size= above one before =init=
 under another driver, naming the driver, and under the portfolio for a
 fitter without =evaluate=, =step= or =init=, or whose =init= has a signature
 that can be read and cannot take =batch_size=, naming what it lacks. Any
