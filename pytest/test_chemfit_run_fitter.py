@@ -7,7 +7,7 @@ below have the signatures such methods have had: one that runs
 ``run_benchmark`` with a ``preset`` parameter, one without it, and one with
 neither ``method`` nor ``preset`` that runs ``anneal.minimize`` itself. The
 others try what else a signature can do: take the budget alone, leave out
-the seed, or take parameters only by position.
+the seed or the budget, or take parameters only by position.
 """
 
 import functools
@@ -164,6 +164,14 @@ class LateBudgetKwargsFitter(Handed):
     def fit_anneal(self, scale, shift, budget, seed=0, /, **options):
         self.handed.append({"scale": scale, "shift": shift, "budget": budget, "seed": seed})
         return self._minimize(budget, seed)
+
+
+class NoBudgetFitter(Handed):
+    """Takes a number of steps in place of a budget."""
+
+    def fit_anneal(self, steps=60):
+        self.handed.append({"steps": steps})
+        return self._minimize(steps, seed=0)
 
 
 def _fitter(kind=ReleasedFitter, bounds=None):
@@ -510,6 +518,24 @@ def test_a_positional_only_seed_gets_nothing_by_default():
             ),
         ),
         (
+            LateBudgetFitter,
+            {"method": "sa"},
+            (
+                "run_fitter() cannot pass budget and method 'sa' to "
+                "LateBudgetFitter.fit_anneal(), which takes no 'method' and takes 'budget' "
+                "only by position; 'budget' comes after 'scale', so a budget passed by "
+                "position would fill 'scale'"
+            ),
+        ),
+        (
+            NoBudgetFitter,
+            {"method": "sa"},
+            (
+                "run_fitter() cannot pass budget and method 'sa' to "
+                "NoBudgetFitter.fit_anneal(), which takes no 'budget' or 'method'"
+            ),
+        ),
+        (
             PositionalSeedFitter,
             {"seed": 7},
             (
@@ -538,6 +564,8 @@ def test_a_positional_only_seed_gets_nothing_by_default():
         "budget-after-a-positional-parameter",
         "budget-after-a-positional-parameter-and-x0",
         "budget-and-seed-after-two-positional-parameters",
+        "method-with-a-late-budget",
+        "method-without-a-budget",
         "positional-only-seed-beside-kwargs",
         "positional-only-preset",
     ],
