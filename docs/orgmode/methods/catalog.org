@@ -1473,18 +1473,20 @@ budget rather than being hand-tuned.
 
 Values-only loop: under =PortfolioPolicy::Auto= a run with no gradient
 and no declared noise goes, before any regime routing, to
-=run_values_only_portfolio= (src/methods/portfolio.rs:3750, 4978-4981),
+=run_values_only_portfolio= (src/methods/portfolio.rs:3771, 5016-5019),
 a bandit over =VALUES_ONLY_ARMS= (=cma=, =qn=, =gsa=, =de=, =surrogate=,
-=explore=, portfolio.rs:1055-1072, 3654-3661) in slices of
+=explore=, portfolio.rs:1055-1072, 3672-3679) in slices of
 =max(4(d+1), min(budget/48, sqrt(4(d+1) budget)))= evaluations
-(=values_only_slice=, portfolio.rs:3669-3672). Without =x0= it starts from
+(=values_only_slice=, portfolio.rs:3687-3690). Without =x0= it starts from
 the best of a seeded design of =d+1= points; when the budget affords
 five gradients per coordinate, an opening finite-difference descent
 runs while its slices succeed, gain more than =1e-4= times the largest
 of the opening's last =OPENING_GAINS= gains, and leave its last
 =OPENING_SPAN= slices with more, together, than that times its largest
 gain, up to convergence (the first slice from below the start is held
-to the gain from the start); until the descent has
+to the gain from the start, both differences; while every value is
+positive the later gains are log ratios, =opening_gain=); until the
+descent has
 lowered its own value from below the start's, a slice in which it
 stalls short of convergence or stops at the start's value gives =cma=
 one slice, once per run, and the opening goes on from the incumbent
@@ -1619,7 +1621,7 @@ portfolio.rs:162) and its work-unit to =max_fevals= converter
 (=endgame_polish_max_fevals=, portfolio.rs:144-150); a coordinate
 pattern-search fallback (=run_endgame_coordinate_microrefine=,
 portfolio.rs:198); the values-only =SuccessScale=
-(portfolio.rs:1582) and =DescentPace= (portfolio.rs:1658); the
+(portfolio.rs:1582) and =DescentPace= (portfolio.rs:1676); the
 =replicas= module notes for batch replicas
 (src/methods/portfolio/replicas.rs:1-29), =ReplicaArchive=
 (replicas.rs:45) and =ReplicaResult= (replicas.rs:56).
@@ -2119,7 +2121,7 @@ Key types and functions: =CmaEs= (src/methods/cma_es.rs:119);
 =covariance_learning_evaluations= (cma_es.rs:111, the horizon
 \(\lambda/(c_1 + c_\mu)\)); =Bipop= and =CmaRegime=
 (cma_es.rs:642/621); the portfolio's =CmaArmState= and =run_cma_arm=
-(src/methods/portfolio.rs:1119/3496).
+(src/methods/portfolio.rs:1119/3514).
 
 Constants and defaults: =default_lambda= \(4 + \lfloor 3 \ln n
 \rfloor\) (cma_es.rs:82). In the portfolio every run is centred on the
@@ -2220,7 +2222,7 @@ one is set, or a failed line search.
 
 Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:312);
 =FdBfgsOptions= (fd_bfgs.rs:138); the portfolio's =QnArmState= and
-=run_qn_arm= (src/methods/portfolio.rs:1208/3570).
+=run_qn_arm= (src/methods/portfolio.rs:1208/3588).
 
 Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
 =MAX_EXTRAPOLATION = 16=, =EXTRAPOLATION_ROOM = 0.5=,

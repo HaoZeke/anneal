@@ -1798,7 +1798,9 @@ def global_optimize(
     power of two leaves a run unchanged, while adding a constant to a
     positive objective can change the descent's steps. When the budget lets
     a descent converge, one from the start opens the run while it pays
-    at the pace of its last few slices; if it stalls short of
+    at the pace of its last few slices, whose gains after the first
+    from below the start read as log ratios while every value is
+    positive; if it stalls short of
     convergence, or stops at the start's value, before it has lowered
     its own value from below that one, CMA-ES takes one slice, once per
     run, and the opening goes on from there. With less, CMA-ES takes one
