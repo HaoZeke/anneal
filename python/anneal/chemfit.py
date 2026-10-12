@@ -2105,7 +2105,7 @@ def _own_fit_anneal(
                 f"; 'budget' comes after {_listed(before)}, so a budget passed by "
                 f"position would fill {before[0]}"
             )
-        if "method" in refused:
+        if "method" in refused and "budget" not in refused:
             message += "; leave method out to run it as it stands"
         raise TypeError(message)
     if ignored is not None:
