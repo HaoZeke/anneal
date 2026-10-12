@@ -1942,45 +1942,13 @@ def _fitter_keyword_error(key: str) -> TypeError:
     return TypeError(message)
 
 
-def run_fitter(
-    fitter: Any,
-    budget: int,
-    method: str = "global_optimize",
-    preset: Any = None,
-    seed: int = 42,
-    **kwargs: Any,
-) -> dict[str, Any]:
-    """Run a ChemFit fitter with the gradient-free bridges.
+def _fitter_driver(key: str, method: Any, preset: Any) -> tuple[str, Any]:
+    """The driver and preset :func:`run_fitter` runs for its method ``key``.
 
-    A fitter that already implements ``fit_anneal`` is called as it stands.
-    Otherwise ``method="global_optimize"`` uses the portfolio and
-    ``method="sa"`` runs ``preset`` (``Boltzmann()`` when none is given),
-    both through :func:`fit_anneal`; ``"portfolio"``, ``"boltzmann"``,
-    ``"fast"`` and ``"gsa"`` name a :func:`fit_anneal` driver directly, and
-    a classical one runs ``preset`` when it is that driver's kind.
-    The keywords ``x0``, ``low``, ``high``, ``bound_span``,
-    ``steps_per_epoch`` and ``preset_kwargs`` go to :func:`fit_anneal`; any
-    other keyword is a TypeError.
-
-    As in anneal 0.10.0, a preset is ignored under the portfolio or with a
-    classical method of another kind, and so is ``preset_kwargs`` under the
-    portfolio. Each gives a FutureWarning and will raise in a future release.
+    ``"global_optimize"`` is the portfolio and ``"sa"`` the preset's driver,
+    Boltzmann without one. A preset that a named driver does not run is left
+    out with a FutureWarning, as anneal 0.10.0 ignored it.
     """
-    if hasattr(fitter, "fit_anneal"):
-        return fitter.fit_anneal(
-            budget=budget, method=method, preset=preset, seed=seed, **kwargs
-        )
-    for key in kwargs:
-        if key not in _FITTER_OPTIONS:
-            raise _fitter_keyword_error(key)
-    key = _choice(method, _FITTER_METHODS)
-    if key is None:
-        raise ValueError(
-            f"method must be one of {', '.join(map(repr, _FITTER_METHODS))}; "
-            f"got {method!r}"
-        )
-    options = dict(kwargs)
-    preset_kwargs = _preset_kwargs(options.pop("preset_kwargs", None))
     driver = _FITTER_METHODS[key]
     if preset is not None:
         own = _preset_driver(preset)
@@ -1998,6 +1966,60 @@ def run_fitter(
             preset = None
     elif driver is None:
         driver = "boltzmann"
+    return driver, preset
+
+
+def run_fitter(
+    fitter: Any,
+    budget: int,
+    method: str = "global_optimize",
+    preset: Any = None,
+    seed: int = 42,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Run a ChemFit fitter with the gradient-free bridges.
+
+    ``method="global_optimize"`` uses the portfolio and ``method="sa"`` runs
+    ``preset`` (``Boltzmann()`` when none is given); ``"portfolio"``,
+    ``"boltzmann"``, ``"fast"`` and ``"gsa"`` name a driver directly, and a
+    classical one runs ``preset`` when it is that driver's kind. A fitter
+    without ``fit_anneal`` runs through :func:`fit_anneal`: the keywords
+    ``x0``, ``low``, ``high``, ``bound_span``, ``steps_per_epoch`` and
+    ``preset_kwargs`` go to it, and any other keyword is a TypeError.
+
+    A fitter that has its own ``fit_anneal`` is handed to it as
+    ``fitter.fit_anneal(budget=budget, method=..., preset=preset,
+    seed=seed, **kwargs)``, with the method under :func:`run_benchmark`'s
+    names, which a ``fit_anneal`` that runs :func:`run_benchmark` takes:
+    ``"portfolio"`` for ``"global_optimize"``, the preset's driver, or
+    ``"boltzmann"`` without one, for ``"sa"``, and the four driver names as
+    they are.
+
+    As in anneal 0.10.0, a preset is ignored under the portfolio or with a
+    classical method of another kind, and so is ``preset_kwargs`` under the
+    portfolio on a fitter without ``fit_anneal``. Each gives a FutureWarning
+    and will raise in a future release. An ignored preset reaches a
+    fitter's own ``fit_anneal`` as ``preset=None``.
+    """
+    own = hasattr(fitter, "fit_anneal")
+    if not own:
+        for key in kwargs:
+            if key not in _FITTER_OPTIONS:
+                raise _fitter_keyword_error(key)
+    key = _choice(method, _FITTER_METHODS)
+    if key is None:
+        raise ValueError(
+            f"method must be one of {', '.join(map(repr, _FITTER_METHODS))}; "
+            f"got {method!r}"
+        )
+    if own:
+        driver, preset = _fitter_driver(key, method, preset)
+        return fitter.fit_anneal(
+            budget=budget, method=driver, preset=preset, seed=seed, **kwargs
+        )
+    options = dict(kwargs)
+    preset_kwargs = _preset_kwargs(options.pop("preset_kwargs", None))
+    driver, preset = _fitter_driver(key, method, preset)
     if driver == "portfolio" and preset_kwargs:
         _deprecated(
             f"run_fitter ignores preset_kwargs under method {method!r}, which runs "
