@@ -1473,11 +1473,11 @@ budget rather than being hand-tuned.
 
 Values-only loop: under =PortfolioPolicy::Auto= a run with no gradient
 and no declared noise goes, before any regime routing, to
-=run_values_only_portfolio= (src/methods/portfolio.rs:3749, 4977-4980),
+=run_values_only_portfolio= (src/methods/portfolio.rs:3750, 4978-4981),
 a bandit over =VALUES_ONLY_ARMS= (=cma=, =qn=, =gsa=, =de=, =surrogate=,
-=explore=, portfolio.rs:1055-1072, 3653-3660) in slices of
+=explore=, portfolio.rs:1055-1072, 3654-3661) in slices of
 =max(4(d+1), min(budget/48, sqrt(4(d+1) budget)))= evaluations
-(=values_only_slice=, portfolio.rs:3668-3671). Without =x0= it starts from
+(=values_only_slice=, portfolio.rs:3669-3672). Without =x0= it starts from
 the best of a seeded design of =d+1= points; when the budget affords
 five gradients per coordinate, an opening finite-difference descent
 runs while its slices succeed, gain more than =1e-4= times the largest
@@ -1585,8 +1585,8 @@ replica, the control for what sharing is worth. Over 40 paired seeds on
 four ChemFit-shaped problems at 1000 and 5000 evaluations, four shared
 replicas beat four private ones on six of the eight cells and trail on
 none, and against one replica with the same budget they win
-=binary_lj_fit@1000=, trail on the other three cells at 1000 and are
-level on all four at 5000
+=binary_lj_fit@1000=, trail on the other three cells at 1000 and on
+=binary_lj_fit@5000=, and are level on the other three at 5000
 ([[file:../explanation/regime_auto.org::*Batch replicas][every row in the regime notes]]).
 
 Measured costs, over 40 paired seeds against the loop's form before
@@ -2226,7 +2226,8 @@ the portfolio's values-only descents use =ftol = 8 eps= (=QN_FTOL=)
 and, from each slice, =fatol= at =1e-7= of the success threshold
 (=QN_FATOL_RTOL=, set through =FdBfgs::set_fatol=), so an iteration is
 slow once it gains no more than the resolution of its value or that
-floor, whichever is larger.
+floor, whichever is larger, and keep the model of the logarithm
+(=log_model=).
 
 Feeds/consumes: the =qn= arm of the portfolio's values-only loop (its
 opening and closing descents, and descents kicked from the incumbent

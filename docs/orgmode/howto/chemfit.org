@@ -72,9 +72,10 @@ are evaluated as one batch. Adding replicas does not multiply the number of
 paid calls, nor does it often buy a better loss for the same calls: on the
 four problems of [[file:../explanation/regime_auto.org::*Batch replicas][the regime notes]],
 four shared replicas trail one replica of the same budget on three at 1000
-evaluations, lead on a binary Lennard-Jones fit at 1000, and are level on
-all four at 5000. Replicas pay when a batch is evaluated concurrently,
-since they take a quarter to half as many sequential steps.
+evaluations, lead on a binary Lennard-Jones fit at 1000, and at 5000 are
+level on three and trail on that fit. Replicas pay when a batch is
+evaluated concurrently, since they take a quarter to half as many
+sequential steps.
 
 ~history="shared"~, the default, keeps one archive and one incumbent for all
 replicas: a point one replica has evaluated costs the others nothing, and

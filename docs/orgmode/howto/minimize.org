@@ -91,9 +91,10 @@ long as one evaluation; they seldom buy a better point for the same number
 of evaluations. On the four problems of the
 [[file:../explanation/regime_auto.org::*Batch replicas][regime notes]], four
 shared replicas trail one replica of the same budget on three at 1000
-evaluations, lead on a binary Lennard-Jones fit at 1000 and are level on
-all four at 5000, hence the default of one. =jac= runs one replica: with
-=jac=, =replicas= above one gives a =FutureWarning=.
+evaluations, lead on a binary Lennard-Jones fit at 1000, and at 5000 are
+level on three and trail on that fit, hence the default of one. =jac=
+runs one replica: with =jac=, =replicas= above one gives a
+=FutureWarning=.
 
 =global_optimize(fun, low, high, budget, seed=seed, x0=x0, replicas=R)= with
 no =grad_fn= or =noise_sigma= runs these batch replicas too, its

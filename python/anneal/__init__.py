@@ -1784,10 +1784,22 @@ def global_optimize(
     run takes a values-only loop instead, whatever the box: CMA-ES, a
     finite-difference quasi-Newton descent, generalized simulated
     annealing quenched to one-coordinate improvements, differential
-    evolution, the additive surrogate, and the QMC restart arm. When the
-    budget lets a descent converge, one from the start opens the run
-    while it pays at the pace of its last few slices; if it stalls short
-    of convergence, or stops at the start's value, before it has lowered
+    evolution, the additive surrogate, and the QMC restart arm. The
+    descent also models the logarithm of its values while they stay
+    positive. Each curvature pair counts for the logarithm when the
+    trapezoid rule along its step misses the change of the values more
+    than four times as far as the change of their logarithm, and for the
+    values when it misses the logarithm's that much further; from two
+    pairs per coordinate on, once more of the pairs since the descent
+    last started afresh have counted for the logarithm than for the
+    values, as they do for a squared error far from its fit, it steps on
+    that model while the model predicts each accepted value at least as
+    closely as the model of the values. Multiplying the objective by a
+    power of two leaves a run unchanged, while adding a constant to a
+    positive objective can change the descent's steps. When the budget lets
+    a descent converge, one from the start opens the run while it pays
+    at the pace of its last few slices; if it stalls short of
+    convergence, or stops at the start's value, before it has lowered
     its own value from below that one, CMA-ES takes one slice, once per
     run, and the opening goes on from there. With less, CMA-ES takes one
     slice from the start, the descent keeps the turn until its gain per
