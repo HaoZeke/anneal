@@ -1,4 +1,9 @@
-"""``run_fitter``: the options it passes on to ``fit_anneal``, and no others."""
+"""``run_fitter``: the options it passes on to ``fit_anneal``, and no others.
+
+A fitter with its own ``fit_anneal`` is handed to it under the method names
+of ``run_benchmark``, which a ``fit_anneal`` that runs ``run_benchmark``
+takes.
+"""
 
 import numpy as np
 import pytest
@@ -6,8 +11,36 @@ import pytest
 pytest.importorskip("anneal")
 
 from anneal import Fast  # noqa: E402
-from anneal.chemfit import fit_anneal, run_fitter  # noqa: E402
+from anneal.chemfit import fit_anneal, run_benchmark, run_fitter  # noqa: E402
 from chemfit_doubles import NextFitter, ReleasedFitter, same_params  # noqa: E402
+
+
+class BenchmarkFitter(NextFitter):
+    """A fitter whose own ``fit_anneal`` runs ``run_benchmark`` and takes a preset.
+
+    ``handed`` logs the method, preset and seed each call received.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.handed = []
+
+    def fit_anneal(
+        self,
+        budget,
+        *,
+        method="portfolio",
+        preset=None,
+        seed=0,
+        batch_size=1,
+        contexts=None,
+        steps_per_epoch=100,
+    ):
+        self.handed.append((method, preset, seed))
+        context = {"fitter": self, "budget": budget, "initial_params": self.initial_parameters}
+        return run_benchmark(
+            context, method=method, preset=preset, seed=seed, steps_per_epoch=steps_per_epoch
+        )
 
 
 def _fitter(kind=ReleasedFitter, bounds=None):
@@ -97,9 +130,49 @@ def test_a_fitter_with_its_own_fit_anneal_gets_every_keyword():
     got = run_fitter(OwnFitAnneal(), 60, method="sa", tell_every=5, n_epochs=3)
     assert got == {
         "budget": 60,
-        "method": "sa",
+        "method": "boltzmann",
         "preset": None,
         "seed": 42,
         "tell_every": 5,
         "n_epochs": 3,
     }
+
+
+SLOW_FAST = Fast(t_init=2.0)
+
+
+@pytest.mark.parametrize(
+    "options, handed",
+    [
+        ({}, ("portfolio", None, 42)),
+        ({"method": "portfolio", "seed": 3}, ("portfolio", None, 3)),
+        ({"method": "sa"}, ("boltzmann", None, 42)),
+        ({"method": "gsa", "steps_per_epoch": 10}, ("gsa", None, 42)),
+        ({"method": "sa", "preset": SLOW_FAST, "steps_per_epoch": 10}, ("fast", SLOW_FAST, 42)),
+    ],
+    ids=["defaults", "portfolio", "sa", "gsa", "sa-preset"],
+)
+def test_a_fit_anneal_over_run_benchmark_runs_each_method_as_the_bridges_do(options, handed):
+    own, plain = _fitter(BenchmarkFitter), _fitter(NextFitter)
+    run_fitter(own, 60, **options)
+    run_fitter(plain, 60, **options)
+    assert len(own.handed) == 1
+    assert own.handed[0][0] == handed[0] and own.handed[0][2] == handed[2]
+    assert own.handed[0][1] is handed[1]
+    assert 1 < len(own.evaluated) <= 60
+    assert _same_run(own, plain)
+
+
+def test_a_preset_another_driver_runs_is_ignored_for_a_fit_anneal_too():
+    own = _fitter(BenchmarkFitter)
+    with pytest.warns(FutureWarning, match="ignores the Fast preset under method 'boltzmann'"):
+        run_fitter(own, 60, method="boltzmann", preset=Fast())
+    assert [(method, preset) for method, preset, _ in own.handed] == [("boltzmann", None)]
+    assert 1 < len(own.evaluated) <= 60
+
+
+def test_an_unknown_method_is_refused_before_a_fit_anneal_is_called():
+    own = _fitter(BenchmarkFitter)
+    with pytest.raises(ValueError, match="method must be one of 'global_optimize', 'sa'"):
+        run_fitter(own, 60, method="anneal")
+    assert own.handed == [] and own.calls == []
