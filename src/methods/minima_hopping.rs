@@ -529,6 +529,83 @@ where
     })
 }
 
+/// A sequence of quenched minima that is allowed to descend only.
+///
+/// Leary's monotonic sequence basin hopping: a proposed minimum continues
+/// the sequence when it is strictly lower than the head, and a higher
+/// quench ends the sequence and starts another at that quench. The rule
+/// does not read a target structure. It also cannot leave a funnel,
+/// because every accepted step goes deeper into the basin the sequence
+/// already occupies.
+#[derive(Debug, Clone, Copy)]
+pub struct MonotonicSequence {
+    /// Energy of the current head.
+    pub head: f64,
+    /// Accepted steps in the current sequence, including the head.
+    pub length: usize,
+    /// Times a higher quench restarted the sequence.
+    pub restarts: usize,
+}
+
+impl MonotonicSequence {
+    /// A sequence whose head is `start`.
+    pub fn new(start: f64) -> Self {
+        Self {
+            head: start,
+            length: 1,
+            restarts: 0,
+        }
+    }
+
+    /// Continue when `energy` is strictly below the head. Otherwise restart.
+    pub fn propose(&mut self, energy: f64) -> bool {
+        if energy < self.head {
+            self.head = energy;
+            self.length += 1;
+            true
+        } else {
+            self.head = energy;
+            self.length = 1;
+            self.restarts += 1;
+            false
+        }
+    }
+}
+
+/// What a chain does when a quench returns to a basin it has already sat in.
+///
+/// None of these reads the coordinates of a target minimum. [`Revisit::Tabu`]
+/// spends the proposal. [`Revisit::Monotonic`] only descends, so it stays in
+/// the funnel. [`Revisit::Escape`] raises the next excursion and leaves the
+/// pass between basins unfilled.
+pub enum Revisit {
+    /// Metropolis on the quenched energies. A return is an ordinary move.
+    Metropolis,
+    /// Reject a return to the basin the chain is in.
+    Tabu,
+    /// Descend-only sequence.
+    Monotonic(MonotonicSequence),
+    /// Goedecker feedback, with Schoenborn's visit factor when
+    /// [`EscapeFeedback::visits_coeff`] is positive.
+    Escape(EscapeFeedback),
+}
+
+impl Revisit {
+    /// Whether a quench of energy `new_energy` from `current_energy` is kept,
+    /// given whether it returned to the basin the chain is in.
+    pub fn keep(&mut self, current_energy: f64, new_energy: f64, returned: bool) -> bool {
+        match self {
+            Self::Metropolis => new_energy < current_energy,
+            Self::Tabu => !returned && new_energy < current_energy,
+            Self::Monotonic(sequence) => sequence.propose(new_energy),
+            Self::Escape(feedback) => {
+                let delta = new_energy - current_energy;
+                feedback.accept(delta)
+            }
+        }
+    }
+}
+
 /// What a quench was, relative to the history.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visit {
@@ -825,6 +902,78 @@ mod tests {
     use ndarray::{Array1, ArrayView1};
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+
+    /// Wide parabola at the origin, narrow parabola of depth -1 at x = 6.
+    fn two_funnel(x: f64) -> f64 {
+        let wide = 0.05 * x * x;
+        let narrow = 8.0 * (x - 6.0) * (x - 6.0) - 1.0;
+        wide.min(narrow)
+    }
+
+    fn quench_1d(mut x: f64) -> (f64, f64) {
+        for _ in 0..80 {
+            let eps = 1e-4;
+            let slope = (two_funnel(x + eps) - two_funnel(x - eps)) / (2.0 * eps);
+            x -= 0.05 * slope;
+        }
+        (x, two_funnel(x))
+    }
+
+    #[test]
+    fn a_fixed_step_stays_in_the_wide_funnel() {
+        let (x, energy) = quench_1d(0.0);
+        assert!(x.abs() < 0.2, "{x}");
+        for _ in 0..30 {
+            let (y, _) = quench_1d(x + 0.4);
+            assert!(y.abs() < 0.2, "a short step left the wide funnel at {y}");
+        }
+        assert!(energy.abs() < 1e-6);
+    }
+
+    #[test]
+    fn an_escalating_escape_reaches_the_narrow_funnel() {
+        let mut feedback = EscapeFeedback::new(0.4, 2.0);
+        feedback.escape_ceiling = 8.0;
+        feedback.beta_same = 1.3;
+        feedback.register_initial(0);
+        let mut x = 0.0;
+        let mut basin = 0usize;
+        for _ in 0..24 {
+            let (y, energy) = quench_1d(x + feedback.escape());
+            let reached = usize::from((y - 6.0).abs() < 0.5);
+            feedback.observe(Some(basin), reached);
+            if energy < two_funnel(x) {
+                x = y;
+                basin = reached;
+            }
+            if basin == 1 {
+                break;
+            }
+        }
+        assert_eq!(basin, 1, "escape scale ended at {}", feedback.escape());
+        assert!(two_funnel(x) < -0.5);
+    }
+
+    #[test]
+    fn a_monotonic_sequence_does_not_leave_the_wide_funnel() {
+        let mut sequence = MonotonicSequence::new(two_funnel(0.0));
+        let mut x = 0.0;
+        for _ in 0..20 {
+            let (y, energy) = quench_1d(x + 0.4);
+            if sequence.propose(energy) {
+                x = y;
+            }
+        }
+        assert!(x.abs() < 0.2);
+        assert!(sequence.restarts > 0);
+    }
+
+    #[test]
+    fn tabu_rejects_a_return_and_keeps_a_descent() {
+        let mut policy = Revisit::Tabu;
+        assert!(!policy.keep(0.0, -0.1, true));
+        assert!(policy.keep(0.0, -0.1, false));
+    }
 
     #[test]
     fn nve_escape_stops_after_the_requested_potential_minimum_in_generic_nd() {
