@@ -42,6 +42,25 @@
 //! in box-normalised coordinates, so a side that spans decades moves as far,
 //! relative to its width, as a unit one. The first accepted pair scales it to
 //! `(s.y / y.D.y) D`, and the steepest-descent fallback steps along `-D g`.
+//!
+//! With [`FdBfgsOptions::log_model`] the engine keeps a second model, of
+//! `ln f`, from the same steps and the gradient `g / f`, while every value
+//! it has started from or accepted is positive. Until the model of `f` has
+//! taken [`LOG_MODEL_PAIRS`] curvature pairs per coordinate, BFGS is still
+//! learning even a quadratic's Hessian and its misses say little about the
+//! loss. From then on both models predict each accepted step's value, and
+//! once the model of `ln f` predicts one [`LOG_MODEL_MARGIN`] times closer
+//! than the model of `f`, the line searches step on `ln f` (its direction,
+//! Armijo test, extrapolation and interpolation) until it predicts a step
+//! less closely. A loss that falls through decades along a curved valley,
+//! as a squared error far from its fit does, is far from quadratic in `f`
+//! and closer to it in `ln f`. Near a minimum whose value is zero the model
+//! of `f` predicts better, and for a loss already on a logarithmic scale
+//! the two mostly predict about as well, so the margin leaves the steps on
+//! `f` there. Gradients, intervals and the slow test read the values
+//! themselves, and the logarithm enters only through ratios of values, so a
+//! power of two multiplying the objective still leaves the descent
+//! unchanged; a constant added to it changes the logarithm.
 
 use eindir_core::Bounds;
 use ndarray::{Array1, Array2, ArrayView1};
@@ -70,6 +89,18 @@ const CENTRAL_INTERVAL_FRACTION: f64 = 0.1;
 const INTERVAL_MOVE: f64 = 2.0;
 /// Re-differenced gradients allowed at one iterate.
 const MAX_REDIFFERENCES: usize = 2;
+/// Factor by which the model of the values must mispredict an accepted
+/// step's value more than the model of their logarithm before a descent with
+/// [`FdBfgsOptions::log_model`] steps on the logarithm. Two models that
+/// predict about as well, as for a loss already on a logarithmic scale,
+/// leave the steps on the values.
+const LOG_MODEL_MARGIN: f64 = 4.0;
+/// Curvature pairs per coordinate the model of the values takes before its
+/// misses count against it. Exact line searches would give a quadratic's
+/// Hessian in one pair per coordinate; with these Armijo searches the
+/// descent of a quadratic in 12 dimensions with condition number `1e3`
+/// turned superlinear only after about two.
+const LOG_MODEL_PAIRS: usize = 2;
 
 /// Termination controls for one descent.
 #[derive(Clone, Copy, Debug)]
@@ -93,6 +124,10 @@ pub struct FdBfgsOptions {
     /// Decrease per iteration at or below which an iteration is slow
     /// whatever the value's scale; zero leaves only the relative test.
     pub fatol: f64,
+    /// Whether the descent also models the logarithm of its values while
+    /// they stay positive, and steps on that model while it predicts the
+    /// accepted values markedly better (see the module notes).
+    pub log_model: bool,
 }
 
 impl Default for FdBfgsOptions {
@@ -106,6 +141,7 @@ impl Default for FdBfgsOptions {
             value_floor: f64::MIN_POSITIVE,
             gtol: 0.0,
             fatol: 0.0,
+            log_model: false,
         }
     }
 }
@@ -137,10 +173,99 @@ struct LineWork {
     direction: Array1<f64>,
     alpha: f64,
     trials: usize,
+    /// Directional derivative of the reading the search steps on.
     slope: f64,
     steepest: bool,
     trial: Array1<f64>,
     fallback: Option<(Array1<f64>, f64)>,
+    /// Whether the search reads the logarithm of the values.
+    log: bool,
+}
+
+/// Quasi-Newton curvature model of one reading of the values.
+struct Curvature {
+    /// Inverse Hessian approximation: the box metric until the first pair
+    /// scales it.
+    inv_hessian: Array2<f64>,
+    /// Hessian approximation, kept only to predict accepted steps: the
+    /// inverse of `inv_hessian` from the first pair on.
+    hessian: Option<Array2<f64>>,
+    scaled: bool,
+    gamma: f64,
+    /// Pairs the model has taken since it was last reset.
+    pairs: usize,
+}
+
+impl Curvature {
+    fn new(metric: &Array1<f64>) -> Self {
+        Self {
+            inv_hessian: Array2::from_diag(metric),
+            hessian: None,
+            scaled: false,
+            gamma: 1.0,
+            pairs: 0,
+        }
+    }
+
+    /// BFGS update with the pair `(s, y)`, skipped when it violates the
+    /// curvature condition. With `direct` the Hessian approximation follows.
+    fn update(&mut self, metric: &Array1<f64>, s: &Array1<f64>, y: &Array1<f64>, direct: bool) {
+        let n = s.len();
+        let sy = s.dot(y);
+        let s_norm = s.dot(s).sqrt();
+        let y_norm = y.dot(y).sqrt();
+        if !(sy.is_finite() && sy > 8.0 * f64::EPSILON * s_norm * y_norm) {
+            return;
+        }
+        let ydy: f64 = (0..n).map(|i| metric[i] * y[i] * y[i]).sum();
+        self.gamma = sy / ydy;
+        self.pairs += 1;
+        if !self.scaled {
+            self.inv_hessian = Array2::from_diag(&(metric * self.gamma));
+            self.scaled = true;
+            if direct {
+                self.hessian = Some(Array2::from_diag(&metric.mapv(|w| 1.0 / (w * self.gamma))));
+            }
+        }
+        let hy = self.inv_hessian.dot(y);
+        let yhy = y.dot(&hy);
+        let rho = 1.0 / sy;
+        let ss = rho * rho * yhy + rho;
+        for i in 0..n {
+            for j in 0..n {
+                self.inv_hessian[[i, j]] += ss * s[i] * s[j] - rho * (s[i] * hy[j] + hy[i] * s[j]);
+            }
+        }
+        if let Some(hessian) = self.hessian.as_mut() {
+            let hs = hessian.dot(s);
+            let shs = s.dot(&hs);
+            if shs > 0.0 && shs.is_finite() {
+                for i in 0..n {
+                    for j in 0..n {
+                        hessian[[i, j]] += rho * y[i] * y[j] - hs[i] * hs[j] / shs;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Second-order term `s.B.s / 2` of the model's change along `s`.
+    fn curvature_term(&self, s: &Array1<f64>) -> Option<f64> {
+        self.hessian
+            .as_ref()
+            .map(|hessian| 0.5 * s.dot(&hessian.dot(s)))
+    }
+}
+
+/// Logarithm of `value / base`, minus infinity when the ratio is not
+/// positive.
+fn log_ratio(value: f64, base: f64) -> f64 {
+    let ratio = value / base;
+    if ratio > 0.0 {
+        ratio.ln()
+    } else {
+        f64::NEG_INFINITY
+    }
 }
 
 enum Phase {
@@ -161,12 +286,20 @@ pub struct FdBfgs {
     x: Array1<f64>,
     f: f64,
     grad: Array1<f64>,
-    inv_hessian: Array2<f64>,
-    scaled: bool,
-    gamma: f64,
+    /// Model of the values.
+    curvature: Curvature,
+    /// Model of their logarithm, with [`FdBfgsOptions::log_model`].
+    log_curvature: Curvature,
+    /// Whether every value the descent has started from or accepted is
+    /// positive, so the logarithm is defined along its path.
+    log_valid: bool,
+    /// Whether the line searches step on the model of the logarithm.
+    log_active: bool,
     scheme: FdScheme,
     phase: Phase,
     pair_from: Option<(Array1<f64>, Array1<f64>)>,
+    /// Value at the point the pending curvature pair starts from.
+    pair_value: f64,
     iterations: usize,
     slow: usize,
     options: FdBfgsOptions,
@@ -203,13 +336,15 @@ impl FdBfgs {
             x: bounds.clip(x0),
             f: f64::INFINITY,
             grad: Array1::zeros(n),
-            inv_hessian: Array2::from_diag(&metric),
+            curvature: Curvature::new(&metric),
+            log_curvature: Curvature::new(&metric),
             metric,
-            scaled: false,
-            gamma: 1.0,
+            log_valid: true,
+            log_active: false,
             scheme: FdScheme::Forward,
             phase: Phase::Value,
             pair_from: None,
+            pair_value: f64::NAN,
             iterations: 0,
             slow: 0,
             options,
@@ -253,9 +388,9 @@ impl FdBfgs {
         self.intervals.fill(None);
         self.redifferences = 0;
         if !keep_curvature {
-            self.inv_hessian = Array2::from_diag(&self.metric);
-            self.scaled = false;
-            self.gamma = 1.0;
+            self.curvature = Curvature::new(&self.metric);
+            self.log_curvature = Curvature::new(&self.metric);
+            self.log_active = false;
         }
         match f {
             Some(f) => self.set_start_value(f),
@@ -321,6 +456,10 @@ impl FdBfgs {
     }
 
     fn set_start_value(&mut self, value: f64) {
+        if !(value > 0.0) {
+            self.log_valid = false;
+            self.log_active = false;
+        }
         self.f = value;
         self.phase = if value.is_finite() {
             Phase::Gradient(self.gradient_work())
@@ -477,7 +616,12 @@ impl FdBfgs {
         if let Some((x_prev, g_prev)) = self.pair_from.take() {
             let s = &self.x - &x_prev;
             let y = &self.grad - &g_prev;
-            self.bfgs_update(&s, &y);
+            let direct = self.options.log_model;
+            self.curvature.update(&self.metric, &s, &y, direct);
+            if direct && self.log_valid {
+                let y = &self.grad / self.f - &g_prev / self.pair_value;
+                self.log_curvature.update(&self.metric, &s, &y, true);
+            }
         }
         if self.options.max_iter > 0 && self.iterations >= self.options.max_iter {
             self.phase = Phase::Done;
@@ -506,27 +650,12 @@ impl FdBfgs {
             .fold(0.0_f64, f64::max)
     }
 
-    fn bfgs_update(&mut self, s: &Array1<f64>, y: &Array1<f64>) {
-        let sy = s.dot(y);
-        let s_norm = s.dot(s).sqrt();
-        let y_norm = y.dot(y).sqrt();
-        if !(sy.is_finite() && sy > 8.0 * f64::EPSILON * s_norm * y_norm) {
-            return;
-        }
-        let ydy: f64 = (0..self.n).map(|i| self.metric[i] * y[i] * y[i]).sum();
-        self.gamma = sy / ydy;
-        if !self.scaled {
-            self.inv_hessian = Array2::from_diag(&(&self.metric * self.gamma));
-            self.scaled = true;
-        }
-        let hy = self.inv_hessian.dot(y);
-        let yhy = y.dot(&hy);
-        let rho = 1.0 / sy;
-        let ss = rho * rho * yhy + rho;
-        for i in 0..self.n {
-            for j in 0..self.n {
-                self.inv_hessian[[i, j]] += ss * s[i] * s[j] - rho * (s[i] * hy[j] + hy[i] * s[j]);
-            }
+    /// Model the line searches step on.
+    fn stepping(&self) -> &Curvature {
+        if self.log_active {
+            &self.log_curvature
+        } else {
+            &self.curvature
         }
     }
 
@@ -536,31 +665,38 @@ impl FdBfgs {
     }
 
     fn begin_line_search(&mut self, steepest: bool) {
+        let log = self.log_active;
+        let model = self.stepping();
+        let grad = if log {
+            &self.grad / self.f
+        } else {
+            self.grad.clone()
+        };
         let free: Vec<usize> = (0..self.n).filter(|&i| self.free(i)).collect();
         let mut direction = Array1::<f64>::zeros(self.n);
         if !steepest {
             for &i in &free {
                 direction[i] = -free
                     .iter()
-                    .map(|&j| self.inv_hessian[[i, j]] * self.grad[j])
+                    .map(|&j| model.inv_hessian[[i, j]] * grad[j])
                     .sum::<f64>();
             }
         }
-        let mut slope = self.grad.dot(&direction);
+        let mut slope = grad.dot(&direction);
         let mut steepest = steepest;
         if steepest || !(slope.is_finite() && slope < 0.0) {
             steepest = true;
             direction.fill(0.0);
             for &i in &free {
-                direction[i] = -self.metric[i] * self.grad[i];
+                direction[i] = -self.metric[i] * grad[i];
             }
-            slope = self.grad.dot(&direction);
+            slope = grad.dot(&direction);
         }
         if !(slope.is_finite() && slope < 0.0) {
             self.phase = Phase::Done;
             return;
         }
-        let alpha = if !self.scaled {
+        let alpha = if !model.scaled {
             let reach = (0..self.n)
                 .map(|i| direction[i].abs() / self.width[i].max(f64::MIN_POSITIVE))
                 .fold(0.0_f64, f64::max);
@@ -568,7 +704,7 @@ impl FdBfgs {
             // zero when the reach is subnormal.
             (FIRST_STEP_FRACTION / reach).min(f64::MAX)
         } else if steepest {
-            self.gamma
+            model.gamma
         } else {
             1.0
         };
@@ -581,6 +717,7 @@ impl FdBfgs {
             steepest,
             trial,
             fallback: None,
+            log,
         });
     }
 
@@ -601,13 +738,22 @@ impl FdBfgs {
             return;
         }
         let moved = &work.trial - &self.x;
+        let linear = self.grad.dot(&moved);
         // The strict decrease matters once the predicted decrease rounds
         // away: the Armijo bound then equals f and would accept a null step.
-        let bound = self.f + ARMIJO * self.grad.dot(&moved);
-        if value.is_finite() && value < self.f && value <= bound {
+        let sufficient = if work.log {
+            log_ratio(value, self.f) <= ARMIJO * (linear / self.f)
+        } else {
+            value <= self.f + ARMIJO * linear
+        };
+        if value.is_finite() && value < self.f && sufficient {
             if work.trials == 0 {
-                let predicted = -self.grad.dot(&moved);
-                let ratio = (self.f - value) / predicted;
+                let (realised, predicted) = if work.log {
+                    (-log_ratio(value, self.f), -(linear / self.f))
+                } else {
+                    (self.f - value, -linear)
+                };
+                let ratio = realised / predicted;
                 if predicted > 0.0 && ratio > EXTRAPOLATE_RATIO {
                     let factor = if ratio >= 1.0 {
                         MAX_EXTRAPOLATION
@@ -630,7 +776,12 @@ impl FdBfgs {
         work.trials += 1;
         let alpha = work.alpha;
         let next = if value.is_finite() {
-            let denom = value - self.f - work.slope * alpha;
+            let change = if work.log {
+                log_ratio(value, self.f)
+            } else {
+                value - self.f
+            };
+            let denom = change - work.slope * alpha;
             if denom > 0.0 && denom.is_finite() {
                 (-work.slope * alpha * alpha / (2.0 * denom)).clamp(0.1 * alpha, 0.5 * alpha)
             } else {
@@ -649,9 +800,48 @@ impl FdBfgs {
         self.phase = Phase::Line(work);
     }
 
+    /// Lets the model that predicted the accepted step's value more closely
+    /// take the next steps: the model of the logarithm only by
+    /// [`LOG_MODEL_MARGIN`], and only once the model of the values has taken
+    /// [`LOG_MODEL_PAIRS`] pairs per coordinate. A value at or below zero
+    /// retires it.
+    fn choose_model(&mut self, trial: &Array1<f64>, value: f64) {
+        if !(value > 0.0) {
+            self.log_valid = false;
+        }
+        if !self.log_valid {
+            self.log_active = false;
+            return;
+        }
+        if !self.log_active && self.curvature.pairs < LOG_MODEL_PAIRS * self.n {
+            return;
+        }
+        let s = trial - &self.x;
+        let (Some(term), Some(log_term)) = (
+            self.curvature.curvature_term(&s),
+            self.log_curvature.curvature_term(&s),
+        ) else {
+            return;
+        };
+        let linear = self.grad.dot(&s);
+        let predicted = self.f + linear + term;
+        let log_predicted = self.f * (linear / self.f + log_term).exp();
+        let miss = (predicted - value).abs();
+        let log_miss = (log_predicted - value).abs();
+        self.log_active = if self.log_active {
+            log_miss <= miss
+        } else {
+            miss > LOG_MODEL_MARGIN * log_miss
+        };
+    }
+
     fn accept(&mut self, trial: Array1<f64>, value: f64) {
+        if self.options.log_model {
+            self.choose_model(&trial, value);
+        }
         self.redifferences = 0;
         let previous = self.f;
+        self.pair_value = previous;
         self.pair_from = Some((std::mem::replace(&mut self.x, trial), self.grad.clone()));
         self.f = value;
         self.iterations += 1;
@@ -697,7 +887,9 @@ impl FdBfgs {
                 self.pair_from = None;
                 self.phase = Phase::Gradient(self.gradient_work());
             }
-            FdScheme::Central if !steepest && self.scaled => self.begin_line_search(true),
+            FdScheme::Central if !steepest && self.stepping().scaled => {
+                self.begin_line_search(true)
+            }
             FdScheme::Central => self.phase = Phase::Done,
         }
     }
@@ -737,9 +929,118 @@ mod tests {
     fn reaches_rosenbrock_minimum_from_values_only() {
         let bounds = boxed(-2.0, 2.0, 6);
         let start = Array1::from_vec(vec![-1.2, 1.0, -0.5, 0.3, 1.5, -1.0]);
-        let mut engine = FdBfgs::new(start.view(), None, &bounds, FdBfgsOptions::default());
-        drive(&mut engine, rosenbrock, 4000, &bounds);
-        assert!(engine.value() < 1e-10, "value {}", engine.value());
+        for log_model in [false, true] {
+            let options = FdBfgsOptions {
+                log_model,
+                ..FdBfgsOptions::default()
+            };
+            let mut engine = FdBfgs::new(start.view(), None, &bounds, options);
+            drive(&mut engine, rosenbrock, 4000, &bounds);
+            assert!(
+                engine.value() < 1e-10,
+                "log model {log_model}: value {}",
+                engine.value()
+            );
+        }
+    }
+
+    /// A bowl whose logarithm is quadratic: in four dimensions it falls
+    /// through nine decades from the tests' start to its minimum of one at
+    /// 0.3.
+    fn exp_bowl(x: ArrayView1<f64>) -> f64 {
+        x.iter()
+            .enumerate()
+            .map(|(i, v)| (1 + i) as f64 * (v - 0.3).powi(2))
+            .sum::<f64>()
+            .exp()
+    }
+
+    /// Evaluations, and whether a line search stepped on the logarithm,
+    /// until the descent's value first drops below `target`.
+    fn log_steps_to<F: Fn(ArrayView1<f64>) -> f64>(
+        engine: &mut FdBfgs,
+        f: F,
+        target: f64,
+        budget: usize,
+    ) -> (usize, bool) {
+        let (mut used, mut log) = (0, false);
+        while used < budget && !engine.is_done() && engine.value() >= target {
+            let x = engine.ask();
+            engine.tell(f(x.view()));
+            log |= engine.log_active;
+            used += 1;
+        }
+        (used, log)
+    }
+
+    #[test]
+    fn the_logarithm_model_takes_over_where_it_predicts_better() {
+        let bounds = boxed(-2.0, 2.0, 4);
+        let start = Array1::from_vec(vec![-1.5, 1.5, -1.5, 1.5]);
+        let run = |log_model: bool| {
+            let options = FdBfgsOptions {
+                log_model,
+                ..FdBfgsOptions::default()
+            };
+            let mut engine = FdBfgs::new(start.view(), None, &bounds, options);
+            log_steps_to(&mut engine, exp_bowl, 1.0 + 1e-8, 4000)
+        };
+        let (plain, plain_log) = run(false);
+        let (dual, dual_log) = run(true);
+        assert!(!plain_log);
+        assert!(dual_log, "the logarithm never took the steps");
+        assert!(
+            3 * dual < plain,
+            "{dual} evaluations with the model, {plain} without"
+        );
+    }
+
+    #[test]
+    fn a_value_at_or_below_zero_retires_the_logarithm_model() {
+        let bounds = boxed(-2.0, 2.0, 4);
+        let start = Array1::from_vec(vec![-1.5, 1.5, -1.5, 1.5]);
+        let options = FdBfgsOptions {
+            log_model: true,
+            ..FdBfgsOptions::default()
+        };
+        let mut engine = FdBfgs::new(start.view(), None, &bounds, options);
+        let shifted = |x: ArrayView1<f64>| exp_bowl(x) - 2.0;
+        let (_, log) = log_steps_to(&mut engine, shifted, 0.0, 4000);
+        assert!(log, "the logarithm never took the steps");
+        assert!(!engine.log_valid && !engine.log_active);
+        drive(&mut engine, shifted, 4000, &bounds);
+        assert!(!engine.log_active);
+        assert!(engine.value() < -1.0 + 1e-12, "value {}", engine.value());
+    }
+
+    #[test]
+    fn the_logarithm_model_leaves_power_of_two_scaling_invisible() {
+        // The logarithm enters only through ratios of values, which a power
+        // of two leaves exact.
+        let bounds = boxed(-2.0, 2.0, 4);
+        let start = Array1::from_vec(vec![-1.5, 1.5, -1.5, 1.5]);
+        let trace = |scale: f64| {
+            let options = FdBfgsOptions {
+                log_model: true,
+                ..FdBfgsOptions::default()
+            };
+            let mut engine = FdBfgs::new(start.view(), None, &bounds, options);
+            let (mut asked, mut log) = (Vec::new(), false);
+            while asked.len() < 600 && !engine.is_done() {
+                let x = engine.ask();
+                engine.tell(scale * exp_bowl(x.view()));
+                log |= engine.log_active;
+                asked.push(x);
+            }
+            (asked, engine.value() / scale, log)
+        };
+        let (plain, value, log) = trace(1.0);
+        assert!(log, "the logarithm never took the steps");
+        for scale in [2f64.powi(-30), 2f64.powi(30)] {
+            let (scaled, scaled_value, _) = trace(scale);
+            assert_eq!(scaled, plain, "scale {scale}");
+            assert_eq!(scaled_value, value, "scale {scale}");
+        }
     }
 
     #[test]
