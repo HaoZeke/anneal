@@ -45,13 +45,16 @@
 //!
 //! With [`FdBfgsOptions::log_model`] the engine keeps a second model, of
 //! `ln f`, from the same steps and the gradient `g / f`, while every value
-//! it has started from or accepted is positive. Once the model of `f` has
-//! taken [`LOG_MODEL_PAIRS`] curvature pairs per coordinate, each new pair
-//! also tells which reading is nearer quadratic along its step: the
-//! trapezoid rule through the two end slopes is exact for a quadratic, and
-//! when it misses the change of `f` more than [`LOG_MODEL_MARGIN`] times its
-//! miss on the change of `ln f` (read back as a value), the line searches
-//! step on `ln f` (its direction, Armijo test, extrapolation and
+//! it has started from or accepted is positive. Each curvature pair also
+//! tells which reading is nearer quadratic along its step: the trapezoid
+//! rule through the two end slopes is exact for a quadratic, and the pair
+//! counts for `ln f` when the rule misses the change of `f` more than
+//! [`LOG_MODEL_MARGIN`] times as far as the change of `ln f` (read back as
+//! a value), and for `f` when it misses the change of `ln f` that much
+//! further. Once the model of `f` has taken [`LOG_MODEL_PAIRS`] curvature
+//! pairs per coordinate, a pair after which more of the pairs since the
+//! models were last reset count for `ln f` than for `f` moves the line
+//! searches onto `ln f` (its direction, Armijo test, extrapolation and
 //! interpolation). They stay there while the model of `ln f` predicts each
 //! accepted step's value at least as closely as the model of `f`. A loss
 //! that falls through decades along a curved valley, as a squared error far
@@ -59,7 +62,11 @@
 //! `ln f`. The test that moves the steps reads neither model's curvature: on
 //! an ill-conditioned quadratic, while the model of `f` is still learning
 //! the curvature, the model of `ln f` predicts many steps more closely
-//! without stepping better, yet the trapezoid rule finds `f` quadratic.
+//! without stepping better, yet the trapezoid rule finds `f` quadratic. It
+//! counts every pair rather than reading the latest one alone, so the early
+//! pairs of a squared error far from its fit still count once the model of
+//! `f` has its pairs, and one step along which `ln f` happens to be nearer
+//! quadratic does not move the steps of a descent whose pairs found `f` so.
 //! Gradients, intervals and the slow test read the values themselves, and
 //! the logarithm enters only through ratios of values, so a power of two
 //! multiplying the objective still leaves the descent unchanged; a constant
@@ -92,11 +99,11 @@ const CENTRAL_INTERVAL_FRACTION: f64 = 0.1;
 const INTERVAL_MOVE: f64 = 2.0;
 /// Re-differenced gradients allowed at one iterate.
 const MAX_REDIFFERENCES: usize = 2;
-/// Factor by which the trapezoid rule along an accepted step must miss the
-/// change of the values more than the change of their logarithm before a
-/// descent with [`FdBfgsOptions::log_model`] steps on the logarithm. Readings
-/// about as near quadratic, as for a loss already on a logarithmic scale,
-/// leave the steps on the values.
+/// Factor by which the trapezoid rule along a curvature pair's step must
+/// miss the change of one reading, the values or their logarithm, further
+/// than the change of the other for the pair to count for the other in a
+/// descent with [`FdBfgsOptions::log_model`]. Pairs about as near quadratic
+/// in both, as for a loss already on a logarithmic scale, count for neither.
 const LOG_MODEL_MARGIN: f64 = 4.0;
 /// Curvature pairs per coordinate the model of the values takes before the
 /// steps may move to the logarithm. Exact line searches would give a
@@ -128,10 +135,10 @@ pub struct FdBfgsOptions {
     /// whatever the value's scale; zero leaves only the relative test.
     pub fatol: f64,
     /// Whether the descent also models the logarithm of its values while
-    /// they stay positive, and steps on that model from a step along which
-    /// the logarithm is markedly nearer quadratic than the values, while it
-    /// predicts the accepted values at least as closely (see the module
-    /// notes).
+    /// they stay positive, and steps on that model once more of its steps
+    /// have been markedly nearer quadratic in the logarithm than in the
+    /// values than the other way round, while it predicts the accepted
+    /// values at least as closely (see the module notes).
     pub log_model: bool,
 }
 
@@ -300,6 +307,13 @@ pub struct FdBfgs {
     log_valid: bool,
     /// Whether the line searches step on the model of the logarithm.
     log_active: bool,
+    /// Curvature pairs since the models were last reset along which the
+    /// trapezoid rule missed the change of the values more than
+    /// [`LOG_MODEL_MARGIN`] times as far as the change of their logarithm.
+    log_nearer: usize,
+    /// Pairs since then along which it missed the change of the logarithm
+    /// more than [`LOG_MODEL_MARGIN`] times as far as that of the values.
+    values_nearer: usize,
     scheme: FdScheme,
     phase: Phase,
     pair_from: Option<(Array1<f64>, Array1<f64>)>,
@@ -346,6 +360,8 @@ impl FdBfgs {
             metric,
             log_valid: true,
             log_active: false,
+            log_nearer: 0,
+            values_nearer: 0,
             scheme: FdScheme::Forward,
             phase: Phase::Value,
             pair_from: None,
@@ -396,6 +412,8 @@ impl FdBfgs {
             self.curvature = Curvature::new(&self.metric);
             self.log_curvature = Curvature::new(&self.metric);
             self.log_active = false;
+            self.log_nearer = 0;
+            self.values_nearer = 0;
         }
         match f {
             Some(f) => self.set_start_value(f),
@@ -626,8 +644,9 @@ impl FdBfgs {
             if direct && self.log_valid {
                 let y = &self.grad / self.f - &g_prev / self.pair_value;
                 self.log_curvature.update(&self.metric, &s, &y, true);
+                self.weigh_trapezoid(&s, &g_prev);
                 if !self.log_active && self.curvature.pairs >= LOG_MODEL_PAIRS * self.n {
-                    self.log_active = self.log_nearer_quadratic(&s, &g_prev);
+                    self.log_active = self.log_nearer > self.values_nearer;
                 }
             }
         }
@@ -808,17 +827,22 @@ impl FdBfgs {
         self.phase = Phase::Line(work);
     }
 
-    /// Whether the trapezoid rule through the end slopes of the step `s`
-    /// just taken, exact for a quadratic, misses the change of the values
-    /// more than [`LOG_MODEL_MARGIN`] times its miss on the change of their
-    /// logarithm, read back as a value. `g_prev` is the gradient at the
-    /// step's start.
-    fn log_nearer_quadratic(&self, s: &Array1<f64>, g_prev: &Array1<f64>) -> bool {
+    /// Counts the step `s` just taken for the logarithm when the trapezoid
+    /// rule through its end slopes, exact for a quadratic, misses the change
+    /// of the values more than [`LOG_MODEL_MARGIN`] times as far as the
+    /// change of their logarithm, read back as a value, and for the values
+    /// when it misses the logarithm's that much further. `g_prev` is the
+    /// gradient at the step's start.
+    fn weigh_trapezoid(&mut self, s: &Array1<f64>, g_prev: &Array1<f64>) {
         let (from, to) = (g_prev.dot(s), self.grad.dot(s));
         let miss = (self.f - self.pair_value - 0.5 * (from + to)).abs();
         let log_slope = 0.5 * (from / self.pair_value + to / self.f);
         let log_miss = (self.f - self.pair_value * log_slope.exp()).abs();
-        miss > LOG_MODEL_MARGIN * log_miss
+        if miss > LOG_MODEL_MARGIN * log_miss {
+            self.log_nearer += 1;
+        } else if log_miss > LOG_MODEL_MARGIN * miss {
+            self.values_nearer += 1;
+        }
     }
 
     /// Keeps the steps on the model of the logarithm while it predicts the
@@ -1039,6 +1063,33 @@ mod tests {
         assert_eq!(dual, plain);
         assert_eq!(dual_value, value);
         assert!(value < 1e-10, "value {value}");
+    }
+
+    #[test]
+    fn each_pair_counts_for_the_reading_nearer_quadratic_along_it() {
+        // The trapezoid rule is exact for x^2 and for the logarithm of
+        // exp(x^2); along x^3 it misses both by about as much.
+        let bounds = boxed(-5.0, 5.0, 1);
+        let options = FdBfgsOptions {
+            log_model: true,
+            ..FdBfgsOptions::default()
+        };
+        let counts = |f: fn(f64) -> f64, g: fn(f64) -> f64, from: f64, to: f64| {
+            let at = Array1::from_elem(1, to);
+            let mut engine = FdBfgs::new(at.view(), Some(f(to)), &bounds, options);
+            engine.pair_value = f(from);
+            engine.grad = Array1::from_elem(1, g(to));
+            let step = Array1::from_elem(1, to - from);
+            engine.weigh_trapezoid(&step, &Array1::from_elem(1, g(from)));
+            (engine.log_nearer, engine.values_nearer)
+        };
+        assert_eq!(counts(|x| x * x, |x| 2.0 * x, 2.0, 1.0), (0, 1));
+        let exp_square = |x: f64| (x * x).exp();
+        assert_eq!(
+            counts(exp_square, |x| 2.0 * x * (x * x).exp(), 1.0, 0.5),
+            (1, 0)
+        );
+        assert_eq!(counts(|x| x.powi(3), |x| 3.0 * x * x, 2.0, 1.5), (0, 0));
     }
 
     #[test]
