@@ -1511,7 +1511,9 @@ def minimize(
         is fixed: the search runs in the free coordinates, and ``fun`` and
         ``jac`` still receive full-length vectors. With every coordinate
         fixed, the run is one evaluation of ``fun`` at the start, and
-        ``jac`` is not called.
+        ``jac`` is not called. Without ``jac`` the run is that evaluation
+        too when no free side is wide enough for a difference step to
+        change its coordinate at the start, a unit or two in the last place.
       jac: optional gradient callable ``jac(x) -> array`` of the length of
         ``x0``. It takes the gradient route of :func:`global_optimize`
         (``grad_fn``), which runs one replica; its calls count in ``njev``.
@@ -1852,7 +1854,11 @@ def global_optimize(
 
     Args:
       obj_fn: callable ``f(numpy.ndarray) -> float``.
-      low, high: box bounds.
+      low, high: box bounds. In the values-only loop, a box with no side
+        wide enough for a difference step to change its coordinate at the
+        start, a unit or two in the last place, ends the run there: it
+        evaluates ``x0`` once, or without it the box's centre once per
+        replica, up to the budget.
       budget: combined objective + gradient evaluation budget.
       seed: RNG seed.
       grad_fn: optional gradient callable ``g(x) -> numpy.ndarray``;

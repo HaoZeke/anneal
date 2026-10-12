@@ -3782,6 +3782,23 @@ where
     let bounds = obj.bounds().clone();
     let dim = bounds.dims;
     let gradient = dim + 1;
+    // With no side wide enough at the start for a difference step to change
+    // its coordinate, the descent has nothing to ask, and every other point
+    // of the box lies a unit or two in the last place from the start in each
+    // coordinate: the run is the start.
+    if !FdBfgs::can_difference(ledger.incumbent(&bounds).view(), &bounds) {
+        if ledger.incumbent_value().is_none() {
+            let _ = obj.eval(ledger.incumbent(&bounds).view());
+        }
+        return VALUES_ONLY_ARMS
+            .iter()
+            .map(|arm| ArmStat {
+                name: arm.name(),
+                pulls: 0,
+                successes: 0,
+            })
+            .collect();
+    }
     // A budget that cannot fund one central stencil cannot fund an arm.
     // One checkpoint exchanges the incumbent, and the rest is prepared
     // global candidates, which is what a direct-neighbour sample count measures.
@@ -6845,6 +6862,38 @@ mod tests {
         assert!(result.n_evals <= 200);
         assert!(obj.calls_inside_box() <= 200);
         assert!(result.best_val.is_finite());
+    }
+
+    #[test]
+    fn a_box_too_narrow_for_a_difference_step_is_one_evaluation_of_the_start() {
+        // Every side one unit in the last place wide: the run is x0, or
+        // without it the box's centre, alone or with replicas.
+        let up = f64::from_bits(1.0f64.to_bits() + 1);
+        let x0 = Array1::from_vec(vec![up, 1.0]);
+        let narrow = || RecordingSphere::new(vec![1.0, 1.0], vec![up, up]);
+        for start in [Some(x0.view()), None] {
+            let obj = narrow();
+            let result = portfolio_optimize_from::<_, ShiftQuadratic>(
+                &obj,
+                None,
+                60,
+                0,
+                None,
+                PortfolioPolicy::Auto,
+                start,
+            );
+            assert_eq!((obj.calls_inside_box(), result.n_evals), (1, 1));
+            let centre = (&obj.bounds.low + &obj.bounds.high) * 0.5;
+            let expected = start.map_or(centre, |x| x.to_owned());
+            assert_eq!(obj.seen.lock().expect("recording lock")[0], expected);
+            assert_eq!(result.best_pos, expected.to_vec());
+        }
+        for archive in [ReplicaArchive::Shared, ReplicaArchive::Private] {
+            let obj = narrow();
+            let result = portfolio_replicas(&obj, 60, 0, x0.view(), 4, archive);
+            assert_eq!((obj.calls_inside_box(), result.portfolio.n_evals), (1, 1));
+            assert_eq!(result.portfolio.best_pos, x0.to_vec());
+        }
     }
 
     #[test]
