@@ -5,14 +5,20 @@ evaluation per candidate, one notice per optimizer step, then ``finish``.
 ChemFit 3.1.1, the first release with this session, names the middle two
 ``ask`` and ``tell``; ChemFit's source names them ``evaluate`` and ``step``
 from commit c57d6f5, which no release has yet, and ChemFit 3.1.0 and earlier
-have neither pair. Every bridge here drives ``evaluate`` and ``step`` when
-the fitter has both, ``ask`` and ``tell`` otherwise, and refuses a fitter
-with neither pair before calling ``init``; only :func:`run_benchmark`
-still drives ``evaluate`` or ``ask`` without its partner, as anneal 0.10.0
-did, with a FutureWarning, and sends the step notices to the other pair's
-``tell`` or ``step`` when the fitter has one. ``finish`` receives the best
-evaluated parameters and its return value is the result; ChemFit returns the
-parameters it was given.
+have neither pair. :func:`fit_anneal`, :func:`fit_chemfit` and
+:func:`run_benchmark` drive the session themselves, and so does
+:func:`run_fitter` on a fitter without a ``fit_anneal`` method of its own.
+Each drives ``evaluate`` and ``step`` when the fitter has both, ``ask`` and
+``tell`` otherwise, and refuses a fitter with neither pair before calling
+``init``; only :func:`run_benchmark` still drives ``evaluate`` or ``ask``
+without its partner, as anneal 0.10.0 did, with a FutureWarning, and sends
+the step notices to the other pair's ``tell`` or ``step`` when the fitter
+has one. ``finish`` receives the best evaluated parameters and its return
+value is the result; ChemFit returns the parameters it was given.
+:func:`run_fitter` hands a fitter with its own ``fit_anneal`` to that method
+without checking which pair it has, so what that method does with the
+session, ``init`` included, decides whether a fitter with neither pair is
+refused, and when.
 
 Nested parameter dicts are flattened only at the optimizer boundary and
 rebuilt on the way back. A leaf keeps its type: a Python number, a

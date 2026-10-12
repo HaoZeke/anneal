@@ -7,7 +7,10 @@ below have the signatures such methods have had: one that runs
 ``run_benchmark`` with a ``preset`` parameter, one without it, and one with
 neither ``method`` nor ``preset`` that runs ``anneal.minimize`` itself. The
 others try what else a signature can do: take the budget alone, leave out
-the seed or the budget, or take parameters only by position.
+the seed or the budget, or take parameters only by position. The last has
+neither session pair, which the bridges that drive the session themselves
+refuse before ``init``, while ``run_fitter`` hands it to its ``fit_anneal``
+with the budget and the seed unchecked.
 """
 
 import functools
@@ -20,7 +23,14 @@ pytest.importorskip("anneal")
 
 from anneal import Boltzmann, Fast, minimize  # noqa: E402
 from anneal.chemfit import fit_anneal, run_benchmark, run_fitter  # noqa: E402
-from chemfit_doubles import NextFitter, ReleasedFitter, same_params  # noqa: E402
+from chemfit_doubles import (  # noqa: E402
+    ENTRIES,
+    NextFitter,
+    Recorder,
+    ReleasedFitter,
+    drive,
+    same_params,
+)
 
 
 class Handed(NextFitter):
@@ -172,6 +182,14 @@ class NoBudgetFitter(Handed):
     def fit_anneal(self, steps=60):
         self.handed.append({"steps": steps})
         return self._minimize(steps, seed=0)
+
+
+class NoPairFitter(Recorder):
+    """Has neither session pair, and a ``fit_anneal`` that calls ``init`` and drives nothing."""
+
+    def fit_anneal(self, budget, seed=0):
+        self.init()
+        return {"budget": budget, "seed": seed}
 
 
 def _fitter(kind=ReleasedFitter, bounds=None):
@@ -407,6 +425,38 @@ def test_a_refusal_inside_a_fit_anneal_follows_the_warning_given_before_the_call
             run_fitter(first, budget, preset=Fast(), **options)
     assert str(caught.value) == warning
     assert first.handed == [] and first.calls == []
+
+
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_run_fitter_hands_a_fitter_with_neither_pair_to_its_own_fit_anneal(entry):
+    plain, own = _fitter(Recorder), _fitter(NoPairFitter)
+    with pytest.raises(TypeError, match="; Recorder has neither pair$"):
+        drive(entry, plain, 60)
+    assert plain.calls == []
+    if entry == "run_fitter":
+        assert drive(entry, own, 60) == {"budget": 60, "seed": 42}
+        assert own.calls == ["init"]
+    else:
+        with pytest.raises(TypeError, match="; NoPairFitter has neither pair$"):
+            drive(entry, own, 60)
+        assert own.calls == []
+
+
+def test_a_fit_anneal_decides_whether_a_budget_of_0_is_refused_and_when():
+    unchecked = _fitter(NoPairFitter)
+    assert run_fitter(unchecked, 0, seed=-1) == {"budget": 0, "seed": -1}
+    assert unchecked.calls == ["init"]
+    late = _fitter(OwnLoopFitter)
+    with pytest.raises(ValueError) as caught:
+        run_fitter(late, 0)
+    assert str(caught.value) == "budget must be a whole number of at least 1, got 0"
+    assert late.handed == [{"budget": 0, "replicas": 4, "seed": 42}]
+    assert late.calls == ["init"] and late.evaluated == []
+    plain = _fitter(NextFitter)
+    with pytest.raises(ValueError) as caught:
+        run_fitter(plain, 0)
+    assert str(caught.value) == "budget must be positive, got 0"
+    assert plain.calls == []
 
 
 def test_a_fit_anneal_without_method_or_preset_runs_as_it_stands():

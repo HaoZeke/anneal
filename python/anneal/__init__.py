@@ -16,8 +16,8 @@ Search splits on geometry, then on gradient:
     loop. Every proposal is reflected into [low, high] and the walk starts
     at x0 when one is given.
   - fit_anneal, fit_chemfit, run_benchmark, run_fitter: gradient-free ChemFit
-    bridges. They drive evaluate/step or ask/tell and raise the first
-    exception the fitter raises.
+    bridges. They drive evaluate/step or ask/tell and raise the first exception
+    the fitter raises, but run_fitter calls a fitter's own fit_anneal instead.
 
 SA algebra (Cool / Move / Accept) stays on run / run_device / run_ensemble
 with Boltzmann, Fast, and Gsa. Last mile is polish / qmc_polish
