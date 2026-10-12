@@ -1,6 +1,8 @@
 import logging
 import os
+import re
 
+from sphinx.application import Sphinx
 from sphinx.locale import __
 
 # -- Project information -----------------------------------------------------
@@ -56,6 +58,22 @@ rust_crates = {
 rust_doc_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "crates")
 rust_rustdoc_fmt = "rst"
 rust_generate_mode = "always"
+
+_MODULE_TITLE = re.compile(
+    r"\A(=+)\n``mod \w+``\n\1\n(?=\n*\.\. rust:module:: (?P<path>[\w:]+)\n)"
+)
+
+
+def _title_module_page(app: Sphinx, docname: str, source: list[str]) -> None:
+    # sphinx-rustdocgen titles each module page by the module's last name,
+    # which modules under different parents share (packing and
+    # catalog::packing), so each page is titled by its path within the crate
+    # instead; the crate page above them names the crate.
+    page = _MODULE_TITLE.match(source[0])
+    if page:
+        title = f"``mod {page['path'].partition('::')[2]}``"
+        rule = "=" * len(title)
+        source[0] = f"{rule}\n{title}\n{rule}\n{source[0][page.end():]}"
 
 # -- sphinx-rustdoc-postprocess configuration --------------------------------
 rustdoc_postprocess_toctree_target = "reference/rust-api.rst"
@@ -118,3 +136,7 @@ html_sidebars = {
 }
 
 html_baseurl = "https://anneal.rgoswami.me/"
+
+
+def setup(app: Sphinx) -> None:
+    app.connect("source-read", _title_module_page)
