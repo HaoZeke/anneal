@@ -2110,8 +2110,10 @@ def run_fitter(
         best = run_fitter(fitter, 500)
 
     runs the portfolio with seed 42 on a ``Fitter`` without ``fit_anneal``
-    and on one whose ``fit_anneal`` runs :func:`run_benchmark`, and runs a
-    ``fit_anneal`` without a ``method`` parameter as it stands.
+    and on one whose ``fit_anneal`` passes its ``method`` and ``seed``
+    parameters to :func:`run_benchmark`. A ``fit_anneal`` without a ``seed``
+    parameter runs with its own seed, and one without a ``method`` parameter
+    runs as it stands.
 
     As in anneal 0.10.0, a preset is ignored under the portfolio or with a
     classical method of another kind, and so is ``preset_kwargs`` under the
