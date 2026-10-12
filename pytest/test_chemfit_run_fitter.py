@@ -121,6 +121,23 @@ def _same_run(left, right):
     )
 
 
+ADVICE = ", or pass method='sa' to run it"
+
+
+def _ignored_fast(method, runs, advice):
+    return (
+        f"run_fitter ignores the Fast preset under method {method!r}, which runs {runs}; "
+        f"leave it out{advice}. This will raise in a future release."
+    )
+
+
+def _warned(call):
+    with warnings.catch_warnings(record=True) as warned:
+        warnings.simplefilter("always")
+        call()
+    return [(w.category, str(w.message)) for w in warned]
+
+
 def test_run_fitter_forwards_the_fit_anneal_options():
     fitter = _fitter(NextFitter)
     low = np.array([0.0, 0.0, 1.0])
@@ -201,6 +218,12 @@ def test_a_fit_anneal_that_takes_kwargs_gets_what_the_caller_gave():
         "tell_every": 5,
         "n_epochs": 3,
     }
+    with pytest.warns(FutureWarning) as warned:
+        got = run_fitter(OwnFitAnneal(), 60, method="boltzmann", preset=Fast())
+    assert got == {"budget": 60, "method": "boltzmann"}
+    assert [str(w.message) for w in warned] == [
+        _ignored_fast("boltzmann", "its own boltzmann preset", ADVICE)
+    ]
 
 
 SLOW_FAST = Fast(t_init=2.0)
@@ -239,13 +262,25 @@ def test_a_fit_anneal_that_takes_a_preset_runs_the_one_given():
     assert _same_run(own, plain)
 
 
-@pytest.mark.parametrize("kind", [BenchmarkFitter, NoPresetFitter], ids=["preset", "no-preset"])
-def test_a_preset_the_method_does_not_run_is_ignored_for_a_fit_anneal_too(kind):
+@pytest.mark.parametrize(
+    "kind, advice", [(BenchmarkFitter, ADVICE), (NoPresetFitter, "")], ids=["preset", "no-preset"]
+)
+@pytest.mark.parametrize(
+    "method, driver, runs",
+    [
+        ("global_optimize", "portfolio", "the portfolio"),
+        ("boltzmann", "boltzmann", "its own boltzmann preset"),
+    ],
+    ids=["default", "boltzmann"],
+)
+def test_a_preset_the_method_does_not_run_is_ignored_for_a_fit_anneal_too(
+    kind, advice, method, driver, runs
+):
     own, plain = _fitter(kind), _fitter(NextFitter)
-    for fitter in (own, plain):
-        with pytest.warns(FutureWarning, match="ignores the Fast preset under method 'boltzmann'"):
-            run_fitter(fitter, 60, method="boltzmann", preset=Fast())
-    assert [(h["method"], h.get("preset")) for h in own.handed] == [("boltzmann", None)]
+    for fitter, said in ((own, advice), (plain, ADVICE)):
+        warned = _warned(lambda: run_fitter(fitter, 60, method=method, preset=Fast()))
+        assert warned == [(FutureWarning, _ignored_fast(method, runs, said))]
+    assert [(h["method"], h.get("preset")) for h in own.handed] == [(driver, None)]
     assert 1 < len(own.evaluated) <= 60
     assert _same_run(own, plain)
 

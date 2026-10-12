@@ -1961,13 +1961,19 @@ def _fitter_driver(key: str, preset: Any) -> tuple[str, Any, Any]:
     return driver, None, preset
 
 
-def _ignored_preset(method: Any, driver: str, preset: Any) -> None:
-    """Warn that :func:`run_fitter` ignores ``preset`` under ``method``, which runs ``driver``."""
+def _ignored_preset(method: Any, driver: str, preset: Any, takes_preset: bool = True) -> None:
+    """Warn that :func:`run_fitter` ignores ``preset`` under ``method``, which runs ``driver``.
+
+    The warning advises ``method='sa'`` only when ``takes_preset``: when the
+    preset would then be passed on, which a fitter's own ``fit_anneal`` may
+    not take.
+    """
     runs = "the portfolio" if driver == "portfolio" else f"its own {driver} preset"
+    advice = ", or pass method='sa' to run it" if takes_preset else ""
     _deprecated(
         f"run_fitter ignores the {type(preset).__name__} preset under method "
-        f"{method!r}, which runs {runs}; leave it out, or pass method='sa' to run "
-        "it. This will raise in a future release."
+        f"{method!r}, which runs {runs}; leave it out{advice}. This will raise in "
+        "a future release."
     )
 
 
@@ -2038,7 +2044,7 @@ def _own_fit_anneal(
             message += "; leave method out to run it as it stands"
         raise TypeError(message)
     if ignored is not None:
-        _ignored_preset(method, call["method"], ignored)
+        _ignored_preset(method, call["method"], ignored, "preset" in named or takes_any)
     return fit(**call)
 
 
