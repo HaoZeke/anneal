@@ -1,8 +1,9 @@
 """The ensemble drivers handle callback exceptions as the other drivers do.
 
 An ordinary exception from the objective or the gradient is scored and
-counted in a single warning. A fatal one ends the call, and fewer callbacks
-follow it than there are replicas.
+counted in a single warning. A fatal one ends the call without that warning,
+even after ordinary ones were scored, and fewer callbacks follow it than there
+are replicas.
 """
 
 import itertools
@@ -198,3 +199,35 @@ def test_after_a_keyboard_interrupt_fewer_calls_follow_than_there_are_replicas(
     assert warned == []
     after = log[log.index((kind, True)) + 1 :]
     assert len(after) < REPLICAS[driver]
+
+
+@pytest.mark.parametrize("driver, kind", INTERRUPTED)
+def test_a_keyboard_interrupt_after_a_scored_error_ends_the_call_without_a_warning(
+    driver, kind
+):
+    log = []
+
+    def scored(n):
+        return ZeroDivisionError("division by zero") if n == 5 else None
+
+    def interrupt(n):
+        return KeyboardInterrupt() if n == 20 else None
+
+    def scored_then_interrupt(n):
+        return scored(n) or interrupt(n)
+
+    fun_raises = scored_then_interrupt if kind == "fun" else scored
+    fun = _logged(quadratic, "fun", log, fun_raises)
+    grad = _logged(jac, "grad_fn", log, interrupt if kind == "grad_fn" else None)
+    options = {"grad_fn": grad} if driver in WITH_GRADIENT else {}
+
+    def run():
+        with pytest.raises(KeyboardInterrupt):
+            _run(driver, fun, **options)
+
+    _, warned = _runtime_warnings(run)
+    assert warned == []
+    raised = [at for at, (_, error) in enumerate(log) if error]
+    assert len(raised) == 2 and log[raised[0]] == ("fun", True)
+    assert log[raised[1]] == (kind, True)
+    assert len(log[raised[1] + 1 :]) < REPLICAS[driver]
