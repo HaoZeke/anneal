@@ -8,7 +8,10 @@ as a number. ``run_benchmark`` still
 drives a fitter with half a session protocol, as 0.10.0 did, with a
 FutureWarning too. Each bridge gives these warnings only once it has checked
 every argument, so the same call with an argument the bridge refuses raises
-that error without them.
+that error without them, except where ``run_fitter`` hands a fitter to its
+own ``fit_anneal``: there ``run_fitter`` warns of a preset that it ignores
+just before calling that method, so a refusal inside the method follows the
+warning.
 
 An argument 0.10.0 coerced, or dropped without a word, now raises an error
 that names it before the fitter's session starts. Bounds 0.10.0 ignored in
