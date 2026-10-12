@@ -581,6 +581,51 @@ def test_a_flat_objective_keeps_the_start_and_the_fixed_coordinate():
     np.testing.assert_array_equal(result.x, start)
 
 
+AFTER_ONE = float(np.nextafter(1.0, 2.0))
+
+
+@pytest.mark.parametrize(
+    "bounds",
+    [
+        [(1.0, AFTER_ONE)],
+        [(1.0, AFTER_ONE), (1.0, AFTER_ONE)],
+        [(1.0, AFTER_ONE), (0.5, 0.5)],
+    ],
+)
+@pytest.mark.parametrize("replicas", [1, 4])
+def test_free_sides_too_narrow_for_a_difference_step_leave_only_the_start(
+    bounds, replicas
+):
+    # No step changes a coordinate whose side is one unit in the last place
+    # wide, so with no wider free side the run is the start's evaluation:
+    # x0's, or without it the box's centre's in each replica.
+    low, high = np.array(bounds).T
+    x0 = high.copy()
+    fun = BatchRecorder(_square)
+    result = anneal.minimize(fun, x0, bounds, budget=60, seed=0, replicas=replicas)
+    assert len(fun.points) == result.nfev == 1
+    np.testing.assert_array_equal(fun.points[0], x0)
+    np.testing.assert_array_equal(result.x, x0)
+    assert result.fun == _square(x0) and result.success
+    free = low < high
+    direct = Recorder(_square)
+    out = anneal.global_optimize(
+        direct, low[free], high[free], 60, seed=0, x0=x0[free], replicas=replicas
+    )
+    assert len(direct.points) == out["n_evals"] == 1
+    np.testing.assert_array_equal(direct.points[0], x0[free])
+    np.testing.assert_array_equal(out["best_pos"], x0[free])
+    centre = (low[free] + high[free]) * 0.5
+    direct = Recorder(_square)
+    out = anneal.global_optimize(
+        direct, low[free], high[free], 60, seed=0, replicas=replicas
+    )
+    assert len(direct.points) == out["n_evals"] == replicas
+    for point in direct.points:
+        np.testing.assert_array_equal(point, centre)
+    np.testing.assert_array_equal(out["best_pos"], centre)
+
+
 def test_a_store_starts_the_run_from_its_best_observation_inside_the_box(tmp_path):
     store = tmp_path / "params.jsonl"
     rows = [

@@ -421,7 +421,7 @@ impl FdBfgs {
     pub fn with_first_coordinate(mut self, first: usize) -> Self {
         self.first = first % self.n;
         if matches!(self.phase, Phase::Gradient(_)) {
-            self.phase = Phase::Gradient(self.gradient_work());
+            self.phase = self.gradient_phase();
         }
         self
     }
@@ -458,9 +458,20 @@ impl FdBfgs {
         }
     }
 
-    /// True once the descent has converged or exhausted its options.
+    /// True once the descent has converged or exhausted its options, or at
+    /// its start when no side of the box is wide enough for a difference
+    /// step to change its coordinate.
     pub fn is_done(&self) -> bool {
         matches!(self.phase, Phase::Done)
+    }
+
+    /// True when `bounds` leave some coordinate of `x` a side wide enough
+    /// for a difference step to change it. When none has one, as when every
+    /// side is a unit in the last place wide or less, a descent from `x`
+    /// asks for nothing but `x` itself.
+    pub fn can_difference(x: ArrayView1<f64>, bounds: &Bounds<f64>) -> bool {
+        let engine = Self::new(x, None, bounds, FdBfgsOptions::default());
+        engine.gradient_work().done < engine.n
     }
 
     /// Sets [`FdBfgsOptions::fatol`] for the iterations that follow.
@@ -519,7 +530,7 @@ impl FdBfgs {
         }
         self.f = value;
         self.phase = if value.is_finite() {
-            Phase::Gradient(self.gradient_work())
+            self.gradient_phase()
         } else {
             Phase::Done
         };
@@ -582,6 +593,17 @@ impl FdBfgs {
         };
         self.load_coord(&mut work);
         work
+    }
+
+    /// A gradient at the iterate, or the end of the descent when no
+    /// coordinate admits a difference step, so that nothing is asked.
+    fn gradient_phase(&self) -> Phase {
+        let work = self.gradient_work();
+        if work.done < self.n {
+            Phase::Gradient(work)
+        } else {
+            Phase::Done
+        }
     }
 
     /// Loads the stencil of the next coordinate in the gradient's order,
@@ -955,7 +977,7 @@ impl FdBfgs {
                 self.scheme = FdScheme::Central;
                 self.pair_from = None;
                 self.slow = 0;
-                self.phase = Phase::Gradient(self.gradient_work());
+                self.phase = self.gradient_phase();
                 return;
             }
             self.slow += 1;
@@ -965,7 +987,7 @@ impl FdBfgs {
         self.phase = if self.slow >= self.options.patience.max(1) {
             Phase::Done
         } else {
-            Phase::Gradient(self.gradient_work())
+            self.gradient_phase()
         };
     }
 
@@ -976,7 +998,7 @@ impl FdBfgs {
         {
             self.redifferences += 1;
             self.pair_from = None;
-            self.phase = Phase::Gradient(self.gradient_work());
+            self.phase = self.gradient_phase();
             return;
         }
         match self.scheme {
@@ -984,7 +1006,7 @@ impl FdBfgs {
             FdScheme::Forward => {
                 self.scheme = FdScheme::Central;
                 self.pair_from = None;
-                self.phase = Phase::Gradient(self.gradient_work());
+                self.phase = self.gradient_phase();
             }
             FdScheme::Central if !steepest && self.stepping().scaled => {
                 self.begin_line_search(true)
@@ -1756,6 +1778,62 @@ mod tests {
         assert!(!engine.is_done());
         engine.restart_at(Array1::from_vec(vec![0.25, 0.5]).view(), None, true);
         assert_eq!(engine.ask(), Array1::from_vec(vec![0.25, 0.5]));
+    }
+
+    #[test]
+    fn a_box_too_narrow_for_a_difference_step_ends_the_descent_at_its_start() {
+        // A side one unit in the last place wide, or of zero width, has no
+        // step that changes its coordinate. With no other side, the descent
+        // has nothing to ask once it knows its start's value, whether told
+        // or given, and from any coordinate first; with one side wide
+        // enough it differences that one.
+        let up = f64::from_bits(1.0f64.to_bits() + 1);
+        let f = |x: ArrayView1<f64>| x.iter().map(|v| (v - 0.3).powi(2)).sum::<f64>();
+        let narrow = [
+            (vec![1.0], vec![up]),
+            (vec![0.5], vec![0.5]),
+            (vec![1.0, 1.0], vec![up, up]),
+            (vec![0.5, 1.0], vec![0.5, up]),
+        ];
+        for (low, high) in narrow {
+            let bounds = Bounds::new(Array1::from(low.clone()), Array1::from(high), 0.0);
+            let start = Array1::from(low);
+            let mut told = FdBfgs::new(start.view(), None, &bounds, FdBfgsOptions::default());
+            assert_eq!(told.ask(), start);
+            told.tell(f(start.view()));
+            let mut given = FdBfgs::new(
+                start.view(),
+                Some(f(start.view())),
+                &bounds,
+                FdBfgsOptions::default(),
+            )
+            .with_first_coordinate(1);
+            let mut moved = FdBfgs::new(start.view(), Some(1.0), &bounds, FdBfgsOptions::default());
+            moved.restart_at(start.view(), Some(f(start.view())), false);
+            for engine in [&mut told, &mut given, &mut moved] {
+                assert!(engine.is_done(), "{start}");
+                assert_eq!(
+                    (engine.ask(), engine.value()),
+                    (start.clone(), f(start.view()))
+                );
+                engine.tell(0.0);
+                assert_eq!(
+                    (engine.position(), engine.value()),
+                    (start.view(), f(start.view()))
+                );
+            }
+        }
+        let bounds = Bounds::new(
+            Array1::from_vec(vec![1.0, 0.0]),
+            Array1::from_vec(vec![up, 1.0]),
+            0.0,
+        );
+        let start = Array1::from_vec(vec![1.0, 0.5]);
+        let mut engine = FdBfgs::new(start.view(), None, &bounds, FdBfgsOptions::default());
+        let used = drive(&mut engine, f, 200, &bounds);
+        assert!(engine.is_done(), "used {used}");
+        assert_eq!(engine.position()[0], 1.0);
+        assert!((engine.position()[1] - 0.3).abs() < 1e-6);
     }
 
     /// log10 of the mean squared residual of a linear fit whose singular

@@ -1473,11 +1473,15 @@ budget rather than being hand-tuned.
 
 Values-only loop: under =PortfolioPolicy::Auto= a run with no gradient
 and no declared noise goes, before any regime routing, to
-=run_values_only_portfolio= (src/methods/portfolio.rs:3771, 5016-5019),
+=run_values_only_portfolio= (src/methods/portfolio.rs:3771, 5033-5036),
 a bandit over =VALUES_ONLY_ARMS= (=cma=, =qn=, =gsa=, =de=, =surrogate=,
 =explore=, portfolio.rs:1055-1072, 3672-3679) in slices of
 =max(4(d+1), min(budget/48, sqrt(4(d+1) budget)))= evaluations
-(=values_only_slice=, portfolio.rs:3687-3690). Without =x0= it starts from
+(=values_only_slice=, portfolio.rs:3687-3690). In a box with no side
+wide enough at the start for a difference step to change its
+coordinate, a unit or two in the last place (=FdBfgs::can_difference=,
+fd_bfgs.rs:472), the run is one evaluation, of =x0= or of the box's
+centre. Without =x0= it starts from
 the best of a seeded design of =d+1= points; when the budget affords
 five gradients per coordinate, an opening finite-difference descent
 runs while its slices succeed, gain more than =1e-4= times the largest
