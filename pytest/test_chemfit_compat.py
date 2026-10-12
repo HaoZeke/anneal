@@ -6,7 +6,9 @@ one the call that passes that gives. So does a numeric string where 0.10.0
 read a parameter value, a bound, a span or a ``fit_chemfit`` preset keyword
 as a number. ``run_benchmark`` still
 drives a fitter with half a session protocol, as 0.10.0 did, with a
-FutureWarning too.
+FutureWarning too. Each bridge gives these warnings only once it has checked
+every argument, so the same call with an argument the bridge refuses raises
+that error without them.
 
 An argument 0.10.0 coerced, or dropped without a word, now raises an error
 that names it before the fitter's session starts. Bounds 0.10.0 ignored in
@@ -14,6 +16,7 @@ favour of others, such as a NumPy pair in ``run_benchmark``'s context
 bounds, are now read.
 """
 
+import functools
 import re
 import warnings
 from decimal import Decimal
@@ -729,6 +732,400 @@ def test_run_benchmark_still_sends_a_mixed_fitter_its_other_step_notice(
     for got, want in zip(fitter.evaluated, full.evaluated):
         assert same_params(got, want)
     assert same_params(out, full.finished_with)
+
+
+_WILL_RAISE = "This will raise in a future release."
+_RUN_FITTER_BOLTZMANN = (
+    "run_fitter ignores the Boltzmann preset under method 'global_optimize', which runs "
+    f"the portfolio; leave it out, or pass method='sa' to run it. {_WILL_RAISE}"
+)
+_RUN_FITTER_FAST = (
+    "run_fitter ignores the Fast preset under method 'boltzmann', which runs its own "
+    f"boltzmann preset; leave it out, or pass method='sa' to run it. {_WILL_RAISE}"
+)
+_RUN_FITTER_PRESET_KWARGS = (
+    "run_fitter ignores preset_kwargs under method 'global_optimize', which runs the "
+    "portfolio; leave them out, or pass method='boltzmann', 'fast' or 'gsa' to use "
+    f"them. {_WILL_RAISE}"
+)
+_FIT_ANNEAL_PRESET_KWARGS = (
+    "fit_anneal ignores preset_kwargs under the portfolio driver, which takes no "
+    "preset; leave them out, or pass driver='boltzmann', 'fast' or 'gsa' to use them. "
+    f"{_WILL_RAISE}"
+)
+_BENCHMARK_PRESETS = {
+    "portfolio": (
+        "run_benchmark ignores the Boltzmann preset under method 'portfolio', which "
+        f"takes none; leave it out, or pass method='boltzmann' to run it. {_WILL_RAISE}"
+    ),
+    "sa": (
+        "run_benchmark has no method 'sa'; it runs the Boltzmann preset as method "
+        "'boltzmann'. Pass method='boltzmann'; 'sa' will raise in a future release."
+    ),
+    "fast": (
+        "run_benchmark runs the Boltzmann preset it was given, not method 'fast'; pass "
+        "method='boltzmann' with it. A preset of another method will raise in a future "
+        "release."
+    ),
+}
+_NO_STEP = (
+    "run_benchmark drives _EvaluateOnly through evaluate with no step notices, since "
+    "it has no step; give it a step method. A fitter without step will raise in a "
+    "future release."
+)
+_X0_OF_ANOTHER_SIZE = {"positions": np.zeros(5), "eps": 0.5}
+_X0_REFUSED = "x0 positions has shape (5,), but the parameter has shape (2, 3)"
+_LOW_HIGH_REFUSED = (
+    "low/high have lengths 2/2 but the flattened parameters have dimension 7"
+)
+_INVERTED = {"positions": (2.0, -2.0), "eps": (0.0, 1.0)}
+_INVERTED_REFUSED = (
+    "the bounds of positions[0,0] are empty, the lower above the upper: "
+    "lower=2.0, upper=-2.0"
+)
+_EMPTY_BOX_REFUSED = (
+    "the bounds of positions[0,0] are empty, the lower above the upper: "
+    "lower=1.0, upper=0.0"
+)
+
+
+def _benchmark(fitter, budget=60, initial_params=None, **options):
+    """``run_benchmark`` on the context of ``fitter``, with its parameters replaced."""
+    context = _context(fitter, budget)
+    if initial_params is not None:
+        context["initial_params"] = initial_params
+    return run_benchmark(context, **options)
+
+
+def _refused_first(label, runs, warned, refused, error, message, make=_fitter):
+    """A call that runs with the FutureWarnings ``warned``, and the same call refused."""
+    return pytest.param(make, runs, warned, refused, error, message, id=label)
+
+
+# (what run_benchmark refuses, the arguments that give it, the error, its message)
+_BENCHMARK_REFUSALS = [
+    ("an empty box", {"low": 1.0, "high": 0.0}, ValueError, _EMPTY_BOX_REFUSED),
+    (
+        "initial_params as a list",
+        {"initial_params": [("eps", 0.5)]},
+        TypeError,
+        "initial_params must be a mapping",
+    ),
+    (
+        "batch_size=0",
+        {"batch_size": 0},
+        ValueError,
+        "batch_size must be positive, got 0",
+    ),
+]
+
+
+# (id, a call 0.10.0 took, the FutureWarnings it gives as it runs, the same call
+# with an argument the bridge refuses, the error and its message, the fitter)
+REFUSED_FIRST = [
+    _refused_first(
+        "run_fitter global_optimize with Boltzmann() and x0 of another size",
+        lambda f: run_fitter(f, 60, preset=Boltzmann()),
+        [_RUN_FITTER_BOLTZMANN],
+        lambda f: run_fitter(f, 60, preset=Boltzmann(), x0=_X0_OF_ANOTHER_SIZE),
+        ValueError,
+        _X0_REFUSED,
+    ),
+    _refused_first(
+        "run_fitter global_optimize with Boltzmann() and low and high of length 2",
+        lambda f: run_fitter(f, 60, preset=Boltzmann()),
+        [_RUN_FITTER_BOLTZMANN],
+        lambda f: run_fitter(
+            f, 60, preset=Boltzmann(), low=np.zeros(2), high=np.ones(2)
+        ),
+        ValueError,
+        _LOW_HIGH_REFUSED,
+    ),
+    _refused_first(
+        "run_fitter global_optimize with Boltzmann() and budget 0",
+        lambda f: run_fitter(f, 60, preset=Boltzmann()),
+        [_RUN_FITTER_BOLTZMANN],
+        lambda f: run_fitter(f, 0, preset=Boltzmann()),
+        ValueError,
+        "budget must be positive, got 0",
+    ),
+    _refused_first(
+        "run_fitter global_optimize with Boltzmann() and seed=-1",
+        lambda f: run_fitter(f, 60, preset=Boltzmann()),
+        [_RUN_FITTER_BOLTZMANN],
+        lambda f: run_fitter(f, 60, preset=Boltzmann(), seed=-1),
+        ValueError,
+        "seed must be at least 0, got -1",
+    ),
+    _refused_first(
+        "run_fitter boltzmann with Fast() and x0 of another size",
+        lambda f: run_fitter(
+            f, 60, method="boltzmann", preset=Fast(), steps_per_epoch=10
+        ),
+        [_RUN_FITTER_FAST],
+        lambda f: run_fitter(
+            f,
+            60,
+            method="boltzmann",
+            preset=Fast(),
+            steps_per_epoch=10,
+            x0=_X0_OF_ANOTHER_SIZE,
+        ),
+        ValueError,
+        _X0_REFUSED,
+    ),
+    _refused_first(
+        "run_fitter global_optimize with preset_kwargs and x0 of another size",
+        lambda f: run_fitter(f, 60, preset_kwargs={"t_init": 2.0}),
+        [_RUN_FITTER_PRESET_KWARGS],
+        lambda f: run_fitter(
+            f, 60, preset_kwargs={"t_init": 2.0}, x0=_X0_OF_ANOTHER_SIZE
+        ),
+        ValueError,
+        _X0_REFUSED,
+    ),
+    _refused_first(
+        "run_fitter global_optimize with Boltzmann() and preset_kwargs and x0 of another size",
+        lambda f: run_fitter(f, 60, preset=Boltzmann(), preset_kwargs={"t_init": 2.0}),
+        [_RUN_FITTER_BOLTZMANN, _RUN_FITTER_PRESET_KWARGS],
+        lambda f: run_fitter(
+            f,
+            60,
+            preset=Boltzmann(),
+            preset_kwargs={"t_init": 2.0},
+            x0=_X0_OF_ANOTHER_SIZE,
+        ),
+        ValueError,
+        _X0_REFUSED,
+    ),
+    _refused_first(
+        "run_fitter fast with Boltzmann() and preset_kwargs t_init=-1",
+        lambda f: run_fitter(
+            f, 60, method="fast", preset=Boltzmann(), steps_per_epoch=10
+        ),
+        [
+            "run_fitter ignores the Boltzmann preset under method 'fast', which runs its "
+            f"own fast preset; leave it out, or pass method='sa' to run it. {_WILL_RAISE}"
+        ],
+        lambda f: run_fitter(
+            f,
+            60,
+            method="fast",
+            preset=Boltzmann(),
+            steps_per_epoch=10,
+            preset_kwargs={"t_init": -1.0},
+        ),
+        ValueError,
+        "t_init must be positive and finite, got -1.0",
+    ),
+    _refused_first(
+        "run_fitter x0 one value for the only parameter and empty bounds",
+        lambda f: run_fitter(f, 60, x0={"x": 0.4}),
+        [
+            "x0 x has shape (), but the parameter has shape (3,); its one value fills "
+            "the parameter. Pass it in the parameter's shape; another shape will raise "
+            "in a future release."
+        ],
+        lambda f: run_fitter(_as(f, {"x": (1.0, -1.0)}), 60, x0={"x": 0.4}),
+        ValueError,
+        "the bounds of x[0] are empty, the lower above the upper: lower=1.0, upper=-1.0",
+        make=_ONLY,
+    ),
+    *[
+        _refused_first(
+            f"run_benchmark {method} with Boltzmann() and {label}",
+            functools.partial(_benchmark, method=method, preset=Boltzmann()),
+            [warning],
+            functools.partial(_benchmark, method=method, preset=Boltzmann(), **more),
+            error,
+            message,
+        )
+        for method, warning in _BENCHMARK_PRESETS.items()
+        for label, more, error, message in _BENCHMARK_REFUSALS
+    ],
+    _refused_first(
+        "run_benchmark sa with Boltzmann() and t_init=-1",
+        lambda f: _benchmark(f, method="sa", preset=Boltzmann()),
+        [_BENCHMARK_PRESETS["sa"]],
+        lambda f: _benchmark(f, method="sa", preset=Boltzmann(t_init=-1.0)),
+        ValueError,
+        "t_init must be positive and finite, got -1.0",
+    ),
+    _refused_first(
+        "run_benchmark on a fitter without step and budget 0",
+        _benchmark,
+        [_NO_STEP],
+        lambda f: _benchmark(f, 0),
+        ValueError,
+        "budget must be positive, got 0",
+        make=lambda: _fitter(_EvaluateOnly),
+    ),
+    _refused_first(
+        "run_benchmark on a fitter without step and method='bogus'",
+        _benchmark,
+        [_NO_STEP],
+        lambda f: _benchmark(f, method="bogus"),
+        ValueError,
+        "unknown method 'bogus': expected 'portfolio', 'boltzmann', 'fast', or 'gsa'",
+        make=lambda: _fitter(_EvaluateOnly),
+    ),
+    _refused_first(
+        "run_benchmark on a fitter without step with Boltzmann() and an empty box",
+        lambda f: _benchmark(f, preset=Boltzmann()),
+        [_NO_STEP, _BENCHMARK_PRESETS["portfolio"]],
+        lambda f: _benchmark(f, preset=Boltzmann(), low=1.0, high=0.0),
+        ValueError,
+        _EMPTY_BOX_REFUSED,
+        make=lambda: _fitter(_EvaluateOnly),
+    ),
+    _refused_first(
+        "fit_anneal preset_kwargs under the portfolio and x0 of another size",
+        lambda f: fit_anneal(f, 60, preset_kwargs={"t_init": 2.0}),
+        [_FIT_ANNEAL_PRESET_KWARGS],
+        lambda f: fit_anneal(
+            f, 60, preset_kwargs={"t_init": 2.0}, x0=_X0_OF_ANOTHER_SIZE
+        ),
+        ValueError,
+        _X0_REFUSED,
+    ),
+    _refused_first(
+        "fit_anneal preset_kwargs under the portfolio and low and high of length 2",
+        lambda f: fit_anneal(f, 60, preset_kwargs={"t_init": 2.0}),
+        [_FIT_ANNEAL_PRESET_KWARGS],
+        lambda f: fit_anneal(
+            f, 60, preset_kwargs={"t_init": 2.0}, low=np.zeros(2), high=np.ones(2)
+        ),
+        ValueError,
+        _LOW_HIGH_REFUSED,
+    ),
+    _refused_first(
+        "fit_anneal preset_kwargs under the portfolio and low without high",
+        lambda f: fit_anneal(f, 60, preset_kwargs={"t_init": 2.0}),
+        [_FIT_ANNEAL_PRESET_KWARGS],
+        lambda f: fit_anneal(f, 60, preset_kwargs={"t_init": 2.0}, low=np.zeros(7)),
+        ValueError,
+        "low and high must be given together",
+    ),
+    _refused_first(
+        "fit_anneal preset_kwargs under the portfolio and empty bounds",
+        lambda f: fit_anneal(f, 60, preset_kwargs={"t_init": 2.0}),
+        [_FIT_ANNEAL_PRESET_KWARGS],
+        lambda f: fit_anneal(_as(f, _INVERTED), 60, preset_kwargs={"t_init": 2.0}),
+        ValueError,
+        _INVERTED_REFUSED,
+    ),
+    _refused_first(
+        "fit_anneal preset_kwargs and a string bound_span and low and high of length 2",
+        lambda f: fit_anneal(f, 60, preset_kwargs={"t_init": 2.0}, bound_span="5e-1"),
+        [
+            _FIT_ANNEAL_PRESET_KWARGS,
+            "fit_anneal reads bound_span from a string; pass a number instead. "
+            "A string will raise in a future release.",
+        ],
+        lambda f: fit_anneal(
+            f,
+            60,
+            preset_kwargs={"t_init": 2.0},
+            bound_span="5e-1",
+            low=np.zeros(2),
+            high=np.ones(2),
+        ),
+        ValueError,
+        _LOW_HIGH_REFUSED,
+    ),
+    _refused_first(
+        "fit_anneal x0 leaf (3, 2) for (2, 3) and low and high of length 2",
+        lambda f: fit_anneal(
+            f, 60, x0={"positions": _START[:6].reshape(3, 2), "eps": 0.5}
+        ),
+        [
+            "x0 positions has shape (3, 2), but the parameter has shape (2, 3); its "
+            "values are read in C order. Pass it in the parameter's shape; another "
+            "shape will raise in a future release."
+        ],
+        lambda f: fit_anneal(
+            f,
+            60,
+            x0={"positions": _START[:6].reshape(3, 2), "eps": 0.5},
+            low=np.zeros(2),
+            high=np.ones(2),
+        ),
+        ValueError,
+        _LOW_HIGH_REFUSED,
+    ),
+    _refused_first(
+        "fit_chemfit t_init under the portfolio and empty bounds",
+        lambda f: fit_chemfit(f, 60, t_init=2.0),
+        [
+            "fit_chemfit ignores t_init under method 'portfolio', which takes no "
+            "preset; leave it out, or pass method='boltzmann', 'fast' or 'gsa' to use "
+            f"it. {_WILL_RAISE}"
+        ],
+        lambda f: fit_chemfit(_as(f, _INVERTED), 60, t_init=2.0),
+        ValueError,
+        _INVERTED_REFUSED,
+    ),
+    _refused_first(
+        "fit_chemfit gamma under boltzmann and t_init=-1",
+        lambda f: fit_chemfit(f, 60, method="boltzmann", steps_per_epoch=10, gamma=0.5),
+        [
+            "fit_chemfit ignores gamma, which method 'boltzmann' does not take; it "
+            "takes t_init and sigma. Pass only those; a preset keyword of another "
+            "method will raise in a future release."
+        ],
+        lambda f: fit_chemfit(
+            f, 60, method="boltzmann", steps_per_epoch=10, gamma=0.5, t_init=-1.0
+        ),
+        ValueError,
+        "t_init must be positive and finite, got -1.0",
+    ),
+    _refused_first(
+        "fit_chemfit initial_parameters as a list of pairs and empty bounds",
+        lambda f: fit_chemfit(_paired(f), 60),
+        [
+            "fit_chemfit reads fitter.initial_parameters, a list of (key, value) pairs, "
+            "as a dict; give the fitter a dict. A fitter whose initial_parameters is not "
+            "a mapping will raise in a future release."
+        ],
+        lambda f: fit_chemfit(_paired(_as(f, _INVERTED)), 60),
+        ValueError,
+        _INVERTED_REFUSED,
+    ),
+]
+
+
+@pytest.mark.parametrize("make, runs, warned, refused, error, message", REFUSED_FIRST)
+def test_a_call_refused_for_another_argument_gives_no_future_warning(
+    make, runs, warned, refused, error, message
+):
+    fitter = make()
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        with pytest.raises(error) as caught:
+            refused(fitter)
+    assert str(caught.value) == message
+    assert [str(w.message) for w in record] == []
+    assert fitter.calls == [] and fitter.evaluated == []
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(error, match=re.escape(message)):
+            refused(make())
+
+
+@pytest.mark.parametrize("make, runs, warned, refused, error, message", REFUSED_FIRST)
+def test_the_call_without_the_refused_argument_still_warns(
+    make, runs, warned, refused, error, message
+):
+    fitter = make()
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        runs(fitter)
+    assert [(w.category, str(w.message)) for w in record] == [
+        (FutureWarning, warning) for warning in warned
+    ]
+    assert all(w.filename == __file__ for w in record)
+    assert fitter.calls[0] == "init" and fitter.calls[-1] == "finish"
+    assert len(fitter.evaluated) > 1
 
 
 def _same(got, want):

@@ -23,6 +23,7 @@ there.
 import functools
 import inspect
 import re
+import warnings
 
 import numpy as np
 import pytest
@@ -232,9 +233,12 @@ def test_run_benchmark_refuses_a_batch_from_a_fitter_without_step():
         step = None
 
     fitter = _fitter(EvaluateOnly)
-    with pytest.warns(FutureWarning), pytest.raises(TypeError) as refused:
-        drive("run_benchmark", fitter, 50, batch_size=2)
+    with warnings.catch_warnings(record=True) as warned:
+        warnings.simplefilter("always")
+        with pytest.raises(TypeError) as refused:
+            drive("run_benchmark", fitter, 50, batch_size=2)
     assert str(refused.value) == _refusal("EvaluateOnly", "step")
+    assert [str(w.message) for w in warned] == []
     assert fitter.calls == []
 
 

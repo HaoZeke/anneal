@@ -50,17 +50,18 @@ when it is called: one that takes a single candidate gets the start as a
 list of one, after ``init``, and what it raises, or a TypeError when its
 reply is not one real loss per candidate, ends the drive as below.
 
-Every argument is checked before ``fitter.init()``. The first exception the
-fitter raises, or a loss that is not a real number, ends the drive: the
-fitter is not called again, ``finish`` is skipped, and the exception reaches
-the caller. The few arguments anneal 0.10.0 accepted and ignored, such as
-preset keywords under the portfolio, still run with a FutureWarning that
-says what to pass instead; they will raise in a future release. So does a
-numeric string given for a parameter value, a bound, ``bound_span``,
-``default_span`` or a preset keyword a :func:`fit_chemfit` method takes, such
-as a bounds pair PyYAML reads from ``[1e-3, 1e1]``: it is read as a number,
-with one FutureWarning per call. A string ``budget``, ``seed``,
-``steps_per_epoch`` or ``tell_every`` is a TypeError.
+Every argument is checked before ``fitter.init()`` and before any
+FutureWarning, so a refused call raises its error without one. The first
+exception the fitter raises, or a loss that is not a real number, ends the
+drive: the fitter is not called again, ``finish`` is skipped, and the
+exception reaches the caller. The few arguments anneal 0.10.0 accepted and
+ignored, such as preset keywords under the portfolio, still run with a
+FutureWarning that says what to pass instead; they will raise in a future
+release. So does a numeric string given for a parameter value, a bound,
+``bound_span``, ``default_span`` or a preset keyword a :func:`fit_chemfit`
+method takes, such as a bounds pair PyYAML reads from ``[1e-3, 1e1]``: it is
+read as a number, with one FutureWarning per call. A string ``budget``,
+``seed``, ``steps_per_epoch`` or ``tell_every`` is a TypeError.
 """
 
 from __future__ import annotations
@@ -71,7 +72,7 @@ import math
 import numbers
 import sys
 import warnings
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from decimal import Decimal
 from typing import Any
 
@@ -276,12 +277,45 @@ def _object_items(arr: np.ndarray, what: str) -> np.ndarray:
 def _deprecated(message: str) -> None:
     """A FutureWarning for a call anneal 0.10.0 took that will raise later.
 
-    The warning points at the first caller outside this module.
+    Inside :class:`_Checks` it waits until the checks pass. The warning
+    points at the first caller outside this module.
     """
+    held = _HELD.get()
+    if held is not None:
+        held.append(message)
+        return
     frame, depth = sys._getframe(), 0
     while frame is not None and frame.f_globals.get("__name__") == __name__:
         frame, depth = frame.f_back, depth + 1
     warnings.warn(message, FutureWarning, stacklevel=depth + 1)
+
+
+_HELD: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "anneal_chemfit_held", default=None
+)
+
+
+class _Checks:
+    """The argument checks of one bridge call, which end before the fitter is called.
+
+    Each FutureWarning given inside them waits for them to end: a call one
+    of them refuses raises its error without a warning, and a call that
+    passes them all gives each warning, in the order given. ``held`` holds
+    the warnings of checks the caller ran first.
+    """
+
+    def __init__(self, held: Iterable[str] = ()):
+        self.held = list(held)
+        self.token = None
+
+    def __enter__(self) -> None:
+        self.token = _HELD.set(self.held)
+
+    def __exit__(self, kind, error, trace) -> None:
+        _HELD.reset(self.token)
+        if kind is None:
+            for message in self.held:
+                _deprecated(message)
 
 
 _STRINGS: contextvars.ContextVar[dict[str, int] | None] = contextvars.ContextVar(
@@ -1302,11 +1336,13 @@ def fit_anneal(
         gets the start as a list of one, after ``init``, and stops the fit
         there.
 
-    Every argument is checked before ``fitter.init()``. Returns what
-    ``fitter.finish`` returns for the best evaluated parameters (ChemFit
-    returns them as given); each leaf keeps its type, shape and floating
-    dtype. The first exception raised by the fitter, or a loss that is not a
-    real number, stops the fit and is raised without calling ``finish``.
+    Every argument is checked before ``fitter.init()`` and before any
+    FutureWarning, so a refused call raises its error without one. Returns
+    what ``fitter.finish`` returns for the best evaluated parameters
+    (ChemFit returns them as given); each leaf keeps its type, shape and
+    floating dtype. The first exception raised by the fitter, or a loss that
+    is not a real number, stops the fit and is raised without calling
+    ``finish``.
     """
     return _fit_anneal(
         fitter,
@@ -1338,23 +1374,26 @@ def _fit_anneal(
     batch_size: Any = 1,
     preset: Any = None,
     caller: str = "fit_anneal",
+    held: Iterable[str] = (),
 ) -> Any:
     """:func:`fit_anneal`, also taking a preset instance from :func:`run_fitter`.
 
-    ``caller`` names the bridge in the warning about numeric strings.
+    ``caller`` names the bridge in the warning about numeric strings, and
+    ``held`` holds the FutureWarnings of the bridge's own checks, given
+    first once these pass too.
     """
-    evaluate, step = _protocol(fitter)
-    name = _choice(driver, _DRIVERS)
-    if name is None:
-        raise ValueError(
-            f"driver must be 'portfolio' or one of {', '.join(_CLASSICAL_DRIVERS)}; "
-            f"got {driver!r}"
-        )
-    budget = _whole("budget", budget, 1)
-    seed = _whole("seed", seed, 0, _SEED_LIMIT)
-    steps = min(_whole("steps_per_epoch", steps_per_epoch, 1), budget)
-    size = _batch_size(batch_size, name, fitter)
-    with _Strings(caller):
+    with _Checks(held), _Strings(caller):
+        evaluate, step = _protocol(fitter)
+        name = _choice(driver, _DRIVERS)
+        if name is None:
+            raise ValueError(
+                f"driver must be 'portfolio' or one of {', '.join(_CLASSICAL_DRIVERS)}; "
+                f"got {driver!r}"
+            )
+        budget = _whole("budget", budget, 1)
+        seed = _whole("seed", seed, 0, _SEED_LIMIT)
+        steps = min(_whole("steps_per_epoch", steps_per_epoch, 1), budget)
+        size = _batch_size(batch_size, name, fitter)
         span = _positive("bound_span", bound_span)
         kwargs = _preset_kwargs(preset_kwargs)
         if name == "portfolio":
@@ -1634,7 +1673,8 @@ def fit_chemfit(
             FutureWarning, as 0.10.0 ignored it, and will raise in a
             future release; any other keyword is a TypeError.
 
-    Every argument is checked before ``fitter.init()``.
+    Every argument is checked before ``fitter.init()`` and before any
+    FutureWarning, so a refused call raises its error without one.
 
     Returns:
         What ``fitter.finish(best_params)`` returns; ChemFit returns
@@ -1642,16 +1682,16 @@ def fit_chemfit(
         raised by the fitter, or a loss that is not a real number, stops the
         fit and is raised without calling ``finish``.
     """
-    evaluate, step = _protocol(fitter)
-    name = _choice(method, _DRIVERS)
-    if name is None:
-        raise ValueError(
-            f"unknown method {method!r}: expected 'portfolio', 'boltzmann', 'fast', or 'gsa'"
-        )
-    budget = _whole("budget", budget, 1)
-    seed = _whole("seed", seed, 0, _SEED_LIMIT)
-    size = _batch_size(batch_size, name, fitter)
-    with _Strings("fit_chemfit"):
+    with _Checks(), _Strings("fit_chemfit"):
+        evaluate, step = _protocol(fitter)
+        name = _choice(method, _DRIVERS)
+        if name is None:
+            raise ValueError(
+                f"unknown method {method!r}: expected 'portfolio', 'boltzmann', 'fast', or 'gsa'"
+            )
+        budget = _whole("budget", budget, 1)
+        seed = _whole("seed", seed, 0, _SEED_LIMIT)
+        size = _batch_size(batch_size, name, fitter)
         span = _positive("default_span", default_span)
         tell_every = _whole("tell_every", tell_every, 1)
         steps = min(_whole("steps_per_epoch", steps_per_epoch, 1), budget)
@@ -1867,8 +1907,9 @@ def run_benchmark(
     ``low`` and ``high`` may be vectors or scalars (broadcast). When they
     are omitted, bounds are read from ``benchmark_context["bounds"]`` or
     ``fitter.bounds``. A coordinate whose two bounds are equal is held fixed.
-    Every argument is checked before ``fitter.init()``; the first exception
-    raised by the fitter is raised without calling ``finish``.
+    Every argument is checked before ``fitter.init()`` and before any
+    FutureWarning, so a refused call raises its error without one; the first
+    exception raised by the fitter is raised without calling ``finish``.
 
     ``batch_size`` above one runs the portfolio as that many batch replicas
     of :func:`anneal.minimize` sharing one archive and incumbent, as in
@@ -1885,22 +1926,22 @@ def run_benchmark(
     stops the fit there.
     """
     fitter = benchmark_context["fitter"]
-    evaluate, step = _protocol(fitter, without_step="run_benchmark")
-    key = _choice(method, (*_DRIVERS, "sa"))
-    if key is None or (key == "sa" and preset is None):
-        raise ValueError(
-            f"unknown method {method!r}: expected 'portfolio', 'boltzmann', 'fast', or 'gsa'"
-        )
-    budget = _whole("budget", benchmark_context["budget"], 1)
-    seed = _whole("seed", seed, 0, _SEED_LIMIT)
-    steps = min(_whole("steps_per_epoch", steps_per_epoch, 1), budget)
-    name, preset = _benchmark_preset(key, preset)
-    size = _batch_size(batch_size, name, fitter)
+    with _Checks(), _Strings("run_benchmark"):
+        evaluate, step = _protocol(fitter, without_step="run_benchmark")
+        key = _choice(method, (*_DRIVERS, "sa"))
+        if key is None or (key == "sa" and preset is None):
+            raise ValueError(
+                f"unknown method {method!r}: expected 'portfolio', 'boltzmann', 'fast', or 'gsa'"
+            )
+        budget = _whole("budget", benchmark_context["budget"], 1)
+        seed = _whole("seed", seed, 0, _SEED_LIMIT)
+        steps = min(_whole("steps_per_epoch", steps_per_epoch, 1), budget)
+        name, preset = _benchmark_preset(key, preset)
+        size = _batch_size(batch_size, name, fitter)
 
-    initial = benchmark_context["initial_params"]
-    if not isinstance(initial, Mapping):
-        raise TypeError("initial_params must be a mapping")
-    with _Strings("run_benchmark"):
+        initial = benchmark_context["initial_params"]
+        if not isinstance(initial, Mapping):
+            raise TypeError("initial_params must be a mapping")
         layout = _Layout(initial)
         if layout.size == 0:
             raise ValueError("initial_params is empty")
@@ -1961,16 +2002,16 @@ def _fitter_driver(key: str, preset: Any) -> tuple[str, Any, Any]:
     return driver, None, preset
 
 
-def _ignored_preset(method: Any, driver: str, preset: Any, takes_preset: bool = True) -> None:
-    """Warn that :func:`run_fitter` ignores ``preset`` under ``method``, which runs ``driver``.
+def _ignored_preset(method: Any, driver: str, preset: Any, takes_preset: bool = True) -> str:
+    """The warning that :func:`run_fitter` ignores ``preset`` under ``method``, which runs ``driver``.
 
-    The warning advises ``method='sa'`` only when ``takes_preset``: when the
-    preset would then be passed on, which a fitter's own ``fit_anneal`` may
-    not take.
+    It advises ``method='sa'`` only when ``takes_preset``: when the preset
+    would then be passed on, which a fitter's own ``fit_anneal`` may not
+    take.
     """
     runs = "the portfolio" if driver == "portfolio" else f"its own {driver} preset"
     advice = ", or pass method='sa' to run it" if takes_preset else ""
-    _deprecated(
+    return (
         f"run_fitter ignores the {type(preset).__name__} preset under method "
         f"{method!r}, which runs {runs}; leave it out{advice}. This will raise in "
         "a future release."
@@ -2062,7 +2103,7 @@ def _own_fit_anneal(
             message += "; leave method out to run it as it stands"
         raise TypeError(message)
     if ignored is not None:
-        _ignored_preset(method, call["method"], ignored, by_keyword("preset"))
+        _deprecated(_ignored_preset(method, call["method"], ignored, by_keyword("preset")))
     return fit(*args, **call)
 
 
@@ -2118,11 +2159,11 @@ def run_fitter(
     As in anneal 0.10.0, a preset is ignored under the portfolio or with a
     classical method of another kind, and so is ``preset_kwargs`` under the
     portfolio on a fitter without ``fit_anneal``. Each gives a FutureWarning
-    and will raise in a future release. A preset ignored so is not passed to
-    a fitter's own ``fit_anneal``; there the warning comes only once nothing
-    is refused, so a refused call raises its TypeError alone. A preset given
-    to a ``fit_anneal`` that gets no method is passed, or refused, as any
-    option is.
+    and will raise in a future release. The warning comes only once nothing
+    is refused, so a refused call raises its error alone, and a preset
+    ignored so is not passed to a fitter's own ``fit_anneal``. A preset
+    given to a ``fit_anneal`` that gets no method is passed, or refused, as
+    any option is.
     """
     own = hasattr(fitter, "fit_anneal")
     if not own:
@@ -2140,10 +2181,11 @@ def run_fitter(
     options = dict(kwargs)
     preset_kwargs = _preset_kwargs(options.pop("preset_kwargs", None))
     driver, preset, ignored = _fitter_driver(key, preset)
+    held: list[str] = []
     if ignored is not None:
-        _ignored_preset(method, driver, ignored)
+        held.append(_ignored_preset(method, driver, ignored))
     if driver == "portfolio" and preset_kwargs:
-        _deprecated(
+        held.append(
             f"run_fitter ignores preset_kwargs under method {method!r}, which runs "
             "the portfolio; leave them out, or pass method='boltzmann', 'fast' or "
             "'gsa' to use them. This will raise in a future release."
@@ -2157,5 +2199,6 @@ def run_fitter(
         preset=preset,
         preset_kwargs=preset_kwargs,
         caller="run_fitter",
+        held=held,
         **options,
     )
