@@ -44,9 +44,12 @@
 //! cross most of the box. Projected onto a face and accepted there, such a
 //! trial would leave the coordinates it clamped held at their bounds while
 //! descending would carry them out of the box, and the descent could settle
-//! in a minimum of the face rather than of the fit. A trial at the minimiser
-//! of the quadratic is not held: on a quadratic objective it is the minimum
-//! along the line. Pairs that violate the curvature condition are skipped.
+//! in a minimum of the face rather than of the fit. Where a face does hold
+//! the minimum over the box, holding the trial short of it usually brings
+//! the descent there later, so at small budgets it can end higher. A trial
+//! at the minimiser of the quadratic is not held: on a quadratic objective
+//! it is the minimum along the line. Pairs that violate the curvature
+//! condition are skipped.
 //!
 //! The initial inverse Hessian is the box metric `D = diag(w^2)`, the identity
 //! in box-normalised coordinates, so a side that spans decades moves as far,

@@ -194,6 +194,9 @@ line. The descent holds a coordinate at its bound while descending would
 carry it out of the box, so a trial carried onto a face can leave the
 descent in a minimum of the face, as on
 [[*A log-loss fit with minima on its faces][a log-loss fit below]].
+Where a face does hold the minimum over the box, holding the longer
+trial short of it usually brings the descent there later, so at small
+budgets it can end higher, as measured in the same section.
 
 The descent also keeps a second BFGS model, of the logarithm of its
 values, while every value it has started from or accepted is positive.
@@ -844,6 +847,33 @@ line search extrapolated as far as it may in 1 of 40 runs before the
 hold and no first step reached a bound, and the loop is level with both
 at 1000 and 5000, through ChemFit as well (7/27/6 over the 40 seeds at
 1000, 0/10/0 over seeds 0 to 9 at 5000).
+
+The hold costs where a face does hold the minimum over the box: held
+short of the face, the longer trial usually brings the descent to that
+minimum later, so at small budgets it can end higher. One replica of
+=minimize= was run over 80 paired seeds (20 to 99) on the base-10
+logarithm of a rotated quadratic form centred outside the unit cube, of
+condition 1e3 in 10 coordinates and of condition 1e2 in 6, from starts
+drawn in the middle 80% of each side. Against the loop before the
+hold, the loop ends higher at 200 evaluations on 77 and 58 seeds
+(3/0/77, =q= 6.2e-15, and 14/8/58, =q= 1.0e-7), by medians of 0.018
+and 6.9e-7 in the logarithm and at most 0.1 and 0.025. At 500 and 1000
+the ten-coordinate form is level (18/44/18 and 5/68/7), while the
+six-coordinate one ends higher on 12 seeds and lower on 3 at 500 (=q=
+0.001) and higher on 6 and lower on none at 1000 (=q= 0.016), by at
+most 0.013 and 0.0043. Run to 1000 evaluations, the loop first comes
+within 1e-3 of the lower of the two runs' best values after a median of
+242 and 100 evaluations, and with the hold taken out after 164.5 and
+58.5, later on 65 and 74 of the 80 seeds. From starts with three of the
+six coordinates on bounds the loop ends higher at 200 (15/10/55, =q=
+4.2e-6) and is level at 500 (13/55/12) and 1000 (8/65/7). The hold
+costs too where the minimum lies on a wall inside the box beyond which
+the values are NaN: on the logarithm of a five-coordinate form of
+condition 1e2 centred at 0.85 in its first coordinate, whose values are
+NaN where that coordinate exceeds 0.7, from starts drawn between 0.05
+and 0.5 on each side, the loop ends higher at 200 (8/11/61, =q=
+7.5e-12, by a median of 0.16) and at 500 (28/8/44, =q= 0.0071), and is
+level at 1000 (34/7/39).
 
 ** The default budget of =minimize=
 
