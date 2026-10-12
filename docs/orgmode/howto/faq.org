@@ -1,4 +1,4 @@
-#+TITLE: FAQ
+#+TITLE: Usage FAQ
 #+OPTIONS: toc:nil todo:nil num:nil author:nil ^:nil
 
 * How do I pick between the presets?
