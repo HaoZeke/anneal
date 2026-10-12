@@ -142,6 +142,14 @@ class PositionalSeedFitter(Handed):
         return self._minimize(budget, seed)
 
 
+class PositionalPresetFitter(Handed):
+    """Runs ``run_benchmark``, taking the preset only by position."""
+
+    def fit_anneal(self, budget, preset=None, /, *, method="portfolio", seed=0):
+        self.handed.append({"method": method, "preset": preset, "seed": seed})
+        return self._benchmark(budget, method=method, preset=preset, seed=seed)
+
+
 class LateBudgetFitter(Handed):
     """Takes the budget only by position, after a scale."""
 
@@ -163,13 +171,19 @@ def _same_run(left, right):
     )
 
 
-ADVICE = ", or pass method='sa' to run it"
+def _ignored_fast(method, runs, why_not=None):
+    """The warning for a Fast preset that ``method`` does not run.
 
-
-def _ignored_fast(method, runs, advice):
+    ``why_not`` says why a fitter's own ``fit_anneal`` cannot take the preset.
+    """
+    if why_not is None:
+        return (
+            f"run_fitter ignores the Fast preset under method {method!r}, which runs {runs}; "
+            "leave it out, or pass method='sa' to run it. This will raise in a future release."
+        )
     return (
-        f"run_fitter ignores the Fast preset under method {method!r}, which runs {runs}; "
-        f"leave it out{advice}. This will raise in a future release."
+        f"run_fitter ignores the Fast preset under method {method!r}, which runs {runs}, "
+        f"and {why_not}; leave it out. This will raise in a future release."
     )
 
 
@@ -264,7 +278,7 @@ def test_a_fit_anneal_that_takes_kwargs_gets_what_the_caller_gave():
         got = run_fitter(OwnFitAnneal(), 60, method="boltzmann", preset=Fast())
     assert got == {"budget": 60, "method": "boltzmann"}
     assert [str(w.message) for w in warned] == [
-        _ignored_fast("boltzmann", "its own boltzmann preset", ADVICE)
+        _ignored_fast("boltzmann", "its own boltzmann preset")
     ]
 
 
@@ -305,7 +319,16 @@ def test_a_fit_anneal_that_takes_a_preset_runs_the_one_given():
 
 
 @pytest.mark.parametrize(
-    "kind, advice", [(BenchmarkFitter, ADVICE), (NoPresetFitter, "")], ids=["preset", "no-preset"]
+    "kind, why_not",
+    [
+        (BenchmarkFitter, None),
+        (NoPresetFitter, "NoPresetFitter.fit_anneal() takes no 'preset'"),
+        (
+            PositionalPresetFitter,
+            "PositionalPresetFitter.fit_anneal() takes 'preset' only by position",
+        ),
+    ],
+    ids=["preset", "no-preset", "positional-only-preset"],
 )
 @pytest.mark.parametrize(
     "method, driver, runs",
@@ -316,12 +339,12 @@ def test_a_fit_anneal_that_takes_a_preset_runs_the_one_given():
     ids=["default", "boltzmann"],
 )
 def test_a_preset_the_method_does_not_run_is_ignored_for_a_fit_anneal_too(
-    kind, advice, method, driver, runs
+    kind, why_not, method, driver, runs
 ):
     own, plain = _fitter(kind), _fitter(NextFitter)
-    for fitter, said in ((own, advice), (plain, ADVICE)):
+    for fitter, why in ((own, why_not), (plain, None)):
         warned = _warned(lambda: run_fitter(fitter, 60, method=method, preset=Fast()))
-        assert warned == [(FutureWarning, _ignored_fast(method, runs, said))]
+        assert warned == [(FutureWarning, _ignored_fast(method, runs, why))]
     assert [(h["method"], h.get("preset")) for h in own.handed] == [(driver, None)]
     assert 1 < len(own.evaluated) <= 60
     assert _same_run(own, plain)
@@ -474,6 +497,14 @@ def test_a_positional_only_seed_gets_nothing_by_default():
                 "takes 'seed' only by position"
             ),
         ),
+        (
+            PositionalPresetFitter,
+            {"method": "sa", "preset": SLOW_FAST},
+            (
+                "run_fitter() cannot pass the Fast preset to "
+                "PositionalPresetFitter.fit_anneal(), which takes 'preset' only by position"
+            ),
+        ),
     ],
     ids=[
         "preset",
@@ -487,6 +518,7 @@ def test_a_positional_only_seed_gets_nothing_by_default():
         "budget-after-a-positional-parameter",
         "budget-after-a-positional-parameter-and-x0",
         "positional-only-seed-beside-kwargs",
+        "positional-only-preset",
     ],
 )
 def test_an_option_a_fit_anneal_cannot_take_is_refused_before_anything_is_evaluated(

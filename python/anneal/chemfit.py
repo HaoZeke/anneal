@@ -2002,19 +2002,19 @@ def _fitter_driver(key: str, preset: Any) -> tuple[str, Any, Any]:
     return driver, None, preset
 
 
-def _ignored_preset(method: Any, driver: str, preset: Any, takes_preset: bool = True) -> str:
+def _ignored_preset(method: Any, driver: str, preset: Any, why_not: str = "") -> str:
     """The warning that :func:`run_fitter` ignores ``preset`` under ``method``, which runs ``driver``.
 
-    It advises ``method='sa'`` only when ``takes_preset``: when the preset
-    would then be passed on, which a fitter's own ``fit_anneal`` may not
-    take.
+    It advises ``method='sa'``, under which the preset is passed on, unless
+    ``why_not`` says why a fitter's own ``fit_anneal`` cannot take it.
     """
     runs = "the portfolio" if driver == "portfolio" else f"its own {driver} preset"
-    advice = ", or pass method='sa' to run it" if takes_preset else ""
+    why = f", and {why_not}" if why_not else ""
+    advice = "" if why_not else ", or pass method='sa' to run it"
     return (
         f"run_fitter ignores the {type(preset).__name__} preset under method "
-        f"{method!r}, which runs {runs}; leave it out{advice}. This will raise in "
-        "a future release."
+        f"{method!r}, which runs {runs}{why}; leave it out{advice}. This will raise "
+        "in a future release."
     )
 
 
@@ -2053,6 +2053,7 @@ def _own_fit_anneal(
     preset it ignores is warned of.
     """
     fit = fitter.fit_anneal
+    owner = f"{type(fitter).__name__}.fit_anneal()"
     named, positional, takes_any = _keywords(fit)
     args: tuple[Any, ...] = ()
     call: dict[str, Any] = {}
@@ -2084,7 +2085,6 @@ def _own_fit_anneal(
     for name, value in kwargs.items():
         offer(name, value, True, name)
     if refused:
-        owner = f"{type(fitter).__name__}.fit_anneal()"
         lacking = [repr(name) for name in refused if name not in positional]
         by_position = [repr(name) for name in refused if name in positional]
         reasons = []
@@ -2103,7 +2103,11 @@ def _own_fit_anneal(
             message += "; leave method out to run it as it stands"
         raise TypeError(message)
     if ignored is not None:
-        _deprecated(_ignored_preset(method, call["method"], ignored, by_keyword("preset")))
+        why_not = ""
+        if not by_keyword("preset"):
+            takes = "'preset' only by position" if "preset" in positional else "no 'preset'"
+            why_not = f"{owner} takes {takes}"
+        _deprecated(_ignored_preset(method, call["method"], ignored, why_not))
     return fit(*args, **call)
 
 
