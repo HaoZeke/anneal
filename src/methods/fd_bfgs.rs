@@ -65,22 +65,28 @@
 //! pairs per coordinate, a pair after which more of the pairs since the
 //! models were last reset count for `ln f` than for `f` moves the line
 //! searches onto `ln f` (its direction, Armijo test, extrapolation and
-//! interpolation). They stay there while the model of `ln f` predicts each
-//! accepted step's value at least as closely as the model of `f`. A loss
-//! that falls through decades along a curved valley, as a squared error far
-//! from its fit does, is far from quadratic in `f` and closer to it in
-//! `ln f`. The test that moves the steps reads neither model's curvature: on
-//! an ill-conditioned quadratic, while the model of `f` is still learning
-//! the curvature, the model of `ln f` predicts many steps more closely
-//! without stepping better, yet the trapezoid rule finds `f` quadratic. It
-//! counts every pair rather than reading the latest one alone, so the early
-//! pairs of a squared error far from its fit still count once the model of
-//! `f` has its pairs, and one step along which `ln f` happens to be nearer
-//! quadratic does not move the steps of a descent whose pairs found `f` so.
-//! Gradients, intervals and the slow test read the values themselves, and
-//! the logarithm enters only through ratios of values, so a power of two
-//! multiplying the objective still leaves the descent unchanged; a constant
-//! added to it changes the logarithm.
+//! interpolation). From then until the models are next reset the count no
+//! longer decides: each accepted step puts the next line search on the
+//! model that predicted its value more closely, `ln f`'s on a tie, so a
+//! step that the model of `ln f` predicts less closely moves the next line
+//! search back onto `f`, and one that it predicts at least as closely moves
+//! it onto `ln f` again. A loss that falls through decades along a curved
+//! valley, as a squared error far from its fit does, is far from quadratic
+//! in `f` and closer to it in `ln f`, while near a minimum whose value is
+//! zero `ln f` is far from quadratic and the model of `f` can predict the
+//! steps more closely. The test that moves the steps onto `ln f` reads
+//! neither model's curvature: on an ill-conditioned quadratic, while the
+//! model of `f` is still learning the curvature, the model of `ln f`
+//! predicts many steps more closely without stepping better, yet the
+//! trapezoid rule finds `f` quadratic. It counts every pair rather than
+//! reading the latest one alone, so the early pairs of a squared error far
+//! from its fit still count once the model of `f` has its pairs, and one
+//! step along which `ln f` happens to be nearer quadratic does not move the
+//! steps of a descent whose pairs found `f` so. Gradients, intervals and
+//! the slow test read the values themselves, and the logarithm enters only
+//! through ratios of values, so a power of two multiplying the objective
+//! still leaves the descent unchanged; a constant added to it changes the
+//! logarithm.
 
 use eindir_core::Bounds;
 use ndarray::{Array1, Array2, ArrayView1};
@@ -158,8 +164,9 @@ pub struct FdBfgsOptions {
     /// Whether the descent also models the logarithm of its values while
     /// they stay positive, and steps on that model once more of its steps
     /// have been markedly nearer quadratic in the logarithm than in the
-    /// values than the other way round, while it predicts the accepted
-    /// values at least as closely (see the module notes).
+    /// values than the other way round, and from then on after each step
+    /// that model predicts at least as closely as the model of the values
+    /// (see the module notes).
     pub log_model: bool,
 }
 
@@ -328,6 +335,10 @@ pub struct FdBfgs {
     log_valid: bool,
     /// Whether the line searches step on the model of the logarithm.
     log_active: bool,
+    /// Whether the count has moved the line searches onto the logarithm
+    /// since the models were last reset; from then on each accepted step
+    /// chooses the model the next line search steps on.
+    log_engaged: bool,
     /// Curvature pairs since the models were last reset along which the
     /// trapezoid rule missed the change of the values more than
     /// [`LOG_MODEL_MARGIN`] times as far as the change of their logarithm.
@@ -381,6 +392,7 @@ impl FdBfgs {
             metric,
             log_valid: true,
             log_active: false,
+            log_engaged: false,
             log_nearer: 0,
             values_nearer: 0,
             scheme: FdScheme::Forward,
@@ -433,6 +445,7 @@ impl FdBfgs {
             self.curvature = Curvature::new(&self.metric);
             self.log_curvature = Curvature::new(&self.metric);
             self.log_active = false;
+            self.log_engaged = false;
             self.log_nearer = 0;
             self.values_nearer = 0;
         }
@@ -666,8 +679,9 @@ impl FdBfgs {
                 let y = &self.grad / self.f - &g_prev / self.pair_value;
                 self.log_curvature.update(&self.metric, &s, &y, true);
                 self.weigh_trapezoid(&s, &g_prev);
-                if !self.log_active && self.curvature.pairs >= LOG_MODEL_PAIRS * self.n {
+                if !self.log_engaged && self.curvature.pairs >= LOG_MODEL_PAIRS * self.n {
                     self.log_active = self.log_nearer > self.values_nearer;
+                    self.log_engaged = self.log_active;
                 }
             }
         }
@@ -883,15 +897,17 @@ impl FdBfgs {
         }
     }
 
-    /// Keeps the steps on the model of the logarithm while it predicts the
-    /// accepted step's value at least as closely as the model of the values.
-    /// A value at or below zero retires it.
-    fn keep_log_steps(&mut self, trial: &Array1<f64>, value: f64) {
+    /// Once the count has moved the steps onto the model of the logarithm,
+    /// puts the next line search on that model when it predicts the
+    /// accepted step's value at least as closely as the model of the values,
+    /// and on the model of the values otherwise. A value at or below zero
+    /// retires the model of the logarithm.
+    fn choose_log_steps(&mut self, trial: &Array1<f64>, value: f64) {
         if !(value > 0.0) {
             self.log_valid = false;
-        }
-        if !(self.log_valid && self.log_active) {
             self.log_active = false;
+        }
+        if !(self.log_valid && self.log_engaged) {
             return;
         }
         let s = trial - &self.x;
@@ -909,7 +925,7 @@ impl FdBfgs {
 
     fn accept(&mut self, trial: Array1<f64>, value: f64) {
         if self.options.log_model {
-            self.keep_log_steps(&trial, value);
+            self.choose_log_steps(&trial, value);
         }
         self.redifferences = 0;
         let previous = self.f;
@@ -1200,6 +1216,70 @@ mod tests {
         let at = Array1::from_vec(vec![0.5, 0.0]);
         engine.restart_at(at.view(), Some(1.0), false);
         assert_eq!(steps_after(&mut engine, "nnnn"), [false; 4]);
+    }
+
+    /// What the model of the values, or with `log` the model of their
+    /// logarithm, predicts for the value at `trial`.
+    fn predicted(engine: &FdBfgs, trial: &Array1<f64>, log: bool) -> f64 {
+        let s = trial - &engine.x;
+        let linear = engine.grad.dot(&s);
+        if log {
+            let term = engine.log_curvature.curvature_term(&s).expect("a pair");
+            engine.f * (linear / engine.f + term).exp()
+        } else {
+            engine.f + linear + engine.curvature.curvature_term(&s).expect("a pair")
+        }
+    }
+
+    #[test]
+    fn each_accepted_step_puts_the_next_line_search_on_the_nearer_model() {
+        // Four pairs move the steps onto the logarithm. A step down the
+        // first coordinate, accepted at the value the model of the values
+        // predicts there, moves the next line search back onto the values,
+        // and the steps stay there through five more pairs, after which
+        // more pairs count for the values than for the logarithm. A step
+        // accepted at the value the model of the logarithm predicts then
+        // puts the next line search on the logarithm again.
+        let mut engine = two_coordinate_descent();
+        let log = steps_after(&mut engine, "llln");
+        assert_eq!(log, [false, false, false, true]);
+        let trial = Array1::from_vec(vec![1.0, 0.0]);
+        let (values, logarithm) = (
+            predicted(&engine, &trial, false),
+            predicted(&engine, &trial, true),
+        );
+        assert!(0.0 < values && values < logarithm && logarithm < engine.f);
+        engine.accept(trial, values);
+        assert_eq!(steps_after(&mut engine, "vvvvv"), [false; 5]);
+        assert!(engine.values_nearer > engine.log_nearer);
+        let trial = Array1::from_vec(vec![0.75, 0.0]);
+        let (values, logarithm) = (
+            predicted(&engine, &trial, false),
+            predicted(&engine, &trial, true),
+        );
+        assert!(0.0 < values && values < logarithm && logarithm < engine.f);
+        engine.accept(trial, logarithm);
+        assert_eq!(steps_after(&mut engine, "v"), [true]);
+    }
+
+    #[test]
+    fn the_count_hands_the_choice_to_the_steps_until_a_reset() {
+        // Before the count moves the steps onto the logarithm, a step
+        // accepted at the value the model of the logarithm predicts leaves
+        // the next line search on the values. Once the count has moved them,
+        // a reset hands the choice back to it, and four pairs move the steps
+        // as they did from the start.
+        let mut engine = two_coordinate_descent();
+        assert_eq!(steps_after(&mut engine, "ll"), [false; 2]);
+        let trial = Array1::from_vec(vec![0.25, 0.0]);
+        let logarithm = predicted(&engine, &trial, true);
+        assert!(0.0 < logarithm && logarithm != predicted(&engine, &trial, false));
+        engine.accept(trial, logarithm);
+        assert_eq!(steps_after(&mut engine, "ln"), [false, true]);
+        let at = Array1::from_vec(vec![0.5, 0.0]);
+        engine.restart_at(at.view(), Some(1.0), false);
+        let log = steps_after(&mut engine, "llln");
+        assert_eq!(log, [false, false, false, true]);
     }
 
     #[test]
