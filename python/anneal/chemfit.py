@@ -65,14 +65,19 @@ the method's to check, so a refusal inside it, such as
 :func:`run_benchmark`'s of a budget of 0, follows the warning. The first
 exception the fitter raises, or a loss that is not a real number, ends the
 drive: the fitter is not called again, ``finish`` is skipped, and the
-exception reaches the caller. The few arguments anneal 0.10.0 accepted and
-ignored, such as preset keywords under the portfolio, still run with a
-FutureWarning that says what to pass instead; they will raise in a future
-release. So does a numeric string given for a parameter value, a bound,
-``bound_span``, ``default_span`` or a preset keyword a :func:`fit_chemfit`
-method takes, such as a bounds pair PyYAML reads from ``[1e-3, 1e1]``: it is
-read as a number, with one FutureWarning per call. A string ``budget``,
-``seed``, ``steps_per_epoch`` or ``tell_every`` is a TypeError.
+exception reaches the caller. On a fitter with its own ``fit_anneal``,
+:func:`run_fitter` leaves what becomes of either to that method: one over
+:func:`run_benchmark` ends the drive the same way, and one that runs its own
+loop over :func:`anneal.minimize` scores an exception the fitter raises as
+the worst value, with a RuntimeWarning, and goes on. The few arguments
+anneal 0.10.0 accepted and ignored, such as preset keywords under the
+portfolio, still run with a FutureWarning that says what to pass instead;
+they will raise in a future release. So does a numeric string given for a
+parameter value, a bound, ``bound_span``, ``default_span`` or a preset
+keyword a :func:`fit_chemfit` method takes, such as a bounds pair PyYAML
+reads from ``[1e-3, 1e1]``: it is read as a number, with one FutureWarning
+per call. A string ``budget``, ``seed``, ``steps_per_epoch`` or
+``tell_every`` is a TypeError.
 """
 
 from __future__ import annotations

@@ -132,8 +132,12 @@ The temperature drops once per epoch, so the loop cools over =budget // 100=
 epochs of 100 steps, and =max_evals= counts the start and stops the run at
 the budget. The expression =positions.reshape(...)= does not modify an array
 in place. In a loop like this one, an exception from =evaluate= is scored as
-the worst value and reported once as a =RuntimeWarning=; the bridges raise it
-instead.
+the worst value and reported once as a =RuntimeWarning=. =fit_anneal=,
+=fit_chemfit= and =run_benchmark= raise it instead, and so does =run_fitter=
+on a fitter without a =fit_anneal= method of its own. =run_fitter= leaves an
+exception raised inside a fitter's own =fit_anneal= to that method: one over
+=run_benchmark= raises it, and one that runs its own loop over
+=anneal.minimize= scores it as this loop does.
 
 * Pilot draws for Bayesian warm-start
 

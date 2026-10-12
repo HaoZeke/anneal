@@ -192,10 +192,11 @@ class NoPairFitter(Recorder):
         return {"budget": budget, "seed": seed}
 
 
-def _fitter(kind=ReleasedFitter, bounds=None):
+def _fitter(kind=ReleasedFitter, bounds=None, fail=None):
     return kind(
         {"x": np.array([0.2, -0.1]), "eps": 1.0},
         {"x": (-1.0, 1.0), "eps": (0.5, 2.0)} if bounds is None else bounds,
+        fail=fail,
     )
 
 
@@ -457,6 +458,32 @@ def test_a_fit_anneal_decides_whether_a_budget_of_0_is_refused_and_when():
         run_fitter(plain, 0)
     assert str(caught.value) == "budget must be positive, got 0"
     assert plain.calls == []
+
+
+def test_a_fit_anneal_decides_what_becomes_of_an_exception_the_fitter_raises():
+    error = RuntimeError("evaluate failed")
+    raised = _fitter(BenchmarkFitter, fail={"evaluate": (3, error)})
+    plain = _fitter(NextFitter, fail={"evaluate": (3, error)})
+    for fitter in (raised, plain):
+        with pytest.raises(RuntimeError) as caught:
+            run_fitter(fitter, 60)
+        assert caught.value is error
+        assert fitter.calls.count("evaluate") == 3 and "finish" not in fitter.calls
+    assert [h["method"] for h in raised.handed] == ["portfolio"]
+    scored = _fitter(OwnLoopFitter, fail={"evaluate": (3, error)})
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        best = run_fitter(scored, 60)
+    warning = (
+        "a callback raised 1 exception(s): an objective call that raised was scored "
+        "as the worst value and a gradient call as zero; the first was: "
+        "RuntimeError: evaluate failed"
+    )
+    assert [(w.category, str(w.message)) for w in record] == [(RuntimeWarning, warning)]
+    assert scored.handed == [{"budget": 60, "replicas": 4, "seed": 42}]
+    assert scored.calls[0] == "init" and scored.calls[-1] == "finish"
+    assert 3 < scored.calls.count("evaluate") <= 60
+    assert best is scored.finished_with
 
 
 def test_a_fit_anneal_without_method_or_preset_runs_as_it_stands():

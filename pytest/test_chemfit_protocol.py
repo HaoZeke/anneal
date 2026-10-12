@@ -9,7 +9,9 @@ that ``run_fitter`` hands a fitter with its own ``fit_anneal`` to that
 method without the check; only ``run_benchmark`` still drives half a pair,
 as anneal 0.10.0 did. An exception raised by the fitter, or a loss that is
 not a real number, must reach the caller unchanged, with no further fitter
-call and no ``finish``.
+call and no ``finish``, except that ``run_fitter`` leaves what becomes of
+either inside a fitter's own ``fit_anneal`` to that method;
+``test_chemfit_run_fitter.py`` covers that path.
 """
 
 import warnings
