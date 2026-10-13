@@ -1942,6 +1942,7 @@ fn portfolio_result_to_dict(
     out.set_item("best_val", result.best_val)?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
+    out.set_item("n_answered", result.n_answered)?;
     let pulls = PyDict::new(py);
     let successes = PyDict::new(py);
     for stat in &result.arm_stats {
@@ -2335,6 +2336,7 @@ fn ensemble_optimize(
     out.set_item("charged", result.charged)?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
+    out.set_item("n_answered", result.n_answered)?;
     out.set_item("hops", result.hops)?;
     out.set_item("history_observations", result.history_observations)?;
     out.set_item("history_minima", result.history_minima)?;
@@ -2574,6 +2576,7 @@ fn global_optimize(
             best_val,
             n_evals: 1,
             n_grads: 0,
+            n_answered: 0,
             arm_stats: Vec::new(),
             hop_state: None,
         };

@@ -180,12 +180,12 @@ fn shared_scalar_proposals_differ_from_the_private_trace() {
     config.coverage.radius = 0.8;
     let shared = ScalarSamples::new(16);
     let result = portfolio_values_ensemble_optimize(&shared, 17, None, &config);
-    assert_eq!(reference.n_evals, config.budget);
-    assert_eq!(result.n_evals, config.budget);
+    assert_eq!(reference.n_evals + reference.n_answered, config.budget);
+    assert_eq!(result.n_evals + result.n_answered, config.budget);
     assert_eq!(result.n_grads, 0);
     assert_eq!(result.best_val, 1.0);
-    assert_eq!(private.positions().len(), config.budget);
-    assert_eq!(shared.positions().len(), config.budget);
+    assert_eq!(private.positions().len(), reference.n_evals);
+    assert_eq!(shared.positions().len(), result.n_evals);
     assert_ne!(private.positions(), shared.positions());
     assert!(result.coverage.applied_foreign_samples > 0);
     assert!(result.coverage.repelled_proposals > 0);

@@ -6,14 +6,15 @@ hop chains. ``bounds`` is SciPy ``Bounds``, an ``(n, 2)`` array or ``n``
 pairs; a coordinate whose ends are equal is fixed and the search runs in
 the others, while ``fun`` and ``jac`` still receive full vectors. ``x0``
 is the first evaluation and is made once, and
-``budget`` counts every objective and gradient call, by default
+``budget`` counts every objective and gradient evaluation, by default
 ``max(1000, 10 n (n + 1))`` for ``n`` free coordinates. With one replica
 ``minimize`` repeats ``global_optimize(..., x0=x0)`` call for call, ``jac``
 taking its gradient route. With ``replicas=R`` and no ``jac``, ``R``
 values-only portfolios run from ``x0`` as batch replicas under the one
-budget, and each step's points go to ``fun.eval_batch`` when ``fun`` has
-one. ``history="shared"`` gives the replicas one archive and incumbent,
-``"private"`` or ``"none"`` gives each its own, and ``coverage_shared``
+budget, and each step's points that no replica has evaluated before go to
+``fun.eval_batch`` when ``fun`` has one. ``history="shared"`` gives the
+replicas one archive and incumbent, ``"private"`` or ``"none"`` gives
+each its own, and ``coverage_shared``
 overrides ``history`` when given. A ``store`` that holds a finite
 observation inside the box starts the run from the best such one and
 receives the result. ``membership``, ``coverage_radius`` and

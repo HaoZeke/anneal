@@ -60,7 +60,7 @@ fn run(shared: bool, height: f64) -> Vec<Vec<u64>> {
     config.coverage.radius = 0.8;
     let start = Array1::from_elem(DIM, 0.1875);
     let result = portfolio_values_ensemble_optimize(&objective, SEED, Some(start.view()), &config);
-    assert_eq!(result.n_evals, config.budget);
+    assert_eq!(result.n_evals + result.n_answered, config.budget);
     assert_eq!(result.n_grads, 0);
     assert_eq!(result.best_val, 1.0);
     assert!(
@@ -70,7 +70,7 @@ fn run(shared: bool, height: f64) -> Vec<Vec<u64>> {
             .all(|replica| { replica.arm_stats.iter().all(|arm| arm.name != "dmc_pop") })
     );
     let mut positions = objective.positions.into_inner().unwrap();
-    assert_eq!(positions.len(), config.budget);
+    assert_eq!(positions.len(), result.n_evals);
     positions.sort();
     positions
 }

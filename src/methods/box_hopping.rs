@@ -225,6 +225,9 @@ pub struct EnsembleHopResult {
     pub n_grads: usize,
     /// Charged hop-ledger calls (evals plus grads).
     pub charged: usize,
+    /// Evaluations the one-replica values portfolio answered from an earlier
+    /// call, spent from the budget but not in `charged`; zero for hop chains.
+    pub n_answered: usize,
     /// Accepted plus rejected hops; zero for the one-replica values portfolio.
     pub hops: usize,
     /// Certified observations reported to the optional minimum history.
@@ -273,6 +276,7 @@ where
             n_evals: out.n_evals,
             n_grads: out.n_grads,
             charged: out.n_evals + out.n_grads,
+            n_answered: out.n_answered,
             hops: 0,
             history_observations: 0,
             history_minima: 0,
@@ -329,6 +333,7 @@ impl From<BoxEnsembleResult> for EnsembleHopResult {
             n_evals: out.n_evals,
             n_grads: out.n_grads,
             charged: out.n_evals + out.n_grads,
+            n_answered: 0,
             hops: out.hops,
             history_observations: out.history_observations,
             history_minima: out.history_minima,

@@ -242,7 +242,8 @@ def test_the_budget_is_the_total_over_every_replica(replicas, history):
 def test_the_default_budget_follows_the_number_of_free_coordinates():
     fun = Recorder()
     result = anneal.minimize(fun, X0, BOX, seed=0)
-    assert len(fun.points) == result.nfev == 1000
+    assert len(fun.points) == result.nfev
+    assert result.nfev + result.diagnostics["n_answered"] == 1000
 
     x0 = np.zeros(12)
     fun = Recorder(lambda x: float(np.sum(x**2)))
@@ -651,6 +652,135 @@ def test_no_stencil_asks_for_a_point_on_a_side_too_narrow_for_its_step(at):
         result = anneal.minimize(fun, x0, bounds, budget=40, seed=seed)
         keys = _keys(fun.points)
         assert len(set(keys)) == len(keys) == result.nfev == 40, seed
+
+
+THREE_ULPS = float(np.nextafter(np.nextafter(AFTER_ONE, 2.0), 2.0))
+AT_THE_BOX_MINIMISER = {
+    "low face, 1-D": (1, 2.0, 1.0, 200),
+    "corner, 6-D": (6, 2.0, 1.0, 200),
+    "inside, minimum on the low face": (1, 2.0, 1.5, 200),
+    "three units in the last place wide": (1, THREE_ULPS, 1.0, 60),
+}
+
+
+@pytest.mark.parametrize(
+    ("replicas", "history"), [(1, "shared"), (4, "shared"), (4, "private")]
+)
+@pytest.mark.parametrize("case", AT_THE_BOX_MINIMISER)
+def test_a_point_already_called_is_answered_from_that_call(case, replicas, history):
+    # The box's minimiser on a face or at a corner: the loop comes back to
+    # it and to stencils it has differenced, and clamped proposals land on
+    # it. Those evaluations still count against the budget.
+    dim, high, at, budget = AT_THE_BOX_MINIMISER[case]
+    x0 = np.full(dim, at)
+    for seed in range(5):
+        fun = BatchRecorder(_corner_square)
+        result = anneal.minimize(
+            fun,
+            x0,
+            [(1.0, high)] * dim,
+            budget=budget,
+            seed=seed,
+            replicas=replicas,
+            history=history,
+        )
+        keys = _keys(fun.points)
+        assert keys[0] == x0.tobytes()
+        assert len(set(keys)) == len(keys) == result.nfev, seed
+        answered = result.diagnostics["n_answered"]
+        assert answered > 0 and result.nfev + answered == budget, seed
+        if replicas == 1:
+            direct = Recorder(_corner_square)
+            anneal.global_optimize(
+                direct, np.ones(dim), np.full(dim, high), budget, seed=seed, x0=x0
+            )
+            assert _keys(direct.points) == keys, seed
+
+
+@pytest.mark.parametrize("seed", [0, 1])
+@pytest.mark.parametrize(
+    ("bounds", "x0"),
+    [
+        ([(1.0, AFTER_ONE)], [1.0]),
+        ([(1.0, AFTER_ONE)] * 2, [1.0, 1.0]),
+        ([(1.0, AFTER_ONE)] * 2, [AFTER_ONE, AFTER_ONE]),
+    ],
+)
+def test_with_jac_a_box_too_narrow_to_move_calls_each_point_once(bounds, x0, seed):
+    gradients = []
+
+    def jac(x):
+        gradients.append(np.array(x, dtype=np.float64))
+        return 2.0 * (np.asarray(x, dtype=np.float64) - 0.3)
+
+    fun = Recorder(_corner_square)
+    result = anneal.minimize(fun, x0, bounds, jac=jac, budget=25, seed=seed)
+    keys = _keys(fun.points)
+    assert keys[0] == np.asarray(x0, dtype=np.float64).tobytes()
+    assert len(set(keys)) == len(keys) == result.nfev <= 2 ** len(x0)
+    assert len(set(_keys(gradients))) == len(gradients) == result.njev
+    assert result.diagnostics["n_answered"] > 0
+    assert result.nfev + result.njev + result.diagnostics["n_answered"] <= 25
+
+
+X0_ROUTES = {
+    "values only": {},
+    "legacy policy": {"policy": "legacy"},
+    "gradient": {"grad_fn": True},
+    "batch replicas": {"replicas": 4},
+    "persistent replicas, gradient": {"replicas": 4, "grad_fn": True},
+    "persistent replicas, legacy policy": {"replicas": 4, "policy": "legacy"},
+}
+
+
+@pytest.mark.parametrize("dim", [1, 6])
+@pytest.mark.parametrize("route", X0_ROUTES)
+def test_global_optimize_calls_x0_first_and_once_on_every_route(route, dim):
+    # From x0 at the box's minimiser, a corner, every route comes back to
+    # it and answers it from its first call. Persistent replicas past the
+    # first start elsewhere and keep their records apart, so only there may
+    # a point other than x0 be called twice, once by each of two replicas.
+    keywords = dict(X0_ROUTES[route])
+    if keywords.pop("grad_fn", False):
+        keywords["grad_fn"] = lambda x: 2.0 * (np.asarray(x) - 0.3)
+    x0 = np.ones(dim)
+    for seed in range(3):
+        fun = Recorder(_corner_square)
+        out = anneal.global_optimize(
+            fun, np.ones(dim), np.full(dim, 2.0), 200, seed=seed, x0=x0, **keywords
+        )
+        keys = _keys(fun.points)
+        assert keys[0] == x0.tobytes() and keys.count(x0.tobytes()) == 1, seed
+        assert out["n_evals"] == len(keys) and out["n_answered"] > 0, seed
+        spent = out["n_evals"] + out["n_grads"] + out["n_answered"]
+        assert spent <= 200 if "grad_fn" in keywords else spent == 200, seed
+        if not route.startswith("persistent"):
+            assert len(set(keys)) == len(keys), seed
+
+
+@pytest.mark.parametrize("at", [1.0, AFTER_ONE])
+def test_a_side_too_narrow_for_a_step_beside_wide_ones_asks_no_point_twice(at):
+    bounds = [(-1.0, 1.0), (1.0, AFTER_ONE), (-1.0, 1.0)]
+    x0 = np.array([0.4, at, -0.3])
+    for seed in range(3):
+        fun = Recorder(_corner_square)
+        result = anneal.minimize(fun, x0, bounds, budget=300, seed=seed)
+        keys = _keys(fun.points)
+        assert keys[0] == x0.tobytes()
+        assert len(set(keys)) == len(keys) == result.nfev
+        assert result.nfev + result.diagnostics["n_answered"] == 300
+
+
+def test_under_declared_noise_x0_is_called_again():
+    # A noisy objective's value at a point is a draw, and the rules that
+    # accept under noise draw again where they need to, x0 among them.
+    x0 = np.ones(1)
+    fun = Recorder(_corner_square)
+    out = anneal.global_optimize(fun, [1.0], [2.0], 200, seed=0, x0=x0, noise_sigma=0.01)
+    keys = _keys(fun.points)
+    assert keys[0] == x0.tobytes()
+    assert keys.count(x0.tobytes()) > 1
+    assert out["n_evals"] == len(keys) and out["n_answered"] == 0
 
 
 def test_a_store_starts_the_run_from_its_best_observation_inside_the_box(tmp_path):

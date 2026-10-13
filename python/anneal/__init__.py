@@ -1139,9 +1139,11 @@ def ensemble_optimize(
     Equal bounds fix a coordinate without changing callback dimensions.
 
     The returned dictionary retains ``best_val``, ``best_pos``, separate
-    ``n_evals`` / ``n_grads``, their sum ``charged``, ``hops``, minimum-history
-    diagnostics, and evaluated-region ``coverage_*`` counters. Coverage is
-    not a count of certified minima.
+    ``n_evals`` / ``n_grads``, their sum ``charged``, ``n_answered`` (the
+    evaluations one values-only portfolio answers from an earlier call,
+    which count against the budget but not in ``charged``; zero for hop
+    chains), ``hops``, minimum-history diagnostics, and evaluated-region
+    ``coverage_*`` counters. Coverage is not a count of certified minima.
 
     ``coverage_shared`` overrides sharing independently of ``history``;
     ``coverage_radius`` sets the normalized RMS parameter distance.
@@ -1183,7 +1185,9 @@ class MinimizeResult:
     """SciPy-shaped result from :func:`minimize`.
 
     ``nfev`` counts objective calls, ``njev`` counts gradient calls, and
-    ``charged`` is their combined budget cost. ``nit`` counts sequential
+    ``charged`` is their sum; an evaluation answered from an earlier call
+    counts against the budget and in none of them, but in
+    ``diagnostics["n_answered"]``. ``nit`` counts sequential
     evaluation steps: every call with one replica, every batch with more.
     ``diagnostics`` retains the engine's result dict, with ``best_pos`` at
     full length. ``success`` means a finite feasible candidate was
@@ -1512,7 +1516,10 @@ def minimize(
         point per row, and returns their values, batch replicas evaluate
         each step's points through it.
       x0: start point, finite and inside ``bounds``. It is the run's first
-        evaluation, made once whatever the number of replicas.
+        evaluation, made once whatever the number of replicas: the run
+        answers an evaluation at a point ``fun`` has already been called
+        at, ``x0`` or any other, from that call, and one of ``jac``
+        likewise.
       bounds: the box, as SciPy ``Bounds`` (anything with ``lb`` and ``ub``;
         scalars broadcast), an ``(n, 2)`` array, or ``n`` pairs
         ``(low, high)``, all finite. A coordinate whose two ends are equal
@@ -1525,8 +1532,9 @@ def minimize(
       jac: optional gradient callable ``jac(x) -> array`` of the length of
         ``x0``. It takes the gradient route of :func:`global_optimize`
         (``grad_fn``), which runs one replica; its calls count in ``njev``.
-      budget: total evaluations, objective and gradient calls together,
-        over all replicas: ``nfev + njev <= budget``. The default is
+      budget: total evaluations, objective and gradient together, over all
+        replicas, those answered from an earlier call included: ``nfev +
+        njev <= budget``. The default is
         ``max(1000, 10 * n * (n + 1))`` for ``n`` free coordinates, twice
         the budget from which the portfolio opens with a descent from ``x0``
         that can converge, and at least 1000.
@@ -1555,14 +1563,15 @@ def minimize(
         and one incumbent for all of them: arms that start at the incumbent
         start at the best point any replica has found, and the additive
         surrogate fits every replica's evaluations. A point another replica
-        has already evaluated is answered without a call, once per replica,
+        has already evaluated is answered without a charge, once per replica,
         and replicas that propose one point at the same step share one row
         of the batch, charged to the one with the most of its share left,
         so a descent they follow together costs the budget once and takes
         about ``n / R`` batches per gradient. ``"private"`` gives each
         replica its own archive, as independent runs batched together would
-        have, and so does ``"none"``: ``minimize`` keeps no ledger of
-        certified minima for it to switch off.
+        have, each paying for every point it asks for while ``fun`` is
+        called once at a point, and so does ``"none"``: ``minimize`` keeps
+        no ledger of certified minima for it to switch off.
       membership: accepted and checked, with a ``FutureWarning``: it chose
         which certified minima entered that ledger.
       store: parameter archive: an ``.h5`` / ``.hdf5`` or ``.jsonl`` path, a
@@ -1634,7 +1643,13 @@ def minimize(
         for message in deferred:
             warnings.warn(message, FutureWarning, stacklevel=2)
         value = _scored_value(fun, start.copy())
-        out = {"best_pos": np.empty(0), "best_val": value, "n_evals": 1, "n_grads": 0}
+        out = {
+            "best_pos": np.empty(0),
+            "best_val": value,
+            "n_evals": 1,
+            "n_grads": 0,
+            "n_answered": 0,
+        }
         nit = 1
     else:
         if n_free == n:
@@ -1902,13 +1917,23 @@ def global_optimize(
         and with ``grad_fn`` also basin hopping and HMC. Without ``x0`` the
         values-only loop starts from the best of a small seeded design.
         With ``replicas`` above one, ``x0`` is still the first evaluation,
-        made once whatever their number.
+        made once whatever their number. Without ``noise_sigma`` the run
+        answers an evaluation at a point ``obj_fn`` has already been called
+        at, ``x0`` or any other, from that call, and one of ``grad_fn``
+        likewise: it costs its unit of ``budget`` but no call, and
+        ``n_evals`` and ``n_grads`` count calls. Persistent replicas are
+        given ``x0``'s value and otherwise answer only the points each has
+        called itself, so each calls ``grad_fn`` at ``x0`` for itself and a
+        point two of them reach is called by each. With ``noise_sigma``
+        every evaluation is a call, at ``x0`` too, since a noisy value is a
+        draw.
       replicas: portfolio instances sharing the aggregate budget. One, the
         default, is the single controller. With ``x0``, no ``grad_fn``, no
         ``noise_sigma`` and ``policy="auto"``, ``R`` replicas are the batch
         replicas of :func:`minimize`: ``R`` values-only loops start from
         ``x0``, evaluated once and shared, and step together, each step's
-        points going to ``obj_fn.eval_batch`` when it has one, so
+        points that no replica has evaluated before going to
+        ``obj_fn.eval_batch`` when it has one, so
         ``minimize(obj_fn, x0, bounds, budget=budget, seed=seed,
         replicas=R)`` on the same box repeats the run call for call. As in
         :func:`minimize`, ``coverage_radius`` and ``coverage_neighbors``
@@ -1941,7 +1966,9 @@ def global_optimize(
     gradient there is reflected with it. Peer separation moves global
     candidates, not derivative stencils or raw objective values. Returns a
     dict with ``best_pos``, ``best_val``, ``n_evals``, ``n_grads``,
-    ``arm_pulls``, and ``arm_successes``. Persistent replicas also report
+    ``n_answered`` (the evaluations answered from an earlier call, so that
+    ``n_evals + n_grads + n_answered`` is the budget spent), ``arm_pulls``,
+    and ``arm_successes``. Persistent replicas also report
     individual results, ``charged`` work and coverage sample counters, and
     batch replicas ``n_batches``, the batches evaluated, the start's
     included.

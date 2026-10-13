@@ -107,7 +107,7 @@ objective, independently of the exploration penalty and occupied chain state.
 
 Both values-only engines use the same Rust budgeted quasi-Newton local refiner.
 It estimates local derivatives from scalar values; no Jacobian or force callback
-is required. Every stencil and line-search probe counts as an objective call,
+is required. Every stencil and line-search probe counts against the budget,
 including rejected probes, and can improve the returned raw incumbent. This
 local refinement does not make the two global controllers identical or certify
 global optimality.
@@ -116,8 +116,9 @@ global optimality.
 is the SciPy-shaped front end for a run from a start point. With one replica,
 the default, it repeats `global_optimize(..., x0=x0)` call for call, taking the
 gradient route when `jac` is given. Without `jac`, `replicas=4` runs four
-values-only portfolios from `x0` under one total budget and evaluates their
-proposals as one batch per step, through `fun.eval_batch` when `fun` has it;
+values-only portfolios from `x0` under one total budget and evaluates the
+proposals no replica has evaluated before as one batch per step, through
+`fun.eval_batch` when `fun` has it;
 they share one archive and incumbent (`history="shared"`) or keep one each
 (`history="private"`). See
 [Minimize from a start point](docs/orgmode/howto/minimize.org).
@@ -141,7 +142,9 @@ or minimum certificates. This does not restrict the optional minimum ledger
 or remove the portfolio checkpoint barrier.
 
 `nfev` and `njev` count actual objective and gradient calls; `charged` is their
-sum. `diagnostics` preserves the underlying work, history, and coverage fields.
+sum. An evaluation at a point already called is answered from that call: it
+counts against `budget` and in neither, but in `diagnostics["n_answered"]`.
+`diagnostics` preserves the underlying work, history, and coverage fields.
 `success` means a finite feasible candidate was returned, not that global
 optimality was certified. An optional parameter store archives results and
 supplies a starting candidate; it does not serialize chain or coverage state.
