@@ -54,7 +54,10 @@ built from its source at commit 3b65fe0 or later takes batches, though it
 still reports version 3.1.1. Whether ``evaluate`` takes a list shows only
 when it is called: one that takes a single candidate gets the start as a
 list of one, after ``init``, and what it raises, or a TypeError when its
-reply is not one real loss per candidate, ends the drive as below.
+reply is not one real loss per candidate, ends the drive as below. That
+these bridges take batches shows in ``FEATURES``, which holds
+``"batch_size"``, and in their signatures, which name ``batch_size``; no
+release up to 0.11.1 has either.
 
 Every argument is checked before ``fitter.init()`` and before any
 FutureWarning, so a refused call raises its error without one. On a fitter
@@ -96,6 +99,7 @@ from typing import Any
 import numpy as np
 
 __all__ = [
+    "FEATURES",
     "ChemFitVector",
     "chemfit_box",
     "fit_anneal",
@@ -105,6 +109,12 @@ __all__ = [
     "run_fitter",
     "unflatten_parameters",
 ]
+
+#: What a caller of these bridges may test for before using it, rather than a
+#: version: ``"batch_size"``, which :func:`fit_anneal`, :func:`fit_chemfit` and
+#: :func:`run_benchmark` take as a named parameter. No release up to 0.11.1
+#: has ``FEATURES`` or ``batch_size``.
+FEATURES: frozenset[str] = frozenset({"batch_size"})
 
 _CLASSICAL_DRIVERS = ("boltzmann", "fast", "gsa")
 _DRIVERS = ("portfolio", *_CLASSICAL_DRIVERS)

@@ -3,8 +3,9 @@
 With ``batch_size`` above one, ``fit_anneal``, ``fit_chemfit`` and
 ``run_benchmark`` run the portfolio as that many batch replicas of
 ``anneal.minimize``: the fitter is initialised with ``init(batch_size=...)``
-and each batch is one ``evaluate`` of a list and one ``step``. When every
-other check passes, a batch under a classical driver is refused before
+and each batch is one ``evaluate`` of a list and one ``step``. That they take
+batches shows in ``anneal.chemfit.FEATURES`` and in their signatures. When
+every other check passes, a batch under a classical driver is refused before
 ``init`` by a message naming the driver, whatever the fitter has of the
 three. Under the portfolio, a fitter without ``evaluate``, ``step`` or
 ``init``, or whose ``init`` has a signature that can be read and cannot take
@@ -82,6 +83,14 @@ def _fitter(kind=BatchFitter, **kwargs):
         {"positions": (-3.0, 3.0), "eps": (0.0, 1.0)},
         **kwargs,
     )
+
+
+def test_the_bridges_say_they_take_batches_by_features_and_by_signature():
+    assert "FEATURES" in anneal.chemfit.__all__
+    assert isinstance(anneal.chemfit.FEATURES, frozenset)
+    assert "batch_size" in anneal.chemfit.FEATURES
+    for name in BATCH_ENTRIES:
+        assert "batch_size" in inspect.signature(getattr(anneal.chemfit, name)).parameters
 
 
 @pytest.mark.parametrize("entry", BATCH_ENTRIES)
