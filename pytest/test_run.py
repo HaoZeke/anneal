@@ -958,6 +958,38 @@ def test_a_run_whose_histories_do_not_fit_together_is_refused_before_any_call(
     assert child.stdout.split()[:2] == printed, child.stdout
 
 
+@pytest.mark.parametrize(
+    ("n_epochs", "steps_per_epoch"),
+    [
+        pytest.param(10**12, 50, marks=REFUSES_40_TB),
+        pytest.param(10**12, 0, marks=REFUSES_40_TB),
+        (2**62, 1),
+    ],
+)
+def test_run_hmc_refuses_a_history_that_cannot_be_allocated_before_any_call(
+    n_epochs, steps_per_epoch
+):
+    # In a child process, as above. run_hmc records every epoch.
+    script = (
+        "import anneal\n"
+        "calls = []\n"
+        "def f(x):\n"
+        "    calls.append(1)\n"
+        "    return float(sum(x * x))\n"
+        "try:\n"
+        "    anneal.run_hmc(f, lambda x: 2.0 * x, [-1.0, -1.0], [1.0, 1.0],"
+        f" n_epochs={n_epochs}, steps_per_epoch={steps_per_epoch}, seed=3)\n"
+        "    print('returned', len(calls))\n"
+        "except ValueError as error:\n"
+        "    print('ValueError', len(calls), error)\n"
+    )
+    child = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=300
+    )
+    assert child.returncode == 0, child.stderr[-2000:]
+    assert child.stdout.split()[:2] == ["ValueError", "0"], child.stdout
+
+
 def test_run_qmc_whose_starts_take_no_steps_records_no_epoch_and_returns():
     # Five evaluations over eight starts give five of them one each, spent on
     # the start itself, so no start takes a step or records an epoch.
