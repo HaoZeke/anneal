@@ -12,8 +12,10 @@ use crate::variant::SaVariant;
 
 /// The Halton points of `bounds`, except that an axis with an infinite wall,
 /// which has no uniform measure, holds every point on its finite wall, or at
-/// zero when both walls are infinite.
+/// zero when its walls are `-inf` and `inf`. A box with an axis that holds
+/// no point, with a NaN wall or two walls at the same infinity, is refused.
 fn qmc_starts(bounds: &eindir_core::Bounds<f64>, n: usize, skip: u64) -> ndarray::Array2<f64> {
+    crate::box_points::assert_box_holds_points(bounds);
     let (low, high): (Vec<f64>, Vec<f64>) = bounds
         .low
         .iter()
@@ -109,7 +111,8 @@ fn steps_within(max_evals: Option<usize>) -> usize {
 ///
 /// Initial position is drawn uniformly from `variant.obj.bounds()`, except
 /// that an axis with an infinite wall, which has no uniform measure, starts on
-/// its finite wall, or at zero when both walls are infinite.
+/// its finite wall, or at zero when its walls are `-inf` and `inf`; the draw
+/// refuses a NaN wall and an axis whose two walls are the same infinity.
 /// Per epoch: temperature `T_k = variant.cool.temperature(epoch)`;
 /// each proposal goes through `variant.mover.propose -> variant.obj.eval ->
 /// variant.accept.accept_prob`; bookkeeping per epoch is collected into an

@@ -7,18 +7,27 @@
 //! and designs eindir makes, so seeded runs there are unchanged. Elsewhere an
 //! axis with finite walls is scaled at half width and doubled, which is exact
 //! away from subnormals, and an axis with an infinite wall, which has no
-//! uniform measure, takes its finite wall, or zero when both walls are
-//! infinite, as the multistart starts of `run_rs_qmc_variant` do.
+//! uniform measure, takes its finite wall, or zero when its walls are `-inf`
+//! and `inf`, as the multistart starts of `run_rs_qmc_variant` do. An axis
+//! with a NaN wall, or whose two walls are the same infinity, holds no point
+//! and is refused.
 
 use eindir_core::Bounds;
 use ndarray::{Array1, Array2};
 use rand::Rng;
 
-/// Panics, naming the coordinate, unless every wall of `bounds` is a number.
-/// `Bounds::new` lets a NaN wall through, and no point is inside such a box.
-pub(crate) fn assert_no_nan_wall(bounds: &Bounds<f64>) {
-    if let Some(i) = (0..bounds.dims).find(|&i| bounds.low[i].is_nan() || bounds.high[i].is_nan()) {
-        panic!("bounds must not be NaN at dimension {i}");
+/// Panics, naming the coordinate, unless every axis of `bounds` holds a
+/// point. `Bounds::new` lets through a NaN wall and an axis whose two walls
+/// are the same infinity, and no point is inside a box with either.
+pub(crate) fn assert_box_holds_points(bounds: &Bounds<f64>) {
+    for i in 0..bounds.dims {
+        let (lo, hi) = (bounds.low[i], bounds.high[i]);
+        if lo.is_nan() || hi.is_nan() {
+            panic!("bounds must not be NaN at dimension {i}");
+        }
+        if lo == hi && lo.is_infinite() {
+            panic!("bounds must not have both walls at {lo} at dimension {i}");
+        }
     }
 }
 
@@ -43,7 +52,7 @@ fn at_fraction(lo: f64, hi: f64, u: f64) -> f64 {
 /// positive finite width, and otherwise one axis at a time, an axis whose
 /// ends are equal at that value without a draw.
 pub(crate) fn uniform_point<R: Rng>(bounds: &Bounds<f64>, rng: &mut R) -> Array1<f64> {
-    assert_no_nan_wall(bounds);
+    assert_box_holds_points(bounds);
     let spans = (0..bounds.dims).all(|i| {
         let width = bounds.high[i] - bounds.low[i];
         width.is_finite() && width > 0.0
@@ -68,7 +77,7 @@ pub(crate) fn uniform_point<R: Rng>(bounds: &Bounds<f64>, rng: &mut R) -> Array1
 /// so cannot hold an axis whose ends are equal: on such a box it panics in
 /// `Bounds::mkpoint`.
 pub(crate) fn spanning_uniform_point<R: Rng>(bounds: &Bounds<f64>, rng: &mut R) -> Array1<f64> {
-    assert_no_nan_wall(bounds);
+    assert_box_holds_points(bounds);
     if bounds
         .low
         .iter()
@@ -89,7 +98,7 @@ pub(crate) fn shifted_low_discrepancy_points(
     skip: u64,
     seed: u64,
 ) -> Array2<f64> {
-    assert_no_nan_wall(bounds);
+    assert_box_holds_points(bounds);
     let widths_finite = (0..bounds.dims).all(|i| (bounds.high[i] - bounds.low[i]).is_finite());
     if widths_finite {
         return eindir_core::shifted_low_discrepancy_points(bounds, n, skip, seed);
@@ -230,6 +239,23 @@ mod tests {
     #[should_panic(expected = "bounds must not be NaN at dimension 0")]
     fn a_nan_wall_is_refused_by_the_draw() {
         let b = bounds(array![f64::NAN, 0.5], array![1.0, 0.5]);
+        uniform_point(&b, &mut StdRng::seed_from_u64(0));
+    }
+
+    #[test]
+    #[should_panic(expected = "bounds must not have both walls at inf at dimension 1")]
+    fn an_axis_whose_walls_are_the_same_infinity_is_refused_by_the_design() {
+        let b = bounds(array![0.0, f64::INFINITY], array![1.0, f64::INFINITY]);
+        shifted_low_discrepancy_points(&b, 4, 1, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "bounds must not have both walls at -inf at dimension 0")]
+    fn an_axis_whose_walls_are_the_same_infinity_is_refused_by_the_draw() {
+        let b = bounds(
+            array![f64::NEG_INFINITY, 0.5],
+            array![f64::NEG_INFINITY, 0.5],
+        );
         uniform_point(&b, &mut StdRng::seed_from_u64(0));
     }
 }
