@@ -558,20 +558,27 @@ impl FdBfgs {
             (FdScheme::Central, None) => f64::EPSILON.cbrt() * self.typical(i),
         }
         .min(0.25 * self.width[i]);
+        // A central step that rounds away would ask the iterate itself, or
+        // one point twice. The one-sided rule then takes the side, failing
+        // that the forward rule, which asks nothing when its step does too.
         if self.scheme == FdScheme::Central && room_up >= h && room_down >= h {
             let hp = realized(h);
             let hm = realized(-h);
-            let span = hp - hm;
-            return (vec![hp, hm], vec![1.0 / span, -1.0 / span], 0.0);
+            if hp != 0.0 && hm != 0.0 {
+                let span = hp - hm;
+                return (vec![hp, hm], vec![1.0 / span, -1.0 / span], 0.0);
+            }
         }
         if self.scheme == FdScheme::Central && room_up.max(room_down) >= 2.0 * h {
             let sign = if room_up >= 2.0 * h { 1.0 } else { -1.0 };
             let h1 = realized(sign * h);
             let h2 = realized(2.0 * sign * h);
-            let w0 = -(h1 + h2) / (h1 * h2);
-            let w1 = h2 / (h1 * (h2 - h1));
-            let w2 = -h1 / (h2 * (h2 - h1));
-            return (vec![h1, h2], vec![w1, w2], w0);
+            if h1 != 0.0 && h2 != h1 {
+                let w0 = -(h1 + h2) / (h1 * h2);
+                let w1 = h2 / (h1 * (h2 - h1));
+                let w2 = -h1 / (h2 * (h2 - h1));
+                return (vec![h1, h2], vec![w1, w2], w0);
+            }
         }
         let sign = if room_up >= h || room_up >= room_down {
             1.0
@@ -1979,6 +1986,46 @@ mod tests {
         assert!(!can(0, 0, 2) && !can(2, 0, 2) && can(1, 0, 2));
         assert!(can(1, 1, 3) && can(3, 1, 3) && !can(2, 1, 3));
         assert!(!can(0, 0, 1) && !can(1, 0, 1) && !can(1, 1, 2));
+    }
+
+    #[test]
+    fn a_central_stencil_asks_nothing_on_a_side_too_narrow_for_its_step() {
+        // On a side one unit in the last place wide, from either end, or of
+        // zero width, every step of either scheme rounds away, so neither
+        // stencil asks anything there and no stencil point is the iterate.
+        let up = f64::from_bits(1.0f64.to_bits() + 1);
+        let f = |x: ArrayView1<f64>| x.iter().map(|v| (v - 0.3).powi(2)).sum::<f64>();
+        for (high, at) in [(up, 1.0), (up, up), (1.0, 1.0)] {
+            let bounds = Bounds::new(
+                Array1::from_vec(vec![-1.0, 1.0, -1.0]),
+                Array1::from_vec(vec![1.0, high, 1.0]),
+                0.0,
+            );
+            let start = Array1::from_vec(vec![0.4, at, -0.3]);
+            let mut engine = FdBfgs::new(start.view(), None, &bounds, FdBfgsOptions::default());
+            for (scheme, points) in [(FdScheme::Forward, 1), (FdScheme::Central, 2)] {
+                engine.scheme = scheme;
+                assert!(engine.stencil(1).0.is_empty(), "{scheme:?} at {at}");
+                assert_eq!(engine.stencil(0).0.len(), points, "{scheme:?} at {at}");
+            }
+            engine.scheme = FdScheme::Forward;
+            let mut central = 0;
+            let mut used = 0;
+            while used < 300 && !engine.is_done() {
+                let x = engine.ask();
+                if matches!(engine.phase, Phase::Gradient(_)) {
+                    assert_ne!(x.view(), engine.position(), "at {at}");
+                    central += usize::from(engine.scheme == FdScheme::Central);
+                }
+                engine.tell(f(x.view()));
+                used += 1;
+            }
+            assert!(
+                engine.is_done() && central > 0,
+                "at {at}: {central} of {used}"
+            );
+            assert_eq!(engine.position()[1], at);
+        }
     }
 
     /// log10 of the mean squared residual of a linear fit whose singular

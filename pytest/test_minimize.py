@@ -629,6 +629,30 @@ def test_free_sides_too_narrow_for_a_difference_step_leave_only_the_start(
     np.testing.assert_array_equal(out["best_pos"], centre)
 
 
+def _keys(points):
+    return [np.asarray(p, dtype=np.float64).tobytes() for p in points]
+
+
+def _corner_square(x):
+    return float(np.sum((np.asarray(x, dtype=np.float64) - 0.3) ** 2))
+
+
+@pytest.mark.parametrize("at", [1.0, AFTER_ONE])
+def test_no_stencil_asks_for_a_point_on_a_side_too_narrow_for_its_step(at):
+    # Within forty evaluations from x0 the loop's descent takes central
+    # differences. On the third side, one unit in the last place wide, every
+    # step rounds away, so no stencil asks for a point there, which would be
+    # the iterate or a point asked before, and so short a run asks for no
+    # point twice.
+    x0 = np.array([0.4, -0.3, at])
+    bounds = [(-1.0, 1.0), (-1.0, 1.0), (1.0, AFTER_ONE)]
+    for seed in range(5):
+        fun = Recorder(_corner_square)
+        result = anneal.minimize(fun, x0, bounds, budget=40, seed=seed)
+        keys = _keys(fun.points)
+        assert len(set(keys)) == len(keys) == result.nfev == 40, seed
+
+
 def test_a_store_starts_the_run_from_its_best_observation_inside_the_box(tmp_path):
     store = tmp_path / "params.jsonl"
     rows = [
