@@ -885,7 +885,7 @@ def _settle(layout: _Layout, low, high):
     """Check a raw box coordinate by coordinate and round it to each leaf's dtype.
 
     Errors name the coordinate. Coordinates whose lower and upper bounds are
-    equal stay in the result; the bridges hold them fixed.
+    equal stay in the result; the drivers hold them fixed.
     """
     low = np.array(low, dtype=np.float64)
     high = np.array(high, dtype=np.float64)
@@ -933,20 +933,17 @@ def _clip(x: np.ndarray, low: np.ndarray, high: np.ndarray) -> np.ndarray:
 
 
 class _Problem:
-    """A flattened fit: the layout, the box, the start, the free coordinates."""
+    """A flattened fit: the layout, the box and the start."""
 
     def __init__(self, layout: _Layout, low: np.ndarray, high: np.ndarray, start):
         self.layout = layout
         self.low = low
         self.high = high
-        self.free = low < high
         self.start = layout.cast(_clip(np.asarray(start, dtype=np.float64), low, high))
 
     def candidate(self, x: np.ndarray) -> dict[str, Any]:
-        """The parameters at the driver's point ``x`` over the free coordinates."""
-        full = self.start.copy()
-        full[self.free] = _clip(x, self.low[self.free], self.high[self.free])
-        return self.layout.params(full)
+        """The parameters at the driver's point ``x``."""
+        return self.layout.params(_clip(x, self.low, self.high))
 
 
 class _Stop(BaseException):
@@ -1041,22 +1038,21 @@ def _drive(
     preset: Any = None,
     steps_per_epoch: int = 1,
 ) -> dict[str, Any]:
-    """Run ``driver`` over the free coordinates and return the best parameters.
+    """Run ``driver`` from the start and return the best parameters.
 
-    A :class:`_BatchSession` runs the portfolio as batch replicas of
-    :func:`anneal.minimize`, one per candidate of a batch, sharing one
-    archive. The first fitter exception is raised here, after the driver has
-    returned.
+    The drivers hold a coordinate whose bounds are equal at the start's
+    value and search the others; with every coordinate fixed, the run is one
+    evaluation of the start. A :class:`_BatchSession` runs the portfolio as
+    batch replicas of :func:`anneal.minimize`, one per candidate of a batch,
+    sharing one archive. The first fitter exception is raised here, after
+    the driver has returned.
     """
     from anneal import global_optimize, minimize, run
 
     problem, budget = session.problem, session.budget
-    free = problem.free
-    low, high, start = problem.low[free], problem.high[free], problem.start[free]
+    low, high, start = problem.low, problem.high, problem.start
     try:
-        if not free.any():
-            session(start)
-        elif driver == "portfolio" and isinstance(session, _BatchSession):
+        if driver == "portfolio" and isinstance(session, _BatchSession):
             minimize(
                 session,
                 start,
