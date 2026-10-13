@@ -15,4 +15,5 @@ preset that ``run_fitter`` ignores waits for the first of ``fit_anneal``,
 that call's checks pass, so a refusal there, such as ``run_benchmark``'s of
 a budget of 0 or a seed of -1, raises its error alone too. When the method
 calls none of them, the warning comes once it returns, and not when it
-raises.
+raises. Either way it points at the line that called ``run_fitter``, in a
+module, a script or a Jupyter cell alike.
