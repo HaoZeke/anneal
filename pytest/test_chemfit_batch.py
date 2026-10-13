@@ -242,14 +242,19 @@ def test_run_benchmark_refuses_a_batch_from_a_fitter_without_step():
     assert fitter.calls == []
 
 
-def test_a_fitter_without_init_cannot_take_a_batch():
+@pytest.mark.parametrize("entry", BATCH_ENTRIES)
+def test_a_fitter_without_init_cannot_take_a_batch(entry):
     class NoInit(BatchFitter):
         init = None
 
     fitter = _fitter(NoInit)
-    with pytest.raises(TypeError, match=re.escape(_refusal("NoInit", "an init that takes batch_size"))):
-        fit_anneal(fitter, 50, batch_size=2)
-    assert fitter.calls == []
+    with warnings.catch_warnings(record=True) as warned:
+        warnings.simplefilter("always")
+        with pytest.raises(TypeError) as refused:
+            drive(entry, fitter, 50, batch_size=2)
+    assert str(refused.value) == _refusal("NoInit", "an init that takes batch_size")
+    assert [str(w.message) for w in warned] == []
+    assert fitter.calls == [] and fitter.evaluated == []
 
 
 def _recorded_init(fitter, wraps):
