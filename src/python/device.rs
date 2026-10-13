@@ -317,11 +317,17 @@ fn run_native<'py>(
         &arrays.binary("less_equal", &low, &high)?,
     )?;
     // Domain validation reads one reduction scalar before drawing or evaluating
-    // points. Bound arrays and all per-transition decisions stay on the device.
+    // points, and one more to name the coordinate of a box it refuses. Bound
+    // arrays and all per-transition decisions stay on the device.
     if !arrays.unary("all", &valid_bounds)?.is_truthy()? {
-        return Err(PyValueError::new_err(
-            "bounds must be finite with low <= high",
-        ));
+        let valid = arrays.binary("astype", &valid_bounds, &arrays.xp.getattr("int8")?)?;
+        let i: usize = arrays
+            .unary("argmin", &valid)?
+            .call_method0("__int__")?
+            .extract()?;
+        return Err(PyValueError::new_err(format!(
+            "bounds must be finite with low <= high at dimension {i}"
+        )));
     }
     let batched = n_chains.is_some();
     let shape = if batched {

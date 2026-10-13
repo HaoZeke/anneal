@@ -44,6 +44,7 @@ from anneal._core import (
     Ledger,
     PyObjective as _CorePyObjective,
     __version__,
+    _objective_walls as _core_objective_walls,
     cluster_search as _core_cluster_search,
     low_discrepancy_points as _core_low_discrepancy_points,
     pilot_draws_qmc as _core_pilot_draws_qmc,
@@ -210,9 +211,14 @@ class PyObjective(metaclass=_ExtensionAlias):
     built without ``grad_fn``, those four end the run at the first gradient
     they ask for and raise a ``ValueError`` saying so;
     ``global_optimize_objective`` runs on values alone with
-    ``use_gradient=False``. ``bounds`` is a :class:`Bounds`. The object made
-    is the extension's own ``PyObjective``, the handle the ``*_objective``
-    functions take, and counts as a ``PyObjective``.
+    ``use_gradient=False``. ``bounds`` is a :class:`Bounds`; a NaN wall,
+    which the extension's own ``Bounds`` takes, is a ValueError naming the
+    coordinate. The ``*_objective`` functions refuse, naming the coordinate,
+    an infinite wall they cannot work with: ``qmc_best1bin_scout_objective``
+    takes one, though not two walls at the same infinity, and the others
+    take finite walls only. The object made is the extension's own
+    ``PyObjective``, the handle the ``*_objective`` functions take, and
+    counts as a ``PyObjective``.
 
     ``grad_fn`` may return any array-like of ``bounds.dims`` numbers, as
     ``global_optimize`` takes its gradients: a strided view, a list, a
@@ -235,7 +241,9 @@ class PyObjective(metaclass=_ExtensionAlias):
             bounds = bounds._core
         if grad_fn is not None:
             grad_fn = _float_gradient(grad_fn)
-        return _CorePyObjective(_float_value(fn_), bounds, grad_fn)
+        objective = _CorePyObjective(_float_value(fn_), bounds, grad_fn)
+        _refuse_a_nan_wall(*map(np.asarray, _core_objective_walls(objective)))
+        return objective
 
 
 def _float_value(fn_):
