@@ -704,9 +704,45 @@ def test_global_optimize_starts_from_x0_and_stays_in_the_box():
     assert result["best_val"] <= lj_cluster_energy(x0)
 
 
-def test_global_optimize_refuses_x0_outside_the_box():
-    with pytest.raises(ValueError, match="outside"):
-        global_optimize(styb_tang_2d, LOW, HIGH, budget=50, x0=np.array([0.0, 7.0]))
+ROUTES = {
+    "values only": {},
+    "gradient": {"grad_fn": True},
+    "declared noise": {"noise_sigma": 0.1},
+    "legacy policy": {"policy": "legacy"},
+    "batch replicas": {"replicas": 4},
+    "persistent replicas": {"replicas": 4, "grad_fn": True},
+    "persistent replicas under noise": {"replicas": 4, "noise_sigma": 0.1},
+}
+
+
+@pytest.mark.parametrize("budget", [1, 50])
+@pytest.mark.parametrize("route", ROUTES)
+def test_global_optimize_refuses_x0_outside_the_box_before_any_call(route, budget):
+    calls = []
+
+    def fun(x):
+        calls.append(("fun", np.array(x, dtype=np.float64)))
+        return styb_tang_2d(x)
+
+    def grad(x):
+        calls.append(("grad", np.array(x, dtype=np.float64)))
+        return styb_tang_grad_2d(x)
+
+    keywords = dict(ROUTES[route])
+    if keywords.pop("grad_fn", False):
+        keywords["grad_fn"] = grad
+    just_above = np.nextafter(HIGH[1], np.inf)
+    for x0, message in [
+        ([0.0, 7.0], r"x0\[1\] = 7 lies outside \[-5, 5\]"),
+        ([0.0, just_above], r"x0\[1\] = 5\.000000000000001 lies outside \[-5, 5\]"),
+        ([-np.inf, 0.0], r"x0\[0\] is not finite"),
+    ]:
+        with pytest.raises(ValueError, match=message):
+            global_optimize(fun, LOW, HIGH, budget, x0=np.array(x0), **keywords)
+    assert calls == []
+    global_optimize(fun, LOW, HIGH, budget, x0=HIGH.copy(), **keywords)
+    assert calls[0][0] == "fun"
+    np.testing.assert_array_equal(calls[0][1], HIGH)
 
 
 def test_run_takes_array_likes_of_any_shape_and_stride():
