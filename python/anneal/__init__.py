@@ -1890,10 +1890,12 @@ def global_optimize(
         (out of regime).
       policy: ``"auto"`` (default; feature-based regime routing) or
         ``"legacy"`` (flat arm order, uninformative priors; A/B only).
-      x0: optional starting point. It is clipped onto the box, then charged
-        as the first evaluation and the first incumbent. It stays the
-        incumbent until a lower value is found (if its value is not finite,
-        until any finite value is). The values-only loop starts its
+      x0: optional starting point, finite and inside the box, faces
+        included; one with a coordinate outside it raises ``ValueError``
+        before any call, as one of the wrong length or not finite does. It
+        is charged as the first evaluation and the first incumbent. It stays
+        the incumbent until a lower value is found (if its value is not
+        finite, until any finite value is). The values-only loop starts its
         descents, CMA-ES, one annealing chain and the first evolution member
         there; with ``grad_fn`` or ``noise_sigma``, arms that read the
         incumbent do, such as the trust-region poll and the population arm,
