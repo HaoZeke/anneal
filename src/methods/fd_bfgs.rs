@@ -1437,6 +1437,29 @@ mod tests {
     }
 
     #[test]
+    fn a_restart_at_a_positive_value_keeps_the_steps_on_the_logarithm() {
+        // The same restart at a start whose value is positive keeps the
+        // steps on the logarithm, where the count had moved them: a restart
+        // that keeps the curvature keeps the model the steps are on.
+        let mut engine = two_coordinate_descent();
+        assert_eq!(
+            steps_after(&mut engine, "llln"),
+            [false, false, false, true]
+        );
+        engine.restart_at(Array1::zeros(2).view(), None, true);
+        let plane = |x: ArrayView1<f64>| 1.0 + x[0] + 2.0 * x[1];
+        while matches!(engine.phase, Phase::Value | Phase::Gradient(_)) {
+            let x = engine.ask();
+            engine.tell(plane(x.view()));
+        }
+        assert!(engine.log_valid && engine.log_active);
+        match &engine.phase {
+            Phase::Line(work) => assert!(work.log),
+            _ => panic!("no line search followed the gradient"),
+        }
+    }
+
+    #[test]
     fn a_retired_logarithm_model_takes_no_more_pairs() {
         // A value at or below zero retires the model of the logarithm for
         // the rest of the run: accepted after two pairs for the logarithm,
