@@ -4,10 +4,11 @@
 //! samplers is drawn inside such a box, spread across it, and the
 //! low-discrepancy designs of the portfolio, the local polishers and the DMC
 //! population spread across it off its walls. An axis with an infinite wall
-//! starts on its finite wall, or at zero when both walls are infinite, and the
-//! classical run, the polishers and the DMC population evaluate no infinite
-//! coordinate there. A NaN wall is refused, naming its coordinate, before
-//! anything is evaluated.
+//! starts on its finite wall, or at zero when its walls are `-inf` and `inf`,
+//! and the classical run, the polishers and the DMC population evaluate no
+//! infinite coordinate there. A NaN wall, and an axis whose two walls are the
+//! same infinity, are refused, naming the coordinate, before anything is
+//! evaluated.
 
 use std::sync::{Arc, Mutex};
 
@@ -20,6 +21,7 @@ use anneal_core::methods::local_polish::{
 };
 use anneal_core::methods::{PortfolioPolicy, portfolio_optimize_from};
 use anneal_core::run_rs;
+use anneal_core::run_rs_qmc_variant_from;
 use anneal_core::run_rs_variant_from;
 use anneal_core::variant::{boltzmann, boltzmann_in_box};
 use eindir_core::{Bounds, Gradient, Objective};
@@ -31,6 +33,7 @@ const WIDE: f64 = 1e308;
 const SCALE: f64 = 1e307;
 
 type Seen = Arc<Mutex<Vec<Array1<f64>>>>;
+type Run = Box<dyn FnOnce(Recorder)>;
 
 /// Records every point it evaluates. Its value, the sum of
 /// `tanh(x / 1e307)^2`, is finite and smooth over every finite `f64`.
@@ -402,4 +405,120 @@ fn a_low_discrepancy_design_refuses_a_nan_wall() {
 fn the_trust_region_poll_refuses_a_nan_wall() {
     let rec = nan_wall();
     qmc_trust_region_poll(&rec, Array1::zeros(2), 10, 0, 0.1, 2, 4);
+}
+
+/// Boxes with an axis whose two walls are the same infinity, which holds no
+/// point, and that axis.
+fn same_infinity_walls() -> Vec<(Recorder, usize)> {
+    let inf = f64::INFINITY;
+    vec![
+        (Recorder::on(&[0.0, inf], &[1.0, inf]), 1),
+        (Recorder::on(&[2.0, -inf, 0.0], &[2.0, -inf, 1.0]), 1),
+        (Recorder::on(&[-inf], &[-inf]), 0),
+    ]
+}
+
+#[test]
+fn an_axis_whose_walls_are_the_same_infinity_is_refused_before_any_point() {
+    for (rec, i) in same_infinity_walls() {
+        let dim = rec.bounds.dims;
+        let message = format!(
+            "bounds must not have both walls at {} at dimension {i}",
+            rec.bounds.low[i]
+        );
+        // From the middle of each finite axis and the wall of the other.
+        let x0 = Array1::from_iter(
+            rec.bounds
+                .low
+                .iter()
+                .zip(rec.bounds.high.iter())
+                .map(|(&lo, &hi)| if lo == hi { lo } else { 0.5 * (lo + hi) }),
+        );
+        let runs: Vec<(&str, Run)> = vec![
+            (
+                "gsa",
+                Box::new(|r| {
+                    qmc_gsa_global_search_from(&r, 30, 3, 4, 1.0, 2.6, -5.0, None);
+                }),
+            ),
+            (
+                "gsa from x0",
+                Box::new(move |r| {
+                    qmc_gsa_global_search_from(&r, 30, 3, 4, 1.0, 2.6, -5.0, Some(x0.view()));
+                }),
+            ),
+            (
+                "best1bin",
+                Box::new(|r| {
+                    qmc_best1bin_scout(&r, 30, 3, 8, 0.5, 0.3, 0.9);
+                }),
+            ),
+            (
+                "trust region",
+                Box::new(move |r| {
+                    qmc_trust_region_poll(&r, Array1::zeros(dim), 30, 3, 0.1, 2, 4);
+                }),
+            ),
+            (
+                "projected gradient",
+                Box::new(move |r| {
+                    shifted_qmc_projected_gradient_polish(
+                        &r,
+                        &Slope(dim),
+                        2,
+                        5,
+                        3,
+                        1,
+                        0.1,
+                        1e-8,
+                        1,
+                    );
+                }),
+            ),
+            (
+                "dmc",
+                Box::new(move |r| {
+                    let mut rng = StdRng::seed_from_u64(3);
+                    run_dmc_population_seeded(
+                        &r,
+                        Some(&Slope(dim)),
+                        30,
+                        3,
+                        4,
+                        2,
+                        1.0,
+                        None,
+                        &mut rng,
+                    );
+                }),
+            ),
+            (
+                "classical",
+                Box::new(|r| {
+                    let variant = boltzmann(r, 1.0, 0.1).expect("a valid preset");
+                    run_rs_variant_from(variant, 2, 3, 0, None, None);
+                }),
+            ),
+            (
+                "multistart",
+                Box::new(|r| {
+                    let variant = boltzmann(r, 1.0, 0.1).expect("a valid preset");
+                    run_rs_qmc_variant_from(variant, 2, 2, 3, 0, None, None);
+                }),
+            ),
+            ("hmc", Box::new(|r| hmc_run(r, 0))),
+            ("nuts", Box::new(|r| nuts_run(r, 0))),
+        ];
+        for (what, run) in runs {
+            let fresh = Recorder::on(
+                rec.bounds.low.as_slice().unwrap(),
+                rec.bounds.high.as_slice().unwrap(),
+            );
+            let seen = fresh.clone();
+            let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(fresh)))
+                .expect_err(what);
+            assert_eq!(refused.downcast_ref::<String>(), Some(&message), "{what}");
+            assert_eq!(seen.points(), Vec::<Array1<f64>>::new(), "{what}");
+        }
+    }
 }

@@ -863,7 +863,7 @@ where
         bounds.dims,
         "center dimension must match objective bounds"
     );
-    crate::box_points::assert_no_nan_wall(bounds);
+    crate::box_points::assert_box_holds_points(bounds);
 
     let levels = n_levels.max(1);
     let dim_scale = (bounds.dims * bounds.dims).max(1) as f64;
