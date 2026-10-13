@@ -902,6 +902,62 @@ def test_a_history_that_cannot_be_allocated_is_refused_before_any_call(
     assert printed[:2] == ["ValueError", "0"]
 
 
+def _held_to_size():
+    # The child sets its address space to its own size plus the room it is
+    # given, which needs Linux's /proc and a hard limit that allows it.
+    if not sys.platform.startswith("linux"):
+        return False
+    import resource
+
+    return resource.getrlimit(resource.RLIMIT_AS)[1] == resource.RLIM_INFINITY
+
+
+@pytest.mark.skipif(not _held_to_size(), reason="needs /proc and an unlimited RLIMIT_AS")
+@pytest.mark.parametrize(
+    ("entry", "options", "room", "printed"),
+    [
+        # A start's history holds 41 bytes an epoch, 40 for its line and 1
+        # for its flag, and its end takes no more.
+        ("run", "max_evals=5", 40.5, ["ValueError", "0"]),
+        ("run", "max_evals=5", 45, ["returned", "1"]),
+        ("run_qmc", "n_starts=8, max_evals=50", 40.5, ["ValueError", "0"]),
+        # The second start runs while the first's history is kept.
+        ("run_qmc", "n_starts=2", 60, ["ValueError", "0"]),
+        ("run_qmc", "n_starts=2", 85, ["returned", "2"]),
+    ],
+)
+def test_a_run_whose_histories_do_not_fit_together_is_refused_before_any_call(
+    entry, options, room, printed
+):
+    # In a child process, as above, whose address space is held to its size
+    # plus room bytes an epoch of 10**7 epochs, each recorded with no steps.
+    # The objective is +inf, so every window of the stationarity flags holds
+    # a value that is not finite and the run's end takes one look an epoch.
+    script = (
+        "import resource\n"
+        "import anneal\n"
+        "calls = []\n"
+        "def f(x):\n"
+        "    calls.append(1)\n"
+        "    return float('inf')\n"
+        "with open('/proc/self/status') as status:\n"
+        "    size = next(int(line.split()[1]) for line in status if line.startswith('VmSize:'))\n"
+        f"limit = size * 1024 + int({room} * 10**7)\n"
+        "resource.setrlimit(resource.RLIMIT_AS, (limit, resource.RLIM_INFINITY))\n"
+        "try:\n"
+        f"    anneal.{entry}(f, [-1.0, -1.0], [1.0, 1.0], anneal.Fast(), n_epochs=10**7,"
+        f" steps_per_epoch=0, seed=3, {options})\n"
+        "    print('returned', len(calls))\n"
+        "except ValueError as error:\n"
+        "    print('ValueError', len(calls), error)\n"
+    )
+    child = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=300
+    )
+    assert child.returncode == 0, child.stderr[-2000:]
+    assert child.stdout.split()[:2] == printed, child.stdout
+
+
 def test_run_qmc_whose_starts_take_no_steps_records_no_epoch_and_returns():
     # Five evaluations over eight starts give five of them one each, spent on
     # the start itself, so no start takes a step or records an epoch.

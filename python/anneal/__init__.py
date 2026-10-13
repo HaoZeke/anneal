@@ -424,9 +424,10 @@ def run(
     by ``obj_fn`` is scored as ``+inf`` and reported once as a
     ``RuntimeWarning``; ``KeyboardInterrupt`` ends the run and is re-raised, as
     is a ``TypeError`` when ``obj_fn`` returns something that is not a number.
-    Before any call the run checks that the room it reserves for the epochs it
-    records, once the start is called, can be allocated, and raises
-    ``ValueError`` when it cannot.
+    Once the start is called the run reserves room for the epochs it records,
+    41 bytes an epoch, and its end takes no more. Before any call it checks
+    that this room can be allocated at once, and raises ``ValueError`` when
+    it cannot.
     """
     return _core_run(
         obj_fn,
@@ -462,9 +463,10 @@ def run_qmc(
     coordinates, whose two ends are equal, are held as :func:`run` holds
     them, the design spanning the free ones; with every coordinate fixed
     the run is one call. Each start reserves room for the epochs it records
-    as :func:`run` does; before any call the run checks that the first
-    start's room, the most any start reserves, can be allocated, and raises
-    ``ValueError`` when it cannot.
+    as :func:`run` does, and the best start's history is kept while the next
+    start runs. Before any call the run checks that the room of the first
+    two starts, the most it holds at once, can be allocated together, and
+    raises ``ValueError`` when it cannot.
     """
     return _core_run_qmc(
         obj_fn,
