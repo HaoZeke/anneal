@@ -643,7 +643,8 @@ struct BudgetLedger {
     n_evals: AtomicUsize,
     n_grads: AtomicUsize,
     /// Gradients charged at a point with a non-finite coordinate, which
-    /// [`BudgetedGradient`] answers without calling the caller's gradient.
+    /// [`BudgetLedger::gradient_at`] answers without calling the caller's
+    /// gradient.
     n_answered: AtomicUsize,
     archive: Arc<Archive>,
     /// Whether the budgeted objectives record what they evaluate. A batch
@@ -746,6 +747,20 @@ impl BudgetLedger {
     fn count(&self, n_evals: usize, n_grads: usize) {
         self.n_evals.fetch_add(n_evals, Ordering::Relaxed);
         self.n_grads.fetch_add(n_grads, Ordering::Relaxed);
+    }
+
+    /// `grad` at `x` on work already reserved with
+    /// [`BudgetLedger::try_charge`], counted in `n_grads` as a call. A point
+    /// with a non-finite coordinate is answered with zeros, as
+    /// [`ReflectedGradient`] answers it, without calling `grad`, and counted
+    /// in `n_answered`.
+    fn gradient_at<G: Gradient<f64>>(&self, grad: &G, x: ArrayView1<f64>) -> Array1<f64> {
+        if x.iter().any(|v| !v.is_finite()) {
+            self.n_answered.fetch_add(1, Ordering::Relaxed);
+            return Array1::zeros(x.len());
+        }
+        self.n_grads.fetch_add(1, Ordering::Relaxed);
+        grad.grad(x)
     }
 
     /// Records an evaluation in the archive ([`Archive::record`]) unless a
@@ -967,7 +982,8 @@ impl<G: Gradient<f64>> Gradient<f64> for ReflectedGradient<'_, G> {
 /// Gradient proxy charging one unit per evaluation. A point with a
 /// non-finite coordinate is charged as well but answered with zeros, as
 /// [`ReflectedGradient`] answers it, and counted in the ledger's
-/// `n_answered`: the caller's gradient never sees it.
+/// `n_answered` ([`BudgetLedger::gradient_at`]): the caller's gradient
+/// never sees it.
 struct BudgetedGradient<'a, G: Gradient<f64>> {
     inner: &'a G,
     ledger: &'a BudgetLedger,
@@ -982,12 +998,7 @@ impl<G: Gradient<f64>> Gradient<f64> for BudgetedGradient<'_, G> {
         if !self.ledger.try_charge(GRADIENT_WORK_UNIT) {
             return Array1::zeros(self.ledger.dim);
         }
-        if x.iter().any(|v| !v.is_finite()) {
-            self.ledger.n_answered.fetch_add(1, Ordering::Relaxed);
-            return Array1::zeros(x.len());
-        }
-        self.ledger.n_grads.fetch_add(1, Ordering::Relaxed);
-        self.inner.grad(x)
+        self.ledger.gradient_at(self.inner, x)
     }
 }
 
@@ -1985,8 +1996,8 @@ where
         return None;
     }
     let value = obj.inner.eval(center.view());
-    let gradient = grad.inner.grad(center.view());
-    obj.ledger.count(1, 1);
+    let gradient = obj.ledger.gradient_at(grad.inner, center.view());
+    obj.ledger.count(1, 0);
     if !value.is_finite() {
         return None;
     }
@@ -5103,7 +5114,7 @@ fn assert_runnable(noise_sigma: Option<f64>, bounds: &Bounds<f64>) {
 /// point the caller evaluated with its value, are recorded first. The
 /// result counts calls in `n_evals` and `n_grads`, and the evaluations the
 /// record answered, spent from the budget all the same, in `n_answered`,
-/// with the gradients [`BudgetedGradient`] answered.
+/// with the gradients the ledger answered ([`BudgetLedger::gradient_at`]).
 #[allow(clippy::too_many_arguments)]
 fn portfolio_optimize_interacting<O, G>(
     obj: &O,
@@ -7787,6 +7798,64 @@ mod tests {
             );
             assert_eq!(each.n_grads, grad.points().len());
             assert!(each.n_answered > 0);
+        }
+    }
+
+    fn overflow_square(x: ArrayView1<f64>) -> f64 {
+        (x[0] / 1e308 - 1.3).powi(2)
+    }
+
+    fn overflow_square_gradient(x: ArrayView1<f64>) -> Array1<f64> {
+        x.mapv(|v| 2.0 * (v / 1e308 - 1.3) / 1e308)
+    }
+
+    #[test]
+    fn center_probe_answers_its_gradient_at_a_centre_that_is_not_finite() {
+        // (low + high) / 2 overflows on the first two boxes, and the gradient
+        // there is charged, answered with zeros and counted in `n_answered`.
+        let probe = |low: f64, high: f64| {
+            let objective = Traced::new(low, high, 1, overflow_square);
+            let gradient = TracedGradient::new(1, overflow_square_gradient);
+            let reflected = ReflectedGradient {
+                inner: &gradient,
+                bounds: objective.bounds(),
+            };
+            let ledger = BudgetLedger::new(10, 1);
+            let budgeted_objective = BudgetedObjective {
+                inner: &objective,
+                ledger: &ledger,
+            };
+            let budgeted = BudgetedGradient {
+                inner: &reflected,
+                ledger: &ledger,
+            };
+            scaled_center_probe(&budgeted_objective, &budgeted, objective.bounds());
+            (
+                gradient.points().len(),
+                ledger.n_grads.load(Ordering::Relaxed),
+                ledger.n_answered.load(Ordering::Relaxed),
+            )
+        };
+        assert_eq!(probe(1e308, 1.7e308), (0, 0, 1));
+        assert_eq!(probe(-1.7e308, -1e308), (0, 0, 1));
+        assert_eq!(probe(1e307, 1.7e307), (1, 1, 0));
+    }
+
+    #[test]
+    fn a_run_on_a_box_whose_centre_overflows_counts_only_its_gradient_calls() {
+        // The centre probe asks for the gradient at the centre, which is not
+        // finite here; `charged_and_called` holds `n_grads` to the calls.
+        let traced = || {
+            (
+                Traced::new(1e308, 1.7e308, 1, overflow_square),
+                Some(TracedGradient::new(1, overflow_square_gradient)),
+            )
+        };
+        let x0 = Array1::from_elem(1, 1.35e308);
+        for seed in [0, 5] {
+            let (_, _, result) =
+                charged_and_called(traced, 200, seed, PortfolioPolicy::Auto, Some(x0.view()));
+            assert!(result.n_answered > 0);
         }
     }
 
