@@ -751,6 +751,41 @@ def test_njev_and_n_grads_count_only_the_calls_of_a_gradient_that_is_not_finite(
     assert out["n_evals"] + out["n_grads"] + out["n_answered"] <= 1000
 
 
+def _overflow_square(x):
+    return float(np.sum((np.asarray(x) / 1e308 - 1.3) ** 2))
+
+
+@pytest.mark.parametrize(
+    ("low", "high"),
+    [([1e308], [1.7e308]), ([1e308, 0.0], [1.7e308, 1.0]), ([-1.7e308], [-1e308])],
+)
+def test_njev_and_n_grads_count_only_the_calls_on_a_box_whose_centre_overflows(low, high):
+    # (low + high) / 2 is not finite on these boxes, and the gradient a run
+    # asks at the centre is charged and answered with zeros without a call.
+    low, high = np.array(low), np.array(high)
+    gradients = []
+
+    def jac(x):
+        gradients.append(np.array(x, dtype=np.float64))
+        return 2.0 * (np.asarray(x) / 1e308 - 1.3) / 1e308
+
+    x0 = low + 0.25 * (high - low)
+    for seed in (0, 5):
+        gradients.clear()
+        result = anneal.minimize(
+            Recorder(_overflow_square), x0, list(zip(low, high)), jac=jac, budget=200, seed=seed
+        )
+        assert len(gradients) == result.njev
+        assert result.nfev + result.njev + result.diagnostics["n_answered"] <= 200
+        for start in ({}, {"x0": x0}):
+            gradients.clear()
+            out = anneal.global_optimize(
+                Recorder(_overflow_square), low, high, 200, seed=seed, grad_fn=jac, **start
+            )
+            assert len(gradients) == out["n_grads"]
+            assert out["n_evals"] + out["n_grads"] + out["n_answered"] <= 200
+
+
 X0_ROUTES = {
     "values only": {},
     "legacy policy": {"policy": "legacy"},

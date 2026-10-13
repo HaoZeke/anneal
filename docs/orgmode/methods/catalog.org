@@ -1473,11 +1473,11 @@ budget rather than being hand-tuned.
 
 Values-only loop: under =PortfolioPolicy::Auto= a run with no gradient
 and no declared noise goes, before any regime routing, to
-=run_values_only_portfolio= (src/methods/portfolio.rs:3890, 5220-5223),
+=run_values_only_portfolio= (src/methods/portfolio.rs:3901, 5231-5234),
 a bandit over =VALUES_ONLY_ARMS= (=cma=, =qn=, =gsa=, =de=, =surrogate=,
-=explore=, portfolio.rs:1174-1191, 3791-3798) in slices of
+=explore=, portfolio.rs:1185-1202, 3802-3809) in slices of
 =max(4(d+1), min(budget/48, sqrt(4(d+1) budget)))= evaluations
-(=values_only_slice=, portfolio.rs:3806-3809). In a box with no side
+(=values_only_slice=, portfolio.rs:3817-3820). In a box with no side
 wide enough at the start for a difference step to change its
 coordinate (=FdBfgs::can_difference=, fd_bfgs.rs:504), the run is one
 evaluation, of =x0= or of the box's centre; the forward step there is
@@ -1580,14 +1580,16 @@ the gradient likewise, counted against the budget as a call, so it takes
 the steps it would have taken by calling again; =n_evals= and =n_grads=
 count the calls and =n_answered= the evaluations answered
 (=portfolio_optimize_interacting=,
-src/methods/portfolio.rs:5108, 5148-5152), with the gradients asked at a
-point that is not finite, which are answered with zeros without a call
-(=BudgetedGradient=, src/methods/portfolio.rs:976-990). Persistent replicas
-(=portfolio_ensemble_optimize=, src/methods/portfolio/ensemble.rs:113)
-are given the value at =x0= and keep a record each, so a point two of
-them reach is a call of each: they run concurrently, and with one record
-which of them called at a point, and so each one's counts, would depend
-on thread timing. With declared noise every evaluation is a call.
+src/methods/portfolio.rs:5119, 5159-5163), with the gradients asked at a
+point that is not finite, such as the one asked at the box's centre when
+that overflows, which are answered with zeros without a call
+(=BudgetLedger::gradient_at=, src/methods/portfolio.rs:757-764).
+Persistent replicas (=portfolio_ensemble_optimize=,
+src/methods/portfolio/ensemble.rs:113) are given the value at =x0= and
+keep a record each, so a point two of them reach is a call of each: they
+run concurrently, and with one record which of them called at a point,
+and so each one's counts, would depend on thread timing. With declared
+noise every evaluation is a call.
 
 Batch replicas: =portfolio_replicas= (src/methods/portfolio/replicas.rs:415)
 runs =R= copies of the values-only loop from =x0= under one total budget.
@@ -1651,7 +1653,7 @@ portfolio.rs:167) and its work-unit to =max_fevals= converter
 (=endgame_polish_max_fevals=, portfolio.rs:149-155); a coordinate
 pattern-search fallback (=run_endgame_coordinate_microrefine=,
 portfolio.rs:203); the values-only =SuccessScale=
-(portfolio.rs:1701) and =DescentPace= (portfolio.rs:1795); the
+(portfolio.rs:1712) and =DescentPace= (portfolio.rs:1806); the
 =replicas= module notes for batch replicas
 (src/methods/portfolio/replicas.rs:1-32), =ReplicaArchive=
 (replicas.rs:48) and =ReplicaResult= (replicas.rs:59).
@@ -2151,7 +2153,7 @@ Key types and functions: =CmaEs= (src/methods/cma_es.rs:119);
 =covariance_learning_evaluations= (cma_es.rs:111, the horizon
 \(\lambda/(c_1 + c_\mu)\)); =Bipop= and =CmaRegime=
 (cma_es.rs:642/621); the portfolio's =CmaArmState= and =run_cma_arm=
-(src/methods/portfolio.rs:1238/3633).
+(src/methods/portfolio.rs:1249/3644).
 
 Constants and defaults: =default_lambda= \(4 + \lfloor 3 \ln n
 \rfloor\) (cma_es.rs:82). In the portfolio every run is centred on the
@@ -2264,7 +2266,7 @@ one is set, or a failed line search.
 
 Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:351);
 =FdBfgsOptions= (fd_bfgs.rs:166); the portfolio's =QnArmState= and
-=run_qn_arm= (src/methods/portfolio.rs:1327/3707).
+=run_qn_arm= (src/methods/portfolio.rs:1338/3718).
 
 Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
 =MAX_EXTRAPOLATION = 16=, =EXTRAPOLATION_ROOM = 0.5=,
