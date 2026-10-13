@@ -337,7 +337,15 @@ def _site() -> _Site:
 
 
 def _give(handed: Iterable[tuple[_Site, str]]) -> None:
-    """Give each handed FutureWarning, pointing at the site it was handed from."""
+    """Give each handed FutureWarning, pointing at the site it was handed from.
+
+    The site's globals name the module and hold the registry, as
+    ``warnings.warn`` takes them from a frame, but are not passed as
+    ``module_globals``: Python 3.12 checks the loader they name, raising
+    ValueError where ``__loader__`` and ``__spec__`` are None, as in a
+    Jupyter cell's namespace, and giving a DeprecationWarning for a script's
+    ``__main__``, whose ``__spec__`` is None.
+    """
     for (filename, line, module_globals), message in handed:
         warnings.warn_explicit(
             message,
@@ -346,7 +354,6 @@ def _give(handed: Iterable[tuple[_Site, str]]) -> None:
             line,
             module=module_globals.get("__name__", "<string>"),
             registry=module_globals.setdefault("__warningregistry__", {}),
-            module_globals=module_globals,
         )
 
 

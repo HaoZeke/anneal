@@ -15,6 +15,10 @@ with the budget and the seed unchecked.
 
 import functools
 import inspect
+import json
+import os
+import subprocess
+import sys
 import warnings
 
 import numpy as np
@@ -444,6 +448,114 @@ def test_the_warning_for_a_fit_anneal_comes_once_its_bridge_checks_pass(kind, wh
             run_fitter(first, 60, preset=Fast())
     assert str(caught.value) == warning
     assert len(first.handed) == 1 and first.calls == []
+
+
+_CALLER = '''\
+import numpy as np
+from anneal import Fast
+from anneal.chemfit import run_benchmark, run_fitter
+
+
+class Own:
+    def __init__(self):
+        self.initial_parameters = {"x": [0.2, -0.1], "eps": 1.0}
+        self.bounds = {"x": (-1.0, 1.0), "eps": (0.5, 2.0)}
+        self.evaluations = 0
+
+    def init(self, batch_size=1):
+        pass
+
+    def evaluate(self, params):
+        self.evaluations += 1
+        return float(np.sum((np.asarray(params["x"]) - 0.3) ** 2) + (params["eps"] - 1.2) ** 2)
+
+    def step(self):
+        pass
+
+    def finish(self, params=None):
+        return params
+
+    def fit_anneal(self, budget, *, method="portfolio", seed=0):
+        context = {"fitter": self, "budget": budget, "initial_params": self.initial_parameters}
+        return run_benchmark(context, method=method, seed=seed)
+
+
+def call(fitter):
+    return run_fitter(fitter, 40, preset=Fast())
+'''
+
+# IPython and Jupyter run a cell in a fresh module's namespace, whose
+# __loader__ and __spec__ are None; a script's __main__ has a loader but no
+# spec.
+_DRIVE = '''\
+import importlib.util
+import json
+import sys
+import types
+import warnings
+
+where, path = sys.argv[1], sys.argv[2]
+with open(path) as fh:
+    source = fh.read()
+if where == "script":
+    namespace, filename = globals(), path
+    exec(compile(source, filename, "exec"), namespace)
+elif where == "cell":
+    cell = types.ModuleType("__main__")
+    cell.__dict__["__builtins__"] = __builtins__
+    namespace, filename = cell.__dict__, "<ipython-input-1>"
+    exec(compile(source, filename, "exec"), namespace)
+else:
+    spec = importlib.util.spec_from_file_location("caller", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    namespace = module.__dict__
+out = {"names": [namespace.get(name) is not None for name in ("__loader__", "__spec__")]}
+fitter = namespace["Own"]()
+with warnings.catch_warnings(record=True) as record:
+    warnings.simplefilter("always", FutureWarning)
+    best = namespace["call"](fitter)
+out["record"] = [[w.category.__name__, str(w.message), w.filename, w.lineno] for w in record]
+out["ran"] = [sorted(best), fitter.evaluations]
+fitter = namespace["Own"]()
+try:
+    namespace["call"](fitter)
+except Exception as error:
+    out["raised"] = [type(error).__name__, str(error), fitter.evaluations]
+print(json.dumps(out))
+'''
+
+
+@pytest.mark.parametrize(
+    "where, names",
+    [("cell", [False, False]), ("script", [True, False]), ("module", [True, True])],
+)
+def test_the_warning_for_a_fit_anneal_reaches_its_caller_from_any_namespace(
+    tmp_path, where, names
+):
+    caller, drive = tmp_path / "caller.py", tmp_path / "drive.py"
+    caller.write_text(_CALLER)
+    drive.write_text(_DRIVE)
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONWARNINGS"}
+    done = subprocess.run(
+        [sys.executable, "-W", "error", str(drive), where, str(caller)],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+    )
+    assert done.returncode == 0, done.stderr[-3000:]
+    out = json.loads(done.stdout)
+    assert out["names"] == names
+    warning = _ignored_fast(
+        "global_optimize", "the portfolio", "Own.fit_anneal() takes no 'preset'"
+    )
+    filename = "<ipython-input-1>" if where == "cell" else str(caller)
+    line = _CALLER.splitlines().index("    return run_fitter(fitter, 40, preset=Fast())") + 1
+    assert out["record"] == [["FutureWarning", warning, filename, line]]
+    keys, evaluations = out["ran"]
+    assert keys == ["eps", "x"] and 1 < evaluations <= 40
+    assert out.get("raised") == ["FutureWarning", warning, 0]
 
 
 def test_a_fit_anneal_that_calls_no_bridge_has_the_warning_once_it_returns():
