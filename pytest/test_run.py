@@ -842,6 +842,72 @@ def test_a_huge_n_epochs_with_a_small_max_evals_returns(entry, low, high, calls)
     assert child.stdout.split()[0] == str(calls)
 
 
+def _refuses_what_it_cannot_back():
+    # Linux refuses at once an allocation larger than its memory and swap
+    # unless it is set to overcommit always; elsewhere room for 10**12 epochs
+    # may be granted, and the run would go on.
+    try:
+        with open("/proc/sys/vm/overcommit_memory") as setting:
+            return setting.read().strip() != "1"
+    except OSError:
+        return False
+
+
+REFUSES_40_TB = pytest.mark.skipif(
+    not _refuses_what_it_cannot_back(), reason="40 TB may be granted here"
+)
+
+
+def _child_run(entry, n_epochs, steps_per_epoch, max_evals):
+    script = (
+        "import anneal\n"
+        "calls = []\n"
+        "def f(x):\n"
+        "    calls.append(1)\n"
+        "    return float(sum(x * x))\n"
+        "try:\n"
+        f"    h = anneal.{entry}(f, [-1.0, -1.0], [1.0, 1.0], anneal.Fast(), n_epochs={n_epochs},"
+        f" steps_per_epoch={steps_per_epoch}, seed=3, max_evals={max_evals!r})\n"
+        "    print('returned', len(calls), len(h.epochs))\n"
+        "except ValueError as error:\n"
+        "    print('ValueError', len(calls), error)\n"
+    )
+    child = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=300
+    )
+    assert child.returncode == 0, child.stderr[-2000:]
+    return child.stdout.split()
+
+
+@pytest.mark.parametrize(
+    ("entry", "n_epochs", "steps_per_epoch", "max_evals"),
+    [
+        pytest.param("run", 10**12, 200, None, marks=REFUSES_40_TB),
+        pytest.param("run_qmc", 10**12, 200, None, marks=REFUSES_40_TB),
+        pytest.param("run", 10**12, 0, 5, marks=REFUSES_40_TB),
+        # Of 50 evaluations over eight starts the first has seven, so it takes
+        # steps, and with none in an epoch it records every epoch.
+        pytest.param("run_qmc", 10**12, 0, 50, marks=REFUSES_40_TB),
+        ("run", 2**62, 1, None),
+        ("run_qmc", 2**62, 1, None),
+    ],
+)
+def test_a_history_that_cannot_be_allocated_is_refused_before_any_call(
+    entry, n_epochs, steps_per_epoch, max_evals
+):
+    # In a child process, as above. Every epoch is recorded, without
+    # max_evals or with no steps in an epoch: room for 10**12 is 40 TB, and
+    # room for 2**62 is more than a pointer spans.
+    printed = _child_run(entry, n_epochs, steps_per_epoch, max_evals)
+    assert printed[:2] == ["ValueError", "0"]
+
+
+def test_run_qmc_whose_starts_take_no_steps_records_no_epoch_and_returns():
+    # Five evaluations over eight starts give five of them one each, spent on
+    # the start itself, so no start takes a step or records an epoch.
+    assert _child_run("run_qmc", 10**12, 0, 5) == ["returned", "5", "0"]
+
+
 def test_run_leaves_a_nan_start():
     def nan_at_origin(x):
         return float("nan") if np.all(x == 0.0) else styb_tang_2d(x)

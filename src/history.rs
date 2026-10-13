@@ -73,6 +73,14 @@ impl History {
         }
     }
 
+    /// Whether the allocator grants, one after the other, the two vectors
+    /// [`History::with_capacity`] reserves for `n_epochs` epochs; each is
+    /// freed at once, and a refusal returns `false` instead of aborting.
+    pub fn can_reserve(n_epochs: usize) -> bool {
+        Vec::<EpochLine>::new().try_reserve_exact(n_epochs).is_ok()
+            && Vec::<bool>::new().try_reserve_exact(n_epochs).is_ok()
+    }
+
     /// Recomputes the per-epoch non-stationarity flags from epoch summaries.
     pub fn refresh_stationarity_flags(&mut self) {
         let values: Vec<f64> = self.epochs.iter().map(|epoch| epoch.best_val).collect();
@@ -132,7 +140,14 @@ pub fn trajectory_stationarity_flags(values: &[f64]) -> Vec<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::trajectory_stationarity_flags;
+    use super::{History, trajectory_stationarity_flags};
+
+    #[test]
+    fn room_past_the_address_space_cannot_be_reserved() {
+        assert!(History::can_reserve(0));
+        assert!(History::can_reserve(100));
+        assert!(!History::can_reserve(usize::MAX / 8));
+    }
 
     #[test]
     fn flags_a_sustained_mean_shift_at_the_change_point() {

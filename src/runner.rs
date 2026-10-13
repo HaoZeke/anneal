@@ -58,7 +58,7 @@ fn drive_rs<S: Sampler<f64>>(
 /// The epochs of `n_epochs` that a run records before `max_steps`
 /// proposals of `steps_per_epoch` an epoch run out, the last one perhaps
 /// cut short. Epochs of no proposals take none, so all are recorded.
-fn epochs_within(n_epochs: usize, steps_per_epoch: usize, max_steps: usize) -> usize {
+pub(crate) fn epochs_within(n_epochs: usize, steps_per_epoch: usize, max_steps: usize) -> usize {
     if max_steps == 0 {
         0
     } else if steps_per_epoch == 0 {
@@ -119,8 +119,15 @@ fn drive_rs_capped<S: Sampler<f64>>(
 }
 
 /// Proposals left once the start has been charged against `max_evals`.
-fn steps_within(max_evals: Option<usize>) -> usize {
+pub(crate) fn steps_within(max_evals: Option<usize>) -> usize {
     max_evals.map_or(usize::MAX, |cap| cap.saturating_sub(1))
+}
+
+/// The share of `max_evals` that start `idx` of `n_starts` may spend, the
+/// cap split as evenly as it goes with the first starts taking one more, so
+/// the first share is the largest.
+pub(crate) fn start_share(max_evals: Option<usize>, n_starts: usize, idx: usize) -> Option<usize> {
+    max_evals.map(|cap| cap / n_starts + usize::from(idx < cap % n_starts))
 }
 
 /// Runs the Metropolis-Hastings SA driver for `n_epochs` epochs of
@@ -326,7 +333,7 @@ where
     // without GIL deadlock. Native multi-walker scaling lives in dmc_pop.
     let mut best_history = None;
     for idx in 0..n_starts {
-        let share = max_evals.map(|cap| cap / n_starts + usize::from(idx < cap % n_starts));
+        let share = start_share(max_evals, n_starts, idx);
         if share == Some(0) {
             break;
         }
