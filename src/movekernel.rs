@@ -601,6 +601,32 @@ mod tests {
     }
 
     #[test]
+    fn reflect_slope_follows_the_image_on_extreme_boxes() {
+        // The first three boxes have a finite fold period, but `x - lo`
+        // overflows; the others have an infinite wall or width.
+        let m = f64::MAX;
+        let inf = f64::INFINITY;
+        for (x, lo, hi) in [
+            (0.3 * m, -m, -0.6 * m),
+            (0.1 * m, -m, -0.6 * m),
+            (0.3 * m, -m, -0.75 * m),
+            (1.5e308, -1e308, 1e308),
+            (-1.5e308, -1e308, 1e308),
+            (-1e308, 0.0, inf),
+            (0.9 * m, -inf, 0.5 * m),
+        ] {
+            let (y, slope) = reflect_coord_with_slope(x, lo, hi);
+            assert_eq!(y.to_bits(), reflect_coord(x, lo, hi).to_bits());
+            let h = 1e-6 * x.abs();
+            let moved = reflect_coord(x + h, lo, hi) - reflect_coord(x - h, lo, hi);
+            assert!(
+                moved != 0.0 && slope == moved.signum(),
+                "x = {x} in [{lo}, {hi}]: slope {slope}, image moved by {moved}"
+            );
+        }
+    }
+
+    #[test]
     fn ln_gamma_matches_gamma_and_survives_overflow() {
         // Reference values of ln Gamma(x) from libm's lgamma.
         let reference = [
