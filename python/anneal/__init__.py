@@ -499,7 +499,11 @@ def run_hmc(
     """HMC-driven simulated annealing inside the box ``[low, high]``.
 
     ``low``, ``high`` and ``x0`` may be any array-like of one shape; they are
-    flattened in C order and the callables receive the flat vector.
+    flattened in C order and the callables receive the flat vector. Once the
+    start is called the run reserves room for every epoch, 41 bytes an epoch,
+    as :func:`run` does without ``max_evals``. Before any call it checks that
+    this room can be allocated at once, and raises ``ValueError`` when it
+    cannot.
     """
     return _core_run_hmc(
         obj_fn,

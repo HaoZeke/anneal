@@ -1054,6 +1054,8 @@ fn run_hmc(
     } else {
         None
     };
+    let held = crate::runner::epochs_within(n_epochs, steps_per_epoch, usize::MAX);
+    refuse_unallocated_histories(n_epochs, &[held])?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
