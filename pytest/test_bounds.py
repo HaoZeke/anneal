@@ -154,6 +154,18 @@ def test_bounds_repr_reads_back_exactly():
     [
         ([0.0, 0.0], [1.0, 1.0, 1.0], 1e-6, "one size"),
         ([0.0, 2.0], [1.0, 1.0], 1e-6, "coordinate 1 has low 2.0 above high 1.0"),
+        (
+            [0.0, float("nan")],
+            [1.0, 1.0],
+            1e-6,
+            "coordinate 1 has a NaN wall: low nan, high 1.0",
+        ),
+        (
+            [0.0, 0.0],
+            [float("nan"), 1.0],
+            1e-6,
+            "coordinate 0 has a NaN wall: low 0.0, high nan",
+        ),
         ([0.0, 0.0], [1.0, 1.0], -1e-6, "slack"),
         ([0.0, 0.0], [1.0, 1.0], float("nan"), "slack"),
     ],
@@ -161,6 +173,13 @@ def test_bounds_repr_reads_back_exactly():
 def test_bounds_refuse_a_malformed_box_with_value_error(low, high, slack, message):
     with pytest.raises(ValueError, match=message):
         Bounds(low, high, slack)
+
+
+def test_bounds_take_an_infinite_wall():
+    inf = float("inf")
+    bounds = Bounds([0.0, -inf], [inf, 1.0])
+    assert bounds.contains([1e300, -1e300])
+    assert bounds.clip([-1.0, 2.0]).tolist() == [0.0, 1.0]
 
 
 def test_contains_refuses_and_clip_rejects_a_point_of_the_wrong_size():
