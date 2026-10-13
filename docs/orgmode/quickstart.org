@@ -84,9 +84,10 @@ and so does =run_fitter= unless the fitter has a =fit_anneal= method of its
 own, which =run_fitter= then calls instead. They drive =ask= / =tell= on
 ChemFit 3.1.1, the first release that has them, and =evaluate= / =step= on
 ChemFit's source from commit c57d6f5, which no release has yet; ChemFit
-3.1.0 has neither pair. The first exception the fitter raises stops the fit
-and reaches the caller without =finish=. A positions-only objective is the
-same loop as their Boltzmann driver:
+3.1.0 has neither pair. The first exception the fitter raises before
+=finish= stops the fit and reaches the caller without =finish=; one that
+=finish= raises reaches the caller as it is. A positions-only objective is
+the same loop as their Boltzmann driver:
 
 #+begin_src python
 import numpy as np

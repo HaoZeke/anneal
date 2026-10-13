@@ -64,8 +64,8 @@ class Recorder:
         self.calls.append("init")
 
     def finish(self, opt_params=None):
-        self.calls.append("finish")
         self.finished_with = opt_params
+        self._record("finish")
         return opt_params
 
     def _record(self, name):

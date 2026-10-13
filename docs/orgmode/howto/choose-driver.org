@@ -74,8 +74,9 @@ portfolio evaluations or once an epoch, not after every evaluation. Every
 bridge (=fit_anneal=, =fit_chemfit=, =run_benchmark=, =run_fitter=) drives
 =ask= / =tell= on ChemFit 3.1.1, the first release that has them, and
 =evaluate= / =step= on ChemFit's source from commit c57d6f5, which no
-release has yet. The first exception the fitter raises stops the fit and
-reaches the caller without =finish=. On a fitter with its own =fit_anneal=,
+release has yet. The first exception the fitter raises before =finish=
+stops the fit and reaches the caller without =finish=; one that =finish=
+raises reaches the caller as it is. On a fitter with its own =fit_anneal=,
 =run_fitter= calls that method instead and leaves the session to it.
 With =batch_size= above one, =fit_anneal=, =fit_chemfit= and
 =run_benchmark= run the portfolio as batch replicas and hand each batch of

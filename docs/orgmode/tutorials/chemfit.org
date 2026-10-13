@@ -88,9 +88,11 @@ this for any nested parameter dictionary, and so does =run_fitter= on a
 fitter without a =fit_anneal= method of its own. They make the same feature
 check and refuse a fitter with neither pair before =init=; only
 =run_benchmark= still drives =evaluate= or =ask= without its partner, with a
-=FutureWarning=. The first exception the fitter raises, or a loss that is not
-a real number, stops the fit: the fitter is not called again, =finish= is
-skipped, and the exception reaches the caller. =run_fitter= hands a fitter
+=FutureWarning=. The first exception the fitter raises before =finish=, or a
+loss that is not a real number, stops the fit: the fitter is not called
+again, =finish= is skipped, and the exception reaches the caller. One that
+=finish= raises reaches the caller as it is, =finish= having been called
+once, as the last call. =run_fitter= hands a fitter
 with its own =fit_anneal= to that method without the feature check, so what
 that method does with the session, =init= included, decides the rest, such
 as whether a fitter with neither pair is refused, and when.

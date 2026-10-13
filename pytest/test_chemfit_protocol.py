@@ -7,11 +7,13 @@ fitter has, and refuse a fitter with neither, as ChemFit 3.1.0's is, before
 starting its session, by a message naming where each pair ships, except
 that ``run_fitter`` hands a fitter with its own ``fit_anneal`` to that
 method without the check; only ``run_benchmark`` still drives half a pair,
-as anneal 0.10.0 did. An exception raised by the fitter, or a loss that is
-not a real number, must reach the caller unchanged, with no further fitter
-call and no ``finish``, except that ``run_fitter`` leaves what becomes of
-either inside a fitter's own ``fit_anneal`` to that method;
-``test_chemfit_run_fitter.py`` covers that path.
+as anneal 0.10.0 did. An exception raised by the fitter before ``finish``,
+or a loss that is not a real number, must reach the caller unchanged, with
+no further fitter call and no ``finish``, and one that ``finish`` raises
+must reach it unchanged after that one call, the last, except that
+``run_fitter`` leaves what becomes of either inside a fitter's own
+``fit_anneal`` to that method; ``test_chemfit_run_fitter.py`` covers that
+path.
 """
 
 import warnings
@@ -146,20 +148,19 @@ def test_a_finish_that_takes_no_parameters_is_called_bare(entry, protocol):
 
 
 @pytest.mark.parametrize("protocol", PROTOCOLS)
+@pytest.mark.parametrize("driver", ["portfolio", "boltzmann"])
 @pytest.mark.parametrize("entry", ENTRIES)
-def test_an_error_inside_finish_reaches_the_caller_after_one_call(entry, protocol):
-    error = TypeError("a fitter callback failed")
-
-    class FailingFinish(protocol):
-        def finish(self, opt_params=None):
-            self.calls.append("finish")
-            raise error
-
-    fitter = FailingFinish(*_problem())
-    with pytest.raises(TypeError) as caught:
-        drive(entry, fitter, 40)
+def test_an_error_inside_finish_reaches_the_caller_after_one_call(entry, driver, protocol):
+    error = RuntimeError("finish failed")
+    fitter = protocol(*_problem(), fail={"finish": (1, error)})
+    with pytest.raises(RuntimeError) as caught:
+        drive(entry, fitter, 40, driver=driver)
     assert caught.value is error
+    assert fitter.calls[0] == "init" and fitter.calls[-1] == "finish"
     assert fitter.calls.count("finish") == 1
+    assert 1 < len(fitter.evaluated) <= 40
+    best = fitter.evaluated[int(np.argmin(fitter.losses))]
+    assert same_params(fitter.finished_with, best)
 
 
 @pytest.mark.parametrize("stage", ["evaluation", "step"])
