@@ -859,12 +859,12 @@ logarithm of a rotated quadratic form centred outside the unit cube, of
 condition 1e3 in 10 coordinates and of condition 1e2 in 6, from starts
 drawn in the middle 80% of each side. Against the loop before the
 hold, the loop ends higher at 200 evaluations on 77 and 58 seeds
-(3/0/77, =q= 6.2e-15, and 14/8/58, =q= 1.0e-7), by medians of 0.018
-and 6.9e-7 in the logarithm and at most 0.1 and 0.025. At 500 and 1000
-the ten-coordinate form is level (18/44/18 and 5/68/7), while the
-six-coordinate one ends higher on 12 seeds and lower on 3 at 500 (=q=
-0.001) and higher on 6 and lower on none at 1000 (=q= 0.016), by at
-most 0.013 and 0.0043. Run to 1000 evaluations, the loop first comes
+(3/0/77, =q= 6.2e-15, and 14/8/58, =q= 1.0e-7), on those seeds by
+medians of 0.018 and 5.9e-6 in the logarithm and at most 0.1 and 0.025.
+At 500 and 1000 the ten-coordinate form is level (18/44/18 and 5/68/7),
+while the six-coordinate one ends higher on 12 seeds and lower on 3 at
+500 (=q= 0.001) and higher on 6 and lower on none at 1000 (=q= 0.016), by
+at most 0.013 and 0.0043. Run to 1000 evaluations, the loop first comes
 within 1e-3 of the lower of the two runs' best values after a median of
 242 and 100 evaluations, and with the hold taken out after 164.5 and
 58.5, later on 65 and 74 of the 80 seeds. From starts with three of the
@@ -875,8 +875,8 @@ the values are NaN: on the logarithm of a five-coordinate form of
 condition 1e2 centred at 0.85 in its first coordinate, whose values are
 NaN where that coordinate exceeds 0.7, from starts drawn between 0.05
 and 0.5 on each side, the loop ends higher at 200 (8/11/61, =q=
-7.5e-12, by a median of 0.16) and at 500 (28/8/44, =q= 0.0071), and is
-level at 1000 (34/7/39).
+7.5e-12, by a median of 0.19 on the 61 seeds) and at 500 (28/8/44, =q=
+0.0071), and is level at 1000 (34/7/39).
 
 ** The default budget of =minimize=
 
