@@ -60,16 +60,16 @@
 //! `s` and `y` the latest pair it took. The updates keep it positive
 //! definite in exact arithmetic, but rounding can leave it indefinite once
 //! the curvature has grown by many decades along the descent, and kept, an
-//! indefinite approximation refuses direction after direction. On the
-//! six-parameter binary Lennard-Jones fit whose loss is `log10(1e-16 + e)`,
-//! `e` the mean squared energy error per atom, every direction refused on
-//! one seed came from an approximation with negative diagonal entries, the
-//! first once `e` had fallen to 6.9e-16, and kept, the descent took 263
-//! steepest-descent steps, each moving the parameters by 1.4e-11 to 4e-11,
-//! over its last 3700 evaluations, from -15.74 to -15.84. Of 40 runs of the
-//! portfolio at 5000 evaluations, 38 reach -15; with the approximation
-//! kept, 17 of them ended short of -15.999, and started over, it brings all
-//! 38 there.
+//! indefinite approximation refuses direction after direction. On a
+//! six-parameter binary Lennard-Jones fit to clusters whose atoms are at
+//! least 0.75 apart, with the loss `log10(1e-16 + e)`, `e` the mean squared
+//! energy error per atom, every direction refused on one seed came from an
+//! approximation with negative diagonal entries, the first once `e` had
+//! fallen to 6.9e-16, and kept, the descent took 263 steepest-descent
+//! steps, each moving the parameters by 1.4e-11 to 4e-11, over its last
+//! 3700 evaluations, from -15.74 to -15.84. Of 40 runs of the portfolio on
+//! it at 5000 evaluations, 38 reach -15; with the approximation kept, 17 of
+//! them ended short of -15.999, and started over, it brings all 38 there.
 //!
 //! With [`FdBfgsOptions::log_model`] the engine keeps a second model, of
 //! `ln f`, from the same steps and the gradient `g / f`, while every value
