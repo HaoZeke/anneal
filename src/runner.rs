@@ -107,7 +107,9 @@ fn steps_within(max_evals: Option<usize>) -> usize {
 /// Runs the Metropolis-Hastings SA driver for `n_epochs` epochs of
 /// `steps_per_epoch` proposals each, seeded from `seed`.
 ///
-/// Initial position is drawn uniformly from `variant.obj.bounds()`.
+/// Initial position is drawn uniformly from `variant.obj.bounds()`, except
+/// that an axis with an infinite wall, which has no uniform measure, starts on
+/// its finite wall, or at zero when both walls are infinite.
 /// Per epoch: temperature `T_k = variant.cool.temperature(epoch)`;
 /// each proposal goes through `variant.mover.propose -> variant.obj.eval ->
 /// variant.accept.accept_prob`; bookkeeping per epoch is collected into an

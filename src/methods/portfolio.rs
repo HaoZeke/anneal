@@ -1789,7 +1789,7 @@ where
         return None;
     }
     let bounds = obj.bounds().clone();
-    let starts = eindir_core::shifted_low_discrepancy_points(
+    let starts = crate::box_points::shifted_low_discrepancy_points(
         &bounds,
         n_points,
         qmc_skip_from_seed(seed),
@@ -2040,7 +2040,7 @@ where
     }
     let sampled = chain_count - xs.len();
     if sampled > 0 {
-        let starts = eindir_core::shifted_low_discrepancy_points(
+        let starts = crate::box_points::shifted_low_discrepancy_points(
             &bounds,
             sampled,
             qmc_skip_from_seed(seed),
@@ -2211,7 +2211,7 @@ fn dual_style_local_search<O, G, R>(
     let per_start = (work_units / n_starts).max(if has_analytic { 8 } else { 24 });
     let x_inc = ledger.incumbent(bounds);
     let n_qmc = (n_starts - 1).max(1);
-    let qmc = eindir_core::shifted_low_discrepancy_points(
+    let qmc = crate::box_points::shifted_low_discrepancy_points(
         bounds,
         n_qmc,
         qmc_skip_from_seed(rng.random::<u64>()),
@@ -2961,7 +2961,7 @@ fn run_arm<O, G>(
                 let pop_size = (DE_POP_PER_DIM * dim)
                     .clamp(DE_POP_MIN, DE_POP_MAX)
                     .min(slice.max(4));
-                let points = eindir_core::shifted_low_discrepancy_points(
+                let points = crate::box_points::shifted_low_discrepancy_points(
                     &bounds,
                     pop_size,
                     qmc_skip_from_seed(seed),
@@ -3453,7 +3453,7 @@ fn run_arm<O, G>(
                 return;
             }
             let m = (2 * REDUCED_K).min(slice / 2).max(2);
-            let points = eindir_core::shifted_low_discrepancy_points(
+            let points = crate::box_points::shifted_low_discrepancy_points(
                 &bounds,
                 m,
                 qmc_skip_from_seed(seed),
@@ -3833,7 +3833,7 @@ where
     states.values_only = true;
     if ledger.incumbent_value().is_none() {
         let count = gradient.min(budget.div_ceil(10));
-        let design = eindir_core::shifted_low_discrepancy_points(
+        let design = crate::box_points::shifted_low_discrepancy_points(
             &bounds,
             count,
             qmc_skip_from_seed(seed ^ START_STREAM),
@@ -5057,7 +5057,7 @@ where
         // Each descent step charges one eval and one gradient.
         let per_start = (probe_budget / (3 * PROJECTED_GRADIENT_STEP_WORK)).max(6);
         let center = (&bounds.low + &bounds.high) * 0.5;
-        let qmc = eindir_core::shifted_low_discrepancy_points(
+        let qmc = crate::box_points::shifted_low_discrepancy_points(
             &bounds,
             2,
             qmc_skip_from_seed(seed ^ 0x9E37_u64),

@@ -173,28 +173,6 @@ pub(crate) fn improves(val: f64, best: f64) -> bool {
     val < best || (best.is_nan() && !val.is_nan())
 }
 
-/// A uniform draw on `bounds`. An axis with `low == high` is that value.
-/// `Bounds::mkpoint` panics on such an axis, and it is the draw whenever
-/// every axis has a positive width, so the seed stream of a non-degenerate
-/// box stays the one `mkpoint` already used.
-fn initial_position<R: Rng>(bounds: &Bounds<f64>, rng: &mut R) -> Array1<f64> {
-    let pinned = bounds
-        .low
-        .iter()
-        .zip(bounds.high.iter())
-        .any(|(lo, hi)| lo == hi);
-    if !pinned {
-        return bounds.mkpoint(rng);
-    }
-    Array1::from_iter(bounds.low.iter().zip(bounds.high.iter()).map(|(&lo, &hi)| {
-        if lo == hi {
-            lo
-        } else {
-            rng.random_range(lo..hi)
-        }
-    }))
-}
-
 impl<O, C, N, M, A> Sampler<f64> for SaVariant<f64, O, C, N, M, A>
 where
     O: eindir_core::Objective<f64> + Send + Sync,
@@ -204,7 +182,7 @@ where
     A: AcceptRule<f64>,
 {
     fn initial_state<R: Rng>(&self, rng: &mut R) -> State {
-        let pos = initial_position(self.obj.bounds(), rng);
+        let pos = crate::box_points::uniform_point(self.obj.bounds(), rng);
         let val = self.obj.eval(pos.view());
         let pair = FPair { pos, val };
         State {

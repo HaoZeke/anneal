@@ -2037,7 +2037,7 @@ per-chain =History=, =proposal_counts=); =run=
 (bayesian_mixing.rs:56).
 
 Feeds/consumes: generic over any =Sampler<f64>= impl; re-exported at
-the crate root as =BayesianMixingSampler= (src/lib.rs:285) and
+the crate root as =BayesianMixingSampler= (src/lib.rs:286) and
 exercised by
 =tests/bayesian_mixing.rs=; no example or portfolio-arm call site
 found in this scan (contrast =mcmc_sa= below, which is referenced from
@@ -2362,7 +2362,7 @@ Key types and functions: =MultiChainState= (mcmc_sa.rs:24);
 (re-exported src/methods/mod.rs:115).
 
 Feeds/consumes: generic over any =Sampler<f64>= impl; re-exported at
-the crate root as =MultiChainSampler= (src/lib.rs:288), referenced from
+the crate root as =MultiChainSampler= (src/lib.rs:289), referenced from
 the doc of =NutsSaSampler= (src/hmc/nuts.rs:288-290), which "drops into
 =run_rs= and =MultiChainSampler= like =HmcSaSampler=", and exercised by
 =tests/mcmc_sa.rs= and =tests/nuts_sa.rs=; no portfolio-arm or example
