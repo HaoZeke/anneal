@@ -8518,6 +8518,29 @@ mod tests {
         assert_eq!(end, Some(n));
     }
 
+    fn rosenbrock_squared_less(x: ArrayView1<f64>) -> f64 {
+        rosenbrock_squared(x) - 4096.0
+    }
+
+    #[test]
+    fn values_only_opening_reads_the_slice_that_crosses_zero_as_a_difference() {
+        // Less 4096, Rosenbrock's square is still positive after the
+        // opening's second slice, and the third, the first whose gain the
+        // bar would read as a log ratio, takes it below zero. Its log ratio
+        // is not a number; the bar reads its gain as a difference, which
+        // passes, and every gain from there on, so the opening goes on past
+        // it to where differences end it.
+        let values = opening_values(rosenbrock_squared_less);
+        let n = values.len() - 1;
+        assert!(
+            values[2] > 0.0 && values[3] < 0.0,
+            "the values were {values:?}"
+        );
+        assert!(n > 3, "the values were {values:?}");
+        let (end, _) = bar_end(&values, |before, after| before - after);
+        assert_eq!(end, Some(n));
+    }
+
     #[test]
     fn opening_gain_reads_log_ratios_while_values_are_positive() {
         assert_eq!(opening_gain(3.0, 1.0, false), 2.0);
