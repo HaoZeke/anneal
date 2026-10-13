@@ -1351,6 +1351,24 @@ mod tests {
     }
 
     #[test]
+    fn a_tie_accepted_on_the_logarithm_keeps_the_next_line_search_there() {
+        // The same step, accepted while the steps are on the logarithm,
+        // leaves the next line search there: a tie goes to the logarithm
+        // whichever model the steps are on. The tie rests only on exp
+        // returning exactly 1 for arguments below 2^-54.
+        let mut engine = two_coordinate_descent();
+        assert_eq!(
+            steps_after(&mut engine, "llln"),
+            [false, false, false, true]
+        );
+        let trial = Array1::from_vec(vec![engine.x[0], 1e-9]);
+        assert_eq!(predicted(&engine, &trial, false), engine.f);
+        assert_eq!(predicted(&engine, &trial, true), engine.f);
+        engine.accept(trial, engine.f * (1.0 - f64::EPSILON));
+        assert_eq!(steps_after(&mut engine, "v"), [true]);
+    }
+
+    #[test]
     fn the_count_hands_the_choice_to_the_steps_until_a_reset() {
         // Before the count moves the steps onto the logarithm, a step
         // accepted at the value the model of the logarithm predicts leaves
