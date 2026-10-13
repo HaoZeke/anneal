@@ -71,6 +71,36 @@
 //! it at 5000 evaluations, 38 reach -15; with the approximation kept, 17 of
 //! them ended short of -15.999, and started over, it brings all 38 there.
 //!
+//! Most of that indefiniteness comes from the updates' own asymmetry. Each
+//! adds its rank-two term entry by entry, so the two triangles of an
+//! approximation round apart, and through `H y`, the inverse approximation
+//! times the next pair's `y`, the asymmetry enters the next update as an
+//! indefinite symmetric term. Where the descent refused directions on the
+//! logarithms of a rotated quadratic and of a two-exponential fit's squared
+//! error, `max|H - H^T|` was 7.3e-3 and 1.8e-3 of `max|H|`, and replayed
+//! with each entry computed once for both triangles, the same pairs gave
+//! positive definite approximations there, along whose directions the
+//! gradient descends. Computed so, the updates left the descent starting
+//! over 4 times in the 40 runs of the portfolio on the Lennard-Jones fit
+//! above at 5000 evaluations, where it starts over 28 times, never on a
+//! like fit to clusters drawn without that spacing, where it starts over 38
+//! times, and 74 times in 546 runs on problems built to strain the
+//! approximation, where it starts over 1393 times. In each of those 78 the
+//! approximation first lost positive definiteness at an update whose
+//! rounding, `eps` times its largest entries before or after the update,
+//! exceeded its smallest eigenvalue before it, while its pairs replayed in
+//! 60-digit arithmetic keep it positive definite; in 4 that update's pair
+//! had `cos(s, y)` below 1e-4. But computed so the updates ended the
+//! portfolio higher on 26 of 40 seeds of the unspaced fit with its `e`
+//! itself as the loss at 500 evaluations (one-sided sign test 0.040); with
+//! the pairs whose `cos(s, y)` is at most 1e-4 skipped as well, on 26 of 40
+//! seeds of a shifted 100-dimensional ellipsoid at 5000 (0.040); damped as
+//! Powell damps the direct update, on 32 of 40 seeds of the unspaced fit
+//! with `e` as the loss at 200 (3.5e-5); and with the inverse update damped
+//! likewise, on 27 of 40 seeds of the unspaced fit at 1000 (0.019). So the
+//! updates stay as they are, and the start-over repairs what their rounding
+//! breaks.
+//!
 //! With [`FdBfgsOptions::log_model`] the engine keeps a second model, of
 //! `ln f`, from the same steps and the gradient `g / f`, while every value
 //! it has started from or accepted is positive. Each curvature pair also
