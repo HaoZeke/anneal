@@ -196,7 +196,15 @@ descent in a minimum of the face, as on
 [[*A log-loss fit with minima on its faces][a log-loss fit below]].
 Where a face does hold the minimum over the box, holding the longer
 trial short of it usually brings the descent there later, so at small
-budgets it can end higher, as measured in the same section.
+budgets it can end higher, as measured in the same section. The BFGS
+updates keep the descent's approximation positive definite in exact
+arithmetic, but rounding can leave it indefinite once the curvature has
+grown by many decades along the descent. A direction along which the
+gradient does not descend then gives way to a steepest-descent step,
+and the approximation the line search would have stepped on starts over
+from the box metric scaled by its latest curvature pair: kept, it
+refused direction after direction, and the descent crept toward the
+floor of the same fit on steepest-descent steps.
 
 The descent also keeps a second BFGS model, of the logarithm of its
 values, while every value it has started from or accepted is positive.
@@ -322,7 +330,11 @@ count has moved the steps onto the logarithm
 before call for call on 18 of the 28 rows and on all 15 short of that
 budget, and one row trails: the =+1e2= copy of =rosen30@5000=, 3.86
 against 3.60 (13/5/22, =q= 0.029), where =rosen30@5000= itself is
-level (10.4 against 12.4, 9/21/10). The loop trails on the rows below,
+level (10.4 against 12.4, 9/21/10). With the descent's approximation
+started over after a direction from it fails to descend, the loop
+repeats its runs from before call for call on 27 of the 28 rows and on
+all 15 short of that budget, and gains on the other, =fit6@5000= (-13.5
+against -13.1, 30/2/8, =p= 6.6e-5). The loop trails on the rows below,
 but for the opening's bar where said, and putting the replaced rule
 back costs the rows named with it:
 
@@ -526,7 +538,7 @@ box. A cell is one problem at one budget, such as =lj13@1000=. Four
 shared replicas beat four private ones at =p < 1e-6= on
 =lj13@1000= (40/0/0, medians -25.7 against -20.8), =lj13@5000= (39/0/1,
 -39.6 against -35.3), =binary_lj_fit@1000= (40/0/0, -5.19 against
--1.14), =binary_lj_fit@5000= (40/0/0, -12.8 against -5.17),
+-1.14), =binary_lj_fit@5000= (40/0/0, -13.2 against -5.17),
 =rastrigin10@5000= (31/8/1, 0 against 1.99) and =rosenbrock10@1000=
 (40/0/0, 0.900 against 6.64), and at 1000 with three coordinates of
 =lj13= fixed (39/0/1) or one parameter of =binary_lj_fit= fixed
@@ -545,11 +557,14 @@ objective a median of 251.5 times at 1000 and 1946 at 5000.
 Against one replica with the same total budget, four shared replicas
 win =binary_lj_fit@1000= (22/14/4, =p= 5.5e-6) and are level at 5000 on
 =lj13=, =rastrigin10= and =rosenbrock10=. They trail on
-=binary_lj_fit@5000= (15/4/21, =q= 0.024, -12.8 against -13.1), as they
-did before the hold on the descent's extrapolated trials (17/3/20, =q=
-0.043), and both are level there with their runs from before it
-(14/15/11 and 16/14/10); before the descent modelled the logarithm of
-its values the two were level (19/3/18, =q= 0.079). They trail at 1000
+=binary_lj_fit@5000= (11/5/24, =q= 0.0014, -13.2 against -13.5), as
+they did before the descent started its approximation over after a
+direction that does not descend (15/4/21, =q= 0.024) and before the hold
+on its extrapolated trials (17/3/20, =q= 0.043). Both gain there on
+their runs from before starting over (19/15/6, =p= 0.008, and 30/2/8,
+=p= 6.6e-5), the hold had left both level with theirs (14/15/11 and
+16/14/10), and before the descent modelled the logarithm of its values
+the two were level (19/3/18, =q= 0.079). They trail at 1000
 on =lj13= (1/0/39, -25.7 against -31.6), where a share of 250
 evaluations plays little more than one slice of at least
 =4(d+1)= = 160, and on =rastrigin10= (0/0/40, 14.4 against 3.98) and
@@ -564,7 +579,7 @@ at 1000.
 Against nevergrad's =NgIohTuned=, asked and told one point at a time
 from the same start for the same number of evaluations, one replica wins
 all four =lj13= and =binary_lj_fit= cells (36/0/4 and 27/1/12 on =lj13=
-at 1000 and 5000, 39/0/1 and 34/0/6 on the fit), and four shared
+at 1000 and 5000, 39/0/1 and 35/0/5 on the fit), and four shared
 replicas win three and trail on =lj13@1000= (12/0/28, -25.7 against
 -26.8). The plain-loss fits and the log-loss fit with minima on its
 faces below compare one replica with it on more budgets.
@@ -575,7 +590,7 @@ both on all eight cells, 40/0/0 each but 39/0/1 on
 1000 its medians are -3.93 on =lj13=, 1.89 on =binary_lj_fit=, 66.7 on
 =rastrigin10= and 13.4 on =rosenbrock10=, against one replica's -31.6,
 -4.87, 3.98 and 1.4e-16, and at 5000 they are -6.94, -1.31, 47.8 and
-2.61 against -39.7, -13.1, 0 and 2.9e-27.
+2.61 against -39.7, -13.5, 0 and 2.9e-27.
 
 =global_optimize(..., x0=x0, replicas=R)= with no =grad_fn= or
 =noise_sigma= under Auto runs these batch replicas, its =coverage_shared=
@@ -594,7 +609,7 @@ its minimum and Rosenbrock with noise of 0.1 about its own
 (=rastrigin10_near=, =rosenbrock10_near=). Over the same 40 paired seeds
 on these 16 cells, four batch replicas beat four persistent controllers
 without =x0= on 13, among them =lj13@1000= (40/0/0, -25.7 against -8.62),
-=binary_lj_fit@5000= (39/0/1, -12.8 against -5.88) and
+=binary_lj_fit@5000= (39/0/1, -13.2 against -5.88) and
 =rosenbrock10@1000= (38/0/2, 0.900 against 6.17), and are level on
 =rastrigin10@1000= (19/2/19, 14.4 against 14.9) and on =rosenbrock10= and
 =rosenbrock10_near= at 5000, where both reach the minimum (0/40/0). The
@@ -688,16 +703,17 @@ on 7 seeds and =lj_pair_fit@100= on 12, winning no seed of either (=q=
 0.0078 and 2.4e-4).
 
 With the model of the logarithm and that choice, the opening's later
-gains read as log ratios ([[*Values-only runs under Auto][above]]), and
-the descent's extrapolated trials whose quadratic has no minimiser held
-to half the room left to the nearest bound
-([[*A log-loss fit with minima on its faces][below]]), one replica ends
-as follows over the same 40 paired seeds. The columns give the free
-coordinates =n=, the medians of the loop, of 0.11.1's loop, which has
-none of these, and of =NgIohTuned=, and the W/T/L of the loop against
-=NgIohTuned=, of 0.11.1's loop against it, and of the loop against
-0.11.1's, each with =p= where the first of the two is ahead and =q=
-where it trails, when below 0.05.
+gains read as log ratios ([[*Values-only runs under Auto][above]]), the
+descent's extrapolated trials whose quadratic has no minimiser held to
+half the room left to the nearest bound
+([[*A log-loss fit with minima on its faces][below]]), and the descent's
+approximation started over after a direction from it fails to descend,
+one replica ends as follows over the same 40 paired seeds. The columns
+give the free coordinates =n=, the medians of the loop, of 0.11.1's
+loop, which has none of these, and of =NgIohTuned=, and the W/T/L of
+the loop against =NgIohTuned=, of 0.11.1's loop against it, and of the
+loop against 0.11.1's, each with =p= where the first of the two is
+ahead and =q= where it trails, when below 0.05.
 
 | Cell | n | Loop | 0.11.1 | =NgIohTuned= | Loop against =NgIohTuned= | 0.11.1 against =NgIohTuned= | Loop against 0.11.1 |
 |------+---+------+---------+--------------+---------------------------+------------------------------+----------------------|
@@ -715,7 +731,7 @@ where it trails, when below 0.05.
 | =lj_pair_fit@1000= | 2 | 0 | 0 | 1.58e-16 | 0/40/0 | 0/40/0 | 0/40/0 |
 | =lj_pair_fit@5000= | 2 | 0 | 0 | 1.88e-18 | 0/40/0 | 0/40/0 | 0/40/0 |
 | =binary_lj_fit@1000= | 6 | -4.87 | -4.82 | -1.64 | 39/0/1, =p= 6.4e-12 | 36/0/4, =p= 8e-11 | 14/15/11 |
-| =binary_lj_fit@5000= | 6 | -13.1 | -12.9 | -6.95 | 34/0/6, =p= 2.2e-8 | 33/0/7, =p= 3.5e-6 | 17/14/9 |
+| =binary_lj_fit@5000= | 6 | -13.5 | -12.9 | -6.95 | 35/0/5, =p= 6e-9 | 33/0/7, =p= 3.5e-6 | 32/0/8, =p= 1.6e-4 |
 | =lj13@1000= | 39 | -31.6 | -31.6 | -26.8 | 36/0/4, =p= 1.2e-10 | 36/0/4, =p= 1.2e-10 | 0/40/0 |
 | =lj13@5000= | 39 | -39.7 | -39.7 | -39.5 | 27/1/12, =p= 0.018 | 27/1/12, =p= 0.018 | 0/40/0 |
 | =rastrigin10@1000= | 10 | 3.98 | 3.98 | 39.3 | 40/0/0, =p= 9.1e-13 | 40/0/0, =p= 9.1e-13 | 0/40/0 |
@@ -723,13 +739,13 @@ where it trails, when below 0.05.
 | =rosenbrock10@1000= | 10 | 1.42e-16 | 1.66e-16 | 1.81 | 38/1/1, =p= 3.7e-9 | 38/1/1, =p= 3.7e-9 | 0/39/1 |
 | =rosenbrock10@5000= | 10 | 2.95e-27 | 2.88e-27 | 2.67e-11 | 1/38/1 | 1/38/1 | 0/40/0 |
 
-Against 0.11.1's loop, the binary fit gains at 500 and 1000
-evaluations, the twelve-parameter fit at 200, 1000 and 5000 and the
-pair fit at 50 and 100, and no row trails; against =NgIohTuned= the
-binary fit goes from trailing at 500 (13/0/27) to ahead (35/0/5) and
-from 17/0/23 to 36/0/4 at 1000, the pair fit from 16/0/24 to 28/0/12
-at 50 and from 11/8/21 to 22/11/7 at 100, and the twelve-parameter fit
-from 19/0/21 to 21/0/19 at 200 and from 29/0/11 to 36/0/4 at 1000. The
+Against 0.11.1's loop, the binary fit gains at 500 and 1000 evaluations,
+the twelve-parameter fit at 200, 1000 and 5000, the pair fit at 50 and
+100 and =binary_lj_fit= at 5000, and no row trails; against =NgIohTuned=
+the binary fit goes from trailing at 500 (13/0/27) to ahead (35/0/5) and
+from 17/0/23 to 36/0/4 at 1000, the pair fit from 16/0/24 to 28/0/12 at
+50 and from 11/8/21 to 22/11/7 at 100, and the twelve-parameter fit from
+19/0/21 to 21/0/19 at 200 and from 29/0/11 to 36/0/4 at 1000. The
 runs repeat 0.11.1's on all 40 seeds of =lj13@1000= and
 =binary_lj_fit_plain@200=; on 35 and 36 seeds of =rastrigin10=, 16 and
 18 of =rosenbrock10= and 18 of =lj13@5000=, which tie on every seed
@@ -737,9 +753,12 @@ but one of =rosenbrock10@1000=, and 25 and 18 of =ternary_lj_fit= at
 200 and 500; and on at most 7 seeds of any other cell. Against the loop
 before its opening read later gains as log ratios and before its
 accepted steps chose the model of the next line search, no row trails
-and four gain: =binary_lj_fit_plain= at 500 (35/3/2, =p= 8e-10) and
-1000 (33/3/4, =p= 3.3e-9) and =ternary_lj_fit= at 1000 (30/10/0, =p=
-9.3e-10) and 5000 (22/16/2, =p= 7.5e-5). The hold on the extrapolated
+and five gain: =binary_lj_fit_plain= at 500 (35/3/2, =p= 8e-10) and 1000
+(33/3/4, =p= 3.3e-9), =ternary_lj_fit= at 1000 (30/10/0, =p= 9.3e-10)
+and 5000 (22/16/2, =p= 7.5e-5), and =binary_lj_fit@5000= (30/2/8, =p=
+6.6e-5), where the loop before its descent started over after a
+direction that does not descend was level with it (0/40/0). The hold on
+the extrapolated
 trials had put no row behind the loop with the model but without it,
 and had gained one, =ternary_lj_fit@200= (10/25/5, =p= 0.028), whose
 runs the loop still repeats. =NgIohTuned= still ends lower on more
@@ -824,7 +843,7 @@ with W/T/L, =p= and =q= as in the table above:
 |------+------+--------+--------------+---------------------------+-----------------------------+---------------------|
 | =binary_lj_spaced@500= | -8.67 | -1.20 | -3.77 | 28/0/12, =p= 1.6e-5 | 9/0/31, =q= 3.0e-4 | 25/11/4, =p= 3.1e-7 |
 | =binary_lj_spaced@1000= | -10.9 | -1.82 | -7.15 | 28/0/12 | 9/0/31, =q= 2.9e-7 | 27/13/0, =p= 7.5e-9 |
-| =binary_lj_spaced@5000= | -16.0 | -16.0 | -16.0 | 11/10/19 | 11/21/8 | 7/17/16 |
+| =binary_lj_spaced@5000= | -16.0 | -16.0 | -16.0 | 12/27/1, =p= 0.0031 | 11/21/8 | 11/29/0, =p= 4.9e-4 |
 | =binary_lj_spaced_plain@1000= | 1.28e-27 | 5.94e-28 | 2.59e-13 | 6/29/5 | 6/29/5 | 3/34/3 |
 | =binary_lj_spaced_plain@5000= | 2.11e-28 | 1.35e-28 | 4.93e-15 | 2/36/2 | 2/37/1 | 1/38/1 |
 | =binary_lj_spaced_ref1@1000= | -10.5 | -2.14 | -7.14 | 33/0/7, =p= 4.7e-4 | 16/0/24, =q= 0.0053 | 25/9/6, =p= 1.7e-6 |
@@ -843,14 +862,22 @@ still ends lower on 12 of the 40 seeds at 1000 evaluations and 12 at
 500 (9 and 11 through ChemFit), all among the 14 runs whose openings end
 on a face, on the same 14 seeds at both budgets: at 1000 these end
 between -4.54 and -0.62 while the other 26 end below -10.7, and at 500
-between -2.14 and 1.09 while the other 26 end below -7.37. At 5000 all
-three reach the loss's floor of -16 on most seeds, and the loop is level
-with both: =NgIohTuned= ends lower on 19 seeds, 11 of them by less than
-0.01, and the loop before the hold on 16, 9 of them by less than 0.01,
-while the loop ends above -5 on 2 seeds, the loop before the hold on 5
-and =NgIohTuned= on 6, all six in the minima of two faces (-1.20 and
--0.624). Through ChemFit, over seeds 0 to 9, the loop and =NgIohTuned=
-are level at 5000 too (2/3/5). On the plain twin, whose descent steps
+between -2.14 and 1.09 while the other 26 end below -7.37. At 5000 the
+loop ends at -15.999 or below, within 0.001 of the loss's floor of -16,
+on 38 of the 40 seeds, the loop before the hold on 32 and =NgIohTuned=
+on 28. It ends lower than =NgIohTuned= on 12 seeds and higher on 1, and
+lower than the loop before the hold on 11 and higher on none, while the
+loop ends above -5 on 2 seeds, the loop before the hold on 5 and
+=NgIohTuned= on 6, all six in the minima of two faces (-1.20 and
+-0.624). Before its descent started its approximation over after a
+direction that does not descend
+([[*Values-only runs under Auto][above]]), the loop crept toward the
+floor on steepest-descent steps and ended at -15.999 or below on 21
+seeds, level with both: =NgIohTuned= ended lower on 19 seeds, 11 of
+them by less than 0.01, and the loop before the hold on 16, 9 of them
+by less than 0.01. Through ChemFit, over seeds 0 to 9, the loop now ends
+lower than =NgIohTuned= at 5000 on 2 seeds and ties on 8, where it ended
+higher on 5 (2/3/5). On the plain twin, whose descent steps
 on the values until its model of the logarithm can take over, the first
 line search extrapolated as far as it may in 1 of 40 runs before the
 hold and no first step reached a bound, and the loop is level with both

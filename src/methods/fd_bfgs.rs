@@ -55,6 +55,21 @@
 //! in box-normalised coordinates, so a side that spans decades moves as far,
 //! relative to its width, as a unit one. The first accepted pair scales it to
 //! `(s.y / y.D.y) D`, and the steepest-descent fallback steps along `-D g`.
+//! A quasi-Newton direction along which the gradient does not descend takes
+//! that fallback, and the approximation starts over from `(s.y / y.D.y) D`,
+//! `s` and `y` the latest pair it took. The updates keep it positive
+//! definite in exact arithmetic, but rounding can leave it indefinite once
+//! the curvature has grown by many decades along the descent, and kept, an
+//! indefinite approximation refuses direction after direction. On the
+//! six-parameter binary Lennard-Jones fit whose loss is `log10(1e-16 + e)`,
+//! `e` the mean squared energy error per atom, every direction refused on
+//! one seed came from an approximation with negative diagonal entries, the
+//! first once `e` had fallen to 6.9e-16, and kept, the descent took 263
+//! steepest-descent steps, each moving the parameters by 1.4e-11 to 4e-11,
+//! over its last 3700 evaluations, from -15.74 to -15.84. Of 40 runs of the
+//! portfolio at 5000 evaluations, 38 reach -15; with the approximation
+//! kept, 17 of them ended short of -15.999, and started over, it brings all
+//! 38 there.
 //!
 //! With [`FdBfgsOptions::log_model`] the engine keeps a second model, of
 //! `ln f`, from the same steps and the gradient `g / f`, while every value
@@ -239,7 +254,8 @@ struct Curvature {
     hessian: Option<Array2<f64>>,
     scaled: bool,
     gamma: f64,
-    /// Pairs the model has taken since it was last reset.
+    /// Pairs the model has taken since it was last reset; starting the
+    /// approximation over keeps the count.
     pairs: usize,
 }
 
@@ -293,6 +309,15 @@ impl Curvature {
                     }
                 }
             }
+        }
+    }
+
+    /// Starts the approximation over from the box metric scaled by the
+    /// latest pair, `(s.y / y.D.y) D`, keeping the count of pairs.
+    fn start_over(&mut self, metric: &Array1<f64>) {
+        self.inv_hessian = Array2::from_diag(&(metric * self.gamma));
+        if self.hessian.is_some() {
+            self.hessian = Some(Array2::from_diag(&metric.mapv(|w| 1.0 / (w * self.gamma))));
         }
     }
 
@@ -781,8 +806,10 @@ impl FdBfgs {
             }
         }
         let mut slope = grad.dot(&direction);
+        let descends = slope.is_finite() && slope < 0.0;
+        let refused = !(steepest || descends);
         let mut steepest = steepest;
-        if steepest || !(slope.is_finite() && slope < 0.0) {
+        if steepest || refused {
             steepest = true;
             direction.fill(0.0);
             for &i in &free {
@@ -806,6 +833,14 @@ impl FdBfgs {
         } else {
             1.0
         };
+        if refused {
+            let model = if log {
+                &mut self.log_curvature
+            } else {
+                &mut self.curvature
+            };
+            model.start_over(&self.metric);
+        }
         let trial = self.projected(&direction, alpha);
         self.phase = Phase::Line(LineWork {
             direction,
@@ -1693,6 +1728,89 @@ mod tests {
         let moved: Vec<f64> = (0..2).map(|i| (next[i] - first[i]).abs()).collect();
         assert_eq!(moved.iter().filter(|&&d| d > 0.0).count(), 1, "{next}");
         assert!(moved.iter().all(|&d| d < 1e-6), "{next}");
+    }
+
+    #[test]
+    fn a_direction_that_does_not_descend_restarts_the_model() {
+        // An indefinite approximation, which rounding leaves once the
+        // curvature has grown by many decades along the descent, gives a
+        // direction along which the gradient climbs. The line search steps
+        // down the steepest-descent direction instead, and the model the
+        // steps are on starts over from the box metric scaled by its latest
+        // pair, inverse and direct approximation alike, while the other
+        // model is kept.
+        for kinds in ["vv", "llln"] {
+            let mut engine = two_coordinate_descent();
+            let log = *steps_after(&mut engine, kinds).last().expect("a pair");
+            let other = if log {
+                &engine.curvature
+            } else {
+                &engine.log_curvature
+            };
+            let kept = (other.inv_hessian.clone(), other.hessian.clone());
+            let model = if log {
+                &mut engine.log_curvature
+            } else {
+                &mut engine.curvature
+            };
+            let gamma = model.gamma;
+            model.inv_hessian = -Array2::<f64>::eye(2);
+            model.hessian = Some(-Array2::<f64>::eye(2));
+            engine.begin_line_search(false);
+            match &engine.phase {
+                Phase::Line(work) => assert!(
+                    work.log == log && work.steepest && engine.grad.dot(&work.direction) < 0.0,
+                    "after {kinds}"
+                ),
+                _ => panic!("after {kinds}: no line search followed"),
+            }
+            let (model, other) = if log {
+                (&engine.log_curvature, &engine.curvature)
+            } else {
+                (&engine.curvature, &engine.log_curvature)
+            };
+            let metric = &engine.metric;
+            let inverse = Array2::from_diag(&(metric * gamma));
+            assert_eq!(model.inv_hessian, inverse, "after {kinds}");
+            let direct = Array2::from_diag(&metric.mapv(|w| 1.0 / (w * gamma)));
+            assert_eq!(model.hessian, Some(direct), "after {kinds}");
+            assert_eq!(
+                (&other.inv_hessian, &other.hessian),
+                (&kept.0, &kept.1),
+                "after {kinds}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_steepest_descent_step_after_a_failed_line_search_keeps_the_models() {
+        // A line search along a quasi-Newton direction that descends can
+        // fail, and the descent then searches down the steepest-descent
+        // direction. Nothing there shows the approximation indefinite, so
+        // both models are kept.
+        let models = |engine: &FdBfgs| {
+            [&engine.curvature, &engine.log_curvature]
+                .map(|model| (model.inv_hessian.clone(), model.hessian.clone()))
+        };
+        for kinds in ["vv", "llln"] {
+            let mut engine = two_coordinate_descent();
+            let log = *steps_after(&mut engine, kinds).last().expect("a pair");
+            let model = if log {
+                &mut engine.log_curvature
+            } else {
+                &mut engine.curvature
+            };
+            model.inv_hessian = Array2::from_shape_vec((2, 2), vec![2.0, 1.0, 1.0, 1.0]).unwrap();
+            model.hessian =
+                Some(Array2::from_shape_vec((2, 2), vec![1.0, -1.0, -1.0, 2.0]).unwrap());
+            let kept = models(&engine);
+            engine.begin_line_search(true);
+            match &engine.phase {
+                Phase::Line(work) => assert!(work.log == log && work.steepest, "after {kinds}"),
+                _ => panic!("after {kinds}: no line search followed"),
+            }
+            assert_eq!(models(&engine), kept, "after {kinds}");
+        }
     }
 
     #[test]
