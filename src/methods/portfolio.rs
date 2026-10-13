@@ -8926,7 +8926,10 @@ mod tests {
         // valley floor. That slice gains no more than a sliver of the
         // largest of the three before it as a difference but far more as a
         // log ratio, which the bar reads while the values are positive, so
-        // the opening goes on past it and ends where log ratios end it.
+        // the opening goes on past it. No later slice falls to the bar in
+        // log ratios: the success threshold, which reads differences, ends
+        // the opening on the first slice that starts from a value below it,
+        // a slice that therefore cannot gain more than the threshold.
         let values = opening_values(rosenbrock_fourth);
         let n = values.len() - 1;
         let (end, _) = bar_end(&values, |before, after| (before / after).ln());
