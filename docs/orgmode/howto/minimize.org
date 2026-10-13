@@ -7,8 +7,14 @@
 replicas=1, history="shared", store=None, ...)~ runs the start-aware
 portfolio of =global_optimize= from =x0= inside a box. =x0= must be finite
 and inside the box; it is the run's first evaluation, made once: the run
-answers an evaluation at a point =fun= has already been called at, =x0= or
-any other, from that call, and one of =jac= likewise.
+takes =fun= and =jac= to be functions of the point, and answers an
+evaluation at a point =fun= has already been called at, =x0= or any other,
+from that call, and one of =jac= likewise. Points match bit for bit, so
+=-0.0= and =0.0= are two points. A =fun= that draws a random value or keeps
+state is not called again at a repeated point either: the run takes the
+value its first call there returned. =minimize= takes no =noise_sigma=, so
+such an objective needs =global_optimize= with =noise_sigma=, under which
+every evaluation is a call.
 
 #+begin_src python
 import numpy as np

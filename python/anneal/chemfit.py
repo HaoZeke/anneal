@@ -29,7 +29,15 @@ nested the same way, and the bounds of a float32 or float16 leaf are rounded
 inward so the cast candidate stays inside them. A parameter whose lower and
 upper bounds are equal is held fixed. Every evaluation lies inside the box,
 the first one is the start, and the budget counts it. The default driver is
-the Thompson-allocated portfolio.
+the Thompson-allocated portfolio, which takes the loss to be a function of
+the parameters: a candidate whose flattened parameters match, bit for bit,
+those of one already evaluated gets that evaluation's loss without a call of
+the fitter, so a loss that samples gets the value its first evaluation there
+returned. None of these bridges takes ``noise_sigma``, with which
+:func:`anneal.global_optimize` calls its objective at every evaluation,
+though :func:`run_fitter` passes one on to a fitter's own ``fit_anneal``
+that takes it. The classical drivers call the fitter at every evaluation, a
+repeated candidate included.
 
 With ``batch_size`` above one, :func:`fit_anneal`, :func:`fit_chemfit` and
 :func:`run_benchmark` run the portfolio as that many batch replicas of
@@ -1445,10 +1453,12 @@ def fit_anneal(
       budget: total objective-evaluation budget, the start included; it is
         never exceeded.
       driver: ``"portfolio"`` (default), the Thompson-allocated portfolio
-        of :func:`anneal.global_optimize` run without a gradient, whose
-        documentation names the arms it then runs; or one of
-        ``"boltzmann"``, ``"fast"``, ``"gsa"`` for single-chain ablation
-        runs.
+        of :func:`anneal.global_optimize` run without a gradient or
+        ``noise_sigma``, whose documentation names the arms it then runs,
+        and which answers a candidate already evaluated, bit for bit, with
+        that evaluation's loss; or one of ``"boltzmann"``, ``"fast"``,
+        ``"gsa"`` for single-chain ablation runs, which evaluate every
+        candidate.
       seed: RNG seed.
       x0: warm start. ``None`` (default) uses the fitter's
         ``initial_parameters``; a nested dict with the same structure and
@@ -1793,11 +1803,13 @@ def fit_chemfit(
         budget: total objective evaluations, the start included; it is
             never exceeded.
         method: ``"portfolio"`` (default), the Thompson-allocated portfolio
-            of :func:`anneal.global_optimize` run without a gradient, whose
-            documentation names the arms it then runs; or ``"boltzmann"``,
-            ``"fast"``, ``"gsa"`` for the bound-respecting classical chain.
-            Every method starts from the initial parameters, moved onto the
-            box when they lie outside it.
+            of :func:`anneal.global_optimize` run without a gradient or
+            ``noise_sigma``, whose documentation names the arms it then
+            runs, and which answers a candidate already evaluated, bit for
+            bit, with that evaluation's loss; or ``"boltzmann"``,
+            ``"fast"``, ``"gsa"`` for the bound-respecting classical chain,
+            which evaluates every candidate. Every method starts from the
+            initial parameters, moved onto the box when they lie outside it.
         seed: RNG seed forwarded to the anneal driver.
         default_span: half-width around the initial value for parameters
             ChemFit leaves unbounded. Bounds read as in :func:`chemfit_box`,
@@ -2048,11 +2060,13 @@ def run_benchmark(
 ) -> Any:
     """Minimize a ChemFit fitter with a gradient-free anneal driver.
 
-    ``method`` is ``portfolio`` (the budget-only global optimizer), or
-    ``boltzmann``, ``fast``, or ``gsa``; ``preset``, when given, is the
-    matching preset instance. The chain starts at ``initial_params``, moved
-    onto the box when it lies outside. Every coordinate the fitter sees lies
-    in the box, and ``budget`` caps the evaluations, the start included. The
+    ``method`` is ``portfolio`` (the budget-only global optimizer, run
+    without ``noise_sigma``: it answers a candidate already evaluated, bit
+    for bit, with that evaluation's loss), or ``boltzmann``, ``fast``, or
+    ``gsa``; ``preset``, when given, is the matching preset instance. The
+    chain starts at ``initial_params``, moved onto the box when it lies
+    outside. Every coordinate the fitter sees lies in the box, and
+    ``budget`` caps the evaluations, the start included. The
     fitter is driven through ``evaluate`` / ``step`` or ``ask`` / ``tell``,
     with one step notice per evaluation, and each parameter leaf keeps its
     type.
@@ -2294,13 +2308,15 @@ def run_fitter(
 ) -> dict[str, Any]:
     """Run a ChemFit fitter with the gradient-free bridges.
 
-    ``method="global_optimize"`` uses the portfolio and ``method="sa"`` runs
-    ``preset`` (``Boltzmann()`` when none is given); ``"portfolio"``,
-    ``"boltzmann"``, ``"fast"`` and ``"gsa"`` name a driver directly, and a
-    classical one runs ``preset`` when it is that driver's kind. A fitter
-    without ``fit_anneal`` runs through :func:`fit_anneal`: the keywords
-    ``x0``, ``low``, ``high``, ``bound_span``, ``steps_per_epoch`` and
-    ``preset_kwargs`` go to it, and any other keyword is a TypeError.
+    ``method="global_optimize"`` uses the portfolio, which answers a
+    candidate already evaluated, bit for bit, with that evaluation's loss,
+    and ``method="sa"`` runs ``preset`` (``Boltzmann()`` when none is
+    given); ``"portfolio"``, ``"boltzmann"``, ``"fast"`` and ``"gsa"`` name
+    a driver directly, and a classical one runs ``preset`` when it is that
+    driver's kind. A fitter without ``fit_anneal`` runs through
+    :func:`fit_anneal`: the keywords ``x0``, ``low``, ``high``,
+    ``bound_span``, ``steps_per_epoch`` and ``preset_kwargs`` go to it, and
+    any other keyword, ``noise_sigma`` among them, is a TypeError.
 
     A fitter that has its own ``fit_anneal`` is handed to it with what the
     signature of that method takes. ``budget`` goes as ``budget=``, or by
