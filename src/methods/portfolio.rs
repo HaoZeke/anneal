@@ -749,6 +749,12 @@ impl BudgetLedger {
         self.n_grads.fetch_add(n_grads, Ordering::Relaxed);
     }
 
+    /// Gives back `work` units reserved with [`BudgetLedger::try_charge`]
+    /// for calls that are not made.
+    fn release(&self, work: usize) {
+        self.used.fetch_sub(work, Ordering::Relaxed);
+    }
+
     /// `grad` at `x` on work already reserved with
     /// [`BudgetLedger::try_charge`], counted in `n_grads` as a call. A point
     /// with a non-finite coordinate is answered with zeros, as
@@ -1990,7 +1996,8 @@ where
     let center = (&bounds.low + &bounds.high) * 0.5;
     // Both evaluations and the gradient are reserved together, but an
     // unusable centre leaves the second evaluation unmade, so each call is
-    // counted only once it is made.
+    // counted only once it is made and the unit of one never made is given
+    // back.
     let work = 2 * OBJECTIVE_WORK_UNIT + GRADIENT_WORK_UNIT;
     if !obj.ledger.try_charge(work) {
         return None;
@@ -1999,9 +2006,11 @@ where
     let gradient = obj.ledger.gradient_at(grad.inner, center.view());
     obj.ledger.count(1, 0);
     if !value.is_finite() {
+        obj.ledger.release(OBJECTIVE_WORK_UNIT);
         return None;
     }
     if gradient.len() != bounds.dims || gradient.iter().any(|v| !v.is_finite()) {
+        obj.ledger.release(OBJECTIVE_WORK_UNIT);
         return Some(CenterProbe {
             gradient_ratio: None,
         });
@@ -2012,6 +2021,7 @@ where
     }));
     let scaled_grad_norm = scaled_gradient.iter().map(|g| g * g).sum::<f64>().sqrt();
     if scaled_grad_norm == 0.0 {
+        obj.ledger.release(OBJECTIVE_WORK_UNIT);
         return Some(CenterProbe {
             gradient_ratio: Some(0.0),
         });
@@ -7003,11 +7013,38 @@ mod tests {
         };
         // A zero gradient is what the binding reads from a gradient callable
         // that raised. It, a non-finite one and one of the wrong length end the
-        // probe after its first evaluation, on the work reserved for two.
-        assert_eq!(probe(vec![0.0, 0.0]), (1, 1, 1, 3));
-        assert_eq!(probe(vec![f64::NAN, 1.0]), (1, 1, 1, 3));
-        assert_eq!(probe(vec![1.0, 1.0, 1.0]), (1, 1, 1, 3));
+        // probe after its first evaluation, and the unit reserved for the
+        // second is given back.
+        assert_eq!(probe(vec![0.0, 0.0]), (1, 1, 1, 2));
+        assert_eq!(probe(vec![f64::NAN, 1.0]), (1, 1, 1, 2));
+        assert_eq!(probe(vec![1.0, 1.0, 1.0]), (1, 1, 1, 2));
         assert_eq!(probe(vec![1.0, -2.0]), (2, 2, 1, 3));
+    }
+
+    #[test]
+    fn center_probe_gives_back_the_second_evaluation_at_a_centre_whose_value_is_not_finite() {
+        let objective = Traced::new(-1.0, 1.0, 2, |_| f64::NAN);
+        let gradient = ConstantGradient(Array1::from_vec(vec![1.0, -2.0]));
+        let ledger = BudgetLedger::new(10, 2);
+        let budgeted_objective = BudgetedObjective {
+            inner: &objective,
+            ledger: &ledger,
+        };
+        let budgeted = BudgetedGradient {
+            inner: &gradient,
+            ledger: &ledger,
+        };
+        assert!(scaled_center_probe(&budgeted_objective, &budgeted, objective.bounds()).is_none());
+        assert_eq!(objective.points().len(), 1);
+        assert_eq!(
+            (
+                ledger.n_evals.load(Ordering::Relaxed),
+                ledger.n_grads.load(Ordering::Relaxed),
+                ledger.n_answered.load(Ordering::Relaxed),
+                ledger.used_get(),
+            ),
+            (1, 1, 0, 2)
+        );
     }
 
     #[test]
