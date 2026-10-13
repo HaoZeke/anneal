@@ -63,9 +63,11 @@ what it cannot pass to that method and warns of a preset that it ignores just
 before the call; the budget, the seed, the fitter's bounds and the rest are
 the method's to check, so a refusal inside it, such as
 :func:`run_benchmark`'s of a budget of 0, follows the warning. The first
-exception the fitter raises, or a loss that is not a real number, ends the
-drive: the fitter is not called again, ``finish`` is skipped, and the
-exception reaches the caller. On a fitter with its own ``fit_anneal``,
+exception the fitter raises before ``finish``, or a loss that is not a real
+number, ends the drive: the fitter is not called again, ``finish`` is
+skipped, and the exception reaches the caller. One that ``finish`` raises
+reaches the caller as it is, ``finish`` having been called once, as the
+fitter's last call. On a fitter with its own ``fit_anneal``,
 :func:`run_fitter` leaves what becomes of either to that method. The few
 arguments anneal 0.10.0 accepted and ignored, such as preset keywords under
 the portfolio, still run with a FutureWarning that says what to pass instead;
@@ -1349,9 +1351,10 @@ def fit_anneal(
     FutureWarning, so a refused call raises its error without one. Returns
     what ``fitter.finish`` returns for the best evaluated parameters
     (ChemFit returns them as given); each leaf keeps its type, shape and
-    floating dtype. The first exception raised by the fitter, or a loss that
-    is not a real number, stops the fit and is raised without calling
-    ``finish``.
+    floating dtype. The first exception raised by the fitter before
+    ``finish``, or a loss that is not a real number, stops the fit and is
+    raised without calling ``finish``; one that ``finish`` raises is raised
+    as it is, ``finish`` having been called once, as the last call.
     """
     return _fit_anneal(
         fitter,
@@ -1691,8 +1694,10 @@ def fit_chemfit(
     Returns:
         What ``fitter.finish(best_params)`` returns; ChemFit returns
         ``best_params``, whose leaves keep their types. The first exception
-        raised by the fitter, or a loss that is not a real number, stops the
-        fit and is raised without calling ``finish``.
+        raised by the fitter before ``finish``, or a loss that is not a real
+        number, stops the fit and is raised without calling ``finish``; one
+        that ``finish`` raises is raised as it is, ``finish`` having been
+        called once, as the last call.
     """
     with _Checks(), _Strings("fit_chemfit"):
         evaluate, step = _protocol(fitter)
@@ -1921,7 +1926,9 @@ def run_benchmark(
     ``fitter.bounds``. A coordinate whose two bounds are equal is held fixed.
     Every argument is checked before ``fitter.init()`` and before any
     FutureWarning, so a refused call raises its error without one; the first
-    exception raised by the fitter is raised without calling ``finish``.
+    exception raised by the fitter before ``finish`` is raised without
+    calling ``finish``, and one that ``finish`` raises is raised as it is,
+    ``finish`` having been called once, as the last call.
 
     ``batch_size`` above one runs the portfolio as that many batch replicas
     of :func:`anneal.minimize` sharing one archive and incumbent, as in
