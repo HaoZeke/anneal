@@ -1811,6 +1811,32 @@ mod tests {
     }
 
     #[test]
+    fn a_start_over_keeps_the_count_of_pairs_and_the_scale() {
+        // Three pairs for the logarithm leave the steps on the values, whose
+        // model then refuses a direction and starts over. It keeps its count
+        // of pairs, so a fourth pair, for neither reading, still completes
+        // two per coordinate and moves the steps onto the logarithm, as it
+        // does without the start-over; and it stays scaled, so that pair
+        // updates the approximation the start-over left instead of scaling
+        // it again by its own s.y / y.D.y.
+        let mut engine = two_coordinate_descent();
+        assert_eq!(steps_after(&mut engine, "lll"), [false; 3]);
+        engine.curvature.inv_hessian = -Array2::<f64>::eye(2);
+        engine.begin_line_search(false);
+        match &engine.phase {
+            Phase::Line(work) => assert!(!work.log && work.steepest),
+            _ => panic!("no line search followed"),
+        }
+        let model = &engine.curvature;
+        assert_eq!(
+            model.inv_hessian,
+            Array2::from_diag(&(&engine.metric * model.gamma))
+        );
+        assert_eq!((model.pairs, model.scaled), (3, true));
+        assert_eq!(steps_after(&mut engine, "n"), [true]);
+    }
+
+    #[test]
     fn a_steepest_descent_step_after_a_failed_line_search_keeps_the_models() {
         // A line search along a quasi-Newton direction that descends can
         // fail, and the descent then searches down the steepest-descent
