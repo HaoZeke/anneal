@@ -8458,6 +8458,30 @@ mod tests {
         );
     }
 
+    fn rosenbrock_fourth(x: ArrayView1<f64>) -> f64 {
+        rosenbrock(x).powi(4)
+    }
+
+    #[test]
+    fn values_only_opening_holds_each_slice_to_its_recent_gains_in_log_ratios() {
+        // Rosenbrock's fourth power falls by nine decades in the opening's
+        // first seven slices and by under a tenth on the eighth, along the
+        // valley floor. That slice gains no more than a sliver of the
+        // largest of the three before it as a difference but far more as a
+        // log ratio, which the bar reads while the values are positive, so
+        // the opening goes on past it and ends where log ratios end it.
+        let values = opening_values(rosenbrock_fourth);
+        let n = values.len() - 1;
+        let (end, _) = bar_end(&values, |before, after| (before / after).ln());
+        assert_eq!(end, Some(n));
+        let gains: Vec<f64> = values[1..].windows(2).map(|w| w[0] - w[1]).collect();
+        let largest = |gains: &[f64]| gains.iter().copied().fold(0.0f64, f64::max);
+        let sliver = (1..n - 2).find(|&k| {
+            gains[k] <= IMPROVEMENT_RTOL * largest(&gains[k.saturating_sub(OPENING_GAINS)..k])
+        });
+        assert!(sliver.is_some(), "the values were {values:?}");
+    }
+
     fn rosenbrock_fourth_less(x: ArrayView1<f64>) -> f64 {
         rosenbrock(x).powi(4) - 3.77e6
     }
