@@ -1225,6 +1225,30 @@ def test_the_helpers_read_numeric_strings_with_a_future_warning(
     assert _same(got, want)
 
 
+def test_chemfit_box_refuses_a_bound_without_width_before_it_warns_of_strings():
+    empty = NextFitter({"x": 0.5, "y": 0.1}, {"x": ("0.5", "0.5"), "y": (0.0, 1.0)})
+    message = (
+        "ChemFit bound for 'x' is empty: lower=0.5 upper=0.5; "
+        "chemfit_box needs lower < upper, as some drivers do"
+    )
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        with pytest.raises(ValueError) as caught:
+            _box(empty)
+    assert str(caught.value) == message
+    assert [str(w.message) for w in record] == []
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(ValueError, match=re.escape(message)):
+            _box(empty)
+    wide = NextFitter({"x": 0.5, "y": 0.1}, {"x": ("0.25", "0.5"), "y": (0.0, 1.0)})
+    with pytest.warns(FutureWarning) as record:
+        low, high = _box(wide)
+    warning = _reads("chemfit_box", "the lower bound of x and the upper bound of x")
+    assert len(record) == 1 and re.match(warning, str(record[0].message))
+    assert np.array_equal(low, [0.25, 0.0]) and np.array_equal(high, [0.5, 1.0])
+
+
 @pytest.mark.parametrize("entry", ENTRIES)
 def test_the_installed_chemfit_fitter_runs_on_bounds_read_from_yaml(entry):
     fitter_type = installed_fitter_type()

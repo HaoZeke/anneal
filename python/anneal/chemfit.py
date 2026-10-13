@@ -1521,13 +1521,13 @@ def chemfit_box(
         span = _positive("default_span", default_span)
         box = _mapped_box(layout, getattr(fitter, "bounds", None), vector.x0, span)
         low, high = _settle(layout, *box)
-    fixed = _first(low == high)
-    if fixed is not None:
-        raise ValueError(
-            f"ChemFit bound for {layout.name(fixed)!r} is empty: "
-            f"lower={float(low[fixed])} upper={float(high[fixed])}; "
-            "chemfit_box needs lower < upper, as some drivers do"
-        )
+        fixed = _first(low == high)
+        if fixed is not None:
+            raise ValueError(
+                f"ChemFit bound for {layout.name(fixed)!r} is empty: "
+                f"lower={float(low[fixed])} upper={float(high[fixed])}; "
+                "chemfit_box needs lower < upper, as some drivers do"
+            )
     return low, high
 
 
