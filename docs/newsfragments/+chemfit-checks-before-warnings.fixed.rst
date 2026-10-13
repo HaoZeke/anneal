@@ -10,10 +10,14 @@ refused call raises its error alone and a call that runs warns as before.
 Where ``run_fitter`` hands a fitter to its own ``fit_anneal``, it refuses
 only what it cannot pass to that method, and the budget, the seed, the
 fitter's bounds and the rest are the method's to check; the warning of a
-preset that ``run_fitter`` ignores waits for the first of ``fit_anneal``,
-``fit_chemfit`` and ``run_benchmark`` that the method calls, and comes once
-that call's checks pass, so a refusal there, such as ``run_benchmark``'s of
-a budget of 0 or a seed of -1, raises its error alone too. When the method
-calls none of them, the warning comes once it returns, and not when it
-raises. Either way it points at the line that called ``run_fitter``, in a
-module, a script or a Jupyter cell alike.
+preset that ``run_fitter`` ignores waits for the calls the method makes to
+``fit_anneal``, ``fit_chemfit`` and ``run_benchmark``, and comes once, from
+the first call whose checks pass, before ``init``. So a refusal there, such
+as ``run_benchmark``'s of a budget of 0 or a seed of -1, raises its error
+alone too, and a call made after the refusal gets the warning once its
+checks pass. A call the method makes on another thread with the same fitter
+gives the warning on that thread, before its ``init``, so under
+``warnings.simplefilter("error")`` it is raised there in place of the fit.
+When no call passes its checks, the warning comes once the method returns,
+and not when it raises. In each case it points at the line that called
+``run_fitter``, in a module, a script or a Jupyter cell alike.
