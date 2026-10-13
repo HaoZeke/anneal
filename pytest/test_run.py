@@ -2,6 +2,8 @@
 preset constructors plus run() driver). Replaces the legacy
 test_funcs / test_mcsamplers / test_quench suites."""
 
+import re
+
 import numpy as np
 import pytest
 
@@ -659,14 +661,35 @@ def test_run_refuses_a_bad_x0(x0, message):
         run(styb_tang_2d, LOW, HIGH, Boltzmann(), n_epochs=1, steps_per_epoch=1, x0=x0)
 
 
+INVALID_PRESETS = [
+    (Boltzmann(t_init=-1.0), "t_init must be positive and finite, got -1"),
+    (Boltzmann(t_init=np.nan), "t_init must be positive and finite, got NaN"),
+    (Boltzmann(t_init=np.inf), "t_init must be positive and finite, got inf"),
+    (Boltzmann(sigma=-1.0), "sigma must be positive and finite, got -1"),
+    (Boltzmann(sigma=0.0), "sigma must be positive and finite, got 0"),
+    (Fast(t_init=-1.0), "t_init must be positive and finite, got -1"),
+    (Fast(gamma=0.0), "gamma must be positive and finite, got 0"),
+    (Fast(gamma=-1.0), "gamma must be positive and finite, got -1"),
+    (Gsa(q_v=1.0), "q_v must lie in (1, 3), got 1"),
+    (Gsa(q_v=3.0), "q_v must lie in (1, 3), got 3"),
+    (Gsa(q_v=3.5), "q_v must lie in (1, 3), got 3.5"),
+    (Gsa(t_init=0.0), "t_init must be positive and finite, got 0"),
+    (Gsa(q_a=np.nan), "q_a must be finite"),
+]
+
+
+@pytest.mark.parametrize("fixed", [False, True], ids=["free box", "every coordinate fixed"])
+@pytest.mark.parametrize("driver", [run, run_qmc], ids=["run", "run_qmc"])
 @pytest.mark.parametrize(
-    "preset",
-    [Boltzmann(sigma=0.0), Fast(t_init=-1.0), Gsa(q_v=3.5)],
-    ids=repr,
+    ("preset", "message"), INVALID_PRESETS, ids=[repr(preset) for preset, _ in INVALID_PRESETS]
 )
-def test_run_refuses_invalid_preset_parameters(preset):
-    with pytest.raises(ValueError):
-        run(styb_tang_2d, LOW, HIGH, preset, n_epochs=1, steps_per_epoch=1)
+def test_run_and_run_qmc_refuse_an_invalid_preset_by_name(preset, message, driver, fixed):
+    low, high = (np.array([0.5, -0.25]),) * 2 if fixed else (LOW, HIGH)
+    keywords = {"n_starts": 2} if driver is run_qmc else {}
+    objective = Recorder(styb_tang_2d)
+    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        driver(objective, low, high, preset, n_epochs=1, steps_per_epoch=1, **keywords)
+    assert objective.points == []
 
 
 def test_global_optimize_starts_from_x0_and_stays_in_the_box():
