@@ -100,7 +100,7 @@ runs one replica: with =jac=, =replicas= above one gives a
 no =grad_fn= or =noise_sigma= runs these batch replicas too, its
 =coverage_shared= standing for =history= and its =coverage_radius= and
 =coverage_neighbors= giving the same =FutureWarning= as in =minimize=, and
-=minimize= on a box with no fixed coordinate repeats it call for call.
+=minimize= repeats it call for call.
 Without =x0=, or with =grad_fn=, =noise_sigma= or ~policy="legacy"~, its
 replicas are persistent portfolio controllers on threads instead, each with
 its own archive and an even share of the budget, exchanging paid proposal

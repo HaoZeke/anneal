@@ -385,6 +385,11 @@ def run(
     Args:
       obj_fn: callable ``f(numpy.ndarray) -> float`` on the flat vector.
       low, high: box bounds, any array-like of one shape; flattened in C order.
+        A coordinate whose two ends are equal is fixed: the run makes the
+        calls of the same run on the other coordinates, and ``obj_fn``
+        receives each point at full length, with the fixed values. With
+        every coordinate fixed, the run is one call at ``x0``, or at
+        ``low`` without it, and has no epochs.
       preset: ``Boltzmann()``, ``Fast()`` or ``Gsa()``.
       n_epochs, steps_per_epoch: the cooling schedule and its length.
       seed: RNG seed.
@@ -430,7 +435,10 @@ def run_qmc(
     ``x0``, when given, replaces the first design point. ``max_evals``, when
     given, is split as evenly as possible over the starts and caps the total
     number of calls; otherwise a run makes
-    ``n_starts * (1 + n_epochs * steps_per_epoch)`` calls.
+    ``n_starts * (1 + n_epochs * steps_per_epoch)`` calls. Fixed
+    coordinates, whose two ends are equal, are held as :func:`run` holds
+    them, the design spanning the free ones; with every coordinate fixed
+    the run is one call.
     """
     return _core_run_qmc(
         obj_fn,
@@ -1854,11 +1862,18 @@ def global_optimize(
 
     Args:
       obj_fn: callable ``f(numpy.ndarray) -> float``.
-      low, high: box bounds. In the values-only loop, a box with no side
-        wide enough for a difference step to change its coordinate at the
-        start, a unit or two in the last place, ends the run there: it
-        evaluates ``x0`` once, or without it the box's centre once per
-        replica, up to the budget.
+      low, high: box bounds. A coordinate whose two ends are equal is
+        fixed: as in :func:`minimize`, the run makes the calls of the same
+        run on the other coordinates, and ``obj_fn`` and ``grad_fn``
+        receive each point at full length, with the fixed values. With
+        every coordinate fixed, the run is one call of ``obj_fn`` at
+        ``x0``, or at ``low`` without it, whatever the number of replicas;
+        ``grad_fn`` is not called, and the dict holds the keys of one
+        controller, its arm counts empty. In the values-only loop, a box
+        with no free side wide enough for a difference step to change its
+        coordinate at the start, a unit or two in the last place, ends the
+        run there: it evaluates ``x0`` once, or without it the box's centre
+        once per replica, up to the budget.
       budget: combined objective + gradient evaluation budget.
       seed: RNG seed.
       grad_fn: optional gradient callable ``g(x) -> numpy.ndarray``;

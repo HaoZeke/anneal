@@ -45,7 +45,7 @@ def test_budget_is_never_exceeded():
 
 def test_global_optimize_rejects_inverted_bounds():
     fn, _, low, high = _rastrigin(2)
-    with pytest.raises(ValueError, match="strictly less"):
+    with pytest.raises(ValueError, match="less than or equal to"):
         anneal.global_optimize(fn, high, low, budget=50, seed=0)
 
 
