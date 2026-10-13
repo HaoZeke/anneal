@@ -33,7 +33,10 @@ the Thompson-allocated portfolio, which takes the loss to be a function of
 the parameters: a candidate whose flattened parameters match, bit for bit,
 those of one already evaluated gets that evaluation's loss without a call of
 the fitter, so a loss that samples gets the value its first evaluation there
-returned. None of these bridges takes ``noise_sigma``, with which
+returned. The parameters matched are those the fitter is given, each
+coordinate of a float32 or float16 leaf rounded to the leaf's dtype, so two
+candidates that round to one such point make one call. None of these
+bridges takes ``noise_sigma``, with which
 :func:`anneal.global_optimize` calls its objective at every evaluation,
 though :func:`run_fitter` passes one on to a fitter's own ``fit_anneal``
 that takes it. The classical drivers call the fitter at every evaluation, a
@@ -45,7 +48,9 @@ With ``batch_size`` above one, :func:`fit_anneal`, :func:`fit_chemfit` and
 is initialised with ``init(batch_size=batch_size)``, and each batch of at
 most ``batch_size`` candidates is one ``evaluate`` of a list, which
 ChemFit's schedule may run concurrently, and one ``step``; the start is a
-batch of one. Batches need the portfolio and a fitter with ``evaluate``,
+batch of one. A candidate answered from an earlier evaluation is left out of
+the list, and a batch holding only such candidates makes no call and sends no
+``step``. Batches need the portfolio and a fitter with ``evaluate``,
 ``step`` and an ``init`` that takes ``batch_size``. When every other check
 passes, a batch under another driver is refused before ``init``, by a
 message naming the driver, and under the portfolio a fitter without
@@ -926,6 +931,11 @@ class _Layout:
                 out[leaf.span] = out[leaf.span].astype(leaf.dtype)
         return out
 
+    @property
+    def rounds(self) -> bool:
+        """Whether a leaf is float32 or float16, so that :meth:`cast` rounds."""
+        return any(leaf.dtype != np.float64 for leaf in self.leaves)
+
     def params(self, vector: np.ndarray) -> dict[str, Any]:
         """A fresh nested dict holding ``vector``, each leaf in its own type."""
         out = _copy_tree(self._tree)
@@ -1102,6 +1112,10 @@ class _Problem:
         """The parameters at the driver's point ``x``."""
         return self.layout.params(_clip(x, self.low, self.high))
 
+    def held(self, x: np.ndarray) -> bytes:
+        """The bits of the parameters at ``x`` as the fitter is given them."""
+        return self.layout.cast(_clip(x, self.low, self.high)).tobytes()
+
 
 class _Stop(BaseException):
     """Ends a driver run from inside the objective; the bridge catches it."""
@@ -1113,7 +1127,10 @@ class _Session:
     It counts evaluations against the budget, sends a step notice every
     ``step_every`` of them, keeps the best point, and records the first
     exception from the fitter or from reading its loss. That exception, or
-    a spent budget, stops the driver.
+    a spent budget, stops the driver. Once given ``answers``, it answers a
+    point whose parameters, as the fitter is given them, match an earlier
+    call's bit for bit with that call's loss, without calling the fitter or
+    counting the point.
     """
 
     def __init__(self, problem: _Problem, evaluate, step, budget: int, step_every: int):
@@ -1126,15 +1143,22 @@ class _Session:
         self.best: np.ndarray | None = None
         self.best_loss = math.inf
         self.error: BaseException | None = None
+        self.answers: dict[bytes, float] | None = None
 
     def __call__(self, x) -> float:
         if self.error is not None or self.count >= self.budget:
             raise _Stop
         try:
             point = np.array(x, dtype=np.float64)
+            if self.answers is not None:
+                key = self.problem.held(point)
+                if key in self.answers:
+                    return self.answers[key]
             loss = _loss_value(self._evaluate(self.problem.candidate(point)))
             self.count += 1
             self._keep(point, loss)
+            if self.answers is not None:
+                self.answers[key] = loss
             if self.count % self.step_every == 0:
                 self._step()
         except BaseException as error:
@@ -1154,7 +1178,9 @@ class _BatchSession(_Session):
     Each batch the driver hands over is one ``evaluate`` of its candidates
     as a list, which the fitter's schedule may run concurrently, and one
     step notice, as ChemFit's own batch loop runs them. A single point is a
-    batch of one.
+    batch of one. With ``answers``, the list holds one candidate for each
+    set of parameters not yet called, and a batch with none makes no call
+    and sends no step notice.
     """
 
     def __init__(self, problem: _Problem, evaluate, step, budget: int, batch_size: int):
@@ -1169,15 +1195,28 @@ class _BatchSession(_Session):
         if self.error is not None or self.count + len(points) > self.budget:
             raise _Stop
         try:
-            candidates = [self.problem.candidate(point) for point in points]
-            losses = _batch_losses(self._evaluate(candidates), len(points))
-            self.count += len(points)
-            for point, loss in zip(points, losses):
-                self._keep(point, loss)
-            self._step()
+            if self.answers is None:
+                return self._evaluate_batch(points)
+            keys = [self.problem.held(point) for point in points]
+            fresh: dict[bytes, np.ndarray] = {}
+            for point, key in zip(points, keys):
+                if key not in self.answers:
+                    fresh.setdefault(key, point)
+            if fresh:
+                losses = self._evaluate_batch(np.array(list(fresh.values())))
+                self.answers.update(zip(fresh, losses))
+            return [self.answers[key] for key in keys]
         except BaseException as error:
             self.error = error
             raise _Stop from None
+
+    def _evaluate_batch(self, points: np.ndarray) -> list[float]:
+        candidates = [self.problem.candidate(point) for point in points]
+        losses = _batch_losses(self._evaluate(candidates), len(points))
+        self.count += len(points)
+        for point, loss in zip(points, losses):
+            self._keep(point, loss)
+        self._step()
         return losses
 
 
@@ -1201,13 +1240,18 @@ def _drive(
     value and search the others; with every coordinate fixed, the run is one
     evaluation of the start. A :class:`_BatchSession` runs the portfolio as
     batch replicas of :func:`anneal.minimize`, one per candidate of a batch,
-    sharing one archive. The first fitter exception is raised here, after
-    the driver has returned.
+    sharing one archive. The portfolio answers a point whose float64
+    coordinates match an earlier call's; when a leaf is float32 or float16,
+    the session also answers one whose parameters match an earlier call's
+    once each such leaf is rounded to its dtype. The first fitter exception
+    is raised here, after the driver has returned.
     """
     from anneal import global_optimize, minimize, run
 
     problem, budget = session.problem, session.budget
     low, high, start = problem.low, problem.high, problem.start
+    if driver == "portfolio" and problem.layout.rounds:
+        session.answers = {}
     try:
         if driver == "portfolio" and isinstance(session, _BatchSession):
             minimize(
@@ -1452,15 +1496,17 @@ def fit_anneal(
         ``step`` (ChemFit's source from commit c57d6f5, in no release yet)
         or ``ask`` and ``tell`` (ChemFit 3.1.1, the first release with
         them).
-        Each evaluation, or each batch when ``batch_size`` is above one,
-        is followed by one ``step`` (or ``tell``).
+        Each evaluation, or each ``evaluate`` of a batch when
+        ``batch_size`` is above one, is followed by one ``step`` (or
+        ``tell``).
       budget: total objective-evaluation budget, the start included; it is
         never exceeded.
       driver: ``"portfolio"`` (default), the Thompson-allocated portfolio
         of :func:`anneal.global_optimize` run without a gradient or
         ``noise_sigma``, whose documentation names the arms it then runs,
-        and which answers a candidate already evaluated, bit for bit, with
-        that evaluation's loss; or one of ``"boltzmann"``, ``"fast"``,
+        and which answers a candidate already evaluated, bit for bit once
+        each float32 or float16 leaf is rounded to its dtype, with that
+        evaluation's loss; or one of ``"boltzmann"``, ``"fast"``,
         ``"gsa"`` for single-chain ablation runs, which evaluate every
         candidate.
       seed: RNG seed.
@@ -1493,16 +1539,18 @@ def fit_anneal(
         ``init(batch_size=batch_size)``, and each batch, at most
         ``batch_size`` candidates, goes to one ``evaluate`` of a list and
         one ``step``, so a fitter whose schedule runs candidates
-        concurrently evaluates them together. ``budget`` stays the total
-        number of evaluations. Needs the portfolio and a fitter with an
-        ``init`` that takes ``batch_size``, besides ``evaluate`` and
-        ``step``: ChemFit built from its source at commit 3b65fe0 or later,
-        not ChemFit 3.1.1, the latest release, which has ``ask`` and
-        ``tell``, nor the commits from c57d6f5 that precede 3b65fe0, whose
-        ``init`` takes ``num_workers``. Whether ``evaluate`` takes a list
-        shows only when it is called: one that takes a single candidate
-        gets the start as a list of one, after ``init``, and stops the fit
-        there.
+        concurrently evaluates them together. A candidate answered from an
+        earlier evaluation is left out of the list, and a batch holding
+        only such candidates makes no call and sends no ``step``.
+        ``budget`` stays the total number of evaluations. Needs the
+        portfolio and a fitter with an ``init`` that takes ``batch_size``,
+        besides ``evaluate`` and ``step``: ChemFit built from its source at
+        commit 3b65fe0 or later, not ChemFit 3.1.1, the latest release,
+        which has ``ask`` and ``tell``, nor the commits from c57d6f5 that
+        precede 3b65fe0, whose ``init`` takes ``num_workers``. Whether
+        ``evaluate`` takes a list shows only when it is called: one that
+        takes a single candidate gets the start as a list of one, after
+        ``init``, and stops the fit there.
 
     Every argument is checked before ``fitter.init()`` and before any
     FutureWarning, so a refused call raises its error without one. Returns
@@ -1810,7 +1858,8 @@ def fit_chemfit(
             of :func:`anneal.global_optimize` run without a gradient or
             ``noise_sigma``, whose documentation names the arms it then
             runs, and which answers a candidate already evaluated, bit for
-            bit, with that evaluation's loss; or ``"boltzmann"``,
+            bit once each float32 or float16 leaf is rounded to its dtype,
+            with that evaluation's loss; or ``"boltzmann"``,
             ``"fast"``, ``"gsa"`` for the bound-respecting classical chain,
             which evaluates every candidate. Every method starts from the
             initial parameters, moved onto the box when they lie outside it.
@@ -1818,9 +1867,11 @@ def fit_chemfit(
         default_span: half-width around the initial value for parameters
             ChemFit leaves unbounded. Bounds read as in :func:`chemfit_box`,
             except that a parameter with equal bounds is held fixed.
-        tell_every: portfolio evaluations between step notices (``step`` or
-            ``tell``) so registered callbacks still fire. With ``batch_size``
-            above one, every batch is followed by one ``step`` instead.
+        tell_every: evaluations of the fitter between step notices
+            (``step`` or ``tell``) so registered callbacks still fire; a
+            candidate answered from an earlier evaluation is not one. With
+            ``batch_size`` above one, every ``evaluate`` of a batch is
+            followed by one ``step`` instead.
         steps_per_epoch: classical-chain evaluations per epoch, and per
             step notice; the chain runs ``max(1, budget // steps_per_epoch)``
             epochs and stops when the budget is spent.
@@ -1830,16 +1881,18 @@ def fit_chemfit(
             fitter is initialised with ``init(batch_size=batch_size)``, and
             each batch, at most ``batch_size`` candidates, goes to one
             ``evaluate`` of a list and one ``step``, as ChemFit's own batch
-            loop runs them. ``budget`` stays the total number of
-            evaluations. Needs ``method="portfolio"`` and a fitter with an
-            ``init`` that takes ``batch_size``, besides ``evaluate`` and
-            ``step``: ChemFit built from its source at commit 3b65fe0 or
-            later, not ChemFit 3.1.1, the latest release, which has ``ask``
-            and ``tell``, nor the commits from c57d6f5 that precede 3b65fe0,
-            whose ``init`` takes ``num_workers``. Whether ``evaluate`` takes
-            a list shows only when it is called: one that takes a single
-            candidate gets the start as a list of one, after ``init``, and
-            stops the fit there.
+            loop runs them. A candidate answered from an earlier evaluation
+            is left out of the list, and a batch holding only such
+            candidates makes no call and sends no ``step``. ``budget``
+            stays the total number of evaluations. Needs
+            ``method="portfolio"`` and a fitter with an ``init`` that takes
+            ``batch_size``, besides ``evaluate`` and ``step``: ChemFit built
+            from its source at commit 3b65fe0 or later, not ChemFit 3.1.1,
+            the latest release, which has ``ask`` and ``tell``, nor the
+            commits from c57d6f5 that precede 3b65fe0, whose ``init`` takes
+            ``num_workers``. Whether ``evaluate`` takes a list shows only
+            when it is called: one that takes a single candidate gets the
+            start as a list of one, after ``init``, and stops the fit there.
         **preset_kwargs: ``t_init`` / ``sigma`` (boltzmann), ``t_init`` /
             ``gamma`` (fast), ``t_init`` / ``q_v`` / ``q_a`` (gsa) for the
             classical preset constructors. One of these that the method
@@ -2066,7 +2119,8 @@ def run_benchmark(
 
     ``method`` is ``portfolio`` (the budget-only global optimizer, run
     without ``noise_sigma``: it answers a candidate already evaluated, bit
-    for bit, with that evaluation's loss), or ``boltzmann``, ``fast``, or
+    for bit once each float32 or float16 leaf is rounded to its dtype, with
+    that evaluation's loss), or ``boltzmann``, ``fast``, or
     ``gsa``; ``preset``, when given, is the matching preset instance. The
     chain starts at ``initial_params``, moved onto the box when it lies
     outside. Every coordinate the fitter sees lies in the box, and
@@ -2095,15 +2149,17 @@ def run_benchmark(
     of :func:`anneal.minimize` sharing one archive and incumbent, as in
     :func:`fit_anneal`: the fitter is initialised with
     ``init(batch_size=batch_size)``, and each batch, at most ``batch_size``
-    candidates, goes to one ``evaluate`` of a list and one ``step``. The
-    budget stays the total, and the fitter needs an ``init`` that takes
-    ``batch_size``, besides ``evaluate`` and ``step``: ChemFit built from
-    its source at commit 3b65fe0 or later, not ChemFit 3.1.1, the latest
-    release, which has ``ask`` and ``tell``, nor the commits from c57d6f5
-    that precede 3b65fe0, whose ``init`` takes ``num_workers``. Whether
-    ``evaluate`` takes a list shows only when it is called: one that takes a
-    single candidate gets the start as a list of one, after ``init``, and
-    stops the fit there.
+    candidates, goes to one ``evaluate`` of a list and one ``step``. A
+    candidate answered from an earlier evaluation is left out of the list,
+    and a batch holding only such candidates makes no call and sends no
+    ``step``. The budget stays the total, and the fitter needs an ``init``
+    that takes ``batch_size``, besides ``evaluate`` and ``step``: ChemFit
+    built from its source at commit 3b65fe0 or later, not ChemFit 3.1.1, the
+    latest release, which has ``ask`` and ``tell``, nor the commits from
+    c57d6f5 that precede 3b65fe0, whose ``init`` takes ``num_workers``.
+    Whether ``evaluate`` takes a list shows only when it is called: one that
+    takes a single candidate gets the start as a list of one, after
+    ``init``, and stops the fit there.
     """
     fitter = benchmark_context["fitter"]
     with _Checks(fitter), _Strings("run_benchmark"):
@@ -2313,7 +2369,8 @@ def run_fitter(
     """Run a ChemFit fitter with the gradient-free bridges.
 
     ``method="global_optimize"`` uses the portfolio, which answers a
-    candidate already evaluated, bit for bit, with that evaluation's loss,
+    candidate already evaluated, bit for bit once each float32 or float16
+    leaf is rounded to its dtype, with that evaluation's loss,
     and ``method="sa"`` runs ``preset`` (``Boltzmann()`` when none is
     given); ``"portfolio"``, ``"boltzmann"``, ``"fast"`` and ``"gsa"`` name
     a driver directly, and a classical one runs ``preset`` when it is that

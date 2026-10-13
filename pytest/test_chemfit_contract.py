@@ -70,6 +70,49 @@ def test_low_precision_leaves_keep_their_dtype_inside_the_bounds(entry, dtype):
         assert np.all(cast >= lower) and np.all(cast <= upper)
 
 
+def _wavy(params):
+    """A loss of a leaf ``x`` read in float32, whatever its dtype, and ``eps``."""
+    x = np.asarray(params["x"]).astype(np.float32).astype(np.float64)
+    eps = float(params["eps"])
+    return float(np.sum((x - 0.3) ** 2 + 0.1 * np.sin(5.0 * x)) + (eps - 1.2) ** 2)
+
+
+def _in_float32(params):
+    """The bits of a candidate with its leaf ``x`` in float32."""
+    return np.asarray(params["x"]).astype(np.float32).tobytes() + np.float64(params["eps"]).tobytes()
+
+
+def _float32_pair(fitter_type):
+    """A fitter with a float32 leaf, and one holding it in float64 that ``_wavy`` rounds.
+
+    The portfolio meets the same box, start and losses on both, so it asks
+    both the same points; the second is called at every one of them.
+    """
+    x = np.array([0.2, -0.1], dtype=np.float32)
+    bounds = {"x": (-1.0, 1.0), "eps": (0.5, 2.0)}
+    return (
+        fitter_type({"x": x, "eps": 1.0}, bounds, loss=_wavy),
+        fitter_type({"x": x.astype(np.float64), "eps": 1.0}, bounds, loss=_wavy),
+    )
+
+
+@pytest.mark.parametrize("seed", [0, 1])
+@pytest.mark.parametrize(
+    ("entry", "batch_size"), [*((entry, 1) for entry in ENTRIES), *((entry, 4) for entry in ENTRIES[:3])]
+)
+def test_the_portfolio_calls_a_float32_leaf_once_at_each_point_it_rounds_to(entry, batch_size, seed):
+    fitter_type = BatchFitter if batch_size > 1 else ReleasedFitter
+    rounded, reference = _float32_pair(fitter_type)
+    options = {"batch_size": batch_size} if batch_size > 1 else {}
+    out = drive(entry, rounded, 200, seed=seed, **options)
+    expected = drive(entry, reference, 200, seed=seed, **options)
+    called = [_in_float32(params) for params in rounded.evaluated]
+    asked = [_in_float32(params) for params in reference.evaluated]
+    assert len(set(asked)) < len(asked)
+    assert called == list(dict.fromkeys(asked))
+    assert _in_float32(out) == _in_float32(expected)
+
+
 @pytest.mark.parametrize("entry", ENTRIES)
 def test_a_box_holding_no_value_of_the_leaf_dtype_is_refused(entry):
     fitter = ReleasedFitter(
