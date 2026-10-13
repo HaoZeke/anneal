@@ -95,6 +95,63 @@ fn validate_box_domain(low: &[f64], high: &[f64], allow_fixed: bool) -> PyResult
     Ok(())
 }
 
+/// The walls a driver takes as they are, besides `low <= high`. No NaN
+/// wall is taken: it compares false with every number, so `Bounds::new`
+/// lets it through and the box holds no point.
+#[derive(Clone, Copy)]
+enum Walls {
+    /// Infinite walls too, so long as each axis holds a point: its two walls
+    /// are not the same infinity.
+    Infinite,
+    /// Finite walls; the width may overflow.
+    Finite,
+    /// Finite walls a finite width apart.
+    FiniteWidth,
+}
+
+/// Refuses, naming the coordinate, a box whose walls `walls` does not take,
+/// or with `low` above `high`. The caller checks the lengths.
+fn validate_walls(low: &[f64], high: &[f64], walls: Walls) -> PyResult<()> {
+    for (i, (&lo, &hi)) in low.iter().zip(high).enumerate() {
+        let refused = if lo.is_nan() || hi.is_nan() {
+            format!("bounds must not be NaN at dimension {i}")
+        } else {
+            match walls {
+                Walls::Infinite if lo == hi && lo.is_infinite() => {
+                    format!("bounds must not have both walls at {lo} at dimension {i}")
+                }
+                Walls::Finite if !lo.is_finite() || !hi.is_finite() => {
+                    format!("bounds must be finite at dimension {i}")
+                }
+                Walls::FiniteWidth if !(hi - lo).is_finite() => {
+                    format!("bounds must be finite, with a finite width, at dimension {i}")
+                }
+                _ if lo > hi => {
+                    format!("low[{i}] must be less than or equal to high[{i}] (got {lo}, {hi})")
+                }
+                _ => continue,
+            }
+        };
+        return Err(PyValueError::new_err(refused));
+    }
+    Ok(())
+}
+
+/// [`validate_walls`] on the box of an `eindir` handle.
+fn validate_handle_walls(native: &PyObjective, walls: Walls) -> PyResult<()> {
+    let bounds = <PyObjective as Objective<f64>>::bounds(native);
+    validate_walls(&bounds.low.to_vec(), &bounds.high.to_vec(), walls)
+}
+
+/// The walls `(low, high)` of an `eindir` handle's box, which its `bounds`
+/// does not give back.
+#[pyfunction(name = "_objective_walls")]
+fn objective_walls(objective: Bound<'_, PyObjective>) -> (Vec<f64>, Vec<f64>) {
+    let native = objective.borrow();
+    let bounds = <PyObjective as Objective<f64>>::bounds(&native);
+    (bounds.low.to_vec(), bounds.high.to_vec())
+}
+
 fn py_view1<'py>(py: Python<'py>, x: ArrayView1<f64>) -> Bound<'py, PyArray1<f64>> {
     match x.as_slice() {
         Some(sl) => PyArray1::from_slice(py, sl),
@@ -1053,6 +1110,7 @@ fn polish(
             "low, high, and x0 must have the same length",
         ));
     }
+    validate_walls(&low_vec, &high_vec, Walls::Infinite)?;
     if max_fevals < 1 {
         return Err(PyValueError::new_err("max_fevals must be positive"));
     }
@@ -1111,6 +1169,7 @@ fn qmc_polish(
             "low and high must have the same length",
         ));
     }
+    validate_walls(&low_vec, &high_vec, Walls::Finite)?;
     if n_starts < 1 {
         return Err(PyValueError::new_err("n_starts must be positive"));
     }
@@ -1208,6 +1267,7 @@ fn qmc_polish_objective(
     }
 
     let native = objective.borrow();
+    validate_handle_walls(&native, Walls::Finite)?;
     let callbacks =
         HandleCallbacks::new(&objective, &native).reading_gradients("qmc_polish_objective", "");
     let result = crate::qmc_projected_gradient_polish(
@@ -1251,6 +1311,7 @@ fn qmc_best1bin_scout(
             "bounds must have at least one dimension",
         ));
     }
+    validate_walls(&low_vec, &high_vec, Walls::Infinite)?;
     if max_evals < 1 {
         return Err(PyValueError::new_err("max_evals must be positive"));
     }
@@ -1331,6 +1392,7 @@ fn qmc_best1bin_scout_objective(
     }
 
     let native = objective.borrow();
+    validate_handle_walls(&native, Walls::Infinite)?;
     let callbacks = HandleCallbacks::new(&objective, &native);
     let result = crate::qmc_best1bin_scout(
         &callbacks,
@@ -1430,6 +1492,7 @@ fn qmc_gsa_global_search_objective(
 ) -> PyResult<Py<PyDict>> {
     validate_qmc_gsa_global_search_args(max_evals, n_chains, t_init, q_v, q_a)?;
     let native = objective.borrow();
+    validate_handle_walls(&native, Walls::Finite)?;
     let bounds = <PyObjective as Objective<f64>>::bounds(&native);
     let start = read_x0(
         x0,
@@ -1480,6 +1543,7 @@ fn qmc_trust_region_poll(
             "bounds must have at least one dimension",
         ));
     }
+    validate_walls(&low_vec, &high_vec, Walls::Finite)?;
     if max_evals < 1 {
         return Err(PyValueError::new_err("max_evals must be positive"));
     }
@@ -1528,6 +1592,7 @@ fn qmc_trust_region_poll_objective(
             "center dimension must match objective bounds",
         ));
     }
+    validate_handle_walls(&native, Walls::Finite)?;
     if max_evals < 1 {
         return Err(PyValueError::new_err("max_evals must be positive"));
     }
@@ -1578,6 +1643,7 @@ fn shifted_qmc_polish(
             "low and high must have the same length",
         ));
     }
+    validate_walls(&low_vec, &high_vec, Walls::Infinite)?;
     if n_starts < 1 {
         return Err(PyValueError::new_err("n_starts must be positive"));
     }
@@ -1658,6 +1724,7 @@ fn additive_independence(
             "low and high must have the same length",
         ));
     }
+    validate_walls(&low_vec, &high_vec, Walls::FiniteWidth)?;
     if max_fevals < 1 {
         return Err(PyValueError::new_err("max_fevals must be positive"));
     }
@@ -1703,6 +1770,7 @@ fn estimate_gle_omega0(
             "low and high must have the same length",
         ));
     }
+    validate_walls(&low_vec, &high_vec, Walls::Finite)?;
     let dim = low_vec.len();
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
@@ -1787,6 +1855,7 @@ fn gle_langevin(
             "low and high must have the same length",
         ));
     }
+    validate_walls(&low_vec, &high_vec, Walls::Finite)?;
     validate_gle_args(max_fevals, omega0)?;
     let dim = low_vec.len();
     let x0 = gle_langevin_x0(x0, dim)?;
@@ -1830,6 +1899,7 @@ fn gle_langevin_preconditioned(
             "low and high must have the same length",
         ));
     }
+    validate_walls(&low_vec, &high_vec, Walls::Finite)?;
     validate_gle_args(max_fevals, omega0)?;
     let dim = low_vec.len();
     let x0 = gle_langevin_x0(x0, dim)?;
@@ -1872,6 +1942,7 @@ fn gle_langevin_objective(
 ) -> PyResult<Py<PyDict>> {
     validate_gle_args(max_fevals, omega0)?;
     let native = objective.borrow();
+    validate_handle_walls(&native, Walls::Finite)?;
     let x0 = gle_langevin_x0(x0, native.dim())?;
     let callbacks =
         HandleCallbacks::new(&objective, &native).reading_gradients("gle_langevin_objective", "");
@@ -1906,6 +1977,7 @@ fn gle_langevin_preconditioned_objective(
 ) -> PyResult<Py<PyDict>> {
     validate_gle_args(max_fevals, omega0)?;
     let native = objective.borrow();
+    validate_handle_walls(&native, Walls::Finite)?;
     let x0 = gle_langevin_x0(x0, native.dim())?;
     let callbacks = HandleCallbacks::new(&objective, &native)
         .reading_gradients("gle_langevin_preconditioned_objective", "");
@@ -2694,6 +2766,7 @@ fn global_optimize_objective(
         ));
     }
     let native = objective.borrow();
+    validate_handle_walls(&native, Walls::Finite)?;
     let bounds = <PyObjective as Objective<f64>>::bounds(&native);
     let start = read_x0(
         x0,
@@ -3042,15 +3115,7 @@ fn low_discrepancy_points(
             "bounds must have at least one dimension",
         ));
     }
-    if low_vec
-        .iter()
-        .zip(high_vec.iter())
-        .any(|(&lo, &hi)| hi < lo)
-    {
-        return Err(PyValueError::new_err(
-            "each upper bound must be greater than or equal to the lower bound",
-        ));
-    }
+    validate_walls(&low_vec, &high_vec, Walls::FiniteWidth)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 0.0);
     let points = eindir_core::low_discrepancy_points(&bounds, n, skip);
     Ok(points.outer_iter().map(|row| row.to_vec()).collect())
@@ -3094,29 +3159,7 @@ fn run_qmc(
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     validate_max_evals(max_evals)?;
-    if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
-    if low_vec.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
-    }
-    if low_vec.iter().zip(high_vec.iter()).any(|(&lo, &hi)| {
-        !lo.is_finite() || !hi.is_finite() || !(2.0 * (hi - lo)).is_finite() || hi < lo
-    }) || !low_vec
-        .iter()
-        .zip(high_vec.iter())
-        .map(|(&lo, &hi)| hi - lo)
-        .sum::<f64>()
-        .is_finite()
-    {
-        return Err(PyValueError::new_err(
-            "each bound must be finite and each upper bound must be greater than or equal to the lower bound",
-        ));
-    }
+    validate_box_domain(&low_vec, &high_vec, true)?;
     preset.validate()?;
     let start = read_x0(x0, &low_vec, &high_vec)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
@@ -3812,5 +3855,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(global_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(global_optimize_objective, m)?)?;
     m.add_function(wrap_pyfunction!(global_optimize_replicas, m)?)?;
+    m.add_function(wrap_pyfunction!(objective_walls, m)?)?;
     Ok(())
 }

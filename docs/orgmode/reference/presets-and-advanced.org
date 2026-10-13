@@ -37,7 +37,22 @@ nor =low= above =high=: either is a =ValueError= naming the coordinate.
 =anneal._core.Bounds=, the extension's own box, and the box a Rust caller
 builds come from eindir-core's =Bounds::new=, which takes a NaN wall,
 though no point lies in such a box: refusing it there belongs to
-eindir-core.
+eindir-core. =PyObjective= refuses such a box, and every function that
+takes a box or a handle refuses a NaN wall, =low= above =high=, and an
+infinite wall it cannot work with, each a =ValueError= naming the
+coordinate, before any call:
+
+- =polish=, =shifted_qmc_polish=, =qmc_best1bin_scout= and
+  =qmc_best1bin_scout_objective= take an infinite wall, though not an axis
+  whose two walls are the same infinity, which holds no point;
+- =qmc_polish=, =qmc_trust_region_poll=, =estimate_gle_omega0=,
+  =gle_langevin=, =gle_langevin_preconditioned= and the other =*_objective=
+  functions take finite walls however far apart;
+- =additive_independence= and =low_discrepancy_points= take finite walls a
+  finite width apart;
+- =run=, =run_qmc=, =global_optimize= and the other drivers take finite
+  walls whose widths stay finite when doubled and when added up, and
+  =run_device= and =run_ensemble= finite walls.
 
 * Pilot and low-discrepancy
 
