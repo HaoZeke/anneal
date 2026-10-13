@@ -5346,6 +5346,14 @@ where
     // Exploratory (MetaD/TPS) slices awaiting conversion: (arm, round).
     const CREDIT_WINDOW: usize = ROUNDS_PER_ARM;
     let mut pending_credit: Vec<(usize, usize)> = Vec::new();
+    // From round `k` on an arm's slice is fixed while nothing is spent. An
+    // arm that spends nothing in its slice returned on its slice, the
+    // remaining budget, the box, the gradient or noise setting, the archive
+    // or state it changes only when it spends, so it spends nothing again
+    // until the ledger moves. Once every arm has played since the ledger
+    // last moved, the bandit can spend nothing more and the endgame takes
+    // what remains.
+    let mut idle = vec![false; k];
     loop {
         let remaining = ledger.remaining();
         if remaining < 4 {
@@ -5437,11 +5445,13 @@ where
             // bandit keeps exploring with the remaining budget and
             // the endgame re-polishes the final incumbent.
             run_low_dimensional_polish(&budgeted_obj, grad, &ledger, &plan, seed, budget);
+            idle.fill(false);
             continue;
         }
         if endgame_now
             || remaining < slice
             || (scalar_reserve > 0 && remaining < scalar_reserve.saturating_add(4))
+            || idle.iter().all(|&played| played)
         {
             // D5 endgame: the tail is pure polish (explore-first is
             // optimal). Cycle
@@ -5623,6 +5633,11 @@ where
             budget,
         );
         ledger.cap_set(budget);
+        if ledger.used_get() > used_before {
+            idle.fill(false);
+        } else if round >= k {
+            idle[choice] = true;
+        }
         let after = ledger.best_get();
         let improved = after.is_finite() && after < before - threshold;
         // Deferred exploratory credit: a MetaD deposit or an accepted
