@@ -171,7 +171,9 @@ impl Gradient<f64> for NoGradient {
 }
 
 /// Runs one replica's values-only loop on its share of the budget and
-/// returns its arm statistics and the evaluations charged to it.
+/// returns its arm statistics, the evaluations charged to it, and how many
+/// of those were at a point with a non-finite coordinate, which asked the
+/// coordinator nothing.
 fn run_replica(
     replica: usize,
     bounds: &Bounds<f64>,
@@ -181,7 +183,7 @@ fn run_replica(
     first: usize,
     asks: mpsc::Sender<Message>,
     answers: mpsc::Receiver<Answer>,
-) -> (Vec<ArmStat>, usize) {
+) -> (Vec<ArmStat>, usize, usize) {
     let _done = DoneGuard { asks: asks.clone() };
     // Each replica runs as a solo run of `share + 1` evaluations whose
     // first, the start, every replica paid for together.
@@ -209,7 +211,11 @@ fn run_replica(
         seed,
         share + 1,
     );
-    (stats, ledger.n_evals.load(Ordering::Relaxed))
+    (
+        stats,
+        ledger.n_evals.load(Ordering::Relaxed),
+        ledger.n_unseen.load(Ordering::Relaxed),
+    )
 }
 
 /// The points a shared archive has answered, by bit pattern, with the
@@ -514,7 +520,7 @@ where
             &mut called,
         );
         drop(answer_txs);
-        let outcomes: Vec<(Vec<ArmStat>, usize)> = handles
+        let outcomes: Vec<(Vec<ArmStat>, usize, usize)> = handles
             .into_iter()
             .map(|handle| match handle.join() {
                 Ok(outcome) => outcome,
@@ -532,8 +538,10 @@ where
         .expect("at least one archive");
     let mut arm_stats: Vec<ArmStat> = Vec::new();
     let mut n_evals = 1usize;
-    for (stats, charged) in outcomes {
+    let mut unseen = 0usize;
+    for (stats, charged, unseen_by_replica) in outcomes {
         n_evals += charged;
+        unseen += unseen_by_replica;
         for stat in stats {
             match arm_stats.iter_mut().find(|s| s.name == stat.name) {
                 Some(total) => {
@@ -548,9 +556,9 @@ where
         portfolio: PortfolioResult {
             best_pos: bounds.clip(best.incumbent(&bounds).view()).to_vec(),
             best_val: best.best_get(),
-            n_evals: n_evals - recalled,
+            n_evals: n_evals - recalled - unseen,
             n_grads: 0,
-            n_answered: recalled,
+            n_answered: recalled + unseen,
             arm_stats,
             hop_state: None,
         },

@@ -226,7 +226,8 @@ pub struct EnsembleHopResult {
     /// Charged hop-ledger calls (evals plus grads).
     pub charged: usize,
     /// Evaluations the one-replica values portfolio answered from an earlier
-    /// call, spent from the budget but not in `charged`; zero for hop chains.
+    /// call or at a point with a non-finite coordinate, without a call,
+    /// spent from the budget but not in `charged`; zero for hop chains.
     pub n_answered: usize,
     /// Accepted plus rejected hops; zero for the one-replica values portfolio.
     pub hops: usize,
