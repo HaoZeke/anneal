@@ -63,11 +63,15 @@ Every argument is checked before ``fitter.init()`` and before any
 FutureWarning, so a refused call raises its error without one. On a fitter
 with its own ``fit_anneal``, :func:`run_fitter` refuses only what it cannot
 pass to that method and leaves the budget, the seed, the fitter's bounds and
-the rest to it; the warning of a preset that it ignores waits for the first
-bridge the method calls and comes once that bridge's checks pass, so a
-refusal there, such as :func:`run_benchmark`'s of a budget of 0, raises its
-error alone. When the method calls no bridge, the warning comes once it
-returns, and not when it raises. The first
+the rest to it; the warning of a preset that it ignores waits for the
+bridges the method calls and comes once, from the first call whose checks
+pass, as they end, before ``init``. So a refusal there, such as
+:func:`run_benchmark`'s of a budget of 0, raises its error alone, and a call
+made after it gets the warning if its checks pass. A bridge that the method
+calls on another thread, with the same fitter, gives the warning on that
+thread, since the caller's thread waits inside the method. When no call
+passes its checks, the warning comes once the method returns, and not when
+it raises. The first
 exception the fitter raises before ``finish``, or a loss that is not a real
 number, ends the drive: the fitter is not called again, ``finish`` is
 skipped, and the exception reaches the caller. One that ``finish`` raises
@@ -91,6 +95,7 @@ import inspect
 import math
 import numbers
 import sys
+import threading
 import warnings
 from collections.abc import Iterable, Mapping
 from decimal import Decimal
@@ -323,10 +328,6 @@ _HELD: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
 
 _Site = tuple[str, int, dict[str, Any]]
 
-_HANDED: contextvars.ContextVar[list[tuple[_Site, str]] | None] = contextvars.ContextVar(
-    "anneal_chemfit_handed", default=None
-)
-
 
 def _site() -> _Site:
     """The file, line and globals of the first caller outside this module."""
@@ -336,19 +337,63 @@ def _site() -> _Site:
     return frame.f_code.co_filename, frame.f_lineno, frame.f_globals
 
 
-def _give(handed: Iterable[tuple[_Site, str]]) -> None:
-    """Give each handed FutureWarning, pointing at the site it was handed from.
+class _Handed:
+    """The FutureWarning :func:`run_fitter` hands on while a fitter's own ``fit_anneal`` runs.
 
-    The site's globals name the module and hold the registry, as
-    ``warnings.warn`` takes them from a frame, but are not passed as
-    ``module_globals``: Python 3.12 checks the loader they name, raising
-    ValueError where ``__loader__`` and ``__spec__`` are None, as in a
-    Jupyter cell's namespace, and giving a DeprecationWarning for a script's
-    ``__main__``, whose ``__spec__`` is None.
+    The checks of the bridges the method calls look for it in their context,
+    which a thread the method starts does not share, and failing that among
+    the warnings handed on for the fitter they were given. The first checks
+    that pass give it, on the thread that runs them, and it is given once,
+    pointing at the line that called :func:`run_fitter`.
     """
-    for (filename, line, module_globals), message in handed:
+
+    def __init__(self, fitter: Any, message: str):
+        self.fitter = fitter
+        self.message = message
+        self.site = _site()
+        self.given = False
+        self.token = None
+
+    def __enter__(self) -> _Handed:
+        self.token = _HANDED.set(self)
+        with _HANDED_LOCK:
+            _HANDED_FOR.setdefault(id(self.fitter), []).append(self)
+        return self
+
+    def __exit__(self, kind, error, trace) -> None:
+        _HANDED.reset(self.token)
+        with _HANDED_LOCK:
+            handed = _HANDED_FOR[id(self.fitter)]
+            handed.remove(self)
+            if not handed:
+                del _HANDED_FOR[id(self.fitter)]
+
+    @staticmethod
+    def find(fitter: Any) -> _Handed | None:
+        """The warning handed on for a bridge called here with ``fitter``, if any."""
+        handed = _HANDED.get()
+        if handed is None:
+            with _HANDED_LOCK:
+                handed = _HANDED_FOR.get(id(fitter), [None])[-1]
+        return handed
+
+    def give(self) -> None:
+        """Give the warning, unless it has been given.
+
+        The site's globals name the module and hold the registry, as
+        ``warnings.warn`` takes them from a frame, but are not passed as
+        ``module_globals``: Python 3.12 checks the loader they name, raising
+        ValueError where ``__loader__`` and ``__spec__`` are None, as in a
+        Jupyter cell's namespace, and giving a DeprecationWarning for a
+        script's ``__main__``, whose ``__spec__`` is None.
+        """
+        with _HANDED_LOCK:
+            if self.given:
+                return
+            self.given = True
+        filename, line, module_globals = self.site
         warnings.warn_explicit(
-            message,
+            self.message,
             FutureWarning,
             filename,
             line,
@@ -357,33 +402,40 @@ def _give(handed: Iterable[tuple[_Site, str]]) -> None:
         )
 
 
+_HANDED: contextvars.ContextVar[_Handed | None] = contextvars.ContextVar(
+    "anneal_chemfit_handed", default=None
+)
+_HANDED_FOR: dict[int, list[_Handed]] = {}
+_HANDED_LOCK = threading.Lock()
+
+
 class _Checks:
     """The argument checks of one bridge call, which end before the fitter is called.
 
     Each FutureWarning given inside them waits for them to end: a call one
     of them refuses raises its error without a warning, and a call that
     passes them all gives each warning, in the order given. ``held`` holds
-    the warnings of checks the caller ran first. The checks of the first
-    bridge that a fitter's own ``fit_anneal`` calls take over the warnings
-    :func:`run_fitter` handed on, and give them first.
+    the warnings of checks the caller ran first. Checks that pass give
+    first the warning :func:`run_fitter` handed on for ``fitter``, unless it
+    has been given; checks run inside others leave it to those.
     """
 
-    def __init__(self, held: Iterable[str] = ()):
+    def __init__(self, fitter: Any, held: Iterable[str] = ()):
+        self.fitter = fitter
         self.held = list(held)
-        self.handed: list[tuple[_Site, str]] = []
+        self.outer = False
         self.token = None
 
     def __enter__(self) -> None:
-        handed = _HANDED.get()
-        if handed:
-            self.handed = handed[:]
-            handed.clear()
+        self.outer = _HELD.get() is None
         self.token = _HELD.set(self.held)
 
     def __exit__(self, kind, error, trace) -> None:
         _HELD.reset(self.token)
         if kind is None:
-            _give(self.handed)
+            handed = _Handed.find(self.fitter) if self.outer else None
+            if handed is not None:
+                handed.give()
             for message in self.held:
                 _deprecated(message)
 
@@ -1449,7 +1501,7 @@ def _fit_anneal(
     ``held`` holds the FutureWarnings of the bridge's own checks, given
     first once these pass too.
     """
-    with _Checks(held), _Strings(caller):
+    with _Checks(fitter, held), _Strings(caller):
         evaluate, step = _protocol(fitter)
         name = _choice(driver, _DRIVERS)
         if name is None:
@@ -1754,7 +1806,7 @@ def fit_chemfit(
         that ``finish`` raises is raised as it is, ``finish`` having been
         called once, as the last call.
     """
-    with _Checks(), _Strings("fit_chemfit"):
+    with _Checks(fitter), _Strings("fit_chemfit"):
         evaluate, step = _protocol(fitter)
         name = _choice(method, _DRIVERS)
         if name is None:
@@ -2000,7 +2052,7 @@ def run_benchmark(
     stops the fit there.
     """
     fitter = benchmark_context["fitter"]
-    with _Checks(), _Strings("run_benchmark"):
+    with _Checks(fitter), _Strings("run_benchmark"):
         evaluate, step = _protocol(fitter, without_step="run_benchmark")
         key = _choice(method, (*_DRIVERS, "sa"))
         if key is None or (key == "sa" and preset is None):
@@ -2124,9 +2176,9 @@ def _own_fit_anneal(
 
     :func:`run_fitter` says what goes; anything that its signature cannot
     take is refused here, before ``fit_anneal`` is called. The warning of a
-    preset it ignores goes to the checks of the first bridge the method
-    calls, which give it once they pass; when it calls none, the warning is
-    given once it returns, and not when it raises.
+    preset it ignores is handed to the checks of the bridges the method
+    calls, and the first that pass give it; when none do, it is given once
+    the method returns, and not when it raises.
     """
     fit = fitter.fit_anneal
     owner = f"{type(fitter).__name__}.fit_anneal()"
@@ -2190,13 +2242,9 @@ def _own_fit_anneal(
     if not by_keyword("preset"):
         takes = "'preset' only by position" if "preset" in positional else "no 'preset'"
         why_not = f"{owner} takes {takes}"
-    handed = [(_site(), _ignored_preset(method, call["method"], ignored, why_not))]
-    token = _HANDED.set(handed)
-    try:
+    with _Handed(fitter, _ignored_preset(method, call["method"], ignored, why_not)) as handed:
         result = fit(*args, **call)
-    finally:
-        _HANDED.reset(token)
-    _give(handed)
+    handed.give()
     return result
 
 
@@ -2258,15 +2306,19 @@ def run_fitter(
     the warning comes only once nothing is refused, so a refused call raises
     its error alone. On a fitter's own ``fit_anneal`` a preset ignored so is
     not passed to it, and the budget, the seed, the fitter's bounds and the
-    rest are that method's to check: the warning waits for the first of
-    :func:`fit_anneal`, :func:`fit_chemfit` and :func:`run_benchmark` that
-    the method calls, and comes once that call's checks pass, before
-    ``init``. So a refusal there, such as :func:`run_benchmark`'s of a
-    budget of 0, raises its error alone, and under
+    rest are that method's to check: the warning waits for the calls the
+    method makes to :func:`fit_anneal`, :func:`fit_chemfit` and
+    :func:`run_benchmark`, and comes once, from the first call whose checks
+    pass, as they end, before ``init``. So a refusal there, such as
+    :func:`run_benchmark`'s of a budget of 0, raises its error alone, a call
+    made after it gets the warning if its checks pass, and under
     ``warnings.simplefilter("error")`` the warning is raised there in place
-    of the fit. When the method calls none of them, the warning comes once
-    it returns, and not when it raises. A preset given to a ``fit_anneal``
-    that gets no method is passed, or refused, as any option is.
+    of the fit. A call that the method makes on another thread, with the
+    same fitter, gives the warning on that thread, before its ``init``,
+    since the caller's thread waits inside the method. When no call passes
+    its checks, the warning comes once the method returns, and not when it
+    raises. A preset given to a ``fit_anneal`` that gets no method is
+    passed, or refused, as any option is.
     """
     own = hasattr(fitter, "fit_anneal")
     if not own:

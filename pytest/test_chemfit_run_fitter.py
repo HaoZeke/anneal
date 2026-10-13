@@ -7,18 +7,21 @@ below have the signatures such methods have had: one that runs
 ``run_benchmark`` with a ``preset`` parameter, one without it, and one with
 neither ``method`` nor ``preset`` that runs ``anneal.minimize`` itself. The
 others try what else a signature can do: take the budget alone, leave out
-the seed or the budget, or take parameters only by position. The last has
+the seed or the budget, or take parameters only by position. The next has
 neither session pair, which the bridges that drive the session themselves
 refuse before ``init``, while ``run_fitter`` hands it to its ``fit_anneal``
-with the budget and the seed unchecked.
+with the budget and the seed unchecked. The last two run ``run_benchmark``
+again after it refuses a budget, and on a worker thread.
 """
 
+import concurrent.futures
 import functools
 import inspect
 import json
 import os
 import subprocess
 import sys
+import threading
 import warnings
 
 import numpy as np
@@ -195,6 +198,34 @@ class NoPairFitter(Recorder):
     def fit_anneal(self, budget, seed=0):
         self.init()
         return {"budget": budget, "seed": seed}
+
+
+class RetryFitter(Handed):
+    """Runs ``run_benchmark``, and again with a budget of 60 when it refuses the one given."""
+
+    def fit_anneal(self, budget, *, method="portfolio", seed=0):
+        self.handed.append({"budget": budget, "method": method, "seed": seed})
+        try:
+            return self._benchmark(budget, method=method, seed=seed)
+        except ValueError:
+            return self._benchmark(60, method=method, seed=seed)
+
+
+class ThreadFitter(Handed):
+    """Runs ``run_benchmark`` on a worker thread; ``threads`` logs where ``init`` ran."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.threads = []
+
+    def init(self):
+        self.threads.append(threading.get_ident())
+        super().init()
+
+    def fit_anneal(self, budget, *, method="portfolio", seed=0):
+        self.handed.append({"budget": budget, "method": method, "seed": seed})
+        with concurrent.futures.ThreadPoolExecutor(1) as pool:
+            return pool.submit(self._benchmark, budget, method=method, seed=seed).result()
 
 
 def _fitter(kind=ReleasedFitter, bounds=None, fail=None):
@@ -556,6 +587,54 @@ def test_the_warning_for_a_fit_anneal_reaches_its_caller_from_any_namespace(
     keys, evaluations = out["ran"]
     assert keys == ["eps", "x"] and 1 < evaluations <= 40
     assert out.get("raised") == ["FutureWarning", warning, 0]
+
+
+def test_a_call_after_a_refused_one_has_the_warning_once_its_checks_pass():
+    warning = _ignored_fast(
+        "global_optimize", "the portfolio", "RetryFitter.fit_anneal() takes no 'preset'"
+    )
+    fitter = _fitter(RetryFitter)
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        warnings.showwarning = lambda message, category, filename, lineno, *rest: (
+            fitter.calls.append((category, str(message), filename, lineno))
+        )
+        line = inspect.currentframe().f_lineno + 1
+        run_fitter(fitter, 0, preset=Fast())
+    assert fitter.calls[:2] == [(FutureWarning, warning, __file__, line), "init"]
+    assert sum(isinstance(call, tuple) for call in fitter.calls) == 1
+    assert len(fitter.handed) == 1 and 1 < len(fitter.evaluated) <= 60
+    fitter = _fitter(RetryFitter)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(FutureWarning) as caught:
+            run_fitter(fitter, 0, preset=Fast())
+    assert str(caught.value) == warning and fitter.calls == []
+
+
+def test_a_bridge_on_another_thread_gives_the_warning_there_before_init():
+    warning = _ignored_fast(
+        "global_optimize", "the portfolio", "ThreadFitter.fit_anneal() takes no 'preset'"
+    )
+    fitter = _fitter(ThreadFitter)
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        warnings.showwarning = lambda message, category, filename, lineno, *rest: (
+            fitter.calls.append((category, str(message), filename, lineno, threading.get_ident()))
+        )
+        line = inspect.currentframe().f_lineno + 1
+        run_fitter(fitter, 60, preset=Fast())
+    worker = fitter.threads[0]
+    assert worker != threading.get_ident()
+    assert fitter.calls[:2] == [(FutureWarning, warning, __file__, line, worker), "init"]
+    assert sum(isinstance(call, tuple) for call in fitter.calls) == 1
+    assert 1 < len(fitter.evaluated) <= 60
+    fitter = _fitter(ThreadFitter)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(FutureWarning) as caught:
+            run_fitter(fitter, 60, preset=Fast())
+    assert str(caught.value) == warning and fitter.calls == []
 
 
 def test_a_fit_anneal_that_calls_no_bridge_has_the_warning_once_it_returns():
