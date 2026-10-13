@@ -8998,7 +8998,10 @@ mod tests {
         // the opening goes on past it. No later slice falls to the bar in
         // log ratios: the success threshold, which reads differences, ends
         // the opening on the first slice that starts from a value below it,
-        // a slice that therefore cannot gain more than the threshold.
+        // a slice that therefore cannot gain more than the threshold. The
+        // slice before it gains less than the run's resolution, `eps` times
+        // 1.81e11, the first value below the start's, so the threshold sits
+        // at its floor, a sliver of that resolution: 4.02e-9.
         let values = opening_values(rosenbrock_fourth);
         let n = values.len() - 1;
         let (end, _) = bar_end(&values, |before, after| (before / after).ln());
