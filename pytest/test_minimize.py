@@ -723,6 +723,34 @@ def test_with_jac_a_box_too_narrow_to_move_calls_each_point_once(bounds, x0, see
     assert result.nfev + result.njev + result.diagnostics["n_answered"] <= 25
 
 
+@pytest.mark.parametrize("bad", [np.nan, np.inf])
+@pytest.mark.parametrize(
+    ("bounds", "x0"), [([(0.0, 1.0)], [0.5]), ([(0.0, 1.0), (0.5, 0.5)], [0.5, 0.5])]
+)
+def test_njev_and_n_grads_count_only_the_calls_of_a_gradient_that_is_not_finite(
+    bounds, x0, bad
+):
+    # Such a gradient sends the descent to points that are not finite, where
+    # the gradient asked is charged and answered with zeros without a call.
+    gradients = []
+
+    def jac(x):
+        gradients.append(np.array(x, dtype=np.float64))
+        return np.full(len(x), bad)
+
+    fun = Recorder(_corner_square)
+    result = anneal.minimize(fun, x0, bounds, jac=jac, budget=1000, seed=5)
+    assert len(fun.points) == result.nfev and len(gradients) == result.njev
+    answered = result.diagnostics["n_answered"]
+    assert result.nfev + result.njev + answered <= 1000
+    gradients.clear()
+    out = anneal.global_optimize(
+        Recorder(_corner_square), [0.0], [1.0], 1000, seed=5, grad_fn=jac, x0=[0.5]
+    )
+    assert len(gradients) == out["n_grads"]
+    assert out["n_evals"] + out["n_grads"] + out["n_answered"] <= 1000
+
+
 X0_ROUTES = {
     "values only": {},
     "legacy policy": {"policy": "legacy"},
