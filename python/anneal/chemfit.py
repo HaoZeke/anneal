@@ -68,10 +68,13 @@ bridges the method calls and comes once, from the first call whose checks
 pass, as they end, before ``init``. So a refusal there, such as
 :func:`run_benchmark`'s of a budget of 0, raises its error alone, and a call
 made after it gets the warning if its checks pass. A bridge that the method
-calls on another thread, with the same fitter, gives the warning on that
-thread, since the caller's thread waits inside the method. When no call
-passes its checks, the warning comes once the method returns, and not when
-it raises. The first
+calls on another thread with the fitter, or with an object that holds the
+fitter or one of the fitter's methods as an attribute, such as a session
+that wraps the fitter, gives the warning on that thread, since the caller's
+thread waits inside the method. A bridge on another thread given any other
+object does not, and the warning then comes once the method returns, after
+the fit, as it does when no call passes its checks; it does not come when
+the method raises. The first
 exception the fitter raises before ``finish``, or a loss that is not a real
 number, ends the drive: the fitter is not called again, ``finish`` is
 skipped, and the exception reaches the caller. One that ``finish`` raises
@@ -96,6 +99,7 @@ import math
 import numbers
 import sys
 import threading
+import types
 import warnings
 from collections.abc import Iterable, Mapping
 from decimal import Decimal
@@ -337,14 +341,39 @@ def _site() -> _Site:
     return frame.f_code.co_filename, frame.f_lineno, frame.f_globals
 
 
+def _within(subject: Any) -> list[Any]:
+    """``subject``, then what it holds as attributes, a bound method as its object.
+
+    The attributes are those of the instance's ``__dict__`` and slots, so a
+    wrapper that keeps a fitter, or the fitter's methods, such as a session
+    that wraps the fitter, leads to the fitter.
+    """
+    values: list[Any] = []
+    try:
+        values.extend(object.__getattribute__(subject, "__dict__").values())
+    except Exception:
+        pass
+    for kind in type(subject).__mro__:
+        for slot in list(vars(kind).values()):
+            if isinstance(slot, types.MemberDescriptorType):
+                try:
+                    values.append(slot.__get__(subject, kind))
+                except AttributeError:
+                    pass
+    held = [value.__self__ if isinstance(value, types.MethodType) else value for value in values]
+    return [subject, *held]
+
+
 class _Handed:
     """The FutureWarning :func:`run_fitter` hands on while a fitter's own ``fit_anneal`` runs.
 
     The checks of the bridges the method calls look for it in their context,
     which a thread the method starts does not share, and failing that among
-    the warnings handed on for the fitter they were given. The first checks
-    that pass give it, on the thread that runs them, and it is given once,
-    pointing at the line that called :func:`run_fitter`.
+    the warnings handed on for the object they were given or for one it
+    holds as an attribute (:func:`_within`), such as the fitter that a
+    wrapper of it keeps. The first checks that pass give it, on the thread
+    that runs them, and it is given once, pointing at the line that called
+    :func:`run_fitter`.
     """
 
     def __init__(self, fitter: Any, message: str):
@@ -372,10 +401,17 @@ class _Handed:
     def find(fitter: Any) -> _Handed | None:
         """The warning handed on for a bridge called here with ``fitter``, if any."""
         handed = _HANDED.get()
-        if handed is None:
-            with _HANDED_LOCK:
-                handed = _HANDED_FOR.get(id(fitter), [None])[-1]
-        return handed
+        if handed is not None:
+            return handed
+        with _HANDED_LOCK:
+            if not _HANDED_FOR:
+                return None
+        candidates = _within(fitter)
+        with _HANDED_LOCK:
+            for candidate in candidates:
+                if id(candidate) in _HANDED_FOR:
+                    return _HANDED_FOR[id(candidate)][-1]
+        return None
 
     def give(self) -> None:
         """Give the warning, unless it has been given.
@@ -2313,12 +2349,16 @@ def run_fitter(
     :func:`run_benchmark`'s of a budget of 0, raises its error alone, a call
     made after it gets the warning if its checks pass, and under
     ``warnings.simplefilter("error")`` the warning is raised there in place
-    of the fit. A call that the method makes on another thread, with the
-    same fitter, gives the warning on that thread, before its ``init``,
-    since the caller's thread waits inside the method. When no call passes
-    its checks, the warning comes once the method returns, and not when it
-    raises. A preset given to a ``fit_anneal`` that gets no method is
-    passed, or refused, as any option is.
+    of the fit. A call that the method makes on another thread with the
+    fitter, or with an object that holds the fitter or one of the fitter's
+    methods as an attribute, such as a session that wraps the fitter, gives
+    the warning on that thread, before its ``init``, since the caller's
+    thread waits inside the method. A call on another thread given any
+    other object does not, and the warning then comes once the method
+    returns, after the fit, as it does when no call passes its checks; it
+    does not come when the method raises. A preset given to a
+    ``fit_anneal`` that gets no method is passed, or refused, as any option
+    is.
     """
     own = hasattr(fitter, "fit_anneal")
     if not own:
