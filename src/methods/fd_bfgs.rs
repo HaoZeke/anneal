@@ -1159,24 +1159,26 @@ mod tests {
         assert!(value < 1e-10, "value {value}");
     }
 
-    #[test]
-    fn each_pair_counts_for_the_reading_nearer_quadratic_along_it() {
-        // The trapezoid rule is exact for x^2 and for the logarithm of
-        // exp(x^2); along x^3 it misses both by about as much.
-        let bounds = boxed(-5.0, 5.0, 1);
+    /// The pairs for the logarithm and for the values that one step from
+    /// `from` to `to` along `f`, whose derivative is `g`, adds to the count.
+    fn counts(f: fn(f64) -> f64, g: fn(f64) -> f64, from: f64, to: f64) -> (usize, usize) {
         let options = FdBfgsOptions {
             log_model: true,
             ..FdBfgsOptions::default()
         };
-        let counts = |f: fn(f64) -> f64, g: fn(f64) -> f64, from: f64, to: f64| {
-            let at = Array1::from_elem(1, to);
-            let mut engine = FdBfgs::new(at.view(), Some(f(to)), &bounds, options);
-            engine.pair_value = f(from);
-            engine.grad = Array1::from_elem(1, g(to));
-            let step = Array1::from_elem(1, to - from);
-            engine.weigh_trapezoid(&step, &Array1::from_elem(1, g(from)));
-            (engine.log_nearer, engine.values_nearer)
-        };
+        let at = Array1::from_elem(1, to);
+        let mut engine = FdBfgs::new(at.view(), Some(f(to)), &boxed(-5.0, 5.0, 1), options);
+        engine.pair_value = f(from);
+        engine.grad = Array1::from_elem(1, g(to));
+        let step = Array1::from_elem(1, to - from);
+        engine.weigh_trapezoid(&step, &Array1::from_elem(1, g(from)));
+        (engine.log_nearer, engine.values_nearer)
+    }
+
+    #[test]
+    fn each_pair_counts_for_the_reading_nearer_quadratic_along_it() {
+        // The trapezoid rule is exact for x^2 and for the logarithm of
+        // exp(x^2); along x^3 it misses both by about as much.
         assert_eq!(counts(|x| x * x, |x| 2.0 * x, 2.0, 1.0), (0, 1));
         let exp_square = |x: f64| (x * x).exp();
         assert_eq!(
@@ -1184,6 +1186,22 @@ mod tests {
             (1, 0)
         );
         assert_eq!(counts(|x| x.powi(3), |x| 3.0 * x * x, 2.0, 1.5), (0, 0));
+    }
+
+    #[test]
+    fn a_pair_counts_for_one_reading_only_where_the_other_misses_four_times_as_far() {
+        // From 2 to 1 along x^3 the trapezoid rule misses the change of the
+        // values 3.2 times as far as the change of the logarithm, and 15
+        // times along x^4; along the square root it misses the logarithm's
+        // 2.2 times as far as the values', and 4.6 times along x^(3/2).
+        // Only the factors over four count.
+        assert_eq!(counts(|x| x.powi(3), |x| 3.0 * x * x, 2.0, 1.0), (0, 0));
+        assert_eq!(counts(|x| x.powi(4), |x| 4.0 * x.powi(3), 2.0, 1.0), (1, 0));
+        assert_eq!(counts(f64::sqrt, |x| 0.5 / x.sqrt(), 2.0, 1.0), (0, 0));
+        assert_eq!(
+            counts(|x| x * x.sqrt(), |x| 1.5 * x.sqrt(), 2.0, 1.0),
+            (0, 1)
+        );
     }
 
     /// The point, value and slope before and after a step along the first
