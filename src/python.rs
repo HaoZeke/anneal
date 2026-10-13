@@ -3001,6 +3001,25 @@ fn run(
     Ok(PyHistory::from(history))
 }
 
+/// Refuses, before any call, a run of `n_epochs` whose histories, of
+/// `held` epochs each and held at once, cannot be allocated together.
+fn refuse_unallocated_histories(n_epochs: usize, held: &[usize]) -> PyResult<()> {
+    if History::can_reserve(held) {
+        return Ok(());
+    }
+    Err(PyValueError::new_err(match *held {
+        [first, second, ..] if second > 0 => format!(
+            "n_epochs={n_epochs} records {first} epochs in the first start and {second} in the \
+             second, which runs while the first's history is kept: histories that cannot be \
+             allocated together"
+        ),
+        _ => format!(
+            "n_epochs={n_epochs} records {} epochs, a history that cannot be allocated",
+            held.first().copied().unwrap_or_default()
+        ),
+    }))
+}
+
 /// How `run` or `run_qmc` drives a preset: from one start, or from
 /// `starts` low-discrepancy ones.
 struct Schedule {
@@ -3040,36 +3059,40 @@ impl Schedule {
         Ok(history)
     }
 
-    /// The most epochs one start records, and so reserves room for once it
-    /// is called: all `n_epochs` unless its share of `max_evals` ends it
-    /// sooner, the first start's share being the largest.
-    fn recorded_epochs(&self) -> usize {
-        let cap = match self.starts {
-            Some(n_starts) => crate::runner::start_share(self.max_evals, n_starts.max(1), 0),
-            None => self.max_evals,
+    /// The epochs of the histories a run holds at once, each reserving room
+    /// for them once its start is called. A start records all `n_epochs`
+    /// unless its share of `max_evals` ends it sooner. With more than one
+    /// start, the best start's history is kept while the next start runs,
+    /// and the first two shares are the largest, so the first two starts
+    /// hold the most.
+    fn held_epochs(&self) -> Vec<usize> {
+        let epochs = |cap| {
+            crate::runner::epochs_within(
+                self.n_epochs,
+                self.steps_per_epoch,
+                crate::runner::steps_within(cap),
+            )
         };
-        crate::runner::epochs_within(
-            self.n_epochs,
-            self.steps_per_epoch,
-            crate::runner::steps_within(cap),
-        )
+        match self.starts {
+            Some(n_starts) => {
+                let n_starts = n_starts.max(1);
+                (0..n_starts.min(2))
+                    .map(|idx| epochs(crate::runner::start_share(self.max_evals, n_starts, idx)))
+                    .collect()
+            }
+            None => vec![epochs(self.max_evals)],
+        }
     }
 
     /// Runs `preset` on `obj` as it is, refusing before any call a run
-    /// whose history cannot be allocated.
+    /// whose histories cannot be allocated together.
     fn run<O: Objective<f64> + Send + Sync>(
         &self,
         obj: O,
         preset: &Preset,
         start: Option<Array1<f64>>,
     ) -> PyResult<History> {
-        let epochs = self.recorded_epochs();
-        if !History::can_reserve(epochs) {
-            return Err(PyValueError::new_err(format!(
-                "n_epochs={} records {epochs} epochs, a history that cannot be allocated",
-                self.n_epochs
-            )));
-        }
+        refuse_unallocated_histories(self.n_epochs, &self.held_epochs())?;
         let law = |e| PyValueError::new_err(format!("{e}"));
         Ok(match preset {
             Preset::Boltzmann(p) => self.drive(
