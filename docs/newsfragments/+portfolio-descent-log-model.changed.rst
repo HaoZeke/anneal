@@ -30,12 +30,15 @@ twelve-parameter fit of three species at 1.5 against 6.88 (36/0/4) and 2.67
 evaluations the pair fit ends at 0.767 against 0.993 (28/0/12) and 3.55
 (35/3/2), and at 500 the binary fit at 0.014 against 0.0783 (35/0/5) and
 0.129 (37/3/0). These figures and those below are of the loop with the hold
-this release also puts on the descent's extrapolated trials and with the log
-ratios its opening now reads. On 13-atom
+this release also puts on the descent's extrapolated trials, with the log
+ratios its opening now reads and with the restart of the descent's
+approximation after a direction that does not descend. On 13-atom
 Lennard-Jones positions, the six-parameter fit with the logarithm of its error
 as the loss, and ten-dimensional Rastrigin and Rosenbrock, at 1000 and 5000
-evaluations, the loop stays level with the loop before, and ahead of
-``NgIohTuned`` except on Rosenbrock at 5000, where the two are level.
+evaluations, the loop stays level with the loop before, but for the
+log-loss fit at 5000, where it now ends lower (32/0/8, 1.6e-4 that it is not
+better), and ahead of ``NgIohTuned`` except on Rosenbrock at 5000, where the
+two are level.
 ``NgIohTuned`` still ends lower
 on more seeds of the pair fit at 200 evaluations, on 6 of the 8 that do not
 tie, where both medians are below ``1e-14`` (the one-sided Wilcoxon
@@ -44,9 +47,10 @@ before), has the lower median on the twelve-parameter fit at 200 (2.68e4
 against 3.12e4, though the loop ends lower on 21 of 40 seeds), and at 1000
 ends lower on 4 of the 40 seeds of the binary fit and 4 of the
 twelve-parameter one. Four shared batch replicas stay level with those
-before on every cell of those four problems, but on the fit of the
-logarithm at 5000 evaluations they now trail one replica (15/4/21, 0.024
-that they are not worse), where the two were level (19/3/18). Runs in
+before on every cell of those four problems but the fit of the logarithm at
+5000 evaluations, where they end lower (22/7/11, 0.042 that they are not
+better) but trail one replica (11/5/24, 0.0014 that they are not worse),
+where the two were level (19/3/18). Runs in
 which the descent steps on the logarithm, which it cannot before
 ``2 d (d + 1)`` evaluations for ``d`` free coordinates, no longer repeat
 those of 0.11.1. Multiplying the objective by a power of two still leaves

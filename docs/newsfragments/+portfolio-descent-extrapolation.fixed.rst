@@ -22,7 +22,7 @@ sign test's 0.0083) and on 28 at 500 (-8.67 against -3.77, 1.6e-5), and
 through ChemFit's ``Fitter.fit_nevergrad`` on 31 at 1000 (0.012) and 29 at
 500. ``NgIohTuned`` still ends lower on 12 of the 40 seeds at both budgets,
 all of them seeds on which the loop ends above a log error of -5, and at 5000
-the two are level, both reaching the floor of the loss on most seeds. On
+both reach the floor of the loss on most seeds. On
 13-atom Lennard-Jones positions, the same fit to clusters drawn without that
 separation, and ten-dimensional Rastrigin and Rosenbrock, each at 1000 and
 5000 evaluations, on the plain-loss fits and on the benchmark rows of the
