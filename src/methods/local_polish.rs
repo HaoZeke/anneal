@@ -587,7 +587,7 @@ where
     let dim = bounds.dims;
     assert!(dim > 0, "objective dimension must be positive");
     let mut rng = StdRng::seed_from_u64(seed);
-    let starts = eindir_core::shifted_low_discrepancy_points(
+    let starts = crate::box_points::shifted_low_discrepancy_points(
         bounds,
         population_size,
         crate::runner::qmc_skip_from_seed(seed),
@@ -723,7 +723,7 @@ where
     let dim = bounds.dims;
     assert!(dim > 0, "objective dimension must be positive");
     let chain_count = n_chains.min(max_evals).max(1);
-    let mut starts = eindir_core::shifted_low_discrepancy_points(
+    let mut starts = crate::box_points::shifted_low_discrepancy_points(
         bounds,
         chain_count,
         crate::runner::qmc_skip_from_seed(seed),
@@ -863,6 +863,7 @@ where
         bounds.dims,
         "center dimension must match objective bounds"
     );
+    crate::box_points::assert_no_nan_wall(bounds);
 
     let levels = n_levels.max(1);
     let dim_scale = (bounds.dims * bounds.dims).max(1) as f64;
@@ -940,7 +941,7 @@ where
             let remaining_direct = n_batch - direct_points;
             let replica_batch = points_per_replica.min(remaining_direct);
             let level_seed = seed.wrapping_add((level * replica_count + replica) as u64);
-            let points = eindir_core::shifted_low_discrepancy_points(
+            let points = crate::box_points::shifted_low_discrepancy_points(
                 &zoom_bounds,
                 replica_batch,
                 crate::runner::qmc_skip_from_seed(level_seed),
@@ -1026,7 +1027,7 @@ where
 
     for replica in 0..n_replicates {
         let replica_seed = seed.wrapping_add(replica as u64);
-        let starts = eindir_core::shifted_low_discrepancy_points(
+        let starts = crate::box_points::shifted_low_discrepancy_points(
             bounds,
             n_starts,
             crate::runner::qmc_skip_from_seed(replica_seed),

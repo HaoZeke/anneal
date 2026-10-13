@@ -689,7 +689,7 @@ where
     // Seed population: QMC covering set, with walker 0 optionally forced to seed_x.
     let mut pop = {
         let mut walkers = Vec::with_capacity(target_n);
-        let qmc = eindir_core::shifted_low_discrepancy_points(&bounds, target_n, 1, seed);
+        let qmc = crate::box_points::shifted_low_discrepancy_points(&bounds, target_n, 1, seed);
         for k in 0..target_n {
             if n_evals >= budget {
                 break;
@@ -1349,7 +1349,7 @@ where
                         .partial_cmp(&pop.walkers[a].energy)
                         .unwrap_or(std::cmp::Ordering::Equal)
                 });
-                let fresh = eindir_core::shifted_low_discrepancy_points(
+                let fresh = crate::box_points::shifted_low_discrepancy_points(
                     &bounds,
                     n_re,
                     step as u64 + 17,

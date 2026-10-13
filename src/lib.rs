@@ -70,6 +70,7 @@ pub mod atomistic_hybrid;
 pub mod bias;
 /// Transport proposals from observed attraction-region crossings.
 pub mod boundary_transport;
+mod box_points;
 /// Spectral statistics of the curvature, without forming a Hessian.
 pub mod calibrate;
 /// Declarative campaign configuration: TOML in, channels explicit.

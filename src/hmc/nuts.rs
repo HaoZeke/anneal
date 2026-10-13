@@ -348,7 +348,7 @@ where
     M: Momentum,
 {
     fn initial_state<R: Rng>(&self, rng: &mut R) -> State {
-        let pos = self.obj.bounds().mkpoint(rng);
+        let pos = crate::box_points::spanning_uniform_point(self.obj.bounds(), rng);
         let val = self.obj.eval(pos.view());
         let pair = FPair { pos, val };
         State {

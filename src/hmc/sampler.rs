@@ -109,7 +109,7 @@ where
             .initial_pos
             .clone()
             .map(|pos| self.obj.bounds().clip(pos.view()))
-            .unwrap_or_else(|| self.obj.bounds().mkpoint(rng));
+            .unwrap_or_else(|| crate::box_points::spanning_uniform_point(self.obj.bounds(), rng));
         let val = self.obj.eval(pos.view());
         let pair = FPair { pos, val };
         State {
