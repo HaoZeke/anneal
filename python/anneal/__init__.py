@@ -1538,9 +1538,15 @@ def minimize(
         each step's points through it.
       x0: start point, finite and inside ``bounds``. It is the run's first
         evaluation, made once whatever the number of replicas: the run
-        answers an evaluation at a point ``fun`` has already been called
-        at, ``x0`` or any other, from that call, and one of ``jac``
-        likewise.
+        takes ``fun`` and ``jac`` to be functions of the point, and answers
+        an evaluation at a point ``fun`` has already been called at, ``x0``
+        or any other, from that call, and one of ``jac`` likewise. Points
+        match bit for bit, so ``-0.0`` and ``0.0`` are two points. A ``fun``
+        that draws a random value or keeps state is not called again at a
+        repeated point either: the run takes the value its first call there
+        returned. ``minimize`` takes no ``noise_sigma``, so such an
+        objective needs :func:`global_optimize` with ``noise_sigma``, under
+        which every evaluation is a call.
       bounds: the box, as SciPy ``Bounds`` (anything with ``lb`` and ``ub``;
         scalars broadcast), an ``(n, 2)`` array, or ``n`` pairs
         ``(low, high)``, all finite. A coordinate whose two ends are equal
@@ -1929,7 +1935,8 @@ def global_optimize(
         analytic gradient.
       noise_sigma: optional known noise scale of a stochastic
         ``obj_fn``. When ``None`` (the default) acceptance is the exact
-        Metropolis rule. When set, the stochastic-evaluation accept
+        Metropolis rule, and a point already called is answered from that
+        call (see ``x0``). When set, the stochastic-evaluation accept
         sites use the Ball, Branke & Meisel (2018) sequential OSA rule,
         which draws repeated noisy evaluations to decide while keeping
         detailed balance under ``Normal(delta, noise_sigma**2)`` cost
@@ -1950,15 +1957,19 @@ def global_optimize(
         values-only loop starts from the best of a small seeded design.
         With ``replicas`` above one, ``x0`` is still the first evaluation,
         made once whatever their number. Without ``noise_sigma`` the run
+        takes ``obj_fn`` and ``grad_fn`` to be functions of the point, and
         answers an evaluation at a point ``obj_fn`` has already been called
         at, ``x0`` or any other, from that call, and one of ``grad_fn``
         likewise: it costs its unit of ``budget`` but no call, and
-        ``n_evals`` and ``n_grads`` count calls. Persistent replicas are
-        given ``x0``'s value and otherwise answer only the points each has
-        called itself, so a point two of them reach is called by each, and
-        the gradient at ``x0`` by each that asks for it. With ``noise_sigma``
-        every evaluation is a call, at ``x0`` too, since a noisy value is a
-        draw.
+        ``n_evals`` and ``n_grads`` count calls. Points match bit for bit,
+        so ``-0.0`` and ``0.0`` are two points, and an ``obj_fn`` that
+        draws a random value or keeps state is not called again at a
+        repeated point either: the run takes the value its first call there
+        returned. Persistent replicas are given ``x0``'s value and otherwise
+        answer only the points each has called itself, so a point two of
+        them reach is called by each, and the gradient at ``x0`` by each
+        that asks for it. With ``noise_sigma`` every evaluation is a call,
+        at ``x0`` too, since a noisy value is a draw.
       replicas: portfolio instances sharing the aggregate budget. One, the
         default, is the single controller. With ``x0``, no ``grad_fn``, no
         ``noise_sigma`` and ``policy="auto"``, ``R`` replicas are the batch

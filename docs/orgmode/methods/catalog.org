@@ -1584,6 +1584,11 @@ src/methods/portfolio.rs:5119, 5159-5163), with the gradients asked at a
 point that is not finite, such as the one asked at the box's centre when
 that overflows, which are answered with zeros without a call
 (=BudgetLedger::gradient_at=, src/methods/portfolio.rs:757-764).
+Points match by bit pattern (=point_bits=,
+src/methods/portfolio.rs:1006-1008), so =-0.0= and =0.0= are two
+points, and an objective that draws a random value or keeps state is not
+called again at a repeated point but answered with the value its first
+call there returned.
 Persistent replicas (=portfolio_ensemble_optimize=,
 src/methods/portfolio/ensemble.rs:113) are given the value at =x0= and
 keep a record each, so a point two of them reach is a call of each: they

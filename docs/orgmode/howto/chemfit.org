@@ -69,6 +69,12 @@ proposal law or reliable numerical derivatives on a noisy or discontinuous
 loss. The returned =res.fun= is the lowest raw value actually observed, and
 =success= does not certify a global minimum.
 
+=minimize= takes the loss to be a function of the parameters: points match
+bit for bit, and a loss that samples is not called again at a repeated
+point but gets the value its first call there returned. Neither =minimize=
+nor the ChemFit bridges below take =noise_sigma=; =global_optimize= with
+=noise_sigma= calls the loss at every evaluation.
+
 * Replica and history controls
 
 With =replicas=1=, the default, =minimize= runs =global_optimize= from =x0=
