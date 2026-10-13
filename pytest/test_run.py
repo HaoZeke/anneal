@@ -3,6 +3,8 @@ preset constructors plus run() driver). Replaces the legacy
 test_funcs / test_mcsamplers / test_quench suites."""
 
 import re
+import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -813,6 +815,31 @@ def test_run_qmc_max_evals_spends_exactly_the_budget(budget):
 def test_run_refuses_max_evals_of_zero():
     with pytest.raises(ValueError, match="max_evals"):
         run(styb_tang_2d, LOW, HIGH, Boltzmann(), max_evals=0)
+
+
+@pytest.mark.parametrize("entry", ["run", "run_qmc"])
+@pytest.mark.parametrize(
+    ("low", "high", "calls"),
+    [([-1.0, -1.0], [1.0, 1.0], 5), ([-1.0, 0.5], [1.0, 0.5], 5), ([0.5], [0.5], 1)],
+)
+def test_a_huge_n_epochs_with_a_small_max_evals_returns(entry, low, high, calls):
+    # In a child process: room reserved for every epoch aborts the
+    # interpreter rather than raising.
+    script = (
+        "import anneal\n"
+        "calls = []\n"
+        "def f(x):\n"
+        "    calls.append(1)\n"
+        "    return float(sum(x * x))\n"
+        f"h = anneal.{entry}(f, {low!r}, {high!r}, anneal.Fast(), n_epochs=10**12,"
+        " steps_per_epoch=200, seed=3, max_evals=5)\n"
+        "print(len(calls), len(h.epochs))\n"
+    )
+    child = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=300
+    )
+    assert child.returncode == 0, child.stderr[-2000:]
+    assert child.stdout.split()[0] == str(calls)
 
 
 def test_run_leaves_a_nan_start():

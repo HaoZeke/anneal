@@ -55,8 +55,22 @@ fn drive_rs<S: Sampler<f64>>(
     )
 }
 
+/// The epochs of `n_epochs` that a run records before `max_steps`
+/// proposals of `steps_per_epoch` an epoch run out, the last one perhaps
+/// cut short. Epochs of no proposals take none, so all are recorded.
+fn epochs_within(n_epochs: usize, steps_per_epoch: usize, max_steps: usize) -> usize {
+    if max_steps == 0 {
+        0
+    } else if steps_per_epoch == 0 {
+        n_epochs
+    } else {
+        n_epochs.min(max_steps.div_ceil(steps_per_epoch))
+    }
+}
+
 /// The driver loop, stopped after `max_steps` proposals. An epoch the cap
-/// cuts short is recorded with the steps it took; later epochs are not run.
+/// cuts short is recorded with the steps it took; later epochs are not run,
+/// and no room is reserved for them.
 fn drive_rs_capped<S: Sampler<f64>>(
     sampler: &S,
     cooling: &dyn Cooling<f64>,
@@ -67,7 +81,10 @@ fn drive_rs_capped<S: Sampler<f64>>(
     max_steps: usize,
 ) -> History {
     let init_pair = state.best.clone();
-    let mut history = History::with_capacity(n_epochs, init_pair);
+    let mut history = History::with_capacity(
+        epochs_within(n_epochs, steps_per_epoch, max_steps),
+        init_pair,
+    );
     let mut steps_left = max_steps;
 
     for epoch in 0..n_epochs {
@@ -444,4 +461,35 @@ where
         anchor,
         None,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::variant::boltzmann_in_box;
+    use eindir_core::objectives::StybTang2D;
+
+    #[test]
+    fn a_cap_bounds_the_epochs_a_run_records() {
+        assert_eq!(epochs_within(100, 10, 25), 3);
+        assert_eq!(epochs_within(100, 10, 20), 2);
+        assert_eq!(epochs_within(2, 10, 25), 2);
+        assert_eq!(epochs_within(100, 10, 0), 0);
+        assert_eq!(epochs_within(100, 0, 25), 100);
+        assert_eq!(epochs_within(100, 10, usize::MAX), 100);
+    }
+
+    #[test]
+    fn a_capped_run_reserves_only_the_epochs_it_records() {
+        let n_epochs = 1 << 20;
+        for (max_evals, recorded) in [(25, 3), (1, 0)] {
+            let variant = boltzmann_in_box(StybTang2D::new(), 1.0, 0.5).expect("a valid preset");
+            let history = run_rs_variant_from(variant, n_epochs, 10, 3, None, Some(max_evals));
+            assert_eq!(history.epochs.len(), recorded, "max_evals {max_evals}");
+            assert!(
+                history.epochs.capacity() < n_epochs,
+                "max_evals {max_evals}"
+            );
+        }
+    }
 }
