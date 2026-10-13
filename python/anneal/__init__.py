@@ -1548,8 +1548,14 @@ def minimize(
         ``jac`` still receive full-length vectors. With every coordinate
         fixed, the run is one evaluation of ``fun`` at the start, and
         ``jac`` is not called. Without ``jac`` the run is that evaluation
-        too when no free side is wide enough for a difference step to
-        change its coordinate at the start, a unit or two in the last place.
+        too when a difference step at the start changes no free
+        coordinate. That step is the square root of the machine epsilon
+        times the larger of the coordinate's magnitude and a tenth of its
+        side, at most a quarter of the side, and it leaves the coordinate
+        unchanged on a side one unit in the last place wide, on one two
+        units wide when half a unit rounds back to the coordinate, and
+        near zero, where it underflows, as on ``[0, 1e-316]`` from either
+        end.
       jac: optional gradient callable ``jac(x) -> array`` of the length of
         ``x0``. It takes the gradient route of :func:`global_optimize`
         (``grad_fn``), which runs one replica; its calls count in ``njev``.
@@ -1906,10 +1912,15 @@ def global_optimize(
         ``x0``, or at ``low`` without it, whatever the number of replicas;
         ``grad_fn`` is not called, and the dict holds the keys of one
         controller, its arm counts empty. In the values-only loop, a box
-        with no free side wide enough for a difference step to change its
-        coordinate at the start, a unit or two in the last place, ends the
-        run there: it evaluates ``x0`` once, or without it the box's centre
-        once per replica, up to the budget.
+        in which a difference step at the start changes no free coordinate
+        ends the run there: it evaluates ``x0`` once, or without it the
+        box's centre once per replica, up to the budget. That step is the
+        square root of the machine epsilon times the larger of the
+        coordinate's magnitude and a tenth of its side, at most a quarter
+        of the side, and it leaves the coordinate unchanged on a side one
+        unit in the last place wide, on one two units wide when half a unit
+        rounds back to the coordinate, and near zero, where it underflows,
+        as on ``[0, 1e-316]`` from either end.
       budget: combined objective + gradient evaluation budget.
       seed: RNG seed.
       grad_fn: optional gradient callable ``g(x) -> numpy.ndarray``;
