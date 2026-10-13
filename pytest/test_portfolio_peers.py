@@ -43,11 +43,11 @@ def _probe(analytic):
     )
     assert result["n_evals"] == len(observations)
     assert result["n_grads"] == len(gradients)
-    assert result["n_evals"] + result["n_grads"] <= 8003
+    assert result["n_evals"] + result["n_grads"] + result["n_answered"] <= 8003
     if analytic:
         assert gradients
     else:
-        assert len(observations) == 8003
+        assert len(observations) + result["n_answered"] == 8003
         assert not gradients
     assert result["best_val"] == min(v for _, v in observations)
     assert result["best_val"] == value(result["best_pos"])
@@ -85,7 +85,8 @@ def test_private_portfolio_peers_report_no_foreign_samples():
         objective, np.full(3, -2.0), np.full(3, 2.0), budget=257,
         replicas=4, coverage_shared=False,
     )
-    assert result["n_evals"] == len(calls) == 257
+    assert result["n_evals"] == len(calls)
+    assert result["n_evals"] + result["n_answered"] == 257
     assert result["n_grads"] == 0
     assert result["coverage_published_samples"] == 0
     assert result["coverage_applied_foreign_samples"] == 0

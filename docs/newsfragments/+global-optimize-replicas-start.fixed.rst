@@ -3,8 +3,9 @@
 dropped. With no ``grad_fn`` or ``noise_sigma`` and the ``auto`` policy it
 now runs the batch replicas of ``minimize``: ``R`` values-only loops start
 from ``x0``, evaluated once and shared, ``coverage_shared`` chooses one
-archive and incumbent or one each, each step's points go to ``eval_batch``
-when the objective has one, ``minimize(..., replicas=R)`` repeats the run
+archive and incumbent or one each, each step's points that no replica has
+evaluated before go to ``eval_batch`` when the objective has one,
+``minimize(..., replicas=R)`` repeats the run
 call for call, and the result reports ``n_batches``. There
 ``coverage_radius`` and ``coverage_neighbors``, which now default to
 ``None``, have nothing to act on and give a ``FutureWarning`` when given, as

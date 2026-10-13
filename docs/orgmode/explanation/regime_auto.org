@@ -494,9 +494,10 @@ above, call for call. With =replicas=R= it runs =portfolio_replicas=:
 start from it, each with an even share of the rest of the budget and its
 own seed (replica 0 keeps the run's), and each plays the loop as a solo
 run of its share and the start would. At each step every replica still
-running proposes one point; the points are evaluated as one batch,
-through =fun.eval_batch= when there is one, and recorded before any
-replica goes on, so a run repeats with its seed.
+running proposes one point; the points no replica has evaluated before
+are evaluated as one batch, through =fun.eval_batch= when there is one,
+the others are answered from their evaluations, and all are recorded
+before any replica goes on, so a run repeats with its seed.
 
 With the default shared history the replicas keep one archive and so one
 incumbent. Arms that start from the incumbent start from the best point
@@ -533,8 +534,13 @@ shared replicas beat four private ones at =p < 1e-6= on
 level (17/3/20, 14.4 against 13.4, =q= 0.20 that sharing trails). No
 seed gives the two the same run. A shared run takes from a quarter to
 half as many batches as evaluations at 1000 (medians of 264 on =lj13=
-and 504 on =binary_lj_fit=) and from 0.27 to 0.40 of them at 5000, a
-private one a quarter.
+and 504 on =binary_lj_fit=) and from 0.27 to 0.40 of them at 5000. A
+private one takes a quarter on =lj13= and at 1000 on =rastrigin10= and
+=rosenbrock10=, and from 0.13 to 0.23 elsewhere: there its replicas'
+descents from =x0= ask for the same points, each called once and paid
+for by every replica that asks, and a step that asks for no new point
+takes no batch, so that on =binary_lj_fit= a private run calls the
+objective a median of 251.5 times at 1000 and 1946 at 5000.
 
 Against one replica with the same total budget, four shared replicas
 win =binary_lj_fit@1000= (22/14/4, =p= 5.5e-6) and are level at 5000 on

@@ -84,7 +84,11 @@ fn check(dim: usize, budget: usize, seed: u64, nonfinite: bool) {
     assert_eq!(result.n_evals, observed.len());
     assert_eq!(result.n_grads, 0);
     assert_eq!(result.history_observations, 0);
-    assert_eq!(result.charged, budget, "dim={dim}, seed={seed}");
+    assert_eq!(
+        result.charged + result.n_answered,
+        budget,
+        "dim={dim}, seed={seed}"
+    );
     if nonfinite {
         assert_eq!(result.best_val, f64::INFINITY);
     } else {

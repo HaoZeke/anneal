@@ -77,13 +77,26 @@ fn run(shared: bool) -> (PortfolioEnsembleResult, Vec<Vec<Array1<f64>>>) {
     let share = config.budget / config.replicas;
     let mut traces: Vec<_> = traces.into_values().collect();
     assert_eq!(traces.len(), config.replicas);
+    // Every other replica opens with its own origin.
     for trace in &mut traces {
-        if trace.len() == share - 1 {
+        if (1..config.replicas).all(|replica| trace.first() != Some(&replica_origin(replica))) {
             trace.insert(0, start.clone());
         }
     }
-    assert!(traces.iter().all(|trace| trace.len() == share));
-    assert_eq!(result.n_evals, config.budget);
+    // A replica pays its share in calls and in evaluations answered from
+    // its earlier calls.
+    let mut lengths: Vec<_> = traces.iter().map(Vec::len).collect();
+    let mut calls: Vec<_> = result.replicas.iter().map(|r| r.n_evals).collect();
+    lengths.sort_unstable();
+    calls.sort_unstable();
+    assert_eq!(lengths, calls);
+    assert!(
+        result
+            .replicas
+            .iter()
+            .all(|r| r.n_evals + r.n_answered == share)
+    );
+    assert_eq!(result.n_evals + result.n_answered, config.budget);
     assert_eq!(result.n_grads, 0);
     assert_eq!(result.best_val, 1.0);
     (result, traces)
