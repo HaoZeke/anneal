@@ -115,6 +115,15 @@ class _ExtensionAlias(type):
         return extension is not None and issubclass(subclass, extension)
 
 
+def _refuse_a_nan_wall(low, high):
+    """Raise ValueError naming the first coordinate whose wall is NaN."""
+    nan = np.flatnonzero(np.isnan(low) | np.isnan(high))
+    if nan.size:
+        i = nan[0]
+        msg = f"coordinate {i} has a NaN wall: low {low[i]}, high {high[i]}"
+        raise ValueError(msg)
+
+
 class Bounds(metaclass=_ExtensionAlias):
     """The box ``low <= x <= high``, widened by ``slack`` in :meth:`contains`.
 
@@ -122,6 +131,8 @@ class Bounds(metaclass=_ExtensionAlias):
     may be any array-likes of one size, strided views, transposes and the
     columns of a ``(dim, 2)`` array included; each is flattened in C order
     into a float64 copy, as ``global_optimize`` takes its vectors.
+    A wall may be infinite but not NaN, and ``low`` may not exceed ``high``:
+    either is a ValueError naming the coordinate.
     ``PyObjective.bounds`` returns the extension's own box, which counts as a
     ``Bounds`` too.
     """
@@ -138,6 +149,7 @@ class Bounds(metaclass=_ExtensionAlias):
             raise ValueError(msg)
         if not slack >= 0.0:
             raise ValueError(f"slack must be at least 0, got {slack!r}")
+        _refuse_a_nan_wall(low, high)
         above = np.flatnonzero(low > high)
         if above.size:
             i = above[0]

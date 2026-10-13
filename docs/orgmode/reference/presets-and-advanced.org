@@ -30,6 +30,15 @@ every coordinate fixed a run is one call, at =x0= or at =low=. A NaN
 objective value counts as worse than every number, =+inf= included, so it
 is never kept as the best.
 
+* Walls
+
+=Bounds(low, high, slack=1e-6)= takes an infinite wall but not a NaN one,
+nor =low= above =high=: either is a =ValueError= naming the coordinate.
+=anneal._core.Bounds=, the extension's own box, and the box a Rust caller
+builds come from eindir-core's =Bounds::new=, which takes a NaN wall,
+though no point lies in such a box: refusing it there belongs to
+eindir-core.
+
 * Pilot and low-discrepancy
 
 - =pilot_draws_qmc(n, seed)= -> (n,3) array of (T0, sigma, =q_v=).
