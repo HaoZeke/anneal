@@ -7,5 +7,7 @@ least 96 evaluations on a box of one or two coordinates, 224 on three or 288
 on four. Each such replica opens with a probe at the centre that reserves two
 evaluations and a gradient together, and the probe counted all three even
 when it stopped after the first evaluation. It now counts each call once it
-is made and still reserves the same work, so every run makes the same calls
-as before.
+is made and gives back the unit it reserved for the evaluation it does not
+make, so that ``n_evals + n_grads + n_answered`` is what the run spent. Such
+a run has that unit left to spend, and the points it asks after the probe can
+differ from those it asked before.
