@@ -1389,6 +1389,31 @@ mod tests {
     }
 
     #[test]
+    fn a_retired_logarithm_model_takes_no_more_pairs() {
+        // A value at or below zero retires the model of the logarithm for
+        // the rest of the run: accepted after two pairs for the logarithm,
+        // it leaves that model and the count where they were through the
+        // pairs that follow. After a restart that keeps the curvature, as
+        // the portfolio's kicks do, at a point whose value is positive, a
+        // pair for the logarithm and one for neither leave the steps on the
+        // values, where from the start the same four pairs moved them onto
+        // the logarithm.
+        for value in [0.0, -1.0] {
+            let mut engine = two_coordinate_descent();
+            assert_eq!(steps_after(&mut engine, "ll"), [false; 2]);
+            engine.accept(Array1::from_vec(vec![0.25, 0.0]), value);
+            assert!(!engine.log_valid, "value {value}");
+            let at = Array1::from_vec(vec![0.5, 0.0]);
+            engine.restart_at(at.view(), None, true);
+            engine.tell(1.0);
+            assert_eq!(steps_after(&mut engine, "ln"), [false; 2], "value {value}");
+            assert_eq!(engine.log_curvature.pairs, 2, "value {value}");
+            let count = (engine.log_nearer, engine.values_nearer);
+            assert_eq!(count, (2, 0), "value {value}");
+        }
+    }
+
+    #[test]
     fn the_logarithm_model_leaves_power_of_two_scaling_invisible() {
         // The logarithm enters only through ratios of values, which a power
         // of two leaves exact.
