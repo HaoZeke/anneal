@@ -55,6 +55,7 @@ where
             },
             n_evals: 1,
             n_grads: 0,
+            n_answered: 0,
             arm_stats: Vec::new(),
             hop_state: None,
         };

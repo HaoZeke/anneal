@@ -47,6 +47,7 @@ where
             best_val: result.best_val,
             n_evals: result.n_evals,
             n_grads: result.n_grads,
+            n_answered: result.n_answered,
             arm_stats: totals
                 .into_iter()
                 .map(|(name, (pulls, successes))| crate::ArmStat {

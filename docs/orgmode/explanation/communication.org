@@ -230,8 +230,8 @@ Both local admission and restart count respect the complete-start cost.
 A smaller residual
 allowance bypasses local search without spending calls or random draws, so
 the global proposal loop can evaluate and communicate feasible positions.
-Every numerical probe counts as an objective call, not a caller-gradient
-call. This is allocation of optimization work, not
+Every numerical probe is charged as an objective evaluation, not a
+caller-gradient one. This is allocation of optimization work, not
 physical-time integration or a certificate that the objective is smooth.
 The public =values_local_polish= API retains its terminal partial-probe
 contract; global-start admission does not change that local refinement API.

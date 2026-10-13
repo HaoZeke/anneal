@@ -39,29 +39,45 @@ impl ScalarQuadratic {
             .sum()
     }
 
-    fn assert_funded_refinement(&self, replicas: usize) {
+    /// Whether `calls` open with the full central stencil about `anchor`
+    /// and a trial off it with a finite value.
+    fn funds_stencil(anchor: &Array1<f64>, calls: &[Array1<f64>]) -> bool {
+        let h = 1e-5 * 10.24;
+        for j in 0..DIM {
+            let mut plus = anchor.clone();
+            let mut minus = anchor.clone();
+            plus[j] = (anchor[j] + h).max(anchor[j].next_up()).min(5.12);
+            minus[j] = (anchor[j] - h).min(anchor[j].next_down()).max(-5.12);
+            if calls[2 * j] != plus || calls[1 + 2 * j] != minus {
+                return false;
+            }
+        }
+        let trial = &calls[2 * DIM];
+        trial != anchor && Self::value(trial.view()).is_finite()
+    }
+
+    /// Each replica's calls, in any order, against the traces.
+    fn assert_funded_refinement(&self, calls: &[usize]) {
         let traces = self.traces.lock().unwrap();
-        assert_eq!(traces.len(), replicas);
+        let mut lengths: Vec<_> = traces.values().map(Vec::len).collect();
+        let mut calls = calls.to_vec();
+        lengths.sort_unstable();
+        calls.sort_unstable();
+        assert_eq!(lengths, calls);
         for trace in traces.values() {
-            assert_eq!(trace.len(), 2_000);
-            let complete = trace.windows(2 * DIM + 2).any(|calls| {
-                let anchor = &calls[0];
-                let h = 1e-5 * 10.24;
-                for j in 0..DIM {
-                    let mut plus = anchor.clone();
-                    let mut minus = anchor.clone();
-                    plus[j] = (anchor[j] + h).max(anchor[j].next_up()).min(5.12);
-                    minus[j] = (anchor[j] - h).min(anchor[j].next_down()).max(-5.12);
-                    if calls[1 + 2 * j] != plus || calls[2 + 2 * j] != minus {
-                        return false;
-                    }
-                }
-                let trial = &calls[2 * DIM + 1];
-                trial != anchor && Self::value(trial.view()).is_finite()
+            // The stencil's anchor, the descent's iterate, was called
+            // before it but not always just before: a descent that starts
+            // from a point evaluated earlier asks for it again, which the
+            // run answers without a call.
+            let complete = (1..trace.len().saturating_sub(2 * DIM)).any(|k| {
+                trace[..k].iter().any(|anchor| {
+                    trace[k].iter().zip(anchor).skip(1).all(|(a, b)| a == b)
+                        && Self::funds_stencil(anchor, &trace[k..])
+                })
             });
             assert!(
                 complete,
-                "a 2000-call chain must fund one full 256-call stencil and a trial, not only partial stencils"
+                "a 2000-evaluation chain must fund one full 256-call stencil and a trial, not only partial stencils"
             );
         }
     }
@@ -104,13 +120,13 @@ impl Gradient<f64> for NoGradient {
 fn scalar_portfolio_funds_complete_high_dimensional_refinement() {
     let loss = ScalarQuadratic::new();
     let result = portfolio_optimize::<_, NoGradient>(&loss, None, 2_000, 7, None);
-    assert_eq!(result.n_evals, 2_000);
+    assert_eq!(result.n_evals + result.n_answered, 2_000);
     assert_eq!(result.n_grads, 0);
     assert_eq!(
         result.best_val,
         ScalarQuadratic::value(ArrayView1::from(&result.best_pos))
     );
-    loss.assert_funded_refinement(1);
+    loss.assert_funded_refinement(&[result.n_evals]);
 }
 
 #[test]
@@ -122,11 +138,22 @@ fn each_scalar_replica_funds_complete_high_dimensional_refinement() {
     };
     config.coverage.shared = false;
     let result = portfolio_ensemble_optimize::<_, NoGradient>(&loss, None, 7, None, &config);
-    assert_eq!(result.n_evals, 8_000);
+    assert_eq!(result.n_evals + result.n_answered, 8_000);
     assert_eq!(result.n_grads, 0);
     assert_eq!(
         result.best_val,
         ScalarQuadratic::value(ArrayView1::from(&result.best_pos))
     );
-    loss.assert_funded_refinement(4);
+    assert!(
+        result
+            .replicas
+            .iter()
+            .all(|replica| replica.n_evals + replica.n_answered == 2_000)
+    );
+    let calls: Vec<_> = result
+        .replicas
+        .iter()
+        .map(|replica| replica.n_evals)
+        .collect();
+    loss.assert_funded_refinement(&calls);
 }

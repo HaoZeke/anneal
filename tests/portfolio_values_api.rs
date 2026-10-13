@@ -42,7 +42,7 @@ fn scalar_client(replicas: usize) {
     let result = portfolio_values_ensemble_optimize(&loss, 17, None, &config);
     let values = loss.measured.into_inner().unwrap();
     assert_eq!(result.n_evals, values.len());
-    assert_eq!(result.n_evals, config.budget);
+    assert_eq!(result.n_evals + result.n_answered, config.budget);
     assert_eq!(result.n_grads, 0);
     assert_eq!(result.replicas.len(), replicas);
     assert!(result.replicas.iter().all(|replica| replica.n_grads == 0));

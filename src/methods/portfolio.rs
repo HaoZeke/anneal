@@ -43,7 +43,11 @@
 //! every native-gradient evaluation costs one unit of the shared
 //! budget. The additive surrogate is fit from the archive of already-
 //! charged evaluations, so its proposals cost only their acceptance
-//! tests.
+//! tests. Without declared noise, an evaluation at a point whose bit
+//! pattern the objective (or the gradient) has already been called at is
+//! answered with that call's value instead of a call. It costs its unit
+//! all the same, so a run asks for the points, in the order, that it
+//! would calling every time, and only its calls are fewer.
 //!
 //! [`portfolio_replicas`] runs several values-only loops as one batched
 //! search from a start point, with one archive between them or one each.
@@ -52,6 +56,7 @@ mod replicas;
 
 pub use replicas::{ReplicaArchive, ReplicaResult, portfolio_replicas};
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -525,10 +530,15 @@ pub struct PortfolioResult {
     pub best_pos: Vec<f64>,
     /// Best-seen objective value.
     pub best_val: f64,
-    /// True-objective evaluations charged.
+    /// Calls of the true objective: the evaluations counted against the
+    /// budget, less those answered from an earlier call at the same point.
     pub n_evals: usize,
-    /// Native-gradient evaluations charged.
+    /// Calls of the native gradient, counted as `n_evals` is.
     pub n_grads: usize,
+    /// Evaluations of either answered from an earlier call at the same
+    /// point, counted against the budget as calls are, so `n_evals +
+    /// n_grads + n_answered` is what the run spent of its budget.
+    pub n_answered: usize,
     /// Per-arm allocation statistics.
     pub arm_stats: Vec<ArmStat>,
     /// Terminal occupied pair of the gradient-enabled hop arm.
@@ -965,6 +975,102 @@ impl<G: Gradient<f64>> Gradient<f64> for BudgetedGradient<'_, G> {
         }
         self.ledger.n_grads.fetch_add(1, Ordering::Relaxed);
         self.inner.grad(x)
+    }
+}
+
+/// Bit pattern of a point: the key under which the run records a call.
+fn point_bits(x: ArrayView1<f64>) -> Box<[u64]> {
+    x.iter().map(|v| v.to_bits()).collect()
+}
+
+/// What a run has had back from its calls, by the bit pattern of the
+/// point, while `answers`; nothing otherwise.
+struct Record<T> {
+    answers: bool,
+    known: Mutex<HashMap<Box<[u64]>, T>>,
+    hits: AtomicUsize,
+}
+
+impl<T: Clone> Record<T> {
+    fn new(answers: bool) -> Self {
+        Self {
+            answers,
+            known: Mutex::new(HashMap::new()),
+            hits: AtomicUsize::new(0),
+        }
+    }
+
+    /// The answer at `x`, or `call`'s, made and recorded when `x` has none.
+    fn answer(&self, x: ArrayView1<f64>, call: impl FnOnce() -> T) -> T {
+        if !self.answers {
+            return call();
+        }
+        let key = point_bits(x);
+        let known = self.known.lock().expect("record lock").get(&key).cloned();
+        if let Some(answer) = known {
+            self.hits.fetch_add(1, Ordering::Relaxed);
+            return answer;
+        }
+        let answer = call();
+        self.known
+            .lock()
+            .expect("record lock")
+            .insert(key, answer.clone());
+        answer
+    }
+
+    fn learn(&self, x: ArrayView1<f64>, answer: T) {
+        if self.answers {
+            self.known
+                .lock()
+                .expect("record lock")
+                .insert(point_bits(x), answer);
+        }
+    }
+
+    /// Answers given without a call.
+    fn hits(&self) -> usize {
+        self.hits.load(Ordering::Relaxed)
+    }
+}
+
+/// The caller's objective as a run calls it: a point it has been called at
+/// is answered from the [`Record`] when that answers. A run without
+/// declared noise takes the objective to be a function of the point alone,
+/// so that the answer is what a call would return.
+struct RecordedObjective<'a, O: Objective<f64>> {
+    inner: &'a O,
+    record: Record<f64>,
+}
+
+impl<O: Objective<f64>> Objective<f64> for RecordedObjective<'_, O> {
+    fn dim(&self) -> usize {
+        self.inner.dim()
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        self.inner.bounds()
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        self.record.answer(x, || self.inner.eval(x))
+    }
+}
+
+/// The caller's gradient as a run calls it, recorded as
+/// [`RecordedObjective`] records values.
+struct RecordedGradient<'a, G: Gradient<f64>> {
+    inner: &'a G,
+    record: Record<Array1<f64>>,
+}
+
+impl<G: Gradient<f64>> Gradient<f64> for RecordedGradient<'_, G> {
+    fn dim(&self) -> usize {
+        self.inner.dim()
+    }
+
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        self.record.answer(x, || self.inner.grad(x))
     }
 }
 
@@ -4848,8 +4954,10 @@ where
 /// Runs the portfolio driver under a shared work-unit budget.
 ///
 /// `budget` bounds combined true-objective and native-gradient
-/// evaluations and is the driver's only required parameter. `grad`
-/// enables the gradient arms and the final polish.
+/// evaluations and is the driver's only required parameter. Without
+/// declared noise an evaluation at a point already called is answered from
+/// that call (see the module notes), so the calls the result counts can
+/// end below it. `grad` enables the gradient arms and the final polish.
 /// `policy` selects regime auto-routing (`Auto`) or flat legacy order.
 pub fn portfolio_optimize_with_policy<O, G>(
     obj: &O,
@@ -4915,7 +5023,17 @@ where
     G: Gradient<f64>,
 {
     let start = x0.map_or(Start::None, Start::Point);
-    portfolio_optimize_interacting(obj, grad, budget, seed, noise_sigma, policy, start, None)
+    portfolio_optimize_interacting(
+        obj,
+        grad,
+        budget,
+        seed,
+        noise_sigma,
+        policy,
+        start,
+        None,
+        None,
+    )
 }
 
 /// Where a portfolio run starts.
@@ -4966,8 +5084,63 @@ fn assert_runnable(noise_sigma: Option<f64>, bounds: &Bounds<f64>) {
     }
 }
 
+/// [`portfolio_run`] on the caller's objective and gradient as recorded
+/// ([`RecordedObjective`], [`RecordedGradient`]), which answer only
+/// without declared noise. A start evaluated before the run and `known`, a
+/// point the caller evaluated with its value, are recorded first. The
+/// result counts calls in `n_evals` and `n_grads`, and the evaluations the
+/// record answered, spent from the budget all the same, in `n_answered`.
 #[allow(clippy::too_many_arguments)]
 fn portfolio_optimize_interacting<O, G>(
+    obj: &O,
+    grad: Option<&G>,
+    budget: usize,
+    seed: u64,
+    noise_sigma: Option<f64>,
+    policy: PortfolioPolicy,
+    start: Start<'_>,
+    known: Option<(ArrayView1<'_, f64>, f64)>,
+    peer: Option<ensemble::Peer>,
+) -> PortfolioResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    let answers = noise_sigma.is_none();
+    let recorded = RecordedObjective {
+        inner: obj,
+        record: Record::new(answers),
+    };
+    let recorded_grad = grad.map(|grad| RecordedGradient {
+        inner: grad,
+        record: Record::new(answers),
+    });
+    if let Start::Evaluated(x0, value) = start {
+        recorded.record.learn(x0, value);
+    }
+    if let Some((x, value)) = known {
+        recorded.record.learn(x, value);
+    }
+    let mut result = portfolio_run(
+        &recorded,
+        recorded_grad.as_ref(),
+        budget,
+        seed,
+        noise_sigma,
+        policy,
+        start,
+        peer,
+    );
+    let evals = recorded.record.hits();
+    let grads = recorded_grad.as_ref().map_or(0, |grad| grad.record.hits());
+    result.n_evals -= evals;
+    result.n_grads -= grads;
+    result.n_answered = evals + grads;
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn portfolio_run<O, G>(
     obj: &O,
     grad: Option<&G>,
     budget: usize,
@@ -5774,6 +5947,7 @@ fn portfolio_result(
         best_val: ledger.best_get(),
         n_evals: ledger.n_evals.load(Ordering::Relaxed),
         n_grads: ledger.n_grads.load(Ordering::Relaxed),
+        n_answered: 0,
         arm_stats,
         hop_state,
     }
@@ -7115,6 +7289,91 @@ mod tests {
         }
     }
 
+    /// Gradient that records every point it is asked for.
+    struct TracedGradient {
+        dim: usize,
+        g: fn(ArrayView1<f64>) -> Array1<f64>,
+        trace: Mutex<Vec<Array1<f64>>>,
+    }
+
+    impl TracedGradient {
+        fn new(dim: usize, g: fn(ArrayView1<f64>) -> Array1<f64>) -> Self {
+            Self {
+                dim,
+                g,
+                trace: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn points(&self) -> Vec<Array1<f64>> {
+            self.trace.lock().expect("trace lock").clone()
+        }
+    }
+
+    impl Gradient<f64> for TracedGradient {
+        fn dim(&self) -> usize {
+            self.dim
+        }
+
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.trace.lock().expect("trace lock").push(x.to_owned());
+            (self.g)(x)
+        }
+    }
+
+    /// `points` without those whose bit pattern an earlier one has.
+    fn first_calls(points: &[Array1<f64>]) -> Vec<Array1<f64>> {
+        let mut seen = std::collections::HashSet::new();
+        points
+            .iter()
+            .filter(|x| seen.insert(point_bits(x.view())))
+            .cloned()
+            .collect()
+    }
+
+    /// Runs from `x0` twice, calling every evaluation the run charges
+    /// ([`portfolio_run`]) and as the driver runs, and checks that the
+    /// second's calls are the first's points less repeats, in order, with
+    /// the same charges and result. Returns the points charged, the calls,
+    /// and the second's result.
+    fn charged_and_called(
+        traced: impl Fn() -> (Traced, Option<TracedGradient>),
+        budget: usize,
+        seed: u64,
+        policy: PortfolioPolicy,
+        x0: Option<ArrayView1<f64>>,
+    ) -> (Vec<Array1<f64>>, Vec<Array1<f64>>, PortfolioResult) {
+        let (plain, plain_grad) = traced();
+        let start = x0.map_or(Start::None, Start::Point);
+        let each = portfolio_run(
+            &plain,
+            plain_grad.as_ref(),
+            budget,
+            seed,
+            None,
+            policy,
+            start,
+            None,
+        );
+        let (obj, grad) = traced();
+        let result = portfolio_optimize_from(&obj, grad.as_ref(), budget, seed, None, policy, x0);
+        let (charged, called) = (plain.points(), obj.points());
+        assert_eq!(called, first_calls(&charged));
+        assert_eq!(each.n_evals, charged.len());
+        assert_eq!(result.n_evals, called.len());
+        if let (Some(plain_grad), Some(grad)) = (&plain_grad, &grad) {
+            assert_eq!(grad.points(), first_calls(&plain_grad.points()));
+            assert_eq!(result.n_grads, grad.points().len());
+        }
+        assert_eq!(
+            result.n_evals + result.n_grads + result.n_answered,
+            each.n_evals + each.n_grads
+        );
+        assert_eq!(result.best_val.to_bits(), each.best_val.to_bits());
+        assert_eq!(result.best_pos, each.best_pos);
+        (charged, called, result)
+    }
+
     fn rosenbrock(x: ArrayView1<f64>) -> f64 {
         (0..x.len() - 1)
             .map(|i| 100.0 * (x[i + 1] - x[i] * x[i]).powi(2) + (1.0 - x[i]).powi(2))
@@ -7314,21 +7573,17 @@ mod tests {
         for (dim, budget) in [(6usize, 900usize), (12, 600)] {
             let start = Array1::from_elem(dim, -1.5);
             for x0 in [Some(start.view()), None] {
-                let obj = Traced::new(-2.0, 2.0, dim, rosenbrock);
-                let result = portfolio_optimize_from::<_, ShiftQuadratic>(
-                    &obj,
-                    None,
-                    budget,
-                    7,
-                    None,
-                    PortfolioPolicy::Auto,
-                    x0,
-                );
-                let points = obj.points();
-                assert_eq!(points.len(), budget, "every call is charged once");
-                assert_eq!(result.n_evals, budget);
+                let traced = || (Traced::new(-2.0, 2.0, dim, rosenbrock), None);
+                let (charged, points, result) =
+                    charged_and_called(traced, budget, 7, PortfolioPolicy::Auto, x0);
+                assert_eq!(charged.len(), budget, "every evaluation is charged once");
                 assert_eq!(result.n_grads, 0);
-                assert!(points.iter().all(|x| obj.bounds.contains(x.view())));
+                let bounds = Bounds::new(
+                    Array1::from_elem(dim, -2.0),
+                    Array1::from_elem(dim, 2.0),
+                    0.0,
+                );
+                assert!(points.iter().all(|x| bounds.contains(x.view())));
                 let names: Vec<_> = result.arm_stats.iter().map(|s| s.name).collect();
                 assert_eq!(names, ["cma", "qn", "gsa", "de", "surrogate", "explore"]);
                 let played: Vec<_> = result
@@ -7382,6 +7637,140 @@ mod tests {
             assert_eq!(result.best_pos, start.to_vec());
             assert_eq!(obj.points()[0], start);
         }
+    }
+
+    fn corner_sphere(x: ArrayView1<f64>) -> f64 {
+        x.iter().map(|v| (v - 0.3).powi(2)).sum()
+    }
+
+    fn corner_sphere_gradient(x: ArrayView1<f64>) -> Array1<f64> {
+        x.mapv(|v| 2.0 * (v - 0.3))
+    }
+
+    #[test]
+    fn a_point_already_called_is_answered_from_its_call() {
+        // The box's minimiser at a corner and the start there or inside:
+        // descents restarted elsewhere come back to the corner and
+        // difference there again, and clamped proposals land on it. On a
+        // box three units in the last place wide every arm keeps landing
+        // on its four points. Under either policy each point is called
+        // once, the start first.
+        let three = f64::from_bits(1.0f64.to_bits() + 3);
+        let cases = [
+            (1usize, 2.0, 1.0, 200usize),
+            (6, 2.0, 1.0, 200),
+            (1, 2.0, 1.5, 200),
+            (1, three, 1.0, 60),
+        ];
+        for (dim, high, at, budget) in cases {
+            for policy in [PortfolioPolicy::Auto, PortfolioPolicy::Legacy] {
+                for seed in 0..3u64 {
+                    let x0 = Array1::from_elem(dim, at);
+                    let traced = || (Traced::new(1.0, high, dim, corner_sphere), None);
+                    let (charged, called, _) =
+                        charged_and_called(traced, budget, seed, policy, Some(x0.view()));
+                    let case = format!("{dim}-D from {at}, {policy:?}, seed {seed}");
+                    assert_eq!(charged.len(), budget, "{case}");
+                    assert!(charged.len() > called.len(), "{case}");
+                    assert_eq!(called[0], x0, "{case}");
+                    assert_eq!(called.iter().filter(|x| **x == x0).count(), 1, "{case}");
+                }
+            }
+        }
+    }
+
+    fn rosenbrock_gradient(x: ArrayView1<f64>) -> Array1<f64> {
+        RosenbrockGrad { dim: x.len() }.grad(x)
+    }
+
+    #[test]
+    fn the_gradient_route_answers_a_point_already_called() {
+        // On boxes one unit in the last place wide the gradient route asks
+        // for their two or four points again and again; from the centre of
+        // a low-dimensional box its probe asks for the start again. The
+        // objective and the gradient are each called once at a point.
+        let up = f64::from_bits(1.0f64.to_bits() + 1);
+        for (dim, at) in [(1usize, 1.0), (2, 1.0), (2, up)] {
+            for seed in 0..2u64 {
+                let x0 = Array1::from_elem(dim, at);
+                let traced = || {
+                    (
+                        Traced::new(1.0, up, dim, corner_sphere),
+                        Some(TracedGradient::new(dim, corner_sphere_gradient)),
+                    )
+                };
+                let (charged, called, result) =
+                    charged_and_called(traced, 25, seed, PortfolioPolicy::Auto, Some(x0.view()));
+                assert!(charged.len() > called.len(), "{dim}-D from {at}");
+                assert_eq!(called[0], x0);
+                assert!(result.n_evals + result.n_grads <= 25);
+            }
+        }
+        let centre = Array1::zeros(2);
+        let traced = || {
+            (
+                Traced::new(-2.0, 2.0, 2, rosenbrock),
+                Some(TracedGradient::new(2, rosenbrock_gradient)),
+            )
+        };
+        let (charged, called, _) =
+            charged_and_called(traced, 200, 0, PortfolioPolicy::Auto, Some(centre.view()));
+        assert!(charged.iter().filter(|x| **x == centre).count() > 1);
+        assert_eq!(called.iter().filter(|x| **x == centre).count(), 1);
+    }
+
+    #[test]
+    fn persistent_replicas_answer_the_start_from_its_first_call() {
+        // Replicas started elsewhere reach the start, the box's minimiser
+        // at a corner, and each answers it from the call made first. The
+        // gradient there is called by each replica that needs it, once.
+        let config = PortfolioEnsembleConfig {
+            replicas: 4,
+            budget: 200,
+            ..PortfolioEnsembleConfig::default()
+        };
+        for dim in [1usize, 6] {
+            let x0 = Array1::from_elem(dim, 1.0);
+            let obj = Traced::new(1.0, 2.0, dim, corner_sphere);
+            let result = portfolio_values_ensemble_optimize(&obj, 0, Some(x0.view()), &config);
+            let points = obj.points();
+            assert_eq!(points[0], x0);
+            assert_eq!(points.iter().filter(|x| **x == x0).count(), 1, "{dim}-D");
+            assert_eq!(result.n_evals, points.len());
+            let obj = Traced::new(1.0, 2.0, dim, corner_sphere);
+            let grad = TracedGradient::new(dim, corner_sphere_gradient);
+            let result =
+                portfolio_ensemble_optimize(&obj, Some(&grad), 0, Some(x0.view()), &config);
+            let points = obj.points();
+            assert_eq!(points[0], x0);
+            assert_eq!(points.iter().filter(|x| **x == x0).count(), 1, "{dim}-D");
+            let at_start = grad.points().iter().filter(|x| **x == x0).count();
+            assert!(at_start <= config.replicas, "{dim}-D: {at_start}");
+            assert_eq!(
+                (result.n_evals, result.n_grads),
+                (points.len(), grad.points().len())
+            );
+        }
+    }
+
+    #[test]
+    fn declared_noise_calls_the_objective_at_every_evaluation() {
+        // A noisy objective's value at a point is a draw, so no evaluation
+        // is answered from an earlier one, the start's included.
+        let x0 = Array1::from_elem(1, 1.0);
+        let obj = Traced::new(1.0, 2.0, 1, corner_sphere);
+        let result = portfolio_optimize_from::<_, ShiftQuadratic>(
+            &obj,
+            None,
+            200,
+            0,
+            Some(0.01),
+            PortfolioPolicy::Auto,
+            Some(x0.view()),
+        );
+        let points = obj.points();
+        assert_eq!(result.n_evals, points.len());
+        assert!(points.iter().filter(|x| **x == x0).count() > 1);
     }
 
     fn rastrigin(x: ArrayView1<f64>) -> f64 {
@@ -7450,21 +7839,12 @@ mod tests {
     fn values_only_warm_up_plays_every_arm() {
         // Rastrigin from a side basin, on a narrow box and a wide one.
         for half in [2.0, 5.12] {
-            let obj = Traced::new(-half, half, 4, rastrigin);
             let start = Array1::from_elem(4, 1.0);
-            let result = portfolio_optimize_from::<_, ShiftQuadratic>(
-                &obj,
-                None,
-                2000,
-                5,
-                None,
-                PortfolioPolicy::Auto,
-                Some(start.view()),
-            );
-            let points = obj.points();
-            assert_eq!(points.len(), 2000);
-            assert_eq!(result.n_evals, 2000);
-            assert!(points.iter().all(|x| obj.bounds.contains(x.view())));
+            let traced = || (Traced::new(-half, half, 4, rastrigin), None);
+            let (charged, points, result) =
+                charged_and_called(traced, 2000, 5, PortfolioPolicy::Auto, Some(start.view()));
+            assert_eq!(charged.len(), 2000);
+            assert!(points.iter().all(|x| x.iter().all(|v| v.abs() <= half)));
             for stat in &result.arm_stats {
                 assert!(
                     stat.pulls > 0,
@@ -7484,17 +7864,15 @@ mod tests {
         for (dim, budget) in [(4usize, 2000usize), (10, 5000)] {
             let start = Array1::from_shape_fn(dim, |i| if i % 2 == 0 { 20.0 } else { -20.0 });
             for seed in [0u64, 1] {
-                let obj = Traced::new(-32.768, 32.768, dim, ackley);
-                let result = portfolio_optimize_from::<_, ShiftQuadratic>(
-                    &obj,
-                    None,
+                let traced = || (Traced::new(-32.768, 32.768, dim, ackley), None);
+                let (charged, _, result) = charged_and_called(
+                    traced,
                     budget,
                     seed,
-                    None,
                     PortfolioPolicy::Auto,
                     Some(start.view()),
                 );
-                assert_eq!(obj.points().len(), budget);
+                assert_eq!(charged.len(), budget);
                 let cma = result.arm_stats.iter().find(|s| s.name == "cma");
                 assert!(cma.is_some_and(|s| s.pulls > ROUNDS_PER_ARM));
                 for stat in &result.arm_stats {
@@ -7606,17 +7984,10 @@ mod tests {
         let mut turns = Vec::new();
         for budget in [1000usize, 4000, 16000, 64000] {
             assert!(budget >= QN_AFFORDABLE_GRADIENTS * dim * (dim + 1));
-            let obj = Traced::new(-5.12, 5.12, dim, rastrigin);
-            let result = portfolio_optimize_from::<_, ShiftQuadratic>(
-                &obj,
-                None,
-                budget,
-                4,
-                None,
-                PortfolioPolicy::Auto,
-                Some(start.view()),
-            );
-            assert_eq!(obj.points().len(), budget);
+            let traced = || (Traced::new(-5.12, 5.12, dim, rastrigin), None);
+            let (charged, _, result) =
+                charged_and_called(traced, budget, 4, PortfolioPolicy::Auto, Some(start.view()));
+            assert_eq!(charged.len(), budget);
             for stat in &result.arm_stats {
                 assert!(stat.pulls > 0, "{} not pulled at {budget}", stat.name);
             }

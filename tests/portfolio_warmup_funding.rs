@@ -48,7 +48,7 @@ fn scalar_replicas_fund_each_active_warmup_arm() {
             let initial = Array1::from_elem(128, 0.1875);
             let result =
                 portfolio_values_ensemble_optimize(&objective, seed, Some(initial.view()), &config);
-            assert_eq!(result.n_evals, config.budget);
+            assert_eq!(result.n_evals + result.n_answered, config.budget);
             assert_eq!(result.n_evals, objective.calls.load(Ordering::Relaxed));
             assert_eq!(result.n_grads, 0);
             assert_eq!(result.best_val, 1.0);

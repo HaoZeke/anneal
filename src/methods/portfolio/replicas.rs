@@ -20,6 +20,9 @@
 //! share on a common descent before the others.
 //! With [`ReplicaArchive::Private`] each replica sees only its own
 //! evaluations, as independent runs batched together would.
+//! Either way a row is paid for as above, but a point any replica has
+//! already evaluated is answered from that evaluation instead of a call,
+//! so the objective is called once at a point.
 //!
 //! The finite-difference descent is deterministic, so replicas that descend
 //! from one shared incumbent ask for the same points. Replica `r` of `R`
@@ -54,9 +57,9 @@ pub enum ReplicaArchive {
 /// Result of [`portfolio_replicas`].
 #[derive(Clone, Debug)]
 pub struct ReplicaResult {
-    /// The best point any replica evaluated, its value, the evaluations
-    /// charged (the start's once) and the replicas' arm statistics summed
-    /// arm by arm.
+    /// The best point any replica evaluated, its value, the calls of the
+    /// objective (the start's once) and the replicas' arm statistics
+    /// summed arm by arm.
     pub portfolio: PortfolioResult,
     /// Calls to [`Objective::eval_batch`], the start's included.
     pub batches: usize,
@@ -238,7 +241,9 @@ fn point_key(x: ArrayView1<f64>) -> Vec<u64> {
 }
 
 /// Batches the replicas' requests until every replica has stopped and
-/// returns the number of batches evaluated.
+/// returns the number of batches evaluated and of rows answered from
+/// `called`, the value of every point evaluated so far by bit pattern.
+#[allow(clippy::too_many_arguments)]
 fn coordinate<O: Objective<f64>>(
     obj: &O,
     archives: &[Arc<Archive>],
@@ -247,7 +252,8 @@ fn coordinate<O: Objective<f64>>(
     answers: &[mpsc::Sender<Answer>],
     shares: &[usize],
     seen: &mut HashMap<Vec<u64>, Seen>,
-) -> usize {
+    called: &mut HashMap<Vec<u64>, f64>,
+) -> (usize, usize) {
     let replicas = answers.len();
     let bounds = obj.bounds();
     let running = shares.iter().filter(|&&share| share > 0).count();
@@ -256,6 +262,7 @@ fn coordinate<O: Objective<f64>>(
     let mut pending: Vec<Option<Array1<f64>>> = vec![None; replicas];
     let mut awaiting = running;
     let mut batches = 0usize;
+    let mut recalled = 0usize;
     loop {
         while awaiting > 0 {
             match asks.recv() {
@@ -266,7 +273,7 @@ fn coordinate<O: Objective<f64>>(
             awaiting -= 1;
         }
         if pending.iter().all(Option::is_none) {
-            return batches;
+            return (batches, recalled);
         }
         // A shared archive answers what it holds, once to each replica;
         // those replicas ask again before the batch is evaluated.
@@ -318,22 +325,50 @@ fn coordinate<O: Objective<f64>>(
                 }
             };
         }
-        let mut batch = Array2::<f64>::zeros((payers.len(), bounds.dims));
-        for (row, &replica) in payers.iter().enumerate() {
-            batch
-                .row_mut(row)
-                .assign(pending[replica].as_ref().expect("payer asked"));
+        // A row is paid for as it is, but a point evaluated before, or in
+        // another row of this batch, is answered from that evaluation; only
+        // the others go to the objective.
+        let mut values = vec![f64::INFINITY; keys.len()];
+        let mut fresh: Vec<usize> = Vec::new();
+        let mut source = vec![None; keys.len()];
+        for (row, key) in keys.iter().enumerate() {
+            if let Some(&value) = called.get(key) {
+                values[row] = value;
+            } else if let Some(first) = fresh.iter().position(|&other| keys[other] == *key) {
+                source[row] = Some(first);
+            } else {
+                source[row] = Some(fresh.len());
+                fresh.push(row);
+            }
         }
-        let values = obj.eval_batch(batch.view());
-        batches += 1;
-        let value_at = |row: usize| values.get(row).copied().unwrap_or(f64::INFINITY);
+        recalled += keys.len() - fresh.len();
+        if !fresh.is_empty() {
+            let mut batch = Array2::<f64>::zeros((fresh.len(), bounds.dims));
+            for (index, &row) in fresh.iter().enumerate() {
+                batch
+                    .row_mut(index)
+                    .assign(pending[payers[row]].as_ref().expect("payer asked"));
+            }
+            let evaluated = obj.eval_batch(batch.view());
+            batches += 1;
+            for (row, index) in source.iter().enumerate() {
+                if let Some(index) = *index {
+                    values[row] = evaluated.get(index).copied().unwrap_or(f64::INFINITY);
+                }
+            }
+            for &row in &fresh {
+                called.insert(keys[row].clone(), values[row]);
+            }
+        }
+        let value_at = |row: usize| values[row];
         for (row, &replica) in payers.iter().enumerate() {
             let archive = if shared {
                 &archives[0]
             } else {
                 &archives[replica]
             };
-            archive.record(batch.row(row), value_at(row), bounds);
+            let x = pending[replica].as_ref().expect("payer asked");
+            archive.record(x.view(), value_at(row), bounds);
             left[replica] -= 1;
         }
         for (replica, slot) in pending.iter_mut().enumerate() {
@@ -365,8 +400,9 @@ fn coordinate<O: Objective<f64>>(
 /// with `x0`), seeded with `seed` mixed with `r` and with its descent's
 /// gradients differenced from coordinate `r * n / replicas` on (replica 0
 /// keeps `seed` and coordinate 0), so one replica repeats that run exactly.
-/// At each step every replica still running asks for one point and the
-/// points go to [`Objective::eval_batch`] together; `archive` decides
+/// At each step every replica still running asks for one point and those
+/// not evaluated before go to [`Objective::eval_batch`] together, the
+/// others answered from their evaluations; `archive` decides
 /// whether the replicas share what they find (see the module notes). Every
 /// point evaluated lies in the objective's bounds, and at most `budget`
 /// evaluations are made. The result holds the best point any replica
@@ -424,6 +460,7 @@ where
         (0..replicas).for_each(|r| everyone.add(r));
         seen.insert(point_key(start.view()), everyone);
     }
+    let mut called = HashMap::from([(point_key(start.view()), start_value)]);
 
     let shares: Vec<usize> = (0..replicas)
         .map(|r| replica_share(budget, replicas, r))
@@ -438,7 +475,7 @@ where
         answer_rxs.push(Some(rx));
     }
     let bounds_ref = &bounds;
-    let (outcomes, batches) = std::thread::scope(|scope| {
+    let (outcomes, batches, recalled) = std::thread::scope(|scope| {
         let mut handles = Vec::with_capacity(running);
         for (replica, &share) in shares.iter().enumerate() {
             if share == 0 {
@@ -466,7 +503,7 @@ where
             handles.push(handle);
         }
         drop(ask_tx);
-        let batches = coordinate(
+        let (batches, recalled) = coordinate(
             obj,
             &archives,
             shared,
@@ -474,6 +511,7 @@ where
             &answer_txs,
             &shares,
             &mut seen,
+            &mut called,
         );
         drop(answer_txs);
         let outcomes: Vec<(Vec<ArmStat>, usize)> = handles
@@ -483,7 +521,7 @@ where
                 Err(panic) => std::panic::resume_unwind(panic),
             })
             .collect();
-        (outcomes, batches + 1)
+        (outcomes, batches + 1, recalled)
     });
 
     let best = archives
@@ -510,8 +548,9 @@ where
         portfolio: PortfolioResult {
             best_pos: bounds.clip(best.incumbent(&bounds).view()).to_vec(),
             best_val: best.best_get(),
-            n_evals,
+            n_evals: n_evals - recalled,
             n_grads: 0,
+            n_answered: recalled,
             arm_stats,
             hop_state: None,
         },
@@ -655,8 +694,11 @@ mod tests {
                 first += n;
             }
             if archive == ReplicaArchive::Private {
-                assert_eq!(points.len(), 801);
-                assert!(batches[1..].iter().all(|&n| n == 4), "{batches:?}");
+                // Each replica pays for a row at each of the 200 steps after
+                // the start; the few rows at points evaluated before are
+                // answered without a call, and a step's batch holds the rest.
+                let full = batches[1..].iter().filter(|&&n| n == 4).count();
+                assert!(points.len() > 790 && full > 190, "{batches:?}");
             } else {
                 // Steps where replicas follow one descent, such as its line
                 // searches, and the end of the run, once some replicas have
@@ -694,37 +736,67 @@ mod tests {
         }
     }
 
+    fn distinct(points: &[Vec<f64>]) -> usize {
+        let mut distinct = points.to_vec();
+        distinct.sort_by(|a, b| a.partial_cmp(b).expect("finite"));
+        distinct.dedup();
+        distinct.len()
+    }
+
     #[test]
     fn shared_replicas_pay_once_for_a_point_they_all_ask_for() {
         // Every replica opens with the same deterministic descent from x0,
-        // so with a shared archive those evaluations are paid once.
+        // so with a shared archive those evaluations are paid once. With
+        // private archives each replica pays for them, and as the objective
+        // is called once at a point, what the others pay are calls the run
+        // does not make.
         let x0 = start(4, 1.2);
         let shared = Recorder::new(rosenbrock, -2.0, 2.0, 4);
         let result = portfolio_replicas(&shared, 2_000, 1, x0.view(), 4, ReplicaArchive::Shared);
         let points = shared.points();
-        let mut distinct = points.clone();
-        distinct.sort_by(|a, b| a.partial_cmp(b).expect("finite"));
-        distinct.dedup();
         assert!(points.len() <= 2_000);
         assert_eq!(result.portfolio.n_evals, points.len());
-        assert!(
-            distinct.len() + 100 > points.len(),
-            "{} of {}",
-            distinct.len(),
-            points.len()
-        );
+        assert_eq!(distinct(&points), points.len());
         let private = Recorder::new(rosenbrock, -2.0, 2.0, 4);
-        portfolio_replicas(&private, 2_000, 1, x0.view(), 4, ReplicaArchive::Private);
-        let mut repeated = private.points();
-        let total = repeated.len();
-        repeated.sort_by(|a, b| a.partial_cmp(b).expect("finite"));
-        repeated.dedup();
+        let result = portfolio_replicas(&private, 2_000, 1, x0.view(), 4, ReplicaArchive::Private);
+        let calls = private.points();
+        assert_eq!(result.portfolio.n_evals, calls.len());
+        assert_eq!(distinct(&calls), calls.len());
         assert!(
-            total - repeated.len() > 100,
-            "{} of {}",
-            repeated.len(),
-            total
+            points.len() > calls.len(),
+            "{} against {}",
+            points.len(),
+            calls.len()
         );
+    }
+
+    #[test]
+    fn replicas_call_the_objective_once_at_a_point() {
+        // From the box's minimiser at a corner, replicas come back to the
+        // start and to stencils they have asked for before, and with
+        // private archives reach each other's points. Each point is called
+        // once, the start first.
+        let sphere = |x: ArrayView1<f64>| x.iter().map(|v| (v - 0.3).powi(2)).sum::<f64>();
+        for dim in [1usize, 6] {
+            for archive in [ReplicaArchive::Shared, ReplicaArchive::Private] {
+                for seed in 0..3u64 {
+                    let x0 = Array1::from_elem(dim, 1.0);
+                    let obj = Recorder::new(sphere, 1.0, 2.0, dim);
+                    let result = portfolio_replicas(&obj, 200, seed, x0.view(), 4, archive);
+                    let points = obj.points();
+                    let batches = obj.batches.lock().expect("batches").clone();
+                    assert_eq!(points[0], x0.to_vec());
+                    assert_eq!(
+                        distinct(&points),
+                        points.len(),
+                        "{dim}-D {archive:?} {seed}"
+                    );
+                    assert_eq!(result.portfolio.n_evals, points.len());
+                    assert_eq!(batches.iter().sum::<usize>(), points.len());
+                    assert_eq!(result.batches, batches.len());
+                }
+            }
+        }
     }
 
     #[test]

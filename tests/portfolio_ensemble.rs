@@ -159,7 +159,7 @@ fn private_replicas_preserve_independent_portfolio_traces() {
     let result = portfolio_ensemble_optimize::<_, NoGradient>(&loss, None, 7, None, &config);
     assert_eq!(loss.trajectories(), expected);
     assert_eq!(result.best_val, expected_best);
-    assert_eq!(result.n_evals, config.budget);
+    assert_eq!(result.n_evals + result.n_answered, config.budget);
     assert_eq!(result.n_grads, 0);
     assert_eq!(result.coverage.published_samples, 0);
     assert!(result.replicas.iter().all(|r| !r.arm_stats.is_empty()));
@@ -249,7 +249,7 @@ fn check_shared(analytic: bool) -> Vec<Vec<Vec<u64>>> {
         assert!(grads > 0);
     } else {
         assert_eq!(grads, 0);
-        assert_eq!(evals, config.budget);
+        assert_eq!(evals + result.n_answered, config.budget);
     }
     assert_eq!(
         result.best_val,

@@ -52,6 +52,9 @@ pub struct PortfolioEnsembleResult {
     pub n_evals: usize,
     /// Actual native-gradient callbacks across all replicas.
     pub n_grads: usize,
+    /// Evaluations the replicas answered from their earlier calls, counted
+    /// against the budget as calls are.
+    pub n_answered: usize,
     /// Funded replicas in index order, including their arm allocation statistics.
     pub replicas: Vec<PortfolioResult>,
     /// Sample communication, independent of minimum certificates and visit counts.
@@ -73,7 +76,7 @@ impl Gradient<f64> for UnavailableGradient {
 /// Run the same portfolio ensemble with only an objective capability.
 ///
 /// Callers need no gradient implementation or placeholder type. Numerical
-/// local-refinement probes are charged objective calls; `n_grads` is zero.
+/// local-refinement probes are charged objective evaluations; `n_grads` is zero.
 /// All configuration, domain and sharing rules of [`portfolio_ensemble_optimize`]
 /// apply, including the single-replica case.
 pub fn portfolio_values_ensemble_optimize<O: Objective<f64>>(
@@ -96,7 +99,11 @@ pub fn portfolio_values_ensemble_optimize<O: Objective<f64>>(
 /// thread, before any replica starts. Replica zero holds that evaluation as
 /// its first, charged to its allowance, and as its first incumbent, as a
 /// portfolio started from `x0` ([`super::portfolio_optimize_from`]) would,
-/// without calling the objective there again.
+/// without calling the objective there again. Without declared noise every
+/// replica answers an evaluation at `x0`, and at any point it has called
+/// the objective at itself, from that call; replicas run concurrently and
+/// keep their records apart, so a point two of them reach is a call of
+/// each.
 ///
 /// Other callbacks run on scoped replica threads and outside exchange
 /// locks. A language binding holding an interpreter lock must release it
@@ -160,10 +167,12 @@ where
                             bounds.low[j] + (bounds.high[j] - bounds.low[j]) * rng.random::<f64>()
                         })
                     });
-                    let start = match (start, &uniform) {
-                        (None, _) => Start::None,
-                        (Some(_), Some(point)) => Start::Point(point.view()),
-                        (Some((x0, value)), None) => Start::Evaluated(x0.view(), *value),
+                    let (start, known) = match (start, &uniform) {
+                        (None, _) => (Start::None, None),
+                        (Some((x0, value)), Some(point)) => {
+                            (Start::Point(point.view()), Some((x0.view(), *value)))
+                        }
+                        (Some((x0, value)), None) => (Start::Evaluated(x0.view(), *value), None),
                     };
                     portfolio_optimize_interacting(
                         obj,
@@ -173,6 +182,7 @@ where
                         config.noise_sigma,
                         config.policy,
                         start,
+                        known,
                         peer,
                     )
                 })
@@ -203,6 +213,7 @@ where
         best_val: best.best_val,
         n_evals: replicas.iter().map(|r| r.n_evals).sum(),
         n_grads: replicas.iter().map(|r| r.n_grads).sum(),
+        n_answered: replicas.iter().map(|r| r.n_answered).sum(),
         replicas,
         coverage,
     }
