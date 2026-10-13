@@ -473,9 +473,9 @@ impl FdBfgs {
     }
 
     /// True when `bounds` leave some coordinate of `x` a side wide enough
-    /// for a difference step to change it. When none has one, as when every
-    /// side is a unit in the last place wide or less, a descent from `x`
-    /// asks for nothing but `x` itself.
+    /// for a difference step to change it. When none has one, as when each
+    /// side is at most a unit in the last place wide or so near zero that
+    /// the step underflows, a descent from `x` asks for nothing but `x`.
     pub fn can_difference(x: ArrayView1<f64>, bounds: &Bounds<f64>) -> bool {
         let engine = Self::new(x, None, bounds, FdBfgsOptions::default());
         engine.gradient_work().done < engine.n
@@ -1937,6 +1937,48 @@ mod tests {
         assert!(engine.is_done(), "used {used}");
         assert_eq!(engine.position()[0], 1.0);
         assert!((engine.position()[1] - 0.3).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_step_that_underflows_near_zero_admits_no_difference() {
+        // The step scales with the larger of |x| and a tenth of the side, so
+        // near zero it underflows: [0, 1e-316] admits none from either end
+        // or its middle, and [0, 2e-316] none from 0 but one from 2e-316.
+        let can = |x: f64, high: f64| {
+            let bounds = Bounds::new(
+                Array1::from_vec(vec![0.0]),
+                Array1::from_vec(vec![high]),
+                0.0,
+            );
+            FdBfgs::can_difference(Array1::from_vec(vec![x]).view(), &bounds)
+        };
+        for x in [0.0, 0.5e-316, 1e-316] {
+            assert!(!can(x, 1e-316), "{x:e}");
+        }
+        assert!(!can(0.0, 2e-316));
+        assert!(can(2e-316, 2e-316));
+        assert!(can(0.0, 1e-300) && can(1e-300, 1e-300));
+    }
+
+    #[test]
+    fn on_a_side_two_units_wide_half_a_unit_rounds_to_an_even_last_bit() {
+        // There the step is half a unit in the last place, and adding it
+        // rounds to whichever neighbour has an even last bit: back to either
+        // end of [1, 1 + 2 ulp] but away from its middle, and away from
+        // either end of [1 + ulp, 1 + 3 ulp]. A side one unit wide admits
+        // no step anywhere.
+        let ulps = |k: u64| f64::from_bits(1.0f64.to_bits() + k);
+        let can = |x: u64, low: u64, high: u64| {
+            let bounds = Bounds::new(
+                Array1::from_vec(vec![ulps(low)]),
+                Array1::from_vec(vec![ulps(high)]),
+                0.0,
+            );
+            FdBfgs::can_difference(Array1::from_vec(vec![ulps(x)]).view(), &bounds)
+        };
+        assert!(!can(0, 0, 2) && !can(2, 0, 2) && can(1, 0, 2));
+        assert!(can(1, 1, 3) && can(3, 1, 3) && !can(2, 1, 3));
+        assert!(!can(0, 0, 1) && !can(1, 0, 1) && !can(1, 1, 2));
     }
 
     /// log10 of the mean squared residual of a linear fit whose singular
