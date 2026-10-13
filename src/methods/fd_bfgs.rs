@@ -1837,14 +1837,55 @@ mod tests {
     }
 
     #[test]
+    fn a_start_over_scales_the_box_metric_by_the_latest_pair() {
+        // The model of the values takes a pair for the values and then one
+        // for neither reading, whose scales s.y / y.D.y differ, while the
+        // steps stay on the values. Started over, it holds the box metric
+        // scaled by the second pair, inverse and direct approximation
+        // alike, and the steepest-descent line search's first trial moves
+        // by that scale too.
+        let mut engine = two_coordinate_descent();
+        assert_eq!(steps_after(&mut engine, "vn"), [false, false]);
+        let scale = |kind| {
+            let (from, to) = pair(kind);
+            let (s, y) = (to[0] - from[0], to[2] - from[2]);
+            s * y / (engine.metric[0] * y * y)
+        };
+        let gamma = scale('n');
+        assert_ne!(gamma, scale('v'));
+        engine.curvature.inv_hessian = -Array2::<f64>::eye(2);
+        engine.curvature.hessian = Some(-Array2::<f64>::eye(2));
+        engine.begin_line_search(false);
+        match &engine.phase {
+            Phase::Line(work) => assert!(!work.log && work.steepest && work.alpha == gamma),
+            _ => panic!("no line search followed"),
+        }
+        let metric = &engine.metric;
+        assert_eq!(
+            engine.curvature.inv_hessian,
+            Array2::from_diag(&(metric * gamma))
+        );
+        let direct = Array2::from_diag(&metric.mapv(|w| 1.0 / (w * gamma)));
+        assert_eq!(engine.curvature.hessian, Some(direct));
+    }
+
+    #[test]
     fn a_steepest_descent_step_after_a_failed_line_search_keeps_the_models() {
         // A line search along a quasi-Newton direction that descends can
-        // fail, and the descent then searches down the steepest-descent
-        // direction. Nothing there shows the approximation indefinite, so
-        // both models are kept.
+        // fail, and once the stencils are central and the gradient has been
+        // differenced again as often as it may be, the descent searches down
+        // the steepest-descent direction. Nothing there shows the
+        // approximation indefinite, so both models keep their
+        // approximations, counts of pairs and scales.
         let models = |engine: &FdBfgs| {
-            [&engine.curvature, &engine.log_curvature]
-                .map(|model| (model.inv_hessian.clone(), model.hessian.clone()))
+            [&engine.curvature, &engine.log_curvature].map(|model| {
+                (
+                    model.inv_hessian.clone(),
+                    model.hessian.clone(),
+                    model.pairs,
+                    model.scaled,
+                )
+            })
         };
         for kinds in ["vv", "llln"] {
             let mut engine = two_coordinate_descent();
@@ -1857,8 +1898,10 @@ mod tests {
             model.inv_hessian = Array2::from_shape_vec((2, 2), vec![2.0, 1.0, 1.0, 1.0]).unwrap();
             model.hessian =
                 Some(Array2::from_shape_vec((2, 2), vec![1.0, -1.0, -1.0, 2.0]).unwrap());
+            engine.scheme = FdScheme::Central;
+            engine.redifferences = MAX_REDIFFERENCES;
             let kept = models(&engine);
-            engine.begin_line_search(true);
+            engine.line_search_failed(false);
             match &engine.phase {
                 Phase::Line(work) => assert!(work.log == log && work.steepest, "after {kinds}"),
                 _ => panic!("after {kinds}: no line search followed"),
