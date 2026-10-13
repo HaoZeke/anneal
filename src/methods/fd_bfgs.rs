@@ -1246,6 +1246,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_pair_counts_only_where_one_reading_misses_over_four_times_as_far() {
+        // Along each unit step below the values fall from one to a half and
+        // the end slopes of the logarithm cancel, so its trapezoid rule
+        // predicts no change and misses by a half. With the slope `g` at the
+        // start, the rule on the values misses by `|1 + g / 2|` times that.
+        // Missing four times as far, or a quarter as far, counts for neither
+        // reading; a little further counts for the logarithm, and a little
+        // less far for the values.
+        let options = FdBfgsOptions {
+            log_model: true,
+            ..FdBfgsOptions::default()
+        };
+        let weigh = |slope: f64| {
+            let at = Array1::from_elem(1, 1.0);
+            let mut engine = FdBfgs::new(at.view(), Some(0.5), &boxed(-5.0, 5.0, 1), options);
+            engine.pair_value = 1.0;
+            engine.grad = Array1::from_elem(1, -0.5 * slope);
+            let step = Array1::from_elem(1, 1.0);
+            engine.weigh_trapezoid(&step, &Array1::from_elem(1, slope));
+            (engine.log_nearer, engine.values_nearer)
+        };
+        assert_eq!(weigh(-10.0), (0, 0));
+        assert_eq!(weigh(-10.0078125), (1, 0));
+        assert_eq!(weigh(-2.5), (0, 0));
+        assert_eq!(weigh(-2.4921875), (0, 1));
+    }
+
     /// The point, value and slope before and after a step along the first
     /// coordinate of a descent in two, along which the trapezoid rule finds
     /// the logarithm nearer quadratic (`exp(x^2)`, `'l'`), the values (`x^2`,
