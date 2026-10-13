@@ -43,6 +43,7 @@ def f_scipy(x):
 res = minimize(f_scipy, x0, bounds=bounds, jac=None, budget=256, seed=0, replicas=4)
 opt_params = dict(zip(keys, res.x))
 assert res.nfev == len(observed) == res.charged <= 256
+assert res.nfev + res.diagnostics["n_answered"] == 256
 assert res.njev == 0
 assert res.fun == min(observed)
 assert res.nit < res.nfev
@@ -50,17 +51,23 @@ print(res.nfev, res.njev, res.nit)
 #+end_src
 
 The three output fields are objective calls, gradient calls and batches.
-They are =256 0 89= for this example: four replicas spent the budget in 89
-sequential steps. =f_scipy= has no =eval_batch=, so each batch is evaluated
-one row after another; a loss object with an =eval_batch(X)= method gets
-each batch, one point per row, in one call.
+They are =249 0 84= for this example: four replicas spent the budget of 256
+in 84 sequential steps, on 249 calls of =f_scipy= and 7 evaluations
+answered from an earlier call, which =res.diagnostics["n_answered"]= counts.
+=f_scipy= has no =eval_batch=, so each batch is evaluated one row after
+another; a loss object with an =eval_batch(X)= method gets each batch, one
+point per row, in one call.
 
 =jac=None= means no caller-supplied derivatives. Scalar local refinement
-can still estimate derivatives through function evaluations; every such
-probe is included in =res.nfev= and the aggregate budget. This is not a
-promise of a derivative-free proposal law or reliable numerical derivatives
-on a noisy or discontinuous loss. The returned =res.fun= is the lowest raw
-value actually observed, and =success= does not certify a global minimum.
+can still estimate derivatives through function evaluations. Such a probe
+at a new point is a call, counted in =res.nfev= and the aggregate budget;
+one at a point already called is answered from that call and counts against
+the budget in =res.diagnostics["n_answered"]= instead, though with the
+replicas sharing their history a point one of them called is free to each
+of the others once (below). This is not a promise of a derivative-free
+proposal law or reliable numerical derivatives on a noisy or discontinuous
+loss. The returned =res.fun= is the lowest raw value actually observed, and
+=success= does not certify a global minimum.
 
 * Replica and history controls
 
