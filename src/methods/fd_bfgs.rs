@@ -1341,6 +1341,36 @@ mod tests {
     }
 
     #[test]
+    fn a_start_at_or_below_zero_retires_the_logarithm_model() {
+        // The portfolio restarts a finished descent at a kicked point with
+        // its curvature kept, and the value there starts the next descent.
+        // After the count has moved the steps onto the logarithm, a start
+        // at or below zero retires that model, and the line search that
+        // follows the gradient there steps downhill on the values.
+        for start in [0.0, -1.0] {
+            let mut engine = two_coordinate_descent();
+            assert_eq!(
+                steps_after(&mut engine, "llln"),
+                [false, false, false, true]
+            );
+            engine.restart_at(Array1::zeros(2).view(), None, true);
+            let plane = |x: ArrayView1<f64>| start + x[0] + 2.0 * x[1];
+            while matches!(engine.phase, Phase::Value | Phase::Gradient(_)) {
+                let x = engine.ask();
+                engine.tell(plane(x.view()));
+            }
+            assert!(!engine.log_valid && !engine.log_active, "start {start}");
+            match &engine.phase {
+                Phase::Line(work) => assert!(
+                    !work.log && engine.grad.dot(&work.direction) < 0.0,
+                    "start {start}"
+                ),
+                _ => panic!("start {start}: no line search followed the gradient"),
+            }
+        }
+    }
+
+    #[test]
     fn the_logarithm_model_leaves_power_of_two_scaling_invisible() {
         // The logarithm enters only through ratios of values, which a power
         // of two leaves exact.
