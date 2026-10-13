@@ -536,8 +536,10 @@ pub struct PortfolioResult {
     /// Calls of the native gradient, counted as `n_evals` is.
     pub n_grads: usize,
     /// Evaluations of either answered from an earlier call at the same
-    /// point, counted against the budget as calls are, so `n_evals +
-    /// n_grads + n_answered` is what the run spent of its budget.
+    /// point, and gradients asked at a point with a non-finite coordinate,
+    /// answered with zeros without a call, counted against the budget as
+    /// calls are, so `n_evals + n_grads + n_answered` is what the run spent
+    /// of its budget.
     pub n_answered: usize,
     /// Per-arm allocation statistics.
     pub arm_stats: Vec<ArmStat>,
@@ -640,6 +642,9 @@ struct BudgetLedger {
     used: AtomicUsize,
     n_evals: AtomicUsize,
     n_grads: AtomicUsize,
+    /// Gradients charged at a point with a non-finite coordinate, which
+    /// [`BudgetedGradient`] answers without calling the caller's gradient.
+    n_answered: AtomicUsize,
     archive: Arc<Archive>,
     /// Whether the budgeted objectives record what they evaluate. A batch
     /// coordinator that answers a replica's evaluations records them itself.
@@ -663,6 +668,7 @@ impl BudgetLedger {
             used: AtomicUsize::new(0),
             n_evals: AtomicUsize::new(0),
             n_grads: AtomicUsize::new(0),
+            n_answered: AtomicUsize::new(0),
             archive,
             records,
             dim,
@@ -958,7 +964,10 @@ impl<G: Gradient<f64>> Gradient<f64> for ReflectedGradient<'_, G> {
     }
 }
 
-/// Gradient proxy charging one unit per evaluation.
+/// Gradient proxy charging one unit per evaluation. A point with a
+/// non-finite coordinate is charged as well but answered with zeros, as
+/// [`ReflectedGradient`] answers it, and counted in the ledger's
+/// `n_answered`: the caller's gradient never sees it.
 struct BudgetedGradient<'a, G: Gradient<f64>> {
     inner: &'a G,
     ledger: &'a BudgetLedger,
@@ -972,6 +981,10 @@ impl<G: Gradient<f64>> Gradient<f64> for BudgetedGradient<'_, G> {
     fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
         if !self.ledger.try_charge(GRADIENT_WORK_UNIT) {
             return Array1::zeros(self.ledger.dim);
+        }
+        if x.iter().any(|v| !v.is_finite()) {
+            self.ledger.n_answered.fetch_add(1, Ordering::Relaxed);
+            return Array1::zeros(x.len());
         }
         self.ledger.n_grads.fetch_add(1, Ordering::Relaxed);
         self.inner.grad(x)
@@ -5089,7 +5102,8 @@ fn assert_runnable(noise_sigma: Option<f64>, bounds: &Bounds<f64>) {
 /// without declared noise. A start evaluated before the run and `known`, a
 /// point the caller evaluated with its value, are recorded first. The
 /// result counts calls in `n_evals` and `n_grads`, and the evaluations the
-/// record answered, spent from the budget all the same, in `n_answered`.
+/// record answered, spent from the budget all the same, in `n_answered`,
+/// with the gradients [`BudgetedGradient`] answered.
 #[allow(clippy::too_many_arguments)]
 fn portfolio_optimize_interacting<O, G>(
     obj: &O,
@@ -5135,7 +5149,7 @@ where
     let grads = recorded_grad.as_ref().map_or(0, |grad| grad.record.hits());
     result.n_evals -= evals;
     result.n_grads -= grads;
-    result.n_answered = evals + grads;
+    result.n_answered += evals + grads;
     result
 }
 
@@ -5947,7 +5961,7 @@ fn portfolio_result(
         best_val: ledger.best_get(),
         n_evals: ledger.n_evals.load(Ordering::Relaxed),
         n_grads: ledger.n_grads.load(Ordering::Relaxed),
-        n_answered: 0,
+        n_answered: ledger.n_answered.load(Ordering::Relaxed),
         arm_stats,
         hop_state,
     }
@@ -7362,12 +7376,13 @@ mod tests {
         assert_eq!(each.n_evals, charged.len());
         assert_eq!(result.n_evals, called.len());
         if let (Some(plain_grad), Some(grad)) = (&plain_grad, &grad) {
+            assert_eq!(each.n_grads, plain_grad.points().len());
             assert_eq!(grad.points(), first_calls(&plain_grad.points()));
             assert_eq!(result.n_grads, grad.points().len());
         }
         assert_eq!(
             result.n_evals + result.n_grads + result.n_answered,
-            each.n_evals + each.n_grads
+            each.n_evals + each.n_grads + each.n_answered
         );
         assert_eq!(result.best_val.to_bits(), each.best_val.to_bits());
         assert_eq!(result.best_pos, each.best_pos);
@@ -7717,6 +7732,62 @@ mod tests {
             charged_and_called(traced, 200, 0, PortfolioPolicy::Auto, Some(centre.view()));
         assert!(charged.iter().filter(|x| **x == centre).count() > 1);
         assert_eq!(called.iter().filter(|x| **x == centre).count(), 1);
+    }
+
+    #[test]
+    fn a_gradient_asked_at_a_point_that_is_not_finite_is_charged_without_a_call() {
+        let ledger = BudgetLedger::new(3, 1);
+        let inner = TracedGradient::new(1, |x| x.to_owned());
+        let budgeted = BudgetedGradient {
+            inner: &inner,
+            ledger: &ledger,
+        };
+        for v in [f64::NAN, f64::INFINITY, 0.5] {
+            let g = budgeted.grad(ArrayView1::from(&[v][..]));
+            assert_eq!(g[0], if v.is_finite() { v } else { 0.0 });
+        }
+        assert_eq!(inner.points(), vec![Array1::from_elem(1, 0.5)]);
+        assert_eq!(ledger.used_get(), 3);
+        assert_eq!(ledger.n_grads.load(Ordering::Relaxed), 1);
+        assert_eq!(ledger.n_answered.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn a_gradient_that_is_not_finite_counts_only_its_calls() {
+        // A gradient that is not finite sends the descent on [0, 1] to
+        // points that are not finite. The gradients asked there are charged,
+        // but counted in `n_answered`, as the caller's gradient is never
+        // called there.
+        let gradients: [fn(ArrayView1<f64>) -> Array1<f64>; 2] = [
+            |x| Array1::from_elem(x.len(), f64::NAN),
+            |x| Array1::from_elem(x.len(), f64::INFINITY),
+        ];
+        let x0 = Array1::from_elem(1, 0.5);
+        for g in gradients {
+            let traced = || {
+                (
+                    Traced::new(0.0, 1.0, 1, |x| (x[0] - 0.3).powi(2)),
+                    Some(TracedGradient::new(1, g)),
+                )
+            };
+            let (_, _, result) =
+                charged_and_called(traced, 1000, 5, PortfolioPolicy::Auto, Some(x0.view()));
+            assert!(result.n_evals + result.n_grads + result.n_answered <= 1000);
+            let (obj, grad) = traced();
+            let grad = grad.expect("a gradient");
+            let each = portfolio_run(
+                &obj,
+                Some(&grad),
+                1000,
+                5,
+                None,
+                PortfolioPolicy::Auto,
+                Start::Point(x0.view()),
+                None,
+            );
+            assert_eq!(each.n_grads, grad.points().len());
+            assert!(each.n_answered > 0);
+        }
     }
 
     #[test]

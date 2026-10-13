@@ -142,8 +142,10 @@ or minimum certificates. This does not restrict the optional minimum ledger
 or remove the portfolio checkpoint barrier.
 
 `nfev` and `njev` count actual objective and gradient calls; `charged` is their
-sum. An evaluation at a point already called is answered from that call: it
-counts against `budget` and in neither, but in `diagnostics["n_answered"]`.
+sum. An evaluation at a point already called is answered from that call, and
+a gradient at a point that is not finite with zeros, without calling `jac`:
+either counts against `budget` and in neither, but in
+`diagnostics["n_answered"]`.
 `diagnostics` preserves the underlying work, history, and coverage fields.
 `success` means a finite feasible candidate was returned, not that global
 optimality was certified. An optional parameter store archives results and

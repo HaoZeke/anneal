@@ -1187,7 +1187,8 @@ class MinimizeResult:
     ``nfev`` counts objective calls, ``njev`` counts gradient calls, and
     ``charged`` is their sum; an evaluation answered from an earlier call
     counts against the budget and in none of them, but in
-    ``diagnostics["n_answered"]``. ``nit`` counts sequential
+    ``diagnostics["n_answered"]``, as does a gradient asked at a point that
+    is not finite, which ``jac`` never sees. ``nit`` counts sequential
     evaluation steps: every call with one replica, every batch with more.
     ``diagnostics`` retains the engine's result dict, with ``best_pos`` at
     full length. ``success`` means a finite feasible candidate was
@@ -1966,9 +1967,10 @@ def global_optimize(
     gradient there is reflected with it. Peer separation moves global
     candidates, not derivative stencils or raw objective values. Returns a
     dict with ``best_pos``, ``best_val``, ``n_evals``, ``n_grads``,
-    ``n_answered`` (the evaluations answered from an earlier call, so that
-    ``n_evals + n_grads + n_answered`` is the budget spent), ``arm_pulls``,
-    and ``arm_successes``. Persistent replicas also report
+    ``n_answered`` (the evaluations answered from an earlier call, and the
+    gradients asked at a point that is not finite, which ``grad_fn`` never
+    sees, so that ``n_evals + n_grads + n_answered`` is the budget spent),
+    ``arm_pulls``, and ``arm_successes``. Persistent replicas also report
     individual results, ``charged`` work and coverage sample counters, and
     batch replicas ``n_batches``, the batches evaluated, the start's
     included.
