@@ -57,12 +57,14 @@ list of one, after ``init``, and what it raises, or a TypeError when its
 reply is not one real loss per candidate, ends the drive as below.
 
 Every argument is checked before ``fitter.init()`` and before any
-FutureWarning, so a refused call raises its error without one, except on a
-fitter with its own ``fit_anneal``. There :func:`run_fitter` refuses only
-what it cannot pass to that method and warns of a preset that it ignores just
-before the call; the budget, the seed, the fitter's bounds and the rest are
-the method's to check, so a refusal inside it, such as
-:func:`run_benchmark`'s of a budget of 0, follows the warning. The first
+FutureWarning, so a refused call raises its error without one. On a fitter
+with its own ``fit_anneal``, :func:`run_fitter` refuses only what it cannot
+pass to that method and leaves the budget, the seed, the fitter's bounds and
+the rest to it; the warning of a preset that it ignores waits for the first
+bridge the method calls and comes once that bridge's checks pass, so a
+refusal there, such as :func:`run_benchmark`'s of a budget of 0, raises its
+error alone. When the method calls no bridge, the warning comes once it
+returns, and not when it raises. The first
 exception the fitter raises before ``finish``, or a loss that is not a real
 number, ends the drive: the fitter is not called again, ``finish`` is
 skipped, and the exception reaches the caller. One that ``finish`` raises
@@ -309,6 +311,34 @@ _HELD: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
     "anneal_chemfit_held", default=None
 )
 
+_Site = tuple[str, int, dict[str, Any]]
+
+_HANDED: contextvars.ContextVar[list[tuple[_Site, str]] | None] = contextvars.ContextVar(
+    "anneal_chemfit_handed", default=None
+)
+
+
+def _site() -> _Site:
+    """The file, line and globals of the first caller outside this module."""
+    frame = sys._getframe(1)
+    while frame.f_back is not None and frame.f_globals.get("__name__") == __name__:
+        frame = frame.f_back
+    return frame.f_code.co_filename, frame.f_lineno, frame.f_globals
+
+
+def _give(handed: Iterable[tuple[_Site, str]]) -> None:
+    """Give each handed FutureWarning, pointing at the site it was handed from."""
+    for (filename, line, module_globals), message in handed:
+        warnings.warn_explicit(
+            message,
+            FutureWarning,
+            filename,
+            line,
+            module=module_globals.get("__name__", "<string>"),
+            registry=module_globals.setdefault("__warningregistry__", {}),
+            module_globals=module_globals,
+        )
+
 
 class _Checks:
     """The argument checks of one bridge call, which end before the fitter is called.
@@ -316,19 +346,27 @@ class _Checks:
     Each FutureWarning given inside them waits for them to end: a call one
     of them refuses raises its error without a warning, and a call that
     passes them all gives each warning, in the order given. ``held`` holds
-    the warnings of checks the caller ran first.
+    the warnings of checks the caller ran first. The checks of the first
+    bridge that a fitter's own ``fit_anneal`` calls take over the warnings
+    :func:`run_fitter` handed on, and give them first.
     """
 
     def __init__(self, held: Iterable[str] = ()):
         self.held = list(held)
+        self.handed: list[tuple[_Site, str]] = []
         self.token = None
 
     def __enter__(self) -> None:
+        handed = _HANDED.get()
+        if handed:
+            self.handed = handed[:]
+            handed.clear()
         self.token = _HELD.set(self.held)
 
     def __exit__(self, kind, error, trace) -> None:
         _HELD.reset(self.token)
         if kind is None:
+            _give(self.handed)
             for message in self.held:
                 _deprecated(message)
 
@@ -2068,8 +2106,10 @@ def _own_fit_anneal(
     """Hand ``fitter`` to its own ``fit_anneal`` with what that method takes.
 
     :func:`run_fitter` says what goes; anything that its signature cannot
-    take is refused here, before ``fit_anneal`` is called and before a
-    preset it ignores is warned of.
+    take is refused here, before ``fit_anneal`` is called. The warning of a
+    preset it ignores goes to the checks of the first bridge the method
+    calls, which give it once they pass; when it calls none, the warning is
+    given once it returns, and not when it raises.
     """
     fit = fitter.fit_anneal
     owner = f"{type(fitter).__name__}.fit_anneal()"
@@ -2127,13 +2167,20 @@ def _own_fit_anneal(
         if "method" in refused and "budget" not in refused:
             message += "; leave method out to run it as it stands"
         raise TypeError(message)
-    if ignored is not None:
-        why_not = ""
-        if not by_keyword("preset"):
-            takes = "'preset' only by position" if "preset" in positional else "no 'preset'"
-            why_not = f"{owner} takes {takes}"
-        _deprecated(_ignored_preset(method, call["method"], ignored, why_not))
-    return fit(*args, **call)
+    if ignored is None:
+        return fit(*args, **call)
+    why_not = ""
+    if not by_keyword("preset"):
+        takes = "'preset' only by position" if "preset" in positional else "no 'preset'"
+        why_not = f"{owner} takes {takes}"
+    handed = [(_site(), _ignored_preset(method, call["method"], ignored, why_not))]
+    token = _HANDED.set(handed)
+    try:
+        result = fit(*args, **call)
+    finally:
+        _HANDED.reset(token)
+    _give(handed)
+    return result
 
 
 def run_fitter(
@@ -2192,13 +2239,16 @@ def run_fitter(
     portfolio on a fitter without ``fit_anneal``. Each gives a FutureWarning
     and will raise in a future release. On a fitter without ``fit_anneal``
     the warning comes only once nothing is refused, so a refused call raises
-    its error alone. On a fitter's own ``fit_anneal`` it comes after
-    run_fitter's own checks, just before that method is called, and a preset
-    ignored so is not passed to it. The budget, the seed, the fitter's
-    bounds and the rest are that method's to check, so a refusal inside it,
-    such as :func:`run_benchmark`'s of a budget of 0, follows the warning,
-    and under ``warnings.simplefilter("error")`` the warning is raised
-    instead and the method is not called. A preset given to a ``fit_anneal``
+    its error alone. On a fitter's own ``fit_anneal`` a preset ignored so is
+    not passed to it, and the budget, the seed, the fitter's bounds and the
+    rest are that method's to check: the warning waits for the first of
+    :func:`fit_anneal`, :func:`fit_chemfit` and :func:`run_benchmark` that
+    the method calls, and comes once that call's checks pass, before
+    ``init``. So a refusal there, such as :func:`run_benchmark`'s of a
+    budget of 0, raises its error alone, and under
+    ``warnings.simplefilter("error")`` the warning is raised there in place
+    of the fit. When the method calls none of them, the warning comes once
+    it returns, and not when it raises. A preset given to a ``fit_anneal``
     that gets no method is passed, or refused, as any option is.
     """
     own = hasattr(fitter, "fit_anneal")
