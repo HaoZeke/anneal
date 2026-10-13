@@ -771,6 +771,30 @@ on 21 of the 40 seeds. At 1000 evaluations it still ends lower on 4 of
 the 40 seeds of =binary_lj_fit_plain= and 4 of =ternary_lj_fit=, and at
 5000 on 5 of =ternary_lj_fit=.
 
+At about ten evaluations per free coordinate =NgIohTuned= leads on the
+two larger fits: over the same 40 paired seeds the loop ends lower on 8
+seeds of =binary_lj_fit_plain@60= and higher on 32 (medians 2.82e3
+against 98.1, =q= 1.2e-8), and lower on 3 of =ternary_lj_fit@100= and
+higher on 37 (2.98e5 against 7.0e4, =q= 1.5e-10). Short of =5d(d+1)=
+evaluations the loop opens with a =cma= slice of at least =4(d+1)= from
+the start ([[*Values-only runs under Auto][above]]), so at 60
+evaluations on six coordinates its descent has 31, about four of its
+gradients. At about 17 evaluations per coordinate the two are level, on
+=binary_lj_fit_plain@100= (23/0/17, 26.9 against 44.7) and
+=ternary_lj_fit@200= (21/0/19); the loop is level on the pair fit at 20
+evaluations (23/0/17) and ahead at 30, 40, 50 and 100 (33/0/7, 36/0/4,
+28/0/12 and 22/11/7), and level on =binary_lj_fit= at 100 and 200
+(20/0/20 and 23/0/17). Against ChemFit's =Fitter.fit_nevergrad= with
+=NgIohTuned= the loop ends 8/0/32 and 3/0/37 at 60 and 100 evaluations
+on the larger fits, 23/0/17 and 22/0/18 at 100 and 200, and 23/0/17 and
+34/0/6 at 20 and 30 on the pair fit. Opening with the descent wherever
+the budget beyond the closing reserve cannot hold a =cma= slice and a
+descent slice after it brings =ternary_lj_fit@100= level (21/0/19) and
+=lj_pair_fit@20= to 24/0/16, but leaves =binary_lj_fit_plain@60= behind
+(12/0/28, =q= 4.8e-6) and would change the runs of four shared replicas
+on =lj13@1000=, whose shares of 250 evaluations fall in the same case,
+so the loop keeps its opening.
+
 ** A log-loss fit with minima on its faces
 
 =binary_lj_spaced= fits the six parameters of =binary_lj_fit=, epsilon
