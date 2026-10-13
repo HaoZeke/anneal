@@ -179,6 +179,28 @@ takes_batches = "batch_size" in inspect.signature(fitter.init).parameters
 best = fit_chemfit(fitter, 256, batch_size=4 if takes_batches else 1)
 #+end_src
 
+A caller that passes =batch_size= only to an anneal that takes it should
+check =anneal.chemfit.FEATURES=, a frozen set of strings that holds
+="batch_size"= wherever =fit_anneal=, =fit_chemfit= and =run_benchmark=
+take it, rather than a version or a source commit. No release up to
+0.11.1 has =FEATURES= or =batch_size=. The three bridges keep
+=batch_size= as a named parameter, so a check of =run_benchmark='s
+signature, the one an anneal without =FEATURES= allows, gives the same
+answer:
+
+#+begin_src python
+import inspect
+
+import anneal.chemfit
+
+features = getattr(anneal.chemfit, "FEATURES", None)
+if features is not None:
+    anneal_takes_batches = "batch_size" in features
+else:
+    run_benchmark = anneal.chemfit.run_benchmark
+    anneal_takes_batches = "batch_size" in inspect.signature(run_benchmark).parameters
+#+end_src
+
 =run_fitter= runs a =Fitter= by method name: ="global_optimize"=, the
 default, runs the portfolio, and ="sa"= runs its =preset=, =Boltzmann()=
 when none is given. A =Fitter= without a =fit_anneal= method of its own,
