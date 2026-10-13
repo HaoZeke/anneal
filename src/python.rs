@@ -3040,13 +3040,36 @@ impl Schedule {
         Ok(history)
     }
 
-    /// Runs `preset` on `obj` as it is.
+    /// The most epochs one start records, and so reserves room for once it
+    /// is called: all `n_epochs` unless its share of `max_evals` ends it
+    /// sooner, the first start's share being the largest.
+    fn recorded_epochs(&self) -> usize {
+        let cap = match self.starts {
+            Some(n_starts) => crate::runner::start_share(self.max_evals, n_starts.max(1), 0),
+            None => self.max_evals,
+        };
+        crate::runner::epochs_within(
+            self.n_epochs,
+            self.steps_per_epoch,
+            crate::runner::steps_within(cap),
+        )
+    }
+
+    /// Runs `preset` on `obj` as it is, refusing before any call a run
+    /// whose history cannot be allocated.
     fn run<O: Objective<f64> + Send + Sync>(
         &self,
         obj: O,
         preset: &Preset,
         start: Option<Array1<f64>>,
     ) -> PyResult<History> {
+        let epochs = self.recorded_epochs();
+        if !History::can_reserve(epochs) {
+            return Err(PyValueError::new_err(format!(
+                "n_epochs={} records {epochs} epochs, a history that cannot be allocated",
+                self.n_epochs
+            )));
+        }
         let law = |e| PyValueError::new_err(format!("{e}"));
         Ok(match preset {
             Preset::Boltzmann(p) => self.drive(
