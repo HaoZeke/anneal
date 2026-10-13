@@ -1923,8 +1923,8 @@ def global_optimize(
         likewise: it costs its unit of ``budget`` but no call, and
         ``n_evals`` and ``n_grads`` count calls. Persistent replicas are
         given ``x0``'s value and otherwise answer only the points each has
-        called itself, so each calls ``grad_fn`` at ``x0`` for itself and a
-        point two of them reach is called by each. With ``noise_sigma``
+        called itself, so a point two of them reach is called by each, and
+        the gradient at ``x0`` by each that asks for it. With ``noise_sigma``
         every evaluation is a call, at ``x0`` too, since a noisy value is a
         draw.
       replicas: portfolio instances sharing the aggregate budget. One, the
