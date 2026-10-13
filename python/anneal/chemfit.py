@@ -1511,8 +1511,11 @@ def chemfit_box(
     without bounds gets ``init +/- default_span``. The bounds of a float32 or
     float16 leaf are rounded inward to that dtype. A bound that is not
     finite, is inverted, overflows, or has no width is a ValueError naming
-    the parameter: the drivers need ``lower < upper``, and
-    :func:`fit_chemfit` holds a zero-width parameter fixed instead.
+    the parameter, so that every driver takes the box: :func:`anneal.run`,
+    :func:`anneal.run_qmc`, :func:`anneal.global_optimize` and
+    :func:`anneal.minimize` hold a zero-width coordinate fixed, and so does
+    :func:`fit_chemfit` with a zero-width parameter, but others, such as
+    :func:`anneal.run_hmc`, need ``lower < upper``.
     """
     layout = vector._layout
     with _Strings("chemfit_box"):
@@ -1524,7 +1527,7 @@ def chemfit_box(
         raise ValueError(
             f"ChemFit bound for {layout.name(fixed)!r} is empty: "
             f"lower={float(low[fixed])} upper={float(high[fixed])}; "
-            "a driver box needs lower < upper"
+            "chemfit_box needs lower < upper, as some drivers do"
         )
     return low, high
 

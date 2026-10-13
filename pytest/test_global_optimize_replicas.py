@@ -163,7 +163,7 @@ REFUSED = {
     "zero budget": ({"budget": 0}, ValueError, "budget must be positive"),
     "budget not a number": ({"budget": "abc"}, ValueError, "invalid literal"),
     "negative seed": ({"seed": -1}, OverflowError, None),
-    "low above high": ({"low": [2.0, -1.0]}, ValueError, "strictly less than"),
+    "low above high": ({"low": [2.0, -1.0]}, ValueError, "less than or equal to"),
     "low of length 3": ({"low": [-1.0, -1.0, -1.0]}, ValueError, "same length"),
     "low not finite": ({"low": [np.nan, -1.0]}, ValueError, "must be finite"),
 }

@@ -148,10 +148,12 @@ assert result["n_evals"] == result["charged"] <= 2003
 assert len(result["replicas"]) == 4
 #+end_src
 
-The portfolio requires finite positive-width intervals. Fixed-axis box search
-uses the separate convenience domain mapping described below. A caller-owned
-native objective handle passed to =global_optimize_objective= retains its
-single-portfolio interface. ChemFit's =fit_anneal=, on its default portfolio
+The portfolio requires finite positive-width intervals; the Python
+=global_optimize= runs it on the free coordinates of a box with fixed ones.
+Fixed-axis box search uses the separate convenience domain mapping described
+below. A caller-owned native objective handle passed to
+=global_optimize_objective= retains its single-portfolio interface.
+ChemFit's =fit_anneal=, on its default portfolio
 driver, runs =global_optimize= from the fitter's start, or batch replicas of
 =minimize= with =batch_size= above one; it does not implicitly select the
 portfolio ensemble shown here.
@@ -288,16 +290,19 @@ length or introduce a separate optimization loop.
 The two =replicas= keywords meet where both apply. =global_optimize(...,
 x0=x0, replicas=R)= with no =grad_fn= or =noise_sigma= under the auto policy
 runs the same batch replicas, its =coverage_shared= standing for =history=,
-so =minimize= on a box with no fixed coordinate repeats it call for call,
-as it repeats =global_optimize= with one replica. Its other replica runs are
-the persistent controllers above, which split the budget between private
-archives and exchange paid proposal positions; =minimize= has no such mode,
-and with =jac= it runs one replica.
+so =minimize= repeats it call for call, as it repeats =global_optimize=
+with one replica. Its other replica runs are the persistent controllers
+above, which split the budget between private archives and exchange paid
+proposal positions; =minimize= has no such mode, and with =jac= it runs one
+replica.
 
 The declared box contains finite closed intervals. Equal endpoints fix an
 axis while every objective and gradient callback retains the full design
-dimension. The one-replica values portfolio searches the free coordinates
-through a compact index map; fixed axes require no dense basis matrix.
+dimension. =minimize=, =global_optimize=, =run= and =run_qmc= make the
+calls of the same search on the free coordinates, and one call when every
+coordinate is fixed. The one-replica values portfolio searches the free
+coordinates through a compact index map; fixed axes require no dense basis
+matrix.
 A fully fixed one-replica values box has one possible point and evaluates
 it once. The box hop paths preserve fixed axes directly.
 

@@ -7,8 +7,11 @@ use ndarray::ArrayView1;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+use super::FixedCoordinates;
 use crate::methods::portfolio::{PortfolioEnsembleConfig, portfolio_ensemble_optimize};
 
+/// Runs the replicas and returns their dict, every position in it completed
+/// with the values of `fixed` when it is given.
 pub(super) fn run<O, G>(
     py: Python<'_>,
     obj: &O,
@@ -16,14 +19,19 @@ pub(super) fn run<O, G>(
     seed: u64,
     x0: Option<ArrayView1<f64>>,
     config: &PortfolioEnsembleConfig,
+    fixed: Option<&FixedCoordinates>,
 ) -> PyResult<Py<PyDict>>
 where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
-    let result = super::with_replica_threads(py, || {
+    let mut result = super::with_replica_threads(py, || {
         portfolio_ensemble_optimize(obj, grad, seed, x0, config)
     });
+    result.best_pos = FixedCoordinates::complete(fixed, result.best_pos);
+    for replica in &mut result.replicas {
+        replica.best_pos = FixedCoordinates::complete(fixed, std::mem::take(&mut replica.best_pos));
+    }
     let mut totals = BTreeMap::new();
     for replica in &result.replicas {
         for arm in &replica.arm_stats {

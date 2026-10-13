@@ -30,8 +30,10 @@ use eindir_core::{Bounds, Objective};
 
 use crate::history::History;
 use crate::variant::{boltzmann_in_box, fast_in_box, gsa_in_box};
+use free_coordinates::FixedCoordinates;
 
 mod device;
+mod free_coordinates;
 mod portfolio_peers;
 
 /// Drop the GIL before native search that may call back into Python.
@@ -2479,7 +2481,11 @@ fn bfwt_optimize(
 ///
 /// Args:
 ///   obj_fn: Python callable `f(numpy.ndarray) -> float`.
-///   low, high: numpy box bounds.
+///   low, high: numpy box bounds. A coordinate whose two ends are equal is
+///            fixed: the run makes the calls of the same run on the other
+///            coordinates, each point completed with the fixed values, and
+///            with every coordinate fixed it is one call at `x0`, or at
+///            `low` without it.
 ///   budget: combined objective + gradient evaluation budget.
 ///   seed: RNG seed.
 ///   grad_fn: optional gradient callable; enables the gradient arms
@@ -2507,7 +2513,7 @@ fn global_optimize(
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    validate_box_bounds(&low_vec, &high_vec)?;
+    validate_box_domain(&low_vec, &high_vec, true)?;
     if budget == 0 {
         return Err(PyValueError::new_err("budget must be positive"));
     }
@@ -2541,62 +2547,125 @@ fn global_optimize(
         ));
     }
     give_future_warnings(py, &future_warnings)?;
-    let x0_view = start.as_ref().map(|x| x.view());
-    if replicas > 1 {
-        if let Some(x0) = x0_view
-            && grad_fn.is_none()
-            && noise_sigma.is_none()
-            && pol == crate::PortfolioPolicy::Auto
-        {
-            let archive = if coverage_shared {
-                crate::ReplicaArchive::Shared
-            } else {
-                crate::ReplicaArchive::Private
-            };
-            return batch_replicas(py, &obj, budget, seed, x0, replicas, archive);
-        }
-        let config = crate::methods::portfolio::PortfolioEnsembleConfig {
-            replicas,
-            budget,
-            noise_sigma,
-            policy: pol,
-            coverage: crate::methods::BoxCoverageConfig {
-                shared: coverage_shared,
-                radius: coverage_radius,
-                neighbors: coverage_neighbors,
-                ..crate::methods::BoxCoverageConfig::default()
-            },
-        };
-        let grad = grad_fn.map(|fn_| CallablePyGradient::new(fn_, dim, &errors));
-        let out = portfolio_peers::run(py, &obj, grad.as_ref(), seed, x0_view, &config);
-        errors.finish(py)?;
-        return out;
-    }
-    let result = match grad_fn {
-        Some(grad_fn) => {
-            let grad = CallablePyGradient::new(grad_fn, dim, &errors);
-            crate::portfolio_optimize_from(
-                &obj,
-                Some(&grad),
-                budget,
-                seed,
-                noise_sigma,
-                pol,
-                x0_view,
-            )
-        }
-        None => crate::portfolio_optimize_from::<_, CallablePyGradient>(
-            &obj,
-            None,
-            budget,
-            seed,
-            noise_sigma,
-            pol,
-            x0_view,
-        ),
+    let grad = grad_fn.map(|fn_| CallablePyGradient::new(fn_, dim, &errors));
+    let search = PortfolioSearch {
+        budget,
+        seed,
+        noise_sigma,
+        policy: pol,
+        replicas,
+        coverage: crate::methods::BoxCoverageConfig {
+            shared: coverage_shared,
+            radius: coverage_radius,
+            neighbors: coverage_neighbors,
+            ..crate::methods::BoxCoverageConfig::default()
+        },
     };
-    errors.finish(py)?;
-    portfolio_result_to_dict(py, result)
+    let template = start.clone().unwrap_or_else(|| obj.bounds().low.clone());
+    let Some(fixed) = FixedCoordinates::of(obj.bounds(), template) else {
+        let x0_view = start.as_ref().map(|x| x.view());
+        return search.run(py, &obj, grad.as_ref(), x0_view, &errors, None);
+    };
+    if fixed.all() {
+        let best_val = obj.eval(fixed.template().view());
+        errors.finish(py)?;
+        let result = crate::PortfolioResult {
+            best_pos: fixed.template().to_vec(),
+            best_val,
+            n_evals: 1,
+            n_grads: 0,
+            arm_stats: Vec::new(),
+            hop_state: None,
+        };
+        return portfolio_result_to_dict(py, result);
+    }
+    let free_obj = fixed.objective(&obj);
+    let free_grad = grad.as_ref().map(|grad| fixed.gradient(grad));
+    let free_start = start.map(|x| fixed.free_part(x.view()));
+    let x0_view = free_start.as_ref().map(|x| x.view());
+    search.run(
+        py,
+        &free_obj,
+        free_grad.as_ref(),
+        x0_view,
+        &errors,
+        Some(&fixed),
+    )
+}
+
+/// The settings of a `global_optimize` call once its box is set aside.
+struct PortfolioSearch {
+    budget: usize,
+    seed: u64,
+    noise_sigma: Option<f64>,
+    policy: crate::PortfolioPolicy,
+    replicas: usize,
+    coverage: crate::methods::BoxCoverageConfig,
+}
+
+impl PortfolioSearch {
+    /// Runs the search on `obj`, whose positions the result completes with
+    /// the values of `fixed` when it is given.
+    fn run<O, G>(
+        &self,
+        py: Python<'_>,
+        obj: &O,
+        grad: Option<&G>,
+        x0: Option<ArrayView1<f64>>,
+        errors: &CallbackErrors,
+        fixed: Option<&FixedCoordinates>,
+    ) -> PyResult<Py<PyDict>>
+    where
+        O: Objective<f64>,
+        G: eindir_core::Gradient<f64>,
+    {
+        if self.replicas > 1 {
+            if let Some(x0) = x0
+                && grad.is_none()
+                && self.noise_sigma.is_none()
+                && self.policy == crate::PortfolioPolicy::Auto
+            {
+                let archive = if self.coverage.shared {
+                    crate::ReplicaArchive::Shared
+                } else {
+                    crate::ReplicaArchive::Private
+                };
+                return batch_replicas(
+                    py,
+                    obj,
+                    errors,
+                    self.budget,
+                    self.seed,
+                    x0,
+                    self.replicas,
+                    archive,
+                    fixed,
+                );
+            }
+            let config = crate::methods::portfolio::PortfolioEnsembleConfig {
+                replicas: self.replicas,
+                budget: self.budget,
+                noise_sigma: self.noise_sigma,
+                policy: self.policy,
+                coverage: self.coverage.clone(),
+            };
+            let out = portfolio_peers::run(py, obj, grad, self.seed, x0, &config, fixed);
+            errors.finish(py)?;
+            return out;
+        }
+        let mut result = crate::portfolio_optimize_from(
+            obj,
+            grad,
+            self.budget,
+            self.seed,
+            self.noise_sigma,
+            self.policy,
+            x0,
+        );
+        errors.finish(py)?;
+        result.best_pos = FixedCoordinates::complete(fixed, result.best_pos);
+        portfolio_result_to_dict(py, result)
+    }
 }
 
 /// Runs the portfolio global optimizer with a native objective handle.
@@ -2708,24 +2777,39 @@ fn global_optimize_replicas(
     give_future_warnings(py, &future_warnings)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
-    batch_replicas(py, &obj, budget, seed, start.view(), replicas, mode)
+    let errors = obj.errors();
+    batch_replicas(
+        py,
+        &obj,
+        &errors,
+        budget,
+        seed,
+        start.view(),
+        replicas,
+        mode,
+        None,
+    )
 }
 
 /// Runs [`crate::portfolio_replicas`] with the interpreter lock released and
-/// returns the portfolio dict with `n_batches` added.
-fn batch_replicas(
+/// returns the portfolio dict with `n_batches` added, its best position
+/// completed with the values of `fixed` when it is given.
+fn batch_replicas<O: Objective<f64>>(
     py: Python<'_>,
-    obj: &CallableObjective,
+    obj: &O,
+    errors: &CallbackErrors,
     budget: usize,
     seed: u64,
     x0: ArrayView1<f64>,
     replicas: usize,
     archive: crate::ReplicaArchive,
+    fixed: Option<&FixedCoordinates>,
 ) -> PyResult<Py<PyDict>> {
-    let result = with_replica_threads(py, || {
+    let mut result = with_replica_threads(py, || {
         crate::portfolio_replicas(obj, budget, seed, x0, replicas, archive)
     });
-    obj.errors().finish(py)?;
+    errors.finish(py)?;
+    result.portfolio.best_pos = FixedCoordinates::complete(fixed, result.portfolio.best_pos);
     let out = portfolio_result_to_dict(py, result.portfolio)?;
     out.bind(py).set_item("n_batches", result.batches)?;
     Ok(out)
@@ -2801,6 +2885,11 @@ impl Preset {
 /// The start costs one evaluation, so the run makes
 /// `1 + n_epochs * steps_per_epoch` calls to `obj_fn`, or `max_evals` when
 /// that is smaller.
+///
+/// A coordinate whose two ends are equal is fixed: the run makes the calls of
+/// the same run on the other coordinates, each point completed with the fixed
+/// values. With every coordinate fixed, the run is one call at `x0`, or at
+/// `low` without it, and has no epochs.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, preset, n_epochs = 100, steps_per_epoch = 200, seed = 42, x0 = None, max_evals = None))]
 fn run(
@@ -2817,32 +2906,116 @@ fn run(
 ) -> PyResult<PyHistory> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    validate_box_bounds(&low_vec, &high_vec)?;
+    validate_box_domain(&low_vec, &high_vec, true)?;
     preset.validate()?;
     validate_max_evals(max_evals)?;
     let start = read_x0(x0, &low_vec, &high_vec)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
-    let history = match preset {
-        Preset::Boltzmann(p) => {
-            let v = boltzmann_in_box(obj, p.t_init, p.sigma)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, start, max_evals)
-        }
-        Preset::Fast(p) => {
-            let v = fast_in_box(obj, p.t_init, p.gamma)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, start, max_evals)
-        }
-        Preset::Gsa(p) => {
-            let v = gsa_in_box(obj, p.t_init, p.q_v, p.q_a)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_variant_from(v, n_epochs, steps_per_epoch, seed, start, max_evals)
-        }
+    let schedule = Schedule {
+        starts: None,
+        n_epochs,
+        steps_per_epoch,
+        seed,
+        max_evals,
     };
+    let history = schedule.run_in_box(obj, &preset, start)?;
     errors.finish(py)?;
     Ok(PyHistory::from(history))
+}
+
+/// How `run` or `run_qmc` drives a preset: from one start, or from
+/// `starts` low-discrepancy ones.
+struct Schedule {
+    starts: Option<usize>,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    max_evals: Option<usize>,
+}
+
+impl Schedule {
+    /// Runs `preset` on the box of `obj`. Fixed coordinates are held: the
+    /// run searches the free ones, or is one evaluation at its start when
+    /// none is free.
+    fn run_in_box(
+        &self,
+        obj: CallableObjective,
+        preset: &Preset,
+        start: Option<Array1<f64>>,
+    ) -> PyResult<History> {
+        let template = start.clone().unwrap_or_else(|| obj.bounds().low.clone());
+        let Some(fixed) = FixedCoordinates::of(obj.bounds(), template) else {
+            return self.run(obj, preset, start);
+        };
+        if fixed.all() {
+            let once = Schedule {
+                starts: None,
+                max_evals: Some(1),
+                ..*self
+            };
+            let template = fixed.template().clone();
+            return once.run(obj, preset, Some(template));
+        }
+        let free_start = start.map(|x| fixed.free_part(x.view()));
+        let mut history = self.run(fixed.objective(&obj), preset, free_start)?;
+        history.best.pos = fixed.full(history.best.pos.view());
+        Ok(history)
+    }
+
+    /// Runs `preset` on `obj` as it is.
+    fn run<O: Objective<f64> + Send + Sync>(
+        &self,
+        obj: O,
+        preset: &Preset,
+        start: Option<Array1<f64>>,
+    ) -> PyResult<History> {
+        let law = |e| PyValueError::new_err(format!("{e}"));
+        Ok(match preset {
+            Preset::Boltzmann(p) => self.drive(
+                boltzmann_in_box(obj, p.t_init, p.sigma).map_err(law)?,
+                start,
+            ),
+            Preset::Fast(p) => self.drive(fast_in_box(obj, p.t_init, p.gamma).map_err(law)?, start),
+            Preset::Gsa(p) => {
+                self.drive(gsa_in_box(obj, p.t_init, p.q_v, p.q_a).map_err(law)?, start)
+            }
+        })
+    }
+
+    fn drive<O, C, N, M, A>(
+        &self,
+        variant: crate::variant::SaVariant<f64, O, C, N, M, A>,
+        start: Option<Array1<f64>>,
+    ) -> History
+    where
+        O: Objective<f64> + Send + Sync,
+        C: crate::cool::Cooling<f64> + Clone,
+        N: crate::neigh::Neighborhood<f64>,
+        M: crate::movekernel::MoveKernel<f64>,
+        A: crate::accept::AcceptRule<f64>,
+    {
+        match self.starts {
+            Some(n_starts) => crate::runner::run_rs_qmc_variant_from(
+                variant,
+                n_starts,
+                self.n_epochs,
+                self.steps_per_epoch,
+                self.seed,
+                start,
+                self.max_evals,
+            ),
+            None => crate::runner::run_rs_variant_from(
+                variant,
+                self.n_epochs,
+                self.steps_per_epoch,
+                self.seed,
+                start,
+                self.max_evals,
+            ),
+        }
+    }
 }
 
 /// Low-discrepancy points scaled to the supplied box bounds.
@@ -2898,7 +3071,8 @@ fn pilot_draws_qmc(n: usize, seed: u64) -> PyResult<Vec<Vec<f64>>> {
 /// evaluation, so the run makes `n_starts * (1 + n_epochs * steps_per_epoch)`
 /// calls to `obj_fn`, and every one of them lies inside `[low, high]`.
 /// `max_evals`, when supplied, is split as evenly as possible over the starts
-/// and caps the total.
+/// and caps the total. Fixed coordinates are held as `run` holds them, the
+/// design spanning the free ones.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, preset, n_starts = 8, n_epochs = 100, steps_per_epoch = 200, seed = 42, x0 = None, max_evals = None))]
 fn run_qmc(
@@ -2945,47 +3119,14 @@ fn run_qmc(
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
-    let history = match preset {
-        Preset::Boltzmann(p) => {
-            let v = boltzmann_in_box(obj, p.t_init, p.sigma)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_qmc_variant_from(
-                v,
-                n_starts,
-                n_epochs,
-                steps_per_epoch,
-                seed,
-                start,
-                max_evals,
-            )
-        }
-        Preset::Fast(p) => {
-            let v = fast_in_box(obj, p.t_init, p.gamma)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_qmc_variant_from(
-                v,
-                n_starts,
-                n_epochs,
-                steps_per_epoch,
-                seed,
-                start,
-                max_evals,
-            )
-        }
-        Preset::Gsa(p) => {
-            let v = gsa_in_box(obj, p.t_init, p.q_v, p.q_a)
-                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs_qmc_variant_from(
-                v,
-                n_starts,
-                n_epochs,
-                steps_per_epoch,
-                seed,
-                start,
-                max_evals,
-            )
-        }
+    let schedule = Schedule {
+        starts: Some(n_starts),
+        n_epochs,
+        steps_per_epoch,
+        seed,
+        max_evals,
     };
+    let history = schedule.run_in_box(obj, &preset, start)?;
     errors.finish(py)?;
     Ok(PyHistory::from(history))
 }
