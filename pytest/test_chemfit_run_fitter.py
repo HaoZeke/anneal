@@ -10,9 +10,10 @@ others try what else a signature can do: take the budget alone, leave out
 the seed or the budget, or take parameters only by position. The next has
 neither session pair, which the bridges that drive the session themselves
 refuse before ``init``, while ``run_fitter`` hands it to its ``fit_anneal``
-with the budget and the seed unchecked. The last three run ``run_benchmark``
-again after it refuses a budget, on a worker thread, and on a worker thread
-given a wrapper of the fitter in its place.
+with the budget and the seed unchecked. The last four run ``run_benchmark``
+again after it refuses a budget, on a worker thread, on a worker thread
+given a wrapper of the fitter in its place, and once told to, so that a
+bridge no ``run_fitter`` called can run while the method waits.
 """
 
 import concurrent.futures
@@ -25,6 +26,7 @@ import sys
 import threading
 import types
 import warnings
+import weakref
 
 import numpy as np
 import pytest
@@ -283,6 +285,52 @@ def _closures(fitter):
     )
 
 
+class SlottedBeside(SlottedSession):
+    """Keeps the fitter in a slot, with a slot for a value beside it."""
+
+    __slots__ = ("beside",)
+
+
+class _Gone:
+    pass
+
+
+def _dead_proxy():
+    """A weakref.proxy of an object since collected, whose ``__class__`` cannot be read."""
+    proxy = weakref.proxy(_Gone())
+    pytest.raises(ReferenceError, getattr, proxy, "__class__")
+    return proxy
+
+
+class Unreadable:
+    """A value whose ``__class__`` raises when read; ``reads`` counts the tries."""
+
+    reads = 0
+
+    def __getattribute__(self, name):
+        if name == "__class__":
+            type(self).reads += 1
+            raise RuntimeError("__class__ cannot be read")
+        return object.__getattribute__(self, name)
+
+
+def _beside(wrap, value):
+    """``wrap``, with ``value`` held as the wrapper's attribute ``beside``."""
+
+    def wrapped(fitter):
+        wrapper = wrap(fitter)
+        wrapper.beside = value
+        return wrapper
+
+    return wrapped
+
+
+class DeadInClass(Session):
+    """Keeps the fitter in its ``__dict__``; its class holds a proxy of a collected object."""
+
+    registry = _dead_proxy()
+
+
 class WrapperThreadFitter(ThreadFitter):
     """Runs ``run_benchmark`` on a worker thread, given ``wrap(self)`` in place of itself."""
 
@@ -295,6 +343,20 @@ class WrapperThreadFitter(ThreadFitter):
         }
         with concurrent.futures.ThreadPoolExecutor(1) as pool:
             return pool.submit(run_benchmark, context, method=method, seed=seed).result()
+
+
+class WaitingFitter(Handed):
+    """Sets ``inside`` in its own ``fit_anneal``, then runs ``run_benchmark`` once ``go`` is set."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.inside = threading.Event()
+        self.go = threading.Event()
+
+    def fit_anneal(self, budget, *, method="portfolio", seed=0):
+        self.inside.set()
+        assert self.go.wait(60)
+        return self._benchmark(budget, method=method, seed=seed)
 
 
 def _fitter(kind=ReleasedFitter, bounds=None, fail=None):
@@ -760,6 +822,89 @@ def test_a_wrapper_of_closures_on_another_thread_has_the_warning_once_the_method
             run_fitter(fitter, 60, preset=Fast())
     assert str(caught.value) == warning
     assert fitter.calls[0] == "init" and fitter.calls[-1] == "finish"
+
+
+def _handed(wrap):
+    """``_wrapper_fitter(wrap)`` once ``run_fitter`` has handed it an ignored Fast preset.
+
+    Each warning is logged among the fitter's calls with whether it came on the worker.
+    """
+    fitter = _wrapper_fitter(wrap)
+    caller = threading.get_ident()
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        warnings.showwarning = lambda message, category, *rest: fitter.calls.append(
+            (category, threading.get_ident() != caller)
+        )
+        run_fitter(fitter, 60, preset=Fast())
+    return fitter
+
+
+_UNREADABLE = pytest.mark.parametrize("value", [_dead_proxy, Unreadable], ids=["proxy", "raises"])
+_HOLDERS = ["dict", "slot", "closures"]
+
+
+@_UNREADABLE
+@pytest.mark.parametrize(
+    "wrap, early", [(Session, True), (SlottedBeside, True), (_closures, False)], ids=_HOLDERS
+)
+def test_a_bridge_on_another_thread_passes_over_a_value_whose_class_cannot_be_read(
+    wrap, early, value
+):
+    Unreadable.reads = 0
+    fitter = _handed(_beside(wrap, value()))
+    alone = _handed(wrap)
+    assert fitter.calls == alone.calls and _same_run(fitter, alone)
+    assert Unreadable.reads == 0
+    if early:
+        assert fitter.calls[:2] == [(FutureWarning, True), "init"]
+    else:
+        assert fitter.calls[-2:] == ["finish", (FutureWarning, False)]
+
+
+def test_a_bridge_on_another_thread_passes_over_a_class_attribute_it_cannot_read():
+    fitter = _handed(DeadInClass)
+    alone = _handed(Session)
+    assert fitter.calls == alone.calls and _same_run(fitter, alone)
+    assert fitter.calls[:2] == [(FutureWarning, True), "init"]
+
+
+@_UNREADABLE
+@pytest.mark.parametrize("wrap", [Session, SlottedBeside, _closures], ids=_HOLDERS)
+def test_a_bridge_no_run_fitter_called_runs_beside_a_hand_off_given_a_value_it_cannot_read(
+    wrap, value
+):
+    def run(fitter):
+        context = {
+            "fitter": _beside(wrap, value())(fitter),
+            "budget": 40,
+            "initial_params": fitter.initial_parameters,
+        }
+        return run_benchmark(context, method="portfolio", seed=0)
+
+    alone = _fitter(NextFitter)
+    run(alone)
+    Unreadable.reads = 0
+    other, fitter = _fitter(WaitingFitter), _fitter(NextFitter)
+    caller = threading.get_ident()
+    seen = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        warnings.showwarning = lambda message, category, *rest: seen.append(
+            (category, threading.get_ident() == caller)
+        )
+        with concurrent.futures.ThreadPoolExecutor(1) as pool:
+            handing = pool.submit(run_fitter, other, 40, preset=Fast())
+            assert other.inside.wait(60)
+            try:
+                run(fitter)
+            finally:
+                other.go.set()
+            handing.result()
+    assert fitter.calls == alone.calls and _same_run(fitter, alone)
+    assert Unreadable.reads == 0
+    assert seen == [(FutureWarning, False)]
+    assert other.calls[0] == "init" and other.calls[-1] == "finish"
 
 
 def test_a_fit_anneal_that_calls_no_bridge_has_the_warning_once_it_returns():

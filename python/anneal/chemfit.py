@@ -354,7 +354,11 @@ def _within(subject: Any) -> list[Any]:
 
     The attributes are those of the instance's ``__dict__`` and slots, so a
     wrapper that keeps a fitter, or the fitter's methods, such as a session
-    that wraps the fitter, leads to the fitter.
+    that wraps the fitter, leads to the fitter. Each value is told apart by
+    its type alone, never by reading its ``__class__``, which can fail, as
+    for a proxy of a collected object, or build something. Neither type
+    tested can be subclassed, so for a value whose ``__class__`` is its type
+    the answer is the one ``isinstance`` gives.
     """
     values: list[Any] = []
     try:
@@ -363,12 +367,12 @@ def _within(subject: Any) -> list[Any]:
         pass
     for kind in type(subject).__mro__:
         for slot in list(vars(kind).values()):
-            if isinstance(slot, types.MemberDescriptorType):
+            if type(slot) is types.MemberDescriptorType:
                 try:
                     values.append(slot.__get__(subject, kind))
                 except AttributeError:
                     pass
-    held = [value.__self__ if isinstance(value, types.MethodType) else value for value in values]
+    held = [value.__self__ if type(value) is types.MethodType else value for value in values]
     return [subject, *held]
 
 
