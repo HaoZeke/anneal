@@ -206,6 +206,63 @@ from the box metric scaled by its latest curvature pair: kept, it
 refused direction after direction, and the descent crept toward the
 floor of the same fit on steepest-descent steps.
 
+Most of that indefiniteness comes from the updates' own asymmetry.
+Each update adds its rank-two term entry by entry, so the two triangles
+of the approximation round apart, and through the approximation's
+product with the next difference of gradients the asymmetry enters the
+next update as an indefinite symmetric term. The descent starts over 28
+times in the 40 runs of =binary_lj_spaced@5000=, 38 times in those of
+=binary_lj_fit@5000= and 1393 times in 546 runs on problems built to
+strain its approximation, runs of a grid of such problems: base-10
+logarithms of quadratics of condition =1e6= to =1e12=, of Rosenbrock's
+function and of a two-exponential fit's squared error, and that error
+itself, at 1000 to 20000 evaluations with one replica and with four.
+With each entry of the updates computed once for both triangles it
+started over 4, 0 and 74 times. In each of those 78 the approximation
+first lost positive definiteness at an update whose rounding, =eps=
+times its largest entries before or after the update, exceeded its
+smallest eigenvalue before it, while its pairs replayed in 60-digit
+arithmetic keep it positive definite; in 4 that update's pair had
+=cos(s, y)= below =1e-4=, in none below =sqrt(eps)=.
+
+Each way of preventing the indefiniteness that was measured ended the
+loop higher on some of the cells and rows below, by a one-sided sign
+test at 0.05 over the same 40 paired seeds against the loop as it is;
+the figures give the two medians, W/T/L and that test's probability.
+The symmetric updates move nearly every run longer than a few hundred
+evaluations, and the loop then ended higher on
+=binary_lj_fit_plain@500= (0.01400 against 0.01402, 14/0/26, 0.040),
+=ellS100@5000= (3790 against 3740, 14/0/26, 0.040) and =levyR30@5000=
+(0.589 against 0.633, 12/4/24, 0.033) and lower on
+=binary_lj_spaced@500= (-8.70 against -8.67, 23/5/12, 0.045), level on
+the other cells and rows; it ended higher on 189 of the 546 runs and
+lower on 147 (0.013), and was level on the 1500 runs of the grid at
+1000 and 5000 evaluations (557/375/568). Skipping as well each pair
+whose =cos(s, y)= is at most =1e-4= skipped 66797 pairs in 180 of
+the 546 runs and left 77 start-overs there; the loop then ended lower
+on =binary_lj_fit_plain@1000= (1.48e-4 against 9.78e-5, 27/0/13,
+0.019) and on =binary_lj_spaced@500= as before, higher on the same two
+rows, on 209 of the 546 runs against 126 lower (3.4e-6) and on 597 of
+the 1500 against 529 lower (0.023). Damped as well, as Powell damps the
+direct update, the updates left 29 start-overs in the 546 runs, but the
+loop ended higher on 229 of them against 116 lower (5.9e-10) and on 636
+of the 1500 against 509 lower (9.7e-5), on =binary_lj_fit_plain@200=
+(0.475 against 0.358, 7/1/32, 3.5e-5), =ternary_lj_fit@500= (216
+against 90.5, 8/0/32, 9.1e-5), three more plain-loss cells, nine
+ellipsoid rows and =rosen30@5000= with its =+1e2= and =x1e-6= copies,
+and lower only on =binary_lj_fit@5000=, the runs of =fit6@5000= (-13.7
+against -13.5, 28/0/12, 0.0083). With the inverse update damped
+likewise, 16 start-overs were left in the 546 runs, and the loop ended
+lower on 233 of them against 129 higher (2.5e-8), on 599 of the 1500
+against 525 higher (0.015), on =binary_lj_fit@5000= (-14.1 against
+-13.5, 27/0/13, 0.019) and on =binary_lj_spaced@500= (-9.59 against
+-8.67, 29/3/8, 3.8e-4), but higher on =binary_lj_fit@1000= (-4.74
+against -4.87, 13/0/27, 0.019), =lj_pair_fit@50= (0.864 against 0.767,
+10/6/24, 0.012), =ternary_lj_fit@500= (145 against 90.5, 12/3/25,
+0.024) and two of the three further sets of spaced clusters at 1000.
+The updates stay as they are, and the start-over repairs what their
+rounding breaks.
+
 The descent also keeps a second BFGS model, of the logarithm of its
 values, while every value it has started from or accepted is positive.
 Along a step a quadratic changes by the step times the mean of its
