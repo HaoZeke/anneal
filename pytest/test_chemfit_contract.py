@@ -21,9 +21,11 @@ from chemfit_doubles import (  # noqa: E402
     DRIVERS,
     ENTRIES,
     PROTOCOLS,
+    BatchFitter,
     ReleasedFitter,
     drive,
     same_params,
+    sum_of_squares,
 )
 
 
@@ -428,3 +430,44 @@ def test_a_fit_with_every_parameter_fixed_evaluates_the_start_once(entry):
     assert fitter.calls[0] == "init" and fitter.calls[-1] == "finish"
     assert fitter.calls.count("ask") == 1
     assert same_params(out, fitter.evaluated[0])
+
+
+def _without_pinned(params):
+    return {key: value for key, value in params.items() if key != "pinned"}
+
+
+def _pinned_fitter(kind, pinned):
+    """A fit of ``a`` and ``b``, with a fixed parameter ``pinned`` between them
+    when ``pinned`` is true; the loss leaves ``pinned`` out."""
+    initial = {"a": np.array([0.3, -0.4]), "pinned": 0.5, "b": 0.1}
+    bounds = {"a": (-1.0, 1.0), "pinned": (0.5, 0.5), "b": (-1.0, 1.0)}
+    if not pinned:
+        initial, bounds = _without_pinned(initial), _without_pinned(bounds)
+    return kind(initial, bounds, loss=lambda params: sum_of_squares(_without_pinned(params)))
+
+
+@pytest.mark.parametrize(
+    ("kind", "driver", "batch_size"),
+    [
+        (ReleasedFitter, "portfolio", None),
+        (ReleasedFitter, "boltzmann", None),
+        (ReleasedFitter, "gsa", None),
+        (BatchFitter, "portfolio", 3),
+    ],
+    ids=["portfolio", "boltzmann", "gsa", "batches"],
+)
+@pytest.mark.parametrize("entry", ENTRIES)
+def test_a_fixed_parameter_leaves_the_fit_of_the_others_as_it_is_without_it(
+    entry, kind, driver, batch_size
+):
+    if batch_size is not None and entry == "run_fitter":
+        pytest.skip("run_fitter passes no batch_size")
+    keywords = {} if batch_size is None else {"batch_size": batch_size}
+    pinned, alone = _pinned_fitter(kind, True), _pinned_fitter(kind, False)
+    out = drive(entry, pinned, 150, driver=driver, **keywords)
+    expected = drive(entry, alone, 150, driver=driver, **keywords)
+    assert pinned.calls == alone.calls
+    assert len(pinned.evaluated) == len(alone.evaluated) > 1
+    for mine, theirs in zip([*pinned.evaluated, out], [*alone.evaluated, expected]):
+        assert mine["pinned"] == 0.5
+        assert same_params(_without_pinned(mine), theirs)
