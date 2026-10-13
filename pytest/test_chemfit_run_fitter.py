@@ -14,6 +14,7 @@ with the budget and the seed unchecked.
 """
 
 import functools
+import inspect
 import warnings
 
 import numpy as np
@@ -405,27 +406,68 @@ def test_a_preset_the_method_does_not_run_is_ignored_for_a_fit_anneal_too(
     ],
     ids=["budget-0", "seed-minus-1", "steps-per-epoch-0", "empty-bounds"],
 )
-def test_a_refusal_inside_a_fit_anneal_follows_the_warning_given_before_the_call(
+def test_a_refusal_inside_a_fit_anneal_comes_without_the_warning(
     kind, why_not, budget, options, bounds, message
 ):
-    warning = _ignored_fast("global_optimize", "the portfolio", why_not)
     own, plain = _fitter(kind, bounds), _fitter(NextFitter, bounds)
-    for fitter, warned in ((own, [(FutureWarning, warning)]), (plain, [])):
-        with warnings.catch_warnings(record=True) as record:
-            warnings.simplefilter("always")
-            with pytest.raises(ValueError) as caught:
-                run_fitter(fitter, budget, preset=Fast(), **options)
-        assert str(caught.value) == message
-        assert [(w.category, str(w.message)) for w in record] == warned
+    for fitter in (own, plain):
+        for action in ("always", "error"):
+            with warnings.catch_warnings(record=True) as record:
+                warnings.simplefilter(action)
+                with pytest.raises(ValueError) as caught:
+                    run_fitter(fitter, budget, preset=Fast(), **options)
+            assert str(caught.value) == message
+            assert record == []
         assert fitter.calls == [] and fitter.evaluated == []
-    assert [h["method"] for h in own.handed] == ["portfolio"]
-    first = _fitter(kind, bounds)
+    assert [h["method"] for h in own.handed] == ["portfolio", "portfolio"]
+
+
+@pytest.mark.parametrize(
+    "kind, why_not",
+    [(BenchmarkFitter, None), (NoPresetFitter, "NoPresetFitter.fit_anneal() takes no 'preset'")],
+    ids=["preset", "no-preset"],
+)
+def test_the_warning_for_a_fit_anneal_comes_once_its_bridge_checks_pass(kind, why_not):
+    warning = _ignored_fast("global_optimize", "the portfolio", why_not)
+    fitter = _fitter(kind)
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        line = inspect.currentframe().f_lineno + 1
+        run_fitter(fitter, 60, preset=Fast())
+    assert [(w.category, str(w.message)) for w in record] == [(FutureWarning, warning)]
+    assert (record[0].filename, record[0].lineno) == (__file__, line)
+    assert fitter.calls[0] == "init" and 1 < len(fitter.evaluated) <= 60
+    first = _fitter(kind)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         with pytest.raises(FutureWarning) as caught:
-            run_fitter(first, budget, preset=Fast(), **options)
+            run_fitter(first, 60, preset=Fast())
     assert str(caught.value) == warning
-    assert first.handed == [] and first.calls == []
+    assert len(first.handed) == 1 and first.calls == []
+
+
+def test_a_fit_anneal_that_calls_no_bridge_has_the_warning_once_it_returns():
+    events = []
+
+    class OwnLoop:
+        def fit_anneal(self, budget, method="portfolio"):
+            if budget < 1:
+                raise ValueError(f"budget must be at least 1, got {budget}")
+            events.append("ran")
+            return {"budget": budget, "method": method}
+
+    warning = _ignored_fast(
+        "global_optimize", "the portfolio", "OwnLoop.fit_anneal() takes no 'preset'"
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        warnings.showwarning = lambda message, *rest, **kw: events.append(str(message))
+        assert run_fitter(OwnLoop(), 60, preset=Fast()) == {"budget": 60, "method": "portfolio"}
+        assert events == ["ran", warning]
+        events.clear()
+        with pytest.raises(ValueError, match="^budget must be at least 1, got 0$"):
+            run_fitter(OwnLoop(), 0, preset=Fast())
+        assert events == []
 
 
 @pytest.mark.parametrize("entry", ENTRIES)

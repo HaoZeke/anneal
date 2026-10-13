@@ -6,11 +6,13 @@ warned first about a fit that never ran, and under
 ``warnings.simplefilter("error")`` raised the warning in place of the error.
 ``fit_anneal``, ``fit_chemfit``, ``run_benchmark`` and ``run_fitter`` now
 check every argument they refuse before giving any such warning, so a
-refused call raises its error alone and a call that runs warns as before,
-except where ``run_fitter`` hands a fitter to its own ``fit_anneal``. There
-``run_fitter`` refuses only what it cannot pass to that method and warns of
-a preset that it ignores just before the call; the budget, the seed, the
-fitter's bounds and the rest are the method's to check, so a refusal inside
-it, such as ``run_benchmark``'s of a budget of 0, follows the warning, and
-under ``warnings.simplefilter("error")`` the warning is raised instead and
-the method is not called.
+refused call raises its error alone and a call that runs warns as before.
+Where ``run_fitter`` hands a fitter to its own ``fit_anneal``, it refuses
+only what it cannot pass to that method, and the budget, the seed, the
+fitter's bounds and the rest are the method's to check; the warning of a
+preset that ``run_fitter`` ignores waits for the first of ``fit_anneal``,
+``fit_chemfit`` and ``run_benchmark`` that the method calls, and comes once
+that call's checks pass, so a refusal there, such as ``run_benchmark``'s of
+a budget of 0 or a seed of -1, raises its error alone too. When the method
+calls none of them, the warning comes once it returns, and not when it
+raises.
