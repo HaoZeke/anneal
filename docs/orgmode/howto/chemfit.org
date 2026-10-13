@@ -148,12 +148,18 @@ reuse =MinimaCorpus::record=.
 =anneal.chemfit= is such an adapter for a ChemFit =Fitter=. =fit_anneal=,
 =fit_chemfit= and =run_benchmark= flatten its parameters, drive its session
 (=init=, =evaluate=, =step=, =finish=) from its initial parameters inside its
-bounds, and return the best parameters with each leaf's type. With
+bounds, and return the best parameters with each leaf's type. Under the
+portfolio, a candidate whose parameters, as the fitter is given them, match
+bit for bit those of an earlier evaluation gets that evaluation's loss
+without a call: the coordinates of a float32 or float16 leaf are rounded to
+the leaf's dtype first, so two candidates that round to one such point make
+one call. With
 =batch_size= above one they run the portfolio as that many batch replicas of
 =minimize=: the fitter is initialised with =init(batch_size=batch_size)=, and
 each batch goes to one =evaluate= of a list, which ChemFit's schedule may run
-concurrently, and one =step=. The budget stays the total number of
-evaluations.
+concurrently, and one =step=. A candidate answered from an earlier evaluation
+is left out of the list, and a batch holding only such candidates makes no
+call and sends no =step=. The budget stays the total number of evaluations.
 
 Batches need the portfolio and a =Fitter= with =evaluate= and =step= whose
 =init= takes =batch_size=, which no ChemFit release has yet. When every

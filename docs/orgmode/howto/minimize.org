@@ -141,10 +141,10 @@ API, =init=, then =evaluate= and =step= (=ask= and =tell= on ChemFit 3.1.1),
 then =finish=, from the fitter's initial parameters and inside its bounds.
 With =batch_size= above one, the portfolio runs that many batch replicas of
 =minimize=: the fitter is initialised with =init(batch_size=batch_size)=,
-and each batch of candidates goes to one =fitter.evaluate([...])= and one
-=fitter.step()=. The example imports =Fitter= from =chemfit.fitter=, where
-ChemFit 3.1.1 and ChemFit's source both have it, and asks for batches only
-where =init= takes =batch_size=.
+and the candidates of each batch not answered from an earlier evaluation go
+to one =fitter.evaluate([...])= and one =fitter.step()=. The example imports
+=Fitter= from =chemfit.fitter=, where ChemFit 3.1.1 and ChemFit's source
+both have it, and asks for batches only where =init= takes =batch_size=.
 
 #+begin_src python
 import inspect
