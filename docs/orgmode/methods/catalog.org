@@ -1479,9 +1479,14 @@ a bandit over =VALUES_ONLY_ARMS= (=cma=, =qn=, =gsa=, =de=, =surrogate=,
 =max(4(d+1), min(budget/48, sqrt(4(d+1) budget)))= evaluations
 (=values_only_slice=, portfolio.rs:3687-3690). In a box with no side
 wide enough at the start for a difference step to change its
-coordinate, a unit or two in the last place (=FdBfgs::can_difference=,
-fd_bfgs.rs:479), the run is one evaluation, of =x0= or of the box's
-centre. Without =x0= it starts from
+coordinate (=FdBfgs::can_difference=, fd_bfgs.rs:479), the run is one
+evaluation, of =x0= or of the box's centre; the forward step there is
+=sqrt(eps)= times the larger of the coordinate's magnitude and a tenth
+of its side, at most a quarter of the side (fd_bfgs.rs:555-560), and it
+leaves the coordinate unchanged on a side one unit in the last place
+wide, on one two units wide when half a unit rounds back to the
+coordinate, and near zero, where it underflows, as on =[0, 1e-316]=
+from either end. Without =x0= it starts from
 the best of a seeded design of =d+1= points; when the budget affords
 five gradients per coordinate, an opening finite-difference descent
 runs while its slices succeed, gain more than =1e-4= times the largest

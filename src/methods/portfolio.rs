@@ -3783,9 +3783,9 @@ where
     let dim = bounds.dims;
     let gradient = dim + 1;
     // With no side wide enough at the start for a difference step to change
-    // its coordinate, the descent has nothing to ask, and every other point
-    // of the box lies a unit or two in the last place from the start in each
-    // coordinate: the run is the start.
+    // its coordinate (sides a unit in the last place wide, some two wide, or
+    // so near zero that the step underflows), the descent has nothing to ask
+    // and the run is the start.
     if !FdBfgs::can_difference(ledger.incumbent(&bounds).view(), &bounds) {
         if ledger.incumbent_value().is_none() {
             let _ = obj.eval(ledger.incumbent(&bounds).view());

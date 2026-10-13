@@ -590,17 +590,20 @@ AFTER_ONE = float(np.nextafter(1.0, 2.0))
         [(1.0, AFTER_ONE)],
         [(1.0, AFTER_ONE), (1.0, AFTER_ONE)],
         [(1.0, AFTER_ONE), (0.5, 0.5)],
+        [(0.0, 1e-316)],
     ],
 )
+@pytest.mark.parametrize("end", [0, 1])
 @pytest.mark.parametrize("replicas", [1, 4])
 def test_free_sides_too_narrow_for_a_difference_step_leave_only_the_start(
-    bounds, replicas
+    bounds, end, replicas
 ):
     # No step changes a coordinate whose side is one unit in the last place
-    # wide, so with no wider free side the run is the start's evaluation:
-    # x0's, or without it the box's centre's in each replica.
+    # wide, or so near zero that the step underflows, so with no wider free
+    # side the run is the start's evaluation: x0's, at either end, or without
+    # it the box's centre's in each replica.
     low, high = np.array(bounds).T
-    x0 = high.copy()
+    x0 = (low, high)[end].copy()
     fun = BatchRecorder(_square)
     result = anneal.minimize(fun, x0, bounds, budget=60, seed=0, replicas=replicas)
     assert len(fun.points) == result.nfev == 1
