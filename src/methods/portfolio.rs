@@ -531,15 +531,17 @@ pub struct PortfolioResult {
     /// Best-seen objective value.
     pub best_val: f64,
     /// Calls of the true objective: the evaluations counted against the
-    /// budget, less those answered from an earlier call at the same point.
+    /// budget, less those answered from an earlier call at the same point
+    /// and those asked at a point with a non-finite coordinate.
     pub n_evals: usize,
     /// Calls of the native gradient, counted as `n_evals` is.
     pub n_grads: usize,
     /// Evaluations of either answered from an earlier call at the same
-    /// point, and gradients asked at a point with a non-finite coordinate,
-    /// answered with zeros without a call, counted against the budget as
-    /// calls are, so `n_evals + n_grads + n_answered` is what the run spent
-    /// of its budget.
+    /// point, and evaluations and gradients asked at a point with a
+    /// non-finite coordinate, answered without a call (an evaluation with
+    /// `+inf`, a gradient with zeros), counted against the budget as calls
+    /// are, so `n_evals + n_grads + n_answered` is what the run spent of its
+    /// budget.
     pub n_answered: usize,
     /// Per-arm allocation statistics.
     pub arm_stats: Vec<ArmStat>,
@@ -646,6 +648,11 @@ struct BudgetLedger {
     /// [`BudgetLedger::gradient_at`] answers without calling the caller's
     /// gradient.
     n_answered: AtomicUsize,
+    /// Evaluations charged at a point with a non-finite coordinate, which
+    /// the budgeted objectives answer with `+inf` without calling the
+    /// objective. They count in `n_evals` too, as the scheduler reads it,
+    /// and a result moves them to `n_answered`.
+    n_unseen: AtomicUsize,
     archive: Arc<Archive>,
     /// Whether the budgeted objectives record what they evaluate. A batch
     /// coordinator that answers a replica's evaluations records them itself.
@@ -670,6 +677,7 @@ impl BudgetLedger {
             n_evals: AtomicUsize::new(0),
             n_grads: AtomicUsize::new(0),
             n_answered: AtomicUsize::new(0),
+            n_unseen: AtomicUsize::new(0),
             archive,
             records,
             dim,
@@ -866,6 +874,7 @@ impl<O: Objective<f64>> Objective<f64> for BudgetedObjective<'_, O> {
         // it is charged and told the point is worthless; the caller's
         // objective never sees it.
         if x.iter().any(|v| !v.is_finite()) {
+            self.ledger.n_unseen.fetch_add(1, Ordering::Relaxed);
             return f64::INFINITY;
         }
         // Reflect into the box before eval and record. A feasible proposal
@@ -911,6 +920,7 @@ impl<O: Objective<f64>> Objective<f64> for LocalBoxBudgetedObjective<'_, O> {
         }
         self.ledger.n_evals.fetch_add(1, Ordering::Relaxed);
         if x.iter().any(|v| !v.is_finite()) {
+            self.ledger.n_unseen.fetch_add(1, Ordering::Relaxed);
             return f64::INFINITY;
         }
         // Reflect into the local box; archive only if also globally feasible.
@@ -5124,7 +5134,9 @@ fn assert_runnable(noise_sigma: Option<f64>, bounds: &Bounds<f64>) {
 /// point the caller evaluated with its value, are recorded first. The
 /// result counts calls in `n_evals` and `n_grads`, and the evaluations the
 /// record answered, spent from the budget all the same, in `n_answered`,
-/// with the gradients the ledger answered ([`BudgetLedger::gradient_at`]).
+/// with the gradients the ledger answered ([`BudgetLedger::gradient_at`])
+/// and the evaluations the budgeted objectives answered at a point with a
+/// non-finite coordinate.
 #[allow(clippy::too_many_arguments)]
 fn portfolio_optimize_interacting<O, G>(
     obj: &O,
@@ -5977,12 +5989,13 @@ fn portfolio_result(
         bounds.contains(ArrayView1::from(&best_pos)),
         "portfolio best_pos must be in bounds"
     );
+    let unseen = ledger.n_unseen.load(Ordering::Relaxed);
     PortfolioResult {
         best_pos,
         best_val: ledger.best_get(),
-        n_evals: ledger.n_evals.load(Ordering::Relaxed),
+        n_evals: ledger.n_evals.load(Ordering::Relaxed) - unseen,
         n_grads: ledger.n_grads.load(Ordering::Relaxed),
-        n_answered: ledger.n_answered.load(Ordering::Relaxed),
+        n_answered: ledger.n_answered.load(Ordering::Relaxed) + unseen,
         arm_stats,
         hop_state,
     }
@@ -7798,6 +7811,37 @@ mod tests {
         assert_eq!(ledger.used_get(), 3);
         assert_eq!(ledger.n_grads.load(Ordering::Relaxed), 1);
         assert_eq!(ledger.n_answered.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn an_evaluation_asked_at_a_point_that_is_not_finite_counts_in_n_answered() {
+        let objective = Traced::new(0.0, 1.0, 1, |x| x[0]);
+        let ledger = BudgetLedger::new(4, 1);
+        let budgeted = BudgetedObjective {
+            inner: &objective,
+            ledger: &ledger,
+        };
+        let local = LocalBoxBudgetedObjective {
+            inner: &objective,
+            ledger: &ledger,
+            bounds: objective.bounds().clone(),
+        };
+        assert_eq!(
+            budgeted.eval(ArrayView1::from(&[f64::NAN][..])),
+            f64::INFINITY
+        );
+        assert_eq!(
+            local.eval(ArrayView1::from(&[f64::INFINITY][..])),
+            f64::INFINITY
+        );
+        assert_eq!(budgeted.eval(ArrayView1::from(&[0.5][..])), 0.5);
+        assert_eq!(objective.points(), vec![Array1::from_elem(1, 0.5)]);
+        assert_eq!(ledger.used_get(), 3);
+        let result = portfolio_result(&ledger, objective.bounds(), Vec::new(), None);
+        assert_eq!(
+            (result.n_evals, result.n_grads, result.n_answered),
+            (1, 0, 2)
+        );
     }
 
     #[test]

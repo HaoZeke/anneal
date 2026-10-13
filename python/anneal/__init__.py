@@ -1172,10 +1172,11 @@ def ensemble_optimize(
 
     The returned dictionary retains ``best_val``, ``best_pos``, separate
     ``n_evals`` / ``n_grads``, their sum ``charged``, ``n_answered`` (the
-    evaluations one values-only portfolio answers from an earlier call,
-    which count against the budget but not in ``charged``; zero for hop
-    chains), ``hops``, minimum-history diagnostics, and evaluated-region
-    ``coverage_*`` counters. Coverage is not a count of certified minima.
+    evaluations one values-only portfolio answers without a call, from an
+    earlier call or at a point that is not finite, which count against the
+    budget but not in ``charged``; zero for hop chains), ``hops``,
+    minimum-history diagnostics, and evaluated-region ``coverage_*``
+    counters. Coverage is not a count of certified minima.
 
     ``coverage_shared`` overrides sharing independently of ``history``;
     ``coverage_radius`` sets the normalized RMS parameter distance.
@@ -1219,12 +1220,13 @@ class MinimizeResult:
     ``nfev`` counts objective calls, ``njev`` counts gradient calls, and
     ``charged`` is their sum; an evaluation answered from an earlier call
     counts against the budget and in none of them, but in
-    ``diagnostics["n_answered"]``, as does a gradient asked at a point that
-    is not finite, which ``jac`` never sees. ``nit`` counts sequential
-    evaluation steps: every call with one replica, every batch with more.
-    ``diagnostics`` retains the engine's result dict, with ``best_pos`` at
-    full length. ``success`` means a finite feasible candidate was
-    returned; it does not certify local convergence or global optimality.
+    ``diagnostics["n_answered"]``, as do an evaluation and a gradient asked
+    at a point that is not finite, which ``fun`` and ``jac`` never see.
+    ``nit`` counts sequential evaluation steps: every call with one
+    replica, every batch with more. ``diagnostics`` retains the engine's
+    result dict, with ``best_pos`` at full length. ``success`` means a
+    finite feasible candidate was returned; it does not certify local
+    convergence or global optimality.
     """
 
     __slots__ = (
@@ -2022,8 +2024,9 @@ def global_optimize(
     candidates, not derivative stencils or raw objective values. Returns a
     dict with ``best_pos``, ``best_val``, ``n_evals``, ``n_grads``,
     ``n_answered`` (the evaluations answered from an earlier call, and the
-    gradients asked at a point that is not finite, which ``grad_fn`` never
-    sees, so that ``n_evals + n_grads + n_answered`` is the budget spent),
+    evaluations and gradients asked at a point that is not finite, which
+    ``obj_fn`` and ``grad_fn`` never see, so that
+    ``n_evals + n_grads + n_answered`` is the budget spent),
     ``arm_pulls``, and ``arm_successes``. Persistent replicas also report
     individual results, ``charged`` work and coverage sample counters, and
     batch replicas ``n_batches``, the batches evaluated, the start's

@@ -1473,11 +1473,11 @@ budget rather than being hand-tuned.
 
 Values-only loop: under =PortfolioPolicy::Auto= a run with no gradient
 and no declared noise goes, before any regime routing, to
-=run_values_only_portfolio= (src/methods/portfolio.rs:3911, 5241-5244),
+=run_values_only_portfolio= (src/methods/portfolio.rs:3921, 5253-5256),
 a bandit over =VALUES_ONLY_ARMS= (=cma=, =qn=, =gsa=, =de=, =surrogate=,
-=explore=, portfolio.rs:1191-1208, 3812-3819) in slices of
+=explore=, portfolio.rs:1201-1218, 3822-3829) in slices of
 =max(4(d+1), min(budget/48, sqrt(4(d+1) budget)))= evaluations
-(=values_only_slice=, portfolio.rs:3827-3830). In a box with no side
+(=values_only_slice=, portfolio.rs:3837-3840). In a box with no side
 wide enough at the start for a difference step to change its
 coordinate (=FdBfgs::can_difference=, fd_bfgs.rs:534), the run is one
 evaluation, of =x0= or of the box's centre; the forward step there is
@@ -1580,41 +1580,46 @@ the gradient likewise, counted against the budget as a call, so it takes
 the steps it would have taken by calling again; =n_evals= and =n_grads=
 count the calls and =n_answered= the evaluations answered
 (=portfolio_optimize_interacting=,
-src/methods/portfolio.rs:5129, 5169-5173), with the gradients asked at a
+src/methods/portfolio.rs:5141, 5181-5185), with the gradients asked at a
 point that is not finite, such as the one asked at the box's centre when
 that overflows, which are answered with zeros without a call
-(=BudgetLedger::gradient_at=, src/methods/portfolio.rs:763-770).
+(=BudgetLedger::gradient_at=, src/methods/portfolio.rs:771-778), and the
+evaluations asked at such a point, which the budgeted objectives charge
+and answer with =+inf= without calling the objective
+(=BudgetedObjective::eval=, src/methods/portfolio.rs:868-879); a result
+counts those in =n_answered= rather than =n_evals= (=portfolio_result=,
+src/methods/portfolio.rs:5979, 5992-5998).
 Points match by bit pattern (=point_bits=,
-src/methods/portfolio.rs:1012-1014), so =-0.0= and =0.0= are two
+src/methods/portfolio.rs:1022-1024), so =-0.0= and =0.0= are two
 points, and an objective that draws a random value or keeps state is not
 called again at a repeated point but answered with the value its first
 call there returned.
 Persistent replicas (=portfolio_ensemble_optimize=,
-src/methods/portfolio/ensemble.rs:113) are given the value at =x0= and
+src/methods/portfolio/ensemble.rs:115) are given the value at =x0= and
 keep a record each, so a point two of them reach is a call of each: they
 run concurrently, and with one record which of them called at a point,
 and so each one's counts, would depend on thread timing. With declared
 noise every evaluation is a call.
 
-Batch replicas: =portfolio_replicas= (src/methods/portfolio/replicas.rs:415)
+Batch replicas: =portfolio_replicas= (src/methods/portfolio/replicas.rs:421)
 runs =R= copies of the values-only loop from =x0= under one total budget.
 =x0= is evaluated once, as a batch of one, and the rest of the budget is
 split as evenly as it goes; replica =r= runs the loop as the solo run of
 its share from =x0= would, seeded with =seed= mixed with =r=, its descent
 differencing each gradient from coordinate =r d / R= on, and replica 0
-keeps =seed= and coordinate 0 (replicas.rs:396-402, 493-494;
+keeps =seed= and coordinate 0 (replicas.rs:402-408, 499-500;
 =FdBfgs::with_first_coordinate=, fd_bfgs.rs:483). Each replica plays on
 a scoped thread, and the coordinator on the calling thread (=coordinate=,
-replicas.rs:247) gathers one point from every replica still running,
+replicas.rs:253) gathers one point from every replica still running,
 evaluates those no replica has evaluated before as one batch through
-=Objective::eval_batch= (replicas.rs:352), answers the rest from their
+=Objective::eval_batch= (replicas.rs:358), answers the rest from their
 earlier evaluations, and records them while every replica waits, so a
 run depends on its seed alone and calls the objective once at a point;
 a row answered so is paid for as an evaluated one is. With
 =ReplicaArchive::Shared= (replicas.rs:51)
 the replicas keep one archive and one incumbent: a point another replica
 has evaluated is answered once per replica with no call and no charge
-(=Seen=, replicas.rs:217), and replicas that ask for one point in the
+(=Seen=, replicas.rs:223), and replicas that ask for one point in the
 same batch share its row, charged to the one with the most of its share
 left, so descents that meet pay for each point once and a gradient takes
 about =d / R= batches. =ReplicaArchive::Private= keeps one archive per
@@ -1658,7 +1663,7 @@ portfolio.rs:167) and its work-unit to =max_fevals= converter
 (=endgame_polish_max_fevals=, portfolio.rs:149-155); a coordinate
 pattern-search fallback (=run_endgame_coordinate_microrefine=,
 portfolio.rs:203); the values-only =SuccessScale=
-(portfolio.rs:1718) and =DescentPace= (portfolio.rs:1812); the
+(portfolio.rs:1728) and =DescentPace= (portfolio.rs:1822); the
 =replicas= module notes for batch replicas
 (src/methods/portfolio/replicas.rs:1-32), =ReplicaArchive=
 (replicas.rs:48) and =ReplicaResult= (replicas.rs:59).
@@ -1686,7 +1691,7 @@ Feeds/consumes: consumes =crate::methods::regime= for arm priors and
 exploit probability, and the typed-algebra kernels
 (=crate::movekernel=, =crate::exchange=, =crate::accept=, =crate::cool=,
 =crate::neigh=) rather than the cluster-specific move library; it feeds
-the Python front end =anneal.minimize= (python/anneal/__init__.py:1526),
+the Python front end =anneal.minimize= (python/anneal/__init__.py:1528),
 which runs =global_optimize= with one replica and the batch replicas,
 through =global_optimize_replicas= (src/python.rs:2573, 2824), with
 more; =global_optimize= itself, which runs them for =replicas= above one
@@ -2158,7 +2163,7 @@ Key types and functions: =CmaEs= (src/methods/cma_es.rs:119);
 =covariance_learning_evaluations= (cma_es.rs:111, the horizon
 \(\lambda/(c_1 + c_\mu)\)); =Bipop= and =CmaRegime=
 (cma_es.rs:642/621); the portfolio's =CmaArmState= and =run_cma_arm=
-(src/methods/portfolio.rs:1255/3654).
+(src/methods/portfolio.rs:1265/3664).
 
 Constants and defaults: =default_lambda= \(4 + \lfloor 3 \ln n
 \rfloor\) (cma_es.rs:82). In the portfolio every run is centred on the
@@ -2271,7 +2276,7 @@ one is set, or a failed line search.
 
 Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:381);
 =FdBfgsOptions= (fd_bfgs.rs:196); the portfolio's =QnArmState= and
-=run_qn_arm= (src/methods/portfolio.rs:1344/3728).
+=run_qn_arm= (src/methods/portfolio.rs:1354/3738).
 
 Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
 =MAX_EXTRAPOLATION = 16=, =EXTRAPOLATION_ROOM = 0.5=,

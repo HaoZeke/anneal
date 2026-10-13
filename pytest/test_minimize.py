@@ -786,6 +786,31 @@ def test_njev_and_n_grads_count_only_the_calls_on_a_box_whose_centre_overflows(l
             assert out["n_evals"] + out["n_grads"] + out["n_answered"] <= 200
 
 
+@pytest.mark.parametrize("scale", [1e307, 1e308])
+def test_nfev_and_n_evals_count_only_the_calls_where_proposals_are_not_finite(scale):
+    # On these boxes some arms propose points that are not finite, which are
+    # charged and answered with +inf without a call.
+    low, high = np.array([scale, 0.0]), np.array([1.7 * scale, 1.0])
+
+    def far_square(x):
+        return float(np.sum((np.asarray(x) / high - 0.3) ** 2))
+
+    for seed in (0, 1):
+        fun = Recorder(far_square)
+        result = anneal.minimize(fun, high, list(zip(low, high)), budget=120, seed=seed)
+        assert len(fun.points) == result.nfev
+        assert result.nfev + result.diagnostics["n_answered"] == 120
+        fun = Recorder(far_square)
+        out = anneal.global_optimize(fun, low, high, 120, seed=seed, x0=high)
+        assert len(fun.points) == out["n_evals"]
+        assert out["n_evals"] + out["n_answered"] == 120
+    # Batch replicas propose such points too, each charged to its replica.
+    fun = Recorder(far_square)
+    out = anneal.global_optimize(fun, low, high, 480, seed=0, x0=high, replicas=4)
+    assert len(fun.points) == out["n_evals"]
+    assert out["n_evals"] + out["n_answered"] == 480
+
+
 X0_ROUTES = {
     "values only": {},
     "legacy policy": {"policy": "legacy"},

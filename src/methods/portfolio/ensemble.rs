@@ -52,8 +52,10 @@ pub struct PortfolioEnsembleResult {
     pub n_evals: usize,
     /// Actual native-gradient callbacks across all replicas.
     pub n_grads: usize,
-    /// Evaluations the replicas answered from their earlier calls, counted
-    /// against the budget as calls are.
+    /// Evaluations the replicas answered from their earlier calls, and
+    /// evaluations and gradients asked at a point with a non-finite
+    /// coordinate, answered without a call, counted against the budget as
+    /// calls are.
     pub n_answered: usize,
     /// Funded replicas in index order, including their arm allocation statistics.
     pub replicas: Vec<PortfolioResult>,
