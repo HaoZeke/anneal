@@ -46,7 +46,13 @@ probability that the loop is not worse is 0.074, against 0.046 for the loop
 before), has the lower median on the twelve-parameter fit at 200 (2.68e4
 against 3.12e4, though the loop ends lower on 21 of 40 seeds), and at 1000
 ends lower on 4 of the 40 seeds of the binary fit and 4 of the
-twelve-parameter one. Four shared batch replicas stay level with those
+twelve-parameter one. At about ten evaluations per parameter it leads on
+both, ending lower on 32 of 40 seeds of the binary fit at 60 evaluations and
+on 37 of the twelve-parameter fit at 100 (medians 98.1 against 2.82e3 and
+7.0e4 against 2.98e5), directly and through ChemFit's
+``Fitter.fit_nevergrad`` alike, and the two are level at 100 evaluations on
+the binary fit and at 200 on the twelve-parameter one; the regime notes give
+these cells. Four shared batch replicas stay level with those
 before on every cell of those four problems but the fit of the logarithm at
 5000 evaluations, where they end lower (22/7/11, 0.042 that they are not
 better) but trail one replica (11/5/24, 0.0014 that they are not worse),
