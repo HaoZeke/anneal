@@ -10,8 +10,9 @@ others try what else a signature can do: take the budget alone, leave out
 the seed or the budget, or take parameters only by position. The next has
 neither session pair, which the bridges that drive the session themselves
 refuse before ``init``, while ``run_fitter`` hands it to its ``fit_anneal``
-with the budget and the seed unchecked. The last two run ``run_benchmark``
-again after it refuses a budget, and on a worker thread.
+with the budget and the seed unchecked. The last three run ``run_benchmark``
+again after it refuses a budget, on a worker thread, and on a worker thread
+given a wrapper of the fitter in its place.
 """
 
 import concurrent.futures
@@ -22,6 +23,7 @@ import os
 import subprocess
 import sys
 import threading
+import types
 import warnings
 
 import numpy as np
@@ -226,6 +228,73 @@ class ThreadFitter(Handed):
         self.handed.append({"budget": budget, "method": method, "seed": seed})
         with concurrent.futures.ThreadPoolExecutor(1) as pool:
             return pool.submit(self._benchmark, budget, method=method, seed=seed).result()
+
+
+class _Session:
+    """Drives the fitter it wraps, which ``run_benchmark`` is given in its place."""
+
+    __slots__ = ()
+
+    def init(self):
+        self._fitter.init()
+
+    def evaluate(self, parameters):
+        return self._fitter.evaluate(parameters)
+
+    def step(self):
+        self._fitter.step()
+
+    def finish(self, opt_params):
+        return self._fitter.finish(opt_params)
+
+
+class Session(_Session):
+    """Keeps the fitter in its ``__dict__``."""
+
+    def __init__(self, fitter):
+        self._fitter = fitter
+        self.bounds = fitter.bounds
+
+
+class SlottedSession(_Session):
+    """Keeps the fitter in a slot."""
+
+    __slots__ = ("_fitter", "bounds")
+
+    def __init__(self, fitter):
+        self._fitter = fitter
+        self.bounds = fitter.bounds
+
+
+def _methods(fitter):
+    """The fitter's session methods as attributes, without the fitter."""
+    names = ("init", "evaluate", "step", "finish", "bounds")
+    return types.SimpleNamespace(**{name: getattr(fitter, name) for name in names})
+
+
+def _closures(fitter):
+    """The fitter's session in closures, which no attribute leads from to the fitter."""
+    return types.SimpleNamespace(
+        init=lambda: fitter.init(),
+        evaluate=lambda parameters: fitter.evaluate(parameters),
+        step=lambda: fitter.step(),
+        finish=lambda opt_params: fitter.finish(opt_params),
+        bounds=fitter.bounds,
+    )
+
+
+class WrapperThreadFitter(ThreadFitter):
+    """Runs ``run_benchmark`` on a worker thread, given ``wrap(self)`` in place of itself."""
+
+    def fit_anneal(self, budget, *, method="portfolio", seed=0):
+        self.handed.append({"budget": budget, "method": method, "seed": seed})
+        context = {
+            "fitter": self.wrap(self),
+            "budget": budget,
+            "initial_params": self.initial_parameters,
+        }
+        with concurrent.futures.ThreadPoolExecutor(1) as pool:
+            return pool.submit(run_benchmark, context, method=method, seed=seed).result()
 
 
 def _fitter(kind=ReleasedFitter, bounds=None, fail=None):
@@ -635,6 +704,62 @@ def test_a_bridge_on_another_thread_gives_the_warning_there_before_init():
         with pytest.raises(FutureWarning) as caught:
             run_fitter(fitter, 60, preset=Fast())
     assert str(caught.value) == warning and fitter.calls == []
+
+
+def _wrapper_fitter(wrap):
+    fitter = _fitter(WrapperThreadFitter)
+    fitter.wrap = wrap
+    return fitter
+
+
+@pytest.mark.parametrize("wrap", [Session, SlottedSession, _methods])
+def test_a_bridge_on_another_thread_given_a_wrapper_of_the_fitter_gives_the_warning_there(wrap):
+    warning = _ignored_fast(
+        "global_optimize", "the portfolio", "WrapperThreadFitter.fit_anneal() takes no 'preset'"
+    )
+    fitter = _wrapper_fitter(wrap)
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        warnings.showwarning = lambda message, category, filename, lineno, *rest: (
+            fitter.calls.append((category, str(message), filename, lineno, threading.get_ident()))
+        )
+        line = inspect.currentframe().f_lineno + 1
+        run_fitter(fitter, 60, preset=Fast())
+    worker = fitter.threads[0]
+    assert worker != threading.get_ident()
+    assert fitter.calls[:2] == [(FutureWarning, warning, __file__, line, worker), "init"]
+    assert sum(isinstance(call, tuple) for call in fitter.calls) == 1
+    assert 1 < len(fitter.evaluated) <= 60
+    fitter = _wrapper_fitter(wrap)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(FutureWarning) as caught:
+            run_fitter(fitter, 60, preset=Fast())
+    assert str(caught.value) == warning and fitter.calls == []
+
+
+def test_a_wrapper_of_closures_on_another_thread_has_the_warning_once_the_method_returns():
+    warning = _ignored_fast(
+        "global_optimize", "the portfolio", "WrapperThreadFitter.fit_anneal() takes no 'preset'"
+    )
+    fitter = _wrapper_fitter(_closures)
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        warnings.showwarning = lambda message, category, filename, lineno, *rest: (
+            fitter.calls.append((category, str(message), filename, lineno, threading.get_ident()))
+        )
+        line = inspect.currentframe().f_lineno + 1
+        run_fitter(fitter, 60, preset=Fast())
+    assert fitter.calls[0] == "init" and fitter.calls[-2] == "finish"
+    assert fitter.calls[-1] == (FutureWarning, warning, __file__, line, threading.get_ident())
+    assert sum(isinstance(call, tuple) for call in fitter.calls) == 1
+    fitter = _wrapper_fitter(_closures)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(FutureWarning) as caught:
+            run_fitter(fitter, 60, preset=Fast())
+    assert str(caught.value) == warning
+    assert fitter.calls[0] == "init" and fitter.calls[-1] == "finish"
 
 
 def test_a_fit_anneal_that_calls_no_bridge_has_the_warning_once_it_returns():

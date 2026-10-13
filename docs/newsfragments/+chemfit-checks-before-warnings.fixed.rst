@@ -15,9 +15,12 @@ preset that ``run_fitter`` ignores waits for the calls the method makes to
 the first call whose checks pass, before ``init``. So a refusal there, such
 as ``run_benchmark``'s of a budget of 0 or a seed of -1, raises its error
 alone too, and a call made after the refusal gets the warning once its
-checks pass. A call the method makes on another thread with the same fitter
-gives the warning on that thread, before its ``init``, so under
-``warnings.simplefilter("error")`` it is raised there in place of the fit.
-When no call passes its checks, the warning comes once the method returns,
-and not when it raises. In each case it points at the line that called
+checks pass. A call the method makes on another thread with the fitter, or
+with an object that holds the fitter or one of the fitter's methods as an
+attribute, such as a session that wraps the fitter, gives the warning on
+that thread, before its ``init``, so under ``warnings.simplefilter("error")``
+it is raised there in place of the fit. A call on another thread given any
+other object does not, and the warning then comes once the method returns,
+after the fit, as it does when no call passes its checks; it does not come
+when the method raises. In each case it points at the line that called
 ``run_fitter``, in a module, a script or a Jupyter cell alike.
