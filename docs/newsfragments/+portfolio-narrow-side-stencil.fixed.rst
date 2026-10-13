@@ -13,8 +13,10 @@ for 42 points a second time in the 40 runs of 40 evaluations over 10 seeds,
 and now asks for none; on Rosenbrock's function, whose descent took no
 central differences on that side, every run is as before. The other runs
 part from their earlier paths at the first such gradient. At 300 evaluations
-each ends at the value it did; at 40, from the upper end, the sphere's runs
+each ends at the value it did. At 40, from the upper end, the sphere's runs
 end higher on 7 of the 10 seeds, by at most 3.3e-16, because the stencil that
 rounded onto the iterate also asked for the side's lower end, where the
-sphere is lower by about that much, and on the logarithm 3 runs end higher,
-by at most 2.8e-16, and 2 lower, by up to 3.1e-15.
+sphere is lower by about that much, and the logarithm's end higher on 3, by
+at most 2.8e-16, and lower on 1, by 2.9e-15; from the lower end the sphere's
+runs end at the values they did, and the logarithm's too but for one that
+ends lower, by 3.1e-15.
