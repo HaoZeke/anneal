@@ -16,4 +16,6 @@ dimensions at 5000 evaluations, nor Rosenbrock's copies with 1e2 added and
 multiplied by 1e-6, behind an opening that goes on while each slice
 succeeds, and it still keeps shifted Ackley, Levy and rotated Levy in 30
 dimensions at 5000 ahead of that opening (medians 5.1e-7 against 4.0e-6,
-3.7e-11 against 1.5e-6 and 0.633 against 3.15).
+3.7e-11 against 1.5e-6 and 0.633 against 3.15). These comparisons with
+0.11.1 take in this release's other changes to the loop as well as the
+ratios.
