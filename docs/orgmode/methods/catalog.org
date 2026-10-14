@@ -344,7 +344,7 @@ Governing stopping rule: climb while \(\lambda_{\min} \geq 0\) or
 \(\mathrm{sign}\cdot(g\cdot v) \geq 0\); stop and overshoot once
 \(\lambda_{\min} < 0\) and \(\mathrm{sign}\cdot(g\cdot v) < 0\)
 (=descending= and =intact= in =activate_aligned=,
-activation.rs:2965, 3183-3184), where \(\lambda_{\min}\) is the softest
+activation.rs:2966, 3184-3185), where \(\lambda_{\min}\) is the softest
 curvature from a Lanczos pass and \(v\) is the direction of travel
 along the mode.
 
@@ -367,7 +367,7 @@ Feeds/consumes: consumes =crate::curvature::curvature_features= for
 the Lanczos mode and shares the perpendicular-projection convention
 with =crate::path= (activation.rs:47-52); called from
 =cluster_hopping='s soft-mode-climb stall response, which imports and
-calls =activate= (cluster_hopping.rs:40, 4618-4627), documented as a
+calls =activate= (cluster_hopping.rs:1, 40, 4633), documented as a
 black-box call site under [[file:catalog.org::*Stall escapes][stall escapes]] above
 ("Soft-mode climb ... Escalates over =minima_hopping='s always-on
 scaled move"); this section documents the climb mechanism itself.
@@ -405,15 +405,15 @@ src/methods/minima_hopping.rs:681, defaults
 energy rise \(\delta\): accept iff \(\delta < \tau\), then
 \(\tau \mathrel{*}= \alpha_{accept}=1/1.05\) on acceptance or
 \(\tau \mathrel{*}= \alpha_{reject}=1.05\) on rejection, clamped to
-\([10^{-9}, 10^6]\) (=accept=, minima_hopping.rs:791) -- an adaptive
+\([10^{-9}, 10^6]\) (=accept=, minima_hopping.rs:796) -- an adaptive
 threshold rather than a Metropolis temperature, since "a temperature
 cold enough to polish cannot cross and one hot enough to cross cannot
 polish" (documented on =accept=, minima_hopping.rs:787-791).
 
 Key types and functions: =Visit= (minima_hopping.rs:530, =Same= /
 =Known= / =New=); =EscapeFeedback= (minima_hopping.rs:546); =observe=
-(minima_hopping.rs:681); =accept= (minima_hopping.rs:791);
-=discovery_rate= (minima_hopping.rs:809).
+(minima_hopping.rs:681); =accept= (minima_hopping.rs:796);
+=discovery_rate= (minima_hopping.rs:814).
 
 Constants and defaults: =escape_ceiling = 4x= the starting scale
 (minima_hopping.rs:577), priced by measurement: at a ceiling of 64 an
@@ -425,7 +425,7 @@ prices itself out of the budget is not escalation" (documented on
 
 Feeds/consumes: constructed and driven by
 =cluster_hopping::run_with_gradient= (cluster_hopping.rs:1080;
-=EscapeFeedback::new= at cluster_hopping.rs:1854,
+=EscapeFeedback::new= at cluster_hopping.rs:1860,
 =feedback.observe_shared= at 1960/3655 and
 =feedback.observe_driver_local= at 1968/1972/1975/3640/3663/3668,
 =feedback.escape()= scaling the library move at 2892-2896 and the
@@ -437,7 +437,7 @@ section documents the feedback mechanism itself.
 ** Objective-driven cluster search (=search=)
 
 What it is: the caller-facing entry point that wraps
-=cluster_hopping::optimize_with_gradient= (cluster_hopping.rs:5414)
+=cluster_hopping::optimize_with_gradient= (cluster_hopping.rs:5419)
 around any =DifferentiableObjective<f64>=, building the relaxation,
 charging every evaluation to the ledger, and counting convergence
 outcomes. Exists so callers stop hand-writing the same relax/charge/count
@@ -445,9 +445,9 @@ glue: an rgpot potential reaches the driver as an =Objective<f64>= by
 the same route as one defined in this crate, and neither the driver nor
 =search= can tell the two apart (cluster_search.rs:9-16).
 
-Key types and functions: =search= (src/methods/cluster_search.rs:291);
-=RelaxStats= (cluster_search.rs:33, screen/full/check charged splits,
-=screen_share=); =CONVERGED_GRADIENT = 1e-3= (cluster_search.rs:102,
+Key types and functions: =search= (src/methods/cluster_search.rs:292);
+=RelaxStats= (cluster_search.rs:34, screen/full/check charged splits,
+=screen_share=); =CONVERGED_GRADIENT = 1e-3= (cluster_search.rs:103,
 the max-component gradient threshold for calling a relaxation
 converged).
 
@@ -1030,7 +1030,7 @@ Key types and functions: =TransitionOutcome=
 (transition_graph.rs:177), =uncertainty= (transition_graph.rs:204),
 =attraction_regions= (transition_graph.rs:219, diffusion + complete
 linkage); =matrix_power= / =complete_linkage_regions=
-(transition_graph.rs:275/292, private).
+(transition_graph.rs:273/290, private).
 
 Feeds/consumes: region identity here is what =region_assignment.rs=
 consumes; kept deliberately separate from descriptor-based basin
@@ -1267,7 +1267,7 @@ a crossing report (=CatalogOperation::BridgeCrossing=,
 catalog_rpc/server.rs:1697), but with no bridge stored the poll
 assigns nothing and every crossing report is rejected. The run loop
 consumes an assignment behind the =CATALOG_BRIDGE= gate
-(examples/lj_cluster_search.rs:4304): entry states re-enter through
+(examples/lj_cluster_search.rs:4303): entry states re-enter through
 the ordinary probe-proposal path and every region change of the live
 descriptor reports as a crossing (=bridge_region_of=,
 lj_cluster_search.rs:3208). See
@@ -1473,16 +1473,16 @@ budget rather than being hand-tuned.
 
 Values-only loop: under =PortfolioPolicy::Auto= a run with no gradient
 and no declared noise goes, before any regime routing, to
-=run_values_only_portfolio= (src/methods/portfolio.rs:3921, 5253-5256),
+=run_values_only_portfolio= (src/methods/portfolio.rs:3963, 5442-5445),
 a bandit over =VALUES_ONLY_ARMS= (=cma=, =qn=, =gsa=, =de=, =surrogate=,
-=explore=, portfolio.rs:1201-1218, 3822-3829) in slices of
+=explore=, portfolio.rs:1215-1232, 3864-3871) in slices of
 =max(4(d+1), min(budget/48, sqrt(4(d+1) budget)))= evaluations
-(=values_only_slice=, portfolio.rs:3837-3840). In a box with no side
+(=values_only_slice=, portfolio.rs:3879-3882). In a box with no side
 wide enough at the start for a difference step to change its
-coordinate (=FdBfgs::can_difference=, fd_bfgs.rs:629), the run is one
+coordinate (=FdBfgs::can_difference=, fd_bfgs.rs:638), the run is one
 evaluation, of =x0= or of the box's centre; the forward step there is
 =sqrt(eps)= times the larger of the coordinate's magnitude and a tenth
-of its side, at most a quarter of the side (fd_bfgs.rs:705-710), and it
+of its side, at most a quarter of the side (fd_bfgs.rs:731-736), and it
 leaves the coordinate unchanged on a side one unit in the last place
 wide, on one two units wide when half a unit rounds back to the
 coordinate, and near zero, where it underflows, as on =[0, 1e-316]=
@@ -1580,17 +1580,17 @@ the gradient likewise, counted against the budget as a call, so it takes
 the steps it would have taken by calling again; =n_evals= and =n_grads=
 count the calls and =n_answered= the evaluations answered
 (=portfolio_optimize_interacting=,
-src/methods/portfolio.rs:5141, 5181-5185), with the gradients asked at a
+src/methods/portfolio.rs:5330, 5370-5374), with the gradients asked at a
 point that is not finite, such as the one asked at the box's centre when
 that overflows, which are answered with zeros without a call
-(=BudgetLedger::gradient_at=, src/methods/portfolio.rs:771-778), and the
+(=BudgetLedger::gradient_at=, src/methods/portfolio.rs:781-788), and the
 evaluations asked at such a point, which the budgeted objectives charge
 and answer with =+inf= without calling the objective
-(=BudgetedObjective::eval=, src/methods/portfolio.rs:868-879); a result
+(=BudgetedObjective::eval=, src/methods/portfolio.rs:882-893); a result
 counts those in =n_answered= rather than =n_evals= (=portfolio_result=,
-src/methods/portfolio.rs:5979, 5992-5998).
+src/methods/portfolio.rs:6168, 6181-6187).
 Points match by bit pattern (=point_bits=,
-src/methods/portfolio.rs:1022-1024), so =-0.0= and =0.0= are two
+src/methods/portfolio.rs:1036-1038), so =-0.0= and =0.0= are two
 points, and an objective that draws a random value or keeps state is not
 called again at a repeated point but answered with the value its first
 call there returned.
@@ -1608,7 +1608,7 @@ split as evenly as it goes; replica =r= runs the loop as the solo run of
 its share from =x0= would, seeded with =seed= mixed with =r=, its descent
 differencing each gradient from coordinate =r d / R= on, and replica 0
 keeps =seed= and coordinate 0 (replicas.rs:402-408, 499-500;
-=FdBfgs::with_first_coordinate=, fd_bfgs.rs:578). Each replica plays on
+=FdBfgs::with_first_coordinate=, fd_bfgs.rs:587). Each replica plays on
 a scoped thread, and the coordinator on the calling thread (=coordinate=,
 replicas.rs:253) gathers one point from every replica still running,
 evaluates those no replica has evaluated before as one batch through
@@ -1663,7 +1663,7 @@ portfolio.rs:167) and its work-unit to =max_fevals= converter
 (=endgame_polish_max_fevals=, portfolio.rs:149-155); a coordinate
 pattern-search fallback (=run_endgame_coordinate_microrefine=,
 portfolio.rs:203); the values-only =SuccessScale=
-(portfolio.rs:1728) and =DescentPace= (portfolio.rs:1822); the
+(portfolio.rs:1748) and =DescentPace= (portfolio.rs:1842); the
 =replicas= module notes for batch replicas
 (src/methods/portfolio/replicas.rs:1-32), =ReplicaArchive=
 (replicas.rs:48) and =ReplicaResult= (replicas.rs:59).
@@ -2163,7 +2163,7 @@ Key types and functions: =CmaEs= (src/methods/cma_es.rs:119);
 =covariance_learning_evaluations= (cma_es.rs:111, the horizon
 \(\lambda/(c_1 + c_\mu)\)); =Bipop= and =CmaRegime=
 (cma_es.rs:642/621); the portfolio's =CmaArmState= and =run_cma_arm=
-(src/methods/portfolio.rs:1265/3664).
+(src/methods/portfolio.rs:1279/3684).
 
 Constants and defaults: =default_lambda= \(4 + \lfloor 3 \ln n
 \rfloor\) (cma_es.rs:82). In the portfolio every run is centred on the
@@ -2274,9 +2274,9 @@ it does not refuse direction after direction.
 A descent ends on a slow iteration, a projected-gradient tolerance when
 one is set, or a failed line search.
 
-Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:476);
+Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:482);
 =FdBfgsOptions= (fd_bfgs.rs:227); the portfolio's =QnArmState= and
-=run_qn_arm= (src/methods/portfolio.rs:1354/3738).
+=run_qn_arm= (src/methods/portfolio.rs:1368/3758).
 
 Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
 =MAX_EXTRAPOLATION = 16=, =EXTRAPOLATION_ROOM = 0.5=,

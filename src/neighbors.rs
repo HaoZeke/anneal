@@ -305,30 +305,6 @@ mod vesin_ffi {
         }
     }
 
-    #[cfg(test)]
-    mod tests {
-        use super::super::NeighborTable;
-        use ndarray::Array1;
-        use rand::rngs::StdRng;
-        use rand::{Rng, SeedableRng};
-
-        /// vesin's lists must equal the naive build exactly, or the backend
-        /// is not a backend.
-        #[test]
-        fn vesin_equals_naive() {
-            let mut rng = StdRng::seed_from_u64(17);
-            for _ in 0..5 {
-                let n = 60;
-                let x = Array1::from_shape_fn(3 * n, |_| rng.random::<f64>() * 5.0);
-                let naive = NeighborTable::build_naive(x.view(), n, 1.4);
-                let fast = NeighborTable::build_vesin(x.view(), n, 1.4).expect("vesin refused");
-                for i in 0..n {
-                    assert_eq!(naive.neighbors(i), fast.neighbors(i), "atom {i}");
-                }
-            }
-        }
-    }
-
     /// Cutoff rows for an open or partly open cell. An axis marked open is
     /// not wrapped. Each ordered pair keeps its shortest image, including a
     /// periodic self-image. `inclusive` keeps a pair whose distance equals
@@ -422,6 +398,29 @@ mod vesin_ffi {
             });
         }
         Some(rows)
+    }
+    #[cfg(test)]
+    mod tests {
+        use super::super::NeighborTable;
+        use ndarray::Array1;
+        use rand::rngs::StdRng;
+        use rand::{Rng, SeedableRng};
+
+        /// vesin's lists must equal the naive build exactly, or the backend
+        /// is not a backend.
+        #[test]
+        fn vesin_equals_naive() {
+            let mut rng = StdRng::seed_from_u64(17);
+            for _ in 0..5 {
+                let n = 60;
+                let x = Array1::from_shape_fn(3 * n, |_| rng.random::<f64>() * 5.0);
+                let naive = NeighborTable::build_naive(x.view(), n, 1.4);
+                let fast = NeighborTable::build_vesin(x.view(), n, 1.4).expect("vesin refused");
+                for i in 0..n {
+                    assert_eq!(naive.neighbors(i), fast.neighbors(i), "atom {i}");
+                }
+            }
+        }
     }
 }
 
@@ -624,7 +623,7 @@ fn mixed_cutoff_pairs(
                 });
             }
         }
-        lists[i].sort_by(|left, right| left.index.cmp(&right.index));
+        lists[i].sort_by_key(|neighbour| neighbour.index);
     }
     Ok(lists)
 }

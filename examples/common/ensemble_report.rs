@@ -34,6 +34,9 @@ impl Tally {
     }
 }
 
+/// Read-only check of one returned structure: energy and largest gradient component.
+type VerifyFn<'a> = dyn Fn(usize, &Array1<f64>, f64) -> (f64, f64) + 'a;
+
 /// Prints one replica line per chain and one ensemble line per seed.
 ///
 /// `verify` re-evaluates the returned coordinates read-only and returns the
@@ -44,7 +47,7 @@ pub fn print_report(
     ens: &EnsembleConfig,
     report: &EnsembleReport,
     unit: &str,
-    verify: &dyn Fn(usize, &Array1<f64>, f64) -> (f64, f64),
+    verify: &VerifyFn<'_>,
     tally: &mut Tally,
 ) {
     for run in &report.replicas {
@@ -223,6 +226,10 @@ pub fn config_from_env(replicas: usize, budget: usize, target: Option<f64>) -> E
 /// are the same when their sorted pair spectra lie within `radius`. It
 /// over-merges homometric pairs and is for smoke runs only, which the
 /// header line says.
+///
+/// The cluster example builds an IRA witness when that feature is on, and
+/// then does not call this fallback.
+#[allow(dead_code)]
 pub fn sorted_pairs_witness(
     n: usize,
     radius: f64,
@@ -262,7 +269,7 @@ pub fn run_seeds<W: ExactStructureWitness + Sync + ?Sized>(
     seeds: u64,
     problem: &EnsembleProblem<'_, W>,
     unit: &str,
-    verify: &dyn Fn(usize, &Array1<f64>, f64) -> (f64, f64),
+    verify: &VerifyFn<'_>,
     reference: Option<f64>,
 ) -> Tally {
     let mut tally = Tally::new();

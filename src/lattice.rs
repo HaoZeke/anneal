@@ -85,18 +85,24 @@ impl Source {
     }
 }
 
+/// Spherical cut of a pentagonal lattice.
+///
+/// The `n` sites nearest a jittered centre, scaled so the nearest-neighbour
+/// distance is `scale`. A cluster minimum is not a sphere: a Marks decahedron
+/// is the body this packing peels to, which [`marks_decahedron`] builds
+/// directly. The cut is still a decahedral seed, and the jitter keeps two
+/// draws from one centre from being the same structure.
 pub fn decahedral_cut<R: Rng + ?Sized>(n: usize, scale: f64, rng: &mut R) -> Array1<f64> {
     if n == 0 {
         return Array1::zeros(0);
     }
     let radius_unit = 1.0 / (2.0 * (PI / 5.0).sin());
     let mut sites: Vec<[f64; 3]> = vec![[0.0, 0.0, 0.0]];
-    for shell in 1..10 {
+    for shell in 1_i32..10 {
         if sites.len() >= n + 40 {
             break;
         }
         for z in -shell..=shell {
-            let z = z as i32;
             let m = shell - z.unsigned_abs() as i32;
             if m <= 0 {
                 let point = [0.0, 0.0, z as f64];
@@ -138,6 +144,185 @@ pub fn decahedral_cut<R: Rng + ?Sized>(n: usize, scale: f64, rng: &mut R) -> Arr
         *value = *value * factor + 0.02 * scale * (rng.random::<f64>() - 0.5);
     }
     raw
+}
+
+/// Marks decahedron `(p, q, r)` at nearest-neighbour distance `spacing`.
+///
+/// `p` is the number of atoms on the (100) facets perpendicular to the
+/// fivefold axis, `q` the number on the facets parallel to it (`q = 1`
+/// leaves no visible (100) facet), and `r` the depth of the re-entrant
+/// notch at the pentagon corners (`r = 0` is an Ino decahedron). `(2, 2, 1)`
+/// is the 75-atom Marks decahedron, the Lennard-Jones minimum at that size.
+/// The fivefold axis is `z` and the body is centred on the origin.
+pub fn marks_decahedron(p: usize, q: usize, r: usize, spacing: f64) -> Array1<f64> {
+    if p == 0 || q == 0 {
+        return Array1::zeros(0);
+    }
+    let turn = 2.0 * PI / 5.0;
+    let b = spacing;
+    let a = b * 3.0_f64.sqrt() / 2.0;
+    let mut vertices = [[0.0; 3]; 5];
+    for m in 0..5 {
+        let angle = turn * m as f64 + PI / 2.0;
+        vertices[m] = [a * angle.cos(), a * angle.sin(), 0.0];
+    }
+    let h = p + q + 2 * r - 1;
+    let g = h - q + 1;
+    let mut sites = Vec::new();
+    for j in 0..h {
+        sites.push([0.0, 0.0, j as f64 * b - (h - 1) as f64 * b / 2.0]);
+    }
+    for n in 1..h {
+        if n >= g {
+            continue;
+        }
+        for m in 0..5 {
+            let v1 = vertices[(m + 4) % 5];
+            let v2 = vertices[m];
+            for i in 0..n {
+                if n - i < g - r && i < g - r {
+                    for j in 0..(h - n) {
+                        let mut pos = [0.0; 3];
+                        let (outer, inner) = ((n - i) as f64, i as f64);
+                        for k in 0..3 {
+                            pos[k] = outer * v1[k] + inner * v2[k];
+                        }
+                        pos[2] += j as f64 * b - (h - n - 1) as f64 * b / 2.0;
+                        sites.push(pos);
+                    }
+                }
+            }
+        }
+    }
+    centre_sites(&mut sites);
+    let mut out = Array1::zeros(3 * sites.len());
+    for (i, site) in sites.iter().enumerate() {
+        for k in 0..3 {
+            out[3 * i + k] = site[k];
+        }
+    }
+    out
+}
+
+fn centre_sites(sites: &mut [[f64; 3]]) {
+    if sites.is_empty() {
+        return;
+    }
+    let mut centre = [0.0; 3];
+    for site in sites.iter() {
+        for k in 0..3 {
+            centre[k] += site[k];
+        }
+    }
+    let n = sites.len() as f64;
+    for site in sites.iter_mut() {
+        for k in 0..3 {
+            site[k] -= centre[k] / n;
+        }
+    }
+}
+
+/// Icosahedral, decahedral, and Marks seeds for a cluster search.
+///
+/// Lennard-Jones at 38 points is a truncated octahedron. A search that
+/// starts from the icosahedral seed, the first of these, reaches it. At 75,
+/// 76 and 77 points the minimum is a Marks decahedron, and that seed
+/// quenches to it. Quench the three, then continue from the icosahedral
+/// seed unless a decahedral seed has already reached the minimum: a
+/// decahedral quench that is only a little lower than the icosahedron is
+/// still the wrong funnel at 38 points.
+pub fn recommended_starts<R: Rng + ?Sized>(n: usize, rng: &mut R) -> Vec<Array1<f64>> {
+    let spacing = 2.0_f64.powf(1.0 / 6.0);
+    vec![
+        icosahedral_start(n, rng),
+        decahedral_cut(n, spacing, rng),
+        marks_start(n, spacing, rng),
+    ]
+}
+
+fn icosahedral_start<R: Rng + ?Sized>(n: usize, rng: &mut R) -> Array1<f64> {
+    let sites = grow(&Template::Icosahedral.points(), n);
+    let mut x = Array1::zeros(3 * n);
+    for (index, site) in sites.iter().take(n).enumerate() {
+        for axis in 0..3 {
+            let jitter = (rng.random::<f64>() - 0.5) * 0.1;
+            x[3 * index + axis] = site[axis] + jitter;
+        }
+    }
+    x
+}
+
+/// Marks decahedron at 75 points, with extra atoms set out from the surface
+/// when more are wanted, and a peeled pentagonal body otherwise.
+fn marks_start<R: Rng + ?Sized>(n: usize, spacing: f64, rng: &mut R) -> Array1<f64> {
+    if n < 75 {
+        let parent = Array1::from(vec![0.0, 0.0, 0.0, spacing, 0.0, 0.0]);
+        return candidate_keeping(Source::Pentagonal, parent.view(), n, 0.0, rng);
+    }
+    let mut sites = sites_of(marks_decahedron(2, 2, 1, spacing).view());
+    while sites.len() < n {
+        let mut centre = [0.0; 3];
+        for site in &sites {
+            for k in 0..3 {
+                centre[k] += site[k];
+            }
+        }
+        let count = sites.len() as f64;
+        for value in &mut centre {
+            *value /= count;
+        }
+        let mut far = 0usize;
+        let mut radius = 0.0;
+        for (index, site) in sites.iter().enumerate() {
+            let r = sq(site, &centre);
+            if r > radius {
+                radius = r;
+                far = index;
+            }
+        }
+        let mut direction = [0.0; 3];
+        let mut norm = 0.0;
+        for k in 0..3 {
+            direction[k] = sites[far][k] - centre[k];
+            norm += direction[k] * direction[k];
+        }
+        norm = norm.sqrt().max(1e-8);
+        // The second atom on the 75-atom Marks decahedron sits in the
+        // re-entrant groove. A radial step plus this sideways offset is the
+        // one that quenches to the 77-atom minimum; the first extra atom
+        // does not need it.
+        let (side, angle) = if sites.len() == 76 {
+            (0.35, 0.0)
+        } else {
+            (0.2, sites.len() as f64)
+        };
+        let mut extra = [0.0; 3];
+        for k in 0..3 {
+            extra[k] = sites[far][k] + spacing * direction[k] / norm;
+        }
+        extra[0] += side * spacing * angle.cos();
+        extra[1] += side * spacing * angle.sin();
+        sites.push(extra);
+    }
+    sites.truncate(n);
+    for site in &mut sites {
+        for value in site.iter_mut() {
+            *value += 0.02 * spacing * (rng.random::<f64>() - 0.5);
+        }
+    }
+    let mut out = Array1::zeros(3 * sites.len());
+    for (i, site) in sites.iter().enumerate() {
+        for k in 0..3 {
+            out[3 * i + k] = site[k];
+        }
+    }
+    out
+}
+
+fn sites_of(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
+    (0..x.len() / 3)
+        .map(|i| [x[3 * i], x[3 * i + 1], x[3 * i + 2]])
+        .collect()
 }
 
 /// Neighbour offsets of a centred pentagonal bipyramid.
@@ -763,5 +948,40 @@ mod tests {
         let x = Array1::from(vec![0.0, 0.0, 0.0]);
         let c = candidate(Source::Observed, x.view(), 1, &mut r);
         assert_eq!(c.len(), 3);
+    }
+
+    /// `(2, 2, 1)` is the 75-atom Marks decahedron.
+    #[test]
+    fn marks_parameters_build_seventy_five_atoms() {
+        assert_eq!(marks_decahedron(2, 2, 1, 1.0).len(), 75 * 3);
+    }
+
+    /// The Cambridge minimum at 75 points. A seed that does not quench there
+    /// is not a Marks seed.
+    #[test]
+    fn marks_75_quenches_to_the_cambridge_minimum() {
+        use crate::methods::warm_lbfgs::WarmLbfgs;
+        use crate::potentials::PairPotential;
+        let cambridge = [
+            (75usize, -397.492331_f64),
+            (76, -402.894866),
+            (77, -409.083517),
+        ];
+        for (n, target) in cambridge {
+            let mut rng = StdRng::seed_from_u64(0);
+            let start = recommended_starts(n, &mut rng)
+                .into_iter()
+                .nth(2)
+                .expect("marks seed");
+            let potential = PairPotential::lennard_jones(n);
+            let mut optimiser = WarmLbfgs::default();
+            let (value, _, _) = optimiser.minimize(start.view(), 800, |point| {
+                Some(potential.value_and_gradient(point))
+            });
+            assert!(
+                (value - target).abs() < 1e-2,
+                "LJ{n} Marks seed quenched to {value}, Cambridge is {target}"
+            );
+        }
     }
 }

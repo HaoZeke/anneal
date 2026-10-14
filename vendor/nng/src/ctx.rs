@@ -28,8 +28,7 @@ use crate::{
 ///
 /// [`Aio`]: struct.Aio.html
 #[derive(Clone, Debug)]
-pub struct Context
-{
+pub struct Context {
 	/// The inner context.
 	///
 	/// While the `nng_ctx` type is copy and it is thread-safe, we don't want
@@ -37,8 +36,7 @@ pub struct Context
 	/// going to throw the inner, actual `nng_ctx` behind and Arc.
 	inner: Arc<Inner>,
 }
-impl Context
-{
+impl Context {
 	/// Creates a new socket context.
 	///
 	/// # Errors
@@ -49,8 +47,7 @@ impl Context
 	///
 	/// [`NotSupported`]: enum.Error.html#variant.NotSupported
 	/// [`OutOfMemory`]: enum.Error.html#variant.OutOfMemory
-	pub fn new(socket: &Socket) -> Result<Context>
-	{
+	pub fn new(socket: &Socket) -> Result<Context> {
 		let mut ctx = nng_sys::nng_ctx::NNG_CTX_INITIALIZER;
 		let rv = unsafe { nng_sys::nng_ctx_open(&mut ctx as _, socket.handle()) };
 
@@ -65,8 +62,7 @@ impl Context
 	///
 	/// [`Aio`]: struct.Aio.html
 	/// [`IncorrectState`]: enum.Error.html#variant.IncorrectState
-	pub fn send<M: Into<Message>>(&self, aio: &Aio, msg: M) -> SendResult<()>
-	{
+	pub fn send<M: Into<Message>>(&self, aio: &Aio, msg: M) -> SendResult<()> {
 		let msg = msg.into();
 		aio.send_ctx(self, msg)
 	}
@@ -80,7 +76,9 @@ impl Context
 	///
 	/// [`Aio`]: struct.Aio.html
 	/// [`IncorrectState`]: enum.Error.html#variant.IncorrectState
-	pub fn recv(&self, aio: &Aio) -> Result<()> { aio.recv_ctx(self) }
+	pub fn recv(&self, aio: &Aio) -> Result<()> {
+		aio.recv_ctx(self)
+	}
 
 	/// Closes the context.
 	///
@@ -92,38 +90,40 @@ impl Context
 	///
 	/// Closing the owning socket also closes this context. Additionally, the
 	/// context is closed once all handles have been dropped.
-	pub fn close(&self) { self.inner.close() }
+	pub fn close(&self) {
+		self.inner.close()
+	}
 
 	/// Returns the inner `nng_ctx` object.
-	pub(crate) fn handle(&self) -> nng_sys::nng_ctx { self.inner.ctx }
+	pub(crate) fn handle(&self) -> nng_sys::nng_ctx {
+		self.inner.ctx
+	}
 }
 
 #[cfg(feature = "ffi-module")]
-impl Context
-{
+impl Context {
 	/// Returns the `nng_ctx` handle for this context.
-	pub fn nng_ctx(&self) -> nng_sys::nng_ctx { self.handle() }
+	pub fn nng_ctx(&self) -> nng_sys::nng_ctx {
+		self.handle()
+	}
 }
 
-impl PartialEq for Context
-{
-	fn eq(&self, other: &Context) -> bool
-	{
+impl PartialEq for Context {
+	fn eq(&self, other: &Context) -> bool {
 		unsafe { nng_sys::nng_ctx_id(self.inner.ctx) == nng_sys::nng_ctx_id(other.inner.ctx) }
 	}
 }
 
 impl Eq for Context {}
 
-impl PartialOrd for Context
-{
-	fn partial_cmp(&self, other: &Context) -> Option<Ordering> { Some(self.cmp(other)) }
+impl PartialOrd for Context {
+	fn partial_cmp(&self, other: &Context) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
 }
 
-impl Ord for Context
-{
-	fn cmp(&self, other: &Context) -> Ordering
-	{
+impl Ord for Context {
+	fn cmp(&self, other: &Context) -> Ordering {
 		unsafe {
 			let us = nng_sys::nng_ctx_id(self.inner.ctx);
 			let them = nng_sys::nng_ctx_id(other.inner.ctx);
@@ -132,10 +132,8 @@ impl Ord for Context
 	}
 }
 
-impl Hash for Context
-{
-	fn hash<H: Hasher>(&self, state: &mut H)
-	{
+impl Hash for Context {
+	fn hash<H: Hasher>(&self, state: &mut H) {
 		let id = unsafe { nng_sys::nng_ctx_id(self.inner.ctx) };
 		id.hash(state);
 	}
@@ -167,14 +165,11 @@ expose_options!{
 
 /// A wrapper around an `nng_ctx`.
 #[derive(Debug)]
-struct Inner
-{
+struct Inner {
 	ctx: nng_sys::nng_ctx,
 }
-impl Inner
-{
-	fn close(&self)
-	{
+impl Inner {
+	fn close(&self) {
 		// The only time this can error is if the socket is already closed or
 		// was never open. Neither of those are an issue for us.
 		let rv = unsafe { nng_sys::nng_ctx_close(self.ctx) };
@@ -186,7 +181,8 @@ impl Inner
 	}
 }
 
-impl Drop for Inner
-{
-	fn drop(&mut self) { self.close() }
+impl Drop for Inner {
+	fn drop(&mut self) {
+		self.close()
+	}
 }

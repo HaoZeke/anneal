@@ -3992,7 +3992,6 @@ impl Default for HearState {
     }
 }
 
-
 /// One independently budgeted LJ replica against an isolated descriptor catalog.
 fn run_capnp_catalog(
     cfg: &Config,
@@ -4687,10 +4686,9 @@ fn run_capnp_catalog(
             if let Some(adopted) = state.heard_structure.as_ref()
                 && checkpoint_sequence.is_multiple_of(10)
             {
-                let same_family = snapshot
-                    .current_state()
-                    .as_slice()
-                    .is_some_and(|here| !anneal_core::catalog::different_packing_family(here, adopted));
+                let same_family = snapshot.current_state().as_slice().is_some_and(|here| {
+                    !anneal_core::catalog::different_packing_family(here, adopted)
+                });
                 println!(
                     "  walk hops {}  energy {:.6}  best {:.6}  in-adopted-family {}",
                     snapshot.hops(),
@@ -7585,9 +7583,9 @@ fn run_history_ensembles(
     #[cfg(feature = "ira")]
     use anneal_core::methods::minima_hopping::SerializedWitness;
     use anneal_core::pes_exploration::StructureContext;
-    use ensemble_report::{
-        config_from_env, print_header, run_seeds, sorted_pairs_witness, witness_name,
-    };
+    #[cfg(not(feature = "ira"))]
+    use ensemble_report::sorted_pairs_witness;
+    use ensemble_report::{config_from_env, print_header, run_seeds, witness_name};
 
     let ens = config_from_env(replicas, budget, reference.map(|r| r + 1e-4));
     let mut cfg = cfg.clone();

@@ -61,7 +61,7 @@ fn brute_shortest(
                             q[2] + shift[2] - p[2],
                         ];
                         let d2 = length2(displacement);
-                        if !(d2 < cutoff2) || d2 <= 1e-24 {
+                        if d2 >= cutoff2 || d2 <= 1e-24 {
                             continue;
                         }
                         let replace = match chosen {

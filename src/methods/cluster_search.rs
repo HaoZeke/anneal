@@ -15,6 +15,7 @@
 //! there arrives at the cluster driver by the same route as one written here
 //! and neither the driver nor this function can tell them apart.
 
+pub use crate::lattice::recommended_starts;
 #[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 #[cfg(test)]

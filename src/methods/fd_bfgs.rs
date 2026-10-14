@@ -195,7 +195,7 @@ const MAX_EXTRAPOLATION: f64 = 16.0;
 /// logarithm of a quadratic form in ten coordinates centred outside the unit
 /// cube, the portfolio ended higher in 200 evaluations with half the room
 /// than with no cap from 77 of 80 starts, and level with it in 500.
-const EXTRAPOLATION_ROOM: f64 = 0.5;
+pub(crate) const EXTRAPOLATION_ROOM: f64 = 0.5;
 /// Until a curvature pair has scaled the inverse Hessian, each line search's
 /// first trial moves the coordinate that moves most by this fraction of its
 /// box width, whatever the gradient's size, so the descent does not depend on
@@ -251,6 +251,11 @@ pub struct FdBfgsOptions {
     /// that model predicts at least as closely as the model of the values
     /// (see the module notes).
     pub log_model: bool,
+    /// Fraction of the room to the nearest bound that an extrapolated trial
+    /// may cover when the quadratic has no minimiser. [`f64::INFINITY`]
+    /// leaves the trial at [`MAX_EXTRAPOLATION`] times the accepted step,
+    /// which is the path the values-only portfolio used before the cap.
+    pub extrapolation_room: f64,
 }
 
 impl Default for FdBfgsOptions {
@@ -265,6 +270,7 @@ impl Default for FdBfgsOptions {
             gtol: 0.0,
             fatol: 0.0,
             log_model: false,
+            extrapolation_room: EXTRAPOLATION_ROOM,
         }
     }
 }
@@ -520,6 +526,8 @@ pub struct FdBfgs {
     redifferences: usize,
     /// Coordinate each gradient differences first.
     first: usize,
+    /// Extrapolations the room cap shortened.
+    clamped_steps: usize,
 }
 
 impl FdBfgs {
@@ -563,6 +571,7 @@ impl FdBfgs {
             used_intervals: vec![0.0; n],
             redifferences: 0,
             first: 0,
+            clamped_steps: 0,
         };
         if let Some(f0) = f0 {
             engine.set_start_value(f0);
@@ -636,6 +645,18 @@ impl FdBfgs {
         self.options.fatol = fatol;
     }
 
+    /// Steps the rest of this descent without the room cap or the log model.
+    ///
+    /// A kick or a restart keeps the choice. This is the path the cap
+    /// replaced, used when a capped descent has stalled short of a face.
+    pub fn use_classic_path(&mut self) {
+        self.options.log_model = false;
+        self.options.extrapolation_room = f64::INFINITY;
+        self.log_active = false;
+        self.log_engaged = false;
+        self.log_valid = false;
+    }
+
     /// Current iterate, the best point the descent has accepted.
     pub fn position(&self) -> ArrayView1<'_, f64> {
         self.x.view()
@@ -654,6 +675,11 @@ impl FdBfgs {
     /// Accepted iterations since the last (re)start.
     pub fn iterations(&self) -> usize {
         self.iterations
+    }
+
+    /// Extrapolations the room cap shortened on this descent.
+    pub fn clamped_steps(&self) -> usize {
+        self.clamped_steps
     }
 
     /// Next candidate to evaluate; always inside the box. Returns the
@@ -1042,8 +1068,18 @@ impl FdBfgs {
                 let ratio = realised / predicted;
                 if predicted > 0.0 && ratio > EXTRAPOLATE_RATIO {
                     let next = if ratio >= 1.0 {
-                        let reach = EXTRAPOLATION_ROOM * self.room(&work.direction);
-                        (work.alpha * MAX_EXTRAPOLATION).min(reach.max(work.alpha))
+                        let uncapped = work.alpha * MAX_EXTRAPOLATION;
+                        let room = self.options.extrapolation_room;
+                        let capped = if room.is_finite() {
+                            let reach = room * self.room(&work.direction);
+                            uncapped.min(reach.max(work.alpha))
+                        } else {
+                            uncapped
+                        };
+                        if capped < uncapped {
+                            self.clamped_steps += 1;
+                        }
+                        capped
                     } else {
                         work.alpha * (0.5 / (1.0 - ratio)).min(MAX_EXTRAPOLATION)
                     };

@@ -1,5 +1,5 @@
 use anneal_core::allocate::{DepthAllocator, RewardMoments};
-use anneal_core::surface_evidence::{SurfaceReportBook, SurfaceReport};
+use anneal_core::surface_evidence::{SurfaceReport, SurfaceReportBook};
 
 fn moments(values: &[f64]) -> RewardMoments {
     let mut moments = RewardMoments::default();
