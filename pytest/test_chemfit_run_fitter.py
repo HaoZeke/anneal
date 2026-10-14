@@ -343,6 +343,39 @@ class DeadInClass(Session):
     registry = _dead_proxy()
 
 
+class _Other:
+    __slots__ = ("x",)
+
+
+class BorrowedSlot(Session):
+    """Keeps the fitter in its ``__dict__``; its class holds another class's slot descriptor."""
+
+    borrowed = _Other.x
+
+
+class RefusingMeta(type):
+    """A metaclass whose ``__getattribute__`` refuses a class's ``__mro__`` and ``__dict__``."""
+
+    def __getattribute__(cls, name):
+        if name in ("__mro__", "__dict__"):
+            raise RuntimeError(f"the class {name} cannot be read")
+        return super().__getattribute__(name)
+
+
+class RefusedSession(Session, metaclass=RefusingMeta):
+    """Keeps the fitter in its ``__dict__``, in a class whose metaclass is ``RefusingMeta``."""
+
+
+class RefusedSlottedSession(_Session, metaclass=RefusingMeta):
+    """Keeps the fitter in a slot of a class whose metaclass is ``RefusingMeta``."""
+
+    __slots__ = ("_fitter", "bounds")
+
+    def __init__(self, fitter):
+        self._fitter = fitter
+        self.bounds = fitter.bounds
+
+
 class WrapperThreadFitter(ThreadFitter):
     """Runs ``run_benchmark`` on a worker thread, given ``wrap(self)`` in place of itself."""
 
@@ -914,7 +947,14 @@ _UNREADABLE = pytest.mark.parametrize(
 )
 _HOLDERS = ["dict", "slot", "closures"]
 _ACTIONS = pytest.mark.parametrize("action", ["always", "error"])
-_CLASS_ATTRIBUTES = pytest.mark.parametrize("wrap, plain", [(DeadInClass, Session)], ids=["proxy"])
+_CLASS_ATTRIBUTES = pytest.mark.parametrize(
+    "wrap, plain", [(DeadInClass, Session), (BorrowedSlot, Session)], ids=["proxy", "foreign-slot"]
+)
+_REFUSED = pytest.mark.parametrize(
+    "wrap, plain",
+    [(RefusedSession, Session), (RefusedSlottedSession, SlottedSession)],
+    ids=["dict", "slot"],
+)
 
 
 @_UNREADABLE
@@ -961,6 +1001,25 @@ def test_a_bridge_no_run_fitter_called_runs_beside_a_hand_off_given_a_value_it_c
 
 @_CLASS_ATTRIBUTES
 def test_a_bridge_no_run_fitter_called_passes_over_a_class_attribute_it_cannot_read(wrap, plain):
+    alone = _fitter(NextFitter)
+    _benchmark_wrapped(plain, alone)
+    fitter, seen, other = _beside_a_hand_off(wrap)
+    assert fitter.calls == alone.calls and _same_run(fitter, alone)
+    assert seen == [(FutureWarning, False)]
+    assert other.calls[0] == "init" and other.calls[-1] == "finish"
+
+
+@_REFUSED
+@_ACTIONS
+def test_a_bridge_on_another_thread_reads_a_class_whose_metaclass_refuses_it(wrap, plain, action):
+    fitter = _handed(wrap, action)
+    alone = _handed(plain, action)
+    assert fitter.calls == alone.calls and _same_run(fitter, alone)
+    assert _warned_where(fitter, action, early=True)
+
+
+@_REFUSED
+def test_a_bridge_no_run_fitter_called_reads_a_class_whose_metaclass_refuses_it(wrap, plain):
     alone = _fitter(NextFitter)
     _benchmark_wrapped(plain, alone)
     fitter, seen, other = _beside_a_hand_off(wrap)
