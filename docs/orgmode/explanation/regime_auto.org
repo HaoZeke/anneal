@@ -212,8 +212,8 @@ of the approximation round apart, and through the approximation's
 product with the next difference of gradients the asymmetry enters the
 next update as an indefinite symmetric term. The descent starts over 28
 times in the 40 runs of =binary_lj_spaced@5000=, 38 times in those of
-=binary_lj_fit@5000= and 1393 times on a grid of problems built to
-strain its approximation, in the 546 of the grid's 2920 runs in which it
+=binary_lj_fit@5000= and 1401 times on a grid of problems built to
+strain its approximation, in the 554 of the grid's 2920 runs in which it
 starts over at all. The grid holds quadratics of condition =1e3= to
 =1e12= in 6 to 30 coordinates, rotated or separable, some with their
 minimum on a face or at a corner of the box or with coordinates that
@@ -232,8 +232,8 @@ after each update 5, 0 and 95 times, in 64 runs. Two changes that alter
 only the rounding, the two factors of each product of two entries of
 the step, or of the difference of gradients, taken in the other order
 and the ratio that scales the box metric one unit in the last place
-larger, left 34 and 29, 39 and 39, and 1445 and 1427 start-overs, the
-last in 553 and 555 runs, 77 and 70 of them outside the 546: which runs
+larger, left 34 and 29, 39 and 39, and 1443 and 1428 start-overs, the
+last in 552 and 558 runs, 76 and 70 of them outside the 554: which runs
 start over at all depends on the rounding.
 
 No difference in the values the loop ends at holds for the symmetric
@@ -246,7 +246,7 @@ are and each of the two rounding changes, by a one-sided sign test at
 each of the four changes ends the loop lower or higher by that test on
 7 to 12 of those 223 cells, rows and sets of runs, a rounding change on
 the most. The test that skips as well each pair whose =cos(s, y)= is at
-most =1e-4= skipped 118867 and 111763 pairs in 423 and 454 of the
+most =1e-4= skipped 118875 and 111767 pairs in 425 and 456 of the
 grid's runs and left 84 and 94 start-overs there, and with either
 computation the loop then ended higher than the updates as they are and
 both rounding changes on the logarithm of the grid's separable
@@ -255,8 +255,8 @@ replica and with four (with one at 5000, at -0.63 and -0.64 against
 -4.12, 0/0/40 and 1/0/39 against the updates as they are), on the
 grid's runs at those budgets and on all its runs, and lower with both
 nowhere. Damped as well, as Powell damps the direct update, the updates
-left 1 and 3 start-overs on =binary_lj_spaced@5000=, none on
-=binary_lj_fit@5000= and 48 and 33 on the grid, but with either
+left one start-over each on =binary_lj_spaced@5000=, none on
+=binary_lj_fit@5000= and 26 and 20 on the grid, but with either
 computation the loop then ended higher, by the same rule, on 30 of
 those 223: =binary_lj_fit_plain@200= (0.475 against 0.358, 7/1/32
 against the updates as they are with both), =ternary_lj_fit@500= (216
@@ -330,6 +330,25 @@ The logarithm enters only through ratios of values, so multiplying the
 objective by a power of two still leaves the descent unchanged, while a
 constant added to a positive objective changes its logarithm and so can
 change its steps.
+
+Each model predicts a step's value from its direct approximation of the
+Hessian, which takes the same pairs as the inverse one. Rounding can
+leave the direct approximation indefinite too, and along a step where
+=s.B.s= is not positive it cannot take the pair; it then becomes the
+inverse of the symmetric part of the inverse approximation, which has
+taken the pair, or, when that part is not positive definite either, the
+inverse of the box metric scaled by the pair, as a start-over leaves it.
+Kept instead, it stays indefinite until the descent restarts or a
+direction from its model fails to descend, since in exact arithmetic the
+updates it can take keep the number of its negative eigenvalues: so
+kept, the direct approximation of the logarithm failed a Cholesky test
+at 571 of the 962 accepted steps at which the choice of model read it
+over seeds 0 to 3 of =binary_lj_fit_plain@5000=, and at 228 of all 962
+the choice differed from the one the same pairs give in 60-digit
+arithmetic; now 37 of 984 fail and the choice differs at 1. By the same
+test, against the loop that kept it and each of that loop's two
+rounding changes, the loop ends neither lower nor higher on any of
+those 223 cells, rows and sets of runs.
 
 The surrogate and the restart arm take values in the run's unit, the
 power of two at or below the threshold in force when they play: the
@@ -413,7 +432,10 @@ level (10.4 against 12.4, 9/21/10). With the descent's approximation
 started over after a direction from it fails to descend, the loop
 repeats its runs from before call for call on 27 of the 28 rows and on
 all 15 short of that budget, and gains on the other, =fit6@5000= (-13.5
-against -13.1, 30/2/8, =p= 6.6e-5). The loop trails on the rows below,
+against -13.1, 30/2/8, =p= 6.6e-5). With each model's direct
+approximation rebuilt along a step where it cannot take the pair, the
+loop repeats its runs from before call for call on all 28 rows and all
+15 short of that budget. The loop trails on the rows below,
 but for the opening's bar where said, and putting the replaced rule
 back costs the rows named with it:
 
@@ -785,9 +807,11 @@ With the model of the logarithm and that choice, the opening's later
 gains read as log ratios ([[*Values-only runs under Auto][above]]), the
 descent's extrapolated trials whose quadratic has no minimiser held to
 half the room left to the nearest bound
-([[*A log-loss fit with minima on its faces][below]]), and the descent's
+([[*A log-loss fit with minima on its faces][below]]), the descent's
 approximation started over after a direction from it fails to descend,
-one replica ends as follows over the same 40 paired seeds. The columns
+and each model's direct approximation rebuilt along a step where it
+cannot take the pair, one replica ends as follows over the same 40
+paired seeds. The columns
 give the free coordinates =n=, the medians of the loop, of 0.11.1's
 loop, which has none of these, and of =NgIohTuned=, and the W/T/L of
 the loop against =NgIohTuned=, of 0.11.1's loop against it, and of the
@@ -816,7 +840,7 @@ ahead and =q= where it trails, when below 0.05.
 | =rastrigin10@1000= | 10 | 3.98 | 3.98 | 39.3 | 40/0/0, =p= 9.1e-13 | 40/0/0, =p= 9.1e-13 | 0/40/0 |
 | =rastrigin10@5000= | 10 | 0 | 0 | 11.9 | 40/0/0, =p= 1.8e-8 | 40/0/0, =p= 1.8e-8 | 0/40/0 |
 | =rosenbrock10@1000= | 10 | 1.42e-16 | 1.66e-16 | 1.81 | 38/1/1, =p= 3.7e-9 | 38/1/1, =p= 3.7e-9 | 0/39/1 |
-| =rosenbrock10@5000= | 10 | 2.95e-27 | 2.88e-27 | 2.67e-11 | 1/38/1 | 1/38/1 | 0/40/0 |
+| =rosenbrock10@5000= | 10 | 2.91e-27 | 2.88e-27 | 2.67e-11 | 1/38/1 | 1/38/1 | 0/40/0 |
 
 Against 0.11.1's loop, the binary fit gains at 500 and 1000 evaluations,
 the twelve-parameter fit at 200, 1000 and 5000, the pair fit at 50 and
@@ -948,7 +972,7 @@ with W/T/L, =p= and =q= as in the table above:
 | =binary_lj_spaced@1000= | -10.9 | -1.82 | -7.15 | 28/0/12 | 9/0/31, =q= 2.9e-7 | 27/13/0, =p= 7.5e-9 |
 | =binary_lj_spaced@5000= | -16.0 | -16.0 | -16.0 | 12/27/1, =p= 0.0031 | 11/21/8 | 11/29/0, =p= 4.9e-4 |
 | =binary_lj_spaced_plain@1000= | 1.28e-27 | 5.94e-28 | 2.59e-13 | 6/29/5 | 6/29/5 | 3/34/3 |
-| =binary_lj_spaced_plain@5000= | 2.11e-28 | 1.35e-28 | 4.93e-15 | 2/36/2 | 2/37/1 | 1/38/1 |
+| =binary_lj_spaced_plain@5000= | 1.75e-28 | 1.35e-28 | 4.93e-15 | 2/36/2 | 2/37/1 | 1/38/1 |
 | =binary_lj_spaced_ref1@1000= | -10.5 | -2.14 | -7.14 | 33/0/7, =p= 4.7e-4 | 16/0/24, =q= 0.0053 | 25/9/6, =p= 1.7e-6 |
 | =binary_lj_spaced_ref2@1000= | -10.9 | -2.08 | -6.88 | 29/0/11, =p= 0.0073 | 14/0/26, =q= 0.0024 | 25/8/7, =p= 5.6e-6 |
 | =binary_lj_spaced_ref3@1000= | -10.7 | -1.79 | -7.03 | 29/0/11, =p= 0.027 | 11/0/29, =q= 3.2e-4 | 25/11/4, =p= 4.7e-7 |

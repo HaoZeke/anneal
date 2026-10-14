@@ -78,8 +78,8 @@
 //! indefinite symmetric term. The descent starts over 28 times in the 40
 //! runs of the portfolio on the Lennard-Jones fit above at 5000
 //! evaluations, 38 times on a like fit to clusters drawn without that
-//! spacing, and 1393 times on a grid of problems built to strain the
-//! approximation, in the 546 of its 2920 runs in which it starts over at
+//! spacing, and 1401 times on a grid of problems built to strain the
+//! approximation, in the 554 of its 2920 runs in which it starts over at
 //! all. Over the runs there that refused directions on the logarithm of
 //! 1e-16 plus a rotated quadratic of condition 1e8, or plus a
 //! two-exponential fit's squared error, the largest `max|H - H^T|` at a
@@ -90,7 +90,7 @@
 //! on the second and 81 and 95 times on the grid. Two changes that alter
 //! only the rounding, the factors of `s_i s_j` and `y_i y_j` in each term
 //! taken in the other order and `s.y / y.D.y` one unit in the last place
-//! larger, left 34 and 29, 39 and 39, and 1445 and 1427 start-overs.
+//! larger, left 34 and 29, 39 and 39, and 1443 and 1428 start-overs.
 //!
 //! The values the portfolio ends at tell neither symmetric computation from
 //! the updates as they are: on none of 82 cells and rows of the regime
@@ -147,6 +147,25 @@
 //! through ratios of values, so a power of two multiplying the objective
 //! still leaves the descent unchanged; a constant added to it changes the
 //! logarithm.
+//!
+//! Each model predicts from its direct approximation `B`, which takes the
+//! same pairs as its inverse one. Rounding can leave `B` indefinite too,
+//! and along a step where `s.B.s` is not positive it cannot take the pair;
+//! it then becomes the inverse of the symmetric part of the inverse
+//! approximation, which has taken the pair, or, when that part is not
+//! positive definite either, the inverse of `(s.y / y.D.y) D`, as a
+//! start-over leaves it. Kept instead, it stays indefinite until the
+//! descent restarts or a direction from its model fails to descend, since
+//! in exact arithmetic the updates it can take keep the number of its
+//! negative eigenvalues: so kept, the direct approximation of `ln f` failed
+//! a Cholesky test at 571 of the 962 accepted steps at which the choice of
+//! model read it, over seeds 0 to 3 of the fit to clusters drawn without
+//! that spacing with `e` itself as the loss at 5000 evaluations, and at 228
+//! of all 962 the choice differed from the one the same pairs give in
+//! 60-digit arithmetic; now 37 of 984 fail and the choice differs at 1. By
+//! the test above, against the loop that kept it and each of that loop's
+//! two rounding changes, the portfolio ends neither lower nor higher on any
+//! of those 223 cells, rows and sets of runs.
 
 use eindir_core::Bounds;
 use ndarray::{Array1, Array2, ArrayView1};
@@ -314,6 +333,12 @@ impl Curvature {
 
     /// BFGS update with the pair `(s, y)`, skipped when it violates the
     /// curvature condition. With `direct` the Hessian approximation follows.
+    /// Along a step where `s.B.s` is not positive, or not finite, it cannot
+    /// take the pair; it becomes the inverse of the symmetric part of the
+    /// inverse approximation, which has taken the pair, computed through
+    /// that part's Cholesky factor, or, when that part is not positive
+    /// definite either, starts over from the inverse of `(s.y / y.D.y) D`,
+    /// as [`Curvature::start_over`] leaves it.
     fn update(&mut self, metric: &Array1<f64>, s: &Array1<f64>, y: &Array1<f64>, direct: bool) {
         let n = s.len();
         let sy = s.dot(y);
@@ -350,6 +375,9 @@ impl Curvature {
                         hessian[[i, j]] += rho * y[i] * y[j] - hs[i] * hs[j] / shs;
                     }
                 }
+            } else {
+                *hessian = symmetric_inverse(&self.inv_hessian)
+                    .unwrap_or_else(|| Array2::from_diag(&metric.mapv(|w| 1.0 / (w * self.gamma))));
             }
         }
     }
@@ -369,6 +397,61 @@ impl Curvature {
             .as_ref()
             .map(|hessian| 0.5 * s.dot(&hessian.dot(s)))
     }
+}
+
+/// Inverse of the symmetric part of `a` through its Cholesky factor, made
+/// exactly symmetric; none when that part fails the factorisation (a pivot
+/// not positive) or the inverse is not finite.
+fn symmetric_inverse(a: &Array2<f64>) -> Option<Array2<f64>> {
+    let n = a.nrows();
+    let mut factor = Array2::<f64>::zeros((n, n));
+    for j in 0..n {
+        let mut pivot = a[[j, j]];
+        for p in 0..j {
+            pivot -= factor[[j, p]] * factor[[j, p]];
+        }
+        if !(pivot > 0.0 && pivot.is_finite()) {
+            return None;
+        }
+        let pivot = pivot.sqrt();
+        factor[[j, j]] = pivot;
+        for i in j + 1..n {
+            let mut v = 0.5 * (a[[i, j]] + a[[j, i]]);
+            for p in 0..j {
+                v -= factor[[i, p]] * factor[[j, p]];
+            }
+            factor[[i, j]] = v / pivot;
+        }
+    }
+    let mut inverse = Array2::<f64>::zeros((n, n));
+    let mut z = vec![0.0; n];
+    for c in 0..n {
+        for i in 0..n {
+            let mut v = if i == c { 1.0 } else { 0.0 };
+            for p in 0..i {
+                v -= factor[[i, p]] * z[p];
+            }
+            z[i] = v / factor[[i, i]];
+        }
+        for i in (0..n).rev() {
+            let mut v = z[i];
+            for p in i + 1..n {
+                v -= factor[[p, i]] * z[p];
+            }
+            z[i] = v / factor[[i, i]];
+        }
+        for i in 0..n {
+            inverse[[i, c]] = z[i];
+        }
+    }
+    for i in 0..n {
+        for j in 0..i {
+            let v = 0.5 * (inverse[[i, j]] + inverse[[j, i]]);
+            inverse[[i, j]] = v;
+            inverse[[j, i]] = v;
+        }
+    }
+    inverse.iter().all(|v| v.is_finite()).then_some(inverse)
 }
 
 /// Logarithm of `value / base`, minus infinity when the ratio is not
@@ -1909,6 +1992,48 @@ mod tests {
         );
         let direct = Array2::from_diag(&metric.mapv(|w| 1.0 / (w * gamma)));
         assert_eq!(engine.curvature.hessian, Some(direct));
+    }
+
+    #[test]
+    fn a_direct_approximation_that_cannot_take_a_pair_becomes_the_inverse_of_the_inverse() {
+        // Rounding can leave the direct approximation indefinite or
+        // singular, and along a step where s.B.s is not positive (-0.75,
+        // then 0) it cannot take the pair. It becomes then the inverse of
+        // the symmetric part of the inverse approximation, which has taken
+        // the pair, its two triangles set here 0.5 apart; and where that
+        // part is not positive definite either, the direct approximation
+        // starts over from the inverse of the box metric scaled by the pair.
+        let metric = Array1::from_vec(vec![1.0, 4.0]);
+        let (s, y) = (
+            Array1::from_vec(vec![1.0, 0.5]),
+            Array1::from_vec(vec![1.0, 1.0]),
+        );
+        let first = |model: &mut Curvature| {
+            let s = Array1::from_vec(vec![1.0, 0.0]);
+            model.update(&metric, &s, &Array1::from_vec(vec![2.0, 0.5]), true);
+        };
+        for entry in [-1.0, -0.25] {
+            let mut model = Curvature::new(&metric);
+            first(&mut model);
+            model.inv_hessian[[0, 1]] += 0.25;
+            model.inv_hessian[[1, 0]] -= 0.25;
+            model.hessian = Some(Array2::from_diag(&Array1::from_vec(vec![entry, 1.0])));
+            model.update(&metric, &s, &y, true);
+            let inverse = &model.inv_hessian;
+            let symmetric = (inverse + &inverse.t()) * 0.5;
+            let product = model.hessian.as_ref().expect("direct").dot(&symmetric);
+            let off = (product - Array2::<f64>::eye(2)).mapv(f64::abs);
+            assert!(off.iter().all(|&v| v < 1e-12), "at {entry}: {off:?}");
+        }
+        let mut model = Curvature::new(&metric);
+        first(&mut model);
+        model.inv_hessian = Array2::from_diag(&Array1::from_vec(vec![-100.0, 1.0]));
+        model.hessian = Some(Array2::from_diag(&Array1::from_vec(vec![-1.0, 1.0])));
+        model.update(&metric, &s, &y, true);
+        assert!(model.inv_hessian[[0, 0]] < 0.0);
+        let gamma = 1.5 / 5.0;
+        let direct = Array2::from_diag(&metric.mapv(|w| 1.0 / (w * gamma)));
+        assert_eq!(model.hessian, Some(direct));
     }
 
     #[test]
