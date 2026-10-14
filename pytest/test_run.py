@@ -2,7 +2,10 @@
 preset constructors plus run() driver). Replaces the legacy
 test_funcs / test_mcsamplers / test_quench suites."""
 
+import hashlib
+import platform
 import re
+import struct
 import subprocess
 import sys
 
@@ -1058,6 +1061,91 @@ def test_run_qmc_with_far_more_starts_than_calls_returns_once_they_are_made():
         " n_epochs=2, steps_per_epoch=2, max_evals=5"
     )
     assert _child_run_qmc_in_room(10**9, arguments, 6) == ["returned", "5", "0"]
+
+
+def _plain_landscape(x):
+    # Arithmetic alone, added up in order, so that its values are the same on
+    # every platform and Python version: no numpy reduction, no sum(), no math
+    # function.
+    total = 0.0
+    for v in x.tolist():
+        d = v - 0.3
+        total += d * d + 0.1 * (v * v - 1.0) * (v * v - 4.0)
+    return total
+
+
+_QMC_BOXES = {
+    "unit": (np.array([-1.0, -1.0, -1.0]), np.array([1.0, 1.0, 1.0])),
+    "mixed": (np.array([-5.0, 0.0, -100.0]), np.array([5.0, 1e-3, 50.0])),
+    "fixed": (np.array([-1.0, 0.25, -1.0]), np.array([1.0, 0.25, 1.0])),
+}
+_QMC_PRESETS = {"boltzmann": Boltzmann, "fast": Fast, "gsa": Gsa}
+# Its Halton index, the seed plus one, passes 2**64 - 1 from the third start on.
+_WRAPPING_SEED = 2**64 - 3
+# The first 16 hex digits of the SHA-256 of every point asked and every
+# history returned by the runs of _qmc_runs, per box and preset.
+_QMC_HISTORIES = {
+    ("unit", "boltzmann"): "e4cb226553fcc288",
+    ("unit", "fast"): "aa0d5bcfaaf549f1",
+    ("unit", "gsa"): "0e7ee6d182a31e0c",
+    ("mixed", "boltzmann"): "bab1cb28ac9b6837",
+    ("mixed", "fast"): "198ec707c4a5958f",
+    ("mixed", "gsa"): "a66432132feb39db",
+    ("fixed", "boltzmann"): "9b4bef97c94ad009",
+    ("fixed", "fast"): "93cae15fd174daad",
+    ("fixed", "gsa"): "7abc80b801f15efa",
+}
+# The runs go through the C library's exp, log and pow, whose last bits can
+# differ from one library to another, so the digests hold only on the
+# platform they were taken on.
+_QMC_HISTORIES_HOLD = sys.platform == "linux" and platform.machine() == "x86_64"
+
+
+def _qmc_runs(low, high):
+    """The options and the number of calls of each run, two epochs of three steps a start.
+
+    64 and 100 starts run uncapped, with 150 calls and with 37, which leaves
+    the starts after the 37th no call, and 8 run from ``_WRAPPING_SEED``; each
+    from the design alone and with ``x0``.
+    """
+    x0 = low + 0.6 * (high - low)
+    for seed in range(3):
+        for n_starts in (64, 100):
+            for cap in (None, 150, 37):
+                calls = 7 * n_starts if cap is None else min(cap, 7 * n_starts)
+                for start in (None, x0):
+                    yield {"n_starts": n_starts, "seed": seed, "max_evals": cap, "x0": start}, calls
+    for start in (None, x0):
+        yield {"n_starts": 8, "seed": _WRAPPING_SEED, "x0": start}, 8 * 7
+
+
+def _qmc_history_digest(box, preset):
+    low, high = _QMC_BOXES[box]
+    digest = hashlib.sha256()
+    for options, calls in _qmc_runs(low, high):
+        objective = Recorder(_plain_landscape)
+        h = run_qmc(
+            objective, low, high, _QMC_PRESETS[preset](), n_epochs=2, steps_per_epoch=3, **options
+        )
+        assert len(objective.points) == calls, options
+        for point in objective.points:
+            digest.update(point.tobytes())
+        digest.update(struct.pack("<d", h.best_val))
+        digest.update(np.asarray(h.best_pos, dtype=np.float64).tobytes())
+        for e in h.epochs:
+            digest.update(
+                struct.pack("<qdqqd", e.epoch, e.temp, e.accepted, e.rejected, e.best_val)
+            )
+        digest.update(bytes(h.stationarity_flags))
+    return digest.hexdigest()[:16]
+
+
+@pytest.mark.parametrize("preset", list(_QMC_PRESETS))
+@pytest.mark.parametrize("box", list(_QMC_BOXES))
+def test_run_qmc_repeats_its_histories_over_many_starts_and_a_wrapping_seed(box, preset):
+    digest = _qmc_history_digest(box, preset)
+    if _QMC_HISTORIES_HOLD:
+        assert digest == _QMC_HISTORIES[box, preset]
 
 
 def test_run_leaves_a_nan_start():
