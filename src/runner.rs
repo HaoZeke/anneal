@@ -54,9 +54,13 @@ impl QmcStarts {
     }
 
     /// Row `idx` of `eindir_core::low_discrepancy_points` on the finite box
-    /// with the same skip, bit for bit.
+    /// with the same skip, bit for bit, as a release build lays it out: the
+    /// Halton index `skip + idx` wraps past `u64::MAX` to 0 in every build,
+    /// so a seed near `u64::MAX` runs with overflow checks on as it runs in
+    /// a release build.
     fn point(&self, idx: usize) -> ndarray::Array1<f64> {
-        let unit = eindir_core::halton_unit(self.skip + idx as u64, self.widths.len());
+        let index = self.skip.wrapping_add(idx as u64);
+        let unit = eindir_core::halton_unit(index, self.widths.len());
         self.finite
             .low
             .iter()
@@ -549,6 +553,34 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_start_past_the_last_halton_index_takes_the_first() {
+        let bounds = eindir_core::Bounds::new(vec![-2.0, -1.0].into(), vec![3.0, 2.5].into(), 0.0);
+        let seed = u64::MAX - 2;
+        let skip = qmc_skip_from_seed(seed);
+        assert_eq!(skip, u64::MAX - 1);
+        let starts = QmcStarts::new(&bounds, skip);
+        let design = eindir_core::low_discrepancy_points(&starts.finite, 2, skip);
+        for (idx, row) in design.outer_iter().enumerate() {
+            assert_eq!(
+                starts.point(idx).mapv(f64::to_bits),
+                row.mapv(f64::to_bits),
+                "start {idx}"
+            );
+        }
+        let from_zero = QmcStarts::new(&bounds, 0);
+        for idx in 2..6 {
+            assert_eq!(
+                starts.point(idx).mapv(f64::to_bits),
+                from_zero.point(idx - 2).mapv(f64::to_bits),
+                "start {idx}"
+            );
+        }
+        let variant = boltzmann_in_box(StybTang2D::new(), 1.0, 0.5).expect("a valid preset");
+        let history = run_rs_qmc_variant_from(variant, 6, 2, 3, seed, None, None);
+        assert!(history.best.val.is_finite());
     }
 
     #[test]
