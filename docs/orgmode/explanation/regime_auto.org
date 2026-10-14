@@ -212,56 +212,78 @@ of the approximation round apart, and through the approximation's
 product with the next difference of gradients the asymmetry enters the
 next update as an indefinite symmetric term. The descent starts over 28
 times in the 40 runs of =binary_lj_spaced@5000=, 38 times in those of
-=binary_lj_fit@5000= and 1393 times in 546 runs on problems built to
-strain its approximation, runs of a grid of such problems: base-10
-logarithms of quadratics of condition =1e6= to =1e12=, of Rosenbrock's
-function and of a two-exponential fit's squared error, and that error
-itself, at 1000 to 20000 evaluations with one replica and with four.
-With each entry of the updates computed once for both triangles it
-started over 4, 0 and 74 times. In each of those 78 the approximation
-first lost positive definiteness at an update whose rounding, =eps=
-times its largest entries before or after the update, exceeded its
-smallest eigenvalue before it, while its pairs replayed in 60-digit
-arithmetic keep it positive definite; in 4 that update's pair had
-=cos(s, y)= below =1e-4=, in none below =sqrt(eps)=.
+=binary_lj_fit@5000= and 1393 times on a grid of problems built to
+strain its approximation, in the 546 of the grid's 2920 runs in which it
+starts over at all. The grid holds quadratics of condition =1e3= to
+=1e12= in 6 to 30 coordinates, rotated or separable, some with their
+minimum on a face or at a corner of the box or with coordinates that
+the box fixes or the value ignores, Rosenbrock's function in 10 and 30
+coordinates and a two-exponential fit's mean squared error, each as the
+base-10 logarithm of a small floor plus the value and six also as the
+value itself, at 200, 1000, 5000 and 20000 evaluations with one replica
+and with four, over 20 seeds, 40 on ten of its cells. Over the runs
+that refused directions on the logarithm of =1e-16= plus its rotated
+quadratic of condition =1e8=, or plus the fit's error, the largest
+=max|H - H^T|= at a refusal, over the coordinates off the bounds, had a
+median of =1.7e-5=, or =6.6e-3=, of =max|H|=. With each entry of both
+updates computed once for both triangles the descent started over 4, 0
+and 81 times, the last in 60 runs, and with the two triangles averaged
+after each update 5, 0 and 95 times, in 64 runs. Two changes that alter
+only the rounding, the two factors of each product of two entries of
+the step, or of the difference of gradients, taken in the other order
+and the ratio that scales the box metric one unit in the last place
+larger, left 34 and 29, 39 and 39, and 1445 and 1427 start-overs, the
+last in 553 and 555 runs, 77 and 70 of them outside the 546: which runs
+start over at all depends on the rounding.
 
-Each way of preventing the indefiniteness that was measured ended the
-loop higher on some of the cells and rows below, by a one-sided sign
-test at 0.05 over the same 40 paired seeds against the loop as it is;
-the figures give the two medians, W/T/L and that test's probability.
-The symmetric updates move nearly every run longer than a few hundred
-evaluations, and the loop then ended higher on
-=binary_lj_fit_plain@500= (0.01400 against 0.01402, 14/0/26, 0.040),
-=ellS100@5000= (3790 against 3740, 14/0/26, 0.040) and =levyR30@5000=
-(0.589 against 0.633, 12/4/24, 0.033) and lower on
-=binary_lj_spaced@500= (-8.70 against -8.67, 23/5/12, 0.045), level on
-the other cells and rows; it ended higher on 189 of the 546 runs and
-lower on 147 (0.013), and was level on the 1500 runs of the grid at
-1000 and 5000 evaluations (557/375/568). Skipping as well each pair
-whose =cos(s, y)= is at most =1e-4= skipped 66797 pairs in 180 of
-the 546 runs and left 77 start-overs there; the loop then ended lower
-on =binary_lj_fit_plain@1000= (1.48e-4 against 9.78e-5, 27/0/13,
-0.019) and on =binary_lj_spaced@500= as before, higher on the same two
-rows, on 209 of the 546 runs against 126 lower (3.4e-6) and on 597 of
-the 1500 against 529 lower (0.023). Damped as well, as Powell damps the
-direct update, the updates left 29 start-overs in the 546 runs, but the
-loop ended higher on 229 of them against 116 lower (5.9e-10) and on 636
-of the 1500 against 509 lower (9.7e-5), on =binary_lj_fit_plain@200=
-(0.475 against 0.358, 7/1/32, 3.5e-5), =ternary_lj_fit@500= (216
-against 90.5, 8/0/32, 9.1e-5), three more plain-loss cells, nine
-ellipsoid rows and =rosen30@5000= with its =+1e2= and =x1e-6= copies,
-and lower only on =binary_lj_fit@5000=, the runs of =fit6@5000= (-13.7
-against -13.5, 28/0/12, 0.0083). With the inverse update damped
-likewise, 16 start-overs were left in the 546 runs, and the loop ended
-lower on 233 of them against 129 higher (2.5e-8), on 599 of the 1500
-against 525 higher (0.015), on =binary_lj_fit@5000= (-14.1 against
--13.5, 27/0/13, 0.019) and on =binary_lj_spaced@500= (-9.59 against
--8.67, 29/3/8, 3.8e-4), but higher on =binary_lj_fit@1000= (-4.74
-against -4.87, 13/0/27, 0.019), =lj_pair_fit@50= (0.864 against 0.767,
-10/6/24, 0.012), =ternary_lj_fit@500= (145 against 90.5, 12/3/25,
-0.024) and two of the three further sets of spaced clusters at 1000.
-The updates stay as they are, and the start-over repairs what their
-rounding breaks.
+No difference in the values the loop ends at holds for the symmetric
+updates. On none of 82 cells and rows of one replica, those of the
+tables and rows below and the fits at smaller budgets, nor on the
+grid's 136 cells, its four budgets or all its runs, did either way of
+computing them end the loop lower, or higher, than the updates as they
+are and each of the two rounding changes, by a one-sided sign test at
+0.05 over the same paired seeds. Against the updates as they are alone,
+each of the four changes ends the loop lower or higher by that test on
+7 to 12 of those 223 cells, rows and sets of runs, a rounding change on
+the most. The test that skips as well each pair whose =cos(s, y)= is at
+most =1e-4= skipped 118867 and 111763 pairs in 423 and 454 of the
+grid's runs and left 84 and 94 start-overs there, and with either
+computation the loop then ended higher than the updates as they are and
+both rounding changes on the logarithm of the grid's separable
+quadratic of condition =1e12= at 5000 and 20000 evaluations with one
+replica and with four (with one at 5000, at -0.63 and -0.64 against
+-4.12, 0/0/40 and 1/0/39 against the updates as they are), on the
+grid's runs at those budgets and on all its runs, and lower with both
+nowhere. Damped as well, as Powell damps the direct update, the updates
+left 1 and 3 start-overs on =binary_lj_spaced@5000=, none on
+=binary_lj_fit@5000= and 48 and 33 on the grid, but with either
+computation the loop then ended higher, by the same rule, on 30 of
+those 223: =binary_lj_fit_plain@200= (0.475 against 0.358, 7/1/32
+against the updates as they are with both), =ternary_lj_fit@500= (216
+against 90.5, 8/0/32), two more plain-loss cells, nine rows of
+ellipsoids, =rosen30@5000= with its =+1e2= and =x1e-6= copies, all the
+grid's runs and those at 5000 evaluations, and twelve of its cells, ten
+of them on its plain quadratics of condition =1e10= and =1e12=. It
+ended lower with both on three of the grid's cells, the logarithm of
+Rosenbrock's function in 30 coordinates at 200 and 1000 evaluations
+with one replica (4.16 against 4.42 at 200, 17/1/2) and that of the
+quadratic whose minimum lies on a face at 1000 with four. With the
+inverse update damped likewise, no start-over was left on either fit
+and 18 and 24 on the grid, and with either computation the loop ended
+lower on 16 of those 223: =binary_lj_fit@5000= and its row =fit6@5000=
+(-14.1 against -13.5, 27/0/13 and 29/0/11), =binary_lj_spaced@500=
+(-9.59 and -9.41 against -8.67, 29/3/8 and 28/3/9), all the grid's runs
+and those at 5000 and 20000 evaluations, and ten of its cells, eight on
+the logarithms of its rotated quadratics of condition =1e6= and =1e8=
+(on that of =1e-16= plus the one of condition =1e8=, at 5000 with one
+replica, -11.9 and -11.6 against -8.16, 20/0/0). It ended higher with
+both on six: =lj_pair_fit@50= (0.864 against 0.767, 10/6/24 and
+10/5/25) and five of the grid's cells, the logarithms of its rotated
+quadratic of condition =1e10= and its separable one of condition =1e12=
+at 5000 evaluations with four replicas, of its two-exponential fit at
+200 with one and of Rosenbrock's function in 30 coordinates at 20000
+with one and with four. The updates stay as they are, and the
+start-over repairs what their rounding breaks.
 
 The descent also keeps a second BFGS model, of the logarithm of its
 values, while every value it has started from or accepted is positive.
