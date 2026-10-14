@@ -57,5 +57,6 @@ Runs in
 which the descent steps on the logarithm, which it cannot before
 ``2 d (d + 1)`` evaluations for ``d`` free coordinates, no longer repeat
 those of 0.11.1. Multiplying the objective by a power of two still leaves
-a run unchanged, while a constant added to a positive objective changes
-its logarithm and so can now change the descent's steps.
+a run unchanged. A constant added to the objective could already change a
+run, and on a positive objective it now also changes the logarithm that
+the descent models.
