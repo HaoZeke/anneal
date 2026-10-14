@@ -1691,7 +1691,7 @@ Feeds/consumes: consumes =crate::methods::regime= for arm priors and
 exploit probability, and the typed-algebra kernels
 (=crate::movekernel=, =crate::exchange=, =crate::accept=, =crate::cool=,
 =crate::neigh=) rather than the cluster-specific move library; it feeds
-the Python front end =anneal.minimize= (python/anneal/__init__.py:1528),
+the Python front end =anneal.minimize= (python/anneal/__init__.py:1530),
 which runs =global_optimize= with one replica and the batch replicas,
 through =global_optimize_replicas= (src/python.rs:2573, 2824), with
 more; =global_optimize= itself, which runs them for =replicas= above one

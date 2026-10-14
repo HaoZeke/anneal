@@ -462,11 +462,13 @@ def run_qmc(
     ``n_starts * (1 + n_epochs * steps_per_epoch)`` calls. Fixed
     coordinates, whose two ends are equal, are held as :func:`run` holds
     them, the design spanning the free ones; with every coordinate fixed
-    the run is one call. Each start reserves room for the epochs it records
-    as :func:`run` does, and the best start's history is kept while the next
-    start runs. Before any call the run checks that the room of the first
-    two starts, the most it holds at once, can be allocated together, and
-    raises ``ValueError`` when it cannot.
+    the run is one call. Each start's design point is made as the start
+    begins, and a start that ``max_evals`` leaves no call is not laid out,
+    so the starts take no room before they run. Each start reserves room
+    for the epochs it records as :func:`run` does, and the best start's
+    history is kept while the next start runs. Before any call the run
+    checks that the room of the first two starts, the most it holds at once,
+    can be allocated together, and raises ``ValueError`` when it cannot.
     """
     return _core_run_qmc(
         obj_fn,

@@ -10,25 +10,61 @@ use crate::history::{EpochLine, History, State};
 use crate::sampler::{Sampler, improves};
 use crate::variant::SaVariant;
 
-/// The Halton points of `bounds`, except that an axis with an infinite wall,
-/// which has no uniform measure, holds every point on its finite wall, or at
-/// zero when its walls are `-inf` and `inf`. A box with an axis that holds
-/// no point, with a NaN wall or two walls at the same infinity, is refused.
-fn qmc_starts(bounds: &eindir_core::Bounds<f64>, n: usize, skip: u64) -> ndarray::Array2<f64> {
-    crate::box_points::assert_box_holds_points(bounds);
-    let (low, high): (Vec<f64>, Vec<f64>) = bounds
-        .low
-        .iter()
-        .zip(&bounds.high)
-        .map(|(&lo, &hi)| match (lo.is_finite(), hi.is_finite()) {
-            (true, true) => (lo, hi),
-            (true, false) => (lo, lo),
-            (false, true) => (hi, hi),
-            (false, false) => (0.0, 0.0),
-        })
-        .unzip();
-    let finite = eindir_core::Bounds::new(low.into(), high.into(), 0.0);
-    eindir_core::low_discrepancy_points(&finite, n, skip)
+/// The Halton points of `bounds` from index `skip`, made one at a time, except
+/// that an axis with an infinite wall, which has no uniform measure, holds
+/// every point on its finite wall, or at zero when its walls are `-inf` and
+/// `inf`. A box with an axis that holds no point, with a NaN wall or two walls
+/// at the same infinity, is refused.
+struct QmcStarts {
+    finite: eindir_core::Bounds<f64>,
+    widths: Vec<f64>,
+    skip: u64,
+}
+
+impl QmcStarts {
+    fn new(bounds: &eindir_core::Bounds<f64>, skip: u64) -> Self {
+        crate::box_points::assert_box_holds_points(bounds);
+        let (low, high): (Vec<f64>, Vec<f64>) = bounds
+            .low
+            .iter()
+            .zip(&bounds.high)
+            .map(|(&lo, &hi)| match (lo.is_finite(), hi.is_finite()) {
+                (true, true) => (lo, hi),
+                (true, false) => (lo, lo),
+                (false, true) => (hi, hi),
+                (false, false) => (0.0, 0.0),
+            })
+            .unzip();
+        let finite = eindir_core::Bounds::new(low.into(), high.into(), 0.0);
+        let widths = finite
+            .low
+            .iter()
+            .zip(&finite.high)
+            .map(|(&lo, &hi)| {
+                let width = hi - lo;
+                assert!(width >= 0.0, "bounds require high >= low on every axis");
+                width
+            })
+            .collect();
+        Self {
+            finite,
+            widths,
+            skip,
+        }
+    }
+
+    /// Row `idx` of `eindir_core::low_discrepancy_points` on the finite box
+    /// with the same skip, bit for bit.
+    fn point(&self, idx: usize) -> ndarray::Array1<f64> {
+        let unit = eindir_core::halton_unit(self.skip + idx as u64, self.widths.len());
+        self.finite
+            .low
+            .iter()
+            .zip(&self.widths)
+            .zip(&unit)
+            .map(|((&lo, &width), &u)| lo + width * u)
+            .collect()
+    }
 }
 
 /// Deterministic positive Halton skip derived from a run seed.
@@ -306,7 +342,8 @@ where
 /// [`run_rs_qmc_variant`] with `x0`, when supplied, in place of the first
 /// low-discrepancy start. `max_evals`, when supplied, is split as evenly as
 /// possible over the starts, each start's share counting its first
-/// evaluation; a start whose share is zero is not run.
+/// evaluation; a start whose share is zero is not run. Each start's point is
+/// made as the start begins, so a start that is not run is not laid out.
 pub fn run_rs_qmc_variant_from<O, C, N, M, A>(
     variant: SaVariant<f64, O, C, N, M, A>,
     n_starts: usize,
@@ -325,10 +362,7 @@ where
 {
     let cooling = variant.cool.clone();
     let n_starts = n_starts.max(1);
-    let mut starts = qmc_starts(variant.obj.bounds(), n_starts, qmc_skip_from_seed(seed));
-    if let Some(x0) = x0 {
-        starts.row_mut(0).assign(&x0);
-    }
+    let starts = QmcStarts::new(variant.obj.bounds(), qmc_skip_from_seed(seed));
     // Serial multi-start: Python objectives cannot be driven from Rayon
     // without GIL deadlock. Native multi-walker scaling lives in dmc_pop.
     let mut best_history = None;
@@ -337,9 +371,14 @@ where
         if share == Some(0) {
             break;
         }
-        let start = starts.row(idx);
+        let mut start = starts.point(idx);
+        if idx == 0
+            && let Some(x0) = &x0
+        {
+            start.assign(x0);
+        }
         let state = variant
-            .initial_state_from_position(start.to_owned())
+            .initial_state_from_position(start)
             .expect("SaVariant constructs a state from any position");
         let chain_seed = seed.wrapping_add(0x9e37_79b9_7f4a_7c15_u64.wrapping_mul(idx as u64 + 1));
         let mut rng = StdRng::seed_from_u64(chain_seed);
@@ -484,6 +523,32 @@ mod tests {
         assert_eq!(epochs_within(100, 10, 0), 0);
         assert_eq!(epochs_within(100, 0, 25), 100);
         assert_eq!(epochs_within(100, 10, usize::MAX), 100);
+    }
+
+    #[test]
+    fn each_start_s_point_is_its_row_of_the_design_laid_out_at_once() {
+        let inf = f64::INFINITY;
+        let boxes: [(&[f64], &[f64]); 4] = [
+            (&[-2.0, -1.0], &[3.0, 2.5]),
+            (&[-5.12; 5], &[5.12; 5]),
+            (&[0.0, 1e-9, 0.5], &[1e-6, 2e-9, 0.5]),
+            (&[-inf, -inf, 1.0, -1e308], &[inf, 4.0, inf, 1e308]),
+        ];
+        for (low, high) in boxes {
+            let bounds = eindir_core::Bounds::new(low.to_vec().into(), high.to_vec().into(), 0.0);
+            for skip in [1, 43, 1 << 40] {
+                let starts = QmcStarts::new(&bounds, skip);
+                // 100 rows, past the 64 from which the design fills rows in parallel.
+                let design = eindir_core::low_discrepancy_points(&starts.finite, 100, skip);
+                for (idx, row) in design.outer_iter().enumerate() {
+                    assert_eq!(
+                        starts.point(idx).mapv(f64::to_bits),
+                        row.mapv(f64::to_bits),
+                        "box {low:?} {high:?}, skip {skip}, start {idx}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
