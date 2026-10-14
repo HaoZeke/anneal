@@ -1479,10 +1479,10 @@ a bandit over =VALUES_ONLY_ARMS= (=cma=, =qn=, =gsa=, =de=, =surrogate=,
 =max(4(d+1), min(budget/48, sqrt(4(d+1) budget)))= evaluations
 (=values_only_slice=, portfolio.rs:3837-3840). In a box with no side
 wide enough at the start for a difference step to change its
-coordinate (=FdBfgs::can_difference=, fd_bfgs.rs:546), the run is one
+coordinate (=FdBfgs::can_difference=, fd_bfgs.rs:629), the run is one
 evaluation, of =x0= or of the box's centre; the forward step there is
 =sqrt(eps)= times the larger of the coordinate's magnitude and a tenth
-of its side, at most a quarter of the side (fd_bfgs.rs:622-627), and it
+of its side, at most a quarter of the side (fd_bfgs.rs:705-710), and it
 leaves the coordinate unchanged on a side one unit in the last place
 wide, on one two units wide when half a unit rounds back to the
 coordinate, and near zero, where it underflows, as on =[0, 1e-316]=
@@ -1608,7 +1608,7 @@ split as evenly as it goes; replica =r= runs the loop as the solo run of
 its share from =x0= would, seeded with =seed= mixed with =r=, its descent
 differencing each gradient from coordinate =r d / R= on, and replica 0
 keeps =seed= and coordinate 0 (replicas.rs:402-408, 499-500;
-=FdBfgs::with_first_coordinate=, fd_bfgs.rs:495). Each replica plays on
+=FdBfgs::with_first_coordinate=, fd_bfgs.rs:578). Each replica plays on
 a scoped thread, and the coordinator on the calling thread (=coordinate=,
 replicas.rs:253) gathers one point from every replica still running,
 evaluates those no replica has evaluated before as one batch through
@@ -2274,15 +2274,15 @@ it does not refuse direction after direction.
 A descent ends on a slow iteration, a projected-gradient tolerance when
 one is set, or a failed line search.
 
-Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:393);
-=FdBfgsOptions= (fd_bfgs.rs:208); the portfolio's =QnArmState= and
+Key types and functions: =FdBfgs= (src/methods/fd_bfgs.rs:476);
+=FdBfgsOptions= (fd_bfgs.rs:227); the portfolio's =QnArmState= and
 =run_qn_arm= (src/methods/portfolio.rs:1354/3738).
 
 Constants and defaults: =ARMIJO = 1e-4=, =MAX_LINE_TRIALS = 40=,
 =MAX_EXTRAPOLATION = 16=, =EXTRAPOLATION_ROOM = 0.5=,
 =FIRST_STEP_FRACTION = 0.05=, =CENTRAL_INTERVAL_FRACTION = 0.1=,
 =INTERVAL_MOVE = 2=, =MAX_REDIFFERENCES = 2=, =LOG_MODEL_MARGIN = 4=,
-=LOG_MODEL_PAIRS = 2= (fd_bfgs.rs:155-204). The default options have
+=LOG_MODEL_PAIRS = 2= (fd_bfgs.rs:174-223). The default options have
 =ftol = 1e-12=, three slow iterations of patience, the value floor
 =f64::MIN_POSITIVE= in the slow-iteration test, no absolute floor on
 it (=fatol = 0=), no gradient tolerance and no model of the logarithm;

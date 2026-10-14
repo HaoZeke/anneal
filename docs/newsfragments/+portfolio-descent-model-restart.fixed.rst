@@ -28,6 +28,6 @@ on 34, and four shared batch replicas end at -13.2 against -12.8 (19/15/6,
 13-atom Lennard-Jones positions and ten-dimensional Rastrigin and Rosenbrock
 at 1000 and 5000 evaluations, on both fits at 1000 and fewer, on the
 plain-loss fits and on the other benchmark rows of the regime notes repeat
-their paths call for call, but for seven that end within 1e-9 of their
+their paths call for call, but for nine that end within 1e-9 of their
 earlier values. Runs in which the descent met such a direction part from
 their earlier paths at the first.
