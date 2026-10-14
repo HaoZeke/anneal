@@ -4,9 +4,11 @@ Above one, the portfolio runs that many batch replicas of
 initialised with ``init(batch_size=batch_size)``, and each batch of
 candidates, at most ``batch_size`` of them, goes to one ``Fitter.evaluate``
 of a list and one ``step``, so a fitter whose schedule runs candidates
-concurrently evaluates them together. The start is the first evaluation, as
+concurrently evaluates them together. A candidate answered from an earlier
+evaluation is left out of the list, and a batch holding only such candidates
+makes no call and sends no ``step``. The start is the first evaluation, as
 a batch of one, and the budget stays the total number of evaluations.
-``fit_chemfit`` then steps the fitter once per batch instead of every
+``fit_chemfit`` then steps the fitter once per ``evaluate`` instead of every
 ``tell_every`` evaluations. A batch needs the portfolio and a fitter with
 ``evaluate``, ``step`` and an ``init`` that takes ``batch_size``. When every
 other check passes, a batch under another driver is refused before ``init``,
