@@ -8,7 +8,7 @@ every point at full length, with the fixed values. With every coordinate
 fixed, a run is one call, at ``x0`` or at ``low``; ``global_optimize`` then
 returns the keys of one controller, its arm counts empty, whatever the
 number of replicas. ``low`` above ``high`` is still refused, now with
-``low[i] must be less than or equal to high[i]``, and a run on a box with
-no fixed coordinate makes the same calls as before. ``chemfit_box`` still
-refuses a zero-width bound, and its message no longer says that the
+``low[i] must be less than or equal to high[i]``, and holding a fixed
+coordinate changes no call of a run on a box without one. ``chemfit_box``
+still refuses a zero-width bound, and its message no longer says that the
 drivers need ``lower < upper``.
