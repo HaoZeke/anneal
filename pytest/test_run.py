@@ -996,6 +996,70 @@ def test_run_qmc_whose_starts_take_no_steps_records_no_epoch_and_returns():
     assert _child_run("run_qmc", 10**12, 0, 5) == ["returned", "5", "0"]
 
 
+def _child_run_qmc_in_room(room, arguments, leave_at):
+    # In a child process held to its size plus room bytes, as above. The
+    # objective is +inf; at its leave_at-th call it writes the count and
+    # leaves the child.
+    script = (
+        "import os\n"
+        "import resource\n"
+        "import anneal\n"
+        "calls = []\n"
+        "def f(x):\n"
+        "    calls.append(1)\n"
+        f"    if len(calls) == {leave_at}:\n"
+        "        os.write(1, b'left %d\\n' % len(calls))\n"
+        "        os._exit(0)\n"
+        "    return float('inf')\n"
+        "with open('/proc/self/status') as status:\n"
+        "    size = next(int(line.split()[1]) for line in status if line.startswith('VmSize:'))\n"
+        f"limit = size * 1024 + {room}\n"
+        "resource.setrlimit(resource.RLIMIT_AS, (limit, resource.RLIM_INFINITY))\n"
+        "try:\n"
+        f"    h = anneal.run_qmc(f, {arguments})\n"
+        "    print('returned', len(calls), len(h.epochs))\n"
+        "except ValueError as error:\n"
+        "    print('ValueError', len(calls), error)\n"
+    )
+    child = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=300
+    )
+    assert child.returncode == 0, child.stderr[-2000:]
+    return child.stdout.split()
+
+
+@pytest.mark.skipif(not _held_to_size(), reason="needs /proc and an unlimited RLIMIT_AS")
+@pytest.mark.parametrize(
+    ("n_starts", "n_epochs", "room"),
+    [
+        # 120 bytes an epoch hold two histories of 41 bytes an epoch, but not
+        # beside 10**6 design points laid out at once, some 200 bytes each;
+        # 10**12 of them take at least 16 TB.
+        (10**6, 10**6, 120 * 10**6),
+        (10**12, 1, 10**9),
+    ],
+)
+def test_run_qmc_lays_out_a_start_only_as_it_begins(n_starts, n_epochs, room):
+    # Each start makes its one call and records its epochs with no steps;
+    # the third start's call comes after the first two histories are held.
+    arguments = (
+        f"[-1.0, -1.0], [1.0, 1.0], anneal.Fast(), n_starts={n_starts},"
+        f" n_epochs={n_epochs}, steps_per_epoch=0, seed=3"
+    )
+    assert _child_run_qmc_in_room(room, arguments, 3) == ["left", "3"]
+
+
+@pytest.mark.skipif(not _held_to_size(), reason="needs /proc and an unlimited RLIMIT_AS")
+def test_run_qmc_with_far_more_starts_than_calls_returns_once_they_are_made():
+    # Five evaluations over 10**12 starts give the first five one each and
+    # leave the rest no call; a sixth call would leave the child.
+    arguments = (
+        "[0.0, 0.0], [1.0, 1.0], anneal.Boltzmann(), n_starts=10**12,"
+        " n_epochs=2, steps_per_epoch=2, max_evals=5"
+    )
+    assert _child_run_qmc_in_room(10**9, arguments, 6) == ["returned", "5", "0"]
+
+
 def test_run_leaves_a_nan_start():
     def nan_at_origin(x):
         return float("nan") if np.all(x == 0.0) else styb_tang_2d(x)
