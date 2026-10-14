@@ -622,6 +622,22 @@ fn run_minima_hopping_with_history<'a>(
         charged.map_or(ledger.spent(), |counter| counter.load(Ordering::SeqCst)),
         energy,
     )];
+    let descriptor = Some(lj::descriptor_space());
+    let context = StructureContext::new(Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")));
+    // The opening quench is already basin 0. Visit maps stay empty so the
+    // first certified return is classified the same way with or without a
+    // history service.
+    let mut local_basins = HashSet::from([current_basin]);
+    let mut accepted_visits: HashMap<usize, u64> = HashMap::new();
+    let mut observed_visits: HashMap<usize, u64> = HashMap::new();
+    let mut history_seconds = 0.0;
+    if let (Some(history), Some(descriptor)) = (history, descriptor.as_ref()) {
+        let history_start = Instant::now();
+        observe_history(history, &ledger, descriptor, &context, witness, |_, _| {
+            Ok(())
+        })?;
+        history_seconds += history_start.elapsed().as_secs_f64();
+    }
 
     while ledger.remaining() > 0 {
         let mut attempt_config = escape_config;

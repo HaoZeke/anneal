@@ -144,6 +144,11 @@ pub extern "C" fn anneal_core_version() -> *const c_char {
 
 /// Write the default box configuration: four replicas, a budget of 400
 /// work units, the default coverage field, and Gaussian escapes.
+///
+/// # Safety
+///
+/// `out` must be null, or aligned and writable for one `anneal_box_config_t`.
+/// A null `out` is rejected and the configuration is not written.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn anneal_box_config_default(
     out: *mut anneal_box_config_t,
@@ -393,6 +398,16 @@ fn ensemble_config(
 /// callback that fails ends the search with `ANNEAL_INTERNAL_ERROR`, and
 /// `x` is left at its start. `low` and `high` have `dim` entries each and
 /// must be finite with `low <= high`.
+///
+/// # Safety
+///
+/// `eval` and `grad` must be non-null and safe to call with `user` and with
+/// the DLPack shells this function builds. `x` must be null or a CPU float64
+/// DLPack tensor this call may read and write. `low` and `high` must each be
+/// null or readable for as many `f64` values as `x` holds. `cfg` and `out`
+/// must each be null, or aligned and valid for one configuration and one
+/// report. A null pointer among `x`, `low`, `high`, `cfg`, and `out` is
+/// rejected before it is dereferenced.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn anneal_box_minimize(
     eval: anneal_eval_fn,
@@ -422,9 +437,7 @@ pub unsafe extern "C" fn anneal_box_minimize(
         let high = unsafe { std::slice::from_raw_parts(high, dim) };
         for (l, h) in low.iter().zip(high) {
             if !(l.is_finite() && h.is_finite() && l <= h) {
-                set_last_error(
-                    "anneal_box_minimize: bounds must be finite with low <= high",
-                );
+                set_last_error("anneal_box_minimize: bounds must be finite with low <= high");
                 return anneal_status_t::ANNEAL_INVALID_PARAMETER;
             }
         }
@@ -534,8 +547,7 @@ mod tests {
         let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "x") }.unwrap();
         let gs = unsafe { cpu_f64_slice_mut(grad_out, "grad") }.unwrap();
         for (g, v) in gs.iter_mut().zip(xs.iter()) {
-            *g = 2.0 * v
-                + 20.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * v).sin();
+            *g = 2.0 * v + 20.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * v).sin();
         }
         anneal_status_t::ANNEAL_SUCCESS
     }

@@ -123,10 +123,9 @@ fn clearance(point: ArrayView1<f64>, peers: &[Array1<f64>], bounds: &Bounds<f64>
         .fold(f64::INFINITY, f64::min)
 }
 
-fn rounded_case(
-    fixed: bool,
-    values: bool,
-) -> (Array1<f64>, Array1<f64>, Vec<Array1<f64>>, Bounds<f64>, f64) {
+type RoundedGeometry = (Array1<f64>, Array1<f64>, Vec<Array1<f64>>, Bounds<f64>, f64);
+
+fn rounded_case(fixed: bool, values: bool) -> RoundedGeometry {
     let low = 1e10;
     let spacing = 1.9073486328125e-6;
     let point = |a: f64, b: f64| {

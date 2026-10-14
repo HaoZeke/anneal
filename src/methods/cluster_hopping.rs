@@ -1366,6 +1366,7 @@ fn rung_height(cfg: &Config, n_rep: usize, ratio: f64) -> f64 {
 /// Everything past the state describes the state rather than the rung, so a
 /// swap moves it with the state and a switch restores it with the state. Left
 /// behind, it would attribute the next hop to whatever the previous rung held.
+#[allow(dead_code)] // Exchange bookkeeping for the replica ladder; the driver does not park rungs through it yet.
 struct Parked {
     energy: f64,
     state: Array1<f64>,
@@ -1388,6 +1389,7 @@ struct Parked {
 /// and at rung `j`'s. `S` is one function on every rung, so it enters only
 /// through the difference of the inverse temperatures and drops out of a flat
 /// ladder.
+#[allow(dead_code)] // Called by the exchange weight below, which the driver does not reach yet.
 fn swap_log_acceptance(
     own_k: [f64; 2],
     own_j: [f64; 2],
@@ -1402,6 +1404,7 @@ fn swap_log_acceptance(
 
 /// What a rung's acceptance can read at one state besides the rung's own bias.
 #[derive(Clone, Copy, Debug)]
+#[allow(dead_code)] // Fields the exchange weight reads; the driver does not build them yet.
 struct HopTerms {
     energy: f64,
     funnel: f64,
@@ -1412,6 +1415,7 @@ struct HopTerms {
 /// What every rung's acceptance weighs a state by, and so what a swap between
 /// two of them has to exchange.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)] // Weights a swap would exchange; the driver does not ask for one yet.
 enum RungWeight {
     /// `exp(-(E + V_k + F + P + B) / T_k)`, with `V_k` the rung's own bias,
     /// `F` the funnel bias, `P` the packing pile and `B` the energy bias: the
@@ -1430,6 +1434,7 @@ enum RungWeight {
 impl RungWeight {
     /// The weight the acceptance test applies, given whether the
     /// flat-histogram cost exists yet.
+    #[allow(dead_code)]
     fn of(cfg: &Config, flat_cost: bool) -> Self {
         if !cfg.flat_histogram || cfg.minima_hopping {
             Self::Boltzmann
@@ -1449,6 +1454,7 @@ impl RungWeight {
 /// is `V_j` at rung `j`'s state and at rung `k`'s. The flat cost is the same
 /// on both rungs at either state, so it cancels from the factor and takes the
 /// energy with it: under that weight a swap exchanges the biases alone.
+#[allow(dead_code)] // The ladder's exchange factor. Measured, and not yet called from the driver.
 fn exchange_log_acceptance(
     weight: RungWeight,
     at_k: HopTerms,
@@ -4959,15 +4965,14 @@ where
                 history_seen = parked_history_seen.remove(rep);
                 let mut next = chains.remove(rep);
                 if next.pending_initial {
-                    if let (Some(h), Some(g)) = (history.as_deref_mut(), next.gradient.as_ref()) {
-                        if let Some(report) =
+                    if let (Some(h), Some(g)) = (history.as_deref_mut(), next.gradient.as_ref())
+                        && let Some(report) =
                             h.observe(next.energy, next.coordinates.view(), g.view())
-                        {
-                            h.mark_accepted(report.minimum);
-                            next.history_minimum = Some(report.minimum);
-                            let seen = history_seen.entry(report.minimum).or_insert(0);
-                            *seen = seen.saturating_add(1);
-                        }
+                    {
+                        h.mark_accepted(report.minimum);
+                        next.history_minimum = Some(report.minimum);
+                        let seen = history_seen.entry(report.minimum).or_insert(0);
+                        *seen = seen.saturating_add(1);
                     }
                     next.pending_initial = false;
                 }

@@ -58,6 +58,8 @@ impl Default for BoxCoverageConfig {
 }
 
 impl BoxCoverageConfig {
+    // The repulsion-snapshot test compiles this file alone.
+    #[cfg_attr(test, allow(dead_code))]
     pub(super) fn for_ensemble(config: &BoxEnsembleConfig) -> Self {
         Self {
             shared: matches!(config.history, HistoryMode::Shared) && config.shared_deposits > 0,
@@ -348,6 +350,7 @@ impl Coverage {
         self.stats.constrained_repulsions += stats.constrained_repulsions;
     }
 
+    #[cfg_attr(test, allow(dead_code))]
     fn heights(&self, replica: usize, descriptor: ArrayView1<f64>) -> (f64, ForeignWell) {
         let bias = &self.biases[replica];
         bias.index()
@@ -365,6 +368,7 @@ impl Coverage {
 
     /// Connect a paid arrival to escape without asserting stationarity.
     /// The existing map is read before recording this trial's local arrival.
+    #[cfg_attr(test, allow(dead_code))]
     pub(super) fn feedback_from_arrival(
         &mut self,
         replica: usize,
@@ -408,6 +412,7 @@ impl Coverage {
     /// Apply the biased Metropolis decision and measure direct peer-height
     /// influence with the same endpoint lookups and original uniform draw.
     #[allow(clippy::too_many_arguments)]
+    #[cfg_attr(test, allow(dead_code))]
     pub(super) fn accepts<R: Rng + ?Sized>(
         &mut self,
         replica: usize,
@@ -477,6 +482,7 @@ impl Coverage {
     }
 
     /// A chain without funded proposals has no further delivery obligation.
+    #[cfg_attr(test, allow(dead_code))]
     pub(crate) fn retire_reader(&mut self, replica: usize) {
         if let Some(exchange) = &mut self.exchange {
             exchange.retire_reader(replica);
@@ -520,6 +526,7 @@ impl Coverage {
     }
 
     /// Record only a local search observation, after deciding trial acceptance.
+    #[cfg_attr(test, allow(dead_code))]
     pub(super) fn observe(
         &mut self,
         replica: usize,

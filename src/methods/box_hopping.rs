@@ -1026,14 +1026,13 @@ where
             &mut replica.work,
             replica.budget,
             &mut n_grads,
-        ) {
-            if let Some(report) = hooks[index].observe(replica.f, replica.x.view(), gradient.view())
-            {
-                history_observations += 1;
-                hooks[index].mark_accepted(report.minimum);
-                replica.feedback.register_initial(report.minimum);
-                replica.here = Some(report.minimum);
-            }
+        ) && let Some(report) =
+            hooks[index].observe(replica.f, replica.x.view(), gradient.view())
+        {
+            history_observations += 1;
+            hooks[index].mark_accepted(report.minimum);
+            replica.feedback.register_initial(report.minimum);
+            replica.here = Some(report.minimum);
         }
     }
 

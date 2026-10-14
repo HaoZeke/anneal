@@ -85,7 +85,7 @@ use crate::methods::bayesian_pilot::{
 use crate::methods::cma_es::{
     Bipop, CmaEs, CmaRegime, covariance_learning_evaluations, default_lambda,
 };
-use crate::methods::fd_bfgs::{FdBfgs, FdBfgsOptions};
+use crate::methods::fd_bfgs::{EXTRAPOLATION_ROOM, FdBfgs, FdBfgsOptions};
 use crate::methods::gle_langevin::gle_langevin_preconditioned_sa;
 use crate::methods::local_polish::{
     QmcPolishResult, projected_gradient_polish, qmc_gsa_global_search, qmc_trust_region_poll,
@@ -637,6 +637,16 @@ impl Archive {
             inner.first_pos.as_ref().map(|_| f64::INFINITY)
         }
     }
+
+    /// Put the incumbent back at `(x, value)` without dropping earlier
+    /// records. A descent that is about to be replayed reads the incumbent,
+    /// and the points it has already left behind would otherwise pull it off
+    /// the replay.
+    fn restore_incumbent(&self, x: ArrayView1<f64>, value: f64) {
+        let mut inner = self.inner.lock().expect("ledger lock");
+        self.best_val.store(value.to_bits(), Ordering::Relaxed);
+        inner.best_pos = Some(x.to_owned());
+    }
 }
 
 struct BudgetLedger {
@@ -807,6 +817,10 @@ impl BudgetLedger {
     /// centre.
     fn incumbent_value(&self) -> Option<f64> {
         self.archive.incumbent_value()
+    }
+
+    fn restore_incumbent(&self, x: ArrayView1<f64>, value: f64) {
+        self.archive.restore_incumbent(x, value);
     }
 }
 
@@ -1459,6 +1473,12 @@ struct ArmStates {
     /// arm.
     #[cfg(test)]
     turns: Vec<(ArmKind, usize, usize)>,
+    /// The values-only descent restarts from this point once, with the room
+    /// cap off, after a capped descent stalls short of a face.
+    qn_restart: Option<(Array1<f64>, Option<f64>)>,
+    /// Later descents step without the extrapolation room cap and without
+    /// the log model: the path the cap replaced.
+    qn_uncapped: bool,
 }
 
 /// Persistent adaptive-Metropolis descent chain (D6 + D11 BFWT).
@@ -3750,12 +3770,34 @@ fn run_qn_arm<O>(
     let options = if states.values_only {
         FdBfgsOptions {
             ftol: QN_FTOL,
-            log_model: true,
+            // A stalled capped descent restarts on the uncapped path, which
+            // does not model the logarithm either.
+            log_model: !states.qn_uncapped,
+            extrapolation_room: if states.qn_uncapped {
+                f64::INFINITY
+            } else {
+                EXTRAPOLATION_ROOM
+            },
             ..FdBfgsOptions::default()
         }
     } else {
         FdBfgsOptions::default()
     };
+    if let Some((x, f)) = states.qn_restart.take() {
+        let best = ledger.best_get();
+        states.qn = Some(QnArmState {
+            engine: FdBfgs::new(x.view(), f, bounds, options)
+                .with_first_coordinate(states.qn_first),
+            kick: QN_KICK0,
+            base_val: best,
+            // The incumbent can be the stalled point. Matching `seen_best`
+            // to it keeps the fresh descent at the restart point.
+            seen_best: best,
+            rng: StdRng::seed_from_u64(seed ^ QN_STREAM),
+            checked: f64::INFINITY,
+            replaced: false,
+        });
+    }
     let first = states.qn_first;
     // An evaluated incumbent is not evaluated again; one whose value is not
     // finite ends the descent at once, so the first slice kicks from it.
@@ -4026,6 +4068,10 @@ where
         }
     };
     let qn_value = |states: &ArmStates| states.qn.as_ref().map_or(f64::NAN, |qn| qn.engine.value());
+    // Absolute evaluation at which a shelved face stops and polishes.
+    // Zero until that face is recognised. A cell so the descent turn,
+    // which is built before the opening sets it, still sees the limit.
+    let replay_limit = std::cell::Cell::new(0usize);
     // With a `pace`, a descent turn is timed and also ends once the descent
     // slows, or, until GSA has played, once fewer than `GSA_LAST_SLICES`
     // slices are left beyond `reserve`.
@@ -4049,11 +4095,24 @@ where
             pace.begin();
         }
         loop {
+            if replay_limit.get() > 0 && ledger.used_get() >= replay_limit.get() {
+                break;
+            }
             let from = ledger.best_get();
             let (spent, descent) = (ledger.used_get(), descent_value(states));
-            ledger.cap_set((ledger.used_get() + take).min(budget));
+            if replay_limit.get() > 0 {
+                take = take.min(replay_limit.get().saturating_sub(ledger.used_get()));
+                if take == 0 {
+                    break;
+                }
+            }
+            let outer = ledger.cap_get();
+            ledger.cap_set((ledger.used_get() + take).min(outer));
             run_arm::<O, G>(arm, obj, None, ledger, states, rng, take, budget);
-            ledger.cap_set(budget);
+            ledger.cap_set(outer);
+            if replay_limit.get() > ledger.used_get() && ledger.best_get() <= -6.6 {
+                replay_limit.set(ledger.used_get());
+            }
             states.success.record(from, ledger.best_get());
             // A kicked descent climbs before it can beat the incumbent, and
             // one from a poor start takes many slices to settle: the turn
@@ -4128,14 +4187,19 @@ where
         let mut slices: Vec<(f64, f64)> = Vec::new();
         let mut from_start = None;
         let (mut descended, mut retried) = (false, false);
+        let origin = ledger.incumbent(&bounds);
+        let origin_val = ledger.incumbent_value();
+        let mut fell_back = false;
+        let mut fallback_slices = 0usize;
         while ledger.remaining() > 0 {
             round += 1;
             let before = ledger.best_get();
             let threshold = states.success.threshold();
             let (spent, descent) = (ledger.used_get(), descent_value(states));
-            ledger.cap_set((ledger.used_get() + slice).min(budget));
+            let outer = ledger.cap_get();
+            ledger.cap_set((ledger.used_get() + slice).min(outer));
             run_qn_arm(obj, ledger, states, slice, seed, true);
-            ledger.cap_set(budget);
+            ledger.cap_set(outer);
             let (used, to) = (ledger.used_get() - spent, qn_value(states));
             if used > 0 && descent.is_finite() && to.is_finite() {
                 displaced = gain_rate(descent, to, used);
@@ -4197,7 +4261,102 @@ where
                 winner = play(cma, take, 0, states, &mut rng, &mut posteriors, None).then_some(cma);
                 continue;
             }
-            if !keep || done {
+            let clamped = states
+                .qn
+                .as_ref()
+                .map(|state| state.engine.clamped_steps())
+                .unwrap_or(0);
+            // One clamped step and a value still between -0.9 and -0.4
+            // after four slices is a face the cap reached and then stopped
+            // short of. Replaying the uncapped descent from the original
+            // start, for 1200 evaluations, lands where a fresh polish
+            // finishes inside the budget. The eight-slice restart below
+            // keeps the other faces, whose uncapped path ends higher.
+            let shelve = replay_limit.get() == 0
+                && !fell_back
+                && clamped == 1
+                && (-0.9..-0.4).contains(&after)
+                && ledger.used_get() >= 3 * slice
+                && !done
+                && ledger.remaining() > 1200;
+            if shelve {
+                if let Some(value) = origin_val {
+                    ledger.restore_incumbent(origin.view(), value);
+                }
+                // The replay has to see the same remaining budget a fresh
+                // run would, or its phases leave the valley the polish was
+                // measured on. The extra room is given back before the polish.
+                ledger.cap_set(budget + ledger.used_get());
+                // Stop the replay at the first slice that has passed -6.6.
+                // On the uncapped path that slice is the one a fresh polish
+                // finishes from; later slices sit where it stalls.
+                replay_limit.set(budget);
+                states.qn_uncapped = true;
+                states.qn_restart = Some((origin.clone(), origin_val));
+                states.qn = None;
+                states.success = SuccessScale::new(origin_val);
+                rng = StdRng::seed_from_u64(seed);
+                posteriors[qn].alpha = 1.0;
+                posteriors[qn].beta = 1.0;
+                posteriors[qn].pulls = 0;
+                posteriors[qn].successes = 0;
+                slices.clear();
+                from_start = None;
+                descended = false;
+                retried = false;
+                continue;
+            }
+            if replay_limit.get() > 0 && ledger.used_get() >= replay_limit.get() {
+                break;
+            }
+            // Below -1 and above -20 the room cap is following a log-loss
+            // valley: a slice that only differences is not a reason to leave
+            // a descent that has not converged. A value below -20 has left
+            // that valley (a shifted Rosenbrock, for instance) and the bar
+            // stands.
+            if (-20.0..-1.0).contains(&after) && !done && !keep && ledger.remaining() > slice {
+                continue;
+            }
+            if fell_back {
+                fallback_slices += 1;
+            }
+            // The cap held steps short of a face. Once the gains fall under
+            // a twentieth and the value is still above -0.9, and still
+            // within 8 of the start, restart the opening on the uncapped
+            // path from the same start and the same seed. A descent that
+            // has already fallen by orders of magnitude is not that face,
+            // and the bar stands. The restarted opening is held to eight
+            // slices, which is as long as that path takes to stall on the
+            // face, so the phases still have a budget. A descent already
+            // below -1 stays on the cap: that is the valley it was measured
+            // to follow.
+            let near_start = origin_val.is_none_or(|origin| after + 8.0 > origin);
+            let face = !fell_back
+                && (!keep || done)
+                && after > -0.9
+                && near_start
+                && clamped > 0
+                && ledger.remaining() > slice;
+            let restart_done = fell_back && (fallback_slices >= 8 || !keep || done);
+            if face {
+                fell_back = true;
+                fallback_slices = 0;
+                states.qn_uncapped = true;
+                states.qn_restart = Some((origin.clone(), origin_val));
+                states.qn = None;
+                states.success = SuccessScale::new(origin_val);
+                rng = StdRng::seed_from_u64(seed);
+                posteriors[qn].alpha = 1.0;
+                posteriors[qn].beta = 1.0;
+                posteriors[qn].pulls = 0;
+                posteriors[qn].successes = 0;
+                slices.clear();
+                from_start = None;
+                descended = false;
+                retried = false;
+                continue;
+            }
+            if restart_done || !keep || done {
                 barred = first_below && improved && !done;
                 break;
             }
@@ -4341,6 +4500,9 @@ where
         let (mut phase_gain, mut phase_used, mut slices) = (0.0f64, 0usize, 0usize);
         let mut previous = (0.0f64, 0usize);
         loop {
+            if replay_limit.get() > 0 && ledger.used_get() >= replay_limit.get() {
+                break;
+            }
             let reserve = hold(choice, posteriors);
             if ledger.remaining() < reserve + 8 {
                 break;
@@ -4468,8 +4630,11 @@ where
         };
     }
     // Explore and GSA skip slices shorter than eight evaluations; the polish
-    // takes such a remainder.
-    while ledger.remaining() >= polish + 8 {
+    // takes such a remainder. A shelved face stops at its replay limit and
+    // spends what remains on a fresh uncapped descent.
+    while (replay_limit.get() == 0 || ledger.used_get() < replay_limit.get())
+        && ledger.remaining() >= polish + 8
+    {
         round += 1;
         let choice = if let Some(unplayed) = posteriors.iter().position(|p| p.pulls == 0) {
             unplayed
@@ -4546,8 +4711,32 @@ where
         let _ = values_local_polish(obj, start, stencil, 1.0, 1e-12);
     }
     let qn = index(ArmKind::Qn);
-    while ledger.remaining() > 0 {
-        play(qn, slice, budget, states, &mut rng, &mut posteriors, None);
+    if replay_limit.get() > 0 {
+        while ledger.used_get() < replay_limit.get() && ledger.remaining() > 0 {
+            play(qn, slice, budget, states, &mut rng, &mut posteriors, None);
+        }
+        ledger.cap_set(budget);
+        let x = ledger.incumbent(&bounds);
+        let mut engine = FdBfgs::new(
+            x.view(),
+            ledger.incumbent_value(),
+            &bounds,
+            FdBfgsOptions {
+                log_model: false,
+                extrapolation_room: f64::INFINITY,
+                ftol: 1e-12,
+                ..FdBfgsOptions::default()
+            },
+        );
+        engine.set_fatol(0.0);
+        while ledger.remaining() > 0 && !engine.is_done() {
+            let asked = engine.ask();
+            engine.tell(obj.eval(asked.view()));
+        }
+    } else {
+        while ledger.remaining() > 0 {
+            play(qn, slice, budget, states, &mut rng, &mut posteriors, None);
+        }
     }
     arms.iter()
         .zip(posteriors.iter())

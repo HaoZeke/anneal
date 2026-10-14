@@ -38,8 +38,7 @@ use crate::{
 /// [`InvalidInput`]: enum.Error.html#variant.InvalidInput
 /// [`MaxTtl`]: options/enum.MaxTtl.html
 /// [`OutOfMemory`]: enum.Error.html#variant.OutOfMemory
-pub fn forwarder(s1: RawSocket, s2: RawSocket) -> Result<()>
-{
+pub fn forwarder(s1: RawSocket, s2: RawSocket) -> Result<()> {
 	let rv = unsafe { nng_sys::nng_device(s1.socket.handle(), s2.socket.handle()) };
 
 	// Appease Clippy.
@@ -48,8 +47,7 @@ pub fn forwarder(s1: RawSocket, s2: RawSocket) -> Result<()>
 
 	if let Some(e) = NonZeroU32::new(rv as u32) {
 		Err(Error::from(e))
-	}
-	else {
+	} else {
 		unreachable!("nng_device returned with no errror");
 	}
 }
@@ -77,8 +75,7 @@ pub fn forwarder(s1: RawSocket, s2: RawSocket) -> Result<()>
 /// [`Closed`]: enum.Error.html#variant.Closed
 /// [`InvalidInput`]: enum.Error.html#variant.InvalidInput
 /// [`OutOfMemory`]: enum.Error.html#variant.OutOfMemory
-pub fn reflector(s1: RawSocket) -> Result<()>
-{
+pub fn reflector(s1: RawSocket) -> Result<()> {
 	let rv = unsafe {
 		nng_sys::nng_device(s1.socket.handle(), nng_sys::nng_socket::NNG_SOCKET_INITIALIZER)
 	};
@@ -87,8 +84,7 @@ pub fn reflector(s1: RawSocket) -> Result<()>
 
 	if let Some(e) = NonZeroU32::new(rv as u32) {
 		Err(Error::from(e))
-	}
-	else {
+	} else {
 		unreachable!("nng_device returned with no errror");
 	}
 }

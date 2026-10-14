@@ -190,7 +190,9 @@ fn run_slab_ensembles(
     #[cfg(feature = "ira")]
     use anneal_core::methods::minima_hopping::SerializedWitness;
     use anneal_core::pes_exploration::StructureContext;
-    use common::ensemble_report::{config_from_env, print_header, run_seeds, sorted_pairs_witness};
+    #[cfg(not(feature = "ira"))]
+    use common::ensemble_report::sorted_pairs_witness;
+    use common::ensemble_report::{config_from_env, print_header, run_seeds};
     use eindir_core::gradient::DifferentiableObjective;
     use ndarray::{Array1, ArrayView1};
     use rand::Rng;

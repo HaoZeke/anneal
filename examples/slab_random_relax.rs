@@ -30,11 +30,11 @@ fn cluster_energies(energies: &[f64]) -> Vec<(f64, usize)> {
     sorted.sort_by(|a, b| a.total_cmp(b));
     let mut clusters: Vec<(f64, usize)> = Vec::new();
     for energy in sorted {
-        if let Some((rep, count)) = clusters.last_mut() {
-            if (energy - *rep).abs() <= ENERGY_TOL {
-                *count += 1;
-                continue;
-            }
+        if let Some((rep, count)) = clusters.last_mut()
+            && (energy - *rep).abs() <= ENERGY_TOL
+        {
+            *count += 1;
+            continue;
         }
         clusters.push((energy, 1));
     }

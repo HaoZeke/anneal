@@ -10,8 +10,8 @@ use anneal_core::methods::cluster_hopping::{
 };
 use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
 use common::efficiency::{apply_two_phase, bank_label, report_eval_wall, report_trace};
-use eindir_core::gradient::DifferentiableObjective;
 use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
+use eindir_core::gradient::DifferentiableObjective;
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -187,7 +187,9 @@ fn run_water_ensembles(
     #[cfg(feature = "ira")]
     use anneal_core::methods::minima_hopping::SerializedWitness;
     use anneal_core::pes_exploration::StructureContext;
-    use common::ensemble_report::{config_from_env, print_header, run_seeds, sorted_pairs_witness};
+    #[cfg(not(feature = "ira"))]
+    use common::ensemble_report::sorted_pairs_witness;
+    use common::ensemble_report::{config_from_env, print_header, run_seeds};
     use eindir_core::gradient::DifferentiableObjective;
     #[cfg(feature = "ira")]
     use std::sync::Mutex;

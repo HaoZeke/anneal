@@ -43,8 +43,8 @@ use anneal_core::methods::cluster_hopping::{
     MoveLibrary, Outcome, random_cluster, run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::cluster_search::{Encounter, median_encounter};
-use anneal_core::methods::lattice_search::{LatticeSearchConfig, reoccupy};
 use anneal_core::methods::csa_cluster::coordination_histogram_distance;
+use anneal_core::methods::lattice_search::{LatticeSearchConfig, reoccupy};
 use anneal_core::methods::splice::cut_and_splice;
 use anneal_core::methods::two_phase::{
     Cutoff, SharedSurfaceAllocator, SurfacePortfolio, TwoPhase, largest_pair_distance,
@@ -996,15 +996,16 @@ fn run_chain(
                     action: "pbh".to_owned(),
                 };
             }
-            if stall_handoff > 0 && snapshot.hops().saturating_sub(mark_hop) >= stall_handoff {
-                if let Some(state) = population.pull_improving(chain, snapshot.best_energy()) {
-                    mark_hop = snapshot.hops();
-                    tally.adopted += 1;
-                    return CheckpointAction::BoundaryProposal {
-                        state: Array1::from(state),
-                        action: "handoff".to_owned(),
-                    };
-                }
+            if stall_handoff > 0
+                && snapshot.hops().saturating_sub(mark_hop) >= stall_handoff
+                && let Some(state) = population.pull_improving(chain, snapshot.best_energy())
+            {
+                mark_hop = snapshot.hops();
+                tally.adopted += 1;
+                return CheckpointAction::BoundaryProposal {
+                    state: Array1::from(state),
+                    action: "handoff".to_owned(),
+                };
             }
             if stall_adopt > 0 && snapshot.hops().saturating_sub(mark_hop) >= stall_adopt {
                 // A kick of the whole cluster and a packing hop both quenched
@@ -1160,29 +1161,30 @@ fn run_chain(
         while ledger.remaining() > 0 {
             if let Some(population) = population.as_ref() {
                 let mut population = population.lock().expect("population");
-                if let Some((offered, offered_state)) = population.take_pending(chain) {
-                    if offered < energy - 1e-9 && offered_state.len() == state.len() {
-                        accepted_transitions.push(AcceptedTransition {
-                            hop: hops,
-                            action: "pbh".to_owned(),
-                            from_energy: energy,
-                            to_energy: offered,
-                            from_state: state.clone(),
-                            from_gradient: None,
-                            to_state: Array1::from(offered_state.clone()),
-                            to_gradient: None,
-                            validated: true,
-                            adopted: true,
-                        });
-                        energy = offered;
-                        state = Array1::from(offered_state);
-                        if energy < best {
-                            best = energy;
-                            best_state = state.clone();
-                            mark_hop = hops;
-                            if improvements.len() < 512 {
-                                improvements.push((hops, ledger.spent(), 0, energy));
-                            }
+                if let Some((offered, offered_state)) = population.take_pending(chain)
+                    && offered < energy - 1e-9
+                    && offered_state.len() == state.len()
+                {
+                    accepted_transitions.push(AcceptedTransition {
+                        hop: hops,
+                        action: "pbh".to_owned(),
+                        from_energy: energy,
+                        to_energy: offered,
+                        from_state: state.clone(),
+                        from_gradient: None,
+                        to_state: Array1::from(offered_state.clone()),
+                        to_gradient: None,
+                        validated: true,
+                        adopted: true,
+                    });
+                    energy = offered;
+                    state = Array1::from(offered_state);
+                    if energy < best {
+                        best = energy;
+                        best_state = state.clone();
+                        mark_hop = hops;
+                        if improvements.len() < 512 {
+                            improvements.push((hops, ledger.spent(), 0, energy));
                         }
                     }
                 }
@@ -1229,29 +1231,30 @@ fn run_chain(
                 if let Some(slice) = child_state.as_slice() {
                     population.offer(chain, child, slice, exchange.pbh_dcut_scale);
                 }
-                if let Some((offered, offered_state)) = population.take_pending(chain) {
-                    if offered < energy - 1e-9 && offered_state.len() == state.len() {
-                        accepted_transitions.push(AcceptedTransition {
-                            hop: hops,
-                            action: "pbh".to_owned(),
-                            from_energy: energy,
-                            to_energy: offered,
-                            from_state: state.clone(),
-                            from_gradient: None,
-                            to_state: Array1::from(offered_state.clone()),
-                            to_gradient: None,
-                            validated: true,
-                            adopted: true,
-                        });
-                        energy = offered;
-                        state = Array1::from(offered_state);
-                        if energy < best {
-                            best = energy;
-                            best_state = state.clone();
-                            mark_hop = hops;
-                            if improvements.len() < 512 {
-                                improvements.push((hops, ledger.spent(), 0, energy));
-                            }
+                if let Some((offered, offered_state)) = population.take_pending(chain)
+                    && offered < energy - 1e-9
+                    && offered_state.len() == state.len()
+                {
+                    accepted_transitions.push(AcceptedTransition {
+                        hop: hops,
+                        action: "pbh".to_owned(),
+                        from_energy: energy,
+                        to_energy: offered,
+                        from_state: state.clone(),
+                        from_gradient: None,
+                        to_state: Array1::from(offered_state.clone()),
+                        to_gradient: None,
+                        validated: true,
+                        adopted: true,
+                    });
+                    energy = offered;
+                    state = Array1::from(offered_state);
+                    if energy < best {
+                        best = energy;
+                        best_state = state.clone();
+                        mark_hop = hops;
+                        if improvements.len() < 512 {
+                            improvements.push((hops, ledger.spent(), 0, energy));
                         }
                     }
                 }

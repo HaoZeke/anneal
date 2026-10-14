@@ -54,6 +54,7 @@ impl RepulsionSnapshot {
     }
 
     /// Restrict displacement to one axis without changing the distance metric.
+    #[cfg_attr(test, allow(dead_code))]
     pub(crate) fn repel_coordinate<R: Rng + ?Sized>(
         &mut self,
         anchor: ArrayView1<f64>,

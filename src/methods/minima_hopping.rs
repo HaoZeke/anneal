@@ -751,6 +751,10 @@ impl EscapeFeedback {
     /// Coverage-region IDs and counts are independent of minimum identity.
     /// The caller supplies prior admitted visits without registering a minimum
     /// or duplicating an authoritative minimum-history feedback update.
+    ///
+    /// Allowed under `cfg(test)` because the repulsion-snapshot test compiles
+    /// this file alone, where the library callers are not in the crate.
+    #[cfg_attr(test, allow(dead_code))]
     pub(crate) fn observe_coverage_return(&mut self, same: bool, prior_visits: u64) {
         let visit = if same { Visit::Same } else { Visit::Known };
         self.apply_escape_feedback(visit, prior_visits.max(1) as f64);
@@ -758,6 +762,7 @@ impl EscapeFeedback {
 
     /// Settle the bounded escape scale after reaching an unexplored region.
     /// Region novelty supplies no stationary-point identity or minimum record.
+    #[cfg_attr(test, allow(dead_code))]
     pub(crate) fn observe_coverage_discovery(&mut self) {
         self.apply_escape_feedback(Visit::New, 1.0);
     }

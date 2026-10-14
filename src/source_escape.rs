@@ -90,11 +90,22 @@ where
         &self,
         coordinates: ArrayView1<'_, f64>,
     ) -> Result<(f64, Array1<f64>), Self::Error> {
-        self.calls
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |calls| {
-                (calls < self.maximum_evaluations).then_some(calls + 1)
-            })
-            .map_err(|_| LimitedSurfaceError::Exhausted)?;
+        // compare_exchange stays on the 1.88 baseline. `try_update` is newer.
+        let mut calls = self.calls.load(Ordering::Relaxed);
+        loop {
+            if calls >= self.maximum_evaluations {
+                return Err(LimitedSurfaceError::Exhausted);
+            }
+            match self.calls.compare_exchange_weak(
+                calls,
+                calls + 1,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(observed) => calls = observed,
+            }
+        }
         self.surface
             .evaluate(coordinates)
             .map_err(|error| LimitedSurfaceError::Surface(error.to_string()))

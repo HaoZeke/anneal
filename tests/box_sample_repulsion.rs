@@ -141,8 +141,7 @@ fn nearby_peer_displaces_the_paid_proposal_in_each_native_escape() {
                     } else {
                         (1, 2)
                     };
-                    let distance =
-                        (trace[proposal_index][0] - trace[peer_index][0]).abs() / 2.0;
+                    let distance = (trace[proposal_index][0] - trace[peer_index][0]).abs() / 2.0;
                     (distance > 1e-8 && distance < radius * 0.75).then_some((
                         seed,
                         trace,

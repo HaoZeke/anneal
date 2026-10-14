@@ -90,18 +90,22 @@ where
         &self,
         coordinates: ArrayView1<'_, f64>,
     ) -> Result<(f64, Array1<f64>), Self::Error> {
-        let reservation =
-            self.evaluations
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |evaluations| {
-                    if evaluations < self.maximum {
-                        Some(evaluations + 1)
-                    } else {
-                        None
-                    }
-                });
-        if reservation.is_err() {
-            self.exhausted.store(true, Ordering::Relaxed);
-            return Err(BudgetedSurfaceError::Exhausted);
+        // compare_exchange stays on the 1.88 baseline. `try_update` is newer.
+        let mut evaluations = self.evaluations.load(Ordering::Relaxed);
+        loop {
+            if evaluations >= self.maximum {
+                self.exhausted.store(true, Ordering::Relaxed);
+                return Err(BudgetedSurfaceError::Exhausted);
+            }
+            match self.evaluations.compare_exchange_weak(
+                evaluations,
+                evaluations + 1,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(observed) => evaluations = observed,
+            }
         }
         self.inner
             .evaluate(coordinates)
