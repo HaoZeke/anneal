@@ -84,17 +84,16 @@ made after it gets the warning if its checks pass. A bridge that the method
 calls on another thread with the fitter, or with an object that holds the
 fitter or one of the fitter's bound methods, such as a session that wraps
 the fitter, gives the warning on that thread, since the caller's thread
-waits inside the method. Such an object is looked into only as the garbage
-collector sees it, so no code of its classes runs, no property, descriptor
-or ``__getattr__``: the fitter or the method is found in its slots, in the
-dictionary of its other attributes, whatever its class makes of the name
-``__dict__``, among its items, as a namedtuple holds its fields, or in a
-dictionary held in any of these, at any depth. A bridge on
-another thread given any other object, such as one that keeps the fitter
-only in a closure, or in a list, a tuple or another object that it holds,
-does not, and the warning then comes once the method returns, after the
-fit, as it does when no call passes its checks; it does not come when the
-method raises. The first
+waits inside the method. Such an object is looked into without running any
+code of its classes, no property, descriptor or ``__getattr__``: the fitter
+or the method is found in its slots, in the dictionary of its other
+attributes, whatever its class makes of the name ``__dict__``, among its
+items, as a namedtuple holds its fields, or in a dictionary held in any of
+these, at any depth. A bridge on another thread given any other object,
+such as one that keeps the fitter only in a closure, or in a list, a tuple
+or another object that it holds, does not, and the warning then comes once
+the method returns, after the fit, as it does when no call passes its
+checks; it does not come when the method raises. The first
 exception the fitter raises before ``finish``, or a loss that is not a real
 number, ends the drive: the fitter is not called again, ``finish`` is
 skipped, and the exception reaches the caller. One that ``finish`` raises
@@ -370,8 +369,9 @@ _class_namespace = type.__dict__["__dict__"].__get__
 def _within(subject: Any) -> list[Any]:
     """``subject``, then what it holds, the object of a bound method among them.
 
-    Nothing is read through an attribute, so no code of the classes of
-    ``subject`` or of what it holds runs: no descriptor, property,
+    Attributes are read only from objects of the interpreter's own types,
+    such as a bound method or a slot descriptor, so no code of the classes
+    of ``subject`` or of what it holds runs: no descriptor, property,
     ``__getattribute__``, ``__getattr__`` or metaclass. What ``subject``
     holds is what the garbage collector sees it refer to
     (:func:`gc.get_referents`): its class, the values in its ``__dict__``,
