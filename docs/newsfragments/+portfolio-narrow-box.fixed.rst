@@ -1,6 +1,7 @@
 In a box where no coordinate admits a difference step, the values-only
-loop's descent indexed past its empty stencil, so ``minimize`` without
-``jac`` and ``global_optimize`` on that loop raised ``PanicException``. The
+loop's descent indexed past its empty stencil, so ``global_optimize`` on that
+loop, and ``minimize`` without ``jac`` given ``replicas=1``, raised
+``PanicException``. The
 step at the start is the square root of the machine epsilon times the larger
 of the coordinate's magnitude and a tenth of its side, at most a quarter of
 the side, and a coordinate admits none when adding the step leaves it

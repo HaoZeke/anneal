@@ -7,10 +7,10 @@ from the first value at or below zero every gain, the earlier slices'
 included, reads as a difference. A positive loss that falls by decades from
 a far start, such as a squared energy error, no longer ends the opening on
 its valley floor, held to the gains of the slices that came down the wall.
-The ratios keep every slice that differences keep, so a run takes
-another course only where differences would have ended its opening, after its
-first slice from below the start, on a slice that left every value positive,
-and there it no longer repeats the run of 0.11.1. Over 40 paired seeds the
+The ratios keep every slice that differences keep, so they change a run only
+where differences would have ended its opening, after its first slice from
+below the start, on a slice that left every value positive. Over 40 paired
+seeds the
 bar no longer leaves the shifted and rotated ellipsoids and Rosenbrock in 30
 dimensions at 5000 evaluations, nor Rosenbrock's copies with 1e2 added and
 multiplied by 1e-6, behind an opening that goes on while each slice
