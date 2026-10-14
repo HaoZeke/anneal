@@ -314,6 +314,18 @@ class Unreadable:
         return object.__getattribute__(self, name)
 
 
+class Lazy:
+    """A value whose ``__class__`` is built when read, as ``dict``; ``reads`` counts the builds."""
+
+    reads = 0
+
+    def __getattribute__(self, name):
+        if name == "__class__":
+            type(self).reads += 1
+            return dict
+        return object.__getattribute__(self, name)
+
+
 def _beside(wrap, value):
     """``wrap``, with ``value`` held as the wrapper's attribute ``beside``."""
 
@@ -824,67 +836,60 @@ def test_a_wrapper_of_closures_on_another_thread_has_the_warning_once_the_method
     assert fitter.calls[0] == "init" and fitter.calls[-1] == "finish"
 
 
-def _handed(wrap):
+def _handed(wrap, action="always"):
     """``_wrapper_fitter(wrap)`` once ``run_fitter`` has handed it an ignored Fast preset.
 
-    Each warning is logged among the fitter's calls with whether it came on the worker.
+    Each warning is logged among the fitter's calls with whether it came on
+    the worker. Under the warnings ``action`` "error", the FutureWarning that
+    ``run_fitter`` raises is logged after them.
     """
     fitter = _wrapper_fitter(wrap)
     caller = threading.get_ident()
     with warnings.catch_warnings():
-        warnings.simplefilter("always")
+        warnings.simplefilter(action)
         warnings.showwarning = lambda message, category, *rest: fitter.calls.append(
             (category, threading.get_ident() != caller)
         )
-        run_fitter(fitter, 60, preset=Fast())
+        try:
+            run_fitter(fitter, 60, preset=Fast())
+        except FutureWarning:
+            fitter.calls.append(FutureWarning)
     return fitter
 
 
-_UNREADABLE = pytest.mark.parametrize("value", [_dead_proxy, Unreadable], ids=["proxy", "raises"])
-_HOLDERS = ["dict", "slot", "closures"]
+def _warned_where(fitter, action, early):
+    """Whether ``_handed`` logged the warning on the worker before ``init``, or after ``finish``.
 
-
-@_UNREADABLE
-@pytest.mark.parametrize(
-    "wrap, early", [(Session, True), (SlottedBeside, True), (_closures, False)], ids=_HOLDERS
-)
-def test_a_bridge_on_another_thread_passes_over_a_value_whose_class_cannot_be_read(
-    wrap, early, value
-):
-    Unreadable.reads = 0
-    fitter = _handed(_beside(wrap, value()))
-    alone = _handed(wrap)
-    assert fitter.calls == alone.calls and _same_run(fitter, alone)
-    assert Unreadable.reads == 0
+    Under the warnings ``action`` "error", the warning raised before ``init``
+    leaves no call, and one raised after ``finish`` follows it.
+    """
+    if action == "error" and early:
+        return fitter.calls == [FutureWarning]
+    if action == "error":
+        return fitter.calls[-2:] == ["finish", FutureWarning]
     if early:
-        assert fitter.calls[:2] == [(FutureWarning, True), "init"]
-    else:
-        assert fitter.calls[-2:] == ["finish", (FutureWarning, False)]
+        return fitter.calls[:2] == [(FutureWarning, True), "init"]
+    return fitter.calls[-2:] == ["finish", (FutureWarning, False)]
 
 
-def test_a_bridge_on_another_thread_passes_over_a_class_attribute_it_cannot_read():
-    fitter = _handed(DeadInClass)
-    alone = _handed(Session)
-    assert fitter.calls == alone.calls and _same_run(fitter, alone)
-    assert fitter.calls[:2] == [(FutureWarning, True), "init"]
+def _benchmark_wrapped(wrap, fitter):
+    """``run_benchmark`` given ``wrap(fitter)``, with a budget of 40 and seed 0."""
+    context = {
+        "fitter": wrap(fitter),
+        "budget": 40,
+        "initial_params": fitter.initial_parameters,
+    }
+    return run_benchmark(context, method="portfolio", seed=0)
 
 
-@_UNREADABLE
-@pytest.mark.parametrize("wrap", [Session, SlottedBeside, _closures], ids=_HOLDERS)
-def test_a_bridge_no_run_fitter_called_runs_beside_a_hand_off_given_a_value_it_cannot_read(
-    wrap, value
-):
-    def run(fitter):
-        context = {
-            "fitter": _beside(wrap, value())(fitter),
-            "budget": 40,
-            "initial_params": fitter.initial_parameters,
-        }
-        return run_benchmark(context, method="portfolio", seed=0)
+def _beside_a_hand_off(wrap):
+    """``_benchmark_wrapped(wrap, fitter)`` while another thread is inside ``run_fitter``.
 
-    alone = _fitter(NextFitter)
-    run(alone)
-    Unreadable.reads = 0
+    The other thread's ``run_fitter`` has handed a fitter of its own to that
+    fitter's ``fit_anneal``, which waits until the call returns. Returns the
+    fitter, the warnings given, each with whether it came on the calling
+    thread, and the other thread's fitter.
+    """
     other, fitter = _fitter(WaitingFitter), _fitter(NextFitter)
     caller = threading.get_ident()
     seen = []
@@ -897,12 +902,69 @@ def test_a_bridge_no_run_fitter_called_runs_beside_a_hand_off_given_a_value_it_c
             handing = pool.submit(run_fitter, other, 40, preset=Fast())
             assert other.inside.wait(60)
             try:
-                run(fitter)
+                _benchmark_wrapped(wrap, fitter)
             finally:
                 other.go.set()
             handing.result()
+    return fitter, seen, other
+
+
+_UNREADABLE = pytest.mark.parametrize(
+    "value", [_dead_proxy, Unreadable, Lazy], ids=["proxy", "raises", "lazy"]
+)
+_HOLDERS = ["dict", "slot", "closures"]
+_ACTIONS = pytest.mark.parametrize("action", ["always", "error"])
+_CLASS_ATTRIBUTES = pytest.mark.parametrize("wrap, plain", [(DeadInClass, Session)], ids=["proxy"])
+
+
+@_UNREADABLE
+@_ACTIONS
+@pytest.mark.parametrize(
+    "wrap, early", [(Session, True), (SlottedBeside, True), (_closures, False)], ids=_HOLDERS
+)
+def test_a_bridge_on_another_thread_passes_over_a_value_whose_class_cannot_be_read(
+    wrap, early, action, value
+):
+    Unreadable.reads = Lazy.reads = 0
+    fitter = _handed(_beside(wrap, value()), action)
+    alone = _handed(wrap, action)
     assert fitter.calls == alone.calls and _same_run(fitter, alone)
-    assert Unreadable.reads == 0
+    assert Unreadable.reads == Lazy.reads == 0
+    assert _warned_where(fitter, action, early)
+
+
+@_CLASS_ATTRIBUTES
+@_ACTIONS
+def test_a_bridge_on_another_thread_passes_over_a_class_attribute_it_cannot_read(
+    wrap, plain, action
+):
+    fitter = _handed(wrap, action)
+    alone = _handed(plain, action)
+    assert fitter.calls == alone.calls and _same_run(fitter, alone)
+    assert _warned_where(fitter, action, early=True)
+
+
+@_UNREADABLE
+@pytest.mark.parametrize("wrap", [Session, SlottedBeside, _closures], ids=_HOLDERS)
+def test_a_bridge_no_run_fitter_called_runs_beside_a_hand_off_given_a_value_it_cannot_read(
+    wrap, value
+):
+    alone = _fitter(NextFitter)
+    _benchmark_wrapped(_beside(wrap, value()), alone)
+    Unreadable.reads = Lazy.reads = 0
+    fitter, seen, other = _beside_a_hand_off(_beside(wrap, value()))
+    assert fitter.calls == alone.calls and _same_run(fitter, alone)
+    assert Unreadable.reads == Lazy.reads == 0
+    assert seen == [(FutureWarning, False)]
+    assert other.calls[0] == "init" and other.calls[-1] == "finish"
+
+
+@_CLASS_ATTRIBUTES
+def test_a_bridge_no_run_fitter_called_passes_over_a_class_attribute_it_cannot_read(wrap, plain):
+    alone = _fitter(NextFitter)
+    _benchmark_wrapped(plain, alone)
+    fitter, seen, other = _beside_a_hand_off(wrap)
+    assert fitter.calls == alone.calls and _same_run(fitter, alone)
     assert seen == [(FutureWarning, False)]
     assert other.calls[0] == "init" and other.calls[-1] == "finish"
 
