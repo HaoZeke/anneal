@@ -1906,7 +1906,9 @@ mod tests {
         // differenced again as often as it may be, the descent searches down
         // the steepest-descent direction. Nothing there shows the
         // approximation indefinite, so both models keep their
-        // approximations, counts of pairs and scales.
+        // approximations, their counts of pairs, whether they are scaled
+        // and the latest pair's s.y / y.D.y, by which the steepest-descent
+        // search's first trial moves along the model it steps on.
         let models = |engine: &FdBfgs| {
             [&engine.curvature, &engine.log_curvature].map(|model| {
                 (
@@ -1914,6 +1916,7 @@ mod tests {
                     model.hessian.clone(),
                     model.pairs,
                     model.scaled,
+                    model.gamma,
                 )
             })
         };
@@ -1931,9 +1934,13 @@ mod tests {
             engine.scheme = FdScheme::Central;
             engine.redifferences = MAX_REDIFFERENCES;
             let kept = models(&engine);
+            let gamma = engine.stepping().gamma;
             engine.line_search_failed(false);
             match &engine.phase {
-                Phase::Line(work) => assert!(work.log == log && work.steepest, "after {kinds}"),
+                Phase::Line(work) => assert!(
+                    work.log == log && work.steepest && work.alpha == gamma,
+                    "after {kinds}"
+                ),
                 _ => panic!("after {kinds}: no line search followed"),
             }
             assert_eq!(models(&engine), kept, "after {kinds}");
