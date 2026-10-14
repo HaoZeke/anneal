@@ -354,6 +354,10 @@ def _site() -> _Site:
     return frame.f_code.co_filename, frame.f_lineno, frame.f_globals
 
 
+_class_mro = type.__dict__["__mro__"].__get__
+_class_namespace = type.__dict__["__dict__"].__get__
+
+
 def _within(subject: Any) -> list[Any]:
     """``subject``, then what it holds as attributes, a bound method as its object.
 
@@ -363,19 +367,23 @@ def _within(subject: Any) -> list[Any]:
     its type alone, never by reading its ``__class__``, which can fail, as
     for a proxy of a collected object, or build something. Neither type
     tested can be subclassed, so for a value whose ``__class__`` is its type
-    the answer is the one ``isinstance`` gives.
+    the answer is the one ``isinstance`` gives. The slots are found in the
+    namespaces of the instance's classes, read as ``type`` keeps them, past a
+    metaclass whose ``__getattribute__`` refuses ``__mro__`` or ``__dict__``,
+    and a slot that cannot be read from the instance, such as one left unset
+    or another class's held as a class attribute, is passed over.
     """
     values: list[Any] = []
     try:
         values.extend(object.__getattribute__(subject, "__dict__").values())
     except Exception:
         pass
-    for kind in type(subject).__mro__:
-        for slot in list(vars(kind).values()):
+    for kind in _class_mro(type(subject)):
+        for slot in list(_class_namespace(kind).values()):
             if type(slot) is types.MemberDescriptorType:
                 try:
                     values.append(slot.__get__(subject, kind))
-                except AttributeError:
+                except Exception:
                     pass
     held = [value.__self__ if type(value) is types.MethodType else value for value in values]
     return [subject, *held]
