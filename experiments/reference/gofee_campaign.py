@@ -1,10 +1,12 @@
 """GOFEE baseline through AGOX, configured from the current documentation.
 
-The search block below reproduces the documented GOFEE example
+The search block follows the documented GOFEE example
 (agox.gitlab.io/agox/algorithms/gofee.html): LowerConfidenceBoundAcquisitor
-with kappa=2, KMeansSampler with sample_size=10, ParallelCollector with the
-staged num_candidates schedule, ParallelRelaxPostprocess on the acquisition
-surface, and LocalOptimizationEvaluator taking one true step per iteration.
+with kappa=2, KMeansSampler with sample_size=10, the staged
+num_candidates schedule, a five-step relaxation on the acquisition
+surface, and LocalOptimizationEvaluator taking one true step per
+iteration. The collector and the relaxer run in the calling process.
+The surrogate trains on at most 512 stored structures.
 Only the system (template, symbols, calculator) and the stopping rule differ:
 a counting wrapper around the true calculator logs every real force call and
 raises once the matched budget is spent, so the comparison counts true calls
@@ -26,7 +28,7 @@ from ase.calculators.calculator import Calculator, all_changes
 
 from agox import AGOX
 from agox.acquisitors import LowerConfidenceBoundAcquisitor
-from agox.collectors import ParallelCollector
+from agox.collectors import StandardCollector
 from agox.databases import Database
 from agox.environments import Environment
 from agox.evaluators import LocalOptimizationEvaluator
@@ -36,7 +38,7 @@ from agox.models.GPR import GPR
 from agox.models.GPR.kernels import RBF, Noise
 from agox.models.GPR.kernels import Constant as C
 from agox.models.GPR.priors import Repulsive
-from agox.postprocessors import ParallelRelaxPostprocess
+from agox.postprocessors import RelaxPostprocess
 from agox.samplers import KMeansSampler
 from agox.utils.filters.ABC_filter import FilterBaseClass
 import sys
@@ -67,23 +69,7 @@ class BoundedTrainingFilter(FilterBaseClass):
         return np.sort(np.concatenate([np.fromiter(chosen, dtype=int), draw]))
 
 
-class KeepZeroStepRelax(ParallelRelaxPostprocess):
-    """A surrogate relaxation of zero steps is still a proposal.
 
-    The pool relaxer drops a candidate whose optimizer took no step.
-    Once every proposal is already under the surrogate force threshold,
-    the true calculator is never called and the iteration counter runs
-    on alone.
-    """
-
-    def _set_results(self, candidates, results):
-        kept = []
-        for candidate, result in zip(candidates, results):
-            self.remove_constraints(candidate)
-            if result.relaxation_steps > 0:
-                self._set_result_to_candidate(candidate, result)
-            kept.append(candidate)
-        return kept
 
 
 class BudgetExhausted(Exception):
@@ -180,7 +166,7 @@ def main():
         database=database,
         prior=Repulsive(),
         filter=BoundedTrainingFilter(512),
-        n_optimize=1,
+        n_optimize=0,
     )
 
     sample_size = 10
@@ -192,7 +178,7 @@ def main():
     generators = [random_generator, rattle_generator]
     num_candidates = {0: [10, 0], 5: [3, 7]}
 
-    collector = ParallelCollector(
+    collector = StandardCollector(
         generators=generators,
         sampler=sampler,
         environment=environment,
@@ -202,7 +188,7 @@ def main():
 
     acquisitor = LowerConfidenceBoundAcquisitor(model=model, kappa=2, order=3)
 
-    relaxer = KeepZeroStepRelax(
+    relaxer = RelaxPostprocess(
         model=acquisitor.get_acquisition_calculator(),
         constraints=environment.get_constraints(),
         optimizer_run_kwargs={"steps": 5},
