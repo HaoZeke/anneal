@@ -75,31 +75,43 @@
 //! adds its rank-two term entry by entry, so the two triangles of an
 //! approximation round apart, and through `H y`, the inverse approximation
 //! times the next pair's `y`, the asymmetry enters the next update as an
-//! indefinite symmetric term. Where the descent refused directions on the
-//! logarithms of a rotated quadratic and of a two-exponential fit's squared
-//! error, `max|H - H^T|` was 7.3e-3 and 1.8e-3 of `max|H|`, and replayed
-//! with each entry computed once for both triangles, the same pairs gave
-//! positive definite approximations there, along whose directions the
-//! gradient descends. Computed so, the updates left the descent starting
-//! over 4 times in the 40 runs of the portfolio on the Lennard-Jones fit
-//! above at 5000 evaluations, where it starts over 28 times, never on a
-//! like fit to clusters drawn without that spacing, where it starts over 38
-//! times, and 74 times in 546 runs on problems built to strain the
-//! approximation, where it starts over 1393 times. In each of those 78 the
-//! approximation first lost positive definiteness at an update whose
-//! rounding, `eps` times its largest entries before or after the update,
-//! exceeded its smallest eigenvalue before it, while its pairs replayed in
-//! 60-digit arithmetic keep it positive definite; in 4 that update's pair
-//! had `cos(s, y)` below 1e-4. But computed so the updates ended the
-//! portfolio higher on 26 of 40 seeds of the unspaced fit with its `e`
-//! itself as the loss at 500 evaluations (one-sided sign test 0.040); with
-//! the pairs whose `cos(s, y)` is at most 1e-4 skipped as well, on 26 of 40
-//! seeds of a shifted 100-dimensional ellipsoid at 5000 (0.040); damped as
-//! Powell damps the direct update, on 32 of 40 seeds of the unspaced fit
-//! with `e` as the loss at 200 (3.5e-5); and with the inverse update damped
-//! likewise, on 27 of 40 seeds of the unspaced fit at 1000 (0.019). So the
-//! updates stay as they are, and the start-over repairs what their rounding
-//! breaks.
+//! indefinite symmetric term. The descent starts over 28 times in the 40
+//! runs of the portfolio on the Lennard-Jones fit above at 5000
+//! evaluations, 38 times on a like fit to clusters drawn without that
+//! spacing, and 1393 times on a grid of problems built to strain the
+//! approximation, in the 546 of its 2920 runs in which it starts over at
+//! all. Over the runs there that refused directions on the logarithm of
+//! 1e-16 plus a rotated quadratic of condition 1e8, or plus a
+//! two-exponential fit's squared error, the largest `max|H - H^T|` at a
+//! refusal, over the coordinates off the bounds, had a median of 1.7e-5,
+//! or 6.6e-3, of `max|H|`. With each entry of both updates computed once
+//! for both triangles, or with the two triangles averaged after each
+//! update, the descent started over 4 and 5 times on the first fit, never
+//! on the second and 81 and 95 times on the grid. Two changes that alter
+//! only the rounding, the factors of `s_i s_j` and `y_i y_j` in each term
+//! taken in the other order and `s.y / y.D.y` one unit in the last place
+//! larger, left 34 and 29, 39 and 39, and 1445 and 1427 start-overs.
+//!
+//! The values the portfolio ends at tell neither symmetric computation from
+//! the updates as they are: on none of 82 cells and rows of the regime
+//! notes and fits at smaller budgets, nor on the grid's cells, its budgets
+//! or all its runs, did either end the portfolio lower, or higher, than the
+//! updates as they are and each of the two rounding changes, by a one-sided
+//! sign test at 0.05 on paired seeds, while against the updates as they are
+//! alone each of the four changes ends it lower or higher on 7 to 12 of
+//! those 223 cells, rows and sets of runs. Skipping as well the pairs whose
+//! `cos(s, y)` is at most 1e-4 ended it higher, with either computation and
+//! against all three, on the logarithm of the grid's separable quadratic of
+//! condition 1e12 at 5000 and 20000 evaluations, on the grid's runs at
+//! those budgets and on all its runs, and lower with both nowhere; damped
+//! as Powell damps the direct update, higher on 30 of the 223, among them
+//! plain-loss fits at 100 to 500 evaluations, ellipsoids, the grid's plain
+//! quadratics and Rosenbrock's function in 30 coordinates, and lower on
+//! three of the grid's cells; and with the inverse update damped likewise,
+//! lower on 16, the unspaced fit at 5000 evaluations, the spaced one at 500
+//! and the grid's runs among them, but higher on 6, a two-parameter pair
+//! fit's squared error at 50 evaluations among them. So the updates stay as
+//! they are, and the start-over repairs what their rounding breaks.
 //!
 //! With [`FdBfgsOptions::log_model`] the engine keeps a second model, of
 //! `ln f`, from the same steps and the gradient `g / f`, while every value
