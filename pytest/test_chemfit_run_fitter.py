@@ -16,6 +16,7 @@ given a wrapper of the fitter in its place, and once told to, so that a
 bridge no ``run_fitter`` called can run while the method waits.
 """
 
+import collections
 import concurrent.futures
 import functools
 import inspect
@@ -374,6 +375,92 @@ class RefusedSlottedSession(_Session, metaclass=RefusingMeta):
     def __init__(self, fitter):
         self._fitter = fitter
         self.bounds = fitter.bounds
+
+
+class Halt(BaseException):
+    """An exception that is not an ``Exception``, as ``KeyboardInterrupt`` is not."""
+
+
+class HaltingDictSession(Session):
+    """Keeps the fitter in its ``__dict__``, a name its class gives a property raising ``Halt``.
+
+    ``reads`` counts the calls of the property.
+    """
+
+    reads = 0
+
+    @property
+    def __dict__(self):
+        type(self).reads += 1
+        raise Halt("__dict__ cannot be read")
+
+
+class RaisingDictSession(Session):
+    """``HaltingDictSession``, with a property that raises RuntimeError."""
+
+    reads = 0
+
+    @property
+    def __dict__(self):
+        type(self).reads += 1
+        raise RuntimeError("__dict__ cannot be read")
+
+
+class ShadowedDictSession(Session):
+    """Keeps the fitter in its ``__dict__``, whose name its class gives a mapping without it."""
+
+    __dict__ = types.MappingProxyType({})
+
+
+class RefusingValues(dict):
+    """A ``dict`` whose ``values`` raises; ``reads`` counts the tries."""
+
+    reads = 0
+
+    def values(self):
+        type(self).reads += 1
+        raise RuntimeError("values cannot be read")
+
+
+def _refusing_values(fitter):
+    """A ``Session`` whose ``__dict__`` is a ``RefusingValues``."""
+    session = Session(fitter)
+    session.__dict__ = RefusingValues(session.__dict__)
+    return session
+
+
+class StoredSession(_Session):
+    """Keeps the fitter in a dictionary in its ``__dict__``, read through a property."""
+
+    def __init__(self, fitter):
+        self.store = {"fitter": fitter}
+        self.bounds = fitter.bounds
+
+    @property
+    def _fitter(self):
+        return self.store["fitter"]
+
+
+class FieldSession(collections.namedtuple("Fields", "fitter bounds"), _Session):
+    """Keeps the fitter as a field of a namedtuple."""
+
+    __slots__ = ()
+
+    def __new__(cls, fitter):
+        return super().__new__(cls, fitter, fitter.bounds)
+
+    @property
+    def _fitter(self):
+        return self.fitter
+
+
+def _session_reads():
+    """The calls of the session code above that a lookup could run."""
+    return HaltingDictSession.reads + RaisingDictSession.reads + RefusingValues.reads
+
+
+def _clear_session_reads():
+    HaltingDictSession.reads = RaisingDictSession.reads = RefusingValues.reads = 0
 
 
 class WrapperThreadFitter(ThreadFitter):
@@ -1024,6 +1111,39 @@ def test_a_bridge_no_run_fitter_called_reads_a_class_whose_metaclass_refuses_it(
     _benchmark_wrapped(plain, alone)
     fitter, seen, other = _beside_a_hand_off(wrap)
     assert fitter.calls == alone.calls and _same_run(fitter, alone)
+    assert seen == [(FutureWarning, False)]
+    assert other.calls[0] == "init" and other.calls[-1] == "finish"
+
+
+_WITH_CODE = [HaltingDictSession, RaisingDictSession, _refusing_values]
+_WITH_CODE_IDS = ["dict-halts", "dict-raises", "values-raise"]
+
+
+@_ACTIONS
+@pytest.mark.parametrize(
+    "wrap",
+    [*_WITH_CODE, ShadowedDictSession, StoredSession, FieldSession],
+    ids=[*_WITH_CODE_IDS, "dict-shadowed", "nested-dict", "namedtuple"],
+)
+def test_a_bridge_on_another_thread_finds_the_fitter_without_running_its_wrapper_s_code(
+    wrap, action
+):
+    _clear_session_reads()
+    fitter = _handed(wrap, action)
+    alone = _handed(Session, action)
+    assert fitter.calls == alone.calls and _same_run(fitter, alone)
+    assert _session_reads() == 0
+    assert _warned_where(fitter, action, early=True)
+
+
+@pytest.mark.parametrize("wrap", _WITH_CODE, ids=_WITH_CODE_IDS)
+def test_a_bridge_no_run_fitter_called_runs_none_of_a_wrapper_s_code(wrap):
+    alone = _fitter(NextFitter)
+    _benchmark_wrapped(Session, alone)
+    _clear_session_reads()
+    fitter, seen, other = _beside_a_hand_off(wrap)
+    assert fitter.calls == alone.calls and _same_run(fitter, alone)
+    assert _session_reads() == 0
     assert seen == [(FutureWarning, False)]
     assert other.calls[0] == "init" and other.calls[-1] == "finish"
 
