@@ -82,12 +82,19 @@ pass, as they end, before ``init``. So a refusal there, such as
 :func:`run_benchmark`'s of a budget of 0, raises its error alone, and a call
 made after it gets the warning if its checks pass. A bridge that the method
 calls on another thread with the fitter, or with an object that holds the
-fitter or one of the fitter's methods as an attribute, such as a session
-that wraps the fitter, gives the warning on that thread, since the caller's
-thread waits inside the method. A bridge on another thread given any other
-object does not, and the warning then comes once the method returns, after
-the fit, as it does when no call passes its checks; it does not come when
-the method raises. The first
+fitter or one of the fitter's bound methods, such as a session that wraps
+the fitter, gives the warning on that thread, since the caller's thread
+waits inside the method. Such an object is looked into only as the garbage
+collector sees it, so no code of its classes runs, no property, descriptor
+or ``__getattr__``: the fitter or the method is found in its slots, in the
+dictionary of its other attributes, whatever its class makes of the name
+``__dict__``, among its items, as a namedtuple holds its fields, or in a
+dictionary held in any of these, at any depth. A bridge on
+another thread given any other object, such as one that keeps the fitter
+only in a closure, or in a list, a tuple or another object that it holds,
+does not, and the warning then comes once the method returns, after the
+fit, as it does when no call passes its checks; it does not come when the
+method raises. The first
 exception the fitter raises before ``finish``, or a loss that is not a real
 number, ends the drive: the fitter is not called again, ``finish`` is
 skipped, and the exception reaches the caller. One that ``finish`` raises
@@ -106,7 +113,9 @@ per call. A string ``budget``, ``seed``, ``steps_per_epoch`` or
 
 from __future__ import annotations
 
+import collections
 import contextvars
+import gc
 import inspect
 import math
 import numbers
@@ -359,34 +368,52 @@ _class_namespace = type.__dict__["__dict__"].__get__
 
 
 def _within(subject: Any) -> list[Any]:
-    """``subject``, then what it holds as attributes, a bound method as its object.
+    """``subject``, then what it holds, the object of a bound method among them.
 
-    The attributes are those of the instance's ``__dict__`` and slots, so a
-    wrapper that keeps a fitter, or the fitter's methods, such as a session
-    that wraps the fitter, leads to the fitter. Each value is told apart by
-    its type alone, never by reading its ``__class__``, which can fail, as
-    for a proxy of a collected object, or build something. Neither type
-    tested can be subclassed, so for a value whose ``__class__`` is its type
-    the answer is the one ``isinstance`` gives. The slots are found in the
-    namespaces of the instance's classes, read as ``type`` keeps them, past a
-    metaclass whose ``__getattribute__`` refuses ``__mro__`` or ``__dict__``,
-    and a slot that cannot be read from the instance, such as one left unset
-    or another class's held as a class attribute, is passed over.
+    Nothing is read through an attribute, so no code of the classes of
+    ``subject`` or of what it holds runs: no descriptor, property,
+    ``__getattribute__``, ``__getattr__`` or metaclass. What ``subject``
+    holds is what the garbage collector sees it refer to
+    (:func:`gc.get_referents`): its class, the values in its ``__dict__``,
+    whatever its class makes of that name, and in its slots, and the items of
+    a container it is, such as the fields of a namedtuple; and the value of
+    each slot descriptor in the namespaces of its classes, read as ``type``
+    keeps them, that can be read from it. The values of a dictionary among
+    these are taken in turn, through dictionaries nested to any depth, since
+    the interpreter hands over the ``__dict__`` of an instance either as a
+    dictionary or as its values alone, as the Python version and the
+    instance's past decide; so is the object of a bound method. Nothing else
+    is looked into: not a list, a tuple or another object held, nor a
+    closure, nor what a property would return. A value is told apart by its
+    type, never by reading its ``__class__``, which can fail, as for a proxy
+    of a collected object, or build something.
     """
-    values: list[Any] = []
     try:
-        values.extend(object.__getattribute__(subject, "__dict__").values())
+        held = gc.get_referents(subject)
     except Exception:
-        pass
+        held = []
     for kind in _class_mro(type(subject)):
         for slot in list(_class_namespace(kind).values()):
             if type(slot) is types.MemberDescriptorType:
                 try:
-                    values.append(slot.__get__(subject, kind))
+                    held.append(slot.__get__(subject, kind))
                 except Exception:
                     pass
-    held = [value.__self__ if type(value) is types.MethodType else value for value in values]
-    return [subject, *held]
+    found, seen, pending = [subject], {id(subject)}, collections.deque(held)
+    while pending:
+        value = pending.popleft()
+        if id(value) in seen:
+            continue
+        seen.add(id(value))
+        found.append(value)
+        if issubclass(type(value), dict):
+            try:
+                pending.extend(dict.values(value))
+            except Exception:
+                pass
+        elif type(value) is types.MethodType:
+            pending.append(value.__self__)
+    return found
 
 
 class _Handed:
@@ -395,10 +422,9 @@ class _Handed:
     The checks of the bridges the method calls look for it in their context,
     which a thread the method starts does not share, and failing that among
     the warnings handed on for the object they were given or for one it
-    holds as an attribute (:func:`_within`), such as the fitter that a
-    wrapper of it keeps. The first checks that pass give it, on the thread
-    that runs them, and it is given once, pointing at the line that called
-    :func:`run_fitter`.
+    holds (:func:`_within`), such as the fitter that a wrapper of it keeps.
+    The first checks that pass give it, on the thread that runs them, and it
+    is given once, pointing at the line that called :func:`run_fitter`.
     """
 
     def __init__(self, fitter: Any, message: str):
@@ -2436,12 +2462,17 @@ def run_fitter(
     ``warnings.simplefilter("error")`` the warning is raised there in place
     of the fit. A call that the method makes on another thread with the
     fitter, or with an object that holds the fitter or one of the fitter's
-    methods as an attribute, such as a session that wraps the fitter, gives
-    the warning on that thread, before its ``init``, since the caller's
-    thread waits inside the method. A call on another thread given any
-    other object does not, and the warning then comes once the method
-    returns, after the fit, as it does when no call passes its checks; it
-    does not come when the method raises. A preset given to a
+    bound methods, such as a session that wraps the fitter, gives the
+    warning on that thread, before its ``init``, since the caller's thread
+    waits inside the method. The fitter or the method is found in the
+    object's slots, in the dictionary of its other attributes, among its
+    items, or in a dictionary held in any of these, at any depth, without
+    running any code of the object's classes, such as a property or a
+    ``__getattr__``. A call on another thread given any other object, such
+    as one that keeps the fitter only in a closure, or in a list, a tuple or
+    another object that it holds, does not, and the warning then comes once
+    the method returns, after the fit, as it does when no call passes its
+    checks; it does not come when the method raises. A preset given to a
     ``fit_anneal`` that gets no method is passed, or refused, as any option
     is.
     """
