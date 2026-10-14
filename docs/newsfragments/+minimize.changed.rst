@@ -24,19 +24,23 @@ they are checked and have no effect, with a ``FutureWarning``, as does
 holds ``x``, ``fun``, ``nfev``, ``njev``, ``nit`` (sequential steps: calls
 with one replica, batches with more), ``success``, ``message`` and the
 engine's ``diagnostics``. One replica is the default: over 40 paired seeds
-at equal evaluations, four shared batch replicas ended worse than one on
-13-atom Lennard-Jones and on ten-dimensional Rastrigin and Rosenbrock at
-1000 evaluations, better on a binary Lennard-Jones parameter fit at 1000,
-and at 5000 level with one on the other three problems and worse on the
-fit. The default budget replaces ``max(32, 80 n)``, in which ``n``
-counted fixed coordinates as well as free ones. Over 20 seeds from a
-start drawn in the box, every run spending its budget, it ended better
-on three-dimensional Rastrigin (median 0 against 2.49, 1000 evaluations
-against 240), the six-parameter fit (-4.81 against -1.78, 1000 against
-480), ten-dimensional Rastrigin (3.98 against 5.47) and Rosenbrock
-(3.5e-20 against 1.3e-3, 1100 against 800 for both) and 13-atom
-Lennard-Jones (-40.7 against -39.4, 15600 against 3120, lower on 14 of
-the 20 seeds), at a one-sided Wilcoxon ``p`` below 0.05 on each, and was
-level on three-dimensional Rosenbrock, which both solve. Both open with the finite-difference descent from ``x0`` up to 15
-free coordinates; on the 39 of Lennard-Jones only the new default
-reaches the ``5 n (n + 1)`` evaluations the opening needs.
+at equal evaluations, two runs tying here and below when their values
+differ by at most ``1e-9 max(1, |b|)``, ``b`` the value compared against,
+four shared batch replicas ended worse than one on 13-atom Lennard-Jones
+and on ten-dimensional Rastrigin and Rosenbrock at 1000 evaluations,
+better on a binary Lennard-Jones parameter fit at 1000, and at 5000 level
+with one on the other three problems and worse on the fit. The default
+budget replaces ``max(32, 80 n)``, in which ``n`` counted fixed
+coordinates as well as free ones. Over 20 seeds from a start drawn in the
+box, every run spending its budget, one replica at the new default ended
+better than one replica at the old on three-dimensional Rastrigin (median
+0 against 2.49, 1000 evaluations against 240), the six-parameter fit
+(-4.81 against -1.78, 1000 against 480), ten-dimensional Rastrigin (3.98
+against 5.47) and Rosenbrock (3.5e-20 against 1.3e-3, 1100 against 800
+for both) and 13-atom Lennard-Jones (-40.7 against -39.4, 15600 against
+3120, lower on 14 of the 20 seeds), at a one-sided Wilcoxon ``p`` below
+0.05 on each, and was level on three-dimensional Rosenbrock, which it
+solves at either. At either default one replica opens with the
+finite-difference descent from ``x0`` up to 15 free coordinates; on the
+39 of Lennard-Jones only the new default reaches the ``5 n (n + 1)``
+evaluations the opening needs.

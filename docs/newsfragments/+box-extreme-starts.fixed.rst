@@ -11,8 +11,8 @@ population on a box with an infinite lower wall, all at ``-f64::MAX``. They
 now draw and lay out such an axis at half its width, doubled, so the points
 spread across it, and start an axis with an infinite wall on its finite
 wall, or at zero when its walls are ``-inf`` and ``inf``, as
-``run_rs_qmc_variant`` does. On a box whose every width is finite the draws
-and designs are those of before, and so are seeded runs. A NaN wall, and an
+``run_rs_qmc_variant`` does. On a box whose every width is finite this
+changes no draw, design or seeded run. A NaN wall, and an
 axis whose two walls are the same infinity, such as ``[inf, inf]``, which
 ``eindir_core::Bounds::new`` accepts though no point is inside, now make
 these draws, the designs of the polishers and of the DMC population,
