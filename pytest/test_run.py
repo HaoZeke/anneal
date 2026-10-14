@@ -1082,31 +1082,18 @@ _QMC_BOXES = {
 _QMC_PRESETS = {"boltzmann": Boltzmann, "fast": Fast, "gsa": Gsa}
 # Its Halton index, the seed plus one, passes 2**64 - 1 from the third start on.
 _WRAPPING_SEED = 2**64 - 3
-# The first 16 hex digits of the SHA-256 of every point asked and every
-# history returned by the runs of _qmc_runs, per box and preset.
-_QMC_HISTORIES = {
-    ("unit", "boltzmann"): "e4cb226553fcc288",
-    ("unit", "fast"): "aa0d5bcfaaf549f1",
-    ("unit", "gsa"): "0e7ee6d182a31e0c",
-    ("mixed", "boltzmann"): "bab1cb28ac9b6837",
-    ("mixed", "fast"): "198ec707c4a5958f",
-    ("mixed", "gsa"): "a66432132feb39db",
-    ("fixed", "boltzmann"): "9b4bef97c94ad009",
-    ("fixed", "fast"): "93cae15fd174daad",
-    ("fixed", "gsa"): "7abc80b801f15efa",
-}
 # The runs go through the C library's exp, log and pow, whose last bits can
 # differ from one library to another, so the digests hold only on the
 # platform they were taken on.
 _QMC_HISTORIES_HOLD = sys.platform == "linux" and platform.machine() == "x86_64"
 
 
-def _qmc_runs(low, high):
+def _qmc_runs_over_many_starts(low, high):
     """The options and the number of calls of each run, two epochs of three steps a start.
 
-    64 and 100 starts run uncapped, with 150 calls and with 37, which leaves
-    the starts after the 37th no call, and 8 run from ``_WRAPPING_SEED``; each
-    from the design alone and with ``x0``.
+    64 and 100 starts from seeds 0, 1 and 2 run uncapped, with 150 calls and
+    with 37, which leaves the starts after the 37th no call; each from the
+    design alone and with ``x0``.
     """
     x0 = low + 0.6 * (high - low)
     for seed in range(3):
@@ -1115,19 +1102,26 @@ def _qmc_runs(low, high):
                 calls = 7 * n_starts if cap is None else min(cap, 7 * n_starts)
                 for start in (None, x0):
                     yield {"n_starts": n_starts, "seed": seed, "max_evals": cap, "x0": start}, calls
+
+
+def _qmc_runs_from_the_wrapping_seed(low, high):
+    """As ``_qmc_runs_over_many_starts``: eight starts from ``_WRAPPING_SEED``, uncapped."""
+    x0 = low + 0.6 * (high - low)
     for start in (None, x0):
         yield {"n_starts": 8, "seed": _WRAPPING_SEED, "x0": start}, 8 * 7
 
 
-def _qmc_history_digest(box, preset):
+def _qmc_history_digests(box, preset, runs):
+    """Per run, 12 hex digits of the SHA-256 of every point asked and the history returned."""
     low, high = _QMC_BOXES[box]
-    digest = hashlib.sha256()
-    for options, calls in _qmc_runs(low, high):
+    digests = []
+    for options, calls in runs(low, high):
         objective = Recorder(_plain_landscape)
         h = run_qmc(
             objective, low, high, _QMC_PRESETS[preset](), n_epochs=2, steps_per_epoch=3, **options
         )
         assert len(objective.points) == calls, options
+        digest = hashlib.sha256()
         for point in objective.points:
             digest.update(point.tobytes())
         digest.update(struct.pack("<d", h.best_val))
@@ -1137,15 +1131,115 @@ def _qmc_history_digest(box, preset):
                 struct.pack("<qdqqd", e.epoch, e.temp, e.accepted, e.rejected, e.best_val)
             )
         digest.update(bytes(h.stationarity_flags))
-    return digest.hexdigest()[:16]
+        digests.append(digest.hexdigest()[:12])
+    return digests
+
+
+# Per box and preset, the digests of the runs of _qmc_runs_over_many_starts, a
+# line for each seed and number of starts: uncapped, then with 150 calls and
+# with 37, each from the design alone and then with x0.
+_QMC_HISTORIES_OVER_MANY_STARTS = {
+    ("unit", "boltzmann"): """
+        4444411d895d 36dad7e69c05 446591d33fff 56107121d3af bdd523e9f1be 577d9e17a149
+        c29952b1904a bfcf0e24faca 916f285a6d8f 2a9397025d5e bdd523e9f1be 577d9e17a149
+        9c1e6aa0c95c 5f7a957a5a43 10aa91dc2dfb 30ad6d21a697 597333e5a5e4 32c0881b2c11
+        53e98cec0f16 1abcfa11afd2 428fef04846e bb3f55988ae4 597333e5a5e4 32c0881b2c11
+        a20d10d0ac87 356bca32a693 4423a205828d 28fe615fa20a eaa3065436c8 f1361948cddf
+        d8c03dabfbdd e0742ca4a068 664550331765 9ecebfb8859f eaa3065436c8 f1361948cddf
+    """,
+    ("unit", "fast"): """
+        bc7f2af5ff21 dbd3dc8291bd b291d33e83fe 4f0cffcd44cd bdd523e9f1be 577d9e17a149
+        07972cc81ef4 f963b8e3e091 a4ec624ba4b4 c85929fb38a9 bdd523e9f1be 577d9e17a149
+        4bc92cc8ad5b 5724554e928e 0243fa4f1628 df4805565124 597333e5a5e4 32c0881b2c11
+        ec840fafd2bc ba627bfddb1a 98a44ab87441 177d87745c8e 597333e5a5e4 32c0881b2c11
+        bd507e071702 1a40de5ee259 72abe72e175a 62d64200f054 eaa3065436c8 f1361948cddf
+        ebe05ca04ed9 604381d0d87d 9e2f15909279 f9df53d6f284 eaa3065436c8 f1361948cddf
+    """,
+    ("unit", "gsa"): """
+        f74d7bb91845 c76f900984c4 458b830aa1e8 cbee846e75e2 bdd523e9f1be 577d9e17a149
+        d3fc3d844f74 e89ac72d18b7 b433f6ff4622 4f404499d487 bdd523e9f1be 577d9e17a149
+        a2e4317e14a4 912e80a10d0c 72f811386891 f01caeec1f41 597333e5a5e4 32c0881b2c11
+        d3bc6bf2818a e5da7fc7f395 37811f7e19aa e6b9da25fbfc 597333e5a5e4 32c0881b2c11
+        4520110db702 af6ba083134a 8a06d56aab71 21cb044d25de eaa3065436c8 f1361948cddf
+        18953894d70c 3deb929500e4 5cf14f2a6dc8 13aa93804a28 eaa3065436c8 f1361948cddf
+    """,
+    ("mixed", "boltzmann"): """
+        e1c2464d2c49 57052bd64b91 7047d0a1a1ee 8776a63ff2bd a5c72fa77f82 583e3a29c233
+        346879ea4677 c3a6b24475c7 0450a19086c8 573bb57db37f a5c72fa77f82 583e3a29c233
+        aef018d507a5 401c29c81294 5db8fca5e6f6 786d92ae790b 1394fe0c0a7d 891180b4ae94
+        13805224936d 004cb60a0562 719a1555ab6c a8f7a9170c35 1394fe0c0a7d 891180b4ae94
+        9d6d64517cdb d72d7d237fd1 43053ca97bc4 153ac4036c15 ac7afe014040 0f005cceb6cf
+        9c8d912d4454 d34af3b76187 22c8f688a027 b6e0307862ae ac7afe014040 0f005cceb6cf
+    """,
+    ("mixed", "fast"): """
+        bc4580f738dc 8c5bb557f08b 59fb64042471 be3921482016 a5c72fa77f82 583e3a29c233
+        a7642435ab7d 4aa2c07ed314 b56ccb663171 79ceef1de6e3 a5c72fa77f82 583e3a29c233
+        5c9efab882ee b28f94c0cb38 b638eb47ea68 e74a50a9e0bf 1394fe0c0a7d 891180b4ae94
+        e7ac82fd4098 807efaeac06b 5719282e6107 98cb10de1b42 1394fe0c0a7d 891180b4ae94
+        e9c2022b175c c0549ce720f1 61103dfe5429 3b1e5c2dad82 ac7afe014040 0f005cceb6cf
+        770c4eeaf588 59e1153cae66 bcd7426c8f65 315af58aa209 ac7afe014040 0f005cceb6cf
+    """,
+    ("mixed", "gsa"): """
+        3c8fa92ef198 2a4e93ff0a26 0d1f16b1b4f5 3a608c2dc60d a5c72fa77f82 583e3a29c233
+        4146e1799c8a 60d8a8202073 5475370c0a44 ca478f65e137 a5c72fa77f82 583e3a29c233
+        7230b5884347 d6b4892a640f 0ffbd6de53f5 aa5e3f552785 1394fe0c0a7d 891180b4ae94
+        f0d8c03321e2 1996dd5df483 57e0cf68a4af 15fc4dfb129c 1394fe0c0a7d 891180b4ae94
+        13726c1e5a3e 2159be10f678 ac425262020e d09fd57bb634 ac7afe014040 0f005cceb6cf
+        de6c93ceb958 241e4c03e02a 220f16fbed17 9e73c4fc08a5 ac7afe014040 0f005cceb6cf
+    """,
+    ("fixed", "boltzmann"): """
+        f64171e2c174 3abdadc4fe45 ab58fc9d3bda 666077991a8f f8576f80e5b2 0b39c877f0a8
+        00093fc0a30b 56290ae0bee3 27fc994801e7 a4cbce1a2788 f8576f80e5b2 0b39c877f0a8
+        996e87e0b2dd 3ddd703075ab e41854bb151b 5983dcdb6b83 5d2fc5c346d8 b2794d14afb2
+        eb39bbcc9120 3951b4e9c8cf 9189101ee2a4 83ebf6ffd304 5d2fc5c346d8 b2794d14afb2
+        5a6a482ec078 e3f53a363607 e666ca78a2b9 15a69e6ff38b e82c3a32bf71 68cb4a073c66
+        a765b32c9fc0 661bb2f84eaf bd2730d182ae 05c84d46fb8e e82c3a32bf71 68cb4a073c66
+    """,
+    ("fixed", "fast"): """
+        d621dd9e9872 af2a3d41d62d 6b38792cf7fa fede92389cc6 f8576f80e5b2 0b39c877f0a8
+        006506b5f7d0 e27802c7dec0 c9ca5c59536d f69a093cef59 f8576f80e5b2 0b39c877f0a8
+        e936492e49e1 fd109e4c65db 805979a807ec eb23a25ace28 5d2fc5c346d8 b2794d14afb2
+        0dc38c412206 1c2fd5686cb8 2f0a8f8be69e 4be1912ebec1 5d2fc5c346d8 b2794d14afb2
+        000a1e3bd5b0 a5673653ddcf 58aefdeeaa94 3b8adbbeeedb e82c3a32bf71 68cb4a073c66
+        8095621ff0b3 fe4ec650fef0 4889cd030336 23ae1e985ea1 e82c3a32bf71 68cb4a073c66
+    """,
+    ("fixed", "gsa"): """
+        d71838f07b9c 15d5dacda8b1 ee453364d5d5 1925628e0efb f8576f80e5b2 0b39c877f0a8
+        18398da8932e 9344f29febe4 619fd7f3d6de 92f0dc8e6e2e f8576f80e5b2 0b39c877f0a8
+        51a83e743685 1401984543ed 76f67972403b 12091ea0c2f4 5d2fc5c346d8 b2794d14afb2
+        6a8d08c07428 ea6681eec8d6 f27607cf0f48 f8c363770fde 5d2fc5c346d8 b2794d14afb2
+        368e6c20d3e1 87875114ed27 aab118fd56c4 b11c52e6528c e82c3a32bf71 68cb4a073c66
+        4dd31491d8e6 f862e9731d11 0936b4a3ed87 4e3e50e3efd0 e82c3a32bf71 68cb4a073c66
+    """,
+}
+# Per box and preset, from the design alone and then with x0.
+_QMC_HISTORIES_FROM_THE_WRAPPING_SEED = {
+    ("unit", "boltzmann"): "a043e0150d26 6643f2cf238d",
+    ("unit", "fast"): "dfb953c8d8c1 847decf6d34e",
+    ("unit", "gsa"): "0cb566c062be b0b2e8eeb32f",
+    ("mixed", "boltzmann"): "f29df7fccb8e 149710eebcc9",
+    ("mixed", "fast"): "97684889be6b 51d930300a77",
+    ("mixed", "gsa"): "1bea35b7c574 8b3b2ffedd10",
+    ("fixed", "boltzmann"): "79bf3456e2ac 0b28711a08d3",
+    ("fixed", "fast"): "44bd16c62a0e f410ecaae9da",
+    ("fixed", "gsa"): "63611143bc33 cfb8d19db46e",
+}
 
 
 @pytest.mark.parametrize("preset", list(_QMC_PRESETS))
 @pytest.mark.parametrize("box", list(_QMC_BOXES))
-def test_run_qmc_repeats_its_histories_over_many_starts_and_a_wrapping_seed(box, preset):
-    digest = _qmc_history_digest(box, preset)
+def test_run_qmc_repeats_its_histories_over_many_starts(box, preset):
+    digests = _qmc_history_digests(box, preset, _qmc_runs_over_many_starts)
     if _QMC_HISTORIES_HOLD:
-        assert digest == _QMC_HISTORIES[box, preset]
+        assert digests == _QMC_HISTORIES_OVER_MANY_STARTS[box, preset].split()
+
+
+@pytest.mark.parametrize("preset", list(_QMC_PRESETS))
+@pytest.mark.parametrize("box", list(_QMC_BOXES))
+def test_run_qmc_repeats_its_histories_from_a_seed_whose_halton_index_wraps(box, preset):
+    digests = _qmc_history_digests(box, preset, _qmc_runs_from_the_wrapping_seed)
+    if _QMC_HISTORIES_HOLD:
+        assert digests == _QMC_HISTORIES_FROM_THE_WRAPPING_SEED[box, preset].split()
 
 
 def test_run_leaves_a_nan_start():
