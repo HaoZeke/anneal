@@ -38,7 +38,33 @@ from agox.models.GPR.kernels import Constant as C
 from agox.models.GPR.priors import Repulsive
 from agox.postprocessors import ParallelRelaxPostprocess
 from agox.samplers import KMeansSampler
+from agox.utils.filters.ABC_filter import FilterBaseClass
 import sys
+
+
+class BoundedTrainingFilter(FilterBaseClass):
+    """Train on a fixed number of stored structures.
+
+    A refit on every stored structure makes the true-call rate fall to
+    zero. The lowest-energy structure and the newest structure are always
+    kept.
+    """
+
+    name = "BoundedTraining"
+
+    def __init__(self, m_points=512):
+        super().__init__()
+        self.m_points = m_points
+
+    def _filter(self, atoms):
+        count = len(atoms)
+        if count <= self.m_points:
+            return np.arange(count)
+        energies = np.array([structure.get_potential_energy() for structure in atoms])
+        chosen = {int(np.argmin(energies)), count - 1}
+        pool = np.array([index for index in range(count) if index not in chosen])
+        draw = np.random.choice(pool, size=self.m_points - len(chosen), replace=False)
+        return np.sort(np.concatenate([np.fromiter(chosen, dtype=int), draw]))
 
 
 class KeepZeroStepRelax(ParallelRelaxPostprocess):
@@ -149,7 +175,12 @@ def main():
     k1 = C(1 - beta, (1 - beta, 1 - beta)) * RBF()
     kernel = C(5000, (1, 1e5)) * (k0 + k1) + Noise(0.01, (0.01, 0.01))
     model = GPR(
-        descriptor=descriptor, kernel=kernel, database=database, prior=Repulsive()
+        descriptor=descriptor,
+        kernel=kernel,
+        database=database,
+        prior=Repulsive(),
+        filter=BoundedTrainingFilter(512),
+        n_optimize=1,
     )
 
     sample_size = 10
