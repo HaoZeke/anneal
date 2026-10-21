@@ -1813,67 +1813,71 @@ fn ride_lowest_mode<E, Q>(
     );
     let _ = std::io::stdout().flush();
     let (floor_energy, _) = evaluate(start);
-    let surface = ForceSurface {
-        evaluate: std::sync::Mutex::new(evaluate),
-    };
     let mut saddles: Vec<(Array1<f64>, Array1<f64>, f64)> = Vec::new();
-    let mut ride_modes = vec![features.mode.clone()];
-    for axis in outer_axes(start, contact).into_iter().take(3) {
-        let (_, mut strain) = twist_and_strain(start, axis);
-        if renormalize_mode(&mut strain, start) {
-            ride_modes.push(strain);
+    {
+        let surface = ForceSurface {
+            evaluate: std::sync::Mutex::new(evaluate),
+        };
+        let mut ride_modes = vec![features.mode.clone()];
+        for axis in outer_axes(start, contact).into_iter().take(3) {
+            let (_, mut strain) = twist_and_strain(start, axis);
+            if renormalize_mode(&mut strain, start) {
+                ride_modes.push(strain);
+            }
         }
-    }
-    for (index, feature) in ride_modes.iter().enumerate() {
-        for travel in [1.0_f64, -1.0] {
-            let mode = if travel < 0.0 {
-                -feature.clone()
-            } else {
-                feature.clone()
-            };
-            println!("{{\"kind\":\"dimer_mode\",\"index\":{index},\"travel\":{travel}}}");
-            let _ = std::io::stdout().flush();
-            let mut network = PesNetwork::new();
-            let connection = discover_cartesian_mode_connection(
-                &surface,
-                &descriptor_space,
-                &mut network,
-                start,
-                masses.view(),
-                &frozen,
-                mode.view(),
-                Some(&species),
-                &config,
-                &witness,
-            );
-            match connection {
-                Ok(connection) => {
-                    println!(
-                        "{{\"kind\":\"dimer\",\"saddle\":{:.6},\"curvature\":{:.6},\"index\":{}}}",
-                        connection.saddle_energy, connection.curvature, connection.negative_modes
-                    );
-                    let _ = std::io::stdout().flush();
-                    for minimum in network.minima() {
+        for (index, feature) in ride_modes.iter().enumerate() {
+            for travel in [1.0_f64, -1.0] {
+                let mode = if travel < 0.0 {
+                    -feature.clone()
+                } else {
+                    feature.clone()
+                };
+                println!("{{\"kind\":\"dimer_mode\",\"index\":{index},\"travel\":{travel}}}");
+                let _ = std::io::stdout().flush();
+                let mut network = PesNetwork::new();
+                let connection = discover_cartesian_mode_connection(
+                    &surface,
+                    &descriptor_space,
+                    &mut network,
+                    start,
+                    masses.view(),
+                    &frozen,
+                    mode.view(),
+                    Some(&species),
+                    &config,
+                    &witness,
+                );
+                match connection {
+                    Ok(connection) => {
                         println!(
-                            "{{\"kind\":\"exit_candidate\",\"energy\":{:.6},\"hop\":0,\"role\":\"quench\"}}",
-                            minimum.energy
+                            "{{\"kind\":\"dimer\",\"saddle\":{:.6},\"curvature\":{:.6},\"index\":{}}}",
+                            connection.saddle_energy,
+                            connection.curvature,
+                            connection.negative_modes
                         );
                         let _ = std::io::stdout().flush();
-                        if minimum.energy < *best_energy {
-                            *best_energy = minimum.energy;
-                            *best = minimum.coordinates.clone();
+                        for minimum in network.minima() {
+                            println!(
+                                "{{\"kind\":\"exit_candidate\",\"energy\":{:.6},\"hop\":0,\"role\":\"quench\"}}",
+                                minimum.energy
+                            );
+                            let _ = std::io::stdout().flush();
+                            if minimum.energy < *best_energy {
+                                *best_energy = minimum.energy;
+                                *best = minimum.coordinates.clone();
+                            }
                         }
+                        saddles.push((
+                            connection.saddle_coordinates,
+                            connection.lowest_mode,
+                            connection.curvature,
+                        ));
                     }
-                    saddles.push((
-                        connection.saddle_coordinates,
-                        connection.lowest_mode,
-                        connection.curvature,
-                    ));
-                }
-                Err(error) => {
-                    let message = error.to_string().replace('"', "'");
-                    println!("{{\"kind\":\"dimer\",\"error\":\"{message}\"}}");
-                    let _ = std::io::stdout().flush();
+                    Err(error) => {
+                        let message = error.to_string().replace('"', "'");
+                        println!("{{\"kind\":\"dimer\",\"error\":\"{message}\"}}");
+                        let _ = std::io::stdout().flush();
+                    }
                 }
             }
         }
