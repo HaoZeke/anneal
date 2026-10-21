@@ -253,16 +253,6 @@ pub fn sorted_pairs_witness(
     ))
 }
 
-/// Name of the witness in the header line.
-#[allow(dead_code)]
-pub fn witness_name() -> &'static str {
-    if cfg!(feature = "ira") {
-        "ira-cached"
-    } else {
-        "sorted-pairs-fallback"
-    }
-}
-
 /// Runs seeds `seed0..seed0 + seeds` of the ensemble, prints each report
 /// and the tally. `verify` re-evaluates a returned structure read-only.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]

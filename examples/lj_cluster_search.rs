@@ -7585,7 +7585,7 @@ fn run_history_ensembles(
     use anneal_core::pes_exploration::StructureContext;
     #[cfg(not(feature = "ira"))]
     use ensemble_report::sorted_pairs_witness;
-    use ensemble_report::{config_from_env, print_header, run_seeds, witness_name};
+    use ensemble_report::{config_from_env, print_header, run_seeds};
 
     let ens = config_from_env(replicas, budget, reference.map(|r| r + 1e-4));
     let mut cfg = cfg.clone();
@@ -7610,7 +7610,11 @@ fn run_history_ensembles(
         let _ = pair_cache_bytes;
         sorted_pairs_witness(n, ira_radius)
     };
-    let witness_name = witness_name();
+    let witness_name = if cfg!(feature = "ira") {
+        "ira-cached"
+    } else {
+        "sorted-pairs-fallback"
+    };
     let context = StructureContext::new(Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")));
     let objective: ObjectiveFactory<'_> = &|_| Box::new(|x: ArrayView1<f64>| lj(x));
     let start: StartFactory<'_> =
