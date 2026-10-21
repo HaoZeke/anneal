@@ -28,13 +28,13 @@
 //! landscape.
 
 use anneal_core::catalog::{PACKING_LINK, PackingBook, leaves_packing, packing_link_labels};
-use rand::SeedableRng;
 use anneal_core::known_basin;
 use anneal_core::methods::activation::{Activation, activate_from_origin};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::movekernel::MoveKernel;
 use anneal_core::potentials::{PairKind, PairPotential};
 use ndarray::{Array1, ArrayView1};
+use rand::SeedableRng;
 use rand::SeedableRng;
 
 fn load_xyz(text: &str) -> Array1<f64> {

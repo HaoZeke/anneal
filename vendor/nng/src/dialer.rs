@@ -33,13 +33,11 @@ use crate::{
 /// [1]: https://nanomsg.github.io/nng/man/v1.2.2/nng_dialer.5.html
 /// [`Socket::dial`]: struct.Socket.html#method.dial
 #[derive(Clone, Copy, Debug)]
-pub struct Dialer
-{
+pub struct Dialer {
 	/// The handle to the underlying
 	handle: nng_sys::nng_dialer,
 }
-impl Dialer
-{
+impl Dialer {
 	/// Creates a new dialer object associated with the given socket.
 	///
 	/// Note that this will immediately start the dialer so no configuration
@@ -68,8 +66,7 @@ impl Dialer
 	/// [`OutOfMemory`]: enum.Error.html#variant.OutOfMemory
 	/// [`PeerAuth`]: enum.Error.html#variant.PeerAuth
 	/// [`Protocol`]: enum.Error.html#variant.Protocol
-	pub fn new(socket: &Socket, url: &str, nonblocking: bool) -> Result<Self>
-	{
+	pub fn new(socket: &Socket, url: &str, nonblocking: bool) -> Result<Self> {
 		// We take a Rust string instead of a c-string because the cost of
 		// creating the dialer will far outweigh the cost of allocating a
 		// single string. Having a full Rust interface will make it easier to
@@ -99,8 +96,7 @@ impl Dialer
 	///
 	/// [`Pipe`]: struct.Pipe.html
 	#[allow(clippy::missing_panics_doc)]
-	pub fn close(self)
-	{
+	pub fn close(self) {
 		// Closing the dialer should only ever result in success or ECLOSED and
 		// both of those mean that the drop was successful.
 		let rv = unsafe { nng_sys::nng_dialer_close(self.handle) };
@@ -114,39 +110,36 @@ impl Dialer
 	/// Create a new Dialer handle from an NNG handle.
 	///
 	/// This function will panic if the handle is not valid.
-	pub(crate) fn from_nng_sys(handle: nng_sys::nng_dialer) -> Self
-	{
+	pub(crate) fn from_nng_sys(handle: nng_sys::nng_dialer) -> Self {
 		assert!(unsafe { nng_sys::nng_dialer_id(handle) > 0 }, "Dialer handle is not initialized");
 		Dialer { handle }
 	}
 }
 
 #[cfg(feature = "ffi-module")]
-impl Dialer
-{
+impl Dialer {
 	/// Returns the underlying `nng_dialer` object.
-	pub fn nng_dialer(self) -> nng_sys::nng_dialer { self.handle }
+	pub fn nng_dialer(self) -> nng_sys::nng_dialer {
+		self.handle
+	}
 }
 
-impl PartialEq for Dialer
-{
-	fn eq(&self, other: &Dialer) -> bool
-	{
+impl PartialEq for Dialer {
+	fn eq(&self, other: &Dialer) -> bool {
 		unsafe { nng_sys::nng_dialer_id(self.handle) == nng_sys::nng_dialer_id(other.handle) }
 	}
 }
 
 impl Eq for Dialer {}
 
-impl PartialOrd for Dialer
-{
-	fn partial_cmp(&self, other: &Dialer) -> Option<Ordering> { Some(self.cmp(other)) }
+impl PartialOrd for Dialer {
+	fn partial_cmp(&self, other: &Dialer) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
 }
 
-impl Ord for Dialer
-{
-	fn cmp(&self, other: &Dialer) -> Ordering
-	{
+impl Ord for Dialer {
+	fn cmp(&self, other: &Dialer) -> Ordering {
 		unsafe {
 			let us = nng_sys::nng_dialer_id(self.handle);
 			let them = nng_sys::nng_dialer_id(other.handle);
@@ -155,10 +148,8 @@ impl Ord for Dialer
 	}
 }
 
-impl Hash for Dialer
-{
-	fn hash<H: Hasher>(&self, state: &mut H)
-	{
+impl Hash for Dialer {
+	fn hash<H: Hasher>(&self, state: &mut H) {
 		let id = unsafe { nng_sys::nng_dialer_id(self.handle) };
 		id.hash(state);
 	}
@@ -207,13 +198,11 @@ expose_options!{
 ///
 /// [`Socket::dial`]: struct.Socket.html#method.dial
 #[derive(Debug)]
-pub struct DialerBuilder
-{
+pub struct DialerBuilder {
 	/// The underlying dialer object that we are configuring
 	handle: nng_sys::nng_dialer,
 }
-impl DialerBuilder
-{
+impl DialerBuilder {
 	/// Creates a new dialer object associated with the given socket.
 	///
 	/// Note that this does not start the dialer. In order to start the dialer,
@@ -230,8 +219,7 @@ impl DialerBuilder
 	/// [`Closed`]: enum.Error.html#variant.Closed
 	/// [`DialerBuilder::start`]: struct.DialerBuilder.html#method.start
 	/// [`OutOfMemory`]: enum.Error.html#variant.OutOfMemory
-	pub fn new(socket: &Socket, url: &str) -> Result<Self>
-	{
+	pub fn new(socket: &Socket, url: &str) -> Result<Self> {
 		// We take a Rust string instead of a c-string because the cost of
 		// creating the dialer will far outweigh the cost of allocating a
 		// single string. Having a full Rust interface will make it easier to
@@ -280,8 +268,7 @@ impl DialerBuilder
 	/// [`OutOfMemory`]: enum.Error.html#variant.OutOfMemory
 	/// [`PeerAuth`]: enum.Error.html#variant.PeerAuth
 	/// [`Protocol`]: enum.Error.html#variant.Protocol
-	pub fn start(self, nonblocking: bool) -> std::result::Result<Dialer, (Self, Error)>
-	{
+	pub fn start(self, nonblocking: bool) -> std::result::Result<Dialer, (Self, Error)> {
 		let flags = if nonblocking { nng_sys::NNG_FLAG_NONBLOCK } else { 0 };
 
 		// If there is an error starting the dialer, we don't want to consume
@@ -291,8 +278,7 @@ impl DialerBuilder
 
 		if let Some(e) = NonZeroU32::new(rv as u32) {
 			Err((self, Error::from(e)))
-		}
-		else {
+		} else {
 			let handle = Dialer { handle: self.handle };
 			std::mem::forget(self);
 			Ok(handle)
@@ -301,10 +287,11 @@ impl DialerBuilder
 }
 
 #[cfg(feature = "ffi-module")]
-impl DialerBuilder
-{
+impl DialerBuilder {
 	/// Returns the underlying `nng_dialer` object.
-	pub fn nng_dialer(&self) -> nng_sys::nng_dialer { self.handle }
+	pub fn nng_dialer(&self) -> nng_sys::nng_dialer {
+		self.handle
+	}
 }
 
 #[rustfmt::skip]
@@ -346,10 +333,8 @@ expose_options!{
 	         transport::websocket::Protocol];
 }
 
-impl Drop for DialerBuilder
-{
-	fn drop(&mut self)
-	{
+impl Drop for DialerBuilder {
+	fn drop(&mut self) {
 		// Closing the dialer should only ever result in success or ECLOSED and
 		// both of those mean that the drop was successful.
 		let rv = unsafe { nng_sys::nng_dialer_close(self.handle) };

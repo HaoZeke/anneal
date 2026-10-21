@@ -31,13 +31,11 @@ use crate::{
 /// [1]: https://nanomsg.github.io/nng/man/v1.2.2/nng_listener.5.html
 /// [`Socket::listen`]: struct.Socket.html#method.listen
 #[derive(Clone, Copy, Debug)]
-pub struct Listener
-{
+pub struct Listener {
 	/// The handle to the underlying
 	handle: nng_sys::nng_listener,
 }
-impl Listener
-{
+impl Listener {
 	/// Creates a new listener object associated with the given socket.
 	///
 	/// Note that this will immediately start the listener so no configuration
@@ -57,8 +55,7 @@ impl Listener
 	/// [`Closed`]: enum.Error.html#variant.Closed
 	/// [`ListenerBuilder`]: struct.ListenerBuilder.html
 	/// [`OutOfMemory`]: enum.Error.html#variant.OutOfMemory
-	pub fn new(socket: &Socket, url: &str) -> Result<Self>
-	{
+	pub fn new(socket: &Socket, url: &str) -> Result<Self> {
 		// We take a Rust string instead of a c-string because the cost of
 		// creating the listener will far outweigh the cost of allocating a
 		// single string. Having a full Rust interface will make it easier to
@@ -87,8 +84,7 @@ impl Listener
 	///
 	/// [`Pipe`]: struct.Pipe.html
 	#[allow(clippy::missing_panics_doc)]
-	pub fn close(self)
-	{
+	pub fn close(self) {
 		// Closing the listener should only ever result in success or ECLOSED
 		// and both of those mean that the drop was successful.
 		let rv = unsafe { nng_sys::nng_listener_close(self.handle) };
@@ -102,8 +98,7 @@ impl Listener
 	/// Create a new `Listener` handle from a NNG handle.
 	///
 	/// This function will panic if the handle is not valid.
-	pub(crate) fn from_nng_sys(handle: nng_sys::nng_listener) -> Self
-	{
+	pub(crate) fn from_nng_sys(handle: nng_sys::nng_listener) -> Self {
 		assert!(
 			unsafe { nng_sys::nng_listener_id(handle) > 0 },
 			"Listener handle is not initialized"
@@ -113,31 +108,29 @@ impl Listener
 }
 
 #[cfg(feature = "ffi-module")]
-impl Listener
-{
+impl Listener {
 	/// Returns the underlying `nng_listener` object.
-	pub fn nng_listener(self) -> nng_sys::nng_listener { self.handle }
+	pub fn nng_listener(self) -> nng_sys::nng_listener {
+		self.handle
+	}
 }
 
-impl PartialEq for Listener
-{
-	fn eq(&self, other: &Listener) -> bool
-	{
+impl PartialEq for Listener {
+	fn eq(&self, other: &Listener) -> bool {
 		unsafe { nng_sys::nng_listener_id(self.handle) == nng_sys::nng_listener_id(other.handle) }
 	}
 }
 
 impl Eq for Listener {}
 
-impl PartialOrd for Listener
-{
-	fn partial_cmp(&self, other: &Listener) -> Option<Ordering> { Some(self.cmp(other)) }
+impl PartialOrd for Listener {
+	fn partial_cmp(&self, other: &Listener) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
 }
 
-impl Ord for Listener
-{
-	fn cmp(&self, other: &Listener) -> Ordering
-	{
+impl Ord for Listener {
+	fn cmp(&self, other: &Listener) -> Ordering {
 		unsafe {
 			let us = nng_sys::nng_listener_id(self.handle);
 			let them = nng_sys::nng_listener_id(other.handle);
@@ -146,10 +139,8 @@ impl Ord for Listener
 	}
 }
 
-impl Hash for Listener
-{
-	fn hash<H: Hasher>(&self, state: &mut H)
-	{
+impl Hash for Listener {
+	fn hash<H: Hasher>(&self, state: &mut H) {
 		let id = unsafe { nng_sys::nng_listener_id(self.handle) };
 		id.hash(state);
 	}
@@ -197,13 +188,11 @@ expose_options!{
 ///
 /// [`Socket::listen`]: struct.Socket.html#method.listen
 #[derive(Debug)]
-pub struct ListenerBuilder
-{
+pub struct ListenerBuilder {
 	/// The underlying listener object that we are configuring
 	handle: nng_sys::nng_listener,
 }
-impl ListenerBuilder
-{
+impl ListenerBuilder {
 	/// Creates a new [`Listener`] object associated with the given socket.
 	///
 	/// Note that this does not start the [`Listener`] In order to start the
@@ -221,8 +210,7 @@ impl ListenerBuilder
 	/// [`Listener`]: struct.Listener.html
 	/// [`ListenerBuilder::start`]: struct.ListenerBuilder.html#method.start
 	/// [`OutOfMemory`]: enum.Error.html#variant.OutOfMemory
-	pub fn new(socket: &Socket, url: &str) -> Result<Self>
-	{
+	pub fn new(socket: &Socket, url: &str) -> Result<Self> {
 		// We take a Rust string instead of a c-string because the cost of
 		// creating the listener will far outweigh the cost of allocating a
 		// single string. Having a full Rust interface will make it easier to
@@ -250,8 +238,7 @@ impl ListenerBuilder
 	///
 	/// [`Closed`]: enum.Error.html#variant.Closed
 	/// [`Listener`]: struct.Listener.html
-	pub fn start(self) -> std::result::Result<Listener, (Self, Error)>
-	{
+	pub fn start(self) -> std::result::Result<Listener, (Self, Error)> {
 		// If there is an error starting the listener, we don't want to consume
 		// it. Instead, we'll return it to the user and they can decide what to
 		// do.
@@ -259,8 +246,7 @@ impl ListenerBuilder
 
 		if let Some(e) = NonZeroU32::new(rv as u32) {
 			Err((self, Error::from(e)))
-		}
-		else {
+		} else {
 			let handle = Listener { handle: self.handle };
 			std::mem::forget(self);
 			Ok(handle)
@@ -269,10 +255,11 @@ impl ListenerBuilder
 }
 
 #[cfg(feature = "ffi-module")]
-impl ListenerBuilder
-{
+impl ListenerBuilder {
 	/// Returns the underlying `nng_listener` object.
-	pub fn nng_listener(&self) -> nng_sys::nng_listener { self.handle }
+	pub fn nng_listener(&self) -> nng_sys::nng_listener {
+		self.handle
+	}
 }
 
 #[rustfmt::skip]
@@ -312,18 +299,15 @@ expose_options!{
 }
 
 #[cfg(unix)]
-mod unix_impls
-{
+mod unix_impls {
 	use super::*;
 	use crate::options::transport::ipc;
 
 	impl crate::options::SetOpt<ipc::Permissions> for ListenerBuilder {}
 }
 
-impl Drop for ListenerBuilder
-{
-	fn drop(&mut self)
-	{
+impl Drop for ListenerBuilder {
+	fn drop(&mut self) {
 		// Closing the listener should only ever result in success or ECLOSED
 		// and both of those mean that the drop was successful.
 		let rv = unsafe { nng_sys::nng_listener_close(self.handle) };

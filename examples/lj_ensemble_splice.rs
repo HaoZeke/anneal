@@ -43,8 +43,8 @@ use anneal_core::methods::cluster_hopping::{
     MoveLibrary, Outcome, random_cluster, run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::cluster_search::{Encounter, median_encounter};
-use anneal_core::methods::lattice_search::{LatticeSearchConfig, reoccupy};
 use anneal_core::methods::csa_cluster::coordination_histogram_distance;
+use anneal_core::methods::lattice_search::{LatticeSearchConfig, reoccupy};
 use anneal_core::methods::splice::cut_and_splice;
 use anneal_core::methods::two_phase::{
     Cutoff, SharedSurfaceAllocator, SurfacePortfolio, TwoPhase, largest_pair_distance,
