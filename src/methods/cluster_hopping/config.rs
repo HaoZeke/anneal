@@ -846,6 +846,29 @@ pub struct Config {
     /// How far above the incumbent a screened trial may land and still be
     /// promoted to a full relaxation.
     pub screen_margin: f64,
+    /// Whether the energy screen credits a trial with the descent its
+    /// screening pass left undone.
+    ///
+    /// A trial is refused when its partial energy, less the upper decile of
+    /// `partial - full` over the last 256 full relaxations, lies more than
+    /// [`Config::screen_margin`] above the incumbent. Until eight full
+    /// relaxations have been seen the credit is zero and the screen is the
+    /// fixed margin. Every eighth refusal is relaxed in full anyway, so the
+    /// window samples the trials the screen refuses and not only those it
+    /// passes. A fixed margin is in energy units and does not carry between
+    /// potentials: on rigid TIP4P10, 256 development starts at 1e6 force
+    /// calls, a sweep of the fixed margin from 25 to 50 kJ/mol cut PAR-2
+    /// from 78.7e3 to 18.4e3, while LJ38 was flat between 1 and 4 epsilon.
+    pub calibrated_screen: bool,
+    /// Whether a full relaxation that ends below the incumbent is continued,
+    /// [`Config::relax_steps`] at a time and up to eight more times, until it
+    /// stops descending.
+    ///
+    /// Only a converged structure is recorded. On rigid TIP4P20 at 80 steps
+    /// a 3e5-call communicating run converged 70 of its 13329 relaxations,
+    /// screens included, so at most 70 of its 832 full ones, and a trial
+    /// reaching the global basin was rarely recordable.
+    pub finish_improving: bool,
     /// Relaxation steps in the screening pass.
     /// Calibrated by sweep on the corrected relaxer, LJ38 at 4e5 charged
     /// evaluations, four seeds each:
@@ -1297,6 +1320,8 @@ impl Config {
             diversity_floor: 0.75,
             height_revisits: 4.0,
             screen_margin: LennardJonesPreset::SCREEN_MARGIN * energy_scale,
+            calibrated_screen: true,
+            finish_improving: true,
             screen_steps: 25,
             adaptive_screen: false,
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,

@@ -1499,6 +1499,94 @@ fn exchange_log_acceptance(
     )
 }
 
+/// How far a partial relaxation still had to descend, over the recent trials
+/// that went on to a full relaxation.
+///
+/// The energy screen compares a partially relaxed trial with the incumbent, so
+/// the margin it needs is the descent the screening pass leaves undone, and
+/// that is a property of the potential and the screening length rather than a
+/// constant. On rigid TIP4P a 15-step screen leaves tens of kJ/mol; on LJ a
+/// 25-step screen leaves a few epsilon.
+///
+/// Trials the screen passes are the ones that had little left to descend, so
+/// a window of those alone underestimates the descent of the trials it
+/// refuses and the screen tightens on itself: on TIP4P20 it refused 99.7 per
+/// cent of hops. Every [`ScreenDescent::AUDIT`]th refusal is relaxed in full
+/// instead, so the window also samples the population the screen judges.
+#[derive(Debug, Default)]
+struct ScreenDescent {
+    drops: std::collections::VecDeque<f64>,
+    allowance: f64,
+    refusals: usize,
+}
+
+impl ScreenDescent {
+    const WINDOW: usize = 256;
+    const WARMUP: usize = 8;
+    const QUANTILE: f64 = 0.9;
+    const AUDIT: usize = 8;
+
+    /// Called on a refusal; true when this one is audited instead.
+    fn audit(&mut self) -> bool {
+        self.refusals += 1;
+        self.refusals.is_multiple_of(Self::AUDIT)
+    }
+
+    fn observe(&mut self, drop: f64) {
+        if !drop.is_finite() {
+            return;
+        }
+        if self.drops.len() == Self::WINDOW {
+            self.drops.pop_front();
+        }
+        self.drops.push_back(drop.max(0.0));
+        if self.drops.len() >= Self::WARMUP {
+            let mut sorted: Vec<f64> = self.drops.iter().copied().collect();
+            let rank = ((sorted.len() - 1) as f64 * Self::QUANTILE).round() as usize;
+            let (_, q, _) = sorted.select_nth_unstable_by(rank, f64::total_cmp);
+            self.allowance = *q;
+        }
+    }
+
+    /// The descent a screened trial is credited with: zero until the warmup
+    /// has been observed, then the upper decile of the window.
+    fn allowance(&self) -> f64 {
+        self.allowance
+    }
+}
+
+/// Continue a full relaxation that ended below the incumbent until it stops
+/// descending, `steps` at a time and at most [`FINISH_ROUNDS`] more times.
+///
+/// Only a converged structure can be recorded, so a relaxation that stopped
+/// on its step cap below the incumbent is the one trial whose convergence
+/// decides whether the run has found anything. A continuation from a
+/// converged point stops at its first gradient.
+fn finish_improving(
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    mut out: (f64, Array1<f64>),
+    steps: usize,
+) -> (f64, Array1<f64>) {
+    for _ in 0..FINISH_ROUNDS {
+        if !(out.0 < ledger.best - 1e-10) || ledger.remaining() == 0 {
+            break;
+        }
+        let more = relax(ledger, out.1.view(), steps);
+        let descended = more.0 < out.0 - 1e-10 * (1.0 + out.0.abs());
+        if more.0 <= out.0 {
+            out = more;
+        }
+        if !descended {
+            break;
+        }
+    }
+    out
+}
+
+/// Continuations [`finish_improving`] grants one relaxation.
+const FINISH_ROUNDS: usize = 8;
+
 fn run_full<'g, R, H>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -2084,6 +2172,7 @@ where
     }
     let mut screened_out = 0usize;
     let mut returned = 0usize;
+    let mut descent = ScreenDescent::default();
     let mut accepted = 0usize;
     let mut hops = 0usize;
     let mut checkpoint_hops = 0usize;
@@ -3338,6 +3427,8 @@ where
             // gradient was 0.31 where every other arm returns about 1e-6.
             e_screen >= ledger.best
                 && !screen.decide(feats.view(), ledger.best, rng.random::<f64>())
+        } else if cfg.calibrated_screen {
+            e_screen - descent.allowance() > ledger.best + cfg.screen_margin && !descent.audit()
         } else {
             e_screen > ledger.best + cfg.screen_margin
         };
@@ -3359,11 +3450,15 @@ where
             }
             (e_screen, x_screen)
         } else {
-            let out = relax(ledger, x_screen.view(), cfg.relax_steps);
+            let mut out = relax(ledger, x_screen.view(), cfg.relax_steps);
+            if cfg.finish_improving {
+                out = finish_improving(ledger, relax, out, cfg.relax_steps);
+            }
             if cfg.bayes_screen {
                 // The answer to the question the posterior was asked.
                 screen.observe(feats.view(), out.0);
             }
+            descent.observe(e_screen - out.0);
             out
         };
         if !quench_is_sane(cfg, e_new, x_new.view()) {
@@ -6562,6 +6657,30 @@ mod tests {
             out.accepted,
             out.hops
         );
+    }
+
+    #[test]
+    fn screen_descent_credits_the_upper_decile_after_warmup() {
+        let mut descent = ScreenDescent::default();
+        for drop in 1..ScreenDescent::WARMUP {
+            descent.observe(drop as f64);
+            assert_eq!(descent.allowance(), 0.0, "credited before the warmup");
+        }
+        descent.observe(f64::NAN);
+        assert_eq!(descent.allowance(), 0.0, "a non-finite drop was counted");
+        for drop in ScreenDescent::WARMUP..=100 {
+            descent.observe(drop as f64);
+        }
+        assert_eq!(descent.allowance(), 90.0);
+        descent.observe(-5.0);
+        assert_eq!(descent.drops.back(), Some(&0.0), "a rise is no descent");
+        for _ in 0..ScreenDescent::WINDOW {
+            descent.observe(2.0);
+        }
+        assert_eq!(descent.drops.len(), ScreenDescent::WINDOW);
+        assert_eq!(descent.allowance(), 2.0, "the window forgets old drops");
+        assert!(Config::for_cluster(13).calibrated_screen);
+        assert!(Config::for_tip4p(4).calibrated_screen);
     }
 
     #[test]
