@@ -1504,77 +1504,6 @@ fn exchange_log_acceptance(
     )
 }
 
-/// Lowest unrelaxed exchange of an inner large atom with an outer small one.
-///
-/// Sixteen pair trials, each one evaluation. The geometry is the incumbent
-/// minimum with those two coordinates exchanged. A trial whose unrelaxed
-/// energy sits above `ceiling` is discarded. `None` when every trial does,
-/// or the budget runs out before a keeper.
-fn best_wide_exchange<F>(
-    x: ArrayView1<f64>,
-    sigma: &[f64],
-    ceiling: f64,
-    mut evaluate: F,
-) -> Option<Array1<f64>>
-where
-    F: FnMut(ArrayView1<f64>) -> Option<f64>,
-{
-    let n = sigma.len();
-    if x.len() != 3 * n || n < 4 {
-        return None;
-    }
-    let mean = sigma.iter().copied().sum::<f64>() / n as f64;
-    let mut centre = [0.0; 3];
-    for i in 0..n {
-        for k in 0..3 {
-            centre[k] += x[3 * i + k];
-        }
-    }
-    for value in &mut centre {
-        *value /= n as f64;
-    }
-    let radii: Vec<f64> = (0..n)
-        .map(|i| {
-            let mut radius = 0.0;
-            for k in 0..3 {
-                let delta = x[3 * i + k] - centre[k];
-                radius += delta * delta;
-            }
-            radius
-        })
-        .collect();
-    let mut large: Vec<usize> = (0..n).filter(|&i| sigma[i] > mean + 1e-12).collect();
-    let mut small: Vec<usize> = (0..n).filter(|&i| sigma[i] <= mean + 1e-12).collect();
-    if large.is_empty() || small.is_empty() {
-        return None;
-    }
-    large.sort_by(|&left, &right| radii[left].total_cmp(&radii[right]));
-    small.sort_by(|&left, &right| radii[right].total_cmp(&radii[left]));
-    large.truncate(4);
-    small.truncate(4);
-    let mut best_energy = f64::INFINITY;
-    let mut best: Option<Array1<f64>> = None;
-    for &large_i in &large {
-        for &small_i in &small {
-            if large_i == small_i {
-                continue;
-            }
-            let mut y = x.to_owned();
-            for k in 0..3 {
-                y.swap(3 * large_i + k, 3 * small_i + k);
-            }
-            let Some(energy) = evaluate(y.view()) else {
-                break;
-            };
-            if energy < best_energy {
-                best_energy = energy;
-                best = Some(y);
-            }
-        }
-    }
-    best.filter(|_| best_energy <= ceiling)
-}
-
 /// Body count at and below which the rigid factor may climb to 24.
 ///
 /// An all-body kick on a ten-water chart still falls into the target
@@ -1591,29 +1520,6 @@ fn rigid_factor_cap(n_bodies: usize) -> f64 {
     } else {
         24.0
     }
-}
-
-/// True when two species differ in diameter by at least a fifth.
-///
-/// At that mismatch an exchange of every misplaced label leaves the
-/// low-energy funnel. The hop proposes a soft microcanonical escape
-/// instead.
-fn large_diameter_ratio(cfg: &Config) -> bool {
-    let Some(sigma) = cfg.species_sigma.as_ref() else {
-        return false;
-    };
-    if sigma.len() < 2 {
-        return false;
-    }
-    let mut smallest = f64::INFINITY;
-    let mut largest = 0.0_f64;
-    for value in sigma {
-        if value.is_finite() && *value > 0.0 {
-            smallest = smallest.min(*value);
-            largest = largest.max(*value);
-        }
-    }
-    smallest.is_finite() && largest / smallest >= 1.2
 }
 
 fn run_full<'g, R, H>(
@@ -2049,16 +1955,6 @@ where
     let mut md_attempts = 0usize;
     let mut md_steps = 0usize;
     let mut md_failed = 0usize;
-    // Wide size mismatch. Random identity exchange leaves the funnel, so the
-    // ordinary proposal is a softened microcanonical escape whose total
-    // kinetic energy grows when the quench returns and shrinks when the
-    // energy falls. Every eighth hop tries one inner-large/outer-small
-    // exchange instead, and only if the unrelaxed energy stays near the
-    // minimum. The preset temperature is the Metropolis temperature.
-    let species_wide = large_diameter_ratio(cfg);
-    let mut species_kinetic = (16.0 * cfg.energy_scale).max(f64::MIN_POSITIVE);
-    let species_kinetic_floor = (4.0 * cfg.energy_scale).max(f64::MIN_POSITIVE);
-    let species_kinetic_cap = (1.5 * n as f64 * cfg.energy_scale).max(species_kinetic);
     let mut orbits_completed = 0usize;
     let mut orbit_gain = 0.0_f64;
     let mut accepted_transitions = Vec::new();
@@ -3015,10 +2911,8 @@ where
             (None, true) => allocator.select(rng),
             (None, false) => rng.random_range(0..kernels.len()),
         };
-        if hops == 0
-            && let Some(swap_at) = kernels.iter().position(|kernel| kernel.name() == "swap")
-        {
-            k = swap_at;
+        if let Some(swap_at) = kernels.iter().position(|kernel| kernel.name() == "swap") {
+            k = moves::select_identity_share(Some(swap_at), rng.random::<f64>(), k);
         }
         // The move scale stays the configured temperature. The law's
         // temperature is an acceptance temperature: it governs which uphill
@@ -3080,7 +2974,6 @@ where
         // a trajectory and a kick at equal charge.
         let hamiltonian = cfg.hmc.is_some() && energy_grad.is_some() && !angular;
         let mut hmc_trial: Option<Array1<f64>> = None;
-        let mut species_escape_trial = false;
         // Goedecker's escape: an NVE trajectory from the occupied minimum,
         // launched with the controller's escape scale as kinetic energy and
         // stopped after two potential minima, replaces the kick. Its end
@@ -3141,83 +3034,6 @@ where
                 }
                 Err(_) => {
                     md_failed += 1;
-                }
-            }
-            if ledger.remaining() == 0 {
-                break;
-            }
-        }
-        // Every eighth hop, exchange one inner large atom with one outer
-        // small atom and quench that geometry. The pair is kept only when
-        // its unrelaxed energy stays within a fixed window of the minimum.
-        if hmc_trial.is_none() && !angular && species_wide && hops.is_multiple_of(8) {
-            if let (Some(sigma), Some(eg)) =
-                (cfg.species_sigma.as_deref(), energy_grad.as_deref_mut())
-            {
-                let ceiling = e + 15.0 * cfg.energy_scale;
-                if let Some(swapped) = best_wide_exchange(x.view(), sigma, ceiling, |p| {
-                    eg(ledger, p).map(|(energy, _)| energy)
-                }) {
-                    hmc_trial = Some(swapped);
-                    species_escape_trial = true;
-                }
-            }
-        }
-        // A large diameter ratio makes an all-pairs identity exchange climb
-        // out of the funnel (Sicher, Mohr, Goedecker). The ordinary proposal
-        // is a softened microcanonical escape that has to travel before it
-        // counts, then a full quench and the preset Metropolis test. A
-        // trajectory that stays in the well falls through to the library
-        // and the next launch is hotter.
-        if hmc_trial.is_none()
-            && !angular
-            && species_wide
-            && let Some(eg) = energy_grad.as_deref_mut()
-        {
-            let escape_floor = 0.80 * cfg.length_scale;
-            let md_config = crate::methods::minima_hopping::MdEscapeConfig {
-                dt: 0.02,
-                potential_minima: 2,
-                maximum_steps: 800,
-                minimum_rise: 0.50 * cfg.energy_scale,
-                max_rms: 2.5 * cfg.length_scale,
-                min_well_rms: 0.0,
-                softening: Some(rgsaddle::VelocitySofteningConfig {
-                    steps: 5,
-                    displacement: 0.10 * cfg.length_scale,
-                    mixing: 0.25,
-                }),
-                ..Default::default()
-            };
-            let kinetic = species_kinetic;
-            let mut evaluate = |p: ArrayView1<f64>| eg(ledger, p);
-            md_attempts += 1;
-            match crate::methods::minima_hopping::nve_escape_with_frozen(
-                x.view(),
-                kinetic,
-                &md_config,
-                &mut evaluate,
-                rng,
-                hop_frozen.as_deref(),
-            ) {
-                Ok(report) if report.potential_minima >= 2 || report.far_rms >= escape_floor => {
-                    md_steps += report.steps;
-                    let position = if report.potential_minima >= 2 {
-                        report.position
-                    } else {
-                        report.far_position
-                    };
-                    hmc_trial = Some(position);
-                    species_escape_trial = true;
-                }
-                Ok(report) => {
-                    md_steps += report.steps;
-                    md_failed += 1;
-                    species_kinetic = (species_kinetic * 1.3).min(species_kinetic_cap);
-                }
-                Err(_) => {
-                    md_failed += 1;
-                    species_kinetic = (species_kinetic * 1.3).min(species_kinetic_cap);
                 }
             }
             if ledger.remaining() == 0 {
@@ -3309,8 +3125,7 @@ where
         };
         // Identity SOAP is not an arm. Thompson must not buy a no-op:
         // reselect a real kernel, or skip the hop.
-        if !species_escape_trial
-            && !cov_fire
+        if !cov_fire
             && !soft_fire
             && !angular
             && kernels[k].name() == "soap"
@@ -3489,10 +3304,7 @@ where
         // relaxed once, to the full iteration cap, and that result is the
         // trial. The Cartesian screen stays a short prefix of a second pass.
         let rigid_quench = cfg.move_library.is_rigid_body();
-        // The species escape is already a point past a barrier. A 25-step
-        // screen of that point falls back into the well it left, and the
-        // return test then skips the quench. Relax it once, in full.
-        let quenched_in_place = rigid_quench || species_escape_trial;
+        let quenched_in_place = rigid_quench;
         let (e_screen, x_screen) = relax(
             ledger,
             trial.view(),
@@ -3612,7 +3424,7 @@ where
             // runs unless the trial is returning.
             !cfg.move_library.is_rigid_body() && e_screen > ledger.best + cfg.screen_margin
         };
-        let (e_new, x_new) = if quenched_in_place && known_stand_in.is_none() {
+        let (mut e_new, mut x_new) = if quenched_in_place && known_stand_in.is_none() {
             (e_screen, x_screen)
         } else if let Some((known_e, known_x)) = known_stand_in {
             // The refund: the basin is on file, its minimum stands in for
@@ -3655,13 +3467,30 @@ where
         // The Cartesian screen still hands back a partial descent, and that
         // partial descent is not a recordable minimum.
         let unquenched = !quenched_in_place && (screened_this || returning);
-        if species_escape_trial {
-            let same = (e_new - e).abs() <= 5.0e-2;
-            if same {
-                species_kinetic = (species_kinetic * 1.3).min(species_kinetic_cap);
-            } else if e_new < e - 0.05 {
-                species_kinetic = (species_kinetic / 1.15).max(species_kinetic_floor);
-            }
+        // A record within one energy unit of the caller's target is close
+        // enough that the remaining gap can be a homotop. Finish it by
+        // downhill quench-assisted identity exchanges. Geometric proposals
+        // keep the Metropolis test. No target means this pass does not run.
+        let record_before_polish = ledger.best;
+        let near_target = ledger
+            .target()
+            .is_some_and(|target| e_new <= target + cfg.energy_scale);
+        if !unquenched
+            && near_target
+            && e_new < best_seen - 1e-9
+            && x_new.len() == 3 * n
+            && let Some(species) = cfg.species.as_deref()
+            && species.len() == n
+        {
+            moves::converge_biminimum(
+                &mut x_new,
+                &mut e_new,
+                species,
+                relax,
+                ledger,
+                cfg.relax_steps,
+                rng,
+            );
         }
         // Every quench trains the surrogate, including the ones taken before
         // it had an opinion. This is where its training data comes from.
@@ -3686,7 +3515,7 @@ where
             // means a vanishing depth.
             sur.observe_full(x_new.view(), n, e_new, 0.0, e_new);
         }
-        let improved = e_new < ledger.best - 1e-10;
+        let improved = e_new < record_before_polish - 1e-10;
         // A structure the ledger records can be reported as the run's answer,
         // so it has to be a minimum. Two paths reach here with one that is not.
         //
