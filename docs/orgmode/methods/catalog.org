@@ -431,7 +431,9 @@ Key types and functions: =search= (src/methods/cluster_search.rs:116);
 =RelaxStats= (cluster_search.rs:33, screen/full/check charged splits,
 =screen_share=); =CONVERGED_GRADIENT = 1e-3= (cluster_search.rs:102,
 the max-component gradient threshold for calling a relaxation
-converged).
+converged). The quench itself asks L-BFGS to stop at gradient 1e-5,
+where the line search on a Lennard-Jones cluster stops accepting
+steps. The default =WarmLbfgs= tolerance stays 1e-6.
 
 Feeds/consumes: consumed by =src/potentials.rs=, =src/python.rs=,
 =src/catalog_rpc/server.rs=, and the =molecular_cluster=,
@@ -1624,6 +1626,9 @@ points, warm and cold starts agree to the last digit because the memory
 is empty at the end of every relaxation (line-search failure at
 =|g| ~ 1e-5= discards the memory before returning), so the warm start as
 built never actually engages; kept as a correct L-BFGS regardless.
+The objective-driven cluster quench sets that tolerance to 1e-5, so
+it stops where the line search stops accepting steps instead of
+requesting 1e-6.
 
 Key types and functions: =WarmLbfgs= (src/methods/warm_lbfgs.rs:57),
 =forget=/=len=/=is_empty= (warm_lbfgs.rs:89/94/99), =minimize=/
