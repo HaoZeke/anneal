@@ -17,6 +17,8 @@ use std::io::{self, Write};
 #[cfg(not(feature = "ira"))]
 use std::sync::Mutex;
 
+type VerifiedPoint<'a> = &'a dyn Fn(usize, &Array1<f64>, f64) -> (f64, f64);
+
 /// Running totals over the seeds of one campaign arm.
 #[derive(Default)]
 pub struct Tally {
@@ -51,7 +53,7 @@ pub fn print_report(
     ens: &EnsembleConfig,
     report: &EnsembleReport,
     unit: &str,
-    verify: &dyn Fn(usize, &Array1<f64>, f64) -> (f64, f64),
+    verify: VerifiedPoint<'_>,
     tally: &mut Tally,
 ) {
     for run in &report.replicas {
@@ -271,7 +273,7 @@ pub fn run_seeds<W: ExactStructureWitness + Sync + ?Sized>(
     seeds: u64,
     problem: &EnsembleProblem<'_, W>,
     unit: &str,
-    verify: &dyn Fn(usize, &Array1<f64>, f64) -> (f64, f64),
+    verify: VerifiedPoint<'_>,
     reference: Option<f64>,
 ) -> Tally {
     let mut tally = Tally::new();
