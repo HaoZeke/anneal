@@ -123,11 +123,15 @@ fn clearance(point: ArrayView1<f64>, peers: &[Array1<f64>], bounds: &Bounds<f64>
         .fold(f64::INFINITY, f64::min)
 }
 
-#[allow(clippy::type_complexity)]
-fn rounded_case(
-    fixed: bool,
-    values: bool,
-) -> (Array1<f64>, Array1<f64>, Vec<Array1<f64>>, Bounds<f64>, f64) {
+struct RoundedCase {
+    initial: Array1<f64>,
+    proposal: Array1<f64>,
+    peers: Vec<Array1<f64>>,
+    bounds: Bounds<f64>,
+    allowance: f64,
+}
+
+fn rounded_case(fixed: bool, values: bool) -> RoundedCase {
     let low = 1e10;
     let spacing = 1.9073486328125e-6;
     let point = |a: f64, b: f64| {
@@ -189,14 +193,26 @@ fn rounded_case(
     if fixed {
         assert_eq!(proposal[2], 7.0);
     }
-    (initial, proposal, peers, bounds, allowance)
+    RoundedCase {
+        initial,
+        proposal,
+        peers,
+        bounds,
+        allowance,
+    }
 }
 
 #[test]
 fn representable_parameter_repulsion_increases_actual_peer_clearance() {
     for fixed in [false, true] {
         for values in [false, true] {
-            let (initial, proposal, peers, bounds, _) = rounded_case(fixed, values);
+            let RoundedCase {
+                initial,
+                proposal,
+                peers,
+                bounds,
+                allowance: _,
+            } = rounded_case(fixed, values);
             let before = clearance(initial.view(), &peers, &bounds);
             let after = clearance(proposal.view(), &peers, &bounds);
             assert!(
@@ -211,7 +227,13 @@ fn representable_parameter_repulsion_increases_actual_peer_clearance() {
 fn representable_parameter_repulsion_keeps_the_geometric_step_cap() {
     for fixed in [false, true] {
         for values in [false, true] {
-            let (initial, proposal, _, bounds, allowance) = rounded_case(fixed, values);
+            let RoundedCase {
+                initial,
+                proposal,
+                bounds,
+                allowance,
+                ..
+            } = rounded_case(fixed, values);
             let displacement = distance(initial.view(), proposal.view(), &bounds);
             assert!(
                 displacement <= allowance + 16.0 * f64::EPSILON,
