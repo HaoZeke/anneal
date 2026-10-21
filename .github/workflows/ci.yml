@@ -229,6 +229,13 @@ jobs:
           --config 'target.aarch64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
           test
 
+      # Feature flags stamp new hashes on the same test binaries and
+      # examples. Keeping the default-feature target filled the disk
+      # during the second link.
+      - name: cargo clean (before feature tests)
+        if: runner.os != 'macOS'
+        run: cargo clean
+
       - name: cargo test (all satisfiable features)
         if: runner.os != 'macOS'
         run: cargo test --features "$CI_FEATURES"
@@ -240,6 +247,12 @@ jobs:
           --config 'target.x86_64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
           --config 'target.aarch64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
           test --features "$CI_FEATURES"
+
+      # maturin develop builds the dev profile and cannot reuse the
+      # opt-level 2 test artifacts. Drop them before the wheel.
+      - name: cargo clean (before the wheel)
+        if: runner.os != 'macOS'
+        run: cargo clean
 
       - name: Create virtualenv
         shell: bash
