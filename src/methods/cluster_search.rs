@@ -132,6 +132,10 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     let mut opt = WarmLbfgs::default();
+    // The line search on a Lennard-Jones cluster stops accepting steps once
+    // the largest gradient component is near 1e-5. A tighter request spends
+    // evaluations that do not move the geometry.
+    opt.gtol = 1e-5;
     // The driver calls the screening pass with `screen_steps` and the full one
     // with `relax_steps`, so the iteration count identifies which is which.
     let screen_iters = cfg.screen_steps;
@@ -1095,6 +1099,25 @@ mod tests {
         let gradient = Array1::from_vec(vec![7.2e-5, -3.0e-5]);
         assert!(gradient_is_converged(gradient.view(), 1.0e-3));
         assert!(!gradient_is_converged(gradient.view(), 1.0e-5));
+    }
+
+    #[test]
+    fn a_cluster_quench_stops_near_the_line_search_scale() {
+        let n = 7usize;
+        let potential = PairPotential::lennard_jones(n);
+        let cfg = Config::communicating(n);
+        let mut ledger = Ledger::new(4_000);
+        let mut coords = Vec::with_capacity(3 * n);
+        for i in 0..n {
+            coords.extend([(i as f64) * 1.2, 0.1 * (i as f64), 0.0]);
+        }
+        let start = Array1::from(coords);
+        let (out, _) = search_from(&potential, &cfg, &mut ledger, start.view(), 11);
+        let (energy, gradient) = verify(&potential, &out).expect("a quenched state");
+        let largest = gradient;
+        assert!(energy < -10.0, "{energy}");
+        assert!(largest < 1.0e-4, "{largest}");
+        assert!(ledger.spent() <= 4_000);
     }
 
     #[cfg(feature = "bank-rpc")]

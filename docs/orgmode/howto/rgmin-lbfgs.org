@@ -18,4 +18,6 @@ is =rgmin=.
 The production choice is L-BFGS with strong Wolfe (Liu and Nocedal
 1989; Nocedal and Wright 7.4 and algorithms 3.5--3.6). SciPy L-BFGS-B
 is the bound-constrained reference this handle was measured against.
+The objective-driven cluster quench sets the gradient tolerance to
+1e-5. The default handle still requests 1e-6.
 See the rgmin SOTA page in that crate's =docs/orgmode/reference/sota.org=.
