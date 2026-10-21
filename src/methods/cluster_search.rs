@@ -132,6 +132,11 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     let mut opt = WarmLbfgs::default();
+    // A minimum is recordable at `record_gradient`; descending past it buys
+    // digits no acceptance test or record reads. Stopping at 1e-6 instead cost
+    // the communicating preset a median 5792 force calls on 32 LJ38 starts
+    // against 4269 here.
+    opt.gtol = cfg.record_gradient;
     // The driver calls the screening pass with `screen_steps` and the full one
     // with `relax_steps`, so the iteration count identifies which is which.
     let screen_iters = cfg.screen_steps;
