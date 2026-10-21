@@ -3389,7 +3389,8 @@ fn rigid_probe(
 ///   rigid: when true, `n` is the number of rigid bodies and the hop state
 ///     is centres followed by Rodrigues rotations. More than ten bodies
 ///     hold the acceptance factor at 4 and scale the orientation amplitude
-///     toward an acceptance ratio of one half. Ten or fewer do not.
+///     toward an acceptance ratio of one half. Ten or fewer do not. The
+///     quench stops on the root-mean-square force.
 ///   layout: `block` (centres, then rotations) or `interleaved` (GMIN
 ///     centre and angle-axis per body). Interleaved rotations are negated
 ///     at the boundary because that angle-axis map is the opposite sense.

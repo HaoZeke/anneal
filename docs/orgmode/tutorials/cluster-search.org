@@ -65,8 +65,12 @@ rotations are negated at the boundary. The orientation step turns every
 body and leaves the centres where they are. On a chart of more than ten
 bodies the acceptance factor stays at 4 and the orientation amplitude
 is scaled toward an acceptance ratio of one half. A ten-body chart may
-still climb to 24 and does not scale the amplitude. Preset temperature,
-screen length, relax length, and record gradient are unchanged.
+still climb to 24 and does not scale the amplitude. The rigid quench
+stops on the root-mean-square force with four L-BFGS pairs, an initial
+diagonal of 0.1, and a capped step. A second pass runs only when the
+first one stopped short and the energy is a new lowest minimum. Preset
+temperature, screen
+length, relax length, and record gradient are unchanged.
 
 #+begin_src python
 water = cluster_search(
