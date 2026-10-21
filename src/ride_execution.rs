@@ -80,6 +80,21 @@ impl<'a, S: ?Sized> BudgetedSurface<'a, S> {
     }
 }
 
+fn reserve_evaluation(counter: &AtomicU64, maximum: u64) -> bool {
+    loop {
+        let current = counter.load(Ordering::Relaxed);
+        if current >= maximum {
+            return false;
+        }
+        if counter
+            .compare_exchange_weak(current, current + 1, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+        {
+            return true;
+        }
+    }
+}
+
 impl<S> PesSurface for BudgetedSurface<'_, S>
 where
     S: PesSurface + ?Sized,
@@ -90,18 +105,7 @@ where
         &self,
         coordinates: ArrayView1<'_, f64>,
     ) -> Result<(f64, Array1<f64>), Self::Error> {
-        // `try_update` is the later name. 1.88 still has `fetch_update`.
-        #[allow(deprecated)]
-        let reservation =
-            self.evaluations
-                .try_update(Ordering::Relaxed, Ordering::Relaxed, |evaluations| {
-                    if evaluations < self.maximum {
-                        Some(evaluations + 1)
-                    } else {
-                        None
-                    }
-                });
-        if reservation.is_err() {
+        if !reserve_evaluation(&self.evaluations, self.maximum) {
             self.exhausted.store(true, Ordering::Relaxed);
             return Err(BudgetedSurfaceError::Exhausted);
         }
