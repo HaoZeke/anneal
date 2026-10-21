@@ -122,7 +122,7 @@ def rigid_energy_grad(x: np.ndarray) -> tuple[float, np.ndarray]:
     half = x.size // 2
     centres = x[:half] / 3.0
     energy = lj_energy(centres) + 0.05 * float(np.dot(x[half:], x[half:]))
-    grad = np.concatenate([lj_grad(centres) / 3.0, 0.1 * x[half:]])
+    grad = np.concatenate([-lj_grad(centres) / 3.0, 0.1 * x[half:]])
     return energy, grad
 
 
