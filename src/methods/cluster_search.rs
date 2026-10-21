@@ -132,6 +132,14 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     let mut opt = WarmLbfgs::default();
+    if cfg.move_library.is_rigid_body() || cfg.species_sigma.is_some() {
+        // Stop the quench at the preset's record tolerance. A tighter
+        // default spends the tail of the descent on a gradient the hop
+        // will not ask for again. Species diameters use the same stop:
+        // the binary ledger records at that tolerance, and the extra
+        // digits do not move the energy by the success window.
+        opt.gtol = cfg.record_gradient;
+    }
     // The driver calls the screening pass with `screen_steps` and the full one
     // with `relax_steps`, so the iteration count identifies which is which.
     let screen_iters = cfg.screen_steps;
@@ -184,6 +192,7 @@ where
             }
             None => x,
         };
+        let stop_at = led.target();
         let (f, xr, _) = opt.minimize_watched(
             x,
             iters,
@@ -194,6 +203,9 @@ where
                 Some(objective.value_and_gradient(v))
             },
             |_, fv| {
+                if stop_at.is_some_and(|limit| fv <= limit) {
+                    return false;
+                }
                 if screening && probe {
                     // Never stops. Records where a stop would have happened and
                     // what it would have claimed, so the claim can be scored
@@ -267,13 +279,41 @@ where
         // Charged like any other evaluation: asking whether a relaxation
         // converged is asking the potential a question, and a protocol that
         // counts evaluations has to count this one.
-        let converged = if led.charge() {
+        let mut f = f;
+        let mut xr = xr;
+        let mut converged = if led.charge() {
             stats.check_charged += 1;
             let g = objective.grad(xr.view());
             gradient_is_converged(g.view(), cfg.record_gradient)
         } else {
             false
         };
+        // A binary quench often hits the iteration cap with the infinity
+        // norm still above the record tolerance, so the ledger would drop
+        // a finite minimum. One more pass from that point finishes the
+        // descent. Screening passes stay short, and the preset cap is
+        // unchanged.
+        if !converged && !screening && cfg.species_sigma.is_some() && led.remaining() > 0 {
+            let (f2, xr2, _) = opt.minimize(xr.view(), iters, |v| {
+                if !led.charge() {
+                    return None;
+                }
+                Some(objective.value_and_gradient(v))
+            });
+            f = f2;
+            xr = xr2;
+            converged = if led.charge() {
+                stats.check_charged += 1;
+                let g = objective.grad(xr.view());
+                gradient_is_converged(g.view(), cfg.record_gradient)
+            } else {
+                false
+            };
+            let extra = led.spent() - before - cost;
+            if extra > 0 {
+                stats.full_charged += extra;
+            }
+        }
         if converged {
             stats.converged += 1;
         } else {
@@ -358,12 +398,20 @@ where
             }
             Some(objective.grad(x))
         };
-        crate::methods::cluster_hopping::run_with_gradient(
+        let mut energy_grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if !led.charge() {
+                    return None;
+                }
+                Some(objective.value_and_gradient(x))
+            };
+        crate::methods::cluster_hopping::run_with_energy_gradient(
             cfg,
             start,
             ledger,
             &mut relax,
             Some(&mut grad),
+            Some(&mut energy_grad),
             &mut rng,
         )
     };
