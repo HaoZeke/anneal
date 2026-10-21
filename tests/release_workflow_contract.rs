@@ -79,3 +79,16 @@ fn ci_audits_large_blobs_without_a_deprecated_action_runtime() {
     assert!(workflow.contains("git cat-file --batch-check"));
     assert!(!workflow.contains("HaoZeke/large-file-auditor"));
 }
+
+/// cargo-c joins `to` with the asset path relative to the asset's parent
+/// directory, so `to = "dlpack"` installs `include/dlpack/dlpack.h`.
+#[test]
+fn c_abi_installs_the_dlpack_header_the_generated_include_names() {
+    let manifest = include_str!("../Cargo.toml");
+    let header = include_str!("../include/dlpack/dlpack.h");
+
+    assert!(manifest.contains("{ from = \"include/dlpack/dlpack.h\", to = \"dlpack\" }"));
+    assert!(header.contains("#define DLPACK_MAJOR_VERSION 1"));
+    assert!(header.contains("#define DLPACK_MINOR_VERSION 3"));
+    assert!(header.contains("typedef struct DLManagedTensorVersioned"));
+}

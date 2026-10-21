@@ -116,7 +116,10 @@ description = "Simulated annealing components on the eindir typed primitives"
 name = "anneal_core"
 
 [package.metadata.capi.install.include]
-asset = [{ from = "include/anneal-core.hpp", to = "." }]
+asset = [
+    { from = "include/anneal-core.hpp", to = "." },
+    { from = "include/dlpack/dlpack.h", to = "dlpack" },
+]
 
 [profile.dist]
 inherits = "release"
