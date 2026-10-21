@@ -3382,6 +3382,8 @@ fn rigid_probe(
 ///     Ignored once `species` or `rigid` selects a chart: those keep the
 ///     stock preset and adapt geometry afterwards.
 ///   species: optional label per point. Two or more labels add a swap move.
+///     A wide diameter ratio also tries one downhill unlike-pair exchange
+///     beside the escape.
 ///   sigmas: optional Lennard-Jones diameter per point, same length as
 ///     `species`. Large diameters are swapped out of the inner shell.
 ///   rigid: when true, `n` is the number of rigid bodies and the hop state

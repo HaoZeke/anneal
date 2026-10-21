@@ -269,6 +269,8 @@ def cluster_search(
         the reduced LJ container. Ignored when ``species`` or ``rigid`` is
         set, because those keep the stock preset.
       species: optional label per point. Two or more labels add a swap move.
+        A wide diameter ratio also tries one downhill unlike-pair exchange
+        beside the escape.
       sigmas: optional diameter per point, same length as ``species``.
       rigid: hop in centre and Rodrigues rotation coordinates. A chart of
         more than ten bodies holds the acceptance factor at 4 and scales

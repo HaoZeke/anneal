@@ -45,7 +45,10 @@ print(out["hops"], round(out["best_energy"], 3), len(out["best"]))
 
 A binary cluster passes one species label and one diameter per atom.
 =sigmas= must be the same length as =species=. =target= ends the search
-when a recorded energy reaches it.
+when a recorded energy reaches it. A wide diameter ratio also draws one
+unlike pair on a side generator and keeps the exchange only when the
+quench is downhill. The microcanonical step and the inner-outer
+exchange still run.
 
 #+begin_src python
 binary = cluster_search(

@@ -2087,6 +2087,44 @@ fn swap_atoms(y: &mut Array1<f64>, i: usize, j: usize) {
     }
 }
 
+/// One random unlike-pair coordinate exchange.
+///
+/// Doye and Meyer's fixed-composition move swaps the coordinates of one A
+/// with one B and leaves every other atom where it is. `None` when a second
+/// label does not exist. The caller supplies the draw, so a side generator
+/// can propose the pair without advancing the chain generator.
+pub(crate) fn doye_unlike_exchange<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    species: &[u32],
+    rng: &mut R,
+) -> Option<Array1<f64>> {
+    let n = species.len();
+    if n < 2 || x.len() < 3 * n {
+        return None;
+    }
+    let mut distinct = false;
+    let first = species[0];
+    for label in species.iter().skip(1) {
+        if *label != first {
+            distinct = true;
+            break;
+        }
+    }
+    if !distinct {
+        return None;
+    }
+    let mut y = x.to_owned();
+    for _ in 0..32 {
+        let i = rng.random_range(0..n);
+        let j = rng.random_range(0..n);
+        if i != j && species[i] != species[j] {
+            swap_atoms(&mut y, i, j);
+            return Some(y);
+        }
+    }
+    None
+}
+
 impl MoveKernel<f64> for ClusterMove {
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
         ClusterMove::propose(self, i, t, rng)
@@ -2653,6 +2691,30 @@ mod move_scaling_tests {
             small_in_core, 1,
             "a wide size ratio exchanges one mismatched pair"
         );
+    }
+
+    #[test]
+    fn a_doye_exchange_swaps_one_unlike_pair() {
+        let species = [1u32, 1, 2, 2];
+        let mut coords = vec![0.0; 12];
+        for i in 0..4 {
+            coords[3 * i] = i as f64;
+        }
+        let x = Array1::from_vec(coords);
+        let mut pairs = std::collections::HashSet::new();
+        for seed in 0..24u64 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let y = doye_unlike_exchange(x.view(), &species, &mut rng).expect("unlike pair");
+            let moved: Vec<usize> = (0..4)
+                .filter(|&i| (0..3).any(|k| y[3 * i + k] != x[3 * i + k]))
+                .collect();
+            assert_eq!(moved.len(), 2, "seed {seed} moved {moved:?}");
+            assert_ne!(species[moved[0]], species[moved[1]]);
+            pairs.insert((moved[0].min(moved[1]), moved[0].max(moved[1])));
+        }
+        assert!(pairs.len() > 1, "every seed exchanged the same pair");
+        let mut rng = StdRng::seed_from_u64(1);
+        assert!(doye_unlike_exchange(x.view(), &[1, 1, 1, 1], &mut rng).is_none());
     }
 
     #[test]

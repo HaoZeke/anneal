@@ -3075,6 +3075,61 @@ where
                 .kernels(cfg);
             }
         }
+        // Extra fixed-composition proposal. The wide-ratio escape and the
+        // inner-outer exchange below still run on the chain generator. This
+        // draw uses its own generator, and the chain moves only when the
+        // quenched exchange is strictly downhill, so an uphill homotop cannot
+        // throw away the minimum the escape is standing on.
+        if species_wide
+            && let Some(species) = cfg.species.as_deref()
+            && species.len() == n
+        {
+            let mut side = StdRng::seed_from_u64(
+                e.to_bits() ^ (hops as u64).wrapping_mul(0x9E37_79B9) ^ 0xD07E_5A4D,
+            );
+            if let Some(swapped) = doye_unlike_exchange(x.view(), species, &mut side) {
+                let ceiling = e + 15.0 * cfg.energy_scale;
+                let raw = energy_grad
+                    .as_deref_mut()
+                    .and_then(|evaluate| evaluate(ledger, swapped.view()))
+                    .map(|(energy, _)| energy);
+                if let Some(raw) = raw
+                    && raw <= ceiling
+                    && ledger.remaining() > 0
+                {
+                    let (eq, xq) = relax(ledger, swapped.view(), cfg.relax_steps);
+                    if quench_is_sane(cfg, eq, xq.view()) && eq < e - 1e-8 {
+                        let gradient = record_quenched_answer(
+                            cfg,
+                            ledger,
+                            &mut grad,
+                            eq,
+                            xq.view(),
+                            &mut unconverged_records,
+                        );
+                        if gradient.is_some() || !gradient_required {
+                            let from_basin =
+                                here.unwrap_or_else(|| identity.basin_of(x.view()));
+                            let reached = identity.basin_of(xq.view());
+                            adopt_minimum!(
+                                eq,
+                                xq,
+                                gradient,
+                                Some(reached),
+                                AdoptionHistory::Fresh,
+                                Some((Some(from_basin), reached)),
+                                Some("doye-exchange"),
+                                hops
+                            );
+                            soft_cache = None;
+                        }
+                    }
+                }
+            }
+            if ledger.remaining() == 0 || ledger.target_reached() {
+                break;
+            }
+        }
         let mut k = match (&context, cfg.allocate_moves) {
             (Some(c), _) => contextual.select(c.view(), rng),
             (None, true) if cfg.depth_reward => depth_allocator.select(rng),
