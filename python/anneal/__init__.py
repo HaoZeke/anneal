@@ -275,9 +275,10 @@ def cluster_search(
       rigid: hop in centre and Rodrigues rotation coordinates. A chart of
         more than ten bodies holds the acceptance factor at 4 and scales
         the orientation amplitude toward an acceptance ratio of one half.
-        Ten bodies or fewer do not. The quench stops on the
-        root-mean-square force. After 1000 hops with no new lowest
-        minimum the walker is drawn again and the lowest minimum is kept.
+        Ten bodies or fewer do not. The quench is the same L-BFGS
+        descent, and a rigid record accepts the root-mean-square force.
+        After 1000 hops with no new lowest minimum the walker is drawn
+        again and the lowest minimum is kept.
       layout: ``block`` or ``interleaved``. Interleaved is the per-body
         centre and angle-axis order, with rotations negated at the boundary.
       target: stop once a recorded energy is at or below this value.

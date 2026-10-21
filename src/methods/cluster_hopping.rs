@@ -1033,9 +1033,10 @@ fn gradient_is_converged(gradient: ArrayView1<f64>, dimensions: usize, tolerance
 
 /// Whether a quenched gradient may be recorded.
 ///
-/// A rigid quench stops on the root-mean-square force. The infinity norm
-/// of that gradient can sit above the preset tolerance, and dropping the
-/// quench there would throw away a minimum the step already accepted.
+/// A rigid record accepts the root-mean-square force at the ranked
+/// tolerance. The root-mean-square is at most the largest entry, so a
+/// quench that met the preset infinity norm is accepted, and so is a
+/// spread-out gradient whose largest entry is still above that norm.
 fn answer_gradient_ok(cfg: &Config, gradient: ArrayView1<f64>, dimensions: usize) -> bool {
     if cfg.move_library.is_rigid_body() {
         crate::methods::rigid_quench::rms_is_converged(
