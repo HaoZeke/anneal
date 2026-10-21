@@ -3261,6 +3261,9 @@ fn cluster_archive_search(
     use rand::SeedableRng;
 
     let mut opt = WarmLbfgs::default();
+    // Same tolerance as the objective-driven quench: the line search stops
+    // accepting steps near 1e-5, and a tighter request does not move the geometry.
+    opt.gtol = 1e-5;
     let mut relax =
         |led: &mut crate::methods::cluster_hopping::Ledger, x: ArrayView1<f64>, iters: usize| {
             opt.forget();
