@@ -6680,6 +6680,7 @@ mod tests {
         assert_eq!(descent.drops.len(), ScreenDescent::WINDOW);
         assert_eq!(descent.allowance(), 2.0, "the window forgets old drops");
         assert!(Config::for_cluster(13).calibrated_screen);
+        assert!(Config::for_cluster(13).finish_improving);
         assert!(Config::for_tip4p(4).calibrated_screen);
     }
 

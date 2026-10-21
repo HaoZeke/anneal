@@ -2900,6 +2900,13 @@ impl PyClusterConfig {
         self.inner.calibrated_screen
     }
 
+    /// Whether a full relaxation below the incumbent continues until it
+    /// stops descending.
+    #[getter]
+    fn finish_improving(&self) -> bool {
+        self.inner.finish_improving
+    }
+
     /// Composed surface-relocation burst arm.
     #[getter]
     fn burst_moves(&self) -> bool {
