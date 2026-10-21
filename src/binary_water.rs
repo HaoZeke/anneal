@@ -8,10 +8,11 @@
 //! an all-body orientation step. A chart with more than ten bodies holds
 //! the acceptance factor at its cap and scales that step toward an
 //! acceptance ratio of one half. Ten bodies or fewer keep the factor
-//! window and the fixed orientation cap. The rigid quench stops on the
-//! root-mean-square force. After 1000 hops with no new lowest minimum
-//! the walker is drawn again, and the lowest minimum is kept. The preset
-//! temperature is left where it is.
+//! window and the fixed orientation cap. The rigid quench is the same
+//! L-BFGS descent, and a rigid record accepts the root-mean-square
+//! force. After 1000 hops with no new lowest minimum the walker is
+//! drawn again, and the lowest minimum is kept. The preset temperature
+//! is left where it is.
 
 use ndarray::{Array1, ArrayView1};
 

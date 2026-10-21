@@ -11,12 +11,10 @@ chart with more than ten bodies holds that factor at 4 and scales the
 orientation amplitude toward an acceptance ratio of one half. A chart
 of ten bodies or fewer is unchanged. Preset temperature, screen length,
 relax length, and record gradient stay on the preset. A rigid quench
-stops on the root-mean-square force, keeps four L-BFGS pairs, starts
-from a diagonal of 0.1, and caps the step. The hop uses the loose
-tolerance. A second pass at the same tolerance runs only when that
-quench stopped short and the energy is a new lowest minimum. A rigid
-chain that goes 1000 hops without a new lowest minimum is replaced by
-a fresh draw in the container and quenched, and the ledger keeps the
-lowest minimum. That 1000 is the restart-file interval in the source.
-The compiled reseed window is zero and is not used. No parameter was
-added, so the C header is unchanged.
+is that same L-BFGS descent, and it returns when the energy crosses
+the run target. A rigid record accepts the root-mean-square force.
+A rigid chain that goes 1000 hops without a new lowest minimum is
+replaced by a fresh draw in the container and quenched, and the ledger
+keeps the lowest minimum. That 1000 is the restart-file interval in
+the source. The compiled reseed window is zero and is not used. No
+parameter was added, so the C header is unchanged.
