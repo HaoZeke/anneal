@@ -598,7 +598,32 @@ fn run_minima_hopping_with_history<'a>(
 
     ledger.record(energy, state.view());
     let mut minima = vec![state.clone()];
-    let mut current_basin = 0usize;
+    let history_start = Instant::now();
+    let descriptor = history.map(|_| lj::descriptor_space());
+    let context = StructureContext::new(Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")));
+    let mut current_basin = if let (Some(history), Some(descriptor)) = (history, &descriptor) {
+        observe_history(
+            history,
+            &ledger,
+            descriptor,
+            &context,
+            witness,
+            |history, observation| {
+                history
+                    .mark_accepted(observation.minimum.id)
+                    .map_err(|error| error.to_string())
+            },
+        )?
+        .0
+        .minimum
+        .id
+    } else {
+        0
+    };
+    let mut history_seconds = history_start.elapsed().as_secs_f64();
+    let mut local_basins = HashSet::from([current_basin]);
+    let mut accepted_visits = HashMap::from([(current_basin, 1_u64)]);
+    let mut observed_visits = HashMap::from([(current_basin, 1_u64)]);
     if let Some(softening) = escape_config.softening.as_mut() {
         softening.displacement =
             anneal_core::methods::activation::softening_displacement(state.view());
