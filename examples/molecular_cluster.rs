@@ -10,8 +10,8 @@ use anneal_core::methods::cluster_hopping::{
 };
 use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
 use common::efficiency::{apply_two_phase, bank_label, report_eval_wall, report_trace};
-use eindir_core::gradient::DifferentiableObjective;
 use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
+use eindir_core::gradient::DifferentiableObjective;
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;

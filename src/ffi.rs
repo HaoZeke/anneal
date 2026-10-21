@@ -422,9 +422,7 @@ pub unsafe extern "C" fn anneal_box_minimize(
         let high = unsafe { std::slice::from_raw_parts(high, dim) };
         for (l, h) in low.iter().zip(high) {
             if !(l.is_finite() && h.is_finite() && l <= h) {
-                set_last_error(
-                    "anneal_box_minimize: bounds must be finite with low <= high",
-                );
+                set_last_error("anneal_box_minimize: bounds must be finite with low <= high");
                 return anneal_status_t::ANNEAL_INVALID_PARAMETER;
             }
         }
@@ -534,8 +532,7 @@ mod tests {
         let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "x") }.unwrap();
         let gs = unsafe { cpu_f64_slice_mut(grad_out, "grad") }.unwrap();
         for (g, v) in gs.iter_mut().zip(xs.iter()) {
-            *g = 2.0 * v
-                + 20.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * v).sin();
+            *g = 2.0 * v + 20.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * v).sin();
         }
         anneal_status_t::ANNEAL_SUCCESS
     }

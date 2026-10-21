@@ -35,13 +35,11 @@ type PipeNotifyFn = dyn Fn(Pipe, PipeEvent) + Send + Sync + 'static;
 ///
 /// [1]: https://nanomsg.github.io/nng/man/v1.2.2/nng_socket.5.html
 #[derive(Clone, Debug)]
-pub struct Socket
-{
+pub struct Socket {
 	/// The shared reference to the underlying NNG socket.
 	inner: Arc<Inner>,
 }
-impl Socket
-{
+impl Socket {
 	/// Creates a new socket which uses the specified protocol.
 	///
 	/// # Errors
@@ -51,8 +49,7 @@ impl Socket
 	///
 	/// [`NotSupported`]: enum.Error.html#variant.NotSupported
 	/// [`OutOfMemory`]: enum.Error.html#variant.OutOfMemory
-	pub fn new(t: Protocol) -> Result<Socket>
-	{
+	pub fn new(t: Protocol) -> Result<Socket> {
 		// Create the uninitialized nng_socket
 		let mut socket = nng_sys::nng_socket::NNG_SOCKET_INITIALIZER;
 
@@ -73,9 +70,10 @@ impl Socket
 			}
 		};
 
-		rv2res!(rv, Socket {
-			inner: Arc::new(Inner { handle: socket, pipe_notify: RwLock::new(None) }),
-		})
+		rv2res!(
+			rv,
+			Socket { inner: Arc::new(Inner { handle: socket, pipe_notify: RwLock::new(None) }) }
+		)
 	}
 
 	/// Initiates a remote connection to a listener.
@@ -120,8 +118,7 @@ impl Socket
 	/// [`OutOfMemory`]: enum.Error.html#variant.OutOfMemory
 	/// [`PeerAuth`]: enum.Error.html#variant.PeerAuth
 	/// [`Protocol`]: enum.Error.html#variant.Protocol
-	pub fn dial(&self, url: &str) -> Result<()>
-	{
+	pub fn dial(&self, url: &str) -> Result<()> {
 		let addr = CString::new(url).map_err(|_| Error::AddressInvalid)?;
 		let rv = unsafe { nng_sys::nng_dial(self.inner.handle, addr.as_ptr(), ptr::null_mut(), 0) };
 
@@ -158,8 +155,7 @@ impl Socket
 	/// [`Addressinvalid`]: enum.Error.html#variant.Addressinvalid
 	/// [`Closed`]: enum.Error.html#variant.Closed
 	/// [`OutOfMemory`]: enum.Error.html#variant.OutOfMemory
-	pub fn listen(&self, url: &str) -> Result<()>
-	{
+	pub fn listen(&self, url: &str) -> Result<()> {
 		let addr = CString::new(url).map_err(|_| Error::AddressInvalid)?;
 		let rv =
 			unsafe { nng_sys::nng_listen(self.inner.handle, addr.as_ptr(), ptr::null_mut(), 0) };
@@ -204,8 +200,7 @@ impl Socket
 	///
 	///
 	/// [1]: https://nanomsg.github.io/nng/man/v1.2.2/nng_dial.3.html
-	pub fn dial_async(&self, url: &str) -> Result<()>
-	{
+	pub fn dial_async(&self, url: &str) -> Result<()> {
 		let addr = CString::new(url).map_err(|_| Error::AddressInvalid)?;
 		let flags = nng_sys::NNG_FLAG_NONBLOCK as c_int;
 		let rv =
@@ -216,7 +211,9 @@ impl Socket
 
 	#[doc(hidden)]
 	#[deprecated(since = "1.0.0-rc.1", note = "This is equivalent to `Socket::listen`")]
-	pub fn listen_async(&self, url: &str) -> Result<()> { self.listen(url) }
+	pub fn listen_async(&self, url: &str) -> Result<()> {
+		self.listen(url)
+	}
 
 	/// Receives a message from the socket.
 	///
@@ -239,8 +236,7 @@ impl Socket
 	/// [`NotSupported`]: enum.Error.html#variant.NotSupported
 	/// [`OutOfMemory`]: enum.Error.html#variant.OutOfMemory
 	/// [`TimedOut`]: enum.Error.html#variant.TimedOut
-	pub fn recv(&self) -> Result<Message>
-	{
+	pub fn recv(&self) -> Result<Message> {
 		let mut msgp: *mut nng_sys::nng_msg = ptr::null_mut();
 		let rv = unsafe { nng_sys::nng_recvmsg(self.inner.handle, &mut msgp as _, 0) };
 
@@ -277,8 +273,7 @@ impl Socket
 	/// [`NotSupported`]: enum.Error.html#variant.NotSupported
 	/// [`OutOfMemory`]: enum.Error.html#variant.OutOfMemory
 	/// [`TimedOut`]: enum.Error.html#variant.TimedOut
-	pub fn send<M: Into<Message>>(&self, msg: M) -> SendResult<()>
-	{
+	pub fn send<M: Into<Message>>(&self, msg: M) -> SendResult<()> {
 		let msg = msg.into();
 
 		unsafe {
@@ -287,8 +282,7 @@ impl Socket
 
 			if let Some(e) = NonZeroU32::new(rv as u32) {
 				Err((Message::from_ptr(msgp), Error::from(e)))
-			}
-			else {
+			} else {
 				Ok(())
 			}
 		}
@@ -317,8 +311,7 @@ impl Socket
 	/// [`NotSupported`]: enum.Error.html#variant.NotSupported
 	/// [`OutOfMemory`]: enum.Error.html#variant.OutOfMemory
 	/// [`TryAgain`]: enum.Error.html#variant.TryAgain
-	pub fn try_recv(&self) -> Result<Message>
-	{
+	pub fn try_recv(&self) -> Result<Message> {
 		let mut msgp: *mut nng_sys::nng_msg = ptr::null_mut();
 		let flags = nng_sys::NNG_FLAG_NONBLOCK as c_int;
 		let rv = unsafe { nng_sys::nng_recvmsg(self.inner.handle, &mut msgp as _, flags) };
@@ -358,8 +351,7 @@ impl Socket
 	/// [`NotSupported`]: enum.Error.html#variant.NotSupported
 	/// [`OutOfMemory`]: enum.Error.html#variant.OutOfMemory
 	/// [`TryAgain`]: enum.Error.html#variant.TryAgain
-	pub fn try_send<M: Into<Message>>(&self, msg: M) -> SendResult<()>
-	{
+	pub fn try_send<M: Into<Message>>(&self, msg: M) -> SendResult<()> {
 		let msg = msg.into();
 		let flags = nng_sys::NNG_FLAG_NONBLOCK as c_int;
 
@@ -369,8 +361,7 @@ impl Socket
 
 			if let Some(e) = NonZeroU32::new(rv as u32) {
 				Err((Message::from_ptr(msgp), Error::from(e)))
-			}
-			else {
+			} else {
 				Ok(())
 			}
 		}
@@ -383,7 +374,9 @@ impl Socket
 	/// * [`IncorrectState`]: The `Aio` already has a running operation.
 	///
 	/// [`IncorrectState`]: enum.Error.html#variant.IncorrectState
-	pub fn recv_async(&self, aio: &Aio) -> Result<()> { aio.recv_socket(self) }
+	pub fn recv_async(&self, aio: &Aio) -> Result<()> {
+		aio.recv_socket(self)
+	}
 
 	/// Start a send operation on the given `Aio` and return immediately.
 	///
@@ -392,8 +385,7 @@ impl Socket
 	/// * [`IncorrectState`]: The `Aio` already has a running operation.
 	///
 	/// [`IncorrectState`]: enum.Error.html#variant.IncorrectState
-	pub fn send_async<M: Into<Message>>(&self, aio: &Aio, msg: M) -> SendResult<()>
-	{
+	pub fn send_async<M: Into<Message>>(&self, aio: &Aio, msg: M) -> SendResult<()> {
 		let msg = msg.into();
 		aio.send_socket(self, msg)
 	}
@@ -458,7 +450,9 @@ impl Socket
 
 	#[doc(hidden)]
 	#[deprecated(since = "1.0.0-rc.1", note = "Use `TryFrom` instead")]
-	pub fn into_raw(self) -> Option<RawSocket> { RawSocket::try_from(self).ok() }
+	pub fn into_raw(self) -> Option<RawSocket> {
+		RawSocket::try_from(self).ok()
+	}
 
 	/// Close the underlying socket.
 	///
@@ -475,10 +469,14 @@ impl Socket
 	///
 	/// This function will be called automatically when all handles have been
 	/// dropped.
-	pub fn close(&self) { self.inner.close() }
+	pub fn close(&self) {
+		self.inner.close()
+	}
 
 	/// Returns the underlying `nng_socket`.
-	pub(crate) fn handle(&self) -> nng_sys::nng_socket { self.inner.handle }
+	pub(crate) fn handle(&self) -> nng_sys::nng_socket {
+		self.inner.handle
+	}
 
 	/// Trampoline function for calling the pipe event closure from C.
 	///
@@ -488,8 +486,7 @@ impl Socket
 		pipe: nng_sys::nng_pipe,
 		ev: nng_sys::nng_pipe_ev,
 		arg: *mut c_void,
-	)
-	{
+	) {
 		abort_unwind(|| {
 			let pipe = Pipe::from_nng_sys(pipe);
 			let ev = PipeEvent::from_code(ev);
@@ -519,16 +516,15 @@ impl Socket
 }
 
 #[cfg(feature = "ffi-module")]
-impl Socket
-{
+impl Socket {
 	/// Returns the handle to the underlying `nng_socket` object.
-	pub fn nng_socket(&self) -> nng_sys::nng_socket { self.inner.handle }
+	pub fn nng_socket(&self) -> nng_sys::nng_socket {
+		self.inner.handle
+	}
 }
 
-impl PartialEq for Socket
-{
-	fn eq(&self, other: &Socket) -> bool
-	{
+impl PartialEq for Socket {
+	fn eq(&self, other: &Socket) -> bool {
 		unsafe {
 			nng_sys::nng_socket_id(self.inner.handle) == nng_sys::nng_socket_id(other.inner.handle)
 		}
@@ -537,15 +533,14 @@ impl PartialEq for Socket
 
 impl Eq for Socket {}
 
-impl PartialOrd for Socket
-{
-	fn partial_cmp(&self, other: &Socket) -> Option<Ordering> { Some(self.cmp(other)) }
+impl PartialOrd for Socket {
+	fn partial_cmp(&self, other: &Socket) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
 }
 
-impl Ord for Socket
-{
-	fn cmp(&self, other: &Socket) -> Ordering
-	{
+impl Ord for Socket {
+	fn cmp(&self, other: &Socket) -> Ordering {
 		unsafe {
 			let us = nng_sys::nng_socket_id(self.inner.handle);
 			let them = nng_sys::nng_socket_id(other.inner.handle);
@@ -554,10 +549,8 @@ impl Ord for Socket
 	}
 }
 
-impl Hash for Socket
-{
-	fn hash<H: Hasher>(&self, state: &mut H)
-	{
+impl Hash for Socket {
+	fn hash<H: Hasher>(&self, state: &mut H) {
 		let id = unsafe { nng_sys::nng_socket_id(self.inner.handle) };
 		id.hash(state);
 	}
@@ -607,8 +600,7 @@ expose_options!{
 }
 
 #[cfg(unix)]
-mod unix_impls
-{
+mod unix_impls {
 	use super::*;
 	use crate::options::{GetOpt, RecvFd, SendFd};
 
@@ -620,18 +612,15 @@ mod unix_impls
 ///
 /// This allows us to have mutliple Rust socket types that won't clone the C
 /// socket type before Rust is done with it.
-struct Inner
-{
+struct Inner {
 	/// Handle to the underlying NNG socket.
 	handle: nng_sys::nng_socket,
 
 	/// The current pipe event callback.
 	pipe_notify: RwLock<Option<Box<PipeNotifyFn>>>,
 }
-impl Inner
-{
-	fn close(&self)
-	{
+impl Inner {
+	fn close(&self) {
 		// Closing a socket should only ever return success or ECLOSED and both
 		// of those mean we have nothing to drop. However, just to be sane
 		// about it all, we'll warn the user if we see something odd. If that
@@ -645,10 +634,8 @@ impl Inner
 	}
 }
 
-impl fmt::Debug for Inner
-{
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
-	{
+impl fmt::Debug for Inner {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.debug_struct("Inner")
 			.field("handle", &self.handle)
 			.field("pipe_notify", &self.pipe_notify.read().unwrap().is_some())
@@ -656,9 +643,10 @@ impl fmt::Debug for Inner
 	}
 }
 
-impl Drop for Inner
-{
-	fn drop(&mut self) { self.close() }
+impl Drop for Inner {
+	fn drop(&mut self) {
+		self.close()
+	}
 }
 
 /// A socket that is open in "raw" mode.
@@ -679,8 +667,7 @@ impl Drop for Inner
 /// [1]: fn.forwarder.html
 /// [`Header`]: struct.Header.html
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct RawSocket
-{
+pub struct RawSocket {
 	/// The NNG socket.
 	pub socket: Socket,
 
@@ -688,8 +675,7 @@ pub struct RawSocket
 	_priv: (),
 }
 
-impl RawSocket
-{
+impl RawSocket {
 	/// Creates a new "raw" socket of the specified protocol.
 	///
 	/// # Errors
@@ -699,8 +685,7 @@ impl RawSocket
 	///
 	/// [`NotSupported`]: enum.Error.html#variant.NotSupported
 	/// [`OutOfMemory`]: enum.Error.html#variant.OutOfMemory
-	pub fn new(t: Protocol) -> Result<RawSocket>
-	{
+	pub fn new(t: Protocol) -> Result<RawSocket> {
 		// This code is largely copied from the Socket impl.
 		let mut socket = nng_sys::nng_socket::NNG_SOCKET_INITIALIZER;
 		let rv = unsafe {
@@ -730,18 +715,15 @@ impl RawSocket
 	}
 }
 
-impl TryFrom<Socket> for RawSocket
-{
+impl TryFrom<Socket> for RawSocket {
 	type Error = CookedSocketError;
 
-	fn try_from(socket: Socket) -> std::result::Result<Self, Self::Error>
-	{
+	fn try_from(socket: Socket) -> std::result::Result<Self, Self::Error> {
 		use crate::options::{Options, Raw};
 
 		if socket.get_opt::<Raw>().expect("Socket should have \"raw\" option available") {
 			Ok(RawSocket { socket, _priv: () })
-		}
-		else {
+		} else {
 			Err(CookedSocketError)
 		}
 	}
@@ -751,15 +733,14 @@ impl TryFrom<Socket> for RawSocket
 #[derive(Debug)]
 pub struct CookedSocketError;
 
-impl fmt::Display for CookedSocketError
-{
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
-	{
+impl fmt::Display for CookedSocketError {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "Socket is in \"cooked\" (not \"raw\") mode")
 	}
 }
 
-impl error::Error for CookedSocketError
-{
-	fn description(&self) -> &str { "Socket is in \"cooked\" (not \"raw\") mode" }
+impl error::Error for CookedSocketError {
+	fn description(&self) -> &str {
+		"Socket is in \"cooked\" (not \"raw\") mode"
+	}
 }
