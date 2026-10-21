@@ -2362,51 +2362,76 @@ where
         if cfg.move_library.is_rigid_body()
             && crate::methods::rigid_quench::stagnation_restart(hops, hops_at_lowest)
         {
-            let mut adopted: Option<(f64, Array1<f64>, Option<Array1<f64>>, bool)> = None;
-            for _attempt in 0..crate::methods::rigid_quench::RESEED_ATTEMPTS {
-                if ledger.remaining() == 0 {
-                    break;
-                }
-                let fresh = random_rigid_reseed(cfg, rng);
-                if fresh.len() != x.len() {
-                    continue;
-                }
-                let (energy, state) = relax(ledger, fresh.view(), cfg.relax_steps);
-                if !energy.is_finite()
-                    || state.len() != x.len()
-                    || !quench_is_sane(cfg, energy, state.view())
+            // One hopping temperature above the target is still the basin the
+            // chain is trying to leave. A fresh cluster quenches far above
+            // that basin, and installing it spends the next thousand hops
+            // climbing back. Return the walker to the lowest minimum instead.
+            // Farther above the target, the fresh draw is the escape.
+            let acceptance = cfg.temperature * rigid_factor;
+            let near_target = ledger.target().is_some_and(|limit| {
+                ledger.best.is_finite() && ledger.best - limit <= acceptance.max(0.0)
+            });
+            if near_target {
+                hops_at_lowest = hops;
+                if let Some(state) = ledger.best_state.clone()
+                    && state.len() == x.len()
+                    && ledger.best + 1.0e-9 < e
                 {
+                    let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
+                    let ok = gradient
+                        .as_ref()
+                        .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len()));
+                    e = ledger.best;
+                    x = state;
+                    current_validation_gradient = gradient.filter(|_| ok);
+                }
+            } else {
+                let mut adopted: Option<(f64, Array1<f64>, Option<Array1<f64>>, bool)> = None;
+                for _attempt in 0..crate::methods::rigid_quench::RESEED_ATTEMPTS {
+                    if ledger.remaining() == 0 {
+                        break;
+                    }
+                    let fresh = random_rigid_reseed(cfg, rng);
+                    if fresh.len() != x.len() {
+                        continue;
+                    }
+                    let (energy, state) = relax(ledger, fresh.view(), cfg.relax_steps);
+                    if !energy.is_finite()
+                        || state.len() != x.len()
+                        || !quench_is_sane(cfg, energy, state.view())
+                    {
+                        continue;
+                    }
+                    let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
+                    let ok = gradient.as_ref().is_some_and(|values| {
+                        answer_gradient_ok(cfg, values.view(), state.len())
+                    });
+                    let finished = ok;
+                    adopted = Some((energy, state, gradient, ok));
+                    if finished {
+                        break;
+                    }
+                }
+                // The clock resets whether or not a usable geometry came back,
+                // so a failed draw does not reseed on the next hop.
+                hops_at_lowest = hops;
+                if let Some((energy, state, gradient, ok)) = adopted {
+                    if ledger.below_target(energy) || ok {
+                        ledger.record(energy, state.view());
+                    }
+                    e = energy;
+                    x = state;
+                    current_validation_gradient = gradient.filter(|_| ok);
+                    orient_window = 0;
+                    orient_yes = 0;
+                    rigid_window = 0;
+                    rigid_hits = 0;
+                    if ledger.remaining() == 0 || ledger.target_reached() {
+                        break;
+                    }
                     continue;
                 }
-                let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
-                let ok = gradient
-                    .as_ref()
-                    .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len()));
-                let finished = ok;
-                adopted = Some((energy, state, gradient, ok));
-                if finished {
-                    break;
-                }
             }
-            // The clock resets whether or not a usable geometry came back,
-            // so a failed draw does not reseed on the next hop.
-            hops_at_lowest = hops;
-            if let Some((energy, state, gradient, ok)) = adopted {
-                if ledger.below_target(energy) || ok {
-                    ledger.record(energy, state.view());
-                }
-                e = energy;
-                x = state;
-                current_validation_gradient = gradient.filter(|_| ok);
-                orient_window = 0;
-                orient_yes = 0;
-                rigid_window = 0;
-                rigid_hits = 0;
-            }
-            if ledger.remaining() == 0 || ledger.target_reached() {
-                break;
-            }
-            continue;
         }
         // The reoccupation move runs inside the chain and charges the
         // ledger directly; its result enters the same adoption path as an

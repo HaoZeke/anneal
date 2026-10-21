@@ -3,7 +3,9 @@
 //! The hop quench is the same Wolfe L-BFGS as a Cartesian quench. A
 //! rigid record accepts the root-mean-square force at the ranked
 //! tolerance of `1e-3`. A walker that goes 1000 hops without a new
-//! lowest minimum is drawn again. That 1000 is the restart-file
+//! lowest minimum returns to that minimum when it lies within one
+//! hopping temperature of the run target. Farther above the target the
+//! walker is drawn again. That 1000 is the restart-file
 //! interval in the source. The compiled reseed window is zero and is
 //! not used.
 
@@ -11,7 +13,7 @@ use ndarray::ArrayView1;
 
 /// RMS force at which a rigid quench may be recorded. Ranked `SLOPPYCONV`.
 pub(crate) const SLOPPY_RMS: f64 = 1.0e-3;
-/// Hops without a new lowest minimum before a rigid walker is replaced.
+/// Hops without a new lowest minimum before a rigid walker may be replaced.
 ///
 /// GMIN's reseed predicate is `J1 - JBEST > NRELAX`. The compiled
 /// `NRELAX` is 0, which would reseed on every hop that does not lower
@@ -19,7 +21,10 @@ pub(crate) const SLOPPY_RMS: f64 = 1.0e-3;
 /// only positive MC-cycle count initialised beside a restart in
 /// `keywords.f90` is `DUMPINT = 1000`: `mc.f` writes a restart file
 /// every 1000 cycles. The reseed waits that many hops. It is not
-/// `NRELAX`.
+/// `NRELAX`. Inside one hopping temperature of the run target the
+/// walker returns to the lowest minimum. A fresh draw there quenches
+/// far above that minimum. Farther above the target the fresh draw
+/// is the escape.
 pub(crate) const STAGNATION_HOPS: usize = 1000;
 /// Failed reseeds tried before the walker is left where it is.
 /// `NEWRESATTEMPTS` stops after ten.
