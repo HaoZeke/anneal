@@ -1031,6 +1031,24 @@ fn gradient_is_converged(gradient: ArrayView1<f64>, dimensions: usize, tolerance
             .all(|v| v.is_finite() && v.abs() < tolerance)
 }
 
+/// Whether a quenched gradient may be recorded.
+///
+/// A rigid record accepts the root-mean-square force at the ranked
+/// tolerance. The root-mean-square is at most the largest entry, so a
+/// quench that met the preset infinity norm is accepted, and so is a
+/// spread-out gradient whose largest entry is still above that norm.
+fn answer_gradient_ok(cfg: &Config, gradient: ArrayView1<f64>, dimensions: usize) -> bool {
+    if cfg.move_library.is_rigid_body() {
+        crate::methods::rigid_quench::rms_is_converged(
+            gradient,
+            dimensions,
+            crate::methods::rigid_quench::SLOPPY_RMS,
+        )
+    } else {
+        gradient_is_converged(gradient, dimensions, cfg.record_gradient)
+    }
+}
+
 /// Records an auxiliary quench without restricting exploratory adoption.
 fn record_quenched_answer(
     cfg: &Config,
@@ -1044,9 +1062,8 @@ fn record_quenched_answer(
     let required = grad.is_some();
     let gradient = if sane {
         grad.as_deref_mut().and_then(|evaluate| {
-            evaluate(ledger, state).filter(|values| {
-                gradient_is_converged(values.view(), state.len(), cfg.record_gradient)
-            })
+            evaluate(ledger, state)
+                .filter(|values| answer_gradient_ok(cfg, values.view(), state.len()))
         })
     } else {
         None
@@ -1742,8 +1759,7 @@ where
     let gradient_required = grad.is_some();
     let initial_validation_gradient = initial_sane.then(|| {
         grad.as_deref_mut().and_then(|g| {
-            g(ledger, x.view())
-                .filter(|values| gradient_is_converged(values.view(), x.len(), cfg.record_gradient))
+            g(ledger, x.view()).filter(|values| answer_gradient_ok(cfg, values.view(), x.len()))
         })
     });
     let initial_validation_gradient = initial_validation_gradient.flatten();
@@ -2491,11 +2507,7 @@ where
                 if from_gradient.is_none() && (published_prize || soap_push || !adopt) {
                     from_gradient = grad.as_deref_mut().and_then(|g| {
                         g(ledger, from_state.view()).filter(|values| {
-                            gradient_is_converged(
-                                values.view(),
-                                from_state.len(),
-                                cfg.record_gradient,
-                            )
+                            answer_gradient_ok(cfg, values.view(), from_state.len())
                         })
                     });
                 }
@@ -2786,11 +2798,7 @@ where
                 let validation_gradient = if proposal_sane {
                     grad.as_deref_mut().and_then(|g| {
                         g(ledger, proposal_state.view()).filter(|values| {
-                            gradient_is_converged(
-                                values.view(),
-                                proposal_state.len(),
-                                cfg.record_gradient,
-                            )
+                            answer_gradient_ok(cfg, values.view(), proposal_state.len())
                         })
                     })
                 } else {
@@ -2919,11 +2927,7 @@ where
                 let candidate_gradient = candidate_sane.then(|| {
                     grad.as_deref_mut().and_then(|gradient| {
                         gradient(ledger, candidate.view()).filter(|values| {
-                            gradient_is_converged(
-                                values.view(),
-                                candidate.len(),
-                                cfg.record_gradient,
-                            )
+                            answer_gradient_ok(cfg, values.view(), candidate.len())
                         })
                     })
                 });
@@ -3844,9 +3848,8 @@ where
             None
         } else {
             grad.as_deref_mut().and_then(|g| {
-                g(ledger, x_new.view()).filter(|values| {
-                    gradient_is_converged(values.view(), x_new.len(), cfg.record_gradient)
-                })
+                g(ledger, x_new.view())
+                    .filter(|values| answer_gradient_ok(cfg, values.view(), x_new.len()))
             })
         };
         let recordable =
@@ -5191,9 +5194,8 @@ where
                 && quench_is_sane(cfg, polished_energy, polished_state.view())
             {
                 let validated = match grad.as_deref_mut() {
-                    Some(gradient) => gradient(ledger, polished_state.view()).is_some_and(|g| {
-                        gradient_is_converged(g.view(), polished_state.len(), cfg.record_gradient)
-                    }),
+                    Some(gradient) => gradient(ledger, polished_state.view())
+                        .is_some_and(|g| answer_gradient_ok(cfg, g.view(), polished_state.len())),
                     None => true,
                 };
                 if validated {
