@@ -3192,20 +3192,39 @@ fn cluster_archive_search(
     // Same tolerance as the objective-driven quench: the line search stops
     // accepting steps near 1e-5, and a tighter request does not move the geometry.
     opt.gtol = 1e-5;
+    let last_plain: std::cell::RefCell<Option<(Array1<f64>, Array1<f64>)>> =
+        std::cell::RefCell::new(None);
     let mut relax =
         |led: &mut crate::methods::cluster_hopping::Ledger, x: ArrayView1<f64>, iters: usize| {
             opt.forget();
+            *last_plain.borrow_mut() = None;
             let (f, xr, _) = opt.minimize(x, iters, |v| {
                 if !led.charge() {
                     return None;
                 }
-                Some(obj.value_and_gradient(v))
+                let (energy, gradient) = obj.value_and_gradient(v);
+                *last_plain.borrow_mut() = Some((v.to_owned(), gradient.clone()));
+                Some((energy, gradient))
             });
-            // Same charged convergence check as the recommended search path.
-            if led.charge() {
+            // Same convergence check as the objective-driven quench. The
+            // result is not stored here; the call is what the ledger counts.
+            let reused = last_plain.borrow();
+            let already = reused.as_ref().is_some_and(|(point, gradient)| {
+                point.len() == xr.len()
+                    && point
+                        .iter()
+                        .zip(xr.iter())
+                        .all(|(left, right)| left == right)
+                    && gradient
+                        .iter()
+                        .fold(0.0_f64, |largest, value| largest.max(value.abs()))
+                        < cfg.record_gradient
+            });
+            drop(reused);
+            if !already && led.charge() {
                 let _ = Gradient::grad(obj, xr.view())
                     .iter()
-                    .fold(0.0_f64, |a, v| a.max(v.abs()))
+                    .fold(0.0_f64, |largest, value| largest.max(value.abs()))
                     < cfg.record_gradient;
             }
             (f, xr)
