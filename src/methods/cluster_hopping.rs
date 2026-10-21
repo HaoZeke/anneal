@@ -467,6 +467,7 @@ pub struct Ledger {
     pub best_state: Option<Array1<f64>>,
     quench_boundaries: Vec<QuenchBoundary>,
     diagnostic_quench: bool,
+    stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 struct DiagnosticQuench<'a> {
@@ -505,7 +506,26 @@ impl Ledger {
             best_state: None,
             quench_boundaries: Vec::new(),
             diagnostic_quench: false,
+            stop: None,
         }
+    }
+
+    /// A ledger that also closes when `stop` is raised.
+    ///
+    /// The caller owns the flag. Once it is set, [`Ledger::charge`] refuses
+    /// and [`Ledger::remaining`] reads zero, so a search ends at its next
+    /// budget check instead of spending what is left. A harness that stops a
+    /// run on a target, or a callback that raised, sets it.
+    pub fn with_stop(budget: usize, stop: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
+        let mut ledger = Self::new(budget);
+        ledger.stop = Some(stop);
+        ledger
+    }
+
+    fn stopped(&self) -> bool {
+        self.stop
+            .as_ref()
+            .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed))
     }
 
     /// Whether the relaxation serves a non-adopting diagnostic probe.
@@ -527,7 +547,7 @@ impl Ledger {
 
     /// Charges one unit, returning `false` when the budget is gone.
     pub fn charge(&mut self) -> bool {
-        if self.spent >= self.budget {
+        if self.spent >= self.budget || self.stopped() {
             return false;
         }
         self.spent += 1;
@@ -588,6 +608,9 @@ impl Ledger {
 
     /// Charged evaluations remaining.
     pub fn remaining(&self) -> usize {
+        if self.stopped() {
+            return 0;
+        }
         self.budget.saturating_sub(self.spent)
     }
 
@@ -6445,6 +6468,22 @@ mod tests {
         let out = optimize(&cfg, &mut ledger, &mut relax, 0);
         assert!(out.charged <= 500, "spent {} of 500", out.charged);
         assert_eq!(ledger.remaining(), 0, "a run should spend its budget");
+    }
+
+    #[test]
+    fn a_raised_stop_closes_the_ledger() {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut ledger = Ledger::with_stop(500, std::sync::Arc::clone(&stop));
+        assert!(ledger.charge());
+        assert_eq!(ledger.remaining(), 499);
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(!ledger.charge(), "a stopped ledger charged");
+        assert_eq!(ledger.remaining(), 0);
+        assert_eq!(ledger.spent(), 1);
+        let cfg = Config::for_cluster(6);
+        let mut relax = toy_relax;
+        let out = optimize(&cfg, &mut ledger, &mut relax, 0);
+        assert_eq!(out.charged, 1, "a stopped run spent its budget");
     }
 
     #[test]
