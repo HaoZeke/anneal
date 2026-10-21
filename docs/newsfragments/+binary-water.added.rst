@@ -3,6 +3,8 @@ Binary Lennard-Jones and rigid TIP4P on the stock cluster presets.
 and ``target``. Two or more species labels add a swap move. A wide
 diameter ratio leaves the occupied basin by one softened microcanonical
 step and one inner-outer exchange, then quenches that point in full.
+The same chart also tries one unlike-pair exchange from a side
+generator and keeps it only when the quench is downhill.
 A rigid chart orients every body and keeps the centres fixed. The
 acceptance temperature of a rigid chart is scaled inside the hop. A
 chart with more than ten bodies holds that factor at 4 and scales the

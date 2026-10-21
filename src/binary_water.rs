@@ -3,7 +3,8 @@
 //! [`Config::recommended`] and [`Config::communicating`] stay numerically
 //! unchanged. Species labels and a rigid chart are applied afterwards.
 //! A wide diameter ratio escapes by one softened microcanonical step across
-//! a barrier, and a narrow ratio exchanges mismatched labels. Water takes
+//! a barrier and tries one downhill unlike-pair exchange on a side
+//! generator. A narrow ratio exchanges mismatched labels. Water takes
 //! an all-body orientation step. A chart with more than ten bodies holds
 //! the acceptance factor at its cap and scales that step toward an
 //! acceptance ratio of one half. Ten bodies or fewer keep the factor
