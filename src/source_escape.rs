@@ -93,7 +93,7 @@ where
         // `try_update` is the later name. 1.88 still has `fetch_update`.
         #[allow(deprecated)]
         self.calls
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |calls| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |calls| {
                 (calls < self.maximum_evaluations).then_some(calls + 1)
             })
             .map_err(|_| LimitedSurfaceError::Exhausted)?;

@@ -94,7 +94,7 @@ where
         #[allow(deprecated)]
         let reservation =
             self.evaluations
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |evaluations| {
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |evaluations| {
                     if evaluations < self.maximum {
                         Some(evaluations + 1)
                     } else {
