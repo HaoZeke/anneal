@@ -151,6 +151,9 @@ where
         opt.forget();
         let before = led.spent();
         let screening = iters <= screen_iters;
+        // A rigid chart uses this same descent. A line-search-free capped
+        // step reached a different basin, and the small-cluster walk then
+        // took more hops at the same cost per quench.
         // The screening pass stops when its own trajectory says the question is
         // settled; the full relaxation runs to its tolerance, because there the
         // answer is the structure and not a verdict about it.

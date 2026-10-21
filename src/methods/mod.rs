@@ -42,6 +42,8 @@ pub mod minima_hopping;
 pub mod nested;
 /// Umbrella bridges between two catalog minima in descriptor space.
 pub mod neus_bridge;
+/// Rigid-body record tolerance.
+pub mod rigid_quench;
 /// Cut-and-splice mixing of two quenched clusters.
 pub mod splice;
 pub mod two_phase;
