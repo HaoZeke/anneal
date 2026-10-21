@@ -68,6 +68,8 @@ pub mod assignment;
 /// Same-PES atomistic basin and ridge exploration by joint-optimum information.
 pub mod atomistic_hybrid;
 pub mod bias;
+/// Stock-preset searches for binary Lennard-Jones and rigid TIP4P.
+pub mod binary_water;
 /// Transport proposals from observed attraction-region crossings.
 pub mod boundary_transport;
 /// Spectral statistics of the curvature, without forming a Hessian.
@@ -227,11 +229,11 @@ pub mod soap;
 pub mod soap_gp;
 /// Budgeted perturb--quench source generation for hybrid PES exploration.
 pub mod source_escape;
-/// Source-keyed relaxation-surface rewards exchanged between chains.
-pub mod surface_evidence;
 pub mod spectral;
 pub mod structure;
 pub mod superbasin;
+/// Source-keyed relaxation-surface rewards exchanged between chains.
+pub mod surface_evidence;
 /// How a leftover chain uses the shared packing catalog.
 pub mod swarm;
 pub mod sym_hessian;
@@ -298,10 +300,9 @@ pub use methods::{
     portfolio_optimize, portfolio_optimize_from, portfolio_optimize_seeded,
     portfolio_optimize_with_policy, portfolio_values_ensemble_optimize, preferred_arm_tail,
     projected_gradient_polish, qmc_best1bin_scout, qmc_gsa_global_search,
-    qmc_gsa_global_search_from,
-    qmc_projected_gradient_polish, qmc_trust_region_poll, regime_exploit_prob,
-    regime_exploit_width, require_accept_compatible, run_dmc_population, select_regime,
-    shifted_qmc_projected_gradient_polish, walker_weight,
+    qmc_gsa_global_search_from, qmc_projected_gradient_polish, qmc_trust_region_poll,
+    regime_exploit_prob, regime_exploit_width, require_accept_compatible, run_dmc_population,
+    select_regime, shifted_qmc_projected_gradient_polish, walker_weight,
 };
 pub use movekernel::{MoveKernel, Reflected};
 pub use neigh::Neighborhood;

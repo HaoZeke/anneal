@@ -238,7 +238,16 @@ impl DifferentiableObjective<f64> for PairPotential {
     }
 }
 
+mod binary_lj;
+mod gmin_tip4p;
 mod tip4p;
+pub use binary_lj::BinaryLennardJones;
+pub use gmin_tip4p::{
+    C6 as GMIN_TIP4P_C6, C12 as GMIN_TIP4P_C12, COULOMB as GMIN_TIP4P_COULOMB, GminTip4p,
+    block_from_interleaved_gmin, energy_ohh, gmin_water_geometry, interleaved_gmin_from_block,
+    reference_sites as gmin_tip4p_sites, rigid_from_ohh,
+};
+pub(crate) use tip4p::compose_rotation;
 pub use tip4p::{
     COULOMB, EPSILON, HOH_DEG, Q_H, Q_M, R_OH, R_OM, SIGMA, Tip4pCluster, fold_rotation_vectors,
     jorgensen_dimer, random_cluster as random_tip4p_cluster, wales_hodges_minimum,
