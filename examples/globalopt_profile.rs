@@ -207,7 +207,9 @@ impl Counted {
                 let j = i + 1 + jj;
                 let d = [xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2]];
                 let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                if !(r2 > 0.0 && r2 < cutoff2) {
+                if r2.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
+                    || r2.partial_cmp(&cutoff2) != Some(std::cmp::Ordering::Less)
+                {
                     continue;
                 }
                 let s2 = match sigma {

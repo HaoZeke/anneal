@@ -396,7 +396,7 @@ fn inertia_ratio(x: &[f64]) -> f64 {
             hi = hi.max(value);
         }
     }
-    if !(lo > 1e-12 && hi.is_finite()) {
+    if lo.partial_cmp(&1e-12) != Some(std::cmp::Ordering::Greater) || !hi.is_finite() {
         return f64::INFINITY;
     }
     hi / lo
@@ -404,7 +404,10 @@ fn inertia_ratio(x: &[f64]) -> f64 {
 
 /// Stretch a spherical cluster along one principal axis before the kick.
 fn stretch_if_spherical(x: &mut [f64], factor: f64) {
-    if !(factor.is_finite() && factor > 1.0) || inertia_ratio(x) > 1.05 {
+    if !factor.is_finite()
+        || factor.partial_cmp(&1.0) != Some(std::cmp::Ordering::Greater)
+        || inertia_ratio(x) > 1.05
+    {
         return;
     }
     let n = x.len() / 3;
