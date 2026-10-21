@@ -433,7 +433,10 @@ Key types and functions: =search= (src/methods/cluster_search.rs:116);
 the max-component gradient threshold for calling a relaxation
 converged). The quench itself asks L-BFGS to stop at gradient 1e-5,
 where the line search on a Lennard-Jones cluster stops accepting
-steps. The default =WarmLbfgs= tolerance stays 1e-6.
+steps. The default =WarmLbfgs= tolerance stays 1e-6. When the
+quenched point is the one that relaxation last evaluated, the
+convergence check reads that gradient instead of calling the
+potential again.
 
 Feeds/consumes: consumed by =src/potentials.rs=, =src/python.rs=,
 =src/catalog_rpc/server.rs=, and the =molecular_cluster=,
