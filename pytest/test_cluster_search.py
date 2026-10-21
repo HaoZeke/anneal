@@ -40,6 +40,8 @@ def test_config_recommended_and_for_cluster():
     assert rec.shared_visit_policy == "tabu"
     assert rec.orbit_complete_on_new
     assert rec.calibrated_screen
+    assert rec.finish_improving
+    assert base.finish_improving
     assert not rec.rigid_body
     assert not base.burst_moves
     assert not base.allocate_moves
