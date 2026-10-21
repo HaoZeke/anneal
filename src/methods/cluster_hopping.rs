@@ -1383,26 +1383,6 @@ fn rung_height(cfg: &Config, n_rep: usize, ratio: f64) -> f64 {
     }
 }
 
-/// A rung waiting for its turn: the state it holds, and what the driver knows
-/// about that state.
-///
-/// Everything past the state describes the state rather than the rung, so a
-/// swap moves it with the state and a switch restores it with the state. Left
-/// behind, it would attribute the next hop to whatever the previous rung held.
-#[allow(dead_code)]
-struct Parked {
-    energy: f64,
-    state: Array1<f64>,
-    /// Basin of the state in the shared identity map, once looked up.
-    basin: Option<usize>,
-    /// Fresh validation gradient retained for the state, when any.
-    gradient: Option<Array1<f64>>,
-    /// The surrogate's value at the state, under delayed acceptance.
-    surrogate: Option<f64>,
-    /// Screen state of the trial that entered the state's basin.
-    entry: Option<Array1<f64>>,
-}
-
 /// Log acceptance of rungs `k` and `j` exchanging the states they hold.
 ///
 /// Rung `k` hops on `exp(-(E + V_k + S) / T_k)`, with `V_k` its own bias and
@@ -1412,7 +1392,7 @@ struct Parked {
 /// and at rung `j`'s. `S` is one function on every rung, so it enters only
 /// through the difference of the inverse temperatures and drops out of a flat
 /// ladder.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 fn swap_log_acceptance(
     own_k: [f64; 2],
     own_j: [f64; 2],
@@ -1426,8 +1406,8 @@ fn swap_log_acceptance(
 }
 
 /// What a rung's acceptance can read at one state besides the rung's own bias.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug)]
-#[cfg_attr(not(test), allow(dead_code))]
 struct HopTerms {
     energy: f64,
     funnel: f64,
@@ -1437,6 +1417,7 @@ struct HopTerms {
 
 /// What every rung's acceptance weighs a state by, and so what a swap between
 /// two of them has to exchange.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(not(test), allow(dead_code))]
 enum RungWeight {
@@ -1454,7 +1435,7 @@ enum RungWeight {
     Flat,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 impl RungWeight {
     /// The weight the acceptance test applies, given whether the
     /// flat-histogram cost exists yet.
@@ -1477,7 +1458,7 @@ impl RungWeight {
 /// is `V_j` at rung `j`'s state and at rung `k`'s. The flat cost is the same
 /// on both rungs at either state, so it cancels from the factor and takes the
 /// energy with it: under that weight a swap exchanges the biases alone.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 fn exchange_log_acceptance(
     weight: RungWeight,
     at_k: HopTerms,
