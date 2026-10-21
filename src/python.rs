@@ -20,9 +20,9 @@
 
 use ndarray::{Array1, ArrayView1};
 use numpy::{PyArray1, PyReadonlyArray1};
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyFloat};
 use rand::SeedableRng;
 
 use eindir_core::py_objective::{PyBounds as EindirPyBounds, PyObjective};
@@ -2323,6 +2323,14 @@ fn bfwt_optimize(
     Ok(out.into())
 }
 
+/// A bare `usize` extraction truncates a float. Neighbour counts are whole.
+fn whole_count(value: &Bound<'_, PyAny>, name: &str) -> PyResult<usize> {
+    if value.is_instance_of::<PyFloat>() {
+        return Err(PyTypeError::new_err(format!("{name} must be an integer")));
+    }
+    value.extract()
+}
+
 /// Runs the Thompson-allocated portfolio global optimizer.
 ///
 /// One generic driver with a single budget knob: a discounted
@@ -2361,8 +2369,9 @@ fn global_optimize(
     replicas: usize,
     coverage_shared: bool,
     coverage_radius: f64,
-    coverage_neighbors: usize,
+    coverage_neighbors: &Bound<'_, PyAny>,
 ) -> PyResult<Py<PyDict>> {
+    let coverage_neighbors = whole_count(coverage_neighbors, "coverage_neighbors")?;
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     validate_box_bounds(&low_vec, &high_vec)?;
