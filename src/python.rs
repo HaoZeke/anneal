@@ -3192,24 +3192,24 @@ fn cluster_archive_search(
     // Same tolerance as the objective-driven quench: the line search stops
     // accepting steps near 1e-5, and a tighter request does not move the geometry.
     opt.gtol = 1e-5;
-    let last_plain: std::cell::RefCell<Option<(Array1<f64>, Array1<f64>)>> =
-        std::cell::RefCell::new(None);
     let mut relax =
         |led: &mut crate::methods::cluster_hopping::Ledger, x: ArrayView1<f64>, iters: usize| {
             opt.forget();
-            *last_plain.borrow_mut() = None;
+            // The line search returns before this closure does, so the last
+            // point can live here. A RefCell borrowed from outside would make
+            // the closure not Send, which archive search requires.
+            let mut last_plain: Option<(Array1<f64>, Array1<f64>)> = None;
             let (f, xr, _) = opt.minimize(x, iters, |v| {
                 if !led.charge() {
                     return None;
                 }
                 let (energy, gradient) = obj.value_and_gradient(v);
-                *last_plain.borrow_mut() = Some((v.to_owned(), gradient.clone()));
+                last_plain = Some((v.to_owned(), gradient.clone()));
                 Some((energy, gradient))
             });
             // Same convergence check as the objective-driven quench. The
             // result is not stored here; the call is what the ledger counts.
-            let reused = last_plain.borrow();
-            let already = reused.as_ref().is_some_and(|(point, gradient)| {
+            let already = last_plain.as_ref().is_some_and(|(point, gradient)| {
                 point.len() == xr.len()
                     && point
                         .iter()
@@ -3220,7 +3220,6 @@ fn cluster_archive_search(
                         .fold(0.0_f64, |largest, value| largest.max(value.abs()))
                         < cfg.record_gradient
             });
-            drop(reused);
             if !already && led.charge() {
                 let _ = Gradient::grad(obj, xr.view())
                     .iter()
