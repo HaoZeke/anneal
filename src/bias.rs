@@ -195,6 +195,34 @@ mod tests {
     /// this a comparison of the two paths through the same code on the same
     /// data.
     #[test]
+    fn a_sorted_spectrum_rejects_from_the_tail() {
+        let mut a = vec![1.0; 64];
+        let mut b = vec![1.0; 64];
+        b[63] = 5.0;
+        let av = ndarray::Array1::from(a.clone());
+        let bv = ndarray::Array1::from(b);
+        let metric = EuclideanMetric;
+        assert!(
+            metric
+                .distance_bounded(av.view(), bv.view(), 0.5)
+                .is_infinite()
+        );
+        b_exact_match(&metric, &av);
+        let close = ndarray::Array1::from(a);
+        assert!(
+            (metric.distance(av.view(), close.view())
+                - metric.distance_bounded(av.view(), close.view(), 1.0))
+            .abs()
+                < 1e-12
+        );
+    }
+
+    fn b_exact_match(metric: &EuclideanMetric, a: &ndarray::Array1<f64>) {
+        let d = metric.distance_bounded(a.view(), a.view(), 1.0);
+        assert!(d.abs() < 1e-12, "{d}");
+    }
+
+    #[test]
     fn the_triangle_prune_agrees_with_an_exhaustive_scan() {
         /// The descriptor is the state, so the test exercises the index and
         /// not a fingerprint.
@@ -559,11 +587,13 @@ impl BasinMetric for EuclideanMetric {
         }
         let limit = bound * bound;
         let mut acc = 0.0;
-        // Checked in blocks rather than per element: the branch costs more
-        // than the arithmetic on a descriptor whose leading entries are nearly
-        // equal for every pair of structures, which is what a sorted distance
-        // spectrum is.
-        for chunk in 0..a.len().div_ceil(32) {
+        // A sorted distance spectrum shares its short distances, so two
+        // different clusters separate at the tail. Blocks are checked from
+        // that end. The branch still sits outside the inner arithmetic.
+        // Crossing the bound returns a value above it; a pair inside the
+        // bound still gets the exact Euclidean distance.
+        let nchunks = a.len().div_ceil(32);
+        for chunk in (0..nchunks).rev() {
             let lo = chunk * 32;
             let hi = (lo + 32).min(a.len());
             for k in lo..hi {
