@@ -34,6 +34,24 @@ pub(crate) const SLOPPY_RMS: f64 = 1.0e-3;
 pub(crate) const TIGHT_RMS: f64 = 1.0e-3;
 /// Accepted steps a full quench may take. Ranked `MAXIT`.
 pub(crate) const MAX_ITERATIONS: usize = 10_000;
+/// Hops without a new lowest minimum before a rigid walker is replaced.
+///
+/// GMIN's reseed predicate is `J1 - JBEST > NRELAX`. The compiled
+/// `NRELAX` is 0, which would reseed on every hop that does not lower
+/// the best, and the ranked TIP4P file leaves `NEWRESTART` off. The
+/// only positive MC-cycle count initialised beside a restart in
+/// `keywords.f90` is `DUMPINT = 1000`: `mc.f` writes a restart file
+/// every 1000 cycles. The reseed waits that many hops. It is not
+/// `NRELAX`.
+pub(crate) const STAGNATION_HOPS: usize = 1000;
+/// Failed reseeds tried before the walker is left where it is.
+/// `NEWRESATTEMPTS` stops after ten.
+pub(crate) const RESEED_ATTEMPTS: usize = 10;
+
+/// True when `hops` since the last new lowest minimum exceeds [`STAGNATION_HOPS`].
+pub(crate) fn stagnation_restart(hops: usize, hops_at_lowest: usize) -> bool {
+    hops.saturating_sub(hops_at_lowest) > STAGNATION_HOPS
+}
 
 /// Root-mean-square force, `sqrt(g · g / n)`.
 pub(crate) fn rms_force(gradient: ArrayView1<f64>) -> f64 {
@@ -350,6 +368,15 @@ mod tests {
             "first step landed at {}",
             seen[1]
         );
+    }
+
+    #[test]
+    fn stagnation_waits_for_the_dump_interval() {
+        assert_eq!(STAGNATION_HOPS, 1000);
+        assert!(!stagnation_restart(1000, 0));
+        assert!(stagnation_restart(1001, 0));
+        assert!(!stagnation_restart(1500, 500));
+        assert!(stagnation_restart(1501, 500));
     }
 
     #[test]

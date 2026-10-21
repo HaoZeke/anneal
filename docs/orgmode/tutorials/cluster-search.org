@@ -68,8 +68,9 @@ is scaled toward an acceptance ratio of one half. A ten-body chart may
 still climb to 24 and does not scale the amplitude. The rigid quench
 stops on the root-mean-square force with four L-BFGS pairs, an initial
 diagonal of 0.1, and a capped step. A second pass runs only when the
-first one stopped short and the energy is a new lowest minimum. Preset
-temperature, screen
+first one stopped short and the energy is a new lowest minimum. After
+1000 hops with no new lowest minimum the walker is drawn again and
+quenched, and the lowest minimum is kept. Preset temperature, screen
 length, relax length, and record gradient are unchanged.
 
 #+begin_src python

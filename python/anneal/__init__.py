@@ -276,7 +276,8 @@ def cluster_search(
         more than ten bodies holds the acceptance factor at 4 and scales
         the orientation amplitude toward an acceptance ratio of one half.
         Ten bodies or fewer do not. The quench stops on the
-        root-mean-square force.
+        root-mean-square force. After 1000 hops with no new lowest
+        minimum the walker is drawn again and the lowest minimum is kept.
       layout: ``block`` or ``interleaved``. Interleaved is the per-body
         centre and angle-axis order, with rotations negated at the boundary.
       target: stop once a recorded energy is at or below this value.
