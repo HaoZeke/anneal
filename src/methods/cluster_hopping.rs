@@ -3281,37 +3281,35 @@ where
         // the Metropolis test still sees a real quenched energy for that
         // basin, so the per-attempt rate is untouched and the remaining
         // force calls are refunded.
+        let ds = bias.cv(x_screen.view());
+        let dc = bias.cv(x.view());
         let known_stand_in: Option<(f64, Array1<f64>)> = if shared_screen && !screen_bank.is_empty()
         {
-            let ds = bias.cv(x_screen.view());
+            let radius2 = cfg.merge_radius * cfg.merge_radius;
             screen_bank
                 .iter()
-                .map(|(cv, energy, coords)| {
-                    let d: f64 = ds
-                        .iter()
-                        .zip(cv.iter())
-                        .map(|(p, q)| (p - q) * (p - q))
-                        .sum::<f64>()
-                        .sqrt();
-                    (d, energy, coords)
+                .filter_map(|(cv, energy, coords)| {
+                    let mut d2 = 0.0;
+                    for (p, q) in ds.iter().zip(cv.iter()) {
+                        d2 += (p - q) * (p - q);
+                        if d2 >= radius2 {
+                            return None;
+                        }
+                    }
+                    Some((d2, energy, coords))
                 })
-                .filter(|(d, _, _)| *d < cfg.merge_radius)
                 .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(_, energy, coords)| (*energy, coords.clone()))
         } else {
             None
         };
-        let returning = cfg.return_screen && {
-            let ds = bias.cv(x_screen.view());
-            let dc = bias.cv(x.view());
-            let d: f64 = ds
-                .iter()
-                .zip(dc.iter())
-                .map(|(p, q)| (p - q) * (p - q))
-                .sum::<f64>()
-                .sqrt();
-            d < cfg.merge_radius
-        };
+        let drift: f64 = ds
+            .iter()
+            .zip(dc.iter())
+            .map(|(p, q)| (p - q) * (p - q))
+            .sum::<f64>()
+            .sqrt();
+        let returning = cfg.return_screen && drift < cfg.merge_radius;
         if returning {
             returned += 1;
         }
@@ -3325,17 +3323,7 @@ where
         // energy, how far the partial relaxation moved in descriptor space, and
         // their product. All of it is already computed above by the return
         // screen, so consulting the posterior costs no evaluations.
-        let feats = {
-            let ds = bias.cv(x_screen.view());
-            let dc = bias.cv(x.view());
-            let drift: f64 = ds
-                .iter()
-                .zip(dc.iter())
-                .map(|(p, q)| (p - q) * (p - q))
-                .sum::<f64>()
-                .sqrt();
-            Array1::from(vec![1.0, e_screen, drift, e_screen * drift])
-        };
+        let feats = Array1::from(vec![1.0, e_screen, drift, e_screen * drift]);
         let screened_this = if cfg.bayes_screen {
             // Refusing is what "screened" means here: the posterior says
             // finishing this relaxation is unlikely to improve on the
