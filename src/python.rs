@@ -3459,7 +3459,8 @@ fn cluster_search(
         Config::for_cluster(n)
     };
     let errors: std::sync::Arc<CallbackErrors> = std::sync::Arc::default();
-    let mut ledger = crate::methods::cluster_hopping::Ledger::with_stop(budget, errors.abort_flag());
+    let mut ledger =
+        crate::methods::cluster_hopping::Ledger::with_stop(budget, errors.abort_flag());
     let rigid = cfg.rigid_body_geometry.is_some();
     let gradient_scale = if budget >= 4 {
         let probe_at = start.as_ref().filter(|_| rigid).map(|s| s.view());
