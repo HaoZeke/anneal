@@ -2324,9 +2324,11 @@ fn bfwt_optimize(
 }
 
 /// A bare `usize` extraction truncates a float. Neighbour counts are whole.
-fn whole_count(value: &Bound<'_, PyAny>, name: &str) -> PyResult<usize> {
+fn coverage_neighbor_count(value: &Bound<'_, PyAny>) -> PyResult<usize> {
     if value.is_instance_of::<PyFloat>() {
-        return Err(PyTypeError::new_err(format!("{name} must be an integer")));
+        return Err(PyTypeError::new_err(
+            "coverage_neighbors must be an integer",
+        ));
     }
     value.extract()
 }
@@ -2369,9 +2371,8 @@ fn global_optimize(
     replicas: usize,
     coverage_shared: bool,
     coverage_radius: f64,
-    coverage_neighbors: &Bound<'_, PyAny>,
+    #[pyo3(from_py_with = coverage_neighbor_count)] coverage_neighbors: usize,
 ) -> PyResult<Py<PyDict>> {
-    let coverage_neighbors = whole_count(coverage_neighbors, "coverage_neighbors")?;
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
     validate_box_bounds(&low_vec, &high_vec)?;
