@@ -53,7 +53,13 @@ pub enum MoveLibrary {
         /// Half-width of a uniform centre-of-mass displacement, in length units.
         translate_step: f64,
         /// Half-width of a uniform rotation-vector displacement, in radians.
+        /// On the local chart this is the cap of the orientation draw.
         rotate_step: f64,
+        /// All-body orientation step instead of the collective pair.
+        ///
+        /// [`Config::for_tip4p`] leaves this off so its kernel names stay
+        /// `rtrans` and `rrot`. [`Config::with_rigid_bodies`] turns it on.
+        local: bool,
     },
 }
 
@@ -206,17 +212,49 @@ impl MoveLibrary {
                 n_molecules,
                 translate_step,
                 rotate_step,
-            } => vec![
-                ClusterMove::RigidTranslate {
-                    n_molecules: *n_molecules,
-                    step: *translate_step,
-                },
-                ClusterMove::RigidRotate {
-                    n_molecules: *n_molecules,
-                    step: *rotate_step,
-                },
-            ],
+                local,
+            } => {
+                // A one-body spin and a collective centre kick both quench
+                // back into the hydrogen-bond basin they left. The local
+                // chart composes one orientation step onto every body and
+                // leaves the centres where they are.
+                let kernels = if *local {
+                    vec![ClusterMove::RigidOrientAll {
+                        n_molecules: *n_molecules,
+                        step: *rotate_step,
+                    }]
+                } else {
+                    vec![
+                        ClusterMove::RigidTranslate {
+                            n_molecules: *n_molecules,
+                            step: *translate_step,
+                        },
+                        ClusterMove::RigidRotate {
+                            n_molecules: *n_molecules,
+                            step: *rotate_step,
+                        },
+                    ]
+                };
+                kernels
+            }
         };
+        if !self.is_rigid_body() && !self.is_molecular() {
+            if let Some(species) = cfg.species.as_ref() {
+                let distinct = {
+                    let mut labels = species.clone();
+                    labels.sort_unstable();
+                    labels.dedup();
+                    labels.len()
+                };
+                if distinct >= 2 && species.len() == cfg.n_points {
+                    kernels.push(ClusterMove::SpeciesSwap {
+                        n_points: cfg.n_points,
+                        species: species.clone(),
+                        sigma: cfg.species_sigma.clone(),
+                    });
+                }
+            }
+        }
         if cfg.soap_repel {
             kernels.push(ClusterMove::SoapRepel {
                 rmsd: LennardJonesPreset::SOAP_RMSD * cfg.length_scale,
@@ -465,6 +503,26 @@ pub enum ClusterMove {
         /// Lennard-Jones energy scale used by the binding criterion.
         energy_scale: f64,
     },
+    /// Exchange coordinates of unlike species.
+    ///
+    /// With per-atom diameters, a large atom in the inner shell swaps with
+    /// a small atom outside it. When the largest diameter is at least 1.2
+    /// times the smallest, only the innermost large atom and the outermost
+    /// small atom are exchanged: exchanging every mismatched pair climbs
+    /// out of a partially mixed core-shell minimum. A smaller mismatch
+    /// exchanges every such pair. A segregated cluster has no such pair,
+    /// so one random unlike exchange is drawn instead and the move is not
+    /// the identity. Without diameters, `1 + round(n^(1/3))` random unlike
+    /// pairs are exchanged. Species counts stay on the indices; only
+    /// coordinates move.
+    SpeciesSwap {
+        /// Atoms in the state.
+        n_points: usize,
+        /// Species label of each atom.
+        species: Vec<u32>,
+        /// Lennard-Jones diameter of each atom, when the caller has one.
+        sigma: Option<Vec<f64>>,
+    },
     /// Translate every rigid-body centre of mass, leaving orientations fixed.
     RigidTranslate {
         /// Rigid bodies in the state.
@@ -477,6 +535,42 @@ pub enum ClusterMove {
         /// Rigid bodies in the state.
         n_molecules: usize,
         /// Half-width of the per-component rotation-vector increment, radians.
+        step: f64,
+    },
+    /// Translate one rigid-body centre, leaving the others and every orientation fixed.
+    RigidTranslateOne {
+        /// Rigid bodies in the state.
+        n_molecules: usize,
+        /// Half-width of the per-coordinate displacement.
+        step: f64,
+    },
+    /// Add a rotation-vector increment to one rigid body.
+    RigidRotateOne {
+        /// Rigid bodies in the state.
+        n_molecules: usize,
+        /// Half-width of the per-component rotation-vector increment, radians.
+        step: f64,
+    },
+    /// Replace one body's orientation by a uniform random rotation composed with it.
+    ///
+    /// The draw is the Haar measure on SO(3). It has no step length: a
+    /// uniform orientation is the move that is not a small kick in the
+    /// exponential chart.
+    RigidReorient {
+        /// Rigid bodies in the state.
+        n_molecules: usize,
+    },
+    /// Compose one orientation step onto every rigid body.
+    ///
+    /// The axis is uniform on the sphere. The angle lies in `[0, step]`
+    /// with density proportional to `sin²(θ/2)`. Centres stay put. The
+    /// composition is on the angle-axis chart whose sense is opposite the
+    /// stored Rodrigues vector, which is the chart the rigid TIP4P
+    /// objective minimises.
+    RigidOrientAll {
+        /// Rigid bodies in the state.
+        n_molecules: usize,
+        /// Maximum angle of the draw, in radians.
         step: f64,
     },
     /// Step in the SOAP power spectrum and pull back through \(J = \partial p/\partial R\).
@@ -1285,8 +1379,13 @@ impl ClusterMove {
             ClusterMove::Twin { .. } => "twin".into(),
             ClusterMove::Soap { .. } => "soap".into(),
             ClusterMove::Reseed { source, .. } => format!("grow:{}", source.name()),
+            ClusterMove::SpeciesSwap { .. } => "swap".into(),
             ClusterMove::RigidTranslate { .. } => "rtrans".into(),
             ClusterMove::RigidRotate { .. } => "rrot".into(),
+            ClusterMove::RigidTranslateOne { .. } => "rtrans1".into(),
+            ClusterMove::RigidRotateOne { .. } => "rrot1".into(),
+            ClusterMove::RigidReorient { .. } => "rreor".into(),
+            ClusterMove::RigidOrientAll { .. } => "rorient".into(),
         }
     }
 
@@ -1604,6 +1703,86 @@ impl ClusterMove {
                 }
                 y
             }
+            ClusterMove::RigidTranslateOne { n_molecules, step } => {
+                let mut y = x.to_owned();
+                let n = *n_molecules;
+                if n > 0 && y.len() >= 3 * n {
+                    let h = step * scale;
+                    let i = rng.random_range(0..n);
+                    for k in 0..3 {
+                        y[3 * i + k] += rng.random_range(-h..h);
+                    }
+                }
+                y
+            }
+            ClusterMove::RigidRotateOne { n_molecules, step } => {
+                let mut y = x.to_owned();
+                let n = *n_molecules;
+                if n > 0 && y.len() >= 6 * n {
+                    let h = step * scale;
+                    let i = rng.random_range(0..n);
+                    let base = 3 * n + 3 * i;
+                    for k in 0..3 {
+                        y[base + k] += rng.random_range(-h..h);
+                    }
+                    if let Some(slice) = y.as_slice_mut() {
+                        crate::potentials::fold_rotation_vectors(n, slice);
+                    }
+                }
+                y
+            }
+            ClusterMove::RigidReorient { n_molecules } => {
+                let mut y = x.to_owned();
+                let n = *n_molecules;
+                if n > 0 && y.len() >= 6 * n {
+                    // A hydrogen-bond cycle is three waters. Spinning one
+                    // body quenches back to the orientation the other two
+                    // still demand. Three is the whole cycle; two is the
+                    // fallback when the cluster has no third body.
+                    let cycle = if n >= 3 { 3 } else { n };
+                    let mut which = Vec::with_capacity(cycle);
+                    while which.len() < cycle {
+                        let j = rng.random_range(0..n);
+                        if !which.contains(&j) {
+                            which.push(j);
+                        }
+                    }
+                    for body in which {
+                        let base = 3 * n + 3 * body;
+                        let omega = [y[base], y[base + 1], y[base + 2]];
+                        let spun = crate::potentials::compose_rotation(haar_rotation(rng), omega);
+                        for k in 0..3 {
+                            y[base + k] = spun[k];
+                        }
+                    }
+                }
+                let _ = scale;
+                y
+            }
+            ClusterMove::RigidOrientAll { n_molecules, step } => {
+                let mut y = x.to_owned();
+                let n = *n_molecules;
+                let max_theta = (*step * scale).abs();
+                if n > 0 && y.len() >= 6 * n && max_theta > 0.0 {
+                    for body in 0..n {
+                        let base = 3 * n + 3 * body;
+                        let stored = [y[base], y[base + 1], y[base + 2]];
+                        // The stored vector is the opposite of the angle-axis
+                        // the composition is written in.
+                        let chart = [-stored[0], -stored[1], -stored[2]];
+                        let updated = rot_rotate_aa(chart, small_random_aa(rng, max_theta));
+                        y[base] = -updated[0];
+                        y[base + 1] = -updated[1];
+                        y[base + 2] = -updated[2];
+                    }
+                }
+                y
+            }
+            ClusterMove::SpeciesSwap {
+                n_points,
+                species,
+                sigma,
+            } => species_swap(x, *n_points, species, sigma.as_deref(), rng),
             ClusterMove::Soap {
                 rmsd,
                 cutoff,
@@ -1689,6 +1868,223 @@ fn mobile_atoms(cfg: &Config, groups: &[Vec<usize>]) -> Option<Vec<usize>> {
     }
     let grouped: Vec<usize> = groups.iter().flatten().copied().collect();
     (grouped.len() != cfg.n_points).then_some(grouped)
+}
+
+/// Cap of the all-body orientation draw, in radians.
+///
+/// The angle density on `[0, cap]` is proportional to `sin²(θ/2)`.
+pub(crate) const RIGID_ORIENTATION_CAP: f64 = 1.64;
+
+fn small_random_aa<R: Rng + ?Sized>(rng: &mut R, max_theta: f64) -> [f64; 3] {
+    let axis = random_unit_vector(rng);
+    let theta = small_orientation_angle(rng, max_theta);
+    [axis[0] * theta, axis[1] * theta, axis[2] * theta]
+}
+
+fn random_unit_vector<R: Rng + ?Sized>(rng: &mut R) -> [f64; 3] {
+    let z = rng.random::<f64>().mul_add(2.0, -1.0);
+    let phi = rng.random::<f64>() * std::f64::consts::TAU;
+    let radial = (1.0 - z * z).max(0.0).sqrt();
+    let (s, c) = phi.sin_cos();
+    [radial * c, radial * s, z]
+}
+
+/// Angle on `[0, max_theta]` with density proportional to `sin²(θ/2)`.
+fn small_orientation_angle<R: Rng + ?Sized>(rng: &mut R, max_theta: f64) -> f64 {
+    if max_theta <= 1.0e-6 {
+        return rng.random::<f64>() * max_theta.max(0.0);
+    }
+    let half_cap = 0.5 * max_theta;
+    let peak = if half_cap <= std::f64::consts::FRAC_PI_2 {
+        half_cap.sin().powi(2).max(1.0e-12)
+    } else {
+        1.0
+    };
+    let envelope = 1.0 / peak;
+    for _ in 0..64 {
+        let angle = rng.random::<f64>() * max_theta;
+        let weight = envelope * (0.5 * angle).sin().powi(2);
+        if rng.random::<f64>() <= weight {
+            return angle;
+        }
+    }
+    max_theta
+}
+
+fn aa_to_quat(p: [f64; 3]) -> [f64; 4] {
+    let theta = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
+    let half = 0.5 * theta;
+    let q0 = half.cos();
+    let qv = if half < 1.0e-6 {
+        [0.5 * p[0], 0.5 * p[1], 0.5 * p[2]]
+    } else {
+        let scale = half.sin() / theta;
+        [scale * p[0], scale * p[1], scale * p[2]]
+    };
+    let mut q = [q0, qv[0], qv[1], qv[2]];
+    if q[0] < 0.0 {
+        for component in &mut q {
+            *component = -*component;
+        }
+    }
+    q
+}
+
+fn quat_mul(left: [f64; 4], right: [f64; 4]) -> [f64; 4] {
+    [
+        left[0] * right[0] - left[1] * right[1] - left[2] * right[2] - left[3] * right[3],
+        left[0] * right[1] + left[1] * right[0] + left[2] * right[3] - left[3] * right[2],
+        left[0] * right[2] - left[1] * right[3] + left[2] * right[0] + left[3] * right[1],
+        left[0] * right[3] + left[1] * right[2] - left[2] * right[1] + left[3] * right[0],
+    ]
+}
+
+fn quat_to_aa(qin: [f64; 4]) -> [f64; 3] {
+    let mut q = qin;
+    if q[0] < 0.0 {
+        for component in &mut q {
+            *component = -*component;
+        }
+    }
+    let norm = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
+    if norm > 0.0 && q[0] > 1.0 {
+        for component in &mut q {
+            *component /= norm;
+        }
+    }
+    let theta = 2.0 * q[0].clamp(-1.0, 1.0).acos();
+    let s = (1.0 - q[0] * q[0]).max(0.0).sqrt();
+    if s < 1.0e-6 {
+        [2.0 * q[1], 2.0 * q[2], 2.0 * q[3]]
+    } else {
+        [q[1] / s * theta, q[2] / s * theta, q[3] / s * theta]
+    }
+}
+
+/// `p3 = p2 ∘ p1` on the angle-axis chart.
+fn rot_rotate_aa(p1: [f64; 3], p2: [f64; 3]) -> [f64; 3] {
+    quat_to_aa(quat_mul(aa_to_quat(p2), aa_to_quat(p1)))
+}
+
+#[cfg(test)]
+fn orientation_increment_angle(before: [f64; 3], after: [f64; 3]) -> f64 {
+    let q_before = aa_to_quat([-before[0], -before[1], -before[2]]);
+    let q_after = aa_to_quat([-after[0], -after[1], -after[2]]);
+    let conj = [q_before[0], -q_before[1], -q_before[2], -q_before[3]];
+    let relative = quat_mul(q_after, conj);
+    2.0 * relative[0].abs().clamp(0.0, 1.0).acos()
+}
+
+fn haar_rotation<R: Rng + ?Sized>(rng: &mut R) -> [[f64; 3]; 3] {
+    let u1 = rng.random::<f64>();
+    let u2 = rng.random::<f64>() * std::f64::consts::TAU;
+    let u3 = rng.random::<f64>() * std::f64::consts::TAU;
+    let a = (1.0 - u1).sqrt();
+    let b = u1.sqrt();
+    let (s2, c2) = u2.sin_cos();
+    let (s3, c3) = u3.sin_cos();
+    let (x, y, z, w) = (a * s2, a * c2, b * s3, b * c3);
+    [
+        [
+            1.0 - 2.0 * (y * y + z * z),
+            2.0 * (x * y - z * w),
+            2.0 * (x * z + y * w),
+        ],
+        [
+            2.0 * (x * y + z * w),
+            1.0 - 2.0 * (x * x + z * z),
+            2.0 * (y * z - x * w),
+        ],
+        [
+            2.0 * (x * z - y * w),
+            2.0 * (y * z + x * w),
+            1.0 - 2.0 * (x * x + y * y),
+        ],
+    ]
+}
+
+fn species_swap<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    n_points: usize,
+    species: &[u32],
+    sigma: Option<&[f64]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    let mut y = x.to_owned();
+    if n_points < 2 || species.len() != n_points || y.len() < 3 * n_points {
+        return y;
+    }
+    let mut centre = [0.0; 3];
+    for i in 0..n_points {
+        for k in 0..3 {
+            centre[k] += y[3 * i + k];
+        }
+    }
+    for value in centre.iter_mut() {
+        *value /= n_points as f64;
+    }
+    let radii: Vec<f64> = (0..n_points)
+        .map(|i| {
+            let mut radius = 0.0;
+            for k in 0..3 {
+                let delta = y[3 * i + k] - centre[k];
+                radius += delta * delta;
+            }
+            radius.sqrt()
+        })
+        .collect();
+    let mut swapped = 0usize;
+    if let Some(sigma) = sigma.filter(|values| values.len() == n_points) {
+        let mean = sigma.iter().sum::<f64>() / n_points as f64;
+        let n_small = sigma.iter().filter(|value| **value <= mean + 1e-12).count();
+        let mut order: Vec<usize> = (0..n_points).collect();
+        order.sort_by(|&left, &right| radii[left].total_cmp(&radii[right]));
+        let mut in_core = vec![false; n_points];
+        for &index in order.iter().take(n_small) {
+            in_core[index] = true;
+        }
+        let mut core_large: Vec<usize> = (0..n_points)
+            .filter(|&index| in_core[index] && sigma[index] > mean + 1e-12)
+            .collect();
+        let mut shell_small: Vec<usize> = (0..n_points)
+            .filter(|&index| !in_core[index] && sigma[index] <= mean + 1e-12)
+            .collect();
+        core_large.sort_by(|&left, &right| radii[left].total_cmp(&radii[right]));
+        shell_small.sort_by(|&left, &right| radii[right].total_cmp(&radii[left]));
+        let pairs = core_large.len().min(shell_small.len());
+        let max_sigma = sigma.iter().copied().fold(0.0_f64, f64::max);
+        let min_sigma = sigma.iter().copied().fold(f64::INFINITY, f64::min);
+        let wide = min_sigma > 0.0 && max_sigma / min_sigma >= 1.2;
+        let pair_limit = if wide { 1.min(pairs) } else { pairs };
+        for pair in 0..pair_limit {
+            swap_atoms(&mut y, core_large[pair], shell_small[pair]);
+        }
+        swapped = pair_limit;
+    }
+    if swapped == 0 {
+        let draws = if sigma.is_some() {
+            1
+        } else {
+            1 + (n_points as f64).cbrt().round() as usize
+        };
+        for _ in 0..draws {
+            for _try in 0..16 {
+                let i = rng.random_range(0..n_points);
+                let j = rng.random_range(0..n_points);
+                if i != j && species[i] != species[j] {
+                    swap_atoms(&mut y, i, j);
+                    break;
+                }
+            }
+        }
+    }
+    y
+}
+
+fn swap_atoms(y: &mut Array1<f64>, i: usize, j: usize) {
+    for k in 0..3 {
+        y.swap(3 * i + k, 3 * j + k);
+    }
 }
 
 impl MoveKernel<f64> for ClusterMove {
@@ -2175,6 +2571,176 @@ mod move_scaling_tests {
             }
             _ => panic!("slab recommended library has no SOAP arm"),
         }
+    }
+
+    #[test]
+    fn a_size_swap_puts_small_atoms_in_the_core() {
+        let n = 8;
+        let mut species = vec![1u32; 4];
+        species.extend(std::iter::repeat(2u32).take(4));
+        let mut sigma = vec![1.0; 4];
+        sigma.extend(std::iter::repeat(1.3).take(4));
+        let mut coords = vec![0.0; 3 * n];
+        // Small atoms (sigma 1) sit outside; large atoms sit in the core.
+        let outer = [
+            [3.0, 0.0, 0.0],
+            [-3.0, 0.0, 0.0],
+            [0.0, 3.0, 0.0],
+            [0.0, -3.0, 0.0],
+        ];
+        let inner = [
+            [0.4, 0.0, 0.0],
+            [-0.4, 0.0, 0.0],
+            [0.0, 0.4, 0.0],
+            [0.0, -0.4, 0.0],
+        ];
+        for i in 0..4 {
+            for k in 0..3 {
+                coords[3 * i + k] = outer[i][k];
+                coords[3 * (4 + i) + k] = inner[i][k];
+            }
+        }
+        let mut cfg = Config::recommended(n);
+        let bare = cfg.resolved_json().unwrap();
+        cfg = cfg.with_species(species.clone(), Some(sigma.clone()));
+        assert!(!bare.contains("species_sigma"));
+        assert_eq!(cfg.temperature, Config::recommended(n).temperature);
+        let names: Vec<String> = cfg
+            .move_library
+            .kernels(&cfg)
+            .iter()
+            .map(|kernel| kernel.name())
+            .collect();
+        assert!(names.iter().any(|name| name == "swap"));
+        assert!(
+            Config::recommended(n)
+                .move_library
+                .kernels(&Config::recommended(n))
+                .iter()
+                .all(|kernel| kernel.name() != "swap")
+        );
+        let mv = ClusterMove::SpeciesSwap {
+            n_points: n,
+            species,
+            sigma: Some(sigma),
+        };
+        let x = Array1::from_vec(coords);
+        let mut rng = StdRng::seed_from_u64(3);
+        let y = mv.propose(x.view(), 0.8, &mut rng);
+        let mut centre = [0.0; 3];
+        for i in 0..n {
+            for k in 0..3 {
+                centre[k] += y[3 * i + k];
+            }
+        }
+        let mut radii: Vec<(usize, f64)> = (0..n)
+            .map(|i| {
+                let mut radius = 0.0;
+                for k in 0..3 {
+                    let delta = y[3 * i + k] - centre[k] / n as f64;
+                    radius += delta * delta;
+                }
+                (i, radius.sqrt())
+            })
+            .collect();
+        radii.sort_by(|left, right| left.1.total_cmp(&right.1));
+        let small_in_core = radii
+            .iter()
+            .take(4)
+            .filter(|(index, _)| cfg.species.as_ref().unwrap()[*index] == 1)
+            .count();
+        assert_eq!(
+            small_in_core, 1,
+            "a wide size ratio exchanges one mismatched pair"
+        );
+    }
+
+    #[test]
+    fn rigid_stock_preset_orients_every_body() {
+        let bare = Config::recommended(4);
+        let cfg = bare
+            .clone()
+            .with_rigid_bodies(crate::potentials::gmin_water_geometry());
+        let names: Vec<String> = cfg
+            .move_library
+            .kernels(&cfg)
+            .iter()
+            .map(|kernel| kernel.name())
+            .collect();
+        assert_eq!(names, ["rorient"]);
+        assert_eq!(cfg.temperature, bare.temperature);
+        assert_eq!(cfg.screen_steps, bare.screen_steps);
+        assert_eq!(cfg.relax_steps, bare.relax_steps);
+        assert_eq!(cfg.record_gradient, bare.record_gradient);
+    }
+
+    #[test]
+    fn an_orientation_step_turns_every_body_and_keeps_the_centres() {
+        let step = RIGID_ORIENTATION_CAP;
+        let mv = ClusterMove::RigidOrientAll {
+            n_molecules: 4,
+            step,
+        };
+        let mut state = Array1::<f64>::zeros(24);
+        for body in 0..4 {
+            state[3 * body] = 0.4 * body as f64;
+            state[12 + 3 * body] = 0.2 * (body as f64 - 1.0);
+            state[12 + 3 * body + 1] = -0.15;
+        }
+        let mut rng = StdRng::seed_from_u64(11);
+        let mut angle_sum = 0.0;
+        let mut draws = 0usize;
+        for _ in 0..32 {
+            let proposed = mv.propose(state.view(), 1.0, &mut rng);
+            for k in 0..12 {
+                assert_eq!(proposed[k], state[k], "centre {k} moved");
+            }
+            for body in 0..4 {
+                let base = 12 + 3 * body;
+                let before = [state[base], state[base + 1], state[base + 2]];
+                let after = [proposed[base], proposed[base + 1], proposed[base + 2]];
+                let angle = orientation_increment_angle(before, after);
+                assert!(
+                    angle <= step + 1e-8,
+                    "body {body} turned by {angle}, cap {step}"
+                );
+                angle_sum += angle;
+                draws += 1;
+            }
+        }
+        let mean = angle_sum / draws as f64;
+        assert!(
+            (1.05..1.40).contains(&mean),
+            "mean orientation angle {mean} left the sin^2 draw"
+        );
+    }
+
+    #[test]
+    fn a_reorientation_spins_a_three_body_cycle_and_keeps_the_centres() {
+        let mv = ClusterMove::RigidReorient { n_molecules: 3 };
+        let mut state = Array1::<f64>::zeros(18);
+        state[0] = 1.0;
+        state[4] = 2.0;
+        state[8] = -1.5;
+        state[9] = 0.2;
+        state[13] = -0.4;
+        let mut rng = StdRng::seed_from_u64(9);
+        let proposed = mv.propose(state.view(), 1.0, &mut rng);
+        for k in 0..9 {
+            assert_eq!(proposed[k], state[k], "centre {k} moved");
+        }
+        let mut changed = 0usize;
+        for body in 0..3 {
+            let base = 9 + 3 * body;
+            let moved = (0..3).any(|k| (proposed[base + k] - state[base + k]).abs() > 1e-8);
+            if moved {
+                changed += 1;
+            }
+            let omega = [proposed[base], proposed[base + 1], proposed[base + 2]];
+            let angle = (omega[0] * omega[0] + omega[1] * omega[1] + omega[2] * omega[2]).sqrt();
+            assert!(angle <= std::f64::consts::PI + 1e-8, "angle {angle}");
+        }
+        assert_eq!(changed, 3, "spun {changed} bodies");
     }
 
     #[test]

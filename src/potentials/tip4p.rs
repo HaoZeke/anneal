@@ -456,7 +456,7 @@ fn mat_scale(s: f64, a: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
     c
 }
 
-fn mat_vec(a: [[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
+pub(crate) fn mat_vec(a: [[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
     [
         a[0][0] * v[0] + a[0][1] * v[1] + a[0][2] * v[2],
         a[1][0] * v[0] + a[1][1] * v[1] + a[1][2] * v[2],
@@ -472,7 +472,7 @@ fn mat_transpose(a: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
     ]
 }
 
-fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+pub(crate) fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],
@@ -480,7 +480,7 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     ]
 }
 
-fn rotation_matrix(w: [f64; 3]) -> [[f64; 3]; 3] {
+pub(crate) fn rotation_matrix(w: [f64; 3]) -> [[f64; 3]; 3] {
     let theta2 = w[0] * w[0] + w[1] * w[1] + w[2] * w[2];
     if theta2 < 1e-16 {
         return IDENTITY;
@@ -506,7 +506,7 @@ fn rotation_matrix(w: [f64; 3]) -> [[f64; 3]; 3] {
 ///
 /// `dR = [J_l(ω) dω]× R`, so the spatial torque `τ = Σ (R s) × (∂E/∂r)`
 /// pulls back as `∂E/∂ω = J_lᵀ τ`.
-fn left_jacobian_t(w: [f64; 3]) -> [[f64; 3]; 3] {
+pub(crate) fn left_jacobian_t(w: [f64; 3]) -> [[f64; 3]; 3] {
     let theta2 = w[0] * w[0] + w[1] * w[1] + w[2] * w[2];
     if theta2 < 1e-16 {
         return IDENTITY;
@@ -562,17 +562,53 @@ fn rotation_taking(from: [f64; 3], to: [f64; 3]) -> [[f64; 3]; 3] {
     mat_add(IDENTITY, mat_add(k, mat_scale(1.0 / (1.0 + c), k2)))
 }
 
-fn rotation_vector(r: [[f64; 3]; 3]) -> [f64; 3] {
+/// Left-multiply `omega`'s rotation by `increment` and return the composed vector.
+pub(crate) fn compose_rotation(increment: [[f64; 3]; 3], omega: [f64; 3]) -> [f64; 3] {
+    rotation_vector(mat_mul(increment, rotation_matrix(omega)))
+}
+
+pub(crate) fn rotation_vector(r: [[f64; 3]; 3]) -> [f64; 3] {
     let tr = r[0][0] + r[1][1] + r[2][2];
     let cos = ((tr - 1.0) * 0.5).clamp(-1.0, 1.0);
     let theta = cos.acos();
     if theta < 1e-12 {
         return [0.0, 0.0, 0.0];
     }
-    let s = 2.0 * theta.sin();
-    if s.abs() < 1e-12 {
-        return [theta, 0.0, 0.0];
+    // Near a half turn the skew part of R vanishes, so the axis is read
+    // from n n^T = (R + I) / 2 instead of from R - R^T.
+    if theta > std::f64::consts::PI - 1e-6 {
+        let mut axis = [
+            (r[0][0] + 1.0).max(0.0).sqrt(),
+            (r[1][1] + 1.0).max(0.0).sqrt(),
+            (r[2][2] + 1.0).max(0.0).sqrt(),
+        ];
+        let dominant = if axis[0] >= axis[1] && axis[0] >= axis[2] {
+            0
+        } else if axis[1] >= axis[2] {
+            1
+        } else {
+            2
+        };
+        if dominant == 0 {
+            axis[1] = axis[1].copysign(r[0][1]);
+            axis[2] = axis[2].copysign(r[0][2]);
+        } else if dominant == 1 {
+            axis[0] = axis[0].copysign(r[1][0]);
+            axis[2] = axis[2].copysign(r[1][2]);
+        } else {
+            axis[0] = axis[0].copysign(r[2][0]);
+            axis[1] = axis[1].copysign(r[2][1]);
+        }
+        let norm = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2])
+            .sqrt()
+            .max(1e-15);
+        return [
+            axis[0] / norm * theta,
+            axis[1] / norm * theta,
+            axis[2] / norm * theta,
+        ];
     }
+    let s = 2.0 * theta.sin();
     [
         (r[2][1] - r[1][2]) / s * theta,
         (r[0][2] - r[2][0]) / s * theta,

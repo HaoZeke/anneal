@@ -667,6 +667,13 @@ pub struct Config {
     /// the species-aware bond matrix, which a single length cannot replace on
     /// a system holding more than one element.
     pub species: Option<Vec<u32>>,
+    /// Lennard-Jones diameter of each point, parallel to [`Config::species`].
+    ///
+    /// Absent on every stock preset, so a resolved preset omits the field.
+    /// [`Config::with_species`] sets it for a binary cluster. The swap move
+    /// uses the diameters to put large atoms outside the small-atom shell.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub species_sigma: Option<Vec<f64>>,
     /// Bond-matrix tolerance on the covalent radii sum.
     pub bond_tolerance: f64,
     /// Frozen mask, one flag per point. A frozen point is environment: groups
@@ -1219,6 +1226,7 @@ impl Config {
             group_cutoff: LennardJonesPreset::GROUP_CUTOFF * length_scale,
             covalent_cutoff: LennardJonesPreset::COVALENT_CUTOFF * length_scale,
             species: None,
+            species_sigma: None,
             bond_tolerance: 1.25,
             frozen: None,
             active_region: None,
@@ -1338,6 +1346,7 @@ impl Config {
             n_molecules,
             translate_step: 0.35,
             rotate_step: 0.40,
+            local: false,
         };
         cfg.rigid_body_geometry =
             Some(crate::potentials::Tip4pCluster::new(n_molecules).rigid_geometry());
@@ -1358,6 +1367,92 @@ impl Config {
         cfg.relax_steps = 80;
         cfg.screen_steps = 15;
         cfg
+    }
+
+    /// Attach species labels, and optional per-atom diameters, to a preset.
+    ///
+    /// Temperature, allocation, and the other preset flags stay as they were.
+    /// Diameters, when present, widen the container and the neighbour cutoff
+    /// by the largest one and set the minimum separation from the smallest,
+    /// because a reduced-unit sphere built for `σ = 1` clips a larger species.
+    pub fn with_species(mut self, species: Vec<u32>, sigma: Option<Vec<f64>>) -> Self {
+        assert_eq!(
+            species.len(),
+            self.n_points,
+            "species length must match n_points"
+        );
+        if let Some(values) = sigma.as_ref() {
+            assert_eq!(
+                values.len(),
+                self.n_points,
+                "sigma length must match n_points"
+            );
+            assert!(
+                values.iter().all(|value| value.is_finite() && *value > 0.0),
+                "sigma must be finite and positive"
+            );
+            let max_sigma = values.iter().copied().fold(0.0_f64, f64::max);
+            let min_sigma = values.iter().copied().fold(f64::INFINITY, f64::min);
+            // Neighbour shells were cut for σ = 1. A larger species still
+            // has its contacts inside a cutoff grown by that diameter.
+            self.neighbour_cutoff *= max_sigma.max(1.0);
+            let span = LennardJonesPreset::CONTAINER_RADIUS
+                * self.length_scale
+                * max_sigma
+                * (self.n_points as f64).cbrt();
+            if span > self.container {
+                self.container = span;
+            }
+            let contact = LennardJonesPreset::MIN_SEPARATION * self.length_scale * min_sigma;
+            if contact.is_finite() && contact > 0.0 {
+                self.min_separation = contact;
+            }
+        }
+        self.species = Some(species);
+        self.species_sigma = sigma;
+        self
+    }
+
+    /// Install a rigid centre-and-rotation chart on a preset.
+    ///
+    /// `n_points` is the number of bodies. The state the hop minimises is
+    /// `6 n_points`: centres, then Rodrigues rotations. The orientation
+    /// step replaces the Cartesian library. Cartesian surfaces, SOAP, and
+    /// point-group completion read those centres as atoms, so they are
+    /// cleared. Temperature, allocation, the return screen, depth reward,
+    /// and tabu stay on the preset. The container grows to fit the
+    /// body-frame site reach. The orientation cap is
+    /// [`super::moves::RIGID_ORIENTATION_CAP`].
+    pub fn with_rigid_bodies(mut self, geometry: crate::rigid_body::RigidBodyGeometry) -> Self {
+        assert!(
+            self.n_points >= 2,
+            "a rigid cluster needs at least two bodies"
+        );
+        let reach = geometry.site_reach().max(1.0e-6);
+        self.move_library = MoveLibrary::RigidBody {
+            n_molecules: self.n_points,
+            translate_step: LennardJonesPreset::ALL_POINTS_STEP * self.length_scale,
+            rotate_step: super::moves::RIGID_ORIENTATION_CAP,
+            local: true,
+        };
+        let contact = 4.0 * reach;
+        let span = LennardJonesPreset::CONTAINER_RADIUS * contact * (self.n_points as f64).cbrt();
+        if span > self.container {
+            self.container = span;
+        }
+        self.min_separation = (2.8 * reach).max(self.min_separation);
+        self.surfaces.clear();
+        self.two_phase = None;
+        self.soap_mode = SoapProposalMode::Off;
+        self.soap_repel = false;
+        self.soap_class_residual = false;
+        self.symmetrise_on_stall = false;
+        self.point_symmetrise = false;
+        self.point_symmetrise_on_new = false;
+        self.orbit_complete_on_new = false;
+        self.angular_moves = false;
+        self.rigid_body_geometry = Some(geometry);
+        self
     }
 
     /// Species-aware molecular preset with rigid groups.
