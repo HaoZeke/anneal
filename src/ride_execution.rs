@@ -90,6 +90,8 @@ where
         &self,
         coordinates: ArrayView1<'_, f64>,
     ) -> Result<(f64, Array1<f64>), Self::Error> {
+        // `try_update` is the later name. 1.88 still has `fetch_update`.
+        #[allow(deprecated)]
         let reservation =
             self.evaluations
                 .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |evaluations| {

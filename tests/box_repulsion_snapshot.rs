@@ -9,6 +9,7 @@ use eindir_core::Bounds;
 use ndarray::{Array1, array};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
+#[allow(dead_code)]
 #[path = "../src/methods/minima_hopping.rs"]
 pub mod minima_hopping_source;
 mod methods {
@@ -16,8 +17,10 @@ mod methods {
     pub use anneal_core::methods::{cluster_hopping, ensemble};
 }
 
+#[allow(dead_code)]
 #[path = "../src/methods/box_hopping/coverage.rs"]
 mod coverage;
+#[allow(dead_code)]
 #[path = "../src/methods/box_hopping/repulsion.rs"]
 mod repulsion;
 use coverage::{BoxCoverageConfig, Coverage};

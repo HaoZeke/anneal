@@ -26,6 +26,7 @@ fn prefers_negative(candidate: [f64; 3], incumbent: [f64; 3]) -> bool {
 
 /// Shortest lattice image of each ordered pair, searched directly.
 /// An open axis contributes only the zero shift.
+#[allow(clippy::neg_cmp_op_on_partial_ord)]
 fn brute_shortest(
     positions: &[[f64; 3]],
     cell: &Cell,

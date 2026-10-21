@@ -104,10 +104,10 @@ impl SurfaceEvidenceBook {
         {
             return Err("occupied source is unresolved");
         }
-        if let Some((interval, _)) = checkpoint {
-            if interval != occupied.block {
-                return Ok(occupied);
-            }
+        if let Some((interval, _)) = checkpoint
+            && interval != occupied.block
+        {
+            return Ok(occupied);
         }
         Ok(occupied)
     }

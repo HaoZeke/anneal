@@ -302,14 +302,14 @@ where
             }
         };
         let mut quenched = quench(point.view());
-        if let Some(outcome) = activate_from_origin(point.view(), here.view(), &mut grad, cfg) {
-            if outcome.crossed {
-                let climbed = quench(outcome.state.view());
-                let climbed_e = energy(climbed.view());
-                let direct_e = energy(quenched.view());
-                if climbed_e.is_finite() && (!direct_e.is_finite() || climbed_e < direct_e) {
-                    quenched = climbed;
-                }
+        if let Some(outcome) = activate_from_origin(point.view(), here.view(), &mut grad, cfg)
+            && outcome.crossed
+        {
+            let climbed = quench(outcome.state.view());
+            let climbed_e = energy(climbed.view());
+            let direct_e = energy(quenched.view());
+            if climbed_e.is_finite() && (!direct_e.is_finite() || climbed_e < direct_e) {
+                quenched = climbed;
             }
         }
         let value = energy(quenched.view());
@@ -1176,7 +1176,6 @@ where
         }
         lambda = soft;
         lowest = soft;
-        directional = soft;
         if soft.is_finite() && soft < 0.0 {
             saw_negative = true;
         }
@@ -1267,9 +1266,6 @@ where
             let step_curvature = (along_after - along) / stride;
             if step_curvature.is_finite() {
                 lambda = step_curvature;
-                if step_curvature < 0.0 {
-                    saw_negative = true;
-                }
             }
             if along_after >= 0.0 {
                 uphill = true;
@@ -1287,7 +1283,7 @@ where
                 );
                 uphill = false;
             }
-            if steps % cfg.refresh.max(1) == 0
+            if steps.is_multiple_of(cfg.refresh.max(1))
                 && let Some((soft, soft_mode)) =
                     lowest_mode(cur.view(), evaluate, cfg.lanczos_steps, epsilon)
             {
@@ -1299,9 +1295,6 @@ where
                         break;
                     }
                     lambda = soft;
-                    if soft < 0.0 {
-                        saw_negative = true;
-                    }
                 }
             }
         }
@@ -1668,42 +1661,45 @@ where
         }
         (square / n_atoms as f64).sqrt() < contact * 1e-3
     };
-    let mut config = PesExplorationConfig::default();
-    config.ride_method = RideMethod::Lanczos;
     // The initial push is one curvature-scale step in 3N. Five doublings
     // stay inside a fraction of a contact, where the soft mode is still defined.
-    config.saddle_displacement = contact / (n_atoms as f64).sqrt();
-    config.activation_growth = 2.0;
-    config.activation_attempts = 5;
-    config.maximum_move = contact * 0.05;
-    config.quench_steps = n_atoms.saturating_mul(16).max(64);
-    config.saddle_steps = n_atoms.saturating_mul(4).max(64);
-    config.quench_gradient_tolerance = 1e-3;
-    config.saddle_force_tolerance = 1e-2;
-    config.minimum_mode_force_tolerance = 1e-2;
-    config.refine_with_prfo = false;
-    config.branch_attempts = 1;
-    config.irc_steps = 1;
     // One contact of root-mean-square motion. A shorter step falls back
     // into the well the climb just left.
-    config.irc_step = contact * (n_atoms as f64).sqrt();
-    let surface = ForceSurface {
-        evaluate: std::sync::Mutex::new(evaluate),
+    let config = PesExplorationConfig {
+        ride_method: RideMethod::Lanczos,
+        saddle_displacement: contact / (n_atoms as f64).sqrt(),
+        activation_growth: 2.0,
+        activation_attempts: 5,
+        maximum_move: contact * 0.05,
+        quench_steps: n_atoms.saturating_mul(16).max(64),
+        saddle_steps: n_atoms.saturating_mul(4).max(64),
+        quench_gradient_tolerance: 1e-3,
+        saddle_force_tolerance: 1e-2,
+        minimum_mode_force_tolerance: 1e-2,
+        refine_with_prfo: false,
+        branch_attempts: 1,
+        irc_steps: 1,
+        irc_step: contact * (n_atoms as f64).sqrt(),
+        ..PesExplorationConfig::default()
     };
     let mut network = PesNetwork::new();
-    let connection = discover_cartesian_mode_connection(
-        &surface,
-        &descriptor_space,
-        &mut network,
-        start,
-        masses.view(),
-        &frozen,
-        heading.view(),
-        Some(&species),
-        &config,
-        &witness,
-    );
-    drop(surface);
+    let connection = {
+        let surface = ForceSurface {
+            evaluate: std::sync::Mutex::new(evaluate),
+        };
+        discover_cartesian_mode_connection(
+            &surface,
+            &descriptor_space,
+            &mut network,
+            start,
+            masses.view(),
+            &frozen,
+            heading.view(),
+            Some(&species),
+            &config,
+            &witness,
+        )
+    };
     let mut saddle_pose: Option<(f64, Array1<f64>, Array1<f64>)> = None;
     let pushes = match connection {
         Ok(connection) => {
@@ -1788,27 +1784,29 @@ fn ride_lowest_mode<E, Q>(
         }
         (square / n_atoms as f64).sqrt() < contact * 1e-3
     };
-    let mut config = PesExplorationConfig::default();
-    config.ride_method = RideMethod::Lanczos;
     // The initial push is one curvature-scale step in 3N. Five doublings
     // stay inside a fraction of a contact, where the soft mode is still defined.
-    config.saddle_displacement = contact / (n_atoms as f64).sqrt();
-    config.activation_growth = 2.0;
-    config.activation_attempts = 5;
-    config.maximum_move = contact * 0.05;
-    config.quench_steps = n_atoms.saturating_mul(16).max(64);
-    config.saddle_steps = n_atoms.saturating_mul(2).max(64);
     // The library gates are tighter than a quenched Lennard-Jones cluster
     // reaches, so the ride aborts before the saddle is recorded.
-    config.quench_gradient_tolerance = 1e-3;
-    config.saddle_force_tolerance = 1e-2;
-    config.minimum_mode_force_tolerance = 1e-2;
-    config.refine_with_prfo = false;
     // One IRC step of one contact, then the quench. A shorter step falls
     // back into the same well. Many steps at this length tear the cluster.
-    config.branch_attempts = 1;
-    config.irc_steps = 1;
-    config.irc_step = contact * (n_atoms as f64).sqrt();
+    let config = PesExplorationConfig {
+        ride_method: RideMethod::Lanczos,
+        saddle_displacement: contact / (n_atoms as f64).sqrt(),
+        activation_growth: 2.0,
+        activation_attempts: 5,
+        maximum_move: contact * 0.05,
+        quench_steps: n_atoms.saturating_mul(16).max(64),
+        saddle_steps: n_atoms.saturating_mul(2).max(64),
+        quench_gradient_tolerance: 1e-3,
+        saddle_force_tolerance: 1e-2,
+        minimum_mode_force_tolerance: 1e-2,
+        refine_with_prfo: false,
+        branch_attempts: 1,
+        irc_steps: 1,
+        irc_step: contact * (n_atoms as f64).sqrt(),
+        ..PesExplorationConfig::default()
+    };
     println!(
         "{{\"kind\":\"dimer_cfg\",\"quench_tol\":{},\"saddle_tol\":{},\"move\":{}}}",
         config.quench_gradient_tolerance, config.saddle_force_tolerance, config.maximum_move
@@ -1880,6 +1878,8 @@ fn ride_lowest_mode<E, Q>(
             }
         }
     }
+    // Ends the borrow of `evaluate`. ForceSurface itself has no destructor.
+    #[allow(clippy::drop_non_drop)]
     drop(surface);
     // A static step off the saddle falls back above the floor. Give the
     // unstable mode the kinetic energy of the saddle above the reactant,
@@ -1898,7 +1898,7 @@ fn ride_lowest_mode<E, Q>(
             for (vel, component) in velocity.iter_mut().zip(mode.iter()) {
                 *vel = sign * speed * component;
             }
-            for _ in 0..(40) {
+            for _ in 0..40 {
                 let (_, gradient) = evaluate(point.view());
                 for i in 0..point.len() {
                     velocity[i] -= 0.5 * dt * gradient[i];
@@ -2898,7 +2898,7 @@ fn fivefold_opening(origin: ArrayView1<f64>, rmsd: f64, which: usize) -> Array1<
     if good.is_empty() {
         return origin.to_owned();
     }
-    let target = if which % 2 == 0 { 0.90 } else { 0.99 };
+    let target = if which.is_multiple_of(2) { 0.90 } else { 0.99 };
     let (axis, _) = good
         .iter()
         .min_by(|a, b| {
@@ -3050,7 +3050,7 @@ where
         }
         // Refresh the direction on schedule, and always after the curvature has
         // already been seen to fall, since that is where it rotates fastest.
-        if steps > 0 && steps % cfg.refresh == 0 && !hold_direction {
+        if steps > 0 && steps.is_multiple_of(cfg.refresh) && !hold_direction {
             match curvature_features(
                 cur.view(),
                 |y| {
