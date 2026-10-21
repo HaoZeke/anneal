@@ -1,14 +1,20 @@
 //! Record lines for thread-replica ensembles, shared by the LJ, water and
 //! surface drivers so one summariser reads every campaign.
 
+#![allow(dead_code)]
+
 use anneal_core::methods::cluster_hopping::Config;
 use anneal_core::methods::ensemble::{
     EnsembleConfig, EnsembleProblem, EnsembleReport, run_ensemble,
 };
+#[cfg(not(feature = "ira"))]
 use anneal_core::methods::minima_hopping::SerializedWitness;
 use anneal_core::pes_exploration::ExactStructureWitness;
-use ndarray::{Array1, ArrayView1};
+use ndarray::Array1;
+#[cfg(not(feature = "ira"))]
+use ndarray::ArrayView1;
 use std::io::{self, Write};
+#[cfg(not(feature = "ira"))]
 use std::sync::Mutex;
 
 /// Running totals over the seeds of one campaign arm.
@@ -39,6 +45,7 @@ impl Tally {
 /// `verify` re-evaluates the returned coordinates read-only and returns the
 /// energy and largest gradient component, or `None` when there is no state;
 /// it asserts the record against the coordinates the way the seed loop does.
+#[allow(clippy::type_complexity)]
 pub fn print_report(
     seed: u64,
     ens: &EnsembleConfig,
@@ -223,6 +230,7 @@ pub fn config_from_env(replicas: usize, budget: usize, target: Option<f64>) -> E
 /// are the same when their sorted pair spectra lie within `radius`. It
 /// over-merges homometric pairs and is for smoke runs only, which the
 /// header line says.
+#[cfg(not(feature = "ira"))]
 pub fn sorted_pairs_witness(
     n: usize,
     radius: f64,
@@ -244,6 +252,7 @@ pub fn sorted_pairs_witness(
 }
 
 /// Name of the witness in the header line.
+#[allow(dead_code)]
 pub fn witness_name() -> &'static str {
     if cfg!(feature = "ira") {
         "ira-cached"
@@ -254,7 +263,7 @@ pub fn witness_name() -> &'static str {
 
 /// Runs seeds `seed0..seed0 + seeds` of the ensemble, prints each report
 /// and the tally. `verify` re-evaluates a returned structure read-only.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn run_seeds<W: ExactStructureWitness + Sync + ?Sized>(
     cfg: &Config,
     ens: &EnsembleConfig,

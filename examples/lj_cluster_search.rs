@@ -7583,9 +7583,9 @@ fn run_history_ensembles(
     #[cfg(feature = "ira")]
     use anneal_core::methods::minima_hopping::SerializedWitness;
     use anneal_core::pes_exploration::StructureContext;
-    use ensemble_report::{
-        config_from_env, print_header, run_seeds, sorted_pairs_witness, witness_name,
-    };
+    #[cfg(not(feature = "ira"))]
+    use ensemble_report::sorted_pairs_witness;
+    use ensemble_report::{config_from_env, print_header, run_seeds, witness_name};
 
     let ens = config_from_env(replicas, budget, reference.map(|r| r + 1e-4));
     let mut cfg = cfg.clone();

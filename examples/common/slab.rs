@@ -4,6 +4,8 @@
 //! is what it fixes, and a rigid group is a connected component of the free
 //! atoms under their covalent radii.
 
+#![allow(dead_code)]
+
 use anneal_core::methods::cluster_hopping::covalent_radius;
 use eindir_core::Objective;
 use eindir_core::bounds::Bounds;

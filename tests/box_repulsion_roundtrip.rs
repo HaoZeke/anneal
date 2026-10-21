@@ -123,6 +123,7 @@ fn clearance(point: ArrayView1<f64>, peers: &[Array1<f64>], bounds: &Bounds<f64>
         .fold(f64::INFINITY, f64::min)
 }
 
+#[allow(clippy::type_complexity)]
 fn rounded_case(
     fixed: bool,
     values: bool,

@@ -74,7 +74,7 @@ fn boxed_boltzmann_never_leaves_the_box() {
     let history = run_rs_variant(variant, 20, 50, 0);
     assert_all_in_box(&probe.seen(), -3.0, 3.0);
     for &v in &history.best.pos {
-        assert!(v >= -3.0 - 1e-9 && v <= 3.0 + 1e-9, "best escaped: {v}");
+        assert!((-3.0 - 1e-9..=3.0 + 1e-9).contains(&v), "best escaped: {v}");
     }
 }
 
@@ -117,7 +117,7 @@ fn boxed_start_from_position_anchors_and_clips() {
     let history = run_rs_variant_from_position(variant, 1, 1, 123, Some(far));
     assert_all_in_box(&probe.seen(), -3.0, 3.0);
     for &v in &history.best.pos {
-        assert!(v >= -3.0 - 1e-9 && v <= 3.0 + 1e-9, "best escaped: {v}");
+        assert!((-3.0 - 1e-9..=3.0 + 1e-9).contains(&v), "best escaped: {v}");
     }
 }
 
@@ -131,6 +131,6 @@ fn boxed_qmc_anchor_runs_as_extra_chain_in_box() {
     assert_all_in_box(&probe.seen(), -3.0, 3.0);
     assert!(history.best.val.is_finite());
     for &v in &history.best.pos {
-        assert!(v >= -3.0 - 1e-9 && v <= 3.0 + 1e-9, "best escaped: {v}");
+        assert!((-3.0 - 1e-9..=3.0 + 1e-9).contains(&v), "best escaped: {v}");
     }
 }

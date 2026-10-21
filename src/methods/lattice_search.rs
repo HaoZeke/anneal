@@ -1375,10 +1375,7 @@ impl Lattice {
         let mut stats = DescentStats::default();
         let mut best_energy = energy;
         let mut best = x.to_vec();
-        loop {
-            let Some(moved) = self.search(&best, ledger) else {
-                break;
-            };
+        while let Some(moved) = self.search(&best, ledger) {
             stats.searches += 1;
             if moved.moves == 0 {
                 break;

@@ -203,7 +203,7 @@ impl Counted {
         for i in 0..n {
             let (xi, rest) = x[3 * i..].split_at(3);
             let mut gi = [0.0; 3];
-            for (jj, xj) in rest.chunks_exact(3).enumerate() {
+            for (jj, xj) in rest.as_chunks::<3>().0.iter().enumerate() {
                 let j = i + 1 + jj;
                 let d = [xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2]];
                 let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
