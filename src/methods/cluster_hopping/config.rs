@@ -1395,6 +1395,34 @@ impl Config {
         cfg
     }
 
+    /// [`Config::communicating`]'s search controls on [`Config::for_tip4p`].
+    ///
+    /// Thompson allocation, the return screen and Recognition carry over.
+    /// Orbit completion, symmetrisation and the two-phase surface act on
+    /// atom positions, not on centre-and-rotation states, so they stay off.
+    pub fn communicating_tip4p(n_molecules: usize) -> Self {
+        let mut cfg = Self::for_tip4p(n_molecules);
+        cfg.allocate_moves = true;
+        cfg.return_screen = true;
+        cfg.shared_deposits = 0;
+        cfg.shared_visit_policy = crate::methods::minima_hopping::SharedVisitPolicy::Recognition;
+        cfg
+    }
+
+    /// [`Config::recommended`]'s search controls on [`Config::for_tip4p`].
+    ///
+    /// Thompson allocation with depth reward, the return screen and tabu
+    /// on stall carry over; the atom-position moves stay off, as in
+    /// [`Config::communicating_tip4p`].
+    pub fn recommended_tip4p(n_molecules: usize) -> Self {
+        let mut cfg = Self::for_tip4p(n_molecules);
+        cfg.allocate_moves = true;
+        cfg.depth_reward = true;
+        cfg.tabu_on_stall = true;
+        cfg.return_screen = true;
+        cfg
+    }
+
     /// Species-aware molecular preset with rigid groups.
     pub fn for_molecular(species: Vec<u32>, groups: Vec<Vec<usize>>, energy_scale: f64) -> Self {
         assert!(!species.is_empty(), "species must not be empty");
