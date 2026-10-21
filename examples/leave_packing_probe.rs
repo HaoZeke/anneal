@@ -34,7 +34,6 @@ use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::{PairKind, PairPotential};
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
-use rand::SeedableRng;
 
 fn load_xyz(text: &str) -> Array1<f64> {
     let coordinates = text
