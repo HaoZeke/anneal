@@ -6688,6 +6688,17 @@ mod tests {
         let mut cfg = Config::for_cluster(6);
         cfg.screen_margin = -1.0e12;
         let mut ledger = Ledger::new(4000);
+        let mut relax = toy_relax;
+        let out = optimize(&cfg, &mut ledger, &mut relax, 1);
+        assert!(out.hops > 0, "no hop completed");
+        assert_eq!(
+            out.screened_out,
+            out.hops - out.hops / ScreenDescent::AUDIT,
+            "the calibrated screen must audit every eighth refusal"
+        );
+
+        cfg.calibrated_screen = false;
+        let mut ledger = Ledger::new(4000);
         let mut relaxation_steps = Vec::new();
         let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
             relaxation_steps.push(steps);
