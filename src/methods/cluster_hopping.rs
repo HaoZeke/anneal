@@ -1584,6 +1584,66 @@ where
 const RIGID_HOT_BODIES: usize = 10;
 /// Highest rigid factor on a chart with more than [`RIGID_HOT_BODIES`] bodies.
 const RIGID_FACTOR_CAP_LARGE: f64 = 4.0;
+/// Metropolis acceptance the orientation amplitude aims at.
+///
+/// The ratio a Cartesian basin-hopping step is adjusted toward, and the
+/// default of GMIN's acceptance-ratio update. A chart with more than ten
+/// bodies keeps its acceptance temperature at the factor cap and moves this
+/// amplitude instead, so the two controls do not chase the same ratio.
+const RIGID_ACCEPT_TARGET: f64 = 0.5;
+/// Quenched trials between orientation-amplitude updates.
+const RIGID_ACCEPT_BLOCK: usize = 50;
+/// Multiplier applied when a block misses [`RIGID_ACCEPT_TARGET`].
+const RIGID_STEP_FACTOR: f64 = 1.05;
+
+/// Next orientation amplitude after one acceptance block.
+///
+/// Above the target the step grows, below it the step shrinks, and the
+/// result stays inside `(1e-3, 1]`. One is the orientation cap already
+/// stored on the move: a larger kick is the regime the factor cap exists
+/// to keep a large water chart out of.
+fn rigid_step_scale(scale: f64, accepted: usize, trials: usize) -> f64 {
+    if trials == 0 {
+        return scale;
+    }
+    let rate = accepted as f64 / trials as f64;
+    let next = if rate > RIGID_ACCEPT_TARGET {
+        scale * RIGID_STEP_FACTOR
+    } else if rate < RIGID_ACCEPT_TARGET {
+        scale / RIGID_STEP_FACTOR
+    } else {
+        scale
+    };
+    next.clamp(1.0e-3, 1.0)
+}
+
+#[cfg(test)]
+mod rigid_step_tests {
+    use super::rigid_step_scale;
+
+    #[test]
+    fn a_low_acceptance_shrinks_the_orientation_step_and_a_high_one_grows_it() {
+        let shrunk = rigid_step_scale(1.0, 10, 50);
+        assert!(
+            (shrunk - 1.0 / 1.05).abs() < 1e-12,
+            "low acceptance left the step at {shrunk}"
+        );
+        let grown = rigid_step_scale(0.8, 40, 50);
+        assert!(
+            (grown - 0.84).abs() < 1e-12,
+            "high acceptance left the step at {grown}"
+        );
+        assert_eq!(
+            rigid_step_scale(1.0, 40, 50),
+            1.0,
+            "the step grew past the orientation cap"
+        );
+        assert!(
+            (rigid_step_scale(0.9, 25, 50) - 0.9).abs() < 1e-12,
+            "an acceptance of one half moved the step"
+        );
+    }
+}
 
 fn rigid_factor_cap(n_bodies: usize) -> f64 {
     if n_bodies > RIGID_HOT_BODIES {
@@ -2212,12 +2272,12 @@ where
     let mut screened_out = 0usize;
     let mut returned = 0usize;
     let mut accepted = 0usize;
-    // A rigid chart is not in the preset's reduced energy unit. Starting at
-    // the top of the acceptance window lets the rate pull the factor down
-    // toward a half. A unit factor keeps the first basins downhill-only.
-    // The cap is lower once the chart has more than ten bodies: the same
-    // all-body kick then leaves the hydrogen-bond funnel whenever the
-    // factor is allowed back up to 24.
+    // A rigid chart is not in the preset's reduced energy unit. Charts of
+    // ten bodies or fewer start at the top of the acceptance window and let
+    // the rate pull the factor down. A chart with more bodies stays at the
+    // lower cap: the orientation amplitude, not the temperature, is what
+    // tracks the acceptance ratio. Letting that factor climb back to 24
+    // leaves the hydrogen-bond funnel.
     let mut rigid_factor: f64 = if cfg.move_library.is_rigid_body() {
         rigid_factor_cap(cfg.n_points)
     } else {
@@ -2225,6 +2285,12 @@ where
     };
     let mut rigid_window = 0usize;
     let mut rigid_hits = 0usize;
+    // Large rigid charts hold the acceptance temperature at the factor cap.
+    // The orientation amplitude is what moves toward a one-half acceptance
+    // ratio. Charts of ten bodies and fewer leave both untouched.
+    let mut orient_scale = 1.0_f64;
+    let mut orient_window = 0usize;
+    let mut orient_yes = 0usize;
     let mut hops = 0usize;
     let mut checkpoint_hops = 0usize;
     let mut checkpoint_quench_start = 0usize;
@@ -3304,7 +3370,12 @@ where
                     pending_features = Some(f);
                     cand
                 }
-                _ => kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng),
+                _ => kernels[k].propose_scaled(
+                    x.view(),
+                    cfg.temperature,
+                    escape * orient_scale,
+                    rng,
+                ),
             }
         };
         // Identity SOAP is not an arm. Thompson must not buy a no-op:
@@ -3334,7 +3405,12 @@ where
                         pending_features = Some(f);
                         cand
                     }
-                    _ => kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng),
+                    _ => kernels[k].propose_scaled(
+                        x.view(),
+                        cfg.temperature,
+                        escape * orient_scale,
+                        rng,
+                    ),
                 };
                 swapped = true;
                 break;
@@ -4030,6 +4106,17 @@ where
             d < 0.0 || rng.random::<f64>() < (-d).exp()
         };
         let mut accept = accept;
+        if cfg.move_library.is_rigid_body() && cfg.n_points > RIGID_HOT_BODIES {
+            orient_window += 1;
+            if accept {
+                orient_yes += 1;
+            }
+            if orient_window >= RIGID_ACCEPT_BLOCK {
+                orient_scale = rigid_step_scale(orient_scale, orient_yes, orient_window);
+                orient_window = 0;
+                orient_yes = 0;
+            }
+        }
         // AS-KMC (Chatterjee–Voter 2010): after N_f sightings the
         // intra-packing hop is a frequent process. Raise its barrier
         // (α = 2, their usual superbasin tolerance) so the rare exit
@@ -4055,7 +4142,10 @@ where
             // temperature window should see.
             accept = false;
         }
-        if cfg.move_library.is_rigid_body() && (!returning || (e_new - e).abs() > 5.0e-2) {
+        if cfg.move_library.is_rigid_body()
+            && cfg.n_points <= RIGID_HOT_BODIES
+            && (!returning || (e_new - e).abs() > 5.0e-2)
+        {
             // Same-basin accepts have no energy change, and counting them
             // keeps a rigid chart cold. Only a move that lands on a
             // different minimum says whether the temperature is high enough.

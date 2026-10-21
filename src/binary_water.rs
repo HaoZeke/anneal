@@ -4,8 +4,11 @@
 //! unchanged. Species labels and a rigid chart are applied afterwards.
 //! A wide diameter ratio escapes by one softened microcanonical step across
 //! a barrier, and a narrow ratio exchanges mismatched labels. Water takes
-//! an all-body orientation step. The acceptance temperature of a rigid
-//! chart is scaled inside the hop so the preset temperature is left where it is.
+//! an all-body orientation step. A chart with more than ten bodies holds
+//! the acceptance factor at its cap and scales that step toward an
+//! acceptance ratio of one half. Ten bodies or fewer keep the factor
+//! window and the fixed orientation cap. The preset temperature is left
+//! where it is.
 
 use ndarray::{Array1, ArrayView1};
 
