@@ -152,7 +152,10 @@ coefficients (e.g. =MERGE_RADIUS = 0.7=, =TEMPERATURE = 0.8=,
 =BIAS_HEIGHT = 0.25=, =SOAP_RMSD = 0.35=, =SOAP_CUTOFF = 3.5=,
 =MIN_SEPARATION = 0.85=) multiplied by declared length/energy scales.
 =Config::recommended= (config.rs:755) selects =MoveLibrary::LeanBurst=
-with the SOAP arm and Thompson allocation over the arms.
+with the SOAP arm and Thompson allocation over the arms. Like
+=Config::communicating=, it completes the core's orbit on every new basin
+and, below 98 points, draws between the plain and the two-phase relative
+0.7 surface.
 
 Feeds/consumes: selected per-config by =MoveLibrary::kernels=; chosen
 per-hop by the allocators below (=allocate_moves= / =contextual_moves= /
