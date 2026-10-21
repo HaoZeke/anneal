@@ -17,6 +17,8 @@ pkg-config --cflags --libs anneal-core
 
 A hand-written companion header =anneal-core.hpp= wraps the C declarations in =namespace anneal= for ergonomic C++ usage.
 
+The install also places =dlpack/dlpack.h= (DLPack 1.3, the header =dlpk= 0.1.5 was translated from) on that include prefix. =anneal-core.h= includes it, so =pkg-config --cflags anneal-core= is enough to compile a consumer. Meson and CMake install the same header.
+
 * Build-system glue
 
 ** Meson
