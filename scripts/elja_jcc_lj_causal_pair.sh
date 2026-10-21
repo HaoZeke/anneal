@@ -2,6 +2,13 @@
 # Matched shared-catalog and private-catalog LJ ensembles in one allocation.
 set -euo pipefail
 
+# macOS ships shasum rather than GNU sha256sum. Text-mode output matches.
+if ! command -v sha256sum >/dev/null 2>&1; then
+  sha256sum() {
+    shasum -a 256 "$@"
+  }
+fi
+
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
   echo "elja_jcc_lj_causal_pair.sh requires a Slurm allocation" >&2
   exit 1
