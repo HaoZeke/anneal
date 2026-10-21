@@ -38,7 +38,7 @@ def test_config_recommended_and_for_cluster():
     assert rec.depth_reward
     assert rec.tabu_on_stall
     assert rec.shared_visit_policy == "tabu"
-    assert not rec.orbit_complete_on_new
+    assert rec.orbit_complete_on_new
     assert not base.burst_moves
     assert not base.allocate_moves
     assert not base.depth_reward

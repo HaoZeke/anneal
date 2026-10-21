@@ -5690,7 +5690,7 @@ mod tests {
         let rec = Config::recommended(75);
         let comm = Config::communicating(75);
         assert!(rec.depth_reward);
-        assert!(!rec.orbit_complete_on_new);
+        assert!(rec.orbit_complete_on_new);
         assert_eq!(rec.shared_visit_policy, SharedVisitPolicy::Tabu);
         assert!(!comm.depth_reward);
         assert!(comm.orbit_complete_on_new);
@@ -5703,13 +5703,13 @@ mod tests {
         assert!(matches!(rec.move_library, MoveLibrary::LeanBurst));
         assert_eq!(comm.surfaces.len(), 1);
         assert!(comm.surfaces[0].is_active());
-        assert!(rec.surfaces.is_empty());
+        assert_eq!(rec.surfaces, comm.surfaces);
         assert!(Config::communicating(98).surfaces.is_empty());
     }
 
     #[test]
     fn packing_surface_names_twin_and_orbit_together() {
-        let mut cfg = Config::recommended(13);
+        let mut cfg = Config::for_cluster(13);
         assert!(!cfg.packing_surface().orbit_on_new);
         assert!(!cfg.packing_surface().twin_as_move);
         cfg.orbit_complete_on_new = true;
