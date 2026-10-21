@@ -270,7 +270,10 @@ def cluster_search(
         set, because those keep the stock preset.
       species: optional label per point. Two or more labels add a swap move.
       sigmas: optional diameter per point, same length as ``species``.
-      rigid: hop in centre and Rodrigues rotation coordinates.
+      rigid: hop in centre and Rodrigues rotation coordinates. A chart of
+        more than ten bodies holds the acceptance factor at 4 and scales
+        the orientation amplitude toward an acceptance ratio of one half.
+        Ten bodies or fewer do not.
       layout: ``block`` or ``interleaved``. Interleaved is the per-body
         centre and angle-axis order, with rotations negated at the boundary.
       target: stop once a recorded energy is at or below this value.

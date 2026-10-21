@@ -60,9 +60,10 @@ bodies. =layout="block"= stores every centre, then every rotation.
 =layout="interleaved"= is centre then angle-axis per body, and the
 rotations are negated at the boundary. The orientation step turns every
 body and leaves the centres where they are. On a chart of more than ten
-bodies the acceptance factor stays at or below 4; a ten-body chart may
-still climb to 24. Preset temperature, screen length, relax length, and
-record gradient are unchanged.
+bodies the acceptance factor stays at 4 and the orientation amplitude
+is scaled toward an acceptance ratio of one half. A ten-body chart may
+still climb to 24 and does not scale the amplitude. Preset temperature,
+screen length, relax length, and record gradient are unchanged.
 
 #+begin_src python
 water = cluster_search(
