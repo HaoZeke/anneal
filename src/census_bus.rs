@@ -4,6 +4,14 @@
 //! energy, Cartesian coordinates) on a `Pub0` socket when it changes, with
 //! an unchanged-state refresh every eight eligible checkpoints. One `Sub0`
 //! socket reads direct neighbours selected by the configured topology.
+//! [`CensusBus::new`] binds this replica and dials those neighbours
+//! immediately; a peer that is not listening yet is retried in the
+//! background. Several replicas in one process must [`CensusBus::bind`]
+//! every publisher before any [`CensusBus::dial`]. A dial that finishes
+//! its TCP handshake against a placeholder still holding the port waits
+//! for a protocol header that never arrives. That wait is ten seconds.
+//! macOS does not reset the unaccepted connection when the placeholder
+//! closes, so the dialer stays in negotiation until the timeout.
 //! Nothing here goes through the coordinator: the neighbourhood's
 //! live positions, which are what the crowd count, the repulsion references
 //! and the shared-bias deposits need, arrive peer to peer with no round
@@ -46,6 +54,9 @@ pub struct PeerMinimum {
 pub struct CensusBus {
     replica: u32,
     replicas: u32,
+    base_port: u16,
+    /// [`CensusBus::dial`] runs once. A second dial would open another pipe.
+    dialed: bool,
     publisher: Socket,
     subscriber: Socket,
     latest: HashMap<u32, PeerMinimum>,
@@ -79,7 +90,26 @@ impl CensusBus {
     /// selects cyclic distances up to `k`; zero is all-to-all. This restricts
     /// direct census delivery, not coordinator-mediated adoption, and supplies
     /// no logarithmic mixing guarantee.
+    ///
+    /// One replica per process uses this. Peers that have not bound yet are
+    /// retried by nng. An in-process cohort uses [`CensusBus::bind`] and
+    /// [`CensusBus::dial`] instead, so no dial completes against a port that
+    /// is still only reserved.
     pub fn new(replica: u32, base_port: u16, replicas: u32) -> Result<Self, CensusBusError> {
+        let mut bus = Self::bind(replica, base_port, replicas)?;
+        bus.dial();
+        Ok(bus)
+    }
+
+    /// Binds this replica's publisher and subscribes, without dialing.
+    ///
+    /// Hold each port until this returns, then [`CensusBus::dial`] only once
+    /// every in-process peer has bound. A non-blocking dial that connects
+    /// first to a placeholder completes the TCP handshake there. nng then
+    /// waits ten seconds for a protocol header. macOS does not reset that
+    /// unaccepted connection when the placeholder closes, so the dialer
+    /// cannot reach the real publisher until the timeout.
+    pub fn bind(replica: u32, base_port: u16, replicas: u32) -> Result<Self, CensusBusError> {
         let publisher =
             Socket::new(Protocol::Pub0).map_err(|e| CensusBusError(format!("pub: {e}")))?;
         publisher
@@ -100,26 +130,11 @@ impl CensusBus {
         subscriber
             .set_opt::<nng::options::RecvMaxSize>(0)
             .map_err(|e| CensusBusError(format!("receive limit: {e}")))?;
-        let neighbors: u32 = std::env::var("CENSUS_BUS_NEIGHBORS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-        for peer in 0..replicas {
-            if !accepts_peer(
-                replica as usize,
-                peer as usize,
-                replicas as usize,
-                neighbors as usize,
-            ) {
-                continue;
-            }
-            // Non-blocking dial: peers that have not bound yet are retried
-            // by nng in the background.
-            let _ = subscriber.dial_async(&url(base_port, peer));
-        }
         Ok(Self {
             replica,
             replicas,
+            base_port,
+            dialed: false,
             publisher,
             subscriber,
             latest: HashMap::new(),
@@ -129,6 +144,33 @@ impl CensusBus {
             pending_wells: Vec::new(),
             nearby: HashMap::new(),
         })
+    }
+
+    /// Dials the configured neighbours once. Peers that are not listening yet
+    /// are retried by nng in the background. `CENSUS_BUS_NEIGHBORS=k` selects
+    /// cyclic distances up to `k`; zero is all-to-all.
+    pub fn dial(&mut self) {
+        if self.dialed {
+            return;
+        }
+        self.dialed = true;
+        let neighbors: u32 = std::env::var("CENSUS_BUS_NEIGHBORS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        for peer in 0..self.replicas {
+            if !accepts_peer(
+                self.replica as usize,
+                peer as usize,
+                self.replicas as usize,
+                neighbors as usize,
+            ) {
+                continue;
+            }
+            // Non-blocking dial: peers that have not bound yet are retried
+            // by nng in the background.
+            let _ = self.subscriber.dial_async(&url(self.base_port, peer));
+        }
     }
 
     /// Publishes a well table for gossip: `(centre, depth)` pairs, deepest
@@ -357,6 +399,8 @@ mod tests {
         CensusBus {
             replica: 0,
             replicas: 2,
+            base_port: 0,
+            dialed: false,
             publisher: Socket::new(Protocol::Pub0).unwrap(),
             subscriber: Socket::new(Protocol::Sub0).unwrap(),
             latest: HashMap::new(),
