@@ -1386,6 +1386,9 @@ def global_optimize(
     ``arm_pulls``, and ``arm_successes``. Multiple replicas also report
     individual results, ``charged`` work and coverage sample counters.
     """
+    # int() truncates a float, so 1.5 would run as 1. A neighbour count is whole.
+    if not isinstance(coverage_neighbors, (int, np.integer)):
+        raise TypeError("coverage_neighbors must be an integer")
     out = _core_global_optimize(
         obj_fn,
         _flat(low),
