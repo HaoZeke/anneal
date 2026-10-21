@@ -32,8 +32,11 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # `--all` also formats path dependencies. vendor/nng is third-party
+      # code with its own rustfmt configuration, and stable rustfmt
+      # rewrites it. Format this package only.
       - name: cargo fmt
-        run: cargo fmt --all -- --check
+        run: cargo fmt -- --check
 
       - name: Verify crate publication package
         run: cargo publish --dry-run
