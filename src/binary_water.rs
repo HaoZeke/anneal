@@ -2,10 +2,12 @@
 //!
 //! [`Config::recommended`] and [`Config::communicating`] stay numerically
 //! unchanged. Species labels and a rigid chart are applied afterwards.
-//! A wide diameter ratio escapes by one softened microcanonical step across
-//! a barrier, and a narrow ratio exchanges mismatched labels. Water takes
-//! an all-body orientation step. The acceptance temperature of a rigid
-//! chart is scaled inside the hop so the preset temperature is left where it is.
+//! With diameters, at least half of the proposals exchange one unlike
+//! pair, and a record within one energy unit of the target is finished
+//! by downhill quench-assisted exchanges. Water takes an all-body
+//! orientation step and leaves the centres fixed. The acceptance
+//! temperature of a rigid chart is
+//! scaled inside the hop so the preset temperature is left where it is.
 
 use ndarray::{Array1, ArrayView1};
 

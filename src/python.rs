@@ -3381,11 +3381,15 @@ fn rigid_probe(
 ///     preset, hops use `with_scales` instead of the reduced LJ container.
 ///     Ignored once `species` or `rigid` selects a chart: those keep the
 ///     stock preset and adapt geometry afterwards.
-///   species: optional label per point. Two or more labels add a swap move.
+///   species: optional label per point. Two or more labels add one
+///     identity exchange.
 ///   sigmas: optional Lennard-Jones diameter per point, same length as
-///     `species`. Large diameters are swapped out of the inner shell.
+///     `species`. With diameters the library is a collective
+///     displacement, an angular relocation, and the identity exchange,
+///     and at least half of the proposals take the exchange.
 ///   rigid: when true, `n` is the number of rigid bodies and the hop state
-///     is centres followed by Rodrigues rotations.
+///     is centres followed by Rodrigues rotations. Every body is
+///     reoriented and the centres stay fixed.
 ///   layout: `block` (centres, then rotations) or `interleaved` (GMIN
 ///     centre and angle-axis per body). Interleaved rotations are negated
 ///     at the boundary because that angle-axis map is the opposite sense.

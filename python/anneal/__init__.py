@@ -3,7 +3,7 @@
 Search splits on geometry, then on gradient:
 
   - cluster_search(obj, grad, n, budget, ...): 3N point set, or 6N when
-    rigid=True. species adds a swap move. recommended / derived / ras
+    rigid=True. species adds an identity exchange. recommended / derived / ras
     select the hop preset.
   - ensemble_optimize(obj, low, high, budget, grad_fn=None, ...): design box.
     Gradient means hop and quench; no gradient means a values-only search.
@@ -268,9 +268,14 @@ def cluster_search(
         this uses ``with_scales`` so an angstrom start is not crushed into
         the reduced LJ container. Ignored when ``species`` or ``rigid`` is
         set, because those keep the stock preset.
-      species: optional label per point. Two or more labels add a swap move.
+      species: optional label per point. Two or more labels add one
+        identity exchange.
       sigmas: optional diameter per point, same length as ``species``.
-      rigid: hop in centre and Rodrigues rotation coordinates.
+        With diameters the library is a collective displacement, an
+        angular relocation, and the identity exchange, and at least half
+        of the proposals take the exchange.
+      rigid: hop in centre and Rodrigues rotation coordinates. Every body
+        is reoriented and the centres stay fixed.
       layout: ``block`` or ``interleaved``. Interleaved is the per-body
         centre and angle-axis order, with rotations negated at the boundary.
       target: stop once a recorded energy is at or below this value.

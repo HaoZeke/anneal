@@ -40,12 +40,16 @@ out = cluster_search(lj, lj_g, cfg.n_points, 4000, seed=0, recommended=True)
 print(out["hops"], round(out["best_energy"], 3), len(out["best"]))
 # derived=True selects Config.derived(n). ras=True is residual archive search.
 # communicating=True selects Config.communicating(n).
-# species and sigmas add a diameter-aware swap. rigid=True is a 6N chart.
+# species and sigmas add an identity exchange. rigid=True is a 6N chart.
 #+end_src
 
 A binary cluster passes one species label and one diameter per atom.
-=sigmas= must be the same length as =species=. =target= ends the search
-when a recorded energy reaches it.
+=sigmas= must be the same length as =species=. The library is then a
+collective displacement, an angular relocation, and one identity
+exchange, and at least half of the proposals take the exchange. A
+record within one energy unit of
+=target= is finished by downhill quench-assisted exchanges. =target=
+ends the search when a recorded energy reaches it.
 
 #+begin_src python
 binary = cluster_search(
