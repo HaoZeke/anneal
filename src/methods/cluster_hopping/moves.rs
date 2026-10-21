@@ -128,7 +128,10 @@ impl MoveLibrary {
                     n_points: cfg.n_points,
                     neighbour_cutoff: cfg.neighbour_cutoff,
                 });
-                if cfg.soap_mode != SoapProposalMode::Off {
+                // Diameters make the homotop part of the search. The cloud
+                // pullback rebuilds a neighbourhood and does not exchange
+                // identities.
+                if cfg.soap_mode != SoapProposalMode::Off && cfg.species_sigma.is_none() {
                     kernels.push(soap_arm(cfg, None, None));
                 }
                 if matches!(self, Self::LeanBurstHollow) {
@@ -246,7 +249,31 @@ impl MoveLibrary {
                     labels.dedup();
                     labels.len()
                 };
-                if distinct >= 2 && species.len() == cfg.n_points {
+                let binary_diameters = distinct >= 2
+                    && species.len() == cfg.n_points
+                    && cfg.species_sigma.is_some();
+                if binary_diameters {
+                    // Fixed composition, with diameters. The moves are a
+                    // displacement of every atom, relocation of a weakly
+                    // bound atom about the centre of mass, and one
+                    // identity exchange. Monoatomic arms are for a single
+                    // diameter and stay off this list.
+                    kernels = vec![
+                        ClusterMove::AllPoints {
+                            step: LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale,
+                        },
+                        ClusterMove::Angular {
+                            n_points: cfg.n_points,
+                            length_scale: cfg.length_scale,
+                            energy_scale: cfg.energy_scale,
+                        },
+                        ClusterMove::SpeciesSwap {
+                            n_points: cfg.n_points,
+                            species: species.clone(),
+                            sigma: cfg.species_sigma.clone(),
+                        },
+                    ];
+                } else if distinct >= 2 && species.len() == cfg.n_points {
                     kernels.push(ClusterMove::SpeciesSwap {
                         n_points: cfg.n_points,
                         species: species.clone(),
@@ -503,18 +530,14 @@ pub enum ClusterMove {
         /// Lennard-Jones energy scale used by the binding criterion.
         energy_scale: f64,
     },
-    /// Exchange coordinates of unlike species.
+    /// Exchange coordinates of one unlike pair.
     ///
-    /// With per-atom diameters, a large atom in the inner shell swaps with
-    /// a small atom outside it. When the largest diameter is at least 1.2
-    /// times the smallest, only the innermost large atom and the outermost
-    /// small atom are exchanged: exchanging every mismatched pair climbs
-    /// out of a partially mixed core-shell minimum. A smaller mismatch
-    /// exchanges every such pair. A segregated cluster has no such pair,
-    /// so one random unlike exchange is drawn instead and the move is not
-    /// the identity. Without diameters, `1 + round(n^(1/3))` random unlike
-    /// pairs are exchanged. Species counts stay on the indices; only
-    /// coordinates move.
+    /// Composition stays fixed. The pair is drawn at random, so a large
+    /// atom can move inward or outward. At a size ratio near 1.3 the low
+    /// minima are not a pure core of small atoms: the larger atoms also
+    /// occupy high-coordination interior sites. Species counts stay on the
+    /// indices; only coordinates move. Diameters are carried so the caller
+    /// can see them, and they do not choose the pair.
     SpeciesSwap {
         /// Atoms in the state.
         n_points: usize,
@@ -2003,6 +2026,24 @@ fn haar_rotation<R: Rng + ?Sized>(rng: &mut R) -> [[f64; 3]; 3] {
     ]
 }
 
+/// Fraction of proposals that take the identity exchange when that move
+/// is in the library.
+///
+/// Doye and Meyer keep the composition fixed and spend half or more of
+/// the steps on one A-B exchange. The other half still contains the
+/// exchange, so the share is at least this fraction. It is not a preset
+/// field.
+pub(crate) const IDENTITY_SWAP_SHARE: f64 = 0.5;
+
+/// `chosen` unless `draw` falls in [`IDENTITY_SWAP_SHARE`] and `swap_at`
+/// names the identity-exchange arm.
+pub(crate) fn select_identity_share(swap_at: Option<usize>, draw: f64, chosen: usize) -> usize {
+    match swap_at {
+        Some(index) if draw < IDENTITY_SWAP_SHARE => index,
+        _ => chosen,
+    }
+}
+
 fn species_swap<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     n_points: usize,
@@ -2011,74 +2052,116 @@ fn species_swap<R: Rng + ?Sized>(
     rng: &mut R,
 ) -> Array1<f64> {
     let mut y = x.to_owned();
+    let _ = sigma;
     if n_points < 2 || species.len() != n_points || y.len() < 3 * n_points {
         return y;
     }
-    let mut centre = [0.0; 3];
-    for i in 0..n_points {
-        for k in 0..3 {
-            centre[k] += y[3 * i + k];
-        }
-    }
-    for value in centre.iter_mut() {
-        *value /= n_points as f64;
-    }
-    let radii: Vec<f64> = (0..n_points)
-        .map(|i| {
-            let mut radius = 0.0;
-            for k in 0..3 {
-                let delta = y[3 * i + k] - centre[k];
-                radius += delta * delta;
-            }
-            radius.sqrt()
-        })
-        .collect();
-    let mut swapped = 0usize;
-    if let Some(sigma) = sigma.filter(|values| values.len() == n_points) {
-        let mean = sigma.iter().sum::<f64>() / n_points as f64;
-        let n_small = sigma.iter().filter(|value| **value <= mean + 1e-12).count();
-        let mut order: Vec<usize> = (0..n_points).collect();
-        order.sort_by(|&left, &right| radii[left].total_cmp(&radii[right]));
-        let mut in_core = vec![false; n_points];
-        for &index in order.iter().take(n_small) {
-            in_core[index] = true;
-        }
-        let mut core_large: Vec<usize> = (0..n_points)
-            .filter(|&index| in_core[index] && sigma[index] > mean + 1e-12)
-            .collect();
-        let mut shell_small: Vec<usize> = (0..n_points)
-            .filter(|&index| !in_core[index] && sigma[index] <= mean + 1e-12)
-            .collect();
-        core_large.sort_by(|&left, &right| radii[left].total_cmp(&radii[right]));
-        shell_small.sort_by(|&left, &right| radii[right].total_cmp(&radii[left]));
-        let pairs = core_large.len().min(shell_small.len());
-        let max_sigma = sigma.iter().copied().fold(0.0_f64, f64::max);
-        let min_sigma = sigma.iter().copied().fold(f64::INFINITY, f64::min);
-        let wide = min_sigma > 0.0 && max_sigma / min_sigma >= 1.2;
-        let pair_limit = if wide { 1.min(pairs) } else { pairs };
-        for pair in 0..pair_limit {
-            swap_atoms(&mut y, core_large[pair], shell_small[pair]);
-        }
-        swapped = pair_limit;
-    }
-    if swapped == 0 {
-        let draws = if sigma.is_some() {
-            1
-        } else {
-            1 + (n_points as f64).cbrt().round() as usize
-        };
-        for _ in 0..draws {
-            for _try in 0..16 {
-                let i = rng.random_range(0..n_points);
-                let j = rng.random_range(0..n_points);
-                if i != j && species[i] != species[j] {
-                    swap_atoms(&mut y, i, j);
-                    break;
-                }
-            }
+    for _try in 0..32 {
+        let i = rng.random_range(0..n_points);
+        let j = rng.random_range(0..n_points);
+        if i != j && species[i] != species[j] {
+            swap_atoms(&mut y, i, j);
+            break;
         }
     }
     y
+}
+
+/// Downhill quench-assisted identity exchanges until none remain.
+///
+/// A biminimum is a local minimum in coordinates and in label swaps:
+/// exchanging any unlike pair and quenching does not lower the energy.
+/// Uphill exchanges are rejected. The candidate list shrinks by the pair
+/// just accepted and is restored after a pass with no descent. Every
+/// evaluation goes through `relax` and is charged by that callback.
+/// The walk stops when the ledger is empty or its target is reached.
+pub(crate) fn converge_biminimum<R: Rng + ?Sized>(
+    coordinates: &mut Array1<f64>,
+    energy: &mut f64,
+    species: &[u32],
+    relax: super::Relax<'_>,
+    ledger: &mut super::Ledger,
+    relax_steps: usize,
+    _rng: &mut R,
+) {
+    let n = species.len();
+    if n < 2 || coordinates.len() != 3 * n || !energy.is_finite() {
+        return;
+    }
+    let mut labels = species.to_vec();
+    labels.sort_unstable();
+    labels.dedup();
+    if labels.len() < 2 {
+        return;
+    }
+    let mut active: Vec<usize> = (0..n).collect();
+    let mut shrunk = false;
+    loop {
+        if ledger.remaining() == 0 || ledger.target_reached() {
+            return;
+        }
+        let mut pairs = Vec::new();
+        for left in 0..active.len() {
+            for right in (left + 1)..active.len() {
+                let a = active[left];
+                let b = active[right];
+                if species[a] != species[b] {
+                    pairs.push((a, b));
+                }
+            }
+        }
+        if pairs.is_empty() {
+            if shrunk {
+                active = (0..n).collect();
+                shrunk = false;
+                continue;
+            }
+            return;
+        }
+        let mut ranked = Vec::with_capacity(pairs.len());
+        for (a, b) in pairs {
+            if ledger.remaining() == 0 {
+                return;
+            }
+            let mut trial = coordinates.clone();
+            swap_atoms(&mut trial, a, b);
+            let (raw, _) = relax(ledger, trial.view(), 0);
+            if raw.is_finite() {
+                ranked.push((raw, a, b));
+            }
+        }
+        ranked.sort_by(|left, right| left.0.total_cmp(&right.0));
+        let mut improved = false;
+        for &(_, a, b) in &ranked {
+            if ledger.remaining() == 0 {
+                return;
+            }
+            let mut trial = coordinates.clone();
+            swap_atoms(&mut trial, a, b);
+            let (quenched, quenched_at) = relax(ledger, trial.view(), relax_steps);
+            if quenched.is_finite() && quenched < *energy {
+                *coordinates = quenched_at;
+                *energy = quenched;
+                ledger.record(*energy, coordinates.view());
+                if ledger.target_reached() {
+                    return;
+                }
+                active.retain(|&index| index != a && index != b);
+                shrunk = true;
+                improved = true;
+                break;
+            }
+        }
+        if improved {
+            continue;
+        }
+        if shrunk {
+            active = (0..n).collect();
+            shrunk = false;
+            continue;
+        }
+        return;
+    }
 }
 
 fn swap_atoms(y: &mut Array1<f64>, i: usize, j: usize) {
@@ -2574,6 +2657,132 @@ mod move_scaling_tests {
     }
 
     #[test]
+    fn an_identity_swap_exchanges_one_unlike_pair() {
+        let n = 8;
+        let mut species = vec![1u32; 4];
+        species.extend(std::iter::repeat(2u32).take(4));
+        let sigma = {
+            let mut values = vec![1.0; 4];
+            values.extend(std::iter::repeat(1.3).take(4));
+            values
+        };
+        let mut coords = vec![0.0; 3 * n];
+        let outer = [
+            [3.0, 0.0, 0.0],
+            [-3.0, 0.0, 0.0],
+            [0.0, 3.0, 0.0],
+            [0.0, -3.0, 0.0],
+        ];
+        let inner = [
+            [0.4, 0.0, 0.0],
+            [-0.4, 0.0, 0.0],
+            [0.0, 0.4, 0.0],
+            [0.0, -0.4, 0.0],
+        ];
+        for i in 0..4 {
+            for k in 0..3 {
+                coords[3 * i + k] = outer[i][k];
+                coords[3 * (4 + i) + k] = inner[i][k];
+            }
+        }
+        let mut cfg = Config::recommended(n);
+        cfg = cfg.with_species(species.clone(), Some(sigma.clone()));
+        let names: Vec<String> = cfg
+            .move_library
+            .kernels(&cfg)
+            .iter()
+            .map(|kernel| kernel.name())
+            .collect();
+        assert_eq!(names, ["all", "angular", "swap"]);
+        assert_eq!(cfg.temperature, Config::recommended(n).temperature);
+        let mv = ClusterMove::SpeciesSwap {
+            n_points: n,
+            species: species.clone(),
+            sigma: Some(sigma),
+        };
+        let x = Array1::from_vec(coords);
+        let mut pairs = std::collections::HashSet::new();
+        for seed in 0..24 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let y = mv.propose(x.view(), 0.8, &mut rng);
+            let mut moved = Vec::new();
+            for i in 0..n {
+                let shifted = (0..3).any(|k| (y[3 * i + k] - x[3 * i + k]).abs() > 1e-12);
+                if shifted {
+                    moved.push(i);
+                }
+            }
+            assert_eq!(moved.len(), 2, "seed {seed} moved {moved:?}");
+            assert_ne!(species[moved[0]], species[moved[1]]);
+            let mut pair = [moved[0], moved[1]];
+            pair.sort_unstable();
+            pairs.insert((pair[0], pair[1]));
+        }
+        assert!(
+            pairs.len() > 1,
+            "the exchange must not be one fixed pair: {pairs:?}"
+        );
+    }
+
+    #[test]
+    fn half_the_coin_selects_the_identity_exchange() {
+        assert_eq!(select_identity_share(Some(4), 0.49, 1), 4);
+        assert_eq!(select_identity_share(Some(4), 0.5, 1), 1);
+        assert_eq!(select_identity_share(None, 0.0, 2), 2);
+    }
+
+    #[test]
+    fn downhill_swaps_stop_at_a_label_minimum() {
+        let species = vec![1u32, 1, 2, 2];
+        let mut coordinates = Array1::from_vec(vec![
+            1.6, 0.0, 0.0, 0.0, 1.6, 0.0, 0.4, 0.0, 0.0, 0.0, 0.4, 0.0,
+        ]);
+        let preferred = [0.4, 0.4, 1.6, 1.6];
+        let energy_of = |point: ArrayView1<f64>| -> f64 {
+            let mut total = 0.0;
+            for i in 0..4 {
+                let radius = (point[3 * i].powi(2)
+                    + point[3 * i + 1].powi(2)
+                    + point[3 * i + 2].powi(2))
+                .sqrt();
+                let gap = radius - preferred[i];
+                total += gap * gap;
+            }
+            total
+        };
+        let mut energy = energy_of(coordinates.view());
+        let mut ledger = Ledger::new(10_000);
+        let mut relax = |led: &mut Ledger, point: ArrayView1<f64>, _steps: usize| {
+            assert!(led.charge());
+            (energy_of(point), point.to_owned())
+        };
+        let mut rng = StdRng::seed_from_u64(1);
+        converge_biminimum(
+            &mut coordinates,
+            &mut energy,
+            &species,
+            &mut relax,
+            &mut ledger,
+            1,
+            &mut rng,
+        );
+        assert!(energy < 1e-9, "label descent left energy {energy}");
+        let settled = energy;
+        let settled_at = coordinates.clone();
+        converge_biminimum(
+            &mut coordinates,
+            &mut energy,
+            &species,
+            &mut relax,
+            &mut ledger,
+            1,
+            &mut rng,
+        );
+        assert!((energy - settled).abs() < 1e-12);
+        assert_eq!(coordinates, settled_at);
+    }
+
+    #[test]
     fn a_size_swap_puts_small_atoms_in_the_core() {
         let n = 8;
         let mut species = vec![1u32; 4];
@@ -2649,10 +2858,7 @@ mod move_scaling_tests {
             .take(4)
             .filter(|(index, _)| cfg.species.as_ref().unwrap()[*index] == 1)
             .count();
-        assert_eq!(
-            small_in_core, 1,
-            "a wide size ratio exchanges one mismatched pair"
-        );
+        assert_eq!(small_in_core, 1, "one unlike exchange moves one small atom in");
     }
 
     #[test]
