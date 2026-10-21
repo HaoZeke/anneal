@@ -1032,6 +1032,12 @@ impl Config {
     /// allocates that arm with surface, single, burst, and sym. The return
     /// screen is on, and a stall takes tabu and symmetrisation. Basin
     /// identity stays the measured pair-spectrum merge at 0.7.
+    /// Orbit completion runs on every new basin, and below 98 points the
+    /// relaxation draws between the plain surface and the two-phase
+    /// relative 0.7 surface, the same rule as [`Config::communicating`].
+    /// On optbench archive starts at development seeds, without them this
+    /// stack needed a median 1.4e5 force calls on 32 LJ38 starts and solved
+    /// 2 of 16 LJ75 starts in 1e6; with them, 4.9e3 and 16 of 16.
     /// [`Config::for_cluster`] remains the plain Wales-Doye baseline.
     /// [`Config::packing_superbasin`] adds the unmeasured SOAP-packing key
     /// and adaptive height.
@@ -1045,6 +1051,10 @@ impl Config {
         cfg.symmetrise_on_stall = true;
         cfg.soap_class_residual = false;
         cfg.soap_mode = SoapProposalMode::Flexible;
+        cfg.orbit_complete_on_new = true;
+        if n_points < 98 {
+            cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
+        }
         cfg
     }
 
