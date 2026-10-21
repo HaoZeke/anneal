@@ -10,5 +10,9 @@ acceptance temperature of a rigid chart is scaled inside the hop. A
 chart with more than ten bodies holds that factor at 4 and scales the
 orientation amplitude toward an acceptance ratio of one half. A chart
 of ten bodies or fewer is unchanged. Preset temperature, screen length,
-relax length, and record gradient stay on the preset. No parameter was
-added, so the C header is unchanged.
+relax length, and record gradient stay on the preset. A rigid quench
+stops on the root-mean-square force, keeps four L-BFGS pairs, starts
+from a diagonal of 0.1, and caps the step. The hop uses the loose
+tolerance. A second pass at the same tolerance runs only when that
+quench stopped short and the energy is a new lowest minimum. No
+parameter was added, so the C header is unchanged.

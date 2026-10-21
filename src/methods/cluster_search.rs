@@ -22,6 +22,7 @@ use crate::methods::cluster_hopping::min_pair_distance;
 #[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::structure_is_sane;
 use crate::methods::cluster_hopping::{Config, Ledger, Outcome, optimize_with_energy_gradient};
+use crate::methods::rigid_quench::{self, TIGHT_RMS};
 use crate::methods::warm_lbfgs::WarmLbfgs;
 use crate::quench::{QuenchPredictor, Verdict};
 use eindir_core::gradient::DifferentiableObjective;
@@ -148,6 +149,66 @@ where
     let mut surfaces = (!cfg.surfaces.is_empty())
         .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
     move |led, x, iters| {
+        // A rigid chart uses the basin-hopping step: RMS force, four
+        // pairs, initial diagonal 0.1, and a capped step. The Cartesian
+        // and binary quenches stay on the warm solver.
+        if cfg.move_library.is_rigid_body() && surfaces.is_none() && cfg.two_phase.is_none() {
+            let before = led.spent();
+            let screening = iters <= screen_iters;
+            let cap = if screening {
+                iters
+            } else {
+                iters.max(rigid_quench::MAX_ITERATIONS)
+            };
+            // The ledger's lowest minimum does not move inside this
+            // quench, so the comparison can be taken before the closure
+            // borrows the ledger.
+            let incumbent = led.best;
+            let sloppy = {
+                let mut evaluate = |v: ArrayView1<f64>| {
+                    if !led.charge() {
+                        return None;
+                    }
+                    Some(objective.value_and_gradient(v))
+                };
+                rigid_quench::rigid_lbfgs(x, cap, rigid_quench::SLOPPY_RMS, &mut evaluate)
+            };
+            let mut result = sloppy;
+            // The ranked tolerances are equal, so this second pass only
+            // finishes a quench that stopped on the iteration cap. It
+            // runs when that unfinished point is a new lowest minimum.
+            if !screening
+                && !result.converged
+                && result.energy < incumbent
+                && led.remaining() > 0
+                && cap > 0
+            {
+                let mut evaluate = |v: ArrayView1<f64>| {
+                    if !led.charge() {
+                        return None;
+                    }
+                    Some(objective.value_and_gradient(v))
+                };
+                let tight =
+                    rigid_quench::rigid_lbfgs(result.point.view(), cap, TIGHT_RMS, &mut evaluate);
+                if tight.converged || tight.energy < result.energy {
+                    result = tight;
+                }
+            }
+            let cost = led.spent() - before;
+            if screening {
+                stats.screen_charged += cost;
+                stats.screens += 1;
+            } else {
+                stats.full_charged += cost;
+            }
+            if result.converged {
+                stats.converged += 1;
+            } else {
+                stats.capped += 1;
+            }
+            return (result.energy, result.point);
+        }
         opt.forget();
         let before = led.spent();
         let screening = iters <= screen_iters;
