@@ -189,6 +189,8 @@ where
             }
             None => x,
         };
+        let last_plain: std::cell::RefCell<Option<(Array1<f64>, Array1<f64>)>> =
+            std::cell::RefCell::new(None);
         let (f, xr, _) = opt.minimize_watched(
             x,
             iters,
@@ -196,7 +198,9 @@ where
                 if !led.charge() {
                     return None;
                 }
-                Some(objective.value_and_gradient(v))
+                let (energy, gradient) = objective.value_and_gradient(v);
+                *last_plain.borrow_mut() = Some((v.to_owned(), gradient.clone()));
+                Some((energy, gradient))
             },
             |_, fv| {
                 if screening && probe {
@@ -269,16 +273,26 @@ where
             stats.capped += 1;
             return (f, xr);
         }
-        // Charged like any other evaluation: asking whether a relaxation
-        // converged is asking the potential a question, and a protocol that
-        // counts evaluations has to count this one.
-        let converged = if led.charge() {
+        // The plain relaxation already evaluated this point. Reusing that
+        // gradient answers the convergence question without a second call.
+        // A point the relaxation did not leave behind is still asked.
+        let reused = last_plain.borrow();
+        let converged = if let Some((point, gradient)) = reused.as_ref()
+            && point.len() == xr.len()
+            && point
+                .iter()
+                .zip(xr.iter())
+                .all(|(left, right)| left == right)
+        {
+            gradient_is_converged(gradient.view(), cfg.record_gradient)
+        } else if led.charge() {
             stats.check_charged += 1;
             let g = objective.grad(xr.view());
             gradient_is_converged(g.view(), cfg.record_gradient)
         } else {
             false
         };
+        drop(reused);
         if converged {
             stats.converged += 1;
         } else {
@@ -1113,8 +1127,12 @@ mod tests {
             coords.extend([(i as f64) * 1.2, 0.1 * (i as f64), 0.0]);
         }
         let start = Array1::from(coords);
-        let (out, _) = search_from(&potential, &cfg, &mut ledger, start.view(), 11);
+        let (out, stats) = search_from(&potential, &cfg, &mut ledger, start.view(), 11);
         let (energy, gradient) = verify(&potential, &out).expect("a quenched state");
+        assert_eq!(
+            stats.check_charged, 0,
+            "the last plain evaluation already answered convergence"
+        );
         let largest = gradient;
         assert!(energy < -10.0, "{energy}");
         assert!(largest < 1.0e-4, "{largest}");

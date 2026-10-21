@@ -3267,17 +3267,35 @@ fn cluster_archive_search(
     let mut relax =
         |led: &mut crate::methods::cluster_hopping::Ledger, x: ArrayView1<f64>, iters: usize| {
             opt.forget();
+            // The line search returns before this closure does, so the last
+            // point can live here. A RefCell borrowed from outside would make
+            // the closure not Send, which archive search requires.
+            let mut last_plain: Option<(Array1<f64>, Array1<f64>)> = None;
             let (f, xr, _) = opt.minimize(x, iters, |v| {
                 if !led.charge() {
                     return None;
                 }
-                Some(obj.value_and_gradient(v))
+                let (energy, gradient) = obj.value_and_gradient(v);
+                last_plain = Some((v.to_owned(), gradient.clone()));
+                Some((energy, gradient))
             });
-            // Same charged convergence check as the recommended search path.
-            if led.charge() {
+            // Same convergence check as the objective-driven quench. The
+            // result is not stored here; the call is what the ledger counts.
+            let already = last_plain.as_ref().is_some_and(|(point, gradient)| {
+                point.len() == xr.len()
+                    && point
+                        .iter()
+                        .zip(xr.iter())
+                        .all(|(left, right)| left == right)
+                    && gradient
+                        .iter()
+                        .fold(0.0_f64, |largest, value| largest.max(value.abs()))
+                        < cfg.record_gradient
+            });
+            if !already && led.charge() {
                 let _ = Gradient::grad(obj, xr.view())
                     .iter()
-                    .fold(0.0_f64, |a, v| a.max(v.abs()))
+                    .fold(0.0_f64, |largest, value| largest.max(value.abs()))
                     < cfg.record_gradient;
             }
             (f, xr)
