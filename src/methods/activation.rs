@@ -1814,6 +1814,7 @@ fn ride_lowest_mode<E, Q>(
     let _ = std::io::stdout().flush();
     let (floor_energy, _) = evaluate(start);
     let mut saddles: Vec<(Array1<f64>, Array1<f64>, f64)> = Vec::new();
+    // The block ends the borrow of `evaluate`. ForceSurface has no destructor.
     {
         let surface = ForceSurface {
             evaluate: std::sync::Mutex::new(evaluate),
@@ -1882,9 +1883,6 @@ fn ride_lowest_mode<E, Q>(
             }
         }
     }
-    // Ends the borrow of `evaluate`. ForceSurface itself has no destructor.
-    #[allow(clippy::drop_non_drop)]
-    drop(surface);
     // A static step off the saddle falls back above the floor. Give the
     // unstable mode the kinetic energy of the saddle above the reactant,
     // integrate two vibrational periods, and quench.
