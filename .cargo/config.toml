@@ -2,15 +2,13 @@
 # verifies the package against crates.io. The published 0.1 and 0.2 lines
 # dropped the saddle and eigen APIs this crate is built against, and a
 # crates.io eindir-core beside the git revision links the C ABI twice.
-# Resolve those crates from the revisions the manifest pins. Publish
-# verification reads this file from the extracted crate.
+# Resolve those crates from the revisions the manifest pins. Verification
+# runs from the workspace, so it still reads this file.
 #
-# featomic's metatensor build runs `cargo rustc --locked` inside the cargo
-# target tree, and an unused patch fails `--locked`. This relative target
-# sits beside the workspace, so that nested cargo is not a child of this
-# config. From the extracted crate the same relative path is a sibling of
-# the crate, not a parent, so verification still applies the patch and does
-# not point its target directory at itself.
+# featomic's metatensor build runs `cargo rustc --locked` with its working
+# directory inside the cargo target tree. An unused patch there makes
+# `--locked` fail. Keep that tree beside the workspace so the nested cargo
+# does not walk up to this file.
 [build]
 target-dir = "../tmp/anneal-target"
 
