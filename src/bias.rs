@@ -196,7 +196,7 @@ mod tests {
     /// data.
     #[test]
     fn a_sorted_spectrum_rejects_from_the_tail() {
-        let mut a = vec![1.0; 64];
+        let a = vec![1.0; 64];
         let mut b = vec![1.0; 64];
         b[63] = 5.0;
         let av = ndarray::Array1::from(a.clone());
