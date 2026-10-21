@@ -6,14 +6,17 @@
 //!
 //! Usage: slab_random_relax <con_file> <total_budget> [seed]
 
-mod common;
+#[path = "common/rgpot_eindir.rs"]
+mod rgpot_eindir;
+#[path = "common/slab.rs"]
+mod slab;
 
 use anneal_core::methods::cluster_hopping::Ledger;
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
-use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
-use common::slab::{Mobile, place_adsorbates, read_system};
 use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use ndarray::ArrayView1;
+use rgpot_eindir::{RgpotObjective, emit_engine_manifest};
+use slab::{Mobile, place_adsorbates, read_system};
 
 const ENERGY_TOL: f64 = 1e-4;
 const RELAX_STEPS: usize = 150;
