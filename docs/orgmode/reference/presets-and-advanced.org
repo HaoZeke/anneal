@@ -8,6 +8,13 @@
 - =box_ensemble_optimize(...)= :: hop primitive. Requires =grad_fn=.
 - =global_optimize(obj, low, high, budget, ...)= :: portfolio arms when the caller does not want hops.
 
+A callback that raises =BaseException= other than =Exception= (a harness
+stop, or =KeyboardInterrupt=) ends the search at once. The best state
+found is kept, and the exception is re-raised. The same stop closes a
+Rust =Ledger= built with =with_stop=, including every budget slice, and
+it closes a stock binary Lennard-Jones search and a rigid TIP4P search.
+A flag that stays down does not change the number of force calls.
+
 See [[file:../howto/choose-driver.org][choose a driver]].
 
 * Classical (values only)

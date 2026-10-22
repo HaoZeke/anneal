@@ -74,6 +74,8 @@ pub mod binary_water;
 pub mod boundary_transport;
 /// Spectral statistics of the curvature, without forming a Hessian.
 pub mod calibrate;
+/// Caller-owned stop flag bound for the thread that runs a search.
+pub mod caller_stop;
 /// Declarative campaign configuration: TOML in, channels explicit.
 pub mod campaign;
 /// Event catalogue keyed by local topology.

@@ -528,9 +528,15 @@ where
         }
     }
 
-    loop {
+    'values: loop {
+        if crate::caller_stop::raised() {
+            break;
+        }
         let mut progressed = false;
         for (index, replica) in replicas.iter_mut().enumerate() {
+            if crate::caller_stop::raised() {
+                break 'values;
+            }
             let remaining = replica.budget.saturating_sub(replica.work);
             let needs_certificate = hooks[index].enabled();
             if remaining == 0 {
@@ -544,6 +550,9 @@ where
             let opening = replica.hops == 0 && remaining > 0;
             if (remaining < 4 || depth == 0) && !opening {
                 while replica.work < replica.budget {
+                    if crate::caller_stop::raised() {
+                        break 'values;
+                    }
                     let _ = obj.eval(replica.x.view());
                     replica.work += 1;
                     n_evals += 1;
@@ -1031,9 +1040,15 @@ where
     }
 
     let mut noise_states: Vec<Option<LangevinStepper>> = (0..replica_count).map(|_| None).collect();
-    loop {
+    'gradient: loop {
+        if crate::caller_stop::raised() {
+            break;
+        }
         let mut progressed = false;
         for (index, replica) in replicas.iter_mut().enumerate() {
+            if crate::caller_stop::raised() {
+                break 'gradient;
+            }
             let remaining = replica.budget.saturating_sub(replica.work);
             let mut depth = quench_depth(quench_allowances[index], remaining);
             if remaining < 4 || depth == 0 {
@@ -1095,6 +1110,9 @@ where
                     replica.work += 1;
                     n_grads += 1;
                     for _ in 0..escape_steps {
+                        if crate::caller_stop::raised() {
+                            break 'gradient;
+                        }
                         let energy = stepper.step_with_proposal(
                             obj,
                             grad,
@@ -2089,5 +2107,92 @@ mod tests {
             "uncharged callback: n={n} charged={}",
             out.charged
         );
+    }
+
+    #[test]
+    fn caller_stop_ends_the_box_ensemble() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        use std::time::{Duration, Instant};
+
+        const AFTER: usize = 30;
+        struct Halt {
+            bounds: Bounds<f64>,
+            calls: AtomicUsize,
+            stop: Arc<AtomicBool>,
+        }
+        impl Objective<f64> for Halt {
+            fn dim(&self) -> usize {
+                2
+            }
+            fn bounds(&self) -> &Bounds<f64> {
+                &self.bounds
+            }
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                let n = self.calls.fetch_add(1, Ordering::SeqCst);
+                if n + 1 >= AFTER {
+                    self.stop.store(true, Ordering::SeqCst);
+                }
+                assert!(n < AFTER + 16, "box kept evaluating after the stop ({n})");
+                x.dot(&x)
+            }
+        }
+        impl Gradient<f64> for Halt {
+            fn dim(&self) -> usize {
+                2
+            }
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                let n = self.calls.fetch_add(1, Ordering::SeqCst);
+                if n + 1 >= AFTER {
+                    self.stop.store(true, Ordering::SeqCst);
+                }
+                assert!(
+                    n < AFTER + 16,
+                    "box kept differentiating after the stop ({n})"
+                );
+                2.0 * &x
+            }
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let _bound = crate::caller_stop::Bind::new(Arc::clone(&stop));
+        let obj = Halt {
+            bounds: Bounds::new(Array1::from_elem(2, -2.0), Array1::from_elem(2, 2.0), 1e-9),
+            calls: AtomicUsize::new(0),
+            stop,
+        };
+        let config = BoxEnsembleConfig {
+            budget: 20_000,
+            replicas: 2,
+            ..BoxEnsembleConfig::default()
+        };
+        let start = Array1::from_elem(2, 1.0);
+        let started = Instant::now();
+        let out = box_ensemble_optimize(&obj, &obj, 5, Some(start.view()), &config);
+        let calls = obj.calls.load(Ordering::SeqCst);
+        assert!(calls <= AFTER + 16, "box made {calls} calls");
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(out.best_val.is_finite());
+        assert_eq!(out.best_pos.len(), 2);
+    }
+
+    #[test]
+    fn an_idle_stop_does_not_change_box_calls() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+
+        fn once(bound: bool) -> (usize, usize, f64) {
+            let obj = CountingSphere::new();
+            let stop = Arc::new(AtomicBool::new(false));
+            let _guard = bound.then(|| crate::caller_stop::Bind::new(stop));
+            let config = BoxEnsembleConfig {
+                budget: 48,
+                replicas: 2,
+                ..BoxEnsembleConfig::default()
+            };
+            let start = Array1::from_elem(6, 1.0);
+            let out = box_ensemble_optimize(&obj, &obj, 4, Some(start.view()), &config);
+            (obj.calls.load(Ordering::SeqCst), out.n_evals, out.best_val)
+        }
+        assert_eq!(once(false), once(true));
     }
 }

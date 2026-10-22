@@ -602,11 +602,14 @@ impl BudgetLedger {
     }
 
     fn remaining(&self) -> usize {
+        if crate::caller_stop::raised() {
+            return 0;
+        }
         self.cap_get().saturating_sub(self.used_get())
     }
 
     fn exhausted(&self) -> bool {
-        self.used_get() >= self.cap_get()
+        crate::caller_stop::raised() || self.used_get() >= self.cap_get()
     }
 
     /// Atomically reserve `work` units without overshooting the cap.
@@ -614,6 +617,9 @@ impl BudgetLedger {
     /// Uses compare-exchange so concurrent chargers cannot pass the check
     /// then both `fetch_add` past `cap` (TOCTOU on the naive remaining/add path).
     fn try_charge(&self, work: usize) -> bool {
+        if crate::caller_stop::raised() {
+            return false;
+        }
         if work == 0 {
             return true;
         }
@@ -5602,6 +5608,24 @@ fn portfolio_result(
 mod tests {
     use super::*;
     use eindir_core::{Rastrigin, StybTang2D};
+
+    #[test]
+    fn a_caller_stop_closes_the_budget_ledger() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let _bound = crate::caller_stop::Bind::new(Arc::clone(&stop));
+        let ledger = BudgetLedger::new(100, 2);
+        assert!(!ledger.exhausted());
+        assert!(ledger.try_charge(1));
+        assert_eq!(ledger.remaining(), 99);
+        stop.store(true, Ordering::Relaxed);
+        assert!(ledger.exhausted());
+        assert_eq!(ledger.remaining(), 0);
+        assert!(!ledger.try_charge(1));
+        assert_eq!(ledger.used_get(), 1);
+    }
 
     /// Pure WU split: first cycle is 2/3 remaining (leaves ≥1/3 residual).
     #[test]

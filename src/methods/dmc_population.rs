@@ -804,7 +804,10 @@ where
     let archive_cap = (target_n0 * ARCHIVE_MULT).max(8);
     let mut accept_ema = 0.35_f64;
 
-    while work(n_evals, n_grads) < budget && !pop.walkers.is_empty() {
+    while work(n_evals, n_grads) < budget
+        && !pop.walkers.is_empty()
+        && !crate::caller_stop::raised()
+    {
         let polishing = work(n_evals, n_grads) >= polish_start;
         if polishing {
             // Multi-start elite polish: L-BFGS when grad is available (dual
@@ -820,7 +823,7 @@ where
             let k_elite = elites.len().clamp(1, 5);
             let mut ei = 0usize;
             // Dual annealing endgame: visit (Tsallis) → local (L-BFGS) cycles.
-            while work(n_evals, n_grads) < budget {
+            while work(n_evals, n_grads) < budget && !crate::caller_stop::raised() {
                 let (mut x, mut fx) = elites[ei % k_elite].clone();
                 ei += 1;
                 let remain = budget.saturating_sub(work(n_evals, n_grads));

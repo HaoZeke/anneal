@@ -574,12 +574,17 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                 let (exchange, mailboxes, occupied, charged_total) =
                     (&exchange, &mailboxes, occupied.as_ref(), &charged_total);
                 let context = context.clone();
+                let caller_stop = crate::caller_stop::bound();
                 scope.spawn(move || -> Result<ReplicaReport, String> {
                     let _reader_lifetime = DepositReaderLifetime { exchange, replica };
                     let _occupied_finish = occupied.map(|board| OccupiedFinish { board, replica });
+                    let _caller_stop = caller_stop.clone().map(crate::caller_stop::Bind::new);
                     let replica_started = Instant::now();
                     let objective = Mutex::new((problem.objective)(replica));
-                    let mut ledger = Ledger::new(replica_budget);
+                    let mut ledger = match caller_stop {
+                        Some(flag) => Ledger::with_stop(replica_budget, flag),
+                        None => Ledger::new(replica_budget),
+                    };
                     let mut opt = WarmLbfgs::default();
                     let callbacks = problem.callbacks_per_objective.max(1);
                     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {

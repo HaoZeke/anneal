@@ -24,6 +24,11 @@ with Boltzmann, Fast, and Gsa. Last mile is polish / qmc_polish
 (bounded L-BFGS). Cluster quench is WarmLbfgs to rgmin::Lbfgs.
 
 The IISE composition laws L1-L4 are enforced in SaVariant::checked.
+
+A callback that raises BaseException other than Exception, such as
+KeyboardInterrupt or a harness stop, ends the search at once. The best
+state found is kept, and the exception is re-raised. An ordinary
+Exception is scored as the worst value.
 """
 
 import json
@@ -296,8 +301,8 @@ def cluster_search(
         ``sigmas``, and a non-block layout.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
-    as ``KeyboardInterrupt``, stops the run at the next evaluation and is
-    re-raised here.
+    as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
+    The best geometry found is kept, and the exception is re-raised here.
 
     Returns a dict with ``best`` (flat coordinates in the state layout),
     ``best_energy``, and ``hops``.

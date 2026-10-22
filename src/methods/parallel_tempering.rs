@@ -180,10 +180,16 @@ impl<S: Sampler<f64>, E: Exchange<f64>> ParallelTemperingSampler<S, E> {
         let mut swap_accepts = 0;
         let mut hot_energies = Vec::with_capacity(n_epochs.saturating_mul(self.k_inner));
 
-        for epoch in 0..n_epochs {
+        'epochs: for epoch in 0..n_epochs {
+            if crate::caller_stop::raised() {
+                break;
+            }
             let mut accepted = vec![0usize; m];
             let mut rejected = vec![0usize; m];
             for inner in 0..self.k_inner {
+                if crate::caller_stop::raised() {
+                    break 'epochs;
+                }
                 // Serial chain steps: Python/CUTEst objectives hold the GIL;
                 // Rayon fan-out deadlocks under pyo3 attach. Native Sync
                 // objectives still scale via multi-walker dmc_pop batches.

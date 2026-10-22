@@ -541,19 +541,44 @@ impl Ledger {
     /// A ledger that also closes when `stop` is raised.
     ///
     /// The caller owns the flag. Once it is set, [`Ledger::charge`] refuses
-    /// and [`Ledger::remaining`] reads zero, so a search ends at its next
-    /// budget check instead of spending what is left. A harness that stops a
-    /// run on a target, or a callback that raised, sets it.
+    /// and [`Ledger::remaining`] reads zero, so a search returns at once
+    /// with the best state found instead of spending what is left. A harness
+    /// that stops a run on a target, or a callback that raised, sets it.
+    /// [`Ledger::slice`] keeps the same flag on a child budget.
     pub fn with_stop(budget: usize, stop: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
         let mut ledger = Self::new(budget);
         ledger.stop = Some(stop);
         ledger
     }
 
-    fn stopped(&self) -> bool {
+    /// A child budget that closes on the same caller stop as this ledger.
+    ///
+    /// The child has its own spend. Handing it to an inner search keeps that
+    /// search's budget arithmetic on the slice, and a stop raised on either
+    /// ledger ends both.
+    pub fn slice(&self, budget: usize) -> Self {
+        let mut child = Self::new(budget);
+        child.stop = self.stop.clone();
+        child
+    }
+
+    /// Binds this ledger's stop on the running thread, if it has one.
+    ///
+    /// Worker threads do not see the binding. Give them [`Ledger::slice`]
+    /// or [`Ledger::with_stop`] so the flag itself travels.
+    pub fn bind_stop(&self) -> Option<crate::caller_stop::Bind> {
+        self.stop.clone().map(crate::caller_stop::Bind::new)
+    }
+
+    /// Whether the caller has asked this ledger to close.
+    ///
+    /// True when this ledger's flag is raised or a stop is bound on this
+    /// thread. A down flag is a relaxed load and does not change a charge.
+    pub fn stopped(&self) -> bool {
         self.stop
             .as_ref()
             .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed))
+            || crate::caller_stop::raised()
     }
 
     /// Whether the relaxation serves a non-adopting diagnostic probe.
@@ -595,6 +620,9 @@ impl Ledger {
     /// goes unpaid, so work charged after it is done can fall more than one
     /// unit short when the ledger runs dry inside one charge.
     pub fn charge_frac(&mut self, frac: f64) -> bool {
+        if self.stopped() {
+            return false;
+        }
         if !(frac > 0.0) || !frac.is_finite() {
             return self.spent < self.budget;
         }
@@ -605,7 +633,7 @@ impl Ledger {
                 return false;
             }
         }
-        self.spent < self.budget
+        !self.stopped() && self.spent < self.budget
     }
 
     /// Charges `n` units at once, returning `false` when the budget ran out
@@ -1839,6 +1867,7 @@ where
     R: Rng + ?Sized,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
+    let _caller_stop = ledger.bind_stop();
     let n = cfg.n_points;
     let continuous_symmetry_classes = match cfg.continuous_symmetry {
         ContinuousSymmetry::Off => None,
@@ -2449,7 +2478,7 @@ where
     let mut hops_at_lowest = 0usize;
 
     loop {
-        if ledger.target_reached() {
+        if ledger.stopped() || ledger.target_reached() {
             break;
         }
         if ledger.best < best_seen - 1e-9 {
@@ -3842,6 +3871,9 @@ where
                 cfg.screen_steps
             },
         );
+        if ledger.stopped() {
+            break;
+        }
         let entry_snapshot = if cfg.trail_on_stall {
             Some(x_screen.clone())
         } else {
@@ -3973,6 +4005,9 @@ where
             descent.observe(e_screen - out.0);
             out
         };
+        if ledger.stopped() {
+            break;
+        }
         if !quench_is_sane(cfg, e_new, x_new.view()) {
             unconverged_records += 1;
             hops += 1;
@@ -7180,6 +7215,28 @@ mod tests {
         let mut relax = toy_relax;
         let out = optimize(&cfg, &mut ledger, &mut relax, 0);
         assert_eq!(out.charged, 1, "a stopped run spent its budget");
+    }
+
+    #[test]
+    fn a_slice_closes_with_the_parent_stop() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let parent = Ledger::with_stop(100, Arc::clone(&stop));
+        let mut child = parent.slice(40);
+        let mut plain = Ledger::new(40);
+        assert!(child.charge());
+        assert!(plain.charge());
+        assert!(child.charge_frac(1.5));
+        assert!(plain.charge_frac(1.5));
+        assert_eq!(child.spent(), plain.spent());
+        stop.store(true, Ordering::Relaxed);
+        assert!(child.stopped());
+        assert!(!child.charge());
+        assert!(!child.charge_frac(0.5));
+        assert_eq!(child.remaining(), 0);
+        assert_eq!(child.spent(), plain.spent());
     }
 
     #[test]
