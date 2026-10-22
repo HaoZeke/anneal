@@ -467,6 +467,8 @@ pub struct Ledger {
     pub best_state: Option<Array1<f64>>,
     quench_boundaries: Vec<QuenchBoundary>,
     diagnostic_quench: bool,
+    /// Energy at or below which the hop may stop.
+    target: Option<f64>,
     stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
@@ -506,8 +508,34 @@ impl Ledger {
             best_state: None,
             quench_boundaries: Vec::new(),
             diagnostic_quench: false,
+            target: None,
             stop: None,
         }
+    }
+
+    /// Stop once a recorded energy is at or below `energy`.
+    ///
+    /// The value lives on the ledger rather than on [`Config`], so a stock
+    /// preset's resolved JSON is unchanged. A non-finite threshold is ignored.
+    pub fn stop_below(&mut self, energy: f64) {
+        if energy.is_finite() {
+            self.target = Some(energy);
+        }
+    }
+
+    /// Threshold installed by [`Ledger::stop_below`], if any.
+    pub fn target(&self) -> Option<f64> {
+        self.target
+    }
+
+    /// Whether `energy` has reached the installed threshold.
+    pub fn below_target(&self, energy: f64) -> bool {
+        self.target.is_some_and(|target| energy <= target)
+    }
+
+    /// Whether the incumbent has reached the installed threshold.
+    pub fn target_reached(&self) -> bool {
+        self.below_target(self.best)
     }
 
     /// A ledger that also closes when `stop` is raised.
@@ -928,7 +956,7 @@ pub type GradFn<'g> = dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f
 /// efficient as it is, which is exactly the kind of miscalibrated comparison
 /// this campaign has already made once.
 pub type EnergyGradFn<'g> =
-    dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<(f64, Array1<f64>)> + 'g;
+    dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<(f64, Array1<f64>)> + Send + 'g;
 
 /// A borrow of one, for a caller that has a gradient to lend.
 ///
@@ -1054,6 +1082,24 @@ fn gradient_is_converged(gradient: ArrayView1<f64>, dimensions: usize, tolerance
             .all(|v| v.is_finite() && v.abs() < tolerance)
 }
 
+/// Whether a quenched gradient may be recorded.
+///
+/// A rigid record accepts the root-mean-square force at the ranked
+/// tolerance. The root-mean-square is at most the largest entry, so a
+/// quench that met the preset infinity norm is accepted, and so is a
+/// spread-out gradient whose largest entry is still above that norm.
+fn answer_gradient_ok(cfg: &Config, gradient: ArrayView1<f64>, dimensions: usize) -> bool {
+    if cfg.move_library.is_rigid_body() {
+        crate::methods::rigid_quench::rms_is_converged(
+            gradient,
+            dimensions,
+            crate::methods::rigid_quench::SLOPPY_RMS,
+        )
+    } else {
+        gradient_is_converged(gradient, dimensions, cfg.record_gradient)
+    }
+}
+
 /// Records an auxiliary quench without restricting exploratory adoption.
 fn record_quenched_answer(
     cfg: &Config,
@@ -1067,9 +1113,8 @@ fn record_quenched_answer(
     let required = grad.is_some();
     let gradient = if sane {
         grad.as_deref_mut().and_then(|evaluate| {
-            evaluate(ledger, state).filter(|values| {
-                gradient_is_converged(values.view(), state.len(), cfg.record_gradient)
-            })
+            evaluate(ledger, state)
+                .filter(|values| answer_gradient_ok(cfg, values.view(), state.len()))
         })
     } else {
         None
@@ -1514,6 +1559,208 @@ fn exchange_log_acceptance(
     )
 }
 
+/// Lowest unrelaxed exchange of an inner large atom with an outer small one.
+///
+/// Sixteen pair trials, each one evaluation. The geometry is the incumbent
+/// minimum with those two coordinates exchanged. A trial whose unrelaxed
+/// energy sits above `ceiling` is discarded. `None` when every trial does,
+/// or the budget runs out before a keeper.
+fn best_wide_exchange<F>(
+    x: ArrayView1<f64>,
+    sigma: &[f64],
+    ceiling: f64,
+    mut evaluate: F,
+) -> Option<Array1<f64>>
+where
+    F: FnMut(ArrayView1<f64>) -> Option<f64>,
+{
+    let n = sigma.len();
+    if x.len() != 3 * n || n < 4 {
+        return None;
+    }
+    let mean = sigma.iter().copied().sum::<f64>() / n as f64;
+    let mut centre = [0.0; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            centre[k] += x[3 * i + k];
+        }
+    }
+    for value in &mut centre {
+        *value /= n as f64;
+    }
+    let radii: Vec<f64> = (0..n)
+        .map(|i| {
+            let mut radius = 0.0;
+            for k in 0..3 {
+                let delta = x[3 * i + k] - centre[k];
+                radius += delta * delta;
+            }
+            radius
+        })
+        .collect();
+    let mut large: Vec<usize> = (0..n).filter(|&i| sigma[i] > mean + 1e-12).collect();
+    let mut small: Vec<usize> = (0..n).filter(|&i| sigma[i] <= mean + 1e-12).collect();
+    if large.is_empty() || small.is_empty() {
+        return None;
+    }
+    large.sort_by(|&left, &right| radii[left].total_cmp(&radii[right]));
+    small.sort_by(|&left, &right| radii[right].total_cmp(&radii[left]));
+    large.truncate(4);
+    small.truncate(4);
+    let mut best_energy = f64::INFINITY;
+    let mut best: Option<Array1<f64>> = None;
+    for &large_i in &large {
+        for &small_i in &small {
+            if large_i == small_i {
+                continue;
+            }
+            let mut y = x.to_owned();
+            for k in 0..3 {
+                y.swap(3 * large_i + k, 3 * small_i + k);
+            }
+            let Some(energy) = evaluate(y.view()) else {
+                break;
+            };
+            if energy < best_energy {
+                best_energy = energy;
+                best = Some(y);
+            }
+        }
+    }
+    best.filter(|_| best_energy <= ceiling)
+}
+
+/// Body count at and below which the rigid factor may climb to 24.
+///
+/// An all-body kick on a ten-water chart still falls into the target
+/// basin at that factor. A larger chart caps the factor at
+/// [`RIGID_FACTOR_CAP_LARGE`] and can still cool when the acceptance
+/// rate is high.
+const RIGID_HOT_BODIES: usize = 10;
+/// Highest rigid factor on a chart with more than [`RIGID_HOT_BODIES`] bodies.
+const RIGID_FACTOR_CAP_LARGE: f64 = 4.0;
+/// Metropolis acceptance the orientation amplitude aims at.
+///
+/// The ratio a Cartesian basin-hopping step is adjusted toward, and the
+/// default of GMIN's acceptance-ratio update. A chart with more than ten
+/// bodies keeps its acceptance temperature at the factor cap and moves this
+/// amplitude instead, so the two controls do not chase the same ratio.
+const RIGID_ACCEPT_TARGET: f64 = 0.5;
+/// Quenched trials between orientation-amplitude updates.
+const RIGID_ACCEPT_BLOCK: usize = 50;
+/// Multiplier applied when a block misses [`RIGID_ACCEPT_TARGET`].
+const RIGID_STEP_FACTOR: f64 = 1.05;
+
+/// Next orientation amplitude after one acceptance block.
+///
+/// Above the target the step grows, below it the step shrinks, and the
+/// result stays inside `(1e-3, 1]`. One is the orientation cap already
+/// stored on the move: a larger kick is the regime the factor cap exists
+/// to keep a large water chart out of.
+fn rigid_step_scale(scale: f64, accepted: usize, trials: usize) -> f64 {
+    if trials == 0 {
+        return scale;
+    }
+    let rate = accepted as f64 / trials as f64;
+    let next = if rate > RIGID_ACCEPT_TARGET {
+        scale * RIGID_STEP_FACTOR
+    } else if rate < RIGID_ACCEPT_TARGET {
+        scale / RIGID_STEP_FACTOR
+    } else {
+        scale
+    };
+    next.clamp(1.0e-3, 1.0)
+}
+
+#[cfg(test)]
+mod rigid_step_tests {
+    use super::rigid_step_scale;
+
+    #[test]
+    fn a_low_acceptance_shrinks_the_orientation_step_and_a_high_one_grows_it() {
+        let shrunk = rigid_step_scale(1.0, 10, 50);
+        assert!(
+            (shrunk - 1.0 / 1.05).abs() < 1e-12,
+            "low acceptance left the step at {shrunk}"
+        );
+        let grown = rigid_step_scale(0.8, 40, 50);
+        assert!(
+            (grown - 0.84).abs() < 1e-12,
+            "high acceptance left the step at {grown}"
+        );
+        assert_eq!(
+            rigid_step_scale(1.0, 40, 50),
+            1.0,
+            "the step grew past the orientation cap"
+        );
+        assert!(
+            (rigid_step_scale(0.9, 25, 50) - 0.9).abs() < 1e-12,
+            "an acceptance of one half moved the step"
+        );
+    }
+}
+
+#[cfg(test)]
+mod rigid_reseed_tests {
+    use super::{Config, random_rigid_reseed};
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    #[test]
+    fn a_reseed_fills_the_centre_block_and_the_rotation_block() {
+        let cfg =
+            Config::recommended(4).with_rigid_bodies(crate::potentials::gmin_water_geometry());
+        let mut rng = StdRng::seed_from_u64(3);
+        let x = random_rigid_reseed(&cfg, &mut rng);
+        assert_eq!(x.len(), 24);
+        let radius = cfg.start_radius();
+        for i in 0..4 {
+            let r = (0..3)
+                .map(|k| x[3 * i + k] * x[3 * i + k])
+                .sum::<f64>()
+                .sqrt();
+            assert!(r <= radius + 1.0e-8, "centre {i} left the ball at {r}");
+            for k in 0..3 {
+                let turn = x[12 + 3 * i + k].abs();
+                assert!(
+                    turn <= std::f64::consts::PI,
+                    "rotation {turn} left the cube"
+                );
+            }
+        }
+    }
+}
+
+fn rigid_factor_cap(n_bodies: usize) -> f64 {
+    if n_bodies > RIGID_HOT_BODIES {
+        RIGID_FACTOR_CAP_LARGE
+    } else {
+        24.0
+    }
+}
+
+/// True when two species differ in diameter by at least a fifth.
+///
+/// At that mismatch an exchange of every misplaced label leaves the
+/// low-energy funnel. The hop proposes a soft microcanonical escape
+/// instead.
+fn large_diameter_ratio(cfg: &Config) -> bool {
+    let Some(sigma) = cfg.species_sigma.as_ref() else {
+        return false;
+    };
+    if sigma.len() < 2 {
+        return false;
+    }
+    let mut smallest = f64::INFINITY;
+    let mut largest = 0.0_f64;
+    for value in sigma {
+        if value.is_finite() && *value > 0.0 {
+            smallest = smallest.min(*value);
+            largest = largest.max(*value);
+        }
+    }
+    smallest.is_finite() && largest / smallest >= 1.2
+}
 /// How far a partial relaxation still had to descend, over the recent trials
 /// that went on to a full relaxation.
 ///
@@ -1669,13 +1916,12 @@ where
     let gradient_required = grad.is_some();
     let initial_validation_gradient = initial_sane.then(|| {
         grad.as_deref_mut().and_then(|g| {
-            g(ledger, x.view())
-                .filter(|values| gradient_is_converged(values.view(), x.len(), cfg.record_gradient))
+            g(ledger, x.view()).filter(|values| answer_gradient_ok(cfg, values.view(), x.len()))
         })
     });
     let initial_validation_gradient = initial_validation_gradient.flatten();
-    let initial_recordable =
-        initial_sane && (!gradient_required || initial_validation_gradient.is_some());
+    let initial_recordable = initial_sane
+        && (ledger.below_target(e) || !gradient_required || initial_validation_gradient.is_some());
     if initial_recordable {
         ledger.record(e, x.view());
     }
@@ -2036,6 +2282,16 @@ where
     let mut md_attempts = 0usize;
     let mut md_steps = 0usize;
     let mut md_failed = 0usize;
+    // Wide size mismatch. Random identity exchange leaves the funnel, so the
+    // ordinary proposal is a softened microcanonical escape whose total
+    // kinetic energy grows when the quench returns and shrinks when the
+    // energy falls. Every eighth hop tries one inner-large/outer-small
+    // exchange instead, and only if the unrelaxed energy stays near the
+    // minimum. The preset temperature is the Metropolis temperature.
+    let species_wide = large_diameter_ratio(cfg);
+    let mut species_kinetic = (16.0 * cfg.energy_scale).max(f64::MIN_POSITIVE);
+    let species_kinetic_floor = (4.0 * cfg.energy_scale).max(f64::MIN_POSITIVE);
+    let species_kinetic_cap = (1.5 * n as f64 * cfg.energy_scale).max(species_kinetic);
     let mut orbits_completed = 0usize;
     let mut orbit_gain = 0.0_f64;
     let mut accepted_transitions = Vec::new();
@@ -2190,6 +2446,25 @@ where
     let mut returned = 0usize;
     let mut descent = ScreenDescent::default();
     let mut accepted = 0usize;
+    // A rigid chart is not in the preset's reduced energy unit. Charts of
+    // ten bodies or fewer start at the top of the acceptance window and let
+    // the rate pull the factor down. A chart with more bodies stays at the
+    // lower cap: the orientation amplitude, not the temperature, is what
+    // tracks the acceptance ratio. Letting that factor climb back to 24
+    // leaves the hydrogen-bond funnel.
+    let mut rigid_factor: f64 = if cfg.move_library.is_rigid_body() {
+        rigid_factor_cap(cfg.n_points)
+    } else {
+        1.0
+    };
+    let mut rigid_window = 0usize;
+    let mut rigid_hits = 0usize;
+    // Large rigid charts hold the acceptance temperature at the factor cap.
+    // The orientation amplitude is what moves toward a one-half acceptance
+    // ratio. Charts of ten bodies and fewer leave both untouched.
+    let mut orient_scale = 1.0_f64;
+    let mut orient_window = 0usize;
+    let mut orient_yes = 0usize;
     let mut hops = 0usize;
     let mut checkpoint_hops = 0usize;
     let mut checkpoint_quench_start = 0usize;
@@ -2198,14 +2473,92 @@ where
     let mut next_reoccupy = cfg.reoccupy_interval;
     let mut best_seen = ledger.best;
     let mut charged_at_best = ledger.spent();
+    // Hops elapsed when the ledger last recorded a lower minimum.
+    // A rigid reseed compares the live hop count with this stamp.
+    let mut hops_at_lowest = 0usize;
 
     loop {
-        if ledger.stopped() {
+        if ledger.stopped() || ledger.target_reached() {
             break;
         }
         if ledger.best < best_seen - 1e-9 {
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
+            hops_at_lowest = hops;
+        }
+        if cfg.move_library.is_rigid_body()
+            && crate::methods::rigid_quench::stagnation_restart(hops, hops_at_lowest)
+        {
+            // One hopping temperature above the target is still the basin the
+            // chain is trying to leave. A fresh cluster quenches far above
+            // that basin, and installing it spends the next thousand hops
+            // climbing back. Return the walker to the lowest minimum instead.
+            // Farther above the target, the fresh draw is the escape.
+            let acceptance = cfg.temperature * rigid_factor;
+            let near_target = ledger.target().is_some_and(|limit| {
+                ledger.best.is_finite() && ledger.best - limit <= acceptance.max(0.0)
+            });
+            if near_target {
+                hops_at_lowest = hops;
+                if let Some(state) = ledger.best_state.clone()
+                    && state.len() == x.len()
+                    && ledger.best + 1.0e-9 < e
+                {
+                    let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
+                    let ok = gradient
+                        .as_ref()
+                        .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len()));
+                    e = ledger.best;
+                    x = state;
+                    current_validation_gradient = gradient.filter(|_| ok);
+                }
+            } else {
+                let mut adopted: Option<(f64, Array1<f64>, Option<Array1<f64>>, bool)> = None;
+                for _attempt in 0..crate::methods::rigid_quench::RESEED_ATTEMPTS {
+                    if ledger.remaining() == 0 {
+                        break;
+                    }
+                    let fresh = random_rigid_reseed(cfg, rng);
+                    if fresh.len() != x.len() {
+                        continue;
+                    }
+                    let (energy, state) = relax(ledger, fresh.view(), cfg.relax_steps);
+                    if !energy.is_finite()
+                        || state.len() != x.len()
+                        || !quench_is_sane(cfg, energy, state.view())
+                    {
+                        continue;
+                    }
+                    let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
+                    let ok = gradient
+                        .as_ref()
+                        .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len()));
+                    let finished = ok;
+                    adopted = Some((energy, state, gradient, ok));
+                    if finished {
+                        break;
+                    }
+                }
+                // The clock resets whether or not a usable geometry came back,
+                // so a failed draw does not reseed on the next hop.
+                hops_at_lowest = hops;
+                if let Some((energy, state, gradient, ok)) = adopted {
+                    if ledger.below_target(energy) || ok {
+                        ledger.record(energy, state.view());
+                    }
+                    e = energy;
+                    x = state;
+                    current_validation_gradient = gradient.filter(|_| ok);
+                    orient_window = 0;
+                    orient_yes = 0;
+                    rigid_window = 0;
+                    rigid_hits = 0;
+                    if ledger.remaining() == 0 || ledger.target_reached() {
+                        break;
+                    }
+                    continue;
+                }
+            }
         }
         // The reoccupation move runs inside the chain and charges the
         // ledger directly; its result enters the same adoption path as an
@@ -2390,11 +2743,7 @@ where
                 if from_gradient.is_none() && (published_prize || soap_push || !adopt) {
                     from_gradient = grad.as_deref_mut().and_then(|g| {
                         g(ledger, from_state.view()).filter(|values| {
-                            gradient_is_converged(
-                                values.view(),
-                                from_state.len(),
-                                cfg.record_gradient,
-                            )
+                            answer_gradient_ok(cfg, values.view(), from_state.len())
                         })
                     });
                 }
@@ -2685,11 +3034,7 @@ where
                 let validation_gradient = if proposal_sane {
                     grad.as_deref_mut().and_then(|g| {
                         g(ledger, proposal_state.view()).filter(|values| {
-                            gradient_is_converged(
-                                values.view(),
-                                proposal_state.len(),
-                                cfg.record_gradient,
-                            )
+                            answer_gradient_ok(cfg, values.view(), proposal_state.len())
                         })
                     })
                 } else {
@@ -2818,11 +3163,7 @@ where
                 let candidate_gradient = candidate_sane.then(|| {
                     grad.as_deref_mut().and_then(|gradient| {
                         gradient(ledger, candidate.view()).filter(|values| {
-                            gradient_is_converged(
-                                values.view(),
-                                candidate.len(),
-                                cfg.record_gradient,
-                            )
+                            answer_gradient_ok(cfg, values.view(), candidate.len())
                         })
                     })
                 });
@@ -2894,7 +3235,13 @@ where
         } else {
             ratios[rep]
         };
-        let temperature = single * scale;
+        let mut temperature = single * scale;
+        if cfg.move_library.is_rigid_body() {
+            // The preset temperature stays in its own energy unit. A rigid
+            // water chart is not that unit, so a local factor moves the
+            // acceptance rate toward one half without editing the preset.
+            temperature *= rigid_factor;
+        }
         // The coldest rung's temperature from the state it holds, which the
         // energy bias is built and filled at. Read here, where that rung's own
         // hop reads its temperature, so the reading is the same whichever rung
@@ -2968,12 +3315,71 @@ where
                 .kernels(cfg);
             }
         }
+        // Extra fixed-composition proposal. The wide-ratio escape and the
+        // inner-outer exchange below still run on the chain generator. This
+        // draw uses its own generator, and the chain moves only when the
+        // quenched exchange is strictly downhill, so an uphill homotop cannot
+        // throw away the minimum the escape is standing on.
+        if species_wide
+            && let Some(species) = cfg.species.as_deref()
+            && species.len() == n
+        {
+            let mut side = StdRng::seed_from_u64(
+                e.to_bits() ^ (hops as u64).wrapping_mul(0x9E37_79B9) ^ 0xD07E_5A4D,
+            );
+            if let Some(swapped) = doye_unlike_exchange(x.view(), species, &mut side) {
+                let ceiling = e + 15.0 * cfg.energy_scale;
+                let raw = energy_grad
+                    .as_deref_mut()
+                    .and_then(|evaluate| evaluate(ledger, swapped.view()))
+                    .map(|(energy, _)| energy);
+                if let Some(raw) = raw
+                    && raw <= ceiling
+                    && ledger.remaining() > 0
+                {
+                    let (eq, xq) = relax(ledger, swapped.view(), cfg.relax_steps);
+                    if quench_is_sane(cfg, eq, xq.view()) && eq < e - 1e-8 {
+                        let gradient = record_quenched_answer(
+                            cfg,
+                            ledger,
+                            &mut grad,
+                            eq,
+                            xq.view(),
+                            &mut unconverged_records,
+                        );
+                        if gradient.is_some() || !gradient_required {
+                            let from_basin = here.unwrap_or_else(|| identity.basin_of(x.view()));
+                            let reached = identity.basin_of(xq.view());
+                            adopt_minimum!(
+                                eq,
+                                xq,
+                                gradient,
+                                Some(reached),
+                                AdoptionHistory::Fresh,
+                                Some((Some(from_basin), reached)),
+                                Some("doye-exchange"),
+                                hops
+                            );
+                            soft_cache = None;
+                        }
+                    }
+                }
+            }
+            if ledger.remaining() == 0 || ledger.target_reached() {
+                break;
+            }
+        }
         let mut k = match (&context, cfg.allocate_moves) {
             (Some(c), _) => contextual.select(c.view(), rng),
             (None, true) if cfg.depth_reward => depth_allocator.select(rng),
             (None, true) => allocator.select(rng),
             (None, false) => rng.random_range(0..kernels.len()),
         };
+        if hops == 0
+            && let Some(swap_at) = kernels.iter().position(|kernel| kernel.name() == "swap")
+        {
+            k = swap_at;
+        }
         // The move scale stays the configured temperature. The law's
         // temperature is an acceptance temperature: it governs which uphill
         // steps are taken, not how far a proposal reaches. Feeding it to the
@@ -3034,6 +3440,7 @@ where
         // a trajectory and a kick at equal charge.
         let hamiltonian = cfg.hmc.is_some() && energy_grad.is_some() && !angular;
         let mut hmc_trial: Option<Array1<f64>> = None;
+        let mut species_escape_trial = false;
         // Goedecker's escape: an NVE trajectory from the occupied minimum,
         // launched with the controller's escape scale as kinetic energy and
         // stopped after two potential minima, replaces the kick. Its end
@@ -3094,6 +3501,85 @@ where
                 }
                 Err(_) => {
                     md_failed += 1;
+                }
+            }
+            if ledger.remaining() == 0 {
+                break;
+            }
+        }
+        // Every eighth hop, exchange one inner large atom with one outer
+        // small atom and quench that geometry. The pair is kept only when
+        // its unrelaxed energy stays within a fixed window of the minimum.
+        if hmc_trial.is_none()
+            && !angular
+            && species_wide
+            && hops.is_multiple_of(8)
+            && let (Some(sigma), Some(eg)) =
+                (cfg.species_sigma.as_deref(), energy_grad.as_deref_mut())
+        {
+            let ceiling = e + 15.0 * cfg.energy_scale;
+            if let Some(swapped) = best_wide_exchange(x.view(), sigma, ceiling, |p| {
+                eg(ledger, p).map(|(energy, _)| energy)
+            }) {
+                hmc_trial = Some(swapped);
+                species_escape_trial = true;
+            }
+        }
+        // A large diameter ratio makes an all-pairs identity exchange climb
+        // out of the funnel (Sicher, Mohr, Goedecker). The ordinary proposal
+        // is a softened microcanonical escape that has to travel before it
+        // counts, then a full quench and the preset Metropolis test. A
+        // trajectory that stays in the well falls through to the library
+        // and the next launch is hotter.
+        if hmc_trial.is_none()
+            && !angular
+            && species_wide
+            && let Some(eg) = energy_grad.as_deref_mut()
+        {
+            let escape_floor = 0.80 * cfg.length_scale;
+            let md_config = crate::methods::minima_hopping::MdEscapeConfig {
+                dt: 0.02,
+                potential_minima: 2,
+                maximum_steps: 800,
+                minimum_rise: 0.50 * cfg.energy_scale,
+                max_rms: 2.5 * cfg.length_scale,
+                min_well_rms: 0.0,
+                softening: Some(rgsaddle::VelocitySofteningConfig {
+                    steps: 5,
+                    displacement: 0.10 * cfg.length_scale,
+                    mixing: 0.25,
+                }),
+                ..Default::default()
+            };
+            let kinetic = species_kinetic;
+            let mut evaluate = |p: ArrayView1<f64>| eg(ledger, p);
+            md_attempts += 1;
+            match crate::methods::minima_hopping::nve_escape_with_frozen(
+                x.view(),
+                kinetic,
+                &md_config,
+                &mut evaluate,
+                rng,
+                hop_frozen.as_deref(),
+            ) {
+                Ok(report) if report.potential_minima >= 2 || report.far_rms >= escape_floor => {
+                    md_steps += report.steps;
+                    let position = if report.potential_minima >= 2 {
+                        report.position
+                    } else {
+                        report.far_position
+                    };
+                    hmc_trial = Some(position);
+                    species_escape_trial = true;
+                }
+                Ok(report) => {
+                    md_steps += report.steps;
+                    md_failed += 1;
+                    species_kinetic = (species_kinetic * 1.3).min(species_kinetic_cap);
+                }
+                Err(_) => {
+                    md_failed += 1;
+                    species_kinetic = (species_kinetic * 1.3).min(species_kinetic_cap);
                 }
             }
             if ledger.remaining() == 0 {
@@ -3180,12 +3666,15 @@ where
                     pending_features = Some(f);
                     cand
                 }
-                _ => kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng),
+                _ => {
+                    kernels[k].propose_scaled(x.view(), cfg.temperature, escape * orient_scale, rng)
+                }
             }
         };
         // Identity SOAP is not an arm. Thompson must not buy a no-op:
         // reselect a real kernel, or skip the hop.
-        if !cov_fire
+        if !species_escape_trial
+            && !cov_fire
             && !soft_fire
             && !angular
             && kernels[k].name() == "soap"
@@ -3209,7 +3698,12 @@ where
                         pending_features = Some(f);
                         cand
                     }
-                    _ => kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng),
+                    _ => kernels[k].propose_scaled(
+                        x.view(),
+                        cfg.temperature,
+                        escape * orient_scale,
+                        rng,
+                    ),
                 };
                 swapped = true;
                 break;
@@ -3272,6 +3766,11 @@ where
                     }
                 }
             }
+        }
+        if cfg.move_library.is_rigid_body()
+            && let Some(slice) = trial.as_slice_mut()
+        {
+            crate::potentials::fold_rotation_vectors(n, slice);
         }
 
         // Screen cheaply, then carry on regardless. A screened trial does not
@@ -3354,7 +3853,24 @@ where
             bias.deposit(x.view(), temperature);
             continue;
         }
-        let (e_screen, x_screen) = relax(ledger, trial.view(), cfg.screen_steps);
+        // A rigid partial quench is not a basin. The return test and the
+        // Metropolis step both need the minimum, so the rigid trial is
+        // relaxed once, to the full iteration cap, and that result is the
+        // trial. The Cartesian screen stays a short prefix of a second pass.
+        let rigid_quench = cfg.move_library.is_rigid_body();
+        // The species escape is already a point past a barrier. A 25-step
+        // screen of that point falls back into the well it left, and the
+        // return test then skips the quench. Relax it once, in full.
+        let quenched_in_place = rigid_quench || species_escape_trial;
+        let (e_screen, x_screen) = relax(
+            ledger,
+            trial.view(),
+            if quenched_in_place {
+                cfg.relax_steps
+            } else {
+                cfg.screen_steps
+            },
+        );
         if ledger.stopped() {
             break;
         }
@@ -3452,9 +3968,15 @@ where
         } else if cfg.calibrated_screen {
             e_screen - descent.allowance() > ledger.best + cfg.screen_margin && !descent.audit()
         } else {
-            e_screen > ledger.best + cfg.screen_margin
+            // A rigid partial quench sits far above the incumbent by an
+            // absolute margin copied from a reduced-unit cluster. Skipping
+            // that test still honours the return screen, and the full quench
+            // runs unless the trial is returning.
+            !cfg.move_library.is_rigid_body() && e_screen > ledger.best + cfg.screen_margin
         };
-        let (e_new, x_new) = if let Some((known_e, known_x)) = known_stand_in {
+        let (e_new, x_new) = if quenched_in_place && known_stand_in.is_none() {
+            (e_screen, x_screen)
+        } else if let Some((known_e, known_x)) = known_stand_in {
             // The refund: the basin is on file, its minimum stands in for
             // the descent, and the force calls the relaxation would have
             // spent go to the next attempt instead.
@@ -3498,7 +4020,18 @@ where
         // A screened or returning structure has only a partial relaxation.
         // It can train screens and count as a rejected attempt, but the live
         // chain remains on the quenched landscape under every acceptance law.
-        let unquenched = screened_this || returning;
+        // A rigid trial was relaxed to the iteration cap before this test.
+        // The Cartesian screen still hands back a partial descent, and that
+        // partial descent is not a recordable minimum.
+        let unquenched = !quenched_in_place && (screened_this || returning);
+        if species_escape_trial {
+            let same = (e_new - e).abs() <= 5.0e-2;
+            if same {
+                species_kinetic = (species_kinetic * 1.3).min(species_kinetic_cap);
+            } else if e_new < e - 0.05 {
+                species_kinetic = (species_kinetic / 1.15).max(species_kinetic_floor);
+            }
+        }
         // Every quench trains the surrogate, including the ones taken before
         // it had an opinion. This is where its training data comes from.
         if let (Some(sur), Some((raw_y, gnorm))) = (surrogate.as_mut(), pending_raw.take()) {
@@ -3543,17 +4076,18 @@ where
         // later inherits the guarantee. Anything not converged still moves the
         // chain and still deposits bias; it is only barred from being recorded
         // as an answer, which is the one thing it cannot be.
+        let hit_target = ledger.below_target(e_new);
         let gradient_required = grad.is_some();
         let validation_gradient = if unquenched {
             None
         } else {
             grad.as_deref_mut().and_then(|g| {
-                g(ledger, x_new.view()).filter(|values| {
-                    gradient_is_converged(values.view(), x_new.len(), cfg.record_gradient)
-                })
+                g(ledger, x_new.view())
+                    .filter(|values| answer_gradient_ok(cfg, values.view(), x_new.len()))
             })
         };
-        let recordable = !unquenched && (!gradient_required || validation_gradient.is_some());
+        let recordable =
+            hit_target || (!unquenched && (!gradient_required || validation_gradient.is_some()));
         // Every certified quench is reported, adopted or not: the history's
         // membership policy decides what counts, not the chain.
         let history_report = match (history.as_deref_mut(), validation_gradient.as_ref()) {
@@ -3571,6 +4105,13 @@ where
         }
         if recordable {
             ledger.record(e_new, x_new.view());
+            if ledger.target_reached() {
+                hops += 1;
+                if improved && improvements.len() < 512 {
+                    improvements.push((hops, ledger.spent(), bias.n_basins(), e_new));
+                }
+                break;
+            }
             // Recognition refunds the rest of a later descent into this
             // basin. HistoryHook still returns identity only; the bank
             // holds coordinates the loop already paid to certify.
@@ -3857,6 +4398,17 @@ where
             d < 0.0 || rng.random::<f64>() < (-d).exp()
         };
         let mut accept = accept;
+        if cfg.move_library.is_rigid_body() && cfg.n_points > RIGID_HOT_BODIES {
+            orient_window += 1;
+            if accept {
+                orient_yes += 1;
+            }
+            if orient_window >= RIGID_ACCEPT_BLOCK {
+                orient_scale = rigid_step_scale(orient_scale, orient_yes, orient_window);
+                orient_window = 0;
+                orient_yes = 0;
+            }
+        }
         // AS-KMC (Chatterjee–Voter 2010): after N_f sightings the
         // intra-packing hop is a frequent process. Raise its barrier
         // (α = 2, their usual superbasin tolerance) so the rare exit
@@ -3876,6 +4428,36 @@ where
         // the temperature that produces it is the parameter every other
         // mechanism here sits downstream of; it has never been measured in this
         // driver.
+        if cfg.move_library.is_rigid_body() && returning && (e_new - e).abs() <= 5.0e-2 {
+            // Same quenched energy and the same distance key. Adopting it
+            // does not leave the basin, so it is not an acceptance the
+            // temperature window should see.
+            accept = false;
+        }
+        if cfg.move_library.is_rigid_body()
+            && cfg.n_points <= RIGID_HOT_BODIES
+            && (!returning || (e_new - e).abs() > 5.0e-2)
+        {
+            // Same-basin accepts have no energy change, and counting them
+            // keeps a rigid chart cold. Only a move that lands on a
+            // different minimum says whether the temperature is high enough.
+            let changed = accept && (e_new - e).abs() > 5.0e-2;
+            rigid_window += 1;
+            if changed {
+                rigid_hits += 1;
+            }
+            if rigid_window >= 8 {
+                let rate = rigid_hits as f64 / rigid_window as f64;
+                let cap = rigid_factor_cap(cfg.n_points);
+                if rate < 0.25 {
+                    rigid_factor = (rigid_factor * 2.0).min(cap);
+                } else if rate > 0.6 {
+                    rigid_factor = (rigid_factor / 1.5).max(1.0);
+                }
+                rigid_window = 0;
+                rigid_hits = 0;
+            }
+        }
         if accept {
             accepted += 1;
             // Every accepted quench within the window is a candidate stage
@@ -4846,9 +5428,8 @@ where
                 && quench_is_sane(cfg, polished_energy, polished_state.view())
             {
                 let validated = match grad.as_deref_mut() {
-                    Some(gradient) => gradient(ledger, polished_state.view()).is_some_and(|g| {
-                        gradient_is_converged(g.view(), polished_state.len(), cfg.record_gradient)
-                    }),
+                    Some(gradient) => gradient(ledger, polished_state.view())
+                        .is_some_and(|g| answer_gradient_ok(cfg, g.view(), polished_state.len())),
                     None => true,
                 };
                 if validated {
@@ -5514,6 +6095,49 @@ pub fn random_cluster_in_radius<R: Rng + ?Sized>(
         }
     }
     out
+}
+
+/// Fresh rigid chart: centres in the container, rotations in `[-π, π]`.
+///
+/// GMIN draws rigid centres uniformly in a ball and draws a fresh
+/// angle-axis rotation for each body. This chart stores Rodrigues
+/// vectors, so the rotation block is uniform in that cube. A short
+/// placement falls back to a draw with no separation constraint.
+fn random_rigid_reseed<R: Rng + ?Sized>(cfg: &Config, rng: &mut R) -> Array1<f64> {
+    let n = cfg.n_points;
+    let radius = cfg.start_radius().max(1.0e-6);
+    let mut centres = random_cluster_in_radius(n, radius, cfg.min_separation, rng);
+    if centres.len() != 3 * n {
+        centres = random_cluster_in_radius(n, radius, 0.0, rng);
+    }
+    let mut x = Array1::zeros(6 * n);
+    let placed = centres.len() / 3;
+    for i in 0..placed.min(n) {
+        for k in 0..3 {
+            x[3 * i + k] = centres[3 * i + k];
+        }
+    }
+    for i in placed..n {
+        let mut v = [0.0; 3];
+        let mut norm = 0.0;
+        for k in 0..3 {
+            let u1: f64 = rng.random::<f64>().max(1e-12);
+            let u2: f64 = rng.random::<f64>();
+            v[k] = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+            norm += v[k] * v[k];
+        }
+        let norm = norm.sqrt().max(1e-12);
+        let r = radius * rng.random::<f64>().cbrt();
+        for k in 0..3 {
+            x[3 * i + k] = v[k] / norm * r;
+        }
+    }
+    for i in 0..n {
+        for k in 0..3 {
+            x[3 * n + 3 * i + k] = rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
+        }
+    }
+    x
 }
 
 /// Convenience entry point seeding its own start.

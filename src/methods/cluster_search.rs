@@ -135,7 +135,8 @@ where
     // A minimum is recordable at `record_gradient`; descending past it buys
     // digits no acceptance test or record reads. Stopping at 1e-6 instead cost
     // the communicating preset a PAR-2 of 5792 force calls on 32 LJ38 starts
-    // against 4269 here, and a median of 5726 against 3253.
+    // against 4269 here, and a median of 5726 against 3253. Rigid bodies and
+    // species diameters record at that same tolerance.
     opt.gtol = cfg.record_gradient;
     // The driver calls the screening pass with `screen_steps` and the full one
     // with `relax_steps`, so the iteration count identifies which is which.
@@ -148,6 +149,9 @@ where
         opt.forget();
         let before = led.spent();
         let screening = iters <= screen_iters;
+        // A rigid chart uses this same descent. A line-search-free capped
+        // step reached a different basin, and the small-cluster walk then
+        // took more hops at the same cost per quench.
         // The screening pass stops when its own trajectory says the question is
         // settled; the full relaxation runs to its tolerance, because there the
         // answer is the structure and not a verdict about it.
@@ -189,6 +193,7 @@ where
             }
             None => x,
         };
+        let stop_at = led.target();
         let (f, xr, _) = opt.minimize_watched(
             x,
             iters,
@@ -199,6 +204,9 @@ where
                 Some(objective.value_and_gradient(v))
             },
             |_, fv| {
+                if stop_at.is_some_and(|limit| fv <= limit) {
+                    return false;
+                }
                 if screening && probe {
                     // Never stops. Records where a stop would have happened and
                     // what it would have claimed, so the claim can be scored
@@ -272,13 +280,41 @@ where
         // Charged like any other evaluation: asking whether a relaxation
         // converged is asking the potential a question, and a protocol that
         // counts evaluations has to count this one.
-        let converged = if led.charge() {
+        let mut f = f;
+        let mut xr = xr;
+        let mut converged = if led.charge() {
             stats.check_charged += 1;
             let g = objective.grad(xr.view());
             gradient_is_converged(g.view(), cfg.record_gradient)
         } else {
             false
         };
+        // A binary quench often hits the iteration cap with the infinity
+        // norm still above the record tolerance, so the ledger would drop
+        // a finite minimum. One more pass from that point finishes the
+        // descent. Screening passes stay short, and the preset cap is
+        // unchanged.
+        if !converged && !screening && cfg.species_sigma.is_some() && led.remaining() > 0 {
+            let (f2, xr2, _) = opt.minimize(xr.view(), iters, |v| {
+                if !led.charge() {
+                    return None;
+                }
+                Some(objective.value_and_gradient(v))
+            });
+            f = f2;
+            xr = xr2;
+            converged = if led.charge() {
+                stats.check_charged += 1;
+                let g = objective.grad(xr.view());
+                gradient_is_converged(g.view(), cfg.record_gradient)
+            } else {
+                false
+            };
+            let extra = led.spent() - before - cost;
+            if extra > 0 {
+                stats.full_charged += extra;
+            }
+        }
         if converged {
             stats.converged += 1;
         } else {
@@ -363,12 +399,20 @@ where
             }
             Some(objective.grad(x))
         };
-        crate::methods::cluster_hopping::run_with_gradient(
+        let mut energy_grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if !led.charge() {
+                    return None;
+                }
+                Some(objective.value_and_gradient(x))
+            };
+        crate::methods::cluster_hopping::run_with_energy_gradient(
             cfg,
             start,
             ledger,
             &mut relax,
             Some(&mut grad),
+            Some(&mut energy_grad),
             &mut rng,
         )
     };
