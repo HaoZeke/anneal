@@ -116,7 +116,14 @@ description = "Simulated annealing components on the eindir typed primitives"
 name = "anneal_core"
 
 [package.metadata.capi.install.include]
-asset = [{ from = "include/anneal-core.hpp", to = "." }]
+# dlpack.h is DLPack 1.3, the header dlpk 0.1.5 was translated from.
+# `to = "dlpack"` installs it as include/dlpack/dlpack.h, which is what
+# anneal-core.h includes, and what `pkg-config --cflags` puts on the
+# compiler's search path.
+asset = [
+    { from = "include/anneal-core.hpp", to = "." },
+    { from = "include/dlpack/dlpack.h", to = "dlpack" },
+]
 
 [profile.dist]
 inherits = "release"

@@ -853,6 +853,29 @@ pub struct Config {
     /// How far above the incumbent a screened trial may land and still be
     /// promoted to a full relaxation.
     pub screen_margin: f64,
+    /// Whether the energy screen credits a trial with the descent its
+    /// screening pass left undone.
+    ///
+    /// A trial is refused when its partial energy, less the upper decile of
+    /// `partial - full` over the last 256 full relaxations, lies more than
+    /// [`Config::screen_margin`] above the incumbent. Until eight full
+    /// relaxations have been seen the credit is zero and the screen is the
+    /// fixed margin. Every eighth refusal is relaxed in full anyway, so the
+    /// window samples the trials the screen refuses and not only those it
+    /// passes. A fixed margin is in energy units and does not carry between
+    /// potentials: on rigid TIP4P10, 256 development starts at 1e6 force
+    /// calls, a sweep of the fixed margin from 25 to 50 kJ/mol cut PAR-2
+    /// from 78.7e3 to 18.4e3, while LJ38 was flat between 1 and 4 epsilon.
+    pub calibrated_screen: bool,
+    /// Whether a full relaxation that ends below the incumbent is continued,
+    /// [`Config::relax_steps`] at a time and up to eight more times, until it
+    /// stops descending.
+    ///
+    /// Only a converged structure is recorded. On rigid TIP4P20 at 80 steps
+    /// a 3e5-call communicating run converged 70 of its 13329 relaxations,
+    /// screens included, so at most 70 of its 832 full ones, and a trial
+    /// reaching the global basin was rarely recordable.
+    pub finish_improving: bool,
     /// Relaxation steps in the screening pass.
     /// Calibrated by sweep on the corrected relaxer, LJ38 at 4e5 charged
     /// evaluations, four seeds each:
@@ -1039,6 +1062,12 @@ impl Config {
     /// allocates that arm with surface, single, burst, and sym. The return
     /// screen is on, and a stall takes tabu and symmetrisation. Basin
     /// identity stays the measured pair-spectrum merge at 0.7.
+    /// Orbit completion runs on every new basin, and below 98 points the
+    /// relaxation draws between the plain surface and the two-phase
+    /// relative 0.7 surface, the same rule as [`Config::communicating`].
+    /// On optbench archive starts at development seeds, without them this
+    /// stack needed a median 1.4e5 force calls on 32 LJ38 starts and solved
+    /// 2 of 16 LJ75 starts in 1e6; with them, 4.9e3 and 16 of 16.
     /// [`Config::for_cluster`] remains the plain Wales-Doye baseline.
     /// [`Config::packing_superbasin`] adds the unmeasured SOAP-packing key
     /// and adaptive height.
@@ -1052,6 +1081,10 @@ impl Config {
         cfg.symmetrise_on_stall = true;
         cfg.soap_class_residual = false;
         cfg.soap_mode = SoapProposalMode::Flexible;
+        cfg.orbit_complete_on_new = true;
+        if n_points < 98 {
+            cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
+        }
         cfg
     }
 
@@ -1295,6 +1328,8 @@ impl Config {
             diversity_floor: 0.75,
             height_revisits: 4.0,
             screen_margin: LennardJonesPreset::SCREEN_MARGIN * energy_scale,
+            calibrated_screen: true,
+            finish_improving: true,
             screen_steps: 25,
             adaptive_screen: false,
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
@@ -1453,6 +1488,34 @@ impl Config {
         self.angular_moves = false;
         self.rigid_body_geometry = Some(geometry);
         self
+    }
+
+    /// [`Config::communicating`]'s search controls on [`Config::for_tip4p`].
+    ///
+    /// Thompson allocation, the return screen and Recognition carry over.
+    /// Orbit completion, symmetrisation and the two-phase surface act on
+    /// atom positions, not on centre-and-rotation states, so they stay off.
+    pub fn communicating_tip4p(n_molecules: usize) -> Self {
+        let mut cfg = Self::for_tip4p(n_molecules);
+        cfg.allocate_moves = true;
+        cfg.return_screen = true;
+        cfg.shared_deposits = 0;
+        cfg.shared_visit_policy = crate::methods::minima_hopping::SharedVisitPolicy::Recognition;
+        cfg
+    }
+
+    /// [`Config::recommended`]'s search controls on [`Config::for_tip4p`].
+    ///
+    /// Thompson allocation with depth reward, the return screen and tabu
+    /// on stall carry over; the atom-position moves stay off, as in
+    /// [`Config::communicating_tip4p`].
+    pub fn recommended_tip4p(n_molecules: usize) -> Self {
+        let mut cfg = Self::for_tip4p(n_molecules);
+        cfg.allocate_moves = true;
+        cfg.depth_reward = true;
+        cfg.tabu_on_stall = true;
+        cfg.return_screen = true;
+        cfg
     }
 
     /// Species-aware molecular preset with rigid groups.

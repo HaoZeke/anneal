@@ -1,6 +1,8 @@
 //! First-encounter and improvement traces. Bank vs no-bank is this
 //! quantity, not whether both arms finished.
 
+#![allow(dead_code)]
+
 use std::time::Instant;
 
 use anneal_core::methods::cluster_hopping::{Config, Outcome};

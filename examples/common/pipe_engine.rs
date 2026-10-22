@@ -1,5 +1,7 @@
 //! Persistent ASE / xtb-cli helper. No Cap'n Proto.
 
+#![allow(dead_code)]
+
 use ndarray::{Array1, ArrayView1};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};

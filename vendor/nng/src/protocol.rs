@@ -3,8 +3,7 @@ use std::fmt;
 /// Describes a relationship between a socket and all sockets to which it is
 /// connected.
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum Protocol
-{
+pub enum Protocol {
 	/// Version 0 of the bus protocol.
 	///
 	/// The _bus_ protocol provides for building mesh networks where every peer
@@ -136,7 +135,8 @@ pub enum Protocol
 }
 
 #[allow(clippy::use_debug)]
-impl fmt::Display for Protocol
-{
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "{:?}", self) }
+impl fmt::Display for Protocol {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{:?}", self)
+	}
 }
