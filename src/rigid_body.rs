@@ -68,6 +68,18 @@ impl RigidBodyGeometry {
         Array1::from(points)
     }
 
+    /// Largest body-frame site distance from the centre.
+    ///
+    /// A rigid chart uses this reach to size the container: the preset's
+    /// reduced-unit sphere is the monoatomic cluster radius, and a water
+    /// with sites an angstrom from the centre does not fit in it.
+    pub fn site_reach(&self) -> f64 {
+        self.sites
+            .iter()
+            .map(|site| (site[0] * site[0] + site[1] * site[1] + site[2] * site[2]).sqrt())
+            .fold(0.0_f64, f64::max)
+    }
+
     /// Sorted site distances in stable species-pair blocks.
     pub fn describe(&self, molecules: usize, state: ArrayView1<f64>) -> Array1<f64> {
         let points = self.expand(molecules, state);

@@ -68,6 +68,8 @@ pub mod assignment;
 /// Same-PES atomistic basin and ridge exploration by joint-optimum information.
 pub mod atomistic_hybrid;
 pub mod bias;
+/// Stock-preset searches for binary Lennard-Jones and rigid TIP4P.
+pub mod binary_water;
 /// Transport proposals from observed attraction-region crossings.
 pub mod boundary_transport;
 /// Spectral statistics of the curvature, without forming a Hessian.
