@@ -144,6 +144,11 @@ pub extern "C" fn anneal_core_version() -> *const c_char {
 
 /// Write the default box configuration: four replicas, a budget of 400
 /// work units, the default coverage field, and Gaussian escapes.
+///
+/// # Safety
+///
+/// `out` must be null, or aligned and writable for one `anneal_box_config_t`.
+/// A null pointer returns `ANNEAL_INVALID_PARAMETER` and writes nothing.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn anneal_box_config_default(
     out: *mut anneal_box_config_t,
@@ -393,6 +398,14 @@ fn ensemble_config(
 /// callback that fails ends the search with `ANNEAL_INTERNAL_ERROR`, and
 /// `x` is left at its start. `low` and `high` have `dim` entries each and
 /// must be finite with `low <= high`.
+///
+/// # Safety
+///
+/// `eval` and `grad` must be non-null and safe to call for the whole search.
+/// `x` must be null or a writable one-dimensional CPU float64 DLPack tensor.
+/// `low`, `high`, `cfg`, and `out` must each be null or valid for the reads
+/// and writes this function performs. A null argument returns
+/// `ANNEAL_INVALID_PARAMETER`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn anneal_box_minimize(
     eval: anneal_eval_fn,
@@ -422,9 +435,7 @@ pub unsafe extern "C" fn anneal_box_minimize(
         let high = unsafe { std::slice::from_raw_parts(high, dim) };
         for (l, h) in low.iter().zip(high) {
             if !(l.is_finite() && h.is_finite() && l <= h) {
-                set_last_error(
-                    "anneal_box_minimize: bounds must be finite with low <= high",
-                );
+                set_last_error("anneal_box_minimize: bounds must be finite with low <= high");
                 return anneal_status_t::ANNEAL_INVALID_PARAMETER;
             }
         }
@@ -534,8 +545,7 @@ mod tests {
         let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "x") }.unwrap();
         let gs = unsafe { cpu_f64_slice_mut(grad_out, "grad") }.unwrap();
         for (g, v) in gs.iter_mut().zip(xs.iter()) {
-            *g = 2.0 * v
-                + 20.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * v).sin();
+            *g = 2.0 * v + 20.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * v).sin();
         }
         anneal_status_t::ANNEAL_SUCCESS
     }

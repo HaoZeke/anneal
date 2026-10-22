@@ -238,6 +238,7 @@ def cluster_search(
     ras: bool = False,
     start=None,
     length_scale: float | None = None,
+    water_sites=None,
 ):
     """Run the measured cluster-search layer.
 
@@ -254,14 +255,25 @@ def cluster_search(
       derived: ``Config.derived(n)``; overrides ``recommended``.
       communicating: ``Config.communicating(n)``; overrides both.
       ras: residual archive search on the recommended preset.
-      start: optional flat ``3n`` start. When set, hops use ``search_from``
-        instead of a random compact cluster.
+      start: optional flat ``3n`` start (``6n`` with ``water_sites``). When
+        set, hops use ``search_from`` instead of a random compact cluster.
       length_scale: optional physical length. With the recommended preset
         this uses ``with_scales`` so an angstrom start is not crushed into
         the reduced LJ container.
+      water_sites: optional ``(3, 3)`` body-frame O, H, H positions of a
+        rigid water, in angstrom, about its rotation centre. ``n`` then counts
+        molecules and the state is ``n`` centres followed by ``n``
+        exponential-map rotation vectors (active Rodrigues). The presets are
+        ``Config.communicating_tip4p``, ``Config.recommended_tip4p`` and, with
+        both false, ``Config.for_tip4p``. Requires ``start``; excludes
+        ``ras``, ``derived`` and ``length_scale``.
 
-    Returns a dict with ``best`` (flat ``3n`` coordinates), ``best_energy``,
-    and ``hops``.
+    A callback raising a ``BaseException`` that is not an ``Exception``, such
+    as ``KeyboardInterrupt``, stops the run at the next evaluation and is
+    re-raised here.
+
+    Returns a dict with ``best`` (flat coordinates in the state layout),
+    ``best_energy``, and ``hops``.
     """
     start_arr = None if start is None else np.asarray(start, dtype=np.float64).reshape(-1)
     args = (
@@ -279,6 +291,8 @@ def cluster_search(
         kwargs["start"] = start_arr
     if length_scale is not None:
         kwargs["length_scale"] = float(length_scale)
+    if water_sites is not None:
+        kwargs["water_sites"] = np.asarray(water_sites, dtype=np.float64).reshape(-1)
     out = _core_cluster_search(*args, **kwargs)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
     return out
@@ -1372,6 +1386,9 @@ def global_optimize(
     ``arm_pulls``, and ``arm_successes``. Multiple replicas also report
     individual results, ``charged`` work and coverage sample counters.
     """
+    # int() truncates a float, so 1.5 would run as 1. A neighbour count is whole.
+    if not isinstance(coverage_neighbors, (int, np.integer)):
+        raise TypeError("coverage_neighbors must be an integer")
     out = _core_global_optimize(
         obj_fn,
         _flat(low),

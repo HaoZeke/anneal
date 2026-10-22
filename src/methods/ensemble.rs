@@ -6,14 +6,16 @@
 //! [`EnsembleConfig`] names. Exact history exchanges identity and visit
 //! counts; shared bias exchanges visits; gossip averages well tables over a
 //! ring or random pairs. The two-choice family restart uses occupied states
-//! to select a fresh start. Ordered bias updates accompany that state action,
-//! so selecting a restart does not suppress a configured communication channel.
+//! to select a fresh start, reading each peer at the checkpoint just
+//! published so the choice does not follow the scheduler. Ordered bias
+//! updates accompany that state action, so selecting a restart does not
+//! suppress a configured communication channel.
 //! The private and shared arms of a comparison differ only in the channel,
 //! never in seeds, starts, budgets or lookups, which is the contract the
 //! campaign records are read under.
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Condvar, Mutex};
 use std::time::Instant;
 
 use ndarray::{Array1, ArrayView1};
@@ -102,6 +104,9 @@ pub struct EnsembleConfig {
     pub gossip: Option<GossipConfig>,
     /// Two-choice family restart after this many charged calls without
     /// improvement (Azar, Broder, Karlin, Upfal 1999).
+    ///
+    /// Each sample is the peer's occupied state at the same checkpoint, or
+    /// the last state that peer published if it has already finished.
     pub two_choice_stall: Option<usize>,
     /// Charged calls between checkpoints, which is the exchange lag and
     /// the resolution of the first-target record.
@@ -373,6 +378,140 @@ impl Drop for DepositReaderLifetime<'_> {
     }
 }
 
+/// Occupied states aligned by checkpoint index.
+///
+/// A replica publishes the state it holds. A stalled replica then reads each
+/// sampled peer at that same index, waiting until the peer has published it
+/// or finished. Before a replica replaces its state, it waits until every
+/// live peer has finished reading the previous one. The state a restart sees
+/// is fixed by the chains and the seed: it does not follow which replica the
+/// scheduler ran first, and a peer that has finished still contributes the
+/// last state it published.
+struct OccupiedBoard {
+    inner: Mutex<OccupiedInner>,
+    wake: Condvar,
+}
+
+struct OccupiedInner {
+    replicas: usize,
+    published: Vec<usize>,
+    consumed: Vec<usize>,
+    finished: Vec<bool>,
+    state: Vec<Option<Vec<f64>>>,
+}
+
+/// One published checkpoint. Drop finishes the read so peers may advance.
+struct OccupiedPost<'a> {
+    board: &'a OccupiedBoard,
+    replica: usize,
+    generation: usize,
+    release_on_drop: bool,
+}
+
+impl Drop for OccupiedPost<'_> {
+    fn drop(&mut self) {
+        if self.release_on_drop {
+            self.board.release(self.replica, self.generation);
+        }
+    }
+}
+
+/// Marks the replica finished when its thread returns or unwinds.
+struct OccupiedFinish<'a> {
+    board: &'a OccupiedBoard,
+    replica: usize,
+}
+
+impl Drop for OccupiedFinish<'_> {
+    fn drop(&mut self) {
+        self.board.finish(self.replica);
+    }
+}
+
+impl OccupiedBoard {
+    fn new(replicas: usize) -> Self {
+        Self {
+            inner: Mutex::new(OccupiedInner {
+                replicas,
+                published: vec![0; replicas],
+                consumed: vec![0; replicas],
+                finished: vec![false; replicas],
+                state: vec![None; replicas],
+            }),
+            wake: Condvar::new(),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, OccupiedInner> {
+        self.inner.lock().unwrap_or_else(|err| err.into_inner())
+    }
+
+    /// Publish `state` as this replica's next checkpoint.
+    ///
+    /// `release` is set when this checkpoint will not read peers. The read
+    /// then ends inside the lock. Otherwise the returned post ends it on drop,
+    /// after the caller has copied the peer states it sampled.
+    fn post(&self, replica: usize, state: Vec<f64>, release: bool) -> OccupiedPost<'_> {
+        let mut guard = self.lock();
+        loop {
+            let published = guard.published[replica];
+            let ready = (0..guard.replicas).all(|peer| {
+                peer == replica || guard.finished[peer] || guard.consumed[peer] >= published
+            });
+            if ready {
+                break;
+            }
+            guard = self.wake.wait(guard).unwrap_or_else(|err| err.into_inner());
+        }
+        guard.state[replica] = Some(state);
+        guard.published[replica] += 1;
+        let generation = guard.published[replica];
+        if release {
+            guard.consumed[replica] = generation;
+        }
+        self.wake.notify_all();
+        OccupiedPost {
+            board: self,
+            replica,
+            generation,
+            release_on_drop: !release,
+        }
+    }
+
+    /// Peer state at `generation`, or the peer's final state if it finished
+    /// with fewer checkpoints. `None` if it finished without publishing.
+    fn peer(&self, peer: usize, generation: usize) -> Option<Vec<f64>> {
+        let mut guard = self.lock();
+        loop {
+            if guard.finished[peer] || guard.published[peer] >= generation {
+                break;
+            }
+            guard = self.wake.wait(guard).unwrap_or_else(|err| err.into_inner());
+        }
+        debug_assert!(
+            guard.published[peer] <= generation,
+            "occupied state advanced past the checkpoint being read"
+        );
+        guard.state[peer].clone()
+    }
+
+    fn release(&self, replica: usize, generation: usize) {
+        let mut guard = self.lock();
+        if guard.consumed[replica] < generation {
+            guard.consumed[replica] = generation;
+            self.wake.notify_all();
+        }
+    }
+
+    fn finish(&self, replica: usize) {
+        let mut guard = self.lock();
+        if !guard.finished[replica] {
+            guard.finished[replica] = true;
+            self.wake.notify_all();
+        }
+    }
+}
+
 /// Runs one ensemble seed.
 ///
 /// The witness is called from every replica thread, so a non-reentrant
@@ -417,7 +556,8 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
     let exchange = Mutex::new(SharedDeposits::new(replicas));
     let mailboxes: Vec<Mutex<Option<Vec<(Array1<f64>, f64)>>>> =
         (0..replicas).map(|_| Mutex::new(None)).collect();
-    let occupied: Vec<Mutex<Option<Vec<f64>>>> = (0..replicas).map(|_| Mutex::new(None)).collect();
+    let occupied =
+        (ens.two_choice_stall.is_some() && replicas > 1).then(|| OccupiedBoard::new(replicas));
     let target = ens.target;
 
     let reports: Vec<Result<ReplicaReport, String>> = std::thread::scope(|scope| {
@@ -432,10 +572,11 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                     HistoryMode::Shared => Some(&histories[0]),
                 };
                 let (exchange, mailboxes, occupied, charged_total) =
-                    (&exchange, &mailboxes, &occupied, &charged_total);
+                    (&exchange, &mailboxes, occupied.as_ref(), &charged_total);
                 let context = context.clone();
                 scope.spawn(move || -> Result<ReplicaReport, String> {
                     let _reader_lifetime = DepositReaderLifetime { exchange, replica };
+                    let _occupied_finish = occupied.map(|board| OccupiedFinish { board, replica });
                     let replica_started = Instant::now();
                     let objective = Mutex::new((problem.objective)(replica));
                     let mut ledger = Ledger::new(replica_budget);
@@ -501,22 +642,23 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                         // Two-choice restart: post the occupied state, and on a
                         // stall sample two peers; both in this family means
                         // the family is crowded and the chain leaves it.
+                        // The post is this checkpoint's index. The sample waits
+                        // for the peer's post at that index, so a replica that
+                        // the scheduler has not reached yet is not a missing
+                        // family, and one that has finished keeps its last state.
                         if let Some(stall) = ens.two_choice_stall
-                            && replicas > 1
+                            && let Some(board) = occupied
+                            && let Some(mine) = snapshot.current_state().as_slice()
                         {
-                            if let Some(mine) = snapshot.current_state().as_slice() {
-                                *occupied[replica].lock().expect("occupied mailbox") =
-                                    Some(mine.to_vec());
-                            }
-                            if snapshot.charged().saturating_sub(charged_at_best) >= stall
-                                && let Some(mine) = snapshot.current_state().as_slice()
-                            {
+                            let stalled =
+                                snapshot.charged().saturating_sub(charged_at_best) >= stall;
+                            let post = board.post(replica, mine.to_vec(), !stalled);
+                            if stalled {
                                 let mut crowded = 0usize;
                                 for _ in 0..2 {
                                     let k = (lcg(&mut draw) % (replicas as u64 - 1)) as usize;
                                     let peer = (replica + 1 + k) % replicas;
-                                    let theirs =
-                                        occupied[peer].lock().expect("occupied mailbox").clone();
+                                    let theirs = board.peer(peer, post.generation);
                                     if let Some(theirs) = theirs
                                         && theirs.len() == mine.len()
                                         && same_family(mine, &theirs)
@@ -838,9 +980,135 @@ mod tests {
         let again =
             run_ensemble(&cfg, &ensemble(HistoryMode::None, None, None), 3, &problem).unwrap();
         for (a, b) in private.replicas.iter().zip(&again.replicas) {
+            assert_eq!(
+                (
+                    a.outcome.best.to_bits(),
+                    a.outcome.hops,
+                    a.charged,
+                    a.two_choice_restarts
+                ),
+                (
+                    b.outcome.best.to_bits(),
+                    b.outcome.hops,
+                    b.charged,
+                    b.two_choice_restarts
+                ),
+                "replica {} schedule mismatch",
+                a.replica
+            );
+        }
+    }
+
+    #[test]
+    fn a_peer_state_stays_at_the_checkpoint_that_published_it() {
+        let board = OccupiedBoard::new(2);
+        std::thread::scope(|scope| {
+            let writer = scope.spawn(|| {
+                let first = board.post(1, vec![1.0], true);
+                assert_eq!(first.generation, 1);
+                let second = board.post(1, vec![-1.0], true);
+                assert_eq!(second.generation, 2);
+            });
+            let reader = scope.spawn(|| {
+                // The writer is given time to reach its second post and block
+                // there. The read still has to observe the first post.
+                std::thread::sleep(std::time::Duration::from_millis(30));
+                let post = board.post(0, vec![0.0], false);
+                assert_eq!(post.generation, 1);
+                let seen = board.peer(1, post.generation);
+                drop(post);
+                seen
+            });
+            writer.join().unwrap();
+            assert_eq!(reader.join().unwrap().as_deref(), Some(&[1.0][..]));
+        });
+    }
+
+    #[test]
+    fn a_finished_peer_keeps_the_last_state_it_published() {
+        let board = OccupiedBoard::new(2);
+        let first = board.post(1, vec![4.0], true);
+        assert_eq!(first.generation, 1);
+        drop(first);
+        board.finish(1);
+        let post = board.post(0, vec![0.0], false);
+        assert_eq!(board.peer(1, post.generation).as_deref(), Some(&[4.0][..]));
+        drop(post);
+        let later = board.post(0, vec![0.0], false);
+        assert_eq!(later.generation, 2);
+        assert_eq!(board.peer(1, later.generation).as_deref(), Some(&[4.0][..]));
+    }
+
+    /// A replica whose first evaluation is late still walks the chain the
+    /// prompt replica walked. The occupied read is the checkpoint, not the
+    /// scheduler.
+    #[test]
+    fn a_late_replica_restarts_with_the_peers_it_would_have_seen() {
+        let cfg = chain_config();
+        let descriptor = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+        let context = StructureContext::new(Some(vec![18; 4]), None, Some("two-well".into()));
+        let witness = SerializedWitness(Mutex::new(|l: ArrayView1<f64>, r: ArrayView1<f64>| {
+            l.iter()
+                .zip(r.iter())
+                .map(|(a, b)| (a - b) * (a - b))
+                .sum::<f64>()
+                .sqrt()
+                < 0.5
+        }));
+        let same_family = |a: &[f64], b: &[f64]| (a[0] > 0.0) == (b[0] > 0.0);
+        let start: StartFactory<'_> =
+            &|_, rng| random_cluster_in_radius(4, cfg.start_radius(), cfg.min_separation, rng);
+        let plain: ObjectiveFactory<'_> = &|_| Box::new(two_well);
+        let late: ObjectiveFactory<'_> = &|replica| {
+            let mut pending = replica == 0;
+            Box::new(move |x| {
+                if pending {
+                    pending = false;
+                    std::thread::sleep(std::time::Duration::from_millis(80));
+                }
+                two_well(x)
+            })
+        };
+        let ens = ensemble(HistoryMode::None, None, None);
+        let baseline = run_ensemble(
+            &cfg,
+            &ens,
+            3,
+            &EnsembleProblem {
+                objective: plain,
+                start,
+                descriptor: &descriptor,
+                context: &context,
+                witness: &witness,
+                same_family: &same_family,
+                certificate: 1e-5,
+                polish_below: 1e-3,
+                callbacks_per_objective: 1,
+            },
+        )
+        .unwrap();
+        let delayed = run_ensemble(
+            &cfg,
+            &ens,
+            3,
+            &EnsembleProblem {
+                objective: late,
+                start,
+                descriptor: &descriptor,
+                context: &context,
+                witness: &witness,
+                same_family: &same_family,
+                certificate: 1e-5,
+                polish_below: 1e-3,
+                callbacks_per_objective: 1,
+            },
+        )
+        .unwrap();
+        for (a, b) in baseline.replicas.iter().zip(&delayed.replicas) {
             assert_eq!(a.outcome.best.to_bits(), b.outcome.best.to_bits());
             assert_eq!(a.outcome.hops, b.outcome.hops);
             assert_eq!(a.charged, b.charged);
+            assert_eq!(a.two_choice_restarts, b.two_choice_restarts);
         }
     }
 

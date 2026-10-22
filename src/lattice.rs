@@ -85,18 +85,21 @@ impl Source {
     }
 }
 
+/// `n` sites of a pentagonal column, scaled so the nearest neighbour is `scale`.
+///
+/// Shells grow on a fivefold axis. The sites closest to a small random centre
+/// are kept, then each coordinate is shifted by a fraction of `scale`.
 pub fn decahedral_cut<R: Rng + ?Sized>(n: usize, scale: f64, rng: &mut R) -> Array1<f64> {
     if n == 0 {
         return Array1::zeros(0);
     }
     let radius_unit = 1.0 / (2.0 * (PI / 5.0).sin());
     let mut sites: Vec<[f64; 3]> = vec![[0.0, 0.0, 0.0]];
-    for shell in 1..10 {
+    for shell in 1i32..10 {
         if sites.len() >= n + 40 {
             break;
         }
         for z in -shell..=shell {
-            let z = z as i32;
             let m = shell - z.unsigned_abs() as i32;
             if m <= 0 {
                 let point = [0.0, 0.0, z as f64];

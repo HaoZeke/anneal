@@ -183,14 +183,17 @@ def test_trajectory_write_is_not_swallowed(monkeypatch, tmp_path):
     def fake_write(path, _atoms, append=False):
         written.append((str(path), bool(append)))
 
-    monkeypatch.setattr("ase.io.write", fake_write, raising=False)
-    import types
     import sys
+    import types
 
+    # The test job does not install ase. Put the stand-in in place
+    # before any import of ase.io, including a monkeypatch target.
+    ase_mod = types.ModuleType("ase")
     ase_io = types.ModuleType("ase.io")
     ase_io.write = fake_write
-    sys.modules.setdefault("ase", types.ModuleType("ase"))
-    sys.modules["ase.io"] = ase_io
+    ase_mod.io = ase_io
+    monkeypatch.setitem(sys.modules, "ase", ase_mod)
+    monkeypatch.setitem(sys.modules, "ase.io", ase_io)
     dest = tmp_path / "opt.xyz"
     opt = Anneal(atoms, logfile=None, trajectory=str(dest))
     opt.run(fmax=0.05, steps=2)

@@ -790,7 +790,6 @@ pub fn run(cfg: &LatticeSearchConfig, ledger: &mut Ledger, relax: Relax<'_>, see
 // atoms and m vacant sites. Building the lattice and choosing sites is
 // geometry and calls no potential.
 
-
 /// Pair-well minimum of the reduced Lennard-Jones potential, `2^(1/6)`.
 pub const LJ_PAIR_MINIMUM: f64 = 1.122_462_048_309_373;
 
@@ -1333,14 +1332,16 @@ impl Lattice {
                 if j == i {
                     continue;
                 }
-                atom_energy[j] += lj_pair(pair_dist2(atoms[j], new)) - lj_pair(pair_dist2(atoms[j], old));
+                atom_energy[j] +=
+                    lj_pair(pair_dist2(atoms[j], new)) - lj_pair(pair_dist2(atoms[j], old));
             }
             atom_energy[i] = site_energy[s] - own;
             for t in 0..m {
                 if t == s {
                     continue;
                 }
-                site_energy[t] += lj_pair(pair_dist2(vacant[t], new)) - lj_pair(pair_dist2(vacant[t], old));
+                site_energy[t] +=
+                    lj_pair(pair_dist2(vacant[t], new)) - lj_pair(pair_dist2(vacant[t], old));
             }
             atoms[i] = new;
             vacant[s] = old;
@@ -1374,10 +1375,7 @@ impl Lattice {
         let mut stats = DescentStats::default();
         let mut best_energy = energy;
         let mut best = x.to_vec();
-        loop {
-            let Some(moved) = self.search(&best, ledger) else {
-                break;
-            };
+        while let Some(moved) = self.search(&best, ledger) {
             stats.searches += 1;
             if moved.moves == 0 {
                 break;

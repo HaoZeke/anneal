@@ -7,8 +7,7 @@ use std::{
 
 /// Represents the addresses used by the underlying transports.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum SocketAddr
-{
+pub enum SocketAddr {
 	/// An address associated with intra-process communication.
 	InProc(String),
 
@@ -30,14 +29,12 @@ pub enum SocketAddr
 	Unspecified,
 }
 
-impl fmt::Display for SocketAddr
-{
+impl fmt::Display for SocketAddr {
 	/// Format trait for an empty format, `{}`.
 	///
 	/// Note that this is liable to change and does not necessarily map to the
 	/// URL originally provided to NNG.
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
-	{
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			SocketAddr::InProc(s) => write!(f, "inproc://{}", s),
 			SocketAddr::Ipc(s) => write!(f, "ipc://{}", s.to_string_lossy()),
@@ -50,10 +47,8 @@ impl fmt::Display for SocketAddr
 }
 
 #[cfg_attr(not(feature = "ffi-module"), doc(hidden))]
-impl From<nng_sys::nng_sockaddr> for SocketAddr
-{
-	fn from(addr: nng_sys::nng_sockaddr) -> SocketAddr
-	{
+impl From<nng_sys::nng_sockaddr> for SocketAddr {
+	fn from(addr: nng_sys::nng_sockaddr) -> SocketAddr {
 		unsafe {
 			match nng_sys::nng_sockaddr_family::try_convert_from(i32::from(addr.s_family)) {
 				Some(nng_sys::nng_sockaddr_family::NNG_AF_INPROC) => {
@@ -83,30 +78,25 @@ impl From<nng_sys::nng_sockaddr> for SocketAddr
 /// A ZeroTier socket address.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct SocketAddrZt
-{
+pub struct SocketAddrZt {
 	pub family: u16,
-	pub nwid:   u64,
+	pub nwid: u64,
 	pub nodeid: u64,
-	pub port:   u32,
+	pub port: u32,
 }
-impl SocketAddrZt
-{
+impl SocketAddrZt {
 	/// Converts an `nng_sockaddr_zt` into its corresponding Rust type.
-	const fn new(addr: &nng_sys::nng_sockaddr_zt) -> SocketAddrZt
-	{
+	const fn new(addr: &nng_sys::nng_sockaddr_zt) -> SocketAddrZt {
 		SocketAddrZt {
 			family: addr.sa_family,
-			nwid:   addr.sa_nwid,
+			nwid: addr.sa_nwid,
 			nodeid: addr.sa_nodeid,
-			port:   addr.sa_port,
+			port: addr.sa_port,
 		}
 	}
 }
-impl fmt::Display for SocketAddrZt
-{
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
-	{
+impl fmt::Display for SocketAddrZt {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		// I have no idea if this output is meaningful at all. This is just vaguely
 		// based off the URI format for ZeroTier, ignoring fields that don't appear in
 		// the specification and guessing how all of the others align.
@@ -119,8 +109,7 @@ impl fmt::Display for SocketAddrZt
 ///
 /// The function is unsafe because it reinterprets the `i8` buffer as a `u8`
 /// buffer via a call to `slice::from_raw_parts`.
-unsafe fn buf_to_string(buf: &[c_char]) -> String
-{
+unsafe fn buf_to_string(buf: &[c_char]) -> String {
 	// Unfortunately, the Rust standard library doesn't have a `from_ptr_len`
 	// style function that would allow me to pass in the whole buffer. Instead,
 	// we need to determine if there is a null byte and only pass in the slice

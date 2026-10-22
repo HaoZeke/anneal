@@ -127,14 +127,24 @@ fn exercise_scenario(scenario: &str) {
         if !ipc {
             drop(reservation.ports[usize::from(replica)].take());
         }
+        // Bind every publisher before any dial. Dropping a reservation only
+        // as this replica binds, then dialing the others, completes the TCP
+        // handshake against reservations that are still listening. nng waits
+        // ten seconds for a protocol header those sockets never send. Linux
+        // resets that unaccepted connection when the reservation closes.
+        // macOS leaves the dialer in negotiation, and the deadline below
+        // fires first.
         buses.push(
-            CensusBus::new(u32::from(replica), reservation.base, u32::from(REPLICAS)).unwrap(),
+            CensusBus::bind(u32::from(replica), reservation.base, u32::from(REPLICAS)).unwrap(),
         );
         assert_eq!(
             ipc_path(reservation.base, replica).try_exists().unwrap(),
             ipc,
             "the selected transport must own exactly its expected endpoint"
         );
+    }
+    for bus in &mut buses {
+        bus.dial();
     }
     let expected: Vec<_> = (0..usize::from(REPLICAS))
         .map(|replica| expected_peers(replica, ring))

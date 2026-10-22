@@ -1076,10 +1076,7 @@ fn elja_hyperqueue_is_one_allocation_on_node_scratch() {
         "/scratch/users/$USER/hq",
         "elja_hq_one.sh",
     ] {
-        assert!(
-            pilot.contains(required),
-            "pilot missing {required}"
-        );
+        assert!(pilot.contains(required), "pilot missing {required}");
     }
     assert!(
         !pilot.contains("--cwd"),
@@ -1111,10 +1108,7 @@ fn elja_hyperqueue_is_one_allocation_on_node_scratch() {
         let submit = source
             .find("hq submit")
             .unwrap_or_else(|| panic!("{script} should keep the old submit after the refusal"));
-        assert!(
-            refuse < submit,
-            "{script} must exit before hq submit"
-        );
+        assert!(refuse < submit, "{script} must exit before hq submit");
     }
     let pilot_refuse = pilot
         .find("refusing: a seed is one Slurm job")
