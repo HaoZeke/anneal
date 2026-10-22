@@ -175,6 +175,12 @@ def test_cluster_search_water_sites_validation():
         cluster_search(f, g, 2, 100, start=start, water_sites=np.zeros(6))
     with pytest.raises(ValueError, match="excludes"):
         cluster_search(f, g, 2, 100, start=start, water_sites=WATER_SITES, derived=True)
+    with pytest.raises(ValueError, match="excludes"):
+        cluster_search(f, g, 2, 100, start=start, water_sites=WATER_SITES, rigid=True)
+    with pytest.raises(ValueError, match="excludes"):
+        cluster_search(
+            f, g, 2, 100, start=start, water_sites=WATER_SITES, species=[1, 2]
+        )
 
 
 def test_cluster_search_ras_flag_exists_and_recommended_defaults():
@@ -200,6 +206,44 @@ def test_cluster_search_ras_flag_exists_and_recommended_defaults():
     assert "floors" not in out
     assert "returned" not in out
     assert "events" not in out
+
+
+def test_cluster_search_species_and_rigid_charts():
+    n = 4
+    species = [1, 1, 2, 2]
+    sigmas = [1.0, 1.0, 1.3, 1.3]
+    out = cluster_search(
+        lj_energy,
+        lj_grad,
+        n,
+        200,
+        seed=2,
+        species=species,
+        sigmas=sigmas,
+        target=-0.5,
+    )
+    assert np.asarray(out["best"]).shape == (3 * n,)
+    assert np.isfinite(out["best_energy"])
+
+    def tip_energy(x):
+        return float(np.sum(np.asarray(x, dtype=np.float64) ** 2))
+
+    def tip_grad(x):
+        return 2.0 * np.asarray(x, dtype=np.float64)
+
+    rigid = cluster_search(
+        tip_energy,
+        tip_grad,
+        2,
+        120,
+        seed=3,
+        rigid=True,
+        layout="block",
+        target=1.0,
+    )
+    assert np.asarray(rigid["best"]).shape == (12,)
+    assert np.isfinite(rigid["best_energy"])
+    assert rigid["best_energy"] <= 1.0 + 1e-6
 
 
 def test_cluster_search_ras_true_uses_archive_outcome():
