@@ -4,6 +4,8 @@
 //! is what it fixes, and a rigid group is a connected component of the free
 //! atoms under their covalent radii.
 
+#![allow(dead_code)]
+
 use anneal_core::methods::cluster_hopping::covalent_radius;
 use eindir_core::Objective;
 use eindir_core::bounds::Bounds;
@@ -52,12 +54,6 @@ pub fn substrate_top(base: &Array1<f64>, free: &[usize]) -> f64 {
     over.iter()
         .map(|&i| base[3 * i + 2])
         .fold(f64::NEG_INFINITY, f64::max)
-}
-
-/// Atoms the hop is allowed to propose on: every atom the fixture leaves
-/// free. The quench may relax them all; the move library relocates these.
-pub fn hop_atoms(free: &[usize]) -> Vec<usize> {
-    free.to_vec()
 }
 
 /// Rigid groups of the free atoms: connected components under a bond
@@ -159,27 +155,6 @@ pub fn place_adsorbates(
     x
 }
 
-pub fn symbol(z: u32) -> &'static str {
-    match z {
-        1 => "H",
-        6 => "C",
-        7 => "N",
-        8 => "O",
-        29 => "Cu",
-        79 => "Au",
-        _ => "X",
-    }
-}
-
-pub fn search_arm() -> &'static str {
-    let from_env = std::env::var("ANNEAL_SLAB_ARM").ok();
-    match from_env.as_deref() {
-        Some("plain") => "plain",
-        Some("recommended") | None => "recommended",
-        Some(value) => panic!("ANNEAL_SLAB_ARM must be plain or recommended; got {value}"),
-    }
-}
-
 /// Zero the gradient on frozen substrate atoms. The potential is unchanged.
 pub struct Mobile<'a, O> {
     pub inner: &'a O,
@@ -219,7 +194,7 @@ impl<O: Objective<f64> + Gradient<f64>> DifferentiableObjective<f64> for Mobile<
 
 #[cfg(test)]
 mod tests {
-    use super::{adsorbate_groups, hop_atoms, place_adsorbates, substrate_top};
+    use super::{adsorbate_groups, place_adsorbates, substrate_top};
     use ndarray::Array1;
 
     fn h2_on_two_fixed() -> (Array1<f64>, Vec<u32>, Vec<usize>) {
@@ -234,7 +209,6 @@ mod tests {
     fn a_bonded_pair_stays_one_rigid_group() {
         let (base, species, free) = h2_on_two_fixed();
         assert_eq!(adsorbate_groups(&base, &species, &free), vec![vec![2, 3]]);
-        assert_eq!(hop_atoms(&free), vec![2, 3]);
     }
 
     #[test]
@@ -263,7 +237,6 @@ mod tests {
             adsorbate_groups(&base, &species, &free),
             vec![vec![1], vec![2], vec![3], vec![4]]
         );
-        assert_eq!(hop_atoms(&free), free);
     }
 
     #[test]

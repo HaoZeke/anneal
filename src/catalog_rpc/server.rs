@@ -861,7 +861,7 @@ impl CatalogServer {
                 let local = tokio::task::LocalSet::new();
                 let (incoming, mut accepted) = tokio::sync::mpsc::unbounded_channel();
                 let accept_stop = Arc::clone(&thread_stop);
-                std::thread::Builder::new()
+                let accept_thread = std::thread::Builder::new()
                     .name("catalog-nng-accept".to_owned())
                     .spawn(move || {
                         let _listener = bound.listener;
@@ -907,6 +907,14 @@ impl CatalogServer {
                         }
                     }
                 });
+                // The accept thread owns the nng socket. Dropping that
+                // socket closes the listen fd. CatalogServer::drop joins
+                // this coordinator thread, so joining the accept thread
+                // here makes stop wait until that fd is closed. A later
+                // CatalogServer::start on the same address can bind it.
+                // macOS returns AddressInUse when the previous listen fd
+                // is still open.
+                let _ = accept_thread.join();
             })
             .expect("catalog RPC thread starts");
         Ok(Self {

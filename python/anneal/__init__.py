@@ -244,6 +244,7 @@ def cluster_search(
     rigid: bool = False,
     layout: str = "block",
     target: float | None = None,
+    water_sites=None,
 ):
     """Run the measured cluster-search layer.
 
@@ -253,8 +254,8 @@ def cluster_search(
         central-difference probe determines its orientation when the budget is
         at least four evaluations.
       n: number of points. The Cartesian state length is ``3 * n``. With
-        ``rigid=True``, ``n`` is the number of bodies and the state length
-        is ``6 * n``.
+        ``rigid=True`` or ``water_sites``, ``n`` is the number of bodies and
+        the state length is ``6 * n``.
       budget: charged objective and gradient evaluations.
       seed: RNG seed.
       recommended: ``Config.recommended(n)`` when true, else
@@ -262,12 +263,13 @@ def cluster_search(
       derived: ``Config.derived(n)``; overrides ``recommended``.
       communicating: ``Config.communicating(n)``; overrides both.
       ras: residual archive search on the recommended preset.
-      start: optional flat start. Cartesian length is ``3n``. A rigid start
-        is ``6n``.
+      start: optional flat start. Cartesian length is ``3n``. A rigid or
+        water start is ``6n``. When set, hops use ``search_from`` instead of
+        a random compact cluster.
       length_scale: optional physical length. With the recommended preset
         this uses ``with_scales`` so an angstrom start is not crushed into
         the reduced LJ container. Ignored when ``species`` or ``rigid`` is
-        set, because those keep the stock preset.
+        set, because those keep the stock preset. Excluded by ``water_sites``.
       species: optional label per point. Two or more labels add a swap move.
         A wide diameter ratio also tries one downhill unlike-pair exchange
         beside the escape.
@@ -284,8 +286,21 @@ def cluster_search(
       layout: ``block`` or ``interleaved``. Interleaved is the per-body
         centre and angle-axis order, with rotations negated at the boundary.
       target: stop once a recorded energy is at or below this value.
+      water_sites: optional ``(3, 3)`` body-frame O, H, H positions of a
+        rigid water, in angstrom, about its rotation centre. ``n`` then counts
+        molecules and the state is ``n`` centres followed by ``n``
+        exponential-map rotation vectors (active Rodrigues). The presets are
+        ``Config.communicating_tip4p``, ``Config.recommended_tip4p`` and, with
+        both false, ``Config.for_tip4p``. Requires ``start``. Excludes
+        ``ras``, ``derived``, ``length_scale``, ``rigid``, ``species``,
+        ``sigmas``, and a non-block layout.
 
-    Returns a dict with ``best``, ``best_energy``, and ``hops``.
+    A callback raising a ``BaseException`` that is not an ``Exception``, such
+    as ``KeyboardInterrupt``, stops the run at the next evaluation and is
+    re-raised here.
+
+    Returns a dict with ``best`` (flat coordinates in the state layout),
+    ``best_energy``, and ``hops``.
     """
     start_arr = None if start is None else np.asarray(start, dtype=np.float64).reshape(-1)
     args = (
@@ -309,6 +324,8 @@ def cluster_search(
         kwargs["sigmas"] = [float(value) for value in np.asarray(sigmas, dtype=np.float64).reshape(-1)]
     if target is not None:
         kwargs["target"] = float(target)
+    if water_sites is not None:
+        kwargs["water_sites"] = np.asarray(water_sites, dtype=np.float64).reshape(-1)
     out = _core_cluster_search(*args, **kwargs)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
     return out
@@ -1402,6 +1419,9 @@ def global_optimize(
     ``arm_pulls``, and ``arm_successes``. Multiple replicas also report
     individual results, ``charged`` work and coverage sample counters.
     """
+    # int() truncates a float, so 1.5 would run as 1. A neighbour count is whole.
+    if not isinstance(coverage_neighbors, (int, np.integer)):
+        raise TypeError("coverage_neighbors must be an integer")
     out = _core_global_optimize(
         obj_fn,
         _flat(low),

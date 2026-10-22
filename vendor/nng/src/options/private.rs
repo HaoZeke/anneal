@@ -17,8 +17,7 @@ use crate::{
 /// This trait does not enforce the availability of any specific options on
 /// any specific type. Calling these methods incorrectly will result in NNG
 /// returning an error code.
-pub trait OptOps: super::Opt
-{
+pub trait OptOps: super::Opt {
 	/// Get the value of the option using the specified type.
 	fn get<T: HasOpts>(s: &T) -> Result<Self::OptType>;
 
@@ -27,8 +26,7 @@ pub trait OptOps: super::Opt
 }
 
 /// Marks a type that can get and set NNG options.
-pub trait HasOpts: Sized
-{
+pub trait HasOpts: Sized {
 	/// Underlying NNG type.
 	type Handle;
 
@@ -82,8 +80,7 @@ pub trait HasOpts: Sized
 	fn handle(&self) -> Self::Handle;
 
 	/// Get the boolean option.
-	fn getopt_bool(&self, opt: *const c_char) -> Result<bool>
-	{
+	fn getopt_bool(&self, opt: *const c_char) -> Result<bool> {
 		let mut raw = false;
 		let rv = unsafe { (Self::GETOPT_BOOL)(self.handle(), opt, &mut raw as _) };
 
@@ -91,8 +88,7 @@ pub trait HasOpts: Sized
 	}
 
 	/// Get an integer option.
-	fn getopt_int(&self, opt: *const c_char) -> Result<i32>
-	{
+	fn getopt_int(&self, opt: *const c_char) -> Result<i32> {
 		let mut res = 0;
 		let rv = unsafe { (Self::GETOPT_INT)(self.handle(), opt, &mut res as _) };
 
@@ -100,8 +96,7 @@ pub trait HasOpts: Sized
 	}
 
 	/// Get the duration from the option.
-	fn getopt_ms(&self, opt: *const c_char) -> Result<Option<Duration>>
-	{
+	fn getopt_ms(&self, opt: *const c_char) -> Result<Option<Duration>> {
 		let mut dur: nng_sys::nng_duration = 0;
 		let rv = unsafe { (Self::GETOPT_MS)(self.handle(), opt, &mut dur as _) };
 
@@ -109,8 +104,7 @@ pub trait HasOpts: Sized
 	}
 
 	/// Get the `size_t` option.
-	fn getopt_size(&self, opt: *const c_char) -> Result<usize>
-	{
+	fn getopt_size(&self, opt: *const c_char) -> Result<usize> {
 		let mut sz = 0;
 		let rv = unsafe { (Self::GETOPT_SIZE)(self.handle(), opt, &mut sz as _) };
 
@@ -118,8 +112,7 @@ pub trait HasOpts: Sized
 	}
 
 	/// Get the specified socket address option.
-	fn getopt_sockaddr(&self, opt: *const c_char) -> Result<SocketAddr>
-	{
+	fn getopt_sockaddr(&self, opt: *const c_char) -> Result<SocketAddr> {
 		unsafe {
 			let mut addr: MaybeUninit<nng_sys::nng_sockaddr> = MaybeUninit::uninit();
 			let rv = (Self::GETOPT_SOCKADDR)(self.handle(), opt, addr.as_mut_ptr());
@@ -129,8 +122,7 @@ pub trait HasOpts: Sized
 	}
 
 	/// Get the string value of the specified option.
-	fn getopt_string(&self, opt: *const c_char) -> Result<String>
-	{
+	fn getopt_string(&self, opt: *const c_char) -> Result<String> {
 		unsafe {
 			let mut ptr: *mut c_char = ptr::null_mut();
 			let rv = (Self::GETOPT_STRING)(self.handle(), opt, &mut ptr as *mut _);
@@ -144,8 +136,7 @@ pub trait HasOpts: Sized
 	}
 
 	/// The the `u64` option.
-	fn getopt_uint64(&self, opt: *const c_char) -> Result<u64>
-	{
+	fn getopt_uint64(&self, opt: *const c_char) -> Result<u64> {
 		let mut res = 0;
 		let rv = unsafe { (Self::GETOPT_UINT64)(self.handle(), opt, &mut res as _) };
 
@@ -153,32 +144,28 @@ pub trait HasOpts: Sized
 	}
 
 	/// Sets the value of opaque data.
-	fn setopt(&self, opt: *const c_char, val: &[u8]) -> Result<()>
-	{
+	fn setopt(&self, opt: *const c_char, val: &[u8]) -> Result<()> {
 		let rv = unsafe { (Self::SETOPT)(self.handle(), opt, val.as_ptr() as _, val.len()) };
 
 		rv2res!(rv)
 	}
 
 	/// Sets the value of a boolean option.
-	fn setopt_bool(&self, opt: *const c_char, val: bool) -> Result<()>
-	{
+	fn setopt_bool(&self, opt: *const c_char, val: bool) -> Result<()> {
 		let rv = unsafe { (Self::SETOPT_BOOL)(self.handle(), opt, val) };
 
 		rv2res!(rv)
 	}
 
 	/// Set the value of an integer option.
-	fn setopt_int(&self, opt: *const c_char, val: i32) -> Result<()>
-	{
+	fn setopt_int(&self, opt: *const c_char, val: i32) -> Result<()> {
 		let rv = unsafe { (Self::SETOPT_INT)(self.handle(), opt, val) };
 
 		rv2res!(rv)
 	}
 
 	/// Set the duration to the option.
-	fn setopt_ms(&self, opt: *const c_char, dur: Option<Duration>) -> Result<()>
-	{
+	fn setopt_ms(&self, opt: *const c_char, dur: Option<Duration>) -> Result<()> {
 		let ms = crate::util::duration_to_nng(dur);
 
 		let rv = unsafe { (Self::SETOPT_MS)(self.handle(), opt, ms) };
@@ -186,23 +173,20 @@ pub trait HasOpts: Sized
 	}
 
 	/// Set the value of the pointer to the option.
-	unsafe fn setopt_ptr(&self, opt: *const c_char, val: *mut c_void) -> Result<()>
-	{
+	unsafe fn setopt_ptr(&self, opt: *const c_char, val: *mut c_void) -> Result<()> {
 		let rv = (Self::SETOPT_PTR)(self.handle(), opt, val);
 		rv2res!(rv)
 	}
 
 	/// Set the value of a `size` option.
-	fn setopt_size(&self, opt: *const c_char, val: usize) -> Result<()>
-	{
+	fn setopt_size(&self, opt: *const c_char, val: usize) -> Result<()> {
 		let rv = unsafe { (Self::SETOPT_SIZE)(self.handle(), opt, val) };
 
 		rv2res!(rv)
 	}
 
 	/// Set the value of the option to the value of the string.
-	fn setopt_string(&self, opt: *const c_char, val: &str) -> Result<()>
-	{
+	fn setopt_string(&self, opt: *const c_char, val: &str) -> Result<()> {
 		let cval = CString::new(val).map_err(|_| Error::InvalidInput)?;
 		let rv = unsafe { (Self::SETOPT_STRING)(self.handle(), opt, cval.as_ptr()) };
 

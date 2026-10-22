@@ -325,6 +325,9 @@ fn the_energy_bias_tempers_at_the_coldest_rung_under_the_budget_window() {
     cfg.energy_bias = true;
     cfg.flat_sweep = 32;
     cfg.max_hops = Some(32);
+    // An orbit completion counts as a hop without a deposit, so the sample
+    // fills on hop 32 only when every hop deposits.
+    cfg.orbit_complete_on_new = false;
     let fill = |swap_period: usize, seed: u64| {
         let mut cfg = cfg.clone();
         cfg.swap_period = swap_period;

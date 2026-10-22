@@ -51,5 +51,7 @@ target_include_directories(anneal_core INTERFACE
     $<INSTALL_INTERFACE:include>
 )
 
-# Install header alongside the library
+# Install header alongside the library. anneal-core.h includes
+# dlpack/dlpack.h, so that header has to land on the same include prefix.
 install(FILES ${ANNEAL_HEADER} DESTINATION include)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/dlpack/dlpack.h DESTINATION include/dlpack)

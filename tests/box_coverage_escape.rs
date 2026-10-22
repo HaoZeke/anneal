@@ -201,7 +201,7 @@ fn return_counters_match_paid_geometry_and_bounded_scale_changes() {
     let mut recrossings = 0;
     let mut updates = 0;
     let mut scale = 1.0_f64;
-    for hop in trace[1..].chunks_exact(2) {
+    for hop in trace[1..].as_chunks::<2>().0.iter() {
         assert_eq!(hop[1], array![0.0]);
         if hop[0][0].abs() / 2.0 > radius {
             recrossings += 1;

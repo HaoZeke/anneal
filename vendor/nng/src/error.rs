@@ -129,8 +129,7 @@ pub enum Error
 }
 
 #[cfg_attr(not(feature = "ffi-module"), doc(hidden))]
-impl From<NonZeroU32> for Error
-{
+impl From<NonZeroU32> for Error {
 	#[rustfmt::skip]
 	fn from(code: NonZeroU32) -> Error
 	{
@@ -174,19 +173,17 @@ impl From<NonZeroU32> for Error
 	}
 }
 
-impl From<SendError> for Error
-{
-	fn from((_, e): SendError) -> Error { e }
+impl From<SendError> for Error {
+	fn from((_, e): SendError) -> Error {
+		e
+	}
 }
 
-impl From<Error> for io::Error
-{
-	fn from(e: Error) -> io::Error
-	{
+impl From<Error> for io::Error {
+	fn from(e: Error) -> io::Error {
 		if let Error::SystemErr(c) = e {
 			io::Error::from_raw_os_error(c as i32)
-		}
-		else {
+		} else {
 			#[rustfmt::skip]
 			#[allow(clippy::match_same_arms)]
 			let new_kind = match e {
@@ -211,8 +208,7 @@ impl From<Error> for io::Error
 
 impl error::Error for Error {}
 
-impl fmt::Display for Error
-{
+impl fmt::Display for Error {
 	#[rustfmt::skip]
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
 	{

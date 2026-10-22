@@ -1,7 +1,7 @@
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    random_cluster, run_with_bias, run_with_bias_at_checkpoints, run_with_gradient,
-    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger,
+    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, random_cluster,
+    run_with_bias, run_with_bias_at_checkpoints, run_with_gradient,
 };
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;

@@ -20,9 +20,9 @@
 
 use ndarray::{Array1, ArrayView1};
 use numpy::{PyArray1, PyReadonlyArray1};
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyFloat};
 use rand::SeedableRng;
 
 use eindir_core::py_objective::{PyBounds as EindirPyBounds, PyObjective};
@@ -520,7 +520,7 @@ impl From<History> for PyHistory {
 #[derive(Default)]
 struct CallbackErrors {
     fatal: std::sync::Mutex<Option<PyErr>>,
-    aborted: std::sync::atomic::AtomicBool,
+    aborted: std::sync::Arc<std::sync::atomic::AtomicBool>,
     scored: std::sync::atomic::AtomicUsize,
     first_scored: std::sync::Mutex<Option<String>>,
 }
@@ -528,6 +528,11 @@ struct CallbackErrors {
 impl CallbackErrors {
     fn aborted(&self) -> bool {
         self.aborted.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The flag an ending run raises, for a ledger that should close with it.
+    fn abort_flag(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        std::sync::Arc::clone(&self.aborted)
     }
 
     fn record(&self, py: Python<'_>, err: PyErr) {
@@ -2318,6 +2323,16 @@ fn bfwt_optimize(
     Ok(out.into())
 }
 
+/// A bare `usize` extraction truncates a float. Neighbour counts are whole.
+fn coverage_neighbor_count(value: &Bound<'_, PyAny>) -> PyResult<usize> {
+    if value.is_instance_of::<PyFloat>() {
+        return Err(PyTypeError::new_err(
+            "coverage_neighbors must be an integer",
+        ));
+    }
+    value.extract()
+}
+
 /// Runs the Thompson-allocated portfolio global optimizer.
 ///
 /// One generic driver with a single budget knob: a discounted
@@ -2356,7 +2371,7 @@ fn global_optimize(
     replicas: usize,
     coverage_shared: bool,
     coverage_radius: f64,
-    coverage_neighbors: usize,
+    #[pyo3(from_py_with = coverage_neighbor_count)] coverage_neighbors: usize,
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -2846,10 +2861,60 @@ impl PyClusterConfig {
         })
     }
 
-    /// Points in a state; the state length is `3 * n_points`.
+    /// The communicating arm on `n` rigid TIP4P waters.
+    #[staticmethod]
+    fn communicating_tip4p(n: usize) -> PyResult<Self> {
+        if n < 2 {
+            return Err(PyValueError::new_err("n must be at least 2"));
+        }
+        Ok(Self {
+            inner: crate::methods::cluster_hopping::Config::communicating_tip4p(n),
+            recommended: false,
+        })
+    }
+
+    /// The recommended arm on `n` rigid TIP4P waters.
+    #[staticmethod]
+    fn recommended_tip4p(n: usize) -> PyResult<Self> {
+        if n < 2 {
+            return Err(PyValueError::new_err("n must be at least 2"));
+        }
+        Ok(Self {
+            inner: crate::methods::cluster_hopping::Config::recommended_tip4p(n),
+            recommended: true,
+        })
+    }
+
+    /// Points in a state; the state length is `3 * n_points`, or `6 *
+    /// n_points` molecules on a rigid-body configuration.
     #[getter]
     fn n_points(&self) -> usize {
         self.inner.n_points
+    }
+
+    /// Whether the state is rigid bodies: centres, then rotations.
+    #[getter]
+    fn rigid_body(&self) -> bool {
+        self.inner.rigid_body_geometry.is_some()
+    }
+
+    /// How far above the incumbent a screened trial may land.
+    #[getter]
+    fn screen_margin(&self) -> f64 {
+        self.inner.screen_margin
+    }
+
+    /// Whether the energy screen credits the descent its pass left undone.
+    #[getter]
+    fn calibrated_screen(&self) -> bool {
+        self.inner.calibrated_screen
+    }
+
+    /// Whether a full relaxation below the incumbent continues until it
+    /// stops descending.
+    #[getter]
+    fn finish_improving(&self) -> bool {
+        self.inner.finish_improving
     }
 
     /// Composed surface-relocation burst arm.
@@ -3050,9 +3115,13 @@ fn cluster_gradient_scale(
     py: Python<'_>,
     obj_fn: &Py<PyAny>,
     grad_fn: &Py<PyAny>,
-    probe: &[f64],
+    cfg: &crate::methods::cluster_hopping::Config,
+    seed: u64,
+    at: Option<ArrayView1<'_, f64>>,
     errors: &CallbackErrors,
 ) -> PyResult<f64> {
+    use crate::methods::cluster_hopping::random_cluster_in_radius;
+
     // The probe follows the run's callback rules: an ordinary exception or a
     // value that cannot orient the gradient leaves the callback taken as a
     // gradient, counted in the run's warning; KeyboardInterrupt, SystemExit
@@ -3081,7 +3150,21 @@ fn cluster_gradient_scale(
         })
     };
 
-    if probe.is_empty() {
+    // A rigid-body state is not a point set, so it is probed where the caller
+    // starts rather than at a random compact cluster.
+    let probe = match at {
+        Some(at) => at.to_owned(),
+        None => {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x6a09_e667_f3bc_c909);
+            random_cluster_in_radius(
+                cfg.n_points,
+                cfg.start_radius(),
+                cfg.min_separation,
+                &mut rng,
+            )
+        }
+    };
+    if at.is_none() && probe.len() != 3 * cfg.n_points {
         return Err(PyValueError::new_err(
             "could not construct a gradient-orientation probe",
         ));
@@ -3141,9 +3224,8 @@ fn cluster_gradient_scale(
     })
 }
 
-fn cluster_bounds(n: usize, length_scale: f64) -> Bounds<f64> {
+fn cluster_bounds(n: usize, dim: usize, length_scale: f64) -> Bounds<f64> {
     let extent = 4.0 * 2.0_f64.powf(1.0 / 6.0) * (n as f64).cbrt() * length_scale;
-    let dim = 3 * n;
     Bounds::new(
         Array1::from_elem(dim, -extent),
         Array1::from_elem(dim, extent),
@@ -3364,8 +3446,8 @@ fn rigid_probe(
 /// Args:
 ///   obj_fn: Python callable `f(numpy.ndarray) -> float`.
 ///   grad_fn: Python gradient or force callable `g(numpy.ndarray) -> numpy.ndarray`.
-///   n: number of points. A Cartesian state is `3n`. `rigid=True` is `n`
-///     bodies and a `6n` state.
+///   n: number of points. A Cartesian state is `3n`. `rigid=True` or
+///     `water_sites` is `n` bodies and a `6n` state.
 ///   budget: charged evaluations.
 ///   seed: RNG seed.
 ///   recommended: measured stack when true, Wales-Doye baseline when false.
@@ -3375,12 +3457,12 @@ fn rigid_probe(
 ///     `derived` when true. Not `Config.recommended`.
 ///   ras: residual archive search on the recommended preset. Keyword-only;
 ///     default false. Does not change `Config.recommended`.
-///   start: optional flat start. Cartesian length is `3n`. A rigid start is
-///     `6n`, block Rodrigues unless `layout` is `interleaved`.
+///   start: optional flat start. Cartesian length is `3n`. A rigid or water
+///     start is `6n`, block Rodrigues unless `layout` is `interleaved`.
 ///   length_scale: optional physical length. When set with the recommended
 ///     preset, hops use `with_scales` instead of the reduced LJ container.
 ///     Ignored once `species` or `rigid` selects a chart: those keep the
-///     stock preset and adapt geometry afterwards.
+///     stock preset and adapt geometry afterwards. Excluded by `water_sites`.
 ///   species: optional label per point. Two or more labels add a swap move.
 ///     A wide diameter ratio also tries one downhill unlike-pair exchange
 ///     beside the escape.
@@ -3399,6 +3481,19 @@ fn rigid_probe(
 ///     centre and angle-axis per body). Interleaved rotations are negated
 ///     at the boundary because that angle-axis map is the opposite sense.
 ///   target: stop once a recorded energy is at or below this value.
+///   water_sites: optional flat 9-vector of the O, H, H positions of one
+///     rigid water in its body frame, in angstrom, about the point its
+///     rotation turns about. When set, `n` counts molecules and the state is
+///     `6n`: `n` centres, then `n` exponential-map rotation vectors that turn
+///     the body frame actively (Rodrigues). The presets become
+///     `Config.communicating_tip4p(n)`, `Config.recommended_tip4p(n)`, or
+///     `Config.for_tip4p(n)` when both are false, with these sites as the
+///     rigid geometry. Needs `start`. Excludes `ras`, `derived`,
+///     `length_scale`, `rigid`, `species`, `sigmas`, and a non-block layout.
+///
+/// A callback raising `BaseException` that is not an `Exception`, such as
+/// `KeyboardInterrupt`, stops the run at the next evaluation and is raised
+/// from this call.
 #[pyfunction]
 #[pyo3(signature = (
     obj_fn,
@@ -3418,6 +3513,7 @@ fn rigid_probe(
     rigid = false,
     layout = "block",
     target = None,
+    water_sites = None,
 ))]
 fn cluster_search(
     py: Python<'_>,
@@ -3437,19 +3533,22 @@ fn cluster_search(
     rigid: bool,
     layout: &str,
     target: Option<f64>,
+    water_sites: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
+    use crate::methods::cluster_hopping::Config;
+
     if n < 2 {
         return Err(PyValueError::new_err("n must be at least 2"));
     }
     if budget < 1 {
         return Err(PyValueError::new_err("budget must be positive"));
     }
-    if let Some(scale) = length_scale {
-        if !scale.is_finite() || scale <= 0.0 {
-            return Err(PyValueError::new_err(
-                "length_scale must be finite and positive",
-            ));
-        }
+    if let Some(scale) = length_scale
+        && (!scale.is_finite() || scale <= 0.0)
+    {
+        return Err(PyValueError::new_err(
+            "length_scale must be finite and positive",
+        ));
     }
     if rigid && species.is_some() {
         return Err(PyValueError::new_err(
@@ -3470,34 +3569,93 @@ fn cluster_search(
     if ras && (rigid || species.is_some()) {
         return Err(PyValueError::new_err("ras is the cartesian archive search"));
     }
+    let water = match water_sites {
+        None => None,
+        Some(sites) => {
+            let sl = sites.as_slice()?;
+            if sl.len() != 9 {
+                return Err(PyValueError::new_err(format!(
+                    "water_sites length {} must be 9 (O, H, H)",
+                    sl.len()
+                )));
+            }
+            if ras || derived || length_scale.is_some() {
+                return Err(PyValueError::new_err(
+                    "water_sites excludes ras, derived and length_scale",
+                ));
+            }
+            if rigid || species.is_some() || sigmas.is_some() || layout != "block" {
+                return Err(PyValueError::new_err(
+                    "water_sites excludes rigid, species, sigmas and a non-block layout",
+                ));
+            }
+            if start.is_none() {
+                return Err(PyValueError::new_err("water_sites needs a start"));
+            }
+            let sites = sl.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
+            Some(
+                crate::rigid_body::RigidBodyGeometry::new(sites, vec![8, 1, 1])
+                    .map_err(PyValueError::new_err)?,
+            )
+        }
+    };
     let interleaved = rigid && layout == "interleaved";
+    let rigid_chart = water.is_some() || rigid;
+    let dim = if rigid_chart { 6 * n } else { 3 * n };
+    let start = match start {
+        Some(start) => {
+            let sl = start.as_slice()?;
+            if sl.len() != dim {
+                return Err(PyValueError::new_err(format!(
+                    "start length {} must be {} = {}",
+                    sl.len(),
+                    if rigid_chart { "6*n" } else { "3*n" },
+                    dim
+                )));
+            }
+            Some(Array1::from_vec(sl.to_vec()))
+        }
+        None => None,
+    };
     let scale = length_scale.unwrap_or(1.0);
-    let mut cfg = if ras {
-        crate::methods::cluster_hopping::Config::recommended(n)
+    let stock = species.is_some() || rigid;
+    let has_water = water.is_some();
+    let mut cfg = if let Some(geometry) = water {
+        let mut cfg = if communicating {
+            Config::communicating_tip4p(n)
+        } else if recommended {
+            Config::recommended_tip4p(n)
+        } else {
+            Config::for_tip4p(n)
+        };
+        cfg.rigid_body_geometry = Some(geometry);
+        cfg
+    } else if ras {
+        Config::recommended(n)
     } else if communicating {
-        crate::methods::cluster_hopping::Config::communicating(n)
+        Config::communicating(n)
     } else if derived {
-        crate::methods::cluster_hopping::Config::derived(n)
+        Config::derived(n)
     } else if recommended {
-        if length_scale.is_some() {
+        if length_scale.is_some() && !stock {
             recommended_with_scale(n, scale)
         } else {
-            crate::methods::cluster_hopping::Config::recommended(n)
+            Config::recommended(n)
         }
-    } else if length_scale.is_some() {
-        crate::methods::cluster_hopping::Config::with_scales(n, scale, 1.0)
+    } else if length_scale.is_some() && !stock {
+        Config::with_scales(n, scale, 1.0)
     } else {
-        crate::methods::cluster_hopping::Config::for_cluster(n)
+        Config::for_cluster(n)
     };
-    if rigid || species.is_some() {
+    if !has_water && stock {
         cfg = if communicating {
-            crate::methods::cluster_hopping::Config::communicating(n)
+            Config::communicating(n)
         } else if derived {
-            crate::methods::cluster_hopping::Config::derived(n)
+            Config::derived(n)
         } else if recommended {
-            crate::methods::cluster_hopping::Config::recommended(n)
+            Config::recommended(n)
         } else {
-            crate::methods::cluster_hopping::Config::for_cluster(n)
+            Config::for_cluster(n)
         };
         if rigid {
             cfg = cfg.with_rigid_bodies(crate::potentials::gmin_water_geometry());
@@ -3506,30 +3664,33 @@ fn cluster_search(
             cfg = cfg.with_species(labels, sigmas);
         }
     }
-    let mut ledger = crate::methods::cluster_hopping::Ledger::new(budget);
+    let errors: std::sync::Arc<CallbackErrors> = std::sync::Arc::default();
+    let mut ledger =
+        crate::methods::cluster_hopping::Ledger::with_stop(budget, errors.abort_flag());
     if let Some(limit) = target {
         if !limit.is_finite() {
             return Err(PyValueError::new_err("target must be finite"));
         }
         ledger.stop_below(limit);
     }
-    let errors: std::sync::Arc<CallbackErrors> = std::sync::Arc::default();
-    let probe = if rigid {
-        rigid_probe(&cfg, seed, interleaved)
-    } else {
-        use crate::methods::cluster_hopping::random_cluster_in_radius;
-        use rand::SeedableRng;
-        let mut rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x6a09_e667_f3bc_c909);
-        let placed = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng);
-        if placed.len() != 3 * n {
-            return Err(PyValueError::new_err(
-                "could not construct a gradient-orientation probe",
-            ));
-        }
-        placed.to_vec()
-    };
     let gradient_scale = if budget >= 4 {
-        let scale = cluster_gradient_scale(py, &obj_fn, &grad_fn, &probe, &errors)?;
+        let probe_owned = if rigid_chart {
+            Some(match start.as_ref() {
+                Some(start) => start.clone(),
+                None => Array1::from_vec(rigid_probe(&cfg, seed, interleaved)),
+            })
+        } else {
+            None
+        };
+        let scale = cluster_gradient_scale(
+            py,
+            &obj_fn,
+            &grad_fn,
+            &cfg,
+            seed,
+            probe_owned.as_ref().map(|probe| probe.view()),
+            &errors,
+        )?;
         for _ in 0..3 {
             assert!(ledger.charge());
         }
@@ -3537,20 +3698,20 @@ fn cluster_search(
     } else {
         1.0
     };
-    let dim = if rigid { 6 * n } else { 3 * n };
-    let extent = if rigid {
-        cfg.container.max(1.0) * 4.0
+    let extent = cfg.container.max(1.0) * 4.0;
+    let bounds = if rigid {
+        Bounds::new(
+            Array1::from_elem(dim, -extent),
+            Array1::from_elem(dim, extent),
+            0.0,
+        )
     } else {
-        4.0 * 2.0_f64.powf(1.0 / 6.0) * (n as f64).cbrt() * scale
+        cluster_bounds(n, dim, scale)
     };
     let obj = CallableDiffObjective {
         fn_: obj_fn,
         grad_fn,
-        bounds: Bounds::new(
-            Array1::from_elem(dim, -extent),
-            Array1::from_elem(dim, extent),
-            0.0,
-        ),
+        bounds,
         gradient_scale,
         errors: std::sync::Arc::clone(&errors),
     };
@@ -3559,28 +3720,6 @@ fn cluster_search(
         errors.finish(py)?;
         return out;
     }
-    let started = if let Some(start) = start {
-        let sl = start.as_slice()?;
-        if sl.len() != dim {
-            return Err(PyValueError::new_err(format!(
-                "start length {} must be {dim}",
-                sl.len()
-            )));
-        }
-        Some(if interleaved {
-            Array1::from_vec(crate::potentials::block_from_interleaved_gmin(sl))
-        } else {
-            Array1::from_vec(sl.to_vec())
-        })
-    } else if rigid {
-        Some(Array1::from_vec(rigid_probe(
-            &cfg,
-            seed.wrapping_add(1),
-            false,
-        )))
-    } else {
-        None
-    };
     let (out, _) = if interleaved {
         let chart = InterleavedChart {
             inner: &obj,
@@ -3591,10 +3730,18 @@ fn cluster_search(
                 0.0,
             ),
         };
-        let start = started.expect("a rigid search always has a start");
-        crate::methods::cluster_search::search_from(&chart, &cfg, &mut ledger, start.view(), seed)
-    } else if let Some(start) = started {
+        let started = match start.as_ref() {
+            Some(start) => Array1::from_vec(crate::potentials::block_from_interleaved_gmin(
+                start.as_slice().unwrap_or(&[]),
+            )),
+            None => Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false)),
+        };
+        crate::methods::cluster_search::search_from(&chart, &cfg, &mut ledger, started.view(), seed)
+    } else if let Some(start) = start {
         crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, start.view(), seed)
+    } else if rigid {
+        let started = Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false));
+        crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, started.view(), seed)
     } else {
         crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
     };
