@@ -563,6 +563,10 @@ fn rotation_taking(from: [f64; 3], to: [f64; 3]) -> [[f64; 3]; 3] {
 }
 
 /// Left-multiply `omega`'s rotation by `increment` and return the composed vector.
+///
+/// A rigid orientation step calls this so the hop and the potential share
+/// one Rodrigues product.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn compose_rotation(increment: [[f64; 3]; 3], omega: [f64; 3]) -> [f64; 3] {
     rotation_vector(mat_mul(increment, rotation_matrix(omega)))
 }
