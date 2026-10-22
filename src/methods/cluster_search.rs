@@ -1223,7 +1223,8 @@ mod tests {
     /// A caller that raises the ledger stop after N potential calls must get
     /// the search back at once, with the best state found and with no further
     /// calls. Basin hopping, the communicating preset, the recommended preset,
-    /// and a replica ladder all share this.
+    /// a replica ladder, and the species chart all share this. The rigid
+    /// TIP4P driver is covered with the stock searches.
     #[test]
     fn caller_stop_returns_at_once() {
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -1292,6 +1293,13 @@ mod tests {
                 cfg.swap_period = 2;
                 cfg
             }),
+            (
+                "species chart",
+                Config::for_cluster(8).with_species(
+                    vec![1, 1, 1, 1, 2, 2, 2, 2],
+                    Some(vec![1.0, 1.0, 1.0, 1.0, 1.3, 1.3, 1.3, 1.3]),
+                ),
+            ),
         ];
         for (name, cfg) in presets {
             let stop = Arc::new(AtomicBool::new(false));
