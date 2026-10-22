@@ -3481,17 +3481,19 @@ where
         // Every eighth hop, exchange one inner large atom with one outer
         // small atom and quench that geometry. The pair is kept only when
         // its unrelaxed energy stays within a fixed window of the minimum.
-        if hmc_trial.is_none() && !angular && species_wide && hops.is_multiple_of(8) {
-            if let (Some(sigma), Some(eg)) =
+        if hmc_trial.is_none()
+            && !angular
+            && species_wide
+            && hops.is_multiple_of(8)
+            && let (Some(sigma), Some(eg)) =
                 (cfg.species_sigma.as_deref(), energy_grad.as_deref_mut())
-            {
-                let ceiling = e + 15.0 * cfg.energy_scale;
-                if let Some(swapped) = best_wide_exchange(x.view(), sigma, ceiling, |p| {
-                    eg(ledger, p).map(|(energy, _)| energy)
-                }) {
-                    hmc_trial = Some(swapped);
-                    species_escape_trial = true;
-                }
+        {
+            let ceiling = e + 15.0 * cfg.energy_scale;
+            if let Some(swapped) = best_wide_exchange(x.view(), sigma, ceiling, |p| {
+                eg(ledger, p).map(|(energy, _)| energy)
+            }) {
+                hmc_trial = Some(swapped);
+                species_escape_trial = true;
             }
         }
         // A large diameter ratio makes an all-pairs identity exchange climb

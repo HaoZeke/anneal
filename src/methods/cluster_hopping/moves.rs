@@ -218,7 +218,7 @@ impl MoveLibrary {
                 // back into the hydrogen-bond basin they left. The local
                 // chart composes one orientation step onto every body and
                 // leaves the centres where they are.
-                let kernels = if *local {
+                if *local {
                     vec![ClusterMove::RigidOrientAll {
                         n_molecules: *n_molecules,
                         step: *rotate_step,
@@ -234,25 +234,25 @@ impl MoveLibrary {
                             step: *rotate_step,
                         },
                     ]
-                };
-                kernels
+                }
             }
         };
-        if !self.is_rigid_body() && !self.is_molecular() {
-            if let Some(species) = cfg.species.as_ref() {
-                let distinct = {
-                    let mut labels = species.clone();
-                    labels.sort_unstable();
-                    labels.dedup();
-                    labels.len()
-                };
-                if distinct >= 2 && species.len() == cfg.n_points {
-                    kernels.push(ClusterMove::SpeciesSwap {
-                        n_points: cfg.n_points,
-                        species: species.clone(),
-                        sigma: cfg.species_sigma.clone(),
-                    });
-                }
+        if !self.is_rigid_body()
+            && !self.is_molecular()
+            && let Some(species) = cfg.species.as_ref()
+        {
+            let distinct = {
+                let mut labels = species.clone();
+                labels.sort_unstable();
+                labels.dedup();
+                labels.len()
+            };
+            if distinct >= 2 && species.len() == cfg.n_points {
+                kernels.push(ClusterMove::SpeciesSwap {
+                    n_points: cfg.n_points,
+                    species: species.clone(),
+                    sigma: cfg.species_sigma.clone(),
+                });
             }
         }
         if cfg.soap_repel {
@@ -2615,9 +2615,9 @@ mod move_scaling_tests {
     fn a_size_swap_puts_small_atoms_in_the_core() {
         let n = 8;
         let mut species = vec![1u32; 4];
-        species.extend(std::iter::repeat(2u32).take(4));
+        species.extend(std::iter::repeat_n(2u32, 4));
         let mut sigma = vec![1.0; 4];
-        sigma.extend(std::iter::repeat(1.3).take(4));
+        sigma.extend(std::iter::repeat_n(1.3, 4));
         let mut coords = vec![0.0; 3 * n];
         // Small atoms (sigma 1) sit outside; large atoms sit in the core.
         let outer = [
