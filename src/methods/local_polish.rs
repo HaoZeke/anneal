@@ -286,7 +286,7 @@ where
     // budget. The floor ties to machine precision at the incumbent scale.
     let mut stall_scale = step0;
 
-    while n_evals < max_fevals {
+    while n_evals < max_fevals && !crate::caller_stop::raised() {
         let grad = gradient.grad(x.view());
         n_grads += 1;
         if grad.len() != x.len() || grad.iter().any(|v| !v.is_finite()) {
@@ -316,7 +316,11 @@ where
             let mut alpha = initial_line_search_step(&direction, low, high);
             let mut trials = 0usize;
             let max_trials = line_search_trial_limit(x.len());
-            while n_evals < max_fevals && alpha > MIN_BACKTRACK_STEP && trials < max_trials {
+            while n_evals < max_fevals
+                && alpha > MIN_BACKTRACK_STEP
+                && trials < max_trials
+                && !crate::caller_stop::raised()
+            {
                 trials += 1;
                 let trial = bounds.clip((&x + &(direction.mapv(|v| alpha * v))).view());
                 if trial
@@ -612,7 +616,7 @@ where
         }
     }
 
-    while n_evals < max_evals {
+    while n_evals < max_evals && !crate::caller_stop::raised() {
         let weight = weight_min + weight_span * rng.random::<f64>();
         for slot in 0..population.len() {
             if n_evals >= max_evals {
@@ -767,7 +771,7 @@ where
     let refine_budget = max_evals / dim.saturating_add(1);
     let global_budget = chain_count.max(max_evals.saturating_sub(refine_budget));
     let mut epoch = 0usize;
-    while n_evals < global_budget {
+    while n_evals < global_budget && !crate::caller_stop::raised() {
         let temp = cooling.temperature(epoch);
         for chain in 0..chain_count {
             if n_evals >= global_budget {

@@ -1087,7 +1087,7 @@ where
     let mut landings: Vec<Array1<f64>> = Vec::new();
 
     if hold_cover {
-        while steps < budget && !saw_negative {
+        while steps < budget && !saw_negative && !crate::caller_stop::raised() {
             let lead = max_atom_weight(mode.view()).max(1e-12);
             let axial_cap = reach.max(contact) / lead;
             let curvature_length = 1.0 / directional.abs().max(epsilon).sqrt();
@@ -1182,7 +1182,7 @@ where
     }
 
     if saw_negative || !hold_cover {
-        while steps < budget {
+        while steps < budget && !crate::caller_stop::raised() {
             if !renormalize_mode(&mut mode, cur.view()) {
                 break;
             }

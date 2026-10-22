@@ -43,6 +43,9 @@ print(out["hops"], round(out["best_energy"], 3), len(out["best"]))
 
 A design box is [[file:box-search.org][box search]], not this page.
 
+A force-call cap or a target hit should raise =BaseException= rather than
+=Exception=. The search then returns at once with the best geometry found.
+
 * Direct quantum-chemistry profiles
 
 The molecular-cluster and slab examples use the same persistent

@@ -233,7 +233,7 @@ fn hops_from_start<'g, R: Rng + ?Sized>(
             break;
         }
         let take = slice.max(1).min(rest);
-        let mut led = Ledger::new(take);
+        let mut led = ledger.slice(take);
         let x0 = if residual && i > 0 {
             residual_start(start, cfg, rng)
         } else {
@@ -427,6 +427,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     archive: &mut Archive,
     rng: &mut R,
 ) -> ArchiveOutcome {
+    let _caller_stop = ledger.bind_stop();
     let cap = ledger.remaining();
     // Molecular / slab budgets are a few thousand evaluations. A 30 %
     // skip-return slice is then too short to be a hop, so they spend the
@@ -440,7 +441,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             // Hop 1 is that walk to 900. Hop 2 is one 1100-eval residual
             // packing at rec quench with angular moves and group restart.
             let p1 = 900.min(cap);
-            let mut led1 = Ledger::new(p1);
+            let mut led1 = ledger.slice(p1);
             let hop1 = run_with_gradient(cfg, start, &mut led1, relax, grad.as_deref_mut(), rng);
             let used1 = led1.spent();
             let _ = ledger.charge_many(used1);
@@ -456,7 +457,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 c2.symmetrise_on_stall = true;
                 let hunt = 850.min(rest);
                 let x2 = residual_start(start, cfg, rng);
-                let mut led2 = Ledger::new(hunt);
+                let mut led2 = ledger.slice(hunt);
                 let hop2 =
                     run_with_gradient(&c2, x2.view(), &mut led2, relax, grad.as_deref_mut(), rng);
                 let used2 = led2.spent();
@@ -478,7 +479,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                                 };
                         }
                         let x3 = hop2.best_state.clone().unwrap();
-                        let mut led3 = Ledger::new(rest3);
+                        let mut led3 = ledger.slice(rest3);
                         let hop3 = run_with_gradient(
                             &c3,
                             x3.view(),
@@ -644,7 +645,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     c_fast.return_screen = true;
     c_fast.return_polish = 0;
     c_fast.symmetrise_on_stall = true;
-    let mut led1 = Ledger::new(explore);
+    let mut led1 = ledger.slice(explore);
     let hop1 = run_with_gradient(&c_fast, start, &mut led1, relax, grad.as_deref_mut(), rng);
     let used1 = led1.spent();
     let _ = ledger.charge_many(used1);
@@ -684,7 +685,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         let rest = ledger.remaining();
         let take = (rest / 2).max(cfg.relax_steps.saturating_mul(8)).min(rest);
         let (from_key, x0) = residual_origin(archive, cfg, start, rng);
-        let mut led = Ledger::new(take.max(1));
+        let mut led = ledger.slice(take.max(1));
         let hop = run_with_gradient(&c_res, x0.view(), &mut led, relax, grad.as_deref_mut(), rng);
         let used = led.spent();
         if used == 0 {
@@ -822,8 +823,8 @@ mod tests {
     /// used to keep walking after the potential had stopped.
     #[test]
     fn caller_stop_ends_the_archive_at_once() {
-        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
         use std::time::{Duration, Instant};
 
         const AFTER: usize = 40;

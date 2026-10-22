@@ -55,6 +55,7 @@ pub fn committor_population(
     relax: Relax<'_>,
     seed: u64,
 ) -> CommittorOutcome {
+    let _caller_stop = ledger.bind_stop();
     let mut rng = StdRng::seed_from_u64(seed);
     let n = cfg.n_points;
     // (structure, own best, alpha, beta)
@@ -80,7 +81,7 @@ pub fn committor_population(
                 break;
             }
             let slice = segment_budget.min(ledger.remaining());
-            let mut sub = Ledger::new(slice);
+            let mut sub = ledger.slice(slice);
             let start = pop[w].0.clone();
             let out = run_with_gradient(cfg, start.view(), &mut sub, relax, None, &mut rng);
             segments += 1;

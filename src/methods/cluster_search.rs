@@ -636,6 +636,7 @@ pub fn search_from_bank<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    let _caller_stop = ledger.bind_stop();
     use crate::bank_rpc::BankClient;
     use crate::bias::BasinBias;
     use crate::diversity::DiversityAnnealer;
@@ -860,7 +861,7 @@ where
         }
         let charged_before = ledger.spent();
         let hops_before = hops;
-        let mut slice_led = Ledger::new(slice.min(ledger.remaining()));
+        let mut slice_led = ledger.slice(slice.min(ledger.remaining()));
         let out = run_with_bias(
             cfg,
             start.view(),
@@ -1293,8 +1294,8 @@ mod tests {
     /// charge, so a difference here is a change in the force-call count.
     #[test]
     fn an_idle_stop_flag_does_not_change_force_calls() {
-        use std::sync::atomic::AtomicBool;
         use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
 
         let pot = PairPotential::lennard_jones(6);
         let mut plain = Config::for_cluster(6);
