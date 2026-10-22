@@ -52,6 +52,21 @@ fn value<'a>(text: &'a str, name: &str) -> &'a str {
         .unwrap_or_else(|| panic!("missing {name} in:\n{text}"))
 }
 
+// GNU sha256sum text mode: lowercase digest, two spaces, relative name.
+fn seal_build_artifacts(root: &Path, relative_paths: &[&str]) -> Vec<u8> {
+    use sha2::{Digest, Sha256};
+
+    let mut sealed = Vec::new();
+    for relative in relative_paths {
+        let path = root.join(relative);
+        let bytes = fs::read(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        let digest = Sha256::digest(bytes);
+        sealed.extend(format!("{digest:x}  {relative}\n").into_bytes());
+    }
+    sealed
+}
+
 #[test]
 fn causal_smoke_campaign_names_every_channel_and_one_paired_ensemble() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -158,16 +173,14 @@ printf 'seed %s: best -44.326801\n' "$SEED_OFFSET"
 printf '1/1 solved\n'
 "#,
     );
-    let build_seal = Command::new("sha256sum")
-        .current_dir(&root)
-        .args([
+    let build_seal = seal_build_artifacts(
+        &root,
+        &[
             "target/release/examples/lj_cluster_search",
             "target/release/examples/catalog_server",
-        ])
-        .output()
-        .expect("sha256sum must seal the staged executables");
-    assert!(build_seal.status.success());
-    fs::write(root.join("BUILD_SHA256SUMS"), build_seal.stdout).unwrap();
+        ],
+    );
+    fs::write(root.join("BUILD_SHA256SUMS"), build_seal).unwrap();
     let qualifier = root.join("qualifier.sh");
     write_executable(
         &qualifier,

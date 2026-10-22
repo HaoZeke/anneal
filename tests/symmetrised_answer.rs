@@ -25,6 +25,7 @@ fn symmetrised_run(endpoint_gradient: f64) -> Outcome {
     cfg.point_symmetrise_every_accept = true;
     cfg.symmetrise_core_fraction = 1.0;
     cfg.symmetry_tolerance = 0.5;
+    cfg.finish_improving = false;
     assert!(
         anneal_core::symmetrise::symmetrise_core(
             candidate.view(),

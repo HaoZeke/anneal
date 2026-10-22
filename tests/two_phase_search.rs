@@ -15,9 +15,10 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 #[test]
 fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not() {
     let budget = 30_000;
-    let mut compacted = Config::recommended(38);
+    let mut plain = Config::recommended(38);
+    plain.surfaces.clear();
+    let mut compacted = plain.clone();
     compacted.two_phase = Some(TwoPhase::relative(0.7, 1.0));
-    let plain = Config::recommended(38);
     for seed in 0..4 {
         let (best, hops, spent) = run(&compacted, budget, seed);
         assert!(

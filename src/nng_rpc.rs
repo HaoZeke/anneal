@@ -1186,7 +1186,8 @@ mod tests {
                 let mut io = NngIo::new(pair).unwrap();
                 use tokio::io::{AsyncReadExt, AsyncWriteExt};
                 let mut buf = [0u8; 8];
-                for _ in 0..2000 {
+                // One warmup frame, then the 2000 the client times.
+                for _ in 0..2001 {
                     io.read_exact(&mut buf).await.unwrap();
                     io.write_all(&buf).await.unwrap();
                 }
@@ -1226,6 +1227,9 @@ mod tests {
         let server = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
             stream.set_nodelay(true).unwrap();
+            // Tokio 1.53 debug-asserts that from_std receives a nonblocking
+            // socket, and registration needs the reactor.
+            stream.set_nonblocking(true).unwrap();
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -1234,7 +1238,8 @@ mod tests {
                 let mut io = tokio::net::TcpStream::from_std(stream).unwrap();
                 use tokio::io::{AsyncReadExt, AsyncWriteExt};
                 let mut buf = [0u8; 8];
-                for _ in 0..2000 {
+                // One warmup frame, then the 2000 the client times.
+                for _ in 0..2001 {
                     io.read_exact(&mut buf).await.unwrap();
                     io.write_all(&buf).await.unwrap();
                 }

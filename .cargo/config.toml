@@ -1,0 +1,18 @@
+# `cargo publish` rewrites a git dependency to its version requirement and
+# verifies the package against crates.io. The published 0.1 and 0.2 lines
+# dropped the saddle and eigen APIs this crate is built against, and a
+# crates.io eindir-core beside the git revision links the C ABI twice.
+# Resolve those crates from the revisions the manifest pins. Verification
+# runs from the workspace, so it still reads this file.
+#
+# featomic's metatensor build runs `cargo rustc --locked` with its working
+# directory inside the cargo target tree. An unused patch there makes
+# `--locked` fail. Keep that tree beside the workspace so the nested cargo
+# does not walk up to this file.
+[build]
+target-dir = "../tmp/anneal-target"
+
+[patch.crates-io]
+eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9" }
+rgmin = { git = "https://github.com/HaoZeke/rgmin.git", rev = "20832fd169932a1cd0d47ac84dc77fa9b435f940" }
+rgsaddle = { git = "https://github.com/OmniPotentRPC/rgsaddle.git", rev = "84fe96bfc1ed163379c0af8bd664b74bf71407d1" }

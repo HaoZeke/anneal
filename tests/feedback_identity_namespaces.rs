@@ -101,6 +101,7 @@ fn a_shared_numeric_id_does_not_make_a_distinct_local_fallback_basin_known() {
     cfg.point_symmetrise_on_new = false;
     cfg.orbit_complete_on_new = false;
     cfg.superbasin_escape = false;
+    cfg.finish_improving = false;
 
     let mut relax_calls = 0;
     let mut gradient_calls = 0;

@@ -37,7 +37,7 @@
 //! `1 + c ln(N)` for visit count `N`, and report that this finds the LJ75 Marks
 //! decahedron where a cut-and-splice evolutionary algorithm does not.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use ndarray::{Array1, ArrayView1};
@@ -421,8 +421,6 @@ where
     let n_atoms = (origin.len() / 3).max(1) as f64;
     let mut far_position = origin.clone();
     let mut far_rms = 0.0;
-    // Position at which `previous_energy` was measured.
-    let mut at_previous = origin.clone();
     let mut well: Option<Array1<f64>> = None;
     let mut minimum_potential = f64::INFINITY;
     let mut maximum_potential = f64::NEG_INFINITY;
@@ -511,7 +509,6 @@ where
                 }
             }
         }
-        at_previous = session.position().to_owned();
         previous_energy = Some(report.energy);
     }
 

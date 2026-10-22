@@ -4,8 +4,8 @@ use std::{
 	os::raw::c_void,
 	ptr::{self, NonNull},
 	sync::{
-		atomic::{AtomicPtr, AtomicUsize, Ordering},
 		Arc,
+		atomic::{AtomicPtr, AtomicUsize, Ordering},
 	},
 	time::Duration,
 };
@@ -117,14 +117,12 @@ type InnerCallback = Box<dyn Fn() + Send + Sync + 'static>;
 /// # // The async of this makes it hard to test, so we won't
 /// ```
 #[derive(Clone, Debug)]
-pub struct Aio
-{
+pub struct Aio {
 	/// The inner AIO bits shared by all instances of this AIO.
 	inner: Arc<Inner>,
 }
 
-impl Aio
-{
+impl Aio {
 	/// Creates a new asynchronous I/O handle.
 	///
 	/// The provided callback will be called on every single I/O event,
@@ -153,8 +151,8 @@ impl Aio
 		// else, which complicates the process of building the AIO slightly. We need to
 		// use a second, non-atomic pointer and then atomically copy it in.
 		let inner = Arc::new(Inner {
-			handle:   AtomicPtr::new(ptr::null_mut()),
-			state:    AtomicUsize::new(State::Inactive as usize),
+			handle: AtomicPtr::new(ptr::null_mut()),
+			state: AtomicUsize::new(State::Inactive as usize),
 			callback: AtomicPtr::new(ptr::null_mut()),
 		});
 
@@ -254,8 +252,7 @@ impl Aio
 	///
 	/// [`IncorrectState`]: enum.Error.html#variant.IncorrectState
 	/// [`TimedOut`]: enum.Error.html#variant.TimedOut
-	pub fn set_timeout(&self, dur: Option<Duration>) -> Result<()>
-	{
+	pub fn set_timeout(&self, dur: Option<Duration>) -> Result<()> {
 		// We need to check that no operations are happening and then prevent them from
 		// happening while we set the timeout. Any state that isn't `Inactive` will do
 		// so the choice is arbitrary. That being said, `Sleeping` feels the most
@@ -290,8 +287,7 @@ impl Aio
 	///
 	/// [`IncorrectState`]: enum.Error.html#variant.IncorrectState
 	/// [`TimedOut`]: enum.Error.html#variant.TimedOut
-	pub fn sleep(&self, dur: Duration) -> Result<()>
-	{
+	pub fn sleep(&self, dur: Duration) -> Result<()> {
 		let sleeping = State::Sleeping as usize;
 		let inactive = State::Inactive as usize;
 		self.inner
@@ -313,24 +309,21 @@ impl Aio
 	/// If there are no operations running then this function returns
 	/// immediately. This function should **not** be called from within the
 	/// completion callback.
-	pub fn wait(&self)
-	{
+	pub fn wait(&self) {
 		unsafe {
 			nng_sys::nng_aio_wait(self.inner.handle.load(Ordering::Relaxed));
 		}
 	}
 
 	/// Cancel the currently running I/O operation.
-	pub fn cancel(&self)
-	{
+	pub fn cancel(&self) {
 		unsafe {
 			nng_sys::nng_aio_cancel(self.inner.handle.load(Ordering::Relaxed));
 		}
 	}
 
 	/// Send a message on the provided socket.
-	pub(crate) fn send_socket(&self, socket: &Socket, msg: Message) -> SendResult<()>
-	{
+	pub(crate) fn send_socket(&self, socket: &Socket, msg: Message) -> SendResult<()> {
 		let inactive = State::Inactive as usize;
 		let sending = State::Sending as usize;
 
@@ -352,8 +345,7 @@ impl Aio
 	}
 
 	/// Receive a message on the provided socket.
-	pub(crate) fn recv_socket(&self, socket: &Socket) -> Result<()>
-	{
+	pub(crate) fn recv_socket(&self, socket: &Socket) -> Result<()> {
 		let inactive = State::Inactive as usize;
 		let receiving = State::Receiving as usize;
 		self.inner
@@ -369,8 +361,7 @@ impl Aio
 	}
 
 	/// Send a message on the provided context.
-	pub(crate) fn send_ctx(&self, ctx: &Context, msg: Message) -> SendResult<()>
-	{
+	pub(crate) fn send_ctx(&self, ctx: &Context, msg: Message) -> SendResult<()> {
 		let inactive = State::Inactive as usize;
 		let sending = State::Sending as usize;
 
@@ -392,8 +383,7 @@ impl Aio
 	}
 
 	/// Receive a message on the provided context.
-	pub(crate) fn recv_ctx(&self, ctx: &Context) -> Result<()>
-	{
+	pub(crate) fn recv_ctx(&self, ctx: &Context) -> Result<()> {
 		let inactive = State::Inactive as usize;
 		let receiving = State::Receiving as usize;
 		self.inner
@@ -413,8 +403,7 @@ impl Aio
 	/// This is really unsafe because you have to be absolutely positive in that
 	/// the type of the pointer is actually `F`. Because we're going through C
 	/// and a `c_void`, the type system does not enforce this for us.
-	extern "C" fn trampoline(arg: *mut c_void)
-	{
+	extern "C" fn trampoline(arg: *mut c_void) {
 		abort_unwind(|| unsafe {
 			let callback_ptr = arg as *const InnerCallback;
 			// This should never happen. It means we, Nng-rs, got something wrong in the allocation
@@ -430,8 +419,7 @@ impl Aio
 }
 
 #[cfg(feature = "ffi-module")]
-impl Aio
-{
+impl Aio {
 	/// Retrieves the `nng_aio` handle for this AIO object.
 	///
 	/// The Rust AIO wrapper internally keeps track of the state of the
@@ -454,13 +442,14 @@ impl Aio
 	// We don't expose a `from_nng_aio` function because we have a strict
 	// requirement on the callback function. This type fundamentally will not work
 	// without our wrapper around the callback.
-	pub unsafe fn nng_aio(&self) -> *mut nng_sys::nng_aio
-	{
+	pub unsafe fn nng_aio(&self) -> *mut nng_sys::nng_aio {
 		self.inner.handle.load(Ordering::Relaxed)
 	}
 
 	/// Retrieves the current state of the wrapper.
-	pub fn state(&self, ordering: Ordering) -> State { self.inner.state.load(ordering).into() }
+	pub fn state(&self, ordering: Ordering) -> State {
+		self.inner.state.load(ordering).into()
+	}
 
 	/// Sets the current state of the wrapper.
 	///
@@ -473,24 +462,19 @@ impl Aio
 	/// object. That information is used to track whether or not the `nng_aio`
 	/// contains a valid message pointer and any inconsistency might result in
 	/// issues .
-	pub unsafe fn set_state(&self, state: State, ordering: Ordering)
-	{
+	pub unsafe fn set_state(&self, state: State, ordering: Ordering) {
 		self.inner.state.store(state as usize, ordering);
 	}
 }
 
-impl Hash for Aio
-{
-	fn hash<H: Hasher>(&self, state: &mut H)
-	{
+impl Hash for Aio {
+	fn hash<H: Hasher>(&self, state: &mut H) {
 		self.inner.handle.load(Ordering::Relaxed).hash(state);
 	}
 }
 
-impl PartialEq for Aio
-{
-	fn eq(&self, other: &Aio) -> bool
-	{
+impl PartialEq for Aio {
+	fn eq(&self, other: &Aio) -> bool {
 		self.inner.handle.load(Ordering::Relaxed) == other.inner.handle.load(Ordering::Relaxed)
 	}
 }
@@ -499,8 +483,7 @@ impl Eq for Aio {}
 
 /// The shared inner items of a `Aio`.
 #[derive(Debug)]
-struct Inner
-{
+struct Inner {
 	/// The handle to the NNG AIO object.
 	///
 	/// Unfortunately, we do have to put this behind some kind of
@@ -519,11 +502,9 @@ struct Inner
 	callback: AtomicPtr<InnerCallback>,
 }
 
-impl Drop for Inner
-{
+impl Drop for Inner {
 	#[allow(clippy::let_underscore_drop)]
-	fn drop(&mut self)
-	{
+	fn drop(&mut self) {
 		// It is possible for this to be dropping while the pointer is null. The
 		// Inner struct is created before the pointer is allocated and it will be
 		// dropped with a null pointer if the NNG allocation fails.
@@ -560,8 +541,7 @@ impl Drop for Inner
 // running operations, then no non-"user forced" errors can happen.
 #[derive(Clone, Debug)]
 #[must_use]
-pub enum AioResult
-{
+pub enum AioResult {
 	/// Result of a send operation.
 	Send(SendResult<()>),
 
@@ -572,10 +552,8 @@ pub enum AioResult
 	Sleep(Result<()>),
 }
 
-impl From<AioResult> for Result<Option<Message>>
-{
-	fn from(aio_res: AioResult) -> Result<Option<Message>>
-	{
+impl From<AioResult> for Result<Option<Message>> {
+	fn from(aio_res: AioResult) -> Result<Option<Message>> {
 		use self::AioResult::*;
 
 		match aio_res {
@@ -587,13 +565,11 @@ impl From<AioResult> for Result<Option<Message>>
 }
 
 /// Module used to allow the conditional visibility of the `State` type.
-mod state
-{
+mod state {
 	/// Represents the state of the AIO object.
 	#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 	#[repr(usize)]
-	pub enum State
-	{
+	pub enum State {
 		/// There is currently nothing happening on the AIO.
 		Inactive,
 
@@ -608,10 +584,8 @@ mod state
 	}
 
 	#[cfg_attr(feature = "ffi-module", doc(hidden))]
-	impl From<usize> for State
-	{
-		fn from(atm: usize) -> State
-		{
+	impl From<usize> for State {
+		fn from(atm: usize) -> State {
 			// Fortunately, Godbolt says that this will compile to a compare, jump, and a
 			// subtract. Three instructions isn't that bad.
 			match atm {
