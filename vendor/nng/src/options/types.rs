@@ -292,11 +292,9 @@ create_option! {
 }
 
 /// Options relating to the socket protocol.
-pub mod protocol
-{
+pub mod protocol {
 	/// Options dealing with the PAIR protocol.
-	pub mod pair
-	{
+	pub mod pair {
 		create_option! {
 			/// Enables or disables the use of _polyamorous_ mode.
 			///
@@ -328,8 +326,7 @@ pub mod protocol
 	}
 
 	/// Options dealing with the PUBSUB protocol.
-	pub mod pubsub
-	{
+	pub mod pubsub {
 		create_option! {
 			/// Register a topic that the subscriber is interested in.
 			///
@@ -366,8 +363,7 @@ pub mod protocol
 	}
 
 	/// Options dealing with the REQREP protocol.
-	pub mod reqrep
-	{
+	pub mod reqrep {
 		use std::time::Duration;
 
 		create_option! {
@@ -392,8 +388,7 @@ pub mod protocol
 	}
 
 	/// Options dealing with the survey protocol.
-	pub mod survey
-	{
+	pub mod survey {
 		use std::time::Duration;
 
 		create_option! {
@@ -419,11 +414,9 @@ pub mod protocol
 }
 
 /// Options dealing with the underlying transport.
-pub mod transport
-{
+pub mod transport {
 	/// Options related to transports built on top of IPC.
-	pub mod ipc
-	{
+	pub mod ipc {
 		#[cfg(unix)]
 		create_option! {
 			/// Configures the permissions used on the UNIX domain socket.
@@ -494,8 +487,7 @@ pub mod transport
 	}
 
 	/// Options related to transports built on top of TCP.
-	pub mod tcp
-	{
+	pub mod tcp {
 		create_option! {
 			/// Disable (or enable) the use of Nagle's algorithm for TCP
 			/// connections.
@@ -566,8 +558,7 @@ pub mod transport
 	}
 
 	/// Options related to the TLS transport.
-	pub mod tls
-	{
+	pub mod tls {
 		create_option! {
 			/// Used to load certificates associated associated private key from a
 			/// file.
@@ -624,8 +615,7 @@ pub mod transport
 	}
 
 	/// Options related to the WebSocket and Secure WebSocket transports.
-	pub mod websocket
-	{
+	pub mod websocket {
 		create_option! {
 			/// A multiline string terminated by CRLF sequences, that can be used
 			/// to add further headers to the HTTP request sent when connecting.

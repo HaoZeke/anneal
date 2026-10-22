@@ -4,6 +4,7 @@ use anneal_core::shared_bias;
 use ndarray::{Array1, array};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
+#[allow(dead_code)]
 #[path = "../src/methods/box_hopping/repulsion.rs"]
 mod repulsion;
 use repulsion::{PeerSamples, Separation};

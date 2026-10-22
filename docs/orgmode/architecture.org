@@ -6,7 +6,7 @@
 anneal/
   Cargo.toml          Rust crate (lib + cdylib + staticlib)
   src/                Rust source
-  include/            hand-written C++ companion header
+  include/            C++ companion header and dlpack/dlpack.h
   python/anneal/      Python package (mixed maturin layout)
   pytest/             pytest suite
   docs/               this documentation

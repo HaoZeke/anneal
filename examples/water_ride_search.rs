@@ -8,7 +8,8 @@
 //!
 //! Usage: `water_ride_search [molecules] [charged-budget] [seed]`.
 
-mod common;
+#[path = "common/rgpot_eindir.rs"]
+mod rgpot_eindir;
 
 use std::collections::HashSet;
 use std::io;
@@ -39,10 +40,10 @@ use anneal_core::pes_exploration::{
 use anneal_core::ride_execution::{CatalogRideExecutionConfig, execute_catalog_ride};
 use anneal_core::shape::IraStructureWitness;
 use anneal_core::source_escape::{SourceEscapeConfig, SourceEscapeOutcome, quench_source_escape};
-use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rgpot_eindir::{RgpotObjective, emit_engine_manifest};
 use serde_json::json;
 
 const WATER_BOX: [f64; 9] = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];

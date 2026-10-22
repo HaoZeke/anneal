@@ -85,6 +85,50 @@ default in =Config::recommended= (src/methods/cluster_hopping/config.rs:768).
 Feeds/consumes: complements the Bayesian screen; both exist to spend
 charged evaluations only where they are likely to pay.
 
+** Calibrated energy screen
+
+What it is: the margin screen refuses a trial whose partial relaxation
+lands more than =screen_margin= above the incumbent. A partial relaxation
+still has some way to descend, and how far is a property of the potential
+and of =screen_steps=, not a constant: a 15-step pass on rigid TIP4P
+leaves tens of kJ/mol, a 25-step pass on Lennard-Jones a few epsilon. The
+calibrated screen credits each trial with the upper decile of the descent
+=partial - full= over the last 256 full relaxations before comparing.
+
+The trials a screen passes are the ones with little left to descend, so a
+window of those alone underestimates the descent of the ones it refuses,
+and the screen tightens on itself: on TIP4P20 it refused 99.7 per cent of
+hops and visited 1377 basins in 1e7 force calls. Every eighth refusal is
+therefore relaxed in full anyway, and its descent enters the same window.
+
+A full relaxation that ends on its step cap below the incumbent is
+continued, =relax_steps= at a time and up to eight more times, until it
+stops descending (=finish_improving=). Only a converged structure is
+recorded, and on TIP4P20 at 80 steps a 3e5-call run converged 70 of its
+13329 relaxations, screens included, so at most 70 of its 832 full ones.
+
+Key types and functions: =ScreenDescent= (src/methods/cluster_hopping.rs:1517)
+with =observe=, =allowance= and =audit=; =finish_improving=
+(src/methods/cluster_hopping.rs:1565); config flags =calibrated_screen=
+and =finish_improving= (src/methods/cluster_hopping/config.rs:862, 871),
+both on in =Config::with_scales= and so in every preset.
+
+Constants and defaults: window 256, warmup 8 full relaxations (the credit
+is zero before), quantile 0.9, one audit in 8 refusals, 8 continuations.
+A drop below zero counts as zero.
+
+Measured on development seeds (seed 1000, not the board's 314159 plus the
+start index), the stock presets with the fixed 25 kJ/mol margin and with
+both mechanisms: TIP4P10, 256 starts at 1e6, =Config::for_tip4p= 78681
+(255 solved) to 15870 PAR-2 force calls, =communicating_tip4p= 92738 (254)
+to 16369, =recommended_tip4p= 97903 (255) to 18397, all 256 solved after.
+On Lennard-Jones, where the fixed margin was already near its best, LJ75
+=communicating= on 32 starts at 1e6 went from 83201 to 52960 and LJ38
+=communicating= on 100 starts at 2e6 from 5362 to 5860.
+
+Feeds/consumes: reads the incumbent from the ledger, like the margin
+screen it replaces; the Bayesian screen, when on, decides instead.
+
 ** Staged quench
 
 What it is: before the full screening relaxation, settles only the
@@ -152,7 +196,10 @@ coefficients (e.g. =MERGE_RADIUS = 0.7=, =TEMPERATURE = 0.8=,
 =BIAS_HEIGHT = 0.25=, =SOAP_RMSD = 0.35=, =SOAP_CUTOFF = 3.5=,
 =MIN_SEPARATION = 0.85=) multiplied by declared length/energy scales.
 =Config::recommended= (config.rs:755) selects =MoveLibrary::LeanBurst=
-with the SOAP arm and Thompson allocation over the arms.
+with the SOAP arm and Thompson allocation over the arms. Like
+=Config::communicating=, it completes the core's orbit on every new basin
+and, below 98 points, draws between the plain and the two-phase relative
+0.7 surface.
 
 Feeds/consumes: selected per-config by =MoveLibrary::kernels=; chosen
 per-hop by the allocators below (=allocate_moves= / =contextual_moves= /

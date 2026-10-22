@@ -26,8 +26,7 @@ const ALLOC_FAIL_MSG: &str = "NNG failed to allocate memory";
 // means those will never fail. Also, Rust normally panics on allocation failure, so this fits the
 // ecosystem better.
 #[derive(Debug)]
-pub struct Message
-{
+pub struct Message {
 	/// The pointer to the actual message.
 	msgp: NonNull<nng_sys::nng_msg>,
 
@@ -42,11 +41,9 @@ pub struct Message
 	/// which seems like it would just end with duplicate code.
 	header: Header,
 }
-impl Message
-{
+impl Message {
 	/// Create an empty message.
-	pub fn new() -> Self
-	{
+	pub fn new() -> Self {
 		let mut msgp: *mut nng_sys::nng_msg = ptr::null_mut();
 		let rv = unsafe { nng_sys::nng_msg_alloc(&mut msgp as _, 0) };
 
@@ -58,8 +55,7 @@ impl Message
 	///
 	/// The returned buffer will have a capacity equal to `cap` but a length of
 	/// zero. To get a `Message` with a specified length, use `Message::zeros`.
-	pub fn with_capacity(cap: usize) -> Self
-	{
+	pub fn with_capacity(cap: usize) -> Self {
 		let mut msgp: *mut nng_sys::nng_msg = ptr::null_mut();
 		let rv = unsafe { nng_sys::nng_msg_alloc(&mut msgp as _, cap) };
 		let msgp = validate_ptr(rv, msgp).expect(ALLOC_FAIL_MSG);
@@ -74,8 +70,7 @@ impl Message
 	}
 
 	/// Create a message that is filled to `size` with zeros.
-	pub fn with_zeros(size: usize) -> Self
-	{
+	pub fn with_zeros(size: usize) -> Self {
 		let mut msgp: *mut nng_sys::nng_msg = ptr::null_mut();
 		let rv = unsafe { nng_sys::nng_msg_alloc(&mut msgp as _, size) };
 
@@ -87,8 +82,7 @@ impl Message
 	///
 	/// If `len` is greater than the message body's current length, this has no
 	/// effect.
-	pub fn truncate(&mut self, len: usize)
-	{
+	pub fn truncate(&mut self, len: usize) {
 		let rv = unsafe {
 			let current_len = nng_sys::nng_msg_len(self.msgp.as_ptr());
 			nng_sys::nng_msg_chop(self.msgp.as_ptr(), current_len.saturating_sub(len))
@@ -102,8 +96,7 @@ impl Message
 	///
 	/// If `len` is greater than the message body's current length then this
 	/// will clear the entire message.
-	pub fn trim(&mut self, len: usize)
-	{
+	pub fn trim(&mut self, len: usize) {
 		let rv = unsafe {
 			let current_len = nng_sys::nng_msg_len(self.msgp.as_ptr());
 			nng_sys::nng_msg_trim(self.msgp.as_ptr(), len.min(current_len))
@@ -113,8 +106,7 @@ impl Message
 	}
 
 	/// Returns a slice that contains the contents of the message body.
-	pub fn as_slice(&self) -> &[u8]
-	{
+	pub fn as_slice(&self) -> &[u8] {
 		unsafe {
 			let ptr = nng_sys::nng_msg_body(self.msgp.as_ptr());
 			let len = nng_sys::nng_msg_len(self.msgp.as_ptr());
@@ -124,8 +116,7 @@ impl Message
 	}
 
 	/// Returns a mutable slice that contains the contents of the message body.
-	pub fn as_mut_slice(&mut self) -> &mut [u8]
-	{
+	pub fn as_mut_slice(&mut self) -> &mut [u8] {
 		unsafe {
 			let ptr = nng_sys::nng_msg_body(self.msgp.as_ptr());
 			let len = nng_sys::nng_msg_len(self.msgp.as_ptr());
@@ -135,28 +126,34 @@ impl Message
 	}
 
 	/// Returns a reference to the message header.
-	pub const fn as_header(&self) -> &Header { &self.header }
+	pub const fn as_header(&self) -> &Header {
+		&self.header
+	}
 
 	/// Returns a mutable reference to the message header.
-	pub fn as_mut_header(&mut self) -> &mut Header { &mut self.header }
+	pub fn as_mut_header(&mut self) -> &mut Header {
+		&mut self.header
+	}
 
 	/// Returns the length of the message.
-	pub fn len(&self) -> usize { unsafe { nng_sys::nng_msg_len(self.msgp.as_ptr()) } }
+	pub fn len(&self) -> usize {
+		unsafe { nng_sys::nng_msg_len(self.msgp.as_ptr()) }
+	}
 
 	/// Returns true if the message body is empty.
-	pub fn is_empty(&self) -> bool { self.len() == 0 }
+	pub fn is_empty(&self) -> bool {
+		self.len() == 0
+	}
 
 	/// Clears the message body.
-	pub fn clear(&mut self)
-	{
+	pub fn clear(&mut self) {
 		unsafe {
 			nng_sys::nng_msg_clear(self.msgp.as_ptr());
 		}
 	}
 
 	/// Prepends the data to the message body.
-	pub fn push_front(&mut self, data: &[u8])
-	{
+	pub fn push_front(&mut self, data: &[u8]) {
 		let rv =
 			unsafe { nng_sys::nng_msg_insert(self.msgp.as_ptr(), data.as_ptr() as _, data.len()) };
 
@@ -164,8 +161,7 @@ impl Message
 	}
 
 	/// Appends the data to the back of the message body.
-	pub fn push_back(&mut self, data: &[u8])
-	{
+	pub fn push_back(&mut self, data: &[u8]) {
 		let rv =
 			unsafe { nng_sys::nng_msg_append(self.msgp.as_ptr(), data.as_ptr() as _, data.len()) };
 
@@ -183,8 +179,7 @@ impl Message
 	/// from which the message was received. This can be used to provide
 	/// different behaviors for different peers, such as a higher level of
 	/// authentication for peers located on an untrusted network.
-	pub fn pipe(&mut self) -> Option<Pipe>
-	{
+	pub fn pipe(&mut self) -> Option<Pipe> {
 		let (pipe, id) = unsafe {
 			let pipe = nng_sys::nng_msg_get_pipe(self.msgp.as_ptr());
 			let id = nng_sys::nng_pipe_id(pipe);
@@ -198,20 +193,17 @@ impl Message
 	///
 	/// This is most useful when used with protocols that support directing a
 	/// message to a specific peer. Not all protocols support this.
-	pub fn set_pipe(&mut self, pipe: Pipe)
-	{
+	pub fn set_pipe(&mut self, pipe: Pipe) {
 		unsafe { nng_sys::nng_msg_set_pipe(self.msgp.as_ptr(), pipe.handle()) }
 	}
 
 	/// Creates a new message from the given pointer.
-	pub(crate) const fn from_ptr(msgp: NonNull<nng_sys::nng_msg>) -> Self
-	{
+	pub(crate) const fn from_ptr(msgp: NonNull<nng_sys::nng_msg>) -> Self {
 		Message { msgp, header: Header { msgp } }
 	}
 
 	/// Consumes the message and returns the `nng_msg` pointer.
-	pub(crate) fn into_ptr(self) -> NonNull<nng_sys::nng_msg>
-	{
+	pub(crate) fn into_ptr(self) -> NonNull<nng_sys::nng_msg> {
 		let ptr = self.msgp;
 		std::mem::forget(self);
 
@@ -220,16 +212,15 @@ impl Message
 }
 
 #[cfg(feature = "ffi-module")]
-impl Message
-{
+impl Message {
 	/// Returns the underlying `nng_msg` pointer.
-	pub fn nng_msg(&self) -> *mut nng_sys::nng_msg { self.msgp.as_ptr() }
+	pub fn nng_msg(&self) -> *mut nng_sys::nng_msg {
+		self.msgp.as_ptr()
+	}
 }
 
-impl Drop for Message
-{
-	fn drop(&mut self)
-	{
+impl Drop for Message {
+	fn drop(&mut self) {
 		unsafe {
 			nng_sys::nng_msg_free(self.msgp.as_ptr());
 		}
@@ -238,10 +229,8 @@ impl Drop for Message
 unsafe impl Send for Message {}
 unsafe impl Sync for Message {}
 
-impl Clone for Message
-{
-	fn clone(&self) -> Self
-	{
+impl Clone for Message {
+	fn clone(&self) -> Self {
 		let mut msgp: *mut nng_sys::nng_msg = ptr::null_mut();
 
 		let rv = unsafe { nng_sys::nng_msg_dup(&mut msgp as _, self.msgp.as_ptr()) };
@@ -251,15 +240,14 @@ impl Clone for Message
 	}
 }
 
-impl Default for Message
-{
-	fn default() -> Message { Message::new() }
+impl Default for Message {
+	fn default() -> Message {
+		Message::new()
+	}
 }
 
-impl<'a> From<&'a [u8]> for Message
-{
-	fn from(s: &[u8]) -> Message
-	{
+impl<'a> From<&'a [u8]> for Message {
+	fn from(s: &[u8]) -> Message {
 		let mut msgp: *mut nng_sys::nng_msg = ptr::null_mut();
 		let rv = unsafe { nng_sys::nng_msg_alloc(&mut msgp as _, s.len()) };
 
@@ -279,9 +267,10 @@ impl<'a> From<&'a [u8]> for Message
 	}
 }
 
-impl<'a> From<&'a Vec<u8>> for Message
-{
-	fn from(s: &Vec<u8>) -> Message { s.as_slice().into() }
+impl<'a> From<&'a Vec<u8>> for Message {
+	fn from(s: &Vec<u8>) -> Message {
+		s.as_slice().into()
+	}
 }
 
 macro_rules! array_impl
@@ -307,8 +296,7 @@ array_impl!(
 	26, 27, 28, 29, 30, 31, 32
 );
 
-impl FromIterator<u8> for Message
-{
+impl FromIterator<u8> for Message {
 	fn from_iter<T>(iter: T) -> Message
 	where
 		T: IntoIterator<Item = u8>,
@@ -321,8 +309,7 @@ impl FromIterator<u8> for Message
 	}
 }
 
-impl<'a> FromIterator<&'a u8> for Message
-{
+impl<'a> FromIterator<&'a u8> for Message {
 	fn from_iter<T>(iter: T) -> Message
 	where
 		T: IntoIterator<Item = &'a u8>,
@@ -335,69 +322,68 @@ impl<'a> FromIterator<&'a u8> for Message
 	}
 }
 
-impl Deref for Message
-{
+impl Deref for Message {
 	type Target = [u8];
 
-	fn deref(&self) -> &[u8] { self.as_slice() }
+	fn deref(&self) -> &[u8] {
+		self.as_slice()
+	}
 }
-impl DerefMut for Message
-{
-	fn deref_mut(&mut self) -> &mut [u8] { self.as_mut_slice() }
+impl DerefMut for Message {
+	fn deref_mut(&mut self) -> &mut [u8] {
+		self.as_mut_slice()
+	}
 }
 
-impl Write for Message
-{
+impl Write for Message {
 	#[inline]
-	fn write(&mut self, buf: &[u8]) -> io::Result<usize>
-	{
+	fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
 		self.push_back(buf);
 		Ok(buf.len())
 	}
 
 	#[inline]
-	fn write_all(&mut self, buf: &[u8]) -> io::Result<()>
-	{
+	fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
 		self.push_back(buf);
 		Ok(())
 	}
 
 	#[inline]
-	fn flush(&mut self) -> io::Result<()> { Ok(()) }
+	fn flush(&mut self) -> io::Result<()> {
+		Ok(())
+	}
 }
 
-impl Extend<u8> for Message
-{
-	fn extend<I: IntoIterator<Item = u8>>(&mut self, iter: I)
-	{
+impl Extend<u8> for Message {
+	fn extend<I: IntoIterator<Item = u8>>(&mut self, iter: I) {
 		for byte in iter {
 			self.push_back(slice::from_ref(&byte));
 		}
 	}
 }
 
-impl<'a> Extend<&'a u8> for Message
-{
-	fn extend<I: IntoIterator<Item = &'a u8>>(&mut self, iter: I)
-	{
+impl<'a> Extend<&'a u8> for Message {
+	fn extend<I: IntoIterator<Item = &'a u8>>(&mut self, iter: I) {
 		for byte in iter {
 			self.push_back(slice::from_ref(byte));
 		}
 	}
 }
 
-impl<I: SliceIndex<[u8]>> Index<I> for Message
-{
+impl<I: SliceIndex<[u8]>> Index<I> for Message {
 	type Output = I::Output;
 
 	#[inline]
-	fn index(&self, index: I) -> &Self::Output { self.as_slice().index(index) }
+	fn index(&self, index: I) -> &Self::Output {
+		self.as_slice().index(index)
+	}
 }
 
-impl<I: SliceIndex<[u8]>> IndexMut<I> for Message
-{
+impl<I: SliceIndex<[u8]>> IndexMut<I> for Message {
 	#[inline]
-	fn index_mut(&mut self, index: I) -> &mut Self::Output { self.as_mut_slice().index_mut(index) }
+	fn index_mut(&mut self, index: I) -> &mut Self::Output {
+		self.as_mut_slice().index_mut(index)
+	}
 }
 
 /// The header of a [`Message`].
@@ -410,18 +396,15 @@ impl<I: SliceIndex<[u8]>> IndexMut<I> for Message
 /// [`Message`]: struct.Message.html
 /// [`RawSocket`]: struct.RawSocket.html
 #[derive(Debug)]
-pub struct Header
-{
+pub struct Header {
 	msgp: NonNull<nng_sys::nng_msg>,
 }
-impl Header
-{
+impl Header {
 	/// Shortens the message header, keeping the first `len` bytes.
 	///
 	/// If `len` is greater than the message header's current length, this has
 	/// no effect.
-	pub fn truncate(&mut self, len: usize)
-	{
+	pub fn truncate(&mut self, len: usize) {
 		let rv = unsafe {
 			let current_len = nng_sys::nng_msg_header_len(self.msgp.as_ptr());
 			nng_sys::nng_msg_header_chop(self.msgp.as_ptr(), current_len.saturating_sub(len))
@@ -435,8 +418,7 @@ impl Header
 	///
 	/// If `len` is greater than the message header's current length then this
 	/// will clear the entire message.
-	pub fn trim(&mut self, len: usize)
-	{
+	pub fn trim(&mut self, len: usize) {
 		let rv = unsafe {
 			let current_len = nng_sys::nng_msg_header_len(self.msgp.as_ptr());
 			nng_sys::nng_msg_header_trim(self.msgp.as_ptr(), len.min(current_len))
@@ -446,8 +428,7 @@ impl Header
 	}
 
 	/// Returns a slice that contains the contents of the message header.
-	pub fn as_slice(&self) -> &[u8]
-	{
+	pub fn as_slice(&self) -> &[u8] {
 		unsafe {
 			let ptr = nng_sys::nng_msg_header(self.msgp.as_ptr());
 			let len = nng_sys::nng_msg_header_len(self.msgp.as_ptr());
@@ -458,8 +439,7 @@ impl Header
 
 	/// Returns a mutable slice that contains the contents of the message
 	/// header.
-	pub fn as_mut_slice(&mut self) -> &mut [u8]
-	{
+	pub fn as_mut_slice(&mut self) -> &mut [u8] {
 		unsafe {
 			let ptr = nng_sys::nng_msg_header(self.msgp.as_ptr());
 			let len = nng_sys::nng_msg_header_len(self.msgp.as_ptr());
@@ -469,22 +449,24 @@ impl Header
 	}
 
 	/// Returns the length of the message header.
-	pub fn len(&self) -> usize { unsafe { nng_sys::nng_msg_header_len(self.msgp.as_ptr()) } }
+	pub fn len(&self) -> usize {
+		unsafe { nng_sys::nng_msg_header_len(self.msgp.as_ptr()) }
+	}
 
 	/// Returns true if the message header is empty.
-	pub fn is_empty(&self) -> bool { self.len() == 0 }
+	pub fn is_empty(&self) -> bool {
+		self.len() == 0
+	}
 
 	/// Clears the message header.
-	pub fn clear(&mut self)
-	{
+	pub fn clear(&mut self) {
 		unsafe {
 			nng_sys::nng_msg_header_clear(self.msgp.as_ptr());
 		}
 	}
 
 	/// Appends the data to the back of the message header.
-	pub fn push_back(&mut self, data: &[u8])
-	{
+	pub fn push_back(&mut self, data: &[u8]) {
 		let rv = unsafe {
 			nng_sys::nng_msg_header_append(self.msgp.as_ptr(), data.as_ptr() as _, data.len())
 		};
@@ -493,8 +475,7 @@ impl Header
 	}
 
 	/// Prepends the data to the message header.
-	pub fn push_front(&mut self, data: &[u8])
-	{
+	pub fn push_front(&mut self, data: &[u8]) {
 		let rv = unsafe {
 			nng_sys::nng_msg_header_insert(self.msgp.as_ptr(), data.as_ptr() as _, data.len())
 		};
@@ -505,67 +486,66 @@ impl Header
 unsafe impl Send for Header {}
 unsafe impl Sync for Header {}
 
-impl Deref for Header
-{
+impl Deref for Header {
 	type Target = [u8];
 
-	fn deref(&self) -> &[u8] { self.as_slice() }
+	fn deref(&self) -> &[u8] {
+		self.as_slice()
+	}
 }
-impl DerefMut for Header
-{
-	fn deref_mut(&mut self) -> &mut [u8] { self.as_mut_slice() }
+impl DerefMut for Header {
+	fn deref_mut(&mut self) -> &mut [u8] {
+		self.as_mut_slice()
+	}
 }
 
-impl Write for Header
-{
+impl Write for Header {
 	#[inline]
-	fn write(&mut self, buf: &[u8]) -> io::Result<usize>
-	{
+	fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
 		self.push_back(buf);
 		Ok(buf.len())
 	}
 
 	#[inline]
-	fn write_all(&mut self, buf: &[u8]) -> io::Result<()>
-	{
+	fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
 		self.push_back(buf);
 		Ok(())
 	}
 
 	#[inline]
-	fn flush(&mut self) -> io::Result<()> { Ok(()) }
+	fn flush(&mut self) -> io::Result<()> {
+		Ok(())
+	}
 }
 
-impl Extend<u8> for Header
-{
-	fn extend<I: IntoIterator<Item = u8>>(&mut self, iter: I)
-	{
+impl Extend<u8> for Header {
+	fn extend<I: IntoIterator<Item = u8>>(&mut self, iter: I) {
 		for byte in iter {
 			self.push_back(slice::from_ref(&byte));
 		}
 	}
 }
 
-impl<'a> Extend<&'a u8> for Header
-{
-	fn extend<I: IntoIterator<Item = &'a u8>>(&mut self, iter: I)
-	{
+impl<'a> Extend<&'a u8> for Header {
+	fn extend<I: IntoIterator<Item = &'a u8>>(&mut self, iter: I) {
 		for byte in iter {
 			self.push_back(slice::from_ref(byte));
 		}
 	}
 }
 
-impl<I: SliceIndex<[u8]>> Index<I> for Header
-{
+impl<I: SliceIndex<[u8]>> Index<I> for Header {
 	type Output = I::Output;
 
 	#[inline]
-	fn index(&self, index: I) -> &Self::Output { self.as_slice().index(index) }
+	fn index(&self, index: I) -> &Self::Output {
+		self.as_slice().index(index)
+	}
 }
 
-impl<I: SliceIndex<[u8]>> IndexMut<I> for Header
-{
+impl<I: SliceIndex<[u8]>> IndexMut<I> for Header {
 	#[inline]
-	fn index_mut(&mut self, index: I) -> &mut Self::Output { self.as_mut_slice().index_mut(index) }
+	fn index_mut(&mut self, index: I) -> &mut Self::Output {
+		self.as_mut_slice().index_mut(index)
+	}
 }

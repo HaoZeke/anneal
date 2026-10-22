@@ -3,7 +3,7 @@
 
 * Search surfaces
 
-- =cluster_search(obj, grad, n, budget, seed=0, recommended=True, derived=False, *, ras=False)= :: \(3N\) point set. Always needs a gradient or force.
+- =cluster_search(obj, grad, n, budget, seed=0, recommended=True, derived=False, communicating=False, *, ras=False, start=None, length_scale=None, water_sites=None)= :: \(3N\) point set. Always needs a gradient or force. With =water_sites= (the body-frame O, H, H of a rigid water) =n= counts molecules and the state is \(6N\): centres, then exponential-map rotations, on =Config.communicating_tip4p=, =Config.recommended_tip4p= or =Config.for_tip4p=.
 - =ensemble_optimize(obj, low, high, budget, ..., grad_fn=None)= :: design box. Gradient → hop and quench; no gradient → portfolio.
 - =box_ensemble_optimize(...)= :: hop primitive. Requires =grad_fn=.
 - =global_optimize(obj, low, high, budget, ...)= :: portfolio arms when the caller does not want hops.

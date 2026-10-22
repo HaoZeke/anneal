@@ -57,7 +57,7 @@ impl Gaussian {
 
 impl MoveKernel<f64> for Gaussian {
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
-        self.step(i.len(), rng) + &i
+        self.step(i.len(), rng) + i
     }
 
     fn displacement<R: Rng + ?Sized>(
@@ -102,7 +102,7 @@ impl Cauchy {
 
 impl MoveKernel<f64> for Cauchy {
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
-        self.step(i.len(), rng) + &i
+        self.step(i.len(), rng) + i
     }
 
     fn displacement<R: Rng + ?Sized>(
