@@ -706,6 +706,70 @@ mod tests {
         cfg
     }
 
+    /// A stop raised on the campaign ledger has to end the bank at once.
+    /// Each chain runs on a slice, and that slice used to ignore the flag.
+    #[test]
+    fn caller_stop_ends_the_bank_at_once() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        const AFTER: usize = 40;
+        let stop = Arc::new(AtomicBool::new(false));
+        let calls = AtomicUsize::new(0);
+        let cfg = small_config(8);
+        let bank_cfg = BankConfig {
+            capacity: 4,
+            slice: 400,
+            seeding: 4,
+            ..BankConfig::default()
+        };
+        let mut ledger = Ledger::with_stop(20_000, Arc::clone(&stop));
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            let mut cur = x.to_owned();
+            for _ in 0..steps {
+                let n = calls.fetch_add(1, Ordering::SeqCst);
+                if n + 1 >= AFTER {
+                    stop.store(true, Ordering::SeqCst);
+                }
+                assert!(
+                    n < AFTER + 24,
+                    "the bank kept relaxing after the stop ({n} calls)"
+                );
+                if !led.charge() {
+                    break;
+                }
+                for v in cur.iter_mut() {
+                    *v -= 0.01;
+                }
+            }
+            (washboard(cur.view()), cur)
+        };
+        let started = Instant::now();
+        let out = run(
+            &cfg,
+            &bank_cfg,
+            &mut ledger,
+            &mut relax,
+            None,
+            spectrum_distance(8),
+            1,
+        );
+        let calls = calls.load(Ordering::SeqCst);
+        assert!(
+            calls <= AFTER + 24,
+            "the bank made {calls} calls after a stop at {AFTER}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the bank returned in {:?} with {calls} calls",
+            started.elapsed()
+        );
+        if out.best.is_finite() {
+            assert!(out.best_state.is_some(), "the bank dropped the best state");
+        }
+    }
+
     /// The accounting claim the comparison rests on: a bank of chains costs
     /// what one chain costs, because the budget is split rather than handed to
     /// each of them.

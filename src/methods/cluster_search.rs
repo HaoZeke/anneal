@@ -1175,6 +1175,148 @@ mod tests {
         assert!(improvements.is_empty());
     }
 
+    /// A caller that raises the ledger stop after N potential calls must get
+    /// the search back at once, with the best state found and with no further
+    /// calls. Basin hopping, the communicating preset, the recommended preset,
+    /// and a replica ladder all share this.
+    #[test]
+    fn caller_stop_returns_at_once() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+        use std::time::{Duration, Instant};
+
+        use eindir_core::{Gradient, Objective};
+
+        const AFTER: usize = 80;
+        const BUDGET: usize = 80_000;
+
+        struct Halt {
+            inner: PairPotential,
+            stop: Arc<AtomicBool>,
+            calls: AtomicUsize,
+            best: Mutex<f64>,
+        }
+
+        impl Objective<f64> for Halt {
+            fn dim(&self) -> usize {
+                Objective::dim(&self.inner)
+            }
+            fn bounds(&self) -> &eindir_core::Bounds<f64> {
+                self.inner.bounds()
+            }
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                self.value_and_gradient(x).0
+            }
+        }
+
+        impl Gradient<f64> for Halt {
+            fn dim(&self) -> usize {
+                Objective::dim(self)
+            }
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                self.value_and_gradient(x).1
+            }
+        }
+
+        impl DifferentiableObjective<f64> for Halt {
+            fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+                let n = self.calls.fetch_add(1, Ordering::SeqCst);
+                let (energy, gradient) = self.inner.value_and_gradient(x);
+                let mut best = self.best.lock().expect("best");
+                if energy < *best {
+                    *best = energy;
+                }
+                if n + 1 >= AFTER {
+                    self.stop.store(true, Ordering::SeqCst);
+                }
+                assert!(
+                    n < AFTER + 8,
+                    "the search kept calling the potential after the stop ({n} calls)"
+                );
+                (energy, gradient)
+            }
+        }
+
+        let presets = [
+            ("basin hopping", Config::for_cluster(8)),
+            ("communicating", Config::communicating(8)),
+            ("recommended", Config::recommended(8)),
+            ("replica ladder", {
+                let mut cfg = Config::for_cluster(8);
+                cfg.replicas = 3;
+                cfg.swap_period = 2;
+                cfg
+            }),
+        ];
+        for (name, cfg) in presets {
+            let stop = Arc::new(AtomicBool::new(false));
+            let objective = Halt {
+                inner: PairPotential::lennard_jones(cfg.n_points),
+                stop: Arc::clone(&stop),
+                calls: AtomicUsize::new(0),
+                best: Mutex::new(f64::INFINITY),
+            };
+            let mut ledger = Ledger::with_stop(BUDGET, Arc::clone(&stop));
+            let started = Instant::now();
+            let (out, _) = search(&objective, &cfg, &mut ledger, 1);
+            let elapsed = started.elapsed();
+            let calls = objective.calls.load(Ordering::SeqCst);
+            let best_seen = *objective.best.lock().expect("best");
+            assert!(
+                calls <= AFTER + 8,
+                "{name} made {calls} calls after a stop at {AFTER}"
+            );
+            assert!(
+                elapsed < Duration::from_secs(2),
+                "{name} returned in {elapsed:?} with {calls} calls, {} hops, {} spent",
+                out.hops,
+                ledger.spent()
+            );
+            assert!(
+                out.hops < 8,
+                "{name} kept hopping ({}) after the stop",
+                out.hops
+            );
+            if out.best.is_finite() {
+                assert!(out.best_state.is_some(), "{name} dropped the best state");
+                assert!(
+                    out.best <= best_seen + 1e-8,
+                    "{name} returned {} above the best energy seen {best_seen}",
+                    out.best
+                );
+            }
+        }
+    }
+
+    /// A stop flag that stays down must not change how many evaluations a
+    /// search charges. The branch that reads the flag is taken on every
+    /// charge, so a difference here is a change in the force-call count.
+    #[test]
+    fn an_idle_stop_flag_does_not_change_force_calls() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
+
+        let pot = PairPotential::lennard_jones(6);
+        let mut plain = Config::for_cluster(6);
+        plain.relax_steps = 40;
+        plain.screen_steps = 8;
+        let mut ledger_plain = Ledger::new(800);
+        let (out_plain, _) = search(&pot, &plain, &mut ledger_plain, 3);
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut ledger_flag = Ledger::with_stop(800, stop);
+        let (out_flag, _) = search(&pot, &plain, &mut ledger_flag, 3);
+        assert_eq!(
+            ledger_plain.spent(),
+            ledger_flag.spent(),
+            "spent {} with the flag down and {} without it",
+            ledger_flag.spent(),
+            ledger_plain.spent()
+        );
+        assert_eq!(out_plain.charged, out_flag.charged);
+        assert_eq!(out_plain.hops, out_flag.hops);
+        assert_eq!(out_plain.best, out_flag.best);
+    }
+
     /// The search runs against a potential passed as a trait object, which is
     /// the whole point: an rgpot potential arrives the same way.
     #[test]

@@ -817,6 +817,69 @@ mod tests {
         (e, y)
     }
 
+    /// A caller that raises the parent stop during a slice must get the
+    /// archive back at once. The slice ledger is where a force-call cap
+    /// used to keep walking after the potential had stopped.
+    #[test]
+    fn caller_stop_ends_the_archive_at_once() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        const AFTER: usize = 40;
+        let stop = Arc::new(AtomicBool::new(false));
+        let calls = AtomicUsize::new(0);
+        let mut cfg = Config::for_cluster(6);
+        cfg.relax_steps = 40;
+        cfg.screen_steps = 8;
+        let mut rng = StdRng::seed_from_u64(1);
+        let start = random_cluster(6, 0.7, cfg.min_separation, &mut rng);
+        let mut ledger = Ledger::with_stop(80_000, Arc::clone(&stop));
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            let mut energy = 0.0;
+            for _ in 0..steps.max(1) {
+                let n = calls.fetch_add(1, Ordering::SeqCst);
+                if n + 1 >= AFTER {
+                    stop.store(true, Ordering::SeqCst);
+                }
+                assert!(
+                    n < AFTER + 24,
+                    "archive kept calling the relaxation after the stop ({n} calls)"
+                );
+                if !led.charge() {
+                    break;
+                }
+                energy = 1.0;
+            }
+            (energy, x.to_owned())
+        };
+        let mut archive = Archive::new();
+        let started = Instant::now();
+        let out = archive_search(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            &mut archive,
+            &mut rng,
+        );
+        let calls = calls.load(Ordering::SeqCst);
+        assert!(
+            calls <= AFTER + 24,
+            "archive made {calls} calls after a stop at {AFTER}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "archive returned in {:?} with {calls} calls and {} charged",
+            started.elapsed(),
+            out.charged
+        );
+        if out.best.is_finite() {
+            assert!(out.best_state.is_some(), "archive dropped the best state");
+        }
+    }
+
     #[test]
     fn archive_search_does_not_touch_recommended_defaults() {
         let rec = Config::recommended(13);
