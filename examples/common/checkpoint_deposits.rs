@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use anneal_core::methods::cluster_hopping::{BiasUpdate, CheckpointAction};
 use ndarray::Array1;
 

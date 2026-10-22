@@ -58,6 +58,10 @@ anneal_header_build = custom_target(
     build_by_default: true,
 )
 
+# anneal-core.h includes dlpack/dlpack.h. Ship that header on the same
+# include prefix the generated header uses.
+install_headers('include/dlpack/dlpack.h', subdir: 'dlpack')
+
 anneal_header_intree = custom_target(
     'cbindgen-anneal',
     input: [files('cbindgen.toml'), files('src/lib.rs')],

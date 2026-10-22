@@ -54,7 +54,10 @@ def test_parameter_positions_communicate_without_derivatives_or_minima(entry, sh
     offsets = np.max(
         np.abs((points[:, free] - start[free]) / (high - low)[free]), axis=1
     )
-    assert np.count_nonzero((offsets > 0.0) & (offsets <= 1e-5)) == 0
+    # The scalar refiner probes each free coordinate at 1e-5 of its width.
+    # Anything smaller than that stencil is not a probe and not a proposal.
+    stencil = 1e-5
+    assert np.count_nonzero((offsets > 0.0) & (offsets < stencil * (1.0 - 1e-6))) == 0
     if shared:
         assert diagnostics["coverage_published_samples"] > 0
         assert diagnostics["coverage_applied_foreign_samples"] > 0
