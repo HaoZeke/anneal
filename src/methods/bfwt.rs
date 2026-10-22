@@ -183,7 +183,7 @@ where
     let mut rm_n = 0usize;
     let mut n_accept = 0usize;
 
-    while work(n_evals, n_grads) < sa_budget {
+    while work(n_evals, n_grads) < sa_budget && !crate::caller_stop::raised() {
         let rem = sa_budget.saturating_sub(work(n_evals, n_grads)) as f64;
         let (t, mode) = budget_feasible_temp(f, best_val, dim, rem, barrier_hat);
         last_mode = mode;

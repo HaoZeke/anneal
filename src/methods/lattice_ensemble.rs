@@ -549,10 +549,17 @@ pub fn run(
     let slots = plan.slots.max(1);
     let share = budget / chains;
     let extra = budget % chains;
+    let caller_stop = crate::caller_stop::bound();
     let mut workers: Vec<Chain> = (0..chains)
-        .map(|c| Chain {
-            rng: StdRng::seed_from_u64(chain_seed(seed, c)),
-            ledger: Ledger::new(share + usize::from(c < extra)),
+        .map(|c| {
+            let budget = share + usize::from(c < extra);
+            Chain {
+                rng: StdRng::seed_from_u64(chain_seed(seed, c)),
+                ledger: match &caller_stop {
+                    Some(flag) => Ledger::with_stop(budget, std::sync::Arc::clone(flag)),
+                    None => Ledger::new(budget),
+                },
+            }
         })
         .collect();
     let (banks, capacity) = match plan.sharing {
@@ -578,6 +585,9 @@ pub fn run(
         bank: Vec::new(),
     };
     loop {
+        if crate::caller_stop::raised() {
+            break;
+        }
         let active: Vec<usize> = (0..chains)
             .filter(|&c| workers[c].ledger.remaining() > 0)
             .collect();

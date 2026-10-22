@@ -534,10 +534,16 @@ where
     let mut stepper =
         LangevinStepper::new(GleNoise::Colored, omega0, dt, t_hi, scale.clone(), seed);
     'outer: for epoch in 0..n_epochs {
+        if crate::caller_stop::raised() {
+            break;
+        }
         let frac = epoch as f64 / (n_epochs.max(2) - 1) as f64;
         let temperature = t_hi * (t_lo / t_hi).powf(frac);
         stepper.set_temperature(temperature);
         for _ in 0..steps {
+            if crate::caller_stop::raised() {
+                break 'outer;
+            }
             let fy = stepper.step(obj, grad, &mut x, &mut g);
             n_evals += 1;
             if fy < best_val {

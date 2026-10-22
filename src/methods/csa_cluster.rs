@@ -222,7 +222,7 @@ fn slice_run_inner<'g>(
     rng: &mut StdRng,
 ) -> (Outcome, usize) {
     let before = ledger.spent();
-    let mut slice_ledger = Ledger::new(budget.min(ledger.remaining()));
+    let mut slice_ledger = ledger.slice(budget.min(ledger.remaining()));
     let out = crate::methods::cluster_hopping::run_with_bias(
         cfg,
         start,
@@ -271,6 +271,7 @@ pub fn run<'g, D>(
 where
     D: FnMut(ArrayView1<f64>, ArrayView1<f64>) -> f64,
 {
+    let _caller_stop = ledger.bind_stop();
     let mut rng = StdRng::seed_from_u64(seed);
     let total = ledger.remaining();
     let mut slices = 0usize;
@@ -710,8 +711,8 @@ mod tests {
     /// Each chain runs on a slice, and that slice used to ignore the flag.
     #[test]
     fn caller_stop_ends_the_bank_at_once() {
-        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
         use std::time::{Duration, Instant};
 
         const AFTER: usize = 40;
