@@ -85,9 +85,9 @@ pub fn search_binary(
     let n = problem.n_a + problem.n_b;
     assert_eq!(start.len(), 3 * n, "binary start is 3 coordinates per atom");
     let mut species = vec![1u32; problem.n_a];
-    species.extend(std::iter::repeat(2u32).take(problem.n_b));
+    species.extend(std::iter::repeat_n(2u32, problem.n_b));
     let mut sigma = vec![problem.sigma_aa; problem.n_a];
-    sigma.extend(std::iter::repeat(problem.sigma_bb).take(problem.n_b));
+    sigma.extend(std::iter::repeat_n(problem.sigma_bb, problem.n_b));
     let cfg = stock_preset(n, communicating).with_species(species, Some(sigma));
     let potential = BinaryLennardJones::new(
         problem.n_a,
@@ -238,7 +238,7 @@ mod tests {
         let n_a = 6;
         let n_b = 7;
         let mut rng = StdRng::seed_from_u64(19);
-        let start = random_cluster_in_radius((n_a + n_b) as usize, 2.2, 0.9, &mut rng);
+        let start = random_cluster_in_radius(n_a + n_b, 2.2, 0.9, &mut rng);
         let problem = BinaryLennardJonesProblem {
             n_a,
             n_b,
