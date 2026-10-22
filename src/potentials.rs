@@ -247,6 +247,10 @@ pub use gmin_tip4p::{
     block_from_interleaved_gmin, energy_ohh, gmin_water_geometry, interleaved_gmin_from_block,
     reference_sites as gmin_tip4p_sites, rigid_from_ohh,
 };
+// The rigid orientation move composes through this name. The helper
+// stays on the chart so that move and the potential share one Rodrigues
+// product. A target that does not include the move still has to compile.
+#[cfg_attr(not(test), allow(unused_imports))]
 pub(crate) use tip4p::compose_rotation;
 pub use tip4p::{
     COULOMB, EPSILON, HOH_DEG, Q_H, Q_M, R_OH, R_OM, SIGMA, Tip4pCluster, fold_rotation_vectors,
@@ -345,6 +349,42 @@ mod tests {
         assert_eq!(g, p.grad(x.view()));
         assert_eq!(Objective::dim(&p), 12);
         assert_eq!(Gradient::dim(&p), 12);
+    }
+
+    /// A half turn used to come back on the x axis, because the skew part
+    /// of the matrix vanishes and the old recovery ignored the axis.
+    #[test]
+    fn a_half_turn_about_y_keeps_its_axis() {
+        let pi = std::f64::consts::PI;
+        let identity = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let composed = compose_rotation(identity, [0.0, pi, 0.0]);
+        assert!(composed[0].abs() < 1e-8, "{composed:?}");
+        assert!(composed[2].abs() < 1e-8, "{composed:?}");
+        assert!(
+            (composed[1].abs() - pi).abs() < 1e-8,
+            "half turn about y came back as {composed:?}"
+        );
+    }
+
+    /// The composed vector has to rotate a point the same way as applying
+    /// the increment after the original rotation.
+    #[test]
+    fn composed_rotation_matches_the_matrix_product() {
+        let omega = [0.35, -0.2, 0.55];
+        let increment = super::tip4p::rotation_matrix([0.4, 0.15, -0.25]);
+        let composed = compose_rotation(increment, omega);
+        let point = [0.2, -0.7, 1.1];
+        let expected = super::tip4p::mat_vec(
+            increment,
+            super::tip4p::mat_vec(super::tip4p::rotation_matrix(omega), point),
+        );
+        let got = super::tip4p::mat_vec(super::tip4p::rotation_matrix(composed), point);
+        for (left, right) in got.iter().zip(expected.iter()) {
+            assert!(
+                (left - right).abs() < 1e-9,
+                "composed {got:?} against product {expected:?}"
+            );
+        }
     }
 
     #[test]

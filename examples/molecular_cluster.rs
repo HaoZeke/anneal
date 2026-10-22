@@ -3,18 +3,23 @@
 //!
 //! Usage: molecular_cluster <m_molecules> <budget> <seeds>
 
-mod common;
+#[path = "common/efficiency.rs"]
+mod efficiency;
+#[path = "common/ensemble_report.rs"]
+mod ensemble_report;
+#[path = "common/rgpot_eindir.rs"]
+mod rgpot_eindir;
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, MoveLibrary, SoapProposalMode, repack_rigid_groups,
 };
 use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
-use common::efficiency::{apply_two_phase, bank_label, report_eval_wall, report_trace};
+use efficiency::{apply_two_phase, bank_label, report_eval_wall, report_trace};
 use eindir_core::gradient::DifferentiableObjective;
-use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rgpot_eindir::{RgpotObjective, emit_engine_manifest};
 use std::io::Write;
 
 const WATER: [[f64; 3]; 3] = [
@@ -187,8 +192,10 @@ fn run_water_ensembles(
     #[cfg(feature = "ira")]
     use anneal_core::methods::minima_hopping::SerializedWitness;
     use anneal_core::pes_exploration::StructureContext;
-    use common::ensemble_report::{config_from_env, print_header, run_seeds, sorted_pairs_witness};
     use eindir_core::gradient::DifferentiableObjective;
+    #[cfg(not(feature = "ira"))]
+    use ensemble_report::sorted_pairs_witness;
+    use ensemble_report::{config_from_env, print_header, run_seeds};
     #[cfg(feature = "ira")]
     use std::sync::Mutex;
 

@@ -260,9 +260,7 @@ impl TransitionGraph {
             }
         }
         let eligible = (0..n)
-            .map(|node| {
-                self.resolved_returns(&config.probe_action, node) >= config.minimum_probes
-            })
+            .map(|node| self.resolved_returns(&config.probe_action, node) >= config.minimum_probes)
             .collect::<Vec<_>>();
         Ok(complete_linkage_regions(
             &distances,

@@ -53,7 +53,7 @@ fn each_rung_accounts_for_foreign_history_visits_in_its_own_bias() {
 
         let history = Mutex::new(MinimumHistory::new(cfg.record_gradient).unwrap());
         let geometry = DescriptorGeometry::finite(1.0).unwrap();
-        let descriptor = universal_descriptor_space(geometry.clone());
+        let descriptor = universal_descriptor_space(geometry);
         let context = StructureContext::new(
             Some(vec![1; 2]),
             Some(geometry),

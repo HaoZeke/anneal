@@ -178,7 +178,7 @@ pub fn gmin_water_geometry() -> crate::rigid_body::RigidBodyGeometry {
 /// Block Rodrigues coordinates from Cartesian O, H, H triples.
 pub fn rigid_from_ohh(cartesian: &[f64]) -> Array1<f64> {
     assert!(
-        cartesian.len() % 9 == 0 && !cartesian.is_empty(),
+        cartesian.len().is_multiple_of(9) && !cartesian.is_empty(),
         "OHH coordinates are O, H, H repeated"
     );
     let n = cartesian.len() / 9;
@@ -230,7 +230,7 @@ pub fn energy_ohh(cartesian: &[f64]) -> f64 {
 /// Interleaved GMIN angle-axis `(c, ω)` to block Rodrigues `(centres, -ω)`.
 pub fn block_from_interleaved_gmin(interleaved: &[f64]) -> Vec<f64> {
     assert!(
-        interleaved.len() % 6 == 0,
+        interleaved.len().is_multiple_of(6),
         "interleaved TIP4P state is 6 per molecule"
     );
     let n = interleaved.len() / 6;
@@ -246,7 +246,10 @@ pub fn block_from_interleaved_gmin(interleaved: &[f64]) -> Vec<f64> {
 
 /// Block Rodrigues state to interleaved GMIN angle-axis.
 pub fn interleaved_gmin_from_block(block: &[f64]) -> Vec<f64> {
-    assert!(block.len() % 6 == 0, "block TIP4P state is 6 per molecule");
+    assert!(
+        block.len().is_multiple_of(6),
+        "block TIP4P state is 6 per molecule"
+    );
     let n = block.len() / 6;
     let mut interleaved = vec![0.0; block.len()];
     for molecule in 0..n {
@@ -259,7 +262,7 @@ pub fn interleaved_gmin_from_block(block: &[f64]) -> Vec<f64> {
 }
 
 fn sites_from_ohh(cartesian: &[f64]) -> Vec<[[f64; 3]; 4]> {
-    assert!(cartesian.len() % 9 == 0 && !cartesian.is_empty());
+    assert!(cartesian.len().is_multiple_of(9) && !cartesian.is_empty());
     let n = cartesian.len() / 9;
     let mut placed = Vec::with_capacity(n);
     for molecule in 0..n {

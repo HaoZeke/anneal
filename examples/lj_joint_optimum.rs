@@ -622,6 +622,12 @@ fn run_minima_hopping_with_history<'a>(
         charged.map_or(ledger.spent(), |counter| counter.load(Ordering::SeqCst)),
         energy,
     )];
+    let descriptor = Some(lj::descriptor_space());
+    let context = StructureContext::new(Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")));
+    let mut local_basins: HashSet<usize> = HashSet::new();
+    let mut accepted_visits: HashMap<usize, u64> = HashMap::new();
+    let mut observed_visits: HashMap<usize, u64> = HashMap::new();
+    let mut history_seconds = 0.0;
 
     while ledger.remaining() > 0 {
         let mut attempt_config = escape_config;
@@ -675,7 +681,9 @@ fn run_minima_hopping_with_history<'a>(
         }
 
         let history_start = Instant::now();
-        let (reached, adopt) = if let (Some(history), Some(descriptor)) = (history, &descriptor) {
+        let (reached, adopt) = if let (Some(history), Some(descriptor)) =
+            (history, descriptor.as_ref())
+        {
             let (observation, adopt) = observe_history(
                 history,
                 &ledger,

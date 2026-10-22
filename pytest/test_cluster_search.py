@@ -38,7 +38,11 @@ def test_config_recommended_and_for_cluster():
     assert rec.depth_reward
     assert rec.tabu_on_stall
     assert rec.shared_visit_policy == "tabu"
-    assert not rec.orbit_complete_on_new
+    assert rec.orbit_complete_on_new
+    assert rec.calibrated_screen
+    assert rec.finish_improving
+    assert base.finish_improving
+    assert not rec.rigid_body
     assert not base.burst_moves
     assert not base.allocate_moves
     assert not base.depth_reward
@@ -106,6 +110,71 @@ def test_cluster_search_start_kwarg():
     out = cluster_search(lj_energy, lj_grad, n, 200, seed=0, start=start)
     assert np.asarray(out["best"]).shape == (3 * n,)
     assert np.isfinite(out["best_energy"])
+
+
+WATER_SITES = np.array(
+    [[0.0, 0.0, -0.0656], [0.0, 0.757, 0.5205], [0.0, -0.757, 0.5205]],
+    dtype=np.float64,
+)
+
+
+def rigid_energy_grad(x: np.ndarray) -> tuple[float, np.ndarray]:
+    """LJ on the centres at sigma 3 plus a quadratic pull on the rotations."""
+    x = np.asarray(x, dtype=np.float64)
+    half = x.size // 2
+    centres = x[:half] / 3.0
+    energy = lj_energy(centres) + 0.05 * float(np.dot(x[half:], x[half:]))
+    grad = np.concatenate([-lj_grad(centres) / 3.0, 0.1 * x[half:]])
+    return energy, grad
+
+
+def test_tip4p_configs_are_rigid():
+    comm = Config.communicating_tip4p(10)
+    rec = Config.recommended_tip4p(10)
+    assert comm.rigid_body and rec.rigid_body
+    assert comm.n_points == 10
+    assert comm.calibrated_screen
+    assert comm.shared_visit_policy == "recognition"
+    assert rec.depth_reward and rec.tabu_on_stall
+    assert not comm.orbit_complete_on_new
+    with pytest.raises(ValueError, match="at least 2"):
+        Config.communicating_tip4p(1)
+
+
+@pytest.mark.parametrize("preset", ["communicating", "recommended", "base"])
+def test_cluster_search_water_sites(preset):
+    n = 3
+    start = np.concatenate(
+        [np.array([0.0, 0.0, 0.0, 3.4, 0.0, 0.0, 0.0, 3.4, 0.0]), np.full(3 * n, 0.3)]
+    )
+    out = cluster_search(
+        lambda x: rigid_energy_grad(x)[0],
+        lambda x: rigid_energy_grad(x)[1],
+        n,
+        600,
+        seed=0,
+        communicating=preset == "communicating",
+        recommended=preset == "recommended",
+        start=start,
+        water_sites=WATER_SITES,
+    )
+    assert np.asarray(out["best"]).shape == (6 * n,)
+    assert out["best_energy"] <= rigid_energy_grad(start)[0]
+    assert out["best_energy"] == pytest.approx(rigid_energy_grad(out["best"])[0])
+
+
+def test_cluster_search_water_sites_validation():
+    f = lambda x: rigid_energy_grad(x)[0]  # noqa: E731
+    g = lambda x: rigid_energy_grad(x)[1]  # noqa: E731
+    start = np.zeros(12)
+    with pytest.raises(ValueError, match="needs a start"):
+        cluster_search(f, g, 2, 100, water_sites=WATER_SITES)
+    with pytest.raises(ValueError, match="6\\*n"):
+        cluster_search(f, g, 2, 100, start=np.zeros(6), water_sites=WATER_SITES)
+    with pytest.raises(ValueError, match="must be 9"):
+        cluster_search(f, g, 2, 100, start=start, water_sites=np.zeros(6))
+    with pytest.raises(ValueError, match="excludes"):
+        cluster_search(f, g, 2, 100, start=start, water_sites=WATER_SITES, derived=True)
 
 
 def test_cluster_search_ras_flag_exists_and_recommended_defaults():

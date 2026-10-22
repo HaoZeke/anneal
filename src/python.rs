@@ -20,9 +20,9 @@
 
 use ndarray::{Array1, ArrayView1};
 use numpy::{PyArray1, PyReadonlyArray1};
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyFloat};
 use rand::SeedableRng;
 
 use eindir_core::py_objective::{PyBounds as EindirPyBounds, PyObjective};
@@ -520,7 +520,7 @@ impl From<History> for PyHistory {
 #[derive(Default)]
 struct CallbackErrors {
     fatal: std::sync::Mutex<Option<PyErr>>,
-    aborted: std::sync::atomic::AtomicBool,
+    aborted: std::sync::Arc<std::sync::atomic::AtomicBool>,
     scored: std::sync::atomic::AtomicUsize,
     first_scored: std::sync::Mutex<Option<String>>,
 }
@@ -528,6 +528,11 @@ struct CallbackErrors {
 impl CallbackErrors {
     fn aborted(&self) -> bool {
         self.aborted.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The flag an ending run raises, for a ledger that should close with it.
+    fn abort_flag(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        std::sync::Arc::clone(&self.aborted)
     }
 
     fn record(&self, py: Python<'_>, err: PyErr) {
@@ -2318,6 +2323,16 @@ fn bfwt_optimize(
     Ok(out.into())
 }
 
+/// A bare `usize` extraction truncates a float. Neighbour counts are whole.
+fn coverage_neighbor_count(value: &Bound<'_, PyAny>) -> PyResult<usize> {
+    if value.is_instance_of::<PyFloat>() {
+        return Err(PyTypeError::new_err(
+            "coverage_neighbors must be an integer",
+        ));
+    }
+    value.extract()
+}
+
 /// Runs the Thompson-allocated portfolio global optimizer.
 ///
 /// One generic driver with a single budget knob: a discounted
@@ -2356,7 +2371,7 @@ fn global_optimize(
     replicas: usize,
     coverage_shared: bool,
     coverage_radius: f64,
-    coverage_neighbors: usize,
+    #[pyo3(from_py_with = coverage_neighbor_count)] coverage_neighbors: usize,
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -2846,10 +2861,60 @@ impl PyClusterConfig {
         })
     }
 
-    /// Points in a state; the state length is `3 * n_points`.
+    /// The communicating arm on `n` rigid TIP4P waters.
+    #[staticmethod]
+    fn communicating_tip4p(n: usize) -> PyResult<Self> {
+        if n < 2 {
+            return Err(PyValueError::new_err("n must be at least 2"));
+        }
+        Ok(Self {
+            inner: crate::methods::cluster_hopping::Config::communicating_tip4p(n),
+            recommended: false,
+        })
+    }
+
+    /// The recommended arm on `n` rigid TIP4P waters.
+    #[staticmethod]
+    fn recommended_tip4p(n: usize) -> PyResult<Self> {
+        if n < 2 {
+            return Err(PyValueError::new_err("n must be at least 2"));
+        }
+        Ok(Self {
+            inner: crate::methods::cluster_hopping::Config::recommended_tip4p(n),
+            recommended: true,
+        })
+    }
+
+    /// Points in a state; the state length is `3 * n_points`, or `6 *
+    /// n_points` molecules on a rigid-body configuration.
     #[getter]
     fn n_points(&self) -> usize {
         self.inner.n_points
+    }
+
+    /// Whether the state is rigid bodies: centres, then rotations.
+    #[getter]
+    fn rigid_body(&self) -> bool {
+        self.inner.rigid_body_geometry.is_some()
+    }
+
+    /// How far above the incumbent a screened trial may land.
+    #[getter]
+    fn screen_margin(&self) -> f64 {
+        self.inner.screen_margin
+    }
+
+    /// Whether the energy screen credits the descent its pass left undone.
+    #[getter]
+    fn calibrated_screen(&self) -> bool {
+        self.inner.calibrated_screen
+    }
+
+    /// Whether a full relaxation below the incumbent continues until it
+    /// stops descending.
+    #[getter]
+    fn finish_improving(&self) -> bool {
+        self.inner.finish_improving
     }
 
     /// Composed surface-relocation burst arm.
@@ -3052,6 +3117,7 @@ fn cluster_gradient_scale(
     grad_fn: &Py<PyAny>,
     cfg: &crate::methods::cluster_hopping::Config,
     seed: u64,
+    at: Option<ArrayView1<'_, f64>>,
     errors: &CallbackErrors,
 ) -> PyResult<f64> {
     use crate::methods::cluster_hopping::random_cluster_in_radius;
@@ -3084,14 +3150,21 @@ fn cluster_gradient_scale(
         })
     };
 
-    let mut rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x6a09_e667_f3bc_c909);
-    let probe = random_cluster_in_radius(
-        cfg.n_points,
-        cfg.start_radius(),
-        cfg.min_separation,
-        &mut rng,
-    );
-    if probe.len() != 3 * cfg.n_points {
+    // A rigid-body state is not a point set, so it is probed where the caller
+    // starts rather than at a random compact cluster.
+    let probe = match at {
+        Some(at) => at.to_owned(),
+        None => {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x6a09_e667_f3bc_c909);
+            random_cluster_in_radius(
+                cfg.n_points,
+                cfg.start_radius(),
+                cfg.min_separation,
+                &mut rng,
+            )
+        }
+    };
+    if at.is_none() && probe.len() != 3 * cfg.n_points {
         return Err(PyValueError::new_err(
             "could not construct a gradient-orientation probe",
         ));
@@ -3151,9 +3224,8 @@ fn cluster_gradient_scale(
     })
 }
 
-fn cluster_bounds(n: usize, length_scale: f64) -> Bounds<f64> {
+fn cluster_bounds(n: usize, dim: usize, length_scale: f64) -> Bounds<f64> {
     let extent = 4.0 * 2.0_f64.powf(1.0 / 6.0) * (n as f64).cbrt() * length_scale;
-    let dim = 3 * n;
     Bounds::new(
         Array1::from_elem(dim, -extent),
         Array1::from_elem(dim, extent),
@@ -3285,12 +3357,25 @@ fn cluster_archive_search(
 ///     `derived` when true. Not `Config.recommended`.
 ///   ras: residual archive search on the recommended preset. Keyword-only;
 ///     default false. Does not change `Config.recommended`.
-///   start: optional flat `3n` start. When set, hops use [`search_from`]
-///     instead of seeding a random compact cluster.
+///   start: optional flat `3n` start, `6n` with `water_sites`. When set, hops
+///     use [`search_from`] instead of seeding a random compact cluster.
 ///   length_scale: optional physical length. When set with the recommended
 ///     preset, hops use `with_scales` instead of the reduced LJ container.
+///   water_sites: optional flat 9-vector of the O, H, H positions of one
+///     rigid water in its body frame, in angstrom, about the point its
+///     rotation turns about. When set, `n` counts molecules and the state is
+///     `6n`: `n` centres, then `n` exponential-map rotation vectors that turn
+///     the body frame actively (Rodrigues). The presets become
+///     `Config.communicating_tip4p(n)`, `Config.recommended_tip4p(n)`, or
+///     `Config.for_tip4p(n)` when both are false, with these sites as the
+///     rigid geometry. Needs `start`; excludes `ras`, `derived`, and
+///     `length_scale`.
+///
+/// A callback raising `BaseException` that is not an `Exception`, such as
+/// `KeyboardInterrupt`, stops the run at the next evaluation and is raised
+/// from this call.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, grad_fn, n, budget, seed = 0, recommended = true, derived = false, communicating = false, *, ras = false, start = None, length_scale = None))]
+#[pyo3(signature = (obj_fn, grad_fn, n, budget, seed = 0, recommended = true, derived = false, communicating = false, *, ras = false, start = None, length_scale = None, water_sites = None))]
 fn cluster_search(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -3304,42 +3389,99 @@ fn cluster_search(
     ras: bool,
     start: Option<PyReadonlyArray1<'_, f64>>,
     length_scale: Option<f64>,
+    water_sites: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
+    use crate::methods::cluster_hopping::Config;
+
     if n < 2 {
         return Err(PyValueError::new_err("n must be at least 2"));
     }
+    let water = match water_sites {
+        None => None,
+        Some(sites) => {
+            let sl = sites.as_slice()?;
+            if sl.len() != 9 {
+                return Err(PyValueError::new_err(format!(
+                    "water_sites length {} must be 9 (O, H, H)",
+                    sl.len()
+                )));
+            }
+            if ras || derived || length_scale.is_some() {
+                return Err(PyValueError::new_err(
+                    "water_sites excludes ras, derived and length_scale",
+                ));
+            }
+            if start.is_none() {
+                return Err(PyValueError::new_err("water_sites needs a start"));
+            }
+            let sites = sl.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
+            Some(
+                crate::rigid_body::RigidBodyGeometry::new(sites, vec![8, 1, 1])
+                    .map_err(PyValueError::new_err)?,
+            )
+        }
+    };
+    let dim = if water.is_some() { 6 * n } else { 3 * n };
+    let start = match start {
+        Some(start) => {
+            let sl = start.as_slice()?;
+            if sl.len() != dim {
+                return Err(PyValueError::new_err(format!(
+                    "start length {} must be {} = {}",
+                    sl.len(),
+                    if water.is_some() { "6*n" } else { "3*n" },
+                    dim
+                )));
+            }
+            Some(Array1::from_vec(sl.to_vec()))
+        }
+        None => None,
+    };
     if budget < 1 {
         return Err(PyValueError::new_err("budget must be positive"));
     }
-    if let Some(scale) = length_scale {
-        if !scale.is_finite() || scale <= 0.0 {
-            return Err(PyValueError::new_err(
-                "length_scale must be finite and positive",
-            ));
-        }
+    if let Some(scale) = length_scale
+        && (!scale.is_finite() || scale <= 0.0)
+    {
+        return Err(PyValueError::new_err(
+            "length_scale must be finite and positive",
+        ));
     }
     let scale = length_scale.unwrap_or(1.0);
-    let cfg = if ras {
-        crate::methods::cluster_hopping::Config::recommended(n)
+    let cfg = if let Some(geometry) = water {
+        let mut cfg = if communicating {
+            Config::communicating_tip4p(n)
+        } else if recommended {
+            Config::recommended_tip4p(n)
+        } else {
+            Config::for_tip4p(n)
+        };
+        cfg.rigid_body_geometry = Some(geometry);
+        cfg
+    } else if ras {
+        Config::recommended(n)
     } else if communicating {
-        crate::methods::cluster_hopping::Config::communicating(n)
+        Config::communicating(n)
     } else if derived {
-        crate::methods::cluster_hopping::Config::derived(n)
+        Config::derived(n)
     } else if recommended {
         if length_scale.is_some() {
             recommended_with_scale(n, scale)
         } else {
-            crate::methods::cluster_hopping::Config::recommended(n)
+            Config::recommended(n)
         }
     } else if length_scale.is_some() {
-        crate::methods::cluster_hopping::Config::with_scales(n, scale, 1.0)
+        Config::with_scales(n, scale, 1.0)
     } else {
-        crate::methods::cluster_hopping::Config::for_cluster(n)
+        Config::for_cluster(n)
     };
-    let mut ledger = crate::methods::cluster_hopping::Ledger::new(budget);
     let errors: std::sync::Arc<CallbackErrors> = std::sync::Arc::default();
+    let mut ledger =
+        crate::methods::cluster_hopping::Ledger::with_stop(budget, errors.abort_flag());
+    let rigid = cfg.rigid_body_geometry.is_some();
     let gradient_scale = if budget >= 4 {
-        let scale = cluster_gradient_scale(py, &obj_fn, &grad_fn, &cfg, seed, &errors)?;
+        let probe_at = start.as_ref().filter(|_| rigid).map(|s| s.view());
+        let scale = cluster_gradient_scale(py, &obj_fn, &grad_fn, &cfg, seed, probe_at, &errors)?;
         for _ in 0..3 {
             assert!(ledger.charge());
         }
@@ -3350,7 +3492,7 @@ fn cluster_search(
     let obj = CallableDiffObjective {
         fn_: obj_fn,
         grad_fn,
-        bounds: cluster_bounds(n, scale),
+        bounds: cluster_bounds(n, dim, scale),
         gradient_scale,
         errors: std::sync::Arc::clone(&errors),
     };
@@ -3360,21 +3502,11 @@ fn cluster_search(
         return out;
     }
     let (out, _) = if let Some(start) = start {
-        let sl = start.as_slice()?;
-        if sl.len() != 3 * n {
-            return Err(PyValueError::new_err(format!(
-                "start length {} must be 3*n = {}",
-                sl.len(),
-                3 * n
-            )));
-        }
-        let start = Array1::from_vec(sl.to_vec());
         crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, start.view(), seed)
     } else {
         crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
     };
     errors.finish(py)?;
-    let dim = 3 * n;
     let best = out
         .best_state
         .map(|a| a.to_vec())
