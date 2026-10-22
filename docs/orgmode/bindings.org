@@ -17,6 +17,12 @@ pkg-config --cflags --libs anneal-core
 
 A hand-written companion header =anneal-core.hpp= wraps the C declarations in =namespace anneal= for ergonomic C++ usage.
 
+=anneal_box_minimize= reads =ANNEAL_SUCCESS= from a callback as "keep
+going". =ANNEAL_STOPPED= asks the search to return at once: the best point
+found is written back, and the call itself returns =ANNEAL_STOPPED=. Any
+other status is a failure and leaves the start in place. The variants live
+in the generated =anneal-core.h=.
+
 The install also places =dlpack/dlpack.h= (DLPack 1.3, the header =dlpk= 0.1.5 was translated from) on that include prefix. =anneal-core.h= includes it, so =pkg-config --cflags anneal-core= is enough to compile a consumer. Meson and CMake install the same header.
 
 * Build-system glue

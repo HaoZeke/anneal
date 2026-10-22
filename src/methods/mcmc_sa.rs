@@ -187,6 +187,9 @@ impl<S: Sampler<f64>> MultiChainSampler<S> {
         let mut epoch_steps: Vec<usize> = Vec::with_capacity(n_epochs);
 
         for epoch in 0..n_epochs {
+            if crate::caller_stop::raised() {
+                break;
+            }
             let temp = cooling.temperature(epoch);
             let mut accepted_per_chain = vec![0usize; self.n_chains];
             let mut rejected_per_chain = vec![0usize; self.n_chains];
@@ -211,7 +214,10 @@ impl<S: Sampler<f64>> MultiChainSampler<S> {
 
             // Phase 2: keep stepping in batches of k_check until convergence
             // or k_max budget. In sparse mode, step only the stragglers.
-            while current_rhat > self.rhat_threshold && total_steps < self.k_max {
+            while current_rhat > self.rhat_threshold
+                && total_steps < self.k_max
+                && !crate::caller_stop::raised()
+            {
                 let active_chains: Vec<usize> = if self.sparse_straggler_only
                     && self.straggler_top_k > 0
                     && self.straggler_top_k < self.n_chains

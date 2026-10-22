@@ -860,6 +860,7 @@ fn run_hmc(
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let grad = CallablePyGradient::new(grad_fn, dim, &errors);
     let cool = LogCool::new(t_init, 2.0_f64);
     let integrator = OmelyanIntegrator::new(epsilon, l_steps, t_init);
@@ -927,6 +928,7 @@ fn polish(
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let grad = CallablePyGradient::new(grad_fn, dim, &errors);
     let result = crate::projected_gradient_polish(
         &obj,
@@ -990,6 +992,7 @@ fn qmc_polish(
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let grad = CallablePyGradient::new(grad_fn, dim, &errors);
     let result = crate::qmc_projected_gradient_polish(
         &obj,
@@ -1135,6 +1138,7 @@ fn qmc_best1bin_scout(
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = crate::qmc_best1bin_scout(
         &obj,
         max_evals,
@@ -1253,6 +1257,7 @@ fn qmc_gsa_global_search(
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = crate::qmc_gsa_global_search_from(
         &obj,
         max_evals,
@@ -1345,6 +1350,7 @@ fn qmc_trust_region_poll(
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = crate::qmc_trust_region_poll(
         &obj,
         Array1::from_vec(center_vec),
@@ -1447,6 +1453,7 @@ fn shifted_qmc_polish(
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let grad = CallablePyGradient::new(grad_fn, dim, &errors);
     let result = crate::shifted_qmc_projected_gradient_polish(
         &obj,
@@ -1523,6 +1530,7 @@ fn additive_independence(
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = crate::methods::additive_independence_sa(
         &obj, seed, max_fevals, degree, grid_m, local_frac, n_epochs, pilot,
     );
@@ -1554,6 +1562,7 @@ fn estimate_gle_omega0(
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let grad = CallablePyGradient::new(grad_fn, dim, &errors);
     let omega0 = crate::methods::estimate_gle_omega0(&obj, &grad);
     errors.finish(py)?;
@@ -1640,6 +1649,7 @@ fn gle_langevin(
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let grad = CallablePyGradient::new(grad_fn, dim, &errors);
     let result = if let Some(omega0) = omega0 {
         crate::methods::gle_langevin_sa(&obj, &grad, seed, max_fevals, omega0, dt, n_epochs, x0)
@@ -1683,6 +1693,7 @@ fn gle_langevin_preconditioned(
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let grad = CallablePyGradient::new(grad_fn, dim, &errors);
     let result = if let Some(omega0) = omega0 {
         crate::methods::gle_langevin_sa(&obj, &grad, seed, max_fevals, omega0, dt, n_epochs, x0)
@@ -1838,6 +1849,7 @@ fn dmc_population_optimize(
     let seed_view = seed_arr.as_ref().map(|a| a.view());
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xd1c_00b0);
     let result = match grad_fn {
         Some(grad_fn) => {
@@ -1902,6 +1914,7 @@ fn gpmd_optimize(
     let seed_view = seed_arr.as_ref().map(|a| a.view());
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = match grad_fn {
         Some(grad_fn) => {
             let grad = CallablePyGradient::new(grad_fn, dim, &errors);
@@ -1947,6 +1960,7 @@ fn amsa_optimize(
     let seed_view = seed_arr.as_ref().map(|a| a.view());
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = match grad_fn {
         Some(grad_fn) => {
             let grad = CallablePyGradient::new(grad_fn, dim, &errors);
@@ -1993,7 +2007,9 @@ fn coverage_decisions_dict<'py>(
 ///
 /// Four (or `replicas`) algebraic hops divide one work-unit budget. They
 /// share a Euclidean minimum history and Goedecker escape feedback. This is
-/// not cluster hopping: the move is a reflected Gaussian on the box.
+/// not cluster hopping: the move is a reflected Gaussian on the box. A
+/// callback raising `BaseException` that is not an `Exception` stops the
+/// ensemble at once and is re-raised. The best point found is kept.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, x0 = None,
                     replicas = 4, history = "shared", membership = "accepted"))]
@@ -2030,6 +2046,7 @@ fn box_ensemble_optimize(
     };
     let obj = CallableObjective::new(obj_fn, parsed.bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let dim = parsed.dim;
     let grad = CallablePyGradient::new(grad_fn, dim, &errors);
     let result = with_replica_threads(py, || {
@@ -2110,6 +2127,9 @@ fn box_ensemble_optimize(
 }
 
 /// Box search split on gradient: hop-and-quench, or the values-only portfolio.
+///
+/// A callback raising `BaseException` that is not an `Exception` stops the
+/// search at once and is re-raised. The best point found is kept.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, x0 = None,
                     replicas = 4, history = "shared", membership = "accepted", *,
@@ -2140,6 +2160,7 @@ fn ensemble_optimize(
     let seed_view = parsed.x0.as_ref().map(|a| a.view());
     let obj = CallableObjective::new(obj_fn, parsed.bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let dim = parsed.dim;
     let history_mode = parsed.history;
     let membership = parsed.membership;
@@ -2291,6 +2312,7 @@ fn bfwt_optimize(
     let seed_view = seed_arr.as_ref().map(|a| a.view());
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let result = match grad_fn {
         Some(grad_fn) => {
             let grad = CallablePyGradient::new(grad_fn, dim, &errors);
@@ -2355,6 +2377,9 @@ fn coverage_neighbor_count(value: &Bound<'_, PyAny>) -> PyResult<usize> {
 ///   seed: RNG seed.
 ///   grad_fn: optional gradient callable; enables the gradient arms
 ///            and the final polish.
+///
+/// A callback raising `BaseException` that is not an `Exception` stops the
+/// portfolio at once and is re-raised. The best point found is kept.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, noise_sigma = None, policy = "auto", x0 = None, *, replicas = 1, coverage_shared = true, coverage_radius = 0.05, coverage_neighbors = 0))]
 fn global_optimize(
@@ -2384,6 +2409,7 @@ fn global_optimize(
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     if let Some(sigma) = noise_sigma
         && (sigma <= 0.0 || !sigma.is_finite())
     {
@@ -2577,7 +2603,9 @@ impl Preset {
 ///
 /// The start costs one evaluation, so the run makes
 /// `1 + n_epochs * steps_per_epoch` calls to `obj_fn`, or `max_evals` when
-/// that is smaller.
+/// that is smaller. A callback raising `BaseException` that is not an
+/// `Exception` stops the walk at once. The best point found is kept, and
+/// the exception is re-raised.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, preset, n_epochs = 100, steps_per_epoch = 200, seed = 42, x0 = None, max_evals = None))]
 fn run(
@@ -2601,6 +2629,7 @@ fn run(
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let history = match preset {
         Preset::Boltzmann(p) => {
             let v = boltzmann_in_box(obj, p.t_init, p.sigma)
@@ -2722,6 +2751,7 @@ fn run_qmc(
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let history = match preset {
         Preset::Boltzmann(p) => {
             let v = boltzmann_in_box(obj, p.t_init, p.sigma)
@@ -3492,8 +3522,8 @@ fn rigid_probe(
 ///     `length_scale`, `rigid`, `species`, `sigmas`, and a non-block layout.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
-/// `KeyboardInterrupt`, stops the run at the next evaluation and is raised
-/// from this call.
+/// `KeyboardInterrupt`, stops the search at once. The best state found is
+/// kept, and the exception is raised from this call.
 #[pyfunction]
 #[pyo3(signature = (
     obj_fn,
@@ -3665,6 +3695,7 @@ fn cluster_search(
         }
     }
     let errors: std::sync::Arc<CallbackErrors> = std::sync::Arc::default();
+    let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let mut ledger =
         crate::methods::cluster_hopping::Ledger::with_stop(budget, errors.abort_flag());
     if let Some(limit) = target {

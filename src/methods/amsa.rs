@@ -238,12 +238,12 @@ where
     // Epoch length ties stagnation detection to dimension.
     let epoch = (8 * (d + 1)).clamp(32, 256);
 
-    while n_evals + n_grads < sa_budget {
+    while n_evals + n_grads < sa_budget && !crate::caller_stop::raised() {
         let epoch_best = best_val;
         let reseed_boost = 1.5_f64.powi(st.reseed_gen.min(6) as i32);
         let l = st.proposal_chol(&bounds);
         for _ in 0..epoch {
-            if n_evals + n_grads >= sa_budget {
+            if n_evals + n_grads >= sa_budget || crate::caller_stop::raised() {
                 break;
             }
             let rem = (sa_budget - n_evals - n_grads) as f64;
