@@ -1750,14 +1750,33 @@ listener_reap(void *arg)
 		return;
 	}
 
+	// Close the listen fd before this listener leaves s_listeners.
+	// nni_sock_shutdown waits for that list and must not return while
+	// the port is still bound. Destroy used to run after the wake, so
+	// the closer raced the reaper. On kqueue that close also waits for
+	// the poller, and a restart on the same address then sees the port
+	// still taken. Keep the list node until the fd is gone so a
+	// pipe-removal wake cannot observe a drained listener list early.
+	nni_mtx_unlock(&s->s_mx);
+
+	nni_aio_stop(&l->l_tmo_aio);
+	nni_aio_stop(&l->l_acc_aio);
+	nni_aio_fini(&l->l_acc_aio);
+	nni_aio_fini(&l->l_tmo_aio);
+	if (l->l_data != NULL) {
+		l->l_ops.l_fini(l->l_data);
+		l->l_data = NULL;
+	}
+
+	nni_mtx_lock(&s->s_mx);
 	nni_list_remove(&s->s_listeners, l);
 	if ((s->s_closing) && (nni_list_empty(&s->s_listeners))) {
 		nni_cv_wake(&s->s_cv);
 	}
-
 	nni_mtx_unlock(&s->s_mx);
 
-	nni_listener_destroy(l);
+	nni_url_free(l->l_url);
+	NNI_FREE_STRUCT(l);
 }
 
 void

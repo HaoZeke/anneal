@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use ndarray::{Array1, ArrayView1};
 use rgpot_core::profile::{ProfileEvaluation, ProfileRequest, ProfileSession};
 

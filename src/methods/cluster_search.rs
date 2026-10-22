@@ -132,14 +132,12 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     let mut opt = WarmLbfgs::default();
-    if cfg.move_library.is_rigid_body() || cfg.species_sigma.is_some() {
-        // Stop the quench at the preset's record tolerance. A tighter
-        // default spends the tail of the descent on a gradient the hop
-        // will not ask for again. Species diameters use the same stop:
-        // the binary ledger records at that tolerance, and the extra
-        // digits do not move the energy by the success window.
-        opt.gtol = cfg.record_gradient;
-    }
+    // A minimum is recordable at `record_gradient`; descending past it buys
+    // digits no acceptance test or record reads. Stopping at 1e-6 instead cost
+    // the communicating preset a PAR-2 of 5792 force calls on 32 LJ38 starts
+    // against 4269 here, and a median of 5726 against 3253. Rigid bodies and
+    // species diameters record at that same tolerance.
+    opt.gtol = cfg.record_gradient;
     // The driver calls the screening pass with `screen_steps` and the full one
     // with `relax_steps`, so the iteration count identifies which is which.
     let screen_iters = cfg.screen_steps;

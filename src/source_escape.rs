@@ -80,6 +80,21 @@ impl<S: ?Sized> LimitedSurface<'_, S> {
     }
 }
 
+fn reserve_evaluation(counter: &AtomicU64, maximum: u64) -> bool {
+    loop {
+        let current = counter.load(Ordering::Relaxed);
+        if current >= maximum {
+            return false;
+        }
+        if counter
+            .compare_exchange_weak(current, current + 1, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+        {
+            return true;
+        }
+    }
+}
+
 impl<S> PesSurface for LimitedSurface<'_, S>
 where
     S: PesSurface + ?Sized,
@@ -90,11 +105,9 @@ where
         &self,
         coordinates: ArrayView1<'_, f64>,
     ) -> Result<(f64, Array1<f64>), Self::Error> {
-        self.calls
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |calls| {
-                (calls < self.maximum_evaluations).then_some(calls + 1)
-            })
-            .map_err(|_| LimitedSurfaceError::Exhausted)?;
+        if !reserve_evaluation(&self.calls, self.maximum_evaluations) {
+            return Err(LimitedSurfaceError::Exhausted);
+        }
         self.surface
             .evaluate(coordinates)
             .map_err(|error| LimitedSurfaceError::Surface(error.to_string()))

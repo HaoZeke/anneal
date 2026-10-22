@@ -82,6 +82,24 @@ water = cluster_search(
 )
 #+end_src
 
+A caller body frame is a different chart. =water_sites= is the O, H, H
+positions of one rigid water, and =n= counts molecules. The state is
+centres then exponential-map rotations. The preset is
+=Config.communicating_tip4p=, =Config.recommended_tip4p=, or
+=Config.for_tip4p=. It needs a start and does not combine with
+=rigid=, =species=, =sigmas=, =ras=, =derived=, or =length_scale=.
+
+#+begin_src python
+sites = np.array(
+    [[0.0, 0.0, -0.0656], [0.0, 0.757, 0.5205], [0.0, -0.757, 0.5205]]
+)
+start = np.concatenate([np.zeros(3 * 4), np.full(3 * 4, 0.1)])
+placed = cluster_search(
+    energy, gradient, 4, 20000, seed=0, recommended=True,
+    start=start, water_sites=sites,
+)
+#+end_src
+
 A design box is [[file:box-search.org][box search]], not this page.
 
 * Direct quantum-chemistry profiles

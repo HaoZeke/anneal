@@ -469,6 +469,7 @@ pub struct Ledger {
     diagnostic_quench: bool,
     /// Energy at or below which the hop may stop.
     target: Option<f64>,
+    stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 struct DiagnosticQuench<'a> {
@@ -508,6 +509,7 @@ impl Ledger {
             quench_boundaries: Vec::new(),
             diagnostic_quench: false,
             target: None,
+            stop: None,
         }
     }
 
@@ -536,6 +538,24 @@ impl Ledger {
         self.below_target(self.best)
     }
 
+    /// A ledger that also closes when `stop` is raised.
+    ///
+    /// The caller owns the flag. Once it is set, [`Ledger::charge`] refuses
+    /// and [`Ledger::remaining`] reads zero, so a search ends at its next
+    /// budget check instead of spending what is left. A harness that stops a
+    /// run on a target, or a callback that raised, sets it.
+    pub fn with_stop(budget: usize, stop: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
+        let mut ledger = Self::new(budget);
+        ledger.stop = Some(stop);
+        ledger
+    }
+
+    fn stopped(&self) -> bool {
+        self.stop
+            .as_ref()
+            .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
     /// Whether the relaxation serves a non-adopting diagnostic probe.
     ///
     /// Diagnostic callbacks must use the declared, fixed relaxation kernel:
@@ -555,7 +575,7 @@ impl Ledger {
 
     /// Charges one unit, returning `false` when the budget is gone.
     pub fn charge(&mut self) -> bool {
-        if self.spent >= self.budget {
+        if self.spent >= self.budget || self.stopped() {
             return false;
         }
         self.spent += 1;
@@ -616,6 +636,9 @@ impl Ledger {
 
     /// Charged evaluations remaining.
     pub fn remaining(&self) -> usize {
+        if self.stopped() {
+            return 0;
+        }
         self.budget.saturating_sub(self.spent)
     }
 
@@ -1405,25 +1428,6 @@ fn rung_height(cfg: &Config, n_rep: usize, ratio: f64) -> f64 {
     }
 }
 
-/// A rung waiting for its turn: the state it holds, and what the driver knows
-/// about that state.
-///
-/// Everything past the state describes the state rather than the rung, so a
-/// swap moves it with the state and a switch restores it with the state. Left
-/// behind, it would attribute the next hop to whatever the previous rung held.
-struct Parked {
-    energy: f64,
-    state: Array1<f64>,
-    /// Basin of the state in the shared identity map, once looked up.
-    basin: Option<usize>,
-    /// Fresh validation gradient retained for the state, when any.
-    gradient: Option<Array1<f64>>,
-    /// The surrogate's value at the state, under delayed acceptance.
-    surrogate: Option<f64>,
-    /// Screen state of the trial that entered the state's basin.
-    entry: Option<Array1<f64>>,
-}
-
 /// Log acceptance of rungs `k` and `j` exchanging the states they hold.
 ///
 /// Rung `k` hops on `exp(-(E + V_k + S) / T_k)`, with `V_k` its own bias and
@@ -1433,6 +1437,7 @@ struct Parked {
 /// and at rung `j`'s. `S` is one function on every rung, so it enters only
 /// through the difference of the inverse temperatures and drops out of a flat
 /// ladder.
+#[cfg(test)]
 fn swap_log_acceptance(
     own_k: [f64; 2],
     own_j: [f64; 2],
@@ -1446,6 +1451,7 @@ fn swap_log_acceptance(
 }
 
 /// What a rung's acceptance can read at one state besides the rung's own bias.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug)]
 struct HopTerms {
     energy: f64,
@@ -1456,7 +1462,9 @@ struct HopTerms {
 
 /// What every rung's acceptance weighs a state by, and so what a swap between
 /// two of them has to exchange.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
 enum RungWeight {
     /// `exp(-(E + V_k + F + P + B) / T_k)`, with `V_k` the rung's own bias,
     /// `F` the funnel bias, `P` the packing pile and `B` the energy bias: the
@@ -1472,6 +1480,7 @@ enum RungWeight {
     Flat,
 }
 
+#[cfg(test)]
 impl RungWeight {
     /// The weight the acceptance test applies, given whether the
     /// flat-histogram cost exists yet.
@@ -1494,6 +1503,7 @@ impl RungWeight {
 /// is `V_j` at rung `j`'s state and at rung `k`'s. The flat cost is the same
 /// on both rungs at either state, so it cancels from the factor and takes the
 /// energy with it: under that weight a swap exchanges the biases alone.
+#[cfg(test)]
 fn exchange_log_acceptance(
     weight: RungWeight,
     at_k: HopTerms,
@@ -1723,6 +1733,93 @@ fn large_diameter_ratio(cfg: &Config) -> bool {
     }
     smallest.is_finite() && largest / smallest >= 1.2
 }
+/// How far a partial relaxation still had to descend, over the recent trials
+/// that went on to a full relaxation.
+///
+/// The energy screen compares a partially relaxed trial with the incumbent, so
+/// the margin it needs is the descent the screening pass leaves undone, and
+/// that is a property of the potential and the screening length rather than a
+/// constant. On rigid TIP4P a 15-step screen leaves tens of kJ/mol; on LJ a
+/// 25-step screen leaves a few epsilon.
+///
+/// Trials the screen passes are the ones that had little left to descend, so
+/// a window of those alone underestimates the descent of the trials it
+/// refuses and the screen tightens on itself: on TIP4P20 it refused 99.7 per
+/// cent of hops. Every [`ScreenDescent::AUDIT`]th refusal is relaxed in full
+/// instead, so the window also samples the population the screen judges.
+#[derive(Debug, Default)]
+struct ScreenDescent {
+    drops: std::collections::VecDeque<f64>,
+    allowance: f64,
+    refusals: usize,
+}
+
+impl ScreenDescent {
+    const WINDOW: usize = 256;
+    const WARMUP: usize = 8;
+    const QUANTILE: f64 = 0.9;
+    const AUDIT: usize = 8;
+
+    /// Called on a refusal; true when this one is audited instead.
+    fn audit(&mut self) -> bool {
+        self.refusals += 1;
+        self.refusals.is_multiple_of(Self::AUDIT)
+    }
+
+    fn observe(&mut self, drop: f64) {
+        if !drop.is_finite() {
+            return;
+        }
+        if self.drops.len() == Self::WINDOW {
+            self.drops.pop_front();
+        }
+        self.drops.push_back(drop.max(0.0));
+        if self.drops.len() >= Self::WARMUP {
+            let mut sorted: Vec<f64> = self.drops.iter().copied().collect();
+            let rank = ((sorted.len() - 1) as f64 * Self::QUANTILE).round() as usize;
+            let (_, q, _) = sorted.select_nth_unstable_by(rank, f64::total_cmp);
+            self.allowance = *q;
+        }
+    }
+
+    /// The descent a screened trial is credited with: zero until the warmup
+    /// has been observed, then the upper decile of the window.
+    fn allowance(&self) -> f64 {
+        self.allowance
+    }
+}
+
+/// Continue a full relaxation that ended below the incumbent until it stops
+/// descending, `steps` at a time and at most [`FINISH_ROUNDS`] more times.
+///
+/// Only a converged structure can be recorded, so a relaxation that stopped
+/// on its step cap below the incumbent is the one trial whose convergence
+/// decides whether the run has found anything. A continuation from a
+/// converged point stops at its first gradient.
+fn finish_improving(
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    mut out: (f64, Array1<f64>),
+    steps: usize,
+) -> (f64, Array1<f64>) {
+    for _ in 0..FINISH_ROUNDS {
+        if !(out.0 < ledger.best - 1e-10) || ledger.remaining() == 0 {
+            break;
+        }
+        let more = relax(ledger, out.1.view(), steps);
+        let descended = more.0 < out.0 - 1e-10 * (1.0 + out.0.abs());
+        if more.0 <= out.0 {
+            out = more;
+        }
+        if !descended {
+            break;
+        }
+    }
+    out
+}
+
+/// Continuations [`finish_improving`] grants one relaxation.
+const FINISH_ROUNDS: usize = 8;
 
 fn run_full<'g, R, H>(
     cfg: &Config,
@@ -2318,6 +2415,7 @@ where
     }
     let mut screened_out = 0usize;
     let mut returned = 0usize;
+    let mut descent = ScreenDescent::default();
     let mut accepted = 0usize;
     // A rigid chart is not in the preset's reduced energy unit. Charts of
     // ten bodies or fewer start at the top of the acceptance window and let
@@ -2403,9 +2501,9 @@ where
                         continue;
                     }
                     let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
-                    let ok = gradient.as_ref().is_some_and(|values| {
-                        answer_gradient_ok(cfg, values.view(), state.len())
-                    });
+                    let ok = gradient
+                        .as_ref()
+                        .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len()));
                     let finished = ok;
                     adopted = Some((energy, state, gradient, ok));
                     if finished {
@@ -3221,8 +3319,7 @@ where
                             &mut unconverged_records,
                         );
                         if gradient.is_some() || !gradient_required {
-                            let from_basin =
-                                here.unwrap_or_else(|| identity.basin_of(x.view()));
+                            let from_basin = here.unwrap_or_else(|| identity.basin_of(x.view()));
                             let reached = identity.basin_of(xq.view());
                             adopt_minimum!(
                                 eq,
@@ -3538,12 +3635,9 @@ where
                     pending_features = Some(f);
                     cand
                 }
-                _ => kernels[k].propose_scaled(
-                    x.view(),
-                    cfg.temperature,
-                    escape * orient_scale,
-                    rng,
-                ),
+                _ => {
+                    kernels[k].propose_scaled(x.view(), cfg.temperature, escape * orient_scale, rng)
+                }
             }
         };
         // Identity SOAP is not an arm. Thompson must not buy a no-op:
@@ -3780,37 +3874,35 @@ where
         // the Metropolis test still sees a real quenched energy for that
         // basin, so the per-attempt rate is untouched and the remaining
         // force calls are refunded.
+        let ds = bias.cv(x_screen.view());
+        let dc = bias.cv(x.view());
         let known_stand_in: Option<(f64, Array1<f64>)> = if shared_screen && !screen_bank.is_empty()
         {
-            let ds = bias.cv(x_screen.view());
+            let radius2 = cfg.merge_radius * cfg.merge_radius;
             screen_bank
                 .iter()
-                .map(|(cv, energy, coords)| {
-                    let d: f64 = ds
-                        .iter()
-                        .zip(cv.iter())
-                        .map(|(p, q)| (p - q) * (p - q))
-                        .sum::<f64>()
-                        .sqrt();
-                    (d, energy, coords)
+                .filter_map(|(cv, energy, coords)| {
+                    let mut d2 = 0.0;
+                    for (p, q) in ds.iter().zip(cv.iter()) {
+                        d2 += (p - q) * (p - q);
+                        if d2 >= radius2 {
+                            return None;
+                        }
+                    }
+                    Some((d2, energy, coords))
                 })
-                .filter(|(d, _, _)| *d < cfg.merge_radius)
                 .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(_, energy, coords)| (*energy, coords.clone()))
         } else {
             None
         };
-        let returning = cfg.return_screen && {
-            let ds = bias.cv(x_screen.view());
-            let dc = bias.cv(x.view());
-            let d: f64 = ds
-                .iter()
-                .zip(dc.iter())
-                .map(|(p, q)| (p - q) * (p - q))
-                .sum::<f64>()
-                .sqrt();
-            d < cfg.merge_radius
-        };
+        let drift: f64 = ds
+            .iter()
+            .zip(dc.iter())
+            .map(|(p, q)| (p - q) * (p - q))
+            .sum::<f64>()
+            .sqrt();
+        let returning = cfg.return_screen && drift < cfg.merge_radius;
         if returning {
             returned += 1;
         }
@@ -3824,17 +3916,7 @@ where
         // energy, how far the partial relaxation moved in descriptor space, and
         // their product. All of it is already computed above by the return
         // screen, so consulting the posterior costs no evaluations.
-        let feats = {
-            let ds = bias.cv(x_screen.view());
-            let dc = bias.cv(x.view());
-            let drift: f64 = ds
-                .iter()
-                .zip(dc.iter())
-                .map(|(p, q)| (p - q) * (p - q))
-                .sum::<f64>()
-                .sqrt();
-            Array1::from(vec![1.0, e_screen, drift, e_screen * drift])
-        };
+        let feats = Array1::from(vec![1.0, e_screen, drift, e_screen * drift]);
         let screened_this = if cfg.bayes_screen {
             // Refusing is what "screened" means here: the posterior says
             // finishing this relaxation is unlikely to improve on the
@@ -3849,6 +3931,8 @@ where
             // gradient was 0.31 where every other arm returns about 1e-6.
             e_screen >= ledger.best
                 && !screen.decide(feats.view(), ledger.best, rng.random::<f64>())
+        } else if cfg.calibrated_screen {
+            e_screen - descent.allowance() > ledger.best + cfg.screen_margin && !descent.audit()
         } else {
             // A rigid partial quench sits far above the incumbent by an
             // absolute margin copied from a reduced-unit cluster. Skipping
@@ -3876,11 +3960,15 @@ where
             }
             (e_screen, x_screen)
         } else {
-            let out = relax(ledger, x_screen.view(), cfg.relax_steps);
+            let mut out = relax(ledger, x_screen.view(), cfg.relax_steps);
+            if cfg.finish_improving {
+                out = finish_improving(ledger, relax, out, cfg.relax_steps);
+            }
             if cfg.bayes_screen {
                 // The answer to the question the posterior was asked.
                 screen.observe(feats.view(), out.0);
             }
+            descent.observe(e_screen - out.0);
             out
         };
         if !quench_is_sane(cfg, e_new, x_new.view()) {
@@ -5546,15 +5634,14 @@ where
                 history_seen = parked_history_seen.remove(rep);
                 let mut next = chains.remove(rep);
                 if next.pending_initial {
-                    if let (Some(h), Some(g)) = (history.as_deref_mut(), next.gradient.as_ref()) {
-                        if let Some(report) =
+                    if let (Some(h), Some(g)) = (history.as_deref_mut(), next.gradient.as_ref())
+                        && let Some(report) =
                             h.observe(next.energy, next.coordinates.view(), g.view())
-                        {
-                            h.mark_accepted(report.minimum);
-                            next.history_minimum = Some(report.minimum);
-                            let seen = history_seen.entry(report.minimum).or_insert(0);
-                            *seen = seen.saturating_add(1);
-                        }
+                    {
+                        h.mark_accepted(report.minimum);
+                        next.history_minimum = Some(report.minimum);
+                        let seen = history_seen.entry(report.minimum).or_insert(0);
+                        *seen = seen.saturating_add(1);
                     }
                     next.pending_initial = false;
                 }
@@ -6297,7 +6384,7 @@ mod tests {
         let rec = Config::recommended(75);
         let comm = Config::communicating(75);
         assert!(rec.depth_reward);
-        assert!(!rec.orbit_complete_on_new);
+        assert!(rec.orbit_complete_on_new);
         assert_eq!(rec.shared_visit_policy, SharedVisitPolicy::Tabu);
         assert!(!comm.depth_reward);
         assert!(comm.orbit_complete_on_new);
@@ -6310,13 +6397,13 @@ mod tests {
         assert!(matches!(rec.move_library, MoveLibrary::LeanBurst));
         assert_eq!(comm.surfaces.len(), 1);
         assert!(comm.surfaces[0].is_active());
-        assert!(rec.surfaces.is_empty());
+        assert_eq!(rec.surfaces, comm.surfaces);
         assert!(Config::communicating(98).surfaces.is_empty());
     }
 
     #[test]
     fn packing_surface_names_twin_and_orbit_together() {
-        let mut cfg = Config::recommended(13);
+        let mut cfg = Config::for_cluster(13);
         assert!(!cfg.packing_surface().orbit_on_new);
         assert!(!cfg.packing_surface().twin_as_move);
         cfg.orbit_complete_on_new = true;
@@ -7078,6 +7165,22 @@ mod tests {
     }
 
     #[test]
+    fn a_raised_stop_closes_the_ledger() {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut ledger = Ledger::with_stop(500, std::sync::Arc::clone(&stop));
+        assert!(ledger.charge());
+        assert_eq!(ledger.remaining(), 499);
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(!ledger.charge(), "a stopped ledger charged");
+        assert_eq!(ledger.remaining(), 0);
+        assert_eq!(ledger.spent(), 1);
+        let cfg = Config::for_cluster(6);
+        let mut relax = toy_relax;
+        let out = optimize(&cfg, &mut ledger, &mut relax, 0);
+        assert_eq!(out.charged, 1, "a stopped run spent its budget");
+    }
+
+    #[test]
     fn outcome_keeps_live_energy_and_accepted_trajectory_edges() {
         let cfg = Config::for_cluster(6);
         let mut ledger = Ledger::new(4000);
@@ -7168,9 +7271,45 @@ mod tests {
     }
 
     #[test]
+    fn screen_descent_credits_the_upper_decile_after_warmup() {
+        let mut descent = ScreenDescent::default();
+        for drop in 1..ScreenDescent::WARMUP {
+            descent.observe(drop as f64);
+            assert_eq!(descent.allowance(), 0.0, "credited before the warmup");
+        }
+        descent.observe(f64::NAN);
+        assert_eq!(descent.allowance(), 0.0, "a non-finite drop was counted");
+        for drop in ScreenDescent::WARMUP..=100 {
+            descent.observe(drop as f64);
+        }
+        assert_eq!(descent.allowance(), 90.0);
+        descent.observe(-5.0);
+        assert_eq!(descent.drops.back(), Some(&0.0), "a rise is no descent");
+        for _ in 0..ScreenDescent::WINDOW {
+            descent.observe(2.0);
+        }
+        assert_eq!(descent.drops.len(), ScreenDescent::WINDOW);
+        assert_eq!(descent.allowance(), 2.0, "the window forgets old drops");
+        assert!(Config::for_cluster(13).calibrated_screen);
+        assert!(Config::for_cluster(13).finish_improving);
+        assert!(Config::for_tip4p(4).calibrated_screen);
+    }
+
+    #[test]
     fn screening_skips_full_relaxation_but_completes_the_hop() {
         let mut cfg = Config::for_cluster(6);
         cfg.screen_margin = -1.0e12;
+        let mut ledger = Ledger::new(4000);
+        let mut relax = toy_relax;
+        let out = optimize(&cfg, &mut ledger, &mut relax, 1);
+        assert!(out.hops > 0, "no hop completed");
+        assert_eq!(
+            out.screened_out,
+            out.hops - out.hops / ScreenDescent::AUDIT,
+            "the calibrated screen must audit every eighth refusal"
+        );
+
+        cfg.calibrated_screen = false;
         let mut ledger = Ledger::new(4000);
         let mut relaxation_steps = Vec::new();
         let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, steps: usize| {

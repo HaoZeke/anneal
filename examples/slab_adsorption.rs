@@ -9,10 +9,33 @@ use anneal_core::methods::cluster_hopping::{Config, Ledger, SoapProposalMode, co
 use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
 use common::efficiency::{apply_two_phase, bank_label, report_eval_wall, report_trace};
 use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
-use common::slab::{
-    Mobile, adsorbate_groups, hop_atoms, place_adsorbates, read_system, search_arm, symbol,
-};
+use common::slab::{Mobile, adsorbate_groups, place_adsorbates, read_system};
 use std::io::Write;
+
+fn hop_atoms(free: &[usize]) -> Vec<usize> {
+    free.to_vec()
+}
+
+fn symbol(z: u32) -> &'static str {
+    match z {
+        1 => "H",
+        6 => "C",
+        7 => "N",
+        8 => "O",
+        29 => "Cu",
+        79 => "Au",
+        _ => "X",
+    }
+}
+
+fn search_arm() -> &'static str {
+    let from_env = std::env::var("ANNEAL_SLAB_ARM").ok();
+    match from_env.as_deref() {
+        Some("plain") => "plain",
+        Some("recommended") | None => "recommended",
+        Some(value) => panic!("ANNEAL_SLAB_ARM must be plain or recommended; got {value}"),
+    }
+}
 
 fn soap_mode_from_env() -> SoapProposalMode {
     match std::env::var("ANNEAL_SOAP_MODE").as_deref() {
@@ -190,7 +213,9 @@ fn run_slab_ensembles(
     #[cfg(feature = "ira")]
     use anneal_core::methods::minima_hopping::SerializedWitness;
     use anneal_core::pes_exploration::StructureContext;
-    use common::ensemble_report::{config_from_env, print_header, run_seeds, sorted_pairs_witness};
+    #[cfg(not(feature = "ira"))]
+    use common::ensemble_report::sorted_pairs_witness;
+    use common::ensemble_report::{config_from_env, print_header, run_seeds};
     use eindir_core::gradient::DifferentiableObjective;
     use ndarray::{Array1, ArrayView1};
     use rand::Rng;

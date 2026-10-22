@@ -765,7 +765,6 @@ mod run {
         ledger: CooperativeLedger,
         replicas: BTreeMap<u32, ReplicaState>,
         events: Vec<TraceEvent>,
-        on_published_prize: bool,
         core_class: CoreClassTable,
     }
 
@@ -820,7 +819,6 @@ mod run {
                 ledger,
                 replicas,
                 events: Vec::new(),
-                on_published_prize: false,
                 core_class: CoreClassTable::default(),
             })
         }

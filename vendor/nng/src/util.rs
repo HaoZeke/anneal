@@ -147,23 +147,24 @@ macro_rules! expose_options
 
 /// A catch-all function for unsupported options operations.
 #[allow(clippy::unimplemented)]
-pub unsafe extern "C" fn fake_opt<H, T>(_: H, _: *const c_char, _: T) -> c_int
-{
+pub unsafe extern "C" fn fake_opt<H, T>(_: H, _: *const c_char, _: T) -> c_int {
 	unimplemented!("{} does not support the option operation on {}", stringify!(H), stringify!(T))
 }
 
 /// A catch-all function for unsupported generic options operations.
 #[allow(clippy::unimplemented)]
-pub unsafe extern "C" fn fake_genopt<H>(_: H, _: *const c_char, _: *const c_void, _: usize)
--> c_int
-{
+pub unsafe extern "C" fn fake_genopt<H>(
+	_: H,
+	_: *const c_char,
+	_: *const c_void,
+	_: usize,
+) -> c_int {
 	unimplemented!("{} does not support the generic option operation", stringify!(H))
 }
 
 /// Converts a Rust `Duration` into an `nng_duration`.
 #[allow(clippy::cast_possible_truncation)]
-pub fn duration_to_nng(dur: Option<Duration>) -> nng_sys::nng_duration
-{
+pub fn duration_to_nng(dur: Option<Duration>) -> nng_sys::nng_duration {
 	// The subsecond milliseconds is guaranteed to be less than 1000, which
 	// means converting from `u32` to `i32` is safe. The only other
 	// potential issue is converting the `u64` of seconds to an `i32`.
@@ -181,15 +182,12 @@ pub fn duration_to_nng(dur: Option<Duration>) -> nng_sys::nng_duration
 }
 
 /// Converts an `nng_duration` into a Rust `Duration`.
-pub fn nng_to_duration(ms: nng_sys::nng_duration) -> Option<Duration>
-{
+pub fn nng_to_duration(ms: nng_sys::nng_duration) -> Option<Duration> {
 	if ms == nng_sys::NNG_DURATION_INFINITE {
 		None
-	}
-	else if ms >= 0 {
+	} else if ms >= 0 {
 		Some(Duration::from_millis(ms as u64))
-	}
-	else {
+	} else {
 		panic!("Unexpected value for `nng_duration` ({})", ms)
 	}
 }
@@ -197,12 +195,10 @@ pub fn nng_to_duration(ms: nng_sys::nng_duration) -> Option<Duration>
 /// Checks an NNG return code and validates the pointer, returning a
 /// `NonNull`.
 #[inline]
-pub fn validate_ptr<T>(rv: c_int, ptr: *mut T) -> Result<NonNull<T>>
-{
+pub fn validate_ptr<T>(rv: c_int, ptr: *mut T) -> Result<NonNull<T>> {
 	if let Some(e) = std::num::NonZeroU32::new(rv as u32) {
 		Err(Error::from(e))
-	}
-	else {
+	} else {
 		Ok(NonNull::new(ptr).expect("NNG returned a null pointer from a successful function"))
 	}
 }
@@ -212,13 +208,10 @@ pub fn validate_ptr<T>(rv: c_int, ptr: *mut T) -> Result<NonNull<T>>
 /// This is meant to handle the fact that `UnwindSafe` is a little bit broken in
 /// Rust and catching an unwind does not necessarily mean that the things should
 /// be exception-safe. See #6 for a few examples of why this is fine.
-pub fn abort_unwind<F: FnOnce() -> R, R>(f: F) -> R
-{
+pub fn abort_unwind<F: FnOnce() -> R, R>(f: F) -> R {
 	struct Guard;
-	impl Drop for Guard
-	{
-		fn drop(&mut self)
-		{
+	impl Drop for Guard {
+		fn drop(&mut self) {
 			if std::thread::panicking() {
 				std::process::abort();
 			}

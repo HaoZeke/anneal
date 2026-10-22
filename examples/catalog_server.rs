@@ -14,7 +14,8 @@
 //! force validation through that exact handle.
 
 #[cfg(feature = "rgpot-ex")]
-mod common;
+#[path = "common/rgpot_eindir.rs"]
+mod rgpot_eindir;
 
 use anneal_core::catalog::lj::{
     CALIBRATION_IRA_TOLERANCE, descriptor_space, fresh_evaluation, reference_coordinates,
@@ -174,7 +175,7 @@ fn run_gfn2_water_coordinator() -> Result<(), Box<dyn std::error::Error>> {
     let evaluate: FreshEvaluator = {
         #[cfg(feature = "rgpot-ex")]
         {
-            use common::rgpot_eindir::RgpotObjective;
+            use rgpot_eindir::RgpotObjective;
             use std::sync::{Arc, Mutex};
 
             let atomic_numbers = species
