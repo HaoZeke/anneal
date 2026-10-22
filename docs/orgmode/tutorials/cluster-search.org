@@ -39,12 +39,72 @@ cfg = Config.recommended(38)
 out = cluster_search(lj, lj_g, cfg.n_points, 4000, seed=0, recommended=True)
 print(out["hops"], round(out["best_energy"], 3), len(out["best"]))
 # derived=True selects Config.derived(n). ras=True is residual archive search.
+# communicating=True selects Config.communicating(n).
+# species and sigmas add a diameter-aware swap. rigid=True is a 6N chart.
+#+end_src
+
+A binary cluster passes one species label and one diameter per atom.
+=sigmas= must be the same length as =species=. =target= ends the search
+when a recorded energy reaches it. A wide diameter ratio also draws one
+unlike pair on a side generator and keeps the exchange only when the
+quench is downhill. The microcanonical step and the inner-outer
+exchange still run.
+
+#+begin_src python
+binary = cluster_search(
+    lj, lj_g, 13, 6000, seed=0, recommended=True,
+    species=[1] * 6 + [2] * 7,
+    sigmas=[1.0] * 6 + [1.3] * 7,
+)
+#+end_src
+
+A rigid chart uses centre and Rodrigues coordinates. =n= is the number of
+bodies. =layout="block"= stores every centre, then every rotation.
+=layout="interleaved"= is centre then angle-axis per body, and the
+rotations are negated at the boundary. The orientation step turns every
+body and leaves the centres where they are. On a chart of more than ten
+bodies the acceptance factor stays at 4 and the orientation amplitude
+is scaled toward an acceptance ratio of one half. A ten-body chart may
+still climb to 24 and does not scale the amplitude. The rigid quench
+is the same L-BFGS descent as a Cartesian quench, and it returns when
+the energy crosses the run target. A rigid record accepts the
+root-mean-square force. After 1000 hops with no new lowest minimum
+the walker returns to that minimum when it lies within one hopping
+temperature of the run target. Farther above the target the walker
+is drawn again and quenched, and the lowest minimum is kept.
+Preset temperature, screen length, relax length, and record gradient
+are unchanged.
+
+#+begin_src python
+water = cluster_search(
+    energy, gradient, 10, 20000, seed=0, recommended=True,
+    rigid=True, layout="block", target=-391.0216842125,
+)
+#+end_src
+
+A caller body frame is a different chart. =water_sites= is the O, H, H
+positions of one rigid water, and =n= counts molecules. The state is
+centres then exponential-map rotations. The preset is
+=Config.communicating_tip4p=, =Config.recommended_tip4p=, or
+=Config.for_tip4p=. It needs a start and does not combine with
+=rigid=, =species=, =sigmas=, =ras=, =derived=, or =length_scale=.
+
+#+begin_src python
+sites = np.array(
+    [[0.0, 0.0, -0.0656], [0.0, 0.757, 0.5205], [0.0, -0.757, 0.5205]]
+)
+start = np.concatenate([np.zeros(3 * 4), np.full(3 * 4, 0.1)])
+placed = cluster_search(
+    energy, gradient, 4, 20000, seed=0, recommended=True,
+    start=start, water_sites=sites,
+)
 #+end_src
 
 A design box is [[file:box-search.org][box search]], not this page.
 
 A force-call cap or a target hit should raise =BaseException= rather than
 =Exception=. The search then returns at once with the best geometry found.
+A binary chart, a rigid chart, and a water-site chart do the same.
 
 * Direct quantum-chemistry profiles
 

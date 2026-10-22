@@ -3227,8 +3227,8 @@ fn cluster_gradient_scale(
     }
 
     let step = f64::EPSILON.cbrt() * (1.0 + probe[index].abs());
-    let mut plus = probe.clone();
-    let mut minus = probe;
+    let mut plus = probe.to_vec();
+    let mut minus = probe.to_vec();
     plus[index] += step;
     minus[index] -= step;
     let Some(plus_value) = call(obj_fn, plus.to_vec())? else {
@@ -3363,6 +3363,105 @@ fn cluster_archive_search(
     ))
 }
 
+struct InterleavedChart<'a> {
+    inner: &'a CallableDiffObjective,
+    n_molecules: usize,
+    bounds: Bounds<f64>,
+}
+
+impl InterleavedChart<'_> {
+    fn to_user(&self, block: ArrayView1<f64>) -> Array1<f64> {
+        let slice = block.as_slice().unwrap_or(&[]);
+        Array1::from_vec(crate::potentials::interleaved_gmin_from_block(slice))
+    }
+
+    fn to_block_gradient(&self, user: ArrayView1<f64>) -> Array1<f64> {
+        let n = self.n_molecules;
+        let mut block = Array1::zeros(6 * n);
+        if user.len() != 6 * n {
+            return block;
+        }
+        for molecule in 0..n {
+            for k in 0..3 {
+                block[3 * molecule + k] = user[6 * molecule + k];
+                block[3 * n + 3 * molecule + k] = -user[6 * molecule + 3 + k];
+            }
+        }
+        block
+    }
+}
+
+impl Objective<f64> for InterleavedChart<'_> {
+    fn dim(&self) -> usize {
+        6 * self.n_molecules
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        self.inner.eval(self.to_user(x).view())
+    }
+}
+
+impl eindir_core::gradient::Gradient<f64> for InterleavedChart<'_> {
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        let user = self.inner.grad(self.to_user(x).view());
+        self.to_block_gradient(user.view())
+    }
+
+    fn dim(&self) -> usize {
+        6 * self.n_molecules
+    }
+}
+
+impl eindir_core::gradient::DifferentiableObjective<f64> for InterleavedChart<'_> {
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let user = self.to_user(x);
+        let (energy, gradient) = eindir_core::gradient::DifferentiableObjective::value_and_gradient(
+            self.inner,
+            user.view(),
+        );
+        (energy, self.to_block_gradient(gradient.view()))
+    }
+}
+
+fn rigid_probe(
+    cfg: &crate::methods::cluster_hopping::Config,
+    seed: u64,
+    interleaved: bool,
+) -> Vec<f64> {
+    use crate::methods::cluster_hopping::random_cluster_in_radius;
+    use rand::SeedableRng;
+
+    let n = cfg.n_points;
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x6a09_e667_f3bc_c909);
+    let centres = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng);
+    let mut block = vec![0.0; 6 * n];
+    if centres.len() == 3 * n {
+        if let Some(slice) = centres.as_slice() {
+            block[..3 * n].copy_from_slice(slice);
+        }
+    } else {
+        for i in 0..n {
+            let angle = i as f64 * 2.399963229728653;
+            let radius = cfg.container.max(1.0) * ((i as f64 + 0.5) / n as f64).cbrt();
+            block[3 * i] = radius * angle.cos();
+            block[3 * i + 1] = radius * angle.sin();
+        }
+    }
+    for i in 0..n {
+        block[3 * n + 3 * i] = 0.25;
+        block[3 * n + 3 * i + 1] = -0.15;
+    }
+    if interleaved {
+        crate::potentials::interleaved_gmin_from_block(&block)
+    } else {
+        block
+    }
+}
+
 /// Runs the measured cluster-search layer on a user energy and gradient.
 ///
 /// `recommended=True` uses `Config.recommended(n)`; otherwise
@@ -3377,7 +3476,8 @@ fn cluster_archive_search(
 /// Args:
 ///   obj_fn: Python callable `f(numpy.ndarray) -> float`.
 ///   grad_fn: Python gradient or force callable `g(numpy.ndarray) -> numpy.ndarray`.
-///   n: number of points; the state is a flat `3n` vector.
+///   n: number of points. A Cartesian state is `3n`. `rigid=True` or
+///     `water_sites` is `n` bodies and a `6n` state.
 ///   budget: charged evaluations.
 ///   seed: RNG seed.
 ///   recommended: measured stack when true, Wales-Doye baseline when false.
@@ -3387,10 +3487,30 @@ fn cluster_archive_search(
 ///     `derived` when true. Not `Config.recommended`.
 ///   ras: residual archive search on the recommended preset. Keyword-only;
 ///     default false. Does not change `Config.recommended`.
-///   start: optional flat `3n` start, `6n` with `water_sites`. When set, hops
-///     use [`search_from`] instead of seeding a random compact cluster.
+///   start: optional flat start. Cartesian length is `3n`. A rigid or water
+///     start is `6n`, block Rodrigues unless `layout` is `interleaved`.
 ///   length_scale: optional physical length. When set with the recommended
 ///     preset, hops use `with_scales` instead of the reduced LJ container.
+///     Ignored once `species` or `rigid` selects a chart: those keep the
+///     stock preset and adapt geometry afterwards. Excluded by `water_sites`.
+///   species: optional label per point. Two or more labels add a swap move.
+///     A wide diameter ratio also tries one downhill unlike-pair exchange
+///     beside the escape.
+///   sigmas: optional Lennard-Jones diameter per point, same length as
+///     `species`. Large diameters are swapped out of the inner shell.
+///   rigid: when true, `n` is the number of rigid bodies and the hop state
+///     is centres followed by Rodrigues rotations. More than ten bodies
+///     hold the acceptance factor at 4 and scale the orientation amplitude
+///     toward an acceptance ratio of one half. Ten or fewer do not. The
+///     quench is the same L-BFGS descent, and a rigid record accepts the
+///     root-mean-square force. After 1000 hops with no new lowest
+///     minimum the walker returns to that minimum when it lies within
+///     one hopping temperature of the run target. Farther above the
+///     target the walker is drawn again, and the lowest minimum is kept.
+///   layout: `block` (centres, then rotations) or `interleaved` (GMIN
+///     centre and angle-axis per body). Interleaved rotations are negated
+///     at the boundary because that angle-axis map is the opposite sense.
+///   target: stop once a recorded energy is at or below this value.
 ///   water_sites: optional flat 9-vector of the O, H, H positions of one
 ///     rigid water in its body frame, in angstrom, about the point its
 ///     rotation turns about. When set, `n` counts molecules and the state is
@@ -3398,14 +3518,33 @@ fn cluster_archive_search(
 ///     the body frame actively (Rodrigues). The presets become
 ///     `Config.communicating_tip4p(n)`, `Config.recommended_tip4p(n)`, or
 ///     `Config.for_tip4p(n)` when both are false, with these sites as the
-///     rigid geometry. Needs `start`; excludes `ras`, `derived`, and
-///     `length_scale`.
+///     rigid geometry. Needs `start`. Excludes `ras`, `derived`,
+///     `length_scale`, `rigid`, `species`, `sigmas`, and a non-block layout.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
 /// kept, and the exception is raised from this call.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, grad_fn, n, budget, seed = 0, recommended = true, derived = false, communicating = false, *, ras = false, start = None, length_scale = None, water_sites = None))]
+#[pyo3(signature = (
+    obj_fn,
+    grad_fn,
+    n,
+    budget,
+    seed = 0,
+    recommended = true,
+    derived = false,
+    communicating = false,
+    *,
+    ras = false,
+    start = None,
+    length_scale = None,
+    species = None,
+    sigmas = None,
+    rigid = false,
+    layout = "block",
+    target = None,
+    water_sites = None,
+))]
 fn cluster_search(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -3419,12 +3558,46 @@ fn cluster_search(
     ras: bool,
     start: Option<PyReadonlyArray1<'_, f64>>,
     length_scale: Option<f64>,
+    species: Option<Vec<u32>>,
+    sigmas: Option<Vec<f64>>,
+    rigid: bool,
+    layout: &str,
+    target: Option<f64>,
     water_sites: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::cluster_hopping::Config;
 
     if n < 2 {
         return Err(PyValueError::new_err("n must be at least 2"));
+    }
+    if budget < 1 {
+        return Err(PyValueError::new_err("budget must be positive"));
+    }
+    if let Some(scale) = length_scale
+        && (!scale.is_finite() || scale <= 0.0)
+    {
+        return Err(PyValueError::new_err(
+            "length_scale must be finite and positive",
+        ));
+    }
+    if rigid && species.is_some() {
+        return Err(PyValueError::new_err(
+            "rigid bodies and species swaps are different charts",
+        ));
+    }
+    if sigmas.is_some() && species.is_none() {
+        return Err(PyValueError::new_err("sigmas require species"));
+    }
+    if layout != "block" && layout != "interleaved" {
+        return Err(PyValueError::new_err("layout must be block or interleaved"));
+    }
+    if !rigid && layout != "block" {
+        return Err(PyValueError::new_err(
+            "interleaved layout is the rigid-body chart",
+        ));
+    }
+    if ras && (rigid || species.is_some()) {
+        return Err(PyValueError::new_err("ras is the cartesian archive search"));
     }
     let water = match water_sites {
         None => None,
@@ -3441,6 +3614,11 @@ fn cluster_search(
                     "water_sites excludes ras, derived and length_scale",
                 ));
             }
+            if rigid || species.is_some() || sigmas.is_some() || layout != "block" {
+                return Err(PyValueError::new_err(
+                    "water_sites excludes rigid, species, sigmas and a non-block layout",
+                ));
+            }
             if start.is_none() {
                 return Err(PyValueError::new_err("water_sites needs a start"));
             }
@@ -3451,7 +3629,9 @@ fn cluster_search(
             )
         }
     };
-    let dim = if water.is_some() { 6 * n } else { 3 * n };
+    let interleaved = rigid && layout == "interleaved";
+    let rigid_chart = water.is_some() || rigid;
+    let dim = if rigid_chart { 6 * n } else { 3 * n };
     let start = match start {
         Some(start) => {
             let sl = start.as_slice()?;
@@ -3459,7 +3639,7 @@ fn cluster_search(
                 return Err(PyValueError::new_err(format!(
                     "start length {} must be {} = {}",
                     sl.len(),
-                    if water.is_some() { "6*n" } else { "3*n" },
+                    if rigid_chart { "6*n" } else { "3*n" },
                     dim
                 )));
             }
@@ -3467,18 +3647,10 @@ fn cluster_search(
         }
         None => None,
     };
-    if budget < 1 {
-        return Err(PyValueError::new_err("budget must be positive"));
-    }
-    if let Some(scale) = length_scale
-        && (!scale.is_finite() || scale <= 0.0)
-    {
-        return Err(PyValueError::new_err(
-            "length_scale must be finite and positive",
-        ));
-    }
     let scale = length_scale.unwrap_or(1.0);
-    let cfg = if let Some(geometry) = water {
+    let stock = species.is_some() || rigid;
+    let has_water = water.is_some();
+    let mut cfg = if let Some(geometry) = water {
         let mut cfg = if communicating {
             Config::communicating_tip4p(n)
         } else if recommended {
@@ -3495,24 +3667,61 @@ fn cluster_search(
     } else if derived {
         Config::derived(n)
     } else if recommended {
-        if length_scale.is_some() {
+        if length_scale.is_some() && !stock {
             recommended_with_scale(n, scale)
         } else {
             Config::recommended(n)
         }
-    } else if length_scale.is_some() {
+    } else if length_scale.is_some() && !stock {
         Config::with_scales(n, scale, 1.0)
     } else {
         Config::for_cluster(n)
     };
+    if !has_water && stock {
+        cfg = if communicating {
+            Config::communicating(n)
+        } else if derived {
+            Config::derived(n)
+        } else if recommended {
+            Config::recommended(n)
+        } else {
+            Config::for_cluster(n)
+        };
+        if rigid {
+            cfg = cfg.with_rigid_bodies(crate::potentials::gmin_water_geometry());
+        }
+        if let Some(labels) = species {
+            cfg = cfg.with_species(labels, sigmas);
+        }
+    }
     let errors: std::sync::Arc<CallbackErrors> = std::sync::Arc::default();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let mut ledger =
         crate::methods::cluster_hopping::Ledger::with_stop(budget, errors.abort_flag());
-    let rigid = cfg.rigid_body_geometry.is_some();
+    if let Some(limit) = target {
+        if !limit.is_finite() {
+            return Err(PyValueError::new_err("target must be finite"));
+        }
+        ledger.stop_below(limit);
+    }
     let gradient_scale = if budget >= 4 {
-        let probe_at = start.as_ref().filter(|_| rigid).map(|s| s.view());
-        let scale = cluster_gradient_scale(py, &obj_fn, &grad_fn, &cfg, seed, probe_at, &errors)?;
+        let probe_owned = if rigid_chart {
+            Some(match start.as_ref() {
+                Some(start) => start.clone(),
+                None => Array1::from_vec(rigid_probe(&cfg, seed, interleaved)),
+            })
+        } else {
+            None
+        };
+        let scale = cluster_gradient_scale(
+            py,
+            &obj_fn,
+            &grad_fn,
+            &cfg,
+            seed,
+            probe_owned.as_ref().map(|probe| probe.view()),
+            &errors,
+        )?;
         for _ in 0..3 {
             assert!(ledger.charge());
         }
@@ -3520,10 +3729,20 @@ fn cluster_search(
     } else {
         1.0
     };
+    let extent = cfg.container.max(1.0) * 4.0;
+    let bounds = if rigid {
+        Bounds::new(
+            Array1::from_elem(dim, -extent),
+            Array1::from_elem(dim, extent),
+            0.0,
+        )
+    } else {
+        cluster_bounds(n, dim, scale)
+    };
     let obj = CallableDiffObjective {
         fn_: obj_fn,
         grad_fn,
-        bounds: cluster_bounds(n, dim, scale),
+        bounds,
         gradient_scale,
         errors: std::sync::Arc::clone(&errors),
     };
@@ -3532,16 +3751,41 @@ fn cluster_search(
         errors.finish(py)?;
         return out;
     }
-    let (out, _) = if let Some(start) = start {
+    let (out, _) = if interleaved {
+        let chart = InterleavedChart {
+            inner: &obj,
+            n_molecules: n,
+            bounds: Bounds::new(
+                Array1::from_elem(dim, -extent),
+                Array1::from_elem(dim, extent),
+                0.0,
+            ),
+        };
+        let started = match start.as_ref() {
+            Some(start) => Array1::from_vec(crate::potentials::block_from_interleaved_gmin(
+                start.as_slice().unwrap_or(&[]),
+            )),
+            None => Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false)),
+        };
+        crate::methods::cluster_search::search_from(&chart, &cfg, &mut ledger, started.view(), seed)
+    } else if let Some(start) = start {
         crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, start.view(), seed)
+    } else if rigid {
+        let started = Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false));
+        crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, started.view(), seed)
     } else {
         crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
     };
     errors.finish(py)?;
-    let best = out
+    let best_block = out
         .best_state
-        .map(|a| a.to_vec())
+        .map(|value| value.to_vec())
         .unwrap_or_else(|| vec![0.0; dim]);
+    let best = if interleaved {
+        crate::potentials::interleaved_gmin_from_block(&best_block)
+    } else {
+        best_block
+    };
     let dict = PyDict::new(py);
     dict.set_item("best", PyArray1::from_vec(py, best))?;
     dict.set_item("best_energy", out.best)?;
