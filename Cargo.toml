@@ -1,3 +1,13 @@
+[workspace]
+# The root package is the member. `members = ["."]` is a prefix of every
+# path under the root, which would mark the vendored crates as explicit
+# members and defeat `exclude`. Edition 2024 already selects the resolver;
+# an explicit `resolver = "2"` would change it.
+# Vendored path dependencies live in this tree. Cargo would otherwise adopt
+# them as workspace members, and `cargo fmt --all` would rewrite them with
+# stable rustfmt.
+exclude = ["vendor/nng", "vendor/nng-sys", "vendor/metatensor-sys"]
+
 [package]
 name = "anneal-core"
 version = "0.11.1"
