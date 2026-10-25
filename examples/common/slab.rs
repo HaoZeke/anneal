@@ -2,8 +2,9 @@
 //! fixed substrate, wrap frozen substrate gradients. What moves is what the
 //! fixture leaves free, and what is substrate is what it fixes. Species
 //! enters only the bond test. A rigid group is a connected component of
-//! the free atoms under covalent radii, except that two atoms whose Cordero
-//! radii are both at least [`METAL_RADIUS_A`] stay separate.
+//! the free atoms under a species-pair cutoff. Light pairs use 1.25 times
+//! the Cordero sum. Metal pairs use a table: Cu-Cu is 2.36 angstrom, and
+//! every other metal pair uses the unscaled Cordero sum.
 
 #![allow(dead_code)]
 
@@ -21,12 +22,20 @@ use std::path::Path;
 /// Angstrom.
 const GROUP_MIN_SEP: f64 = 2.5;
 /// Two free atoms closer than this multiple of the sum of their covalent
-/// radii belong to one rigid group.
+/// radii belong to one rigid group when at least one of them is light.
 const BOND_SCALE: f64 = 1.25;
-/// Cordero radii at or above this are the metal entries (Cu 1.32, Pt and
-/// Au 1.36). Two of them are never one hop body. H is 0.31, so H2 still
-/// bonds. One scale cannot both keep H2 at 0.74 Å (needs a scale above
-/// 0.74/0.62) and split a Cu pair at 2.5 Å (needs a scale below 2.5/2.64).
+/// Cu-Cu pair cutoff in angstrom. Ram, Jarman and Bernath measured
+/// re = 2.21927(3) angstrom for Cu2 X 1Σg+ (J. Mol. Spectrosc. 156,
+/// 468-486, 1992, doi:10.1016/0022-2852(92)90247-L). 2.36 sits above
+/// that bond and below the 2.5 angstrom Cu contact in the substrate
+/// fixture, which is a surface neighbour and not a molecule. The
+/// unscaled Cordero sum for Cu is 2.64 angstrom, so that sum would
+/// still fuse the fixture.
+const CU_CU_CUTOFF_A: f64 = 2.36;
+const CU_Z: u32 = 29;
+/// Cordero radius at or above this is a metal entry (Cu 1.32, Pt and Au
+/// 1.36). H is 0.31. A rule that never bonds two such atoms would split
+/// Cu2 at 2.2 angstrom, so metal pairs use [`pair_cutoff`] instead.
 const METAL_RADIUS_A: f64 = 1.0;
 
 pub fn read_system(path: &str) -> (Array1<f64>, Vec<u32>, Vec<usize>, [f64; 9]) {
@@ -62,29 +71,43 @@ pub fn substrate_top(base: &Array1<f64>, free: &[usize]) -> f64 {
         .fold(f64::NEG_INFINITY, f64::max)
 }
 
-/// Rigid groups of the free atoms: connected components under a bond
-/// criterion of [`BOND_SCALE`] times the sum of covalent radii, so a
-/// molecule hops as one body and separated atoms hop on their own. Two
-/// atoms with Cordero radius at least [`METAL_RADIUS_A`] are not bonded
-/// here. A metal nearest neighbour sits inside that cutoff and is not a
-/// molecule.
+/// Distance below which two atoms are one hop body.
+///
+/// Cu-Cu is [`CU_CU_CUTOFF_A`]. Any other pair of Cordero radii at least
+/// [`METAL_RADIUS_A`] uses the unscaled sum, so a dimer shorter than that
+/// sum stays one body and a longer lattice neighbour stays separate.
+/// Every remaining pair uses [`BOND_SCALE`] times the sum, which bonds H2
+/// at 0.74 angstrom (cutoff 0.775 angstrom).
+fn pair_cutoff(za: u32, zb: u32, ra: f64, rb: f64) -> f64 {
+    let (z1, z2) = if za <= zb { (za, zb) } else { (zb, za) };
+    if z1 == CU_Z && z2 == CU_Z {
+        return CU_CU_CUTOFF_A;
+    }
+    if ra >= METAL_RADIUS_A && rb >= METAL_RADIUS_A {
+        return ra + rb;
+    }
+    BOND_SCALE * (ra + rb)
+}
+
+/// Rigid groups of the free atoms: connected components under
+/// [`pair_cutoff`], so a molecule hops as one body and separated atoms
+/// hop on their own.
 pub fn adsorbate_groups(base: &Array1<f64>, species: &[u32], free: &[usize]) -> Vec<Vec<usize>> {
     let n = species.len();
     if free.is_empty() || free.len() == n {
         return vec![(0..n).collect()];
     }
     let bonded = |a: usize, b: usize| {
-        let ra = covalent_radius(species[a]);
-        let rb = covalent_radius(species[b]);
-        if ra >= METAL_RADIUS_A && rb >= METAL_RADIUS_A {
-            return false;
-        }
+        let za = species[a];
+        let zb = species[b];
+        let ra = covalent_radius(za);
+        let rb = covalent_radius(zb);
         let mut d2 = 0.0;
         for k in 0..3 {
             let d = base[3 * a + k] - base[3 * b + k];
             d2 += d * d;
         }
-        let cut = BOND_SCALE * (ra + rb);
+        let cut = pair_cutoff(za, zb, ra, rb);
         cut > 0.0 && d2 < cut * cut
     };
     let mut assigned = vec![false; free.len()];
@@ -208,7 +231,10 @@ impl<O: Objective<f64> + Gradient<f64>> DifferentiableObjective<f64> for Mobile<
 
 #[cfg(test)]
 mod tests {
-    use super::{BOND_SCALE, METAL_RADIUS_A, adsorbate_groups, place_adsorbates, substrate_top};
+    use super::{
+        BOND_SCALE, CU_CU_CUTOFF_A, METAL_RADIUS_A, adsorbate_groups, pair_cutoff,
+        place_adsorbates, substrate_top,
+    };
     use anneal_core::methods::cluster_hopping::covalent_radius;
     use ndarray::Array1;
 
@@ -264,15 +290,22 @@ mod tests {
         assert_eq!(platinum, 1.36);
         assert!(cu >= METAL_RADIUS_A && platinum >= METAL_RADIUS_A);
         assert!(hydrogen < METAL_RADIUS_A);
-        let cu_cutoff = BOND_SCALE * (cu + cu);
+        let cu_scaled = BOND_SCALE * (cu + cu);
         let h2_cutoff = BOND_SCALE * (hydrogen + hydrogen);
-        let pt_cutoff = BOND_SCALE * (platinum + platinum);
-        // The recorded fixture puts free Cu 2.5 A apart, inside 3.30 A.
-        assert!(2.5 < cu_cutoff);
+        let pt_sum = platinum + platinum;
+        // The recorded fixture puts free Cu 2.5 A apart, inside the scaled
+        // covalent cutoff 3.30 A and inside the Cordero sum 2.64 A.
+        assert!(2.5 < cu_scaled);
+        assert!(2.5 < cu + cu);
+        assert!(2.5 > CU_CU_CUTOFF_A);
+        assert_eq!(pair_cutoff(29, 29, cu, cu), CU_CU_CUTOFF_A);
         // H2 at 0.74 A is inside 0.775 A, so the molecule still bonds.
         assert!(0.74 < h2_cutoff);
-        // Pt nearest neighbours at 2.77 A are inside 3.40 A.
-        assert!(2.77 < pt_cutoff);
+        // Pt nearest neighbours at 2.77 A are inside the scaled cutoff
+        // 3.40 A and outside the unscaled Cordero sum 2.72 A.
+        assert!(2.77 < BOND_SCALE * pt_sum);
+        assert!(2.77 > pt_sum);
+        assert!((pair_cutoff(78, 78, platinum, platinum) - pt_sum).abs() < 1e-12);
         // No single scale both bonds H2 and splits the Cu pair.
         assert!(0.74 / (hydrogen + hydrogen) > 2.5 / (cu + cu));
         let (base, species, free) = h2_on_two_fixed();
@@ -293,6 +326,19 @@ mod tests {
             adsorbate_groups(&base, &species, &free),
             vec![vec![1], vec![2]]
         );
+    }
+
+    #[test]
+    fn a_copper_dimer_at_2_2_angstrom_is_one_group() {
+        // One fixed Cu keeps the early return from fusing the whole cell.
+        // The two free atoms are Cu2 at 2.2 A, below re = 2.21927(3) A
+        // only by the test's round number, and below the 2.36 A cutoff.
+        let base = Array1::from(vec![0.0, 0.0, 0.0, 2.2, 0.0, 0.0, 4.4, 0.0, 0.0]);
+        let species = vec![29, 29, 29];
+        let free = vec![1, 2];
+        assert!(2.2 < CU_CU_CUTOFF_A);
+        assert!(covalent_radius(29) >= METAL_RADIUS_A);
+        assert_eq!(adsorbate_groups(&base, &species, &free), vec![vec![1, 2]]);
     }
 
     #[test]

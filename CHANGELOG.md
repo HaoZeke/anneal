@@ -231,12 +231,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   The ledger redraws a start, up to ``DEFAULT_START_ATTEMPTS`` (8), and
   records each redraw. A finite first quench is unchanged. A caller stop
   during that opening quench returns the outcome recorded so far.
-- Free metal atoms on a slab stay their own hop groups. ``adsorbate_groups``
-  bonds light atoms at 1.25 times the Cordero sum, and it does not bond
-  two atoms whose radii are both at least 1 angstrom. Cu at 2.5 angstrom
-  and Pt at 2.77 angstrom sit inside that covalent cutoff, so the old
-  rule fused them. H2 at 0.74 angstrom still bonds. No single scale does
-  both.
+- Slab hop groups use a species-pair cutoff. Cu-Cu is 2.36 angstrom,
+  above the Cu2 bond length 2.21927(3) angstrom (Ram, Jarman and
+  Bernath, J. Mol. Spectrosc. 156, 468, 1992,
+  doi:10.1016/0022-2852(92)90247-L) and below the 2.5 angstrom fixture
+  contact. Other metal pairs use the unscaled Cordero sum, so Pt at
+  2.77 angstrom stays separate and a shorter metal dimer stays one
+  body. Light pairs stay at 1.25 times the Cordero sum, which bonds H2.
+  A rule that never bonds two radii of at least 1 angstrom splits that
+  Cu2 bond, so it is not used.
 - An in-process census cohort dials neighbours only after every publisher
   is bound. A dial that landed on a port reservation completed the TCP
   handshake there and waited for a protocol header the reservation never
