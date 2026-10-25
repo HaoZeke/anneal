@@ -35,12 +35,24 @@ The label is species-aware IRA (`match_shapes_typed`, breadth 1.8),
 the same function for a search geometry and a geometry under
 `WATER_GOFEE_DIR`. The Kabsch helper is not the label. The gate is
 half the minimum IRA RMSD between distinct deposited references,
-computed once before any seed. No references are deposited here, so
-the gate stays unset and every seed is unassigned. A build without
-the `ira` feature records that reason and does not substitute the
-Kabsch helper. Primitive-ring counts are not the isomer name.
+computed once before any seed and before the engine is opened.
+`WATER_ISOMER_DIR` holds `{prism,cage,book}.xyz` in O, H, H order,
+relaxed at that engine. A build without the `ira` feature records
+that reason and does not substitute the Kabsch helper. Primitive-ring
+counts are not the isomer name.
 
-Hit columns that need a same-level reference energy are unscored.
+With `ASE_PYTHON` set, the engine is the deposited calculator in
+`examples/ase_objective.py`, not the rgpot library. GFN2-xTB is
+tblite 0.7.0 `TBLite(method="GFN2-xTB")`. PBE is PySCF 2.14.0 RKS,
+basis 6-31g*, xc PBE, grid level 3. PET-MAD is pet-mad 1.4.4,
+checkpoint 1.0.2, CPU. ASE is 3.29.0. The cell is 40 angstrom with
+periodic boundaries off, matching the relaxation that produced the
+references. The script refuses any other package version. The helper keeps one ASE `Atoms` object and updates positions. tblite 0.7.0 aborts if a second `Atoms` is bound to the same calculator. Each
+reference geometry is evaluated once and its energy is printed before
+the seeds. Without `ASE_PYTHON` the driver still loads rgpot.
+
+A non-finite opening quench is reported as `search_error` and does not drop the gate or the reference energies. Hit columns stay unscored on a smoke or a single arm. A success rate
+waits on the full seed block.
 
 ## Seeds and budget
 
@@ -52,7 +64,8 @@ Hit columns that need a same-level reference energy are unscored.
 Smoke, one engine and one arm:
 
 ```
-PAPER_SMOKE=1 PAPER_OUT=water-hexamer-SMOKE.txt \
+ASE_PYTHON=/path/to/python PAPER_SMOKE=1 PAPER_OUT=water-hexamer-SMOKE.txt \
+  WATER_ISOMER_DIR=/path/to/gfn2 \
   cargo run --offline --example water_hexamer --features rgpot-ex,featomic,bank-rpc,ira -- gfn2 recommended
 ```
 
