@@ -469,3 +469,157 @@ fn load_pbe(_atomic_numbers: Vec<i32>, _n_atoms: usize) -> Result<ForceObjective
         "NWChem PBE/6-31G* was not evaluated. {library_state}. {config_state}. This build of rgpot-core does not enable the profile client, and the NWChem driver binary is not the embed SDK. Settings remain basis {PBE_BASIS}, theory {PBE_THEORY}, xc {PBE_XC}, charge {PBE_CHARGE}, multiplicity {PBE_MULTIPLICITY}, task {PBE_TASK}, dispersion {PBE_DISPERSION}."
     ))
 }
+
+fn load_petmad(atomic_numbers: Vec<i32>, n_atoms: usize) -> Result<ForceObjective, String> {
+    let Some(library) = engine_file("RGPOT_METATOMIC_ENGINE", "libmetatomic_engine.so") else {
+        return Err(
+            "libmetatomic_engine.so not found (RGPOT_METATOMIC_ENGINE or ./libmetatomic_engine.so)"
+                .into(),
+        );
+    };
+    let Some(model) = env_file("RGPOT_METATOMIC_MODEL") else {
+        return Err(format!(
+            "PET-MAD model not found (RGPOT_METATOMIC_MODEL). Cited file name is {PETMAD_MODEL_NAME}."
+        ));
+    };
+    let model_name = model
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unnamed");
+    if model_name != PETMAD_MODEL_NAME {
+        eprintln!("petmad model file is {model_name}; the cited name is {PETMAD_MODEL_NAME}");
+    }
+    let lib = unsafe { Library::new(&library) }.map_err(|error| error.to_string())?;
+    let create: Symbol<MtaCreate> =
+        unsafe { lib.get(b"rgpot_mta_create\0") }.map_err(|error| error.to_string())?;
+    let destroy: Symbol<MtaDestroy> =
+        unsafe { lib.get(b"rgpot_mta_destroy\0") }.map_err(|error| error.to_string())?;
+    let force: Symbol<MtaForce> =
+        unsafe { lib.get(b"rgpot_mta_force\0") }.map_err(|error| error.to_string())?;
+    let model_c =
+        CString::new(model.to_string_lossy().as_bytes()).map_err(|error| error.to_string())?;
+    let device = CString::new(PETMAD_DEVICE).map_err(|error| error.to_string())?;
+    let unit = CString::new("angstrom").map_err(|error| error.to_string())?;
+    let cfg = MtaConfig {
+        model_path: model_c.as_ptr(),
+        device: device.as_ptr(),
+        length_unit: unit.as_ptr(),
+        extensions_directory: std::ptr::null(),
+        check_consistency: 0,
+        uncertainty_threshold: 0.0,
+        dtype_override: std::ptr::null(),
+        random_rotation: 0,
+        n_symmetry_rotations: 0,
+        so3_probe_scatter: 0,
+        torch_determinism_strict: 0,
+    };
+    let mut err = [0u8; 512];
+    let pot = unsafe { create(&cfg, err.as_mut_ptr(), err.len()) };
+    if pot.is_null() {
+        return Err(format!(
+            "rgpot_mta_create failed: {}",
+            String::from_utf8_lossy(&err)
+        ));
+    }
+    let force =
+        unsafe { std::mem::transmute::<Symbol<MtaForce>, Symbol<'static, MtaForce>>(force) };
+    let destroy =
+        unsafe { std::mem::transmute::<Symbol<MtaDestroy>, Symbol<'static, MtaDestroy>>(destroy) };
+    let kernel = PetKernel {
+        _lib: lib,
+        pot,
+        force,
+        destroy,
+        _model: model_c,
+        _device: device,
+        _unit: unit,
+        atomic_numbers,
+        box_: vacuum_box(),
+    };
+    let dim = 3 * n_atoms;
+    Ok(ForceObjective::new(dim, move |coordinates: &[f64]| {
+        let mut forces = vec![0.0; coordinates.len()];
+        let mut energy = 0.0;
+        let mut variance = 0.0;
+        let rc = unsafe {
+            (kernel.force)(
+                kernel.pot,
+                (coordinates.len() / 3) as i64,
+                coordinates.as_ptr(),
+                kernel.atomic_numbers.as_ptr(),
+                forces.as_mut_ptr(),
+                &mut energy,
+                &mut variance,
+                kernel.box_.as_ptr(),
+            )
+        };
+        if rc != 0 || !energy.is_finite() {
+            return (f64::NAN, vec![f64::NAN; coordinates.len()]);
+        }
+        // The metatomic ABI returns forces. The search gradient is the
+        // negative of the force, matching the NWChem profile adapter.
+        let gradient = forces.iter().map(|force| -force).collect();
+        let _ = variance;
+        (energy, gradient)
+    }))
+}
+
+fn vacuum_box() -> [f64; 9] {
+    [
+        VACUUM_BOX, 0.0, 0.0, 0.0, VACUUM_BOX, 0.0, 0.0, 0.0, VACUUM_BOX,
+    ]
+}
+
+fn engine_file(var: &str, filename: &str) -> Option<PathBuf> {
+    env_file(var).or_else(|| {
+        let local = PathBuf::from(filename);
+        local.is_file().then_some(local)
+    })
+}
+
+fn env_file(var: &str) -> Option<PathBuf> {
+    let path = PathBuf::from(std::env::var_os(var)?);
+    path.is_file().then_some(path)
+}
+
+fn load_references() -> Vec<(String, Vec<f64>)> {
+    let Ok(dir) = std::env::var("WATER_ISOMER_DIR") else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for name in WATER_ISOMER_NAMES {
+        let path = PathBuf::from(&dir).join(format!("{name}.xyz"));
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Some(coordinates) = parse_xyz(&text) {
+            if monomers_intact(&coordinates, WATER_HEXAMER_MOLECULES).unwrap_or(false) {
+                found.push((name.to_owned(), coordinates));
+            } else {
+                eprintln!("isomer reference {name} failed the monomer check");
+            }
+        }
+    }
+    found
+}
+
+fn parse_xyz(text: &str) -> Option<Vec<f64>> {
+    let mut lines = text.lines();
+    let count: usize = lines.next()?.trim().parse().ok()?;
+    if count != 3 * WATER_HEXAMER_MOLECULES {
+        return None;
+    }
+    let _comment = lines.next()?;
+    let mut coordinates = Vec::with_capacity(3 * count);
+    for line in lines.take(count) {
+        let mut fields = line.split_whitespace();
+        let element = fields.next()?;
+        if element != "O" && element != "H" {
+            return None;
+        }
+        for _ in 0..3 {
+            coordinates.push(fields.next()?.parse().ok()?);
+        }
+    }
+    (coordinates.len() == 9 * WATER_HEXAMER_MOLECULES).then_some(coordinates)
+}
