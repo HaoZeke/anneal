@@ -267,4 +267,224 @@ fn command_text(program: &str, args: &[&str]) -> String {
         .unwrap_or_else(|| "unavailable".to_owned())
 }
 
-fn main() {}
+#[cfg(feature = "rgsaddle")]
+fn provenance_json(arm: &str, seed: u64, budget: usize) -> String {
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(0);
+    let threads = std::env::var("RAYON_NUM_THREADS").unwrap_or_else(|_| cores.to_string());
+    format!(
+        "{{\n  \"arm\": \"{arm}\",\n  \"seed\": {seed},\n  \"budget\": {budget},\n  \"hardware_model\": \"{}\",\n  \"cores\": {cores},\n  \"threads\": \"{threads}\",\n  \"compiler\": \"{}\",\n  \"commit\": \"{}\",\n  \"package\": \"anneal-core {}\"\n}}\n",
+        hardware_model().replace('"', "'"),
+        command_text("rustc", &["-vV"])
+            .replace('"', "'")
+            .replace('\n', " | "),
+        command_text("git", &["rev-parse", "HEAD"]),
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
+#[cfg(feature = "rgsaddle")]
+fn mobile_of(full: &Array1<f64>, mobile: &[usize]) -> Array1<f64> {
+    let mut out = Array1::zeros(3 * mobile.len());
+    for (slot, &atom) in mobile.iter().enumerate() {
+        for k in 0..3 {
+            out[3 * slot + k] = full[3 * atom + k];
+        }
+    }
+    out
+}
+
+#[cfg(all(feature = "rgsaddle", feature = "ira"))]
+fn rmsd(a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+    let n = a.len() / 3;
+    if n == 0 || a.len() != b.len() {
+        return f64::INFINITY;
+    }
+    let mut sum = 0.0;
+    for i in 0..a.len() {
+        let d = a[i] - b[i];
+        sum += d * d;
+    }
+    (sum / n as f64).sqrt()
+}
+
+#[cfg(feature = "rgsaddle")]
+fn permutation_rmsd(reference: ArrayView1<f64>, query: ArrayView1<f64>) -> f64 {
+    let n = reference.len() / 3;
+    if n == 0 || query.len() != reference.len() || n > 8 {
+        return f64::INFINITY;
+    }
+    let mut order: Vec<usize> = (0..n).collect();
+    let mut best = f64::INFINITY;
+    fn walk(
+        reference: ArrayView1<f64>,
+        query: ArrayView1<f64>,
+        order: &mut [usize],
+        slot: usize,
+        best: &mut f64,
+    ) {
+        if slot == order.len() {
+            let mut sum = 0.0;
+            for (i, &src) in order.iter().enumerate() {
+                for k in 0..3 {
+                    let d = reference[3 * i + k] - query[3 * src + k];
+                    sum += d * d;
+                }
+            }
+            let value = (sum / order.len() as f64).sqrt();
+            if value < *best {
+                *best = value;
+            }
+            return;
+        }
+        for i in slot..order.len() {
+            order.swap(slot, i);
+            walk(reference, query, order, slot + 1, best);
+            order.swap(slot, i);
+        }
+    }
+    walk(reference, query, &mut order, 0, &mut best);
+    best
+}
+
+#[cfg(feature = "rgsaddle")]
+fn island_rmsd(reference: ArrayView1<f64>, query: ArrayView1<f64>) -> (f64, &'static str) {
+    #[cfg(feature = "ira")]
+    {
+        let order = anneal_core::shape::CanonicalOrder::new(reference.to_owned(), 1.8);
+        if let Some(canon) = order.canonicalise(query) {
+            return (rmsd(reference, canon.view()), "ira");
+        }
+    }
+    (permutation_rmsd(reference, query), "cartesian-permutation")
+}
+
+#[cfg(feature = "rgsaddle")]
+struct Geometry {
+    energy: f64,
+    mobile: Array1<f64>,
+    saddle: bool,
+}
+
+#[cfg(feature = "rgsaddle")]
+fn is_saddle_path(path: &Path) -> bool {
+    path.components()
+        .any(|component| matches!(component.as_os_str().to_str(), Some("saddle" | "saddles")))
+}
+
+#[cfg(feature = "rgsaddle")]
+fn collect_con(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_con(&path, out);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("con")
+            && path.file_name().and_then(|name| name.to_str()) != Some("mid.con")
+        {
+            out.push(path);
+        }
+    }
+}
+
+#[cfg(feature = "rgsaddle")]
+fn load_references(root: &Path, params: &MorseParams) -> Vec<Geometry> {
+    let mut files = Vec::new();
+    collect_con(root, &mut files);
+    files.sort();
+    let mut loaded = Vec::new();
+    for path in files {
+        let (pos, _species, free, box_) = read_system(path.to_str().unwrap_or(""));
+        let island = island_layer(&pos, &free);
+        if island.is_empty() {
+            continue;
+        }
+        let cell = [box_[0], box_[4], box_[8]];
+        let (energy, _) = morse_smooth(pos.view(), params, cell);
+        loaded.push(Geometry {
+            energy,
+            mobile: mobile_of(&pos, &island),
+            saddle: is_saddle_path(&path),
+        });
+    }
+    loaded
+}
+
+#[cfg(feature = "rgsaddle")]
+fn matched(found_e: f64, found: ArrayView1<f64>, reference: &Geometry) -> bool {
+    let (deviation, _) = island_rmsd(reference.mobile.view(), found);
+    (found_e - reference.energy).abs() <= ENERGY_WINDOW_EV && deviation <= RMSD_WINDOW_A
+}
+
+#[cfg(any(test, feature = "rgsaddle"))]
+/// Free atoms split into layers when neighbouring z values differ by more
+/// than this. The heptamer is the smallest layer. The other free layers are
+/// the movable substrate.
+const LAYER_GAP_A: f64 = 1.0;
+
+#[cfg(any(test, feature = "rgsaddle"))]
+fn island_layer(base: &Array1<f64>, free: &[usize]) -> Vec<usize> {
+    let mut ordered = free.to_vec();
+    ordered.sort_by(|&a, &b| {
+        base[3 * a + 2]
+            .partial_cmp(&base[3 * b + 2])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut layers: Vec<Vec<usize>> = Vec::new();
+    for atom in ordered {
+        let split = layers.last().is_none_or(|layer| {
+            let previous = *layer.last().expect("layer");
+            base[3 * atom + 2] - base[3 * previous + 2] > LAYER_GAP_A
+        });
+        if split {
+            layers.push(vec![atom]);
+        } else if let Some(layer) = layers.last_mut() {
+            layer.push(atom);
+        }
+    }
+    layers
+        .into_iter()
+        .min_by(|left, right| {
+            left.len().cmp(&right.len()).then_with(|| {
+                let z = |layer: &Vec<usize>| layer.iter().map(|&i| base[3 * i + 2]).sum::<f64>();
+                z(right)
+                    .partial_cmp(&z(left))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(feature = "rgsaddle")]
+fn configure(species: &[u32], island: &[usize], base: &Array1<f64>, arm: &str) -> Config {
+    let groups = adsorbate_groups(base, species, island);
+    let mut cfg = if arm == "plain" {
+        Config::for_molecular(species.to_vec(), groups, 1.0)
+    } else {
+        Config::recommended_molecular(species.to_vec(), groups, 1.0)
+    };
+    cfg.active_region = Some((island.to_vec(), 0));
+    if !island.is_empty() {
+        let adsorbate = island
+            .iter()
+            .map(|&i| covalent_radius(species[i]))
+            .fold(0.0_f64, f64::max);
+        cfg.length_scale = 2.0 * adsorbate;
+    }
+    cfg.screen_steps = env_usize("SCREEN_STEPS", 10);
+    cfg.relax_steps = env_usize("RELAX_STEPS", 150);
+    cfg
+}
+
+fn main() {
+    #[cfg(not(feature = "rgsaddle"))]
+    {
+        eprintln!("pt111_heptamer requires the rgsaddle feature");
+        std::process::exit(2);
+    }
+    #[cfg(feature = "rgsaddle")]
+    drive();
+}
