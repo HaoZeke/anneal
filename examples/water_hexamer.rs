@@ -211,3 +211,261 @@ fn selection(arg: &str, choices: &[(&str, &str)]) -> Vec<String> {
             .join("|")
     );
 }
+
+fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
+    let arm = match arm_name {
+        "recommended" => WaterSearchArm::Recommended,
+        "communicating" => WaterSearchArm::Communicating,
+        "derived" => WaterSearchArm::Derived,
+        "good_turing" => WaterSearchArm::GoodTuring,
+        other => panic!("unknown arm {other}"),
+    };
+    let budget = if smoke {
+        SMOKE_BUDGET
+    } else {
+        match engine {
+            "gfn2" => GFN2_HEXAMER_BUDGET,
+            "pbe" => PBE_HEXAMER_BUDGET,
+            "petmad" => PETMAD_HEXAMER_BUDGET,
+            other => panic!("unknown engine {other}"),
+        }
+    };
+    let seed0 = WATER_HEXAMER_SEED_START;
+    let seeds = if smoke { 1 } else { WATER_HEXAMER_SEED_COUNT };
+    let mut text = String::new();
+    text.push_str(&format!(
+        "\nengine: {engine}\narm: {arm_name}\nbudget: {budget}\nseeds: {seed0}..{}\n",
+        seed0 + seeds - 1
+    ));
+    text.push_str(&engine_settings(engine));
+    let n_atoms = 3 * WATER_HEXAMER_MOLECULES;
+    let loaded = load_engine(engine, n_atoms);
+    let Ok(objective) = loaded else {
+        text.push_str(&format!(
+            "engine_loaded: false\nsearch: not started\nload_error: {}\n",
+            loaded.err().unwrap_or_default()
+        ));
+        return text;
+    };
+    text.push_str("engine_loaded: true\n");
+    let species = water_species(WATER_HEXAMER_MOLECULES).expect("hexamer species");
+    let groups = water_groups(WATER_HEXAMER_MOLECULES).expect("hexamer groups");
+    let mut cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
+    configure_water_arm(&mut cfg, arm);
+    cfg.move_library = MoveLibrary::Molecular {
+        groups: groups.clone(),
+        reactive: false,
+    };
+    let references = load_references();
+    let reference_views: Vec<(&str, &[f64])> = references
+        .iter()
+        .map(|(name, coordinates)| (name.as_str(), coordinates.as_slice()))
+        .collect();
+    let template = reference_coordinates(WATER_HEXAMER_MOLECULES).expect("template");
+    for seed in seed0..seed0 + seeds {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let start = repack_rigid_groups(
+            ArrayView1::from(&template),
+            &groups,
+            cfg.length_scale,
+            &mut rng,
+        );
+        let start_intact =
+            monomers_intact(start.as_slice().unwrap_or(&[]), WATER_HEXAMER_MOLECULES)
+                .unwrap_or(false);
+        if seed == seed0 {
+            let started = Instant::now();
+            let (energy, gradient) = objective.value_and_gradient(start.view());
+            let eval_us = started.elapsed().as_micros();
+            let finite = energy.is_finite() && gradient.iter().all(|value| value.is_finite());
+            text.push_str(&format!(
+                "first_eval_us: {eval_us}\nfirst_energy: {energy}\nfirst_gradient_finite: {finite}\n"
+            ));
+            if eval_us > 0 {
+                let full_calls = match engine {
+                    "gfn2" => GFN2_HEXAMER_BUDGET,
+                    "pbe" => PBE_HEXAMER_BUDGET,
+                    _ => PETMAD_HEXAMER_BUDGET,
+                } as u128
+                    * WATER_HEXAMER_SEED_COUNT as u128;
+                let estimate_s = eval_us * full_calls / 1_000_000;
+                text.push_str(&format!(
+                    "one_geometry_full_run_estimate_s: {estimate_s}\nestimate_note: one geometry, quench overhead not included, smoke\n"
+                ));
+            }
+        }
+        let mut ledger = Ledger::new(budget);
+        let wall = Instant::now();
+        let (outcome, stats) = if arm == WaterSearchArm::GoodTuring {
+            let mut census = BasinCensus::new(
+                sorted_oxygen_distances(&template, WATER_HEXAMER_MOLECULES)
+                    .expect("descriptor")
+                    .len(),
+                OXYGEN_DISTANCE_CENSUS_RADIUS_A,
+            )
+            .expect("census");
+            let mut trace = String::new();
+            let mut checkpoint =
+                |snapshot: anneal_core::methods::cluster_hopping::ChainCheckpoint<'_>| {
+                    for boundary in snapshot.quench_boundaries() {
+                        if boundary.status() != QuenchStatus::Validated {
+                            continue;
+                        }
+                        let state = boundary.state();
+                        let Some(state) = state.as_slice() else {
+                            continue;
+                        };
+                        let Ok(descriptor) =
+                            sorted_oxygen_distances(state, WATER_HEXAMER_MOLECULES)
+                        else {
+                            continue;
+                        };
+                        if census.observe(&descriptor).is_err() {
+                            continue;
+                        }
+                        let mass = census
+                            .unseen_mass()
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "none".to_owned());
+                        trace.push_str(&format!(
+                        "good_turing_trace: force_calls={} visits={} unseen_mass={mass} minimum_visits={PRODUCTION_MINIMUM_VISITS} max_unseen_mass={PRODUCTION_MAX_UNSEEN_MASS}\n",
+                        snapshot.charged(),
+                        census.total_visits()
+                    ));
+                    }
+                    if let Some(reason) = good_turing_stop_reason(&census) {
+                        CheckpointAction::Retire {
+                            reason: reason.to_owned(),
+                        }
+                    } else {
+                        CheckpointAction::Continue
+                    }
+                };
+            let result = search_from_with_checkpoint(
+                &objective,
+                &cfg,
+                &mut ledger,
+                start.view(),
+                seed,
+                GOOD_TURING_CHECKPOINT_INTERVAL,
+                &mut checkpoint,
+            );
+            text.push_str(&trace);
+            text.push_str(&format!(
+                "good_turing_saturated: {}\n",
+                good_turing_stop_reason(&census).is_some()
+            ));
+            result
+        } else {
+            search_from(&objective, &cfg, &mut ledger, start.view(), seed)
+        };
+        let wall_s = wall.elapsed().as_secs_f64();
+        let best = outcome.best;
+        let intact = outcome
+            .best_state
+            .as_ref()
+            .and_then(|state| state.as_slice())
+            .and_then(|state| monomers_intact(state, WATER_HEXAMER_MOLECULES).ok())
+            .unwrap_or(false);
+        let isomer = if intact {
+            outcome
+                .best_state
+                .as_ref()
+                .and_then(|state| state.as_slice())
+                .and_then(|state| {
+                    assign_isomer(state, WATER_HEXAMER_MOLECULES, &reference_views, None).ok()
+                })
+        } else {
+            None
+        };
+        let (isomer_name, isomer_rmsd) = match isomer {
+            Some(matched) => (
+                matched.name.unwrap_or_else(|| "unassigned".to_owned()),
+                matched
+                    .rmsd
+                    .map(|value| format!("{value:.6}"))
+                    .unwrap_or_else(|| "none".to_owned()),
+            ),
+            None => ("unassigned".to_owned(), "none".to_owned()),
+        };
+        let per_second = if wall_s > 0.0 {
+            ledger.spent() as f64 / wall_s
+        } else {
+            0.0
+        };
+        text.push_str(&format!(
+            "seed: {seed}\nstart_monomers_intact: {start_intact}\nbest_energy: {best}\nbest_monomers_intact: {intact}\nisomer: {isomer_name}\nisomer_rmsd_A: {isomer_rmsd}\nisomer_gate_A: unset\nforce_calls: {}\nwall_seconds: {wall_s:.6}\nforce_calls_per_second: {per_second:.6}\nhops: {}\nbasins: {}\nconverged: {}\nquenches: {}\nhits: unscored\nwilson_95: unscored\nmedian_par2_force: unscored\nmedian_par2_wall: unscored\nunscored_reason: no same-level reference energy in this tree\n",
+            ledger.spent(),
+            outcome.hops,
+            outcome.basins,
+            stats.converged,
+            stats.total()
+        ));
+    }
+    text
+}
+
+fn engine_settings(engine: &str) -> String {
+    match engine {
+        "gfn2" => format!(
+            "engine_kind: {ENGINE_KIND}\nmethod: {GFN2_METHOD}\naccuracy: {GFN2_ACCURACY}\netemp_K: 300\nmaxiter: {GFN2_MAX_ITERATIONS}\ncharge: 0\nuhf: 0\nvacuum_box_A: {VACUUM_BOX}\nfull_budget: {GFN2_HEXAMER_BUDGET}\n"
+        ),
+        "pbe" => format!(
+            "engine_kind: {PBE_ENGINE_KIND}\ncode: NWChem\nbasis: {PBE_BASIS}\ntheory: {PBE_THEORY}\nxc: {PBE_XC}\ndispersion: {PBE_DISPERSION}\ncharge: {PBE_CHARGE}\nmultiplicity: {PBE_MULTIPLICITY}\ntask: {PBE_TASK}\ncell: none\nfull_budget: {PBE_HEXAMER_BUDGET}\n"
+        ),
+        "petmad" => format!(
+            "engine_kind: {PETMAD_ENGINE_KIND}\nmodel_name: {PETMAD_MODEL_NAME}\ndevice: {PETMAD_DEVICE}\nlength_unit: angstrom\nenergy_unit: eV\nvacuum_box_A: {VACUUM_BOX}\nmodel_cutoff: unnamed, inside the model file\ncheck_consistency: 0\nuncertainty_threshold: 0\nrandom_rotation: 0\nfull_budget: {PETMAD_HEXAMER_BUDGET}\n"
+        ),
+        other => format!("engine_kind: {other}\n"),
+    }
+}
+
+fn load_engine(engine: &str, n_atoms: usize) -> Result<ForceObjective, String> {
+    let atomic_numbers: Vec<i32> = (0..WATER_HEXAMER_MOLECULES)
+        .flat_map(|_| [8, 1, 1])
+        .collect();
+    match engine {
+        "gfn2" => load_gfn2(&atomic_numbers, n_atoms),
+        "pbe" => load_pbe(atomic_numbers, n_atoms),
+        "petmad" => load_petmad(atomic_numbers, n_atoms),
+        other => Err(format!("unknown engine {other}")),
+    }
+}
+
+fn load_gfn2(atomic_numbers: &[i32], n_atoms: usize) -> Result<ForceObjective, String> {
+    let Some(path) = engine_file("RGPOT_XTB_ENGINE", "libxtb_engine.so") else {
+        return Err("libxtb_engine.so not found (RGPOT_XTB_ENGINE or ./libxtb_engine.so)".into());
+    };
+    let box_ = vacuum_box();
+    let numbers = atomic_numbers.to_vec();
+    let loaded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        RgpotObjective::xtb(&numbers, box_)
+    }));
+    let Ok(pot) = loaded else {
+        return Err(format!("gfn2 dlopen failed for {}", path.display()));
+    };
+    emit_engine_manifest("xtb");
+    let dim = 3 * n_atoms;
+    Ok(ForceObjective::new(dim, move |coordinates: &[f64]| {
+        let objective = pot.wrapper();
+        let (energy, gradient) = objective.value_and_gradient(ArrayView1::from(coordinates));
+        (energy, gradient.to_vec())
+    }))
+}
+
+fn load_pbe(_atomic_numbers: Vec<i32>, _n_atoms: usize) -> Result<ForceObjective, String> {
+    let library = engine_file("POTENTIAL_LIBRARY", "libnwchemc.so")
+        .or_else(|| engine_file("RGPOT_NWCHEMC_ENGINE", "libnwchemc.so"));
+    let config = env_file("POTENTIAL_CONFIG").or_else(|| env_file("NWCHEMC_CONFIG"));
+    let library_state = match &library {
+        Some(path) => format!("library present at {}", path.display()),
+        None => "libnwchemc.so not found".to_owned(),
+    };
+    let config_state = match &config {
+        Some(path) => format!("config present at {}", path.display()),
+        None => "PotentialConfig bytes not found".to_owned(),
+    };
+    Err(format!(
+        "NWChem PBE/6-31G* was not evaluated. {library_state}. {config_state}. This build of rgpot-core does not enable the profile client, and the NWChem driver binary is not the embed SDK. Settings remain basis {PBE_BASIS}, theory {PBE_THEORY}, xc {PBE_XC}, charge {PBE_CHARGE}, multiplicity {PBE_MULTIPLICITY}, task {PBE_TASK}, dispersion {PBE_DISPERSION}."
+    ))
+}
