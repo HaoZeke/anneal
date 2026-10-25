@@ -4266,6 +4266,10 @@ where
                 history_new += 1;
             }
         }
+        // The floor the fivefold channel reads is the incumbent before this
+        // record. Gap and energy are not that comparison.
+        let channel_floor_energy = ledger.best;
+        let channel_floor_state = seam.as_ref().and_then(|_| ledger.best_state.clone());
         if recordable {
             ledger.record(e_new, x_new.view());
             if ledger.target_reached() {
@@ -4657,18 +4661,16 @@ where
             }
             if let Some(seam) = seam.as_mut()
                 && recordable
-                && e_new <= ledger.best + crate::catalog::SEAM_WINDOW
-                && let (Some(floor), Some(trial)) = (
-                    ledger
-                        .best_state
-                        .as_ref()
-                        .and_then(|b| b.as_slice().map(<[f64]>::to_vec)),
-                    x_new.as_slice(),
-                )
+                && let (Some(floor_state), Some(trial)) =
+                    (channel_floor_state.as_ref(), x_new.as_slice())
             {
-                let gap = crate::catalog::packing_seam_gap(&floor, trial);
-                if seam.offer(gap, e_new, trial) && frontier_exchange {
-                    crate::catalog::offer_frontier_post(gap, e_new, trial);
+                let share = crate::catalog::icosahedral_share(x_new.view());
+                let floor_share = crate::catalog::icosahedral_share(floor_state.view());
+                if crate::catalog::fivefold_channel(e_new, channel_floor_energy, share, floor_share)
+                    && seam.offer(share, e_new, trial)
+                    && frontier_exchange
+                {
+                    crate::catalog::offer_frontier_post(share, e_new, trial);
                 }
             }
             // One arrival on the packing the chain has just moved onto.
