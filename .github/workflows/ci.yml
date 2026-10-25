@@ -43,13 +43,12 @@ jobs:
       - name: cargo clippy (default features)
         run: cargo clippy --all-targets -- -D warnings
 
-      # `cargo package --no-verify` writes anneal-core-${version}.crate.
-      # A publish dry run on cargo 1.99 leaves the packaged crate under
-      # target/package/tmp-crate only. `--no-verify` skips the rebuild,
-      # which would follow this workspace's patch. The next step checks
-      # the packaged default features against crates.io.
+      # `cargo package` writes anneal-core-${version}.crate and verifies
+      # it. The next step extracts that crate, drops the development
+      # cargo config and the lockfile, and checks the default features
+      # plus `rgsaddle,python` against crates.io.
       - name: Package the crate
-        run: cargo package --no-verify
+        run: cargo package
 
       - name: Check packaged default features against crates.io
         shell: bash
@@ -69,6 +68,7 @@ jobs:
             cd "$pkg"
             cargo generate-lockfile
             cargo check --locked
+            cargo check --locked --features rgsaddle,python
           )
 
       - name: Checkout Vesin
