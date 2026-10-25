@@ -1,0 +1,27 @@
+--- a/src/directives/module_directive.rs
++++ b/src/directives/module_directive.rs
+@@ -122,9 +122,21 @@
+                         && meta_name_value.path.segments.first().unwrap().ident == "path"
+                     {
+                         if let Expr::Lit(value) = &meta_name_value.value {
+-                            module_attrs.path = parent_file.path.join(Path::new(
+-                                &value.to_token_stream().to_string().trim_matches('"'),
+-                            ));
++                            // `#[path]` is relative to the file that contains
++                            // the attribute. Joining onto that file makes the
++                            // next component a non-directory.
++                            let relative = value.to_token_stream().to_string();
++                            let relative = relative.trim_matches('"');
++                            let base = if parent_file.path.is_dir() {
++                                parent_file.path.clone()
++                            } else {
++                                parent_file
++                                    .path
++                                    .parent()
++                                    .unwrap_or(parent_file.path.as_path())
++                                    .to_path_buf()
++                            };
++                            module_attrs.path = base.join(relative);
+                         }
+                         else {
+                             panic!(
