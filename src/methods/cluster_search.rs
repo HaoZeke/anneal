@@ -22,8 +22,8 @@ use crate::methods::cluster_hopping::min_pair_distance;
 #[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::structure_is_sane;
 use crate::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, Config, Ledger, Outcome, optimize_with_energy_gradient,
-    run_with_energy_gradient_at_checkpoints,
+    ChainCheckpoint, CheckpointAction, Config, Ledger, Outcome, SearchError,
+    optimize_with_energy_gradient, run_with_energy_gradient_at_checkpoints,
 };
 use crate::methods::warm_lbfgs::WarmLbfgs;
 use crate::quench::{QuenchPredictor, Verdict};
@@ -356,7 +356,7 @@ pub fn search<O>(
     cfg: &Config,
     ledger: &mut Ledger,
     seed: u64,
-) -> (Outcome, RelaxStats)
+) -> Result<(Outcome, RelaxStats), SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
@@ -392,9 +392,9 @@ where
             Some(&mut grad),
             Some(&mut energy_grad),
             seed,
-        )
+        )?
     };
-    (out, stats)
+    Ok((out, stats))
 }
 
 /// As [`search`], from a geometry the caller already has.
@@ -407,7 +407,7 @@ pub fn search_from<O>(
     ledger: &mut Ledger,
     start: ArrayView1<f64>,
     seed: u64,
-) -> (Outcome, RelaxStats)
+) -> Result<(Outcome, RelaxStats), SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
@@ -436,9 +436,9 @@ where
             Some(&mut grad),
             Some(&mut energy_grad),
             &mut rng,
-        )
+        )?
     };
-    (out, stats)
+    Ok((out, stats))
 }
 
 /// [`search_from`] with a checkpoint after each block of charged work.
@@ -454,7 +454,7 @@ pub fn search_from_with_checkpoint<O, H>(
     seed: u64,
     checkpoint_interval: usize,
     checkpoint: &mut H,
-) -> (Outcome, RelaxStats)
+) -> Result<(Outcome, RelaxStats), SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
@@ -486,9 +486,9 @@ where
             &mut rng,
             checkpoint_interval,
             checkpoint,
-        )
+        )?
     };
-    (out, stats)
+    Ok((out, stats))
 }
 
 /// [`search_from`] when `BANK_RPC` is unset; [`search_from_bank`] when it is.
@@ -502,7 +502,7 @@ pub fn search_from_maybe_bank<O>(
     ledger: &mut Ledger,
     start: ArrayView1<f64>,
     seed: u64,
-) -> (Outcome, RelaxStats)
+) -> Result<(Outcome, RelaxStats), SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
@@ -748,7 +748,7 @@ pub fn search_from_bank<O>(
     start: ArrayView1<f64>,
     seed: u64,
     sock: &str,
-) -> (Outcome, RelaxStats)
+) -> Result<(Outcome, RelaxStats), crate::methods::cluster_hopping::SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
@@ -986,7 +986,7 @@ where
             Some(&mut grad),
             &mut bias,
             &mut rng,
-        );
+        )?;
         ledger.charge_many(slice_led.spent());
         if let Some(st) = slice_led.best_state.as_ref() {
             ledger.record(slice_led.best, st.view());
@@ -1039,7 +1039,7 @@ where
         improvements,
         ..Outcome::default()
     };
-    (out, stats)
+    Ok((out, stats))
 }
 
 #[cfg(any(feature = "bank-rpc", test))]
@@ -1244,7 +1244,8 @@ mod tests {
             1,
             1,
             &mut checkpoint,
-        );
+        )
+        .expect("search records a quench boundary");
         assert!(
             !ledger.quench_boundaries().is_empty(),
             "search recorded no quench boundary"
@@ -1419,7 +1420,7 @@ mod tests {
             };
             let mut ledger = Ledger::with_stop(BUDGET, Arc::clone(&stop));
             let started = Instant::now();
-            let (out, _) = search(&objective, &cfg, &mut ledger, 1);
+            let (out, _) = search(&objective, &cfg, &mut ledger, 1).expect("finite start");
             let elapsed = started.elapsed();
             let calls = objective.calls.load(Ordering::SeqCst);
             let best_seen = *objective.best.lock().expect("best");
@@ -1462,10 +1463,10 @@ mod tests {
         plain.relax_steps = 40;
         plain.screen_steps = 8;
         let mut ledger_plain = Ledger::new(800);
-        let (out_plain, _) = search(&pot, &plain, &mut ledger_plain, 3);
+        let (out_plain, _) = search(&pot, &plain, &mut ledger_plain, 3).expect("finite start");
         let stop = Arc::new(AtomicBool::new(false));
         let mut ledger_flag = Ledger::with_stop(800, stop);
-        let (out_flag, _) = search(&pot, &plain, &mut ledger_flag, 3);
+        let (out_flag, _) = search(&pot, &plain, &mut ledger_flag, 3).expect("finite start");
         assert_eq!(
             ledger_plain.spent(),
             ledger_flag.spent(),
@@ -1488,7 +1489,7 @@ mod tests {
         cfg.allocate_moves = true;
         cfg.return_screen = true;
         let mut ledger = Ledger::new(120_000);
-        let (out, stats) = search(dyn_pot, &cfg, &mut ledger, 0);
+        let (out, stats) = search(dyn_pot, &cfg, &mut ledger, 0).expect("finite start");
 
         assert!(out.hops > 0, "no hops were taken");
         assert!(stats.total() > 0, "no relaxations were counted");
@@ -1507,7 +1508,7 @@ mod tests {
         let mut cfg = Config::for_cluster(13);
         cfg.return_screen = true;
         let mut ledger = Ledger::new(120_000);
-        let (out, _) = search(&pot, &cfg, &mut ledger, 3);
+        let (out, _) = search(&pot, &cfg, &mut ledger, 3).expect("finite start");
         let (e, gmax) = verify(&pot, &out).expect("no structure came back");
         assert!(
             (e - out.best).abs() < 1e-6,
@@ -1526,7 +1527,7 @@ mod tests {
         cfg.allocate_moves = true;
         cfg.return_screen = true;
         let mut ledger = Ledger::new(150_000);
-        let (out, _) = search(&pot, &cfg, &mut ledger, 0);
+        let (out, _) = search(&pot, &cfg, &mut ledger, 0).expect("finite start");
         let e = first_encounter(&out, -44.326801, 1e-4, ledger.spent());
         match e {
             Encounter::Found { charged, hops } => {
@@ -1661,7 +1662,7 @@ mod tests {
         let mut best = f64::INFINITY;
         for seed in 0..3 {
             let mut ledger = Ledger::new(150_000);
-            let (out, _) = search(&pot, &cfg, &mut ledger, seed);
+            let (out, _) = search(&pot, &cfg, &mut ledger, seed).expect("finite start");
             best = best.min(out.best);
         }
         assert!(
@@ -1676,7 +1677,7 @@ mod tests {
         let pot = PairPotential::morse(13, 6.0);
         let cfg = Config::for_cluster(13);
         let mut ledger = Ledger::new(5_000);
-        let (_, _) = search(&pot, &cfg, &mut ledger, 1);
+        let (_, _) = search(&pot, &cfg, &mut ledger, 1).expect("finite start");
         assert!(ledger.spent() <= 5_000, "spent {}", ledger.spent());
     }
 

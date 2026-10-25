@@ -108,7 +108,8 @@ fn scheduled_ci_move_is_quenched_charged_and_adopted_only_downhill() {
         };
     let mut rng = StdRng::seed_from_u64(7);
 
-    let outcome = run(&config, start.view(), &mut ledger, &mut relax, &mut rng);
+    let outcome =
+        run(&config, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
 
     assert_eq!(outcome.continuous_symmetry.0, 1);
     assert!(outcome.continuous_symmetry.1 > 0.0);
@@ -136,7 +137,8 @@ fn ci_interval_counts_the_initial_quench_as_quench_one() {
         };
     let mut rng = StdRng::seed_from_u64(7);
 
-    let outcome = run(&config, start.view(), &mut ledger, &mut relax, &mut rng);
+    let outcome =
+        run(&config, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
 
     assert_eq!(outcome.hops, 1);
     assert_eq!(outcome.continuous_symmetry.0, 0);
@@ -162,7 +164,8 @@ fn ci_quench_itself_advances_the_csm_quench_counter() {
         };
     let mut rng = StdRng::seed_from_u64(7);
 
-    let outcome = run(&config, start.view(), &mut ledger, &mut relax, &mut rng);
+    let outcome =
+        run(&config, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
 
     assert_eq!(outcome.hops, 3);
     assert_eq!(outcome.continuous_symmetry.0, 2);

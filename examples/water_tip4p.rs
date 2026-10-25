@@ -89,7 +89,8 @@ fn main() {
             &mut rng,
             1_000,
             &mut checkpoint,
-        );
+        )
+        .expect("finite start");
         if let Some(state) = out.best_state.as_ref() {
             let e = pot.value_and_gradient(state.view()).0;
             out.best = e;

@@ -150,7 +150,8 @@ fn main() {
             report_eval_wall(&obj, x0.view(), "cuh2");
         }
         let mut ledger = Ledger::new(budget);
-        let (out, stats) = search_from_maybe_bank(&obj, &cfg, &mut ledger, x0.view(), seed);
+        let (out, stats) =
+            search_from_maybe_bank(&obj, &cfg, &mut ledger, x0.view(), seed).expect("finite start");
         let checked = verify(&obj, &out);
         println!(
             "  seed {seed}: best {:.6} eV  hops {}  charged {}  basins {}  converged {}/{}  arm {}  search {search}",

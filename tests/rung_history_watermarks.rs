@@ -111,7 +111,8 @@ fn each_rung_accounts_for_foreign_history_visits_in_its_own_bias() {
             &mut rng,
             1,
             &mut checkpoint,
-        );
+        )
+        .expect("finite start");
 
         assert_eq!(outcome.hops, 4);
         assert_eq!(outcome.rungs.len(), 2);
