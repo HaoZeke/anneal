@@ -493,7 +493,88 @@ fn engine_settings(engine: &str) -> String {
     }
 }
 
+fn deposited_calculator(engine: &str) -> String {
+    if std::env::var_os("ASE_PYTHON").is_none() {
+        return "calculator: rgpot\n".to_owned();
+    }
+    match engine {
+        "gfn2" => "calculator: tblite 0.7.0 TBLite method GFN2-xTB ase 3.29.0 cell 40 A pbc false\n",
+        "pbe" => "calculator: pyscf 2.14.0 RKS xc PBE basis 6-31g* grid level 3 ase 3.29.0 cell 40 A pbc false\n",
+        "petmad" => "calculator: pet-mad 1.4.4 checkpoint 1.0.2 device cpu ase 3.29.0 cell 40 A pbc false\n",
+        _other => "calculator: unknown\n",
+    }
+    .to_owned()
+}
+
+fn assign_references(
+    references: &[(String, Vec<f64>)],
+    views: &[(&str, &[f64])],
+    gate: Option<f64>,
+) -> String {
+    let mut text = String::new();
+    for (name, coordinates) in references {
+        match assign_isomer(coordinates, WATER_HEXAMER_MOLECULES, views, gate) {
+            Ok(matched) => {
+                let assigned = matched.name.unwrap_or_else(|| "unassigned".to_owned());
+                let rmsd = matched
+                    .rmsd
+                    .map(|value| format!("{value:.6}"))
+                    .unwrap_or_else(|| "none".to_owned());
+                text.push_str(&format!(
+                    "reference_assign: {name} isomer: {assigned} isomer_rmsd_A: {rmsd}\n"
+                ));
+            }
+            Err(error) => text.push_str(&format!(
+                "reference_assign: {name} isomer: unassigned isomer_reason: {error}\n"
+            )),
+        }
+    }
+    text
+}
+
+fn evaluate_references(objective: &ForceObjective, references: &[(String, Vec<f64>)]) -> String {
+    let mut text = String::new();
+    for (name, coordinates) in references {
+        let (energy, gradient) = objective.value_and_gradient(ArrayView1::from(coordinates));
+        let mut max_force: f64 = 0.0;
+        let values = gradient.as_slice().unwrap_or(&[]);
+        for atom in values.as_chunks::<3>().0 {
+            let norm = (atom[0] * atom[0] + atom[1] * atom[1] + atom[2] * atom[2]).sqrt();
+            max_force = max_force.max(norm);
+        }
+        text.push_str(&format!(
+            "reference_energy: {name} {energy:.12} max_force {max_force:.6}\n"
+        ));
+    }
+    text
+}
+
+fn load_deposited(engine: &str, n_atoms: usize) -> Result<ForceObjective, String> {
+    let ase_engine = match engine {
+        "gfn2" => "tblite-gfn2",
+        "pbe" => "pyscf-pbe",
+        "petmad" => "pet-mad",
+        other => return Err(format!("no deposited calculator for {other}")),
+    };
+    let symbols = (0..WATER_HEXAMER_MOLECULES)
+        .flat_map(|_| ["O", "H", "H"])
+        .map(str::to_owned)
+        .collect();
+    let mut pipe = pipe_engine::PipeEngine::start(ase_engine, symbols, None);
+    let dim = 3 * n_atoms;
+    Ok(ForceObjective::new(
+        dim,
+        move |coordinates: &[f64]| match pipe.eval(ArrayView1::from(coordinates)) {
+            Some((energy, gradient)) => (energy, gradient.to_vec()),
+            None => (f64::NAN, vec![f64::NAN; coordinates.len()]),
+        },
+    ))
+}
+
 fn load_engine(engine: &str, n_atoms: usize) -> Result<ForceObjective, String> {
+    if std::env::var_os("ASE_PYTHON").is_some() {
+        return load_deposited(engine, n_atoms);
+    }
     let atomic_numbers: Vec<i32> = (0..WATER_HEXAMER_MOLECULES)
         .flat_map(|_| [8, 1, 1])
         .collect();
