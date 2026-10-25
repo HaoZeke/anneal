@@ -488,3 +488,242 @@ fn main() {
     #[cfg(feature = "rgsaddle")]
     drive();
 }
+
+#[cfg(feature = "rgsaddle")]
+fn drive() {
+    let args: Vec<String> = std::env::args().collect();
+    let con = args.get(1).cloned().unwrap_or_else(|| {
+        eprintln!(
+            "usage: pt111_heptamer <pos.con> <problem.toml> <reference_root> <budget> <seeds> [seed0] [recommended|plain]"
+        );
+        std::process::exit(2);
+    });
+    let problem = args.get(2).cloned().expect("problem toml");
+    let reference_root = args.get(3).cloned().expect("reference root");
+    let budget: usize = args.get(4).and_then(|v| v.parse().ok()).unwrap_or(4_605);
+    let seeds: u64 = args.get(5).and_then(|v| v.parse().ok()).unwrap_or(1);
+    let seed0: u64 = args.get(6).and_then(|v| v.parse().ok()).unwrap_or(4000);
+    let arm = args.get(7).map(String::as_str).unwrap_or("recommended");
+    if !matches!(arm, "recommended" | "plain") {
+        eprintln!("arm must be recommended or plain");
+        std::process::exit(2);
+    }
+    let text =
+        std::fs::read_to_string(&problem).unwrap_or_else(|err| panic!("read problem: {err}"));
+    let params = parse_problem(&text).unwrap_or_else(|err| panic!("{err}"));
+    let (base, species, free, box_) = read_system(&con);
+    let island = island_layer(&base, &free);
+    let cell = [box_[0], box_[4], box_[8]];
+    let n = species.len();
+    let extent = cell.into_iter().fold(0.0_f64, f64::max).max(params.cutoff) * 2.0;
+    let surface = Surface {
+        params,
+        cell,
+        active: {
+            let mut active = vec![false; n];
+            for &i in &free {
+                active[i] = true;
+            }
+            active
+        },
+        bounds: Bounds::new(
+            Array1::from_elem(3 * n, -extent),
+            Array1::from_elem(3 * n, extent),
+            0.0,
+        ),
+        template: base.clone(),
+    };
+    let references = load_references(Path::new(&reference_root), &params);
+    let minima: Vec<&Geometry> = references.iter().filter(|item| !item.saddle).collect();
+    let saddles: Vec<&Geometry> = references.iter().filter(|item| item.saddle).collect();
+    let lowest = minima
+        .iter()
+        .map(|item| item.energy)
+        .fold(f64::INFINITY, f64::min);
+    let saddles_below: Vec<&Geometry> = saddles
+        .iter()
+        .copied()
+        .filter(|item| item.energy - lowest < params.barrier_below_ev)
+        .collect();
+    println!(
+        "pt111 arm {arm} atoms {n} mobile {} cell {:.4} {:.4} {:.4} D {:.4} alpha {:.4} r0 {:.4} cutoff {:.4} barrier_below {:.4} problem_connected_saddles {:?} minima_loaded {} saddles_loaded {} saddles_below_barrier {} rmsd_kind pending",
+        island.len(),
+        cell[0],
+        cell[1],
+        cell[2],
+        params.depth,
+        params.alpha,
+        params.r0,
+        params.cutoff,
+        params.barrier_below_ev,
+        params.connected_saddles,
+        minima.len(),
+        saddles.len(),
+        saddles_below.len()
+    );
+    let cfg = configure(&species, &island, &base, arm);
+    let hardware = hardware_model();
+    let out_dir = std::env::var("PAPER_OUT").unwrap_or_else(|_| ".".into());
+    let mut quenched: Vec<(u64, f64, Array1<f64>)> = Vec::new();
+    let mut rmsd_kind = "unset";
+    for seed in seed0..seed0 + seeds {
+        let start = place_adsorbates(&base, &species, &island, box_, seed);
+        let mut ledger = Ledger::new(budget);
+        let (out, stats) = search_from(&surface, &cfg, &mut ledger, start.view(), seed);
+        let mut state = out.best_state.clone().unwrap_or_else(|| start.clone());
+        for (i, on) in surface.active.iter().enumerate() {
+            if !on {
+                for k in 0..3 {
+                    state[3 * i + k] = base[3 * i + k];
+                }
+            }
+        }
+        let (energy, _) = surface.energy_gradient(state.view());
+        let mobile = mobile_of(&state, &island);
+        let global_hit = minima
+            .iter()
+            .any(|item| item.energy <= lowest + 1e-8 && matched(energy, mobile.view(), item));
+        let distinct_minima = minima
+            .iter()
+            .filter(|item| matched(energy, mobile.view(), item))
+            .count();
+        if let Some(item) = minima.first() {
+            let (deviation, kind) = island_rmsd(item.mobile.view(), mobile.view());
+            rmsd_kind = kind;
+            let _ = deviation;
+        }
+        println!(
+            "seed {seed} best {energy:.6} charged {} hops {} converged {}/{} global_hit {global_hit} minima_matched {distinct_minima} hardware {hardware}",
+            ledger.spent(),
+            out.hops,
+            stats.converged,
+            stats.total(),
+        );
+        let mut manifest = RunManifest::new(format!("r9-pt111-{arm}-{seed}"), seed, budget as u64);
+        manifest.engine.build_identity = Some(format!("anneal-core {}", env!("CARGO_PKG_VERSION")));
+        let provenance = provenance_json(arm, seed, budget);
+        manifest.add_artifact("hardware-model", hardware.as_bytes());
+        manifest.add_artifact("provenance", provenance.as_bytes());
+        let json = manifest.to_json().expect("manifest");
+        std::fs::write(
+            Path::new(&out_dir).join(format!("pt111-{arm}-seed{seed}.provenance.json")),
+            &provenance,
+        )
+        .unwrap_or_else(|err| panic!("write provenance: {err}"));
+        let path = Path::new(&out_dir).join(format!("pt111-{arm}-seed{seed}.manifest.json"));
+        std::fs::write(&path, &json).unwrap_or_else(|err| panic!("write manifest: {err}"));
+        quenched.push((seed, energy, state));
+    }
+    println!("rmsd_kind {rmsd_kind}");
+    let dimer_steps = env_usize("DIMER_STEPS", 20);
+    let dimer_pairs = env_usize("DIMER_PAIRS", usize::MAX);
+    let mut certified = 0usize;
+    let mut matched_saddles = 0usize;
+    let mut false_edges = 0usize;
+    let mut attempted = 0usize;
+    for i in 0..quenched.len() {
+        for j in (i + 1)..quenched.len() {
+            if attempted >= dimer_pairs {
+                break;
+            }
+            attempted += 1;
+            let report = certify_edge(
+                &surface,
+                &island,
+                &quenched[i].2,
+                &quenched[j].2,
+                dimer_steps,
+            );
+            let Some((energy, mobile, curvature)) = report else {
+                continue;
+            };
+            let hit = saddles_below
+                .iter()
+                .any(|item| matched(energy, mobile.view(), item));
+            let negative = curvature < 0.0;
+            if negative {
+                certified += 1;
+                if hit {
+                    matched_saddles += 1;
+                } else if !saddles_below.is_empty() {
+                    false_edges += 1;
+                }
+            }
+            println!(
+                "dimer {} {} energy {energy:.6} curvature {curvature:.6} matched {hit}",
+                quenched[i].0, quenched[j].0
+            );
+        }
+    }
+    let false_text = if saddles_below.is_empty() {
+        "unscored".to_owned()
+    } else {
+        false_edges.to_string()
+    };
+    println!(
+        "summary arm {arm} seeds {seeds} quenched {} dimer_attempted {attempted} certified {certified} saddles_matched {matched_saddles} false_edges {false_text} saddles_below_barrier {}",
+        quenched.len(),
+        saddles_below.len()
+    );
+}
+
+#[cfg(feature = "rgsaddle")]
+fn certify_edge(
+    surface: &Surface,
+    mobile: &[usize],
+    left: &Array1<f64>,
+    right: &Array1<f64>,
+    steps: usize,
+) -> Option<(f64, Array1<f64>, f64)> {
+    use rgsaddle::{
+        ForceGate, MinModeConfig, MinModeKind, MinModeSession, PointSurface, SaddleError,
+    };
+    struct Island<'a> {
+        surface: &'a Surface,
+        mobile: &'a [usize],
+    }
+    impl PointSurface for Island<'_> {
+        fn eval(&self, x: ArrayView1<f64>) -> Result<(f64, Array1<f64>), SaddleError> {
+            if x.len() != 3 * self.mobile.len() {
+                return Err(SaddleError::Shape("mobile dimer vector".into()));
+            }
+            let mut full = self.surface.template.clone();
+            for (slot, &atom) in self.mobile.iter().enumerate() {
+                for k in 0..3 {
+                    full[3 * atom + k] = x[3 * slot + k];
+                }
+            }
+            let (energy, gradient) = self.surface.energy_gradient(full.view());
+            let mut mobile_gradient = Array1::zeros(x.len());
+            for (slot, &atom) in self.mobile.iter().enumerate() {
+                for k in 0..3 {
+                    mobile_gradient[3 * slot + k] = gradient[3 * atom + k];
+                }
+            }
+            Ok((energy, mobile_gradient))
+        }
+    }
+    let left_m = mobile_of(left, mobile);
+    let right_m = mobile_of(right, mobile);
+    let mut mode = &right_m - &left_m;
+    let norm = mode.dot(&mode).sqrt();
+    if norm < 1e-8 {
+        println!("dimer skipped: endpoints share a mobile geometry");
+        return None;
+    }
+    mode /= norm;
+    let start = (&left_m + &right_m) * 0.5;
+    let config = MinModeConfig {
+        kind: MinModeKind::Dimer,
+        force_gate: ForceGate::L2Norm,
+        force_tol: 1.0e-3,
+        max_rotations: env_usize("DIMER_ROTATIONS", 20),
+        ..MinModeConfig::default()
+    };
+    let island = Island { surface, mobile };
+    let mut session = MinModeSession::new(config, start, mode).ok()?;
+    let report = session.run(&island, steps.max(1)).ok()?;
+    let position = session.position().to_owned();
+    let (energy, _) = island.eval(position.view()).ok()?;
+    Some((energy, position, report.curvature))
+}
