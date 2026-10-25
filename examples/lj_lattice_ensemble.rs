@@ -60,6 +60,7 @@ use anneal_core::methods::cluster_search::{Encounter, median_encounter};
 use anneal_core::methods::lattice_ensemble::{self, Plan, Sharing};
 use anneal_core::methods::lattice_search::{Lattice, Quench};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use anneal_core::potentials::PairKind;
 use anneal_core::structure::cna_descriptor;
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
@@ -255,10 +256,9 @@ fn main() {
         memory: env_usize("QUENCH_MEMORY", Quench::default().memory),
         ..Quench::default()
     };
-    let lattice = Lattice {
-        candidates: env_usize("LATTICE_CANDIDATES", Lattice::default().candidates),
-        ..Lattice::default()
-    };
+    let kind = PairKind::LennardJones;
+    let mut lattice = Lattice::for_pair(kind);
+    lattice.candidates = env_usize("LATTICE_CANDIDATES", lattice.candidates);
     println!(
         "LJ N={n}, arm {arm}, total {total} per ensemble, {chains} chains x {} charged, \
          {ensembles} ensembles from seed {seed0}, threads {threads}, reference {}",
@@ -302,7 +302,9 @@ fn main() {
                 group
                     .par_iter()
                     .map(|&seed| {
-                        let run = lattice_ensemble::run(n, total, seed, &plan, &quench, &lattice);
+                        let run = lattice_ensemble::run_with_lattice(
+                            n, total, seed, &plan, &quench, &lattice,
+                        );
                         let solved = target.is_some_and(|r| run.best < r + HIT);
                         let hit = target.and_then(|r| {
                             run.trace.iter().find(|record| record.energy < r + HIT)
