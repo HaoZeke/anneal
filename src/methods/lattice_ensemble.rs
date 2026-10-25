@@ -155,6 +155,10 @@ pub struct Plan {
 }
 
 impl Default for Plan {
+    /// Frozen field values for the tabulated lattice runs.
+    ///
+    /// `plan_default_is_frozen` pins every field. A different default is
+    /// a different plan.
     fn default() -> Self {
         Self {
             chains: 40,
@@ -913,5 +917,42 @@ mod tests {
         let recommended_energy = quench_lj(&recommended, cfg.relax_steps);
         let serial_energy = quench_lj(&serial, cfg.relax_steps);
         assert_eq!(serial_energy.to_bits(), recommended_energy.to_bits());
+    }
+
+    #[test]
+    fn plan_default_is_frozen() {
+        let plan = Plan::default();
+        assert_eq!(plan.chains, 40);
+        assert_eq!(plan.slots, 1);
+        assert_eq!(plan.fresh.to_bits(), 0.3_f64.to_bits());
+        assert_eq!(plan.splice.to_bits(), 0.2_f64.to_bits());
+        assert_eq!(plan.moved, (1, 4));
+        assert_eq!(plan.merge.0.to_bits(), 0.5_f64.to_bits());
+        assert_eq!(plan.merge.1.to_bits(), 0.5_f64.to_bits());
+        assert_eq!(plan.retire, 20);
+        assert_eq!(plan.start, StartRule::PresetSphere);
+        assert_eq!(plan.min_separation.to_bits(), 0.85_f64.to_bits());
+        assert_eq!(plan.sharing, Sharing::Shared);
+    }
+
+    #[test]
+    fn a_zero_splice_rate_never_splices() {
+        let plan = Plan {
+            chains: 4,
+            slots: 2,
+            fresh: 0.0,
+            splice: 0.0,
+            ..Plan::default()
+        };
+        let run = run(
+            13,
+            400,
+            1,
+            &plan,
+            &Quench::default(),
+            PairKind::LennardJones,
+        );
+        assert_eq!(run.trials[Origin::Spliced.index()], 0);
+        assert_eq!(run.admitted[Origin::Spliced.index()], 0);
     }
 }
