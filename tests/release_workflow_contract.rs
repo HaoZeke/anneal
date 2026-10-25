@@ -11,7 +11,7 @@ fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
     let manifest = include_str!("../Cargo.toml");
     let workflow = include_str!("../.github/workflows/ci.yml");
 
-    assert!(manifest.contains("rgpot-core = { version = \"=3.0.2\", git = \"https://github.com/HaoZeke/potlib.git\", rev = \"386c0342e008903472925ad78f8f32a91db51e14\""));
+    assert!(manifest.contains("rgpot-core = { version = \"=3.5.1\", optional = true }"));
     assert!(manifest.contains("linkcell    = { version = \"=0.3.11\", default-features = false }"));
     assert!(manifest.contains("eindir-core = { version = \"0.6.0\", features = [\"capi\"] }"));
     assert!(manifest.contains("rgmin = \"0.5.0\""));
