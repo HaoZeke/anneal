@@ -7,12 +7,7 @@ use anneal_core::methods::feynman_kac::{
 };
 
 fn coefficients() -> SelectionCoefficients {
-    SelectionCoefficients {
-        energy: 1.0,
-        novelty: 0.8,
-        scarcity: 0.6,
-        log_weight_clip: 4.0,
-    }
+    SelectionCoefficients::default()
 }
 
 #[test]
@@ -29,10 +24,10 @@ fn energy_ranks_are_invariant_to_positive_affine_units() {
 #[test]
 fn novelty_and_scarcity_protect_a_productive_second_funnel() {
     let evidence = [
-        BasinEvidence::new(0.0, 0.0, 0.0).unwrap(),
-        BasinEvidence::new(0.25, 1.0, 1.0).unwrap(),
-        BasinEvidence::new(0.75, 0.4, 0.5).unwrap(),
-        BasinEvidence::new(1.0, 0.2, 0.1).unwrap(),
+        BasinEvidence::new(0.0, 0.0, 0.0, 0.0).unwrap(),
+        BasinEvidence::new(0.25, 1.0, 1.0, 0.0).unwrap(),
+        BasinEvidence::new(0.75, 0.4, 0.5, 0.0).unwrap(),
+        BasinEvidence::new(1.0, 0.2, 0.1, 0.0).unwrap(),
     ];
     let plan = reconfiguration_plan(&evidence, coefficients(), 0.125, 2).unwrap();
 
@@ -45,10 +40,10 @@ fn novelty_and_scarcity_protect_a_productive_second_funnel() {
 #[test]
 fn systematic_reconfiguration_is_fixed_size_capped_and_replayable() {
     let evidence = [
-        BasinEvidence::new(0.0, 0.0, 0.0).unwrap(),
-        BasinEvidence::new(0.4, 0.2, 0.2).unwrap(),
-        BasinEvidence::new(0.7, 0.8, 0.7).unwrap(),
-        BasinEvidence::new(1.0, 1.0, 1.0).unwrap(),
+        BasinEvidence::new(0.0, 0.0, 0.0, 0.0).unwrap(),
+        BasinEvidence::new(0.4, 0.2, 0.2, 0.0).unwrap(),
+        BasinEvidence::new(0.7, 0.8, 0.7, 0.0).unwrap(),
+        BasinEvidence::new(1.0, 1.0, 1.0, 0.0).unwrap(),
     ];
 
     let first = reconfiguration_plan(&evidence, coefficients(), 0.375, 2).unwrap();
@@ -64,7 +59,7 @@ fn systematic_reconfiguration_is_fixed_size_capped_and_replayable() {
 
 #[test]
 fn equal_evidence_preserves_one_parent_per_chain() {
-    let evidence = [BasinEvidence::new(0.5, 0.5, 0.5).unwrap(); 4];
+    let evidence = [BasinEvidence::new(0.5, 0.5, 0.5, 0.0).unwrap(); 4];
     let plan = reconfiguration_plan(&evidence, coefficients(), 0.91, 2).unwrap();
 
     assert_eq!(plan.parents(), &[0, 1, 2, 3]);
@@ -76,21 +71,67 @@ fn equal_evidence_preserves_one_parent_per_chain() {
 
 #[test]
 fn invalid_ranks_and_offsets_are_rejected() {
-    assert!(BasinEvidence::new(-0.1, 0.5, 0.5).is_err());
-    assert!(BasinEvidence::new(0.5, f64::NAN, 0.5).is_err());
+    assert!(BasinEvidence::new(-0.1, 0.5, 0.5, 0.0).is_err());
+    assert!(BasinEvidence::new(0.5, f64::NAN, 0.5, 0.0).is_err());
+    assert!(BasinEvidence::new(0.5, 0.5, 0.5, 1.1).is_err());
 
-    let evidence = [BasinEvidence::new(0.5, 0.5, 0.5).unwrap(); 4];
+    let evidence = [BasinEvidence::new(0.5, 0.5, 0.5, 0.0).unwrap(); 4];
     assert!(reconfiguration_plan(&evidence, coefficients(), 1.0, 2).is_err());
     assert!(reconfiguration_plan(&evidence, coefficients(), 0.5, 0).is_err());
+    let mut negative = coefficients();
+    negative.uncertainty = -0.1;
+    assert!(reconfiguration_plan(&evidence, negative, 0.5, 2).is_err());
+}
+
+#[test]
+fn default_log_weight_is_the_four_rank_formula() {
+    let coefficients = coefficients();
+    assert_eq!(coefficients.energy, 1.0);
+    assert_eq!(coefficients.novelty, 0.8);
+    assert_eq!(coefficients.scarcity, 0.6);
+    assert_eq!(coefficients.uncertainty, 0.4);
+    assert_eq!(coefficients.log_weight_clip, 4.0);
+
+    // log w = -r_E + 0.8 r_N + 0.6 r_S + 0.4 r_U
+    // A 0.4, B 0.4, C 0.4, D 0.8 before the max is removed.
+    let evidence = [
+        BasinEvidence::new(0.0, 0.0, 0.0, 1.0).unwrap(),
+        BasinEvidence::new(1.0, 1.0, 1.0, 0.0).unwrap(),
+        BasinEvidence::new(0.5, 0.5, 0.5, 0.5).unwrap(),
+        BasinEvidence::new(0.0, 1.0, 0.0, 0.0).unwrap(),
+    ];
+    let plan = reconfiguration_plan(&evidence, coefficients, 0.0, 2).unwrap();
+
+    let logs = [0.4_f64, 0.4, 0.4, 0.8];
+    let maximum = logs.into_iter().fold(f64::NEG_INFINITY, f64::max);
+    let shifted = logs.map(|value| (value - maximum).max(-coefficients.log_weight_clip));
+    let normalizer: f64 = shifted.iter().map(|value| value.exp()).sum();
+    let expected = shifted.map(|value| value.exp() / normalizer);
+    for (got, want) in plan.weights().iter().zip(expected) {
+        assert!((got - want).abs() < 1e-12, "{got} != {want}");
+    }
+
+    // The same ranks with the uncertainty coefficient removed move the weights.
+    let mut three_term = coefficients;
+    three_term.uncertainty = 0.0;
+    let three = reconfiguration_plan(&evidence, three_term, 0.0, 2).unwrap();
+    assert!((plan.weights()[0] - three.weights()[0]).abs() > 1e-6);
+
+    // Offset 0, four weights near (0.223, 0.223, 0.223, 0.332):
+    // thresholds 0, 0.25, 0.5, 0.75 land on parents 0, 1, 2, 3.
+    // The family cap of 2 does not move a one-child family.
+    assert_eq!(plan.parents(), &[0, 1, 2, 3]);
+    assert_eq!(plan.diagnostics().max_family_size, 1);
+    assert!(plan.weights()[3] > plan.weights()[0]);
 }
 
 #[test]
 fn coordinator_ranks_raw_population_evidence_once_per_epoch() {
     let members = [
-        PopulationMember::new(11, -397.0, 0.2, 12.0).unwrap(),
-        PopulationMember::new(17, -399.0, 0.9, 2.0).unwrap(),
-        PopulationMember::new(23, -398.0, 0.6, 5.0).unwrap(),
-        PopulationMember::new(29, -396.0, 0.1, 20.0).unwrap(),
+        PopulationMember::new(11, -397.0, 0.2, 12.0, 0.0).unwrap(),
+        PopulationMember::new(17, -399.0, 0.9, 2.0, 0.0).unwrap(),
+        PopulationMember::new(23, -398.0, 0.6, 5.0, 0.0).unwrap(),
+        PopulationMember::new(29, -396.0, 0.1, 20.0, 0.0).unwrap(),
     ];
     let ranked = rank_population(&members).unwrap();
 
@@ -100,12 +141,35 @@ fn coordinator_ranks_raw_population_evidence_once_per_epoch() {
     assert_eq!(ranked[1].evidence().scarcity_rank(), 1.0);
     assert_eq!(ranked[3].evidence().energy_rank(), 1.0);
     assert_eq!(ranked[3].evidence().scarcity_rank(), 0.0);
+    assert_eq!(ranked[0].evidence().uncertainty_rank(), 0.5);
+    assert_eq!(ranked[3].evidence().uncertainty_rank(), 0.5);
+}
+
+#[test]
+fn graph_field_uncertainty_is_ranked_with_the_population() {
+    let members = [
+        PopulationMember::new(0, -10.0, 0.5, 2.0, 0.1).unwrap(),
+        PopulationMember::new(1, -10.0, 0.5, 2.0, 0.4).unwrap(),
+        PopulationMember::new(2, -10.0, 0.5, 2.0, 0.9).unwrap(),
+        PopulationMember::new(3, -10.0, 0.5, 2.0, 0.2).unwrap(),
+    ];
+    let ranked = rank_population(&members).unwrap();
+
+    assert_eq!(ranked[0].evidence().uncertainty_rank(), 0.0);
+    assert!((ranked[1].evidence().uncertainty_rank() - 2.0 / 3.0).abs() < 1e-12);
+    assert_eq!(ranked[2].evidence().uncertainty_rank(), 1.0);
+    assert!((ranked[3].evidence().uncertainty_rank() - 1.0 / 3.0).abs() < 1e-12);
+
+    let low = ranked[0].evidence();
+    let high = ranked[2].evidence();
+    let plan = reconfiguration_plan(&[low, high], coefficients(), 0.0, 2).unwrap();
+    assert!(plan.weights()[1] > plan.weights()[0]);
 }
 
 #[test]
 fn scarcity_is_inverse_visit_count_but_ranking_is_scale_free() {
-    let first = PopulationMember::new(0, -10.0, 0.5, 1.0).unwrap();
-    let second = PopulationMember::new(1, -10.0, 0.5, 50.0).unwrap();
+    let first = PopulationMember::new(0, -10.0, 0.5, 1.0, 0.0).unwrap();
+    let second = PopulationMember::new(1, -10.0, 0.5, 50.0, 0.0).unwrap();
     let ranked = rank_population(&[first, second]).unwrap();
 
     assert_eq!(ranked[0].evidence().scarcity_rank(), 1.0);
@@ -115,8 +179,8 @@ fn scarcity_is_inverse_visit_count_but_ranking_is_scale_free() {
 #[test]
 fn transition_diagnostics_are_not_population_selection_evidence() {
     let transition_diagnostics = [0.1, 0.9];
-    let first = PopulationMember::new(0, -10.0, 0.5, 2.0).unwrap();
-    let second = PopulationMember::new(1, -10.0, 0.5, 2.0).unwrap();
+    let first = PopulationMember::new(0, -10.0, 0.5, 2.0, 0.0).unwrap();
+    let second = PopulationMember::new(1, -10.0, 0.5, 2.0, 0.0).unwrap();
     let ranked = rank_population(&[first, second]).unwrap();
 
     assert_ne!(transition_diagnostics[0], transition_diagnostics[1]);
@@ -130,11 +194,13 @@ fn transition_diagnostics_are_not_population_selection_evidence() {
 
 #[test]
 fn raw_population_rejects_duplicate_replicas_and_nonfinite_metrics() {
-    assert!(PopulationMember::new(0, f64::NAN, 0.5, 1.0).is_err());
-    assert!(PopulationMember::new(0, -1.0, -0.1, 1.0).is_err());
-    assert!(PopulationMember::new(0, -1.0, 0.1, 0.0).is_err());
+    assert!(PopulationMember::new(0, f64::NAN, 0.5, 1.0, 0.0).is_err());
+    assert!(PopulationMember::new(0, -1.0, -0.1, 1.0, 0.0).is_err());
+    assert!(PopulationMember::new(0, -1.0, 0.1, 0.0, 0.0).is_err());
+    assert!(PopulationMember::new(0, -1.0, 0.1, 1.0, -0.2).is_err());
+    assert!(PopulationMember::new(0, -1.0, 0.1, 1.0, f64::INFINITY).is_err());
 
-    let member = PopulationMember::new(3, -1.0, 0.1, 1.0).unwrap();
+    let member = PopulationMember::new(3, -1.0, 0.1, 1.0, 0.0).unwrap();
     assert!(rank_population(&[member, member]).is_err());
 }
 
@@ -142,10 +208,10 @@ fn raw_population_rejects_duplicate_replicas_and_nonfinite_metrics() {
 fn synchronous_epoch_waits_for_every_replica_and_returns_replica_parents() {
     let mut population = SynchronousPopulation::new([0, 1, 2, 3], coefficients(), 2, 91).unwrap();
     let members = [
-        PopulationMember::new(0, -10.0, 0.2, 8.0).unwrap(),
-        PopulationMember::new(1, -11.0, 0.9, 1.0).unwrap(),
-        PopulationMember::new(2, -9.0, 0.5, 3.0).unwrap(),
-        PopulationMember::new(3, -8.0, 0.1, 13.0).unwrap(),
+        PopulationMember::new(0, -10.0, 0.2, 8.0, 0.0).unwrap(),
+        PopulationMember::new(1, -11.0, 0.9, 1.0, 0.0).unwrap(),
+        PopulationMember::new(2, -9.0, 0.5, 3.0, 0.0).unwrap(),
+        PopulationMember::new(3, -8.0, 0.1, 13.0, 0.0).unwrap(),
     ];
 
     for (submitted, member) in members.into_iter().enumerate() {
@@ -174,14 +240,14 @@ fn synchronous_epoch_waits_for_every_replica_and_returns_replica_parents() {
 #[test]
 fn synchronous_epoch_replay_is_idempotent_and_conflicts_are_rejected() {
     let mut population = SynchronousPopulation::new([4, 9], coefficients(), 1, 71).unwrap();
-    let first = PopulationMember::new(4, -4.0, 0.4, 2.0).unwrap();
+    let first = PopulationMember::new(4, -4.0, 0.4, 2.0, 0.0).unwrap();
 
     let pending = population.submit(0, first).unwrap();
     assert_eq!(population.submit(0, first).unwrap(), pending);
-    let conflict = PopulationMember::new(4, -5.0, 0.4, 2.0).unwrap();
+    let conflict = PopulationMember::new(4, -5.0, 0.4, 2.0, 0.0).unwrap();
     assert!(population.submit(0, conflict).is_err());
 
-    let second = PopulationMember::new(9, -3.0, 0.8, 1.0).unwrap();
+    let second = PopulationMember::new(9, -3.0, 0.8, 1.0, 0.0).unwrap();
     let ready = population.submit(0, second).unwrap();
     assert_eq!(population.submit(0, second).unwrap(), ready);
 }
@@ -191,12 +257,12 @@ fn synchronous_epoch_rejects_unknown_replicas_and_skipped_epochs() {
     let mut population = SynchronousPopulation::new([0, 1], coefficients(), 1, 5).unwrap();
     assert!(
         population
-            .submit(0, PopulationMember::new(7, -1.0, 0.2, 1.0).unwrap())
+            .submit(0, PopulationMember::new(7, -1.0, 0.2, 1.0, 0.0).unwrap())
             .is_err()
     );
     assert!(
         population
-            .submit(1, PopulationMember::new(0, -1.0, 0.2, 1.0).unwrap())
+            .submit(1, PopulationMember::new(0, -1.0, 0.2, 1.0, 0.0).unwrap())
             .is_err()
     );
 }
@@ -234,7 +300,8 @@ fn an_abstaining_replica_releases_the_epoch_instead_of_holding_it_open() {
     // its peers finished and left.
     let mut population = SynchronousPopulation::new([0, 1, 2, 3], coefficients(), 2, 17).unwrap();
     for replica in 0..3u32 {
-        let member = PopulationMember::new(replica, -10.0 + f64::from(replica), 0.3, 2.0).unwrap();
+        let member =
+            PopulationMember::new(replica, -10.0 + f64::from(replica), 0.3, 2.0, 0.0).unwrap();
         assert!(matches!(
             population.submit(0, member).unwrap(),
             EpochSubmissionOutcome::Pending { .. }
@@ -259,7 +326,7 @@ fn an_abstaining_replica_releases_the_epoch_instead_of_holding_it_open() {
 fn abstention_applies_to_one_epoch_and_not_to_the_next() {
     let mut population = SynchronousPopulation::new([0, 1], coefficients(), 1, 23).unwrap();
     population
-        .submit(0, PopulationMember::new(0, -5.0, 0.4, 1.0).unwrap())
+        .submit(0, PopulationMember::new(0, -5.0, 0.4, 1.0, 0.0).unwrap())
         .unwrap();
     assert!(matches!(
         population.abstain(0, 1).unwrap(),
@@ -269,7 +336,7 @@ fn abstention_applies_to_one_epoch_and_not_to_the_next() {
     // Replica 1 abstained because its own state offered nothing at that
     // barrier, which says nothing about the next one.
     let outcome = population
-        .submit(1, PopulationMember::new(0, -6.0, 0.4, 1.0).unwrap())
+        .submit(1, PopulationMember::new(0, -6.0, 0.4, 1.0, 0.0).unwrap())
         .unwrap();
 
     assert_eq!(
@@ -313,7 +380,7 @@ fn an_epoch_every_replica_abstains_from_closes_vacantly() {
     );
     // The next epoch is open and both replicas are expected again.
     let outcome = population
-        .submit(1, PopulationMember::new(0, -3.0, 0.2, 1.0).unwrap())
+        .submit(1, PopulationMember::new(0, -3.0, 0.2, 1.0, 0.0).unwrap())
         .unwrap();
     assert_eq!(
         outcome,
@@ -343,7 +410,8 @@ fn live_replicas_close_an_epoch_without_the_unstarted_roster() {
 
     let mut last = None;
     for replica in 0..3u32 {
-        let member = PopulationMember::new(replica, -10.0 + f64::from(replica), 0.3, 2.0).unwrap();
+        let member =
+            PopulationMember::new(replica, -10.0 + f64::from(replica), 0.3, 2.0, 0.0).unwrap();
         last = Some(population.submit(0, member).unwrap());
         if replica < 2 {
             assert_eq!(
@@ -369,7 +437,7 @@ fn a_single_live_replica_cannot_close_the_configured_roster() {
     let mut population = SynchronousPopulation::new(0u32..8, coefficients(), 2, 29).unwrap();
     population.mark_live(0).unwrap();
     let outcome = population
-        .submit(0, PopulationMember::new(0, -10.0, 0.3, 2.0).unwrap())
+        .submit(0, PopulationMember::new(0, -10.0, 0.3, 2.0, 0.0).unwrap())
         .unwrap();
     assert_eq!(
         outcome,
@@ -385,7 +453,7 @@ fn a_single_live_replica_cannot_close_the_configured_roster() {
 fn an_unmarked_population_still_waits_for_every_configured_replica() {
     let mut population = SynchronousPopulation::new([0, 1, 2, 3], coefficients(), 2, 13).unwrap();
     let outcome = population
-        .submit(0, PopulationMember::new(0, -10.0, 0.3, 2.0).unwrap())
+        .submit(0, PopulationMember::new(0, -10.0, 0.3, 2.0, 0.0).unwrap())
         .unwrap();
     assert_eq!(
         outcome,
@@ -408,7 +476,8 @@ fn retiring_a_live_replica_closes_without_that_replica() {
 
     let mut last = None;
     for replica in [0u32, 1, 3] {
-        let member = PopulationMember::new(replica, -10.0 + f64::from(replica), 0.3, 2.0).unwrap();
+        let member =
+            PopulationMember::new(replica, -10.0 + f64::from(replica), 0.3, 2.0, 0.0).unwrap();
         last = Some(population.submit(0, member).unwrap());
     }
 
@@ -528,7 +597,7 @@ fn an_attached_replica_is_required_by_the_open_barrier() {
     assert_eq!(population.live_replicas(), vec![2]);
 
     let first = population
-        .submit(0, PopulationMember::new(0, -4.0, 0.4, 2.0).unwrap())
+        .submit(0, PopulationMember::new(0, -4.0, 0.4, 2.0, 0.0).unwrap())
         .unwrap();
     assert_eq!(
         first,
@@ -539,10 +608,10 @@ fn an_attached_replica_is_required_by_the_open_barrier() {
         }
     );
     population
-        .submit(0, PopulationMember::new(1, -3.0, 0.8, 1.0).unwrap())
+        .submit(0, PopulationMember::new(1, -3.0, 0.8, 1.0, 0.0).unwrap())
         .unwrap();
     let ready = population
-        .submit(0, PopulationMember::new(2, -5.0, 0.2, 1.0).unwrap())
+        .submit(0, PopulationMember::new(2, -5.0, 0.2, 1.0, 0.0).unwrap())
         .unwrap();
     let EpochSubmissionOutcome::Ready(plan) = ready else {
         panic!("the attached replica must close the epoch it is required by")
@@ -561,10 +630,10 @@ fn the_barrier_closes_on_quorum_once_the_deadline_passes() {
         "nothing submitted, nothing to close"
     );
     population
-        .submit(0, PopulationMember::new(0, -10.0, 0.2, 8.0).unwrap())
+        .submit(0, PopulationMember::new(0, -10.0, 0.2, 8.0, 0.0).unwrap())
         .unwrap();
     population
-        .submit(0, PopulationMember::new(1, -11.0, 0.9, 1.0).unwrap())
+        .submit(0, PopulationMember::new(1, -11.0, 0.9, 1.0, 0.0).unwrap())
         .unwrap();
     assert!(population.tick().unwrap().is_none());
     assert!(population.tick().unwrap().is_none());
@@ -578,7 +647,7 @@ fn the_barrier_closes_on_quorum_once_the_deadline_passes() {
     // A late submission to the closed epoch is answered with its plan and
     // finds itself unaddressed there rather than reopening the barrier.
     let late = population
-        .submit(0, PopulationMember::new(2, -9.0, 0.5, 3.0).unwrap())
+        .submit(0, PopulationMember::new(2, -9.0, 0.5, 3.0, 0.0).unwrap())
         .unwrap();
     let EpochSubmissionOutcome::Ready(plan) = late else {
         panic!("a closed epoch answers with its plan")
@@ -593,7 +662,7 @@ fn a_quorum_short_barrier_outlasts_the_deadline() {
         .with_quorum(0.75, 2)
         .unwrap();
     population
-        .submit(0, PopulationMember::new(0, -10.0, 0.2, 8.0).unwrap())
+        .submit(0, PopulationMember::new(0, -10.0, 0.2, 8.0, 0.0).unwrap())
         .unwrap();
     for _ in 0..5 {
         assert!(population.tick().unwrap().is_none());
