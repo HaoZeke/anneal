@@ -769,7 +769,8 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                         &mut rng,
                         ens.checkpoint_interval,
                         &mut checkpoint,
-                    );
+                    )
+                    .expect("finite start");
                     if first_target_calls.is_none() && target.is_some_and(|t| outcome.best < t) {
                         first_target_calls = Some(charged_total.load(Ordering::SeqCst));
                     }

@@ -454,6 +454,17 @@ impl QuenchBoundary {
     }
 }
 
+/// A search stopped because no initial quench was finite.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SearchError {
+    /// The initial evaluation was non-finite on every attempt.
+    #[error("no finite start after {attempts} attempts")]
+    NoFiniteStart {
+        /// Quenches tried before the search stopped.
+        attempts: usize,
+    },
+}
+
 /// Charged objective-work ledger with optional per-relaxation evidence.
 pub struct Ledger {
     budget: usize,
@@ -470,6 +481,10 @@ pub struct Ledger {
     /// Energy at or below which the hop may stop.
     target: Option<f64>,
     stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// How many initial quenches to try before [`SearchError::NoFiniteStart`].
+    start_attempts: usize,
+    /// Geometries drawn after a non-finite initial quench, in order.
+    start_redraws: Vec<Array1<f64>>,
 }
 
 struct DiagnosticQuench<'a> {
@@ -510,7 +525,26 @@ impl Ledger {
             diagnostic_quench: false,
             target: None,
             stop: None,
+            start_attempts: Self::DEFAULT_START_ATTEMPTS,
+            start_redraws: Vec::new(),
         }
+    }
+
+    /// Initial quenches tried when the first evaluation is non-finite.
+    pub const DEFAULT_START_ATTEMPTS: usize = 8;
+
+    /// Caps the initial-quench redraws. Values below 1 are raised to 1.
+    pub fn set_start_attempts(&mut self, attempts: usize) {
+        self.start_attempts = attempts.max(1);
+    }
+
+    /// Starts drawn after a refused initial evaluation, oldest first.
+    pub fn start_redraws(&self) -> &[Array1<f64>] {
+        &self.start_redraws
+    }
+
+    fn note_start_redraw(&mut self, state: ArrayView1<f64>) {
+        self.start_redraws.push(state.to_owned());
     }
 
     /// Stop once a recorded energy is at or below `energy`.
@@ -1143,7 +1177,7 @@ pub fn run<R: Rng + ?Sized>(
     ledger: &mut Ledger,
     relax: Relax<'_>,
     rng: &mut R,
-) -> Outcome {
+) -> Result<Outcome, SearchError> {
     run_with_gradient(cfg, start, ledger, relax, None, rng)
 }
 
@@ -1160,7 +1194,7 @@ pub fn run_with_gradient_settle<'g, R: Rng + ?Sized>(
     grad: Option<&mut GradFn<'g>>,
     settle: Option<Settle<'_>>,
     rng: &mut R,
-) -> Outcome {
+) -> Result<Outcome, SearchError> {
     let mut checkpoint = continue_without_checkpoint;
     run_full(
         cfg,
@@ -1186,7 +1220,7 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
     relax: Relax<'_>,
     grad: Option<&mut GradFn<'g>>,
     rng: &mut R,
-) -> Outcome {
+) -> Result<Outcome, SearchError> {
     let mut checkpoint = continue_without_checkpoint;
     run_full(
         cfg,
@@ -1214,7 +1248,7 @@ pub fn run_with_energy_gradient<'g, R: Rng + ?Sized>(
     grad: Option<&mut GradFn<'g>>,
     energy_grad: Option<&mut EnergyGradFn<'g>>,
     rng: &mut R,
-) -> Outcome {
+) -> Result<Outcome, SearchError> {
     let mut checkpoint = continue_without_checkpoint;
     run_full(
         cfg,
@@ -1246,7 +1280,7 @@ pub fn run_with_energy_gradient_at_checkpoints<'g, R, H>(
     rng: &mut R,
     checkpoint_interval: usize,
     checkpoint: &mut H,
-) -> Outcome
+) -> Result<Outcome, SearchError>
 where
     R: Rng + ?Sized,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
@@ -1292,7 +1326,7 @@ pub fn run_with_bias<'g, R: Rng + ?Sized>(
     grad: Option<&mut GradFn<'g>>,
     bias: &mut BasinBias<ClusterFingerprint>,
     rng: &mut R,
-) -> Outcome {
+) -> Result<Outcome, SearchError> {
     assert!(
         cfg.replicas <= 1,
         "a shared bias and a replica ladder are different things: \
@@ -1327,7 +1361,7 @@ pub fn run_with_bias_at_checkpoints<'g, R, H>(
     rng: &mut R,
     checkpoint_interval: usize,
     checkpoint: &mut H,
-) -> Outcome
+) -> Result<Outcome, SearchError>
 where
     R: Rng + ?Sized,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
@@ -1377,7 +1411,7 @@ pub fn run_with_history_at_checkpoints<'g, R, H>(
     rng: &mut R,
     checkpoint_interval: usize,
     checkpoint: &mut H,
-) -> Outcome
+) -> Result<Outcome, SearchError>
 where
     R: Rng + ?Sized,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
@@ -1896,6 +1930,21 @@ fn finish_improving(
 /// Continuations [`finish_improving`] grants one relaxation.
 const FINISH_ROUNDS: usize = 8;
 
+/// A caller stop during the opening quench is not a refused potential.
+///
+/// The ledger may hold no finite minimum yet. The search still returns
+/// that record, and it does not draw another start.
+fn outcome_when_start_was_stopped(ledger: &Ledger, x: &Array1<f64>, energy: f64) -> Outcome {
+    Outcome {
+        best: ledger.best,
+        best_state: ledger.best_state.clone(),
+        final_state: Some(x.clone()),
+        final_energy: energy,
+        charged: ledger.spent(),
+        ..Outcome::default()
+    }
+}
+
 fn run_full<'g, R, H>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -1909,7 +1958,7 @@ fn run_full<'g, R, H>(
     checkpoint_interval: Option<usize>,
     checkpoint: &mut H,
     rng: &mut R,
-) -> Outcome
+) -> Result<Outcome, SearchError>
 where
     R: Rng + ?Sized,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
@@ -1958,17 +2007,70 @@ where
     // The first quench supplies a stable canonical reference before the bias
     // is built. Reporting it as a minimum additionally requires the same
     // geometry and gradient contract as every subsequent quench.
-    let (mut e, mut x) = relax(ledger, start, cfg.relax_steps);
-    let initial_sane = quench_is_sane(cfg, e, x.view());
+    let attempts = ledger.start_attempts.max(1);
+    let mut x = start.to_owned();
+    let mut e = f64::NAN;
+    let mut initial_validation_gradient: Option<Array1<f64>> = None;
+    let mut initial_recordable = false;
     let gradient_required = grad.is_some();
-    let initial_validation_gradient = initial_sane.then(|| {
-        grad.as_deref_mut().and_then(|g| {
-            g(ledger, x.view()).filter(|values| answer_gradient_ok(cfg, values.view(), x.len()))
-        })
-    });
-    let initial_validation_gradient = initial_validation_gradient.flatten();
-    let initial_recordable = initial_sane
-        && (ledger.below_target(e) || !gradient_required || initial_validation_gradient.is_some());
+    for attempt in 0..attempts {
+        // `remaining` is also zero when the caller has stopped. That is a
+        // finished search, not a potential that refused every start.
+        if ledger.stopped() {
+            return Ok(outcome_when_start_was_stopped(ledger, &x, e));
+        }
+        if attempt > 0 {
+            if ledger.remaining() == 0 {
+                return Err(SearchError::NoFiniteStart { attempts: attempt });
+            }
+            let mut fresh = random_cluster_in_radius(
+                n,
+                cfg.start_radius().max(cfg.min_separation),
+                cfg.min_separation,
+                rng,
+            );
+            if fresh.len() != x.len() {
+                fresh = x.clone();
+                if let Some(coord) = fresh.first_mut() {
+                    *coord += 0.25;
+                }
+            }
+            ledger.note_start_redraw(fresh.view());
+            x = fresh;
+        }
+        let quenched = relax(ledger, x.view(), cfg.relax_steps);
+        e = quenched.0;
+        x = quenched.1;
+        if !e.is_finite() {
+            if ledger.stopped() {
+                return Ok(outcome_when_start_was_stopped(ledger, &x, e));
+            }
+            if attempt + 1 == attempts {
+                return Err(SearchError::NoFiniteStart {
+                    attempts: attempt + 1,
+                });
+            }
+            continue;
+        }
+        let initial_sane = quench_is_sane(cfg, e, x.view());
+        let nested = initial_sane.then(|| {
+            grad.as_deref_mut().and_then(|g| {
+                g(ledger, x.view()).filter(|values| answer_gradient_ok(cfg, values.view(), x.len()))
+            })
+        });
+        initial_validation_gradient = nested.flatten();
+        initial_recordable = initial_sane
+            && (ledger.below_target(e)
+                || !gradient_required
+                || initial_validation_gradient.is_some());
+        break;
+    }
+    if !e.is_finite() {
+        if ledger.stopped() {
+            return Ok(outcome_when_start_was_stopped(ledger, &x, e));
+        }
+        return Err(SearchError::NoFiniteStart { attempts });
+    }
     if initial_recordable {
         ledger.record(e, x.view());
     }
@@ -5880,7 +5982,7 @@ where
         *slot = bias;
     }
 
-    Outcome {
+    Ok(Outcome {
         best: ledger.best,
         best_state: ledger.best_state.clone(),
         final_state: Some(x.clone()),
@@ -6039,7 +6141,7 @@ where
             r
         }),
         energy_bias: ebias,
-    }
+    })
 }
 
 /// Seeds a non-overlapping configuration at liquid-like density.
@@ -6203,7 +6305,12 @@ fn random_rigid_reseed<R: Rng + ?Sized>(cfg: &Config, rng: &mut R) -> Array1<f64
 }
 
 /// Convenience entry point seeding its own start.
-pub fn optimize(cfg: &Config, ledger: &mut Ledger, relax: Relax<'_>, seed: u64) -> Outcome {
+pub fn optimize(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    seed: u64,
+) -> Result<Outcome, SearchError> {
     optimize_with_gradient(cfg, ledger, relax, None, seed)
 }
 
@@ -6215,7 +6322,7 @@ pub fn optimize_with_settle<'g>(
     grad: Option<&mut GradFn<'g>>,
     settle: Option<Settle<'_>>,
     seed: u64,
-) -> Outcome {
+) -> Result<Outcome, SearchError> {
     let mut rng = StdRng::seed_from_u64(seed);
     let start = random_cluster_in_radius(
         cfg.n_points,
@@ -6233,7 +6340,7 @@ pub fn optimize_with_gradient<'g>(
     relax: Relax<'_>,
     grad: Option<&mut GradFn<'g>>,
     seed: u64,
-) -> Outcome {
+) -> Result<Outcome, SearchError> {
     let mut rng = StdRng::seed_from_u64(seed);
     let start = random_cluster_in_radius(
         cfg.n_points,
@@ -6253,7 +6360,7 @@ pub fn optimize_with_energy_gradient<'g>(
     grad: Option<&mut GradFn<'g>>,
     energy_grad: Option<&mut EnergyGradFn<'g>>,
     seed: u64,
-) -> Outcome {
+) -> Result<Outcome, SearchError> {
     let mut rng = StdRng::seed_from_u64(seed);
     let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
     run_with_energy_gradient(
@@ -6538,7 +6645,8 @@ mod tests {
             None,
             &mut bias,
             &mut rng,
-        );
+        )
+        .expect("finite start");
         let after_first = bias.n_basins();
         assert!(after_first > 0, "the first chain deposited nothing");
 
@@ -6552,7 +6660,8 @@ mod tests {
             None,
             &mut bias,
             &mut rng,
-        );
+        )
+        .expect("finite start");
         assert!(
             out.basins >= after_first,
             "the second chain saw {} basins where the first left {after_first}",
@@ -6740,7 +6849,7 @@ mod tests {
             let e = x.iter().map(|v| v * v).sum::<f64>();
             (e, x.to_owned())
         };
-        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng);
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
         assert!(
             out.returned >= 1,
             "expected returning trials, got {}",
@@ -6787,7 +6896,7 @@ mod tests {
             let e = x.iter().map(|v| v * v).sum::<f64>();
             (e, x.to_owned())
         };
-        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng);
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
         assert!(
             out.returned >= 1,
             "expected returning trials, got {}",
@@ -6908,7 +7017,7 @@ mod tests {
             &witness,
             HistoryMembership::Accepted,
         );
-        let out1 = run(1, &mut first);
+        let out1 = run(1, &mut first).expect("finite start");
         assert!(
             out1.history_visits.0 > 0,
             "the first chain reported nothing"
@@ -6925,7 +7034,7 @@ mod tests {
             &witness,
             HistoryMembership::Accepted,
         );
-        let out2 = run(2, &mut second);
+        let out2 = run(2, &mut second).expect("finite start");
         assert!(
             out2.history_visits.0 > 0,
             "the second chain reported nothing"
@@ -7006,7 +7115,7 @@ mod tests {
             &witness,
             HistoryMembership::Accepted,
         );
-        let _ = run(1, &mut first);
+        let _ = run(1, &mut first).expect("finite start");
         let mut second = SharedMinimumHistory::new(
             &history,
             &descriptor,
@@ -7014,7 +7123,7 @@ mod tests {
             &witness,
             HistoryMembership::Accepted,
         );
-        let out2 = run(2, &mut second);
+        let out2 = run(2, &mut second).expect("finite start");
         assert_eq!(
             out2.visit_counts.1, 0,
             "recognition must not inherit the peer well as known: {:?}",
@@ -7051,7 +7160,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(7);
         let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
         let mut ledger = Ledger::new(8_000);
-        let _ = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng);
+        let _ = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
         assert!(full >= 1, "the first descent must certify the well");
         assert!(
             full < 6,
@@ -7083,7 +7192,7 @@ mod tests {
         };
         let mut ledger = Ledger::new(16);
         let mut rng = StdRng::seed_from_u64(41);
-        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng);
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
 
         assert_eq!(ledger.best, 0.0);
         assert_eq!(out.best, 0.0);
@@ -7116,7 +7225,8 @@ mod tests {
             &mut relax,
             Some(&mut grad),
             &mut rng,
-        );
+        )
+        .expect("finite start");
 
         assert!(out.best.is_infinite());
         assert!(out.best_state.is_none());
@@ -7143,11 +7253,105 @@ mod tests {
             &mut relax,
             Some(&mut grad),
             &mut rng,
-        );
+        )
+        .expect("finite start");
 
         assert!(out.best.is_infinite());
         assert!(out.best_state.is_none());
         assert!(out.improvements.is_empty());
+    }
+
+    #[test]
+    fn a_refused_start_redraws_until_a_finite_quench() {
+        let mut cfg = Config::for_cluster(4);
+        cfg.max_hops = Some(0);
+        let start = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.0, 1.2,
+        ]);
+        {
+            let mut calls = 0usize;
+            let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+                assert!(ledger.charge());
+                calls += 1;
+                if calls <= 3 {
+                    (f64::NAN, x.to_owned())
+                } else {
+                    (-1.0, x.to_owned())
+                }
+            };
+            let mut ledger = Ledger::new(32);
+            ledger.set_start_attempts(4);
+            let mut rng = StdRng::seed_from_u64(9);
+            let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng)
+                .expect("the fourth quench is finite");
+            assert_eq!(out.best, -1.0);
+            assert_eq!(ledger.start_redraws().len(), 3);
+            assert!(ledger.best.is_finite());
+        }
+        {
+            let mut calls = 0usize;
+            let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+                assert!(ledger.charge());
+                calls += 1;
+                if calls <= 3 {
+                    (f64::NAN, x.to_owned())
+                } else {
+                    (-1.0, x.to_owned())
+                }
+            };
+            let mut ledger = Ledger::new(32);
+            ledger.set_start_attempts(3);
+            let mut rng = StdRng::seed_from_u64(9);
+            let err = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng)
+                .expect_err("three refusals exhaust the attempts");
+            assert_eq!(err, SearchError::NoFiniteStart { attempts: 3 });
+            assert_eq!(ledger.start_redraws().len(), 2);
+            assert!(ledger.best.is_infinite());
+        }
+    }
+
+    #[test]
+    fn a_caller_stop_during_a_refused_start_returns_the_outcome() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let mut cfg = Config::for_cluster(4);
+        cfg.max_hops = Some(0);
+        let start = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.0, 1.2,
+        ]);
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut calls = 0usize;
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            assert!(ledger.charge());
+            calls += 1;
+            stop.store(true, Ordering::Relaxed);
+            (f64::NAN, x.to_owned())
+        };
+        let mut ledger = Ledger::with_stop(32, Arc::clone(&stop));
+        ledger.set_start_attempts(4);
+        let mut rng = StdRng::seed_from_u64(9);
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng)
+            .expect("a caller stop is not a refused start");
+        assert_eq!(calls, 1);
+        assert!(ledger.start_redraws().is_empty());
+        assert!(out.best.is_infinite());
+        assert_eq!(out.charged, 1);
+
+        let raised = Arc::new(AtomicBool::new(true));
+        let mut calls = 0usize;
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            let _ = ledger.charge();
+            calls += 1;
+            (-1.0, x.to_owned())
+        };
+        let mut ledger = Ledger::with_stop(32, raised);
+        let mut rng = StdRng::seed_from_u64(9);
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng)
+            .expect("a raised stop returns before the first quench");
+        assert_eq!(calls, 0);
+        assert_eq!(out.charged, 0);
+        assert!(out.best.is_infinite());
     }
 
     #[test]
@@ -7188,7 +7392,8 @@ mod tests {
             &mut relax,
             Some(&mut grad),
             &mut rng,
-        );
+        )
+        .expect("finite start");
 
         assert_eq!(out.best, 0.0);
         assert!(
@@ -7230,7 +7435,8 @@ mod tests {
             None,
             Some(&mut eg),
             &mut rng,
-        );
+        )
+        .expect("finite start");
         assert_eq!(
             out.hmc.len(),
             3,
@@ -7258,7 +7464,7 @@ mod tests {
         let cfg = Config::for_cluster(6);
         let mut ledger = Ledger::new(500);
         let mut relax = toy_relax;
-        let out = optimize(&cfg, &mut ledger, &mut relax, 0);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 0).expect("finite start");
         assert!(out.charged <= 500, "spent {} of 500", out.charged);
         assert_eq!(ledger.remaining(), 0, "a run should spend its budget");
     }
@@ -7275,7 +7481,7 @@ mod tests {
         assert_eq!(ledger.spent(), 1);
         let cfg = Config::for_cluster(6);
         let mut relax = toy_relax;
-        let out = optimize(&cfg, &mut ledger, &mut relax, 0);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 0).expect("finite start");
         assert_eq!(out.charged, 1, "a stopped run spent its budget");
     }
 
@@ -7306,7 +7512,7 @@ mod tests {
         let cfg = Config::for_cluster(6);
         let mut ledger = Ledger::new(4000);
         let mut relax = toy_relax;
-        let out = optimize(&cfg, &mut ledger, &mut relax, 19);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 19).expect("finite start");
 
         assert!(out.final_energy.is_finite());
         let final_state = out
@@ -7345,7 +7551,8 @@ mod tests {
             &mut relax,
             Some(&mut grad),
             &mut rng,
-        );
+        )
+        .expect("finite start");
 
         let validated = out
             .accepted_transitions
@@ -7375,7 +7582,7 @@ mod tests {
         cfg.funnel_period = 8;
         let mut ledger = Ledger::new(1500);
         let mut relax = toy_relax;
-        let out = optimize(&cfg, &mut ledger, &mut relax, 11);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 11).expect("finite start");
         assert!(out.charged <= 1500, "spent {} of 1500", out.charged);
         assert_eq!(
             ledger.remaining(),
@@ -7422,7 +7629,7 @@ mod tests {
         cfg.screen_margin = -1.0e12;
         let mut ledger = Ledger::new(4000);
         let mut relax = toy_relax;
-        let out = optimize(&cfg, &mut ledger, &mut relax, 1);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 1).expect("finite start");
         assert!(out.hops > 0, "no hop completed");
         assert_eq!(
             out.screened_out,
@@ -7437,7 +7644,7 @@ mod tests {
             relaxation_steps.push(steps);
             toy_relax(ledger, x, steps)
         };
-        let out = optimize(&cfg, &mut ledger, &mut relax, 1);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 1).expect("finite start");
         assert!(out.hops > 0, "no hop completed");
         assert_eq!(out.screened_out, out.hops);
         assert!(
@@ -7459,7 +7666,7 @@ mod tests {
         let cfg = Config::for_cluster(6);
         let mut ledger = Ledger::new(4000);
         let mut relax = toy_relax;
-        let out = optimize(&cfg, &mut ledger, &mut relax, 2);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 2).expect("finite start");
         assert!(out.basins >= 1, "at least the starting basin must register");
     }
 
@@ -7471,7 +7678,7 @@ mod tests {
         let cfg = Config::for_cluster(6);
         let mut ledger = Ledger::new(4000);
         let mut relax = toy_relax;
-        let out = optimize(&cfg, &mut ledger, &mut relax, 3);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 3).expect("finite start");
         assert!(out.transport.is_none());
     }
 
@@ -7488,7 +7695,7 @@ mod tests {
         cfg.ladder_pilot = 20;
         let mut ledger = Ledger::new(60_000);
         let mut relax = toy_relax;
-        let out = optimize(&cfg, &mut ledger, &mut relax, 5);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 5).expect("finite start");
         let (trips, sweeps, barrier) = out.transport.expect("a ladder reports transport");
         assert!(sweeps > 20, "only {sweeps} sweeps; the ladder never ran");
         assert!(trips > 0, "no round trip in {sweeps} sweeps");
@@ -7512,7 +7719,7 @@ mod tests {
             c.ladder_mode = mode;
             let mut ledger = Ledger::new(60_000);
             let mut relax = toy_relax;
-            let out = optimize(&c, &mut ledger, &mut relax, 5);
+            let out = optimize(&c, &mut ledger, &mut relax, 5).expect("finite start");
             out.rungs.iter().map(|(t, _, _)| *t).collect::<Vec<f64>>()
         };
         let geometric = run(LadderMode::Reversible);
@@ -7543,7 +7750,9 @@ mod tests {
         let run_once = |seed| {
             let mut ledger = Ledger::new(2000);
             let mut relax = toy_relax;
-            optimize(&cfg, &mut ledger, &mut relax, seed).best
+            optimize(&cfg, &mut ledger, &mut relax, seed)
+                .expect("finite start")
+                .best
         };
         assert_eq!(run_once(7), run_once(7), "same seed must give same result");
     }

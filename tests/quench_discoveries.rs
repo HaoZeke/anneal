@@ -46,6 +46,7 @@ fn polishing_run(valid: bool) -> Outcome {
         Some(&mut gradient),
         &mut rng,
     )
+    .expect("finite start")
 }
 
 #[test]
@@ -93,7 +94,8 @@ fn malformed_gradients_cannot_certify_the_initial_minimum() {
             &mut relax,
             Some(&mut gradient),
             &mut rng,
-        );
+        )
+        .expect("finite start");
         assert!(
             outcome.best_state.is_none(),
             "accepted gradient {bad_gradient:?}"

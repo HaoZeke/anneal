@@ -270,7 +270,8 @@ fn run_seed(
     };
     let mut rng = StdRng::seed_from_u64(seed);
     let started = Instant::now();
-    let outcome = run_with_gradient(cfg, start.view(), &mut ledger, &mut relax, None, &mut rng);
+    let outcome = run_with_gradient(cfg, start.view(), &mut ledger, &mut relax, None, &mut rng)
+        .expect("finite start");
     (outcome, started.elapsed().as_secs_f64())
 }
 

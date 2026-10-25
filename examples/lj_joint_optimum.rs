@@ -324,8 +324,9 @@ fn run_hopping(
             Some(&mut gradient),
             &mut rng,
         )
+        .expect("finite start")
     } else {
-        run(&config, initial, &mut ledger, &mut relax, &mut rng)
+        run(&config, initial, &mut ledger, &mut relax, &mut rng).expect("finite start")
     }
 }
 

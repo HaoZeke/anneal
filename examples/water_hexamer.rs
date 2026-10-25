@@ -349,7 +349,8 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                 seed,
                 GOOD_TURING_CHECKPOINT_INTERVAL,
                 &mut checkpoint,
-            );
+            )
+            .expect("finite start");
             text.push_str(&trace);
             text.push_str(&format!(
                 "good_turing_saturated: {}\n",
@@ -357,7 +358,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             ));
             result
         } else {
-            search_from(&objective, &cfg, &mut ledger, start.view(), seed)
+            search_from(&objective, &cfg, &mut ledger, start.view(), seed).expect("finite start")
         };
         let wall_s = wall.elapsed().as_secs_f64();
         let best = outcome.best;
