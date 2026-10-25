@@ -220,6 +220,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   composition walk, the communication and regime notes, and the box
   Langevin escape are in the contents. The eindir inventory is no longer
   fetched at build time.
+- Water isomer names use species-aware IRA. The gate is half the
+  minimum gap between distinct deposited references and is computed
+  before any seed. A dissociated monomer is unassigned. Search
+  geometries and deposited GOFEE geometries use that same classifier.
+  The Kabsch helper is not the label. A build without the ``ira``
+  feature leaves the gate unset instead of substituting that helper.
 - A search whose first quench is not finite returns
   ``SearchError::NoFiniteStart`` instead of continuing from that value.
   The ledger redraws a start, up to ``DEFAULT_START_ATTEMPTS`` (8), and
