@@ -542,14 +542,14 @@ pub const PETMAD_MODEL_NAME: &str = "pet-mad-xs-v1.5.0.pt";
 /// Device recorded for the PET-MAD force call.
 pub const PETMAD_DEVICE: &str = "cpu";
 
-/// rgpot-core git revision in `Cargo.lock`. This develop pin is 3.0.2.
-pub const RGPOT_REV: &str = "386c0342e008903472925ad78f8f32a91db51e14";
+/// rgpot-core checksum in `Cargo.lock`. The crate is registry 3.5.1.
+pub const RGPOT_REV: &str = "df34626c5c9d888c234e6a0921e7e6c0335561ec50460fcf74e4b77772c89ede";
 
 /// rgpot-core version this tree links.
-pub const RGPOT_VERSION: &str = "3.0.2";
+pub const RGPOT_VERSION: &str = "3.5.1";
 
-/// eindir-core git revision in `Cargo.lock`.
-pub const EINDIR_REV: &str = "f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9";
+/// eindir-core checksum in `Cargo.lock`. The crate is registry 0.6.0.
+pub const EINDIR_REV: &str = "e330e3abad9c1a597b144d40eb4b07ab3511d79f7d2cdbbcb37a44662f974db0";
 
 /// eindir-core version this tree links.
 pub const EINDIR_VERSION: &str = "0.6.0";

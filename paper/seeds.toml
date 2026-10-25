@@ -69,3 +69,11 @@ sizes = [38, 12]
 seed_start = 5000
 seed_end = 5063
 detail = "64 paired seeds. Soap on against off, on the icosahedral 38-mer and on 12 LJ sites as 4 water-shaped groups."
+
+[[run]]
+id = "r6-water-hexamer"
+items = ["R6"]
+sizes = [6]
+seed_start = 0
+seed_end = 31
+detail = "32 seeds per engine, frozen as 0-31. (H2O)6 under GFN2-xTB, NWChem PBE/6-31G*, and PET-MAD, 4000 force evaluations. The search arm is recommended_molecular. Communicating, derived, and Good-Turing are additional arms on the same seeds."

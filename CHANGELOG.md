@@ -10,6 +10,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- ``water_hexamer`` searches (H2O)6 under GFN2-xTB, NWChem PBE/6-31G*, and
+  PET-MAD. The PBE arm records basis 6-31G*, theory dft, functional PBE,
+  charge 0, multiplicity 1, task gradient, and no named dispersion
+  correction. Recommended, communicating, derived, and Good-Turing arms
+  keep the molecular groups. Integrity requires exactly two hydrogens
+  within 1.2 angstrom of each oxygen. A dissociated monomer is
+  unassigned. Isomer names wait on same-level reference geometries.
+  The isolated-water template is not that set. Seeds are 0-31 and the
+  force budget is 4000 on every engine. A process with ``PAPER_SMOKE=1`` is a smoke. A full run records the crate version.
 - Lattice-ensemble ablation arms on ``Plan``. ``retire = 0`` never frees a
   bank slot. ``Resemblance::LeeCsa`` uses eq. (2) of Lee, Lee and Lee,
   Phys. Rev. Lett. 91, 080201 (2003): the weighted absolute difference of
