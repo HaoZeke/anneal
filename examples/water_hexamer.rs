@@ -11,6 +11,8 @@
 //! Isomer names are assigned only when `WATER_ISOMER_DIR` holds
 //! same-level geometries in O, H, H order.
 
+#[path = "common/pipe_engine.rs"]
+mod pipe_engine;
 #[path = "common/rgpot_eindir.rs"]
 mod rgpot_eindir;
 
@@ -239,15 +241,6 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     ));
     text.push_str(&engine_settings(engine));
     let n_atoms = 3 * WATER_HEXAMER_MOLECULES;
-    let loaded = load_engine(engine, n_atoms);
-    let Ok(objective) = loaded else {
-        text.push_str(&format!(
-            "engine_loaded: false\nsearch: not started\nload_error: {}\n",
-            loaded.err().unwrap_or_default()
-        ));
-        return text;
-    };
-    text.push_str("engine_loaded: true\n");
     let species = water_species(WATER_HEXAMER_MOLECULES).expect("hexamer species");
     let groups = water_groups(WATER_HEXAMER_MOLECULES).expect("hexamer groups");
     let mut cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
@@ -284,7 +277,19 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     text.push_str(&format!(
         "isomer_gate_A: {gate_text}\nisomer_gate_when: before seeds\nisomer_gate_reason: {gate_reason}\n"
     ));
+    text.push_str(&deposited_calculator(engine));
+    text.push_str(&assign_references(&references, &reference_views, gate));
     text.push_str(&classify_gofee(&reference_views, gate));
+    let loaded = load_engine(engine, n_atoms);
+    let Ok(objective) = loaded else {
+        text.push_str(&format!(
+            "engine_loaded: false\nsearch: not started\nload_error: {}\n",
+            loaded.err().unwrap_or_default()
+        ));
+        return text;
+    };
+    text.push_str("engine_loaded: true\n");
+    text.push_str(&evaluate_references(&objective, &references));
     let template = reference_coordinates(WATER_HEXAMER_MOLECULES).expect("template");
     for seed in seed0..seed0 + seeds {
         let mut rng = StdRng::seed_from_u64(seed);
@@ -365,7 +370,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                         CheckpointAction::Continue
                     }
                 };
-            let result = search_from_with_checkpoint(
+            match search_from_with_checkpoint(
                 &objective,
                 &cfg,
                 &mut ledger,
@@ -373,16 +378,28 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                 seed,
                 GOOD_TURING_CHECKPOINT_INTERVAL,
                 &mut checkpoint,
-            )
-            .expect("finite start");
-            text.push_str(&trace);
-            text.push_str(&format!(
-                "good_turing_saturated: {}\n",
-                good_turing_stop_reason(&census).is_some()
-            ));
-            result
+            ) {
+                Ok(result) => {
+                    text.push_str(&trace);
+                    text.push_str(&format!(
+                        "good_turing_saturated: {}\n",
+                        good_turing_stop_reason(&census).is_some()
+                    ));
+                    result
+                }
+                Err(error) => {
+                    text.push_str(&format!("search_error: {error}\n"));
+                    return text;
+                }
+            }
         } else {
-            search_from(&objective, &cfg, &mut ledger, start.view(), seed).expect("finite start")
+            match search_from(&objective, &cfg, &mut ledger, start.view(), seed) {
+                Ok(result) => result,
+                Err(error) => {
+                    text.push_str(&format!("search_error: {error}\n"));
+                    return text;
+                }
+            }
         };
         let wall_s = wall.elapsed().as_secs_f64();
         let best = outcome.best;
@@ -450,7 +467,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             0.0
         };
         text.push_str(&format!(
-            "seed: {seed}\nstart_monomers_intact: {start_intact}\nbest_energy: {best}\nbest_monomers_intact: {intact}\nisomer: {isomer_name}\nisomer_rmsd_A: {isomer_rmsd}\nisomer_gate_A: {gate_text}\nisomer_reason: {isomer_reason}\nforce_calls: {}\nwall_seconds: {wall_s:.6}\nforce_calls_per_second: {per_second:.6}\nhops: {}\nbasins: {}\nconverged: {}\nquenches: {}\nhits: unscored\nwilson_95: unscored\nmedian_par2_force: unscored\nmedian_par2_wall: unscored\nunscored_reason: no same-level reference energy in this tree\n",
+            "seed: {seed}\nstart_monomers_intact: {start_intact}\nbest_energy: {best}\nbest_monomers_intact: {intact}\nisomer: {isomer_name}\nisomer_rmsd_A: {isomer_rmsd}\nisomer_gate_A: {gate_text}\nisomer_reason: {isomer_reason}\nforce_calls: {}\nwall_seconds: {wall_s:.6}\nforce_calls_per_second: {per_second:.6}\nhops: {}\nbasins: {}\nconverged: {}\nquenches: {}\nhits: unscored\nwilson_95: unscored\nmedian_par2_force: unscored\nmedian_par2_wall: unscored\nunscored_reason: smoke or one arm, success rate waits on the full seed block\n",
             ledger.spent(),
             outcome.hops,
             outcome.basins,
@@ -476,7 +493,88 @@ fn engine_settings(engine: &str) -> String {
     }
 }
 
+fn deposited_calculator(engine: &str) -> String {
+    if std::env::var_os("ASE_PYTHON").is_none() {
+        return "calculator: rgpot\n".to_owned();
+    }
+    match engine {
+        "gfn2" => "calculator: tblite 0.7.0 TBLite method GFN2-xTB ase 3.29.0 cell 40 A pbc false\n",
+        "pbe" => "calculator: pyscf 2.14.0 RKS xc PBE basis 6-31g* grid level 3 ase 3.29.0 cell 40 A pbc false\n",
+        "petmad" => "calculator: pet-mad 1.4.4 checkpoint 1.0.2 device cpu ase 3.29.0 cell 40 A pbc false\n",
+        _other => "calculator: unknown\n",
+    }
+    .to_owned()
+}
+
+fn assign_references(
+    references: &[(String, Vec<f64>)],
+    views: &[(&str, &[f64])],
+    gate: Option<f64>,
+) -> String {
+    let mut text = String::new();
+    for (name, coordinates) in references {
+        match assign_isomer(coordinates, WATER_HEXAMER_MOLECULES, views, gate) {
+            Ok(matched) => {
+                let assigned = matched.name.unwrap_or_else(|| "unassigned".to_owned());
+                let rmsd = matched
+                    .rmsd
+                    .map(|value| format!("{value:.6}"))
+                    .unwrap_or_else(|| "none".to_owned());
+                text.push_str(&format!(
+                    "reference_assign: {name} isomer: {assigned} isomer_rmsd_A: {rmsd}\n"
+                ));
+            }
+            Err(error) => text.push_str(&format!(
+                "reference_assign: {name} isomer: unassigned isomer_reason: {error}\n"
+            )),
+        }
+    }
+    text
+}
+
+fn evaluate_references(objective: &ForceObjective, references: &[(String, Vec<f64>)]) -> String {
+    let mut text = String::new();
+    for (name, coordinates) in references {
+        let (energy, gradient) = objective.value_and_gradient(ArrayView1::from(coordinates));
+        let mut max_force: f64 = 0.0;
+        let values = gradient.as_slice().unwrap_or(&[]);
+        for atom in values.as_chunks::<3>().0 {
+            let norm = (atom[0] * atom[0] + atom[1] * atom[1] + atom[2] * atom[2]).sqrt();
+            max_force = max_force.max(norm);
+        }
+        text.push_str(&format!(
+            "reference_energy: {name} {energy:.12} max_force {max_force:.6}\n"
+        ));
+    }
+    text
+}
+
+fn load_deposited(engine: &str, n_atoms: usize) -> Result<ForceObjective, String> {
+    let ase_engine = match engine {
+        "gfn2" => "tblite-gfn2",
+        "pbe" => "pyscf-pbe",
+        "petmad" => "pet-mad",
+        other => return Err(format!("no deposited calculator for {other}")),
+    };
+    let symbols = (0..WATER_HEXAMER_MOLECULES)
+        .flat_map(|_| ["O", "H", "H"])
+        .map(str::to_owned)
+        .collect();
+    let mut pipe = pipe_engine::PipeEngine::start(ase_engine, symbols, None);
+    let dim = 3 * n_atoms;
+    Ok(ForceObjective::new(
+        dim,
+        move |coordinates: &[f64]| match pipe.eval(ArrayView1::from(coordinates)) {
+            Some((energy, gradient)) => (energy, gradient.to_vec()),
+            None => (f64::NAN, vec![f64::NAN; coordinates.len()]),
+        },
+    ))
+}
+
 fn load_engine(engine: &str, n_atoms: usize) -> Result<ForceObjective, String> {
+    if std::env::var_os("ASE_PYTHON").is_some() {
+        return load_deposited(engine, n_atoms);
+    }
     let atomic_numbers: Vec<i32> = (0..WATER_HEXAMER_MOLECULES)
         .flat_map(|_| [8, 1, 1])
         .collect();
