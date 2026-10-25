@@ -1041,7 +1041,11 @@ fn dist2(left: [f64; 3], right: [f64; 3]) -> f64 {
 #[cfg(test)]
 mod water_hexamer_tests {
     use super::*;
-    use crate::methods::cluster_hopping::MoveLibrary;
+    use crate::methods::cluster_hopping::{
+        CheckpointAction, Ledger, MoveLibrary, SoapProposalMode,
+    };
+    use crate::methods::cluster_search::search_from_with_checkpoint;
+    use crate::potentials::{PairKind, PairPotential};
 
     #[test]
     fn the_template_hexamer_is_intact_and_a_loose_hydrogen_is_not() {
@@ -1170,6 +1174,49 @@ mod water_hexamer_tests {
         let threshold =
             crate::screen::cost_asymmetric_threshold(derived.screen_steps, derived.relax_steps);
         assert!((derived.bayes_threshold - threshold).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_saturated_census_retires_the_search_before_the_budget() {
+        let n_molecules = 2;
+        let species = water_species(n_molecules).unwrap();
+        let groups = water_groups(n_molecules).unwrap();
+        let mut cfg = Config::recommended_molecular(species, groups, 1.0);
+        cfg.relax_steps = 0;
+        cfg.screen_steps = 0;
+        cfg.soap_mode = SoapProposalMode::Off;
+        cfg.adaptive_height = false;
+        cfg.allocate_moves = false;
+        cfg.depth_reward = false;
+        let start = reference_coordinates(n_molecules).unwrap();
+        let objective = PairPotential::new(3 * n_molecules, PairKind::LennardJones, 8.0);
+        let budget = 2_000;
+        let mut ledger = Ledger::new(budget);
+        let mut census = BasinCensus::new(1, OXYGEN_DISTANCE_CENSUS_RADIUS_A).unwrap();
+        for _ in 0..20 {
+            census.observe(&[0.0]).unwrap();
+        }
+        let mut checkpoint =
+            |_: crate::methods::cluster_hopping::ChainCheckpoint<'_>| CheckpointAction::Retire {
+                reason: good_turing_stop_reason(&census)
+                    .unwrap_or("continuing")
+                    .to_owned(),
+            };
+        let (_out, _stats) = search_from_with_checkpoint(
+            &objective,
+            &cfg,
+            &mut ledger,
+            ndarray::ArrayView1::from(&start),
+            5100,
+            GOOD_TURING_CHECKPOINT_INTERVAL,
+            &mut checkpoint,
+        );
+        assert!(
+            ledger.spent() < budget / 2,
+            "retire spent {} of {budget}",
+            ledger.spent()
+        );
+        assert!(ledger.spent() > 0);
     }
 
     #[test]
