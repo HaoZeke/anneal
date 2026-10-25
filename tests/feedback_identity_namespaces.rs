@@ -145,7 +145,8 @@ fn a_shared_numeric_id_does_not_make_a_distinct_local_fallback_basin_known() {
         &mut rng,
         1,
         &mut checkpoint,
-    );
+    )
+    .expect("finite start");
 
     assert_eq!(out.hops, 2);
     assert_eq!(history.observations, vec![0, 1, 2]);

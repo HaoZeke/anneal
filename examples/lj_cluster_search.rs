@@ -1585,7 +1585,8 @@ fn main() {
                     &mut relax,
                     Some(&mut grad),
                     &mut rng_rec,
-                );
+                )
+                .expect("finite start");
                 let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
                 if hit {
                     rec_solved += 1;
@@ -2595,6 +2596,7 @@ fn main() {
                 interval,
                 &mut checkpoint,
             )
+            .expect("finite start")
         } else {
             {
                 // The settle stage: steepest descent of the moved atoms in the
@@ -2662,6 +2664,7 @@ fn main() {
                     },
                     seed,
                 )
+                .expect("finite start")
             }
         };
 
@@ -6641,7 +6644,8 @@ fn run_capnp_catalog(
         &mut local_rng,
         checkpoint_interval,
         &mut checkpoint,
-    );
+    )
+    .expect("finite start");
     println!("  checkpoint phases {}", phases.report());
     if evidence_only && let Some(charged) = unsettled_objective_calls(ledger.spent(), last_charged)
     {
@@ -7512,7 +7516,8 @@ fn run_capnp_bank(
             Some(grad),
             &mut bias,
             &mut rng,
-        );
+        )
+        .expect("finite start");
         ledger.charge_many(slice_led.spent());
         if let Some(st) = slice_led.best_state.as_ref() {
             ledger.record(slice_led.best, st.view());

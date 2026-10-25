@@ -410,7 +410,7 @@ fn main() {
                         &mut ledger,
                         x0.view(),
                         seed0 + index as u64,
-                    );
+                    ).expect("finite start");
                     let (_, calls, hit) = *objective.state.lock().unwrap();
                     let line = format!(
                         "{path} start={start_energy:.9} hit={} calls={} best={:.6} hops={} basins={} screened={} returned={} visits={:?} relax={} screens={} converged={} capped={} screen_calls={} full_calls={} check_calls={} secs={:.1}",

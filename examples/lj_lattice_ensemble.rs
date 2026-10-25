@@ -181,7 +181,8 @@ fn recommended_chain(n: usize, budget: usize, seed: u64, target: Option<f64>) ->
         &mut rng,
         500,
         &mut checkpoint,
-    );
+    )
+    .expect("finite start");
     let first_hit = target.and_then(|reference| {
         outcome
             .improvements

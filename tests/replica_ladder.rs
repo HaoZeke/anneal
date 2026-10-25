@@ -49,8 +49,9 @@ fn lj_run_on(cfg: &Config, seed: u64, ledger: &mut Ledger, gradient: bool) -> Ou
             Some(pot.value_and_gradient(x).1)
         };
         optimize_with_gradient(cfg, ledger, &mut relax, Some(&mut grad), seed)
+            .expect("finite start")
     } else {
-        optimize(cfg, ledger, &mut relax, seed)
+        optimize(cfg, ledger, &mut relax, seed).expect("finite start")
     }
 }
 
@@ -237,7 +238,7 @@ fn a_resumed_rung_measures_returns_against_its_own_basin() {
     let mut ledger = Ledger::new(BUDGET);
     let mut rng = StdRng::seed_from_u64(31);
 
-    let out = run(&cfg, compact.view(), &mut ledger, &mut relax, &mut rng);
+    let out = run(&cfg, compact.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
 
     let (same, known, new) = out.visit_counts;
     assert!(
