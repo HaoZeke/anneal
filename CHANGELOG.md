@@ -125,6 +125,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   the workspace uses. The git pin at 3.0.2 compiled a second eindir, and
   packaging rewrote that pin to registry 3.0.2, which depends on
   ``eindir-core`` 0.5.2.
+- The certified-constructor UI tests record the current compiler wording.
+  Each uncertified combination still fails to compile: an acceptance rule
+  is not a certified acceptance, a downstream crate cannot implement the
+  sealed acceptance trait, and a full-space move is not certified for a
+  box. The UI build repeats the path patches the parent resolve used, so
+  the check runs offline.
 - An in-process census cohort dials neighbours only after every publisher
   is bound. A dial that landed on a port reservation completed the TCP
   handshake there and waited for a protocol header the reservation never
