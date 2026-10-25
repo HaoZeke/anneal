@@ -7,9 +7,12 @@ once rather than per evaluation:
     reply:    "E <energy_eV>"\n  then N lines "fx fy fz" (eV/Angstrom)\n "DONE"\n
 
 Engine by environment:
-    ASE_ENGINE=xtb      GFN2-xTB through the Python bindings
-    ASE_ENGINE=xtb-cli  GFN2-xTB through the xtb executable (no bindings)
-    ASE_ENGINE=cp2k     PBE through CP2K (set ASE_CP2K_COMMAND to cp2k_shell)
+    ASE_ENGINE=xtb          GFN2-xTB through the Python bindings
+    ASE_ENGINE=xtb-cli      GFN2-xTB through the xtb executable (no bindings)
+    ASE_ENGINE=cp2k         PBE through CP2K (set ASE_CP2K_COMMAND to cp2k_shell)
+    ASE_ENGINE=tblite-gfn2  GFN2-xTB, tblite 0.7.0, TBLite(method="GFN2-xTB")
+    ASE_ENGINE=pyscf-pbe    PySCF 2.14.0 RKS, PBE/6-31G*, grid level 3
+    ASE_ENGINE=pet-mad      pet-mad 1.4.4, checkpoint 1.0.2, CPU
 
 Energies and forces pass through unchanged; unit handling and convergence
 settings live here, visible, rather than inside the driver.
@@ -22,6 +25,28 @@ import tempfile
 
 HARTREE_EV = 27.211386245988
 BOHR_ANG = 0.529177210903
+TBLITE_VERSION = "0.7.0"
+PYSCF_VERSION = "2.14.0"
+ASE_VERSION = "3.29.0"
+PET_MAD_VERSION = "1.4.4"
+PET_MAD_CHECKPOINT = "1.0.2"
+PYSCF_XC = "PBE"
+PYSCF_BASIS = "6-31g*"
+PYSCF_GRID_LEVEL = 3
+WATER_CELL_A = 40.0
+DEPOSITED = ("tblite-gfn2", "pyscf-pbe", "pet-mad")
+
+
+def require_version(module, version, label):
+    got = getattr(module, "__version__", None)
+    if not got:
+        import importlib.metadata as metadata
+
+        got = metadata.version(label)
+    if got != version:
+        raise SystemExit(f"{label} {got} is not the deposited pin {version}")
+    sys.stderr.write(f"engine_package {label} {got}\n")
+    sys.stderr.flush()
 
 
 class XtbCli:
@@ -115,13 +140,84 @@ def make_calculator():
             pseudo_potential="GTH-PBE",
             max_scf=200,
         )
+    if engine == "tblite-gfn2":
+        import ase
+        import tblite
+        from tblite.ase import TBLite
+
+        require_version(ase, ASE_VERSION, "ase")
+        require_version(tblite, TBLITE_VERSION, "tblite")
+        # verbosity 0 keeps the SCF log off stdout. The pipe protocol
+        # owns stdout; a banner there is read as the energy line.
+        return TBLite(method="GFN2-xTB", verbosity=0)
+    if engine == "pyscf-pbe":
+        import ase
+        import pyscf
+        from ase.calculators.calculator import Calculator, all_changes
+
+        require_version(ase, ASE_VERSION, "ase")
+        require_version(pyscf, PYSCF_VERSION, "pyscf")
+
+        class PyscfPBE(Calculator):
+            implemented_properties = ["energy", "forces"]
+
+            def calculate(self, atoms=None, properties=("energy", "forces"), system_changes=all_changes):
+                Calculator.calculate(self, atoms, properties, system_changes)
+                energy, forces = pyscf_pbe_energy_forces(self.atoms)
+                self.results["energy"] = energy
+                self.results["forces"] = forces
+
+        return PyscfPBE()
+    if engine == "pet-mad":
+        import ase
+        import pet_mad
+        from pet_mad.calculator import PETMADCalculator
+
+        require_version(ase, ASE_VERSION, "ase")
+        require_version(pet_mad, PET_MAD_VERSION, "pet-mad")
+        sys.stderr.write(f"engine_checkpoint pet-mad {PET_MAD_CHECKPOINT} cpu\n")
+        sys.stderr.flush()
+        return PETMADCalculator(version=PET_MAD_CHECKPOINT, device="cpu")
     raise SystemExit(f"unknown ASE_ENGINE {engine!r}")
+
+
+def pyscf_pbe_energy_forces(atoms):
+    """PySCF RKS PBE/6-31G*, grid level 3. Energy is eV and forces are eV/angstrom."""
+    from ase.units import Bohr, Hartree
+    from pyscf import dft, gto
+
+    labels = [
+        f"{sym} {x:.10f} {y:.10f} {z:.10f}"
+        for sym, (x, y, z) in zip(atoms.get_chemical_symbols(), atoms.get_positions())
+    ]
+    mol = gto.M(
+        atom="; ".join(labels),
+        basis=PYSCF_BASIS,
+        unit="Angstrom",
+        charge=0,
+        spin=0,
+        verbose=0,
+    )
+    mf = dft.RKS(mol)
+    mf.xc = PYSCF_XC
+    mf.grids.level = PYSCF_GRID_LEVEL
+    energy = float(mf.kernel())
+    grad = mf.nuc_grad_method().kernel()
+    import numpy as np
+
+    grad = np.asarray(grad, dtype=float)
+    return energy * Hartree, -grad * (Hartree / Bohr)
 
 
 def main():
     calc = make_calculator()
     stdin = sys.stdin
     out = sys.stdout
+    # One Atoms object for the life of the calculator. tblite 0.7.0 aborts
+    # in the Fortran calculator if a new Atoms is bound to the same TBLite
+    # on a later call. Positions are updated in place, which is what the
+    # deposited relaxation did.
+    atoms = None
     while True:
         header = stdin.readline()
         if not header:
@@ -149,23 +245,29 @@ def main():
             else:
                 from ase import Atoms
 
-                atoms = Atoms(symbols=symbols, positions=positions)
-                if cell is not None:
-                    atoms.set_cell(
-                        [
-                            [cell[0], cell[1], cell[2]],
-                            [cell[3], cell[4], cell[5]],
-                            [cell[6], cell[7], cell[8]],
-                        ]
-                    )
-                    atoms.pbc = True
-                elif os.environ.get("ASE_ENGINE") == "cp2k":
-                    # CP2K needs a cell. Resize-every-call (center(vacuum=...))
-                    # changes the Poisson grid between hops and the restart
-                    # guess then fails to converge, aborting the shell.
-                    atoms.set_cell([24.0, 24.0, 24.0])
-                    atoms.center()
-                atoms.calc = calc
+                if atoms is None:
+                    atoms = Atoms(symbols=symbols, positions=positions)
+                    if cell is not None:
+                        atoms.set_cell(
+                            [
+                                [cell[0], cell[1], cell[2]],
+                                [cell[3], cell[4], cell[5]],
+                                [cell[6], cell[7], cell[8]],
+                            ]
+                        )
+                        atoms.pbc = True
+                    elif os.environ.get("ASE_ENGINE") in DEPOSITED:
+                        atoms.set_cell([WATER_CELL_A, WATER_CELL_A, WATER_CELL_A])
+                        atoms.pbc = False
+                    elif os.environ.get("ASE_ENGINE") == "cp2k":
+                        # CP2K needs a cell. Resize-every-call (center(vacuum=...))
+                        # changes the Poisson grid between hops and the restart
+                        # guess then fails to converge, aborting the shell.
+                        atoms.set_cell([24.0, 24.0, 24.0])
+                        atoms.center()
+                    atoms.calc = calc
+                else:
+                    atoms.set_positions(positions)
                 energy = atoms.get_potential_energy()
                 forces = atoms.get_forces()
             out.write(f"E {energy:.10f}\n")
@@ -185,6 +287,7 @@ def main():
                 # evaluations are not counted as failures of a dead engine.
                 try:
                     calc = make_calculator()
+                    atoms = None
                 except Exception:
                     pass
         try:
