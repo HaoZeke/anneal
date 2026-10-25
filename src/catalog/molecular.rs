@@ -62,6 +62,15 @@ pub enum MolecularCatalogPresetError {
     /// Species vector must be `[8, 1, 1]` repeated once per molecule.
     #[error("water species vector is inconsistent")]
     SpeciesMismatch,
+    /// The isolated-water template is a start, not a deposited isomer.
+    #[error("the isolated-water template is not an isomer reference")]
+    IsolatedTemplate,
+    /// Species-aware IRA is the assignment. This build did not link it.
+    #[error("isomer assignment needs the ira feature")]
+    AssignmentNeedsIra,
+    /// IRA refused the two point sets.
+    #[error("species-aware IRA match failed")]
+    IraMatch,
 }
 
 /// Stable engine family for the in-process rgpot GFN2-xTB handle.
@@ -664,17 +673,77 @@ pub fn good_turing_stop_reason(census: &BasinCensus) -> Option<&'static str> {
 pub struct IsomerMatch {
     /// Name from [`WATER_ISOMER_NAMES`], when the RMSD is inside the gate.
     pub name: Option<String>,
-    /// Lowest permutation-invariant RMSD among the references, in angstroms.
+    /// Lowest species-aware IRA RMSD among the references, in angstroms.
     pub rmsd: Option<f64>,
 }
 
-/// Assign a hexamer by permutation-invariant RMSD against same-level references.
+/// Same label for a search geometry and a deposited GOFEE geometry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassifiedGeometry {
+    /// Every oxygen has exactly two hydrogens within [`WATER_OH_BOND_MAX_A`].
+    pub intact: bool,
+    /// Isomer name when the geometry is intact and inside the gate.
+    pub name: Option<String>,
+    /// Species-aware IRA RMSD to the nearest reference, when one was computed.
+    pub rmsd: Option<f64>,
+}
+
+/// Half the smallest positive gap.
 ///
-/// An empty reference list is unassigned. `cutoff` is the engine's
-/// assignment gate. `None` reports the nearest RMSD and does not name
-/// an isomer, because that gate is half the minimum gap between
-/// deposited references and those references are not in this tree.
-/// The isolated-water template is not a valid entry of `references`.
+/// A zero gap is the same geometry twice, not a separation between
+/// distinct references. No positive gap leaves the gate unset.
+pub fn assignment_cutoff(gaps: &[f64]) -> Option<f64> {
+    let mut min = f64::INFINITY;
+    for gap in gaps {
+        if gap.is_finite() && *gap > 0.0 && *gap < min {
+            min = *gap;
+        }
+    }
+    min.is_finite().then_some(0.5 * min)
+}
+
+/// Assignment gate from deposited references, before any search seed.
+///
+/// Fewer than two references cannot form a gap, so the gate is unset.
+/// Two or more references need species-aware IRA. A build without that
+/// feature returns [`MolecularCatalogPresetError::AssignmentNeedsIra`]
+/// and does not fall back to the Kabsch helper.
+pub fn isomer_reference_gate(
+    references: &[(&str, &[f64])],
+    n_molecules: usize,
+) -> Result<Option<f64>, MolecularCatalogPresetError> {
+    if references.len() < 2 {
+        return Ok(None);
+    }
+    reject_template_references(references, n_molecules)?;
+    #[cfg(not(feature = "ira"))]
+    {
+        Err(MolecularCatalogPresetError::AssignmentNeedsIra)
+    }
+    #[cfg(feature = "ira")]
+    {
+        let species = water_species(n_molecules)?;
+        let mut gaps = Vec::new();
+        for left in 0..references.len() {
+            for right in (left + 1)..references.len() {
+                gaps.push(ira_water_rmsd(
+                    references[left].1,
+                    references[right].1,
+                    &species,
+                )?);
+            }
+        }
+        Ok(assignment_cutoff(&gaps))
+    }
+}
+
+/// Assign a hexamer by species-aware IRA against same-level references.
+///
+/// An empty reference list is unassigned. A dissociated monomer is
+/// unassigned and does not receive an RMSD. `cutoff` is the engine's
+/// gate from [`isomer_reference_gate`]. `None` reports the nearest RMSD
+/// and does not name an isomer. The isolated-water template is not a
+/// valid entry of `references`. Primitive-ring counts are not this label.
 pub fn assign_isomer(
     candidate: &[f64],
     n_molecules: usize,
@@ -687,30 +756,105 @@ pub fn assign_isomer(
             rmsd: None,
         });
     }
-    let mut best_name: Option<&str> = None;
-    let mut best = f64::INFINITY;
-    for (name, reference) in references {
+    if !monomers_intact(candidate, n_molecules)? {
+        return Ok(IsomerMatch {
+            name: None,
+            rmsd: None,
+        });
+    }
+    reject_template_references(references, n_molecules)?;
+    for (name, _) in references {
         if !WATER_ISOMER_NAMES.contains(name) {
             return Err(MolecularCatalogPresetError::SpeciesMismatch);
         }
-        let rmsd = water_rmsd(reference, candidate, n_molecules)?;
-        if rmsd < best {
-            best = rmsd;
-            best_name = Some(*name);
-        }
     }
-    let inside = cutoff.is_some_and(|gate| best.is_finite() && best <= gate);
-    Ok(IsomerMatch {
-        name: inside.then(|| best_name.unwrap_or("").to_owned()),
-        rmsd: best.is_finite().then_some(best),
+    #[cfg(not(feature = "ira"))]
+    {
+        let _ = cutoff;
+        Err(MolecularCatalogPresetError::AssignmentNeedsIra)
+    }
+    #[cfg(feature = "ira")]
+    {
+        let species = water_species(n_molecules)?;
+        let mut best_name: Option<&str> = None;
+        let mut best = f64::INFINITY;
+        for (name, reference) in references {
+            let rmsd = ira_water_rmsd(reference, candidate, &species)?;
+            if rmsd < best {
+                best = rmsd;
+                best_name = Some(*name);
+            }
+        }
+        let inside = cutoff.is_some_and(|gate| best.is_finite() && best <= gate);
+        Ok(IsomerMatch {
+            name: inside.then(|| best_name.unwrap_or("").to_owned()),
+            rmsd: best.is_finite().then_some(best),
+        })
+    }
+}
+
+/// Classify one geometry the way a search seed and a GOFEE dump are both scored.
+pub fn classify_geometry(
+    candidate: &[f64],
+    n_molecules: usize,
+    references: &[(&str, &[f64])],
+    cutoff: Option<f64>,
+) -> Result<ClassifiedGeometry, MolecularCatalogPresetError> {
+    let intact = monomers_intact(candidate, n_molecules)?;
+    if !intact {
+        return Ok(ClassifiedGeometry {
+            intact: false,
+            name: None,
+            rmsd: None,
+        });
+    }
+    let matched = assign_isomer(candidate, n_molecules, references, cutoff)?;
+    Ok(ClassifiedGeometry {
+        intact: true,
+        name: matched.name,
+        rmsd: matched.rmsd,
     })
 }
 
-/// Rotation-and-permutation RMSD of two `(H2O)m` geometries (A).
+fn reject_template_references(
+    references: &[(&str, &[f64])],
+    n_molecules: usize,
+) -> Result<(), MolecularCatalogPresetError> {
+    let template = reference_coordinates(n_molecules)?;
+    if references
+        .iter()
+        .any(|(_, coordinates)| *coordinates == template.as_slice())
+    {
+        return Err(MolecularCatalogPresetError::IsolatedTemplate);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "ira")]
+fn ira_water_rmsd(
+    reference: &[f64],
+    candidate: &[f64],
+    species: &[u32],
+) -> Result<f64, MolecularCatalogPresetError> {
+    if reference.len() != candidate.len() || reference.len() != 3 * species.len() {
+        return Err(MolecularCatalogPresetError::CoordinateDimension);
+    }
+    crate::shape::match_shapes_typed(
+        ArrayView1::from(reference),
+        species,
+        ArrayView1::from(candidate),
+        species,
+        1.8,
+    )
+    .map(|matched| matched.distance)
+    .map_err(|_| MolecularCatalogPresetError::IraMatch)
+}
+
+/// Kabsch RMSD of two `(H2O)m` geometries (A).
 ///
-/// Molecules may be reordered. The two hydrogens of a molecule may swap.
-/// Alignment is the Kabsch rotation, inversion included, after both clouds
-/// are centred.
+/// This is not the isomer assignment. Molecules may be reordered. The
+/// two hydrogens of a molecule may swap. Alignment is the Kabsch
+/// rotation, inversion included, after both clouds are centred.
 pub fn water_rmsd(
     reference: &[f64],
     candidate: &[f64],
@@ -1111,24 +1255,64 @@ mod water_hexamer_tests {
         let mut shifted = coordinates.clone();
         shifted[3] += 0.4;
         assert!(water_rmsd(&coordinates, &shifted, 2).unwrap() > ISOMER_RMSD_GATE_NAMED_BY_FIXES_A);
-        let matched = assign_isomer(
-            &coordinates,
-            2,
-            &[("book", coordinates.as_slice())],
-            Some(1.0),
-        )
-        .unwrap();
-        assert_eq!(matched.name.as_deref(), Some("book"));
-        let waiting =
-            assign_isomer(&coordinates, 2, &[("book", coordinates.as_slice())], None).unwrap();
-        assert!(waiting.name.is_none());
-        assert!(waiting.rmsd.unwrap() < 1e-8);
-        assert!(
-            assign_isomer(&coordinates, 2, &[], None)
-                .unwrap()
-                .name
-                .is_none()
+        let mut book = coordinates.clone();
+        for value in book.iter_mut().take(9) {
+            *value += 0.4;
+        }
+        assert!(monomers_intact(&book, 2).unwrap());
+        let named = assign_isomer(&book, 2, &[("book", book.as_slice())], Some(1.0));
+        #[cfg(not(feature = "ira"))]
+        assert_eq!(named, Err(MolecularCatalogPresetError::AssignmentNeedsIra));
+        #[cfg(feature = "ira")]
+        {
+            let named = named.unwrap();
+            assert_eq!(named.name.as_deref(), Some("book"));
+            assert!(named.rmsd.unwrap() < 1e-6);
+        }
+        let waiting = assign_isomer(&book, 2, &[("book", book.as_slice())], None);
+        #[cfg(not(feature = "ira"))]
+        assert_eq!(
+            waiting,
+            Err(MolecularCatalogPresetError::AssignmentNeedsIra)
         );
+        #[cfg(feature = "ira")]
+        {
+            let waiting = waiting.unwrap();
+            assert!(waiting.name.is_none());
+            assert!(waiting.rmsd.unwrap() < 1e-6);
+        }
+        assert!(assign_isomer(&book, 2, &[], None).unwrap().name.is_none());
+        assert_eq!(
+            assign_isomer(
+                &coordinates,
+                2,
+                &[("book", coordinates.as_slice())],
+                Some(1.0)
+            ),
+            Err(MolecularCatalogPresetError::IsolatedTemplate)
+        );
+    }
+
+    #[test]
+    fn a_dissociated_monomer_is_unassigned_for_search_and_gofee() {
+        let mut book = reference_coordinates(2).unwrap();
+        for value in book.iter_mut().take(9) {
+            *value += 0.4;
+        }
+        let mut broken = book.clone();
+        broken[3] += 5.0;
+        assert!(!monomers_intact(&broken, 2).unwrap());
+        let references = [("book", book.as_slice())];
+        let search = classify_geometry(&broken, 2, &references, Some(1.0)).unwrap();
+        let gofee = classify_geometry(&broken, 2, &references, Some(1.0)).unwrap();
+        assert_eq!(search, gofee);
+        assert!(!search.intact);
+        assert!(search.name.is_none());
+        assert!(search.rmsd.is_none());
+        assert_eq!(assignment_cutoff(&[]), None);
+        assert_eq!(assignment_cutoff(&[0.0, 0.0]), None);
+        assert_eq!(assignment_cutoff(&[1.0, 0.5, 0.0]), Some(0.25));
+        assert!(isomer_reference_gate(&[], 2).unwrap().is_none());
     }
 
     #[test]
