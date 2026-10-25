@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_imports)]
 //! One lattice-ensemble arm per difference from the published methods.
 //!
 //! Usage: `lattice_ensemble_ablation [lj38|lj75|lj98|morse80|all]`
@@ -275,4 +274,199 @@ fn cpu_model() -> String {
         .unwrap_or_else(|| "unknown".to_owned())
 }
 
-fn main() {}
+fn command_output(program: &str, args: &[&str]) -> String {
+    std::process::Command::new(program)
+        .args(args)
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+        .filter(|text| !text.is_empty())
+        .unwrap_or_else(|| "unknown".to_owned())
+}
+
+fn fmt_opt(value: f64) -> String {
+    if value.is_finite() {
+        format!("{value:.6}")
+    } else {
+        "-".to_owned()
+    }
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let which = args.get(1).map(String::as_str).unwrap_or("all");
+    let smoke = std::env::var("PAPER_SMOKE").ok().as_deref() == Some("1");
+    let threads = args.get(2).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+    });
+    let mut selected: Vec<Landscape> = landscapes()
+        .into_iter()
+        .filter(|landscape| which == "all" || landscape.name == which)
+        .collect();
+    if selected.is_empty() {
+        eprintln!("unknown landscape {which:?}: expected lj38, lj75, lj98, morse80 or all");
+        std::process::exit(2);
+    }
+    let chains = if smoke { 4 } else { Plan::default().chains };
+    if smoke {
+        for landscape in &mut selected {
+            landscape.seeds = 2;
+            landscape.budget = 8_000;
+        }
+    }
+    let label = if smoke { "SMOKE" } else { "UNTAGGED" };
+    let arm_list = arms(chains);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build()
+        .expect("thread pool");
+    let mut report = String::new();
+    let header = format!(
+        "label {label}\n\
+         hardware {cpu}\n\
+         cores {cores}\n\
+         threads {threads}\n\
+         rustc {rustc}\n\
+         commit {commit}\n\
+         start PresetSphere\n\
+         lengths Lattice::for_pair of the landscape pair, in units of r_min\n\
+         chains {chains}\n\
+         private_slots {PRIVATE_SLOTS}\n\
+         hit_window {HIT}\n\
+         z95 {Z95}\n\
+         note force ledger is accounting and has no arm\n",
+        cpu = cpu_model(),
+        cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(0),
+        rustc = command_output("rustc", &["--version"]),
+        commit = command_output("git", &["rev-parse", "HEAD"]),
+    );
+    report.push_str(&header);
+    println!("{header}");
+
+    for landscape in &selected {
+        let seeds: Vec<u64> = (landscape.seed0..landscape.seed0 + landscape.seeds).collect();
+        let started = Instant::now();
+        let per_seed: Vec<Vec<Trial>> = pool.install(|| {
+            use rayon::prelude::*;
+            seeds
+                .par_iter()
+                .map(|&seed| {
+                    arm_list
+                        .iter()
+                        .map(|arm| {
+                            let run = lattice_ensemble::run(
+                                landscape.n,
+                                landscape.budget,
+                                seed,
+                                &arm.plan,
+                                &Quench::default(),
+                                landscape.kind,
+                            );
+                            score(&run, landscape.reference, landscape.budget)
+                        })
+                        .collect()
+                })
+                .collect()
+        });
+        let block = format!(
+            "landscape {name} n {n} kind {kind} reference {reference:.6} seeds {seed0}+{count} ({from}) budget {budget} wall_s {wall:.3}\n",
+            name = landscape.name,
+            n = landscape.n,
+            kind = kind_label(landscape.kind),
+            reference = landscape.reference,
+            seed0 = landscape.seed0,
+            count = landscape.seeds,
+            from = landscape.seeds_from,
+            budget = landscape.budget,
+            wall = started.elapsed().as_secs_f64(),
+        );
+        print!("{block}");
+        report.push_str(&block);
+        let columns: Vec<Vec<Trial>> = (0..arm_list.len())
+            .map(|arm| per_seed.iter().map(|row| row[arm]).collect())
+            .collect();
+        for (index, arm) in arm_list.iter().enumerate() {
+            let trials = &columns[index];
+            let hits = trials.iter().filter(|trial| trial.hit).count();
+            let (rate, wlo, whi) = wilson(hits, trials.len());
+            let (force_med, force_iqr) = median_iqr(
+                &trials
+                    .iter()
+                    .map(|trial| trial.par2_force)
+                    .collect::<Vec<_>>(),
+            );
+            let (wall_med, wall_iqr) = median_iqr(
+                &trials
+                    .iter()
+                    .map(|trial| trial.par2_wall)
+                    .collect::<Vec<_>>(),
+            );
+            let force_sum: f64 = trials.iter().map(|trial| trial.force_calls).sum();
+            let wall_sum: f64 = trials.iter().map(|trial| trial.wall_seconds).sum();
+            let per_second = if wall_sum > 0.0 {
+                force_sum / wall_sum
+            } else {
+                f64::NAN
+            };
+            let deepest = trials
+                .iter()
+                .map(|trial| trial.best)
+                .fold(f64::INFINITY, f64::min);
+            let best_if_none = if hits == 0 {
+                fmt_opt(deepest)
+            } else {
+                "-".to_owned()
+            };
+            let spliced: usize = trials.iter().map(|trial| trial.spliced).sum();
+            let mut line = format!(
+                "arm {name} hits {hits}/{n} rate {rate:.6} wilson [{wlo:.6}, {whi:.6}] median_par2_force {fmed} iqr_force {fiqr} median_par2_wall {wmed} iqr_wall {wiqr} force_per_s {rate_s} best_if_none {best_if_none} spliced_trials {spliced}",
+                name = arm.name,
+                n = trials.len(),
+                fmed = fmt_opt(force_med),
+                fiqr = fmt_opt(force_iqr),
+                wmed = fmt_opt(wall_med),
+                wiqr = fmt_opt(wall_iqr),
+                rate_s = fmt_opt(per_second),
+            );
+            if index > 0 {
+                let (diff, lo, hi) = paired_hits(&columns[0], trials);
+                let paired = median_paired_par2(&columns[0], trials);
+                line.push_str(&format!(
+                    " paired_diff {diff:.6} interval [{lo:.6}, {hi:.6}] median_paired_par2_force {paired}",
+                    paired = fmt_opt(paired),
+                ));
+            }
+            println!("{line}");
+            report.push_str(&line);
+            report.push('\n');
+        }
+        let _ = std::io::stdout().flush();
+    }
+
+    if let Ok(dir) = std::env::var("PAPER_OUT") {
+        let name = if smoke {
+            "lattice-ablation-SMOKE.txt"
+        } else {
+            "lattice-ablation-UNTAGGED.txt"
+        };
+        let path = std::path::Path::new(&dir).join(name);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(err) = std::fs::write(&path, &report) {
+            eprintln!("could not write {}: {err}", path.display());
+        }
+    }
+}
+
+fn kind_label(kind: PairKind) -> String {
+    match kind {
+        PairKind::LennardJones => "LennardJones".to_owned(),
+        PairKind::Morse { rho } => format!("Morse rho {rho}"),
+    }
+}
