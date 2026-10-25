@@ -120,6 +120,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- ``rgpot-ex`` links one ``eindir_abi_stamp_t``. ``rgpot-core`` is crates.io
+  3.5.1, which depends on ``eindir-core`` 0.6.0, the same crate the rest of
+  the workspace uses. The git pin at 3.0.2 compiled a second eindir, and
+  packaging rewrote that pin to registry 3.0.2, which depends on
+  ``eindir-core`` 0.5.2.
 - An in-process census cohort dials neighbours only after every publisher
   is bound. A dial that landed on a port reservation completed the TCP
   handshake there and waited for a protocol header the reservation never
