@@ -1052,8 +1052,8 @@ pub struct Lattice {
     /// Pair distance below which two atoms are bonded, for coordination.
     pub bond_cutoff: f64,
     /// Longest triangle edge a hollow is built over. Above the square
-    /// diagonal `sqrt(2) * 2^(1/6)`, so fourfold hollows are found as well
-    /// as threefold ones.
+    /// diagonal `sqrt(2)` times the pair minimum, so fourfold hollows are
+    /// found as well as threefold ones.
     pub hollow_cutoff: f64,
     /// Distance from a site to each atom of its triangle.
     pub site_distance: f64,
@@ -1070,18 +1070,31 @@ pub struct Lattice {
     pub max_moves: usize,
 }
 
-impl Default for Lattice {
-    fn default() -> Self {
+impl Lattice {
+    /// Lengths are fixed ratios of `kind.r_min()`.
+    ///
+    /// The ratios are the historical Lennard-Jones lattice: bond 1.2,
+    /// hollow 1.47, site 1, clearance 0.85, merge 0.25.
+    /// `interior_coordination` stays 12, a field of the lattice rather than
+    /// a property of the pair.
+    pub fn for_pair(kind: PairKind) -> Self {
+        let r = kind.r_min();
         Self {
-            bond_cutoff: 1.2 * LJ_PAIR_MINIMUM,
-            hollow_cutoff: 1.47 * LJ_PAIR_MINIMUM,
-            site_distance: LJ_PAIR_MINIMUM,
-            clearance: 0.85 * LJ_PAIR_MINIMUM,
-            merge_distance: 0.25 * LJ_PAIR_MINIMUM,
+            bond_cutoff: 1.2 * r,
+            hollow_cutoff: 1.47 * r,
+            site_distance: r,
+            clearance: 0.85 * r,
+            merge_distance: 0.25 * r,
             interior_coordination: 12,
             candidates: 4,
             max_moves: 0,
         }
+    }
+}
+
+impl Default for Lattice {
+    fn default() -> Self {
+        Self::for_pair(PairKind::LennardJones)
     }
 }
 
@@ -1432,7 +1445,7 @@ impl Lattice {
 mod tests {
     use super::*;
     use crate::methods::warm_lbfgs::WarmLbfgs;
-    use crate::potentials::PairPotential;
+    use crate::potentials::{PairKind, PairPotential};
     use ndarray::Array1;
 
     fn search(n: usize, budget: usize, seed: u64) -> Outcome {
@@ -1721,5 +1734,72 @@ mod tests {
         assert_eq!(y.len(), x.len());
         assert!(y.iter().all(|v| v.is_finite()));
         assert_ne!(x, y);
+    }
+
+    #[test]
+    fn morse_site_distance_is_the_pair_minimum() {
+        for rho in [6.0, 10.0, 14.0] {
+            let kind = PairKind::Morse { rho };
+            let lattice = Lattice::for_pair(kind);
+            assert_eq!(lattice.site_distance.to_bits(), kind.r_min().to_bits());
+            assert_eq!(lattice.site_distance.to_bits(), 1.0_f64.to_bits());
+            assert_eq!(
+                lattice.bond_cutoff.to_bits(),
+                (1.2 * kind.r_min()).to_bits()
+            );
+            assert_eq!(
+                lattice.hollow_cutoff.to_bits(),
+                (1.47 * kind.r_min()).to_bits()
+            );
+            assert_eq!(lattice.clearance.to_bits(), (0.85 * kind.r_min()).to_bits());
+            assert_eq!(
+                lattice.merge_distance.to_bits(),
+                (0.25 * kind.r_min()).to_bits()
+            );
+            assert_eq!(lattice.interior_coordination, 12);
+        }
+    }
+
+    #[test]
+    fn lennard_jones_lattice_matches_the_historical_default() {
+        let lattice = Lattice::for_pair(PairKind::LennardJones);
+        assert_eq!(lattice.site_distance.to_bits(), LJ_PAIR_MINIMUM.to_bits());
+        assert_eq!(
+            lattice.bond_cutoff.to_bits(),
+            (1.2 * LJ_PAIR_MINIMUM).to_bits()
+        );
+        assert_eq!(
+            lattice.hollow_cutoff.to_bits(),
+            (1.47 * LJ_PAIR_MINIMUM).to_bits()
+        );
+        assert_eq!(
+            lattice.clearance.to_bits(),
+            (0.85 * LJ_PAIR_MINIMUM).to_bits()
+        );
+        assert_eq!(
+            lattice.merge_distance.to_bits(),
+            (0.25 * LJ_PAIR_MINIMUM).to_bits()
+        );
+        assert_eq!(lattice.interior_coordination, 12);
+        assert_eq!(lattice.candidates, 4);
+        assert_eq!(lattice.max_moves, 0);
+        let preset = Lattice::default();
+        assert_eq!(
+            preset.site_distance.to_bits(),
+            lattice.site_distance.to_bits()
+        );
+        assert_eq!(preset.bond_cutoff.to_bits(), lattice.bond_cutoff.to_bits());
+        assert_eq!(
+            preset.hollow_cutoff.to_bits(),
+            lattice.hollow_cutoff.to_bits()
+        );
+        assert_eq!(preset.clearance.to_bits(), lattice.clearance.to_bits());
+        assert_eq!(
+            preset.merge_distance.to_bits(),
+            lattice.merge_distance.to_bits()
+        );
+        assert_eq!(preset.interior_coordination, lattice.interior_coordination);
+        assert_eq!(preset.candidates, lattice.candidates);
+        assert_eq!(preset.max_moves, lattice.max_moves);
     }
 }
