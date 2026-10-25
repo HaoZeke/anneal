@@ -18,6 +18,9 @@ description = "Simulated annealing components built on the eindir typed primitiv
 repository = "https://github.com/HaoZeke/anneal"
 categories = ["science", "mathematics"]
 keywords = ["optimization", "simulated-annealing", "metaheuristic"]
+# Development pins and the out-of-tree target directory. The published
+# crate resolves registry versions.
+exclude = [".cargo/config.toml"]
 
 [lib]
 name = "anneal_core"
@@ -39,14 +42,20 @@ featomic = ["dep:featomic", "dep:metatensor"]
 # Neighbour construction through the vesin cell lists.
 vesin-nl = []
 # Cap'n Proto shared bank. Chains are separate processes.
-bank-rpc = ["dep:capnp", "dep:capnp-rpc", "dep:futures", "dep:nng", "dep:tokio", "dep:tokio-util", "dep:libc"]
+bank-rpc = ["dep:capnp", "dep:capnp-rpc", "dep:futures", "dep:nng", "dep:tokio", "dep:tokio-util", "dep:libc", "rgsaddle"]
 # REQ/REP transport for MinimumHistory. Independent of catalog/census.
 history-nng = ["dep:nng"]
+# Minimum-saddle-minimum sessions, stationary-index checks, the
+# constant-energy (NVE) minima-hopping escape, and the dense symmetric
+# eigensolve used by a connected spectral split. Off by default. `python`
+# and `bank-rpc` turn it on. The git revision below is what the feature
+# compiles against.
+rgsaddle = ["dep:rgsaddle"]
 # The gradient-enhanced Gaussian process of gpr_optim, over its C API. Needs
 # libgpr_optim on the link path; set GPR_OPTIM_LIB_DIR when building.
 gpr = []
 capi = ["eindir-core/capi"]
-python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
+python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective", "rgsaddle"]
 # Examples using an in-process rgpot eindir handle (xtb / CuH2 via
 # libloading). Off by default so LJ builds do not pull rgpot-core.
 # Do not enable rgpot-core/rpc: that needs a host capnp compiler.
@@ -64,7 +73,7 @@ linkcell    = { version = "0.3.11", git = "https://github.com/d-SEAMS/linkcell",
 # are the reproducible source selected when this crate is consumed elsewhere.
 eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9", version = "0.6.0", features = ["capi"] }
 rgmin = { git = "https://github.com/HaoZeke/rgmin.git", rev = "20832fd169932a1cd0d47ac84dc77fa9b435f940", version = "0.2.0" }
-rgsaddle = { git = "https://github.com/OmniPotentRPC/rgsaddle.git", rev = "84fe96bfc1ed163379c0af8bd664b74bf71407d1", version = "0.1.0" }
+rgsaddle = { git = "https://github.com/OmniPotentRPC/rgsaddle.git", rev = "84fe96bfc1ed163379c0af8bd664b74bf71407d1", version = "0.1.0", optional = true }
 readcon-core = "=0.14.8"
 readcon-db = "=0.1.5"
 num-traits  = "0.2"
@@ -238,7 +247,7 @@ required-features = ["ira"]
 
 [[example]]
 name = "lj_joint_optimum"
-required-features = ["ira"]
+required-features = ["ira", "rgsaddle"]
 
 [[example]]
 name = "curvature_transport"

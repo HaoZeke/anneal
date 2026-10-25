@@ -3347,6 +3347,7 @@ fn cluster_archive_search(
     dict.set_item("floors", out.floors)?;
     dict.set_item("returned", out.returned)?;
     dict.set_item("events", out.events)?;
+    dict.set_item("nve_unavailable", out.nve_unavailable)?;
     Ok(dict.into())
 }
 
@@ -3469,9 +3470,12 @@ fn rigid_probe(
 /// `Config.communicating(n)` and overrides both. A charged central-difference
 /// probe distinguishes gradients from force-valued callbacks when the budget
 /// can cover it. Every objective or gradient evaluation is charged to a ledger
-/// of `budget` units. Returns `{best, best_energy, hops}`.
+/// of `budget` units. Returns `{best, best_energy, hops, nve_unavailable}`.
+/// `nve_unavailable` is set when a constant-energy escape was requested and
+/// the `rgsaddle` feature is off. The `python` feature enables it.
 /// `ras=True` runs residual archive search on `Config.recommended(n)` and
-/// also reports `charged`, `floors`, `returned`, and `events`.
+/// also reports `charged`, `floors`, `returned`, `events`, and
+/// `nve_unavailable`.
 ///
 /// Args:
 ///   obj_fn: Python callable `f(numpy.ndarray) -> float`.
@@ -3790,6 +3794,7 @@ fn cluster_search(
     dict.set_item("best", PyArray1::from_vec(py, best))?;
     dict.set_item("best_energy", out.best)?;
     dict.set_item("hops", out.hops)?;
+    dict.set_item("nve_unavailable", out.nve_unavailable)?;
     Ok(dict.into())
 }
 
