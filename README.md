@@ -301,6 +301,29 @@ moves. Compare putative global minima against Wales and Hodges,
 cargo run --locked --release --example water_tip4p -- 6 20000 4
 ```
 
+The `rgsaddle` feature is off by default. It compiles minimum-saddle-minimum
+sessions and stationary-index checks. It compiles the constant-energy (NVE)
+minima-hopping escape and the dense symmetric eigensolve for a connected
+landscape split.
+Connected spectral splits return `GraphError::FeatureDisabled`. Saddle
+sessions and stationary-index checks return
+`PesExplorationError::SaddleUnavailable`. An NVE escape returns
+`NveError::FeatureDisabled`. With `md_escape` set, or on a binary chart with
+a wide diameter ratio, `cluster_search` stops and sets
+`Outcome::nve_unavailable`. `python` and `bank-rpc` turn the feature on,
+including PyPI wheels and `maturin develop --features python`. The feature
+compiles the git revision of
+[rgsaddle](https://github.com/OmniPotentRPC/rgsaddle) named in `Cargo.toml`.
+CI packages the crate with `cargo package --no-verify`. A later step
+extracts `anneal-core-${version}.crate`. It drops the development patch
+and the lockfile. It runs `cargo check` on the default features against
+crates.io.
+
+```bash
+cargo test --locked
+cargo test --locked --features rgsaddle
+```
+
 The `vesin-nl` feature compiles vesin's own cell-list sources into the
 neighbour list instead of the crate's reimplementation. Its build script
 reads `VESIN_SRC`, a checkout of [vesin](https://github.com/Luthaf/vesin),
