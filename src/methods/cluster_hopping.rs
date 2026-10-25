@@ -1232,6 +1232,45 @@ pub fn run_with_energy_gradient<'g, R: Rng + ?Sized>(
     )
 }
 
+/// As [`run_with_energy_gradient`], with periodic observations.
+///
+/// [`CheckpointAction::Retire`] ends the run with the best state found.
+/// The interval counts charged evaluations. It must be positive.
+pub fn run_with_energy_gradient_at_checkpoints<'g, R, H>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    energy_grad: Option<&mut EnergyGradFn<'g>>,
+    rng: &mut R,
+    checkpoint_interval: usize,
+    checkpoint: &mut H,
+) -> Outcome
+where
+    R: Rng + ?Sized,
+    H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
+{
+    assert!(
+        checkpoint_interval > 0,
+        "checkpoint interval must be positive"
+    );
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        energy_grad,
+        None,
+        None,
+        None,
+        Some(checkpoint_interval),
+        checkpoint,
+        rng,
+    )
+}
+
 /// As [`run_with_gradient`], with a bias supplied by the caller and left
 /// behind when the run ends.
 ///

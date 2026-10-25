@@ -1886,5 +1886,44 @@ mod tests {
         assert_eq!(preset.interior_coordination, lattice.interior_coordination);
         assert_eq!(preset.candidates, lattice.candidates);
         assert_eq!(preset.max_moves, lattice.max_moves);
+        assert_eq!(preset.kind, PairKind::LennardJones);
+    }
+
+    #[test]
+    fn lennard_jones_site_energy_matches_lj_pair_bits() {
+        let lattice = Lattice::default();
+        for r2 in [0.5_f64, 1.0, LJ_PAIR_MINIMUM * LJ_PAIR_MINIMUM, 4.0] {
+            assert_eq!(lattice.pair_energy(r2).to_bits(), lj_pair(r2).to_bits());
+        }
+        let morse = Lattice::for_pair(PairKind::Morse { rho: 14.0 });
+        let (energy, _) = PairKind::Morse { rho: 14.0 }.pair(1.0);
+        assert_eq!(morse.pair_energy(1.0).to_bits(), energy.to_bits());
+        assert!(morse.kind != PairKind::LennardJones);
+    }
+
+    #[test]
+    fn morse_quench_of_a_displaced_pair_sits_at_the_well() {
+        let quench = Quench {
+            kind: PairKind::Morse { rho: 14.0 },
+            max_iterations: 400,
+            ..Quench::default()
+        };
+        let start = [0.0, 0.0, 0.0, 1.15, 0.0, 0.0];
+        let mut ledger = Ledger::new(2_000);
+        let relaxed = quench.relax(&mut ledger, &start).expect("budget");
+        assert!(relaxed.converged, "rms {}", relaxed.rms);
+        assert!(
+            (relaxed.energy + 1.0).abs() < 1e-5,
+            "energy {}",
+            relaxed.energy
+        );
+        let d = [
+            relaxed.state[3] - relaxed.state[0],
+            relaxed.state[4] - relaxed.state[1],
+            relaxed.state[5] - relaxed.state[2],
+        ];
+        let bond = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        assert!((bond - 1.0).abs() < 1e-3, "bond {bond}");
+        assert_eq!(Quench::default().kind, PairKind::LennardJones);
     }
 }
