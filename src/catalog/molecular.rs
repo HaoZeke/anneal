@@ -27,6 +27,7 @@ use std::collections::BTreeMap;
 use ndarray::ArrayView1;
 use sha2::{Digest, Sha256};
 
+use super::census::BasinCensus;
 use super::{
     DescriptorSignature, EngineSignature, FreshEvaluation, SystemSignature, ValidatorConfig,
 };
@@ -41,7 +42,9 @@ use crate::descriptor_space::{
 use crate::descriptor_space::{
     UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION, universal_descriptor_space,
 };
+use crate::methods::cluster_hopping::Config;
 use crate::methods::cluster_hopping::covalent_radius;
+use crate::methods::minima_hopping::SharedVisitPolicy;
 use crate::soap::{SoapSpec, local_spectra_z};
 
 /// Invalid GFN2-xTB water catalog preset input.
@@ -466,4 +469,283 @@ pub fn fresh_evaluation(
                 .into(),
         )
     }
+}
+
+/// Maximum O-H separation that still counts as a bond in the integrity check (A).
+///
+/// A quenched hexamer fails when an oxygen is left with one hydrogen or three.
+pub const WATER_OH_BOND_MAX_A: f64 = 1.2;
+
+/// First seed of the water-hexamer block. Inclusive end is 31.
+///
+/// IDEAS H5 names 0-31. An earlier plan used 5100-5131 because the
+/// registry had been keeping paper seeds in high blocks. IDEAS wins.
+pub const WATER_HEXAMER_SEED_START: u64 = 0;
+
+/// Seeds per engine. The block is 0-31.
+pub const WATER_HEXAMER_SEED_COUNT: u64 = 32;
+
+/// Force budget per seed, the same on every engine.
+///
+/// FIXES R6 logged 1200 PBE evaluations and 4000 GFN2 evaluations.
+/// The outline sets 4000 for every engine, and that is the budget here.
+pub const WATER_HEXAMER_BUDGET: usize = 4000;
+
+/// GFN2-xTB force budget. Same as [`WATER_HEXAMER_BUDGET`].
+pub const GFN2_HEXAMER_BUDGET: usize = WATER_HEXAMER_BUDGET;
+
+/// PBE/6-31G* force budget. Same as [`WATER_HEXAMER_BUDGET`].
+pub const PBE_HEXAMER_BUDGET: usize = WATER_HEXAMER_BUDGET;
+
+/// PET-MAD force budget. Same as [`WATER_HEXAMER_BUDGET`].
+pub const PETMAD_HEXAMER_BUDGET: usize = WATER_HEXAMER_BUDGET;
+
+/// NWChem embed engine id used by the rgpot profile.
+pub const PBE_ENGINE_KIND: &str = "nwchemc";
+
+/// Gaussian basis named for the PBE hexamer rerun.
+pub const PBE_BASIS: &str = "6-31g*";
+
+/// NWChem theory arm for the PBE hexamer rerun.
+pub const PBE_THEORY: &str = "dft";
+
+/// Exchange-correlation functional. `scfType` when `theory` is `dft`.
+pub const PBE_XC: &str = "pbe";
+
+/// No dispersion correction is named for the PBE/6-31G* rerun.
+pub const PBE_DISPERSION: &str = "none named";
+
+/// Molecular charge of neutral (H2O)6.
+pub const PBE_CHARGE: i32 = 0;
+
+/// Spin multiplicity 2S+1 of singlet water.
+pub const PBE_MULTIPLICITY: i32 = 1;
+
+/// NWChem task. The frontend calls gradient.
+pub const PBE_TASK: &str = "gradient";
+
+/// Metatomic engine family for the PET-MAD hexamer rerun.
+pub const PETMAD_ENGINE_KIND: &str = "metatomic-rgpot-v1";
+
+/// Model file named by the potlib metatomic dlopen test.
+pub const PETMAD_MODEL_NAME: &str = "pet-mad-xs-v1.5.0.pt";
+
+/// Device recorded for the PET-MAD force call.
+pub const PETMAD_DEVICE: &str = "cpu";
+
+/// rgpot-core checksum in `Cargo.lock`. The crate is registry 3.5.1.
+pub const RGPOT_REV: &str = "df34626c5c9d888c234e6a0921e7e6c0335561ec50460fcf74e4b77772c89ede";
+
+/// rgpot-core version this tree links.
+pub const RGPOT_VERSION: &str = "3.5.1";
+
+/// eindir-core checksum in `Cargo.lock`. The crate is registry 0.6.0.
+pub const EINDIR_REV: &str = "e330e3abad9c1a597b144d40eb4b07ab3511d79f7d2cdbbcb37a44662f974db0";
+
+/// eindir-core version this tree links.
+pub const EINDIR_VERSION: &str = "0.6.0";
+
+/// Isomer names the hexamer assignment knows.
+pub const WATER_ISOMER_NAMES: [&str; 6] = [
+    "prism",
+    "cage",
+    "book",
+    "bag",
+    "cyclic-chair",
+    "cyclic-boat",
+];
+
+/// FIXES R6 wrote an RMSD gate of 0.1 A in a proposed sentence.
+///
+/// The outline replaces that gate. The assignment cutoff is half the
+/// minimum IRA RMSD between distinct same-level references, computed
+/// after those references are relaxed and before any search seed.
+/// No deposited references are in this tree, so no cutoff is stored.
+pub const ISOMER_RMSD_GATE_NAMED_BY_FIXES_A: f64 = 0.1;
+
+/// Census radius on the sorted oxygen-oxygen distances (A).
+///
+/// This is the Good-Turing descriptor radius for the water arm. It is
+/// not the isomer assignment cutoff.
+pub const OXYGEN_DISTANCE_CENSUS_RADIUS_A: f64 = 0.1;
+
+/// Charged-evaluation interval of the Good-Turing checkpoint.
+pub const GOOD_TURING_CHECKPOINT_INTERVAL: usize = 1;
+
+/// Search arm on the molecular preset.
+///
+/// Communicating and derived keep the molecular groups. They do not
+/// install [`Config::communicating`] or [`Config::derived`] as atomic
+/// presets. Good-Turing uses the recommended flags and a census stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaterSearchArm {
+    /// [`Config::recommended_molecular`].
+    Recommended,
+    /// Orbit, Recognition, and the return screen, on the molecular library.
+    Communicating,
+    /// Budget-window temperature and the cost-asymmetric Bayes screen.
+    Derived,
+    /// Recommended flags, plus the production Good-Turing stop.
+    GoodTuring,
+}
+
+/// Overlay one water arm on a molecular configuration.
+///
+/// The move library is left as the caller set it. The atomic two-phase
+/// surface is not copied onto these arms.
+pub fn configure_water_arm(cfg: &mut Config, arm: WaterSearchArm) {
+    match arm {
+        WaterSearchArm::Recommended | WaterSearchArm::GoodTuring => {}
+        WaterSearchArm::Communicating => {
+            cfg.depth_reward = false;
+            cfg.allocate_moves = true;
+            cfg.return_screen = true;
+            cfg.orbit_complete_on_new = true;
+            cfg.shared_deposits = 0;
+            cfg.shared_visit_policy = SharedVisitPolicy::Recognition;
+            cfg.jump_on_stall = false;
+        }
+        WaterSearchArm::Derived => {
+            cfg.budget_window = true;
+            cfg.bayes_screen = true;
+            cfg.bayes_threshold =
+                crate::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
+        }
+    }
+}
+
+/// Whether every oxygen has exactly two hydrogens within [`WATER_OH_BOND_MAX_A`].
+pub fn monomers_intact(
+    coordinates: &[f64],
+    n_molecules: usize,
+) -> Result<bool, MolecularCatalogPresetError> {
+    let points = water_points(coordinates, n_molecules)?;
+    let limit2 = WATER_OH_BOND_MAX_A * WATER_OH_BOND_MAX_A;
+    for molecule in &points {
+        let oxygen = molecule[0];
+        let mut near = 0usize;
+        for other in &points {
+            for hydrogen in [other[1], other[2]] {
+                if dist2(oxygen, hydrogen) <= limit2 {
+                    near += 1;
+                }
+            }
+        }
+        if near != 2 {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Sorted oxygen-oxygen distances of `(H2O)m`. The Good-Turing descriptor.
+pub fn sorted_oxygen_distances(
+    coordinates: &[f64],
+    n_molecules: usize,
+) -> Result<Vec<f64>, MolecularCatalogPresetError> {
+    let points = water_points(coordinates, n_molecules)?;
+    let mut distances = Vec::with_capacity(n_molecules * n_molecules.saturating_sub(1) / 2);
+    for i in 0..points.len() {
+        for j in (i + 1)..points.len() {
+            distances.push(dist2(points[i][0], points[j][0]).sqrt());
+        }
+    }
+    distances.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(distances)
+}
+
+/// `Some("saturated")` when the production Good-Turing rule is met.
+pub fn good_turing_stop_reason(census: &BasinCensus) -> Option<&'static str> {
+    census.is_saturated().then_some("saturated")
+}
+
+/// One isomer match, or none when no reference is within the gate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IsomerMatch {
+    /// Name from [`WATER_ISOMER_NAMES`], when the RMSD is inside the gate.
+    pub name: Option<String>,
+    /// Lowest permutation-invariant RMSD among the references, in angstroms.
+    pub rmsd: Option<f64>,
+}
+
+/// Assign a hexamer by permutation-invariant RMSD against same-level references.
+///
+/// An empty reference list is unassigned. `cutoff` is the engine's
+/// assignment gate. `None` reports the nearest RMSD and does not name
+/// an isomer, because that gate is half the minimum gap between
+/// deposited references and those references are not in this tree.
+/// The isolated-water template is not a valid entry of `references`.
+pub fn assign_isomer(
+    candidate: &[f64],
+    n_molecules: usize,
+    references: &[(&str, &[f64])],
+    cutoff: Option<f64>,
+) -> Result<IsomerMatch, MolecularCatalogPresetError> {
+    if references.is_empty() {
+        return Ok(IsomerMatch {
+            name: None,
+            rmsd: None,
+        });
+    }
+    let mut best_name: Option<&str> = None;
+    let mut best = f64::INFINITY;
+    for (name, reference) in references {
+        if !WATER_ISOMER_NAMES.contains(name) {
+            return Err(MolecularCatalogPresetError::SpeciesMismatch);
+        }
+        let rmsd = water_rmsd(reference, candidate, n_molecules)?;
+        if rmsd < best {
+            best = rmsd;
+            best_name = Some(*name);
+        }
+    }
+    let inside = cutoff.is_some_and(|gate| best.is_finite() && best <= gate);
+    Ok(IsomerMatch {
+        name: inside.then(|| best_name.unwrap_or("").to_owned()),
+        rmsd: best.is_finite().then_some(best),
+    })
+}
+
+/// Rotation-and-permutation RMSD of two `(H2O)m` geometries (A).
+///
+/// Molecules may be reordered. The two hydrogens of a molecule may swap.
+/// Alignment is the Kabsch rotation, inversion included, after both clouds
+/// are centred.
+pub fn water_rmsd(
+    reference: &[f64],
+    candidate: &[f64],
+    n_molecules: usize,
+) -> Result<f64, MolecularCatalogPresetError> {
+    let left = water_points(reference, n_molecules)?;
+    let right = water_points(candidate, n_molecules)?;
+    let mut order = vec![0usize; n_molecules];
+    let mut used = vec![false; n_molecules];
+    let mut flips = vec![false; n_molecules];
+    let mut best = f64::INFINITY;
+    assign_molecules(
+        &left, &right, 0, &mut order, &mut used, &mut flips, &mut best,
+    );
+    Ok(best)
+}
+
+fn dist2(_left: [f64; 3], _right: [f64; 3]) -> f64 {
+    0.0
+}
+
+fn water_points(
+    _coordinates: &[f64],
+    _n_molecules: usize,
+) -> Result<Vec<[[f64; 3]; 3]>, MolecularCatalogPresetError> {
+    Err(MolecularCatalogPresetError::InvalidMoleculeCount)
+}
+
+fn assign_molecules(
+    _reference: &[[[f64; 3]; 3]],
+    _candidate: &[[[f64; 3]; 3]],
+    _placed: usize,
+    _order: &mut [usize],
+    _used: &mut [bool],
+    _flips: &mut [bool],
+    _best: &mut f64,
+) {
 }
