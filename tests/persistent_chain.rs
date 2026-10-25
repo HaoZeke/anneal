@@ -50,7 +50,8 @@ fn no_action_checkpoints_are_identical_to_an_uninterrupted_run() {
         None,
         &mut uninterrupted_bias,
         &mut uninterrupted_rng,
-    );
+    )
+    .expect("finite start");
 
     let mut checkpoints = Vec::new();
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
@@ -67,7 +68,8 @@ fn no_action_checkpoints_are_identical_to_an_uninterrupted_run() {
         &mut checkpointed_rng,
         211,
         &mut checkpoint,
-    );
+    )
+    .expect("finite start");
 
     assert!(
         checkpoints.len() > 1,
@@ -122,7 +124,8 @@ fn checkpoint_external_work_is_charged_without_fabricating_a_proposal() {
         &mut baseline_rng,
         1,
         &mut baseline_checkpoint,
-    );
+    )
+    .expect("finite start");
 
     const EXTERNAL_CALLS: usize = 37;
     let mut settled = false;
@@ -146,7 +149,8 @@ fn checkpoint_external_work_is_charged_without_fabricating_a_proposal() {
         &mut external_rng,
         1,
         &mut external_checkpoint,
-    );
+    )
+    .expect("finite start");
 
     assert!(settled, "checkpoint did not settle the external work");
     assert_eq!(
@@ -204,7 +208,8 @@ fn checkpoint_boundary_proposal_is_quenched_and_chain_continues() {
         &mut rng,
         211,
         &mut checkpoint,
-    );
+    )
+    .expect("finite start");
 
     assert!(offered, "checkpoint did not offer the boundary proposal");
     assert!(
@@ -253,7 +258,8 @@ fn checkpoint_probe_is_recorded_without_becoming_the_live_chain() {
         &mut rng,
         40,
         &mut checkpoint,
-    );
+    )
+    .expect("finite start");
 
     let probe = outcome
         .accepted_transitions
@@ -308,7 +314,8 @@ fn failed_diagnostic_probe_stays_off_the_live_chain() {
         &mut rng,
         1,
         &mut checkpoint,
-    );
+    )
+    .expect("finite start");
 
     let probe = outcome
         .accepted_transitions
@@ -358,7 +365,8 @@ fn unvalidated_screen_result_never_becomes_the_live_chain_state() {
         &mut relax,
         Some(&mut gradient),
         &mut rng,
-    );
+    )
+    .expect("finite start");
 
     // A screened trial still faces the acceptance law and may carry the
     // chain: that is how a short screen finds basins at all. What it may
@@ -409,7 +417,8 @@ fn occupancy_retire_stops_the_chain() {
         &mut rng,
         211,
         &mut checkpoint,
-    );
+    )
+    .expect("finite start");
 
     assert_eq!(checkpoints, 1, "retire kept invoking the checkpoint hook");
     assert!(
@@ -464,7 +473,8 @@ fn checkpoint_external_adopt_charges_the_work_then_moves_the_live_chain() {
         &mut boundary_rng,
         7,
         &mut boundary_checkpoint,
-    );
+    )
+    .expect("finite start");
 
     const EXTERNAL_CALLS: usize = 53;
     let mut external_offered = false;
@@ -490,7 +500,8 @@ fn checkpoint_external_adopt_charges_the_work_then_moves_the_live_chain() {
         &mut external_rng,
         7,
         &mut external_checkpoint,
-    );
+    )
+    .expect("finite start");
 
     assert!(
         external_offered,

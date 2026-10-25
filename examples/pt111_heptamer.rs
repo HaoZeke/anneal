@@ -569,7 +569,8 @@ fn drive() {
     for seed in seed0..seed0 + seeds {
         let start = place_adsorbates(&base, &species, &island, box_, seed);
         let mut ledger = Ledger::new(budget);
-        let (out, stats) = search_from(&surface, &cfg, &mut ledger, start.view(), seed);
+        let (out, stats) =
+            search_from(&surface, &cfg, &mut ledger, start.view(), seed).expect("finite start");
         let mut state = out.best_state.clone().unwrap_or_else(|| start.clone());
         for (i, on) in surface.active.iter().enumerate() {
             if !on {

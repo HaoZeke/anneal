@@ -143,7 +143,8 @@ fn recommended_molecular_search_hops_on_water_dimer() {
     let mut opt = WarmLbfgs::default();
     let mut relax = charged_relax(&pot, &mut opt, None);
     let mut rng = StdRng::seed_from_u64(3);
-    let out = run_with_gradient(&cfg, start.view(), &mut ledger, &mut relax, None, &mut rng);
+    let out = run_with_gradient(&cfg, start.view(), &mut ledger, &mut relax, None, &mut rng)
+        .expect("finite start");
     assert!(out.best.is_finite(), "best {}", out.best);
     assert!(out.hops > 0, "no hops on recommended_molecular");
     let soap_draws = out
@@ -171,7 +172,8 @@ fn recommended_molecular_slab_keeps_frozen_coords() {
     let mut opt = WarmLbfgs::default();
     let mut relax = charged_relax(&pot, &mut opt, Some(frozen.as_slice()));
     let mut rng = StdRng::seed_from_u64(5);
-    let out = run_with_gradient(&cfg, start.view(), &mut ledger, &mut relax, None, &mut rng);
+    let out = run_with_gradient(&cfg, start.view(), &mut ledger, &mut relax, None, &mut rng)
+        .expect("finite start");
     assert!(out.best.is_finite(), "best {}", out.best);
     assert!(out.hops > 0, "no hops on slab-shaped recommended_molecular");
     let end = out
