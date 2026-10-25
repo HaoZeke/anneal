@@ -207,7 +207,10 @@ impl RankedPopulationMember {
 /// Novelty is ranked directly. Scarcity is ranked through inverse exact basin
 /// visits, so a less-visited census basin receives a higher scarcity rank.
 /// Graph-field uncertainty is ranked directly, so a less certain node receives
-/// a higher uncertainty rank.
+/// a higher uncertainty rank. Scores that agree to
+/// [`UNCERTAINTY_RANK_RELATIVE_TOLERANCE`] share a rank: the residual
+/// variance is a solved diagonal, and a symmetric star does not come back
+/// bitwise equal.
 pub fn rank_population(
     members: &[PopulationMember],
 ) -> Result<Vec<RankedPopulationMember>, ReconfigurationError> {
@@ -241,7 +244,8 @@ pub fn rank_population(
     let energy_ranks = ascending_fractional_ranks(&energy)?;
     let novelty_ranks = ascending_fractional_ranks(&novelty)?;
     let scarcity_ranks = ascending_fractional_ranks(&scarcity)?;
-    let uncertainty_ranks = ascending_fractional_ranks(&uncertainty)?;
+    let uncertainty_ranks =
+        ascending_fractional_ranks_within(&uncertainty, UNCERTAINTY_RANK_RELATIVE_TOLERANCE)?;
 
     members
         .iter()
@@ -258,6 +262,56 @@ pub fn rank_population(
             })
         })
         .collect()
+}
+
+/// Relative tolerance for grouping graph-field scores before ranking.
+///
+/// One part in 1e8. A gap this small is the Cholesky factor, not a
+/// different posterior variance.
+pub const UNCERTAINTY_RANK_RELATIVE_TOLERANCE: f64 = 1e-8;
+
+fn ascending_fractional_ranks_within(
+    values: &[f64],
+    relative: f64,
+) -> Result<Vec<f64>, ReconfigurationError> {
+    if values.is_empty() {
+        return Err(ReconfigurationError::EmptyPopulation);
+    }
+    for &value in values {
+        if !value.is_finite() {
+            return Err(ReconfigurationError::InvalidParameter {
+                field: "rank_input",
+                value,
+            });
+        }
+    }
+    if values.len() == 1 {
+        return Ok(vec![0.0]);
+    }
+    let mut order: Vec<usize> = (0..values.len()).collect();
+    order.sort_by(|&left, &right| values[left].total_cmp(&values[right]));
+    let scale = (values.len() - 1) as f64;
+    let mut ranks = vec![0.0; values.len()];
+    let mut begin = 0;
+    while begin < order.len() {
+        let anchor = values[order[begin]];
+        let mut end = begin + 1;
+        while end < order.len() && uncertainty_scores_match(anchor, values[order[end]], relative) {
+            end += 1;
+        }
+        let average_position = 0.5 * (begin + end - 1) as f64;
+        let rank = average_position / scale;
+        for &index in &order[begin..end] {
+            ranks[index] = rank;
+        }
+        begin = end;
+    }
+    Ok(ranks)
+}
+
+fn uncertainty_scores_match(left: f64, right: f64, relative: f64) -> bool {
+    let scale = left.abs().max(right.abs()).max(relative);
+    (left - right).abs() <= relative * scale
 }
 
 fn validate_rank(field: &'static str, value: f64) -> Result<(), ReconfigurationError> {
