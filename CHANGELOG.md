@@ -204,6 +204,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- The seam restart banks a structure only when it is within two epsilon
+  of the previous floor and its icosahedral template share is strictly
+  below that floor. A DECAF gap and an energy doorway are not the
+  broadcast. ``restart_on_stall`` stays off on ``recommended``,
+  ``derived``, and ``communicating``, so the restart is not a stall arm.
 - The census IPC address, the q-Gaussian bound check, the q-Gaussian
   error, and the MD work directory name the values they test. The address,
   the accepted ``(q_v, q_a)`` interval, the error text, and the directory
