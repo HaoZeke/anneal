@@ -23,14 +23,30 @@ fn checked_rejects_uncertified_component_combinations() {
     let config = target.join("tests/trybuild/anneal-core/.cargo");
     std::fs::create_dir_all(&config).unwrap();
     let vendor = Path::new(env!("CARGO_MANIFEST_DIR")).join("vendor/metatensor-sys");
-    std::fs::write(
-        config.join("config.toml"),
-        format!(
-            "[patch.crates-io]\nmetatensor-sys = {{ path = \"{}\" }}\n",
-            vendor.display()
-        ),
-    )
-    .unwrap();
+    let mut patch = format!(
+        "[patch.crates-io]\nmetatensor-sys = {{ path = \"{}\" }}\n",
+        vendor.display()
+    );
+    // trybuild does not walk up to the workspace config. A development
+    // registry patch has to be repeated here or the UI crate cannot
+    // resolve it. The committed config has no patch.
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join(".cargo/config.toml");
+    if let Ok(text) = std::fs::read_to_string(workspace) {
+        if let Some((_, body)) = text.split_once("[patch.crates-io]") {
+            for line in body.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    continue;
+                }
+                if trimmed.starts_with('[') {
+                    break;
+                }
+                patch.push_str(trimmed);
+                patch.push('\n');
+            }
+        }
+    }
+    std::fs::write(config.join("config.toml"), patch).unwrap();
 
     let tests = trybuild::TestCases::new();
     tests.compile_fail("tests/ui/checked_rejects_*.rs");

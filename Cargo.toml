@@ -48,8 +48,8 @@ history-nng = ["dep:nng"]
 # Minimum-saddle-minimum sessions, stationary-index checks, the
 # constant-energy (NVE) minima-hopping escape, and the dense symmetric
 # eigensolve used by a connected spectral split. Off by default. `python`
-# and `bank-rpc` turn it on. The git revision below is what the feature
-# compiles against.
+# and `bank-rpc` turn it on. The feature compiles rgsaddle 0.3.0 from
+# crates.io against rgmin 0.5.0.
 rgsaddle = ["dep:rgsaddle"]
 # The gradient-enhanced Gaussian process of gpr_optim, over its C API. Needs
 # libgpr_optim on the link path; set GPR_OPTIM_LIB_DIR when building.
@@ -68,12 +68,12 @@ nauty-pet = { version = "0.14", optional = true }
 thiserror   = "2"
 ndarray     = "0.17"
 dlpk        = { version = "0.1.5", features = ["ndarray", "half"] }
-linkcell    = { version = "0.3.11", git = "https://github.com/d-SEAMS/linkcell", rev = "2e26b83c0c9bbc07d09eb056011dd8e2cec6f4a5", default-features = false }
-# Sibling checkouts provide the local development surface; the Git revisions
-# are the reproducible source selected when this crate is consumed elsewhere.
-eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9", version = "0.6.0", features = ["capi"] }
-rgmin = { git = "https://github.com/HaoZeke/rgmin.git", rev = "20832fd169932a1cd0d47ac84dc77fa9b435f940", version = "0.2.0" }
-rgsaddle = { git = "https://github.com/OmniPotentRPC/rgsaddle.git", rev = "84fe96bfc1ed163379c0af8bd664b74bf71407d1", version = "0.1.0", optional = true }
+# Published 0.3.11 is the previous git pin, sources included.
+linkcell    = { version = "=0.3.11", default-features = false }
+# eindir-core 0.6.0 on crates.io matches the previous git pin's sources.
+eindir-core = { version = "0.6.0", features = ["capi"] }
+rgmin = "0.5.0"
+rgsaddle = { version = "0.3.0", optional = true }
 readcon-core = "=0.14.8"
 readcon-db = "=0.1.5"
 num-traits  = "0.2"
