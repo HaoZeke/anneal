@@ -83,6 +83,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
 
    howto/install
    howto/choose-driver
+   howto/box-langevin-escape
    howto/chemfit
    howto/precision-policy
    howto/rgmin-lbfgs
@@ -98,7 +99,18 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    architecture
    explanation/algebra
    explanation/bayesian-details
+   explanation/communication
    explanation/gle-mechanics
+   explanation/regime_auto
+#+end_export
+
+#+begin_export rst
+.. toctree::
+   :maxdepth: 1
+   :caption: Methods
+
+   methods/catalog
+   methods/composition
 #+end_export
 
 #+begin_export rst

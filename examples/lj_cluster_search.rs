@@ -4345,7 +4345,7 @@ fn run_capnp_catalog(
             String::new()
         });
         let workdir =
-            std::env::temp_dir().join(format!("anneal-md-{}-{}-{}", campaign, ensemble, replica));
+            std::env::temp_dir().join(format!("anneal-md-{campaign}-{ensemble}-{replica}"));
         let engine =
             anneal_core::md_engine::engine_by_name(&name, std::path::Path::new(&binary), &workdir);
         if engine.is_none() {

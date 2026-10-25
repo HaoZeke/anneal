@@ -1,4 +1,7 @@
 import os
+import sys
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ext")))
 
 # -- Project information -----------------------------------------------------
 project = "anneal"
@@ -14,6 +17,8 @@ extensions = [
     "sphinx_sitemap",
     "sphinxcontrib_rust",
     "sphinx_rustdoc_postprocess",
+    "anneal_docutils",
+    "sphinx.ext.mathjax",
 ]
 
 templates_path = ["_templates"]
@@ -22,7 +27,6 @@ exclude_patterns = []
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "numpy": ("https://numpy.org/doc/stable", None),
-    "eindir": ("https://eindir.rgoswami.me", None),
 }
 
 # -- sphinxcontrib-rust configuration ----------------------------------------
