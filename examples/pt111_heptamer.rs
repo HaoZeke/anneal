@@ -675,9 +675,7 @@ fn certify_edge(
     right: &Array1<f64>,
     steps: usize,
 ) -> Option<(f64, Array1<f64>, f64)> {
-    use rgsaddle::{
-        ForceGate, MinModeConfig, MinModeKind, MinModeSession, PointSurface, SaddleError,
-    };
+    use rgsaddle::{MinModeConfig, MinModeKind, MinModeSession, PointSurface, SaddleError};
     struct Island<'a> {
         surface: &'a Surface,
         mobile: &'a [usize],
@@ -715,7 +713,6 @@ fn certify_edge(
     let start = (&left_m + &right_m) * 0.5;
     let config = MinModeConfig {
         kind: MinModeKind::Dimer,
-        force_gate: ForceGate::L2Norm,
         force_tol: 1.0e-3,
         max_rotations: env_usize("DIMER_ROTATIONS", 20),
         ..MinModeConfig::default()
