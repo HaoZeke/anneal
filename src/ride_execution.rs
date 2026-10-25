@@ -153,7 +153,8 @@ fn classify_failure(error: PesExplorationError, budget_exhausted: bool) -> RideF
         | PesExplorationError::Surface(_)
         | PesExplorationError::InvalidEvaluation(_)
         | PesExplorationError::Descriptor(_)
-        | PesExplorationError::Saddle(_) => RideFailure::Surface,
+        | PesExplorationError::Saddle(_)
+        | PesExplorationError::SaddleUnavailable => RideFailure::Surface,
     }
 }
 

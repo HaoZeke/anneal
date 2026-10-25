@@ -852,7 +852,13 @@ pub struct Outcome {
     pub gossip_rounds: usize,
     /// MD escapes attempted, integration steps taken, and attempts that
     /// found no second potential minimum or ran out of budget.
+    ///
+    /// An attempt that never started because the `rgsaddle` feature is off
+    /// is not counted here. That refusal is [`Outcome::nve_unavailable`].
     pub md_escape: (usize, usize, usize),
+    /// The hop asked for a constant-energy (NVE) escape and the `rgsaddle`
+    /// feature is off, so the run stopped instead of substituting a kick.
+    pub nve_unavailable: bool,
     /// Seconds the chain spent inside the history, lock waits included.
     pub history_seconds: f64,
     /// Climbs triggered by a stall.
@@ -1781,8 +1787,10 @@ fn rigid_factor_cap(n_bodies: usize) -> f64 {
 /// True when two species differ in diameter by at least a fifth.
 ///
 /// At that mismatch an exchange of every misplaced label leaves the
-/// low-energy funnel. The hop proposes a soft microcanonical escape
-/// instead.
+/// low-energy funnel. The hop proposes a soft constant-energy (NVE)
+/// escape instead. Without the `rgsaddle` feature that escape is not
+/// compiled, the run stops, and [`Outcome::nve_unavailable`] is set.
+/// The library kick is not substituted.
 fn large_diameter_ratio(cfg: &Config) -> bool {
     let Some(sigma) = cfg.species_sigma.as_ref() else {
         return false;
@@ -2321,6 +2329,7 @@ where
     let mut md_attempts = 0usize;
     let mut md_steps = 0usize;
     let mut md_failed = 0usize;
+    let mut nve_unavailable = false;
     // Wide size mismatch. Random identity exchange leaves the funnel, so the
     // ordinary proposal is a softened microcanonical escape whose total
     // kinetic energy grows when the quench returns and shrinks when the
@@ -3496,7 +3505,7 @@ where
                 potential_minima: cfg.md_escape_minima.max(1),
                 maximum_steps: cfg.md_escape_max_steps.max(1),
                 softening: (cfg.md_escape_soften > 0).then_some(
-                    rgsaddle::VelocitySofteningConfig {
+                    crate::methods::minima_hopping::VelocitySofteningConfig {
                         steps: cfg.md_escape_soften,
                         ..Default::default()
                     },
@@ -3509,7 +3518,6 @@ where
                 let gradient = g(ledger, p)?;
                 energy.is_finite().then_some((energy, gradient))
             };
-            md_attempts += 1;
             match crate::methods::minima_hopping::nve_escape_with_frozen(
                 x.view(),
                 kinetic,
@@ -3519,6 +3527,7 @@ where
                 hop_frozen.as_deref(),
             ) {
                 Ok(report) if report.potential_minima >= md_config.potential_minima => {
+                    md_attempts += 1;
                     md_steps += report.steps;
                     if md_attempts <= 8 && std::env::var("MD_TRACE").is_ok_and(|v| v == "1") {
                         let displacement = (&report.position - &x).mapv(|d| d * d).sum().sqrt();
@@ -3535,10 +3544,16 @@ where
                     hmc_trial = Some(report.position);
                 }
                 Ok(report) => {
+                    md_attempts += 1;
                     md_steps += report.steps;
                     md_failed += 1;
                 }
+                Err(crate::methods::minima_hopping::NveError::FeatureDisabled) => {
+                    nve_unavailable = true;
+                    break;
+                }
                 Err(_) => {
+                    md_attempts += 1;
                     md_failed += 1;
                 }
             }
@@ -3566,10 +3581,11 @@ where
         }
         // A large diameter ratio makes an all-pairs identity exchange climb
         // out of the funnel (Sicher, Mohr, Goedecker). The ordinary proposal
-        // is a softened microcanonical escape that has to travel before it
-        // counts, then a full quench and the preset Metropolis test. A
-        // trajectory that stays in the well falls through to the library
-        // and the next launch is hotter.
+        // is a softened constant-energy (NVE) escape that has to travel
+        // before it counts, then a full quench and the preset Metropolis
+        // test. A trajectory that stays in the well falls through to the
+        // library and the next launch is hotter. An escape that is not
+        // compiled stops the run instead of falling through.
         if hmc_trial.is_none()
             && !angular
             && species_wide
@@ -3583,7 +3599,7 @@ where
                 minimum_rise: 0.50 * cfg.energy_scale,
                 max_rms: 2.5 * cfg.length_scale,
                 min_well_rms: 0.0,
-                softening: Some(rgsaddle::VelocitySofteningConfig {
+                softening: Some(crate::methods::minima_hopping::VelocitySofteningConfig {
                     steps: 5,
                     displacement: 0.10 * cfg.length_scale,
                     mixing: 0.25,
@@ -3592,7 +3608,6 @@ where
             };
             let kinetic = species_kinetic;
             let mut evaluate = |p: ArrayView1<f64>| eg(ledger, p);
-            md_attempts += 1;
             match crate::methods::minima_hopping::nve_escape_with_frozen(
                 x.view(),
                 kinetic,
@@ -3602,6 +3617,7 @@ where
                 hop_frozen.as_deref(),
             ) {
                 Ok(report) if report.potential_minima >= 2 || report.far_rms >= escape_floor => {
+                    md_attempts += 1;
                     md_steps += report.steps;
                     let position = if report.potential_minima >= 2 {
                         report.position
@@ -3612,11 +3628,17 @@ where
                     species_escape_trial = true;
                 }
                 Ok(report) => {
+                    md_attempts += 1;
                     md_steps += report.steps;
                     md_failed += 1;
                     species_kinetic = (species_kinetic * 1.3).min(species_kinetic_cap);
                 }
+                Err(crate::methods::minima_hopping::NveError::FeatureDisabled) => {
+                    nve_unavailable = true;
+                    break;
+                }
                 Err(_) => {
+                    md_attempts += 1;
                     md_failed += 1;
                     species_kinetic = (species_kinetic * 1.3).min(species_kinetic_cap);
                 }
@@ -5902,6 +5924,7 @@ where
         shared_deposits,
         gossip_rounds,
         md_escape: (md_attempts, md_steps, md_failed),
+        nve_unavailable,
         history_seconds: history.as_deref().map_or(0.0, |h| h.cost().2),
         merge_radius: final_radius,
         mean_step: radius.mean_step(),

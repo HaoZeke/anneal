@@ -43,6 +43,11 @@ pub struct CommittorOutcome {
     pub segments: usize,
     /// Improvement events observed.
     pub improvements: usize,
+    /// A requested constant-energy (NVE) escape stopped a segment.
+    ///
+    /// Set when [`crate::methods::cluster_hopping::Outcome::nve_unavailable`]
+    /// is set on any segment in the run.
+    pub nve_unavailable: bool,
 }
 
 /// Runs `walkers` short chains under `cfg`, resampling by improvement
@@ -73,6 +78,7 @@ pub fn committor_population(
     let mut resamples = 0usize;
     let mut segments = 0usize;
     let mut improvements = 0usize;
+    let mut nve_unavailable = false;
     let no_grad: Option<&mut GradFn<'_>> = None;
     let _ = no_grad;
     while ledger.remaining() > 0 {
@@ -85,6 +91,7 @@ pub fn committor_population(
             let start = pop[w].0.clone();
             let out = run_with_gradient(cfg, start.view(), &mut sub, relax, None, &mut rng);
             segments += 1;
+            nve_unavailable |= out.nve_unavailable;
             if !ledger.charge_many(sub.spent()) {
                 // The slice overran the remaining budget; the overrun is
                 // charged and the loop ends on the next check.
@@ -132,6 +139,7 @@ pub fn committor_population(
         resamples,
         segments,
         improvements,
+        nve_unavailable,
     }
 }
 
