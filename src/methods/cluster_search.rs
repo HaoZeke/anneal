@@ -21,7 +21,10 @@ use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 use crate::methods::cluster_hopping::min_pair_distance;
 #[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::structure_is_sane;
-use crate::methods::cluster_hopping::{Config, Ledger, Outcome, optimize_with_energy_gradient};
+use crate::methods::cluster_hopping::{
+    ChainCheckpoint, CheckpointAction, Config, Ledger, Outcome, optimize_with_energy_gradient,
+    run_with_energy_gradient_at_checkpoints,
+};
 use crate::methods::warm_lbfgs::WarmLbfgs;
 use crate::quench::{QuenchPredictor, Verdict};
 use eindir_core::gradient::DifferentiableObjective;
@@ -414,6 +417,56 @@ where
             Some(&mut grad),
             Some(&mut energy_grad),
             &mut rng,
+        )
+    };
+    (out, stats)
+}
+
+/// [`search_from`] with a checkpoint after each block of charged work.
+///
+/// The water Good-Turing arm retires from this hook once the census of
+/// validated quenches is saturated. Other arms pass a checkpoint that
+/// continues.
+pub fn search_from_with_checkpoint<O, H>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    start: ArrayView1<f64>,
+    seed: u64,
+    checkpoint_interval: usize,
+    checkpoint: &mut H,
+) -> (Outcome, RelaxStats)
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+    H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
+{
+    let mut stats = RelaxStats::default();
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let out = {
+        let mut relax = warm_relax(objective, cfg, &mut stats, seed);
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+            if !led.charge() {
+                return None;
+            }
+            Some(objective.grad(x))
+        };
+        let mut energy_grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if !led.charge() {
+                    return None;
+                }
+                Some(objective.value_and_gradient(x))
+            };
+        run_with_energy_gradient_at_checkpoints(
+            cfg,
+            start,
+            ledger,
+            &mut relax,
+            Some(&mut grad),
+            Some(&mut energy_grad),
+            &mut rng,
+            checkpoint_interval,
+            checkpoint,
         )
     };
     (out, stats)

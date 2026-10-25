@@ -27,6 +27,7 @@ use std::collections::BTreeMap;
 use ndarray::ArrayView1;
 use sha2::{Digest, Sha256};
 
+use super::census::BasinCensus;
 use super::{
     DescriptorSignature, EngineSignature, FreshEvaluation, SystemSignature, ValidatorConfig,
 };
@@ -41,7 +42,9 @@ use crate::descriptor_space::{
 use crate::descriptor_space::{
     UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION, universal_descriptor_space,
 };
+use crate::methods::cluster_hopping::Config;
 use crate::methods::cluster_hopping::covalent_radius;
+use crate::methods::minima_hopping::SharedVisitPolicy;
 use crate::soap::{SoapSpec, local_spectra_z};
 
 /// Invalid GFN2-xTB water catalog preset input.
@@ -465,5 +468,768 @@ pub fn fresh_evaluation(
             "GFN2-xTB catalog evaluation requires feature rgpot-ex and a loaded rgpot engine handle"
                 .into(),
         )
+    }
+}
+
+/// Maximum O-H separation that still counts as a bond in the integrity check (A).
+///
+/// A quenched hexamer fails when an oxygen is left with one hydrogen or three.
+pub const WATER_OH_BOND_MAX_A: f64 = 1.2;
+
+/// First seed of the water-hexamer block. Inclusive end is 31.
+///
+/// IDEAS H5 names 0-31. An earlier plan used 5100-5131 because the
+/// registry had been keeping paper seeds in high blocks. IDEAS wins.
+pub const WATER_HEXAMER_SEED_START: u64 = 0;
+
+/// Seeds per engine. The block is 0-31.
+pub const WATER_HEXAMER_SEED_COUNT: u64 = 32;
+
+/// Force budget per seed, the same on every engine.
+///
+/// FIXES R6 logged 1200 PBE evaluations and 4000 GFN2 evaluations.
+/// The outline sets 4000 for every engine, and that is the budget here.
+pub const WATER_HEXAMER_BUDGET: usize = 4000;
+
+/// GFN2-xTB force budget. Same as [`WATER_HEXAMER_BUDGET`].
+pub const GFN2_HEXAMER_BUDGET: usize = WATER_HEXAMER_BUDGET;
+
+/// PBE/6-31G* force budget. Same as [`WATER_HEXAMER_BUDGET`].
+pub const PBE_HEXAMER_BUDGET: usize = WATER_HEXAMER_BUDGET;
+
+/// PET-MAD force budget. Same as [`WATER_HEXAMER_BUDGET`].
+pub const PETMAD_HEXAMER_BUDGET: usize = WATER_HEXAMER_BUDGET;
+
+/// NWChem embed engine id used by the rgpot profile.
+pub const PBE_ENGINE_KIND: &str = "nwchemc";
+
+/// Gaussian basis named for the PBE hexamer rerun.
+pub const PBE_BASIS: &str = "6-31g*";
+
+/// NWChem theory arm for the PBE hexamer rerun.
+pub const PBE_THEORY: &str = "dft";
+
+/// Exchange-correlation functional. `scfType` when `theory` is `dft`.
+pub const PBE_XC: &str = "pbe";
+
+/// No dispersion correction is named for the PBE/6-31G* rerun.
+pub const PBE_DISPERSION: &str = "none named";
+
+/// Molecular charge of neutral (H2O)6.
+pub const PBE_CHARGE: i32 = 0;
+
+/// Spin multiplicity 2S+1 of singlet water.
+pub const PBE_MULTIPLICITY: i32 = 1;
+
+/// NWChem task. The frontend calls gradient.
+pub const PBE_TASK: &str = "gradient";
+
+/// Metatomic engine family for the PET-MAD hexamer rerun.
+pub const PETMAD_ENGINE_KIND: &str = "metatomic-rgpot-v1";
+
+/// Model file named by the potlib metatomic dlopen test.
+pub const PETMAD_MODEL_NAME: &str = "pet-mad-xs-v1.5.0.pt";
+
+/// Device recorded for the PET-MAD force call.
+pub const PETMAD_DEVICE: &str = "cpu";
+
+/// rgpot-core checksum in `Cargo.lock`. The crate is registry 3.5.1.
+pub const RGPOT_REV: &str = "df34626c5c9d888c234e6a0921e7e6c0335561ec50460fcf74e4b77772c89ede";
+
+/// rgpot-core version this tree links.
+pub const RGPOT_VERSION: &str = "3.5.1";
+
+/// eindir-core checksum in `Cargo.lock`. The crate is registry 0.6.0.
+pub const EINDIR_REV: &str = "e330e3abad9c1a597b144d40eb4b07ab3511d79f7d2cdbbcb37a44662f974db0";
+
+/// eindir-core version this tree links.
+pub const EINDIR_VERSION: &str = "0.6.0";
+
+/// Isomer names the hexamer assignment knows.
+pub const WATER_ISOMER_NAMES: [&str; 6] = [
+    "prism",
+    "cage",
+    "book",
+    "bag",
+    "cyclic-chair",
+    "cyclic-boat",
+];
+
+/// FIXES R6 wrote an RMSD gate of 0.1 A in a proposed sentence.
+///
+/// The outline replaces that gate. The assignment cutoff is half the
+/// minimum IRA RMSD between distinct same-level references, computed
+/// after those references are relaxed and before any search seed.
+/// No deposited references are in this tree, so no cutoff is stored.
+pub const ISOMER_RMSD_GATE_NAMED_BY_FIXES_A: f64 = 0.1;
+
+/// Census radius on the sorted oxygen-oxygen distances (A).
+///
+/// This is the Good-Turing descriptor radius for the water arm. It is
+/// not the isomer assignment cutoff.
+pub const OXYGEN_DISTANCE_CENSUS_RADIUS_A: f64 = 0.1;
+
+/// Charged-evaluation interval of the Good-Turing checkpoint.
+pub const GOOD_TURING_CHECKPOINT_INTERVAL: usize = 1;
+
+/// Search arm on the molecular preset.
+///
+/// Communicating and derived keep the molecular groups. They do not
+/// install [`Config::communicating`] or [`Config::derived`] as atomic
+/// presets. Good-Turing uses the recommended flags and a census stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaterSearchArm {
+    /// [`Config::recommended_molecular`].
+    Recommended,
+    /// Orbit, Recognition, and the return screen, on the molecular library.
+    Communicating,
+    /// Budget-window temperature and the cost-asymmetric Bayes screen.
+    Derived,
+    /// Recommended flags, plus the production Good-Turing stop.
+    GoodTuring,
+}
+
+/// Overlay one water arm on a molecular configuration.
+///
+/// The move library is left as the caller set it. The atomic two-phase
+/// surface is not copied onto these arms.
+pub fn configure_water_arm(cfg: &mut Config, arm: WaterSearchArm) {
+    match arm {
+        WaterSearchArm::Recommended | WaterSearchArm::GoodTuring => {}
+        WaterSearchArm::Communicating => {
+            cfg.depth_reward = false;
+            cfg.allocate_moves = true;
+            cfg.return_screen = true;
+            cfg.orbit_complete_on_new = true;
+            cfg.shared_deposits = 0;
+            cfg.shared_visit_policy = SharedVisitPolicy::Recognition;
+            cfg.jump_on_stall = false;
+        }
+        WaterSearchArm::Derived => {
+            cfg.budget_window = true;
+            cfg.bayes_screen = true;
+            cfg.bayes_threshold =
+                crate::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
+        }
+    }
+}
+
+/// Whether every oxygen has exactly two hydrogens within [`WATER_OH_BOND_MAX_A`].
+pub fn monomers_intact(
+    coordinates: &[f64],
+    n_molecules: usize,
+) -> Result<bool, MolecularCatalogPresetError> {
+    let points = water_points(coordinates, n_molecules)?;
+    let limit2 = WATER_OH_BOND_MAX_A * WATER_OH_BOND_MAX_A;
+    for molecule in &points {
+        let oxygen = molecule[0];
+        let mut near = 0usize;
+        for other in &points {
+            for hydrogen in [other[1], other[2]] {
+                if dist2(oxygen, hydrogen) <= limit2 {
+                    near += 1;
+                }
+            }
+        }
+        if near != 2 {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Sorted oxygen-oxygen distances of `(H2O)m`. The Good-Turing descriptor.
+pub fn sorted_oxygen_distances(
+    coordinates: &[f64],
+    n_molecules: usize,
+) -> Result<Vec<f64>, MolecularCatalogPresetError> {
+    let points = water_points(coordinates, n_molecules)?;
+    let mut distances = Vec::with_capacity(n_molecules * n_molecules.saturating_sub(1) / 2);
+    for i in 0..points.len() {
+        for j in (i + 1)..points.len() {
+            distances.push(dist2(points[i][0], points[j][0]).sqrt());
+        }
+    }
+    distances.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(distances)
+}
+
+/// `Some("saturated")` when the production Good-Turing rule is met.
+pub fn good_turing_stop_reason(census: &BasinCensus) -> Option<&'static str> {
+    census.is_saturated().then_some("saturated")
+}
+
+/// One isomer match, or none when no reference is within the gate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IsomerMatch {
+    /// Name from [`WATER_ISOMER_NAMES`], when the RMSD is inside the gate.
+    pub name: Option<String>,
+    /// Lowest permutation-invariant RMSD among the references, in angstroms.
+    pub rmsd: Option<f64>,
+}
+
+/// Assign a hexamer by permutation-invariant RMSD against same-level references.
+///
+/// An empty reference list is unassigned. `cutoff` is the engine's
+/// assignment gate. `None` reports the nearest RMSD and does not name
+/// an isomer, because that gate is half the minimum gap between
+/// deposited references and those references are not in this tree.
+/// The isolated-water template is not a valid entry of `references`.
+pub fn assign_isomer(
+    candidate: &[f64],
+    n_molecules: usize,
+    references: &[(&str, &[f64])],
+    cutoff: Option<f64>,
+) -> Result<IsomerMatch, MolecularCatalogPresetError> {
+    if references.is_empty() {
+        return Ok(IsomerMatch {
+            name: None,
+            rmsd: None,
+        });
+    }
+    let mut best_name: Option<&str> = None;
+    let mut best = f64::INFINITY;
+    for (name, reference) in references {
+        if !WATER_ISOMER_NAMES.contains(name) {
+            return Err(MolecularCatalogPresetError::SpeciesMismatch);
+        }
+        let rmsd = water_rmsd(reference, candidate, n_molecules)?;
+        if rmsd < best {
+            best = rmsd;
+            best_name = Some(*name);
+        }
+    }
+    let inside = cutoff.is_some_and(|gate| best.is_finite() && best <= gate);
+    Ok(IsomerMatch {
+        name: inside.then(|| best_name.unwrap_or("").to_owned()),
+        rmsd: best.is_finite().then_some(best),
+    })
+}
+
+/// Rotation-and-permutation RMSD of two `(H2O)m` geometries (A).
+///
+/// Molecules may be reordered. The two hydrogens of a molecule may swap.
+/// Alignment is the Kabsch rotation, inversion included, after both clouds
+/// are centred.
+pub fn water_rmsd(
+    reference: &[f64],
+    candidate: &[f64],
+    n_molecules: usize,
+) -> Result<f64, MolecularCatalogPresetError> {
+    let left = water_points(reference, n_molecules)?;
+    let right = water_points(candidate, n_molecules)?;
+    let mut order = vec![0usize; n_molecules];
+    let mut used = vec![false; n_molecules];
+    let mut flips = vec![false; n_molecules];
+    let mut best = f64::INFINITY;
+    assign_molecules(
+        &left, &right, 0, &mut order, &mut used, &mut flips, &mut best,
+    );
+    Ok(best)
+}
+
+fn water_points(
+    coordinates: &[f64],
+    n_molecules: usize,
+) -> Result<Vec<[[f64; 3]; 3]>, MolecularCatalogPresetError> {
+    if n_molecules == 0 {
+        return Err(MolecularCatalogPresetError::InvalidMoleculeCount);
+    }
+    if coordinates.len() != 9 * n_molecules || coordinates.iter().any(|value| !value.is_finite()) {
+        return Err(MolecularCatalogPresetError::CoordinateDimension);
+    }
+    let mut molecules = Vec::with_capacity(n_molecules);
+    for molecule in 0..n_molecules {
+        let base = 9 * molecule;
+        let mut points = [[0.0; 3]; 3];
+        for atom in 0..3 {
+            for axis in 0..3 {
+                points[atom][axis] = coordinates[base + 3 * atom + axis];
+            }
+        }
+        molecules.push(points);
+    }
+    Ok(molecules)
+}
+
+fn assign_molecules(
+    reference: &[[[f64; 3]; 3]],
+    candidate: &[[[f64; 3]; 3]],
+    placed: usize,
+    order: &mut [usize],
+    used: &mut [bool],
+    flips: &mut [bool],
+    best: &mut f64,
+) {
+    let n = reference.len();
+    if placed == n {
+        choose_flips(reference, candidate, order, flips, 0, best);
+        return;
+    }
+    for index in 0..n {
+        if used[index] {
+            continue;
+        }
+        used[index] = true;
+        order[placed] = index;
+        assign_molecules(reference, candidate, placed + 1, order, used, flips, best);
+        used[index] = false;
+    }
+}
+
+fn choose_flips(
+    reference: &[[[f64; 3]; 3]],
+    candidate: &[[[f64; 3]; 3]],
+    order: &[usize],
+    flips: &mut [bool],
+    molecule: usize,
+    best: &mut f64,
+) {
+    if molecule == reference.len() {
+        let rmsd = aligned_rmsd(reference, candidate, order, flips);
+        if rmsd < *best {
+            *best = rmsd;
+        }
+        return;
+    }
+    flips[molecule] = false;
+    choose_flips(reference, candidate, order, flips, molecule + 1, best);
+    flips[molecule] = true;
+    choose_flips(reference, candidate, order, flips, molecule + 1, best);
+}
+
+fn aligned_rmsd(
+    reference: &[[[f64; 3]; 3]],
+    candidate: &[[[f64; 3]; 3]],
+    order: &[usize],
+    flips: &[bool],
+) -> f64 {
+    let mut left = Vec::with_capacity(3 * reference.len());
+    let mut right = Vec::with_capacity(3 * reference.len());
+    for (molecule, (&source, &flip)) in order.iter().zip(flips.iter()).enumerate() {
+        left.extend_from_slice(&reference[molecule]);
+        let group = candidate[source];
+        if flip {
+            right.extend_from_slice(&[group[0], group[2], group[1]]);
+        } else {
+            right.extend_from_slice(&group);
+        }
+    }
+    let left = centre(&left);
+    let right = centre(&right);
+    let mut covariance = [[0.0; 3]; 3];
+    for (from, to) in right.iter().zip(left.iter()) {
+        for row in 0..3 {
+            for col in 0..3 {
+                covariance[row][col] += from[row] * to[col];
+            }
+        }
+    }
+    let rotation = kabsch_rotation(covariance);
+    let mut flipped = rotation;
+    for row in 0..3 {
+        flipped[row][2] = -flipped[row][2];
+    }
+    [
+        identity(),
+        rotation,
+        transpose(rotation),
+        flipped,
+        transpose(flipped),
+    ]
+    .into_iter()
+    .map(|candidate| point_rmsd(&left, &right, candidate))
+    .fold(f64::INFINITY, f64::min)
+}
+
+fn point_rmsd(left: &[[f64; 3]], right: &[[f64; 3]], rotation: [[f64; 3]; 3]) -> f64 {
+    let mut error = 0.0;
+    for (to, from) in left.iter().zip(right.iter()) {
+        let mapped = rotate(&rotation, *from);
+        for axis in 0..3 {
+            let delta = mapped[axis] - to[axis];
+            error += delta * delta;
+        }
+    }
+    (error / left.len() as f64).sqrt()
+}
+
+fn identity() -> [[f64; 3]; 3] {
+    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+}
+
+fn transpose(matrix: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    let mut out = [[0.0; 3]; 3];
+    for row in 0..3 {
+        for col in 0..3 {
+            out[row][col] = matrix[col][row];
+        }
+    }
+    out
+}
+
+/// Proper rotation from the covariance, by a 3x3 Jacobi SVD.
+///
+/// A planar water template makes one singular value zero. The missing
+/// axis is the cross product of the other two, with the sign that keeps
+/// the determinant positive.
+fn kabsch_rotation(covariance: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    let mut gram = [[0.0; 3]; 3];
+    for row in 0..3 {
+        for col in 0..3 {
+            for axis in 0..3 {
+                gram[row][col] += covariance[axis][row] * covariance[axis][col];
+            }
+        }
+    }
+    let (vectors, values) = jacobi_eigen(gram);
+    let mut left = [[0.0; 3]; 3];
+    let mut filled = [false; 3];
+    for col in 0..3 {
+        let sigma = values[col].max(0.0).sqrt();
+        if sigma <= 1e-10 {
+            continue;
+        }
+        for row in 0..3 {
+            for axis in 0..3 {
+                left[row][col] += covariance[row][axis] * vectors[axis][col];
+            }
+            left[row][col] /= sigma;
+        }
+        filled[col] = true;
+    }
+    complete_columns(&mut left, &filled);
+    let mut rotation = [[0.0; 3]; 3];
+    for row in 0..3 {
+        for col in 0..3 {
+            for axis in 0..3 {
+                rotation[row][col] += left[row][axis] * vectors[col][axis];
+            }
+        }
+    }
+    rotation
+}
+
+fn complete_columns(columns: &mut [[f64; 3]; 3], filled: &[bool; 3]) {
+    let present: Vec<usize> = (0..3).filter(|index| filled[*index]).collect();
+    let missing: Vec<usize> = (0..3).filter(|index| !filled[*index]).collect();
+    if missing.is_empty() {
+        return;
+    }
+    if present.len() == 2 {
+        let a = column(columns, present[0]);
+        let b = column(columns, present[1]);
+        let mut cross = [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ];
+        let norm = (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
+        if norm > 1e-12 {
+            for axis in 0..3 {
+                cross[axis] /= norm;
+                columns[axis][missing[0]] = cross[axis];
+            }
+        }
+        return;
+    }
+    for (slot, axis) in missing.iter().zip(0..3) {
+        columns[axis][*slot] = 1.0;
+    }
+}
+
+fn column(matrix: &[[f64; 3]; 3], index: usize) -> [f64; 3] {
+    [matrix[0][index], matrix[1][index], matrix[2][index]]
+}
+
+fn jacobi_eigen(mut matrix: [[f64; 3]; 3]) -> ([[f64; 3]; 3], [f64; 3]) {
+    let mut vectors = identity();
+    for _ in 0..16 {
+        let pairs = [(0, 1), (0, 2), (1, 2)];
+        let mut pivot = (0, 1);
+        let mut biggest = 0.0;
+        for pair in pairs {
+            let value = matrix[pair.0][pair.1].abs();
+            if value > biggest {
+                biggest = value;
+                pivot = pair;
+            }
+        }
+        if biggest < 1e-15 {
+            break;
+        }
+        jacobi_rotate(&mut matrix, &mut vectors, pivot.0, pivot.1);
+    }
+    (vectors, [matrix[0][0], matrix[1][1], matrix[2][2]])
+}
+
+fn jacobi_rotate(matrix: &mut [[f64; 3]; 3], vectors: &mut [[f64; 3]; 3], p: usize, q: usize) {
+    let off = matrix[p][q];
+    let diag_p = matrix[p][p];
+    let diag_q = matrix[q][q];
+    let tau = (diag_q - diag_p) / (2.0 * off);
+    let step = if tau >= 0.0 {
+        1.0 / (tau + (1.0 + tau * tau).sqrt())
+    } else {
+        -1.0 / (-tau + (1.0 + tau * tau).sqrt())
+    };
+    let cosine = 1.0 / (1.0 + step * step).sqrt();
+    let sine = step * cosine;
+    matrix[p][p] = diag_p - step * off;
+    matrix[q][q] = diag_q + step * off;
+    matrix[p][q] = 0.0;
+    matrix[q][p] = 0.0;
+    for row in 0..3 {
+        if row == p || row == q {
+            continue;
+        }
+        let left = matrix[row][p];
+        let right = matrix[row][q];
+        matrix[row][p] = cosine * left - sine * right;
+        matrix[p][row] = matrix[row][p];
+        matrix[row][q] = sine * left + cosine * right;
+        matrix[q][row] = matrix[row][q];
+    }
+    for row in 0..3 {
+        let left = vectors[row][p];
+        let right = vectors[row][q];
+        vectors[row][p] = cosine * left - sine * right;
+        vectors[row][q] = sine * left + cosine * right;
+    }
+}
+
+fn centre(points: &[[f64; 3]]) -> Vec<[f64; 3]> {
+    let scale = points.len() as f64;
+    let mut shift = [0.0; 3];
+    for point in points {
+        for axis in 0..3 {
+            shift[axis] += point[axis];
+        }
+    }
+    for axis in 0..3 {
+        shift[axis] /= scale;
+    }
+    points
+        .iter()
+        .map(|point| {
+            [
+                point[0] - shift[0],
+                point[1] - shift[1],
+                point[2] - shift[2],
+            ]
+        })
+        .collect()
+}
+
+fn rotate(matrix: &[[f64; 3]; 3], point: [f64; 3]) -> [f64; 3] {
+    [
+        matrix[0][0] * point[0] + matrix[1][0] * point[1] + matrix[2][0] * point[2],
+        matrix[0][1] * point[0] + matrix[1][1] * point[1] + matrix[2][1] * point[2],
+        matrix[0][2] * point[0] + matrix[1][2] * point[1] + matrix[2][2] * point[2],
+    ]
+}
+
+fn dist2(left: [f64; 3], right: [f64; 3]) -> f64 {
+    let mut total = 0.0;
+    for axis in 0..3 {
+        let delta = left[axis] - right[axis];
+        total += delta * delta;
+    }
+    total
+}
+
+#[cfg(test)]
+mod water_hexamer_tests {
+    use super::*;
+    use crate::methods::cluster_hopping::{
+        CheckpointAction, Ledger, MoveLibrary, SoapProposalMode,
+    };
+    use crate::methods::cluster_search::search_from_with_checkpoint;
+    use crate::potentials::{PairKind, PairPotential};
+
+    #[test]
+    fn the_template_hexamer_is_intact_and_a_loose_hydrogen_is_not() {
+        let coordinates = reference_coordinates(WATER_HEXAMER_MOLECULES).unwrap();
+        assert!(monomers_intact(&coordinates, WATER_HEXAMER_MOLECULES).unwrap());
+        let mut broken = coordinates.clone();
+        broken[3] += 5.0;
+        assert!(!monomers_intact(&broken, WATER_HEXAMER_MOLECULES).unwrap());
+        let mut crowded = coordinates.clone();
+        crowded[12] = 0.2;
+        crowded[13] = 0.2;
+        crowded[14] = 0.0;
+        assert!(!monomers_intact(&crowded, WATER_HEXAMER_MOLECULES).unwrap());
+    }
+
+    #[test]
+    fn oxygen_distances_are_sorted_and_the_stop_follows_the_production_rule() {
+        let coordinates = reference_coordinates(WATER_HEXAMER_MOLECULES).unwrap();
+        let distances = sorted_oxygen_distances(&coordinates, WATER_HEXAMER_MOLECULES).unwrap();
+        assert_eq!(distances.len(), 15);
+        assert!(distances.windows(2).all(|pair| pair[0] <= pair[1]));
+        let mut census = BasinCensus::new(1, OXYGEN_DISTANCE_CENSUS_RADIUS_A).unwrap();
+        assert!(good_turing_stop_reason(&census).is_none());
+        for index in 0..20 {
+            census.observe(&[index as f64]).unwrap();
+        }
+        assert!(good_turing_stop_reason(&census).is_none());
+        let mut repeated = BasinCensus::new(1, OXYGEN_DISTANCE_CENSUS_RADIUS_A).unwrap();
+        for _ in 0..20 {
+            repeated.observe(&[0.0]).unwrap();
+        }
+        assert_eq!(good_turing_stop_reason(&repeated), Some("saturated"));
+    }
+
+    #[test]
+    fn rmsd_is_zero_after_a_rigid_motion_or_a_molecule_swap() {
+        let coordinates = reference_coordinates(2).unwrap();
+        assert!(water_rmsd(&coordinates, &coordinates, 2).unwrap() < 1e-8);
+        let mut moved = coordinates.clone();
+        for value in moved.iter_mut() {
+            *value += 3.0;
+        }
+        for atom in 0..6 {
+            let x = moved[3 * atom];
+            let y = moved[3 * atom + 1];
+            moved[3 * atom] = -y;
+            moved[3 * atom + 1] = x;
+        }
+        assert!(
+            water_rmsd(&coordinates, &moved, 2).unwrap() < 1e-6,
+            "{}",
+            water_rmsd(&coordinates, &moved, 2).unwrap()
+        );
+        let mut swapped = coordinates.clone();
+        let (head, tail) = swapped.split_at_mut(9);
+        head.swap_with_slice(tail);
+        assert!(water_rmsd(&coordinates, &swapped, 2).unwrap() < 1e-6);
+        let mut flipped = coordinates.clone();
+        flipped.swap(3, 6);
+        flipped.swap(4, 7);
+        flipped.swap(5, 8);
+        assert!(water_rmsd(&coordinates, &flipped, 2).unwrap() < 1e-6);
+        let mut shifted = coordinates.clone();
+        shifted[3] += 0.4;
+        assert!(water_rmsd(&coordinates, &shifted, 2).unwrap() > ISOMER_RMSD_GATE_NAMED_BY_FIXES_A);
+        let matched = assign_isomer(
+            &coordinates,
+            2,
+            &[("book", coordinates.as_slice())],
+            Some(1.0),
+        )
+        .unwrap();
+        assert_eq!(matched.name.as_deref(), Some("book"));
+        let waiting =
+            assign_isomer(&coordinates, 2, &[("book", coordinates.as_slice())], None).unwrap();
+        assert!(waiting.name.is_none());
+        assert!(waiting.rmsd.unwrap() < 1e-8);
+        assert!(
+            assign_isomer(&coordinates, 2, &[], None)
+                .unwrap()
+                .name
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn water_arms_keep_the_molecular_library() {
+        let species = water_species(WATER_HEXAMER_MOLECULES).unwrap();
+        let groups = water_groups(WATER_HEXAMER_MOLECULES).unwrap();
+        let recommended = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
+        let library = recommended.move_library.clone();
+        for arm in [
+            WaterSearchArm::Recommended,
+            WaterSearchArm::Communicating,
+            WaterSearchArm::Derived,
+            WaterSearchArm::GoodTuring,
+        ] {
+            let mut cfg = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
+            configure_water_arm(&mut cfg, arm);
+            assert_eq!(cfg.move_library, library);
+            assert!(cfg.surfaces.is_empty());
+            match &cfg.move_library {
+                MoveLibrary::Molecular { groups, reactive } => {
+                    assert_eq!(groups.len(), WATER_HEXAMER_MOLECULES);
+                    assert!(!reactive);
+                }
+                other => panic!("molecular library replaced by {other:?}"),
+            }
+        }
+        let mut communicating = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
+        configure_water_arm(&mut communicating, WaterSearchArm::Communicating);
+        assert!(!communicating.depth_reward);
+        assert!(communicating.return_screen);
+        assert!(communicating.orbit_complete_on_new);
+        assert_eq!(communicating.shared_deposits, 0);
+        assert!(matches!(
+            communicating.shared_visit_policy,
+            SharedVisitPolicy::Recognition
+        ));
+        assert!(!communicating.jump_on_stall);
+        let mut derived = Config::recommended_molecular(species, groups, 1.0);
+        configure_water_arm(&mut derived, WaterSearchArm::Derived);
+        assert!(derived.budget_window);
+        assert!(derived.bayes_screen);
+        assert!(derived.depth_reward);
+        let threshold =
+            crate::screen::cost_asymmetric_threshold(derived.screen_steps, derived.relax_steps);
+        assert!((derived.bayes_threshold - threshold).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_saturated_census_retires_the_search_before_the_budget() {
+        let n_molecules = 2;
+        let species = water_species(n_molecules).unwrap();
+        let groups = water_groups(n_molecules).unwrap();
+        let mut cfg = Config::recommended_molecular(species, groups, 1.0);
+        cfg.relax_steps = 0;
+        cfg.screen_steps = 0;
+        cfg.soap_mode = SoapProposalMode::Off;
+        cfg.adaptive_height = false;
+        cfg.allocate_moves = false;
+        cfg.depth_reward = false;
+        let start = reference_coordinates(n_molecules).unwrap();
+        let objective = PairPotential::new(3 * n_molecules, PairKind::LennardJones, 8.0);
+        let budget = 2_000;
+        let mut ledger = Ledger::new(budget);
+        let mut census = BasinCensus::new(1, OXYGEN_DISTANCE_CENSUS_RADIUS_A).unwrap();
+        for _ in 0..20 {
+            census.observe(&[0.0]).unwrap();
+        }
+        let mut checkpoint =
+            |_: crate::methods::cluster_hopping::ChainCheckpoint<'_>| CheckpointAction::Retire {
+                reason: good_turing_stop_reason(&census)
+                    .unwrap_or("continuing")
+                    .to_owned(),
+            };
+        let (_out, _stats) = search_from_with_checkpoint(
+            &objective,
+            &cfg,
+            &mut ledger,
+            ndarray::ArrayView1::from(&start),
+            5100,
+            GOOD_TURING_CHECKPOINT_INTERVAL,
+            &mut checkpoint,
+        );
+        assert!(
+            ledger.spent() < budget / 2,
+            "retire spent {} of {budget}",
+            ledger.spent()
+        );
+        assert!(ledger.spent() > 0);
+    }
+
+    #[test]
+    fn engine_pins_match_the_lockfile() {
+        let lock = include_str!("../../Cargo.lock");
+        assert!(lock.contains(RGPOT_REV));
+        assert!(lock.contains(EINDIR_REV));
+        assert_eq!(PBE_DISPERSION, "none named");
+        assert_eq!(PBE_BASIS, "6-31g*");
+        assert_eq!(PBE_XC, "pbe");
+        assert_eq!(GFN2_METHOD, 3);
+        assert_eq!(WATER_HEXAMER_SEED_START + WATER_HEXAMER_SEED_COUNT - 1, 31);
+        assert_eq!(PBE_HEXAMER_BUDGET, 4000);
+        assert_eq!(GFN2_HEXAMER_BUDGET, 4000);
     }
 }
