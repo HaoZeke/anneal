@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
-## [0.12.0](https://github.com/HaoZeke/anneal/tree/v0.12.0) - 2026-10-24
+## [0.12.0](https://github.com/HaoZeke/anneal/tree/v0.12.0)
 
 ### Added
 
@@ -76,15 +76,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   binary wide-diameter-ratio escape stop the run and set
   ``Outcome::nve_unavailable``. ``IrcKind`` and ``NveError`` each have
   one definition. ``python`` and ``bank-rpc`` enable the feature.
-  PyPI wheels and in-repo feature builds keep the sessions. From crates.io,
-  ``rgsaddle``, ``python``, and ``bank-rpc`` do not build until matching
-  rgmin and rgsaddle releases exist. Default features, docs.rs, and the
-  wheels are fine. CI packages the crate with ``cargo package --no-verify``.
-  A later step extracts ``anneal-core-${version}.crate``. It drops the
-  development patch and the lockfile. It runs ``cargo check`` on the
-  default features against crates.io.
-- ``nve_escape`` and ``nve_escape_seeded`` return ``NveError``. ``IrcKind``
-  is defined in this crate. ``GraphError::FeatureDisabled``,
+  PyPI wheels and in-repo feature builds keep the sessions. The
+  feature compiles rgsaddle 0.3.0 from crates.io against rgmin 0.5.0.
+  ``rgsaddle``, ``python``, and ``bank-rpc`` build from crates.io.
+  The lockfile records rgmin 0.5.0, rgsaddle 0.3.0, eindir-core 0.6.0,
+  and linkcell 0.3.11. The activation relaxation leaves ``ftol_rel`` and
+  ``noise_floor`` unset.
+- ``nve_escape`` and ``nve_escape_seeded`` return ``NveError``.
+  ``GraphError::FeatureDisabled``,
   ``PesExplorationError::SaddleUnavailable``, and
   ``NveError::FeatureDisabled`` are new. ``Outcome``, ``ArchiveOutcome``,
   ``CommittorOutcome``, ``BankOutcome``, and ``StockSearch`` gain

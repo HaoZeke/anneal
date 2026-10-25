@@ -83,7 +83,9 @@ impl From<rgsaddle::SaddleError> for NveError {
             rgsaddle::SaddleError::Shape(message) => Self::Shape(message),
             rgsaddle::SaddleError::Surface(message) => Self::Surface(message),
             rgsaddle::SaddleError::NonFinite(site) => Self::NonFinite(site),
-            rgsaddle::SaddleError::Solver(message) => Self::Solver(message),
+            rgsaddle::SaddleError::Solver(message)
+            | rgsaddle::SaddleError::Invalid(message)
+            | rgsaddle::SaddleError::Stalled(message) => Self::Solver(message),
         }
     }
 }

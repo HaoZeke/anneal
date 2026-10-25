@@ -1,15 +1,7 @@
-# Development builds resolve eindir-core, rgmin, and rgsaddle from the
-# revisions below. This file is excluded from the published package.
-# Commands run in this workspace still read it.
-#
+# Development builds keep the cargo target tree beside the workspace.
 # featomic's metatensor build runs `cargo rustc --locked` with its working
 # directory inside the cargo target tree. An unused patch there makes
 # `--locked` fail. Keep that tree beside the workspace so the nested cargo
 # does not walk up to this file.
 [build]
 target-dir = "../tmp/anneal-target"
-
-[patch.crates-io]
-eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9" }
-rgmin = { git = "https://github.com/HaoZeke/rgmin.git", rev = "20832fd169932a1cd0d47ac84dc77fa9b435f940" }
-rgsaddle = { git = "https://github.com/OmniPotentRPC/rgsaddle.git", rev = "84fe96bfc1ed163379c0af8bd664b74bf71407d1" }
