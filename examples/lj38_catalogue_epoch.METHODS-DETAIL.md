@@ -37,9 +37,11 @@ replica at 200 evaluations. A capped quench is not reported as a
 minimum.
 
 The graph for this driver is a star: replica 0 linked to the other
-three. Leaves and the centre do not share a posterior variance, so
-`r_U` is not a tie. That is the field of this one logged epoch. It is
-not a deposited transition network.
+three. The centre and a leaf do not share a posterior variance, so
+`r_U` separates them. Leaves of that star agree to well under one part
+in 1e8. The rank groups scores at that tolerance, because the Cholesky
+factor is not bitwise symmetric. That is the field of this one logged
+epoch. It is not a deposited transition network.
 
 ## Reproduction
 

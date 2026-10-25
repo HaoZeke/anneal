@@ -167,6 +167,29 @@ fn graph_field_uncertainty_is_ranked_with_the_population() {
 }
 
 #[test]
+fn graph_field_roundoff_does_not_split_a_rank() {
+    let leaf = 0.085185185185;
+    let members = [
+        PopulationMember::new(0, -10.0, 0.5, 2.0, 0.066666666667).unwrap(),
+        PopulationMember::new(1, -10.0, 0.5, 2.0, leaf).unwrap(),
+        PopulationMember::new(2, -10.0, 0.5, 2.0, leaf + 1e-14).unwrap(),
+        PopulationMember::new(3, -10.0, 0.5, 2.0, leaf + 1e-13).unwrap(),
+    ];
+    let ranked = rank_population(&members).unwrap();
+
+    assert_eq!(ranked[0].evidence().uncertainty_rank(), 0.0);
+    assert_eq!(ranked[1].evidence().uncertainty_rank(), 2.0 / 3.0);
+    assert_eq!(
+        ranked[2].evidence().uncertainty_rank(),
+        ranked[1].evidence().uncertainty_rank()
+    );
+    assert_eq!(
+        ranked[3].evidence().uncertainty_rank(),
+        ranked[1].evidence().uncertainty_rank()
+    );
+}
+
+#[test]
 fn scarcity_is_inverse_visit_count_but_ranking_is_scale_free() {
     let first = PopulationMember::new(0, -10.0, 0.5, 1.0, 0.0).unwrap();
     let second = PopulationMember::new(1, -10.0, 0.5, 50.0, 0.0).unwrap();
