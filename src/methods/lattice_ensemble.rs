@@ -65,6 +65,7 @@ use rayon::prelude::*;
 use crate::methods::cluster_hopping::{Ledger, random_cluster};
 use crate::methods::lattice_search::{Lattice, Quench};
 use crate::methods::splice::cut_and_splice;
+use crate::potentials::PairKind;
 
 /// Whether the chains see one bank or each its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -537,7 +538,24 @@ impl Chain {
 ///
 /// The budget is split over the chains, the first `budget % chains` chains
 /// taking one call more, so the ledgers sum to `budget` exactly.
+/// Site geometry is [`Lattice::for_pair`] of `kind`.
 pub fn run(
+    n: usize,
+    budget: usize,
+    seed: u64,
+    plan: &Plan,
+    quench: &Quench,
+    kind: PairKind,
+) -> Run {
+    let lattice = Lattice::for_pair(kind);
+    run_with_lattice(n, budget, seed, plan, quench, &lattice)
+}
+
+/// Runs one ensemble on a caller-built lattice.
+///
+/// [`run`] builds that lattice from the pair kind. A harness that only
+/// changes the candidate count keeps the same lengths through this entry.
+pub fn run_with_lattice(
     n: usize,
     budget: usize,
     seed: u64,
@@ -653,6 +671,7 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::potentials::PairKind;
 
     fn line(points: usize, spacing: f64) -> Vec<f64> {
         (0..points)
@@ -765,7 +784,7 @@ mod tests {
             3,
             &small_plan(Sharing::Shared),
             &Quench::default(),
-            &Lattice::default(),
+            PairKind::LennardJones,
         );
         assert_eq!(run.charged, budget, "chains stop only on an empty ledger");
         assert_eq!(run.calls.iter().sum::<usize>(), run.charged);
@@ -785,7 +804,7 @@ mod tests {
                 5,
                 &small_plan(sharing),
                 &Quench::default(),
-                &Lattice::default(),
+                PairKind::LennardJones,
             );
             assert!(
                 (run.best - -44.326801).abs() < 1e-5,
@@ -810,7 +829,7 @@ mod tests {
                         11,
                         &plan,
                         &Quench::default(),
-                        &Lattice::default(),
+                        PairKind::LennardJones,
                     )
                 })
         };
