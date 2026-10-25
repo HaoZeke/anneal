@@ -19,28 +19,35 @@
 //! different chains.
 //! [`Sharing::Private`](crate::methods::lattice_ensemble::Sharing::Private)
 //! gives each chain a bank of `slots` members, with the same trial rules,
-//! budget shares and stream seeds. A one-slot private bank never splices and
-//! never draws the splice coin, so a chain's random stream parts from its
-//! stream under `Sharing::Shared` at its first bank draw, or sooner if the
-//! shared bank is not yet full when the private one is, since only a full bank
-//! draws the coin for a random start. With one slot the private ablation
-//! therefore removes cross-chain splicing together with the exchange of
-//! members. A margin over another method that the private ablation matches
-//! belongs to what the two share, the trial rules, the lattice descent and its
-//! quench, and not to communication between chains.
+//! budget shares and stream seeds. Splicing needs a second member to donate
+//! the other half: [`choose`](crate::methods::lattice_ensemble) draws a splice
+//! only when the bank holds at least two members. A one-slot private bank
+//! therefore never splices and never draws the splice coin, and that chain's
+//! random stream parts from its stream under `Sharing::Shared` at its first
+//! bank draw, or sooner if the shared bank is not yet full when the private
+//! one is, since only a full bank draws the coin for a random start. The
+//! private ablation arm uses more than one slot, so the bank has a donor and
+//! the splice rate is the only thing that decides whether a draw splices.
+//! With one slot the private bank removes cross-chain splicing together with
+//! the exchange of members. A margin over another method that a one-slot
+//! private run matches belongs to what the two share, the trial rules, the
+//! lattice descent and its quench, and not to communication between chains.
 //!
 //! Chains advance in synchronous generations. Parents are drawn and offers
 //! admitted in chain order between generations; only the trials run in
 //! parallel, each on its own ledger and random stream, so a run replays bit
 //! for bit at any thread count.
 //!
-//! Resemblance is the mean absolute difference between the sorted distances
-//! of the atoms from their centroid. The merge distance is a fraction of the
-//! mean pairwise resemblance of the first full bank, by default a half, the
-//! D_ave/2 of Lee, Lee and Lee. Conformational space annealing shrinks it as
-//! the search goes on, and here it may shrink linearly as the budget is spent;
-//! by default it holds, because a shrinking cutoff lets the variants of one
-//! funnel fill the bank as distinct members.
+//! Resemblance defaults to the mean absolute difference between the sorted
+//! distances of the atoms from their centroid. The other key is the shell
+//! histogram of Lee, Lee and Lee, Phys. Rev. Lett. 91, 080201 (2003), eq. (2),
+//! arXiv cond-mat/0307690. The merge distance is a fraction of the mean
+//! pairwise resemblance of the first full bank, D_ave. By default that
+//! fraction is held at one half, D_ave/2. Lee, Lee and Lee instead reduce it
+//! by a fixed ratio so that it equals D_ave/5 after 10_000 local
+//! minimizations, and hold it there. A shrinking cutoff lets the variants of
+//! one funnel fill the bank as distinct members, which is why the default
+//! holds.
 //!
 //! Parents are drawn least-used first, and a member that improves is fresh
 //! again, so the effort follows the funnels that are still descending. A
@@ -53,9 +60,16 @@
 //! run reads a reference energy or a structure class.
 //!
 //! The retirement rule, the radial resemblance key, the held merge distance
-//! and the counted accounting are this work's. The bank rule, cut-and-splice
-//! and the lattice search are the cited methods, the last in the variant
-//! [`crate::methods::lattice_search`] describes.
+//! and the counted accounting are this work's. Retirement of zero, the shell
+//! histogram, the fixed-ratio cutoff and a run with the bank switched off are
+//! the published choices those four replace, selected per arm.
+//! [`Plan::banked`](crate::methods::lattice_ensemble::Plan::banked) false is
+//! the dynamic lattice search of Shao, Cheng and Cai on its own: every trial
+//! is a fresh cluster, quenched and taken down the lattice, and nothing is
+//! spliced or stored. The bank rule, cut-and-splice and the lattice search
+//! are the cited methods, the last in the variant
+//! [`crate::methods::lattice_search`] describes. The counted force total is
+//! accounting. It is not a switch.
 
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
@@ -74,7 +88,7 @@ pub enum Sharing {
     /// every chain.
     Shared,
     /// A bank of `slots` members per chain, seen by that chain alone. With one
-    /// slot it never splices.
+    /// slot the bank has no donor, so it never splices.
     Private,
 }
 
@@ -107,6 +121,31 @@ impl Origin {
             Self::Spliced => "spliced",
         }
     }
+}
+
+/// Which distance the bank treats as resemblance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resemblance {
+    /// Sorted distances from the centroid. The difference is the mean
+    /// absolute deviation. This is the default.
+    Radial,
+    /// Eq. (2) of Lee, Lee and Lee, Phys. Rev. Lett. 91, 080201 (2003).
+    LeeCsa,
+}
+
+/// How the merge distance moves after the first bank fills.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CutoffSchedule {
+    /// Linear in the fraction of the force budget already spent, from
+    /// [`Plan::merge`](crate::methods::lattice_ensemble::Plan::merge) `.0` to
+    /// `.1`. Equal ends hold the cutoff. The default ends are both one half.
+    LinearBudget,
+    /// Lee, Lee and Lee, Phys. Rev. Lett. 91, 080201 (2003). The cutoff
+    /// starts at D_ave/2 and is reduced by a fixed ratio so that it equals
+    /// D_ave/5 after [`LEE_ANNEAL_MINIMIZATIONS`] local minimizations, then
+    /// stays at D_ave/5. [`Plan::merge`](crate::methods::lattice_ensemble::Plan::merge)
+    /// is not read.
+    LeeFixedRatio,
 }
 
 /// Where a fresh trial places its points.
@@ -152,6 +191,14 @@ pub struct Plan {
     pub min_separation: f64,
     /// One bank for all chains, or one per chain.
     pub sharing: Sharing,
+    /// Radial key, or Lee, Lee and Lee's shell histogram.
+    pub resemblance: Resemblance,
+    /// Held or linear cutoff, or their fixed-ratio schedule.
+    pub cutoff: CutoffSchedule,
+    /// When false, every trial is a fresh lattice descent and the bank is
+    /// not drawn, spliced or updated. That is the dynamic lattice search of
+    /// Shao, Cheng and Cai on its own. The default keeps the bank.
+    pub banked: bool,
 }
 
 impl Default for Plan {
@@ -171,6 +218,9 @@ impl Default for Plan {
             start: StartRule::PresetSphere,
             min_separation: 0.85,
             sharing: Sharing::Shared,
+            resemblance: Resemblance::Radial,
+            cutoff: CutoffSchedule::LinearBudget,
+            banked: true,
         }
     }
 }
@@ -258,6 +308,97 @@ pub fn resemblance(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b).map(|(u, v)| (u - v).abs()).sum::<f64>() / a.len() as f64
 }
 
+/// First-shell radius in Lee, Lee and Lee, Phys. Rev. Lett. 91, 080201
+/// (2003), eq. (2), in reduced units with sigma = 1.
+pub const LEE_SHELL_FIRST: f64 = 1.35;
+/// Second-shell radius in the same equation, same units.
+pub const LEE_SHELL_SECOND: f64 = 1.70;
+/// Local minimizations at which their cutoff reaches D_ave/5.
+///
+/// "The D_cut is reduced by a fixed ratio ... in such a way that D_cut
+/// reaches D_ave/5 after 10000 local minimizations. ... The value of D_cut
+/// is kept constant after it reaches the final value."
+pub const LEE_ANNEAL_MINIMIZATIONS: u64 = 10_000;
+
+/// Fraction of D_ave on that fixed-ratio schedule.
+///
+/// `(1/2) * (2/5) ^ min(m / 10000, 1)`. Zero minimizations gives one half.
+/// Ten thousand and every count after it gives one fifth. Up to the horizon
+/// the ratio of successive fractions is constant.
+pub fn lee_cut_fraction(minimizations: u64) -> f64 {
+    let horizon = LEE_ANNEAL_MINIMIZATIONS as f64;
+    let t = (minimizations as f64 / horizon).min(1.0);
+    0.5 * (2.0_f64 / 5.0).powf(t)
+}
+
+/// Shell radii for `kind`.
+///
+/// Lennard-Jones keeps 1.35 and 1.70. Any other pair multiplies both by
+/// `r_min(kind) / r_min(Lennard-Jones)`, which is 1 for Lennard-Jones, so a
+/// neighbour at the pair minimum sits in the same bin it occupies in the
+/// paper's units.
+pub fn lee_shell_radii(kind: PairKind) -> (f64, f64) {
+    let scale = kind.r_min() / PairKind::LennardJones.r_min();
+    (LEE_SHELL_FIRST * scale, LEE_SHELL_SECOND * scale)
+}
+
+/// Eq. (2) of Lee, Lee and Lee.
+///
+/// `H(1, n)` counts atoms with `n` neighbours inside the sphere of radius
+/// `shell1`, and `H(2, n)` the same for `shell2`. A neighbour on the boundary
+/// counts. The second sphere includes the first. The distance is
+/// `sum_n n * (2 |H(1,n) - H'(1,n)| + |H(2,n) - H'(2,n)|)`.
+pub fn lee_csa_distance(a: &[f64], b: &[f64], shell1: f64, shell2: f64) -> f64 {
+    let ha = lee_histograms(a, shell1, shell2);
+    let hb = lee_histograms(b, shell1, shell2);
+    histogram_distance(&ha, &hb)
+}
+
+fn lee_histograms(x: &[f64], shell1: f64, shell2: f64) -> Vec<f64> {
+    let n = x.len() / 3;
+    let mut hist = vec![0.0; n.saturating_mul(2)];
+    if n == 0 {
+        return hist;
+    }
+    let s1 = shell1 * shell1;
+    let s2 = shell2 * shell2;
+    for i in 0..n {
+        let mut c1 = 0usize;
+        let mut c2 = 0usize;
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let dx = x[3 * i] - x[3 * j];
+            let dy = x[3 * i + 1] - x[3 * j + 1];
+            let dz = x[3 * i + 2] - x[3 * j + 2];
+            let r2 = dx * dx + dy * dy + dz * dz;
+            if r2 <= s1 {
+                c1 += 1;
+            }
+            if r2 <= s2 {
+                c2 += 1;
+            }
+        }
+        hist[c1] += 1.0;
+        hist[n + c2] += 1.0;
+    }
+    hist
+}
+
+fn histogram_distance(a: &[f64], b: &[f64]) -> f64 {
+    if a.len() != b.len() || !a.len().is_multiple_of(2) {
+        return f64::INFINITY;
+    }
+    let n = a.len() / 2;
+    let mut total = 0.0;
+    for k in 0..n {
+        let weight = k as f64;
+        total += weight * (2.0 * (a[k] - b[k]).abs() + (a[n + k] - b[n + k]).abs());
+    }
+    total
+}
+
 /// Same energy and same radial key: one minimum found twice.
 const SAME_ENERGY: f64 = 1e-6;
 const SAME_KEY: f64 = 1e-4;
@@ -276,6 +417,10 @@ pub struct FunnelBank {
     /// Draws without improvement that make a member's slot free for a
     /// random start; zero never frees one.
     retire: usize,
+    /// Radial key, or the shell histogram.
+    resemblance: Resemblance,
+    /// Radii passed to the shell histogram. The radial key ignores them.
+    shells: (f64, f64),
 }
 
 impl FunnelBank {
@@ -288,6 +433,8 @@ impl FunnelBank {
             scale: None,
             merge: 0.0,
             retire: 0,
+            resemblance: Resemblance::Radial,
+            shells: (LEE_SHELL_FIRST, LEE_SHELL_SECOND),
         }
     }
 
@@ -295,6 +442,15 @@ impl FunnelBank {
     /// without improving for the next random start that resembles no member.
     pub fn with_retirement(mut self, retire: usize) -> Self {
         self.retire = retire;
+        self
+    }
+
+    /// The same bank, comparing offers with `resemblance`.
+    ///
+    /// The default is the radial key, which ignores `shells`.
+    pub fn with_resemblance(mut self, resemblance: Resemblance, shells: (f64, f64)) -> Self {
+        self.resemblance = resemblance;
+        self.shells = shells;
         self
     }
 
@@ -327,18 +483,41 @@ impl FunnelBank {
         }
     }
 
+    /// Moves the merge distance under `schedule`.
+    ///
+    /// [`CutoffSchedule::LinearBudget`] is [`FunnelBank::set_progress`].
+    /// [`CutoffSchedule::LeeFixedRatio`] uses [`lee_cut_fraction`] of the
+    /// bank's scale and does not read `merge` or `budget_progress`.
+    /// `minimizations` counts local minimizations already finished.
+    pub fn set_cutoff(
+        &mut self,
+        schedule: CutoffSchedule,
+        merge: (f64, f64),
+        budget_progress: f64,
+        minimizations: u64,
+    ) {
+        match schedule {
+            CutoffSchedule::LinearBudget => self.set_progress(merge, budget_progress),
+            CutoffSchedule::LeeFixedRatio => {
+                if let Some(scale) = self.scale {
+                    self.merge = scale * lee_cut_fraction(minimizations);
+                }
+            }
+        }
+    }
+
     /// Offers a minimum under the replacement rule.
     ///
     /// Until the bank first fills, every minimum that is not one already held
     /// takes a free slot; the spread of that first bank sets the scale of the
     /// merge distance, so the first bank cannot itself be filtered by it.
     pub fn offer(&mut self, energy: f64, state: &[f64], origin: Origin) -> Admission {
-        let key = radial_key(state);
+        let key = self.key_of(state);
         let nearest = self
             .members
             .iter()
             .enumerate()
-            .map(|(i, m)| (i, resemblance(&key, &m.key)))
+            .map(|(i, m)| (i, self.distance(&key, &m.key)))
             .min_by(|a, b| a.1.total_cmp(&b.1));
         let member = |energy: f64, key: Vec<f64>| Member {
             energy,
@@ -396,12 +575,26 @@ impl FunnelBank {
         }
     }
 
+    fn key_of(&self, state: &[f64]) -> Vec<f64> {
+        match self.resemblance {
+            Resemblance::Radial => radial_key(state),
+            Resemblance::LeeCsa => lee_histograms(state, self.shells.0, self.shells.1),
+        }
+    }
+
+    fn distance(&self, a: &[f64], b: &[f64]) -> f64 {
+        match self.resemblance {
+            Resemblance::Radial => resemblance(a, b),
+            Resemblance::LeeCsa => histogram_distance(a, b),
+        }
+    }
+
     fn calibrate(&mut self) {
         let mut total = 0.0;
         let mut pairs = 0usize;
         for i in 0..self.members.len() {
             for j in (i + 1)..self.members.len() {
-                total += resemblance(&self.members[i].key, &self.members[j].key);
+                total += self.distance(&self.members[i].key, &self.members[j].key);
                 pairs += 1;
             }
         }
@@ -443,6 +636,10 @@ pub struct Record {
     /// counting the trials of one generation in chain order. Lattice pair work
     /// not yet settled into whole calls, under one call per chain, is not in it.
     pub charged: usize,
+    /// Oracle calls up to and including that trial. The bank term is zero.
+    pub force_calls: usize,
+    /// Wall time from the start of the ensemble to the admission, in seconds.
+    pub wall_seconds: f64,
     /// Energy of the new best.
     pub energy: f64,
     /// How the trial that found it started.
@@ -458,6 +655,15 @@ pub struct Run {
     pub best_state: Vec<f64>,
     /// Force calls charged across all chains.
     pub charged: usize,
+    /// Potential calls summed over every chain and the bank.
+    ///
+    /// A chain call is one energy-and-gradient evaluation, or one whole unit
+    /// the lattice search settled for its pair work. The bank does not
+    /// evaluate the potential when it admits a member, so its term is zero
+    /// and is still added. This is the count a matched budget uses.
+    pub force_calls: usize,
+    /// Wall time of the ensemble, in seconds.
+    pub wall_seconds: f64,
     /// Generations run.
     pub generations: usize,
     /// Every new ensemble best, in order.
@@ -494,11 +700,12 @@ enum Start {
 struct Trial {
     origin: Origin,
     calls: usize,
+    oracle_calls: usize,
     minimum: Option<(f64, Vec<f64>)>,
 }
 
 fn choose(bank: &mut FunnelBank, rng: &mut StdRng, plan: &Plan) -> Start {
-    if !bank.is_full() || rng.random::<f64>() < plan.fresh {
+    if !plan.banked || !bank.is_full() || rng.random::<f64>() < plan.fresh {
         return Start::Fresh;
     }
     let Some(parent) = bank.draw() else {
@@ -533,6 +740,7 @@ impl Chain {
         lattice: &Lattice,
     ) -> Trial {
         let before = self.ledger.spent();
+        crate::methods::lattice_search::oracle_begin();
         let (origin, x) = match start {
             Start::Fresh => (Origin::Fresh, plan.fresh_cluster(n, &mut self.rng).to_vec()),
             Start::Moved { state, count } => {
@@ -561,6 +769,7 @@ impl Chain {
         Trial {
             origin,
             calls: self.ledger.spent() - before,
+            oracle_calls: crate::methods::lattice_search::oracle_end(),
             minimum,
         }
     }
@@ -580,7 +789,9 @@ pub fn run(
     kind: PairKind,
 ) -> Run {
     let lattice = Lattice::for_pair(kind);
-    run_with_lattice(n, budget, seed, plan, quench, &lattice)
+    let mut quench = quench.clone();
+    quench.kind = kind;
+    run_with_lattice(n, budget, seed, plan, &quench, &lattice)
 }
 
 /// Runs one ensemble on a caller-built lattice.
@@ -620,13 +831,23 @@ pub fn run_with_lattice(
         Sharing::Shared => 0,
         Sharing::Private => c,
     };
+    let shells = lee_shell_radii(lattice.kind);
     let mut banks: Vec<FunnelBank> = (0..banks)
-        .map(|_| FunnelBank::new(capacity).with_retirement(plan.retire))
+        .map(|_| {
+            FunnelBank::new(capacity)
+                .with_retirement(plan.retire)
+                .with_resemblance(plan.resemblance, shells)
+        })
         .collect();
+    let mut quenches = vec![0u64; banks.len()];
+    let started = std::time::Instant::now();
+    let bank_calls = 0usize;
     let mut out = Run {
         best: f64::INFINITY,
         best_state: Vec::new(),
         charged: 0,
+        force_calls: 0,
+        wall_seconds: 0.0,
         generations: 0,
         trace: Vec::new(),
         trials: [0; 3],
@@ -653,7 +874,12 @@ pub fn run_with_lattice(
                 .fold((0usize, 0usize), |(s, t), (_, w)| {
                     (s + w.ledger.spent(), t + w.ledger.budget())
                 });
-            bank.set_progress(plan.merge, spent as f64 / total.max(1) as f64);
+            bank.set_cutoff(
+                plan.cutoff,
+                plan.merge,
+                spent as f64 / total.max(1) as f64,
+                quenches[b],
+            );
         }
         let starts: Vec<Start> = active
             .iter()
@@ -671,6 +897,7 @@ pub fn run_with_lattice(
         for (&c, trial) in active.iter().zip(trials) {
             let o = trial.origin.index();
             out.charged += trial.calls;
+            out.force_calls += trial.oracle_calls;
             out.trials[o] += 1;
             out.calls[o] += trial.calls;
             let Some((energy, state)) = trial.minimum else {
@@ -681,9 +908,15 @@ pub fn run_with_lattice(
                 out.best_state.clone_from(&state);
                 out.trace.push(Record {
                     charged: out.charged,
+                    force_calls: out.force_calls,
+                    wall_seconds: started.elapsed().as_secs_f64(),
                     energy,
                     origin: trial.origin,
                 });
+            }
+            quenches[bank_of(c)] += 1;
+            if !plan.banked {
+                continue;
             }
             match banks[bank_of(c)].offer(energy, &state, trial.origin) {
                 Admission::Added(_)
@@ -697,6 +930,9 @@ pub fn run_with_lattice(
         }
     }
     out.bank = banks.into_iter().flat_map(|b| b.members).collect();
+    // Admission compares stored energies. It does not call the potential.
+    out.force_calls += bank_calls;
+    out.wall_seconds = started.elapsed().as_secs_f64();
     out
 }
 
@@ -822,11 +1058,36 @@ mod tests {
         );
         assert_eq!(run.charged, budget, "chains stop only on an empty ledger");
         assert_eq!(run.calls.iter().sum::<usize>(), run.charged);
+        assert_eq!(
+            run.force_calls, run.charged,
+            "the reported count must equal the oracle calls, bank term included"
+        );
+        assert!(run.wall_seconds >= 0.0);
         assert!(
             run.trace
                 .windows(2)
                 .all(|w| w[1].energy < w[0].energy && w[1].charged >= w[0].charged)
         );
+    }
+
+    #[test]
+    fn reported_force_count_equals_the_sum_of_oracle_calls() {
+        for sharing in [Sharing::Shared, Sharing::Private] {
+            let run = run(
+                13,
+                900,
+                2,
+                &small_plan(sharing),
+                &Quench::default(),
+                PairKind::LennardJones,
+            );
+            assert_eq!(
+                run.force_calls, run.charged,
+                "{sharing:?}: reported {} oracle {}",
+                run.force_calls, run.charged
+            );
+            assert!(run.force_calls > 0, "{sharing:?} recorded no calls");
+        }
     }
 
     #[test]
@@ -933,6 +1194,9 @@ mod tests {
         assert_eq!(plan.start, StartRule::PresetSphere);
         assert_eq!(plan.min_separation.to_bits(), 0.85_f64.to_bits());
         assert_eq!(plan.sharing, Sharing::Shared);
+        assert_eq!(plan.resemblance, Resemblance::Radial);
+        assert_eq!(plan.cutoff, CutoffSchedule::LinearBudget);
+        assert!(plan.banked);
     }
 
     #[test]
@@ -954,5 +1218,176 @@ mod tests {
         );
         assert_eq!(run.trials[Origin::Spliced.index()], 0);
         assert_eq!(run.admitted[Origin::Spliced.index()], 0);
+    }
+
+    fn cheap_quench() -> Quench {
+        Quench {
+            max_iterations: 2,
+            rms_tolerance: 1.0e6,
+            ..Quench::default()
+        }
+    }
+
+    #[test]
+    fn retire_zero_never_frees_a_slot() {
+        let mut bank = FunnelBank::new(2).with_retirement(0);
+        bank.offer(-1.0, &line(4, 1.0), Origin::Fresh);
+        bank.offer(-2.0, &line(4, 3.0), Origin::Fresh);
+        bank.set_progress((0.5, 0.5), 0.0);
+        for _ in 0..6 {
+            bank.draw();
+        }
+        assert_eq!(
+            bank.offer(-0.5, &line(4, 9.0), Origin::Fresh),
+            Admission::Rejected
+        );
+    }
+
+    fn tetrahedron() -> Vec<f64> {
+        let height = (6.0_f64).sqrt() / 3.0;
+        let mid = (3.0_f64).sqrt() / 6.0;
+        let side = (3.0_f64).sqrt() / 2.0;
+        let points = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.5, side, 0.0],
+            [0.5, mid, height],
+        ];
+        points.into_iter().flatten().collect()
+    }
+
+    #[test]
+    fn lee_distance_matches_equation_2() {
+        let straight = line(4, 1.0);
+        let tetra = tetrahedron();
+        // Line: two ends with coordination 1 and two interiors with
+        // coordination 2, in both shells, because the second neighbour sits
+        // at 2, past 1.70. Tetrahedron: every atom has coordination 3 in
+        // both shells. Eq. (2) then totals 54.
+        let distance = lee_csa_distance(&straight, &tetra, LEE_SHELL_FIRST, LEE_SHELL_SECOND);
+        assert_eq!(distance, 54.0);
+        assert_eq!(
+            lee_csa_distance(&straight, &straight, LEE_SHELL_FIRST, LEE_SHELL_SECOND),
+            0.0
+        );
+        let stretched = line(4, 1.2);
+        assert_eq!(
+            lee_csa_distance(&straight, &stretched, LEE_SHELL_FIRST, LEE_SHELL_SECOND),
+            0.0
+        );
+        assert!(resemblance(&radial_key(&straight), &radial_key(&stretched)) > 1e-3);
+        let mut lee = FunnelBank::new(2)
+            .with_resemblance(Resemblance::LeeCsa, (LEE_SHELL_FIRST, LEE_SHELL_SECOND));
+        assert_eq!(
+            lee.offer(-1.0, &straight, Origin::Fresh),
+            Admission::Added(0)
+        );
+        assert_eq!(
+            lee.offer(-1.0, &stretched, Origin::Fresh),
+            Admission::Duplicate(0)
+        );
+        let mut radial = FunnelBank::new(2);
+        assert_eq!(
+            radial.offer(-1.0, &straight, Origin::Fresh),
+            Admission::Added(0)
+        );
+        assert_eq!(
+            radial.offer(-1.0, &stretched, Origin::Fresh),
+            Admission::Added(1)
+        );
+    }
+
+    #[test]
+    fn lee_cutoff_goes_from_half_to_a_fifth_by_a_fixed_ratio() {
+        assert!((lee_cut_fraction(0) - 0.5).abs() < 1e-15);
+        assert!((lee_cut_fraction(LEE_ANNEAL_MINIMIZATIONS) - 0.2).abs() < 1e-12);
+        assert!((lee_cut_fraction(LEE_ANNEAL_MINIMIZATIONS * 2) - 0.2).abs() < 1e-12);
+        let step = lee_cut_fraction(1) / lee_cut_fraction(0);
+        assert!((lee_cut_fraction(2) / lee_cut_fraction(1) - step).abs() < 1e-12);
+        let published = (2.0_f64 / 5.0).powf(1.0 / LEE_ANNEAL_MINIMIZATIONS as f64);
+        assert!((step - published).abs() < 1e-12);
+        let lj = lee_shell_radii(PairKind::LennardJones);
+        assert_eq!(lj.0.to_bits(), LEE_SHELL_FIRST.to_bits());
+        assert_eq!(lj.1.to_bits(), LEE_SHELL_SECOND.to_bits());
+        let morse = lee_shell_radii(PairKind::Morse { rho: 14.0 });
+        let scale = 1.0 / PairKind::LennardJones.r_min();
+        assert!((morse.0 - LEE_SHELL_FIRST * scale).abs() < 1e-12);
+        assert!((morse.1 - LEE_SHELL_SECOND * scale).abs() < 1e-12);
+
+        let mut bank = FunnelBank::new(2);
+        bank.offer(-1.0, &line(4, 1.0), Origin::Fresh);
+        bank.offer(-2.0, &line(4, 3.0), Origin::Fresh);
+        let scale = bank.scale().expect("full bank");
+        bank.set_cutoff(CutoffSchedule::LeeFixedRatio, (0.9, 0.9), 1.0, 0);
+        assert!((bank.merge() - 0.5 * scale).abs() < 1e-12);
+        bank.set_cutoff(
+            CutoffSchedule::LeeFixedRatio,
+            (0.9, 0.9),
+            0.0,
+            LEE_ANNEAL_MINIMIZATIONS,
+        );
+        assert!((bank.merge() - 0.2 * scale).abs() < 1e-9 * scale.max(1.0));
+        bank.set_cutoff(CutoffSchedule::LinearBudget, (0.5, 0.5), 0.7, 10_000);
+        assert!((bank.merge() - 0.5 * scale).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_one_slot_private_bank_does_not_splice_and_two_slots_do() {
+        let quench = cheap_quench();
+        let base = Plan {
+            chains: 4,
+            fresh: 0.0,
+            splice: 1.0,
+            sharing: Sharing::Private,
+            ..Plan::default()
+        };
+        let one = run(
+            13,
+            600,
+            1,
+            &Plan {
+                slots: 1,
+                ..base.clone()
+            },
+            &quench,
+            PairKind::LennardJones,
+        );
+        let two = run(
+            13,
+            600,
+            1,
+            &Plan { slots: 2, ..base },
+            &quench,
+            PairKind::LennardJones,
+        );
+        let spliced = Origin::Spliced.index();
+        println!(
+            "splice_probe slots1 {} slots2 {}",
+            one.trials[spliced], two.trials[spliced]
+        );
+        assert_eq!(one.trials[spliced], 0);
+        assert!(
+            two.trials[spliced] > 0,
+            "two-slot private spliced {}",
+            two.trials[spliced]
+        );
+    }
+
+    #[test]
+    fn an_unbanked_run_is_a_fresh_lattice_descent() {
+        let plan = Plan {
+            chains: 3,
+            slots: 2,
+            fresh: 0.0,
+            splice: 1.0,
+            banked: false,
+            ..Plan::default()
+        };
+        let run = run(13, 400, 4, &plan, &cheap_quench(), PairKind::LennardJones);
+        assert_eq!(run.trials[Origin::Spliced.index()], 0);
+        assert_eq!(run.trials[Origin::Moved.index()], 0);
+        assert!(run.trials[Origin::Fresh.index()] > 0);
+        assert!(run.bank.is_empty());
+        assert!(run.best.is_finite());
     }
 }
