@@ -999,13 +999,190 @@ fn jacobi_rotate(matrix: &mut [[f64; 3]; 3], vectors: &mut [[f64; 3]; 3], p: usi
 }
 
 fn centre(points: &[[f64; 3]]) -> Vec<[f64; 3]> {
-    points.to_vec()
+    let scale = points.len() as f64;
+    let mut shift = [0.0; 3];
+    for point in points {
+        for axis in 0..3 {
+            shift[axis] += point[axis];
+        }
+    }
+    for axis in 0..3 {
+        shift[axis] /= scale;
+    }
+    points
+        .iter()
+        .map(|point| {
+            [
+                point[0] - shift[0],
+                point[1] - shift[1],
+                point[2] - shift[2],
+            ]
+        })
+        .collect()
 }
 
-fn rotate(_matrix: &[[f64; 3]; 3], point: [f64; 3]) -> [f64; 3] {
-    point
+fn rotate(matrix: &[[f64; 3]; 3], point: [f64; 3]) -> [f64; 3] {
+    [
+        matrix[0][0] * point[0] + matrix[1][0] * point[1] + matrix[2][0] * point[2],
+        matrix[0][1] * point[0] + matrix[1][1] * point[1] + matrix[2][1] * point[2],
+        matrix[0][2] * point[0] + matrix[1][2] * point[1] + matrix[2][2] * point[2],
+    ]
 }
 
-fn dist2(_left: [f64; 3], _right: [f64; 3]) -> f64 {
-    0.0
+fn dist2(left: [f64; 3], right: [f64; 3]) -> f64 {
+    let mut total = 0.0;
+    for axis in 0..3 {
+        let delta = left[axis] - right[axis];
+        total += delta * delta;
+    }
+    total
+}
+
+#[cfg(test)]
+mod water_hexamer_tests {
+    use super::*;
+    use crate::methods::cluster_hopping::MoveLibrary;
+
+    #[test]
+    fn the_template_hexamer_is_intact_and_a_loose_hydrogen_is_not() {
+        let coordinates = reference_coordinates(WATER_HEXAMER_MOLECULES).unwrap();
+        assert!(monomers_intact(&coordinates, WATER_HEXAMER_MOLECULES).unwrap());
+        let mut broken = coordinates.clone();
+        broken[3] += 5.0;
+        assert!(!monomers_intact(&broken, WATER_HEXAMER_MOLECULES).unwrap());
+        let mut crowded = coordinates.clone();
+        crowded[12] = 0.2;
+        crowded[13] = 0.2;
+        crowded[14] = 0.0;
+        assert!(!monomers_intact(&crowded, WATER_HEXAMER_MOLECULES).unwrap());
+    }
+
+    #[test]
+    fn oxygen_distances_are_sorted_and_the_stop_follows_the_production_rule() {
+        let coordinates = reference_coordinates(WATER_HEXAMER_MOLECULES).unwrap();
+        let distances = sorted_oxygen_distances(&coordinates, WATER_HEXAMER_MOLECULES).unwrap();
+        assert_eq!(distances.len(), 15);
+        assert!(distances.windows(2).all(|pair| pair[0] <= pair[1]));
+        let mut census = BasinCensus::new(1, OXYGEN_DISTANCE_CENSUS_RADIUS_A).unwrap();
+        assert!(good_turing_stop_reason(&census).is_none());
+        for index in 0..20 {
+            census.observe(&[index as f64]).unwrap();
+        }
+        assert!(good_turing_stop_reason(&census).is_none());
+        let mut repeated = BasinCensus::new(1, OXYGEN_DISTANCE_CENSUS_RADIUS_A).unwrap();
+        for _ in 0..20 {
+            repeated.observe(&[0.0]).unwrap();
+        }
+        assert_eq!(good_turing_stop_reason(&repeated), Some("saturated"));
+    }
+
+    #[test]
+    fn rmsd_is_zero_after_a_rigid_motion_or_a_molecule_swap() {
+        let coordinates = reference_coordinates(2).unwrap();
+        assert!(water_rmsd(&coordinates, &coordinates, 2).unwrap() < 1e-8);
+        let mut moved = coordinates.clone();
+        for value in moved.iter_mut() {
+            *value += 3.0;
+        }
+        for atom in 0..6 {
+            let x = moved[3 * atom];
+            let y = moved[3 * atom + 1];
+            moved[3 * atom] = -y;
+            moved[3 * atom + 1] = x;
+        }
+        assert!(
+            water_rmsd(&coordinates, &moved, 2).unwrap() < 1e-6,
+            "{}",
+            water_rmsd(&coordinates, &moved, 2).unwrap()
+        );
+        let mut swapped = coordinates.clone();
+        let (head, tail) = swapped.split_at_mut(9);
+        head.swap_with_slice(tail);
+        assert!(water_rmsd(&coordinates, &swapped, 2).unwrap() < 1e-6);
+        let mut flipped = coordinates.clone();
+        flipped.swap(3, 6);
+        flipped.swap(4, 7);
+        flipped.swap(5, 8);
+        assert!(water_rmsd(&coordinates, &flipped, 2).unwrap() < 1e-6);
+        let mut shifted = coordinates.clone();
+        shifted[3] += 0.4;
+        assert!(water_rmsd(&coordinates, &shifted, 2).unwrap() > ISOMER_RMSD_GATE_NAMED_BY_FIXES_A);
+        let matched = assign_isomer(
+            &coordinates,
+            2,
+            &[("book", coordinates.as_slice())],
+            Some(1.0),
+        )
+        .unwrap();
+        assert_eq!(matched.name.as_deref(), Some("book"));
+        let waiting =
+            assign_isomer(&coordinates, 2, &[("book", coordinates.as_slice())], None).unwrap();
+        assert!(waiting.name.is_none());
+        assert!(waiting.rmsd.unwrap() < 1e-8);
+        assert!(
+            assign_isomer(&coordinates, 2, &[], None)
+                .unwrap()
+                .name
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn water_arms_keep_the_molecular_library() {
+        let species = water_species(WATER_HEXAMER_MOLECULES).unwrap();
+        let groups = water_groups(WATER_HEXAMER_MOLECULES).unwrap();
+        let recommended = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
+        let library = recommended.move_library.clone();
+        for arm in [
+            WaterSearchArm::Recommended,
+            WaterSearchArm::Communicating,
+            WaterSearchArm::Derived,
+            WaterSearchArm::GoodTuring,
+        ] {
+            let mut cfg = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
+            configure_water_arm(&mut cfg, arm);
+            assert_eq!(cfg.move_library, library);
+            assert!(cfg.surfaces.is_empty());
+            match &cfg.move_library {
+                MoveLibrary::Molecular { groups, reactive } => {
+                    assert_eq!(groups.len(), WATER_HEXAMER_MOLECULES);
+                    assert!(!reactive);
+                }
+                other => panic!("molecular library replaced by {other:?}"),
+            }
+        }
+        let mut communicating = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
+        configure_water_arm(&mut communicating, WaterSearchArm::Communicating);
+        assert!(!communicating.depth_reward);
+        assert!(communicating.return_screen);
+        assert!(communicating.orbit_complete_on_new);
+        assert_eq!(communicating.shared_deposits, 0);
+        assert!(matches!(
+            communicating.shared_visit_policy,
+            SharedVisitPolicy::Recognition
+        ));
+        assert!(!communicating.jump_on_stall);
+        let mut derived = Config::recommended_molecular(species, groups, 1.0);
+        configure_water_arm(&mut derived, WaterSearchArm::Derived);
+        assert!(derived.budget_window);
+        assert!(derived.bayes_screen);
+        assert!(derived.depth_reward);
+        let threshold =
+            crate::screen::cost_asymmetric_threshold(derived.screen_steps, derived.relax_steps);
+        assert!((derived.bayes_threshold - threshold).abs() < 1e-12);
+    }
+
+    #[test]
+    fn engine_pins_match_the_lockfile() {
+        let lock = include_str!("../../Cargo.lock");
+        assert!(lock.contains(RGPOT_REV));
+        assert!(lock.contains(EINDIR_REV));
+        assert_eq!(PBE_DISPERSION, "none named");
+        assert_eq!(PBE_BASIS, "6-31g*");
+        assert_eq!(PBE_XC, "pbe");
+        assert_eq!(GFN2_METHOD, 3);
+        assert_eq!(WATER_HEXAMER_SEED_START + WATER_HEXAMER_SEED_COUNT - 1, 31);
+        assert_eq!(PBE_HEXAMER_BUDGET, 4000);
+        assert_eq!(GFN2_HEXAMER_BUDGET, 4000);
+    }
 }
