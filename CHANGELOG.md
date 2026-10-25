@@ -10,6 +10,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Lattice-ensemble ablation arms on ``Plan``. ``retire = 0`` never frees a
+  bank slot. ``Resemblance::LeeCsa`` uses eq. (2) of Lee, Lee and Lee,
+  Phys. Rev. Lett. 91, 080201 (2003): the weighted absolute difference of
+  the first and second shell coordination histograms, radii 1.35 and 1.70
+  at sigma = 1, scaled by the pair minimum on any other pair.
+  ``CutoffSchedule::LeeFixedRatio`` reduces the merge distance by a fixed
+  ratio from D_ave/2 to D_ave/5 over 10000 local minimizations and then
+  holds it. ``banked = false`` runs Shao, Cheng and Cai's lattice move
+  from a fresh start, with no bank and no splice. The defaults stay the
+  radial key, the held cutoff, retirement after 20 draws, and the bank.
+  ``lj_lattice_ensemble`` runs its private arm at two slots unless
+  ``SLOTS`` is set, and its default seed is the registered block.
+  ``lattice_ensemble_ablation`` reports the T1 columns and the paired
+  difference against the full ensemble. The quench and the lattice site
+  energy follow ``PairKind``, so a Morse ensemble is Morse.
 - ``pt111_heptamer`` quenches the OptBench Pt(111) heptamer with rgmin and
   certifies edges with an rgsaddle dimer from each quenched endpoint pair.
   The hop and the RMSD use the smallest free layer split at 1.0 angstrom.
