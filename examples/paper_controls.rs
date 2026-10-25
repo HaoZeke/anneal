@@ -1,4 +1,22 @@
-#![allow(dead_code, unused_imports)]
+//! Paper control drivers for the registered seed blocks.
+//!
+//! `recommended` is `Config::recommended`. `for_cluster` is the screened
+//! basin-hopping control: temperature `0.8`, screen of 25 steps, and no
+//! other field edited. It is also the in-tree control where the outline
+//! leaves GMIN on the optbench side. `derived` is `Config::derived`.
+//! `soap-on` and `soap-off` share `Config::recommended` and differ only
+//! in `SoapProposalMode`. `soap38` starts from the icosahedron used by
+//! `ttt_lj38`. `lj12-groups` is named and refused: four water-shaped
+//! groups are not deposited here.
+//!
+//! `PAPER_SMOKE=1` runs the first registered seed at 200 force evaluations
+//! and writes a file whose name contains `SMOKE`. That file is not a paper
+//! table. Full runs launch from the v0.12.0 tag.
+//!
+//! ```text
+//! paper_controls <system> <arm>
+//! ```
+
 use anneal_core::catalog::lj::system_signature;
 #[cfg(test)]
 use anneal_core::methods::cluster_hopping::MoveLibrary;
@@ -256,24 +274,78 @@ fn run_seed(
     (outcome, started.elapsed().as_secs_f64())
 }
 
-fn ico_start(n: usize, _seed: u64) -> Array1<f64> {
-    Array1::zeros(n * 3)
+/// Icosahedral 38-mer perturbation from `examples/ttt_lj38.rs`.
+fn ico_start(n: usize, seed: u64) -> Array1<f64> {
+    let sites =
+        anneal_core::lattice::grow(&anneal_core::structure::Template::Icosahedral.points(), n);
+    let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E37).wrapping_add(7));
+    let mut x = Array1::zeros(3 * n);
+    for (index, site) in sites.iter().take(n).enumerate() {
+        for axis in 0..3 {
+            let jitter = (rng.random::<f64>() - 0.5) * 0.1;
+            x[3 * index + axis] = site[axis] + jitter;
+        }
+    }
+    x
 }
 
-fn lj_reference(_n: usize) -> Option<f64> {
-    None
+/// Cambridge Cluster Database values already scored in this repository.
+/// LJ31 and LJ76 are not among them.
+fn lj_reference(n: usize) -> Option<f64> {
+    match n {
+        38 => Some(-173.928427),
+        75 => Some(-397.492331),
+        98 => Some(-543.665361),
+        102 => Some(-569.363652),
+        _ => None,
+    }
 }
 
-fn morse_reference(_n: usize, _rho: f64) -> Option<f64> {
-    None
+/// Bold Doye-Wales entries copied from `examples/cluster_bench.rs`.
+/// The rho = 14, N = 80 value is the 80G entry recorded by
+/// `examples/lattice_ensemble_ablation.rs`.
+fn morse_reference(n: usize, rho: f64) -> Option<f64> {
+    match (n, rho as i64) {
+        (38, 6) => Some(-157.477108),
+        (55, 6) => Some(-250.286609),
+        (38, 10) => Some(-145.849817),
+        (55, 10) => Some(-225.814286),
+        (38, 14) => Some(-144.321054),
+        (55, 14) => Some(-220.646208),
+        (80, 14) => Some(-340.811371),
+        _ => None,
+    }
 }
 
-fn engine_identity(_n: usize, _rho: Option<f64>) -> (String, String) {
-    (String::new(), String::new())
+fn engine_identity(n: usize, rho: Option<f64>) -> (String, String) {
+    match rho {
+        None => {
+            let signature = system_signature(n).expect("LJ signature");
+            (signature.engine.kind, hex(&signature.engine.config_digest))
+        }
+        Some(rho) => (
+            "morse-doye-wales-v1".into(),
+            sha256_hex(format!("morse epsilon=1 r0=1 rho={rho}").as_bytes()),
+        ),
+    }
 }
 
 fn output_path(smoke: bool) -> String {
-    if smoke { "SMOKE".into() } else { "out".into() }
+    let path = std::env::var("PAPER_OUT").unwrap_or_else(|_| {
+        if smoke {
+            "paper-controls-SMOKE.txt".into()
+        } else {
+            "paper-controls.txt".into()
+        }
+    });
+    if !require_smoke_name(smoke, &path) {
+        panic!("PAPER_SMOKE output path must contain SMOKE");
+    }
+    path
+}
+
+fn require_smoke_name(smoke: bool, path: &str) -> bool {
+    !smoke || path.contains("SMOKE")
 }
 
 fn push(report: &mut String, text: &str) {
@@ -281,9 +353,84 @@ fn push(report: &mut String, text: &str) {
 }
 
 fn git_commit() -> String {
-    "unknown".into()
+    std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|text| text.trim().to_string())
+        .unwrap_or_else(|| "unknown".into())
 }
 
 fn cpu_model() -> String {
-    "unknown".into()
+    std::fs::read_to_string("/proc/cpuinfo")
+        .ok()
+        .and_then(|text| {
+            text.lines()
+                .find(|line| line.starts_with("model name"))
+                .and_then(|line| line.split(':').nth(1))
+                .map(|value| value.trim().to_string())
+        })
+        .unwrap_or_else(|| "unknown".into())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    hex(&Sha256::digest(bytes))
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Arm, MoveLibrary, SoapProposalMode, apply_arm, campaign, require_smoke_name};
+
+    #[test]
+    fn outline_counts_use_the_registered_blocks() {
+        let lj38 = campaign("lj38").unwrap();
+        assert_eq!(
+            (lj38.seed0, lj38.seed_count, lj38.paper_budget),
+            (2000, 72, Some(400_000))
+        );
+        assert_eq!(lj38.reference, Some(-173.928427));
+        let lj75 = campaign("lj75").unwrap();
+        assert_eq!(lj75.paper_budget, Some(4_000_000));
+        assert_eq!(lj75.seed_count, 48);
+        let held = campaign("lj31").unwrap();
+        assert_eq!((held.seed0, held.seed_count), (2200, 48));
+        assert!(held.paper_budget.is_none());
+        assert!(held.reference.is_none());
+        assert_eq!(campaign("lj102").unwrap().reference, Some(-569.363652));
+        let soap = campaign("soap38").unwrap();
+        assert_eq!((soap.seed0, soap.seed_count), (5000, 64));
+        assert_eq!(soap.paper_budget, Some(25_000));
+        assert!(soap.icosahedral);
+        assert_eq!(campaign("morse38-6").unwrap().reference, Some(-157.477108));
+        assert!(campaign("morse80-6").unwrap().reference.is_none());
+        assert_eq!(campaign("morse80-14").unwrap().reference, Some(-340.811371));
+        assert!(campaign("lj12-groups").is_err());
+    }
+
+    #[test]
+    fn arms_keep_the_named_presets() {
+        let derived = apply_arm(13, Arm::Derived);
+        assert!(derived.budget_window && derived.bayes_screen);
+        let control = apply_arm(13, Arm::ForCluster);
+        assert!(!control.budget_window && !control.bayes_screen);
+        assert_eq!(control.screen_steps, 25);
+        assert_eq!(control.temperature.to_bits(), 0.8_f64.to_bits());
+        let recommended = apply_arm(13, Arm::Recommended);
+        let off = apply_arm(13, Arm::SoapOff);
+        assert_eq!(off.soap_mode, SoapProposalMode::Off);
+        assert_eq!(off.move_library, recommended.move_library);
+        assert_eq!(
+            apply_arm(13, Arm::SoapOn).soap_mode,
+            SoapProposalMode::Flexible
+        );
+        assert_eq!(recommended.move_library, MoveLibrary::LeanBurst);
+        assert!(require_smoke_name(true, "paper-controls-SMOKE.txt"));
+        assert!(!require_smoke_name(true, "paper-controls.txt"));
+    }
 }
