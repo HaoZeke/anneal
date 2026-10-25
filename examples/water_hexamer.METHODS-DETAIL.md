@@ -31,11 +31,14 @@ Groups are repacked from the isolated-water template in
 
 A geometry is intact when every oxygen has exactly two hydrogens within
 1.2 angstrom. A dissociated monomer is unassigned, not an isomer.
-Species-aware IRA against deposited same-level XYZ is the assignment
-the outline names. This driver records a permutation RMSD when
-`WATER_ISOMER_DIR` contains `{prism,cage,book,bag,cyclic-chair,cyclic-boat}.xyz`
-in O, H, H order, and it does not apply a cutoff. The cutoff and the
-IRA witness are the following piece.
+The label is species-aware IRA (`match_shapes_typed`, breadth 1.8),
+the same function for a search geometry and a geometry under
+`WATER_GOFEE_DIR`. The Kabsch helper is not the label. The gate is
+half the minimum IRA RMSD between distinct deposited references,
+computed once before any seed. No references are deposited here, so
+the gate stays unset and every seed is unassigned. A build without
+the `ira` feature records that reason and does not substitute the
+Kabsch helper. Primitive-ring counts are not the isomer name.
 
 Hit columns that need a same-level reference energy are unscored.
 
