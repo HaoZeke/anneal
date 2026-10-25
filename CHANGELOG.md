@@ -10,6 +10,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- ``paper_controls`` runs the registered control arms: ``recommended``,
+  ``for_cluster`` (screened basin hopping, and the in-tree control while
+  GMIN stays on the optbench side), ``derived``, and soap on against
+  soap off. The log header carries the commit, config digest, engine
+  digest, seed, force count, wall time and CPU model, and each run
+  writes a ``RunManifest``. LJ38 uses the first 72 seeds of 2000-2199
+  at 400000 evaluations. LJ75 and LJ98 use the first 48 at 4000000.
+  Held-out landscapes use 2200-2247 and do not invent a budget. A run
+  launched before the v0.12.0 tag is a smoke and is labelled smoke.
 - Catalogue selection uses four ranks. The default log weight is
   ``-r_E + 0.8 r_N + 0.6 r_S + 0.4 r_U``, clipped at 4 nats. ``r_U`` is
   the rank of the graph-field score ``variance / (1 + effort)``. Scores
