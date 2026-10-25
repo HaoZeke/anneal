@@ -81,6 +81,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- The Pt(111) heptamer dimer stops translation on the maximum force
+  component. ``rgsaddle`` 0.3.0 has no force-gate field on
+  ``MinModeConfig``.
+
 - ``Plan::start`` is ``StartRule::PresetSphere`` or ``StartRule::Density``.
   The default is the preset sphere of ``Config::recommended``, radius
   ``0.9 * L0 * N^(1/3)`` with ``L0`` the preset length scale. A fresh
