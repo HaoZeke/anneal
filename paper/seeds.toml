@@ -1,0 +1,71 @@
+# Seed registry for the v0.12.0 paper runs.
+# Inclusive ranges. Registered before any of these runs.
+#
+# The fix list names 2000-2199 for the paired Lennard-Jones rerun,
+# 3000-3029 for the LJ75 and LJ98 lattice ensembles, and 3100-3199
+# for the LJ38 lattice ensemble. R2, R9 and R10 name a count and not
+# the integers. Those integers are registered here.
+
+[[run]]
+id = "r1-recommended-vs-sbh"
+items = ["R1"]
+sizes = [38, 75, 98]
+seed_start = 2000
+seed_end = 2199
+detail = "200 paired seeds. Config::recommended against screened basin hopping, at the Table 2 budgets."
+
+[[run]]
+id = "r12-derived"
+items = ["R12"]
+sizes = [38, 75, 98]
+seed_start = 2000
+seed_end = 2199
+detail = "Config::derived on the R1 seeds and budgets."
+
+[[run]]
+id = "r15-gmin"
+items = ["R15"]
+sizes = [38, 75, 98]
+seed_start = 2000
+seed_end = 2199
+detail = "GMIN basin hopping on the R1 seed count and budgets."
+
+[[run]]
+id = "r2-held-out"
+items = ["R2"]
+sizes = [31, 38, 55, 76, 80, 102]
+seed_start = 2200
+seed_end = 2247
+detail = "48 seeds on each held-out landscape: Morse rho 6, 10 and 14 at N = 38, 55 and 80, and LJ31, LJ76, LJ102. These landscapes were not used to choose the configuration."
+
+[[run]]
+id = "r4-lattice-lj75-lj98"
+items = ["R4", "R14"]
+sizes = [75, 98]
+seed_start = 3000
+seed_end = 3029
+detail = "30 ensembles. Arms: shared, private, serial, independent, and shared with splice 0."
+
+[[run]]
+id = "r4-lattice-lj38"
+items = ["R4", "R14"]
+sizes = [38]
+seed_start = 3100
+seed_end = 3199
+detail = "100 ensembles. Same arms as the LJ75 and LJ98 lattice runs."
+
+[[run]]
+id = "r9-pt111-heptamer"
+items = ["R9"]
+sizes = [7]
+seed_start = 4000
+seed_end = 4047
+detail = "48 seeds. Recommended against plain on the OptBench Pt(111) heptamer."
+
+[[run]]
+id = "r10-soap"
+items = ["R10"]
+sizes = [38, 12]
+seed_start = 5000
+seed_end = 5063
+detail = "64 paired seeds. Soap on against off, on the icosahedral 38-mer and on 12 LJ sites as 4 water-shaped groups."
