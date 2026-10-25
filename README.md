@@ -308,16 +308,19 @@ landscape split.
 Connected spectral splits return `GraphError::FeatureDisabled`. Saddle
 sessions and stationary-index checks return
 `PesExplorationError::SaddleUnavailable`. An NVE escape returns
-`NveError::FeatureDisabled`. With `md_escape` set, or on a binary chart with
-a wide diameter ratio, `cluster_search` stops and sets
-`Outcome::nve_unavailable`. `python` and `bank-rpc` turn the feature on,
-including PyPI wheels and `maturin develop --features python`. The feature
-compiles the git revision of
+`NveError::FeatureDisabled`. `nd_hybrid` and `atomistic_hybrid` ridge
+connections return `PesExplorationError::SaddleUnavailable`. With
+`md_escape` set, or on a binary chart with a wide diameter ratio,
+`cluster_search` stops and sets `Outcome::nve_unavailable`. `python` and
+`bank-rpc` turn the feature on, including PyPI wheels and `maturin develop
+--features python`. The feature compiles the git revision of
 [rgsaddle](https://github.com/OmniPotentRPC/rgsaddle) named in `Cargo.toml`.
-CI packages the crate with `cargo package --no-verify`. A later step
-extracts `anneal-core-${version}.crate`. It drops the development patch
-and the lockfile. It runs `cargo check` on the default features against
-crates.io.
+From crates.io, `rgsaddle`, `python`, and `bank-rpc` do not build until
+matching rgmin and rgsaddle releases exist. Default features, docs.rs, and
+the wheels are fine. CI packages the crate with `cargo package --no-verify`.
+A later step extracts `anneal-core-${version}.crate`. It drops the
+development patch and the lockfile. It runs `cargo check` on the default
+features against crates.io.
 
 ```bash
 cargo test --locked
