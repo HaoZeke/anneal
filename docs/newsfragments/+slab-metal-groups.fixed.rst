@@ -1,4 +1,3 @@
-``adsorbate_groups`` keeps two atoms whose Cordero radii are both at
-least 1 angstrom in separate hop groups. Cu at 2.5 angstrom and Pt at
-2.77 angstrom sit inside 1.25 times the Cordero sum, and that scale
-still bonds H2 at 0.74 angstrom. One scale cannot do both.
+``adsorbate_groups`` no longer uses one covalent scale for every pair.
+Light pairs stay at 1.25 times the Cordero sum, which bonds H2. Metal
+pairs use a cutoff table.
