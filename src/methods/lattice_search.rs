@@ -818,8 +818,34 @@ pub fn lj_value(x: &[f64]) -> f64 {
     4.0 * e
 }
 
+thread_local! {
+    static ORACLE: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+/// Starts counting potential calls on this thread. Pair with [`oracle_end`].
+pub fn oracle_begin() {
+    ORACLE.with(|slot| slot.set(Some(0)));
+}
+
+/// Stops counting and returns the calls recorded since [`oracle_begin`].
+pub fn oracle_end() -> usize {
+    ORACLE.with(|slot| slot.replace(None).unwrap_or(0))
+}
+
+fn oracle_add(n: usize) {
+    if n == 0 {
+        return;
+    }
+    ORACLE.with(|slot| {
+        if let Some(count) = slot.get() {
+            slot.set(Some(count + n));
+        }
+    });
+}
+
 /// Reduced Lennard-Jones energy and gradient, writing the gradient into `g`.
 pub fn lj_value_gradient(x: &[f64], g: &mut [f64]) -> f64 {
+    oracle_add(1);
     let n = x.len() / 3;
     g.iter_mut().for_each(|v| *v = 0.0);
     let mut e = 0.0;
@@ -856,6 +882,15 @@ fn full_pairs(n: usize) -> f64 {
     (n * n.saturating_sub(1) / 2).max(1) as f64
 }
 
+/// Charges `frac` and, while [`oracle_begin`] is active, counts the whole
+/// units that charge settled. The residue under one unit is not a call.
+fn charge_oracle(ledger: &mut Ledger, frac: f64) -> bool {
+    let before = ledger.spent();
+    let ok = ledger.charge_frac(frac);
+    oracle_add(ledger.spent().saturating_sub(before));
+    ok
+}
+
 fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b).map(|(u, v)| u * v).sum()
 }
@@ -883,6 +918,9 @@ pub struct Quench {
     pub max_iterations: usize,
     /// Inverse-Hessian diagonal before any curvature pair is stored.
     pub initial_diagonal: f64,
+    /// Pair potential evaluated at each step. The default is reduced
+    /// Lennard-Jones, and that path is the historical gradient.
+    pub kind: PairKind,
 }
 
 impl Default for Quench {
@@ -893,6 +931,7 @@ impl Default for Quench {
             rms_tolerance: 1e-5,
             max_iterations: 4000,
             initial_diagonal: 0.1,
+            kind: PairKind::LennardJones,
         }
     }
 }
@@ -912,7 +951,38 @@ pub struct Relaxed {
     pub converged: bool,
 }
 
+fn pair_value_gradient(kind: PairKind, x: &[f64], g: &mut [f64]) -> f64 {
+    oracle_add(1);
+    let n = x.len() / 3;
+    g.fill(0.0);
+    let mut energy = 0.0;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d = [
+                x[3 * i] - x[3 * j],
+                x[3 * i + 1] - x[3 * j + 1],
+                x[3 * i + 2] - x[3 * j + 2],
+            ];
+            let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+            let (value, coef) = kind.pair(r2);
+            energy += value;
+            for k in 0..3 {
+                g[3 * i + k] += coef * d[k];
+                g[3 * j + k] -= coef * d[k];
+            }
+        }
+    }
+    energy
+}
+
 impl Quench {
+    fn value_gradient(&self, x: &[f64], g: &mut [f64]) -> f64 {
+        match self.kind {
+            PairKind::LennardJones => lj_value_gradient(x, g),
+            kind => pair_value_gradient(kind, x, g),
+        }
+    }
+
     /// Quenches `start`, charging one unit per value-and-gradient call.
     ///
     /// Returns `None` when the ledger cannot pay for the first evaluation. A
@@ -925,7 +995,7 @@ impl Quench {
         let memory = self.memory.max(1);
         let mut x = start.to_vec();
         let mut g = vec![0.0; dim];
-        let mut e = lj_value_gradient(&x, &mut g);
+        let mut e = self.value_gradient(&x, &mut g);
         let mut calls = 1usize;
         let mut s_hist: VecDeque<Vec<f64>> = VecDeque::with_capacity(memory);
         let mut y_hist: VecDeque<Vec<f64>> = VecDeque::with_capacity(memory);
@@ -993,7 +1063,7 @@ impl Quench {
                         converged: false,
                     });
                 }
-                let en = lj_value_gradient(&xn, &mut gn);
+                let en = self.value_gradient(&xn, &mut gn);
                 calls += 1;
                 if en.is_finite() && en - e <= 1e-10 * e.abs().max(1.0) {
                     accepted = Some(en);
@@ -1068,6 +1138,8 @@ pub struct Lattice {
     pub candidates: usize,
     /// Moves per search; zero means one per atom.
     pub max_moves: usize,
+    /// Pair potential the site energies are read from.
+    pub kind: PairKind,
 }
 
 impl Lattice {
@@ -1088,6 +1160,14 @@ impl Lattice {
             interior_coordination: 12,
             candidates: 4,
             max_moves: 0,
+            kind,
+        }
+    }
+
+    fn pair_energy(&self, r2: f64) -> f64 {
+        match self.kind {
+            PairKind::LennardJones => lj_pair(r2),
+            kind => kind.pair(r2).0,
         }
     }
 }
@@ -1280,20 +1360,25 @@ impl Lattice {
             });
         }
         let m = vacant.len();
-        if !ledger.charge_frac(1.0 + (m * n) as f64 / pairs) {
+        if !charge_oracle(ledger, 1.0 + (m * n) as f64 / pairs) {
             return None;
         }
         let mut atom_energy = vec![0.0; n];
         for i in 0..n {
             for j in (i + 1)..n {
-                let v = lj_pair(pair_dist2(atoms[i], atoms[j]));
+                let v = self.pair_energy(pair_dist2(atoms[i], atoms[j]));
                 atom_energy[i] += v;
                 atom_energy[j] += v;
             }
         }
         let mut site_energy: Vec<f64> = vacant
             .iter()
-            .map(|&p| atoms.iter().map(|&q| lj_pair(pair_dist2(p, q))).sum())
+            .map(|&p| {
+                atoms
+                    .iter()
+                    .map(|&q| self.pair_energy(pair_dist2(p, q)))
+                    .sum()
+            })
             .collect();
         let limit = if self.max_moves == 0 {
             n
@@ -1319,14 +1404,14 @@ impl Lattice {
                     if r2 < 1e-12 {
                         continue;
                     }
-                    let own = lj_pair(r2);
+                    let own = self.pair_energy(r2);
                     let delta = site_energy[s] - own - atom_energy[i];
                     if best.is_none_or(|(d, ..)| delta < d) {
                         best = Some((delta, i, s, own));
                     }
                 }
             }
-            if !ledger.charge_frac((ka * m) as f64 / pairs) {
+            if !charge_oracle(ledger, (ka * m) as f64 / pairs) {
                 break;
             }
             let Some((delta, i, s, own)) = best else {
@@ -1335,7 +1420,7 @@ impl Lattice {
             if delta > -1e-9 {
                 break;
             }
-            if !ledger.charge_frac((2 * n + 2 * m) as f64 / pairs) {
+            if !charge_oracle(ledger, (2 * n + 2 * m) as f64 / pairs) {
                 break;
             }
             let old = atoms[i];
@@ -1345,16 +1430,16 @@ impl Lattice {
                 if j == i {
                     continue;
                 }
-                atom_energy[j] +=
-                    lj_pair(pair_dist2(atoms[j], new)) - lj_pair(pair_dist2(atoms[j], old));
+                atom_energy[j] += self.pair_energy(pair_dist2(atoms[j], new))
+                    - self.pair_energy(pair_dist2(atoms[j], old));
             }
             atom_energy[i] = site_energy[s] - own;
             for t in 0..m {
                 if t == s {
                     continue;
                 }
-                site_energy[t] +=
-                    lj_pair(pair_dist2(vacant[t], new)) - lj_pair(pair_dist2(vacant[t], old));
+                site_energy[t] += self.pair_energy(pair_dist2(vacant[t], new))
+                    - self.pair_energy(pair_dist2(vacant[t], old));
             }
             atoms[i] = new;
             vacant[s] = old;
@@ -1801,5 +1886,44 @@ mod tests {
         assert_eq!(preset.interior_coordination, lattice.interior_coordination);
         assert_eq!(preset.candidates, lattice.candidates);
         assert_eq!(preset.max_moves, lattice.max_moves);
+        assert_eq!(preset.kind, PairKind::LennardJones);
+    }
+
+    #[test]
+    fn lennard_jones_site_energy_matches_lj_pair_bits() {
+        let lattice = Lattice::default();
+        for r2 in [0.5_f64, 1.0, LJ_PAIR_MINIMUM * LJ_PAIR_MINIMUM, 4.0] {
+            assert_eq!(lattice.pair_energy(r2).to_bits(), lj_pair(r2).to_bits());
+        }
+        let morse = Lattice::for_pair(PairKind::Morse { rho: 14.0 });
+        let (energy, _) = PairKind::Morse { rho: 14.0 }.pair(1.0);
+        assert_eq!(morse.pair_energy(1.0).to_bits(), energy.to_bits());
+        assert!(morse.kind != PairKind::LennardJones);
+    }
+
+    #[test]
+    fn morse_quench_of_a_displaced_pair_sits_at_the_well() {
+        let quench = Quench {
+            kind: PairKind::Morse { rho: 14.0 },
+            max_iterations: 400,
+            ..Quench::default()
+        };
+        let start = [0.0, 0.0, 0.0, 1.15, 0.0, 0.0];
+        let mut ledger = Ledger::new(2_000);
+        let relaxed = quench.relax(&mut ledger, &start).expect("budget");
+        assert!(relaxed.converged, "rms {}", relaxed.rms);
+        assert!(
+            (relaxed.energy + 1.0).abs() < 1e-5,
+            "energy {}",
+            relaxed.energy
+        );
+        let d = [
+            relaxed.state[3] - relaxed.state[0],
+            relaxed.state[4] - relaxed.state[1],
+            relaxed.state[5] - relaxed.state[2],
+        ];
+        let bond = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        assert!((bond - 1.0).abs() < 1e-3, "bond {bond}");
+        assert_eq!(Quench::default().kind, PairKind::LennardJones);
     }
 }
