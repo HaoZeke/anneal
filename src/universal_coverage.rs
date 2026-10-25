@@ -403,6 +403,18 @@ impl UniversalCoverage {
         self.compression.clone()
     }
 
+    /// Effort-adjusted graph-field score `variance / (1 + effort)`.
+    ///
+    /// An unassigned class, or a class the field has not grown, scores the
+    /// prior residual variance. Population selection ranks this score to
+    /// obtain `r_U`.
+    pub fn graph_field_uncertainty(&self, class: Option<usize>) -> f64 {
+        match class {
+            Some(class) => self.residual.score(class),
+            None => self.residual.residual_score(),
+        }
+    }
+
     /// Assemble novelty, posterior uncertainty, disagreement, and graph evidence.
     pub fn evidence(
         &mut self,
