@@ -120,9 +120,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
-- The census IPC address, the q-Gaussian bound check, and the q-Gaussian
-  error name the values they test. The address, the accepted ``(q_v, q_a)``
-  interval, and the error text are unchanged.
+- The census IPC address, the q-Gaussian bound check, the q-Gaussian
+  error, and the MD work directory name the values they test. The address,
+  the accepted ``(q_v, q_a)`` interval, the error text, and the directory
+  name are unchanged.
 - ``rgpot-ex`` links one ``eindir_abi_stamp_t``. ``rgpot-core`` is crates.io
   3.5.1, which depends on ``eindir-core`` 0.6.0, the same crate the rest of
   the workspace uses. The git pin at 3.0.2 compiled a second eindir, and
