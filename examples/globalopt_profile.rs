@@ -122,10 +122,10 @@ fn tip4p_energy_gradient(sites: &[[f64; 3]; 4], x: &[f64]) -> (f64, Vec<f64>) {
             -x[3 * n + 3 * m + 1],
             -x[3 * n + 3 * m + 2],
         ];
-        for s in 0..4 {
-            let (r, d) = gmin_rotate(w, sites[s]);
-            for a in 0..3 {
-                placed[m][s][a] = x[3 * m + a] + r[a];
+        for (s, site) in sites.iter().enumerate() {
+            let (r, d) = gmin_rotate(w, *site);
+            for (a, component) in r.iter().enumerate() {
+                placed[m][s][a] = x[3 * m + a] + *component;
             }
             deriv[m][s] = d;
         }
@@ -140,20 +140,20 @@ fn tip4p_energy_gradient(sites: &[[f64; 3]; 4], x: &[f64]) -> (f64, Vec<f64>) {
             let r12 = r6 * r6;
             e += TIP4P_C12 * r12 - TIP4P_C6 * r6;
             let slope = (-12.0 * TIP4P_C12 * r12 + 6.0 * TIP4P_C6 * r6) * inv;
-            for a in 0..3 {
-                site_grad[l][0][a] += slope * d[a];
-                site_grad[r][0][a] -= slope * d[a];
+            for (a, component) in d.iter().enumerate() {
+                site_grad[l][0][a] += slope * *component;
+                site_grad[r][0][a] -= slope * *component;
             }
-            for sa in 1..4 {
-                for sb in 1..4 {
+            for (sa, charge_a) in TIP4P_CHARGES.iter().enumerate().skip(1) {
+                for (sb, charge_b) in TIP4P_CHARGES.iter().enumerate().skip(1) {
                     let d: [f64; 3] = std::array::from_fn(|a| placed[l][sa][a] - placed[r][sb][a]);
                     let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                    let pair = TIP4P_COULOMB * TIP4P_CHARGES[sa] * TIP4P_CHARGES[sb] / r2.sqrt();
+                    let pair = TIP4P_COULOMB * *charge_a * *charge_b / r2.sqrt();
                     e += pair;
                     let slope = -pair / r2;
-                    for a in 0..3 {
-                        site_grad[l][sa][a] += slope * d[a];
-                        site_grad[r][sb][a] -= slope * d[a];
+                    for (a, component) in d.iter().enumerate() {
+                        site_grad[l][sa][a] += slope * *component;
+                        site_grad[r][sb][a] -= slope * *component;
                     }
                 }
             }
