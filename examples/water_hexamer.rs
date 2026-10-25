@@ -415,20 +415,23 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                 &reference_views,
                 gate,
             ) {
-                Ok(matched) => (
-                    matched.name.unwrap_or_else(|| "unassigned".to_owned()),
-                    matched
-                        .rmsd
-                        .map(|value| format!("{value:.6}"))
-                        .unwrap_or_else(|| "none".to_owned()),
-                    if matched.name.is_some() {
+                Ok(matched) => {
+                    let reason = if matched.name.is_some() {
                         "inside gate"
                     } else if gate.is_none() {
                         "gate unset"
                     } else {
                         "outside gate"
-                    },
-                ),
+                    };
+                    (
+                        matched.name.unwrap_or_else(|| "unassigned".to_owned()),
+                        matched
+                            .rmsd
+                            .map(|value| format!("{value:.6}"))
+                            .unwrap_or_else(|| "none".to_owned()),
+                        reason,
+                    )
+                }
                 Err(MolecularCatalogPresetError::AssignmentNeedsIra) => (
                     "unassigned".to_owned(),
                     "none".to_owned(),
