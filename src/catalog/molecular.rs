@@ -1210,7 +1210,8 @@ mod water_hexamer_tests {
             5100,
             GOOD_TURING_CHECKPOINT_INTERVAL,
             &mut checkpoint,
-        );
+        )
+        .expect("finite start");
         assert!(
             ledger.spent() < budget / 2,
             "retire spent {} of {budget}",

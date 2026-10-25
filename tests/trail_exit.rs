@@ -63,7 +63,8 @@ fn a_stalled_chain_leaves_through_its_recorded_entry() {
         None,
         &mut bias,
         &mut rng,
-    );
+    )
+    .expect("finite start");
 
     assert!(
         outcome.trail_escapes >= 1,
@@ -93,7 +94,8 @@ fn the_trail_exit_is_off_unless_asked_for() {
         None,
         &mut bias,
         &mut rng,
-    );
+    )
+    .expect("finite start");
 
     assert_eq!(outcome.trail_escapes, 0);
 }

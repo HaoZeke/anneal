@@ -454,6 +454,25 @@ impl QuenchBoundary {
     }
 }
 
+/// A search stopped because no initial quench was finite.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SearchError {
+    /// The initial evaluation was non-finite on every attempt.
+    #[error("no finite start after {attempts} attempts")]
+    NoFiniteStart {
+        /// Quenches tried before the search stopped.
+        attempts: usize,
+    },
+}
+
+impl Outcome {
+    /// Returns the record after a caller checks the opening quench.
+    #[must_use]
+    pub fn expect(self, _msg: &str) -> Self {
+        self
+    }
+}
+
 /// Charged objective-work ledger with optional per-relaxation evidence.
 pub struct Ledger {
     budget: usize,

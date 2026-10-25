@@ -3778,7 +3778,8 @@ fn cluster_search(
         crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, started.view(), seed)
     } else {
         crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
-    };
+    }
+    .map_err(|err| PyValueError::new_err(err.to_string()))?;
     errors.finish(py)?;
     let best_block = out
         .best_state
