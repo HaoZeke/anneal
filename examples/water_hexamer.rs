@@ -24,14 +24,14 @@ use anneal_core::catalog::census::{
 };
 use anneal_core::catalog::molecular::{
     EINDIR_REV, EINDIR_VERSION, ENGINE_KIND, GFN2_ACCURACY, GFN2_HEXAMER_BUDGET,
-    GFN2_MAX_ITERATIONS, GFN2_METHOD, GOOD_TURING_CHECKPOINT_INTERVAL,
+    GFN2_MAX_ITERATIONS, GFN2_METHOD, GOOD_TURING_CHECKPOINT_INTERVAL, MolecularCatalogPresetError,
     OXYGEN_DISTANCE_CENSUS_RADIUS_A, PBE_BASIS, PBE_CHARGE, PBE_DISPERSION, PBE_ENGINE_KIND,
     PBE_HEXAMER_BUDGET, PBE_MULTIPLICITY, PBE_TASK, PBE_THEORY, PBE_XC, PETMAD_DEVICE,
     PETMAD_ENGINE_KIND, PETMAD_HEXAMER_BUDGET, PETMAD_MODEL_NAME, RGPOT_REV, RGPOT_VERSION,
     VACUUM_BOX, WATER_HEXAMER_MOLECULES, WATER_HEXAMER_SEED_COUNT, WATER_HEXAMER_SEED_START,
-    WATER_ISOMER_NAMES, WaterSearchArm, assign_isomer, configure_water_arm,
-    good_turing_stop_reason, monomers_intact, reference_coordinates, sorted_oxygen_distances,
-    water_groups, water_species,
+    WATER_ISOMER_NAMES, WaterSearchArm, assign_isomer, classify_geometry, configure_water_arm,
+    good_turing_stop_reason, isomer_reference_gate, monomers_intact, reference_coordinates,
+    sorted_oxygen_distances, water_groups, water_species,
 };
 use anneal_core::methods::cluster_hopping::{
     CheckpointAction, Config, Ledger, MoveLibrary, QuenchStatus, repack_rigid_groups,
@@ -261,6 +261,30 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
         .iter()
         .map(|(name, coordinates)| (name.as_str(), coordinates.as_slice()))
         .collect();
+    let gate_result = isomer_reference_gate(&reference_views, WATER_HEXAMER_MOLECULES);
+    let (gate, gate_text, gate_reason) = match &gate_result {
+        Ok(Some(value)) => (
+            Some(*value),
+            format!("{value:.6}"),
+            "half the minimum inter-reference IRA RMSD",
+        ),
+        Ok(None) => (
+            None,
+            "unset".to_owned(),
+            "fewer than two deposited references",
+        ),
+        Err(MolecularCatalogPresetError::AssignmentNeedsIra) => {
+            (None, "unset".to_owned(), "ira feature not built")
+        }
+        Err(MolecularCatalogPresetError::IsolatedTemplate) => {
+            (None, "unset".to_owned(), "isolated-water template")
+        }
+        Err(_) => (None, "unset".to_owned(), "reference gate failed"),
+    };
+    text.push_str(&format!(
+        "isomer_gate_A: {gate_text}\nisomer_gate_when: before seeds\nisomer_gate_reason: {gate_reason}\n"
+    ));
+    text.push_str(&classify_gofee(&reference_views, gate));
     let template = reference_coordinates(WATER_HEXAMER_MOLECULES).expect("template");
     for seed in seed0..seed0 + seeds {
         let mut rng = StdRng::seed_from_u64(seed);
@@ -368,26 +392,54 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             .and_then(|state| state.as_slice())
             .and_then(|state| monomers_intact(state, WATER_HEXAMER_MOLECULES).ok())
             .unwrap_or(false);
-        let isomer = if intact {
-            outcome
-                .best_state
-                .as_ref()
-                .and_then(|state| state.as_slice())
-                .and_then(|state| {
-                    assign_isomer(state, WATER_HEXAMER_MOLECULES, &reference_views, None).ok()
-                })
+        let (isomer_name, isomer_rmsd, isomer_reason) = if !intact {
+            (
+                "unassigned".to_owned(),
+                "none".to_owned(),
+                "dissociated monomer",
+            )
+        } else if reference_views.is_empty() {
+            (
+                "unassigned".to_owned(),
+                "none".to_owned(),
+                "no deposited references",
+            )
         } else {
-            None
-        };
-        let (isomer_name, isomer_rmsd) = match isomer {
-            Some(matched) => (
-                matched.name.unwrap_or_else(|| "unassigned".to_owned()),
-                matched
-                    .rmsd
-                    .map(|value| format!("{value:.6}"))
-                    .unwrap_or_else(|| "none".to_owned()),
-            ),
-            None => ("unassigned".to_owned(), "none".to_owned()),
+            match assign_isomer(
+                outcome
+                    .best_state
+                    .as_ref()
+                    .and_then(|state| state.as_slice())
+                    .unwrap_or(&[]),
+                WATER_HEXAMER_MOLECULES,
+                &reference_views,
+                gate,
+            ) {
+                Ok(matched) => (
+                    matched.name.unwrap_or_else(|| "unassigned".to_owned()),
+                    matched
+                        .rmsd
+                        .map(|value| format!("{value:.6}"))
+                        .unwrap_or_else(|| "none".to_owned()),
+                    if matched.name.is_some() {
+                        "inside gate"
+                    } else if gate.is_none() {
+                        "gate unset"
+                    } else {
+                        "outside gate"
+                    },
+                ),
+                Err(MolecularCatalogPresetError::AssignmentNeedsIra) => (
+                    "unassigned".to_owned(),
+                    "none".to_owned(),
+                    "ira feature not built",
+                ),
+                Err(_) => (
+                    "unassigned".to_owned(),
+                    "none".to_owned(),
+                    "assignment failed",
+                ),
+            }
         };
         let per_second = if wall_s > 0.0 {
             ledger.spent() as f64 / wall_s
@@ -395,7 +447,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             0.0
         };
         text.push_str(&format!(
-            "seed: {seed}\nstart_monomers_intact: {start_intact}\nbest_energy: {best}\nbest_monomers_intact: {intact}\nisomer: {isomer_name}\nisomer_rmsd_A: {isomer_rmsd}\nisomer_gate_A: unset\nforce_calls: {}\nwall_seconds: {wall_s:.6}\nforce_calls_per_second: {per_second:.6}\nhops: {}\nbasins: {}\nconverged: {}\nquenches: {}\nhits: unscored\nwilson_95: unscored\nmedian_par2_force: unscored\nmedian_par2_wall: unscored\nunscored_reason: no same-level reference energy in this tree\n",
+            "seed: {seed}\nstart_monomers_intact: {start_intact}\nbest_energy: {best}\nbest_monomers_intact: {intact}\nisomer: {isomer_name}\nisomer_rmsd_A: {isomer_rmsd}\nisomer_gate_A: {gate_text}\nisomer_reason: {isomer_reason}\nforce_calls: {}\nwall_seconds: {wall_s:.6}\nforce_calls_per_second: {per_second:.6}\nhops: {}\nbasins: {}\nconverged: {}\nquenches: {}\nhits: unscored\nwilson_95: unscored\nmedian_par2_force: unscored\nmedian_par2_wall: unscored\nunscored_reason: no same-level reference energy in this tree\n",
             ledger.spent(),
             outcome.hops,
             outcome.basins,
@@ -581,6 +633,71 @@ fn engine_file(var: &str, filename: &str) -> Option<PathBuf> {
 fn env_file(var: &str) -> Option<PathBuf> {
     let path = PathBuf::from(std::env::var_os(var)?);
     path.is_file().then_some(path)
+}
+
+fn classify_gofee(references: &[(&str, &[f64])], gate: Option<f64>) -> String {
+    let Ok(dir) = std::env::var("WATER_GOFEE_DIR") else {
+        return "gofee: unscored\ngofee_reason: no deposited geometries\n".to_owned();
+    };
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(error) => return format!("gofee: unscored\ngofee_reason: {error}\n"),
+    };
+    let mut rows = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("xyz") {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Some(coordinates) = parse_xyz(&text) else {
+            continue;
+        };
+        rows.push((path, coordinates));
+    }
+    if rows.is_empty() {
+        return "gofee: unscored\ngofee_reason: no deposited geometries\n".to_owned();
+    }
+    let mut assigned = 0usize;
+    let mut unassigned = 0usize;
+    let mut lines = String::from("gofee: classified\n");
+    for (path, coordinates) in &rows {
+        match classify_geometry(coordinates, WATER_HEXAMER_MOLECULES, references, gate) {
+            Ok(found) => {
+                if found.name.is_some() {
+                    assigned += 1;
+                } else {
+                    unassigned += 1;
+                }
+                let name = found
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "unassigned".to_owned());
+                let rmsd = found
+                    .rmsd
+                    .map(|value| format!("{value:.6}"))
+                    .unwrap_or_else(|| "none".to_owned());
+                lines.push_str(&format!(
+                    "gofee_geometry: {} intact: {} isomer: {name} isomer_rmsd_A: {rmsd}\n",
+                    path.display(),
+                    found.intact
+                ));
+            }
+            Err(error) => {
+                unassigned += 1;
+                lines.push_str(&format!(
+                    "gofee_geometry: {} intact: unknown isomer: unassigned isomer_reason: {error}\n",
+                    path.display()
+                ));
+            }
+        }
+    }
+    lines.push_str(&format!(
+        "gofee_assigned: {assigned}\ngofee_unassigned: {unassigned}\n"
+    ));
+    lines
 }
 
 fn load_references() -> Vec<(String, Vec<f64>)> {
