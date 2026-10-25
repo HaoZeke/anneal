@@ -57,12 +57,12 @@
 //! and the lattice search are the cited methods, the last in the variant
 //! [`crate::methods::lattice_search`] describes.
 
-use ndarray::ArrayView1;
+use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 
-use crate::methods::cluster_hopping::{Ledger, random_cluster};
+use crate::methods::cluster_hopping::{Config, Ledger, random_cluster, random_cluster_in_radius};
 use crate::methods::lattice_search::{Lattice, Quench};
 use crate::methods::splice::cut_and_splice;
 use crate::potentials::PairKind;
@@ -109,6 +109,18 @@ impl Origin {
     }
 }
 
+/// Where a fresh trial places its points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StartRule {
+    /// The sphere [`Config::recommended`] draws in.
+    ///
+    /// Radius `0.9 * L0 * N^(1/3)`, with `L0` the preset length scale
+    /// ([`Config::start_radius`]).
+    PresetSphere,
+    /// The liquid-density ball of [`random_cluster`] at this number density.
+    Density(f64),
+}
+
 /// The settings of one ensemble.
 #[derive(Debug, Clone)]
 pub struct Plan {
@@ -131,9 +143,12 @@ pub struct Plan {
     /// next random start that resembles no member, whatever its energy.
     /// Zero keeps every member until a lower minimum displaces it.
     pub retire: usize,
-    /// Number density of the random starts.
-    pub density: f64,
+    /// Distribution of a fresh trial. The default is the preset sphere.
+    pub start: StartRule,
     /// Closest approach allowed in random starts and splices.
+    ///
+    /// A [`StartRule::PresetSphere`] draw uses the recommended preset's own
+    /// separation, which is this value for a reduced Lennard-Jones cluster.
     pub min_separation: f64,
     /// One bank for all chains, or one per chain.
     pub sharing: Sharing,
@@ -149,9 +164,25 @@ impl Default for Plan {
             moved: (1, 4),
             merge: (0.5, 0.5),
             retire: 20,
-            density: 0.7,
+            start: StartRule::PresetSphere,
             min_separation: 0.85,
             sharing: Sharing::Shared,
+        }
+    }
+}
+
+impl Plan {
+    /// A fresh cluster under [`Plan::start`].
+    ///
+    /// [`StartRule::PresetSphere`] is the draw [`Config::recommended`] uses,
+    /// so a one-chain ensemble and that chain share a start at the same seed.
+    pub fn fresh_cluster<R: Rng + ?Sized>(&self, n: usize, rng: &mut R) -> Array1<f64> {
+        match self.start {
+            StartRule::PresetSphere => {
+                let cfg = Config::recommended(n);
+                random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng)
+            }
+            StartRule::Density(density) => random_cluster(n, density, self.min_separation, rng),
         }
     }
 }
@@ -499,10 +530,7 @@ impl Chain {
     ) -> Trial {
         let before = self.ledger.spent();
         let (origin, x) = match start {
-            Start::Fresh => (
-                Origin::Fresh,
-                random_cluster(n, plan.density, plan.min_separation, &mut self.rng).to_vec(),
-            ),
+            Start::Fresh => (Origin::Fresh, plan.fresh_cluster(n, &mut self.rng).to_vec()),
             Start::Moved { state, count } => {
                 (Origin::Moved, lattice.shuffle(&state, count, &mut self.rng))
             }
@@ -671,7 +699,9 @@ pub fn run_with_lattice(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::methods::cluster_hopping::{Config, random_cluster_in_radius};
     use crate::potentials::PairKind;
+    use ndarray::Array1;
 
     fn line(points: usize, spacing: f64) -> Vec<f64> {
         (0..points)
@@ -849,5 +879,39 @@ mod tests {
                 .zip(&three.best_state)
                 .all(|(a, b)| a.to_bits() == b.to_bits())
         );
+    }
+
+    fn quench_lj(x: &Array1<f64>, steps: usize) -> f64 {
+        let n = x.len() / 3;
+        let pot = crate::potentials::PairPotential::lennard_jones(n);
+        let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+        let (energy, _, _) = opt.minimize(x.view(), steps, |v| Some(pot.value_and_gradient(v)));
+        energy
+    }
+
+    #[test]
+    fn serial_arm_matches_recommended_first_quench() {
+        let n = 13usize;
+        let seed = 11u64;
+        let cfg = Config::recommended(n);
+        let radius = 0.9 * cfg.length_scale * (n as f64).cbrt();
+        assert_eq!(cfg.start_radius().to_bits(), radius.to_bits());
+        let plan = Plan {
+            chains: 1,
+            ..Plan::default()
+        };
+        assert_eq!(plan.start, StartRule::PresetSphere);
+        let mut recommended_rng = StdRng::seed_from_u64(seed);
+        let recommended = random_cluster_in_radius(
+            n,
+            cfg.start_radius(),
+            cfg.min_separation,
+            &mut recommended_rng,
+        );
+        let mut serial_rng = StdRng::seed_from_u64(seed);
+        let serial = plan.fresh_cluster(n, &mut serial_rng);
+        let recommended_energy = quench_lj(&recommended, cfg.relax_steps);
+        let serial_energy = quench_lj(&serial, cfg.relax_steps);
+        assert_eq!(serial_energy.to_bits(), recommended_energy.to_bits());
     }
 }
