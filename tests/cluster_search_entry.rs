@@ -39,7 +39,7 @@ fn cluster_search(n: usize, budget: usize, seed: u64, recommended: bool) -> Sear
         );
         (f, xr)
     };
-    let out = optimize(&cfg, &mut ledger, &mut relax, seed);
+    let out = optimize(&cfg, &mut ledger, &mut relax, seed).expect("finite start");
     SearchReport {
         best: out.best_state.unwrap_or_else(|| Array1::zeros(3 * n)),
         best_energy: out.best,

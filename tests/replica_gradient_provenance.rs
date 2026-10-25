@@ -55,7 +55,8 @@ fn independently_initialized_rung_retains_its_own_gradient_on_activation() {
         &mut relax,
         Some(&mut gradient),
         &mut rng,
-    );
+    )
+    .expect("finite start");
 
     assert_eq!(outcome.hops, 2);
     assert_eq!(outcome.rungs.len(), 2);

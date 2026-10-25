@@ -783,7 +783,7 @@ fn main() {
                 anneal_core::methods::cluster_search::RelaxStats::default(),
             )
         } else {
-            search(&pot, &cfg, &mut ledger, seed)
+            search(&pot, &cfg, &mut ledger, seed).expect("finite start")
         };
 
         // The reported value is checked against a fresh evaluation of the

@@ -719,7 +719,8 @@ mod tests {
                 None,
                 &mut bias,
                 &mut rng,
-            );
+            )
+            .expect("finite start");
             bests[seed as usize] = out.best;
             if out.best < target + 0.01 {
                 hits += 1;

@@ -155,7 +155,7 @@ where
     if target.is_finite() {
         ledger.stop_below(target);
     }
-    let (out, _) = search_from(potential, cfg, &mut ledger, start, seed);
+    let (out, _) = search_from(potential, cfg, &mut ledger, start, seed).expect("finite start");
     let state = ledger
         .best_state
         .clone()

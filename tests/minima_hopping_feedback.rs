@@ -17,7 +17,8 @@ fn one_basin_run() -> (Config, Outcome) {
         assert!(ledger.charge());
         (-1.0, minimum.clone())
     };
-    let outcome = run(&config, minimum.view(), &mut ledger, &mut relax, &mut rng);
+    let outcome =
+        run(&config, minimum.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
     (config, outcome)
 }
 
@@ -67,7 +68,8 @@ fn returning_to_the_initial_basin_after_departure_is_a_known_visit() {
         (-1.0, minimum.clone())
     };
 
-    let outcome = run(&config, initial.view(), &mut ledger, &mut relax, &mut rng);
+    let outcome =
+        run(&config, initial.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
 
     assert_eq!(outcome.hops, 2);
     assert_eq!(outcome.accepted, 2);
@@ -104,7 +106,8 @@ fn a_first_departure_preserves_the_resolved_starting_identity() {
         let state = if proposals == 1 { &other } else { &initial };
         (-1.0, state.clone())
     };
-    let outcome = run(&config, initial.view(), &mut ledger, &mut relax, &mut rng);
+    let outcome =
+        run(&config, initial.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
     assert_eq!(outcome.hops, 2);
     assert_eq!(outcome.accepted, 2);
     assert_eq!(outcome.visit_counts, (0, 1, 1));

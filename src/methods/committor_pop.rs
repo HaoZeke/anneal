@@ -89,7 +89,8 @@ pub fn committor_population(
             let slice = segment_budget.min(ledger.remaining());
             let mut sub = ledger.slice(slice);
             let start = pop[w].0.clone();
-            let out = run_with_gradient(cfg, start.view(), &mut sub, relax, None, &mut rng);
+            let out = run_with_gradient(cfg, start.view(), &mut sub, relax, None, &mut rng)
+                .expect("finite start");
             segments += 1;
             nve_unavailable |= out.nve_unavailable;
             if !ledger.charge_many(sub.spent()) {
