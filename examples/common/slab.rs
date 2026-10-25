@@ -1,8 +1,9 @@
 //! Shared slab geometry: read a .con, place the free adsorbates above the
-//! fixed substrate, wrap frozen substrate gradients. Nothing here reads a
-//! species: what moves is what the fixture leaves free, what is substrate
-//! is what it fixes, and a rigid group is a connected component of the free
-//! atoms under their covalent radii.
+//! fixed substrate, wrap frozen substrate gradients. What moves is what the
+//! fixture leaves free, and what is substrate is what it fixes. Species
+//! enters only the bond test. A rigid group is a connected component of
+//! the free atoms under covalent radii, except that two atoms whose Cordero
+//! radii are both at least [`METAL_RADIUS_A`] stay separate.
 
 #![allow(dead_code)]
 
@@ -22,6 +23,11 @@ const GROUP_MIN_SEP: f64 = 2.5;
 /// Two free atoms closer than this multiple of the sum of their covalent
 /// radii belong to one rigid group.
 const BOND_SCALE: f64 = 1.25;
+/// Cordero radii at or above this are the metal entries (Cu 1.32, Pt and
+/// Au 1.36). Two of them are never one hop body. H is 0.31, so H2 still
+/// bonds. One scale cannot both keep H2 at 0.74 Å (needs a scale above
+/// 0.74/0.62) and split a Cu pair at 2.5 Å (needs a scale below 2.5/2.64).
+const METAL_RADIUS_A: f64 = 1.0;
 
 pub fn read_system(path: &str) -> (Array1<f64>, Vec<u32>, Vec<usize>, [f64; 9]) {
     let frame = readcon_core::iterators::read_first_frame(Path::new(path))
@@ -58,20 +64,28 @@ pub fn substrate_top(base: &Array1<f64>, free: &[usize]) -> f64 {
 
 /// Rigid groups of the free atoms: connected components under a bond
 /// criterion of [`BOND_SCALE`] times the sum of covalent radii, so a
-/// molecule hops as one body and separated atoms hop on their own.
+/// molecule hops as one body and separated atoms hop on their own. Two
+/// atoms with Cordero radius at least [`METAL_RADIUS_A`] are not bonded
+/// here. A metal nearest neighbour sits inside that cutoff and is not a
+/// molecule.
 pub fn adsorbate_groups(base: &Array1<f64>, species: &[u32], free: &[usize]) -> Vec<Vec<usize>> {
     let n = species.len();
     if free.is_empty() || free.len() == n {
         return vec![(0..n).collect()];
     }
     let bonded = |a: usize, b: usize| {
+        let ra = covalent_radius(species[a]);
+        let rb = covalent_radius(species[b]);
+        if ra >= METAL_RADIUS_A && rb >= METAL_RADIUS_A {
+            return false;
+        }
         let mut d2 = 0.0;
         for k in 0..3 {
             let d = base[3 * a + k] - base[3 * b + k];
             d2 += d * d;
         }
-        let cut = BOND_SCALE * (covalent_radius(species[a]) + covalent_radius(species[b]));
-        d2 < cut * cut
+        let cut = BOND_SCALE * (ra + rb);
+        cut > 0.0 && d2 < cut * cut
     };
     let mut assigned = vec![false; free.len()];
     let mut groups = Vec::new();
@@ -194,7 +208,8 @@ impl<O: Objective<f64> + Gradient<f64>> DifferentiableObjective<f64> for Mobile<
 
 #[cfg(test)]
 mod tests {
-    use super::{adsorbate_groups, place_adsorbates, substrate_top};
+    use super::{BOND_SCALE, METAL_RADIUS_A, adsorbate_groups, place_adsorbates, substrate_top};
+    use anneal_core::methods::cluster_hopping::covalent_radius;
     use ndarray::Array1;
 
     fn h2_on_two_fixed() -> (Array1<f64>, Vec<u32>, Vec<usize>) {
@@ -236,6 +251,47 @@ mod tests {
         assert_eq!(
             adsorbate_groups(&base, &species, &free),
             vec![vec![1], vec![2], vec![3], vec![4]]
+        );
+    }
+
+    #[test]
+    fn metal_neighbours_inside_the_covalent_cutoff_stay_split() {
+        let cu = covalent_radius(29);
+        let hydrogen = covalent_radius(1);
+        let platinum = covalent_radius(78);
+        assert_eq!(cu, 1.32);
+        assert_eq!(hydrogen, 0.31);
+        assert_eq!(platinum, 1.36);
+        assert!(cu >= METAL_RADIUS_A && platinum >= METAL_RADIUS_A);
+        assert!(hydrogen < METAL_RADIUS_A);
+        let cu_cutoff = BOND_SCALE * (cu + cu);
+        let h2_cutoff = BOND_SCALE * (hydrogen + hydrogen);
+        let pt_cutoff = BOND_SCALE * (platinum + platinum);
+        // The recorded fixture puts free Cu 2.5 A apart, inside 3.30 A.
+        assert!(2.5 < cu_cutoff);
+        // H2 at 0.74 A is inside 0.775 A, so the molecule still bonds.
+        assert!(0.74 < h2_cutoff);
+        // Pt nearest neighbours at 2.77 A are inside 3.40 A.
+        assert!(2.77 < pt_cutoff);
+        // No single scale both bonds H2 and splits the Cu pair.
+        assert!(0.74 / (hydrogen + hydrogen) > 2.5 / (cu + cu));
+        let (base, species, free) = h2_on_two_fixed();
+        assert_eq!(adsorbate_groups(&base, &species, &free), vec![vec![2, 3]]);
+        let base = Array1::from(vec![
+            0.0, 0.0, 0.0, 2.5, 0.0, 0.0, 5.0, 0.0, 0.0, 1.0, 4.0, 2.0, 7.0, 4.0, 2.0,
+        ]);
+        let species = vec![29, 29, 29, 1, 1];
+        let free = vec![1, 2, 3, 4];
+        assert_eq!(
+            adsorbate_groups(&base, &species, &free),
+            vec![vec![1], vec![2], vec![3], vec![4]]
+        );
+        let base = Array1::from(vec![0.0, 0.0, 0.0, 2.77, 0.0, 0.0, 5.54, 0.0, 0.0]);
+        let species = vec![78, 78, 78];
+        let free = vec![1, 2];
+        assert_eq!(
+            adsorbate_groups(&base, &species, &free),
+            vec![vec![1], vec![2]]
         );
     }
 
