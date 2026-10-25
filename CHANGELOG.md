@@ -120,6 +120,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- The census IPC address, the q-Gaussian bound check, the q-Gaussian
+  error, and the MD work directory name the values they test. The address,
+  the accepted ``(q_v, q_a)`` interval, the error text, and the directory
+  name are unchanged.
 - ``rgpot-ex`` links one ``eindir_abi_stamp_t``. ``rgpot-core`` is crates.io
   3.5.1, which depends on ``eindir-core`` 0.6.0, the same crate the rest of
   the workspace uses. The git pin at 3.0.2 compiled a second eindir, and
@@ -131,6 +135,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   sealed acceptance trait, and a full-space move is not certified for a
   box. The UI build repeats the path patches the parent resolve used, so
   the check runs offline.
+- The Rust API page is generated again. ``sphinx-rustdocgen`` 1.3.0 joined
+  a ``#[path]`` module onto the file that declared it, then failed to read
+  that path. The docs build installs 1.3.0 with that join made from the
+  file's directory. Generated pages join a wrapped code span onto one line,
+  keep a literal closed when a word follows it, and escape LaTeX bars.
+  The cluster-search title line matches the title. The method catalog, the
+  composition walk, the communication and regime notes, and the box
+  Langevin escape are in the contents. The eindir inventory is no longer
+  fetched at build time.
 - An in-process census cohort dials neighbours only after every publisher
   is bound. A dial that landed on a port reservation completed the TCP
   handshake there and waited for a protocol header the reservation never
