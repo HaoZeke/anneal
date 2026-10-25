@@ -6,6 +6,166 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
+## [0.12.0](https://github.com/HaoZeke/anneal/tree/v0.12.0) - 2026-10-24
+
+### Added
+
+- Binary Lennard-Jones and rigid TIP4P on the stock cluster presets.
+  ``cluster_search`` takes ``species``, ``sigmas``, ``rigid``, ``layout``,
+  and ``target``. Two or more species labels add a swap move. A wide
+  diameter ratio leaves the occupied basin by one softened constant-energy
+  (NVE) step and one inner-outer exchange, then quenches that point in full.
+  That step needs the ``rgsaddle`` feature.
+  The same chart also tries one unlike-pair exchange from a side
+  generator and keeps it only when the quench is downhill.
+  A rigid chart orients every body and keeps the centres fixed. The
+  acceptance temperature of a rigid chart is scaled inside the hop. A
+  chart with more than ten bodies holds that factor at 4 and scales the
+  orientation amplitude toward an acceptance ratio of one half. A chart
+  of ten bodies or fewer is unchanged. Temperature, screen length,
+  relax length, and record gradient stay on the preset. A rigid quench
+  is that same L-BFGS descent, and it returns when the energy crosses
+  the run target. A rigid record accepts the root-mean-square force.
+  A rigid chain that goes 1000 hops and records no new lowest minimum
+  returns to that minimum when it lies within one hopping temperature
+  of the run target. Farther above the target the walker is replaced
+  by a fresh draw and quenched, and the ledger keeps the lowest
+  minimum. That 1000 is the restart-file interval in
+  the source. The compiled reseed window is zero. The C header is unchanged.
+- ``BinaryLennardJones`` is a two-species Lennard-Jones cluster with no
+  cutoff. Species A is the first ``n_a`` atoms and the unlike diameter is
+  the value the caller passes. ``GminTip4p`` is rigid TIP4P on the GMIN
+  DEFTIP4 coefficients, stored as centres followed by Rodrigues rotations.
+  Neither potential adds a C or Python parameter.
+- ``cluster_search`` takes ``water_sites``, the body-frame O, H, H positions of
+  a rigid water, and then searches ``n`` molecules as centres followed by
+  exponential-map rotations, on ``Config.communicating_tip4p``,
+  ``Config.recommended_tip4p`` or ``Config.for_tip4p``. The gradient-sign
+  probe runs at the start on a rigid state. ``Config`` gains the two TIP4P
+  constructors and the ``rigid_body``, ``screen_margin`` and
+  ``calibrated_screen`` getters.
+
+### Developer
+
+- A half turn composed on the TIP4P Rodrigues chart stays on its own axis.
+  The composition helper is what a rigid orientation step calls, and it
+  lives with the potential so the hop and the energy share one product.
+  The C header and the Python bindings are unchanged.
+- Coordinate-length checks on the GMIN TIP4P helpers use
+  ``is_multiple_of``. The C header and the Python bindings are unchanged.
+- The stock binary and rigid helpers compile under the current clippy
+  denies. Species and diameter lists use ``repeat_n``. The rigid move
+  list is returned directly, and the wide-exchange guard is one
+  condition. Behaviour is unchanged. The C header and the Python
+  bindings are unchanged.
+- ``examples/globalopt_profile.rs`` profiles the cluster presets on optbench
+  archive starts under harness-style counting, and
+  ``scripts/optbench/anneal_globalopt.py`` scores them through optbench's
+  lane-B harness with native kernels checked against optbench's own.
+
+### Changed
+
+- The optional ``rgsaddle`` feature is off by default. It compiles
+  minimum-saddle-minimum sessions and stationary-index checks. It
+  compiles the constant-energy (NVE) minima-hopping escape and the
+  dense symmetric eigensolve for a connected landscape split. A default
+  build omits those paths. Connected spectral splits return
+  ``GraphError::FeatureDisabled``. Saddle sessions and stationary-index
+  checks return ``PesExplorationError::SaddleUnavailable``. An NVE
+  escape returns ``NveError::FeatureDisabled``. ``md_escape`` and the
+  binary wide-diameter-ratio escape stop the run and set
+  ``Outcome::nve_unavailable``. ``IrcKind`` and ``NveError`` each have
+  one definition. ``python`` and ``bank-rpc`` enable the feature.
+  PyPI wheels and in-repo feature builds keep the sessions. From crates.io,
+  ``rgsaddle``, ``python``, and ``bank-rpc`` do not build until matching
+  rgmin and rgsaddle releases exist. Default features, docs.rs, and the
+  wheels are fine. CI packages the crate with ``cargo package --no-verify``.
+  A later step extracts ``anneal-core-${version}.crate``. It drops the
+  development patch and the lockfile. It runs ``cargo check`` on the
+  default features against crates.io.
+- ``nve_escape`` and ``nve_escape_seeded`` return ``NveError``. ``IrcKind``
+  is defined in this crate. ``GraphError::FeatureDisabled``,
+  ``PesExplorationError::SaddleUnavailable``, and
+  ``NveError::FeatureDisabled`` are new. ``Outcome``, ``ArchiveOutcome``,
+  ``CommittorOutcome``, ``BankOutcome``, and ``StockSearch`` gain
+  ``nve_unavailable``.
+- The cluster hop's energy screen credits each trial with the descent its
+  screening pass leaves undone, the upper decile of screened minus full over the
+  last 256 full relaxations, and relaxes every eighth refusal in full so the
+  estimate also samples the trials it refuses (``Config::calibrated_screen``).
+  A full relaxation that ends on its step cap below the incumbent is continued
+  until it stops descending (``Config::finish_improving``). Both are on in
+  every preset. ``Config.calibrated_screen`` and ``Config.finish_improving``
+  read the two flags from Python. On 256 TIP4P10 archive starts at
+  development seeds and 1e6 force calls, PAR-2 went from 78681 to 15870 on
+  ``Config::for_tip4p`` and from 92738 to 16369 on
+  ``Config::communicating_tip4p``.
+- The cluster-search quench stops at ``Config::record_gradient``, the gradient
+  at which a minimum is recordable. The stop sits above rgmin's 1e-6.
+  On 32 LJ38 archive starts at development seeds the communicating preset's
+  PAR-2 fell from 5792 to 4269 force calls and its median from 5726 to 3253.
+- ``Config::recommended`` completes the core's orbit on every new basin and,
+  below 98 points, draws between the plain and the two-phase relative 0.7
+  surface, the rule ``Config::communicating`` already used. On optbench archive
+  starts at development seeds the preset went from a median 1.4e5 force calls
+  on 32 LJ38 starts to 4.9e3, and from 2 to 16 of 16 LJ75 starts solved in 1e6.
+- ``cluster_search`` keeps both chart keyword sets on one call. ``species``,
+  ``sigmas``, ``rigid``, ``layout`` and ``target`` select a stock preset and
+  then a binary or rigid chart. ``water_sites`` selects the TIP4P presets and
+  a caller body frame. The two sets exclude each other. A callback that raises
+  ``KeyboardInterrupt`` still stops the run. The C header is unchanged.
+
+### Fixed
+
+- An in-process census cohort dials neighbours only after every publisher
+  is bound. A dial that landed on a port reservation completed the TCP
+  handshake there and waited for a protocol header the reservation never
+  sends. That wait is ten seconds. Closing the reservation on macOS leaves
+  the unaccepted connection open. A five second connectivity check then
+  expired with replicas missing.
+- Search drivers return as soon as the caller stops evaluation and keep the
+  best state found. They no longer spend the rest of the budget after the
+  potential stops answering. A ledger slice keeps the caller's stop flag.
+  ``ANNEAL_STOPPED`` from a C callback ends
+  ``anneal_box_minimize`` the same way and writes the best point. A flag
+  that stays down leaves the force-call count unchanged. Stock binary
+  Lennard-Jones and rigid TIP4P searches, including a batch of them, return
+  on that stop. So does ``cluster_search`` on a binary chart, a rigid chart,
+  or a water-site chart.
+- Stopping a catalog coordinator closes its listen socket before stop
+  returns, so a new coordinator can bind that same address. The thread
+  that owned the listener kept running after stop, and the listen fd
+  was closed only after stop had already returned, so a restart on that
+  port failed with the address already in use.
+- The JCC LJ causal pair runner runs under bash 3.2, the bash GitHub puts
+  on macOS images. Protocol values are assignment exports. Replica indexes
+  use a shell loop. The dynamic-loader check runs where ``ldd`` is present.
+  Run artifacts are sealed with a portable read loop and a plain ``sort``.
+- The cargo-c install places ``dlpack/dlpack.h`` (DLPack 1.3, the header
+  ``dlpk`` 0.1.5 was translated from) beside ``anneal-core.h``. The C header
+  includes that file. ``pkg-config --cflags anneal-core`` compiles a
+  consumer, including ``DLManagedTensorVersioned``. Meson and CMake install
+  the same header.
+- Two-choice restarts read the occupied state a peer published at the
+  same checkpoint. A peer that has already finished contributes the last
+  state it published. The mailbox returned the scheduler's stored state.
+  An empty store made one run restart from a different state than its pair.
+  A private repeat then disagreed by a hop, 1250 against 1251.
+- ``cluster_search`` ends at its next evaluation when a callback raises a
+  ``BaseException`` outside ``Exception``, such as ``KeyboardInterrupt``,
+  and re-raises it. ``Ledger::with_stop`` closes a ledger on a caller-owned
+  flag.
+
+### Miscellaneous
+
+- CI runs on pushes to ``develop`` and to ``main``. ``cargo fmt`` checks
+  the workspace member. Workspace exclude covers ``nng`` and ``nng-sys``.
+  It also covers ``metatensor-sys``. Stable rustfmt formats the workspace
+  member. The vendored crates' ``rustfmt.toml`` asks for nightly options.
+  The ``ignore`` key is unstable on stable. ``cargo fmt --all`` would still
+  walk a path dependency.
+
+
 ## [0.11.1](https://github.com/HaoZeke/anneal/tree/v0.11.1) - 2026-10-11
 
 ### Fixed
