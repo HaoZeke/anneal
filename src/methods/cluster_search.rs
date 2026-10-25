@@ -373,8 +373,7 @@ where
             Some(&mut grad),
             Some(&mut energy_grad),
             seed,
-        )
-        .expect("finite start")
+        )?
     };
     Ok((out, stats))
 }
@@ -418,8 +417,7 @@ where
             Some(&mut grad),
             Some(&mut energy_grad),
             &mut rng,
-        )
-        .expect("finite start")
+        )?
     };
     Ok((out, stats))
 }
@@ -469,8 +467,7 @@ where
             &mut rng,
             checkpoint_interval,
             checkpoint,
-        )
-        .expect("finite start")
+        )?
     };
     Ok((out, stats))
 }
@@ -970,8 +967,7 @@ where
             Some(&mut grad),
             &mut bias,
             &mut rng,
-        )
-        .expect("finite start");
+        )?;
         ledger.charge_many(slice_led.spent());
         if let Some(st) = slice_led.best_state.as_ref() {
             ledger.record(slice_led.best, st.view());
