@@ -1,3 +1,5 @@
+#![cfg(feature = "rgsaddle")]
+
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 

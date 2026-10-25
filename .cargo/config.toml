@@ -1,9 +1,6 @@
-# `cargo publish` rewrites a git dependency to its version requirement and
-# verifies the package against crates.io. The published 0.1 and 0.2 lines
-# dropped the saddle and eigen APIs this crate is built against, and a
-# crates.io eindir-core beside the git revision links the C ABI twice.
-# Resolve those crates from the revisions the manifest pins. Verification
-# runs from the workspace, so it still reads this file.
+# Development builds resolve eindir-core, rgmin, and rgsaddle from the
+# revisions below. This file is excluded from the published package.
+# Commands run in this workspace still read it.
 #
 # featomic's metatensor build runs `cargo rustc --locked` with its working
 # directory inside the cargo target tree. An unused patch there makes

@@ -35,7 +35,7 @@ use anneal_core::methods::cluster_hopping::{
 use anneal_core::methods::cluster_search::{Encounter, first_encounter, median_encounter};
 use anneal_core::methods::minima_hopping::{
     EscapeFeedback, HistoryObservation, MdEscapeConfig, MdEscapeGeometry, MdTimeStepFeedback,
-    MinimumHistory, Visit, nve_escape,
+    MinimumHistory, VelocitySofteningConfig, Visit, nve_escape,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::pes_exploration::{
@@ -46,7 +46,6 @@ use anneal_core::potentials::{PairKind, PairPotential};
 use anneal_core::shape::IraStructureWitness;
 use ndarray::ArrayView1;
 use rand::{SeedableRng, rngs::StdRng};
-use rgsaddle::VelocitySofteningConfig;
 use serde_json::json;
 
 const TARGET_TOLERANCE: f64 = 1e-3;

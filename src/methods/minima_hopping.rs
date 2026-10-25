@@ -38,17 +38,80 @@
 //! decahedron where a cut-and-splice evolutionary algorithm does not.
 
 use std::collections::HashMap;
+#[cfg(feature = "rgsaddle")]
 use std::sync::Mutex;
 
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
+#[cfg(feature = "rgsaddle")]
 use rand_distr::{Distribution, StandardNormal};
+#[cfg(feature = "rgsaddle")]
 use rgmin::{Manifold, ManifoldKind};
+#[cfg(feature = "rgsaddle")]
 use rgsaddle::internal::{CartAxis, Translation};
-use rgsaddle::{
-    Constraints, PointSurface, SaddleError, SamdConfig, SamdSession, VelocitySofteningConfig,
-    soften_velocity_on,
-};
+#[cfg(feature = "rgsaddle")]
+use rgsaddle::{Constraints, PointSurface, SamdConfig, SamdSession, soften_velocity_on};
+
+/// Failure from one constant-energy (NVE) minima-hopping escape.
+///
+/// The same enum with and without the `rgsaddle` feature. A feature build
+/// converts `rgsaddle::SaddleError` into these variants. `FeatureDisabled`
+/// is the result when the escape is not compiled.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum NveError {
+    /// The state or the controls do not match the integrator.
+    #[error("shape mismatch: {0}")]
+    Shape(String),
+    /// The surface did not return a finite energy and gradient.
+    #[error("surface evaluation failed: {0}")]
+    Surface(String),
+    /// A value that must be finite was not.
+    #[error("non-finite value in {0}")]
+    NonFinite(&'static str),
+    /// The delegated integrator stopped.
+    #[error("solver step failed: {0}")]
+    Solver(String),
+    /// The escape is compiled only with the `rgsaddle` feature.
+    #[error("rgsaddle feature is not enabled")]
+    FeatureDisabled,
+}
+
+#[cfg(feature = "rgsaddle")]
+impl From<rgsaddle::SaddleError> for NveError {
+    fn from(error: rgsaddle::SaddleError) -> Self {
+        match error {
+            rgsaddle::SaddleError::Shape(message) => Self::Shape(message),
+            rgsaddle::SaddleError::Surface(message) => Self::Surface(message),
+            rgsaddle::SaddleError::NonFinite(site) => Self::NonFinite(site),
+            rgsaddle::SaddleError::Solver(message) => Self::Solver(message),
+        }
+    }
+}
+
+/// Finite modified-dimer softening of a Gaussian launch direction.
+///
+/// The fields match `rgsaddle::VelocitySofteningConfig`. The feature build
+/// copies them into that type before `soften_velocity_on`, so the published
+/// displacement, mixing, and probe count are unchanged.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VelocitySofteningConfig {
+    /// Modified-dimer probes of the launch direction.
+    pub steps: usize,
+    /// Finite-difference displacement of each probe.
+    pub displacement: f64,
+    /// Mix of the soft direction into the launch velocity.
+    pub mixing: f64,
+}
+
+impl Default for VelocitySofteningConfig {
+    fn default() -> Self {
+        Self {
+            steps: 0,
+            displacement: 0.1,
+            mixing: 0.15,
+        }
+    }
+}
 
 #[path = "minima_hopping/history.rs"]
 mod history;
@@ -186,6 +249,7 @@ impl MdTimeStepFeedback {
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 fn sampled_energy_span(minimum: f64, maximum: f64) -> f64 {
     if minimum.is_finite() && maximum.is_finite() && maximum >= minimum {
         maximum - minimum
@@ -194,20 +258,23 @@ fn sampled_energy_span(minimum: f64, maximum: f64) -> f64 {
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 struct CallbackSurface<'a, F> {
     evaluate: Mutex<&'a mut F>,
 }
 
+#[cfg(feature = "rgsaddle")]
 impl<F> PointSurface for CallbackSurface<'_, F>
 where
     F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
 {
-    fn eval(&self, x: ArrayView1<f64>) -> Result<(f64, Array1<f64>), SaddleError> {
+    fn eval(&self, x: ArrayView1<f64>) -> Result<(f64, Array1<f64>), rgsaddle::SaddleError> {
         let mut evaluate = self
             .evaluate
             .lock()
-            .map_err(|_| SaddleError::Surface("NVE evaluator lock poisoned".into()))?;
-        (*evaluate)(x).ok_or_else(|| SaddleError::Surface("evaluation budget exhausted".into()))
+            .map_err(|_| rgsaddle::SaddleError::Surface("NVE evaluator lock poisoned".into()))?;
+        (*evaluate)(x)
+            .ok_or_else(|| rgsaddle::SaddleError::Surface("evaluation budget exhausted".into()))
     }
 }
 
@@ -218,13 +285,14 @@ where
 /// rescale is the identity and the delegated velocity-Verlet trajectory is
 /// microcanonical. The host loop stops after `potential_minima` local minima
 /// in the potential-energy trace, as in the Goedecker algorithm.
+#[cfg(feature = "rgsaddle")]
 pub fn nve_escape<F, R>(
     start: ArrayView1<f64>,
     initial_kinetic: f64,
     config: &MdEscapeConfig,
     evaluate: &mut F,
     rng: &mut R,
-) -> Result<MdEscapeReport, SaddleError>
+) -> Result<MdEscapeReport, NveError>
 where
     F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
     R: Rng + ?Sized,
@@ -236,6 +304,7 @@ where
 ///
 /// Fixed atoms define the frame instead of the rigid quotient. An absent or
 /// all-mobile mask keeps the configured geometry and its stepping path.
+#[cfg(feature = "rgsaddle")]
 pub(crate) fn nve_escape_with_frozen<F, R>(
     start: ArrayView1<f64>,
     initial_kinetic: f64,
@@ -243,7 +312,7 @@ pub(crate) fn nve_escape_with_frozen<F, R>(
     evaluate: &mut F,
     rng: &mut R,
     frozen_atoms: Option<&[bool]>,
-) -> Result<MdEscapeReport, SaddleError>
+) -> Result<MdEscapeReport, NveError>
 where
     F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
     R: Rng + ?Sized,
@@ -266,6 +335,7 @@ where
 /// asks for it, mixes the seed toward the softest direction. A small
 /// Gaussian part remains so two nearby covers do not collapse onto one
 /// trajectory. `None` is the unbiased Gaussian launch.
+#[cfg(feature = "rgsaddle")]
 pub fn nve_escape_seeded<F, R>(
     start: ArrayView1<f64>,
     initial_kinetic: f64,
@@ -273,7 +343,7 @@ pub fn nve_escape_seeded<F, R>(
     config: &MdEscapeConfig,
     evaluate: &mut F,
     rng: &mut R,
-) -> Result<MdEscapeReport, SaddleError>
+) -> Result<MdEscapeReport, NveError>
 where
     F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
     R: Rng + ?Sized,
@@ -289,6 +359,7 @@ where
     )
 }
 
+#[cfg(feature = "rgsaddle")]
 fn nve_escape_launch<F, R>(
     start: ArrayView1<f64>,
     initial_kinetic: f64,
@@ -297,7 +368,7 @@ fn nve_escape_launch<F, R>(
     evaluate: &mut F,
     rng: &mut R,
     frozen_atoms: Option<&[bool]>,
-) -> Result<MdEscapeReport, SaddleError>
+) -> Result<MdEscapeReport, NveError>
 where
     F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
     R: Rng + ?Sized,
@@ -310,12 +381,12 @@ where
         || !initial_kinetic.is_finite()
         || initial_kinetic <= 0.0
     {
-        return Err(SaddleError::Shape(
+        return Err(NveError::Shape(
             "NVE escape needs a nonempty state and positive finite controls".into(),
         ));
     }
     if config.geometry == MdEscapeGeometry::RigidQuotient && !start.len().is_multiple_of(3) {
-        return Err(SaddleError::Shape(
+        return Err(NveError::Shape(
             "rigid-quotient NVE escape needs a 3N Cartesian state".into(),
         ));
     }
@@ -323,7 +394,7 @@ where
     let frozen_chart = match frozen_atoms {
         Some(frozen) => {
             if !start.len().is_multiple_of(3) || frozen.len() != start.len() / 3 {
-                return Err(SaddleError::Shape(
+                return Err(NveError::Shape(
                     "frozen NVE escape needs one mask entry per Cartesian atom".into(),
                 ));
             }
@@ -381,7 +452,14 @@ where
     let surface = CallbackSurface {
         evaluate: Mutex::new(evaluate),
     };
-    let softening_evaluations = if let Some(softening) = config.softening {
+    let softening = config
+        .softening
+        .map(|softening| rgsaddle::VelocitySofteningConfig {
+            steps: softening.steps,
+            displacement: softening.displacement,
+            mixing: softening.mixing,
+        });
+    let softening_evaluations = if let Some(softening) = softening {
         let report = soften_velocity_on(manifold, start, velocity.view(), &surface, softening)?;
         velocity = report.direction;
         report.evaluations
@@ -391,7 +469,7 @@ where
 
     let unscaled_kinetic = 0.5 * velocity.dot(&velocity);
     if !unscaled_kinetic.is_finite() || unscaled_kinetic <= 1e-16 {
-        return Err(SaddleError::Solver(
+        return Err(NveError::Solver(
             "NVE velocity has no component in the free coordinates".into(),
         ));
     }
@@ -524,6 +602,71 @@ where
         far_position,
         far_rms,
     })
+}
+
+/// Run the constant-energy (NVE) minima-hopping escape.
+///
+/// The `rgsaddle` feature is off in this build. The call returns
+/// [`NveError::FeatureDisabled`].
+#[cfg(not(feature = "rgsaddle"))]
+pub fn nve_escape<F, R>(
+    start: ArrayView1<f64>,
+    initial_kinetic: f64,
+    config: &MdEscapeConfig,
+    evaluate: &mut F,
+    rng: &mut R,
+) -> Result<MdEscapeReport, NveError>
+where
+    F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
+    R: Rng + ?Sized,
+{
+    let _ = (start, initial_kinetic, config, evaluate, rng);
+    Err(NveError::FeatureDisabled)
+}
+
+#[cfg(not(feature = "rgsaddle"))]
+pub(crate) fn nve_escape_with_frozen<F, R>(
+    start: ArrayView1<f64>,
+    initial_kinetic: f64,
+    config: &MdEscapeConfig,
+    evaluate: &mut F,
+    rng: &mut R,
+    frozen_atoms: Option<&[bool]>,
+) -> Result<MdEscapeReport, NveError>
+where
+    F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
+    R: Rng + ?Sized,
+{
+    let _ = (start, initial_kinetic, config, evaluate, rng, frozen_atoms);
+    Err(NveError::FeatureDisabled)
+}
+
+/// Run the constant-energy (NVE) escape from a supplied launch direction.
+///
+/// The `rgsaddle` feature is off in this build. The call returns
+/// [`NveError::FeatureDisabled`].
+#[cfg(not(feature = "rgsaddle"))]
+pub fn nve_escape_seeded<F, R>(
+    start: ArrayView1<f64>,
+    initial_kinetic: f64,
+    seed_direction: Option<ArrayView1<f64>>,
+    config: &MdEscapeConfig,
+    evaluate: &mut F,
+    rng: &mut R,
+) -> Result<MdEscapeReport, NveError>
+where
+    F: for<'a> FnMut(ArrayView1<'a, f64>) -> Option<(f64, Array1<f64>)> + Send,
+    R: Rng + ?Sized,
+{
+    let _ = (
+        start,
+        initial_kinetic,
+        seed_direction,
+        config,
+        evaluate,
+        rng,
+    );
+    Err(NveError::FeatureDisabled)
 }
 
 /// A sequence of quenched minima that is allowed to descend only.
@@ -917,6 +1060,22 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "rgsaddle"))]
+    fn nve_escape_reports_the_missing_feature() {
+        let start = Array1::from_vec(vec![0.0, 0.0, 0.0]);
+        let mut evaluate = |_x: ArrayView1<f64>| None;
+        let mut rng = StdRng::seed_from_u64(1);
+        let result = nve_escape(
+            start.view(),
+            0.5,
+            &MdEscapeConfig::default(),
+            &mut evaluate,
+            &mut rng,
+        );
+        assert!(matches!(result, Err(NveError::FeatureDisabled)));
+    }
+
+    #[test]
     fn a_fixed_step_stays_in_the_wide_funnel() {
         let (x, energy) = quench_1d(0.0);
         assert!(x.abs() < 0.2, "{x}");
@@ -975,6 +1134,7 @@ mod tests {
         assert!(policy.keep(0.0, -0.1, false));
     }
 
+    #[cfg(feature = "rgsaddle")]
     #[test]
     fn nve_escape_stops_after_the_requested_potential_minimum_in_generic_nd() {
         let start = Array1::zeros(5);
@@ -1003,6 +1163,7 @@ mod tests {
         assert_eq!(report.position.len(), 5);
     }
 
+    #[cfg(feature = "rgsaddle")]
     #[test]
     fn nve_escape_requires_sustained_turning_point_and_returns_its_frame() {
         let start = Array1::zeros(5);
@@ -1035,6 +1196,7 @@ mod tests {
         assert!((report.position.dot(&report.position).sqrt() - 0.05).abs() < 1e-12);
     }
 
+    #[cfg(feature = "rgsaddle")]
     #[test]
     fn flat_and_monotonic_paths_do_not_count_as_potential_minima() {
         let start = Array1::zeros(5);
@@ -1066,6 +1228,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "rgsaddle")]
     #[test]
     fn separated_sustained_valleys_count_once_each() {
         let start = Array1::zeros(5);
@@ -1093,6 +1256,7 @@ mod tests {
         assert_eq!(report.energy, 1.0);
     }
 
+    #[cfg(feature = "rgsaddle")]
     #[test]
     fn nve_escape_reports_the_energy_spans_needed_for_step_control() {
         let start = Array1::zeros(5);
@@ -1141,6 +1305,7 @@ mod tests {
         assert!(feedback.time_step() >= 0.001);
     }
 
+    #[cfg(feature = "rgsaddle")]
     #[test]
     fn softened_nve_charges_direction_probes_and_suppresses_the_hard_mode() {
         let start = Array1::zeros(2);
@@ -1149,7 +1314,7 @@ mod tests {
             potential_minima: 1,
             maximum_steps: 1,
             geometry: MdEscapeGeometry::Euclidean,
-            softening: Some(rgsaddle::VelocitySofteningConfig {
+            softening: Some(VelocitySofteningConfig {
                 steps: 20,
                 displacement: 0.1,
                 mixing: 0.15,
@@ -1349,14 +1514,15 @@ mod tests {
         assert_eq!(f.classify(Some(2), 2), Visit::Same);
     }
 
+    #[cfg(feature = "rgsaddle")]
     mod geometry_controls {
         use super::super::{
-            MdEscapeConfig, MdEscapeGeometry, MdEscapeReport, nve_escape, nve_escape_with_frozen,
+            MdEscapeConfig, MdEscapeGeometry, MdEscapeReport, NveError, VelocitySofteningConfig,
+            nve_escape, nve_escape_with_frozen,
         };
         use ndarray::{Array1, ArrayView1, array};
         use rand::rngs::StdRng;
         use rand::{Rng, SeedableRng};
-        use rgsaddle::{SaddleError, VelocitySofteningConfig};
 
         fn config(geometry: MdEscapeGeometry, softening_steps: usize) -> MdEscapeConfig {
             MdEscapeConfig {
@@ -1455,7 +1621,7 @@ mod tests {
                         Some(&[true; 3]),
                     );
 
-                    assert!(matches!(result, Err(SaddleError::Solver(_))));
+                    assert!(matches!(result, Err(NveError::Solver(_))));
                     assert_eq!(evaluations, 0);
                 }
             }

@@ -260,5 +260,7 @@ def test_cluster_search_ras_true_uses_archive_outcome():
     assert "floors" in out
     assert "returned" in out
     assert "events" in out
+    assert "nve_unavailable" in out
+    assert out["nve_unavailable"] is False
     assert out["charged"] > 0
     assert out["floors"] >= 1
