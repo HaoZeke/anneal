@@ -1071,6 +1071,26 @@ mod tests {
     }
 
     #[test]
+    fn reported_force_count_equals_the_sum_of_oracle_calls() {
+        for sharing in [Sharing::Shared, Sharing::Private] {
+            let run = run(
+                13,
+                900,
+                2,
+                &small_plan(sharing),
+                &Quench::default(),
+                PairKind::LennardJones,
+            );
+            assert_eq!(
+                run.force_calls, run.charged,
+                "{sharing:?}: reported {} oracle {}",
+                run.force_calls, run.charged
+            );
+            assert!(run.force_calls > 0, "{sharing:?} recorded no calls");
+        }
+    }
+
+    #[test]
     fn thirteen_atoms_reach_the_icosahedron() {
         for sharing in [Sharing::Shared, Sharing::Private] {
             let run = run(
@@ -1174,6 +1194,9 @@ mod tests {
         assert_eq!(plan.start, StartRule::PresetSphere);
         assert_eq!(plan.min_separation.to_bits(), 0.85_f64.to_bits());
         assert_eq!(plan.sharing, Sharing::Shared);
+        assert_eq!(plan.resemblance, Resemblance::Radial);
+        assert_eq!(plan.cutoff, CutoffSchedule::LinearBudget);
+        assert!(plan.banked);
     }
 
     #[test]
@@ -1195,5 +1218,176 @@ mod tests {
         );
         assert_eq!(run.trials[Origin::Spliced.index()], 0);
         assert_eq!(run.admitted[Origin::Spliced.index()], 0);
+    }
+
+    fn cheap_quench() -> Quench {
+        Quench {
+            max_iterations: 2,
+            rms_tolerance: 1.0e6,
+            ..Quench::default()
+        }
+    }
+
+    #[test]
+    fn retire_zero_never_frees_a_slot() {
+        let mut bank = FunnelBank::new(2).with_retirement(0);
+        bank.offer(-1.0, &line(4, 1.0), Origin::Fresh);
+        bank.offer(-2.0, &line(4, 3.0), Origin::Fresh);
+        bank.set_progress((0.5, 0.5), 0.0);
+        for _ in 0..6 {
+            bank.draw();
+        }
+        assert_eq!(
+            bank.offer(-0.5, &line(4, 9.0), Origin::Fresh),
+            Admission::Rejected
+        );
+    }
+
+    fn tetrahedron() -> Vec<f64> {
+        let height = (6.0_f64).sqrt() / 3.0;
+        let mid = (3.0_f64).sqrt() / 6.0;
+        let side = (3.0_f64).sqrt() / 2.0;
+        let points = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.5, side, 0.0],
+            [0.5, mid, height],
+        ];
+        points.into_iter().flatten().collect()
+    }
+
+    #[test]
+    fn lee_distance_matches_equation_2() {
+        let straight = line(4, 1.0);
+        let tetra = tetrahedron();
+        // Line: two ends with coordination 1 and two interiors with
+        // coordination 2, in both shells, because the second neighbour sits
+        // at 2, past 1.70. Tetrahedron: every atom has coordination 3 in
+        // both shells. Eq. (2) then totals 54.
+        let distance = lee_csa_distance(&straight, &tetra, LEE_SHELL_FIRST, LEE_SHELL_SECOND);
+        assert_eq!(distance, 54.0);
+        assert_eq!(
+            lee_csa_distance(&straight, &straight, LEE_SHELL_FIRST, LEE_SHELL_SECOND),
+            0.0
+        );
+        let stretched = line(4, 1.2);
+        assert_eq!(
+            lee_csa_distance(&straight, &stretched, LEE_SHELL_FIRST, LEE_SHELL_SECOND),
+            0.0
+        );
+        assert!(resemblance(&radial_key(&straight), &radial_key(&stretched)) > 1e-3);
+        let mut lee = FunnelBank::new(2)
+            .with_resemblance(Resemblance::LeeCsa, (LEE_SHELL_FIRST, LEE_SHELL_SECOND));
+        assert_eq!(
+            lee.offer(-1.0, &straight, Origin::Fresh),
+            Admission::Added(0)
+        );
+        assert_eq!(
+            lee.offer(-1.0, &stretched, Origin::Fresh),
+            Admission::Duplicate(0)
+        );
+        let mut radial = FunnelBank::new(2);
+        assert_eq!(
+            radial.offer(-1.0, &straight, Origin::Fresh),
+            Admission::Added(0)
+        );
+        assert_eq!(
+            radial.offer(-1.0, &stretched, Origin::Fresh),
+            Admission::Added(1)
+        );
+    }
+
+    #[test]
+    fn lee_cutoff_goes_from_half_to_a_fifth_by_a_fixed_ratio() {
+        assert!((lee_cut_fraction(0) - 0.5).abs() < 1e-15);
+        assert!((lee_cut_fraction(LEE_ANNEAL_MINIMIZATIONS) - 0.2).abs() < 1e-12);
+        assert!((lee_cut_fraction(LEE_ANNEAL_MINIMIZATIONS * 2) - 0.2).abs() < 1e-12);
+        let step = lee_cut_fraction(1) / lee_cut_fraction(0);
+        assert!((lee_cut_fraction(2) / lee_cut_fraction(1) - step).abs() < 1e-12);
+        let published = (2.0_f64 / 5.0).powf(1.0 / LEE_ANNEAL_MINIMIZATIONS as f64);
+        assert!((step - published).abs() < 1e-12);
+        let lj = lee_shell_radii(PairKind::LennardJones);
+        assert_eq!(lj.0.to_bits(), LEE_SHELL_FIRST.to_bits());
+        assert_eq!(lj.1.to_bits(), LEE_SHELL_SECOND.to_bits());
+        let morse = lee_shell_radii(PairKind::Morse { rho: 14.0 });
+        let scale = 1.0 / PairKind::LennardJones.r_min();
+        assert!((morse.0 - LEE_SHELL_FIRST * scale).abs() < 1e-12);
+        assert!((morse.1 - LEE_SHELL_SECOND * scale).abs() < 1e-12);
+
+        let mut bank = FunnelBank::new(2);
+        bank.offer(-1.0, &line(4, 1.0), Origin::Fresh);
+        bank.offer(-2.0, &line(4, 3.0), Origin::Fresh);
+        let scale = bank.scale().expect("full bank");
+        bank.set_cutoff(CutoffSchedule::LeeFixedRatio, (0.9, 0.9), 1.0, 0);
+        assert!((bank.merge() - 0.5 * scale).abs() < 1e-12);
+        bank.set_cutoff(
+            CutoffSchedule::LeeFixedRatio,
+            (0.9, 0.9),
+            0.0,
+            LEE_ANNEAL_MINIMIZATIONS,
+        );
+        assert!((bank.merge() - 0.2 * scale).abs() < 1e-9 * scale.max(1.0));
+        bank.set_cutoff(CutoffSchedule::LinearBudget, (0.5, 0.5), 0.7, 10_000);
+        assert!((bank.merge() - 0.5 * scale).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_one_slot_private_bank_does_not_splice_and_two_slots_do() {
+        let quench = cheap_quench();
+        let base = Plan {
+            chains: 4,
+            fresh: 0.0,
+            splice: 1.0,
+            sharing: Sharing::Private,
+            ..Plan::default()
+        };
+        let one = run(
+            13,
+            600,
+            1,
+            &Plan {
+                slots: 1,
+                ..base.clone()
+            },
+            &quench,
+            PairKind::LennardJones,
+        );
+        let two = run(
+            13,
+            600,
+            1,
+            &Plan { slots: 2, ..base },
+            &quench,
+            PairKind::LennardJones,
+        );
+        let spliced = Origin::Spliced.index();
+        println!(
+            "splice_probe slots1 {} slots2 {}",
+            one.trials[spliced], two.trials[spliced]
+        );
+        assert_eq!(one.trials[spliced], 0);
+        assert!(
+            two.trials[spliced] > 0,
+            "two-slot private spliced {}",
+            two.trials[spliced]
+        );
+    }
+
+    #[test]
+    fn an_unbanked_run_is_a_fresh_lattice_descent() {
+        let plan = Plan {
+            chains: 3,
+            slots: 2,
+            fresh: 0.0,
+            splice: 1.0,
+            banked: false,
+            ..Plan::default()
+        };
+        let run = run(13, 400, 4, &plan, &cheap_quench(), PairKind::LennardJones);
+        assert_eq!(run.trials[Origin::Spliced.index()], 0);
+        assert_eq!(run.trials[Origin::Moved.index()], 0);
+        assert!(run.trials[Origin::Fresh.index()] > 0);
+        assert!(run.bank.is_empty());
+        assert!(run.best.is_finite());
     }
 }
