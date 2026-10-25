@@ -1,3 +1,5 @@
-``cargo fmt --all --check`` passes with stable rustfmt. The vendored nng
-crate keeps nightly rustfmt options that stable rustfmt does not apply,
-so the sources are formatted the way the lint job checks them.
+``cargo fmt --check`` passes with stable rustfmt on the workspace member.
+Vendored ``nng`` stays out of that check: its ``rustfmt.toml`` asks for
+nightly options, the ``ignore`` key is unstable on stable, and
+``cargo fmt --all`` would still walk the path dependency. The vendored
+sources are not reformatted.
