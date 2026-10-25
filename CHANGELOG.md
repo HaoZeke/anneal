@@ -10,6 +10,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Catalogue selection uses four ranks. The default log weight is
+  ``-r_E + 0.8 r_N + 0.6 r_S + 0.4 r_U``, clipped at 4 nats. ``r_U`` is
+  the rank of the graph-field score ``variance / (1 + effort)``.
+  ``lj38_catalogue_epoch`` logs one four-replica LJ38 epoch on seeds
+  3100-3103. The paper force total is 400000, shared by the four
+  replicas. A run launched before the v0.12.0 tag is a smoke and is
+  labelled smoke.
 - ``water_hexamer`` searches (H2O)6 under GFN2-xTB, NWChem PBE/6-31G*, and
   PET-MAD. The PBE arm records basis 6-31G*, theory dft, functional PBE,
   charge 0, multiplicity 1, task gradient, and no named dispersion
