@@ -12,6 +12,7 @@
 //! - `shared`: the lattice ensemble of
 //!   [`anneal_core::methods::lattice_ensemble`] with one bank.
 //! - `private`: the same ensemble with one bank per chain.
+//! - `nosplice`: the shared bank with `splice` forced to 0.
 //!
 //! The recommended chain is the code path of `lj_ensemble_splice` in its
 //! `indep` mode: [`Config::recommended`], a random start in the preset sphere
@@ -213,8 +214,11 @@ fn main() {
     let arm = args.get(4).cloned().unwrap_or_else(|| "shared".to_owned());
     let seed0: u64 = args.get(5).and_then(|v| v.parse().ok()).unwrap_or(900);
     let threads: usize = args.get(6).and_then(|v| v.parse().ok()).unwrap_or(4);
-    if !matches!(arm.as_str(), "serial" | "indep" | "shared" | "private") {
-        eprintln!("unknown arm {arm:?}: expected serial, indep, shared or private");
+    if !matches!(
+        arm.as_str(),
+        "serial" | "indep" | "shared" | "private" | "nosplice"
+    ) {
+        eprintln!("unknown arm {arm:?}: expected serial, indep, shared, private or nosplice");
         std::process::exit(2);
     }
     let chains = if arm == "serial" {
@@ -228,8 +232,8 @@ fn main() {
         .build()
         .expect("thread pool");
     let seeds: Vec<u64> = (seed0..seed0 + ensembles).collect();
-    let lattice_arm = matches!(arm.as_str(), "shared" | "private");
-    let plan = Plan {
+    let lattice_arm = matches!(arm.as_str(), "shared" | "private" | "nosplice");
+    let mut plan = Plan {
         chains,
         slots: env_usize("SLOTS", Plan::default().slots),
         fresh: env_f64("FRESH", Plan::default().fresh),
@@ -254,6 +258,10 @@ fn main() {
         },
         ..Plan::default()
     };
+    if arm == "nosplice" {
+        plan.sharing = Sharing::Shared;
+        plan.splice = 0.0;
+    }
     let quench = Quench {
         max_step: env_f64("QUENCH_STEP", Quench::default().max_step),
         rms_tolerance: env_f64("QUENCH_TOL", Quench::default().rms_tolerance),
