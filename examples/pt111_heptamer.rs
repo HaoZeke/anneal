@@ -675,9 +675,7 @@ fn certify_edge(
     right: &Array1<f64>,
     steps: usize,
 ) -> Option<(f64, Array1<f64>, f64)> {
-    use rgsaddle::{
-        ForceGate, MinModeConfig, MinModeKind, MinModeSession, PointSurface, SaddleError,
-    };
+    use rgsaddle::{MinModeConfig, MinModeKind, MinModeSession, PointSurface, SaddleError};
     struct Island<'a> {
         surface: &'a Surface,
         mobile: &'a [usize],
@@ -715,7 +713,6 @@ fn certify_edge(
     let start = (&left_m + &right_m) * 0.5;
     let config = MinModeConfig {
         kind: MinModeKind::Dimer,
-        force_gate: ForceGate::L2Norm,
         force_tol: 1.0e-3,
         max_rotations: env_usize("DIMER_ROTATIONS", 20),
         ..MinModeConfig::default()
@@ -726,4 +723,110 @@ fn certify_edge(
     let position = session.position().to_owned();
     let (energy, _) = island.eval(position.view()).ok()?;
     Some((energy, position, report.curvature))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MorseParams, Surface, morse_smooth, parse_problem};
+    use eindir_core::bounds::Bounds;
+    use ndarray::Array1;
+
+    fn sample() -> MorseParams {
+        parse_problem(
+            "D = 0.7102\nalpha = 1.6047\nr0 = 2.897\ncutoff = 9.5\nbarrier_below_eV = 1.5\npbc = [true, true, false]\nconnected_saddles = 27\n",
+        )
+        .unwrap()
+    }
+
+    fn analytic(radius: f64, params: &MorseParams) -> (f64, f64) {
+        let at_cut = (-params.alpha * (params.cutoff - params.r0)).exp();
+        let offset = params.depth * (at_cut * at_cut - 2.0 * at_cut);
+        let der_cut = -2.0 * params.alpha * params.depth * (at_cut * at_cut - at_cut);
+        let decay = (-params.alpha * (radius - params.r0)).exp();
+        let morse = params.depth * (decay * decay - 2.0 * decay);
+        let energy = morse - offset - (radius - params.cutoff) * der_cut;
+        let slope = -2.0 * params.alpha * params.depth * (decay * decay - decay) - der_cut;
+        (energy, slope)
+    }
+
+    #[test]
+    fn smooth_linear_pair_matches_the_cutoff_shift() {
+        let params = sample();
+        let mut x = Array1::zeros(6);
+        x[3] = params.r0;
+        let (energy, gradient) = morse_smooth(x.view(), &params, [20.0, 20.0, 30.0]);
+        let (expect_e, expect_s) = analytic(params.r0, &params);
+        assert!((energy - expect_e).abs() <= 1e-15);
+        assert!((gradient[0] + expect_s).abs() <= 1e-15);
+        assert!((gradient[3] - expect_s).abs() <= 1e-15);
+    }
+
+    #[test]
+    fn a_pair_past_the_cutoff_does_not_contribute() {
+        let params = sample();
+        let mut x = Array1::zeros(6);
+        x[3] = params.cutoff + 0.1;
+        let (energy, gradient) = morse_smooth(x.view(), &params, [40.0, 40.0, 40.0]);
+        assert_eq!(energy, 0.0);
+        assert!(gradient.iter().all(|g| *g == 0.0));
+    }
+
+    #[test]
+    fn periodic_axis_uses_the_nearest_image() {
+        let params = sample();
+        let cell = 19.2;
+        let gap = params.r0;
+        let mut wrapped = Array1::zeros(6);
+        wrapped[3] = cell - gap;
+        let mut direct = Array1::zeros(6);
+        direct[3] = gap;
+        let (wrapped_e, _) = morse_smooth(wrapped.view(), &params, [cell, 20.0, 30.0]);
+        let (direct_e, _) = morse_smooth(direct.view(), &params, [cell, 20.0, 30.0]);
+        assert!((wrapped_e - direct_e).abs() <= 1e-12);
+    }
+
+    #[test]
+    fn frozen_atoms_keep_a_zero_gradient() {
+        let params = sample();
+        let template = Array1::from_vec(vec![0.0, 0.0, 0.0, 3.0, 0.0, 0.0]);
+        let surface = Surface {
+            params,
+            cell: [20.0, 20.0, 20.0],
+            active: vec![true, false],
+            template: template.clone(),
+            bounds: Bounds::new(Array1::from_elem(6, -10.0), Array1::from_elem(6, 10.0), 0.0),
+        };
+        let mut moved = template.clone();
+        moved[3] = 9.0;
+        let (_energy, gradient) = surface.energy_gradient(moved.view());
+        assert_eq!(gradient[3], 0.0);
+        assert_eq!(gradient[4], 0.0);
+        assert_eq!(gradient[5], 0.0);
+        let (pinned, _) = morse_smooth(template.view(), &params, surface.cell);
+        let (got, _) = surface.energy_gradient(moved.view());
+        assert_eq!(got.to_bits(), pinned.to_bits());
+    }
+
+    #[test]
+    fn the_smallest_free_layer_is_the_island() {
+        let mut base = Array1::zeros(12);
+        base[2] = 1.0;
+        base[5] = 1.2;
+        base[8] = 4.0;
+        base[11] = 8.0;
+        let island = super::island_layer(&base, &[0, 1, 2, 3]);
+        assert_eq!(island, vec![3]);
+    }
+
+    #[test]
+    fn problem_file_numbers_come_from_the_text() {
+        let params = sample();
+        assert_eq!(params.depth, 0.7102);
+        assert_eq!(params.alpha, 1.6047);
+        assert_eq!(params.r0, 2.897);
+        assert_eq!(params.cutoff, 9.5);
+        assert_eq!(params.barrier_below_ev, 1.5);
+        assert_eq!(params.connected_saddles, Some(27));
+        assert_eq!(params.periodic, [true, true, false]);
+    }
 }
