@@ -24,10 +24,10 @@ fn checked_rejects_uncertified_component_combinations() {
     // build.target-dir` passed to the parent. It uses `CARGO_TARGET_DIR`
     // or the workspace config. Write the patch into each of those trees.
     let mut targets = vec![target];
-    if let Some(configured) = configured_target_dir() {
-        if !targets.contains(&configured) {
-            targets.push(configured);
-        }
+    if let Some(configured) = configured_target_dir()
+        && !targets.contains(&configured)
+    {
+        targets.push(configured);
     }
     let vendor = Path::new(env!("CARGO_MANIFEST_DIR")).join("vendor/metatensor-sys");
     let mut patch = format!(
@@ -38,19 +38,19 @@ fn checked_rejects_uncertified_component_combinations() {
     // registry patch has to be repeated here or the UI crate cannot
     // resolve it. The committed config has no patch.
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join(".cargo/config.toml");
-    if let Ok(text) = std::fs::read_to_string(workspace) {
-        if let Some((_, body)) = text.split_once("[patch.crates-io]") {
-            for line in body.lines() {
-                let trimmed = line.trim();
-                if trimmed.is_empty() || trimmed.starts_with('#') {
-                    continue;
-                }
-                if trimmed.starts_with('[') {
-                    break;
-                }
-                patch.push_str(trimmed);
-                patch.push('\n');
+    if let Ok(text) = std::fs::read_to_string(workspace)
+        && let Some((_, body)) = text.split_once("[patch.crates-io]")
+    {
+        for line in body.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
             }
+            if trimmed.starts_with('[') {
+                break;
+            }
+            patch.push_str(trimmed);
+            patch.push('\n');
         }
     }
     // trybuild copies the workspace lock and passes `--offline`. A lock
