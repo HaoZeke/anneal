@@ -58,6 +58,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   list is returned directly, and the wide-exchange guard is one
   condition. Behaviour is unchanged. The C header and the Python
   bindings are unchanged.
+- The normal-quantile table and the format strings that name their
+  values satisfy clippy's deny set. The quantile values are unchanged.
+  The TIP4P profile walks the sites it indexes. The C header and the
+  Python bindings are unchanged.
 - ``examples/globalopt_profile.rs`` profiles the cluster presets on optbench
   archive starts under harness-style counting, and
   ``scripts/optbench/anneal_globalopt.py`` scores them through optbench's
