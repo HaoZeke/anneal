@@ -14,10 +14,11 @@
 //! - `private`: the same ensemble with one bank per chain.
 //!
 //! The recommended chain is the code path of `lj_ensemble_splice` in its
-//! `indep` mode: [`Config::recommended`], a random start at density 0.7, the
-//! warm L-BFGS quench charged per call, and a checkpoint every 500 calls that
-//! changes nothing. Ensemble `s` seeds chain `c` with `s * 0x9E3779B9 + c + 7`
-//! in every arm, so the arms are paired by ensemble.
+//! `indep` mode: [`Config::recommended`], a random start in the preset sphere
+//! of radius `0.9 * L0 * N^(1/3)`, the warm L-BFGS quench charged per call,
+//! and a checkpoint every 500 calls that changes nothing. Ensemble `s` seeds
+//! chain `c` with `s * 0x9E3779B9 + c + 7` in every arm, so the arms are
+//! paired by ensemble.
 //!
 //! First-hit cost is in force calls of the whole ensemble. `serial` reports
 //! its chain's ledger at the first hit; `indep` reports `CHAINS` times the
@@ -53,11 +54,11 @@ use std::time::Instant;
 
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, random_cluster,
-    run_with_bias_at_checkpoints,
+    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger,
+    random_cluster_in_radius, run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::cluster_search::{Encounter, median_encounter};
-use anneal_core::methods::lattice_ensemble::{self, Plan, Sharing};
+use anneal_core::methods::lattice_ensemble::{self, Plan, Sharing, StartRule};
 use anneal_core::methods::lattice_search::{Lattice, Quench};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairKind;
@@ -144,7 +145,7 @@ struct ChainResult {
 fn recommended_chain(n: usize, budget: usize, seed: u64, target: Option<f64>) -> ChainResult {
     let cfg = Config::recommended(n);
     let mut rng = StdRng::seed_from_u64(seed);
-    let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+    let start = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng);
     let mut ledger = Ledger::new(budget);
     let mut opt = WarmLbfgs::default();
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
@@ -242,7 +243,10 @@ fn main() {
             env_f64("MERGE_END", Plan::default().merge.1),
         ),
         retire: env_usize("RETIRE", Plan::default().retire),
-        density: env_f64("DENSITY", Plan::default().density),
+        start: match std::env::var("DENSITY") {
+            Ok(value) => StartRule::Density(value.parse().unwrap_or(0.7)),
+            Err(_) => StartRule::PresetSphere,
+        },
         sharing: if arm == "private" {
             Sharing::Private
         } else {
@@ -267,7 +271,7 @@ fn main() {
     );
     if lattice_arm {
         println!(
-            "  plan: slots {} fresh {} splice {} moved {}..{} merge {}->{} retire {} density {} min_separation {}; \
+            "  plan: slots {} fresh {} splice {} moved {}..{} merge {}->{} retire {} start {} min_separation {}; \
              quench step {} tol {} memory {} iterations {}; lattice candidates {} bond {:.4} hollow {:.4} site {:.4} clearance {:.4}",
             plan.slots,
             plan.fresh,
@@ -277,7 +281,10 @@ fn main() {
             plan.merge.0,
             plan.merge.1,
             plan.retire,
-            plan.density,
+            match plan.start {
+                StartRule::PresetSphere => "preset-sphere".to_owned(),
+                StartRule::Density(density) => format!("density {density}"),
+            },
             plan.min_separation,
             quench.max_step,
             quench.rms_tolerance,
@@ -290,7 +297,7 @@ fn main() {
             lattice.clearance,
         );
     } else {
-        println!("  recommended chain: Config::recommended({n}), checkpoint 500, density 0.7");
+        println!("  recommended chain: Config::recommended({n}), checkpoint 500, preset sphere");
     }
     let show_bank = env_usize("SHOW_BANK", 0) == 1;
     let chunk = if arm == "indep" { 1 } else { threads.max(1) };
