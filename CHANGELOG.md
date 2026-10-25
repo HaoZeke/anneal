@@ -27,6 +27,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   3100-3103. The paper force total is 400000, shared by the four
   replicas. A run launched before the v0.12.0 tag is a smoke and is
   labelled smoke.
+- ``water_hexamer`` reads deposited isomer geometries from
+  ``WATER_ISOMER_DIR`` and sets the assignment gate to half the minimum
+  species-aware IRA RMSD before any seed. ``ASE_PYTHON`` selects the
+  deposited calculators: tblite 0.7.0 GFN2-xTB, PySCF 2.14.0 RKS
+  PBE/6-31G* grid level 3, and pet-mad 1.4.4 checkpoint 1.0.2 on CPU,
+  through ASE 3.29.0. The helper keeps one ASE atoms object and
+  updates positions. The gate is printed even when the engine does
+  not load. A non-finite opening quench is reported and does not drop
+  the gate or the reference energies.
 - ``water_hexamer`` searches (H2O)6 under GFN2-xTB, NWChem PBE/6-31G*, and
   PET-MAD. The PBE arm records basis 6-31G*, theory dft, functional PBE,
   charge 0, multiplicity 1, task gradient, and no named dispersion

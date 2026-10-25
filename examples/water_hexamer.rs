@@ -11,6 +11,8 @@
 //! Isomer names are assigned only when `WATER_ISOMER_DIR` holds
 //! same-level geometries in O, H, H order.
 
+#[path = "common/pipe_engine.rs"]
+mod pipe_engine;
 #[path = "common/rgpot_eindir.rs"]
 mod rgpot_eindir;
 
@@ -239,15 +241,6 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     ));
     text.push_str(&engine_settings(engine));
     let n_atoms = 3 * WATER_HEXAMER_MOLECULES;
-    let loaded = load_engine(engine, n_atoms);
-    let Ok(objective) = loaded else {
-        text.push_str(&format!(
-            "engine_loaded: false\nsearch: not started\nload_error: {}\n",
-            loaded.err().unwrap_or_default()
-        ));
-        return text;
-    };
-    text.push_str("engine_loaded: true\n");
     let species = water_species(WATER_HEXAMER_MOLECULES).expect("hexamer species");
     let groups = water_groups(WATER_HEXAMER_MOLECULES).expect("hexamer groups");
     let mut cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
@@ -284,7 +277,19 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     text.push_str(&format!(
         "isomer_gate_A: {gate_text}\nisomer_gate_when: before seeds\nisomer_gate_reason: {gate_reason}\n"
     ));
+    text.push_str(&deposited_calculator(engine));
+    text.push_str(&assign_references(&references, &reference_views, gate));
     text.push_str(&classify_gofee(&reference_views, gate));
+    let loaded = load_engine(engine, n_atoms);
+    let Ok(objective) = loaded else {
+        text.push_str(&format!(
+            "engine_loaded: false\nsearch: not started\nload_error: {}\n",
+            loaded.err().unwrap_or_default()
+        ));
+        return text;
+    };
+    text.push_str("engine_loaded: true\n");
+    text.push_str(&evaluate_references(&objective, &references));
     let template = reference_coordinates(WATER_HEXAMER_MOLECULES).expect("template");
     for seed in seed0..seed0 + seeds {
         let mut rng = StdRng::seed_from_u64(seed);
@@ -365,7 +370,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                         CheckpointAction::Continue
                     }
                 };
-            let result = search_from_with_checkpoint(
+            match search_from_with_checkpoint(
                 &objective,
                 &cfg,
                 &mut ledger,
@@ -373,16 +378,28 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                 seed,
                 GOOD_TURING_CHECKPOINT_INTERVAL,
                 &mut checkpoint,
-            )
-            .expect("finite start");
-            text.push_str(&trace);
-            text.push_str(&format!(
-                "good_turing_saturated: {}\n",
-                good_turing_stop_reason(&census).is_some()
-            ));
-            result
+            ) {
+                Ok(result) => {
+                    text.push_str(&trace);
+                    text.push_str(&format!(
+                        "good_turing_saturated: {}\n",
+                        good_turing_stop_reason(&census).is_some()
+                    ));
+                    result
+                }
+                Err(error) => {
+                    text.push_str(&format!("search_error: {error}\n"));
+                    return text;
+                }
+            }
         } else {
-            search_from(&objective, &cfg, &mut ledger, start.view(), seed).expect("finite start")
+            match search_from(&objective, &cfg, &mut ledger, start.view(), seed) {
+                Ok(result) => result,
+                Err(error) => {
+                    text.push_str(&format!("search_error: {error}\n"));
+                    return text;
+                }
+            }
         };
         let wall_s = wall.elapsed().as_secs_f64();
         let best = outcome.best;
@@ -450,7 +467,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             0.0
         };
         text.push_str(&format!(
-            "seed: {seed}\nstart_monomers_intact: {start_intact}\nbest_energy: {best}\nbest_monomers_intact: {intact}\nisomer: {isomer_name}\nisomer_rmsd_A: {isomer_rmsd}\nisomer_gate_A: {gate_text}\nisomer_reason: {isomer_reason}\nforce_calls: {}\nwall_seconds: {wall_s:.6}\nforce_calls_per_second: {per_second:.6}\nhops: {}\nbasins: {}\nconverged: {}\nquenches: {}\nhits: unscored\nwilson_95: unscored\nmedian_par2_force: unscored\nmedian_par2_wall: unscored\nunscored_reason: no same-level reference energy in this tree\n",
+            "seed: {seed}\nstart_monomers_intact: {start_intact}\nbest_energy: {best}\nbest_monomers_intact: {intact}\nisomer: {isomer_name}\nisomer_rmsd_A: {isomer_rmsd}\nisomer_gate_A: {gate_text}\nisomer_reason: {isomer_reason}\nforce_calls: {}\nwall_seconds: {wall_s:.6}\nforce_calls_per_second: {per_second:.6}\nhops: {}\nbasins: {}\nconverged: {}\nquenches: {}\nhits: unscored\nwilson_95: unscored\nmedian_par2_force: unscored\nmedian_par2_wall: unscored\nunscored_reason: smoke or one arm, success rate waits on the full seed block\n",
             ledger.spent(),
             outcome.hops,
             outcome.basins,
