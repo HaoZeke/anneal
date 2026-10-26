@@ -156,6 +156,26 @@ impl DifferentiableObjective<f64> for ForceObjective {
     }
 }
 
+struct PetKernel {
+    _lib: Library,
+    pot: *mut c_void,
+    force: Symbol<'static, MtaForce>,
+    destroy: Symbol<'static, MtaDestroy>,
+    _model: CString,
+    _device: CString,
+    _unit: CString,
+    atomic_numbers: Vec<i32>,
+    box_: [f64; 9],
+}
+
+unsafe impl Send for PetKernel {}
+
+impl Drop for PetKernel {
+    fn drop(&mut self) {
+        unsafe { (self.destroy)(self.pot) };
+    }
+}
+
 fn main() {}
 
 /// Push overlapped molecules apart without drawing more random numbers.
@@ -306,5 +326,192 @@ fn write_geometry(seed: u64, coordinates: &[f64], energy: f64) {
     }
     let path = PathBuf::from(dir).join(format!("seed-{seed}.xyz"));
     let _ = std::fs::write(path, text);
+}
+
+fn load_deposited(engine: &str, n_atoms: usize) -> Result<ForceObjective, String> {
+    let ase_engine = match engine {
+        "gfn2" => "tblite-gfn2",
+        "pbe" => "pyscf-pbe",
+        "petmad" => "pet-mad",
+        other => return Err(format!("no deposited calculator for {other}")),
+    };
+    let symbols = (0..WATER_HEXAMER_MOLECULES)
+        .flat_map(|_| ["O", "H", "H"])
+        .map(str::to_owned)
+        .collect();
+    let mut pipe = pipe_engine::PipeEngine::start(ase_engine, symbols, None);
+    let dim = 3 * n_atoms;
+    Ok(ForceObjective::new(
+        dim,
+        move |coordinates: &[f64]| match pipe.eval(ArrayView1::from(coordinates)) {
+            Some((energy, gradient)) => (energy, gradient.to_vec()),
+            None => (f64::NAN, vec![f64::NAN; coordinates.len()]),
+        },
+    ))
+}
+
+fn load_engine(engine: &str, n_atoms: usize) -> Result<ForceObjective, String> {
+    if std::env::var_os("ASE_PYTHON").is_some() {
+        return load_deposited(engine, n_atoms);
+    }
+    let atomic_numbers: Vec<i32> = (0..WATER_HEXAMER_MOLECULES)
+        .flat_map(|_| [8, 1, 1])
+        .collect();
+    match engine {
+        "gfn2" => load_gfn2(&atomic_numbers, n_atoms),
+        "pbe" => load_pbe(atomic_numbers, n_atoms),
+        "petmad" => load_petmad(atomic_numbers, n_atoms),
+        other => Err(format!("unknown engine {other}")),
+    }
+}
+
+fn load_gfn2(atomic_numbers: &[i32], n_atoms: usize) -> Result<ForceObjective, String> {
+    let Some(path) = engine_file("RGPOT_XTB_ENGINE", "libxtb_engine.so") else {
+        return Err("libxtb_engine.so not found (RGPOT_XTB_ENGINE or ./libxtb_engine.so)".into());
+    };
+    let box_ = vacuum_box();
+    let numbers = atomic_numbers.to_vec();
+    let loaded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        RgpotObjective::xtb(&numbers, box_)
+    }));
+    let Ok(pot) = loaded else {
+        return Err(format!("gfn2 dlopen failed for {}", path.display()));
+    };
+    emit_engine_manifest("xtb");
+    let dim = 3 * n_atoms;
+    Ok(ForceObjective::new(dim, move |coordinates: &[f64]| {
+        let objective = pot.wrapper();
+        let (energy, gradient) = objective.value_and_gradient(ArrayView1::from(coordinates));
+        (energy, gradient.to_vec())
+    }))
+}
+
+fn load_pbe(_atomic_numbers: Vec<i32>, _n_atoms: usize) -> Result<ForceObjective, String> {
+    let library = engine_file("POTENTIAL_LIBRARY", "libnwchemc.so")
+        .or_else(|| engine_file("RGPOT_NWCHEMC_ENGINE", "libnwchemc.so"));
+    let config = env_file("POTENTIAL_CONFIG").or_else(|| env_file("NWCHEMC_CONFIG"));
+    let library_state = match &library {
+        Some(path) => format!("library present at {}", path.display()),
+        None => "libnwchemc.so not found".to_owned(),
+    };
+    let config_state = match &config {
+        Some(path) => format!("config present at {}", path.display()),
+        None => "PotentialConfig bytes not found".to_owned(),
+    };
+    Err(format!(
+        "NWChem PBE/6-31G* was not evaluated. {library_state}. {config_state}. This build of rgpot-core does not enable the profile client, and the NWChem driver binary is not the embed SDK. Settings remain basis {PBE_BASIS}, theory {PBE_THEORY}, xc {PBE_XC}, charge {PBE_CHARGE}, multiplicity {PBE_MULTIPLICITY}, task {PBE_TASK}, dispersion {PBE_DISPERSION}."
+    ))
+}
+
+fn load_petmad(atomic_numbers: Vec<i32>, n_atoms: usize) -> Result<ForceObjective, String> {
+    let Some(library) = engine_file("RGPOT_METATOMIC_ENGINE", "libmetatomic_engine.so") else {
+        return Err(
+            "libmetatomic_engine.so not found (RGPOT_METATOMIC_ENGINE or ./libmetatomic_engine.so)"
+                .into(),
+        );
+    };
+    let Some(model) = env_file("RGPOT_METATOMIC_MODEL") else {
+        return Err(format!(
+            "PET-MAD model not found (RGPOT_METATOMIC_MODEL). Cited file name is {PETMAD_MODEL_NAME}."
+        ));
+    };
+    let model_name = model
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unnamed");
+    if model_name != PETMAD_MODEL_NAME {
+        eprintln!("petmad model file is {model_name}; the cited name is {PETMAD_MODEL_NAME}");
+    }
+    let lib = unsafe { Library::new(&library) }.map_err(|error| error.to_string())?;
+    let create: Symbol<MtaCreate> =
+        unsafe { lib.get(b"rgpot_mta_create\0") }.map_err(|error| error.to_string())?;
+    let destroy: Symbol<MtaDestroy> =
+        unsafe { lib.get(b"rgpot_mta_destroy\0") }.map_err(|error| error.to_string())?;
+    let force: Symbol<MtaForce> =
+        unsafe { lib.get(b"rgpot_mta_force\0") }.map_err(|error| error.to_string())?;
+    let model_c =
+        CString::new(model.to_string_lossy().as_bytes()).map_err(|error| error.to_string())?;
+    let device = CString::new(PETMAD_DEVICE).map_err(|error| error.to_string())?;
+    let unit = CString::new("angstrom").map_err(|error| error.to_string())?;
+    let cfg = MtaConfig {
+        model_path: model_c.as_ptr(),
+        device: device.as_ptr(),
+        length_unit: unit.as_ptr(),
+        extensions_directory: std::ptr::null(),
+        check_consistency: 0,
+        uncertainty_threshold: 0.0,
+        dtype_override: std::ptr::null(),
+        random_rotation: 0,
+        n_symmetry_rotations: 0,
+        so3_probe_scatter: 0,
+        torch_determinism_strict: 0,
+    };
+    let mut err = [0u8; 512];
+    let pot = unsafe { create(&cfg, err.as_mut_ptr(), err.len()) };
+    if pot.is_null() {
+        return Err(format!(
+            "rgpot_mta_create failed: {}",
+            String::from_utf8_lossy(&err)
+        ));
+    }
+    let force =
+        unsafe { std::mem::transmute::<Symbol<MtaForce>, Symbol<'static, MtaForce>>(force) };
+    let destroy =
+        unsafe { std::mem::transmute::<Symbol<MtaDestroy>, Symbol<'static, MtaDestroy>>(destroy) };
+    let kernel = PetKernel {
+        _lib: lib,
+        pot,
+        force,
+        destroy,
+        _model: model_c,
+        _device: device,
+        _unit: unit,
+        atomic_numbers,
+        box_: vacuum_box(),
+    };
+    let dim = 3 * n_atoms;
+    Ok(ForceObjective::new(dim, move |coordinates: &[f64]| {
+        let mut forces = vec![0.0; coordinates.len()];
+        let mut energy = 0.0;
+        let mut variance = 0.0;
+        let rc = unsafe {
+            (kernel.force)(
+                kernel.pot,
+                (coordinates.len() / 3) as i64,
+                coordinates.as_ptr(),
+                kernel.atomic_numbers.as_ptr(),
+                forces.as_mut_ptr(),
+                &mut energy,
+                &mut variance,
+                kernel.box_.as_ptr(),
+            )
+        };
+        if rc != 0 || !energy.is_finite() {
+            return (f64::NAN, vec![f64::NAN; coordinates.len()]);
+        }
+        // The metatomic ABI returns forces. The search gradient is the
+        // negative of the force, matching the NWChem profile adapter.
+        let gradient = forces.iter().map(|force| -force).collect();
+        let _ = variance;
+        (energy, gradient)
+    }))
+}
+
+fn vacuum_box() -> [f64; 9] {
+    [
+        VACUUM_BOX, 0.0, 0.0, 0.0, VACUUM_BOX, 0.0, 0.0, 0.0, VACUUM_BOX,
+    ]
+}
+
+fn engine_file(var: &str, filename: &str) -> Option<PathBuf> {
+    env_file(var).or_else(|| {
+        let local = PathBuf::from(filename);
+        local.is_file().then_some(local)
+    })
+}
+
+fn env_file(var: &str) -> Option<PathBuf> {
+    let path = PathBuf::from(std::env::var_os(var)?);
+    path.is_file().then_some(path)
 }
 
