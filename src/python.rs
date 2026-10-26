@@ -3511,6 +3511,8 @@ fn rigid_probe(
 ///     centre and angle-axis per body). Interleaved rotations are negated
 ///     at the boundary because that angle-axis map is the opposite sense.
 ///   target: stop once a recorded energy is at or below this value.
+///     A Lennard-Jones limit equal to the LJ75 or LJ98 icosahedral shelf
+///     is refused. A limit above the published minimum plus 0.001 warns.
 ///   water_sites: optional flat 9-vector of the O, H, H positions of one
 ///     rigid water in its body frame, in angstrom, about the point its
 ///     rotation turns about. When set, `n` counts molecules and the state is
@@ -3702,9 +3704,7 @@ fn cluster_search(
         if !limit.is_finite() {
             return Err(PyValueError::new_err("target must be finite"));
         }
-        let limit =
-            crate::published_minima::lj98_stop_limit(n, limit).map_err(PyValueError::new_err)?;
-        ledger.stop_below(limit);
+        ledger.stop_below(n, limit).map_err(PyValueError::new_err)?;
     }
     let gradient_scale = if budget >= 4 {
         let probe_owned = if rigid_chart {
@@ -3795,6 +3795,18 @@ fn cluster_search(
     Ok(dict.into())
 }
 
+/// Refuse a Lennard-Jones halt limit that is a known icosahedral shelf.
+///
+/// `n` is the number of atoms and `limit` is the energy at which a search
+/// stops (`energy <= limit`). The LJ75 C1 shelf and the LJ98 Cs shelf are
+/// errors. When the published minimum for `n` is known, a limit above that
+/// minimum plus the harness window of 0.001 is kept and a warning is written
+/// to stderr. The minimum itself and the minimum plus that window are quiet.
+#[pyfunction]
+fn check_stop_limit(n: usize, limit: f64) -> PyResult<f64> {
+    crate::published_minima::check_stop_limit(n, limit).map_err(PyValueError::new_err)
+}
+
 // ---------------------------------------------------------------------------
 // Module entry point.
 // ---------------------------------------------------------------------------
@@ -3815,6 +3827,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<EindirPyBounds>()?;
     m.add_class::<PyObjective>()?;
     m.add_function(wrap_pyfunction!(cluster_search, m)?)?;
+    m.add_function(wrap_pyfunction!(check_stop_limit, m)?)?;
     m.add_function(wrap_pyfunction!(low_discrepancy_points, m)?)?;
     m.add_function(wrap_pyfunction!(osa_acceptance_rate, m)?)?;
     m.add_function(wrap_pyfunction!(pilot_draws_qmc, m)?)?;

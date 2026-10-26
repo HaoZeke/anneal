@@ -102,7 +102,7 @@ pub fn search_binary(
         problem.sigma_ab,
         problem.sigma_bb,
     );
-    run_stock(&potential, &cfg, start, budget, target, seed)
+    run_stock(&potential, &cfg, start, budget, n, target, seed)
 }
 
 /// Rigid TIP4P from a block Rodrigues start (`3 n` centres, then `3 n` rotations).
@@ -125,7 +125,7 @@ pub fn search_gmin_tip4p(
     );
     let cfg = stock_preset(n_molecules, communicating).with_rigid_bodies(gmin_water_geometry());
     let potential = GminTip4p::new(n_molecules);
-    run_stock(&potential, &cfg, start, budget, target, seed)
+    run_stock(&potential, &cfg, start, budget, n_molecules, target, seed)
 }
 
 fn run_stock<O>(
@@ -133,6 +133,7 @@ fn run_stock<O>(
     cfg: &Config,
     start: ArrayView1<f64>,
     budget: usize,
+    n: usize,
     target: f64,
     seed: u64,
 ) -> StockSearch
@@ -148,7 +149,9 @@ where
         None => Ledger::new(budget),
     };
     if target.is_finite() {
-        ledger.stop_below(target);
+        ledger
+            .stop_below(n, target)
+            .unwrap_or_else(|error| panic!("{error}"));
     }
     let _ = search_from(potential, cfg, &mut ledger, start, seed);
     let state = ledger
@@ -406,6 +409,7 @@ mod tests {
                 &binary_cfg,
                 binary_start.view(),
                 BUDGET,
+                6,
                 f64::NEG_INFINITY,
                 5,
             )
@@ -453,6 +457,7 @@ mod tests {
                 &water_cfg,
                 water_start.view(),
                 BUDGET,
+                2,
                 f64::NEG_INFINITY,
                 7,
             )
