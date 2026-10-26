@@ -180,61 +180,42 @@ impl Tip4pCluster {
             }
         }
 
-        let mut energy = 0.0;
-        let mut force = vec![[[0.0; 3]; 4]; n];
-        let charges = [0.0, Q_H, Q_H, Q_M];
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let d = [
-                    placed[i].sites[0][0] - placed[j].sites[0][0],
-                    placed[i].sites[0][1] - placed[j].sites[0][1],
-                    placed[i].sites[0][2] - placed[j].sites[0][2],
-                ];
-                let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                if r2 > 0.0 {
-                    let inv2 = SIGMA * SIGMA / r2;
-                    let inv6 = inv2 * inv2 * inv2;
-                    let inv12 = inv6 * inv6;
-                    energy += 4.0 * EPSILON * (inv12 - inv6);
-                    let coef = -24.0 * EPSILON / r2 * (2.0 * inv12 - inv6);
-                    for k in 0..3 {
-                        force[i][0][k] += coef * d[k];
-                        force[j][0][k] -= coef * d[k];
-                    }
-                }
-                for a in 1..4 {
-                    for b in 1..4 {
-                        let d = [
-                            placed[i].sites[a][0] - placed[j].sites[b][0],
-                            placed[i].sites[a][1] - placed[j].sites[b][1],
-                            placed[i].sites[a][2] - placed[j].sites[b][2],
-                        ];
-                        let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                        if r2 <= 0.0 {
-                            continue;
-                        }
-                        let r = r2.sqrt();
-                        let qq = COULOMB * charges[a] * charges[b];
-                        energy += qq / r;
-                        let coef = -qq / (r2 * r);
-                        for k in 0..3 {
-                            force[i][a][k] += coef * d[k];
-                            force[j][b][k] -= coef * d[k];
-                        }
-                    }
+        let mut sites = vec![0.0; 12 * n];
+        for molecule in 0..n {
+            for site in 0..4 {
+                for axis in 0..3 {
+                    sites[12 * molecule + 3 * site + axis] = placed[molecule].sites[site][axis];
                 }
             }
         }
+        let (energy, site_gradient) = super::tip4p_site_gradient(
+            super::Tip4pSites {
+                c6: 0.0,
+                c12: 0.0,
+                epsilon: EPSILON,
+                sigma: SIGMA,
+                use_epsilon: true,
+                coulomb: COULOMB,
+                q_h: Q_H,
+                q_m: Q_M,
+            },
+            &sites,
+        );
 
         let mut g = Array1::zeros(6 * n);
         for i in 0..n {
             let mut torque = [0.0; 3];
             for a in 0..4 {
                 for k in 0..3 {
-                    g[3 * i + k] += force[i][a][k];
+                    g[3 * i + k] += site_gradient[12 * i + 3 * a + k];
                 }
                 let rel = mat_vec(placed[i].rotation, self.body[a]);
-                let t = cross(rel, force[i][a]);
+                let site = [
+                    site_gradient[12 * i + 3 * a],
+                    site_gradient[12 * i + 3 * a + 1],
+                    site_gradient[12 * i + 3 * a + 2],
+                ];
+                let t = cross(rel, site);
                 for k in 0..3 {
                     torque[k] += t[k];
                 }

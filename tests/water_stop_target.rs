@@ -44,6 +44,7 @@ fn translation_and_rotation(n: usize) -> Config {
 /// reaches -582.974479 kJ/mol, and the upper reference stops the search
 /// after 154553 calls.
 fn search(cfg: &Config, budget: usize, seed: u64, target: Option<f64>) -> Trace {
+    anneal_core::install_rgpot_kernels!();
     let n = cfg.n_points;
     let pot = Tip4pCluster::new(n);
     let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(3));

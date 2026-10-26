@@ -11,6 +11,7 @@ fn dimer() -> Array1<f64> {
 
 #[test]
 fn basin_descriptor_distinguishes_orientation_dependent_water_energies() {
+    anneal_core::install_rgpot_kernels!();
     let x = dimer();
     let mut turned = x.clone();
     turned[10] = 1.2;

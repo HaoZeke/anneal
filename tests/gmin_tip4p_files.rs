@@ -28,6 +28,7 @@ const SEED_2000_CHECKD: f64 = -13.192_905_420_423_074;
 const GMIN_TOLERANCE: f64 = 1.0e-3;
 
 fn energy(block: &[f64]) -> f64 {
+    anneal_core::install_rgpot_kernels!();
     GminTip4p::new(block.len() / 6).eval(Array1::from_vec(block.to_vec()).view())
 }
 

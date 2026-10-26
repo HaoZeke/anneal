@@ -18,6 +18,7 @@ use rand::rngs::StdRng;
 
 #[test]
 fn a_rigid_replica_ladder_seeds_extra_rungs_as_rigid_bodies() {
+    anneal_core::install_rgpot_kernels!();
     let n = 8;
     let mut cfg = Config::for_tip4p(n);
     assert!(

@@ -131,32 +131,32 @@ fn tip4p_energy_gradient(sites: &[[f64; 3]; 4], x: &[f64]) -> (f64, Vec<f64>) {
             deriv[m][s] = d;
         }
     }
-    let mut site_grad = vec![[[0.0; 3]; 4]; n];
-    let mut e = 0.0;
-    for l in 0..n {
-        for r in (l + 1)..n {
-            let d: [f64; 3] = std::array::from_fn(|a| placed[l][0][a] - placed[r][0][a]);
-            let inv = 1.0 / (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-            let r6 = inv * inv * inv;
-            let r12 = r6 * r6;
-            e += TIP4P_C12 * r12 - TIP4P_C6 * r6;
-            let slope = (-12.0 * TIP4P_C12 * r12 + 6.0 * TIP4P_C6 * r6) * inv;
-            for (a, component) in d.iter().enumerate() {
-                site_grad[l][0][a] += slope * *component;
-                site_grad[r][0][a] -= slope * *component;
+    let mut sites_flat = vec![0.0; 12 * n];
+    for molecule in 0..n {
+        for site in 0..4 {
+            for axis in 0..3 {
+                sites_flat[12 * molecule + 3 * site + axis] = placed[molecule][site][axis];
             }
-            for (sa, charge_a) in TIP4P_CHARGES.iter().enumerate().skip(1) {
-                for (sb, charge_b) in TIP4P_CHARGES.iter().enumerate().skip(1) {
-                    let d: [f64; 3] = std::array::from_fn(|a| placed[l][sa][a] - placed[r][sb][a]);
-                    let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                    let pair = TIP4P_COULOMB * *charge_a * *charge_b / r2.sqrt();
-                    e += pair;
-                    let slope = -pair / r2;
-                    for (a, component) in d.iter().enumerate() {
-                        site_grad[l][sa][a] += slope * *component;
-                        site_grad[r][sb][a] -= slope * *component;
-                    }
-                }
+        }
+    }
+    let (e, flat_gradient) = anneal_core::potentials::tip4p_site_gradient(
+        anneal_core::potentials::Tip4pSites {
+            c6: TIP4P_C6,
+            c12: TIP4P_C12,
+            epsilon: 0.0,
+            sigma: 0.0,
+            use_epsilon: false,
+            coulomb: TIP4P_COULOMB,
+            q_h: TIP4P_CHARGES[1],
+            q_m: TIP4P_CHARGES[3],
+        },
+        &sites_flat,
+    );
+    let mut site_grad = vec![[[0.0; 3]; 4]; n];
+    for molecule in 0..n {
+        for site in 0..4 {
+            for axis in 0..3 {
+                site_grad[molecule][site][axis] = flat_gradient[12 * molecule + 3 * site + axis];
             }
         }
     }

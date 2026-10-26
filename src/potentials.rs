@@ -42,6 +42,9 @@ pub struct ClusterKernels {
     /// `rgpot_pair::binary_lj`.
     #[allow(clippy::type_complexity)]
     pub binary_lj: fn(usize, [f64; 3], [f64; 3], f64, &[f64], &mut [f64]) -> f64,
+    /// `rgpot_pair::tip4p_sites`.
+    #[allow(clippy::type_complexity)]
+    pub tip4p_sites: fn(bool, f64, f64, f64, f64, f64, f64, f64, &[f64], &mut [f64]) -> f64,
     /// `rgpot_pair::gupta`.
     #[allow(clippy::type_complexity)]
     pub gupta:
@@ -62,6 +65,7 @@ pub fn cluster_kernels() -> Option<&'static ClusterKernels> {
         cluster_lj: rgpot_pair::cluster_lj,
         cambridge_morse: rgpot_pair::cambridge_morse,
         binary_lj: rgpot_pair::binary_lj,
+        tip4p_sites: rgpot_pair::tip4p_sites,
         gupta: rgpot_pair::gupta,
     });
     CLUSTER_KERNELS.get()
@@ -76,9 +80,55 @@ macro_rules! install_rgpot_kernels {
             cluster_lj: ::rgpot_pair::cluster_lj,
             cambridge_morse: ::rgpot_pair::cambridge_morse,
             binary_lj: ::rgpot_pair::binary_lj,
+            tip4p_sites: ::rgpot_pair::tip4p_sites,
             gupta: ::rgpot_pair::gupta,
         })
     };
+}
+
+/// Parameters of one TIP4P site evaluation.
+#[derive(Debug, Clone, Copy)]
+pub struct Tip4pSites {
+    /// Attractive coefficient. Used when `use_epsilon` is false.
+    pub c6: f64,
+    /// Repulsive coefficient. Used when `use_epsilon` is false.
+    pub c12: f64,
+    /// Well depth. Used when `use_epsilon` is true.
+    pub epsilon: f64,
+    /// Diameter. Used when `use_epsilon` is true.
+    pub sigma: f64,
+    /// Select the epsilon and sigma oxygen term.
+    pub use_epsilon: bool,
+    /// Coulomb prefactor.
+    pub coulomb: f64,
+    /// Hydrogen charge.
+    pub q_h: f64,
+    /// M-site charge.
+    pub q_m: f64,
+}
+
+/// TIP4P site energy and gradient. `sites` is molecule-major O, H, H, M.
+pub fn tip4p_site_gradient(cfg: Tip4pSites, sites: &[f64]) -> (f64, Vec<f64>) {
+    assert!(
+        sites.len().is_multiple_of(12) && !sites.is_empty(),
+        "TIP4P sites are 12 coordinates per molecule"
+    );
+    let kernel = cluster_kernels()
+        .expect("TIP4P needs the rgpot kernels: call anneal_core::install_rgpot_kernels!()");
+    let mut gradient = vec![0.0; sites.len()];
+    let energy = (kernel.tip4p_sites)(
+        cfg.use_epsilon,
+        cfg.c6,
+        cfg.c12,
+        cfg.epsilon,
+        cfg.sigma,
+        cfg.coulomb,
+        cfg.q_h,
+        cfg.q_m,
+        sites,
+        &mut gradient,
+    );
+    (energy, gradient)
 }
 
 /// A pairwise cluster potential over `n` free points in three dimensions.
