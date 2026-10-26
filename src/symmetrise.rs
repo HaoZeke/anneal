@@ -93,6 +93,76 @@ fn normalise(v: [f64; 3]) -> Option<[f64; 3]> {
     Some([v[0] / n, v[1] / n, v[2] / n])
 }
 
+fn centre_points(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
+    let c = centroid(x, n);
+    let mut rel = vec![[0.0; 3]; n];
+    for a in 0..n {
+        rel[a] = [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]];
+    }
+    rel
+}
+
+fn nearest_sq(rel: &[[f64; 3]], image: [f64; 3]) -> f64 {
+    let mut best = f64::INFINITY;
+    for point in rel {
+        let d = (image[0] - point[0]).powi(2)
+            + (image[1] - point[1]).powi(2)
+            + (image[2] - point[2]).powi(2);
+        if d < best {
+            best = d;
+        }
+    }
+    best
+}
+
+/// Root-mean-square nearest-image distance, or `None` once that running
+/// figure, still divided by the full point count, has met `tolerance`.
+///
+/// Later images add a non-negative squared distance, so a partial sum that
+/// has already reached `tolerance` cannot fall back under it. Callers that
+/// keep only operations below `tolerance` therefore see the same set, and
+/// the deviation stored for a kept operation is the full sum.
+fn rotation_rms(rel: &[[f64; 3]], axis: [f64; 3], order: usize, tolerance: f64) -> Option<f64> {
+    let n = rel.len();
+    if n == 0 || order < 2 {
+        return None;
+    }
+    let angle = 2.0 * std::f64::consts::PI / order as f64;
+    let mut total = 0.0;
+    let denom = n as f64;
+    let finite = tolerance.is_finite();
+    for point in rel {
+        total += nearest_sq(rel, rotate(*point, axis, angle));
+        if finite && (total / denom).sqrt() >= tolerance {
+            return None;
+        }
+    }
+    Some((total / denom).sqrt())
+}
+
+fn plane_rms(rel: &[[f64; 3]], axis: [f64; 3], tolerance: f64) -> Option<f64> {
+    let n = rel.len();
+    if n == 0 {
+        return None;
+    }
+    let mirror = mirror_matrix(axis);
+    let mut total = 0.0;
+    let denom = n as f64;
+    let finite = tolerance.is_finite();
+    for point in rel {
+        let image = [
+            mirror[0][0] * point[0] + mirror[0][1] * point[1] + mirror[0][2] * point[2],
+            mirror[1][0] * point[0] + mirror[1][1] * point[1] + mirror[1][2] * point[2],
+            mirror[2][0] * point[0] + mirror[2][1] * point[1] + mirror[2][2] * point[2],
+        ];
+        total += nearest_sq(rel, image);
+        if finite && (total / denom).sqrt() >= tolerance {
+            return None;
+        }
+    }
+    Some((total / denom).sqrt())
+}
+
 /// Root-mean-square distance between each point and its nearest image under a
 /// rotation of `order` about `axis`.
 ///
@@ -100,26 +170,10 @@ fn normalise(v: [f64; 3]) -> Option<[f64; 3]> {
 /// approximate symmetry rather than of exact symmetry: an exactly symmetric
 /// structure permutes onto itself and every distance is zero.
 pub fn deviation(x: ArrayView1<f64>, n: usize, axis: [f64; 3], order: usize) -> f64 {
-    if n == 0 || order < 2 {
+    if n == 0 || order < 2 || x.len() < 3 * n {
         return f64::INFINITY;
     }
-    let c = centroid(x, n);
-    let angle = 2.0 * std::f64::consts::PI / order as f64;
-    let mut total = 0.0;
-    for a in 0..n {
-        let v = [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]];
-        let w = rotate(v, axis, angle);
-        let mut best = f64::INFINITY;
-        for b in 0..n {
-            let u = [x[3 * b] - c[0], x[3 * b + 1] - c[1], x[3 * b + 2] - c[2]];
-            let d = (w[0] - u[0]).powi(2) + (w[1] - u[1]).powi(2) + (w[2] - u[2]).powi(2);
-            if d < best {
-                best = d;
-            }
-        }
-        total += best;
-    }
-    (total / n as f64).sqrt()
+    rotation_rms(&centre_points(x, n), axis, order, f64::INFINITY).unwrap_or(f64::INFINITY)
 }
 
 /// How far `x` is from being symmetric under the plane whose normal is `axis`.
@@ -128,30 +182,10 @@ pub fn deviation(x: ArrayView1<f64>, n: usize, axis: [f64; 3], order: usize) -> 
 /// and matched to its nearest partner, and the root-mean-square of those
 /// distances is what "approximately symmetric" means here.
 pub fn plane_deviation(x: ArrayView1<f64>, n: usize, axis: [f64; 3]) -> f64 {
-    if n == 0 {
+    if n == 0 || x.len() < 3 * n {
         return f64::INFINITY;
     }
-    let c = centroid(x, n);
-    let m = mirror_matrix(axis);
-    let mut total = 0.0;
-    for a in 0..n {
-        let v = [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]];
-        let w = [
-            m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
-            m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
-            m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
-        ];
-        let mut best = f64::INFINITY;
-        for b in 0..n {
-            let u = [x[3 * b] - c[0], x[3 * b + 1] - c[1], x[3 * b + 2] - c[2]];
-            let d = (w[0] - u[0]).powi(2) + (w[1] - u[1]).powi(2) + (w[2] - u[2]).powi(2);
-            if d < best {
-                best = d;
-            }
-        }
-        total += best;
-    }
-    (total / n as f64).sqrt()
+    plane_rms(&centre_points(x, n), axis, f64::INFINITY).unwrap_or(f64::INFINITY)
 }
 
 /// Axes worth testing, taken from the structure rather than at random.
@@ -200,11 +234,17 @@ fn candidate_axes(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
 /// found by [`detect_all`], which exists to build a group rather than to push a
 /// structure along one operation.
 pub fn detect(x: ArrayView1<f64>, n: usize, orders: &[usize], tolerance: f64) -> Option<Candidate> {
+    let rel = centre_points(x, n);
     let mut best: Option<Candidate> = None;
     for axis in candidate_axes(x, n) {
         for &order in orders {
-            let d = deviation(x, n, axis, order);
-            if d < tolerance && best.map(|b| d < b.deviation).unwrap_or(true) {
+            let Some(d) = rotation_rms(&rel, axis, order, tolerance) else {
+                continue;
+            };
+            if best
+                .as_ref()
+                .is_none_or(|incumbent| d < incumbent.deviation)
+            {
                 best = Some(Candidate {
                     axis,
                     order,
@@ -229,21 +269,21 @@ pub fn detect_all(
     orders: &[usize],
     tolerance: f64,
 ) -> Vec<Candidate> {
+    let rel = centre_points(x, n);
     let mut out = Vec::new();
     for axis in candidate_axes(x, n) {
         for &order in orders {
-            let d = deviation(x, n, axis, order);
-            if d < tolerance {
-                out.push(Candidate {
-                    axis,
-                    order,
-                    improper: false,
-                    deviation: d,
-                });
-            }
+            let Some(d) = rotation_rms(&rel, axis, order, tolerance) else {
+                continue;
+            };
+            out.push(Candidate {
+                axis,
+                order,
+                improper: false,
+                deviation: d,
+            });
         }
-        let d = plane_deviation(x, n, axis);
-        if d < tolerance {
+        if let Some(d) = plane_rms(&rel, axis, tolerance) {
             out.push(Candidate {
                 axis,
                 order: 1,
@@ -859,6 +899,73 @@ mod tests {
         // No five-fold axis anywhere in an octahedron.
         let d = deviation(x.view(), 6, [0.0, 0.0, 1.0], 5);
         assert!(d > 0.1, "a five-fold axis gave {d}, which is too small");
+    }
+
+    /// Stopping a scan once the running root-mean-square has met the
+    /// tolerance has to keep the same operations, with the same deviation
+    /// bits, as measuring every image. A looser stored deviation would
+    /// reorder the generators and move a later quench.
+    #[test]
+    fn a_stopped_scan_keeps_the_operations_under_the_tolerance() {
+        let clouds = [
+            jitter(&octahedron(1.0), 0.02),
+            jitter(&octahedron(1.2), 0.35),
+        ];
+        for x in &clouds {
+            let n = x.len() / 3;
+            let tolerance = 0.5;
+            let found = detect_all(x.view(), n, &[2, 3, 4, 5, 6], tolerance);
+            let mut expected = Vec::new();
+            for axis in candidate_axes(x.view(), n) {
+                for &order in &[2usize, 3, 4, 5, 6] {
+                    let d = deviation(x.view(), n, axis, order);
+                    if d < tolerance {
+                        expected.push((axis, order, false, d));
+                    }
+                }
+                let d = plane_deviation(x.view(), n, axis);
+                if d < tolerance {
+                    expected.push((axis, 1, true, d));
+                }
+            }
+            expected.sort_by(|left, right| {
+                left.3
+                    .partial_cmp(&right.3)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            assert_eq!(found.len(), expected.len());
+            for (cand, (axis, order, improper, deviation)) in found.iter().zip(expected.iter()) {
+                assert_eq!(cand.axis, *axis);
+                assert_eq!(cand.order, *order);
+                assert_eq!(cand.improper, *improper);
+                assert_eq!(cand.deviation, *deviation);
+            }
+        }
+        // The centred coordinates are computed once. That has to match the
+        // deviation the inner loop used to recompute on every pair, or a
+        // boundary operation changes the generator order.
+        let x = &clouds[1];
+        let n = x.len() / 3;
+        let axis = [0.0, 0.0, 1.0];
+        let order = 4;
+        let c = centroid(x.view(), n);
+        let angle = 2.0 * std::f64::consts::PI / order as f64;
+        let mut total = 0.0;
+        for a in 0..n {
+            let v = [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]];
+            let w = rotate(v, axis, angle);
+            let mut best = f64::INFINITY;
+            for b in 0..n {
+                let u = [x[3 * b] - c[0], x[3 * b + 1] - c[1], x[3 * b + 2] - c[2]];
+                let d = (w[0] - u[0]).powi(2) + (w[1] - u[1]).powi(2) + (w[2] - u[2]).powi(2);
+                if d < best {
+                    best = d;
+                }
+            }
+            total += best;
+        }
+        let reference = (total / n as f64).sqrt();
+        assert_eq!(deviation(x.view(), n, axis, order), reference);
     }
 
     /// The groups the hard structures actually have, which proper rotations alone
