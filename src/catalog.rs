@@ -38,7 +38,7 @@ pub use calibration::{
 pub use census::{
     BasinCensus, BasinId, CensusEntry, CensusError, CensusObservation, PRODUCTION_MAX_UNSEEN_MASS,
     PRODUCTION_MINIMUM_VISITS, PRODUCTION_SINGLETON_BUDGET, PRODUCTION_UNSEEN_MASS_DEN,
-    PRODUCTION_UNSEEN_MASS_NUM, gt_min_visits,
+    PRODUCTION_UNSEEN_MASS_NUM, WitnessId, gt_min_visits,
 };
 pub use event::{Event, EventCatalog, TopologyRecord};
 pub use hyperband::{
