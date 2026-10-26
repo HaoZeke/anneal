@@ -1676,61 +1676,7 @@ fn ico_axes() -> [[f64; 3]; 6] {
 /// not change which points are matched. An index-order greedy pass does.
 #[cfg_attr(feature = "ira", allow(dead_code))]
 fn hungarian(cost: &[f64], n: usize) -> Vec<usize> {
-    let mut u = vec![0.0; n + 1];
-    let mut v = vec![0.0; n + 1];
-    let mut p = vec![0usize; n + 1];
-    let mut way = vec![0usize; n + 1];
-    for i in 1..=n {
-        p[0] = i;
-        let mut j0 = 0usize;
-        let mut minv = vec![f64::INFINITY; n + 1];
-        let mut used = vec![false; n + 1];
-        loop {
-            used[j0] = true;
-            let i0 = p[j0];
-            let mut delta = f64::INFINITY;
-            let mut j1 = 0usize;
-            for j in 1..=n {
-                if used[j] {
-                    continue;
-                }
-                let cur = cost[(i0 - 1) * n + (j - 1)] - u[i0] - v[j];
-                if cur < minv[j] {
-                    minv[j] = cur;
-                    way[j] = j0;
-                }
-                if minv[j] < delta {
-                    delta = minv[j];
-                    j1 = j;
-                }
-            }
-            for j in 0..=n {
-                if used[j] {
-                    u[p[j]] += delta;
-                    v[j] -= delta;
-                } else {
-                    minv[j] -= delta;
-                }
-            }
-            j0 = j1;
-            if p[j0] == 0 {
-                break;
-            }
-        }
-        loop {
-            let j1 = way[j0];
-            p[j0] = p[j1];
-            j0 = j1;
-            if j0 == 0 {
-                break;
-            }
-        }
-    }
-    let mut perm = vec![0usize; n];
-    for j in 1..=n {
-        perm[p[j] - 1] = j - 1;
-    }
-    perm
+    crate::assignment::minimum_cost_assignment(cost, n).unwrap_or_else(|| (0..n).collect())
 }
 
 /// Columns matched to each row of `x` under the minimum sum of squared distances.
@@ -1833,6 +1779,42 @@ fn candidate_axes(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
     axes
 }
 
+/// Lower bound on the fivefold RMS, from the sum of nearest-image distances.
+///
+/// An optimal assignment costs at least the sum of each atom's nearest image,
+/// so an axis whose bound already misses the caller's cut needs no assignment.
+fn assignment_lower_bound(x: ArrayView1<f64>, axis: [f64; 3]) -> f64 {
+    let n = x.len() / 3;
+    if n == 0 {
+        return 0.0;
+    }
+    let com = com_of(x);
+    let rmat = rotation_about(axis, 2.0 * PI / 5.0);
+    let mut centred = vec![[0.0; 3]; n];
+    let mut turned = vec![[0.0; 3]; n];
+    for i in 0..n {
+        let point = [
+            x[3 * i] - com[0],
+            x[3 * i + 1] - com[1],
+            x[3 * i + 2] - com[2],
+        ];
+        centred[i] = point;
+        turned[i] = rot_apply(&rmat, point);
+    }
+    let mut sum = 0.0;
+    for point in &centred {
+        let mut nearest = f64::INFINITY;
+        for image in &turned {
+            let d0 = point[0] - image[0];
+            let d1 = point[1] - image[1];
+            let d2 = point[2] - image[2];
+            nearest = nearest.min(d0 * d0 + d1 * d1 + d2 * d2);
+        }
+        sum += nearest;
+    }
+    (sum / n as f64).sqrt()
+}
+
 fn residual_about(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
     let n = x.len() / 3;
     let com = com_of(x);
@@ -1903,6 +1885,9 @@ fn fivefold_residual(x: ArrayView1<f64>) -> (f64, [f64; 3], Array1<f64>) {
     let mut best_ax = [0.0, 0.0, 1.0];
     let mut best_dr = Array1::zeros(x.len());
     for ax in candidate_axes(x) {
+        if assignment_lower_bound(x, ax) >= best_d {
+            continue;
+        }
         let (d5, dr) = residual_about(x, ax);
         if d5 < best_d {
             best_d = d5;
@@ -2231,11 +2216,32 @@ pub fn step_away_fivefold<R: Rng + ?Sized>(
     if n <= 13 {
         return fivefold_probe(x, rmsd).y;
     }
-    let table = fivefold_axis_table(x);
-    let good: Vec<([f64; 3], f64)> = table
-        .into_iter()
-        .filter(|(_, d)| *d < FIVEFOLD_AXIS)
-        .collect();
+    // The nearest-image sum is a lower bound on the assignment cost, so an
+    // axis whose bound already misses the cut cannot enter the good set.
+    // Counting those first avoids the assignment when fewer than two axes
+    // can possibly qualify, which is the same yield as evaluating them.
+    let axes = candidate_axes(x);
+    let mut viable = Vec::new();
+    for axis in axes {
+        if assignment_lower_bound(x.view(), axis) < FIVEFOLD_AXIS {
+            viable.push(axis);
+        }
+    }
+    if viable.len() < FIVEFOLD_MIN_AXES {
+        return x.to_owned();
+    }
+    let mut good = Vec::new();
+    for axis in viable {
+        let length = residual_about(x, axis).0;
+        if length < FIVEFOLD_AXIS {
+            good.push((axis, length));
+        }
+    }
+    good.sort_by(|left, right| {
+        left.1
+            .partial_cmp(&right.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     if good.len() < FIVEFOLD_MIN_AXES {
         return x.to_owned();
     }
