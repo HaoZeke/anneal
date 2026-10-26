@@ -1136,6 +1136,9 @@ fn answer_gradient_ok(cfg: &Config, gradient: ArrayView1<f64>, dimensions: usize
             dimensions,
             crate::methods::rigid_quench::SLOPPY_RMS,
         )
+    } else if let Some(rms) = cfg.quench_rms.filter(|rms| rms.is_finite() && *rms > 0.0) {
+        gradient_is_converged(gradient, dimensions, cfg.record_gradient)
+            || crate::methods::rigid_quench::rms_is_converged(gradient, dimensions, rms)
     } else {
         gradient_is_converged(gradient, dimensions, cfg.record_gradient)
     }
@@ -2340,6 +2343,9 @@ where
     let mut symmetry_gain = 0.0_f64;
     let mut continuous_symmetry_attempts = 0usize;
     let mut continuous_symmetry_quenches = 0usize;
+    // Quenched energy at the last continuous-symmetry projection.
+    // NaN until the first one, so that call always runs.
+    let mut last_symmetry_energy = f64::NAN;
     let mut continuous_symmetry_gain = 0.0_f64;
     let mut quiet = 0usize;
     let mut longest_quiet = 0usize;
@@ -3317,93 +3323,106 @@ where
             }
         };
         if continuous_symmetry_due {
-            continuous_symmetry_attempts += 1;
-            let classes = continuous_symmetry_classes
-                .as_deref()
-                .expect("enabled continuous symmetry has equivalence classes");
-            let projection = match cfg.continuous_symmetry {
-                ContinuousSymmetry::Inversion { .. } => {
-                    crate::continuous_symmetry::project_inversion(x.view(), classes)
-                        .map(|projected| projected.coordinates)
-                }
-                ContinuousSymmetry::Measure { .. } => {
-                    crate::csm::propose(x.view(), classes).map(|projected| projected.coordinates)
-                }
-                ContinuousSymmetry::Off => None,
-            };
-            let symmetry_action = match cfg.continuous_symmetry {
-                ContinuousSymmetry::Measure { .. } => "continuous-symmetry-csm",
-                _ => "continuous-symmetry-ci",
-            };
-            if let Some(projection) = projection {
-                continuous_symmetry_quenches += 1;
-                let from_energy = e;
-                let from_state = x.clone();
-                let from_gradient = current_validation_gradient.clone();
-                let (candidate_energy, candidate) =
-                    relax(ledger, projection.view(), cfg.relax_steps);
-                let candidate_sane = quench_is_sane(cfg, candidate_energy, candidate.view());
-                let gradient_required = grad.is_some();
-                let candidate_gradient = candidate_sane.then(|| {
-                    grad.as_deref_mut().and_then(|gradient| {
-                        gradient(ledger, candidate.view()).filter(|values| {
-                            answer_gradient_ok(cfg, values.view(), candidate.len())
+            // GMIN's `mc.f` calls SYMMETRY when the quench count is a
+            // multiple of NSYMINTERVAL and the energy changed since
+            // ELASTSYM. `symmetry.f90` returns immediately when NSYMCALL
+            // is already above one, so a second call at the same minimum
+            // does no orbit work. The sloppy-quench preset is the one
+            // that adopts that gate. Below 98 points the projection stays
+            // on its interval, and the measured smaller-cluster walks do
+            // not move.
+            let same_minimum = cfg.quench_rms.is_some()
+                && last_symmetry_energy.is_finite()
+                && (e - last_symmetry_energy).abs() <= 1e-8;
+            if !same_minimum {
+                last_symmetry_energy = e;
+                continuous_symmetry_attempts += 1;
+                let classes = continuous_symmetry_classes
+                    .as_deref()
+                    .expect("enabled continuous symmetry has equivalence classes");
+                let projection = match cfg.continuous_symmetry {
+                    ContinuousSymmetry::Inversion { .. } => {
+                        crate::continuous_symmetry::project_inversion(x.view(), classes)
+                            .map(|projected| projected.coordinates)
+                    }
+                    ContinuousSymmetry::Measure { .. } => crate::csm::propose(x.view(), classes)
+                        .map(|projected| projected.coordinates),
+                    ContinuousSymmetry::Off => None,
+                };
+                let symmetry_action = match cfg.continuous_symmetry {
+                    ContinuousSymmetry::Measure { .. } => "continuous-symmetry-csm",
+                    _ => "continuous-symmetry-ci",
+                };
+                if let Some(projection) = projection {
+                    continuous_symmetry_quenches += 1;
+                    let from_energy = e;
+                    let from_state = x.clone();
+                    let from_gradient = current_validation_gradient.clone();
+                    let (candidate_energy, candidate) =
+                        relax(ledger, projection.view(), cfg.relax_steps);
+                    let candidate_sane = quench_is_sane(cfg, candidate_energy, candidate.view());
+                    let gradient_required = grad.is_some();
+                    let candidate_gradient = candidate_sane.then(|| {
+                        grad.as_deref_mut().and_then(|gradient| {
+                            gradient(ledger, candidate.view()).filter(|values| {
+                                answer_gradient_ok(cfg, values.view(), candidate.len())
+                            })
                         })
-                    })
-                });
-                let candidate_gradient = candidate_gradient.flatten();
-                let recordable =
-                    candidate_sane && (!gradient_required || candidate_gradient.is_some());
-                let improved = recordable && candidate_energy < ledger.best - 1e-10;
-                if recordable {
-                    ledger.record(candidate_energy, candidate.view());
-                } else {
-                    unconverged_records += 1;
-                }
-                let adopted = recordable && candidate_energy < e - 1e-10;
-                if adopted {
-                    continuous_symmetry_gain += e - candidate_energy;
-                    let from_basin = here.unwrap_or_else(|| identity.basin_of(x.view()));
-                    let reached = identity.basin_of(candidate.view());
-                    adopt_minimum!(
-                        candidate_energy,
-                        candidate.clone(),
-                        candidate_gradient.clone(),
-                        Some(reached),
-                        AdoptionHistory::Fresh,
-                        Some((Some(from_basin), reached)),
-                        None,
-                        hops
-                    );
-                    soft_cache = None;
-                    basin_entry = None;
-                    quiet = 0;
-                    if improved && improvements.len() < 512 {
-                        improvements.push((
-                            hops,
-                            ledger.spent(),
-                            bias.n_basins(),
+                    });
+                    let candidate_gradient = candidate_gradient.flatten();
+                    let recordable =
+                        candidate_sane && (!gradient_required || candidate_gradient.is_some());
+                    let improved = recordable && candidate_energy < ledger.best - 1e-10;
+                    if recordable {
+                        ledger.record(candidate_energy, candidate.view());
+                    } else {
+                        unconverged_records += 1;
+                    }
+                    let adopted = recordable && candidate_energy < e - 1e-10;
+                    if adopted {
+                        continuous_symmetry_gain += e - candidate_energy;
+                        let from_basin = here.unwrap_or_else(|| identity.basin_of(x.view()));
+                        let reached = identity.basin_of(candidate.view());
+                        adopt_minimum!(
                             candidate_energy,
-                        ));
+                            candidate.clone(),
+                            candidate_gradient.clone(),
+                            Some(reached),
+                            AdoptionHistory::Fresh,
+                            Some((Some(from_basin), reached)),
+                            None,
+                            hops
+                        );
+                        soft_cache = None;
+                        basin_entry = None;
+                        quiet = 0;
+                        if improved && improvements.len() < 512 {
+                            improvements.push((
+                                hops,
+                                ledger.spent(),
+                                bias.n_basins(),
+                                candidate_energy,
+                            ));
+                        }
+                    }
+                    if recordable {
+                        accepted_transitions.push(AcceptedTransition {
+                            hop: hops,
+                            action: symmetry_action.to_owned(),
+                            from_energy,
+                            to_energy: candidate_energy,
+                            from_state,
+                            from_gradient,
+                            to_state: candidate,
+                            to_gradient: candidate_gradient,
+                            validated: true,
+                            adopted,
+                        });
                     }
                 }
-                if recordable {
-                    accepted_transitions.push(AcceptedTransition {
-                        hop: hops,
-                        action: symmetry_action.to_owned(),
-                        from_energy,
-                        to_energy: candidate_energy,
-                        from_state,
-                        from_gradient,
-                        to_state: candidate,
-                        to_gradient: candidate_gradient,
-                        validated: true,
-                        adopted,
-                    });
+                if ledger.remaining() == 0 {
+                    break;
                 }
-            }
-            if ledger.remaining() == 0 {
-                break;
             }
         }
         // A new incumbent, including one just produced by the projection
@@ -6845,6 +6864,14 @@ mod tests {
         let want = crate::screen::cost_asymmetric_threshold(der.screen_steps, der.relax_steps);
         assert!((der.bayes_threshold - want).abs() < 1e-12);
         assert!((der.bayes_threshold - 7.0 / 15.0).abs() < 1e-12);
+        assert!(Config::recommended(38).quench_rms.is_none());
+        assert!(Config::recommended(75).quench_rms.is_none());
+        assert!(Config::derived(75).quench_rms.is_none());
+        assert_eq!(Config::recommended(98).quench_rms, Some(0.007));
+        assert_eq!(Config::derived(150).quench_rms, Some(0.007));
+        assert!(Config::for_cluster(98).quench_rms.is_none());
+        assert!(Config::communicating(98).quench_rms.is_none());
+        assert!(Config::for_tip4p(8).quench_rms.is_none());
     }
 
     #[test]

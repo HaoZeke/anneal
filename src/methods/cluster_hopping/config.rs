@@ -932,6 +932,20 @@ pub struct Config {
     /// comes back near 1e-6, and tight enough to bar a partial quench, which
     /// comes back near 1e-1 or worse.
     pub record_gradient: f64,
+    /// Root-mean-square Cartesian force at which a search quench may stop.
+    ///
+    /// `None` keeps the infinity-norm stop at [`Config::record_gradient`].
+    /// `Some(rms)` is GMIN `SLOPPYCONV`: the minimiser stops when
+    /// `sqrt(g·g / (3N))` is at most `rms`, and a quench within 0.05 of
+    /// the incumbent or the ledger target is then polished back to the
+    /// infinity-norm record tolerance. A sloppy stop on Lennard-Jones was
+    /// measured as much as 0.008 above that tight energy, which is wider
+    /// than the 0.001 hit window. Published LJ75, LJ98, and LJ150 inputs
+    /// use 0.007. [`Config::recommended`] sets that value at 98 points and
+    /// above, and leaves it unset below, so LJ38, LJ55, and LJ75 keep the
+    /// measured walk. [`Config::for_cluster`], [`Config::communicating`],
+    /// and the rigid and molecular presets leave it unset.
+    pub quench_rms: Option<f64>,
     /// Whether every quenched energy is kept, not only the improving ones:
     /// the sample [`crate::tail`] fits an endpoint to. Truncated by
     /// [`Config::screen_margin`], since the full relaxation runs only where
@@ -1127,6 +1141,13 @@ impl Config {
             interval: 10,
             reseed_hops: 5,
         };
+        // Published GMIN LJ98 and LJ150 inputs stop a search quench at
+        // SLOPPYCONV 0.007 and call SYMMETRY again only after the quenched
+        // energy changes. Both stay off below 98 points: those sizes already
+        // hit, and a looser stop would be a different walk.
+        if n_points >= 98 {
+            cfg.quench_rms = Some(0.007);
+        }
         cfg
     }
 
@@ -1390,6 +1411,7 @@ impl Config {
             screen_steps: 25,
             adaptive_screen: false,
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
+            quench_rms: None,
             trace_quenched: false,
             polish_records: 0,
             surrogate_tolerance: 0.5,
