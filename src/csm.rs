@@ -170,8 +170,26 @@ fn centre_and_scale(x: ArrayView1<'_, f64>, n: usize) -> Option<(Vec<[f64; 3]>, 
     Some((centred, centroid, max_r))
 }
 
+fn is_identity(op: &[[f64; 3]; 3]) -> bool {
+    for row in 0..3 {
+        for col in 0..3 {
+            let want = if row == col { 1.0 } else { 0.0 };
+            if (op[row][col] - want).abs() > 1e-12 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 fn match_operated(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option<Vec<usize>> {
     let n = classes.len();
+    // The identity sends every atom to itself, so the diagonal is a minimum
+    // of cost zero and the assignment problem is unnecessary.
+    if is_identity(op) {
+        return Some((0..n).collect());
+    }
+    let images: Vec<[f64; 3]> = y.iter().map(|point| mul_vec(op, *point)).collect();
     let mut blocks: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
     for (atom, &class) in classes.iter().enumerate() {
         blocks.entry(class).or_default().push(atom);
@@ -182,10 +200,9 @@ fn match_operated(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option
         let mut costs = vec![0.0; width * width];
         for (row_i, &row) in atoms.iter().enumerate() {
             for (col_i, &col) in atoms.iter().enumerate() {
-                let image = mul_vec(op, y[col]);
                 let mut squared = 0.0;
                 for axis in 0..3 {
-                    let delta = y[row][axis] - image[axis];
+                    let delta = y[row][axis] - images[col][axis];
                     squared += delta * delta;
                 }
                 costs[row_i * width + col_i] = squared;
