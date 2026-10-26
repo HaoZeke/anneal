@@ -1018,7 +1018,10 @@ def test_cluster_search_probe_follows_the_callback_rules():
 
     def infinite_far_out(x):
         p = np.asarray(x).reshape(-1, 3)
-        return float("inf") if np.max(np.abs(p)) > 1.2 else lj_cluster_energy(x)
+        # A relaxed 13-point cluster sits outside a half-width of 1.2, so
+        # every quench there is infinite and the eight starts are exhausted.
+        # The box has to contain the cluster the relaxation actually reaches.
+        return float("inf") if np.max(np.abs(p)) > 8.0 else lj_cluster_energy(x)
 
     out = cluster_search(infinite_far_out, lj_cluster_gradient, 13, 2000, seed=1)
     assert isinstance(out["best_energy"], float)
