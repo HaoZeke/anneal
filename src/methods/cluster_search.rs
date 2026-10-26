@@ -21,7 +21,10 @@ use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 use crate::methods::cluster_hopping::min_pair_distance;
 #[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::structure_is_sane;
-use crate::methods::cluster_hopping::{Config, Ledger, Outcome, optimize_with_energy_gradient};
+use crate::methods::cluster_hopping::{
+    ChainCheckpoint, CheckpointAction, Config, Ledger, Outcome, optimize_with_energy_gradient,
+    run_with_energy_gradient_at_checkpoints,
+};
 use crate::methods::warm_lbfgs::WarmLbfgs;
 use crate::quench::{QuenchPredictor, Verdict};
 use eindir_core::gradient::DifferentiableObjective;
@@ -275,6 +278,9 @@ where
         // check stays on every other path, where the answer is not known.
         if early {
             stats.capped += 1;
+            // The water census reads these boundaries. A screened descent is
+            // not a minimum, so it is recorded without a validation gradient.
+            led.record_quench_boundary(before, f, xr.clone(), None);
             return (f, xr);
         }
         // Charged like any other evaluation: asking whether a relaxation
@@ -282,10 +288,15 @@ where
         // counts evaluations has to count this one.
         let mut f = f;
         let mut xr = xr;
+        let mut validated = None;
         let mut converged = if led.charge() {
             stats.check_charged += 1;
             let g = objective.grad(xr.view());
-            gradient_is_converged(g.view(), cfg.record_gradient)
+            let ok = gradient_is_converged(g.view(), cfg.record_gradient);
+            if ok {
+                validated = Some(g);
+            }
+            ok
         } else {
             false
         };
@@ -306,8 +317,15 @@ where
             converged = if led.charge() {
                 stats.check_charged += 1;
                 let g = objective.grad(xr.view());
-                gradient_is_converged(g.view(), cfg.record_gradient)
+                let ok = gradient_is_converged(g.view(), cfg.record_gradient);
+                if ok {
+                    validated = Some(g);
+                } else {
+                    validated = None;
+                }
+                ok
             } else {
+                validated = None;
                 false
             };
             let extra = led.spent() - before - cost;
@@ -319,7 +337,11 @@ where
             stats.converged += 1;
         } else {
             stats.capped += 1;
+            validated = None;
         }
+        // Good-Turing retires from the checkpoint's quench list. Leaving this
+        // empty made that stop observe nothing and run out the budget.
+        led.record_quench_boundary(before, f, xr.clone(), validated);
         (f, xr)
     }
 }
@@ -414,6 +436,56 @@ where
             Some(&mut grad),
             Some(&mut energy_grad),
             &mut rng,
+        )
+    };
+    (out, stats)
+}
+
+/// [`search_from`] with a checkpoint after each block of charged work.
+///
+/// The water Good-Turing arm retires from this hook once the census of
+/// validated quenches is saturated. Other arms pass a checkpoint that
+/// continues.
+pub fn search_from_with_checkpoint<O, H>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    start: ArrayView1<f64>,
+    seed: u64,
+    checkpoint_interval: usize,
+    checkpoint: &mut H,
+) -> (Outcome, RelaxStats)
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+    H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
+{
+    let mut stats = RelaxStats::default();
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let out = {
+        let mut relax = warm_relax(objective, cfg, &mut stats, seed);
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+            if !led.charge() {
+                return None;
+            }
+            Some(objective.grad(x))
+        };
+        let mut energy_grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if !led.charge() {
+                    return None;
+                }
+                Some(objective.value_and_gradient(x))
+            };
+        run_with_energy_gradient_at_checkpoints(
+            cfg,
+            start,
+            ledger,
+            &mut relax,
+            Some(&mut grad),
+            Some(&mut energy_grad),
+            &mut rng,
+            checkpoint_interval,
+            checkpoint,
         )
     };
     (out, stats)
@@ -1145,6 +1217,42 @@ mod tests {
         let gradient = Array1::from_vec(vec![7.2e-5, -3.0e-5]);
         assert!(gradient_is_converged(gradient.view(), 1.0e-3));
         assert!(!gradient_is_converged(gradient.view(), 1.0e-5));
+    }
+
+    /// The water Good-Turing arm retires only from quench boundaries. A search
+    /// that never records them cannot saturate, so this is the hook's input.
+    #[test]
+    fn production_quenches_reach_the_census_hook() {
+        use crate::methods::cluster_hopping::{ChainCheckpoint, CheckpointAction};
+
+        let potential = PairPotential::lennard_jones(5);
+        let cfg = Config::for_cluster(5);
+        let mut ledger = Ledger::new(180);
+        let start = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.2, 0.2, 0.0, 0.2, 1.3, 0.1, -0.4, 0.5, 1.1, 0.7, -0.6, 0.8,
+        ]);
+        let mut observed = 0usize;
+        let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+            observed += snapshot.quench_boundaries().len();
+            CheckpointAction::Continue
+        };
+        search_from_with_checkpoint(
+            &potential,
+            &cfg,
+            &mut ledger,
+            start.view(),
+            1,
+            1,
+            &mut checkpoint,
+        );
+        assert!(
+            !ledger.quench_boundaries().is_empty(),
+            "search recorded no quench boundary"
+        );
+        assert!(
+            observed > 0,
+            "checkpoint saw none of the recorded boundaries"
+        );
     }
 
     #[cfg(feature = "bank-rpc")]
