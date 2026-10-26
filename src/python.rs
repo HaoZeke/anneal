@@ -3511,8 +3511,8 @@ fn rigid_probe(
 ///     centre and angle-axis per body). Interleaved rotations are negated
 ///     at the boundary because that angle-axis map is the opposite sense.
 ///   target: stop once a recorded energy is at or below this value.
-///     A Lennard-Jones limit equal to the LJ75 or LJ98 icosahedral shelf
-///     is refused. A limit above the published minimum plus 0.001 warns.
+///     A Lennard-Jones limit within 0.001 of the LJ75 or LJ98 icosahedral
+///     shelf is refused. A limit above the published minimum plus 0.001 warns.
 ///   water_sites: optional flat 9-vector of the O, H, H positions of one
 ///     rigid water in its body frame, in angstrom, about the point its
 ///     rotation turns about. When set, `n` counts molecules and the state is
@@ -3795,13 +3795,14 @@ fn cluster_search(
     Ok(dict.into())
 }
 
-/// Refuse a Lennard-Jones halt limit that is a known icosahedral shelf.
+/// Refuse a Lennard-Jones halt limit within 0.001 of a known icosahedral shelf.
 ///
 /// `n` is the number of atoms and `limit` is the energy at which a search
-/// stops (`energy <= limit`). The LJ75 C1 shelf and the LJ98 Cs shelf are
-/// errors. When the published minimum for `n` is known, a limit above that
-/// minimum plus the harness window of 0.001 is kept and a warning is written
-/// to stderr. The minimum itself and the minimum plus that window are quiet.
+/// stops (`energy <= limit`). The closed ball around the LJ75 C1 shelf and
+/// the LJ98 Cs shelf is an error. When the published minimum for `n` is
+/// known, a limit above that minimum plus the harness window of 0.001 is
+/// kept and a warning is written to stderr. The minimum itself and the
+/// minimum plus that window are quiet, and both sit outside the shelf ball.
 #[pyfunction]
 fn check_stop_limit(n: usize, limit: f64) -> PyResult<f64> {
     crate::published_minima::check_stop_limit(n, limit).map_err(PyValueError::new_err)
