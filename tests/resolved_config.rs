@@ -33,3 +33,15 @@ fn resolved_configuration_is_stable_and_mode_sensitive() {
         off.resolved_sha256().unwrap()
     );
 }
+
+#[test]
+fn default_witness_ceiling_is_absent_from_the_resolved_json() {
+    let cfg = Config::recommended(38);
+    assert!(!cfg.witness_tripleton_ceiling);
+    let json = cfg.resolved_json().unwrap();
+    assert!(!json.contains("witness_tripleton"));
+    assert_eq!(
+        cfg.resolved_sha256().unwrap(),
+        "c1641fc1630d4d99d0d2d348a79c36ac67dcaaf495836a83c9c5a36dd2727782"
+    );
+}

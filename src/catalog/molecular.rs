@@ -679,6 +679,14 @@ pub fn good_turing_target_stop(census: &BasinCensus) -> Option<&'static str> {
     census.target_found_with_confidence().then_some("saturated")
 }
 
+/// [`good_turing_target_stop`] at `ceiling`.
+///
+/// The production call passes [`super::census::PRODUCTION_MAX_UNSEEN_MASS`].
+/// [`super::census::WITNESS_TRIPLETON_CEILING`] is the opt-in.
+pub fn good_turing_target_stop_at(census: &BasinCensus, ceiling: f64) -> Option<&'static str> {
+    census.target_found_below(ceiling).then_some("saturated")
+}
+
 /// Stable witness for a named isomer. Unknown names are not a target.
 pub fn isomer_witness(name: &str) -> Option<WitnessId> {
     WATER_ISOMER_NAMES

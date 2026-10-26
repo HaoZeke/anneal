@@ -7,6 +7,8 @@
 //! without it uses seeds 0-31 and 4000 force evaluations on every
 //! engine, unless `WATER_FORCE_BUDGET`, `WATER_SEED_FIRST` and
 //! `WATER_SEED_COUNT` select a block.
+//! `WATER_WITNESS_TRIPLETON=1` retires a witnessed target at the
+//! one-third ceiling. The default remains one fifth.
 //!
 //! Hit columns that need a same-level reference energy stay unscored.
 //! Isomer names are assigned only when `WATER_ISOMER_DIR` holds
@@ -22,7 +24,9 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use anneal_core::catalog::census::{BasinCensus, PRODUCTION_MAX_UNSEEN_MASS};
+use anneal_core::catalog::census::{
+    BasinCensus, PRODUCTION_MAX_UNSEEN_MASS, WITNESS_TRIPLETON_CEILING,
+};
 use anneal_core::catalog::leftover_esty_upper;
 use anneal_core::catalog::molecular::{
     EINDIR_REV, EINDIR_VERSION, ENGINE_KIND, GFN2_ACCURACY, GFN2_HEXAMER_BUDGET,
@@ -32,7 +36,7 @@ use anneal_core::catalog::molecular::{
     PETMAD_ENGINE_KIND, PETMAD_HEXAMER_BUDGET, PETMAD_MODEL_NAME, RGPOT_REV, RGPOT_VERSION,
     VACUUM_BOX, WATER_HEXAMER_MOLECULES, WATER_HEXAMER_SEED_COUNT, WATER_HEXAMER_SEED_START,
     WATER_ISOMER_NAMES, WaterSearchArm, assign_isomer, classify_geometry, configure_water_arm,
-    good_turing_target_stop, isomer_reference_gate, isomer_witness, monomers_intact,
+    good_turing_target_stop_at, isomer_reference_gate, isomer_witness, monomers_intact,
     reference_coordinates, sorted_oxygen_distances, water_groups, water_species,
 };
 use anneal_core::methods::cluster_hopping::{
@@ -447,6 +451,22 @@ fn write_geometry(seed: u64, coordinates: &[f64], energy: f64) {
     let _ = std::fs::write(path, text);
 }
 
+fn incumbent_inside(
+    state: Option<&[f64]>,
+    references: &[(&str, &[f64])],
+    gate: Option<f64>,
+) -> bool {
+    let Some(state) = state else {
+        return false;
+    };
+    if monomers_intact(state, WATER_HEXAMER_MOLECULES) != Ok(true) {
+        return false;
+    }
+    assign_isomer(state, WATER_HEXAMER_MOLECULES, references, gate)
+        .ok()
+        .is_some_and(|matched| matched.name.is_some())
+}
+
 fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     let arm = match arm_name {
         "recommended" => WaterSearchArm::Recommended,
@@ -468,6 +488,13 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     let groups = water_groups(WATER_HEXAMER_MOLECULES).expect("hexamer groups");
     let mut cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
     configure_water_arm(&mut cfg, arm);
+    if std::env::var("WATER_WITNESS_TRIPLETON").ok().as_deref() == Some("1") {
+        cfg.witness_tripleton_ceiling = true;
+    }
+    text.push_str(&format!(
+        "witness_tripleton_ceiling: {}\n",
+        cfg.witness_tripleton_ceiling
+    ));
     cfg.move_library = MoveLibrary::Molecular {
         groups: groups.clone(),
         reactive: false,
@@ -557,6 +584,13 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                 OXYGEN_DISTANCE_CENSUS_RADIUS_A,
             )
             .expect("census");
+            let ceiling = if cfg.witness_tripleton_ceiling {
+                WITNESS_TRIPLETON_CEILING
+            } else {
+                PRODUCTION_MAX_UNSEEN_MASS
+            };
+            let require_incumbent = cfg.witness_tripleton_ceiling;
+            let mut retired = false;
             let mut trace = String::new();
             let mut checkpoint =
                 |snapshot: anneal_core::methods::cluster_hopping::ChainCheckpoint<'_>| {
@@ -622,10 +656,19 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                             .unwrap_or_else(|| "none".to_owned());
                         let witness_label = witness_name.unwrap_or_else(|| "none".to_owned());
                         trace.push_str(&format!(
-                        "good_turing_trace: force_calls={calls} visits={visits} unseen_mass={mass} singletons={singletons} doubletons={doubletons} hatch={hatch} esty_upper={upper} witness={witness_label} max_unseen_mass={PRODUCTION_MAX_UNSEEN_MASS}\n"
+                        "good_turing_trace: force_calls={calls} visits={visits} unseen_mass={mass} singletons={singletons} doubletons={doubletons} hatch={hatch} esty_upper={upper} witness={witness_label} max_unseen_mass={ceiling}\n"
                     ));
                     }
-                    if let Some(reason) = good_turing_target_stop(&census) {
+                    let mut stop = good_turing_target_stop_at(&census, ceiling);
+                    if stop.is_some() && require_incumbent {
+                        let best_state = snapshot.best_state();
+                        let best = best_state.as_ref().and_then(|state| state.as_slice());
+                        if !incumbent_inside(best, &reference_views, gate) {
+                            stop = None;
+                        }
+                    }
+                    if let Some(reason) = stop {
+                        retired = true;
                         CheckpointAction::Retire {
                             reason: reason.to_owned(),
                         }
@@ -643,10 +686,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                 &mut checkpoint,
             );
             text.push_str(&trace);
-            text.push_str(&format!(
-                "good_turing_saturated: {}\n",
-                good_turing_target_stop(&census).is_some()
-            ));
+            text.push_str(&format!("good_turing_saturated: {retired}\n"));
             result
         } else {
             search_from(&objective, &cfg, &mut ledger, start.view(), seed)

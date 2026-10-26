@@ -1030,6 +1030,16 @@ pub struct Config {
     /// leapfrog leaf; every parameter is adapted, see [`crate::hmc::hop`].
     #[serde(skip)]
     pub hmc: Option<crate::hmc::hop::HopConfig>,
+    /// Witnessed stop at one third instead of the production one fifth.
+    ///
+    /// Off keeps the production ceiling. On, a clean tripleton can retire:
+    /// its Esty upper bound is already 0 and its hatch is one quarter.
+    #[serde(skip_serializing_if = "is_false")]
+    pub witness_tripleton_ceiling: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Config {
@@ -1361,6 +1371,7 @@ impl Config {
             superbasin_quotient: false,
             superbasin_features: false,
             hmc: None,
+            witness_tripleton_ceiling: false,
         }
     }
 
