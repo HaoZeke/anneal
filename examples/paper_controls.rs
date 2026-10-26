@@ -1,8 +1,8 @@
 //! Paper control drivers for the registered seed blocks.
 //!
 //! `recommended` is `Config::recommended`. `for_cluster` is the screened
-//! basin-hopping control: temperature `0.8`, screen of 25 steps, and no
-//! other field edited. It is also the in-tree control where the outline
+//! basin-hopping control: temperature `0.8`, screen of 25 steps, the Bayes
+//! screen on, and threshold `7/15`. It is also the in-tree control where the outline
 //! leaves GMIN on the optbench side. `derived` is `Config::derived`.
 //! `soap-on` and `soap-off` share `Config::recommended` and differ only
 //! in `SoapProposalMode`. `soap38` starts from the icosahedron used by
@@ -18,10 +18,11 @@
 //! ```
 
 use anneal_core::catalog::lj::system_signature;
-#[cfg(test)]
-use anneal_core::methods::cluster_hopping::MoveLibrary;
 use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, SoapProposalMode, random_cluster_in_radius, run_with_gradient,
+    Config, Ledger, MoveLibrary, SoapProposalMode, random_cluster_in_radius, run_with_gradient,
+};
+use anneal_core::methods::population_annealing::{
+    PopulationAnneal, PopulationReport, population_anneal,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::{PairKind, PairPotential};
@@ -42,6 +43,8 @@ enum Arm {
     Derived,
     SoapOn,
     SoapOff,
+    /// Hukushima–Iba population annealing. Not a `Config` hop.
+    Population,
 }
 
 struct Campaign {
@@ -115,14 +118,21 @@ fn main() {
     );
     for offset in 0..seeds {
         let seed = campaign.seed0 + offset;
-        let (outcome, wall) = run_seed(&cfg, &campaign, seed, budget);
-        let force_to_hit = campaign.reference.and_then(|reference| {
-            outcome
-                .improvements
-                .iter()
-                .find(|(_, _, _, energy)| *energy <= reference + HIT)
-                .map(|(_, spent, _, _)| *spent)
-        });
+        let (charged, best, wall, force_to_hit, generations) = if arm == Arm::Population {
+            let (report, charged, wall, force_to_hit, generations) =
+                run_population(&campaign, seed, budget, smoke);
+            (charged, report.best_energy, wall, force_to_hit, generations)
+        } else {
+            let (outcome, wall) = run_seed(&cfg, &campaign, seed, budget);
+            let force_to_hit = campaign.reference.and_then(|reference| {
+                outcome
+                    .improvements
+                    .iter()
+                    .find(|(_, _, _, energy)| *energy <= reference + HIT)
+                    .map(|(_, spent, _, _)| *spent)
+            });
+            (outcome.charged, outcome.best, wall, force_to_hit, 0)
+        };
         let hit = match (campaign.reference, force_to_hit) {
             (None, _) => "unscored",
             (Some(_), Some(_)) => "true",
@@ -131,13 +141,11 @@ fn main() {
         push(
             &mut report,
             &format!(
-                "seed: {seed}\nforce_count: {}\nforce_to_hit: {}\nwall_seconds: {wall:.6}\n\
-                 best: {:.6}\nhit: {hit}\n",
-                outcome.charged,
+                "seed: {seed}\nforce_count: {charged}\nforce_to_hit: {}\nwall_seconds: {wall:.6}\n\
+                 best: {best:.6}\nhit: {hit}\ngenerations: {generations}\n",
                 force_to_hit
                     .map(|value| value.to_string())
                     .unwrap_or_else(|| "-".into()),
-                outcome.best,
             ),
         );
     }
@@ -214,21 +222,97 @@ fn parse_arm(name: &str) -> Option<Arm> {
         "derived" => Arm::Derived,
         "soap-on" => Arm::SoapOn,
         "soap-off" => Arm::SoapOff,
+        "population" => Arm::Population,
         _ => return None,
     })
 }
 
 fn apply_arm(n: usize, arm: Arm) -> Config {
     match arm {
-        Arm::Recommended | Arm::SoapOn => Config::recommended(n),
+        Arm::Recommended => Config::recommended(n),
         Arm::ForCluster => Config::for_cluster(n),
         Arm::Derived => Config::derived(n),
+        Arm::SoapOn => {
+            let mut cfg = Config::recommended(n);
+            // The 38-point recommended library is the named-lattice reseed.
+            // The soap ablation is the LeanBurst stack with the proposal on.
+            cfg.move_library = MoveLibrary::LeanBurst;
+            cfg.soap_mode = SoapProposalMode::Flexible;
+            cfg
+        }
         Arm::SoapOff => {
             let mut cfg = Config::recommended(n);
+            cfg.move_library = MoveLibrary::LeanBurst;
             cfg.soap_mode = SoapProposalMode::Off;
             cfg
         }
+        // The population arm does not hop. The digest below is unused.
+        Arm::Population => Config::for_cluster(n),
     }
+}
+
+/// Hukushima–Iba population with Machta's half-population ESS step.
+///
+/// A smoke uses four walkers so the 200-call budget still reaches a
+/// quench. A full run uses the reference population of 100.
+fn run_population(
+    campaign: &Campaign,
+    seed: u64,
+    budget: usize,
+    smoke: bool,
+) -> (PopulationReport, usize, f64, Option<usize>, usize) {
+    let mut cfg = PopulationAnneal::reference(campaign.n);
+    if smoke {
+        cfg.walkers = 4;
+        cfg.quench_reserve_per_walker = 30;
+        cfg.quench_steps = 40;
+    }
+    let kind = match campaign.rho {
+        Some(rho) => PairKind::Morse { rho },
+        None => PairKind::LennardJones,
+    };
+    let potential = match kind {
+        PairKind::LennardJones => PairPotential::lennard_jones(campaign.n),
+        PairKind::Morse { rho } => PairPotential::morse(campaign.n, rho),
+    };
+    let mut ledger = Ledger::new(budget);
+    let mut optimiser = WarmLbfgs::default();
+    let mut rng = StdRng::seed_from_u64(seed);
+    let reference = campaign.reference;
+    let mut first_hit = None;
+    let started = Instant::now();
+    let report = population_anneal(
+        campaign.n,
+        &mut ledger,
+        &cfg,
+        |led, x| {
+            if !led.charge() {
+                return None;
+            }
+            Some(potential.value_and_gradient(x).0)
+        },
+        |led, x, steps| {
+            optimiser.forget();
+            let (value, relaxed, _) = optimiser.minimize(x, steps, |v| {
+                if !led.charge() {
+                    return None;
+                }
+                Some(potential.value_and_gradient(v))
+            });
+            if first_hit.is_none() && reference.is_some_and(|target| value <= target + HIT) {
+                first_hit = Some(led.spent());
+            }
+            value.is_finite().then_some((value, relaxed))
+        },
+        &mut rng,
+    );
+    (
+        report.clone(),
+        ledger.spent(),
+        started.elapsed().as_secs_f64(),
+        first_hit,
+        report.generations,
+    )
 }
 
 fn run_seed(
@@ -268,10 +352,26 @@ fn run_seed(
         });
         (value, relaxed)
     };
+    // The climb reads this gradient. Without it the stall leave never runs
+    // and the only call-clock response is a fresh start, which returns to
+    // the Mackay icosahedron.
+    let mut grad = |led: &mut Ledger, v: ArrayView1<f64>| {
+        if !led.charge() {
+            return None;
+        }
+        Some(potential.value_and_gradient(v).1)
+    };
     let mut rng = StdRng::seed_from_u64(seed);
     let started = Instant::now();
-    let outcome = run_with_gradient(cfg, start.view(), &mut ledger, &mut relax, None, &mut rng)
-        .expect("finite start");
+    let outcome = run_with_gradient(
+        cfg,
+        start.view(),
+        &mut ledger,
+        &mut relax,
+        Some(&mut grad),
+        &mut rng,
+    )
+    .expect("finite start");
     (outcome, started.elapsed().as_secs_f64())
 }
 
@@ -419,18 +519,36 @@ mod tests {
         let derived = apply_arm(13, Arm::Derived);
         assert!(derived.budget_window && derived.bayes_screen);
         let control = apply_arm(13, Arm::ForCluster);
-        assert!(!control.budget_window && !control.bayes_screen);
+        assert!(!control.budget_window && control.bayes_screen);
+        let tau = anneal_core::screen::cost_asymmetric_threshold(
+            control.screen_steps,
+            control.relax_steps,
+        );
+        assert!((control.bayes_threshold - tau).abs() < 1e-12);
+        assert!((tau - 7.0 / 15.0).abs() < 1e-12);
         assert_eq!(control.screen_steps, 25);
         assert_eq!(control.temperature.to_bits(), 0.8_f64.to_bits());
         let recommended = apply_arm(13, Arm::Recommended);
         let off = apply_arm(13, Arm::SoapOff);
         assert_eq!(off.soap_mode, SoapProposalMode::Off);
-        assert_eq!(off.move_library, recommended.move_library);
+        assert_eq!(off.move_library, MoveLibrary::LeanBurst);
         assert_eq!(
             apply_arm(13, Arm::SoapOn).soap_mode,
             SoapProposalMode::Flexible
         );
         assert_eq!(recommended.move_library, MoveLibrary::LeanBurst);
+        assert_eq!(
+            apply_arm(38, Arm::Recommended).move_library,
+            MoveLibrary::Reseed
+        );
+        assert_eq!(
+            apply_arm(38, Arm::SoapOn).move_library,
+            MoveLibrary::LeanBurst
+        );
+        assert!(matches!(
+            super::parse_arm("population"),
+            Some(Arm::Population)
+        ));
         assert!(require_smoke_name(true, "paper-controls-SMOKE.txt"));
         assert!(!require_smoke_name(true, "paper-controls.txt"));
     }
