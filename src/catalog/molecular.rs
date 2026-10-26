@@ -622,6 +622,104 @@ pub fn configure_water_arm(cfg: &mut Config, arm: WaterSearchArm) {
         }
     }
 }
+
+/// Whether every oxygen has exactly two hydrogens within [`WATER_OH_BOND_MAX_A`].
+pub fn monomers_intact(
+    coordinates: &[f64],
+    n_molecules: usize,
+) -> Result<bool, MolecularCatalogPresetError> {
+    let points = water_points(coordinates, n_molecules)?;
+    let limit2 = WATER_OH_BOND_MAX_A * WATER_OH_BOND_MAX_A;
+    for molecule in &points {
+        let oxygen = molecule[0];
+        let mut near = 0usize;
+        for other in &points {
+            for hydrogen in [other[1], other[2]] {
+                if dist2(oxygen, hydrogen) <= limit2 {
+                    near += 1;
+                }
+            }
+        }
+        if near != 2 {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Sorted oxygen-oxygen distances of `(H2O)m`. The Good-Turing descriptor.
+pub fn sorted_oxygen_distances(
+    coordinates: &[f64],
+    n_molecules: usize,
+) -> Result<Vec<f64>, MolecularCatalogPresetError> {
+    let points = water_points(coordinates, n_molecules)?;
+    let mut distances = Vec::with_capacity(n_molecules * n_molecules.saturating_sub(1) / 2);
+    for i in 0..points.len() {
+        for j in (i + 1)..points.len() {
+            distances.push(dist2(points[i][0], points[j][0]).sqrt());
+        }
+    }
+    distances.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(distances)
+}
+
+/// `Some("saturated")` when the production Good-Turing rule is met.
+pub fn good_turing_stop_reason(census: &BasinCensus) -> Option<&'static str> {
+    census.is_saturated().then_some("saturated")
+}
+
+/// `Some("saturated")` when a witnessed target meets that same rule.
+///
+/// The visit floor and the unseen-mass ceiling stay the production
+/// values. The witness is what keeps near-duplicate minima of one
+/// target from being counted as singletons when no radius sits between
+/// the same-minimum scatter and the distinct-minimum separation.
+pub fn good_turing_target_stop(census: &BasinCensus) -> Option<&'static str> {
+    census.target_found_with_confidence().then_some("saturated")
+}
+
+/// Stable witness for a named isomer. Unknown names are not a target.
+pub fn isomer_witness(name: &str) -> Option<WitnessId> {
+    WATER_ISOMER_NAMES
+        .iter()
+        .position(|known| *known == name)
+        .and_then(|index| u64::try_from(index).ok())
+        .map(WitnessId::from_raw)
+}
+
+fn water_points(
+    coordinates: &[f64],
+    n_molecules: usize,
+) -> Result<Vec<[[f64; 3]; 3]>, MolecularCatalogPresetError> {
+    if n_molecules == 0 {
+        return Err(MolecularCatalogPresetError::InvalidMoleculeCount);
+    }
+    if coordinates.len() != 9 * n_molecules || coordinates.iter().any(|value| !value.is_finite()) {
+        return Err(MolecularCatalogPresetError::CoordinateDimension);
+    }
+    let mut molecules = Vec::with_capacity(n_molecules);
+    for molecule in 0..n_molecules {
+        let base = 9 * molecule;
+        let mut points = [[0.0; 3]; 3];
+        for atom in 0..3 {
+            for axis in 0..3 {
+                points[atom][axis] = coordinates[base + 3 * atom + axis];
+            }
+        }
+        molecules.push(points);
+    }
+    Ok(molecules)
+}
+
+fn dist2(left: [f64; 3], right: [f64; 3]) -> f64 {
+    let mut total = 0.0;
+    for axis in 0..3 {
+        let delta = left[axis] - right[axis];
+        total += delta * delta;
+    }
+    total
+}
+
 #[cfg(test)]
 mod water_hexamer_tests {
     use super::*;
@@ -630,6 +728,39 @@ mod water_hexamer_tests {
     };
     use crate::methods::cluster_search::search_from_with_checkpoint;
     use crate::potentials::{PairKind, PairPotential};
+
+    #[test]
+    fn the_template_hexamer_is_intact_and_a_loose_hydrogen_is_not() {
+        let coordinates = reference_coordinates(WATER_HEXAMER_MOLECULES).unwrap();
+        assert!(monomers_intact(&coordinates, WATER_HEXAMER_MOLECULES).unwrap());
+        let mut broken = coordinates.clone();
+        broken[3] += 5.0;
+        assert!(!monomers_intact(&broken, WATER_HEXAMER_MOLECULES).unwrap());
+        let mut crowded = coordinates.clone();
+        crowded[12] = 0.2;
+        crowded[13] = 0.2;
+        crowded[14] = 0.0;
+        assert!(!monomers_intact(&crowded, WATER_HEXAMER_MOLECULES).unwrap());
+    }
+
+    #[test]
+    fn oxygen_distances_are_sorted_and_the_stop_follows_the_production_rule() {
+        let coordinates = reference_coordinates(WATER_HEXAMER_MOLECULES).unwrap();
+        let distances = sorted_oxygen_distances(&coordinates, WATER_HEXAMER_MOLECULES).unwrap();
+        assert_eq!(distances.len(), 15);
+        assert!(distances.windows(2).all(|pair| pair[0] <= pair[1]));
+        let mut census = BasinCensus::new(1, OXYGEN_DISTANCE_CENSUS_RADIUS_A).unwrap();
+        assert!(good_turing_stop_reason(&census).is_none());
+        for index in 0..20 {
+            census.observe(&[index as f64]).unwrap();
+        }
+        assert!(good_turing_stop_reason(&census).is_none());
+        let mut repeated = BasinCensus::new(1, OXYGEN_DISTANCE_CENSUS_RADIUS_A).unwrap();
+        for _ in 0..20 {
+            repeated.observe(&[0.0]).unwrap();
+        }
+        assert_eq!(good_turing_stop_reason(&repeated), Some("saturated"));
+    }
 
     #[test]
     fn water_arms_keep_the_molecular_library() {
@@ -674,6 +805,49 @@ mod water_hexamer_tests {
         let threshold =
             crate::screen::cost_asymmetric_threshold(derived.screen_steps, derived.relax_steps);
         assert!((derived.bayes_threshold - threshold).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_saturated_census_retires_the_search_before_the_budget() {
+        let n_molecules = 2;
+        let species = water_species(n_molecules).unwrap();
+        let groups = water_groups(n_molecules).unwrap();
+        let mut cfg = Config::recommended_molecular(species, groups, 1.0);
+        cfg.relax_steps = 0;
+        cfg.screen_steps = 0;
+        cfg.soap_mode = SoapProposalMode::Off;
+        cfg.adaptive_height = false;
+        cfg.allocate_moves = false;
+        cfg.depth_reward = false;
+        let start = reference_coordinates(n_molecules).unwrap();
+        let objective = PairPotential::new(3 * n_molecules, PairKind::LennardJones, 8.0);
+        let budget = 2_000;
+        let mut ledger = Ledger::new(budget);
+        let mut census = BasinCensus::new(1, OXYGEN_DISTANCE_CENSUS_RADIUS_A).unwrap();
+        for _ in 0..20 {
+            census.observe(&[0.0]).unwrap();
+        }
+        let mut checkpoint =
+            |_: crate::methods::cluster_hopping::ChainCheckpoint<'_>| CheckpointAction::Retire {
+                reason: good_turing_stop_reason(&census)
+                    .unwrap_or("continuing")
+                    .to_owned(),
+            };
+        let (_out, _stats) = search_from_with_checkpoint(
+            &objective,
+            &cfg,
+            &mut ledger,
+            ndarray::ArrayView1::from(&start),
+            5100,
+            GOOD_TURING_CHECKPOINT_INTERVAL,
+            &mut checkpoint,
+        );
+        assert!(
+            ledger.spent() < budget / 2,
+            "retire spent {} of {budget}",
+            ledger.spent()
+        );
+        assert!(ledger.spent() > 0);
     }
 
     #[test]
