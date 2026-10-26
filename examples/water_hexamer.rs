@@ -6,8 +6,7 @@
 //! whose name contains `SMOKE`. That file is not a paper table. A run
 //! without it uses seeds 0-31 and 4000 force evaluations on every
 //! engine, unless `WATER_FORCE_BUDGET`, `WATER_SEED_FIRST` and
-//! `WATER_SEED_COUNT` select a block. Full campaign numbers still come
-//! from the v0.12.0 tag.
+//! `WATER_SEED_COUNT` select a block.
 //!
 //! Hit columns that need a same-level reference energy stay unscored.
 //! Isomer names are assigned only when `WATER_ISOMER_DIR` holds
@@ -194,8 +193,9 @@ fn main() {
     let smoke = std::env::var("PAPER_SMOKE").ok().as_deref() == Some("1");
     let mut report = String::new();
     report.push_str(&format!(
-        "label: {}\ndriver: water_hexamer\nfull_runs: v0.12.0 tag\nrgpot: {RGPOT_VERSION} {RGPOT_REV}\neindir: {EINDIR_VERSION} {EINDIR_REV}\n",
-        if smoke { "smoke" } else { "campaign-shape" }
+        "label: {}\ndriver: water_hexamer\nfull_runs: crate {}\nrgpot: {RGPOT_VERSION} {RGPOT_REV}\neindir: {EINDIR_VERSION} {EINDIR_REV}\n",
+        if smoke { "smoke" } else { "campaign-shape" },
+        env!("CARGO_PKG_VERSION")
     ));
     for engine in &engines {
         for arm in &arms {
