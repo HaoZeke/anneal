@@ -3,12 +3,20 @@
 
 //! Dense minimum-cost bipartite assignment.
 //!
-//! The search is the successive-shortest-path method with dual potentials
-//! (Jonker and Volgenant). A continuous-symmetry projection solves one of
-//! these problems for every group operation and every trial orientation, so
-//! the inner scan has to be a flat loop: the recursive Kuhn-Munkres walk it
-//! replaced spent its time on call overhead and was the dominant cost of an
-//! energy evaluation at 98 and 150 atoms.
+//! Below 98 atoms the permutation is the column-first Kuhn-Munkres matching
+//! the measured LJ38, LJ55, and LJ75 walks were generated with. Several
+//! optimal permutations can share a cost, and a different tie break moves
+//! those walks. At 98 atoms and above the same optimum is computed by
+//! successive shortest paths. A continuous-symmetry projection solves one
+//! of these problems for every group operation and every trial orientation,
+//! and the recursive Kuhn-Munkres walk was the dominant cost of an energy
+//! evaluation at that size.
+
+/// Matrix size at which the flat shortest-path scan replaces Kuhn-Munkres.
+///
+/// 98 is the atom count where one projection of the full point set stopped
+/// being a small fraction of a quench.
+const SHORTEST_PATH_FROM: usize = 98;
 
 /// Returns the column assigned to each row of a finite `n × n` cost matrix.
 ///
@@ -22,7 +30,14 @@ pub fn minimum_cost_assignment(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     if n.checked_mul(n) != Some(costs.len()) || costs.iter().any(|value| !value.is_finite()) {
         return None;
     }
+    if n < SHORTEST_PATH_FROM {
+        kuhn_munkres(costs, n)
+    } else {
+        successive_shortest_paths(costs, n)
+    }
+}
 
+fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     // Column 0 is the dummy used to grow the matching. Rows and columns of
     // `costs` are 1-indexed in the dual update so the dummy sits at index 0.
     let mut row_potential = vec![0.0; n + 1];
@@ -99,9 +114,136 @@ pub fn minimum_cost_assignment(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     Some(assignment)
 }
 
+/// Column-first Kuhn-Munkres. The tight edge is the lowest column index
+/// within the scale tolerance, which is the permutation the smaller
+/// Lennard-Jones walks recorded.
+fn kuhn_munkres(costs: &[f64], n: usize) -> Option<Vec<usize>> {
+    let scale = costs
+        .iter()
+        .fold(1.0_f64, |largest, value| largest.max(value.abs()));
+    let tight_tolerance = scale * 1e-9;
+    let weights: Vec<f64> = costs.iter().map(|cost| -cost).collect();
+    let mut row_potential = vec![f64::NEG_INFINITY; n];
+    for row in 0..n {
+        for column in 0..n {
+            row_potential[row] = row_potential[row].max(weights[row * n + column]);
+        }
+    }
+    let mut column_potential = vec![0.0_f64; n];
+    let mut row_match = vec![usize::MAX; n];
+    let mut column_match = vec![usize::MAX; n];
+
+    for root in 0..n {
+        let mut augmented = false;
+        for _ in 0..=n {
+            let mut rows_seen = vec![false; n];
+            let mut columns_seen = vec![false; n];
+            if augment_tight(
+                root,
+                n,
+                &weights,
+                &row_potential,
+                &column_potential,
+                tight_tolerance,
+                &mut row_match,
+                &mut column_match,
+                &mut rows_seen,
+                &mut columns_seen,
+            ) {
+                augmented = true;
+                break;
+            }
+
+            let mut delta = f64::INFINITY;
+            for row in 0..n {
+                if !rows_seen[row] {
+                    continue;
+                }
+                for column in 0..n {
+                    if columns_seen[column] {
+                        continue;
+                    }
+                    let slack =
+                        row_potential[row] + column_potential[column] - weights[row * n + column];
+                    delta = delta.min(slack);
+                }
+            }
+            if !(delta > 0.0) || !delta.is_finite() {
+                return None;
+            }
+            for index in 0..n {
+                if rows_seen[index] {
+                    row_potential[index] -= delta;
+                }
+                if columns_seen[index] {
+                    column_potential[index] += delta;
+                }
+            }
+        }
+        if !augmented {
+            return None;
+        }
+    }
+
+    let mut used = vec![false; n];
+    for &column in &row_match {
+        if column == usize::MAX || used[column] {
+            return None;
+        }
+        used[column] = true;
+    }
+    Some(row_match)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn augment_tight(
+    row: usize,
+    n: usize,
+    weights: &[f64],
+    row_potential: &[f64],
+    column_potential: &[f64],
+    tight_tolerance: f64,
+    row_match: &mut [usize],
+    column_match: &mut [usize],
+    rows_seen: &mut [bool],
+    columns_seen: &mut [bool],
+) -> bool {
+    rows_seen[row] = true;
+    for column in 0..n {
+        if columns_seen[column] {
+            continue;
+        }
+        let slack = row_potential[row] + column_potential[column] - weights[row * n + column];
+        if slack.abs() > tight_tolerance {
+            continue;
+        }
+        columns_seen[column] = true;
+        let displaced = column_match[column];
+        if displaced == usize::MAX
+            || augment_tight(
+                displaced,
+                n,
+                weights,
+                row_potential,
+                column_potential,
+                tight_tolerance,
+                row_match,
+                column_match,
+                rows_seen,
+                columns_seen,
+            )
+        {
+            row_match[row] = column;
+            column_match[column] = row;
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
-    use super::minimum_cost_assignment;
+    use super::{kuhn_munkres, minimum_cost_assignment, successive_shortest_paths};
 
     fn brute(costs: &[f64], n: usize) -> f64 {
         fn walk(costs: &[f64], n: usize, row: usize, used: &mut [bool], acc: f64, best: &mut f64) {
@@ -145,6 +287,14 @@ mod tests {
                 let got = cost_of(&costs, n, &assignment);
                 let want = brute(&costs, n);
                 assert!((got - want).abs() < 1e-8, "n={n} {got} vs {want}");
+                let fast = successive_shortest_paths(&costs, n).expect("square");
+                let fast_cost = cost_of(&costs, n, &fast);
+                assert!(
+                    (fast_cost - want).abs() < 1e-8,
+                    "n={n} shortest {fast_cost}"
+                );
+                let slow = kuhn_munkres(&costs, n).expect("square");
+                assert_eq!(assignment, slow);
             }
         }
     }
