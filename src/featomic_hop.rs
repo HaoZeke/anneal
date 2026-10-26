@@ -163,7 +163,21 @@ fn spectrum(
     species: Option<&[u32]>,
     mobile: Option<&[usize]>,
 ) -> Spectrum {
-    spectrum_keep(x, rcut, species, mobile, LMIN)
+    spectrum_keep(x, rcut, species, mobile, LMIN, true)
+}
+
+/// Power spectrum values without position gradients.
+///
+/// `cloud_mean` and `leftover` match [`spectrum`]. The Jacobian stays
+/// zero. A closed-shell hop only needs those values to decide that the
+/// cover moves, and the gradient rows are what make the calculator slow.
+fn spectrum_values(
+    x: ArrayView1<f64>,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+) -> Spectrum {
+    spectrum_keep(x, rcut, species, mobile, LMIN, false)
 }
 
 fn spectrum_keep(
@@ -172,12 +186,14 @@ fn spectrum_keep(
     species: Option<&[u32]>,
     mobile: Option<&[usize]>,
     lmin: i32,
+    with_gradients: bool,
 ) -> Spectrum {
     let n = x.len() / 3;
     let json = hypers(rcut);
     let mut systems = system_of(x, species);
+    let gradient_names: &[&str] = if with_gradients { &["positions"] } else { &[] };
     let options = CalculationOptions {
-        gradients: &["positions"],
+        gradients: gradient_names,
         ..Default::default()
     };
     let out = with_calculator(&json, |calc| {
@@ -458,8 +474,8 @@ pub fn soap_bank_distance_lmin(
     mobile: Option<&[usize]>,
     lmin: i32,
 ) -> f64 {
-    let ua = unit(&spectrum_keep(a, rcut, species, mobile, lmin).cloud_mean);
-    let ub = unit(&spectrum_keep(b, rcut, species, mobile, lmin).cloud_mean);
+    let ua = unit(&spectrum_keep(a, rcut, species, mobile, lmin, true).cloud_mean);
+    let ub = unit(&spectrum_keep(b, rcut, species, mobile, lmin, true).cloud_mean);
     if ua.len() != ub.len() || ua.is_empty() {
         return f64::INFINITY;
     }
@@ -1082,10 +1098,10 @@ pub fn step_away_featomic<R: Rng + ?Sized>(
     mobile: Option<&[usize]>,
     rng: &mut R,
 ) -> Array1<f64> {
-    let mut s = spectrum(x, rcut, species, mobile);
-    let nnu = (s.n_at * s.n_feat).max(1) as f64;
-    let rms = (s.leftover.iter().map(|v| v * v).sum::<f64>() / nnu).sqrt();
-    if rms < DEFECT || shell_leftover(&s) {
+    let values = spectrum_values(x, rcut, species, mobile);
+    let nnu = (values.n_at * values.n_feat).max(1) as f64;
+    let rms = (values.leftover.iter().map(|v| v * v).sum::<f64>() / nnu).sqrt();
+    if rms < DEFECT || shell_leftover(&values) {
         let archive = PACK_ARCHIVE.with(|a| a.borrow().clone());
         if !archive.is_empty() {
             return step_into_hole(x, &archive, SOAP_PACK_MERGE, rcut, species, mobile, rng);
@@ -1105,11 +1121,23 @@ pub fn step_away_featomic<R: Rng + ?Sized>(
         // the displacement sphere is the generic rearrangement. The
         // fivefold residual is the fallback when that placement does
         // not move, and the kick remains only if that residual is flat.
+        // The kick's Jacobian is not read when an earlier step moves.
+        // Its two uniform draws per mean component still are, so the
+        // stream stays the one the gradient path would have left.
         let covered = leave_archive_hole(x, rcut, species, mobile, rmsd, rng);
         let five = crate::soap::step_away_fivefold_measured(x, rmsd);
+        if displacement_rms(&covered, x) > 1e-6 || displacement_rms(&five, x) > 1e-6 {
+            for _ in 0..values.cloud_mean.len() {
+                let _: f64 = rng.random();
+                let _: f64 = rng.random();
+            }
+            return first_that_moves(x, &[covered, five]);
+        }
+        let s = spectrum(x, rcut, species, mobile);
         let kick = packing_kick(x, &s, rmsd, mobile, rng);
         return first_that_moves(x, &[covered, five, kick]);
     }
+    let mut s = spectrum(x, rcut, species, mobile);
     focus_patch(&mut s, x, rcut, rng);
     let dr = tikhonov(&s.jacobian, s.leftover.view(), LAMBDA);
     pin_frozen(x, scale_to_cap(x, dr, rmsd), mobile)
@@ -1230,6 +1258,64 @@ mod tests {
             s += d * d;
         }
         assert!((s / 13.0).sqrt() > 1e-8, "archive-null hop was identity");
+    }
+
+    fn hop_with_gradients<R: Rng + ?Sized>(
+        x: ArrayView1<f64>,
+        rmsd: f64,
+        rcut: f64,
+        species: Option<&[u32]>,
+        mobile: Option<&[usize]>,
+        rng: &mut R,
+    ) -> Array1<f64> {
+        let mut s = spectrum(x, rcut, species, mobile);
+        let nnu = (s.n_at * s.n_feat).max(1) as f64;
+        let rms = (s.leftover.iter().map(|v| v * v).sum::<f64>() / nnu).sqrt();
+        if rms < DEFECT || shell_leftover(&s) {
+            let archive = PACK_ARCHIVE.with(|a| a.borrow().clone());
+            if !archive.is_empty() {
+                return step_into_hole(x, &archive, SOAP_PACK_MERGE, rcut, species, mobile, rng);
+            }
+            if mobile.is_some_and(|set| set.len() < x.len() / 3) {
+                return x.to_owned();
+            }
+            let covered = leave_archive_hole(x, rcut, species, mobile, rmsd, rng);
+            let five = crate::soap::step_away_fivefold_measured(x, rmsd);
+            let kick = packing_kick(x, &s, rmsd, mobile, rng);
+            return first_that_moves(x, &[covered, five, kick]);
+        }
+        focus_patch(&mut s, x, rcut, rng);
+        let dr = tikhonov(&s.jacobian, s.leftover.view(), LAMBDA);
+        pin_frozen(x, scale_to_cap(x, dr, rmsd), mobile)
+    }
+
+    #[test]
+    fn values_match_and_the_closed_shell_hop_matches_the_gradient_path() {
+        let x = regular_icosahedron();
+        let full = spectrum(x.view(), 3.5, None, None);
+        let values = spectrum_values(x.view(), 3.5, None, None);
+        assert_eq!(full.cloud_mean.len(), values.cloud_mean.len());
+        for (left, right) in full.leftover.iter().zip(values.leftover.iter()) {
+            assert_eq!(left.to_bits(), right.to_bits());
+        }
+        for (left, right) in full.cloud_mean.iter().zip(values.cloud_mean.iter()) {
+            assert_eq!(left.to_bits(), right.to_bits());
+        }
+        let nnu = (values.n_at * values.n_feat).max(1) as f64;
+        let rms = (values.leftover.iter().map(|v| v * v).sum::<f64>() / nnu).sqrt();
+        assert!(
+            rms < DEFECT || shell_leftover(&values),
+            "regular icosahedron is not the closed-shell path this shortcut claims"
+        );
+        let mut rng_new = StdRng::seed_from_u64(11);
+        let mut rng_old = StdRng::seed_from_u64(11);
+        let y = step_away_featomic(x.view(), 0.35, 3.5, None, None, &mut rng_new);
+        let z = hop_with_gradients(x.view(), 0.35, 3.5, None, None, &mut rng_old);
+        assert_eq!(y.len(), z.len());
+        for (left, right) in y.iter().zip(z.iter()) {
+            assert_eq!(left.to_bits(), right.to_bits());
+        }
+        assert_eq!(rng_new.random::<u64>(), rng_old.random::<u64>());
     }
 
     #[test]
