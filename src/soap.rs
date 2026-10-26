@@ -1664,32 +1664,87 @@ fn ico_axes() -> [[f64; 3]; 6] {
     ]
 }
 
+/// Minimum-cost assignment of a square matrix.
+///
+/// `cost[i * n + j]` is the cost of matching row `i` to column `j`.
+/// The result is `perm[i] = column`. The optimum is a property of the
+/// costs, so a simultaneous permutation of the rows and columns does
+/// not change which points are matched. An index-order greedy pass does.
 #[cfg_attr(feature = "ira", allow(dead_code))]
-fn nearest_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
-    let n = x.len() / 3;
-    let mut used = vec![false; n];
-    let mut perm = vec![0usize; n];
-    for i in 0..n {
-        let mut best = 0usize;
-        let mut best_d = f64::INFINITY;
-        for j in 0..n {
-            if used[j] {
-                continue;
+fn hungarian(cost: &[f64], n: usize) -> Vec<usize> {
+    let mut u = vec![0.0; n + 1];
+    let mut v = vec![0.0; n + 1];
+    let mut p = vec![0usize; n + 1];
+    let mut way = vec![0usize; n + 1];
+    for i in 1..=n {
+        p[0] = i;
+        let mut j0 = 0usize;
+        let mut minv = vec![f64::INFINITY; n + 1];
+        let mut used = vec![false; n + 1];
+        loop {
+            used[j0] = true;
+            let i0 = p[j0];
+            let mut delta = f64::INFINITY;
+            let mut j1 = 0usize;
+            for j in 1..=n {
+                if used[j] {
+                    continue;
+                }
+                let cur = cost[(i0 - 1) * n + (j - 1)] - u[i0] - v[j];
+                if cur < minv[j] {
+                    minv[j] = cur;
+                    way[j] = j0;
+                }
+                if minv[j] < delta {
+                    delta = minv[j];
+                    j1 = j;
+                }
             }
+            for j in 0..=n {
+                if used[j] {
+                    u[p[j]] += delta;
+                    v[j] -= delta;
+                } else {
+                    minv[j] -= delta;
+                }
+            }
+            j0 = j1;
+            if p[j0] == 0 {
+                break;
+            }
+        }
+        loop {
+            let j1 = way[j0];
+            p[j0] = p[j1];
+            j0 = j1;
+            if j0 == 0 {
+                break;
+            }
+        }
+    }
+    let mut perm = vec![0usize; n];
+    for j in 1..=n {
+        perm[p[j] - 1] = j - 1;
+    }
+    perm
+}
+
+/// Columns matched to each row of `x` under the minimum sum of squared distances.
+#[cfg_attr(feature = "ira", allow(dead_code))]
+fn optimal_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
+    let n = x.len() / 3;
+    let mut cost = vec![0.0; n * n];
+    for i in 0..n {
+        for j in 0..n {
             let mut d2 = 0.0;
             for a in 0..3 {
                 let d = x[3 * i + a] - y[3 * j + a];
                 d2 += d * d;
             }
-            if d2 < best_d {
-                best_d = d2;
-                best = j;
-            }
+            cost[i * n + j] = d2;
         }
-        used[best] = true;
-        perm[i] = best;
     }
-    perm
+    hungarian(&cost, n)
 }
 
 fn com_of(x: ArrayView1<f64>) -> [f64; 3] {
@@ -1798,14 +1853,7 @@ fn residual_about(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
             y[3 * i + 1] = q[1];
             y[3 * i + 2] = q[2];
         }
-        let xc_view = {
-            let mut t = Array1::zeros(x.len());
-            for i in 0..x.len() {
-                t[i] = xc[i];
-            }
-            t
-        };
-        let perm = nearest_perm(xc_view.view(), &y);
+        let perm = optimal_perm(ArrayView1::from(xc.as_slice()), &y);
         let mut y_m = vec![0.0; x.len()];
         for i in 0..n {
             for a in 0..3 {
@@ -1827,7 +1875,7 @@ fn residual_about(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
 }
 
 /// Residual `x − R_5 x` under the best fivefold axis, and that axis's
-/// deviation length. SOFI/IRA when linked; greedy assignment otherwise.
+/// deviation length. SOFI/IRA when linked; Hungarian assignment otherwise.
 fn fivefold_residual(x: ArrayView1<f64>) -> (f64, [f64; 3], Array1<f64>) {
     let mut best_d = f64::INFINITY;
     let mut best_ax = [0.0, 0.0, 1.0];
