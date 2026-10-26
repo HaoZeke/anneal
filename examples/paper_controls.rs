@@ -31,6 +31,7 @@ use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use sha2::{Digest, Sha256};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 const HIT: f64 = 1e-4;
@@ -123,20 +124,18 @@ fn main() {
                 run_population(&campaign, seed, budget, smoke);
             (charged, report.best_energy, wall, force_to_hit, generations)
         } else {
-            let (outcome, wall) = run_seed(&cfg, &campaign, seed, budget);
-            let force_to_hit = campaign.reference.and_then(|reference| {
-                outcome
-                    .improvements
-                    .iter()
-                    .find(|(_, _, _, energy)| *energy <= reference + HIT)
-                    .map(|(_, spent, _, _)| *spent)
+            let (outcome, wall, force_to_hit) = run_seed(&cfg, &campaign, seed, budget);
+            let force_to_hit = force_to_hit.filter(|_| {
+                campaign
+                    .reference
+                    .is_some_and(|reference| outcome.best <= reference + HIT)
             });
             (outcome.charged, outcome.best, wall, force_to_hit, 0)
         };
-        let hit = match (campaign.reference, force_to_hit) {
-            (None, _) => "unscored",
-            (Some(_), Some(_)) => "true",
-            (Some(_), None) => "false",
+        let hit = match campaign.reference {
+            None => "unscored",
+            Some(reference) if best <= reference + HIT => "true",
+            Some(_) => "false",
         };
         push(
             &mut report,
@@ -320,7 +319,11 @@ fn run_seed(
     campaign: &Campaign,
     seed: u64,
     budget: usize,
-) -> (anneal_core::methods::cluster_hopping::Outcome, f64) {
+) -> (
+    anneal_core::methods::cluster_hopping::Outcome,
+    f64,
+    Option<usize>,
+) {
     let kind = match campaign.rho {
         Some(rho) => PairKind::Morse { rho },
         None => PairKind::LennardJones,
@@ -331,7 +334,12 @@ fn run_seed(
     };
     let mut ledger = Ledger::new(budget);
     let mut optimiser = WarmLbfgs::default();
+    let reference = campaign.reference;
+    // The outcome keeps 512 improvement records. A later crossing still
+    // updates the best energy, so the hit clock is this quench.
+    let first_hit = AtomicUsize::new(usize::MAX);
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
+        let before = led.best;
         optimiser.forget();
         let (value, relaxed, _) = optimiser.minimize(x, iterations, |v| {
             if !led.charge() {
@@ -339,6 +347,12 @@ fn run_seed(
             }
             Some(potential.value_and_gradient(v))
         });
+        if first_hit.load(Ordering::Relaxed) == usize::MAX
+            && reference.is_some_and(|target| value.is_finite() && value <= target + HIT)
+            && value < before - 1e-10
+        {
+            first_hit.store(led.spent(), Ordering::Relaxed);
+        }
         (value, relaxed)
     };
     // The climb reads this gradient. Without it the stall leave never runs
@@ -368,7 +382,21 @@ fn run_seed(
         optimize_with_gradient(cfg, &mut ledger, &mut relax, Some(&mut grad), seed)
     }
     .expect("finite start");
-    (outcome, started.elapsed().as_secs_f64())
+    let from_list = campaign.reference.and_then(|reference| {
+        outcome
+            .improvements
+            .iter()
+            .find(|(_, _, _, energy)| *energy <= reference + HIT)
+            .map(|(_, spent, _, _)| *spent)
+    });
+    (
+        outcome,
+        started.elapsed().as_secs_f64(),
+        match first_hit.load(Ordering::Relaxed) {
+            usize::MAX => from_list,
+            spent => Some(spent),
+        },
+    )
 }
 
 /// Icosahedral 38-mer perturbation from `examples/ttt_lj38.rs`.

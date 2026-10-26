@@ -9,6 +9,7 @@ use anneal_core::methods::cluster_hopping::{Config, Ledger, optimize_with_gradie
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use ndarray::ArrayView1;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 fn main() {
@@ -30,7 +31,12 @@ fn main() {
     let potential = PairPotential::lennard_jones(n);
     let mut ledger = Ledger::new(budget);
     let mut optimiser = WarmLbfgs::default();
+    // The outcome keeps 512 improvement records. A later crossing still
+    // updates the best energy, so the hit clock is the quench that first
+    // lands at or below the reference, not that capped list.
+    let first_hit = AtomicUsize::new(usize::MAX);
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
+        let before = led.best;
         optimiser.forget();
         let (value, relaxed, _) = optimiser.minimize(x, iterations, |v| {
             if !led.charge() {
@@ -38,6 +44,13 @@ fn main() {
             }
             Some(potential.value_and_gradient(v))
         });
+        if first_hit.load(Ordering::Relaxed) == usize::MAX
+            && value.is_finite()
+            && value < before - 1e-10
+            && value <= reference + tol
+        {
+            first_hit.store(led.spent(), Ordering::Relaxed);
+        }
         (value, relaxed)
     };
     let mut grad = |led: &mut Ledger, v: ArrayView1<f64>| {
@@ -50,12 +63,17 @@ fn main() {
     let outcome = optimize_with_gradient(&cfg, &mut ledger, &mut relax, Some(&mut grad), seed)
         .expect("finite start");
     let wall = started.elapsed().as_secs_f64();
-    let force_to_hit = outcome
+    let hit = outcome.best <= reference + tol;
+    let from_list = outcome
         .improvements
         .iter()
         .find(|(_, _, _, energy)| *energy <= reference + tol)
         .map(|(_, spent, _, _)| *spent);
-    let hit = force_to_hit.is_some();
+    let tracked = match first_hit.load(Ordering::Relaxed) {
+        usize::MAX => None,
+        spent => Some(spent),
+    };
+    let force_to_hit = if hit { tracked.or(from_list) } else { None };
     println!(
         "{{\"n\":{n},\"seed\":{seed},\"budget\":{budget},\"reference\":{reference},\"tol\":{tol},\
 \"config\":\"{preset}\",\"config_digest\":\"{digest}\",\
