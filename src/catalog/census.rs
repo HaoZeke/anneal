@@ -31,6 +31,23 @@ pub const PRODUCTION_MINIMUM_VISITS: u64 = gt_min_visits(
 pub const PRODUCTION_MAX_UNSEEN_MASS: f64 =
     PRODUCTION_UNSEEN_MASS_NUM as f64 / PRODUCTION_UNSEEN_MASS_DEN as f64;
 
+/// Numerator of the opt-in witnessed ceiling.
+pub const WITNESS_TRIPLETON_NUM: u64 = 1;
+/// Denominator of the opt-in witnessed ceiling. With the numerator
+/// this is `1/3`.
+pub const WITNESS_TRIPLETON_DEN: u64 = 3;
+/// Opt-in ceiling for a witnessed target.
+///
+/// A single witness at three visits has no singleton and no doubleton,
+/// so Esty's variance is 0 and the upper bound is 0. Good's hatch is
+/// `(0 + 1) / (3 + 1) = 1/4`. That is not strictly below
+/// [`PRODUCTION_MAX_UNSEEN_MASS`], and it is strictly below one third.
+/// One third is the least unit fraction with that property. Two visits
+/// of one witness are still a doubleton: the hatch is one third, which
+/// is not strictly below this ceiling.
+pub const WITNESS_TRIPLETON_CEILING: f64 =
+    WITNESS_TRIPLETON_NUM as f64 / WITNESS_TRIPLETON_DEN as f64;
+
 /// Stable identifier for one immutable census medoid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BasinId(u64);
@@ -242,12 +259,21 @@ impl BasinCensus {
     /// bound, not [`PRODUCTION_MINIMUM_VISITS`]. Anonymous saturation
     /// still uses that floor.
     pub fn target_found_with_confidence(&self) -> bool {
+        self.target_found_below(PRODUCTION_MAX_UNSEEN_MASS)
+    }
+
+    /// [`target_found_with_confidence`] at `ceiling` instead of
+    /// [`PRODUCTION_MAX_UNSEEN_MASS`].
+    ///
+    /// The predicate is the same hatch-and-Esty pair. Only the ceiling
+    /// changes. [`WITNESS_TRIPLETON_CEILING`] is the opt-in value.
+    pub fn target_found_below(&self, ceiling: f64) -> bool {
         self.has_witness()
             && super::occupancy::leftover_esty_stable(
                 self.total_visits(),
                 self.singleton_count(),
                 self.doubleton_count(),
-                PRODUCTION_MAX_UNSEEN_MASS,
+                ceiling,
             )
     }
 

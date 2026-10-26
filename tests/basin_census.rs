@@ -218,6 +218,43 @@ fn witnessed_confidence_follows_the_esty_bound_not_a_fixed_count() {
 }
 
 #[test]
+fn witness_tripleton_ceiling_retires_the_third_clean_visit() {
+    use anneal_core::catalog::census::WITNESS_TRIPLETON_CEILING;
+
+    let witness = Some(WitnessId::from_raw(7));
+    let mut census = BasinCensus::new(1, 0.1).unwrap();
+    for index in 0..2 {
+        census
+            .observe_witness(&[f64::from(index)], witness)
+            .unwrap();
+    }
+    assert!(!census.target_found_below(WITNESS_TRIPLETON_CEILING));
+    census.observe_witness(&[2.0], witness).unwrap();
+    assert_eq!(census.total_visits(), 3);
+    assert_eq!(census.singleton_count(), 0);
+    assert_eq!(census.doubleton_count(), 0);
+    assert!(!census.target_found_with_confidence());
+    assert!(census.target_found_below(WITNESS_TRIPLETON_CEILING));
+
+    let mut mixed = BasinCensus::new(1, 0.1).unwrap();
+    for index in 0..3 {
+        mixed
+            .observe_witness(&[f64::from(index)], Some(WitnessId::from_raw(1)))
+            .unwrap();
+    }
+    mixed
+        .observe_witness(&[10.0], Some(WitnessId::from_raw(2)))
+        .unwrap();
+    mixed
+        .observe_witness(&[10.4], Some(WitnessId::from_raw(2)))
+        .unwrap();
+    assert_eq!(mixed.total_visits(), 5);
+    assert_eq!(mixed.singleton_count(), 0);
+    assert_eq!(mixed.doubleton_count(), 1);
+    assert!(!mixed.target_found_below(WITNESS_TRIPLETON_CEILING));
+}
+
+#[test]
 fn fewer_than_twenty_visits_never_report_saturation() {
     let mut census = census(0.25);
     for _ in 0..19 {
