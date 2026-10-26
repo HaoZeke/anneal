@@ -737,22 +737,9 @@ pub struct SiteEnergies {
 impl Fingerprint for SiteEnergies {
     fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
         let n = self.n_points;
-        let mut e = vec![0.0_f64; n];
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let dx = x[3 * i] - x[3 * j];
-                let dy = x[3 * i + 1] - x[3 * j + 1];
-                let dz = x[3 * i + 2] - x[3 * j + 2];
-                let r2 = dx * dx + dy * dy + dz * dz;
-                if r2 <= 0.0 {
-                    continue;
-                }
-                let s6 = 1.0 / (r2 * r2 * r2);
-                let v = 4.0 * (s6 * s6 - s6);
-                e[i] += v;
-                e[j] += v;
-            }
-        }
+        let mut e =
+            crate::potentials::lennard_jones_atom_energies(1.0, 1.0, x.slice(ndarray::s![..3 * n]))
+                .to_vec();
         e.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         Array1::from(e)
     }
