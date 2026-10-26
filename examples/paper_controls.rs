@@ -19,7 +19,7 @@
 
 use anneal_core::catalog::lj::system_signature;
 use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, MoveLibrary, SoapProposalMode, random_cluster_in_radius, run_with_gradient,
+    Config, Ledger, MoveLibrary, SoapProposalMode, optimize_with_gradient, run_with_gradient,
 };
 use anneal_core::methods::population_annealing::{
     PopulationAnneal, PopulationReport, population_anneal,
@@ -329,17 +329,6 @@ fn run_seed(
         PairKind::LennardJones => PairPotential::lennard_jones(campaign.n),
         PairKind::Morse { rho } => PairPotential::morse(campaign.n, rho),
     };
-    let start = if campaign.icosahedral {
-        ico_start(campaign.n, seed)
-    } else {
-        let mut start_rng = StdRng::seed_from_u64(seed);
-        random_cluster_in_radius(
-            campaign.n,
-            cfg.start_radius(),
-            cfg.min_separation,
-            &mut start_rng,
-        )
-    };
     let mut ledger = Ledger::new(budget);
     let mut optimiser = WarmLbfgs::default();
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
@@ -361,16 +350,23 @@ fn run_seed(
         }
         Some(potential.value_and_gradient(v).1)
     };
-    let mut rng = StdRng::seed_from_u64(seed);
     let started = Instant::now();
-    let outcome = run_with_gradient(
-        cfg,
-        start.view(),
-        &mut ledger,
-        &mut relax,
-        Some(&mut grad),
-        &mut rng,
-    )
+    // One `StdRng`, the library entry. A second stream reseeded at `seed`
+    // after the start draw is a different search.
+    let outcome = if campaign.icosahedral {
+        let start = ico_start(campaign.n, seed);
+        let mut rng = StdRng::seed_from_u64(seed);
+        run_with_gradient(
+            cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+    } else {
+        optimize_with_gradient(cfg, &mut ledger, &mut relax, Some(&mut grad), seed)
+    }
     .expect("finite start");
     (outcome, started.elapsed().as_secs_f64())
 }
