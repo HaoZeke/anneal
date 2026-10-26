@@ -76,6 +76,24 @@ fn ledger_exposes_the_budget() {
 }
 
 #[test]
+fn recommended_lennard_jones_scales_stay_reduced() {
+    let cfg = Config::recommended(38);
+    assert_eq!(cfg.length_scale, 1.0);
+    assert_eq!(cfg.energy_scale, 1.0);
+    assert_eq!(cfg.min_separation, 0.85);
+    assert_eq!(cfg.jump_step, 0.38);
+    assert_eq!(cfg.temperature, 0.8);
+    assert_eq!(cfg.bias_height, 0.25);
+    let (nearest, well) = rgpot_pair::sutton_chen_scales(1.0, 34.408, 1.0, 10, 8);
+    let scaled = Config::recommended_for_scales(38, nearest, well);
+    let (lj_nearest, lj_well) = rgpot_pair::lennard_jones_scales(1.0, 1.0);
+    assert_eq!(scaled.length_scale, nearest / lj_nearest);
+    assert_eq!(scaled.energy_scale, well / lj_well);
+    assert!(scaled.min_separation < cfg.min_separation);
+    assert!(scaled.temperature > cfg.temperature);
+}
+
+#[test]
 fn recommended_differs_from_for_cluster() {
     let rec = Config::recommended(38);
     let base = Config::for_cluster(38);
