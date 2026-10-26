@@ -1,1 +1,1 @@
-An opt-in occupancy temperature raises the chain's existing temperature when a closed basin census is concentrated. It modulates a budget-window temperature instead of replacing it, and it does not cool a spread census.
+An opt-in occupancy temperature raises the chain's existing temperature when a closed basin census is concentrated. It modulates a budget-window temperature instead of replacing it, and it does not cool a spread census. ``for_cluster`` turns it on. The measured presets leave it off.
