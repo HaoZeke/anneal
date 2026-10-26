@@ -206,8 +206,10 @@ impl BasinCensus {
     ///
     /// `Some` increments that witness's basin irrespective of descriptor
     /// distance, so near-duplicates of one minimum are not singletons.
-    /// `None` uses [`Self::observe`]. The production visit floor and
-    /// unseen-mass ceiling are unchanged.
+    /// `None` uses [`Self::observe`]. Anonymous saturation keeps the
+    /// production visit floor. A witness is confident when the Esty
+    /// unseen-mass bound is under the same ceiling, which is not a
+    /// fixed visit count.
     pub fn observe_witness(
         &mut self,
         descriptor: &[f64],
@@ -230,13 +232,23 @@ impl BasinCensus {
         !self.witness_basins.is_empty()
     }
 
-    /// Production saturation after a witness has named the target.
+    /// Whether a witnessed target meets the production unseen-mass bound.
     ///
-    /// Anonymous revisits can meet the unseen-mass ceiling without the
-    /// target. A witness without that ceiling is one sighting, not
-    /// confidence.
+    /// Anonymous revisits can meet the ceiling without the target, so a
+    /// witness is required. The visit count is the one
+    /// [`super::occupancy::leftover_esty_stable`] demands for these
+    /// singletons and doubletons at [`PRODUCTION_MAX_UNSEEN_MASS`].
+    /// That is Good's next-step hatch plus Esty's one-sided 95% upper
+    /// bound, not [`PRODUCTION_MINIMUM_VISITS`]. Anonymous saturation
+    /// still uses that floor.
     pub fn target_found_with_confidence(&self) -> bool {
-        self.has_witness() && self.is_saturated()
+        self.has_witness()
+            && super::occupancy::leftover_esty_stable(
+                self.total_visits(),
+                self.singleton_count(),
+                self.doubleton_count(),
+                PRODUCTION_MAX_UNSEEN_MASS,
+            )
     }
 
     fn observe_validated_assignment(

@@ -668,10 +668,11 @@ pub fn good_turing_stop_reason(census: &BasinCensus) -> Option<&'static str> {
     census.is_saturated().then_some("saturated")
 }
 
-/// `Some("saturated")` when a witnessed target meets that same rule.
+/// `Some("saturated")` when a witnessed target meets the Esty bound.
 ///
-/// The visit floor and the unseen-mass ceiling stay the production
-/// values. The witness is what keeps near-duplicate minima of one
+/// The unseen-mass ceiling stays the production value. The number of
+/// visits is the one that bound requires, not the anonymous visit
+/// floor. The witness is what keeps near-duplicate minima of one
 /// target from being counted as singletons when no radius sits between
 /// the same-minimum scatter and the distinct-minimum separation.
 pub fn good_turing_target_stop(census: &BasinCensus) -> Option<&'static str> {

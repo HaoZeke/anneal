@@ -22,9 +22,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use anneal_core::catalog::census::{
-    BasinCensus, PRODUCTION_MAX_UNSEEN_MASS, PRODUCTION_MINIMUM_VISITS,
-};
+use anneal_core::catalog::census::{BasinCensus, PRODUCTION_MAX_UNSEEN_MASS};
+use anneal_core::catalog::leftover_esty_upper;
 use anneal_core::catalog::molecular::{
     EINDIR_REV, EINDIR_VERSION, ENGINE_KIND, GFN2_ACCURACY, GFN2_HEXAMER_BUDGET,
     GFN2_MAX_ITERATIONS, GFN2_METHOD, GOOD_TURING_CHECKPOINT_INTERVAL, MolecularCatalogPresetError,
@@ -610,14 +609,20 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                                 first_prism_wall = Some(wall.elapsed().as_secs_f64());
                             }
                         }
+                        let visits = census.total_visits();
+                        let singletons = census.singleton_count();
+                        let doubletons = census.doubleton_count();
                         let mass = census
                             .unseen_mass()
                             .map(|value| value.to_string())
                             .unwrap_or_else(|| "none".to_owned());
+                        let hatch = ((singletons + 1) as f64 / (visits + 1) as f64).to_string();
+                        let upper = leftover_esty_upper(visits, singletons, doubletons)
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "none".to_owned());
                         let witness_label = witness_name.unwrap_or_else(|| "none".to_owned());
                         trace.push_str(&format!(
-                        "good_turing_trace: force_calls={calls} visits={} unseen_mass={mass} witness={witness_label} minimum_visits={PRODUCTION_MINIMUM_VISITS} max_unseen_mass={PRODUCTION_MAX_UNSEEN_MASS}\n",
-                        census.total_visits()
+                        "good_turing_trace: force_calls={calls} visits={visits} unseen_mass={mass} singletons={singletons} doubletons={doubletons} hatch={hatch} esty_upper={upper} witness={witness_label} max_unseen_mass={PRODUCTION_MAX_UNSEEN_MASS}\n"
                     ));
                     }
                     if let Some(reason) = good_turing_target_stop(&census) {
