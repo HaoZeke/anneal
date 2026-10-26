@@ -125,6 +125,37 @@ fn gradient_is_converged(gradient: ArrayView1<f64>, threshold: f64) -> bool {
         < threshold
 }
 
+/// Energy window, in units of [`Config::energy_scale`], inside which a
+/// root-mean-square quench is polished to [`Config::record_gradient`].
+///
+/// A stop at RMS 0.007 on Lennard-Jones left the energy as much as 0.008
+/// above the infinity-norm minimum. The hit window is 0.001, so a
+/// candidate within this margin of the incumbent or the ledger target is
+/// tightened before it can be the recorded answer.
+const SLOPPY_POLISH_MARGIN: f64 = 0.05;
+
+fn apply_quench_tolerance(opt: &mut WarmLbfgs, cfg: &Config, dimension: usize) {
+    match cfg.quench_rms {
+        Some(rms) if rms.is_finite() && rms > 0.0 && dimension > 0 => {
+            opt.norm = rgmin::GradNorm::Euclidean;
+            opt.gtol = rms * (dimension as f64).sqrt();
+        }
+        _ => {
+            opt.norm = rgmin::GradNorm::Infinity;
+            opt.gtol = cfg.record_gradient;
+        }
+    }
+}
+
+fn quench_gradient_ok(cfg: &Config, gradient: ArrayView1<f64>) -> bool {
+    if gradient_is_converged(gradient, cfg.record_gradient) {
+        return true;
+    }
+    cfg.quench_rms.is_some_and(|rms| {
+        rms.is_finite() && rms > 0.0 && crate::methods::rigid_quench::rms_force(gradient) <= rms
+    })
+}
+
 fn warm_relax<'a, O>(
     objective: &'a O,
     cfg: &'a Config,
@@ -139,8 +170,9 @@ where
     // digits no acceptance test or record reads. Stopping at 1e-6 instead cost
     // the communicating preset a PAR-2 of 5792 force calls on 32 LJ38 starts
     // against 4269 here, and a median of 5726 against 3253. Rigid bodies and
-    // species diameters record at that same tolerance.
-    opt.gtol = cfg.record_gradient;
+    // species diameters record at that same tolerance. A preset that sets
+    // `quench_rms` stops the search descent at that root-mean-square and
+    // polishes only the quenches that could become the recorded answer.
     // The driver calls the screening pass with `screen_steps` and the full one
     // with `relax_steps`, so the iteration count identifies which is which.
     let screen_iters = cfg.screen_steps;
@@ -150,6 +182,7 @@ where
         .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
     move |led, x, iters| {
         opt.forget();
+        apply_quench_tolerance(&mut opt, cfg, x.len());
         let before = led.spent();
         let screening = iters <= screen_iters;
         // A rigid chart uses this same descent. A line-search-free capped
@@ -285,10 +318,32 @@ where
         // counts evaluations has to count this one.
         let mut f = f;
         let mut xr = xr;
+        // The sloppy energy can sit a few thousandths above the tight
+        // minimum. Polish when that gap could hide a hit or a new record.
+        // Farther above the incumbent the chain adopts the sloppy point,
+        // which is the search quench GMIN runs at SLOPPYCONV.
+        let margin = SLOPPY_POLISH_MARGIN * cfg.energy_scale;
+        let near_record = stop_at.is_some_and(|limit| f <= limit + margin) || f <= target + margin;
+        if !screening && cfg.quench_rms.is_some() && near_record && led.remaining() > 0 {
+            opt.norm = rgmin::GradNorm::Infinity;
+            opt.gtol = cfg.record_gradient;
+            let (f2, xr2, _) = opt.minimize(xr.view(), iters, |v| {
+                if !led.charge() {
+                    return None;
+                }
+                Some(objective.value_and_gradient(v))
+            });
+            f = f2;
+            xr = xr2;
+            let extra = led.spent() - before - cost;
+            if extra > 0 {
+                stats.full_charged += extra;
+            }
+        }
         let mut converged = if led.charge() {
             stats.check_charged += 1;
             let g = objective.grad(xr.view());
-            gradient_is_converged(g.view(), cfg.record_gradient)
+            quench_gradient_ok(cfg, g.view())
         } else {
             false
         };
@@ -309,7 +364,7 @@ where
             converged = if led.charge() {
                 stats.check_charged += 1;
                 let g = objective.grad(xr.view());
-                gradient_is_converged(g.view(), cfg.record_gradient)
+                quench_gradient_ok(cfg, g.view())
             } else {
                 false
             };

@@ -55,8 +55,15 @@ pub struct WarmLbfgs {
     inner: Lbfgs,
     /// Pairs retained; the usual choice is between five and ten.
     pub max_pairs: usize,
-    /// Gradient infinity norm below which a relaxation is converged.
+    /// Gradient norm below which a relaxation is converged.
+    ///
+    /// Compared with [`WarmLbfgs::norm`]. The default is an infinity norm,
+    /// which is the record tolerance. A search quench that adopts GMIN's
+    /// `SLOPPYCONV` sets [`GradNorm::Euclidean`] and a root-mean-square
+    /// threshold instead.
     pub gtol: f64,
+    /// Norm used against [`WarmLbfgs::gtol`].
+    pub norm: GradNorm,
     /// Armijo sufficient-decrease constant, `c1` in the Wolfe conditions.
     pub armijo: f64,
     /// Curvature constant, `c2`. The usual choice for quasi-Newton is 0.9.
@@ -71,6 +78,7 @@ impl Default for WarmLbfgs {
             inner: Lbfgs::default(),
             max_pairs: 8,
             gtol: 1e-6,
+            norm: GradNorm::Infinity,
             armijo: 1e-4,
             curvature: 0.9,
             max_line_evals: 20,
@@ -85,7 +93,7 @@ impl WarmLbfgs {
         self.inner.armijo = self.armijo;
         self.inner.curvature = self.curvature;
         self.inner.max_line_evals = self.max_line_evals;
-        self.inner.norm = GradNorm::Infinity;
+        self.inner.norm = self.norm;
         self.inner.trim();
     }
 
