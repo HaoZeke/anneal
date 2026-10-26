@@ -109,19 +109,43 @@ impl ForceObjective {
     }
 
     fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-        let coordinates: Vec<f64> = x.iter().copied().collect();
-        let (energy, mut gradient) =
-            (self.eval.lock().expect("engine lock").as_mut())(&coordinates);
+        let owned;
+        let coordinates: &[f64] = if let Some(slice) = x.as_slice() {
+            slice
+        } else {
+            owned = x.iter().copied().collect::<Vec<f64>>();
+            &owned
+        };
+        let (energy, mut gradient) = (self.eval.lock().expect("engine lock").as_mut())(coordinates);
         if gradient.len() != self.dim || !energy.is_finite() {
             return (f64::NAN, Array1::from_elem(self.dim, f64::NAN));
         }
-        let (wall, wall_gradient) = oh_wall(&coordinates);
+        let (wall, wall_gradient) = oh_wall(coordinates);
         if wall != 0.0 {
             for (component, extra) in gradient.iter_mut().zip(wall_gradient) {
                 *component += extra;
             }
         }
         (energy + wall, Array1::from_vec(gradient))
+    }
+}
+
+/// Move a standard-layout gradient out of its allocation.
+///
+/// A nonstandard view still copies. The logical values are the same
+/// either way.
+fn gradient_vector(gradient: Array1<f64>) -> Vec<f64> {
+    let len = gradient.len();
+    if gradient.is_standard_layout() {
+        match gradient.into_raw_vec_and_offset() {
+            (values, None | Some(0)) if values.len() == len => values,
+            (values, Some(offset)) if offset.saturating_add(len) <= values.len() => {
+                values[offset..offset + len].to_vec()
+            }
+            (values, _) => values,
+        }
+    } else {
+        gradient.to_vec()
     }
 }
 
@@ -364,7 +388,9 @@ fn covalent_oh_span(coordinates: &[f64]) -> (f64, f64) {
 /// Harmonic wall outside [`OH_WALL_ONSET_A`]. Zero, with zero gradient, inside it.
 fn oh_wall(coordinates: &[f64]) -> (f64, Vec<f64>) {
     let mut energy = 0.0;
-    let mut gradient = vec![0.0; coordinates.len()];
+    // The gradient stays unallocated while every OH bond is inside the
+    // onset. The caller adds it only when the energy is nonzero.
+    let mut gradient = Vec::new();
     if coordinates.len() != 9 * WATER_HEXAMER_MOLECULES {
         return (0.0, gradient);
     }
@@ -382,6 +408,9 @@ fn oh_wall(coordinates: &[f64]) -> (f64, Vec<f64>) {
             }
             let excess = distance - OH_WALL_ONSET_A;
             energy += OH_WALL_EV_PER_A2 * excess * excess;
+            if gradient.is_empty() {
+                gradient.resize(coordinates.len(), 0.0);
+            }
             let slope = 2.0 * OH_WALL_EV_PER_A2 * excess / distance;
             for axis in 0..3 {
                 let component = (coordinates[hydrogen + axis] - coordinates[oxygen + axis]) * slope;
@@ -809,7 +838,7 @@ fn load_deposited(engine: &str, n_atoms: usize) -> Result<ForceObjective, String
     Ok(ForceObjective::new(
         dim,
         move |coordinates: &[f64]| match pipe.eval(ArrayView1::from(coordinates)) {
-            Some((energy, gradient)) => (energy, gradient.to_vec()),
+            Some((energy, gradient)) => (energy, gradient_vector(gradient)),
             None => (f64::NAN, vec![f64::NAN; coordinates.len()]),
         },
     ))
@@ -847,7 +876,7 @@ fn load_gfn2(atomic_numbers: &[i32], n_atoms: usize) -> Result<ForceObjective, S
     Ok(ForceObjective::new(dim, move |coordinates: &[f64]| {
         let objective = pot.wrapper();
         let (energy, gradient) = objective.value_and_gradient(ArrayView1::from(coordinates));
-        (energy, gradient.to_vec())
+        (energy, gradient_vector(gradient))
     }))
 }
 
