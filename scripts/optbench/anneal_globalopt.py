@@ -52,6 +52,22 @@ def _optbench(root: Path) -> None:
         sys.path.insert(0, str(root))
 
 
+def lennard_jones_size(problem: dict) -> int | None:
+    """Atom count of a pure Lennard-Jones problem, when its name is ``lj<N>``."""
+    import re
+
+    kind = str((problem.get("potential") or {}).get("kind") or "lennard-jones")
+    if kind != "lennard-jones":
+        return None
+    name = str(problem.get("problem") or "")
+    match = re.fullmatch(r"lj(\d+)", name)
+    if match is None:
+        match = re.fullmatch(r"globalopt/lj(\d+)", str(problem.get("id") or ""))
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
 def load_problem(root: Path, name: str) -> dict:
     path = root / "problems" / "globalopt" / f"{name}.toml"
     with path.open("rb") as handle:
@@ -65,6 +81,11 @@ def load_problem(root: Path, name: str) -> dict:
     if reference is None:
         raise ValueError(f"{path} states no reference energy")
     convergence["energy_minimum"] = float(reference)
+    size = lennard_jones_size(problem)
+    if size is not None:
+        import anneal
+
+        anneal.check_stop_limit(size, float(convergence["energy_minimum"]))
     return problem
 
 
