@@ -180,14 +180,184 @@ fn spectrum_values(
     spectrum_keep(x, rcut, species, mobile, LMIN, false)
 }
 
-fn spectrum_keep(
+struct PowerRows {
+    rows: Vec<Vec<f64>>,
+    j_raw: Vec<Vec<f64>>,
+    n_feat: usize,
+}
+
+struct SoapSlot {
+    rcut_bits: u64,
+    lmin: i32,
+    gradients: bool,
+    species: Option<Vec<u32>>,
+    mobile: Option<Vec<usize>>,
+    coords: Vec<f64>,
+    rows: Vec<Vec<f64>>,
+    j_raw: Vec<Vec<f64>>,
+    n_feat: usize,
+}
+
+struct SoapStats {
+    hits: u64,
+    misses: u64,
+    clean_centers: u64,
+    centers: u64,
+}
+
+impl SoapStats {
+    const fn new() -> Self {
+        Self {
+            hits: 0,
+            misses: 0,
+            clean_centers: 0,
+            centers: 0,
+        }
+    }
+}
+
+impl Drop for SoapStats {
+    fn drop(&mut self) {
+        let Ok(path) = std::env::var("SOAP_CACHE_STATS") else {
+            return;
+        };
+        let line = format!(
+            "hits {} misses {} clean_centers {} centers {}\n",
+            self.hits, self.misses, self.clean_centers, self.centers
+        );
+        let _ = std::fs::write(path, line);
+    }
+}
+
+thread_local! {
+    static SOAP_MEMORY: RefCell<Option<SoapSlot>> = const { RefCell::new(None) };
+    static SOAP_STATS: RefCell<SoapStats> = const { RefCell::new(SoapStats::new()) };
+}
+
+#[cfg(test)]
+fn soap_cache_stats() -> (u64, u64, u64, u64) {
+    SOAP_STATS.with(|stats| {
+        let stats = stats.borrow();
+        (stats.hits, stats.misses, stats.clean_centers, stats.centers)
+    })
+}
+
+fn atom_same(left: &[f64], right: &[f64], index: usize) -> bool {
+    let base = 3 * index;
+    left[base].to_bits() == right[base].to_bits()
+        && left[base + 1].to_bits() == right[base + 1].to_bits()
+        && left[base + 2].to_bits() == right[base + 2].to_bits()
+}
+
+fn pair_dist2(coords: &[f64], left: usize, right: usize) -> f64 {
+    let a = 3 * left;
+    let b = 3 * right;
+    let dx = coords[a] - coords[b];
+    let dy = coords[a + 1] - coords[b + 1];
+    let dz = coords[a + 2] - coords[b + 2];
+    dx * dx + dy * dy + dz * dz
+}
+
+/// A centre is unchanged when it and every atom inside `rcut` of it
+/// have the same coordinates, and no atom has crossed the cutoff.
+fn centre_unchanged(previous: &[f64], coords: &[f64], centre: usize, r2: f64) -> bool {
+    if !atom_same(previous, coords, centre) {
+        return false;
+    }
+    let n = coords.len() / 3;
+    for other in 0..n {
+        let was = pair_dist2(previous, centre, other) <= r2;
+        let now = pair_dist2(coords, centre, other) <= r2;
+        if was != now || (now && !atom_same(previous, coords, other)) {
+            return false;
+        }
+    }
+    true
+}
+
+fn slot_matches(
+    slot: &SoapSlot,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    lmin: i32,
+    with_gradients: bool,
+    n: usize,
+) -> bool {
+    slot.rcut_bits == rcut.to_bits()
+        && slot.lmin == lmin
+        && slot.gradients == with_gradients
+        && slot.coords.len() == 3 * n
+        && slot.species.as_deref() == species
+        && slot.mobile.as_deref() == mobile
+}
+
+fn cached_power_rows(
     x: ArrayView1<f64>,
     rcut: f64,
     species: Option<&[u32]>,
     mobile: Option<&[usize]>,
     lmin: i32,
     with_gradients: bool,
-) -> Spectrum {
+) -> PowerRows {
+    let Some(coords) = x.as_slice() else {
+        SOAP_STATS.with(|stats| stats.borrow_mut().misses += 1);
+        return uncached_power_rows(x, rcut, species, lmin, with_gradients);
+    };
+    let n = coords.len() / 3;
+    let reusable = SOAP_MEMORY.with(|memory| {
+        let memory = memory.borrow();
+        let slot = memory.as_ref()?;
+        if !slot_matches(slot, rcut, species, mobile, lmin, with_gradients, n) {
+            return None;
+        }
+        let r2 = rcut * rcut;
+        let mut clean = 0usize;
+        for centre in 0..n {
+            if centre_unchanged(&slot.coords, coords, centre, r2) {
+                clean += 1;
+            }
+        }
+        SOAP_STATS.with(|stats| {
+            let mut stats = stats.borrow_mut();
+            stats.centers += n as u64;
+            stats.clean_centers += clean as u64;
+        });
+        (clean == n).then(|| PowerRows {
+            rows: slot.rows.clone(),
+            j_raw: slot.j_raw.clone(),
+            n_feat: slot.n_feat,
+        })
+    });
+    if let Some(rows) = reusable {
+        SOAP_STATS.with(|stats| stats.borrow_mut().hits += 1);
+        return rows;
+    }
+    let computed = uncached_power_rows(x, rcut, species, lmin, with_gradients);
+    SOAP_STATS.with(|stats| stats.borrow_mut().misses += 1);
+    SOAP_MEMORY.with(|memory| {
+        *memory.borrow_mut() = Some(SoapSlot {
+            rcut_bits: rcut.to_bits(),
+            lmin,
+            gradients: with_gradients,
+            species: species.map(|values| values.to_vec()),
+            mobile: mobile.map(|values| values.to_vec()),
+            coords: coords.to_vec(),
+            rows: computed.rows.clone(),
+            j_raw: computed.j_raw.clone(),
+            n_feat: computed.n_feat,
+        });
+    });
+    computed
+}
+
+fn uncached_power_rows(
+    x: ArrayView1<f64>,
+    rcut: f64,
+    species: Option<&[u32]>,
+    lmin: i32,
+    with_gradients: bool,
+) -> PowerRows {
     let n = x.len() / 3;
     let json = hypers(rcut);
     let mut systems = system_of(x, species);
@@ -201,9 +371,6 @@ fn spectrum_keep(
             .expect("featomic soap_power_spectrum failed")
     });
 
-    // Concatenate blocks. Each block is one (center_type, neighbor types) key.
-    // Only `l ≥ LMIN` columns enter the leftover: the radial/low-l block is
-    // a breathing mode on a closed packing shell.
     let mut rows: Vec<Vec<f64>> = vec![Vec::new(); n];
     let mut j_raw: Vec<Vec<f64>> = vec![Vec::new(); n];
     let m = 3 * n;
@@ -212,9 +379,6 @@ fn spectrum_keep(
         let array = block.values().to_array();
         let n_s = array.shape()[0];
         let n_f = array.shape()[array.ndim() - 1];
-        // Logical order is what `row * n_f + f` indexes. A standard-layout
-        // block already is that order; copying it is the 0.45% + 0.43%
-        // `Copied` / `from_iter` pair under `spectrum_keep`.
         let flat_owned;
         let flat: &[f64] = if let Some(slice) = array.as_slice() {
             slice
@@ -265,7 +429,6 @@ fn spectrum_keep(
             };
             let gsamp = g.samples();
             for grow in 0..g_rows {
-                // ("sample", "system", "atom")
                 let sample = gsamp[grow][0].usize();
                 let atom = gsamp[grow][2].usize();
                 if sample >= n_s || atom >= n {
@@ -289,12 +452,34 @@ fn spectrum_keep(
         }
     }
     let n_feat = rows.iter().map(|r| r.len()).max().unwrap_or(0);
-    for r in &mut rows {
-        r.resize(n_feat, 0.0);
+    for row in &mut rows {
+        row.resize(n_feat, 0.0);
     }
-    for j in &mut j_raw {
-        j.resize(n_feat * m, 0.0);
+    for column in &mut j_raw {
+        column.resize(n_feat * m, 0.0);
     }
+    PowerRows {
+        rows,
+        j_raw,
+        n_feat,
+    }
+}
+
+fn spectrum_keep(
+    x: ArrayView1<f64>,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    lmin: i32,
+    with_gradients: bool,
+) -> Spectrum {
+    let n = x.len() / 3;
+    let PowerRows {
+        rows,
+        j_raw,
+        n_feat,
+    } = cached_power_rows(x, rcut, species, mobile, lmin, with_gradients);
+    let m = 3 * n;
 
     let keep = mobile_mask(n, mobile);
     let zi = |i: usize| species.and_then(|z| z.get(i).copied()).unwrap_or(0);
@@ -1316,6 +1501,29 @@ mod tests {
             assert_eq!(left.to_bits(), right.to_bits());
         }
         assert_eq!(rng_new.random::<u64>(), rng_old.random::<u64>());
+    }
+
+    #[test]
+    fn repeated_power_rows_reuse_an_unchanged_neighbourhood() {
+        let x = ico13();
+        let (hits, _, _, _) = soap_cache_stats();
+        let first = spectrum_values(x.view(), 3.5, None, None);
+        let second = spectrum_values(x.view(), 3.5, None, None);
+        for (left, right) in first.leftover.iter().zip(second.leftover.iter()) {
+            assert_eq!(left.to_bits(), right.to_bits());
+        }
+        let (hits_after, _, _, _) = soap_cache_stats();
+        assert!(hits_after > hits);
+        let mut moved = x.clone();
+        moved[0] += 0.4;
+        let third = spectrum_values(moved.view(), 3.5, None, None);
+        assert!(
+            first
+                .leftover
+                .iter()
+                .zip(third.leftover.iter())
+                .any(|(left, right)| left.to_bits() != right.to_bits())
+        );
     }
 
     #[test]
