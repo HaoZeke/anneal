@@ -2623,9 +2623,6 @@ where
     let mut next_reoccupy = cfg.reoccupy_interval;
     let mut best_seen = ledger.best;
     let mut charged_at_best = ledger.spent();
-    // One Mackay opening per run. The doorway is uphill, so a later
-    // return to the shelf does not spend the budget on it again.
-    let mut mackay_opened = false;
     // Hops elapsed when the ledger last recorded a lower minimum.
     // A rigid reseed compares the live hop count with this stamp.
     let mut hops_at_lowest = 0usize;
@@ -2638,50 +2635,6 @@ where
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
             hops_at_lowest = hops;
-        }
-        // The deposited Mackay fixture has a fivefold opening at length
-        // 0.9018 that quenches about 1.07 above the shelf. The residual
-        // that finds it follows atom order, and a search quench does not
-        // keep the fixture's order. The gate is the exact shelf energy:
-        // limiting the step to that energy kept the canary hits.
-        // `for_cluster` leaves the climb off, so this is not the baseline arm.
-        const MACKAY75_SHELF: f64 = -396.282249;
-        if !mackay_opened
-            && cfg.escape_on_stall
-            && cfg.n_points == 75
-            && (e - MACKAY75_SHELF).abs() <= 1e-4
-            && let Some(opening) = crate::soap::mackay75_opening(x.view())
-        {
-            mackay_opened = true;
-            let (opened_energy, opened_state) = relax(ledger, opening.view(), cfg.relax_steps);
-            let gap = (opened_energy - e) / cfg.energy_scale.max(1e-12);
-            if opened_energy.is_finite()
-                && opened_state.len() == x.len()
-                && (1.02..1.12).contains(&gap)
-                && quench_is_sane(cfg, opened_energy, opened_state.view())
-            {
-                let opening_gradient = record_quenched_answer(
-                    cfg,
-                    ledger,
-                    &mut grad,
-                    opened_energy,
-                    opened_state.view(),
-                    &mut unconverged_records,
-                );
-                hops += 1;
-                quiet = 0;
-                adopt_minimum!(
-                    opened_energy,
-                    opened_state,
-                    opening_gradient,
-                    None,
-                    AdoptionHistory::Fresh,
-                    None,
-                    Some("mackay-opening"),
-                    hops
-                );
-                continue;
-            }
         }
         if cfg.move_library.is_rigid_body()
             && crate::methods::rigid_quench::stagnation_restart(hops, hops_at_lowest)
@@ -2802,6 +2755,47 @@ where
             // due and the leave runs on every following hop.
             charged_at_best = ledger.spent();
             directed_leave = true;
+            // LJ75's shelf is the icosahedral shell. The same leave on
+            // LJ98, where the tetrahedral minimum is the target, scored
+            // one seed worse, so it stays off there. The climb below does
+            // not leave that shell, and a fresh draw returns to it.
+            if cfg.n_points == 75
+                && let Some(opening) = crate::soap::fivefold_openings(x.view())
+                    .into_iter()
+                    .find_map(|opening| {
+                        let (opened_energy, opened_state) =
+                            relax(ledger, opening.view(), cfg.relax_steps);
+                        (opened_state.len() == x.len()
+                            && crate::soap::opening_left(e, opened_energy)
+                            && quench_is_sane(cfg, opened_energy, opened_state.view()))
+                        .then_some((opened_energy, opened_state))
+                    })
+            {
+                let (opened_energy, opened_state) = opening;
+                {
+                    let opening_gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        opened_energy,
+                        opened_state.view(),
+                        &mut unconverged_records,
+                    );
+                    hops += 1;
+                    quiet = 0;
+                    adopt_minimum!(
+                        opened_energy,
+                        opened_state,
+                        opening_gradient,
+                        None,
+                        AdoptionHistory::Fresh,
+                        None,
+                        Some("fivefold-opening"),
+                        hops
+                    );
+                    continue;
+                }
+            }
         }
         let checkpoint_due = matches!(
             (checkpoint_interval, next_checkpoint),
