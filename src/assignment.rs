@@ -3,10 +3,12 @@
 
 //! Dense minimum-cost bipartite assignment.
 //!
-//! The numerical scheme follows the Kuhn--Munkres implementation used by
-//! gpr_optim's MIT-licensed `Distance.cpp`. Keeping the kernel here avoids a
-//! C++ boundary in the inner loop while preserving its finite-square input
-//! contract and scale-aware tight-edge test.
+//! The search is the successive-shortest-path method with dual potentials
+//! (Jonker and Volgenant). A continuous-symmetry projection solves one of
+//! these problems for every group operation and every trial orientation, so
+//! the inner scan has to be a flat loop: the recursive Kuhn-Munkres walk it
+//! replaced spent its time on call overhead and was the dominant cost of an
+//! energy evaluation at 98 and 150 atoms.
 
 /// Returns the column assigned to each row of a finite `n × n` cost matrix.
 ///
@@ -17,129 +19,133 @@ pub fn minimum_cost_assignment(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     if n == 0 {
         return costs.is_empty().then(Vec::new);
     }
-    if n.checked_mul(n) != Some(costs.len()) || costs.iter().any(|v| !v.is_finite()) {
+    if n.checked_mul(n) != Some(costs.len()) || costs.iter().any(|value| !value.is_finite()) {
         return None;
     }
 
-    let scale = costs
-        .iter()
-        .fold(1.0_f64, |largest, value| largest.max(value.abs()));
-    let tight_tolerance = scale * 1e-9;
-    let weights: Vec<f64> = costs.iter().map(|cost| -cost).collect();
-    let mut row_potential = vec![f64::NEG_INFINITY; n];
-    for row in 0..n {
-        for column in 0..n {
-            row_potential[row] = row_potential[row].max(weights[row * n + column]);
-        }
-    }
-    let mut column_potential = vec![0.0_f64; n];
-    let mut row_match = vec![usize::MAX; n];
-    let mut column_match = vec![usize::MAX; n];
+    // Column 0 is the dummy used to grow the matching. Rows and columns of
+    // `costs` are 1-indexed in the dual update so the dummy sits at index 0.
+    let mut row_potential = vec![0.0; n + 1];
+    let mut column_potential = vec![0.0; n + 1];
+    let mut column_match = vec![0usize; n + 1];
+    let mut predecessor = vec![0usize; n + 1];
+    let mut min_reduced = vec![0.0; n + 1];
+    let mut used = vec![false; n + 1];
 
-    for root in 0..n {
-        let mut augmented = false;
-        for _ in 0..=n {
-            let mut rows_seen = vec![false; n];
-            let mut columns_seen = vec![false; n];
-            if augment_tight(
-                root,
-                n,
-                &weights,
-                &row_potential,
-                &column_potential,
-                tight_tolerance,
-                &mut row_match,
-                &mut column_match,
-                &mut rows_seen,
-                &mut columns_seen,
-            ) {
-                augmented = true;
-                break;
-            }
-
+    for row in 1..=n {
+        column_match[0] = row;
+        let mut column = 0usize;
+        min_reduced.fill(f64::INFINITY);
+        used.fill(false);
+        loop {
+            used[column] = true;
+            let matched_row = column_match[column];
+            let row_base = (matched_row - 1) * n;
             let mut delta = f64::INFINITY;
-            for row in 0..n {
-                if !rows_seen[row] {
+            let mut next_column = 0usize;
+            let row_dual = row_potential[matched_row];
+            for candidate in 1..=n {
+                if used[candidate] {
                     continue;
                 }
-                for column in 0..n {
-                    if columns_seen[column] {
-                        continue;
-                    }
-                    let slack =
-                        row_potential[row] + column_potential[column] - weights[row * n + column];
-                    delta = delta.min(slack);
+                let reduced =
+                    costs[row_base + candidate - 1] - row_dual - column_potential[candidate];
+                if reduced < min_reduced[candidate] {
+                    min_reduced[candidate] = reduced;
+                    predecessor[candidate] = column;
+                }
+                if min_reduced[candidate] < delta {
+                    delta = min_reduced[candidate];
+                    next_column = candidate;
                 }
             }
-            if !(delta > 0.0) || !delta.is_finite() {
+            if !delta.is_finite() {
                 return None;
             }
-            for index in 0..n {
-                if rows_seen[index] {
-                    row_potential[index] -= delta;
-                }
-                if columns_seen[index] {
-                    column_potential[index] += delta;
+            for index in 0..=n {
+                if used[index] {
+                    row_potential[column_match[index]] += delta;
+                    column_potential[index] -= delta;
+                } else {
+                    min_reduced[index] -= delta;
                 }
             }
+            column = next_column;
+            if column_match[column] == 0 {
+                break;
+            }
         }
-        if !augmented {
-            return None;
+        while column != 0 {
+            let previous = predecessor[column];
+            column_match[column] = column_match[previous];
+            column = previous;
         }
     }
 
-    let mut used = vec![false; n];
-    for &column in &row_match {
-        if column == usize::MAX || used[column] {
+    let mut assignment = vec![0usize; n];
+    let mut seen = vec![false; n];
+    for column in 1..=n {
+        let row = column_match[column];
+        if row == 0 || row > n {
             return None;
         }
-        used[column] = true;
+        let slot = row - 1;
+        if seen[slot] {
+            return None;
+        }
+        seen[slot] = true;
+        assignment[slot] = column - 1;
     }
-    Some(row_match)
+    Some(assignment)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn augment_tight(
-    row: usize,
-    n: usize,
-    weights: &[f64],
-    row_potential: &[f64],
-    column_potential: &[f64],
-    tight_tolerance: f64,
-    row_match: &mut [usize],
-    column_match: &mut [usize],
-    rows_seen: &mut [bool],
-    columns_seen: &mut [bool],
-) -> bool {
-    rows_seen[row] = true;
-    for column in 0..n {
-        if columns_seen[column] {
-            continue;
+#[cfg(test)]
+mod tests {
+    use super::minimum_cost_assignment;
+
+    fn brute(costs: &[f64], n: usize) -> f64 {
+        fn walk(costs: &[f64], n: usize, row: usize, used: &mut [bool], acc: f64, best: &mut f64) {
+            if row == n {
+                *best = best.min(acc);
+                return;
+            }
+            for column in 0..n {
+                if used[column] {
+                    continue;
+                }
+                used[column] = true;
+                walk(costs, n, row + 1, used, acc + costs[row * n + column], best);
+                used[column] = false;
+            }
         }
-        let slack = row_potential[row] + column_potential[column] - weights[row * n + column];
-        if slack.abs() > tight_tolerance {
-            continue;
-        }
-        columns_seen[column] = true;
-        let displaced = column_match[column];
-        if displaced == usize::MAX
-            || augment_tight(
-                displaced,
-                n,
-                weights,
-                row_potential,
-                column_potential,
-                tight_tolerance,
-                row_match,
-                column_match,
-                rows_seen,
-                columns_seen,
-            )
-        {
-            row_match[row] = column;
-            column_match[column] = row;
-            return true;
+        let mut best = f64::INFINITY;
+        walk(costs, n, 0, &mut vec![false; n], 0.0, &mut best);
+        best
+    }
+
+    fn cost_of(costs: &[f64], n: usize, assignment: &[usize]) -> f64 {
+        assignment
+            .iter()
+            .enumerate()
+            .map(|(row, column)| costs[row * n + column])
+            .sum()
+    }
+
+    #[test]
+    fn matches_brute_force_on_small_matrices() {
+        let mut state = 0x1234_5678_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((state >> 33) as u32 % 50) as f64
+        };
+        for n in 1..=6 {
+            for _ in 0..20 {
+                let costs: Vec<f64> = (0..n * n).map(|_| next()).collect();
+                let assignment = minimum_cost_assignment(&costs, n).expect("square");
+                let got = cost_of(&costs, n, &assignment);
+                let want = brute(&costs, n);
+                assert!((got - want).abs() < 1e-8, "n={n} {got} vs {want}");
+            }
         }
     }
-    false
 }
