@@ -367,6 +367,308 @@ fn write_geometry(seed: u64, coordinates: &[f64], energy: f64) {
     let _ = std::fs::write(path, text);
 }
 
+fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
+    let arm = match arm_name {
+        "recommended" => WaterSearchArm::Recommended,
+        "communicating" => WaterSearchArm::Communicating,
+        "derived" => WaterSearchArm::Derived,
+        "good_turing" => WaterSearchArm::GoodTuring,
+        other => panic!("unknown arm {other}"),
+    };
+    let budget = campaign_budget(engine, smoke);
+    let (seed0, seeds) = seed_block(smoke);
+    let mut text = String::new();
+    text.push_str(&format!(
+        "\nengine: {engine}\narm: {arm_name}\nbudget: {budget}\nseeds: {seed0}..{}\n",
+        seed0 + seeds - 1
+    ));
+    text.push_str(&engine_settings(engine));
+    let n_atoms = 3 * WATER_HEXAMER_MOLECULES;
+    let species = water_species(WATER_HEXAMER_MOLECULES).expect("hexamer species");
+    let groups = water_groups(WATER_HEXAMER_MOLECULES).expect("hexamer groups");
+    let mut cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
+    configure_water_arm(&mut cfg, arm);
+    cfg.move_library = MoveLibrary::Molecular {
+        groups: groups.clone(),
+        reactive: false,
+    };
+    let references = load_references();
+    let reference_views: Vec<(&str, &[f64])> = references
+        .iter()
+        .map(|(name, coordinates)| (name.as_str(), coordinates.as_slice()))
+        .collect();
+    let gate_result = isomer_reference_gate(&reference_views, WATER_HEXAMER_MOLECULES);
+    let (gate, gate_text, gate_reason) = match &gate_result {
+        Ok(Some(value)) => (
+            Some(*value),
+            format!("{value:.6}"),
+            "half the minimum inter-reference IRA RMSD",
+        ),
+        Ok(None) => (
+            None,
+            "unset".to_owned(),
+            "fewer than two deposited references",
+        ),
+        Err(MolecularCatalogPresetError::AssignmentNeedsIra) => {
+            (None, "unset".to_owned(), "ira feature not built")
+        }
+        Err(MolecularCatalogPresetError::IsolatedTemplate) => {
+            (None, "unset".to_owned(), "isolated-water template")
+        }
+        Err(_) => (None, "unset".to_owned(), "reference gate failed"),
+    };
+    text.push_str(&format!(
+        "isomer_gate_A: {gate_text}\nisomer_gate_when: before seeds\nisomer_gate_reason: {gate_reason}\n"
+    ));
+    text.push_str(&deposited_calculator(engine));
+    text.push_str(&assign_references(&references, &reference_views, gate));
+    text.push_str(&classify_gofee(&reference_views, gate));
+    let loaded = load_engine(engine, n_atoms);
+    let Ok(objective) = loaded else {
+        text.push_str(&format!(
+            "engine_loaded: false\nsearch: not started\nload_error: {}\n",
+            loaded.err().unwrap_or_default()
+        ));
+        return text;
+    };
+    text.push_str("engine_loaded: true\n");
+    text.push_str(&evaluate_references(&objective, &references));
+    let template = reference_coordinates(WATER_HEXAMER_MOLECULES).expect("template");
+    for seed in seed0..seed0 + seeds {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let packed = repack_rigid_groups(
+            ArrayView1::from(&template),
+            &groups,
+            cfg.length_scale,
+            &mut rng,
+        );
+        let (start, spread_steps) = separate_overlapped_start(packed, WATER_HEXAMER_MOLECULES);
+        let start_slice = start.as_slice().unwrap_or(&[]);
+        let start_intact = monomers_intact(start_slice, WATER_HEXAMER_MOLECULES).unwrap_or(false);
+        let (start_oh_min, start_oh_max) = covalent_oh_span(start_slice);
+        if seed == seed0 {
+            let started = Instant::now();
+            let (energy, gradient) = objective.value_and_gradient(start.view());
+            let eval_us = started.elapsed().as_micros();
+            let finite = energy.is_finite() && gradient.iter().all(|value| value.is_finite());
+            text.push_str(&format!(
+                "first_eval_us: {eval_us}\nfirst_energy: {energy}\nfirst_gradient_finite: {finite}\n"
+            ));
+            if eval_us > 0 {
+                let full_calls = budget as u128 * seeds as u128;
+                let estimate_s = eval_us * full_calls / 1_000_000;
+                text.push_str(&format!(
+                    "one_geometry_block_estimate_s: {estimate_s}\nestimate_note: one geometry times this process block, quench overhead not included\n"
+                ));
+            }
+        }
+        let mut ledger = Ledger::new(budget);
+        let wall = Instant::now();
+        let mut first_hit_calls: Option<usize> = None;
+        let mut first_hit_wall: Option<f64> = None;
+        let mut first_hit_isomer: Option<String> = None;
+        let mut first_prism_calls: Option<usize> = None;
+        let mut first_prism_wall: Option<f64> = None;
+        let (outcome, stats) = if arm == WaterSearchArm::GoodTuring {
+            let mut census = BasinCensus::new(
+                sorted_oxygen_distances(&template, WATER_HEXAMER_MOLECULES)
+                    .expect("descriptor")
+                    .len(),
+                OXYGEN_DISTANCE_CENSUS_RADIUS_A,
+            )
+            .expect("census");
+            let mut trace = String::new();
+            let mut checkpoint =
+                |snapshot: anneal_core::methods::cluster_hopping::ChainCheckpoint<'_>| {
+                    let window_calls: usize = snapshot
+                        .quench_boundaries()
+                        .iter()
+                        .map(|boundary| boundary.charged_calls())
+                        .sum();
+                    let mut calls = snapshot.charged().saturating_sub(window_calls);
+                    for boundary in snapshot.quench_boundaries() {
+                        calls = calls.saturating_add(boundary.charged_calls());
+                        if boundary.status() != QuenchStatus::Validated {
+                            continue;
+                        }
+                        let state = boundary.state();
+                        let Some(state) = state.as_slice() else {
+                            continue;
+                        };
+                        let Ok(descriptor) =
+                            sorted_oxygen_distances(state, WATER_HEXAMER_MOLECULES)
+                        else {
+                            continue;
+                        };
+                        let matched =
+                            assign_isomer(state, WATER_HEXAMER_MOLECULES, &reference_views, gate)
+                                .ok();
+                        let witness_name = matched.as_ref().and_then(|item| item.name.clone());
+                        // Off-target quenches are not visits of the target census.
+                        // A radius ball cannot merge them with the isomer, and
+                        // counting them as singletons keeps the production
+                        // unseen-mass ceiling from ever clearing.
+                        let Some(witness) = witness_name.as_deref().and_then(isomer_witness) else {
+                            continue;
+                        };
+                        if census.observe_witness(&descriptor, Some(witness)).is_err() {
+                            continue;
+                        }
+                        if let Some(matched) = matched.as_ref() {
+                            if first_hit_calls.is_none()
+                                && let Some(name) = matched.name.clone()
+                            {
+                                first_hit_calls = Some(calls);
+                                first_hit_wall = Some(wall.elapsed().as_secs_f64());
+                                first_hit_isomer = Some(name);
+                            }
+                            if first_prism_calls.is_none()
+                                && matched.name.as_deref() == Some("prism")
+                            {
+                                first_prism_calls = Some(calls);
+                                first_prism_wall = Some(wall.elapsed().as_secs_f64());
+                            }
+                        }
+                        let mass = census
+                            .unseen_mass()
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "none".to_owned());
+                        let witness_label = witness_name.unwrap_or_else(|| "none".to_owned());
+                        trace.push_str(&format!(
+                        "good_turing_trace: force_calls={calls} visits={} unseen_mass={mass} witness={witness_label} minimum_visits={PRODUCTION_MINIMUM_VISITS} max_unseen_mass={PRODUCTION_MAX_UNSEEN_MASS}\n",
+                        census.total_visits()
+                    ));
+                    }
+                    if let Some(reason) = good_turing_target_stop(&census) {
+                        CheckpointAction::Retire {
+                            reason: reason.to_owned(),
+                        }
+                    } else {
+                        CheckpointAction::Continue
+                    }
+                };
+            let result = search_from_with_checkpoint(
+                &objective,
+                &cfg,
+                &mut ledger,
+                start.view(),
+                seed,
+                GOOD_TURING_CHECKPOINT_INTERVAL,
+                &mut checkpoint,
+            );
+            text.push_str(&trace);
+            text.push_str(&format!(
+                "good_turing_saturated: {}\n",
+                good_turing_target_stop(&census).is_some()
+            ));
+            result
+        } else {
+            search_from(&objective, &cfg, &mut ledger, start.view(), seed)
+        };
+        let wall_s = wall.elapsed().as_secs_f64();
+        let best = outcome.best;
+        let best_slice = outcome
+            .best_state
+            .as_ref()
+            .and_then(|state| state.as_slice());
+        let intact = best_slice
+            .and_then(|state| monomers_intact(state, WATER_HEXAMER_MOLECULES).ok())
+            .unwrap_or(false);
+        let (best_oh_min, best_oh_max) = covalent_oh_span(best_slice.unwrap_or(&[]));
+        write_geometry(seed, best_slice.unwrap_or(&[]), best);
+        let (isomer_name, isomer_rmsd, isomer_reason) = if !intact {
+            (
+                "unassigned".to_owned(),
+                "none".to_owned(),
+                "dissociated monomer",
+            )
+        } else if reference_views.is_empty() {
+            (
+                "unassigned".to_owned(),
+                "none".to_owned(),
+                "no deposited references",
+            )
+        } else {
+            match assign_isomer(
+                outcome
+                    .best_state
+                    .as_ref()
+                    .and_then(|state| state.as_slice())
+                    .unwrap_or(&[]),
+                WATER_HEXAMER_MOLECULES,
+                &reference_views,
+                gate,
+            ) {
+                Ok(matched) => {
+                    let reason = if matched.name.is_some() {
+                        "inside gate"
+                    } else if gate.is_none() {
+                        "gate unset"
+                    } else {
+                        "outside gate"
+                    };
+                    (
+                        matched.name.unwrap_or_else(|| "unassigned".to_owned()),
+                        matched
+                            .rmsd
+                            .map(|value| format!("{value:.6}"))
+                            .unwrap_or_else(|| "none".to_owned()),
+                        reason,
+                    )
+                }
+                Err(MolecularCatalogPresetError::AssignmentNeedsIra) => (
+                    "unassigned".to_owned(),
+                    "none".to_owned(),
+                    "ira feature not built",
+                ),
+                Err(_) => (
+                    "unassigned".to_owned(),
+                    "none".to_owned(),
+                    "assignment failed",
+                ),
+            }
+        };
+        let per_second = if wall_s > 0.0 {
+            ledger.spent() as f64 / wall_s
+        } else {
+            0.0
+        };
+        let hit = if isomer_reason == "inside gate" {
+            "1"
+        } else if gate.is_none() || reference_views.is_empty() {
+            "unscored"
+        } else {
+            "0"
+        };
+        let first_hit_calls_text = first_hit_calls
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_owned());
+        let first_hit_wall_text = first_hit_wall
+            .map(|value| format!("{value:.6}"))
+            .unwrap_or_else(|| "none".to_owned());
+        let first_hit_isomer_text = first_hit_isomer.unwrap_or_else(|| "none".to_owned());
+        let first_prism_calls_text = first_prism_calls
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_owned());
+        let first_prism_wall_text = first_prism_wall
+            .map(|value| format!("{value:.6}"))
+            .unwrap_or_else(|| "none".to_owned());
+        text.push_str(&format!(
+            "seed: {seed}\nstart_monomers_intact: {start_intact}\nstart_spread_steps: {spread_steps}\nstart_oh_min_A: {start_oh_min:.6}\nstart_oh_max_A: {start_oh_max:.6}\nbest_energy: {best}\nbest_monomers_intact: {intact}\nbest_oh_min_A: {best_oh_min:.6}\nbest_oh_max_A: {best_oh_max:.6}\nisomer: {isomer_name}\nisomer_rmsd_A: {isomer_rmsd}\nisomer_gate_A: {gate_text}\nisomer_reason: {isomer_reason}\nfirst_hit_calls: {first_hit_calls_text}\nfirst_hit_wall_seconds: {first_hit_wall_text}\nfirst_hit_isomer: {first_hit_isomer_text}\nfirst_prism_calls: {first_prism_calls_text}\nfirst_prism_wall_seconds: {first_prism_wall_text}\nforce_calls: {}\nwall_seconds: {wall_s:.6}\nforce_calls_per_second: {per_second:.6}\nhops: {}\nbasins: {}\nconverged: {}\nquenches: {}\nhit: {hit}\n",
+            ledger.spent(),
+            outcome.hops,
+            outcome.basins,
+            stats.converged,
+            stats.total()
+        ));
+        eprintln!(
+            "seed_done: {seed} force_calls={} wall_seconds={wall_s:.6} best_energy={best}",
+            ledger.spent()
+        );
+    }
+    text
+}
+
 fn engine_settings(engine: &str) -> String {
     match engine {
         "gfn2" => format!(
