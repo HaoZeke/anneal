@@ -189,33 +189,16 @@ impl Surface {
     fn reference(&self, n: usize) -> Option<f64> {
         match self {
             Self::LennardJones => reference(n),
-            Self::Morse(_, rho) => match ((rho * 2.0).round() as i64, n) {
-                (28, 38) => Some(-144.321054),
-                (28, 55) => Some(-220.646208),
-                (28, 75) => Some(-318.407330),
-                (20, 38) => Some(-145.849817),
-                (20, 55) => Some(-225.814286),
-                (20, 75) => Some(-322.643558),
-                (12, 38) => Some(-157.477108),
-                (12, 55) => Some(-250.286609),
-                (12, 75) => Some(-351.472365),
-                _ => None,
-            },
+            Self::Morse(_, rho) => anneal_core::published_minima::morse(n, *rho),
         }
     }
 }
 
 fn reference(n: usize) -> Option<f64> {
-    Some(match n {
-        13 => -44.326801,
-        38 => -173.928427,
-        55 => -279.248470,
-        75 => -397.492331,
-        98 => -543.665361,
-        102 => -569.363652,
-        104 => -582.086642,
-        _ => return None,
-    })
+    match n {
+        13 | 38 | 55 | 75 | 98 | 102 | 104 => anneal_core::published_minima::lennard_jones(n),
+        _ => None,
+    }
 }
 
 /// First-phase surface: the plain energy plus the library's two-phase penalty.

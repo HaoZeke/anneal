@@ -48,38 +48,16 @@ fn potential_name(spec: &str) -> String {
 /// Wales' table for the same database, in units of the pair well depth.
 fn reference(p: PairKind, n: usize) -> Option<f64> {
     match p {
-        PairKind::LennardJones => Some(match n {
-            13 => -44.326801,
-            38 => -173.928427,
-            55 => -279.248470,
-            75 => -397.492331,
-            98 => -543.665361,
-            _ => return None,
-        }),
-        PairKind::Morse { rho } => {
-            let r = (rho * 2.0).round() as i64;
-            // Taken from the bold entries of Doye and Wales' table, which are
-            // the global minima; the table also lists competing minima for the
-            // same size and range, and the global one changes structure along
-            // a row. Two values here were first taken from non-bold rows, so
-            // the success bar was set below the global minimum: at rho = 6 and
-            // N = 38 the minimum is 38E at -157.477108, not 38D at -157.406902,
-            // and at rho = 14 and N = 55 it is 55C at -220.646208, not 55B at
-            // -213.523774. The runs found the true minima and were scored
-            // against the wrong ones.
-            Some(match (r, n) {
-                (12, 38) => -157.477108,
-                (12, 55) => -250.286609,
-                (12, 75) => -351.472365,
-                (20, 38) => -145.849817,
-                (20, 55) => -225.814286,
-                (20, 75) => -322.643558,
-                (28, 38) => -144.321054,
-                (28, 55) => -220.646208,
-                (28, 75) => -318.407330,
-                _ => return None,
-            })
-        }
+        PairKind::LennardJones => match n {
+            13 | 38 | 55 | 75 | 98 => anneal_core::published_minima::lennard_jones(n),
+            _ => None,
+        },
+        // Bold Doye–Wales entries. Two values here were first taken from
+        // non-bold rows, so the success bar was set below the global minimum:
+        // at rho = 6 and N = 38 the minimum is 38E, not 38D, and at rho = 14
+        // and N = 55 it is 55C, not 55B. The numbers live in
+        // `published_minima::morse`.
+        PairKind::Morse { rho } => anneal_core::published_minima::morse(n, rho),
     }
 }
 

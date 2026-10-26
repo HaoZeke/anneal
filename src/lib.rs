@@ -200,6 +200,8 @@ pub mod pes_db;
 /// rgmin quenches and rgsaddle minimum--saddle--minimum connections.
 pub mod pes_exploration;
 pub mod potentials;
+/// Cambridge Cluster Database energies used as stops and scores.
+pub mod published_minima;
 pub mod quench;
 /// Leader consensus over exploration decrees between server brains.
 pub mod raft;
