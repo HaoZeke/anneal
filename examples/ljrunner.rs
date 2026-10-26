@@ -20,13 +20,19 @@ fn main() {
     let reference: f64 = args.next().expect("reference").parse().expect("reference");
     let tol: f64 = args.next().expect("tol").parse().expect("tol");
     let preset = args.next().unwrap_or_else(|| "recommended".to_owned());
-    let cfg = match preset.as_str() {
+    let mut cfg = match preset.as_str() {
         "recommended" => Config::recommended(n),
         "derived" => Config::derived(n),
         "for_cluster" => Config::for_cluster(n),
         "communicating" => Config::communicating(n),
         other => panic!("unknown preset {other}"),
     };
+    match args.next().as_deref() {
+        Some("entropy") => cfg.occupancy_temperature = true,
+        Some("fixed") => cfg.occupancy_temperature = false,
+        None => {}
+        Some(other) => panic!("temperature arm is 'entropy', 'fixed', or omitted, got {other}"),
+    }
     let digest = cfg.resolved_sha256().expect("digest");
     let potential = PairPotential::lennard_jones(n);
     let mut ledger = Ledger::new(budget);
@@ -76,9 +82,10 @@ fn main() {
     let force_to_hit = if hit { tracked.or(from_list) } else { None };
     println!(
         "{{\"n\":{n},\"seed\":{seed},\"budget\":{budget},\"reference\":{reference},\"tol\":{tol},\
-\"config\":\"{preset}\",\"config_digest\":\"{digest}\",\
+\"config\":\"{preset}\",\"occupancy_temperature\":{},\"config_digest\":\"{digest}\",\
 \"charged\":{},\"best\":{:.12},\"hit\":{hit},\"force_to_hit\":{},\"wall_seconds\":{wall:.6},\
 \"hops\":{}}}",
+        cfg.occupancy_temperature,
         outcome.charged,
         outcome.best,
         force_to_hit
