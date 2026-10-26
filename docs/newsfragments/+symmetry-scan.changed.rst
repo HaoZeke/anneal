@@ -1,0 +1,1 @@
+The core-orbit symmetry scan centres a cluster once and stops an axis once its running root-mean-square meets the tolerance. Operations that pass are unchanged, including the deviation stored for each one, so the generator order is the one a full scan would have produced.
