@@ -79,20 +79,52 @@ pub fn cover_points<R: rand::Rng + ?Sized>(
     points
 }
 
+/// Water hexamer displacement dimension: 18 atoms, three Cartesian axes.
+const WATER_COVER_N: usize = 96;
+const WATER_COVER_DIM: usize = 54;
+
 /// Shared covering for `(n, dim)`, farthest-point ordered.
+///
+/// The water size is the stored Gauss–Seidel result. Relaxing it again
+/// is the same points and costs a few tenths of a second on the first
+/// use. Every other size still relaxes.
 pub fn shared_cover(n: usize, dim: usize) -> Arc<Vec<Vec<f64>>> {
     let cache = COVER_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let mut guard = cache.lock().unwrap_or_else(|poison| poison.into_inner());
     if let Some(existing) = guard.get(&(n, dim)) {
         return Arc::clone(existing);
     }
-    let mut rng = StdRng::seed_from_u64(COVER_SEED);
-    let points = cover_points(n, dim, COVER_NITR, &mut rng);
-    let order = farthest_order(&points);
-    let ordered: Vec<Vec<f64>> = order.iter().map(|&i| points[i].clone()).collect();
+    let ordered = if n == WATER_COVER_N && dim == WATER_COVER_DIM {
+        water_cover_points()
+    } else {
+        let mut rng = StdRng::seed_from_u64(COVER_SEED);
+        let points = cover_points(n, dim, COVER_NITR, &mut rng);
+        let order = farthest_order(&points);
+        order.iter().map(|&i| points[i].clone()).collect()
+    };
     let shared = Arc::new(ordered);
     guard.insert((n, dim), Arc::clone(&shared));
     shared
+}
+
+/// Farthest-point order of `cover_points(96, 54, COVER_NITR)` at
+/// [`COVER_SEED`]. Little-endian `f64`, point-major.
+fn water_cover_points() -> Vec<Vec<f64>> {
+    const BYTES: &[u8] = include_bytes!("cover96x54.bin");
+    const COUNT: usize = WATER_COVER_N * WATER_COVER_DIM;
+    const _: () = assert!(BYTES.len() == COUNT * 8);
+    let mut points = Vec::with_capacity(WATER_COVER_N);
+    for point in 0..WATER_COVER_N {
+        let mut row = Vec::with_capacity(WATER_COVER_DIM);
+        for axis in 0..WATER_COVER_DIM {
+            let offset = (point * WATER_COVER_DIM + axis) * 8;
+            let mut raw = [0u8; 8];
+            raw.copy_from_slice(&BYTES[offset..offset + 8]);
+            row.push(f64::from_le_bytes(raw));
+        }
+        points.push(row);
+    }
+    points
 }
 
 /// Direction `index` of the shared covering, wrapping.
@@ -594,12 +626,22 @@ mod tests {
 
     #[test]
     fn water_sized_cover_matches_the_allocating_relaxation() {
-        let cover = shared_cover(96, 54);
-        assert_eq!(cover.len(), 96);
-        assert_eq!(cover[0].len(), 54);
+        let mut rng = StdRng::seed_from_u64(COVER_SEED);
+        let points = cover_points(96, 54, COVER_NITR, &mut rng);
+        let order = farthest_order(&points);
+        let ordered: Vec<Vec<f64>> = order.iter().map(|&i| points[i].clone()).collect();
+        assert_eq!(ordered.len(), 96);
+        assert_eq!(ordered[0].len(), 54);
         // Bit pattern of the allocating Gauss–Seidel, measured before the
         // work arrays were hoisted.
-        assert_eq!(cover_digest(&cover), 0x0d5a_3fad_fcca_2579);
+        assert_eq!(cover_digest(&ordered), 0x0d5a_3fad_fcca_2579);
+        let cover = shared_cover(96, 54);
+        assert_eq!(cover.len(), ordered.len());
+        for (got, expect) in cover.iter().zip(&ordered) {
+            for (left, right) in got.iter().zip(expect) {
+                assert_eq!(left.to_bits(), right.to_bits());
+            }
+        }
     }
 
     #[test]
