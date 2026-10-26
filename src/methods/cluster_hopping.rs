@@ -47,6 +47,7 @@ use crate::screen::Screen;
 
 mod config;
 mod moves;
+mod packing_bank;
 mod preset;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
@@ -2623,9 +2624,11 @@ where
     let mut next_reoccupy = cfg.reoccupy_interval;
     let mut best_seen = ledger.best;
     let mut charged_at_best = ledger.spent();
-    // One Mackay opening per run. The doorway is uphill, so a later
-    // return to the shelf does not spend the budget on it again.
-    let mut mackay_opened = false;
+    // Minima separated by common-neighbour fractions. A stall in the
+    // icosahedral packing can return to a lower minimum of another packing
+    // the chain already quenched, instead of redrawing inside the same one.
+    let mut packing = packing_bank::PackingBank::new();
+    let packing_cutoff = 1.2 * cfg.length_scale;
     // Hops elapsed when the ledger last recorded a lower minimum.
     // A rigid reseed compares the live hop count with this stamp.
     let mut hops_at_lowest = 0usize;
@@ -2638,50 +2641,6 @@ where
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
             hops_at_lowest = hops;
-        }
-        // The deposited Mackay fixture has a fivefold opening at length
-        // 0.9018 that quenches about 1.07 above the shelf. The residual
-        // that finds it follows atom order, and a search quench does not
-        // keep the fixture's order. The gate is the exact shelf energy:
-        // limiting the step to that energy kept the canary hits.
-        // `for_cluster` leaves the climb off, so this is not the baseline arm.
-        const MACKAY75_SHELF: f64 = -396.282249;
-        if !mackay_opened
-            && cfg.escape_on_stall
-            && cfg.n_points == 75
-            && (e - MACKAY75_SHELF).abs() <= 1e-4
-            && let Some(opening) = crate::soap::mackay75_opening(x.view())
-        {
-            mackay_opened = true;
-            let (opened_energy, opened_state) = relax(ledger, opening.view(), cfg.relax_steps);
-            let gap = (opened_energy - e) / cfg.energy_scale.max(1e-12);
-            if opened_energy.is_finite()
-                && opened_state.len() == x.len()
-                && (1.02..1.12).contains(&gap)
-                && quench_is_sane(cfg, opened_energy, opened_state.view())
-            {
-                let opening_gradient = record_quenched_answer(
-                    cfg,
-                    ledger,
-                    &mut grad,
-                    opened_energy,
-                    opened_state.view(),
-                    &mut unconverged_records,
-                );
-                hops += 1;
-                quiet = 0;
-                adopt_minimum!(
-                    opened_energy,
-                    opened_state,
-                    opening_gradient,
-                    None,
-                    AdoptionHistory::Fresh,
-                    None,
-                    Some("mackay-opening"),
-                    hops
-                );
-                continue;
-            }
         }
         if cfg.move_library.is_rigid_body()
             && crate::methods::rigid_quench::stagnation_restart(hops, hops_at_lowest)
@@ -4939,6 +4898,9 @@ where
             }
         }
         if accept {
+            if !unquenched && cfg.packing_cna_applies() {
+                packing.offer(e_new, x_new.view(), packing_cutoff);
+            }
             // An accepted uphill step to a different basin samples the escape
             // distribution, which is the quantity the deposit height has to be
             // commensurate with.
@@ -5544,6 +5506,156 @@ where
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
             quiet = 0;
             longest_quiet = 0;
+            // An icosahedral plateau returns to a lower minimum of another
+            // packing when the bank holds one. The structure was already
+            // quenched, so this does not run another relaxation and it draws
+            // no random numbers. A face-centred-cubic plateau does not take
+            // it: that is the 38-point minimum, and leaving it is the wrong
+            // move.
+            if directed_leave
+                && cfg.packing_cna_applies()
+                && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+                && let Some((other_energy, other_state)) =
+                    packing.better_other(x.view(), e, packing_cutoff)
+            {
+                let other_gradient = record_quenched_answer(
+                    cfg,
+                    ledger,
+                    &mut grad,
+                    other_energy,
+                    other_state.view(),
+                    &mut unconverged_records,
+                );
+                if grad.is_none() || other_gradient.is_some() {
+                    e = other_energy;
+                    x = other_state;
+                    current_validation_gradient = other_gradient;
+                }
+            }
+            // Derived search cools inside the budget window, and the climb
+            // is a displacement. On a plateau whose occupied structure is
+            // not icosahedral, also grow the lattice orders. That is the
+            // move that crosses a funnel in one step. The chain takes the
+            // growth only when it deepens the incumbent. A lattice minimum
+            // above the best would pin the search there. The climb still runs.
+            if directed_leave
+                && cfg.budget_window
+                && !crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+            {
+                let best_before_growth = ledger.best;
+                let mut best_growth: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
+                for source in crate::lattice::Source::library() {
+                    if ledger.remaining() == 0 {
+                        break;
+                    }
+                    let grown = crate::lattice::candidate(source, x.view(), x.len() / 3, rng);
+                    let (grown_energy, grown_state) = relax(ledger, grown.view(), cfg.relax_steps);
+                    if grown_state.len() != x.len() || !grown_energy.is_finite() {
+                        continue;
+                    }
+                    let grown_gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        grown_energy,
+                        grown_state.view(),
+                        &mut unconverged_records,
+                    );
+                    let replace = best_growth
+                        .as_ref()
+                        .is_none_or(|(energy, _, _)| grown_energy < *energy);
+                    if replace {
+                        best_growth = Some((grown_energy, grown_state, grown_gradient));
+                    }
+                }
+                if let Some((grown_energy, grown_state, grown_gradient)) = best_growth
+                    && grown_energy < best_before_growth - 1e-9
+                {
+                    hops += 1;
+                    adopt_minimum!(
+                        grown_energy,
+                        grown_state,
+                        grown_gradient,
+                        None,
+                        AdoptionHistory::Fresh,
+                        None,
+                        Some("stall-growth"),
+                        hops
+                    );
+                }
+                if ledger.best < best_before_growth - 1e-12 && improvements.len() < 512 {
+                    improvements.push((hops, ledger.spent(), bias.n_basins(), ledger.best));
+                }
+            }
+            // The same growth while the occupied structure is icosahedral.
+            // The chain is then inside the funnel that contains most of the
+            // minima, and the other orders, including the pentagonal one a
+            // decahedron is built from, are the leave. The draws come from a
+            // stream seeded by the hop and the incumbent, so a growth that
+            // does not win leaves the chain's own stream where it was. The
+            // quench is kept only when it deepens the incumbent.
+            if directed_leave
+                && cfg.packing_cna_applies()
+                && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+            {
+                let best_before_growth = ledger.best;
+                let mut side = StdRng::seed_from_u64(
+                    (hops as u64).wrapping_mul(0x9E37_79B9)
+                        ^ best_before_growth.to_bits()
+                        ^ 0x11A7_11CE,
+                );
+                // Close packing and the pentagonal order. Regrowing the
+                // icosahedron the chain is already in does not leave it.
+                let sources = [
+                    crate::lattice::Source::Named(crate::structure::Template::FaceCentredCubic),
+                    crate::lattice::Source::Named(crate::structure::Template::HexagonalClosePacked),
+                    crate::lattice::Source::Pentagonal,
+                ];
+                let mut best_growth: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
+                for source in sources {
+                    if ledger.remaining() == 0 {
+                        break;
+                    }
+                    let grown = crate::lattice::candidate(source, x.view(), x.len() / 3, &mut side);
+                    let (grown_energy, grown_state) = relax(ledger, grown.view(), cfg.relax_steps);
+                    if grown_state.len() != x.len() || !grown_energy.is_finite() {
+                        continue;
+                    }
+                    let grown_gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        grown_energy,
+                        grown_state.view(),
+                        &mut unconverged_records,
+                    );
+                    let replace = best_growth
+                        .as_ref()
+                        .is_none_or(|(energy, _, _)| grown_energy < *energy);
+                    if replace {
+                        best_growth = Some((grown_energy, grown_state, grown_gradient));
+                    }
+                }
+                if let Some((grown_energy, grown_state, grown_gradient)) = best_growth
+                    && grown_energy < best_before_growth - 1e-9
+                {
+                    hops += 1;
+                    adopt_minimum!(
+                        grown_energy,
+                        grown_state,
+                        grown_gradient,
+                        None,
+                        AdoptionHistory::Fresh,
+                        None,
+                        Some("stall-growth"),
+                        hops
+                    );
+                    packing.offer(e, x.view(), packing_cutoff);
+                }
+                if ledger.best < best_before_growth - 1e-12 && improvements.len() < 512 {
+                    improvements.push((hops, ledger.spent(), bias.n_basins(), ledger.best));
+                }
+            }
             if let Some(g) = grad.as_deref_mut() {
                 let scale = if cfg.minima_hopping {
                     feedback.escape()

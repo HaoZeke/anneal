@@ -66,7 +66,7 @@ dependencies = [
  "rayon",
  "readcon-core",
  "readcon-db",
- "rgmin 0.5.0",
+ "rgmin",
  "rgpot-core",
  "rgsaddle",
  "serde",
@@ -2253,7 +2253,7 @@ checksum = "a0f31d99cd0ac55c273927e5cd56f3f79d756823b283c22faf3789877d3af75d"
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
- "eindir-core 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "eindir-core",
  "libm",
  "multiversion",
  "ndarray 0.17.2",
@@ -2283,7 +2283,7 @@ dependencies = [
  "linkcell",
  "ndarray 0.17.2",
  "rayon",
- "rgmin 0.5.0",
+ "rgmin",
  "thiserror 2.0.18",
 ]
 

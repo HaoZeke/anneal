@@ -33,7 +33,7 @@ use rand::{Rng, SeedableRng};
 use sha2::{Digest, Sha256};
 use std::time::Instant;
 
-const HIT: f64 = 1e-4;
+const HIT: f64 = 0.001;
 const SMOKE_CALLS: usize = 200;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
