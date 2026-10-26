@@ -1293,8 +1293,7 @@ mod tests {
         let separated = 1.2_f64;
         let displaced =
             Array1::from_vec(vec![-separated / 2.0, 0.0, 0.0, separated / 2.0, 0.0, 0.0]);
-        let inverse_sixth = separated.powi(-6);
-        let displaced_energy = 4.0 * (inverse_sixth * inverse_sixth - inverse_sixth);
+        let displaced_energy = crate::potentials::lj_pair_terms(1.0, 1.0, separated * separated).0;
         let unquenched = validate_bank_sample(
             &potential,
             &config,

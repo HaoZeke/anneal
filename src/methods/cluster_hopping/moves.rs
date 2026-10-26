@@ -642,24 +642,11 @@ pub fn pair_energies_scaled(
     length_scale: f64,
     energy_scale: f64,
 ) -> Array1<f64> {
-    let mut e = Array1::<f64>::zeros(n);
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let dx = x[3 * i] - x[3 * j];
-            let dy = x[3 * i + 1] - x[3 * j + 1];
-            let dz = x[3 * i + 2] - x[3 * j + 2];
-            let r2 = dx * dx + dy * dy + dz * dz;
-            if r2 <= 0.0 {
-                continue;
-            }
-            let scaled_r2 = length_scale * length_scale / r2;
-            let s6 = scaled_r2 * scaled_r2 * scaled_r2;
-            let v = 4.0 * energy_scale * (s6 * s6 - s6);
-            e[i] += v;
-            e[j] += v;
-        }
-    }
-    e
+    crate::potentials::lennard_jones_atom_energies(
+        energy_scale,
+        length_scale,
+        x.slice(ndarray::s![..3 * n]),
+    )
 }
 
 /// Whether the worst-bound point is loose enough for an angular move, and which
