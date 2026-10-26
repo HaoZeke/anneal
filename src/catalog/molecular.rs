@@ -687,6 +687,28 @@ pub fn isomer_witness(name: &str) -> Option<WitnessId> {
         .map(WitnessId::from_raw)
 }
 
+/// Kabsch RMSD of two `(H2O)m` geometries (A).
+///
+/// This is not the isomer assignment. Molecules may be reordered. The
+/// two hydrogens of a molecule may swap. Alignment is the Kabsch
+/// rotation, inversion included, after both clouds are centred.
+pub fn water_rmsd(
+    reference: &[f64],
+    candidate: &[f64],
+    n_molecules: usize,
+) -> Result<f64, MolecularCatalogPresetError> {
+    let left = water_points(reference, n_molecules)?;
+    let right = water_points(candidate, n_molecules)?;
+    let mut order = vec![0usize; n_molecules];
+    let mut used = vec![false; n_molecules];
+    let mut flips = vec![false; n_molecules];
+    let mut best = f64::INFINITY;
+    assign_molecules(
+        &left, &right, 0, &mut order, &mut used, &mut flips, &mut best,
+    );
+    Ok(best)
+}
+
 fn water_points(
     coordinates: &[f64],
     n_molecules: usize,
@@ -709,6 +731,283 @@ fn water_points(
         molecules.push(points);
     }
     Ok(molecules)
+}
+
+fn assign_molecules(
+    reference: &[[[f64; 3]; 3]],
+    candidate: &[[[f64; 3]; 3]],
+    placed: usize,
+    order: &mut [usize],
+    used: &mut [bool],
+    flips: &mut [bool],
+    best: &mut f64,
+) {
+    let n = reference.len();
+    if placed == n {
+        choose_flips(reference, candidate, order, flips, 0, best);
+        return;
+    }
+    for index in 0..n {
+        if used[index] {
+            continue;
+        }
+        used[index] = true;
+        order[placed] = index;
+        assign_molecules(reference, candidate, placed + 1, order, used, flips, best);
+        used[index] = false;
+    }
+}
+
+fn choose_flips(
+    reference: &[[[f64; 3]; 3]],
+    candidate: &[[[f64; 3]; 3]],
+    order: &[usize],
+    flips: &mut [bool],
+    molecule: usize,
+    best: &mut f64,
+) {
+    if molecule == reference.len() {
+        let rmsd = aligned_rmsd(reference, candidate, order, flips);
+        if rmsd < *best {
+            *best = rmsd;
+        }
+        return;
+    }
+    flips[molecule] = false;
+    choose_flips(reference, candidate, order, flips, molecule + 1, best);
+    flips[molecule] = true;
+    choose_flips(reference, candidate, order, flips, molecule + 1, best);
+}
+
+fn aligned_rmsd(
+    reference: &[[[f64; 3]; 3]],
+    candidate: &[[[f64; 3]; 3]],
+    order: &[usize],
+    flips: &[bool],
+) -> f64 {
+    let mut left = Vec::with_capacity(3 * reference.len());
+    let mut right = Vec::with_capacity(3 * reference.len());
+    for (molecule, (&source, &flip)) in order.iter().zip(flips.iter()).enumerate() {
+        left.extend_from_slice(&reference[molecule]);
+        let group = candidate[source];
+        if flip {
+            right.extend_from_slice(&[group[0], group[2], group[1]]);
+        } else {
+            right.extend_from_slice(&group);
+        }
+    }
+    let left = centre(&left);
+    let right = centre(&right);
+    let mut covariance = [[0.0; 3]; 3];
+    for (from, to) in right.iter().zip(left.iter()) {
+        for row in 0..3 {
+            for col in 0..3 {
+                covariance[row][col] += from[row] * to[col];
+            }
+        }
+    }
+    let rotation = kabsch_rotation(covariance);
+    let mut flipped = rotation;
+    for row in 0..3 {
+        flipped[row][2] = -flipped[row][2];
+    }
+    [
+        identity(),
+        rotation,
+        transpose(rotation),
+        flipped,
+        transpose(flipped),
+    ]
+    .into_iter()
+    .map(|candidate| point_rmsd(&left, &right, candidate))
+    .fold(f64::INFINITY, f64::min)
+}
+
+fn point_rmsd(left: &[[f64; 3]], right: &[[f64; 3]], rotation: [[f64; 3]; 3]) -> f64 {
+    let mut error = 0.0;
+    for (to, from) in left.iter().zip(right.iter()) {
+        let mapped = rotate(&rotation, *from);
+        for axis in 0..3 {
+            let delta = mapped[axis] - to[axis];
+            error += delta * delta;
+        }
+    }
+    (error / left.len() as f64).sqrt()
+}
+
+fn identity() -> [[f64; 3]; 3] {
+    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+}
+
+fn transpose(matrix: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    let mut out = [[0.0; 3]; 3];
+    for row in 0..3 {
+        for col in 0..3 {
+            out[row][col] = matrix[col][row];
+        }
+    }
+    out
+}
+
+/// Proper rotation from the covariance, by a 3x3 Jacobi SVD.
+///
+/// A planar water template makes one singular value zero. The missing
+/// axis is the cross product of the other two, with the sign that keeps
+/// the determinant positive.
+fn kabsch_rotation(covariance: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    let mut gram = [[0.0; 3]; 3];
+    for row in 0..3 {
+        for col in 0..3 {
+            for axis in 0..3 {
+                gram[row][col] += covariance[axis][row] * covariance[axis][col];
+            }
+        }
+    }
+    let (vectors, values) = jacobi_eigen(gram);
+    let mut left = [[0.0; 3]; 3];
+    let mut filled = [false; 3];
+    for col in 0..3 {
+        let sigma = values[col].max(0.0).sqrt();
+        if sigma <= 1e-10 {
+            continue;
+        }
+        for row in 0..3 {
+            for axis in 0..3 {
+                left[row][col] += covariance[row][axis] * vectors[axis][col];
+            }
+            left[row][col] /= sigma;
+        }
+        filled[col] = true;
+    }
+    complete_columns(&mut left, &filled);
+    let mut rotation = [[0.0; 3]; 3];
+    for row in 0..3 {
+        for col in 0..3 {
+            for axis in 0..3 {
+                rotation[row][col] += left[row][axis] * vectors[col][axis];
+            }
+        }
+    }
+    rotation
+}
+
+fn complete_columns(columns: &mut [[f64; 3]; 3], filled: &[bool; 3]) {
+    let present: Vec<usize> = (0..3).filter(|index| filled[*index]).collect();
+    let missing: Vec<usize> = (0..3).filter(|index| !filled[*index]).collect();
+    if missing.is_empty() {
+        return;
+    }
+    if present.len() == 2 {
+        let a = column(columns, present[0]);
+        let b = column(columns, present[1]);
+        let mut cross = [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ];
+        let norm = (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
+        if norm > 1e-12 {
+            for axis in 0..3 {
+                cross[axis] /= norm;
+                columns[axis][missing[0]] = cross[axis];
+            }
+        }
+        return;
+    }
+    for (slot, axis) in missing.iter().zip(0..3) {
+        columns[axis][*slot] = 1.0;
+    }
+}
+
+fn column(matrix: &[[f64; 3]; 3], index: usize) -> [f64; 3] {
+    [matrix[0][index], matrix[1][index], matrix[2][index]]
+}
+
+fn jacobi_eigen(mut matrix: [[f64; 3]; 3]) -> ([[f64; 3]; 3], [f64; 3]) {
+    let mut vectors = identity();
+    for _ in 0..16 {
+        let pairs = [(0, 1), (0, 2), (1, 2)];
+        let mut pivot = (0, 1);
+        let mut biggest = 0.0;
+        for pair in pairs {
+            let value = matrix[pair.0][pair.1].abs();
+            if value > biggest {
+                biggest = value;
+                pivot = pair;
+            }
+        }
+        if biggest < 1e-15 {
+            break;
+        }
+        jacobi_rotate(&mut matrix, &mut vectors, pivot.0, pivot.1);
+    }
+    (vectors, [matrix[0][0], matrix[1][1], matrix[2][2]])
+}
+
+fn jacobi_rotate(matrix: &mut [[f64; 3]; 3], vectors: &mut [[f64; 3]; 3], p: usize, q: usize) {
+    let off = matrix[p][q];
+    let diag_p = matrix[p][p];
+    let diag_q = matrix[q][q];
+    let tau = (diag_q - diag_p) / (2.0 * off);
+    let step = if tau >= 0.0 {
+        1.0 / (tau + (1.0 + tau * tau).sqrt())
+    } else {
+        -1.0 / (-tau + (1.0 + tau * tau).sqrt())
+    };
+    let cosine = 1.0 / (1.0 + step * step).sqrt();
+    let sine = step * cosine;
+    matrix[p][p] = diag_p - step * off;
+    matrix[q][q] = diag_q + step * off;
+    matrix[p][q] = 0.0;
+    matrix[q][p] = 0.0;
+    for row in 0..3 {
+        if row == p || row == q {
+            continue;
+        }
+        let left = matrix[row][p];
+        let right = matrix[row][q];
+        matrix[row][p] = cosine * left - sine * right;
+        matrix[p][row] = matrix[row][p];
+        matrix[row][q] = sine * left + cosine * right;
+        matrix[q][row] = matrix[row][q];
+    }
+    for row in 0..3 {
+        let left = vectors[row][p];
+        let right = vectors[row][q];
+        vectors[row][p] = cosine * left - sine * right;
+        vectors[row][q] = sine * left + cosine * right;
+    }
+}
+
+fn centre(points: &[[f64; 3]]) -> Vec<[f64; 3]> {
+    let scale = points.len() as f64;
+    let mut shift = [0.0; 3];
+    for point in points {
+        for axis in 0..3 {
+            shift[axis] += point[axis];
+        }
+    }
+    for axis in 0..3 {
+        shift[axis] /= scale;
+    }
+    points
+        .iter()
+        .map(|point| {
+            [
+                point[0] - shift[0],
+                point[1] - shift[1],
+                point[2] - shift[2],
+            ]
+        })
+        .collect()
+}
+
+fn rotate(matrix: &[[f64; 3]; 3], point: [f64; 3]) -> [f64; 3] {
+    [
+        matrix[0][0] * point[0] + matrix[1][0] * point[1] + matrix[2][0] * point[2],
+        matrix[0][1] * point[0] + matrix[1][1] * point[1] + matrix[2][1] * point[2],
+        matrix[0][2] * point[0] + matrix[1][2] * point[1] + matrix[2][2] * point[2],
+    ]
 }
 
 fn dist2(left: [f64; 3], right: [f64; 3]) -> f64 {
