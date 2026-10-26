@@ -1082,7 +1082,24 @@ impl Config {
     /// [`Config::packing_superbasin`] adds the unmeasured SOAP-packing key
     /// and adaptive height.
     pub fn recommended(n_points: usize) -> Self {
-        let mut cfg = Self::for_cluster(n_points);
+        let (nearest, well) = rgpot_pair::lennard_jones_scales(1.0, 1.0);
+        Self::recommended_for_scales(n_points, nearest, well)
+    }
+
+    /// [`Config::recommended`] against one potential's own scales.
+    ///
+    /// `nearest_neighbor` and `well_depth` come from rgpot. They are
+    /// divided by the reduced Lennard-Jones nearest-neighbor distance
+    /// and well depth, so the reduced Lennard-Jones arm stays on the
+    /// preset coefficients. Sutton-Chen passes the fcc bulk neighbor
+    /// and the cohesive energy per atom.
+    pub fn recommended_for_scales(n_points: usize, nearest_neighbor: f64, well_depth: f64) -> Self {
+        let (lj_nearest, lj_well) = rgpot_pair::lennard_jones_scales(1.0, 1.0);
+        let mut cfg = Self::with_scales(
+            n_points,
+            nearest_neighbor / lj_nearest,
+            well_depth / lj_well,
+        );
         cfg.move_library = MoveLibrary::LeanBurst;
         cfg.allocate_moves = true;
         cfg.depth_reward = true;
