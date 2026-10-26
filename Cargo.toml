@@ -151,6 +151,10 @@ name = "molecular_cluster"
 required-features = ["rgpot-ex", "featomic", "bank-rpc"]
 
 [[example]]
+name = "water_hexamer"
+required-features = ["rgpot-ex", "featomic", "bank-rpc", "ira"]
+
+[[example]]
 name = "slab_adsorption"
 required-features = ["rgpot-ex", "featomic", "bank-rpc"]
 
