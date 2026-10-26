@@ -205,11 +205,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- ``Config::recommended`` at 38 points grows the named lattices (face-centred,
+  hexagonal, icosahedral, simple cubic, and the observed cloud) instead of
+  the LeanBurst displacement stack. That stack left 17 of 72 seeds on the
+  Mackay minimum ``-173.252378`` at 400000 calls. At 75 and 98 points the
+  global minimum is not one of those packings, and ``recommended`` stays
+  LeanBurst. A stall takes the recorded basin trail, the climb, and the
+  restart. ``for_cluster`` turns the Bayes screen on at
+  ``(R-S)/(2R-S)``, which is ``7/15`` at 25 and 200 steps. A call plateau
+  with the climb enabled is the directed leave, not a fresh Mackay draw.
+  ``paper_controls`` passes the potential gradient, which is what the
+  climb reads.
+- The LJ75 Mackay opening is read in the deposited fixture's atom order.
+  Sorted distance signatures put a search minimum at that geometry back
+  into that order before the fivefold residual, which otherwise follows
+  storage order and misses the axis at length 0.9018. The quench is
+  adopted only when the current energy is the shelf and the gap above it
+  sits in ``(1.02, 1.12)``. The climb stays the gate, so ``for_cluster``
+  does not take the opening.
 - The seam restart banks a structure only when it is within two epsilon
   of the previous floor and its icosahedral template share is strictly
   below that floor. A DECAF gap and an energy doorway are not the
-  broadcast. ``restart_on_stall`` stays off on ``recommended``,
-  ``derived``, and ``communicating``, so the restart is not a stall arm.
+  broadcast. ``communicating`` leaves ``restart_on_stall`` off.
 - The census IPC address, the q-Gaussian bound check, the q-Gaussian
   error, and the MD work directory name the values they test. The address,
   the accepted ``(q_v, q_a)`` interval, the error text, and the directory

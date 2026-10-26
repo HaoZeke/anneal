@@ -26,10 +26,12 @@ fn the_measured_shares_fire_inside_two_epsilon_and_a_doorway_does_not() {
 }
 
 #[test]
-fn restart_stays_out_of_the_stall_allocator() {
+fn restart_is_a_recommended_stall_arm() {
     for n in [38usize, 75] {
-        assert!(!Config::recommended(n).restart_on_stall);
-        assert!(!Config::derived(n).restart_on_stall);
+        assert!(Config::recommended(n).restart_on_stall);
+        assert!(Config::derived(n).restart_on_stall);
+        assert!(Config::recommended(n).escape_on_stall);
         assert!(!Config::communicating(n).restart_on_stall);
+        assert!(!Config::communicating(n).escape_on_stall);
     }
 }

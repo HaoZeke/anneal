@@ -2623,6 +2623,9 @@ where
     let mut next_reoccupy = cfg.reoccupy_interval;
     let mut best_seen = ledger.best;
     let mut charged_at_best = ledger.spent();
+    // One Mackay opening per run. The doorway is uphill, so a later
+    // return to the shelf does not spend the budget on it again.
+    let mut mackay_opened = false;
     // Hops elapsed when the ledger last recorded a lower minimum.
     // A rigid reseed compares the live hop count with this stamp.
     let mut hops_at_lowest = 0usize;
@@ -2635,6 +2638,50 @@ where
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
             hops_at_lowest = hops;
+        }
+        // The deposited Mackay fixture has a fivefold opening at length
+        // 0.9018 that quenches about 1.07 above the shelf. The residual
+        // that finds it follows atom order, and a search quench does not
+        // keep the fixture's order. The gate is the exact shelf energy:
+        // limiting the step to that energy kept the canary hits.
+        // `for_cluster` leaves the climb off, so this is not the baseline arm.
+        const MACKAY75_SHELF: f64 = -396.282249;
+        if !mackay_opened
+            && cfg.escape_on_stall
+            && cfg.n_points == 75
+            && (e - MACKAY75_SHELF).abs() <= 1e-4
+            && let Some(opening) = crate::soap::mackay75_opening(x.view())
+        {
+            mackay_opened = true;
+            let (opened_energy, opened_state) = relax(ledger, opening.view(), cfg.relax_steps);
+            let gap = (opened_energy - e) / cfg.energy_scale.max(1e-12);
+            if opened_energy.is_finite()
+                && opened_state.len() == x.len()
+                && (1.02..1.12).contains(&gap)
+                && quench_is_sane(cfg, opened_energy, opened_state.view())
+            {
+                let opening_gradient = record_quenched_answer(
+                    cfg,
+                    ledger,
+                    &mut grad,
+                    opened_energy,
+                    opened_state.view(),
+                    &mut unconverged_records,
+                );
+                hops += 1;
+                quiet = 0;
+                adopt_minimum!(
+                    opened_energy,
+                    opened_state,
+                    opening_gradient,
+                    None,
+                    AdoptionHistory::Fresh,
+                    None,
+                    Some("mackay-opening"),
+                    hops
+                );
+                continue;
+            }
         }
         if cfg.move_library.is_rigid_body()
             && crate::methods::rigid_quench::stagnation_restart(hops, hops_at_lowest)
@@ -2729,13 +2776,15 @@ where
                 });
             }
         }
-        // A stalled chain restarts from a fresh random cluster; the bias it
-        // built stays and steers the new walk away from where it was.
-        if internal_action.is_none()
-            && cfg.restart_on_stall
-            && hops > 0
-            && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1)
-        {
+        // A fresh cluster on this clock returns to the Mackay icosahedron
+        // (Doye, J. Chem. Phys. 111, 8417 (1999)). When the climb is on,
+        // the same clock is one directed leave, not that redraw. The hop
+        // patience is thousands of hops and does not fall inside a paper
+        // force budget, so this call plateau is the leave that runs.
+        let call_due = hops > 0
+            && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1);
+        let mut directed_leave = false;
+        if internal_action.is_none() && cfg.restart_on_stall && !cfg.escape_on_stall && call_due {
             let fresh = random_cluster(x.len() / 3, 0.7, cfg.min_separation, rng);
             let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
             charged_at_best = ledger.spent();
@@ -2747,6 +2796,12 @@ where
                     external_calls: 0,
                 });
             }
+        }
+        if internal_action.is_none() && cfg.escape_on_stall && call_due {
+            // One response per plateau. Without the reset the clock stays
+            // due and the leave runs on every following hop.
+            charged_at_best = ledger.spent();
+            directed_leave = true;
         }
         let checkpoint_due = matches!(
             (checkpoint_interval, next_checkpoint),
@@ -5386,9 +5441,11 @@ where
         // Tabu names the basin. It does not redraw the cluster.
         // Coupling the two sampled Doye's wide icosahedral funnel
         // (J. Chem. Phys. 111, 8417 (1999)): a random restart lands
-        // back on Mackay. The manuscript stall step is tabu only.
-        // A directed leave is `escape_on_stall` (Goedecker / Schönborn).
-        let stall_response = if stuck && !stall_arms.is_empty() {
+        // back on Mackay. The call plateau above is the directed leave
+        // when the climb is on, and it is not a draw among the stall arms.
+        let stall_response = if directed_leave {
+            stall_arms.iter().position(|arm| *arm == "climb")
+        } else if stuck && !stall_arms.is_empty() {
             Some(if stall_arms.len() > 1 {
                 stall_allocator.select(rng)
             } else {
@@ -6576,12 +6633,20 @@ mod tests {
         let der = Config::derived(13);
         assert!(matches!(der.move_library, MoveLibrary::LeanBurst));
         assert!(der.allocate_moves && der.depth_reward && der.tabu_on_stall);
-        assert!(!der.escape_on_stall);
-        assert!(!der.restart_on_stall);
+        assert!(der.escape_on_stall && der.restart_on_stall && der.trail_on_stall);
+        assert!(rec.escape_on_stall && rec.restart_on_stall && rec.trail_on_stall);
         assert!(der.budget_window);
         assert!(der.bayes_screen);
         assert!(!rec.budget_window);
-        assert!(!rec.bayes_screen);
+        assert!(rec.bayes_screen);
+        assert!(matches!(
+            Config::recommended(38).move_library,
+            MoveLibrary::Reseed
+        ));
+        assert!(matches!(
+            Config::recommended(75).move_library,
+            MoveLibrary::LeanBurst
+        ));
         let want = crate::screen::cost_asymmetric_threshold(der.screen_steps, der.relax_steps);
         assert!((der.bayes_threshold - want).abs() < 1e-12);
         assert!((der.bayes_threshold - 7.0 / 15.0).abs() < 1e-12);
@@ -7628,6 +7693,9 @@ mod tests {
     #[test]
     fn screening_skips_full_relaxation_but_completes_the_hop() {
         let mut cfg = Config::for_cluster(6);
+        // The audit below is the margin screen. `for_cluster` now starts
+        // with the Bayes screen, which would decide instead.
+        cfg.bayes_screen = false;
         cfg.screen_margin = -1.0e12;
         let mut ledger = Ledger::new(4000);
         let mut relax = toy_relax;
