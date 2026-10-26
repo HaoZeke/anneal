@@ -1,0 +1,1 @@
+At 75 points, a stalled icosahedral shell steps the lower reconstructable pentagon, including after a centre-of-mass reordering, and keeps the quench when it leaves the occupied basin. The opening does not read a deposited geometry or a shelf energy, and it is not used at 98 points.
