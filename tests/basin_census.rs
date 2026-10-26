@@ -150,6 +150,74 @@ fn a_witness_merges_near_duplicates_the_radius_splits() {
 }
 
 #[test]
+fn witnessed_confidence_follows_the_esty_bound_not_a_fixed_count() {
+    let witness = Some(WitnessId::from_raw(7));
+    let mut early = BasinCensus::new(1, 0.1).unwrap();
+    early.observe_witness(&[0.0], witness).unwrap();
+    early.observe_witness(&[0.4], witness).unwrap();
+    assert_eq!(early.total_visits(), 2);
+    assert_eq!(early.unseen_mass(), Some(0.0));
+    assert!(early.total_visits() < anneal_core::catalog::PRODUCTION_MINIMUM_VISITS);
+    assert!(!early.is_saturated());
+    assert!(!early.target_found_with_confidence());
+
+    let mut repeated = BasinCensus::new(1, 0.1).unwrap();
+    for index in 0..4 {
+        repeated
+            .observe_witness(&[f64::from(index)], witness)
+            .unwrap();
+        assert!(
+            !repeated.target_found_with_confidence(),
+            "visit {} is still short of the bound",
+            index + 1
+        );
+    }
+    repeated.observe_witness(&[4.0], witness).unwrap();
+    assert_eq!(repeated.total_visits(), 5);
+    assert_eq!(repeated.singleton_count(), 0);
+    assert_eq!(repeated.doubleton_count(), 0);
+    assert!(repeated.total_visits() < anneal_core::catalog::PRODUCTION_MINIMUM_VISITS);
+    assert!(!repeated.is_saturated());
+    assert!(repeated.target_found_with_confidence());
+
+    let mut distinct = BasinCensus::new(1, 0.1).unwrap();
+    distinct
+        .observe_witness(&[0.0], Some(WitnessId::from_raw(1)))
+        .unwrap();
+    distinct
+        .observe_witness(&[1.0], Some(WitnessId::from_raw(2)))
+        .unwrap();
+    assert_eq!(distinct.total_visits(), 2);
+    assert!(!distinct.target_found_with_confidence());
+
+    // Four visits of one witness and two of another: the hatch is under
+    // the ceiling, and the doubleton keeps the Esty upper bound above it.
+    let mut mixed = BasinCensus::new(1, 0.1).unwrap();
+    for index in 0..4 {
+        mixed
+            .observe_witness(&[f64::from(index)], Some(WitnessId::from_raw(1)))
+            .unwrap();
+    }
+    mixed
+        .observe_witness(&[10.0], Some(WitnessId::from_raw(2)))
+        .unwrap();
+    mixed
+        .observe_witness(&[10.4], Some(WitnessId::from_raw(2)))
+        .unwrap();
+    assert_eq!(mixed.total_visits(), 6);
+    assert_eq!(mixed.singleton_count(), 0);
+    assert_eq!(mixed.doubleton_count(), 1);
+    assert!(!mixed.target_found_with_confidence());
+    mixed
+        .observe_witness(&[10.2], Some(WitnessId::from_raw(2)))
+        .unwrap();
+    assert_eq!(mixed.total_visits(), 7);
+    assert_eq!(mixed.doubleton_count(), 0);
+    assert!(mixed.target_found_with_confidence());
+    assert!(!mixed.is_saturated());
+}
+
+#[test]
 fn fewer_than_twenty_visits_never_report_saturation() {
     let mut census = census(0.25);
     for _ in 0..19 {
