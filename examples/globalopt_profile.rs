@@ -131,32 +131,32 @@ fn tip4p_energy_gradient(sites: &[[f64; 3]; 4], x: &[f64]) -> (f64, Vec<f64>) {
             deriv[m][s] = d;
         }
     }
-    let mut site_grad = vec![[[0.0; 3]; 4]; n];
-    let mut e = 0.0;
-    for l in 0..n {
-        for r in (l + 1)..n {
-            let d: [f64; 3] = std::array::from_fn(|a| placed[l][0][a] - placed[r][0][a]);
-            let inv = 1.0 / (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-            let r6 = inv * inv * inv;
-            let r12 = r6 * r6;
-            e += TIP4P_C12 * r12 - TIP4P_C6 * r6;
-            let slope = (-12.0 * TIP4P_C12 * r12 + 6.0 * TIP4P_C6 * r6) * inv;
-            for a in 0..3 {
-                site_grad[l][0][a] += slope * d[a];
-                site_grad[r][0][a] -= slope * d[a];
+    let mut flat = vec![0.0; 12 * n];
+    for molecule in 0..n {
+        for site in 0..4 {
+            for axis in 0..3 {
+                flat[12 * molecule + 3 * site + axis] = placed[molecule][site][axis];
             }
-            for sa in 1..4 {
-                for sb in 1..4 {
-                    let d: [f64; 3] = std::array::from_fn(|a| placed[l][sa][a] - placed[r][sb][a]);
-                    let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                    let pair = TIP4P_COULOMB * TIP4P_CHARGES[sa] * TIP4P_CHARGES[sb] / r2.sqrt();
-                    e += pair;
-                    let slope = -pair / r2;
-                    for a in 0..3 {
-                        site_grad[l][sa][a] += slope * d[a];
-                        site_grad[r][sb][a] -= slope * d[a];
-                    }
-                }
+        }
+    }
+    let (e, flat_gradient) = anneal_core::potentials::tip4p_site_gradient(
+        anneal_core::potentials::Tip4pSites {
+            c6: TIP4P_C6,
+            c12: TIP4P_C12,
+            epsilon: 0.0,
+            sigma: 0.0,
+            use_epsilon: false,
+            coulomb: TIP4P_COULOMB,
+            q_h: TIP4P_CHARGES[1],
+            q_m: TIP4P_CHARGES[3],
+        },
+        &flat,
+    );
+    let mut site_grad = vec![[[0.0; 3]; 4]; n];
+    for molecule in 0..n {
+        for site in 0..4 {
+            for axis in 0..3 {
+                site_grad[molecule][site][axis] = flat_gradient[12 * molecule + 3 * site + axis];
             }
         }
     }
@@ -194,45 +194,15 @@ impl Counted {
             let (e, g) = tip4p_energy_gradient(sites, &x);
             return (e, Array1::from(g));
         }
-        let (sigma, cutoff2) = match &self.model {
-            Model::Binary(sigma) => (Some(sigma), 400.0),
-            _ => (None, 1600.0),
-        };
-        let n = self.dim / 3;
-        let mut e = 0.0;
-        let mut g = vec![0.0; 3 * n];
-        for i in 0..n {
-            let (xi, rest) = x[3 * i..].split_at(3);
-            let mut gi = [0.0; 3];
-            for (jj, xj) in rest.as_chunks::<3>().0.iter().enumerate() {
-                let j = i + 1 + jj;
-                let d = [xi[0] - xj[0], xi[1] - xj[1], xi[2] - xj[2]];
-                let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                if r2.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
-                    || r2.partial_cmp(&cutoff2) != Some(std::cmp::Ordering::Less)
-                {
-                    continue;
-                }
-                let s2 = match sigma {
-                    Some(s) => 0.25 * (s[i] + s[j]) * (s[i] + s[j]),
-                    None => 1.0,
-                };
-                let inv = 1.0 / r2;
-                let sr2 = s2 * inv;
-                let sr6 = sr2 * sr2 * sr2;
-                let sr12 = sr6 * sr6;
-                e += sr12 - sr6;
-                let slope = 24.0 * (sr6 - 2.0 * sr12) * inv;
-                for k in 0..3 {
-                    gi[k] += slope * d[k];
-                    g[3 * j + k] -= slope * d[k];
-                }
+        let view = ArrayView1::from(&x);
+        match &self.model {
+            Model::Binary(sigma) => {
+                let (energy, gradient) =
+                    anneal_core::potentials::lennard_jones_arithmetic(sigma, 20.0, view);
+                (energy, gradient)
             }
-            for k in 0..3 {
-                g[3 * i + k] += gi[k];
-            }
+            _ => anneal_core::potentials::lennard_jones(1.0, 1.0, 40.0, view),
         }
-        (4.0 * e, Array1::from(g))
     }
 
     fn fresh(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
