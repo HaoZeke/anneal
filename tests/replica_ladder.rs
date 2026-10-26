@@ -8,7 +8,7 @@
 
 use anneal_core::dos::EnergyBias;
 use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, MoveLibrary, Outcome, optimize, optimize_with_gradient, run,
+    Config, ContinuousSymmetry, Ledger, MoveLibrary, Outcome, optimize, optimize_with_gradient, run,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
@@ -76,8 +76,13 @@ fn large_rises(base: &Config, ladder_top: f64) -> usize {
 }
 
 fn assert_the_hot_rung_climbs(base: &Config) {
-    let flat = large_rises(base, 1.0);
-    let hot = large_rises(base, 10.0);
+    let mut base = base.clone();
+    // The continuous-symmetry quench and the five-hop icosahedral reseed are
+    // adoptions this count is not about. The ladder's temperature is what
+    // the rise count measures, so the move stays off.
+    base.continuous_symmetry = ContinuousSymmetry::Off;
+    let flat = large_rises(&base, 1.0);
+    let hot = large_rises(&base, 10.0);
     assert!(
         hot >= 3 * flat.max(10),
         "a rung ten times hotter adopted {hot} rises above a well depth \
@@ -335,8 +340,10 @@ fn the_energy_bias_tempers_at_the_coldest_rung_under_the_budget_window() {
     cfg.flat_sweep = 32;
     cfg.max_hops = Some(32);
     // An orbit completion counts as a hop without a deposit, so the sample
-    // fills on hop 32 only when every hop deposits.
+    // fills on hop 32 only when every hop deposits. A continuous-symmetry
+    // quench is the same kind of extra hop, so the move stays off.
     cfg.orbit_complete_on_new = false;
+    cfg.continuous_symmetry = ContinuousSymmetry::Off;
     let fill = |swap_period: usize, seed: u64| {
         let mut cfg = cfg.clone();
         cfg.swap_period = swap_period;
