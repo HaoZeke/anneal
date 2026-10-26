@@ -269,6 +269,7 @@ def test_cluster_search_ras_true_uses_archive_outcome():
 
 LJ98_GLOBAL = -543.665361
 LJ98_SHELF = -543.642957
+LJ75_GLOBAL = -397.492331
 LJ75_SHELF = -396.282249
 HARNESS_WINDOW = 0.001
 
@@ -278,6 +279,27 @@ def test_check_stop_limit_refuses_known_shelves():
         check_stop_limit(98, LJ98_SHELF)
     with pytest.raises(ValueError, match="LJ75"):
         check_stop_limit(75, LJ75_SHELF)
+
+
+def test_shelf_ball_excludes_the_published_minimum(capfd):
+    """The closed 1e-3 ball never refuses the minimum or the minimum + 0.001."""
+    assert HARNESS_WINDOW == 0.001
+    cases = (
+        (98, LJ98_SHELF, LJ98_GLOBAL, "LJ98"),
+        (75, LJ75_SHELF, LJ75_GLOBAL, "LJ75"),
+    )
+    for size, shelf, minimum, label in cases:
+        legal = minimum + 0.001
+        assert abs(minimum - shelf) > HARNESS_WINDOW
+        assert abs(legal - shelf) > HARNESS_WINDOW
+        assert legal == minimum + HARNESS_WINDOW
+        assert check_stop_limit(size, minimum) == minimum
+        assert check_stop_limit(size, legal) == legal
+        assert capfd.readouterr().err == ""
+        for edge in (shelf + HARNESS_WINDOW, shelf - HARNESS_WINDOW):
+            assert abs(edge - shelf) <= HARNESS_WINDOW
+            with pytest.raises(ValueError, match=label):
+                check_stop_limit(size, edge)
 
 
 def test_check_stop_limit_keeps_the_minimum_and_the_window(capfd):
@@ -304,6 +326,10 @@ def test_cluster_search_rejects_known_shelves():
         cluster_search(lj_energy, lj_grad, 98, 1, seed=0, target=LJ98_SHELF)
     with pytest.raises(ValueError, match="LJ75"):
         cluster_search(lj_energy, lj_grad, 75, 1, seed=0, target=LJ75_SHELF)
+    for size, shelf, label in ((98, LJ98_SHELF, "LJ98"), (75, LJ75_SHELF, "LJ75")):
+        for edge in (shelf + HARNESS_WINDOW, shelf - HARNESS_WINDOW):
+            with pytest.raises(ValueError, match=label):
+                cluster_search(lj_energy, lj_grad, size, 1, seed=0, target=edge)
 
 
 def _globalopt_driver():
@@ -343,6 +369,18 @@ def test_load_problem_checks_the_published_minimum(tmp_path, capfd):
     assert problem["convergence"]["energy_minimum"] == LJ98_GLOBAL
     assert capfd.readouterr().err == ""
 
+    legal = LJ98_GLOBAL + 0.001
+    assert abs(legal - LJ98_SHELF) > HARNESS_WINDOW
+    _write_problem(tmp_path, "lj98", legal)
+    quiet = driver.load_problem(tmp_path, "lj98")
+    assert quiet["convergence"]["energy_minimum"] == legal
+    assert capfd.readouterr().err == ""
+
+    _write_problem(tmp_path, "lj75", LJ75_GLOBAL + 0.001)
+    lj75_legal = driver.load_problem(tmp_path, "lj75")
+    assert lj75_legal["convergence"]["energy_minimum"] == LJ75_GLOBAL + 0.001
+    assert capfd.readouterr().err == ""
+
     _write_problem(tmp_path, "lj98", LJ98_GLOBAL + 0.01)
     warned = driver.load_problem(tmp_path, "lj98")
     assert warned["convergence"]["energy_minimum"] == LJ98_GLOBAL + 0.01
@@ -352,9 +390,20 @@ def test_load_problem_checks_the_published_minimum(tmp_path, capfd):
     with pytest.raises(ValueError, match="LJ98"):
         driver.load_problem(tmp_path, "lj98")
 
+    for edge in (LJ98_SHELF + HARNESS_WINDOW, LJ98_SHELF - HARNESS_WINDOW):
+        assert abs(edge - LJ98_SHELF) <= HARNESS_WINDOW
+        _write_problem(tmp_path, "lj98", edge)
+        with pytest.raises(ValueError, match="LJ98"):
+            driver.load_problem(tmp_path, "lj98")
+
     _write_problem(tmp_path, "lj75", LJ75_SHELF)
     with pytest.raises(ValueError, match="LJ75"):
         driver.load_problem(tmp_path, "lj75")
+
+    for edge in (LJ75_SHELF + HARNESS_WINDOW, LJ75_SHELF - HARNESS_WINDOW):
+        _write_problem(tmp_path, "lj75", edge)
+        with pytest.raises(ValueError, match="LJ75"):
+            driver.load_problem(tmp_path, "lj75")
 
     _write_problem(tmp_path, "lj100-binary", -1.0, kind="binary-lennard-jones")
     binary = driver.load_problem(tmp_path, "lj100-binary")
