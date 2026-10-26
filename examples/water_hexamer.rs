@@ -300,8 +300,8 @@ fn separate_overlapped_start(mut start: Array1<f64>, n_molecules: usize) -> (Arr
                 }
             }
             let count = atoms.len() as f64;
-            for axis in 0..3 {
-                coms[group_index][axis] /= count;
+            for value in &mut coms[group_index] {
+                *value /= count;
             }
         }
         let mut global = [0.0; 3];
@@ -311,8 +311,8 @@ fn separate_overlapped_start(mut start: Array1<f64>, n_molecules: usize) -> (Arr
             }
         }
         let count = groups.len().max(1) as f64;
-        for axis in 0..3 {
-            global[axis] /= count;
+        for value in &mut global {
+            *value /= count;
         }
         for (group_index, atoms) in groups.iter().enumerate() {
             let mut direction = [0.0; 3];
