@@ -255,20 +255,32 @@ fn relax_cover<R: rand::Rng + ?Sized>(points: &mut [Vec<f64>], max_iter: usize, 
     let mut step = vec![1.0; n];
     let mut d_e = f64::INFINITY;
     let mut iter = 0usize;
+    // One set of work arrays for the whole relaxation. The stable sort
+    // starts from the identity each sweep, which is what a fresh
+    // `0..n` vector did, so equal contributions keep the same order.
+    let mut contrib = vec![0.0; n];
+    let mut order: Vec<usize> = (0..n).collect();
+    let mut grad = vec![0.0; dim];
+    let mut row = vec![0.0; dim];
+    let mut trial = vec![0.0; dim];
+    let mut trial_pair = vec![0.0; n];
+    let mut trial_dot = vec![0.0; n];
+    let mut trial_geo = vec![0.0; n];
     while iter < max_iter && d_e > COVER_ETOL {
         iter += 1;
-        let mut contrib = vec![0.0; n];
         for i in 0..n {
             contrib[i] = (0..n).map(|j| pair[i * n + j]).sum();
         }
-        let mut order: Vec<usize> = (0..n).collect();
+        for (slot, index) in order.iter_mut().enumerate() {
+            *index = slot;
+        }
         order.sort_by(|&left, &right| {
             contrib[right]
                 .partial_cmp(&contrib[left])
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         for &j in &order {
-            let mut grad = vec![0.0; dim];
+            grad.fill(0.0);
             let mut kept = 0usize;
             for i in 0..n {
                 if i == j {
@@ -278,7 +290,6 @@ fn relax_cover<R: rand::Rng + ?Sized>(points: &mut [Vec<f64>], max_iter: usize, 
                 let g = geo[i * n + j];
                 let tang = (1.0 - dot * dot).sqrt();
                 let w = COVER_S / ((tang + f64::EPSILON) * (g.powf(COVER_S + 1.0) + f64::EPSILON));
-                let mut row = vec![0.0; dim];
                 let mut nrm2 = 0.0;
                 for ax in 0..dim {
                     row[ax] = w * points[i][ax];
@@ -310,14 +321,10 @@ fn relax_cover<R: rand::Rng + ?Sized>(points: &mut [Vec<f64>], max_iter: usize, 
             }
             let u_old: f64 = (0..n).map(|i| pair[j * n + i]).sum();
             loop {
-                let mut trial = vec![0.0; dim];
                 for ax in 0..dim {
                     trial[ax] = points[j][ax] - step[j] * grad[ax];
                 }
                 normalize(&mut trial);
-                let mut trial_pair = vec![0.0; n];
-                let mut trial_dot = vec![0.0; n];
-                let mut trial_geo = vec![0.0; n];
                 for i in 0..n {
                     if i == j {
                         trial_dot[i] = 1.0;
@@ -337,7 +344,7 @@ fn relax_cover<R: rand::Rng + ?Sized>(points: &mut [Vec<f64>], max_iter: usize, 
                 }
                 let u_new: f64 = trial_pair.iter().sum();
                 if u_new <= u_old {
-                    points[j] = trial;
+                    points[j].copy_from_slice(&trial);
                     for i in 0..n {
                         dots[j * n + i] = trial_dot[i];
                         dots[i * n + j] = trial_dot[i];
@@ -571,6 +578,28 @@ mod tests {
             .sum::<f64>()
             .sqrt();
         assert!(d > 0.2, "covering directions collapsed, d={d}");
+    }
+
+    fn cover_digest(cover: &[Vec<f64>]) -> u64 {
+        let mut acc: u64 = 0x6a09_e667_f3bc_c909;
+        for point in cover {
+            for value in point {
+                acc = acc
+                    .wrapping_mul(0x0000_0100_0000_01b3)
+                    .wrapping_add(value.to_bits());
+            }
+        }
+        acc
+    }
+
+    #[test]
+    fn water_sized_cover_matches_the_allocating_relaxation() {
+        let cover = shared_cover(96, 54);
+        assert_eq!(cover.len(), 96);
+        assert_eq!(cover[0].len(), 54);
+        // Bit pattern of the allocating Gauss–Seidel, measured before the
+        // work arrays were hoisted.
+        assert_eq!(cover_digest(&cover), 0x0d5a_3fad_fcca_2579);
     }
 
     #[test]
