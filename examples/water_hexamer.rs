@@ -176,7 +176,59 @@ impl Drop for PetKernel {
     }
 }
 
-fn main() {}
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let engines = selection(
+        args.first().map(String::as_str).unwrap_or("all"),
+        &[("gfn2", "gfn2"), ("pbe", "pbe"), ("petmad", "petmad")],
+    );
+    let arms = selection(
+        args.get(1).map(String::as_str).unwrap_or("all"),
+        &[
+            ("recommended", "recommended"),
+            ("communicating", "communicating"),
+            ("derived", "derived"),
+            ("good_turing", "good_turing"),
+        ],
+    );
+    let smoke = std::env::var("PAPER_SMOKE").ok().as_deref() == Some("1");
+    let mut report = String::new();
+    report.push_str(&format!(
+        "label: {}\ndriver: water_hexamer\nfull_runs: v0.12.0 tag\nrgpot: {RGPOT_VERSION} {RGPOT_REV}\neindir: {EINDIR_VERSION} {EINDIR_REV}\n",
+        if smoke { "smoke" } else { "campaign-shape" }
+    ));
+    for engine in &engines {
+        for arm in &arms {
+            report.push_str(&run_arm(engine, arm, smoke));
+        }
+    }
+    print!("{report}");
+    if let Ok(path) = std::env::var("PAPER_OUT") {
+        if smoke && !path.contains("SMOKE") {
+            panic!("PAPER_SMOKE output path must contain SMOKE");
+        }
+        std::fs::write(&path, &report).unwrap_or_else(|error| panic!("write {path}: {error}"));
+    } else if smoke {
+        std::fs::write("water-hexamer-SMOKE.txt", &report).expect("smoke file");
+    }
+}
+
+fn selection(arg: &str, choices: &[(&str, &str)]) -> Vec<String> {
+    if arg == "all" {
+        return choices.iter().map(|(_, name)| (*name).to_owned()).collect();
+    }
+    if choices.iter().any(|(name, _)| *name == arg) {
+        return vec![arg.to_owned()];
+    }
+    panic!(
+        "unknown selector {arg}; expected all or {}",
+        choices
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>()
+            .join("|")
+    );
+}
 
 fn campaign_budget(engine: &str, smoke: bool) -> usize {
     if smoke {
