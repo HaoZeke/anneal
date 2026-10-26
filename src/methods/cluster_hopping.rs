@@ -1966,9 +1966,10 @@ where
 {
     let _caller_stop = ledger.bind_stop();
     let n = cfg.n_points;
-    let continuous_symmetry_classes = match cfg.continuous_symmetry {
-        ContinuousSymmetry::Off => None,
-        ContinuousSymmetry::Inversion { interval } => {
+    let (continuous_symmetry_classes, csm_reseed_hops) = match cfg.continuous_symmetry {
+        ContinuousSymmetry::Off => (None, 0),
+        ContinuousSymmetry::Inversion { interval }
+        | ContinuousSymmetry::Measure { interval, .. } => {
             assert!(
                 interval > 0,
                 "continuous-symmetry interval must be positive"
@@ -1983,7 +1984,11 @@ where
                 n,
                 "continuous-symmetry classes must match n_points"
             );
-            Some(classes)
+            let reseed = match cfg.continuous_symmetry {
+                ContinuousSymmetry::Measure { reseed_hops, .. } => reseed_hops,
+                _ => 0,
+            };
+            (Some(classes), reseed)
         }
     };
     // The descriptor and the metric have to agree. A shape distance is
@@ -2632,6 +2637,7 @@ where
     // Hops elapsed when the ledger last recorded a lower minimum.
     // A rigid reseed compares the live hop count with this stamp.
     let mut hops_at_lowest = 0usize;
+    let mut csm_reseed_stamp = 0usize;
 
     loop {
         if ledger.stopped() || ledger.target_reached() {
@@ -2641,6 +2647,7 @@ where
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
             hops_at_lowest = hops;
+            csm_reseed_stamp = hops;
         }
         if cfg.move_library.is_rigid_body()
             && crate::methods::rigid_quench::stagnation_restart(hops, hops_at_lowest)
@@ -3301,7 +3308,8 @@ where
         }
         let continuous_symmetry_due = match cfg.continuous_symmetry {
             ContinuousSymmetry::Off => false,
-            ContinuousSymmetry::Inversion { interval } => {
+            ContinuousSymmetry::Inversion { interval }
+            | ContinuousSymmetry::Measure { interval, .. } => {
                 let quench_index = 1usize
                     .saturating_add(hops)
                     .saturating_add(continuous_symmetry_quenches);
@@ -3313,15 +3321,27 @@ where
             let classes = continuous_symmetry_classes
                 .as_deref()
                 .expect("enabled continuous symmetry has equivalence classes");
-            if let Some(projection) =
-                crate::continuous_symmetry::project_inversion(x.view(), classes)
-            {
+            let projection = match cfg.continuous_symmetry {
+                ContinuousSymmetry::Inversion { .. } => {
+                    crate::continuous_symmetry::project_inversion(x.view(), classes)
+                        .map(|projected| projected.coordinates)
+                }
+                ContinuousSymmetry::Measure { .. } => {
+                    crate::csm::propose(x.view(), classes).map(|projected| projected.coordinates)
+                }
+                ContinuousSymmetry::Off => None,
+            };
+            let symmetry_action = match cfg.continuous_symmetry {
+                ContinuousSymmetry::Measure { .. } => "continuous-symmetry-csm",
+                _ => "continuous-symmetry-ci",
+            };
+            if let Some(projection) = projection {
                 continuous_symmetry_quenches += 1;
                 let from_energy = e;
                 let from_state = x.clone();
                 let from_gradient = current_validation_gradient.clone();
                 let (candidate_energy, candidate) =
-                    relax(ledger, projection.coordinates.view(), cfg.relax_steps);
+                    relax(ledger, projection.view(), cfg.relax_steps);
                 let candidate_sane = quench_is_sane(cfg, candidate_energy, candidate.view());
                 let gradient_required = grad.is_some();
                 let candidate_gradient = candidate_sane.then(|| {
@@ -3370,7 +3390,7 @@ where
                 if recordable {
                     accepted_transitions.push(AcceptedTransition {
                         hop: hops,
-                        action: "continuous-symmetry-ci".to_owned(),
+                        action: symmetry_action.to_owned(),
                         from_energy,
                         to_energy: candidate_energy,
                         from_state,
@@ -3381,6 +3401,69 @@ where
                         adopted,
                     });
                 }
+            }
+            if ledger.remaining() == 0 {
+                break;
+            }
+        }
+        // A new incumbent, including one just produced by the projection
+        // above, restarts the short clock. The clock is not
+        // `restart_patience`: that one is thousands of force calls and does
+        // not match the five-step restart in the 2013 symmetry paper.
+        if ledger.best < best_seen - 1e-9 {
+            best_seen = ledger.best;
+            csm_reseed_stamp = hops;
+        }
+        if csm_reseed_hops > 0
+            && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
+            && cfg.packing_cna_applies()
+            && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+            && ledger.remaining() > 0
+        {
+            csm_reseed_stamp = hops;
+            let classes = continuous_symmetry_classes
+                .as_deref()
+                .expect("a CSM reseed has equivalence classes");
+            let mut fresh = random_cluster(n, 0.7, cfg.min_separation, rng);
+            if let Some(closed) = crate::packing::on_new_basin(
+                fresh.view(),
+                n,
+                cfg.symmetry_tolerance,
+                cfg.symmetry_merge_radius,
+                cfg.symmetrise_core_fraction,
+                cfg.min_separation,
+            ) {
+                fresh = closed;
+            }
+            if let Some(projected) = crate::csm::propose(fresh.view(), classes) {
+                fresh = projected.coordinates;
+            }
+            let (reseed_energy, reseed_state) = relax(ledger, fresh.view(), cfg.relax_steps);
+            let reseed_gradient = record_quenched_answer(
+                cfg,
+                ledger,
+                &mut grad,
+                reseed_energy,
+                reseed_state.view(),
+                &mut unconverged_records,
+            );
+            let reseed_ok = quench_is_sane(cfg, reseed_energy, reseed_state.view())
+                && (grad.is_none() || reseed_gradient.is_some());
+            if reseed_ok {
+                let reached = identity.basin_of(reseed_state.view());
+                adopt_minimum!(
+                    reseed_energy,
+                    reseed_state,
+                    reseed_gradient,
+                    Some(reached),
+                    AdoptionHistory::Fresh,
+                    Some((here, reached)),
+                    Some("csm-reseed"),
+                    hops
+                );
+                soft_cache = None;
+                basin_entry = None;
+                quiet = 0;
             }
             if ledger.remaining() == 0 {
                 break;
@@ -6784,6 +6867,21 @@ mod tests {
         assert!(comm.surfaces[0].is_active());
         assert_eq!(rec.surfaces, comm.surfaces);
         assert!(Config::communicating(98).surfaces.is_empty());
+        assert!(matches!(
+            rec.continuous_symmetry,
+            ContinuousSymmetry::Measure {
+                interval: 10,
+                reseed_hops: 5
+            }
+        ));
+        assert_eq!(rec.continuous_symmetry, comm.continuous_symmetry);
+        assert!(matches!(
+            Config::for_cluster(75).continuous_symmetry,
+            ContinuousSymmetry::Off
+        ));
+        let rigid =
+            Config::recommended(4).with_rigid_bodies(crate::potentials::gmin_water_geometry());
+        assert!(matches!(rigid.continuous_symmetry, ContinuousSymmetry::Off));
     }
 
     #[test]
