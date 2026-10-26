@@ -39,6 +39,9 @@ pub struct ClusterKernels {
     pub cluster_lj: fn(&[f64], &mut f64, &mut [f64]),
     /// `rgpot_pair::cambridge_morse`.
     pub cambridge_morse: fn(&[f64], f64, &mut f64, &mut [f64]),
+    /// `rgpot_pair::binary_lj`.
+    #[allow(clippy::type_complexity)]
+    pub binary_lj: fn(usize, [f64; 3], [f64; 3], f64, &[f64], &mut [f64]) -> f64,
     /// `rgpot_pair::gupta`.
     #[allow(clippy::type_complexity)]
     pub gupta:
@@ -58,6 +61,7 @@ pub fn cluster_kernels() -> Option<&'static ClusterKernels> {
     install_cluster_kernels(ClusterKernels {
         cluster_lj: rgpot_pair::cluster_lj,
         cambridge_morse: rgpot_pair::cambridge_morse,
+        binary_lj: rgpot_pair::binary_lj,
         gupta: rgpot_pair::gupta,
     });
     CLUSTER_KERNELS.get()
@@ -71,6 +75,7 @@ macro_rules! install_rgpot_kernels {
         $crate::potentials::install_cluster_kernels($crate::potentials::ClusterKernels {
             cluster_lj: ::rgpot_pair::cluster_lj,
             cambridge_morse: ::rgpot_pair::cambridge_morse,
+            binary_lj: ::rgpot_pair::binary_lj,
             gupta: ::rgpot_pair::gupta,
         })
     };
