@@ -176,6 +176,17 @@ pub enum ContinuousSymmetry {
         /// Divisor of the basin-hopping quench count.
         interval: usize,
     },
+    /// Project onto `C_i`, `C_5`, and `D_5h` and quench the lowest continuous
+    /// symmetry measure. On an icosahedral plateau, `reseed_hops` without a
+    /// new incumbent draws a fresh cluster, closes its core orbits, projects,
+    /// and quenches. Zero disables that reseed. GMIN's `NSYMINTERVAL` default
+    /// is the same ten quenches (`keywords.f90`).
+    Measure {
+        /// Divisor of the basin-hopping quench count.
+        interval: usize,
+        /// Hops without a new incumbent before an icosahedral reseed.
+        reseed_hops: usize,
+    },
 }
 
 /// Driver settings.
@@ -478,8 +489,9 @@ pub struct Config {
     /// This is distinct from [`Config::symmetrise_on_stall`]. The
     /// continuous-symmetry construction solves a global atom assignment for
     /// each group image and quenches the averaged geometry on a fixed
-    /// schedule. The current implementation provides `C_i`, whose inversion
-    /// operation makes the orientation objective rotation independent.
+    /// schedule. `C_i` has no orientation search. [`ContinuousSymmetry::Measure`]
+    /// is the Oakley, Johnston and Wales continuous symmetry measure over
+    /// `C_i`, `C_5`, and `D_5h`, with orientations taken from the inertia tensor.
     pub continuous_symmetry: ContinuousSymmetry,
     /// Largest deviation at which an approximate symmetry is worth using.
     pub symmetry_tolerance: f64,
@@ -1116,6 +1128,15 @@ impl Config {
         if n_points < 98 {
             cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
         }
+        // GMIN calls SYMMETRYCSM every NSYMINTERVAL quenches, default 10.
+        // The same paper's LJ75 table used a restart of about five basin
+        // hopping steps once symmetrisation was on. Both run inside this
+        // chain. The reseed fires only on an icosahedral plateau, so a
+        // face-centred construction is not abandoned.
+        cfg.continuous_symmetry = ContinuousSymmetry::Measure {
+            interval: 10,
+            reseed_hops: 5,
+        };
         cfg
     }
 
@@ -1138,6 +1159,10 @@ impl Config {
         if n_points < 98 {
             cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
         }
+        cfg.continuous_symmetry = ContinuousSymmetry::Measure {
+            interval: 10,
+            reseed_hops: 5,
+        };
         cfg
     }
 
@@ -1529,6 +1554,7 @@ impl Config {
         self.point_symmetrise_on_new = false;
         self.orbit_complete_on_new = false;
         self.angular_moves = false;
+        self.continuous_symmetry = ContinuousSymmetry::Off;
         self.rigid_body_geometry = Some(geometry);
         self
     }
