@@ -178,6 +178,45 @@ impl Drop for PetKernel {
 
 fn main() {}
 
+fn campaign_budget(engine: &str, smoke: bool) -> usize {
+    if smoke {
+        return SMOKE_BUDGET;
+    }
+    if let Ok(text) = std::env::var("WATER_FORCE_BUDGET") {
+        let budget: usize = text
+            .parse()
+            .unwrap_or_else(|error| panic!("WATER_FORCE_BUDGET {text:?}: {error}"));
+        assert!(budget > 0, "WATER_FORCE_BUDGET must be positive");
+        return budget;
+    }
+    match engine {
+        "gfn2" => GFN2_HEXAMER_BUDGET,
+        "pbe" => PBE_HEXAMER_BUDGET,
+        "petmad" => PETMAD_HEXAMER_BUDGET,
+        other => panic!("unknown engine {other}"),
+    }
+}
+
+fn seed_block(smoke: bool) -> (u64, u64) {
+    if smoke {
+        return (WATER_HEXAMER_SEED_START, 1);
+    }
+    let first = match std::env::var("WATER_SEED_FIRST") {
+        Ok(text) => text
+            .parse()
+            .unwrap_or_else(|error| panic!("WATER_SEED_FIRST {text:?}: {error}")),
+        Err(_) => WATER_HEXAMER_SEED_START,
+    };
+    let count = match std::env::var("WATER_SEED_COUNT") {
+        Ok(text) => text
+            .parse()
+            .unwrap_or_else(|error| panic!("WATER_SEED_COUNT {text:?}: {error}")),
+        Err(_) => WATER_HEXAMER_SEED_COUNT,
+    };
+    assert!(count > 0, "WATER_SEED_COUNT must be positive");
+    (first, count)
+}
+
 /// Push overlapped molecules apart without drawing more random numbers.
 ///
 /// `repack_rigid_groups` keeps each water's internal geometry and can still
@@ -326,6 +365,78 @@ fn write_geometry(seed: u64, coordinates: &[f64], energy: f64) {
     }
     let path = PathBuf::from(dir).join(format!("seed-{seed}.xyz"));
     let _ = std::fs::write(path, text);
+}
+
+fn engine_settings(engine: &str) -> String {
+    match engine {
+        "gfn2" => format!(
+            "engine_kind: {ENGINE_KIND}\nmethod: {GFN2_METHOD}\naccuracy: {GFN2_ACCURACY}\netemp_K: 300\nmaxiter: {GFN2_MAX_ITERATIONS}\ncharge: 0\nuhf: 0\nvacuum_box_A: {VACUUM_BOX}\nfull_budget: {GFN2_HEXAMER_BUDGET}\noh_wall_onset_A: {OH_WALL_ONSET_A}\noh_wall_eV_per_A2: {OH_WALL_EV_PER_A2}\n"
+        ),
+        "pbe" => format!(
+            "engine_kind: {PBE_ENGINE_KIND}\ncode: NWChem\nbasis: {PBE_BASIS}\ntheory: {PBE_THEORY}\nxc: {PBE_XC}\ndispersion: {PBE_DISPERSION}\ncharge: {PBE_CHARGE}\nmultiplicity: {PBE_MULTIPLICITY}\ntask: {PBE_TASK}\ncell: none\nfull_budget: {PBE_HEXAMER_BUDGET}\n"
+        ),
+        "petmad" => format!(
+            "engine_kind: {PETMAD_ENGINE_KIND}\nmodel_name: {PETMAD_MODEL_NAME}\ndevice: {PETMAD_DEVICE}\nlength_unit: angstrom\nenergy_unit: eV\nvacuum_box_A: {VACUUM_BOX}\nmodel_cutoff: unnamed, inside the model file\ncheck_consistency: 0\nuncertainty_threshold: 0\nrandom_rotation: 0\nfull_budget: {PETMAD_HEXAMER_BUDGET}\n"
+        ),
+        other => format!("engine_kind: {other}\n"),
+    }
+}
+
+fn deposited_calculator(engine: &str) -> String {
+    if std::env::var_os("ASE_PYTHON").is_none() {
+        let build = std::env::var("TBLITE_BUILD").unwrap_or_else(|_| "unspecified".to_owned());
+        return format!("calculator: rgpot\ntblite_build: {build}\n");
+    }
+    match engine {
+        "gfn2" => "calculator: tblite 0.7.0 TBLite method GFN2-xTB ase 3.29.0 cell 40 A pbc false\n",
+        "pbe" => "calculator: pyscf 2.14.0 RKS xc PBE basis 6-31g* grid level 3 ase 3.29.0 cell 40 A pbc false\n",
+        "petmad" => "calculator: pet-mad 1.4.4 checkpoint 1.0.2 device cpu ase 3.29.0 cell 40 A pbc false\n",
+        _other => "calculator: unknown\n",
+    }
+    .to_owned()
+}
+
+fn assign_references(
+    references: &[(String, Vec<f64>)],
+    views: &[(&str, &[f64])],
+    gate: Option<f64>,
+) -> String {
+    let mut text = String::new();
+    for (name, coordinates) in references {
+        match assign_isomer(coordinates, WATER_HEXAMER_MOLECULES, views, gate) {
+            Ok(matched) => {
+                let assigned = matched.name.unwrap_or_else(|| "unassigned".to_owned());
+                let rmsd = matched
+                    .rmsd
+                    .map(|value| format!("{value:.6}"))
+                    .unwrap_or_else(|| "none".to_owned());
+                text.push_str(&format!(
+                    "reference_assign: {name} isomer: {assigned} isomer_rmsd_A: {rmsd}\n"
+                ));
+            }
+            Err(error) => text.push_str(&format!(
+                "reference_assign: {name} isomer: unassigned isomer_reason: {error}\n"
+            )),
+        }
+    }
+    text
+}
+
+fn evaluate_references(objective: &ForceObjective, references: &[(String, Vec<f64>)]) -> String {
+    let mut text = String::new();
+    for (name, coordinates) in references {
+        let (energy, gradient) = objective.value_and_gradient(ArrayView1::from(coordinates));
+        let mut max_force: f64 = 0.0;
+        let values = gradient.as_slice().unwrap_or(&[]);
+        for atom in values.as_chunks::<3>().0 {
+            let norm = (atom[0] * atom[0] + atom[1] * atom[1] + atom[2] * atom[2]).sqrt();
+            max_force = max_force.max(norm);
+        }
+        text.push_str(&format!(
+            "reference_energy: {name} {energy:.12} max_force {max_force:.6}\n"
+        ));
+    }
+    text
 }
 
 fn load_deposited(engine: &str, n_atoms: usize) -> Result<ForceObjective, String> {
@@ -515,3 +626,109 @@ fn env_file(var: &str) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
+fn classify_gofee(references: &[(&str, &[f64])], gate: Option<f64>) -> String {
+    let Ok(dir) = std::env::var("WATER_GOFEE_DIR") else {
+        return "gofee: unscored\ngofee_reason: no deposited geometries\n".to_owned();
+    };
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(error) => return format!("gofee: unscored\ngofee_reason: {error}\n"),
+    };
+    let mut rows = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("xyz") {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Some(coordinates) = parse_xyz(&text) else {
+            continue;
+        };
+        rows.push((path, coordinates));
+    }
+    if rows.is_empty() {
+        return "gofee: unscored\ngofee_reason: no deposited geometries\n".to_owned();
+    }
+    let mut assigned = 0usize;
+    let mut unassigned = 0usize;
+    let mut lines = String::from("gofee: classified\n");
+    for (path, coordinates) in &rows {
+        match classify_geometry(coordinates, WATER_HEXAMER_MOLECULES, references, gate) {
+            Ok(found) => {
+                if found.name.is_some() {
+                    assigned += 1;
+                } else {
+                    unassigned += 1;
+                }
+                let name = found
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "unassigned".to_owned());
+                let rmsd = found
+                    .rmsd
+                    .map(|value| format!("{value:.6}"))
+                    .unwrap_or_else(|| "none".to_owned());
+                lines.push_str(&format!(
+                    "gofee_geometry: {} intact: {} isomer: {name} isomer_rmsd_A: {rmsd}\n",
+                    path.display(),
+                    found.intact
+                ));
+            }
+            Err(error) => {
+                unassigned += 1;
+                lines.push_str(&format!(
+                    "gofee_geometry: {} intact: unknown isomer: unassigned isomer_reason: {error}\n",
+                    path.display()
+                ));
+            }
+        }
+    }
+    lines.push_str(&format!(
+        "gofee_assigned: {assigned}\ngofee_unassigned: {unassigned}\n"
+    ));
+    lines
+}
+
+fn load_references() -> Vec<(String, Vec<f64>)> {
+    let Ok(dir) = std::env::var("WATER_ISOMER_DIR") else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for name in WATER_ISOMER_NAMES {
+        let path = PathBuf::from(&dir).join(format!("{name}.xyz"));
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Some(coordinates) = parse_xyz(&text) {
+            if monomers_intact(&coordinates, WATER_HEXAMER_MOLECULES).unwrap_or(false) {
+                found.push((name.to_owned(), coordinates));
+            } else {
+                eprintln!("isomer reference {name} failed the monomer check");
+            }
+        }
+    }
+    found
+}
+
+fn parse_xyz(text: &str) -> Option<Vec<f64>> {
+    let mut lines = text.lines();
+    let count: usize = lines.next()?.trim().parse().ok()?;
+    if count != 3 * WATER_HEXAMER_MOLECULES {
+        return None;
+    }
+    let _comment = lines.next()?;
+    let mut coordinates = Vec::with_capacity(3 * count);
+    for line in lines.take(count) {
+        let mut fields = line.split_whitespace();
+        let element = fields.next()?;
+        if element != "O" && element != "H" {
+            return None;
+        }
+        for _ in 0..3 {
+            coordinates.push(fields.next()?.parse().ok()?);
+        }
+    }
+    (coordinates.len() == 9 * WATER_HEXAMER_MOLECULES).then_some(coordinates)
+}
