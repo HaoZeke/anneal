@@ -27,6 +27,7 @@ use std::collections::BTreeMap;
 use ndarray::ArrayView1;
 use sha2::{Digest, Sha256};
 
+use super::census::{BasinCensus, WitnessId};
 use super::{
     DescriptorSignature, EngineSignature, FreshEvaluation, SystemSignature, ValidatorConfig,
 };
@@ -41,7 +42,9 @@ use crate::descriptor_space::{
 use crate::descriptor_space::{
     UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION, universal_descriptor_space,
 };
+use crate::methods::cluster_hopping::Config;
 use crate::methods::cluster_hopping::covalent_radius;
+use crate::methods::minima_hopping::SharedVisitPolicy;
 use crate::soap::{SoapSpec, local_spectra_z};
 
 /// Invalid GFN2-xTB water catalog preset input.
@@ -59,6 +62,15 @@ pub enum MolecularCatalogPresetError {
     /// Species vector must be `[8, 1, 1]` repeated once per molecule.
     #[error("water species vector is inconsistent")]
     SpeciesMismatch,
+    /// The isolated-water template is a start, not a deposited isomer.
+    #[error("the isolated-water template is not an isomer reference")]
+    IsolatedTemplate,
+    /// Species-aware IRA is the assignment. This build did not link it.
+    #[error("isomer assignment needs the ira feature")]
+    AssignmentNeedsIra,
+    /// IRA refused the two point sets.
+    #[error("species-aware IRA match failed")]
+    IraMatch,
 }
 
 /// Stable engine family for the in-process rgpot GFN2-xTB handle.
@@ -465,5 +477,216 @@ pub fn fresh_evaluation(
             "GFN2-xTB catalog evaluation requires feature rgpot-ex and a loaded rgpot engine handle"
                 .into(),
         )
+    }
+}
+
+/// Maximum O-H separation that still counts as a bond in the integrity check (A).
+///
+/// A quenched hexamer fails when an oxygen is left with one hydrogen or three.
+pub const WATER_OH_BOND_MAX_A: f64 = 1.2;
+
+/// First seed of the water-hexamer block. Inclusive end is 31.
+///
+/// IDEAS H5 names 0-31. An earlier plan used 5100-5131 because the
+/// registry had been keeping paper seeds in high blocks. IDEAS wins.
+pub const WATER_HEXAMER_SEED_START: u64 = 0;
+
+/// Seeds per engine. The block is 0-31.
+pub const WATER_HEXAMER_SEED_COUNT: u64 = 32;
+
+/// Force budget per seed, the same on every engine.
+///
+/// FIXES R6 logged 1200 PBE evaluations and 4000 GFN2 evaluations.
+/// The outline sets 4000 for every engine, and that is the budget here.
+pub const WATER_HEXAMER_BUDGET: usize = 4000;
+
+/// GFN2-xTB force budget. Same as [`WATER_HEXAMER_BUDGET`].
+pub const GFN2_HEXAMER_BUDGET: usize = WATER_HEXAMER_BUDGET;
+
+/// PBE/6-31G* force budget. Same as [`WATER_HEXAMER_BUDGET`].
+pub const PBE_HEXAMER_BUDGET: usize = WATER_HEXAMER_BUDGET;
+
+/// PET-MAD force budget. Same as [`WATER_HEXAMER_BUDGET`].
+pub const PETMAD_HEXAMER_BUDGET: usize = WATER_HEXAMER_BUDGET;
+
+/// NWChem embed engine id used by the rgpot profile.
+pub const PBE_ENGINE_KIND: &str = "nwchemc";
+
+/// Gaussian basis named for the PBE hexamer rerun.
+pub const PBE_BASIS: &str = "6-31g*";
+
+/// NWChem theory arm for the PBE hexamer rerun.
+pub const PBE_THEORY: &str = "dft";
+
+/// Exchange-correlation functional. `scfType` when `theory` is `dft`.
+pub const PBE_XC: &str = "pbe";
+
+/// No dispersion correction is named for the PBE/6-31G* rerun.
+pub const PBE_DISPERSION: &str = "none named";
+
+/// Molecular charge of neutral (H2O)6.
+pub const PBE_CHARGE: i32 = 0;
+
+/// Spin multiplicity 2S+1 of singlet water.
+pub const PBE_MULTIPLICITY: i32 = 1;
+
+/// NWChem task. The frontend calls gradient.
+pub const PBE_TASK: &str = "gradient";
+
+/// Metatomic engine family for the PET-MAD hexamer rerun.
+pub const PETMAD_ENGINE_KIND: &str = "metatomic-rgpot-v1";
+
+/// Model file named by the potlib metatomic dlopen test.
+pub const PETMAD_MODEL_NAME: &str = "pet-mad-xs-v1.5.0.pt";
+
+/// Device recorded for the PET-MAD force call.
+pub const PETMAD_DEVICE: &str = "cpu";
+
+/// rgpot-core git revision in `Cargo.lock`. This develop pin is 3.0.2.
+pub const RGPOT_REV: &str = "386c0342e008903472925ad78f8f32a91db51e14";
+
+/// rgpot-core version this tree links.
+pub const RGPOT_VERSION: &str = "3.0.2";
+
+/// eindir-core git revision in `Cargo.lock`.
+pub const EINDIR_REV: &str = "f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9";
+
+/// eindir-core version this tree links.
+pub const EINDIR_VERSION: &str = "0.6.0";
+
+/// Isomer names the hexamer assignment knows.
+pub const WATER_ISOMER_NAMES: [&str; 6] = [
+    "prism",
+    "cage",
+    "book",
+    "bag",
+    "cyclic-chair",
+    "cyclic-boat",
+];
+
+/// FIXES R6 wrote an RMSD gate of 0.1 A in a proposed sentence.
+///
+/// The outline replaces that gate. The assignment cutoff is half the
+/// minimum IRA RMSD between distinct same-level references, computed
+/// after those references are relaxed and before any search seed.
+/// No deposited references are in this tree, so no cutoff is stored.
+pub const ISOMER_RMSD_GATE_NAMED_BY_FIXES_A: f64 = 0.1;
+
+/// Census radius on the sorted oxygen-oxygen distances (A).
+///
+/// This is the Good-Turing descriptor radius for the water arm. It is
+/// not the isomer assignment cutoff.
+pub const OXYGEN_DISTANCE_CENSUS_RADIUS_A: f64 = 0.1;
+
+/// Charged-evaluation interval of the Good-Turing checkpoint.
+pub const GOOD_TURING_CHECKPOINT_INTERVAL: usize = 1;
+
+/// Search arm on the molecular preset.
+///
+/// Communicating and derived keep the molecular groups. They do not
+/// install [`Config::communicating`] or [`Config::derived`] as atomic
+/// presets. Good-Turing uses the recommended flags and a census stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaterSearchArm {
+    /// [`Config::recommended_molecular`].
+    Recommended,
+    /// Orbit, Recognition, and the return screen, on the molecular library.
+    Communicating,
+    /// Budget-window temperature and the cost-asymmetric Bayes screen.
+    Derived,
+    /// Recommended flags, plus the production Good-Turing stop.
+    GoodTuring,
+}
+
+/// Overlay one water arm on a molecular configuration.
+///
+/// The move library is left as the caller set it. The atomic two-phase
+/// surface is not copied onto these arms.
+pub fn configure_water_arm(cfg: &mut Config, arm: WaterSearchArm) {
+    match arm {
+        WaterSearchArm::Recommended | WaterSearchArm::GoodTuring => {}
+        WaterSearchArm::Communicating => {
+            cfg.depth_reward = false;
+            cfg.allocate_moves = true;
+            cfg.return_screen = true;
+            cfg.orbit_complete_on_new = true;
+            cfg.shared_deposits = 0;
+            cfg.shared_visit_policy = SharedVisitPolicy::Recognition;
+            cfg.jump_on_stall = false;
+        }
+        WaterSearchArm::Derived => {
+            cfg.budget_window = true;
+            cfg.bayes_screen = true;
+            cfg.bayes_threshold =
+                crate::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
+        }
+    }
+}
+#[cfg(test)]
+mod water_hexamer_tests {
+    use super::*;
+    use crate::methods::cluster_hopping::{
+        CheckpointAction, Ledger, MoveLibrary, SoapProposalMode,
+    };
+    use crate::methods::cluster_search::search_from_with_checkpoint;
+    use crate::potentials::{PairKind, PairPotential};
+
+    #[test]
+    fn water_arms_keep_the_molecular_library() {
+        let species = water_species(WATER_HEXAMER_MOLECULES).unwrap();
+        let groups = water_groups(WATER_HEXAMER_MOLECULES).unwrap();
+        let recommended = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
+        let library = recommended.move_library.clone();
+        for arm in [
+            WaterSearchArm::Recommended,
+            WaterSearchArm::Communicating,
+            WaterSearchArm::Derived,
+            WaterSearchArm::GoodTuring,
+        ] {
+            let mut cfg = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
+            configure_water_arm(&mut cfg, arm);
+            assert_eq!(cfg.move_library, library);
+            assert!(cfg.surfaces.is_empty());
+            match &cfg.move_library {
+                MoveLibrary::Molecular { groups, reactive } => {
+                    assert_eq!(groups.len(), WATER_HEXAMER_MOLECULES);
+                    assert!(!reactive);
+                }
+                other => panic!("molecular library replaced by {other:?}"),
+            }
+        }
+        let mut communicating = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
+        configure_water_arm(&mut communicating, WaterSearchArm::Communicating);
+        assert!(!communicating.depth_reward);
+        assert!(communicating.return_screen);
+        assert!(communicating.orbit_complete_on_new);
+        assert_eq!(communicating.shared_deposits, 0);
+        assert!(matches!(
+            communicating.shared_visit_policy,
+            SharedVisitPolicy::Recognition
+        ));
+        assert!(!communicating.jump_on_stall);
+        let mut derived = Config::recommended_molecular(species, groups, 1.0);
+        configure_water_arm(&mut derived, WaterSearchArm::Derived);
+        assert!(derived.budget_window);
+        assert!(derived.bayes_screen);
+        assert!(derived.depth_reward);
+        let threshold =
+            crate::screen::cost_asymmetric_threshold(derived.screen_steps, derived.relax_steps);
+        assert!((derived.bayes_threshold - threshold).abs() < 1e-12);
+    }
+
+    #[test]
+    fn engine_pins_match_the_lockfile() {
+        let lock = include_str!("../../Cargo.lock");
+        assert!(lock.contains(RGPOT_REV));
+        assert!(lock.contains(EINDIR_REV));
+        assert_eq!(PBE_DISPERSION, "none named");
+        assert_eq!(PBE_BASIS, "6-31g*");
+        assert_eq!(PBE_XC, "pbe");
+        assert_eq!(GFN2_METHOD, 3);
+        assert_eq!(WATER_HEXAMER_SEED_START + WATER_HEXAMER_SEED_COUNT - 1, 31);
+        assert_eq!(PBE_HEXAMER_BUDGET, 4000);
+        assert_eq!(GFN2_HEXAMER_BUDGET, 4000);
     }
 }
