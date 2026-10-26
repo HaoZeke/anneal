@@ -1,4 +1,4 @@
-use anneal_core::catalog::{BasinCensus, BasinId, CensusError};
+use anneal_core::catalog::{BasinCensus, BasinId, CensusError, WitnessId};
 use proptest::prelude::*;
 use std::collections::BTreeMap;
 
@@ -103,6 +103,50 @@ fn saturation_uses_only_exact_visit_and_singleton_counts() {
     assert_eq!(census.total_visits(), 21);
     assert_eq!(census.singleton_count(), 3);
     assert!(census.is_saturated());
+}
+
+#[test]
+fn a_witness_merges_near_duplicates_the_radius_splits() {
+    let mut split = BasinCensus::new(1, 0.1).unwrap();
+    for index in 0..20 {
+        split.observe(&[f64::from(index) * 0.5]).unwrap();
+    }
+    assert_eq!(split.len(), 20);
+    assert_eq!(split.singleton_count(), 20);
+    assert!(!split.is_saturated());
+    assert!(!split.target_found_with_confidence());
+
+    let mut same = BasinCensus::new(1, 0.1).unwrap();
+    for index in 0..20 {
+        let observation = same
+            .observe_witness(&[f64::from(index) * 0.5], Some(WitnessId::from_raw(1)))
+            .unwrap();
+        assert_eq!(observation.basin_id, BasinId::from_raw(0));
+        assert_eq!(observation.created, index == 0);
+    }
+    assert_eq!(same.len(), 1);
+    assert_eq!(same.singleton_count(), 0);
+    assert!(same.unseen_mass().unwrap() < 0.2);
+    assert!(same.is_saturated());
+    assert!(same.target_found_with_confidence());
+
+    let mut distinct = BasinCensus::new(1, 10.0).unwrap();
+    distinct
+        .observe_witness(&[0.0], Some(WitnessId::from_raw(1)))
+        .unwrap();
+    distinct
+        .observe_witness(&[0.0], Some(WitnessId::from_raw(2)))
+        .unwrap();
+    assert_eq!(distinct.len(), 2);
+    assert!(!distinct.target_found_with_confidence());
+
+    let mut anonymous = BasinCensus::new(1, 0.1).unwrap();
+    for _ in 0..20 {
+        anonymous.observe(&[0.0]).unwrap();
+    }
+    assert!(anonymous.is_saturated());
+    assert!(!anonymous.has_witness());
+    assert!(!anonymous.target_found_with_confidence());
 }
 
 #[test]
