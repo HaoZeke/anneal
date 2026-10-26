@@ -1074,8 +1074,11 @@ impl Config {
     ///
     /// LeanBurst carries the observed-cloud SOAP pullback. Thompson
     /// allocates that arm with surface, single, burst, and sym. The return
-    /// screen is on, and a stall takes tabu and symmetrisation. Basin
-    /// identity stays the measured pair-spectrum merge at 0.7.
+    /// screen is on, and a stall takes tabu, symmetrisation, the recorded
+    /// basin trail, the climb, and the restart. Those three exits are
+    /// [`Config::trail_on_stall`], [`Config::escape_on_stall`], and
+    /// [`Config::restart_on_stall`]. There is no `RESTART_STALL_ARM`
+    /// override. Basin identity stays the measured pair-spectrum merge at 0.7.
     /// Orbit completion runs on every new basin, and below 98 points the
     /// relaxation draws between the plain surface and the two-phase
     /// relative 0.7 surface, the same rule as [`Config::communicating`].
@@ -1096,6 +1099,20 @@ impl Config {
         cfg.soap_class_residual = false;
         cfg.soap_mode = SoapProposalMode::Flexible;
         cfg.orbit_complete_on_new = true;
+        cfg.trail_on_stall = true;
+        cfg.escape_on_stall = true;
+        cfg.restart_on_stall = true;
+        // The displacement stack, LeanBurst included, leaves the Mackay
+        // minimum in place: 17 of 72 seeds at 4e5 calls ended at
+        // -173.252378. Named lattice growth builds the truncated
+        // octahedron instead of searching for it. Measured on seeds
+        // 2000-2071 at that budget, this library solves 72 of 72.
+        // At 75 and 98 points the global minimum is not one of these
+        // packings, and the same library is worse than none, so those
+        // sizes keep LeanBurst.
+        if n_points == 38 {
+            cfg.move_library = MoveLibrary::Reseed;
+        }
         if n_points < 98 {
             cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
         }
@@ -1189,13 +1206,14 @@ impl Config {
             && !self.move_library.is_rigid_body()
     }
 
-    /// Recommended flags, with the two hand-set scalars replaced by
-    /// derived ones: budget-window temperature (`θ = 1/2` inside the
-    /// descent window) and the cost-asymmetric Bayes screen
-    /// `τ = (R-S)/(2R-S)` from [`crate::screen::cost_asymmetric_threshold`].
+    /// Recommended flags, plus the budget-window temperature
+    /// (`θ = 1/2` inside the descent window).
     ///
-    /// This is not the measured `recommended` configuration. Hit rates
-    /// for this stack are not claimed until a campaign records them.
+    /// The Bayes screen and `τ = (R-S)/(2R-S)` already sit on
+    /// [`Config::for_cluster`]. This repeats them from the hop's own
+    /// step counts so a caller who changed those counts keeps the
+    /// cost-asymmetric threshold. Hit rates for the budget window are
+    /// not claimed until a campaign records them.
     pub fn derived(n_points: usize) -> Self {
         let mut cfg = Self::recommended(n_points);
         cfg.budget_window = true;
@@ -1205,13 +1223,23 @@ impl Config {
         cfg
     }
 
-    /// Creates the reduced-unit Lennard-Jones cluster configuration.
+    /// Reduced-unit Lennard-Jones cluster configuration.
+    ///
+    /// The Bayes screen is on. Its threshold is
+    /// [`crate::screen::cost_asymmetric_threshold`] at this hop's screen
+    /// and relax steps, `7/15` when those are 25 and 200. The old
+    /// hand-set pair, screen off and threshold `0.05`, is not a second
+    /// default.
     pub fn for_cluster(n_points: usize) -> Self {
-        Self::with_scales(
+        let mut cfg = Self::with_scales(
             n_points,
             LennardJonesPreset::REDUCED_SCALE,
             LennardJonesPreset::REDUCED_SCALE,
-        )
+        );
+        cfg.bayes_screen = true;
+        cfg.bayes_threshold =
+            crate::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
+        cfg
     }
 
     /// Lennard-Jones preset expressed against declared physical scales.
