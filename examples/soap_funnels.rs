@@ -21,20 +21,7 @@ use std::env;
 use std::fs;
 
 fn lj(x: ArrayView1<f64>) -> f64 {
-    let n = x.len() / 3;
-    let mut e = 0.0;
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let d0 = x[3 * i] - x[3 * j];
-            let d1 = x[3 * i + 1] - x[3 * j + 1];
-            let d2 = x[3 * i + 2] - x[3 * j + 2];
-            let r2 = d0 * d0 + d1 * d1 + d2 * d2;
-            let inv2 = 1.0 / r2;
-            let inv6 = inv2 * inv2 * inv2;
-            e += 4.0 * (inv6 * inv6 - inv6);
-        }
-    }
-    e
+    anneal_core::potentials::reduced_lennard_jones(x).0
 }
 
 fn load_points(path: &str, n: usize) -> Array1<f64> {
