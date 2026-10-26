@@ -12,8 +12,10 @@
 //! [`crate::methods::cluster_search`] can be handed a potential from rgpot
 //! without knowing the difference.
 //!
-//! The pair formulas live in rgpot. This module loads `librgpot` from
-//! `RGPOT_LIB` and calls it. Set that variable to the shared library.
+//! The pair formulas live in `rgpot-pair`. `lj_unit` and `morse_unit`
+//! are inlined into the search loop, so a pair does not cross a
+//! library boundary. Sutton-Chen is still one loaded call per
+//! evaluation. Set `RGPOT_LIB` for that smoke.
 
 use eindir_core::Objective;
 use eindir_core::bounds::Bounds;
@@ -61,12 +63,18 @@ impl PairKind {
     ///
     /// The derivative is returned divided by `r` because every caller
     /// multiplies it by the separation vector.
+    #[inline]
     pub fn pair(&self, r2: f64) -> (f64, f64) {
-        let (energy, coef, _) = match self {
-            PairKind::LennardJones => rgpot_call::lj_pair_terms(1.0, 1.0, r2),
-            PairKind::Morse { rho } => rgpot_call::morse_pair_terms(1.0, *rho, 1.0, r2),
-        };
-        (energy, coef)
+        match self {
+            PairKind::LennardJones => {
+                let (energy, coef, _) = rgpot_pair::lj_unit(r2);
+                (energy, coef)
+            }
+            PairKind::Morse { rho } => {
+                let (energy, coef, _) = rgpot_pair::morse_unit(*rho, r2);
+                (energy, coef)
+            }
+        }
     }
 
     /// `d2V/dr2` and `(dV/dr) / r` at squared separation `r2`.
@@ -83,13 +91,19 @@ impl PairKind {
     /// `V'(r)/r` alone. That second piece is exactly what the stretch-only model
     /// operator in [`crate::model_hessian`] leaves out.
     ///
-    /// Curvature comes from rgpot, the same call as [`PairKind::pair`].
+    /// Curvature comes from `rgpot-pair`, the same tree as [`PairKind::pair`].
+    #[inline]
     pub fn pair_curvature(&self, r2: f64) -> (f64, f64) {
-        let (_, coef, curv) = match self {
-            PairKind::LennardJones => rgpot_call::lj_pair_terms(1.0, 1.0, r2),
-            PairKind::Morse { rho } => rgpot_call::morse_pair_terms(1.0, *rho, 1.0, r2),
-        };
-        (curv, coef)
+        match self {
+            PairKind::LennardJones => {
+                let (_, coef, curv) = rgpot_pair::lj_unit(r2);
+                (curv, coef)
+            }
+            PairKind::Morse { rho } => {
+                let (_, coef, curv) = rgpot_pair::morse_unit(*rho, r2);
+                (curv, coef)
+            }
+        }
     }
 }
 
@@ -149,11 +163,29 @@ impl PairPotential {
     /// the same for both, so computing them separately doubles the cost of
     /// every relaxation step.
     pub fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-        let x = x.slice(ndarray::s![..3 * self.n_points]);
-        match self.kind {
-            PairKind::LennardJones => rgpot_call::reduced_lennard_jones(x),
-            PairKind::Morse { rho } => rgpot_call::morse(rho, x),
+        let n = self.n_points;
+        let mut e = 0.0;
+        let mut g = Array1::zeros(x.len());
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let d = [
+                    x[3 * i] - x[3 * j],
+                    x[3 * i + 1] - x[3 * j + 1],
+                    x[3 * i + 2] - x[3 * j + 2],
+                ];
+                let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+                if r2 <= 0.0 {
+                    continue;
+                }
+                let (v, coef) = self.kind.pair(r2);
+                e += v;
+                for k in 0..3 {
+                    g[3 * i + k] += coef * d[k];
+                    g[3 * j + k] -= coef * d[k];
+                }
+            }
         }
+        (e, g)
     }
 }
 
