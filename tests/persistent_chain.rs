@@ -331,6 +331,9 @@ fn failed_diagnostic_probe_stays_off_the_live_chain() {
 fn unvalidated_screen_result_never_becomes_the_live_chain_state() {
     let mut cfg = Config::for_cluster(2);
     cfg.max_hops = Some(1);
+    // This refusal is the margin screen. The Bayes screen would relax the
+    // trial while it is still warming up.
+    cfg.bayes_screen = false;
     cfg.screen_margin = -100.0;
     cfg.return_screen = false;
     let start = Array1::from(vec![-0.6, 0.0, 0.0, 0.6, 0.0, 0.0]);

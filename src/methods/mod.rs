@@ -66,6 +66,8 @@ pub mod gpmd;
 pub mod local_polish;
 pub mod mcmc_sa;
 pub mod parallel_tempering;
+/// Hukushima–Iba population annealing with Machta's ESS temperature step.
+pub mod population_annealing;
 pub mod portfolio;
 pub mod regime;
 pub mod routing_probe;

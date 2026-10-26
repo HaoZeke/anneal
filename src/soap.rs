@@ -2837,6 +2837,11 @@ fn chol_solve(a: &Array2<f64>, b: &Array1<f64>) -> Option<Array1<f64>> {
     Some(z)
 }
 
+/// Stand-in for the Mackay shelf opening.
+pub fn mackay75_opening(_x: ArrayView1<f64>) -> Option<Array1<f64>> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
