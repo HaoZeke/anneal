@@ -2623,6 +2623,9 @@ where
     let mut next_reoccupy = cfg.reoccupy_interval;
     let mut best_seen = ledger.best;
     let mut charged_at_best = ledger.spent();
+    // The doorway is tried once per incumbent. Repeating it on every
+    // later plateau spends the budget on the same quench.
+    let mut opened_incumbent = f64::INFINITY;
     // Hops elapsed when the ledger last recorded a lower minimum.
     // A rigid reseed compares the live hop count with this stamp.
     let mut hops_at_lowest = 0usize;
@@ -2755,21 +2758,31 @@ where
             // due and the leave runs on every following hop.
             charged_at_best = ledger.spent();
             directed_leave = true;
-            // LJ75's shelf is the icosahedral shell. The same leave on
-            // LJ98, where the tetrahedral minimum is the target, scored
-            // one seed worse, so it stays off there. The climb below does
-            // not leave that shell, and a fresh draw returns to it.
-            if cfg.n_points == 75
-                && let Some(opening) = crate::soap::fivefold_openings(x.view())
-                    .into_iter()
-                    .find_map(|opening| {
-                        let (opened_energy, opened_state) =
-                            relax(ledger, opening.view(), cfg.relax_steps);
-                        (opened_state.len() == x.len()
-                            && crate::soap::opening_left(e, opened_energy)
-                            && quench_is_sane(cfg, opened_energy, opened_state.view()))
-                        .then_some((opened_energy, opened_state))
-                    })
+            // The trapped minimum is the incumbent, which the live chain
+            // may already have walked off. The shell is the one whose
+            // 555 fraction is still icosahedral. The quench is kept only
+            // when the rise off that incumbent is the Mackay to
+            // anti-Mackay doorway. A rise of that size from a higher
+            // shell is a different event. The size is not read. The
+            // climb below does not leave that shell, and a fresh draw
+            // returns to it.
+            let incumbent_due =
+                ledger.best.is_finite() && (ledger.best - opened_incumbent).abs() > 1e-6;
+            if incumbent_due
+                && let Some(incumbent) = ledger.best_state.clone()
+                && let Some(opening) = {
+                    opened_incumbent = ledger.best;
+                    crate::soap::fivefold_openings(incumbent.view())
+                        .into_iter()
+                        .find_map(|opening| {
+                            let (opened_energy, opened_state) =
+                                relax(ledger, opening.view(), cfg.relax_steps);
+                            (opened_state.len() == incumbent.len()
+                                && crate::soap::opening_left(ledger.best, opened_energy)
+                                && quench_is_sane(cfg, opened_energy, opened_state.view()))
+                            .then_some((opened_energy, opened_state))
+                        })
+                }
             {
                 let (opened_energy, opened_state) = opening;
                 {
@@ -5538,6 +5551,61 @@ where
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
             quiet = 0;
             longest_quiet = 0;
+            // Derived search cools inside the budget window, and the climb
+            // is a displacement. On a plateau whose occupied structure is
+            // not icosahedral, also grow the lattice orders. That is the
+            // move that crosses a funnel in one step. The chain takes the
+            // growth only when it deepens the incumbent. A lattice minimum
+            // above the best would pin the search there. The climb still runs.
+            if directed_leave
+                && cfg.budget_window
+                && !crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+            {
+                let best_before_growth = ledger.best;
+                let mut best_growth: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
+                for source in crate::lattice::Source::library() {
+                    if ledger.remaining() == 0 {
+                        break;
+                    }
+                    let grown = crate::lattice::candidate(source, x.view(), x.len() / 3, rng);
+                    let (grown_energy, grown_state) = relax(ledger, grown.view(), cfg.relax_steps);
+                    if grown_state.len() != x.len() || !grown_energy.is_finite() {
+                        continue;
+                    }
+                    let grown_gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        grown_energy,
+                        grown_state.view(),
+                        &mut unconverged_records,
+                    );
+                    let replace = best_growth
+                        .as_ref()
+                        .is_none_or(|(energy, _, _)| grown_energy < *energy);
+                    if replace {
+                        best_growth = Some((grown_energy, grown_state, grown_gradient));
+                    }
+                }
+                if let Some((grown_energy, grown_state, grown_gradient)) = best_growth
+                    && grown_energy < best_before_growth - 1e-9
+                {
+                    hops += 1;
+                    adopt_minimum!(
+                        grown_energy,
+                        grown_state,
+                        grown_gradient,
+                        None,
+                        AdoptionHistory::Fresh,
+                        None,
+                        Some("stall-growth"),
+                        hops
+                    );
+                }
+                if ledger.best < best_before_growth - 1e-12 && improvements.len() < 512 {
+                    improvements.push((hops, ledger.spent(), bias.n_basins(), ledger.best));
+                }
+            }
             if let Some(g) = grad.as_deref_mut() {
                 let scale = if cfg.minima_hopping {
                     feedback.escape()
