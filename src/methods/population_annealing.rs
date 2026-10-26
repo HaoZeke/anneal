@@ -252,3 +252,79 @@ where
         best_state,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::methods::warm_lbfgs::WarmLbfgs;
+    use crate::potentials::PairPotential;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    #[test]
+    fn a_flat_population_takes_the_largest_temperature_step() {
+        let energies = vec![-1.0; 8];
+        assert_eq!(choose_dbeta(&energies, 4.0), 50.0);
+        assert_eq!(effective_sample_size(&[0.0; 8], 10.0), 8.0);
+    }
+
+    #[test]
+    fn a_spread_population_stops_at_half_its_size() {
+        let energies = vec![0.0, 0.0, 4.0, 4.0];
+        let step = choose_dbeta(&energies, 2.0);
+        assert!(step > 0.0 && step < 50.0, "{step}");
+        let shifted = vec![0.0, 0.0, 4.0, 4.0];
+        let size = effective_sample_size(&shifted, step);
+        assert!(
+            (size - 2.0).abs() < 0.05,
+            "effective size {size} at step {step}"
+        );
+    }
+
+    #[test]
+    fn a_quenched_population_lands_below_its_unquenched_best() {
+        let n = 7usize;
+        let mut cfg = PopulationAnneal::reference(n);
+        cfg.walkers = 4;
+        cfg.quench_reserve_per_walker = 40;
+        cfg.quench_steps = 80;
+        let potential = PairPotential::lennard_jones(n);
+        let mut ledger = Ledger::new(800);
+        let mut optimiser = WarmLbfgs::default();
+        let mut rng = StdRng::seed_from_u64(2000);
+        let report = population_anneal(
+            n,
+            &mut ledger,
+            &cfg,
+            |led, x| {
+                if !led.charge() {
+                    return None;
+                }
+                Some(potential.value_and_gradient(x).0)
+            },
+            |led, x, steps| {
+                optimiser.forget();
+                let (value, relaxed, _) = optimiser.minimize(x, steps, |v| {
+                    if !led.charge() {
+                        return None;
+                    }
+                    Some(potential.value_and_gradient(v))
+                });
+                value.is_finite().then_some((value, relaxed))
+            },
+            &mut rng,
+        );
+        assert!(report.generations > 0, "generations {}", report.generations);
+        assert!(report.quenched > 0, "quenched {}", report.quenched);
+        assert!(report.best_energy.is_finite());
+        assert!(
+            report.best_energy < report.unquenched_best,
+            "quenched {} against unquenched {}",
+            report.best_energy,
+            report.unquenched_best
+        );
+        assert_eq!(report.best_state.len(), 3 * n);
+        assert!(report.final_temperature <= cfg.temperature_high + 1e-12);
+        assert!(ledger.spent() > 0);
+    }
+}
