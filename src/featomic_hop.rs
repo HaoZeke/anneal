@@ -194,10 +194,18 @@ fn spectrum_keep(
     for idx in 0..out.keys().count() {
         let block = out.block_by_id(idx);
         let array = block.values().to_array();
-        let shape = array.shape().to_vec();
-        let flat: Vec<f64> = array.iter().copied().collect();
-        let n_s = shape[0];
-        let n_f = shape[shape.len() - 1];
+        let n_s = array.shape()[0];
+        let n_f = array.shape()[array.ndim() - 1];
+        // Logical order is what `row * n_f + f` indexes. A standard-layout
+        // block already is that order; copying it is the 0.45% + 0.43%
+        // `Copied` / `from_iter` pair under `spectrum_keep`.
+        let flat_owned;
+        let flat: &[f64] = if let Some(slice) = array.as_slice() {
+            slice
+        } else {
+            flat_owned = array.iter().copied().collect::<Vec<f64>>();
+            &flat_owned
+        };
         let samples = block.samples();
         let sample_names = samples.names();
         let atom_col = sample_names.iter().position(|&s| s == "atom").unwrap_or(0);
@@ -231,9 +239,14 @@ fn spectrum_keep(
         }
         if let Some(g) = block.gradient("positions") {
             let garray = g.values().to_array();
-            let gshape = garray.shape().to_vec();
-            let gflat: Vec<f64> = garray.iter().copied().collect();
-            let (g_rows, g_dirs, g_f) = (gshape[0], gshape[1], gshape[2]);
+            let (g_rows, g_dirs, g_f) = (garray.shape()[0], garray.shape()[1], garray.shape()[2]);
+            let gflat_owned;
+            let gflat: &[f64] = if let Some(slice) = garray.as_slice() {
+                slice
+            } else {
+                gflat_owned = garray.iter().copied().collect::<Vec<f64>>();
+                &gflat_owned
+            };
             let gsamp = g.samples();
             for grow in 0..g_rows {
                 // ("sample", "system", "atom")
