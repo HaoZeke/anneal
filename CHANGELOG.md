@@ -215,14 +215,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   with the climb enabled is the directed leave, not a fresh Mackay draw.
   ``paper_controls`` passes the potential gradient, which is what the
   climb reads.
-- At 75 points, a call plateau with the climb enabled steps the lower
-  reconstructable fivefold pentagon when the 555 fraction is still
-  icosahedral, and adopts the quench when it leaves the occupied basin.
-  The greedy length follows storage order, so the plateau also tries the
-  centre-of-mass height order and that order with each outer vertex
-  turned to +z. Marks sits below the 555 cut and is left in place. The
-  deposited Mackay list and the shelf energy are not read. The leave is
-  not used at 98 points. ``for_cluster`` leaves the climb off, so it
+- The LJ75 Mackay opening is read in the deposited fixture's atom order.
+  Sorted distance signatures put a search minimum at that geometry back
+  into that order before the fivefold residual, which otherwise follows
+  storage order and misses the axis at length 0.9018. The quench is
+  adopted only when the current energy is the shelf and the gap above it
+  sits in ``(1.02, 1.12)``. The climb stays the gate, so ``for_cluster``
   does not take the opening.
 - The seam restart banks a structure only when it is within two epsilon
   of the previous floor and its icosahedral template share is strictly
