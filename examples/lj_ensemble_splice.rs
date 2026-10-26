@@ -58,29 +58,7 @@ use rand::{Rng, SeedableRng};
 
 /// Lennard-Jones value and gradient in reduced units, no cutoff.
 fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-    let n = x.len() / 3;
-    let mut e = 0.0;
-    let mut g = Array1::zeros(x.len());
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let d = [
-                x[3 * i] - x[3 * j],
-                x[3 * i + 1] - x[3 * j + 1],
-                x[3 * i + 2] - x[3 * j + 2],
-            ];
-            let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-            let inv2 = 1.0 / r2;
-            let inv6 = inv2 * inv2 * inv2;
-            let inv12 = inv6 * inv6;
-            e += 4.0 * (inv12 - inv6);
-            let coef = 24.0 * inv2 * (2.0 * inv12 - inv6);
-            for k in 0..3 {
-                g[3 * i + k] -= coef * d[k];
-                g[3 * j + k] += coef * d[k];
-            }
-        }
-    }
-    (e, g)
+    anneal_core::potentials::reduced_lennard_jones(x)
 }
 
 /// Place the worst-bound atom just outside the current hull.
@@ -93,7 +71,6 @@ fn relocate_worst_atom(x: &[f64], count: usize, rng: &mut impl Rng) -> Array1<f6
     if n < 2 || count == 0 {
         return out;
     }
-    let mut bound = vec![0.0; n];
     let mut cm = [0.0; 3];
     for i in 0..n {
         cm[0] += x[3 * i];
@@ -104,24 +81,8 @@ fn relocate_worst_atom(x: &[f64], count: usize, rng: &mut impl Rng) -> Array1<f6
     cm[0] /= scale;
     cm[1] /= scale;
     cm[2] /= scale;
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let d = [
-                x[3 * i] - x[3 * j],
-                x[3 * i + 1] - x[3 * j + 1],
-                x[3 * i + 2] - x[3 * j + 2],
-            ];
-            let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-            if r2 < 1e-12 {
-                continue;
-            }
-            let inv2 = 1.0 / r2;
-            let inv6 = inv2 * inv2 * inv2;
-            let vij = 4.0 * (inv6 * inv6 - inv6);
-            bound[i] += vij;
-            bound[j] += vij;
-        }
-    }
+    let bound = anneal_core::potentials::lennard_jones_atom_energies(1.0, 1.0, ArrayView1::from(x))
+        .to_vec();
     let mut order: Vec<usize> = (0..n).collect();
     order.sort_by(|&a, &b| {
         bound[b]

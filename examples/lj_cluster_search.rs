@@ -192,29 +192,7 @@ fn apply_occupancy_superbasin(cfg: &mut Config, n: usize) {
 
 /// Lennard-Jones value and gradient in reduced units, no cutoff.
 fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-    let n = x.len() / 3;
-    let mut e = 0.0;
-    let mut g = Array1::zeros(x.len());
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let d = [
-                x[3 * i] - x[3 * j],
-                x[3 * i + 1] - x[3 * j + 1],
-                x[3 * i + 2] - x[3 * j + 2],
-            ];
-            let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-            let inv2 = 1.0 / r2;
-            let inv6 = inv2 * inv2 * inv2;
-            let inv12 = inv6 * inv6;
-            e += 4.0 * (inv12 - inv6);
-            let coef = 24.0 * inv2 * (2.0 * inv12 - inv6);
-            for k in 0..3 {
-                g[3 * i + k] -= coef * d[k];
-                g[3 * j + k] += coef * d[k];
-            }
-        }
-    }
-    (e, g)
+    anneal_core::potentials::reduced_lennard_jones(x)
 }
 
 #[cfg(all(feature = "bank-rpc", feature = "ira"))]
@@ -1257,29 +1235,7 @@ fn charged_noisy<R: rand::Rng + ?Sized>(
 /// Frozen atoms contribute forces to the moved ones; their own entries stay
 /// zero, which is the frozen-environment constraint.
 fn lj_partial_grad(x: ndarray::ArrayView1<f64>, moved: &[usize]) -> Array1<f64> {
-    let n = x.len() / 3;
-    let mut g = Array1::zeros(x.len());
-    for &i in moved {
-        for j in 0..n {
-            if j == i {
-                continue;
-            }
-            let d = [
-                x[3 * i] - x[3 * j],
-                x[3 * i + 1] - x[3 * j + 1],
-                x[3 * i + 2] - x[3 * j + 2],
-            ];
-            let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-            let inv2 = 1.0 / r2;
-            let inv6 = inv2 * inv2 * inv2;
-            let inv12 = inv6 * inv6;
-            let coef = 24.0 * inv2 * (2.0 * inv12 - inv6);
-            for k in 0..3 {
-                g[3 * i + k] -= coef * d[k];
-            }
-        }
-    }
-    g
+    anneal_core::potentials::lennard_jones_partial(x, moved)
 }
 
 /// Published global minima. A score for known hurdles; occupancy

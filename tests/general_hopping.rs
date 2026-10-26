@@ -15,29 +15,7 @@ fn hs1_value_gradient(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
 }
 
 fn lj_value_gradient(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-    let n = x.len() / 3;
-    let mut value = 0.0;
-    let mut gradient = Array1::zeros(x.len());
-    for i in 0..n {
-        for j in i + 1..n {
-            let d = [
-                x[3 * i] - x[3 * j],
-                x[3 * i + 1] - x[3 * j + 1],
-                x[3 * i + 2] - x[3 * j + 2],
-            ];
-            let r2 = d.iter().map(|v| v * v).sum::<f64>();
-            let inv2 = 1.0 / r2;
-            let inv6 = inv2.powi(3);
-            let inv12 = inv6 * inv6;
-            value += 4.0 * (inv12 - inv6);
-            let coefficient = 24.0 * inv2 * (2.0 * inv12 - inv6);
-            for k in 0..3 {
-                gradient[3 * i + k] -= coefficient * d[k];
-                gradient[3 * j + k] += coefficient * d[k];
-            }
-        }
-    }
-    (value, gradient)
+    anneal_core::potentials::reduced_lennard_jones(x)
 }
 
 fn gradient_quench(
@@ -113,15 +91,11 @@ fn periodic_dimer_l4(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         d[k] = delta;
         r2 += delta * delta;
     }
-    let inv2 = 1.0 / r2.max(1e-8);
-    let inv6 = inv2.powi(3);
-    let inv12 = inv6 * inv6;
-    let value = 4.0 * (inv12 - inv6);
-    let coefficient = 24.0 * inv2 * (2.0 * inv12 - inv6);
+    let (energy, coef, _) = anneal_core::potentials::lj_pair_terms(1.0, 1.0, r2.max(1e-8));
     let mut gradient = Array1::zeros(6);
     for k in 0..3 {
-        gradient[k] -= coefficient * d[k];
-        gradient[3 + k] += coefficient * d[k];
+        gradient[k] += coef * d[k];
+        gradient[3 + k] -= coef * d[k];
     }
-    (value, gradient)
+    (energy, gradient)
 }
