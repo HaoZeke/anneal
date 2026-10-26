@@ -3810,4 +3810,99 @@ mod tests {
             "nu3 J disagrees with FD: max|Δ|={max_d} max|FD|={max_a}"
         );
     }
+
+    fn load_xyz(text: &str) -> Array1<f64> {
+        let mut coords = Vec::new();
+        for line in text.lines().skip(2) {
+            let mut parts = line.split_whitespace();
+            if parts.next().is_none() {
+                continue;
+            }
+            for _ in 0..3 {
+                coords.push(parts.next().unwrap().parse::<f64>().unwrap());
+            }
+        }
+        Array1::from_vec(coords)
+    }
+
+    fn quench_lj_state(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let n = x.len() / 3;
+        let potential = crate::potentials::PairPotential::lennard_jones(n);
+        let mut optimiser = crate::methods::warm_lbfgs::WarmLbfgs::default();
+        let (value, relaxed, _) =
+            optimiser.minimize(x, 400, |v| Some(potential.value_and_gradient(v)));
+        (value, relaxed)
+    }
+
+    fn permute_atoms(x: &Array1<f64>, order: &[usize]) -> Array1<f64> {
+        let mut y = Array1::zeros(x.len());
+        for (slot, &src) in order.iter().enumerate() {
+            for axis in 0..3 {
+                y[3 * slot + axis] = x[3 * src + axis];
+            }
+        }
+        y
+    }
+
+    /// The deposited Mackay shell, in every storage order the rejection tried.
+    ///
+    /// The doorway is a property of the cloud. Shuffling the quenched
+    /// atoms must still land in the Mackay to anti-Mackay window, and on
+    /// the same minimum. Marks, the 38-point octahedron, and the
+    /// tetrahedral minimum are not icosahedral shells.
+    #[test]
+    fn fivefold_opening_is_invariant_under_deposited_order() {
+        let fixture = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let marks = load_xyz(include_str!("../tests/fixtures/lj75_marks.xyz"));
+        let fcc = load_xyz(include_str!("../tests/fixtures/lj38_fcc.xyz"));
+        let tetrahedral = load_xyz(include_str!("../tests/fixtures/lj98_gm.xyz"));
+        assert!(fivefold_openings(marks.view()).is_empty());
+        assert!(fivefold_openings(fcc.view()).is_empty());
+        assert!(fivefold_openings(tetrahedral.view()).is_empty());
+        let (shelf, quenched) = quench_lj_state(fixture.view());
+        let length = fivefold_length(quenched.view());
+        let doorway = |cloud: &Array1<f64>| -> f64 {
+            let mut rise = None;
+            for opened in fivefold_openings(cloud.view()) {
+                let (landed, _) = quench_lj_state(opened.view());
+                let gap = landed - shelf;
+                if opening_left(shelf, landed) {
+                    rise = Some(gap);
+                    break;
+                }
+            }
+            rise.expect("no Mackay to anti-Mackay opening")
+        };
+        let deposited = doorway(&quenched);
+        assert!(
+            (super::DOORWAY_LO..super::DOORWAY_HI).contains(&deposited),
+            "deposited rise {deposited} from {shelf}"
+        );
+        let n = quenched.len() / 3;
+        let mut rng = StdRng::seed_from_u64(0);
+        for seed in 0..24 {
+            let mut order: Vec<usize> = (0..n).collect();
+            for i in (1..n).rev() {
+                let j = rng.random_range(0..=i);
+                order.swap(i, j);
+            }
+            let scrambled = permute_atoms(&quenched, &order);
+            let scrambled_length = fivefold_length(scrambled.view());
+            assert!(
+                (scrambled_length - length).abs() < 1e-8,
+                "perm {seed} length {scrambled_length} vs {length}"
+            );
+            let rise = doorway(&scrambled);
+            assert!(
+                (rise - deposited).abs() < 1e-4,
+                "perm {seed} rise {rise} left the doorway {deposited}"
+            );
+        }
+        let mut reversed: Vec<usize> = (0..n).rev().collect();
+        let rise = doorway(&permute_atoms(&quenched, &reversed));
+        assert!((rise - deposited).abs() < 1e-4, "reversed rise {rise}");
+        reversed.rotate_left(1);
+        let rise = doorway(&permute_atoms(&quenched, &reversed));
+        assert!((rise - deposited).abs() < 1e-4, "rotated rise {rise}");
+    }
 }
