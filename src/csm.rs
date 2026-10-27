@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 use ndarray::{Array1, ArrayView1};
 
-use crate::assignment::minimum_cost_assignment;
+use crate::assignment::{SHORTEST_PATH_FROM, greedy_assignment, minimum_cost_assignment};
 
 /// Projects `x` onto `ops` at the best of `orientations`.
 ///
@@ -208,7 +208,17 @@ fn match_operated(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option
                 costs[row_i * width + col_i] = squared;
             }
         }
-        let local = minimum_cost_assignment(&costs, width)?;
+        // Below 98 atoms the permutation is the Kuhn-Munkres matching the
+        // recorded walks used. At 98 and above a projection repeats this
+        // matrix for every group operation and every trial orientation, and
+        // that cubic solve was about half of a search evaluation. The row
+        // greedy matching is a different permutation when its choice is not
+        // optimal, so those larger searches can quench a different trial.
+        let local = if width >= SHORTEST_PATH_FROM {
+            greedy_assignment(&costs, width)
+        } else {
+            minimum_cost_assignment(&costs, width)?
+        };
         for (row_i, &col_i) in local.iter().enumerate() {
             assignment[atoms[row_i]] = atoms[col_i];
         }

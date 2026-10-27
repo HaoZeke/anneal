@@ -15,8 +15,10 @@
 /// Matrix size at which the flat shortest-path scan replaces Kuhn-Munkres.
 ///
 /// 98 is the atom count where one projection of the full point set stopped
-/// being a small fraction of a quench.
-const SHORTEST_PATH_FROM: usize = 98;
+/// being a small fraction of a quench. Callers that project a whole cluster
+/// of this size use [`greedy_assignment`] instead: one dense solve is already
+/// near the cubic floor, and a projection repeats it for every operation.
+pub(crate) const SHORTEST_PATH_FROM: usize = 98;
 
 /// Returns the column assigned to each row of a finite `n × n` cost matrix.
 ///
@@ -112,6 +114,41 @@ fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<usize>> {
         assignment[slot] = column - 1;
     }
     Some(assignment)
+}
+
+/// Row-greedy matching: each row takes the cheapest column still free.
+///
+/// A tie keeps the lowest column index. The result is always a permutation of
+/// a finite square matrix, and it is not always a minimum-cost assignment.
+/// Continuous-symmetry and fivefold matching use it from [`SHORTEST_PATH_FROM`]
+/// atoms up, where the dense solver was the search. Smaller clusters stay on
+/// [`minimum_cost_assignment`], whose tie break those walks were recorded with.
+pub(crate) fn greedy_assignment(costs: &[f64], n: usize) -> Vec<usize> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut used = vec![false; n];
+    let mut assignment = vec![0usize; n];
+    for row in 0..n {
+        let base = row * n;
+        let mut best_column = 0usize;
+        let mut best_cost = f64::INFINITY;
+        let mut found = false;
+        for column in 0..n {
+            if used[column] {
+                continue;
+            }
+            let cost = costs[base + column];
+            if !found || cost < best_cost {
+                best_cost = cost;
+                best_column = column;
+                found = true;
+            }
+        }
+        used[best_column] = true;
+        assignment[row] = best_column;
+    }
+    assignment
 }
 
 /// Column-first Kuhn-Munkres. The tight edge is the lowest column index
@@ -243,7 +280,9 @@ fn augment_tight(
 
 #[cfg(test)]
 mod tests {
-    use super::{kuhn_munkres, minimum_cost_assignment, successive_shortest_paths};
+    use super::{
+        greedy_assignment, kuhn_munkres, minimum_cost_assignment, successive_shortest_paths,
+    };
 
     fn brute(costs: &[f64], n: usize) -> f64 {
         fn walk(costs: &[f64], n: usize, row: usize, used: &mut [bool], acc: f64, best: &mut f64) {
@@ -297,5 +336,35 @@ mod tests {
                 assert_eq!(assignment, slow);
             }
         }
+    }
+
+    #[test]
+    fn greedy_matching_is_a_permutation_and_not_always_optimal() {
+        let costs = [1.0, 100.0, 1.0, 100.0, 1.0, 100.0, 1.0, 100.0, 100.0];
+        let greedy = greedy_assignment(&costs, 3);
+        let mut seen = [false; 3];
+        for column in &greedy {
+            assert!(
+                *column < 3 && !seen[*column],
+                "not a permutation {greedy:?}"
+            );
+            seen[*column] = true;
+        }
+        let optimal = minimum_cost_assignment(&costs, 3).expect("square");
+        assert!(
+            cost_of(&costs, 3, &greedy) > cost_of(&costs, 3, &optimal) + 1.0,
+            "this matrix is the witness that the row scan is not the dense solver"
+        );
+        let diagonal: Vec<f64> = (0..98 * 98)
+            .map(|index| {
+                let row = index / 98;
+                let column = index % 98;
+                if row == column { 0.0 } else { 1.0 }
+            })
+            .collect();
+        assert_eq!(
+            greedy_assignment(&diagonal, 98),
+            (0..98).collect::<Vec<_>>()
+        );
     }
 }

@@ -1,0 +1,1 @@
+At 98 atoms and above, a continuous-symmetry projection and a fivefold residual match atoms by the cheapest free column in each row, lowest index on a tie. That permutation is not always the successive-shortest-path matching, so an LJ98 or LJ150 search can quench a different trial. Below 98 atoms the matching is still Kuhn-Munkres.
