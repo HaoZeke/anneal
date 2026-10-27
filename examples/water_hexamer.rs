@@ -50,11 +50,12 @@ use anneal_core::catalog::molecular::{
     water_groups, water_species,
 };
 use anneal_core::methods::cluster_hopping::{
-    CheckpointAction, Config, Ledger, MoveLibrary, Outcome, QuenchStatus, repack_rigid_groups,
+    CheckpointAction, Config, Ledger, MoveLibrary, Outcome, QuenchStatus, SearchError,
+    repack_rigid_groups,
 };
 use anneal_core::methods::cluster_search::{
-    RelaxStats, polish_recorded_answer, polish_recorded_answer_until, search_from,
-    search_from_with_checkpoint,
+    RelaxStats, last_search_phase, polish_recorded_answer, polish_recorded_answer_until,
+    search_from, search_from_with_checkpoint,
 };
 use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use eindir_core::{Bounds, Objective};
@@ -574,6 +575,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     let budget = campaign_budget(engine, smoke);
     let (seed0, seeds) = seed_block(smoke);
     let external_on = external_polish_on();
+    let witness_ceiling = std::env::var("WATER_WITNESS_TRIPLETON").ok().as_deref() == Some("1");
     let mut text = String::new();
     text.push_str(&format!(
         "\nengine: {engine}\narm: {arm_name}\nbudget: {budget}\nseeds: {seed0}..{}\n",
@@ -585,7 +587,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     let groups = water_groups(WATER_HEXAMER_MOLECULES).expect("hexamer groups");
     let mut cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
     configure_water_arm(&mut cfg, arm);
-    if std::env::var("WATER_WITNESS_TRIPLETON").ok().as_deref() == Some("1") {
+    if witness_ceiling {
         cfg.witness_tripleton_ceiling = true;
     }
     if external_on {
@@ -641,7 +643,6 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     text.push_str("engine_loaded: true\n");
     let (reference_report, prism_energy) = evaluate_references(&objective, &references);
     text.push_str(&reference_report);
-    let _ = prism_energy;
     let template = reference_coordinates(WATER_HEXAMER_MOLECULES).expect("template");
     let forced_start = match std::env::var("WATER_START_XYZ") {
         Ok(path) => match read_start_xyz(&path) {
@@ -696,7 +697,41 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
         let mut first_hit_isomer: Option<String> = None;
         let mut first_prism_calls: Option<usize> = None;
         let mut first_prism_wall: Option<f64> = None;
-        let (mut outcome, mut stats) = if arm == WaterSearchArm::GoodTuring {
+        let (mut outcome, mut stats) = if arm == WaterSearchArm::GoodTuring && external_on {
+            let ceiling = if cfg.witness_tripleton_ceiling {
+                WITNESS_TRIPLETON_CEILING
+            } else {
+                PRODUCTION_MAX_UNSEEN_MASS
+            };
+            match witnessed_good_turing(
+                &objective,
+                &cfg,
+                &mut ledger,
+                start.view(),
+                seed,
+                &template,
+                &reference_views,
+                gate,
+                ceiling,
+                cfg.witness_tripleton_ceiling,
+                &wall,
+            ) {
+                Ok((outcome, stats, trace, retired, marks)) => {
+                    text.push_str(&trace);
+                    text.push_str(&format!("good_turing_saturated: {retired}\n"));
+                    first_hit_calls = marks.first_hit_calls;
+                    first_hit_wall = marks.first_hit_wall;
+                    first_hit_isomer = marks.first_hit_isomer;
+                    first_prism_calls = marks.first_prism_calls;
+                    first_prism_wall = marks.first_prism_wall;
+                    (outcome, stats)
+                }
+                Err(error) => {
+                    text.push_str(&format!("search_error: {error}\n"));
+                    return text;
+                }
+            }
+        } else if arm == WaterSearchArm::GoodTuring {
             let mut census = BasinCensus::new(
                 sorted_oxygen_distances(&template, WATER_HEXAMER_MOLECULES)
                     .expect("descriptor")
@@ -874,16 +909,9 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             } else {
                 (0, 0.0, "none")
             };
-        let _keep = (
-            answer_polish,
-            polished_inside,
-            external_calls,
-            external_wall,
-            external_status,
-            deferred_polish_s,
-            deferred_polish_calls,
-        );
         let wall_s = wall.elapsed().as_secs_f64();
+        let search_phase = last_search_phase();
+        let external_phase = last_external_phase();
         let best = outcome.best;
         let best_slice = outcome
             .best_state
@@ -978,6 +1006,34 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             outcome.basins,
             stats.converged,
             stats.total()
+        ));
+        let prism_views: Vec<(&str, &[f64])> = reference_views
+            .iter()
+            .copied()
+            .filter(|(name, _)| *name == "prism")
+            .collect();
+        let prism_rmsd = best_slice.and_then(|state| {
+            assign_isomer(state, WATER_HEXAMER_MOLECULES, &prism_views, None)
+                .ok()
+                .and_then(|matched| matched.rmsd)
+        });
+        let prism_rmsd_text = prism_rmsd
+            .map(|value| format!("{value:.6}"))
+            .unwrap_or_else(|| "none".to_owned());
+        let prism_delta_text = prism_energy
+            .map(|reference| format!("{:.12}", best - reference))
+            .unwrap_or_else(|| "none".to_owned());
+        text.push_str(&format!(
+            "prism_rmsd_A: {prism_rmsd_text}\nprism_delta_eV: {prism_delta_text}\nanswer_gradient: {}\nexternal_polish: {external_status}\nexternal_polish_calls: {external_calls}\nexternal_polish_wall_seconds: {external_wall:.6}\nphase_search_seconds: {search_s:.6}\nphase_lbfgs_seconds: {lbfgs_s:.6}\nphase_lbfgs_calls: {lbfgs_calls}\nphase_answer_polish: {answer_polish}\nphase_external_setup_seconds: {setup_s:.6}\nphase_crest_check_seconds: {check_s:.6}\nphase_crest_check_calls: {check_calls}\nphase_lbfgs2_seconds: {lbfgs2_s:.6}\nphase_lbfgs2_calls: {lbfgs2_calls}\n",
+            cfg.answer_gradient,
+            search_s = search_phase.search_seconds,
+            lbfgs_s = search_phase.polish_seconds + deferred_polish_s,
+            lbfgs_calls = search_phase.polish_calls + deferred_polish_calls,
+            setup_s = external_phase.setup_seconds,
+            check_s = external_phase.check_seconds,
+            check_calls = external_phase.check_calls,
+            lbfgs2_s = external_phase.second_seconds,
+            lbfgs2_calls = external_phase.second_calls,
         ));
         eprintln!(
             "seed_done: {seed} force_calls={} wall_seconds={wall_s:.6} best_energy={best}",
@@ -1358,6 +1414,131 @@ fn parse_xyz(text: &str) -> Option<Vec<f64>> {
         }
     }
     (coordinates.len() == 9 * WATER_HEXAMER_MOLECULES).then_some(coordinates)
+}
+
+struct HitMarks {
+    first_hit_calls: Option<usize>,
+    first_hit_wall: Option<f64>,
+    first_hit_isomer: Option<String>,
+    first_prism_calls: Option<usize>,
+    first_prism_wall: Option<f64>,
+}
+
+fn witnessed_good_turing<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    start: ArrayView1<f64>,
+    seed: u64,
+    template: &[f64],
+    reference_views: &[(&str, &[f64])],
+    gate: Option<f64>,
+    ceiling: f64,
+    require_incumbent: bool,
+    wall: &Instant,
+) -> Result<(Outcome, RelaxStats, String, bool, HitMarks), SearchError>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let mut census = BasinCensus::new(
+        sorted_oxygen_distances(template, WATER_HEXAMER_MOLECULES)
+            .expect("descriptor")
+            .len(),
+        OXYGEN_DISTANCE_CENSUS_RADIUS_A,
+    )
+    .expect("census");
+    let mut retired = false;
+    let mut trace = String::new();
+    let mut marks = HitMarks {
+        first_hit_calls: None,
+        first_hit_wall: None,
+        first_hit_isomer: None,
+        first_prism_calls: None,
+        first_prism_wall: None,
+    };
+    let mut checkpoint = |snapshot: anneal_core::methods::cluster_hopping::ChainCheckpoint<'_>| {
+        let window_calls: usize = snapshot
+            .quench_boundaries()
+            .iter()
+            .map(|boundary| boundary.charged_calls())
+            .sum();
+        let mut calls = snapshot.charged().saturating_sub(window_calls);
+        for boundary in snapshot.quench_boundaries() {
+            calls = calls.saturating_add(boundary.charged_calls());
+            if boundary.status() != QuenchStatus::Validated {
+                continue;
+            }
+            let state = boundary.state();
+            let Some(state) = state.as_slice() else {
+                continue;
+            };
+            let Ok(descriptor) = sorted_oxygen_distances(state, WATER_HEXAMER_MOLECULES) else {
+                continue;
+            };
+            let matched = assign_isomer(state, WATER_HEXAMER_MOLECULES, reference_views, gate).ok();
+            let witness_name = matched.as_ref().and_then(|item| item.name.clone());
+            let Some(witness) = witness_name.as_deref().and_then(isomer_witness) else {
+                continue;
+            };
+            if census.observe_witness(&descriptor, Some(witness)).is_err() {
+                continue;
+            }
+            if let Some(matched) = matched.as_ref() {
+                if marks.first_hit_calls.is_none()
+                    && let Some(name) = matched.name.clone()
+                {
+                    marks.first_hit_calls = Some(calls);
+                    marks.first_hit_wall = Some(wall.elapsed().as_secs_f64());
+                    marks.first_hit_isomer = Some(name);
+                }
+                if marks.first_prism_calls.is_none() && matched.name.as_deref() == Some("prism") {
+                    marks.first_prism_calls = Some(calls);
+                    marks.first_prism_wall = Some(wall.elapsed().as_secs_f64());
+                }
+            }
+            let visits = census.total_visits();
+            let singletons = census.singleton_count();
+            let doubletons = census.doubleton_count();
+            let mass = census
+                .unseen_mass()
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_owned());
+            let hatch = ((singletons + 1) as f64 / (visits + 1) as f64).to_string();
+            let upper = leftover_esty_upper(visits, singletons, doubletons)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_owned());
+            let witness_label = witness_name.unwrap_or_else(|| "none".to_owned());
+            trace.push_str(&format!(
+                "good_turing_trace: force_calls={calls} visits={visits} unseen_mass={mass} singletons={singletons} doubletons={doubletons} hatch={hatch} esty_upper={upper} witness={witness_label} max_unseen_mass={ceiling}\n"
+            ));
+        }
+        let mut stop = good_turing_target_stop_at(&census, ceiling);
+        if stop.is_some() && require_incumbent {
+            let best_state = snapshot.best_state();
+            let best = best_state.as_ref().and_then(|state| state.as_slice());
+            if !incumbent_inside(best, reference_views, gate) {
+                stop = None;
+            }
+        }
+        if let Some(reason) = stop {
+            retired = true;
+            CheckpointAction::Retire {
+                reason: reason.to_owned(),
+            }
+        } else {
+            CheckpointAction::Continue
+        }
+    };
+    let (outcome, stats) = search_from_with_checkpoint(
+        objective,
+        cfg,
+        ledger,
+        start,
+        seed,
+        GOOD_TURING_CHECKPOINT_INTERVAL,
+        &mut checkpoint,
+    )?;
+    Ok((outcome, stats, trace, retired, marks))
 }
 
 fn crest_then_library<O>(
