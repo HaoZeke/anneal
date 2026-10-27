@@ -18,6 +18,14 @@
 //! and writes a file whose name contains `SMOKE`. That file is not a paper
 //! table. Full runs launch from the v0.12.0 tag.
 //!
+//! `PAPER_STARTS` names a directory of GMIN start files. Seed
+//! `seed_start + k` then relaxes from `coords.<k + 1>` with its centroid at
+//! the origin, as GMIN's `CENTRE` puts it, and the log names the file and its
+//! SHA-256. The walk still draws from the seed. The 200 LJ75 starts of the
+//! GMIN benchmark are `lj75_clusters.tgz` (SHA-256 `8590a6fd...fc5fdb3`) at
+//! <https://theory.cm.utexas.edu/benchmarks/globalopt/lj75/lj75_clusters.tgz>,
+//! and they are not vendored here.
+//!
 //! ```text
 //! paper_controls <system> <arm>
 //! ```
@@ -94,6 +102,11 @@ fn main() {
         }
     };
     let seeds = if smoke { 1 } else { campaign.seed_count };
+    let starts = std::env::var_os("PAPER_STARTS").map(std::path::PathBuf::from);
+    if starts.is_some() && (arm == Arm::Population || campaign.icosahedral) {
+        eprintln!("PAPER_STARTS replaces a drawn start, and {system} {arm_name} draws none");
+        std::process::exit(2);
+    }
     let cfg = apply_arm(campaign.n, arm);
     let config_digest = cfg.resolved_sha256().expect("config digest");
     let (engine_kind, engine_digest) = engine_identity(campaign.n, campaign.rho);
@@ -122,14 +135,30 @@ fn main() {
                 .unwrap_or_else(|| "unset".into()),
         ),
     );
+    if starts.is_some() {
+        push(&mut report, "starts: gmin coords files\n");
+    }
     for offset in 0..seeds {
         let seed = campaign.seed0 + offset;
+        let start = starts.as_deref().map(|dir| {
+            let file = format!("coords.{}", offset + 1);
+            match gmin_start(&dir.join(&file), campaign.n) {
+                Ok((start, digest)) => {
+                    push(&mut report, &format!("start: {file} {digest}\n"));
+                    start
+                }
+                Err(reason) => {
+                    eprintln!("{file}: {reason}");
+                    std::process::exit(2);
+                }
+            }
+        });
         let (charged, best, wall, force_to_hit, generations) = if arm == Arm::Population {
             let (report, charged, wall, force_to_hit, generations) =
                 run_population(&campaign, seed, budget, smoke);
             (charged, report.best_energy, wall, force_to_hit, generations)
         } else {
-            let (outcome, wall) = run_seed(&cfg, &campaign, seed, budget);
+            let (outcome, wall) = run_seed(&cfg, &campaign, seed, budget, start.as_ref());
             let force_to_hit = campaign
                 .reference
                 .filter(|reference| outcome.best <= reference + HIT)
@@ -318,7 +347,13 @@ fn run_population(
     )
 }
 
-fn run_seed(cfg: &Config, campaign: &Campaign, seed: u64, budget: usize) -> (Outcome, f64) {
+fn run_seed(
+    cfg: &Config,
+    campaign: &Campaign,
+    seed: u64,
+    budget: usize,
+    start: Option<&Array1<f64>>,
+) -> (Outcome, f64) {
     let potential = match campaign.rho {
         Some(rho) => PairPotential::morse(campaign.n, rho),
         None => PairPotential::lennard_jones(campaign.n),
@@ -328,14 +363,48 @@ fn run_seed(cfg: &Config, campaign: &Campaign, seed: u64, budget: usize) -> (Out
         ledger.stop_below(reference + HIT);
     }
     let started = Instant::now();
-    let searched = if campaign.icosahedral {
-        let start = ico_start(campaign.n, seed);
-        cluster_search::search_from(&potential, cfg, &mut ledger, start.view(), seed)
-    } else {
-        cluster_search::search(&potential, cfg, &mut ledger, seed)
+    let searched = match start {
+        Some(start) => {
+            cluster_search::search_from(&potential, cfg, &mut ledger, start.view(), seed)
+        }
+        None if campaign.icosahedral => {
+            let start = ico_start(campaign.n, seed);
+            cluster_search::search_from(&potential, cfg, &mut ledger, start.view(), seed)
+        }
+        None => cluster_search::search(&potential, cfg, &mut ledger, seed),
     };
     let (outcome, _) = searched.expect("finite start");
     (outcome, started.elapsed().as_secs_f64())
+}
+
+/// A GMIN `coords` file of `n` rows of x, y, z, centred at the origin, and
+/// the SHA-256 of its bytes. A Fortran `D` exponent reads as `E`.
+fn gmin_start(path: &std::path::Path, n: usize) -> Result<(Array1<f64>, String), String> {
+    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+    let text = String::from_utf8_lossy(&bytes);
+    let values: Vec<f64> = text
+        .split_whitespace()
+        .map(|token| token.replace(['D', 'd'], "E").parse::<f64>())
+        .collect::<Result<_, _>>()
+        .map_err(|error| error.to_string())?;
+    if values.len() != 3 * n {
+        return Err(format!(
+            "{} coordinates where {n} atoms need {}",
+            values.len(),
+            3 * n
+        ));
+    }
+    if !values.iter().all(|value| value.is_finite()) {
+        return Err("a coordinate is not finite".into());
+    }
+    let mut start = Array1::from(values);
+    for axis in 0..3 {
+        let centroid = (0..n).map(|atom| start[3 * atom + axis]).sum::<f64>() / n as f64;
+        for atom in 0..n {
+            start[3 * atom + axis] -= centroid;
+        }
+    }
+    Ok((start, sha256_hex(&bytes)))
 }
 
 /// Icosahedral 38-mer perturbation from `examples/ttt_lj38.rs`.
@@ -451,8 +520,20 @@ fn hex(bytes: &[u8]) -> String {
 mod tests {
     use super::{
         Arm, Config, HIT, Ledger, MoveLibrary, PairPotential, SoapProposalMode, apply_arm,
-        campaign, cluster_search, require_smoke_name, run_seed,
+        campaign, cluster_search, gmin_start, require_smoke_name, run_seed, sha256_hex,
     };
+
+    #[test]
+    fn gmin_starts_are_centred_and_counted() {
+        let path = std::env::temp_dir().join(format!("coords.{}", std::process::id()));
+        let text = "  1.0D0 0.0 2.0\n -1.0 4.0 0.0\n";
+        std::fs::write(&path, text).unwrap();
+        let (start, digest) = gmin_start(&path, 2).unwrap();
+        assert_eq!(start.to_vec(), [1.0, -2.0, 1.0, -1.0, 2.0, -1.0]);
+        assert_eq!(digest, sha256_hex(text.as_bytes()));
+        assert!(gmin_start(&path, 3).is_err());
+        std::fs::remove_file(&path).unwrap();
+    }
 
     /// `lj_board` scores a seed with `cluster_search::search` on a ledger that
     /// stops at the reference plus `HIT`. A control arm walks the same chain.
@@ -468,7 +549,7 @@ mod tests {
             (Arm::Derived, Config::derived(75)),
         ] {
             for seed in 2000..2004 {
-                let (control, _) = run_seed(&apply_arm(75, arm), &lj75, seed, BUDGET);
+                let (control, _) = run_seed(&apply_arm(75, arm), &lj75, seed, BUDGET, None);
                 let mut ledger = Ledger::new(BUDGET);
                 ledger.stop_below(reference + HIT);
                 let (board, _) =
