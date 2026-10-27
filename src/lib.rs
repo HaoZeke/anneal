@@ -202,7 +202,7 @@ pub mod pes_db;
 /// rgmin quenches and rgsaddle minimum--saddle--minimum connections.
 pub mod pes_exploration;
 pub mod potentials;
-/// GMIN point-group primitives: inertia, Jacobi axes, and the operation test.
+/// GMIN point-group primitives. A search does not call this module yet.
 pub mod ptgrp;
 pub mod quench;
 /// Leader consensus over exploration decrees between server brains.
