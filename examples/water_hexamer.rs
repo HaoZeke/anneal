@@ -50,9 +50,12 @@ use anneal_core::catalog::molecular::{
     water_groups, water_species,
 };
 use anneal_core::methods::cluster_hopping::{
-    CheckpointAction, Config, Ledger, MoveLibrary, QuenchStatus, repack_rigid_groups,
+    CheckpointAction, Config, Ledger, MoveLibrary, Outcome, QuenchStatus, repack_rigid_groups,
 };
-use anneal_core::methods::cluster_search::{search_from, search_from_with_checkpoint};
+use anneal_core::methods::cluster_search::{
+    RelaxStats, polish_recorded_answer, polish_recorded_answer_until, search_from,
+    search_from_with_checkpoint,
+};
 use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use eindir_core::{Bounds, Objective};
 use libloading::{Library, Symbol};
@@ -538,6 +541,28 @@ fn incumbent_inside(
         .is_some_and(|matched| matched.name.is_some())
 }
 
+#[derive(Clone, Copy, Default)]
+struct ExternalPhase {
+    setup_seconds: f64,
+    check_seconds: f64,
+    check_calls: usize,
+    second_seconds: f64,
+    second_calls: usize,
+}
+
+thread_local! {
+    static LAST_EXTERNAL_PHASE: std::cell::Cell<ExternalPhase> =
+        std::cell::Cell::new(ExternalPhase::default());
+}
+
+fn remember_external_phase(phase: ExternalPhase) {
+    LAST_EXTERNAL_PHASE.with(|cell| cell.set(phase));
+}
+
+fn last_external_phase() -> ExternalPhase {
+    LAST_EXTERNAL_PHASE.with(|cell| cell.get())
+}
+
 fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     let arm = match arm_name {
         "recommended" => WaterSearchArm::Recommended,
@@ -614,7 +639,9 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
         return text;
     };
     text.push_str("engine_loaded: true\n");
-    text.push_str(&evaluate_references(&objective, &references));
+    let (reference_report, prism_energy) = evaluate_references(&objective, &references);
+    text.push_str(&reference_report);
+    let _ = prism_energy;
     let template = reference_coordinates(WATER_HEXAMER_MOLECULES).expect("template");
     let forced_start = match std::env::var("WATER_START_XYZ") {
         Ok(path) => match read_start_xyz(&path) {
@@ -662,13 +689,14 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             }
         }
         let mut ledger = Ledger::new(budget);
+        remember_external_phase(ExternalPhase::default());
         let wall = Instant::now();
         let mut first_hit_calls: Option<usize> = None;
         let mut first_hit_wall: Option<f64> = None;
         let mut first_hit_isomer: Option<String> = None;
         let mut first_prism_calls: Option<usize> = None;
         let mut first_prism_wall: Option<f64> = None;
-        let (outcome, stats) = if arm == WaterSearchArm::GoodTuring {
+        let (mut outcome, mut stats) = if arm == WaterSearchArm::GoodTuring {
             let mut census = BasinCensus::new(
                 sorted_oxygen_distances(&template, WATER_HEXAMER_MOLECULES)
                     .expect("descriptor")
@@ -784,6 +812,77 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
         } else {
             search_from(&objective, &cfg, &mut ledger, start.view(), seed).expect("finite start")
         };
+        let mut deferred_polish_s = 0.0;
+        let mut deferred_polish_calls = 0usize;
+        let answer_polish = if !external_on {
+            "library"
+        } else if incumbent_inside(
+            outcome
+                .best_state
+                .as_ref()
+                .and_then(|state| state.as_slice()),
+            &reference_views,
+            gate,
+        ) {
+            "inside"
+        } else {
+            let spent_before_polish = ledger.spent();
+            let polish_started = Instant::now();
+            polish_recorded_answer_until(
+                &objective,
+                &cfg,
+                &mut ledger,
+                &mut outcome,
+                &mut stats,
+                |coordinates| incumbent_inside(Some(coordinates), &reference_views, gate),
+            );
+            deferred_polish_s = polish_started.elapsed().as_secs_f64();
+            deferred_polish_calls = ledger.spent().saturating_sub(spent_before_polish);
+            "outside"
+        };
+        let polished_inside = answer_polish != "library"
+            && incumbent_inside(
+                outcome
+                    .best_state
+                    .as_ref()
+                    .and_then(|state| state.as_slice()),
+                &reference_views,
+                gate,
+            );
+        let (external_calls, external_wall, external_status) =
+            if answer_polish == "outside" && !polished_inside {
+                crest_then_library(
+                    &objective,
+                    &cfg,
+                    &mut ledger,
+                    &mut outcome,
+                    &mut stats,
+                    seed,
+                    &reference_views,
+                    gate,
+                )
+            } else if polished_inside {
+                (
+                    0,
+                    0.0,
+                    if answer_polish == "inside" {
+                        "inside"
+                    } else {
+                        "lbfgs"
+                    },
+                )
+            } else {
+                (0, 0.0, "none")
+            };
+        let _keep = (
+            answer_polish,
+            polished_inside,
+            external_calls,
+            external_wall,
+            external_status,
+            deferred_polish_s,
+            deferred_polish_calls,
+        );
         let wall_s = wall.elapsed().as_secs_f64();
         let best = outcome.best;
         let best_slice = outcome
@@ -943,8 +1042,12 @@ fn assign_references(
     text
 }
 
-fn evaluate_references(objective: &ForceObjective, references: &[(String, Vec<f64>)]) -> String {
+fn evaluate_references(
+    objective: &ForceObjective,
+    references: &[(String, Vec<f64>)],
+) -> (String, Option<f64>) {
     let mut text = String::new();
+    let mut prism_energy = None;
     for (name, coordinates) in references {
         let (energy, gradient) = objective.value_and_gradient(ArrayView1::from(coordinates));
         let mut max_force: f64 = 0.0;
@@ -953,11 +1056,14 @@ fn evaluate_references(objective: &ForceObjective, references: &[(String, Vec<f6
             let norm = (atom[0] * atom[0] + atom[1] * atom[1] + atom[2] * atom[2]).sqrt();
             max_force = max_force.max(norm);
         }
+        if name == "prism" {
+            prism_energy = Some(energy);
+        }
         text.push_str(&format!(
             "reference_energy: {name} {energy:.12} max_force {max_force:.6}\n"
         ));
     }
-    text
+    (text, prism_energy)
 }
 
 fn load_deposited(engine: &str, n_atoms: usize) -> Result<ForceObjective, String> {
@@ -1252,6 +1358,169 @@ fn parse_xyz(text: &str) -> Option<Vec<f64>> {
         }
     }
     (coordinates.len() == 9 * WATER_HEXAMER_MOLECULES).then_some(coordinates)
+}
+
+fn crest_then_library<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    outcome: &mut Outcome,
+    stats: &mut RelaxStats,
+    seed: u64,
+    references: &[(&str, &[f64])],
+    gate: Option<f64>,
+) -> (usize, f64, &'static str)
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let kept_energy = outcome.best;
+    let kept_state = outcome.best_state.clone();
+    let kept_inside = incumbent_inside(
+        kept_state.as_ref().and_then(|state| state.as_slice()),
+        references,
+        gate,
+    );
+    let restore = |outcome: &mut Outcome, ledger: &mut Ledger| {
+        outcome.best = kept_energy;
+        outcome.best_state = kept_state.clone();
+        if let Some(state) = kept_state.as_ref() {
+            ledger.replace_best(kept_energy, state.view());
+        }
+    };
+    let leaves_gate = |outcome: &Outcome| {
+        kept_inside
+            && !incumbent_inside(
+                outcome
+                    .best_state
+                    .as_ref()
+                    .and_then(|state| state.as_slice()),
+                references,
+                gate,
+            )
+    };
+    let Some(crest) = std::env::var("CREST_BIN")
+        .ok()
+        .filter(|path| PathBuf::from(path).is_file())
+    else {
+        return (0, 0.0, "unavailable");
+    };
+    let Some(coordinates) = kept_state
+        .as_ref()
+        .and_then(|state| state.as_slice().map(|slice| slice.to_vec()))
+    else {
+        return (0, 0.0, "lbfgs");
+    };
+    let setup_started = Instant::now();
+    let dir = std::env::temp_dir().join(format!("water-polish-{seed}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    if std::fs::create_dir_all(&dir).is_err() {
+        return (0, 0.0, "lbfgs");
+    }
+    let mut phase = ExternalPhase {
+        setup_seconds: setup_started.elapsed().as_secs_f64(),
+        ..ExternalPhase::default()
+    };
+    let started = Instant::now();
+    let produced = crest_extreme(&crest, &dir, &coordinates);
+    let external_wall = started.elapsed().as_secs_f64();
+    let _ = std::fs::remove_dir_all(&dir);
+    let Some((polished, calls)) = produced else {
+        remember_external_phase(phase);
+        return (0, external_wall, "lbfgs");
+    };
+    let check_started = Instant::now();
+    let spent_before_check = ledger.spent();
+    ledger.grant(1);
+    if !ledger.charge() {
+        phase.check_seconds = check_started.elapsed().as_secs_f64();
+        phase.check_calls = ledger.spent().saturating_sub(spent_before_check);
+        remember_external_phase(phase);
+        return (calls, external_wall, "lbfgs");
+    }
+    stats.check_charged += 1;
+    let point = Array1::from_vec(polished);
+    let (energy, gradient) = objective.value_and_gradient(point.view());
+    phase.check_seconds = check_started.elapsed().as_secs_f64();
+    phase.check_calls = ledger.spent().saturating_sub(spent_before_check);
+    let gnorm = if gradient.iter().any(|value| !value.is_finite()) {
+        f64::INFINITY
+    } else {
+        gradient.dot(&gradient).sqrt()
+    };
+    let usable = energy.is_finite()
+        && point.iter().all(|value| value.is_finite())
+        && monomers_intact(point.as_slice().unwrap_or(&[]), WATER_HEXAMER_MOLECULES) == Ok(true);
+    if !usable {
+        remember_external_phase(phase);
+        return (calls, external_wall, "lbfgs");
+    }
+    outcome.best = energy;
+    outcome.best_state = Some(point.clone());
+    ledger.replace_best(energy, point.view());
+    let status = if gnorm < cfg.answer_gradient {
+        "crest"
+    } else {
+        let second_started = Instant::now();
+        let spent_before_second = ledger.spent();
+        polish_recorded_answer(objective, cfg, ledger, outcome, stats);
+        phase.second_seconds = second_started.elapsed().as_secs_f64();
+        phase.second_calls = ledger.spent().saturating_sub(spent_before_second);
+        "crest+lbfgs"
+    };
+    remember_external_phase(phase);
+    if leaves_gate(outcome) {
+        restore(outcome, ledger);
+        return (calls, external_wall, "lbfgs");
+    }
+    (calls, external_wall, status)
+}
+
+fn crest_extreme(
+    crest: &str,
+    dir: &std::path::Path,
+    coordinates: &[f64],
+) -> Option<(Vec<f64>, usize)> {
+    let mut text = String::from("18\nwater hexamer polish\n");
+    for molecule in 0..WATER_HEXAMER_MOLECULES {
+        for (offset, symbol) in [(0, "O"), (3, "H"), (6, "H")] {
+            let base = 9 * molecule + offset;
+            text.push_str(&format!(
+                "{symbol} {:.10} {:.10} {:.10}\n",
+                coordinates[base],
+                coordinates[base + 1],
+                coordinates[base + 2]
+            ));
+        }
+    }
+    std::fs::write(dir.join("start.xyz"), text).ok()?;
+    let mut library = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
+    if let Some(parent) = PathBuf::from(crest).parent() {
+        if !library.is_empty() {
+            library.push(':');
+        }
+        library.push_str(&parent.display().to_string());
+    }
+    let output = std::process::Command::new(crest)
+        .args(["start.xyz", "--opt", "extreme", "-T", "1"])
+        .current_dir(dir)
+        .env("LD_LIBRARY_PATH", library)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let log = String::from_utf8_lossy(&output.stdout);
+    let calls = log
+        .lines()
+        .rev()
+        .find_map(|line| {
+            line.trim()
+                .strip_prefix("* Total number of energy+grad calls:")
+                .and_then(|rest| rest.trim().parse().ok())
+        })
+        .unwrap_or(0);
+    let polished = std::fs::read_to_string(dir.join("crestopt.xyz")).ok()?;
+    parse_xyz(&polished).map(|coordinates| (coordinates, calls))
 }
 
 fn read_start_xyz(path: &str) -> Option<Vec<f64>> {
