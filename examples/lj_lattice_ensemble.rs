@@ -16,12 +16,11 @@
 //!   never splices.
 //! - `nosplice`: the shared bank with `splice` forced to 0.
 //!
-//! The recommended chain is the code path of `lj_ensemble_splice` in its
-//! `indep` mode: [`Config::recommended`], a random start in the preset sphere
-//! of radius `0.9 * L0 * N^(1/3)`, the warm L-BFGS quench charged per call,
-//! and a checkpoint every 500 calls that changes nothing. Ensemble `s` seeds
-//! chain `c` with `s * 0x9E3779B9 + c + 7` in every arm, so the arms are
-//! paired by ensemble.
+//! The recommended chain is [`cluster_search::search`] on
+//! [`Config::recommended`], the entry a library caller runs, so the preset's
+//! surfaces and record tolerance are in its quench. Ensemble `s` seeds chain
+//! `c` with `s * 0x9E3779B9 + c + 7` in every arm, so the arms are paired by
+//! ensemble.
 //!
 //! First-hit cost is in force calls of the whole ensemble. `serial` reports
 //! its chain's ledger at the first hit; `indep` reports `CHAINS` times the
@@ -40,7 +39,8 @@
 //! splice; at one slot it cannot, so that setting removes splicing as well
 //! as the exchange of members. A lattice arm against a recommended arm
 //! changes the search itself, quench included: the step-capped L-BFGS of the
-//! GMIN form against the strong Wolfe L-BFGS of [`WarmLbfgs`]. A margin over
+//! GMIN form against the strong Wolfe L-BFGS of
+//! [`anneal_core::methods::warm_lbfgs::WarmLbfgs`]. A margin over
 //! the recommended arms that `private` matches is the lattice search's, not
 //! communication's.
 //!
@@ -56,54 +56,17 @@
 use std::io::Write;
 use std::time::Instant;
 
-use anneal_core::bias::BasinBias;
-use anneal_core::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger,
-    random_cluster_in_radius, run_with_bias_at_checkpoints,
-};
-use anneal_core::methods::cluster_search::{Encounter, median_encounter};
+use anneal_core::methods::cluster_hopping::{Config, Ledger};
+use anneal_core::methods::cluster_search::{self, Encounter, median_encounter};
 use anneal_core::methods::lattice_ensemble::{self, Plan, Sharing, StartRule};
 use anneal_core::methods::lattice_search::{Lattice, Quench};
-use anneal_core::methods::warm_lbfgs::WarmLbfgs;
-use anneal_core::potentials::PairKind;
+use anneal_core::potentials::{PairKind, PairPotential};
 use anneal_core::structure::cna_descriptor;
-use ndarray::{Array1, ArrayView1};
-use rand::SeedableRng;
-use rand::rngs::StdRng;
+use ndarray::ArrayView1;
 use rayon::prelude::*;
 
 /// Hit tolerance above the reference energy.
 const HIT: f64 = 1e-4;
-
-/// Lennard-Jones value and gradient in reduced units, no cutoff.
-///
-/// The summation order is that of `lj_ensemble_splice`, so the recommended
-/// arms replay its chains bit for bit.
-fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-    let n = x.len() / 3;
-    let mut e = 0.0;
-    let mut g = Array1::zeros(x.len());
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let d = [
-                x[3 * i] - x[3 * j],
-                x[3 * i + 1] - x[3 * j + 1],
-                x[3 * i + 2] - x[3 * j + 2],
-            ];
-            let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-            let inv2 = 1.0 / r2;
-            let inv6 = inv2 * inv2 * inv2;
-            let inv12 = inv6 * inv6;
-            e += 4.0 * (inv12 - inv6);
-            let coef = 24.0 * inv2 * (2.0 * inv12 - inv6);
-            for k in 0..3 {
-                g[3 * i + k] -= coef * d[k];
-                g[3 * j + k] += coef * d[k];
-            }
-        }
-    }
-    (e, g)
-}
 
 fn reference(n: usize) -> Option<f64> {
     Some(match n {
@@ -148,41 +111,10 @@ struct ChainResult {
 /// One recommended chain on `budget` calls, scored after it ends.
 fn recommended_chain(n: usize, budget: usize, seed: u64, target: Option<f64>) -> ChainResult {
     let cfg = Config::recommended(n);
-    let mut rng = StdRng::seed_from_u64(seed);
-    let start = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng);
     let mut ledger = Ledger::new(budget);
-    let mut opt = WarmLbfgs::default();
-    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
-        let before = led.spent();
-        opt.forget();
-        let (f, xr, _) = opt.minimize(x, iters, |v| {
-            if !led.charge() {
-                return None;
-            }
-            Some(lj(v))
-        });
-        led.record_quench_boundary(before, f, xr.clone(), None);
-        (f, xr)
-    };
-    let mut bias = BasinBias::new(
-        ClusterFingerprint::for_keying(n, cfg.shape_keyed),
-        cfg.merge_radius,
-        cfg.bias_height,
-        cfg.bias_gamma,
-    );
-    let mut checkpoint = |_: ChainCheckpoint<'_>| CheckpointAction::Continue;
-    let outcome = run_with_bias_at_checkpoints(
-        &cfg,
-        start.view(),
-        &mut ledger,
-        &mut relax,
-        None,
-        &mut bias,
-        &mut rng,
-        500,
-        &mut checkpoint,
-    )
-    .expect("finite start");
+    let (outcome, _) =
+        cluster_search::search(&PairPotential::lennard_jones(n), &cfg, &mut ledger, seed)
+            .expect("finite start");
     let first_hit = target.and_then(|reference| {
         outcome
             .improvements
@@ -316,7 +248,7 @@ fn main() {
             lattice.clearance,
         );
     } else {
-        println!("  recommended chain: Config::recommended({n}), checkpoint 500, preset sphere");
+        println!("  recommended chain: cluster_search::search on Config::recommended({n})");
     }
     let show_bank = env_usize("SHOW_BANK", 0) == 1;
     let chunk = if arm == "indep" { 1 } else { threads.max(1) };
