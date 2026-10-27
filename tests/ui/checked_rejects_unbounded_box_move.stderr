@@ -7,8 +7,15 @@ error[E0277]: the trait bound `anneal_core::movekernel::Gaussian: CertifiedMoveF
 16 |         Gaussian::new(0.5),
    |         ^^^^^^^^^^^^^^^^^^ the trait `CertifiedMoveFor<f64, BoxConstrained<f64>>` is not implemented for `anneal_core::movekernel::Gaussian`
    |
-   = help: the trait `CertifiedMoveFor<f64, BoxConstrained<f64>>` is not implemented for `anneal_core::movekernel::Gaussian`
-           but trait `CertifiedMoveFor<f64, ContinuousR_n>` is implemented for it
+help: the trait `CertifiedMoveFor<f64, BoxConstrained<f64>>` is not implemented for `anneal_core::movekernel::Gaussian`
+      but trait `CertifiedMoveFor<f64, ContinuousR_n>` is implemented for it
+  --> src/variant.rs
+   |
+   |         impl CertifiedMoveFor<f64, ContinuousR_n> for $move {
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+   | certify_full_space_move!(Gaussian);
+   | ---------------------------------- in this macro invocation
    = help: for that trait implementation, expected `ContinuousR_n`, found `BoxConstrained<f64>`
 note: required by a bound in `SaVariant::<T, O, C, N, M, A>::checked`
   --> src/variant.rs
@@ -18,3 +25,4 @@ note: required by a bound in `SaVariant::<T, O, C, N, M, A>::checked`
 ...
    |         M: CertifiedMoveFor<T, N>,
    |            ^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `SaVariant::<T, O, C, N, M, A>::checked`
+   = note: this error originates in the macro `certify_full_space_move` (in Nightly builds, run with -Z macro-backtrace for more info)
