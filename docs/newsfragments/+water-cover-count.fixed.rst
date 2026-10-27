@@ -1,0 +1,1 @@
+Clippy denies are clean on this tree. Acklam's coefficients keep an allow for the published digits. The frozen water cover no longer names ``COUNT``. The three compile-fail fixtures match rustc 1.88.0.
