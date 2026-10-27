@@ -91,6 +91,25 @@ pub const GFN2_MAX_ITERATIONS: i32 = 500;
 /// Receiving-side Euclidean gradient-norm gate for GFN2 stationary points.
 pub const MAX_GRADIENT_NORM: f64 = 1e-5;
 
+/// Hartree in electron-volts.
+pub const HARTREE_EV: f64 = 27.211386245988;
+
+/// Bohr in angstroms.
+pub const BOHR_ANGSTROM: f64 = 0.529177210903;
+
+/// Gradient convergence of the CREST `--opt extreme` reoptimisation, Eh/Bohr.
+pub const PRISM_REOPT_GRADIENT_EH_PER_BOHR: f64 = 5.0e-5;
+
+/// Euclidean force tolerance used to reoptimise the reference prism, eV/Å.
+///
+/// CREST `--opt extreme` compares `norm2` of the gradient with
+/// 5e-5 Eh/Bohr. The same number as an infinity norm stops short of that
+/// geometry. Zero is the default, so a search that never sets
+/// [`Config::answer_gradient`] does not run this pass.
+pub fn reference_prism_gradient_ev_per_angstrom() -> f64 {
+    PRISM_REOPT_GRADIENT_EH_PER_BOHR * HARTREE_EV / BOHR_ANGSTROM
+}
+
 /// Vacuum box edge used by `molecular_cluster` (A).
 pub const VACUUM_BOX: f64 = 60.0;
 
