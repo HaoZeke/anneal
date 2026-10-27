@@ -3345,8 +3345,10 @@ where
                         crate::continuous_symmetry::project_inversion(x.view(), classes)
                             .map(|projected| projected.coordinates)
                     }
-                    ContinuousSymmetry::Measure { .. } => crate::csm::propose(x.view(), classes)
-                        .map(|projected| projected.coordinates),
+                    ContinuousSymmetry::Measure { .. } => {
+                        crate::csm::propose_for(x.view(), classes, cfg.large_matching_greedy)
+                            .map(|projected| projected.coordinates)
+                    }
                     ContinuousSymmetry::Off => None,
                 };
                 let symmetry_action = match cfg.continuous_symmetry {
@@ -3454,7 +3456,9 @@ where
             ) {
                 fresh = closed;
             }
-            if let Some(projected) = crate::csm::propose(fresh.view(), classes) {
+            if let Some(projected) =
+                crate::csm::propose_for(fresh.view(), classes, cfg.large_matching_greedy)
+            {
                 fresh = projected.coordinates;
             }
             let (reseed_energy, reseed_state) = relax(ledger, fresh.view(), cfg.relax_steps);
@@ -5431,9 +5435,13 @@ where
                 // constraint wearing its name.
                 let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
                 for order in [2usize, 3, 4, 5, 6] {
-                    if let Some(c) =
-                        crate::symmetrise::detect(x.view(), n, &[order], cfg.symmetry_tolerance)
-                    {
+                    if let Some(c) = crate::symmetrise::detect_for(
+                        x.view(),
+                        n,
+                        &[order],
+                        cfg.symmetry_tolerance,
+                        cfg.cap_vertex_axes,
+                    ) {
                         cands.push(c);
                     }
                 }
@@ -5446,12 +5454,13 @@ where
                         cfg.symmetry_merge_radius,
                     ))
                 } else {
-                    crate::symmetrise::symmetrise_detected(
+                    crate::symmetrise::symmetrise_detected_for(
                         x.view(),
                         n,
                         &[2, 3, 4, 5, 6],
                         cfg.symmetry_tolerance,
                         cfg.symmetry_merge_radius,
+                        cfg.cap_vertex_axes,
                     )
                     .map(|(y, _)| y)
                 };
@@ -6869,6 +6878,11 @@ mod tests {
         assert!(Config::derived(75).quench_rms.is_none());
         assert_eq!(Config::recommended(98).quench_rms, Some(0.007));
         assert_eq!(Config::derived(150).quench_rms, Some(0.007));
+        assert!(!Config::recommended(150).large_matching_greedy);
+        assert!(!Config::recommended(150).cap_vertex_axes);
+        let resolved = Config::recommended(98).resolved_json().expect("json");
+        assert!(!resolved.contains("large_matching_greedy"));
+        assert!(!resolved.contains("cap_vertex_axes"));
         assert!(Config::for_cluster(98).quench_rms.is_none());
         assert!(Config::communicating(98).quench_rms.is_none());
         assert!(Config::for_tip4p(8).quench_rms.is_none());
