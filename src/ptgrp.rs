@@ -1,8 +1,16 @@
 //! Point-group detection after GMIN `ptgrp.f`, in pieces of a few hundred
-//! lines. The pieces so far centre a cluster, diagonalise its inertia tensor,
-//! test a symmetry operation, and place the cloud on the principal axes the
-//! way `PTGRP` does before it names the group. Later pieces name the group,
-//! grow orbits, and make the symmetry move. Nothing here is called by a search.
+//! lines. Nothing here is called by a search.
+//!
+//! 1. Centre, inertia, Jacobi, and `TESTSYMOP`.
+//! 2. The principal frame (`IDEGEN` at `SYMTOL3`).
+//! 3. The axial names (`Cn`, `Cnv`, `Cnh`, `Dn`, `Dnh`, `Sn`, `D2d`) from the
+//!    `IDEGEN = 1` block. A decahedron only reaches this block after the
+//!    inertia tolerance shrinks; at `0.3` it is still classed with the cubic
+//!    groups.
+//! 4. The cubic search (`Oh`, `Td`, `Ih`) and its generator matrices.
+//! 5. Orbits of a growing core, stopping at the first non-trivial group.
+//! 6. The `symmetry.f90` move, behind `gmin_symmetry`. That is the piece that
+//!    changes coordinates.
 
 /// Geometric centre, then coordinates relative to it.
 pub fn centre(points: &[[f64; 3]]) -> (Vec<[f64; 3]>, [f64; 3]) {
@@ -246,8 +254,10 @@ fn rotation_about(axis: usize, degrees: f64) -> [[f64; 3]; 3] {
     for row in 1..=3 {
         for col in 1..=row {
             if row != col && row != axis && col != axis {
-                let sign = 2 * ((row * col) & 1) - 1;
-                matrix[row - 1][col - 1] = sign as f64 * sin;
+                // The low bit is an integer, and a clear bit has to become -1.
+                // Subtracting from a `usize` zero overflows.
+                let sign = 2 * (((row * col) & 1) as i32) - 1;
+                matrix[row - 1][col - 1] = f64::from(sign) * sin;
                 matrix[col - 1][row - 1] = -matrix[row - 1][col - 1];
             }
         }
@@ -326,6 +336,219 @@ pub fn principal_frame(
         previous = moment;
     }
     (framed, moments, degenerate)
+}
+
+fn apply(points: &[[f64; 3]], matrix: [[f64; 3]; 3]) -> Vec<[f64; 3]> {
+    points
+        .iter()
+        .map(|point| {
+            [0, 1, 2].map(|col| {
+                point[0] * matrix[0][col] + point[1] * matrix[1][col] + point[2] * matrix[2][col]
+            })
+        })
+        .collect()
+}
+
+fn mirror(points: &[[f64; 3]], axis: usize) -> Vec<[f64; 3]> {
+    points
+        .iter()
+        .map(|point| {
+            let mut image = *point;
+            image[axis - 1] = -image[axis - 1];
+            image
+        })
+        .collect()
+}
+
+fn holds(reference: &[[f64; 3]], image: &[[f64; 3]], mass: &[f64], tolerance: f64) -> bool {
+    operation_holds(reference, image, mass, tolerance).0
+}
+
+/// Atom whose orbit has size `order`, `2 order`, or `4 order`.
+///
+/// Radii are ordered by `PIKSR2`. The grouping tolerance is `SYMTOL1`. A
+/// trailing zero closes the last orbit, which is what the cleared scratch
+/// array does in `PTGRP`.
+fn reference_atom(
+    points: &[[f64; 3]],
+    mass: &[f64],
+    order: usize,
+    tolerance: f64,
+) -> Option<usize> {
+    let n = points.len();
+    let mut radius = vec![0.0; n + 1];
+    let mut sorted: Vec<usize> = (0..n).collect();
+    for atom in 0..n {
+        let point = points[atom];
+        radius[atom] =
+            mass[atom] * (point[0] * point[0] + point[1] * point[1] + point[2] * point[2]).sqrt();
+    }
+    for slot in 1..n {
+        let value = radius[slot];
+        let atom = sorted[slot];
+        let mut placed = slot;
+        while placed > 0 && radius[placed - 1] > value {
+            radius[placed] = radius[placed - 1];
+            sorted[placed] = sorted[placed - 1];
+            placed -= 1;
+        }
+        radius[placed] = value;
+        sorted[placed] = atom;
+    }
+    let mut sizes = Vec::new();
+    let mut count = 1;
+    for index in 1..=n {
+        let gap = (radius[index] - radius[index - 1]).abs();
+        if gap < tolerance {
+            count += 1;
+        }
+        if gap > tolerance {
+            sizes.push(count);
+            count = 1;
+        }
+    }
+    for multiple in [1, 2, 4] {
+        let mut cursor = 0;
+        for &size in &sizes {
+            if size == multiple * order {
+                return Some(sorted[cursor]);
+            }
+            cursor += size;
+        }
+    }
+    None
+}
+
+/// Align one atom of the principal orbit with a Cartesian axis, as `PTGRP`
+/// does before it looks for vertical mirrors. `axis` is 1-based.
+#[allow(clippy::float_cmp)]
+fn align_orbit(
+    points: &[[f64; 3]],
+    atom: usize,
+    axis: usize,
+    orbit_tolerance: f64,
+) -> Vec<[f64; 3]> {
+    let point = points[atom];
+    let mut perpendicular = 0.0;
+    for coord in 0..3 {
+        if coord + 1 != axis {
+            perpendicular += point[coord] * point[coord];
+        }
+    }
+    perpendicular = perpendicular.sqrt();
+    if perpendicular == 0.0 {
+        perpendicular = 1.0e-3;
+    }
+    let toward = 2 - axis / 2;
+    let mut cosine = point[toward - 1] / perpendicular;
+    if cosine.abs() > 1.0 {
+        cosine = cosine.signum();
+    }
+    let mut angle = cosine.acos().to_degrees();
+    let already = (0..3).any(|turn| (angle - (turn as f64) * 90.0).abs() < orbit_tolerance);
+    if already {
+        return points.to_vec();
+    }
+    let mut aligned = apply(points, rotation_about(axis, angle));
+    let other = (1..=3).find(|candidate| *candidate != axis && *candidate != toward);
+    if let Some(other) = other
+        && aligned[atom][other - 1].abs() > 1.0e-6
+    {
+        angle *= -2.0;
+        aligned = apply(&aligned, rotation_about(axis, angle));
+    }
+    aligned
+}
+
+/// Point-group name from the `IDEGEN = 1` block.
+///
+/// `None` means that block found no axis, which is the accidental-degeneracy
+/// path. Cubic groups never enter here. The distance tolerance is `SYMTOL2`
+/// and the orbit tolerance is `SYMTOL1`.
+pub fn axial_name(
+    framed: &[[f64; 3]],
+    mass: &[f64],
+    orbit_tolerance: f64,
+    distance_tolerance: f64,
+) -> Option<String> {
+    let mut order = 0;
+    let mut axis = 0;
+    for fold in 2..=6 {
+        for candidate in 1..=3 {
+            let turned = apply(framed, rotation_about(candidate, 360.0 / fold as f64));
+            if holds(framed, &turned, mass, distance_tolerance) {
+                order = fold;
+                axis = candidate;
+            }
+        }
+    }
+    if order == 0 {
+        return None;
+    }
+    let mut points = framed.to_vec();
+    if order == 2 {
+        axis = 0;
+        for candidate in 1..=3 {
+            let quarter = apply(&points, rotation_about(candidate, 90.0));
+            let improper = mirror(&quarter, candidate);
+            if holds(&points, &improper, mass, distance_tolerance) {
+                axis = candidate;
+            }
+        }
+        if axis == 0 {
+            return None;
+        }
+    }
+    if order % 2 == 1
+        && let Some(atom) = reference_atom(&points, mass, order, orbit_tolerance)
+    {
+        points = align_orbit(&points, atom, axis, orbit_tolerance);
+    }
+    let half_turn = 180.0 / (2.0 * order as f64);
+    let stepped = apply(&points, rotation_about(axis, half_turn));
+    let mut on_axis = false;
+    let mut off_axis = false;
+    for candidate in 1..=3 {
+        if candidate == axis {
+            continue;
+        }
+        let spun = apply(&points, rotation_about(candidate, 180.0));
+        on_axis |= holds(&points, &spun, mass, distance_tolerance);
+        let spun = apply(&stepped, rotation_about(candidate, 180.0));
+        off_axis |= holds(&stepped, &spun, mass, distance_tolerance);
+    }
+    let dihedral = on_axis || off_axis;
+    let horizontal = mirror(&points, axis);
+    let horizontal = holds(&points, &horizontal, mass, distance_tolerance);
+    let mut vertical = false;
+    for candidate in 1..=3 {
+        if candidate == axis {
+            continue;
+        }
+        let plane = mirror(&points, candidate);
+        vertical |= holds(&points, &plane, mass, distance_tolerance);
+    }
+    let improper = {
+        let turned = apply(&points, rotation_about(axis, 180.0 / order as f64));
+        let reflected = mirror(&turned, axis);
+        holds(&points, &reflected, mass, distance_tolerance)
+    };
+    let stem = if dihedral && horizontal {
+        format!("D{order}h")
+    } else if order == 2 && dihedral {
+        "D2d".to_string()
+    } else if horizontal {
+        format!("C{order}h")
+    } else if vertical {
+        format!("C{order}v")
+    } else if improper {
+        format!("S{}", 2 * order)
+    } else if dihedral {
+        format!("D{order}")
+    } else {
+        format!("C{order}")
+    };
+    Some(stem)
 }
 
 #[cfg(test)]
@@ -428,6 +651,33 @@ mod tests {
                 close(got_moments[axis], moments[axis]);
             }
             assert_eq!(got_degenerate, degenerate);
+        }
+    }
+
+    /// At `SYMTOL3 = 0.3` every one of these minima is triply degenerate, so
+    /// the axial block is not entered. One shrink separates the Marks
+    /// decahedron, and that block then reports the same `D5h` as GMIN.
+    /// LJ38 and LJ98 stay in the cubic class.
+    #[test]
+    fn the_axial_block_names_the_marks_decahedron() {
+        let cases = [
+            (include_str!("../tests/fixtures/lj38_fcc.xyz"), 2, None),
+            (
+                include_str!("../tests/fixtures/lj75_marks.xyz"),
+                1,
+                Some("D5h"),
+            ),
+            (include_str!("../tests/fixtures/lj98_gm.xyz"), 2, None),
+        ];
+        for (text, class, name) in cases {
+            let points = load(text);
+            let mass = vec![1.0; points.len()];
+            let (_, _, loose) = principal_frame(&points, &mass, 0.3);
+            assert_eq!(loose, 2);
+            let (framed, _, tight) = principal_frame(&points, &mass, 0.03);
+            assert_eq!(tight, class);
+            let got = (tight == 1).then(|| axial_name(&framed, &mass, 0.01, 0.05).unwrap());
+            assert_eq!(got.as_deref(), name);
         }
     }
 }
