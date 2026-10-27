@@ -6880,9 +6880,11 @@ mod tests {
         assert_eq!(Config::derived(150).quench_rms, Some(0.007));
         assert!(!Config::recommended(150).large_matching_greedy);
         assert!(!Config::recommended(150).cap_vertex_axes);
+        assert!(!Config::recommended(98).gmin_symmetry);
         let resolved = Config::recommended(98).resolved_json().expect("json");
         assert!(!resolved.contains("large_matching_greedy"));
         assert!(!resolved.contains("cap_vertex_axes"));
+        assert!(!resolved.contains("gmin_symmetry"));
         assert!(Config::for_cluster(98).quench_rms.is_none());
         assert!(Config::communicating(98).quench_rms.is_none());
         assert!(Config::for_tip4p(8).quench_rms.is_none());
