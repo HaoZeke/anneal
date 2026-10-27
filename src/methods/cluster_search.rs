@@ -152,7 +152,14 @@ fn gradient_is_converged(gradient: ArrayView1<f64>, threshold: f64) -> bool {
         < threshold
 }
 
-fn warm_relax<'a, O>(
+/// The relaxation [`search`] and [`search_from`] hand to the chain.
+///
+/// It reads the preset: the surface portfolio or `two_phase` first, then the
+/// plain descent to `record_gradient`, the screening predictor, and a charged
+/// convergence check. A driver that calls [`crate::methods::cluster_hopping`]
+/// itself takes this closure, so a preset walks the same way whichever entry
+/// runs it. `seed` draws the surface portfolio. `stats` counts the work.
+pub fn warm_relax<'a, O>(
     objective: &'a O,
     cfg: &'a Config,
     stats: &'a mut RelaxStats,

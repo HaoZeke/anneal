@@ -3285,29 +3285,12 @@ fn cluster_archive_search(
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::archive_search::{Archive, archive_search};
     use crate::methods::cluster_hopping::random_cluster_in_radius;
-    use crate::methods::warm_lbfgs::WarmLbfgs;
-    use eindir_core::gradient::{DifferentiableObjective, Gradient};
+    use crate::methods::cluster_search::{RelaxStats, warm_relax};
+    use eindir_core::gradient::Gradient;
     use rand::SeedableRng;
 
-    let mut opt = WarmLbfgs::default();
-    let mut relax =
-        |led: &mut crate::methods::cluster_hopping::Ledger, x: ArrayView1<f64>, iters: usize| {
-            opt.forget();
-            let (f, xr, _) = opt.minimize(x, iters, |v| {
-                if !led.charge() {
-                    return None;
-                }
-                Some(obj.value_and_gradient(v))
-            });
-            // Same charged convergence check as the recommended search path.
-            if led.charge() {
-                let _ = Gradient::grad(obj, xr.view())
-                    .iter()
-                    .fold(0.0_f64, |a, v| a.max(v.abs()))
-                    < cfg.record_gradient;
-            }
-            (f, xr)
-        };
+    let mut stats = RelaxStats::default();
+    let mut relax = warm_relax(obj, cfg, &mut stats, seed);
     let mut grad = |led: &mut crate::methods::cluster_hopping::Ledger,
                     x: ArrayView1<f64>|
      -> Option<Array1<f64>> {
