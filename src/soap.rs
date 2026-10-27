@@ -1694,6 +1694,12 @@ fn optimal_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
             cost[i * n + j] = d2;
         }
     }
+    if n >= crate::assignment::SHORTEST_PATH_FROM {
+        // Same split as a continuous-symmetry projection: the dense
+        // permutation is the cost at this size, and the row-greedy
+        // matching is the one the residual is built from.
+        return crate::assignment::greedy_assignment(&cost, n);
+    }
     hungarian(&cost, n)
 }
 
