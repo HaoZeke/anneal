@@ -692,6 +692,27 @@ impl Ledger {
         }
     }
 
+    /// Replace the incumbent with a reoptimised geometry and its energy.
+    ///
+    /// [`Ledger::record`] keeps a looser value when the tightened geometry
+    /// comes back slightly higher. The reported answer is this pair, so
+    /// both fields move together. Nothing in the default hop calls this.
+    pub fn replace_best(&mut self, value: f64, state: ArrayView1<f64>) {
+        if value.is_finite() && state.iter().all(|component| component.is_finite()) {
+            self.best = value;
+            self.best_state = Some(state.to_owned());
+        }
+    }
+
+    /// Add `extra` charged evaluations after the search ceiling is spent.
+    ///
+    /// The reported-minimum reoptimisation runs after the campaign budget.
+    /// Those calls are still counted in [`Ledger::spent`]. A default search
+    /// does not grant anything.
+    pub fn grant(&mut self, extra: usize) {
+        self.budget = self.budget.saturating_add(extra);
+    }
+
     /// Charged evaluations the ledger was created with.
     pub fn budget(&self) -> usize {
         self.budget
