@@ -433,7 +433,9 @@ pub fn polish_recorded_answer<O>(
 ///
 /// The answer-gradient check still runs when `accept` never fires. When it
 /// does, the geometry is kept after a fresh evaluation and the rest of the
-/// tightening is not paid for. `accept` sees accepted iterates only.
+/// tightening is not paid for. `accept` sees the start and every later
+/// accepted iterate. A start that `accept` already reports is not stepped,
+/// so a hit does not become a miss.
 pub fn polish_recorded_answer_until<O, A>(
     objective: &O,
     cfg: &Config,
@@ -1478,6 +1480,108 @@ mod tests {
         assert!(
             observed > 0,
             "checkpoint saw none of the recorded boundaries"
+        );
+    }
+
+    /// A start inside the accept ball is a hit. The bowl's minimum is
+    /// outside that ball. The gated polish must report a point that is
+    /// still inside. The ungated polish of the same start walks out, so
+    /// the assertion is the gate and not a descent that never moves.
+    #[test]
+    fn answer_polish_cannot_turn_a_hit_into_a_miss() {
+        use eindir_core::{Bounds, Gradient, Objective};
+
+        struct Bowl {
+            bounds: Bounds<f64>,
+        }
+
+        impl Bowl {
+            fn new() -> Self {
+                Self {
+                    bounds: Bounds::new(
+                        Array1::from_elem(1, -20.0),
+                        Array1::from_elem(1, 20.0),
+                        0.0,
+                    ),
+                }
+            }
+        }
+
+        impl Objective<f64> for Bowl {
+            fn dim(&self) -> usize {
+                1
+            }
+            fn bounds(&self) -> &Bounds<f64> {
+                &self.bounds
+            }
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                self.value_and_gradient(x).0
+            }
+        }
+
+        impl Gradient<f64> for Bowl {
+            fn dim(&self) -> usize {
+                1
+            }
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                self.value_and_gradient(x).1
+            }
+        }
+
+        impl DifferentiableObjective<f64> for Bowl {
+            fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+                let shift = x[0] - 4.0;
+                (0.5 * shift * shift, Array1::from_vec(vec![shift]))
+            }
+        }
+
+        let inside = |point: &[f64]| point[0].abs() <= 1.0;
+        let objective = Bowl::new();
+        let mut cfg = Config::for_cluster(1);
+        cfg.answer_gradient = 1.0e-8;
+        let start = Array1::from_vec(vec![0.25]);
+        assert!(inside(start.as_slice().expect("start")));
+        let start_energy = objective.value_and_gradient(start.view()).0;
+
+        let mut gated = Outcome {
+            best: start_energy,
+            best_state: Some(start.clone()),
+            ..Outcome::default()
+        };
+        let mut gated_ledger = Ledger::new(0);
+        polish_recorded_answer_until(
+            &objective,
+            &cfg,
+            &mut gated_ledger,
+            &mut gated,
+            &mut RelaxStats::default(),
+            inside,
+        );
+        let kept = gated.best_state.expect("gated state");
+        assert!(
+            inside(kept.as_slice().expect("kept")),
+            "gated polish left the ball at {}",
+            kept[0]
+        );
+
+        let mut open = Outcome {
+            best: start_energy,
+            best_state: Some(start),
+            ..Outcome::default()
+        };
+        let mut open_ledger = Ledger::new(0);
+        polish_recorded_answer(
+            &objective,
+            &cfg,
+            &mut open_ledger,
+            &mut open,
+            &mut RelaxStats::default(),
+        );
+        let left = open.best_state.expect("ungated state");
+        assert!(
+            !inside(left.as_slice().expect("left")),
+            "ungated polish stayed inside at {}",
+            left[0]
         );
     }
 
