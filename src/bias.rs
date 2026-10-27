@@ -758,10 +758,109 @@ impl Fingerprint for SiteEnergies {
     }
 }
 
+struct SpectrumSlot {
+    n: usize,
+    coords: Vec<u64>,
+    distances: Vec<f64>,
+}
+
+thread_local! {
+    static SPECTRA: std::cell::RefCell<Vec<SpectrumSlot>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn cached_spectrum(n: usize, coords: &[f64]) -> Option<Vec<f64>> {
+    SPECTRA.with(|slots| {
+        slots
+            .borrow()
+            .iter()
+            .find(|slot| {
+                slot.n == n
+                    && slot.coords.len() == coords.len()
+                    && slot
+                        .coords
+                        .iter()
+                        .zip(coords)
+                        .all(|(bits, value)| *bits == value.to_bits())
+            })
+            .map(|slot| slot.distances.clone())
+    })
+}
+
+fn store_spectrum(n: usize, coords: &[f64], distances: &[f64]) {
+    let slot = SpectrumSlot {
+        n,
+        coords: coords.iter().map(|value| value.to_bits()).collect(),
+        distances: distances.to_vec(),
+    };
+    SPECTRA.with(|slots| {
+        let mut slots = slots.borrow_mut();
+        if slots.len() < 4 {
+            slots.push(slot);
+        } else {
+            let clock = slots.len();
+            slots[clock % 4] = slot;
+            // `len` stays 4; rotate by moving the newest into a fixed window.
+            slots.rotate_left(1);
+        }
+    });
+}
+
+/// Least-significant-digit radix order of finite non-negative distances.
+///
+/// The IEEE bits of those values are already in numeric order, so the sorted
+/// multiset matches `sort_by` on `partial_cmp` and a repeated call on the
+/// same coordinates can reuse it.
+fn sort_nonnegative_distances(values: &mut [f64]) {
+    let n = values.len();
+    if n < 2 {
+        return;
+    }
+    let mut keys = vec![0u64; n];
+    let mut alt = vec![0u64; n];
+    for (index, value) in values.iter().enumerate() {
+        keys[index] = value.to_bits();
+    }
+    for shift in (0..64).step_by(8) {
+        if shift % 16 == 0 {
+            radix_pass(&keys, &mut alt, shift as u32);
+        } else {
+            radix_pass(&alt, &mut keys, shift as u32);
+        }
+    }
+    for (index, key) in keys.iter().enumerate() {
+        values[index] = f64::from_bits(*key);
+    }
+}
+
+fn radix_pass(src: &[u64], dst: &mut [u64], shift: u32) {
+    let mut count = [0usize; 256];
+    for &key in src {
+        count[((key >> shift) & 0xff) as usize] += 1;
+    }
+    let mut sum = 0usize;
+    for bin in &mut count {
+        let taken = *bin;
+        *bin = sum;
+        sum += taken;
+    }
+    for &key in src {
+        let bin = ((key >> shift) & 0xff) as usize;
+        dst[count[bin]] = key;
+        count[bin] += 1;
+    }
+}
+
 impl Fingerprint for SortedPairs {
     fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
         let n = self.n_points;
-        let mut d = Vec::with_capacity(n * (n - 1) / 2);
+        let len = n.saturating_mul(3);
+        if x.len() >= len
+            && let Some(coords) = x.as_slice()
+            && let Some(hit) = cached_spectrum(n, &coords[..len])
+        {
+            return Array1::from_vec(hit);
+        }
+        let mut d = Vec::with_capacity(n * n.saturating_sub(1) / 2);
         for i in 0..n {
             for j in (i + 1)..n {
                 let dx = x[3 * i] - x[3 * j];
@@ -770,8 +869,18 @@ impl Fingerprint for SortedPairs {
                 d.push((dx * dx + dy * dy + dz * dz).sqrt());
             }
         }
-        d.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        Array1::from(d)
+        if d.iter().all(|value| value.is_finite() && *value >= 0.0) {
+            sort_nonnegative_distances(&mut d);
+        } else {
+            d.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        }
+        if x.len() >= len
+            && let Some(coords) = x.as_slice()
+            && d.iter().all(|value| value.is_finite())
+        {
+            store_spectrum(n, &coords[..len], &d);
+        }
+        Array1::from_vec(d)
     }
 }
 
@@ -1204,6 +1313,36 @@ mod basin_bias_tests {
         let db = fp.describe(b.view());
         for k in 0..da.len() {
             assert!((da[k] - db[k]).abs() < 1e-12, "component {k} differs");
+        }
+    }
+
+    #[test]
+    fn sorted_pair_distances_match_a_comparison_sort_and_a_repeat() {
+        let fp = SortedPairs { n_points: 12 };
+        let mut state = 0x9e37_u64;
+        let mut coords = Vec::with_capacity(36);
+        for _ in 0..36 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            coords.push((state >> 33) as f64 / 1024.0);
+        }
+        let x = Array1::from(coords);
+        let once = fp.describe(x.view());
+        let twice = fp.describe(x.view());
+        assert_eq!(once, twice);
+        let mut manual = Vec::new();
+        let n = 12;
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let dx = x[3 * i] - x[3 * j];
+                let dy = x[3 * i + 1] - x[3 * j + 1];
+                let dz = x[3 * i + 2] - x[3 * j + 2];
+                manual.push((dx * dx + dy * dy + dz * dz).sqrt());
+            }
+        }
+        manual.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(once.len(), manual.len());
+        for (got, want) in once.iter().zip(&manual) {
+            assert_eq!(got.to_bits(), want.to_bits());
         }
     }
 
