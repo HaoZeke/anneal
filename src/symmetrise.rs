@@ -102,17 +102,31 @@ fn centre_points(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
     rel
 }
 
-fn nearest_sq(rel: &[[f64; 3]], image: [f64; 3]) -> f64 {
-    let mut best = f64::INFINITY;
-    for point in rel {
-        let d = (image[0] - point[0]).powi(2)
-            + (image[1] - point[1]).powi(2)
-            + (image[2] - point[2]).powi(2);
-        if d < best {
-            best = d;
-        }
+/// Nearest squared distance. A direct scan: a grid over a 98-point cloud
+/// was slower than reading the points, and the squared distance is what the
+/// root-mean-square records.
+struct ImageIndex<'a> {
+    points: &'a [[f64; 3]],
+}
+
+impl<'a> ImageIndex<'a> {
+    fn build(points: &'a [[f64; 3]]) -> Self {
+        Self { points }
     }
-    best
+
+    fn nearest_sq(&self, image: [f64; 3]) -> f64 {
+        let mut best = f64::INFINITY;
+        for point in self.points {
+            let d0 = image[0] - point[0];
+            let d1 = image[1] - point[1];
+            let d2 = image[2] - point[2];
+            let squared = d0 * d0 + d1 * d1 + d2 * d2;
+            if squared < best {
+                best = squared;
+            }
+        }
+        best
+    }
 }
 
 /// Root-mean-square nearest-image distance, or `None` once that running
@@ -122,8 +136,13 @@ fn nearest_sq(rel: &[[f64; 3]], image: [f64; 3]) -> f64 {
 /// has already reached `tolerance` cannot fall back under it. Callers that
 /// keep only operations below `tolerance` therefore see the same set, and
 /// the deviation stored for a kept operation is the full sum.
-fn rotation_rms(rel: &[[f64; 3]], axis: [f64; 3], order: usize, tolerance: f64) -> Option<f64> {
-    let n = rel.len();
+fn rotation_rms(
+    index: &ImageIndex<'_>,
+    axis: [f64; 3],
+    order: usize,
+    tolerance: f64,
+) -> Option<f64> {
+    let n = index.points.len();
     if n == 0 || order < 2 {
         return None;
     }
@@ -131,8 +150,8 @@ fn rotation_rms(rel: &[[f64; 3]], axis: [f64; 3], order: usize, tolerance: f64) 
     let mut total = 0.0;
     let denom = n as f64;
     let finite = tolerance.is_finite();
-    for point in rel {
-        total += nearest_sq(rel, rotate(*point, axis, angle));
+    for point in index.points {
+        total += index.nearest_sq(rotate(*point, axis, angle));
         if finite && (total / denom).sqrt() >= tolerance {
             return None;
         }
@@ -140,8 +159,8 @@ fn rotation_rms(rel: &[[f64; 3]], axis: [f64; 3], order: usize, tolerance: f64) 
     Some((total / denom).sqrt())
 }
 
-fn plane_rms(rel: &[[f64; 3]], axis: [f64; 3], tolerance: f64) -> Option<f64> {
-    let n = rel.len();
+fn plane_rms(index: &ImageIndex<'_>, axis: [f64; 3], tolerance: f64) -> Option<f64> {
+    let n = index.points.len();
     if n == 0 {
         return None;
     }
@@ -149,13 +168,13 @@ fn plane_rms(rel: &[[f64; 3]], axis: [f64; 3], tolerance: f64) -> Option<f64> {
     let mut total = 0.0;
     let denom = n as f64;
     let finite = tolerance.is_finite();
-    for point in rel {
+    for point in index.points {
         let image = [
             mirror[0][0] * point[0] + mirror[0][1] * point[1] + mirror[0][2] * point[2],
             mirror[1][0] * point[0] + mirror[1][1] * point[1] + mirror[1][2] * point[2],
             mirror[2][0] * point[0] + mirror[2][1] * point[1] + mirror[2][2] * point[2],
         ];
-        total += nearest_sq(rel, image);
+        total += index.nearest_sq(image);
         if finite && (total / denom).sqrt() >= tolerance {
             return None;
         }
@@ -173,7 +192,8 @@ pub fn deviation(x: ArrayView1<f64>, n: usize, axis: [f64; 3], order: usize) -> 
     if n == 0 || order < 2 || x.len() < 3 * n {
         return f64::INFINITY;
     }
-    rotation_rms(&centre_points(x, n), axis, order, f64::INFINITY).unwrap_or(f64::INFINITY)
+    let centred = centre_points(x, n);
+    rotation_rms(&ImageIndex::build(&centred), axis, order, f64::INFINITY).unwrap_or(f64::INFINITY)
 }
 
 /// How far `x` is from being symmetric under the plane whose normal is `axis`.
@@ -185,16 +205,25 @@ pub fn plane_deviation(x: ArrayView1<f64>, n: usize, axis: [f64; 3]) -> f64 {
     if n == 0 || x.len() < 3 * n {
         return f64::INFINITY;
     }
-    plane_rms(&centre_points(x, n), axis, f64::INFINITY).unwrap_or(f64::INFINITY)
+    let centred = centre_points(x, n);
+    plane_rms(&ImageIndex::build(&centred), axis, f64::INFINITY).unwrap_or(f64::INFINITY)
 }
+
+/// Atom count at which a symmetry scan stops walking an axis through every
+/// atom. The inertia axes stay, and the vertex directions are the twelve
+/// farthest atoms. Below this size every atom is still an axis, which is the
+/// scan the smaller Lennard-Jones walks were measured with.
+const VERTEX_AXES_FROM: usize = 98;
+const VERTEX_AXIS_CAP: usize = 12;
 
 /// Axes worth testing, taken from the structure rather than at random.
 ///
 /// Two families. The principal axes of the inertia tensor, which is where a
 /// rotation axis of a symmetric body must lie; and the directions from the
-/// centroid to each point and to each pair midpoint, which is where an axis
-/// through a vertex or an edge lies. That covers the axes of the point groups
-/// clusters actually adopt without enumerating directions blindly.
+/// centroid to each point, which is where an axis through a vertex lies.
+/// From [`VERTEX_AXES_FROM`] atoms the second family is the twelve farthest
+/// points: an axis through every atom was most of the scan, and the vertices
+/// of a core are among those twelve.
 fn candidate_axes(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
     let c = centroid(x, n);
     let mut out: Vec<[f64; 3]> = Vec::with_capacity(3 + n + n);
@@ -215,8 +244,24 @@ fn candidate_axes(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
             out.push(u);
         }
     }
-    // Through each point.
-    for a in 0..n {
+    // Through each point, or through the farthest points once the cloud is
+    // large enough that one axis per atom dominates the scan.
+    let mut vertices: Vec<usize> = (0..n).collect();
+    if n >= VERTEX_AXES_FROM {
+        vertices.sort_by(|&left, &right| {
+            let radius = |a: usize| {
+                let dx = x[3 * a] - c[0];
+                let dy = x[3 * a + 1] - c[1];
+                let dz = x[3 * a + 2] - c[2];
+                dx * dx + dy * dy + dz * dz
+            };
+            radius(right)
+                .total_cmp(&radius(left))
+                .then(left.cmp(&right))
+        });
+        vertices.truncate(VERTEX_AXIS_CAP.min(n));
+    }
+    for a in vertices {
         if let Some(u) = normalise([x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]]) {
             out.push(u);
         }
@@ -235,10 +280,11 @@ fn candidate_axes(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
 /// structure along one operation.
 pub fn detect(x: ArrayView1<f64>, n: usize, orders: &[usize], tolerance: f64) -> Option<Candidate> {
     let rel = centre_points(x, n);
+    let index = ImageIndex::build(&rel);
     let mut best: Option<Candidate> = None;
     for axis in candidate_axes(x, n) {
         for &order in orders {
-            let Some(d) = rotation_rms(&rel, axis, order, tolerance) else {
+            let Some(d) = rotation_rms(&index, axis, order, tolerance) else {
                 continue;
             };
             if best
@@ -270,10 +316,11 @@ pub fn detect_all(
     tolerance: f64,
 ) -> Vec<Candidate> {
     let rel = centre_points(x, n);
+    let index = ImageIndex::build(&rel);
     let mut out = Vec::new();
     for axis in candidate_axes(x, n) {
         for &order in orders {
-            let Some(d) = rotation_rms(&rel, axis, order, tolerance) else {
+            let Some(d) = rotation_rms(&index, axis, order, tolerance) else {
                 continue;
             };
             out.push(Candidate {
@@ -283,7 +330,7 @@ pub fn detect_all(
                 deviation: d,
             });
         }
-        if let Some(d) = plane_rms(&rel, axis, tolerance) {
+        if let Some(d) = plane_rms(&index, axis, tolerance) {
             out.push(Candidate {
                 axis,
                 order: 1,
@@ -700,20 +747,22 @@ pub fn complete_orbits(
         for g in group {
             let w = act(g, r);
             let mut hit = None;
-            for (i, (p, _, _)) in sites.iter().enumerate() {
-                let d =
-                    ((w[0] - p[0]).powi(2) + (w[1] - p[1]).powi(2) + (w[2] - p[2]).powi(2)).sqrt();
-                if d <= pair_cutoff {
+            for (i, (point, _, _)) in sites.iter().enumerate() {
+                let d0 = w[0] - point[0];
+                let d1 = w[1] - point[1];
+                let d2 = w[2] - point[2];
+                let distance = (d0 * d0 + d1 * d1 + d2 * d2).sqrt();
+                if distance <= pair_cutoff {
                     hit = Some(i);
                     break;
                 }
             }
             match hit {
                 Some(i) => {
-                    let (p, count, _) = &mut sites[i];
+                    let (point, count, _) = &mut sites[i];
                     let m = *count as f64;
                     for k in 0..3 {
-                        p[k] = (p[k] * m + w[k]) / (m + 1.0);
+                        point[k] = (point[k] * m + w[k]) / (m + 1.0);
                     }
                     *count += 1;
                 }
@@ -1324,6 +1373,46 @@ mod tests {
         for k in 0..3 {
             assert!((cx[k] - cy[k]).abs() < 1e-9, "centroid moved on axis {k}");
         }
+    }
+
+    #[test]
+    fn nearest_image_matches_a_full_scan() {
+        let mut state = 0x51a7_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((state >> 33) as i32 as f64) / 4096.0
+        };
+        let points: Vec<[f64; 3]> = (0..48).map(|_| [next(), next(), next()]).collect();
+        let index = ImageIndex::build(&points);
+        let mut queries: Vec<[f64; 3]> = points.clone();
+        queries.push([1.0e3, -40.0, 2.0]);
+        queries.push([points[0][0], points[0][1], points[0][2]]);
+        for image in queries {
+            let got = index.nearest_sq(image);
+            let mut want = f64::INFINITY;
+            for point in &points {
+                let d0 = image[0] - point[0];
+                let d1 = image[1] - point[1];
+                let d2 = image[2] - point[2];
+                want = want.min(d0 * d0 + d1 * d1 + d2 * d2);
+            }
+            assert_eq!(got.to_bits(), want.to_bits(), "grid {got} scan {want}");
+        }
+    }
+
+    #[test]
+    fn a_large_cloud_keeps_twelve_vertex_axes() {
+        let n = 98;
+        let mut coords = Vec::with_capacity(3 * n);
+        for i in 0..n {
+            coords.extend_from_slice(&[i as f64, (i * 3) as f64, ((i * 5) % 17) as f64]);
+        }
+        let x = Array1::from(coords);
+        let axes = candidate_axes(x.view(), n);
+        assert!(axes.len() <= 3 + VERTEX_AXIS_CAP, "axes {}", axes.len());
+        assert!(axes.len() > 3, "the vertex directions were dropped");
+        let small = candidate_axes(octahedron(1.0).view(), 6);
+        assert!(small.len() > 3, "a six-point body still walks every atom");
     }
 }
 
