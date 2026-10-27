@@ -230,3 +230,78 @@ pub fn operation_holds(
     let radius = (point[0] * point[0] + point[1] * point[1] + point[2] * point[2]).sqrt();
     (true, worst_sq.sqrt(), radius)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn load(text: &str) -> Vec<[f64; 3]> {
+        let mut lines = text.lines();
+        let n: usize = lines.next().unwrap().trim().parse().unwrap();
+        let _ = lines.next();
+        lines
+            .take(n)
+            .map(|line| {
+                let mut parts = line.split_whitespace().skip(1);
+                [(); 3].map(|_| parts.next().unwrap().parse().unwrap())
+            })
+            .collect()
+    }
+
+    fn frame(text: &str) -> (Vec<[f64; 3]>, [f64; 3], [[f64; 3]; 3]) {
+        let (shifted, _) = centre(&load(text));
+        let mass = vec![1.0; shifted.len()];
+        let (values, vectors) = jacobi(inertia(&shifted, &mass));
+        (shifted, values, vectors)
+    }
+
+    fn close(got: f64, want: f64) {
+        assert!((got - want).abs() < 1e-8, "{got} against {want}");
+    }
+
+    /// GMIN `ptgrp.o` on the published minima, equal masses, `SYMTOL2 = 0.05`.
+    /// LJ38 is `O h`, LJ75 Marks is `D5h`, LJ98 is `T d`. Columns of `vectors`
+    /// are the eigenvectors.
+    #[test]
+    fn inertia_and_the_inversion_test_match_gmin() {
+        #[rustfmt::skip]
+        let cases: [(&str, [f64; 3], [[f64; 3]; 3], bool, f64, f64); 3] = [
+            (include_str!("../tests/fixtures/lj38_fcc.xyz"),
+             [61.0911772406, 61.0912485883, 61.0913093029],
+             [[-0.5509065733, 0.8344584834, -0.0134531356],
+              [0.8216634235, 0.5394946820, -0.1838877554],
+              [0.1461888024, 0.1123589226, 0.9828551809]],
+             true, 0.0000282100, 1.7495300257),
+            (include_str!("../tests/fixtures/lj75_marks.xyz"),
+             [183.2544230887, 183.2545781902, 219.1336141258],
+             [[-0.1204782750, -0.2447361176, 0.9620754742],
+              [0.9840120886, 0.0986114385, 0.1483104636],
+              [-0.1311685735, 0.9645620856, 0.2289427623]],
+             false, 1000.0, 2.2413150452),
+            (include_str!("../tests/fixtures/lj98_gm.xyz"),
+             [302.6729069658, 302.6729069662, 302.6729069670],
+             [[0.8763100952, 0.3711490425, -0.3071302743],
+              [-0.1039943591, 0.7682416361, 0.6316565221],
+              [-0.4703889777, 0.5215871709, -0.7118153080]],
+             false, 1000.0, 0.6654380894),
+        ];
+        for (text, values, vectors, inverts, invert_distance, identity_radius) in cases {
+            let (shifted, got_values, got_vectors) = frame(text);
+            for axis in 0..3 {
+                close(got_values[axis], values[axis]);
+                for row in 0..3 {
+                    close(got_vectors[row][axis], vectors[row][axis]);
+                }
+            }
+            let mass = vec![1.0; shifted.len()];
+            let (holds, distance, radius) = operation_holds(&shifted, &shifted, &mass, 0.05);
+            assert!(holds);
+            close(distance, 0.0);
+            close(radius, identity_radius);
+            let inverted: Vec<[f64; 3]> = shifted.iter().map(|p| [-p[0], -p[1], -p[2]]).collect();
+            let (holds, distance, _) = operation_holds(&shifted, &inverted, &mass, 0.05);
+            assert_eq!(holds, inverts);
+            close(distance, invert_distance);
+        }
+    }
+}
