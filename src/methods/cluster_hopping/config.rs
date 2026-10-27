@@ -1111,6 +1111,15 @@ pub struct Config {
     /// so the resolved digest of every preset that keeps L-BFGS is unchanged.
     #[serde(skip_serializing_if = "crate::methods::tric_opt::LocalStep::is_lbfgs")]
     pub local_step: crate::methods::tric_opt::LocalStep,
+    /// Euclidean-norm tolerance of the geometry the hop reports.
+    ///
+    /// Zero leaves that geometry at [`Config::record_gradient`]. A positive
+    /// value tighter than the record gate reoptimises the best geometry
+    /// once, after the search. Relaxations during the search still stop
+    /// at [`Config::record_gradient`]. `WATER_POLISH_EXTERNAL=1` leaves
+    /// the pass to the caller, so the default search does not tighten.
+    #[serde(skip_serializing_if = "is_non_positive")]
+    pub answer_gradient: f64,
     /// Whether every quenched energy is kept, not only the improving ones:
     /// the sample [`crate::tail`] fits an endpoint to. Truncated by
     /// [`Config::screen_margin`], since the full relaxation runs only where
@@ -1738,6 +1747,7 @@ impl Config {
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
             precondition_bonds: false,
             local_step: crate::methods::tric_opt::LocalStep::Lbfgs,
+            answer_gradient: 0.0,
             trace_quenched: false,
             long_ranged: false,
             polish_records: 0,
@@ -2280,4 +2290,8 @@ mod coverage_behaviour {
             .expect("site");
         let _ = Config::with_scales(1, 1.0, 1.0).with_rigid_bodies(geometry);
     }
+}
+
+fn is_non_positive(value: &f64) -> bool {
+    *value <= 0.0
 }
