@@ -1682,6 +1682,10 @@ fn hungarian(cost: &[f64], n: usize) -> Vec<usize> {
 /// Columns matched to each row of `x` under the minimum sum of squared distances.
 #[cfg_attr(feature = "ira", allow(dead_code))]
 fn optimal_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
+    optimal_perm_for(x, y, false)
+}
+
+fn optimal_perm_for(x: ArrayView1<f64>, y: &[f64], greedy: bool) -> Vec<usize> {
     let n = x.len() / 3;
     let mut cost = vec![0.0; n * n];
     for i in 0..n {
@@ -1694,10 +1698,9 @@ fn optimal_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
             cost[i * n + j] = d2;
         }
     }
-    if n >= crate::assignment::SHORTEST_PATH_FROM {
-        // Same split as a continuous-symmetry projection: the dense
-        // permutation is the cost at this size, and the row-greedy
-        // matching is the one the residual is built from.
+    if greedy && n >= crate::assignment::SHORTEST_PATH_FROM {
+        // Opt-in. The cheapest free column is not the successive-shortest-path
+        // permutation, and the default residual is built from that optimum.
         return crate::assignment::greedy_assignment(&cost, n);
     }
     hungarian(&cost, n)
@@ -1822,6 +1825,10 @@ fn assignment_lower_bound(x: ArrayView1<f64>, axis: [f64; 3]) -> f64 {
 }
 
 fn residual_about(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
+    residual_about_for(x, axis, false)
+}
+
+fn residual_about_for(x: ArrayView1<f64>, axis: [f64; 3], greedy: bool) -> (f64, Array1<f64>) {
     let n = x.len() / 3;
     let com = com_of(x);
     let angle = 2.0 * PI / 5.0;
@@ -1863,7 +1870,7 @@ fn residual_about(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
             y[3 * i + 1] = q[1];
             y[3 * i + 2] = q[2];
         }
-        let perm = optimal_perm(ArrayView1::from(xc.as_slice()), &y);
+        let perm = optimal_perm_for(ArrayView1::from(xc.as_slice()), &y, greedy);
         let mut y_m = vec![0.0; x.len()];
         for i in 0..n {
             for a in 0..3 {
@@ -1887,6 +1894,10 @@ fn residual_about(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
 /// Residual `x − R_5 x` under the best fivefold axis, and that axis's
 /// deviation length. SOFI/IRA when linked; Hungarian assignment otherwise.
 fn fivefold_residual(x: ArrayView1<f64>) -> (f64, [f64; 3], Array1<f64>) {
+    fivefold_residual_for(x, false)
+}
+
+fn fivefold_residual_for(x: ArrayView1<f64>, greedy: bool) -> (f64, [f64; 3], Array1<f64>) {
     let mut best_d = f64::INFINITY;
     let mut best_ax = [0.0, 0.0, 1.0];
     let mut best_dr = Array1::zeros(x.len());
@@ -1894,7 +1905,7 @@ fn fivefold_residual(x: ArrayView1<f64>) -> (f64, [f64; 3], Array1<f64>) {
         if assignment_lower_bound(x, ax) >= best_d {
             continue;
         }
-        let (d5, dr) = residual_about(x, ax);
+        let (d5, dr) = residual_about_for(x, ax, greedy);
         if d5 < best_d {
             best_d = d5;
             best_ax = ax;
@@ -2053,7 +2064,15 @@ pub fn fivefold_probe(x: ArrayView1<f64>, rmsd: f64) -> FivefoldProbe {
 /// [`FIVEFOLD_GATE`]. This is the hop that produced the LJ38 58/72
 /// campaign. The multi-axis gated hop is [`step_away_fivefold`].
 pub fn step_away_fivefold_measured(x: ArrayView1<f64>, rmsd: f64) -> Array1<f64> {
-    let (d5, axis, mut dr) = fivefold_residual(x);
+    step_away_fivefold_measured_for(x, rmsd, false)
+}
+
+pub(crate) fn step_away_fivefold_measured_for(
+    x: ArrayView1<f64>,
+    rmsd: f64,
+    greedy: bool,
+) -> Array1<f64> {
+    let (d5, axis, mut dr) = fivefold_residual_for(x, greedy);
     if d5 > FIVEFOLD_GATE {
         return x.to_owned();
     }
@@ -2218,6 +2237,15 @@ pub fn step_away_fivefold<R: Rng + ?Sized>(
     rmsd: f64,
     rng: &mut R,
 ) -> Array1<f64> {
+    step_away_fivefold_for(x, rmsd, rng, false)
+}
+
+pub(crate) fn step_away_fivefold_for<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    rmsd: f64,
+    rng: &mut R,
+    greedy: bool,
+) -> Array1<f64> {
     let n = x.len() / 3;
     if n <= 13 {
         return fivefold_probe(x, rmsd).y;
@@ -2238,7 +2266,7 @@ pub fn step_away_fivefold<R: Rng + ?Sized>(
     }
     let mut good = Vec::new();
     for axis in viable {
-        let length = residual_about(x, axis).0;
+        let length = residual_about_for(x, axis, greedy).0;
         if length < FIVEFOLD_AXIS {
             good.push((axis, length));
         }
@@ -2267,13 +2295,22 @@ pub fn step_away_fivefold<R: Rng + ?Sized>(
     let a = closest(RECON_LO + 0.01);
     let b = closest(RECON_HI - 0.01);
     let axis = if rng.random::<bool>() { a } else { b };
-    step_away_fivefold_about(x, rmsd.max(PENTAGON_CAP), axis)
+    step_away_fivefold_about_for(x, rmsd.max(PENTAGON_CAP), axis, greedy)
 }
 
 /// Fivefold residual hop about one named axis. Used to probe which
 /// pentagon opening leaves the icosahedral shelf.
 pub fn step_away_fivefold_about(x: ArrayView1<f64>, rmsd: f64, axis: [f64; 3]) -> Array1<f64> {
-    let (d5, mut dr) = residual_about(x, axis);
+    step_away_fivefold_about_for(x, rmsd, axis, false)
+}
+
+pub(crate) fn step_away_fivefold_about_for(
+    x: ArrayView1<f64>,
+    rmsd: f64,
+    axis: [f64; 3],
+    greedy: bool,
+) -> Array1<f64> {
+    let (d5, mut dr) = residual_about_for(x, axis, greedy);
     if d5 < 1e-8 {
         dr = pentagon_break(x, axis);
         return scale_to_cap(x, dr, rmsd);

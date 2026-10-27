@@ -15,9 +15,8 @@
 /// Matrix size at which the flat shortest-path scan replaces Kuhn-Munkres.
 ///
 /// 98 is the atom count where one projection of the full point set stopped
-/// being a small fraction of a quench. Callers that project a whole cluster
-/// of this size use [`greedy_assignment`] instead: one dense solve is already
-/// near the cubic floor, and a projection repeats it for every operation.
+/// being a small fraction of a quench. Successive shortest paths is the
+/// permutation those walks use. [`greedy_assignment`] is a separate opt-in.
 pub(crate) const SHORTEST_PATH_FROM: usize = 98;
 
 /// Returns the column assigned to each row of a finite `n × n` cost matrix.

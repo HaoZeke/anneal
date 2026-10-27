@@ -26,6 +26,16 @@ pub fn project(
     ops: &[[[f64; 3]; 3]],
     orientations: &[[[f64; 3]; 3]],
 ) -> Option<(Array1<f64>, f64)> {
+    project_for(x, classes, ops, orientations, false)
+}
+
+pub(crate) fn project_for(
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+    ops: &[[[f64; 3]; 3]],
+    orientations: &[[[f64; 3]; 3]],
+    greedy: bool,
+) -> Option<(Array1<f64>, f64)> {
     let n = classes.len();
     if ops.is_empty() || orientations.is_empty() || x.len() != n.checked_mul(3)? {
         return None;
@@ -39,7 +49,7 @@ pub fn project(
         let y = apply_all(rotation, &centred);
         let mut hat = vec![[0.0; 3]; n];
         for op in ops {
-            let assignment = match_operated(&y, classes, op)?;
+            let assignment = match_operated(&y, classes, op, greedy)?;
             for atom in 0..n {
                 let image = mul_vec(op, y[assignment[atom]]);
                 for axis in 0..3 {
@@ -102,6 +112,18 @@ pub struct GroupProjection {
 
 /// Projects onto the library group with the lowest measure.
 pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
+    propose_for(x, classes, false)
+}
+
+/// As [`propose`], with the cheapest-free-column matching when `greedy` is set.
+///
+/// The default projection uses successive shortest paths at 98 atoms and
+/// above. The greedy permutation is a different trial.
+pub(crate) fn propose_for(
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+    greedy: bool,
+) -> Option<GroupProjection> {
     let orientations = inertia_orientations(x, classes.len())?;
     let mut best: Option<GroupProjection> = None;
     for (name, ops) in [
@@ -109,7 +131,8 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
         ("C_5", cyclic_about_z(5)),
         ("D_5h", d5h_ops()),
     ] {
-        let Some((coordinates, measure)) = project(x, classes, &ops, &orientations) else {
+        let Some((coordinates, measure)) = project_for(x, classes, &ops, &orientations, greedy)
+        else {
             continue;
         };
         if closest_pair(&coordinates) < SINGULAR_PAIR {
@@ -182,7 +205,12 @@ fn is_identity(op: &[[f64; 3]; 3]) -> bool {
     true
 }
 
-fn match_operated(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option<Vec<usize>> {
+fn match_operated(
+    y: &[[f64; 3]],
+    classes: &[u32],
+    op: &[[f64; 3]; 3],
+    greedy: bool,
+) -> Option<Vec<usize>> {
     let n = classes.len();
     // The identity sends every atom to itself, so the diagonal is a minimum
     // of cost zero and the assignment problem is unnecessary.
@@ -209,12 +237,11 @@ fn match_operated(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option
             }
         }
         // Below 98 atoms the permutation is the Kuhn-Munkres matching the
-        // recorded walks used. At 98 and above a projection repeats this
-        // matrix for every group operation and every trial orientation, and
-        // that cubic solve was about half of a search evaluation. The row
-        // greedy matching is a different permutation when its choice is not
-        // optimal, so those larger searches can quench a different trial.
-        let local = if width >= SHORTEST_PATH_FROM {
+        // recorded walks used. At 98 and above the same optimum is successive
+        // shortest paths. The cheapest free column is a different permutation
+        // when that choice is not optimal, so it stays off unless the caller
+        // asked for it.
+        let local = if greedy && width >= SHORTEST_PATH_FROM {
             greedy_assignment(&costs, width)
         } else {
             minimum_cost_assignment(&costs, width)?

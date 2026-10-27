@@ -209,10 +209,9 @@ pub fn plane_deviation(x: ArrayView1<f64>, n: usize, axis: [f64; 3]) -> f64 {
     plane_rms(&ImageIndex::build(&centred), axis, f64::INFINITY).unwrap_or(f64::INFINITY)
 }
 
-/// Atom count at which a symmetry scan stops walking an axis through every
-/// atom. The inertia axes stay, and the vertex directions are the twelve
-/// farthest atoms. Below this size every atom is still an axis, which is the
-/// scan the smaller Lennard-Jones walks were measured with.
+/// Atom count at which a caller may limit vertex axes to the twelve farthest
+/// atoms. The inertia axes stay. Below this size, and whenever the cap is
+/// off, every atom is still an axis.
 const VERTEX_AXES_FROM: usize = 98;
 const VERTEX_AXIS_CAP: usize = 12;
 
@@ -221,10 +220,10 @@ const VERTEX_AXIS_CAP: usize = 12;
 /// Two families. The principal axes of the inertia tensor, which is where a
 /// rotation axis of a symmetric body must lie; and the directions from the
 /// centroid to each point, which is where an axis through a vertex lies.
-/// From [`VERTEX_AXES_FROM`] atoms the second family is the twelve farthest
-/// points: an axis through every atom was most of the scan, and the vertices
-/// of a core are among those twelve.
-fn candidate_axes(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
+/// From [`VERTEX_AXES_FROM`] atoms the second family can be the twelve
+/// farthest points. That cap is off unless the caller asks: an axis through
+/// every atom is the scan the measured walks used.
+pub(crate) fn candidate_axes_for(x: ArrayView1<f64>, n: usize, cap: bool) -> Vec<[f64; 3]> {
     let c = centroid(x, n);
     let mut out: Vec<[f64; 3]> = Vec::with_capacity(3 + n + n);
     // Inertia tensor about the centroid, then its eigenvectors.
@@ -244,10 +243,10 @@ fn candidate_axes(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
             out.push(u);
         }
     }
-    // Through each point, or through the farthest points once the cloud is
-    // large enough that one axis per atom dominates the scan.
+    // Through each point. The twelve farthest are a shorter scan, and only
+    // when the caller asked for that cap.
     let mut vertices: Vec<usize> = (0..n).collect();
-    if n >= VERTEX_AXES_FROM {
+    if cap && n >= VERTEX_AXES_FROM {
         vertices.sort_by(|&left, &right| {
             let radius = |a: usize| {
                 let dx = x[3 * a] - c[0];
@@ -279,10 +278,20 @@ fn candidate_axes(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
 /// found by [`detect_all`], which exists to build a group rather than to push a
 /// structure along one operation.
 pub fn detect(x: ArrayView1<f64>, n: usize, orders: &[usize], tolerance: f64) -> Option<Candidate> {
+    detect_for(x, n, orders, tolerance, false)
+}
+
+pub(crate) fn detect_for(
+    x: ArrayView1<f64>,
+    n: usize,
+    orders: &[usize],
+    tolerance: f64,
+    cap_vertices: bool,
+) -> Option<Candidate> {
     let rel = centre_points(x, n);
     let index = ImageIndex::build(&rel);
     let mut best: Option<Candidate> = None;
-    for axis in candidate_axes(x, n) {
+    for axis in candidate_axes_for(x, n, cap_vertices) {
         for &order in orders {
             let Some(d) = rotation_rms(&index, axis, order, tolerance) else {
                 continue;
@@ -315,10 +324,20 @@ pub fn detect_all(
     orders: &[usize],
     tolerance: f64,
 ) -> Vec<Candidate> {
+    detect_all_for(x, n, orders, tolerance, false)
+}
+
+pub(crate) fn detect_all_for(
+    x: ArrayView1<f64>,
+    n: usize,
+    orders: &[usize],
+    tolerance: f64,
+    cap_vertices: bool,
+) -> Vec<Candidate> {
     let rel = centre_points(x, n);
     let index = ImageIndex::build(&rel);
     let mut out = Vec::new();
-    for axis in candidate_axes(x, n) {
+    for axis in candidate_axes_for(x, n, cap_vertices) {
         for &order in orders {
             let Some(d) = rotation_rms(&index, axis, order, tolerance) else {
                 continue;
@@ -901,7 +920,18 @@ pub fn symmetrise_detected(
     tolerance: f64,
     pair_cutoff: f64,
 ) -> Option<(Array1<f64>, Candidate)> {
-    let cand = detect(x, n, orders, tolerance)?;
+    symmetrise_detected_for(x, n, orders, tolerance, pair_cutoff, false)
+}
+
+pub(crate) fn symmetrise_detected_for(
+    x: ArrayView1<f64>,
+    n: usize,
+    orders: &[usize],
+    tolerance: f64,
+    pair_cutoff: f64,
+    cap_vertices: bool,
+) -> Option<(Array1<f64>, Candidate)> {
+    let cand = detect_for(x, n, orders, tolerance, cap_vertices)?;
     Some((symmetrise(x, n, &cand, pair_cutoff), cand))
 }
 
@@ -965,7 +995,7 @@ mod tests {
             let tolerance = 0.5;
             let found = detect_all(x.view(), n, &[2, 3, 4, 5, 6], tolerance);
             let mut expected = Vec::new();
-            for axis in candidate_axes(x.view(), n) {
+            for axis in candidate_axes_for(x.view(), n, false) {
                 for &order in &[2usize, 3, 4, 5, 6] {
                     let d = deviation(x.view(), n, axis, order);
                     if d < tolerance {
@@ -1408,10 +1438,20 @@ mod tests {
             coords.extend_from_slice(&[i as f64, (i * 3) as f64, ((i * 5) % 17) as f64]);
         }
         let x = Array1::from(coords);
-        let axes = candidate_axes(x.view(), n);
-        assert!(axes.len() <= 3 + VERTEX_AXIS_CAP, "axes {}", axes.len());
-        assert!(axes.len() > 3, "the vertex directions were dropped");
-        let small = candidate_axes(octahedron(1.0).view(), 6);
+        let axes = candidate_axes_for(x.view(), n, false);
+        assert!(
+            axes.len() > 3 + VERTEX_AXIS_CAP,
+            "the default scan dropped vertex axes: {}",
+            axes.len()
+        );
+        let capped = candidate_axes_for(x.view(), n, true);
+        assert!(
+            capped.len() <= 3 + VERTEX_AXIS_CAP,
+            "capped axes {}",
+            capped.len()
+        );
+        assert!(capped.len() > 3, "the vertex directions were dropped");
+        let small = candidate_axes_for(octahedron(1.0).view(), 6, false);
         assert!(small.len() > 3, "a six-point body still walks every atom");
     }
 }

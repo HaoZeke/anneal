@@ -1,1 +1,1 @@
-From 98 atoms, a symmetry scan tests the inertia axes and the twelve farthest atoms. An axis through every atom is what the smaller clusters still use. The nearest image on either scan is the same squared distance as a pass over every point, and an orbit merge still takes the first site inside the cutoff.
+A symmetry scan can stop after the inertia axes and the twelve farthest atoms once the cloud has 98 atoms. That cap stays off unless ``cap_vertex_axes`` is set, and it applies to the stall symmetrisation. The default scan still walks an axis through every atom.

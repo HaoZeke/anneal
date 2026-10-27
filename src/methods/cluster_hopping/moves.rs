@@ -594,6 +594,9 @@ pub enum ClusterMove {
         /// Rigid groups. The ambient `J⁺` step is retracted to their
         /// nearest finite rigid motions before the proposal is returned.
         groups: Option<Vec<Vec<usize>>>,
+        /// Cheapest-free-column matching at 98 atoms and above. Off keeps
+        /// successive shortest paths.
+        greedy_matching: bool,
     },
 }
 
@@ -618,6 +621,7 @@ fn soap_arm(
         } else {
             None
         },
+        greedy_matching: cfg.large_matching_greedy,
     }
 }
 
@@ -1155,6 +1159,7 @@ impl ClusterMove {
             species: None,
             mobile: None,
             groups: None,
+            greedy_matching: false,
         });
         v
     }
@@ -1790,6 +1795,7 @@ impl ClusterMove {
                 species,
                 mobile,
                 groups,
+                greedy_matching,
             } => {
                 let spec = crate::soap::SoapSpec {
                     n_max: 3,
@@ -1810,7 +1816,8 @@ impl ClusterMove {
                     // fivefold, and a proposal that never moves is
                     // worse than a repeated one. So draw first and keep
                     // the measured hop for when the draw declines.
-                    let drawn = crate::soap::step_away_fivefold(x, *rmsd, rng);
+                    let drawn =
+                        crate::soap::step_away_fivefold_for(x, *rmsd, rng, *greedy_matching);
                     let moved = drawn
                         .iter()
                         .zip(x.iter())
@@ -1818,7 +1825,7 @@ impl ClusterMove {
                     if moved {
                         drawn
                     } else {
-                        crate::soap::step_away_fivefold_measured(x, *rmsd)
+                        crate::soap::step_away_fivefold_measured_for(x, *rmsd, *greedy_matching)
                     }
                 } else {
                     crate::soap::step_away_cloud(
@@ -2234,6 +2241,7 @@ mod move_scaling_tests {
             species: None,
             mobile: None,
             groups: None,
+            greedy_matching: false,
         };
         let x = Array1::from_vec(vec![
             0.0, 0.0, 0.0, 1.15, 0.08, 0.02, 0.18, 1.22, 0.11, 0.95, 0.85, 1.28,

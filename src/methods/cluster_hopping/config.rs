@@ -1060,6 +1060,26 @@ pub struct Config {
     /// leapfrog leaf; every parameter is adapted, see [`crate::hmc::hop`].
     #[serde(skip)]
     pub hmc: Option<crate::hmc::hop::HopConfig>,
+    /// Cheapest-free-column matching for a continuous-symmetry projection
+    /// and a fivefold residual, once the matrix is at least 98 wide.
+    ///
+    /// Off, the default, keeps successive shortest paths at that size and
+    /// Kuhn-Munkres below 98. The greedy permutation is not always optimal,
+    /// and the LJ150 recommended seeds lost hits with it on.
+    #[serde(skip_serializing_if = "omit_false")]
+    pub large_matching_greedy: bool,
+    /// Limit a symmetry scan of 98 atoms or more to the inertia axes and
+    /// the twelve farthest atoms.
+    ///
+    /// Off, the default, walks an axis through every atom. The shorter
+    /// scan changed which stall symmetrisation the large-cluster walks
+    /// accepted.
+    #[serde(skip_serializing_if = "omit_false")]
+    pub cap_vertex_axes: bool,
+}
+
+fn omit_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Config {
@@ -1440,6 +1460,8 @@ impl Config {
             superbasin_quotient: false,
             superbasin_features: false,
             hmc: None,
+            large_matching_greedy: false,
+            cap_vertex_axes: false,
         }
     }
 
