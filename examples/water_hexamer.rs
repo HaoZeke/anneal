@@ -20,7 +20,9 @@
 //! template. `WATER_POLISH_EXTERNAL=1` polishes with Euclidean LBFGS only
 //! when the search geometry is outside the IRA gate, and stops at the first
 //! accepted iterate inside the gate. CREST `--opt extreme` runs only if that
-//! polish is still outside. Unset, the search does not run that polish.
+//! polish is still outside. The polish after a usable CREST geometry uses
+//! that same stop and keeps the lowest-energy geometry that is inside the
+//! gate. Unset, the search does not run that polish.
 //! The O-H wall stays on.
 
 #[path = "common/pipe_engine.rs"]
@@ -54,8 +56,8 @@ use anneal_core::methods::cluster_hopping::{
     repack_rigid_groups,
 };
 use anneal_core::methods::cluster_search::{
-    RelaxStats, last_search_phase, polish_recorded_answer, polish_recorded_answer_until,
-    search_from, search_from_with_checkpoint,
+    RelaxStats, last_search_phase, polish_recorded_answer_until, search_from,
+    search_from_with_checkpoint,
 };
 use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use eindir_core::{Bounds, Objective};
@@ -565,6 +567,7 @@ fn last_external_phase() -> ExternalPhase {
 }
 
 fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
+    let arm_started = Instant::now();
     let arm = match arm_name {
         "recommended" => WaterSearchArm::Recommended,
         "communicating" => WaterSearchArm::Communicating,
@@ -632,6 +635,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     text.push_str(&deposited_calculator(engine));
     text.push_str(&assign_references(&references, &reference_views, gate));
     text.push_str(&classify_gofee(&reference_views, gate));
+    let load_started = Instant::now();
     let loaded = load_engine(engine, n_atoms);
     let Ok(objective) = loaded else {
         text.push_str(&format!(
@@ -641,7 +645,14 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
         return text;
     };
     text.push_str("engine_loaded: true\n");
+    let engine_load_s = load_started.elapsed().as_secs_f64();
+    text.push_str(&format!("phase_engine_load_seconds: {engine_load_s:.6}\n"));
+    let references_started = Instant::now();
     let (reference_report, prism_energy) = evaluate_references(&objective, &references);
+    let reference_eval_s = references_started.elapsed().as_secs_f64();
+    text.push_str(&format!(
+        "phase_reference_eval_seconds: {reference_eval_s:.6}\n"
+    ));
     text.push_str(&reference_report);
     let template = reference_coordinates(WATER_HEXAMER_MOLECULES).expect("template");
     let forced_start = match std::env::var("WATER_START_XYZ") {
@@ -691,6 +702,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
         }
         let mut ledger = Ledger::new(budget);
         remember_external_phase(ExternalPhase::default());
+        let before_wall_s = arm_started.elapsed().as_secs_f64();
         let wall = Instant::now();
         let mut first_hit_calls: Option<usize> = None;
         let mut first_hit_wall: Option<f64> = None;
@@ -910,6 +922,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                 (0, 0.0, "none")
             };
         let wall_s = wall.elapsed().as_secs_f64();
+        let after_wall = Instant::now();
         let search_phase = last_search_phase();
         let external_phase = last_external_phase();
         let best = outcome.best;
@@ -1023,8 +1036,15 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
         let prism_delta_text = prism_energy
             .map(|reference| format!("{:.12}", best - reference))
             .unwrap_or_else(|| "none".to_owned());
+        let after_wall_s = after_wall.elapsed().as_secs_f64();
+        // Cold start and the search that produces the answer. Reference
+        // evaluations are deposited-isomer scoring and are not in this wall.
+        // The final IRA assignment is phase_after_wall and is not in it.
+        // CREST's matched wall is its process wall minus the post-cap
+        // ensemble optimisation, which this arm does not run.
+        let matched_wall_s = before_wall_s - reference_eval_s + wall_s;
         text.push_str(&format!(
-            "prism_rmsd_A: {prism_rmsd_text}\nprism_delta_eV: {prism_delta_text}\nanswer_gradient: {}\nexternal_polish: {external_status}\nexternal_polish_calls: {external_calls}\nexternal_polish_wall_seconds: {external_wall:.6}\nphase_search_seconds: {search_s:.6}\nphase_lbfgs_seconds: {lbfgs_s:.6}\nphase_lbfgs_calls: {lbfgs_calls}\nphase_answer_polish: {answer_polish}\nphase_external_setup_seconds: {setup_s:.6}\nphase_crest_check_seconds: {check_s:.6}\nphase_crest_check_calls: {check_calls}\nphase_lbfgs2_seconds: {lbfgs2_s:.6}\nphase_lbfgs2_calls: {lbfgs2_calls}\n",
+            "prism_rmsd_A: {prism_rmsd_text}\nprism_delta_eV: {prism_delta_text}\nanswer_gradient: {}\nexternal_polish: {external_status}\nexternal_polish_calls: {external_calls}\nexternal_polish_wall_seconds: {external_wall:.6}\nphase_before_wall_seconds: {before_wall_s:.6}\nphase_search_seconds: {search_s:.6}\nphase_lbfgs_seconds: {lbfgs_s:.6}\nphase_lbfgs_calls: {lbfgs_calls}\nphase_answer_polish: {answer_polish}\nphase_external_setup_seconds: {setup_s:.6}\nphase_crest_check_seconds: {check_s:.6}\nphase_crest_check_calls: {check_calls}\nphase_lbfgs2_seconds: {lbfgs2_s:.6}\nphase_lbfgs2_calls: {lbfgs2_calls}\nphase_after_wall_seconds: {after_wall_s:.6}\nphase_matched_wall_seconds: {matched_wall_s:.6}\n",
             cfg.answer_gradient,
             search_s = search_phase.search_seconds,
             lbfgs_s = search_phase.polish_seconds + deferred_polish_s,
@@ -1561,23 +1581,27 @@ where
         references,
         gate,
     );
-    let restore = |outcome: &mut Outcome, ledger: &mut Ledger| {
-        outcome.best = kept_energy;
-        outcome.best_state = kept_state.clone();
-        if let Some(state) = kept_state.as_ref() {
-            ledger.replace_best(kept_energy, state.view());
-        }
+    // Lowest-energy geometry already inside the gate. The call that reaches
+    // CREST is outside, so this starts empty unless a caller handed in an
+    // inside geometry. A usable CREST geometry that is inside is recorded
+    // before the second polish, and that snapshot is what a later outside
+    // point is not allowed to replace.
+    let mut best_inside: Option<(f64, Array1<f64>)> = if kept_inside {
+        kept_state.clone().map(|state| (kept_energy, state))
+    } else {
+        None
     };
-    let leaves_gate = |outcome: &Outcome| {
-        kept_inside
-            && !incumbent_inside(
-                outcome
-                    .best_state
-                    .as_ref()
-                    .and_then(|state| state.as_slice()),
-                references,
-                gate,
-            )
+    let consider_inside = |best_inside: &mut Option<(f64, Array1<f64>)>,
+                           energy: f64,
+                           state: &Array1<f64>,
+                           inside: bool| {
+        if !inside || !energy.is_finite() {
+            return;
+        }
+        let replace = best_inside.as_ref().is_none_or(|(kept, _)| energy < *kept);
+        if replace {
+            *best_inside = Some((energy, state.clone()));
+        }
     };
     let Some(crest) = std::env::var("CREST_BIN")
         .ok()
@@ -1638,20 +1662,47 @@ where
     outcome.best = energy;
     outcome.best_state = Some(point.clone());
     ledger.replace_best(energy, point.view());
+    consider_inside(
+        &mut best_inside,
+        energy,
+        &point,
+        incumbent_inside(point.as_slice(), references, gate),
+    );
     let status = if gnorm < cfg.answer_gradient {
         "crest"
     } else {
         let second_started = Instant::now();
         let spent_before_second = ledger.spent();
-        polish_recorded_answer(objective, cfg, ledger, outcome, stats);
+        polish_recorded_answer_until(objective, cfg, ledger, outcome, stats, |coordinates| {
+            incumbent_inside(Some(coordinates), references, gate)
+        });
         phase.second_seconds = second_started.elapsed().as_secs_f64();
         phase.second_calls = ledger.spent().saturating_sub(spent_before_second);
+        if let Some(state) = outcome.best_state.clone() {
+            consider_inside(
+                &mut best_inside,
+                outcome.best,
+                &state,
+                incumbent_inside(state.as_slice(), references, gate),
+            );
+        }
         "crest+lbfgs"
     };
     remember_external_phase(phase);
-    if leaves_gate(outcome) {
-        restore(outcome, ledger);
-        return (calls, external_wall, "lbfgs");
+    if let Some((inside_energy, inside_state)) = best_inside {
+        let now_inside = incumbent_inside(
+            outcome
+                .best_state
+                .as_ref()
+                .and_then(|state| state.as_slice()),
+            references,
+            gate,
+        );
+        if !now_inside || outcome.best > inside_energy {
+            outcome.best = inside_energy;
+            outcome.best_state = Some(inside_state.clone());
+            ledger.replace_best(inside_energy, inside_state.view());
+        }
     }
     (calls, external_wall, status)
 }
