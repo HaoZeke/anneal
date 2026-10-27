@@ -37,7 +37,8 @@ use anneal_core::catalog::molecular::{
     VACUUM_BOX, WATER_HEXAMER_MOLECULES, WATER_HEXAMER_SEED_COUNT, WATER_HEXAMER_SEED_START,
     WATER_ISOMER_NAMES, WaterSearchArm, assign_isomer, classify_geometry, configure_water_arm,
     good_turing_target_stop_at, isomer_reference_gate, isomer_witness, monomers_intact,
-    reference_coordinates, sorted_oxygen_distances, water_groups, water_species,
+    reference_coordinates, reference_prism_gradient_ev_per_angstrom, sorted_oxygen_distances,
+    water_groups, water_species,
 };
 use anneal_core::methods::cluster_hopping::{
     CheckpointAction, Config, Ledger, MoveLibrary, QuenchStatus, repack_rigid_groups,
@@ -60,6 +61,10 @@ const OH_WALL_ONSET_A: f64 = 1.15;
 
 /// Stiffness of that wall, in eV per square angstrom.
 const OH_WALL_EV_PER_A2: f64 = 200.0;
+
+fn external_polish_on() -> bool {
+    std::env::var("WATER_POLISH_EXTERNAL").ok().as_deref() == Some("1")
+}
 
 #[repr(C)]
 struct MtaConfig {
@@ -296,6 +301,63 @@ fn seed_block(smoke: bool) -> (u64, u64) {
     (first, count)
 }
 
+fn monomer_centred(coordinates: &[f64], molecule: usize) -> [[f64; 3]; 3] {
+    let base = 9 * molecule;
+    let mut atoms = [[0.0; 3]; 3];
+    let mut com = [0.0; 3];
+    for atom in 0..3 {
+        for axis in 0..3 {
+            let value = coordinates[base + 3 * atom + axis];
+            atoms[atom][axis] = value;
+            com[axis] += value;
+        }
+    }
+    for value in &mut com {
+        *value /= 3.0;
+    }
+    for atom in &mut atoms {
+        for axis in 0..3 {
+            atom[axis] -= com[axis];
+        }
+    }
+    atoms
+}
+
+fn water_template_matches(parsed: &[f64], builtin: &[f64]) -> bool {
+    if parsed.len() != builtin.len() || builtin.len() != 9 * WATER_HEXAMER_MOLECULES {
+        return false;
+    }
+    let reference = monomer_centred(builtin, 0);
+    for molecule in 0..WATER_HEXAMER_MOLECULES {
+        let found = monomer_centred(parsed, molecule);
+        for atom in 0..3 {
+            for axis in 0..3 {
+                if (found[atom][axis] - reference[atom][axis]).abs() > 1e-6 {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+fn prepared_water_start(
+    parsed: Option<&[f64]>,
+    builtin: &[f64],
+    groups: &[Vec<usize>],
+    length_scale: f64,
+    seed: u64,
+) -> (Array1<f64>, usize) {
+    let template = match parsed {
+        Some(coordinates) if water_template_matches(coordinates, builtin) => builtin,
+        Some(coordinates) => coordinates,
+        None => builtin,
+    };
+    let mut rng = StdRng::seed_from_u64(seed);
+    let packed = repack_rigid_groups(ArrayView1::from(template), groups, length_scale, &mut rng);
+    separate_overlapped_start(packed, WATER_HEXAMER_MOLECULES)
+}
+
 /// Push overlapped molecules apart without drawing more random numbers.
 ///
 /// `repack_rigid_groups` keeps each water's internal geometry and can still
@@ -477,6 +539,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     };
     let budget = campaign_budget(engine, smoke);
     let (seed0, seeds) = seed_block(smoke);
+    let external_on = external_polish_on();
     let mut text = String::new();
     text.push_str(&format!(
         "\nengine: {engine}\narm: {arm_name}\nbudget: {budget}\nseeds: {seed0}..{}\n",
@@ -490,6 +553,9 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     configure_water_arm(&mut cfg, arm);
     if std::env::var("WATER_WITNESS_TRIPLETON").ok().as_deref() == Some("1") {
         cfg.witness_tripleton_ceiling = true;
+    }
+    if external_on {
+        cfg.answer_gradient = reference_prism_gradient_ev_per_angstrom();
     }
     text.push_str(&format!(
         "witness_tripleton_ceiling: {}\n",
@@ -541,15 +607,32 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     text.push_str("engine_loaded: true\n");
     text.push_str(&evaluate_references(&objective, &references));
     let template = reference_coordinates(WATER_HEXAMER_MOLECULES).expect("template");
+    let forced_start = match std::env::var("WATER_START_XYZ") {
+        Ok(path) => match read_start_xyz(&path) {
+            Some(coordinates) => {
+                text.push_str(&format!("start_xyz: {path}\nstart_xyz_status: read\n"));
+                Some(coordinates)
+            }
+            None => {
+                text.push_str(&format!(
+                    "start_xyz: {path}\nstart_xyz_status: rejected\nsearch: not started\n"
+                ));
+                return text;
+            }
+        },
+        Err(_) => {
+            text.push_str("start_xyz: unset\nstart_xyz_status: built-in\n");
+            None
+        }
+    };
     for seed in seed0..seed0 + seeds {
-        let mut rng = StdRng::seed_from_u64(seed);
-        let packed = repack_rigid_groups(
-            ArrayView1::from(&template),
+        let (start, spread_steps) = prepared_water_start(
+            forced_start.as_deref(),
+            &template,
             &groups,
             cfg.length_scale,
-            &mut rng,
+            seed,
         );
-        let (start, spread_steps) = separate_overlapped_start(packed, WATER_HEXAMER_MOLECULES);
         let start_slice = start.as_slice().unwrap_or(&[]);
         let start_intact = monomers_intact(start_slice, WATER_HEXAMER_MOLECULES).unwrap_or(false);
         let (start_oh_min, start_oh_max) = covalent_oh_span(start_slice);
@@ -1160,4 +1243,13 @@ fn parse_xyz(text: &str) -> Option<Vec<f64>> {
         }
     }
     (coordinates.len() == 9 * WATER_HEXAMER_MOLECULES).then_some(coordinates)
+}
+
+fn read_start_xyz(path: &str) -> Option<Vec<f64>> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let coordinates = parse_xyz(&text)?;
+    monomers_intact(&coordinates, WATER_HEXAMER_MOLECULES)
+        .ok()
+        .filter(|intact| *intact)?;
+    Some(coordinates)
 }
