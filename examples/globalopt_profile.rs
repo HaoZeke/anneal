@@ -112,6 +112,7 @@ fn gmin_rotate(w: [f64; 3], p: [f64; 3]) -> ([f64; 3], [[f64; 3]; 3]) {
     (out, d)
 }
 
+#[allow(clippy::needless_range_loop)]
 fn tip4p_energy_gradient(sites: &[[f64; 3]; 4], x: &[f64]) -> (f64, Vec<f64>) {
     let n = x.len() / 6;
     let mut placed = vec![[[0.0; 3]; 4]; n];
