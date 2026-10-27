@@ -1,0 +1,1 @@
+A point-group helper centres a cluster, diagonalises its inertia tensor the way GMIN ``ptgrp.f`` does, and tests whether a moved copy is the same set of atoms. The group is not named yet, and a search does not call the helper. ``gmin_symmetry`` stays off.

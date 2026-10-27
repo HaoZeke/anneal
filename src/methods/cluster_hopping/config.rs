@@ -1076,6 +1076,13 @@ pub struct Config {
     /// accepted.
     #[serde(skip_serializing_if = "omit_false")]
     pub cap_vertex_axes: bool,
+    /// GMIN `SYMMETRY` as an alternative to the continuous-symmetry move.
+    ///
+    /// Off, the default. The point-group primitives are in [`crate::ptgrp`].
+    /// The symmetry-adapted move is not wired yet, so setting this does not
+    /// change a search.
+    #[serde(skip_serializing_if = "omit_false")]
+    pub gmin_symmetry: bool,
 }
 
 fn omit_false(value: &bool) -> bool {
@@ -1462,6 +1469,7 @@ impl Config {
             hmc: None,
             large_matching_greedy: false,
             cap_vertex_axes: false,
+            gmin_symmetry: false,
         }
     }
 
