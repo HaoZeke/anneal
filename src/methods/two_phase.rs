@@ -1284,7 +1284,7 @@ mod tests {
         let plain = penalty(x.view(), cutoff, beta, mu);
         let same = penalty_shaped(x.view(), cutoff, beta, mu, Some(&isotropic));
         assert!((plain.0 - same.0).abs() < 1e-12);
-        assert!(!TwoPhase::relative(0.7, 1.0).shape_for(x.view()).is_some());
+        assert!(TwoPhase::relative(0.7, 1.0).shape_for(x.view()).is_none());
         assert!(
             TwoPhase::relative_anisotropic(0.7, 1.0)
                 .shape_for(x.view())

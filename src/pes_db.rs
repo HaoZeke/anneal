@@ -472,8 +472,7 @@ impl DescriptorMetadata {
             .find(|(_, (stored, computed))| stored != computed)
         {
             return Err(PesDbError::InvalidRecord(format!(
-                "descriptor value {index} has bits {:016x}, reproduced {:016x}",
-                stored, computed
+                "descriptor value {index} has bits {stored:016x}, reproduced {computed:016x}",
             )));
         }
         if self.blocks.len() != reproduced.blocks.len() {
