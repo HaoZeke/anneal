@@ -13,6 +13,15 @@
 //! Hit columns that need a same-level reference energy stay unscored.
 //! Isomer names are assigned only when `WATER_ISOMER_DIR` holds
 //! same-level geometries in O, H, H order.
+//!
+//! `WATER_FORCE_BUDGET`, `WATER_SEED_FIRST` and `WATER_SEED_COUNT` select a
+//! block. `WATER_START_XYZ`, when set, is the rigid-monomer template. A file
+//! whose centred monomers match the built-in water is repacked from that
+//! template. `WATER_POLISH_EXTERNAL=1` polishes with Euclidean LBFGS only
+//! when the search geometry is outside the IRA gate, and stops at the first
+//! accepted iterate inside the gate. CREST `--opt extreme` runs only if that
+//! polish is still outside. Unset, the search does not run that polish.
+//! The O-H wall stays on.
 
 #[path = "common/pipe_engine.rs"]
 mod pipe_engine;
@@ -1252,4 +1261,87 @@ fn read_start_xyz(path: &str) -> Option<Vec<f64>> {
         .ok()
         .filter(|intact| *intact)?;
     Some(coordinates)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        WATER_HEXAMER_MOLECULES, parse_xyz, prepared_water_start, reference_coordinates,
+        water_groups, water_species,
+    };
+    use anneal_core::methods::cluster_hopping::Config;
+
+    fn xyz_roundtrip(coordinates: &[f64]) -> Vec<f64> {
+        let mut text = format!("{}\nround trip\n", coordinates.len() / 3);
+        for molecule in 0..WATER_HEXAMER_MOLECULES {
+            for (offset, symbol) in [(0, "O"), (3, "H"), (6, "H")] {
+                let base = 9 * molecule + offset;
+                text.push_str(&format!(
+                    "{symbol} {:.6} {:.6} {:.6}\n",
+                    coordinates[base],
+                    coordinates[base + 1],
+                    coordinates[base + 2]
+                ));
+            }
+        }
+        parse_xyz(&text).expect("parsed xyz")
+    }
+
+    fn rough_grid() -> Vec<f64> {
+        let water = [
+            [0.0, 0.0, 0.0],
+            [0.7572, 0.5865, 0.0],
+            [-0.7572, 0.5865, 0.0],
+        ];
+        let mut coordinates = Vec::with_capacity(9 * WATER_HEXAMER_MOLECULES);
+        for molecule in 0..WATER_HEXAMER_MOLECULES {
+            let column = (molecule % 3) as f64;
+            let row = (molecule / 3) as f64;
+            for atom in &water {
+                coordinates.extend_from_slice(&[
+                    atom[0] + 2.8 * column,
+                    atom[1] + 2.8 * row,
+                    atom[2],
+                ]);
+            }
+        }
+        coordinates
+    }
+
+    #[test]
+    fn parsed_template_prepares_like_the_builtin() {
+        let builtin = reference_coordinates(WATER_HEXAMER_MOLECULES).expect("template");
+        let parsed_line = xyz_roundtrip(&builtin);
+        let parsed_grid = xyz_roundtrip(&rough_grid());
+        let groups = water_groups(WATER_HEXAMER_MOLECULES).expect("groups");
+        let species = water_species(WATER_HEXAMER_MOLECULES).expect("species");
+        let cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
+        let mut distorted = parsed_grid.clone();
+        distorted[0] += 0.1;
+        for seed in [0_u64, 15] {
+            let (from_builtin, steps_builtin) =
+                prepared_water_start(None, &builtin, &groups, cfg.length_scale, seed);
+            let (from_line, steps_line) = prepared_water_start(
+                Some(&parsed_line),
+                &builtin,
+                &groups,
+                cfg.length_scale,
+                seed,
+            );
+            let (from_grid, steps_grid) = prepared_water_start(
+                Some(&parsed_grid),
+                &builtin,
+                &groups,
+                cfg.length_scale,
+                seed,
+            );
+            let (from_other, _) =
+                prepared_water_start(Some(&distorted), &builtin, &groups, cfg.length_scale, seed);
+            assert_eq!(steps_builtin, steps_line);
+            assert_eq!(steps_builtin, steps_grid);
+            assert_eq!(from_builtin, from_line);
+            assert_eq!(from_builtin, from_grid);
+            assert_ne!(from_builtin, from_other);
+        }
+    }
 }
