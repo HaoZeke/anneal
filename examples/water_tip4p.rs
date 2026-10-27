@@ -5,13 +5,16 @@
 //! A non-numeric fourth token is an options label and is ignored, so
 //! `ttt.sh n budget seeds tip4p` can drive this binary the same way it
 //! drives `lj_cluster_search`.
+//!
+//! The relaxation is `cluster_search::warm_relax` on `Config::for_tip4p`,
+//! the one `search_from` runs, with the rotation vectors folded after it.
 
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
     ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger,
     run_with_bias_at_checkpoints,
 };
-use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use anneal_core::methods::cluster_search::{RelaxStats, warm_relax};
 use anneal_core::potentials::{Tip4pCluster, random_tip4p_cluster, wales_hodges_minimum};
 use ndarray::ArrayView1;
 use rand::SeedableRng;
@@ -52,15 +55,10 @@ fn main() {
         let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(3));
         let start = random_tip4p_cluster(n, &mut rng);
         let mut ledger = Ledger::new(budget);
-        let mut opt = WarmLbfgs::default();
+        let mut stats = RelaxStats::default();
+        let mut preset_relax = warm_relax(&pot, &cfg, &mut stats, seed);
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
-            opt.forget();
-            let (f, mut xr, _) = opt.minimize(x, iters, |v| {
-                if !led.charge() {
-                    return None;
-                }
-                Some(pot.value_and_gradient(v))
-            });
+            let (f, mut xr) = preset_relax(led, x, iters);
             if let Some(slice) = xr.as_slice_mut() {
                 pot.fold_rotations(slice);
             }
