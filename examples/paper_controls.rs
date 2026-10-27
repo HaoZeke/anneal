@@ -9,6 +9,11 @@
 //! `ttt_lj38`. `lj12-groups` is named and refused: four water-shaped
 //! groups are not deposited here.
 //!
+//! Every arm but `population` runs through `cluster_search`, the same entry
+//! as a library caller, so the preset's surfaces and record tolerance are in
+//! the relaxation. A system with a reference stops at that reference plus
+//! `HIT`, and a hit's `force_to_hit` is the charged count at the stop.
+//!
 //! `PAPER_SMOKE=1` runs the first registered seed at 200 force evaluations
 //! and writes a file whose name contains `SMOKE`. That file is not a paper
 //! table. Full runs launch from the v0.12.0 tag.
@@ -19,15 +24,16 @@
 
 use anneal_core::catalog::lj::system_signature;
 use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, MoveLibrary, SoapProposalMode, random_cluster_in_radius, run_with_gradient,
+    Config, Ledger, MoveLibrary, Outcome, SoapProposalMode,
 };
+use anneal_core::methods::cluster_search;
 use anneal_core::methods::population_annealing::{
     PopulationAnneal, PopulationReport, population_anneal,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::{PairKind, PairPotential};
 use anneal_core::run_manifest::RunManifest;
-use ndarray::{Array1, ArrayView1};
+use ndarray::Array1;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use sha2::{Digest, Sha256};
@@ -124,13 +130,10 @@ fn main() {
             (charged, report.best_energy, wall, force_to_hit, generations)
         } else {
             let (outcome, wall) = run_seed(&cfg, &campaign, seed, budget);
-            let force_to_hit = campaign.reference.and_then(|reference| {
-                outcome
-                    .improvements
-                    .iter()
-                    .find(|(_, _, _, energy)| *energy <= reference + HIT)
-                    .map(|(_, spent, _, _)| *spent)
-            });
+            let force_to_hit = campaign
+                .reference
+                .filter(|reference| outcome.best <= reference + HIT)
+                .map(|_| outcome.charged);
             (outcome.charged, outcome.best, wall, force_to_hit, 0)
         };
         let hit = match (campaign.reference, force_to_hit) {
@@ -315,63 +318,23 @@ fn run_population(
     )
 }
 
-fn run_seed(
-    cfg: &Config,
-    campaign: &Campaign,
-    seed: u64,
-    budget: usize,
-) -> (anneal_core::methods::cluster_hopping::Outcome, f64) {
-    let kind = match campaign.rho {
-        Some(rho) => PairKind::Morse { rho },
-        None => PairKind::LennardJones,
-    };
-    let potential = match kind {
-        PairKind::LennardJones => PairPotential::lennard_jones(campaign.n),
-        PairKind::Morse { rho } => PairPotential::morse(campaign.n, rho),
-    };
-    let start = if campaign.icosahedral {
-        ico_start(campaign.n, seed)
-    } else {
-        let mut start_rng = StdRng::seed_from_u64(seed);
-        random_cluster_in_radius(
-            campaign.n,
-            cfg.start_radius(),
-            cfg.min_separation,
-            &mut start_rng,
-        )
+fn run_seed(cfg: &Config, campaign: &Campaign, seed: u64, budget: usize) -> (Outcome, f64) {
+    let potential = match campaign.rho {
+        Some(rho) => PairPotential::morse(campaign.n, rho),
+        None => PairPotential::lennard_jones(campaign.n),
     };
     let mut ledger = Ledger::new(budget);
-    let mut optimiser = WarmLbfgs::default();
-    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
-        optimiser.forget();
-        let (value, relaxed, _) = optimiser.minimize(x, iterations, |v| {
-            if !led.charge() {
-                return None;
-            }
-            Some(potential.value_and_gradient(v))
-        });
-        (value, relaxed)
-    };
-    // The climb reads this gradient. Without it the stall leave never runs
-    // and the only call-clock response is a fresh start, which returns to
-    // the Mackay icosahedron.
-    let mut grad = |led: &mut Ledger, v: ArrayView1<f64>| {
-        if !led.charge() {
-            return None;
-        }
-        Some(potential.value_and_gradient(v).1)
-    };
-    let mut rng = StdRng::seed_from_u64(seed);
+    if let Some(reference) = campaign.reference {
+        ledger.stop_below(reference + HIT);
+    }
     let started = Instant::now();
-    let outcome = run_with_gradient(
-        cfg,
-        start.view(),
-        &mut ledger,
-        &mut relax,
-        Some(&mut grad),
-        &mut rng,
-    )
-    .expect("finite start");
+    let searched = if campaign.icosahedral {
+        let start = ico_start(campaign.n, seed);
+        cluster_search::search_from(&potential, cfg, &mut ledger, start.view(), seed)
+    } else {
+        cluster_search::search(&potential, cfg, &mut ledger, seed)
+    };
+    let (outcome, _) = searched.expect("finite start");
     (outcome, started.elapsed().as_secs_f64())
 }
 
@@ -486,7 +449,40 @@ fn hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Arm, MoveLibrary, SoapProposalMode, apply_arm, campaign, require_smoke_name};
+    use super::{
+        Arm, Config, HIT, Ledger, MoveLibrary, PairPotential, SoapProposalMode, apply_arm,
+        campaign, cluster_search, require_smoke_name, run_seed,
+    };
+
+    /// `lj_board` scores a seed with `cluster_search::search` on a ledger that
+    /// stops at the reference plus `HIT`. A control arm walks the same chain.
+    #[test]
+    fn lj75_controls_match_the_board() {
+        const BUDGET: usize = 60_000;
+        let lj75 = campaign("lj75").unwrap();
+        let reference = lj75.reference.unwrap();
+        let potential = PairPotential::lennard_jones(75);
+        let mut hits = 0;
+        for (arm, preset) in [
+            (Arm::Recommended, Config::recommended(75)),
+            (Arm::Derived, Config::derived(75)),
+        ] {
+            for seed in 2000..2004 {
+                let (control, _) = run_seed(&apply_arm(75, arm), &lj75, seed, BUDGET);
+                let mut ledger = Ledger::new(BUDGET);
+                ledger.stop_below(reference + HIT);
+                let (board, _) =
+                    cluster_search::search(&potential, &preset, &mut ledger, seed).unwrap();
+                assert_eq!(control.best.to_bits(), board.best.to_bits(), "seed {seed}");
+                assert_eq!(control.charged, board.charged, "seed {seed}");
+                hits += usize::from(board.best <= reference + HIT);
+            }
+        }
+        assert!(
+            hits > 0,
+            "no seed reached the stop, so the stop went untested"
+        );
+    }
 
     #[test]
     fn outline_counts_use_the_registered_blocks() {

@@ -204,6 +204,10 @@ name = "ttt_lj38"
 required-features = []
 
 [[example]]
+name = "paper_controls"
+test = true
+
+[[example]]
 name = "catalog_journal_scan"
 required-features = ["bank-rpc"]
 
