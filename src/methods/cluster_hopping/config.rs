@@ -932,6 +932,15 @@ pub struct Config {
     /// comes back near 1e-6, and tight enough to bar a partial quench, which
     /// comes back near 1e-1 or worse.
     pub record_gradient: f64,
+    /// Euclidean-norm tolerance of the geometry the hop reports.
+    ///
+    /// Zero leaves that geometry at [`Config::record_gradient`]. A positive
+    /// value tighter than the record gate reoptimises the best geometry
+    /// once, after the search. Relaxations during the search still stop
+    /// at [`Config::record_gradient`]. `WATER_POLISH_EXTERNAL=1` leaves
+    /// the pass to the caller, so the default search does not tighten.
+    #[serde(skip_serializing_if = "is_non_positive")]
+    pub answer_gradient: f64,
     /// Whether every quenched energy is kept, not only the improving ones:
     /// the sample [`crate::tail`] fits an endpoint to. Truncated by
     /// [`Config::screen_margin`], since the full relaxation runs only where
@@ -1400,6 +1409,7 @@ impl Config {
             screen_steps: 25,
             adaptive_screen: false,
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
+            answer_gradient: 0.0,
             trace_quenched: false,
             polish_records: 0,
             surrogate_tolerance: 0.5,
@@ -1647,4 +1657,8 @@ impl Config {
     pub fn proposal_kernel(&self) -> ClusterProposal {
         ClusterProposal::new(self.move_library.kernels(self))
     }
+}
+
+fn is_non_positive(value: &f64) -> bool {
+    *value <= 0.0
 }
