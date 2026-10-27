@@ -1,8 +1,8 @@
 //! Point-group detection after GMIN `ptgrp.f`, in pieces of a few hundred
-//! lines. This piece is the centre of mass, the inertia tensor, Jacobi
-//! eigenvectors, and `TESTSYMOP`. Later pieces name the axial group, then the
-//! cubic group, then grow orbits, then make the symmetry move. Nothing here
-//! is called by a search.
+//! lines. The pieces so far centre a cluster, diagonalise its inertia tensor,
+//! test a symmetry operation, and place the cloud on the principal axes the
+//! way `PTGRP` does before it names the group. Later pieces name the group,
+//! grow orbits, and make the symmetry move. Nothing here is called by a search.
 
 /// Geometric centre, then coordinates relative to it.
 pub fn centre(points: &[[f64; 3]]) -> (Vec<[f64; 3]>, [f64; 3]) {
@@ -231,6 +231,103 @@ pub fn operation_holds(
     (true, worst_sq.sqrt(), radius)
 }
 
+/// Rotation matrix from `ROTM` with the angle in degrees.
+///
+/// `axis` is 1, 2, or 3. The integer bit tests are the Fortran `IAND` checks
+/// that put a 1 on the rotation axis and a sine on the other two.
+fn rotation_about(axis: usize, degrees: f64) -> [[f64; 3]; 3] {
+    let turn = degrees.to_radians();
+    let (sin, cos) = turn.sin_cos();
+    let mut matrix = [[0.0; 3]; 3];
+    for index in 1..=3 {
+        matrix[index - 1][index - 1] = cos;
+        matrix[axis - 1][index - 1] = ((axis & index) / axis.max(index)) as f64;
+    }
+    for row in 1..=3 {
+        for col in 1..=row {
+            if row != col && row != axis && col != axis {
+                let sign = 2 * ((row * col) & 1) - 1;
+                matrix[row - 1][col - 1] = sign as f64 * sin;
+                matrix[col - 1][row - 1] = -matrix[row - 1][col - 1];
+            }
+        }
+    }
+    matrix
+}
+
+fn multiply(left: [[f64; 3]; 3], right: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    let mut out = [[0.0; 3]; 3];
+    for row in 0..3 {
+        for col in 0..3 {
+            out[row][col] = (0..3).map(|k| left[row][k] * right[k][col]).sum();
+        }
+    }
+    out
+}
+
+fn cross_normalized(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    let raw = [
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    ];
+    let norm = (raw[0] * raw[0] + raw[1] * raw[1] + raw[2] * raw[2]).sqrt();
+    if norm < 1e-14 {
+        return raw;
+    }
+    [raw[0] / norm, raw[1] / norm, raw[2] / norm]
+}
+
+/// Principal-axis frame used before `PTGRP` names a group.
+///
+/// `tolerance` is `SYMTOL3`. When the two larger moments agree within that
+/// relative tolerance the unique axis is turned onto z. A left-handed frame
+/// flips the y coordinate. The returned count is `IDEGEN`.
+pub fn principal_frame(
+    points: &[[f64; 3]],
+    mass: &[f64],
+    tolerance: f64,
+) -> (Vec<[f64; 3]>, [f64; 3], usize) {
+    let (shifted, _) = centre(points);
+    let (values, mut vectors) = jacobi(inertia(&shifted, mass));
+    let mut moments = values;
+    let sum = moments[0] + moments[1] + moments[2];
+    if ((moments[1] - moments[2]) / sum).abs() < tolerance {
+        vectors = multiply(vectors, rotation_about(2, 90.0));
+        moments.swap(0, 2);
+    }
+    let mut framed: Vec<[f64; 3]> = shifted
+        .iter()
+        .map(|point| {
+            [
+                point[0] * vectors[0][0] + point[1] * vectors[1][0] + point[2] * vectors[2][0],
+                point[0] * vectors[0][1] + point[1] * vectors[1][1] + point[2] * vectors[2][1],
+                point[0] * vectors[0][2] + point[1] * vectors[1][2] + point[2] * vectors[2][2],
+            ]
+        })
+        .collect();
+    let column = |which: usize| [vectors[0][which], vectors[1][which], vectors[2][which]];
+    let handed = cross_normalized(column(0), column(1))
+        .iter()
+        .zip(column(2))
+        .map(|(left, right)| left * right)
+        .sum::<f64>();
+    if handed < 0.0 {
+        for point in &mut framed {
+            point[1] = -point[1];
+        }
+    }
+    let mut previous = -1.0;
+    let mut degenerate = 0;
+    for moment in moments {
+        if ((moment - previous) / sum).abs() < tolerance {
+            degenerate += 1;
+        }
+        previous = moment;
+    }
+    (framed, moments, degenerate)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,6 +399,35 @@ mod tests {
             let (holds, distance, _) = operation_holds(&shifted, &inverted, &mass, 0.05);
             assert_eq!(holds, inverts);
             close(distance, invert_distance);
+        }
+    }
+
+    /// GMIN's frame before it names the group. All three minima are triply
+    /// degenerate at `SYMTOL3 = 0.3`, which is why a decahedron still enters
+    /// the cubic branch.
+    #[test]
+    fn the_principal_frame_matches_gmin() {
+        #[rustfmt::skip]
+        let cases: [(&str, [f64; 3], [f64; 3], usize); 3] = [
+            (include_str!("../tests/fixtures/lj38_fcc.xyz"),
+             [1.61424173, -0.53269125, -0.41390697],
+             [61.09130930, 61.09124859, 61.09117724], 2),
+            (include_str!("../tests/fixtures/lj75_marks.xyz"),
+             [2.24131505, -0.00000620, -0.00000625],
+             [219.13361413, 183.25457819, 183.25442309], 2),
+            (include_str!("../tests/fixtures/lj98_gm.xyz"),
+             [0.06972369, -0.61779616, 0.23722219],
+             [302.67290697, 302.67290697, 302.67290697], 2),
+        ];
+        for (text, first, moments, degenerate) in cases {
+            let points = load(text);
+            let mass = vec![1.0; points.len()];
+            let (framed, got_moments, got_degenerate) = principal_frame(&points, &mass, 0.3);
+            for axis in 0..3 {
+                close(framed[0][axis], first[axis]);
+                close(got_moments[axis], moments[axis]);
+            }
+            assert_eq!(got_degenerate, degenerate);
         }
     }
 }
