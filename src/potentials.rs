@@ -12,11 +12,8 @@
 //! [`crate::methods::cluster_search`] can be handed a potential from rgpot
 //! without knowing the difference.
 //!
-//! They are reference implementations. rgpot is where potentials belong, and it
-//! reaches this crate as an `eindir_objective_t`; what these are for is to be a
-//! second implementation of the same functions, so the two can be checked
-//! against each other. Two independent implementations agreeing to six decimals
-//! says more about both than either says alone.
+//! The pair formulas live in rgpot. This module loads `librgpot` from
+//! `RGPOT_LIB` and calls it. Set that variable to the shared library.
 
 use eindir_core::Objective;
 use eindir_core::bounds::Bounds;
@@ -63,25 +60,13 @@ impl PairKind {
     /// Pair energy and `(dV/dr) / r` at squared separation `r2`.
     ///
     /// The derivative is returned divided by `r` because every caller
-    /// multiplies it by the separation vector, and dividing once here avoids a
-    /// square root in the Lennard-Jones case entirely.
-    #[inline]
+    /// multiplies it by the separation vector.
     pub fn pair(&self, r2: f64) -> (f64, f64) {
-        match self {
-            PairKind::LennardJones => {
-                let inv2 = 1.0 / r2;
-                let inv6 = inv2 * inv2 * inv2;
-                let inv12 = inv6 * inv6;
-                (4.0 * (inv12 - inv6), -24.0 * inv2 * (2.0 * inv12 - inv6))
-            }
-            PairKind::Morse { rho } => {
-                let r = r2.sqrt();
-                let a = (rho * (1.0 - r)).exp();
-                // V = a^2 - 2a and dV/dr = 2 rho (a - a^2), which vanishes at
-                // r = 1 where a = 1.
-                (a * (a - 2.0), 2.0 * rho * (a - a * a) / r)
-            }
-        }
+        let (energy, coef, _) = match self {
+            PairKind::LennardJones => rgpot_call::lj_pair_terms(1.0, 1.0, r2),
+            PairKind::Morse { rho } => rgpot_call::morse_pair_terms(1.0, *rho, 1.0, r2),
+        };
+        (energy, coef)
     }
 
     /// `d2V/dr2` and `(dV/dr) / r` at squared separation `r2`.
@@ -98,31 +83,13 @@ impl PairKind {
     /// `V'(r)/r` alone. That second piece is exactly what the stretch-only model
     /// operator in [`crate::model_hessian`] leaves out.
     ///
-    /// Lennard-Jones: `V'' = r^-2 (624 r^-12 - 168 r^-6)`, which is written in
-    /// inverse powers so the routine takes no square root.
-    ///
-    /// Morse: with `a = e^{rho (1 - r)}`, `V'' = 2 rho^2 (2 a^2 - a)`.
-    #[inline]
+    /// Curvature comes from rgpot, the same call as [`PairKind::pair`].
     pub fn pair_curvature(&self, r2: f64) -> (f64, f64) {
-        match self {
-            PairKind::LennardJones => {
-                let inv2 = 1.0 / r2;
-                let inv6 = inv2 * inv2 * inv2;
-                let inv12 = inv6 * inv6;
-                (
-                    inv2 * (624.0 * inv12 - 168.0 * inv6),
-                    -24.0 * inv2 * (2.0 * inv12 - inv6),
-                )
-            }
-            PairKind::Morse { rho } => {
-                let r = r2.sqrt();
-                let a = (rho * (1.0 - r)).exp();
-                (
-                    2.0 * rho * rho * (2.0 * a * a - a),
-                    2.0 * rho * (a - a * a) / r,
-                )
-            }
-        }
+        let (_, coef, curv) = match self {
+            PairKind::LennardJones => rgpot_call::lj_pair_terms(1.0, 1.0, r2),
+            PairKind::Morse { rho } => rgpot_call::morse_pair_terms(1.0, *rho, 1.0, r2),
+        };
+        (curv, coef)
     }
 }
 
@@ -182,29 +149,11 @@ impl PairPotential {
     /// the same for both, so computing them separately doubles the cost of
     /// every relaxation step.
     pub fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-        let n = self.n_points;
-        let mut e = 0.0;
-        let mut g = Array1::zeros(x.len());
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let d = [
-                    x[3 * i] - x[3 * j],
-                    x[3 * i + 1] - x[3 * j + 1],
-                    x[3 * i + 2] - x[3 * j + 2],
-                ];
-                let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                if r2 <= 0.0 {
-                    continue;
-                }
-                let (v, coef) = self.kind.pair(r2);
-                e += v;
-                for k in 0..3 {
-                    g[3 * i + k] += coef * d[k];
-                    g[3 * j + k] -= coef * d[k];
-                }
-            }
+        let x = x.slice(ndarray::s![..3 * self.n_points]);
+        match self.kind {
+            PairKind::LennardJones => rgpot_call::reduced_lennard_jones(x),
+            PairKind::Morse { rho } => rgpot_call::morse(rho, x),
         }
-        (e, g)
     }
 }
 
@@ -240,12 +189,18 @@ impl DifferentiableObjective<f64> for PairPotential {
 
 mod binary_lj;
 mod gmin_tip4p;
+mod rgpot_call;
 mod tip4p;
 pub use binary_lj::BinaryLennardJones;
 pub use gmin_tip4p::{
     C6 as GMIN_TIP4P_C6, C12 as GMIN_TIP4P_C12, COULOMB as GMIN_TIP4P_COULOMB, GminTip4p,
     block_from_interleaved_gmin, energy_ohh, gmin_water_geometry, interleaved_gmin_from_block,
     reference_sites as gmin_tip4p_sites, rigid_from_ohh,
+};
+pub use rgpot_call::{
+    Tip4pSites, binary_lennard_jones, lennard_jones, lennard_jones_arithmetic,
+    lennard_jones_atom_energies, lennard_jones_partial, lj_pair_terms, morse, morse_pair_terms,
+    reduced_lennard_jones, tip4p_site_gradient,
 };
 // The rigid orientation move composes through this name. The helper
 // stays on the chart so that move and the potential share one Rodrigues
