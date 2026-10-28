@@ -3538,3 +3538,255 @@ where
         .admit_saddle(candidate, witness)
         .map_err(PesExplorationError::from)
 }
+
+/// Certify a stationary-point index from central differences of PES gradients.
+///
+/// The `rgsaddle` feature is off in this build. The call returns
+/// [`PesExplorationError::SaddleUnavailable`].
+#[cfg(not(feature = "rgsaddle"))]
+pub fn stationary_index<S: PesSurface + ?Sized>(
+    surface: &S,
+    coordinates: ArrayView1<f64>,
+    step: f64,
+    negative_tolerance: f64,
+) -> Result<StationaryIndex, PesExplorationError> {
+    let _ = (surface, coordinates, step, negative_tolerance);
+    Err(PesExplorationError::SaddleUnavailable)
+}
+
+/// Certify the index on the free Cartesian tangent space of one atomic system.
+///
+/// The `rgsaddle` feature is off in this build. The call returns
+/// [`PesExplorationError::SaddleUnavailable`].
+#[cfg(not(feature = "rgsaddle"))]
+pub fn stationary_index_cartesian<S: PesSurface + ?Sized>(
+    surface: &S,
+    coordinates: ArrayView1<f64>,
+    frozen_atoms: &[bool],
+    periodic: [bool; 3],
+    step: f64,
+    negative_tolerance: f64,
+) -> Result<StationaryIndex, PesExplorationError> {
+    let _ = (
+        surface,
+        coordinates,
+        frozen_atoms,
+        periodic,
+        step,
+        negative_tolerance,
+    );
+    Err(PesExplorationError::SaddleUnavailable)
+}
+
+/// Quench a point, ride one supplied mode to an index-one saddle, and quench
+/// both downhill branches on an arbitrary-dimensional surface.
+///
+/// The `rgsaddle` feature is off in this build. The call returns
+/// [`PesExplorationError::SaddleUnavailable`].
+#[cfg(not(feature = "rgsaddle"))]
+pub fn discover_nd_connection<S, W>(
+    surface: &S,
+    network: &mut NdPesNetwork,
+    start: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    config: &PesExplorationConfig,
+    witness: &W,
+) -> Result<NdSaddleConnection, PesExplorationError>
+where
+    S: PesSurface,
+    W: ExactStructureWitness + ?Sized,
+{
+    let _ = (surface, network, start, mode, config, witness);
+    Err(PesExplorationError::SaddleUnavailable)
+}
+
+/// Run one N-dimensional ridge ride under a hard PES-evaluation boundary.
+///
+/// The `rgsaddle` feature is off in this build. The attempt's connection is
+/// [`PesExplorationError::SaddleUnavailable`] and no evaluations are charged.
+#[cfg(not(feature = "rgsaddle"))]
+pub fn discover_nd_connection_with_budget<S, W>(
+    surface: &S,
+    network: &mut NdPesNetwork,
+    start: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    config: &PesExplorationConfig,
+    witness: &W,
+    maximum_evaluations: u64,
+) -> NdConnectionAttempt
+where
+    S: PesSurface + ?Sized,
+    W: ExactStructureWitness + ?Sized,
+{
+    let _ = (
+        surface,
+        network,
+        start,
+        mode,
+        config,
+        witness,
+        maximum_evaluations,
+    );
+    NdConnectionAttempt {
+        connection: Err(PesExplorationError::SaddleUnavailable),
+        charged_evaluations: 0,
+        budget_exhausted: false,
+    }
+}
+
+/// Quench a basin, ride one supplied mode, roll both IRC branches, and admit
+/// the resulting exact minimum and saddle identities.
+///
+/// The `rgsaddle` feature is off in this build. The call returns
+/// [`PesExplorationError::SaddleUnavailable`].
+#[cfg(not(feature = "rgsaddle"))]
+#[allow(clippy::too_many_arguments)]
+pub fn discover_mode_connection<S, W>(
+    surface: &S,
+    descriptor_space: &DescriptorSpace,
+    network: &mut PesNetwork,
+    start: ArrayView1<f64>,
+    masses: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    species: Option<&[u32]>,
+    config: &PesExplorationConfig,
+    witness: &W,
+) -> Result<SaddleConnection, PesExplorationError>
+where
+    S: PesSurface,
+    W: ExactStructureWitness + ?Sized,
+{
+    let _ = (
+        surface,
+        descriptor_space,
+        network,
+        start,
+        masses,
+        mode,
+        species,
+        config,
+        witness,
+    );
+    Err(PesExplorationError::SaddleUnavailable)
+}
+
+/// Discover an atomistic connection and certify its index only on free modes.
+///
+/// The `rgsaddle` feature is off in this build. The call returns
+/// [`PesExplorationError::SaddleUnavailable`].
+#[cfg(not(feature = "rgsaddle"))]
+#[allow(clippy::too_many_arguments)]
+pub fn discover_cartesian_mode_connection<S, W>(
+    surface: &S,
+    descriptor_space: &DescriptorSpace,
+    network: &mut PesNetwork,
+    start: ArrayView1<f64>,
+    masses: ArrayView1<f64>,
+    frozen_atoms: &[bool],
+    mode: ArrayView1<f64>,
+    species: Option<&[u32]>,
+    config: &PesExplorationConfig,
+    witness: &W,
+) -> Result<SaddleConnection, PesExplorationError>
+where
+    S: PesSurface,
+    W: ExactStructureWitness + ?Sized,
+{
+    let _ = (
+        surface,
+        descriptor_space,
+        network,
+        start,
+        masses,
+        frozen_atoms,
+        mode,
+        species,
+        config,
+        witness,
+    );
+    Err(PesExplorationError::SaddleUnavailable)
+}
+
+/// Run one atomistic ridge ride under a hard PES-evaluation boundary.
+///
+/// The `rgsaddle` feature is off in this build. The attempt's connection is
+/// [`PesExplorationError::SaddleUnavailable`] and no evaluations are charged.
+#[cfg(not(feature = "rgsaddle"))]
+#[allow(clippy::too_many_arguments)]
+pub fn discover_cartesian_mode_connection_with_budget<S, W>(
+    surface: &S,
+    descriptor_space: &DescriptorSpace,
+    network: &mut PesNetwork,
+    start: ArrayView1<f64>,
+    masses: ArrayView1<f64>,
+    frozen_atoms: &[bool],
+    mode: ArrayView1<f64>,
+    species: Option<&[u32]>,
+    config: &PesExplorationConfig,
+    witness: &W,
+    maximum_evaluations: u64,
+) -> CartesianConnectionAttempt
+where
+    S: PesSurface + ?Sized,
+    W: ExactStructureWitness + ?Sized,
+{
+    let _ = (
+        surface,
+        descriptor_space,
+        network,
+        start,
+        masses,
+        frozen_atoms,
+        mode,
+        species,
+        config,
+        witness,
+        maximum_evaluations,
+    );
+    CartesianConnectionAttempt {
+        connection: Err(PesExplorationError::SaddleUnavailable),
+        charged_evaluations: 0,
+        budget_exhausted: false,
+    }
+}
+
+/// Run one budgeted atomistic ridge ride in a caller-owned identity domain.
+///
+/// The `rgsaddle` feature is off in this build. The attempt's connection is
+/// [`PesExplorationError::SaddleUnavailable`] and no evaluations are charged.
+#[cfg(not(feature = "rgsaddle"))]
+#[allow(clippy::too_many_arguments)]
+pub fn discover_cartesian_mode_connection_in_context_with_budget<S, W>(
+    surface: &S,
+    descriptor_space: &DescriptorSpace,
+    network: &mut PesNetwork,
+    start: ArrayView1<f64>,
+    frozen_atoms: &[bool],
+    mode: ArrayView1<f64>,
+    context: &StructureContext,
+    config: &PesExplorationConfig,
+    witness: &W,
+    maximum_evaluations: u64,
+) -> CartesianConnectionAttempt
+where
+    S: PesSurface + ?Sized,
+    W: ExactStructureWitness + ?Sized,
+{
+    let _ = (
+        surface,
+        descriptor_space,
+        network,
+        start,
+        frozen_atoms,
+        mode,
+        context,
+        config,
+        witness,
+        maximum_evaluations,
+    );
+    CartesianConnectionAttempt {
+        connection: Err(PesExplorationError::SaddleUnavailable),
+        charged_evaluations: 0,
+        budget_exhausted: false,
+    }
+}
