@@ -5,20 +5,11 @@ error[E0277]: the trait bound `AlwaysReject: CertifiedAcceptance<f64>` is not sa
    |             ------------------ required by a bound introduced by this call
 ...
 22 |         AlwaysReject,
-   |         ^^^^^^^^^^^^ unsatisfied trait bound
+   |         ^^^^^^^^^^^^ the trait `CertifiedAcceptance<f64>` is not implemented for `AlwaysReject`
    |
-help: the trait `CertifiedAcceptance<f64>` is not implemented for `AlwaysReject`
-  --> tests/ui/checked_rejects_uncertified_accept.rs:8:1
-   |
- 8 | struct AlwaysReject;
-   | ^^^^^^^^^^^^^^^^^^^
-help: the following other types implement trait `CertifiedAcceptance<T>`
-  --> src/variant.rs
-   |
-   | impl<T: Float + Send + Sync> CertifiedAcceptance<T> for Metropolis {}
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `anneal_core::accept::Metropolis`
-   | impl<T: Float + Send + Sync> CertifiedAcceptance<T> for TsallisAccept<T> {}
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `TsallisAccept<T>`
+   = help: the following other types implement trait `CertifiedAcceptance<T>`:
+             TsallisAccept<T>
+             anneal_core::accept::Metropolis
 note: required by a bound in `SaVariant::<T, O, C, N, M, A>::checked`
   --> src/variant.rs
    |

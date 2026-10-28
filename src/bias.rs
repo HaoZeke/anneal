@@ -293,9 +293,7 @@ mod tests {
         let v_after = b.potential(s.view());
         assert!(
             v_after > v_before,
-            "deposit should increase V at the deposit point: {} -> {}",
-            v_before,
-            v_after,
+            "deposit should increase V at the deposit point: {v_before} -> {v_after}",
         );
     }
 

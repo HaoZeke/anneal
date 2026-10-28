@@ -806,8 +806,7 @@ mod tests {
         share /= draws as f64;
         assert!(
             share < 0.02,
-            "rigid modes took {:.3} of the velocity, so the mass is not biting",
-            share
+            "rigid modes took {share:.3} of the velocity, so the mass is not biting",
         );
     }
 

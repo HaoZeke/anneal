@@ -2,20 +2,11 @@ error[E0277]: the trait bound `AlwaysReject: variant::sealed::Acceptance` is not
   --> tests/ui/checked_rejects_downstream_self_certification.rs:12:35
    |
 12 | impl CertifiedAcceptance<f64> for AlwaysReject {}
-   |                                   ^^^^^^^^^^^^ unsatisfied trait bound
+   |                                   ^^^^^^^^^^^^ the trait `variant::sealed::Acceptance` is not implemented for `AlwaysReject`
    |
-help: the trait `variant::sealed::Acceptance` is not implemented for `AlwaysReject`
-  --> tests/ui/checked_rejects_downstream_self_certification.rs:4:1
-   |
- 4 | struct AlwaysReject;
-   | ^^^^^^^^^^^^^^^^^^^
-help: the following other types implement trait `variant::sealed::Acceptance`
-  --> src/variant.rs
-   |
-   | impl sealed::Acceptance for Metropolis {}
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `anneal_core::accept::Metropolis`
-   | impl<T: Float> sealed::Acceptance for TsallisAccept<T> {}
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `TsallisAccept<T>`
+   = help: the following other types implement trait `variant::sealed::Acceptance`:
+             TsallisAccept<T>
+             anneal_core::accept::Metropolis
 note: required by a bound in `CertifiedAcceptance`
   --> src/variant.rs
    |
