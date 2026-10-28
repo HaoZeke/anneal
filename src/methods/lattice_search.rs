@@ -794,61 +794,20 @@ pub fn run(cfg: &LatticeSearchConfig, ledger: &mut Ledger, relax: Relax<'_>, see
 pub const LJ_PAIR_MINIMUM: f64 = 1.122_462_048_309_373;
 
 /// Reduced Lennard-Jones pair energy at squared distance `r2`.
-#[inline]
 pub fn lj_pair(r2: f64) -> f64 {
-    let inv6 = 1.0 / (r2 * r2 * r2);
-    4.0 * inv6 * (inv6 - 1.0)
+    crate::potentials::lj_pair_terms(1.0, 1.0, r2).0
 }
 
 /// Reduced Lennard-Jones energy of a flattened `3N` cluster, no cutoff.
 pub fn lj_value(x: &[f64]) -> f64 {
-    let n = x.len() / 3;
-    let mut e = 0.0;
-    for i in 0..n {
-        let (xi, yi, zi) = (x[3 * i], x[3 * i + 1], x[3 * i + 2]);
-        for j in (i + 1)..n {
-            let dx = xi - x[3 * j];
-            let dy = yi - x[3 * j + 1];
-            let dz = zi - x[3 * j + 2];
-            let inv2 = 1.0 / (dx * dx + dy * dy + dz * dz);
-            let inv6 = inv2 * inv2 * inv2;
-            e += inv6 * (inv6 - 1.0);
-        }
-    }
-    4.0 * e
+    crate::potentials::reduced_lennard_jones(ArrayView1::from(x)).0
 }
 
 /// Reduced Lennard-Jones energy and gradient, writing the gradient into `g`.
 pub fn lj_value_gradient(x: &[f64], g: &mut [f64]) -> f64 {
-    let n = x.len() / 3;
-    g.iter_mut().for_each(|v| *v = 0.0);
-    let mut e = 0.0;
-    for i in 0..n {
-        let (xi, yi, zi) = (x[3 * i], x[3 * i + 1], x[3 * i + 2]);
-        let (mut gx, mut gy, mut gz) = (0.0, 0.0, 0.0);
-        for j in (i + 1)..n {
-            let dx = xi - x[3 * j];
-            let dy = yi - x[3 * j + 1];
-            let dz = zi - x[3 * j + 2];
-            let inv2 = 1.0 / (dx * dx + dy * dy + dz * dz);
-            let inv6 = inv2 * inv2 * inv2;
-            e += inv6 * (inv6 - 1.0);
-            let c = inv2 * inv6 * (2.0 * inv6 - 1.0);
-            gx += c * dx;
-            gy += c * dy;
-            gz += c * dz;
-            g[3 * j] -= c * dx;
-            g[3 * j + 1] -= c * dy;
-            g[3 * j + 2] -= c * dz;
-        }
-        g[3 * i] += gx;
-        g[3 * i + 1] += gy;
-        g[3 * i + 2] += gz;
-    }
-    for v in g.iter_mut() {
-        *v *= -24.0;
-    }
-    4.0 * e
+    let (energy, gradient) = crate::potentials::reduced_lennard_jones(ArrayView1::from(x));
+    g.copy_from_slice(gradient.as_slice().expect("gradient is contiguous"));
+    energy
 }
 
 /// Pair terms in one full evaluation of an `n`-point cluster.

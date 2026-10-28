@@ -765,26 +765,9 @@ mod tests {
 
     /// Lennard-Jones in reduced units, the same form the driver charges for.
     fn lj(x: &[f64], n: usize) -> (f64, Vec<f64>) {
-        let mut e = 0.0;
-        let mut g = vec![0.0; 3 * n];
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let d = [
-                    x[3 * i] - x[3 * j],
-                    x[3 * i + 1] - x[3 * j + 1],
-                    x[3 * i + 2] - x[3 * j + 2],
-                ];
-                let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                let s6 = 1.0 / (r2 * r2 * r2);
-                e += 4.0 * (s6 * s6 - s6);
-                let f = 24.0 * (2.0 * s6 * s6 - s6) / r2;
-                for k in 0..3 {
-                    g[3 * i + k] -= f * d[k];
-                    g[3 * j + k] += f * d[k];
-                }
-            }
-        }
-        (e, g)
+        let (energy, gradient) =
+            crate::potentials::reduced_lennard_jones(ndarray::ArrayView1::from(&x[..3 * n]));
+        (energy, gradient.to_vec())
     }
 
     #[test]
