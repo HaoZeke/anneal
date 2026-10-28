@@ -224,9 +224,7 @@ mod tests {
         // measurable factor (typically 2-5x at q=1.3 over 200 draws).
         assert!(
             max_q > max_g,
-            "q-Gaussian max-|p| {} not heavier than Gaussian max-|p| {}",
-            max_q,
-            max_g
+            "q-Gaussian max-|p| {max_q} not heavier than Gaussian max-|p| {max_g}",
         );
     }
 }

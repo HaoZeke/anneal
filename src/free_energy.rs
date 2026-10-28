@@ -174,15 +174,11 @@ mod tests {
         let (_c, delta_f) = bar.solve();
         assert!(
             delta_f.is_finite(),
-            "BAR estimate {} should be finite; truth is {}",
-            delta_f,
-            true_df
+            "BAR estimate {delta_f} should be finite; truth is {true_df}",
         );
         assert!(
             (delta_f - true_df).abs() < 0.08,
-            "BAR estimate {} differs from truth {}",
-            delta_f,
-            true_df,
+            "BAR estimate {delta_f} differs from truth {true_df}",
         );
     }
 

@@ -1702,8 +1702,7 @@ mod tests {
         x[3] = 0.74;
         assert!(
             structure_is_sane(x.view(), OVERLAP_SEPARATION),
-            "H-H 0.74 Å must clear the overlap floor {}",
-            OVERLAP_SEPARATION
+            "H-H 0.74 Å must clear the overlap floor {OVERLAP_SEPARATION}",
         );
         const { assert!(OVERLAP_SEPARATION < 0.74) };
     }

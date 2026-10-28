@@ -823,6 +823,7 @@ pub const TARGET_SWAP_ACCEPT: f64 = 0.23;
 
 /// Standard normal quantile, Acklam's rational approximation. Absolute error
 /// below 1.2e-9 over the open unit interval.
+#[allow(clippy::excessive_precision)]
 pub fn inverse_normal_cdf(p: f64) -> f64 {
     const A: [f64; 6] = [
         -3.969683028665376e+01,
