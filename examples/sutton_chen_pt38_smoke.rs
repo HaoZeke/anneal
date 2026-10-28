@@ -115,7 +115,8 @@ fn main() {
     let seed: u64 = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(1);
 
     let potential = RgpotSc::open(&path);
-    let cfg = Config::recommended(38);
+    let (nearest, well) = rgpot_pair::sutton_chen_scales(1.0, 34.408, 1.0, 10, 8);
+    let cfg = Config::recommended_for_scales(38, nearest, well);
     let mut ledger = Ledger::new(budget);
     let mut opt = WarmLbfgs::default();
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
@@ -134,13 +135,19 @@ fn main() {
         (value, relaxed)
     };
     let out = optimize(&cfg, &mut ledger, &mut relax, seed);
+    let hit = if out.best <= REFERENCE + 1.0e-3 { 1 } else { 0 };
     println!("label: smoke, not a paper row");
     println!("arm: recommended");
     println!("atoms: 38");
     println!("potential: rgpot Sutton-Chen 10-8");
+    println!("seed: {seed}");
+    println!("budget: {budget}");
+    println!("length_scale: {}", cfg.length_scale);
+    println!("energy_scale: {}", cfg.energy_scale);
     println!("reference: {REFERENCE}");
     println!("best_energy: {}", out.best);
     println!("force_calls: {}", ledger.spent());
     println!("hops: {}", out.hops);
     println!("delta_from_reference: {}", out.best - REFERENCE);
+    println!("hit: {hit}");
 }
