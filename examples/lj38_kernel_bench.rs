@@ -57,6 +57,48 @@ fn main() {
     println!("gradient_sum: {gradient_sum:.16}");
     println!("gradient_sum_hex: {:x}", gradient_sum.to_bits());
     println!("g0_hex: {:x}", gradient[0].to_bits());
+    let gradient_bits = gradient.iter().fold(0u64, |acc, value| {
+        acc.wrapping_mul(0x9E37_79B1_85EB_CA87)
+            .wrapping_add(value.to_bits())
+    });
+    println!("gradient_bits: {gradient_bits:x}");
+    let mut pair_energy = 0.0;
+    let n = x.len() / 3;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut r2 = 0.0;
+            for k in 0..3 {
+                let d = x[3 * i + k] - x[3 * j + k];
+                r2 += d * d;
+            }
+            pair_energy += potential.kind().pair(r2).0;
+        }
+    }
+    println!("pair_energy: {pair_energy:.16}");
+    println!("pair_energy_hex: {:x}", pair_energy.to_bits());
+    let pair_calls = 2000;
+    let pair_start = Instant::now();
+    for _ in 0..pair_calls {
+        let mut acc = 0.0;
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let mut r2 = 0.0;
+                for k in 0..3 {
+                    let d = x[3 * i + k] - x[3 * j + k];
+                    r2 += d * d;
+                }
+                acc += potential.kind().pair(r2).0;
+            }
+        }
+        std::hint::black_box(acc);
+    }
+    let pair_seconds = pair_start.elapsed().as_secs_f64();
+    println!("pair_loop_calls: {pair_calls}");
+    println!("pair_loop_seconds: {pair_seconds:.6}");
+    println!(
+        "pair_loop_calls_per_second: {:.3}",
+        pair_calls as f64 / pair_seconds
+    );
     println!("calls: {calls}");
     println!("seconds: {seconds:.6}");
     println!(
