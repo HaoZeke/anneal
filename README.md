@@ -312,15 +312,11 @@ sessions and stationary-index checks return
 connections return `PesExplorationError::SaddleUnavailable`. With
 `md_escape` set, or on a binary chart with a wide diameter ratio,
 `cluster_search` stops and sets `Outcome::nve_unavailable`. `python` and
-`bank-rpc` turn the feature on, including PyPI wheels and `maturin develop
---features python`. The feature compiles the git revision of
-[rgsaddle](https://github.com/OmniPotentRPC/rgsaddle) named in `Cargo.toml`.
-From crates.io, `rgsaddle`, `python`, and `bank-rpc` do not build until
-matching rgmin and rgsaddle releases exist. Default features, docs.rs, and
-the wheels are fine. CI packages the crate with `cargo package --no-verify`.
-A later step extracts `anneal-core-${version}.crate`. It drops the
-development patch and the lockfile. It runs `cargo check` on the default
-features against crates.io.
+`bank-rpc` turn the feature on, including PyPI wheels and
+`maturin develop --features python`. The feature compiles
+[rgsaddle](https://github.com/OmniPotentRPC/rgsaddle) 0.3.0 from
+crates.io against rgmin 0.5.0. `rgsaddle`, `python`, and `bank-rpc`
+build from crates.io.
 
 ```bash
 cargo test --locked

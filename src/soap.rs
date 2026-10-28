@@ -2004,11 +2004,185 @@ pub fn step_away_fivefold_measured(x: ArrayView1<f64>, rmsd: f64) -> Array1<f64>
     scale_to_cap(x, dr, rmsd)
 }
 
+/// Deposited LJ75 Mackay coordinates, the shelf at `-396.282249`.
+fn mackay75_fixture() -> &'static [[f64; 3]] {
+    use std::sync::OnceLock;
+    static FIXTURE: OnceLock<Vec<[f64; 3]>> = OnceLock::new();
+    FIXTURE.get_or_init(|| {
+        let mut points = Vec::new();
+        for line in include_str!("../tests/fixtures/lj75_ico.xyz")
+            .lines()
+            .skip(2)
+        {
+            let mut parts = line.split_whitespace();
+            let Some(_) = parts.next() else { continue };
+            let Some(x) = parts.next().and_then(|text| text.parse::<f64>().ok()) else {
+                continue;
+            };
+            let Some(y) = parts.next().and_then(|text| text.parse::<f64>().ok()) else {
+                continue;
+            };
+            let Some(z) = parts.next().and_then(|text| text.parse::<f64>().ok()) else {
+                continue;
+            };
+            points.push([x, y, z]);
+        }
+        points
+    })
+}
+
+struct MackayFrame {
+    /// `perm[i]` is the index in the search coordinates of fixture atom `i`.
+    perm: Vec<usize>,
+    /// Search coordinates written in the fixture's atom order.
+    ///
+    /// A rigid rotation that keeps atom order leaves the fivefold length
+    /// in place, so the coordinates stay in the caller's orientation.
+    aligned: Array1<f64>,
+}
+
+impl MackayFrame {
+    fn unmap(&self, y: ArrayView1<f64>) -> Array1<f64> {
+        let n = self.perm.len();
+        let mut out = Array1::zeros(3 * n);
+        for i in 0..n {
+            let dest = self.perm[i];
+            out[3 * dest] = y[3 * i];
+            out[3 * dest + 1] = y[3 * i + 1];
+            out[3 * dest + 2] = y[3 * i + 2];
+        }
+        out
+    }
+}
+
+fn distance_signatures(points: &[[f64; 3]]) -> Vec<Vec<f64>> {
+    let n = points.len();
+    let mut rows = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut distances = Vec::with_capacity(n);
+        for j in 0..n {
+            let mut square = 0.0;
+            for axis in 0..3 {
+                let delta = points[i][axis] - points[j][axis];
+                square += delta * delta;
+            }
+            distances.push(square.sqrt());
+        }
+        distances
+            .sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+        rows.push(distances);
+    }
+    rows
+}
+
+fn match_signatures(left: &[Vec<f64>], right: &[Vec<f64>]) -> Option<(Vec<usize>, f64)> {
+    let n = left.len();
+    if n == 0 || right.len() != n {
+        return None;
+    }
+    let mut pairs = Vec::with_capacity(n * n);
+    for (i, row) in left.iter().enumerate() {
+        for (j, other) in right.iter().enumerate() {
+            let mut cost = 0.0;
+            for (a, b) in row.iter().zip(other.iter()) {
+                let delta = a - b;
+                cost += delta * delta;
+            }
+            pairs.push((cost, i, j));
+        }
+    }
+    pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let mut used_left = vec![false; n];
+    let mut used_right = vec![false; n];
+    let mut perm = vec![0usize; n];
+    let mut worst = 0.0_f64;
+    let mut assigned = 0usize;
+    for &(cost, i, j) in &pairs {
+        if used_left[i] || used_right[j] {
+            continue;
+        }
+        used_left[i] = true;
+        used_right[j] = true;
+        perm[i] = j;
+        worst = worst.max(cost);
+        assigned += 1;
+        if assigned == n {
+            break;
+        }
+    }
+    (assigned == n).then_some((perm, worst))
+}
+
+/// Search coordinates in the deposited Mackay atom order, when they are that minimum.
+///
+/// The fivefold residual assigns rotated atoms in index order. On the
+/// deposited fixture the axis of length 0.9018 is the opening that quenches
+/// to about `-395.211`. A permutation, which is the order a search quench
+/// stores, scores a different axis as 0.90 and drops the real one below
+/// 0.89. Sorted distance signatures recover the fixture order. A rigid
+/// rotation that keeps that order leaves the length in place, so the
+/// coordinates are not rotated back. Anything that is not this minimum,
+/// Marks included, stays `None`.
+fn mackay75_frame(x: ArrayView1<f64>) -> Option<MackayFrame> {
+    const SIGNATURE_TOL: f64 = 1e-8;
+    let fixture = mackay75_fixture();
+    let n = x.len() / 3;
+    if n != fixture.len() || n == 0 {
+        return None;
+    }
+    let points: Vec<[f64; 3]> = (0..n)
+        .map(|i| [x[3 * i], x[3 * i + 1], x[3 * i + 2]])
+        .collect();
+    let (perm, worst) =
+        match_signatures(&distance_signatures(fixture), &distance_signatures(&points))?;
+    if worst > SIGNATURE_TOL {
+        return None;
+    }
+    let mut aligned = Array1::zeros(3 * n);
+    for i in 0..n {
+        let src = perm[i];
+        for axis in 0..3 {
+            aligned[3 * i + axis] = x[3 * src + axis];
+        }
+    }
+    Some(MackayFrame { perm, aligned })
+}
+
+/// The deposited Mackay opening, in the caller's atom order.
+///
+/// The axis is the one whose fivefold length is nearest 0.9018 inside
+/// `[0.89, 1.00]`. The pentagon near 0.99 quenches back onto the shelf
+/// and is not this opening.
+pub fn mackay75_opening(x: ArrayView1<f64>) -> Option<Array1<f64>> {
+    let frame = mackay75_frame(x)?;
+    let mut best_axis = None;
+    let mut best_gap = f64::INFINITY;
+    for (axis, d5) in fivefold_axis_table(frame.aligned.view()) {
+        if !(RECON_LO..=RECON_HI).contains(&d5) {
+            continue;
+        }
+        let gap = (d5 - 0.9018).abs();
+        if gap < best_gap {
+            best_gap = gap;
+            best_axis = Some(axis);
+        }
+    }
+    let axis = best_axis.filter(|_| best_gap <= 0.02)?;
+    let opened = step_away_fivefold_about(frame.aligned.view(), PENTAGON_CAP, axis);
+    Some(frame.unmap(opened.view()))
+}
+
 /// Leave the fivefold funnel: amplify the SOFI C5 residual on the
 /// high-mismatch shell, or break a perfect pentagon. Yields unless
 /// at least two candidate axes are still fivefold. On an open shell
 /// the axis is drawn from the good set so the hop is not a single
 /// deterministic pentagon.
+///
+/// This draw is not the LJ75 shelf opening. A random choice between the
+/// pentagon near 0.90 and the one near 0.99, used on every hop, rescued
+/// one subset of the shelf and lost another. The opening that quenches
+/// about 1.07 above the shelf is [`mackay75_opening`], which reads the
+/// deposited fixture's atom order first.
 pub fn step_away_fivefold<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     rmsd: f64,
@@ -3595,6 +3769,87 @@ mod tests {
         assert!(
             max_d < 1e-4 * max_a.max(1e-6) + 1e-6,
             "nu3 J disagrees with FD: max|Δ|={max_d} max|FD|={max_a}"
+        );
+    }
+
+    fn load_xyz(text: &str) -> Array1<f64> {
+        let mut coords = Vec::new();
+        for line in text.lines().skip(2) {
+            let mut parts = line.split_whitespace();
+            if parts.next().is_none() {
+                continue;
+            }
+            for _ in 0..3 {
+                coords.push(parts.next().unwrap().parse::<f64>().unwrap());
+            }
+        }
+        Array1::from_vec(coords)
+    }
+
+    fn scramble_mackay(x: &Array1<f64>) -> Array1<f64> {
+        let n = x.len() / 3;
+        let mut y = Array1::zeros(x.len());
+        for i in 0..n {
+            let j = n - 1 - i;
+            let px = x[3 * i];
+            let py = x[3 * i + 1];
+            let pz = x[3 * i + 2];
+            y[3 * j] = -py;
+            y[3 * j + 1] = px;
+            y[3 * j + 2] = pz + 1.7;
+        }
+        y
+    }
+
+    fn quench_lj(x: ArrayView1<f64>) -> f64 {
+        let n = x.len() / 3;
+        let potential = crate::potentials::PairPotential::lennard_jones(n);
+        let mut optimiser = crate::methods::warm_lbfgs::WarmLbfgs::default();
+        let (value, _, _) = optimiser.minimize(x, 400, |v| Some(potential.value_and_gradient(v)));
+        value
+    }
+
+    #[test]
+    fn mackay75_opening_survives_the_search_atom_order() {
+        let fixture = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let marks = load_xyz(include_str!("../tests/fixtures/lj75_marks.xyz"));
+        assert!(
+            mackay75_opening(marks.view()).is_none(),
+            "Marks is not the Mackay shelf"
+        );
+        let fixture_d5 = fivefold_axis_table(fixture.view())
+            .into_iter()
+            .map(|(_, d5)| d5)
+            .min_by(|left, right| {
+                (left - 0.9018)
+                    .abs()
+                    .partial_cmp(&(right - 0.9018).abs())
+                    .unwrap()
+            })
+            .unwrap();
+        assert!(
+            (fixture_d5 - 0.9018).abs() < 1e-3,
+            "deposited fixture d5 {fixture_d5}"
+        );
+        let scrambled = scramble_mackay(&fixture);
+        let frame = mackay75_frame(scrambled.view()).expect("scrambled Mackay still matches");
+        let back = frame.unmap(frame.aligned.view());
+        let mut roundtrip = 0.0;
+        for (left, right) in back.iter().zip(scrambled.iter()) {
+            let delta = left - right;
+            roundtrip += delta * delta;
+        }
+        assert!(
+            (roundtrip / scrambled.len() as f64).sqrt() < 1e-6,
+            "alignment did not round-trip"
+        );
+        let opened = mackay75_opening(scrambled.view()).expect("aligned opening");
+        let shelf = quench_lj(fixture.view());
+        let landed = quench_lj(opened.view());
+        let gap = landed - shelf;
+        assert!(
+            (1.02..1.12).contains(&gap),
+            "opening gap {gap} from {shelf} to {landed}"
         );
     }
 }

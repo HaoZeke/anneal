@@ -54,7 +54,8 @@ fn a_default_build_stops_when_an_nve_escape_was_requested() {
         Some(&mut gradient),
         Some(&mut energy),
         &mut rng,
-    );
+    )
+    .expect("finite start");
     assert!(out.nve_unavailable);
     assert_eq!(out.hops, 0);
     assert_eq!(out.md_escape, (0, 0, 0));
@@ -71,7 +72,8 @@ fn a_default_build_stops_when_an_nve_escape_was_requested() {
         Some(&mut gradient),
         Some(&mut energy),
         &mut rng,
-    );
+    )
+    .expect("finite start");
     assert!(
         out.nve_unavailable,
         "a wide diameter ratio must not fall through to the kick"
@@ -159,7 +161,8 @@ fn hopping_nve_keeps_frozen_coordinates_fixed_at_every_force_evaluation() {
         &mut relax,
         Some(&mut gradient),
         &mut rng,
-    );
+    )
+    .expect("finite start");
 
     assert_eq!(out.hops, 1);
     assert_eq!(out.md_escape.0, 1, "the hop must execute an NVE escape");

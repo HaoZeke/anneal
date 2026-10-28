@@ -59,7 +59,7 @@ sphinx-sitemap             = ">=2.7.0, <3"
 
 [feature.docs.tasks]
 # Keep the rustdoc generator inside the checked-out Pixi docs prefix.
-setup-rustdocgen = "test -x .pixi/envs/docs/bin/sphinx-rustdocgen || cargo install --root .pixi/envs/docs sphinx-rustdocgen"
+setup-rustdocgen = "sh docs/scripts/install_rustdocgen.sh"
 orgbld           = "emacs --batch -l docs/export.el"
 docbld           = { cmd = "python -m sphinx docs/source docs/build -b html", depends-on = ["orgbld", "setup-rustdocgen"] }
 
