@@ -2523,6 +2523,8 @@ fn relax_activation_shell<S: PesSurface + ?Sized>(
         gtol: 0.0,
         istep: 1.0,
         maxmove: Some(0.25 * config.maximum_move),
+        ftol_rel: None,
+        noise_floor: None,
     };
     let mut solver = Solver::new(
         Method::Fire { kind: FireKind::V2 },
