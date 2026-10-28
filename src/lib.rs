@@ -101,6 +101,8 @@ pub mod cooperative_search;
 /// Shared core-class table for cooperative cluster chains.
 pub mod coreclass;
 pub mod corekey;
+/// Continuous symmetry measure averages for a free point set.
+pub mod csm;
 pub mod curvature;
 /// Transport for consensus traffic between server brains.
 #[cfg(feature = "bank-rpc")]
