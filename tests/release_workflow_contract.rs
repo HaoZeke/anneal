@@ -15,11 +15,26 @@ fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
     assert!(manifest.contains("linkcell    = { version = \"0.3.11\", git = \"https://github.com/d-SEAMS/linkcell\", rev = \"2e26b83c0c9bbc07d09eb056011dd8e2cec6f4a5\""));
     assert!(manifest.contains("eindir-core = { git = \"https://github.com/HaoZeke/eindir.git\", rev = \"f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9\", version = \"0.6.0\", features = [\"capi\"]"));
     assert!(manifest.contains("rgmin = { git = \"https://github.com/HaoZeke/rgmin.git\", rev = \"20832fd169932a1cd0d47ac84dc77fa9b435f940\""));
-    assert!(manifest.contains("rgsaddle = { git = \"https://github.com/OmniPotentRPC/rgsaddle.git\", rev = \"84fe96bfc1ed163379c0af8bd664b74bf71407d1\""));
-    // Verification compiles the crates.io copies of these git
-    // dependencies, and those copies do not yet export the API this
-    // crate imports. The dry run packages only.
-    assert!(workflow.contains("cargo publish --dry-run --no-verify"));
+    assert!(manifest.contains("rgsaddle = { git = \"https://github.com/OmniPotentRPC/rgsaddle.git\", rev = \"84fe96bfc1ed163379c0af8bd664b74bf71407d1\", version = \"0.1.0\", optional = true }"));
+    assert!(manifest.contains("rgsaddle = [\"dep:rgsaddle\"]"));
+    assert!(manifest.contains("default = []"));
+    assert!(manifest.contains("python = [\"dep:pyo3\", \"dep:numpy\", \"dlpk/pyo3\", \"eindir-core/py-objective\", \"rgsaddle\"]"));
+    assert!(manifest.contains("bank-rpc = [\"dep:capnp\", \"dep:capnp-rpc\", \"dep:futures\", \"dep:nng\", \"dep:tokio\", \"dep:tokio-util\", \"dep:libc\", \"rgsaddle\"]"));
+    assert!(manifest.contains("exclude = [\".cargo/config.toml\"]"));
+    // `cargo package --no-verify` writes anneal-core-${version}.crate.
+    // A publish dry run on cargo 1.99 leaves the crate under
+    // target/package/tmp-crate, so a glob of anneal-core-*.crate fails
+    // before the crates.io check. The version comes from cargo metadata.
+    assert!(workflow.contains("cargo package --no-verify"));
+    assert!(workflow.contains("anneal-core-${version}.crate"));
+    assert!(workflow.contains("pkg[\"version\"]"));
+    assert!(workflow.contains("test -f \"$crate\""));
+    assert!(!workflow.contains("anneal-core-*.crate"));
+    assert!(!workflow.contains("tail -1"));
+    assert!(!workflow.contains("cargo publish --dry-run --no-verify"));
+    assert!(workflow.contains("cargo clippy --all-targets -- -D warnings"));
+    assert!(workflow.contains("rm -rf \"$pkg/.cargo\""));
+    assert!(workflow.contains("cargo check --locked"));
 }
 
 #[test]

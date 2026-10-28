@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
 
 concurrency:
@@ -32,17 +32,44 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      # `--all` also formats path dependencies. vendor/nng is third-party
-      # code with its own rustfmt configuration, and stable rustfmt
-      # rewrites it. Format this package only.
+      # `vendor/nng` and `vendor/nng-sys` are workspace-excluded path
+      # dependencies. `cargo fmt --all` still walks every path dependency,
+      # and stable rustfmt rewrites that tree: its rustfmt.toml asks for
+      # nightly options, and the `ignore` key is unstable on stable.
+      # Format workspace members only. Do not reformat the vendored sources.
       - name: cargo fmt
         run: cargo fmt -- --check
 
-      # Packaging is the check. Verification rebuilds the tarball
-      # against the crates.io copies of the git dependencies, and
-      # those copies do not yet export the API this crate imports.
-      - name: Verify crate publication package
-        run: cargo publish --dry-run --no-verify
+      - name: cargo clippy (default features)
+        run: cargo clippy --all-targets -- -D warnings
+
+      # `cargo package --no-verify` writes anneal-core-${version}.crate.
+      # A publish dry run on cargo 1.99 leaves the packaged crate under
+      # target/package/tmp-crate only. `--no-verify` skips the rebuild,
+      # which would follow this workspace's patch. The next step checks
+      # the packaged default features against crates.io.
+      - name: Package the crate
+        run: cargo package --no-verify
+
+      - name: Check packaged default features against crates.io
+        shell: bash
+        run: |
+          set -euo pipefail
+          meta=$(cargo metadata --format-version 1 --no-deps)
+          read -r target version < <(python3 -c 'import json,sys; m=json.loads(sys.argv[1]); pkg=next(p for p in m["packages"] if p["name"]=="anneal-core"); print(m["target_directory"], pkg["version"])' "$meta")
+          crate="${target}/package/anneal-core-${version}.crate"
+          test -f "$crate"
+          work=$(mktemp -d)
+          tar -xzf "$crate" -C "$work"
+          pkg=$(find "$work" -mindepth 1 -maxdepth 1 -type d)
+          test -d "$pkg"
+          rm -rf "$pkg/.cargo"
+          rm -f "$pkg/Cargo.lock"
+          (
+            cd "$pkg"
+            cargo generate-lockfile
+            cargo check --locked
+          )
 
       - name: Checkout Vesin
         uses: actions/checkout@v6

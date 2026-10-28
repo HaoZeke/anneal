@@ -1,3 +1,5 @@
+#![cfg(feature = "rgsaddle")]
+
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicU64, Ordering};
 
