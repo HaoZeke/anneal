@@ -90,17 +90,18 @@ fn shelf_error(n: usize) -> &'static str {
 /// Check a halt limit against the published Lennard-Jones minimum for `n`.
 ///
 /// `limit` is the energy at which a search halts (`energy <= limit`).
-/// Installing the LJ75 or LJ98 icosahedral shelf is an error. When
-/// [`lennard_jones`] knows `n`, a limit above that minimum plus
-/// [`HARNESS_WINDOW`] is kept and a warning is written. The minimum itself
-/// and the minimum plus the window are quiet. A non-finite limit is left
+/// A limit in the closed ball around the LJ75 or LJ98 icosahedral shelf,
+/// `|limit - shelf| <= HARNESS_WINDOW`, is an error. When [`lennard_jones`]
+/// knows `n`, a limit above that minimum plus [`HARNESS_WINDOW`] is kept and
+/// a warning is written. The minimum itself and the minimum plus the window
+/// are quiet. Both sit outside that ball. A non-finite limit is left
 /// unchanged and is not a shelf.
 pub fn check_stop_limit(n: usize, limit: f64) -> Result<f64, &'static str> {
     if !limit.is_finite() {
         return Ok(limit);
     }
     if let Some(shelf) = icosahedral_shelf(n)
-        && limit == shelf
+        && (limit - shelf).abs() <= HARNESS_WINDOW
     {
         return Err(shelf_error(n));
     }
@@ -137,10 +138,50 @@ mod tests {
         assert!(check_stop_limit(98, window).is_ok());
         assert!(window < LJ98_ICOSAHEDRAL);
         assert_eq!(check_stop_limit(98, LJ98_ICOSAHEDRAL), Err(shelf_error(98)));
-        // 1e-4 above the shelf is not the shelf. It sits above the
-        // tetrahedral minimum plus the harness window, so it warns.
-        assert!(check_stop_limit(98, LJ98_ICOSAHEDRAL + 1e-4).is_ok());
+        // 1e-4 above the shelf is inside the closed harness ball.
+        assert_eq!(
+            check_stop_limit(98, LJ98_ICOSAHEDRAL + 1e-4),
+            Err(shelf_error(98))
+        );
         assert!(check_stop_limit(75, LJ98_ICOSAHEDRAL).is_ok());
+    }
+
+    #[test]
+    fn the_shelf_ball_excludes_the_published_minimum() {
+        // The refusal is the closed ball |limit - shelf| <= HARNESS_WINDOW.
+        // The printed minimum and that minimum plus 0.001 have to stay legal.
+        assert_eq!(HARNESS_WINDOW, 0.001);
+        let cases = [
+            (75usize, LJ75_ICOSAHEDRAL, -397.492331_f64),
+            (98, LJ98_ICOSAHEDRAL, LJ98_GLOBAL),
+        ];
+        for (n, shelf, printed) in cases {
+            let minimum = lennard_jones(n).unwrap();
+            assert_eq!(minimum, printed);
+            let legal = minimum + 0.001;
+            assert_eq!(legal, minimum + HARNESS_WINDOW);
+            assert!(
+                (minimum - shelf).abs() > HARNESS_WINDOW,
+                "LJ{n} minimum {minimum} lies in the shelf ball"
+            );
+            assert!(
+                (legal - shelf).abs() > HARNESS_WINDOW,
+                "LJ{n} minimum + 0.001 {legal} lies in the shelf ball"
+            );
+            assert!(check_stop_limit(n, minimum).is_ok());
+            assert!(check_stop_limit(n, legal).is_ok());
+            assert_eq!(check_stop_limit(n, shelf), Err(shelf_error(n)));
+            for edge in [shelf + HARNESS_WINDOW, shelf - HARNESS_WINDOW] {
+                assert!(
+                    (edge - shelf).abs() <= HARNESS_WINDOW,
+                    "LJ{n} boundary {edge} fell outside the closed ball"
+                );
+                assert_eq!(check_stop_limit(n, edge), Err(shelf_error(n)));
+            }
+            let outside = shelf + HARNESS_WINDOW + 1e-9;
+            assert!((outside - shelf).abs() > HARNESS_WINDOW);
+            assert!(check_stop_limit(n, outside).is_ok());
+        }
     }
 
     #[test]
@@ -153,6 +194,15 @@ mod tests {
         assert!(ledger.target().is_none());
         assert_eq!(
             ledger.stop_below(75, LJ75_ICOSAHEDRAL),
+            Err(shelf_error(75))
+        );
+        assert!(ledger.target().is_none());
+        assert_eq!(
+            ledger.stop_below(98, LJ98_ICOSAHEDRAL + HARNESS_WINDOW),
+            Err(shelf_error(98))
+        );
+        assert_eq!(
+            ledger.stop_below(75, LJ75_ICOSAHEDRAL - HARNESS_WINDOW),
             Err(shelf_error(75))
         );
         assert!(ledger.target().is_none());
@@ -171,12 +221,12 @@ mod tests {
         assert!(check_stop_limit(98, minimum + HARNESS_WINDOW).is_ok());
         let above = minimum + HARNESS_WINDOW + 1e-9;
         assert!(check_stop_limit(98, above).is_ok());
-        // -543.641 is farther than 1e-3 from the Cs shelf, so the old ball
-        // accepted it. It is still above the tetrahedral minimum plus the window.
+        // -543.641 is outside the closed 1e-3 ball around the Cs shelf.
+        // It is still above the tetrahedral minimum plus the window.
         let missed = -543.641;
+        assert!((missed - LJ98_ICOSAHEDRAL).abs() > HARNESS_WINDOW);
         assert!(check_stop_limit(98, missed).is_ok());
         assert!(missed > minimum + HARNESS_WINDOW);
-        assert!(missed != LJ98_ICOSAHEDRAL);
         let mut ledger = Ledger::new(4);
         ledger.stop_below(98, above).unwrap();
         assert_eq!(ledger.target(), Some(above));
