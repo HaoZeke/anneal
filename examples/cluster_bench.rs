@@ -61,6 +61,11 @@ fn reference(p: PairKind, n: usize) -> Option<f64> {
     }
 }
 
+/// A run hits when its best energy is at or below the reference plus the tolerance.
+fn energy_hits(energy: f64, reference: f64) -> bool {
+    energy <= reference + 1e-4
+}
+
 /// Is the archive made of minima, and do its basins hold distinct structures.
 ///
 /// Three merges are built and the deciding statistic recomputed under each.
@@ -813,7 +818,7 @@ fn main() {
                 r.get(r.len() / 2).copied().unwrap_or(f64::NAN)
             )
         });
-        let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
+        let hit = reference.is_some_and(|r| energy_hits(out.best, r));
         if let Some(tr) = &out.energy_trace {
             // One file per seed, one quenched energy per line, in order. The
             // name carries the outcome because which region a run sat in is the
@@ -1060,5 +1065,19 @@ fn main() {
             let hi = found.iter().copied().max().unwrap_or(0);
             println!("  observed encounters span {lo} to {hi}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::energy_hits;
+
+    #[test]
+    fn the_boundary_energy_is_a_hit() {
+        let reference = -173.928427;
+        let boundary = reference + 1e-4;
+        assert!(energy_hits(boundary, reference));
+        assert!(energy_hits(reference - 1.0, reference));
+        assert!(!energy_hits(boundary + 1e-8, reference));
     }
 }

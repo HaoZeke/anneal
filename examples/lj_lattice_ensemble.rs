@@ -69,6 +69,11 @@ use rayon::prelude::*;
 /// Hit tolerance above the reference energy.
 const HIT: f64 = 1e-4;
 
+/// A chain hits when its energy is at or below the reference plus [`HIT`].
+fn energy_hits(energy: f64, reference: f64) -> bool {
+    energy <= reference + HIT
+}
+
 /// Lennard-Jones value and gradient in reduced units, no cutoff.
 ///
 /// The summation order is that of `lj_ensemble_splice`, so the recommended
@@ -176,7 +181,7 @@ fn recommended_chain(n: usize, budget: usize, seed: u64, target: Option<f64>) ->
         outcome
             .improvements
             .iter()
-            .find(|&&(_, _, _, energy)| energy < reference + HIT)
+            .find(|&&(_, _, _, energy)| energy_hits(energy, reference))
             .map(|&(_, charged, _, _)| charged)
     });
     ChainResult {
@@ -299,9 +304,9 @@ fn main() {
                     .par_iter()
                     .map(|&seed| {
                         let run = lattice_ensemble::run(n, total, seed, &plan, &quench, &lattice);
-                        let solved = target.is_some_and(|r| run.best < r + HIT);
+                        let solved = target.is_some_and(|r| energy_hits(run.best, r));
                         let hit = target.and_then(|r| {
-                            run.trace.iter().find(|record| record.energy < r + HIT)
+                            run.trace.iter().find(|record| energy_hits(record.energy, r))
                         });
                         let low = run.bank.iter().map(|m| m.energy).fold(f64::INFINITY, f64::min);
                         let high = run
@@ -386,7 +391,7 @@ fn main() {
                     let solved_chains: Vec<usize> = reports
                         .iter()
                         .enumerate()
-                        .filter(|(_, r)| target.is_some_and(|t| r.best < t + HIT))
+                        .filter(|(_, r)| target.is_some_and(|t| energy_hits(r.best, t)))
                         .map(|(c, _)| c)
                         .collect();
                     // Chains run side by side, so the ensemble has spent
@@ -454,4 +459,18 @@ fn main() {
             .collect::<Vec<_>>()
             .join(", "),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::energy_hits;
+
+    #[test]
+    fn the_boundary_energy_is_a_hit() {
+        let reference = -279.248470;
+        let boundary = reference + 1e-4;
+        assert!(energy_hits(boundary, reference));
+        assert!(energy_hits(reference - 0.02, reference));
+        assert!(!energy_hits(boundary + 1e-8, reference));
+    }
 }
