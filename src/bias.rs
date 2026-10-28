@@ -478,6 +478,14 @@ impl<F: Fingerprint> BasinIndex<F> {
         self.visits.get(i).copied().unwrap_or(0)
     }
 
+    /// Arrival counts in basin order. Zero-length until the first visit.
+    ///
+    /// The slice order is insertion order, so a sum over it does not depend
+    /// on a thread count or a rank count.
+    pub fn arrival_counts(&self) -> &[u64] {
+        &self.visits
+    }
+
     /// Sets the distance below which two descriptors are one basin.
     pub fn set_merge_radius(&mut self, radius: f64) {
         assert!(radius > 0.0, "merge_radius must be > 0");

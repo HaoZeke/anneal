@@ -617,35 +617,13 @@ impl OccupancyBookMap {
     /// [`Self::entropy_ceiling`] is what it would be if the arrivals were
     /// even.
     pub fn entropy(&self) -> f64 {
-        let total: u64 = self.community_wells.iter().sum();
-        if total == 0 {
-            return 0.0;
-        }
-        let total = total as f64;
-        -self
-            .community_wells
-            .iter()
-            .filter(|count| **count > 0)
-            .map(|count| {
-                let p = *count as f64 / total;
-                p * p.ln()
-            })
-            .sum::<f64>()
+        occupancy_entropy_of(&self.community_wells)
     }
 
     /// \(\ln F\) over occupied communities: the entropy an even spread
     /// would have, and the ceiling [`Self::entropy`] is measured against.
     pub fn entropy_ceiling(&self) -> f64 {
-        let occupied = self
-            .community_wells
-            .iter()
-            .filter(|count| **count > 0)
-            .count();
-        if occupied == 0 {
-            0.0
-        } else {
-            (occupied as f64).ln()
-        }
+        occupancy_entropy_ceiling_of(&self.community_wells)
     }
 
     /// Surprisal \(-\ln p_k\) of each community, in nats, in
@@ -687,6 +665,96 @@ impl OccupancyBookMap {
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(index, _)| index)
     }
+}
+
+/// Shannon entropy \(H=-\sum p_k\ln p_k\) of arrival counts, in nats.
+///
+/// Zero counts are unoccupied and drop out. The sum walks the slice in
+/// order, so the value does not depend on a thread count or a rank count.
+pub fn occupancy_entropy_of(counts: &[u64]) -> f64 {
+    let total: u64 = counts.iter().sum();
+    if total == 0 {
+        return 0.0;
+    }
+    let total = total as f64;
+    -counts
+        .iter()
+        .filter(|count| **count > 0)
+        .map(|count| {
+            let p = *count as f64 / total;
+            p * p.ln()
+        })
+        .sum::<f64>()
+}
+
+/// \(\ln F\) over occupied basins, the ceiling of [`occupancy_entropy_of`].
+pub fn occupancy_entropy_ceiling_of(counts: &[u64]) -> f64 {
+    let occupied = counts.iter().filter(|count| **count > 0).count();
+    if occupied == 0 {
+        0.0
+    } else {
+        (occupied as f64).ln()
+    }
+}
+
+/// How far a closed census sits from a uniform occupancy, in \([0, 1]\).
+///
+/// Chao1 calls the census closed when it has reached the visit floor and
+/// holds no singletons ([`super::packing::GoodTuringSample::chao1_complete`]).
+/// An open census is still discovering basins, and the deficit is zero.
+/// A closed census in one basin has deficit one. A closed uniform census
+/// has deficit zero.
+fn occupancy_deficit(counts: &[u64]) -> f64 {
+    let sample = super::packing::GoodTuringSample::from_counts(counts.iter().copied());
+    if !sample.chao1_complete() {
+        return 0.0;
+    }
+    let occupied = counts.iter().filter(|count| **count > 0).count();
+    if occupied <= 1 {
+        return 1.0;
+    }
+    let ceiling = occupancy_entropy_ceiling_of(counts);
+    if !(ceiling > 0.0) {
+        return 0.0;
+    }
+    let gap = (ceiling - occupancy_entropy_of(counts)) / ceiling;
+    gap.clamp(0.0, 1.0)
+}
+
+/// Raise `t_base` from the entropy of one chain's basin occupancy.
+///
+/// `t_base` is the temperature that chain would hop at without this law:
+/// the budget-window temperature when that window is on, otherwise the
+/// configured temperature. The result is never below `t_base`, so a
+/// spread census does not freeze the chain, and two presets keep
+/// different temperatures when their bases differ.
+///
+/// Wales and Doye, *J. Phys. Chem. A* **101**, 5111 (1997), set the
+/// Metropolis temperature so the acceptance ratio is about one half. A
+/// barrier \(b\) the chain has failed to cross meets that ratio at
+/// \(b / \ln 2\). Wang and Landau, *Phys. Rev. Lett.* **86**, 2050
+/// (2001), push a walker out of a bin the histogram has over-visited.
+/// The push here is [`occupancy_deficit`]: zero while the census is
+/// open or uniform, one when a closed census sits in one basin. The
+/// temperature rises from `t_base` toward \(\max(t_base, b/\ln 2)\) by
+/// that deficit. With no observed barrier the base stands. No
+/// coefficient depends on the number of atoms.
+pub fn occupancy_temperature(counts: &[u64], t_base: f64, barrier: f64) -> f64 {
+    let t_base = if t_base.is_finite() && t_base > 0.0 {
+        t_base
+    } else {
+        0.0
+    };
+    if t_base == 0.0 {
+        return 0.0;
+    }
+    let deficit = occupancy_deficit(counts);
+    if deficit == 0.0 || !(barrier.is_finite() && barrier > 0.0) {
+        return t_base;
+    }
+    let half = barrier / 2.0_f64.ln();
+    let hot = t_base.max(half);
+    t_base + deficit * (hot - t_base)
 }
 
 /// Whether the sparsified book still has holes extras should Leave into.
@@ -2034,9 +2102,9 @@ mod tests {
         occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_by_birth,
         occupancy_leave_by_ei, occupancy_leave_new_class, occupancy_leave_target,
         occupancy_map_floor, occupancy_retire, occupancy_retire_at, occupancy_ring_class_changed,
-        occupancy_ring_floor, occupancy_sparsify_book, packing_role, pitman_yor_p_new,
-        promote_one_sided, published_energy_score, retis_exchange_adjacent, retis_should_swap,
-        ring_leave_weight, ring_novelty, seat_extras,
+        occupancy_ring_floor, occupancy_sparsify_book, occupancy_temperature, packing_role,
+        pitman_yor_p_new, promote_one_sided, published_energy_score, retis_exchange_adjacent,
+        retis_should_swap, ring_leave_weight, ring_novelty, seat_extras,
     };
 
     fn book_of(counts: &[u64]) -> OccupancyBookMap {
@@ -2074,6 +2142,54 @@ mod tests {
             funnel.entropy() < 0.1 * ceiling,
             "999 to 1 must read as nearly no diversity, got {}",
             funnel.entropy()
+        );
+    }
+
+    #[test]
+    fn occupancy_temperature_raises_a_closed_basin_and_holds_a_spread() {
+        let t_base: f64 = 0.8;
+        let barrier = 1.0;
+        let half = barrier / 2.0_f64.ln();
+        let closed: Vec<u64> = vec![20];
+        let raised = occupancy_temperature(&closed, t_base, barrier);
+        assert!(
+            (raised - half).abs() < 1e-12,
+            "a closed single basin accepts its barrier at one half, got {raised}"
+        );
+        assert!(raised > t_base);
+        let even: Vec<u64> = vec![20, 20];
+        assert_eq!(
+            occupancy_temperature(&even, t_base, barrier).to_bits(),
+            t_base.to_bits(),
+            "a closed uniform census keeps the base"
+        );
+        let open = vec![1u64, 1, 1];
+        assert_eq!(
+            occupancy_temperature(&open, t_base, barrier).to_bits(),
+            t_base.to_bits()
+        );
+        assert_eq!(
+            occupancy_temperature(&[1], t_base, barrier).to_bits(),
+            t_base.to_bits()
+        );
+        assert_eq!(
+            occupancy_temperature(&[], t_base, barrier).to_bits(),
+            t_base.to_bits()
+        );
+        assert_eq!(
+            occupancy_temperature(&closed, t_base, 0.0).to_bits(),
+            t_base.to_bits()
+        );
+        let cooler: f64 = 0.2;
+        assert!(occupancy_temperature(&closed, cooler, barrier) >= cooler);
+        assert_ne!(
+            occupancy_temperature(&open, t_base, barrier).to_bits(),
+            occupancy_temperature(&open, cooler, barrier).to_bits(),
+            "the base is the budget-window temperature, and two bases stay distinct"
+        );
+        assert_eq!(
+            occupancy_temperature(&closed, t_base, barrier).to_bits(),
+            occupancy_temperature(&closed, t_base, barrier).to_bits()
         );
     }
 

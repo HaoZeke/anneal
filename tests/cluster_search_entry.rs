@@ -106,6 +106,11 @@ fn recommended_differs_from_for_cluster() {
     assert!(matches!(base.move_library, MoveLibrary::Atomic));
     assert!(!(base.allocate_moves || base.depth_reward || base.tabu_on_stall));
     assert!(!base.trail_on_stall && !base.escape_on_stall && !base.restart_on_stall);
+    assert!(base.occupancy_temperature);
+    assert!(!rec.occupancy_temperature);
+    assert!(!Config::derived(38).occupancy_temperature);
+    assert!(!Config::communicating(38).occupancy_temperature);
+    assert!(!Config::packing_superbasin(38).occupancy_temperature);
 }
 
 #[test]

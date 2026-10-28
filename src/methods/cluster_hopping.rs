@@ -3434,7 +3434,19 @@ where
         } else {
             cfg.temperature
         };
-        let single = single_chain_temperature(cfg, held, dos.as_ref(), e);
+        let base = single_chain_temperature(cfg, held, dos.as_ref(), e);
+        // The occupancy law modulates `base`. It does not replace a
+        // budget-window temperature, and a spread census leaves `base` as it
+        // stands.
+        let single = if cfg.occupancy_temperature {
+            crate::catalog::occupancy::occupancy_temperature(
+                bias.index().arrival_counts(),
+                base,
+                law.barrier(),
+            )
+        } else {
+            base
+        };
         let scale = if n_rep > 1 && cfg.ladder_mode.tempers() {
             temps[rep] / cfg.temperature.max(1e-12)
         } else {
@@ -5060,7 +5072,7 @@ where
                 None,
                 hops
             );
-        } else if cfg.budget_window {
+        } else if cfg.budget_window || cfg.occupancy_temperature {
             // The biased delta, which is what the chain actually declined, not
             // the raw energy difference. The bias is part of the barrier the
             // chain faces, and estimating the barrier without it measures a
