@@ -1,17 +1,25 @@
 use std::convert::Infallible;
+#[cfg(feature = "rgsaddle")]
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anneal_core::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
 use anneal_core::pes_exploration::{
-    ExactStructureWitness, PesExplorationConfig, PesNetwork, PesSurface, RideMethod,
-    StructureContext, discover_cartesian_mode_connection,
-    discover_cartesian_mode_connection_with_budget, discover_mode_connection,
-    quench_minimum_with_norm, stationary_index, stationary_index_cartesian,
+    ExactStructureWitness, PesNetwork, PesSurface, StructureContext, quench_minimum_with_norm,
 };
-use ndarray::{Array1, ArrayView1, array};
+#[cfg(feature = "rgsaddle")]
+use anneal_core::pes_exploration::{
+    PesExplorationConfig, RideMethod, discover_cartesian_mode_connection,
+    discover_cartesian_mode_connection_with_budget, discover_mode_connection, stationary_index,
+    stationary_index_cartesian,
+};
+#[cfg(feature = "rgsaddle")]
+use ndarray::array;
+use ndarray::{Array1, ArrayView1};
 
+#[cfg(feature = "rgsaddle")]
 struct DoubleWell;
 
+#[cfg(feature = "rgsaddle")]
 impl PesSurface for DoubleWell {
     type Error = Infallible;
 
@@ -28,8 +36,10 @@ impl PesSurface for DoubleWell {
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 struct LastCoordinateDoubleWell;
 
+#[cfg(feature = "rgsaddle")]
 impl PesSurface for LastCoordinateDoubleWell {
     type Error = Infallible;
 
@@ -57,8 +67,10 @@ impl PesSurface for NumericalForceFloor {
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 struct ComponentwiseConvergedSaddle;
 
+#[cfg(feature = "rgsaddle")]
 impl PesSurface for ComponentwiseConvergedSaddle {
     type Error = Infallible;
 
@@ -87,8 +99,10 @@ impl PesSurface for ComponentwiseConvergedSaddle {
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 struct IndexTwoSaddle;
 
+#[cfg(feature = "rgsaddle")]
 impl PesSurface for IndexTwoSaddle {
     type Error = Infallible;
 
@@ -105,8 +119,10 @@ impl PesSurface for IndexTwoSaddle {
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 struct RadialPairBarrier;
 
+#[cfg(feature = "rgsaddle")]
 impl PesSurface for RadialPairBarrier {
     type Error = Infallible;
 
@@ -134,10 +150,12 @@ impl PesSurface for RadialPairBarrier {
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 struct CountingRadialPairBarrier {
     calls: AtomicU64,
 }
 
+#[cfg(feature = "rgsaddle")]
 impl CountingRadialPairBarrier {
     fn new() -> Self {
         Self {
@@ -150,6 +168,7 @@ impl CountingRadialPairBarrier {
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 impl PesSurface for CountingRadialPairBarrier {
     type Error = Infallible;
 
@@ -159,8 +178,10 @@ impl PesSurface for CountingRadialPairBarrier {
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 struct FrozenContaminatedIndex;
 
+#[cfg(feature = "rgsaddle")]
 impl PesSurface for FrozenContaminatedIndex {
     type Error = Infallible;
 
@@ -196,6 +217,7 @@ impl ExactStructureWitness for CartesianWitness {
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 #[test]
 fn rgmin_rgsaddle_connection_finds_both_double_well_minima() {
     let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
@@ -251,6 +273,7 @@ fn rgmin_rgsaddle_connection_finds_both_double_well_minima() {
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 #[test]
 fn prfo_handoff_preserves_a_nonleading_unstable_mode() {
     let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
@@ -304,6 +327,7 @@ fn quench_certification_accepts_a_measured_force_floor_inside_the_norm_gate() {
     assert!(minimum.gradient.dot(&minimum.gradient).sqrt() < 1e-5);
 }
 
+#[cfg(feature = "rgsaddle")]
 #[test]
 fn prfo_refinement_uses_the_receivers_componentwise_force_gate() {
     let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
@@ -342,6 +366,7 @@ fn prfo_refinement_uses_the_receivers_componentwise_force_gate() {
     assert!(connection.saddle_max_gradient <= config.saddle_force_tolerance);
 }
 
+#[cfg(feature = "rgsaddle")]
 #[test]
 fn constrained_atomistic_connection_certifies_only_free_modes() {
     let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
@@ -383,6 +408,7 @@ fn constrained_atomistic_connection_certifies_only_free_modes() {
     assert_eq!(network.saddle_count(), 1);
 }
 
+#[cfg(feature = "rgsaddle")]
 #[test]
 fn atomistic_ride_has_a_hard_pes_call_boundary() {
     let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
@@ -425,6 +451,7 @@ fn atomistic_ride_has_a_hard_pes_call_boundary() {
     assert_eq!(surface.calls(), 1);
 }
 
+#[cfg(feature = "rgsaddle")]
 #[test]
 fn budgeted_atomistic_ride_preserves_free_mode_index_certification() {
     let descriptor_space = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
@@ -471,6 +498,7 @@ fn budgeted_atomistic_ride_preserves_free_mode_index_certification() {
     assert_eq!(network.saddle_count(), 1);
 }
 
+#[cfg(feature = "rgsaddle")]
 #[test]
 fn finite_difference_index_counts_every_unstable_mode() {
     let report = stationary_index(&IndexTwoSaddle, Array1::zeros(6).view(), 1e-4, 1e-7).unwrap();
@@ -481,6 +509,7 @@ fn finite_difference_index_counts_every_unstable_mode() {
     assert!(report.eigenvalues[2] > 1.9);
 }
 
+#[cfg(feature = "rgsaddle")]
 #[test]
 fn cartesian_index_excludes_finite_cluster_rigid_modes() {
     let coordinates = Array1::from_vec(vec![-0.5, 0.0, 0.0, 0.5, 0.0, 0.0]);
@@ -499,6 +528,7 @@ fn cartesian_index_excludes_finite_cluster_rigid_modes() {
     assert!(report.lowest_mode[0] * report.lowest_mode[3] < 0.0);
 }
 
+#[cfg(feature = "rgsaddle")]
 #[test]
 fn cartesian_index_excludes_frozen_surface_coordinates() {
     let report = stationary_index_cartesian(
