@@ -1,4 +1,4 @@
-use anneal_core::methods::cluster_hopping::{Config, Ledger};
+use anneal_core::methods::cluster_hopping::{Config, Ledger, MoveLibrary};
 use anneal_core::methods::cluster_search::search;
 use anneal_core::methods::two_phase::TwoPhase;
 use anneal_core::potentials::PairPotential;
@@ -8,7 +8,7 @@ const LJ38_OCTAHEDRON: f64 = -173.928427;
 fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
     let pot = PairPotential::lennard_jones(cfg.n_points);
     let mut ledger = Ledger::new(budget);
-    let (out, _) = search(&pot, cfg, &mut ledger, seed);
+    let (out, _) = search(&pot, cfg, &mut ledger, seed).expect("finite start");
     (out.best, out.hops, ledger.spent())
 }
 
@@ -16,6 +16,13 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not() {
     let budget = 30_000;
     let mut plain = Config::recommended(38);
+    // The surface comparison is the LeanBurst walk. The 38-point reseed
+    // and the stall exits are a different measurement.
+    plain.move_library = MoveLibrary::LeanBurst;
+    plain.trail_on_stall = false;
+    plain.escape_on_stall = false;
+    plain.restart_on_stall = false;
+    plain.bayes_screen = false;
     plain.surfaces.clear();
     let mut compacted = plain.clone();
     compacted.two_phase = Some(TwoPhase::relative(0.7, 1.0));

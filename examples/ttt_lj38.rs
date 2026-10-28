@@ -14,17 +14,20 @@
 //! resolvable at this many runs, a shifted-exponential fit, and the
 //! parallel speedup that fit implies for an ensemble.
 //!
+//! Each run is `cluster_search::search_from` on [`Config::recommended`]
+//! from a jittered icosahedral start, so it walks as a library caller does.
+//!
 //! Usage: `ttt_lj38 [runs] [budget] [target]`, default 32 runs of
 //! 25000 evaluations against -173.928427, the truncated octahedron.
 
-use anneal_core::methods::cluster_hopping::{Config, Ledger, SoapProposalMode, run_with_gradient};
-use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use anneal_core::methods::cluster_hopping::{Config, Ledger, SoapProposalMode};
+use anneal_core::methods::cluster_search;
 use anneal_core::potentials::PairPotential;
 use anneal_core::runtime_distribution::{
     RunTime, offset_is_resolved, parallel_speedup, reached_quantile, resolvable_shortfall,
     runs_for_resolution, shifted_exponential_fit, speedup_ceiling, success_rate,
 };
-use ndarray::{Array1, ArrayView1};
+use ndarray::Array1;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
@@ -55,26 +58,9 @@ fn time_to_target(soap: bool, seed: u64, budget: usize, target: f64) -> RunTime 
     };
     let potential = PairPotential::lennard_jones(N);
     let mut ledger = Ledger::new(budget);
-    let mut optimiser = WarmLbfgs::default();
-    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
-        optimiser.forget();
-        let (value, relaxed, _) = optimiser.minimize(x, iterations, |v| {
-            if !led.charge() {
-                return None;
-            }
-            Some(potential.value_and_gradient(v))
-        });
-        (value, relaxed)
-    };
-    let mut rng = StdRng::seed_from_u64(seed);
-    let out = run_with_gradient(
-        &cfg,
-        ico_start(seed).view(),
-        &mut ledger,
-        &mut relax,
-        None,
-        &mut rng,
-    );
+    let (out, _) =
+        cluster_search::search_from(&potential, &cfg, &mut ledger, ico_start(seed).view(), seed)
+            .expect("finite start");
     out.improvements
         .iter()
         .find(|(_, _, _, energy)| *energy <= target + 1e-4)

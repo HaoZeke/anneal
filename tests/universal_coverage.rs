@@ -101,6 +101,15 @@ fn unseen_block_structure_outranks_an_observed_minimum_without_a_radius() {
     assert!(novel.energy_standard_deviation > known.energy_standard_deviation);
     assert!(novel.residual_variance > known.residual_variance);
     assert!(novel.acquisition > known.acquisition);
+    assert_eq!(
+        coverage.graph_field_uncertainty(Some(0)),
+        known.residual_variance
+    );
+    assert_eq!(
+        coverage.graph_field_uncertainty(None),
+        coverage.graph_field_uncertainty(Some(99))
+    );
+    assert!(coverage.graph_field_uncertainty(None) >= known.residual_variance);
 }
 
 #[test]

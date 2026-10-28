@@ -1603,7 +1603,11 @@ const PENTAGON_CAP: f64 = 0.75;
 const RECON_LO: f64 = 0.89;
 const RECON_HI: f64 = 1.00;
 
-/// Fivefold SOFI/greedy length of `x` about the best candidate axis.
+/// Fivefold length of `x` about the best candidate axis.
+///
+/// SOFI/IRA when that feature is linked. Otherwise the length is the
+/// root-mean-square of the minimum-cost assignment, which does not
+/// depend on storage order.
 pub fn fivefold_length(x: ArrayView1<f64>) -> f64 {
     fivefold_residual(x).0
 }
@@ -1664,32 +1668,87 @@ fn ico_axes() -> [[f64; 3]; 6] {
     ]
 }
 
+/// Minimum-cost assignment of a square matrix.
+///
+/// `cost[i * n + j]` is the cost of matching row `i` to column `j`.
+/// The result is `perm[i] = column`. The optimum is a property of the
+/// costs, so a simultaneous permutation of the rows and columns does
+/// not change which points are matched. An index-order greedy pass does.
 #[cfg_attr(feature = "ira", allow(dead_code))]
-fn nearest_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
-    let n = x.len() / 3;
-    let mut used = vec![false; n];
-    let mut perm = vec![0usize; n];
-    for i in 0..n {
-        let mut best = 0usize;
-        let mut best_d = f64::INFINITY;
-        for j in 0..n {
-            if used[j] {
-                continue;
+fn hungarian(cost: &[f64], n: usize) -> Vec<usize> {
+    let mut u = vec![0.0; n + 1];
+    let mut v = vec![0.0; n + 1];
+    let mut p = vec![0usize; n + 1];
+    let mut way = vec![0usize; n + 1];
+    for i in 1..=n {
+        p[0] = i;
+        let mut j0 = 0usize;
+        let mut minv = vec![f64::INFINITY; n + 1];
+        let mut used = vec![false; n + 1];
+        loop {
+            used[j0] = true;
+            let i0 = p[j0];
+            let mut delta = f64::INFINITY;
+            let mut j1 = 0usize;
+            for j in 1..=n {
+                if used[j] {
+                    continue;
+                }
+                let cur = cost[(i0 - 1) * n + (j - 1)] - u[i0] - v[j];
+                if cur < minv[j] {
+                    minv[j] = cur;
+                    way[j] = j0;
+                }
+                if minv[j] < delta {
+                    delta = minv[j];
+                    j1 = j;
+                }
             }
+            for j in 0..=n {
+                if used[j] {
+                    u[p[j]] += delta;
+                    v[j] -= delta;
+                } else {
+                    minv[j] -= delta;
+                }
+            }
+            j0 = j1;
+            if p[j0] == 0 {
+                break;
+            }
+        }
+        loop {
+            let j1 = way[j0];
+            p[j0] = p[j1];
+            j0 = j1;
+            if j0 == 0 {
+                break;
+            }
+        }
+    }
+    let mut perm = vec![0usize; n];
+    for j in 1..=n {
+        perm[p[j] - 1] = j - 1;
+    }
+    perm
+}
+
+/// Columns matched to each row of `x` under the minimum sum of squared distances.
+#[cfg_attr(feature = "ira", allow(dead_code))]
+fn optimal_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
+    let n = x.len() / 3;
+    let mut cost = vec![0.0; n * n];
+    for i in 0..n {
+        for j in 0..n {
             let mut d2 = 0.0;
             for a in 0..3 {
                 let d = x[3 * i + a] - y[3 * j + a];
                 d2 += d * d;
             }
-            if d2 < best_d {
-                best_d = d2;
-                best = j;
-            }
+            cost[i * n + j] = d2;
         }
-        used[best] = true;
-        perm[i] = best;
     }
-    perm
+    hungarian(&cost, n)
 }
 
 fn com_of(x: ArrayView1<f64>) -> [f64; 3] {
@@ -1745,7 +1804,25 @@ fn candidate_axes(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
         let r2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
         far.push((r2, v));
     }
-    far.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    far.sort_by(|a, b| {
+        b.0.partial_cmp(&a.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(
+                b.1[2]
+                    .partial_cmp(&a.1[2])
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
+            .then(
+                b.1[1]
+                    .partial_cmp(&a.1[1])
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
+            .then(
+                b.1[0]
+                    .partial_cmp(&a.1[0])
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
+    });
     for &(_, v) in far.iter().take(12.min(n)) {
         if let Some(u) = norm3(v)
             && axis_unique(&axes, u)
@@ -1798,14 +1875,7 @@ fn residual_about(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
             y[3 * i + 1] = q[1];
             y[3 * i + 2] = q[2];
         }
-        let xc_view = {
-            let mut t = Array1::zeros(x.len());
-            for i in 0..x.len() {
-                t[i] = xc[i];
-            }
-            t
-        };
-        let perm = nearest_perm(xc_view.view(), &y);
+        let perm = optimal_perm(ArrayView1::from(xc.as_slice()), &y);
         let mut y_m = vec![0.0; x.len()];
         for i in 0..n {
             for a in 0..3 {
@@ -1827,7 +1897,7 @@ fn residual_about(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
 }
 
 /// Residual `x − R_5 x` under the best fivefold axis, and that axis's
-/// deviation length. SOFI/IRA when linked; greedy assignment otherwise.
+/// deviation length. SOFI/IRA when linked; Hungarian assignment otherwise.
 fn fivefold_residual(x: ArrayView1<f64>) -> (f64, [f64; 3], Array1<f64>) {
     let mut best_d = f64::INFINITY;
     let mut best_ax = [0.0, 0.0, 1.0];
@@ -2004,11 +2074,154 @@ pub fn step_away_fivefold_measured(x: ArrayView1<f64>, rmsd: f64) -> Array1<f64>
     scale_to_cap(x, dr, rmsd)
 }
 
+/// Interior angle of a regular pentagon, `3π/5`.
+///
+/// A fivefold symmetry is a turn by `2π/5`. The interior angle is not a
+/// power of that turn. Assigning the cloud onto a copy rotated by the
+/// interior angle is a minimum-cost matching, and the residual of that
+/// matching sits on five atoms. Scaling it by [`PENTAGON_CAP`] is the
+/// step from a Mackay pentagon onto the anti-Mackay sites.
+const PENTAGON_INTERIOR: f64 = 3.0 * PI / 5.0;
+
+/// Quench rise that is the Mackay to anti-Mackay reconstruction.
+///
+/// One nearest-neighbour Lennard-Jones contact is a well of depth 1.
+/// The second neighbour lies at `2^{2/3}` and contributes `-15/64`.
+/// The reconstruction drops one nearest neighbour and keeps that
+/// second shell, so the rise sits above a bare contact,
+/// `1 + (15/64)/10 = 1.0234375`, and below one well plus half the
+/// second shell, `1 + (15/64)/2 = 1.1171875`. Widened outward to the
+/// hundredth, the open interval is `(1.02, 1.12)`. The other pentagon
+/// of the same shell returns by about a tenth and stays Mackay. A
+/// second broken contact rises by about two wells. This is the pair
+/// potential, not a fit to search seeds.
+const DOORWAY_LO: f64 = 1.02;
+const DOORWAY_HI: f64 = 1.12;
+
+fn canonical_direction(u: [f64; 3]) -> [f64; 3] {
+    for component in u {
+        if component > 1e-9 {
+            return u;
+        }
+        if component < -1e-9 {
+            return [-u[0], -u[1], -u[2]];
+        }
+    }
+    u
+}
+
+/// Candidate axes with a fixed sign and a geometric order.
+///
+/// Opposite vertices name one axis. The sign is the one whose first
+/// nonzero component is positive, and the list is sorted by that
+/// direction, so a permutation of the atoms does not reorder it.
+fn opening_axes(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
+    let mut axes = Vec::new();
+    for axis in candidate_axes(x) {
+        let direction = canonical_direction(axis);
+        if axis_unique(&axes, direction) {
+            axes.push(direction);
+        }
+    }
+    axes.sort_by(|left, right| {
+        left[0]
+            .partial_cmp(&right[0])
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(
+                left[1]
+                    .partial_cmp(&right[1])
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
+            .then(
+                left[2]
+                    .partial_cmp(&right[2])
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
+    });
+    axes
+}
+
+/// Optimal residual of a turn by the pentagon's interior angle.
+fn interior_opening(x: ArrayView1<f64>, axis: [f64; 3], sign: f64) -> Array1<f64> {
+    let n = x.len() / 3;
+    let com = com_of(x);
+    let rmat = rotation_about(axis, sign * PENTAGON_INTERIOR);
+    let mut centred = vec![0.0; x.len()];
+    let mut turned = vec![0.0; x.len()];
+    for i in 0..n {
+        let point = [
+            x[3 * i] - com[0],
+            x[3 * i + 1] - com[1],
+            x[3 * i + 2] - com[2],
+        ];
+        for axis_i in 0..3 {
+            centred[3 * i + axis_i] = point[axis_i];
+        }
+        let image = rot_apply(&rmat, point);
+        for axis_i in 0..3 {
+            turned[3 * i + axis_i] = image[axis_i];
+        }
+    }
+    let perm = optimal_perm(ArrayView1::from(centred.as_slice()), &turned);
+    let mut dr = Array1::zeros(x.len());
+    for i in 0..n {
+        for axis_i in 0..3 {
+            dr[3 * i + axis_i] = centred[3 * i + axis_i] - turned[3 * perm[i] + axis_i];
+        }
+    }
+    concentrate_residual(&mut dr, 5);
+    scale_support_to_cap(x, dr, PENTAGON_CAP)
+}
+
+/// Stall openings off a shell whose 555 fraction is still icosahedral.
+///
+/// Each entry turns one candidate axis by the pentagon's interior
+/// angle, in either sense, and steps the five atoms that carry the
+/// optimal residual. Marks and the tetrahedral minimum sit below the
+/// 555 cut. No deposited geometry is compared, and the call does not
+/// name an energy or a size.
+pub fn fivefold_openings(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
+    let n = x.len() / 3;
+    if n <= 13 || !ih_dominated(x, SoapSpec::default()) {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
+    for axis in opening_axes(x) {
+        for sign in [1.0, -1.0] {
+            let opened = interior_opening(x, axis, sign);
+            let moved = opened
+                .iter()
+                .zip(x.iter())
+                .any(|(after, before)| (after - before).abs() > 1e-12);
+            if moved {
+                found.push(opened);
+            }
+        }
+    }
+    found
+}
+
+/// Whether a quenched opening is the Mackay to anti-Mackay doorway.
+///
+/// A descent back onto the occupied shelf is not this step, and neither
+/// is the first rise above half a unit. The rise has to fall in
+/// `(1.02, 1.12)`, the one-bond window around the reconstruction.
+pub fn opening_left(current: f64, opened: f64) -> bool {
+    let rise = opened - current;
+    rise.is_finite() && rise > DOORWAY_LO && rise < DOORWAY_HI
+}
+
 /// Leave the fivefold funnel: amplify the SOFI C5 residual on the
 /// high-mismatch shell, or break a perfect pentagon. Yields unless
 /// at least two candidate axes are still fivefold. On an open shell
 /// the axis is drawn from the good set so the hop is not a single
 /// deterministic pentagon.
+///
+/// This draw is not the stall opening. A random choice between the
+/// pentagon near 0.90 and the one near 0.99, used on every hop, rescued
+/// one subset of the shelf and lost another. The stall opening is
+/// [`fivefold_openings`], which takes the lower pentagon after the
+/// chain has stopped improving.
 pub fn step_away_fivefold<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     rmsd: f64,
@@ -3596,5 +3809,100 @@ mod tests {
             max_d < 1e-4 * max_a.max(1e-6) + 1e-6,
             "nu3 J disagrees with FD: max|Δ|={max_d} max|FD|={max_a}"
         );
+    }
+
+    fn load_xyz(text: &str) -> Array1<f64> {
+        let mut coords = Vec::new();
+        for line in text.lines().skip(2) {
+            let mut parts = line.split_whitespace();
+            if parts.next().is_none() {
+                continue;
+            }
+            for _ in 0..3 {
+                coords.push(parts.next().unwrap().parse::<f64>().unwrap());
+            }
+        }
+        Array1::from_vec(coords)
+    }
+
+    fn quench_lj_state(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let n = x.len() / 3;
+        let potential = crate::potentials::PairPotential::lennard_jones(n);
+        let mut optimiser = crate::methods::warm_lbfgs::WarmLbfgs::default();
+        let (value, relaxed, _) =
+            optimiser.minimize(x, 400, |v| Some(potential.value_and_gradient(v)));
+        (value, relaxed)
+    }
+
+    fn permute_atoms(x: &Array1<f64>, order: &[usize]) -> Array1<f64> {
+        let mut y = Array1::zeros(x.len());
+        for (slot, &src) in order.iter().enumerate() {
+            for axis in 0..3 {
+                y[3 * slot + axis] = x[3 * src + axis];
+            }
+        }
+        y
+    }
+
+    /// The deposited Mackay shell, in every storage order the rejection tried.
+    ///
+    /// The doorway is a property of the cloud. Shuffling the quenched
+    /// atoms must still land in the Mackay to anti-Mackay window, and on
+    /// the same minimum. Marks, the 38-point octahedron, and the
+    /// tetrahedral minimum are not icosahedral shells.
+    #[test]
+    fn fivefold_opening_is_invariant_under_deposited_order() {
+        let fixture = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let marks = load_xyz(include_str!("../tests/fixtures/lj75_marks.xyz"));
+        let fcc = load_xyz(include_str!("../tests/fixtures/lj38_fcc.xyz"));
+        let tetrahedral = load_xyz(include_str!("../tests/fixtures/lj98_gm.xyz"));
+        assert!(fivefold_openings(marks.view()).is_empty());
+        assert!(fivefold_openings(fcc.view()).is_empty());
+        assert!(fivefold_openings(tetrahedral.view()).is_empty());
+        let (shelf, quenched) = quench_lj_state(fixture.view());
+        let length = fivefold_length(quenched.view());
+        let doorway = |cloud: &Array1<f64>| -> f64 {
+            let mut rise = None;
+            for opened in fivefold_openings(cloud.view()) {
+                let (landed, _) = quench_lj_state(opened.view());
+                let gap = landed - shelf;
+                if opening_left(shelf, landed) {
+                    rise = Some(gap);
+                    break;
+                }
+            }
+            rise.expect("no Mackay to anti-Mackay opening")
+        };
+        let deposited = doorway(&quenched);
+        assert!(
+            (super::DOORWAY_LO..super::DOORWAY_HI).contains(&deposited),
+            "deposited rise {deposited} from {shelf}"
+        );
+        let n = quenched.len() / 3;
+        let mut rng = StdRng::seed_from_u64(0);
+        for seed in 0..24 {
+            let mut order: Vec<usize> = (0..n).collect();
+            for i in (1..n).rev() {
+                let j = rng.random_range(0..=i);
+                order.swap(i, j);
+            }
+            let scrambled = permute_atoms(&quenched, &order);
+            let scrambled_length = fivefold_length(scrambled.view());
+            assert!(
+                (scrambled_length - length).abs() < 1e-8,
+                "perm {seed} length {scrambled_length} vs {length}"
+            );
+            let rise = doorway(&scrambled);
+            assert!(
+                (rise - deposited).abs() < 1e-4,
+                "perm {seed} rise {rise} left the doorway {deposited}"
+            );
+        }
+        let mut reversed: Vec<usize> = (0..n).rev().collect();
+        let rise = doorway(&permute_atoms(&quenched, &reversed));
+        assert!((rise - deposited).abs() < 1e-4, "reversed rise {rise}");
+        reversed.rotate_left(1);
+        let rise = doorway(&permute_atoms(&quenched, &reversed));
+        assert!((rise - deposited).abs() < 1e-4, "rotated rise {rise}");
     }
 }

@@ -11,13 +11,16 @@
 //!   each, with no exchange.
 //! - `shared`: the lattice ensemble of
 //!   [`anneal_core::methods::lattice_ensemble`] with one bank.
-//! - `private`: the same ensemble with one bank per chain.
+//! - `private`: the same ensemble with one bank per chain. Unless `SLOTS` is
+//!   set, this arm uses two slots, the smallest bank with a donor. One slot
+//!   never splices.
+//! - `nosplice`: the shared bank with `splice` forced to 0.
 //!
-//! The recommended chain is the code path of `lj_ensemble_splice` in its
-//! `indep` mode: [`Config::recommended`], a random start at density 0.7, the
-//! warm L-BFGS quench charged per call, and a checkpoint every 500 calls that
-//! changes nothing. Ensemble `s` seeds chain `c` with `s * 0x9E3779B9 + c + 7`
-//! in every arm, so the arms are paired by ensemble.
+//! The recommended chain is [`cluster_search::search`] on
+//! [`Config::recommended`], the entry a library caller runs, so the preset's
+//! surfaces and record tolerance are in its quench. Ensemble `s` seeds chain
+//! `c` with `s * 0x9E3779B9 + c + 7` in every arm, so the arms are paired by
+//! ensemble.
 //!
 //! First-hit cost is in force calls of the whole ensemble. `serial` reports
 //! its chain's ledger at the first hit; `indep` reports `CHAINS` times the
@@ -32,10 +35,12 @@
 //! costs at most one call ([`anneal_core::methods::lattice_search`]).
 //!
 //! `shared` against `private` holds the trial rules, the lattice descent and
-//! its quench fixed and measures the bank: the exchange of members and, at
-//! one slot, splicing between chains. A lattice arm against a recommended arm
+//! its quench fixed and measures the bank. At two slots the private bank can
+//! splice; at one slot it cannot, so that setting removes splicing as well
+//! as the exchange of members. A lattice arm against a recommended arm
 //! changes the search itself, quench included: the step-capped L-BFGS of the
-//! GMIN form against the strong Wolfe L-BFGS of [`WarmLbfgs`]. A margin over
+//! GMIN form against the strong Wolfe L-BFGS of
+//! [`anneal_core::methods::warm_lbfgs::WarmLbfgs`]. A margin over
 //! the recommended arms that `private` matches is the lattice search's, not
 //! communication's.
 //!
@@ -51,53 +56,17 @@
 use std::io::Write;
 use std::time::Instant;
 
-use anneal_core::bias::BasinBias;
-use anneal_core::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, random_cluster,
-    run_with_bias_at_checkpoints,
-};
-use anneal_core::methods::cluster_search::{Encounter, median_encounter};
-use anneal_core::methods::lattice_ensemble::{self, Plan, Sharing};
+use anneal_core::methods::cluster_hopping::{Config, Ledger};
+use anneal_core::methods::cluster_search::{self, Encounter, median_encounter};
+use anneal_core::methods::lattice_ensemble::{self, Plan, Sharing, StartRule};
 use anneal_core::methods::lattice_search::{Lattice, Quench};
-use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use anneal_core::potentials::{PairKind, PairPotential};
 use anneal_core::structure::cna_descriptor;
-use ndarray::{Array1, ArrayView1};
-use rand::SeedableRng;
-use rand::rngs::StdRng;
+use ndarray::ArrayView1;
 use rayon::prelude::*;
 
 /// Hit tolerance above the reference energy.
 const HIT: f64 = 1e-4;
-
-/// Lennard-Jones value and gradient in reduced units, no cutoff.
-///
-/// The summation order is that of `lj_ensemble_splice`, so the recommended
-/// arms replay its chains bit for bit.
-fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-    let n = x.len() / 3;
-    let mut e = 0.0;
-    let mut g = Array1::zeros(x.len());
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let d = [
-                x[3 * i] - x[3 * j],
-                x[3 * i + 1] - x[3 * j + 1],
-                x[3 * i + 2] - x[3 * j + 2],
-            ];
-            let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-            let inv2 = 1.0 / r2;
-            let inv6 = inv2 * inv2 * inv2;
-            let inv12 = inv6 * inv6;
-            e += 4.0 * (inv12 - inv6);
-            let coef = 24.0 * inv2 * (2.0 * inv12 - inv6);
-            for k in 0..3 {
-                g[3 * i + k] -= coef * d[k];
-                g[3 * j + k] += coef * d[k];
-            }
-        }
-    }
-    (e, g)
-}
 
 fn reference(n: usize) -> Option<f64> {
     Some(match n {
@@ -142,40 +111,10 @@ struct ChainResult {
 /// One recommended chain on `budget` calls, scored after it ends.
 fn recommended_chain(n: usize, budget: usize, seed: u64, target: Option<f64>) -> ChainResult {
     let cfg = Config::recommended(n);
-    let mut rng = StdRng::seed_from_u64(seed);
-    let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
     let mut ledger = Ledger::new(budget);
-    let mut opt = WarmLbfgs::default();
-    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
-        let before = led.spent();
-        opt.forget();
-        let (f, xr, _) = opt.minimize(x, iters, |v| {
-            if !led.charge() {
-                return None;
-            }
-            Some(lj(v))
-        });
-        led.record_quench_boundary(before, f, xr.clone(), None);
-        (f, xr)
-    };
-    let mut bias = BasinBias::new(
-        ClusterFingerprint::for_keying(n, cfg.shape_keyed),
-        cfg.merge_radius,
-        cfg.bias_height,
-        cfg.bias_gamma,
-    );
-    let mut checkpoint = |_: ChainCheckpoint<'_>| CheckpointAction::Continue;
-    let outcome = run_with_bias_at_checkpoints(
-        &cfg,
-        start.view(),
-        &mut ledger,
-        &mut relax,
-        None,
-        &mut bias,
-        &mut rng,
-        500,
-        &mut checkpoint,
-    );
+    let (outcome, _) =
+        cluster_search::search(&PairPotential::lennard_jones(n), &cfg, &mut ledger, seed)
+            .expect("finite start");
     let first_hit = target.and_then(|reference| {
         outcome
             .improvements
@@ -209,10 +148,16 @@ fn main() {
         .map_or(400_000, |v| v as usize);
     let ensembles: u64 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(10);
     let arm = args.get(4).cloned().unwrap_or_else(|| "shared".to_owned());
-    let seed0: u64 = args.get(5).and_then(|v| v.parse().ok()).unwrap_or(900);
+    let seed0: u64 = args.get(5).and_then(|v| v.parse().ok()).unwrap_or(match n {
+        75 | 98 => 3_000,
+        _ => 3_100,
+    });
     let threads: usize = args.get(6).and_then(|v| v.parse().ok()).unwrap_or(4);
-    if !matches!(arm.as_str(), "serial" | "indep" | "shared" | "private") {
-        eprintln!("unknown arm {arm:?}: expected serial, indep, shared or private");
+    if !matches!(
+        arm.as_str(),
+        "serial" | "indep" | "shared" | "private" | "nosplice"
+    ) {
+        eprintln!("unknown arm {arm:?}: expected serial, indep, shared, private or nosplice");
         std::process::exit(2);
     }
     let chains = if arm == "serial" {
@@ -220,16 +165,20 @@ fn main() {
     } else {
         env_usize("CHAINS", 40).max(1)
     };
+    let mut slots = env_usize("SLOTS", Plan::default().slots);
+    if arm == "private" && std::env::var("SLOTS").is_err() {
+        slots = 2;
+    }
     let target = reference(n);
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(threads)
         .build()
         .expect("thread pool");
     let seeds: Vec<u64> = (seed0..seed0 + ensembles).collect();
-    let lattice_arm = matches!(arm.as_str(), "shared" | "private");
-    let plan = Plan {
+    let lattice_arm = matches!(arm.as_str(), "shared" | "private" | "nosplice");
+    let mut plan = Plan {
         chains,
-        slots: env_usize("SLOTS", Plan::default().slots),
+        slots,
         fresh: env_f64("FRESH", Plan::default().fresh),
         splice: env_f64("SPLICE", Plan::default().splice),
         moved: (
@@ -241,7 +190,10 @@ fn main() {
             env_f64("MERGE_END", Plan::default().merge.1),
         ),
         retire: env_usize("RETIRE", Plan::default().retire),
-        density: env_f64("DENSITY", Plan::default().density),
+        start: match std::env::var("DENSITY") {
+            Ok(value) => StartRule::Density(value.parse().unwrap_or(0.7)),
+            Err(_) => StartRule::PresetSphere,
+        },
         sharing: if arm == "private" {
             Sharing::Private
         } else {
@@ -249,16 +201,19 @@ fn main() {
         },
         ..Plan::default()
     };
+    if arm == "nosplice" {
+        plan.sharing = Sharing::Shared;
+        plan.splice = 0.0;
+    }
     let quench = Quench {
         max_step: env_f64("QUENCH_STEP", Quench::default().max_step),
         rms_tolerance: env_f64("QUENCH_TOL", Quench::default().rms_tolerance),
         memory: env_usize("QUENCH_MEMORY", Quench::default().memory),
         ..Quench::default()
     };
-    let lattice = Lattice {
-        candidates: env_usize("LATTICE_CANDIDATES", Lattice::default().candidates),
-        ..Lattice::default()
-    };
+    let kind = PairKind::LennardJones;
+    let mut lattice = Lattice::for_pair(kind);
+    lattice.candidates = env_usize("LATTICE_CANDIDATES", lattice.candidates);
     println!(
         "LJ N={n}, arm {arm}, total {total} per ensemble, {chains} chains x {} charged, \
          {ensembles} ensembles from seed {seed0}, threads {threads}, reference {}",
@@ -267,7 +222,7 @@ fn main() {
     );
     if lattice_arm {
         println!(
-            "  plan: slots {} fresh {} splice {} moved {}..{} merge {}->{} retire {} density {} min_separation {}; \
+            "  plan: slots {} fresh {} splice {} moved {}..{} merge {}->{} retire {} start {} min_separation {}; \
              quench step {} tol {} memory {} iterations {}; lattice candidates {} bond {:.4} hollow {:.4} site {:.4} clearance {:.4}",
             plan.slots,
             plan.fresh,
@@ -277,7 +232,10 @@ fn main() {
             plan.merge.0,
             plan.merge.1,
             plan.retire,
-            plan.density,
+            match plan.start {
+                StartRule::PresetSphere => "preset-sphere".to_owned(),
+                StartRule::Density(density) => format!("density {density}"),
+            },
             plan.min_separation,
             quench.max_step,
             quench.rms_tolerance,
@@ -290,7 +248,7 @@ fn main() {
             lattice.clearance,
         );
     } else {
-        println!("  recommended chain: Config::recommended({n}), checkpoint 500, density 0.7");
+        println!("  recommended chain: cluster_search::search on Config::recommended({n})");
     }
     let show_bank = env_usize("SHOW_BANK", 0) == 1;
     let chunk = if arm == "indep" { 1 } else { threads.max(1) };
@@ -302,7 +260,9 @@ fn main() {
                 group
                     .par_iter()
                     .map(|&seed| {
-                        let run = lattice_ensemble::run(n, total, seed, &plan, &quench, &lattice);
+                        let run = lattice_ensemble::run_with_lattice(
+                            n, total, seed, &plan, &quench, &lattice,
+                        );
                         let solved = target.is_some_and(|r| run.best < r + HIT);
                         let hit = target.and_then(|r| {
                             run.trace.iter().find(|record| record.energy < r + HIT)

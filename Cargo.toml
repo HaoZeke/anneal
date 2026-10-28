@@ -1,6 +1,16 @@
+[workspace]
+# The root package is the member. `members = ["."]` is a prefix of every
+# path under the root, which would mark the vendored crates as explicit
+# members and defeat `exclude`. Edition 2024 already selects the resolver;
+# an explicit `resolver = "2"` would change it.
+# Vendored path dependencies live in this tree. Cargo would otherwise adopt
+# them as workspace members, and `cargo fmt --all` would rewrite them with
+# stable rustfmt.
+exclude = ["vendor/nng", "vendor/nng-sys", "vendor/metatensor-sys"]
+
 [package]
 name = "anneal-core"
-version = "0.11.1"
+version = "0.12.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -8,6 +18,9 @@ description = "Simulated annealing components built on the eindir typed primitiv
 repository = "https://github.com/HaoZeke/anneal"
 categories = ["science", "mathematics"]
 keywords = ["optimization", "simulated-annealing", "metaheuristic"]
+# Development pins and the out-of-tree target directory. The published
+# crate resolves registry versions.
+exclude = [".cargo/config.toml"]
 
 [lib]
 name = "anneal_core"
@@ -29,14 +42,20 @@ featomic = ["dep:featomic", "dep:metatensor"]
 # Neighbour construction through the vesin cell lists.
 vesin-nl = []
 # Cap'n Proto shared bank. Chains are separate processes.
-bank-rpc = ["dep:capnp", "dep:capnp-rpc", "dep:futures", "dep:nng", "dep:tokio", "dep:tokio-util", "dep:libc"]
+bank-rpc = ["dep:capnp", "dep:capnp-rpc", "dep:futures", "dep:nng", "dep:tokio", "dep:tokio-util", "dep:libc", "rgsaddle"]
 # REQ/REP transport for MinimumHistory. Independent of catalog/census.
 history-nng = ["dep:nng"]
+# Minimum-saddle-minimum sessions, stationary-index checks, the
+# constant-energy (NVE) minima-hopping escape, and the dense symmetric
+# eigensolve used by a connected spectral split. Off by default. `python`
+# and `bank-rpc` turn it on. The feature compiles rgsaddle 0.3.0 from
+# crates.io against rgmin 0.5.0.
+rgsaddle = ["dep:rgsaddle"]
 # The gradient-enhanced Gaussian process of gpr_optim, over its C API. Needs
 # libgpr_optim on the link path; set GPR_OPTIM_LIB_DIR when building.
 gpr = []
 capi = ["eindir-core/capi"]
-python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
+python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective", "rgsaddle"]
 # Examples using an in-process rgpot eindir handle (xtb / CuH2 via
 # libloading). Off by default so LJ builds do not pull rgpot-core.
 # Do not enable rgpot-core/rpc: that needs a host capnp compiler.
@@ -49,12 +68,12 @@ nauty-pet = { version = "0.14", optional = true }
 thiserror   = "2"
 ndarray     = "0.17"
 dlpk        = { version = "0.1.5", features = ["ndarray", "half"] }
-linkcell    = { version = "0.3.11", git = "https://github.com/d-SEAMS/linkcell", rev = "2e26b83c0c9bbc07d09eb056011dd8e2cec6f4a5", default-features = false }
-# Sibling checkouts provide the local development surface; the Git revisions
-# are the reproducible source selected when this crate is consumed elsewhere.
-eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9", version = "0.6.0", features = ["capi"] }
-rgmin = { git = "https://github.com/HaoZeke/rgmin.git", rev = "20832fd169932a1cd0d47ac84dc77fa9b435f940", version = "0.2.0" }
-rgsaddle = { git = "https://github.com/OmniPotentRPC/rgsaddle.git", rev = "84fe96bfc1ed163379c0af8bd664b74bf71407d1", version = "0.1.0" }
+# Published 0.3.11 is the previous git pin, sources included.
+linkcell    = { version = "=0.3.11", default-features = false }
+# eindir-core 0.6.0 on crates.io matches the previous git pin's sources.
+eindir-core = { version = "0.6.0", features = ["capi"] }
+rgmin = "0.5.0"
+rgsaddle = { version = "0.3.0", optional = true }
 readcon-core = "=0.14.8"
 readcon-db = "=0.1.5"
 num-traits  = "0.2"
@@ -67,8 +86,10 @@ toml        = "0.8"
 sha2        = "0.10"
 pyo3        = { version = "0.26", features = ["extension-module", "abi3-py310"], optional = true }
 numpy       = { version = "0.26", optional = true }
-# Only examples/molecular_cluster, slab_adsorption, and rgpot_minimize.
-rgpot-core = { version = "=3.0.2", git = "https://github.com/HaoZeke/potlib.git", rev = "386c0342e008903472925ad78f8f32a91db51e14", optional = true }
+# Registry 3.5.1 depends on eindir-core 0.6.0, the same crate the rest of
+# the workspace uses. A git pin of 3.0.2 packages as registry 3.0.2, and
+# that release depends on eindir-core 0.5.2.
+rgpot-core = { version = "=3.5.1", optional = true }
 libloading = { version = "0.8", optional = true }
 capnp = { version = "0.21", optional = true }
 capnp-rpc = { version = "0.21", optional = true }
@@ -183,6 +204,10 @@ name = "ttt_lj38"
 required-features = []
 
 [[example]]
+name = "paper_controls"
+test = true
+
+[[example]]
 name = "catalog_journal_scan"
 required-features = ["bank-rpc"]
 
@@ -228,7 +253,7 @@ required-features = ["ira"]
 
 [[example]]
 name = "lj_joint_optimum"
-required-features = ["ira"]
+required-features = ["ira", "rgsaddle"]
 
 [[example]]
 name = "curvature_transport"

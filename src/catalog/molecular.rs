@@ -91,6 +91,25 @@ pub const GFN2_MAX_ITERATIONS: i32 = 500;
 /// Receiving-side Euclidean gradient-norm gate for GFN2 stationary points.
 pub const MAX_GRADIENT_NORM: f64 = 1e-5;
 
+/// Hartree in electron-volts.
+pub const HARTREE_EV: f64 = 27.211386245988;
+
+/// Bohr in angstroms.
+pub const BOHR_ANGSTROM: f64 = 0.529177210903;
+
+/// Gradient convergence of the CREST `--opt extreme` reoptimisation, Eh/Bohr.
+pub const PRISM_REOPT_GRADIENT_EH_PER_BOHR: f64 = 5.0e-5;
+
+/// Euclidean force tolerance used to reoptimise the reference prism, eV/Å.
+///
+/// CREST `--opt extreme` compares `norm2` of the gradient with
+/// 5e-5 Eh/Bohr. The same number as an infinity norm stops short of that
+/// geometry. Zero is the default, so a search that never sets
+/// [`Config::answer_gradient`] does not run this pass.
+pub fn reference_prism_gradient_ev_per_angstrom() -> f64 {
+    PRISM_REOPT_GRADIENT_EH_PER_BOHR * HARTREE_EV / BOHR_ANGSTROM
+}
+
 /// Vacuum box edge used by `molecular_cluster` (A).
 pub const VACUUM_BOX: f64 = 60.0;
 
@@ -542,14 +561,14 @@ pub const PETMAD_MODEL_NAME: &str = "pet-mad-xs-v1.5.0.pt";
 /// Device recorded for the PET-MAD force call.
 pub const PETMAD_DEVICE: &str = "cpu";
 
-/// rgpot-core git revision in `Cargo.lock`. This develop pin is 3.0.2.
-pub const RGPOT_REV: &str = "386c0342e008903472925ad78f8f32a91db51e14";
+/// rgpot-core checksum in `Cargo.lock`. The crate is registry 3.5.1.
+pub const RGPOT_REV: &str = "df34626c5c9d888c234e6a0921e7e6c0335561ec50460fcf74e4b77772c89ede";
 
 /// rgpot-core version this tree links.
-pub const RGPOT_VERSION: &str = "3.0.2";
+pub const RGPOT_VERSION: &str = "3.5.1";
 
-/// eindir-core git revision in `Cargo.lock`.
-pub const EINDIR_REV: &str = "f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9";
+/// eindir-core checksum in `Cargo.lock`. The crate is registry 0.6.0.
+pub const EINDIR_REV: &str = "e330e3abad9c1a597b144d40eb4b07ab3511d79f7d2cdbbcb37a44662f974db0";
 
 /// eindir-core version this tree links.
 pub const EINDIR_VERSION: &str = "0.6.0";
@@ -1422,7 +1441,8 @@ mod water_hexamer_tests {
             5100,
             GOOD_TURING_CHECKPOINT_INTERVAL,
             &mut checkpoint,
-        );
+        )
+        .expect("finite start");
         assert!(
             ledger.spent() < budget / 2,
             "retire spent {} of {budget}",

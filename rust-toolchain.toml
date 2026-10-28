@@ -1,0 +1,5 @@
+# compile_contracts stores rustc 1.88.0 diagnostics. A later stable
+# rewrites those spans and fails the fixture comparison.
+[toolchain]
+channel = "1.88.0"
+components = ["rustfmt", "clippy"]

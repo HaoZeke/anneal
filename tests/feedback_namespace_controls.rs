@@ -143,7 +143,8 @@ fn run_trace(
         &mut rng,
         1,
         &mut checkpoint,
-    );
+    )
+    .expect("finite start");
 
     assert_eq!(out.hops, hops);
     assert_eq!(relax_calls, sequence.len());

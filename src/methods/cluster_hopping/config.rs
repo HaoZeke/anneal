@@ -176,6 +176,17 @@ pub enum ContinuousSymmetry {
         /// Divisor of the basin-hopping quench count.
         interval: usize,
     },
+    /// Project onto `C_i`, `C_5`, and `D_5h` and quench the lowest continuous
+    /// symmetry measure. On an icosahedral plateau, `reseed_hops` without a
+    /// new incumbent draws a fresh cluster, closes its core orbits, projects,
+    /// and quenches. Zero disables that reseed. GMIN's `NSYMINTERVAL` default
+    /// is the same ten quenches (`keywords.f90`).
+    Measure {
+        /// Divisor of the basin-hopping quench count.
+        interval: usize,
+        /// Hops without a new incumbent before an icosahedral reseed.
+        reseed_hops: usize,
+    },
 }
 
 /// Driver settings.
@@ -307,11 +318,15 @@ pub struct Config {
     /// complementary and must stay separable.
     pub minima_hopping: bool,
     /// Under [`Config::minima_hopping`], propose by Goedecker's escape: a
-    /// short NVE trajectory launched with kinetic energy
+    /// short constant-energy (NVE) trajectory launched with kinetic energy
     /// [`Config::md_escape_kinetic`] times the controller's escape scale,
     /// stopped after two potential-energy minima along the path, then
     /// quenched like any trial. Every MD step charges an energy and a
     /// gradient. Off, the controller scales the ordinary kick instead.
+    ///
+    /// The trajectory is compiled with the `rgsaddle` feature. Without it
+    /// the run stops and [`super::Outcome::nve_unavailable`] is set. The
+    /// library kick is not substituted for the escape.
     pub md_escape: bool,
     /// Time step of the escape trajectory in the run's reduced units.
     pub md_escape_dt: f64,
@@ -474,8 +489,9 @@ pub struct Config {
     /// This is distinct from [`Config::symmetrise_on_stall`]. The
     /// continuous-symmetry construction solves a global atom assignment for
     /// each group image and quenches the averaged geometry on a fixed
-    /// schedule. The current implementation provides `C_i`, whose inversion
-    /// operation makes the orientation objective rotation independent.
+    /// schedule. `C_i` has no orientation search. [`ContinuousSymmetry::Measure`]
+    /// is the Oakley, Johnston and Wales continuous symmetry measure over
+    /// `C_i`, `C_5`, and `D_5h`, with orientations taken from the inertia tensor.
     pub continuous_symmetry: ContinuousSymmetry,
     /// Largest deviation at which an approximate symmetry is worth using.
     pub symmetry_tolerance: f64,
@@ -916,6 +932,15 @@ pub struct Config {
     /// comes back near 1e-6, and tight enough to bar a partial quench, which
     /// comes back near 1e-1 or worse.
     pub record_gradient: f64,
+    /// Euclidean-norm tolerance of the geometry the hop reports.
+    ///
+    /// Zero leaves that geometry at [`Config::record_gradient`]. A positive
+    /// value tighter than the record gate reoptimises the best geometry
+    /// once, after the search. Relaxations during the search still stop
+    /// at [`Config::record_gradient`]. `WATER_POLISH_EXTERNAL=1` leaves
+    /// the pass to the caller, so the default search does not tighten.
+    #[serde(skip_serializing_if = "is_non_positive")]
+    pub answer_gradient: f64,
     /// Whether every quenched energy is kept, not only the improving ones:
     /// the sample [`crate::tail`] fits an endpoint to. Truncated by
     /// [`Config::screen_margin`], since the full relaxation runs only where
@@ -1070,8 +1095,11 @@ impl Config {
     ///
     /// LeanBurst carries the observed-cloud SOAP pullback. Thompson
     /// allocates that arm with surface, single, burst, and sym. The return
-    /// screen is on, and a stall takes tabu and symmetrisation. Basin
-    /// identity stays the measured pair-spectrum merge at 0.7.
+    /// screen is on, and a stall takes tabu, symmetrisation, the recorded
+    /// basin trail, the climb, and the restart. Those three exits are
+    /// [`Config::trail_on_stall`], [`Config::escape_on_stall`], and
+    /// [`Config::restart_on_stall`]. There is no `RESTART_STALL_ARM`
+    /// override. Basin identity stays the measured pair-spectrum merge at 0.7.
     /// Orbit completion runs on every new basin, and below 98 points the
     /// relaxation draws between the plain surface and the two-phase
     /// relative 0.7 surface, the same rule as [`Config::communicating`].
@@ -1092,9 +1120,32 @@ impl Config {
         cfg.soap_class_residual = false;
         cfg.soap_mode = SoapProposalMode::Flexible;
         cfg.orbit_complete_on_new = true;
+        cfg.trail_on_stall = true;
+        cfg.escape_on_stall = true;
+        cfg.restart_on_stall = true;
+        // The displacement stack, LeanBurst included, leaves the Mackay
+        // minimum in place: 17 of 72 seeds at 4e5 calls ended at
+        // -173.252378. Named lattice growth builds the truncated
+        // octahedron instead of searching for it. Measured on seeds
+        // 2000-2071 at that budget, this library solves 72 of 72.
+        // At 75 and 98 points the global minimum is not one of these
+        // packings, and the same library is worse than none, so those
+        // sizes keep LeanBurst.
+        if n_points == 38 {
+            cfg.move_library = MoveLibrary::Reseed;
+        }
         if n_points < 98 {
             cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
         }
+        // GMIN calls SYMMETRYCSM every NSYMINTERVAL quenches, default 10.
+        // The same paper's LJ75 table used a restart of about five basin
+        // hopping steps once symmetrisation was on. Both run inside this
+        // chain. The reseed fires only on an icosahedral plateau, so a
+        // face-centred construction is not abandoned.
+        cfg.continuous_symmetry = ContinuousSymmetry::Measure {
+            interval: 10,
+            reseed_hops: 5,
+        };
         cfg
     }
 
@@ -1117,6 +1168,10 @@ impl Config {
         if n_points < 98 {
             cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
         }
+        cfg.continuous_symmetry = ContinuousSymmetry::Measure {
+            interval: 10,
+            reseed_hops: 5,
+        };
         cfg
     }
 
@@ -1185,13 +1240,14 @@ impl Config {
             && !self.move_library.is_rigid_body()
     }
 
-    /// Recommended flags, with the two hand-set scalars replaced by
-    /// derived ones: budget-window temperature (`θ = 1/2` inside the
-    /// descent window) and the cost-asymmetric Bayes screen
-    /// `τ = (R-S)/(2R-S)` from [`crate::screen::cost_asymmetric_threshold`].
+    /// Recommended flags, plus the budget-window temperature
+    /// (`θ = 1/2` inside the descent window).
     ///
-    /// This is not the measured `recommended` configuration. Hit rates
-    /// for this stack are not claimed until a campaign records them.
+    /// The Bayes screen and `τ = (R-S)/(2R-S)` already sit on
+    /// [`Config::for_cluster`]. This repeats them from the hop's own
+    /// step counts so a caller who changed those counts keeps the
+    /// cost-asymmetric threshold. Hit rates for the budget window are
+    /// not claimed until a campaign records them.
     pub fn derived(n_points: usize) -> Self {
         let mut cfg = Self::recommended(n_points);
         cfg.budget_window = true;
@@ -1201,13 +1257,23 @@ impl Config {
         cfg
     }
 
-    /// Creates the reduced-unit Lennard-Jones cluster configuration.
+    /// Reduced-unit Lennard-Jones cluster configuration.
+    ///
+    /// The Bayes screen is on. Its threshold is
+    /// [`crate::screen::cost_asymmetric_threshold`] at this hop's screen
+    /// and relax steps, `7/15` when those are 25 and 200. The old
+    /// hand-set pair, screen off and threshold `0.05`, is not a second
+    /// default.
     pub fn for_cluster(n_points: usize) -> Self {
-        Self::with_scales(
+        let mut cfg = Self::with_scales(
             n_points,
             LennardJonesPreset::REDUCED_SCALE,
             LennardJonesPreset::REDUCED_SCALE,
-        )
+        );
+        cfg.bayes_screen = true;
+        cfg.bayes_threshold =
+            crate::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
+        cfg
     }
 
     /// Lennard-Jones preset expressed against declared physical scales.
@@ -1343,6 +1409,7 @@ impl Config {
             screen_steps: 25,
             adaptive_screen: false,
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
+            answer_gradient: 0.0,
             trace_quenched: false,
             polish_records: 0,
             surrogate_tolerance: 0.5,
@@ -1497,6 +1564,7 @@ impl Config {
         self.point_symmetrise_on_new = false;
         self.orbit_complete_on_new = false;
         self.angular_moves = false;
+        self.continuous_symmetry = ContinuousSymmetry::Off;
         self.rigid_body_geometry = Some(geometry);
         self
     }
@@ -1589,4 +1657,8 @@ impl Config {
     pub fn proposal_kernel(&self) -> ClusterProposal {
         ClusterProposal::new(self.move_library.kernels(self))
     }
+}
+
+fn is_non_positive(value: &f64) -> bool {
+    *value <= 0.0
 }

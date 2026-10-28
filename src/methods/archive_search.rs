@@ -93,6 +93,11 @@ pub struct ArchiveOutcome {
     pub charged: usize,
     /// Ledger spend when `best` last improved.
     pub best_at: usize,
+    /// A requested constant-energy (NVE) escape stopped a hop.
+    ///
+    /// Set when [`crate::methods::cluster_hopping::Outcome::nve_unavailable`]
+    /// is set on any hop in the run.
+    pub nve_unavailable: bool,
 }
 
 fn hop_best_at(hop: &crate::methods::cluster_hopping::Outcome, fallback: usize) -> usize {
@@ -113,6 +118,7 @@ struct HopAcc {
     returned: usize,
     artn: usize,
     basins: usize,
+    nve_unavailable: bool,
 }
 
 fn paid_full_quenches(cfg: &Config, allocated: usize, hops: usize) -> usize {
@@ -225,6 +231,7 @@ fn hops_from_start<'g, R: Rng + ?Sized>(
         returned: 0,
         artn: 0,
         basins: 0,
+        nve_unavailable: false,
     };
     let mut spent_before = ledger.spent();
     for (i, &slice) in slices.iter().enumerate() {
@@ -239,12 +246,14 @@ fn hops_from_start<'g, R: Rng + ?Sized>(
         } else {
             start.to_owned()
         };
-        let hop = run_with_gradient(cfg, x0.view(), &mut led, relax, grad.as_deref_mut(), rng);
+        let hop = run_with_gradient(cfg, x0.view(), &mut led, relax, grad.as_deref_mut(), rng)
+            .expect("finite start");
         let used = led.spent();
         let _ = ledger.charge_many(used);
         acc.screens += hop.screened_out;
         acc.full += paid_full_quenches(cfg, take, hop.hops);
         acc.returned += hop.returned;
+        acc.nve_unavailable |= hop.nve_unavailable;
         acc.artn += hop.symmetrised.0 + hop.stall_escapes;
         acc.basins = acc.basins.max(hop.basins);
         if hop.best.is_finite() {
@@ -399,6 +408,7 @@ fn fold_hop(
     acc.screens += hop.screened_out;
     acc.full += paid_full_quenches(cfg, allocated, hop.hops);
     acc.returned += hop.returned;
+    acc.nve_unavailable |= hop.nve_unavailable;
     acc.artn += hop.symmetrised.0 + hop.stall_escapes;
     acc.basins = acc.basins.max(hop.basins);
     if hop.best.is_finite() && hop.best < acc.best - 1e-12 {
@@ -442,7 +452,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             // packing at rec quench with angular moves and group restart.
             let p1 = 900.min(cap);
             let mut led1 = ledger.slice(p1);
-            let hop1 = run_with_gradient(cfg, start, &mut led1, relax, grad.as_deref_mut(), rng);
+            let hop1 = run_with_gradient(cfg, start, &mut led1, relax, grad.as_deref_mut(), rng)
+                .expect("finite start");
             let used1 = led1.spent();
             let _ = ledger.charge_many(used1);
             let at1 = hop_best_at(&hop1, used1);
@@ -459,11 +470,13 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 let x2 = residual_start(start, cfg, rng);
                 let mut led2 = ledger.slice(hunt);
                 let hop2 =
-                    run_with_gradient(&c2, x2.view(), &mut led2, relax, grad.as_deref_mut(), rng);
+                    run_with_gradient(&c2, x2.view(), &mut led2, relax, grad.as_deref_mut(), rng)
+                        .expect("finite start");
                 let used2 = led2.spent();
                 let _ = ledger.charge_many(used2);
                 let at2 = used1.saturating_add(hop_best_at(&hop2, used2));
                 let rest3 = ledger.remaining();
+                let mut nve_unavailable = hop1.nve_unavailable || hop2.nve_unavailable;
                 let (best, best_state, best_at, basins, screens, full, returned, artn) =
                     if rest3 > 0 && hop2.best < hop1.best - 0.015 && hop2.best_state.is_some() {
                         let mut c3 = c2.clone();
@@ -487,8 +500,10 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                             relax,
                             grad.as_deref_mut(),
                             rng,
-                        );
+                        )
+                        .expect("finite start");
                         let _ = ledger.charge_many(led3.spent());
+                        nve_unavailable |= hop3.nve_unavailable;
                         let at3 = used1
                             .saturating_add(used2)
                             .saturating_add(hop_best_at(&hop3, led3.spent()));
@@ -563,6 +578,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                     returned,
                     artn,
                     basins,
+                    nve_unavailable,
                 }
             } else {
                 HopAcc {
@@ -574,6 +590,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                     returned: hop1.returned,
                     artn: hop1.symmetrised.0 + hop1.stall_escapes + hop1.restarts,
                     basins: hop1.basins,
+                    nve_unavailable: hop1.nve_unavailable,
                 }
             };
             if acc.best.is_finite()
@@ -593,6 +610,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 artn: acc.artn,
                 charged: ledger.spent(),
                 best_at: acc.best_at,
+                nve_unavailable: acc.nve_unavailable,
             };
         }
         let mut c = cfg.clone();
@@ -635,6 +653,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             artn: acc.artn,
             charged: ledger.spent(),
             best_at: acc.best_at,
+            nve_unavailable: acc.nve_unavailable,
         };
     }
     // Explore (skip-return) then residual holes / non-incumbent keys.
@@ -646,7 +665,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     c_fast.return_polish = 0;
     c_fast.symmetrise_on_stall = true;
     let mut led1 = ledger.slice(explore);
-    let hop1 = run_with_gradient(&c_fast, start, &mut led1, relax, grad.as_deref_mut(), rng);
+    let hop1 = run_with_gradient(&c_fast, start, &mut led1, relax, grad.as_deref_mut(), rng)
+        .expect("finite start");
     let used1 = led1.spent();
     let _ = ledger.charge_many(used1);
     let at1 = hop_best_at(&hop1, used1);
@@ -673,6 +693,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         returned: hop1.returned,
         artn: hop1.symmetrised.0 + hop1.stall_escapes,
         basins: hop1.basins,
+        nve_unavailable: hop1.nve_unavailable,
     };
     let mut c_res = cfg.clone();
     c_res.return_screen = true;
@@ -686,7 +707,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         let take = (rest / 2).max(cfg.relax_steps.saturating_mul(8)).min(rest);
         let (from_key, x0) = residual_origin(archive, cfg, start, rng);
         let mut led = ledger.slice(take.max(1));
-        let hop = run_with_gradient(&c_res, x0.view(), &mut led, relax, grad.as_deref_mut(), rng);
+        let hop = run_with_gradient(&c_res, x0.view(), &mut led, relax, grad.as_deref_mut(), rng)
+            .expect("finite start");
         let used = led.spent();
         if used == 0 {
             break;
@@ -731,6 +753,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         artn: acc.artn,
         charged: ledger.spent(),
         best_at: acc.best_at,
+        nve_unavailable: acc.nve_unavailable,
     }
 }
 

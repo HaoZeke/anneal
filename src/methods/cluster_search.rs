@@ -15,21 +15,48 @@
 //! there arrives at the cluster driver by the same route as one written here
 //! and neither the driver nor this function can tell them apart.
 
-#[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 #[cfg(test)]
 use crate::methods::cluster_hopping::min_pair_distance;
-#[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::structure_is_sane;
 use crate::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, Config, Ledger, Outcome, optimize_with_energy_gradient,
-    run_with_energy_gradient_at_checkpoints,
+    ChainCheckpoint, CheckpointAction, Config, Ledger, Outcome, SearchError,
+    optimize_with_energy_gradient, run_with_energy_gradient_at_checkpoints,
 };
 use crate::methods::warm_lbfgs::WarmLbfgs;
 use crate::quench::{QuenchPredictor, Verdict};
 use eindir_core::gradient::DifferentiableObjective;
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
+use std::cell::Cell;
+use std::time::Instant;
+
+/// Search time and the Euclidean answer polish that follows it.
+///
+/// The printed seed wall includes both. Callers that compare that wall
+/// with another code read this split instead of guessing from the ledger.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct SearchPhase {
+    /// Seconds inside the hop, before the answer polish.
+    pub search_seconds: f64,
+    /// Seconds in the Euclidean LBFGS that tightens the recorded minimum.
+    pub polish_seconds: f64,
+    /// Ledger charges during that polish, including its convergence check.
+    pub polish_calls: usize,
+}
+
+thread_local! {
+    static LAST_SEARCH_PHASE: Cell<SearchPhase> = Cell::new(SearchPhase::default());
+}
+
+/// Phase split from the most recent search on this thread.
+pub fn last_search_phase() -> SearchPhase {
+    LAST_SEARCH_PHASE.with(|cell| cell.get())
+}
+
+fn remember_search_phase(phase: SearchPhase) {
+    LAST_SEARCH_PHASE.with(|cell| cell.set(phase));
+}
 
 /// What a search did, beyond the outcome the driver reports.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -125,7 +152,14 @@ fn gradient_is_converged(gradient: ArrayView1<f64>, threshold: f64) -> bool {
         < threshold
 }
 
-fn warm_relax<'a, O>(
+/// The relaxation [`search`] and [`search_from`] hand to the chain.
+///
+/// It reads the preset: the surface portfolio or `two_phase` first, then the
+/// plain descent to `record_gradient`, the screening predictor, and a charged
+/// convergence check. A driver that calls [`crate::methods::cluster_hopping`]
+/// itself takes this closure, so a preset walks the same way whichever entry
+/// runs it. `seed` draws the surface portfolio. `stats` counts the work.
+pub fn warm_relax<'a, O>(
     objective: &'a O,
     cfg: &'a Config,
     stats: &'a mut RelaxStats,
@@ -346,6 +380,174 @@ where
     }
 }
 
+/// Iterations available to the reported-minimum reoptimisation.
+///
+/// The search quench stops at [`Config::record_gradient`] and may also
+/// hit its iteration cap. This pass is the one that has to reach
+/// [`Config::answer_gradient`]. CREST `--opt extreme` allows 360 cycles.
+const ANSWER_POLISH_STEPS: usize = 360;
+
+/// Line-search evaluations budgeted for one reported-minimum iteration.
+const ANSWER_LINE_EVALS: usize = 21;
+
+/// Euclidean gradient norm. A non-finite component is not a small gradient.
+fn gradient_euclidean_norm(gradient: ArrayView1<f64>) -> f64 {
+    if gradient.iter().any(|value| !value.is_finite()) {
+        return f64::INFINITY;
+    }
+    gradient.dot(&gradient).sqrt()
+}
+
+/// Reoptimise the geometry the hop reports, when a tighter tolerance is set.
+///
+/// `WATER_POLISH_EXTERNAL=1` leaves this pass to the water driver. That
+/// driver runs it only when the recorded geometry is outside the IRA gate.
+/// Unset, the pass runs only when [`Config::answer_gradient`] is positive
+/// and tighter than the record gate. The default value is zero, so a
+/// default search does not tighten and does not spend extra calls.
+fn reoptimise_reported_minimum<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    outcome: &mut Outcome,
+    stats: &mut RelaxStats,
+) where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    if std::env::var("WATER_POLISH_EXTERNAL").ok().as_deref() == Some("1") {
+        return;
+    }
+    polish_recorded_answer(objective, cfg, ledger, outcome, stats);
+}
+
+/// Euclidean LBFGS of the recorded geometry, down to [`Config::answer_gradient`].
+///
+/// The search budget is unchanged. The extra calls are granted and counted.
+/// A failed pass leaves the recorded geometry where it was.
+pub fn polish_recorded_answer<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    outcome: &mut Outcome,
+    stats: &mut RelaxStats,
+) where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    polish_recorded_answer_until(objective, cfg, ledger, outcome, stats, |_| false);
+}
+
+/// [`polish_recorded_answer`] that keeps the first accepted iterate `accept` reports.
+///
+/// The answer-gradient check still runs when `accept` never fires. When it
+/// does, the geometry is kept after a fresh evaluation and the rest of the
+/// tightening is not paid for. `accept` sees the start and every later
+/// accepted iterate. A start that `accept` already reports is not stepped,
+/// so a hit does not become a miss.
+pub fn polish_recorded_answer_until<O, A>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    outcome: &mut Outcome,
+    stats: &mut RelaxStats,
+    mut accept: A,
+) where
+    O: DifferentiableObjective<f64> + ?Sized,
+    A: FnMut(&[f64]) -> bool,
+{
+    let tolerance = cfg.answer_gradient;
+    if !(tolerance > 0.0) || !(tolerance < cfg.record_gradient) {
+        return;
+    }
+    let Some(start) = outcome.best_state.clone() else {
+        return;
+    };
+    let spent_before = ledger.spent();
+    ledger.grant(
+        ANSWER_POLISH_STEPS
+            .saturating_mul(ANSWER_LINE_EVALS)
+            .saturating_add(1),
+    );
+    let mut opt = rgmin::Lbfgs::default();
+    opt.gtol = tolerance;
+    opt.norm = rgmin::GradNorm::Euclidean;
+    opt.max_line_evals = ANSWER_LINE_EVALS;
+    let mut accepted_early = false;
+    let (_relaxed_energy, state, _, _) = opt.minimize_recognized(
+        start.view(),
+        ANSWER_POLISH_STEPS,
+        |point| {
+            if !ledger.charge() {
+                return None;
+            }
+            stats.full_charged += 1;
+            Some(objective.value_and_gradient(point))
+        },
+        |_iteration, _value, point| {
+            let coordinates = point.as_slice()?;
+            if !accept(coordinates) {
+                return None;
+            }
+            accepted_early = true;
+            Some((0.0, point.to_owned()))
+        },
+    );
+    if !reported_geometry_ok(cfg, state.view()) {
+        outcome.charged = ledger.spent();
+        return;
+    }
+    if !ledger.charge() {
+        outcome.charged = ledger.spent();
+        return;
+    }
+    stats.check_charged += 1;
+    let (fresh, gradient) = objective.value_and_gradient(state.view());
+    let converged = fresh.is_finite()
+        && gradient.len() == state.len()
+        && (accepted_early || gradient_euclidean_norm(gradient.view()) < tolerance);
+    if converged && reported_geometry_ok(cfg, state.view()) {
+        outcome.best = fresh;
+        outcome.best_state = Some(state.clone());
+        ledger.replace_best(fresh, state.view());
+        ledger.record_quench_boundary(spent_before, fresh, state, Some(gradient));
+        if !accepted_early {
+            stats.converged += 1;
+        }
+    }
+    outcome.charged = ledger.spent();
+}
+
+fn reported_geometry_ok(cfg: &Config, state: ArrayView1<f64>) -> bool {
+    let separation = if cfg.species.is_some() {
+        OVERLAP_SEPARATION
+    } else {
+        0.0
+    };
+    structure_is_sane(state, separation)
+}
+
+fn finish_search<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    mut outcome: Outcome,
+    mut stats: RelaxStats,
+    search_started: Instant,
+) -> (Outcome, RelaxStats)
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let search_seconds = search_started.elapsed().as_secs_f64();
+    let spent = ledger.spent();
+    let polish_started = Instant::now();
+    reoptimise_reported_minimum(objective, cfg, ledger, &mut outcome, &mut stats);
+    remember_search_phase(SearchPhase {
+        search_seconds,
+        polish_seconds: polish_started.elapsed().as_secs_f64(),
+        polish_calls: ledger.spent().saturating_sub(spent),
+    });
+    (outcome, stats)
+}
+
 /// Runs a cluster search on `objective` under `ledger`.
 ///
 /// The relaxation is this crate's warm-started quasi-Newton one, and its
@@ -356,10 +558,11 @@ pub fn search<O>(
     cfg: &Config,
     ledger: &mut Ledger,
     seed: u64,
-) -> (Outcome, RelaxStats)
+) -> Result<(Outcome, RelaxStats), SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    let search_started = Instant::now();
     let mut stats = RelaxStats::default();
 
     // Split deliberately: the relaxation needs the optimizer mutably, the
@@ -392,9 +595,16 @@ where
             Some(&mut grad),
             Some(&mut energy_grad),
             seed,
-        )
+        )?
     };
-    (out, stats)
+    Ok(finish_search(
+        objective,
+        cfg,
+        ledger,
+        out,
+        stats,
+        search_started,
+    ))
 }
 
 /// As [`search`], from a geometry the caller already has.
@@ -407,10 +617,11 @@ pub fn search_from<O>(
     ledger: &mut Ledger,
     start: ArrayView1<f64>,
     seed: u64,
-) -> (Outcome, RelaxStats)
+) -> Result<(Outcome, RelaxStats), SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    let search_started = Instant::now();
     let mut stats = RelaxStats::default();
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let out = {
@@ -436,9 +647,16 @@ where
             Some(&mut grad),
             Some(&mut energy_grad),
             &mut rng,
-        )
+        )?
     };
-    (out, stats)
+    Ok(finish_search(
+        objective,
+        cfg,
+        ledger,
+        out,
+        stats,
+        search_started,
+    ))
 }
 
 /// [`search_from`] with a checkpoint after each block of charged work.
@@ -454,11 +672,12 @@ pub fn search_from_with_checkpoint<O, H>(
     seed: u64,
     checkpoint_interval: usize,
     checkpoint: &mut H,
-) -> (Outcome, RelaxStats)
+) -> Result<(Outcome, RelaxStats), SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
+    let search_started = Instant::now();
     let mut stats = RelaxStats::default();
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let out = {
@@ -486,9 +705,16 @@ where
             &mut rng,
             checkpoint_interval,
             checkpoint,
-        )
+        )?
     };
-    (out, stats)
+    Ok(finish_search(
+        objective,
+        cfg,
+        ledger,
+        out,
+        stats,
+        search_started,
+    ))
 }
 
 /// [`search_from`] when `BANK_RPC` is unset; [`search_from_bank`] when it is.
@@ -502,7 +728,7 @@ pub fn search_from_maybe_bank<O>(
     ledger: &mut Ledger,
     start: ArrayView1<f64>,
     seed: u64,
-) -> (Outcome, RelaxStats)
+) -> Result<(Outcome, RelaxStats), SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
@@ -748,10 +974,11 @@ pub fn search_from_bank<O>(
     start: ArrayView1<f64>,
     seed: u64,
     sock: &str,
-) -> (Outcome, RelaxStats)
+) -> Result<(Outcome, RelaxStats), crate::methods::cluster_hopping::SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    let search_started = Instant::now();
     let _caller_stop = ledger.bind_stop();
     use crate::bank_rpc::BankClient;
     use crate::bias::BasinBias;
@@ -986,7 +1213,7 @@ where
             Some(&mut grad),
             &mut bias,
             &mut rng,
-        );
+        )?;
         ledger.charge_many(slice_led.spent());
         if let Some(st) = slice_led.best_state.as_ref() {
             ledger.record(slice_led.best, st.view());
@@ -1039,7 +1266,14 @@ where
         improvements,
         ..Outcome::default()
     };
-    (out, stats)
+    Ok(finish_search(
+        objective,
+        cfg,
+        ledger,
+        out,
+        stats,
+        search_started,
+    ))
 }
 
 #[cfg(any(feature = "bank-rpc", test))]
@@ -1244,7 +1478,8 @@ mod tests {
             1,
             1,
             &mut checkpoint,
-        );
+        )
+        .expect("search records a quench boundary");
         assert!(
             !ledger.quench_boundaries().is_empty(),
             "search recorded no quench boundary"
@@ -1252,6 +1487,108 @@ mod tests {
         assert!(
             observed > 0,
             "checkpoint saw none of the recorded boundaries"
+        );
+    }
+
+    /// A start inside the accept ball is a hit. The bowl's minimum is
+    /// outside that ball. The gated polish must report a point that is
+    /// still inside. The ungated polish of the same start walks out, so
+    /// the assertion is the gate and not a descent that never moves.
+    #[test]
+    fn answer_polish_cannot_turn_a_hit_into_a_miss() {
+        use eindir_core::{Bounds, Gradient, Objective};
+
+        struct Bowl {
+            bounds: Bounds<f64>,
+        }
+
+        impl Bowl {
+            fn new() -> Self {
+                Self {
+                    bounds: Bounds::new(
+                        Array1::from_elem(1, -20.0),
+                        Array1::from_elem(1, 20.0),
+                        0.0,
+                    ),
+                }
+            }
+        }
+
+        impl Objective<f64> for Bowl {
+            fn dim(&self) -> usize {
+                1
+            }
+            fn bounds(&self) -> &Bounds<f64> {
+                &self.bounds
+            }
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                self.value_and_gradient(x).0
+            }
+        }
+
+        impl Gradient<f64> for Bowl {
+            fn dim(&self) -> usize {
+                1
+            }
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                self.value_and_gradient(x).1
+            }
+        }
+
+        impl DifferentiableObjective<f64> for Bowl {
+            fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+                let shift = x[0] - 4.0;
+                (0.5 * shift * shift, Array1::from_vec(vec![shift]))
+            }
+        }
+
+        let inside = |point: &[f64]| point[0].abs() <= 1.0;
+        let objective = Bowl::new();
+        let mut cfg = Config::for_cluster(1);
+        cfg.answer_gradient = 1.0e-8;
+        let start = Array1::from_vec(vec![0.25]);
+        assert!(inside(start.as_slice().expect("start")));
+        let start_energy = objective.value_and_gradient(start.view()).0;
+
+        let mut gated = Outcome {
+            best: start_energy,
+            best_state: Some(start.clone()),
+            ..Outcome::default()
+        };
+        let mut gated_ledger = Ledger::new(0);
+        polish_recorded_answer_until(
+            &objective,
+            &cfg,
+            &mut gated_ledger,
+            &mut gated,
+            &mut RelaxStats::default(),
+            inside,
+        );
+        let kept = gated.best_state.expect("gated state");
+        assert!(
+            inside(kept.as_slice().expect("kept")),
+            "gated polish left the ball at {}",
+            kept[0]
+        );
+
+        let mut open = Outcome {
+            best: start_energy,
+            best_state: Some(start),
+            ..Outcome::default()
+        };
+        let mut open_ledger = Ledger::new(0);
+        polish_recorded_answer(
+            &objective,
+            &cfg,
+            &mut open_ledger,
+            &mut open,
+            &mut RelaxStats::default(),
+        );
+        let left = open.best_state.expect("ungated state");
+        assert!(
+            !inside(left.as_slice().expect("left")),
+            "ungated polish stayed inside at {}",
+            left[0]
         );
     }
 
@@ -1419,7 +1756,7 @@ mod tests {
             };
             let mut ledger = Ledger::with_stop(BUDGET, Arc::clone(&stop));
             let started = Instant::now();
-            let (out, _) = search(&objective, &cfg, &mut ledger, 1);
+            let (out, _) = search(&objective, &cfg, &mut ledger, 1).expect("finite start");
             let elapsed = started.elapsed();
             let calls = objective.calls.load(Ordering::SeqCst);
             let best_seen = *objective.best.lock().expect("best");
@@ -1462,10 +1799,10 @@ mod tests {
         plain.relax_steps = 40;
         plain.screen_steps = 8;
         let mut ledger_plain = Ledger::new(800);
-        let (out_plain, _) = search(&pot, &plain, &mut ledger_plain, 3);
+        let (out_plain, _) = search(&pot, &plain, &mut ledger_plain, 3).expect("finite start");
         let stop = Arc::new(AtomicBool::new(false));
         let mut ledger_flag = Ledger::with_stop(800, stop);
-        let (out_flag, _) = search(&pot, &plain, &mut ledger_flag, 3);
+        let (out_flag, _) = search(&pot, &plain, &mut ledger_flag, 3).expect("finite start");
         assert_eq!(
             ledger_plain.spent(),
             ledger_flag.spent(),
@@ -1488,7 +1825,7 @@ mod tests {
         cfg.allocate_moves = true;
         cfg.return_screen = true;
         let mut ledger = Ledger::new(120_000);
-        let (out, stats) = search(dyn_pot, &cfg, &mut ledger, 0);
+        let (out, stats) = search(dyn_pot, &cfg, &mut ledger, 0).expect("finite start");
 
         assert!(out.hops > 0, "no hops were taken");
         assert!(stats.total() > 0, "no relaxations were counted");
@@ -1507,7 +1844,7 @@ mod tests {
         let mut cfg = Config::for_cluster(13);
         cfg.return_screen = true;
         let mut ledger = Ledger::new(120_000);
-        let (out, _) = search(&pot, &cfg, &mut ledger, 3);
+        let (out, _) = search(&pot, &cfg, &mut ledger, 3).expect("finite start");
         let (e, gmax) = verify(&pot, &out).expect("no structure came back");
         assert!(
             (e - out.best).abs() < 1e-6,
@@ -1526,7 +1863,7 @@ mod tests {
         cfg.allocate_moves = true;
         cfg.return_screen = true;
         let mut ledger = Ledger::new(150_000);
-        let (out, _) = search(&pot, &cfg, &mut ledger, 0);
+        let (out, _) = search(&pot, &cfg, &mut ledger, 0).expect("finite start");
         let e = first_encounter(&out, -44.326801, 1e-4, ledger.spent());
         match e {
             Encounter::Found { charged, hops } => {
@@ -1661,7 +1998,7 @@ mod tests {
         let mut best = f64::INFINITY;
         for seed in 0..3 {
             let mut ledger = Ledger::new(150_000);
-            let (out, _) = search(&pot, &cfg, &mut ledger, seed);
+            let (out, _) = search(&pot, &cfg, &mut ledger, seed).expect("finite start");
             best = best.min(out.best);
         }
         assert!(
@@ -1676,7 +2013,7 @@ mod tests {
         let pot = PairPotential::morse(13, 6.0);
         let cfg = Config::for_cluster(13);
         let mut ledger = Ledger::new(5_000);
-        let (_, _) = search(&pot, &cfg, &mut ledger, 1);
+        let (_, _) = search(&pot, &cfg, &mut ledger, 1).expect("finite start");
         assert!(ledger.spent() <= 5_000, "spent {}", ledger.spent());
     }
 
@@ -1702,8 +2039,7 @@ mod tests {
         x[3] = 0.74;
         assert!(
             structure_is_sane(x.view(), OVERLAP_SEPARATION),
-            "H-H 0.74 Å must clear the overlap floor {}",
-            OVERLAP_SEPARATION
+            "H-H 0.74 Å must clear the overlap floor {OVERLAP_SEPARATION}",
         );
         const { assert!(OVERLAP_SEPARATION < 0.74) };
     }

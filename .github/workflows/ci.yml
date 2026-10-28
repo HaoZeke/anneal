@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
 
 concurrency:
@@ -28,21 +28,48 @@ jobs:
           fetch-depth: 0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: rustfmt, clippy
 
-      # `--all` also formats path dependencies. vendor/nng is third-party
-      # code with its own rustfmt configuration, and stable rustfmt
-      # rewrites it. Format this package only.
+      # `vendor/nng` and `vendor/nng-sys` are workspace-excluded path
+      # dependencies. `cargo fmt --all` still walks every path dependency,
+      # and stable rustfmt rewrites that tree: its rustfmt.toml asks for
+      # nightly options, and the `ignore` key is unstable on stable.
+      # Format workspace members only. Do not reformat the vendored sources.
       - name: cargo fmt
         run: cargo fmt -- --check
 
-      # Packaging is the check. Verification rebuilds the tarball
-      # against the crates.io copies of the git dependencies, and
-      # those copies do not yet export the API this crate imports.
-      - name: Verify crate publication package
-        run: cargo publish --dry-run --no-verify
+      - name: cargo clippy (default features)
+        run: cargo clippy --all-targets -- -D warnings
+
+      # `cargo package` writes anneal-core-${version}.crate and verifies
+      # it. The next step extracts that crate, drops the development
+      # cargo config and the lockfile, and checks the default features
+      # plus `rgsaddle,python` against crates.io.
+      - name: Package the crate
+        run: cargo package
+
+      - name: Check packaged default features against crates.io
+        shell: bash
+        run: |
+          set -euo pipefail
+          meta=$(cargo metadata --format-version 1 --no-deps)
+          read -r target version < <(python3 -c 'import json,sys; m=json.loads(sys.argv[1]); pkg=next(p for p in m["packages"] if p["name"]=="anneal-core"); print(m["target_directory"], pkg["version"])' "$meta")
+          crate="${target}/package/anneal-core-${version}.crate"
+          test -f "$crate"
+          work=$(mktemp -d)
+          tar -xzf "$crate" -C "$work"
+          pkg=$(find "$work" -mindepth 1 -maxdepth 1 -type d)
+          test -d "$pkg"
+          rm -rf "$pkg/.cargo"
+          rm -f "$pkg/Cargo.lock"
+          (
+            cd "$pkg"
+            cargo generate-lockfile
+            cargo check --locked
+            cargo check --locked --features rgsaddle,python
+          )
 
       - name: Checkout Vesin
         uses: actions/checkout@v6
@@ -120,8 +147,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # compile_contracts compares rustc 1.88.0 stderr. Keep this
+      # channel in step with rust-toolchain.toml.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.88.0
 
       - uses: actions/setup-python@v6
         with:
@@ -308,7 +337,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.88.0
 
       - name: Install system dependencies
         run: |

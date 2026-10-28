@@ -131,9 +131,7 @@ mod tests {
             let a_m = m.swap_accept_prob(f_i, t_i, f_j, t_j);
             assert!(
                 (a_t - a_m).abs() < 1e-9,
-                "Tsallis q=1 {} != Metropolis {}",
-                a_t,
-                a_m
+                "Tsallis q=1 {a_t} != Metropolis {a_m}",
             );
         }
     }

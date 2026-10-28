@@ -13,6 +13,17 @@
 //! Hit columns that need a same-level reference energy stay unscored.
 //! Isomer names are assigned only when `WATER_ISOMER_DIR` holds
 //! same-level geometries in O, H, H order.
+//!
+//! `WATER_FORCE_BUDGET`, `WATER_SEED_FIRST` and `WATER_SEED_COUNT` select a
+//! block. `WATER_START_XYZ`, when set, is the rigid-monomer template. A file
+//! whose centred monomers match the built-in water is repacked from that
+//! template. `WATER_POLISH_EXTERNAL=1` polishes with Euclidean LBFGS only
+//! when the search geometry is outside the IRA gate, and stops at the first
+//! accepted iterate inside the gate. CREST `--opt extreme` runs only if that
+//! polish is still outside. The polish after a usable CREST geometry uses
+//! that same stop and keeps the lowest-energy geometry that is inside the
+//! gate. Unset, the search does not run that polish.
+//! The O-H wall stays on.
 
 #[path = "common/pipe_engine.rs"]
 mod pipe_engine;
@@ -37,12 +48,17 @@ use anneal_core::catalog::molecular::{
     VACUUM_BOX, WATER_HEXAMER_MOLECULES, WATER_HEXAMER_SEED_COUNT, WATER_HEXAMER_SEED_START,
     WATER_ISOMER_NAMES, WaterSearchArm, assign_isomer, classify_geometry, configure_water_arm,
     good_turing_target_stop_at, isomer_reference_gate, isomer_witness, monomers_intact,
-    reference_coordinates, sorted_oxygen_distances, water_groups, water_species,
+    reference_coordinates, reference_prism_gradient_ev_per_angstrom, sorted_oxygen_distances,
+    water_groups, water_species,
 };
 use anneal_core::methods::cluster_hopping::{
-    CheckpointAction, Config, Ledger, MoveLibrary, QuenchStatus, repack_rigid_groups,
+    CheckpointAction, Config, Ledger, MoveLibrary, Outcome, QuenchStatus, SearchError,
+    repack_rigid_groups,
 };
-use anneal_core::methods::cluster_search::{search_from, search_from_with_checkpoint};
+use anneal_core::methods::cluster_search::{
+    RelaxStats, last_search_phase, polish_recorded_answer_until, search_from,
+    search_from_with_checkpoint,
+};
 use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use eindir_core::{Bounds, Objective};
 use libloading::{Library, Symbol};
@@ -60,6 +76,10 @@ const OH_WALL_ONSET_A: f64 = 1.15;
 
 /// Stiffness of that wall, in eV per square angstrom.
 const OH_WALL_EV_PER_A2: f64 = 200.0;
+
+fn external_polish_on() -> bool {
+    std::env::var("WATER_POLISH_EXTERNAL").ok().as_deref() == Some("1")
+}
 
 #[repr(C)]
 struct MtaConfig {
@@ -296,6 +316,63 @@ fn seed_block(smoke: bool) -> (u64, u64) {
     (first, count)
 }
 
+fn monomer_centred(coordinates: &[f64], molecule: usize) -> [[f64; 3]; 3] {
+    let base = 9 * molecule;
+    let mut atoms = [[0.0; 3]; 3];
+    let mut com = [0.0; 3];
+    for atom in 0..3 {
+        for axis in 0..3 {
+            let value = coordinates[base + 3 * atom + axis];
+            atoms[atom][axis] = value;
+            com[axis] += value;
+        }
+    }
+    for value in &mut com {
+        *value /= 3.0;
+    }
+    for atom in &mut atoms {
+        for axis in 0..3 {
+            atom[axis] -= com[axis];
+        }
+    }
+    atoms
+}
+
+fn water_template_matches(parsed: &[f64], builtin: &[f64]) -> bool {
+    if parsed.len() != builtin.len() || builtin.len() != 9 * WATER_HEXAMER_MOLECULES {
+        return false;
+    }
+    let reference = monomer_centred(builtin, 0);
+    for molecule in 0..WATER_HEXAMER_MOLECULES {
+        let found = monomer_centred(parsed, molecule);
+        for atom in 0..3 {
+            for axis in 0..3 {
+                if (found[atom][axis] - reference[atom][axis]).abs() > 1e-6 {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+fn prepared_water_start(
+    parsed: Option<&[f64]>,
+    builtin: &[f64],
+    groups: &[Vec<usize>],
+    length_scale: f64,
+    seed: u64,
+) -> (Array1<f64>, usize) {
+    let template = match parsed {
+        Some(coordinates) if water_template_matches(coordinates, builtin) => builtin,
+        Some(coordinates) => coordinates,
+        None => builtin,
+    };
+    let mut rng = StdRng::seed_from_u64(seed);
+    let packed = repack_rigid_groups(ArrayView1::from(template), groups, length_scale, &mut rng);
+    separate_overlapped_start(packed, WATER_HEXAMER_MOLECULES)
+}
+
 /// Push overlapped molecules apart without drawing more random numbers.
 ///
 /// `repack_rigid_groups` keeps each water's internal geometry and can still
@@ -467,7 +544,30 @@ fn incumbent_inside(
         .is_some_and(|matched| matched.name.is_some())
 }
 
+#[derive(Clone, Copy, Default)]
+struct ExternalPhase {
+    setup_seconds: f64,
+    check_seconds: f64,
+    check_calls: usize,
+    second_seconds: f64,
+    second_calls: usize,
+}
+
+thread_local! {
+    static LAST_EXTERNAL_PHASE: std::cell::Cell<ExternalPhase> =
+        std::cell::Cell::new(ExternalPhase::default());
+}
+
+fn remember_external_phase(phase: ExternalPhase) {
+    LAST_EXTERNAL_PHASE.with(|cell| cell.set(phase));
+}
+
+fn last_external_phase() -> ExternalPhase {
+    LAST_EXTERNAL_PHASE.with(|cell| cell.get())
+}
+
 fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
+    let arm_started = Instant::now();
     let arm = match arm_name {
         "recommended" => WaterSearchArm::Recommended,
         "communicating" => WaterSearchArm::Communicating,
@@ -477,6 +577,8 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     };
     let budget = campaign_budget(engine, smoke);
     let (seed0, seeds) = seed_block(smoke);
+    let external_on = external_polish_on();
+    let witness_ceiling = std::env::var("WATER_WITNESS_TRIPLETON").ok().as_deref() == Some("1");
     let mut text = String::new();
     text.push_str(&format!(
         "\nengine: {engine}\narm: {arm_name}\nbudget: {budget}\nseeds: {seed0}..{}\n",
@@ -488,8 +590,11 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     let groups = water_groups(WATER_HEXAMER_MOLECULES).expect("hexamer groups");
     let mut cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
     configure_water_arm(&mut cfg, arm);
-    if std::env::var("WATER_WITNESS_TRIPLETON").ok().as_deref() == Some("1") {
+    if witness_ceiling {
         cfg.witness_tripleton_ceiling = true;
+    }
+    if external_on {
+        cfg.answer_gradient = reference_prism_gradient_ev_per_angstrom();
     }
     text.push_str(&format!(
         "witness_tripleton_ceiling: {}\n",
@@ -530,6 +635,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     text.push_str(&deposited_calculator(engine));
     text.push_str(&assign_references(&references, &reference_views, gate));
     text.push_str(&classify_gofee(&reference_views, gate));
+    let load_started = Instant::now();
     let loaded = load_engine(engine, n_atoms);
     let Ok(objective) = loaded else {
         text.push_str(&format!(
@@ -539,17 +645,42 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
         return text;
     };
     text.push_str("engine_loaded: true\n");
-    text.push_str(&evaluate_references(&objective, &references));
+    let engine_load_s = load_started.elapsed().as_secs_f64();
+    text.push_str(&format!("phase_engine_load_seconds: {engine_load_s:.6}\n"));
+    let references_started = Instant::now();
+    let (reference_report, prism_energy) = evaluate_references(&objective, &references);
+    let reference_eval_s = references_started.elapsed().as_secs_f64();
+    text.push_str(&format!(
+        "phase_reference_eval_seconds: {reference_eval_s:.6}\n"
+    ));
+    text.push_str(&reference_report);
     let template = reference_coordinates(WATER_HEXAMER_MOLECULES).expect("template");
+    let forced_start = match std::env::var("WATER_START_XYZ") {
+        Ok(path) => match read_start_xyz(&path) {
+            Some(coordinates) => {
+                text.push_str(&format!("start_xyz: {path}\nstart_xyz_status: read\n"));
+                Some(coordinates)
+            }
+            None => {
+                text.push_str(&format!(
+                    "start_xyz: {path}\nstart_xyz_status: rejected\nsearch: not started\n"
+                ));
+                return text;
+            }
+        },
+        Err(_) => {
+            text.push_str("start_xyz: unset\nstart_xyz_status: built-in\n");
+            None
+        }
+    };
     for seed in seed0..seed0 + seeds {
-        let mut rng = StdRng::seed_from_u64(seed);
-        let packed = repack_rigid_groups(
-            ArrayView1::from(&template),
+        let (start, spread_steps) = prepared_water_start(
+            forced_start.as_deref(),
+            &template,
             &groups,
             cfg.length_scale,
-            &mut rng,
+            seed,
         );
-        let (start, spread_steps) = separate_overlapped_start(packed, WATER_HEXAMER_MOLECULES);
         let start_slice = start.as_slice().unwrap_or(&[]);
         let start_intact = monomers_intact(start_slice, WATER_HEXAMER_MOLECULES).unwrap_or(false);
         let (start_oh_min, start_oh_max) = covalent_oh_span(start_slice);
@@ -570,13 +701,49 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             }
         }
         let mut ledger = Ledger::new(budget);
+        remember_external_phase(ExternalPhase::default());
+        let before_wall_s = arm_started.elapsed().as_secs_f64();
         let wall = Instant::now();
         let mut first_hit_calls: Option<usize> = None;
         let mut first_hit_wall: Option<f64> = None;
         let mut first_hit_isomer: Option<String> = None;
         let mut first_prism_calls: Option<usize> = None;
         let mut first_prism_wall: Option<f64> = None;
-        let (outcome, stats) = if arm == WaterSearchArm::GoodTuring {
+        let (mut outcome, mut stats) = if arm == WaterSearchArm::GoodTuring && external_on {
+            let ceiling = if cfg.witness_tripleton_ceiling {
+                WITNESS_TRIPLETON_CEILING
+            } else {
+                PRODUCTION_MAX_UNSEEN_MASS
+            };
+            match witnessed_good_turing(
+                &objective,
+                &cfg,
+                &mut ledger,
+                start.view(),
+                seed,
+                &template,
+                &reference_views,
+                gate,
+                ceiling,
+                cfg.witness_tripleton_ceiling,
+                &wall,
+            ) {
+                Ok((outcome, stats, trace, retired, marks)) => {
+                    text.push_str(&trace);
+                    text.push_str(&format!("good_turing_saturated: {retired}\n"));
+                    first_hit_calls = marks.first_hit_calls;
+                    first_hit_wall = marks.first_hit_wall;
+                    first_hit_isomer = marks.first_hit_isomer;
+                    first_prism_calls = marks.first_prism_calls;
+                    first_prism_wall = marks.first_prism_wall;
+                    (outcome, stats)
+                }
+                Err(error) => {
+                    text.push_str(&format!("search_error: {error}\n"));
+                    return text;
+                }
+            }
+        } else if arm == WaterSearchArm::GoodTuring {
             let mut census = BasinCensus::new(
                 sorted_oxygen_distances(&template, WATER_HEXAMER_MOLECULES)
                     .expect("descriptor")
@@ -684,14 +851,80 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                 seed,
                 GOOD_TURING_CHECKPOINT_INTERVAL,
                 &mut checkpoint,
-            );
+            )
+            .expect("finite start");
             text.push_str(&trace);
             text.push_str(&format!("good_turing_saturated: {retired}\n"));
             result
         } else {
-            search_from(&objective, &cfg, &mut ledger, start.view(), seed)
+            search_from(&objective, &cfg, &mut ledger, start.view(), seed).expect("finite start")
         };
+        let mut deferred_polish_s = 0.0;
+        let mut deferred_polish_calls = 0usize;
+        let answer_polish = if !external_on {
+            "library"
+        } else if incumbent_inside(
+            outcome
+                .best_state
+                .as_ref()
+                .and_then(|state| state.as_slice()),
+            &reference_views,
+            gate,
+        ) {
+            "inside"
+        } else {
+            let spent_before_polish = ledger.spent();
+            let polish_started = Instant::now();
+            polish_recorded_answer_until(
+                &objective,
+                &cfg,
+                &mut ledger,
+                &mut outcome,
+                &mut stats,
+                |coordinates| incumbent_inside(Some(coordinates), &reference_views, gate),
+            );
+            deferred_polish_s = polish_started.elapsed().as_secs_f64();
+            deferred_polish_calls = ledger.spent().saturating_sub(spent_before_polish);
+            "outside"
+        };
+        let polished_inside = answer_polish != "library"
+            && incumbent_inside(
+                outcome
+                    .best_state
+                    .as_ref()
+                    .and_then(|state| state.as_slice()),
+                &reference_views,
+                gate,
+            );
+        let (external_calls, external_wall, external_status) =
+            if answer_polish == "outside" && !polished_inside {
+                crest_then_library(
+                    &objective,
+                    &cfg,
+                    &mut ledger,
+                    &mut outcome,
+                    &mut stats,
+                    seed,
+                    &reference_views,
+                    gate,
+                )
+            } else if polished_inside {
+                (
+                    0,
+                    0.0,
+                    if answer_polish == "inside" {
+                        "inside"
+                    } else {
+                        "lbfgs"
+                    },
+                )
+            } else {
+                (0, 0.0, "none")
+            };
         let wall_s = wall.elapsed().as_secs_f64();
+        let after_wall = Instant::now();
+        let search_phase = last_search_phase();
+        let external_phase = last_external_phase();
         let best = outcome.best;
         let best_slice = outcome
             .best_state
@@ -787,6 +1020,41 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             stats.converged,
             stats.total()
         ));
+        let prism_views: Vec<(&str, &[f64])> = reference_views
+            .iter()
+            .copied()
+            .filter(|(name, _)| *name == "prism")
+            .collect();
+        let prism_rmsd = best_slice.and_then(|state| {
+            assign_isomer(state, WATER_HEXAMER_MOLECULES, &prism_views, None)
+                .ok()
+                .and_then(|matched| matched.rmsd)
+        });
+        let prism_rmsd_text = prism_rmsd
+            .map(|value| format!("{value:.6}"))
+            .unwrap_or_else(|| "none".to_owned());
+        let prism_delta_text = prism_energy
+            .map(|reference| format!("{:.12}", best - reference))
+            .unwrap_or_else(|| "none".to_owned());
+        let after_wall_s = after_wall.elapsed().as_secs_f64();
+        // Cold start and the search that produces the answer. Reference
+        // evaluations are deposited-isomer scoring and are not in this wall.
+        // The final IRA assignment is phase_after_wall and is not in it.
+        // CREST's matched wall is its process wall minus the post-cap
+        // ensemble optimisation, which this arm does not run.
+        let matched_wall_s = before_wall_s - reference_eval_s + wall_s;
+        text.push_str(&format!(
+            "prism_rmsd_A: {prism_rmsd_text}\nprism_delta_eV: {prism_delta_text}\nanswer_gradient: {}\nexternal_polish: {external_status}\nexternal_polish_calls: {external_calls}\nexternal_polish_wall_seconds: {external_wall:.6}\nphase_before_wall_seconds: {before_wall_s:.6}\nphase_search_seconds: {search_s:.6}\nphase_lbfgs_seconds: {lbfgs_s:.6}\nphase_lbfgs_calls: {lbfgs_calls}\nphase_answer_polish: {answer_polish}\nphase_external_setup_seconds: {setup_s:.6}\nphase_crest_check_seconds: {check_s:.6}\nphase_crest_check_calls: {check_calls}\nphase_lbfgs2_seconds: {lbfgs2_s:.6}\nphase_lbfgs2_calls: {lbfgs2_calls}\nphase_after_wall_seconds: {after_wall_s:.6}\nphase_matched_wall_seconds: {matched_wall_s:.6}\n",
+            cfg.answer_gradient,
+            search_s = search_phase.search_seconds,
+            lbfgs_s = search_phase.polish_seconds + deferred_polish_s,
+            lbfgs_calls = search_phase.polish_calls + deferred_polish_calls,
+            setup_s = external_phase.setup_seconds,
+            check_s = external_phase.check_seconds,
+            check_calls = external_phase.check_calls,
+            lbfgs2_s = external_phase.second_seconds,
+            lbfgs2_calls = external_phase.second_calls,
+        ));
         eprintln!(
             "seed_done: {seed} force_calls={} wall_seconds={wall_s:.6} best_energy={best}",
             ledger.spent()
@@ -850,8 +1118,12 @@ fn assign_references(
     text
 }
 
-fn evaluate_references(objective: &ForceObjective, references: &[(String, Vec<f64>)]) -> String {
+fn evaluate_references(
+    objective: &ForceObjective,
+    references: &[(String, Vec<f64>)],
+) -> (String, Option<f64>) {
     let mut text = String::new();
+    let mut prism_energy = None;
     for (name, coordinates) in references {
         let (energy, gradient) = objective.value_and_gradient(ArrayView1::from(coordinates));
         let mut max_force: f64 = 0.0;
@@ -860,11 +1132,14 @@ fn evaluate_references(objective: &ForceObjective, references: &[(String, Vec<f6
             let norm = (atom[0] * atom[0] + atom[1] * atom[1] + atom[2] * atom[2]).sqrt();
             max_force = max_force.max(norm);
         }
+        if name == "prism" {
+            prism_energy = Some(energy);
+        }
         text.push_str(&format!(
             "reference_energy: {name} {energy:.12} max_force {max_force:.6}\n"
         ));
     }
-    text
+    (text, prism_energy)
 }
 
 fn load_deposited(engine: &str, n_atoms: usize) -> Result<ForceObjective, String> {
@@ -1159,4 +1434,415 @@ fn parse_xyz(text: &str) -> Option<Vec<f64>> {
         }
     }
     (coordinates.len() == 9 * WATER_HEXAMER_MOLECULES).then_some(coordinates)
+}
+
+struct HitMarks {
+    first_hit_calls: Option<usize>,
+    first_hit_wall: Option<f64>,
+    first_hit_isomer: Option<String>,
+    first_prism_calls: Option<usize>,
+    first_prism_wall: Option<f64>,
+}
+
+fn witnessed_good_turing<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    start: ArrayView1<f64>,
+    seed: u64,
+    template: &[f64],
+    reference_views: &[(&str, &[f64])],
+    gate: Option<f64>,
+    ceiling: f64,
+    require_incumbent: bool,
+    wall: &Instant,
+) -> Result<(Outcome, RelaxStats, String, bool, HitMarks), SearchError>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let mut census = BasinCensus::new(
+        sorted_oxygen_distances(template, WATER_HEXAMER_MOLECULES)
+            .expect("descriptor")
+            .len(),
+        OXYGEN_DISTANCE_CENSUS_RADIUS_A,
+    )
+    .expect("census");
+    let mut retired = false;
+    let mut trace = String::new();
+    let mut marks = HitMarks {
+        first_hit_calls: None,
+        first_hit_wall: None,
+        first_hit_isomer: None,
+        first_prism_calls: None,
+        first_prism_wall: None,
+    };
+    let mut checkpoint = |snapshot: anneal_core::methods::cluster_hopping::ChainCheckpoint<'_>| {
+        let window_calls: usize = snapshot
+            .quench_boundaries()
+            .iter()
+            .map(|boundary| boundary.charged_calls())
+            .sum();
+        let mut calls = snapshot.charged().saturating_sub(window_calls);
+        for boundary in snapshot.quench_boundaries() {
+            calls = calls.saturating_add(boundary.charged_calls());
+            if boundary.status() != QuenchStatus::Validated {
+                continue;
+            }
+            let state = boundary.state();
+            let Some(state) = state.as_slice() else {
+                continue;
+            };
+            let Ok(descriptor) = sorted_oxygen_distances(state, WATER_HEXAMER_MOLECULES) else {
+                continue;
+            };
+            let matched = assign_isomer(state, WATER_HEXAMER_MOLECULES, reference_views, gate).ok();
+            let witness_name = matched.as_ref().and_then(|item| item.name.clone());
+            let Some(witness) = witness_name.as_deref().and_then(isomer_witness) else {
+                continue;
+            };
+            if census.observe_witness(&descriptor, Some(witness)).is_err() {
+                continue;
+            }
+            if let Some(matched) = matched.as_ref() {
+                if marks.first_hit_calls.is_none()
+                    && let Some(name) = matched.name.clone()
+                {
+                    marks.first_hit_calls = Some(calls);
+                    marks.first_hit_wall = Some(wall.elapsed().as_secs_f64());
+                    marks.first_hit_isomer = Some(name);
+                }
+                if marks.first_prism_calls.is_none() && matched.name.as_deref() == Some("prism") {
+                    marks.first_prism_calls = Some(calls);
+                    marks.first_prism_wall = Some(wall.elapsed().as_secs_f64());
+                }
+            }
+            let visits = census.total_visits();
+            let singletons = census.singleton_count();
+            let doubletons = census.doubleton_count();
+            let mass = census
+                .unseen_mass()
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_owned());
+            let hatch = ((singletons + 1) as f64 / (visits + 1) as f64).to_string();
+            let upper = leftover_esty_upper(visits, singletons, doubletons)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_owned());
+            let witness_label = witness_name.unwrap_or_else(|| "none".to_owned());
+            trace.push_str(&format!(
+                "good_turing_trace: force_calls={calls} visits={visits} unseen_mass={mass} singletons={singletons} doubletons={doubletons} hatch={hatch} esty_upper={upper} witness={witness_label} max_unseen_mass={ceiling}\n"
+            ));
+        }
+        let mut stop = good_turing_target_stop_at(&census, ceiling);
+        if stop.is_some() && require_incumbent {
+            let best_state = snapshot.best_state();
+            let best = best_state.as_ref().and_then(|state| state.as_slice());
+            if !incumbent_inside(best, reference_views, gate) {
+                stop = None;
+            }
+        }
+        if let Some(reason) = stop {
+            retired = true;
+            CheckpointAction::Retire {
+                reason: reason.to_owned(),
+            }
+        } else {
+            CheckpointAction::Continue
+        }
+    };
+    let (outcome, stats) = search_from_with_checkpoint(
+        objective,
+        cfg,
+        ledger,
+        start,
+        seed,
+        GOOD_TURING_CHECKPOINT_INTERVAL,
+        &mut checkpoint,
+    )?;
+    Ok((outcome, stats, trace, retired, marks))
+}
+
+fn crest_then_library<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    outcome: &mut Outcome,
+    stats: &mut RelaxStats,
+    seed: u64,
+    references: &[(&str, &[f64])],
+    gate: Option<f64>,
+) -> (usize, f64, &'static str)
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let kept_energy = outcome.best;
+    let kept_state = outcome.best_state.clone();
+    let kept_inside = incumbent_inside(
+        kept_state.as_ref().and_then(|state| state.as_slice()),
+        references,
+        gate,
+    );
+    // Lowest-energy geometry already inside the gate. The call that reaches
+    // CREST is outside, so this starts empty unless a caller handed in an
+    // inside geometry. A usable CREST geometry that is inside is recorded
+    // before the second polish, and that snapshot is what a later outside
+    // point is not allowed to replace.
+    let mut best_inside: Option<(f64, Array1<f64>)> = if kept_inside {
+        kept_state.clone().map(|state| (kept_energy, state))
+    } else {
+        None
+    };
+    let consider_inside = |best_inside: &mut Option<(f64, Array1<f64>)>,
+                           energy: f64,
+                           state: &Array1<f64>,
+                           inside: bool| {
+        if !inside || !energy.is_finite() {
+            return;
+        }
+        let replace = best_inside.as_ref().is_none_or(|(kept, _)| energy < *kept);
+        if replace {
+            *best_inside = Some((energy, state.clone()));
+        }
+    };
+    let Some(crest) = std::env::var("CREST_BIN")
+        .ok()
+        .filter(|path| PathBuf::from(path).is_file())
+    else {
+        return (0, 0.0, "unavailable");
+    };
+    let Some(coordinates) = kept_state
+        .as_ref()
+        .and_then(|state| state.as_slice().map(|slice| slice.to_vec()))
+    else {
+        return (0, 0.0, "lbfgs");
+    };
+    let setup_started = Instant::now();
+    let dir = std::env::temp_dir().join(format!("water-polish-{seed}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    if std::fs::create_dir_all(&dir).is_err() {
+        return (0, 0.0, "lbfgs");
+    }
+    let mut phase = ExternalPhase {
+        setup_seconds: setup_started.elapsed().as_secs_f64(),
+        ..ExternalPhase::default()
+    };
+    let started = Instant::now();
+    let produced = crest_extreme(&crest, &dir, &coordinates);
+    let external_wall = started.elapsed().as_secs_f64();
+    let _ = std::fs::remove_dir_all(&dir);
+    let Some((polished, calls)) = produced else {
+        remember_external_phase(phase);
+        return (0, external_wall, "lbfgs");
+    };
+    let check_started = Instant::now();
+    let spent_before_check = ledger.spent();
+    ledger.grant(1);
+    if !ledger.charge() {
+        phase.check_seconds = check_started.elapsed().as_secs_f64();
+        phase.check_calls = ledger.spent().saturating_sub(spent_before_check);
+        remember_external_phase(phase);
+        return (calls, external_wall, "lbfgs");
+    }
+    stats.check_charged += 1;
+    let point = Array1::from_vec(polished);
+    let (energy, gradient) = objective.value_and_gradient(point.view());
+    phase.check_seconds = check_started.elapsed().as_secs_f64();
+    phase.check_calls = ledger.spent().saturating_sub(spent_before_check);
+    let gnorm = if gradient.iter().any(|value| !value.is_finite()) {
+        f64::INFINITY
+    } else {
+        gradient.dot(&gradient).sqrt()
+    };
+    let usable = energy.is_finite()
+        && point.iter().all(|value| value.is_finite())
+        && monomers_intact(point.as_slice().unwrap_or(&[]), WATER_HEXAMER_MOLECULES) == Ok(true);
+    if !usable {
+        remember_external_phase(phase);
+        return (calls, external_wall, "lbfgs");
+    }
+    outcome.best = energy;
+    outcome.best_state = Some(point.clone());
+    ledger.replace_best(energy, point.view());
+    consider_inside(
+        &mut best_inside,
+        energy,
+        &point,
+        incumbent_inside(point.as_slice(), references, gate),
+    );
+    let status = if gnorm < cfg.answer_gradient {
+        "crest"
+    } else {
+        let second_started = Instant::now();
+        let spent_before_second = ledger.spent();
+        polish_recorded_answer_until(objective, cfg, ledger, outcome, stats, |coordinates| {
+            incumbent_inside(Some(coordinates), references, gate)
+        });
+        phase.second_seconds = second_started.elapsed().as_secs_f64();
+        phase.second_calls = ledger.spent().saturating_sub(spent_before_second);
+        if let Some(state) = outcome.best_state.clone() {
+            consider_inside(
+                &mut best_inside,
+                outcome.best,
+                &state,
+                incumbent_inside(state.as_slice(), references, gate),
+            );
+        }
+        "crest+lbfgs"
+    };
+    remember_external_phase(phase);
+    if let Some((inside_energy, inside_state)) = best_inside {
+        let now_inside = incumbent_inside(
+            outcome
+                .best_state
+                .as_ref()
+                .and_then(|state| state.as_slice()),
+            references,
+            gate,
+        );
+        if !now_inside || outcome.best > inside_energy {
+            outcome.best = inside_energy;
+            outcome.best_state = Some(inside_state.clone());
+            ledger.replace_best(inside_energy, inside_state.view());
+        }
+    }
+    (calls, external_wall, status)
+}
+
+fn crest_extreme(
+    crest: &str,
+    dir: &std::path::Path,
+    coordinates: &[f64],
+) -> Option<(Vec<f64>, usize)> {
+    let mut text = String::from("18\nwater hexamer polish\n");
+    for molecule in 0..WATER_HEXAMER_MOLECULES {
+        for (offset, symbol) in [(0, "O"), (3, "H"), (6, "H")] {
+            let base = 9 * molecule + offset;
+            text.push_str(&format!(
+                "{symbol} {:.10} {:.10} {:.10}\n",
+                coordinates[base],
+                coordinates[base + 1],
+                coordinates[base + 2]
+            ));
+        }
+    }
+    std::fs::write(dir.join("start.xyz"), text).ok()?;
+    let mut library = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
+    if let Some(parent) = PathBuf::from(crest).parent() {
+        if !library.is_empty() {
+            library.push(':');
+        }
+        library.push_str(&parent.display().to_string());
+    }
+    let output = std::process::Command::new(crest)
+        .args(["start.xyz", "--opt", "extreme", "-T", "1"])
+        .current_dir(dir)
+        .env("LD_LIBRARY_PATH", library)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let log = String::from_utf8_lossy(&output.stdout);
+    let calls = log
+        .lines()
+        .rev()
+        .find_map(|line| {
+            line.trim()
+                .strip_prefix("* Total number of energy+grad calls:")
+                .and_then(|rest| rest.trim().parse().ok())
+        })
+        .unwrap_or(0);
+    let polished = std::fs::read_to_string(dir.join("crestopt.xyz")).ok()?;
+    parse_xyz(&polished).map(|coordinates| (coordinates, calls))
+}
+
+fn read_start_xyz(path: &str) -> Option<Vec<f64>> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let coordinates = parse_xyz(&text)?;
+    monomers_intact(&coordinates, WATER_HEXAMER_MOLECULES)
+        .ok()
+        .filter(|intact| *intact)?;
+    Some(coordinates)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        WATER_HEXAMER_MOLECULES, parse_xyz, prepared_water_start, reference_coordinates,
+        water_groups, water_species,
+    };
+    use anneal_core::methods::cluster_hopping::Config;
+
+    fn xyz_roundtrip(coordinates: &[f64]) -> Vec<f64> {
+        let mut text = format!("{}\nround trip\n", coordinates.len() / 3);
+        for molecule in 0..WATER_HEXAMER_MOLECULES {
+            for (offset, symbol) in [(0, "O"), (3, "H"), (6, "H")] {
+                let base = 9 * molecule + offset;
+                text.push_str(&format!(
+                    "{symbol} {:.6} {:.6} {:.6}\n",
+                    coordinates[base],
+                    coordinates[base + 1],
+                    coordinates[base + 2]
+                ));
+            }
+        }
+        parse_xyz(&text).expect("parsed xyz")
+    }
+
+    fn rough_grid() -> Vec<f64> {
+        let water = [
+            [0.0, 0.0, 0.0],
+            [0.7572, 0.5865, 0.0],
+            [-0.7572, 0.5865, 0.0],
+        ];
+        let mut coordinates = Vec::with_capacity(9 * WATER_HEXAMER_MOLECULES);
+        for molecule in 0..WATER_HEXAMER_MOLECULES {
+            let column = (molecule % 3) as f64;
+            let row = (molecule / 3) as f64;
+            for atom in &water {
+                coordinates.extend_from_slice(&[
+                    atom[0] + 2.8 * column,
+                    atom[1] + 2.8 * row,
+                    atom[2],
+                ]);
+            }
+        }
+        coordinates
+    }
+
+    #[test]
+    fn parsed_template_prepares_like_the_builtin() {
+        let builtin = reference_coordinates(WATER_HEXAMER_MOLECULES).expect("template");
+        let parsed_line = xyz_roundtrip(&builtin);
+        let parsed_grid = xyz_roundtrip(&rough_grid());
+        let groups = water_groups(WATER_HEXAMER_MOLECULES).expect("groups");
+        let species = water_species(WATER_HEXAMER_MOLECULES).expect("species");
+        let cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
+        let mut distorted = parsed_grid.clone();
+        distorted[0] += 0.1;
+        for seed in [0_u64, 15] {
+            let (from_builtin, steps_builtin) =
+                prepared_water_start(None, &builtin, &groups, cfg.length_scale, seed);
+            let (from_line, steps_line) = prepared_water_start(
+                Some(&parsed_line),
+                &builtin,
+                &groups,
+                cfg.length_scale,
+                seed,
+            );
+            let (from_grid, steps_grid) = prepared_water_start(
+                Some(&parsed_grid),
+                &builtin,
+                &groups,
+                cfg.length_scale,
+                seed,
+            );
+            let (from_other, _) =
+                prepared_water_start(Some(&distorted), &builtin, &groups, cfg.length_scale, seed);
+            assert_eq!(steps_builtin, steps_line);
+            assert_eq!(steps_builtin, steps_grid);
+            assert_eq!(from_builtin, from_line);
+            assert_eq!(from_builtin, from_grid);
+            assert_ne!(from_builtin, from_other);
+        }
+    }
 }

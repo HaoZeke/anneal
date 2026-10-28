@@ -1,27 +1,58 @@
-//! Minimum--saddle--minimum exploration with rgmin and rgsaddle.
+//! Minimum-saddle-minimum exploration with rgmin and rgsaddle.
 //!
 //! The descriptor orders structural comparisons but never certifies identity.
 //! A caller-supplied exact witness makes the final equivalence decision. This
 //! keeps catalog admission independent of a fixed descriptor radius while the
 //! same universal descriptor remains available for novelty and acquisition.
 
-use std::fmt::{Display, Formatter};
+use std::fmt::Display;
+#[cfg(feature = "rgsaddle")]
+use std::fmt::Formatter;
+#[cfg(feature = "rgsaddle")]
 use std::sync::Mutex;
 
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
+use ndarray::{Array1, ArrayView1};
+#[cfg(feature = "rgsaddle")]
+use ndarray::{Array2, ArrayView2};
 use rand::{SeedableRng, rngs::StdRng};
 use rand_distr::{Distribution, StandardNormal};
+#[cfg(feature = "rgsaddle")]
 use rgmin::{
-    ApplyHessian, Control, EigenParams, EigensolverKind, FireKind, GradNorm, Lbfgs, ManifoldKind,
-    Method, Oracle, Solver, lowest_mode,
+    ApplyHessian, Control, EigenParams, EigensolverKind, FireKind, ManifoldKind, Method, Oracle,
+    Solver, lowest_mode,
 };
-pub use rgsaddle::IrcKind;
+use rgmin::{GradNorm, Lbfgs};
+#[cfg(feature = "rgsaddle")]
 use rgsaddle::internal::{CartAxis, Translation};
+#[cfg(feature = "rgsaddle")]
 use rgsaddle::{
     Constraints, ForceGate, HessUpdate, IrcConfig, IrcDirection, IrcSession, MinModeConfig,
     MinModeKind, MinModeSession, MinModeStatus, PointSurface, SaddleError, SellaGeom,
     SellaSaddleConfig, SellaSaddleSession, exact_eigh, prfo_trust_region,
 };
+
+/// Gonzalez-Schlegel sphere, or the Ishida-Morokuma-Komornicki corrector.
+///
+/// One type with and without the `rgsaddle` feature. A session copies it
+/// into `rgsaddle::IrcKind` when that feature builds the integrator.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum IrcKind {
+    /// Gonzalez-Schlegel / Sella sphere in the session metric.
+    #[default]
+    Gs2,
+    /// Ishida-Morokuma-Komornicki predictor-corrector.
+    Morokuma,
+}
+
+#[cfg(feature = "rgsaddle")]
+impl From<IrcKind> for rgsaddle::IrcKind {
+    fn from(kind: IrcKind) -> Self {
+        match kind {
+            IrcKind::Gs2 => Self::Gs2,
+            IrcKind::Morokuma => Self::Morokuma,
+        }
+    }
+}
 
 use crate::curvature::{project_rigid_with, rigid_basis};
 use crate::descriptor_space::{
@@ -39,39 +70,62 @@ pub trait PesSurface: Sync {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "rgsaddle")]
     use std::sync::Mutex;
+    #[cfg(feature = "rgsaddle")]
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use ndarray::{Array1, ArrayView1, array};
+    use ndarray::array;
+    #[cfg(feature = "rgsaddle")]
+    use ndarray::{Array1, ArrayView1};
 
-    use super::{
-        IrcDirection, PesExplorationConfig, PesSurface, activation_basis, deflate_cartesian_mode,
-        finest_irc_step, refine_cartesian_with_prfo, roll_branch, roll_nd_branch,
-    };
+    use super::IrcKind;
+    #[cfg(feature = "rgsaddle")]
+    use super::PesSurface;
+    #[cfg(feature = "rgsaddle")]
+    use super::{IrcDirection, refine_cartesian_with_prfo, roll_branch, roll_nd_branch};
+    use super::{PesExplorationConfig, activation_basis, deflate_cartesian_mode, finest_irc_step};
     use crate::curvature::project_rigid_with;
     use crate::descriptor_space::DescriptorGeometry;
-    use rgsaddle::IrcKind;
 
     #[test]
+    fn irc_kind_does_not_change_shape_with_the_feature() {
+        let config = PesExplorationConfig {
+            irc_kind: IrcKind::Morokuma,
+            ..PesExplorationConfig::default()
+        };
+        assert_eq!(config.irc_kind, IrcKind::Morokuma);
+        assert_eq!(PesExplorationConfig::default().irc_kind, IrcKind::Gs2);
+    }
+
+    #[test]
+    #[cfg(feature = "rgsaddle")]
     fn irc_configuration_preserves_the_selected_rgsaddle_backend() {
         let config = PesExplorationConfig {
             irc_kind: IrcKind::Morokuma,
             ..PesExplorationConfig::default()
         };
 
-        assert_eq!(super::irc_config(&config, 0.125).kind, IrcKind::Morokuma);
+        assert_eq!(
+            super::irc_config(&config, 0.125).kind,
+            rgsaddle::IrcKind::from(IrcKind::Morokuma)
+        );
     }
 
+    #[cfg(feature = "rgsaddle")]
     struct FailingIrcSurface;
 
+    #[cfg(feature = "rgsaddle")]
     struct CountingQuarticSaddle {
         evaluations: AtomicUsize,
     }
 
+    #[cfg(feature = "rgsaddle")]
     struct RecordingQuarticSaddle {
         first_evaluation: Mutex<Option<Array1<f64>>>,
     }
 
+    #[cfg(feature = "rgsaddle")]
     impl PesSurface for CountingQuarticSaddle {
         type Error = &'static str;
 
@@ -93,6 +147,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "rgsaddle")]
     impl PesSurface for RecordingQuarticSaddle {
         type Error = &'static str;
 
@@ -117,6 +172,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "rgsaddle")]
     impl PesSurface for FailingIrcSurface {
         type Error = &'static str;
 
@@ -139,6 +195,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "rgsaddle")]
     fn cartesian_prfo_refines_the_selected_unstable_mode_without_dense_refreshes() {
         let surface = CountingQuarticSaddle {
             evaluations: AtomicUsize::new(0),
@@ -193,6 +250,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "rgsaddle")]
     fn irc_surface_failure_identifies_the_branch_and_outer_step() {
         let error = roll_branch(
             &FailingIrcSurface,
@@ -222,6 +280,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "rgsaddle")]
     fn molecular_irc_starts_with_the_certified_mode_without_reestimating_it() {
         let surface = RecordingQuarticSaddle {
             first_evaluation: Mutex::new(None),
@@ -254,6 +313,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "rgsaddle")]
     fn generic_irc_starts_in_five_dimensions_with_the_certified_mode() {
         let surface = RecordingQuarticSaddle {
             first_evaluation: Mutex::new(None),
@@ -429,6 +489,7 @@ pub enum RideMethod {
 }
 
 impl RideMethod {
+    #[cfg(feature = "rgsaddle")]
     fn min_mode(self) -> MinModeKind {
         match self {
             Self::Dimer => MinModeKind::Dimer,
@@ -819,6 +880,7 @@ impl Default for PesExplorationConfig {
 }
 
 impl PesExplorationConfig {
+    #[cfg(feature = "rgsaddle")]
     fn validate(&self) -> Result<(), PesExplorationError> {
         if self.quench_steps == 0
             || self.saddle_steps == 0
@@ -963,6 +1025,9 @@ pub enum PesExplorationError {
     /// rgsaddle session failure.
     #[error("rgsaddle failed: {0}")]
     Saddle(String),
+    /// Saddle sessions are compiled only with the `rgsaddle` feature.
+    #[error("rgsaddle feature is not enabled")]
+    SaddleUnavailable,
 }
 
 /// One rgmin-certified local minimum.
@@ -1169,6 +1234,7 @@ impl PesNetwork {
         })
     }
 
+    #[cfg(feature = "rgsaddle")]
     fn admit_saddle<W: ExactStructureWitness + ?Sized>(
         &mut self,
         mut candidate: SaddleConnection,
@@ -1210,6 +1276,7 @@ impl PesNetwork {
         Ok(candidate)
     }
 
+    #[cfg(feature = "rgsaddle")]
     fn retain_unresolved_saddle(&mut self, mut candidate: SaddleConnection) {
         candidate.id = self.unresolved_saddles.len();
         self.unresolved_saddles.push(candidate);
@@ -1413,6 +1480,7 @@ impl NdPesNetwork {
         }
     }
 
+    #[cfg(feature = "rgsaddle")]
     fn admit_saddle<W: ExactStructureWitness + ?Sized>(
         &mut self,
         mut candidate: NdSaddleConnection,
@@ -1438,6 +1506,7 @@ impl NdPesNetwork {
         candidate
     }
 
+    #[cfg(feature = "rgsaddle")]
     fn retain_unresolved_saddle<W: ExactStructureWitness + ?Sized>(
         &mut self,
         mut candidate: NdSaddleConnection,
@@ -1459,8 +1528,10 @@ impl NdPesNetwork {
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 struct SaddleSurface<'a, S>(&'a S);
 
+#[cfg(feature = "rgsaddle")]
 impl<S> PointSurface for SaddleSurface<'_, S>
 where
     S: PesSurface,
@@ -1472,11 +1543,13 @@ where
 }
 
 #[derive(Debug)]
+#[cfg(feature = "rgsaddle")]
 enum EvaluationBudgetError {
     Exhausted,
     Surface(String),
 }
 
+#[cfg(feature = "rgsaddle")]
 impl Display for EvaluationBudgetError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -1486,12 +1559,14 @@ impl Display for EvaluationBudgetError {
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 struct EvaluationBudgetSurface<'a, S: ?Sized> {
     surface: &'a S,
     maximum_evaluations: u64,
     state: Mutex<(u64, bool)>,
 }
 
+#[cfg(feature = "rgsaddle")]
 impl<'a, S: ?Sized> EvaluationBudgetSurface<'a, S> {
     fn new(surface: &'a S, maximum_evaluations: u64) -> Self {
         Self {
@@ -1506,6 +1581,7 @@ impl<'a, S: ?Sized> EvaluationBudgetSurface<'a, S> {
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 impl<S> PesSurface for EvaluationBudgetSurface<'_, S>
 where
     S: PesSurface + ?Sized,
@@ -1578,6 +1654,7 @@ fn max_abs(values: ArrayView1<f64>) -> f64 {
     values.iter().map(|value| value.abs()).fold(0.0, f64::max)
 }
 
+#[cfg(feature = "rgsaddle")]
 fn emit_pes_trace(event: serde_json::Value) {
     if std::env::var_os("ANNEAL_PES_TRACE").is_some() {
         eprintln!("{event}");
@@ -1595,6 +1672,7 @@ pub struct StationaryIndex {
     pub negative_modes: usize,
 }
 
+#[cfg(feature = "rgsaddle")]
 fn finite_difference_hessian<S: PesSurface + ?Sized>(
     surface: &S,
     coordinates: ArrayView1<f64>,
@@ -1639,6 +1717,7 @@ fn finite_difference_hessian<S: PesSurface + ?Sized>(
     Ok(hessian)
 }
 
+#[cfg(feature = "rgsaddle")]
 fn index_hessian(
     hessian: Array2<f64>,
     negative_tolerance: f64,
@@ -1677,6 +1756,7 @@ fn index_hessian(
 ///
 /// This arbitrary-dimensional form counts every native coordinate. Atomistic
 /// callers with rigid or frozen directions use [`stationary_index_cartesian`].
+#[cfg(feature = "rgsaddle")]
 pub fn stationary_index<S: PesSurface + ?Sized>(
     surface: &S,
     coordinates: ArrayView1<f64>,
@@ -1695,6 +1775,7 @@ pub fn stationary_index<S: PesSurface + ?Sized>(
 /// removes translation and rotation, while an unconstrained periodic system
 /// removes translation. The projected directions remain as numerical zero
 /// eigenvalues and therefore cannot masquerade as unstable physical modes.
+#[cfg(feature = "rgsaddle")]
 pub fn stationary_index_cartesian<S: PesSurface + ?Sized>(
     surface: &S,
     coordinates: ArrayView1<f64>,
@@ -1754,6 +1835,7 @@ pub fn stationary_index_cartesian<S: PesSurface + ?Sized>(
     index_hessian(hessian, negative_tolerance)
 }
 
+#[cfg(feature = "rgsaddle")]
 fn quench<S: PesSurface + ?Sized>(
     surface: &S,
     start: ArrayView1<f64>,
@@ -1893,6 +1975,7 @@ fn gradient_certified(
             .is_some_and(|tolerance| gradient.dot(&gradient).sqrt() <= tolerance)
 }
 
+#[cfg(feature = "rgsaddle")]
 fn quench_recognizing<W, S>(
     surface: &S,
     start: ArrayView1<f64>,
@@ -1955,6 +2038,7 @@ where
     })
 }
 
+#[cfg(feature = "rgsaddle")]
 fn equivalent_with_context<W: ExactStructureWitness + ?Sized>(
     witness: &W,
     left: ArrayView1<f64>,
@@ -1978,6 +2062,7 @@ fn equivalent_with_context<W: ExactStructureWitness + ?Sized>(
     )
 }
 
+#[cfg(feature = "rgsaddle")]
 fn reconcile_source_connection<W, S>(
     surface: &S,
     origin: Quenched,
@@ -2040,6 +2125,7 @@ where
     Ok((origin, positive, negative))
 }
 
+#[cfg(feature = "rgsaddle")]
 fn descriptor(
     descriptor_space: &DescriptorSpace,
     stationary: &Quenched,
@@ -2048,6 +2134,7 @@ fn descriptor(
     Ok(descriptor_space.describe(stationary.coordinates.view(), species)?)
 }
 
+#[cfg(feature = "rgsaddle")]
 fn min_mode_config(config: &PesExplorationConfig) -> MinModeConfig {
     MinModeConfig {
         kind: config.ride_method.min_mode(),
@@ -2061,6 +2148,7 @@ fn min_mode_config(config: &PesExplorationConfig) -> MinModeConfig {
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 fn sorted_eigensystem(
     hessian: ArrayView2<'_, f64>,
 ) -> Result<(Array1<f64>, Array2<f64>), PesExplorationError> {
@@ -2083,6 +2171,7 @@ fn sorted_eigensystem(
     Ok((sorted_values, sorted_vectors))
 }
 
+#[cfg(feature = "rgsaddle")]
 fn nd_prfo_model<S: PesSurface + ?Sized>(
     surface: &S,
     coordinates: ArrayView1<f64>,
@@ -2094,6 +2183,7 @@ fn nd_prfo_model<S: PesSurface + ?Sized>(
     Ok((gradient, eigenvalues, eigenvectors))
 }
 
+#[cfg(feature = "rgsaddle")]
 fn nd_prfo_increment(
     gradient: &Array1<f64>,
     eigenvalues: &Array1<f64>,
@@ -2110,6 +2200,7 @@ fn nd_prfo_increment(
     Ok(step)
 }
 
+#[cfg(feature = "rgsaddle")]
 fn refine_nd_with_prfo<S: PesSurface + ?Sized>(
     surface: &S,
     start: ArrayView1<f64>,
@@ -2136,6 +2227,7 @@ fn refine_nd_with_prfo<S: PesSurface + ?Sized>(
     })
 }
 
+#[cfg(feature = "rgsaddle")]
 fn unstable_coordinate_error(
     gradient: ArrayView1<f64>,
     mode: ArrayView1<f64>,
@@ -2150,6 +2242,7 @@ fn unstable_coordinate_error(
     Ok(error)
 }
 
+#[cfg(feature = "rgsaddle")]
 fn center_nd_irc_saddle<S: PesSurface + ?Sized>(
     surface: &S,
     start: ArrayView1<f64>,
@@ -2197,6 +2290,7 @@ fn center_nd_irc_saddle<S: PesSurface + ?Sized>(
     })
 }
 
+#[cfg(feature = "rgsaddle")]
 fn cartesian_sella_free_dimension(
     dimension: usize,
     cartesian_index: Option<(&[bool], [bool; 3])>,
@@ -2218,6 +2312,7 @@ fn cartesian_sella_free_dimension(
     Ok(free)
 }
 
+#[cfg(feature = "rgsaddle")]
 fn cartesian_sella_session(
     config: SellaSaddleConfig,
     start: ArrayView1<f64>,
@@ -2261,6 +2356,7 @@ fn cartesian_sella_session(
     result.map_err(|error| PesExplorationError::Saddle(error.to_string()))
 }
 
+#[cfg(feature = "rgsaddle")]
 fn refine_cartesian_with_prfo<S: PesSurface>(
     surface: &S,
     start: ArrayView1<f64>,
@@ -2311,6 +2407,7 @@ fn refine_cartesian_with_prfo<S: PesSurface>(
     })
 }
 
+#[cfg(feature = "rgsaddle")]
 fn cartesian_max_gradient(
     coordinates: ArrayView1<f64>,
     gradient: ArrayView1<f64>,
@@ -2322,12 +2419,13 @@ fn cartesian_max_gradient(
     Ok(max_abs(tangent_gradient.view()))
 }
 
+#[cfg(feature = "rgsaddle")]
 fn irc_config(config: &PesExplorationConfig, branch_step: f64) -> IrcConfig {
     IrcConfig {
         dx: branch_step,
         force_tol: config.irc_force_tolerance,
         max_move: config.maximum_move,
-        kind: config.irc_kind,
+        kind: config.irc_kind.into(),
         ..IrcConfig::default()
     }
 }
@@ -2343,6 +2441,7 @@ fn normalize_mode(mode: ArrayView1<f64>) -> Result<Array1<f64>, PesExplorationEr
     Ok(mode.mapv(|value| value / norm))
 }
 
+#[cfg(any(test, feature = "rgsaddle"))]
 fn refine_irc_step(step: f64, config: &PesExplorationConfig) -> Result<f64, PesExplorationError> {
     let next = step / config.branch_growth;
     if !next.is_finite() || next <= 0.0 {
@@ -2353,6 +2452,7 @@ fn refine_irc_step(step: f64, config: &PesExplorationConfig) -> Result<f64, PesE
     Ok(next)
 }
 
+#[cfg(any(test, feature = "rgsaddle"))]
 fn finest_irc_step(
     initial_step: f64,
     config: &PesExplorationConfig,
@@ -2360,6 +2460,7 @@ fn finest_irc_step(
     (1..config.branch_attempts).try_fold(initial_step, |step, _| refine_irc_step(step, config))
 }
 
+#[cfg(feature = "rgsaddle")]
 fn directional_curvature<S: PesSurface + ?Sized>(
     surface: &S,
     coordinates: ArrayView1<f64>,
@@ -2408,12 +2509,14 @@ fn activation_basis(
     basis
 }
 
+#[cfg(feature = "rgsaddle")]
 fn project_activation_vector(values: &mut Array1<f64>, basis: &[Array1<f64>]) {
     if !basis.is_empty() {
         project_rigid_with(values, basis);
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 struct ActivationHessian<'a, S: PesSurface + ?Sized> {
     surface: &'a S,
     gradient: Array1<f64>,
@@ -2422,6 +2525,7 @@ struct ActivationHessian<'a, S: PesSurface + ?Sized> {
     failure: Mutex<Option<PesExplorationError>>,
 }
 
+#[cfg(feature = "rgsaddle")]
 impl<S: PesSurface + ?Sized> ApplyHessian for ActivationHessian<'_, S> {
     fn apply_hessian(&self, coordinates: ArrayView1<f64>, mode: ArrayView1<f64>) -> Array1<f64> {
         let mut mode = mode.to_owned();
@@ -2447,6 +2551,7 @@ impl<S: PesSurface + ?Sized> ApplyHessian for ActivationHessian<'_, S> {
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 fn lowest_activation_mode<S: PesSurface + ?Sized>(
     surface: &S,
     coordinates: ArrayView1<f64>,
@@ -2490,6 +2595,7 @@ fn lowest_activation_mode<S: PesSurface + ?Sized>(
     Ok((curvature, mode))
 }
 
+#[cfg(feature = "rgsaddle")]
 fn relax_activation_shell<S: PesSurface + ?Sized>(
     surface: &S,
     origin: ArrayView1<f64>,
@@ -2523,6 +2629,8 @@ fn relax_activation_shell<S: PesSurface + ?Sized>(
         gtol: 0.0,
         istep: 1.0,
         maxmove: Some(0.25 * config.maximum_move),
+        ftol_rel: None,
+        noise_floor: None,
     };
     let mut solver = Solver::new(
         Method::Fire { kind: FireKind::V2 },
@@ -2543,11 +2651,13 @@ fn relax_activation_shell<S: PesSurface + ?Sized>(
     Ok(coordinates)
 }
 
+#[cfg(feature = "rgsaddle")]
 struct ActivationStart {
     coordinates: Array1<f64>,
     mode: Array1<f64>,
 }
 
+#[cfg(feature = "rgsaddle")]
 fn bowl_breakout<S: PesSurface + ?Sized>(
     surface: &S,
     origin: ArrayView1<f64>,
@@ -2597,6 +2707,7 @@ fn bowl_breakout<S: PesSurface + ?Sized>(
     Err(PesExplorationError::ActivationNotEscaped { lowest_curvature })
 }
 
+#[cfg(feature = "rgsaddle")]
 fn roll_branch<S: PesSurface>(
     surface: &S,
     saddle: &Array1<f64>,
@@ -2627,6 +2738,7 @@ fn roll_branch<S: PesSurface>(
     )
 }
 
+#[cfg(feature = "rgsaddle")]
 fn roll_nd_branch<S: PesSurface>(
     surface: &S,
     saddle: &Array1<f64>,
@@ -2653,6 +2765,7 @@ fn roll_nd_branch<S: PesSurface>(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "rgsaddle")]
 fn drive_irc_branch<S: PesSurface>(
     surface: &S,
     mut session: IrcSession,
@@ -2711,6 +2824,7 @@ fn drive_irc_branch<S: PesSurface>(
     Ok((quench(surface, endpoint.view(), config)?, report.at_minimum))
 }
 
+#[cfg(feature = "rgsaddle")]
 fn cartesian_distance(left: ArrayView1<f64>, right: ArrayView1<f64>) -> f64 {
     left.iter()
         .zip(right)
@@ -2719,6 +2833,7 @@ fn cartesian_distance(left: ArrayView1<f64>, right: ArrayView1<f64>) -> f64 {
         .sqrt()
 }
 
+#[cfg(feature = "rgsaddle")]
 fn minimum_pair_distance(coordinates: ArrayView1<f64>) -> Option<f64> {
     let atom_count = coordinates.len() / 3;
     (coordinates.len().is_multiple_of(3) && atom_count >= 2).then(|| {
@@ -2738,6 +2853,7 @@ fn minimum_pair_distance(coordinates: ArrayView1<f64>) -> Option<f64> {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "rgsaddle")]
 fn roll_branch_shells<S, W>(
     surface: &S,
     origin: Quenched,
@@ -2804,6 +2920,7 @@ where
 /// coordinate metric, then rgmin certifies their endpoint minima. An
 /// atomistic caller uses [`discover_mode_connection`] to select the
 /// mass-weighted rigid quotient instead.
+#[cfg(feature = "rgsaddle")]
 pub fn discover_nd_connection<S, W>(
     surface: &S,
     network: &mut NdPesNetwork,
@@ -2975,6 +3092,7 @@ where
 /// any certified minima or unresolved saddle evidence accumulated before a
 /// scientific failure, so a hybrid explorer can reuse the evidence.
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "rgsaddle")]
 pub fn discover_nd_connection_with_budget<S, W>(
     surface: &S,
     network: &mut NdPesNetwork,
@@ -3001,6 +3119,7 @@ where
 /// Quench a basin, ride one supplied mode, roll both IRC branches, and admit
 /// the resulting exact minimum and saddle identities.
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "rgsaddle")]
 pub fn discover_mode_connection<S, W>(
     surface: &S,
     descriptor_space: &DescriptorSpace,
@@ -3039,6 +3158,7 @@ where
 /// [`discover_mode_connection`] path remains available for Cartesian-shaped
 /// mathematical surfaces whose coordinates do not obey atomistic symmetries.
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "rgsaddle")]
 pub fn discover_cartesian_mode_connection<S, W>(
     surface: &S,
     descriptor_space: &DescriptorSpace,
@@ -3083,6 +3203,7 @@ where
 /// witness of [`discover_cartesian_mode_connection`]. Calls refused at the
 /// boundary are not charged.
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "rgsaddle")]
 pub fn discover_cartesian_mode_connection_with_budget<S, W>(
     surface: &S,
     descriptor_space: &DescriptorSpace,
@@ -3128,6 +3249,7 @@ where
 /// from distinct PES invocations non-interchangeable even when their Cartesian
 /// shapes happen to be equivalent.
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "rgsaddle")]
 pub fn discover_cartesian_mode_connection_in_context_with_budget<S, W>(
     surface: &S,
     descriptor_space: &DescriptorSpace,
@@ -3180,6 +3302,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "rgsaddle")]
 fn discover_mode_connection_impl<S, W>(
     surface: &S,
     descriptor_space: &DescriptorSpace,
@@ -3414,4 +3537,256 @@ where
     network
         .admit_saddle(candidate, witness)
         .map_err(PesExplorationError::from)
+}
+
+/// Certify a stationary-point index from central differences of PES gradients.
+///
+/// The `rgsaddle` feature is off in this build. The call returns
+/// [`PesExplorationError::SaddleUnavailable`].
+#[cfg(not(feature = "rgsaddle"))]
+pub fn stationary_index<S: PesSurface + ?Sized>(
+    surface: &S,
+    coordinates: ArrayView1<f64>,
+    step: f64,
+    negative_tolerance: f64,
+) -> Result<StationaryIndex, PesExplorationError> {
+    let _ = (surface, coordinates, step, negative_tolerance);
+    Err(PesExplorationError::SaddleUnavailable)
+}
+
+/// Certify the index on the free Cartesian tangent space of one atomic system.
+///
+/// The `rgsaddle` feature is off in this build. The call returns
+/// [`PesExplorationError::SaddleUnavailable`].
+#[cfg(not(feature = "rgsaddle"))]
+pub fn stationary_index_cartesian<S: PesSurface + ?Sized>(
+    surface: &S,
+    coordinates: ArrayView1<f64>,
+    frozen_atoms: &[bool],
+    periodic: [bool; 3],
+    step: f64,
+    negative_tolerance: f64,
+) -> Result<StationaryIndex, PesExplorationError> {
+    let _ = (
+        surface,
+        coordinates,
+        frozen_atoms,
+        periodic,
+        step,
+        negative_tolerance,
+    );
+    Err(PesExplorationError::SaddleUnavailable)
+}
+
+/// Quench a point, ride one supplied mode to an index-one saddle, and quench
+/// both downhill branches on an arbitrary-dimensional surface.
+///
+/// The `rgsaddle` feature is off in this build. The call returns
+/// [`PesExplorationError::SaddleUnavailable`].
+#[cfg(not(feature = "rgsaddle"))]
+pub fn discover_nd_connection<S, W>(
+    surface: &S,
+    network: &mut NdPesNetwork,
+    start: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    config: &PesExplorationConfig,
+    witness: &W,
+) -> Result<NdSaddleConnection, PesExplorationError>
+where
+    S: PesSurface,
+    W: ExactStructureWitness + ?Sized,
+{
+    let _ = (surface, network, start, mode, config, witness);
+    Err(PesExplorationError::SaddleUnavailable)
+}
+
+/// Run one N-dimensional ridge ride under a hard PES-evaluation boundary.
+///
+/// The `rgsaddle` feature is off in this build. The attempt's connection is
+/// [`PesExplorationError::SaddleUnavailable`] and no evaluations are charged.
+#[cfg(not(feature = "rgsaddle"))]
+pub fn discover_nd_connection_with_budget<S, W>(
+    surface: &S,
+    network: &mut NdPesNetwork,
+    start: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    config: &PesExplorationConfig,
+    witness: &W,
+    maximum_evaluations: u64,
+) -> NdConnectionAttempt
+where
+    S: PesSurface + ?Sized,
+    W: ExactStructureWitness + ?Sized,
+{
+    let _ = (
+        surface,
+        network,
+        start,
+        mode,
+        config,
+        witness,
+        maximum_evaluations,
+    );
+    NdConnectionAttempt {
+        connection: Err(PesExplorationError::SaddleUnavailable),
+        charged_evaluations: 0,
+        budget_exhausted: false,
+    }
+}
+
+/// Quench a basin, ride one supplied mode, roll both IRC branches, and admit
+/// the resulting exact minimum and saddle identities.
+///
+/// The `rgsaddle` feature is off in this build. The call returns
+/// [`PesExplorationError::SaddleUnavailable`].
+#[cfg(not(feature = "rgsaddle"))]
+#[allow(clippy::too_many_arguments)]
+pub fn discover_mode_connection<S, W>(
+    surface: &S,
+    descriptor_space: &DescriptorSpace,
+    network: &mut PesNetwork,
+    start: ArrayView1<f64>,
+    masses: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    species: Option<&[u32]>,
+    config: &PesExplorationConfig,
+    witness: &W,
+) -> Result<SaddleConnection, PesExplorationError>
+where
+    S: PesSurface,
+    W: ExactStructureWitness + ?Sized,
+{
+    let _ = (
+        surface,
+        descriptor_space,
+        network,
+        start,
+        masses,
+        mode,
+        species,
+        config,
+        witness,
+    );
+    Err(PesExplorationError::SaddleUnavailable)
+}
+
+/// Discover an atomistic connection and certify its index only on free modes.
+///
+/// The `rgsaddle` feature is off in this build. The call returns
+/// [`PesExplorationError::SaddleUnavailable`].
+#[cfg(not(feature = "rgsaddle"))]
+#[allow(clippy::too_many_arguments)]
+pub fn discover_cartesian_mode_connection<S, W>(
+    surface: &S,
+    descriptor_space: &DescriptorSpace,
+    network: &mut PesNetwork,
+    start: ArrayView1<f64>,
+    masses: ArrayView1<f64>,
+    frozen_atoms: &[bool],
+    mode: ArrayView1<f64>,
+    species: Option<&[u32]>,
+    config: &PesExplorationConfig,
+    witness: &W,
+) -> Result<SaddleConnection, PesExplorationError>
+where
+    S: PesSurface,
+    W: ExactStructureWitness + ?Sized,
+{
+    let _ = (
+        surface,
+        descriptor_space,
+        network,
+        start,
+        masses,
+        frozen_atoms,
+        mode,
+        species,
+        config,
+        witness,
+    );
+    Err(PesExplorationError::SaddleUnavailable)
+}
+
+/// Run one atomistic ridge ride under a hard PES-evaluation boundary.
+///
+/// The `rgsaddle` feature is off in this build. The attempt's connection is
+/// [`PesExplorationError::SaddleUnavailable`] and no evaluations are charged.
+#[cfg(not(feature = "rgsaddle"))]
+#[allow(clippy::too_many_arguments)]
+pub fn discover_cartesian_mode_connection_with_budget<S, W>(
+    surface: &S,
+    descriptor_space: &DescriptorSpace,
+    network: &mut PesNetwork,
+    start: ArrayView1<f64>,
+    masses: ArrayView1<f64>,
+    frozen_atoms: &[bool],
+    mode: ArrayView1<f64>,
+    species: Option<&[u32]>,
+    config: &PesExplorationConfig,
+    witness: &W,
+    maximum_evaluations: u64,
+) -> CartesianConnectionAttempt
+where
+    S: PesSurface + ?Sized,
+    W: ExactStructureWitness + ?Sized,
+{
+    let _ = (
+        surface,
+        descriptor_space,
+        network,
+        start,
+        masses,
+        frozen_atoms,
+        mode,
+        species,
+        config,
+        witness,
+        maximum_evaluations,
+    );
+    CartesianConnectionAttempt {
+        connection: Err(PesExplorationError::SaddleUnavailable),
+        charged_evaluations: 0,
+        budget_exhausted: false,
+    }
+}
+
+/// Run one budgeted atomistic ridge ride in a caller-owned identity domain.
+///
+/// The `rgsaddle` feature is off in this build. The attempt's connection is
+/// [`PesExplorationError::SaddleUnavailable`] and no evaluations are charged.
+#[cfg(not(feature = "rgsaddle"))]
+#[allow(clippy::too_many_arguments)]
+pub fn discover_cartesian_mode_connection_in_context_with_budget<S, W>(
+    surface: &S,
+    descriptor_space: &DescriptorSpace,
+    network: &mut PesNetwork,
+    start: ArrayView1<f64>,
+    frozen_atoms: &[bool],
+    mode: ArrayView1<f64>,
+    context: &StructureContext,
+    config: &PesExplorationConfig,
+    witness: &W,
+    maximum_evaluations: u64,
+) -> CartesianConnectionAttempt
+where
+    S: PesSurface + ?Sized,
+    W: ExactStructureWitness + ?Sized,
+{
+    let _ = (
+        surface,
+        descriptor_space,
+        network,
+        start,
+        frozen_atoms,
+        mode,
+        context,
+        config,
+        witness,
+        maximum_evaluations,
+    );
+    CartesianConnectionAttempt {
+        connection: Err(PesExplorationError::SaddleUnavailable),
+        charged_evaluations: 0,
+        budget_exhausted: false,
+    }
 }
