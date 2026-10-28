@@ -307,11 +307,15 @@ pub struct Config {
     /// complementary and must stay separable.
     pub minima_hopping: bool,
     /// Under [`Config::minima_hopping`], propose by Goedecker's escape: a
-    /// short NVE trajectory launched with kinetic energy
+    /// short constant-energy (NVE) trajectory launched with kinetic energy
     /// [`Config::md_escape_kinetic`] times the controller's escape scale,
     /// stopped after two potential-energy minima along the path, then
     /// quenched like any trial. Every MD step charges an energy and a
     /// gradient. Off, the controller scales the ordinary kick instead.
+    ///
+    /// The trajectory is compiled with the `rgsaddle` feature. Without it
+    /// the run stops and [`super::Outcome::nve_unavailable`] is set. The
+    /// library kick is not substituted for the escape.
     pub md_escape: bool,
     /// Time step of the escape trajectory in the run's reduced units.
     pub md_escape_dt: f64,

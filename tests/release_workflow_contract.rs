@@ -17,7 +17,7 @@ fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
     assert!(manifest.contains("rgmin = \"0.5.0\""));
     assert!(manifest.contains("rgsaddle = { version = \"0.3.0\", optional = true }"));
     assert!(manifest.contains("rgsaddle = [\"dep:rgsaddle\"]"));
-    assert!(manifest.contains("default = [\"rgsaddle\"]"));
+    assert!(manifest.contains("default = []"));
     assert!(manifest.contains("python = [\"dep:pyo3\", \"dep:numpy\", \"dlpk/pyo3\", \"eindir-core/py-objective\", \"rgsaddle\"]"));
     assert!(manifest.contains("bank-rpc = [\"dep:capnp\", \"dep:capnp-rpc\", \"dep:futures\", \"dep:nng\", \"dep:tokio\", \"dep:tokio-util\", \"dep:libc\", \"rgsaddle\"]"));
     assert!(manifest.contains("exclude = [\".cargo/config.toml\"]"));
