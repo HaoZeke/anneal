@@ -188,7 +188,8 @@ fn run_one(
     let mut opt = WarmLbfgs::default();
     let mut relax = charged_relax(&pot, &mut opt, frozen);
     let mut rng = StdRng::seed_from_u64(seed);
-    let out = run_with_gradient(&cfg, start, &mut ledger, &mut relax, None, &mut rng);
+    let out = run_with_gradient(&cfg, start, &mut ledger, &mut relax, None, &mut rng)
+        .expect("finite start");
     let soap_draws = out
         .arms
         .iter()

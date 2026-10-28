@@ -6,10 +6,74 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
-## [0.12.0](https://github.com/HaoZeke/anneal/tree/v0.12.0) - 2026-10-24
+## [0.12.0](https://github.com/HaoZeke/anneal/tree/v0.12.0)
 
 ### Added
 
+- ``paper_controls`` runs the registered control arms: ``recommended``,
+  ``for_cluster`` (screened basin hopping, and the in-tree control while
+  GMIN stays on the optbench side), ``derived``, and soap on against
+  soap off. The log header carries the commit, config digest, engine
+  digest, seed, force count, wall time and CPU model, and each run
+  writes a ``RunManifest``. LJ38 uses the first 72 seeds of 2000-2199
+  at 400000 evaluations. LJ75 and LJ98 use the first 48 at 4000000.
+  Held-out landscapes use 2200-2247 and do not invent a budget. A run
+  launched before the v0.12.0 tag is a smoke and is labelled smoke.
+- Catalogue selection uses four ranks. The default log weight is
+  ``-r_E + 0.8 r_N + 0.6 r_S + 0.4 r_U``, clipped at 4 nats. ``r_U`` is
+  the rank of the graph-field score ``variance / (1 + effort)``. Scores
+  within one part in 1e8 share that rank.
+  ``lj38_catalogue_epoch`` logs one four-replica LJ38 epoch on seeds
+  3100-3103. The paper force total is 400000, shared by the four
+  replicas. A run launched before the v0.12.0 tag is a smoke and is
+  labelled smoke.
+- ``water_hexamer`` reads deposited isomer geometries from
+  ``WATER_ISOMER_DIR`` and sets the assignment gate to half the minimum
+  species-aware IRA RMSD before any seed. ``ASE_PYTHON`` selects the
+  deposited calculators: tblite 0.7.0 GFN2-xTB, PySCF 2.14.0 RKS
+  PBE/6-31G* grid level 3, and pet-mad 1.4.4 checkpoint 1.0.2 on CPU,
+  through ASE 3.29.0. The helper keeps one ASE atoms object and
+  updates positions. The gate is printed even when the engine does
+  not load. A non-finite opening quench is reported and does not drop
+  the gate or the reference energies.
+- ``water_hexamer`` searches (H2O)6 under GFN2-xTB, NWChem PBE/6-31G*, and
+  PET-MAD. The PBE arm records basis 6-31G*, theory dft, functional PBE,
+  charge 0, multiplicity 1, task gradient, and no named dispersion
+  correction. Recommended, communicating, derived, and Good-Turing arms
+  keep the molecular groups. Integrity requires exactly two hydrogens
+  within 1.2 angstrom of each oxygen. A dissociated monomer is
+  unassigned. Isomer names wait on same-level reference geometries.
+  The isolated-water template is not that set. Seeds are 0-31 and the
+  force budget is 4000 on every engine. A process with ``PAPER_SMOKE=1`` is a smoke. A full run records the crate version.
+- Lattice-ensemble ablation arms on ``Plan``. ``retire = 0`` never frees a
+  bank slot. ``Resemblance::LeeCsa`` uses eq. (2) of Lee, Lee and Lee,
+  Phys. Rev. Lett. 91, 080201 (2003): the weighted absolute difference of
+  the first and second shell coordination histograms, radii 1.35 and 1.70
+  at sigma = 1, scaled by the pair minimum on any other pair.
+  ``CutoffSchedule::LeeFixedRatio`` reduces the merge distance by a fixed
+  ratio from D_ave/2 to D_ave/5 over 10000 local minimizations and then
+  holds it. ``banked = false`` runs Shao, Cheng and Cai's lattice move
+  from a fresh start, with no bank and no splice. The defaults stay the
+  radial key, the held cutoff, retirement after 20 draws, and the bank.
+  ``lj_lattice_ensemble`` runs its private arm at two slots unless
+  ``SLOTS`` is set, and its default seed is the registered block.
+  ``lattice_ensemble_ablation`` reports the T1 columns and the paired
+  difference against the full ensemble. The quench and the lattice site
+  energy follow ``PairKind``, so a Morse ensemble is Morse.
+- ``pt111_heptamer`` quenches the OptBench Pt(111) heptamer with rgmin and
+  certifies edges with an rgsaddle dimer from each quenched endpoint pair.
+  The hop and the RMSD use the smallest free layer split at 1.0 angstrom.
+  Other free layers keep a live gradient. Morse parameters and reference
+  geometries are read from the OptBench problem file and ``.con`` tree.
+  ``mid.con`` is not treated as a saddle. A match is an energy within
+  0.05 eV and an RMSD within 0.1 angstrom.
+- ``paper/seeds.toml`` registers the paper seed ranges before any run.
+  R1, R12 and R15 use 2000-2199. R2 uses 2200-2247. The lattice
+  ensembles use 3000-3029 on LJ75 and LJ98 and 3100-3199 on LJ38,
+  including the shared arm with splice 0 (``nosplice``). The Pt(111)
+  heptamer uses 4000-4047 and the soap pairs use 5000-5063.
+  ``Plan::default`` is frozen at the field values pinned by
+  ``plan_default_is_frozen``.
 - Binary Lennard-Jones and rigid TIP4P on the stock cluster presets.
   ``cluster_search`` takes ``species``, ``sigmas``, ``rigid``, ``layout``,
   and ``target``. Two or more species labels add a swap move. A wide
@@ -58,6 +122,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   list is returned directly, and the wide-exchange guard is one
   condition. Behaviour is unchanged. The C header and the Python
   bindings are unchanged.
+- The normal-quantile table and the format strings that name their
+  values satisfy clippy's deny set. The quantile values are unchanged.
+  The TIP4P profile walks the sites it indexes. The C header and the
+  Python bindings are unchanged.
 - ``examples/globalopt_profile.rs`` profiles the cluster presets on optbench
   archive starts under harness-style counting, and
   ``scripts/optbench/anneal_globalopt.py`` scores them through optbench's
@@ -65,6 +133,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- The Pt(111) heptamer dimer stops translation on the maximum force
+  component. ``rgsaddle`` 0.3.0 has no force-gate field on
+  ``MinModeConfig``.
+
+- ``Plan::start`` is ``StartRule::PresetSphere`` or ``StartRule::Density``.
+  The default is the preset sphere of ``Config::recommended``, radius
+  ``0.9 * L0 * N^(1/3)`` with ``L0`` the preset length scale. A fresh
+  trial used to be ``random_cluster`` at density 0.7; that draw is
+  ``StartRule::Density(0.7)``. The serial arm at seed ``s`` quenches to
+  the same first energy, bit for bit, as the recommended chain at that
+  seed. Changing the default does change existing output. The 13-atom
+  ensemble tests still pass and still finish on the icosahedron, but
+  the best-energy bits and the trace are not the density-0.7 values.
+  ``lj_lattice_ensemble`` prints different energies unless ``DENSITY``
+  is set, which selects ``StartRule::Density``.
+- ``Lattice::for_pair`` sets bond, hollow, site, clearance and merge
+  distances to 1.2, 1.47, 1, 0.85 and 0.25 times ``PairKind::r_min``.
+  ``interior_coordination`` stays a field. ``Lattice::default`` is
+  ``for_pair(LennardJones)`` and matches the previous hard-coded well
+  bit for bit. ``lattice_ensemble::run`` takes that pair kind.
 - The optional ``rgsaddle`` feature is off by default. It compiles
   minimum-saddle-minimum sessions and stationary-index checks. It
   compiles the constant-energy (NVE) minima-hopping escape and the
@@ -76,15 +164,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   binary wide-diameter-ratio escape stop the run and set
   ``Outcome::nve_unavailable``. ``IrcKind`` and ``NveError`` each have
   one definition. ``python`` and ``bank-rpc`` enable the feature.
-  PyPI wheels and in-repo feature builds keep the sessions. From crates.io,
-  ``rgsaddle``, ``python``, and ``bank-rpc`` do not build until matching
-  rgmin and rgsaddle releases exist. Default features, docs.rs, and the
-  wheels are fine. CI packages the crate with ``cargo package --no-verify``.
-  A later step extracts ``anneal-core-${version}.crate``. It drops the
-  development patch and the lockfile. It runs ``cargo check`` on the
-  default features against crates.io.
-- ``nve_escape`` and ``nve_escape_seeded`` return ``NveError``. ``IrcKind``
-  is defined in this crate. ``GraphError::FeatureDisabled``,
+  PyPI wheels and in-repo feature builds keep the sessions. The
+  feature compiles rgsaddle 0.3.0 from crates.io against rgmin 0.5.0.
+  ``rgsaddle``, ``python``, and ``bank-rpc`` build from crates.io.
+  The lockfile records rgmin 0.5.0, rgsaddle 0.3.0, eindir-core 0.6.0,
+  and linkcell 0.3.11. The activation relaxation leaves ``ftol_rel`` and
+  ``noise_floor`` unset.
+- ``nve_escape`` and ``nve_escape_seeded`` return ``NveError``.
+  ``GraphError::FeatureDisabled``,
   ``PesExplorationError::SaddleUnavailable``, and
   ``NveError::FeatureDisabled`` are new. ``Outcome``, ``ArchiveOutcome``,
   ``CommittorOutcome``, ``BankOutcome``, and ``StockSearch`` gain
@@ -117,6 +204,72 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- ``Config::recommended`` at 38 points grows the named lattices (face-centred,
+  hexagonal, icosahedral, simple cubic, and the observed cloud) instead of
+  the LeanBurst displacement stack. That stack left 17 of 72 seeds on the
+  Mackay minimum ``-173.252378`` at 400000 calls. At 75 and 98 points the
+  global minimum is not one of those packings, and ``recommended`` stays
+  LeanBurst. A stall takes the recorded basin trail, the climb, and the
+  restart. ``for_cluster`` turns the Bayes screen on at
+  ``(R-S)/(2R-S)``, which is ``7/15`` at 25 and 200 steps. A call plateau
+  with the climb enabled is the directed leave, not a fresh Mackay draw.
+  ``paper_controls`` passes the potential gradient, which is what the
+  climb reads.
+- The LJ75 Mackay opening is read in the deposited fixture's atom order.
+  Sorted distance signatures put a search minimum at that geometry back
+  into that order before the fivefold residual, which otherwise follows
+  storage order and misses the axis at length 0.9018. The quench is
+  adopted only when the current energy is the shelf and the gap above it
+  sits in ``(1.02, 1.12)``. The climb stays the gate, so ``for_cluster``
+  does not take the opening.
+- The seam restart banks a structure only when it is within two epsilon
+  of the previous floor and its icosahedral template share is strictly
+  below that floor. A DECAF gap and an energy doorway are not the
+  broadcast. ``communicating`` leaves ``restart_on_stall`` off.
+- The census IPC address, the q-Gaussian bound check, the q-Gaussian
+  error, and the MD work directory name the values they test. The address,
+  the accepted ``(q_v, q_a)`` interval, the error text, and the directory
+  name are unchanged.
+- ``rgpot-ex`` links one ``eindir_abi_stamp_t``. ``rgpot-core`` is crates.io
+  3.5.1, which depends on ``eindir-core`` 0.6.0, the same crate the rest of
+  the workspace uses. The git pin at 3.0.2 compiled a second eindir, and
+  packaging rewrote that pin to registry 3.0.2, which depends on
+  ``eindir-core`` 0.5.2.
+- The certified-constructor UI tests record the current compiler wording.
+  Each uncertified combination still fails to compile: an acceptance rule
+  is not a certified acceptance, a downstream crate cannot implement the
+  sealed acceptance trait, and a full-space move is not certified for a
+  box. The UI build repeats the path patches the parent resolve used, so
+  the check runs offline.
+- The Rust API page is generated again. ``sphinx-rustdocgen`` 1.3.0 joined
+  a ``#[path]`` module onto the file that declared it, then failed to read
+  that path. The docs build installs 1.3.0 with that join made from the
+  file's directory. Generated pages join a wrapped code span onto one line,
+  keep a literal closed when a word follows it, and escape LaTeX bars.
+  The cluster-search title line matches the title. The method catalog, the
+  composition walk, the communication and regime notes, and the box
+  Langevin escape are in the contents. The eindir inventory is no longer
+  fetched at build time.
+- Water isomer names use species-aware IRA. The gate is half the
+  minimum gap between distinct deposited references and is computed
+  before any seed. A dissociated monomer is unassigned. Search
+  geometries and deposited GOFEE geometries use that same classifier.
+  The Kabsch helper is not the label. A build without the ``ira``
+  feature leaves the gate unset instead of substituting that helper.
+- A search whose first quench is not finite returns
+  ``SearchError::NoFiniteStart`` instead of continuing from that value.
+  The ledger redraws a start, up to ``DEFAULT_START_ATTEMPTS`` (8), and
+  records each redraw. A finite first quench is unchanged. A caller stop
+  during that opening quench returns the outcome recorded so far.
+- Slab hop groups use a species-pair cutoff. Cu-Cu is 2.36 angstrom,
+  above the Cu2 bond length 2.21927(3) angstrom (Ram, Jarman and
+  Bernath, J. Mol. Spectrosc. 156, 468, 1992,
+  doi:10.1016/0022-2852(92)90247-L) and below the 2.5 angstrom fixture
+  contact. Other metal pairs use the unscaled Cordero sum, so Pt at
+  2.77 angstrom stays separate and a shorter metal dimer stays one
+  body. Light pairs stay at 1.25 times the Cordero sum, which bonds H2.
+  A rule that never bonds two radii of at least 1 angstrom splits that
+  Cu2 bond, so it is not used.
 - An in-process census cohort dials neighbours only after every publisher
   is bound. A dial that landed on a port reservation completed the TCP
   handshake there and waited for a protocol header the reservation never

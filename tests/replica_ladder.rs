@@ -49,8 +49,9 @@ fn lj_run_on(cfg: &Config, seed: u64, ledger: &mut Ledger, gradient: bool) -> Ou
             Some(pot.value_and_gradient(x).1)
         };
         optimize_with_gradient(cfg, ledger, &mut relax, Some(&mut grad), seed)
+            .expect("finite start")
     } else {
-        optimize(cfg, ledger, &mut relax, seed)
+        optimize(cfg, ledger, &mut relax, seed).expect("finite start")
     }
 }
 
@@ -117,6 +118,9 @@ fn the_ladder_multiplies_the_budget_window_temperature() {
 #[test]
 fn the_ladder_multiplies_the_statistical_temperature() {
     let mut cfg = Config::recommended(13);
+    // The rise counts below were measured with the Bayes screen off.
+    // `recommended` now inherits that screen from `for_cluster`.
+    cfg.bayes_screen = false;
     cfg.temperature = 0.2;
     cfg.statistical_temperature = true;
     cfg.swap_period = 450;
@@ -180,6 +184,10 @@ fn returns(cfg: &Config) -> (f64, usize, usize) {
 #[test]
 fn a_rung_switch_brings_each_state_its_own_basin() {
     let mut cfg = Config::for_cluster(13);
+    // The measured ladder wants every trial quenched. `for_cluster` now
+    // starts with the Bayes screen on, so this case turns that screen off.
+    cfg.bayes_screen = false;
+    cfg.return_screen = false;
     assert!(!cfg.return_screen && !cfg.bayes_screen);
     cfg.minima_hopping = true;
     cfg.screen_margin = f64::INFINITY;
@@ -212,6 +220,7 @@ fn a_rung_switch_brings_each_state_its_own_basin() {
 #[test]
 fn a_resumed_rung_measures_returns_against_its_own_basin() {
     let mut cfg = Config::for_cluster(6);
+    cfg.bayes_screen = false;
     cfg.replicas = 3;
     cfg.swap_period = 3;
     cfg.minima_hopping = true;
@@ -237,7 +246,7 @@ fn a_resumed_rung_measures_returns_against_its_own_basin() {
     let mut ledger = Ledger::new(BUDGET);
     let mut rng = StdRng::seed_from_u64(31);
 
-    let out = run(&cfg, compact.view(), &mut ledger, &mut relax, &mut rng);
+    let out = run(&cfg, compact.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
 
     let (same, known, new) = out.visit_counts;
     assert!(

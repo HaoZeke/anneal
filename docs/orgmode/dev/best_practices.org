@@ -43,7 +43,7 @@ See:
 
 - [[https://eindir.rgoswami.me/howto/gradients.html][eindir gradients guide]]
 - [[https://eindir.rgoswami.me/explanation/primitives.html][eindir primitives explanation]]
-- The =eindir.gradient= module in the eindir Rust API (intersphinx cross-reference from this documentation set).
+- The =eindir_core= gradient module, from the eindir documentation.
 
 ** Reproducibility
 

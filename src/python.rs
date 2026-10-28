@@ -842,8 +842,7 @@ fn run_hmc(
     let q_max = 1.0 + 2.0 / dim as f64;
     if q > 1.0 && q >= q_max {
         return Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "q-Gaussian momentum requires q < 1 + 2/dim = {} for dim = {}; got q = {}",
-            q_max, dim, q
+            "q-Gaussian momentum requires q < 1 + 2/dim = {q_max} for dim = {dim}; got q = {q}"
         )));
     }
     let x0_arr = if let Some(arr) = x0 {
@@ -3779,7 +3778,8 @@ fn cluster_search(
         crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, started.view(), seed)
     } else {
         crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
-    };
+    }
+    .map_err(|err| PyValueError::new_err(err.to_string()))?;
     errors.finish(py)?;
     let best_block = out
         .best_state

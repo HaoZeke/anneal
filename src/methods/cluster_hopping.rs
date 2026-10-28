@@ -47,6 +47,7 @@ use crate::screen::Screen;
 
 mod config;
 mod moves;
+mod packing_bank;
 mod preset;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
@@ -454,6 +455,17 @@ impl QuenchBoundary {
     }
 }
 
+/// A search stopped because no initial quench was finite.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SearchError {
+    /// The initial evaluation was non-finite on every attempt.
+    #[error("no finite start after {attempts} attempts")]
+    NoFiniteStart {
+        /// Quenches tried before the search stopped.
+        attempts: usize,
+    },
+}
+
 /// Charged objective-work ledger with optional per-relaxation evidence.
 pub struct Ledger {
     budget: usize,
@@ -470,6 +482,10 @@ pub struct Ledger {
     /// Energy at or below which the hop may stop.
     target: Option<f64>,
     stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// How many initial quenches to try before [`SearchError::NoFiniteStart`].
+    start_attempts: usize,
+    /// Geometries drawn after a non-finite initial quench, in order.
+    start_redraws: Vec<Array1<f64>>,
 }
 
 struct DiagnosticQuench<'a> {
@@ -510,7 +526,26 @@ impl Ledger {
             diagnostic_quench: false,
             target: None,
             stop: None,
+            start_attempts: Self::DEFAULT_START_ATTEMPTS,
+            start_redraws: Vec::new(),
         }
+    }
+
+    /// Initial quenches tried when the first evaluation is non-finite.
+    pub const DEFAULT_START_ATTEMPTS: usize = 8;
+
+    /// Caps the initial-quench redraws. Values below 1 are raised to 1.
+    pub fn set_start_attempts(&mut self, attempts: usize) {
+        self.start_attempts = attempts.max(1);
+    }
+
+    /// Starts drawn after a refused initial evaluation, oldest first.
+    pub fn start_redraws(&self) -> &[Array1<f64>] {
+        &self.start_redraws
+    }
+
+    fn note_start_redraw(&mut self, state: ArrayView1<f64>) {
+        self.start_redraws.push(state.to_owned());
     }
 
     /// Stop once a recorded energy is at or below `energy`.
@@ -1143,7 +1178,7 @@ pub fn run<R: Rng + ?Sized>(
     ledger: &mut Ledger,
     relax: Relax<'_>,
     rng: &mut R,
-) -> Outcome {
+) -> Result<Outcome, SearchError> {
     run_with_gradient(cfg, start, ledger, relax, None, rng)
 }
 
@@ -1160,7 +1195,7 @@ pub fn run_with_gradient_settle<'g, R: Rng + ?Sized>(
     grad: Option<&mut GradFn<'g>>,
     settle: Option<Settle<'_>>,
     rng: &mut R,
-) -> Outcome {
+) -> Result<Outcome, SearchError> {
     let mut checkpoint = continue_without_checkpoint;
     run_full(
         cfg,
@@ -1186,7 +1221,7 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
     relax: Relax<'_>,
     grad: Option<&mut GradFn<'g>>,
     rng: &mut R,
-) -> Outcome {
+) -> Result<Outcome, SearchError> {
     let mut checkpoint = continue_without_checkpoint;
     run_full(
         cfg,
@@ -1214,7 +1249,7 @@ pub fn run_with_energy_gradient<'g, R: Rng + ?Sized>(
     grad: Option<&mut GradFn<'g>>,
     energy_grad: Option<&mut EnergyGradFn<'g>>,
     rng: &mut R,
-) -> Outcome {
+) -> Result<Outcome, SearchError> {
     let mut checkpoint = continue_without_checkpoint;
     run_full(
         cfg,
@@ -1246,7 +1281,7 @@ pub fn run_with_energy_gradient_at_checkpoints<'g, R, H>(
     rng: &mut R,
     checkpoint_interval: usize,
     checkpoint: &mut H,
-) -> Outcome
+) -> Result<Outcome, SearchError>
 where
     R: Rng + ?Sized,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
@@ -1292,7 +1327,7 @@ pub fn run_with_bias<'g, R: Rng + ?Sized>(
     grad: Option<&mut GradFn<'g>>,
     bias: &mut BasinBias<ClusterFingerprint>,
     rng: &mut R,
-) -> Outcome {
+) -> Result<Outcome, SearchError> {
     assert!(
         cfg.replicas <= 1,
         "a shared bias and a replica ladder are different things: \
@@ -1327,7 +1362,7 @@ pub fn run_with_bias_at_checkpoints<'g, R, H>(
     rng: &mut R,
     checkpoint_interval: usize,
     checkpoint: &mut H,
-) -> Outcome
+) -> Result<Outcome, SearchError>
 where
     R: Rng + ?Sized,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
@@ -1377,7 +1412,7 @@ pub fn run_with_history_at_checkpoints<'g, R, H>(
     rng: &mut R,
     checkpoint_interval: usize,
     checkpoint: &mut H,
-) -> Outcome
+) -> Result<Outcome, SearchError>
 where
     R: Rng + ?Sized,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
@@ -1896,6 +1931,21 @@ fn finish_improving(
 /// Continuations [`finish_improving`] grants one relaxation.
 const FINISH_ROUNDS: usize = 8;
 
+/// A caller stop during the opening quench is not a refused potential.
+///
+/// The ledger may hold no finite minimum yet. The search still returns
+/// that record, and it does not draw another start.
+fn outcome_when_start_was_stopped(ledger: &Ledger, x: &Array1<f64>, energy: f64) -> Outcome {
+    Outcome {
+        best: ledger.best,
+        best_state: ledger.best_state.clone(),
+        final_state: Some(x.clone()),
+        final_energy: energy,
+        charged: ledger.spent(),
+        ..Outcome::default()
+    }
+}
+
 fn run_full<'g, R, H>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -1909,7 +1959,7 @@ fn run_full<'g, R, H>(
     checkpoint_interval: Option<usize>,
     checkpoint: &mut H,
     rng: &mut R,
-) -> Outcome
+) -> Result<Outcome, SearchError>
 where
     R: Rng + ?Sized,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
@@ -1958,17 +2008,70 @@ where
     // The first quench supplies a stable canonical reference before the bias
     // is built. Reporting it as a minimum additionally requires the same
     // geometry and gradient contract as every subsequent quench.
-    let (mut e, mut x) = relax(ledger, start, cfg.relax_steps);
-    let initial_sane = quench_is_sane(cfg, e, x.view());
+    let attempts = ledger.start_attempts.max(1);
+    let mut x = start.to_owned();
+    let mut e = f64::NAN;
+    let mut initial_validation_gradient: Option<Array1<f64>> = None;
+    let mut initial_recordable = false;
     let gradient_required = grad.is_some();
-    let initial_validation_gradient = initial_sane.then(|| {
-        grad.as_deref_mut().and_then(|g| {
-            g(ledger, x.view()).filter(|values| answer_gradient_ok(cfg, values.view(), x.len()))
-        })
-    });
-    let initial_validation_gradient = initial_validation_gradient.flatten();
-    let initial_recordable = initial_sane
-        && (ledger.below_target(e) || !gradient_required || initial_validation_gradient.is_some());
+    for attempt in 0..attempts {
+        // `remaining` is also zero when the caller has stopped. That is a
+        // finished search, not a potential that refused every start.
+        if ledger.stopped() {
+            return Ok(outcome_when_start_was_stopped(ledger, &x, e));
+        }
+        if attempt > 0 {
+            if ledger.remaining() == 0 {
+                return Err(SearchError::NoFiniteStart { attempts: attempt });
+            }
+            let mut fresh = random_cluster_in_radius(
+                n,
+                cfg.start_radius().max(cfg.min_separation),
+                cfg.min_separation,
+                rng,
+            );
+            if fresh.len() != x.len() {
+                fresh = x.clone();
+                if let Some(coord) = fresh.first_mut() {
+                    *coord += 0.25;
+                }
+            }
+            ledger.note_start_redraw(fresh.view());
+            x = fresh;
+        }
+        let quenched = relax(ledger, x.view(), cfg.relax_steps);
+        e = quenched.0;
+        x = quenched.1;
+        if !e.is_finite() {
+            if ledger.stopped() {
+                return Ok(outcome_when_start_was_stopped(ledger, &x, e));
+            }
+            if attempt + 1 == attempts {
+                return Err(SearchError::NoFiniteStart {
+                    attempts: attempt + 1,
+                });
+            }
+            continue;
+        }
+        let initial_sane = quench_is_sane(cfg, e, x.view());
+        let nested = initial_sane.then(|| {
+            grad.as_deref_mut().and_then(|g| {
+                g(ledger, x.view()).filter(|values| answer_gradient_ok(cfg, values.view(), x.len()))
+            })
+        });
+        initial_validation_gradient = nested.flatten();
+        initial_recordable = initial_sane
+            && (ledger.below_target(e)
+                || !gradient_required
+                || initial_validation_gradient.is_some());
+        break;
+    }
+    if !e.is_finite() {
+        if ledger.stopped() {
+            return Ok(outcome_when_start_was_stopped(ledger, &x, e));
+        }
+        return Err(SearchError::NoFiniteStart { attempts });
+    }
     if initial_recordable {
         ledger.record(e, x.view());
     }
@@ -2521,6 +2624,11 @@ where
     let mut next_reoccupy = cfg.reoccupy_interval;
     let mut best_seen = ledger.best;
     let mut charged_at_best = ledger.spent();
+    // Minima separated by common-neighbour fractions. A stall in the
+    // icosahedral packing can return to a lower minimum of another packing
+    // the chain already quenched, instead of redrawing inside the same one.
+    let mut packing = packing_bank::PackingBank::new();
+    let packing_cutoff = 1.2 * cfg.length_scale;
     // Hops elapsed when the ledger last recorded a lower minimum.
     // A rigid reseed compares the live hop count with this stamp.
     let mut hops_at_lowest = 0usize;
@@ -2627,13 +2735,15 @@ where
                 });
             }
         }
-        // A stalled chain restarts from a fresh random cluster; the bias it
-        // built stays and steers the new walk away from where it was.
-        if internal_action.is_none()
-            && cfg.restart_on_stall
-            && hops > 0
-            && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1)
-        {
+        // A fresh cluster on this clock returns to the Mackay icosahedron
+        // (Doye, J. Chem. Phys. 111, 8417 (1999)). When the climb is on,
+        // the same clock is one directed leave, not that redraw. The hop
+        // patience is thousands of hops and does not fall inside a paper
+        // force budget, so this call plateau is the leave that runs.
+        let call_due = hops > 0
+            && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1);
+        let mut directed_leave = false;
+        if internal_action.is_none() && cfg.restart_on_stall && !cfg.escape_on_stall && call_due {
             let fresh = random_cluster(x.len() / 3, 0.7, cfg.min_separation, rng);
             let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
             charged_at_best = ledger.spent();
@@ -2645,6 +2755,12 @@ where
                     external_calls: 0,
                 });
             }
+        }
+        if internal_action.is_none() && cfg.escape_on_stall && call_due {
+            // One response per plateau. Without the reset the clock stays
+            // due and the leave runs on every following hop.
+            charged_at_best = ledger.spent();
+            directed_leave = true;
         }
         let checkpoint_due = matches!(
             (checkpoint_interval, next_checkpoint),
@@ -4164,6 +4280,10 @@ where
                 history_new += 1;
             }
         }
+        // The floor the fivefold channel reads is the incumbent before this
+        // record. Gap and energy are not that comparison.
+        let channel_floor_energy = ledger.best;
+        let channel_floor_state = seam.as_ref().and_then(|_| ledger.best_state.clone());
         if recordable {
             ledger.record(e_new, x_new.view());
             if ledger.target_reached() {
@@ -4555,18 +4675,16 @@ where
             }
             if let Some(seam) = seam.as_mut()
                 && recordable
-                && e_new <= ledger.best + crate::catalog::SEAM_WINDOW
-                && let (Some(floor), Some(trial)) = (
-                    ledger
-                        .best_state
-                        .as_ref()
-                        .and_then(|b| b.as_slice().map(<[f64]>::to_vec)),
-                    x_new.as_slice(),
-                )
+                && let (Some(floor_state), Some(trial)) =
+                    (channel_floor_state.as_ref(), x_new.as_slice())
             {
-                let gap = crate::catalog::packing_seam_gap(&floor, trial);
-                if seam.offer(gap, e_new, trial) && frontier_exchange {
-                    crate::catalog::offer_frontier_post(gap, e_new, trial);
+                let share = crate::catalog::icosahedral_share(x_new.view());
+                let floor_share = crate::catalog::icosahedral_share(floor_state.view());
+                if crate::catalog::fivefold_channel(e_new, channel_floor_energy, share, floor_share)
+                    && seam.offer(share, e_new, trial)
+                    && frontier_exchange
+                {
+                    crate::catalog::offer_frontier_post(share, e_new, trial);
                 }
             }
             // One arrival on the packing the chain has just moved onto.
@@ -4780,6 +4898,9 @@ where
             }
         }
         if accept {
+            if !unquenched && cfg.packing_cna_applies() {
+                packing.offer(e_new, x_new.view(), packing_cutoff);
+            }
             // An accepted uphill step to a different basin samples the escape
             // distribution, which is the quantity the deposit height has to be
             // commensurate with.
@@ -5282,9 +5403,11 @@ where
         // Tabu names the basin. It does not redraw the cluster.
         // Coupling the two sampled Doye's wide icosahedral funnel
         // (J. Chem. Phys. 111, 8417 (1999)): a random restart lands
-        // back on Mackay. The manuscript stall step is tabu only.
-        // A directed leave is `escape_on_stall` (Goedecker / Schönborn).
-        let stall_response = if stuck && !stall_arms.is_empty() {
+        // back on Mackay. The call plateau above is the directed leave
+        // when the climb is on, and it is not a draw among the stall arms.
+        let stall_response = if directed_leave {
+            stall_arms.iter().position(|arm| *arm == "climb")
+        } else if stuck && !stall_arms.is_empty() {
             Some(if stall_arms.len() > 1 {
                 stall_allocator.select(rng)
             } else {
@@ -5383,6 +5506,156 @@ where
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
             quiet = 0;
             longest_quiet = 0;
+            // An icosahedral plateau returns to a lower minimum of another
+            // packing when the bank holds one. The structure was already
+            // quenched, so this does not run another relaxation and it draws
+            // no random numbers. A face-centred-cubic plateau does not take
+            // it: that is the 38-point minimum, and leaving it is the wrong
+            // move.
+            if directed_leave
+                && cfg.packing_cna_applies()
+                && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+                && let Some((other_energy, other_state)) =
+                    packing.better_other(x.view(), e, packing_cutoff)
+            {
+                let other_gradient = record_quenched_answer(
+                    cfg,
+                    ledger,
+                    &mut grad,
+                    other_energy,
+                    other_state.view(),
+                    &mut unconverged_records,
+                );
+                if grad.is_none() || other_gradient.is_some() {
+                    e = other_energy;
+                    x = other_state;
+                    current_validation_gradient = other_gradient;
+                }
+            }
+            // Derived search cools inside the budget window, and the climb
+            // is a displacement. On a plateau whose occupied structure is
+            // not icosahedral, also grow the lattice orders. That is the
+            // move that crosses a funnel in one step. The chain takes the
+            // growth only when it deepens the incumbent. A lattice minimum
+            // above the best would pin the search there. The climb still runs.
+            if directed_leave
+                && cfg.budget_window
+                && !crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+            {
+                let best_before_growth = ledger.best;
+                let mut best_growth: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
+                for source in crate::lattice::Source::library() {
+                    if ledger.remaining() == 0 {
+                        break;
+                    }
+                    let grown = crate::lattice::candidate(source, x.view(), x.len() / 3, rng);
+                    let (grown_energy, grown_state) = relax(ledger, grown.view(), cfg.relax_steps);
+                    if grown_state.len() != x.len() || !grown_energy.is_finite() {
+                        continue;
+                    }
+                    let grown_gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        grown_energy,
+                        grown_state.view(),
+                        &mut unconverged_records,
+                    );
+                    let replace = best_growth
+                        .as_ref()
+                        .is_none_or(|(energy, _, _)| grown_energy < *energy);
+                    if replace {
+                        best_growth = Some((grown_energy, grown_state, grown_gradient));
+                    }
+                }
+                if let Some((grown_energy, grown_state, grown_gradient)) = best_growth
+                    && grown_energy < best_before_growth - 1e-9
+                {
+                    hops += 1;
+                    adopt_minimum!(
+                        grown_energy,
+                        grown_state,
+                        grown_gradient,
+                        None,
+                        AdoptionHistory::Fresh,
+                        None,
+                        Some("stall-growth"),
+                        hops
+                    );
+                }
+                if ledger.best < best_before_growth - 1e-12 && improvements.len() < 512 {
+                    improvements.push((hops, ledger.spent(), bias.n_basins(), ledger.best));
+                }
+            }
+            // The same growth while the occupied structure is icosahedral.
+            // The chain is then inside the funnel that contains most of the
+            // minima, and the other orders, including the pentagonal one a
+            // decahedron is built from, are the leave. The draws come from a
+            // stream seeded by the hop and the incumbent, so a growth that
+            // does not win leaves the chain's own stream where it was. The
+            // quench is kept only when it deepens the incumbent.
+            if directed_leave
+                && cfg.packing_cna_applies()
+                && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+            {
+                let best_before_growth = ledger.best;
+                let mut side = StdRng::seed_from_u64(
+                    (hops as u64).wrapping_mul(0x9E37_79B9)
+                        ^ best_before_growth.to_bits()
+                        ^ 0x11A7_11CE,
+                );
+                // Close packing and the pentagonal order. Regrowing the
+                // icosahedron the chain is already in does not leave it.
+                let sources = [
+                    crate::lattice::Source::Named(crate::structure::Template::FaceCentredCubic),
+                    crate::lattice::Source::Named(crate::structure::Template::HexagonalClosePacked),
+                    crate::lattice::Source::Pentagonal,
+                ];
+                let mut best_growth: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
+                for source in sources {
+                    if ledger.remaining() == 0 {
+                        break;
+                    }
+                    let grown = crate::lattice::candidate(source, x.view(), x.len() / 3, &mut side);
+                    let (grown_energy, grown_state) = relax(ledger, grown.view(), cfg.relax_steps);
+                    if grown_state.len() != x.len() || !grown_energy.is_finite() {
+                        continue;
+                    }
+                    let grown_gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        grown_energy,
+                        grown_state.view(),
+                        &mut unconverged_records,
+                    );
+                    let replace = best_growth
+                        .as_ref()
+                        .is_none_or(|(energy, _, _)| grown_energy < *energy);
+                    if replace {
+                        best_growth = Some((grown_energy, grown_state, grown_gradient));
+                    }
+                }
+                if let Some((grown_energy, grown_state, grown_gradient)) = best_growth
+                    && grown_energy < best_before_growth - 1e-9
+                {
+                    hops += 1;
+                    adopt_minimum!(
+                        grown_energy,
+                        grown_state,
+                        grown_gradient,
+                        None,
+                        AdoptionHistory::Fresh,
+                        None,
+                        Some("stall-growth"),
+                        hops
+                    );
+                    packing.offer(e, x.view(), packing_cutoff);
+                }
+                if ledger.best < best_before_growth - 1e-12 && improvements.len() < 512 {
+                    improvements.push((hops, ledger.spent(), bias.n_basins(), ledger.best));
+                }
+            }
             if let Some(g) = grad.as_deref_mut() {
                 let scale = if cfg.minima_hopping {
                     feedback.escape()
@@ -5880,7 +6153,7 @@ where
         *slot = bias;
     }
 
-    Outcome {
+    Ok(Outcome {
         best: ledger.best,
         best_state: ledger.best_state.clone(),
         final_state: Some(x.clone()),
@@ -6039,7 +6312,7 @@ where
             r
         }),
         energy_bias: ebias,
-    }
+    })
 }
 
 /// Seeds a non-overlapping configuration at liquid-like density.
@@ -6203,7 +6476,12 @@ fn random_rigid_reseed<R: Rng + ?Sized>(cfg: &Config, rng: &mut R) -> Array1<f64
 }
 
 /// Convenience entry point seeding its own start.
-pub fn optimize(cfg: &Config, ledger: &mut Ledger, relax: Relax<'_>, seed: u64) -> Outcome {
+pub fn optimize(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    seed: u64,
+) -> Result<Outcome, SearchError> {
     optimize_with_gradient(cfg, ledger, relax, None, seed)
 }
 
@@ -6215,7 +6493,7 @@ pub fn optimize_with_settle<'g>(
     grad: Option<&mut GradFn<'g>>,
     settle: Option<Settle<'_>>,
     seed: u64,
-) -> Outcome {
+) -> Result<Outcome, SearchError> {
     let mut rng = StdRng::seed_from_u64(seed);
     let start = random_cluster_in_radius(
         cfg.n_points,
@@ -6233,7 +6511,7 @@ pub fn optimize_with_gradient<'g>(
     relax: Relax<'_>,
     grad: Option<&mut GradFn<'g>>,
     seed: u64,
-) -> Outcome {
+) -> Result<Outcome, SearchError> {
     let mut rng = StdRng::seed_from_u64(seed);
     let start = random_cluster_in_radius(
         cfg.n_points,
@@ -6253,7 +6531,7 @@ pub fn optimize_with_energy_gradient<'g>(
     grad: Option<&mut GradFn<'g>>,
     energy_grad: Option<&mut EnergyGradFn<'g>>,
     seed: u64,
-) -> Outcome {
+) -> Result<Outcome, SearchError> {
     let mut rng = StdRng::seed_from_u64(seed);
     let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
     run_with_energy_gradient(
@@ -6467,12 +6745,20 @@ mod tests {
         let der = Config::derived(13);
         assert!(matches!(der.move_library, MoveLibrary::LeanBurst));
         assert!(der.allocate_moves && der.depth_reward && der.tabu_on_stall);
-        assert!(!der.escape_on_stall);
-        assert!(!der.restart_on_stall);
+        assert!(der.escape_on_stall && der.restart_on_stall && der.trail_on_stall);
+        assert!(rec.escape_on_stall && rec.restart_on_stall && rec.trail_on_stall);
         assert!(der.budget_window);
         assert!(der.bayes_screen);
         assert!(!rec.budget_window);
-        assert!(!rec.bayes_screen);
+        assert!(rec.bayes_screen);
+        assert!(matches!(
+            Config::recommended(38).move_library,
+            MoveLibrary::Reseed
+        ));
+        assert!(matches!(
+            Config::recommended(75).move_library,
+            MoveLibrary::LeanBurst
+        ));
         let want = crate::screen::cost_asymmetric_threshold(der.screen_steps, der.relax_steps);
         assert!((der.bayes_threshold - want).abs() < 1e-12);
         assert!((der.bayes_threshold - 7.0 / 15.0).abs() < 1e-12);
@@ -6538,7 +6824,8 @@ mod tests {
             None,
             &mut bias,
             &mut rng,
-        );
+        )
+        .expect("finite start");
         let after_first = bias.n_basins();
         assert!(after_first > 0, "the first chain deposited nothing");
 
@@ -6552,7 +6839,8 @@ mod tests {
             None,
             &mut bias,
             &mut rng,
-        );
+        )
+        .expect("finite start");
         assert!(
             out.basins >= after_first,
             "the second chain saw {} basins where the first left {after_first}",
@@ -6740,7 +7028,7 @@ mod tests {
             let e = x.iter().map(|v| v * v).sum::<f64>();
             (e, x.to_owned())
         };
-        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng);
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
         assert!(
             out.returned >= 1,
             "expected returning trials, got {}",
@@ -6787,7 +7075,7 @@ mod tests {
             let e = x.iter().map(|v| v * v).sum::<f64>();
             (e, x.to_owned())
         };
-        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng);
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
         assert!(
             out.returned >= 1,
             "expected returning trials, got {}",
@@ -6908,7 +7196,7 @@ mod tests {
             &witness,
             HistoryMembership::Accepted,
         );
-        let out1 = run(1, &mut first);
+        let out1 = run(1, &mut first).expect("finite start");
         assert!(
             out1.history_visits.0 > 0,
             "the first chain reported nothing"
@@ -6925,7 +7213,7 @@ mod tests {
             &witness,
             HistoryMembership::Accepted,
         );
-        let out2 = run(2, &mut second);
+        let out2 = run(2, &mut second).expect("finite start");
         assert!(
             out2.history_visits.0 > 0,
             "the second chain reported nothing"
@@ -7006,7 +7294,7 @@ mod tests {
             &witness,
             HistoryMembership::Accepted,
         );
-        let _ = run(1, &mut first);
+        let _ = run(1, &mut first).expect("finite start");
         let mut second = SharedMinimumHistory::new(
             &history,
             &descriptor,
@@ -7014,7 +7302,7 @@ mod tests {
             &witness,
             HistoryMembership::Accepted,
         );
-        let out2 = run(2, &mut second);
+        let out2 = run(2, &mut second).expect("finite start");
         assert_eq!(
             out2.visit_counts.1, 0,
             "recognition must not inherit the peer well as known: {:?}",
@@ -7051,7 +7339,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(7);
         let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
         let mut ledger = Ledger::new(8_000);
-        let _ = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng);
+        let _ = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
         assert!(full >= 1, "the first descent must certify the well");
         assert!(
             full < 6,
@@ -7083,7 +7371,7 @@ mod tests {
         };
         let mut ledger = Ledger::new(16);
         let mut rng = StdRng::seed_from_u64(41);
-        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng);
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
 
         assert_eq!(ledger.best, 0.0);
         assert_eq!(out.best, 0.0);
@@ -7116,7 +7404,8 @@ mod tests {
             &mut relax,
             Some(&mut grad),
             &mut rng,
-        );
+        )
+        .expect("finite start");
 
         assert!(out.best.is_infinite());
         assert!(out.best_state.is_none());
@@ -7143,11 +7432,105 @@ mod tests {
             &mut relax,
             Some(&mut grad),
             &mut rng,
-        );
+        )
+        .expect("finite start");
 
         assert!(out.best.is_infinite());
         assert!(out.best_state.is_none());
         assert!(out.improvements.is_empty());
+    }
+
+    #[test]
+    fn a_refused_start_redraws_until_a_finite_quench() {
+        let mut cfg = Config::for_cluster(4);
+        cfg.max_hops = Some(0);
+        let start = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.0, 1.2,
+        ]);
+        {
+            let mut calls = 0usize;
+            let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+                assert!(ledger.charge());
+                calls += 1;
+                if calls <= 3 {
+                    (f64::NAN, x.to_owned())
+                } else {
+                    (-1.0, x.to_owned())
+                }
+            };
+            let mut ledger = Ledger::new(32);
+            ledger.set_start_attempts(4);
+            let mut rng = StdRng::seed_from_u64(9);
+            let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng)
+                .expect("the fourth quench is finite");
+            assert_eq!(out.best, -1.0);
+            assert_eq!(ledger.start_redraws().len(), 3);
+            assert!(ledger.best.is_finite());
+        }
+        {
+            let mut calls = 0usize;
+            let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+                assert!(ledger.charge());
+                calls += 1;
+                if calls <= 3 {
+                    (f64::NAN, x.to_owned())
+                } else {
+                    (-1.0, x.to_owned())
+                }
+            };
+            let mut ledger = Ledger::new(32);
+            ledger.set_start_attempts(3);
+            let mut rng = StdRng::seed_from_u64(9);
+            let err = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng)
+                .expect_err("three refusals exhaust the attempts");
+            assert_eq!(err, SearchError::NoFiniteStart { attempts: 3 });
+            assert_eq!(ledger.start_redraws().len(), 2);
+            assert!(ledger.best.is_infinite());
+        }
+    }
+
+    #[test]
+    fn a_caller_stop_during_a_refused_start_returns_the_outcome() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let mut cfg = Config::for_cluster(4);
+        cfg.max_hops = Some(0);
+        let start = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.0, 1.2, 0.0, 0.0, 0.0, 1.2,
+        ]);
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut calls = 0usize;
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            assert!(ledger.charge());
+            calls += 1;
+            stop.store(true, Ordering::Relaxed);
+            (f64::NAN, x.to_owned())
+        };
+        let mut ledger = Ledger::with_stop(32, Arc::clone(&stop));
+        ledger.set_start_attempts(4);
+        let mut rng = StdRng::seed_from_u64(9);
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng)
+            .expect("a caller stop is not a refused start");
+        assert_eq!(calls, 1);
+        assert!(ledger.start_redraws().is_empty());
+        assert!(out.best.is_infinite());
+        assert_eq!(out.charged, 1);
+
+        let raised = Arc::new(AtomicBool::new(true));
+        let mut calls = 0usize;
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            let _ = ledger.charge();
+            calls += 1;
+            (-1.0, x.to_owned())
+        };
+        let mut ledger = Ledger::with_stop(32, raised);
+        let mut rng = StdRng::seed_from_u64(9);
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng)
+            .expect("a raised stop returns before the first quench");
+        assert_eq!(calls, 0);
+        assert_eq!(out.charged, 0);
+        assert!(out.best.is_infinite());
     }
 
     #[test]
@@ -7188,7 +7571,8 @@ mod tests {
             &mut relax,
             Some(&mut grad),
             &mut rng,
-        );
+        )
+        .expect("finite start");
 
         assert_eq!(out.best, 0.0);
         assert!(
@@ -7230,7 +7614,8 @@ mod tests {
             None,
             Some(&mut eg),
             &mut rng,
-        );
+        )
+        .expect("finite start");
         assert_eq!(
             out.hmc.len(),
             3,
@@ -7258,7 +7643,7 @@ mod tests {
         let cfg = Config::for_cluster(6);
         let mut ledger = Ledger::new(500);
         let mut relax = toy_relax;
-        let out = optimize(&cfg, &mut ledger, &mut relax, 0);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 0).expect("finite start");
         assert!(out.charged <= 500, "spent {} of 500", out.charged);
         assert_eq!(ledger.remaining(), 0, "a run should spend its budget");
     }
@@ -7275,7 +7660,7 @@ mod tests {
         assert_eq!(ledger.spent(), 1);
         let cfg = Config::for_cluster(6);
         let mut relax = toy_relax;
-        let out = optimize(&cfg, &mut ledger, &mut relax, 0);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 0).expect("finite start");
         assert_eq!(out.charged, 1, "a stopped run spent its budget");
     }
 
@@ -7306,7 +7691,7 @@ mod tests {
         let cfg = Config::for_cluster(6);
         let mut ledger = Ledger::new(4000);
         let mut relax = toy_relax;
-        let out = optimize(&cfg, &mut ledger, &mut relax, 19);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 19).expect("finite start");
 
         assert!(out.final_energy.is_finite());
         let final_state = out
@@ -7345,7 +7730,8 @@ mod tests {
             &mut relax,
             Some(&mut grad),
             &mut rng,
-        );
+        )
+        .expect("finite start");
 
         let validated = out
             .accepted_transitions
@@ -7375,7 +7761,7 @@ mod tests {
         cfg.funnel_period = 8;
         let mut ledger = Ledger::new(1500);
         let mut relax = toy_relax;
-        let out = optimize(&cfg, &mut ledger, &mut relax, 11);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 11).expect("finite start");
         assert!(out.charged <= 1500, "spent {} of 1500", out.charged);
         assert_eq!(
             ledger.remaining(),
@@ -7419,10 +7805,13 @@ mod tests {
     #[test]
     fn screening_skips_full_relaxation_but_completes_the_hop() {
         let mut cfg = Config::for_cluster(6);
+        // The audit below is the margin screen. `for_cluster` now starts
+        // with the Bayes screen, which would decide instead.
+        cfg.bayes_screen = false;
         cfg.screen_margin = -1.0e12;
         let mut ledger = Ledger::new(4000);
         let mut relax = toy_relax;
-        let out = optimize(&cfg, &mut ledger, &mut relax, 1);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 1).expect("finite start");
         assert!(out.hops > 0, "no hop completed");
         assert_eq!(
             out.screened_out,
@@ -7437,7 +7826,7 @@ mod tests {
             relaxation_steps.push(steps);
             toy_relax(ledger, x, steps)
         };
-        let out = optimize(&cfg, &mut ledger, &mut relax, 1);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 1).expect("finite start");
         assert!(out.hops > 0, "no hop completed");
         assert_eq!(out.screened_out, out.hops);
         assert!(
@@ -7459,7 +7848,7 @@ mod tests {
         let cfg = Config::for_cluster(6);
         let mut ledger = Ledger::new(4000);
         let mut relax = toy_relax;
-        let out = optimize(&cfg, &mut ledger, &mut relax, 2);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 2).expect("finite start");
         assert!(out.basins >= 1, "at least the starting basin must register");
     }
 
@@ -7471,7 +7860,7 @@ mod tests {
         let cfg = Config::for_cluster(6);
         let mut ledger = Ledger::new(4000);
         let mut relax = toy_relax;
-        let out = optimize(&cfg, &mut ledger, &mut relax, 3);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 3).expect("finite start");
         assert!(out.transport.is_none());
     }
 
@@ -7488,7 +7877,7 @@ mod tests {
         cfg.ladder_pilot = 20;
         let mut ledger = Ledger::new(60_000);
         let mut relax = toy_relax;
-        let out = optimize(&cfg, &mut ledger, &mut relax, 5);
+        let out = optimize(&cfg, &mut ledger, &mut relax, 5).expect("finite start");
         let (trips, sweeps, barrier) = out.transport.expect("a ladder reports transport");
         assert!(sweeps > 20, "only {sweeps} sweeps; the ladder never ran");
         assert!(trips > 0, "no round trip in {sweeps} sweeps");
@@ -7512,7 +7901,7 @@ mod tests {
             c.ladder_mode = mode;
             let mut ledger = Ledger::new(60_000);
             let mut relax = toy_relax;
-            let out = optimize(&c, &mut ledger, &mut relax, 5);
+            let out = optimize(&c, &mut ledger, &mut relax, 5).expect("finite start");
             out.rungs.iter().map(|(t, _, _)| *t).collect::<Vec<f64>>()
         };
         let geometric = run(LadderMode::Reversible);
@@ -7543,7 +7932,9 @@ mod tests {
         let run_once = |seed| {
             let mut ledger = Ledger::new(2000);
             let mut relax = toy_relax;
-            optimize(&cfg, &mut ledger, &mut relax, seed).best
+            optimize(&cfg, &mut ledger, &mut relax, seed)
+                .expect("finite start")
+                .best
         };
         assert_eq!(run_once(7), run_once(7), "same seed must give same result");
     }
