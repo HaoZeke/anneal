@@ -515,12 +515,18 @@ impl Ledger {
 
     /// Stop once a recorded energy is at or below `energy`.
     ///
-    /// The value lives on the ledger rather than on [`Config`], so a stock
-    /// preset's resolved JSON is unchanged. A non-finite threshold is ignored.
-    pub fn stop_below(&mut self, energy: f64) {
+    /// `n` is the number of atoms. When the published Lennard-Jones minimum
+    /// for that size is known, a limit above the minimum plus the harness
+    /// window warns and is kept. The LJ75 and LJ98 icosahedral shelves are
+    /// refused and not installed. The value lives on the ledger rather than
+    /// on [`Config`], so a stock preset's resolved JSON is unchanged. A
+    /// non-finite threshold is ignored.
+    pub fn stop_below(&mut self, n: usize, energy: f64) -> Result<(), &'static str> {
         if energy.is_finite() {
+            crate::published_minima::check_stop_limit(n, energy)?;
             self.target = Some(energy);
         }
+        Ok(())
     }
 
     /// Threshold installed by [`Ledger::stop_below`], if any.
