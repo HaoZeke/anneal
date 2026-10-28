@@ -202,6 +202,11 @@ pub struct BankOutcome {
     pub deadlocks: usize,
     /// Random minima those enlargements admitted.
     pub injected: usize,
+    /// A requested constant-energy (NVE) escape stopped a slice.
+    ///
+    /// Set when [`crate::methods::cluster_hopping::Outcome::nve_unavailable`]
+    /// is set on any slice in the run.
+    pub nve_unavailable: bool,
 }
 
 /// One chain against its own sub-ledger, settled up against the caller's.
@@ -281,6 +286,7 @@ where
     let mut basins = 0usize;
     let mut screened_out = 0usize;
     let mut returned = 0usize;
+    let mut nve_unavailable = false;
     // A model of how low each morphology goes, over the share of points in
     // each local environment. Five numbers, so a Gaussian process over it is
     // exact and cheap; the coordinates would not be.
@@ -339,6 +345,7 @@ where
         basins += out.basins;
         screened_out += out.screened_out;
         returned += out.returned;
+        nve_unavailable |= out.nve_unavailable;
         if let Some(s) = out.best_state.as_ref() {
             if bank_cfg.acquisition {
                 funnel.observe(morphology(s.view(), cfg, bond_cutoff).view(), out.best);
@@ -535,6 +542,7 @@ where
         basins += out.basins;
         screened_out += out.screened_out;
         returned += out.returned;
+        nve_unavailable |= out.nve_unavailable;
         if let Some(s) = out.best_state.as_ref() {
             if bank_cfg.acquisition {
                 funnel.observe(morphology(s.view(), cfg, bond_cutoff).view(), out.best);
@@ -571,6 +579,7 @@ where
         bank: energies,
         deadlocks,
         injected,
+        nve_unavailable,
     }
 }
 

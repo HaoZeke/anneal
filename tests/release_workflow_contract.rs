@@ -21,8 +21,20 @@ fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
     assert!(manifest.contains("python = [\"dep:pyo3\", \"dep:numpy\", \"dlpk/pyo3\", \"eindir-core/py-objective\", \"rgsaddle\"]"));
     assert!(manifest.contains("bank-rpc = [\"dep:capnp\", \"dep:capnp-rpc\", \"dep:futures\", \"dep:nng\", \"dep:tokio\", \"dep:tokio-util\", \"dep:libc\", \"rgsaddle\"]"));
     assert!(manifest.contains("exclude = [\".cargo/config.toml\"]"));
-    assert!(workflow.contains("cargo publish --dry-run --no-verify"));
+    // `cargo package` writes anneal-core-${version}.crate. The version
+    // comes from cargo metadata.
+    assert!(workflow.contains("cargo package"));
+    assert!(!workflow.contains("cargo package --no-verify"));
+    assert!(workflow.contains("anneal-core-${version}.crate"));
+    assert!(workflow.contains("pkg[\"version\"]"));
+    assert!(workflow.contains("test -f \"$crate\""));
+    assert!(!workflow.contains("anneal-core-*.crate"));
+    assert!(!workflow.contains("tail -1"));
+    assert!(!workflow.contains("cargo publish --dry-run --no-verify"));
     assert!(workflow.contains("cargo clippy --all-targets -- -D warnings"));
+    assert!(workflow.contains("rm -rf \"$pkg/.cargo\""));
+    assert!(workflow.contains("cargo check --locked"));
+    assert!(workflow.contains("cargo check --locked --features rgsaddle,python"));
 }
 
 #[test]

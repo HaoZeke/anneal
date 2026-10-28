@@ -15,7 +15,9 @@
 
 use std::collections::HashMap;
 
+#[cfg(feature = "rgsaddle")]
 use ndarray::Array2;
+#[cfg(feature = "rgsaddle")]
 use rgsaddle::exact_eigh;
 
 /// Invalid graph query.
@@ -33,6 +35,9 @@ pub enum GraphError {
     /// The symmetric Laplacian eigensolve did not return a decomposition.
     #[error("landscape Laplacian eigensolve failed")]
     Eigensolver,
+    /// A connected split needs the dense eigensolve from the `rgsaddle` feature.
+    #[error("connected spectral split needs the rgsaddle feature")]
+    FeatureDisabled,
 }
 
 /// The two most weakly coupled communities of the explored landscape.
@@ -169,73 +174,84 @@ impl LandscapeGraph {
                 .collect();
             (0.0, left, right)
         } else {
-            let degrees = (0..n).map(|i| self.degree(i)).collect::<Vec<_>>();
-            let mut laplacian = Array2::zeros((n, n));
-            for i in 0..n {
-                laplacian[(i, i)] = 1.0;
-                for j in 0..n {
-                    if i != j {
-                        laplacian[(i, j)] = -self.weights[i][j] / (degrees[i] * degrees[j]).sqrt();
-                    }
-                }
+            // The Fiedler vector is the second eigenpair of the symmetric
+            // normalized Laplacian. `rgsaddle::exact_eigh` is the dense Jacobi
+            // solve (Sella `exact`). Without that feature the seam is unreported.
+            #[cfg(not(feature = "rgsaddle"))]
+            {
+                return Err(GraphError::FeatureDisabled);
             }
-            let (eigenvalues, eigenvectors) =
-                exact_eigh(laplacian.view()).map_err(|_| GraphError::Eigensolver)?;
-            let mut order = (0..n).collect::<Vec<_>>();
-            order.sort_by(|left, right| eigenvalues[*left].total_cmp(&eigenvalues[*right]));
-            let fiedler = order[1];
-            let vector = eigenvectors.column(fiedler);
-            let mut sweep = (0..n).collect::<Vec<_>>();
-            sweep.sort_by(|&left, &right| {
-                let left_score = vector[left] / degrees[left].sqrt();
-                let right_score = vector[right] / degrees[right].sqrt();
-                left_score
-                    .total_cmp(&right_score)
-                    .then_with(|| self.basins[left].cmp(&self.basins[right]))
-            });
-
-            let total_volume = degrees.iter().sum::<f64>();
-            let mut in_prefix = vec![false; n];
-            let mut prefix_volume = 0.0;
-            let mut cut = 0.0;
-            let mut best = None::<(f64, f64, usize)>;
-            for prefix_len in 1..n {
-                let added = sweep[prefix_len - 1];
-                for (other, &weight) in self.weights[added].iter().enumerate() {
-                    if in_prefix[other] {
-                        cut -= weight;
-                    } else {
-                        cut += weight;
+            #[cfg(feature = "rgsaddle")]
+            {
+                let degrees = (0..n).map(|i| self.degree(i)).collect::<Vec<_>>();
+                let mut laplacian = Array2::zeros((n, n));
+                for i in 0..n {
+                    laplacian[(i, i)] = 1.0;
+                    for j in 0..n {
+                        if i != j {
+                            laplacian[(i, j)] =
+                                -self.weights[i][j] / (degrees[i] * degrees[j]).sqrt();
+                        }
                     }
                 }
-                in_prefix[added] = true;
-                prefix_volume += degrees[added];
-                let complement_volume = total_volume - prefix_volume;
-                let conductance = cut.max(0.0) / prefix_volume.min(complement_volume);
-                let imbalance = (prefix_volume - complement_volume).abs();
-                let candidate = (conductance, imbalance, prefix_len);
-                let improves = best.is_none_or(|incumbent| {
-                    candidate
-                        .0
-                        .total_cmp(&incumbent.0)
-                        .then_with(|| candidate.1.total_cmp(&incumbent.1))
-                        .then_with(|| candidate.2.cmp(&incumbent.2))
-                        .is_lt()
+                let (eigenvalues, eigenvectors) =
+                    exact_eigh(laplacian.view()).map_err(|_| GraphError::Eigensolver)?;
+                let mut order = (0..n).collect::<Vec<_>>();
+                order.sort_by(|left, right| eigenvalues[*left].total_cmp(&eigenvalues[*right]));
+                let fiedler = order[1];
+                let vector = eigenvectors.column(fiedler);
+                let mut sweep = (0..n).collect::<Vec<_>>();
+                sweep.sort_by(|&left, &right| {
+                    let left_score = vector[left] / degrees[left].sqrt();
+                    let right_score = vector[right] / degrees[right].sqrt();
+                    left_score
+                        .total_cmp(&right_score)
+                        .then_with(|| self.basins[left].cmp(&self.basins[right]))
                 });
-                if improves {
-                    best = Some(candidate);
+
+                let total_volume = degrees.iter().sum::<f64>();
+                let mut in_prefix = vec![false; n];
+                let mut prefix_volume = 0.0;
+                let mut cut = 0.0;
+                let mut best = None::<(f64, f64, usize)>;
+                for prefix_len in 1..n {
+                    let added = sweep[prefix_len - 1];
+                    for (other, &weight) in self.weights[added].iter().enumerate() {
+                        if in_prefix[other] {
+                            cut -= weight;
+                        } else {
+                            cut += weight;
+                        }
+                    }
+                    in_prefix[added] = true;
+                    prefix_volume += degrees[added];
+                    let complement_volume = total_volume - prefix_volume;
+                    let conductance = cut.max(0.0) / prefix_volume.min(complement_volume);
+                    let imbalance = (prefix_volume - complement_volume).abs();
+                    let candidate = (conductance, imbalance, prefix_len);
+                    let improves = best.is_none_or(|incumbent| {
+                        candidate
+                            .0
+                            .total_cmp(&incumbent.0)
+                            .then_with(|| candidate.1.total_cmp(&incumbent.1))
+                            .then_with(|| candidate.2.cmp(&incumbent.2))
+                            .is_lt()
+                    });
+                    if improves {
+                        best = Some(candidate);
+                    }
                 }
+                let split = best.expect("a connected graph has a proper sweep prefix").2;
+                let left = sweep[..split]
+                    .iter()
+                    .map(|&index| self.basins[index])
+                    .collect();
+                let right = sweep[split..]
+                    .iter()
+                    .map(|&index| self.basins[index])
+                    .collect();
+                (eigenvalues[fiedler].max(0.0), left, right)
             }
-            let split = best.expect("a connected graph has a proper sweep prefix").2;
-            let left = sweep[..split]
-                .iter()
-                .map(|&index| self.basins[index])
-                .collect();
-            let right = sweep[split..]
-                .iter()
-                .map(|&index| self.basins[index])
-                .collect();
-            (eigenvalues[fiedler].max(0.0), left, right)
         };
         left.sort_unstable();
         right.sort_unstable();
@@ -370,6 +386,7 @@ impl LandscapeGraph {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "rgsaddle")]
     fn barbell() -> LandscapeGraph {
         // Two 4-cliques, basins 0..4 and 10..14, joined by one weak edge
         // between 3 and 10.
@@ -385,6 +402,7 @@ mod tests {
         g
     }
 
+    #[cfg(feature = "rgsaddle")]
     #[test]
     fn the_split_of_a_barbell_is_its_cliques() {
         let split = barbell().spectral_split().unwrap();
@@ -414,6 +432,7 @@ mod tests {
         assert_eq!(reps, [3, 10]);
     }
 
+    #[cfg(feature = "rgsaddle")]
     #[test]
     fn the_connectivity_of_a_path_is_exact() {
         // L(P3) has eigenvalues 0, 1, 3.
@@ -428,6 +447,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "rgsaddle")]
     #[test]
     fn the_fiedler_split_does_not_depend_on_start_vector_overlap() {
         // The index-ramp vector used by the iterative implementation is
@@ -456,6 +476,7 @@ mod tests {
         assert_eq!(sides, [vec![0, 3], vec![1, 2]]);
     }
 
+    #[cfg(feature = "rgsaddle")]
     #[test]
     fn conductance_sweep_finds_the_degree_heterogeneous_seam() {
         // A zero-sign cut of the unnormalized Fiedler vector isolates basin 3
@@ -525,6 +546,15 @@ mod tests {
         assert!(times[&0].is_infinite());
         assert!(times[&1].is_infinite());
         assert_eq!(times[&7], 0.0);
+    }
+
+    #[test]
+    #[cfg(not(feature = "rgsaddle"))]
+    fn a_connected_landscape_names_the_missing_feature() {
+        let mut g = LandscapeGraph::new();
+        g.observe_crossing(0, 1, 1.0);
+        g.observe_crossing(1, 2, 1.0);
+        assert_eq!(g.spectral_split().unwrap_err(), GraphError::FeatureDisabled);
     }
 
     #[test]
