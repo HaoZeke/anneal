@@ -32,14 +32,10 @@ fn env_usize(key: &str, default: usize) -> usize {
 }
 
 fn reference(n: usize) -> Option<f64> {
-    Some(match n {
-        13 => -44.326801,
-        38 => -173.928427,
-        55 => -279.248470,
-        75 => -397.492331,
-        98 => -543.665361,
-        _ => return None,
-    })
+    match n {
+        13 | 38 | 55 | 75 | 98 => anneal_core::published_minima::lennard_jones(n),
+        _ => None,
+    }
 }
 
 struct Probe {

@@ -3701,6 +3701,8 @@ fn cluster_search(
         if !limit.is_finite() {
             return Err(PyValueError::new_err("target must be finite"));
         }
+        let limit =
+            crate::published_minima::lj98_stop_limit(n, limit).map_err(PyValueError::new_err)?;
         ledger.stop_below(limit);
     }
     let gradient_scale = if budget >= 4 {

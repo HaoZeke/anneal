@@ -149,16 +149,10 @@ struct MinimaHoppingRun {
 }
 
 fn reference(n: usize) -> Option<f64> {
-    Some(match n {
-        13 => -44.326_801,
-        38 => -173.928_427,
-        55 => -279.248_470,
-        75 => -397.492_331,
-        98 => -543.665_361,
-        102 => -569.363_652,
-        104 => -582.086_642,
-        _ => return None,
-    })
+    match n {
+        13 | 38 | 55 | 75 | 98 | 102 | 104 => anneal_core::published_minima::lennard_jones(n),
+        _ => None,
+    }
 }
 
 fn irc_name(kind: IrcKind) -> &'static str {

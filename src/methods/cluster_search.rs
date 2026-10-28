@@ -1105,9 +1105,11 @@ impl Encounter {
 ///
 /// `target` is compared with a tolerance, since a published minimum is quoted
 /// to six decimals and a relaxation lands near it rather than on it.
+/// An energy at or below `target + tolerance` is a hit. A lower energy is
+/// still a hit.
 pub fn first_encounter(out: &Outcome, target: f64, tolerance: f64, spent: usize) -> Encounter {
     for &(hops, charged, _, e) in &out.improvements {
-        if e < target + tolerance {
+        if e <= target + tolerance {
             return Encounter::Found { charged, hops };
         }
     }
@@ -1515,6 +1517,24 @@ mod tests {
             out.best
         );
         assert!(gmax < 1e-3, "returned a structure with gradient {gmax:.2e}");
+    }
+
+    /// The hit is `energy <= target + tolerance`. The LJ98 icosahedral shelf
+    /// is above the tetrahedral minimum by more than that window.
+    #[test]
+    fn lj98_icosahedral_shelf_is_not_a_hit_on_the_global_minimum() {
+        use crate::published_minima::{LJ98_GLOBAL, LJ98_ICOSAHEDRAL};
+        let mut out = Outcome::default();
+        out.improvements.push((1, 10, 1, LJ98_ICOSAHEDRAL));
+        assert!(!first_encounter(&out, LJ98_GLOBAL, 1e-3, 40).found());
+        out.improvements.push((2, 20, 1, LJ98_GLOBAL + 1e-3));
+        match first_encounter(&out, LJ98_GLOBAL, 1e-3, 40) {
+            Encounter::Found { charged, .. } => assert_eq!(charged, 20),
+            Encounter::Censored { .. } => panic!("the boundary is a hit"),
+        }
+        out.improvements.clear();
+        out.improvements.push((3, 30, 1, LJ98_GLOBAL - 0.01));
+        assert!(first_encounter(&out, LJ98_GLOBAL, 1e-3, 40).found());
     }
 
     /// A run that reached the target reports where, and one that did not is
