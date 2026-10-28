@@ -1,0 +1,1 @@
+``WATER_POLISH_EXTERNAL=1`` runs the Euclidean answer polish only when the search geometry is outside the IRA gate, and stops that polish at the first accepted iterate inside the gate. CREST ``--opt extreme`` runs only on that outside path. Unset, ``answer_gradient`` stays zero and the reported geometry is unchanged.
