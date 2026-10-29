@@ -64,7 +64,7 @@ lattice_ensemble_ablation lj38
 Smoke, not a paper table:
 
 ```
-PAPER_SMOKE=1 PAPER_OUT=/tmp/lattice-ablation-SMOKE lattice_ensemble_ablation all
+PAPER_SMOKE=1 PAPER_OUT=lattice-ablation-SMOKE lattice_ensemble_ablation all
 ```
 
 `PAPER_SMOKE=1` uses the first two registered seeds, four chains and a budget of 8000, and writes `lattice-ablation-SMOKE.txt`. Hardware, cores, threads, rustc and the commit are printed in that file.
