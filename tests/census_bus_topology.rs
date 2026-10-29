@@ -28,7 +28,7 @@ impl Drop for EndpointReservation {
 }
 
 fn ipc_path(base: u16, replica: u16) -> PathBuf {
-    PathBuf::from(format!("/tmp/anneal-census-{base}-{replica:03}"))
+    std::env::temp_dir().join(format!("anneal-census-{base}-{replica:03}"))
 }
 
 fn reserve_endpoints(deadline: Instant) -> EndpointReservation {
@@ -49,7 +49,7 @@ fn reserve_endpoints(deadline: Instant) -> EndpointReservation {
         if ports.len() != usize::from(REPLICAS) {
             continue;
         }
-        let lock_path = PathBuf::from(format!("/tmp/anneal-census-topology-{base}.lock"));
+        let lock_path = std::env::temp_dir().join(format!("anneal-census-topology-{base}.lock"));
         let lock = match OpenOptions::new()
             .write(true)
             .create_new(true)

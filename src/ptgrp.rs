@@ -408,12 +408,12 @@ fn reference_atom(
         }
     }
     for multiple in [1, 2, 4] {
-        let mut cursor = 0;
+        let mut offset = 0;
         for &size in &sizes {
             if size == multiple * order {
-                return Some(sorted[cursor]);
+                return Some(sorted[offset]);
             }
-            cursor += size;
+            offset += size;
         }
     }
     None
