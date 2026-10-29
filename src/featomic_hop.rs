@@ -1340,6 +1340,37 @@ pub fn step_away_featomic_at<R: Rng + ?Sized>(
     step_away_featomic(x, rmsd, rcut, species, mobile, rng)
 }
 
+/// Distance between conformers on the species-mean SOAP power spectrum.
+///
+/// Angular channels start at `l = 0`. The packing leftover keeps only
+/// `l ≥ 5`, which is a shell breath on a cluster and nearly blind to a
+/// dihedral.
+pub fn conformer_soap_distance(
+    left: ArrayView1<f64>,
+    right: ArrayView1<f64>,
+    species: &[u32],
+) -> Option<f64> {
+    if left.len() != right.len() || species.len() * 3 != left.len() {
+        return None;
+    }
+    let a = spectrum_keep(left, 4.0, Some(species), None, 0);
+    let b = spectrum_keep(right, 4.0, Some(species), None, 0);
+    if a.cloud_mean.is_empty() || a.cloud_mean.len() != b.cloud_mean.len() {
+        return None;
+    }
+    let distance = a
+        .cloud_mean
+        .iter()
+        .zip(b.cloud_mean.iter())
+        .map(|(p, q)| {
+            let d = p - q;
+            d * d
+        })
+        .sum::<f64>()
+        .sqrt();
+    distance.is_finite().then_some(distance)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

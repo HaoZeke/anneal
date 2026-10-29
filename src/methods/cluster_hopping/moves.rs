@@ -269,6 +269,27 @@ impl MoveLibrary {
                 fallback_step: LennardJonesPreset::SINGLE_POINT_STEP * cfg.length_scale,
             });
         }
+        if cfg.internal_moves
+            && let Some(species) = cfg.species.clone()
+        {
+            let groups = self.declared_groups().unwrap_or(&[]).to_vec();
+            // A fragment bigger than a triatomic has internal rotors. Adding
+            // those arms to a water cluster only steals hops from group
+            // relocation, which is the move that finds the low-lying isomers.
+            let flexible = groups.iter().any(|group| group.len() > 4);
+            if flexible {
+                kernels.push(ClusterMove::Torsion {
+                    species: species.clone(),
+                    tolerance: cfg.bond_tolerance,
+                    groups: groups.clone(),
+                });
+                kernels.push(ClusterMove::IcCross {
+                    species,
+                    tolerance: cfg.bond_tolerance,
+                    groups,
+                });
+            }
+        }
         kernels
     }
 
@@ -594,6 +615,36 @@ pub enum ClusterMove {
         /// Rigid groups. The ambient `J⁺` step is retracted to their
         /// nearest finite rigid motions before the proposal is returned.
         groups: Option<Vec<Vec<usize>>>,
+    },
+    /// A heavy-atom dihedral jump, or a fragment turn when the graph has no rotor.
+    ///
+    /// The angle is a fixed rotor step or a ring pucker. It is not a walk
+    /// along the dihedral gradient.
+    Torsion {
+        /// Atomic numbers, one per atom.
+        species: Vec<u32>,
+        /// Bond cutoff in units of the covalent-radius sum.
+        tolerance: f64,
+        /// Declared rigid fragments. Empty means the bond graph's components.
+        groups: Vec<Vec<usize>>,
+    },
+    /// Large reorientation of one declared fragment about its own centre.
+    FragmentOrient {
+        /// Atomic numbers, one per atom.
+        species: Vec<u32>,
+        /// Bond cutoff in units of the covalent-radius sum.
+        tolerance: f64,
+        /// Declared rigid fragments.
+        groups: Vec<Vec<usize>>,
+    },
+    /// Exchange a subset of dihedrals and fragment orientations with another chain.
+    IcCross {
+        /// Atomic numbers, one per atom.
+        species: Vec<u32>,
+        /// Bond cutoff in units of the covalent-radius sum.
+        tolerance: f64,
+        /// Declared rigid fragments.
+        groups: Vec<Vec<usize>>,
     },
 }
 
@@ -1386,6 +1437,9 @@ impl ClusterMove {
             ClusterMove::RigidRotateOne { .. } => "rrot1".into(),
             ClusterMove::RigidReorient { .. } => "rreor".into(),
             ClusterMove::RigidOrientAll { .. } => "rorient".into(),
+            ClusterMove::Torsion { .. } => "torsion".into(),
+            ClusterMove::FragmentOrient { .. } => "frag".into(),
+            ClusterMove::IcCross { .. } => "icross".into(),
         }
     }
 
@@ -1832,6 +1886,39 @@ impl ClusterMove {
                     )
                 }
             }
+            ClusterMove::Torsion {
+                species,
+                tolerance,
+                groups,
+            } => super::organic::propose_torsion(
+                x,
+                species,
+                *tolerance,
+                Some(groups.as_slice()),
+                rng,
+            ),
+            ClusterMove::FragmentOrient {
+                species,
+                tolerance,
+                groups,
+            } => super::organic::propose_fragment(
+                x,
+                species,
+                *tolerance,
+                Some(groups.as_slice()),
+                rng,
+            ),
+            ClusterMove::IcCross {
+                species,
+                tolerance,
+                groups,
+            } => super::organic::propose_crossover(
+                x,
+                species,
+                *tolerance,
+                Some(groups.as_slice()),
+                rng,
+            ),
         }
     }
 }

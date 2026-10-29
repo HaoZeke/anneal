@@ -992,6 +992,15 @@ pub struct Config {
     pub quench_confidence: f64,
     /// Relaxation steps in the full pass.
     pub relax_steps: usize,
+    /// Covalent torsion, fragment orientation, and internal-coordinate
+    /// crossover. Off on the cluster presets. Serialized only when set, so
+    /// their resolved digest is unchanged.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub internal_moves: bool,
+    /// Single-pass relaxation length for an internal-coordinate proposal.
+    /// Zero keeps the cluster screen and the full quench.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub internal_relax: usize,
     /// First-phase transform of every relaxation: relax on a compacted
     /// surface first, then on the plain potential from that minimum, judging
     /// the plain energy. `None` relaxes on the plain potential only.
@@ -1056,6 +1065,10 @@ pub struct Config {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+fn is_zero_usize(value: &usize) -> bool {
+    *value == 0
 }
 
 impl Config {
@@ -1409,6 +1422,8 @@ impl Config {
             quench_warmup: 4,
             quench_confidence: 2.0,
             relax_steps: 200,
+            internal_moves: false,
+            internal_relax: 0,
             two_phase: None,
             reoccupy: None,
             reoccupy_interval: 5_000,
@@ -1636,6 +1651,29 @@ impl Config {
             cfg.merge_radius = crate::featomic_hop::SOAP_PACK_MERGE;
         }
         cfg
+    }
+
+    /// Opt-in container and internal-coordinate moves for a bonded system.
+    ///
+    /// Not part of [`Config::recommended_molecular`]. On (H2O)4 it closes
+    /// most of the gap to a short CREST run. On (H2O)6 and n-hexane the
+    /// same change is worse at that budget, so the preset stays as it was.
+    pub fn with_bonded_container(mut self) -> Self {
+        let n_frag = self
+            .move_library
+            .declared_groups()
+            .map(|groups| groups.len())
+            .unwrap_or(0);
+        if n_frag >= 2
+            && let Some(species) = &self.species
+        {
+            let span = super::organic::fragment_container(species, n_frag);
+            if span > self.container {
+                self.container = span;
+            }
+        }
+        self.internal_moves = true;
+        self
     }
 
     /// Radius of the preset's initial cluster sphere.

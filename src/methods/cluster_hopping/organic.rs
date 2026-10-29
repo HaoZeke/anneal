@@ -1,0 +1,714 @@
+//! Bond-graph internal coordinates for any covalent molecule or cluster.
+//!
+//! A rotatable bond is a heavy-atom contact that is not a dead end. A ring
+//! bond takes a small pucker. A fragment with no rotor is turned as a rigid
+//! body about its own centre. Neither move follows a dihedral gradient, and
+//! neither scores a proposal with an auxiliary potential. Proposals are
+//! ranked by distance in the internal coordinates, or by a featomic SOAP
+//! mean when that feature is built.
+
+use ndarray::{Array1, ArrayView1};
+use rand::Rng;
+
+use super::covalent_radius;
+
+thread_local! {
+    static PARTNER: std::cell::RefCell<Option<Vec<f64>>> = const { std::cell::RefCell::new(None) };
+    static ARCHIVE: std::cell::RefCell<Vec<Vec<f64>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+struct Internals {
+    angles: Vec<f64>,
+    distances: Vec<f64>,
+}
+
+/// Drop the partner geometry and the descriptor archive. One search, one memory.
+pub fn reset_search_memory() {
+    PARTNER.with(|slot| *slot.borrow_mut() = None);
+    ARCHIVE.with(|slot| slot.borrow_mut().clear());
+}
+
+/// Geometry of another chain, copied in by the hop before a proposal.
+pub fn offer_partner(coordinates: &[f64]) {
+    PARTNER.with(|slot| *slot.borrow_mut() = Some(coordinates.to_vec()));
+}
+
+/// Forget the partner so a later single-chain proposal does not reuse it.
+pub fn clear_partner() {
+    PARTNER.with(|slot| *slot.borrow_mut() = None);
+}
+
+fn partner() -> Option<Vec<f64>> {
+    PARTNER.with(|slot| slot.borrow().clone())
+}
+
+/// Sphere that holds a cluster of `n_fragments` rigid pieces.
+///
+/// The Lennard-Jones container is about one bond across for a handful of
+/// waters, so a proposal is crushed through the hydrogen-bond network.
+/// A diffuse linear chain is the other error: fragments drift apart and
+/// the short budget is spent reassociating them. `2.5` bond lengths times
+/// `n_frag^(1/3)` sits on the measured plateau for (H2O)4 and (H2O)6.
+pub fn fragment_container(species: &[u32], n_fragments: usize) -> f64 {
+    let bond = 2.0
+        * species
+            .iter()
+            .copied()
+            .map(covalent_radius)
+            .fold(0.0_f64, f64::max);
+    let n = (n_fragments.max(1) as f64).cbrt();
+    2.5 * bond * n
+}
+
+/// Largest distance from the centre of mass.
+pub fn com_radius(x: ArrayView1<f64>, n: usize) -> f64 {
+    let count = n.max(1) as f64;
+    let mut centre = [0.0; 3];
+    for atom in 0..n {
+        for axis in 0..3 {
+            centre[axis] += x[3 * atom + axis];
+        }
+    }
+    for value in &mut centre {
+        *value /= count;
+    }
+    let mut radius = 0.0_f64;
+    for atom in 0..n {
+        let mut d2 = 0.0;
+        for axis in 0..3 {
+            let d = x[3 * atom + axis] - centre[axis];
+            d2 += d * d;
+        }
+        radius = radius.max(d2.sqrt());
+    }
+    radius
+}
+
+#[derive(Clone, Copy)]
+struct Rotor {
+    i: usize,
+    j: usize,
+    k: usize,
+    l: usize,
+    ring: bool,
+}
+
+fn neighbors(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> Vec<Vec<usize>> {
+    let n = species.len().min(x.len() / 3);
+    let mut nb = vec![Vec::new(); n];
+    for a in 0..n {
+        let ra = covalent_radius(species[a]);
+        for b in (a + 1)..n {
+            let cut = tolerance * (ra + covalent_radius(species[b]));
+            if cut <= 0.0 {
+                continue;
+            }
+            let mut d2 = 0.0;
+            for axis in 0..3 {
+                let d = x[3 * a + axis] - x[3 * b + axis];
+                d2 += d * d;
+            }
+            if d2 < cut * cut {
+                nb[a].push(b);
+                nb[b].push(a);
+            }
+        }
+    }
+    nb
+}
+
+fn in_ring(nb: &[Vec<usize>], j: usize, k: usize) -> bool {
+    let mut seen = vec![false; nb.len()];
+    seen[j] = true;
+    let mut layer = vec![j];
+    for _ in 0..6 {
+        let mut next = Vec::new();
+        for &a in &layer {
+            for &b in &nb[a] {
+                if (a == j && b == k) || (a == k && b == j) {
+                    continue;
+                }
+                if b == k {
+                    return true;
+                }
+                if !seen[b] {
+                    seen[b] = true;
+                    next.push(b);
+                }
+            }
+        }
+        if next.is_empty() {
+            break;
+        }
+        layer = next;
+    }
+    false
+}
+
+fn anchor(nb: &[usize], banned: usize, species: &[u32]) -> Option<usize> {
+    nb.iter()
+        .copied()
+        .find(|&atom| atom != banned && species.get(atom).copied().unwrap_or(0) > 1)
+        .or_else(|| nb.iter().copied().find(|&atom| atom != banned))
+}
+
+fn rotors(nb: &[Vec<usize>], species: &[u32]) -> Vec<Rotor> {
+    let mut found = Vec::new();
+    for j in 0..nb.len() {
+        if species.get(j).copied().unwrap_or(0) <= 1 {
+            continue;
+        }
+        for &k in &nb[j] {
+            if k < j || species.get(k).copied().unwrap_or(0) <= 1 {
+                continue;
+            }
+            let Some(i) = anchor(&nb[j], k, species) else {
+                continue;
+            };
+            let Some(l) = anchor(&nb[k], j, species) else {
+                continue;
+            };
+            if species[i] <= 1 || species[l] <= 1 {
+                continue;
+            }
+            found.push(Rotor {
+                i,
+                j,
+                k,
+                l,
+                ring: in_ring(nb, j, k),
+            });
+        }
+    }
+    found
+}
+
+fn side_of(nb: &[Vec<usize>], j: usize, k: usize) -> Vec<usize> {
+    let mut seen = vec![false; nb.len()];
+    seen[j] = true;
+    seen[k] = true;
+    let mut side = vec![k];
+    let mut layer = vec![k];
+    while let Some(a) = layer.pop() {
+        for &b in &nb[a] {
+            if !seen[b] {
+                seen[b] = true;
+                side.push(b);
+                layer.push(b);
+            }
+        }
+    }
+    side
+}
+
+fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn point(x: &[f64], atom: usize) -> [f64; 3] {
+    [x[3 * atom], x[3 * atom + 1], x[3 * atom + 2]]
+}
+
+fn dihedral(x: &[f64], rotor: Rotor) -> f64 {
+    let b1 = sub(point(x, rotor.j), point(x, rotor.i));
+    let b2 = sub(point(x, rotor.k), point(x, rotor.j));
+    let b3 = sub(point(x, rotor.l), point(x, rotor.k));
+    let n1 = cross(b1, b2);
+    let n2 = cross(b2, b3);
+    let n2len = dot(b2, b2).sqrt();
+    if n2len < 1e-12 {
+        return 0.0;
+    }
+    let b2u = [b2[0] / n2len, b2[1] / n2len, b2[2] / n2len];
+    let m1 = cross(n1, b2u);
+    dot(m1, n2).atan2(dot(n1, n2))
+}
+
+fn wrap(angle: f64) -> f64 {
+    let mut a = angle;
+    while a > std::f64::consts::PI {
+        a -= std::f64::consts::TAU;
+    }
+    while a < -std::f64::consts::PI {
+        a += std::f64::consts::TAU;
+    }
+    a
+}
+
+fn rotate_side(y: &mut [f64], j: usize, k: usize, side: &[usize], angle: f64) {
+    let origin = point(y, j);
+    let mut axis = sub(point(y, k), origin);
+    let norm = dot(axis, axis).sqrt();
+    if norm < 1e-8 {
+        return;
+    }
+    axis = [axis[0] / norm, axis[1] / norm, axis[2] / norm];
+    let (s, c) = angle.sin_cos();
+    for &atom in side {
+        if atom == j || atom == k {
+            continue;
+        }
+        let p = sub(point(y, atom), origin);
+        let proj = dot(p, axis);
+        let cr = cross(axis, p);
+        for t in 0..3 {
+            y[3 * atom + t] = origin[t] + p[t] * c + cr[t] * s + axis[t] * proj * (1.0 - c);
+        }
+    }
+}
+
+fn centroid(x: &[f64], atoms: &[usize]) -> [f64; 3] {
+    let mut c = [0.0; 3];
+    let mut n = 0usize;
+    for &atom in atoms {
+        if 3 * atom + 2 < x.len() {
+            for t in 0..3 {
+                c[t] += x[3 * atom + t];
+            }
+            n += 1;
+        }
+    }
+    let scale = (n.max(1) as f64).recip();
+    [c[0] * scale, c[1] * scale, c[2] * scale]
+}
+
+fn spin_lists<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    groups: &[Vec<usize>],
+    rng: &mut R,
+) -> Array1<f64> {
+    let mut y = x.to_owned();
+    if groups.is_empty() {
+        return y;
+    }
+    let g = rng.random_range(0..groups.len());
+    let atoms = &groups[g];
+    let gc = centroid(x.as_slice().unwrap_or(&[]), atoms);
+    let axis = loop {
+        let v = [
+            rng.random::<f64>() * 2.0 - 1.0,
+            rng.random::<f64>() * 2.0 - 1.0,
+            rng.random::<f64>() * 2.0 - 1.0,
+        ];
+        let n2 = dot(v, v);
+        if n2 > 1e-6 && n2 <= 1.0 {
+            let n = n2.sqrt();
+            break [v[0] / n, v[1] / n, v[2] / n];
+        }
+    };
+    let angle = rng.random_range(1.2..std::f64::consts::PI);
+    let (s, c) = angle.sin_cos();
+    let shift = [
+        rng.random_range(-0.45..0.45),
+        rng.random_range(-0.45..0.45),
+        rng.random_range(-0.45..0.45),
+    ];
+    let slice = y.as_slice_mut().expect("coordinates are contiguous");
+    for &atom in atoms {
+        if 3 * atom + 2 >= slice.len() {
+            continue;
+        }
+        let p = sub(point(slice, atom), gc);
+        let proj = dot(p, axis);
+        let cr = cross(axis, p);
+        for t in 0..3 {
+            slice[3 * atom + t] =
+                gc[t] + shift[t] + p[t] * c + cr[t] * s + axis[t] * proj * (1.0 - c);
+        }
+    }
+    y
+}
+
+fn copy_pose(dst: &mut [f64], src: &[f64], atoms: &[usize]) {
+    let from = centroid(src, atoms);
+    let to = centroid(dst, atoms);
+    for &atom in atoms {
+        if 3 * atom + 2 >= dst.len() || 3 * atom + 2 >= src.len() {
+            continue;
+        }
+        for t in 0..3 {
+            dst[3 * atom + t] = to[t] + (src[3 * atom + t] - from[t]);
+        }
+    }
+}
+
+fn components(nb: &[Vec<usize>]) -> Vec<Vec<usize>> {
+    let mut seen = vec![false; nb.len()];
+    let mut groups = Vec::new();
+    for start in 0..nb.len() {
+        if seen[start] {
+            continue;
+        }
+        let mut comp = Vec::new();
+        let mut stack = vec![start];
+        seen[start] = true;
+        while let Some(a) = stack.pop() {
+            comp.push(a);
+            for &b in &nb[a] {
+                if !seen[b] {
+                    seen[b] = true;
+                    stack.push(b);
+                }
+            }
+        }
+        comp.sort_unstable();
+        if comp.len() >= 3 {
+            groups.push(comp);
+        }
+    }
+    groups
+}
+
+fn fragment_lists<'a>(groups: Option<&'a [Vec<usize>]>, nb: &[Vec<usize>]) -> Vec<Vec<usize>> {
+    if let Some(groups) = groups
+        && groups.len() >= 2
+    {
+        return groups.to_vec();
+    }
+    components(nb)
+}
+
+fn one_internal<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    species: &[u32],
+    tolerance: f64,
+    groups: Option<&[Vec<usize>]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    let nb = neighbors(x, species, tolerance);
+    let rotors = rotors(&nb, species);
+    let frags = fragment_lists(groups, &nb);
+    let multi = frags.len() >= 2;
+    let use_torsion = !rotors.is_empty() && (!multi || rng.random::<f64>() < 0.7);
+    if use_torsion {
+        let rotor = rotors[rng.random_range(0..rotors.len())];
+        let angle = if rotor.ring {
+            let sign = if rng.random::<f64>() < 0.5 { -1.0 } else { 1.0 };
+            sign * rng.random_range(0.8..1.3)
+        } else {
+            const STEPS: [f64; 3] = [
+                std::f64::consts::TAU / 3.0,
+                std::f64::consts::PI,
+                -std::f64::consts::TAU / 3.0,
+            ];
+            STEPS[rng.random_range(0..3)] + rng.random_range(-0.2..0.2)
+        };
+        let side = side_of(&nb, rotor.j, rotor.k);
+        let mut y = x.to_owned();
+        rotate_side(
+            y.as_slice_mut().expect("coordinates are contiguous"),
+            rotor.j,
+            rotor.k,
+            &side,
+            angle,
+        );
+        return y;
+    }
+    if multi {
+        return spin_lists(x, &frags, rng);
+    }
+    x.to_owned()
+}
+
+fn internals_of(
+    x: &[f64],
+    species: &[u32],
+    tolerance: f64,
+    groups: Option<&[Vec<usize>]>,
+) -> Internals {
+    let view = ArrayView1::from(x);
+    let nb = neighbors(view, species, tolerance);
+    let mut angles = Vec::new();
+    for rotor in rotors(&nb, species) {
+        angles.push(dihedral(x, rotor));
+    }
+    let frags = fragment_lists(groups, &nb);
+    let mut distances = Vec::new();
+    for a in 0..frags.len() {
+        for b in (a + 1)..frags.len() {
+            let ca = centroid(x, &frags[a]);
+            let cb = centroid(x, &frags[b]);
+            distances.push(dot(sub(ca, cb), sub(ca, cb)).sqrt());
+        }
+    }
+    Internals { angles, distances }
+}
+
+fn internal_distance(left: &Internals, right: &Internals) -> f64 {
+    let mut acc = 0.0;
+    for i in 0..left.angles.len().min(right.angles.len()) {
+        let d = wrap(left.angles[i] - right.angles[i]);
+        acc += d * d;
+    }
+    for i in 0..left.distances.len().min(right.distances.len()) {
+        let d = left.distances[i] - right.distances[i];
+        acc += d * d;
+    }
+    acc.sqrt()
+}
+
+fn descriptor_distance(
+    x: ArrayView1<f64>,
+    y: ArrayView1<f64>,
+    species: &[u32],
+    tolerance: f64,
+    groups: Option<&[Vec<usize>]>,
+) -> f64 {
+    #[cfg(feature = "featomic")]
+    if let Some(distance) = crate::featomic_hop::conformer_soap_distance(x, y, species) {
+        return distance;
+    }
+    let left = internals_of(x.as_slice().unwrap_or(&[]), species, tolerance, groups);
+    let right = internals_of(y.as_slice().unwrap_or(&[]), species, tolerance, groups);
+    internal_distance(&left, &right)
+}
+
+fn remember(coordinates: &[f64]) {
+    ARCHIVE.with(|slot| {
+        let mut archive = slot.borrow_mut();
+        archive.push(coordinates.to_vec());
+        if archive.len() > 24 {
+            archive.remove(0);
+        }
+    });
+}
+
+fn farthest<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    species: &[u32],
+    tolerance: f64,
+    groups: Option<&[Vec<usize>]>,
+    rng: &mut R,
+    draw: impl Fn(&mut R) -> Array1<f64>,
+) -> Array1<f64> {
+    let mut best = x.to_owned();
+    let mut best_score = -1.0;
+    for _ in 0..4 {
+        let cand = draw(rng);
+        let mut score = descriptor_distance(x, cand.view(), species, tolerance, groups);
+        ARCHIVE.with(|slot| {
+            for prior in slot.borrow().iter() {
+                let prior_view = ArrayView1::from(prior.as_slice());
+                score = score.min(descriptor_distance(
+                    cand.view(),
+                    prior_view,
+                    species,
+                    tolerance,
+                    groups,
+                ));
+            }
+        });
+        if score > best_score {
+            best_score = score;
+            best = cand;
+        }
+    }
+    remember(best.as_slice().unwrap_or(&[]));
+    best
+}
+
+/// One torsion or, when the graph has no rotor, one fragment turn.
+pub fn propose_torsion<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    species: &[u32],
+    tolerance: f64,
+    groups: Option<&[Vec<usize>]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    farthest(x, species, tolerance, groups, rng, |rng| {
+        one_internal(x, species, tolerance, groups, rng)
+    })
+}
+
+/// Large rigid reorientation of one fragment.
+pub fn propose_fragment<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    species: &[u32],
+    tolerance: f64,
+    groups: Option<&[Vec<usize>]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    farthest(x, species, tolerance, groups, rng, |rng| {
+        let nb = neighbors(x, species, tolerance);
+        let frags = fragment_lists(groups, &nb);
+        if frags.len() >= 2 {
+            spin_lists(x, &frags, rng)
+        } else {
+            one_internal(x, species, tolerance, groups, rng)
+        }
+    })
+}
+
+/// Copy a random subset of dihedrals and fragment orientations from the partner chain.
+pub fn propose_crossover<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    species: &[u32],
+    tolerance: f64,
+    groups: Option<&[Vec<usize>]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    let Some(other) = partner() else {
+        return propose_torsion(x, species, tolerance, groups, rng);
+    };
+    if other.len() != x.len() {
+        return propose_torsion(x, species, tolerance, groups, rng);
+    }
+    let nb = neighbors(x, species, tolerance);
+    let rotors = rotors(&nb, species);
+    let mut y = x.to_owned();
+    let mut changed = false;
+    {
+        let slice = y.as_slice_mut().expect("coordinates are contiguous");
+        for rotor in rotors {
+            if rng.random::<f64>() < 0.5 {
+                let delta = wrap(dihedral(&other, rotor) - dihedral(slice, rotor));
+                if delta.abs() > 1e-3 {
+                    let side = side_of(&nb, rotor.j, rotor.k);
+                    rotate_side(slice, rotor.j, rotor.k, &side, delta);
+                    changed = true;
+                }
+            }
+        }
+        let frags = fragment_lists(groups, &nb);
+        if frags.len() >= 2 {
+            for frag in &frags {
+                if rng.random::<f64>() < 0.5 {
+                    copy_pose(slice, &other, frag);
+                    changed = true;
+                }
+            }
+        }
+    }
+    if !changed {
+        return propose_fragment(x, species, tolerance, groups, rng);
+    }
+    y
+}
+
+/// A second chain starts from a bond-preserving kick of the quenched first chain.
+pub fn kick<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    species: &[u32],
+    tolerance: f64,
+    groups: Option<&[Vec<usize>]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    one_internal(x, species, tolerance, groups, rng)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    fn butane() -> (Vec<f64>, Vec<u32>) {
+        // Anti carbon chain in the xy plane, with one hydrogen on the last carbon
+        // so the dihedral has a reporter that leaves the plane.
+        let coords = vec![
+            0.0, 0.0, 0.0, // C0
+            1.53, 0.0, 0.0, // C1
+            2.54, 1.26, 0.0, // C2
+            4.07, 1.26, 0.0, // C3
+            4.60, 2.20, 0.30, // H on C3, not used as a rotor anchor
+        ];
+        let species = vec![6, 6, 6, 6, 1];
+        (coords, species)
+    }
+
+    #[test]
+    fn a_torsion_keeps_the_axis_length_and_moves_the_end() {
+        let (coords, species) = butane();
+        let x = Array1::from(coords);
+        let nb = neighbors(x.view(), &species, 1.25);
+        let found = rotors(&nb, &species);
+        assert!(!found.is_empty(), "butane has a heavy-atom rotor");
+        let rotor = found[0];
+        let before = {
+            let d = x[3 * rotor.j] - x[3 * rotor.k];
+            let e = x[3 * rotor.j + 1] - x[3 * rotor.k + 1];
+            let f = x[3 * rotor.j + 2] - x[3 * rotor.k + 2];
+            (d * d + e * e + f * f).sqrt()
+        };
+        let side = side_of(&nb, rotor.j, rotor.k);
+        let mut y = x.to_vec();
+        let end_before = y[3 * rotor.l + 2];
+        rotate_side(&mut y, rotor.j, rotor.k, &side, std::f64::consts::TAU / 3.0);
+        let after = {
+            let d = y[3 * rotor.j] - y[3 * rotor.k];
+            let e = y[3 * rotor.j + 1] - y[3 * rotor.k + 1];
+            let f = y[3 * rotor.j + 2] - y[3 * rotor.k + 2];
+            (d * d + e * e + f * f).sqrt()
+        };
+        assert!((before - after).abs() < 1e-9);
+        assert!(
+            (y[3 * rotor.l + 2] - end_before).abs() > 0.2,
+            "the far atom did not leave its old height"
+        );
+    }
+
+    #[test]
+    fn the_chain_container_holds_an_alkane_and_leaves_lj_alone() {
+        let species = vec![6u32; 20];
+        let groups = vec![(0..20).collect::<Vec<_>>()];
+        let alkane = super::super::Config::recommended_molecular(species, groups, 1.0);
+        let cluster = super::super::Config::recommended(20);
+        assert!(!alkane.internal_moves);
+        assert!(!cluster.internal_moves);
+        // One covalent molecule keeps the preset sphere. The hop then
+        // widens it to the geometry in hand, rather than to a chain of
+        // every atom.
+        let plain =
+            super::super::Config::for_molecular(vec![6u32; 20], vec![(0..20).collect()], 1.0);
+        assert!((alkane.container - plain.container).abs() < 1e-9);
+        let waters = vec![8u32, 1, 1, 8, 1, 1, 8, 1, 1, 8, 1, 1];
+        let water_groups = vec![vec![0, 1, 2], vec![3, 4, 5], vec![6, 7, 8], vec![9, 10, 11]];
+        let water = super::super::Config::recommended_molecular(waters, water_groups, 1.0);
+        assert!(water.container > cluster.container);
+        assert!(water.container < 8.0, "water container {}", water.container);
+        let names: Vec<String> = cluster
+            .move_library
+            .kernels(&cluster)
+            .iter()
+            .map(|kernel| kernel.name())
+            .collect();
+        assert!(
+            names
+                .iter()
+                .all(|name| name != "torsion" && name != "frag" && name != "icross")
+        );
+    }
+
+    #[test]
+    fn crossover_without_a_partner_still_moves_a_fragment() {
+        reset_search_memory();
+        let mut waters = Vec::new();
+        let mut species = Vec::new();
+        for t in 0..2 {
+            let x = t as f64 * 3.0;
+            waters.extend([x, 0.0, 0.0, x + 0.96, 0.0, 0.0, x - 0.24, 0.93, 0.0]);
+            species.extend([8, 1, 1]);
+        }
+        let x = Array1::from(waters);
+        let groups = vec![vec![0, 1, 2], vec![3, 4, 5]];
+        let mut rng = StdRng::seed_from_u64(7);
+        let y = propose_crossover(x.view(), &species, 1.25, Some(&groups), &mut rng);
+        let shift: f64 = x.iter().zip(y.iter()).map(|(a, b)| (a - b) * (a - b)).sum();
+        assert!(
+            shift.sqrt() > 0.2,
+            "a water dimer crossover was the identity"
+        );
+    }
+}
