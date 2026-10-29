@@ -47,12 +47,14 @@ use crate::screen::Screen;
 
 mod config;
 mod moves;
+mod organic;
 mod packing_bank;
 mod preset;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, SoapProposalMode};
 pub use moves::*;
+pub use organic::{com_radius, fragment_container};
 
 #[cfg(test)]
 use preset::LennardJonesPreset;
@@ -1966,6 +1968,9 @@ where
 {
     let _caller_stop = ledger.bind_stop();
     let n = cfg.n_points;
+    if cfg.internal_moves {
+        organic::reset_search_memory();
+    }
     let (continuous_symmetry_classes, csm_reseed_hops) = match cfg.continuous_symmetry {
         ContinuousSymmetry::Off => (None, 0),
         ContinuousSymmetry::Inversion { interval }
@@ -2578,8 +2583,27 @@ where
     // recorded, and keeps its validation gradient for the first step the rung
     // takes from it.
     for _ in 1..n_rep {
-        let s0 = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
-        let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
+        let s0 = if cfg.internal_moves {
+            if let Some(species) = cfg.species.as_deref() {
+                organic::kick(
+                    x.view(),
+                    species,
+                    cfg.bond_tolerance,
+                    cfg.move_library.declared_groups(),
+                    rng,
+                )
+            } else {
+                x.clone()
+            }
+        } else {
+            random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng)
+        };
+        let open_steps = if cfg.internal_relax > 0 {
+            cfg.internal_relax
+        } else {
+            cfg.relax_steps
+        };
+        let (e0, x0) = relax(ledger, s0.view(), open_steps);
         let gradient = record_quenched_answer(
             cfg,
             ledger,
@@ -2621,6 +2645,20 @@ where
     let mut orient_scale = 1.0_f64;
     let mut orient_window = 0usize;
     let mut orient_yes = 0usize;
+    // A single covalent molecule is not crushed back into the Lennard-Jones
+    // sphere. A cluster of fragments uses the preset radius set above.
+    let hold_radius = if cfg.internal_moves
+        && cfg
+            .move_library
+            .declared_groups()
+            .map(|groups| groups.len())
+            .unwrap_or(0)
+            <= 1
+    {
+        cfg.container.max(1.25 * organic::com_radius(x.view(), n))
+    } else {
+        cfg.container
+    };
     let mut hops = 0usize;
     let mut checkpoint_hops = 0usize;
     let mut checkpoint_quench_start = 0usize;
@@ -3861,6 +3899,14 @@ where
                 break;
             }
         }
+        if cfg.internal_moves {
+            let partner = chains.first().map(|chain| chain.coordinates.to_vec());
+            if let Some(partner) = partner {
+                organic::offer_partner(&partner);
+            } else {
+                organic::clear_partner();
+            }
+        }
         let mut trial = if let Some(t) = hmc_trial {
             t
         } else if cov_fire {
@@ -4002,7 +4048,7 @@ where
         match hop_frozen.as_ref() {
             None => {
                 recentre(&mut trial, n);
-                contain(&mut trial, n, cfg.container);
+                contain(&mut trial, n, hold_radius);
             }
             Some(f) => {
                 let mut lo = [f64::INFINITY; 3];
@@ -4121,11 +4167,15 @@ where
         // The species escape is already a point past a barrier. A 25-step
         // screen of that point falls back into the well it left, and the
         // return test then skips the quench. Relax it once, in full.
-        let quenched_in_place = rigid_quench || species_escape_trial;
+        let internal_quench = cfg.internal_relax > 0
+            && matches!(kernels[k].name().as_str(), "torsion" | "frag" | "icross");
+        let quenched_in_place = rigid_quench || species_escape_trial || internal_quench;
         let (e_screen, x_screen) = relax(
             ledger,
             trial.view(),
-            if quenched_in_place {
+            if internal_quench {
+                cfg.internal_relax
+            } else if quenched_in_place {
                 cfg.relax_steps
             } else {
                 cfg.screen_steps

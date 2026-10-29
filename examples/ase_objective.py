@@ -75,6 +75,8 @@ class XtbCli:
         env = os.environ.copy()
         env.setdefault("OMP_NUM_THREADS", "1")
         cmd = [self.exe, "geo.xyz", "--grad", "--gfn", "2", "--norestart"]
+        if acc := os.environ.get("XTB_ACC"):
+            cmd.extend(["--acc", acc])
         if cell is not None:
             cmd.extend(["--input", "xcontrol"])
         subprocess.run(
