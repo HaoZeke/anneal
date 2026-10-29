@@ -25,18 +25,18 @@ _DOUBLE = re.compile(r"``.*?``", re.DOTALL)
 def _join_wrapped_code(text: str) -> str:
     """Pull a single-backtick span that rustdoc wrapped back onto one line."""
     parts = []
-    cursor = 0
+    pos = 0
     for fence in _FENCE.finditer(text):
-        parts.append(_join_region(text[cursor : fence.start()]))
+        parts.append(_join_region(text[pos : fence.start()]))
         parts.append(fence.group(0))
-        cursor = fence.end()
-    parts.append(_join_region(text[cursor:]))
+        pos = fence.end()
+    parts.append(_join_region(text[pos:]))
     return "".join(parts)
 
 
 def _join_region(text: str) -> str:
     parts = []
-    cursor = 0
+    pos = 0
     index = 0
     while index < len(text):
         if text.startswith("``", index):
@@ -55,11 +55,11 @@ def _join_region(text: str) -> str:
         if "\n" not in span:
             index = end + 1
             continue
-        parts.append(text[cursor:index])
+        parts.append(text[pos:index])
         parts.append("`" + re.sub(r"\n[ ]*", " ", span) + "`")
-        cursor = end + 1
-        index = cursor
-    parts.append(text[cursor:])
+        pos = end + 1
+        index = pos
+    parts.append(text[pos:])
     return "".join(parts)
 
 

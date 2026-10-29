@@ -78,7 +78,8 @@ pub struct CensusBus {
 /// port range; `CENSUS_BUS_IPC=1` selects it.
 fn url(base_port: u16, replica: u32) -> String {
     if std::env::var("CENSUS_BUS_IPC").is_ok_and(|v| v == "1") {
-        format!("ipc:///tmp/anneal-census-{base_port}-{replica:03}")
+        let socket = std::env::temp_dir().join(format!("anneal-census-{base_port}-{replica:03}"));
+        format!("ipc://{}", socket.display())
     } else {
         format!("tcp://127.0.0.1:{}", u32::from(base_port) + replica)
     }
