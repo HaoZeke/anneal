@@ -74,7 +74,8 @@ fn time_to_target(soap: bool, seed: u64, budget: usize, target: f64) -> RunTime 
         &mut relax,
         None,
         &mut rng,
-    );
+    )
+    .expect("finite start");
     out.improvements
         .iter()
         .find(|(_, _, _, energy)| *energy <= target + 1e-4)

@@ -6,6 +6,7 @@ use anneal_core::atomistic_hybrid::{
     explore_atomistic_with_policy,
 };
 use anneal_core::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
+#[cfg(feature = "rgsaddle")]
 use anneal_core::methods::cluster_search::Encounter;
 use anneal_core::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesSurface, RideMethod,
@@ -113,6 +114,7 @@ fn config() -> AtomisticHybridConfig {
     }
 }
 
+#[cfg(feature = "rgsaddle")]
 #[test]
 fn ridge_only_atomistic_search_uses_the_budgeted_rgsaddle_path() {
     let surface = CountingRadialPairBarrier::new();

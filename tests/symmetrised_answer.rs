@@ -76,7 +76,8 @@ fn symmetrised_run(endpoint_gradient: f64) -> Outcome {
         &mut relax,
         Some(&mut gradient),
         &mut rng,
-    );
+    )
+    .expect("finite start");
     assert_eq!(full_quenches, 3);
     assert_eq!(outcome.symmetrised.0, 1);
     assert_eq!(outcome.final_state.as_ref(), Some(&endpoint));

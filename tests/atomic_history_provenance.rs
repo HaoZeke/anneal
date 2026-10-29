@@ -156,7 +156,8 @@ fn external_adoption_replaces_the_occupied_shared_identity_before_a_return() {
         &mut rng,
         1,
         &mut checkpoint,
-    );
+    )
+    .expect("finite start");
 
     assert!(offered);
     assert!(!external_pending.load(Ordering::Relaxed));

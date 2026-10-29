@@ -516,8 +516,7 @@ fn descriptor_periodic_neighbours_use_the_shortest_vector() {
                 && (image.displacement[1] - fractional[1]).abs() < 1e-8
                 && (image.displacement[2] - fractional[2]).abs() < 1e-8
         }),
-        "pair (0, 1) hand-rolled loop still contains the fractional wrap {:?}",
-        fractional
+        "pair (0, 1) hand-rolled loop still contains the fractional wrap {fractional:?}",
     );
     assert!(
         length2(fractional) > length2(named.1) + 1e-8,

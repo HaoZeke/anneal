@@ -1,0 +1,1 @@
+A stalled icosahedral search no longer opens a fivefold axis. It grows close-packed and pentagonal lattice orders from its own stream, and keeps a bank of minima separated by common-neighbour fractions so a lower minimum of another packing is not discarded. The chain takes a grown quench only when it deepens the incumbent. A face-centred-cubic plateau does not take either step.

@@ -49,7 +49,7 @@ fn finite_diff_gradient_matches_analytic_at_zero() {
     for &g_i in grad.iter() {
         let g: f64 = g_i;
         assert!(g.is_finite());
-        assert!((g - 2.5).abs() < 1e-3, "FD gradient {} far from 2.5", g);
+        assert!((g - 2.5).abs() < 1e-3, "FD gradient {g} far from 2.5");
     }
 }
 
@@ -119,8 +119,7 @@ fn hmc_sa_acceptance_in_unit_interval() {
     let rate = accepted as f64 / total as f64;
     assert!(
         rate > 0.0 && rate <= 1.0,
-        "HMC-SA acceptance rate {} out of [0, 1]",
-        rate
+        "HMC-SA acceptance rate {rate} out of [0, 1]",
     );
     // Suppress unused-import warning when Metropolis is not directly named.
     let _ = std::any::type_name::<Metropolis>();

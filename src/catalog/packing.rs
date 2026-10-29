@@ -1306,6 +1306,44 @@ pub const SEAM_BINS: usize = 12;
 /// Cartesian kick produced at +30 and worse.
 pub const SEAM_WINDOW: f64 = 12.0;
 
+/// Energy window of the fivefold channel, in the potential's own unit.
+///
+/// `SharedChannel.lean` states the fire as within two epsilon of the floor.
+/// The seam ladder's twelve-epsilon doorway window is not this cut.
+pub const FIVEFOLD_FLOOR_WINDOW: f64 = 2.0;
+
+/// Icosahedral slot of [`crate::structure::ptm_fractions`].
+pub const ICOSAHEDRAL_TEMPLATE: usize = 2;
+
+/// Neighbour cutoff for the sealed Lennard-Jones template shares.
+///
+/// The pair quoted on the hop trace is FCC 0.013 against 0.120 and
+/// icosahedral 0.307 against 0.120. That reading uses this cutoff.
+pub const FIVEFOLD_TEMPLATE_CUTOFF: f64 = 1.6;
+
+/// The fivefold channel.
+///
+/// True when `energy` is within [`FIVEFOLD_FLOOR_WINDOW`] of the floor
+/// and the icosahedral template share is strictly below the floor's share.
+/// A DECAF gap and an energy doorway are not inputs.
+pub fn fivefold_channel(energy: f64, floor_energy: f64, ico_share: f64, floor_share: f64) -> bool {
+    energy.is_finite()
+        && floor_energy.is_finite()
+        && ico_share.is_finite()
+        && floor_share.is_finite()
+        && energy <= floor_energy + FIVEFOLD_FLOOR_WINDOW
+        && ico_share < floor_share
+}
+
+/// Icosahedral template share of one structure.
+pub fn icosahedral_share(x: ArrayView1<f64>) -> f64 {
+    let n = x.len() / 3;
+    if n == 0 || x.len() != 3 * n {
+        return f64::NAN;
+    }
+    crate::structure::ptm_fractions(x, n, FIVEFOLD_TEMPLATE_CUTOFF)[ICOSAHEDRAL_TEMPLATE]
+}
+
 impl SeamBank {
     /// An empty bank.
     pub fn new() -> Self {

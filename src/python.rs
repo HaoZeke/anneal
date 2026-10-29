@@ -842,8 +842,7 @@ fn run_hmc(
     let q_max = 1.0 + 2.0 / dim as f64;
     if q > 1.0 && q >= q_max {
         return Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "q-Gaussian momentum requires q < 1 + 2/dim = {} for dim = {}; got q = {}",
-            q_max, dim, q
+            "q-Gaussian momentum requires q < 1 + 2/dim = {q_max} for dim = {dim}; got q = {q}"
         )));
     }
     let x0_arr = if let Some(arr) = x0 {
@@ -3347,6 +3346,7 @@ fn cluster_archive_search(
     dict.set_item("floors", out.floors)?;
     dict.set_item("returned", out.returned)?;
     dict.set_item("events", out.events)?;
+    dict.set_item("nve_unavailable", out.nve_unavailable)?;
     Ok(dict.into())
 }
 
@@ -3469,9 +3469,12 @@ fn rigid_probe(
 /// `Config.communicating(n)` and overrides both. A charged central-difference
 /// probe distinguishes gradients from force-valued callbacks when the budget
 /// can cover it. Every objective or gradient evaluation is charged to a ledger
-/// of `budget` units. Returns `{best, best_energy, hops}`.
+/// of `budget` units. Returns `{best, best_energy, hops, nve_unavailable}`.
+/// `nve_unavailable` is set when a constant-energy escape was requested and
+/// the `rgsaddle` feature is off. The `python` feature enables it.
 /// `ras=True` runs residual archive search on `Config.recommended(n)` and
-/// also reports `charged`, `floors`, `returned`, and `events`.
+/// also reports `charged`, `floors`, `returned`, `events`, and
+/// `nve_unavailable`.
 ///
 /// Args:
 ///   obj_fn: Python callable `f(numpy.ndarray) -> float`.
@@ -3775,7 +3778,8 @@ fn cluster_search(
         crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, started.view(), seed)
     } else {
         crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
-    };
+    }
+    .map_err(|err| PyValueError::new_err(err.to_string()))?;
     errors.finish(py)?;
     let best_block = out
         .best_state
@@ -3790,6 +3794,7 @@ fn cluster_search(
     dict.set_item("best", PyArray1::from_vec(py, best))?;
     dict.set_item("best_energy", out.best)?;
     dict.set_item("hops", out.hops)?;
+    dict.set_item("nve_unavailable", out.nve_unavailable)?;
     Ok(dict.into())
 }
 

@@ -94,9 +94,7 @@ fn gsa_canonical_q_accepts_more_than_metropolis_on_same_seed() {
     assert!(
         total_acc_tsallis >= total_acc_metro,
         "Tsallis q_a > 1 must accept at least as many moves as q_a = 1; \
-         got Tsallis = {}, Metropolis = {}",
-        total_acc_tsallis,
-        total_acc_metro,
+         got Tsallis = {total_acc_tsallis}, Metropolis = {total_acc_metro}",
     );
 }
 

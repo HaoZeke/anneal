@@ -71,9 +71,7 @@ fn l1_gaussian_perturbation_is_zero_mean() {
     for &m in mean.iter() {
         assert!(
             m.abs() < tol,
-            "Gaussian perturbation mean {} out of tolerance {}",
-            m,
-            tol
+            "Gaussian perturbation mean {m} out of tolerance {tol}",
         );
     }
 }

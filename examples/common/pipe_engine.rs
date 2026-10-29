@@ -26,7 +26,8 @@ impl PipeEngine {
     pub(crate) fn start(engine: &str, symbols: Vec<String>, cell: Option<[f64; 9]>) -> Self {
         let helper = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/ase_objective.py");
         let omp = std::env::var("OMP_NUM_THREADS").unwrap_or_else(|_| "1".into());
-        let mut child = Command::new("python3")
+        let python = std::env::var("ASE_PYTHON").unwrap_or_else(|_| "python3".into());
+        let mut child = Command::new(python)
             .arg(helper)
             .env("ASE_ENGINE", engine)
             .env("PYTHONUNBUFFERED", "1")

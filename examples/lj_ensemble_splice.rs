@@ -1309,6 +1309,7 @@ fn run_chain(
             exchange.checkpoint,
             &mut checkpoint,
         )
+        .expect("finite start")
     };
     let first_hit = target.and_then(|reference| {
         outcome

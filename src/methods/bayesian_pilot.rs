@@ -465,11 +465,7 @@ mod tests {
         assert!((log_s_mean - prior.log_sigma_mean).abs() < 0.1);
         assert!((q_v_mean - prior.q_v_mean).abs() < 0.1);
         for (_, _, q) in &draws {
-            assert!(
-                *q > Q_V_MIN && *q < Q_V_MAX,
-                "q_v {} outside (1.05, 2.95)",
-                q
-            );
+            assert!(*q > Q_V_MIN && *q < Q_V_MAX, "q_v {q} outside (1.05, 2.95)",);
         }
     }
 

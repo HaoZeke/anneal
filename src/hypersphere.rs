@@ -111,8 +111,7 @@ pub fn shared_cover(n: usize, dim: usize) -> Arc<Vec<Vec<f64>>> {
 /// [`COVER_SEED`]. Little-endian `f64`, point-major.
 fn water_cover_points() -> Vec<Vec<f64>> {
     const BYTES: &[u8] = include_bytes!("cover96x54.bin");
-    const COUNT: usize = WATER_COVER_N * WATER_COVER_DIM;
-    const _: () = assert!(BYTES.len() == COUNT * 8);
+    const _: () = assert!(BYTES.len() == WATER_COVER_N * WATER_COVER_DIM * 8);
     let mut points = Vec::with_capacity(WATER_COVER_N);
     for point in 0..WATER_COVER_N {
         let mut row = Vec::with_capacity(WATER_COVER_DIM);
