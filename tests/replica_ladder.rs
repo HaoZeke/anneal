@@ -8,7 +8,7 @@
 
 use anneal_core::dos::EnergyBias;
 use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, MoveLibrary, Outcome, optimize, optimize_with_gradient, run,
+    Config, ContinuousSymmetry, Ledger, MoveLibrary, Outcome, optimize, optimize_with_gradient, run,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
@@ -49,8 +49,9 @@ fn lj_run_on(cfg: &Config, seed: u64, ledger: &mut Ledger, gradient: bool) -> Ou
             Some(pot.value_and_gradient(x).1)
         };
         optimize_with_gradient(cfg, ledger, &mut relax, Some(&mut grad), seed)
+            .expect("finite start")
     } else {
-        optimize(cfg, ledger, &mut relax, seed)
+        optimize(cfg, ledger, &mut relax, seed).expect("finite start")
     }
 }
 
@@ -75,8 +76,13 @@ fn large_rises(base: &Config, ladder_top: f64) -> usize {
 }
 
 fn assert_the_hot_rung_climbs(base: &Config) {
-    let flat = large_rises(base, 1.0);
-    let hot = large_rises(base, 10.0);
+    let mut base = base.clone();
+    // The continuous-symmetry quench and the five-hop icosahedral reseed are
+    // adoptions this count is not about. The ladder's temperature is what
+    // the rise count measures, so the move stays off.
+    base.continuous_symmetry = ContinuousSymmetry::Off;
+    let flat = large_rises(&base, 1.0);
+    let hot = large_rises(&base, 10.0);
     assert!(
         hot >= 3 * flat.max(10),
         "a rung ten times hotter adopted {hot} rises above a well depth \
@@ -117,6 +123,9 @@ fn the_ladder_multiplies_the_budget_window_temperature() {
 #[test]
 fn the_ladder_multiplies_the_statistical_temperature() {
     let mut cfg = Config::recommended(13);
+    // The rise counts below were measured with the Bayes screen off.
+    // `recommended` now inherits that screen from `for_cluster`.
+    cfg.bayes_screen = false;
     cfg.temperature = 0.2;
     cfg.statistical_temperature = true;
     cfg.swap_period = 450;
@@ -180,6 +189,10 @@ fn returns(cfg: &Config) -> (f64, usize, usize) {
 #[test]
 fn a_rung_switch_brings_each_state_its_own_basin() {
     let mut cfg = Config::for_cluster(13);
+    // The measured ladder wants every trial quenched. `for_cluster` now
+    // starts with the Bayes screen on, so this case turns that screen off.
+    cfg.bayes_screen = false;
+    cfg.return_screen = false;
     assert!(!cfg.return_screen && !cfg.bayes_screen);
     cfg.minima_hopping = true;
     cfg.screen_margin = f64::INFINITY;
@@ -212,6 +225,7 @@ fn a_rung_switch_brings_each_state_its_own_basin() {
 #[test]
 fn a_resumed_rung_measures_returns_against_its_own_basin() {
     let mut cfg = Config::for_cluster(6);
+    cfg.bayes_screen = false;
     cfg.replicas = 3;
     cfg.swap_period = 3;
     cfg.minima_hopping = true;
@@ -237,7 +251,7 @@ fn a_resumed_rung_measures_returns_against_its_own_basin() {
     let mut ledger = Ledger::new(BUDGET);
     let mut rng = StdRng::seed_from_u64(31);
 
-    let out = run(&cfg, compact.view(), &mut ledger, &mut relax, &mut rng);
+    let out = run(&cfg, compact.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
 
     let (same, known, new) = out.visit_counts;
     assert!(
@@ -326,8 +340,10 @@ fn the_energy_bias_tempers_at_the_coldest_rung_under_the_budget_window() {
     cfg.flat_sweep = 32;
     cfg.max_hops = Some(32);
     // An orbit completion counts as a hop without a deposit, so the sample
-    // fills on hop 32 only when every hop deposits.
+    // fills on hop 32 only when every hop deposits. A continuous-symmetry
+    // quench is the same kind of extra hop, so the move stays off.
     cfg.orbit_complete_on_new = false;
+    cfg.continuous_symmetry = ContinuousSymmetry::Off;
     let fill = |swap_period: usize, seed: u64| {
         let mut cfg = cfg.clone();
         cfg.swap_period = swap_period;

@@ -305,7 +305,9 @@ def cluster_search(
     The best geometry found is kept, and the exception is re-raised here.
 
     Returns a dict with ``best`` (flat coordinates in the state layout),
-    ``best_energy``, and ``hops``.
+    ``best_energy``, ``hops``, and ``nve_unavailable``. The last is true
+    when a constant-energy (NVE) escape was requested and that escape is
+    not compiled. The ``python`` feature compiles it.
     """
     start_arr = None if start is None else np.asarray(start, dtype=np.float64).reshape(-1)
     args = (

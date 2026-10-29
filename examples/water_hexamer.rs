@@ -676,7 +676,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                         CheckpointAction::Continue
                     }
                 };
-            let result = search_from_with_checkpoint(
+            match search_from_with_checkpoint(
                 &objective,
                 &cfg,
                 &mut ledger,
@@ -684,12 +684,25 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                 seed,
                 GOOD_TURING_CHECKPOINT_INTERVAL,
                 &mut checkpoint,
-            );
-            text.push_str(&trace);
-            text.push_str(&format!("good_turing_saturated: {retired}\n"));
-            result
+            ) {
+                Ok(result) => {
+                    text.push_str(&trace);
+                    text.push_str(&format!("good_turing_saturated: {retired}\n"));
+                    result
+                }
+                Err(error) => {
+                    text.push_str(&format!("search_error: {error}\n"));
+                    return text;
+                }
+            }
         } else {
-            search_from(&objective, &cfg, &mut ledger, start.view(), seed)
+            match search_from(&objective, &cfg, &mut ledger, start.view(), seed) {
+                Ok(result) => result,
+                Err(error) => {
+                    text.push_str(&format!("search_error: {error}\n"));
+                    return text;
+                }
+            }
         };
         let wall_s = wall.elapsed().as_secs_f64();
         let best = outcome.best;

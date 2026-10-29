@@ -1,8 +1,11 @@
-use anneal_core::methods::cluster_hopping::{Config, Ledger, run_with_gradient};
+#[cfg(feature = "rgsaddle")]
+use anneal_core::methods::cluster_hopping::run_with_gradient;
+use anneal_core::methods::cluster_hopping::{Config, Ledger};
 use ndarray::{Array1, ArrayView1, array};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
+#[cfg(feature = "rgsaddle")]
 fn mobile_harmonic(state: ArrayView1<f64>, minimum: ArrayView1<f64>) -> (f64, Array1<f64>) {
     let mut gradient = &state - &minimum;
     for coordinate in gradient.iter_mut().take(3) {
@@ -12,6 +15,74 @@ fn mobile_harmonic(state: ArrayView1<f64>, minimum: ArrayView1<f64>) -> (f64, Ar
 }
 
 #[test]
+#[cfg(not(feature = "rgsaddle"))]
+fn a_default_build_stops_when_an_nve_escape_was_requested() {
+    use anneal_core::methods::cluster_hopping::run_with_energy_gradient;
+
+    let minimum = array![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+    let mut cfg = Config::for_cluster(3);
+    cfg.minima_hopping = true;
+    cfg.md_escape = true;
+    cfg.max_hops = Some(4);
+    cfg.replicas = 1;
+    cfg.angular_moves = false;
+    cfg.soft_perturb = false;
+    cfg.cov_perturb = false;
+    cfg.hmc = None;
+    cfg.relax_steps = 1;
+    cfg.screen_steps = 1;
+    cfg.return_screen = false;
+    let mut relax = |ledger: &mut Ledger, state: ArrayView1<f64>, _steps: usize| {
+        assert!(ledger.charge());
+        (0.0, state.to_owned())
+    };
+    let mut gradient = |ledger: &mut Ledger, state: ArrayView1<f64>| {
+        assert!(ledger.charge());
+        Some(Array1::zeros(state.len()))
+    };
+    let mut energy = |ledger: &mut Ledger, state: ArrayView1<f64>| {
+        assert!(ledger.charge());
+        Some((0.0, Array1::zeros(state.len())))
+    };
+    let mut ledger = Ledger::new(64);
+    let mut rng = StdRng::seed_from_u64(3);
+    let out = run_with_energy_gradient(
+        &cfg,
+        minimum.view(),
+        &mut ledger,
+        &mut relax,
+        Some(&mut gradient),
+        Some(&mut energy),
+        &mut rng,
+    )
+    .expect("finite start");
+    assert!(out.nve_unavailable);
+    assert_eq!(out.hops, 0);
+    assert_eq!(out.md_escape, (0, 0, 0));
+
+    cfg.md_escape = false;
+    cfg.species = Some(vec![1, 1, 2]);
+    cfg.species_sigma = Some(vec![1.0, 1.0, 1.4]);
+    let mut ledger = Ledger::new(64);
+    let out = run_with_energy_gradient(
+        &cfg,
+        minimum.view(),
+        &mut ledger,
+        &mut relax,
+        Some(&mut gradient),
+        Some(&mut energy),
+        &mut rng,
+    )
+    .expect("finite start");
+    assert!(
+        out.nve_unavailable,
+        "a wide diameter ratio must not fall through to the kick"
+    );
+    assert_eq!(out.md_escape, (0, 0, 0));
+}
+
+#[test]
+#[cfg(feature = "rgsaddle")]
 fn hopping_nve_keeps_frozen_coordinates_fixed_at_every_force_evaluation() {
     let minimum = array![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
     let mut cfg = Config::for_cluster(3);
@@ -90,7 +161,8 @@ fn hopping_nve_keeps_frozen_coordinates_fixed_at_every_force_evaluation() {
         &mut relax,
         Some(&mut gradient),
         &mut rng,
-    );
+    )
+    .expect("finite start");
 
     assert_eq!(out.hops, 1);
     assert_eq!(out.md_escape.0, 1, "the hop must execute an NVE escape");

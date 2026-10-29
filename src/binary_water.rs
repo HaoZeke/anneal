@@ -2,9 +2,12 @@
 //!
 //! [`Config::recommended`] and [`Config::communicating`] stay numerically
 //! unchanged. Species labels and a rigid chart are applied afterwards.
-//! A wide diameter ratio escapes by one softened microcanonical step across
-//! a barrier and tries one downhill unlike-pair exchange on a side
-//! generator. A narrow ratio exchanges mismatched labels. Water takes
+//! A wide diameter ratio escapes by one softened constant-energy (NVE)
+//! step across a barrier and tries one downhill unlike-pair exchange on
+//! a side generator. That escape needs the `rgsaddle` feature. Without
+//! it the search stops and [`StockSearch::nve_unavailable`] is set; the
+//! library kick is not substituted. A narrow ratio exchanges mismatched
+//! labels. Water takes
 //! an all-body orientation step. A chart with more than ten bodies holds
 //! the acceptance factor at its cap and scales that step toward an
 //! acceptance ratio of one half. Ten bodies or fewer keep the factor
@@ -52,6 +55,8 @@ pub struct StockSearch {
     pub charged: usize,
     /// State that attained [`StockSearch::energy`].
     pub state: Vec<f64>,
+    /// The wide-ratio escape was requested and the `rgsaddle` feature is off.
+    pub nve_unavailable: bool,
 }
 
 impl StockSearch {
@@ -150,7 +155,7 @@ where
     if target.is_finite() {
         ledger.stop_below(target);
     }
-    let _ = search_from(potential, cfg, &mut ledger, start, seed);
+    let (out, _) = search_from(potential, cfg, &mut ledger, start, seed).expect("finite start");
     let state = ledger
         .best_state
         .clone()
@@ -160,6 +165,7 @@ where
         energy: ledger.best,
         charged: ledger.spent(),
         state,
+        nve_unavailable: out.nve_unavailable,
     }
 }
 
@@ -273,11 +279,22 @@ mod tests {
             "quenched energy was not recorded ({})",
             found.energy
         );
-        assert!(
-            found.energy < -15.0,
-            "energy {} never left the separated limit",
-            found.energy
-        );
+        if cfg!(feature = "rgsaddle") {
+            assert!(
+                !found.nve_unavailable,
+                "the feature build compiles the constant-energy escape"
+            );
+            assert!(
+                found.energy < -15.0,
+                "energy {} never left the separated limit",
+                found.energy
+            );
+        } else {
+            assert!(
+                found.nve_unavailable,
+                "a default build must report the missing escape instead of kicking"
+            );
+        }
         assert!(found.charged <= 6_000, "charged {}", found.charged);
     }
 
