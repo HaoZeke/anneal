@@ -834,6 +834,21 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                 "refines: {}\nrefine_force_calls: {}\nrejected_trials: {}\n",
                 stats.refines, stats.refine_charged, outcome.rejected_trials
             ));
+            text.push_str(&format!(
+                "keep_bond_graph: {}\ngraph_rejections: {}\nstart_graph_rejected: {}\n",
+                cfg.keep_bond_graph, outcome.graph_rejections, outcome.start_graph_rejected
+            ));
+        }
+        if let Ok(dir) = std::env::var("WATER_GEOMETRY_DIR") {
+            let dir = std::path::Path::new(&dir);
+            write_water_xyz(&dir.join(format!("start_s{seed}.xyz")), &start, "start");
+            if let Some(state) = &outcome.best_state {
+                write_water_xyz(
+                    &dir.join(format!("best_s{seed}.xyz")),
+                    state,
+                    &format!("best {best}"),
+                );
+            }
         }
         eprintln!(
             "seed_done: {seed} force_calls={} wall_seconds={wall_s:.6} best_energy={best}",
@@ -841,6 +856,22 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
         );
     }
     text
+}
+
+/// One structure of O, H, H waters as XYZ, for scoring off the board.
+fn write_water_xyz(path: &std::path::Path, coordinates: &Array1<f64>, comment: &str) {
+    let atoms = coordinates.len() / 3;
+    let mut body = format!("{atoms}\n{comment}\n");
+    for (atom, xyz) in coordinates.as_slice().unwrap_or(&[]).chunks(3).enumerate() {
+        let symbol = if atom % 3 == 0 { "O" } else { "H" };
+        body.push_str(&format!(
+            "{symbol} {:.10} {:.10} {:.10}\n",
+            xyz[0], xyz[1], xyz[2]
+        ));
+    }
+    std::fs::create_dir_all(path.parent().unwrap_or(std::path::Path::new(".")))
+        .and_then(|()| std::fs::write(path, body))
+        .unwrap_or_else(|error| panic!("failed to write {}: {error}", path.display()));
 }
 
 fn engine_settings(engine: &str) -> String {

@@ -255,6 +255,7 @@ fn main() {
     println!("internal_moves {}", cfg.internal_moves);
     println!("internal_relax {}", cfg.internal_relax);
     println!("replicas {}", cfg.replicas);
+    println!("keep_bond_graph {}", cfg.keep_bond_graph);
     let mut ledger = Ledger::new(budget);
     let started = std::time::Instant::now();
     let (out, stats) = search_from(&obj, &cfg, &mut ledger, start.view(), seed)
@@ -295,6 +296,10 @@ fn main() {
     println!("NONFINITE_REQUESTS {nonfinite}");
     println!("SOAP_FALLBACKS {}", out.soap_fallbacks);
     println!("REJECTED_TRIALS {}", out.rejected_trials);
+    println!(
+        "GRAPH_REJECTIONS {} start {}",
+        out.graph_rejections, out.start_graph_rejected
+    );
     println!("REFINES {} charged {}", stats.refines, stats.refine_charged);
     println!("ROTORS {rotors}");
     println!(
