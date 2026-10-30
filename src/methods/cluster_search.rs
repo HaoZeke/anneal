@@ -120,6 +120,10 @@ pub struct RelaxStats {
     /// the wall seconds per potential call of the opening quench and of one
     /// TRIC step outside the potential, once measured.
     pub quench_seconds: Option<(f64, f64)>,
+    /// Charged evaluations the objective answered with a non-finite value or
+    /// gradient. The line search backtracks from each, and a refused start
+    /// ends its relaxation at `+inf`.
+    pub refused: usize,
 }
 
 impl RelaxStats {
@@ -1033,6 +1037,7 @@ where
                 LocalStep::Lbfgs
             };
         }
+        stats.refused = opt.refused();
         if let Some((at, claim)) = probe_at {
             stats.probe_stops += 1;
             stats.probe_steps += at;
@@ -1190,6 +1195,7 @@ where
                 remember(v, energy, &gradient, physical);
                 Some((energy, gradient))
             });
+            stats.refused = opt.refused();
             let extra = led.spent() - spent_at;
             if extra > 0 {
                 stats.full_charged += extra;
