@@ -9,6 +9,9 @@
 //! `WATER_SEED_COUNT` select a block.
 //! `WATER_WITNESS_TRIPLETON=1` retires a witnessed target at the
 //! one-third ceiling. The default remains one fifth.
+//! `WATER_SEED=s` runs seed `s` alone. Seeds of one process share the
+//! bridge, and tblite starts each SCF from the last wavefunction, so a
+//! change to one seed's evaluations moves the energies of every later one.
 //!
 //! Hit columns that need a same-level reference energy stay unscored.
 //! Isomer names are assigned only when `WATER_ISOMER_DIR` holds
@@ -279,6 +282,12 @@ fn campaign_budget(engine: &str, smoke: bool) -> usize {
 fn seed_block(smoke: bool) -> (u64, u64) {
     if smoke {
         return (WATER_HEXAMER_SEED_START, 1);
+    }
+    if let Ok(text) = std::env::var("WATER_SEED") {
+        let seed = text
+            .parse()
+            .unwrap_or_else(|error| panic!("WATER_SEED {text:?}: {error}"));
+        return (seed, 1);
     }
     let first = match std::env::var("WATER_SEED_FIRST") {
         Ok(text) => text
@@ -793,13 +802,15 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             .map(|value| format!("{value:.6}"))
             .unwrap_or_else(|| "none".to_owned());
         text.push_str(&format!(
-            "seed: {seed}\nstart_monomers_intact: {start_intact}\nstart_spread_steps: {spread_steps}\nstart_oh_min_A: {start_oh_min:.6}\nstart_oh_max_A: {start_oh_max:.6}\nbest_energy: {best}\nbest_monomers_intact: {intact}\nbest_oh_min_A: {best_oh_min:.6}\nbest_oh_max_A: {best_oh_max:.6}\nisomer: {isomer_name}\nisomer_rmsd_A: {isomer_rmsd}\nisomer_gate_A: {gate_text}\nisomer_reason: {isomer_reason}\nfirst_hit_calls: {first_hit_calls_text}\nfirst_hit_wall_seconds: {first_hit_wall_text}\nfirst_hit_isomer: {first_hit_isomer_text}\nfirst_prism_calls: {first_prism_calls_text}\nfirst_prism_wall_seconds: {first_prism_wall_text}\nforce_calls: {}\nwall_seconds: {wall_s:.6}\nforce_calls_per_second: {per_second:.6}\nhops: {}\nhop_stop: {}\nbasins: {}\nconverged: {}\nquenches: {}\nhit: {hit}\n",
+            "seed: {seed}\nstart_monomers_intact: {start_intact}\nstart_spread_steps: {spread_steps}\nstart_oh_min_A: {start_oh_min:.6}\nstart_oh_max_A: {start_oh_max:.6}\nbest_energy: {best}\nbest_monomers_intact: {intact}\nbest_oh_min_A: {best_oh_min:.6}\nbest_oh_max_A: {best_oh_max:.6}\nisomer: {isomer_name}\nisomer_rmsd_A: {isomer_rmsd}\nisomer_gate_A: {gate_text}\nisomer_reason: {isomer_reason}\nfirst_hit_calls: {first_hit_calls_text}\nfirst_hit_wall_seconds: {first_hit_wall_text}\nfirst_hit_isomer: {first_hit_isomer_text}\nfirst_prism_calls: {first_prism_calls_text}\nfirst_prism_wall_seconds: {first_prism_wall_text}\nforce_calls: {}\nwall_seconds: {wall_s:.6}\nforce_calls_per_second: {per_second:.6}\nhops: {}\nhop_stop: {}\nbasins: {}\nconverged: {}\nquenches: {}\nrefused_evaluations: {}\nsoap_fallbacks: {}\nhit: {hit}\n",
             ledger.spent(),
             outcome.hops,
             outcome.stop.as_ref().map_or("none", |stop| stop.code()),
             outcome.basins,
             stats.converged,
-            stats.total()
+            stats.total(),
+            stats.refused,
+            outcome.soap_fallbacks
         ));
         eprintln!(
             "seed_done: {seed} force_calls={} wall_seconds={wall_s:.6} best_energy={best}",

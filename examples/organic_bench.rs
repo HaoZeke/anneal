@@ -1,11 +1,12 @@
 //! GFN2 conformer search on one xyz file.
 //!
-//! Usage: `organic_bench <xyz> <budget> <seed> <baseline|fixed>`
+//! Usage: `organic_bench <xyz> <budget> <seed> <preset|baseline|wide|fixed>`
 //!
 //! The objective is the xtb binary through `examples/ase_objective.py`
-//! (`ASE_ENGINE=xtb-cli`). `XTB_ACC` selects `--acc`. `baseline` is the
-//! molecular preset without internal-coordinate moves. `fixed` is
-//! [`Config::recommended_molecular`], which carries those moves.
+//! (`ASE_ENGINE=xtb-cli`). `XTB_ACC` selects `--acc`. `preset` is
+//! [`Config::recommended_molecular`] as it stands. `baseline` is the
+//! molecular preset without internal-coordinate moves. `fixed` adds
+//! [`Config::with_bonded_container`].
 //!
 //! The xyz comment may be `groups i,j;k,l`. Without it, every atom is
 //! one group.
@@ -164,7 +165,9 @@ fn main() {
             0.0,
         ),
     };
-    let mut cfg = if arm == "baseline" || arm == "wide" {
+    let mut cfg = if arm == "preset" {
+        Config::recommended_molecular(species.clone(), groups.clone(), 1.0)
+    } else if arm == "baseline" || arm == "wide" {
         let mut cfg = baseline(species.clone(), groups.clone());
         if arm == "wide" {
             let span =
@@ -216,6 +219,8 @@ fn main() {
         "QUENCH screen {} full {} check {}",
         stats.screen_charged, stats.full_charged, stats.check_charged
     );
+    println!("REFUSED {}", stats.refused);
+    println!("SOAP_FALLBACKS {}", out.soap_fallbacks);
     println!("WALL {wall:.3}");
     for (name, draws, accepts, reward) in &out.arms {
         println!("ARM {name} draws {draws} accepts {accepts} reward {reward:.4}");
