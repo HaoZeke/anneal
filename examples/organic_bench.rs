@@ -10,6 +10,11 @@
 //!
 //! The xyz comment may be `groups i,j;k,l`. Without it, every atom is
 //! one group.
+//!
+//! A call the bridge answers `FAIL` scores `+inf` with a NaN gradient, so
+//! the relaxation's guard rejects it. It is charged like any other call
+//! and counted in `FAILED_CALLS`. A bridge that stops answering ends the
+//! run.
 
 #[path = "common/pipe_engine.rs"]
 mod pipe_engine;
@@ -25,8 +30,14 @@ use eindir_core::bounds::Bounds;
 use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use ndarray::{Array1, ArrayView1};
 
+struct Engine {
+    pipe: pipe_engine::PipeEngine,
+    calls: usize,
+    nonfinite_requests: usize,
+}
+
 struct XtbObjective {
-    pipe: Mutex<pipe_engine::PipeEngine>,
+    engine: Mutex<Engine>,
     dim: usize,
     bounds: Bounds<f64>,
 }
@@ -57,10 +68,19 @@ impl Gradient<f64> for XtbObjective {
 
 impl DifferentiableObjective<f64> for XtbObjective {
     fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-        let mut pipe = self.pipe.lock().expect("xtb pipe");
-        match pipe.eval(x) {
+        let mut engine = self.engine.lock().expect("xtb pipe");
+        engine.calls += 1;
+        if x.iter().any(|v| !v.is_finite()) {
+            engine.nonfinite_requests += 1;
+        }
+        let failed = engine.pipe.failures;
+        match engine.pipe.eval(x) {
             Some(pair) => pair,
-            None => (1.0e6, Array1::zeros(x.len())),
+            // A zero gradient would certify the point as a converged minimum.
+            None if engine.pipe.failures > failed => {
+                (f64::INFINITY, Array1::from_elem(x.len(), f64::NAN))
+            }
+            None => panic!("the xtb bridge stopped answering at call {}", engine.calls),
         }
     }
 }
@@ -157,7 +177,11 @@ fn main() {
     }
     let pipe = pipe_engine::PipeEngine::start("xtb-cli", symbols, None);
     let obj = XtbObjective {
-        pipe: Mutex::new(pipe),
+        engine: Mutex::new(Engine {
+            pipe,
+            calls: 0,
+            nonfinite_requests: 0,
+        }),
         dim: 3 * n,
         bounds: Bounds::new(
             Array1::from_elem(3 * n, -1.0e3),
@@ -203,10 +227,22 @@ fn main() {
     let (out, stats) = search_from(&obj, &cfg, &mut ledger, start.view(), seed)
         .unwrap_or_else(|err| panic!("search failed: {err}"));
     let wall = started.elapsed().as_secs_f64();
+    let (calls, failed, nonfinite) = {
+        let engine = obj.engine.lock().expect("xtb pipe");
+        (
+            engine.calls,
+            engine.pipe.failures,
+            engine.nonfinite_requests,
+        )
+    };
     println!("FINAL {:.8}", out.final_energy);
     if let Some(state) = &out.final_state {
         let gradient = obj.grad(state.view());
-        let gmax = gradient.iter().fold(0.0_f64, |acc, v| acc.max(v.abs()));
+        let gmax = if gradient.iter().all(|v| v.is_finite()) {
+            gradient.iter().fold(0.0_f64, |acc, v| acc.max(v.abs()))
+        } else {
+            f64::NAN
+        };
         println!("GMAX {gmax:.6}");
     }
     println!("BEST {:.8}", out.best);
@@ -220,6 +256,10 @@ fn main() {
         stats.screen_charged, stats.full_charged, stats.check_charged
     );
     println!("REFUSED {}", stats.refused);
+    println!("REFUSED_STARTS {}", stats.refused_starts);
+    println!("ENGINE_CALLS {calls}");
+    println!("FAILED_CALLS {failed}");
+    println!("NONFINITE_REQUESTS {nonfinite}");
     println!("SOAP_FALLBACKS {}", out.soap_fallbacks);
     println!("WALL {wall:.3}");
     for (name, draws, accepts, reward) in &out.arms {

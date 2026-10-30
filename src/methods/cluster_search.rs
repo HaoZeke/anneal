@@ -78,6 +78,9 @@ pub struct RelaxStats {
     /// gradient. The line search backtracks from each, and a refused start
     /// ends its relaxation at `+inf`.
     pub refused: usize,
+    /// Of `refused`, the relaxations whose first evaluation was refused and
+    /// that therefore ended at their start.
+    pub refused_starts: usize,
 }
 
 impl RelaxStats {
@@ -242,6 +245,7 @@ where
             },
         );
         stats.refused = opt.refused();
+        stats.refused_starts = opt.refused_starts();
         if let Some((at, claim)) = probe_at {
             stats.probe_stops += 1;
             stats.probe_steps += at;
@@ -318,6 +322,7 @@ where
                 Some(objective.value_and_gradient(v))
             });
             stats.refused = opt.refused();
+            stats.refused_starts = opt.refused_starts();
             f = f2;
             xr = xr2;
             converged = if led.charge() {
