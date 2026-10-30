@@ -74,6 +74,10 @@ pub struct RelaxStats {
     /// Against `screens * screen_steps` this is what stopping on a decision
     /// bought, and it is the only number that says whether it bought anything.
     pub screen_steps_taken: usize,
+    /// Charged evaluations the objective answered with a non-finite value or
+    /// gradient. The line search backtracks from each, and a refused start
+    /// ends its relaxation at `+inf`.
+    pub refused: usize,
 }
 
 impl RelaxStats {
@@ -237,6 +241,7 @@ where
                 false
             },
         );
+        stats.refused = opt.refused();
         if let Some((at, claim)) = probe_at {
             stats.probe_stops += 1;
             stats.probe_steps += at;
@@ -304,6 +309,7 @@ where
                 }
                 Some(objective.value_and_gradient(v))
             });
+            stats.refused = opt.refused();
             f = f2;
             xr = xr2;
             converged = if led.charge() {
