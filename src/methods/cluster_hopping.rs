@@ -466,6 +466,56 @@ pub enum SearchError {
     },
 }
 
+/// Why a search returned an [`Outcome`].
+///
+/// A ledger that is closed for more than one reason reports the target
+/// first, then the caller stop, then the budget.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HopStop {
+    /// The charged budget was spent.
+    Budget,
+    /// The incumbent reached the [`Ledger::stop_below`] threshold.
+    Target,
+    /// The caller raised the ledger's stop flag.
+    CallerStop,
+    /// A checkpoint returned [`CheckpointAction::Retire`].
+    Retired {
+        /// The reason the checkpoint gave.
+        reason: String,
+    },
+    /// The hop needs the NVE escape and the `rgsaddle` feature is off.
+    NveUnavailable,
+    /// The run took [`Config::max_hops`] hops.
+    MaxHops,
+    /// The Hamiltonian proposal returned no trajectory while budget was left.
+    NoTrajectory,
+}
+
+impl HopStop {
+    /// Stable lower-case name for logs and run records.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Budget => "budget",
+            Self::Target => "target",
+            Self::CallerStop => "caller_stop",
+            Self::Retired { .. } => "retired",
+            Self::NveUnavailable => "nve_unavailable",
+            Self::MaxHops => "max_hops",
+            Self::NoTrajectory => "no_trajectory",
+        }
+    }
+
+    fn of_closed(ledger: &Ledger) -> Self {
+        if ledger.target_reached() {
+            Self::Target
+        } else if ledger.stopped() {
+            Self::CallerStop
+        } else {
+            Self::Budget
+        }
+    }
+}
+
 /// Charged objective-work ledger with optional per-relaxation evidence.
 pub struct Ledger {
     budget: usize,
@@ -894,6 +944,9 @@ pub struct Outcome {
     /// The hop asked for a constant-energy (NVE) escape and the `rgsaddle`
     /// feature is off, so the run stopped instead of substituting a kick.
     pub nve_unavailable: bool,
+    /// Why the run returned. A search always sets it; only an outcome
+    /// built by hand leaves it `None`.
+    pub stop: Option<HopStop>,
     /// Seconds the chain spent inside the history, lock waits included.
     pub history_seconds: f64,
     /// Climbs triggered by a stall.
@@ -1942,6 +1995,7 @@ fn outcome_when_start_was_stopped(ledger: &Ledger, x: &Array1<f64>, energy: f64)
         final_state: Some(x.clone()),
         final_energy: energy,
         charged: ledger.spent(),
+        stop: Some(HopStop::CallerStop),
         ..Outcome::default()
     }
 }
@@ -2640,11 +2694,14 @@ where
     let mut csm_reseed_stamp = 0usize;
     let hop_room = |hops: usize| cfg.max_hops.is_none_or(|cap| hops < cap);
 
-    loop {
+    let stop = loop {
+        if ledger.stopped() || ledger.target_reached() {
+            break HopStop::of_closed(ledger);
+        }
         // The cap is read here because every early `continue` returns here,
         // and most of them have just taken a hop.
-        if ledger.stopped() || ledger.target_reached() || !hop_room(hops) {
-            break;
+        if !hop_room(hops) {
+            break HopStop::MaxHops;
         }
         if ledger.best < best_seen - 1e-9 {
             best_seen = ledger.best;
@@ -2720,7 +2777,7 @@ where
                     rigid_window = 0;
                     rigid_hits = 0;
                     if ledger.remaining() == 0 || ledger.target_reached() {
-                        break;
+                        break HopStop::of_closed(ledger);
                     }
                     continue;
                 }
@@ -2816,8 +2873,8 @@ where
                 }
                 checkpoint_action = *action;
             }
-            if let CheckpointAction::Retire { .. } = checkpoint_action {
-                break;
+            if let CheckpointAction::Retire { reason } = checkpoint_action {
+                break HopStop::Retired { reason };
             }
             let diagnostic_quench =
                 matches!(&checkpoint_action, CheckpointAction::ProbeProposal { .. });
@@ -3306,9 +3363,12 @@ where
                 }
             }
         }
+        if ledger.remaining() == 0 {
+            break HopStop::of_closed(ledger);
+        }
         // An adoption above can take the last hop the cap allows.
-        if ledger.remaining() == 0 || !hop_room(hops) {
-            break;
+        if !hop_room(hops) {
+            break HopStop::MaxHops;
         }
         let continuous_symmetry_due = match cfg.continuous_symmetry {
             ContinuousSymmetry::Off => false,
@@ -3407,7 +3467,7 @@ where
                 }
             }
             if ledger.remaining() == 0 {
-                break;
+                break HopStop::of_closed(ledger);
             }
         }
         // A new incumbent, including one just produced by the projection
@@ -3470,7 +3530,7 @@ where
                 quiet = 0;
             }
             if ledger.remaining() == 0 {
-                break;
+                break HopStop::of_closed(ledger);
             }
         }
         // Gap to the incumbent, which is what the law scales the window by.
@@ -3617,7 +3677,7 @@ where
                 }
             }
             if ledger.remaining() == 0 || ledger.target_reached() {
-                break;
+                break HopStop::of_closed(ledger);
             }
         }
         let mut k = match (&context, cfg.allocate_moves) {
@@ -3753,7 +3813,7 @@ where
                 }
                 Err(crate::methods::minima_hopping::NveError::FeatureDisabled) => {
                     nve_unavailable = true;
-                    break;
+                    break HopStop::NveUnavailable;
                 }
                 Err(_) => {
                     md_attempts += 1;
@@ -3761,7 +3821,7 @@ where
                 }
             }
             if ledger.remaining() == 0 {
-                break;
+                break HopStop::of_closed(ledger);
             }
         }
         // Every eighth hop, exchange one inner large atom with one outer
@@ -3838,7 +3898,7 @@ where
                 }
                 Err(crate::methods::minima_hopping::NveError::FeatureDisabled) => {
                     nve_unavailable = true;
-                    break;
+                    break HopStop::NveUnavailable;
                 }
                 Err(_) => {
                     md_attempts += 1;
@@ -3847,7 +3907,7 @@ where
                 }
             }
             if ledger.remaining() == 0 {
-                break;
+                break HopStop::of_closed(ledger);
             }
         }
         if hamiltonian {
@@ -3861,8 +3921,13 @@ where
                 .propose(hc, ledger, x.view(), e, &mut eg_ref, rng)
                 .map(|p| p.x);
             if hmc_trial.is_none() {
-                // The ledger ran out inside the trajectory.
-                break;
+                // The ledger ran out inside the trajectory, or the sampler
+                // could not start one from this state.
+                break if ledger.remaining() == 0 {
+                    HopStop::of_closed(ledger)
+                } else {
+                    HopStop::NoTrajectory
+                };
             }
         }
         let mut trial = if let Some(t) = hmc_trial {
@@ -4136,7 +4201,7 @@ where
             },
         );
         if ledger.stopped() {
-            break;
+            break HopStop::of_closed(ledger);
         }
         let entry_snapshot = if cfg.trail_on_stall {
             Some(x_screen.clone())
@@ -4270,7 +4335,7 @@ where
             out
         };
         if ledger.stopped() {
-            break;
+            break HopStop::of_closed(ledger);
         }
         if !quench_is_sane(cfg, e_new, x_new.view()) {
             unconverged_records += 1;
@@ -4375,7 +4440,7 @@ where
                 if improved && improvements.len() < 512 {
                     improvements.push((hops, ledger.spent(), bias.n_basins(), e_new));
                 }
-                break;
+                break HopStop::Target;
             }
             // Recognition refunds the rest of a later descent into this
             // basin. HistoryHook still returns identity only; the bank
@@ -6129,7 +6194,7 @@ where
         }
 
         if !hop_room(hops) {
-            break;
+            break HopStop::MaxHops;
         }
 
         if cfg.path_on_stall {
@@ -6229,7 +6294,7 @@ where
                 }
             }
         }
-    }
+    };
 
     let n_basins = bias.n_basins();
     // Per-rung sampler diagnostics, with the active rung put back at its own
@@ -6293,6 +6358,7 @@ where
         gossip_rounds,
         md_escape: (md_attempts, md_steps, md_failed),
         nve_unavailable,
+        stop: Some(stop),
         history_seconds: history.as_deref().map_or(0.0, |h| h.cost().2),
         merge_radius: final_radius,
         mean_step: radius.mean_step(),
