@@ -18,6 +18,7 @@ Energies and forces pass through unchanged; unit handling and convergence
 settings live here, visible, rather than inside the driver.
 """
 
+import math
 import os
 import subprocess
 import sys
@@ -35,6 +36,10 @@ PYSCF_BASIS = "6-31g*"
 PYSCF_GRID_LEVEL = 3
 WATER_CELL_A = 40.0
 DEPOSITED = ("tblite-gfn2", "pyscf-pbe", "pet-mad")
+
+
+class NonFiniteGeometry(ValueError):
+    """A request whose coordinates are not all finite."""
 
 
 def require_version(module, version, label):
@@ -242,6 +247,10 @@ def main():
         if tag != "EVAL":
             raise SystemExit(f"protocol error: expected EVAL, got {tag!r}")
         try:
+            if not all(math.isfinite(v) for row in positions for v in row):
+                # Refused before the engine sees it: tblite 0.7.0 bound to
+                # non-finite positions fails every later evaluation.
+                raise NonFiniteGeometry
             if isinstance(calc, XtbCli):
                 energy, forces = calc.eval(symbols, positions, cell)
             else:
@@ -284,8 +293,12 @@ def main():
                     out.write("0 0 0\n")
             except BrokenPipeError:
                 return
-            if os.environ.get("ASE_ENGINE") == "cp2k":
-                # An unconverged SCF aborts cp2k_shell. Recreate so later
+            if not isinstance(exc, NonFiniteGeometry) and os.environ.get("ASE_ENGINE") in (
+                "cp2k",
+                "tblite-gfn2",
+            ):
+                # An unconverged SCF aborts cp2k_shell, and leaves tblite's
+                # wavefunction as the next guess. Recreate so later
                 # evaluations are not counted as failures of a dead engine.
                 try:
                     calc = make_calculator()
