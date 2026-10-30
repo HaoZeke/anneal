@@ -1012,6 +1012,11 @@ pub struct Config {
     /// See [`Config::with_chain_exchange`]. Serialized only when set.
     #[serde(default, skip_serializing_if = "is_false")]
     pub chain_exchange: bool,
+    /// Rotatable-bond torsion kicks as an allocated arm, attached when the
+    /// quenched start has a rotatable bond. See [`Config::with_torsion_kicks`].
+    /// Serialized only when set.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub torsion_kicks: bool,
     /// First-phase transform of every relaxation: relax on a compacted
     /// surface first, then on the plain potential from that minimum, judging
     /// the plain energy. `None` relaxes on the plain potential only.
@@ -1437,6 +1442,7 @@ impl Config {
             internal_relax: 0,
             loose_gradient: None,
             chain_exchange: false,
+            torsion_kicks: false,
             two_phase: None,
             reoccupy: None,
             reoccupy_interval: 5_000,
@@ -1734,6 +1740,17 @@ impl Config {
             self.swap_period = 1;
             self.chain_exchange = true;
         }
+        self
+    }
+
+    /// Torsion kicks on the rotatable bonds of the covalent graph, as one
+    /// more allocated arm, `tkick`.
+    ///
+    /// The arm is attached only when the quenched start has a rotatable
+    /// bond, so a system without one runs the preset unchanged. The
+    /// container, the hold radius and the other arms are untouched.
+    pub fn with_torsion_kicks(mut self) -> Self {
+        self.torsion_kicks = true;
         self
     }
 

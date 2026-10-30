@@ -646,6 +646,15 @@ pub enum ClusterMove {
         /// Declared rigid fragments.
         groups: Vec<Vec<usize>>,
     },
+    /// Large turns of several rotatable bonds at once, read from the
+    /// covalent graph of the state it is applied to. See
+    /// [`super::organic::propose_torsion_kick`].
+    TorsionKick {
+        /// Atomic numbers, one per atom.
+        species: Vec<u32>,
+        /// Bond cutoff in units of the covalent-radius sum.
+        tolerance: f64,
+    },
 }
 
 fn soap_arm(
@@ -1440,6 +1449,7 @@ impl ClusterMove {
             ClusterMove::Torsion { .. } => "torsion".into(),
             ClusterMove::FragmentOrient { .. } => "frag".into(),
             ClusterMove::IcCross { .. } => "icross".into(),
+            ClusterMove::TorsionKick { .. } => "tkick".into(),
         }
     }
 
@@ -1919,6 +1929,9 @@ impl ClusterMove {
                 Some(groups.as_slice()),
                 rng,
             ),
+            ClusterMove::TorsionKick { species, tolerance } => {
+                super::organic::propose_torsion_kick(x, species, *tolerance, rng)
+            }
         }
     }
 }

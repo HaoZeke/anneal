@@ -54,7 +54,7 @@ mod preset;
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, SoapProposalMode};
 pub use moves::*;
-pub use organic::{com_radius, fragment_container};
+pub use organic::{com_radius, fragment_container, rotatable_bond_count};
 
 #[cfg(test)]
 use preset::LennardJonesPreset;
@@ -2004,6 +2004,25 @@ fn finish_improving(
 /// Continuations [`finish_improving`] grants one relaxation.
 const FINISH_ROUNDS: usize = 8;
 
+/// Whether a run carries the `tkick` arm: [`Config::torsion_kicks`] is set
+/// and the quenched start `x` has a rotatable bond.
+fn kicks_torsions(cfg: &Config, x: ArrayView1<f64>) -> bool {
+    cfg.torsion_kicks
+        && cfg.species.as_deref().is_some_and(|species| {
+            organic::rotatable_bond_count(x, species, cfg.bond_tolerance) > 0
+        })
+}
+
+/// The `tkick` arm, appended after the library's own arms.
+fn torsion_kick_arm(cfg: &Config) -> Option<ClusterMove> {
+    cfg.species
+        .as_deref()
+        .map(|species| ClusterMove::TorsionKick {
+            species: species.to_vec(),
+            tolerance: cfg.bond_tolerance,
+        })
+}
+
 /// A caller stop during the opening quench is not a refused potential.
 ///
 /// The ledger may hold no finite minimum yet. The search still returns
@@ -2232,6 +2251,10 @@ where
     let mut kernels = cfg.move_library.kernels(cfg);
     if cfg.displacement_only {
         kernels = vec![ClusterMove::AllPoints { step: 0.38 }];
+    }
+    let kicking = kicks_torsions(cfg, x.view());
+    if kicking {
+        kernels.extend(torsion_kick_arm(cfg));
     }
     // Which kernel to propose from is learned rather than drawn uniformly. The
     // useful move changes as the search moves through the landscape, so the
@@ -3698,6 +3721,9 @@ where
                     reactive: *reactive,
                 }
                 .kernels(cfg);
+                if kicking {
+                    kernels.extend(torsion_kick_arm(cfg));
+                }
             }
         }
         // Extra fixed-composition proposal. The wide-ratio escape and the

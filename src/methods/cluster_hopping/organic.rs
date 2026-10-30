@@ -608,6 +608,111 @@ pub fn kick<R: Rng + ?Sized>(
     one_internal(x, species, tolerance, groups, rng)
 }
 
+/// A bond the torsion kick turns, and the smaller of its two sides.
+struct RotatableBond {
+    j: usize,
+    k: usize,
+    side: Vec<usize>,
+}
+
+/// Two or more neighbours besides `other`, all hydrogen: a methyl or amino
+/// top, whose turn is a symmetry of the molecule.
+fn terminal_top(nb: &[Vec<usize>], species: &[u32], atom: usize, other: usize) -> bool {
+    nb[atom].len() >= 3
+        && nb[atom]
+            .iter()
+            .filter(|&&b| b != other)
+            .all(|&b| species.get(b).copied().unwrap_or(0) <= 1)
+}
+
+/// Heavy-atom bonds outside rings whose ends each carry another atom and
+/// neither of which is a terminal top.
+fn rotatable_bonds(nb: &[Vec<usize>], species: &[u32]) -> Vec<RotatableBond> {
+    let heavy = |atom: usize| species.get(atom).copied().unwrap_or(0) > 1;
+    let mut found = Vec::new();
+    for j in 0..nb.len() {
+        if !heavy(j) || nb[j].len() < 2 {
+            continue;
+        }
+        for &k in &nb[j] {
+            if k < j || !heavy(k) || nb[k].len() < 2 {
+                continue;
+            }
+            if terminal_top(nb, species, j, k)
+                || terminal_top(nb, species, k, j)
+                || in_ring(nb, j, k)
+            {
+                continue;
+            }
+            let far = side_of(nb, j, k);
+            let near = side_of(nb, k, j);
+            let side = if far.len() <= near.len() { far } else { near };
+            found.push(RotatableBond { j, k, side });
+        }
+    }
+    found
+}
+
+/// Rotatable bonds of `x`'s covalent graph, as [`propose_torsion_kick`]
+/// counts them.
+pub fn rotatable_bond_count(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> usize {
+    rotatable_bonds(&neighbors(x, species, tolerance), species).len()
+}
+
+/// Draws before [`propose_torsion_kick`] keeps a kick that changed the graph.
+const TORSION_KICK_DRAWS: usize = 8;
+
+/// Turn between one and half of the rotatable bonds, each by a third of a
+/// turn to a half turn either way, moving the smaller side of each bond.
+///
+/// A kick that brings two atoms within bonding distance changes the
+/// covalent graph and is redrawn, up to [`TORSION_KICK_DRAWS`] times, after
+/// which the last draw is kept. A graph with no rotatable bond is returned
+/// unchanged.
+pub fn propose_torsion_kick<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    species: &[u32],
+    tolerance: f64,
+    rng: &mut R,
+) -> Array1<f64> {
+    let nb = neighbors(x, species, tolerance);
+    let bonds = rotatable_bonds(&nb, species);
+    let mut kicked = x.to_owned();
+    if bonds.is_empty() {
+        return kicked;
+    }
+    let most = (bonds.len() / 2).max(1);
+    let mut order: Vec<usize> = (0..bonds.len()).collect();
+    for _ in 0..TORSION_KICK_DRAWS {
+        let m = rng.random_range(1..=most);
+        for i in 0..m {
+            let pick = rng.random_range(i..order.len());
+            order.swap(i, pick);
+        }
+        let mut y = x.to_owned();
+        {
+            let slice = y.as_slice_mut().expect("coordinates are contiguous");
+            for &b in &order[..m] {
+                let bond = &bonds[b];
+                let magnitude =
+                    rng.random_range(std::f64::consts::FRAC_PI_3..=std::f64::consts::PI);
+                let angle = if rng.random_bool(0.5) {
+                    magnitude
+                } else {
+                    -magnitude
+                };
+                rotate_side(slice, bond.j, bond.k, &bond.side, angle);
+            }
+        }
+        let kept_graph = neighbors(y.view(), species, tolerance) == nb;
+        kicked = y;
+        if kept_graph {
+            break;
+        }
+    }
+    kicked
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -689,6 +794,252 @@ mod tests {
                 .iter()
                 .all(|name| name != "torsion" && name != "frag" && name != "icross")
         );
+    }
+
+    /// A zigzag heavy-atom chain in the xy plane. Every carbon is filled to
+    /// four bonds with hydrogens; a terminal oxygen carries one.
+    fn saturated_chain(heavy: &[u32]) -> (Vec<f64>, Vec<u32>) {
+        let mut coords = Vec::new();
+        let mut species = Vec::new();
+        let last = heavy.len() - 1;
+        for (i, &z) in heavy.iter().enumerate() {
+            let (x, y) = (1.27 * i as f64, if i % 2 == 1 { 0.84 } else { 0.0 });
+            let out = if i % 2 == 1 { 1.0 } else { -1.0 };
+            coords.extend([x, y, 0.0]);
+            species.push(z);
+            let mut hydrogens = Vec::new();
+            if z == 6 {
+                hydrogens.push([x, y + 0.51 * out, 0.89]);
+                hydrogens.push([x, y + 0.51 * out, -0.89]);
+                if i == 0 {
+                    hydrogens.push([x - 1.03, y - 0.3 * out, 0.0]);
+                }
+                if i == last {
+                    hydrogens.push([x + 1.03, y - 0.3 * out, 0.0]);
+                }
+            } else if i == last {
+                hydrogens.push([x + 0.91, y - 0.3 * out, 0.0]);
+            }
+            for h in hydrogens {
+                coords.extend(h);
+                species.push(1);
+            }
+        }
+        (coords, species)
+    }
+
+    fn water() -> (Vec<f64>, Vec<u32>) {
+        (
+            vec![0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0],
+            vec![8, 1, 1],
+        )
+    }
+
+    #[test]
+    fn methyl_tops_do_not_count_and_a_hydroxyl_turn_does() {
+        let (hexane, hexane_species) = saturated_chain(&[6; 6]);
+        let (ethanol, ethanol_species) = saturated_chain(&[6, 6, 8]);
+        let (water, water_species) = water();
+        let count =
+            |x: &[f64], species: &[u32]| rotatable_bond_count(ArrayView1::from(x), species, 1.25);
+        assert_eq!(hexane_species.len(), 20);
+        assert_eq!(ethanol_species.len(), 9);
+        assert_eq!(count(&hexane, &hexane_species), 3);
+        assert_eq!(count(&ethanol, &ethanol_species), 1);
+        assert_eq!(count(&water, &water_species), 0);
+    }
+
+    #[test]
+    fn a_torsion_kick_keeps_the_bonds_and_turns_a_dihedral() {
+        let (coords, species) = saturated_chain(&[6; 6]);
+        let x = Array1::from(coords);
+        let nb = neighbors(x.view(), &species, 1.25);
+        let backbone: Vec<Rotor> = rotors(&nb, &species);
+        let mut rng = StdRng::seed_from_u64(11);
+        for _ in 0..20 {
+            let y = propose_torsion_kick(x.view(), &species, 1.25, &mut rng);
+            assert_eq!(neighbors(y.view(), &species, 1.25), nb);
+            for a in 0..species.len() {
+                for &b in &nb[a] {
+                    let length = |v: &[f64]| {
+                        let d = sub(point(v, a), point(v, b));
+                        dot(d, d).sqrt()
+                    };
+                    let before = length(x.as_slice().expect("contiguous"));
+                    let after = length(y.as_slice().expect("contiguous"));
+                    assert!((before - after).abs() < 1e-9, "bond {a}-{b}");
+                }
+            }
+            let turned = backbone.iter().any(|&rotor| {
+                let before = dihedral(x.as_slice().expect("contiguous"), rotor);
+                let after = dihedral(y.as_slice().expect("contiguous"), rotor);
+                wrap(after - before).abs() > std::f64::consts::FRAC_PI_3 - 1e-9
+            });
+            assert!(turned, "no backbone dihedral turned by a third of a turn");
+        }
+    }
+
+    #[test]
+    fn the_kick_arm_needs_a_rotatable_bond_and_the_flag() {
+        let (hexane, hexane_species) = saturated_chain(&[6; 6]);
+        let (waters, water_species) = water();
+        let config = |species: &[u32], kicks: bool| {
+            let n = species.len();
+            let cfg = super::super::Config::recommended_molecular(
+                species.to_vec(),
+                vec![(0..n).collect()],
+                1.0,
+            );
+            if kicks { cfg.with_torsion_kicks() } else { cfg }
+        };
+        let kicks = |cfg: &super::super::Config, x: &[f64]| {
+            super::super::kicks_torsions(cfg, ArrayView1::from(x))
+        };
+        let kicked = config(&hexane_species, true);
+        assert!(kicks(&kicked, &hexane));
+        assert_eq!(
+            super::super::torsion_kick_arm(&kicked)
+                .map(|arm| arm.name())
+                .as_deref(),
+            Some("tkick")
+        );
+        assert!(!kicks(&config(&hexane_species, false), &hexane));
+        assert!(!kicks(&config(&water_species, true), &waters));
+        let plain = config(&hexane_species, false);
+        let names: Vec<String> = plain
+            .move_library
+            .kernels(&plain)
+            .iter()
+            .map(|kernel| kernel.name())
+            .collect();
+        assert!(names.iter().all(|name| name != "tkick"));
+    }
+
+    /// Harmonic springs on the bonds of a reference geometry, and a soft
+    /// wall between atoms closer than 2 Angstrom that are not bonded.
+    struct Springs {
+        bonds: Vec<(usize, usize, f64)>,
+        bonded: Vec<Vec<bool>>,
+        bounds: eindir_core::Bounds<f64>,
+    }
+
+    impl Springs {
+        fn new(x: &[f64], species: &[u32]) -> Self {
+            let n = species.len();
+            let nb = neighbors(ArrayView1::from(x), species, 1.25);
+            let mut bonded = vec![vec![false; n]; n];
+            let mut bonds = Vec::new();
+            for a in 0..n {
+                for &b in &nb[a] {
+                    bonded[a][b] = true;
+                    if a < b {
+                        let d = sub(point(x, a), point(x, b));
+                        bonds.push((a, b, dot(d, d).sqrt()));
+                    }
+                }
+            }
+            let bounds = eindir_core::Bounds::new(
+                Array1::from_elem(3 * n, -50.0),
+                Array1::from_elem(3 * n, 50.0),
+                0.0,
+            );
+            Self {
+                bonds,
+                bonded,
+                bounds,
+            }
+        }
+
+        fn pair(x: &[f64], g: &mut [f64], a: usize, b: usize, slope: f64, r: f64) {
+            for t in 0..3 {
+                let unit = (x[3 * a + t] - x[3 * b + t]) / r.max(1e-12);
+                g[3 * a + t] += slope * unit;
+                g[3 * b + t] -= slope * unit;
+            }
+        }
+    }
+
+    impl eindir_core::Objective<f64> for Springs {
+        fn dim(&self) -> usize {
+            3 * self.bonded.len()
+        }
+        fn bounds(&self) -> &eindir_core::Bounds<f64> {
+            &self.bounds
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            eindir_core::gradient::DifferentiableObjective::value_and_gradient(self, x).0
+        }
+    }
+
+    impl eindir_core::Gradient<f64> for Springs {
+        fn dim(&self) -> usize {
+            3 * self.bonded.len()
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            eindir_core::gradient::DifferentiableObjective::value_and_gradient(self, x).1
+        }
+    }
+
+    impl eindir_core::gradient::DifferentiableObjective<f64> for Springs {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let x = x.to_vec();
+            let n = self.bonded.len();
+            let mut g = vec![0.0; 3 * n];
+            let mut e = 0.0;
+            for &(a, b, r0) in &self.bonds {
+                let d = sub(point(&x, a), point(&x, b));
+                let r = dot(d, d).sqrt();
+                e += (r - r0) * (r - r0);
+                Self::pair(&x, &mut g, a, b, 2.0 * (r - r0), r);
+            }
+            for a in 0..n {
+                for b in (a + 1)..n {
+                    if self.bonded[a][b] {
+                        continue;
+                    }
+                    let d = sub(point(&x, a), point(&x, b));
+                    let r = dot(d, d).sqrt();
+                    if r < 2.0 {
+                        e += (2.0 - r) * (2.0 - r);
+                        Self::pair(&x, &mut g, a, b, -2.0 * (2.0 - r), r);
+                    }
+                }
+            }
+            (e, Array1::from(g))
+        }
+    }
+
+    /// The molecular library rebuilds its arms from the bond graph on every
+    /// hop; the kick arm has to survive that, or the allocator draws an arm
+    /// the list no longer holds.
+    #[test]
+    fn a_kicking_molecular_run_draws_the_arm_on_every_rebuild() {
+        let (coords, species) = saturated_chain(&[6; 6]);
+        let springs = Springs::new(&coords, &species);
+        let n = species.len();
+        let cfg = super::super::Config::recommended_molecular(
+            species.clone(),
+            vec![(0..n).collect()],
+            1.0,
+        )
+        .with_torsion_kicks();
+        let mut ledger = super::super::Ledger::new(600);
+        let (out, _) = crate::methods::cluster_search::search_from(
+            &springs,
+            &cfg,
+            &mut ledger,
+            ArrayView1::from(&coords),
+            1,
+        )
+        .expect("finite start");
+        let draws = out
+            .arms
+            .iter()
+            .find(|arm| arm.0 == "tkick")
+            .map(|arm| arm.1)
+            .expect("the run carries the kick arm");
+        assert!(draws > 0, "the allocator never drew tkick");
+        assert_eq!(out.charged, 600);
     }
 
     #[test]
