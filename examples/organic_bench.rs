@@ -79,7 +79,10 @@ fn atomic_number(symbol: &str) -> u32 {
     }
 }
 
-fn load_xyz(path: &str) -> (Vec<String>, Vec<u32>, Array1<f64>, Vec<Vec<usize>>, String) {
+/// Symbols, atomic numbers, coordinates, declared groups and the comment line.
+type Xyz = (Vec<String>, Vec<u32>, Array1<f64>, Vec<Vec<usize>>, String);
+
+fn load_xyz(path: &str) -> Xyz {
     let file = File::open(path).unwrap_or_else(|err| panic!("open {path}: {err}"));
     let mut lines = BufReader::new(file).lines();
     let n: usize = lines
@@ -213,7 +216,7 @@ fn main() {
         "QUENCH screen {} full {} check {}",
         stats.screen_charged, stats.full_charged, stats.check_charged
     );
-    println!("WALL {:.3}", wall);
+    println!("WALL {wall:.3}");
     for (name, draws, accepts, reward) in &out.arms {
         println!("ARM {name} draws {draws} accepts {accepts} reward {reward:.4}");
     }
