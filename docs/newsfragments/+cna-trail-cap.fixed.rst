@@ -1,0 +1,1 @@
+Common neighbour analysis returns on a compressed, unrelaxed structure. A bonded pair with more than `TRAIL_BOND_CAP` (twelve) bonds among its common neighbours is reported as `(r, s, 0)` without tracing its trail, so `cna`, the per-point triplet fractions and `ih_dominated` no longer run without end on such input. Relaxed clusters never reach the cap and are unchanged.
