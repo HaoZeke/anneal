@@ -470,7 +470,19 @@ pub enum SearchError {
 ///
 /// A ledger that is closed for more than one reason reports the target
 /// first, then the caller stop, then the budget.
+///
+/// A later release may add a reason, so a `match` outside this crate needs
+/// a wildcard arm. [`HopStop::code`] names every reason.
+///
+/// ```text
+/// match stop {
+///     HopStop::Budget => "out of budget",
+///     HopStop::Target => "reached the target",
+///     _ => stop.code(),
+/// }
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum HopStop {
     /// The charged budget was spent.
     Budget,
