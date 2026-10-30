@@ -2638,9 +2638,12 @@ where
     // A rigid reseed compares the live hop count with this stamp.
     let mut hops_at_lowest = 0usize;
     let mut csm_reseed_stamp = 0usize;
+    let hop_room = |hops: usize| cfg.max_hops.is_none_or(|cap| hops < cap);
 
     loop {
-        if ledger.stopped() || ledger.target_reached() {
+        // The cap is read here because every early `continue` returns here,
+        // and most of them have just taken a hop.
+        if ledger.stopped() || ledger.target_reached() || !hop_room(hops) {
             break;
         }
         if ledger.best < best_seen - 1e-9 {
@@ -4272,9 +4275,6 @@ where
             unconverged_records += 1;
             hops += 1;
             bias.deposit(x.view(), temperature);
-            if cfg.max_hops.is_some_and(|cap| hops >= cap) {
-                break;
-            }
             continue;
         }
         // A screened or returning structure has only a partial relaxation.
@@ -6114,9 +6114,7 @@ where
             }
         }
 
-        if let Some(cap) = cfg.max_hops
-            && hops >= cap
-        {
+        if !hop_room(hops) {
             break;
         }
 
