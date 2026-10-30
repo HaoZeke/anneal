@@ -6,6 +6,9 @@
 //! whose name contains `SMOKE`. That file is not a paper table. A run
 //! without it uses seeds 0-31 and 4000 force evaluations on every
 //! engine. Full campaign numbers still come from the v0.12.0 tag.
+//! `WATER_SEED=s` runs seed `s` alone. Seeds of one process share the
+//! bridge, and tblite starts each SCF from the last wavefunction, so a
+//! change to one seed's evaluations moves the energies of every later one.
 //!
 //! Hit columns that need a same-level reference energy stay unscored.
 //! Isomer names are assigned only when `WATER_ISOMER_DIR` holds
@@ -232,8 +235,15 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             other => panic!("unknown engine {other}"),
         }
     };
-    let seed0 = WATER_HEXAMER_SEED_START;
-    let seeds = if smoke { 1 } else { WATER_HEXAMER_SEED_COUNT };
+    let only = std::env::var("WATER_SEED")
+        .ok()
+        .map(|v| v.parse::<u64>().expect("WATER_SEED is a seed number"));
+    let seed0 = only.unwrap_or(WATER_HEXAMER_SEED_START);
+    let seeds = if smoke || only.is_some() {
+        1
+    } else {
+        WATER_HEXAMER_SEED_COUNT
+    };
     let mut text = String::new();
     text.push_str(&format!(
         "\nengine: {engine}\narm: {arm_name}\nbudget: {budget}\nseeds: {seed0}..{}\n",
@@ -467,12 +477,14 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             0.0
         };
         text.push_str(&format!(
-            "seed: {seed}\nstart_monomers_intact: {start_intact}\nbest_energy: {best}\nbest_monomers_intact: {intact}\nisomer: {isomer_name}\nisomer_rmsd_A: {isomer_rmsd}\nisomer_gate_A: {gate_text}\nisomer_reason: {isomer_reason}\nforce_calls: {}\nwall_seconds: {wall_s:.6}\nforce_calls_per_second: {per_second:.6}\nhops: {}\nbasins: {}\nconverged: {}\nquenches: {}\nhits: unscored\nwilson_95: unscored\nmedian_par2_force: unscored\nmedian_par2_wall: unscored\nunscored_reason: smoke or one arm, success rate waits on the full seed block\n",
+            "seed: {seed}\nstart_monomers_intact: {start_intact}\nbest_energy: {best}\nbest_monomers_intact: {intact}\nisomer: {isomer_name}\nisomer_rmsd_A: {isomer_rmsd}\nisomer_gate_A: {gate_text}\nisomer_reason: {isomer_reason}\nforce_calls: {}\nwall_seconds: {wall_s:.6}\nforce_calls_per_second: {per_second:.6}\nhops: {}\nbasins: {}\nconverged: {}\nquenches: {}\nrefused_evaluations: {}\nsoap_fallbacks: {}\nhits: unscored\nwilson_95: unscored\nmedian_par2_force: unscored\nmedian_par2_wall: unscored\nunscored_reason: smoke or one arm, success rate waits on the full seed block\n",
             ledger.spent(),
             outcome.hops,
             outcome.basins,
             stats.converged,
-            stats.total()
+            stats.total(),
+            stats.refused,
+            outcome.soap_fallbacks
         ));
     }
     text
