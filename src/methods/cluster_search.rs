@@ -126,10 +126,7 @@ fn two_phase_penalty(
 }
 
 fn gradient_is_converged(gradient: ArrayView1<f64>, threshold: f64) -> bool {
-    gradient
-        .iter()
-        .fold(0.0_f64, |largest, value| largest.max(value.abs()))
-        < threshold
+    gradient.iter().all(|value| value.abs() < threshold)
 }
 
 fn warm_relax<'a, O>(
@@ -283,9 +280,11 @@ where
             portfolio.observe(screening, f, target);
         }
         // A descent stopped on a verdict is known not to be converged, so
-        // asking is spending an evaluation on an answer already in hand. The
-        // check stays on every other path, where the answer is not known.
-        if early {
+        // asking is spending an evaluation on an answer already in hand. So
+        // is one that ended at a non-finite energy, a refused start: the
+        // engine has just refused that geometry. The check stays on every
+        // other path, where the answer is not known.
+        if early || !f.is_finite() {
             stats.capped += 1;
             // The water census reads these boundaries. A screened descent is
             // not a minimum, so it is recorded without a validation gradient.
@@ -1267,6 +1266,111 @@ mod tests {
         assert!(
             observed > 0,
             "checkpoint saw none of the recorded boundaries"
+        );
+    }
+
+    #[test]
+    fn a_nan_component_is_not_converged() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let gradient = Array1::from_vec(vec![1.0e-6, bad, -1.0e-6]);
+            assert!(!gradient_is_converged(gradient.view(), 1.0e-3), "{bad}");
+        }
+    }
+
+    /// Lennard-Jones for the first `answered` calls, then a refusal: a NaN
+    /// value and gradient, as an SCF that stops converging returns.
+    struct RefusesAfter {
+        inner: PairPotential,
+        answered: usize,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl RefusesAfter {
+        fn new(n: usize, answered: usize) -> Self {
+            Self {
+                inner: PairPotential::lennard_jones(n),
+                answered,
+                calls: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl eindir_core::Objective<f64> for RefusesAfter {
+        fn dim(&self) -> usize {
+            eindir_core::Objective::dim(&self.inner)
+        }
+        fn bounds(&self) -> &eindir_core::Bounds<f64> {
+            self.inner.bounds()
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.value_and_gradient(x).0
+        }
+    }
+
+    impl eindir_core::Gradient<f64> for RefusesAfter {
+        fn dim(&self) -> usize {
+            eindir_core::Objective::dim(self)
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.value_and_gradient(x).1
+        }
+    }
+
+    impl DifferentiableObjective<f64> for RefusesAfter {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if n >= self.answered {
+                return (f64::NAN, Array1::from_elem(x.len(), f64::NAN));
+            }
+            self.inner.value_and_gradient(x)
+        }
+    }
+
+    #[test]
+    fn a_refused_start_is_not_asked_whether_it_converged() {
+        let objective = RefusesAfter::new(4, 0);
+        let cfg = Config::for_cluster(4);
+        let start = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1,
+        ]);
+        let mut stats = RelaxStats::default();
+        let mut ledger = Ledger::new(100);
+        let (f, x) = {
+            let mut relax = warm_relax(&objective, &cfg, &mut stats, 0);
+            relax(&mut ledger, start.view(), cfg.relax_steps)
+        };
+        assert_eq!(f, f64::INFINITY);
+        assert_eq!(x, start);
+        assert_eq!(ledger.spent(), 1);
+        assert_eq!(
+            (
+                stats.check_charged,
+                stats.refused_starts,
+                stats.capped,
+                stats.converged
+            ),
+            (0, 1, 1, 0)
+        );
+    }
+
+    /// Once the engine refuses, every trial fails `quench_is_sane`. The arm
+    /// that drew each one is still told, so the draws cover every hop but
+    /// the last, which the spent budget may cut off.
+    #[test]
+    fn a_rejected_trial_is_charged_to_the_arm_that_drew_it() {
+        let objective = RefusesAfter::new(8, 300);
+        let mut cfg = Config::for_cluster(8);
+        cfg.allocate_moves = true;
+        cfg.depth_reward = true;
+        let mut ledger = Ledger::new(600);
+        let (out, _) = search(&objective, &cfg, &mut ledger, 2).expect("finite start");
+        assert!(out.rejected_trials > 0, "no trial was rejected");
+        let drawn: usize = out.arms.iter().map(|arm| arm.1).sum();
+        assert!(
+            drawn <= out.hops && out.hops - drawn <= 1,
+            "{drawn} draws over {} hops, {} rejected",
+            out.hops,
+            out.rejected_trials
         );
     }
 
