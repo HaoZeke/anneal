@@ -87,6 +87,9 @@ fn main() {
     } else {
         Config::recommended_molecular(species.clone(), groups, 1.0)
     };
+    // Adsorbate-surface contacts are what the search rearranges, so the
+    // start's covalent graph is not an invariant.
+    cfg.keep_bond_graph = false;
     // Hop the adsorbate only. shells=0 so the first Cu shell is not
     // added to the move mask; the quench still relaxes free substrate
     // through Mobile.

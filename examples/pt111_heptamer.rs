@@ -466,6 +466,9 @@ fn configure(species: &[u32], island: &[usize], base: &Array1<f64>, arm: &str) -
     } else {
         Config::recommended_molecular(species.to_vec(), groups, 1.0)
     };
+    // The island's metal-metal and metal-surface contacts are what the
+    // search rearranges, so the start's covalent graph is not an invariant.
+    cfg.keep_bond_graph = false;
     cfg.active_region = Some((island.to_vec(), 0));
     if !island.is_empty() {
         let adsorbate = island
