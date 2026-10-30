@@ -780,6 +780,9 @@ pub struct Outcome {
     /// Hops whose SOAP proposal was the identity and whose redraws all
     /// drew SOAP again, so the move came uniformly from the other arms.
     pub soap_fallbacks: usize,
+    /// Trials whose quench failed `quench_is_sane`: a non-finite energy or
+    /// an overlapping pair.
+    pub rejected_trials: usize,
     /// Distinct basins registered.
     pub basins: usize,
     /// Charged evaluations spent.
@@ -2627,6 +2630,10 @@ where
     }
     let mut screened_out = 0usize;
     let mut soap_fallbacks = 0usize;
+    let mut rejected_trials = 0usize;
+    // What a failed trial reports to the depth allocator: no structure, so
+    // the worst depth any arm has reached.
+    let mut lowest_depth_reward = f64::INFINITY;
     let mut returned = 0usize;
     let mut descent = ScreenDescent::default();
     let mut accepted = 0usize;
@@ -4319,6 +4326,28 @@ where
             break;
         }
         if !quench_is_sane(cfg, e_new, x_new.view()) {
+            // A trial the spent budget cut off is the end of the run, not a
+            // refusal, and its feedback would reach no later draw.
+            let refused = ledger.remaining() > 0;
+            rejected_trials += usize::from(refused);
+            // Without this the arm whose proposals the engine refuses keeps
+            // its estimate while spending calls.
+            if refused && !angular {
+                if let Some(c) = &context {
+                    contextual.update(k, c.view(), 0.0);
+                } else if cfg.allocate_moves {
+                    if cfg.depth_reward {
+                        let reward = if lowest_depth_reward.is_finite() {
+                            lowest_depth_reward
+                        } else {
+                            -(e - ledger.best)
+                        };
+                        depth_allocator.update(k, reward);
+                    }
+                    allocator.update(k, false);
+                    arm_draws[k] += 1;
+                }
+            }
             unconverged_records += 1;
             hops += 1;
             bias.deposit(x.view(), temperature);
@@ -4998,7 +5027,11 @@ where
                 // How close the move brought the chain to the best it knows.
                 // Dense, because every hop produces one, and informative,
                 // because its size says how deep rather than merely whether.
-                depth_allocator.update(k, -(e_new - ledger.best));
+                let reward = -(e_new - ledger.best);
+                if reward.is_finite() {
+                    lowest_depth_reward = lowest_depth_reward.min(reward);
+                }
+                depth_allocator.update(k, reward);
             }
             allocator.update(k, improved || (accept && !(cfg.novel_reward && returning)));
             arm_draws[k] += 1;
@@ -6295,6 +6328,7 @@ where
         hops,
         screened_out,
         soap_fallbacks,
+        rejected_trials,
         basins: n_basins,
         charged: ledger.spent(),
         returned,
