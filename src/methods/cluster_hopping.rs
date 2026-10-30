@@ -2589,6 +2589,19 @@ where
     // recorded, and keeps its validation gradient for the first step the rung
     // takes from it.
     for _ in 1..n_rep {
+        if cfg.chain_exchange {
+            // A copy is already quenched and validated, so it costs nothing.
+            chains.push(OccupiedMinimum {
+                energy: e,
+                coordinates: x.clone(),
+                gradient: current_validation_gradient.clone(),
+                history_minimum: None,
+                local_minimum: None,
+                generation: 0,
+                pending_initial: true,
+            });
+            continue;
+        }
         let s0 = if cfg.internal_moves {
             if let Some(species) = cfg.species.as_deref() {
                 organic::kick(

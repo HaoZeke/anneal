@@ -1420,6 +1420,50 @@ mod tests {
         );
     }
 
+    #[test]
+    fn chain_exchange_needs_twelve_declared_groups() {
+        let waters = |count: usize| {
+            let species: Vec<u32> = (0..count).flat_map(|_| [8, 1, 1]).collect();
+            let groups: Vec<Vec<usize>> = (0..count)
+                .map(|w| vec![3 * w, 3 * w + 1, 3 * w + 2])
+                .collect();
+            Config::recommended_molecular(species, groups, 1.0)
+        };
+        let eight = waters(8);
+        let gated = eight.clone().with_chain_exchange();
+        assert_eq!(
+            gated.resolved_sha256().expect("digest"),
+            eight.resolved_sha256().expect("digest")
+        );
+        let twelve = waters(12).with_chain_exchange();
+        assert_eq!(
+            (twelve.replicas, twelve.swap_period, twelve.chain_exchange),
+            (Config::EXCHANGE_CHAINS, 1, true)
+        );
+    }
+
+    /// The extra chains are copies of the quenched start and cost nothing,
+    /// where fresh rungs each pay for a quench of their own.
+    #[test]
+    fn exchanging_chains_start_from_free_copies_of_the_start() {
+        let pot = PairPotential::lennard_jones(8);
+        let mut one = Config::for_cluster(8);
+        one.max_hops = Some(1);
+        let mut copies = one.clone();
+        copies.replicas = Config::EXCHANGE_CHAINS;
+        copies.swap_period = 1;
+        copies.chain_exchange = true;
+        let mut fresh = copies.clone();
+        fresh.chain_exchange = false;
+        let spent = |cfg: &Config| {
+            let mut ledger = Ledger::new(50_000);
+            search(&pot, cfg, &mut ledger, 5).expect("finite start");
+            ledger.spent()
+        };
+        assert_eq!(spent(&copies), spent(&one));
+        assert!(spent(&fresh) > spent(&one));
+    }
+
     /// Once the engine refuses, every trial fails `quench_is_sane`. The arm
     /// that drew each one is still told, so the draws cover every hop but
     /// the last, which the spent budget may cut off.
