@@ -2,6 +2,7 @@
 
 use anneal_core::campaign::CampaignConfig;
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -52,6 +53,34 @@ fn value<'a>(text: &'a str, name: &str) -> &'a str {
         .unwrap_or_else(|| panic!("missing {name} in:\n{text}"))
 }
 
+/// Why the runner would refuse `repository` before anything this test checks:
+/// it seals the source commit, so it needs a git checkout whose tracked files
+/// match HEAD, by the same `git diff --quiet HEAD --` it runs itself.
+fn unsealable_checkout(repository: &Path) -> Option<String> {
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .arg("-C")
+            .arg(repository)
+            .args(args)
+            .output()
+    };
+    let stderr =
+        |output: &std::process::Output| String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    match git(&["rev-parse", "HEAD"]) {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => return Some(format!("not a git checkout ({})", stderr(&output))),
+        Err(error) => return Some(format!("git is unavailable ({error})")),
+    }
+    match git(&["diff", "--quiet", "HEAD", "--"]) {
+        Ok(output) if output.status.success() => None,
+        Ok(output) if output.status.code() == Some(1) => {
+            Some("tracked source differs from HEAD".to_owned())
+        }
+        Ok(output) => Some(format!("git diff failed ({})", stderr(&output))),
+        Err(error) => Some(format!("git is unavailable ({error})")),
+    }
+}
+
 // GNU sha256sum text mode: lowercase digest, two spaces, relative name.
 fn seal_build_artifacts(root: &Path, relative_paths: &[&str]) -> Vec<u8> {
     use sha2::{Digest, Sha256};
@@ -100,6 +129,17 @@ fn causal_runner_pairs_shared_and_private_catalog_topologies() {
         "missing causal runner {}",
         runner.display()
     );
+    if let Some(reason) = unsealable_checkout(&repository) {
+        // Written past the harness's capture, so a passing run still shows it.
+        let _ = writeln!(
+            std::io::stderr(),
+            "warning: skipped causal_runner_pairs_shared_and_private_catalog_topologies: \
+             {reason} in {}; the runner refuses a checkout it cannot seal, so it \
+             runs only on a clean commit",
+            repository.display()
+        );
+        return;
+    }
 
     let temp = TempTree::new();
     let root = temp.path().join("root");
