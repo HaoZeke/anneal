@@ -1,4 +1,5 @@
-//! Compile-time checks for the certified component constructor.
+//! Compile-time checks for the certified component constructor, and for a
+//! downstream `match` on `HopStop` that has no wildcard arm.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -70,6 +71,7 @@ fn checked_rejects_uncertified_component_combinations() {
 
     let tests = trybuild::TestCases::new();
     tests.compile_fail("tests/ui/checked_rejects_*.rs");
+    tests.compile_fail("tests/ui/hop_stop_*.rs");
 }
 
 /// Registry dependencies whose lock entries have no `source`.
