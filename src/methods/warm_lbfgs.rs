@@ -42,9 +42,59 @@
 //! the sign. And a relaxation benchmark has to check the final gradient, since
 //! an unrepaired overlap returns a gradient near 1e13 that no line search
 //! recovers from, making a cost comparison count failures instead of work.
+//!
+//! # Refused evaluations
+//!
+//! An engine that refuses a geometry, such as an SCF that does not
+//! converge, answers with a non-finite value or gradient. `rgmin` 0.5.0's
+//! bracketing phase compares a NaN value false against both Wolfe tests and
+//! doubles the step, up to `max_line_evals` times, and a NaN gradient at the
+//! start of a relaxation becomes a NaN direction. On a tblite water board
+//! the farthest atom of the requested geometry went from 5.5 to 1.7e6
+//! Angstrom from the centroid within 20 requests, and then the coordinates
+//! went NaN. Here a non-finite answer after the start reaches the solver as
+//! `+inf` with a zero gradient, which fails the Armijo test, so the zoom
+//! bisects back towards the accepted step. A refused start has no accepted
+//! step to return to and ends that relaxation at `+inf`.
 
 use ndarray::{Array1, ArrayView1};
 use rgmin::{GradNorm, Lbfgs};
+
+/// Stands between the caller's objective and the solver.
+struct Refusals<F> {
+    fg: F,
+    answered: usize,
+    refused: usize,
+    refused_start: bool,
+}
+
+impl<F> Refusals<F>
+where
+    F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
+{
+    fn new(fg: F) -> Self {
+        Self {
+            fg,
+            answered: 0,
+            refused: 0,
+            refused_start: false,
+        }
+    }
+
+    fn eval(&mut self, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+        let (f, g) = (self.fg)(x)?;
+        self.answered += 1;
+        if f.is_finite() && g.iter().all(|v| v.is_finite()) {
+            return Some((f, g));
+        }
+        self.refused += 1;
+        if self.answered == 1 {
+            self.refused_start = true;
+            return None;
+        }
+        Some((f64::INFINITY, Array1::zeros(x.len())))
+    }
+}
 
 /// L-BFGS with memory that persists across relaxations.
 ///
@@ -63,6 +113,7 @@ pub struct WarmLbfgs {
     pub curvature: f64,
     /// Line-search evaluations attempted before the direction is abandoned.
     pub max_line_evals: usize,
+    refused: usize,
 }
 
 impl Default for WarmLbfgs {
@@ -74,6 +125,7 @@ impl Default for WarmLbfgs {
             armijo: 1e-4,
             curvature: 0.9,
             max_line_evals: 20,
+            refused: 0,
         }
     }
 }
@@ -117,11 +169,19 @@ impl WarmLbfgs {
         self.inner.record(s, y);
     }
 
+    /// Evaluations answered with a non-finite value or gradient, over every
+    /// relaxation this handle has run.
+    pub fn refused(&self) -> usize {
+        self.refused
+    }
+
     /// Relaxes `x0`, calling `fg` for value and gradient.
     ///
     /// `fg` returns `None` when the caller's budget is spent, which ends the
-    /// relaxation where it stands. Returns the value, the point, and the number
-    /// of evaluations used.
+    /// relaxation where it stands. A non-finite value or gradient is a
+    /// refused evaluation: the line search backtracks from it, and a refused
+    /// start returns `+inf` at `x0`. Returns the value, the point, and the
+    /// number of evaluations used.
     pub fn minimize<F>(
         &mut self,
         x0: ArrayView1<f64>,
@@ -155,7 +215,12 @@ impl WarmLbfgs {
         R: FnMut(usize, f64, ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
     {
         self.sync();
-        self.inner.minimize_recognized(x0, max_iter, fg, recognise)
+        let mut guard = Refusals::new(fg);
+        let (f, x, evals, recognized) =
+            self.inner
+                .minimize_recognized(x0, max_iter, |v| guard.eval(v), recognise);
+        self.refused += guard.refused;
+        (f, x, evals + usize::from(guard.refused_start), recognized)
     }
 
     /// Relaxes `x0`, offering each accepted iterate to `watch`.
@@ -176,7 +241,12 @@ impl WarmLbfgs {
         W: FnMut(usize, f64) -> bool,
     {
         self.sync();
-        self.inner.minimize_watched(x0, max_iter, fg, watch)
+        let mut guard = Refusals::new(fg);
+        let (f, x, evals) = self
+            .inner
+            .minimize_watched(x0, max_iter, |v| guard.eval(v), watch);
+        self.refused += guard.refused;
+        (f, x, evals + usize::from(guard.refused_start))
     }
 }
 
@@ -289,5 +359,51 @@ mod tests {
             Some(quad(v))
         });
         assert!(evals <= 3, "spent {evals} with a budget of 3");
+    }
+
+    /// A bowl centred at 3 that the engine answers only inside `|x_i| <= 2`,
+    /// as an SCF that fails away from a bound geometry does.
+    fn refused_outside(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        if x.iter().any(|v| v.abs() > 2.0) {
+            return (f64::NAN, Array1::from_elem(x.len(), f64::NAN));
+        }
+        let f = x.iter().map(|v| (v - 3.0) * (v - 3.0)).sum();
+        (f, x.mapv(|v| 2.0 * (v - 3.0)))
+    }
+
+    #[test]
+    fn a_refusal_shrinks_the_step_instead_of_doubling_it() {
+        let mut opt = WarmLbfgs::default();
+        let x0 = Array1::zeros(6);
+        let mut farthest = 0.0_f64;
+        let mut non_finite = 0;
+        let (f, x, evals) = opt.minimize(x0.view(), 200, |v| {
+            if v.iter().any(|c| !c.is_finite()) {
+                non_finite += 1;
+            }
+            farthest = v.iter().fold(farthest, |m, c| m.max(c.abs()));
+            Some(refused_outside(v))
+        });
+        assert_eq!(non_finite, 0, "NaN coordinates reached the engine");
+        assert!(farthest < 8.0, "a trial went {farthest} out");
+        assert!(f.is_finite() && f < refused_outside(x0.view()).0, "f = {f}");
+        assert!(x.iter().all(|c| c.abs() <= 2.0), "ended outside at {x}");
+        assert!(opt.refused() > 0 && opt.refused() < evals);
+    }
+
+    #[test]
+    fn a_refused_start_ends_only_that_relaxation() {
+        let mut opt = WarmLbfgs::default();
+        let refused = Array1::from_elem(4, 2.5);
+        let mut calls = 0;
+        let (f, x, evals) = opt.minimize(refused.view(), 200, |v| {
+            calls += 1;
+            Some(refused_outside(v))
+        });
+        assert_eq!((calls, evals, opt.refused()), (1, 1, 1));
+        assert_eq!(f, f64::INFINITY);
+        assert_eq!(x, refused);
+        let (f, _, _) = opt.minimize(Array1::zeros(4).view(), 200, |v| Some(refused_outside(v)));
+        assert!(f.is_finite() && f < 36.0, "the next relaxation gave {f}");
     }
 }
