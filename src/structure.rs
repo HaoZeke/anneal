@@ -95,6 +95,17 @@ fn adjacency(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<Vec<bool>> {
     adj
 }
 
+/// Bonds among the common neighbours of one pair past which the trail is not
+/// traced.
+///
+/// The trail search visits every trail, and their number grows faster than
+/// exponentially in the bonds, so a pair inside a compressed, unrelaxed
+/// structure can keep it running without end. Every named triplet carries
+/// six bonds or fewer, and relaxed Lennard-Jones clusters of 38 to 98 points
+/// stay within that, so the cap changes no answer on them. Past it the
+/// triplet is reported as `(r, s, 0)`.
+pub const TRAIL_BOND_CAP: usize = 12;
+
 /// Bonds in the longest continuous chain among a set of common neighbours.
 ///
 /// The third index, and the one that has to be counted the right way. It is the
@@ -104,6 +115,9 @@ fn adjacency(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<Vec<bool>> {
 /// ring, so a perfect thirteen-point icosahedron reports `(5,5,4)` for its
 /// twelve centre-to-surface pairs where the literature reports `555`, and
 /// everything keyed on `555` reads zero.
+///
+/// Returns zero past [`TRAIL_BOND_CAP`] bonds, which no traced set with a
+/// bond can give.
 fn longest_trail(sub: &[Vec<bool>]) -> usize {
     let m = sub.len();
     if m == 0 {
@@ -117,7 +131,7 @@ fn longest_trail(sub: &[Vec<bool>]) -> usize {
             }
         }
     }
-    if edges.is_empty() {
+    if edges.is_empty() || edges.len() > TRAIL_BOND_CAP {
         return 0;
     }
     let mut incident: Vec<Vec<(usize, usize)>> = vec![Vec::new(); m];
@@ -125,8 +139,7 @@ fn longest_trail(sub: &[Vec<bool>]) -> usize {
         incident[i].push((k, j));
         incident[j].push((k, i));
     }
-    // Exhaustive over bonds, which is harmless: the set is the common
-    // neighbours of one pair and the bond count stays in single figures.
+    // Exhaustive over bonds, which the cap above keeps cheap.
     let mut best = 0usize;
     for start in 0..m {
         let mut stack: Vec<(usize, u64, usize)> = vec![(start, 0, 0)];
