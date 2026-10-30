@@ -371,7 +371,7 @@ fn components(nb: &[Vec<usize>]) -> Vec<Vec<usize>> {
     groups
 }
 
-fn fragment_lists<'a>(groups: Option<&'a [Vec<usize>]>, nb: &[Vec<usize>]) -> Vec<Vec<usize>> {
+fn fragment_lists(groups: Option<&[Vec<usize>]>, nb: &[Vec<usize>]) -> Vec<Vec<usize>> {
     if let Some(groups) = groups
         && groups.len() >= 2
     {
