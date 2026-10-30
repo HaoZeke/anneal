@@ -1001,6 +1001,12 @@ pub struct Config {
     /// Zero keeps the cluster screen and the full quench.
     #[serde(default, skip_serializing_if = "is_zero_usize")]
     pub internal_relax: usize,
+    /// Gradient infinity norm at which every search relaxation stops, in
+    /// place of `record_gradient`. A full relaxation that stops near the
+    /// incumbent continues to `record_gradient`. `None` keeps one tolerance.
+    /// See [`Config::with_loose_quench`]. Serialized only when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loose_gradient: Option<f64>,
     /// First-phase transform of every relaxation: relax on a compacted
     /// surface first, then on the plain potential from that minimum, judging
     /// the plain energy. `None` relaxes on the plain potential only.
@@ -1418,6 +1424,7 @@ impl Config {
             relax_steps: 200,
             internal_moves: false,
             internal_relax: 0,
+            loose_gradient: None,
             two_phase: None,
             reoccupy: None,
             reoccupy_interval: 5_000,
@@ -1666,6 +1673,26 @@ impl Config {
             }
         }
         self.internal_moves = true;
+        self
+    }
+
+    /// Ratio of [`Config::loose_gradient`] to `record_gradient` under
+    /// [`Config::with_loose_quench`].
+    pub const LOOSE_QUENCH_FACTOR: f64 = 4.0;
+
+    /// Loose search quench, with a tight finish only near the incumbent.
+    ///
+    /// Every search relaxation stops at [`Config::LOOSE_QUENCH_FACTOR`]
+    /// times `record_gradient`. On the molecular preset that is 0.2 eV/Å,
+    /// about xtb's "loose" level, where the preset stops near its "normal"
+    /// one. A full relaxation that stops within a window of the incumbent
+    /// continues to `record_gradient`, charged. The window is open until
+    /// three such finishes have been measured, then twice the largest drop
+    /// any of them made. Records still need the `record_gradient`
+    /// validation, so an unfinished quench can move the chain but cannot
+    /// become the answer.
+    pub fn with_loose_quench(mut self) -> Self {
+        self.loose_gradient = Some(Self::LOOSE_QUENCH_FACTOR * self.record_gradient);
         self
     }
 

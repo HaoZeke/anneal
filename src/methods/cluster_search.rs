@@ -81,6 +81,11 @@ pub struct RelaxStats {
     /// Of `refused`, the relaxations whose first evaluation was refused and
     /// that therefore ended at their start.
     pub refused_starts: usize,
+    /// Loose quenches continued to `record_gradient` under
+    /// [`Config::loose_gradient`].
+    pub refines: usize,
+    /// Of `full_charged`, the evaluations those continuations spent.
+    pub refine_charged: usize,
 }
 
 impl RelaxStats {
@@ -129,6 +134,35 @@ fn gradient_is_converged(gradient: ArrayView1<f64>, threshold: f64) -> bool {
     gradient.iter().all(|value| value.abs() < threshold)
 }
 
+/// Which loose quenches are continued to the record tolerance.
+///
+/// Open until [`RefineWindow::MEASURED`] continuations have been measured,
+/// then twice the largest drop, loose energy minus continued energy, that
+/// any continuation of the run has made. A loose end further above the
+/// incumbent than that cannot become the record by finishing its descent.
+#[derive(Default)]
+struct RefineWindow {
+    measured: usize,
+    largest_drop: f64,
+}
+
+impl RefineWindow {
+    const MEASURED: usize = 3;
+
+    fn width(&self) -> f64 {
+        if self.measured < Self::MEASURED {
+            f64::INFINITY
+        } else {
+            2.0 * self.largest_drop
+        }
+    }
+
+    fn observe(&mut self, drop: f64) {
+        self.measured += 1;
+        self.largest_drop = self.largest_drop.max(drop);
+    }
+}
+
 fn warm_relax<'a, O>(
     objective: &'a O,
     cfg: &'a Config,
@@ -145,6 +179,8 @@ where
     // against 4269 here, and a median of 5726 against 3253. Rigid bodies and
     // species diameters record at that same tolerance.
     opt.gtol = cfg.record_gradient;
+    let search_gtol = cfg.loose_gradient.unwrap_or(cfg.record_gradient);
+    let mut window = cfg.loose_gradient.map(|_| RefineWindow::default());
     // The driver calls the screening pass with `screen_steps` and the full one
     // with `relax_steps`, so the iteration count identifies which is which.
     let screen_iters = cfg.screen_steps;
@@ -154,6 +190,7 @@ where
         .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
     move |led, x, iters| {
         opt.forget();
+        opt.gtol = search_gtol;
         let before = led.spent();
         let screening = iters <= screen_iters;
         // A rigid chart uses this same descent. A line-search-free capped
@@ -288,11 +325,38 @@ where
             stats.capped += 1;
             return (f, xr);
         }
+        let mut f = f;
+        let mut xr = xr;
+        let mut refine_paid = 0;
+        if let Some(window) = window.as_mut()
+            && !screening
+            && f <= led.best + window.width()
+            && led.remaining() > 0
+        {
+            let mark = led.spent();
+            opt.gtol = cfg.record_gradient;
+            let (refined, at, _) = opt.minimize(xr.view(), cfg.relax_steps, |v| {
+                if !led.charge() {
+                    return None;
+                }
+                Some(objective.value_and_gradient(v))
+            });
+            opt.gtol = search_gtol;
+            stats.refused = opt.refused();
+            stats.refused_starts = opt.refused_starts();
+            refine_paid = led.spent() - mark;
+            stats.refines += 1;
+            stats.refine_charged += refine_paid;
+            stats.full_charged += refine_paid;
+            if refined.is_finite() {
+                window.observe(f - refined);
+                f = refined;
+                xr = at;
+            }
+        }
         // Charged like any other evaluation: asking whether a relaxation
         // converged is asking the potential a question, and a protocol that
         // counts evaluations has to count this one.
-        let mut f = f;
-        let mut xr = xr;
         let mut converged = if led.charge() {
             stats.check_charged += 1;
             let g = objective.grad(xr.view());
@@ -323,7 +387,7 @@ where
             } else {
                 false
             };
-            let extra = led.spent() - before - cost;
+            let extra = led.spent() - before - cost - refine_paid;
             if extra > 0 {
                 stats.full_charged += extra;
             }
@@ -1294,6 +1358,65 @@ mod tests {
                 stats.converged
             ),
             (0, 1, 1, 0)
+        );
+    }
+
+    #[test]
+    fn the_refine_window_opens_for_three_then_takes_twice_the_largest_drop() {
+        let mut window = RefineWindow::default();
+        for drop in [0.25, -0.1, 0.5] {
+            assert_eq!(window.width(), f64::INFINITY);
+            window.observe(drop);
+        }
+        assert_eq!(window.width(), 1.0);
+        window.observe(0.1);
+        assert_eq!(window.width(), 1.0);
+    }
+
+    /// Every relaxation stops at the loose tolerance. The first three full
+    /// ones are finished to the record tolerance; once the window has
+    /// closed, one far above the incumbent is not.
+    #[test]
+    fn a_loose_quench_is_finished_only_near_the_incumbent() {
+        use crate::methods::cluster_hopping::random_cluster_in_radius;
+        use eindir_core::Gradient;
+
+        let pot = PairPotential::lennard_jones(7);
+        let cfg = Config::for_cluster(7).with_loose_quench();
+        let loose = cfg.loose_gradient.expect("loose tolerance");
+        assert_eq!(loose, Config::LOOSE_QUENCH_FACTOR * cfg.record_gradient);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(3);
+        let mut stats = RelaxStats::default();
+        let mut ledger = Ledger::new(100_000);
+        let mut ends: Vec<(f64, Array1<f64>)> = Vec::new();
+        {
+            let mut relax = warm_relax(&pot, &cfg, &mut stats, 0);
+            for round in 0..4 {
+                if round == 3 {
+                    let far_below = ends[0].1.clone();
+                    ledger.record(-1.0e3, ArrayView1::from(&far_below));
+                }
+                let start =
+                    random_cluster_in_radius(7, cfg.start_radius(), cfg.min_separation, &mut rng);
+                ends.push(relax(&mut ledger, start.view(), cfg.relax_steps));
+            }
+        }
+        let largest = |x: &Array1<f64>| {
+            pot.grad(x.view())
+                .iter()
+                .fold(0.0_f64, |m, v| m.max(v.abs()))
+        };
+        assert_eq!(stats.refines, 3);
+        assert!(stats.refine_charged > 0);
+        assert!(stats.refine_charged < stats.full_charged);
+        for (_, x) in &ends[..3] {
+            assert!(largest(x) < cfg.record_gradient, "{}", largest(x));
+        }
+        assert!(largest(&ends[3].1) < loose);
+        assert_eq!(
+            stats.charged(),
+            ledger.spent(),
+            "every relaxation and check is charged"
         );
     }
 
