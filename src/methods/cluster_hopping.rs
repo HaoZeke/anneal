@@ -3306,7 +3306,8 @@ where
                 }
             }
         }
-        if ledger.remaining() == 0 {
+        // An adoption above can take the last hop the cap allows.
+        if ledger.remaining() == 0 || !hop_room(hops) {
             break;
         }
         let continuous_symmetry_due = match cfg.continuous_symmetry {
@@ -5157,6 +5158,7 @@ where
         // accepted return is still an accept.
         if cfg.point_symmetrise_on_new
             && accept
+            && hop_room(hops)
             && (moved_basin || cfg.point_symmetrise_every_accept)
             && let Some(y) = crate::symmetrise::symmetrise_core(
                 x.view(),
@@ -5202,6 +5204,7 @@ where
         // symmetrisation above: once per new basin, quenched, offered.
         if cfg.packing_surface().orbit_on_new
             && accept
+            && hop_room(hops)
             && (moved_basin || cfg.point_symmetrise_every_accept)
             && let Some(y) = crate::packing::on_new_basin(
                 x.view(),
@@ -5281,6 +5284,7 @@ where
         // hundred thousand hops, and a fresh random start pays the descent
         // again and lands on the shelf with the same odds.
         if cfg.jump_on_stall
+            && hop_room(hops)
             && cfg.jump_patience > 0
             && quiet >= cfg.jump_patience
             && quiet.is_multiple_of(cfg.jump_patience)
@@ -5374,7 +5378,7 @@ where
             restarts += 1;
             continue;
         }
-        if cfg.symmetrise_on_stall && stuck {
+        if cfg.symmetrise_on_stall && stuck && hop_room(hops) {
             let soap_spec = crate::soap::SoapSpec {
                 rcut_nn: 3.5 * cfg.length_scale,
                 ..Default::default()
@@ -5488,7 +5492,13 @@ where
         // (J. Chem. Phys. 111, 8417 (1999)): a random restart lands
         // back on Mackay. The call plateau above is the directed leave
         // when the climb is on, and it is not a draw among the stall arms.
-        let stall_response = if directed_leave {
+        // Each stall arm can take a hop, and the quench above may have taken
+        // the last one the cap allows. The climb can take up to three, one
+        // per lattice growth and one for its activation quench, so each of
+        // those rechecks.
+        let stall_response = if !hop_room(hops) {
+            None
+        } else if directed_leave {
             stall_arms.iter().position(|arm| *arm == "climb")
         } else if stuck && !stall_arms.is_empty() {
             Some(if stall_arms.len() > 1 {
@@ -5623,6 +5633,7 @@ where
             // above the best would pin the search there. The climb still runs.
             if directed_leave
                 && cfg.budget_window
+                && hop_room(hops)
                 && !crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
             {
                 let best_before_growth = ledger.best;
@@ -5678,6 +5689,7 @@ where
             // does not win leaves the chain's own stream where it was. The
             // quench is kept only when it deepens the incumbent.
             if directed_leave
+                && hop_room(hops)
                 && cfg.packing_cna_applies()
                 && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
             {
@@ -5739,7 +5751,9 @@ where
                     improvements.push((hops, ledger.spent(), bias.n_basins(), ledger.best));
                 }
             }
-            if let Some(g) = grad.as_deref_mut() {
+            if hop_room(hops)
+                && let Some(g) = grad.as_deref_mut()
+            {
                 let scale = if cfg.minima_hopping {
                     feedback.escape()
                 } else {
