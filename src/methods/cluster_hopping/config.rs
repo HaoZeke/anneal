@@ -1007,6 +1007,11 @@ pub struct Config {
     /// See [`Config::with_loose_quench`]. Serialized only when set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loose_gradient: Option<f64>,
+    /// Extra replicas start from copies of the quenched start, with its
+    /// validation gradient, instead of a fresh point cloud.
+    /// See [`Config::with_chain_exchange`]. Serialized only when set.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub chain_exchange: bool,
     /// First-phase transform of every relaxation: relax on a compacted
     /// surface first, then on the plain potential from that minimum, judging
     /// the plain energy. `None` relaxes on the plain potential only.
@@ -1431,6 +1436,7 @@ impl Config {
             internal_moves: false,
             internal_relax: 0,
             loose_gradient: None,
+            chain_exchange: false,
             two_phase: None,
             reoccupy: None,
             reoccupy_interval: 5_000,
@@ -1687,6 +1693,13 @@ impl Config {
     /// [`Config::with_loose_quench`].
     pub const LOOSE_QUENCH_FACTOR: f64 = 4.0;
 
+    /// Declared rigid groups from which [`Config::with_chain_exchange`]
+    /// runs exchanging chains.
+    pub const CHAIN_EXCHANGE_GROUPS: usize = 12;
+
+    /// Chains [`Config::with_chain_exchange`] runs above its gate.
+    pub const EXCHANGE_CHAINS: usize = 4;
+
     /// Loose search quench, with a tight finish only near the incumbent.
     ///
     /// Every search relaxation stops at [`Config::LOOSE_QUENCH_FACTOR`]
@@ -1700,6 +1713,27 @@ impl Config {
     /// become the answer.
     pub fn with_loose_quench(mut self) -> Self {
         self.loose_gradient = Some(Self::LOOSE_QUENCH_FACTOR * self.record_gradient);
+        self
+    }
+
+    /// Exchanging chains on a system of many rigid groups.
+    ///
+    /// The gate counts the rigid groups the molecular library declares, not
+    /// atoms. Below [`Config::CHAIN_EXCHANGE_GROUPS`] nothing changes. From
+    /// there up, [`Config::EXCHANGE_CHAINS`] rungs of the existing ladder
+    /// offer an exchange after every hop, and the extra rungs start from
+    /// uncharged copies of the quenched start, since a random point cloud
+    /// does not keep the molecules intact.
+    pub fn with_chain_exchange(mut self) -> Self {
+        let groups = self
+            .move_library
+            .declared_groups()
+            .map_or(0, |groups| groups.len());
+        if groups >= Self::CHAIN_EXCHANGE_GROUPS {
+            self.replicas = Self::EXCHANGE_CHAINS;
+            self.swap_period = 1;
+            self.chain_exchange = true;
+        }
         self
     }
 
