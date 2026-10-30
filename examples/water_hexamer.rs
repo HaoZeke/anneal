@@ -259,6 +259,23 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
         groups: groups.clone(),
         reactive: false,
     };
+    // The opt-in search arms on top of the board's own arm. Unset, the
+    // board is unchanged.
+    let gap_arm = std::env::var("WATER_GAP_ARM").ok();
+    if let Some(name) = gap_arm.as_deref() {
+        cfg = match name {
+            "preset" => cfg,
+            "loose" => cfg.with_loose_quench(),
+            "chains" => cfg.with_chain_exchange(),
+            "tkick" => cfg.with_torsion_kicks(),
+            "combo" => cfg
+                .with_loose_quench()
+                .with_chain_exchange()
+                .with_torsion_kicks(),
+            other => panic!("unknown WATER_GAP_ARM {other}"),
+        };
+        text.push_str(&format!("gap_arm: {name}\nreplicas: {}\n", cfg.replicas));
+    }
     let references = load_references();
     let reference_views: Vec<(&str, &[f64])> = references
         .iter()
@@ -486,6 +503,12 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             stats.refused,
             outcome.soap_fallbacks
         ));
+        if gap_arm.is_some() {
+            text.push_str(&format!(
+                "refines: {}\nrefine_force_calls: {}\nrejected_trials: {}\n",
+                stats.refines, stats.refine_charged, outcome.rejected_trials
+            ));
+        }
     }
     text
 }
