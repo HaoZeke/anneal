@@ -780,9 +780,16 @@ pub struct Outcome {
     /// Hops whose SOAP proposal was the identity and whose redraws all
     /// drew SOAP again, so the move came uniformly from the other arms.
     pub soap_fallbacks: usize,
-    /// Trials whose quench failed `quench_is_sane`: a non-finite energy or
-    /// an overlapping pair.
+    /// Trials whose quench failed `quench_is_sane`: a non-finite energy,
+    /// an overlapping pair or, under [`Config::keep_bond_graph`], a changed
+    /// covalent graph.
     pub rejected_trials: usize,
+    /// Structures the [`Config::keep_bond_graph`] check turned away, at
+    /// every site that judges a quench, the start's included.
+    pub graph_rejections: usize,
+    /// Whether the start's own quench changed the covalent graph, so the
+    /// chain began on the unquenched start.
+    pub start_graph_rejected: bool,
     /// Distinct basins registered.
     pub basins: usize,
     /// Charged evaluations spent.
@@ -1120,7 +1127,34 @@ fn quench_is_sane(cfg: &Config, energy: f64, x: ArrayView1<f64>) -> bool {
     } else {
         0.0
     };
-    energy.is_finite() && structure_is_sane(x, minimum)
+    energy.is_finite() && structure_is_sane(x, minimum) && keeps_graph(cfg, x)
+}
+
+/// Whether `x` has the covalent graph bound by [`bind_graph_reference`];
+/// true when none is bound.
+fn keeps_graph(cfg: &Config, x: ArrayView1<f64>) -> bool {
+    match (cfg.graph_reference.as_deref(), cfg.species.as_deref()) {
+        (Some(reference), Some(species)) => reference.kept(x, species, cfg.bond_tolerance),
+        _ => true,
+    }
+}
+
+/// `cfg` with the covalent graph of `start` bound as the reference, when it
+/// keeps the graph and none is bound yet. A search that runs nested searches
+/// from derived starts binds once at its own entry, so every nested search
+/// judges against the structure its caller passed.
+pub(crate) fn bind_graph_reference(cfg: &Config, start: ArrayView1<f64>) -> Option<Config> {
+    let species = cfg.species.as_deref()?;
+    if !cfg.keep_bond_graph || cfg.graph_reference.is_some() || start.len() != 3 * species.len() {
+        return None;
+    }
+    let mut bound = cfg.clone();
+    bound.graph_reference = Some(std::sync::Arc::new(organic::GraphReference::of(
+        start,
+        species,
+        cfg.bond_tolerance,
+    )));
+    Some(bound)
 }
 
 fn gradient_is_converged(gradient: ArrayView1<f64>, dimensions: usize, tolerance: f64) -> bool {
@@ -1992,6 +2026,9 @@ where
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
     let _caller_stop = ledger.bind_stop();
+    let bound = bind_graph_reference(cfg, start);
+    let cfg = bound.as_ref().unwrap_or(cfg);
+    let graph_changes_before = cfg.graph_reference.as_ref().map_or(0, |r| r.changes());
     let n = cfg.n_points;
     if cfg.internal_moves {
         organic::reset_search_memory();
@@ -2048,6 +2085,7 @@ where
     let mut e = f64::NAN;
     let mut initial_validation_gradient: Option<Array1<f64>> = None;
     let mut initial_recordable = false;
+    let mut start_graph_rejected = false;
     let gradient_required = grad.is_some();
     for attempt in 0..attempts {
         // `remaining` is also zero when the caller has stopped. That is a
@@ -2074,6 +2112,7 @@ where
             ledger.note_start_redraw(fresh.view());
             x = fresh;
         }
+        let unquenched = x.clone();
         let quenched = relax(ledger, x.view(), cfg.relax_steps);
         e = quenched.0;
         x = quenched.1;
@@ -2088,7 +2127,18 @@ where
             }
             continue;
         }
-        let initial_sane = quench_is_sane(cfg, e, x.view());
+        // A start quench that changed the graph is a rejected step like any
+        // other, so the chain begins on the start geometry. That geometry is
+        // not a minimum and is never recorded.
+        if !keeps_graph(cfg, x.view()) {
+            start_graph_rejected = true;
+            let (start_energy, start_state) = relax(ledger, unquenched.view(), 0);
+            if start_energy.is_finite() {
+                e = start_energy;
+                x = start_state;
+            }
+        }
+        let initial_sane = !start_graph_rejected && quench_is_sane(cfg, e, x.view());
         let nested = initial_sane.then(|| {
             grad.as_deref_mut().and_then(|g| {
                 g(ledger, x.view()).filter(|values| answer_gradient_ok(cfg, values.view(), x.len()))
@@ -6368,6 +6418,11 @@ where
         screened_out,
         soap_fallbacks,
         rejected_trials,
+        graph_rejections: cfg
+            .graph_reference
+            .as_ref()
+            .map_or(0, |r| r.changes() - graph_changes_before),
+        start_graph_rejected,
         basins: n_basins,
         charged: ledger.spent(),
         returned,
@@ -6828,6 +6883,124 @@ mod connectivity_tests {
         reacted[3] = 3.6;
         let g2 = connectivity_groups(reacted.view(), 6, 1.3);
         assert_eq!(g2, vec![vec![0, 2], vec![1, 3, 4, 5]]);
+    }
+}
+
+#[cfg(test)]
+mod graph_invariant_tests {
+    use super::*;
+
+    const SPECIES: [u32; 6] = [8, 1, 1, 8, 1, 1];
+
+    /// A water dimer, and the same dimer after a proton of the first water
+    /// has moved onto the second oxygen.
+    fn dimer() -> (Array1<f64>, Array1<f64>) {
+        let intact = Array1::from(vec![
+            0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0, 2.9, 0.0, 0.0, 3.2, 0.9, 0.0, 3.2,
+            -0.9, 0.0,
+        ]);
+        let mut reacted = intact.clone();
+        reacted[3] = 1.95;
+        (intact, reacted)
+    }
+
+    fn molecular() -> Config {
+        let mut cfg =
+            Config::for_molecular(SPECIES.to_vec(), vec![vec![0, 1, 2], vec![3, 4, 5]], 1.0);
+        cfg.screen_margin = f64::INFINITY;
+        cfg.return_screen = false;
+        cfg
+    }
+
+    #[test]
+    fn a_quench_that_changes_the_graph_is_rejected_and_never_recorded() {
+        let (intact, reacted) = dimer();
+        let run_dimer = |cfg: &Config| {
+            let mut calls = 0usize;
+            let mut relax = |ledger: &mut Ledger, _x: ArrayView1<f64>, _steps: usize| {
+                assert!(ledger.charge());
+                calls += 1;
+                if calls == 1 {
+                    (0.0, intact.clone())
+                } else {
+                    (-5.0, reacted.clone())
+                }
+            };
+            let mut ledger = Ledger::new(64);
+            let mut rng = StdRng::seed_from_u64(5);
+            run(cfg, intact.view(), &mut ledger, &mut relax, &mut rng).expect("finite start")
+        };
+
+        let mut cfg = molecular();
+        cfg.max_hops = Some(3);
+        let kept = run_dimer(&cfg);
+        assert_eq!(kept.best, 0.0);
+        assert_eq!(kept.best_state.as_ref(), Some(&intact));
+        assert!(!kept.start_graph_rejected);
+        assert!(kept.graph_rejections >= 1);
+        assert!(kept.rejected_trials >= 1);
+        assert!(kept.improvements.iter().all(|(_, _, _, e)| *e > -1.0));
+
+        cfg.keep_bond_graph = false;
+        let reacting = run_dimer(&cfg);
+        assert_eq!(
+            reacting.best, -5.0,
+            "without the invariant the product is kept"
+        );
+        assert_eq!(reacting.graph_rejections, 0);
+    }
+
+    #[test]
+    fn a_start_whose_quench_reacts_keeps_the_chain_on_the_start() {
+        let (intact, reacted) = dimer();
+        let cfg = molecular();
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            assert!(ledger.charge());
+            if steps == 0 {
+                (1.0, x.to_owned())
+            } else {
+                (-5.0, reacted.clone())
+            }
+        };
+        // The start quench and its zero-step pricing, and nothing after.
+        let mut ledger = Ledger::new(2);
+        let mut rng = StdRng::seed_from_u64(3);
+        let out =
+            run(&cfg, intact.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
+
+        assert!(out.start_graph_rejected);
+        assert_eq!(out.graph_rejections, 1);
+        assert!(out.best.is_infinite());
+        assert!(out.best_state.is_none());
+        assert_eq!(out.final_energy, 1.0);
+        assert_eq!(out.final_state.as_ref(), Some(&intact));
+        assert_eq!(out.charged, 2);
+    }
+
+    #[test]
+    fn a_search_without_species_or_opted_out_binds_nothing() {
+        let (intact, _) = dimer();
+        let mut lj = Config::for_cluster(6);
+        lj.keep_bond_graph = true;
+        assert!(bind_graph_reference(&lj, intact.view()).is_none());
+        let mut off = molecular();
+        off.keep_bond_graph = false;
+        assert!(bind_graph_reference(&off, intact.view()).is_none());
+
+        let lj_json = Config::for_cluster(6).resolved_json().expect("serializes");
+        assert!(!lj_json.contains("keep_bond_graph"));
+        assert!(!lj_json.contains("graph_reference"));
+        let molecular_json = molecular().resolved_json().expect("serializes");
+        assert!(molecular_json.contains(r#""keep_bond_graph":true"#));
+    }
+
+    #[test]
+    fn a_nested_search_judges_against_the_outer_start() {
+        let (intact, reacted) = dimer();
+        let outer = bind_graph_reference(&molecular(), intact.view()).expect("binds");
+        assert!(bind_graph_reference(&outer, reacted.view()).is_none());
+        assert!(!keeps_graph(&outer, reacted.view()));
+        assert!(keeps_graph(&outer, intact.view()));
     }
 }
 

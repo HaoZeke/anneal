@@ -7,6 +7,8 @@
 //! ranked by distance in the internal coordinates, or by a featomic SOAP
 //! mean when that feature is built.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 
@@ -713,6 +715,46 @@ pub fn propose_torsion_kick<R: Rng + ?Sized>(
     kicked
 }
 
+/// The covalent graph of `x` under the bond-matrix rule: for each atom, the
+/// ascending indices of the atoms it bonds to. Two structures of the same
+/// atoms have the same graph when these lists are equal; no isomorphism is
+/// taken, so a hydrogen that moves to another molecule changes the graph.
+pub(crate) fn bond_graph(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> Vec<Vec<usize>> {
+    neighbors(x, species, tolerance)
+}
+
+/// The covalent graph a graph-keeping search must keep, taken from the
+/// structure the caller started it from, and the quenches that did not.
+#[derive(Debug)]
+pub(crate) struct GraphReference {
+    graph: Vec<Vec<usize>>,
+    changes: AtomicUsize,
+}
+
+impl GraphReference {
+    pub(crate) fn of(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> Self {
+        Self {
+            graph: bond_graph(x, species, tolerance),
+            changes: AtomicUsize::new(0),
+        }
+    }
+
+    /// Whether `x` has the reference graph. A structure that does not is
+    /// counted.
+    pub(crate) fn kept(&self, x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> bool {
+        let kept = bond_graph(x, species, tolerance) == self.graph;
+        if !kept {
+            self.changes.fetch_add(1, Ordering::Relaxed);
+        }
+        kept
+    }
+
+    /// Structures [`GraphReference::kept`] has turned away.
+    pub(crate) fn changes(&self) -> usize {
+        self.changes.load(Ordering::Relaxed)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1061,5 +1103,40 @@ mod tests {
             shift.sqrt() > 0.2,
             "a water dimer crossover was the identity"
         );
+    }
+
+    #[test]
+    fn a_proton_moved_to_the_other_water_changes_the_graph() {
+        let species = [8, 1, 1, 8, 1, 1];
+        let intact = Array1::from(vec![
+            0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0, 2.9, 0.0, 0.0, 3.2, 0.9, 0.0, 3.2,
+            -0.9, 0.0,
+        ]);
+        let reference = GraphReference::of(intact.view(), &species, 1.25);
+        assert_eq!(
+            bond_graph(intact.view(), &species, 1.25),
+            vec![vec![1, 2], vec![0], vec![0], vec![4, 5], vec![3], vec![3]]
+        );
+
+        let mut apart = intact.clone();
+        for i in 9..18 {
+            if i % 3 == 0 {
+                apart[i] += 1.5;
+            }
+        }
+        assert!(reference.kept(apart.view(), &species, 1.25));
+
+        let mut transferred = intact.clone();
+        transferred[3] = 1.95;
+        assert!(!reference.kept(transferred.view(), &species, 1.25));
+
+        // Each water is again intact, but the graph is over atom indices, so
+        // the hydrogens trading molecules is still a change.
+        let mut swapped = intact.clone();
+        for axis in 0..3 {
+            swapped.swap(3 + axis, 12 + axis);
+        }
+        assert!(!reference.kept(swapped.view(), &species, 1.25));
+        assert_eq!(reference.changes(), 2);
     }
 }

@@ -438,6 +438,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     rng: &mut R,
 ) -> ArchiveOutcome {
     let _caller_stop = ledger.bind_stop();
+    let bound = crate::methods::cluster_hopping::bind_graph_reference(cfg, start);
+    let cfg = bound.as_ref().unwrap_or(cfg);
     let cap = ledger.remaining();
     // Molecular / slab budgets are a few thousand evaluations. A 30 %
     // skip-return slice is then too short to be a hop, so they spend the

@@ -182,6 +182,9 @@ fn run_one(
     seed: u64,
     frozen: Option<&[bool]>,
 ) -> Row {
+    // The Lennard-Jones stand-in has no covalent bonds, so the start's
+    // graph is not an invariant of this search.
+    cfg.keep_bond_graph = false;
     let n = start.len() / 3;
     let pot = PairPotential::lennard_jones(n);
     let mut ledger = Ledger::new(budget);

@@ -130,7 +130,10 @@ fn hop_shape_from_shipped_constructors() {
 fn recommended_molecular_search_hops_on_water_dimer() {
     let (start, species, groups) = water_dimer();
     let n = species.len();
-    let cfg = Config::recommended_molecular(species, groups, 1.0);
+    let mut cfg = Config::recommended_molecular(species, groups, 1.0);
+    // The Lennard-Jones stand-in has no covalent bonds, so the start's
+    // graph is not an invariant of this search.
+    cfg.keep_bond_graph = false;
     assert!(!cfg.packing_cna_applies());
     assert!(
         cfg.move_library
@@ -164,6 +167,9 @@ fn recommended_molecular_slab_keeps_frozen_coords() {
     let (start, species, groups) = water_dimer();
     let n = species.len();
     let mut cfg = Config::recommended_molecular(species, groups, 1.0);
+    // The Lennard-Jones stand-in has no covalent bonds, so the start's
+    // graph is not an invariant of this search.
+    cfg.keep_bond_graph = false;
     cfg.active_region = Some((vec![0, 1, 2], 0));
     let frozen: Vec<bool> = (0..n).map(|i| i >= 3).collect();
     cfg.frozen = Some(frozen.clone());

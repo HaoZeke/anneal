@@ -1017,6 +1017,19 @@ pub struct Config {
     /// Serialized only when set.
     #[serde(default, skip_serializing_if = "is_false")]
     pub torsion_kicks: bool,
+    /// Keep the covalent graph of the start: a quench whose bond matrix
+    /// (over [`Config::species`] at [`Config::bond_tolerance`]) differs from
+    /// the start's, pair by pair, is a rejected step and is never recorded.
+    /// When the start's own quench changes it, the chain stays on the start
+    /// geometry, priced by one zero-step relaxation. Set by
+    /// [`Config::for_molecular`]; no effect without species. Serialized only
+    /// when set.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub keep_bond_graph: bool,
+    /// The start's graph under [`Config::keep_bond_graph`], bound when the
+    /// search begins so nested searches judge against the caller's start.
+    #[serde(skip)]
+    pub(crate) graph_reference: Option<std::sync::Arc<super::organic::GraphReference>>,
     /// First-phase transform of every relaxation: relax on a compacted
     /// surface first, then on the plain potential from that minimum, judging
     /// the plain energy. `None` relaxes on the plain potential only.
@@ -1437,6 +1450,8 @@ impl Config {
             loose_gradient: None,
             chain_exchange: false,
             torsion_kicks: false,
+            keep_bond_graph: false,
+            graph_reference: None,
             two_phase: None,
             reoccupy: None,
             reoccupy_interval: 5_000,
@@ -1614,7 +1629,9 @@ impl Config {
         cfg
     }
 
-    /// Species-aware molecular preset with rigid groups.
+    /// Species-aware molecular preset with rigid groups. It keeps the start's
+    /// covalent graph ([`Config::keep_bond_graph`]); a search meant to form or
+    /// break bonds turns that off.
     pub fn for_molecular(species: Vec<u32>, groups: Vec<Vec<usize>>, energy_scale: f64) -> Self {
         assert!(!species.is_empty(), "species must not be empty");
         let length_scale = MolecularPreset::COVALENT_DIAMETER
@@ -1631,6 +1648,7 @@ impl Config {
             reactive: false,
         };
         cfg.species = Some(species);
+        cfg.keep_bond_graph = true;
         cfg
     }
 
