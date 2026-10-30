@@ -811,6 +811,7 @@ where
     let mut hops = 0usize;
     let mut basins = 0usize;
     let mut screened_out = 0usize;
+    let mut soap_fallbacks = 0usize;
     let mut returned = 0usize;
     let mut slices = 0usize;
     let mut null_starts = 0usize;
@@ -1000,6 +1001,7 @@ where
         hops += out.hops;
         basins += out.basins;
         screened_out += out.screened_out;
+        soap_fallbacks += out.soap_fallbacks;
         returned += out.returned;
         slices += 1;
         for (h, c, b, e) in out.improvements {
@@ -1040,6 +1042,7 @@ where
         hops,
         basins,
         screened_out,
+        soap_fallbacks,
         returned,
         charged: ledger.spent(),
         improvements,
