@@ -777,6 +777,9 @@ pub struct Outcome {
     pub hops: usize,
     /// Trials rejected by screening before a full relaxation.
     pub screened_out: usize,
+    /// Hops whose SOAP proposal was the identity and whose redraws all
+    /// drew SOAP again, so the move came uniformly from the other arms.
+    pub soap_fallbacks: usize,
     /// Distinct basins registered.
     pub basins: usize,
     /// Charged evaluations spent.
@@ -2623,6 +2626,7 @@ where
         });
     }
     let mut screened_out = 0usize;
+    let mut soap_fallbacks = 0usize;
     let mut returned = 0usize;
     let mut descent = ScreenDescent::default();
     let mut accepted = 0usize;
@@ -3978,7 +3982,8 @@ where
             }
         };
         // Identity SOAP is not an arm. Thompson must not buy a no-op:
-        // reselect a real kernel, or skip the hop.
+        // reselect a real kernel. A library with no other arm pays one
+        // call for the skipped hop, so the budget still ends the run.
         if !species_escape_trial
             && !cov_fire
             && !soft_fire
@@ -3986,37 +3991,32 @@ where
             && kernels[k].name() == "soap"
             && hop_is_identity(x.view(), trial.view())
         {
-            let mut swapped = false;
-            for _ in 0..kernels.len() {
-                let k2 = match (&context, cfg.allocate_moves) {
+            let n_kernels = kernels.len();
+            let Some((k2, fell_back)) =
+                arm_after_identity(&kernels, rng, |rng| match (&context, cfg.allocate_moves) {
                     (Some(c), _) => contextual.select(c.view(), rng),
                     (None, true) if cfg.depth_reward => depth_allocator.select(rng),
                     (None, true) => allocator.select(rng),
-                    (None, false) => rng.random_range(0..kernels.len()),
-                };
-                if kernels[k2].name() == "soap" {
-                    continue;
+                    (None, false) => rng.random_range(0..n_kernels),
+                })
+            else {
+                if !ledger.charge() {
+                    break;
                 }
-                k = k2;
-                trial = match (&mut constructor, &kernels[k]) {
-                    (Some(c), ClusterMove::Reseed { n_points, .. }) => {
-                        let (cand, f) = c.propose(x.view(), *n_points, rng);
-                        pending_features = Some(f);
-                        cand
-                    }
-                    _ => kernels[k].propose_scaled(
-                        x.view(),
-                        cfg.temperature,
-                        escape * orient_scale,
-                        rng,
-                    ),
-                };
-                swapped = true;
-                break;
-            }
-            if !swapped {
                 continue;
-            }
+            };
+            soap_fallbacks += usize::from(fell_back);
+            k = k2;
+            trial = match (&mut constructor, &kernels[k]) {
+                (Some(c), ClusterMove::Reseed { n_points, .. }) => {
+                    let (cand, f) = c.propose(x.view(), *n_points, rng);
+                    pending_features = Some(f);
+                    cand
+                }
+                _ => {
+                    kernels[k].propose_scaled(x.view(), cfg.temperature, escape * orient_scale, rng)
+                }
+            };
         }
         let proposal_action = if cov_fire {
             "covariance".to_owned()
@@ -6294,6 +6294,7 @@ where
         accepted_transitions,
         hops,
         screened_out,
+        soap_fallbacks,
         basins: n_basins,
         charged: ledger.spent(),
         returned,
@@ -6513,6 +6514,35 @@ pub fn repack_rigid_groups<R: Rng + ?Sized>(
     y
 }
 
+/// The arm for a hop whose SOAP proposal was the identity, and whether it
+/// came from the fallback.
+///
+/// The identity is never charged, so the allocator never learns that SOAP
+/// proposes nothing there and can draw it on every redraw. Skipping the hop
+/// then spent no call, and the chain spun in place: trofinetide seed 4 under
+/// the molecular preset skipped 4096 hops by its 777th call. After one redraw
+/// per arm the arm comes uniformly from the others; `None` means there are
+/// none.
+fn arm_after_identity<R: Rng + ?Sized>(
+    kernels: &[ClusterMove],
+    rng: &mut R,
+    mut select: impl FnMut(&mut R) -> usize,
+) -> Option<(usize, bool)> {
+    for _ in 0..kernels.len() {
+        let k = select(rng);
+        if kernels[k].name() != "soap" {
+            return Some((k, false));
+        }
+    }
+    let others: Vec<usize> = (0..kernels.len())
+        .filter(|&i| kernels[i].name() != "soap")
+        .collect();
+    if others.is_empty() {
+        return None;
+    }
+    Some((others[rng.random_range(0..others.len())], true))
+}
+
 fn hop_is_identity(x: ArrayView1<f64>, y: ArrayView1<f64>) -> bool {
     if x.len() != y.len() || x.is_empty() {
         return false;
@@ -6725,6 +6755,67 @@ mod connectivity_tests {
         reacted[3] = 3.6;
         let g2 = connectivity_groups(reacted.view(), 6, 1.3);
         assert_eq!(g2, vec![vec![0, 2], vec![1, 3, 4, 5]]);
+    }
+}
+
+#[cfg(test)]
+mod identity_redraw_tests {
+    use super::*;
+
+    fn soap() -> ClusterMove {
+        ClusterMove::Soap {
+            rmsd: 0.1,
+            cutoff: 3.0,
+            class: false,
+            species: None,
+            mobile: None,
+            groups: None,
+        }
+    }
+
+    fn library() -> Vec<ClusterMove> {
+        vec![
+            ClusterMove::AllPoints { step: 0.3 },
+            soap(),
+            ClusterMove::SinglePoint {
+                n_points: 4,
+                step: 0.3,
+            },
+        ]
+    }
+
+    #[test]
+    fn a_redraw_that_finds_another_arm_takes_it() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut picks = [1, 1, 2].into_iter();
+        let mut asked = 0;
+        let got = arm_after_identity(&library(), &mut rng, |_| {
+            asked += 1;
+            picks.next().expect("three picks")
+        });
+        assert_eq!(got, Some((2, false)));
+        assert_eq!(asked, 3);
+    }
+
+    #[test]
+    fn an_allocator_stuck_on_soap_still_gets_a_move() {
+        let kernels = library();
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut seen = [0usize; 3];
+        for _ in 0..200 {
+            let (k, fell_back) =
+                arm_after_identity(&kernels, &mut rng, |_| 1).expect("two arms besides soap");
+            assert!(fell_back);
+            seen[k] += 1;
+        }
+        assert_eq!(seen[1], 0);
+        assert!(seen[0] > 50 && seen[2] > 50, "fallback draws {seen:?}");
+    }
+
+    #[test]
+    fn soap_alone_has_no_other_arm() {
+        let mut rng = StdRng::seed_from_u64(7);
+        assert_eq!(arm_after_identity(&[soap()], &mut rng, |_| 0), None);
     }
 }
 
