@@ -1,12 +1,15 @@
 //! GFN2 conformer search on one xyz file.
 //!
-//! Usage: `organic_bench <xyz> <budget> <seed> <preset|baseline|wide|fixed>`
+//! Usage: `organic_bench <xyz> <budget> <seed> <arm>`
 //!
 //! The objective is the xtb binary through `examples/ase_objective.py`
 //! (`ASE_ENGINE=xtb-cli`). `XTB_ACC` selects `--acc`. `preset` is
 //! [`Config::recommended_molecular`] as it stands. `baseline` is the
 //! molecular preset without internal-coordinate moves. `fixed` adds
-//! [`Config::with_bonded_container`].
+//! [`Config::with_bonded_container`]. `loose`, `chains` and `tkick` add
+//! [`Config::with_loose_quench`], [`Config::with_chain_exchange`] and
+//! [`Config::with_torsion_kicks`] to the preset, and `combo` adds all
+//! three. `chains4` is the four exchanging chains without the group gate.
 //!
 //! The xyz comment may be `groups i,j;k,l`. Without it, every atom is
 //! one group.
@@ -23,7 +26,9 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
 
-use anneal_core::methods::cluster_hopping::{Config, Ledger, SoapProposalMode};
+use anneal_core::methods::cluster_hopping::{
+    Config, Ledger, SoapProposalMode, rotatable_bond_count,
+};
 use anneal_core::methods::cluster_search::search_from;
 use eindir_core::Objective;
 use eindir_core::bounds::Bounds;
@@ -162,6 +167,29 @@ fn baseline(species: Vec<u32>, groups: Vec<Vec<usize>>) -> Config {
     cfg
 }
 
+/// The preset and the opt-in arms layered on it.
+fn gap_arm(arm: &str, species: &[u32], groups: &[Vec<usize>]) -> Option<Config> {
+    let cfg = Config::recommended_molecular(species.to_vec(), groups.to_vec(), 1.0);
+    Some(match arm {
+        "preset" => cfg,
+        "loose" => cfg.with_loose_quench(),
+        "chains" => cfg.with_chain_exchange(),
+        "tkick" => cfg.with_torsion_kicks(),
+        "combo" => cfg
+            .with_loose_quench()
+            .with_chain_exchange()
+            .with_torsion_kicks(),
+        "chains4" => {
+            let mut cfg = cfg;
+            cfg.replicas = Config::EXCHANGE_CHAINS;
+            cfg.swap_period = 1;
+            cfg.chain_exchange = true;
+            cfg
+        }
+        _ => return None,
+    })
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let path = args.get(1).map(String::as_str).unwrap_or("mol.xyz");
@@ -189,8 +217,8 @@ fn main() {
             0.0,
         ),
     };
-    let mut cfg = if arm == "preset" {
-        Config::recommended_molecular(species.clone(), groups.clone(), 1.0)
+    let mut cfg = if let Some(cfg) = gap_arm(arm, &species, &groups) {
+        cfg
     } else if arm == "baseline" || arm == "wide" {
         let mut cfg = baseline(species.clone(), groups.clone());
         if arm == "wide" {
@@ -214,6 +242,11 @@ fn main() {
         cfg
     };
     cfg.replicas = cfg.replicas.max(1);
+    let rotors = rotatable_bond_count(
+        start.view(),
+        cfg.species.as_deref().unwrap_or(&[]),
+        cfg.bond_tolerance,
+    );
     println!("arm {arm}");
     println!("seed {seed}");
     println!("budget {budget}");
@@ -261,6 +294,13 @@ fn main() {
     println!("FAILED_CALLS {failed}");
     println!("NONFINITE_REQUESTS {nonfinite}");
     println!("SOAP_FALLBACKS {}", out.soap_fallbacks);
+    println!("REJECTED_TRIALS {}", out.rejected_trials);
+    println!("REFINES {} charged {}", stats.refines, stats.refine_charged);
+    println!("ROTORS {rotors}");
+    println!(
+        "CHAINS {} swaps {} accepted {}",
+        cfg.replicas, out.swaps_tried, out.swaps_accepted
+    );
     println!("WALL {wall:.3}");
     for (name, draws, accepts, reward) in &out.arms {
         println!("ARM {name} draws {draws} accepts {accepts} reward {reward:.4}");
