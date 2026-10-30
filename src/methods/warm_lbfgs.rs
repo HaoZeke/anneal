@@ -114,6 +114,7 @@ pub struct WarmLbfgs {
     /// Line-search evaluations attempted before the direction is abandoned.
     pub max_line_evals: usize,
     refused: usize,
+    refused_starts: usize,
 }
 
 impl Default for WarmLbfgs {
@@ -126,6 +127,7 @@ impl Default for WarmLbfgs {
             curvature: 0.9,
             max_line_evals: 20,
             refused: 0,
+            refused_starts: 0,
         }
     }
 }
@@ -175,6 +177,12 @@ impl WarmLbfgs {
         self.refused
     }
 
+    /// Relaxations this handle ended because their first evaluation was
+    /// refused. Each is also one of [`WarmLbfgs::refused`].
+    pub fn refused_starts(&self) -> usize {
+        self.refused_starts
+    }
+
     /// Relaxes `x0`, calling `fg` for value and gradient.
     ///
     /// `fg` returns `None` when the caller's budget is spent, which ends the
@@ -220,6 +228,7 @@ impl WarmLbfgs {
             self.inner
                 .minimize_recognized(x0, max_iter, |v| guard.eval(v), recognise);
         self.refused += guard.refused;
+        self.refused_starts += usize::from(guard.refused_start);
         (f, x, evals + usize::from(guard.refused_start), recognized)
     }
 
@@ -246,6 +255,7 @@ impl WarmLbfgs {
             .inner
             .minimize_watched(x0, max_iter, |v| guard.eval(v), watch);
         self.refused += guard.refused;
+        self.refused_starts += usize::from(guard.refused_start);
         (f, x, evals + usize::from(guard.refused_start))
     }
 }
@@ -389,6 +399,7 @@ mod tests {
         assert!(f.is_finite() && f < refused_outside(x0.view()).0, "f = {f}");
         assert!(x.iter().all(|c| c.abs() <= 2.0), "ended outside at {x}");
         assert!(opt.refused() > 0 && opt.refused() < evals);
+        assert_eq!(opt.refused_starts(), 0);
     }
 
     #[test]
@@ -400,10 +411,14 @@ mod tests {
             calls += 1;
             Some(refused_outside(v))
         });
-        assert_eq!((calls, evals, opt.refused()), (1, 1, 1));
+        assert_eq!(
+            (calls, evals, opt.refused(), opt.refused_starts()),
+            (1, 1, 1, 1)
+        );
         assert_eq!(f, f64::INFINITY);
         assert_eq!(x, refused);
         let (f, _, _) = opt.minimize(Array1::zeros(4).view(), 200, |v| Some(refused_outside(v)));
         assert!(f.is_finite() && f < 36.0, "the next relaxation gave {f}");
+        assert_eq!(opt.refused_starts(), 1);
     }
 }
