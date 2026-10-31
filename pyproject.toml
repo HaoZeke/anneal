@@ -53,6 +53,13 @@ cutest = [
 features      = ["python"]
 module-name   = "anneal._core"
 python-source = "python"
+# The sdist feature set does not enable the optional nng path crate, so
+# maturin leaves it out while Cargo.toml still points at it. nng itself
+# path-depends on vendor/nng-sys. Both trees have to ship in the sdist.
+include = [
+    { path = "vendor/nng/**/*", format = "sdist" },
+    { path = "vendor/nng-sys/**/*", format = "sdist" },
+]
 
 [tool.pytest.ini_options]
 markers = [
