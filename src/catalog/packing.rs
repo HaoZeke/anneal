@@ -178,6 +178,15 @@ impl PackingBook {
         Some(histogram)
     }
 
+    /// Class histogram against the whole current codebook, never cached.
+    ///
+    /// [`Self::histogram`] can hand back the histogram a structure was
+    /// observed with, before later structures grew the codebook. A map
+    /// of a whole book compares every row against one codebook.
+    pub fn codebook_histogram(&self, coordinates: &[f64]) -> Option<Vec<f64>> {
+        self.assign_histogram(coordinates)
+    }
+
     /// Remembered histogram for a structure that has not moved by
     /// [`PACKING_MOVE_EPS`]. `grown_only` restricts the answer to
     /// entries the growing path built, which is what a caller that is
