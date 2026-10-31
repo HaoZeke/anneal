@@ -998,7 +998,7 @@ pub fn orbit_complete_core(
 }
 
 /// How [`shell_core_group`] finds a core and reads its point group, after
-/// the `SYMMETRY` routine in Wales's GMIN.
+/// the `SYMMETRY` routine in Wales's global minimisation program (GMIN).
 ///
 /// The centre is the centroid weighted by `exp(-decay r)`, iterated until
 /// it moves less than `centre_step`, then moved to the plain centroid of
