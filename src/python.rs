@@ -32,6 +32,7 @@ use crate::history::History;
 use crate::variant::{boltzmann_in_box, fast_in_box, gsa_in_box};
 
 mod device;
+mod landfold;
 mod portfolio_peers;
 
 /// Drop the GIL before native search that may call back into Python.
@@ -3807,6 +3808,7 @@ fn cluster_search(
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", crate::version::ANNEAL_VERSION)?;
     device::register(m)?;
+    landfold::register(m)?;
     m.add_class::<PyBasinBias>()?;
     m.add_class::<PyBoltzmann>()?;
     m.add_class::<PyFast>()?;

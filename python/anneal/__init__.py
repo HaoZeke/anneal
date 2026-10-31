@@ -15,6 +15,8 @@ Search splits on geometry, then on gradient:
   - run(obj_fn, low, high, preset, n_epochs, steps_per_epoch, seed, x0): SA
     loop. Every proposal is reflected into [low, high] and the walk starts
     at x0 when one is given.
+  - landfold(rows, ...), landfold_book(paths, ...): sketch-map embedding of
+    descriptor rows or of minima books. map.project places held-out rows.
   - fit_anneal, fit_chemfit, run_benchmark, run_fitter: gradient-free ChemFit
     bridges. They drive evaluate/step or ask/tell and raise the first
     exception the fitter raises.
@@ -78,6 +80,7 @@ from anneal._core import (
     run_hmc as _core_run_hmc,
     run_qmc as _core_run_qmc,
 )
+from anneal._landfold import LandfoldMap, landfold, landfold_book
 from anneal.device import DeviceHistory, EnsembleHistory, run_device, run_ensemble
 from anneal.tvm_ffi import (
     TvmFfiTensorMetadata,
@@ -1479,6 +1482,7 @@ __all__ = [
     "Fast",
     "Gsa",
     "History",
+    "LandfoldMap",
     "Ledger",
     "PyObjective",
     "Anneal",
@@ -1516,6 +1520,8 @@ __all__ = [
     "bfwt_optimize",
     "global_optimize",
     "global_optimize_objective",
+    "landfold",
+    "landfold_book",
     "ChemFitVector",
     "chemfit_box",
     "fit_anneal",
