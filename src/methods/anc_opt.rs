@@ -20,9 +20,13 @@
 //!    Wilson B-vectors of each internal coordinate, so the Hessian is
 //!    Cartesian and needs no internal-coordinate bookkeeping. The prefactors
 //!    are xtb's retuned 0.40, 0.13 and 0.0075 rather than the paper's 0.45,
-//!    0.15 and 0.005, and the stretch carries xtb's damped C6 pair term with
-//!    the D2 coefficients scaled by 20, which is what keeps a hydrogen-bonded
-//!    or dispersion-bound complex from looking like separate molecules.
+//!    0.15 and 0.005. The stretch of every pair also carries xtb's damped C6
+//!    term, with the D2 coefficients scaled by 20: the Cartesian Hessian of
+//!    the attraction `V = -s6 c6 f(r) / r^6` is subtracted from the block, as
+//!    `ddvopt` subtracts it (`Hxx = gmm x x / r^2 - vdw`). Beyond the damping
+//!    radius that gives a pair the positive radial curvature `-V''`, which is
+//!    what keeps a hydrogen-bonded or dispersion-bound complex from looking
+//!    like separate molecules to the model.
 //!    [`ModelHessian::Swart`] swaps the weight for the Swart--Bickelhaupt
 //!    covalent-radius form `exp(1 - r_ij / (R_i + R_j))`.
 //! 2. Approximate normal coordinates. The model is projected onto the
@@ -806,6 +810,8 @@ fn pair_weight(model: ModelHessian, zi: u32, zj: u32, r2: f64) -> f64 {
 
 /// Radial derivatives `(V'(r), V''(r))` of the damped attraction
 /// `V = -s6 c6 f(r) / r^6`, `f = 1 / (1 + exp(-a (r / R0 - 1)))`.
+///
+/// The model subtracts the Cartesian Hessian built from these.
 fn dispersion_derivatives(c: f64, r0: f64, r: f64) -> (f64, f64) {
     let a = VDW_STEEPNESS / r0;
     let e = (-a * (r - r0)).exp();
@@ -863,7 +869,7 @@ pub fn model_hessian(x: &[f64], z: &[u32], model: ModelHessian) -> Vec<f64> {
     }
     let close = |i: usize, j: usize| r2[i * n + j] <= CUTOFF2;
 
-    // Stretch over every pair, with the damped C6 attraction.
+    // Stretch over every pair, less the Hessian of the damped C6 attraction.
     for i in 0..n {
         for j in 0..i {
             let d = sub(pos(i), pos(j));
@@ -880,7 +886,8 @@ pub fn model_hessian(x: &[f64], z: &[u32], model: ModelHessian) -> Vec<f64> {
             for p in 0..3 {
                 for q in 0..3 {
                     let delta = if p == q { 1.0 } else { 0.0 };
-                    let block = k * u[p] * u[q] + v2 * u[p] * u[q] + v1 / r * (delta - u[p] * u[q]);
+                    let vdw = v2 * u[p] * u[q] + v1 / r * (delta - u[p] * u[q]);
+                    let block = k * u[p] * u[q] - vdw;
                     h[(3 * i + p) * n3 + 3 * i + q] += block;
                     h[(3 * j + p) * n3 + 3 * j + q] += block;
                     h[(3 * i + p) * n3 + 3 * j + q] -= block;
@@ -1544,6 +1551,105 @@ mod tests {
                 (v2 - fd2).abs() < 1e-4 * (1.0 + fd2.abs()),
                 "r={r}: {v2} vs {fd2}"
             );
+        }
+    }
+
+    /// xtb 6.7.1 `getvdwxx` (`src/model_hessian.f90`), transcribed: the
+    /// second derivative along `x` of `-s6 c66 f(r) / r^6`.
+    fn xtb_getvdwxx(rx: f64, ry: f64, rz: f64, c66: f64, s6: f64, r0: f64) -> f64 {
+        let avdw = 20.0;
+        let t1 = s6 * c66;
+        let t2 = rx * rx;
+        let t5 = t2 + ry * ry + rz * rz;
+        let t6 = t5 * t5;
+        let t7 = t6 * t6;
+        let t10 = t5.sqrt();
+        let t11 = 1.0 / r0;
+        let t15 = (-avdw * (t10 * t11 - 1.0)).exp();
+        let t16 = 1.0 + t15;
+        let t17 = 1.0 / t16;
+        let t24 = t16 * t16;
+        let t25 = 1.0 / t24;
+        let t29 = t11 * t15;
+        let t33 = 1.0 / t7;
+        let t44 = avdw * avdw / (r0 * r0);
+        let t45 = t15 * t15;
+        -48.0 * t1 / t7 / t5 * t17 * t2
+            + 13.0 * t1 / t10 / t7 * t25 * t2 * avdw * t29
+            + 6.0 * t1 * t33 * t17
+            - 2.0 * t1 * t33 / t24 / t16 * t44 * t2 * t45
+            - t1 / t10 / t6 / t5 * t25 * avdw * t29
+            + t1 * t33 * t25 * t44 * t2 * t15
+    }
+
+    /// xtb 6.7.1 `getvdwxy`, transcribed: the mixed `x`, `y` derivative.
+    fn xtb_getvdwxy(rx: f64, ry: f64, rz: f64, c66: f64, s6: f64, r0: f64) -> f64 {
+        let avdw = 20.0;
+        let t1 = s6 * c66;
+        let t5 = rx * rx + ry * ry + rz * rz;
+        let t6 = t5 * t5;
+        let t7 = t6 * t6;
+        let t11 = t5.sqrt();
+        let t12 = 1.0 / r0;
+        let t16 = (-avdw * (t11 * t12 - 1.0)).exp();
+        let t17 = 1.0 + t16;
+        let t25 = t17 * t17;
+        let t26 = 1.0 / t25;
+        let t35 = 1.0 / t7;
+        let t43 = avdw * avdw / (r0 * r0);
+        let t44 = t16 * t16;
+        -48.0 * t1 / t7 / t5 / t17 * rx * ry
+            + 13.0 * t1 / t11 / t7 * t26 * rx * avdw * t12 * ry * t16
+            - 2.0 * t1 * t35 / t25 / t17 * t43 * rx * t44 * ry
+            + t1 * t35 * t26 * t43 * rx * ry * t16
+    }
+
+    /// The assembled pair block is `gmm u u^T - vdw`, as `ddvopt` forms it
+    /// (`Hxx = gmm*xkl*xkl/rkl2-vdw(1,1)`), and not `gmm u u^T + vdw`.
+    #[test]
+    fn the_c6_tensor_is_subtracted_from_the_stretch_block_as_in_xtb() {
+        let z = [7u32, 8];
+        let dir = [0.48, -0.36, 0.8];
+        let c66 = (c6(z[0]) * c6(z[1])).sqrt();
+        let rv = (vdw_radius(z[0]) + vdw_radius(z[1])) / BOHR_ANGSTROM;
+        for r in [4.0, 6.0, 8.0, 12.0] {
+            let d = [r * dir[0], r * dir[1], r * dir[2]];
+            let x = [d[0], d[1], d[2], 0.0, 0.0, 0.0];
+            let h = model_hessian(&x, &z, ModelHessian::Lindh);
+            let gmm = K_STRETCH * pair_weight(ModelHessian::Lindh, z[0], z[1], r * r);
+            // vdw(p, q) with the argument order ddvopt passes.
+            let vdw = |p: usize, q: usize| {
+                let (a, b, c) = match (p.min(q), p.max(q)) {
+                    (0, 0) => return xtb_getvdwxx(d[0], d[1], d[2], c66, S6, rv),
+                    (1, 1) => return xtb_getvdwxx(d[1], d[0], d[2], c66, S6, rv),
+                    (2, 2) => return xtb_getvdwxx(d[2], d[0], d[1], c66, S6, rv),
+                    (0, 1) => (d[0], d[1], d[2]),
+                    (0, 2) => (d[0], d[2], d[1]),
+                    _ => (d[1], d[2], d[0]),
+                };
+                xtb_getvdwxy(a, b, c, c66, S6, rv)
+            };
+            let mut radial = 0.0;
+            for p in 0..3 {
+                for q in 0..3 {
+                    let want = gmm * d[p] * d[q] / (r * r) - vdw(p, q);
+                    let got = h[p * 6 + q];
+                    assert!(
+                        (got - want).abs() < 1e-9 * want.abs().max(1e-12),
+                        "r={r} ({p},{q}): {got} against xtb {want}"
+                    );
+                    assert!((h[p * 6 + 3 + q] + want).abs() < 1e-9 * want.abs().max(1e-12));
+                    radial += dir[p] * got * dir[q];
+                }
+            }
+            // Beyond the damping radius the attraction curves down, so its
+            // subtraction stiffens the pair.
+            if r > 1.5 * rv {
+                assert!(
+                    radial > gmm,
+                    "r={r}: radial curvature {radial} not above the bare stretch {gmm}"
+                );
+            }
         }
     }
 
