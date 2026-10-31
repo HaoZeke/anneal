@@ -350,7 +350,6 @@ mod gmin_tip4p;
 mod gupta;
 mod sutton_chen;
 mod tip4p;
-pub use sutton_chen::{SuttonChen, SuttonChenFamily};
 pub use binary_lj::BinaryLennardJones;
 pub use gmin_tip4p::{
     C6 as GMIN_TIP4P_C6, C12 as GMIN_TIP4P_C12, COULOMB as GMIN_TIP4P_COULOMB, GminAngleAxisFile,
@@ -359,6 +358,7 @@ pub use gmin_tip4p::{
     rigid_from_ohh,
 };
 pub use gupta::{COPPER_Z, GOLD_Z, Gupta};
+pub use sutton_chen::{SuttonChen, SuttonChenFamily};
 // The rigid orientation move composes through this name. The helper
 // stays on the chart so that move and the potential share one Rodrigues
 // product. A target that does not include the move still has to compile.
