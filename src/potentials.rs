@@ -162,6 +162,30 @@ impl PairPotential {
         Self::new(n_points, kind, Self::extent_for(n_points, kind))
     }
 
+    /// Morse global minima from the Cambridge Cluster Database, in units of
+    /// the pair well depth.
+    ///
+    /// The bold entries of Doye and Wales' table
+    /// (`jon/structures/Morse/tables.html`). The global minimum changes
+    /// structure along a row: for 55 atoms it is 55A at `rho = 3`, the Mackay
+    /// icosahedron 55B at 6 and 10, and 55C at 14, where 55D lies 0.1277
+    /// above it. `rho` is matched to the nearest half.
+    pub fn ccd_morse_minimum(n_points: usize, rho: f64) -> Option<f64> {
+        Some(match ((rho * 2.0).round() as i64, n_points) {
+            (6, 55) => -417.918562,
+            (12, 38) => -157.477108,
+            (12, 55) => -250.286609,
+            (12, 75) => -351.472365,
+            (20, 38) => -145.849817,
+            (20, 55) => -225.814286,
+            (20, 75) => -322.643558,
+            (28, 38) => -144.321054,
+            (28, 55) => -220.646208,
+            (28, 75) => -318.407330,
+            _ => return None,
+        })
+    }
+
     /// A domain that comfortably holds a compact cluster of this size.
     ///
     /// A close-packed cluster of `n` points has a radius of order
@@ -253,9 +277,11 @@ pub use gmin_tip4p::{
 #[cfg_attr(not(test), allow(unused_imports))]
 pub(crate) use tip4p::compose_rotation;
 pub use tip4p::{
-    COULOMB, EPSILON, HOH_DEG, Q_H, Q_M, R_OH, R_OM, SIGMA, Tip4pCluster, fold_rotation_vectors,
-    jorgensen_dimer, random_cluster as random_tip4p_cluster, wales_hodges_minimum,
+    COULOMB, EPSILON, HOH_DEG, Q_H, Q_M, R_OH, R_OM, SIGMA, Tip4pCluster, ccd_tip4p_minimum,
+    fold_rotation_vectors, jorgensen_dimer, random_cluster as random_tip4p_cluster,
+    wales_hodges_minimum,
 };
+pub(crate) use tip4p::{mat_vec, rotation_matrix, rotation_vector};
 
 impl crate::pes_exploration::PesSurface for PairPotential {
     type Error = std::convert::Infallible;
@@ -268,6 +294,36 @@ impl crate::pes_exploration::PesSurface for PairPotential {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The database's 55-atom Morse structures relax to its table energies,
+    /// each at the range where it is the global minimum.
+    #[test]
+    fn database_morse_minima_reproduce_the_table() {
+        let relax = |text: &str, rho: f64| {
+            let x: Array1<f64> = text
+                .lines()
+                .skip(1)
+                .flat_map(str::split_whitespace)
+                .map(|t| t.parse::<f64>().expect("coordinate"))
+                .collect();
+            assert_eq!(x.len(), 165);
+            let p = PairPotential::morse(55, rho);
+            let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+            opt.gtol = 1e-9;
+            opt.minimize(x.view(), 20_000, |y| Some(p.value_and_gradient(y)))
+                .0
+        };
+        let a = include_str!("../tests/fixtures/morse-55A.txt");
+        let b = include_str!("../tests/fixtures/morse-55B.txt");
+        let c = include_str!("../tests/fixtures/morse-55C.txt");
+        for (text, rho) in [(a, 3.0), (b, 6.0), (b, 10.0), (c, 14.0)] {
+            let e = relax(text, rho);
+            let want = PairPotential::ccd_morse_minimum(55, rho).expect("table row");
+            assert!((e - want).abs() < 1e-6, "rho {rho}: {e} against {want}");
+        }
+        let d = relax(include_str!("../tests/fixtures/morse-55D.txt"), 14.0);
+        assert!((d + 220.518533).abs() < 1e-6, "55D at rho 14 is {d}");
+    }
 
     /// Two points at the pair minimum: energy is minus the well depth and the
     /// force vanishes. Fixes depth, position and the sign of the derivative

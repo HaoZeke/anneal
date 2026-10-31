@@ -26,5 +26,6 @@ fn the_registry_lists_the_paper_seed_ranges() {
     assert_eq!(range("r9-pt111-heptamer"), (4000, 4047));
     assert_eq!(range("r10-soap"), (5000, 5063));
     assert_eq!(range("r6-water-hexamer"), (0, 31));
-    assert_eq!(runs.len(), 9);
+    assert_eq!(range("ccd-morse55-tip4p"), (9200, 9231));
+    assert_eq!(runs.len(), 10);
 }
