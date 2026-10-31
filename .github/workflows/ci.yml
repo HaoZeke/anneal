@@ -141,7 +141,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, macos-15]
+        # macos-14 jobs are cancelled in about a second by the runner-image
+        # brownout. The image is retired on 2026-11-02; macos-26 replaces it.
+        os: [ubuntu-latest, macos-15, macos-26]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
