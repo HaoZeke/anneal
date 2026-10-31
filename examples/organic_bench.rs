@@ -10,6 +10,8 @@
 //! [`Config::with_loose_quench`], [`Config::with_chain_exchange`] and
 //! [`Config::with_torsion_kicks`] to the preset, and `combo` adds all
 //! three. `chains4` is the four exchanging chains without the group gate.
+//! `polish` runs only the preset's final polish on the xyz structure, with
+//! the whole budget.
 //!
 //! The xyz comment may be `groups i,j;k,l`. Without it, every atom is
 //! one group.
@@ -27,7 +29,7 @@ use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
 
 use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, SoapProposalMode, rotatable_bond_count,
+    Config, Ledger, SoapProposalMode, polish_structure, rotatable_bond_count,
 };
 use anneal_core::methods::cluster_search::search_from;
 use eindir_core::Objective;
@@ -217,6 +219,10 @@ fn main() {
             0.0,
         ),
     };
+    if arm == "polish" {
+        polish_only(&obj, path, species, groups, &start, budget, seed);
+        return;
+    }
     let mut cfg = if let Some(cfg) = gap_arm(arm, &species, &groups) {
         cfg
     } else if arm == "baseline" || arm == "wide" {
@@ -256,6 +262,7 @@ fn main() {
     println!("internal_relax {}", cfg.internal_relax);
     println!("replicas {}", cfg.replicas);
     println!("keep_bond_graph {}", cfg.keep_bond_graph);
+    println!("record_polish {}", cfg.record_polish);
     let mut ledger = Ledger::new(budget);
     let started = std::time::Instant::now();
     let (out, stats) = search_from(&obj, &cfg, &mut ledger, start.view(), seed)
@@ -271,13 +278,13 @@ fn main() {
     };
     println!("FINAL {:.8}", out.final_energy);
     if let Some(state) = &out.final_state {
-        let gradient = obj.grad(state.view());
-        let gmax = if gradient.iter().all(|v| v.is_finite()) {
-            gradient.iter().fold(0.0_f64, |acc, v| acc.max(v.abs()))
-        } else {
-            f64::NAN
-        };
-        println!("GMAX {gmax:.6}");
+        println!("GMAX {:.6}", largest_component(&obj.grad(state.view())));
+    }
+    if let Some(state) = &out.best_state {
+        println!(
+            "BEST_GMAX {:.6}",
+            largest_component(&obj.grad(state.view()))
+        );
     }
     println!("BEST {:.8}", out.best);
     println!("CHARGED {}", out.charged);
@@ -301,6 +308,30 @@ fn main() {
         out.graph_rejections, out.start_graph_rejected
     );
     println!("REFINES {} charged {}", stats.refines, stats.refine_charged);
+    match &out.polish {
+        Some(polish) => {
+            println!(
+                "POLISH reserve {} search_charged {} calls {} records {} unspent {}",
+                polish.reserve,
+                polish.search_charged,
+                polish.calls,
+                polish.records.len(),
+                budget.saturating_sub(out.charged)
+            );
+            for (k, record) in polish.records.iter().enumerate() {
+                println!(
+                    "POLISH_RECORD {k} from {:.8} to {:.8} calls {} converged {} gnorm {:.6} recorded {}",
+                    record.from,
+                    record.to,
+                    record.calls,
+                    record.converged,
+                    record.gradient_norm,
+                    record.recorded
+                );
+            }
+        }
+        None => println!("POLISH none"),
+    }
     println!("ROTORS {rotors}");
     println!(
         "CHAINS {} swaps {} accepted {}",
@@ -314,20 +345,78 @@ fn main() {
         println!("IMPROVE {charged} {energy:.8}");
     }
     if let Some(state) = &out.best_state {
-        let xyz = format!("best_{arm}_s{seed}.xyz");
-        let mut body = format!("{n}\nbest {:.8} eV\n", out.best);
-        let symbols = load_symbols(path);
-        for i in 0..n {
-            body.push_str(&format!(
-                "{} {:.8} {:.8} {:.8}\n",
-                symbols[i],
-                state[3 * i],
-                state[3 * i + 1],
-                state[3 * i + 2]
-            ));
+        write_best(path, &format!("best_{arm}_s{seed}.xyz"), out.best, state);
+    }
+}
+
+fn write_best(path: &str, xyz: &str, energy: f64, state: &Array1<f64>) {
+    let symbols = load_symbols(path);
+    let n = symbols.len();
+    let mut body = format!("{n}\nbest {energy:.8} eV\n");
+    for i in 0..n {
+        body.push_str(&format!(
+            "{} {:.8} {:.8} {:.8}\n",
+            symbols[i],
+            state[3 * i],
+            state[3 * i + 1],
+            state[3 * i + 2]
+        ));
+    }
+    std::fs::write(xyz, body).expect("write best xyz");
+    println!("WROTE {xyz}");
+}
+
+/// Largest absolute component, NaN when any is not finite.
+fn largest_component(gradient: &Array1<f64>) -> f64 {
+    if gradient.iter().all(|v| v.is_finite()) {
+        gradient.iter().fold(0.0_f64, |acc, v| acc.max(v.abs()))
+    } else {
+        f64::NAN
+    }
+}
+
+/// The `polish` arm: the final polish alone on the xyz structure, with the
+/// whole budget, under the preset.
+fn polish_only(
+    obj: &XtbObjective,
+    path: &str,
+    species: Vec<u32>,
+    groups: Vec<Vec<usize>>,
+    start: &Array1<f64>,
+    budget: usize,
+    seed: u64,
+) {
+    let cfg = Config::recommended_molecular(species, groups, 1.0);
+    println!("arm polish");
+    println!("seed {seed}");
+    println!("budget {budget}");
+    println!("keep_bond_graph {}", cfg.keep_bond_graph);
+    let mut ledger = Ledger::new(budget);
+    let mut energy_grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+        if !led.charge() {
+            return None;
         }
-        std::fs::write(&xyz, body).expect("write best xyz");
-        println!("WROTE {xyz}");
+        Some(obj.value_and_gradient(x))
+    };
+    let started = std::time::Instant::now();
+    let (record, best) = polish_structure(&cfg, &mut ledger, &mut energy_grad, start.view())
+        .expect("the preset has species");
+    let wall = started.elapsed().as_secs_f64();
+    let calls = obj.engine.lock().expect("xtb pipe").calls;
+    println!(
+        "POLISH_SMOKE from {:.8} to {:.8} calls {} converged {} gnorm {:.6}",
+        record.from, record.to, record.calls, record.converged, record.gradient_norm
+    );
+    println!("CHARGED {}", ledger.spent());
+    println!("ENGINE_CALLS {calls}");
+    println!("WALL {wall:.3}");
+    if let Some((energy, state)) = best {
+        println!("BEST {energy:.8}");
+        println!(
+            "BEST_GMAX {:.6}",
+            largest_component(&obj.grad(state.view()))
+        );
+        write_best(path, &format!("best_polish_s{seed}.xyz"), energy, &state);
     }
 }
 

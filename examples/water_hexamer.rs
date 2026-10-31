@@ -838,6 +838,18 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                 "keep_bond_graph: {}\ngraph_rejections: {}\nstart_graph_rejected: {}\n",
                 cfg.keep_bond_graph, outcome.graph_rejections, outcome.start_graph_rejected
             ));
+            match &outcome.polish {
+                Some(polish) => text.push_str(&format!(
+                    "polish_reserve: {}\npolish_search_force_calls: {}\npolish_force_calls: {}\npolish_records: {}\npolish_converged: {}\npolish_recorded: {}\n",
+                    polish.reserve,
+                    polish.search_charged,
+                    polish.calls,
+                    polish.records.len(),
+                    polish.records.iter().filter(|r| r.converged).count(),
+                    polish.records.iter().filter(|r| r.recorded).count()
+                )),
+                None => text.push_str("polish_reserve: none\n"),
+            }
         }
         if let Ok(dir) = std::env::var("WATER_GEOMETRY_DIR") {
             let dir = std::path::Path::new(&dir);
