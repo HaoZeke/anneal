@@ -43,7 +43,8 @@ use anneal_core::catalog::molecular::{
     reference_coordinates, sorted_oxygen_distances, water_groups, water_species,
 };
 use anneal_core::methods::cluster_hopping::{
-    CheckpointAction, Config, Ledger, MoveLibrary, QuenchStatus, repack_rigid_groups,
+    CheckpointAction, Config, Ledger, MoveLibrary, QuenchStatus, StartSeparation,
+    repack_rigid_groups, separate_start,
 };
 use anneal_core::methods::cluster_search::{search_from, search_from_with_checkpoint};
 use eindir_core::gradient::{DifferentiableObjective, Gradient};
@@ -850,10 +851,31 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                 )),
                 None => text.push_str("polish_reserve: none\n"),
             }
+            text.push_str(&match outcome.start_separation {
+                Some(StartSeparation::Separated { steps, factor }) => {
+                    format!("start_separation: k {steps} s {factor:.6}\n")
+                }
+                Some(StartSeparation::Unresolved) => "start_separation: unresolved\n".to_owned(),
+                None => "start_separation: none\n".to_owned(),
+            });
+            text.push_str(&format!(
+                "first_record_force_calls: {}\n",
+                outcome.improvements.first().map_or_else(
+                    || "none".to_owned(),
+                    |(_, charged, _, _)| charged.to_string()
+                )
+            ));
         }
         if let Ok(dir) = std::env::var("WATER_GEOMETRY_DIR") {
             let dir = std::path::Path::new(&dir);
             write_water_xyz(&dir.join(format!("start_s{seed}.xyz")), &start, "start");
+            if let Some((separation, Some(separated))) = separate_start(&cfg, start.view()) {
+                write_water_xyz(
+                    &dir.join(format!("separated_s{seed}.xyz")),
+                    &separated,
+                    &format!("separated {separation:?}"),
+                );
+            }
             if let Some(state) = &outcome.best_state {
                 write_water_xyz(
                     &dir.join(format!("best_s{seed}.xyz")),

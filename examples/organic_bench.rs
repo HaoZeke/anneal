@@ -29,7 +29,7 @@ use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
 
 use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, SoapProposalMode, polish_structure, rotatable_bond_count,
+    Config, Ledger, SoapProposalMode, StartSeparation, polish_structure, rotatable_bond_count,
 };
 use anneal_core::methods::cluster_search::search_from;
 use eindir_core::Objective;
@@ -263,6 +263,7 @@ fn main() {
     println!("replicas {}", cfg.replicas);
     println!("keep_bond_graph {}", cfg.keep_bond_graph);
     println!("record_polish {}", cfg.record_polish);
+    println!("separate_start_molecules {}", cfg.separate_start_molecules);
     let mut ledger = Ledger::new(budget);
     let started = std::time::Instant::now();
     let (out, stats) = search_from(&obj, &cfg, &mut ledger, start.view(), seed)
@@ -307,6 +308,7 @@ fn main() {
         "GRAPH_REJECTIONS {} start {}",
         out.graph_rejections, out.start_graph_rejected
     );
+    println!("START_SEPARATION {}", separation_text(out.start_separation));
     println!("REFINES {} charged {}", stats.refines, stats.refine_charged);
     match &out.polish {
         Some(polish) => {
@@ -364,6 +366,14 @@ fn write_best(path: &str, xyz: &str, energy: f64, state: &Array1<f64>) {
     }
     std::fs::write(xyz, body).expect("write best xyz");
     println!("WROTE {xyz}");
+}
+
+fn separation_text(separation: Option<StartSeparation>) -> String {
+    match separation {
+        Some(StartSeparation::Separated { steps, factor }) => format!("k {steps} s {factor:.6}"),
+        Some(StartSeparation::Unresolved) => "unresolved".to_owned(),
+        None => "none".to_owned(),
+    }
 }
 
 /// Largest absolute component, NaN when any is not finite.
