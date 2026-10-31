@@ -1,0 +1,392 @@
+#+TITLE: Landscape embeddings for minima books
+#+STARTUP: content
+
+This note surveys methods that place the minima of a global-optimisation
+run on a plane. It picks one for =anneal landfold= and records why. The
+benchmark numbers at the end come from the asv suite of the anneal_repro
+workflow.
+
+* The object to map
+
+A minima book is the list of distinct local minima that a search found.
+Each entry has an energy and 3N coordinates. anneal reads =.min= dumps,
+one minimum per line, and multi-frame =.xyz= files.
+
+Each minimum becomes a DECAF row: the fraction of its atoms in each
+packing class of one shared codebook. The codebook comes from anneal's own
+SOAP power spectrum, so the rows are histograms. Two minima are compared
+by the L1 distance of their rows. That distance is not Euclidean, and many
+minima share a row exactly.
+
+The map has to do three things for a figure of an energy landscape.
+
+1. Keep funnels and structural families apart. LJ38 has an fcc funnel and
+   an icosahedral funnel [[doye1999b]]. LJ75 and LJ98 have decahedral and
+   tetrahedral global minima far from the icosahedral bulk
+   [[doye1999a]] [[leary1999]].
+2. Keep near neighbours together inside a funnel, so that colour by energy
+   shows a gradient and not noise.
+3. Accept minima found later without moving the old ones. A book grows as
+   the search runs, and a figure series should not reshuffle.
+
+Practical requirements follow from the use. The input is a distance, not
+a Euclidean frame. A seed must fix the map bit for bit, at any thread
+count. A book of ten thousand minima must fold in seconds, so the cost has
+to grow like n m for m landmarks, not like n squared.
+
+The previous paper figures used scikit-learn metric MDS on a switched L1
+matrix, 1 - 1/(1 + (d/sigma)^2) with sigma the median distance. This note
+calls that the Ceriotti kernel pipeline, after the sigmoid of sketch-map.
+It is dense in n and has no out-of-sample step.
+
+* Methods
+
+** Classical and metric MDS
+
+Classical MDS double-centres the squared distances and keeps the top two
+eigenvectors [[torgerson1952]]. It is deterministic up to sign and costs
+one dense eigensolve. Metric and non-metric MDS minimise a stress instead
+[[kruskal1964]]. SMACOF is the usual solver [[borg2005]].
+
+All of them weight every pair alike. Distances between funnels are large
+and uninformative beyond "far", yet they dominate the stress. The map then
+spends its area on the gaps and crushes each funnel. Classical MDS remains
+the best start for anything that follows, because it is unique and cheap
+on a few hundred landmarks.
+
+** Landmark MDS and Nystrom extensions
+
+Landmark MDS embeds m landmarks by classical MDS and places every other
+point by a linear triangulation from its landmark distances
+[[desilva2003]]. Platt showed that it is a Nystrom method [[platt2005]].
+Bengio and co-workers gave the matching out-of-sample formula for the
+spectral family [[bengio2004]]. The cost is O(n m). The weakness is the
+same uniform pair weighting as classical MDS.
+
+** Isomap, kernel PCA and Laplacian eigenmaps
+
+Isomap runs classical MDS on graph geodesics over a k-nearest-neighbour
+graph [[tenenbaum2000]]. Kernel PCA diagonalises a kernel matrix
+[[scholkopf1998]], and Laplacian eigenmaps use the graph Laplacian
+[[belkin2003]].
+
+A minima book is not a sampled manifold. It is a set of clusters, often
+disconnected at small k. Isomap then fails on disconnected graphs or joins
+funnels through one short edge. Duplicate DECAF rows make the
+neighbour graph degenerate.
+
+** t-SNE
+
+t-SNE matches neighbour probabilities with a heavy-tailed kernel on the
+plane [[vandermaaten2008]]. Barnes-Hut [[vandermaaten2014]] and FFT
+interpolation [[linderman2019]] bring the cost near O(n log n). openTSNE
+implements both and can add points to a fixed map [[policar2024]].
+
+t-SNE keeps neighbourhoods very well. It does not keep the distance
+between clusters, so the gap between two funnels on the plot means
+nothing. Results depend on initialisation and perplexity
+[[kobak2019]].
+
+** UMAP
+
+UMAP builds a fuzzy neighbour graph and lays it out with attraction and
+repulsion [[mcinnes2018a]] [[mcinnes2018b]]. It is fast and keeps more of
+the global layout than t-SNE. Its layout step is stochastic and only fixed
+by a seed in single-threaded mode. Between-cluster distances again carry
+little meaning.
+
+** PHATE
+
+PHATE diffuses on a neighbour graph and embeds potential distances by MDS
+[[moon2019]]. It is built for continuous trajectories, such as cells along
+a lineage. On a book of separate funnels its diffusion has little to
+follow. With a precomputed distance, as here, the cost is dense.
+
+** Sketch-map
+
+Sketch-map passes both the high-dimensional distance D and the map
+distance d through sigmoids, s_D and s_d, and minimises the weighted
+squared difference [[ceriotti2011]]. Pairs much closer than sigma all read
+as zero. Pairs much farther all read as one. Only the middle range shapes
+the map.
+
+For an energy landscape this is the right bias. Small differences
+between near-identical minima fall below sigma and are ignored. The gap between funnels saturates,
+so funnels separate without consuming the plot. The original method uses
+farthest-point landmarks, iterative metric MDS as a start, a global grid
+search per point, and a per-point fit for out-of-sample placement
+[[ceriotti2013]]. It was later used to bias simulations in sketch-map
+coordinates [[tribello2012]].
+
+Sketch-map and its variants are the common choice for structure maps in
+materials chemistry [[de2016]] [[cheng2020]]. These maps usually rest on
+SOAP [[bartok2013]], and DECAF rows are built on SOAP too. The reference
+code [[sketchmapcode]] is serial C++ with conjugate gradients.
+
+** Embeddings built for structure search
+
+SHEAP embeds AIRSS structure-search results with a t-SNE or UMAP cost and
+hard-sphere repulsion between points [[shires2021]]. It shares the
+problems of those costs for funnel distances. EncoderMap trains an
+autoencoder with a sketch-map loss [[lemke2019]]. A network adds training
+cost and run-to-run variance for no gain on books of this size.
+
+** Disconnectivity graphs and metric layouts
+
+Disconnectivity graphs plot minima by energy and join them where the
+lowest connecting saddle allows [[becker1997]] [[wales1998]]
+[[wales2003]]. Free energy variants exist [[krivov2002]]. Metric
+disconnectivity graphs put an order parameter on the horizontal axis
+[[smeeton2014]].
+
+All of these need the saddle network. A minima book from basin hopping
+[[wales1997]] has no saddles. A layout that uses them is the right next
+step once anneal records saddles. It cannot be built from a book alone.
+
+* Comparison
+
+| Method               | funnels apart | local order | out-of-sample      | deterministic | cost     |
+|----------------------+---------------+-------------+--------------------+---------------+----------|
+| classical MDS        | crushed       | weak        | Nystrom            | yes           | n^2      |
+| landmark MDS         | crushed       | weak        | yes                | yes           | n m      |
+| Isomap               | graph cuts    | good        | Nystrom            | yes           | n^2      |
+| t-SNE, openTSNE      | gaps arbitrary | best       | openTSNE only      | seeded        | n log n  |
+| UMAP                 | gaps arbitrary | good       | approximate        | single thread | n log n  |
+| PHATE                | weak          | fair        | limited            | seeded        | n^2      |
+| sketch-map           | yes           | good        | per-point fit      | yes           | n m      |
+| disconnectivity graph | yes          | none        | needs saddles      | yes           | needs saddles |
+
+* Choice
+
+Landmark sketch-map is the best fit for minima books. The sigmoid gives
+the two scales a landscape figure needs. Landmarks bring the cost to
+O(n m). The per-point fit places new minima without moving the old ones.
+Every step can run deterministically in parallel.
+
+=anneal landfold= implements it as follows.
+
+1. Farthest-point landmarks [[gonzalez1985]] from a seeded first index.
+   Each landmark is weighted by its Voronoi population to the power 0.5.
+2. Classical MDS on the landmark distances. A block subspace iteration
+   with Rayleigh-Ritz gives lambda1 and lambda2 of the double-centred Gram
+   matrix.
+3. The mixed stress of the reference code over landmark pairs. Stages step
+   the weight of the raw distance term from 1 to 0. Each stage with a
+   sigmoid term sweeps every landmark over a 21 by 21 grid. L-BFGS then
+   relaxes all of them.
+4. Each other minimum is placed by L-BFGS on its own stress against the
+   fixed landmarks. It starts from the best of its nearest landmarks and
+   their weighted centroid.
+
+Defaults are 400 landmarks, sigma half the median landmark distance, and
+switch exponents (2, 4) on both sides. These were chosen on the LJ books
+below, so they may favour them. Parallel loops write disjoint slots and
+reduce in index order. A seed therefore fixes the map at any thread
+count.
+
+anneal already had =methods::sketchmap::SketchMap2d= for collective
+variables in a Euclidean frame. =landfold= is the book pipeline: L1 on
+DECAF rows, the mixed stress, the grid, the weights, and a stable CLI and
+Python API.
+
+* Benchmark
+
+Books are not taken from the paper data, which was not reachable. They are
+LJ38, LJ75 and LJ98 books of 2000 distinct minima each, written by the
+anneal example =landfold_lj_book=. Every method maps one set of DECAF rows
+with the L1 distance.
+
+Trustworthiness T and continuity C are those of Venna and Kaski at ten
+neighbours [[venna2001]] [[venna2006]]. Kruskal is stress-1 on the raw
+distances at the best map scale. Sketch-map stress is the mean squared
+switch residual over all pairs, with the landfold switch, at the best map
+scale. Runtimes are asv medians of three runs on one machine with eight
+cores. Each timing starts from the descriptor rows and includes any
+distance matrix the method needs.
+
+Settings are in =landfold/embed.py= of the anneal_repro workflow, with
+seed 0 throughout. The versions are scikit-learn 1.9.1, openTSNE 1.0.4,
+umap-learn 0.5.12 and PHATE 2.0.0. MDS starts from a random layout with
+one init, Isomap uses ten neighbours, and t-SNE uses perplexity 30.
+
+Thread use differs between methods. landfold, openTSNE and PHATE are
+given all eight cores. UMAP runs on one thread, because a fixed seed
+forces it. The scikit-learn methods keep their defaults, which thread
+only inside BLAS and OpenMP kernels. The reference code is serial.
+anneal_landfold_serial is landfold on one thread, with a map equal to
+the parallel one bit for bit. anneal_landfold_book times the whole path
+from the book file: reading, DECAF rows and the fold.
+
+The reference sketch-map run takes the landfold landmarks, sigma and
+switch exponents. Its landmark weights are Voronoi populations at power
+1, as =dimlandmark -w= writes them. It follows the stages of its own
+=sketch-map.sh= script.
+
+| book | method | T | C | Kruskal | sketch-map | runtime (s) |
+|------+--------+---+---+---------+------------+-------------|
+| lj38 | anneal_landfold | 0.9036 | 0.9422 | 0.2717 | 0.02489 | 0.69 |
+| lj38 | anneal_landfold_serial | 0.9036 | 0.9422 | 0.2717 | 0.02489 | 3.70 |
+| lj38 | anneal_landfold_book |  |  |  |  | 1.11 |
+| lj38 | reference_sketchmap | 0.8911 | 0.9394 | 0.2656 | 0.02415 | 87.76 |
+| lj38 | sklearn_mds_switch | 0.8588 | 0.9371 | 0.2436 | 0.02574 | 10.59 |
+| lj38 | sklearn_mds | 0.8594 | 0.9425 | 0.2318 | 0.02514 | 10.30 |
+| lj38 | sklearn_isomap | 0.8477 | 0.9488 | 0.2853 | 0.03246 | 0.72 |
+| lj38 | sklearn_tsne | 0.9676 | 0.9340 | 0.3076 | 0.03539 | 2.11 |
+| lj38 | opentsne | 0.9620 | 0.9304 | 0.3112 | 0.03567 | 12.46 |
+| lj38 | umap | 0.9195 | 0.9432 | 0.2981 | 0.03555 | 4.06 |
+| lj38 | phate | 0.8631 | 0.9467 | 0.4374 | 0.03951 | 3.48 |
+| lj75 | anneal_landfold | 0.9184 | 0.9196 | 0.3459 | 0.02725 | 0.70 |
+| lj75 | anneal_landfold_serial | 0.9184 | 0.9196 | 0.3459 | 0.02725 | 4.27 |
+| lj75 | anneal_landfold_book |  |  |  |  | 1.87 |
+| lj75 | reference_sketchmap | 0.9119 | 0.9196 | 0.3418 | 0.02644 | 101.62 |
+| lj75 | sklearn_mds_switch | 0.8287 | 0.8994 | 0.3056 | 0.02914 | 11.81 |
+| lj75 | sklearn_mds | 0.8268 | 0.9021 | 0.3024 | 0.02914 | 11.78 |
+| lj75 | sklearn_isomap | 0.8179 | 0.9275 | 0.4008 | 0.03605 | 0.75 |
+| lj75 | sklearn_tsne | 0.9602 | 0.9379 | 0.4011 | 0.03202 | 2.11 |
+| lj75 | opentsne | 0.9542 | 0.9272 | 0.3909 | 0.03334 | 14.10 |
+| lj75 | umap | 0.9226 | 0.9402 | 0.5784 | 0.03655 | 3.96 |
+| lj75 | phate | 0.8537 | 0.9360 | 0.5381 | 0.04237 | 3.63 |
+| lj98 | anneal_landfold | 0.9489 | 0.9494 | 0.2972 | 0.02004 | 0.80 |
+| lj98 | anneal_landfold_serial | 0.9489 | 0.9494 | 0.2972 | 0.02004 | 4.61 |
+| lj98 | anneal_landfold_book |  |  |  |  | 2.38 |
+| lj98 | reference_sketchmap | 0.9437 | 0.9393 | 0.3076 | 0.01928 | 128.06 |
+| lj98 | sklearn_mds_switch | 0.8733 | 0.8698 | 0.2659 | 0.02336 | 12.46 |
+| lj98 | sklearn_mds | 0.8718 | 0.8812 | 0.2620 | 0.02348 | 12.02 |
+| lj98 | sklearn_isomap | 0.8711 | 0.9501 | 0.3350 | 0.03044 | 0.74 |
+| lj98 | sklearn_tsne | 0.9797 | 0.9668 | 0.3256 | 0.02768 | 2.25 |
+| lj98 | opentsne | 0.9791 | 0.9667 | 0.3267 | 0.02752 | 13.44 |
+| lj98 | umap | 0.9622 | 0.9681 | 0.3784 | 0.03291 | 4.05 |
+| lj98 | phate | 0.9039 | 0.9503 | 0.3747 | 0.04367 | 3.64 |
+
+What the table shows:
+
+- Against the previous paper pipeline, sklearn_mds_switch, landfold raises
+  T by 0.045 to 0.090 and C by 0.005 to 0.080. Its sketch-map stress is
+  lower on every book. It is 15 to 17 times faster on eight threads and
+  about 2.8 times faster on one.
+- Against the reference sketch-map, landfold has higher T on all three
+  books. Its C is higher on LJ38 and LJ98 and lower by 0.00003 on LJ75. The reference reaches a lower all-pair
+  sketch-map stress, by under 0.001. landfold is 128 to 159 times faster
+  on eight threads and 24 to 28 times faster on one.
+- t-SNE, openTSNE and UMAP keep more nearest neighbours, with T higher
+  by 0.004 to 0.064. Their sketch-map stress is higher on every book, by
+  0.005 to 0.013, and so is their Kruskal stress. The gaps between their
+  clusters carry little of the distance between funnels.
+- Raw MDS has the lowest Kruskal stress, since it fits raw distances. Its
+  T is 0.04 to 0.09 below landfold.
+- Isomap and PHATE are below landfold in T on every book.
+
+Among the methods that keep the global layout, landfold has the highest T
+on every book. Only Isomap is as fast, within 0.1 s either way.
+
+* References
+
+- <<ceriotti2011>> M. Ceriotti, G. A. Tribello, M. Parrinello. Simplifying
+  the representation of complex free-energy landscapes using sketch-map.
+  PNAS 108, 13023 (2011). doi:10.1073/pnas.1108486108
+- <<ceriotti2013>> M. Ceriotti, G. A. Tribello, M. Parrinello.
+  Demonstrating the transferability and the descriptive power of
+  sketch-map. J. Chem. Theory Comput. 9, 1521 (2013).
+  doi:10.1021/ct3010563
+- <<tribello2012>> G. A. Tribello, M. Ceriotti, M. Parrinello. Using
+  sketch-map coordinates to analyze and bias molecular dynamics
+  simulations. PNAS 109, 5196 (2012). doi:10.1073/pnas.1201152109
+- <<sketchmapcode>> lab-cosmo/sketchmap, reference implementation,
+  https://github.com/lab-cosmo/sketchmap, commit c2871db.
+- <<torgerson1952>> W. S. Torgerson. Multidimensional scaling: I. Theory
+  and method. Psychometrika 17, 401 (1952). doi:10.1007/BF02288916
+- <<kruskal1964>> J. B. Kruskal. Multidimensional scaling by optimizing
+  goodness of fit to a nonmetric hypothesis. Psychometrika 29, 1 (1964).
+  doi:10.1007/BF02289565
+- <<borg2005>> I. Borg, P. J. F. Groenen. Modern Multidimensional
+  Scaling, 2nd ed. Springer (2005). doi:10.1007/0-387-28981-X
+- <<desilva2003>> V. de Silva, J. B. Tenenbaum. Global versus local
+  methods in nonlinear dimensionality reduction. Advances in Neural
+  Information Processing Systems 15 (2003). No DOI.
+- <<platt2005>> J. C. Platt. FastMap, MetricMap, and Landmark MDS are all
+  Nystrom algorithms. AISTATS 2005, PMLR R5. No DOI.
+- <<bengio2004>> Y. Bengio, J.-F. Paiement, P. Vincent, O. Delalleau,
+  N. Le Roux, M. Ouimet. Out-of-sample extensions for LLE, Isomap, MDS,
+  Eigenmaps, and spectral clustering. Advances in Neural Information
+  Processing Systems 16 (2004). No DOI.
+- <<tenenbaum2000>> J. B. Tenenbaum, V. de Silva, J. C. Langford. A global
+  geometric framework for nonlinear dimensionality reduction. Science
+  290, 2319 (2000). doi:10.1126/science.290.5500.2319
+- <<scholkopf1998>> B. Scholkopf, A. Smola, K.-R. Muller. Nonlinear
+  component analysis as a kernel eigenvalue problem. Neural Comput. 10,
+  1299 (1998). doi:10.1162/089976698300017467
+- <<belkin2003>> M. Belkin, P. Niyogi. Laplacian eigenmaps for
+  dimensionality reduction and data representation. Neural Comput. 15,
+  1373 (2003). doi:10.1162/089976603321780317
+- <<vandermaaten2008>> L. van der Maaten, G. Hinton. Visualizing data using
+  t-SNE. J. Mach. Learn. Res. 9, 2579 (2008). No DOI.
+- <<vandermaaten2014>> L. van der Maaten. Accelerating t-SNE using
+  tree-based algorithms. J. Mach. Learn. Res. 15, 3221 (2014). No DOI.
+- <<linderman2019>> G. C. Linderman, M. Rachh, J. G. Hoskins,
+  S. Steinerberger, Y. Kluger. Fast interpolation-based t-SNE for improved
+  visualization of single-cell RNA-seq data. Nat. Methods 16, 243 (2019).
+  doi:10.1038/s41592-018-0308-4
+- <<policar2024>> P. G. Policar, M. Strazar, B. Zupan. openTSNE: a modular
+  Python library for t-SNE dimensionality reduction and embedding. J. Stat.
+  Softw. 109(3) (2024). doi:10.18637/jss.v109.i03
+- <<kobak2019>> D. Kobak, P. Berens. The art of using t-SNE for
+  single-cell transcriptomics. Nat. Commun. 10, 5416 (2019).
+  doi:10.1038/s41467-019-13056-x
+- <<mcinnes2018a>> L. McInnes, J. Healy, J. Melville. UMAP: uniform
+  manifold approximation and projection for dimension reduction.
+  arXiv:1802.03426 (2018). doi:10.48550/arXiv.1802.03426
+- <<mcinnes2018b>> L. McInnes, J. Healy, N. Saul, L. Grossberger. UMAP:
+  uniform manifold approximation and projection. J. Open Source Softw. 3,
+  861 (2018). doi:10.21105/joss.00861
+- <<moon2019>> K. R. Moon et al. Visualizing structure and transitions in
+  high-dimensional biological data. Nat. Biotechnol. 37, 1482 (2019).
+  doi:10.1038/s41587-019-0336-3
+- <<de2016>> S. De, A. P. Bartok, G. Csanyi, M. Ceriotti. Comparing
+  molecules and solids across structural and alchemical space. Phys.
+  Chem. Chem. Phys. 18, 13754 (2016). doi:10.1039/C6CP00415F
+- <<cheng2020>> B. Cheng et al. Mapping materials and molecules. Acc.
+  Chem. Res. 53, 1981 (2020). doi:10.1021/acs.accounts.0c00403
+- <<bartok2013>> A. P. Bartok, R. Kondor, G. Csanyi. On representing
+  chemical environments. Phys. Rev. B 87, 184115 (2013).
+  doi:10.1103/PhysRevB.87.184115
+- <<shires2021>> B. W. B. Shires, C. J. Pickard. Visualizing energy
+  landscapes through manifold learning. Phys. Rev. X 11, 041026 (2021).
+  doi:10.1103/PhysRevX.11.041026
+- <<lemke2019>> T. Lemke, C. Peter. EncoderMap: dimensionality reduction
+  and generation of molecule conformations. J. Chem. Theory Comput. 15,
+  1209 (2019). doi:10.1021/acs.jctc.8b00975
+- <<becker1997>> O. M. Becker, M. Karplus. The topology of
+  multidimensional potential energy surfaces: theory and application to
+  peptide structure and kinetics. J. Chem. Phys. 106, 1495 (1997).
+  doi:10.1063/1.473299
+- <<wales1998>> D. J. Wales, M. A. Miller, T. R. Walsh. Archetypal energy
+  landscapes. Nature 394, 758 (1998). doi:10.1038/29487
+- <<wales2003>> D. J. Wales. Energy Landscapes. Cambridge University Press
+  (2003). doi:10.1017/CBO9780511721724
+- <<krivov2002>> S. V. Krivov, M. Karplus. Free energy disconnectivity
+  graphs: application to peptide models. J. Chem. Phys. 117, 10894
+  (2002). doi:10.1063/1.1517606
+- <<smeeton2014>> L. C. Smeeton, M. T. Oakley, R. L. Johnston. Visualizing
+  energy landscapes with metric disconnectivity graphs. J. Comput. Chem.
+  35, 1481 (2014). doi:10.1002/jcc.23643
+- <<wales1997>> D. J. Wales, J. P. K. Doye. Global optimization by
+  basin-hopping and the lowest energy structures of Lennard-Jones clusters
+  containing up to 110 atoms. J. Phys. Chem. A 101, 5111 (1997).
+  doi:10.1021/jp970984n
+- <<doye1999a>> J. P. K. Doye, M. A. Miller, D. J. Wales. Evolution of the
+  potential energy surface with size for Lennard-Jones clusters. J. Chem.
+  Phys. 111, 8417 (1999). doi:10.1063/1.480217
+- <<doye1999b>> J. P. K. Doye, M. A. Miller, D. J. Wales. The double-funnel
+  energy landscape of the 38-atom Lennard-Jones cluster. J. Chem. Phys.
+  110, 6896 (1999). doi:10.1063/1.478595
+- <<leary1999>> R. H. Leary, J. P. K. Doye. Tetrahedral global minimum for
+  the 98-atom Lennard-Jones cluster. Phys. Rev. E 60, R6320 (1999).
+  doi:10.1103/PhysRevE.60.R6320
+- <<gonzalez1985>> T. F. Gonzalez. Clustering to minimize the maximum
+  intercluster distance. Theor. Comput. Sci. 38, 293 (1985).
+  doi:10.1016/0304-3975(85)90224-5
+- <<venna2001>> J. Venna, S. Kaski. Neighborhood preservation in nonlinear
+  projection methods: an experimental study. ICANN 2001, LNCS 2130, 485
+  (2001). doi:10.1007/3-540-44668-0_68
+- <<venna2006>> J. Venna, S. Kaski. Local multidimensional scaling. Neural
+  Netw. 19, 889 (2006). doi:10.1016/j.neunet.2006.05.014
