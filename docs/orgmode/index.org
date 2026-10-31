@@ -87,6 +87,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    howto/chemfit
    howto/precision-policy
    howto/rgmin-lbfgs
+   howto/landfold
    howto/faq
    faq
 #+end_export
