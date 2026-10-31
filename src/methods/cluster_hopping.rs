@@ -801,6 +801,9 @@ pub struct Outcome {
     /// Whether the start's own quench changed the covalent graph, so the
     /// chain began on the unquenched start.
     pub start_graph_rejected: bool,
+    /// Relaxations that continued the opening quench, under
+    /// [`Config::keep_bond_graph`], after it failed its validation gradient.
+    pub start_continuations: usize,
     /// Distinct basins registered.
     pub basins: usize,
     /// Charged evaluations spent.
@@ -1343,7 +1346,8 @@ pub fn run_with_energy_gradient<'g, R: Rng + ?Sized>(
 /// The search runs on the budget less [`polish::reserve`], and the polish
 /// then has every call the ledger has left. The start is separated and the
 /// graph bound here, so the polish judges structures against the reference
-/// the search used.
+/// the search used. A search that recorded nothing hands the polish the
+/// state its chain holds, or the start when that state is not sane.
 #[allow(clippy::too_many_arguments)]
 fn run_then_polish<'g, R, H>(
     cfg: &Config,
@@ -1406,10 +1410,18 @@ where
         rng,
     );
     ledger.budget += reserve;
-    let records = std::mem::replace(&mut ledger.records, outer_records).unwrap_or_default();
+    let mut records = std::mem::replace(&mut ledger.records, outer_records).unwrap_or_default();
     let mut outcome = searched?;
     if separation.is_some() {
         outcome.start_separation = separation;
+    }
+    if records.is_empty() {
+        let held = outcome
+            .final_state
+            .as_ref()
+            .filter(|state| quench_is_sane(cfg, outcome.final_energy, state.view()))
+            .map(|state| (outcome.final_energy, state.clone()));
+        records.push(held.unwrap_or_else(|| (f64::INFINITY, start.to_owned())));
     }
     if let Some(energy_grad) = energy_grad {
         polish::polish_records(cfg, ledger, energy_grad, records, reserve, &mut outcome);
@@ -2078,6 +2090,120 @@ fn finish_improving(
 /// Continuations [`finish_improving`] grants one relaxation.
 const FINISH_ROUNDS: usize = 8;
 
+/// A finite opening quench as the chain takes it up.
+struct SettledOpening {
+    state: (f64, Array1<f64>),
+    graph_rejected: bool,
+    sane: bool,
+    validation: Option<Array1<f64>>,
+    continuations: usize,
+}
+
+/// Judges a finite opening quench of `unquenched`.
+///
+/// A start quench that changed the graph is a rejected step like any other,
+/// so the chain begins on the start geometry. That geometry is not a minimum
+/// and is never recorded.
+fn settle_opening(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    mut grad: Option<&mut GradFn<'_>>,
+    mut state: (f64, Array1<f64>),
+    unquenched: Array1<f64>,
+) -> SettledOpening {
+    let graph_rejected = !keeps_graph(cfg, state.1.view());
+    if graph_rejected {
+        let priced = relax(ledger, unquenched.view(), 0);
+        if priced.0.is_finite() {
+            state = priced;
+        }
+    }
+    let sane = !graph_rejected && quench_is_sane(cfg, state.0, state.1.view());
+    let mut validation = if sane {
+        grad.as_deref_mut().and_then(|g| {
+            g(ledger, state.1.view())
+                .filter(|values| answer_gradient_ok(cfg, values.view(), state.1.len()))
+        })
+    } else {
+        None
+    };
+    let mut continuations = 0;
+    if sane
+        && validation.is_none()
+        && !ledger.below_target(state.0)
+        && cfg.keep_bond_graph
+        && cfg.finish_improving
+        && let Some(g) = grad
+    {
+        let finished = finish_start(cfg, ledger, relax, g, state, cfg.relax_steps);
+        state = finished.state;
+        validation = finished.validation;
+        continuations = finished.rounds;
+    }
+    SettledOpening {
+        state,
+        graph_rejected,
+        sane,
+        validation,
+        continuations,
+    }
+}
+
+/// An opening quench after [`finish_start`].
+struct FinishedStart {
+    state: (f64, Array1<f64>),
+    validation: Option<Array1<f64>>,
+    rounds: usize,
+}
+
+/// Continue an opening quench that is sane but failed its validation
+/// gradient, `steps` at a time and at most [`FINISH_ROUNDS`] more times.
+///
+/// Under [`Config::keep_bond_graph`] a run may refuse every trial, and then
+/// the opening quench is the only structure it can record. A continuation is
+/// kept only when it is sane, so it keeps the graph, and does not rise; the
+/// first that fails either test, or that no longer descends, ends it.
+fn finish_start(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: &mut GradFn<'_>,
+    mut state: (f64, Array1<f64>),
+    steps: usize,
+) -> FinishedStart {
+    let mut rounds = 0;
+    for _ in 0..FINISH_ROUNDS {
+        if ledger.remaining() == 0 {
+            break;
+        }
+        let more = relax(ledger, state.1.view(), steps);
+        if !(more.0 <= state.0) || !quench_is_sane(cfg, more.0, more.1.view()) {
+            break;
+        }
+        rounds += 1;
+        let descended = more.0 < state.0 - 1e-10 * (1.0 + state.0.abs());
+        state = more;
+        let validation = grad(ledger, state.1.view())
+            .filter(|values| answer_gradient_ok(cfg, values.view(), state.1.len()));
+        if validation.is_some() {
+            return FinishedStart {
+                state,
+                validation,
+                rounds,
+            };
+        }
+        if !descended {
+            break;
+        }
+    }
+    FinishedStart {
+        state,
+        validation: None,
+        rounds,
+    }
+}
+
 /// Whether a run carries the `tkick` arm: [`Config::torsion_kicks`] is set
 /// and the quenched start `x` has a rotatable bond.
 fn kicks_torsions(cfg: &Config, x: ArrayView1<f64>) -> bool {
@@ -2193,6 +2319,7 @@ where
     let mut initial_validation_gradient: Option<Array1<f64>> = None;
     let mut initial_recordable = false;
     let mut start_graph_rejected = false;
+    let mut start_continuations = 0usize;
     let gradient_required = grad.is_some();
     for attempt in 0..attempts {
         // `remaining` is also zero when the caller has stopped. That is a
@@ -2234,24 +2361,12 @@ where
             }
             continue;
         }
-        // A start quench that changed the graph is a rejected step like any
-        // other, so the chain begins on the start geometry. That geometry is
-        // not a minimum and is never recorded.
-        if !keeps_graph(cfg, x.view()) {
-            start_graph_rejected = true;
-            let (start_energy, start_state) = relax(ledger, unquenched.view(), 0);
-            if start_energy.is_finite() {
-                e = start_energy;
-                x = start_state;
-            }
-        }
-        let initial_sane = !start_graph_rejected && quench_is_sane(cfg, e, x.view());
-        let nested = initial_sane.then(|| {
-            grad.as_deref_mut().and_then(|g| {
-                g(ledger, x.view()).filter(|values| answer_gradient_ok(cfg, values.view(), x.len()))
-            })
-        });
-        initial_validation_gradient = nested.flatten();
+        let opening = settle_opening(cfg, ledger, relax, grad.as_deref_mut(), (e, x), unquenched);
+        (e, x) = opening.state;
+        start_graph_rejected = opening.graph_rejected;
+        start_continuations = opening.continuations;
+        initial_validation_gradient = opening.validation;
+        let initial_sane = opening.sane;
         initial_recordable = initial_sane
             && (ledger.below_target(e)
                 || !gradient_required
@@ -6539,6 +6654,7 @@ where
             .as_ref()
             .map_or(0, |r| r.changes() - graph_changes_before),
         start_graph_rejected,
+        start_continuations,
         basins: n_basins,
         charged: ledger.spent(),
         returned,
@@ -7203,6 +7319,169 @@ mod graph_invariant_tests {
 
         assert_eq!(out.rejected_trials, 2);
         assert_eq!(out.restarts, 1);
+    }
+
+    /// The dimer with its second water moved by `shift` along x, which
+    /// keeps the graph.
+    fn nudged(intact: &Array1<f64>, shift: f64) -> Array1<f64> {
+        let mut x = intact.clone();
+        for atom in 3..6 {
+            x[3 * atom] += shift;
+        }
+        x
+    }
+
+    /// A gradient that validates only `converged`.
+    fn validating(
+        converged: Array1<f64>,
+    ) -> impl FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>> + Send {
+        move |ledger: &mut Ledger, x: ArrayView1<f64>| {
+            if !ledger.charge() {
+                return None;
+            }
+            let value = if x == converged { 0.0 } else { 1.0 };
+            Some(Array1::from_elem(x.len(), value))
+        }
+    }
+
+    #[test]
+    fn a_start_quench_stopped_on_its_cap_is_continued_until_it_validates() {
+        let (intact, _) = dimer();
+        let capped = nudged(&intact, 0.1);
+        let converged = nudged(&intact, 0.2);
+        let run_capped = |cfg: &Config, budget: usize| {
+            let mut quenches = 0usize;
+            let mut relax = |ledger: &mut Ledger, _x: ArrayView1<f64>, _steps: usize| {
+                assert!(ledger.charge());
+                quenches += 1;
+                if quenches == 1 {
+                    (-1.0, capped.clone())
+                } else {
+                    (-1.5, converged.clone())
+                }
+            };
+            let mut grad = validating(converged.clone());
+            let mut ledger = Ledger::new(budget);
+            let mut rng = StdRng::seed_from_u64(7);
+            run_with_gradient(
+                cfg,
+                intact.view(),
+                &mut ledger,
+                &mut relax,
+                Some(&mut grad),
+                &mut rng,
+            )
+            .expect("finite start")
+        };
+
+        // The quench, its gradient, one continuation and its gradient, and
+        // nothing after.
+        let cfg = molecular();
+        let out = run_capped(&cfg, 4);
+        assert_eq!(out.start_continuations, 1);
+        assert_eq!(out.best, -1.5);
+        assert_eq!(out.best_state.as_ref(), Some(&converged));
+        assert_eq!(out.unconverged_records, 0);
+        assert_eq!(out.charged, 4);
+
+        let mut off = molecular();
+        off.finish_improving = false;
+        let out = run_capped(&off, 2);
+        assert_eq!(out.start_continuations, 0);
+        assert!(out.best.is_infinite());
+        assert_eq!(out.unconverged_records, 1);
+    }
+
+    #[test]
+    fn a_continuation_that_changes_the_graph_is_not_kept() {
+        let (intact, reacted) = dimer();
+        let capped = nudged(&intact, 0.1);
+        let mut quenches = 0usize;
+        let mut relax = |ledger: &mut Ledger, _x: ArrayView1<f64>, _steps: usize| {
+            assert!(ledger.charge());
+            quenches += 1;
+            if quenches == 1 {
+                (-1.0, capped.clone())
+            } else {
+                (-5.0, reacted.clone())
+            }
+        };
+        let mut grad = validating(reacted.clone());
+        let mut ledger = Ledger::new(3);
+        let mut rng = StdRng::seed_from_u64(7);
+        let cfg = molecular();
+        let out = run_with_gradient(
+            &cfg,
+            intact.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("finite start");
+        assert_eq!(out.start_continuations, 0);
+        assert!(out.best.is_infinite());
+        assert_eq!(out.final_state.as_ref(), Some(&capped));
+        assert!(out.graph_rejections >= 1);
+    }
+
+    /// A harmonic well whose minimum is `centre`.
+    fn well(
+        centre: Array1<f64>,
+    ) -> impl FnMut(&mut Ledger, ArrayView1<f64>) -> Option<(f64, Array1<f64>)> + Send {
+        move |ledger: &mut Ledger, x: ArrayView1<f64>| {
+            if !ledger.charge() {
+                return None;
+            }
+            let d = &x - &centre;
+            Some((d.dot(&d), 2.0 * d))
+        }
+    }
+
+    #[test]
+    fn a_search_that_records_nothing_polishes_the_state_it_holds() {
+        let (intact, reacted) = dimer();
+        let mut cfg = molecular();
+        cfg.record_gradient = 5.0e-2;
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            assert!(ledger.charge());
+            if x == intact {
+                (0.0, intact.clone())
+            } else {
+                (-5.0, reacted.clone())
+            }
+        };
+        // The search's gradient never validates, so the search records
+        // nothing and refuses every trial.
+        let mut grad = validating(Array1::zeros(intact.len()));
+        let mut energy_grad = well(nudged(&intact, 0.01));
+        let budget = 64;
+        let mut ledger = Ledger::new(budget);
+        let mut rng = StdRng::seed_from_u64(9);
+        let out = run_with_energy_gradient(
+            &cfg,
+            intact.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            Some(&mut energy_grad),
+            &mut rng,
+        )
+        .expect("finite start");
+        let polish = out.polish.as_ref().expect("the setting polishes");
+        assert!(polish.reserve > 0);
+        assert_eq!(polish.records.len(), 1);
+        assert_eq!(polish.records[0].from, 0.0);
+        assert!(polish.records[0].recorded);
+        assert!(polish.calls > 0);
+        assert!(out.best.is_finite());
+        let best = out.best_state.as_ref().expect("a recorded best");
+        assert!(keeps_graph(
+            &bind_graph_reference(&cfg, intact.view()).expect("binds"),
+            best.view()
+        ));
+        assert!(out.charged <= budget);
+        assert_eq!(out.charged, ledger.spent());
     }
 }
 

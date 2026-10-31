@@ -308,6 +308,7 @@ fn main() {
         "GRAPH_REJECTIONS {} start {}",
         out.graph_rejections, out.start_graph_rejected
     );
+    println!("START_CONTINUATIONS {}", out.start_continuations);
     println!("START_SEPARATION {}", separation_text(out.start_separation));
     println!("REFINES {} charged {}", stats.refines, stats.refine_charged);
     match &out.polish {
