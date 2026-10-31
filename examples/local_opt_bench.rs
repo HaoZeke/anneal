@@ -1,6 +1,6 @@
 //! Calls to converge one molecular relaxation, L-BFGS against ANC.
 //!
-//! Usage: `local_opt_bench <start.xyz> [gtol eV/A] [lbfgs|anc|anc-swart|anc-bofill ...]`
+//! Usage: `local_opt_bench <start.xyz> [gtol eV/A] [lbfgs|anc|anc-swart|anc-bofill|anc-trust ...]`
 //!
 //! Every value-and-gradient call goes to GFN2-xTB through the `xtb`
 //! executable (`ASE_ENGINE=xtb-cli`, `XTB_EXE` to override the path), one
@@ -9,6 +9,8 @@
 //! `record_gradient` of 5e-2 eV/A. Prints one tab-separated line per
 //! optimiser: file, optimiser, calls, final energy (eV), final max |g|
 //! (eV/A, from one extra uncounted call), and whether it met the gate.
+//! With `BENCH_XYZ_DIR` set, each final geometry is also written there as
+//! `<file>-<optimiser>.xyz`, its energy on the comment line.
 
 #[path = "common/pipe_engine.rs"]
 mod pipe_engine;
@@ -98,6 +100,19 @@ fn main() {
         };
         let (e, g) = engine.eval(x.view()).expect("final evaluation");
         let worst = g.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+        if let Some(dir) = std::env::var_os("BENCH_XYZ_DIR") {
+            let mut text = format!("{}\nenergy_eV={e:.8}\n", symbols.len());
+            for (i, s) in symbols.iter().enumerate() {
+                text.push_str(&format!(
+                    "{s} {:.10} {:.10} {:.10}\n",
+                    x[3 * i],
+                    x[3 * i + 1],
+                    x[3 * i + 2]
+                ));
+            }
+            let out = std::path::Path::new(&dir).join(format!("{label}-{name}.xyz"));
+            std::fs::write(&out, text).expect("writable BENCH_XYZ_DIR");
+        }
         println!(
             "{label}\t{name}\t{calls}\t{e:.6}\t{worst:.4e}\t{}",
             worst < gtol
