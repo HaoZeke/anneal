@@ -3149,9 +3149,15 @@ fn biased_metropolis<R: Rng + ?Sized>(
     d < 0.0 || rng.random::<f64>() < portable_exp(-d)
 }
 
+/// Whether `state` lies in a basin the history has deposited on, by the
+/// bias's own fingerprint and merge radius.
+fn returns_to_deposit<F: Fingerprint>(bias: &BasinBias<F>, state: ArrayView1<f64>) -> bool {
+    bias.potential(bias.cv(state).view()) > 0.0
+}
+
 #[cfg(test)]
 mod biased_metropolis_tests {
-    use super::biased_metropolis;
+    use super::{biased_metropolis, returns_to_deposit};
     use crate::bias::{BasinBias, Bias, SortedPairs};
     use ndarray::array;
     use rand::SeedableRng;
@@ -3186,6 +3192,18 @@ mod biased_metropolis_tests {
         };
         assert_eq!(taken(&empty), 1000);
         assert_eq!(taken(&filled), 0);
+    }
+
+    #[test]
+    fn only_a_deposited_basin_is_a_return() {
+        let here = array![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0];
+        let offer = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.9, 0.0];
+        let mut bias = BasinBias::new(SortedPairs { n_points: 3 }, 0.05, 511.0, 5.0);
+        assert!(!returns_to_deposit(&bias, offer.view()));
+        let s = bias.cv(offer.view());
+        bias.deposit(s.view(), 30.0);
+        assert!(returns_to_deposit(&bias, offer.view()));
+        assert!(!returns_to_deposit(&bias, here.view()));
     }
 }
 
@@ -8616,9 +8634,10 @@ where
         // applied to the whole cluster, so surface atoms move onto the empty
         // orbit positions the core implies. Once per new basin, every
         // candidate the core asks for is quenched and recorded, and the
-        // lowest is offered to the biased Metropolis test a hop faces. On
-        // raw energy alone a completion goes back into a basin the deposits
-        // have filled, and the chain returns to the same shelf.
+        // lowest is offered to the raw Metropolis test. When a completion
+        // ends in a basin the deposits have filled, it faces the biased
+        // test a hop faces instead: on raw energy alone it carries the
+        // chain back to the same shelf.
         let mut orbit_offer = None;
         if cfg.packing_surface().orbit_on_new
             && accept
@@ -8656,9 +8675,12 @@ where
             }
         }
         if let Some((es, xs, sym_gradient)) = orbit_offer {
-            let mut biases: Vec<&dyn Bias> = vec![&bias];
-            if let Some(sp) = spectral.as_ref() {
-                biases.push(sp);
+            let mut biases: Vec<&dyn Bias> = Vec::new();
+            if returns_to_deposit(&bias, xs.view()) {
+                biases.push(&bias);
+                if let Some(sp) = spectral.as_ref() {
+                    biases.push(sp);
+                }
             }
             if biased_metropolis(&biases, (e, x.view()), (es, xs.view()), temperature, rng) {
                 if es < e {
