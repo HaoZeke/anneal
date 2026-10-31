@@ -52,18 +52,31 @@
 //! # Measured
 //!
 //! GFN2-xTB through the `xtb` executable, one counted call per value and
-//! gradient, from RDKit ETKDG starts with no force-field cleanup, four
-//! seeds each (`examples/local_opt_bench.rs`). Both optimisers stop at a
-//! largest gradient component of 5e-2 eV/A, the molecular presets'
-//! `record_gradient`. Calls summed over the four starts:
+//! gradient, from the first four seeds of the flexible-molecule protocol's
+//! starts (ETKDGv3 and at most 200 MMFF94 steps; `examples/local_opt_bench.rs`).
+//! `abb` is one 4-(4-hydroxyphenyl)butanoic acid with two 3-indolepropionic
+//! acids, a noncovalent trimer. Both optimisers stop at a largest gradient
+//! component of 5e-2 eV/A, the molecular presets' `record_gradient`. Calls
+//! summed over the four starts:
 //!
 //! | system | atoms | L-BFGS | ANC | xtb `--opt loose` cycles |
 //! |---|---|---|---|---|
-//! | met-enkephalin | 75 | 354 | 171 | 180 |
-//! | trofinetide | 43 | 467 | 152 | 173 |
-//! | N-methylacetamide and two waters | 18 | 357 | 182 | 182 |
+//! | Ac-Ala-NHMe | 22 | 203 | 85 | 72 |
+//! | trofinetide | 43 | 248 | 89 | 143 |
+//! | met-enkephalin | 75 | 199 | 111 | 205 |
+//! | abb | 75 | 315 | 226 | 294 |
 //!
-//! ANC ended lower than L-BFGS on all twelve starts, by 4 to 228 meV.
+//! ANC ended lower than L-BFGS on all sixteen starts, by 4 to 828 meV, and
+//! took more calls on two of them (112 against 96 and 44 against 38), both
+//! where it ended more than 300 meV lower.
+//!
+//! At 5e-3 eV/A the sums are 815 against 189, 1672 against 362, 2891 against
+//! 547 and 5650 against 1003. Two abb starts end in a minimum 142 and 165 meV
+//! above the one L-BFGS reaches after 1045 and 2464 calls. That is another
+//! basin, not an early stop: tightened with `xtb --opt vtight`, the two
+//! endpoints stay 2.3 and 2.5 A apart in heavy atoms, and the trust radius,
+//! which refuses every step that raises the energy, ends within 2.5 meV of
+//! plain ANC.
 //!
 //! # Units
 //!
