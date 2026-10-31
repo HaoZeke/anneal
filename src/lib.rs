@@ -160,6 +160,9 @@ pub mod hmc;
 pub mod hypersphere;
 /// Invert known wells so rgmin does not walk a Leave back into them.
 pub mod known_basin;
+/// Sketch-map embedding of a minima book: farthest-point landmarks, MDS
+/// start, sketch-map stress, and out-of-sample placement.
+pub mod landfold;
 pub mod lattice;
 /// Law-witness helpers and the `LawViolation` diagnostic type.
 pub mod laws;
