@@ -363,6 +363,10 @@ fn main() {
     println!("START_CONTINUATIONS {}", out.start_continuations);
     println!("START_SEPARATION {}", separation_text(out.start_separation));
     println!("REFINES {} charged {}", stats.refines, stats.refine_charged);
+    println!(
+        "RELAX converged {} capped {} screens {}",
+        stats.converged, stats.capped, stats.screens
+    );
     match &out.polish {
         Some(polish) => {
             println!(
