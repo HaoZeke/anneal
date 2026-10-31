@@ -6062,7 +6062,10 @@ where
             && cfg.prior_reseed
             && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
             && cfg.packing_cna_applies()
-            && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+            && crate::soap::ih_dominated(
+                x.view(),
+                crate::soap::SoapSpec::at_length(cfg.length_scale),
+            )
             && ledger.remaining() > 0
         {
             csm_reseed_stamp = hops;
@@ -6089,7 +6092,10 @@ where
             // is still icosahedral and the plain quench did not beat it.
             let best_before = ledger.best;
             let best_ih = ledger.best_state.as_ref().is_some_and(|state| {
-                crate::soap::ih_dominated(state.view(), crate::soap::SoapSpec::default())
+                crate::soap::ih_dominated(
+                    state.view(),
+                    crate::soap::SoapSpec::at_length(cfg.length_scale),
+                )
             });
             // Successful LJ104 paths leave an icosahedral best within about
             // thirty hops. The LJ75 Marks search sits on that best for the
@@ -8738,10 +8744,7 @@ where
             continue;
         }
         if cfg.symmetrise_on_stall && stuck && hop_room(hops) {
-            let soap_spec = crate::soap::SoapSpec {
-                rcut_nn: 3.5 * cfg.length_scale,
-                ..Default::default()
-            };
+            let soap_spec = crate::soap::SoapSpec::at_length(cfg.length_scale);
             let withhold = (cfg.packing_cna_applies()
                 && crate::soap::ih_dominated(x.view(), soap_spec))
                 || cfg.active_region.is_some()
@@ -8977,7 +8980,10 @@ where
             // move.
             if directed_leave
                 && cfg.packing_cna_applies()
-                && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+                && crate::soap::ih_dominated(
+                    x.view(),
+                    crate::soap::SoapSpec::at_length(cfg.length_scale),
+                )
                 && let Some((other_energy, other_state)) =
                     packing.better_other(x.view(), e, packing_cutoff)
             {
@@ -9008,7 +9014,10 @@ where
                 && cfg.prior_growth
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
-                && !crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+                && !crate::soap::ih_dominated(
+                    x.view(),
+                    crate::soap::SoapSpec::at_length(cfg.length_scale),
+                )
             {
                 let best_before_growth = ledger.best;
                 if growth_held(
@@ -9135,7 +9144,10 @@ where
             if directed_leave
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
-                && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+                && crate::soap::ih_dominated(
+                    x.view(),
+                    crate::soap::SoapSpec::at_length(cfg.length_scale),
+                )
             {
                 let best_before_growth = ledger.best;
                 if growth_held(

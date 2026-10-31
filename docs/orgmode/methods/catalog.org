@@ -319,6 +319,7 @@ stopped improving, each answering a different way of being stuck.
   orbit; withheld when the structure is already icosahedrally
   dominated (=ih_dominated=, src/soap.rs:1088), so the mechanism never
   invents a packing the observed cloud does not have.
+  The hop passes =SoapSpec::at_length(length_scale)=, so the 555 test bonds the first shell at the preset's own length.
 - Funnel tracking (=track_funnels=, config.rs:244; src/funnel_spectral.rs):
   builds a transition graph on accepted hops keyed by basin identity;
   =Partition= (src/funnel_spectral.rs:43) and =FunnelSpectrum=
@@ -665,9 +666,11 @@ frozen-atom and mobile-mask support; =pullback_nu3= (src/soap.rs:861);
 icosahedral, 1 = fcc cuboctahedron, 2 = hcp); =class_masses=
 (src/soap.rs:1068); =ih_dominated= (src/soap.rs:1088).
 
-Constants and defaults: =SoapSpec= carries =n_max=, =l_max=, =rcut_nn=
-(cutoff in nearest-neighbour units). Preset values
-=SOAP_RMSD = 0.35=, =SOAP_CUTOFF = 3.5= (LennardJonesPreset).
+Constants and defaults: =SoapSpec= carries =n_max=, =l_max=, =rcut_nn= (cutoff in nearest-neighbour units).
+=SoapSpec::at_length= writes the default cutoff at another length.
+=contact_cutoff= is the common-neighbour contact cutoff of the icosahedral test and of the 555, 421 and 422 class masses.
+It is =CONTACT_CUTOFF = 1.35= at the default and scales with =rcut_nn=.
+Preset values =SOAP_RMSD = 0.35=, =SOAP_CUTOFF = 3.5= (LennardJonesPreset).
 
 Feeds/consumes: consumed by =ClusterMove::Soap= for the hop proposal,
 by =DescriptorSpace= (below) for catalog descriptors, and by
