@@ -95,6 +95,10 @@ fn adjacency(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<Vec<bool>> {
     adj
 }
 
+/// Most bonds among one pair's common neighbours whose longest trail is
+/// searched.
+pub const TRAIL_BOND_LIMIT: usize = 12;
+
 /// Bonds in the longest continuous chain among a set of common neighbours.
 ///
 /// The third index, and the one that has to be counted the right way. It is the
@@ -104,6 +108,12 @@ fn adjacency(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<Vec<bool>> {
 /// ring, so a perfect thirteen-point icosahedron reports `(5,5,4)` for its
 /// twelve centre-to-surface pairs where the literature reports `555`, and
 /// everything keyed on `555` reads zero.
+///
+/// A set with more than [`TRAIL_BOND_LIMIT`] bonds reports 0, which no set
+/// with a bond can carry. The search is exhaustive and grows exponentially
+/// with the bonds. A cutoff past the first shell, as the reduced 1.35 is on a
+/// long-range Morse cluster, can give sets of more than [`TRAIL_BOND_LIMIT`]
+/// bonds. Every signature read here has at most five bonds.
 fn longest_trail(sub: &[Vec<bool>]) -> usize {
     let m = sub.len();
     if m == 0 {
@@ -117,7 +127,7 @@ fn longest_trail(sub: &[Vec<bool>]) -> usize {
             }
         }
     }
-    if edges.is_empty() {
+    if edges.is_empty() || edges.len() > TRAIL_BOND_LIMIT {
         return 0;
     }
     let mut incident: Vec<Vec<(usize, usize)>> = vec![Vec::new(); m];
@@ -125,8 +135,6 @@ fn longest_trail(sub: &[Vec<bool>]) -> usize {
         incident[i].push((k, j));
         incident[j].push((k, i));
     }
-    // Exhaustive over bonds, which is harmless: the set is the common
-    // neighbours of one pair and the bond count stays in single figures.
     let mut best = 0usize;
     for start in 0..m {
         let mut stack: Vec<(usize, u64, usize)> = vec![(start, 0, 0)];
@@ -746,6 +754,21 @@ mod tests {
         x
     }
 
+    /// Every point of the set has an even degree, so the longest trail is a
+    /// circuit through every bond, up to the limit and not past it.
+    #[test]
+    fn the_trail_is_searched_up_to_the_bond_limit() {
+        let complete = |m: usize, cut: &dyn Fn(usize, usize) -> bool| -> Vec<Vec<bool>> {
+            (0..m)
+                .map(|a| (0..m).map(|b| a != b && !cut(a, b)).collect())
+                .collect()
+        };
+        assert_eq!(longest_trail(&complete(5, &|_, _| false)), 10);
+        let matching = complete(6, &|a, b| a / 2 == b / 2);
+        assert_eq!(longest_trail(&matching), TRAIL_BOND_LIMIT);
+        assert_eq!(longest_trail(&complete(9, &|_, _| false)), 0);
+    }
+
     /// The centre of a perfect icosahedron. Its twelve centre-to-vertex pairs
     /// are the ones the literature reports as 555, and counting the third index
     /// as a simple path instead of a trail gives 554 and reads zero.
@@ -761,6 +784,9 @@ mod tests {
             c.counts
         );
         assert_eq!(c.get((5, 5, 4)), 0, "555 was miscounted as 554");
+        let wide = cna(x.view(), 13, 2.5);
+        assert_eq!(wide.bonds, 78);
+        assert_eq!(wide.get((11, 55, 0)), 78, "counts {:?}", wide.counts);
         let fr = atom_triplet_fracs(x.view(), 13, 1.2);
         assert!(
             fr[0][0] > 0.9,
