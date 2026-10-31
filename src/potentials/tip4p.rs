@@ -33,29 +33,63 @@ pub const Q_H: f64 = 0.52;
 /// M-site charge, elementary charges.
 pub const Q_M: f64 = -1.04;
 /// Oxygen Lennard-Jones well depth, kJ/mol.
-pub const EPSILON: f64 = 0.6485;
-/// Oxygen Lennard-Jones diameter, angstrom.
-pub const SIGMA: f64 = 3.15365;
-/// Coulomb constant, kJ/mol Å e⁻².
-pub const COULOMB: f64 = 1389.35458;
+///
+/// Jorgensen et al. give the oxygen pair as `A = 600e3` kcal/mol Å^12 and
+/// `C = 610` kcal/mol Å^6, which at 4.184 kJ/kcal are GMIN's `C12` and `C6`.
+/// The well depth is `C6² / 4 C12`; the rounded 0.6485 leaves every cluster
+/// minimum about 1.3e-3 kJ/mol per molecule above the database energies.
+pub const EPSILON: f64 =
+    super::gmin_tip4p::C6 * super::gmin_tip4p::C6 / (4.0 * super::gmin_tip4p::C12);
+/// Oxygen Lennard-Jones diameter, `(C12 / C6)^(1/6)`, angstrom.
+pub const SIGMA: f64 = 3.153_577_941_976_495;
+/// Coulomb constant, kJ/mol Å e⁻², the value GMIN computes TIP4P with.
+pub const COULOMB: f64 = super::gmin_tip4p::COULOMB;
 /// Oxygen mass used to place the centre of mass, u.
 const MASS_O: f64 = 15.9994;
 /// Hydrogen mass used to place the centre of mass, u.
 const MASS_H: f64 = 1.008;
 
-/// Wales and Hodges, *Chem. Phys. Lett.* **286**, 65 (1998), putative
-/// TIP4P global minima in kJ/mol.
-pub fn wales_hodges_minimum(n_molecules: usize) -> Option<f64> {
+/// Putative TIP4P global minima in kJ/mol for 2 to 21 molecules.
+///
+/// The energy line of `TIP4P-N.xyz` in the Cambridge Cluster Database
+/// (`TIP4P-water.html`), from Wales and Hodges, *Chem. Phys. Lett.* **286**,
+/// 65 (1998). These are the
+/// energies this potential reproduces at the database coordinates.
+pub fn ccd_tip4p_minimum(n_molecules: usize) -> Option<f64> {
     Some(match n_molecules {
-        2 => -26.08757,
-        6 => -197.78,
-        8 => -305.52,
-        10 => -391.02,
-        12 => -492.91,
-        20 => -872.99,
-        21 => -916.71,
+        2 => -26.0875718462,
+        3 => -69.9938657427,
+        4 => -116.5904186160,
+        5 => -152.1090020006,
+        6 => -197.7805260034,
+        7 => -243.5723973918,
+        8 => -305.5183221676,
+        9 => -344.4352092012,
+        10 => -391.0226842125,
+        11 => -431.4890723318,
+        12 => -492.9082357122,
+        13 => -532.9705363445,
+        14 => -582.9911036211,
+        15 => -628.3722525077,
+        16 => -681.1925945898,
+        17 => -723.8077531390,
+        18 => -773.2318693143,
+        19 => -821.0369191145,
+        20 => -872.9887544952,
+        21 => -916.7074302940,
         _ => return None,
     })
+}
+
+/// Wales and Hodges, *Chem. Phys. Lett.* **286**, 65 (1998), putative
+/// TIP4P global minima in kJ/mol, as [`ccd_tip4p_minimum`] gives them.
+///
+/// The paper's two-decimal values put the 8, 12, 20 and 21 minima 1.68e-3,
+/// 1.76e-3, 1.25e-3 and 2.57e-3 kJ/mol below the database energies, up to
+/// 2.57e-3 at N = 21, so a hit test against them is not a test against the
+/// database. The 15-molecule minimum was missing.
+pub fn wales_hodges_minimum(n_molecules: usize) -> Option<f64> {
+    ccd_tip4p_minimum(n_molecules)
 }
 
 /// Rigid TIP4P cluster of `n_molecules` waters.
@@ -672,6 +706,48 @@ mod tests {
     }
 
     #[test]
+    fn the_energy_is_the_gmin_parameter_set() {
+        // GminTip4p reproduces the database minima; see its fixture test.
+        let mut rng = StdRng::seed_from_u64(9);
+        for n in [2usize, 6, 15] {
+            let pot = Tip4pCluster::new(n);
+            let x = random_cluster(n, &mut rng);
+            let mut ohh = Vec::with_capacity(9 * n);
+            for i in 0..n {
+                for site in &pot.molecule_sites(x.view(), i)[..3] {
+                    ohh.extend_from_slice(site);
+                }
+            }
+            let e = pot.eval(x.view());
+            let gmin = crate::potentials::energy_ohh(&ohh);
+            assert!(
+                (e - gmin).abs() < 1e-9 * (1.0 + gmin.abs()),
+                "{n} waters: {e} against the GMIN set {gmin}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_reference_table_is_the_database_header() {
+        for (text, n) in [
+            (include_str!("../../tests/fixtures/tip4p-10.xyz"), 10),
+            (include_str!("../../tests/fixtures/tip4p-15.xyz"), 15),
+            (include_str!("../../tests/fixtures/tip4p-20.xyz"), 20),
+        ] {
+            let header: f64 = text
+                .lines()
+                .nth(1)
+                .and_then(|l| l.split('=').nth(1))
+                .and_then(|v| v.split_whitespace().next())
+                .and_then(|v| v.parse().ok())
+                .expect("energy line");
+            assert_eq!(ccd_tip4p_minimum(n), Some(header));
+        }
+        assert!((2..=21).all(|n| ccd_tip4p_minimum(n).is_some()));
+        assert_eq!(ccd_tip4p_minimum(22), None);
+    }
+
+    #[test]
     fn the_trait_methods_agree_with_the_fused_one() {
         let pot = Tip4pCluster::new(2);
         let x = jorgensen_dimer();
@@ -692,7 +768,7 @@ mod tests {
         for seed in 0u64..4 {
             let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E3779B97F4A7C15) + 3);
             let start = random_cluster(6, &mut rng);
-            let mut ledger = Ledger::new(20_000);
+            let mut ledger = Ledger::new(40_000);
             let mut opt = WarmLbfgs::default();
             let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
                 opt.forget();
