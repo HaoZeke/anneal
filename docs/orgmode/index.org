@@ -89,6 +89,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    howto/precision-policy
    howto/rgmin-lbfgs
    howto/tip4p-cycle-reversal
+   howto/landfold
    howto/faq
    faq
 #+end_export
