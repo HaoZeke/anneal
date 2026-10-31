@@ -1175,7 +1175,7 @@ pub(crate) fn bind_graph_reference(cfg: &Config, start: ArrayView1<f64>) -> Opti
 
 /// [`separate_start`] for a search that begins here: what it did and the
 /// separated start. Nothing once a graph is bound, as in a nested search.
-fn separated_start(
+pub(crate) fn separated_start(
     cfg: &Config,
     start: ArrayView1<f64>,
 ) -> (Option<StartSeparation>, Option<Array1<f64>>) {
