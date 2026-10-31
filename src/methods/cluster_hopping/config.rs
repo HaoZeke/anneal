@@ -1396,7 +1396,24 @@ impl Config {
     /// [`Config::packing_superbasin`] adds the unmeasured SOAP-packing key
     /// and adaptive height.
     pub fn recommended(n_points: usize) -> Self {
-        let mut cfg = Self::for_cluster(n_points);
+        Self::recommended_with_scales(
+            n_points,
+            LennardJonesPreset::REDUCED_SCALE,
+            LennardJonesPreset::REDUCED_SCALE,
+        )
+    }
+
+    /// [`Config::recommended`] with every length in `length_scale` and every
+    /// energy in `energy_scale`, as [`Config::with_scales`] reads them.
+    ///
+    /// The preset's lengths are Lennard-Jones diameters, so a pair potential
+    /// whose minimum sits elsewhere passes [`crate::potentials::PairKind::length_scale`].
+    /// A Morse cluster has its minimum at 1, not at 1.12: run on reduced
+    /// units, its steps, neighbour shells, merge radius and container are all
+    /// 12% wide of the ones the preset was measured with, and the coordination
+    /// count behind surface relocation reaches past the second shell.
+    pub fn recommended_with_scales(n_points: usize, length_scale: f64, energy_scale: f64) -> Self {
+        let mut cfg = Self::screened_with_scales(n_points, length_scale, energy_scale);
         cfg.move_library = MoveLibrary::LeanBurst;
         cfg.allocate_moves = true;
         cfg.depth_reward = true;
@@ -1418,7 +1435,9 @@ impl Config {
         // Installing it only at 38 atoms was per-system tuning, so the
         // preset keeps LeanBurst at every size.
         if n_points < 98 {
-            cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
+            // The quartic penalty is an energy per length^4.
+            let beta = energy_scale / length_scale.powi(4);
+            cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, beta)];
         }
         // At 200 steps at least 27 per cent of the full quenches of LJ98
         // runs stop above the record gradient, and the chain accepts on
@@ -1574,11 +1593,15 @@ impl Config {
     /// hand-set pair, screen off and threshold `0.05`, is not a second
     /// default.
     pub fn for_cluster(n_points: usize) -> Self {
-        let mut cfg = Self::with_scales(
+        Self::screened_with_scales(
             n_points,
             LennardJonesPreset::REDUCED_SCALE,
             LennardJonesPreset::REDUCED_SCALE,
-        );
+        )
+    }
+
+    fn screened_with_scales(n_points: usize, length_scale: f64, energy_scale: f64) -> Self {
+        let mut cfg = Self::with_scales(n_points, length_scale, energy_scale);
         cfg.bayes_screen = true;
         cfg.bayes_threshold =
             crate::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
