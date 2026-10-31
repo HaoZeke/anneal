@@ -311,7 +311,7 @@ where
             stale = 0;
             stalls += 1;
             chain_best = f64::INFINITY;
-            if cfg.reseed_every > 0 && stalls % cfg.reseed_every == 0 {
+            if cfg.reseed_every > 0 && stalls.is_multiple_of(cfg.reseed_every) {
                 (Proposal::Splice, fresh(cfg, &mut rng))
             } else {
                 let a = pool.members[rng.random_range(0..pool.members.len())]
