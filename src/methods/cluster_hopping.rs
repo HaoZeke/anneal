@@ -51,9 +51,7 @@ mod packing_bank;
 mod preset;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
-pub use config::{
-    Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, SoapProposalMode,
-};
+pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, SoapProposalMode};
 pub use moves::*;
 
 #[cfg(test)]
