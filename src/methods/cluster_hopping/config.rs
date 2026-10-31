@@ -189,6 +189,31 @@ pub enum ContinuousSymmetry {
     },
 }
 
+/// Which core orbit completion ([`Config::orbit_complete_on_new`]) reads
+/// its point group from.
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OrbitCore {
+    /// The innermost [`Config::symmetrise_core_fraction`] of the points by
+    /// distance from the centroid, up to three of its operations closed
+    /// exactly ([`crate::symmetrise::orbit_complete_core`]).
+    #[default]
+    Fraction,
+    /// The innermost shells about a weighted centre, every operation
+    /// refined and closed tolerantly
+    /// ([`crate::symmetrise::orbit_complete_shells`]).
+    Shells(crate::symmetrise::ShellCore),
+    /// Both completions, shells first, each quenched and recorded; the
+    /// lower quench is offered to the acceptance rule.
+    Both(crate::symmetrise::ShellCore),
+}
+
+impl OrbitCore {
+    fn is_fraction(&self) -> bool {
+        matches!(self, Self::Fraction)
+    }
+}
+
 /// Driver settings.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Config {
@@ -452,6 +477,12 @@ pub struct Config {
     /// quenched and offered to the acceptance rule. With
     /// [`Config::point_symmetrise_on_new`] both are attempted, core first.
     pub orbit_complete_on_new: bool,
+    /// Which core an orbit completion reads its point group from. No
+    /// preset leaves the fraction core; [`Config::with_dual_orbit_core`]
+    /// opts in to both. Fraction is omitted from the resolved JSON, so a
+    /// config that never sets this resolves as it did before the field.
+    #[serde(skip_serializing_if = "OrbitCore::is_fraction")]
+    pub orbit_core: OrbitCore,
     /// Add the population-repulsion SOAP step ([`ClusterMove::SoapRepel`])
     /// as a proposal arm.
     pub soap_repel: bool,
@@ -1257,6 +1288,38 @@ impl Config {
         cfg
     }
 
+    /// [`Config::for_cluster`] with [`Config::with_dual_orbit_core`].
+    ///
+    /// Opt-in only: no other preset builds on this one, and
+    /// [`Config::for_cluster`] itself completes no orbits.
+    pub fn for_cluster_dual_core(n_points: usize) -> Self {
+        Self::for_cluster(n_points).with_dual_orbit_core()
+    }
+
+    /// Orbit completion on two cores, with a random restart on a stall.
+    ///
+    /// Every newly entered basin is completed twice, once with the point
+    /// group of the innermost shells about a weighted centre
+    /// ([`crate::symmetrise::ShellCore::scaled`] at this config's
+    /// [`Config::length_scale`]) and once with the fraction core. Each is
+    /// quenched and recorded, and the lower is offered to the acceptance
+    /// rule ([`OrbitCore::Both`]). A chain without a new ledger best for
+    /// 4000 charged calls restarts from a random cluster
+    /// ([`Config::restart_on_stall`]), and the climb
+    /// ([`Config::escape_on_stall`]) is off.
+    ///
+    /// Call it after the length scale is final. A rigid-body chain has no
+    /// orbit completion: [`Config::with_rigid_bodies`] clears both the
+    /// completion and the core.
+    pub fn with_dual_orbit_core(mut self) -> Self {
+        self.orbit_complete_on_new = true;
+        self.orbit_core = OrbitCore::Both(crate::symmetrise::ShellCore::scaled(self.length_scale));
+        self.restart_on_stall = true;
+        self.escape_on_stall = false;
+        self.restart_patience = 4_000;
+        self
+    }
+
     /// Lennard-Jones preset expressed against declared physical scales.
     pub fn with_scales(n_points: usize, length_scale: f64, energy_scale: f64) -> Self {
         assert!(
@@ -1329,6 +1392,7 @@ impl Config {
             point_symmetrise: false,
             point_symmetrise_on_new: false,
             orbit_complete_on_new: false,
+            orbit_core: OrbitCore::Fraction,
             soap_repel: false,
             exchange_metropolis: false,
             md_escape: false,
@@ -1542,6 +1606,7 @@ impl Config {
         self.point_symmetrise = false;
         self.point_symmetrise_on_new = false;
         self.orbit_complete_on_new = false;
+        self.orbit_core = OrbitCore::Fraction;
         self.angular_moves = false;
         self.continuous_symmetry = ContinuousSymmetry::Off;
         self.rigid_body_geometry = Some(geometry);
