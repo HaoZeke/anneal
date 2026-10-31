@@ -111,6 +111,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
 
    methods/catalog
    methods/composition
+   methods/torsion
 #+end_export
 
 #+begin_export rst

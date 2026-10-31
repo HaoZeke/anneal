@@ -1,0 +1,118 @@
+#+TITLE: Torsion Moves
+
+The molecular library moves whole groups rigidly.
+On one flexible molecule that leaves the SOAP pullback as the only proposal that changes the conformation in =recommended_molecular=, and conformer searches are not built that way.
+This page surveys how established codes propose conformational changes, then describes the rotor arm =recommended_molecular= now carries (=ClusterMove::Rotor=, =src/methods/cluster_hopping/torsion.rs=).
+
+* Survey
+
+** Monte Carlo minimisation on dihedrals
+
+Li and Scheraga's Monte Carlo minimisation (PNAS 84, 6611, 1987, doi:10.1073/pnas.84.19.6611) perturbs the backbone and side-chain dihedrals of a polypeptide, minimises, and accepts on the minimised energy.
+It is the dihedral form of basin hopping.
+Chang, Guida and Still (J. Am. Chem. Soc. 111, 4379, 1989, doi:10.1021/ja00194a035) run Monte Carlo in internal coordinates, minimise every trial, and bias the starting structure toward the low-energy conformers found so far.
+Wales and Doye (J. Phys. Chem. A 101, 5111, 1997) give the basin-hopping framing that the cluster driver already follows.
+
+** Tinker
+
+Tinker's MONTE program does Monte Carlo minimisation with single-atom Cartesian moves or single-torsion moves, each followed by minimisation and a Metropolis test.
+Its SCAN program is basin hopping of another kind: it activates each known minimum along its normal modes and minimises from there, adding every new minimum to the search list until none turns up.
+It does not select torsions.
+The manual finds it most useful for scanning a smoothed surface.
+
+** GMIN and OPTIM
+
+GMIN's GROUPROTATION keyword reads an =atomgroups= file.
+Each entry names a group, the two bond atoms that define the axis, the group size, a rotation scale factor and a selection probability; the group is rotated about the axis from the first bond atom to the second.
+Scale modes (=SCALENONE=, =SCALEPROB=, =SCALEROT=, =SCALEBOTH=) let the amplitude and the probability adapt.
+The AMBER and CHARMM interfaces ship a script that generates the file for side chains.
+This is the design closest to the arm here: a fixed set of rotors, one rotated per step, before the quench.
+
+** RDKit ETKDG
+
+RDKit's ETKDG (Riniker and Landrum, J. Chem. Inf. Model. 55, 2562, 2015, doi:10.1021/acs.jcim.5b00654; version 3, Wang et al., J. Chem. Inf. Model. 60, 2044, 2020, doi:10.1021/acs.jcim.0c00025) embeds conformers from distance bounds and then corrects torsions against experimental preferences: a potential \(V(\phi) = \sum_{m=1}^{6} V_m (1 + s_m \cos m\phi)\) per torsion pattern, with patterns from Schärfer et al. (J. Med. Chem. 56, 2016, 2013, doi:10.1021/jm3016816) and Guba et al. (J. Chem. Inf. Model. 56, 1, 2016, doi:10.1021/acs.jcim.5b00522).
+RDKit's rotatable-bond SMARTS in its non-strict form is a single acyclic bond between two atoms that are neither terminal nor triple-bonded.
+The strict form also excludes bonds into CF3, CCl3, CBr3, t-butyl and methyl groups, and amide, ester and acid linkages.
+
+** Open Babel Confab
+
+Confab (O'Boyle et al., J. Cheminform. 3, 8, 2011, doi:10.1186/1758-2946-3-8; Open Babel, J. Cheminform. 3, 33, 2011, doi:10.1186/1758-2946-3-33) enumerates rotors systematically.
+A rotor is an acyclic single bond whose atoms both have two or more heavy neighbours and are not sp.
+Each rotor takes the allowed angles in a torsion library (=torlib.txt=, for example -60, 60 and 180 degrees for an alkane), every combination is scored with MMFF94, and ring conformations are not sampled.
+Open Babel's random and weighted rotor searches draw from the same library instead of enumerating it.
+
+** CREST
+
+CREST's iMTD-GC workflow (Pracht, Bohle and Grimme, Phys. Chem. Chem. Phys. 22, 7169, 2020, doi:10.1039/C9CP06869D) runs metadynamics with an RMSD bias, then MD from the low conformers, then a genetic crossing of Z-matrices, \(R_\mathrm{new} = R_\mathrm{ref} + R_i - R_j\), with GFN-xTB optimisations throughout.
+CREST 3 (J. Chem. Phys. 160, 114110, 2024, doi:10.1063/5.0197592) adds further workflows.
+Since version 3.1 it has a =--bh= mode, Metropolis Monte Carlo moves on dihedral angles with local optimisations, which is the method of this page, and a =-ttconf= mode that searches a tensor-train grid over dihedrals.
+
+** Concerted moves
+
+A single torsion near the middle of a chain swings everything on its smaller side.
+The concerted rotation of polymer Monte Carlo (Dodd, Boone and Theodorou, Mol. Phys. 78, 961, 1993, doi:10.1080/00268979300100641) changes up to seven skeletal torsions together so the rest of the chain does not move.
+The arm here does not do that.
+Its counter-rotation holds one end and moves the other, and the design section says how far.
+
+* Design
+
+** Which bonds rotate
+
+Bonds are read off the current geometry with the covalent-radius bond matrix at =Config::bond_tolerance=, the rule the per-hop molecular groups use, and are re-read on every proposal.
+A bond is rotatable when
+
+- it is a bridge of the bond graph, so not in a ring;
+- neither end is terminal (one neighbour) or linear (two neighbours at more than 165 degrees);
+- it is not a double bond: both ends planar and the separation below 0.93 of the covalent radii sum;
+- it is not excluded by =RotorRules=.
+
+=RotorRules= is serialised with the resolved configuration.
+Its =terminal= field takes four values.
+
+- =polar=, the default: methyl-like groups, a carbon carrying only hydrogens and halogens, do not turn, while OH, NH2, NH3+, SH and COO- do.
+- =heavy_atom=, Confab's rule: a bond turns only when each end has two or more non-hydrogen neighbours, so CH3, OH, NH2, NH3+ and SH do not turn, and CF3 and COO- do.
+- =exclude=: no bond into a terminal group turns, CF3 and COO- included.
+- =include=: every terminal group turns.
+
+Its =amide_like= field is off by default, after the RDKit strict definition: amide C-N, ester and acid C-O and thioester C-S stay planar, since a flip there is a cis-trans isomerisation.
+
+The smaller side of the bond turns, and a side holding a frozen atom never does.
+Rotation is exact Rodrigues rotation about the bond axis, so every bond length and bond angle is kept.
+
+** Angle proposals
+
+Each rotor draws its new dihedral from a mixture.
+With probability =preferred_fraction= (0.5) it takes one of the preferred values other than the well it sits in, plus a Gaussian jitter with a standard deviation of 15 degrees: staggered (60, 180, 300) for two tetrahedral ends, syn and anti (0, 180) for two planar ends, and the six-fold set for a mixed bond.
+This is the torsion library of Confab and the preferences of ETKDG reduced to their hybridisation classes.
+Otherwise it draws uniformly outside a window of plus or minus 30 degrees around the current value, 60 degrees wide in total, since a smaller turn quenches back to where it started.
+
+** Correlated moves
+
+With probability =correlated_fraction= (0.25) a proposal turns several rotors at once.
+A share =counter_rotation_fraction= (0.5) of those are counter-rotations: two rotors one bond apart whose axes are parallel or antiparallel within 10 degrees, turned by \(\Delta\) and by \(\mp\Delta\).
+Bonds two apart along an all-trans chain qualify, and so do peptide \(\psi\) and the next \(\phi\) across a trans amide.
+The larger side stays put.
+The smaller side turns by at most twice the angle between the axes, so by at most 20 degrees, and along an all-trans chain it is translated without turning.
+It is not an end-fixed crankshaft: the far end moves.
+
+The other correlated draws turn two or three adjacent rotors independently.
+They start from one random rotor and add rotors next to those already chosen.
+A rotor with no rotatable neighbour turns alone, so a draw never turns rotors in two different molecules.
+
+** Rejection before the energy call
+
+A draw is redrawn, without calling the objective, when it brings any pair three or more bonds apart closer than 0.6 of their Bondi van der Waals radii sum (Bondi, J. Phys. Chem. 68, 441, 1964, doi:10.1021/j100785a001), or when it carries an atom beyond the larger of the container and the current extent.
+After 32 rejected draws, or with no rotatable bond, the structure comes back unchanged and the driver treats the hop as it treats an identity SOAP proposal: it draws another arm, or skips the hop when the library has no other arm.
+The ledger therefore charges only the evaluations of the trial actually quenched.
+
+In a run with a frozen frame, the driver does not clamp a rotor trial to the frame, because a turn about a bond cannot carry a molecule away from it and a clamp would bend bonds.
+In a centred run, the driver recentres a rotor trial and clamps it point by point, as it does every trial.
+The arm has already redrawn any turn that leaves the container, so the clamp leaves a rotor trial from a contained state unchanged.
+A state wider than the container is clamped point by point and bent, as under every other arm, and the molecular preset's container is narrower than an all-trans octane.
+
+** Where it is offered
+
+=Config::recommended_molecular= sets =rotor= when some group, or the whole system when no groups are given, has four or more atoms and two or more heavy atoms.
+Water, ions and other small rigid units keep the library and the resolved-configuration hash they had.
+The arm is registered with the move allocator under the name =rotor=, so its draws, accepts and best value appear in the per-arm report with the other kernels.
+Configurations with an =active_region= do not get the arm.
