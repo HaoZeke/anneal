@@ -173,7 +173,7 @@ fn read_descriptor_csv(path: &Path) -> Result<Vec<Vec<f64>>, String> {
 fn write_descriptor_csv(path: &Path, rows: &[Vec<f64>]) -> Result<(), String> {
     let mut out = String::new();
     for row in rows {
-        let line: Vec<String> = row.iter().map(|v| format!("{v:.10}")).collect();
+        let line: Vec<String> = row.iter().map(|v| format!("{v:?}")).collect();
         out.push_str(&line.join(","));
         out.push('\n');
     }

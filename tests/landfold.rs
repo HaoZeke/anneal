@@ -377,8 +377,10 @@ fn the_cli_writes_csv_and_json_for_a_minima_book() {
     for (a, b) in text.lines().zip(again.lines()).skip(1) {
         let a: Vec<&str> = a.split(',').collect();
         let b: Vec<&str> = b.split(',').collect();
-        let close =
-            |s: &str, t: &str| (s.parse::<f64>().unwrap() - t.parse::<f64>().unwrap()).abs() < 1e-6;
-        assert!(close(a[2], b[2]) && close(a[3], b[3]), "{a:?} vs {b:?}");
+        assert_eq!(
+            a[2..5],
+            b[2..5],
+            "the dumped rows fold to the map of the book"
+        );
     }
 }
