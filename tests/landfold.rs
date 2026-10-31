@@ -310,3 +310,75 @@ fn a_decaf_book_folds_with_the_two_lj38_funnels_apart() {
         "fcc and ico overlap on the map: gap {gap}"
     );
 }
+
+#[test]
+fn the_cli_writes_csv_and_json_for_a_minima_book() {
+    let dir = tempfile::tempdir().unwrap();
+    let book = dir.path().join("lj38.min");
+    std::fs::write(&book, lj38_book()).unwrap();
+    let csv = dir.path().join("lj38.csv");
+    let json = dir.path().join("lj38.json");
+    let desc = dir.path().join("lj38.desc.csv");
+    let run = |extra: &[&str]| {
+        let status = std::process::Command::new(env!("CARGO_BIN_EXE_anneal"))
+            .arg("landfold")
+            .args(extra)
+            .arg("--quiet")
+            .status()
+            .unwrap();
+        assert!(status.success(), "anneal landfold {extra:?} failed");
+    };
+    let book_s = book.to_str().unwrap();
+    run(&[
+        book_s,
+        "--out",
+        csv.to_str().unwrap(),
+        "--dump-descriptors",
+        desc.to_str().unwrap(),
+    ]);
+    run(&[book_s, "--out", json.to_str().unwrap(), "--seed", "0"]);
+
+    let text = std::fs::read_to_string(&csv).unwrap();
+    let mut lines = text.lines();
+    assert_eq!(
+        lines.next().unwrap(),
+        "index,energy,x,y,landmark,family,community"
+    );
+    let rows: Vec<Vec<&str>> = lines.map(|l| l.split(',').collect()).collect();
+    assert_eq!(rows.len(), 12);
+    assert!(rows.iter().all(|r| r.len() == 7));
+    let energy: f64 = rows[0][1].parse().unwrap();
+    assert!(
+        (energy + 173.928427).abs() < 1e-4,
+        "fcc global minimum energy {energy}"
+    );
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&json).unwrap()).unwrap();
+    assert_eq!(parsed["kind"], "landfold");
+    assert_eq!(parsed["n"], 12);
+    let points = parsed["points"].as_array().unwrap();
+    for (row, point) in rows.iter().zip(points) {
+        let x: f64 = row[2].parse().unwrap();
+        assert!(
+            (x - point["x"].as_f64().unwrap()).abs() < 1e-9,
+            "CSV and JSON agree"
+        );
+    }
+
+    let from_desc = dir.path().join("from_desc.csv");
+    run(&[
+        "--descriptors",
+        desc.to_str().unwrap(),
+        "--out",
+        from_desc.to_str().unwrap(),
+    ]);
+    let again = std::fs::read_to_string(&from_desc).unwrap();
+    for (a, b) in text.lines().zip(again.lines()).skip(1) {
+        let a: Vec<&str> = a.split(',').collect();
+        let b: Vec<&str> = b.split(',').collect();
+        let close =
+            |s: &str, t: &str| (s.parse::<f64>().unwrap() - t.parse::<f64>().unwrap()).abs() < 1e-6;
+        assert!(close(a[2], b[2]) && close(a[3], b[3]), "{a:?} vs {b:?}");
+    }
+}
