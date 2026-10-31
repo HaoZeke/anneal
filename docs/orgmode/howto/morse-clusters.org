@@ -1,0 +1,53 @@
+#+TITLE: Search Morse Clusters
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+* Scale the preset to the pair
+
+=Config::recommended= is written in Lennard-Jones diameters, with the pair minimum at 2^(1/6).
+A Morse pair has its minimum at 1, at every range.
+On reduced units, every length in the preset is 12% too wide for Morse.
+
+Pass the pair's own length scale instead:
+
+#+begin_src rust
+use anneal_core::methods::cluster_hopping::Config;
+use anneal_core::potentials::PairPotential;
+
+let pot = PairPotential::morse(43, 6.0);
+let cfg = Config::recommended_with_scales(43, pot.kind().length_scale(), 1.0);
+#+end_src
+
+=PairKind::length_scale= is =r_min / 2^(1/6)=: 1 for Lennard-Jones and 0.891 for Morse.
+
+* What scales
+
+- These lengths: the step, the neighbour cutoff behind the coordination counts, the merge radius, the container and the minimum separation.
+- The two-phase surface's quartic penalty, as an energy per length^4.
+- The temperature, which scales with the energy.
+  The Morse well depth is 1, the same as the Lennard-Jones epsilon, so the temperature keeps the preset's value.
+
+The range rho does not enter.
+At rho = 6 the Morse well has the Lennard-Jones curvature once its minimum is fitted.
+
+* Measured effect
+
+#+begin_export rst
+.. image:: /_static/morse6-hits.svg
+   :width: 520
+   :align: center
+   :alt: Hits of 16 seeds at rho = 6 for N = 35, 37, 43, 44 and 60, reduced units against the pair length scale
+#+end_export
+
+- Sizes: N = 35, 37, 43, 44 and 60 at rho = 6.
+- Seeds: 12000 to 12015.
+- Budget: 100000 calls per run.
+- Hit: within 1e-3 of the Cambridge table's energy, with every gradient component at most 1e-3.
+
+To reproduce:
+
+#+begin_src sh
+cargo run --release --example morse_table -- \
+  examples/fixtures/morse_ccd.csv 6 35,37,43,44,60 100000 12000 16
+#+end_src
+
+Append =reduced= to run =Config::recommended= on reduced units.
