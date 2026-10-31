@@ -12,7 +12,11 @@
 //! three. `chains4` is the four exchanging chains without the group gate.
 //! `polish` runs only the preset's final polish on the xyz structure, with
 //! the whole budget. `crush` is the preset with atom-by-atom containment,
-//! [`Config::rigid_containment`] off.
+//! [`Config::rigid_containment`] off. `molecular` is
+//! [`Config::for_molecular`] at the preset's gate, and `communicating` and
+//! `derived` overlay those water arms on the preset. `ORGANIC_LOCAL_STEP`
+//! (`lbfgs` or `anc`), `ORGANIC_RECORD_GRADIENT` and `ORGANIC_RELAX_STEPS`
+//! override any arm's local optimiser, gate and full-relaxation cap.
 //!
 //! The xyz comment may be `groups i,j;k,l`. Without it, every atom is
 //! one group.
@@ -29,6 +33,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
 
+use anneal_core::catalog::molecular::{WaterSearchArm, configure_water_arm};
+use anneal_core::methods::anc_opt::LocalStep;
 use anneal_core::methods::cluster_hopping::{
     Config, GraphCause, GraphCauses, GraphRefusal, Ledger, SoapProposalMode, StartSeparation,
     polish_structure, rotatable_bond_count,
@@ -195,8 +201,39 @@ fn gap_arm(arm: &str, species: &[u32], groups: &[Vec<usize>]) -> Option<Config> 
             cfg.chain_exchange = true;
             cfg
         }
+        "molecular" => {
+            let mut cfg = Config::for_molecular(species.to_vec(), groups.to_vec(), 1.0);
+            cfg.record_gradient = 5.0e-2;
+            cfg
+        }
+        "communicating" => {
+            let mut cfg = cfg;
+            configure_water_arm(&mut cfg, WaterSearchArm::Communicating);
+            cfg
+        }
+        "derived" => {
+            let mut cfg = cfg;
+            configure_water_arm(&mut cfg, WaterSearchArm::Derived);
+            cfg
+        }
         _ => return None,
     })
+}
+
+/// `ORGANIC_LOCAL_STEP`, `ORGANIC_RECORD_GRADIENT` and `ORGANIC_RELAX_STEPS`
+/// override the arm's local optimiser, gate and full-relaxation cap.
+fn apply_overrides(cfg: &mut Config) {
+    match std::env::var("ORGANIC_LOCAL_STEP").as_deref() {
+        Ok("anc") => cfg.local_step = LocalStep::ANC_EV_ANGSTROM,
+        Ok("lbfgs") | Err(_) => cfg.local_step = LocalStep::Lbfgs,
+        Ok(other) => panic!("ORGANIC_LOCAL_STEP {other}: expected anc or lbfgs"),
+    }
+    if let Ok(value) = std::env::var("ORGANIC_RECORD_GRADIENT") {
+        cfg.record_gradient = value.parse().expect("ORGANIC_RECORD_GRADIENT");
+    }
+    if let Ok(value) = std::env::var("ORGANIC_RELAX_STEPS") {
+        cfg.relax_steps = value.parse().expect("ORGANIC_RELAX_STEPS");
+    }
 }
 
 fn main() {
@@ -255,6 +292,7 @@ fn main() {
         cfg
     };
     cfg.replicas = cfg.replicas.max(1);
+    apply_overrides(&mut cfg);
     let rotors = rotatable_bond_count(
         start.view(),
         cfg.species.as_deref().unwrap_or(&[]),
@@ -272,6 +310,9 @@ fn main() {
     println!("record_polish {}", cfg.record_polish);
     println!("separate_start_molecules {}", cfg.separate_start_molecules);
     println!("rigid_containment {}", cfg.rigid_containment);
+    println!("local_step {:?}", cfg.local_step);
+    println!("record_gradient {:e}", cfg.record_gradient);
+    println!("relax_steps {}", cfg.relax_steps);
     let mut ledger = Ledger::new(budget);
     let started = std::time::Instant::now();
     let (out, stats) = search_from(&obj, &cfg, &mut ledger, start.view(), seed)
