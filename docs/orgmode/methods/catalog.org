@@ -200,7 +200,8 @@ with the SOAP arm and Thompson allocation over the arms. Like
 =Config::communicating=, it completes the core's orbit on every new basin
 and, below 98 points, draws between the plain and the two-phase relative
 0.7 surface.
-The completed structure faces the same biased Metropolis test as a hop (=biased_metropolis= in src/methods/cluster_hopping.rs), so the history deposits can refuse it.
+A completed structure that ends in a basin the history has deposited on faces the same biased Metropolis test as a hop (=returns_to_deposit= and =biased_metropolis= in src/methods/cluster_hopping.rs), so the deposits can refuse it.
+Any other completed structure faces the raw energy test.
 
 Feeds/consumes: selected per-config by =MoveLibrary::kernels=; chosen
 per-hop by the allocators below (=allocate_moves= / =contextual_moves= /
