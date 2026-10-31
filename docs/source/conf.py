@@ -47,6 +47,7 @@ Rust API (``anneal-core``)
    :maxdepth: 2
 
    ../crates/anneal_core/lib
+   ../crates/anneal_core/bin/anneal
 """
 
 # -- Options for HTML output -------------------------------------------------

@@ -4,7 +4,7 @@
 //! reads each one as a DECAF class histogram on a shared codebook, and two
 //! minima are compared by the L1 distance of their histograms. [`landfold`]
 //! maps any set of descriptor rows to the plane in four steps, the hybrid
-//! `docs/landfold-survey.org` argues for:
+//! `docs/orgmode/explanation/landfold-survey.org` argues for:
 //!
 //! 1. Landmarks by farthest-point sampling (Gonzalez 1985), the first one
 //!    drawn from the seed. Each landmark is weighted by the number of rows
