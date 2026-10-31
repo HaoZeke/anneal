@@ -77,3 +77,11 @@ sizes = [6]
 seed_start = 0
 seed_end = 31
 detail = "32 seeds per engine, frozen as 0-31. (H2O)6 under GFN2-xTB, NWChem PBE/6-31G*, and PET-MAD, 4000 force evaluations. The search arm is recommended_molecular. Communicating, derived, and Good-Turing are additional arms on the same seeds."
+
+[[run]]
+id = "ccd-morse55-tip4p"
+items = ["Morse55", "TIP4P15", "TIP4P20"]
+sizes = [55, 15, 20]
+seed_start = 9200
+seed_end = 9231
+detail = "32 seeds per arm and problem, examples/ccd_hits. Morse 55 at rho = 14 and rigid TIP4P (GMIN parameters) for 15 and 20 molecules. Budgets in potential calls, every call counted: 1e6 for Morse55 and TIP4P15, 2e7 for TIP4P20. A seed is a hit when an evaluated point lies at or below the Cambridge Cluster Database minimum plus 1e-3 within the budget. Arms: recommended on develop, gmin on the fix."
