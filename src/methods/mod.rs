@@ -13,6 +13,8 @@
 
 /// History-conditioned escape feedback, after Goedecker's minima hopping.
 pub mod activation;
+/// Molecular relaxation in approximate normal coordinates of a model Hessian.
+pub mod anc_opt;
 /// Residual archive search: local events, floors, cheap novelty loop.
 #[cfg(feature = "graphkey")]
 pub mod archive_search;
