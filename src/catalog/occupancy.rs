@@ -1532,19 +1532,29 @@ fn torgerson_2d(dist: &[Vec<f64>]) -> Option<(Vec<[f64; 2]>, [f64; 2])> {
         }
     }
     let mut y = vec![[0.0; 2]; n];
+    // Unit eigenvectors. `y` stores √λ u, so deflating against `y` removes
+    // λ₁ times the unit-vector term: the second coordinate goes to zero when
+    // λ₁ > 1 and copies the first when λ₁ < 1.
+    let mut unit = [vec![0.0; n], vec![0.0; n]];
     let mut spectrum = [0.0; 2];
     for k in 0..2 {
+        // A pure ±1 seed is the λ = −1 mode of the unit-square metric, so
+        // power iteration never reaches the repeated eigenvalue 2. The ramp
+        // keeps that seed from lying in one eigenspace.
         let mut v: Vec<f64> = (0..n)
-            .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
+            .map(|i| {
+                let alt = if i % 2 == 0 { 1.0 } else { -1.0 };
+                alt + 0.05 * (i as f64 + 1.0)
+            })
             .collect();
         let norm0 = v.iter().map(|z| z * z).sum::<f64>().sqrt().max(1e-15);
         for z in &mut v {
             *z /= norm0;
         }
         if k == 1 {
-            let prev: f64 = v.iter().zip(y.iter()).map(|(a, row)| a * row[0]).sum();
+            let prev: f64 = v.iter().zip(&unit[0]).map(|(a, u)| a * u).sum();
             for i in 0..n {
-                v[i] -= prev * y[i][0];
+                v[i] -= prev * unit[0][i];
             }
             let norm = v.iter().map(|z| z * z).sum::<f64>().sqrt().max(1e-15);
             for z in &mut v {
@@ -1560,9 +1570,9 @@ fn torgerson_2d(dist: &[Vec<f64>]) -> Option<(Vec<[f64; 2]>, [f64; 2])> {
                 }
             }
             if k == 1 {
-                let prev: f64 = w.iter().zip(y.iter()).map(|(a, row)| a * row[0]).sum();
+                let prev: f64 = w.iter().zip(&unit[0]).map(|(a, u)| a * u).sum();
                 for i in 0..n {
-                    w[i] -= prev * y[i][0];
+                    w[i] -= prev * unit[0][i];
                 }
             }
             lambda = w.iter().zip(v.iter()).map(|(a, c)| a * c).sum();
@@ -1573,6 +1583,7 @@ fn torgerson_2d(dist: &[Vec<f64>]) -> Option<(Vec<[f64; 2]>, [f64; 2])> {
         }
         let scale = lambda.max(0.0).sqrt();
         spectrum[k] = lambda.max(0.0);
+        unit[k].clone_from(&v);
         for i in 0..n {
             y[i][k] = scale * v[i];
         }
@@ -2023,21 +2034,69 @@ mod tests {
     use super::OccupancyBookMap;
     use super::{
         CHAMPION_RANK, InterfaceSeat, LEAVE_CROSSING_HOPS, LeavePath, OCCUPANCY_SEAM_CONDUCTANCE,
-        OccupancyCertificate, OccupancyFesError, OccupancyLeaveAdopt, OccupancyLeaveTarget,
-        PackingRole, assign_interfaces, hops_per_core_hour, in_interface_ensemble,
-        interface_ladder, is_occupancy_leave_action, leave_crossing_slices, leave_defers,
-        leave_shot_accepted, leftover_birth_probability, leftover_dwell_from_census,
+        OccupancyCertificate, OccupancyFesError, OccupancyFold, OccupancyLeaveAdopt,
+        OccupancyLeaveTarget, PackingRole, assign_interfaces, hops_per_core_hour,
+        in_interface_ensemble, interface_ladder, is_occupancy_leave_action, leave_crossing_slices,
+        leave_defers, leave_shot_accepted, leftover_birth_probability, leftover_dwell_from_census,
         leftover_esty_stable, leftover_esty_var, leftover_hatch_stable, leftover_lambda,
         leftover_sat_dwell, occupancy_book_holes, occupancy_compact, occupancy_complete,
         occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes,
         occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_is_cluster,
         occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_by_birth,
         occupancy_leave_by_ei, occupancy_leave_new_class, occupancy_leave_target,
-        occupancy_map_floor, occupancy_retire, occupancy_retire_at, occupancy_ring_class_changed,
-        occupancy_ring_floor, occupancy_sparsify_book, packing_role, pitman_yor_p_new,
-        promote_one_sided, published_energy_score, retis_exchange_adjacent, retis_should_swap,
-        ring_leave_weight, ring_novelty, seat_extras,
+        occupancy_map_floor, occupancy_map_fold, occupancy_retire, occupancy_retire_at,
+        occupancy_ring_class_changed, occupancy_ring_floor, occupancy_sparsify_book, packing_role,
+        pitman_yor_p_new, promote_one_sided, published_energy_score, retis_exchange_adjacent,
+        retis_should_swap, ring_leave_weight, ring_novelty, seat_extras,
     };
+
+    /// L1 distances of the unit-square corners have a repeated Torgerson
+    /// eigenvalue 2. Deflating against √λ u instead of u zeroed the second.
+    #[test]
+    fn torgerson_square_keeps_two_axes() {
+        let corners = vec![
+            vec![0.0, 0.0],
+            vec![1.0, 0.0],
+            vec![1.0, 1.0],
+            vec![0.0, 1.0],
+        ];
+        let (xy, spectrum) =
+            occupancy_map_fold(&corners, OccupancyFold::Identity).expect("square embeds");
+        assert!(
+            (spectrum[0] - 2.0).abs() < 1e-6 && (spectrum[1] - 2.0).abs() < 1e-6,
+            "square spectrum {spectrum:?}"
+        );
+        let spread = |axis: usize| {
+            let mean = xy.iter().map(|p| p[axis]).sum::<f64>() / xy.len() as f64;
+            (xy.iter().map(|p| (p[axis] - mean).powi(2)).sum::<f64>() / xy.len() as f64).sqrt()
+        };
+        assert!(
+            spread(0) > 0.2 && spread(1) > 0.2,
+            "square collapsed: {xy:?}"
+        );
+
+        // A rectangle is still rank 2: unequal sides, both axes live.
+        let rectangle = vec![
+            vec![0.0, 0.0],
+            vec![3.0, 0.0],
+            vec![3.0, 1.0],
+            vec![0.0, 1.0],
+        ];
+        let (rect, rect_spectrum) =
+            occupancy_map_fold(&rectangle, OccupancyFold::Identity).expect("rectangle embeds");
+        assert!(
+            rect_spectrum[0] > 1.0 && rect_spectrum[1] > 0.2,
+            "rectangle spectrum {rect_spectrum:?} xy {rect:?}"
+        );
+        let rect_spread = |axis: usize| {
+            let mean = rect.iter().map(|p| p[axis]).sum::<f64>() / rect.len() as f64;
+            (rect.iter().map(|p| (p[axis] - mean).powi(2)).sum::<f64>() / rect.len() as f64).sqrt()
+        };
+        assert!(
+            rect_spread(0) > 0.2 && rect_spread(1) > 0.2,
+            "rectangle collapsed: {rect:?}"
+        );
+    }
 
     fn book_of(counts: &[u64]) -> OccupancyBookMap {
         OccupancyBookMap {
