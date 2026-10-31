@@ -1,0 +1,3 @@
+``Tip4pCluster`` uses the TIP4P parameters the Cambridge Cluster Database minima were computed with: the oxygen well depth is ``C6^2 / 4 C12`` from Jorgensen's coefficients instead of the rounded 0.6485 kJ/mol, and the Coulomb prefactor is GMIN's 1389.354848.
+The rounded depth left every minimum about 1.3e-3 kJ/mol per molecule above the database, so 15 and 20 molecule runs on this objective could not reach the published energies.
+``ccd_tip4p_minimum`` lists the database energies for 2 to 21 molecules at full precision; ``wales_hodges_minimum`` now returns the same values, which adds the missing 15-molecule entry and replaces the two-decimal values for 8, 12, 20 and 21 molecules, which sat up to 2.57e-3 kJ/mol (N = 21) below the database energies.
