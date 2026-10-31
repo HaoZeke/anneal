@@ -84,7 +84,10 @@ pub struct SuttonChen {
 impl SuttonChen {
     /// Potential over `n_points` in a box wide enough for a compact cluster.
     pub fn new(n_points: usize, family: SuttonChenFamily) -> Self {
-        assert!(n_points >= 2, "a Sutton-Chen cluster needs at least two points");
+        assert!(
+            n_points >= 2,
+            "a Sutton-Chen cluster needs at least two points"
+        );
         let dim = 3 * n_points;
         // Bulk nearest-neighbour distance at lattice constant a = 1 is 1/sqrt(2).
         let nn = std::f64::consts::FRAC_1_SQRT_2;
@@ -191,8 +194,7 @@ struct Bond {
 fn reduced_powers(r2: f64, n_exp: i32, m_exp: i32) -> (f64, f64) {
     let inv2 = 1.0 / r2;
     let phi = if m_exp == 6 {
-        let inv3 = inv2 * inv2 * inv2;
-        inv3
+        inv2 * inv2 * inv2
     } else {
         r2.sqrt().powi(-m_exp)
     };
