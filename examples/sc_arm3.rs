@@ -137,7 +137,9 @@ fn main() {
         opt.forget();
         let full = iters > screen_steps;
         // Full quenches stop at an infinity-norm of the same 1e-3 GMIN uses
-        // as an RMS bound (`BQMAX`). A screen runs its step count.
+        // as an RMS bound (`BQMAX`). The 1e9 tolerance ends a screen at
+        // its first gradient check, so a screen costs one or two calls
+        // rather than its step count. Arm 3 is benchmarked with this screen.
         opt.gtol = if full { QUENCH_RMS } else { 1.0e9 };
         let cap = if full { iters.min(relax_steps) } else { iters };
         let (mut energy, xr, _) =
