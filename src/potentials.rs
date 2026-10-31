@@ -281,6 +281,7 @@ pub use tip4p::{
     fold_rotation_vectors, jorgensen_dimer, random_cluster as random_tip4p_cluster,
     wales_hodges_minimum,
 };
+pub(crate) use tip4p::{mat_vec, rotation_matrix, rotation_vector};
 
 impl crate::pes_exploration::PesSurface for PairPotential {
     type Error = std::convert::Infallible;
