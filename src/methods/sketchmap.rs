@@ -327,15 +327,29 @@ fn classical_mds_2d(dist: ArrayView2<f64>) -> Option<Array2<f64>> {
         }
     }
     // Power iteration for top-2 eigenpairs (symmetric).
+    // `y` stores √λ u. Deflate against the unit vector, not against `y`:
+    // subtracting `(w · y) y` scales the projection by λ₁.
     let mut y = Array2::<f64>::zeros((n, 2));
+    let mut unit = Array2::<f64>::zeros((n, 2));
     for k in 0..2 {
-        let mut v = Array1::from_elem(n, 1.0 / (n as f64).sqrt());
-        // Orthogonalize against previous.
+        // The constant vector is the kernel of a double-centered Gram matrix.
+        // An exact square then stays at the origin. A non-constant seed
+        // reaches the positive eigenvalues.
+        let mut v = Array1::zeros(n);
+        for i in 0..n {
+            let alt = if i % 2 == 0 { 1.0 } else { -1.0 };
+            v[i] = alt + 0.05 * (i as f64 + 1.0);
+        }
+        let norm0 = v.dot(&v).sqrt().max(1e-15);
+        v.mapv_inplace(|z| z / norm0);
         if k == 1 {
-            let prev = y.column(0).to_owned();
-            let dot: f64 = v.iter().zip(prev.iter()).map(|(a, b)| a * b).sum();
+            let dot: f64 = v
+                .iter()
+                .zip(unit.column(0).iter())
+                .map(|(a, b)| a * b)
+                .sum();
             for i in 0..n {
-                v[i] -= dot * prev[i];
+                v[i] -= dot * unit[[i, 0]];
             }
             let norm = v.dot(&v).sqrt().max(1e-15);
             v.mapv_inplace(|z| z / norm);
@@ -351,27 +365,22 @@ fn classical_mds_2d(dist: ArrayView2<f64>) -> Option<Array2<f64>> {
                 w[i] = acc;
             }
             if k == 1 {
-                let prev = y.column(0).to_owned();
-                let dot: f64 = w.iter().zip(prev.iter()).map(|(a, b)| a * b).sum();
+                let dot: f64 = w
+                    .iter()
+                    .zip(unit.column(0).iter())
+                    .map(|(a, b)| a * b)
+                    .sum();
                 for i in 0..n {
-                    w[i] -= dot * prev[i];
+                    w[i] -= dot * unit[[i, 0]];
                 }
             }
+            lambda = w.dot(&v);
             let norm = w.dot(&w).sqrt().max(1e-15);
             v = w / norm;
-            // Rayleigh
-            let mut num = 0.0;
-            for i in 0..n {
-                let mut acc = 0.0;
-                for j in 0..n {
-                    acc += b[[i, j]] * v[j];
-                }
-                num += v[i] * acc;
-            }
-            lambda = num;
         }
         let scale = lambda.max(0.0).sqrt();
         for i in 0..n {
+            unit[[i, k]] = v[i];
             y[[i, k]] = scale * v[i];
         }
     }
@@ -416,6 +425,43 @@ pub fn farthest_point_landmarks(xs: &[Array1<f64>], max_landmarks: usize) -> Vec
 mod tests {
     use super::*;
     use ndarray::array;
+
+    #[test]
+    fn classical_mds_square_is_not_a_line() {
+        // Same L1 metric as the unit-square corners. Both Gram eigenvalues are 2.
+        let dist = array![
+            [0.0, 1.0, 2.0, 1.0],
+            [1.0, 0.0, 1.0, 2.0],
+            [2.0, 1.0, 0.0, 1.0],
+            [1.0, 2.0, 1.0, 0.0],
+        ];
+        let embedded = classical_mds_2d(dist.view()).expect("square embeds");
+        let lambda = |axis: usize| embedded.column(axis).mapv(|v| v * v).sum();
+        let l1 = lambda(0);
+        let l2 = lambda(1);
+        assert!(
+            (l1 - 2.0).abs() < 1e-6 && (l2 - 2.0).abs() < 1e-6,
+            "square eigenvalues {l1} {l2}, emb {embedded:?}"
+        );
+
+        // A 0.6 by 0.2 rectangle has Gram eigenvalues 0.48 and 0.16. With
+        // λ₁ < 1, deflating against √λ u left a copy of the first column in
+        // the second, so the embedding was a line.
+        let rect = array![
+            [0.0, 0.6, 0.8, 0.2],
+            [0.6, 0.0, 0.2, 0.8],
+            [0.8, 0.2, 0.0, 0.6],
+            [0.2, 0.8, 0.6, 0.0],
+        ];
+        let flat = classical_mds_2d(rect.view()).expect("rectangle embeds");
+        let r1 = flat.column(0).mapv(|v| v * v).sum();
+        let r2 = flat.column(1).mapv(|v| v * v).sum();
+        let cross = flat.column(0).dot(&flat.column(1));
+        assert!(
+            (r1 - 0.48).abs() < 1e-6 && (r2 - 0.16).abs() < 1e-6 && cross.abs() < 1e-6,
+            "rectangle eigenvalues {r1} {r2}, cross {cross}, emb {flat:?}"
+        );
+    }
 
     #[test]
     fn sigmoid_is_zero_at_origin_and_increases() {
