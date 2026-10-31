@@ -103,6 +103,9 @@ libc = { version = "0.2", optional = true }
 # C core so SLURM tasks do not need LD_LIBRARY_PATH.
 featomic   = { version = "0.6.0", features = ["metatensor-static"], optional = true }
 metatensor = { version = "=0.2.3", optional = true }
+# The Thomson cover is pinned to one bit pattern. The `arch` feature
+# switches sqrt and fma to the host, so both targets use the soft path.
+libm = { version = "0.2.16", default-features = false }
 
 [dev-dependencies]
 criterion = { version = "0.6", features = ["html_reports"] }
