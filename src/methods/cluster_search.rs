@@ -1489,6 +1489,38 @@ mod tests {
         );
     }
 
+    /// Under ANC a refusal is counted as `WarmLbfgs` counts it, and a refused
+    /// start ends at `+inf` where it began.
+    #[test]
+    fn the_anc_local_step_counts_refusals_as_lbfgs_does() {
+        let mut cfg = Config::for_cluster(4);
+        cfg.species = Some(vec![18; 4]);
+        cfg.local_step = LocalStep::Anc {
+            model: crate::methods::anc_opt::ModelHessian::Lindh,
+            units: crate::methods::anc_opt::AncUnits::ATOMIC,
+        };
+        let start = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1,
+        ]);
+        for (answered, f_finite, refused_starts) in [(0, false, 1), (3, true, 0)] {
+            let objective = RefusesAfter::new(4, answered);
+            let mut stats = RelaxStats::default();
+            let mut ledger = Ledger::new(100);
+            let (f, x) = {
+                let mut relax = warm_relax(&objective, &cfg, &mut stats, 0);
+                relax(&mut ledger, start.view(), cfg.relax_steps)
+            };
+            assert_eq!(f.is_finite(), f_finite, "answered {answered}");
+            assert_eq!(stats.refused, 1, "answered {answered}");
+            assert_eq!(stats.refused_starts, refused_starts, "answered {answered}");
+            if !f_finite {
+                assert_eq!(f, f64::INFINITY);
+                assert_eq!(x, start);
+                assert_eq!(ledger.spent(), 1);
+            }
+        }
+    }
+
     #[test]
     fn convergence_uses_the_configured_recording_threshold() {
         let gradient = Array1::from_vec(vec![7.2e-5, -3.0e-5]);
