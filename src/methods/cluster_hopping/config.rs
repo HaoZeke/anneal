@@ -1026,6 +1026,18 @@ pub struct Config {
     /// when set.
     #[serde(default, skip_serializing_if = "is_false")]
     pub keep_bond_graph: bool,
+    /// Polish the recorded bests once the search ends, with a quasi-Newton
+    /// optimizer over a model Hessian's approximate normal coordinates and a
+    /// tight stop on energy change and gradient norm. The search ends early by
+    /// the dimension of those coordinates, and the polish spends what is left,
+    /// lowest record first. Unlike [`Config::polish_records`], it runs after
+    /// the search and not with the search's own relaxation. Only the
+    /// value-and-gradient entry points run it. Set by
+    /// [`Config::for_molecular`]; no effect without species or under a
+    /// rigid-body move library. Angstrom and electronvolt, as
+    /// [`Config::record_gradient`] assumes there. Serialized only when set.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub record_polish: bool,
     /// The start's graph under [`Config::keep_bond_graph`], bound when the
     /// search begins so nested searches judge against the caller's start.
     #[serde(skip)]
@@ -1451,6 +1463,7 @@ impl Config {
             chain_exchange: false,
             torsion_kicks: false,
             keep_bond_graph: false,
+            record_polish: false,
             graph_reference: None,
             two_phase: None,
             reoccupy: None,
@@ -1631,7 +1644,8 @@ impl Config {
 
     /// Species-aware molecular preset with rigid groups. It keeps the start's
     /// covalent graph ([`Config::keep_bond_graph`]); a search meant to form or
-    /// break bonds turns that off.
+    /// break bonds turns that off. It polishes its records once the search
+    /// ends ([`Config::record_polish`]).
     pub fn for_molecular(species: Vec<u32>, groups: Vec<Vec<usize>>, energy_scale: f64) -> Self {
         assert!(!species.is_empty(), "species must not be empty");
         let length_scale = MolecularPreset::COVALENT_DIAMETER
@@ -1649,6 +1663,7 @@ impl Config {
         };
         cfg.species = Some(species);
         cfg.keep_bond_graph = true;
+        cfg.record_polish = true;
         cfg
     }
 
