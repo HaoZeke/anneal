@@ -1038,6 +1038,16 @@ pub struct Config {
     /// [`Config::record_gradient`] assumes there. Serialized only when set.
     #[serde(default, skip_serializing_if = "is_false")]
     pub record_polish: bool,
+    /// Separate a start whose declared molecules are in covalent contact
+    /// before its graph is bound: when two atoms of different groups bond
+    /// under the graph rule, every group moves rigidly away from the mean
+    /// of the group centroids by the smallest factor 1.05^k, k at most 60,
+    /// that leaves no such bond. An atom in no group is a group of its own.
+    /// It costs no call. Acts only under [`Config::keep_bond_graph`], with
+    /// species, nothing frozen and at least two declared groups. Set by
+    /// [`Config::for_molecular`]. Serialized only when set.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub separate_start_molecules: bool,
     /// The start's graph under [`Config::keep_bond_graph`], bound when the
     /// search begins so nested searches judge against the caller's start.
     #[serde(skip)]
@@ -1470,6 +1480,7 @@ impl Config {
             torsion_kicks: false,
             keep_bond_graph: false,
             record_polish: false,
+            separate_start_molecules: false,
             graph_reference: None,
             two_phase: None,
             reoccupy: None,
@@ -1651,8 +1662,9 @@ impl Config {
 
     /// Species-aware molecular preset with rigid groups. It keeps the start's
     /// covalent graph ([`Config::keep_bond_graph`]); a search meant to form or
-    /// break bonds turns that off. It polishes its records once the search
-    /// ends ([`Config::record_polish`]).
+    /// break bonds turns that off. It separates molecules that start in
+    /// covalent contact ([`Config::separate_start_molecules`]) and polishes
+    /// its records once the search ends ([`Config::record_polish`]).
     pub fn for_molecular(species: Vec<u32>, groups: Vec<Vec<usize>>, energy_scale: f64) -> Self {
         assert!(!species.is_empty(), "species must not be empty");
         let length_scale = MolecularPreset::COVALENT_DIAMETER
@@ -1671,6 +1683,7 @@ impl Config {
         cfg.species = Some(species);
         cfg.keep_bond_graph = true;
         cfg.record_polish = true;
+        cfg.separate_start_molecules = true;
         cfg
     }
 

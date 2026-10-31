@@ -55,7 +55,9 @@ mod preset;
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, SoapProposalMode};
 pub use moves::*;
-pub use organic::{com_radius, fragment_container, rotatable_bond_count};
+pub use organic::{
+    StartSeparation, com_radius, fragment_container, rotatable_bond_count, separate_start,
+};
 pub use polish::{PolishReport, PolishedRecord, model_hessian, polish_structure};
 
 #[cfg(test)]
@@ -1056,6 +1058,9 @@ pub struct Outcome {
     pub energy_bias: Option<crate::dos::EnergyBias>,
     /// The final polish of the records, under [`Config::record_polish`].
     pub polish: Option<PolishReport>,
+    /// What [`Config::separate_start_molecules`] did to the start, when it
+    /// found molecules in covalent contact.
+    pub start_separation: Option<StartSeparation>,
 }
 
 /// Relaxes `x`, charging every evaluation, and stopping when the budget ends.
@@ -1233,6 +1238,21 @@ pub(crate) fn bind_graph_reference(cfg: &Config, start: ArrayView1<f64>) -> Opti
     Some(bound)
 }
 
+/// [`separate_start`] for a search that begins here: what it did and the
+/// separated start. Nothing once a graph is bound, as in a nested search.
+fn separated_start(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+) -> (Option<StartSeparation>, Option<Array1<f64>>) {
+    if cfg.graph_reference.is_some() {
+        return (None, None);
+    }
+    match separate_start(cfg, start) {
+        Some((report, state)) => (Some(report), state),
+        None => (None, None),
+    }
+}
+
 fn gradient_is_converged(gradient: ArrayView1<f64>, dimensions: usize, tolerance: f64) -> bool {
     dimensions > 0
         && gradient.len() == dimensions
@@ -1386,8 +1406,9 @@ pub fn run_with_energy_gradient<'g, R: Rng + ?Sized>(
 /// [`Config::record_polish`] by the polish of the records.
 ///
 /// The search runs on the budget less [`polish::reserve`], and the polish
-/// then has every call the ledger has left. The graph is bound here, so the
-/// polish judges structures against the reference the search used.
+/// then has every call the ledger has left. The start is separated and the
+/// graph bound here, so the polish judges structures against the reference
+/// the search used.
 #[allow(clippy::too_many_arguments)]
 fn run_then_polish<'g, R, H>(
     cfg: &Config,
@@ -1404,13 +1425,17 @@ where
     R: Rng + ?Sized,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
+    let (separation, separated) = separated_start(cfg, start);
+    let start = separated.as_ref().map_or(start, |state| state.view());
+    let bound = bind_graph_reference(cfg, start);
+    let cfg = bound.as_ref().unwrap_or(cfg);
     let reserve = if energy_grad.is_some() {
         polish::reserve(cfg, start, ledger.remaining())
     } else {
         0
     };
     if reserve == 0 {
-        return run_full(
+        let mut outcome = run_full(
             cfg,
             start,
             ledger,
@@ -1423,10 +1448,12 @@ where
             checkpoint_interval,
             checkpoint,
             rng,
-        );
+        )?;
+        if separation.is_some() {
+            outcome.start_separation = separation;
+        }
+        return Ok(outcome);
     }
-    let bound = bind_graph_reference(cfg, start);
-    let cfg = bound.as_ref().unwrap_or(cfg);
     ledger.budget -= reserve;
     let outer_records = ledger.records.replace(Vec::new());
     let searched = run_full(
@@ -1446,6 +1473,9 @@ where
     ledger.budget += reserve;
     let records = std::mem::replace(&mut ledger.records, outer_records).unwrap_or_default();
     let mut outcome = searched?;
+    if separation.is_some() {
+        outcome.start_separation = separation;
+    }
     if let Some(energy_grad) = energy_grad {
         polish::polish_records(cfg, ledger, energy_grad, records, reserve, &mut outcome);
     }
@@ -2167,6 +2197,8 @@ where
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
     let _caller_stop = ledger.bind_stop();
+    let (separation, separated) = separated_start(cfg, start);
+    let start = separated.as_ref().map_or(start, |state| state.view());
     let bound = bind_graph_reference(cfg, start);
     let cfg = bound.as_ref().unwrap_or(cfg);
     let graph_changes_before = cfg.graph_reference.as_ref().map_or(0, |r| r.changes());
@@ -6740,6 +6772,7 @@ where
         }),
         energy_bias: ebias,
         polish: None,
+        start_separation: separation,
     })
 }
 
