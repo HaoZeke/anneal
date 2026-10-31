@@ -206,6 +206,9 @@ impl MoveLibrary {
                 if cfg.soap_mode != SoapProposalMode::Off {
                     kernels.push(soap_arm(cfg, mobile, Some(groups.clone())));
                 }
+                if let Some(arm) = cfg.rotor.as_ref().and_then(|s| rotor_arm(cfg, s)) {
+                    kernels.push(arm);
+                }
                 kernels
             }
             Self::RigidBody {
@@ -595,6 +598,25 @@ pub enum ClusterMove {
         /// nearest finite rigid motions before the proposal is returned.
         groups: Option<Vec<Vec<usize>>>,
     },
+    /// Turn one side of a rotatable bond, or of a few neighbouring bonds
+    /// together, keeping every bond length and angle. See [`TorsionMove`].
+    /// The angle is drawn from a dihedral mixture, so there is no amplitude
+    /// for a scale to multiply.
+    Rotor(TorsionMove),
+}
+
+fn rotor_arm(cfg: &Config, settings: &TorsionSettings) -> Option<ClusterMove> {
+    let species = cfg.species.as_ref()?;
+    if species.len() != cfg.n_points || cfg.active_region.is_some() {
+        return None;
+    }
+    Some(ClusterMove::Rotor(TorsionMove {
+        species: species.clone(),
+        rules: settings.rules(cfg.bond_tolerance),
+        settings: settings.clone(),
+        container: cfg.frozen.is_none().then_some(cfg.container),
+        frozen: cfg.frozen.clone(),
+    }))
 }
 
 fn soap_arm(
@@ -1386,6 +1408,7 @@ impl ClusterMove {
             ClusterMove::RigidRotateOne { .. } => "rrot1".into(),
             ClusterMove::RigidReorient { .. } => "rreor".into(),
             ClusterMove::RigidOrientAll { .. } => "rorient".into(),
+            ClusterMove::Rotor(_) => "rotor".into(),
         }
     }
 
@@ -1832,6 +1855,7 @@ impl ClusterMove {
                     )
                 }
             }
+            ClusterMove::Rotor(kernel) => kernel.propose(x, rng),
         }
     }
 }

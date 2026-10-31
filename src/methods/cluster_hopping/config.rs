@@ -814,6 +814,14 @@ pub struct Config {
     /// Molecular constraint mode for the SOAP proposal. Recommended uses the
     /// flexible Cartesian pullback; `Off` removes the arm for the control.
     pub soap_mode: SoapProposalMode,
+    /// Rotor arm of the molecular library: a rotation of one side of a
+    /// rotatable bond, or of a few neighbouring bonds together, that keeps
+    /// every bond length and angle. Rotors are read off each hop's own bond
+    /// graph. `None` offers no arm and is omitted from the resolved preset,
+    /// so presets without it keep their identity. Needs `species` and no
+    /// `active_region`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rotor: Option<TorsionSettings>,
     /// Extra relaxation steps on a returning trial when `return_screen` is on.
     ///
     /// Zero (the recommended default) skips the full quench entirely, which is
@@ -1056,6 +1064,12 @@ pub struct Config {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+/// Whether a molecule of these atoms can have a rotatable bond: four atoms
+/// for a dihedral, two of them heavy for a bond between non-terminal atoms.
+fn may_rotate(species: &[u32]) -> bool {
+    species.len() >= 4 && species.iter().filter(|&&z| z > 1).count() >= 2
 }
 
 impl Config {
@@ -1386,6 +1400,7 @@ impl Config {
             return_screen: false,
             soap_class_residual: false,
             soap_mode: SoapProposalMode::Flexible,
+            rotor: None,
             return_polish: 0,
             return_polish_after: 0,
             path_on_stall: false,
@@ -1613,12 +1628,31 @@ impl Config {
     /// `2p − μ` within each observed atomic number. No CNA, no fcc
     /// prototype. A slab sets `active_region`; frozen atoms stay as
     /// SOAP neighbours and do not move.
+    ///
+    /// A group that can hold a rotatable bond, four or more atoms with two
+    /// or more heavy ones, adds the [`TorsionSettings::recommended`] rotor
+    /// arm. With no groups the whole system is that group. Water, ions and
+    /// other small rigid units keep the library they had.
     pub fn recommended_molecular(
         species: Vec<u32>,
         groups: Vec<Vec<usize>>,
         energy_scale: f64,
     ) -> Self {
+        let flexible = if groups.is_empty() {
+            may_rotate(&species)
+        } else {
+            groups.iter().any(|group| {
+                let members: Vec<u32> = group
+                    .iter()
+                    .filter_map(|&atom| species.get(atom).copied())
+                    .collect();
+                may_rotate(&members)
+            })
+        };
         let mut cfg = Self::for_molecular(species, groups, energy_scale);
+        if flexible {
+            cfg.rotor = Some(TorsionSettings::recommended());
+        }
         cfg.allocate_moves = true;
         cfg.depth_reward = true;
         cfg.tabu_on_stall = true;

@@ -49,10 +49,15 @@ mod config;
 mod moves;
 mod packing_bank;
 mod preset;
+mod torsion;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, SoapProposalMode};
 pub use moves::*;
+pub use torsion::{
+    Rotor, RotorRules, TerminalRotors, Topology, TorsionMove, TorsionSettings, dihedral,
+    rotatable_bonds, rotate_about_bond, van_der_waals_radius,
+};
 
 #[cfg(test)]
 use preset::LennardJonesPreset;
@@ -1105,6 +1110,47 @@ pub(crate) fn contain(x: &mut Array1<f64>, n: usize, radius: f64) {
             let s = radius / r;
             for k in 0..3 {
                 x[3 * i + k] *= s;
+            }
+        }
+    }
+}
+
+/// Containment of a trial after recentring ([`contain`]), or relative to
+/// `frozen`'s bounding box when a frozen frame is set.
+///
+/// A rotor trial keeps every bond length and angle, and a clamp to the frame
+/// would undo that. Against a frozen frame it is not clamped, since a turn
+/// about a bond cannot carry a molecule away from the frame.
+pub(crate) fn contain_trial(
+    trial: &mut Array1<f64>,
+    cfg: &Config,
+    frozen: Option<&[bool]>,
+    rotor_trial: bool,
+) {
+    let n = cfg.n_points;
+    match frozen {
+        None => contain(trial, n, cfg.container),
+        Some(_) if rotor_trial => {}
+        Some(f) => {
+            let mut lo = [f64::INFINITY; 3];
+            let mut hi = [f64::NEG_INFINITY; 3];
+            for i in 0..n {
+                if f.get(i).copied().unwrap_or(false) {
+                    for k in 0..3 {
+                        lo[k] = lo[k].min(trial[3 * i + k]);
+                        hi[k] = hi[k].max(trial[3 * i + k]);
+                    }
+                }
+            }
+            if lo[0].is_finite() {
+                for i in 0..n {
+                    if !f.get(i).copied().unwrap_or(false) {
+                        for k in 0..3 {
+                            trial[3 * i + k] = trial[3 * i + k]
+                                .clamp(lo[k] - cfg.container, hi[k] + cfg.container);
+                        }
+                    }
+                }
             }
         }
     }
@@ -4012,13 +4058,14 @@ where
                 }
             }
         };
-        // Identity SOAP is not an arm. Thompson must not buy a no-op:
-        // reselect a real kernel, or skip the hop.
+        // Identity SOAP is not an arm, nor is a rotor draw with no rotor or
+        // no clash-free turn. Thompson must not buy a no-op: reselect a real
+        // kernel, or skip the hop.
         if !species_escape_trial
             && !cov_fire
             && !soft_fire
             && !angular
-            && kernels[k].name() == "soap"
+            && may_return_identity(&kernels[k].name())
             && hop_is_identity(x.view(), trial.view())
         {
             let mut swapped = false;
@@ -4029,7 +4076,7 @@ where
                     (None, true) => allocator.select(rng),
                     (None, false) => rng.random_range(0..kernels.len()),
                 };
-                if kernels[k2].name() == "soap" {
+                if may_return_identity(&kernels[k2].name()) {
                     continue;
                 }
                 k = k2;
@@ -4080,34 +4127,15 @@ where
         // the separated limit, and the run measured exactly that, an intact
         // H2 four billion Angstrom above its slab. The free atoms are clamped
         // to within `container` of the frame.
-        match hop_frozen.as_ref() {
-            None => {
-                recentre(&mut trial, n);
-                contain(&mut trial, n, cfg.container);
-            }
-            Some(f) => {
-                let mut lo = [f64::INFINITY; 3];
-                let mut hi = [f64::NEG_INFINITY; 3];
-                for i in 0..n {
-                    if f.get(i).copied().unwrap_or(false) {
-                        for k in 0..3 {
-                            lo[k] = lo[k].min(trial[3 * i + k]);
-                            hi[k] = hi[k].max(trial[3 * i + k]);
-                        }
-                    }
-                }
-                if lo[0].is_finite() {
-                    for i in 0..n {
-                        if !f.get(i).copied().unwrap_or(false) {
-                            for k in 0..3 {
-                                trial[3 * i + k] = trial[3 * i + k]
-                                    .clamp(lo[k] - cfg.container, hi[k] + cfg.container);
-                            }
-                        }
-                    }
-                }
-            }
+        if hop_frozen.is_none() {
+            recentre(&mut trial, n);
         }
+        contain_trial(
+            &mut trial,
+            cfg,
+            hop_frozen.as_deref(),
+            proposal_action == "rotor",
+        );
         if cfg.move_library.is_rigid_body()
             && let Some(slice) = trial.as_slice_mut()
         {
@@ -6551,6 +6579,12 @@ pub fn repack_rigid_groups<R: Rng + ?Sized>(
         }
     }
     y
+}
+
+/// Arms whose proposal can come back unchanged: SOAP with no leftover, and
+/// a rotor draw with no rotatable bond or no clash-free turn.
+fn may_return_identity(name: &str) -> bool {
+    matches!(name, "soap" | "rotor")
 }
 
 fn hop_is_identity(x: ArrayView1<f64>, y: ArrayView1<f64>) -> bool {
