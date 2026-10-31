@@ -1048,6 +1048,16 @@ pub struct Config {
     /// [`Config::for_molecular`]. Serialized only when set.
     #[serde(default, skip_serializing_if = "is_false")]
     pub separate_start_molecules: bool,
+    /// Never compress a molecule wider than [`Config::container`]. A fragment,
+    /// a covalent component of the chain's state under the graph rule, with
+    /// an atom of the trial farther from the fragment's centroid than the
+    /// radius moves rigidly onto the centre instead of having its atoms
+    /// pulled onto the sphere one by one. Every other atom is contained as
+    /// without this. Acts with species on a Cartesian library whose state has
+    /// an atom per species entry, and only where the free frame is contained.
+    /// Set by [`Config::for_molecular`]. Serialized only when set.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub rigid_containment: bool,
     /// The start's graph under [`Config::keep_bond_graph`], bound when the
     /// search begins so nested searches judge against the caller's start.
     #[serde(skip)]
@@ -1481,6 +1491,7 @@ impl Config {
             keep_bond_graph: false,
             record_polish: false,
             separate_start_molecules: false,
+            rigid_containment: false,
             graph_reference: None,
             two_phase: None,
             reoccupy: None,
@@ -1663,8 +1674,10 @@ impl Config {
     /// Species-aware molecular preset with rigid groups. It keeps the start's
     /// covalent graph ([`Config::keep_bond_graph`]); a search meant to form or
     /// break bonds turns that off. It separates molecules that start in
-    /// covalent contact ([`Config::separate_start_molecules`]) and polishes
-    /// its records once the search ends ([`Config::record_polish`]).
+    /// covalent contact ([`Config::separate_start_molecules`]), contains
+    /// trials without compressing a molecule wider than the container
+    /// ([`Config::rigid_containment`]) and polishes its records once the
+    /// search ends ([`Config::record_polish`]).
     pub fn for_molecular(species: Vec<u32>, groups: Vec<Vec<usize>>, energy_scale: f64) -> Self {
         assert!(!species.is_empty(), "species must not be empty");
         let length_scale = MolecularPreset::COVALENT_DIAMETER
@@ -1684,6 +1697,7 @@ impl Config {
         cfg.keep_bond_graph = true;
         cfg.record_polish = true;
         cfg.separate_start_molecules = true;
+        cfg.rigid_containment = true;
         cfg
     }
 
