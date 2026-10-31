@@ -11,7 +11,8 @@
 //! [`Config::with_torsion_kicks`] to the preset, and `combo` adds all
 //! three. `chains4` is the four exchanging chains without the group gate.
 //! `polish` runs only the preset's final polish on the xyz structure, with
-//! the whole budget.
+//! the whole budget. `crush` is the preset with atom-by-atom containment,
+//! [`Config::rigid_containment`] off.
 //!
 //! The xyz comment may be `groups i,j;k,l`. Without it, every atom is
 //! one group.
@@ -29,7 +30,8 @@ use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
 
 use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, SoapProposalMode, StartSeparation, polish_structure, rotatable_bond_count,
+    Config, GraphCause, GraphCauses, GraphRefusal, Ledger, SoapProposalMode, StartSeparation,
+    polish_structure, rotatable_bond_count,
 };
 use anneal_core::methods::cluster_search::search_from;
 use eindir_core::Objective;
@@ -174,6 +176,11 @@ fn gap_arm(arm: &str, species: &[u32], groups: &[Vec<usize>]) -> Option<Config> 
     let cfg = Config::recommended_molecular(species.to_vec(), groups.to_vec(), 1.0);
     Some(match arm {
         "preset" => cfg,
+        "crush" => {
+            let mut cfg = cfg;
+            cfg.rigid_containment = false;
+            cfg
+        }
         "loose" => cfg.with_loose_quench(),
         "chains" => cfg.with_chain_exchange(),
         "tkick" => cfg.with_torsion_kicks(),
@@ -264,6 +271,7 @@ fn main() {
     println!("keep_bond_graph {}", cfg.keep_bond_graph);
     println!("record_polish {}", cfg.record_polish);
     println!("separate_start_molecules {}", cfg.separate_start_molecules);
+    println!("rigid_containment {}", cfg.rigid_containment);
     let mut ledger = Ledger::new(budget);
     let started = std::time::Instant::now();
     let (out, stats) = search_from(&obj, &cfg, &mut ledger, start.view(), seed)
@@ -308,6 +316,9 @@ fn main() {
         "GRAPH_REJECTIONS {} start {}",
         out.graph_rejections, out.start_graph_rejected
     );
+    let symbols = load_symbols(path);
+    println!("{}", causes_text(out.graph_causes));
+    println!("{}", first_text(out.graph_first.as_ref(), &symbols));
     println!("START_CONTINUATIONS {}", out.start_continuations);
     println!("START_SEPARATION {}", separation_text(out.start_separation));
     println!("REFINES {} charged {}", stats.refines, stats.refine_charged);
@@ -367,6 +378,42 @@ fn write_best(path: &str, xyz: &str, energy: f64, state: &Array1<f64>) {
     }
     std::fs::write(xyz, body).expect("write best xyz");
     println!("WROTE {xyz}");
+}
+
+fn causes_text(causes: GraphCauses) -> String {
+    format!(
+        "GRAPH_CAUSES kernel {} crush {} contained {} reaction {}",
+        causes.kernel, causes.crush, causes.crush_contained, causes.reaction
+    )
+}
+
+/// The first refused trial: its cause and the bonds its quench broke and
+/// formed, as `C15-O17`, by element and zero-based index.
+fn first_text(first: Option<&GraphRefusal>, symbols: &[String]) -> String {
+    let Some(first) = first else {
+        return "GRAPH_FIRST none".to_owned();
+    };
+    let bonds = |pairs: &[(usize, usize)]| {
+        if pairs.is_empty() {
+            return "-".to_owned();
+        }
+        pairs
+            .iter()
+            .map(|&(a, b)| format!("{}{a}-{}{b}", symbols[a], symbols[b]))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let cause = match first.cause {
+        GraphCause::Kernel => "kernel",
+        GraphCause::Crush => "crush",
+        GraphCause::Reaction => "reaction",
+    };
+    format!(
+        "GRAPH_FIRST {cause} contained {} broken {} formed {}",
+        first.contained_changed,
+        bonds(&first.broken),
+        bonds(&first.formed)
+    )
 }
 
 fn separation_text(separation: Option<StartSeparation>) -> String {

@@ -56,7 +56,8 @@ pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, SoapProposalMode};
 pub use moves::*;
 pub use organic::{
-    StartSeparation, com_radius, fragment_container, rotatable_bond_count, separate_start,
+    GraphCause, GraphCauses, GraphRefusal, StartSeparation, com_radius, fragment_container,
+    rotatable_bond_count, separate_start,
 };
 pub use polish::{PolishReport, PolishedRecord, model_hessian, polish_structure};
 
@@ -801,6 +802,11 @@ pub struct Outcome {
     /// Whether the start's own quench changed the covalent graph, so the
     /// chain began on the unquenched start.
     pub start_graph_rejected: bool,
+    /// Trials the [`Config::keep_bond_graph`] check refused, by where each
+    /// left the graph: the proposal, containment or the quench.
+    pub graph_causes: GraphCauses,
+    /// The first of those trials.
+    pub graph_first: Option<GraphRefusal>,
     /// Relaxations that continued the opening quench, under
     /// [`Config::keep_bond_graph`], after it failed its validation gradient.
     pub start_continuations: usize,
@@ -1077,6 +1083,96 @@ pub(crate) fn contain(x: &mut Array1<f64>, n: usize, radius: f64) {
             }
         }
     }
+}
+
+/// [`contain`] by `fragments` rather than by points: a fragment with a point
+/// beyond `radius` moves rigidly toward the origin until the sphere holds it,
+/// or onto the origin when it is wider than the sphere. A point in no
+/// fragment is contained on its own.
+pub(crate) fn contain_fragments(
+    x: &mut Array1<f64>,
+    n: usize,
+    fragments: &[Vec<usize>],
+    radius: f64,
+) {
+    let point = |x: &Array1<f64>, i: usize| [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+    let norm = |v: [f64; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    let mut covered = vec![false; n];
+    for fragment in fragments {
+        let atoms: Vec<usize> = fragment.iter().copied().filter(|&i| i < n).collect();
+        for &i in &atoms {
+            covered[i] = true;
+        }
+        if atoms.is_empty() || atoms.iter().all(|&i| norm(point(x, i)) <= radius) {
+            continue;
+        }
+        let mut centre = [0.0; 3];
+        for &i in &atoms {
+            for (k, c) in centre.iter_mut().enumerate() {
+                *c += x[3 * i + k] / atoms.len() as f64;
+            }
+        }
+        let extent = atoms
+            .iter()
+            .map(|&i| {
+                let p = point(x, i);
+                norm([p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]])
+            })
+            .fold(0.0_f64, f64::max);
+        let distance = norm(centre);
+        let target = (radius - extent).max(0.0);
+        if distance <= target || distance == 0.0 {
+            continue;
+        }
+        let shift = (target - distance) / distance;
+        for &i in &atoms {
+            for (k, c) in centre.iter().enumerate() {
+                x[3 * i + k] += shift * c;
+            }
+        }
+    }
+    for (i, &held) in covered.iter().enumerate() {
+        if held {
+            continue;
+        }
+        let r = norm(point(x, i));
+        if r > radius {
+            for k in 0..3 {
+                x[3 * i + k] *= radius / r;
+            }
+        }
+    }
+}
+
+/// [`contain`], except for a covalent fragment of `state` wider than the
+/// sphere: pulling its points onto the sphere one by one would compress it,
+/// so it moves rigidly onto the centre instead ([`contain_fragments`]).
+pub(crate) fn contain_sparing_wide_fragments(
+    x: &mut Array1<f64>,
+    n: usize,
+    state: ArrayView1<f64>,
+    species: &[u32],
+    tolerance: f64,
+    radius: f64,
+) {
+    let wide: Vec<Vec<usize>> = connectivity_groups_z(state, species, tolerance)
+        .into_iter()
+        .filter(|fragment| {
+            let atoms: Vec<usize> = fragment.iter().copied().filter(|&i| i < n).collect();
+            let count = atoms.len().max(1) as f64;
+            let centre: Vec<f64> = (0..3)
+                .map(|k| atoms.iter().map(|&i| x[3 * i + k]).sum::<f64>() / count)
+                .collect();
+            atoms.iter().any(|&i| {
+                (0..3)
+                    .map(|k| (x[3 * i + k] - centre[k]).powi(2))
+                    .sum::<f64>()
+                    .sqrt()
+                    > radius
+            })
+        })
+        .collect();
+    contain_fragments(x, n, &wide, radius);
 }
 
 /// Pushes overlapping points apart to `min_sep`.
@@ -2978,6 +3074,8 @@ where
     } else {
         cfg.container
     };
+    let mut graph_causes = GraphCauses::default();
+    let mut graph_first: Option<GraphRefusal> = None;
     let mut hops = 0usize;
     let mut checkpoint_hops = 0usize;
     let mut checkpoint_quench_start = 0usize;
@@ -4363,12 +4461,33 @@ where
         // the separated limit, and the run measured exactly that, an intact
         // H2 four billion Angstrom above its slab. The free atoms are clamped
         // to within `container` of the frame.
+        let proposed = cfg.graph_reference.is_some().then(|| trial.clone());
+        let mut before_containment = None;
         match hop_frozen.as_ref() {
             None => {
                 recentre(&mut trial, n);
-                contain(&mut trial, n, hold_radius);
+                if proposed.is_some() {
+                    before_containment = Some(trial.clone());
+                }
+                let species = cfg.species.as_deref().filter(|z| {
+                    cfg.rigid_containment && !cfg.move_library.is_rigid_body() && z.len() == n
+                });
+                match species {
+                    Some(z) => contain_sparing_wide_fragments(
+                        &mut trial,
+                        n,
+                        x.view(),
+                        z,
+                        cfg.bond_tolerance,
+                        hold_radius,
+                    ),
+                    None => contain(&mut trial, n, hold_radius),
+                }
             }
             Some(f) => {
+                if proposed.is_some() {
+                    before_containment = Some(trial.clone());
+                }
                 let mut lo = [f64::INFINITY; 3];
                 let mut hi = [f64::NEG_INFINITY; 3];
                 for i in 0..n {
@@ -4637,6 +4756,22 @@ where
             break;
         }
         if !quench_is_sane(cfg, e_new, x_new.view()) {
+            if let (Some(reference), Some(species), Some(proposed), Some(before)) = (
+                cfg.graph_reference.as_deref(),
+                cfg.species.as_deref(),
+                proposed.as_ref(),
+                before_containment.as_ref(),
+            ) && e_new.is_finite()
+                && structure_is_sane(x_new.view(), OVERLAP_SEPARATION)
+            {
+                let refusal = reference.refusal(
+                    [proposed.view(), before.view(), trial.view(), x_new.view()],
+                    species,
+                    cfg.bond_tolerance,
+                );
+                graph_causes.count(&refusal);
+                graph_first.get_or_insert(refusal);
+            }
             // A trial the spent budget cut off is the end of the run, not a
             // refusal, and its feedback would reach no later draw.
             let refused = ledger.remaining() > 0;
@@ -6654,6 +6789,8 @@ where
             .as_ref()
             .map_or(0, |r| r.changes() - graph_changes_before),
         start_graph_rejected,
+        graph_causes,
+        graph_first,
         start_continuations,
         basins: n_basins,
         charged: ledger.spent(),
@@ -7182,6 +7319,173 @@ mod graph_invariant_tests {
             "without the invariant the product is kept"
         );
         assert_eq!(reacting.graph_rejections, 0);
+    }
+
+    #[test]
+    fn a_refused_trial_is_classified_by_where_it_left_the_graph() {
+        let (intact, reacted) = dimer();
+        let reference = organic::GraphReference::of(intact.view(), &SPECIES, 1.25);
+        let refusal =
+            |stages: [&Array1<f64>; 4]| reference.refusal(stages.map(|x| x.view()), &SPECIES, 1.25);
+        assert_eq!(
+            refusal([&reacted, &reacted, &reacted, &reacted]).cause,
+            GraphCause::Kernel
+        );
+        let crushed = refusal([&intact, &intact, &reacted, &reacted]);
+        assert_eq!(crushed.cause, GraphCause::Crush);
+        assert!(crushed.contained_changed);
+        let mut nudged = intact.clone();
+        nudged[3] += 0.01;
+        let touched = refusal([&intact, &intact, &nudged, &reacted]);
+        assert_eq!(touched.cause, GraphCause::Crush);
+        assert!(!touched.contained_changed);
+        let mut elsewhere = intact.clone();
+        elsewhere[12] += 0.01;
+        let reaction = refusal([&intact, &intact, &elsewhere, &reacted]);
+        assert_eq!(reaction.cause, GraphCause::Reaction);
+        assert_eq!(reaction.broken, vec![(0, 1)]);
+        assert_eq!(reaction.formed, vec![(1, 3)]);
+        assert_eq!(reference.changes(), 0);
+
+        let mut causes = GraphCauses::default();
+        for r in [&crushed, &touched, &reaction] {
+            causes.count(r);
+        }
+        assert_eq!(
+            causes,
+            GraphCauses {
+                kernel: 0,
+                crush: 2,
+                crush_contained: 1,
+                reaction: 1
+            }
+        );
+        assert_eq!(causes.plus(causes).total(), 6);
+    }
+
+    #[test]
+    fn contain_fragments_moves_whole_fragments_and_never_compresses_one() {
+        let (intact, _) = dimer();
+        let fragments = vec![vec![0, 1, 2], vec![3, 4, 5]];
+        let pairs = |x: &Array1<f64>, atoms: &[usize]| -> Vec<f64> {
+            let d = |a: usize, b: usize| {
+                (0..3)
+                    .map(|k| (x[3 * a + k] - x[3 * b + k]).powi(2))
+                    .sum::<f64>()
+                    .sqrt()
+            };
+            vec![
+                d(atoms[0], atoms[1]),
+                d(atoms[0], atoms[2]),
+                d(atoms[1], atoms[2]),
+            ]
+        };
+        let radius = 2.0;
+        let mut x = intact.clone();
+        recentre(&mut x, 6);
+        let before = x.clone();
+        contain_fragments(&mut x, 6, &fragments, radius);
+        for fragment in &fragments {
+            for (a, b) in pairs(&before, fragment).iter().zip(pairs(&x, fragment)) {
+                assert!((a - b).abs() < 1e-12);
+            }
+        }
+        for i in 0..6 {
+            let r = (0..3).map(|k| x[3 * i + k].powi(2)).sum::<f64>().sqrt();
+            assert!(r <= radius + 1e-12, "atom {i} at {r}");
+        }
+        assert_ne!(x.slice(ndarray::s![0..9]), before.slice(ndarray::s![0..9]));
+        assert_eq!(
+            x.slice(ndarray::s![9..18]),
+            before.slice(ndarray::s![9..18])
+        );
+
+        let mut wide = intact.clone();
+        recentre(&mut wide, 6);
+        let centred = wide.clone();
+        contain_fragments(&mut wide, 6, &[vec![0, 1, 2, 3, 4, 5]], 0.5);
+        let shift = (&wide - &centred)
+            .iter()
+            .fold(0.0_f64, |m, v| m.max(v.abs()));
+        assert!(shift < 1e-12, "a centred fragment moved by {shift}");
+
+        let mut loose = Array1::from(vec![3.0, 0.0, 0.0, 0.5, 0.0, 0.0]);
+        contain_fragments(&mut loose, 2, &[vec![1]], 1.0);
+        assert_eq!(loose, Array1::from(vec![1.0, 0.0, 0.0, 0.5, 0.0, 0.0]));
+    }
+
+    #[test]
+    fn containment_pulls_atoms_but_moves_a_fragment_wider_than_the_sphere_whole() {
+        let tolerance = molecular().bond_tolerance;
+        let species = [6, 6, 6];
+        let graph = |x: &Array1<f64>| organic::bond_graph(x.view(), &species, tolerance);
+
+        let pair = Array1::from(vec![1.5, 0.0, 0.0, 3.0, 0.0, 0.0]);
+        let mut pulled = pair.clone();
+        contain_sparing_wide_fragments(&mut pulled, 2, pair.view(), &species[..2], tolerance, 2.5);
+        let mut radial = pair.clone();
+        contain(&mut radial, 2, 2.5);
+        assert_eq!(pulled, radial);
+        let mut moved = pair.clone();
+        contain_fragments(&mut moved, 2, &[vec![0, 1]], 2.5);
+        assert_ne!(pulled, moved);
+
+        let bent = Array1::from(vec![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.2, 0.0]);
+        let mut radial = bent.clone();
+        contain(&mut radial, 3, 0.9);
+        assert_ne!(graph(&radial), graph(&bent));
+        let mut held = bent.clone();
+        contain_sparing_wide_fragments(&mut held, 3, bent.view(), &species, tolerance, 0.9);
+        let mut rigid = bent.clone();
+        contain_fragments(&mut rigid, 3, &[vec![0, 1, 2]], 0.9);
+        assert_eq!(held, rigid);
+        assert_eq!(graph(&held), graph(&bent));
+    }
+
+    #[test]
+    fn rigid_containment_keeps_a_molecule_wider_than_the_container_intact() {
+        let species = vec![6, 6, 6];
+        let bent = Array1::from(vec![-1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.2, 0.0]);
+        let run_bent = |rigid: bool| {
+            let mut cfg = Config::for_molecular(species.clone(), vec![vec![0, 1, 2]], 1.0);
+            cfg.container = 0.9;
+            cfg.rigid_containment = rigid;
+            cfg.screen_margin = f64::INFINITY;
+            cfg.return_screen = false;
+            cfg.max_hops = Some(6);
+            let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+                assert!(ledger.charge());
+                (0.0, x.to_owned())
+            };
+            let mut ledger = Ledger::new(400);
+            let mut rng = StdRng::seed_from_u64(7);
+            run(&cfg, bent.view(), &mut ledger, &mut relax, &mut rng).expect("finite start")
+        };
+        let crushed = run_bent(false);
+        assert!(crushed.graph_causes.crush >= 1);
+        assert_eq!(
+            crushed.graph_causes.crush,
+            crushed.graph_causes.crush_contained
+        );
+        assert_eq!(crushed.graph_causes.total(), crushed.graph_rejections);
+        let first = crushed.graph_first.expect("a refused trial");
+        assert_eq!(first.cause, GraphCause::Crush);
+        assert_eq!(first.formed, vec![(0, 1)]);
+        assert!(first.broken.is_empty());
+
+        let held = run_bent(true);
+        assert_eq!(held.graph_rejections, 0);
+        assert_eq!(held.graph_causes, GraphCauses::default());
+        assert!(held.graph_first.is_none());
+        assert!(held.hops >= 1);
+    }
+
+    #[test]
+    fn only_the_molecular_preset_contains_by_fragment() {
+        assert!(molecular().rigid_containment);
+        assert!(!Config::for_cluster(6).rigid_containment);
+        let lj_json = Config::for_cluster(6).resolved_json().expect("serializes");
+        assert!(!lj_json.contains("rigid_containment"));
     }
 
     #[test]

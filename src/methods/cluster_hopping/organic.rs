@@ -753,6 +753,122 @@ impl GraphReference {
     pub(crate) fn changes(&self) -> usize {
         self.changes.load(Ordering::Relaxed)
     }
+
+    /// Why a trial whose quench `quenched` left the graph did so, read off
+    /// the trial as proposed, `proposed`, and as handed to the quench,
+    /// `contained`, after recentring and containment. `recentred` is the
+    /// trial between the two, which is what containment moved atoms from.
+    pub(crate) fn refusal(
+        &self,
+        stages: [ArrayView1<f64>; 4],
+        species: &[u32],
+        tolerance: f64,
+    ) -> GraphRefusal {
+        let [proposed, recentred, contained, quenched] = stages;
+        let graph = |x: ArrayView1<f64>| bond_graph(x, species, tolerance);
+        let reached = graph(quenched);
+        let pairs = |g: &[Vec<usize>]| -> Vec<(usize, usize)> {
+            g.iter()
+                .enumerate()
+                .flat_map(|(a, bonded)| {
+                    bonded.iter().filter(move |&&b| b > a).map(move |&b| (a, b))
+                })
+                .collect()
+        };
+        let (old, new) = (pairs(&self.graph), pairs(&reached));
+        let broken: Vec<(usize, usize)> =
+            old.iter().copied().filter(|p| !new.contains(p)).collect();
+        let formed: Vec<(usize, usize)> =
+            new.iter().copied().filter(|p| !old.contains(p)).collect();
+        let contained_changed = graph(contained) != self.graph;
+        let moved =
+            |atom: usize| (0..3).any(|k| recentred[3 * atom + k] != contained[3 * atom + k]);
+        let touched = broken
+            .iter()
+            .chain(&formed)
+            .any(|&(a, b)| moved(a) || moved(b));
+        let cause = if graph(proposed) != self.graph {
+            GraphCause::Kernel
+        } else if contained_changed || touched {
+            GraphCause::Crush
+        } else {
+            GraphCause::Reaction
+        };
+        GraphRefusal {
+            cause,
+            contained_changed,
+            broken,
+            formed,
+        }
+    }
+}
+
+/// Where a trial that the graph invariant refused first left the reference
+/// graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphCause {
+    /// The proposal itself, before recentring and containment.
+    Kernel,
+    /// Containment: the contained trial already had another graph, or a bond
+    /// the quench changed has an atom containment moved.
+    Crush,
+    /// The quench, from a contained trial with the reference graph, at bonds
+    /// of atoms containment did not move.
+    Reaction,
+}
+
+/// One trial the graph invariant refused, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphRefusal {
+    /// Where the trial left the graph.
+    pub cause: GraphCause,
+    /// Whether the contained trial, before any quench, had another graph.
+    pub contained_changed: bool,
+    /// Reference bonds the quenched trial lacks, as `(i, j)` with `i < j`.
+    pub broken: Vec<(usize, usize)>,
+    /// Bonds of the quenched trial the reference lacks.
+    pub formed: Vec<(usize, usize)>,
+}
+
+/// Graph refusals of trials by cause, over a run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GraphCauses {
+    /// [`GraphCause::Kernel`].
+    pub kernel: usize,
+    /// [`GraphCause::Crush`].
+    pub crush: usize,
+    /// Of `crush`, those whose contained trial already had another graph.
+    pub crush_contained: usize,
+    /// [`GraphCause::Reaction`].
+    pub reaction: usize,
+}
+
+impl GraphCauses {
+    pub(crate) fn count(&mut self, refusal: &GraphRefusal) {
+        match refusal.cause {
+            GraphCause::Kernel => self.kernel += 1,
+            GraphCause::Crush => {
+                self.crush += 1;
+                self.crush_contained += usize::from(refusal.contained_changed);
+            }
+            GraphCause::Reaction => self.reaction += 1,
+        }
+    }
+
+    /// Every refusal counted.
+    pub fn total(&self) -> usize {
+        self.kernel + self.crush + self.reaction
+    }
+
+    /// The sum of two counts.
+    pub fn plus(self, other: Self) -> Self {
+        Self {
+            kernel: self.kernel + other.kernel,
+            crush: self.crush + other.crush,
+            crush_contained: self.crush_contained + other.crush_contained,
+            reaction: self.reaction + other.reaction,
+        }
+    }
 }
 
 /// Ratio of successive factors in [`separate_start`].
