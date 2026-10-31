@@ -53,6 +53,33 @@ fn decaf_histogram_separates_lj38_oh_from_the_icosahedral_competitor() {
 }
 
 #[test]
+fn codebook_histogram_reads_every_observed_structure_against_the_final_codebook() {
+    let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
+    let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
+    let mut book = PackingBook::default();
+    book.observe(ico.as_slice().unwrap()).unwrap();
+    book.observe(oh.as_slice().unwrap()).unwrap();
+    let cached = book.histogram(ico.as_slice().unwrap()).unwrap();
+    let ico_row = book.codebook_histogram(ico.as_slice().unwrap()).unwrap();
+    let oh_row = book.codebook_histogram(oh.as_slice().unwrap()).unwrap();
+    assert_eq!(ico_row.len(), oh_row.len());
+    assert!(
+        ico_row.len() > cached.len(),
+        "the cached ico row predates the Oh leaders: {} vs {}",
+        ico_row.len(),
+        cached.len()
+    );
+    assert_eq!(
+        *ico_row.last().unwrap(),
+        0.0,
+        "no ico environment is unseen"
+    );
+    assert_eq!(*oh_row.last().unwrap(), 0.0, "no Oh environment is unseen");
+    assert!((ico_row.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+    assert!(packing_distance(&ico_row, &oh_row) > PACKING_MERGE);
+}
+
+#[test]
 fn dimer_coordinates_have_no_packing_fingerprint() {
     assert!(packing_fingerprint(&[0.0, 0.0, 0.0, 1.2, 0.0, 0.0]).is_none());
 }
