@@ -8,8 +8,8 @@
 //! sc_arm3 <12-6|9-6> <n> <budget> <seed> <reference-energy>
 //! ```
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger, OrbitCore, optimize};
@@ -37,7 +37,10 @@ fn check_points(args: &[String]) {
         if i == 0 {
             continue;
         }
-        let parts: Vec<f64> = line.split_whitespace().filter_map(|v| v.parse().ok()).collect();
+        let parts: Vec<f64> = line
+            .split_whitespace()
+            .filter_map(|v| v.parse().ok())
+            .collect();
         if parts.len() >= 3 {
             coords.extend_from_slice(&parts[..3]);
         }
@@ -138,18 +141,16 @@ fn main() {
         // as an RMS bound (`BQMAX`). A screen runs its step count.
         opt.gtol = if full { QUENCH_RMS } else { 1.0e9 };
         let cap = if full { iters.min(relax_steps) } else { iters };
-        let (mut energy, mut xr, _) = opt.minimize(x, cap, |v| {
-            led.charge().then(|| pot.value_and_gradient(v))
-        });
+        let (mut energy, xr, _) =
+            opt.minimize(x, cap, |v| led.charge().then(|| pot.value_and_gradient(v)));
         let mut grad = Array1::zeros(0);
         if full && led.charge() {
             let (e2, g2) = pot.value_and_gradient(xr.view());
             energy = e2;
             grad = g2;
         }
-        let validated = full
-            && grad.len() == xr.len()
-            && rms(grad.as_slice().unwrap_or(&[])) <= QUENCH_RMS;
+        let validated =
+            full && grad.len() == xr.len() && rms(grad.as_slice().unwrap_or(&[])) <= QUENCH_RMS;
         led.record_quench_boundary(
             charged_before,
             energy,
@@ -185,7 +186,8 @@ fn main() {
     println!("quench_iters: {QUENCH_ITERS}");
     println!(
         "resolved_sha256: {}",
-        cfg.resolved_sha256().unwrap_or_else(|_| "unavailable".into())
+        cfg.resolved_sha256()
+            .unwrap_or_else(|_| "unavailable".into())
     );
 
     let started = Instant::now();
@@ -194,7 +196,7 @@ fn main() {
         std::process::exit(1);
     });
     let wall = started.elapsed().as_secs_f64();
-    let hit_e = hit_energy.lock().expect("hit").clone();
+    let hit_e = *hit_energy.lock().expect("hit");
     let calls = hit_calls.load(Ordering::Relaxed);
     let quenches = hit_quenches.load(Ordering::Relaxed);
     let hit = hit_e.is_some() && calls > 0;
