@@ -49,12 +49,14 @@ mod config;
 mod moves;
 mod organic;
 mod packing_bank;
+mod polish;
 mod preset;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, SoapProposalMode};
 pub use moves::*;
 pub use organic::{com_radius, fragment_container, rotatable_bond_count};
+pub use polish::{PolishReport, PolishedRecord, model_hessian, polish_structure};
 
 #[cfg(test)]
 use preset::LennardJonesPreset;
@@ -550,6 +552,9 @@ pub struct Ledger {
     start_attempts: usize,
     /// Geometries drawn after a non-finite initial quench, in order.
     start_redraws: Vec<Array1<f64>>,
+    /// Every value and state [`Ledger::record`] accepted, in order, while a
+    /// search under [`Config::record_polish`] runs.
+    records: Option<Vec<(f64, Array1<f64>)>>,
 }
 
 struct DiagnosticQuench<'a> {
@@ -592,6 +597,7 @@ impl Ledger {
             stop: None,
             start_attempts: Self::DEFAULT_START_ATTEMPTS,
             start_redraws: Vec::new(),
+            records: None,
         }
     }
 
@@ -753,6 +759,9 @@ impl Ledger {
         if value < self.best {
             self.best = value;
             self.best_state = Some(state.to_owned());
+            if let Some(records) = self.records.as_mut() {
+                records.push((value, state.to_owned()));
+            }
         }
     }
 
@@ -1045,6 +1054,8 @@ pub struct Outcome {
     /// The energy bias as the run left it, under [`Config::energy_bias`] once
     /// its first sample has filled.
     pub energy_bias: Option<crate::dos::EnergyBias>,
+    /// The final polish of the records, under [`Config::record_polish`].
+    pub polish: Option<PolishReport>,
 }
 
 /// Relaxes `x`, charging every evaluation, and stopping when the budget ends.
@@ -1358,7 +1369,7 @@ pub fn run_with_energy_gradient<'g, R: Rng + ?Sized>(
     rng: &mut R,
 ) -> Result<Outcome, SearchError> {
     let mut checkpoint = continue_without_checkpoint;
-    run_full(
+    run_then_polish(
         cfg,
         start,
         ledger,
@@ -1366,12 +1377,79 @@ pub fn run_with_energy_gradient<'g, R: Rng + ?Sized>(
         grad,
         energy_grad,
         None,
-        None,
-        None,
-        None,
         &mut checkpoint,
         rng,
     )
+}
+
+/// [`run_full`] with value and gradient together, followed under
+/// [`Config::record_polish`] by the polish of the records.
+///
+/// The search runs on the budget less [`polish::reserve`], and the polish
+/// then has every call the ledger has left. The graph is bound here, so the
+/// polish judges structures against the reference the search used.
+#[allow(clippy::too_many_arguments)]
+fn run_then_polish<'g, R, H>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    mut energy_grad: Option<&mut EnergyGradFn<'g>>,
+    checkpoint_interval: Option<usize>,
+    checkpoint: &mut H,
+    rng: &mut R,
+) -> Result<Outcome, SearchError>
+where
+    R: Rng + ?Sized,
+    H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
+{
+    let reserve = if energy_grad.is_some() {
+        polish::reserve(cfg, start, ledger.remaining())
+    } else {
+        0
+    };
+    if reserve == 0 {
+        return run_full(
+            cfg,
+            start,
+            ledger,
+            relax,
+            grad,
+            energy_grad,
+            None,
+            None,
+            None,
+            checkpoint_interval,
+            checkpoint,
+            rng,
+        );
+    }
+    let bound = bind_graph_reference(cfg, start);
+    let cfg = bound.as_ref().unwrap_or(cfg);
+    ledger.budget -= reserve;
+    let outer_records = ledger.records.replace(Vec::new());
+    let searched = run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        energy_grad.as_deref_mut(),
+        None,
+        None,
+        None,
+        checkpoint_interval,
+        checkpoint,
+        rng,
+    );
+    ledger.budget += reserve;
+    let records = std::mem::replace(&mut ledger.records, outer_records).unwrap_or_default();
+    let mut outcome = searched?;
+    if let Some(energy_grad) = energy_grad {
+        polish::polish_records(cfg, ledger, energy_grad, records, reserve, &mut outcome);
+    }
+    Ok(outcome)
 }
 
 /// As [`run_with_energy_gradient`], with periodic observations.
@@ -1397,16 +1475,13 @@ where
         checkpoint_interval > 0,
         "checkpoint interval must be positive"
     );
-    run_full(
+    run_then_polish(
         cfg,
         start,
         ledger,
         relax,
         grad,
         energy_grad,
-        None,
-        None,
-        None,
         Some(checkpoint_interval),
         checkpoint,
         rng,
@@ -6664,6 +6739,7 @@ where
             r
         }),
         energy_bias: ebias,
+        polish: None,
     })
 }
 
