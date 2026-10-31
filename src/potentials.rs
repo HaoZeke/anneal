@@ -240,7 +240,9 @@ impl DifferentiableObjective<f64> for PairPotential {
 
 mod binary_lj;
 mod gmin_tip4p;
+mod sutton_chen;
 mod tip4p;
+pub use sutton_chen::{SuttonChen, SuttonChenFamily};
 pub use binary_lj::BinaryLennardJones;
 pub use gmin_tip4p::{
     C6 as GMIN_TIP4P_C6, C12 as GMIN_TIP4P_C12, COULOMB as GMIN_TIP4P_COULOMB, GminTip4p,
