@@ -1680,6 +1680,16 @@ Feeds/consumes: the =Relax= closure most examples and =csa_cluster=
 build around; consumed throughout the cluster-hopping call sites as the
 concrete quasi-Newton engine.
 
+** ANC local step
+
+What it is: an opt-in molecular relaxer in the approximate normal coordinates of a Lindh or Swart model Hessian, the scheme of xtb's ANCopt.
+On GFN2-xTB starts it reaches a 5e-3 eV/Å gate in 2.8 to 7.5 times fewer calls than L-BFGS, but on eight of twelve starts at a different minimum, so L-BFGS stays the default.
+See [[file:anc-local-step.org][The molecular local step]].
+
+Key types and functions: =AncOpt= (src/methods/anc_opt.rs:203), =LocalStep= (anc_opt.rs:176), =minimize=/=minimize_watched= (anc_opt.rs:264/283), =LocalRelax::for_config= (src/methods/cluster_search.rs:178).
+
+Feeds/consumes: selected by =Config::local_step=; =warm_relax= in cluster_search.rs relaxes through it when =species= is set and the state is Cartesian.
+
 ** CSA bank population (=Bank=)
 
 What it is: the diversity-held population under the conformational-

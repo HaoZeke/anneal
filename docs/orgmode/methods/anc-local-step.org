@@ -1,0 +1,138 @@
+#+TITLE: The molecular local step
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+* The molecular local step
+
+A cluster search relaxes every proposal before it judges it.
+By default that relaxation is warm-started L-BFGS.
+=LocalStep::Anc= offers a second relaxation for molecules, the approximate normal coordinate (ANC) scheme of xtb's ANCopt.
+This page explains what it does, how it differs from xtb, and what it was measured to do.
+[[file:../howto/anc-local-step.org][Use the ANC local step]] says how to turn it on.
+
+** Why a model Hessian
+
+A quasi-Newton relaxation in Cartesian coordinates starts from a unit Hessian.
+It then has to learn, one curvature pair at a time, that a bond stretch is a hundred times stiffer than a torsion.
+On a flexible molecule that learning is most of the relaxation.
+Molecular optimisers that converge in tens of cycles start instead from a model Hessian built from the geometry alone, and step in the coordinates that diagonalise it.
+
+** What it does
+
+=methods::anc_opt::AncOpt= follows xtb 6.7.1 (=optimizer.f90=, =type/anc.f90=, =bfgs.f90=, =model_hessian.f90=):
+
+1. Build a model Hessian at the current geometry.
+   The default is Lindh's 1995 valence model, with xtb's prefactors 0.40, 0.13 and 0.0075 for stretch, bend and torsion.
+   Swart and Bickelhaupt's covalent-radius weight is the alternative.
+2. Add xtb's damped C6 term to the stretch of every pair, with D2 coefficients scaled by 20.
+   As in xtb's =ddvopt=, the Cartesian Hessian of the attraction \(V = -s_6 C_6 f(r)/r^6\) is subtracted from the pair block.
+   Beyond the damping radius that gives the pair a positive radial curvature, so a hydrogen-bonded or dispersion-bound complex does not look like separate molecules to the model.
+3. Project out rigid translations and rotations, diagonalise, shift the spectrum so the softest mode sits at =hlow=, and clamp it to =[hlow, hmax]=.
+   The eigenvectors are the coordinates.
+4. Take rational function steps in those coordinates, each component capped at =max_component= bohr.
+   A step \(q\) maps back to Cartesians linearly, \(x = x_\mathrm{ref} + Bq\), where \(B\) holds the eigenvectors and \(x_\mathrm{ref}\) is the geometry they were built at.
+5. Update the coordinate Hessian after each step with BFGS (with xtb's diagonal floor) or Bofill's update.
+6. Rebuild the coordinates from a fresh model Hessian every =micro_cycles= steps.
+   The rebuild resets the coordinate Hessian to the new model eigenvalues.
+   With the trust radius off, a proposed step longer than 2 bohr after the second in a basis also forces a rebuild.
+
+** Where it departs from xtb
+
+- The convergence test is the caller's: the largest Cartesian gradient component under =gtol=, the same test =WarmLbfgs= applies.
+  The two optimisers therefore count calls to the same gate.
+- =HessianUpdate::Bofill= is Bofill's update.
+  xtb's alternative to BFGS is Powell's.
+- =AncOpt::trust_radius= is off by default, as xtb has none.
+  When set, a step that raises the energy by more than =energy_rise= is rejected and the radius shrinks.
+  The coordinate Hessian is updated only with kept steps.
+  When the model predicted no descent, the ratio test does not grow the radius.
+  A step longer than the radius is scaled to it rather than forcing a rebuild, and xtb's 1.5 lengthening of steps at a small gradient is off.
+
+** How it plugs into a search
+
+=Config::local_step= selects the relaxation.
+The search uses ANC only when the configuration names =species= and the state has \(3N\) coordinates; on any other state it falls back to L-BFGS.
+Every value-and-gradient call is charged to the search's ledger, exactly as L-BFGS calls are.
+A call that returns a non-finite value or gradient is counted as refused, and a refused first call refuses the start, the same accounting L-BFGS gets.
+=Config::local_step= is left out of the resolved configuration while it is L-BFGS, so the hashes of existing configurations do not change.
+
+** Measured
+
+The engine was GFN2-xTB through the =xtb= 6.7.1 executable, one process and one counted call per value and gradient, with =OMP_NUM_THREADS=1= and =MKL_CBWR=COMPATIBLE=.
+The starts were RDKit ETKDG geometries with no force-field cleanup, four seeds each of met-enkephalin (75 atoms), trofinetide (43 atoms) and N-methylacetamide with two waters (18 atoms).
+Both optimisers ran from each start to a largest gradient component of 5e-3 eV/Å, with =examples/local_opt_bench.rs=.
+[[file:../howto/anc-local-step.org][Use the ANC local step]] gives the command for one row.
+Each end point was then given to =xtb --hess=.
+The whole set was run twice, and the two runs print the same lines and write the same final geometries.
+
+The official =xtb= binary links Intel MKL, and =MKL_CBWR= pins the code path MKL would otherwise pick from the processor.
+L-BFGS is sensitive to that path.
+On one machine, metenk-3 under L-BFGS took between 1274 and 1363 calls across MKL's code paths, and every run ended within 0.3 meV of the others.
+On metenk-2, the unpinned path stopped in a minimum 115 meV higher, after 1294 calls.
+
+The rule for "same stationary point" was written before the run: an energy difference of at most 1 meV and a heavy-atom Kabsch RMSD of at most 0.1 Å.
+Imaginary modes smaller than 20 cm⁻¹ are noted but not counted.
+
+#+begin_export rst
+.. figure:: /_static/anc-local-step-calls.png
+   :width: 100%
+   :alt: Calls to the 5e-3 eV/Å gate for each of the twelve starts, L-BFGS against ANC.
+
+   Calls to a largest gradient component of 5e-3 eV/Å for each start.
+   A filled ANC bar reached the same minimum as L-BFGS; a hollow one did not.
+   The labels are the ANC energy minus the L-BFGS energy, in meV.
+#+end_export
+
+| start         | L-BFGS calls | ANC calls | ANC − L-BFGS (meV) | heavy RMSD (Å) | same point |
+|---------------+--------------+-----------+--------------------+----------------+------------|
+| metenk-0      |          756 |       152 |               +3.2 |          0.349 | no         |
+| metenk-1      |          968 |       233 |               −8.6 |          0.390 | no         |
+| metenk-2      |         1826 |       315 |             +148.5 |          2.764 | no         |
+| metenk-3      |         1356 |       182 |             +406.5 |          2.409 | no         |
+| nma2w-0       |          395 |        94 |                0.0 |          0.059 | yes        |
+| nma2w-1       |          228 |        81 |               +0.2 |          0.039 | yes        |
+| nma2w-2       |          437 |        80 |               −0.2 |          0.036 | yes        |
+| nma2w-3       |          392 |        94 |               +1.7 |          0.098 | no         |
+| trofinetide-0 |          598 |       119 |              +20.2 |          0.359 | no         |
+| trofinetide-1 |          642 |       122 |              +15.3 |          1.012 | no         |
+| trofinetide-2 |          376 |        59 |               +0.6 |          0.057 | yes        |
+| trofinetide-3 |          487 |        88 |               −0.7 |          0.107 | no         |
+
+Every run met the gate, and =xtb --hess= finds no imaginary mode at any of the 24 end points, so all are minima.
+
+ANC took between 2.8 and 7.5 times fewer calls on every start.
+On four starts it reached the same minimum as L-BFGS: nma2w-0, -1 and -2, and trofinetide-2.
+On the other eight it reached a different one: all four met-enkephalin starts, nma2w-3, and trofinetide-0, -1 and -3.
+Two of those miss the rule narrowly, nma2w-3 on energy (1.7 meV) and trofinetide-3 on RMSD (0.107 Å).
+ANC ended higher on six of the eight, by up to 406.5 meV on metenk-3, and lower on metenk-1 and trofinetide-3.
+With the trust radius on (=anc-trust= in the bench, a starting radius of 0.3 bohr), ANC reaches a different minimum on eight of the twelve starts and ends higher on six of them.
+All its end points are minima; one, trofinetide-0, has a −5.1 cm⁻¹ mode below the 20 cm⁻¹ threshold.
+
+** Why L-BFGS stays the default
+
+A local step inside a search is judged by where it lands, not only by how fast.
+The different minima come from the ANC step itself.
+Each step is a rational function step in the eigenvectors of the model Hessian, mapped back to Cartesians by the linear update \(x = x_\mathrm{ref} + Bq\).
+That frame is held for =micro_cycles= steps and then rebuilt, and the rebuild resets the coordinate Hessian to the model eigenvalues.
+On a peptide the frame carries the relaxation out of the torsional valley that L-BFGS stays in.
+
+metenk-3 shows the size of the effect.
+ANC ends 406.5 meV above L-BFGS, with a heavy-atom RMSD of 2.409 Å between the end points.
+Both runs stop on the same test, the largest Cartesian gradient component, at 3.94e-3 eV/Å for L-BFGS and 4.43e-3 eV/Å for ANC, and both end points are minima.
+The trust radius rejects a step that raises the energy by more than =energy_rise=, scales a long step to the radius, and drops the 1.5 lengthening.
+With it on, metenk-3 still ends 406.9 meV above L-BFGS, at a heavy-atom RMSD of 2.403 Å.
+Shorter, guarded steps leave the gap in place.
+
+Until a search-level measurement shows that the saved calls buy more hops than the changed minima cost, ANC stays opt-in.
+
+** Sources
+
+- Lindh, Bernhardsson, Karlström and Malmqvist, Chem. Phys. Lett. 241, 423 (1995), doi:10.1016/0009-2614(95)00646-L.
+- Swart and Bickelhaupt, Int. J. Quantum Chem. 106, 2536 (2006), doi:10.1002/qua.21049.
+- Bakken and Helgaker, J. Chem. Phys. 117, 9160 (2002), doi:10.1063/1.1515483.
+- Banerjee, Adams, Simons and Shepard, J. Phys. Chem. 89, 52 (1985), doi:10.1021/j100247a015.
+- Bofill, J. Comput. Chem. 15, 1 (1994), doi:10.1002/jcc.540150102.
+- Wang and Song, J. Chem. Phys. 144, 214108 (2016), doi:10.1063/1.4952956 (geomeTRIC).
+- Packwood et al., J. Chem. Phys. 144, 164109 (2016), doi:10.1063/1.4947024 (the Exp preconditioner).
+- Bannwarth, Ehlert and Grimme, J. Chem. Theory Comput. 15, 1652 (2019), doi:10.1021/acs.jctc.8b01176 (GFN2-xTB).
+
+The Rust API reference of =methods::anc_opt= documents every field; see the [[file:../reference/rust-api.org][Rust API Reference]].

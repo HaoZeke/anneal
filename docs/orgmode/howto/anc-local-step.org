@@ -1,0 +1,105 @@
+#+TITLE: Use the ANC local step
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+* Use the ANC local step
+
+This guide switches the relaxation inside a molecular cluster search from L-BFGS to approximate normal coordinates (ANC), checks that the switch took, measures it on your system, and switches back.
+It is Rust only; the Python bindings keep L-BFGS.
+[[file:../methods/anc-local-step.org][The molecular local step]] explains the method and why it is not the default.
+
+** Before you start
+
+You need an objective that implements =DifferentiableObjective<f64>= over Cartesian coordinates, the atomic number of each atom (=species=), and the atom indices of each molecule (=groups=).
+The constant below is for an objective in eV and Å.
+
+To measure the step you also need an =xtb= 6.7.1 executable and Python 3.
+The bench calls =xtb= from the Python standard library and does not need ASE.
+
+** Select it
+
+Set =local_step= on a molecular configuration and run the search.
+The function returns =Box<dyn Error>=, so =?= takes both the serialisation error and the search error:
+
+#+begin_src rust
+use std::error::Error;
+
+use anneal_core::DifferentiableObjective;
+use anneal_core::methods::anc_opt::LocalStep;
+use anneal_core::methods::cluster_hopping::{Config, Ledger};
+use anneal_core::methods::cluster_search::search;
+
+pub fn relax_with_anc<O: DifferentiableObjective<f64>>(
+    objective: &O,
+    species: Vec<u32>,
+    groups: Vec<Vec<usize>>,
+    budget: usize,
+) -> Result<(), Box<dyn Error>> {
+    let mut cfg = Config::recommended_molecular(species, groups, 1.0);
+    cfg.local_step = LocalStep::ANC_EV_ANGSTROM;
+    let json = cfg.resolved_json()?;
+    assert!(json.contains(r#""local_step":{"kind":"anc""#));
+    let mut ledger = Ledger::new(budget);
+    let (outcome, _) = search(objective, &cfg, &mut ledger, 7)?;
+    println!("best {:.6} after {} hops", outcome.best, outcome.hops);
+    Ok(())
+}
+#+end_src
+
+For other units, or the Swart model Hessian, name both.
+=AncUnits= and =ModelHessian= come from =anneal_core::methods::anc_opt=:
+
+#+begin_src rust
+cfg.local_step = LocalStep::Anc {
+    model: ModelHessian::Swart,
+    units: AncUnits::ATOMIC,
+};
+#+end_src
+
+=AncUnits= takes any pair of =energy_per_hartree= and =length_per_bohr=.
+
+** Check that it applies
+
+ANC runs only when =cfg.species= is set and the state has three coordinates per atom.
+=Config::recommended_molecular= sets =species=.
+On any other state the search falls back to L-BFGS without an error.
+
+The resolved configuration records the choice, which the =assert!= above checks, so the hash changes as well.
+In a default build, two waters under =recommended_molecular= resolve to =ade417d7…= with L-BFGS and to =5153a56b…= with =ANC_EV_ANGSTROM=.
+A run that compares hashes against an earlier L-BFGS run will see a new configuration.
+
+** Measure it on your system
+
+Compare one relaxation per start before you run a whole search.
+=examples/local_opt_bench.rs= drives GFN2-xTB through the =xtb= executable, one process per call, and counts every call:
+
+#+begin_src bash
+export OMP_NUM_THREADS=1 MKL_CBWR=COMPATIBLE XTB_EXE=/path/to/xtb BENCH_XYZ_DIR=out
+mkdir -p out
+cargo run --release --example local_opt_bench -- start.xyz 5e-3 lbfgs anc
+#+end_src
+
+The arguments are the start, the gate on the largest gradient component in eV/Å, and the optimisers.
+=anc-swart=, =anc-bofill= and =anc-trust= are the variants.
+The official =xtb= 6.7.1 binary links Intel MKL, which picks its code path from the processor.
+=MKL_CBWR=COMPATIBLE= fixes that path, so the counts repeat on another machine.
+Without it a long relaxation can end in a different number of calls.
+
+Each optimiser prints one line: start, optimiser, calls, energy (eV), largest gradient component (eV/Å), and whether it met the gate.
+On =metenk-0=, one of the met-enkephalin starts in the method page's table:
+
+#+begin_example
+metenk-0	lbfgs	756	-3321.421812	4.5444e-3	true
+metenk-0	anc	152	-3321.418630	3.5304e-3	true
+#+end_example
+
+Fewer calls do not mean the same answer.
+Before you trust the count, compare the end points in =out/=: the energy on the comment line, the heavy-atom RMSD, and =xtb out/start-anc.xyz --hess=, which lists the frequencies.
+On =metenk-0= the two runs end 3.2 meV apart in different minima.
+
+** Switch back
+
+#+begin_src rust
+cfg.local_step = LocalStep::Lbfgs;
+#+end_src
+
+L-BFGS is the default, and a configuration with it resolves to the same hash it had before =local_step= existed.

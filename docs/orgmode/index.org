@@ -87,6 +87,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    howto/chemfit
    howto/precision-policy
    howto/rgmin-lbfgs
+   howto/anc-local-step
    howto/faq
    faq
 #+end_export
@@ -111,6 +112,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
 
    methods/catalog
    methods/composition
+   methods/anc-local-step
 #+end_export
 
 #+begin_export rst

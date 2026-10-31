@@ -60,19 +60,24 @@
 //!
 //! # Measured
 //!
-//! GFN2-xTB through the `xtb` executable, one counted call per value and
-//! gradient, from RDKit ETKDG starts with no force-field cleanup, four
-//! seeds each (`examples/local_opt_bench.rs`). Both optimisers stop at a
-//! largest gradient component of 5e-2 eV/A, the molecular presets'
-//! `record_gradient`. Calls summed over the four starts:
+//! GFN2-xTB through the `xtb` 6.7.1 executable with `MKL_CBWR=COMPATIBLE`,
+//! one counted call per value and gradient, from RDKit ETKDG starts with no
+//! force-field cleanup, four seeds each (`examples/local_opt_bench.rs`).
+//! Both optimisers stop at a largest gradient component of 5e-2 eV/A, the
+//! molecular presets' `record_gradient`. Calls summed over the four starts:
 //!
 //! | system | atoms | L-BFGS | ANC | xtb `--opt loose` cycles |
 //! |---|---|---|---|---|
-//! | met-enkephalin | 75 | 354 | 171 | 180 |
-//! | trofinetide | 43 | 467 | 152 | 173 |
-//! | N-methylacetamide and two waters | 18 | 357 | 182 | 182 |
+//! | met-enkephalin | 75 | 419 | 172 | 182 |
+//! | trofinetide | 43 | 486 | 154 | 172 |
+//! | N-methylacetamide and two waters | 18 | 357 | 165 | 181 |
 //!
-//! ANC ended lower than L-BFGS on all twelve starts, by 4 to 228 meV.
+//! ANC ended lower than L-BFGS on eleven of the twelve starts, by 8.7 to
+//! 219 meV, and 2.8 meV higher on the twelfth. At that gate neither end point
+//! is a converged minimum. At 5e-3 eV/A the sums are 4906 against 882, 2103
+//! against 388 and 1452 against 349, but eight of the twelve pairs end at
+//! different minima (406.5 meV apart on one met-enkephalin start), so the
+//! fewer calls do not buy the same answer.
 //!
 //! # Units
 //!

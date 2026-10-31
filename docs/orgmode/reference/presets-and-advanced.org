@@ -49,25 +49,12 @@ Gradient support is provided by =eindir=; see the [[https://eindir.rgoswami.me/h
 
 * Molecular local step
 
-A cluster search relaxes every proposal with warm-started L-BFGS unless
-=Config::local_step= says otherwise. =LocalStep::Anc= uses the scheme of
-xtb's ANCopt instead: a Lindh (or Swart--Bickelhaupt) model Hessian built
-from the geometry, its eigenvectors as approximate normal coordinates,
-rational function steps in those coordinates, BFGS (or Bofill) updates, and
-a rebuild of the coordinates as the geometry moves. It needs =species= and
-Cartesian coordinates, and falls back to L-BFGS on any other state. Every
-value-and-gradient call it makes is charged to the search's ledger, as with
-L-BFGS. The Rust API documentation of =methods::anc_opt= holds the details
-and the measurements.
-
-- Lindh, Bernhardsson, Karlström and Malmqvist, Chem. Phys. Lett. 241, 423 (1995), doi:10.1016/0009-2614(95)00646-L.
-- Swart and Bickelhaupt, Int. J. Quantum Chem. 106, 2536 (2006), doi:10.1002/qua.21049.
-- Bakken and Helgaker, J. Chem. Phys. 117, 9160 (2002), doi:10.1063/1.1515483.
-- Banerjee, Adams, Simons and Shepard, J. Phys. Chem. 89, 52 (1985), doi:10.1021/j100247a015.
-- Bofill, J. Comput. Chem. 15, 1 (1994), doi:10.1002/jcc.540150102.
-- Wang and Song, J. Chem. Phys. 144, 214108 (2016), doi:10.1063/1.4952956 (geomeTRIC).
-- Packwood et al., J. Chem. Phys. 144, 164109 (2016), doi:10.1063/1.4947024 (the Exp preconditioner).
-- Bannwarth, Ehlert and Grimme, J. Chem. Theory Comput. 15, 1652 (2019), doi:10.1021/acs.jctc.8b01176 (GFN2-xTB).
+=Config::local_step= selects the relaxation of a cluster search.
+=LocalStep::Lbfgs=, warm-started L-BFGS, is the default.
+=LocalStep::Anc { model, units }= relaxes in approximate normal coordinates, the scheme of xtb's ANCopt, and =LocalStep::ANC_EV_ANGSTROM= is its Lindh-model form for eV and Å.
+It needs =species= and Cartesian coordinates and falls back to L-BFGS on any other state.
+It is serialised into the resolved configuration only when it is not L-BFGS.
+See [[file:../howto/anc-local-step.org][Use the ANC local step]] and [[file:../methods/anc-local-step.org][The molecular local step]].
 
 * Advanced drivers
 
