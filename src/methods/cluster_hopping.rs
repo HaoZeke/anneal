@@ -1845,6 +1845,67 @@ mod rigid_step_tests {
     }
 }
 
+/// Metropolis on the rise in energy plus deposits from `here` to `offer`,
+/// each an energy and a state, the test an ordinary hop faces at
+/// `temperature`.
+fn biased_metropolis<R: Rng + ?Sized>(
+    biases: &[&dyn Bias],
+    here: (f64, ArrayView1<f64>),
+    offer: (f64, ArrayView1<f64>),
+    temperature: f64,
+    rng: &mut R,
+) -> bool {
+    let deposits = |state: ArrayView1<f64>| {
+        biases
+            .iter()
+            .map(|b| b.potential(b.cv(state).view()))
+            .sum::<f64>()
+    };
+    let rise = offer.0 + deposits(offer.1) - here.0 - deposits(here.1);
+    let d = rise / temperature.max(1e-12);
+    d < 0.0 || rng.random::<f64>() < (-d).exp()
+}
+
+#[cfg(test)]
+mod biased_metropolis_tests {
+    use super::biased_metropolis;
+    use crate::bias::{BasinBias, Bias, SortedPairs};
+    use ndarray::array;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    /// The seed 14100 trace on Sutton-Chen 12-6 at 73 points: a completion
+    /// 200 below the chain at temperature 30, into a basin 511 deeper in
+    /// deposits. On raw energy it is always taken; with the deposits it
+    /// is a rise of 311, and refused.
+    #[test]
+    fn deposits_at_the_offer_refuse_a_drop_in_energy() {
+        let here = array![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0];
+        let offer = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.9, 0.0];
+        let empty = BasinBias::new(SortedPairs { n_points: 3 }, 0.05, 511.0, 5.0);
+        let mut filled = BasinBias::new(SortedPairs { n_points: 3 }, 0.05, 511.0, 5.0);
+        let s = filled.cv(offer.view());
+        filled.deposit(s.view(), 30.0);
+        assert_eq!(filled.potential(s.view()), 511.0);
+        let mut rng = StdRng::seed_from_u64(14100);
+        let mut taken = |bias: &dyn Bias| {
+            (0..1000)
+                .filter(|_| {
+                    biased_metropolis(
+                        &[bias],
+                        (0.0, here.view()),
+                        (-200.0, offer.view()),
+                        30.0,
+                        &mut rng,
+                    )
+                })
+                .count()
+        };
+        assert_eq!(taken(&empty), 1000);
+        assert_eq!(taken(&filled), 0);
+    }
+}
+
 #[cfg(test)]
 mod rigid_reseed_tests {
     use super::{Config, random_rigid_reseed};
@@ -5277,8 +5338,10 @@ where
         }
         // Orbit completion of a newly entered basin: the core's point group
         // applied to the whole cluster, so surface atoms move onto the empty
-        // orbit positions the core implies. Same terms as the core
-        // symmetrisation above: once per new basin, quenched, offered.
+        // orbit positions the core implies. Once per new basin, quenched,
+        // and offered to the biased Metropolis test a hop faces. On raw
+        // energy alone a completion lands back in a basin the deposits
+        // have filled, and the chain returns to the same shelf.
         let mut orbit_offer = None;
         if cfg.packing_surface().orbit_on_new
             && accept
@@ -5316,8 +5379,11 @@ where
             }
         }
         if let Some((es, xs, sym_gradient)) = orbit_offer {
-            let d = (es - e) / temperature.max(1e-12);
-            if d < 0.0 || rng.random::<f64>() < (-d).exp() {
+            let mut biases: Vec<&dyn Bias> = vec![&bias];
+            if let Some(sp) = spectral.as_ref() {
+                biases.push(sp);
+            }
+            if biased_metropolis(&biases, (e, x.view()), (es, xs.view()), temperature, rng) {
                 if es < e {
                     orbit_gain += e - es;
                 }
