@@ -3,7 +3,8 @@
 //! Usage: `ccd_hits <problem> <budget> <first_seed> <last_seed> [arm]`
 //!
 //! `problem` is `morse55` (Morse, `rho = 14`), `morse55:RHO`, `tip4p15` or
-//! `tip4p20`. Seeds are inclusive. `arm` names a `cluster_hopping` preset,
+//! `tip4p20`. Seeds are inclusive. `arm` is `gmin` for the structural-move
+//! hopper in `methods::gmin_hop`, or names a `cluster_hopping` preset,
 //! `recommended` by default. The registration in `paper/seeds.toml` fixes the problems, the
 //! seeds, the budgets and the hit rule.
 //!
@@ -22,6 +23,7 @@
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger, Outcome};
 use anneal_core::methods::cluster_search::{search, search_from};
+use anneal_core::methods::gmin_hop;
 use anneal_core::potentials::{GminTip4p, PairPotential, ccd_tip4p_minimum, gmin_water_geometry};
 use eindir_core::Objective;
 use eindir_core::bounds::Bounds;
@@ -196,10 +198,21 @@ fn run_seed(problem: Problem, arm: &str, budget: usize, seed: u64) -> (Outcome, 
                 stop,
                 state: Mutex::new(fresh),
             };
-            let cfg = morse_config(arm, n);
-            let out = search(&objective, &cfg, &mut ledger, seed)
-                .expect("finite start")
-                .0;
+            let out = if arm == "gmin" {
+                let start = gmin_hop::random_compact_cluster(n, &mut start_rng(seed));
+                gmin_hop::hop(
+                    &objective,
+                    &gmin_hop::Config::morse(n),
+                    &mut ledger,
+                    start.view(),
+                    seed,
+                )
+            } else {
+                let cfg = morse_config(arm, n);
+                search(&objective, &cfg, &mut ledger, seed)
+                    .expect("finite start")
+                    .0
+            };
             (out, objective)
         }
         Problem::Tip4p { n } => {
@@ -211,10 +224,20 @@ fn run_seed(problem: Problem, arm: &str, budget: usize, seed: u64) -> (Outcome, 
                 state: Mutex::new(fresh),
             };
             let start = anneal_core::potentials::random_tip4p_cluster(n, &mut start_rng(seed));
-            let cfg = tip4p_config(arm, n);
-            let out = search_from(&objective, &cfg, &mut ledger, start.view(), seed)
-                .expect("finite start")
-                .0;
+            let out = if arm == "gmin" {
+                gmin_hop::hop(
+                    &objective,
+                    &gmin_hop::Config::water(n),
+                    &mut ledger,
+                    start.view(),
+                    seed,
+                )
+            } else {
+                let cfg = tip4p_config(arm, n);
+                search_from(&objective, &cfg, &mut ledger, start.view(), seed)
+                    .expect("finite start")
+                    .0
+            };
             (out, objective)
         }
     };
