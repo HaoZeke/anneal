@@ -48,12 +48,15 @@
 //!    of date as torsions turn, and the rebuild is what lets the relaxation
 //!    follow a large conformational change.
 //!
-//! Two departures from xtb, both selectable. The convergence test is the
-//! caller's: the largest Cartesian gradient component under `gtol`, the test
+//! Three departures from xtb. The convergence test is the caller's: the
+//! largest Cartesian gradient component under `gtol`, the test
 //! [`crate::methods::warm_lbfgs::WarmLbfgs`] applies, so the two count calls
-//! to the same answer. And [`AncOpt::trust_radius`] puts a trust radius on the
-//! step with a ratio test, rejecting a step that raises the energy; xtb takes
-//! every step it proposes.
+//! to the same answer. [`HessianUpdate::Bofill`] is Bofill's update, where
+//! xtb's alternative to BFGS is Powell's. And [`AncOpt::trust_radius`], off
+//! by default, puts a trust radius on the step with a ratio test: a step that
+//! raises the energy by more than [`AncOpt::energy_rise`] is rejected, and
+//! the coordinate Hessian is updated only with the steps that are kept. xtb
+//! takes every step it proposes.
 //!
 //! # Measured
 //!
@@ -374,28 +377,17 @@ impl AncOpt {
                         None => return (best.0, best.1, evals),
                     }
                 }
+                let actual = (f_trial - f) / e_unit;
+                if let Some(radius) = trust.as_mut()
+                    && !judge_step(radius, norm, predicted, actual, self)
+                {
+                    continue;
+                }
                 let gq_trial = anc.project(g_trial.view(), to_au_grad);
                 let y: Vec<f64> = gq_trial.iter().zip(&gq).map(|(a, b)| a - b).collect();
                 match self.update {
                     HessianUpdate::Bfgs => bfgs(&mut hq, &dq, &y, nvar, self.hlow),
                     HessianUpdate::Bofill => bofill(&mut hq, &dq, &y, nvar),
-                }
-                let actual = (f_trial - f) / e_unit;
-                if let Some(radius) = trust.as_mut() {
-                    if actual > self.energy_rise {
-                        *radius = (0.25 * norm).max(1e-4);
-                        continue;
-                    }
-                    let ratio = if predicted < 0.0 {
-                        actual / predicted
-                    } else {
-                        1.0
-                    };
-                    if ratio < 0.25 {
-                        *radius = (0.5 * norm).max(1e-4);
-                    } else if ratio > 0.75 && norm > 0.8 * *radius {
-                        *radius = (2.0 * *radius).min(self.trust_max);
-                    }
                 }
                 q = q_trial;
                 x = x_trial;
@@ -432,6 +424,29 @@ impl AncOpt {
             .as_ref()
             .is_some_and(|mask| mask.get(atom).copied().unwrap_or(false))
     }
+}
+
+/// Trust-radius verdict on a step of length `norm` bohr whose energy change
+/// was `actual` hartree against the model's `predicted`; `true` keeps it.
+///
+/// A rejected step sets the radius to a quarter of its length. A kept one
+/// sets it to half its length on a ratio below 0.25, and doubles it, up to
+/// `trust_max`, on a ratio above 0.75 when the step reached the radius. A
+/// model that predicted no descent gives no ratio, and the radius stays.
+fn judge_step(radius: &mut f64, norm: f64, predicted: f64, actual: f64, opt: &AncOpt) -> bool {
+    if actual > opt.energy_rise {
+        *radius = (0.25 * norm).max(1e-4);
+        return false;
+    }
+    if predicted < 0.0 {
+        let ratio = actual / predicted;
+        if ratio < 0.25 {
+            *radius = (0.5 * norm).max(1e-4);
+        } else if ratio > 0.75 && norm > 0.8 * *radius {
+            *radius = (2.0 * *radius).min(opt.trust_max);
+        }
+    }
+    true
 }
 
 fn next_micro(micro: usize, base: usize) -> usize {
@@ -1651,6 +1666,67 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// With the trust radius on, a step whose energy rises is rejected before
+    /// it reaches the update. The next step is then the same RFO step on the
+    /// same Hessian, cut to the smaller radius, so it points the same way.
+    #[test]
+    fn a_rejected_trust_step_leaves_the_coordinate_hessian_alone() {
+        let ff = ValenceFf::pentane();
+        let x0 = pentane_start(1);
+        for update in [HessianUpdate::Bfgs, HessianUpdate::Bofill] {
+            let mut opt = AncOpt::new(ff.species.clone(), AncUnits::EV_ANGSTROM);
+            opt.gtol = 5e-3;
+            opt.update = update;
+            opt.trust_radius = Some(0.3);
+            let mut points: Vec<Array1<f64>> = Vec::new();
+            opt.minimize(x0.view(), 2, |v| {
+                points.push(v.to_owned());
+                let (e, g) = ff.energy_gradient(v);
+                // The first trial is reported 100 eV higher than it is.
+                Some(if points.len() == 2 {
+                    (e + 100.0, g)
+                } else {
+                    (e, g)
+                })
+            });
+            assert_eq!(points.len(), 3, "{update:?}");
+            let s1 = &points[1] - &x0;
+            let s2 = &points[2] - &x0;
+            let n1 = s1.dot(&s1).sqrt();
+            let n2 = s2.dot(&s2).sqrt();
+            assert!(
+                (n1 - 0.3 * BOHR_ANGSTROM).abs() < 1e-9,
+                "{update:?}: first step {n1} A did not reach the radius"
+            );
+            assert!(
+                (n2 / n1 - 0.25).abs() < 1e-9,
+                "{update:?}: radius after the rejection {n2} A against {n1} A"
+            );
+            let cos = s1.dot(&s2) / (n1 * n2);
+            assert!(
+                cos > 1.0 - 1e-9,
+                "{update:?}: the retry turned (cos {cos}), so the Hessian changed"
+            );
+        }
+    }
+
+    #[test]
+    fn a_model_that_predicted_no_descent_does_not_grow_the_radius() {
+        let opt = AncOpt::new(vec![1, 1], AncUnits::ATOMIC);
+        // A kept step that reached the radius and matched the model doubles it.
+        let mut radius = 0.3;
+        assert!(judge_step(&mut radius, 0.3, -1e-3, -1e-3, &opt));
+        assert_eq!(radius, 0.6);
+        for predicted in [0.0, 1e-4] {
+            let mut radius = 0.3;
+            assert!(judge_step(&mut radius, 0.3, predicted, -1e-3, &opt));
+            assert_eq!(radius, 0.3, "predicted {predicted}");
+        }
+        let mut radius = 0.3;
+        assert!(!judge_step(&mut radius, 0.3, -1e-3, 1e-3, &opt));
+        assert_eq!(radius, 0.075);
     }
 
     #[test]
