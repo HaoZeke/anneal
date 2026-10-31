@@ -3430,7 +3430,10 @@ where
         if csm_reseed_hops > 0
             && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
             && cfg.packing_cna_applies()
-            && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+            && crate::soap::ih_dominated(
+                x.view(),
+                crate::soap::SoapSpec::at_length(cfg.length_scale),
+            )
             && ledger.remaining() > 0
         {
             csm_reseed_stamp = hops;
@@ -5398,10 +5401,7 @@ where
             continue;
         }
         if cfg.symmetrise_on_stall && stuck && hop_room(hops) {
-            let soap_spec = crate::soap::SoapSpec {
-                rcut_nn: 3.5 * cfg.length_scale,
-                ..Default::default()
-            };
+            let soap_spec = crate::soap::SoapSpec::at_length(cfg.length_scale);
             let withhold = (cfg.packing_cna_applies()
                 && crate::soap::ih_dominated(x.view(), soap_spec))
                 || cfg.active_region.is_some()
@@ -5626,7 +5626,10 @@ where
             // move.
             if directed_leave
                 && cfg.packing_cna_applies()
-                && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+                && crate::soap::ih_dominated(
+                    x.view(),
+                    crate::soap::SoapSpec::at_length(cfg.length_scale),
+                )
                 && let Some((other_energy, other_state)) =
                     packing.better_other(x.view(), e, packing_cutoff)
             {
@@ -5653,7 +5656,10 @@ where
             if directed_leave
                 && cfg.budget_window
                 && hop_room(hops)
-                && !crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+                && !crate::soap::ih_dominated(
+                    x.view(),
+                    crate::soap::SoapSpec::at_length(cfg.length_scale),
+                )
             {
                 let best_before_growth = ledger.best;
                 let mut best_growth: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
@@ -5710,7 +5716,10 @@ where
             if directed_leave
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
-                && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+                && crate::soap::ih_dominated(
+                    x.view(),
+                    crate::soap::SoapSpec::at_length(cfg.length_scale),
+                )
             {
                 let best_before_growth = ledger.best;
                 let mut side = StdRng::seed_from_u64(
