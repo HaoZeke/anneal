@@ -1,1 +1,0 @@
-A hop cap set with `max_hops` now bounds every hop a cluster hopping run takes. A first-stage rejection under delayed acceptance, a symmetrisation or stall move after the last allowed quench, and each growth and activation inside a climb no longer take a hop past it. A cap of zero takes no hop. Runs that never reach their cap are unchanged.
