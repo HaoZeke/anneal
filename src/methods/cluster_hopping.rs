@@ -4546,7 +4546,16 @@ where
             }
             unconverged_records += 1;
             hops += 1;
-            bias.deposit(x.view(), temperature);
+            if refused {
+                // Where an energy rejection leaves the chain: one more visit
+                // to the basin it holds and one more hop without a record.
+                bias.deposit(bias.cv(x.view()).view(), temperature);
+                quiet += 1;
+            } else {
+                // Reaches no later draw, and the basin counts the LJ digests
+                // pin include it.
+                bias.deposit(x.view(), temperature);
+            }
             if cfg.max_hops.is_some_and(|cap| hops >= cap) {
                 break;
             }
@@ -7110,6 +7119,90 @@ mod graph_invariant_tests {
         assert!(bind_graph_reference(&outer, reacted.view()).is_none());
         assert!(!keeps_graph(&outer, reacted.view()));
         assert!(keeps_graph(&outer, intact.view()));
+    }
+
+    #[test]
+    fn a_refused_trial_deposits_on_the_basin_the_chain_holds() {
+        let (intact, reacted) = dimer();
+        let mut cfg = molecular();
+        cfg.max_hops = Some(3);
+        let mut calls = 0usize;
+        let mut relax = |ledger: &mut Ledger, _x: ArrayView1<f64>, _steps: usize| {
+            assert!(ledger.charge());
+            calls += 1;
+            if calls == 1 {
+                (0.0, intact.clone())
+            } else {
+                (-5.0, reacted.clone())
+            }
+        };
+        let mut bias = BasinBias::new(
+            ClusterFingerprint::of_config(&cfg, &intact),
+            cfg.merge_radius,
+            cfg.bias_height,
+            cfg.bias_gamma,
+        );
+        let mut ledger = Ledger::new(64);
+        let mut rng = StdRng::seed_from_u64(5);
+        let out = run_with_bias(
+            &cfg,
+            intact.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            &mut bias,
+            &mut rng,
+        )
+        .expect("finite start");
+
+        assert_eq!(out.rejected_trials, 3);
+        assert_eq!(out.final_state.as_ref(), Some(&intact));
+        let held = bias.cv(intact.view());
+        assert_eq!(bias.n_basins(), 1);
+        assert!(bias.wells().iter().all(|(c, _)| c.len() == held.len()));
+        assert!(bias.potential(held.view()) > 0.0);
+    }
+
+    #[test]
+    fn refused_trials_count_towards_the_stall() {
+        let (intact, reacted) = dimer();
+        let mut apart = intact.clone();
+        for atom in 3..6 {
+            apart[3 * atom] += 1.0;
+        }
+        let mut cfg = molecular();
+        cfg.max_hops = Some(3);
+        cfg.restart_on_stall = true;
+        cfg.restart_patience = usize::MAX;
+        cfg.escape_stall_patience = 3;
+        cfg.escape_stall_factor = 0.0;
+        // Two refused trials, then one the chain may keep or decline, so
+        // only the refused ones can bring the third hop to the patience.
+        let mut trials = 0usize;
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            assert!(ledger.charge());
+            if x == intact {
+                (0.0, intact.clone())
+            } else if x == reacted {
+                (-5.0, reacted.clone())
+            } else if x == apart {
+                (1.0, apart.clone())
+            } else {
+                trials += 1;
+                if trials <= 2 {
+                    (-5.0, reacted.clone())
+                } else {
+                    (1.0, apart.clone())
+                }
+            }
+        };
+        let mut ledger = Ledger::new(64);
+        let mut rng = StdRng::seed_from_u64(5);
+        let out =
+            run(&cfg, intact.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
+
+        assert_eq!(out.rejected_trials, 2);
+        assert_eq!(out.restarts, 1);
     }
 }
 
