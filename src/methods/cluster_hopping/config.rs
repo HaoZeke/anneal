@@ -189,6 +189,31 @@ pub enum ContinuousSymmetry {
     },
 }
 
+/// Which core orbit completion ([`Config::orbit_complete_on_new`]) reads
+/// its point group from.
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OrbitCore {
+    /// The innermost [`Config::symmetrise_core_fraction`] of the points by
+    /// distance from the centroid, up to three of its operations closed
+    /// exactly ([`crate::symmetrise::orbit_complete_core`]).
+    #[default]
+    Fraction,
+    /// The innermost shells about a weighted centre, every operation
+    /// refined and closed tolerantly
+    /// ([`crate::symmetrise::orbit_complete_shells`]).
+    Shells(crate::symmetrise::ShellCore),
+    /// Both completions, shells first, each quenched and recorded; the
+    /// lower quench is offered to the acceptance rule.
+    Both(crate::symmetrise::ShellCore),
+}
+
+impl OrbitCore {
+    fn is_fraction(&self) -> bool {
+        matches!(self, Self::Fraction)
+    }
+}
+
 /// Driver settings.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Config {
@@ -452,6 +477,11 @@ pub struct Config {
     /// quenched and offered to the acceptance rule. With
     /// [`Config::point_symmetrise_on_new`] both are attempted, core first.
     pub orbit_complete_on_new: bool,
+    /// The core orbit completion reads its point group from. Core
+    /// symmetrisation and the continuous-symmetry reseed keep the fraction
+    /// core whatever this is.
+    #[serde(skip_serializing_if = "OrbitCore::is_fraction")]
+    pub orbit_core: OrbitCore,
     /// Add the population-repulsion SOAP step ([`ClusterMove::SoapRepel`])
     /// as a proposal arm.
     pub soap_repel: bool,
@@ -1112,6 +1142,9 @@ impl Config {
         cfg.soap_class_residual = false;
         cfg.soap_mode = SoapProposalMode::Flexible;
         cfg.orbit_complete_on_new = true;
+        // `for_cluster` offers both cores. This measured stack keeps the
+        // fraction core.
+        cfg.orbit_core = OrbitCore::Fraction;
         cfg.trail_on_stall = true;
         cfg.escape_on_stall = true;
         // The displacement stack, LeanBurst included, leaves the Mackay
@@ -1154,6 +1187,7 @@ impl Config {
         cfg.allocate_moves = true;
         cfg.return_screen = true;
         cfg.orbit_complete_on_new = true;
+        cfg.orbit_core = OrbitCore::Fraction;
         cfg.shared_deposits = 0;
         cfg.shared_visit_policy = crate::methods::minima_hopping::SharedVisitPolicy::Recognition;
         if n_points < 98 {
@@ -1264,6 +1298,10 @@ impl Config {
         cfg.bayes_screen = true;
         cfg.bayes_threshold =
             crate::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
+        // Arm 3: each orbit completion relaxes a shell-core candidate and a
+        // fraction-core candidate and offers the lower. Callers that keep the
+        // fraction core set it back after this preset.
+        cfg.orbit_core = OrbitCore::Both(crate::symmetrise::ShellCore::scaled(cfg.length_scale));
         cfg
     }
 
@@ -1339,6 +1377,7 @@ impl Config {
             point_symmetrise: false,
             point_symmetrise_on_new: false,
             orbit_complete_on_new: false,
+            orbit_core: OrbitCore::Fraction,
             soap_repel: false,
             exchange_metropolis: false,
             md_escape: false,
