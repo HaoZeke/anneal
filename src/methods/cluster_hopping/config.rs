@@ -555,6 +555,8 @@ pub struct Config {
     /// preset leaves the fraction core; [`Config::with_dual_orbit_core`]
     /// opts in to both. Fraction is omitted from the resolved JSON, so a
     /// config that never sets this resolves as it did before the field.
+    /// Core symmetrisation and the continuous-symmetry reseed keep the
+    /// fraction core whatever this is.
     #[serde(skip_serializing_if = "OrbitCore::is_fraction")]
     pub orbit_core: OrbitCore,
     /// Add the population-repulsion SOAP step ([`ClusterMove::SoapRepel`])
@@ -1396,6 +1398,9 @@ impl Config {
         cfg.soap_class_residual = false;
         cfg.soap_mode = SoapProposalMode::Flexible;
         cfg.orbit_complete_on_new = true;
+        // `for_cluster` offers both cores. This measured stack keeps the
+        // fraction core.
+        cfg.orbit_core = OrbitCore::Fraction;
         cfg.trail_on_stall = true;
         cfg.escape_on_stall = true;
         // Named lattice growth builds the truncated octahedron instead of
@@ -1446,6 +1451,7 @@ impl Config {
         cfg.allocate_moves = true;
         cfg.return_screen = true;
         cfg.orbit_complete_on_new = true;
+        cfg.orbit_core = OrbitCore::Fraction;
         cfg.shared_deposits = 0;
         cfg.shared_visit_policy = crate::methods::minima_hopping::SharedVisitPolicy::Recognition;
         if n_points < 98 {
@@ -1568,6 +1574,10 @@ impl Config {
         cfg.bayes_screen = true;
         cfg.bayes_threshold =
             crate::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
+        // Arm 3: each orbit completion relaxes a shell-core candidate and a
+        // fraction-core candidate and offers the lower. Callers that keep the
+        // fraction core set it back after this preset.
+        cfg.orbit_core = OrbitCore::Both(crate::symmetrise::ShellCore::scaled(cfg.length_scale));
         cfg
     }
 
