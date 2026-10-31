@@ -60,6 +60,15 @@ impl PairKind {
         }
     }
 
+    /// The Lennard-Jones diameter whose pair minimum is this one's,
+    /// `r_min / 2^(1/6)`: exactly 1 for Lennard-Jones, 0.891 for Morse.
+    ///
+    /// The cluster presets are written in Lennard-Jones diameters, so this is
+    /// the length to hand [`crate::methods::cluster_hopping::Config::recommended_with_scales`].
+    pub fn length_scale(&self) -> f64 {
+        self.r_min() / 2.0_f64.powf(1.0 / 6.0)
+    }
+
     /// Pair energy and `(dV/dr) / r` at squared separation `r2`.
     ///
     /// The derivative is returned divided by `r` because every caller
@@ -333,6 +342,19 @@ mod tests {
         let e_hard = hard.eval(far.view());
         assert!(e_hard > e_soft, "short range should bind less at 1.4 r0");
         assert!(e_hard.abs() < 0.02, "at rho = 14 the pair is nearly free");
+    }
+
+    /// The length scale puts each pair minimum at the Lennard-Jones `2^(1/6)`
+    /// in its own units, whatever the range.
+    #[test]
+    fn the_length_scale_maps_each_minimum_onto_the_lennard_jones_one() {
+        assert_eq!(PairKind::LennardJones.length_scale(), 1.0);
+        for rho in [3.0, 6.0, 10.0, 14.0] {
+            let kind = PairKind::Morse { rho };
+            let s = kind.length_scale();
+            assert!((kind.r_min() / s - 2.0_f64.powf(1.0 / 6.0)).abs() < 1e-15);
+            assert!((s - 0.890_898_718_140_339_3).abs() < 1e-15);
+        }
     }
 
     /// Objective and Gradient have to agree with the fused routine, or a caller

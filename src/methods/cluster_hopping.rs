@@ -8020,6 +8020,48 @@ mod tests {
     }
 
     #[test]
+    fn recommended_is_its_scaled_form_at_reduced_units() {
+        for n in [13, 38, 55, 75, 98] {
+            assert_eq!(
+                Config::recommended(n).resolved_json().unwrap(),
+                Config::recommended_with_scales(n, 1.0, 1.0)
+                    .resolved_json()
+                    .unwrap(),
+                "n = {n}"
+            );
+        }
+        let lj = crate::potentials::PairKind::LennardJones.length_scale();
+        assert_eq!(lj, 1.0);
+        let s = crate::potentials::PairKind::Morse { rho: 6.0 }.length_scale();
+        let (plain, morse) = (
+            Config::recommended(43),
+            Config::recommended_with_scales(43, s, 1.0),
+        );
+        for (reduced, scaled) in [
+            (plain.neighbour_cutoff, morse.neighbour_cutoff),
+            (plain.merge_radius, morse.merge_radius),
+            (plain.container, morse.container),
+            (plain.min_separation, morse.min_separation),
+        ] {
+            assert!(
+                (scaled - s * reduced).abs() < 1e-12,
+                "{scaled} against {reduced}"
+            );
+        }
+        assert_eq!(morse.length_scale, s);
+        assert_eq!(morse.temperature, plain.temperature);
+        assert_eq!(
+            morse.surfaces,
+            vec![crate::methods::two_phase::TwoPhase::relative(
+                0.7,
+                1.0 / s.powi(4)
+            )]
+        );
+        assert!(matches!(morse.move_library, MoveLibrary::LeanBurst));
+        assert!(morse.return_screen && morse.orbit_complete_on_new && morse.bayes_screen);
+    }
+
+    #[test]
     fn communicating_is_orbit_without_depth_reward() {
         let rec = Config::recommended(75);
         let comm = Config::communicating(75);
