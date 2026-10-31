@@ -1363,4 +1363,68 @@ mod tests {
         assert_eq!(crushed.best_state, separated.best_state);
         assert_eq!(crushed.improvements, separated.improvements);
     }
+
+    /// The archive search separates its start as a search does. 1200 calls
+    /// take its molecular branch past the 900-call first hop into the
+    /// residual start of the second, so every start it derives is checked.
+    #[cfg(feature = "graphkey")]
+    #[test]
+    fn the_archive_search_separates_its_start() {
+        use crate::methods::archive_search::{Archive, ArchiveOutcome, archive_search};
+        use eindir_core::gradient::DifferentiableObjective;
+        let (x, species, groups) = crushed_dimer();
+        let cfg = water_config(&species, &groups);
+        let (_, moved) = separate_start(&cfg, x.view()).expect("a contact");
+        let moved = moved.expect("a separated start");
+        let springs = Springs::new(moved.as_slice().expect("contiguous"), &species);
+        let run = |start: ArrayView1<f64>| -> ArchiveOutcome {
+            let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+            opt.gtol = cfg.record_gradient;
+            let mut relax = |led: &mut super::super::Ledger, x: ArrayView1<f64>, steps: usize| {
+                opt.forget();
+                let (f, y, _) = opt.minimize(x, steps, |v| {
+                    if !led.charge() {
+                        return None;
+                    }
+                    Some(springs.value_and_gradient(v))
+                });
+                (f, y)
+            };
+            let mut grad = |led: &mut super::super::Ledger, x: ArrayView1<f64>| {
+                led.charge().then(|| springs.value_and_gradient(x).1)
+            };
+            let mut ledger = super::super::Ledger::new(1200);
+            let mut archive = Archive::new();
+            let mut rng = StdRng::seed_from_u64(3);
+            let out = archive_search(
+                &cfg,
+                start,
+                &mut ledger,
+                &mut relax,
+                Some(&mut grad),
+                &mut archive,
+                &mut rng,
+            );
+            assert_eq!(out.charged, ledger.spent());
+            out
+        };
+        let crushed = run(x.view());
+        let separated = run(moved.view());
+        assert_eq!(
+            crushed.start_separation,
+            Some(StartSeparation::Separated {
+                steps: 2,
+                factor: 1.05_f64.powi(2)
+            })
+        );
+        assert_eq!(separated.start_separation, None);
+        assert!(crushed.charged > 900, "the second hop never ran");
+        assert!(crushed.best.is_finite());
+        assert_eq!(crushed.charged, separated.charged);
+        assert_eq!(crushed.best, separated.best);
+        assert_eq!(crushed.best_state, separated.best_state);
+        assert_eq!(crushed.best_at, separated.best_at);
+        assert_eq!(crushed.full, separated.full);
+        assert_eq!(crushed.screens, separated.screens);
+    }
 }

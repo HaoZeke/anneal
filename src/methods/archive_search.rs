@@ -11,7 +11,7 @@ use crate::catalog::{Event, EventCatalog};
 use crate::floors::FloorBook;
 use crate::localkey::local_keys;
 use crate::methods::cluster_hopping::{
-    Config, GradFn, Ledger, Relax, active_mask, run_with_gradient,
+    Config, GradFn, Ledger, Relax, StartSeparation, active_mask, run_with_gradient,
 };
 use crate::residual_field::ResidualField;
 use crate::screen::DropModel;
@@ -98,6 +98,9 @@ pub struct ArchiveOutcome {
     /// Set when [`crate::methods::cluster_hopping::Outcome::nve_unavailable`]
     /// is set on any hop in the run.
     pub nve_unavailable: bool,
+    /// What [`Config::separate_start_molecules`] did to the start, when it
+    /// found molecules in covalent contact.
+    pub start_separation: Option<StartSeparation>,
 }
 
 fn hop_best_at(hop: &crate::methods::cluster_hopping::Outcome, fallback: usize) -> usize {
@@ -438,6 +441,9 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     rng: &mut R,
 ) -> ArchiveOutcome {
     let _caller_stop = ledger.bind_stop();
+    let (start_separation, separated) =
+        crate::methods::cluster_hopping::separated_start(cfg, start);
+    let start = separated.as_ref().map_or(start, |state| state.view());
     let bound = crate::methods::cluster_hopping::bind_graph_reference(cfg, start);
     let cfg = bound.as_ref().unwrap_or(cfg);
     let cap = ledger.remaining();
@@ -613,6 +619,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 charged: ledger.spent(),
                 best_at: acc.best_at,
                 nve_unavailable: acc.nve_unavailable,
+                start_separation,
             };
         }
         let mut c = cfg.clone();
@@ -656,6 +663,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             charged: ledger.spent(),
             best_at: acc.best_at,
             nve_unavailable: acc.nve_unavailable,
+            start_separation,
         };
     }
     // Explore (skip-return) then residual holes / non-incumbent keys.
@@ -756,6 +764,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         charged: ledger.spent(),
         best_at: acc.best_at,
         nve_unavailable: acc.nve_unavailable,
+        start_separation,
     }
 }
 
