@@ -932,6 +932,13 @@ pub struct Config {
     /// comes back near 1e-6, and tight enough to bar a partial quench, which
     /// comes back near 1e-1 or worse.
     pub record_gradient: f64,
+    /// Local optimiser for every quench of a search.
+    ///
+    /// [`LocalStep::Anc`](crate::methods::anc_opt::LocalStep::Anc) needs
+    /// `species` and Cartesian coordinates; on any other state the search
+    /// falls back to L-BFGS.
+    #[serde(skip_serializing_if = "crate::methods::anc_opt::LocalStep::is_lbfgs")]
+    pub local_step: crate::methods::anc_opt::LocalStep,
     /// Whether every quenched energy is kept, not only the improving ones:
     /// the sample [`crate::tail`] fits an endpoint to. Truncated by
     /// [`Config::screen_margin`], since the full relaxation runs only where
@@ -1474,6 +1481,7 @@ impl Config {
             screen_steps: 25,
             adaptive_screen: false,
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
+            local_step: crate::methods::anc_opt::LocalStep::Lbfgs,
             trace_quenched: false,
             polish_records: 0,
             surrogate_tolerance: 0.5,

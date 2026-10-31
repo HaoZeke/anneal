@@ -15,6 +15,7 @@
 //! there arrives at the cluster driver by the same route as one written here
 //! and neither the driver nor this function can tell them apart.
 
+use crate::methods::anc_opt::{AncOpt, LocalStep};
 #[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 #[cfg(test)]
@@ -163,6 +164,129 @@ impl RefineWindow {
     }
 }
 
+/// The local optimiser [`Config::local_step`] selects, behind one interface.
+enum LocalRelax {
+    Lbfgs(WarmLbfgs),
+    Anc {
+        opt: Box<AncOpt>,
+        refused: usize,
+        refused_starts: usize,
+    },
+}
+
+impl LocalRelax {
+    fn for_config(cfg: &Config, dim: usize) -> Self {
+        if let (LocalStep::Anc { model, units }, Some(species)) = (cfg.local_step, &cfg.species)
+            && dim == 3 * species.len()
+        {
+            let mut anc = AncOpt::new(species.clone(), units);
+            anc.model = model;
+            anc.gtol = cfg.record_gradient;
+            anc.frozen = cfg.frozen.clone();
+            return Self::Anc {
+                opt: Box::new(anc),
+                refused: 0,
+                refused_starts: 0,
+            };
+        }
+        let mut opt = WarmLbfgs::default();
+        // A minimum is recordable at `record_gradient`; descending past it buys
+        // digits no acceptance test or record reads. Stopping at 1e-6 instead cost
+        // the communicating preset a PAR-2 of 5792 force calls on 32 LJ38 starts
+        // against 4269 here, and a median of 5726 against 3253. Rigid bodies and
+        // species diameters record at that same tolerance.
+        opt.gtol = cfg.record_gradient;
+        Self::Lbfgs(opt)
+    }
+
+    fn forget(&mut self) {
+        if let Self::Lbfgs(opt) = self {
+            opt.forget();
+        }
+    }
+
+    fn set_gtol(&mut self, gtol: f64) {
+        match self {
+            Self::Lbfgs(opt) => opt.gtol = gtol,
+            Self::Anc { opt, .. } => opt.gtol = gtol,
+        }
+    }
+
+    /// Evaluations answered with a non-finite value or gradient, as
+    /// [`WarmLbfgs::refused`] counts them.
+    fn refused(&self) -> usize {
+        match self {
+            Self::Lbfgs(opt) => opt.refused(),
+            Self::Anc { refused, .. } => *refused,
+        }
+    }
+
+    /// Relaxations ended because their first evaluation was refused, as
+    /// [`WarmLbfgs::refused_starts`] counts them.
+    fn refused_starts(&self) -> usize {
+        match self {
+            Self::Lbfgs(opt) => opt.refused_starts(),
+            Self::Anc { refused_starts, .. } => *refused_starts,
+        }
+    }
+
+    fn minimize<F>(
+        &mut self,
+        x0: ArrayView1<f64>,
+        max_iter: usize,
+        fg: F,
+    ) -> (f64, Array1<f64>, usize)
+    where
+        F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
+    {
+        self.minimize_watched(x0, max_iter, fg, |_, _| true)
+    }
+
+    fn minimize_watched<F, W>(
+        &mut self,
+        x0: ArrayView1<f64>,
+        max_iter: usize,
+        fg: F,
+        watch: W,
+    ) -> (f64, Array1<f64>, usize)
+    where
+        F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
+        W: FnMut(usize, f64) -> bool,
+    {
+        match self {
+            Self::Lbfgs(opt) => opt.minimize_watched(x0, max_iter, fg, watch),
+            Self::Anc {
+                opt,
+                refused,
+                refused_starts,
+            } => {
+                // A refusal reaches AncOpt as +inf, which ends a relaxation
+                // without a trust radius and shrinks the radius with one.
+                let mut fg = fg;
+                let mut answered = 0usize;
+                let mut refused_start = false;
+                let (f, x, evals) = opt.minimize_watched(
+                    x0,
+                    max_iter,
+                    |v| {
+                        let (f, g) = fg(v)?;
+                        answered += 1;
+                        if f.is_finite() && g.iter().all(|c| c.is_finite()) {
+                            return Some((f, g));
+                        }
+                        *refused += 1;
+                        refused_start |= answered == 1;
+                        Some((f64::INFINITY, Array1::zeros(v.len())))
+                    },
+                    watch,
+                );
+                *refused_starts += usize::from(refused_start);
+                (f, x, evals)
+            }
+        }
+    }
+}
+
 fn warm_relax<'a, O>(
     objective: &'a O,
     cfg: &'a Config,
@@ -172,13 +296,7 @@ fn warm_relax<'a, O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    let mut opt = WarmLbfgs::default();
-    // A minimum is recordable at `record_gradient`; descending past it buys
-    // digits no acceptance test or record reads. Stopping at 1e-6 instead cost
-    // the communicating preset a PAR-2 of 5792 force calls on 32 LJ38 starts
-    // against 4269 here, and a median of 5726 against 3253. Rigid bodies and
-    // species diameters record at that same tolerance.
-    opt.gtol = cfg.record_gradient;
+    let mut opt = LocalRelax::for_config(cfg, eindir_core::Objective::dim(objective));
     let search_gtol = cfg.loose_gradient.unwrap_or(cfg.record_gradient);
     let mut window = cfg.loose_gradient.map(|_| RefineWindow::default());
     // The driver calls the screening pass with `screen_steps` and the full one
@@ -190,7 +308,7 @@ where
         .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
     move |led, x, iters| {
         opt.forget();
-        opt.gtol = search_gtol;
+        opt.set_gtol(search_gtol);
         let before = led.spent();
         let screening = iters <= screen_iters;
         // A rigid chart uses this same descent. A line-search-free capped
@@ -337,14 +455,14 @@ where
             && led.remaining() > 0
         {
             let mark = led.spent();
-            opt.gtol = cfg.record_gradient;
+            opt.set_gtol(cfg.record_gradient);
             let (refined, at, _) = opt.minimize(xr.view(), cfg.relax_steps, |v| {
                 if !led.charge() {
                     return None;
                 }
                 Some(objective.value_and_gradient(v))
             });
-            opt.gtol = search_gtol;
+            opt.set_gtol(search_gtol);
             stats.refused = opt.refused();
             stats.refused_starts = opt.refused_starts();
             refine_paid = led.spent() - mark;
@@ -1288,6 +1406,88 @@ mod tests {
     use super::*;
     use crate::potentials::PairPotential;
     use ndarray::Array1;
+
+    struct CountedFf {
+        ff: crate::methods::anc_opt::test_ff::ValenceFf,
+        bounds: eindir_core::Bounds<f64>,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl eindir_core::Objective<f64> for CountedFf {
+        fn dim(&self) -> usize {
+            3 * self.ff.species.len()
+        }
+        fn bounds(&self) -> &eindir_core::Bounds<f64> {
+            &self.bounds
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.value_and_gradient(x).0
+        }
+    }
+
+    impl eindir_core::Gradient<f64> for CountedFf {
+        fn dim(&self) -> usize {
+            3 * self.ff.species.len()
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.value_and_gradient(x).1
+        }
+    }
+
+    impl DifferentiableObjective<f64> for CountedFf {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.ff.energy_gradient(x)
+        }
+    }
+
+    #[test]
+    fn the_anc_local_step_is_charged_and_converges_in_fewer_calls() {
+        use crate::methods::anc_opt::test_ff::{ValenceFf, water_ring};
+
+        let n_mol = 3;
+        let mut totals = Vec::new();
+        for step in [LocalStep::Lbfgs, LocalStep::ANC_EV_ANGSTROM] {
+            let ff = ValenceFf::waters(n_mol);
+            let species = ff.species.clone();
+            let groups = (0..n_mol)
+                .map(|m| vec![3 * m, 3 * m + 1, 3 * m + 2])
+                .collect();
+            let mut cfg = Config::recommended_molecular(species, groups, 0.2);
+            cfg.local_step = step;
+            let dim = 9 * n_mol;
+            let objective = CountedFf {
+                ff,
+                bounds: eindir_core::Bounds::new(
+                    Array1::from_elem(dim, -20.0),
+                    Array1::from_elem(dim, 20.0),
+                    1e-9,
+                ),
+                calls: std::sync::atomic::AtomicUsize::new(0),
+            };
+            let mut ledger = Ledger::new(1_500);
+            let start = water_ring(n_mol, 4);
+            let (out, stats) =
+                search_from(&objective, &cfg, &mut ledger, start.view(), 7).expect("finite start");
+            let calls = objective.calls.load(std::sync::atomic::Ordering::SeqCst);
+            assert_eq!(
+                calls,
+                ledger.spent(),
+                "{step:?}: an uncharged objective call"
+            );
+            assert!(ledger.spent() <= 1_500);
+            assert!(out.best.is_finite());
+            assert!(stats.converged > 0, "{step:?}: no relaxation converged");
+            totals.push((stats.converged, stats.charged()));
+        }
+        let per = |(converged, charged): (usize, usize)| charged as f64 / converged as f64;
+        assert!(
+            per(totals[1]) < per(totals[0]),
+            "charged calls per converged relaxation: ANC {} against L-BFGS {}",
+            per(totals[1]),
+            per(totals[0])
+        );
+    }
 
     #[test]
     fn convergence_uses_the_configured_recording_threshold() {
