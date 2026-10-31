@@ -755,6 +755,115 @@ impl GraphReference {
     }
 }
 
+/// Ratio of successive factors in [`separate_start`].
+const SEPARATION_RATIO: f64 = 1.05;
+/// Factors tried before [`separate_start`] leaves a start as it is.
+const SEPARATION_STEPS: i32 = 60;
+
+/// What [`Config::separate_start_molecules`] did to a start whose declared
+/// molecules were in covalent contact.
+///
+/// [`Config::separate_start_molecules`]: super::Config::separate_start_molecules
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StartSeparation {
+    /// Every group moved by `(factor - 1)` times its centroid's offset from
+    /// the mean centroid.
+    Separated {
+        /// The exponent k.
+        steps: usize,
+        /// 1.05^k.
+        factor: f64,
+    },
+    /// No factor up to 1.05^60 removed every contact. The start is unchanged.
+    Unresolved,
+}
+
+/// Each atom's group, its first declared group or a group of its own,
+/// numbered from zero over the groups that hold an atom, and their count.
+fn group_index(groups: &[Vec<usize>], n: usize) -> (Vec<usize>, usize) {
+    let mut declared = vec![None; n];
+    for (g, atoms) in groups.iter().enumerate() {
+        for &atom in atoms {
+            if atom < n && declared[atom].is_none() {
+                declared[atom] = Some(g);
+            }
+        }
+    }
+    let mut compact: Vec<Option<usize>> = vec![None; groups.len()];
+    let mut count = 0usize;
+    let mut index = Vec::with_capacity(n);
+    for d in declared {
+        let known = d.and_then(|g| compact[g]);
+        let id = known.unwrap_or(count);
+        if known.is_none() {
+            count += 1;
+            if let Some(g) = d {
+                compact[g] = Some(id);
+            }
+        }
+        index.push(id);
+    }
+    (index, count)
+}
+
+fn groups_bonded(x: ArrayView1<f64>, species: &[u32], tolerance: f64, group: &[usize]) -> bool {
+    neighbors(x, species, tolerance)
+        .iter()
+        .enumerate()
+        .any(|(a, bonded)| bonded.iter().any(|&b| group[a] != group[b]))
+}
+
+/// The start [`Config::separate_start_molecules`] gives a search, and what it
+/// did, when the setting acts and two atoms of different groups bond; `None`
+/// otherwise. The state is `None` when no factor worked. Makes no call.
+///
+/// [`Config::separate_start_molecules`]: super::Config::separate_start_molecules
+pub fn separate_start(
+    cfg: &super::Config,
+    start: ArrayView1<f64>,
+) -> Option<(StartSeparation, Option<Array1<f64>>)> {
+    let species = cfg.species.as_deref()?;
+    let groups = cfg.move_library.declared_groups()?;
+    let frozen = cfg.frozen.as_deref().is_some_and(|f| f.iter().any(|&v| v));
+    if !cfg.separate_start_molecules
+        || !cfg.keep_bond_graph
+        || frozen
+        || groups.len() < 2
+        || start.len() != 3 * species.len()
+    {
+        return None;
+    }
+    let n = species.len();
+    let (group, count) = group_index(groups, n);
+    if !groups_bonded(start, species, cfg.bond_tolerance, &group) {
+        return None;
+    }
+    let mut members: Vec<Vec<usize>> = vec![Vec::new(); count];
+    for (a, &g) in group.iter().enumerate() {
+        members[g].push(a);
+    }
+    let x = start.to_vec();
+    let centroids: Vec<[f64; 3]> = members.iter().map(|atoms| centroid(&x, atoms)).collect();
+    let mut mean = [0.0; 3];
+    for c in &centroids {
+        for t in 0..3 {
+            mean[t] += c[t] / count as f64;
+        }
+    }
+    let offsets: Vec<[f64; 3]> = centroids.iter().map(|&c| sub(c, mean)).collect();
+    for steps in 1..=SEPARATION_STEPS {
+        let factor = SEPARATION_RATIO.powi(steps);
+        let moved = Array1::from_shape_fn(3 * n, |c| {
+            x[c] + (factor - 1.0) * offsets[group[c / 3]][c % 3]
+        });
+        if !groups_bonded(moved.view(), species, cfg.bond_tolerance, &group) {
+            let steps = steps as usize;
+            return Some((StartSeparation::Separated { steps, factor }, Some(moved)));
+        }
+    }
+    Some((StartSeparation::Unresolved, None))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1138,5 +1247,120 @@ mod tests {
         }
         assert!(!reference.kept(swapped.view(), &species, 1.25));
         assert_eq!(reference.changes(), 2);
+    }
+
+    /// Two waters with a hydrogen of the first 1.0 A from the second
+    /// oxygen, inside the O-H bond cut of 1.2125 A. The centroids sit
+    /// 2.12 A apart along x, so the contact opens by 2.12 (s - 1).
+    fn crushed_dimer() -> (Array1<f64>, Vec<u32>, Vec<Vec<usize>>) {
+        let x = Array1::from(vec![
+            0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0, 1.96, 0.0, 0.0, 2.2, 0.93, 0.0, 2.92,
+            0.0, 0.0,
+        ]);
+        (
+            x,
+            vec![8, 1, 1, 8, 1, 1],
+            vec![vec![0, 1, 2], vec![3, 4, 5]],
+        )
+    }
+
+    fn water_config(species: &[u32], groups: &[Vec<usize>]) -> super::super::Config {
+        super::super::Config::recommended_molecular(species.to_vec(), groups.to_vec(), 1.0)
+    }
+
+    /// 1.05 leaves the contact at 1.106 A; 1.05^2 opens it to 1.2173 A.
+    #[test]
+    fn a_crushed_dimer_is_separated_at_the_smallest_factor() {
+        let (x, species, groups) = crushed_dimer();
+        let cfg = water_config(&species, &groups);
+        let (report, moved) = separate_start(&cfg, x.view()).expect("a contact");
+        let factor = 1.05_f64.powi(2);
+        assert_eq!(report, StartSeparation::Separated { steps: 2, factor });
+        let moved = moved.expect("a separated start");
+        for atom in 0..6 {
+            let sign = if atom < 3 { -1.0 } else { 1.0 };
+            let want = x[3 * atom] + sign * (factor - 1.0) * 1.06;
+            assert!((moved[3 * atom] - want).abs() < 1e-12);
+            assert_eq!(moved[3 * atom + 1], x[3 * atom + 1]);
+            assert_eq!(moved[3 * atom + 2], x[3 * atom + 2]);
+        }
+        let (group, _) = group_index(&groups, 6);
+        assert!(!groups_bonded(
+            moved.view(),
+            &species,
+            cfg.bond_tolerance,
+            &group
+        ));
+        let once = Array1::from_shape_fn(18, |c| {
+            let sign = if c < 9 { -1.0 } else { 1.0 };
+            x[c] + if c % 3 == 0 { sign * 0.05 * 1.06 } else { 0.0 }
+        });
+        assert!(groups_bonded(
+            once.view(),
+            &species,
+            cfg.bond_tolerance,
+            &group
+        ));
+        assert_eq!(
+            bond_graph(moved.view(), &species, 1.25),
+            vec![vec![1, 2], vec![0], vec![0], vec![4, 5], vec![3], vec![3]]
+        );
+    }
+
+    #[test]
+    fn a_start_without_contact_between_groups_is_left_alone() {
+        let (mut x, species, groups) = crushed_dimer();
+        for atom in 3..6 {
+            x[3 * atom] += 1.0;
+        }
+        assert!(separate_start(&water_config(&species, &groups), x.view()).is_none());
+    }
+
+    /// One group, a frozen point, the graph not kept, or the setting off.
+    #[test]
+    fn separation_needs_two_groups_no_frozen_point_and_the_graph_kept() {
+        let (x, species, groups) = crushed_dimer();
+        let one = water_config(&species, &[(0..6).collect()]);
+        assert!(separate_start(&one, x.view()).is_none());
+        let mut frozen = water_config(&species, &groups);
+        frozen.frozen = Some(vec![true, false, false, false, false, false]);
+        assert!(separate_start(&frozen, x.view()).is_none());
+        let mut free = water_config(&species, &groups);
+        free.keep_bond_graph = false;
+        assert!(separate_start(&free, x.view()).is_none());
+        let mut off = water_config(&species, &groups);
+        off.separate_start_molecules = false;
+        assert!(separate_start(&off, x.view()).is_none());
+    }
+
+    /// A search from the crushed start is the search from its separated
+    /// structure, call for call.
+    #[test]
+    fn the_separation_charges_nothing() {
+        let (x, species, groups) = crushed_dimer();
+        let cfg = water_config(&species, &groups);
+        let (_, moved) = separate_start(&cfg, x.view()).expect("a contact");
+        let moved = moved.expect("a separated start");
+        let springs = Springs::new(moved.as_slice().expect("contiguous"), &species);
+        let run = |start: ArrayView1<f64>| {
+            let mut ledger = super::super::Ledger::new(200);
+            let (out, _) =
+                crate::methods::cluster_search::search_from(&springs, &cfg, &mut ledger, start, 3)
+                    .expect("finite start");
+            assert_eq!(out.charged, ledger.spent());
+            out
+        };
+        let crushed = run(x.view());
+        let separated = run(moved.view());
+        assert!(matches!(
+            crushed.start_separation,
+            Some(StartSeparation::Separated { steps: 2, .. })
+        ));
+        assert_eq!(separated.start_separation, None);
+        assert!(crushed.charged <= 200);
+        assert_eq!(crushed.charged, separated.charged);
+        assert_eq!(crushed.best, separated.best);
+        assert_eq!(crushed.best_state, separated.best_state);
+        assert_eq!(crushed.improvements, separated.improvements);
     }
 }
