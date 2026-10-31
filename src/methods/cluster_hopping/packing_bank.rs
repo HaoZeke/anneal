@@ -71,17 +71,17 @@ impl PackingBank {
             return;
         }
         let order = Self::order(state, cutoff);
-        if let Some(index) = self.closest(order) {
-            if l1(self.seats[index].order, order) <= GAP {
-                if energy < self.seats[index].energy {
-                    self.seats[index] = Seat {
-                        energy,
-                        order,
-                        state: state.to_owned(),
-                    };
-                }
-                return;
+        if let Some(index) = self.closest(order)
+            && l1(self.seats[index].order, order) <= GAP
+        {
+            if energy < self.seats[index].energy {
+                self.seats[index] = Seat {
+                    energy,
+                    order,
+                    state: state.to_owned(),
+                };
             }
+            return;
         }
         let seat = Seat {
             energy,
