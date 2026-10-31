@@ -9,6 +9,8 @@
 //! `record_gradient` of 5e-2 eV/A. Prints one tab-separated line per
 //! optimiser: file, optimiser, calls, final energy (eV), final max |g|
 //! (eV/A, from one extra uncounted call), and whether it met the gate.
+//! With `LOCAL_OPT_BENCH_OUT` set to a directory, each optimiser's final
+//! geometry and the energy of every counted call are written there.
 
 #[path = "common/pipe_engine.rs"]
 mod pipe_engine;
@@ -65,15 +67,19 @@ fn main() {
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("start");
+    let out_dir = std::env::var("LOCAL_OPT_BENCH_OUT").ok();
     for name in names {
         let mut engine = PipeEngine::start("xtb-cli", symbols.clone(), None);
         let mut calls = 0usize;
+        let mut trace = Vec::new();
         let mut fg = |v: ndarray::ArrayView1<f64>| {
             if calls >= MAX_CALLS {
                 return None;
             }
             calls += 1;
-            engine.eval(v)
+            let out = engine.eval(v);
+            trace.push(out.as_ref().map_or(f64::NAN, |(e, _)| *e));
+            out
         };
         let (_, x) = match name {
             "lbfgs" => {
@@ -98,6 +104,20 @@ fn main() {
         };
         let (e, g) = engine.eval(x.view()).expect("final evaluation");
         let worst = g.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+        if let Some(dir) = &out_dir {
+            let mut xyz = format!("{}\n{label} {name} E {e:.8} eV\n", symbols.len());
+            for (i, s) in symbols.iter().enumerate() {
+                xyz.push_str(&format!(
+                    "{s} {:.8} {:.8} {:.8}\n",
+                    x[3 * i],
+                    x[3 * i + 1],
+                    x[3 * i + 2]
+                ));
+            }
+            std::fs::write(format!("{dir}/{label}-{name}.xyz"), xyz).expect("write endpoint");
+            let lines: String = trace.iter().map(|e| format!("{e:.8}\n")).collect();
+            std::fs::write(format!("{dir}/{label}-{name}.trace"), lines).expect("write trace");
+        }
         println!(
             "{label}\t{name}\t{calls}\t{e:.6}\t{worst:.4e}\t{}",
             worst < gtol
