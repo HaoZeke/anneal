@@ -482,6 +482,14 @@ pub struct Config {
     /// core whatever this is.
     #[serde(skip_serializing_if = "OrbitCore::is_fraction")]
     pub orbit_core: OrbitCore,
+    /// Surface hops from each new lowest structure: every least-bound atom
+    /// is tried on every vacant hollow site where it keeps its neighbour
+    /// count ([`crate::packing::surface_hops`]), and each is quenched. The
+    /// lowest product is taken when it is below the structure it came from,
+    /// and the hops repeat from it. Neighbours are pairs inside
+    /// [`crate::soap::contact_cutoff`] at [`Config::length_scale`].
+    #[serde(skip_serializing_if = "is_false")]
+    pub surface_hop_on_best: bool,
     /// Add the population-repulsion SOAP step ([`ClusterMove::SoapRepel`])
     /// as a proposal arm.
     pub soap_repel: bool,
@@ -1378,6 +1386,7 @@ impl Config {
             point_symmetrise_on_new: false,
             orbit_complete_on_new: false,
             orbit_core: OrbitCore::Fraction,
+            surface_hop_on_best: false,
             soap_repel: false,
             exchange_metropolis: false,
             md_escape: false,

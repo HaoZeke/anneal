@@ -936,6 +936,9 @@ pub struct Outcome {
     /// Orbit candidates skipped unquenched because an earlier candidate of
     /// the same completion was the identical structure.
     pub orbit_duplicates: usize,
+    /// Surface hops quenched, how many of their sweeps went below the
+    /// structure they started from, and the energy those sweeps gained.
+    pub surface_hops: (usize, usize, f64),
     /// Continuous-symmetry quenches attempted, and downhill energy gained.
     pub continuous_symmetry: (usize, f64),
     /// Restarts triggered by a stall.
@@ -2631,6 +2634,7 @@ where
     let mut orbits_completed = 0usize;
     let mut orbit_duplicates = 0usize;
     let mut orbit_gain = 0.0_f64;
+    let mut surface_hops = (0usize, 0usize, 0.0_f64);
     let mut accepted_transitions = Vec::new();
     // All live-state replacement consumes one complete destination record.
     // Ordinary hops supply their paid history report; auxiliary adoptions
@@ -6084,6 +6088,78 @@ where
                 }
             }
         }
+        // A new lowest structure on a metal cluster is often its core with a
+        // surface atom one site away from where it belongs. At the search
+        // temperature the chain wanders among such isomers and rarely tries
+        // that one site, so the least-bound atoms are tried on every vacant
+        // hollow site of the new best, and the descent follows the lowest
+        // product while it goes down. Bounded by the improvement events.
+        if cfg.surface_hop_on_best && ledger.best < best_before_iteration - 1e-10 {
+            let cutoff =
+                crate::soap::contact_cutoff(crate::soap::SoapSpec::at_length(cfg.length_scale));
+            let mut from = ledger.best_state.clone().map(|s| (ledger.best, s));
+            while let Some((from_energy, base)) = from.take() {
+                let mut lowest: Option<(f64, Array1<f64>, Option<Array1<f64>>, _)> = None;
+                for y in crate::packing::surface_hops(base.view(), n, cutoff, cfg.min_separation) {
+                    if !hop_room(hops) || ledger.stopped() || ledger.target_reached() {
+                        break;
+                    }
+                    let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
+                    if !(es.is_finite() && xs.len() == x.len()) {
+                        continue;
+                    }
+                    let gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        es,
+                        xs.view(),
+                        &mut unconverged_records,
+                    );
+                    let certified = quench_is_sane(cfg, es, xs.view())
+                        && (grad.is_none() || gradient.is_some());
+                    hops += 1;
+                    surface_hops.0 += 1;
+                    let report = match (history.as_deref_mut(), gradient.as_ref()) {
+                        (Some(h), Some(g)) => {
+                            let report = h.observe(es, xs.view(), g.view());
+                            if let Some(r) = report {
+                                history_observations += 1;
+                                history_new += usize::from(r.is_new);
+                            }
+                            report
+                        }
+                        _ => None,
+                    };
+                    if certified && lowest.as_ref().is_none_or(|(l, ..)| es < *l) {
+                        lowest = Some((es, xs, gradient, report));
+                    }
+                }
+                if let Some((es, xs, gradient, report)) = lowest
+                    && es < from_energy - 1e-10
+                {
+                    surface_hops.1 += 1;
+                    surface_hops.2 += from_energy - es;
+                    from = Some((es, xs.clone()));
+                    if es < e - 1e-10 {
+                        let evidence = match report {
+                            Some(report) => AdoptionHistory::Observed(Some(report)),
+                            None => AdoptionHistory::Fresh,
+                        };
+                        adopt_minimum!(
+                            es,
+                            xs,
+                            gradient,
+                            None,
+                            evidence,
+                            None,
+                            Some("surface-hop"),
+                            hops
+                        );
+                    }
+                }
+            }
+        }
 
         // Offered on a period rather than behind the energy stall the other
         // escapes use, because this mechanism carries its own trapping test and
@@ -6496,6 +6572,7 @@ where
         symmetrised: (symmetrised, symmetry_gain),
         orbits: (orbits_completed, orbit_gain),
         orbit_duplicates,
+        surface_hops,
         continuous_symmetry: (continuous_symmetry_attempts, continuous_symmetry_gain),
         restarts,
         exchanges_refused,
