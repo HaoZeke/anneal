@@ -1,0 +1,94 @@
+#+TITLE: Orbit completion memory
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+* Orbit completion memory
+
+When an accepted hop enters a new basin, orbit completion (=Config::orbit_complete_on_new=, after Oakley, Johnston and Wales 2013) reads the point group of the cluster's core, moves every point onto the site set of that group, and quenches the result.
+=Config::recommended= and =Config::communicating= turn it on.
+With =Config::orbit_memory= set, a chain remembers the minima its completions start from and reach.
+It then adopts a completion only when the completion finds something new.
+The field is off by default, and no preset turns it on.
+This page explains what the memory does, why it is off, and what it did on Lennard-Jones (LJ) clusters.
+
+** Why a chain repeats a completion
+
+Completion is a deterministic map of a structure.
+Different structures with the same core can complete onto the same symmetric minimum, and a minimum reached by completion already sits on its orbits.
+Without a memory, a completion is offered to the chain like a hop: it faces the Metropolis test, raw or deposit-biased, and so may also move the chain uphill.
+
+Sixteen arm-3 runs logged their completions with the structure memory set and nothing skipped.
+They used 2e6 potential calls each, with seeds 7000 to 7003 on LJ38, LJ77, LJ98 and LJ102.
+The runs made 82787 completion quenches.
+Of these, 44747 reached a minimum that the same chain had already put through completion.
+The share was 567 of 1109 quenches on LJ38, 7198 of 27353 on LJ77, 17225 of 27573 on LJ98 and 19757 of 26752 on LJ102.
+
+** The field
+
+=OrbitMemory= has three values.
+
+- =Off=, the default, keeps nothing and leaves the hop as it was.
+  It is left out of the resolved configuration, so preset digests do not change.
+- =Energy= keeps the energy of every completion start and every completion quench, two energies within 1e-6 of =energy_scale= counting as one.
+  A chain does not start a completion from a kept energy.
+- =Structure= keeps a minimum by its energy, within the same tolerance, and by the basin descriptor of the history bias, two descriptors within =Config::merge_radius= counting as one.
+  For Lennard-Jones clusters the descriptor is the sorted pair distances.
+  A start is kept only if it is a quenched minimum, since a trial the screen did not fully quench has a partial energy and structure that no quench returns to.
+  Every completion is quenched.
+
+Under either memory, a chain adopts a completion only when its quench ends below the energy of the structure it started from, on a minimum not kept before.
+The deposit-biased test still applies to that completion and may refuse it.
+The quench is recorded either way, so a completion that reaches a new best is reported whether or not the chain adopts it.
+=Outcome::orbits_skipped= counts the completions =Energy= did not start.
+
+The structure memory skips no quench.
+Before the quench, nearness to a kept minimum did not predict where the quench ended.
+A skip by the start drops a completion whose start lies within the merge radius of a kept minimum.
+In the logged runs it would have dropped 72139 quenches.
+Of those, 32557 reached minima not kept, and 120 of them set a new best for the run.
+A skip by the completed structure drops a completion whose result is that close to a kept minimum before the quench.
+It would have dropped 27810 quenches and lost 1524 new minima, 61 of them a new best.
+
+** What it changed
+
+The head-to-head below follows a fixed protocol against core-orbit symmetrisation in the Wales group's global optimisation program (GMIN).
+Its anneal arm is arm 3: =Config::for_cluster= with orbit completion on, reading both the fraction and the shell core.
+It runs 32 seeds per size, stops at the Cambridge Cluster Database energy plus 0.001, and allows 2e6 potential calls at 38 points, 6e6 at 76 to 98 and 8e6 at 102 to 104.
+Base is the memory off, v1 is =Energy= and v2 is =Structure=, and the GMIN rows are the protocol's own.
+Cost is the penalised average runtime (PAR-2) in potential calls, where a run that misses counts twice its budget.
+
+#+begin_export rst
+.. figure:: /_static/orbit-memory-h2h.png
+   :alt: Hits per size for GMIN, base, v1 and v2, and per-seed PAR-2 cost of v1 and v2 against base.
+
+   Left: runs at the reference out of 32.
+   Middle and right: PAR-2 potential calls per seed, v1 and v2 against base.
+   A miss counts twice the budget, and below the diagonal the memory is cheaper.
+#+end_export
+
+| Size  | GMIN hits | Base hits | v1 hits | v2 hits | Base mean PAR-2 | v1 mean PAR-2 | v2 mean PAR-2 | v1 against base, p | v2 against base, p |
+|-------+-----------+-----------+---------+---------+-----------------+---------------+---------------+--------------------+--------------------|
+| LJ38  |        32 |        32 |      32 |      32 |           63634 |         82598 |         75110 |              0.369 |              0.299 |
+| LJ76  |        20 |        31 |      30 |      29 |         2070294 |       2448909 |       3383916 |              0.852 |              0.031 |
+| LJ77  |        13 |        32 |      30 |      29 |         1188088 |       2893907 |       3067545 |            0.00041 |             0.0012 |
+| LJ98  |        32 |        13 |       6 |       6 |         8436580 |       9925775 |      10050945 |              0.332 |              0.121 |
+| LJ102 |        27 |         3 |      11 |      11 |        14876862 |      11651007 |      11996031 |              0.019 |              0.055 |
+| LJ103 |        28 |         2 |      17 |       8 |        15350768 |       9406277 |      12583778 |            0.00054 |              0.017 |
+| LJ104 |        21 |         0 |       2 |       2 |        16000000 |      15305206 |      15267567 |              0.180 |              0.180 |
+
+The p values are two-sided Wilcoxon signed-rank tests on the paired PAR-2 values.
+Both memories help from LJ102 up: LJ102 goes from 3 hits to 11 under either, and LJ103 from 2 to 17 under =Energy= and to 8 under =Structure=.
+Both cost hits from LJ76 to LJ98.
+=Structure= loses 2 hits on LJ76, 3 on LJ77 and 7 on LJ98.
+It is also slower on LJ76 and LJ77.
+On LJ38 every arm hits on every seed.
+Against GMIN's mean PAR-2 of 51441 there, base at 63634 is not slower (p 0.411), =Energy= is slower (p 0.040), and =Structure= has a higher mean at p 0.052.
+
+On =Config::recommended= itself, with 2e6 potential calls and seeds 0 to 63, LJ75 hits on all 64 seeds under every arm.
+LJ98, scored at the Leary tetrahedron -543.665361, hits on 52 seeds with the memory off, 54 under =Energy= and 52 under =Structure=.
+The paired sign tests on PAR-2 against the memory off give p 0.609 and 0.443 on LJ98, and 0.332 and 0.576 on LJ75.
+
+** Why it is off
+
+A preset would change only if the structure memory was worse than base on no size of either comparison and not slower than GMIN on LJ38.
+It is worse on LJ76, LJ77 and LJ98, so =orbit_memory= stays an opt-in field.
+In these runs either memory hit more often than base only from LJ102 up.

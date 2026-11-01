@@ -196,6 +196,8 @@ Like =Config::communicating=, it completes the core's orbit on every new basin a
 A stuck chain (=stalled= in src/methods/cluster_hopping.rs) can complete into the deposited basin of the lowest structure seen (=returns_to_deposit= and =returns_to_best=).
 That structure faces the same biased Metropolis test as a hop (=biased_metropolis= in src/methods/cluster_hopping.rs), so the deposits can refuse it.
 Any other completed structure faces the raw energy test.
+=Config::orbit_memory= is off by default.
+When set, a chain adopts a completion only downhill onto a minimum that no earlier completion reached; see [[file:../explanation/orbit-memory.org][orbit completion memory]].
 
 Feeds/consumes: selected per-config by =MoveLibrary::kernels=; chosen
 per-hop by the allocators below (=allocate_moves= / =contextual_moves= /

@@ -101,6 +101,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    explanation/bayesian-details
    explanation/communication
    explanation/gle-mechanics
+   explanation/orbit-memory
    explanation/regime_auto
 #+end_export
 
