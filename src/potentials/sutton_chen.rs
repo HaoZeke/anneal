@@ -2,8 +2,8 @@
 //!
 //! Doye and Wales set `eps = 1` and `a = 1` and use Sutton and Chen's
 //! dimensionless `c` (*New J. Chem.* **22**, 733 (1998)). Silver and rhodium
-//! form the 12-6 row (`c = 144.41`), and nickel and copper the 9-6 row
-//! (`c = 39.432`).
+//! form the 12-6 row (`c = 144.41`), nickel and copper the 9-6 row
+//! (`c = 39.432`), and gold and platinum the 10-8 row (`c = 34.408`).
 //!
 //! ```text
 //! E = 1/2 sum_i sum_{j != i} (a/r_ij)^n - c sum_i sqrt(rho_i)
@@ -22,14 +22,17 @@ pub enum SuttonChenFamily {
     Sc12_6,
     /// `n = 9`, `m = 6`, `c = 39.432`. Nickel and copper.
     Sc9_6,
+    /// `n = 10`, `m = 8`, `c = 34.408`. Gold and platinum.
+    Sc10_8,
 }
 
 impl SuttonChenFamily {
-    /// Parse `12-6` or `9-6`.
+    /// Parse `12-6`, `9-6` or `10-8`.
     pub fn parse(text: &str) -> Option<Self> {
         match text {
             "12-6" | "12_6" | "sc12-6" => Some(Self::Sc12_6),
             "9-6" | "9_6" | "sc9-6" => Some(Self::Sc9_6),
+            "10-8" | "10_8" | "sc10-8" => Some(Self::Sc10_8),
             _ => None,
         }
     }
@@ -39,12 +42,16 @@ impl SuttonChenFamily {
         match self {
             Self::Sc12_6 => 12,
             Self::Sc9_6 => 9,
+            Self::Sc10_8 => 10,
         }
     }
 
     /// Density exponent `m`.
     pub fn m_exp(self) -> i32 {
-        6
+        match self {
+            Self::Sc12_6 | Self::Sc9_6 => 6,
+            Self::Sc10_8 => 8,
+        }
     }
 
     /// Sutton-Chen `c`, exactly the value printed on the Cambridge point files.
@@ -52,6 +59,7 @@ impl SuttonChenFamily {
         match self {
             Self::Sc12_6 => 144.41,
             Self::Sc9_6 => 39.432,
+            Self::Sc10_8 => 34.408,
         }
     }
 
@@ -60,6 +68,7 @@ impl SuttonChenFamily {
         match self {
             Self::Sc12_6 => 30.0,
             Self::Sc9_6 => 10.0,
+            Self::Sc10_8 => 5.0,
         }
     }
 
@@ -68,6 +77,7 @@ impl SuttonChenFamily {
         match self {
             Self::Sc12_6 => "12-6",
             Self::Sc9_6 => "9-6",
+            Self::Sc10_8 => "10-8",
         }
     }
 }
@@ -193,14 +203,16 @@ struct Bond {
 /// `(r^{-n}, r^{-m})` at squared separation `r2`, with `a = 1`.
 fn reduced_powers(r2: f64, n_exp: i32, m_exp: i32) -> (f64, f64) {
     let inv2 = 1.0 / r2;
-    let phi = if m_exp == 6 {
-        inv2 * inv2 * inv2
-    } else {
-        r2.sqrt().powi(-m_exp)
+    let inv6 = inv2 * inv2 * inv2;
+    let phi = match m_exp {
+        6 => inv6,
+        8 => inv6 * inv2,
+        _ => r2.sqrt().powi(-m_exp),
     };
     let v = match n_exp {
-        12 => phi * phi,
-        9 => phi * inv2 / r2.sqrt(),
+        12 => inv6 * inv6,
+        10 => inv6 * inv2 * inv2,
+        9 => inv6 * inv2 / r2.sqrt(),
         _ => r2.sqrt().powi(-n_exp),
     };
     (v, phi)
@@ -240,21 +252,87 @@ impl DifferentiableObjective<f64> for SuttonChen {
 mod tests {
     use super::*;
 
+    const FAMILIES: [SuttonChenFamily; 3] = [
+        SuttonChenFamily::Sc12_6,
+        SuttonChenFamily::Sc9_6,
+        SuttonChenFamily::Sc10_8,
+    ];
+
     /// Two atoms: `E = r^{-n} - 2 c r^{-m/2}`.
     #[test]
     fn a_dimer_matches_the_closed_form() {
         let r = 0.7;
-        let p = SuttonChen::new(2, SuttonChenFamily::Sc12_6);
-        let x = Array1::from(vec![0.0, 0.0, 0.0, r, 0.0, 0.0]);
-        let (e, _) = p.value_and_gradient(x.view());
-        let c = SuttonChenFamily::Sc12_6.c();
-        let closed = r.powi(-12) - 2.0 * c * r.powi(-3);
-        assert!((e - closed).abs() < 1e-8, "{e} vs {closed}");
+        for family in FAMILIES {
+            let p = SuttonChen::new(2, family);
+            let x = Array1::from(vec![0.0, 0.0, 0.0, r, 0.0, 0.0]);
+            let (e, _) = p.value_and_gradient(x.view());
+            let closed = r.powi(-family.n_exp()) - 2.0 * family.c() * r.powi(-family.m_exp() / 2);
+            assert!(
+                (e - closed).abs() < 1e-8 * closed.abs().max(1.0),
+                "{}: {e} vs {closed}",
+                family.label()
+            );
+        }
+    }
+
+    /// Centre plus the twelve vertices of a regular icosahedron at `radius`.
+    fn icosahedron(radius: f64) -> Array1<f64> {
+        let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let scale = radius / (1.0 + phi * phi).sqrt();
+        let mut x = vec![0.0; 3];
+        for (a, b) in [(1.0, phi), (-1.0, phi), (1.0, -phi), (-1.0, -phi)] {
+            for v in [[0.0, a, b], [a, b, 0.0], [b, 0.0, a]] {
+                x.extend(v.iter().map(|c| c * scale));
+            }
+        }
+        Array1::from(x)
+    }
+
+    /// The thirteen-point icosahedron has one free length, so minimising the
+    /// energy over that length gives the Cambridge minimum of each row.
+    #[test]
+    fn the_icosahedron_matches_the_cambridge_energy() {
+        let printed = [-10968.5082, -2808.5765, -3280.3843];
+        for (family, want) in FAMILIES.into_iter().zip(printed) {
+            let p = SuttonChen::new(13, family);
+            let energy = |r: f64| p.eval(icosahedron(r).view());
+            let (mut lo, mut hi) = (0.5, 1.0);
+            let g = (5.0_f64.sqrt() - 1.0) / 2.0;
+            for _ in 0..200 {
+                let a = hi - g * (hi - lo);
+                let b = lo + g * (hi - lo);
+                if energy(a) < energy(b) {
+                    hi = b;
+                } else {
+                    lo = a;
+                }
+            }
+            let e = energy(0.5 * (lo + hi));
+            assert!(
+                (e - want).abs() < 5e-4,
+                "{}: {e} vs printed {want}",
+                family.label()
+            );
+        }
+    }
+
+    #[test]
+    fn every_family_parses_from_its_label() {
+        for family in FAMILIES {
+            assert_eq!(SuttonChenFamily::parse(family.label()), Some(family));
+        }
+        assert_eq!(SuttonChenFamily::parse("8-4"), None);
     }
 
     #[test]
     fn the_gradient_matches_a_central_difference() {
-        let p = SuttonChen::new(4, SuttonChenFamily::Sc9_6);
+        for family in FAMILIES {
+            gradient_matches(family);
+        }
+    }
+
+    fn gradient_matches(family: SuttonChenFamily) {
+        let p = SuttonChen::new(4, family);
         let x = Array1::from(vec![
             0.0, 0.0, 0.0, 0.8, 0.1, 0.0, 0.2, 0.75, 0.15, -0.3, 0.4, 0.7,
         ]);
@@ -268,7 +346,8 @@ mod tests {
             let num = (p.eval(xp.view()) - p.eval(xm.view())) / (2.0 * eps);
             assert!(
                 (num - g[k]).abs() < 1e-4,
-                "component {k}: numeric {num} analytic {} energy {e0}",
+                "{} component {k}: numeric {num} analytic {} energy {e0}",
+                family.label(),
                 g[k]
             );
         }
