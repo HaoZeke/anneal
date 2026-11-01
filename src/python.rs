@@ -3506,10 +3506,14 @@ fn rigid_probe(
 ///     hold the acceptance factor at 4 and scale the orientation amplitude
 ///     toward an acceptance ratio of one half. Ten or fewer do not. The
 ///     quench is the same L-BFGS descent, and a rigid record accepts the
-///     root-mean-square force. After 1000 hops with no new lowest
-///     minimum the walker returns to that minimum when it lies within
-///     one hopping temperature of the run target. Farther above the
-///     target the walker is drawn again, and the lowest minimum is kept.
+///     root-mean-square force. The chain keeps the eight lowest distinct
+///     minima of its quenched start, accepted quenches and lowest
+///     recorded minimum. Each stall follows 1000 hops with no new
+///     lowest minimum. At each stall the walker moves to the lowest kept
+///     minimum that is neither its own nor one of the last four stall
+///     destinations. When no kept minimum qualifies, the walker stays
+///     put. Nothing is drawn, the target is not read, and the lowest
+///     minimum is kept.
 ///   layout: `block` (centres, then rotations) or `interleaved` (GMIN
 ///     centre and angle-axis per body). Interleaved rotations are negated
 ///     at the boundary because that angle-axis map is the opposite sense.
