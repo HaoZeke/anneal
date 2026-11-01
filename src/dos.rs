@@ -590,6 +590,62 @@ impl Weight {
     }
 }
 
+/// Hansmann and Wille, Phys. Rev. Lett. 88, 068105 (2002).
+///
+/// The energy that enters the Metropolis test is `E + weight * H(E)`, where
+/// `H` counts visits to that energy bin. A bin the chain has sat in becomes
+/// harder to stay in, and an empty bin is the bare energy. The histogram is
+/// not a flat-histogram weight over the whole range: that target was measured
+/// to spend the budget in the high-energy sea. This type is the paving rule
+/// itself.
+#[derive(Debug, Clone)]
+pub struct EnergyLandscapePaving {
+    /// Metropolis temperature on the paved energy.
+    pub temperature: f64,
+    /// How hard a visit pushes its bin.
+    pub weight: f64,
+    lo: f64,
+    width: f64,
+    hist: Vec<u32>,
+}
+
+impl EnergyLandscapePaving {
+    /// Bins of `width` starting at `lo`.
+    pub fn new(temperature: f64, weight: f64, lo: f64, width: f64) -> Self {
+        assert!(temperature > 0.0);
+        assert!(width > 0.0);
+        Self {
+            temperature,
+            weight,
+            lo,
+            width,
+            hist: Vec::new(),
+        }
+    }
+
+    fn bin(&mut self, energy: f64) -> usize {
+        let index = ((energy - self.lo) / self.width).floor().max(0.0) as usize;
+        if index >= self.hist.len() {
+            self.hist.resize(index + 1, 0);
+        }
+        index
+    }
+
+    fn paved(&mut self, energy: f64) -> f64 {
+        let index = self.bin(energy);
+        energy + self.weight * f64::from(self.hist[index])
+    }
+
+    /// Metropolis on the paved energies. The arrival bin is then counted.
+    pub fn accept(&mut self, e_old: f64, e_new: f64, uniform: f64) -> bool {
+        let delta = self.paved(e_new) - self.paved(e_old);
+        let take = delta <= 0.0 || uniform < (-delta / self.temperature).exp();
+        let index = self.bin(e_new);
+        self.hist[index] = self.hist[index].saturating_add(1);
+        take
+    }
+}
+
 /// A flat target below a cut and a Boltzmann one above it.
 ///
 /// Flat sampling across a whole energy range is the wrong target for a search.
@@ -718,6 +774,18 @@ mod tests {
     use super::*;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+
+    #[test]
+    fn paving_makes_a_sat_in_bin_easier_to_leave() {
+        let mut paving = EnergyLandscapePaving::new(1.0, 1.0, 0.0, 1.0);
+        for _ in 0..8 {
+            assert!(paving.accept(0.2, 0.2, 0.0));
+        }
+        // A rise from 0.2 to 1.5 is rejected by Metropolis at T = 1 when
+        // the uniform draw is 0.99. After the low bin is occupied the
+        // paved rise is negative, so the move is certain.
+        assert!(paving.accept(0.2, 1.5, 0.99));
+    }
 
     /// Counts drawn from a known entropy curve have to recover it, or the
     /// posterior is not measuring what it claims to.

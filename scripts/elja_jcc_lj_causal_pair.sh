@@ -2,6 +2,41 @@
 # Matched shared-catalog and private-catalog LJ ensembles in one allocation.
 set -euo pipefail
 
+# macOS ships shasum rather than GNU sha256sum. Text-mode output matches.
+if ! command -v sha256sum >/dev/null 2>&1; then
+  sha256sum() {
+    shasum -a 256 "$@"
+  }
+fi
+
+# GitHub macOS images put bash 3.2 on PATH. That bash has no [[ -v ]],
+# declare -g, or mapfile, and the image has no seq, ldd, or sort -z.
+protocol_variable_is_set() {
+  local name=$1
+  [[ $name =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
+  eval "[[ \"\${${name}+set}\" == set ]]"
+}
+
+integers_through() {
+  local value=$1
+  local last=$2
+  while ((value <= last)); do
+    printf '%s\n' "$value"
+    value=$((value + 1))
+  done
+}
+
+comma_range() {
+  local value=$1
+  local last=$2
+  local joined=$value
+  while ((value < last)); do
+    value=$((value + 1))
+    joined+=",$value"
+  done
+  printf '%s\n' "$joined"
+}
+
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
   echo "elja_jcc_lj_causal_pair.sh requires a Slurm allocation" >&2
   exit 1
@@ -33,16 +68,16 @@ esac
 require_protocol_value() {
   local name=$1
   local expected=$2
-  if [[ -v $name && ${!name} != "$expected" ]]; then
+  if protocol_variable_is_set "$name" && [[ ${!name} != "$expected" ]]; then
     echo "$name=${!name} conflicts with the JCC LJ protocol value $expected" >&2
     exit 2
   fi
-  declare -gx "$name=$expected"
+  export "${name}=${expected}"
 }
 
 reject_protocol_variable() {
   local name=$1
-  if [[ -v $name ]]; then
+  if protocol_variable_is_set "$name"; then
     echo "$name is not part of the JCC LJ causal protocol" >&2
     exit 2
   fi
@@ -121,7 +156,7 @@ TRANSPORT_RADIUS=${CATALOG_TRANSPORT_RADIUS:-$(awk -v n="$N" 'BEGIN { printf "%.
 POPULATION_INTERVAL=${CATALOG_POPULATION_INTERVAL:-50000}
 TOTAL_BUDGET=$((PER_REPLICA_BUDGET * REPLICAS))
 SEED_BASE=$((${SEED_OFFSET_BASE:-400000} + ENSEMBLE_INDEX * REPLICAS))
-REPLICA_LIST=$(seq -s, 0 $((REPLICAS - 1)))
+REPLICA_LIST=$(comma_range 0 $((REPLICAS - 1)))
 brain_topology=none
 brain_transport=none
 
@@ -134,7 +169,8 @@ for executable in "$BIN" "$SERVER"; do
     echo "missing executable: $executable" >&2
     exit 2
   fi
-  if ldd "$executable" | grep -F "not found" >/dev/null; then
+  if command -v ldd >/dev/null 2>&1 \
+    && ldd "$executable" 2>/dev/null | grep -F "not found" >/dev/null; then
     echo "unresolved libraries in $executable" >&2
     ldd "$executable" >&2
     exit 2
@@ -192,11 +228,18 @@ server_prefixes=()
 last_started_endpoint=
 stop_servers() {
   local pid
-  for pid in "${server_pids[@]}"; do
+  local index=0
+  local count=${#server_pids[@]}
+  while ((index < count)); do
+    pid=${server_pids[$index]}
     kill "$pid" 2>/dev/null || true
+    index=$((index + 1))
   done
-  for pid in "${server_pids[@]}"; do
+  index=0
+  while ((index < count)); do
+    pid=${server_pids[$index]}
     wait "$pid" 2>/dev/null || true
+    index=$((index + 1))
   done
   server_pids=()
   server_prefixes=()
@@ -225,7 +268,7 @@ start_catalog() {
   pid=$!
   server_pids+=("$pid")
   server_prefixes+=("$prefix")
-  for _ in $(seq 1 200); do
+  for _ in $(integers_through 1 200); do
     endpoint=$(grep -o '"addr":"[^"]*"' "${prefix}.jsonl" 2>/dev/null \
       | awk -F '"' 'NR == 1 { print $4 }' || true)
     if [[ -n $endpoint ]]; then
@@ -281,7 +324,7 @@ while ((replica < REPLICAS)); do
   fi
 
   if [[ $ARM == control ]]; then
-    for private_replica in $(seq "$wave_start" $((wave_end - 1))); do
+    for private_replica in $(integers_through "$wave_start" $((wave_end - 1))); do
       start_catalog \
         "$OUT/coordinator-replica-${private_replica}" \
         "$PER_REPLICA_BUDGET" \
@@ -347,7 +390,7 @@ fi
 solved=0
 best_all=
 qualification_traces=()
-for replica in $(seq 0 $((REPLICAS - 1))); do
+for replica in $(integers_through 0 $((REPLICAS - 1))); do
   output="$OUT/workers/replica-${replica}.out"
   errors="$OUT/workers/replica-${replica}.err"
   trace="$OUT/traces/replica-${replica}.jsonl"
@@ -391,7 +434,7 @@ done
   --output "$OUT/qualification.json" \
   "${qualification_traces[@]}"
 
-for replica in $(seq 1 $((REPLICAS - 1))); do
+for replica in $(integers_through 1 $((REPLICAS - 1))); do
   cmp -s "$OUT/workers/replica-0/resolved-config.json" \
     "$OUT/workers/replica-${replica}/resolved-config.json"
 done
@@ -457,7 +500,19 @@ calibration_sha256=$(sha256sum "$CALIBRATION" | awk '{print $1}')
 printf 'replicas %s solved %s best %s source %s arm %s\n' \
   "$REPLICAS" "$solved" "${best_all:-none}" "$SOURCE_COMMIT" "$ARM" \
   >"$OUT/TERMINAL_OK"
-mapfile -d '' artifact_files < <(cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 \
-  | sort -z)
+artifact_files=()
+if sort -z </dev/null >/dev/null 2>&1; then
+  while IFS= read -r -d '' file; do
+    artifact_files+=("$file")
+  done < <(cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z)
+else
+  while IFS= read -r file; do
+    artifact_files+=("$file")
+  done < <(cd "$OUT" && find . -type f ! -name SHA256SUMS | LC_ALL=C sort)
+fi
+if ((${#artifact_files[@]} == 0)); then
+  echo "ensemble produced no artifacts to seal" >&2
+  exit 1
+fi
 (cd "$OUT" && sha256sum "${artifact_files[@]}" >SHA256SUMS)
 cat "$OUT/TERMINAL_OK"

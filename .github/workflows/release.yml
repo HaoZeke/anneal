@@ -56,15 +56,15 @@ jobs:
             static_lib: libanneal_core.a
             shared_lib: libanneal_core.so
           - os: macos
-            runner: macos-14
+            runner: macos-15
             target: aarch64-apple-darwin
             artifact: anneal-core-macos-aarch64
             static_lib: libanneal_core.a
             shared_lib: libanneal_core.dylib
-          # x86_64 mac is cross-compiled from the arm64 runner; the macos-13
-          # x86_64 image is retired and queues forever.
+          # x86_64 mac is cross-compiled from the arm64 runner. macos-14 is
+          # retired on 2026-11-02 and the brownout cancels the job at once.
           - os: macos
-            runner: macos-14
+            runner: macos-15
             target: x86_64-apple-darwin
             artifact: anneal-core-macos-x86_64
             static_lib: libanneal_core.a
@@ -140,9 +140,9 @@ jobs:
             target: x86_64
           - os: ubuntu-22.04
             target: aarch64
-          - os: macos-14
+          - os: macos-15
             target: x86_64
-          - os: macos-14
+          - os: macos-15
             target: aarch64
     steps:
       - uses: actions/checkout@v6

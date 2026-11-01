@@ -1,5 +1,7 @@
 //! Append-only descriptor-basin census with exact visit accounting.
 
+use std::collections::BTreeMap;
+
 /// Coverage policy: leftover and packing Good--Turing refuse to call
 /// the census complete while unseen mass is at least `num/den`.
 pub const PRODUCTION_UNSEEN_MASS_NUM: u64 = 1;
@@ -28,6 +30,23 @@ pub const PRODUCTION_MINIMUM_VISITS: u64 = gt_min_visits(
 /// Production Good--Turing unseen-mass ceiling `α = 1/5`.
 pub const PRODUCTION_MAX_UNSEEN_MASS: f64 =
     PRODUCTION_UNSEEN_MASS_NUM as f64 / PRODUCTION_UNSEEN_MASS_DEN as f64;
+
+/// Numerator of the opt-in witnessed ceiling.
+pub const WITNESS_TRIPLETON_NUM: u64 = 1;
+/// Denominator of the opt-in witnessed ceiling. With the numerator
+/// this is `1/3`.
+pub const WITNESS_TRIPLETON_DEN: u64 = 3;
+/// Opt-in ceiling for a witnessed target.
+///
+/// A single witness at three visits has no singleton and no doubleton,
+/// so Esty's variance is 0 and the upper bound is 0. Good's hatch is
+/// `(0 + 1) / (3 + 1) = 1/4`. That is not strictly below
+/// [`PRODUCTION_MAX_UNSEEN_MASS`], and it is strictly below one third.
+/// One third is the least unit fraction with that property. Two visits
+/// of one witness are still a doubleton: the hatch is one third, which
+/// is not strictly below this ceiling.
+pub const WITNESS_TRIPLETON_CEILING: f64 =
+    WITNESS_TRIPLETON_NUM as f64 / WITNESS_TRIPLETON_DEN as f64;
 
 /// Stable identifier for one immutable census medoid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -117,6 +136,28 @@ pub enum CensusError {
     CounterOverflow,
 }
 
+/// Caller-owned identity of one minimum.
+///
+/// The same witness is one basin even when the descriptor distance
+/// exceeds the census radius. A radius is the wrong identity when the
+/// same-minimum scatter is not below the distinct-minimum separation:
+/// [`super::calibration::calibrate_census_radius_two_sample`] refuses
+/// that overlap, and a ball there splits one minimum into singletons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct WitnessId(u64);
+
+impl WitnessId {
+    /// Construct an identifier from its canonical integer representation.
+    pub const fn from_raw(value: u64) -> Self {
+        Self(value)
+    }
+
+    /// Return the canonical integer representation.
+    pub const fn as_raw(self) -> u64 {
+        self.0
+    }
+}
+
 /// Exact, uncapped census of fixed-radius descriptor basins.
 #[derive(Debug, Clone)]
 pub struct BasinCensus {
@@ -124,6 +165,8 @@ pub struct BasinCensus {
     radius_squared: f64,
     entries: Vec<CensusEntry>,
     total_visits: u64,
+    /// Basin opened by each structural witness.
+    witness_basins: BTreeMap<u64, BasinId>,
 }
 
 impl BasinCensus {
@@ -141,6 +184,7 @@ impl BasinCensus {
             radius_squared,
             entries: Vec::new(),
             total_visits: 0,
+            witness_basins: BTreeMap::new(),
         })
     }
 
@@ -173,6 +217,64 @@ impl BasinCensus {
             });
         }
         self.observe_validated_assignment(descriptor, basin)
+    }
+
+    /// Record one minimum under a structural witness, or by radius if there is none.
+    ///
+    /// `Some` increments that witness's basin irrespective of descriptor
+    /// distance, so near-duplicates of one minimum are not singletons.
+    /// `None` uses [`Self::observe`]. Anonymous saturation keeps the
+    /// production visit floor. A witness is confident when the Esty
+    /// unseen-mass bound is under the same ceiling, which is not a
+    /// fixed visit count.
+    pub fn observe_witness(
+        &mut self,
+        descriptor: &[f64],
+        witness: Option<WitnessId>,
+    ) -> Result<CensusObservation, CensusError> {
+        let Some(witness) = witness else {
+            return self.observe(descriptor);
+        };
+        if let Some(basin) = self.witness_basins.get(&witness.as_raw()).copied() {
+            return self.observe_assigned(descriptor, Some(basin));
+        }
+        let created = self.observe_assigned(descriptor, None)?;
+        self.witness_basins
+            .insert(witness.as_raw(), created.basin_id);
+        Ok(created)
+    }
+
+    /// Whether any observation carried a structural witness.
+    pub fn has_witness(&self) -> bool {
+        !self.witness_basins.is_empty()
+    }
+
+    /// Whether a witnessed target meets the production unseen-mass bound.
+    ///
+    /// Anonymous revisits can meet the ceiling without the target, so a
+    /// witness is required. The visit count is the one
+    /// [`super::occupancy::leftover_esty_stable`] demands for these
+    /// singletons and doubletons at [`PRODUCTION_MAX_UNSEEN_MASS`].
+    /// That is Good's next-step hatch plus Esty's one-sided 95% upper
+    /// bound, not [`PRODUCTION_MINIMUM_VISITS`]. Anonymous saturation
+    /// still uses that floor.
+    pub fn target_found_with_confidence(&self) -> bool {
+        self.target_found_below(PRODUCTION_MAX_UNSEEN_MASS)
+    }
+
+    /// [`target_found_with_confidence`] at `ceiling` instead of
+    /// [`PRODUCTION_MAX_UNSEEN_MASS`].
+    ///
+    /// The predicate is the same hatch-and-Esty pair. Only the ceiling
+    /// changes. [`WITNESS_TRIPLETON_CEILING`] is the opt-in value.
+    pub fn target_found_below(&self, ceiling: f64) -> bool {
+        self.has_witness()
+            && super::occupancy::leftover_esty_stable(
+                self.total_visits(),
+                self.singleton_count(),
+                self.doubleton_count(),
+                ceiling,
+            )
     }
 
     fn observe_validated_assignment(

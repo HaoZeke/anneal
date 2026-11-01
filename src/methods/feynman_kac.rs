@@ -1,8 +1,9 @@
 //! Target-free Feynman--Kac reconfiguration for cooperative search chains.
 //!
 //! A search epoch supplies one validated representative per chain. The
-//! selection potential combines within-epoch energy rank, descriptor novelty,
-//! and census scarcity. Systematic resampling keeps the chain population fixed,
+//! selection potential combines within-epoch energy rank, packing-histogram
+//! novelty, census scarcity, and graph-field uncertainty. Systematic
+//! resampling keeps the chain population fixed,
 //! while a family cap prevents a single observed funnel from occupying every
 //! slot. Transition-network inference is diagnostic output rather than
 //! population evidence. This is a population-management operator, not a
@@ -70,26 +71,31 @@ pub struct BasinEvidence {
     energy_rank: f64,
     novelty_rank: f64,
     scarcity_rank: f64,
+    uncertainty_rank: f64,
 }
 
 impl BasinEvidence {
     /// Construct evidence from ranks in `[0, 1]`.
     ///
-    /// Lower energy rank is better. Higher novelty and scarcity ranks are
-    /// better. Ranks keep selection pressure independent of energy units and
-    /// cluster-size-dependent energy scale.
+    /// Lower energy rank is better. Higher novelty, scarcity, and
+    /// graph-field uncertainty ranks are better. Ranks keep selection
+    /// pressure independent of energy units and cluster-size-dependent
+    /// energy scale.
     pub fn new(
         energy_rank: f64,
         novelty_rank: f64,
         scarcity_rank: f64,
+        uncertainty_rank: f64,
     ) -> Result<Self, ReconfigurationError> {
         validate_rank("energy", energy_rank)?;
         validate_rank("novelty", novelty_rank)?;
         validate_rank("scarcity", scarcity_rank)?;
+        validate_rank("uncertainty", uncertainty_rank)?;
         Ok(Self {
             energy_rank,
             novelty_rank,
             scarcity_rank,
+            uncertainty_rank,
         })
     }
 
@@ -107,6 +113,14 @@ impl BasinEvidence {
     pub fn scarcity_rank(self) -> f64 {
         self.scarcity_rank
     }
+
+    /// Graph-field uncertainty rank, where one is least certain.
+    ///
+    /// The raw score is the catalogue residual `variance / (1 + effort)`.
+    /// This rank is that score ordered across the epoch.
+    pub fn uncertainty_rank(self) -> f64 {
+        self.uncertainty_rank
+    }
 }
 
 /// Raw coordinator evidence for one replica at a synchronization epoch.
@@ -116,16 +130,19 @@ pub struct PopulationMember {
     energy: f64,
     novelty: f64,
     basin_visits: f64,
+    /// Graph-field score `variance / (1 + effort)`, before ranking.
+    uncertainty: f64,
 }
 
 impl PopulationMember {
-    /// Construct one member from fresh energy, descriptor novelty, and the
-    /// exact visit count of its immutable census basin.
+    /// Construct one member from fresh energy, packing-histogram novelty,
+    /// the visit count of its census basin, and the graph-field score.
     pub fn new(
         replica: u32,
         energy: f64,
         novelty: f64,
         basin_visits: f64,
+        uncertainty: f64,
     ) -> Result<Self, ReconfigurationError> {
         if !energy.is_finite() {
             return Err(ReconfigurationError::InvalidParameter {
@@ -145,11 +162,18 @@ impl PopulationMember {
                 value: basin_visits,
             });
         }
+        if !uncertainty.is_finite() || uncertainty < 0.0 {
+            return Err(ReconfigurationError::InvalidParameter {
+                field: "member_uncertainty",
+                value: uncertainty,
+            });
+        }
         Ok(Self {
             replica,
             energy,
             novelty,
             basin_visits,
+            uncertainty,
         })
     }
 
@@ -182,6 +206,11 @@ impl RankedPopulationMember {
 ///
 /// Novelty is ranked directly. Scarcity is ranked through inverse exact basin
 /// visits, so a less-visited census basin receives a higher scarcity rank.
+/// Graph-field uncertainty is ranked directly, so a less certain node receives
+/// a higher uncertainty rank. Scores that agree to
+/// [`UNCERTAINTY_RANK_RELATIVE_TOLERANCE`] share a rank: the residual
+/// variance is a solved diagonal, and a symmetric star does not come back
+/// bitwise equal.
 pub fn rank_population(
     members: &[PopulationMember],
 ) -> Result<Vec<RankedPopulationMember>, ReconfigurationError> {
@@ -208,9 +237,15 @@ pub fn rank_population(
         .iter()
         .map(|member| 1.0 / member.basin_visits)
         .collect::<Vec<_>>();
+    let uncertainty = members
+        .iter()
+        .map(|member| member.uncertainty)
+        .collect::<Vec<_>>();
     let energy_ranks = ascending_fractional_ranks(&energy)?;
     let novelty_ranks = ascending_fractional_ranks(&novelty)?;
     let scarcity_ranks = ascending_fractional_ranks(&scarcity)?;
+    let uncertainty_ranks =
+        ascending_fractional_ranks_within(&uncertainty, UNCERTAINTY_RANK_RELATIVE_TOLERANCE)?;
 
     members
         .iter()
@@ -222,10 +257,61 @@ pub fn rank_population(
                     energy_ranks[index],
                     novelty_ranks[index],
                     scarcity_ranks[index],
+                    uncertainty_ranks[index],
                 )?,
             })
         })
         .collect()
+}
+
+/// Relative tolerance for grouping graph-field scores before ranking.
+///
+/// One part in 1e8. A gap this small is the Cholesky factor, not a
+/// different posterior variance.
+pub const UNCERTAINTY_RANK_RELATIVE_TOLERANCE: f64 = 1e-8;
+
+fn ascending_fractional_ranks_within(
+    values: &[f64],
+    relative: f64,
+) -> Result<Vec<f64>, ReconfigurationError> {
+    if values.is_empty() {
+        return Err(ReconfigurationError::EmptyPopulation);
+    }
+    for &value in values {
+        if !value.is_finite() {
+            return Err(ReconfigurationError::InvalidParameter {
+                field: "rank_input",
+                value,
+            });
+        }
+    }
+    if values.len() == 1 {
+        return Ok(vec![0.0]);
+    }
+    let mut order: Vec<usize> = (0..values.len()).collect();
+    order.sort_by(|&left, &right| values[left].total_cmp(&values[right]));
+    let scale = (values.len() - 1) as f64;
+    let mut ranks = vec![0.0; values.len()];
+    let mut begin = 0;
+    while begin < order.len() {
+        let anchor = values[order[begin]];
+        let mut end = begin + 1;
+        while end < order.len() && uncertainty_scores_match(anchor, values[order[end]], relative) {
+            end += 1;
+        }
+        let average_position = 0.5 * (begin + end - 1) as f64;
+        let rank = average_position / scale;
+        for &index in &order[begin..end] {
+            ranks[index] = rank;
+        }
+        begin = end;
+    }
+    Ok(ranks)
+}
+
+fn uncertainty_scores_match(left: f64, right: f64, relative: f64) -> bool {
+    let scale = left.abs().max(right.abs()).max(relative);
+    (left - right).abs() <= relative * scale
 }
 
 fn validate_rank(field: &'static str, value: f64) -> Result<(), ReconfigurationError> {
@@ -245,6 +331,8 @@ pub struct SelectionCoefficients {
     pub novelty: f64,
     /// Pressure toward census scarcity.
     pub scarcity: f64,
+    /// Pressure toward graph-field uncertainty.
+    pub uncertainty: f64,
     /// Maximum log-weight difference retained before exponentiation.
     pub log_weight_clip: f64,
 }
@@ -255,6 +343,7 @@ impl Default for SelectionCoefficients {
             energy: 1.0,
             novelty: 0.8,
             scarcity: 0.6,
+            uncertainty: 0.4,
             log_weight_clip: 4.0,
         }
     }
@@ -266,6 +355,7 @@ impl SelectionCoefficients {
             ("energy", self.energy),
             ("novelty", self.novelty),
             ("scarcity", self.scarcity),
+            ("uncertainty", self.uncertainty),
         ] {
             if !value.is_finite() || value < 0.0 {
                 return Err(ReconfigurationError::InvalidParameter { field, value });
@@ -964,6 +1054,7 @@ pub fn reconfiguration_plan(
             -coefficients.energy * item.energy_rank
                 + coefficients.novelty * item.novelty_rank
                 + coefficients.scarcity * item.scarcity_rank
+                + coefficients.uncertainty * item.uncertainty_rank
         })
         .collect();
     let maximum = log_weights

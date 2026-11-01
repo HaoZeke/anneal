@@ -26,6 +26,7 @@ fn prefers_negative(candidate: [f64; 3], incumbent: [f64; 3]) -> bool {
 
 /// Shortest lattice image of each ordered pair, searched directly.
 /// An open axis contributes only the zero shift.
+#[allow(clippy::neg_cmp_op_on_partial_ord)]
 fn brute_shortest(
     positions: &[[f64; 3]],
     cell: &Cell,
@@ -61,7 +62,8 @@ fn brute_shortest(
                             q[2] + shift[2] - p[2],
                         ];
                         let d2 = length2(displacement);
-                        if !(d2 < cutoff2) || d2 <= 1e-24 {
+                        if d2.partial_cmp(&cutoff2) != Some(std::cmp::Ordering::Less) || d2 <= 1e-24
+                        {
                             continue;
                         }
                         let replace = match chosen {
@@ -514,8 +516,7 @@ fn descriptor_periodic_neighbours_use_the_shortest_vector() {
                 && (image.displacement[1] - fractional[1]).abs() < 1e-8
                 && (image.displacement[2] - fractional[2]).abs() < 1e-8
         }),
-        "pair (0, 1) hand-rolled loop still contains the fractional wrap {:?}",
-        fractional
+        "pair (0, 1) hand-rolled loop still contains the fractional wrap {fractional:?}",
     );
     assert!(
         length2(fractional) > length2(named.1) + 1e-8,

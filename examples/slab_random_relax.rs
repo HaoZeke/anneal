@@ -6,14 +6,17 @@
 //!
 //! Usage: slab_random_relax <con_file> <total_budget> [seed]
 
-mod common;
+#[path = "common/rgpot_eindir.rs"]
+mod rgpot_eindir;
+#[path = "common/slab.rs"]
+mod slab;
 
 use anneal_core::methods::cluster_hopping::Ledger;
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
-use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
-use common::slab::{Mobile, place_adsorbates, read_system};
 use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use ndarray::ArrayView1;
+use rgpot_eindir::{RgpotObjective, emit_engine_manifest};
+use slab::{Mobile, place_adsorbates, read_system};
 
 const ENERGY_TOL: f64 = 1e-4;
 const RELAX_STEPS: usize = 150;
@@ -30,11 +33,11 @@ fn cluster_energies(energies: &[f64]) -> Vec<(f64, usize)> {
     sorted.sort_by(|a, b| a.total_cmp(b));
     let mut clusters: Vec<(f64, usize)> = Vec::new();
     for energy in sorted {
-        if let Some((rep, count)) = clusters.last_mut() {
-            if (energy - *rep).abs() <= ENERGY_TOL {
-                *count += 1;
-                continue;
-            }
+        if let Some((rep, count)) = clusters.last_mut()
+            && (energy - *rep).abs() <= ENERGY_TOL
+        {
+            *count += 1;
+            continue;
         }
         clusters.push((energy, 1));
     }

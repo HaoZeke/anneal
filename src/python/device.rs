@@ -39,7 +39,7 @@ impl DevicePolicy {
             }
             Preset::Gsa(p) => {
                 positive(p.t_init, "t_init")?;
-                if !(p.q_v > 1.0 && p.q_v < 3.0) || !p.q_a.is_finite() {
+                if !(p.q_v > 1.0 && p.q_v < 3.0 && p.q_a.is_finite()) {
                     return Err(PyValueError::new_err(
                         "q_v must lie in (1, 3) and q_a must be finite",
                     ));

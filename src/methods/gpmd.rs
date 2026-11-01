@@ -154,7 +154,7 @@ where
     let mut n_accept = 0usize;
     let mut n_propose = 0usize;
 
-    while work(n_evals, n_grads) < sa_budget {
+    while work(n_evals, n_grads) < sa_budget && !crate::caller_stop::raised() {
         let t = gap_proportional_temp(f, best_val, dim);
         // Proposal scale: box-relative floor * exp(log_scale).
         let mut width_mean = 0.0;
@@ -257,7 +257,7 @@ where
             let mut z = best_pos.clone();
             let mut fz = best_val;
             let mut i = 0usize;
-            while steps > 0 && work(n_evals, n_grads) < budget {
+            while steps > 0 && work(n_evals, n_grads) < budget && !crate::caller_stop::raised() {
                 let lo = bounds.low[i % dim];
                 let hi = bounds.high[i % dim];
                 let step = 0.1 * (hi - lo).abs().max(1e-12);

@@ -21,7 +21,10 @@ use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 use crate::methods::cluster_hopping::min_pair_distance;
 #[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::structure_is_sane;
-use crate::methods::cluster_hopping::{Config, Ledger, Outcome, optimize_with_energy_gradient};
+use crate::methods::cluster_hopping::{
+    ChainCheckpoint, CheckpointAction, Config, Ledger, Outcome, SearchError,
+    optimize_with_energy_gradient, run_with_energy_gradient_at_checkpoints,
+};
 use crate::methods::warm_lbfgs::WarmLbfgs;
 use crate::quench::{QuenchPredictor, Verdict};
 use eindir_core::gradient::DifferentiableObjective;
@@ -132,6 +135,12 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     let mut opt = WarmLbfgs::default();
+    // A minimum is recordable at `record_gradient`; descending past it buys
+    // digits no acceptance test or record reads. Stopping at 1e-6 instead cost
+    // the communicating preset a PAR-2 of 5792 force calls on 32 LJ38 starts
+    // against 4269 here, and a median of 5726 against 3253. Rigid bodies and
+    // species diameters record at that same tolerance.
+    opt.gtol = cfg.record_gradient;
     // The driver calls the screening pass with `screen_steps` and the full one
     // with `relax_steps`, so the iteration count identifies which is which.
     let screen_iters = cfg.screen_steps;
@@ -143,6 +152,9 @@ where
         opt.forget();
         let before = led.spent();
         let screening = iters <= screen_iters;
+        // A rigid chart uses this same descent. A line-search-free capped
+        // step reached a different basin, and the small-cluster walk then
+        // took more hops at the same cost per quench.
         // The screening pass stops when its own trajectory says the question is
         // settled; the full relaxation runs to its tolerance, because there the
         // answer is the structure and not a verdict about it.
@@ -184,6 +196,7 @@ where
             }
             None => x,
         };
+        let stop_at = led.target();
         let (f, xr, _) = opt.minimize_watched(
             x,
             iters,
@@ -194,6 +207,9 @@ where
                 Some(objective.value_and_gradient(v))
             },
             |_, fv| {
+                if stop_at.is_some_and(|limit| fv <= limit) {
+                    return false;
+                }
                 if screening && probe {
                     // Never stops. Records where a stop would have happened and
                     // what it would have claimed, so the claim can be scored
@@ -262,23 +278,70 @@ where
         // check stays on every other path, where the answer is not known.
         if early {
             stats.capped += 1;
+            // The water census reads these boundaries. A screened descent is
+            // not a minimum, so it is recorded without a validation gradient.
+            led.record_quench_boundary(before, f, xr.clone(), None);
             return (f, xr);
         }
         // Charged like any other evaluation: asking whether a relaxation
         // converged is asking the potential a question, and a protocol that
         // counts evaluations has to count this one.
-        let converged = if led.charge() {
+        let mut f = f;
+        let mut xr = xr;
+        let mut validated = None;
+        let mut converged = if led.charge() {
             stats.check_charged += 1;
             let g = objective.grad(xr.view());
-            gradient_is_converged(g.view(), cfg.record_gradient)
+            let ok = gradient_is_converged(g.view(), cfg.record_gradient);
+            if ok {
+                validated = Some(g);
+            }
+            ok
         } else {
             false
         };
+        // A binary quench often hits the iteration cap with the infinity
+        // norm still above the record tolerance, so the ledger would drop
+        // a finite minimum. One more pass from that point finishes the
+        // descent. Screening passes stay short, and the preset cap is
+        // unchanged.
+        if !converged && !screening && cfg.species_sigma.is_some() && led.remaining() > 0 {
+            let (f2, xr2, _) = opt.minimize(xr.view(), iters, |v| {
+                if !led.charge() {
+                    return None;
+                }
+                Some(objective.value_and_gradient(v))
+            });
+            f = f2;
+            xr = xr2;
+            converged = if led.charge() {
+                stats.check_charged += 1;
+                let g = objective.grad(xr.view());
+                let ok = gradient_is_converged(g.view(), cfg.record_gradient);
+                if ok {
+                    validated = Some(g);
+                } else {
+                    validated = None;
+                }
+                ok
+            } else {
+                validated = None;
+                false
+            };
+            let extra = led.spent() - before - cost;
+            if extra > 0 {
+                stats.full_charged += extra;
+            }
+        }
         if converged {
             stats.converged += 1;
         } else {
             stats.capped += 1;
+            validated = None;
         }
+        // Good-Turing retires from the checkpoint's quench list. Leaving this
+        // empty made that stop observe nothing and run out the budget.
+        led.record_quench_boundary(before, f, xr.clone(), validated);
         (f, xr)
     }
 }
@@ -293,7 +356,7 @@ pub fn search<O>(
     cfg: &Config,
     ledger: &mut Ledger,
     seed: u64,
-) -> (Outcome, RelaxStats)
+) -> Result<(Outcome, RelaxStats), SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
@@ -329,9 +392,9 @@ where
             Some(&mut grad),
             Some(&mut energy_grad),
             seed,
-        )
+        )?
     };
-    (out, stats)
+    Ok((out, stats))
 }
 
 /// As [`search`], from a geometry the caller already has.
@@ -344,7 +407,7 @@ pub fn search_from<O>(
     ledger: &mut Ledger,
     start: ArrayView1<f64>,
     seed: u64,
-) -> (Outcome, RelaxStats)
+) -> Result<(Outcome, RelaxStats), SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
@@ -358,16 +421,74 @@ where
             }
             Some(objective.grad(x))
         };
-        crate::methods::cluster_hopping::run_with_gradient(
+        let mut energy_grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if !led.charge() {
+                    return None;
+                }
+                Some(objective.value_and_gradient(x))
+            };
+        crate::methods::cluster_hopping::run_with_energy_gradient(
             cfg,
             start,
             ledger,
             &mut relax,
             Some(&mut grad),
+            Some(&mut energy_grad),
             &mut rng,
-        )
+        )?
     };
-    (out, stats)
+    Ok((out, stats))
+}
+
+/// [`search_from`] with a checkpoint after each block of charged work.
+///
+/// The water Good-Turing arm retires from this hook once the census of
+/// validated quenches is saturated. Other arms pass a checkpoint that
+/// continues.
+pub fn search_from_with_checkpoint<O, H>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    start: ArrayView1<f64>,
+    seed: u64,
+    checkpoint_interval: usize,
+    checkpoint: &mut H,
+) -> Result<(Outcome, RelaxStats), SearchError>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+    H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
+{
+    let mut stats = RelaxStats::default();
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let out = {
+        let mut relax = warm_relax(objective, cfg, &mut stats, seed);
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+            if !led.charge() {
+                return None;
+            }
+            Some(objective.grad(x))
+        };
+        let mut energy_grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if !led.charge() {
+                    return None;
+                }
+                Some(objective.value_and_gradient(x))
+            };
+        run_with_energy_gradient_at_checkpoints(
+            cfg,
+            start,
+            ledger,
+            &mut relax,
+            Some(&mut grad),
+            Some(&mut energy_grad),
+            &mut rng,
+            checkpoint_interval,
+            checkpoint,
+        )?
+    };
+    Ok((out, stats))
 }
 
 /// [`search_from`] when `BANK_RPC` is unset; [`search_from_bank`] when it is.
@@ -381,7 +502,7 @@ pub fn search_from_maybe_bank<O>(
     ledger: &mut Ledger,
     start: ArrayView1<f64>,
     seed: u64,
-) -> (Outcome, RelaxStats)
+) -> Result<(Outcome, RelaxStats), SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
@@ -627,10 +748,11 @@ pub fn search_from_bank<O>(
     start: ArrayView1<f64>,
     seed: u64,
     sock: &str,
-) -> (Outcome, RelaxStats)
+) -> Result<(Outcome, RelaxStats), crate::methods::cluster_hopping::SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    let _caller_stop = ledger.bind_stop();
     use crate::bank_rpc::BankClient;
     use crate::bias::BasinBias;
     use crate::diversity::DiversityAnnealer;
@@ -855,7 +977,7 @@ where
         }
         let charged_before = ledger.spent();
         let hops_before = hops;
-        let mut slice_led = Ledger::new(slice.min(ledger.remaining()));
+        let mut slice_led = ledger.slice(slice.min(ledger.remaining()));
         let out = run_with_bias(
             cfg,
             start.view(),
@@ -864,7 +986,7 @@ where
             Some(&mut grad),
             &mut bias,
             &mut rng,
-        );
+        )?;
         ledger.charge_many(slice_led.spent());
         if let Some(st) = slice_led.best_state.as_ref() {
             ledger.record(slice_led.best, st.view());
@@ -917,7 +1039,7 @@ where
         improvements,
         ..Outcome::default()
     };
-    (out, stats)
+    Ok((out, stats))
 }
 
 #[cfg(any(feature = "bank-rpc", test))]
@@ -1097,6 +1219,43 @@ mod tests {
         assert!(!gradient_is_converged(gradient.view(), 1.0e-5));
     }
 
+    /// The water Good-Turing arm retires only from quench boundaries. A search
+    /// that never records them cannot saturate, so this is the hook's input.
+    #[test]
+    fn production_quenches_reach_the_census_hook() {
+        use crate::methods::cluster_hopping::{ChainCheckpoint, CheckpointAction};
+
+        let potential = PairPotential::lennard_jones(5);
+        let cfg = Config::for_cluster(5);
+        let mut ledger = Ledger::new(180);
+        let start = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.2, 0.2, 0.0, 0.2, 1.3, 0.1, -0.4, 0.5, 1.1, 0.7, -0.6, 0.8,
+        ]);
+        let mut observed = 0usize;
+        let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+            observed += snapshot.quench_boundaries().len();
+            CheckpointAction::Continue
+        };
+        search_from_with_checkpoint(
+            &potential,
+            &cfg,
+            &mut ledger,
+            start.view(),
+            1,
+            1,
+            &mut checkpoint,
+        )
+        .expect("finite start");
+        assert!(
+            !ledger.quench_boundaries().is_empty(),
+            "search recorded no quench boundary"
+        );
+        assert!(
+            observed > 0,
+            "checkpoint saw none of the recorded boundaries"
+        );
+    }
+
     #[cfg(feature = "bank-rpc")]
     #[test]
     fn bank_samples_require_charged_local_energy_and_gradient_validation() {
@@ -1170,6 +1329,156 @@ mod tests {
         assert!(improvements.is_empty());
     }
 
+    /// A caller that raises the ledger stop after N potential calls must get
+    /// the search back at once, with the best state found and with no further
+    /// calls. Basin hopping, the communicating preset, the recommended preset,
+    /// a replica ladder, and the species chart all share this. The rigid
+    /// TIP4P driver is covered with the stock searches.
+    #[test]
+    fn caller_stop_returns_at_once() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+        use std::time::{Duration, Instant};
+
+        use eindir_core::{Gradient, Objective};
+
+        const AFTER: usize = 80;
+        const BUDGET: usize = 80_000;
+
+        struct Halt {
+            inner: PairPotential,
+            stop: Arc<AtomicBool>,
+            calls: AtomicUsize,
+            best: Mutex<f64>,
+        }
+
+        impl Objective<f64> for Halt {
+            fn dim(&self) -> usize {
+                Objective::dim(&self.inner)
+            }
+            fn bounds(&self) -> &eindir_core::Bounds<f64> {
+                self.inner.bounds()
+            }
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                self.value_and_gradient(x).0
+            }
+        }
+
+        impl Gradient<f64> for Halt {
+            fn dim(&self) -> usize {
+                Objective::dim(self)
+            }
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                self.value_and_gradient(x).1
+            }
+        }
+
+        impl DifferentiableObjective<f64> for Halt {
+            fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+                let n = self.calls.fetch_add(1, Ordering::SeqCst);
+                let (energy, gradient) = self.inner.value_and_gradient(x);
+                let mut best = self.best.lock().expect("best");
+                if energy < *best {
+                    *best = energy;
+                }
+                if n + 1 >= AFTER {
+                    self.stop.store(true, Ordering::SeqCst);
+                }
+                assert!(
+                    n < AFTER + 8,
+                    "the search kept calling the potential after the stop ({n} calls)"
+                );
+                (energy, gradient)
+            }
+        }
+
+        let presets = [
+            ("basin hopping", Config::for_cluster(8)),
+            ("communicating", Config::communicating(8)),
+            ("recommended", Config::recommended(8)),
+            ("replica ladder", {
+                let mut cfg = Config::for_cluster(8);
+                cfg.replicas = 3;
+                cfg.swap_period = 2;
+                cfg
+            }),
+            (
+                "species chart",
+                Config::for_cluster(8).with_species(
+                    vec![1, 1, 1, 1, 2, 2, 2, 2],
+                    Some(vec![1.0, 1.0, 1.0, 1.0, 1.3, 1.3, 1.3, 1.3]),
+                ),
+            ),
+        ];
+        for (name, cfg) in presets {
+            let stop = Arc::new(AtomicBool::new(false));
+            let objective = Halt {
+                inner: PairPotential::lennard_jones(cfg.n_points),
+                stop: Arc::clone(&stop),
+                calls: AtomicUsize::new(0),
+                best: Mutex::new(f64::INFINITY),
+            };
+            let mut ledger = Ledger::with_stop(BUDGET, Arc::clone(&stop));
+            let started = Instant::now();
+            let (out, _) = search(&objective, &cfg, &mut ledger, 1).expect("finite start");
+            let elapsed = started.elapsed();
+            let calls = objective.calls.load(Ordering::SeqCst);
+            let best_seen = *objective.best.lock().expect("best");
+            assert!(
+                calls <= AFTER + 8,
+                "{name} made {calls} calls after a stop at {AFTER}"
+            );
+            assert!(
+                elapsed < Duration::from_secs(2),
+                "{name} returned in {elapsed:?} with {calls} calls, {} hops, {} spent",
+                out.hops,
+                ledger.spent()
+            );
+            assert!(
+                out.hops < 8,
+                "{name} kept hopping ({}) after the stop",
+                out.hops
+            );
+            if out.best.is_finite() {
+                assert!(out.best_state.is_some(), "{name} dropped the best state");
+                assert!(
+                    out.best <= best_seen + 1e-8,
+                    "{name} returned {} above the best energy seen {best_seen}",
+                    out.best
+                );
+            }
+        }
+    }
+
+    /// A stop flag that stays down must not change how many evaluations a
+    /// search charges. The branch that reads the flag is taken on every
+    /// charge, so a difference here is a change in the force-call count.
+    #[test]
+    fn an_idle_stop_flag_does_not_change_force_calls() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+
+        let pot = PairPotential::lennard_jones(6);
+        let mut plain = Config::for_cluster(6);
+        plain.relax_steps = 40;
+        plain.screen_steps = 8;
+        let mut ledger_plain = Ledger::new(800);
+        let (out_plain, _) = search(&pot, &plain, &mut ledger_plain, 3).expect("finite start");
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut ledger_flag = Ledger::with_stop(800, stop);
+        let (out_flag, _) = search(&pot, &plain, &mut ledger_flag, 3).expect("finite start");
+        assert_eq!(
+            ledger_plain.spent(),
+            ledger_flag.spent(),
+            "spent {} with the flag down and {} without it",
+            ledger_flag.spent(),
+            ledger_plain.spent()
+        );
+        assert_eq!(out_plain.charged, out_flag.charged);
+        assert_eq!(out_plain.hops, out_flag.hops);
+        assert_eq!(out_plain.best, out_flag.best);
+    }
+
     /// The search runs against a potential passed as a trait object, which is
     /// the whole point: an rgpot potential arrives the same way.
     #[test]
@@ -1180,7 +1489,7 @@ mod tests {
         cfg.allocate_moves = true;
         cfg.return_screen = true;
         let mut ledger = Ledger::new(120_000);
-        let (out, stats) = search(dyn_pot, &cfg, &mut ledger, 0);
+        let (out, stats) = search(dyn_pot, &cfg, &mut ledger, 0).expect("finite start");
 
         assert!(out.hops > 0, "no hops were taken");
         assert!(stats.total() > 0, "no relaxations were counted");
@@ -1199,7 +1508,7 @@ mod tests {
         let mut cfg = Config::for_cluster(13);
         cfg.return_screen = true;
         let mut ledger = Ledger::new(120_000);
-        let (out, _) = search(&pot, &cfg, &mut ledger, 3);
+        let (out, _) = search(&pot, &cfg, &mut ledger, 3).expect("finite start");
         let (e, gmax) = verify(&pot, &out).expect("no structure came back");
         assert!(
             (e - out.best).abs() < 1e-6,
@@ -1218,7 +1527,7 @@ mod tests {
         cfg.allocate_moves = true;
         cfg.return_screen = true;
         let mut ledger = Ledger::new(150_000);
-        let (out, _) = search(&pot, &cfg, &mut ledger, 0);
+        let (out, _) = search(&pot, &cfg, &mut ledger, 0).expect("finite start");
         let e = first_encounter(&out, -44.326801, 1e-4, ledger.spent());
         match e {
             Encounter::Found { charged, hops } => {
@@ -1353,7 +1662,7 @@ mod tests {
         let mut best = f64::INFINITY;
         for seed in 0..3 {
             let mut ledger = Ledger::new(150_000);
-            let (out, _) = search(&pot, &cfg, &mut ledger, seed);
+            let (out, _) = search(&pot, &cfg, &mut ledger, seed).expect("finite start");
             best = best.min(out.best);
         }
         assert!(
@@ -1368,7 +1677,7 @@ mod tests {
         let pot = PairPotential::morse(13, 6.0);
         let cfg = Config::for_cluster(13);
         let mut ledger = Ledger::new(5_000);
-        let (_, _) = search(&pot, &cfg, &mut ledger, 1);
+        let (_, _) = search(&pot, &cfg, &mut ledger, 1).expect("finite start");
         assert!(ledger.spent() <= 5_000, "spent {}", ledger.spent());
     }
 
@@ -1394,8 +1703,7 @@ mod tests {
         x[3] = 0.74;
         assert!(
             structure_is_sane(x.view(), OVERLAP_SEPARATION),
-            "H-H 0.74 Å must clear the overlap floor {}",
-            OVERLAP_SEPARATION
+            "H-H 0.74 Å must clear the overlap floor {OVERLAP_SEPARATION}",
         );
         const { assert!(OVERLAP_SEPARATION < 0.74) };
     }

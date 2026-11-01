@@ -231,7 +231,9 @@ mod tests {
 
     fn permuted(coordinates: &[f64]) -> Vec<f64> {
         coordinates
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .rev()
             .flatten()
             .copied()

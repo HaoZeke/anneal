@@ -39,8 +39,7 @@ pub(crate) mod private;
 /// let socket = Socket::new(Protocol::Pub0).unwrap();
 /// socket.set_opt::<Raw>(true).unwrap(); // Won't compile
 /// ```
-pub trait Options: private::HasOpts
-{
+pub trait Options: private::HasOpts {
 	/// Reads the specified option from the object.
 	#[allow(clippy::missing_errors_doc)]
 	fn get_opt<T: private::OptOps>(&self) -> Result<T::OptType>
@@ -62,8 +61,7 @@ pub trait Options: private::HasOpts
 impl<T: private::HasOpts> Options for T {}
 
 /// Marks the type as an NNG option.
-pub trait Opt
-{
+pub trait Opt {
 	/// The type that the option read and writes.
 	type OptType;
 }

@@ -3,9 +3,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use anneal_core::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
 use anneal_core::nd_hybrid::{
-    ActionFeatureMap, CoordinateActionFeatures, DescriptorActionFeatures, NdEscapeKernel,
-    NdHybridConfig, NdHybridMechanism, NdHybridPolicy, explore_nd_hybrid, explore_nd_with_policy,
+    ActionFeatureMap, CoordinateActionFeatures, DescriptorActionFeatures, NdHybridConfig,
+    NdHybridMechanism, NdHybridPolicy, explore_nd_with_policy,
 };
+#[cfg(feature = "rgsaddle")]
+use anneal_core::nd_hybrid::{NdEscapeKernel, explore_nd_hybrid};
 use anneal_core::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesSurface, RideMethod,
 };
@@ -93,6 +95,7 @@ fn descriptor_action_features_ignore_rigid_like_species_permutations() {
     assert!(distance < 1e-10, "descriptor distance {distance}");
 }
 
+#[cfg(feature = "rgsaddle")]
 #[test]
 fn hybrid_nd_search_shares_escaped_minima_with_budgeted_ridge_rides() {
     let surface = ProductDoubleWell::new();
@@ -250,13 +253,14 @@ fn fixed_nd_policies_issue_only_the_named_mechanism() {
         exploration,
     };
 
-    for (policy, expected) in [
-        (NdHybridPolicy::RidgeOnly, NdHybridMechanism::Ridge),
-        (
-            NdHybridPolicy::BasinEscapeOnly,
-            NdHybridMechanism::BasinEscape,
-        ),
-    ] {
+    let mut policies = Vec::new();
+    #[cfg(feature = "rgsaddle")]
+    policies.push((NdHybridPolicy::RidgeOnly, NdHybridMechanism::Ridge));
+    policies.push((
+        NdHybridPolicy::BasinEscapeOnly,
+        NdHybridMechanism::BasinEscape,
+    ));
+    for (policy, expected) in policies {
         let surface = ProductDoubleWell::new();
         let report = explore_nd_with_policy(
             &surface,

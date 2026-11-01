@@ -17,7 +17,8 @@
 use std::cell::RefCell;
 use std::ffi::CString;
 use std::os::raw::{c_char, c_void};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use dlpk::sys::{
     DLDataType, DLDataTypeCode, DLDevice, DLDeviceType, DLManagedTensorVersioned, DLPackVersion,
@@ -43,6 +44,8 @@ pub enum anneal_status_t {
     ANNEAL_INVALID_PARAMETER = 1,
     /// Panic or internal failure behind the C boundary.
     ANNEAL_INTERNAL_ERROR = 2,
+    /// The callback asked the search to stop. The best point found is kept.
+    ANNEAL_STOPPED = 3,
 }
 
 /// `f(x)` callback over a borrowed CPU float64 DLPack tensor.
@@ -144,6 +147,11 @@ pub extern "C" fn anneal_core_version() -> *const c_char {
 
 /// Write the default box configuration: four replicas, a budget of 400
 /// work units, the default coverage field, and Gaussian escapes.
+///
+/// # Safety
+///
+/// `out` must be null, or aligned and writable for one `anneal_box_config_t`.
+/// A null pointer returns `ANNEAL_INVALID_PARAMETER` and writes nothing.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn anneal_box_config_default(
     out: *mut anneal_box_config_t,
@@ -239,6 +247,7 @@ struct CallbackObjective {
     bounds: Bounds<f64>,
     scratch: Mutex<Scratch>,
     failed: Mutex<bool>,
+    stop: Arc<AtomicBool>,
 }
 
 unsafe impl Send for CallbackObjective {}
@@ -275,10 +284,17 @@ impl Objective<f64> for CallbackObjective {
     }
 
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        if self.stop.load(Ordering::Relaxed) {
+            return f64::INFINITY;
+        }
         let user = self.user as *mut c_void;
         let eval = self.eval;
         let mut value = f64::INFINITY;
         let status = self.with_x(x, |_, xt| unsafe { eval(user, xt, &mut value) });
+        if status == anneal_status_t::ANNEAL_STOPPED {
+            self.stop.store(true, Ordering::Relaxed);
+            return if value.is_nan() { f64::INFINITY } else { value };
+        }
         if status != anneal_status_t::ANNEAL_SUCCESS {
             self.fail("anneal_box_minimize: objective callback failed");
             return f64::INFINITY;
@@ -289,14 +305,21 @@ impl Objective<f64> for CallbackObjective {
 
 impl Gradient<f64> for CallbackObjective {
     fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        let n = x.len();
+        if self.stop.load(Ordering::Relaxed) {
+            return Array1::zeros(n);
+        }
         let user = self.user as *mut c_void;
         let grad = self.grad;
-        let n = x.len();
         let mut gradient = Array1::<f64>::zeros(n);
         let status = self.with_x(x, |scratch, xt| {
             let gt = scratch.out.point_at(gradient.as_mut_ptr(), n);
             unsafe { grad(user, xt, gt) }
         });
+        if status == anneal_status_t::ANNEAL_STOPPED {
+            self.stop.store(true, Ordering::Relaxed);
+            return gradient;
+        }
         if status != anneal_status_t::ANNEAL_SUCCESS {
             self.fail("anneal_box_minimize: gradient callback failed");
             return Array1::from_elem(n, f64::NAN);
@@ -391,8 +414,18 @@ fn ensemble_config(
 /// `eval` and `grad` must be non-null. `x` holds the start of the first
 /// replica on entry and the best evaluated point on exit; the other replicas start at uniform draws in the box. A
 /// callback that fails ends the search with `ANNEAL_INTERNAL_ERROR`, and
-/// `x` is left at its start. `low` and `high` have `dim` entries each and
-/// must be finite with `low <= high`.
+/// `x` is left at its start. A callback that returns `ANNEAL_STOPPED`
+/// ends the search at once: the best point found is written to `x` and
+/// the call returns `ANNEAL_STOPPED`. `low` and `high` have `dim` entries
+/// each and must be finite with `low <= high`.
+///
+/// # Safety
+///
+/// `eval` and `grad` must be non-null and safe to call for the whole search.
+/// `x` must be null or a writable one-dimensional CPU float64 DLPack tensor.
+/// `low`, `high`, `cfg`, and `out` must each be null or valid for the reads
+/// and writes this function performs. A null argument returns
+/// `ANNEAL_INVALID_PARAMETER`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn anneal_box_minimize(
     eval: anneal_eval_fn,
@@ -422,9 +455,7 @@ pub unsafe extern "C" fn anneal_box_minimize(
         let high = unsafe { std::slice::from_raw_parts(high, dim) };
         for (l, h) in low.iter().zip(high) {
             if !(l.is_finite() && h.is_finite() && l <= h) {
-                set_last_error(
-                    "anneal_box_minimize: bounds must be finite with low <= high",
-                );
+                set_last_error("anneal_box_minimize: bounds must be finite with low <= high");
                 return anneal_status_t::ANNEAL_INVALID_PARAMETER;
             }
         }
@@ -435,6 +466,8 @@ pub unsafe extern "C" fn anneal_box_minimize(
                 return anneal_status_t::ANNEAL_INVALID_PARAMETER;
             }
         };
+        let stop = Arc::new(AtomicBool::new(false));
+        let _caller_stop = crate::caller_stop::Bind::new(Arc::clone(&stop));
         let objective = CallbackObjective {
             eval,
             grad,
@@ -450,6 +483,7 @@ pub unsafe extern "C" fn anneal_box_minimize(
                 xbuf: Vec::with_capacity(dim),
             }),
             failed: Mutex::new(false),
+            stop: Arc::clone(&stop),
         };
         let x0 = Array1::from_vec(start);
         let result = box_ensemble_optimize_with_coverage(
@@ -462,6 +496,27 @@ pub unsafe extern "C" fn anneal_box_minimize(
         );
         if *objective.failed.lock().expect("anneal ffi failure flag") {
             return anneal_status_t::ANNEAL_INTERNAL_ERROR;
+        }
+        let stopped = stop.load(Ordering::Relaxed);
+        if stopped && result.best_pos.len() == dim && result.best_val.is_finite() {
+            let dest = match unsafe { cpu_f64_slice_mut(x, "x") } {
+                Ok(s) => s,
+                Err(st) => return st,
+            };
+            dest.copy_from_slice(result.best_pos.as_slice().expect("contiguous"));
+            unsafe {
+                *out = anneal_box_report_t {
+                    value: result.best_val,
+                    n_evals: result.n_evals,
+                    n_grads: result.n_grads,
+                    hops: result.hops,
+                };
+            }
+            return anneal_status_t::ANNEAL_STOPPED;
+        }
+        if stopped {
+            set_last_error("anneal_box_minimize: stopped before a finite point");
+            return anneal_status_t::ANNEAL_STOPPED;
         }
         if !result.best_val.is_finite() || result.best_pos.len() != dim {
             set_last_error("anneal_box_minimize: no finite point was evaluated");
@@ -534,8 +589,7 @@ mod tests {
         let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "x") }.unwrap();
         let gs = unsafe { cpu_f64_slice_mut(grad_out, "grad") }.unwrap();
         for (g, v) in gs.iter_mut().zip(xs.iter()) {
-            *g = 2.0 * v
-                + 20.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * v).sin();
+            *g = 2.0 * v + 20.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * v).sin();
         }
         anneal_status_t::ANNEAL_SUCCESS
     }
@@ -663,5 +717,86 @@ mod tests {
         };
         assert_eq!(status, anneal_status_t::ANNEAL_INVALID_PARAMETER);
         assert_eq!(counter.evals, 0);
+    }
+
+    struct StopAfter {
+        evals: usize,
+        grads: usize,
+        after: usize,
+    }
+
+    unsafe extern "C" fn stop_value(
+        user: *mut c_void,
+        x: *const DLManagedTensorVersioned,
+        value_out: *mut f64,
+    ) -> anneal_status_t {
+        let counter = unsafe { &mut *(user as *mut StopAfter) };
+        counter.evals += 1;
+        let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "x") }.unwrap();
+        unsafe { *value_out = rastrigin_value(xs) };
+        if counter.evals >= counter.after {
+            anneal_status_t::ANNEAL_STOPPED
+        } else {
+            anneal_status_t::ANNEAL_SUCCESS
+        }
+    }
+
+    unsafe extern "C" fn stop_grad(
+        user: *mut c_void,
+        x: *const DLManagedTensorVersioned,
+        grad_out: *mut DLManagedTensorVersioned,
+    ) -> anneal_status_t {
+        let counter = unsafe { &mut *(user as *mut StopAfter) };
+        counter.grads += 1;
+        let xs = unsafe { cpu_f64_slice_mut(x as *mut _, "x") }.unwrap();
+        let gs = unsafe { cpu_f64_slice_mut(grad_out, "grad") }.unwrap();
+        for (g, v) in gs.iter_mut().zip(xs.iter()) {
+            *g = 2.0 * v + 20.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * v).sin();
+        }
+        if counter.evals >= counter.after {
+            anneal_status_t::ANNEAL_STOPPED
+        } else {
+            anneal_status_t::ANNEAL_SUCCESS
+        }
+    }
+
+    #[test]
+    fn box_minimize_stops_when_the_callback_says_so() {
+        use std::time::{Duration, Instant};
+
+        const AFTER: usize = 24;
+        let mut counter = StopAfter {
+            evals: 0,
+            grads: 0,
+            after: AFTER,
+        };
+        let mut x = vec![3.0, -2.0];
+        let mut shell = StandingShell::new();
+        let low = [-5.12, -5.12];
+        let high = [5.12, 5.12];
+        let mut cfg = default_config();
+        cfg.seed = 7;
+        cfg.budget = 20_000;
+        let mut report = anneal_box_report_t::default();
+        let started = Instant::now();
+        let status = unsafe {
+            anneal_box_minimize(
+                stop_value,
+                stop_grad,
+                (&mut counter as *mut StopAfter).cast(),
+                shell.point_at(x.as_mut_ptr(), 2),
+                low.as_ptr(),
+                high.as_ptr(),
+                &cfg,
+                &mut report,
+            )
+        };
+        assert_eq!(status, anneal_status_t::ANNEAL_STOPPED);
+        assert!(counter.evals <= AFTER + 4, "evals {}", counter.evals);
+        assert!(counter.evals >= AFTER, "evals {}", counter.evals);
+        assert!(counter.grads <= AFTER + 4, "grads {}", counter.grads);
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(report.value.is_finite());
+        assert!((rastrigin_value(&x) - report.value).abs() <= 1e-8);
     }
 }

@@ -101,6 +101,7 @@ fn a_shared_numeric_id_does_not_make_a_distinct_local_fallback_basin_known() {
     cfg.point_symmetrise_on_new = false;
     cfg.orbit_complete_on_new = false;
     cfg.superbasin_escape = false;
+    cfg.finish_improving = false;
 
     let mut relax_calls = 0;
     let mut gradient_calls = 0;
@@ -144,7 +145,8 @@ fn a_shared_numeric_id_does_not_make_a_distinct_local_fallback_basin_known() {
         &mut rng,
         1,
         &mut checkpoint,
-    );
+    )
+    .expect("finite start");
 
     assert_eq!(out.hops, 2);
     assert_eq!(history.observations, vec![0, 1, 2]);
