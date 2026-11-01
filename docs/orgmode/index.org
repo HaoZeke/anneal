@@ -85,6 +85,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
 
    howto/install
    howto/choose-driver
+   howto/sutton-chen-head-to-head
    howto/box-langevin-escape
    howto/chemfit
    howto/precision-policy
