@@ -5,7 +5,7 @@
 //! read.
 //!
 //! ```text
-//! sc_arm3 <12-6|9-6> <n> <budget> <seed> <reference-energy>
+//! sc_arm3 <12-6|9-6|10-8> <n> <budget> <seed> <reference-energy>
 //! ```
 
 use std::sync::Arc;
@@ -27,7 +27,7 @@ const HIT_WINDOW: f64 = 1.0e-3;
 
 fn check_points(args: &[String]) {
     if args.len() != 4 {
-        eprintln!("usage: sc_arm3 check <12-6|9-6> <points-file>");
+        eprintln!("usage: sc_arm3 check <12-6|9-6|10-8> <points-file>");
         std::process::exit(2);
     }
     let family = SuttonChenFamily::parse(&args[2]).expect("family");
@@ -71,7 +71,7 @@ fn main() {
     }
     if args.len() != 6 {
         eprintln!(
-            "usage: sc_arm3 <12-6|9-6> <n> <budget> <seed> <reference-energy>\n       sc_arm3 check <12-6|9-6> <points-file>"
+            "usage: sc_arm3 <12-6|9-6|10-8> <n> <budget> <seed> <reference-energy>\n       sc_arm3 check <12-6|9-6|10-8> <points-file>"
         );
         std::process::exit(2);
     }
