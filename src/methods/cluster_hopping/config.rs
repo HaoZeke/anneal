@@ -214,6 +214,40 @@ impl OrbitCore {
     }
 }
 
+/// What a chain keeps of its orbit completions
+/// ([`Config::orbit_complete_on_new`]), and what it does with it.
+///
+/// Under either memory a chain keeps the minima it has put through
+/// completion: the minimum a completion started from and every minimum a
+/// completion quenched to. It adopts a completion only when the quench ends
+/// below the start and reaches a minimum not kept before. The biased test of
+/// the acceptance rule may still refuse it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OrbitMemory {
+    /// No memory: every completion is quenched and offered to the
+    /// acceptance rule.
+    #[default]
+    Off,
+    /// Minima are one when their energies agree to `1e-6` of the energy
+    /// scale. The energy of every start is kept, quenched or not, and a
+    /// chain does not complete from a kept energy.
+    Energy,
+    /// Minima are one when their energies agree to `1e-6` of the energy
+    /// scale and their basin descriptors lie within [`Config::merge_radius`].
+    /// A start is kept only when it is a quenched minimum, and every
+    /// completion is quenched: nearness in descriptor space at the merge
+    /// radius, of the start or of the completed structure, does not tell
+    /// whether the quench will reach a kept minimum.
+    Structure,
+}
+
+impl OrbitMemory {
+    fn is_off(&self) -> bool {
+        matches!(self, Self::Off)
+    }
+}
+
 /// Driver settings.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Config {
@@ -482,6 +516,10 @@ pub struct Config {
     /// core whatever this is.
     #[serde(skip_serializing_if = "OrbitCore::is_fraction")]
     pub orbit_core: OrbitCore,
+    /// What a chain keeps of its orbit completions. Off, the default,
+    /// quenches every completion and offers it to the acceptance rule.
+    #[serde(skip_serializing_if = "OrbitMemory::is_off")]
+    pub orbit_memory: OrbitMemory,
     /// Add the population-repulsion SOAP step ([`ClusterMove::SoapRepel`])
     /// as a proposal arm.
     pub soap_repel: bool,
@@ -1378,6 +1416,7 @@ impl Config {
             point_symmetrise_on_new: false,
             orbit_complete_on_new: false,
             orbit_core: OrbitCore::Fraction,
+            orbit_memory: OrbitMemory::Off,
             soap_repel: false,
             exchange_metropolis: false,
             md_escape: false,

@@ -47,11 +47,14 @@ use crate::screen::Screen;
 
 mod config;
 mod moves;
+mod orbit_memory;
 mod packing_bank;
 mod preset;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
-pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, SoapProposalMode};
+pub use config::{
+    Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, OrbitMemory, SoapProposalMode,
+};
 pub use moves::*;
 
 #[cfg(test)]
@@ -932,6 +935,9 @@ pub struct Outcome {
     pub symmetrised: (usize, f64),
     /// Orbit completions attempted, and the energy they gained.
     pub orbits: (usize, f64),
+    /// Orbit completions not started because [`Config::orbit_memory`] had
+    /// already kept their start.
+    pub orbits_skipped: usize,
     /// Continuous-symmetry quenches attempted, and downhill energy gained.
     pub continuous_symmetry: (usize, f64),
     /// Restarts triggered by a stall.
@@ -2650,6 +2656,12 @@ where
     let species_kinetic_cap = (1.5 * n as f64 * cfg.energy_scale).max(species_kinetic);
     let mut orbits_completed = 0usize;
     let mut orbit_gain = 0.0_f64;
+    let mut completion_memory = orbit_memory::CompletionMemory::new(
+        cfg.orbit_memory,
+        orbit_memory::COMPLETED_ENERGY_TOLERANCE * cfg.energy_scale,
+        cfg.merge_radius,
+    );
+    let mut orbits_skipped = 0usize;
     let mut accepted_transitions = Vec::new();
     // All live-state replacement consumes one complete destination record.
     // Ordinary hops supply their paid history report; auxiliary adoptions
@@ -5418,12 +5430,27 @@ where
         // raw energy alone it carries the chain back to the shelf it is
         // stuck on. A filled basin above that shelf is often where the
         // chain goes on to the minimum, so a return there stays raw.
+        //
+        // Under `orbit_memory` a completion is adopted only downhill onto a
+        // minimum the chain has not put through completion, and the biased
+        // test may still refuse it.
         let mut orbit_offer = None;
-        if cfg.packing_surface().orbit_on_new
+        let mut orbit_others = Vec::new();
+        let structural = completion_memory.structural();
+        let describe = |state: ArrayView1<f64>| structural.then(|| bias.cv(state));
+        let completion_due = cfg.packing_surface().orbit_on_new
             && accept
             && hop_room(hops)
-            && (moved_basin || cfg.point_symmetrise_every_accept)
-        {
+            && (moved_basin || cfg.point_symmetrise_every_accept);
+        let completion_new = completion_due
+            && (cfg.orbit_memory != OrbitMemory::Energy || !completion_memory.holds(e, None));
+        if completion_due && !completion_new {
+            orbits_skipped += 1;
+        }
+        if completion_new {
+            if cfg.orbit_memory == OrbitMemory::Energy || !unquenched {
+                completion_memory.keep(e, describe(x.view()).as_ref().map(|d| d.view()));
+            }
             for y in crate::packing::orbit_candidates(
                 x.view(),
                 n,
@@ -5445,15 +5472,29 @@ where
                     );
                     hops += 1;
                     orbits_completed += 1;
+                    let ds = describe(xs.view());
                     if orbit_offer
                         .as_ref()
-                        .is_none_or(|(lowest, _, _)| es < *lowest)
+                        .is_none_or(|(lowest, _, _, _)| es < *lowest)
                     {
-                        orbit_offer = Some((es, xs, sym_gradient));
+                        if let Some((lowest, _, _, d)) =
+                            orbit_offer.replace((es, xs, sym_gradient, ds))
+                        {
+                            orbit_others.push((lowest, d));
+                        }
+                    } else {
+                        orbit_others.push((es, ds));
                     }
                 }
             }
         }
+        let orbit_offer = orbit_offer.and_then(|(es, xs, sym_gradient, ds)| {
+            let fresh = completion_memory.offer(e, es, ds.as_ref().map(|d| d.view()));
+            for (other, d) in orbit_others {
+                completion_memory.keep(other, d.as_ref().map(|d| d.view()));
+            }
+            fresh.then_some((es, xs, sym_gradient))
+        });
         if let Some((es, xs, sym_gradient)) = orbit_offer {
             let mut biases: Vec<&dyn Bias> = Vec::new();
             if stalled(cfg, quiet, longest_quiet)
@@ -6512,6 +6553,7 @@ where
         }),
         symmetrised: (symmetrised, symmetry_gain),
         orbits: (orbits_completed, orbit_gain),
+        orbits_skipped,
         continuous_symmetry: (continuous_symmetry_attempts, continuous_symmetry_gain),
         restarts,
         exchanges_refused,
