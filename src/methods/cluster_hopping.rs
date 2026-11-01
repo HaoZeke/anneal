@@ -1502,6 +1502,37 @@ where
     )
 }
 
+/// Learned stall response. Each enabled escape is one arm under the
+/// same depth-rewarded Thompson allocation the move set uses: a stall
+/// draws one response and the draw is rewarded with the deepening the
+/// escape realized, a signed number every stall produces, under a
+/// Normal-Gamma posterior whose predictive needs no reward scale. A
+/// success bit was the first version and is exactly the sparse reward
+/// DepthAllocator documents as failing to switch a wrong arm off.
+/// Every arm is domain-free: the trail is the objective's own descent
+/// history, the climb needs a gradient alone, the restart draws fresh
+/// coordinates. With one arm enabled the allocator is never consulted,
+/// so single-flag behaviour is unchanged.
+fn stall_arms(cfg: &Config) -> Vec<&'static str> {
+    [
+        cfg.trail_on_stall.then_some("trail"),
+        cfg.escape_on_stall.then_some("climb"),
+        // RESTART_STALL_ARM=0 keeps the restart out of the stall allocator,
+        // so a restart happens only on the charged-patience rule. Measured:
+        // with the stall arm in, a chain restarted 9 to 16 times a run
+        // whatever RESTART_PATIENCE said, every 5 to 8k hops, shorter than
+        // the descent to the shelf. A rigid chain never takes it: its
+        // stall moves within the chain's own archive instead.
+        (cfg.restart_on_stall
+            && !cfg.move_library.is_rigid_body()
+            && !std::env::var("RESTART_STALL_ARM").is_ok_and(|v| v == "0"))
+        .then_some("restart"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
 /// Each rung's temperature as a multiple of the one a single chain would hop
 /// at: `ladder_top^(k/(R-1))` for rung `k` of `R`, and exactly one for a
 /// single chain.
@@ -2384,31 +2415,7 @@ where
     // Evaluated screen state of the trial that entered the current basin,
     // kept as the exit point a stalled chain leaves through.
     let mut basin_entry: Option<Array1<f64>> = None;
-    // Learned stall response. Each enabled escape is one arm under the
-    // same depth-rewarded Thompson allocation the move set uses: a stall
-    // draws one response and the draw is rewarded with the deepening the
-    // escape realized, a signed number every stall produces, under a
-    // Normal-Gamma posterior whose predictive needs no reward scale. A
-    // success bit was the first version and is exactly the sparse reward
-    // DepthAllocator documents as failing to switch a wrong arm off.
-    // Every arm is domain-free: the trail is the objective's own descent
-    // history, the climb needs a gradient alone, the restart draws fresh
-    // coordinates. With one arm enabled the allocator is never consulted,
-    // so single-flag behaviour is unchanged.
-    let stall_arms: Vec<&'static str> = [
-        cfg.trail_on_stall.then_some("trail"),
-        cfg.escape_on_stall.then_some("climb"),
-        // RESTART_STALL_ARM=0 keeps the restart out of the stall allocator,
-        // so a restart happens only on the charged-patience rule. Measured:
-        // with the stall arm in, a chain restarted 9 to 16 times a run
-        // whatever RESTART_PATIENCE said, every 5 to 8k hops, shorter than
-        // the descent to the shelf.
-        (cfg.restart_on_stall && !std::env::var("RESTART_STALL_ARM").is_ok_and(|v| v == "0"))
-            .then_some("restart"),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    let stall_arms = stall_arms(cfg);
     let mut stall_allocator = crate::allocate::DepthAllocator::new(stall_arms.len().max(1));
     let mut last_polish_spent = 0usize;
     let mut soft_lambda = 0.0_f64;
@@ -2746,7 +2753,12 @@ where
         let call_due = hops > 0
             && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1);
         let mut directed_leave = false;
-        if internal_action.is_none() && cfg.restart_on_stall && !cfg.escape_on_stall && call_due {
+        if internal_action.is_none()
+            && cfg.restart_on_stall
+            && !cfg.escape_on_stall
+            && !cfg.move_library.is_rigid_body()
+            && call_due
+        {
             let fresh = random_cluster(x.len() / 3, 0.7, cfg.min_separation, rng);
             let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
             charged_at_best = ledger.spent();
@@ -6856,6 +6868,15 @@ mod tests {
         let rigid =
             Config::recommended(4).with_rigid_bodies(crate::potentials::gmin_water_geometry());
         assert!(matches!(rigid.continuous_symmetry, ContinuousSymmetry::Off));
+    }
+
+    #[test]
+    fn a_rigid_chain_has_no_restart_among_its_stall_arms() {
+        let atomic = Config::recommended(6);
+        assert_eq!(stall_arms(&atomic), ["trail", "climb", "restart"]);
+        let rigid = atomic.with_rigid_bodies(crate::potentials::gmin_water_geometry());
+        assert!(rigid.restart_on_stall);
+        assert!(!stall_arms(&rigid).contains(&"restart"));
     }
 
     #[test]
