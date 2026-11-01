@@ -5,3 +5,4 @@ In the ``ens`` arm, chains split the budget and share one exact minimum history.
 That ensemble has no shared bias, no gossip and no restart.
 The chains take turns at each checkpoint, so a run uses one thread and repeats exactly.
 A hit stops every chain once a validated quench reaches the reference energy plus 0.001.
+The ``iso-hop`` and ``ens-hop`` arms add surface hops from each new lowest structure.
