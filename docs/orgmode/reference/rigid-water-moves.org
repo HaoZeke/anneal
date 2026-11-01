@@ -1,0 +1,111 @@
+#+TITLE: Rigid water moves
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+#+begin_export rst
+==================
+Rigid water moves
+==================
+#+end_export
+
+This page lists the moves of the rigid-body library in =cluster_hopping= and their settings.
+It also lists the head-to-head driver =examples/h2h_seed=.
+The water presets use the transferable intermolecular potential with four points (TIP4P).
+
+* State
+
+A rigid cluster of =n= bodies has =6 n= coordinates.
+The first =3 n= are the centres.
+The last =3 n= are rotation vectors, one per body.
+=Config::rigid_body_geometry= gives the site positions in the body frame and the atomic number of each site.
+It must be the body frame of the objective.
+=Config::for_tip4p= installs the frame of =Tip4pCluster=.
+For =GminTip4p=, set it to =gmin_water_geometry()=, as =examples/h2h_seed= does.
+
+* Moves
+
+#+begin_export rst
+.. list-table::
+   :header-rows: 1
+
+   * - Name
+     - Move
+     - Setting
+   * - ``rtrans``
+     - Shift every centre by a uniform step in each coordinate.
+     - ``translate_step``, 0.35 angstroms in ``for_tip4p``.
+   * - ``rrot``
+     - Add a uniform increment to each component of every rotation vector, then fold it into the ball of radius pi.
+     - ``rotate_step``, 0.40 rad in ``for_tip4p``.
+   * - ``rcycle``
+     - Reverse one directed cycle of hydrogen bonds.
+       Each body on the cycle turns about its oxygen.
+     - ``reverse_cycles``, on in ``for_tip4p``.
+   * - ``rorient``
+     - Compose one orientation step onto every body.
+       Centres stay put.
+     - ``rotate_step``, the cap of the angle, 1.64 rad in ``with_rigid_bodies``.
+#+end_export
+
+* =MoveLibrary::RigidBody=
+
+- =n_molecules= :: bodies in the state.
+- =translate_step= :: half-width of the =rtrans= step, in length units.
+- =rotate_step= :: largest =rrot= increment per component, or the cap of the =rorient= angle, in radians.
+- =local= :: =true= offers =rorient= in place of =rtrans= and =rrot=.
+- =reverse_cycles= :: =true= adds =rcycle=.
+
+* Presets
+
+- =Config::for_tip4p=, =Config::recommended_tip4p=, =Config::communicating_tip4p= :: =rtrans=, =rrot= and =rcycle=.
+- =Config::with_rigid_bodies= :: =rorient= only.
+
+The Python =cluster_search= with =water_sites= uses these three TIP4P presets on the caller's sites.
+It labels the three sites 8, 1 and 1, so =rcycle= is on there too.
+
+* =rcycle= rules
+
+- The geometry must have exactly one site of atomic number 8 and two of atomic number 1.
+  Otherwise the library does not offer =rcycle=.
+- A hydrogen bond is an O to H distance under 2.5 angstroms between two different molecules.
+  The donor is the molecule of the hydrogen.
+- A walk from a random donor follows a random donated bond at each step.
+  It never steps straight back to the molecule it came from.
+  It stops at the first molecule it has visited.
+  The molecules from that visit on are the cycle, three or more of them.
+- When the walk finds no cycle, the move returns the state unchanged.
+  The hop loop then draws another move for that hop.
+- The move has no proposal ratio.
+
+* =examples/h2h_seed=
+
+#+begin_src sh
+h2h_seed <lj|morse|tip4p> <n> <rho> <budget> <seed> <arm> <stop> <prefix>
+#+end_src
+
+- =arm= :: =recommended= or =base=.
+           For =tip4p= these are =Config::recommended_tip4p= and =Config::for_tip4p=.
+           For atoms they are =Config::recommended= and =Config::for_cluster=.
+- =rho= :: the Morse range.
+           Lennard-Jones and TIP4P ignore it.
+- =stop= :: an energy at which the run ends early, or =-= to spend the whole budget.
+- Start :: atoms come from =random_cluster_in_radius=, drawn from =seed=.
+           The radius and the separation are those of =Config::for_cluster(n)=.
+           Waters come from =random_tip4p_cluster=, drawn from =seed= times the 64-bit golden ratio plus 3.
+           The search itself runs on =seed=.
+
+Outputs:
+
+- =<prefix>.trace.csv= :: =calls,energy= for each new lowest energy, when it is at least 1e-7 lower.
+- =<prefix>.xyz= :: the lowest point.
+                    Atoms are =X=.
+                    Waters are O, H and H, with the M site left out.
+                    Their sites use the parameters of the global minimisation program (GMIN).
+- Summary on standard output:
+  - =calls= :: calls into the potential, capped at the budget.
+  - =charged= :: calls the ledger charged.
+  - =lowest= :: lowest energy over the counted calls.
+  - =geometry_energy= :: the energy of the written geometry.
+                         For water it is computed again from the O, H and H sites.
+  - =best= :: the search's own best minimum.
+  - =hops=, =basins= :: hops made and distinct basins seen.
+  - =wall_seconds= :: elapsed time.
