@@ -12,8 +12,28 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
     (out.best, out.hops, ledger.spent())
 }
 
+/// The relative cutoff reaches the LJ38 octahedron on starts where the plain
+/// LeanBurst walk need not.
+///
+/// Seeds 0..16 at a budget of 30_000, from `recommended` with the 38-point
+/// reseed and the stall exits off. The `ira` feature replaces the fivefold
+/// permutation in `residual_about`, and the plain walk's hits move with it.
+/// Counted hits of the octahedron, within `1e-4`:
+///
+/// ```text
+/// matcher   cutoff   plain
+/// local     16/16    6/16
+/// ira       16/16    5/16
+/// ```
+///
+/// Hop counts are not that comparison. Seed 0 with IRA spends 435 hops and
+/// reaches the octahedron while the plain walk spends 414 and stops at
+/// -173.252378. The bars sit above those two plain counts and under a full
+/// miss of the cutoff walk: at least 15 cutoff hits, at most 10 plain hits,
+/// and a gap of at least 5. The measured gaps are 10 and 11.
 #[test]
 fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not() {
+    const SEEDS: u64 = 16;
     let budget = 30_000;
     let mut plain = Config::recommended(38);
     // The surface comparison is the LeanBurst walk. The 38-point reseed
@@ -26,20 +46,32 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
     plain.surfaces.clear();
     let mut compacted = plain.clone();
     compacted.two_phase = Some(TwoPhase::relative(0.7, 1.0));
-    for seed in 0..4 {
-        let (best, hops, spent) = run(&compacted, budget, seed);
-        assert!(
-            best < LJ38_OCTAHEDRON + 1e-4,
-            "seed {seed}: the compacted walk stopped at {best:.6} after {hops} hops"
-        );
+    let mut compact_hits = 0usize;
+    let mut plain_hits = 0usize;
+    for seed in 0..SEEDS {
+        let (best, _, spent) = run(&compacted, budget, seed);
         assert!(spent <= budget, "the ledger overspent: {spent} of {budget}");
-        let (_, plain_hops, plain_spent) = run(&plain, budget, seed);
+        if best < LJ38_OCTAHEDRON + 1e-4 {
+            compact_hits += 1;
+        }
+        let (plain_best, _, plain_spent) = run(&plain, budget, seed);
         assert!(plain_spent <= budget);
-        assert!(
-            hops < plain_hops,
-            "seed {seed}: two relaxations per hop must buy fewer hops than one ({hops} against {plain_hops})"
-        );
+        if plain_best < LJ38_OCTAHEDRON + 1e-4 {
+            plain_hits += 1;
+        }
     }
+    assert!(
+        compact_hits >= 15,
+        "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds"
+    );
+    assert!(
+        plain_hits <= 10,
+        "the plain walk reached the octahedron on {plain_hits} of {SEEDS} seeds"
+    );
+    assert!(
+        compact_hits - plain_hits >= 5,
+        "the cutoff walk reached {compact_hits} seeds and the plain walk {plain_hits}"
+    );
 }
 
 #[test]

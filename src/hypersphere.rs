@@ -24,9 +24,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
-use rand_distr::{Distribution, StandardNormal};
 
 /// Repulsion exponent \(s\) in \(1/\gamma^{s}\). SoftSaddle uses 1.
 pub const COVER_S: f64 = 1.0;
@@ -262,7 +262,7 @@ fn random_sphere<R: rand::Rng + ?Sized>(n: usize, dim: usize, rng: &mut R) -> Ve
     for _ in 0..n {
         let mut v = vec![0.0; dim];
         for item in &mut v {
-            *item = StandardNormal.sample(rng);
+            *item = unit_normal(rng);
         }
         normalize(&mut v);
         points.push(v);
@@ -320,7 +320,8 @@ fn relax_cover<R: rand::Rng + ?Sized>(points: &mut [Vec<f64>], max_iter: usize, 
                 let dot = dots[i * n + j].clamp(-1.0, 1.0);
                 let g = geo[i * n + j];
                 let tang = (1.0 - dot * dot).sqrt();
-                let w = COVER_S / ((tang + f64::EPSILON) * (g.powf(COVER_S + 1.0) + f64::EPSILON));
+                let w =
+                    COVER_S / ((tang + f64::EPSILON) * (real_pow(g, COVER_S + 1.0) + f64::EPSILON));
                 let mut nrm2 = 0.0;
                 for ax in 0..dim {
                     row[ax] = w * points[i][ax];
@@ -338,7 +339,7 @@ fn relax_cover<R: rand::Rng + ?Sized>(points: &mut [Vec<f64>], max_iter: usize, 
             if iter < 5 && kept == 0 {
                 for point in points.iter_mut() {
                     for item in point.iter_mut() {
-                        let z: f64 = StandardNormal.sample(rng);
+                        let z: f64 = unit_normal(rng);
                         *item += z / 1e5;
                     }
                     normalize(point);
@@ -370,8 +371,8 @@ fn relax_cover<R: rand::Rng + ?Sized>(points: &mut [Vec<f64>], max_iter: usize, 
                         .sum::<f64>()
                         .clamp(-1.0, 1.0);
                     trial_dot[i] = d;
-                    trial_geo[i] = d.acos();
-                    trial_pair[i] = 1.0 / (trial_geo[i].powf(COVER_S) + f64::EPSILON);
+                    trial_geo[i] = arc_cosine(d);
+                    trial_pair[i] = 1.0 / (real_pow(trial_geo[i], COVER_S) + f64::EPSILON);
                 }
                 let u_new: f64 = trial_pair.iter().sum();
                 if u_new <= u_old {
@@ -427,8 +428,8 @@ fn refresh_pairs(points: &[Vec<f64>], dots: &mut [f64], geo: &mut [f64], pair: &
                 .sum::<f64>()
                 .clamp(-1.0, 1.0);
             dots[i * n + j] = d;
-            geo[i * n + j] = d.acos();
-            pair[i * n + j] = 1.0 / (geo[i * n + j].powf(COVER_S) + f64::EPSILON);
+            geo[i * n + j] = arc_cosine(d);
+            pair[i * n + j] = 1.0 / (real_pow(geo[i * n + j], COVER_S) + f64::EPSILON);
         }
     }
 }
@@ -442,12 +443,46 @@ fn euclid(left: &[f64], right: &[f64]) -> f64 {
 }
 
 fn geodesic(left: &[f64], right: &[f64]) -> f64 {
-    left.iter()
-        .zip(right.iter())
-        .map(|(a, b)| a * b)
-        .sum::<f64>()
-        .clamp(-1.0, 1.0)
-        .acos()
+    arc_cosine(
+        left.iter()
+            .zip(right.iter())
+            .map(|(a, b)| a * b)
+            .sum::<f64>()
+            .clamp(-1.0, 1.0),
+    )
+}
+
+/// Inverse cosine from the `libm` crate.
+///
+/// `f64::acos` calls the host libm. glibc and libSystem disagree on the
+/// bits, and the Thomson sweep turns that into a different covering.
+fn arc_cosine(value: f64) -> f64 {
+    libm::acos(value)
+}
+
+/// `pow` from the same crate.
+///
+/// `COVER_S` is 1, and LLVM turns `f64::powf` of that constant into a
+/// multiply. The host `pow` is a different function, and it is the one
+/// LLVM emits when the exponent is not a constant.
+fn real_pow(base: f64, exponent: f64) -> f64 {
+    libm::pow(base, exponent)
+}
+
+/// One standard normal, Marsaglia polar, with `libm::log`.
+///
+/// `StandardNormal` is a ziggurat. Its wedge and its tail call the host
+/// `exp` and `ln`, and one ulp of difference there changes a later sample.
+fn unit_normal<R: Rng + ?Sized>(rng: &mut R) -> f64 {
+    loop {
+        let u = rng.random::<f64>() * 2.0 - 1.0;
+        let v = rng.random::<f64>() * 2.0 - 1.0;
+        let radius = u * u + v * v;
+        if radius > 0.0 && radius < 1.0 {
+            let scale = (-2.0 * libm::log(radius) / radius).sqrt();
+            return u * scale;
+        }
+    }
 }
 
 fn normalize(v: &mut [f64]) {
@@ -631,9 +666,9 @@ mod tests {
         let ordered: Vec<Vec<f64>> = order.iter().map(|&i| points[i].clone()).collect();
         assert_eq!(ordered.len(), 96);
         assert_eq!(ordered[0].len(), 54);
-        // Bit pattern of the allocating Gauss–Seidel, measured before the
-        // work arrays were hoisted.
-        assert_eq!(cover_digest(&ordered), 0x0d5a_3fad_fcca_2579);
+        // Bit pattern of this seed once acos, pow, and the initial normal
+        // sample go through `libm` rather than the host libm.
+        assert_eq!(cover_digest(&ordered), 0x7f5c_d1ac_6545_0082);
         let cover = shared_cover(96, 54);
         assert_eq!(cover.len(), ordered.len());
         for (got, expect) in cover.iter().zip(&ordered) {
