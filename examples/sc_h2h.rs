@@ -219,6 +219,18 @@ impl<W: ExactStructureWitness + ?Sized> HistoryHook for RadialHistory<'_, W> {
         self.seconds += started.elapsed().as_secs_f64();
     }
 
+    fn claim_completion(&mut self, minimum: usize) -> bool {
+        let started = Instant::now();
+        let claimed = self
+            .history
+            .lock()
+            .ok()
+            .and_then(|mut history| history.claim_completion(minimum).ok())
+            .unwrap_or(true);
+        self.seconds += started.elapsed().as_secs_f64();
+        claimed
+    }
+
     fn cost(&self) -> (usize, usize, f64) {
         (self.observations, self.refusals, self.seconds)
     }
@@ -550,14 +562,17 @@ fn main() {
 
     let mut spent = 0;
     let mut best = f64::INFINITY;
+    let mut orbit_duplicates = 0;
     for (r, rseed, charged, outcome, cost) in &outcomes {
         spent += charged;
         best = best.min(outcome.best);
+        orbit_duplicates += outcome.orbit_duplicates;
         println!(
-            "replica_{r}: seed={rseed} spent={charged} best={:.10} hops={} orbits={} restarts={} stall_escapes={} history_visits={}/{} history_cost={}/{}/{:.3}",
+            "replica_{r}: seed={rseed} spent={charged} best={:.10} hops={} orbits={} orbit_duplicates={} restarts={} stall_escapes={} history_visits={}/{} history_cost={}/{}/{:.3}",
             outcome.best,
             outcome.hops,
             outcome.orbits.0,
+            outcome.orbit_duplicates,
             outcome.restarts,
             outcome.stall_escapes,
             outcome.history_visits.0,
@@ -578,6 +593,7 @@ fn main() {
     println!("best: {best:.10}");
     println!("full_quenches: {}", full_quenches.load(Ordering::Relaxed));
     calls.print();
+    println!("orbit_duplicates: {orbit_duplicates}");
     let hit = hit.into_inner().expect("hit");
     println!("hit: {}", hit.is_some());
     match hit {
