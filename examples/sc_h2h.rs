@@ -11,8 +11,11 @@
 //! run prints as `minima_signature`.
 //!
 //! ```text
-//! sc_h2h <iso|ens> <12-6|9-6|10-8> <n> <budget> <seed> <start-file> <reference> [replicas] [turn-calls]
+//! sc_h2h <iso|ens|iso-hop|ens-hop> <12-6|9-6|10-8> <n> <budget> <seed> <start-file> <reference> [replicas] [turn-calls]
 //! ```
+//!
+//! A `-hop` arm adds surface hops from each new lowest structure,
+//! `Config::surface_hop_on_best`, and is otherwise its base arm.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -367,7 +370,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if !(8..=10).contains(&args.len()) {
         eprintln!(
-            "usage: sc_h2h <iso|ens> <12-6|9-6|10-8> <n> <budget> <seed> <start-file> <reference> [replicas] [turn-calls]"
+            "usage: sc_h2h <iso|ens|iso-hop|ens-hop> <12-6|9-6|10-8> <n> <budget> <seed> <start-file> <reference> [replicas] [turn-calls]"
         );
         std::process::exit(2);
     }
@@ -381,7 +384,10 @@ fn main() {
     let seed: u64 = args[5].parse().expect("seed");
     let start = read_start(&args[6], n);
     let reference: f64 = args[7].parse().expect("reference energy");
-    let replicas: usize = match arm {
+    let (base_arm, surface_hop) = arm
+        .strip_suffix("-hop")
+        .map_or((arm, false), |base| (base, true));
+    let replicas: usize = match base_arm {
         "iso" => 1,
         "ens" => args.get(8).map_or(4, |v| v.parse().expect("replicas")),
         _ => {
@@ -406,6 +412,7 @@ fn main() {
         anneal_core::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
     cfg.orbit_complete_on_new = true;
     cfg.orbit_core = OrbitCore::Both(ShellCore::scaled(cfg.length_scale));
+    cfg.surface_hop_on_best = surface_hop;
 
     println!("code: anneal");
     println!("arm: {arm}");
@@ -640,16 +647,23 @@ fn main() {
     let mut spent = 0;
     let mut best = f64::INFINITY;
     let mut orbit_duplicates = 0;
+    let mut surface = (0, 0, 0.0);
     for (r, rseed, charged, outcome, cost) in &outcomes {
         spent += charged;
         best = best.min(outcome.best);
         orbit_duplicates += outcome.orbit_duplicates;
+        surface.0 += outcome.surface_hops.0;
+        surface.1 += outcome.surface_hops.1;
+        surface.2 += outcome.surface_hops.2;
         println!(
-            "replica_{r}: seed={rseed} spent={charged} best={:.10} hops={} orbits={} orbit_duplicates={} restarts={} stall_escapes={} history_visits={}/{} history_cost={}/{}/{:.3}",
+            "replica_{r}: seed={rseed} spent={charged} best={:.10} hops={} orbits={} orbit_duplicates={} surface_hops={}/{}/{:.6} restarts={} stall_escapes={} history_visits={}/{} history_cost={}/{}/{:.3}",
             outcome.best,
             outcome.hops,
             outcome.orbits.0,
             outcome.orbit_duplicates,
+            outcome.surface_hops.0,
+            outcome.surface_hops.1,
+            outcome.surface_hops.2,
             outcome.restarts,
             outcome.stall_escapes,
             outcome.history_visits.0,
@@ -671,6 +685,9 @@ fn main() {
     println!("full_quenches: {}", full_quenches.load(Ordering::Relaxed));
     calls.print();
     println!("orbit_duplicates: {orbit_duplicates}");
+    println!("surface_hops: {}", surface.0);
+    println!("surface_descents: {}", surface.1);
+    println!("surface_gain: {:.6}", surface.2);
     let hit = hit.into_inner().expect("hit");
     println!("hit: {}", hit.is_some());
     match hit {
