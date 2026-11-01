@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
-## [0.12.0](https://github.com/HaoZeke/anneal/tree/v0.12.0)
+## [0.12.0](https://github.com/HaoZeke/anneal/tree/v0.12.0) - 2026-10-31
 
 ### Added
 
@@ -109,6 +109,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   probe runs at the start on a rigid state. ``Config`` gains the two TIP4P
   constructors and the ``rigid_body``, ``screen_margin`` and
   ``calibrated_screen`` getters.
+- The cluster and communicating presets project a free point set onto the continuous symmetry measure of C_i, C_5, and D_5h every ten quenches, and quench the lowest average that is not a coordinate singularity.
+  An icosahedral plateau that has not deepened the incumbent for five hops draws a fresh cluster, closes its core orbits, and projects before that quench.
+  A rigid chart leaves the move off.
+- A cluster hop run reports why it returned in ``Outcome::stop``.
+  ``HopStop`` names the budget, the target, a caller stop, a checkpoint retirement and its reason, a missing NVE escape, the hop cap, or an empty Hamiltonian proposal.
+  ``HopStop`` is ``#[non_exhaustive]``, so a ``match`` on it outside the crate needs a wildcard arm, and a later reason is not a breaking change.
+  The water hexamer record prints it as ``hop_stop``.
+  Search results are unchanged.
 
 ### Developer
 
@@ -202,6 +210,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   then a binary or rigid chart. ``water_sites`` selects the TIP4P presets and
   a caller body frame. The two sets exclude each other. A callback that raises
   ``KeyboardInterrupt`` still stops the run. The C header is unchanged.
+- The manifest resolves rgmin 0.5.0 and rgsaddle 0.3.0 from crates.io. linkcell stays 0.3.11.
+  The activation relaxation leaves the relative tolerance and the noise floor unset.
 
 ### Fixed
 
@@ -309,6 +319,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   ``BaseException`` outside ``Exception``, such as ``KeyboardInterrupt``,
   and re-raises it. ``Ledger::with_stop`` closes a ledger on a caller-owned
   flag.
+- Common neighbour analysis returns on a compressed, unrelaxed structure.
+  A bonded pair with more than ``TRAIL_BOND_CAP`` (twelve) bonds among its common neighbours is reported as ``(r, s, 0)`` without tracing its trail, so ``cna``, the per-point triplet fractions and ``ih_dominated`` no longer run without end on such input.
+  Relaxed clusters never reach the cap and are unchanged.
+- The Thomson cover reuses its Gauss-Seidel work arrays.
+  The point set is unchanged.
+- The hexamer force call no longer copies a contiguous geometry, allocates an idle OH-wall gradient, or allocates a new xTB force buffer.
+- A hop cap set with ``max_hops`` now bounds every hop a cluster hopping run takes.
+  A first-stage rejection under delayed acceptance, a symmetrisation or stall move after the last allowed quench, and each growth and activation inside a climb no longer take a hop past it.
+  A cap of zero takes no hop.
+  Runs that never reach their cap are unchanged.
+- The hexamer assignment reads the isomer name before moving it, so the IRA feature build can use that path.
+- A stalled icosahedral search no longer opens a fivefold axis.
+  It grows close-packed and pentagonal lattice orders from its own stream, and keeps a bank of minima separated by common-neighbour fractions so a lower minimum of another packing is not discarded.
+  The chain takes a grown quench only when it deepens the incumbent.
+  A face-centred-cubic plateau does not take either step.
+- A cluster search records each quench boundary, including the validation gradient when the descent converged, so a Good-Turing checkpoint can see the minima it is meant to count.
+- A closed-shell SOAP hop reads the power spectrum before its position gradients.
+  The packing kick's random draws still happen, so the proposal matches the gradient path.
+- A SOAP power spectrum reuses per-centre rows when every neighbour inside the cutoff is unchanged.
+- SOAP power-spectrum blocks are read in place when the array is already in logical order.
+- The 96 by 54 Thomson cover used for a water hexamer is the stored point set.
+  Other sizes still relax.
+- A structural witness merges near-duplicate minima that the census radius splits, and the Good-Turing stop waits until that witnessed target is found with the production confidence rule.
+- A witnessed target is found with confidence when the Esty unseen-mass bound sits under the production ceiling.
+  The anonymous visit floor is unchanged.
+- An opt-in witnessed stop uses a one-third unseen-mass ceiling, so a clean tripleton can retire.
+  The default ceiling stays one fifth.
 
 ### Miscellaneous
 
