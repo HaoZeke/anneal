@@ -1893,7 +1893,11 @@ fn biased_metropolis<R: Rng + ?Sized>(
             .map(|b| b.potential(b.cv(state).view()))
             .sum::<f64>()
     };
-    let rise = offer.0 + deposits(offer.1) - here.0 - deposits(here.1);
+    // The energies are differenced before the deposits are added. A deposit
+    // added to a Sutton-Chen total near 7e4 first loses its low bits, and an
+    // offer at the chain's own energy in its own basin then rounds to either
+    // side of zero, which decides whether a random number is drawn.
+    let rise = offer.0 - here.0 + deposits(offer.1) - deposits(here.1);
     let d = rise / temperature.max(1e-12);
     d < 0.0 || rng.random::<f64>() < (-d).exp()
 }
