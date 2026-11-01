@@ -1876,9 +1876,35 @@ fn returns_to_deposit<F: Fingerprint>(bias: &BasinBias<F>, state: ArrayView1<f64
     bias.potential(bias.cv(state).view()) > 0.0
 }
 
+/// Whether `state` lies in the same deposited basin as `best`, the lowest
+/// structure the run has seen, by the bias's own lookup.
+fn returns_to_best<F: Fingerprint>(
+    bias: &BasinBias<F>,
+    best: Option<&Array1<f64>>,
+    state: ArrayView1<f64>,
+) -> bool {
+    let well = |x: ArrayView1<f64>| bias.index().lookup(bias.cv(x).view());
+    match (well(state), best) {
+        (Some(here), Some(b)) => well(b.view()) == Some(here),
+        _ => false,
+    }
+}
+
+/// Stuck means stuck for longer than this chain has ever been stuck before,
+/// not stuck for some number someone chose. Traced on 75 points, a run that
+/// succeeds goes tens of thousands of hops between improvements on its way to
+/// the crossing, so a fixed patience of 400 fires about 180 climbs into a
+/// healthy search.
+fn stalled(cfg: &Config, quiet: usize, longest_quiet: usize) -> bool {
+    quiet
+        >= cfg
+            .escape_stall_patience
+            .max((cfg.escape_stall_factor * longest_quiet as f64) as usize)
+}
+
 #[cfg(test)]
 mod biased_metropolis_tests {
-    use super::{biased_metropolis, returns_to_deposit};
+    use super::{Config, biased_metropolis, returns_to_best, returns_to_deposit, stalled};
     use crate::bias::{BasinBias, Bias, SortedPairs};
     use ndarray::array;
     use rand::SeedableRng;
@@ -1925,6 +1951,31 @@ mod biased_metropolis_tests {
         bias.deposit(s.view(), 30.0);
         assert!(returns_to_deposit(&bias, offer.view()));
         assert!(!returns_to_deposit(&bias, here.view()));
+    }
+
+    #[test]
+    fn only_the_basin_of_the_best_is_a_return_to_it() {
+        let here = array![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0];
+        let offer = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.9, 0.0];
+        let mut bias = BasinBias::new(SortedPairs { n_points: 3 }, 0.05, 511.0, 5.0);
+        assert!(!returns_to_best(&bias, Some(&offer), offer.view()));
+        for x in [&here, &offer] {
+            let s = bias.cv(x.view());
+            bias.deposit(s.view(), 30.0);
+        }
+        assert!(returns_to_best(&bias, Some(&offer), offer.view()));
+        assert!(!returns_to_best(&bias, Some(&here), offer.view()));
+        assert!(!returns_to_best(&bias, None, offer.view()));
+    }
+
+    #[test]
+    fn a_chain_is_stalled_past_twice_its_longest_quiet_stretch() {
+        let cfg = Config::with_scales(13, 1.0, 1.0);
+        let patience = cfg.escape_stall_patience;
+        assert!(!stalled(&cfg, patience - 1, 0));
+        assert!(stalled(&cfg, patience, 0));
+        assert!(!stalled(&cfg, 2 * patience - 1, patience));
+        assert!(stalled(&cfg, 2 * patience, patience));
     }
 }
 
@@ -5361,10 +5412,12 @@ where
         // Orbit completion of a newly entered basin: the core's point group
         // applied to the whole cluster, so surface atoms move onto the empty
         // orbit positions the core implies. Once per new basin, quenched,
-        // and offered to the raw Metropolis test. A completion that lands
-        // in a basin the deposits have filled faces the biased test a hop
-        // faces instead: on raw energy alone it carries the chain back to
-        // the same shelf.
+        // and offered to the raw Metropolis test. When the chain is stuck
+        // and the completion ends in the filled basin of the lowest
+        // structure seen, it faces the biased test a hop faces instead: on
+        // raw energy alone it carries the chain back to the shelf it is
+        // stuck on. A filled basin above that shelf is often where the
+        // chain goes on to the minimum, so a return there stays raw.
         let mut orbit_offer = None;
         if cfg.packing_surface().orbit_on_new
             && accept
@@ -5403,7 +5456,10 @@ where
         }
         if let Some((es, xs, sym_gradient)) = orbit_offer {
             let mut biases: Vec<&dyn Bias> = Vec::new();
-            if returns_to_deposit(&bias, xs.view()) {
+            if stalled(cfg, quiet, longest_quiet)
+                && returns_to_deposit(&bias, xs.view())
+                && returns_to_best(&bias, ledger.best_state.as_ref(), xs.view())
+            {
                 biases.push(&bias);
                 if let Some(sp) = spectral.as_ref() {
                     biases.push(sp);
@@ -5444,15 +5500,7 @@ where
         } else {
             quiet += 1;
         }
-        // Stuck means stuck for longer than this chain has ever been stuck
-        // before, not stuck for some number someone chose. Traced on 75
-        // points, a run that succeeds goes tens of thousands of hops between
-        // improvements on its way to the crossing, so a fixed patience of 400
-        // fires about 180 climbs into a healthy search.
-        let stuck = quiet
-            >= cfg
-                .escape_stall_patience
-                .max((cfg.escape_stall_factor * longest_quiet as f64) as usize);
+        let stuck = stalled(cfg, quiet, longest_quiet);
         // Basin hopping with occasional jumping (Iwamatsu and Okabe, Chem.
         // Phys. Lett. 399, 396 (2004)): after `jump_patience` hops without
         // improvement, take `jump_steps` collective displacements with no
