@@ -74,7 +74,8 @@ fn run(action: CheckpointAction) -> (Outcome, BasinBias<ClusterFingerprint>, Vec
         &mut StdRng::seed_from_u64(11),
         1,
         &mut checkpoint,
-    );
+    )
+    .expect("finite start");
     assert_eq!(ledger.spent(), calls.len());
     assert_eq!(outcome.charged, calls.len());
     assert!(calls.len() <= 128);

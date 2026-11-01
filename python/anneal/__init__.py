@@ -2,8 +2,9 @@
 
 Search splits on geometry, then on gradient:
 
-  - cluster_search(obj, grad, n, budget, ...): 3N point set.
-    recommended / derived / ras select the hop preset.
+  - cluster_search(obj, grad, n, budget, ...): 3N point set, or 6N when
+    rigid=True. species adds a swap move. recommended / derived / ras
+    select the hop preset.
   - ensemble_optimize(obj, low, high, budget, grad_fn=None, ...): design box.
     Gradient means hop and quench; no gradient means a values-only search.
   - minimize(fun, x0, bounds, jac=None, budget=..., replicas=4, store=...):
@@ -23,6 +24,11 @@ with Boltzmann, Fast, and Gsa. Last mile is polish / qmc_polish
 (bounded L-BFGS). Cluster quench is WarmLbfgs to rgmin::Lbfgs.
 
 The IISE composition laws L1-L4 are enforced in SaVariant::checked.
+
+A callback that raises BaseException other than Exception, such as
+KeyboardInterrupt or a harness stop, ends the search at once. The best
+state found is kept, and the exception is re-raised. An ordinary
+Exception is scored as the worst value.
 """
 
 import json
@@ -238,6 +244,12 @@ def cluster_search(
     ras: bool = False,
     start=None,
     length_scale: float | None = None,
+    species=None,
+    sigmas=None,
+    rigid: bool = False,
+    layout: str = "block",
+    target: float | None = None,
+    water_sites=None,
 ):
     """Run the measured cluster-search layer.
 
@@ -246,7 +258,9 @@ def cluster_search(
       grad_fn: gradient or force callable ``g(x) -> numpy.ndarray``. A charged
         central-difference probe determines its orientation when the budget is
         at least four evaluations.
-      n: number of points (state length is ``3 * n``).
+      n: number of points. The Cartesian state length is ``3 * n``. With
+        ``rigid=True`` or ``water_sites``, ``n`` is the number of bodies and
+        the state length is ``6 * n``.
       budget: charged objective and gradient evaluations.
       seed: RNG seed.
       recommended: ``Config.recommended(n)`` when true, else
@@ -254,14 +268,46 @@ def cluster_search(
       derived: ``Config.derived(n)``; overrides ``recommended``.
       communicating: ``Config.communicating(n)``; overrides both.
       ras: residual archive search on the recommended preset.
-      start: optional flat ``3n`` start. When set, hops use ``search_from``
-        instead of a random compact cluster.
+      start: optional flat start. Cartesian length is ``3n``. A rigid or
+        water start is ``6n``. When set, hops use ``search_from`` instead of
+        a random compact cluster.
       length_scale: optional physical length. With the recommended preset
         this uses ``with_scales`` so an angstrom start is not crushed into
-        the reduced LJ container.
+        the reduced LJ container. Ignored when ``species`` or ``rigid`` is
+        set, because those keep the stock preset. Excluded by ``water_sites``.
+      species: optional label per point. Two or more labels add a swap move.
+        A wide diameter ratio also tries one downhill unlike-pair exchange
+        beside the escape.
+      sigmas: optional diameter per point, same length as ``species``.
+      rigid: hop in centre and Rodrigues rotation coordinates. A chart of
+        more than ten bodies holds the acceptance factor at 4 and scales
+        the orientation amplitude toward an acceptance ratio of one half.
+        Ten bodies or fewer do not. The quench is the same L-BFGS
+        descent, and a rigid record accepts the root-mean-square force.
+        After 1000 hops with no new lowest minimum the walker returns to
+        that minimum when it lies within one hopping temperature of the
+        run target. Farther above the target the walker is drawn again,
+        and the lowest minimum is kept.
+      layout: ``block`` or ``interleaved``. Interleaved is the per-body
+        centre and angle-axis order, with rotations negated at the boundary.
+      target: stop once a recorded energy is at or below this value.
+      water_sites: optional ``(3, 3)`` body-frame O, H, H positions of a
+        rigid water, in angstrom, about its rotation centre. ``n`` then counts
+        molecules and the state is ``n`` centres followed by ``n``
+        exponential-map rotation vectors (active Rodrigues). The presets are
+        ``Config.communicating_tip4p``, ``Config.recommended_tip4p`` and, with
+        both false, ``Config.for_tip4p``. Requires ``start``. Excludes
+        ``ras``, ``derived``, ``length_scale``, ``rigid``, ``species``,
+        ``sigmas``, and a non-block layout.
 
-    Returns a dict with ``best`` (flat ``3n`` coordinates), ``best_energy``,
-    and ``hops``.
+    A callback raising a ``BaseException`` that is not an ``Exception``, such
+    as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
+    The best geometry found is kept, and the exception is re-raised here.
+
+    Returns a dict with ``best`` (flat coordinates in the state layout),
+    ``best_energy``, ``hops``, and ``nve_unavailable``. The last is true
+    when a constant-energy (NVE) escape was requested and that escape is
+    not compiled. The ``python`` feature compiles it.
     """
     start_arr = None if start is None else np.asarray(start, dtype=np.float64).reshape(-1)
     args = (
@@ -274,11 +320,19 @@ def cluster_search(
         bool(derived),
         bool(communicating),
     )
-    kwargs = {"ras": bool(ras)}
+    kwargs = {"ras": bool(ras), "rigid": bool(rigid), "layout": str(layout)}
     if start_arr is not None:
         kwargs["start"] = start_arr
     if length_scale is not None:
         kwargs["length_scale"] = float(length_scale)
+    if species is not None:
+        kwargs["species"] = [int(value) for value in species]
+    if sigmas is not None:
+        kwargs["sigmas"] = [float(value) for value in np.asarray(sigmas, dtype=np.float64).reshape(-1)]
+    if target is not None:
+        kwargs["target"] = float(target)
+    if water_sites is not None:
+        kwargs["water_sites"] = np.asarray(water_sites, dtype=np.float64).reshape(-1)
     out = _core_cluster_search(*args, **kwargs)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
     return out
@@ -1372,6 +1426,9 @@ def global_optimize(
     ``arm_pulls``, and ``arm_successes``. Multiple replicas also report
     individual results, ``charged`` work and coverage sample counters.
     """
+    # int() truncates a float, so 1.5 would run as 1. A neighbour count is whole.
+    if not isinstance(coverage_neighbors, (int, np.integer)):
+        raise TypeError("coverage_neighbors must be an integer")
     out = _core_global_optimize(
         obj_fn,
         _flat(low),

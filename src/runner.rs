@@ -69,7 +69,7 @@ fn drive_rs_capped<S: Sampler<f64>>(
     let mut steps_left = max_steps;
 
     for epoch in 0..n_epochs {
-        if steps_left == 0 {
+        if steps_left == 0 || crate::caller_stop::raised() {
             break;
         }
         let temp = cooling.temperature(epoch);
@@ -77,6 +77,9 @@ fn drive_rs_capped<S: Sampler<f64>>(
         let mut rejected: usize = 0;
 
         for _ in 0..steps_per_epoch.min(steps_left) {
+            if crate::caller_stop::raised() {
+                break;
+            }
             if sampler.step(&mut state, epoch, rng) {
                 accepted += 1;
             } else {
@@ -439,4 +442,111 @@ where
         anchor,
         None,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::drive_rs_capped;
+    use crate::cool::{Cooling, ReciprocalCool};
+    use crate::history::State;
+    use crate::sampler::Sampler;
+    use eindir_core::FPair;
+    use ndarray::Array1;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    struct Halt {
+        stop: Arc<AtomicBool>,
+        steps: AtomicUsize,
+    }
+
+    impl Sampler<f64> for Halt {
+        fn initial_state<R: rand::Rng>(&self, _rng: &mut R) -> State {
+            let pos = Array1::zeros(1);
+            let pair = FPair { pos, val: 1.0 };
+            State {
+                cur: pair.clone(),
+                best: pair,
+            }
+        }
+
+        fn step<R: rand::Rng>(&self, state: &mut State, _epoch: usize, _rng: &mut R) -> bool {
+            let n = self.steps.fetch_add(1, Ordering::SeqCst);
+            if n + 1 >= 6 {
+                self.stop.store(true, Ordering::SeqCst);
+            }
+            assert!(n < 20, "the driver kept stepping after the stop ({n})");
+            state.cur.val = 1.0 / (n as f64 + 2.0);
+            if state.cur.val < state.best.val {
+                state.best.val = state.cur.val;
+                state.best.pos = state.cur.pos.clone();
+            }
+            true
+        }
+    }
+
+    #[test]
+    fn caller_stop_ends_the_sa_driver() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let sampler = Halt {
+            stop: Arc::clone(&stop),
+            steps: AtomicUsize::new(0),
+        };
+        let _bound = crate::caller_stop::Bind::new(stop);
+        let cooling = ReciprocalCool::new(1.0);
+        let mut rng = StdRng::seed_from_u64(1);
+        let state = sampler.initial_state(&mut rng);
+        let history = drive_rs_capped(&sampler, &cooling, state, 40, 50, &mut rng, 10_000);
+        let steps = sampler.steps.load(Ordering::SeqCst);
+        assert!(steps <= 20, "steps {steps}");
+        assert!(history.best.val < 1.0);
+        assert_eq!(history.best.pos.len(), 1);
+        let _ = cooling.temperature(0);
+    }
+
+    #[test]
+    fn an_idle_stop_does_not_change_sa_steps() {
+        fn once(bound: bool) -> (usize, f64) {
+            struct Count {
+                steps: AtomicUsize,
+            }
+            impl Sampler<f64> for Count {
+                fn initial_state<R: rand::Rng>(&self, _rng: &mut R) -> State {
+                    let pos = Array1::from_elem(1, 0.25);
+                    let pair = FPair { pos, val: 0.25 };
+                    State {
+                        cur: pair.clone(),
+                        best: pair,
+                    }
+                }
+                fn step<R: rand::Rng>(
+                    &self,
+                    state: &mut State,
+                    _epoch: usize,
+                    rng: &mut R,
+                ) -> bool {
+                    self.steps.fetch_add(1, Ordering::SeqCst);
+                    let draw: f64 = rng.random();
+                    state.cur.val = draw;
+                    if draw < state.best.val {
+                        state.best.val = draw;
+                    }
+                    draw < 0.5
+                }
+            }
+            let stop = Arc::new(AtomicBool::new(false));
+            let _guard = bound.then(|| crate::caller_stop::Bind::new(stop));
+            let sampler = Count {
+                steps: AtomicUsize::new(0),
+            };
+            let cooling = ReciprocalCool::new(2.0);
+            let mut rng = StdRng::seed_from_u64(9);
+            let state = sampler.initial_state(&mut rng);
+            let history = drive_rs_capped(&sampler, &cooling, state, 3, 7, &mut rng, 100);
+            (sampler.steps.load(Ordering::SeqCst), history.best.val)
+        }
+        assert_eq!(once(false), once(true));
+    }
 }

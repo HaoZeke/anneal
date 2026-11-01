@@ -108,6 +108,7 @@ fn run_trace(
     cfg.point_symmetrise_on_new = false;
     cfg.orbit_complete_on_new = false;
     cfg.superbasin_escape = false;
+    cfg.finish_improving = false;
 
     let mut relax_calls = 0;
     let mut gradient_calls = 0;
@@ -142,7 +143,8 @@ fn run_trace(
         &mut rng,
         1,
         &mut checkpoint,
-    );
+    )
+    .expect("finite start");
 
     assert_eq!(out.hops, hops);
     assert_eq!(relax_calls, sequence.len());

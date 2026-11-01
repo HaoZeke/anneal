@@ -85,6 +85,9 @@ struct XtbKernel {
     force: Symbol<'static, XtbForce>,
     destroy: Symbol<'static, XtbDestroy>,
     evaluations: usize,
+    /// Force buffer reused across calls. The owned DLPack tensor copies
+    /// it before the callback returns.
+    scratch: Vec<f64>,
 }
 
 impl Drop for XtbKernel {
@@ -160,7 +163,10 @@ unsafe extern "C" fn xtb_callback(
     if pos.is_null() || z.is_null() || boxp.is_null() {
         return rgpot_status_t::RGPOT_INVALID_PARAMETER;
     }
-    let mut forces = vec![0.0; 3 * n];
+    if kernel.scratch.len() != 3 * n {
+        kernel.scratch.resize(3 * n, 0.0);
+    }
+    kernel.scratch.fill(0.0);
     let mut energy = 0.0;
     let mut var = 0.0;
     kernel.evaluations += 1;
@@ -188,7 +194,7 @@ unsafe extern "C" fn xtb_callback(
             n as i64,
             pos,
             z,
-            forces.as_mut_ptr(),
+            kernel.scratch.as_mut_ptr(),
             &mut energy,
             &mut var,
             boxp,
@@ -199,7 +205,7 @@ unsafe extern "C" fn xtb_callback(
     }
     out.energy = energy;
     out.variance = var;
-    out.forces = unsafe { rgpot_tensor_owned_cpu_f64_2d(forces.as_ptr(), n as i64, 3) };
+    out.forces = unsafe { rgpot_tensor_owned_cpu_f64_2d(kernel.scratch.as_ptr(), n as i64, 3) };
     rgpot_status_t::RGPOT_SUCCESS
 }
 
@@ -329,6 +335,7 @@ impl RgpotObjective {
             force,
             destroy,
             evaluations: 0,
+            scratch: Vec::new(),
         });
         let n = atmnrs.len();
         let low = vec![-80.0; 3 * n];

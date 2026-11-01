@@ -13,7 +13,8 @@ fn symmetrised_run(endpoint_gradient: f64) -> Outcome {
     }
     let endpoint = &candidate * 0.9;
     let mut cfg = Config::for_cluster(6);
-    cfg.max_hops = Some(1);
+    // The quench and its core symmetrisation are a hop each.
+    cfg.max_hops = Some(2);
     cfg.screen_steps = 1;
     cfg.relax_steps = 2;
     cfg.return_screen = false;
@@ -25,6 +26,7 @@ fn symmetrised_run(endpoint_gradient: f64) -> Outcome {
     cfg.point_symmetrise_every_accept = true;
     cfg.symmetrise_core_fraction = 1.0;
     cfg.symmetry_tolerance = 0.5;
+    cfg.finish_improving = false;
     assert!(
         anneal_core::symmetrise::symmetrise_core(
             candidate.view(),
@@ -75,7 +77,8 @@ fn symmetrised_run(endpoint_gradient: f64) -> Outcome {
         &mut relax,
         Some(&mut gradient),
         &mut rng,
-    );
+    )
+    .expect("finite start");
     assert_eq!(full_quenches, 3);
     assert_eq!(outcome.symmetrised.0, 1);
     assert_eq!(outcome.final_state.as_ref(), Some(&endpoint));

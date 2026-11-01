@@ -176,6 +176,17 @@ pub enum ContinuousSymmetry {
         /// Divisor of the basin-hopping quench count.
         interval: usize,
     },
+    /// Project onto `C_i`, `C_5`, and `D_5h` and quench the lowest continuous
+    /// symmetry measure. On an icosahedral plateau, `reseed_hops` without a
+    /// new incumbent draws a fresh cluster, closes its core orbits, projects,
+    /// and quenches. Zero disables that reseed. GMIN's `NSYMINTERVAL` default
+    /// is the same ten quenches (`keywords.f90`).
+    Measure {
+        /// Divisor of the basin-hopping quench count.
+        interval: usize,
+        /// Hops without a new incumbent before an icosahedral reseed.
+        reseed_hops: usize,
+    },
 }
 
 /// Driver settings.
@@ -307,11 +318,15 @@ pub struct Config {
     /// complementary and must stay separable.
     pub minima_hopping: bool,
     /// Under [`Config::minima_hopping`], propose by Goedecker's escape: a
-    /// short NVE trajectory launched with kinetic energy
+    /// short constant-energy (NVE) trajectory launched with kinetic energy
     /// [`Config::md_escape_kinetic`] times the controller's escape scale,
     /// stopped after two potential-energy minima along the path, then
     /// quenched like any trial. Every MD step charges an energy and a
     /// gradient. Off, the controller scales the ordinary kick instead.
+    ///
+    /// The trajectory is compiled with the `rgsaddle` feature. Without it
+    /// the run stops and [`super::Outcome::nve_unavailable`] is set. The
+    /// library kick is not substituted for the escape.
     pub md_escape: bool,
     /// Time step of the escape trajectory in the run's reduced units.
     pub md_escape_dt: f64,
@@ -474,8 +489,9 @@ pub struct Config {
     /// This is distinct from [`Config::symmetrise_on_stall`]. The
     /// continuous-symmetry construction solves a global atom assignment for
     /// each group image and quenches the averaged geometry on a fixed
-    /// schedule. The current implementation provides `C_i`, whose inversion
-    /// operation makes the orientation objective rotation independent.
+    /// schedule. `C_i` has no orientation search. [`ContinuousSymmetry::Measure`]
+    /// is the Oakley, Johnston and Wales continuous symmetry measure over
+    /// `C_i`, `C_5`, and `D_5h`, with orientations taken from the inertia tensor.
     pub continuous_symmetry: ContinuousSymmetry,
     /// Largest deviation at which an approximate symmetry is worth using.
     pub symmetry_tolerance: f64,
@@ -667,6 +683,13 @@ pub struct Config {
     /// the species-aware bond matrix, which a single length cannot replace on
     /// a system holding more than one element.
     pub species: Option<Vec<u32>>,
+    /// Lennard-Jones diameter of each point, parallel to [`Config::species`].
+    ///
+    /// Absent on every stock preset, so a resolved preset omits the field.
+    /// [`Config::with_species`] sets it for a binary cluster. The swap move
+    /// uses the diameters to put large atoms outside the small-atom shell.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub species_sigma: Option<Vec<f64>>,
     /// Bond-matrix tolerance on the covalent radii sum.
     pub bond_tolerance: f64,
     /// Frozen mask, one flag per point. A frozen point is environment: groups
@@ -846,6 +869,29 @@ pub struct Config {
     /// How far above the incumbent a screened trial may land and still be
     /// promoted to a full relaxation.
     pub screen_margin: f64,
+    /// Whether the energy screen credits a trial with the descent its
+    /// screening pass left undone.
+    ///
+    /// A trial is refused when its partial energy, less the upper decile of
+    /// `partial - full` over the last 256 full relaxations, lies more than
+    /// [`Config::screen_margin`] above the incumbent. Until eight full
+    /// relaxations have been seen the credit is zero and the screen is the
+    /// fixed margin. Every eighth refusal is relaxed in full anyway, so the
+    /// window samples the trials the screen refuses and not only those it
+    /// passes. A fixed margin is in energy units and does not carry between
+    /// potentials: on rigid TIP4P10, 256 development starts at 1e6 force
+    /// calls, a sweep of the fixed margin from 25 to 50 kJ/mol cut PAR-2
+    /// from 78.7e3 to 18.4e3, while LJ38 was flat between 1 and 4 epsilon.
+    pub calibrated_screen: bool,
+    /// Whether a full relaxation that ends below the incumbent is continued,
+    /// [`Config::relax_steps`] at a time and up to eight more times, until it
+    /// stops descending.
+    ///
+    /// Only a converged structure is recorded. On rigid TIP4P20 at 80 steps
+    /// a 3e5-call communicating run converged 70 of its 13329 relaxations,
+    /// screens included, so at most 70 of its 832 full ones, and a trial
+    /// reaching the global basin was rarely recordable.
+    pub finish_improving: bool,
     /// Relaxation steps in the screening pass.
     /// Calibrated by sweep on the corrected relaxer, LJ38 at 4e5 charged
     /// evaluations, four seeds each:
@@ -1000,6 +1046,16 @@ pub struct Config {
     /// leapfrog leaf; every parameter is adapted, see [`crate::hmc::hop`].
     #[serde(skip)]
     pub hmc: Option<crate::hmc::hop::HopConfig>,
+    /// Witnessed stop at one third instead of the production one fifth.
+    ///
+    /// Off keeps the production ceiling. On, a clean tripleton can retire:
+    /// its Esty upper bound is already 0 and its hatch is one quarter.
+    #[serde(skip_serializing_if = "is_false")]
+    pub witness_tripleton_ceiling: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Config {
@@ -1030,8 +1086,17 @@ impl Config {
     ///
     /// LeanBurst carries the observed-cloud SOAP pullback. Thompson
     /// allocates that arm with surface, single, burst, and sym. The return
-    /// screen is on, and a stall takes tabu and symmetrisation. Basin
-    /// identity stays the measured pair-spectrum merge at 0.7.
+    /// screen is on, and a stall takes tabu, symmetrisation, the recorded
+    /// basin trail, the climb, and the restart. Those three exits are
+    /// [`Config::trail_on_stall`], [`Config::escape_on_stall`], and
+    /// [`Config::restart_on_stall`]. There is no `RESTART_STALL_ARM`
+    /// override. Basin identity stays the measured pair-spectrum merge at 0.7.
+    /// Orbit completion runs on every new basin, and below 98 points the
+    /// relaxation draws between the plain surface and the two-phase
+    /// relative 0.7 surface, the same rule as [`Config::communicating`].
+    /// On optbench archive starts at development seeds, without them this
+    /// stack needed a median 1.4e5 force calls on 32 LJ38 starts and solved
+    /// 2 of 16 LJ75 starts in 1e6; with them, 4.9e3 and 16 of 16.
     /// [`Config::for_cluster`] remains the plain Wales-Doye baseline.
     /// [`Config::packing_superbasin`] adds the unmeasured SOAP-packing key
     /// and adaptive height.
@@ -1045,6 +1110,33 @@ impl Config {
         cfg.symmetrise_on_stall = true;
         cfg.soap_class_residual = false;
         cfg.soap_mode = SoapProposalMode::Flexible;
+        cfg.orbit_complete_on_new = true;
+        cfg.trail_on_stall = true;
+        cfg.escape_on_stall = true;
+        cfg.restart_on_stall = true;
+        // The displacement stack, LeanBurst included, leaves the Mackay
+        // minimum in place: 17 of 72 seeds at 4e5 calls ended at
+        // -173.252378. Named lattice growth builds the truncated
+        // octahedron instead of searching for it. Measured on seeds
+        // 2000-2071 at that budget, this library solves 72 of 72.
+        // At 75 and 98 points the global minimum is not one of these
+        // packings, and the same library is worse than none, so those
+        // sizes keep LeanBurst.
+        if n_points == 38 {
+            cfg.move_library = MoveLibrary::Reseed;
+        }
+        if n_points < 98 {
+            cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
+        }
+        // GMIN calls SYMMETRYCSM every NSYMINTERVAL quenches, default 10.
+        // The same paper's LJ75 table used a restart of about five basin
+        // hopping steps once symmetrisation was on. Both run inside this
+        // chain. The reseed fires only on an icosahedral plateau, so a
+        // face-centred construction is not abandoned.
+        cfg.continuous_symmetry = ContinuousSymmetry::Measure {
+            interval: 10,
+            reseed_hops: 5,
+        };
         cfg
     }
 
@@ -1067,6 +1159,10 @@ impl Config {
         if n_points < 98 {
             cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
         }
+        cfg.continuous_symmetry = ContinuousSymmetry::Measure {
+            interval: 10,
+            reseed_hops: 5,
+        };
         cfg
     }
 
@@ -1135,13 +1231,14 @@ impl Config {
             && !self.move_library.is_rigid_body()
     }
 
-    /// Recommended flags, with the two hand-set scalars replaced by
-    /// derived ones: budget-window temperature (`θ = 1/2` inside the
-    /// descent window) and the cost-asymmetric Bayes screen
-    /// `τ = (R-S)/(2R-S)` from [`crate::screen::cost_asymmetric_threshold`].
+    /// Recommended flags, plus the budget-window temperature
+    /// (`θ = 1/2` inside the descent window).
     ///
-    /// This is not the measured `recommended` configuration. Hit rates
-    /// for this stack are not claimed until a campaign records them.
+    /// The Bayes screen and `τ = (R-S)/(2R-S)` already sit on
+    /// [`Config::for_cluster`]. This repeats them from the hop's own
+    /// step counts so a caller who changed those counts keeps the
+    /// cost-asymmetric threshold. Hit rates for the budget window are
+    /// not claimed until a campaign records them.
     pub fn derived(n_points: usize) -> Self {
         let mut cfg = Self::recommended(n_points);
         cfg.budget_window = true;
@@ -1151,13 +1248,23 @@ impl Config {
         cfg
     }
 
-    /// Creates the reduced-unit Lennard-Jones cluster configuration.
+    /// Reduced-unit Lennard-Jones cluster configuration.
+    ///
+    /// The Bayes screen is on. Its threshold is
+    /// [`crate::screen::cost_asymmetric_threshold`] at this hop's screen
+    /// and relax steps, `7/15` when those are 25 and 200. The old
+    /// hand-set pair, screen off and threshold `0.05`, is not a second
+    /// default.
     pub fn for_cluster(n_points: usize) -> Self {
-        Self::with_scales(
+        let mut cfg = Self::with_scales(
             n_points,
             LennardJonesPreset::REDUCED_SCALE,
             LennardJonesPreset::REDUCED_SCALE,
-        )
+        );
+        cfg.bayes_screen = true;
+        cfg.bayes_threshold =
+            crate::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
+        cfg
     }
 
     /// Lennard-Jones preset expressed against declared physical scales.
@@ -1219,6 +1326,7 @@ impl Config {
             group_cutoff: LennardJonesPreset::GROUP_CUTOFF * length_scale,
             covalent_cutoff: LennardJonesPreset::COVALENT_CUTOFF * length_scale,
             species: None,
+            species_sigma: None,
             bond_tolerance: 1.25,
             frozen: None,
             active_region: None,
@@ -1287,6 +1395,8 @@ impl Config {
             diversity_floor: 0.75,
             height_revisits: 4.0,
             screen_margin: LennardJonesPreset::SCREEN_MARGIN * energy_scale,
+            calibrated_screen: true,
+            finish_improving: true,
             screen_steps: 25,
             adaptive_screen: false,
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
@@ -1318,6 +1428,7 @@ impl Config {
             superbasin_quotient: false,
             superbasin_features: false,
             hmc: None,
+            witness_tripleton_ceiling: false,
         }
     }
 
@@ -1338,6 +1449,7 @@ impl Config {
             n_molecules,
             translate_step: 0.35,
             rotate_step: 0.40,
+            local: false,
         };
         cfg.rigid_body_geometry =
             Some(crate::potentials::Tip4pCluster::new(n_molecules).rigid_geometry());
@@ -1357,6 +1469,121 @@ impl Config {
         cfg.allocate_moves = true;
         cfg.relax_steps = 80;
         cfg.screen_steps = 15;
+        cfg
+    }
+
+    /// Attach species labels, and optional per-atom diameters, to a preset.
+    ///
+    /// Temperature, allocation, and the other preset flags stay as they were.
+    /// Diameters, when present, widen the container and the neighbour cutoff
+    /// by the largest one and set the minimum separation from the smallest,
+    /// because a reduced-unit sphere built for `σ = 1` clips a larger species.
+    pub fn with_species(mut self, species: Vec<u32>, sigma: Option<Vec<f64>>) -> Self {
+        assert_eq!(
+            species.len(),
+            self.n_points,
+            "species length must match n_points"
+        );
+        if let Some(values) = sigma.as_ref() {
+            assert_eq!(
+                values.len(),
+                self.n_points,
+                "sigma length must match n_points"
+            );
+            assert!(
+                values.iter().all(|value| value.is_finite() && *value > 0.0),
+                "sigma must be finite and positive"
+            );
+            let max_sigma = values.iter().copied().fold(0.0_f64, f64::max);
+            let min_sigma = values.iter().copied().fold(f64::INFINITY, f64::min);
+            // Neighbour shells were cut for σ = 1. A larger species still
+            // has its contacts inside a cutoff grown by that diameter.
+            self.neighbour_cutoff *= max_sigma.max(1.0);
+            let span = LennardJonesPreset::CONTAINER_RADIUS
+                * self.length_scale
+                * max_sigma
+                * (self.n_points as f64).cbrt();
+            if span > self.container {
+                self.container = span;
+            }
+            let contact = LennardJonesPreset::MIN_SEPARATION * self.length_scale * min_sigma;
+            if contact.is_finite() && contact > 0.0 {
+                self.min_separation = contact;
+            }
+        }
+        self.species = Some(species);
+        self.species_sigma = sigma;
+        self
+    }
+
+    /// Install a rigid centre-and-rotation chart on a preset.
+    ///
+    /// `n_points` is the number of bodies. The state the hop minimises is
+    /// `6 n_points`: centres, then Rodrigues rotations. The orientation
+    /// step replaces the Cartesian library. Cartesian surfaces, SOAP, and
+    /// point-group completion read those centres as atoms, so they are
+    /// cleared. Temperature, allocation, the return screen, depth reward,
+    /// and tabu stay on the preset. The container grows to fit the
+    /// body-frame site reach. The orientation cap is
+    /// [`super::moves::RIGID_ORIENTATION_CAP`].
+    pub fn with_rigid_bodies(mut self, geometry: crate::rigid_body::RigidBodyGeometry) -> Self {
+        assert!(
+            self.n_points >= 2,
+            "a rigid cluster needs at least two bodies"
+        );
+        let reach = geometry.site_reach().max(1.0e-6);
+        self.move_library = MoveLibrary::RigidBody {
+            n_molecules: self.n_points,
+            translate_step: LennardJonesPreset::ALL_POINTS_STEP * self.length_scale,
+            rotate_step: super::moves::RIGID_ORIENTATION_CAP,
+            local: true,
+        };
+        let contact = 4.0 * reach;
+        let span = LennardJonesPreset::CONTAINER_RADIUS * contact * (self.n_points as f64).cbrt();
+        if span > self.container {
+            self.container = span;
+        }
+        self.min_separation = (2.8 * reach).max(self.min_separation);
+        self.surfaces.clear();
+        self.two_phase = None;
+        self.soap_mode = SoapProposalMode::Off;
+        self.soap_repel = false;
+        self.soap_class_residual = false;
+        self.symmetrise_on_stall = false;
+        self.point_symmetrise = false;
+        self.point_symmetrise_on_new = false;
+        self.orbit_complete_on_new = false;
+        self.angular_moves = false;
+        self.continuous_symmetry = ContinuousSymmetry::Off;
+        self.rigid_body_geometry = Some(geometry);
+        self
+    }
+
+    /// [`Config::communicating`]'s search controls on [`Config::for_tip4p`].
+    ///
+    /// Thompson allocation, the return screen and Recognition carry over.
+    /// Orbit completion, symmetrisation and the two-phase surface act on
+    /// atom positions, not on centre-and-rotation states, so they stay off.
+    pub fn communicating_tip4p(n_molecules: usize) -> Self {
+        let mut cfg = Self::for_tip4p(n_molecules);
+        cfg.allocate_moves = true;
+        cfg.return_screen = true;
+        cfg.shared_deposits = 0;
+        cfg.shared_visit_policy = crate::methods::minima_hopping::SharedVisitPolicy::Recognition;
+        cfg
+    }
+
+    /// [`Config::recommended`]'s search controls on [`Config::for_tip4p`].
+    ///
+    /// Thompson allocation with depth reward, the return screen and tabu
+    /// on stall carry over; the atom-position moves stay off, as in
+    /// [`Config::communicating_tip4p`].
+    pub fn recommended_tip4p(n_molecules: usize) -> Self {
+        let mut cfg = Self::for_tip4p(n_molecules);
+        cfg.allocate_moves = true;
+        cfg.depth_reward = true;
+        cfg.tabu_on_stall = true;
+        cfg.return_screen = true;
         cfg
     }
 

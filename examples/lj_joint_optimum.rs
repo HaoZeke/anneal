@@ -35,7 +35,7 @@ use anneal_core::methods::cluster_hopping::{
 use anneal_core::methods::cluster_search::{Encounter, first_encounter, median_encounter};
 use anneal_core::methods::minima_hopping::{
     EscapeFeedback, HistoryObservation, MdEscapeConfig, MdEscapeGeometry, MdTimeStepFeedback,
-    MinimumHistory, Visit, nve_escape,
+    MinimumHistory, VelocitySofteningConfig, Visit, nve_escape,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::pes_exploration::{
@@ -46,7 +46,6 @@ use anneal_core::potentials::{PairKind, PairPotential};
 use anneal_core::shape::IraStructureWitness;
 use ndarray::ArrayView1;
 use rand::{SeedableRng, rngs::StdRng};
-use rgsaddle::VelocitySofteningConfig;
 use serde_json::json;
 
 const TARGET_TOLERANCE: f64 = 1e-3;
@@ -325,8 +324,9 @@ fn run_hopping(
             Some(&mut gradient),
             &mut rng,
         )
+        .expect("finite start")
     } else {
-        run(&config, initial, &mut ledger, &mut relax, &mut rng)
+        run(&config, initial, &mut ledger, &mut relax, &mut rng).expect("finite start")
     }
 }
 
@@ -622,6 +622,12 @@ fn run_minima_hopping_with_history<'a>(
         charged.map_or(ledger.spent(), |counter| counter.load(Ordering::SeqCst)),
         energy,
     )];
+    let descriptor = Some(lj::descriptor_space());
+    let context = StructureContext::new(Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")));
+    let mut local_basins: HashSet<usize> = HashSet::new();
+    let mut accepted_visits: HashMap<usize, u64> = HashMap::new();
+    let mut observed_visits: HashMap<usize, u64> = HashMap::new();
+    let mut history_seconds = 0.0;
 
     while ledger.remaining() > 0 {
         let mut attempt_config = escape_config;
@@ -675,7 +681,9 @@ fn run_minima_hopping_with_history<'a>(
         }
 
         let history_start = Instant::now();
-        let (reached, adopt) = if let (Some(history), Some(descriptor)) = (history, &descriptor) {
+        let (reached, adopt) = if let (Some(history), Some(descriptor)) =
+            (history, descriptor.as_ref())
+        {
             let (observation, adopt) = observe_history(
                 history,
                 &ledger,

@@ -861,7 +861,7 @@ impl CatalogServer {
                 let local = tokio::task::LocalSet::new();
                 let (incoming, mut accepted) = tokio::sync::mpsc::unbounded_channel();
                 let accept_stop = Arc::clone(&thread_stop);
-                std::thread::Builder::new()
+                let accept_thread = std::thread::Builder::new()
                     .name("catalog-nng-accept".to_owned())
                     .spawn(move || {
                         let _listener = bound.listener;
@@ -907,6 +907,14 @@ impl CatalogServer {
                         }
                     }
                 });
+                // The accept thread owns the nng socket. Dropping that
+                // socket closes the listen fd. CatalogServer::drop joins
+                // this coordinator thread, so joining the accept thread
+                // here makes stop wait until that fd is closed. A later
+                // CatalogServer::start on the same address can bind it.
+                // macOS returns AddressInUse when the previous listen fd
+                // is still open.
+                let _ = accept_thread.join();
             })
             .expect("catalog RPC thread starts");
         Ok(Self {
@@ -2076,7 +2084,7 @@ fn apply_request(
             // been rather than where a box was drawn.
             observe_descriptor(scientific, &validated.candidate.descriptor);
             record_energy(scientific, request.identity.replica, validated.fresh.energy);
-            let (basin_visits, novelty) = member_evidence(
+            let (basin_visits, novelty, uncertainty) = member_evidence(
                 scientific,
                 &validated.candidate.coordinates,
                 &validated.candidate.descriptor,
@@ -2102,6 +2110,7 @@ fn apply_request(
                 validated.fresh.energy,
                 novelty,
                 basin_visits as f64,
+                uncertainty,
             ) else {
                 return validation_rejected(state, &request);
             };
@@ -2147,7 +2156,7 @@ fn apply_request(
             else {
                 return validation_rejected(state, &request);
             };
-            let (basin_visits, novelty) = member_evidence(
+            let (basin_visits, novelty, uncertainty) = member_evidence(
                 scientific,
                 &member_candidate.coordinates,
                 &member_candidate.descriptor,
@@ -2158,6 +2167,7 @@ fn apply_request(
                 member_candidate.energy,
                 novelty,
                 basin_visits as f64,
+                uncertainty,
             ) else {
                 return validation_rejected(state, &request);
             };
@@ -5798,15 +5808,15 @@ fn accepted_with_payload(
 }
 
 /// A barrier member's evidence: the visit count of its packing family (or
-/// of its census basin when the structure has no packing histogram) and
+/// of its census basin when the structure has no packing histogram),
 /// its novelty (the packing book's, or the distance to the nearest other
-/// census basin).
+/// census basin), and the graph-field score of that basin.
 fn member_evidence(
     scientific: &ScientificState,
     coordinates: &[f64],
     descriptor: &[f64],
     basin_id: BasinId,
-) -> (u64, f64) {
+) -> (u64, f64, f64) {
     let packing = scientific.packing.histogram(coordinates);
     let basin_visits = packing
         .as_ref()
@@ -5825,7 +5835,9 @@ fn member_evidence(
         || nearest_other_census_distance(&scientific.census, basin_id, descriptor),
         |fp| scientific.packing.novelty(fp),
     );
-    (basin_visits, novelty)
+    let class = usize::try_from(basin_id.as_raw()).ok();
+    let uncertainty = scientific.coverage.graph_field_uncertainty(class);
+    (basin_visits, novelty, uncertainty)
 }
 
 /// The reply payload after a barrier submission: the epoch's progress

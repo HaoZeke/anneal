@@ -163,21 +163,207 @@ fn spectrum(
     species: Option<&[u32]>,
     mobile: Option<&[usize]>,
 ) -> Spectrum {
-    spectrum_keep(x, rcut, species, mobile, LMIN)
+    spectrum_keep(x, rcut, species, mobile, LMIN, true)
 }
 
-fn spectrum_keep(
+/// Power spectrum values without position gradients.
+///
+/// `cloud_mean` and `leftover` match [`spectrum`]. The Jacobian stays
+/// zero. A closed-shell hop only needs those values to decide that the
+/// cover moves, and the gradient rows are what make the calculator slow.
+fn spectrum_values(
+    x: ArrayView1<f64>,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+) -> Spectrum {
+    spectrum_keep(x, rcut, species, mobile, LMIN, false)
+}
+
+struct PowerRows {
+    rows: Vec<Vec<f64>>,
+    j_raw: Vec<Vec<f64>>,
+    n_feat: usize,
+}
+
+struct SoapSlot {
+    rcut_bits: u64,
+    lmin: i32,
+    gradients: bool,
+    species: Option<Vec<u32>>,
+    mobile: Option<Vec<usize>>,
+    coords: Vec<f64>,
+    rows: Vec<Vec<f64>>,
+    j_raw: Vec<Vec<f64>>,
+    n_feat: usize,
+}
+
+struct SoapStats {
+    hits: u64,
+    misses: u64,
+    clean_centers: u64,
+    centers: u64,
+}
+
+impl SoapStats {
+    const fn new() -> Self {
+        Self {
+            hits: 0,
+            misses: 0,
+            clean_centers: 0,
+            centers: 0,
+        }
+    }
+}
+
+impl Drop for SoapStats {
+    fn drop(&mut self) {
+        let Ok(path) = std::env::var("SOAP_CACHE_STATS") else {
+            return;
+        };
+        let line = format!(
+            "hits {} misses {} clean_centers {} centers {}\n",
+            self.hits, self.misses, self.clean_centers, self.centers
+        );
+        let _ = std::fs::write(path, line);
+    }
+}
+
+thread_local! {
+    static SOAP_MEMORY: RefCell<Option<SoapSlot>> = const { RefCell::new(None) };
+    static SOAP_STATS: RefCell<SoapStats> = const { RefCell::new(SoapStats::new()) };
+}
+
+#[cfg(test)]
+fn soap_cache_stats() -> (u64, u64, u64, u64) {
+    SOAP_STATS.with(|stats| {
+        let stats = stats.borrow();
+        (stats.hits, stats.misses, stats.clean_centers, stats.centers)
+    })
+}
+
+fn atom_same(left: &[f64], right: &[f64], index: usize) -> bool {
+    let base = 3 * index;
+    left[base].to_bits() == right[base].to_bits()
+        && left[base + 1].to_bits() == right[base + 1].to_bits()
+        && left[base + 2].to_bits() == right[base + 2].to_bits()
+}
+
+fn pair_dist2(coords: &[f64], left: usize, right: usize) -> f64 {
+    let a = 3 * left;
+    let b = 3 * right;
+    let dx = coords[a] - coords[b];
+    let dy = coords[a + 1] - coords[b + 1];
+    let dz = coords[a + 2] - coords[b + 2];
+    dx * dx + dy * dy + dz * dz
+}
+
+/// A centre is unchanged when it and every atom inside `rcut` of it
+/// have the same coordinates, and no atom has crossed the cutoff.
+fn centre_unchanged(previous: &[f64], coords: &[f64], centre: usize, r2: f64) -> bool {
+    if !atom_same(previous, coords, centre) {
+        return false;
+    }
+    let n = coords.len() / 3;
+    for other in 0..n {
+        let was = pair_dist2(previous, centre, other) <= r2;
+        let now = pair_dist2(coords, centre, other) <= r2;
+        if was != now || (now && !atom_same(previous, coords, other)) {
+            return false;
+        }
+    }
+    true
+}
+
+fn slot_matches(
+    slot: &SoapSlot,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    lmin: i32,
+    with_gradients: bool,
+    n: usize,
+) -> bool {
+    slot.rcut_bits == rcut.to_bits()
+        && slot.lmin == lmin
+        && slot.gradients == with_gradients
+        && slot.coords.len() == 3 * n
+        && slot.species.as_deref() == species
+        && slot.mobile.as_deref() == mobile
+}
+
+fn cached_power_rows(
     x: ArrayView1<f64>,
     rcut: f64,
     species: Option<&[u32]>,
     mobile: Option<&[usize]>,
     lmin: i32,
-) -> Spectrum {
+    with_gradients: bool,
+) -> PowerRows {
+    let Some(coords) = x.as_slice() else {
+        SOAP_STATS.with(|stats| stats.borrow_mut().misses += 1);
+        return uncached_power_rows(x, rcut, species, lmin, with_gradients);
+    };
+    let n = coords.len() / 3;
+    let reusable = SOAP_MEMORY.with(|memory| {
+        let memory = memory.borrow();
+        let slot = memory.as_ref()?;
+        if !slot_matches(slot, rcut, species, mobile, lmin, with_gradients, n) {
+            return None;
+        }
+        let r2 = rcut * rcut;
+        let mut clean = 0usize;
+        for centre in 0..n {
+            if centre_unchanged(&slot.coords, coords, centre, r2) {
+                clean += 1;
+            }
+        }
+        SOAP_STATS.with(|stats| {
+            let mut stats = stats.borrow_mut();
+            stats.centers += n as u64;
+            stats.clean_centers += clean as u64;
+        });
+        (clean == n).then(|| PowerRows {
+            rows: slot.rows.clone(),
+            j_raw: slot.j_raw.clone(),
+            n_feat: slot.n_feat,
+        })
+    });
+    if let Some(rows) = reusable {
+        SOAP_STATS.with(|stats| stats.borrow_mut().hits += 1);
+        return rows;
+    }
+    let computed = uncached_power_rows(x, rcut, species, lmin, with_gradients);
+    SOAP_STATS.with(|stats| stats.borrow_mut().misses += 1);
+    SOAP_MEMORY.with(|memory| {
+        *memory.borrow_mut() = Some(SoapSlot {
+            rcut_bits: rcut.to_bits(),
+            lmin,
+            gradients: with_gradients,
+            species: species.map(|values| values.to_vec()),
+            mobile: mobile.map(|values| values.to_vec()),
+            coords: coords.to_vec(),
+            rows: computed.rows.clone(),
+            j_raw: computed.j_raw.clone(),
+            n_feat: computed.n_feat,
+        });
+    });
+    computed
+}
+
+fn uncached_power_rows(
+    x: ArrayView1<f64>,
+    rcut: f64,
+    species: Option<&[u32]>,
+    lmin: i32,
+    with_gradients: bool,
+) -> PowerRows {
     let n = x.len() / 3;
     let json = hypers(rcut);
     let mut systems = system_of(x, species);
+    let gradient_names: &[&str] = if with_gradients { &["positions"] } else { &[] };
     let options = CalculationOptions {
-        gradients: &["positions"],
+        gradients: gradient_names,
         ..Default::default()
     };
     let out = with_calculator(&json, |calc| {
@@ -185,19 +371,21 @@ fn spectrum_keep(
             .expect("featomic soap_power_spectrum failed")
     });
 
-    // Concatenate blocks. Each block is one (center_type, neighbor types) key.
-    // Only `l ≥ LMIN` columns enter the leftover: the radial/low-l block is
-    // a breathing mode on a closed packing shell.
     let mut rows: Vec<Vec<f64>> = vec![Vec::new(); n];
     let mut j_raw: Vec<Vec<f64>> = vec![Vec::new(); n];
     let m = 3 * n;
     for idx in 0..out.keys().count() {
         let block = out.block_by_id(idx);
         let array = block.values().to_array();
-        let shape = array.shape().to_vec();
-        let flat: Vec<f64> = array.iter().copied().collect();
-        let n_s = shape[0];
-        let n_f = shape[shape.len() - 1];
+        let n_s = array.shape()[0];
+        let n_f = array.shape()[array.ndim() - 1];
+        let flat_owned;
+        let flat: &[f64] = if let Some(slice) = array.as_slice() {
+            slice
+        } else {
+            flat_owned = array.iter().copied().collect::<Vec<f64>>();
+            &flat_owned
+        };
         let samples = block.samples();
         let sample_names = samples.names();
         let atom_col = sample_names.iter().position(|&s| s == "atom").unwrap_or(0);
@@ -231,12 +419,16 @@ fn spectrum_keep(
         }
         if let Some(g) = block.gradient("positions") {
             let garray = g.values().to_array();
-            let gshape = garray.shape().to_vec();
-            let gflat: Vec<f64> = garray.iter().copied().collect();
-            let (g_rows, g_dirs, g_f) = (gshape[0], gshape[1], gshape[2]);
+            let (g_rows, g_dirs, g_f) = (garray.shape()[0], garray.shape()[1], garray.shape()[2]);
+            let gflat_owned;
+            let gflat: &[f64] = if let Some(slice) = garray.as_slice() {
+                slice
+            } else {
+                gflat_owned = garray.iter().copied().collect::<Vec<f64>>();
+                &gflat_owned
+            };
             let gsamp = g.samples();
             for grow in 0..g_rows {
-                // ("sample", "system", "atom")
                 let sample = gsamp[grow][0].usize();
                 let atom = gsamp[grow][2].usize();
                 if sample >= n_s || atom >= n {
@@ -260,12 +452,34 @@ fn spectrum_keep(
         }
     }
     let n_feat = rows.iter().map(|r| r.len()).max().unwrap_or(0);
-    for r in &mut rows {
-        r.resize(n_feat, 0.0);
+    for row in &mut rows {
+        row.resize(n_feat, 0.0);
     }
-    for j in &mut j_raw {
-        j.resize(n_feat * m, 0.0);
+    for column in &mut j_raw {
+        column.resize(n_feat * m, 0.0);
     }
+    PowerRows {
+        rows,
+        j_raw,
+        n_feat,
+    }
+}
+
+fn spectrum_keep(
+    x: ArrayView1<f64>,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    lmin: i32,
+    with_gradients: bool,
+) -> Spectrum {
+    let n = x.len() / 3;
+    let PowerRows {
+        rows,
+        j_raw,
+        n_feat,
+    } = cached_power_rows(x, rcut, species, mobile, lmin, with_gradients);
+    let m = 3 * n;
 
     let keep = mobile_mask(n, mobile);
     let zi = |i: usize| species.and_then(|z| z.get(i).copied()).unwrap_or(0);
@@ -445,8 +659,8 @@ pub fn soap_bank_distance_lmin(
     mobile: Option<&[usize]>,
     lmin: i32,
 ) -> f64 {
-    let ua = unit(&spectrum_keep(a, rcut, species, mobile, lmin).cloud_mean);
-    let ub = unit(&spectrum_keep(b, rcut, species, mobile, lmin).cloud_mean);
+    let ua = unit(&spectrum_keep(a, rcut, species, mobile, lmin, true).cloud_mean);
+    let ub = unit(&spectrum_keep(b, rcut, species, mobile, lmin, true).cloud_mean);
     if ua.len() != ub.len() || ua.is_empty() {
         return f64::INFINITY;
     }
@@ -1069,10 +1283,10 @@ pub fn step_away_featomic<R: Rng + ?Sized>(
     mobile: Option<&[usize]>,
     rng: &mut R,
 ) -> Array1<f64> {
-    let mut s = spectrum(x, rcut, species, mobile);
-    let nnu = (s.n_at * s.n_feat).max(1) as f64;
-    let rms = (s.leftover.iter().map(|v| v * v).sum::<f64>() / nnu).sqrt();
-    if rms < DEFECT || shell_leftover(&s) {
+    let values = spectrum_values(x, rcut, species, mobile);
+    let nnu = (values.n_at * values.n_feat).max(1) as f64;
+    let rms = (values.leftover.iter().map(|v| v * v).sum::<f64>() / nnu).sqrt();
+    if rms < DEFECT || shell_leftover(&values) {
         let archive = PACK_ARCHIVE.with(|a| a.borrow().clone());
         if !archive.is_empty() {
             return step_into_hole(x, &archive, SOAP_PACK_MERGE, rcut, species, mobile, rng);
@@ -1092,11 +1306,23 @@ pub fn step_away_featomic<R: Rng + ?Sized>(
         // the displacement sphere is the generic rearrangement. The
         // fivefold residual is the fallback when that placement does
         // not move, and the kick remains only if that residual is flat.
+        // The kick's Jacobian is not read when an earlier step moves.
+        // Its two uniform draws per mean component still are, so the
+        // stream stays the one the gradient path would have left.
         let covered = leave_archive_hole(x, rcut, species, mobile, rmsd, rng);
         let five = crate::soap::step_away_fivefold_measured(x, rmsd);
+        if displacement_rms(&covered, x) > 1e-6 || displacement_rms(&five, x) > 1e-6 {
+            for _ in 0..values.cloud_mean.len() {
+                let _: f64 = rng.random();
+                let _: f64 = rng.random();
+            }
+            return first_that_moves(x, &[covered, five]);
+        }
+        let s = spectrum(x, rcut, species, mobile);
         let kick = packing_kick(x, &s, rmsd, mobile, rng);
         return first_that_moves(x, &[covered, five, kick]);
     }
+    let mut s = spectrum(x, rcut, species, mobile);
     focus_patch(&mut s, x, rcut, rng);
     let dr = tikhonov(&s.jacobian, s.leftover.view(), LAMBDA);
     pin_frozen(x, scale_to_cap(x, dr, rmsd), mobile)
@@ -1217,6 +1443,87 @@ mod tests {
             s += d * d;
         }
         assert!((s / 13.0).sqrt() > 1e-8, "archive-null hop was identity");
+    }
+
+    fn hop_with_gradients<R: Rng + ?Sized>(
+        x: ArrayView1<f64>,
+        rmsd: f64,
+        rcut: f64,
+        species: Option<&[u32]>,
+        mobile: Option<&[usize]>,
+        rng: &mut R,
+    ) -> Array1<f64> {
+        let mut s = spectrum(x, rcut, species, mobile);
+        let nnu = (s.n_at * s.n_feat).max(1) as f64;
+        let rms = (s.leftover.iter().map(|v| v * v).sum::<f64>() / nnu).sqrt();
+        if rms < DEFECT || shell_leftover(&s) {
+            let archive = PACK_ARCHIVE.with(|a| a.borrow().clone());
+            if !archive.is_empty() {
+                return step_into_hole(x, &archive, SOAP_PACK_MERGE, rcut, species, mobile, rng);
+            }
+            if mobile.is_some_and(|set| set.len() < x.len() / 3) {
+                return x.to_owned();
+            }
+            let covered = leave_archive_hole(x, rcut, species, mobile, rmsd, rng);
+            let five = crate::soap::step_away_fivefold_measured(x, rmsd);
+            let kick = packing_kick(x, &s, rmsd, mobile, rng);
+            return first_that_moves(x, &[covered, five, kick]);
+        }
+        focus_patch(&mut s, x, rcut, rng);
+        let dr = tikhonov(&s.jacobian, s.leftover.view(), LAMBDA);
+        pin_frozen(x, scale_to_cap(x, dr, rmsd), mobile)
+    }
+
+    #[test]
+    fn values_match_and_the_closed_shell_hop_matches_the_gradient_path() {
+        let x = regular_icosahedron();
+        let full = spectrum(x.view(), 3.5, None, None);
+        let values = spectrum_values(x.view(), 3.5, None, None);
+        assert_eq!(full.cloud_mean.len(), values.cloud_mean.len());
+        for (left, right) in full.leftover.iter().zip(values.leftover.iter()) {
+            assert_eq!(left.to_bits(), right.to_bits());
+        }
+        for (left, right) in full.cloud_mean.iter().zip(values.cloud_mean.iter()) {
+            assert_eq!(left.to_bits(), right.to_bits());
+        }
+        let nnu = (values.n_at * values.n_feat).max(1) as f64;
+        let rms = (values.leftover.iter().map(|v| v * v).sum::<f64>() / nnu).sqrt();
+        assert!(
+            rms < DEFECT || shell_leftover(&values),
+            "regular icosahedron is not the closed-shell path this shortcut claims"
+        );
+        let mut rng_new = StdRng::seed_from_u64(11);
+        let mut rng_old = StdRng::seed_from_u64(11);
+        let y = step_away_featomic(x.view(), 0.35, 3.5, None, None, &mut rng_new);
+        let z = hop_with_gradients(x.view(), 0.35, 3.5, None, None, &mut rng_old);
+        assert_eq!(y.len(), z.len());
+        for (left, right) in y.iter().zip(z.iter()) {
+            assert_eq!(left.to_bits(), right.to_bits());
+        }
+        assert_eq!(rng_new.random::<u64>(), rng_old.random::<u64>());
+    }
+
+    #[test]
+    fn repeated_power_rows_reuse_an_unchanged_neighbourhood() {
+        let x = ico13();
+        let (hits, _, _, _) = soap_cache_stats();
+        let first = spectrum_values(x.view(), 3.5, None, None);
+        let second = spectrum_values(x.view(), 3.5, None, None);
+        for (left, right) in first.leftover.iter().zip(second.leftover.iter()) {
+            assert_eq!(left.to_bits(), right.to_bits());
+        }
+        let (hits_after, _, _, _) = soap_cache_stats();
+        assert!(hits_after > hits);
+        let mut moved = x.clone();
+        moved[0] += 0.4;
+        let third = spectrum_values(moved.view(), 3.5, None, None);
+        assert!(
+            first
+                .leftover
+                .iter()
+                .zip(third.leftover.iter())
+                .any(|(left, right)| left.to_bits() != right.to_bits())
+        );
     }
 
     #[test]

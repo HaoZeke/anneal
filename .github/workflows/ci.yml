@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
 
 concurrency:
@@ -32,11 +32,44 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # `vendor/nng` and `vendor/nng-sys` are workspace-excluded path
+      # dependencies. `cargo fmt --all` still walks every path dependency,
+      # and stable rustfmt rewrites that tree: its rustfmt.toml asks for
+      # nightly options, and the `ignore` key is unstable on stable.
+      # Format workspace members only. Do not reformat the vendored sources.
       - name: cargo fmt
-        run: cargo fmt --all -- --check
+        run: cargo fmt -- --check
 
-      - name: Verify crate publication package
-        run: cargo publish --dry-run
+      - name: cargo clippy (default features)
+        run: cargo clippy --all-targets -- -D warnings
+
+      # `cargo package` writes anneal-core-${version}.crate and verifies
+      # it. The next step extracts that crate, drops the development
+      # cargo config and the lockfile, and checks the default features
+      # plus `rgsaddle,python` against crates.io.
+      - name: Package the crate
+        run: cargo package
+
+      - name: Check packaged default features against crates.io
+        shell: bash
+        run: |
+          set -euo pipefail
+          meta=$(cargo metadata --format-version 1 --no-deps)
+          read -r target version < <(python3 -c 'import json,sys; m=json.loads(sys.argv[1]); pkg=next(p for p in m["packages"] if p["name"]=="anneal-core"); print(m["target_directory"], pkg["version"])' "$meta")
+          crate="${target}/package/anneal-core-${version}.crate"
+          test -f "$crate"
+          work=$(mktemp -d)
+          tar -xzf "$crate" -C "$work"
+          pkg=$(find "$work" -mindepth 1 -maxdepth 1 -type d)
+          test -d "$pkg"
+          rm -rf "$pkg/.cargo"
+          rm -f "$pkg/Cargo.lock"
+          (
+            cd "$pkg"
+            cargo generate-lockfile
+            cargo check --locked
+            cargo check --locked --features rgsaddle,python
+          )
 
       - name: Checkout Vesin
         uses: actions/checkout@v6
@@ -108,7 +141,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, macos-15]
+        # macos-14 jobs are cancelled in about a second by the runner-image
+        # brownout. The image is retired on 2026-11-02; macos-26 replaces it.
+        os: [ubuntu-latest, macos-15, macos-26]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
@@ -120,6 +155,45 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+
+      # ubuntu-latest keeps Android, .NET, Conda, browsers, and the
+      # toolcache on a disk that only guarantees about 14 GiB free.
+      # The test job then links a default-feature target and a second
+      # one for CI_FEATURES. The feature link died with no space left
+      # after the default suite had passed. Those preinstalled trees
+      # are unused here. Python stays; setup-python just installed it.
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          df -h /
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /usr/share/miniconda \
+            /usr/local/share/vcpkg \
+            /usr/local/.ghcup \
+            /opt/ghc \
+            /usr/share/swift \
+            /usr/local/share/powershell \
+            /usr/local/share/chromium \
+            /usr/local/share/chromedriver-linux64 \
+            /usr/local/share/edge_driver \
+            /usr/local/share/gecko_driver \
+            /opt/google \
+            /opt/microsoft \
+            /opt/az \
+            /usr/lib/jvm \
+            /home/linuxbrew
+          if [[ -d /opt/hostedtoolcache ]]; then
+            find /opt/hostedtoolcache -mindepth 1 -maxdepth 1 ! -name Python \
+              -exec sudo rm -rf {} +
+          fi
+          if command -v docker >/dev/null 2>&1; then
+            sudo docker image prune --all --force || true
+          fi
+          sudo apt-get clean
+          df -h /
 
       - name: Checkout Vesin
         uses: actions/checkout@v6
@@ -184,6 +258,13 @@ jobs:
           --config 'target.aarch64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
           test
 
+      # Feature flags stamp new hashes on the same test binaries and
+      # examples. Keeping the default-feature target filled the disk
+      # during the second link.
+      - name: cargo clean (before feature tests)
+        if: runner.os != 'macOS'
+        run: cargo clean
+
       - name: cargo test (all satisfiable features)
         if: runner.os != 'macOS'
         run: cargo test --features "$CI_FEATURES"
@@ -195,6 +276,12 @@ jobs:
           --config 'target.x86_64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
           --config 'target.aarch64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
           test --features "$CI_FEATURES"
+
+      # maturin develop builds the dev profile and cannot reuse the
+      # opt-level 2 test artifacts. Drop them before the wheel.
+      - name: cargo clean (before the wheel)
+        if: runner.os != 'macOS'
+        run: cargo clean
 
       - name: Create virtualenv
         shell: bash

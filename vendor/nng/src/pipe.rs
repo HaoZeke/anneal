@@ -20,16 +20,13 @@ use crate::{dialer::Dialer, listener::Listener};
 ///
 /// [1]: https://nanomsg.github.io/nng/man/v1.2.2/nng_pipe.5
 #[derive(Clone, Copy, Debug)]
-pub struct Pipe
-{
+pub struct Pipe {
 	/// The underlying NNG pipe.
 	handle: nng_sys::nng_pipe,
 }
-impl Pipe
-{
+impl Pipe {
 	/// Returns the dialer associated with this pipe, if any.
-	pub fn dialer(self) -> Option<Dialer>
-	{
+	pub fn dialer(self) -> Option<Dialer> {
 		let (dialer, id) = unsafe {
 			let dialer = nng_sys::nng_pipe_dialer(self.handle);
 			let id = nng_sys::nng_dialer_id(dialer);
@@ -40,8 +37,7 @@ impl Pipe
 	}
 
 	/// Returns the listener associated with this pipe, if any.
-	pub fn listener(self) -> Option<Listener>
-	{
+	pub fn listener(self) -> Option<Listener> {
 		let (listener, id) = unsafe {
 			let listener = nng_sys::nng_pipe_listener(self.handle);
 			let id = nng_sys::nng_listener_id(listener);
@@ -58,8 +54,7 @@ impl Pipe
 	/// automatically closed when their creator closes or when the remote peer
 	/// closes the underlying connection.
 	#[allow(clippy::missing_panics_doc)]
-	pub fn close(self)
-	{
+	pub fn close(self) {
 		// The pipe either closes succesfully, was already closed, or was never open. In
 		// any of those scenarios, the pipe is in the desired state. As such, we don't
 		// care about the return value.
@@ -72,44 +67,43 @@ impl Pipe
 	}
 
 	/// Returns the underlying NNG handle for the pipe.
-	pub(crate) const fn handle(self) -> nng_sys::nng_pipe { self.handle }
+	pub(crate) const fn handle(self) -> nng_sys::nng_pipe {
+		self.handle
+	}
 
 	/// Create a new Pipe handle from a NNG handle.
 	///
 	/// This function will panic if the handle is not valid.
-	pub(crate) fn from_nng_sys(handle: nng_sys::nng_pipe) -> Self
-	{
+	pub(crate) fn from_nng_sys(handle: nng_sys::nng_pipe) -> Self {
 		assert!(unsafe { nng_sys::nng_pipe_id(handle) > 0 }, "Pipe handle is not initialized");
 		Pipe { handle }
 	}
 }
 
 #[cfg(feature = "ffi-module")]
-impl Pipe
-{
+impl Pipe {
 	/// Returns the handle to the underlying `nng_pipe` object.
-	pub fn nng_pipe(self) -> nng_sys::nng_pipe { self.handle() }
+	pub fn nng_pipe(self) -> nng_sys::nng_pipe {
+		self.handle()
+	}
 }
 
-impl PartialEq for Pipe
-{
-	fn eq(&self, other: &Pipe) -> bool
-	{
+impl PartialEq for Pipe {
+	fn eq(&self, other: &Pipe) -> bool {
 		unsafe { nng_sys::nng_pipe_id(self.handle) == nng_sys::nng_pipe_id(other.handle) }
 	}
 }
 
 impl Eq for Pipe {}
 
-impl PartialOrd for Pipe
-{
-	fn partial_cmp(&self, other: &Pipe) -> Option<Ordering> { Some(self.cmp(other)) }
+impl PartialOrd for Pipe {
+	fn partial_cmp(&self, other: &Pipe) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
 }
 
-impl Ord for Pipe
-{
-	fn cmp(&self, other: &Pipe) -> Ordering
-	{
+impl Ord for Pipe {
+	fn cmp(&self, other: &Pipe) -> Ordering {
 		unsafe {
 			let us = nng_sys::nng_pipe_id(self.handle);
 			let them = nng_sys::nng_pipe_id(other.handle);
@@ -118,10 +112,8 @@ impl Ord for Pipe
 	}
 }
 
-impl Hash for Pipe
-{
-	fn hash<H: Hasher>(&self, state: &mut H)
-	{
+impl Hash for Pipe {
+	fn hash<H: Hasher>(&self, state: &mut H) {
 		let id = unsafe { nng_sys::nng_pipe_id(self.handle) };
 		id.hash(state);
 	}
@@ -158,10 +150,9 @@ expose_options!{
 }
 
 #[cfg(unix)]
-mod unix_impls
-{
+mod unix_impls {
 	use super::*;
-	use crate::options::{transport::ipc, SetOpt};
+	use crate::options::{SetOpt, transport::ipc};
 
 	impl SetOpt<ipc::PeerUid> for Pipe {}
 	impl SetOpt<ipc::PeerGid> for Pipe {}
@@ -172,8 +163,7 @@ mod unix_impls
 ///
 /// [`Pipe`]: struct.Pipe.html
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum PipeEvent
-{
+pub enum PipeEvent {
 	/// Occurs after a connection and negotiation has completed but before the
 	/// pipe is added to the socket.
 	///
@@ -199,11 +189,9 @@ pub enum PipeEvent
 	#[doc(hidden)]
 	Unknown(u32),
 }
-impl PipeEvent
-{
+impl PipeEvent {
 	/// Converts the NNG code into a `PipeEvent`.
-	pub(crate) fn from_code(event: u32) -> Self
-	{
+	pub(crate) fn from_code(event: u32) -> Self {
 		match event {
 			nng_sys::NNG_PIPE_EV_ADD_PRE => PipeEvent::AddPre,
 			nng_sys::NNG_PIPE_EV_ADD_POST => PipeEvent::AddPost,

@@ -39,7 +39,7 @@ fn cluster_search(n: usize, budget: usize, seed: u64, recommended: bool) -> Sear
         );
         (f, xr)
     };
-    let out = optimize(&cfg, &mut ledger, &mut relax, seed);
+    let out = optimize(&cfg, &mut ledger, &mut relax, seed).expect("finite start");
     SearchReport {
         best: out.best_state.unwrap_or_else(|| Array1::zeros(3 * n)),
         best_energy: out.best,
@@ -81,18 +81,38 @@ fn recommended_differs_from_for_cluster() {
     let base = Config::for_cluster(38);
     assert_eq!(rec.n_points, 38);
     assert_eq!(base.n_points, 38);
-    assert!(matches!(rec.move_library, MoveLibrary::LeanBurst));
+    assert!(matches!(rec.move_library, MoveLibrary::Reseed));
+    let names: Vec<String> = rec
+        .move_library
+        .kernels(&rec)
+        .iter()
+        .map(|kernel| kernel.name())
+        .collect();
+    assert!(
+        names.iter().any(|name| name == "grow:fcc"),
+        "LJ38 recommended must be able to grow the octahedron: {names:?}"
+    );
+    assert!(matches!(
+        Config::recommended(75).move_library,
+        MoveLibrary::LeanBurst
+    ));
+    assert!(matches!(
+        Config::derived(38).move_library,
+        MoveLibrary::Reseed
+    ));
     assert!(rec.allocate_moves && rec.depth_reward && rec.tabu_on_stall);
-    assert!(!rec.escape_on_stall);
-    assert!(!rec.restart_on_stall);
+    assert!(rec.trail_on_stall && rec.escape_on_stall && rec.restart_on_stall);
+    assert!(rec.bayes_screen && base.bayes_screen);
     assert!(matches!(base.move_library, MoveLibrary::Atomic));
     assert!(!(base.allocate_moves || base.depth_reward || base.tabu_on_stall));
-    assert!(!base.escape_on_stall);
+    assert!(!base.trail_on_stall && !base.escape_on_stall && !base.restart_on_stall);
 }
 
 #[test]
-fn recommended_relaxation_is_the_plain_energy() {
+fn recommended_draws_the_compacted_surface_below_98() {
     let rec = Config::recommended(75);
     assert!(rec.two_phase.is_none());
-    assert!(rec.surfaces.is_empty());
+    assert_eq!(rec.surfaces, Config::communicating(75).surfaces);
+    assert!(rec.orbit_complete_on_new);
+    assert!(Config::recommended(98).surfaces.is_empty());
 }

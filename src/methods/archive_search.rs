@@ -93,6 +93,11 @@ pub struct ArchiveOutcome {
     pub charged: usize,
     /// Ledger spend when `best` last improved.
     pub best_at: usize,
+    /// A requested constant-energy (NVE) escape stopped a hop.
+    ///
+    /// Set when [`crate::methods::cluster_hopping::Outcome::nve_unavailable`]
+    /// is set on any hop in the run.
+    pub nve_unavailable: bool,
 }
 
 fn hop_best_at(hop: &crate::methods::cluster_hopping::Outcome, fallback: usize) -> usize {
@@ -113,6 +118,7 @@ struct HopAcc {
     returned: usize,
     artn: usize,
     basins: usize,
+    nve_unavailable: bool,
 }
 
 fn paid_full_quenches(cfg: &Config, allocated: usize, hops: usize) -> usize {
@@ -225,6 +231,7 @@ fn hops_from_start<'g, R: Rng + ?Sized>(
         returned: 0,
         artn: 0,
         basins: 0,
+        nve_unavailable: false,
     };
     let mut spent_before = ledger.spent();
     for (i, &slice) in slices.iter().enumerate() {
@@ -233,18 +240,20 @@ fn hops_from_start<'g, R: Rng + ?Sized>(
             break;
         }
         let take = slice.max(1).min(rest);
-        let mut led = Ledger::new(take);
+        let mut led = ledger.slice(take);
         let x0 = if residual && i > 0 {
             residual_start(start, cfg, rng)
         } else {
             start.to_owned()
         };
-        let hop = run_with_gradient(cfg, x0.view(), &mut led, relax, grad.as_deref_mut(), rng);
+        let hop = run_with_gradient(cfg, x0.view(), &mut led, relax, grad.as_deref_mut(), rng)
+            .expect("finite start");
         let used = led.spent();
         let _ = ledger.charge_many(used);
         acc.screens += hop.screened_out;
         acc.full += paid_full_quenches(cfg, take, hop.hops);
         acc.returned += hop.returned;
+        acc.nve_unavailable |= hop.nve_unavailable;
         acc.artn += hop.symmetrised.0 + hop.stall_escapes;
         acc.basins = acc.basins.max(hop.basins);
         if hop.best.is_finite() {
@@ -399,6 +408,7 @@ fn fold_hop(
     acc.screens += hop.screened_out;
     acc.full += paid_full_quenches(cfg, allocated, hop.hops);
     acc.returned += hop.returned;
+    acc.nve_unavailable |= hop.nve_unavailable;
     acc.artn += hop.symmetrised.0 + hop.stall_escapes;
     acc.basins = acc.basins.max(hop.basins);
     if hop.best.is_finite() && hop.best < acc.best - 1e-12 {
@@ -427,6 +437,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     archive: &mut Archive,
     rng: &mut R,
 ) -> ArchiveOutcome {
+    let _caller_stop = ledger.bind_stop();
     let cap = ledger.remaining();
     // Molecular / slab budgets are a few thousand evaluations. A 30 %
     // skip-return slice is then too short to be a hop, so they spend the
@@ -440,8 +451,9 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             // Hop 1 is that walk to 900. Hop 2 is one 1100-eval residual
             // packing at rec quench with angular moves and group restart.
             let p1 = 900.min(cap);
-            let mut led1 = Ledger::new(p1);
-            let hop1 = run_with_gradient(cfg, start, &mut led1, relax, grad.as_deref_mut(), rng);
+            let mut led1 = ledger.slice(p1);
+            let hop1 = run_with_gradient(cfg, start, &mut led1, relax, grad.as_deref_mut(), rng)
+                .expect("finite start");
             let used1 = led1.spent();
             let _ = ledger.charge_many(used1);
             let at1 = hop_best_at(&hop1, used1);
@@ -456,13 +468,15 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 c2.symmetrise_on_stall = true;
                 let hunt = 850.min(rest);
                 let x2 = residual_start(start, cfg, rng);
-                let mut led2 = Ledger::new(hunt);
+                let mut led2 = ledger.slice(hunt);
                 let hop2 =
-                    run_with_gradient(&c2, x2.view(), &mut led2, relax, grad.as_deref_mut(), rng);
+                    run_with_gradient(&c2, x2.view(), &mut led2, relax, grad.as_deref_mut(), rng)
+                        .expect("finite start");
                 let used2 = led2.spent();
                 let _ = ledger.charge_many(used2);
                 let at2 = used1.saturating_add(hop_best_at(&hop2, used2));
                 let rest3 = ledger.remaining();
+                let mut nve_unavailable = hop1.nve_unavailable || hop2.nve_unavailable;
                 let (best, best_state, best_at, basins, screens, full, returned, artn) =
                     if rest3 > 0 && hop2.best < hop1.best - 0.015 && hop2.best_state.is_some() {
                         let mut c3 = c2.clone();
@@ -478,7 +492,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                                 };
                         }
                         let x3 = hop2.best_state.clone().unwrap();
-                        let mut led3 = Ledger::new(rest3);
+                        let mut led3 = ledger.slice(rest3);
                         let hop3 = run_with_gradient(
                             &c3,
                             x3.view(),
@@ -486,8 +500,10 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                             relax,
                             grad.as_deref_mut(),
                             rng,
-                        );
+                        )
+                        .expect("finite start");
                         let _ = ledger.charge_many(led3.spent());
+                        nve_unavailable |= hop3.nve_unavailable;
                         let at3 = used1
                             .saturating_add(used2)
                             .saturating_add(hop_best_at(&hop3, led3.spent()));
@@ -562,6 +578,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                     returned,
                     artn,
                     basins,
+                    nve_unavailable,
                 }
             } else {
                 HopAcc {
@@ -573,6 +590,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                     returned: hop1.returned,
                     artn: hop1.symmetrised.0 + hop1.stall_escapes + hop1.restarts,
                     basins: hop1.basins,
+                    nve_unavailable: hop1.nve_unavailable,
                 }
             };
             if acc.best.is_finite()
@@ -592,6 +610,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 artn: acc.artn,
                 charged: ledger.spent(),
                 best_at: acc.best_at,
+                nve_unavailable: acc.nve_unavailable,
             };
         }
         let mut c = cfg.clone();
@@ -634,6 +653,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             artn: acc.artn,
             charged: ledger.spent(),
             best_at: acc.best_at,
+            nve_unavailable: acc.nve_unavailable,
         };
     }
     // Explore (skip-return) then residual holes / non-incumbent keys.
@@ -644,8 +664,9 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     c_fast.return_screen = true;
     c_fast.return_polish = 0;
     c_fast.symmetrise_on_stall = true;
-    let mut led1 = Ledger::new(explore);
-    let hop1 = run_with_gradient(&c_fast, start, &mut led1, relax, grad.as_deref_mut(), rng);
+    let mut led1 = ledger.slice(explore);
+    let hop1 = run_with_gradient(&c_fast, start, &mut led1, relax, grad.as_deref_mut(), rng)
+        .expect("finite start");
     let used1 = led1.spent();
     let _ = ledger.charge_many(used1);
     let at1 = hop_best_at(&hop1, used1);
@@ -672,6 +693,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         returned: hop1.returned,
         artn: hop1.symmetrised.0 + hop1.stall_escapes,
         basins: hop1.basins,
+        nve_unavailable: hop1.nve_unavailable,
     };
     let mut c_res = cfg.clone();
     c_res.return_screen = true;
@@ -684,8 +706,9 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         let rest = ledger.remaining();
         let take = (rest / 2).max(cfg.relax_steps.saturating_mul(8)).min(rest);
         let (from_key, x0) = residual_origin(archive, cfg, start, rng);
-        let mut led = Ledger::new(take.max(1));
-        let hop = run_with_gradient(&c_res, x0.view(), &mut led, relax, grad.as_deref_mut(), rng);
+        let mut led = ledger.slice(take.max(1));
+        let hop = run_with_gradient(&c_res, x0.view(), &mut led, relax, grad.as_deref_mut(), rng)
+            .expect("finite start");
         let used = led.spent();
         if used == 0 {
             break;
@@ -730,6 +753,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         artn: acc.artn,
         charged: ledger.spent(),
         best_at: acc.best_at,
+        nve_unavailable: acc.nve_unavailable,
     }
 }
 
@@ -815,6 +839,69 @@ mod tests {
             e = lj(y.view());
         }
         (e, y)
+    }
+
+    /// A caller that raises the parent stop during a slice must get the
+    /// archive back at once. The slice ledger is where a force-call cap
+    /// used to keep walking after the potential had stopped.
+    #[test]
+    fn caller_stop_ends_the_archive_at_once() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::time::{Duration, Instant};
+
+        const AFTER: usize = 40;
+        let stop = Arc::new(AtomicBool::new(false));
+        let calls = AtomicUsize::new(0);
+        let mut cfg = Config::for_cluster(6);
+        cfg.relax_steps = 40;
+        cfg.screen_steps = 8;
+        let mut rng = StdRng::seed_from_u64(1);
+        let start = random_cluster(6, 0.7, cfg.min_separation, &mut rng);
+        let mut ledger = Ledger::with_stop(80_000, Arc::clone(&stop));
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            let mut energy = 0.0;
+            for _ in 0..steps.max(1) {
+                let n = calls.fetch_add(1, Ordering::SeqCst);
+                if n + 1 >= AFTER {
+                    stop.store(true, Ordering::SeqCst);
+                }
+                assert!(
+                    n < AFTER + 24,
+                    "archive kept calling the relaxation after the stop ({n} calls)"
+                );
+                if !led.charge() {
+                    break;
+                }
+                energy = 1.0;
+            }
+            (energy, x.to_owned())
+        };
+        let mut archive = Archive::new();
+        let started = Instant::now();
+        let out = archive_search(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            &mut archive,
+            &mut rng,
+        );
+        let calls = calls.load(Ordering::SeqCst);
+        assert!(
+            calls <= AFTER + 24,
+            "archive made {calls} calls after a stop at {AFTER}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "archive returned in {:?} with {calls} calls and {} charged",
+            started.elapsed(),
+            out.charged
+        );
+        if out.best.is_finite() {
+            assert!(out.best_state.is_some(), "archive dropped the best state");
+        }
     }
 
     #[test]

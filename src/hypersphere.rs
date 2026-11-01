@@ -24,9 +24,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
-use rand_distr::{Distribution, StandardNormal};
 
 /// Repulsion exponent \(s\) in \(1/\gamma^{s}\). SoftSaddle uses 1.
 pub const COVER_S: f64 = 1.0;
@@ -79,20 +79,51 @@ pub fn cover_points<R: rand::Rng + ?Sized>(
     points
 }
 
+/// Water hexamer displacement dimension: 18 atoms, three Cartesian axes.
+const WATER_COVER_N: usize = 96;
+const WATER_COVER_DIM: usize = 54;
+
 /// Shared covering for `(n, dim)`, farthest-point ordered.
+///
+/// The water size is the stored Gauss–Seidel result. Relaxing it again
+/// is the same points and costs a few tenths of a second on the first
+/// use. Every other size still relaxes.
 pub fn shared_cover(n: usize, dim: usize) -> Arc<Vec<Vec<f64>>> {
     let cache = COVER_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let mut guard = cache.lock().unwrap_or_else(|poison| poison.into_inner());
     if let Some(existing) = guard.get(&(n, dim)) {
         return Arc::clone(existing);
     }
-    let mut rng = StdRng::seed_from_u64(COVER_SEED);
-    let points = cover_points(n, dim, COVER_NITR, &mut rng);
-    let order = farthest_order(&points);
-    let ordered: Vec<Vec<f64>> = order.iter().map(|&i| points[i].clone()).collect();
+    let ordered = if n == WATER_COVER_N && dim == WATER_COVER_DIM {
+        water_cover_points()
+    } else {
+        let mut rng = StdRng::seed_from_u64(COVER_SEED);
+        let points = cover_points(n, dim, COVER_NITR, &mut rng);
+        let order = farthest_order(&points);
+        order.iter().map(|&i| points[i].clone()).collect()
+    };
     let shared = Arc::new(ordered);
     guard.insert((n, dim), Arc::clone(&shared));
     shared
+}
+
+/// Farthest-point order of `cover_points(96, 54, COVER_NITR)` at
+/// [`COVER_SEED`]. Little-endian `f64`, point-major.
+fn water_cover_points() -> Vec<Vec<f64>> {
+    const BYTES: &[u8] = include_bytes!("cover96x54.bin");
+    const _: () = assert!(BYTES.len() == WATER_COVER_N * WATER_COVER_DIM * 8);
+    let mut points = Vec::with_capacity(WATER_COVER_N);
+    for point in 0..WATER_COVER_N {
+        let mut row = Vec::with_capacity(WATER_COVER_DIM);
+        for axis in 0..WATER_COVER_DIM {
+            let offset = (point * WATER_COVER_DIM + axis) * 8;
+            let mut raw = [0u8; 8];
+            raw.copy_from_slice(&BYTES[offset..offset + 8]);
+            row.push(f64::from_le_bytes(raw));
+        }
+        points.push(row);
+    }
+    points
 }
 
 /// Direction `index` of the shared covering, wrapping.
@@ -231,7 +262,7 @@ fn random_sphere<R: rand::Rng + ?Sized>(n: usize, dim: usize, rng: &mut R) -> Ve
     for _ in 0..n {
         let mut v = vec![0.0; dim];
         for item in &mut v {
-            *item = StandardNormal.sample(rng);
+            *item = unit_normal(rng);
         }
         normalize(&mut v);
         points.push(v);
@@ -255,20 +286,32 @@ fn relax_cover<R: rand::Rng + ?Sized>(points: &mut [Vec<f64>], max_iter: usize, 
     let mut step = vec![1.0; n];
     let mut d_e = f64::INFINITY;
     let mut iter = 0usize;
+    // One set of work arrays for the whole relaxation. The stable sort
+    // starts from the identity each sweep, which is what a fresh
+    // `0..n` vector did, so equal contributions keep the same order.
+    let mut contrib = vec![0.0; n];
+    let mut order: Vec<usize> = (0..n).collect();
+    let mut grad = vec![0.0; dim];
+    let mut row = vec![0.0; dim];
+    let mut trial = vec![0.0; dim];
+    let mut trial_pair = vec![0.0; n];
+    let mut trial_dot = vec![0.0; n];
+    let mut trial_geo = vec![0.0; n];
     while iter < max_iter && d_e > COVER_ETOL {
         iter += 1;
-        let mut contrib = vec![0.0; n];
         for i in 0..n {
             contrib[i] = (0..n).map(|j| pair[i * n + j]).sum();
         }
-        let mut order: Vec<usize> = (0..n).collect();
+        for (slot, index) in order.iter_mut().enumerate() {
+            *index = slot;
+        }
         order.sort_by(|&left, &right| {
             contrib[right]
                 .partial_cmp(&contrib[left])
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         for &j in &order {
-            let mut grad = vec![0.0; dim];
+            grad.fill(0.0);
             let mut kept = 0usize;
             for i in 0..n {
                 if i == j {
@@ -277,8 +320,8 @@ fn relax_cover<R: rand::Rng + ?Sized>(points: &mut [Vec<f64>], max_iter: usize, 
                 let dot = dots[i * n + j].clamp(-1.0, 1.0);
                 let g = geo[i * n + j];
                 let tang = (1.0 - dot * dot).sqrt();
-                let w = COVER_S / ((tang + f64::EPSILON) * (g.powf(COVER_S + 1.0) + f64::EPSILON));
-                let mut row = vec![0.0; dim];
+                let w =
+                    COVER_S / ((tang + f64::EPSILON) * (real_pow(g, COVER_S + 1.0) + f64::EPSILON));
                 let mut nrm2 = 0.0;
                 for ax in 0..dim {
                     row[ax] = w * points[i][ax];
@@ -296,7 +339,7 @@ fn relax_cover<R: rand::Rng + ?Sized>(points: &mut [Vec<f64>], max_iter: usize, 
             if iter < 5 && kept == 0 {
                 for point in points.iter_mut() {
                     for item in point.iter_mut() {
-                        let z: f64 = StandardNormal.sample(rng);
+                        let z: f64 = unit_normal(rng);
                         *item += z / 1e5;
                     }
                     normalize(point);
@@ -310,14 +353,10 @@ fn relax_cover<R: rand::Rng + ?Sized>(points: &mut [Vec<f64>], max_iter: usize, 
             }
             let u_old: f64 = (0..n).map(|i| pair[j * n + i]).sum();
             loop {
-                let mut trial = vec![0.0; dim];
                 for ax in 0..dim {
                     trial[ax] = points[j][ax] - step[j] * grad[ax];
                 }
                 normalize(&mut trial);
-                let mut trial_pair = vec![0.0; n];
-                let mut trial_dot = vec![0.0; n];
-                let mut trial_geo = vec![0.0; n];
                 for i in 0..n {
                     if i == j {
                         trial_dot[i] = 1.0;
@@ -332,12 +371,12 @@ fn relax_cover<R: rand::Rng + ?Sized>(points: &mut [Vec<f64>], max_iter: usize, 
                         .sum::<f64>()
                         .clamp(-1.0, 1.0);
                     trial_dot[i] = d;
-                    trial_geo[i] = d.acos();
-                    trial_pair[i] = 1.0 / (trial_geo[i].powf(COVER_S) + f64::EPSILON);
+                    trial_geo[i] = arc_cosine(d);
+                    trial_pair[i] = 1.0 / (real_pow(trial_geo[i], COVER_S) + f64::EPSILON);
                 }
                 let u_new: f64 = trial_pair.iter().sum();
                 if u_new <= u_old {
-                    points[j] = trial;
+                    points[j].copy_from_slice(&trial);
                     for i in 0..n {
                         dots[j * n + i] = trial_dot[i];
                         dots[i * n + j] = trial_dot[i];
@@ -389,8 +428,8 @@ fn refresh_pairs(points: &[Vec<f64>], dots: &mut [f64], geo: &mut [f64], pair: &
                 .sum::<f64>()
                 .clamp(-1.0, 1.0);
             dots[i * n + j] = d;
-            geo[i * n + j] = d.acos();
-            pair[i * n + j] = 1.0 / (geo[i * n + j].powf(COVER_S) + f64::EPSILON);
+            geo[i * n + j] = arc_cosine(d);
+            pair[i * n + j] = 1.0 / (real_pow(geo[i * n + j], COVER_S) + f64::EPSILON);
         }
     }
 }
@@ -404,12 +443,46 @@ fn euclid(left: &[f64], right: &[f64]) -> f64 {
 }
 
 fn geodesic(left: &[f64], right: &[f64]) -> f64 {
-    left.iter()
-        .zip(right.iter())
-        .map(|(a, b)| a * b)
-        .sum::<f64>()
-        .clamp(-1.0, 1.0)
-        .acos()
+    arc_cosine(
+        left.iter()
+            .zip(right.iter())
+            .map(|(a, b)| a * b)
+            .sum::<f64>()
+            .clamp(-1.0, 1.0),
+    )
+}
+
+/// Inverse cosine from the `libm` crate.
+///
+/// `f64::acos` calls the host libm. glibc and libSystem disagree on the
+/// bits, and the Thomson sweep turns that into a different covering.
+fn arc_cosine(value: f64) -> f64 {
+    libm::acos(value)
+}
+
+/// `pow` from the same crate.
+///
+/// `COVER_S` is 1, and LLVM turns `f64::powf` of that constant into a
+/// multiply. The host `pow` is a different function, and it is the one
+/// LLVM emits when the exponent is not a constant.
+fn real_pow(base: f64, exponent: f64) -> f64 {
+    libm::pow(base, exponent)
+}
+
+/// One standard normal, Marsaglia polar, with `libm::log`.
+///
+/// `StandardNormal` is a ziggurat. Its wedge and its tail call the host
+/// `exp` and `ln`, and one ulp of difference there changes a later sample.
+fn unit_normal<R: Rng + ?Sized>(rng: &mut R) -> f64 {
+    loop {
+        let u = rng.random::<f64>() * 2.0 - 1.0;
+        let v = rng.random::<f64>() * 2.0 - 1.0;
+        let radius = u * u + v * v;
+        if radius > 0.0 && radius < 1.0 {
+            let scale = (-2.0 * libm::log(radius) / radius).sqrt();
+            return u * scale;
+        }
+    }
 }
 
 fn normalize(v: &mut [f64]) {
@@ -571,6 +644,38 @@ mod tests {
             .sum::<f64>()
             .sqrt();
         assert!(d > 0.2, "covering directions collapsed, d={d}");
+    }
+
+    fn cover_digest(cover: &[Vec<f64>]) -> u64 {
+        let mut acc: u64 = 0x6a09_e667_f3bc_c909;
+        for point in cover {
+            for value in point {
+                acc = acc
+                    .wrapping_mul(0x0000_0100_0000_01b3)
+                    .wrapping_add(value.to_bits());
+            }
+        }
+        acc
+    }
+
+    #[test]
+    fn water_sized_cover_matches_the_allocating_relaxation() {
+        let mut rng = StdRng::seed_from_u64(COVER_SEED);
+        let points = cover_points(96, 54, COVER_NITR, &mut rng);
+        let order = farthest_order(&points);
+        let ordered: Vec<Vec<f64>> = order.iter().map(|&i| points[i].clone()).collect();
+        assert_eq!(ordered.len(), 96);
+        assert_eq!(ordered[0].len(), 54);
+        // Bit pattern of this seed once acos, pow, and the initial normal
+        // sample go through `libm` rather than the host libm.
+        assert_eq!(cover_digest(&ordered), 0x7f5c_d1ac_6545_0082);
+        let cover = shared_cover(96, 54);
+        assert_eq!(cover.len(), ordered.len());
+        for (got, expect) in cover.iter().zip(&ordered) {
+            for (left, right) in got.iter().zip(expect) {
+                assert_eq!(left.to_bits(), right.to_bits());
+            }
+        }
     }
 
     #[test]

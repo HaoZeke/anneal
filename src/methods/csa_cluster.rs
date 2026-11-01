@@ -202,6 +202,11 @@ pub struct BankOutcome {
     pub deadlocks: usize,
     /// Random minima those enlargements admitted.
     pub injected: usize,
+    /// A requested constant-energy (NVE) escape stopped a slice.
+    ///
+    /// Set when [`crate::methods::cluster_hopping::Outcome::nve_unavailable`]
+    /// is set on any slice in the run.
+    pub nve_unavailable: bool,
 }
 
 /// One chain against its own sub-ledger, settled up against the caller's.
@@ -222,7 +227,7 @@ fn slice_run_inner<'g>(
     rng: &mut StdRng,
 ) -> (Outcome, usize) {
     let before = ledger.spent();
-    let mut slice_ledger = Ledger::new(budget.min(ledger.remaining()));
+    let mut slice_ledger = ledger.slice(budget.min(ledger.remaining()));
     let out = crate::methods::cluster_hopping::run_with_bias(
         cfg,
         start,
@@ -231,7 +236,8 @@ fn slice_run_inner<'g>(
         grad.as_deref_mut(),
         bias,
         rng,
-    );
+    )
+    .expect("finite start");
     ledger.charge_many(slice_ledger.spent());
     if let Some(st) = slice_ledger.best_state.as_ref() {
         ledger.record(slice_ledger.best, st.view());
@@ -271,6 +277,7 @@ pub fn run<'g, D>(
 where
     D: FnMut(ArrayView1<f64>, ArrayView1<f64>) -> f64,
 {
+    let _caller_stop = ledger.bind_stop();
     let mut rng = StdRng::seed_from_u64(seed);
     let total = ledger.remaining();
     let mut slices = 0usize;
@@ -280,6 +287,7 @@ where
     let mut basins = 0usize;
     let mut screened_out = 0usize;
     let mut returned = 0usize;
+    let mut nve_unavailable = false;
     // A model of how low each morphology goes, over the share of points in
     // each local environment. Five numbers, so a Gaussian process over it is
     // exact and cheap; the coordinates would not be.
@@ -338,6 +346,7 @@ where
         basins += out.basins;
         screened_out += out.screened_out;
         returned += out.returned;
+        nve_unavailable |= out.nve_unavailable;
         if let Some(s) = out.best_state.as_ref() {
             if bank_cfg.acquisition {
                 funnel.observe(morphology(s.view(), cfg, bond_cutoff).view(), out.best);
@@ -534,6 +543,7 @@ where
         basins += out.basins;
         screened_out += out.screened_out;
         returned += out.returned;
+        nve_unavailable |= out.nve_unavailable;
         if let Some(s) = out.best_state.as_ref() {
             if bank_cfg.acquisition {
                 funnel.observe(morphology(s.view(), cfg, bond_cutoff).view(), out.best);
@@ -570,6 +580,7 @@ where
         bank: energies,
         deadlocks,
         injected,
+        nve_unavailable,
     }
 }
 
@@ -704,6 +715,70 @@ mod tests {
         let mut cfg = Config::for_cluster(n);
         cfg.max_hops = Some(40);
         cfg
+    }
+
+    /// A stop raised on the campaign ledger has to end the bank at once.
+    /// Each chain runs on a slice, and that slice used to ignore the flag.
+    #[test]
+    fn caller_stop_ends_the_bank_at_once() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::time::{Duration, Instant};
+
+        const AFTER: usize = 40;
+        let stop = Arc::new(AtomicBool::new(false));
+        let calls = AtomicUsize::new(0);
+        let cfg = small_config(8);
+        let bank_cfg = BankConfig {
+            capacity: 4,
+            slice: 400,
+            seeding: 4,
+            ..BankConfig::default()
+        };
+        let mut ledger = Ledger::with_stop(20_000, Arc::clone(&stop));
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            let mut cur = x.to_owned();
+            for _ in 0..steps {
+                let n = calls.fetch_add(1, Ordering::SeqCst);
+                if n + 1 >= AFTER {
+                    stop.store(true, Ordering::SeqCst);
+                }
+                assert!(
+                    n < AFTER + 24,
+                    "the bank kept relaxing after the stop ({n} calls)"
+                );
+                if !led.charge() {
+                    break;
+                }
+                for v in cur.iter_mut() {
+                    *v -= 0.01;
+                }
+            }
+            (washboard(cur.view()), cur)
+        };
+        let started = Instant::now();
+        let out = run(
+            &cfg,
+            &bank_cfg,
+            &mut ledger,
+            &mut relax,
+            None,
+            spectrum_distance(8),
+            1,
+        );
+        let calls = calls.load(Ordering::SeqCst);
+        assert!(
+            calls <= AFTER + 24,
+            "the bank made {calls} calls after a stop at {AFTER}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the bank returned in {:?} with {calls} calls",
+            started.elapsed()
+        );
+        if out.best.is_finite() {
+            assert!(out.best_state.is_some(), "the bank dropped the best state");
+        }
     }
 
     /// The accounting claim the comparison rests on: a bank of chains costs

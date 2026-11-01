@@ -25,13 +25,14 @@
 //! censored by the decision rule it trains. This is the same reason a bandit
 //! keeps a floor on every arm, and [`crate::allocate`] does it there.
 //!
-//! # The approximation, stated
+//! # The predictive tail
 //!
-//! The conjugate Normal-Inverse-Gamma posterior gives a Student-t predictive.
-//! The tail probability here uses the Gaussian with the same variance, which is
-//! exact in the limit of many observations and understates the tails below it.
-//! That is why nothing is decided by the model until [`Screen::warmup`]
-//! observations have arrived; before then every trial is relaxed.
+//! The conjugate Normal-Inverse-Gamma posterior gives a Student-t predictive
+//! with `ν = 2a` degrees of freedom and scale `√(s² (1 + x'Vx))`. The
+//! probability of landing below the incumbent is that distribution's cdf.
+//! A normal cdf of the same scale understates the tails while `ν` is small.
+//! Nothing is decided by the model until [`Screen::warmup`] observations have
+//! arrived; before then every trial is relaxed.
 
 use ndarray::{Array1, Array2, ArrayView1};
 
@@ -153,12 +154,14 @@ impl Screen {
         solve(self.precision.view(), self.rhs.view())
     }
 
-    /// Predictive mean and variance at `x`.
+    /// Predictive mean and Student-t scale squared at `x`.
     ///
-    /// The variance is the Student-t scale, which carries both the noise and
-    /// the uncertainty in the coefficients; the second term is what makes a
+    /// The scale is `s² (1 + x'Vx)`. It carries both the noise and the
+    /// uncertainty in the coefficients; the second term is what makes a
     /// trial unlike anything seen before come out uncertain rather than
-    /// confidently predicted.
+    /// confidently predicted. The degrees of freedom are `2a`, and the
+    /// tail in [`Screen::probability_of_improvement`] is the Student-t cdf
+    /// of that scale, not a normal cdf.
     pub fn predict(&self, x: ArrayView1<f64>) -> Option<(f64, f64)> {
         let m = self.coefficients()?;
         if x.len() != m.len() {
@@ -191,8 +194,8 @@ impl Screen {
             self.relaxed += 1;
             return true;
         }
-        let p = match self.predict(x) {
-            Some((mean, var)) => normal_cdf((best - mean) / var.sqrt().max(1e-12)),
+        let p = match self.probability_of_improvement(x, best) {
+            Some(probability) => probability,
             None => {
                 self.relaxed += 1;
                 return true;
@@ -206,9 +209,12 @@ impl Screen {
     }
 
     /// Posterior probability that a full relaxation would land below `best`.
+    ///
+    /// Student-t with `ν = 2a` and the scale from [`Screen::predict`].
     pub fn probability_of_improvement(&self, x: ArrayView1<f64>, best: f64) -> Option<f64> {
-        let (mean, var) = self.predict(x)?;
-        Some(normal_cdf((best - mean) / var.sqrt().max(1e-12)))
+        let (mean, scale2) = self.predict(x)?;
+        let z = (best - mean) / scale2.sqrt().max(1e-12);
+        Some(student_t_cdf(z, (2.0 * self.a).max(1e-12)))
     }
 }
 
@@ -324,12 +330,131 @@ fn quad_form(a: ndarray::ArrayView2<f64>, x: ArrayView1<f64>) -> Option<f64> {
     Some(x.iter().zip(z.iter()).map(|(p, q)| p * q).sum())
 }
 
+/// Student-t cdf at `t` with `nu` degrees of freedom.
+///
+/// `P(T ≤ t) = 1 - ½ I_x(ν/2, ½)` for `t ≥ 0`, and the complement for
+/// `t < 0`, with `x = ν / (ν + t²)`. `I_x` is the regularized incomplete
+/// beta. At `ν = 1` this is the Cauchy cdf `½ + arctan(t)/π`.
+fn student_t_cdf(t: f64, nu: f64) -> f64 {
+    if !nu.is_finite() || nu <= 0.0 {
+        return f64::NAN;
+    }
+    if t.is_nan() {
+        return f64::NAN;
+    }
+    if t.is_infinite() {
+        return if t.is_sign_positive() { 1.0 } else { 0.0 };
+    }
+    let x = nu / (nu + t * t);
+    let tail = 0.5 * regularized_incomplete_beta(0.5 * nu, 0.5, x);
+    if t >= 0.0 { 1.0 - tail } else { tail }
+}
+
+/// Regularized incomplete beta `I_x(a, b)`, by Lentz's continued fraction.
+fn regularized_incomplete_beta(a: f64, b: f64, x: f64) -> f64 {
+    if x <= 0.0 {
+        return 0.0;
+    }
+    if x >= 1.0 {
+        return 1.0;
+    }
+    let ln_prefix = a * x.ln() + b * (1.0 - x).ln() - ln_beta(a, b);
+    let prefix = ln_prefix.exp();
+    if x < (a + 1.0) / (a + b + 2.0) {
+        prefix * beta_continued_fraction(a, b, x) / a
+    } else {
+        1.0 - prefix * beta_continued_fraction(b, a, 1.0 - x) / b
+    }
+}
+
+/// Continued fraction for the incomplete beta, Numerical Recipes `betacf`.
+fn beta_continued_fraction(a: f64, b: f64, x: f64) -> f64 {
+    const MAXIT: usize = 200;
+    const EPS: f64 = 3.0e-14;
+    const FPMIN: f64 = 1.0e-30;
+    let qab = a + b;
+    let qap = a + 1.0;
+    let qam = a - 1.0;
+    let mut c = 1.0;
+    let mut d = 1.0 - qab * x / qap;
+    if d.abs() < FPMIN {
+        d = FPMIN;
+    }
+    d = 1.0 / d;
+    let mut h = d;
+    for m in 1..=MAXIT {
+        let m = m as f64;
+        let m2 = 2.0 * m;
+        let mut aa = m * (b - m) * x / ((qam + m2) * (a + m2));
+        d = 1.0 + aa * d;
+        if d.abs() < FPMIN {
+            d = FPMIN;
+        }
+        c = 1.0 + aa / c;
+        if c.abs() < FPMIN {
+            c = FPMIN;
+        }
+        d = 1.0 / d;
+        h *= d * c;
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2));
+        d = 1.0 + aa * d;
+        if d.abs() < FPMIN {
+            d = FPMIN;
+        }
+        c = 1.0 + aa / c;
+        if c.abs() < FPMIN {
+            c = FPMIN;
+        }
+        d = 1.0 / d;
+        let del = d * c;
+        h *= del;
+        if (del - 1.0).abs() < EPS {
+            break;
+        }
+    }
+    h
+}
+
+/// `ln B(a, b)` from the Lanczos approximation of `ln Γ`.
+fn ln_beta(a: f64, b: f64) -> f64 {
+    ln_gamma(a) + ln_gamma(b) - ln_gamma(a + b)
+}
+
+/// Lanczos `ln Γ(z)` for `z > 0`, reflection below `1/2`.
+fn ln_gamma(z: f64) -> f64 {
+    if z < 0.5 {
+        return (std::f64::consts::PI / (std::f64::consts::PI * z).sin()).ln() - ln_gamma(1.0 - z);
+    }
+    const COEFFICIENTS: [f64; 9] = [
+        0.999_999_999_999_809_9,
+        676.520_368_121_885_1,
+        -1_259.139_216_722_402_8,
+        771.323_428_777_653_1,
+        -176.615_029_162_140_6,
+        12.507_343_278_686_905,
+        -0.138_571_095_265_720_12,
+        9.984_369_578_019_572e-6,
+        1.505_632_735_149_311_6e-7,
+    ];
+    let z = z - 1.0;
+    let mut acc = COEFFICIENTS[0];
+    for (i, coefficient) in COEFFICIENTS.iter().enumerate().skip(1) {
+        acc += coefficient / (z + i as f64);
+    }
+    let t = z + 7.5;
+    (2.0 * std::f64::consts::PI).sqrt().ln() + (z + 0.5) * t.ln() - t + acc.ln()
+}
+
 /// Standard normal CDF, by the error function's rational approximation.
+///
+/// Kept for the Student-t reference test. The screen tail does not call it.
+#[cfg(test)]
 fn normal_cdf(z: f64) -> f64 {
     0.5 * (1.0 + erf(z / std::f64::consts::SQRT_2))
 }
 
 /// Abramowitz and Stegun 7.1.26, absolute error below 1.5e-7.
+#[cfg(test)]
 fn erf(x: f64) -> f64 {
     let s = if x < 0.0 { -1.0 } else { 1.0 };
     let x = x.abs();
@@ -350,6 +475,51 @@ mod tests {
     /// Features of a trial: an intercept and two cheap measurements.
     fn feat(a: f64, b: f64) -> Array1<f64> {
         array![1.0, a, b]
+    }
+
+    #[test]
+    fn student_t_matches_the_cauchy_and_a_published_quantile() {
+        assert!((student_t_cdf(0.0, 5.0) - 0.5).abs() < 1e-12);
+        assert!((student_t_cdf(0.0, 1.0) - 0.5).abs() < 1e-12);
+        // Cauchy: 1/2 + arctan(1)/pi = 3/4.
+        let cauchy = 0.5 + 1.0_f64.atan() / std::f64::consts::PI;
+        assert!((student_t_cdf(1.0, 1.0) - cauchy).abs() < 1e-12);
+        assert!((student_t_cdf(-1.0, 1.0) - (1.0 - cauchy)).abs() < 1e-12);
+        // t_5 0.95 quantile, to 9 digits.
+        assert!((student_t_cdf(2.015_048_373, 5.0) - 0.95).abs() < 1e-8);
+        assert!((student_t_cdf(-2.015_048_373, 5.0) - 0.05).abs() < 1e-8);
+        let z = 1.644_853_626_951_472_2;
+        assert!((student_t_cdf(z, 1.0e6) - normal_cdf(z)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn improvement_probability_is_the_student_t_of_the_nig_scale() {
+        let mut screen = Screen::new(2, 1, 0.0, 0.5);
+        for i in 0..12 {
+            let a = (i as f64) - 6.0;
+            screen.observe(array![1.0, a].view(), a);
+        }
+        let x = array![1.0, 0.25];
+        let (mean, scale2) = screen.predict(x.view()).unwrap();
+        let best = mean;
+        let z = (best - mean) / scale2.sqrt();
+        let reference = student_t_cdf(z, 2.0 * screen.a);
+        let got = screen.probability_of_improvement(x.view(), best).unwrap();
+        assert!((got - reference).abs() < 1e-12, "{got} against {reference}");
+        assert!(
+            (got - 0.5).abs() < 1e-12,
+            "a mean landing is a half tail, got {got}"
+        );
+        let z_off = -2.0;
+        let off = screen
+            .probability_of_improvement(x.view(), mean + z_off * scale2.sqrt())
+            .unwrap();
+        assert!((off - student_t_cdf(z_off, 2.0 * screen.a)).abs() < 1e-12);
+        assert!(
+            (off - normal_cdf(z_off)).abs() > 1e-3,
+            "the Student-t tail must not collapse to the normal at nu {}",
+            2.0 * screen.a
+        );
     }
 
     #[test]
@@ -408,7 +578,7 @@ mod tests {
     }
 
     /// Everything is relaxed until the model has seen enough to be worth
-    /// consulting, which is what makes the Gaussian tail approximation safe.
+    /// consulting. The Student-t tail is not used before that.
     #[test]
     fn nothing_is_refused_before_warmup() {
         let mut s = Screen::new(3, 50, 0.0, 0.99);

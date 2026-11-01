@@ -1585,7 +1585,8 @@ fn main() {
                     &mut relax,
                     Some(&mut grad),
                     &mut rng_rec,
-                );
+                )
+                .expect("finite start");
                 let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
                 if hit {
                     rec_solved += 1;
@@ -2595,6 +2596,7 @@ fn main() {
                 interval,
                 &mut checkpoint,
             )
+            .expect("finite start")
         } else {
             {
                 // The settle stage: steepest descent of the moved atoms in the
@@ -2662,6 +2664,7 @@ fn main() {
                     },
                     seed,
                 )
+                .expect("finite start")
             }
         };
 
@@ -3992,7 +3995,6 @@ impl Default for HearState {
     }
 }
 
-
 /// One independently budgeted LJ replica against an isolated descriptor catalog.
 fn run_capnp_catalog(
     cfg: &Config,
@@ -4346,7 +4348,7 @@ fn run_capnp_catalog(
             String::new()
         });
         let workdir =
-            std::env::temp_dir().join(format!("anneal-md-{}-{}-{}", campaign, ensemble, replica));
+            std::env::temp_dir().join(format!("anneal-md-{campaign}-{ensemble}-{replica}"));
         let engine =
             anneal_core::md_engine::engine_by_name(&name, std::path::Path::new(&binary), &workdir);
         if engine.is_none() {
@@ -4687,10 +4689,9 @@ fn run_capnp_catalog(
             if let Some(adopted) = state.heard_structure.as_ref()
                 && checkpoint_sequence.is_multiple_of(10)
             {
-                let same_family = snapshot
-                    .current_state()
-                    .as_slice()
-                    .is_some_and(|here| !anneal_core::catalog::different_packing_family(here, adopted));
+                let same_family = snapshot.current_state().as_slice().is_some_and(|here| {
+                    !anneal_core::catalog::different_packing_family(here, adopted)
+                });
                 println!(
                     "  walk hops {}  energy {:.6}  best {:.6}  in-adopted-family {}",
                     snapshot.hops(),
@@ -6643,7 +6644,8 @@ fn run_capnp_catalog(
         &mut local_rng,
         checkpoint_interval,
         &mut checkpoint,
-    );
+    )
+    .expect("finite start");
     println!("  checkpoint phases {}", phases.report());
     if evidence_only && let Some(charged) = unsettled_objective_calls(ledger.spent(), last_charged)
     {
@@ -7514,7 +7516,8 @@ fn run_capnp_bank(
             Some(grad),
             &mut bias,
             &mut rng,
-        );
+        )
+        .expect("finite start");
         ledger.charge_many(slice_led.spent());
         if let Some(st) = slice_led.best_state.as_ref() {
             ledger.record(slice_led.best, st.view());
@@ -7585,9 +7588,9 @@ fn run_history_ensembles(
     #[cfg(feature = "ira")]
     use anneal_core::methods::minima_hopping::SerializedWitness;
     use anneal_core::pes_exploration::StructureContext;
-    use ensemble_report::{
-        config_from_env, print_header, run_seeds, sorted_pairs_witness, witness_name,
-    };
+    #[cfg(not(feature = "ira"))]
+    use ensemble_report::sorted_pairs_witness;
+    use ensemble_report::{config_from_env, print_header, run_seeds};
 
     let ens = config_from_env(replicas, budget, reference.map(|r| r + 1e-4));
     let mut cfg = cfg.clone();
@@ -7612,7 +7615,11 @@ fn run_history_ensembles(
         let _ = pair_cache_bytes;
         sorted_pairs_witness(n, ira_radius)
     };
-    let witness_name = witness_name();
+    let witness_name = if cfg!(feature = "ira") {
+        "ira-cached"
+    } else {
+        "sorted-pairs-fallback"
+    };
     let context = StructureContext::new(Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")));
     let objective: ObjectiveFactory<'_> = &|_| Box::new(|x: ArrayView1<f64>| lj(x));
     let start: StartFactory<'_> =
