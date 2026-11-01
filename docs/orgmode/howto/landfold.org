@@ -9,12 +9,15 @@ The @@rst::doc:`landfold survey </explanation/landfold-survey>`@@ explains the c
 * Inputs
 
 A book is a =.min= dump, one minimum per line with the energy and then 3N coordinates, or a multi-frame =.xyz= file.
-Each minimum becomes a DECAF row, the class histogram of its atoms on one codebook shared by the book.
+Each minimum becomes one row of a packing-identity descriptor.
+The descriptor comes from the Descriptor Embedding and Clustering for Atomistic-environment Framework (DECAF).
+A row is the class histogram of the atoms of a minimum on one codebook shared by the book.
 Rows are compared by L1 distance.
 Any other descriptor matrix can be folded directly.
 
-The =landfold_lj_book= example writes the LJ38 book of the benchmark, 2000 distinct minima from seed 38, if you have no book at hand.
-Run it from the repository root:
+If you have no book at hand, the =landfold_lj_book= example writes one.
+It is the 38-atom Lennard-Jones (LJ38) book of the benchmark, with 2000 distinct minima from seed 38.
+Run the example from the repository root:
 
 #+begin_src sh
 cargo run --release --example landfold_lj_book -- 38 2000 38 lj38.min \
@@ -30,18 +33,22 @@ target/release/anneal landfold lj38.min --seed 0 --out lj38.json --dump-descript
 target/release/anneal landfold --descriptors lj38.desc.csv --out again.csv
 #+end_src
 
-Several books are read in order and folded as one.
-The CSV columns are =index,energy,x,y,landmark,family,community=, one row per minimum in book order.
+If you pass more than one book, landfold reads them in order and folds them as one.
+The comma-separated values (CSV) output has one row per minimum, in book order.
+Its columns are =index,energy,x,y,landmark,family,community=.
 =landmark= is 1 for a landmark.
 =family= and =community= are the DECAF family and occupied-class community.
 =community= is empty when a minimum has none.
 
-The JSON object has =kind= ("landfold"), =n=, =landmarks=, =sigma=, =sigma_low=, =high=, =low=, =stress=, =spectrum= and =points=.
+The JavaScript Object Notation (JSON) output is a single object.
+It has =kind= ("landfold"), =n=, =landmarks=, =sigma=, =sigma_low=, =high=, =low=, =stress=, =spectrum= and =points=.
 Each point carries the CSV fields.
 The output format follows the extension of =--out=, or =--format csv|json=.
 
-The dumped descriptors parse back to equal doubles.
-Folding them with =--descriptors= gives the map of the book bit for bit.
+The =--dump-descriptors= output parses back to equal doubles.
+Folding that file with =--descriptors= therefore gives the map of the book bit for bit.
+
+The options below control how landfold folds a book.
 
 | option             | default          | meaning                                       |
 |--------------------+------------------+-----------------------------------------------|
@@ -52,14 +59,15 @@ Folding them with =--descriptors= gives the map of the book bit for bit.
 | =--sigma-low S=    | sigma            | map switch scale                              |
 | =--high A,B=       | 2,4              | high-dimensional switch exponents             |
 | =--low a,b=        | 2,4              | map switch exponents                          |
-| =--grid G=         | 21               | grid nodes per axis, 0 to skip                |
+| =--grid G=         | 21               | grid nodes per axis; 0 skips the grid         |
 | =--iterations K=   | 200              | L-BFGS iterations per stage                   |
 | =--mix M1,...=     | 1,0.5,0.25,0.1,0 | raw-distance weight of each stage             |
 | =--weight-power G= | 0.5              | landmark weight is Voronoi population to G    |
 | =--metric l1/l2=   | l1               | row distance                                  |
 | =--threads T=      | all cores        | worker threads                                |
 
-A summary on standard error gives sigma, the final stress, lambda1 and lambda2 of the landmark MDS start, and the read and fold times.
+A summary on standard error gives sigma, the final stress, and the read and fold times.
+It also gives lambda1 and lambda2 of the landmark multidimensional scaling (MDS) start.
 =-q= drops it.
 
 * Plot the map
@@ -89,7 +97,8 @@ more = anneal.landfold(new_rows)               # any (n, D) array
 placed = fold["map"].project(new_book_rows)    # held-out rows, (k, 2)
 #+end_src
 
-Both calls take the options of the CLI as keywords, for example =landmarks=, =sigma_scale=, =high= and =threads=.
+Both calls take the options of the command-line interface (CLI) as keywords.
+These include =landmarks=, =sigma_scale=, =high= and =threads=.
 They return a dict with =xy=, =landmarks=, =sigma=, =sigma_low=, =high=, =low=, =stress=, =spectrum= and =map=.
 =landfold_book= adds =energy=, =rows=, =family= and =community=, with -1 for no community.
 =map.project= places rows against the fixed landmarks, and =map.landmark_xy= and =map.weights= expose the fit.
@@ -112,4 +121,5 @@ let new_xy = fold.map.project(&rows.rows[0]);
 
 * Snakemake
 
-The anneal_repro workflow =landfold/Snakefile= runs the CLI per book in its =landfold_coords= rule and writes =results/maps/{book}.csv=.
+In the anneal_repro workflow, =landfold/Snakefile= runs the CLI per book in its =landfold_coords= rule.
+The rule writes =results/maps/{book}.csv=.
