@@ -6,6 +6,10 @@
 //! thread and repeats exactly. The Cambridge energy is a stopping threshold
 //! only. Coordinates of the published minimum are never read.
 //!
+//! With `ANNEAL_MINIMA_DB` set, every chain's validated minima go to the
+//! readcon-db corpus below that root after the run, keyed by the digest the
+//! run prints as `minima_signature`.
+//!
 //! ```text
 //! sc_h2h <iso|ens> <12-6|9-6|10-8> <n> <budget> <seed> <start-file> <reference> [replicas] [turn-calls]
 //! ```
@@ -16,7 +20,7 @@ use std::time::Instant;
 
 use anneal_core::descriptor_space::DescriptorVector;
 use anneal_core::methods::cluster_hopping::{
-    CheckpointAction, Config, Ledger, OrbitCore, Outcome, QuenchBoundary,
+    CheckpointAction, Config, Ledger, OrbitCore, Outcome, QuenchBoundary, QuenchStatus,
     run_with_history_at_checkpoints,
 };
 use anneal_core::methods::minima_hopping::{
@@ -24,6 +28,7 @@ use anneal_core::methods::minima_hopping::{
     history_feedback_membership,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use anneal_core::minima_db::{MinimaCorpus, MinimaSet, MinimaUnits};
 use anneal_core::pes_exploration::{ExactStructureWitness, StructureContext};
 use anneal_core::potentials::{SuttonChen, SuttonChenFamily};
 use anneal_core::symmetrise::ShellCore;
@@ -236,6 +241,31 @@ impl<W: ExactStructureWitness + ?Sized> HistoryHook for RadialHistory<'_, W> {
     }
 }
 
+/// Element written for a family's frames, for viewers only.
+fn element(family: SuttonChenFamily) -> u32 {
+    match family {
+        SuttonChenFamily::Sc12_6 => 47,
+        SuttonChenFamily::Sc9_6 => 28,
+        SuttonChenFamily::Sc10_8 => 79,
+    }
+}
+
+/// Corpus identity of one Sutton-Chen system: row, size and the quench certificate.
+fn minima_signature(family: SuttonChenFamily, n: usize) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(
+        format!(
+            "anneal-sutton-chen;n={};m={};c={};a=1;eps=1;points={n};quench-rms={QUENCH_RMS}",
+            family.n_exp(),
+            family.m_exp(),
+            family.c()
+        )
+        .as_bytes(),
+    );
+    h.finalize().into()
+}
+
 fn read_start(path: &str, n: usize) -> Array1<f64> {
     let text = std::fs::read_to_string(path).expect("start file");
     let coords: Vec<f64> = text
@@ -392,6 +422,15 @@ fn main() {
     println!("length_scale: {length_scale:.10}");
     println!("record_gradient: {:.6e}", cfg.record_gradient);
     println!("identity_radius: {IDENTITY_RADIUS}");
+    let signature = minima_signature(family, n);
+    println!(
+        "minima_signature: {}",
+        signature
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    );
+    let minima_db = std::env::var("ANNEAL_MINIMA_DB").ok();
     println!(
         "resolved_sha256: {}",
         cfg.resolved_sha256()
@@ -424,6 +463,7 @@ fn main() {
                 let start = start.view();
                 let (turns, hit, full_quenches, calls) = (&turns, &hit, &full_quenches, &calls);
                 let (history, context, witness) = (&history, &context, &witness);
+                let minima_db = minima_db.as_deref();
                 let budget = per_replica[r];
                 let replica_seed =
                     seed.wrapping_add((r as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15));
@@ -548,6 +588,43 @@ fn main() {
                         std::process::exit(1);
                     });
                     turns.pass(r, ledger.spent(), true);
+                    if let Some(root) = minima_db {
+                        let entries: Vec<(f64, ArrayView1<f64>)> = ledger
+                            .quench_boundaries()
+                            .iter()
+                            .filter(|b| b.status() == QuenchStatus::Validated)
+                            .map(|b| (b.energy(), b.state()))
+                            .collect();
+                        let set = MinimaSet {
+                            system: format!("sc{}-{n}", family.label()),
+                            temperature: cfg.temperature,
+                            seed: replica_seed,
+                        };
+                        let provenance = serde_json::json!({
+                            "driver": "sc_h2h",
+                            "arm": arm,
+                            "run_seed": seed,
+                            "replica": r,
+                            "budget": budget,
+                            "config_digest": cfg.resolved_sha256().unwrap_or_default(),
+                        });
+                        let units = MinimaUnits {
+                            length: "sutton-chen-a".into(),
+                            energy: "sutton-chen-epsilon".into(),
+                        };
+                        if let Err(e) = MinimaCorpus::open(root, signature).and_then(|corpus| {
+                            corpus.record(
+                                &set,
+                                &vec![element(family); n],
+                                &units,
+                                &entries,
+                                1e-6,
+                                provenance,
+                            )
+                        }) {
+                            eprintln!("minima corpus: {e}");
+                        }
+                    }
                     let cost = hook.cost();
                     (r, replica_seed, ledger.spent(), outcome, cost)
                 })
