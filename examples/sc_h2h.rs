@@ -287,6 +287,33 @@ impl Turns {
 /// Replica index, seed, calls spent, outcome, and history cost.
 type ReplicaEnd = (usize, u64, usize, Outcome, (usize, usize, f64));
 
+/// Where the calls went: screens, full quenches, single points and gradients.
+#[derive(Default)]
+struct Calls {
+    screens: AtomicUsize,
+    screen_calls: AtomicUsize,
+    full_calls: AtomicUsize,
+    single_points: AtomicUsize,
+    gradients_paid: AtomicUsize,
+    gradients_reused: AtomicUsize,
+}
+
+impl Calls {
+    fn add(counter: &AtomicUsize, v: usize) {
+        counter.fetch_add(v, Ordering::Relaxed);
+    }
+
+    fn print(&self) {
+        let get = |c: &AtomicUsize| c.load(Ordering::Relaxed);
+        println!("screens: {}", get(&self.screens));
+        println!("screen_calls: {}", get(&self.screen_calls));
+        println!("full_quench_calls: {}", get(&self.full_calls));
+        println!("single_point_calls: {}", get(&self.single_points));
+        println!("gradient_calls: {}", get(&self.gradients_paid));
+        println!("gradients_reused: {}", get(&self.gradients_reused));
+    }
+}
+
 struct Hit {
     calls: usize,
     quenches: usize,
@@ -361,6 +388,7 @@ fn main() {
 
     let stop = Arc::new(AtomicBool::new(false));
     let full_quenches = AtomicUsize::new(0);
+    let calls = Calls::default();
     let hit: Mutex<Option<Hit>> = Mutex::new(None);
     let turns = Turns::new(replicas);
     let history = Mutex::new(MinimumHistory::new(cfg.record_gradient).expect("history tolerance"));
@@ -382,7 +410,7 @@ fn main() {
                 let stop = Arc::clone(&stop);
                 let pot = potential.clone();
                 let start = start.view();
-                let (turns, hit, full_quenches) = (&turns, &hit, &full_quenches);
+                let (turns, hit, full_quenches, calls) = (&turns, &hit, &full_quenches, &calls);
                 let (history, context, witness) = (&history, &context, &witness);
                 let budget = per_replica[r];
                 let replica_seed =
@@ -401,6 +429,7 @@ fn main() {
                     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
                         if iters == 0 || led.remaining() == 0 {
                             return if led.charge() {
+                                Calls::add(&calls.single_points, 1);
                                 (pot_r.value_and_gradient(x).0, x.to_owned())
                             } else {
                                 (f64::INFINITY, x.to_owned())
@@ -430,6 +459,13 @@ fn main() {
                             xr.clone(),
                             validated.then(|| grad.clone()),
                         );
+                        let paid = led.spent() - charged_before;
+                        if full {
+                            Calls::add(&calls.full_calls, paid);
+                        } else {
+                            Calls::add(&calls.screens, 1);
+                            Calls::add(&calls.screen_calls, paid);
+                        }
                         if full {
                             let q = full_quenches.fetch_add(1, Ordering::Relaxed) + 1;
                             if validated && energy <= target {
@@ -456,9 +492,13 @@ fn main() {
                         if let Some((xs, g)) = last_r.lock().expect("last").as_ref()
                             && xs.view() == x
                         {
+                            Calls::add(&calls.gradients_reused, 1);
                             return Some(g.clone());
                         }
-                        led.charge().then(|| pot_g.value_and_gradient(x).1)
+                        led.charge().then(|| {
+                            Calls::add(&calls.gradients_paid, 1);
+                            pot_g.value_and_gradient(x).1
+                        })
                     };
                     let mut hook = RadialHistory {
                         history,
@@ -537,6 +577,7 @@ fn main() {
     println!("spent: {spent}");
     println!("best: {best:.10}");
     println!("full_quenches: {}", full_quenches.load(Ordering::Relaxed));
+    calls.print();
     let hit = hit.into_inner().expect("hit");
     println!("hit: {}", hit.is_some());
     match hit {
