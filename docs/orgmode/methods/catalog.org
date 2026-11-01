@@ -190,20 +190,12 @@ is loose enough for the angular move. =connectivity_groups=
 (moves.rs:602) derives rigid molecular groups from the current bonding
 rather than a fixed declaration.
 
-Constants and defaults: =LennardJonesPreset= and =MolecularPreset=
-(src/methods/cluster_hopping/preset.rs) fix the dimensionless
-coefficients (e.g. =MERGE_RADIUS = 0.7=, =TEMPERATURE = 0.8=,
-=BIAS_HEIGHT = 0.25=, =SOAP_RMSD = 0.35=, =SOAP_CUTOFF = 3.5=,
-=MIN_SEPARATION = 0.85=) multiplied by declared length/energy scales.
-=Config::recommended= (config.rs:755) selects =MoveLibrary::LeanBurst=
-with the SOAP arm and Thompson allocation over the arms. Like
-=Config::communicating=, it completes the core's orbit on every new basin
-and, below 98 points, draws between the plain and the two-phase relative
-0.7 surface. A completed structure that lands in a basin the history has
-deposited on (=returns_to_deposit=, src/methods/cluster_hopping.rs:1871)
-faces the same biased Metropolis test as a hop (=biased_metropolis=,
-src/methods/cluster_hopping.rs:1851), so the deposits can refuse it. Any
-other completed structure faces the raw energy test.
+Constants and defaults: =LennardJonesPreset= and =MolecularPreset= (src/methods/cluster_hopping/preset.rs) fix the dimensionless coefficients (e.g. =MERGE_RADIUS = 0.7=, =TEMPERATURE = 0.8=, =BIAS_HEIGHT = 0.25=, =SOAP_RMSD = 0.35=, =SOAP_CUTOFF = 3.5=, =MIN_SEPARATION = 0.85=) multiplied by declared length/energy scales.
+=Config::recommended= in src/methods/cluster_hopping/config.rs selects =MoveLibrary::LeanBurst= with the smooth overlap of atomic positions (SOAP) arm and Thompson allocation over the arms.
+Like =Config::communicating=, it completes the core's orbit on every new basin and, below 98 points, draws between the plain and the two-phase relative 0.7 surface.
+A stuck chain (=stalled= in src/methods/cluster_hopping.rs) can complete into the deposited basin of the lowest structure seen (=returns_to_deposit= and =returns_to_best=).
+That structure faces the same biased Metropolis test as a hop (=biased_metropolis= in src/methods/cluster_hopping.rs), so the deposits can refuse it.
+Any other completed structure faces the raw energy test.
 
 Feeds/consumes: selected per-config by =MoveLibrary::kernels=; chosen
 per-hop by the allocators below (=allocate_moves= / =contextual_moves= /
