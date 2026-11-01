@@ -51,6 +51,7 @@ pub struct MinimumHistory {
     network: PesNetwork,
     visits: Vec<u64>,
     accepted_visits: Vec<u64>,
+    completed: Vec<bool>,
     total_visits: u64,
     gradient_tolerance: f64,
 }
@@ -65,6 +66,7 @@ impl MinimumHistory {
             network: PesNetwork::new(),
             visits: Vec::new(),
             accepted_visits: Vec::new(),
+            completed: Vec::new(),
             total_visits: 0,
             gradient_tolerance,
         })
@@ -109,6 +111,19 @@ impl MinimumHistory {
         Ok(())
     }
 
+    /// Claims the orbit completion of `minimum` for the calling chain.
+    ///
+    /// True the first time only. A completion depends on the minimum and
+    /// not on the chain that reached it, so when a second chain completes the
+    /// same identity, it pays for products the history already has.
+    pub fn claim_completion(&mut self, minimum: usize) -> Result<bool, MinimumHistoryError> {
+        let done = self
+            .completed
+            .get_mut(minimum)
+            .ok_or(MinimumHistoryError::UnknownMinimum(minimum))?;
+        Ok(!std::mem::replace(done, true))
+    }
+
     /// Admit one charged minimum certificate and return only search history.
     pub fn observe<W: ExactStructureWitness + ?Sized>(
         &mut self,
@@ -139,6 +154,7 @@ impl MinimumHistory {
         if minimum.is_new {
             self.visits.push(0);
             self.accepted_visits.push(0);
+            self.completed.push(false);
         }
         // Every basin count is bounded by the checked total observation count.
         self.visits[minimum.id] += 1;
@@ -240,6 +256,15 @@ pub trait HistoryHook {
 
     /// Publishes that the chain now stands in `minimum`.
     fn mark_accepted(&mut self, minimum: usize);
+
+    /// Whether this chain should complete the orbit of `minimum`.
+    ///
+    /// True when no chain sharing the history has claimed it. When a history
+    /// keeps no claims, it returns true and every completion runs.
+    fn claim_completion(&mut self, minimum: usize) -> bool {
+        let _ = minimum;
+        true
+    }
 
     /// Observations, refusals and seconds spent in the history.
     fn cost(&self) -> (usize, usize, f64);
@@ -383,6 +408,19 @@ impl<W: ExactStructureWitness + ?Sized> HistoryHook for SharedMinimumHistory<'_,
         self.seconds += started.elapsed().as_secs_f64();
     }
 
+    fn claim_completion(&mut self, minimum: usize) -> bool {
+        let started = Instant::now();
+        // A refused lock or an unknown identity leaves the completion to run.
+        let claimed = self
+            .history
+            .lock()
+            .ok()
+            .and_then(|mut history| history.claim_completion(minimum).ok())
+            .unwrap_or(true);
+        self.seconds += started.elapsed().as_secs_f64();
+        claimed
+    }
+
     fn cost(&self) -> (usize, usize, f64) {
         (self.observations, self.refusals, self.seconds)
     }
@@ -469,6 +507,19 @@ impl<W: ExactStructureWitness + ?Sized> HistoryHook for SharedDesignHistory<'_, 
             let _ = history.mark_accepted(minimum);
         }
         self.seconds += started.elapsed().as_secs_f64();
+    }
+
+    fn claim_completion(&mut self, minimum: usize) -> bool {
+        let started = Instant::now();
+        // A refused lock or an unknown identity leaves the completion to run.
+        let claimed = self
+            .history
+            .lock()
+            .ok()
+            .and_then(|mut history| history.claim_completion(minimum).ok())
+            .unwrap_or(true);
+        self.seconds += started.elapsed().as_secs_f64();
+        claimed
     }
 
     fn cost(&self) -> (usize, usize, f64) {
@@ -584,5 +635,68 @@ mod hook_tests {
         );
         assert_eq!(first.cost().1, 1);
         assert_eq!(history.lock().unwrap().minimum_count(), 2);
+    }
+
+    #[test]
+    fn one_chain_claims_a_completion_and_the_other_does_not() {
+        let history = Mutex::new(MinimumHistory::new(1e-3).unwrap());
+        let descriptor = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+        let context = StructureContext::new(Some(vec![18; 3]), None, Some("test".into()));
+        let witness = SerializedWitness(Mutex::new(SameCoordinates));
+        let mut first = SharedMinimumHistory::new(
+            &history,
+            &descriptor,
+            context.clone(),
+            &witness,
+            HistoryMembership::Accepted,
+        );
+        let mut second = SharedMinimumHistory::new(
+            &history,
+            &descriptor,
+            context,
+            &witness,
+            HistoryMembership::Accepted,
+        );
+        let zero = Array1::zeros(9);
+        let a = first
+            .observe(-1.0, triangle(1.0).view(), zero.view())
+            .unwrap();
+        let b = second
+            .observe(-1.0, triangle(1.0).view(), zero.view())
+            .unwrap();
+        assert_eq!(a.minimum, b.minimum);
+        assert!(first.claim_completion(a.minimum));
+        assert!(!second.claim_completion(b.minimum));
+        assert!(!first.claim_completion(a.minimum));
+        let d = second
+            .observe(-0.5, triangle(2.0).view(), zero.view())
+            .unwrap();
+        assert!(second.claim_completion(d.minimum));
+        assert!(matches!(
+            history.lock().unwrap().claim_completion(99),
+            Err(MinimumHistoryError::UnknownMinimum(99))
+        ));
+    }
+
+    #[test]
+    fn a_hook_without_claims_completes_every_time() {
+        struct Silent;
+        impl HistoryHook for Silent {
+            fn observe(
+                &mut self,
+                _: f64,
+                _: ArrayView1<f64>,
+                _: ArrayView1<f64>,
+            ) -> Option<HistoryReport> {
+                None
+            }
+            fn mark_accepted(&mut self, _: usize) {}
+            fn cost(&self) -> (usize, usize, f64) {
+                (0, 0, 0.0)
+            }
+        }
+        let mut hook = Silent;
+        assert!(hook.claim_completion(0));
+        assert!(hook.claim_completion(0));
     }
 }

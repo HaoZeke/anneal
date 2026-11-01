@@ -933,6 +933,9 @@ pub struct Outcome {
     pub symmetrised: (usize, f64),
     /// Orbit completions attempted, and the energy they gained.
     pub orbits: (usize, f64),
+    /// Orbit candidates skipped unquenched because an earlier candidate of
+    /// the same completion was the identical structure.
+    pub orbit_duplicates: usize,
     /// Continuous-symmetry quenches attempted, and downhill energy gained.
     pub continuous_symmetry: (usize, f64),
     /// Restarts triggered by a stall.
@@ -2626,6 +2629,7 @@ where
     let species_kinetic_floor = (4.0 * cfg.energy_scale).max(f64::MIN_POSITIVE);
     let species_kinetic_cap = (1.5 * n as f64 * cfg.energy_scale).max(species_kinetic);
     let mut orbits_completed = 0usize;
+    let mut orbit_duplicates = 0usize;
     let mut orbit_gain = 0.0_f64;
     let mut accepted_transitions = Vec::new();
     // All live-state replacement consumes one complete destination record.
@@ -5363,13 +5367,18 @@ where
         // raw energy alone it carries the chain back to the shelf it is
         // stuck on. A filled basin above that shelf is often where the
         // chain goes on to the minimum, so a return there stays raw.
+        // Under a shared history each minimum is completed by one chain only,
+        // and every product is reported, so other chains recognise it.
         let mut orbit_offer = None;
         if cfg.packing_surface().orbit_on_new
             && accept
             && hop_room(hops)
             && (moved_basin || cfg.point_symmetrise_every_accept)
+            && history_here
+                .zip(history.as_deref_mut())
+                .is_none_or(|(m, h)| h.claim_completion(m))
         {
-            for y in crate::packing::orbit_candidates(
+            let candidates = crate::packing::orbit_candidates(
                 x.view(),
                 n,
                 cfg.orbit_core,
@@ -5377,7 +5386,15 @@ where
                 cfg.symmetry_merge_radius,
                 cfg.symmetrise_core_fraction,
                 cfg.min_separation,
-            ) {
+            );
+            for (k, y) in candidates.iter().enumerate() {
+                if candidates[..k]
+                    .iter()
+                    .any(|earlier| hop_is_identity(earlier.view(), y.view()))
+                {
+                    orbit_duplicates += 1;
+                    continue;
+                }
                 let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
                 if es.is_finite() && xs.len() == x.len() {
                     let sym_gradient = record_quenched_answer(
@@ -5390,16 +5407,27 @@ where
                     );
                     hops += 1;
                     orbits_completed += 1;
+                    let product_report = match (history.as_deref_mut(), sym_gradient.as_ref()) {
+                        (Some(h), Some(g)) => {
+                            let report = h.observe(es, xs.view(), g.view());
+                            if let Some(r) = report {
+                                history_observations += 1;
+                                history_new += usize::from(r.is_new);
+                            }
+                            report
+                        }
+                        _ => None,
+                    };
                     if orbit_offer
                         .as_ref()
-                        .is_none_or(|(lowest, _, _)| es < *lowest)
+                        .is_none_or(|(lowest, _, _, _)| es < *lowest)
                     {
-                        orbit_offer = Some((es, xs, sym_gradient));
+                        orbit_offer = Some((es, xs, sym_gradient, product_report));
                     }
                 }
             }
         }
-        if let Some((es, xs, sym_gradient)) = orbit_offer {
+        if let Some((es, xs, sym_gradient, product_report)) = orbit_offer {
             let mut biases: Vec<&dyn Bias> = Vec::new();
             if stalled(cfg, quiet, longest_quiet)
                 && returns_to_deposit(&bias, xs.view())
@@ -5414,12 +5442,16 @@ where
                 if es < e {
                     orbit_gain += e - es;
                 }
+                let evidence = match product_report {
+                    Some(report) => AdoptionHistory::Observed(Some(report)),
+                    None => AdoptionHistory::Fresh,
+                };
                 adopt_minimum!(
                     es,
                     xs,
                     sym_gradient,
                     None,
-                    AdoptionHistory::Fresh,
+                    evidence,
                     None,
                     Some("orbit-completion"),
                     hops
@@ -6463,6 +6495,7 @@ where
         }),
         symmetrised: (symmetrised, symmetry_gain),
         orbits: (orbits_completed, orbit_gain),
+        orbit_duplicates,
         continuous_symmetry: (continuous_symmetry_attempts, continuous_symmetry_gain),
         restarts,
         exchanges_refused,
