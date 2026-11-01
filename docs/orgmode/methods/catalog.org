@@ -203,6 +203,16 @@ and, below 98 points, draws between the plain and the two-phase relative
 A stuck chain can complete into the deposited basin of the lowest structure seen (=stalled=, =returns_to_deposit= and =returns_to_best= in src/methods/cluster_hopping.rs).
 The deposits can then refuse the completion, because it faces the same biased Metropolis test as a hop (=biased_metropolis=).
 Any other completed structure faces the raw energy test.
+Under a shared minimum history each minimum is completed once, by the chain that claims it first (=claim_completion= in src/methods/minima_hopping/history.rs, asked for by the hop loop in src/methods/cluster_hopping.rs).
+Every completion product is reported to the history, and a completion skips a candidate that repeats an earlier one.
+
+=Config::surface_hop_on_best= adds surface hops and is off by default (config.rs).
+Each time the record falls, the hop tries the least-bound atoms of the new best on every vacant hollow site where they keep their neighbour count (=packing::surface_hops=, src/packing.rs).
+Every try is quenched.
+The lowest product is taken when it is below the best, and the tries repeat from it (the =surface_hop_on_best= branch of the hop loop in src/methods/cluster_hopping.rs).
+Neighbours are pairs inside the contact cutoff =contact_cutoff=, 1.35 times the length scale.
+The move is aimed at metal clusters whose search stops on a surface isomer of the right core.
+On 9-6 Sutton-Chen N=78 the missed runs end on such an isomer, and one hop of its four-coordinated atom reaches the global minimum (=tests/surface_hop.rs=).
 
 Feeds/consumes: selected per-config by =MoveLibrary::kernels=; chosen
 per-hop by the allocators below (=allocate_moves= / =contextual_moves= /
