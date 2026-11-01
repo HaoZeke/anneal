@@ -1845,37 +1845,6 @@ mod rigid_step_tests {
     }
 }
 
-#[cfg(test)]
-mod rigid_reseed_tests {
-    use super::{Config, random_rigid_reseed};
-    use rand::SeedableRng;
-    use rand::rngs::StdRng;
-
-    #[test]
-    fn a_reseed_fills_the_centre_block_and_the_rotation_block() {
-        let cfg =
-            Config::recommended(4).with_rigid_bodies(crate::potentials::gmin_water_geometry());
-        let mut rng = StdRng::seed_from_u64(3);
-        let x = random_rigid_reseed(&cfg, &mut rng);
-        assert_eq!(x.len(), 24);
-        let radius = cfg.start_radius();
-        for i in 0..4 {
-            let r = (0..3)
-                .map(|k| x[3 * i + k] * x[3 * i + k])
-                .sum::<f64>()
-                .sqrt();
-            assert!(r <= radius + 1.0e-8, "centre {i} left the ball at {r}");
-            for k in 0..3 {
-                let turn = x[12 + 3 * i + k].abs();
-                assert!(
-                    turn <= std::f64::consts::PI,
-                    "rotation {turn} left the cube"
-                );
-            }
-        }
-    }
-}
-
 fn rigid_factor_cap(n_bodies: usize) -> f64 {
     if n_bodies > RIGID_HOT_BODIES {
         RIGID_FACTOR_CAP_LARGE
@@ -2701,10 +2670,15 @@ where
     let mut packing = packing_bank::PackingBank::new();
     let packing_cutoff = 1.2 * cfg.length_scale;
     // Hops elapsed when the ledger last recorded a lower minimum.
-    // A rigid reseed compares the live hop count with this stamp.
+    // A rigid stall measures 1000 hops from that hop count.
     let mut hops_at_lowest = 0usize;
     let mut csm_reseed_stamp = 0usize;
     let hop_room = |hops: usize| cfg.max_hops.is_none_or(|cap| hops < cap);
+    // Distinct minima a rigid chain has quenched. Its stall moves to one.
+    let mut stall_archive = crate::methods::stall_archive::StallArchive::default();
+    if cfg.move_library.is_rigid_body() {
+        stall_archive.offer(e, x.view());
+    }
 
     let stop = loop {
         if ledger.stopped() || ledger.target_reached() {
@@ -2722,77 +2696,27 @@ where
             csm_reseed_stamp = hops;
         }
         if cfg.move_library.is_rigid_body()
-            && crate::methods::rigid_quench::stagnation_restart(hops, hops_at_lowest)
+            && crate::methods::rigid_quench::stalled(hops, hops_at_lowest)
         {
-            // One hopping temperature above the target is still the basin the
-            // chain is trying to leave. A fresh cluster quenches far above
-            // that basin, and installing it spends the next thousand hops
-            // climbing back. Return the walker to the lowest minimum instead.
-            // Farther above the target, the fresh draw is the escape.
-            let acceptance = cfg.temperature * rigid_factor;
-            let near_target = ledger.target().is_some_and(|limit| {
-                ledger.best.is_finite() && ledger.best - limit <= acceptance.max(0.0)
-            });
-            if near_target {
-                hops_at_lowest = hops;
-                if let Some(state) = ledger.best_state.clone()
-                    && state.len() == x.len()
-                    && ledger.best + 1.0e-9 < e
-                {
-                    let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
-                    let ok = gradient
-                        .as_ref()
-                        .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len()));
-                    e = ledger.best;
-                    x = state;
-                    current_validation_gradient = gradient.filter(|_| ok);
-                }
-            } else {
-                let mut adopted: Option<(f64, Array1<f64>, Option<Array1<f64>>, bool)> = None;
-                for _attempt in 0..crate::methods::rigid_quench::RESEED_ATTEMPTS {
-                    if ledger.remaining() == 0 {
-                        break;
-                    }
-                    let fresh = random_rigid_reseed(cfg, rng);
-                    if fresh.len() != x.len() {
-                        continue;
-                    }
-                    let (energy, state) = relax(ledger, fresh.view(), cfg.relax_steps);
-                    if !energy.is_finite()
-                        || state.len() != x.len()
-                        || !quench_is_sane(cfg, energy, state.view())
-                    {
-                        continue;
-                    }
-                    let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
-                    let ok = gradient
-                        .as_ref()
-                        .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len()));
-                    let finished = ok;
-                    adopted = Some((energy, state, gradient, ok));
-                    if finished {
-                        break;
-                    }
-                }
-                // The clock resets whether or not a usable geometry came back,
-                // so a failed draw does not reseed on the next hop.
-                hops_at_lowest = hops;
-                if let Some((energy, state, gradient, ok)) = adopted {
-                    if ledger.below_target(energy) || ok {
-                        ledger.record(energy, state.view());
-                    }
-                    e = energy;
-                    x = state;
-                    current_validation_gradient = gradient.filter(|_| ok);
-                    orient_window = 0;
-                    orient_yes = 0;
-                    rigid_window = 0;
-                    rigid_hits = 0;
-                    if ledger.remaining() == 0 || ledger.target_reached() {
-                        break HopStop::of_closed(ledger);
-                    }
-                    continue;
-                }
+            // The stop target is never read here, and no cluster is drawn.
+            // The walker moves to the lowest minimum it has already quenched
+            // that is neither its own nor a recent stall destination. The
+            // ledger best is offered at every stall, so a walker away from
+            // it goes back there unless it did so in the last few stalls.
+            hops_at_lowest = hops;
+            if let Some(state) = ledger.best_state.as_ref() {
+                stall_archive.offer(ledger.best, state.view());
+            }
+            if let Some((energy, state)) = stall_archive.escape(e)
+                && state.len() == x.len()
+            {
+                let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
+                let ok = gradient
+                    .as_ref()
+                    .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len()));
+                e = energy;
+                x = state;
+                current_validation_gradient = gradient.filter(|_| ok);
             }
         }
         // The reoccupation move runs inside the chain and charges the
@@ -5062,6 +4986,9 @@ where
             if !unquenched && cfg.packing_cna_applies() {
                 packing.offer(e_new, x_new.view(), packing_cutoff);
             }
+            if !unquenched && cfg.move_library.is_rigid_body() {
+                stall_archive.offer(e_new, x_new.view());
+            }
             // An accepted uphill step to a different basin samples the escape
             // distribution, which is the quantity the deposit height has to be
             // commensurate with.
@@ -6603,49 +6530,6 @@ pub fn random_cluster_in_radius<R: Rng + ?Sized>(
         }
     }
     out
-}
-
-/// Fresh rigid chart: centres in the container, rotations in `[-π, π]`.
-///
-/// GMIN draws rigid centres uniformly in a ball and draws a fresh
-/// angle-axis rotation for each body. This chart stores Rodrigues
-/// vectors, so the rotation block is uniform in that cube. A short
-/// placement falls back to a draw with no separation constraint.
-fn random_rigid_reseed<R: Rng + ?Sized>(cfg: &Config, rng: &mut R) -> Array1<f64> {
-    let n = cfg.n_points;
-    let radius = cfg.start_radius().max(1.0e-6);
-    let mut centres = random_cluster_in_radius(n, radius, cfg.min_separation, rng);
-    if centres.len() != 3 * n {
-        centres = random_cluster_in_radius(n, radius, 0.0, rng);
-    }
-    let mut x = Array1::zeros(6 * n);
-    let placed = centres.len() / 3;
-    for i in 0..placed.min(n) {
-        for k in 0..3 {
-            x[3 * i + k] = centres[3 * i + k];
-        }
-    }
-    for i in placed..n {
-        let mut v = [0.0; 3];
-        let mut norm = 0.0;
-        for k in 0..3 {
-            let u1: f64 = rng.random::<f64>().max(1e-12);
-            let u2: f64 = rng.random::<f64>();
-            v[k] = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
-            norm += v[k] * v[k];
-        }
-        let norm = norm.sqrt().max(1e-12);
-        let r = radius * rng.random::<f64>().cbrt();
-        for k in 0..3 {
-            x[3 * i + k] = v[k] / norm * r;
-        }
-    }
-    for i in 0..n {
-        for k in 0..3 {
-            x[3 * n + 3 * i + k] = rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
-        }
-    }
-    x
 }
 
 /// Convenience entry point seeding its own start.
