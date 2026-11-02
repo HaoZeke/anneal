@@ -3,7 +3,30 @@
 
 * Search surfaces
 
-- =cluster_search(obj, grad, n, budget, seed=0, recommended=True, derived=False, communicating=False, *, ras=False, start=None, length_scale=None, species=None, sigmas=None, rigid=False, layout="block", target=None, water_sites=None)= :: \(3N\) point set, or \(6N\) when =rigid=True= or =water_sites= is set. Always needs a gradient or force. =species= is one label per point and =sigmas= is one diameter per point; two or more labels add a swap move. A wide diameter ratio also tries one downhill unlike-pair exchange beside the microcanonical step and the inner-outer exchange. =layout= is =block= or =interleaved=. =target= stops the hop once a recorded energy is at or below that value. =length_scale= is ignored when =species= or =rigid= is set, because those keep the stock preset. A rigid chart of more than ten bodies holds the acceptance factor at 4 and scales the orientation amplitude toward an acceptance ratio of one half; ten bodies or fewer do not. A rigid quench is the same L-BFGS descent, and a rigid record accepts the root-mean-square force. A chain with 1000 hops and no new lowest minimum returns to that minimum when it lies within one hopping temperature of the run target. Farther above the target the walker is drawn again. The lowest minimum is kept. With =water_sites= (the body-frame O, H, H of a rigid water) =n= counts molecules and the state is centres, then exponential-map rotations, on =Config.communicating_tip4p=, =Config.recommended_tip4p= or =Config.for_tip4p=. =water_sites= needs a start and excludes =ras=, =derived=, =length_scale=, =rigid=, =species=, =sigmas=, and a non-block layout. A callback raising a =BaseException= that is not an =Exception=, such as =KeyboardInterrupt=, stops the run at the next evaluation and is re-raised.
+- =cluster_search(obj, grad, n, budget, seed=0, recommended=True, derived=False, communicating=False, *, ras=False, start=None, length_scale=None, species=None, sigmas=None, rigid=False, layout="block", target=None, water_sites=None)= :: \(3N\) point set, or \(6N\) for =rigid=True= or =water_sites=.
+  Always needs a gradient or force.
+  =species= is one label per point and =sigmas= is one diameter per point; two or more labels add a swap move.
+  A wide diameter ratio also tries one downhill unlike-pair exchange beside the microcanonical step and the inner-outer exchange.
+  =layout= is =block= or =interleaved=.
+  Once a recorded energy is at or below =target=, the hop stops.
+  Because =species= and =rigid= keep the stock preset, either of them makes the search ignore =length_scale=.
+  Above ten bodies, a rigid chart keeps the acceptance factor at 4.
+  It also scales the orientation amplitude toward an acceptance ratio of one half.
+  Ten bodies or fewer do neither.
+  Rigid quenches use the same limited-memory Broyden-Fletcher-Goldfarb-Shanno (L-BFGS) descent.
+  A rigid record accepts the root-mean-square force.
+  The chain keeps the eight lowest distinct minima of its quenched start, accepted quenches and lowest recorded minimum.
+  Each stall follows 1000 hops with no new lowest minimum.
+  At each stall the walker moves to the lowest kept minimum that is neither its own nor one of the last four stall destinations.
+  When no kept minimum qualifies, the walker stays put.
+  Nothing is drawn, the run target is not read, and the lowest minimum is kept.
+  =water_sites= gives the body-frame O, H, H positions of one rigid water.
+  With it, =n= counts molecules, and the state is centres, then exponential-map rotations.
+  The preset is then =Config.communicating_tip4p=, =Config.recommended_tip4p= or =Config.for_tip4p=.
+  =water_sites= needs a start.
+  It excludes =ras=, =derived=, =length_scale=, =rigid=, =species=, =sigmas=, and a non-block layout.
+  A callback may raise a =BaseException= that is not an =Exception=, such as =KeyboardInterrupt=.
+  The run then stops at the next evaluation, and the exception is re-raised.
 - =ensemble_optimize(obj, low, high, budget, ..., grad_fn=None)= :: design box. Gradient → hop and quench; no gradient → portfolio.
 - =box_ensemble_optimize(...)= :: hop primitive. Requires =grad_fn=.
 - =global_optimize(obj, low, high, budget, ...)= :: portfolio arms when the caller does not want hops.
