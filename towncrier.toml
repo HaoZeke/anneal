@@ -1,6 +1,9 @@
 [tool.towncrier]
 name = "anneal"
-version = "0.12.0"
+# Version is read from the workspace Cargo.toml by scripts/anneal_version.py.
+# https://towncrier.readthedocs.io/en/stable/
+package = "anneal_version"
+package_dir = "scripts"
 directory = "docs/newsfragments"
 filename = "CHANGELOG.md"
 start_string = "<!-- towncrier release notes start -->\n"
