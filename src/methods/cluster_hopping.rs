@@ -7450,6 +7450,9 @@ mod graph_invariant_tests {
             let mut cfg = Config::for_molecular(species.clone(), vec![vec![0, 1, 2]], 1.0);
             cfg.container = 0.9;
             cfg.rigid_containment = rigid;
+            // A flexible SOAP step can break a bond of this strained molecule
+            // before containment runs, so every proposal here is rigid.
+            cfg.soap_mode = SoapProposalMode::Rigid;
             cfg.screen_margin = f64::INFINITY;
             cfg.return_screen = false;
             cfg.max_hops = Some(6);
