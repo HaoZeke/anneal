@@ -101,7 +101,7 @@ fn recommended_differs_from_for_cluster() {
         MoveLibrary::Reseed
     ));
     assert!(rec.allocate_moves && rec.depth_reward && rec.tabu_on_stall);
-    assert!(rec.trail_on_stall && rec.escape_on_stall && rec.restart_on_stall);
+    assert!(rec.trail_on_stall && rec.escape_on_stall && !rec.restart_on_stall);
     assert!(rec.bayes_screen && base.bayes_screen);
     assert!(matches!(base.move_library, MoveLibrary::Atomic));
     assert!(!(base.allocate_moves || base.depth_reward || base.tabu_on_stall));

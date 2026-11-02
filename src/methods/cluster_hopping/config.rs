@@ -1087,10 +1087,11 @@ impl Config {
     /// LeanBurst carries the observed-cloud SOAP pullback. Thompson
     /// allocates that arm with surface, single, burst, and sym. The return
     /// screen is on, and a stall takes tabu, symmetrisation, the recorded
-    /// basin trail, the climb, and the restart. Those three exits are
-    /// [`Config::trail_on_stall`], [`Config::escape_on_stall`], and
-    /// [`Config::restart_on_stall`]. There is no `RESTART_STALL_ARM`
-    /// override. Basin identity stays the measured pair-spectrum merge at 0.7.
+    /// basin trail, and the climb. Those two exits are
+    /// [`Config::trail_on_stall`] and [`Config::escape_on_stall`].
+    /// [`Config::restart_on_stall`] stays off, so a stalled walker is never
+    /// redrawn from random coordinates. Basin identity stays the measured
+    /// pair-spectrum merge at 0.7.
     /// Orbit completion runs on every new basin, and below 98 points the
     /// relaxation draws between the plain surface and the two-phase
     /// relative 0.7 surface, the same rule as [`Config::communicating`].
@@ -1113,7 +1114,6 @@ impl Config {
         cfg.orbit_complete_on_new = true;
         cfg.trail_on_stall = true;
         cfg.escape_on_stall = true;
-        cfg.restart_on_stall = true;
         // The displacement stack, LeanBurst included, leaves the Mackay
         // minimum in place: 17 of 72 seeds at 4e5 calls ended at
         // -173.252378. Named lattice growth builds the truncated
