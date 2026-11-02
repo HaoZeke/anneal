@@ -2,11 +2,16 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ext")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "scripts")))
+
+from anneal_version import package_version
 
 # -- Project information -----------------------------------------------------
 project = "anneal"
 copyright = "2026--present, anneal developers"
 author = "anneal developers"
+release = package_version()
+version = release
 html_logo = "../../branding/logo/anneal_logo.png"
 
 # -- General configuration ---------------------------------------------------

@@ -10,7 +10,11 @@
 project(
     'anneal-core',
     ['rust', 'c'],
-    version: '0.5.0',
+    # [[[cog
+    # cog.outl("    version: '%s'," % anneal_version.package_version())
+    # ]]]
+    version: '0.12.0',
+    # [[[end]]]
     meson_version: '>=1.8.0',
     default_options: [
         'buildtype=debugoptimized',
@@ -61,6 +65,7 @@ anneal_header_build = custom_target(
 # anneal-core.h includes dlpack/dlpack.h. Ship that header on the same
 # include prefix the generated header uses.
 install_headers('include/dlpack/dlpack.h', subdir: 'dlpack')
+install_headers('include/anneal-version.h')
 
 anneal_header_intree = custom_target(
     'cbindgen-anneal',

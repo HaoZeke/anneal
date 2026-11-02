@@ -8,6 +8,9 @@
  * the C ABI exports in the `anneal` namespace for ergonomic C++ usage.
  */
 
+// Package version macro, generated from the workspace Cargo.toml.
+// https://nedbatchelder.com/code/cog/
+#include "anneal-version.h"
 #include "anneal-core.h"
 
 namespace anneal {
