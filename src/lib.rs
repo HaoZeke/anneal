@@ -160,6 +160,9 @@ pub mod hmc;
 pub mod hypersphere;
 /// Invert known wells so rgmin does not walk a Leave back into them.
 pub mod known_basin;
+/// Sketch-map embedding of a minima book: farthest-point landmarks, MDS
+/// start, sketch-map stress, and out-of-sample placement.
+pub mod landfold;
 pub mod lattice;
 /// Law-witness helpers and the `LawViolation` diagnostic type.
 pub mod laws;
@@ -270,7 +273,10 @@ pub mod ffi;
 pub mod shape;
 pub mod shared_bias;
 
-#[cfg(feature = "python")]
+// eindir-core builds pyo3 with `extension-module`, so no test executable
+// links libpython. The optimiser can inline a Python callback into a native
+// driver that a unit test calls, which then fails to link.
+#[cfg(all(feature = "python", not(test)))]
 pub mod python;
 
 pub use accept::AcceptRule;

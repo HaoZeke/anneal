@@ -22,21 +22,18 @@ anneal Documentation
 Every driver (Boltzmann, Fast, Gsa, GLE-Langevin, additive independence, Bayesian pilot+mixer, parallel tempering, QMC polish, ...) is a different filling of those five slots; a change to any shared implementation (e.g. the noise-aware Accept or the batched device kernel) therefore appears in all of them.
 
 Use =anneal= when the problem is bounded, expensive, derivative-free or partly derivative-aware, and the search policy needs to be swapped without changing the objective wrapper.
-The public search surface splits on geometry and then on gradient:
-=cluster_search= for a \(3N\) point set, =ensemble_optimize= for a
-design box (hop when a gradient is supplied, portfolio otherwise).
-Classical schedules, GLE proposals, Bayesian pilot allocation, QMC
-starts, and device batches remain the typed SA algebra on a box.
+The public search surface splits on geometry and then on gradient: =cluster_search= for a \(3N\) point set, =ensemble_optimize= for a design box (hop when a gradient is supplied, portfolio otherwise).
+Classical schedules, GLE proposals, Bayesian pilot allocation, QMC starts, and device batches remain the typed SA algebra on a box.
 
 * Key Features
 
-- *Cooperative cluster population* :: Four independently charged replicas share
-validated basin evidence through a synchronous catalogue coordinator.  A
-target-free Feynman--Kac epoch uses energy, novelty, census scarcity, and GMRF
-uncertainty to resample a fixed population with capped families and distinct
-rejuvenation.  Private-catalogue ensembles preserve the causal control for the
-value of cross-replica communication.
-- *Search: cluster or box, then gradient* :: A point set of \(N\) atoms is =cluster_search=. A design box with a gradient is communicating hop (=ensemble_optimize=). The same box without a gradient is the values-only portfolio. Do not pad a box to \(3N\).
+- *Cooperative cluster population* :: Four independently charged replicas share validated basin evidence through a synchronous catalogue coordinator.
+A target-free Feynman--Kac epoch uses energy, novelty, census scarcity, and GMRF uncertainty to resample a fixed population with capped families and distinct rejuvenation.
+Private-catalogue ensembles preserve the causal control for the value of cross-replica communication.
+- *Search: cluster or box, then gradient* :: A point set of \(N\) atoms is =cluster_search=.
+                                             A design box with a gradient is communicating hop (=ensemble_optimize=).
+                                             The same box without a gradient is the values-only portfolio.
+                                             Do not pad a box to \(3N\).
 - *Classical presets (Boltzmann, Fast, Gsa)* :: Logarithmic, reciprocal, and Tsallis families.
 Identical call site via =run=; only the component objects differ.
 - *Bayesian pilot + mixer (bGSA auto)* :: QMC pilot draws for (T0, sigma, q_v), short chains, three-term posterior (prior + 0.234 target + improvement), per-chain Beta(4,1) on "produced new global best", Thompson sampling every step with 0.05 incumbent guard.
@@ -46,7 +43,8 @@ One =max_proposals= knob controls the total budget.
 On objectives with gradients, this gives larger coherent moves than white-noise Langevin without changing the accept law.
 - *Rank-1 additive independence* :: Separable Chebyshev surrogate fitted on values only; O(d) per proposal via product of 1D tempered marginals + Metropolis correction.
 The surrogate proposes from a cheap approximation and the Metropolis correction keeps the target objective authoritative.
-- *QMC / shifted-QMC polish* :: Bounded L-BFGS (Armijo backtrack) on low-discrepancy starts. Cluster hops quench through rgmin.
+- *QMC / shifted-QMC polish* :: Bounded L-BFGS (Armijo backtrack) on low-discrepancy starts.
+                                Cluster hops quench through rgmin.
 This turns a stochastic incumbent into a reproducible local finish when the objective exposes enough smoothness.
 - *Device, ensemble, reuse* :: =run_device= (NumPy or CuPy) and =run_ensemble= (batched) execute the identical transition kernel.
 The reuse table (dimension scale, rank-1 independence, GLE drift, batched device, noise-aware Accept, QMC polish) is the concrete payoff of the factoring: one implementation change serves every preset and advanced driver.
@@ -87,6 +85,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    howto/chemfit
    howto/precision-policy
    howto/rgmin-lbfgs
+   howto/landfold
    howto/faq
    faq
 #+end_export
@@ -101,6 +100,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    explanation/bayesian-details
    explanation/communication
    explanation/gle-mechanics
+   explanation/landfold-survey
    explanation/regime_auto
 #+end_export
 
