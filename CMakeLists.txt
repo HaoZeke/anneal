@@ -7,7 +7,23 @@
 # against. The cargo-c-installed pkg-config file (`anneal-core.pc`) gives
 # system-wide consumers an alternate, install-time entry point.
 cmake_minimum_required(VERSION 3.22)
-project(anneal-core VERSION 0.5.0 LANGUAGES C CXX)
+
+# The project version is the workspace Cargo.toml [package].version.
+# The first column-0 `version = "` line is that field. The [workspace]
+# table does not set a version, so LIMIT_COUNT 1 stays on the package line.
+set_property(
+    DIRECTORY
+    APPEND
+    PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml")
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml" _anneal_version_line
+     REGEX "^version = \""
+     LIMIT_COUNT 1)
+if(NOT _anneal_version_line)
+    message(FATAL_ERROR "Cargo.toml has no package version")
+endif()
+string(REGEX REPLACE "^version = \"([^\"]+)\".*" "\\1" ANNEAL_VERSION "${_anneal_version_line}")
+project(anneal-core VERSION ${ANNEAL_VERSION} LANGUAGES C CXX)
 
 # Corrosion builds the Rust crate from Cargo.toml
 include(FetchContent)
@@ -54,4 +70,5 @@ target_include_directories(anneal_core INTERFACE
 # Install header alongside the library. anneal-core.h includes
 # dlpack/dlpack.h, so that header has to land on the same include prefix.
 install(FILES ${ANNEAL_HEADER} DESTINATION include)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/anneal-version.h DESTINATION include)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/dlpack/dlpack.h DESTINATION include/dlpack)

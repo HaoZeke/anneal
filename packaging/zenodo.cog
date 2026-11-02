@@ -1,0 +1,57 @@
+[[[cog
+import json
+doc = {
+    "title": "anneal: typed simulated-annealing components",
+    "description": "If you use anneal, please cite the paper and the software.",
+    "upload_type": "software",
+    "license": "MIT",
+    "version": anneal_version.package_version(),
+    "creators": anneal_version.citation_creators(),
+    "related_identifiers": [
+        {
+            "identifier": "10.5281/zenodo.10672746",
+            "relation": "isVersionOf",
+            "scheme": "doi",
+        }
+    ],
+}
+cog.out(json.dumps(doc, indent=2) + "\n")
+]]]
+{
+  "title": "anneal: typed simulated-annealing components",
+  "description": "If you use anneal, please cite the paper and the software.",
+  "upload_type": "software",
+  "license": "MIT",
+  "version": "0.12.0",
+  "creators": [
+    {
+      "name": "Goswami, Rohit",
+      "affiliation": "TurtleTech ehf",
+      "orcid": "0000-0002-2393-8056"
+    },
+    {
+      "name": "Goswami, Ruhila"
+    },
+    {
+      "name": "Goswami, Amrita"
+    },
+    {
+      "name": "Sallermann, Moritz",
+      "orcid": "0000-0002-2355-9355"
+    },
+    {
+      "name": "Goswami, Sonaly"
+    },
+    {
+      "name": "Goswami, Debabrata"
+    }
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "10.5281/zenodo.10672746",
+      "relation": "isVersionOf",
+      "scheme": "doi"
+    }
+  ]
+}
+[[[end]]]

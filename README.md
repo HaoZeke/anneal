@@ -2,6 +2,13 @@
   <img src="./branding/logo/anneal_logo.png" alt="Anneal" width="280">
 </p>
 
+<!-- [[[cog
+v = anneal_version.package_version()
+cog.outl("[![Version %s](https://img.shields.io/badge/version-%s-2ea44f)](https://github.com/HaoZeke/anneal/releases/tag/v%s)" % (v, v, v))
+]]] -->
+[![Version 0.12.0](https://img.shields.io/badge/version-0.12.0-2ea44f)](https://github.com/HaoZeke/anneal/releases/tag/v0.12.0)
+<!-- [[[end]]] -->
+
 # Anneal
 
 **Start here.** Bound-constrained global optimization with a single budget knob, or classical simulated-annealing presets you can swap without rewriting a driver.

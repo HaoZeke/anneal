@@ -11,7 +11,9 @@ pixi run -e python python-test
 
 * Conventional Commits
 
-Commit messages follow the Conventional Commits convention (enforced by cog in CI via cocogitto).
+Commit messages follow the Conventional Commits convention.
+CI checks them with cocogitto (https://docs.cocogitto.io/).
+That program is separate from cogapp (https://nedbatchelder.com/code/cog/), which regenerates version copies.
 Use the standard prefixes:
 
 - =feat:=   new functionality
@@ -21,13 +23,34 @@ Use the standard prefixes:
 - =chore:=  tooling, build, dependency updates
 - =ci:=     CI configuration
 
+* Version
+
+The only handwritten package version is =[package].version= in the workspace =Cargo.toml=.
+Edit that one line, then regenerate the copies from the repository root:
+
+#+BEGIN_SRC bash
+python3 scripts/version_cog.py -r @scripts/cogfiles
+python3 scripts/version_cog.py -d -o .zenodo.json packaging/zenodo.cog
+#+END_SRC
+
+=scripts/version_cog.py= calls cogapp (https://nedbatchelder.com/code/cog/) with one shared prologue.
+It refreshes =pyproject.toml=, =pixi.toml=, =meson.build=, =CITATION.cff=, =include/anneal-version.h=, the README badge, and =.zenodo.json=.
+The Zenodo creator list is read from =CITATION.cff=.
+=cog.toml= belongs to cocogitto (https://docs.cocogitto.io/), so this step does not call a bare =cog=.
+CMake, Sphinx, and the Rust crate read the same field when they configure or compile.
+=cargo update --workspace --offline= refreshes the =anneal-core= entry in =Cargo.lock= (https://doc.rust-lang.org/cargo/commands/cargo-update.html).
+Towncrier (https://towncrier.readthedocs.io/en/stable/) reads the field through =scripts/anneal_version.py=.
+Do not write a version into =towncrier.toml=.
+
 * Changelog (towncrier)
 
-Changelog is assembled with towncrier from news fragments (not cog).
+Changelog notes are assembled with towncrier (https://towncrier.readthedocs.io/en/stable/) from news fragments.
+Do not edit =CHANGELOG.md= by hand.
+The org sources under =docs/orgmode/= are exported to RST by =emacs --batch -l docs/export.el=; write contributor notes there, not in generated RST.
 For any user-visible or breaking change, add a fragment under =docs/newsfragments/= before merging the PR:
 
 - Name: =+short-desc.type.rst= (or =123.type.rst= for PR #) where type is one of: added, changed, removed, fixed, deprecated, security, dev, misc.
-- Content: one or more lines describing the change (towncrier adds the bullet and wires the issue link from filename when numeric).
+- Content: one or more lines describing the change (towncrier, https://towncrier.readthedocs.io/en/stable/, adds the bullet and wires the issue link from filename when numeric).
 
 Preview/build locally (requires the uv feature or uv on PATH):
 
@@ -36,7 +59,7 @@ pixi r towncrier-draft   # preview, no write
 pixi r towncrier-build   # write to CHANGELOG.md and consume fragments
 #+END_SRC
 
-Run the build step as part of preparing a release tag (after version bump in relevant files).
+Run the build step as part of preparing a release tag, after the one-line version edit and cogapp (https://nedbatchelder.com/code/cog/).
 Fragments are required for changes that should appear in release notes.
 
 The publish tag must be named =vX.Y.Z=. An unprefixed tag does not
