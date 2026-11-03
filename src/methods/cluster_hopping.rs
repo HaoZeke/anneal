@@ -4573,7 +4573,11 @@ where
                 } else {
                     (-(e_new - e) / temperature.max(1e-12)).exp()
                 };
-                sb.observe(from, identity.lookup(x_new.view()), a);
+                sb.observe(
+                    from,
+                    identity.lookup(identity.describe(x_new.view()).view()),
+                    a,
+                );
             }
         }
         // Biased rise. The bias is part of the landscape the chain walks; a
