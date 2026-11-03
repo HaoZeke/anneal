@@ -1,0 +1,17 @@
+uname_m=x86_64
+nproc=8
+cpu_model=Intel(R) Xeon(R) Processor
+git_commit=90c898dd2971c8753268b153d96b9b54429b081c
+mode=plain
+arm=lj38-plain
+seed=0
+n=38
+ceiling=30000
+library=LeanBurst
+surfaces=0
+stall_exits=off
+energy=-173.928427
+calls=30000
+wall_s=0.718809
+hops=443
+exit=0
