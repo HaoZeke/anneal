@@ -2506,7 +2506,7 @@ fn main() {
                 };
                 #[cfg(all(feature = "ira", not(feature = "featomic")))]
                 let mut dist = {
-                    let ira = IraMetric::default();
+                    let ira = anneal_core::shape::IraMetric::default();
                     move |p: ArrayView1<f64>, q: ArrayView1<f64>| ira.distance(p, q)
                 };
                 #[cfg(not(any(feature = "ira", feature = "featomic")))]
