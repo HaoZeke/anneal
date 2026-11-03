@@ -59,12 +59,13 @@ fn lj_run(cfg: &Config, seed: u64) -> Outcome {
     lj_run_with(cfg, seed, BUDGET, false)
 }
 
-/// Adopted steps that climbed more than one well depth, over the seeds.
-fn large_rises(base: &Config, ladder_top: f64) -> usize {
+/// Adopted steps that climbed more than one well depth, over the first `seeds`
+/// seeds.
+fn large_rises(base: &Config, ladder_top: f64, seeds: u64) -> usize {
     let mut cfg = base.clone();
     cfg.replicas = 2;
     cfg.ladder_top = ladder_top;
-    (0..SEEDS)
+    (0..seeds)
         .map(|seed| {
             lj_run(&cfg, seed)
                 .accepted_transitions
@@ -75,16 +76,16 @@ fn large_rises(base: &Config, ladder_top: f64) -> usize {
         .sum()
 }
 
-fn assert_the_hot_rung_climbs(base: &Config) {
+fn assert_the_hot_rung_climbs(base: &Config, seeds: u64, factor: usize) {
     let mut base = base.clone();
     // The continuous-symmetry quench and the five-hop icosahedral reseed are
     // adoptions this count is not about. The ladder's temperature is what
     // the rise count measures, so the move stays off.
     base.continuous_symmetry = ContinuousSymmetry::Off;
-    let flat = large_rises(&base, 1.0);
-    let hot = large_rises(&base, 10.0);
+    let flat = large_rises(&base, 1.0, seeds);
+    let hot = large_rises(&base, 10.0, seeds);
     assert!(
-        hot >= 3 * flat.max(10),
+        hot >= factor * flat.max(10),
         "a rung ten times hotter adopted {hot} rises above a well depth \
          against {flat} on a flat ladder"
     );
@@ -95,7 +96,7 @@ fn a_hot_rung_adopts_more_large_rises_than_a_flat_ladder() {
     let mut cfg = Config::recommended(13);
     assert!(!cfg.budget_window && !cfg.statistical_temperature);
     cfg.temperature = 0.2;
-    assert_the_hot_rung_climbs(&cfg);
+    assert_the_hot_rung_climbs(&cfg, SEEDS, 3);
 }
 
 /// The law sets the coldest rung's temperature and the hot rung hops at its
@@ -104,7 +105,7 @@ fn a_hot_rung_adopts_more_large_rises_than_a_flat_ladder() {
 fn the_ladder_multiplies_the_budget_window_temperature() {
     let cfg = Config::derived(13);
     assert!(cfg.budget_window);
-    assert_the_hot_rung_climbs(&cfg);
+    assert_the_hot_rung_climbs(&cfg, SEEDS, 3);
 }
 
 /// The clamped estimate is the coldest rung's temperature and the hot rung
@@ -117,9 +118,19 @@ fn the_ladder_multiplies_the_budget_window_temperature() {
 /// drops the ratio under it from one that keeps it. Turns of 450 let the
 /// coldest rung fill the sweep of 400 within its first turn, so the hot rung's
 /// whole first turn runs under the estimate, without the refits a shorter
-/// sweep would add. Measured over these seeds, the hot rung adopts 422 rises
-/// against a bar of 195, a ladder that drops the ratio under the estimate 96,
-/// and one whose rungs all hop at one temperature 58 against a bar of 195.
+/// sweep would add.
+///
+/// The estimate is fitted through `exp` and `ln`, which each platform's maths
+/// library rounds its own way. One seed can then reach different counts on
+/// different platforms, so the counts are draws and the bar is set against
+/// their spread. Over seeds 0 to 4095 on x86_64 Linux, in blocks of 16, the
+/// flat ladder averages 90 rises and the hot ladder 366, 4.05 times as many.
+/// A ladder that drops the ratio under the estimate averages 90, the flat
+/// count. Twice the flat count is the geometric mean of those two ratios.
+/// Against its own flat ladder, the hot ladder's lowest block is 2.70 times
+/// and the dropped ratio's highest 1.11 times. Blocks of 8 were too noisy: 25
+/// of 512 fell under three times, as seeds 0 to 7 did on macos-15 with 221
+/// against 74.
 #[test]
 fn the_ladder_multiplies_the_statistical_temperature() {
     let mut cfg = Config::recommended(13);
@@ -129,7 +140,7 @@ fn the_ladder_multiplies_the_statistical_temperature() {
     cfg.temperature = 0.2;
     cfg.statistical_temperature = true;
     cfg.swap_period = 450;
-    assert_the_hot_rung_climbs(&cfg);
+    assert_the_hot_rung_climbs(&cfg, 2 * SEEDS, 2);
 }
 
 /// A rung that takes over the chain takes over what is known about its own
