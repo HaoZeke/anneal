@@ -50,12 +50,10 @@ impl NeighborTable {
     }
 
     fn dist2(x: ArrayView1<f64>, i: usize, j: usize) -> f64 {
-        (0..3)
-            .map(|k| {
-                let d = x[3 * i + k] - x[3 * j + k];
-                d * d
-            })
-            .sum()
+        let dx = x[3 * i] - x[3 * j];
+        let dy = x[3 * i + 1] - x[3 * j + 1];
+        let dz = x[3 * i + 2] - x[3 * j + 2];
+        dx * dx + dy * dy + dz * dz
     }
 
     /// Points in the table.
@@ -181,6 +179,71 @@ mod tests {
             NeighborTable::moved_between(a.view(), b.view()),
             vec![7, 13]
         );
+    }
+
+    #[test]
+    fn cartesian_pairs_match_the_ordered_reference_bit_for_bit() {
+        fn ordered(
+            positions: &[[f64; 3]],
+            cutoff: f64,
+            inclusive: bool,
+        ) -> Vec<Vec<CutoffNeighbour>> {
+            let limit = cutoff * cutoff;
+            let mut lists = vec![Vec::new(); positions.len()];
+            for i in 0..positions.len() {
+                for j in 0..positions.len() {
+                    if i == j {
+                        continue;
+                    }
+                    let displacement = [
+                        positions[j][0] - positions[i][0],
+                        positions[j][1] - positions[i][1],
+                        positions[j][2] - positions[i][2],
+                    ];
+                    let length2 = dot3(displacement);
+                    let keep = if inclusive {
+                        length2 <= limit
+                    } else {
+                        length2 < limit
+                    };
+                    if keep && length2 > 1e-24 {
+                        lists[i].push(CutoffNeighbour {
+                            index: j,
+                            displacement,
+                            distance: length2.sqrt(),
+                        });
+                    }
+                }
+            }
+            lists
+        }
+
+        let positions = [
+            [0.0, -0.0, 0.0],
+            [1.0, 0.0, -0.0],
+            [0.0, 2.0, 0.5],
+            [-1.25, 0.25, -0.75],
+        ];
+        for inclusive in [false, true] {
+            let expected = ordered(&positions, 2.0, inclusive);
+            let observed = cartesian_pairs(&positions, 2.0, inclusive);
+            for (expected_row, observed_row) in expected.iter().zip(&observed) {
+                assert_eq!(expected_row.len(), observed_row.len());
+                for (expected_pair, observed_pair) in expected_row.iter().zip(observed_row) {
+                    assert_eq!(expected_pair.index, observed_pair.index);
+                    assert_eq!(
+                        expected_pair.distance.to_bits(),
+                        observed_pair.distance.to_bits()
+                    );
+                    for axis in 0..3 {
+                        assert_eq!(
+                            expected_pair.displacement[axis].to_bits(),
+                            observed_pair.displacement[axis].to_bits()
+                        );
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -542,10 +605,7 @@ fn cartesian_pairs(
     }
     let limit = cutoff * cutoff;
     for i in 0..n {
-        for j in 0..n {
-            if i == j {
-                continue;
-            }
+        for j in (i + 1)..n {
             let displacement = [
                 positions[j][0] - positions[i][0],
                 positions[j][1] - positions[i][1],
@@ -558,10 +618,20 @@ fn cartesian_pairs(
                 length2 < limit
             };
             if keep && length2 > 1e-24 {
+                let distance = length2.sqrt();
                 lists[i].push(CutoffNeighbour {
                     index: j,
                     displacement,
-                    distance: length2.sqrt(),
+                    distance,
+                });
+                lists[j].push(CutoffNeighbour {
+                    index: i,
+                    displacement: [
+                        positions[i][0] - positions[j][0],
+                        positions[i][1] - positions[j][1],
+                        positions[i][2] - positions[j][2],
+                    ],
+                    distance,
                 });
             }
         }
