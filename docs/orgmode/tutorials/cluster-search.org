@@ -101,6 +101,40 @@ placed = cluster_search(
 )
 #+end_src
 
+* Communicating chains in the example binaries
+
+=lj_cluster_search= and =water_tip4p= run thread replicas of the hop
+when =HISTORY_REPLICAS= is set.
+The replicas split one budget and share one exact minimum history
+under =HISTORY=shared=.
+The option =comm= selects =Config.communicating= for Lennard-Jones,
+and =PRESET=communicating= selects =Config.communicating_tip4p= for
+water.
+=sbreport= turns on the superbasin report, and =sbasin= the escape as
+well.
+Each replica then prints a =superbasin:= line with its transitions,
+jumps and refusals.
+An escape is offered every =superbasin_period= hops, so a chain
+shorter than one period prints no jumps and no refusals.
+
+#+begin_src bash
+SEED_OFFSET=100 HISTORY_REPLICAS=4 HISTORY=shared HISTORY_POLICY=accepted \
+cargo run --release --features ira,bank-rpc --example lj_cluster_search -- \
+  38 400000 1 comm,sbasin
+PRESET=communicating OPTS=sbasin SEED_OFFSET=100 HISTORY_REPLICAS=4 \
+HISTORY=shared HISTORY_POLICY=accepted \
+cargo run --release --features ira --example water_tip4p -- 10 20000 1
+#+end_src
+
+Ensemble chains relax on the plain surface, so the surface portfolio
+of =Config.communicating= is inert there, and the header says so.
+=plainsurface= drops the portfolio and the two-phase surface from a
+single-process run, so that run relaxes on the same surface.
+The water ensemble judges identity on the lab-frame O and H sites.
+The rotation vectors of the chart change under a rigid motion of the
+whole cluster, so the chart itself cannot be matched.
+Both binaries stop on an option they do not bind.
+
 A design box is [[file:box-search.org][box search]], not this page.
 
 A force-call cap or a target hit should raise =BaseException= rather than
