@@ -22,6 +22,17 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
+#: Sign-flip draws of the paired test.
+SIGNFLIP_DRAWS = 20000
+#: Slack that counts a draw tied with the observed mean as extreme.
+TIE_TOLERANCE = 1e-15
+#: Top of the hit-fraction scale, a little above one so a full curve shows.
+FRACTION_TOP = 1.02
+#: Figure size in inches.
+FIGSIZE = (6, 3.5)
+#: Resolution of the saved figure in dots per inch.
+DPI = 150
+
 
 def read(path):
     if path.suffix == ".json":
@@ -42,13 +53,13 @@ def runs(directory, seeds):
     return out
 
 
-def signflip(diffs, draws=20000, seed=0):
+def signflip(diffs, draws=SIGNFLIP_DRAWS, seed=0):
     observed = sum(diffs) / len(diffs)
     rng = random.Random(seed)
     extreme = 0
     for _ in range(draws):
         total = sum(v if rng.randrange(2) == 0 else -v for v in diffs)
-        if abs(total / len(diffs)) >= abs(observed) - 1e-15:
+        if abs(total / len(diffs)) >= abs(observed) - TIE_TOLERANCE:
             extreme += 1
     return (extreme + 1) / (draws + 1)
 
@@ -59,7 +70,7 @@ def main():
     series = [(label, runs(path, seeds)) for label, path in (a.split("=", 1) for a in sys.argv[5:])]
     par2 = [{s: c if h else 2 * budget for s, (h, c) in r.items()} for _, r in series]
     print("label hits median_calls_to_hit mean_par2 paired_p")
-    fig, ax = plt.subplots(figsize=(6, 3.5))
+    fig, ax = plt.subplots(figsize=FIGSIZE)
     for k, (label, r) in enumerate(series):
         calls = sorted(c for h, c in r.values() if h)
         med = f"{statistics.median(calls):.1f}".removesuffix(".0") if calls else "-"
@@ -75,10 +86,10 @@ def main():
     ax.set_xlabel("energy calls")
     ax.set_ylabel("fraction of seeds at the global minimum")
     ax.set_xlim(0, budget)
-    ax.set_ylim(0, 1.02)
+    ax.set_ylim(0, FRACTION_TOP)
     ax.legend(frameon=False, loc="lower right")
     fig.tight_layout()
-    fig.savefig(out, dpi=150)
+    fig.savefig(out, dpi=DPI)
 
 
 if __name__ == "__main__":

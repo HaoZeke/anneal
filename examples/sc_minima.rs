@@ -10,28 +10,38 @@
 //! ```
 //!
 //! `length` is the preset length of the run, `nn / 2^(1/6)`. The bond
-//! cutoff is 1.35 times it, between the first and second shells.
+//! cutoff is `CONTACT_CUTOFF`, 1.35, times it, between the first and second shells.
 
 use anneal_core::minima_db::MinimaCorpus;
+use anneal_core::soap::CONTACT_CUTOFF;
 use anneal_core::structure::cna;
 use ndarray::ArrayView1;
 use std::collections::BTreeSet;
 use std::io::Write as _;
 
-fn digest(text: &str) -> [u8; 32] {
+/// Bytes of a corpus signature, a SHA-256 digest.
+const SIGNATURE_BYTES: usize = 32;
+/// Last bin of the coordination histogram, which also counts every higher coordination.
+const MAX_COORDINATION: usize = 13;
+/// Distinct minima printed when the command line gives no count.
+const DEFAULT_TOP: usize = 10;
+/// Energy within which neighbouring minima, lowest first, count as one.
+const ENERGY_GROUPING: f64 = 1e-4;
+
+fn digest(text: &str) -> [u8; SIGNATURE_BYTES] {
     assert!(
-        text.len() == 64,
+        text.len() == 2 * SIGNATURE_BYTES,
         "signature must be 64 hexadecimal characters"
     );
-    let mut d = [0u8; 32];
+    let mut d = [0u8; SIGNATURE_BYTES];
     for (i, b) in d.iter_mut().enumerate() {
         *b = u8::from_str_radix(&text[2 * i..2 * i + 2], 16).expect("hexadecimal signature");
     }
     d
 }
 
-/// Neighbour counts within `cutoff`, as a histogram from 0 to 13.
-fn coordination(x: ArrayView1<f64>, cutoff: f64) -> [usize; 14] {
+/// Neighbour counts within `cutoff`, as a histogram from 0 to [`MAX_COORDINATION`].
+fn coordination(x: ArrayView1<f64>, cutoff: f64) -> [usize; MAX_COORDINATION + 1] {
     let n = x.len() / 3;
     let mut z = vec![0usize; n];
     for i in 0..n {
@@ -43,9 +53,9 @@ fn coordination(x: ArrayView1<f64>, cutoff: f64) -> [usize; 14] {
             }
         }
     }
-    let mut h = [0usize; 14];
+    let mut h = [0usize; MAX_COORDINATION + 1];
     for c in z {
-        h[c.min(13)] += 1;
+        h[c.min(MAX_COORDINATION)] += 1;
     }
     h
 }
@@ -62,14 +72,14 @@ fn main() {
     let system = &args[3];
     let temperature: f64 = args[4].parse().expect("temperature");
     let length: f64 = args[5].parse().expect("length");
-    let top: usize = args.get(6).map_or(10, |v| v.parse().expect("top"));
+    let top: usize = args.get(6).map_or(DEFAULT_TOP, |v| v.parse().expect("top"));
     let out = args.get(7);
-    let cutoff = 1.35 * length;
+    let cutoff = CONTACT_CUTOFF * length;
     let minima = corpus.minima(system, temperature).expect("minima");
     let mut groups: Vec<(f64, BTreeSet<u64>, Vec<f64>)> = Vec::new();
     for m in &minima {
         match groups.last_mut() {
-            Some((e, seeds, _)) if (m.energy - *e).abs() <= 1e-4 => {
+            Some((e, seeds, _)) if (m.energy - *e).abs() <= ENERGY_GROUPING => {
                 seeds.insert(m.set.seed);
             }
             _ => groups.push((
