@@ -1,0 +1,46 @@
+# A squash merge of a pull request with more than one commit takes its
+# subject from the pull-request title. The commit check in ci.yml meets
+# that subject only on the push to develop or main, after the merge.
+# Check the title while the pull request is open. A rerun of ci.yml
+# replays the old payload, so the `edited` type is what lets a fixed
+# title clear this check.
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  title:
+    name: Conventional pull-request title
+    runs-on: ubuntu-latest
+    steps:
+      # cog verify takes the custom commit types from cog.toml.
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install Cocogitto
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cocogitto
+
+      # The title reaches the shell through the environment, so it cannot
+      # inject commands. cog verify labels its report with the git identity
+      # and panics when user.name is unset, as it is on a fresh checkout.
+      - name: Conventional pull-request title
+        shell: bash
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          git config user.name "$PR_AUTHOR"
+          git config user.email "$PR_AUTHOR@users.noreply.github.com"
+          cog verify "$PR_TITLE"
