@@ -106,6 +106,87 @@ impl SelfRegulatingTemperature {
     }
 }
 
+/// Length of the longest run of misses that `trials` independent trials,
+/// each a hit with probability `p`, show about once.
+///
+/// A run of at least `L` misses starts after a hit, so `trials` trials
+/// contain about `trials * p * (1 - p)^L` of them. That count is one at
+/// `L = ln(trials * p) / ln(1 / (1 - p))`, the leading term of the longest
+/// run in M. F. Schilling, College Math. J. **21**, 196 (1990). The value
+/// is zero when there is nothing to measure: `p` at zero or one, or fewer
+/// than one expected hit.
+pub fn expected_longest_run(trials: u64, p: f64) -> f64 {
+    let hits = trials as f64 * p;
+    if !(p > 0.0 && p < 1.0) || hits <= 1.0 {
+        return 0.0;
+    }
+    hits.ln() / (1.0 / (1.0 - p)).ln()
+}
+
+/// GOAT's gradient boost reduced to its forced step: after a stall, take
+/// the next new minimum whatever its energy.
+///
+/// GOAT enters the boost when no new minimum turns up for more than
+/// `GradBoost` iterations, three by default, and then takes the next new
+/// minimum regardless of the temperature (de Souza 2025). It also
+/// strengthens its uphill gradient, and the hop here has no uphill walk,
+/// so only the forced step is carried.
+///
+/// The stall length is not GOAT's. Three counts GOAT micro-iterations,
+/// each a full uphill walk and relaxation that finds a new minimum most of
+/// the time. A hop finds one at a rate that differs by system and falls as
+/// the bias fills, so the stall is measured against the walker's own rate
+/// instead: the walker is stalled once its current run without a new
+/// minimum reaches [`expected_longest_run`] at its measured discovery
+/// rate. A walk whose rate stays the same reaches that length about once
+/// in its history so far. At trial `t` such a run ends with probability
+/// about `1 / t`, so the trials from `H` to `2H` contain about `ln 2` of
+/// them, and a steady walk is boosted about 0.69 times or fewer each time
+/// its history doubles.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StallBoost {
+    trials: u64,
+    new: u64,
+    run: u64,
+    armed: bool,
+}
+
+impl StallBoost {
+    /// A walker with no history.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Records one quenched trial, `new` when it reached a minimum the
+    /// walker had not stood in.
+    pub fn observe(&mut self, new: bool) {
+        self.trials += 1;
+        if new {
+            self.new += 1;
+            self.run = 0;
+        } else {
+            self.run += 1;
+        }
+        let limit = expected_longest_run(self.trials, self.new as f64 / self.trials as f64);
+        self.armed |= limit > 0.0 && self.run as f64 >= limit;
+    }
+
+    /// Whether the next new minimum is to be taken unconditionally.
+    pub fn armed(&self) -> bool {
+        self.armed
+    }
+
+    /// Spends the boost on a new minimum.
+    pub fn fire(&mut self) {
+        self.armed = false;
+    }
+
+    /// Current run of trials without a new minimum.
+    pub fn run(&self) -> u64 {
+        self.run
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,5 +271,62 @@ mod tests {
         }
         let rate = taken as f64 / counted as f64;
         assert!((rate - 0.5).abs() < 0.01, "settled at {rate}");
+    }
+
+    #[test]
+    fn the_longest_run_is_the_one_expected_once() {
+        let (h, p) = (10_000u64, 0.2);
+        let l = expected_longest_run(h, p);
+        let count = h as f64 * p * (1.0 - p).powf(l);
+        assert!((count - 1.0).abs() < 1e-9, "count {count}");
+        assert_eq!(expected_longest_run(h, 0.0), 0.0);
+        assert_eq!(expected_longest_run(h, 1.0), 0.0);
+        assert_eq!(expected_longest_run(3, 0.2), 0.0);
+    }
+
+    #[test]
+    fn a_steady_walk_is_boosted_less_than_once_per_doubling() {
+        let p = 0.3;
+        let mut uniform = uniforms(0x9e37_79b9_7f4a_7c15);
+        let walks = 200;
+        let mut fired = 0u32;
+        for _ in 0..walks {
+            let mut boost = StallBoost::new();
+            for _ in 0..1u64 << 16 {
+                let new = uniform() < p;
+                boost.observe(new);
+                if new && boost.armed() {
+                    boost.fire();
+                    fired += 1;
+                }
+            }
+        }
+        let per_doubling = fired as f64 / walks as f64 / 16.0;
+        assert!(per_doubling > 0.1 && per_doubling < std::f64::consts::LN_2);
+    }
+
+    #[test]
+    fn a_stalled_walk_is_boosted() {
+        let mut boost = StallBoost::new();
+        for k in 0..1000 {
+            let new = k % 2 == 0;
+            boost.observe(new);
+            if new && boost.armed() {
+                boost.fire();
+            }
+        }
+        assert!(!boost.armed());
+        let mut waited = 0;
+        while !boost.armed() {
+            boost.observe(false);
+            waited += 1;
+        }
+        // The warm-up ends on a miss, so the run starts at one.
+        let limit = expected_longest_run(boost.trials, boost.new as f64 / boost.trials as f64);
+        assert_eq!(waited as f64 + 1.0, limit.ceil());
+        boost.observe(true);
+        assert!(boost.armed());
+        boost.fire();
+        assert!(!boost.armed());
     }
 }

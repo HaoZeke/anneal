@@ -46,3 +46,19 @@ SEED_OFFSET=100 \
 cargo run --release --features ira,bank-rpc --example lj_cluster_search -- \
   38 400000 1 comm,sbasin,plainsurface,goat
 #+end_src
+
+* Boost after a stall
+
+=Config.boost_on_stall= accepts a chain's next new minimum after a stall, whatever its energy.
+GOAT's gradient boost takes that step after =GradBoost= iterations without a new minimum, three by default.
+A new minimum is a quenched trial whose descriptor the chain's own bias has never deposited on.
+The stall length here is not GOAT's count of three, which counts GOAT's own uphill walks.
+A chain is stalled once its run of trials without a new minimum reaches a length set by its own discovery rate.
+That length is the longest run the rate shows about once.
+=goat::expected_longest_run= gives it from the leading term of Schilling's longest-run law.
+Schilling's law is in College Math. J. 21, 196 (1990).
+The hop has no gradient reflection, so only the forced acceptance carries over.
+
+The boost applies on every chain of the baseline, under the Metropolis rule and under minima hopping.
+Its stall counter and its test for a new minimum read the chain's own bias, not the shared history.
+=boost= turns it on in both binaries, and each chain then prints its count of boosts on its =goat:= line.

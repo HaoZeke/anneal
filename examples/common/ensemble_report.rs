@@ -50,6 +50,7 @@ impl Tally {
 #[allow(clippy::type_complexity)]
 pub fn print_report(
     seed: u64,
+    cfg: &Config,
     ens: &EnsembleConfig,
     report: &EnsembleReport,
     unit: &str,
@@ -107,7 +108,7 @@ pub fn print_report(
                 superbasin_line(sb)
             );
         }
-        if let Some(goat) = goat_line(&run.outcome) {
+        if let Some(goat) = goat_line(cfg, &run.outcome) {
             println!("    seed {seed} replica {} {goat}", run.replica);
         }
     }
@@ -167,7 +168,10 @@ pub fn superbasin_line(sb: &anneal_core::superbasin::SuperbasinReport) -> String
 }
 
 /// What the GOAT rules a chain ran did, or `None` when it ran none.
-pub fn goat_line(outcome: &anneal_core::methods::cluster_hopping::Outcome) -> Option<String> {
+pub fn goat_line(
+    cfg: &Config,
+    outcome: &anneal_core::methods::cluster_hopping::Outcome,
+) -> Option<String> {
     let mut parts = Vec::new();
     if !outcome.temperature_factors.is_empty() {
         let factors: Vec<String> = outcome
@@ -176,6 +180,9 @@ pub fn goat_line(outcome: &anneal_core::methods::cluster_hopping::Outcome) -> Op
             .map(|f| format!("{f:.3}"))
             .collect();
         parts.push(format!("temperature factors {}", factors.join(" ")));
+    }
+    if cfg.boost_on_stall {
+        parts.push(format!("boosts {}", outcome.boosts));
     }
     (!parts.is_empty()).then(|| format!("goat: {}", parts.join(", ")))
 }
@@ -322,7 +329,7 @@ pub fn run_seeds<W: ExactStructureWitness + Sync + ?Sized>(
     for seed in seed0..seed0 + seeds {
         let report = run_ensemble(cfg, ens, seed, problem)
             .unwrap_or_else(|error| panic!("seed {seed}: {error}"));
-        print_report(seed, ens, &report, unit, verify, &mut tally);
+        print_report(seed, cfg, ens, &report, unit, verify, &mut tally);
     }
     print_tally(ens, &tally, reference);
     tally

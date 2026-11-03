@@ -985,6 +985,9 @@ pub struct Outcome {
     /// Per-rung factor on the temperature at the end of the run, under
     /// [`Config::self_regulating_temperature`]. Empty otherwise.
     pub temperature_factors: Vec<f64>,
+    /// New minima that the acceptance rule refused and
+    /// [`Config::boost_on_stall`] accepted.
+    pub boosts: usize,
     /// Swap attempts, each from the active rung to the next one up, the
     /// hottest offering to the coldest.
     pub swaps_tried: usize,
@@ -2682,6 +2685,8 @@ where
     let mut orient_window = 0usize;
     let mut orient_yes = 0usize;
     let mut regulators = vec![crate::goat::SelfRegulatingTemperature::new(); n_rep];
+    let mut stall_boosts = vec![crate::goat::StallBoost::new(); n_rep];
+    let mut boosts = 0usize;
     let mut hops = 0usize;
     let mut checkpoint_hops = 0usize;
     let mut checkpoint_quench_start = 0usize;
@@ -4610,6 +4615,9 @@ where
         // which is how the measured LJ38 run discovers basins from a
         // 25-step screen. Gating accept on recordable froze that path
         // at fifteen basins.
+        let reached_new =
+            cfg.boost_on_stall && !unquenched && bias.index().lookup(s_new.view()).is_none();
+        let forced = reached_new && stall_boosts[rep].armed();
         let mut trial_local_minimum = here;
         let accept = if cfg.minima_hopping {
             let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
@@ -4702,6 +4710,17 @@ where
             let d = delta / temperature.max(1e-12) + eb;
             d < 0.0 || rng.random::<f64>() < (-d).exp()
         };
+        if forced {
+            stall_boosts[rep].fire();
+            boosts += usize::from(!accept);
+            if cfg.minima_hopping && !accept {
+                trial_local_minimum = Some(identity.basin_of(x_new.view()));
+            }
+        }
+        if cfg.boost_on_stall && !unquenched {
+            stall_boosts[rep].observe(reached_new);
+        }
+        let accept = accept || forced;
         if cfg.self_regulating_temperature
             && !cfg.minima_hopping
             && !unquenched
@@ -6379,6 +6398,7 @@ where
         } else {
             Vec::new()
         },
+        boosts,
         swaps_tried,
         transport: match (&ladder, &transport) {
             (Some(l), _) => Some((l.index().round_trips(), l.sweeps(), l.barrier())),

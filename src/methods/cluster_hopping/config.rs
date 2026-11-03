@@ -840,6 +840,21 @@ pub struct Config {
     /// steer the same ratio.
     #[serde(skip_serializing_if = "is_false")]
     pub self_regulating_temperature: bool,
+    /// After a stall, accept the next new minimum whatever its energy.
+    ///
+    /// The forced step of GOAT's gradient boost (de Souza, Angew. Chem.
+    /// Int. Ed. 64, e202500393 (2025)). A new minimum is a quenched trial
+    /// whose descriptor the rung's bias has never deposited on, so it is a
+    /// basin the rung has not stood in. The stall length is not GOAT's
+    /// count of three. A rung is stalled once its current run of quenched
+    /// trials without a new minimum reaches the longest run its own
+    /// discovery rate shows about once, by Schilling's longest-run law;
+    /// [`crate::goat::StallBoost`] gives the reason and the derivation.
+    /// GOAT also strengthens its gradient reflection, and the hop here has
+    /// no reflection, so only the forced acceptance is carried. The tabu
+    /// and frequent-superbasin vetoes still apply.
+    #[serde(skip_serializing_if = "is_false")]
+    pub boost_on_stall: bool,
     /// Abandon a trial whose short relaxation is heading back to the current
     /// basin, before paying for the full one.
     ///
@@ -1428,6 +1443,7 @@ impl Config {
             ladder_pilot: 200,
             ladder_target_accept: crate::tempering::TARGET_SWAP_ACCEPT,
             self_regulating_temperature: false,
+            boost_on_stall: false,
             return_screen: false,
             soap_class_residual: false,
             soap_mode: SoapProposalMode::Flexible,
