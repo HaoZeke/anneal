@@ -857,7 +857,12 @@ mod tests {
         cfg.relax_steps = 40;
         cfg.screen_steps = 8;
         let mut rng = StdRng::seed_from_u64(1);
-        let start = random_cluster(6, 0.7, cfg.min_separation, &mut rng);
+        let start = random_cluster(
+            6,
+            crate::methods::cluster_hopping::LJ_LIQUID_NUMBER_DENSITY,
+            cfg.min_separation,
+            &mut rng,
+        );
         let mut ledger = Ledger::with_stop(80_000, Arc::clone(&stop));
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
             let mut energy = 0.0;
@@ -922,7 +927,12 @@ mod tests {
         assert!(rec2.depth_reward);
 
         let mut rng = StdRng::seed_from_u64(0);
-        let start = random_cluster(13, 0.7, rec.min_separation, &mut rng);
+        let start = random_cluster(
+            13,
+            crate::methods::cluster_hopping::LJ_LIQUID_NUMBER_DENSITY,
+            rec.min_separation,
+            &mut rng,
+        );
         let mut ledger = Ledger::new(80);
         let mut relax =
             |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| crude_relax(led, x, steps);
@@ -953,7 +963,12 @@ mod tests {
     fn a_tiny_run_records_floors_and_refuses_returns() {
         let mut rng = StdRng::seed_from_u64(1);
         let cfg = Config::recommended(7);
-        let start = random_cluster(7, 0.7, cfg.min_separation, &mut rng);
+        let start = random_cluster(
+            7,
+            crate::methods::cluster_hopping::LJ_LIQUID_NUMBER_DENSITY,
+            cfg.min_separation,
+            &mut rng,
+        );
         let mut ledger = Ledger::new(400);
         let mut relax =
             |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| crude_relax(led, x, steps);
@@ -984,7 +999,12 @@ mod tests {
         assert!(!rec.symmetrise_on_stall);
 
         let mut rng = StdRng::seed_from_u64(3);
-        let start = random_cluster(3, 0.7, rec.min_separation, &mut rng);
+        let start = random_cluster(
+            3,
+            crate::methods::cluster_hopping::LJ_LIQUID_NUMBER_DENSITY,
+            rec.min_separation,
+            &mut rng,
+        );
         let mut ledger = Ledger::new(200);
         let mut relax =
             |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| crude_relax(led, x, steps);
@@ -1015,7 +1035,12 @@ mod tests {
         let rec = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
         let before = format!("{rec:?}");
         let mut rng = StdRng::seed_from_u64(4);
-        let start = random_cluster(3, 0.7, rec.min_separation, &mut rng);
+        let start = random_cluster(
+            3,
+            crate::methods::cluster_hopping::LJ_LIQUID_NUMBER_DENSITY,
+            rec.min_separation,
+            &mut rng,
+        );
         let mut ledger = Ledger::new(rec.relax_steps + 8);
         let mut relax =
             |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| crude_relax(led, x, steps);
@@ -1030,7 +1055,12 @@ mod tests {
     fn a_tiny_run_does_not_starve_full_quenches() {
         let mut rng = StdRng::seed_from_u64(2);
         let cfg = Config::recommended(7);
-        let start = random_cluster(7, 0.7, cfg.min_separation, &mut rng);
+        let start = random_cluster(
+            7,
+            crate::methods::cluster_hopping::LJ_LIQUID_NUMBER_DENSITY,
+            cfg.min_separation,
+            &mut rng,
+        );
         let mut ledger = Ledger::new(400);
         let mut relax =
             |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| crude_relax(led, x, steps);
@@ -1066,7 +1096,12 @@ mod tests {
         assert_eq!(rec.return_polish_after, 0);
         assert!(rec.return_screen);
         let mut rng = StdRng::seed_from_u64(5);
-        let start = random_cluster(7, 0.7, rec.min_separation, &mut rng);
+        let start = random_cluster(
+            7,
+            crate::methods::cluster_hopping::LJ_LIQUID_NUMBER_DENSITY,
+            rec.min_separation,
+            &mut rng,
+        );
         let mut ledger = Ledger::new(50_000);
         let mut relax =
             |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| crude_relax(led, x, steps);
@@ -1099,7 +1134,12 @@ mod tests {
         assert_eq!(rec.return_polish, 0);
         assert_eq!(rec.return_polish_after, 0);
         let mut rng = StdRng::seed_from_u64(6);
-        let start = random_cluster(75, 0.7, rec.min_separation, &mut rng);
+        let start = random_cluster(
+            75,
+            crate::methods::cluster_hopping::LJ_LIQUID_NUMBER_DENSITY,
+            rec.min_separation,
+            &mut rng,
+        );
         let mut ledger = Ledger::new(50_000);
         let mut relax =
             |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| crude_relax(led, x, steps);
@@ -1129,7 +1169,12 @@ mod tests {
     fn residual_hole_starts_off_the_incumbent_floor() {
         let rec = Config::recommended(7);
         let mut rng = StdRng::seed_from_u64(11);
-        let start = random_cluster(7, 0.7, rec.min_separation, &mut rng);
+        let start = random_cluster(
+            7,
+            crate::methods::cluster_hopping::LJ_LIQUID_NUMBER_DENSITY,
+            rec.min_separation,
+            &mut rng,
+        );
         let mut archive = Archive::new();
         record_best(&mut archive, &rec, -10.0, start.view());
         record_best(&mut archive, &rec, -10.0, start.view());
@@ -1165,7 +1210,12 @@ mod tests {
         let rec = Config::recommended(7);
         let before = format!("{rec:?}");
         let mut rng = StdRng::seed_from_u64(8);
-        let start = random_cluster(7, 0.7, rec.min_separation, &mut rng);
+        let start = random_cluster(
+            7,
+            crate::methods::cluster_hopping::LJ_LIQUID_NUMBER_DENSITY,
+            rec.min_separation,
+            &mut rng,
+        );
         let mut ledger = Ledger::new(50_000);
         let mut relax =
             |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| crude_relax(led, x, steps);

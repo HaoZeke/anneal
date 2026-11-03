@@ -25,7 +25,9 @@ use crate::diversity::DiversityAnnealer;
 use crate::funnel_bo::FunnelModel;
 use crate::methods::bank::{Admission, Bank};
 use crate::methods::cluster_hopping::ClusterFingerprint;
-use crate::methods::cluster_hopping::{Config, GradFn, Ledger, Outcome, Relax, random_cluster};
+use crate::methods::cluster_hopping::{
+    Config, GradFn, LJ_LIQUID_NUMBER_DENSITY, Ledger, Outcome, Relax, random_cluster,
+};
 use crate::methods::splice::cut_and_splice;
 #[cfg(not(feature = "featomic"))]
 use crate::structure::cna_descriptor;
@@ -322,7 +324,12 @@ where
         if ledger.remaining() == 0 {
             break;
         }
-        let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+        let start = random_cluster(
+            cfg.n_points,
+            LJ_LIQUID_NUMBER_DENSITY,
+            cfg.min_separation,
+            &mut rng,
+        );
         let (out, spent_before) = slice_run(
             cfg,
             ledger,
@@ -425,7 +432,12 @@ where
                     if ledger.remaining() == 0 {
                         break;
                     }
-                    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+                    let start = random_cluster(
+                        cfg.n_points,
+                        LJ_LIQUID_NUMBER_DENSITY,
+                        cfg.min_separation,
+                        &mut rng,
+                    );
                     let (e, x) = relax(ledger, start.view(), cfg.relax_steps);
                     ledger.record(e, x.view());
                     if bank.inject(x.view(), e) {
