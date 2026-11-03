@@ -17,6 +17,22 @@ use ndarray::Array1;
 
 /// Nearest-neighbour distance of fcc at lattice constant one.
 const SC_NEIGHBOUR: f64 = std::f64::consts::FRAC_1_SQRT_2;
+/// Vertices of the icosahedron, each bonded to the centre by one 555 pair.
+const ICOSAHEDRON_VERTICES: usize = 12;
+/// Points of the centred icosahedron.
+const ICOSAHEDRON_POINTS: usize = ICOSAHEDRON_VERTICES + 1;
+/// Sites of the fcc ball, the size of the fcc 38 cluster.
+const FCC_POINTS: usize = 38;
+/// Lattice cells on each side of the origin, enough to contain the [`FCC_POINTS`] nearest sites.
+const CELL_REACH: i32 = 3;
+/// Length other than one at which the scaled cutoff is checked.
+const SHORT_LENGTH: f64 = 0.5;
+/// Error allowed on the scaled cutoff.
+const CUTOFF_TOLERANCE: f64 = 1e-15;
+/// Seconds the fixed-cutoff analysis may take before the test calls it a hang.
+const CNA_TIMEOUT_SECS: u64 = 30;
+/// Bound on the bonds among a pair's common neighbours at the scaled cutoff, half `TRAIL_BOND_CAP`.
+const FIRST_SHELL_BONDS: usize = 6;
 
 /// The Lennard-Jones diameter whose pair minimum is that neighbour distance.
 fn sc_length() -> f64 {
@@ -48,9 +64,9 @@ fn fcc_ball(nn: f64, n: usize) -> Array1<f64> {
         [0.0, 0.5, 0.5],
     ];
     let mut sites = Vec::new();
-    for i in -3..=3 {
-        for j in -3..=3 {
-            for k in -3..=3 {
+    for i in -CELL_REACH..=CELL_REACH {
+        for j in -CELL_REACH..=CELL_REACH {
+            for k in -CELL_REACH..=CELL_REACH {
                 for b in &basis {
                     let cell = [i as f64, j as f64, k as f64];
                     sites.push([0, 1, 2].map(|q| a * (cell[q] + b[q])));
@@ -75,8 +91,11 @@ fn within<T: Send + 'static>(secs: u64, f: impl FnOnce() -> T + Send + 'static) 
 fn the_unit_length_keeps_the_lennard_jones_cutoff() {
     assert_eq!(SoapSpec::at_length(1.0), SoapSpec::default());
     assert_eq!(contact_cutoff(SoapSpec::default()), CONTACT_CUTOFF);
-    let half = contact_cutoff(SoapSpec::at_length(0.5));
-    assert!((half - 0.5 * CONTACT_CUTOFF).abs() < 1e-15, "{half}");
+    let half = contact_cutoff(SoapSpec::at_length(SHORT_LENGTH));
+    assert!(
+        (half - SHORT_LENGTH * CONTACT_CUTOFF).abs() < CUTOFF_TOLERANCE,
+        "{half}"
+    );
 }
 
 /// The mis-bonding. At the fixed cutoff each vertex of a Sutton-Chen
@@ -84,13 +103,18 @@ fn the_unit_length_keeps_the_lennard_jones_cutoff() {
 #[test]
 fn a_sutton_chen_icosahedron_is_icosahedral_at_its_own_length() {
     let x = icosahedron13(SC_NEIGHBOUR);
-    let fixed = cna(x.view(), 13, CONTACT_CUTOFF);
+    let fixed = cna(x.view(), ICOSAHEDRON_POINTS, CONTACT_CUTOFF);
     assert_eq!(fixed.get((5, 5, 5)), 0, "counts {:?}", fixed.counts);
     assert!(!ih_dominated(x.view(), SoapSpec::default()));
 
     let spec = SoapSpec::at_length(sc_length());
-    let scaled = cna(x.view(), 13, contact_cutoff(spec));
-    assert_eq!(scaled.get((5, 5, 5)), 12, "counts {:?}", scaled.counts);
+    let scaled = cna(x.view(), ICOSAHEDRON_POINTS, contact_cutoff(spec));
+    assert_eq!(
+        scaled.get((5, 5, 5)),
+        ICOSAHEDRON_VERTICES,
+        "counts {:?}",
+        scaled.counts
+    );
     assert!(ih_dominated(x.view(), spec));
 }
 
@@ -100,9 +124,12 @@ fn a_sutton_chen_icosahedron_is_icosahedral_at_its_own_length() {
 /// the lattice is read.
 #[test]
 fn a_sutton_chen_lattice_stays_in_the_first_shell_at_its_own_length() {
-    let x = fcc_ball(SC_NEIGHBOUR, 38);
+    let x = fcc_ball(SC_NEIGHBOUR, FCC_POINTS);
     let y = x.clone();
-    let fixed = within(30, move || cna(y.view(), 38, CONTACT_CUTOFF)).expect("cna did not return");
+    let fixed = within(CNA_TIMEOUT_SECS, move || {
+        cna(y.view(), FCC_POINTS, CONTACT_CUTOFF)
+    })
+    .expect("cna did not return");
     assert!(
         fixed
             .counts
@@ -114,9 +141,12 @@ fn a_sutton_chen_lattice_stays_in_the_first_shell_at_its_own_length() {
     assert_eq!(fixed.get((4, 2, 1)), 0, "counts {:?}", fixed.counts);
 
     let spec = SoapSpec::at_length(sc_length());
-    let scaled = cna(x.view(), 38, contact_cutoff(spec));
+    let scaled = cna(x.view(), FCC_POINTS, contact_cutoff(spec));
     assert!(
-        scaled.counts.iter().all(|((_, s, _), _)| *s <= 6),
+        scaled
+            .counts
+            .iter()
+            .all(|((_, s, _), _)| *s <= FIRST_SHELL_BONDS),
         "counts {:?}",
         scaled.counts
     );

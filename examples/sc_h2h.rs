@@ -48,6 +48,22 @@ const HIT_WINDOW: f64 = 1.0e-3;
 /// Two quenches are one minimum when their sorted pair distances differ by
 /// less than this in Euclidean norm. The nearest neighbour is `1/sqrt(2)`.
 const IDENTITY_RADIUS: f64 = 1.0e-3;
+/// Chains of an `ens` arm when the command line gives no count.
+const DEFAULT_REPLICAS: usize = 4;
+/// Potential calls a chain spends per turn when the command line gives no count.
+const DEFAULT_TURN_CALLS: usize = 2000;
+/// Lennard-Jones temperature that `Config::with_scales` multiplies by the energy scale.
+const LJ_TEMPERATURE: f64 = 0.8;
+/// Largest difference allowed between the configured and the published temperature.
+const TEMPERATURE_MATCH: f64 = 1e-9;
+/// Gradient tolerance that ends a screen at its first gradient check.
+const SCREEN_GTOL: f64 = 1.0e9;
+/// Odd 64-bit golden-ratio multiplier that spreads the replica seeds apart.
+const REPLICA_SEED_STRIDE: u64 = 0x9e37_79b9_7f4a_7c15;
+/// Bytes of a corpus signature, a SHA-256 digest.
+const SIGNATURE_BYTES: usize = 32;
+/// Energy within which the corpus stores repeated exact coordinates once.
+const CORPUS_ENERGY_TOLERANCE: f64 = 1e-6;
 
 fn rms(g: &[f64]) -> f64 {
     let s: f64 = g.iter().map(|v| v * v).sum();
@@ -254,7 +270,7 @@ fn element(family: SuttonChenFamily) -> u32 {
 }
 
 /// Corpus identity of one Sutton-Chen system: row, size and the quench certificate.
-fn minima_signature(family: SuttonChenFamily, n: usize) -> [u8; 32] {
+fn minima_signature(family: SuttonChenFamily, n: usize) -> [u8; SIGNATURE_BYTES] {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(
@@ -389,13 +405,17 @@ fn main() {
         .map_or((arm, false), |base| (base, true));
     let replicas: usize = match base_arm {
         "iso" => 1,
-        "ens" => args.get(8).map_or(4, |v| v.parse().expect("replicas")),
+        "ens" => args
+            .get(8)
+            .map_or(DEFAULT_REPLICAS, |v| v.parse().expect("replicas")),
         _ => {
             eprintln!("unknown arm {arm}");
             std::process::exit(2);
         }
     };
-    let turn_calls: usize = args.get(9).map_or(2000, |v| v.parse().expect("turn calls"));
+    let turn_calls: usize = args
+        .get(9)
+        .map_or(DEFAULT_TURN_CALLS, |v| v.parse().expect("turn calls"));
     let target = reference + HIT_WINDOW;
 
     let potential = SuttonChen::new(n, family);
@@ -404,8 +424,8 @@ fn main() {
     let temperature = family.basin_hopping_temperature();
     // `with_scales` multiplies the Lennard-Jones temperature 0.8 by the energy
     // scale, so this scale makes the Metropolis temperature the published T*.
-    let mut cfg = Config::with_scales(n, length_scale, temperature / 0.8);
-    assert!((cfg.temperature - temperature).abs() < 1e-9);
+    let mut cfg = Config::with_scales(n, length_scale, temperature / LJ_TEMPERATURE);
+    assert!((cfg.temperature - temperature).abs() < TEMPERATURE_MATCH);
     cfg.bayes_screen = true;
     cfg.relax_steps = QUENCH_ITERS;
     cfg.bayes_threshold =
@@ -472,8 +492,7 @@ fn main() {
                 let (history, context, witness) = (&history, &context, &witness);
                 let minima_db = minima_db.as_deref();
                 let budget = per_replica[r];
-                let replica_seed =
-                    seed.wrapping_add((r as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+                let replica_seed = seed.wrapping_add((r as u64).wrapping_mul(REPLICA_SEED_STRIDE));
                 scope.spawn(move || {
                     turns.wait(r, &stop);
                     let mut ledger = Ledger::with_stop(budget, Arc::clone(&stop));
@@ -497,8 +516,7 @@ fn main() {
                         let charged_before = led.spent();
                         opt.forget();
                         let full = iters > screen_steps;
-                        // A 1e9 tolerance ends a screen at its first gradient check.
-                        opt.gtol = if full { QUENCH_RMS } else { 1.0e9 };
+                        opt.gtol = if full { QUENCH_RMS } else { SCREEN_GTOL };
                         let cap = if full { iters.min(QUENCH_ITERS) } else { iters };
                         let (mut energy, xr, _) = opt.minimize(x, cap, |v| {
                             led.charge().then(|| pot_r.value_and_gradient(v))
@@ -625,7 +643,7 @@ fn main() {
                                 &vec![element(family); n],
                                 &units,
                                 &entries,
-                                1e-6,
+                                CORPUS_ENERGY_TOLERANCE,
                                 provenance,
                             )
                         }) {

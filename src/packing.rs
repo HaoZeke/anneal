@@ -295,7 +295,7 @@ mod tests {
     const CORE_FRACTION: f64 = 0.6;
     /// Minimum separation of the completions and the hops.
     const MIN_SEPARATION: f64 = 0.5;
-    /// Bond cutoff of the hop tests, between the unit first shell and the second.
+    /// Bond cutoff of the hop tests, above the icosahedron's edge length.
     const BOND_CUTOFF: f64 = 1.2;
     /// Bonded atoms around a hollow site, the triangle under it.
     const HOLLOW_NEIGHBOURS: usize = 3;

@@ -24,6 +24,12 @@ const QUENCH_RMS: f64 = 1.0e-3;
 const QUENCH_ITERS: usize = 500;
 /// A hit is a validated quench at or below the Cambridge energy plus this window.
 const HIT_WINDOW: f64 = 1.0e-3;
+/// Lennard-Jones temperature that `Config::with_scales` multiplies by the energy scale.
+const LJ_TEMPERATURE: f64 = 0.8;
+/// Largest difference allowed between the configured and the published temperature.
+const TEMPERATURE_MATCH: f64 = 1e-9;
+/// Gradient tolerance that ends a screen at its first gradient check.
+const SCREEN_GTOL: f64 = 1.0e9;
 
 fn check_points(args: &[String]) {
     if args.len() != 4 {
@@ -94,9 +100,9 @@ fn main() {
     // scale. The scale is the published Sutton-Chen basin-hopping temperature
     // divided by that 0.8, so the Metropolis temperature is T* and the bias
     // height stays in the same proportion to T* as 0.25 is to 0.8.
-    let mut cfg = Config::with_scales(n, length_scale, temperature / 0.8);
+    let mut cfg = Config::with_scales(n, length_scale, temperature / LJ_TEMPERATURE);
     assert!(
-        (cfg.temperature - temperature).abs() < 1e-9,
+        (cfg.temperature - temperature).abs() < TEMPERATURE_MATCH,
         "temperature {} did not become T* {temperature}",
         cfg.temperature
     );
@@ -138,10 +144,10 @@ fn main() {
         opt.forget();
         let full = iters > screen_steps;
         // Full quenches stop at an infinity-norm of the same 1e-3 GMIN uses
-        // as an RMS bound (`BQMAX`). The 1e9 tolerance ends a screen at
+        // as an RMS bound (`BQMAX`). `SCREEN_GTOL` ends a screen at
         // its first gradient check, so a screen costs one or two calls
         // rather than its step count. Arm 3 is benchmarked with this screen.
-        opt.gtol = if full { QUENCH_RMS } else { 1.0e9 };
+        opt.gtol = if full { QUENCH_RMS } else { SCREEN_GTOL };
         let cap = if full { iters.min(relax_steps) } else { iters };
         let (mut energy, xr, _) =
             opt.minimize(x, cap, |v| led.charge().then(|| pot.value_and_gradient(v)));
