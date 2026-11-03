@@ -2619,8 +2619,22 @@ where
 
     // Every rung's start is held to the first one's contract before it is
     // recorded, and keeps its validation gradient for the first step the rung
-    // takes from it.
+    // takes from it. A rigid chart draws no start: as at a rigid stall, a
+    // rung moves only to a minimum the chain has quenched, and before the
+    // first hop that is the first rung's start.
     for _ in 1..n_rep {
+        if cfg.move_library.is_rigid_body() {
+            chains.push(OccupiedMinimum {
+                energy: e,
+                coordinates: x.clone(),
+                gradient: current_validation_gradient.clone(),
+                history_minimum: None,
+                local_minimum: None,
+                generation: 0,
+                pending_initial: true,
+            });
+            continue;
+        }
         let s0 = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
         let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
         let gradient = record_quenched_answer(
