@@ -82,6 +82,11 @@ impl SuttonChenFamily {
     }
 }
 
+/// Half-width of the box per nearest-neighbour distance and cube root of the point count.
+const BOX_EXTENT: f64 = 4.0;
+/// Squared separation at or below which a pair is coincident and left out of the sums.
+const COINCIDENT_R2: f64 = 1e-24;
+
 /// Sutton-Chen cluster over `n` free points, flat point-major coordinates.
 #[derive(Debug, Clone)]
 pub struct SuttonChen {
@@ -101,7 +106,7 @@ impl SuttonChen {
         let dim = 3 * n_points;
         // Bulk nearest-neighbour distance at lattice constant a = 1 is 1/sqrt(2).
         let nn = std::f64::consts::FRAC_1_SQRT_2;
-        let extent = 4.0 * nn * (n_points as f64).cbrt();
+        let extent = BOX_EXTENT * nn * (n_points as f64).cbrt();
         Self {
             n_points,
             family,
@@ -140,7 +145,7 @@ impl SuttonChen {
                 let dy = x[3 * i + 1] - x[3 * j + 1];
                 let dz = x[3 * i + 2] - x[3 * j + 2];
                 let r2 = dx * dx + dy * dy + dz * dz;
-                if r2 <= 1e-24 {
+                if r2 <= COINCIDENT_R2 {
                     continue;
                 }
                 let (v, phi) = reduced_powers(r2, n_exp, m_exp);
@@ -257,18 +262,38 @@ mod tests {
         SuttonChenFamily::Sc9_6,
         SuttonChenFamily::Sc10_8,
     ];
+    /// Separation of the dimer, near the rows' nearest-neighbour distance.
+    const DIMER_SEPARATION: f64 = 0.7;
+    /// Relative error allowed against the dimer's closed form.
+    const DIMER_TOLERANCE: f64 = 1e-8;
+    /// Points of the centred icosahedron, the centre and its twelve vertices.
+    const ICOSAHEDRON_POINTS: usize = 13;
+    /// Radii between which the golden-section search looks for the icosahedron's minimum.
+    const RADIUS_BRACKET: (f64, f64) = (0.5, 1.0);
+    /// Golden-section steps, far more than double precision needs.
+    const GOLDEN_STEPS: usize = 200;
+    /// Error allowed against the printed Cambridge energies.
+    const CAMBRIDGE_TOLERANCE: f64 = 5e-4;
+    /// Flat coordinates of an irregular four-point cluster.
+    const TETRAMER: [f64; 12] = [
+        0.0, 0.0, 0.0, 0.8, 0.1, 0.0, 0.2, 0.75, 0.15, -0.3, 0.4, 0.7,
+    ];
+    /// Step of the central difference.
+    const DIFFERENCE_STEP: f64 = 1e-6;
+    /// Error allowed between the central difference and the analytic gradient.
+    const GRADIENT_TOLERANCE: f64 = 1e-4;
 
     /// Two atoms: `E = r^{-n} - 2 c r^{-m/2}`.
     #[test]
     fn a_dimer_matches_the_closed_form() {
-        let r = 0.7;
+        let r = DIMER_SEPARATION;
         for family in FAMILIES {
             let p = SuttonChen::new(2, family);
             let x = Array1::from(vec![0.0, 0.0, 0.0, r, 0.0, 0.0]);
             let (e, _) = p.value_and_gradient(x.view());
             let closed = r.powi(-family.n_exp()) - 2.0 * family.c() * r.powi(-family.m_exp() / 2);
             assert!(
-                (e - closed).abs() < 1e-8 * closed.abs().max(1.0),
+                (e - closed).abs() < DIMER_TOLERANCE * closed.abs().max(1.0),
                 "{}: {e} vs {closed}",
                 family.label()
             );
@@ -294,11 +319,11 @@ mod tests {
     fn the_icosahedron_matches_the_cambridge_energy() {
         let printed = [-10968.5082, -2808.5765, -3280.3843];
         for (family, want) in FAMILIES.into_iter().zip(printed) {
-            let p = SuttonChen::new(13, family);
+            let p = SuttonChen::new(ICOSAHEDRON_POINTS, family);
             let energy = |r: f64| p.eval(icosahedron(r).view());
-            let (mut lo, mut hi) = (0.5, 1.0);
+            let (mut lo, mut hi) = RADIUS_BRACKET;
             let g = (5.0_f64.sqrt() - 1.0) / 2.0;
-            for _ in 0..200 {
+            for _ in 0..GOLDEN_STEPS {
                 let a = hi - g * (hi - lo);
                 let b = lo + g * (hi - lo);
                 if energy(a) < energy(b) {
@@ -309,7 +334,7 @@ mod tests {
             }
             let e = energy(0.5 * (lo + hi));
             assert!(
-                (e - want).abs() < 5e-4,
+                (e - want).abs() < CAMBRIDGE_TOLERANCE,
                 "{}: {e} vs printed {want}",
                 family.label()
             );
@@ -332,12 +357,10 @@ mod tests {
     }
 
     fn gradient_matches(family: SuttonChenFamily) {
-        let p = SuttonChen::new(4, family);
-        let x = Array1::from(vec![
-            0.0, 0.0, 0.0, 0.8, 0.1, 0.0, 0.2, 0.75, 0.15, -0.3, 0.4, 0.7,
-        ]);
+        let p = SuttonChen::new(TETRAMER.len() / 3, family);
+        let x = Array1::from(TETRAMER.to_vec());
         let (e0, g) = p.value_and_gradient(x.view());
-        let eps = 1e-6;
+        let eps = DIFFERENCE_STEP;
         for k in 0..x.len() {
             let mut xp = x.clone();
             let mut xm = x.clone();
@@ -345,7 +368,7 @@ mod tests {
             xm[k] -= eps;
             let num = (p.eval(xp.view()) - p.eval(xm.view())) / (2.0 * eps);
             assert!(
-                (num - g[k]).abs() < 1e-4,
+                (num - g[k]).abs() < GRADIENT_TOLERANCE,
                 "{} component {k}: numeric {num} analytic {} energy {e0}",
                 family.label(),
                 g[k]

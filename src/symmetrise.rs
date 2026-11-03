@@ -587,7 +587,7 @@ pub fn symmetrise_core(
             core[3 * k + d] = x[3 * a + d];
         }
     }
-    let cands = detect_all(core.view(), m, &[2, 3, 4, 5, 6], tolerance);
+    let cands = detect_all(core.view(), m, &ROTATION_ORDERS, tolerance);
     if cands.is_empty() {
         return None;
     }
@@ -596,7 +596,7 @@ pub fn symmetrise_core(
         let seen = gens.iter().any(|g| {
             let dot =
                 g.axis[0] * cand.axis[0] + g.axis[1] * cand.axis[1] + g.axis[2] * cand.axis[2];
-            dot.abs() > 0.995 && g.improper == cand.improper
+            dot.abs() > PARALLEL_COSINE && g.improper == cand.improper
         });
         if !seen {
             gens.push(*cand);
@@ -794,7 +794,7 @@ pub fn orbit_complete_core(
             core[3 * k + d] = x[3 * a + d];
         }
     }
-    let cands = detect_all(core.view(), m, &[2, 3, 4, 5, 6], tolerance);
+    let cands = detect_all(core.view(), m, &ROTATION_ORDERS, tolerance);
     if cands.is_empty() {
         return None;
     }
@@ -803,7 +803,7 @@ pub fn orbit_complete_core(
         let seen = gens.iter().any(|g| {
             let dot =
                 g.axis[0] * cand.axis[0] + g.axis[1] * cand.axis[1] + g.axis[2] * cand.axis[2];
-            dot.abs() > 0.995 && g.improper == cand.improper
+            dot.abs() > PARALLEL_COSINE && g.improper == cand.improper
         });
         if !seen {
             gens.push(*cand);
@@ -883,6 +883,19 @@ pub struct CoreGroup {
     pub centre: [f64; 3],
 }
 
+/// Determinant magnitude below which [`inverse`] reports a matrix as singular.
+const SINGULAR_DETERMINANT: f64 = 1e-12;
+/// Newton steps of [`refine_operation`]'s polar factor, which converges quadratically.
+const POLAR_STEPS: usize = 60;
+/// Most steps of [`shell_core_group`]'s weighted-centre iteration before it settles for the last centre.
+const CENTRE_STEPS: usize = 200;
+/// Fewest points [`shell_core_group`] reads a group from, the smallest set that need not be planar.
+const MIN_CORE_POINTS: usize = 4;
+/// Rotation orders [`detect_all`] tries on a core: the crystallographic ones and the icosahedral five.
+const ROTATION_ORDERS: [usize; 5] = [2, 3, 4, 5, 6];
+/// Cosine above which two detected operations' directions count as one, so only the first is kept.
+const PARALLEL_COSINE: f64 = 0.995;
+
 fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
     ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
 }
@@ -918,7 +931,7 @@ fn inverse(a: &Rot) -> Option<Rot> {
     let det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1])
         - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
         + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
-    if det.abs() < 1e-12 {
+    if det.abs() < SINGULAR_DETERMINANT {
         return None;
     }
     let mut o = [[0.0; 3]; 3];
@@ -965,7 +978,7 @@ pub fn refine_operation(g: &Rot, core: &[[f64; 3]]) -> Rot {
         }
     }
     let mut x = h;
-    for _ in 0..60 {
+    for _ in 0..POLAR_STEPS {
         let Some(inv) = inverse(&x) else { return *g };
         let it = transpose(&inv);
         let mut next = [[0.0; 3]; 3];
@@ -1021,11 +1034,11 @@ pub fn close_group(gens: &[Rot], closure: f64, cap: usize) -> Vec<Rot> {
 /// describes. `None` when no core of at most `spec.max_points` points has
 /// an operation.
 pub fn shell_core_group(x: ArrayView1<f64>, n: usize, spec: &ShellCore) -> Option<CoreGroup> {
-    if n < 4 {
+    if n < MIN_CORE_POINTS {
         return None;
     }
     let mut c = centroid(x, n);
-    for _ in 0..200 {
+    for _ in 0..CENTRE_STEPS {
         let mut num = [0.0; 3];
         let mut den = 0.0;
         for a in 0..n {
@@ -1070,7 +1083,7 @@ pub fn shell_core_group(x: ArrayView1<f64>, n: usize, spec: &ShellCore) -> Optio
         if m > spec.max_points {
             return None;
         }
-        if m <= 3 {
+        if m < MIN_CORE_POINTS {
             continue;
         }
         let core: Vec<usize> = radii[..m].iter().map(|p| p.1).collect();
@@ -1084,7 +1097,7 @@ pub fn shell_core_group(x: ArrayView1<f64>, n: usize, spec: &ShellCore) -> Optio
                 cx[3 * k + d] = p[d];
             }
         }
-        let cands = detect_all(cx.view(), m, &[2, 3, 4, 5, 6], spec.tolerance);
+        let cands = detect_all(cx.view(), m, &ROTATION_ORDERS, spec.tolerance);
         if cands.is_empty() {
             continue;
         }
@@ -1093,7 +1106,7 @@ pub fn shell_core_group(x: ArrayView1<f64>, n: usize, spec: &ShellCore) -> Optio
             let seen = picked.iter().any(|g| {
                 let dot =
                     g.axis[0] * cand.axis[0] + g.axis[1] * cand.axis[1] + g.axis[2] * cand.axis[2];
-                dot.abs() > 0.995 && g.improper == cand.improper
+                dot.abs() > PARALLEL_COSINE && g.improper == cand.improper
             });
             if !seen {
                 picked.push(*cand);
@@ -1595,6 +1608,53 @@ mod shell_tests {
     use super::*;
     use ndarray::Array1;
 
+    /// Points of the centred icosahedron, the centre and its twelve vertices.
+    const ICOSAHEDRON_POINTS: usize = 13;
+    /// Points of the one-sided surface over the icosahedron.
+    const SURFACE_POINTS: usize = 10;
+    /// Golden-ratio conjugate, so successive surface points spread evenly in azimuth.
+    const GOLDEN_FRACTION: f64 = 0.618_034;
+    /// Smallest radius of a surface point, outside the icosahedron's first shell.
+    const SURFACE_RADIUS: f64 = 1.9;
+    /// Radius added per step of the surface's [`SURFACE_RADII`] radii.
+    const SURFACE_RADIUS_STEP: f64 = 0.05;
+    /// Distinct radii the surface points cycle through.
+    const SURFACE_RADII: usize = 3;
+    /// Lowest height fraction of a surface point, which keeps the surface on one side.
+    const SURFACE_Z_MIN: f64 = 0.35;
+    /// Spread of the surface's height fractions above [`SURFACE_Z_MIN`].
+    const SURFACE_Z_SPAN: f64 = 0.6;
+    /// Stride, coprime to [`SURFACE_POINTS`], that deals the heights out of order.
+    const SURFACE_Z_STRIDE: usize = 7;
+    /// Multiplier of the fixed jitter pattern over the coordinate index.
+    const JITTER_STRIDE: usize = 37;
+    /// Offset of the fixed jitter pattern.
+    const JITTER_OFFSET: usize = 11;
+    /// Period of the fixed jitter pattern, whose half maps it onto `[-1, 1]`.
+    const JITTER_PERIOD: usize = 17;
+    /// Jitter amplitude that moves the core off its exact orbit without hiding its group.
+    const JITTER: f64 = 0.003;
+    /// Angle in radians by which the second two-fold misses perpendicular.
+    const TILT: f64 = 0.03;
+    /// Most elements the exact closure may generate, reached because it never repeats.
+    const EXACT_CAP: usize = 48;
+    /// Element comparison of [`generate_group`], right for exact operations only.
+    const EXACT_CLOSURE: f64 = 1e-6;
+    /// Error added to a vertex direction before the five-fold is built from it.
+    const DIRECTION_ERROR: [f64; 2] = [0.04, 0.03];
+    /// Largest element difference between the refined and the exact operation.
+    const REFINE_TOLERANCE: f64 = 1e-9;
+    /// Largest distance of the found centre from the icosahedron's centre.
+    const CENTRE_ERROR: f64 = 0.01;
+    /// Smallest offset of the whole structure's centroid from the icosahedron's centre.
+    const CENTROID_OFFSET: f64 = 0.3;
+    /// Merge radius of the shell completion.
+    const MERGE_RADIUS: f64 = 0.3;
+    /// Minimum separation of the shell completion.
+    const MIN_SEPARATION: f64 = 0.5;
+    /// Largest fraction of its radial spread the completed core may keep.
+    const SPREAD_RATIO: f64 = 0.1;
+
     fn icosahedron() -> Vec<[f64; 3]> {
         let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
         let s = 1.0 / (1.0 + phi * phi).sqrt();
@@ -1615,23 +1675,30 @@ mod shell_tests {
     fn centred_icosahedron_under_a_one_sided_surface(amp: f64) -> (Array1<f64>, usize) {
         let mut points = vec![[0.0; 3]];
         points.extend(icosahedron());
-        for i in 0..10 {
-            let a = 2.0 * std::f64::consts::PI * (i as f64) * 0.618_034;
-            let r = 1.9 + 0.05 * ((i % 3) as f64);
-            let z = 0.35 + 0.6 * ((i * 7 % 10) as f64) / 10.0;
+        for i in 0..SURFACE_POINTS {
+            let a = 2.0 * std::f64::consts::PI * (i as f64) * GOLDEN_FRACTION;
+            let r = SURFACE_RADIUS + SURFACE_RADIUS_STEP * ((i % SURFACE_RADII) as f64);
+            let z = SURFACE_Z_MIN
+                + SURFACE_Z_SPAN * ((i * SURFACE_Z_STRIDE % SURFACE_POINTS) as f64)
+                    / SURFACE_POINTS as f64;
             let rho = (1.0 - z * z).sqrt();
             points.push([r * rho * a.cos(), r * rho * a.sin(), r * z]);
         }
         let mut x = Array1::from(points.iter().flatten().copied().collect::<Vec<f64>>());
-        for (i, v) in x.iter_mut().enumerate().take(3 * 13) {
-            *v += amp * (((i * 37 + 11) % 17) as f64 / 8.0 - 1.0);
+        for (i, v) in x.iter_mut().enumerate().take(3 * ICOSAHEDRON_POINTS) {
+            *v += amp
+                * (((i * JITTER_STRIDE + JITTER_OFFSET) % JITTER_PERIOD) as f64
+                    / (JITTER_PERIOD / 2) as f64
+                    - 1.0);
         }
         (x, points.len())
     }
 
     fn spread(x: ArrayView1<f64>) -> f64 {
         let c = point(x, 0);
-        let r: Vec<f64> = (1..13).map(|a| distance(point(x, a), c)).collect();
+        let r: Vec<f64> = (1..ICOSAHEDRON_POINTS)
+            .map(|a| distance(point(x, a), c))
+            .collect();
         r.iter().copied().fold(f64::NEG_INFINITY, f64::max)
             - r.iter().copied().fold(f64::INFINITY, f64::min)
     }
@@ -1642,7 +1709,7 @@ mod shell_tests {
     /// exact closure runs to its cap, while a tolerant one stops at ten.
     #[test]
     fn a_tolerant_closure_stops_at_the_group_the_operations_approximate() {
-        let tilt = 0.03_f64;
+        let tilt = TILT;
         let near = [
             Candidate {
                 axis: [0.0, 0.0, 1.0],
@@ -1657,10 +1724,10 @@ mod shell_tests {
                 deviation: 0.0,
             },
         ];
-        assert_eq!(generate_group(&near, 48).len(), 48);
+        assert_eq!(generate_group(&near, EXACT_CAP).len(), EXACT_CAP);
         let gens: Vec<Rot> = near.iter().map(operation).collect();
         assert_eq!(close_group(&gens, 0.27, 120).len(), 10);
-        assert_eq!(close_group(&gens, 1e-6, 120).len(), 120);
+        assert_eq!(close_group(&gens, EXACT_CLOSURE, 120).len(), 120);
     }
 
     /// Refinement replaces an operation by the orthogonal map that carries
@@ -1672,13 +1739,13 @@ mod shell_tests {
         core.extend(icosahedron());
         let v = core[1];
         let exact = rot_matrix(v, 2.0 * std::f64::consts::PI / 5.0);
-        let off = normalise([v[0] + 0.04, v[1] - 0.03, v[2]]).unwrap();
+        let off = normalise([v[0] + DIRECTION_ERROR[0], v[1] - DIRECTION_ERROR[1], v[2]]).unwrap();
         let rough = rot_matrix(off, 2.0 * std::f64::consts::PI / 5.0);
         let refined = refine_operation(&rough, &core);
         for i in 0..3 {
             for j in 0..3 {
                 assert!(
-                    (refined[i][j] - exact[i][j]).abs() < 1e-9,
+                    (refined[i][j] - exact[i][j]).abs() < REFINE_TOLERANCE,
                     "element ({i}, {j}) is {} against {}",
                     refined[i][j],
                     exact[i][j]
@@ -1693,29 +1760,35 @@ mod shell_tests {
     /// shell that carries an operation is the icosahedron itself.
     #[test]
     fn the_shell_core_reads_the_core_group_through_a_one_sided_surface() {
-        let (x, n) = centred_icosahedron_under_a_one_sided_surface(0.003);
+        let (x, n) = centred_icosahedron_under_a_one_sided_surface(JITTER);
         let core = shell_core_group(x.view(), n, &ShellCore::scaled(1.0)).expect("a core group");
-        assert_eq!(core.core.len(), 13);
+        assert_eq!(core.core.len(), ICOSAHEDRON_POINTS);
         assert!(
-            core.core.iter().all(|&a| a < 13),
+            core.core.iter().all(|&a| a < ICOSAHEDRON_POINTS),
             "a surface point in the core"
         );
         assert_eq!(core.group.len(), 60, "the icosahedral rotations");
-        assert!(distance(core.centre, point(x.view(), 0)) < 0.01);
-        assert!(distance(centroid(x.view(), n), point(x.view(), 0)) > 0.3);
+        assert!(distance(core.centre, point(x.view(), 0)) < CENTRE_ERROR);
+        assert!(distance(centroid(x.view(), n), point(x.view(), 0)) > CENTROID_OFFSET);
     }
 
     /// Completion about the core's centre puts the jittered core back on
     /// one radius and leaves the count of points as it was.
     #[test]
     fn completion_on_the_shell_core_closes_the_core_onto_its_orbit() {
-        let (x, n) = centred_icosahedron_under_a_one_sided_surface(0.003);
-        let y = orbit_complete_shells(x.view(), n, &ShellCore::scaled(1.0), 0.3, 0.5)
-            .expect("the jittered core moves");
+        let (x, n) = centred_icosahedron_under_a_one_sided_surface(JITTER);
+        let y = orbit_complete_shells(
+            x.view(),
+            n,
+            &ShellCore::scaled(1.0),
+            MERGE_RADIUS,
+            MIN_SEPARATION,
+        )
+        .expect("the jittered core moves");
         assert_eq!(y.len(), x.len());
         let (before, after) = (spread(x.view()), spread(y.view()));
         assert!(
-            after < 0.1 * before,
+            after < SPREAD_RATIO * before,
             "radial spread {before} became {after}"
         );
     }
@@ -1726,12 +1799,12 @@ mod shell_tests {
     fn a_first_shell_past_the_largest_core_gives_no_group() {
         let (x, n) = centred_icosahedron_under_a_one_sided_surface(0.0);
         let spec = ShellCore {
-            max_points: 12,
+            max_points: ICOSAHEDRON_POINTS - 1,
             ..ShellCore::scaled(1.0)
         };
         assert!(shell_core_group(x.view(), n, &spec).is_none());
         let spec = ShellCore {
-            max_points: 13,
+            max_points: ICOSAHEDRON_POINTS,
             ..spec
         };
         assert!(shell_core_group(x.view(), n, &spec).is_some());

@@ -1813,6 +1813,9 @@ where
     best.filter(|_| best_energy <= ceiling)
 }
 
+/// Drop below another energy that counts as strictly lower, so rounding noise is no improvement.
+const STRICT_IMPROVEMENT: f64 = 1e-10;
+
 /// Body count at and below which the rigid factor may climb to 24.
 ///
 /// An all-body kick on a ten-water chart still falls into the target
@@ -1883,6 +1886,9 @@ mod rigid_step_tests {
     }
 }
 
+/// Lowest temperature [`biased_metropolis`] divides by, so a zero temperature refuses every rise.
+const METROPOLIS_TEMPERATURE_FLOOR: f64 = 1e-12;
+
 /// Metropolis on the rise in energy plus deposits from `here` to `offer`,
 /// each an energy and a state, the test an ordinary hop faces at
 /// `temperature`.
@@ -1904,7 +1910,7 @@ fn biased_metropolis<R: Rng + ?Sized>(
     // offer at the chain's own energy in its own basin then rounds to either
     // side of zero, which decides whether a random number is drawn.
     let rise = offer.0 - here.0 + deposits(offer.1) - deposits(here.1);
-    let d = rise / temperature.max(1e-12);
+    let d = rise / temperature.max(METROPOLIS_TEMPERATURE_FLOOR);
     d < 0.0 || rng.random::<f64>() < (-d).exp()
 }
 
@@ -1944,9 +1950,41 @@ fn stalled(cfg: &Config, quiet: usize, longest_quiet: usize) -> bool {
 mod biased_metropolis_tests {
     use super::{Config, biased_metropolis, returns_to_best, returns_to_deposit, stalled};
     use crate::bias::{BasinBias, Bias, SortedPairs};
-    use ndarray::array;
+    use ndarray::Array1;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+
+    /// Flat coordinates of the chain's three-point structure.
+    const HERE: [f64; 3 * POINTS] = [0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0];
+    /// Flat coordinates of the offered three-point structure, a different basin from [`HERE`].
+    const OFFER: [f64; 3 * POINTS] = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.9, 0.0];
+    /// Points in [`HERE`] and [`OFFER`].
+    const POINTS: usize = 3;
+    /// Bias merge radius, small enough that [`HERE`] and [`OFFER`] are two basins.
+    const MERGE_RADIUS: f64 = 0.05;
+    /// Fixed deposit height, the 511 of the traced basin's deposits.
+    const DEPOSIT: f64 = 511.0;
+    /// Well-tempered factor of the bias.
+    const GAMMA: f64 = 5.0;
+    /// Search temperature of the trace.
+    const TEMPERATURE: f64 = 30.0;
+    /// Energy of [`OFFER`] below [`HERE`] in the trace.
+    const DROP: f64 = 200.0;
+    /// Seed of the traced run, reused for the acceptance draws.
+    const TRACE_SEED: u64 = 14100;
+    /// Acceptance tests drawn per bias, enough that a nonzero rate would show.
+    const TRIALS: usize = 1000;
+    /// Points of the configuration the stall test reads its patience from.
+    const STALL_POINTS: usize = 13;
+
+    fn bias() -> BasinBias<SortedPairs> {
+        BasinBias::new(
+            SortedPairs { n_points: POINTS },
+            MERGE_RADIUS,
+            DEPOSIT,
+            GAMMA,
+        )
+    }
 
     /// The seed 14100 trace on Sutton-Chen 12-6 at 73 points: a completion
     /// 200 below the chain at temperature 30, into a basin 511 deeper in
@@ -1954,52 +1992,52 @@ mod biased_metropolis_tests {
     /// is a rise of 311, and refused.
     #[test]
     fn deposits_at_the_offer_refuse_a_drop_in_energy() {
-        let here = array![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0];
-        let offer = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.9, 0.0];
-        let empty = BasinBias::new(SortedPairs { n_points: 3 }, 0.05, 511.0, 5.0);
-        let mut filled = BasinBias::new(SortedPairs { n_points: 3 }, 0.05, 511.0, 5.0);
+        let here = Array1::from(HERE.to_vec());
+        let offer = Array1::from(OFFER.to_vec());
+        let empty = bias();
+        let mut filled = bias();
         let s = filled.cv(offer.view());
-        filled.deposit(s.view(), 30.0);
-        assert_eq!(filled.potential(s.view()), 511.0);
-        let mut rng = StdRng::seed_from_u64(14100);
+        filled.deposit(s.view(), TEMPERATURE);
+        assert_eq!(filled.potential(s.view()), DEPOSIT);
+        let mut rng = StdRng::seed_from_u64(TRACE_SEED);
         let mut taken = |bias: &dyn Bias| {
-            (0..1000)
+            (0..TRIALS)
                 .filter(|_| {
                     biased_metropolis(
                         &[bias],
                         (0.0, here.view()),
-                        (-200.0, offer.view()),
-                        30.0,
+                        (-DROP, offer.view()),
+                        TEMPERATURE,
                         &mut rng,
                     )
                 })
                 .count()
         };
-        assert_eq!(taken(&empty), 1000);
+        assert_eq!(taken(&empty), TRIALS);
         assert_eq!(taken(&filled), 0);
     }
 
     #[test]
     fn only_a_deposited_basin_is_a_return() {
-        let here = array![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0];
-        let offer = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.9, 0.0];
-        let mut bias = BasinBias::new(SortedPairs { n_points: 3 }, 0.05, 511.0, 5.0);
+        let here = Array1::from(HERE.to_vec());
+        let offer = Array1::from(OFFER.to_vec());
+        let mut bias = bias();
         assert!(!returns_to_deposit(&bias, offer.view()));
         let s = bias.cv(offer.view());
-        bias.deposit(s.view(), 30.0);
+        bias.deposit(s.view(), TEMPERATURE);
         assert!(returns_to_deposit(&bias, offer.view()));
         assert!(!returns_to_deposit(&bias, here.view()));
     }
 
     #[test]
     fn only_the_basin_of_the_best_is_a_return_to_it() {
-        let here = array![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0];
-        let offer = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.9, 0.0];
-        let mut bias = BasinBias::new(SortedPairs { n_points: 3 }, 0.05, 511.0, 5.0);
+        let here = Array1::from(HERE.to_vec());
+        let offer = Array1::from(OFFER.to_vec());
+        let mut bias = bias();
         assert!(!returns_to_best(&bias, Some(&offer), offer.view()));
         for x in [&here, &offer] {
             let s = bias.cv(x.view());
-            bias.deposit(s.view(), 30.0);
+            bias.deposit(s.view(), TEMPERATURE);
         }
         assert!(returns_to_best(&bias, Some(&offer), offer.view()));
         assert!(!returns_to_best(&bias, Some(&here), offer.view()));
@@ -2008,7 +2046,7 @@ mod biased_metropolis_tests {
 
     #[test]
     fn a_chain_is_stalled_past_twice_its_longest_quiet_stretch() {
-        let cfg = Config::with_scales(13, 1.0, 1.0);
+        let cfg = Config::with_scales(STALL_POINTS, 1.0, 1.0);
         let patience = cfg.escape_stall_patience;
         assert!(!stalled(&cfg, patience - 1, 0));
         assert!(stalled(&cfg, patience, 0));
@@ -2119,7 +2157,7 @@ fn finish_improving(
     steps: usize,
 ) -> (f64, Array1<f64>) {
     for _ in 0..FINISH_ROUNDS {
-        if !(out.0 < ledger.best - 1e-10) || ledger.remaining() == 0 {
+        if !(out.0 < ledger.best - STRICT_IMPROVEMENT) || ledger.remaining() == 0 {
             break;
         }
         let more = relax(ledger, out.1.view(), steps);
@@ -3398,7 +3436,7 @@ where
                 if recordable {
                     // A validated discovery belongs to the answer even when
                     // the live chain does not adopt the diagnostic endpoint.
-                    let improved = proposal_energy < ledger.best - 1e-10;
+                    let improved = proposal_energy < ledger.best - STRICT_IMPROVEMENT;
                     ledger.record(proposal_energy, proposal_state.view());
                     if adopt {
                         hops += 1;
@@ -3509,13 +3547,13 @@ where
                 let candidate_gradient = candidate_gradient.flatten();
                 let recordable =
                     candidate_sane && (!gradient_required || candidate_gradient.is_some());
-                let improved = recordable && candidate_energy < ledger.best - 1e-10;
+                let improved = recordable && candidate_energy < ledger.best - STRICT_IMPROVEMENT;
                 if recordable {
                     ledger.record(candidate_energy, candidate.view());
                 } else {
                     unconverged_records += 1;
                 }
-                let adopted = recordable && candidate_energy < e - 1e-10;
+                let adopted = recordable && candidate_energy < e - STRICT_IMPROVEMENT;
                 if adopted {
                     continuous_symmetry_gain += e - candidate_energy;
                     let from_basin = here.unwrap_or_else(|| identity.basin_of(x.view()));
@@ -4477,7 +4515,7 @@ where
             // means a vanishing depth.
             sur.observe_full(x_new.view(), n, e_new, 0.0, e_new);
         }
-        let improved = e_new < ledger.best - 1e-10;
+        let improved = e_new < ledger.best - STRICT_IMPROVEMENT;
         // A structure the ledger records can be reported as the run's answer,
         // so it has to be a minimum. Two paths reach here with one that is not.
         //
@@ -6048,7 +6086,7 @@ where
         // bounds the visit trigger so polishing can never take more than
         // about a fifth of the budget on a chain that hops basins every
         // slice.
-        let improved_record = ledger.best < best_before_iteration - 1e-10;
+        let improved_record = ledger.best < best_before_iteration - STRICT_IMPROVEMENT;
         let visit_due = moved_basin
             && ledger.spent().saturating_sub(last_polish_spent)
                 >= cfg.polish_records.saturating_mul(4);
@@ -6094,7 +6132,7 @@ where
         // that one site, so the least-bound atoms are tried on every vacant
         // hollow site of the new best, and the descent follows the lowest
         // product while it goes down. Bounded by the improvement events.
-        if cfg.surface_hop_on_best && ledger.best < best_before_iteration - 1e-10 {
+        if cfg.surface_hop_on_best && ledger.best < best_before_iteration - STRICT_IMPROVEMENT {
             let cutoff =
                 crate::soap::contact_cutoff(crate::soap::SoapSpec::at_length(cfg.length_scale));
             let mut from = ledger.best_state.clone().map(|s| (ledger.best, s));
@@ -6136,12 +6174,12 @@ where
                     }
                 }
                 if let Some((es, xs, gradient, report)) = lowest
-                    && es < from_energy - 1e-10
+                    && es < from_energy - STRICT_IMPROVEMENT
                 {
                     surface_hops.1 += 1;
                     surface_hops.2 += from_energy - es;
                     from = Some((es, xs.clone()));
-                    if es < e - 1e-10 {
+                    if es < e - STRICT_IMPROVEMENT {
                         let evidence = match report {
                             Some(report) => AdoptionHistory::Observed(Some(report)),
                             None => AdoptionHistory::Fresh,
