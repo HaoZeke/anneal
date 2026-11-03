@@ -591,6 +591,17 @@ pub struct Config {
     /// and first takes over after about `R` times [`Config::flat_sweep`] hops,
     /// at hop 750 rather than 400 on two rungs at the default sweep.
     pub statistical_temperature: bool,
+    /// Raise this chain's temperature from the entropy of its basin occupancy.
+    ///
+    /// Off unless a caller sets it. [`Self::for_cluster`] turns it on.
+    /// The law is [`crate::catalog::occupancy::occupancy_temperature`].
+    /// It reads this chain's arrivals and the uphill barrier the chain
+    /// has declined, and it raises the temperature the chain already
+    /// had: the budget-window temperature when [`Self::budget_window`]
+    /// is on, otherwise [`Self::temperature`]. A spread or still-open
+    /// census leaves that temperature alone. Measured presets leave the
+    /// flag off.
+    pub occupancy_temperature: bool,
     /// Deposit a well-tempered bias in quenched energy.
     ///
     /// The per-basin bias fills the basin the chain stands in, and the trap is
@@ -1116,6 +1127,9 @@ impl Config {
         if n_points < 98 {
             cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
         }
+        // The measured stack keeps its own temperature. The occupancy
+        // rise is the untuned preset's default, not this one.
+        cfg.occupancy_temperature = false;
         cfg
     }
 
@@ -1138,6 +1152,7 @@ impl Config {
         if n_points < 98 {
             cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
         }
+        cfg.occupancy_temperature = false;
         cfg
     }
 
@@ -1187,6 +1202,7 @@ impl Config {
         // packing before the exit is cheap.
         cfg.adaptive_height = true;
         cfg.height_revisits = 20.0;
+        cfg.occupancy_temperature = false;
         #[cfg(feature = "featomic")]
         {
             cfg.keying = Keying::SoapPacking;
@@ -1239,6 +1255,10 @@ impl Config {
         cfg.bayes_screen = true;
         cfg.bayes_threshold =
             crate::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
+        // The occupancy rise matched or beat the fixed recommended
+        // temperature on LJ38, LJ55, LJ75 and LJ98 at the paper budgets.
+        // Measured presets leave the flag off.
+        cfg.occupancy_temperature = true;
         cfg
     }
 
@@ -1289,6 +1309,7 @@ impl Config {
             flat_sweep: 400,
             flat_quantile: 0.5,
             statistical_temperature: false,
+            occupancy_temperature: false,
             energy_bias: false,
             depth_reward: false,
             novel_reward: false,
