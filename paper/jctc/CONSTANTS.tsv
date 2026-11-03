@@ -1,0 +1,19 @@
+constant	value	justification	source	where stated	assessment	verdict	fix
+hit tolerance	0.001	First improvement strictly below the published reference plus this tolerance. The next LJ38 minimum on the Cambridge table, -173.252378, lies 0.676 above the octahedron.	Cambridge Cluster Database LJ table; HIT_TOLERANCE in examples/lj38_honest.rs	manuscript and SI	named	pass	none
+LJ38 reference	-173.928427	Published Oh minimum used as the hit threshold.	Cambridge Cluster Database LJ table; Gomez and Romero, Pillardy and Piela, and Doye, Wales and Berry	example LJ38	cited	pass	none
+LJ55 reference	-279.248470	Published Ih minimum used as the hit threshold.	Cambridge Cluster Database LJ table; Hoare and Pal, Adv. Phys. 20, 161 (1971)	example LJ55	cited	pass	none
+LJ75 reference	-397.492331	Published D5h minimum used as the hit threshold.	Cambridge Cluster Database LJ table; Doye, Wales and Berry, J. Chem. Phys. 103, 4234 (1995)	example LJ75	cited	pass	none
+LJ98 reference	-543.665361	Published Td minimum used as the hit threshold.	Cambridge Cluster Database LJ table; Leary and Doye, Phys. Rev. E 60, R6320 (1999)	example LJ98	cited	pass	none
+LJ104 reference	-582.086642	Published C2v minimum used as the hit threshold.	Cambridge Cluster Database LJ table; Doye and Wales, Chem. Phys. Lett. 247, 339 (1995)	example LJ104	cited	pass	none
+published call ceiling	109753	One call ceiling at every size. It is the Oakley mean first encounter for LJ98 core-orbit basin hopping. The six-run logs use it.	Oakley, Johnston and Wales, Phys. Chem. Chem. Phys. 15, 3965 (2013), Table 1; OAKLEY_LJ98_MEAN_EVALUATIONS	manuscript and SI	cited	pass	none
+miss penalty	219506	Twice the call ceiling.	PAR-2 rule in the manuscript	manuscript	derived	pass	none
+record gradient	0.001	LennardJonesPreset::RECORD_GRADIENT. The measured head keeps this value.	src/methods/cluster_hopping/preset.rs:31	manuscript	unchanged	pass	none
+recommended relax steps	1000	The quench cap on Config::recommended. The Cambridge global minimisation program sets both iteration caps to 1000 on its LJ98 deck.	src/methods/cluster_hopping/config.rs:1138	manuscript	measured head	pass	none
+for_cluster relax steps	200	The value Config::for_cluster assigns. The measured head keeps it.	src/methods/cluster_hopping/config.rs:1425	manuscript	unchanged	pass	none
+screen steps	25	The value Config::for_cluster assigns. The measured head keeps it.	src/methods/cluster_hopping/config.rs	manuscript	unchanged	pass	none
+start density	0.7	Saturated liquid number density at reduced temperature 1, kept to one decimal place. The ancillary equation gives 0.702.	Thol, Rutkai, Koster, Lustig, Span and Vrabec, J. Phys. Chem. Ref. Data 45, 023101 (2016); LJ_LIQUID_NUMBER_DENSITY	SI	named	pass	none
+LJ38 hits	4 of 6	Six fresh processes. Median calls 39147.5, interquartile range 214339.	logs/lj38-seed0.log through seed5	Table 1	measured	pass	none
+LJ55 hits	6 of 6	Median calls 5828.5, interquartile range 7776.	logs/lj55-seed*.log	Table 1	measured	pass	none
+LJ75 hits	1 of 6	Median calls 219506, interquartile range 0.	logs/lj75-seed*.log	Table 1	measured	pass	none
+LJ98 hits	0 of 6	Median calls 219506, interquartile range 0.	logs/lj98-seed*.log	Table 1	measured	pass	none
+LJ104 hits	0 of 6	Median calls 219506, interquartile range 0.	logs/lj104-seed*.log	Table 1	measured	pass	none
