@@ -1416,9 +1416,25 @@ pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
     if n == 0 {
         return false;
     }
-    let _ = spec;
-    let c = crate::structure::cna(x, n, 1.35);
+    let c = crate::structure::cna(x, n, bond_cutoff(spec));
     c.fraction((5, 5, 5)) > 0.12
+}
+
+/// Honeycutt-Andersen bond cutoff in the same length unit as `spec.rcut_nn`.
+///
+/// [`crate::structure::RING_CUTOFF_SCALE`] is the Lennard-Jones value, between
+/// the first and second shells. The default SOAP cutoff is 3.5, so an
+/// unscaled spec keeps 1.35. A spec whose cutoff was multiplied by a
+/// potential length scale carries that scale here. An absolute 1.35 on a
+/// shorter lattice bonds several shells, and the longest-trail count is
+/// exhaustive in the common-neighbour bonds.
+fn bond_cutoff(spec: SoapSpec) -> f64 {
+    let base = SoapSpec::default().rcut_nn;
+    if spec.rcut_nn == base {
+        crate::structure::RING_CUTOFF_SCALE
+    } else {
+        crate::structure::RING_CUTOFF_SCALE * (spec.rcut_nn / base)
+    }
 }
 
 /// Oracle target: 555 atoms toward 421 (occupied mean, else fcc prototype).
@@ -3136,6 +3152,27 @@ mod tests {
             "ico13 should be Ih-dominated, 555 frac {}",
             crate::structure::cna(x.view(), 13, 1.2).fraction((5, 5, 5))
         );
+        assert_eq!(bond_cutoff(spec), crate::structure::RING_CUTOFF_SCALE);
+        // Same contact graph after a uniform shrink, once the cutoff shrinks
+        // with the SOAP length. An absolute 1.35 on this frame bonds several
+        // shells.
+        let scale = 0.5;
+        let mut shrunk = x.clone();
+        for v in shrunk.iter_mut() {
+            *v *= scale;
+        }
+        let scaled = SoapSpec {
+            rcut_nn: spec.rcut_nn * scale,
+            ..spec
+        };
+        let frac = crate::structure::cna(x.view(), 13, bond_cutoff(spec)).fraction((5, 5, 5));
+        let frac_scaled =
+            crate::structure::cna(shrunk.view(), 13, bond_cutoff(scaled)).fraction((5, 5, 5));
+        assert!(
+            (frac - frac_scaled).abs() < 1e-12,
+            "scaled cutoff changed the 555 fraction: {frac} vs {frac_scaled}"
+        );
+        assert!(ih_dominated(shrunk.view(), scaled));
         // No occupied 421 on Mackay ico13: the class target is the fcc
         // prototype. That is the oracle. The recommended hop must not
         // use it.
