@@ -7183,7 +7183,9 @@ mod tests {
 
     #[test]
     fn a_rigid_chain_has_no_restart_among_its_stall_arms() {
-        let atomic = Config::recommended(6);
+        let mut atomic = Config::recommended(6);
+        assert!(!atomic.restart_on_stall);
+        atomic.restart_on_stall = true;
         assert_eq!(stall_arms(&atomic), ["trail", "climb", "restart"]);
         let rigid = atomic.with_rigid_bodies(crate::potentials::gmin_water_geometry());
         assert!(rigid.restart_on_stall);
