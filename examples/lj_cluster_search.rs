@@ -151,6 +151,7 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
                     | "goat"
                     | "selft"
                     | "boost"
+                    | "rotamer"
             ),
             "unknown search mechanism: {option}"
         );
@@ -180,6 +181,7 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
         cfg.superbasin_report || cfg.superbasin_escape || opts.contains(&"sbreport");
     cfg.self_regulating_temperature = cfg.self_regulating_temperature || opts.contains(&"selft");
     cfg.boost_on_stall = cfg.boost_on_stall || opts.contains(&"boost");
+    cfg.rotamer_test = cfg.rotamer_test || opts.contains(&"rotamer");
 }
 
 /// Occupancy catalog: leftover-SOAP packing key plus AS-KMC height
@@ -360,6 +362,15 @@ mod option_tests {
         assert!(!cfg.boost_on_stall);
         apply_boolean_options(&mut cfg, &["comm", "sbasin", "boost"]);
         assert!(cfg.boost_on_stall);
+    }
+
+    #[test]
+    fn rotamer_turns_on_the_rotamer_test() {
+        let mut cfg = Config::communicating(38);
+        apply_boolean_options(&mut cfg, &["comm", "sbasin"]);
+        assert!(!cfg.rotamer_test);
+        apply_boolean_options(&mut cfg, &["comm", "sbasin", "rotamer"]);
+        assert!(cfg.rotamer_test);
     }
 
     #[test]

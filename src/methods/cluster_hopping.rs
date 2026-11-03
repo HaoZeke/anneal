@@ -988,6 +988,11 @@ pub struct Outcome {
     /// New minima that the acceptance rule refused and
     /// [`Config::boost_on_stall`] accepted.
     pub boosts: usize,
+    /// Quenched trials that [`Config::rotamer_test`] placed in a kept basin
+    /// the descriptor merge had missed, by the bias key or, under minima
+    /// hopping, by the controller's basin identity. A trial is counted once,
+    /// and a screened trial that was never fully quenched is not counted.
+    pub rotamers: usize,
     /// Swap attempts, each from the active rung to the next one up, the
     /// hottest offering to the coldest.
     pub swaps_tried: usize,
@@ -2461,8 +2466,15 @@ where
         ClusterFingerprint::of_config(cfg, &canonical_reference),
         cfg.merge_radius,
     );
+    let rotamer_window = crate::goat::ROTAMER_WINDOW_KCAL * cfg.kcal_per_mol();
+    let mut rotamer_keys: Vec<crate::goat::RotamerArchive<Array1<f64>>> = (0..n_rep)
+        .map(|_| crate::goat::RotamerArchive::new(rotamer_window))
+        .collect();
+    let mut rotamer_basins = crate::goat::RotamerArchive::<usize>::new(rotamer_window);
+    let mut rotamers = 0usize;
     if cfg.minima_hopping {
-        let initial_basin = identity.basin_of(x.view());
+        let (initial_basin, _) =
+            rotamer_basin(cfg, &mut identity, &mut rotamer_basins, x.view(), e);
         feedback.register_driver_local_initial(initial_basin);
         here = Some(initial_basin);
     }
@@ -4564,8 +4576,9 @@ where
         } else {
             (0.0, 0.0)
         };
-        let s_old = bias.cv(x.view());
-        let s_new = bias.cv(x_new.view());
+        let (s_old, _) = rotamer_key(cfg, &bias, &rotamer_keys[rep], x.view(), e);
+        let (s_new, rotamer) = rotamer_key(cfg, &bias, &rotamer_keys[rep], x_new.view(), e_new);
+        let mut rotamer = rotamer && !unquenched;
         // A draw from the region's density of states, recorded before the
         // acceptance rule reweights it towards the low tail.
         if let (Some(t), false) = (trace.as_mut(), unquenched) {
@@ -4628,7 +4641,9 @@ where
                 // Threshold on the *biased* rise. Adapts like Goedecker's E_diff
                 // while still feeling the per-basin deposits. A self-return
                 // updates escape strength but is not an acceptance trial.
-                let reached = identity.basin_of(x_new.view());
+                let (reached, merged) =
+                    rotamer_basin(cfg, &mut identity, &mut rotamer_basins, x_new.view(), e_new);
+                rotamer |= merged;
                 let ok = if let Some(report) = history_report {
                     // The population's identity and counts drive the
                     // controller: a minimum first found by another chain is
@@ -4714,9 +4729,12 @@ where
             stall_boosts[rep].fire();
             boosts += usize::from(!accept);
             if cfg.minima_hopping && !accept {
-                trial_local_minimum = Some(identity.basin_of(x_new.view()));
+                trial_local_minimum = Some(
+                    rotamer_basin(cfg, &mut identity, &mut rotamer_basins, x_new.view(), e_new).0,
+                );
             }
         }
+        rotamers += usize::from(rotamer);
         if cfg.boost_on_stall && !unquenched {
             stall_boosts[rep].observe(reached_new);
         }
@@ -5188,7 +5206,19 @@ where
             // larger rises a hot rung declines would otherwise heat every rung.
             law.observe_rejection(delta / ratios[rep]);
         }
-        bias.deposit(bias.cv(x.view()).view(), temperature);
+        let here_key = if cfg.rotamer_test {
+            let (key, rotamer) = rotamer_key(cfg, &bias, &rotamer_keys[rep], x.view(), e);
+            if !rotamer
+                && bias.index().lookup(key.view()).is_none()
+                && let Some(rotor) = rotor_of(cfg, x.view())
+            {
+                rotamer_keys[rep].push(e, rotor, key.clone());
+            }
+            key
+        } else {
+            bias.cv(x.view())
+        };
+        bias.deposit(here_key.view(), temperature);
         // Visits other chains made to the minimum this quench reached, paid
         // into this chain's bias as if it had made them. The count is under
         // the history's membership policy, so with accepted membership only
@@ -6399,6 +6429,7 @@ where
             Vec::new()
         },
         boosts,
+        rotamers,
         swaps_tried,
         transport: match (&ladder, &transport) {
             (Some(l), _) => Some((l.index().round_trips(), l.sweeps(), l.barrier())),
@@ -6562,6 +6593,75 @@ fn hop_is_identity(x: ArrayView1<f64>, y: ArrayView1<f64>) -> bool {
         s += d * d;
     }
     (s / n).sqrt() < 1e-8
+}
+
+/// The rotor of a minimum for GOAT's rotational-constant test: the sites
+/// the objective's chart stands for, weighted by their standard atomic
+/// weights, or unit masses when the run names no species.
+fn rotor_of(cfg: &Config, x: ArrayView1<f64>) -> Option<crate::goat::Rotor> {
+    let (points, species) = match cfg.rigid_body_geometry.as_ref() {
+        Some(geometry) if x.len().is_multiple_of(6) => {
+            let molecules = x.len() / 6;
+            let species: Vec<u32> = (0..molecules)
+                .flat_map(|_| geometry.species().iter().copied())
+                .collect();
+            (geometry.expand(molecules, x), Some(species))
+        }
+        _ => (x.to_owned(), cfg.species.clone()),
+    };
+    let n = points.len() / 3;
+    let masses = match species {
+        Some(species) if species.len() == n => species
+            .iter()
+            .map(|z| crate::goat::standard_atomic_weight(*z))
+            .collect::<Option<Vec<f64>>>()?,
+        _ => vec![1.0; n],
+    };
+    crate::goat::Rotor::of(points.view(), &masses)
+}
+
+/// The bias key of a minimum at `energy`, under [`Config::rotamer_test`]
+/// the kept key of a basin it is a rotamer of, with whether it was one.
+fn rotamer_key(
+    cfg: &Config,
+    bias: &BasinBias<ClusterFingerprint>,
+    kept: &crate::goat::RotamerArchive<Array1<f64>>,
+    x: ArrayView1<f64>,
+    energy: f64,
+) -> (Array1<f64>, bool) {
+    let d = bias.cv(x);
+    if !cfg.rotamer_test || kept.is_empty() || bias.index().lookup(d.view()).is_some() {
+        return (d, false);
+    }
+    match rotor_of(cfg, x).and_then(|rotor| kept.find(energy, &rotor).cloned()) {
+        Some(key) => (key, true),
+        None => (d, false),
+    }
+}
+
+/// The controller's basin for a minimum at `energy`, under
+/// [`Config::rotamer_test`] the kept basin it is a rotamer of, with whether
+/// it was one.
+fn rotamer_basin(
+    cfg: &Config,
+    identity: &mut BasinIndex<ClusterFingerprint>,
+    kept: &mut crate::goat::RotamerArchive<usize>,
+    x: ArrayView1<f64>,
+    energy: f64,
+) -> (usize, bool) {
+    if !cfg.rotamer_test || identity.lookup(identity.describe(x).view()).is_some() {
+        return (identity.basin_of(x), false);
+    }
+    let Some(rotor) = rotor_of(cfg, x) else {
+        return (identity.basin_of(x), false);
+    };
+    if let Some(&basin) = kept.find(energy, &rotor) {
+        identity.bump(basin);
+        return (basin, true);
+    }
+    let basin = identity.basin_of(x);
+    kept.push(energy, rotor, basin);
+    (basin, false)
 }
 
 /// Whether two basin descriptors fall within one merge radius.

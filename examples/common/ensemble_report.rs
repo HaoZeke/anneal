@@ -184,6 +184,9 @@ pub fn goat_line(
     if cfg.boost_on_stall {
         parts.push(format!("boosts {}", outcome.boosts));
     }
+    if cfg.rotamer_test {
+        parts.push(format!("rotamers {}", outcome.rotamers));
+    }
     (!parts.is_empty()).then(|| format!("goat: {}", parts.join(", ")))
 }
 

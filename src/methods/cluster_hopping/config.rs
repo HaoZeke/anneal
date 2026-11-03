@@ -855,6 +855,28 @@ pub struct Config {
     /// and frequent-superbasin vetoes still apply.
     #[serde(skip_serializing_if = "is_false")]
     pub boost_on_stall: bool,
+    /// Count two minima as one basin when GOAT's sorting calls them the
+    /// same structure.
+    ///
+    /// GOAT sorts minima by energy and rotational constants, with criteria
+    /// it takes from CREST (de Souza, Angew. Chem. Int. Ed. 64, e202500393
+    /// (2025); Pracht, Bohle and Grimme, Phys. Chem. Chem. Phys. 22, 7169
+    /// (2020)). Beside the descriptor merge of [`Config::keying`], a
+    /// minimum the merge does not place is the same basin as a kept one
+    /// when the energies differ by less than
+    /// [`crate::goat::ROTAMER_WINDOW_KCAL`] kcal/mol and the rotors pass
+    /// [`crate::goat::Rotor::matches`]. The minimum then takes the kept
+    /// basin's descriptor. The test applies to the hop's own bias key and,
+    /// under [`Config::minima_hopping`], to the controller's identity of
+    /// the minima it compares. The bias key of a screened trial that was
+    /// never fully quenched goes through the test as well. Funnel
+    /// tracking, paving and superbasins keep the descriptor merge. Paving
+    /// registers every reached minimum before the controller sees it, so
+    /// with paving on the controller keeps the descriptor merge too.
+    /// Masses are the standard atomic weights of the rigid body sites or of
+    /// [`Config::species`], and are one for unlabelled points.
+    #[serde(skip_serializing_if = "is_false")]
+    pub rotamer_test: bool,
     /// Abandon a trial whose short relaxation is heading back to the current
     /// basin, before paying for the full one.
     ///
@@ -1444,6 +1466,7 @@ impl Config {
             ladder_target_accept: crate::tempering::TARGET_SWAP_ACCEPT,
             self_regulating_temperature: false,
             boost_on_stall: false,
+            rotamer_test: false,
             return_screen: false,
             soap_class_residual: false,
             soap_mode: SoapProposalMode::Flexible,

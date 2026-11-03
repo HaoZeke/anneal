@@ -120,7 +120,7 @@ pub fn inertia_shape(x: ArrayView1<f64>) -> Option<Shape> {
 
 /// Jacobi eigen decomposition of a symmetric 3x3 matrix: eigenvalues and
 /// the matching unit eigenvectors as rows.
-fn symmetric_eigen(mut a: [[f64; 3]; 3]) -> ([f64; 3], [[f64; 3]; 3]) {
+pub(crate) fn symmetric_eigen(mut a: [[f64; 3]; 3]) -> ([f64; 3], [[f64; 3]; 3]) {
     let mut v = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     for _ in 0..50 {
         let (mut p, mut q, mut largest) = (0, 1, 0.0_f64);

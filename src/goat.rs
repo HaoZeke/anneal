@@ -6,6 +6,10 @@
 //! <https://doi.org/10.1002/anie.202500393>. Its workers walk from minimum
 //! to minimum under a Metropolis test at temperatures that regulate
 //! themselves.
+//! It sorts the minima it finds by energy and rotational constants, with
+//! criteria it takes from CREST: P. Pracht, F. Bohle and S. Grimme, Phys.
+//! Chem. Chem. Phys. **22**, 7169 (2020), whose default thresholds are
+//! tabulated in P. Pracht *et al.*, J. Chem. Phys. **160**, 114110 (2024).
 //!
 //! Only the rules are carried here, and each item names the paper its rule
 //! and each of its numbers come from. Where the rule here departs from
@@ -187,9 +191,208 @@ impl StallBoost {
     }
 }
 
+/// Energy window, in kcal/mol, inside which two minima can be rotamers.
+///
+/// CREST's default `E_thr` (Pracht *et al.* 2024, Table II). GOAT's own
+/// default `MaxEnDiff` is 0.1 kcal/mol (de Souza 2025); the narrower CREST
+/// window is used here.
+pub const ROTAMER_WINDOW_KCAL: f64 = 0.05;
+
+/// Largest relative difference of the rotational constants of two rotamers
+/// of a spherical top.
+///
+/// GOAT's `MaxRotDiff` of at most one percent (de Souza 2025), which is
+/// also the low end of CREST's `B_thr` (Pracht *et al.* 2024, Table II).
+pub const ROTOR_TOLERANCE_SPHERICAL: f64 = 0.01;
+
+/// The same tolerance for a rotor whose smallest moment of inertia is
+/// negligible beside its largest.
+///
+/// The high end of CREST's `B_thr` range of 1.0 to 2.5 percent (Pracht
+/// *et al.* 2024, Table II).
+pub const ROTOR_TOLERANCE_ANISOTROPIC: f64 = 0.025;
+
+/// Standard atomic weight of element `z`, in daltons.
+///
+/// Abridged values of the IUPAC Commission on Isotopic Abundances and
+/// Atomic Weights (Prohaska *et al.*, Pure Appl. Chem. **94**, 573 (2022))
+/// for hydrogen to krypton and for the coinage and platinum-group metals.
+/// Only ratios of moments of inertia are used, so the unit does not
+/// matter.
+pub fn standard_atomic_weight(z: u32) -> Option<f64> {
+    const LIGHT: [f64; 36] = [
+        1.008, 4.0026, 6.94, 9.0122, 10.81, 12.011, 14.007, 15.999, 18.998, 20.180, 22.990, 24.305,
+        26.982, 28.085, 30.974, 32.06, 35.45, 39.95, 39.098, 40.078, 44.956, 47.867, 50.942,
+        51.996, 54.938, 55.845, 58.933, 58.693, 63.546, 65.38, 69.723, 72.630, 74.922, 78.971,
+        79.904, 83.798,
+    ];
+    match z {
+        1..=36 => Some(LIGHT[z as usize - 1]),
+        44 => Some(101.07),
+        45 => Some(102.91),
+        46 => Some(106.42),
+        47 => Some(107.87),
+        76 => Some(190.23),
+        77 => Some(192.22),
+        78 => Some(195.08),
+        79 => Some(196.97),
+        _ => None,
+    }
+}
+
+/// Principal moments of inertia of a structure, smallest first.
+///
+/// A rotational constant is `B = h / (8 pi^2 I)`, so the relative gap
+/// `|B - B'| / max(B, B')` between two constants equals the relative gap
+/// `|I - I'| / max(I, I')` between their moments. The test of GOAT and
+/// CREST on the constants is therefore made on the moments, and no unit
+/// of `B` enters.
+///
+/// Atom permutations leave the moments unchanged, and that lets the
+/// test join rotamers that a descriptor or an aligned distance can miss.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rotor {
+    moments: [f64; 3],
+}
+
+impl Rotor {
+    /// The rotor of `points`, three coordinates per site, with site masses
+    /// `masses`.
+    ///
+    /// The mass-weighted second-moment tensor `S = sum m d d^T` about the
+    /// centre of mass has the principal values `s_k`, and the inertia
+    /// tensor `tr(S) - S` shares its eigenvectors, so the moments are
+    /// `I_k = tr(S) - s_k`. None when the lengths disagree or a moment is
+    /// not positive, as for a single site or sites on one line.
+    pub fn of(points: ndarray::ArrayView1<f64>, masses: &[f64]) -> Option<Self> {
+        let n = masses.len();
+        if n < 2 || points.len() != 3 * n {
+            return None;
+        }
+        let total: f64 = masses.iter().sum();
+        if !(total > 0.0) {
+            return None;
+        }
+        let mut centre = [0.0_f64; 3];
+        for (i, m) in masses.iter().enumerate() {
+            for (k, c) in centre.iter_mut().enumerate() {
+                *c += m * points[3 * i + k] / total;
+            }
+        }
+        let mut second = [[0.0_f64; 3]; 3];
+        for (i, m) in masses.iter().enumerate() {
+            let d: [f64; 3] = std::array::from_fn(|k| points[3 * i + k] - centre[k]);
+            for (a, row) in second.iter_mut().enumerate() {
+                for (b, entry) in row.iter_mut().enumerate() {
+                    *entry += m * d[a] * d[b];
+                }
+            }
+        }
+        let (principal, _) = crate::methods::two_phase::symmetric_eigen(second);
+        let trace: f64 = principal.iter().sum();
+        let mut moments = principal.map(|s| trace - s);
+        moments.sort_by(f64::total_cmp);
+        let floor = 1e-12 * moments[2].abs().max(f64::MIN_POSITIVE);
+        moments
+            .iter()
+            .all(|m| m.is_finite() && *m > floor)
+            .then_some(Self { moments })
+    }
+
+    /// Principal moments, smallest first.
+    pub fn moments(&self) -> [f64; 3] {
+        self.moments
+    }
+
+    /// `1 - I_min / I_max`: zero for a spherical top and near one when the
+    /// smallest moment is negligible beside the largest.
+    pub fn anisotropy(&self) -> f64 {
+        (1.0 - self.moments[0] / self.moments[2]).clamp(0.0, 1.0)
+    }
+
+    /// Tolerance on the relative difference of this rotor's constants.
+    ///
+    /// CREST widens its `B_thr` from 1.0 to 2.5 percent as a rotor grows
+    /// more anisotropic (Pracht *et al.* 2024, Table II). The paper gives
+    /// the range and the direction and not the curve. The curve here is
+    /// anneal's: a straight line in [`Rotor::anisotropy`] from
+    /// [`ROTOR_TOLERANCE_SPHERICAL`] to [`ROTOR_TOLERANCE_ANISOTROPIC`].
+    pub fn tolerance(&self) -> f64 {
+        ROTOR_TOLERANCE_SPHERICAL
+            + (ROTOR_TOLERANCE_ANISOTROPIC - ROTOR_TOLERANCE_SPHERICAL) * self.anisotropy()
+    }
+
+    /// Largest relative difference between matching principal moments.
+    pub fn difference(&self, other: &Self) -> f64 {
+        self.moments
+            .iter()
+            .zip(other.moments.iter())
+            .map(|(a, b)| (a - b).abs() / a.max(*b))
+            .fold(0.0, f64::max)
+    }
+
+    /// Whether two rotors pass the rotational-constant test of GOAT's
+    /// third sorting step (de Souza 2025).
+    ///
+    /// The test is symmetric: the pair must pass the wider of its two
+    /// tolerances. The energy test is the caller's.
+    pub fn matches(&self, other: &Self) -> bool {
+        self.difference(other) < self.tolerance().max(other.tolerance())
+    }
+}
+
+/// Minima kept for the rotamer test, each with a value the caller maps a
+/// rotamer onto.
+///
+/// GOAT's sorting first takes every kept minimum within the energy window,
+/// and calls a new minimum the same as one of those whose rotational
+/// constants agree within the tolerance (de Souza 2025, steps 1 and 3).
+/// GOAT's step 2, an aligned distance below 0.125 angstrom, is not
+/// carried: the cluster hop already merges minima by its own descriptors.
+#[derive(Debug, Clone)]
+pub struct RotamerArchive<T> {
+    entries: Vec<(f64, Rotor, T)>,
+    window: f64,
+}
+
+impl<T> RotamerArchive<T> {
+    /// An empty archive whose energy test is `|E_a - E_b| < window`.
+    pub fn new(window: f64) -> Self {
+        Self {
+            entries: Vec::new(),
+            window,
+        }
+    }
+
+    /// The value of the first kept minimum that a minimum at `energy` with
+    /// rotor `rotor` is a rotamer of.
+    pub fn find(&self, energy: f64, rotor: &Rotor) -> Option<&T> {
+        self.entries
+            .iter()
+            .find(|(e, kept, _)| (e - energy).abs() < self.window && kept.matches(rotor))
+            .map(|(_, _, value)| value)
+    }
+
+    /// Keeps a minimum.
+    pub fn push(&mut self, energy: f64, rotor: Rotor, value: T) {
+        self.entries.push((energy, rotor, value));
+    }
+
+    /// Kept minima.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether nothing is kept.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ndarray::array;
 
     #[test]
     fn base_temperatures_take_their_step_half_the_time() {
@@ -328,5 +531,78 @@ mod tests {
         assert!(boost.armed());
         boost.fire();
         assert!(!boost.armed());
+    }
+
+    fn water() -> (ndarray::Array1<f64>, [f64; 3]) {
+        (
+            array![0.0, 0.0, 0.0, 0.757, 0.586, 0.0, -0.757, 0.586, 0.0],
+            [15.999, 1.008, 1.008],
+        )
+    }
+
+    #[test]
+    fn moments_of_a_planar_rotor_add_up() {
+        let (points, masses) = water();
+        let rotor = Rotor::of(points.view(), &masses).unwrap();
+        let [a, b, c] = rotor.moments();
+        assert!(a <= b && b <= c);
+        assert!((a + b - c).abs() < 1e-9 * c, "{a} + {b} != {c}");
+    }
+
+    #[test]
+    fn a_turned_relabelled_copy_is_a_rotamer_and_a_stretched_one_is_not() {
+        let (points, masses) = water();
+        let a = Rotor::of(points.view(), &masses).unwrap();
+        // Turned by 90 degrees about z, with the hydrogens swapped.
+        let turned = array![0.0, 0.0, 0.0, 0.586, 0.757, 0.0, 0.586, -0.757, 0.0];
+        let b = Rotor::of(turned.view(), &masses).unwrap();
+        assert!(a.difference(&b) < 1e-12);
+        assert!(a.matches(&b));
+        let mut stretched = points.clone();
+        stretched[3] *= 1.05;
+        stretched[6] *= 1.05;
+        let c = Rotor::of(stretched.view(), &masses).unwrap();
+        assert!(!a.matches(&c));
+    }
+
+    #[test]
+    fn the_tolerance_runs_from_one_to_two_and_a_half_percent() {
+        let cube: Vec<f64> = (0..8)
+            .flat_map(|k| [k & 1, (k >> 1) & 1, (k >> 2) & 1].map(f64::from))
+            .collect();
+        let sphere = Rotor::of(ndarray::ArrayView1::from(&cube), &[1.0; 8]).unwrap();
+        assert!(sphere.anisotropy() < 1e-12);
+        assert!((sphere.tolerance() - ROTOR_TOLERANCE_SPHERICAL).abs() < 1e-12);
+        let rod = array![0.0, 0.0, -10.0, 0.0, 0.0, 10.0, 0.01, 0.0, 0.0];
+        let rod = Rotor::of(rod.view(), &[1.0; 3]).unwrap();
+        assert!(rod.anisotropy() > 0.999);
+        assert!((rod.tolerance() - ROTOR_TOLERANCE_ANISOTROPIC).abs() < 1e-4);
+        assert!(rod.tolerance() <= ROTOR_TOLERANCE_ANISOTROPIC);
+    }
+
+    #[test]
+    fn collinear_sites_have_no_rotor() {
+        let line = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0];
+        assert!(Rotor::of(line.view(), &[1.0; 3]).is_none());
+        assert!(Rotor::of(line.view(), &[1.0; 2]).is_none());
+    }
+
+    #[test]
+    fn the_archive_applies_the_energy_window() {
+        let (points, masses) = water();
+        let rotor = Rotor::of(points.view(), &masses).unwrap();
+        let mut archive = RotamerArchive::new(ROTAMER_WINDOW_KCAL);
+        archive.push(-1.0, rotor, 7usize);
+        assert_eq!(archive.find(-1.0 + 0.04, &rotor), Some(&7));
+        assert_eq!(archive.find(-1.0 + 0.06, &rotor), None);
+        assert_eq!(archive.len(), 1);
+    }
+
+    #[test]
+    fn weights_cover_water_and_platinum() {
+        assert_eq!(standard_atomic_weight(1), Some(1.008));
+        assert_eq!(standard_atomic_weight(8), Some(15.999));
+        assert_eq!(standard_atomic_weight(78), Some(195.08));
+        assert_eq!(standard_atomic_weight(0), None);
     }
 }

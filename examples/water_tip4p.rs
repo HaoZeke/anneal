@@ -8,10 +8,11 @@
 //! mechanisms: `sbreport` turns on the superbasin report and `sbasin` the
 //! superbasin escape with it. `goat` runs GOAT's ladder of four rungs that
 //! never exchange states, at GOAT's kcal/mol steps converted to kJ/mol.
-//! `selft` lets each chain regulate its own temperature, and `boost`
-//! accepts a chain's next new minimum after a stall. An unknown name stops
-//! the run, so a label cannot stand for a mechanism the binary does not
-//! bind.
+//! `selft` lets each chain regulate its own temperature, `boost` accepts a
+//! chain's next new minimum after a stall, and `rotamer` merges rotamers
+//! under GOAT's energy and rotational-constant test into one basin of a
+//! chain. An unknown name stops the run, so a label cannot stand for a
+//! mechanism the binary does not bind.
 //!
 //! `HISTORY_REPLICAS` runs that many thread replicas per seed, splitting the
 //! budget, over the channels `HISTORY` and the other ensemble variables of
@@ -49,7 +50,10 @@ const HIT_TOLERANCE: f64 = 0.01;
 fn apply_options(cfg: &mut Config, opts: &[&str]) {
     for option in opts {
         assert!(
-            matches!(*option, "sbreport" | "sbasin" | "goat" | "selft" | "boost"),
+            matches!(
+                *option,
+                "sbreport" | "sbasin" | "goat" | "selft" | "boost" | "rotamer"
+            ),
             "unknown search mechanism: {option}"
         );
     }
@@ -58,6 +62,7 @@ fn apply_options(cfg: &mut Config, opts: &[&str]) {
         cfg.superbasin_report || cfg.superbasin_escape || opts.contains(&"sbreport");
     cfg.self_regulating_temperature = cfg.self_regulating_temperature || opts.contains(&"selft");
     cfg.boost_on_stall = cfg.boost_on_stall || opts.contains(&"boost");
+    cfg.rotamer_test = cfg.rotamer_test || opts.contains(&"rotamer");
     if opts.contains(&"goat") {
         *cfg = cfg.clone().with_goat_ladder();
     }
@@ -513,6 +518,9 @@ mod tests {
         let mut cfg = Config::communicating_tip4p(4);
         apply_options(&mut cfg, &["sbasin", "boost"]);
         assert!(cfg.boost_on_stall && cfg.minima_hopping);
+        let mut cfg = Config::communicating_tip4p(4);
+        apply_options(&mut cfg, &["sbasin", "rotamer"]);
+        assert!(cfg.rotamer_test);
     }
 
     #[test]

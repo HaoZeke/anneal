@@ -62,3 +62,33 @@ The hop has no gradient reflection, so only the forced acceptance carries over.
 The boost applies on every chain of the baseline, under the Metropolis rule and under minima hopping.
 Its stall counter and its test for a new minimum read the chain's own bias, not the shared history.
 =boost= turns it on in both binaries, and each chain then prints its count of boosts on its =goat:= line.
+
+* Rotamer test
+
+=Config.rotamer_test= counts two minima as one basin when GOAT's sorting calls them the same structure.
+GOAT takes the criteria from the Conformer-Rotamer Ensemble Sampling Tool (CREST).
+CREST is the tool of Pracht, Bohle and Grimme, PCCP 22, 7169 (2020).
+Two minima match when their energies and their rotational constants agree.
+The energy window is =ROTAMER_WINDOW_KCAL=, CREST's 0.05 kcal/mol, which is narrower than GOAT's 0.1 kcal/mol.
+The rotational constants agree when their largest relative difference is below a tolerance.
+The tolerance is GOAT's 1 percent for a spherical top.
+It widens to 2.5 percent, the top of CREST's range, for an anisotropic rotor.
+CREST gives that range in Pracht et al., J. Chem. Phys. 160, 114110 (2024), and not the curve between its ends.
+The curve here is anneal's, a straight line in the anisotropy =1 - I_min / I_max=.
+The relative difference of two rotational constants equals that of their moments of inertia.
+The test therefore reads the principal moments.
+GOAT's second test, an aligned distance below 0.125 angstrom, is not carried.
+The descriptor merge of the hop already applies in its place.
+
+A minimum the descriptor merge does not place then takes the descriptor of a kept rotamer.
+The bias key of a screened trial that was never fully quenched goes through the test as well.
+=Outcome.rotamers= leaves such trials out of its count.
+Masses are standard atomic weights of the rigid-body sites or of =Config.species=.
+A Lennard-Jones run names no species, so its points carry unit masses.
+
+The test acts on one chain's own store.
+That store is the chain's bias key and, under minima hopping, its controller's basin identity.
+The shared history of an ensemble keeps its exact witness and does not consult the rotamer archive.
+The rotamer test is a tolerance test that can join two distinct minima, and the history is the record of exact identity.
+The superbasin tracker keeps the descriptor merge as well.
+=rotamer= turns the test on in both binaries, and each chain then prints its count of merges on its =goat:= line.
