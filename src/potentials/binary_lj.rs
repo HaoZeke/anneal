@@ -71,16 +71,6 @@ impl BinaryLennardJones {
         self.n_a + self.n_b
     }
 
-    fn pair_params(&self, i: usize, j: usize) -> (f64, f64) {
-        let a_i = i < self.n_a;
-        let a_j = j < self.n_a;
-        match (a_i, a_j) {
-            (true, true) => (self.epsilon_aa, self.sigma_aa),
-            (false, false) => (self.epsilon_bb, self.sigma_bb),
-            _ => (self.epsilon_ab, self.sigma_ab),
-        }
-    }
-
     /// Energy and Cartesian gradient in one pair pass.
     pub fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let n = self.n_points();
@@ -89,32 +79,13 @@ impl BinaryLennardJones {
             3 * n,
             "binary Lennard-Jones state is 3 coordinates per atom"
         );
-        let mut energy = 0.0;
-        let mut gradient = Array1::zeros(x.len());
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let d = [
-                    x[3 * i] - x[3 * j],
-                    x[3 * i + 1] - x[3 * j + 1],
-                    x[3 * i + 2] - x[3 * j + 2],
-                ];
-                let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                if r2 <= 0.0 {
-                    continue;
-                }
-                let (eps, sigma) = self.pair_params(i, j);
-                let a = (sigma * sigma) / r2;
-                let a3 = a * a * a;
-                let a6 = a3 * a3;
-                energy += 4.0 * eps * (a6 - a3);
-                let coef = 4.0 * eps * (-12.0 * a6 + 6.0 * a3) / r2;
-                for k in 0..3 {
-                    gradient[3 * i + k] += coef * d[k];
-                    gradient[3 * j + k] -= coef * d[k];
-                }
-            }
-        }
-        (energy, gradient)
+        super::rgpot_call::binary_lennard_jones(
+            self.n_a,
+            [self.epsilon_aa, self.epsilon_ab, self.epsilon_bb],
+            [self.sigma_aa, self.sigma_ab, self.sigma_bb],
+            0.0,
+            x,
+        )
     }
 }
 
