@@ -114,6 +114,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
 
    methods/catalog
    methods/composition
+   methods/goat
 #+end_export
 
 #+begin_export rst

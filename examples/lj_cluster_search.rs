@@ -148,6 +148,8 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
                     | "sbreport"
                     | "sbasin"
                     | "plainsurface"
+                    | "goat"
+                    | "selft"
             ),
             "unknown search mechanism: {option}"
         );
@@ -175,6 +177,7 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
     cfg.superbasin_escape = cfg.superbasin_escape || opts.contains(&"sbasin");
     cfg.superbasin_report =
         cfg.superbasin_report || cfg.superbasin_escape || opts.contains(&"sbreport");
+    cfg.self_regulating_temperature = cfg.self_regulating_temperature || opts.contains(&"selft");
 }
 
 /// Occupancy catalog: leftover-SOAP packing key plus AS-KMC height
@@ -337,6 +340,15 @@ mod option_tests {
         let mut cfg = Config::communicating(38);
         apply_boolean_options(&mut cfg, &["comm"]);
         assert!(!cfg.superbasin_report && !cfg.superbasin_escape);
+    }
+
+    #[test]
+    fn selft_turns_on_the_self_regulating_temperature() {
+        let mut cfg = Config::communicating(38);
+        apply_boolean_options(&mut cfg, &["comm", "sbasin"]);
+        assert!(!cfg.self_regulating_temperature);
+        apply_boolean_options(&mut cfg, &["comm", "sbasin", "selft"]);
+        assert!(cfg.self_regulating_temperature);
     }
 
     #[test]
@@ -2142,6 +2154,21 @@ fn main() {
             cfg.replicas, cfg.swap_period, cfg.ladder_top
         );
     }
+    // GOAT's rungs never exchange states, so the ladder is its own search
+    // and not a mode of the exchange ladders above.
+    if opts.contains(&"goat") {
+        assert!(
+            ladder_mode.is_none(),
+            "goat is a ladder of its own; drop the exchange ladder"
+        );
+        cfg = cfg.with_goat_ladder();
+        println!(
+            "  goat ladder: {} rungs from T={:.4} to T={:.4}, self-regulating",
+            cfg.replicas,
+            cfg.temperature,
+            cfg.temperature * cfg.ladder_top
+        );
+    }
     // The deposit height matters only now that basins are revisited: at 33
     // revisits a height of 0.25 accumulates to about 8, against escape gaps
     // measured at 0.09 for the cheapest and 0.18 at the tenth percentile.
@@ -2912,6 +2939,9 @@ fn main() {
         );
         if let Some(sb) = &out.superbasin {
             println!("  seed {seed} {}", ensemble_report::superbasin_line(sb));
+        }
+        if let Some(goat) = ensemble_report::goat_line(&out) {
+            println!("  seed {seed} {goat}");
         }
         let _ = io::stdout().flush();
     }

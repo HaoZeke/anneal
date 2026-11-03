@@ -107,6 +107,9 @@ pub fn print_report(
                 superbasin_line(sb)
             );
         }
+        if let Some(goat) = goat_line(&run.outcome) {
+            println!("    seed {seed} replica {} {goat}", run.replica);
+        }
     }
     let hit = report.solved(ens.target);
     tally.seeds += 1;
@@ -161,6 +164,20 @@ pub fn superbasin_line(sb: &anneal_core::superbasin::SuperbasinReport) -> String
         sb.improvements.0,
         sb.improvements.1
     )
+}
+
+/// What the GOAT rules a chain ran did, or `None` when it ran none.
+pub fn goat_line(outcome: &anneal_core::methods::cluster_hopping::Outcome) -> Option<String> {
+    let mut parts = Vec::new();
+    if !outcome.temperature_factors.is_empty() {
+        let factors: Vec<String> = outcome
+            .temperature_factors
+            .iter()
+            .map(|f| format!("{f:.3}"))
+            .collect();
+        parts.push(format!("temperature factors {}", factors.join(" ")));
+    }
+    (!parts.is_empty()).then(|| format!("goat: {}", parts.join(", ")))
 }
 
 /// The campaign-arm footer the summariser and the note read.

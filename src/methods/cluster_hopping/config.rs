@@ -161,6 +161,25 @@ pub enum SoapProposalMode {
     Off,
 }
 
+/// Chemical unit of a configuration's energies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnergyUnit {
+    /// Multiples of [`Config::energy_scale`], with no chemical unit.
+    #[default]
+    Reduced,
+    /// Kilojoules per mole.
+    KilojoulePerMole,
+    /// Kilocalories per mole.
+    KilocaloriePerMole,
+}
+
+impl EnergyUnit {
+    fn is_reduced(&self) -> bool {
+        *self == Self::Reduced
+    }
+}
+
 /// Deterministic continuous-symmetry proposal inserted into basin hopping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
 #[serde(tag = "group", rename_all = "snake_case")]
@@ -200,6 +219,12 @@ pub struct Config {
     pub length_scale: f64,
     /// Declared objective-energy scale.
     pub energy_scale: f64,
+    /// Chemical unit of the objective's energies.
+    ///
+    /// Only rules stated in a chemical unit read it, such as the kcal/mol
+    /// steps of [`Config::with_goat_ladder`]; see [`Config::kcal_per_mol`].
+    #[serde(skip_serializing_if = "EnergyUnit::is_reduced")]
+    pub energy_unit: EnergyUnit,
     /// Proposal library hosted by this configuration.
     pub move_library: MoveLibrary,
     /// Actual site geometry for descriptors of center-and-rotation states.
@@ -797,6 +822,24 @@ pub struct Config {
     pub ladder_pilot: usize,
     /// Swap acceptance the adapted ladder is placed and held at.
     pub ladder_target_accept: f64,
+    /// Let each rung's temperature regulate itself by GOAT's feedback.
+    ///
+    /// A rung hops at its usual temperature times a factor of at least
+    /// one. A quenched trial that reaches a minimum other than the
+    /// rung's own divides the factor by [`crate::goat::TEMPERATURE_FACTOR`]
+    /// when accepted and multiplies it when rejected, and the factor
+    /// never drops below one (de Souza, Angew. Chem. Int. Ed. 64,
+    /// e202500393 (2025)). A return to the rung's own basin and a trial
+    /// the screen stops are not outcomes. The feedback moves each rung
+    /// toward one acceptance in two; see
+    /// [`crate::goat::TEMPERATURE_FACTOR`] for why the factor sets only
+    /// the speed. [`Config::with_goat_ladder`] pairs it with GOAT's base
+    /// temperatures. The acceptance has to be Metropolis for it to act,
+    /// so it has no effect under [`Config::minima_hopping`]. On a rigid
+    /// chart it replaces the chart's own acceptance factor, since both
+    /// steer the same ratio.
+    #[serde(skip_serializing_if = "is_false")]
+    pub self_regulating_temperature: bool,
     /// Abandon a trial whose short relaxation is heading back to the current
     /// basin, before paying for the full one.
     ///
@@ -1281,6 +1324,7 @@ impl Config {
             n_points,
             length_scale,
             energy_scale,
+            energy_unit: EnergyUnit::Reduced,
             move_library: MoveLibrary::Atomic,
             rigid_body_geometry: None,
             neighbour_cutoff: LennardJonesPreset::NEIGHBOUR_CUTOFF * length_scale,
@@ -1383,6 +1427,7 @@ impl Config {
             ladder_window: 10,
             ladder_pilot: 200,
             ladder_target_accept: crate::tempering::TARGET_SWAP_ACCEPT,
+            self_regulating_temperature: false,
             return_screen: false,
             soap_class_residual: false,
             soap_mode: SoapProposalMode::Flexible,
@@ -1446,6 +1491,7 @@ impl Config {
         );
         let length_scale = crate::potentials::SIGMA;
         let mut cfg = Self::with_scales(n_molecules, length_scale, 1.0);
+        cfg.energy_unit = EnergyUnit::KilojoulePerMole;
         cfg.move_library = MoveLibrary::RigidBody {
             n_molecules,
             translate_step: 0.35,
@@ -1559,6 +1605,42 @@ impl Config {
         self.angular_moves = false;
         self.continuous_symmetry = ContinuousSymmetry::Off;
         self.rigid_body_geometry = Some(geometry);
+        self
+    }
+
+    /// Size of one kcal/mol in the objective's energy unit.
+    ///
+    /// GOAT states its energies in kcal/mol. A run in reduced units has no
+    /// chemical unit, so there one kcal/mol is read as
+    /// [`Config::energy_scale`].
+    pub fn kcal_per_mol(&self) -> f64 {
+        match self.energy_unit {
+            EnergyUnit::Reduced => self.energy_scale,
+            EnergyUnit::KilojoulePerMole => 4.184,
+            EnergyUnit::KilocaloriePerMole => 1.0,
+        }
+    }
+
+    /// Put a preset on GOAT's ladder of self-regulating walkers.
+    ///
+    /// Four rungs share the budget without exchanging states, as GOAT's
+    /// base workers do. Rung `k` starts where an uphill quench of
+    /// `LADDER_STEPS_KCAL[k]` kcal/mol is accepted half the time, which is
+    /// [`crate::goat::ladder_temperatures`] at [`Config::kcal_per_mol`].
+    /// That is a geometric ladder from `0.5 / ln 2` kcal/mol with a top
+    /// eight times its bottom, so [`Config::temperature`] and
+    /// [`Config::ladder_top`] carry it. Each rung then regulates its own
+    /// temperature ([`Config::self_regulating_temperature`]). GOAT's walk
+    /// is Metropolis on every rung, so [`Config::minima_hopping`] is turned
+    /// off. Every other flag of the preset stays as it was.
+    pub fn with_goat_ladder(mut self) -> Self {
+        let temperatures = crate::goat::ladder_temperatures(self.kcal_per_mol());
+        self.replicas = temperatures.len();
+        self.ladder_mode = LadderMode::Independent;
+        self.temperature = temperatures[0];
+        self.ladder_top = temperatures[temperatures.len() - 1] / temperatures[0];
+        self.self_regulating_temperature = true;
+        self.minima_hopping = false;
         self
     }
 

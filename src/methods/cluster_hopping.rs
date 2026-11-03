@@ -52,7 +52,7 @@ mod packing_bank;
 mod preset;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
-pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, SoapProposalMode};
+pub use config::{Config, ContinuousSymmetry, EnergyUnit, Keying, LadderMode, SoapProposalMode};
 pub use moves::*;
 
 #[cfg(test)]
@@ -982,6 +982,9 @@ pub struct Outcome {
     /// few basins and a deep one. A ladder where every rung looks alike is a
     /// ladder whose spread is too narrow to be worth its cost.
     pub rungs: Vec<(f64, usize, f64)>,
+    /// Per-rung factor on the temperature at the end of the run, under
+    /// [`Config::self_regulating_temperature`]. Empty otherwise.
+    pub temperature_factors: Vec<f64>,
     /// Swap attempts, each from the active rung to the next one up, the
     /// hottest offering to the coldest.
     pub swaps_tried: usize,
@@ -2678,6 +2681,7 @@ where
     let mut orient_scale = 1.0_f64;
     let mut orient_window = 0usize;
     let mut orient_yes = 0usize;
+    let mut regulators = vec![crate::goat::SelfRegulatingTemperature::new(); n_rep];
     let mut hops = 0usize;
     let mut checkpoint_hops = 0usize;
     let mut checkpoint_quench_start = 0usize;
@@ -3510,7 +3514,9 @@ where
             ratios[rep]
         };
         let mut temperature = single * scale;
-        if cfg.move_library.is_rigid_body() {
+        if cfg.self_regulating_temperature && !cfg.minima_hopping {
+            temperature *= regulators[rep].factor();
+        } else if cfg.move_library.is_rigid_body() {
             // The preset temperature stays in its own energy unit. A rigid
             // water chart is not that unit, so a local factor moves the
             // acceptance rate toward one half without editing the preset.
@@ -4696,6 +4702,13 @@ where
             let d = delta / temperature.max(1e-12) + eb;
             d < 0.0 || rng.random::<f64>() < (-d).exp()
         };
+        if cfg.self_regulating_temperature
+            && !cfg.minima_hopping
+            && !unquenched
+            && !same_descriptor(s_old.view(), s_new.view(), bias.merge_radius())
+        {
+            regulators[rep].observe(accept);
+        }
         let mut accept = accept;
         if cfg.move_library.is_rigid_body() && cfg.n_points > RIGID_HOT_BODIES {
             orient_window += 1;
@@ -6361,6 +6374,11 @@ where
             }
             all
         },
+        temperature_factors: if cfg.self_regulating_temperature {
+            regulators.iter().map(|r| r.factor()).collect()
+        } else {
+            Vec::new()
+        },
         swaps_tried,
         transport: match (&ladder, &transport) {
             (Some(l), _) => Some((l.index().round_trips(), l.sweeps(), l.barrier())),
@@ -6524,6 +6542,17 @@ fn hop_is_identity(x: ArrayView1<f64>, y: ArrayView1<f64>) -> bool {
         s += d * d;
     }
     (s / n).sqrt() < 1e-8
+}
+
+/// Whether two basin descriptors fall within one merge radius.
+fn same_descriptor(a: ArrayView1<f64>, b: ArrayView1<f64>, radius: f64) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b.iter())
+            .map(|(p, q)| (p - q) * (p - q))
+            .sum::<f64>()
+            .sqrt()
+            <= radius
 }
 
 /// Samples a non-overlapping cluster uniformly inside a sphere.

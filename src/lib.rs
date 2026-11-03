@@ -135,6 +135,8 @@ pub mod free_energy;
 /// First-derivative interface for HMC-style samplers.
 pub mod funnel_bo;
 pub mod funnel_spectral;
+/// Search rules from GOAT (de Souza, Angew. Chem. Int. Ed. 2025).
+pub mod goat;
 /// The gradient-enhanced Gaussian process of gpr_optim, over its C API.
 #[cfg(feature = "gpr")]
 pub mod gpr;

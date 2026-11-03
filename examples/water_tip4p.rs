@@ -6,8 +6,11 @@
 //! `recommended` ([`Config::recommended_tip4p`]) or `communicating`
 //! ([`Config::communicating_tip4p`]). `OPTS` is a comma-separated list of
 //! mechanisms: `sbreport` turns on the superbasin report and `sbasin` the
-//! superbasin escape with it. An unknown name stops the run, so a label
-//! cannot stand for a mechanism the binary does not bind.
+//! superbasin escape with it. `goat` runs GOAT's ladder of four rungs that
+//! never exchange states, at GOAT's kcal/mol steps converted to kJ/mol.
+//! `selft` lets each chain regulate its own temperature. An unknown name
+//! stops the run, so a label cannot stand for a mechanism the binary does
+//! not bind.
 //!
 //! `HISTORY_REPLICAS` runs that many thread replicas per seed, splitting the
 //! budget, over the channels `HISTORY` and the other ensemble variables of
@@ -27,7 +30,7 @@ use anneal_core::descriptor_space::{
 };
 use anneal_core::methods::cluster_hopping::{
     ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger,
-    run_with_bias_at_checkpoints,
+    run_with_bias_at_checkpoints, run_with_gradient,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::pes_exploration::{ExactStructureWitness, StructureContext, StructureView};
@@ -45,13 +48,17 @@ const HIT_TOLERANCE: f64 = 0.01;
 fn apply_options(cfg: &mut Config, opts: &[&str]) {
     for option in opts {
         assert!(
-            matches!(*option, "sbreport" | "sbasin"),
+            matches!(*option, "sbreport" | "sbasin" | "goat" | "selft"),
             "unknown search mechanism: {option}"
         );
     }
     cfg.superbasin_escape = cfg.superbasin_escape || opts.contains(&"sbasin");
     cfg.superbasin_report =
         cfg.superbasin_report || cfg.superbasin_escape || opts.contains(&"sbreport");
+    cfg.self_regulating_temperature = cfg.self_regulating_temperature || opts.contains(&"selft");
+    if opts.contains(&"goat") {
+        *cfg = cfg.clone().with_goat_ladder();
+    }
 }
 
 fn main() {
@@ -100,6 +107,14 @@ fn main() {
     if !opts.is_empty() {
         println!("  mechanisms: {}", opts.join(", "));
     }
+    if opts.contains(&"goat") {
+        println!(
+            "  goat ladder: {} rungs from T={:.4} to T={:.4} kJ/mol, self-regulating",
+            cfg.replicas,
+            cfg.temperature,
+            cfg.temperature * cfg.ladder_top
+        );
+    }
     if cfg.superbasin_report {
         println!(
             "  superbasin report{}",
@@ -143,24 +158,37 @@ fn main() {
             }
             Some(pot.value_and_gradient(x).1)
         };
-        let mut bias = BasinBias::new(
-            ClusterFingerprint::of_config(&cfg, &start),
-            cfg.merge_radius,
-            cfg.bias_height,
-            cfg.bias_gamma,
-        );
-        let mut checkpoint = |_: ChainCheckpoint<'_>| CheckpointAction::Continue;
-        let mut out = run_with_bias_at_checkpoints(
-            &cfg,
-            start.view(),
-            &mut ledger,
-            &mut relax,
-            Some(&mut grad),
-            &mut bias,
-            &mut rng,
-            1_000,
-            &mut checkpoint,
-        )
+        // A ladder gives every rung a bias of its own, so only a single
+        // chain can take the caller's.
+        let mut out = if cfg.replicas > 1 {
+            run_with_gradient(
+                &cfg,
+                start.view(),
+                &mut ledger,
+                &mut relax,
+                Some(&mut grad),
+                &mut rng,
+            )
+        } else {
+            let mut bias = BasinBias::new(
+                ClusterFingerprint::of_config(&cfg, &start),
+                cfg.merge_radius,
+                cfg.bias_height,
+                cfg.bias_gamma,
+            );
+            let mut checkpoint = |_: ChainCheckpoint<'_>| CheckpointAction::Continue;
+            run_with_bias_at_checkpoints(
+                &cfg,
+                start.view(),
+                &mut ledger,
+                &mut relax,
+                Some(&mut grad),
+                &mut bias,
+                &mut rng,
+                1_000,
+                &mut checkpoint,
+            )
+        }
         .expect("finite start");
         if let Some(state) = out.best_state.as_ref() {
             let e = pot.value_and_gradient(state.view()).0;
@@ -194,6 +222,9 @@ fn main() {
         );
         if let Some(sb) = &out.superbasin {
             println!("  seed {seed} {}", ensemble_report::superbasin_line(sb));
+        }
+        if let Some(goat) = ensemble_report::goat_line(&out) {
+            println!("  seed {seed} {goat}");
         }
         println!(
             "{}/1 solved, deepest {:.6}   mean hops {:.0}, force per hop {:.0}",
@@ -466,6 +497,17 @@ mod tests {
         let mut cfg = Config::communicating_tip4p(4);
         apply_options(&mut cfg, &["sbreport"]);
         assert!(cfg.superbasin_report && !cfg.superbasin_escape);
+    }
+
+    #[test]
+    fn goat_and_selft_bind_their_fields() {
+        let mut cfg = Config::communicating_tip4p(4);
+        apply_options(&mut cfg, &["sbasin", "selft"]);
+        assert!(cfg.self_regulating_temperature && cfg.replicas == 1);
+        let mut cfg = Config::communicating_tip4p(4);
+        apply_options(&mut cfg, &["sbasin", "goat"]);
+        assert_eq!(cfg.replicas, 4);
+        assert!(cfg.self_regulating_temperature && !cfg.minima_hopping);
     }
 
     #[test]

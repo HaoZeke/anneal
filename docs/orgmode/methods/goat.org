@@ -1,0 +1,48 @@
+#+TITLE: GOAT Search Rules
+
+The global optimization algorithm (GOAT) of de Souza runs parallel basin hopping over molecular and atomic clusters.
+Its paper is B. de Souza, Angew. Chem. Int. Ed. 64, e202500393 (2025).
+=anneal_core::goat= carries its search rules, and each rule is a flag on the cluster hop that is off by default.
+Each item of the module names the paper behind its rule and its numbers.
+Each item also says where anneal departs from that paper.
+
+GOAT states its energies in kcal/mol.
+=Config::kcal_per_mol= gives one kcal/mol in the unit of =Config.energy_unit=.
+=Config::for_tip4p= declares kilojoules per mole, so there a kcal/mol is 4.184 energy units.
+A run in reduced units has no chemical unit, so there a kcal/mol is read as one =Config.energy_scale=.
+
+Anneal's own method is communicating chains with the superbasin tracker on.
+The example binaries run it with =comm,sbasin= and =HISTORY_REPLICAS= under =HISTORY=shared=.
+Each rule below says whether it applies on top of that baseline.
+
+* Ladder and self-regulating temperature
+
+=Config::with_goat_ladder= sets four rungs that never exchange states.
+Rung =k= starts at the temperature where an uphill step of =LADDER_STEPS_KCAL[k]= kcal/mol is accepted half the time.
+GOAT's acceptance is =exp(-dE / k_B T)=, so that temperature is =step / ln 2=.
+The steps are GOAT's 0.5, 1, 2 and 4 kcal/mol, so the ladder doubles from rung to rung.
+The ladder turns minima hopping off, since GOAT's walk is Metropolis.
+
+=Config.self_regulating_temperature= moves a chain's temperature by =TEMPERATURE_FACTOR= after each outcome.
+An accepted hop to another basin divides the temperature by the factor.
+A refused one multiplies it by the factor, and the temperature never falls below the base.
+The factor of 1.05 is GOAT's =T_fac=.
+The feedback settles at one acceptance in two for any factor, and the factor sets only its speed.
+Minima hopping has no Metropolis test, so the flag does nothing there.
+
+The ladder cannot run on the communicating baseline.
+=EnsembleConfig::validate= refuses a chain with more than one rung, because a ladder owns its own bias.
+The binaries therefore run it as a separate single-process arm with =goat=.
+They stop when =goat= meets =HISTORY_REPLICAS=.
+That arm is one process with its own bias and Metropolis acceptance, so it compares two methods and not one rule.
+=selft= applies on each chain of the baseline when the chain is Metropolis.
+That is the Lennard-Jones preset and not the TIP4P one, whose chains use minima hopping.
+
+#+begin_src bash
+SEED_OFFSET=100 HISTORY_REPLICAS=4 HISTORY=shared HISTORY_POLICY=accepted \
+cargo run --release --features ira,bank-rpc --example lj_cluster_search -- \
+  38 400000 1 comm,sbasin,selft
+SEED_OFFSET=100 \
+cargo run --release --features ira,bank-rpc --example lj_cluster_search -- \
+  38 400000 1 comm,sbasin,plainsurface,goat
+#+end_src
