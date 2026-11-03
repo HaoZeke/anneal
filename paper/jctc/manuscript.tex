@@ -1,0 +1,192 @@
+\documentclass[journal=jctcce,manuscript=article]{achemso}
+
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{amsmath}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\sisetup{scientific-notation=true,exponent-product=\times}
+
+\input{macros}
+
+\author{Rohit Goswami}
+\affiliation{SURF B.V., Amsterdam, The Netherlands}
+\alsoaffiliation{Science Institute, University of Iceland, Reykjavik, Iceland}
+\alsoaffiliation{TurtleTech ehf., Reykjavik, Iceland}
+\author{Ruhila Goswami}
+\affiliation{Faculty of Life and Environmental Sciences, University of Iceland, Reykjavik, Iceland}
+\author{Amrita Goswami}
+\affiliation{Universidad Complutense de Madrid, Madrid, Spain}
+\author{Moritz Sallermann}
+\affiliation{Universidad Complutense de Madrid, Madrid, Spain}
+\author{Sonaly Goswami}
+\affiliation{Department of Chemistry, Indian Institute of Technology Kanpur, Kanpur, India}
+\author{Debabrata Goswami}
+\affiliation{Center for Bits and Atoms, Massachusetts Institute of Technology, Cambridge, Massachusetts 02139, United States}
+\alsoaffiliation{Department of Chemistry, Indian Institute of Technology Kanpur, Kanpur, India}
+\email{dgoswami@iitk.ac.in}
+
+\title{Basin hopping on Lennard-Jones clusters with one preset at every size}
+
+\begin{document}
+
+\begin{abstract}
+On the head of \texttt{lib/recommended-no-size-switches} the recommended preset keeps one move library at every cluster size.
+Lattice regrowth and a compacted pair surface are settings the caller adds.
+We ran six fresh processes of that head at each of five Lennard-Jones sizes.
+Each process records the first converged energy below the published minimum.
+The 38-atom result in this article is that head, with no test on the atom count.
+We take the median of a size as the mean of the third and fourth sorted penalised costs.
+We take the interquartile range as the fifth sorted cost minus the second.
+\end{abstract}
+
+\section{Introduction}
+The structure that a thermodynamic model of a cluster starts from is a local minimum of the potential, and the global minimum is the structure that model treats as the ground state.\cite{wales2003}
+On the Lennard-Jones pair potential the number of minima grows so quickly with the number of atoms that a search is judged by how many evaluations it spends before it reaches a minimum that is already known.\cite{wales1997,jones1924}
+Basin hopping, introduced by Li and Scheraga for a rough potential-energy surface and made the working method for atomic clusters by Wales and Doye, is a Monte Carlo walk on those minima.\cite{li1987,wales1997}
+A move proposes a new geometry, a local minimisation returns a minimum, and the Metropolis rule at one temperature accepts or rejects that minimum.
+Oakley, Johnston and Wales report mean first-encounter costs, over 100 random starts that all succeed, of 4369 energy evaluations for the 38-atom cluster with the continuous symmetry measure, 50229 for the 75-atom cluster with core orbits, and 109753 for the 98-atom cluster with core orbits.\cite{oakley2013}
+Those three means are the rows of their Tables 1 for the continuous-symmetry and core-orbit basin-hopping runs, as listed in \texttt{data/literature.tsv}.
+The starts are random, the runs continue until every start has succeeded, and the counter is an energy or gradient evaluation.
+We measure the preset below with a seeded draw, a fixed call ceiling, and a force-call ledger.
+The Oakley table and this ledger do not order each other.
+The preset measured here is the one the library builds for a cluster.
+It draws move arms by Thompson sampling from a posterior on the depth of the quench, it abandons a quench that is returning to the occupied basin, and it restarts when the chain has stopped improving.\cite{thompson1933,goedecker2004}
+On main the constructor still installs a lattice-growth library when the atom count is 38, and a compacted surface when the count is below 98.
+Both branches are gone on the head measured here.
+A caller who wants either device sets it on the configuration.
+
+\section{The search}
+\subsection{One step of basin hopping}
+A chain stores a minimum \(x\) with energy \(E(x)\).
+The move adds a displacement, the local minimiser returns a new minimum \(y\), and the chain accepts \(y\) with the Metropolis probability at temperature \(T\),
+\begin{equation}
+\min\bigl(1,\exp[-(E(y)-E(x))/T]\bigr).
+\label{eq:metropolis}
+\end{equation}
+\(T\) is \(\TempReduced\) in the reduced units where the pair well depth is 1.
+Wales and Doye use that reduced temperature for Lennard-Jones basin hopping, and the preset stores it as \texttt{LennardJonesPreset::TEMPERATURE}.\cite{wales1997}
+One temperature is used at every size.
+The hit that scores a run is the first converged evaluation whose energy lies below the published minimum by less than \(0.001\).
+A miss is a run that reaches its call ceiling without such an evaluation.
+The penalised cost, written PAR-2 below, is the call count of a hit and twice the ceiling for a miss.
+The process spends the whole ceiling.
+A threshold stored on the ledger would also accept an unconverged quench, so the run does not carry one, and the hit is read afterwards from the trace of converged improvements.
+
+\begin{algorithm}
+\caption{One chain of the recommended preset.}
+\label{alg:chain}
+\begin{algorithmic}[1]
+\State Draw a non-overlapping start from the seed and quench it.
+\While{the call budget remains}
+\State Draw a move from the library and quench the displaced geometry to a minimum \(y\).
+\State Replace \(x\) by \(y\) with the probability in equation~\ref{eq:metropolis}.
+\State When \(y\) is a new basin, quench the symmetry images of its core.
+\EndWhile
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{What the preset turns on}
+The recommended preset starts from the Wales and Doye displacement and then selects the lean burst library at every size.
+Thompson sampling draws each move from a normal-gamma posterior on the depth reached by earlier quenches of that move.\cite{thompson1933}
+The constructor leaves the surface list empty.
+The lattice-regrowth library builds a truncated octahedron, a decahedron, or an icosahedron from a named template.
+Which of those is the global minimum changes with size: face-centred cubic at 38 atoms, icosahedral at 55, and Marks decahedral at 75.\cite{wales1997}
+Installing that library only when the count equals 38 searches for a structure the count has already named, which is why the preset keeps the displacement library at every size.
+Doye showed that the Locatelli-Schoen compression, a term that pulls every atom toward the centroid, is a change of the potential.\cite{doye2000,locatelli2002}
+The same paper puts the compression into basin hopping as a two-phase search the caller turns on.
+A caller who wants that cutoff passes 0.7 times the largest pair distance in the structure being quenched.
+It is a property of that geometry.
+The constructor does not test the atom count to install it.
+Orbit completion quenches the images of a symmetric core when a new basin appears.
+A continuous-symmetry projection every ten quenches, and a reseed after five hops on an icosahedral plateau, follow the defaults Oakley, Johnston and Wales published for GMIN.\cite{oakley2013}
+Those two numbers are applied at every size.
+
+\section{How the runs were made}
+Each process called \texttt{Config::recommended} for one size and one seed.
+The start is the non-overlapping draw that the search builds from that seed at liquid-like density, with the preset minimum separation.
+The sizes are 38, 55, 75, 98 and 104.
+The published minima used as references are \(-173.928427\), \(-279.248470\), \(-397.492331\), \(-543.665361\) and \(-582.086642\).
+The ceilings are \(1.2\times 10^{6}\) calls at 38 atoms, \(1.0\times 10^{5}\) at 55, \(4.0\times 10^{5}\) at 75, and \(1.0\times 10^{6}\) at 98 and at 104.
+The seeds are 0, 1, 2, 3, 4 and 5, six processes at each size.
+The launch order rotates the size inside each seed and takes the seeds in the order 3, 0, 5, 1, 4, 2, so that one size does not occupy the first process of every seed.
+Each process is a fresh invocation, pinned to one core.
+The machine is an x86-64 guest with 8 processors.
+The processor string in \texttt{/proc/cpuinfo} is Intel Xeon.
+The binary was built with rustc 1.91.0 from the commit named in the Supporting Information.
+For six sorted costs \(x_1 \le \cdots \le x_6\), the median is \((x_3+x_4)/2\) and the interquartile range is \(x_5-x_2\).
+A comparison of hit counts on a later campaign uses Fisher's exact test.
+A comparison of paired penalised costs uses the Wilcoxon signed-rank test.
+This article has no second code on these seeds, so it reports no such test.
+
+\section{Results}
+We report the six-run summary in Table~\ref{tbl:six}.
+The call median is the median of the penalised costs.
+The wall median is the median of the process wall times.
+Each process spends its ceiling, so the wall time is the time to spend that ceiling, and the call count of a hit is the earlier charge at which the trace crossed the reference.
+Full precision for every seed is in the Supporting Information.
+
+\begin{table}
+\caption{Six fresh runs of \texttt{Config::recommended} on the head of \texttt{lib/recommended-no-size-switches}.
+The 38-atom row is that head, with no test on the atom count.
+Hits are out of six seeds.
+The call columns are penalised costs.
+The wall columns are the time to spend the ceiling.}
+\label{tbl:six}
+\begin{tabular}{lrrrrr}
+\toprule
+cluster & hits & median calls & IQR calls & median wall / s & IQR wall / s \\
+\midrule
+LJ\(_{38}\) & \HitLjxxxviii{}/\HitsSix{} & \num{\MedLjxxxviii} & \num{\IqrLjxxxviii} & \num{\WallLjxxxviii} & \num{\IqrWallLjxxxviii} \\
+LJ\(_{55}\) & \HitLjlv{}/\HitsSix{} & \num{\MedLjlv} & \num{\IqrLjlv} & \num{\WallLjlv} & \num{\IqrWallLjlv} \\
+LJ\(_{75}\) & \HitLjlxxv{}/\HitsSix{} & \num{\MedLjlxxv} & \num{\IqrLjlxxv} & \num{\WallLjlxxv} & \num{\IqrWallLjlxxv} \\
+LJ\(_{98}\) & \HitLjxcviii{}/\HitsSix{} & \num{\MedLjxcviii} & \num{\IqrLjxcviii} & \num{\WallLjxcviii} & \num{\IqrWallLjxcviii} \\
+LJ\(_{104}\) & \HitLjcv{}/\HitsSix{} & \num{\MedLjcv} & \num{\IqrLjcv} & \num{\WallLjcv} & \num{\IqrWallLjcv} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Conclusions}
+We measured a head that keeps the lean burst library at every size, including 38 atoms, and that leaves the surface list empty.
+The six-run table is the 38-atom result.
+The same table is the result at the other four sizes.
+The Oakley means remain the published scale for symmetrised basin hopping under a different protocol.
+The Supporting Information lists the experiments that a later campaign still has to run, including a paired comparison with GMIN on shared starts.
+
+\section*{Author contributions}
+The roles follow the CRediT taxonomy.
+Rohit Goswami: conceptualization, methodology, software, formal analysis, and writing of the original draft.
+Ruhila Goswami: software and visualization.
+Amrita Goswami: methodology and review of the draft.
+Moritz Sallermann: software, methodology, and review of the draft.
+Sonaly Goswami: validation and review of the draft.
+Debabrata Goswami: supervision and review of the draft.
+
+\section*{Acknowledgments}
+Rohit Goswami thanks his pets Ar\'{\i}, Yoda, Jude, Crystee, Thor, and Loki, and the garden cats.
+In memoriam TuiTui, Snoopy, and Cosmo.
+He thanks his cactus Ami and his in-laws Nagaselvamani and Sankaranarayan.
+Ruhila Goswami set the figure colour palette.
+Generative AI tools assisted with drafting and editing the text; the authors reviewed and edited all content and take full responsibility for it.
+
+\section*{Funding}
+This research did not receive any specific grant from funding agencies in the public, commercial, or not-for-profit sectors.
+
+\section*{Notes}
+The authors declare no competing financial interest.
+
+\begin{suppinfo}
+The Supporting Information gives the board constants, every seed at full precision, the plain-walk record, the TIP4P pair constants, the Oakley rows, the earlier campaign file, and the rerun plan.
+\end{suppinfo}
+
+\section*{Data and software availability}
+The runs used commit \texttt{\CommitShort}, the head of \texttt{lib/recommended-no-size-switches}.
+That commit is the library head under test.
+It is not on main.
+The crate in that tree reports version 0.12.0, and the newest tag on the repository is v0.11.1.
+The source is under the MIT licence at \url{https://github.com/HaoZeke/anneal}, with documentation at \url{https://anneal.rgoswami.me}, and the archive of that line is the Zenodo concept record \url{https://doi.org/10.5281/zenodo.10672746}.
+GMIN keyword files for a later paired comparison are those distributed with OptBench.
+
+\bibliography{refs}
+
+\end{document}
