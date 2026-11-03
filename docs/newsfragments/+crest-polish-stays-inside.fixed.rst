@@ -1,0 +1,1 @@
+``WATER_POLISH_EXTERNAL=1`` stops the Euclidean polish after CREST at the first accepted iterate inside the IRA gate and keeps the lowest-energy geometry that is already inside that gate. A polish that starts inside the gate cannot report a geometry outside it.

@@ -455,6 +455,12 @@ impl QuenchBoundary {
     }
 }
 
+/// Encounter records kept on a ledger and on [`Outcome::improvements`].
+///
+/// A run that improves past this is still descending. The tail is not the
+/// first-encounter statistic the list exists to report.
+const IMPROVEMENT_CAP: usize = 512;
+
 /// A search stopped because no initial quench was finite.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SearchError {
@@ -486,6 +492,11 @@ pub struct Ledger {
     start_attempts: usize,
     /// Geometries drawn after a non-finite initial quench, in order.
     start_redraws: Vec<Array1<f64>>,
+    /// Charged count and energy each time [`Ledger::record`] lowered the incumbent.
+    ///
+    /// The count is [`Ledger::spent`] at that call, before any later relaxation.
+    /// Capped at [`IMPROVEMENT_CAP`] records, the same cap as [`Outcome::improvements`].
+    encounters: Vec<(usize, f64)>,
 }
 
 struct DiagnosticQuench<'a> {
@@ -528,6 +539,7 @@ impl Ledger {
             stop: None,
             start_attempts: Self::DEFAULT_START_ATTEMPTS,
             start_redraws: Vec::new(),
+            encounters: Vec::new(),
         }
     }
 
@@ -685,11 +697,45 @@ impl Ledger {
     }
 
     /// Records a value and its state when it improves the incumbent.
+    ///
+    /// A new incumbent is also an encounter. Auxiliary quenches, orbit
+    /// completion among them, call this and do not otherwise name the
+    /// improvement. The charged count has to be the one at this call: a
+    /// later push would time the minimum after work that did not find it.
     pub fn record(&mut self, value: f64, state: ArrayView1<f64>) {
         if value < self.best {
             self.best = value;
             self.best_state = Some(state.to_owned());
+            if self.encounters.len() < IMPROVEMENT_CAP {
+                self.encounters.push((self.spent, value));
+            }
         }
+    }
+
+    /// Charged count and energy at each incumbent [`Ledger::record`] stored.
+    pub fn encounters(&self) -> &[(usize, f64)] {
+        &self.encounters
+    }
+
+    /// Replace the incumbent with a reoptimised geometry and its energy.
+    ///
+    /// [`Ledger::record`] keeps a looser value when the tightened geometry
+    /// comes back slightly higher. The reported answer is this pair, so
+    /// both fields move together. Nothing in the default hop calls this.
+    pub fn replace_best(&mut self, value: f64, state: ArrayView1<f64>) {
+        if value.is_finite() && state.iter().all(|component| component.is_finite()) {
+            self.best = value;
+            self.best_state = Some(state.to_owned());
+        }
+    }
+
+    /// Add `extra` charged evaluations after the search ceiling is spent.
+    ///
+    /// The reported-minimum reoptimisation runs after the campaign budget.
+    /// Those calls are still counted in [`Ledger::spent`]. A default search
+    /// does not grant anything.
+    pub fn grant(&mut self, extra: usize) {
+        self.budget = self.budget.saturating_add(extra);
     }
 
     /// Charged evaluations the ledger was created with.
@@ -797,6 +843,11 @@ pub struct Outcome {
     pub soft_crossed: usize,
     /// Hop, charged evaluations spent, basin count and value at each new
     /// global best.
+    ///
+    /// Every [`Ledger::record`] that lowers the incumbent is a row, including
+    /// an auxiliary quench the search loop does not push. The charged count is
+    /// [`Ledger::spent`] at that record. Hop and basin count come from the
+    /// loop's own push when it named the same energy, and are zero otherwise.
     ///
     /// This is what a first-encounter time is computed from, and it is the
     /// statistic worth reporting. A success rate at a fixed budget is the same
@@ -1930,6 +1981,33 @@ fn finish_improving(
 
 /// Continuations [`finish_improving`] grants one relaxation.
 const FINISH_ROUNDS: usize = 8;
+
+/// Encounter list scoring reads, one row per incumbent [`Ledger::record`] stored.
+///
+/// `pushed` carries the hop and basin count the search loop wrote beside a
+/// record it named. The charged count stays the one on the ledger, taken at
+/// the record. Orbit completion and the other auxiliary quenches call
+/// [`Ledger::record`] and do not push; those incumbents are still rows, or a
+/// minimum that exists only on the ledger is scored as a miss.
+fn improvements_from_encounters(
+    pushed: &[(usize, usize, usize, f64)],
+    encounters: &[(usize, f64)],
+) -> Vec<(usize, usize, usize, f64)> {
+    let mut out = Vec::with_capacity(encounters.len());
+    for &(spent, energy) in encounters {
+        if out.len() == IMPROVEMENT_CAP {
+            break;
+        }
+        let noted = pushed
+            .iter()
+            .find(|(_, _, _, noted_energy)| *noted_energy == energy);
+        let (hop, basins) = noted
+            .map(|(hop, _, basins, _)| (*hop, *basins))
+            .unwrap_or((0, 0));
+        out.push((hop, spent, basins, energy));
+    }
+    out
+}
 
 /// A caller stop during the opening quench is not a refused potential.
 ///
@@ -6220,6 +6298,10 @@ where
     }
 
     let n_basins = bias.n_basins();
+    // The ledger is the list of incumbents. A push beside `Ledger::record`
+    // carries the hop and basin count; an auxiliary quench that only records
+    // still has to appear, with the charged count from the record itself.
+    let improvements = improvements_from_encounters(&improvements, ledger.encounters());
     // Per-rung sampler diagnostics, with the active rung put back at its own
     // index so the report reads in ladder order.
     let hmc_diag: Vec<crate::hmc::hop::HopDiagnostics> = match hop {
@@ -8281,6 +8363,137 @@ mod tests {
         repair(&mut x, n, 0.85);
         let d = ((x[0] - x[3]).powi(2) + (x[1] - x[4]).powi(2) + (x[2] - x[5]).powi(2)).sqrt();
         assert!(d >= 0.85 - 1e-6, "overlap survived repair at {d}");
+    }
+
+    /// Orbit completion is the only quench that stores the target. Scoring
+    /// reads the encounter list the way `paper_controls` does: the first row
+    /// at or below the reference plus the hit tolerance, and the charged
+    /// count on that row. The count is the ledger's spent when the row was
+    /// recorded, which is earlier than the run's final spent.
+    #[test]
+    fn orbit_completion_improvement_is_scored_at_its_record() {
+        let n = 6;
+        let mut shelf_state = Array1::from(vec![
+            1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            -1.0,
+        ]);
+        for (i, value) in shelf_state.iter_mut().enumerate() {
+            *value += 0.08 * (((i * 37 + 11) % 17) as f64 / 8.0 - 1.0);
+        }
+        let mut cfg = Config::for_cluster(n);
+        cfg.max_hops = Some(1);
+        cfg.bayes_screen = false;
+        cfg.calibrated_screen = false;
+        cfg.finish_improving = false;
+        cfg.return_screen = false;
+        cfg.screen_margin = f64::INFINITY;
+        cfg.screen_steps = 1;
+        cfg.relax_steps = 1;
+        cfg.polish_records = 3;
+        cfg.orbit_complete_on_new = true;
+        cfg.point_symmetrise_on_new = false;
+        let orbit_state = crate::packing::on_new_basin(
+            shelf_state.view(),
+            n,
+            cfg.symmetry_tolerance,
+            cfg.symmetry_merge_radius,
+            cfg.symmetrise_core_fraction,
+            cfg.min_separation,
+        )
+        .expect("jittered octahedron completes an orbit");
+        let moved = orbit_state
+            .iter()
+            .zip(shelf_state.iter())
+            .any(|(a, b)| (a - b).abs() > 1e-8);
+        assert!(moved, "orbit completion returned the input");
+
+        const SHELF: f64 = -1.0;
+        const TARGET: f64 = -10.0;
+        const HIT: f64 = 0.001;
+        let same = |left: ArrayView1<f64>, right: ArrayView1<f64>| {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right.iter())
+                    .all(|(a, b)| (a - b).abs() <= 1e-8)
+        };
+        let found_at = std::sync::atomic::AtomicUsize::new(usize::MAX);
+        let mut relax = |ledger: &mut Ledger, state: ArrayView1<f64>, steps: usize| {
+            assert!(ledger.charge());
+            if steps == cfg.polish_records {
+                (TARGET, orbit_state.clone())
+            } else if same(state, orbit_state.view()) {
+                found_at.store(ledger.spent(), std::sync::atomic::Ordering::Relaxed);
+                (TARGET, orbit_state.clone())
+            } else {
+                (SHELF, shelf_state.clone())
+            }
+        };
+        let mut gradient = |ledger: &mut Ledger, state: ArrayView1<f64>| {
+            assert!(ledger.charge());
+            let marked = found_at.load(std::sync::atomic::Ordering::Relaxed);
+            if same(state, orbit_state.view())
+                && marked != usize::MAX
+                && ledger
+                    .encounters()
+                    .iter()
+                    .all(|(_, energy)| *energy != TARGET)
+            {
+                // The validating gradient is charged before the record.
+                // Later calls on this geometry are not the discovery.
+                found_at.store(ledger.spent(), std::sync::atomic::Ordering::Relaxed);
+            }
+            Some(Array1::zeros(state.len()))
+        };
+        let mut ledger = Ledger::new(10_000);
+        let mut rng = StdRng::seed_from_u64(11);
+        let out = run_with_gradient(
+            &cfg,
+            shelf_state.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut gradient),
+            &mut rng,
+        )
+        .expect("finite start");
+
+        let spent = found_at.load(std::sync::atomic::Ordering::Relaxed);
+        assert_ne!(spent, usize::MAX, "orbit quench ran");
+        assert_eq!(out.orbits.0, 1, "orbit completion did not run once");
+        assert_eq!(out.best, TARGET);
+        assert!(
+            ledger
+                .encounters()
+                .iter()
+                .any(|(at, energy)| *at == spent && *energy == TARGET),
+            "ledger encounters {:?}, record at {spent}",
+            ledger.encounters()
+        );
+        let force_to_hit = out
+            .improvements
+            .iter()
+            .find(|(_, _, _, energy)| *energy <= TARGET + HIT)
+            .map(|(_, charged, _, _)| *charged);
+        assert_eq!(force_to_hit, Some(spent));
+        assert!(
+            out.charged > spent,
+            "final spent {} is not after the record at {spent}",
+            out.charged
+        );
+        assert!(
+            out.improvements
+                .iter()
+                .filter(|(_, _, _, energy)| *energy <= TARGET + HIT)
+                .count()
+                == 1
+        );
+        let shelf_energy = out
+            .improvements
+            .iter()
+            .find(|(_, _, _, energy)| (*energy - SHELF).abs() <= 1e-12)
+            .map(|(_, _, _, energy)| *energy)
+            .expect("shelf row");
+        assert!(shelf_energy > TARGET + HIT);
     }
 }
 
