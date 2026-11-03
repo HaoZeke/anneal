@@ -1,0 +1,126 @@
+#+TITLE: Hydrogen-bond cycle reversal
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+#+begin_export rst
+=============================
+Hydrogen-bond cycle reversal
+=============================
+#+end_export
+
+This page explains why the rigid water search reverses cycles of hydrogen bonds.
+Its water model is the transferable intermolecular potential with four points (TIP4P).
+It covers how the move works, how it fits with the other moves, and what it changed on a fixed set of clusters.
+
+* The other moves
+
+A rigid water has a centre and an orientation, six coordinates per molecule.
+=Config::for_tip4p= follows Wales and Hodges (1998) with two moves.
+=rtrans= shifts every centre by a small random step.
+=rrot= adds a small random increment to every rotation.
+After each move the search relaxes the cluster to a local minimum.
+It then accepts or rejects that minimum by its energy.
+A move allocator picks the move for each hop.
+It favours the moves that have paid off on this run.
+
+* Why bond direction matters
+
+In a water cluster each hydrogen bond has a donor and an acceptor.
+The donor points one of its hydrogens at the acceptor's oxygen.
+Two clusters can put every oxygen in the same place and still differ in which way the bonds point.
+Their energies differ, because the charges sit in different places.
+
+The molecules around a ring of bonds must all turn at once to change one arrangement into another.
+A move that turns one molecule breaks its bonds.
+The relaxation can then turn it straight back to the minimum it left.
+=rrot= turns every molecule, but each in a random direction.
+That rarely gives a whole ring that points the other way.
+
+* The move
+
+=rcycle= reverses one directed cycle of bonds.
+It starts at a random molecule that donates a bond.
+It follows a random donated bond to the next molecule, and repeats.
+It never steps straight back to the molecule it came from.
+It stops when it reaches a molecule it has already visited.
+The molecules from that visit on form a cycle of three or more.
+Two waters that donate to each other would keep the same two bonds when both turn, so the walk skips that pair.
+
+Each molecule on the cycle then turns about its own oxygen.
+The turn maps the plane of its two hydrogens onto the plane of its other hydrogen and the oxygen of the molecule before it on the cycle.
+Its donating hydrogen ends near that oxygen, and its other hydrogen moves a little.
+Each molecule on the cycle still donates one bond and accepts one along the cycle, now the other way round.
+The oxygens do not move, so the network stays.
+The new hydrogen positions are close to the bonded ones, and the relaxation settles them.
+
+The idea is the loop move for proton arrangements in ice, from Rahman and Stillinger (1972).
+In ice that move is used to sample arrangements at equilibrium.
+Here the walk is not uniform over cycles, so the move has no proposal ratio.
+It is a move for finding minima, not for sampling.
+
+The allocator sees =rcycle= as a third move, beside =rtrans= and =rrot=.
+If the walk finds no cycle, the move returns the cluster unchanged.
+The search then draws another move for that hop, so it spends no quench on an unchanged cluster.
+It has no rate to set.
+The allocator gives it more hops when it pays off on that run and fewer when it does not.
+
+* What it changed
+
+The comparison runs =Config::recommended_tip4p= with and without the move.
+It uses nine sizes from 10 to 21 molecules and 32 seeds per size, seeds 35000 to 35031.
+These seeds were chosen after the move was frozen, and each run ran once.
+Each run has 500,000 calls into the potential and starts from the same recorded start.
+A run is a hit when its lowest energy comes within 0.01 kJ/mol of the Cambridge Cluster Database value.
+
+#+begin_export rst
+.. image:: /_static/water-cycle-eval.png
+   :alt: Two panels over nine sizes.
+         Left, hits of 32: both versions hit 32 at 10 molecules; with the move 12 against 2 at 12, and 1 against 0 at 16 and at 17; neither hits at 15 or from 18 to 21.
+         Right, the median lowest energy minus the Cambridge value is lower with the move at every size from 12 to 21.
+#+end_export
+
+With the move the search hits 46 of 288 runs, against 34 without it.
+Paired by size and seed, 12 pairs hit only with the move and none hit only without it.
+A two-sided sign test on those pairs gives p = 0.00049.
+Most of the gain is at 12 molecules, with 12 hits against 2.
+From 16 to 21 molecules the hits go from 0 to 2 of 192.
+At every size from 12 to 21 the median lowest energy is lower with the move.
+
+The table gives each size.
+A gap is the median lowest energy minus the Cambridge value, in kJ/mol.
+
+| Molecules | Hits without | Hits with | Only with | Only without | Gap without | Gap with |
+|-----------+--------------+-----------+-----------+--------------+-------------+----------|
+| 10 | 32 | 32 | 0 | 0 | -0.000762 | -0.000762 |
+| 12 | 2 | 12 | 10 | 0 | +13.782743 | +4.478147 |
+| 15 | 0 | 0 | 0 | 0 | +10.414234 | +7.794840 |
+| 16 | 0 | 1 | 1 | 0 | +18.178949 | +17.393822 |
+| 17 | 0 | 1 | 1 | 0 | +10.541877 | +8.214856 |
+| 18 | 0 | 0 | 0 | 0 | +16.615574 | +11.883522 |
+| 19 | 0 | 0 | 0 | 0 | +14.697763 | +12.129441 |
+| 20 | 0 | 0 | 0 | 0 | +22.965101 | +19.151865 |
+| 21 | 0 | 0 | 0 | 0 | +19.612597 | +15.622243 |
+| All | 34 | 46 | 12 | 0 | | |
+
+The 12-molecule gap hides a trap.
+Five runs with the move and five without it end 13.591445 kJ/mol above the Cambridge value.
+That minimum has 18 hydrogen bonds, against 20 in the lowest one, and its oxygens form a different network.
+A cycle reversal leaves the oxygens where they are, so on its own it cannot turn one network into the other.
+
+* Development seeds
+
+Two earlier sets of seeds are development seeds and not a test.
+Seeds 100 to 115 checked the move while it was written.
+Seeds 11000 to 11031 were scored on an earlier walk that could step straight back, before the final walk was frozen.
+Both sets were looked at before the walk was frozen, so this page gives no sign test for them.
+The final walk gives these hits on them.
+
+| Seeds | Runs | Hits without | Hits with |
+|-------+------+--------------+-----------|
+| 100 to 115 | 144 | 16 | 27 |
+| 11000 to 11031 | 288 | 33 | 50 |
+
+* Related pages
+
+- [[file:../tutorials/water-hopping.org][Find a water cluster minimum]] runs one search.
+- [[file:../howto/tip4p-cycle-reversal.org][Turn hydrogen-bond cycle reversal off]] compares the two settings on your own clusters.
+- [[file:../reference/rigid-water-moves.org][Rigid water moves]] lists the settings.

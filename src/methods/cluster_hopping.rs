@@ -46,6 +46,7 @@ use crate::path::{StallDetector, interpolate_path};
 use crate::screen::Screen;
 
 mod config;
+mod cycles;
 mod moves;
 mod packing_bank;
 mod preset;
@@ -3950,11 +3951,13 @@ where
         };
         // Identity SOAP is not an arm. Thompson must not buy a no-op:
         // reselect a real kernel, or skip the hop.
+        // A cycle reversal that finds no cycle returns the state unchanged too.
+        let may_idle = |name: &str| name == "soap" || name == "rcycle";
         if !species_escape_trial
             && !cov_fire
             && !soft_fire
             && !angular
-            && kernels[k].name() == "soap"
+            && may_idle(&kernels[k].name())
             && hop_is_identity(x.view(), trial.view())
         {
             let mut swapped = false;
@@ -3965,7 +3968,7 @@ where
                     (None, true) => allocator.select(rng),
                     (None, false) => rng.random_range(0..kernels.len()),
                 };
-                if kernels[k2].name() == "soap" {
+                if may_idle(&kernels[k2].name()) {
                     continue;
                 }
                 k = k2;

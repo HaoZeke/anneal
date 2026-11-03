@@ -70,6 +70,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    tutorials/classical-and-presets
    tutorials/chemfit
    tutorials/cluster-search
+   tutorials/water-hopping
    tutorials/box-search
    tutorials/bayesian-pilot-mixer
    tutorials/gle-colored-noise
@@ -87,6 +88,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    howto/chemfit
    howto/precision-policy
    howto/rgmin-lbfgs
+   howto/tip4p-cycle-reversal
    howto/faq
    faq
 #+end_export
@@ -102,6 +104,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    explanation/communication
    explanation/gle-mechanics
    explanation/regime_auto
+   explanation/water-cycle-reversal
 #+end_export
 
 #+begin_export rst
@@ -122,6 +125,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    reference/rust-api
    reference/glossary
    reference/presets-and-advanced
+   reference/rigid-water-moves
    bindings
    device
    changelog

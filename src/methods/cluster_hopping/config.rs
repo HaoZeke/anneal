@@ -1438,6 +1438,7 @@ impl Config {
     /// per molecule (centre of mass plus an exponential-map rotation). The
     /// move library is Wales--Hodges translation and rotation, each with
     /// its own step, not the atomic Cartesian kernels.
+    /// A third arm reverses a directed hydrogen-bond cycle.
     pub fn for_tip4p(n_molecules: usize) -> Self {
         assert!(
             n_molecules >= 2,
@@ -1450,6 +1451,7 @@ impl Config {
             translate_step: 0.35,
             rotate_step: 0.40,
             local: false,
+            reverse_cycles: true,
         };
         cfg.rigid_body_geometry =
             Some(crate::potentials::Tip4pCluster::new(n_molecules).rigid_geometry());
@@ -1537,6 +1539,7 @@ impl Config {
             translate_step: LennardJonesPreset::ALL_POINTS_STEP * self.length_scale,
             rotate_step: super::moves::RIGID_ORIENTATION_CAP,
             local: true,
+            reverse_cycles: false,
         };
         let contact = 4.0 * reach;
         let span = LennardJonesPreset::CONTAINER_RADIUS * contact * (self.n_points as f64).cbrt();
