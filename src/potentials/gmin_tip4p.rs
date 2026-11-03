@@ -312,48 +312,32 @@ fn sites_from_ohh(cartesian: &[f64]) -> Vec<[[f64; 3]; 4]> {
 
 fn site_energy_forces(placed: &[[[f64; 3]; 4]]) -> (f64, Vec<[[f64; 3]; 4]>) {
     let n = placed.len();
-    let mut energy = 0.0;
-    let mut force = vec![[[0.0; 3]; 4]; n];
-    let charges = [0.0, Q_H, Q_H, Q_M];
-    for left in 0..n {
-        for right in (left + 1)..n {
-            let delta = [
-                placed[left][0][0] - placed[right][0][0],
-                placed[left][0][1] - placed[right][0][1],
-                placed[left][0][2] - placed[right][0][2],
-            ];
-            let distance2 = delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2];
-            if distance2 > 0.0 {
-                let inverse = 1.0 / distance2;
-                let r6 = inverse * inverse * inverse;
-                let r12 = r6 * r6;
-                energy += C12 * r12 - C6 * r6;
-                let slope = (-12.0 * C12 * r12 + 6.0 * C6 * r6) * inverse;
-                for k in 0..3 {
-                    force[left][0][k] += slope * delta[k];
-                    force[right][0][k] -= slope * delta[k];
-                }
+    let mut flat = vec![0.0; 12 * n];
+    for molecule in 0..n {
+        for site in 0..4 {
+            for k in 0..3 {
+                flat[12 * molecule + 3 * site + k] = placed[molecule][site][k];
             }
-            for a in 1..4 {
-                for b in 1..4 {
-                    let delta = [
-                        placed[left][a][0] - placed[right][b][0],
-                        placed[left][a][1] - placed[right][b][1],
-                        placed[left][a][2] - placed[right][b][2],
-                    ];
-                    let distance2 = delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2];
-                    if distance2 <= 0.0 {
-                        continue;
-                    }
-                    let distance = distance2.sqrt();
-                    let pair = COULOMB * charges[a] * charges[b] / distance;
-                    energy += pair;
-                    let slope = -pair / distance2;
-                    for k in 0..3 {
-                        force[left][a][k] += slope * delta[k];
-                        force[right][b][k] -= slope * delta[k];
-                    }
-                }
+        }
+    }
+    let (energy, site_gradient) = super::rgpot_call::tip4p_site_gradient(
+        super::rgpot_call::Tip4pSites {
+            c6: C6,
+            c12: C12,
+            epsilon: 0.0,
+            sigma: 0.0,
+            use_epsilon: false,
+            coulomb: COULOMB,
+            q_h: Q_H,
+            q_m: Q_M,
+        },
+        &flat,
+    );
+    let mut force = vec![[[0.0; 3]; 4]; n];
+    for molecule in 0..n {
+        for site in 0..4 {
+            for k in 0..3 {
+                force[molecule][site][k] = site_gradient[12 * molecule + 3 * site + k];
             }
         }
     }

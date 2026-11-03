@@ -141,48 +141,32 @@ impl Tip4pCluster {
             }
         }
 
-        let mut energy = 0.0;
-        let mut force = vec![[[0.0; 3]; 4]; n];
-        let charges = [0.0, Q_H, Q_H, Q_M];
+        let mut flat = vec![0.0; 12 * n];
         for i in 0..n {
-            for j in (i + 1)..n {
-                let d = [
-                    sites[i][0][0] - sites[j][0][0],
-                    sites[i][0][1] - sites[j][0][1],
-                    sites[i][0][2] - sites[j][0][2],
-                ];
-                let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                if r2 > 0.0 {
-                    let inv2 = SIGMA * SIGMA / r2;
-                    let inv6 = inv2 * inv2 * inv2;
-                    let inv12 = inv6 * inv6;
-                    energy += 4.0 * EPSILON * (inv12 - inv6);
-                    let coef = -24.0 * EPSILON / r2 * (2.0 * inv12 - inv6);
-                    for k in 0..3 {
-                        force[i][0][k] += coef * d[k];
-                        force[j][0][k] -= coef * d[k];
-                    }
+            for a in 0..4 {
+                for k in 0..3 {
+                    flat[12 * i + 3 * a + k] = sites[i][a][k];
                 }
-                for a in 1..4 {
-                    for b in 1..4 {
-                        let d = [
-                            sites[i][a][0] - sites[j][b][0],
-                            sites[i][a][1] - sites[j][b][1],
-                            sites[i][a][2] - sites[j][b][2],
-                        ];
-                        let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                        if r2 <= 0.0 {
-                            continue;
-                        }
-                        let r = r2.sqrt();
-                        let qq = COULOMB * charges[a] * charges[b];
-                        energy += qq / r;
-                        let coef = -qq / (r2 * r);
-                        for k in 0..3 {
-                            force[i][a][k] += coef * d[k];
-                            force[j][b][k] -= coef * d[k];
-                        }
-                    }
+            }
+        }
+        let (energy, site_gradient) = super::rgpot_call::tip4p_site_gradient(
+            super::rgpot_call::Tip4pSites {
+                c6: 0.0,
+                c12: 0.0,
+                epsilon: EPSILON,
+                sigma: SIGMA,
+                use_epsilon: true,
+                coulomb: COULOMB,
+                q_h: Q_H,
+                q_m: Q_M,
+            },
+            &flat,
+        );
+        let mut force = vec![[[0.0; 3]; 4]; n];
+        for i in 0..n {
+            for a in 0..4 {
+                for k in 0..3 {
+                    force[i][a][k] = site_gradient[12 * i + 3 * a + k];
                 }
             }
         }
