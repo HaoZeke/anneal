@@ -73,6 +73,13 @@ pub fn orbit_candidates(
     }
 }
 
+/// Fewest points with a surface hop: a bonded triangle and an atom to move onto its hollow.
+const SURFACE_HOP_MIN_POINTS: usize = 4;
+/// Fraction of the mean bond length within which an atom makes a hollow site occupied.
+const VACANT_BOND_FRACTION: f64 = 0.8;
+/// Fraction of the mean bond length within which two hollow sites are merged into one.
+const MERGE_BOND_FRACTION: f64 = 0.3;
+
 /// Surface hops of the least-bound atoms: each atom with the lowest
 /// coordination, placed on each vacant hollow site where it keeps at least
 /// as many neighbours as it has.
@@ -80,9 +87,10 @@ pub fn orbit_candidates(
 /// Neighbours are pairs closer than `cutoff`, which must sit between the
 /// first and second shells. A hollow site is above a triangle of mutually
 /// bonded atoms, on the side away from the centroid, at the mean bond length
-/// from all three. It is vacant when no atom is within 0.8 bond lengths or
-/// `min_separation`, the moving atom included, so a hop is at least that
-/// far. Sites closer than 0.3 bond lengths to an earlier one are merged.
+/// from all three. It is vacant when no atom is within
+/// [`VACANT_BOND_FRACTION`] bond lengths or `min_separation`, the moving atom
+/// included, so a hop is at least that far. Sites closer than
+/// [`MERGE_BOND_FRACTION`] bond lengths to an earlier one are merged.
 ///
 /// The order is the atoms' order, then the triangles' order, so equal
 /// inputs give equal candidates.
@@ -95,7 +103,7 @@ pub fn surface_hops(
     let point = |i: usize| [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
     let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
     let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    if n_points < 4 || x.len() != 3 * n_points {
+    if n_points < SURFACE_HOP_MIN_POINTS || x.len() != 3 * n_points {
         return Vec::new();
     }
     let mut bonded = vec![false; n_points * n_points];
@@ -126,7 +134,7 @@ pub fn surface_hops(
         }
     }
     let vacant = |s: [f64; 3]| {
-        let clear = (0.8 * bond).max(min_separation);
+        let clear = (VACANT_BOND_FRACTION * bond).max(min_separation);
         (0..n_points).all(|i| {
             let d = sub(point(i), s);
             dot(d, d) >= clear * clear
@@ -185,7 +193,7 @@ pub fn surface_hops(
                 ];
                 let merged = sites.iter().any(|t| {
                     let d = sub(*t, s);
-                    dot(d, d) < (0.3 * bond).powi(2)
+                    dot(d, d) < (MERGE_BOND_FRACTION * bond).powi(2)
                 });
                 if !merged && vacant(s) {
                     sites.push(s);
@@ -269,6 +277,31 @@ mod tests {
         assert!(on_new_basin(x.view(), 3, 0.2, 0.3, 0.6, 0.4).is_none());
     }
 
+    /// Points of the centred icosahedron, the centre and its twelve vertices.
+    const ICOSAHEDRON_POINTS: usize = 13;
+    /// Multiplier of the fixed jitter pattern over the coordinate index.
+    const JITTER_STRIDE: usize = 37;
+    /// Offset of the fixed jitter pattern.
+    const JITTER_OFFSET: usize = 11;
+    /// Period of the fixed jitter pattern, whose half maps it onto `[-1, 1]`.
+    const JITTER_PERIOD: usize = 17;
+    /// Jitter amplitude that moves the icosahedron off its exact orbits without hiding its group.
+    const JITTER: f64 = 0.003;
+    /// Detection tolerance of both orbit cores.
+    const TOLERANCE: f64 = 0.5;
+    /// Merge radius of both orbit completions.
+    const MERGE_RADIUS: f64 = 0.3;
+    /// Fraction of the points the fraction core takes.
+    const CORE_FRACTION: f64 = 0.6;
+    /// Minimum separation of the completions and the hops.
+    const MIN_SEPARATION: f64 = 0.5;
+    /// Bond cutoff of the hop tests, between the unit first shell and the second.
+    const BOND_CUTOFF: f64 = 1.2;
+    /// Bonded atoms around a hollow site, the triangle under it.
+    const HOLLOW_NEIGHBOURS: usize = 3;
+    /// Closest any atom may be to a hop's site, so the hop makes no overlap.
+    const NO_OVERLAP: f64 = 0.75;
+
     /// A centred icosahedron, each coordinate moved a little: both cores
     /// find a group that moves it, and `Both` is the shell completion then
     /// the fraction one.
@@ -288,10 +321,23 @@ mod tests {
         }
         let mut x = Array1::from(x);
         for (i, v) in x.iter_mut().enumerate() {
-            *v += 0.003 * (((i * 37 + 11) % 17) as f64 / 8.0 - 1.0);
+            *v += JITTER
+                * (((i * JITTER_STRIDE + JITTER_OFFSET) % JITTER_PERIOD) as f64
+                    / (JITTER_PERIOD / 2) as f64
+                    - 1.0);
         }
         let spec = ShellCore::scaled(1.0);
-        let get = |core| orbit_candidates(x.view(), 13, core, 0.5, 0.3, 0.6, 0.5);
+        let get = |core| {
+            orbit_candidates(
+                x.view(),
+                ICOSAHEDRON_POINTS,
+                core,
+                TOLERANCE,
+                MERGE_RADIUS,
+                CORE_FRACTION,
+                MIN_SEPARATION,
+            )
+        };
         let fraction = get(OrbitCore::Fraction);
         let shells = get(OrbitCore::Shells(spec));
         assert_eq!(fraction.len(), 1);
@@ -323,7 +369,7 @@ mod tests {
     #[test]
     fn a_closed_icosahedron_has_no_surface_hop() {
         let x = Array1::from(icosahedron());
-        assert!(surface_hops(x.view(), 13, 1.2, 0.5).is_empty());
+        assert!(surface_hops(x.view(), ICOSAHEDRON_POINTS, BOND_CUTOFF, MIN_SEPARATION).is_empty());
     }
 
     /// An atom on top of a vertex has one neighbour. Each hop moves that
@@ -334,16 +380,21 @@ mod tests {
         let top = [x[3] * 2.0, x[4] * 2.0, x[5] * 2.0];
         x.extend(top);
         let x = Array1::from(x);
-        let hops = surface_hops(x.view(), 14, 1.2, 0.5);
+        let hops = surface_hops(
+            x.view(),
+            ICOSAHEDRON_POINTS + 1,
+            BOND_CUTOFF,
+            MIN_SEPARATION,
+        );
         assert!(!hops.is_empty());
         for y in &hops {
-            for i in 0..13 {
+            for i in 0..ICOSAHEDRON_POINTS {
                 for k in 0..3 {
                     assert_eq!(y[3 * i + k], x[3 * i + k]);
                 }
             }
             let site = [y[39], y[40], y[41]];
-            let distances: Vec<f64> = (0..13)
+            let distances: Vec<f64> = (0..ICOSAHEDRON_POINTS)
                 .map(|i| {
                     (0..3)
                         .map(|k| (y[3 * i + k] - site[k]).powi(2))
@@ -351,9 +402,17 @@ mod tests {
                         .sqrt()
                 })
                 .collect();
-            assert!(distances.iter().filter(|d| **d < 1.2).count() >= 3);
-            assert!(distances.iter().all(|d| *d > 0.75));
+            assert!(distances.iter().filter(|d| **d < BOND_CUTOFF).count() >= HOLLOW_NEIGHBOURS);
+            assert!(distances.iter().all(|d| *d > NO_OVERLAP));
         }
-        assert_eq!(hops, surface_hops(x.view(), 14, 1.2, 0.5));
+        assert_eq!(
+            hops,
+            surface_hops(
+                x.view(),
+                ICOSAHEDRON_POINTS + 1,
+                BOND_CUTOFF,
+                MIN_SEPARATION
+            )
+        );
     }
 }

@@ -546,6 +546,19 @@ mod hook_tests {
         }
     }
 
+    /// Minimum-certificate gradient tolerance of the shared history; the fixture gradients are zero.
+    const RECORD_GRADIENT: f64 = 1e-3;
+    /// Points of [`triangle`].
+    const TRIANGLE_POINTS: usize = 3;
+    /// Species of every fixture point, the atomic number of argon.
+    const ARGON: u32 = 18;
+    /// Energy of the second, larger triangle, above the first's -1.
+    const SECOND_ENERGY: f64 = -0.5;
+    /// Gradient component of the refused observation, far above [`RECORD_GRADIENT`].
+    const UNCERTIFIED_GRADIENT: f64 = 0.5;
+    /// A minimum identifier the history never issued.
+    const UNISSUED_MINIMUM: usize = 99;
+
     fn triangle(scale: f64) -> Array1<f64> {
         array![
             0.0,
@@ -583,9 +596,13 @@ mod hook_tests {
 
     #[test]
     fn two_hooks_over_one_history_see_each_other() {
-        let history = Mutex::new(MinimumHistory::new(1e-3).unwrap());
+        let history = Mutex::new(MinimumHistory::new(RECORD_GRADIENT).unwrap());
         let descriptor = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
-        let context = StructureContext::new(Some(vec![18; 3]), None, Some("test".into()));
+        let context = StructureContext::new(
+            Some(vec![ARGON; TRIANGLE_POINTS]),
+            None,
+            Some("test".into()),
+        );
         let witness = SerializedWitness(Mutex::new(SameCoordinates));
         let mut first = SharedMinimumHistory::new(
             &history,
@@ -601,7 +618,7 @@ mod hook_tests {
             &witness,
             HistoryMembership::Observed,
         );
-        let zero = Array1::zeros(9);
+        let zero = Array1::zeros(3 * TRIANGLE_POINTS);
         let a = first
             .observe(-1.0, triangle(1.0).view(), zero.view())
             .unwrap();
@@ -622,12 +639,12 @@ mod hook_tests {
         assert_eq!(c.visits, 2, "accepted visits count from adoption onwards");
         // A different structure is new to both.
         let d = second
-            .observe(-0.5, triangle(2.0).view(), zero.view())
+            .observe(SECOND_ENERGY, triangle(2.0).view(), zero.view())
             .unwrap();
         assert!(d.first_observation && d.is_new);
         assert_ne!(d.minimum, a.minimum);
         // An uncertified gradient is refused, not admitted.
-        let bad = Array1::from_elem(9, 0.5);
+        let bad = Array1::from_elem(3 * TRIANGLE_POINTS, UNCERTIFIED_GRADIENT);
         assert!(
             first
                 .observe(-1.0, triangle(1.0).view(), bad.view())
@@ -639,9 +656,13 @@ mod hook_tests {
 
     #[test]
     fn one_chain_claims_a_completion_and_the_other_does_not() {
-        let history = Mutex::new(MinimumHistory::new(1e-3).unwrap());
+        let history = Mutex::new(MinimumHistory::new(RECORD_GRADIENT).unwrap());
         let descriptor = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
-        let context = StructureContext::new(Some(vec![18; 3]), None, Some("test".into()));
+        let context = StructureContext::new(
+            Some(vec![ARGON; TRIANGLE_POINTS]),
+            None,
+            Some("test".into()),
+        );
         let witness = SerializedWitness(Mutex::new(SameCoordinates));
         let mut first = SharedMinimumHistory::new(
             &history,
@@ -657,7 +678,7 @@ mod hook_tests {
             &witness,
             HistoryMembership::Accepted,
         );
-        let zero = Array1::zeros(9);
+        let zero = Array1::zeros(3 * TRIANGLE_POINTS);
         let a = first
             .observe(-1.0, triangle(1.0).view(), zero.view())
             .unwrap();
@@ -669,12 +690,12 @@ mod hook_tests {
         assert!(!second.claim_completion(b.minimum));
         assert!(!first.claim_completion(a.minimum));
         let d = second
-            .observe(-0.5, triangle(2.0).view(), zero.view())
+            .observe(SECOND_ENERGY, triangle(2.0).view(), zero.view())
             .unwrap();
         assert!(second.claim_completion(d.minimum));
         assert!(matches!(
-            history.lock().unwrap().claim_completion(99),
-            Err(MinimumHistoryError::UnknownMinimum(99))
+            history.lock().unwrap().claim_completion(UNISSUED_MINIMUM),
+            Err(MinimumHistoryError::UnknownMinimum(UNISSUED_MINIMUM))
         ));
     }
 
