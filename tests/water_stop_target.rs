@@ -7,7 +7,7 @@
 
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger,
+    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, MoveLibrary,
     run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
@@ -25,12 +25,23 @@ struct Trace {
     best: u64,
 }
 
-/// Returns the trace of one `Config::for_tip4p` search with the seed and
-/// start of the head-to-head runner. The search is stopped at `target`
-/// when one is given, and otherwise after `budget` calls.
-fn search(n: usize, budget: usize, seed: u64, target: Option<f64>) -> Trace {
+/// `Config::for_tip4p` with the cycle reversal off, so the chain moves by
+/// translation and rotation alone.
+fn translation_and_rotation(n: usize) -> Config {
+    let mut cfg = Config::for_tip4p(n);
+    let MoveLibrary::RigidBody { reverse_cycles, .. } = &mut cfg.move_library else {
+        unreachable!("Config::for_tip4p moves rigid bodies");
+    };
+    *reverse_cycles = false;
+    cfg
+}
+
+/// Returns the trace of one search under `cfg` with the seed and start of
+/// the head-to-head runner. The search is stopped at `target` when one is
+/// given, and otherwise after `budget` calls.
+fn search(cfg: &Config, budget: usize, seed: u64, target: Option<f64>) -> Trace {
+    let n = cfg.n_points;
     let pot = Tip4pCluster::new(n);
-    let cfg = Config::for_tip4p(n);
     let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(3));
     let start = random_tip4p_cluster(n, &mut rng);
     let mut ledger = Ledger::new(budget);
@@ -60,14 +71,14 @@ fn search(n: usize, budget: usize, seed: u64, target: Option<f64>) -> Trace {
         Some(pot.value_and_gradient(x).1)
     };
     let mut bias = BasinBias::new(
-        ClusterFingerprint::of_config(&cfg, &start),
+        ClusterFingerprint::of_config(cfg, &start),
         cfg.merge_radius,
         cfg.bias_height,
         cfg.bias_gamma,
     );
     let mut checkpoint = |_: ChainCheckpoint<'_>| CheckpointAction::Continue;
     let out = run_with_bias_at_checkpoints(
-        &cfg,
+        cfg,
         start.view(),
         &mut ledger,
         &mut relax,
@@ -92,11 +103,14 @@ fn search(n: usize, budget: usize, seed: u64, target: Option<f64>) -> Trace {
 /// Neither reference is reached. Instead, the chain stalls at -574.978
 /// kJ/mol after 1250 hops, and the two targets sit just inside and just
 /// outside one hopping temperature, 8 kJ/mol, of that minimum. Without a
-/// target, a run walks the same path.
+/// target, a run walks the same path. The chain moves by translation and
+/// rotation alone: with the cycle reversal, it never stalls inside the
+/// budget and it reaches the upper reference.
 #[test]
 fn two_unreached_references_give_one_water_trajectory() {
-    let lower = search(14, 200_000, 11030, Some(-582.99110 + 0.01));
-    let upper = search(14, 200_000, 11030, Some(-582.9744786324 + 0.01));
+    let cfg = translation_and_rotation(14);
+    let lower = search(&cfg, 200_000, 11030, Some(-582.99110 + 0.01));
+    let upper = search(&cfg, 200_000, 11030, Some(-582.9744786324 + 0.01));
     assert!(
         lower.hops > 1_250,
         "no stall inside the budget: {} hops",
@@ -111,7 +125,7 @@ fn two_unreached_references_give_one_water_trajectory() {
         .position(|(a, b)| a != b);
     assert_eq!(diverged, None, "trajectories part at quench {diverged:?}");
     assert_eq!(lower, upper);
-    assert_eq!(lower, search(14, 200_000, 11030, None));
+    assert_eq!(lower, search(&cfg, 200_000, 11030, None));
 }
 
 /// The search must stop at its first hit on a reference it reaches, and
@@ -119,8 +133,9 @@ fn two_unreached_references_give_one_water_trajectory() {
 /// matches the one an unreached reference gives.
 #[test]
 fn a_reached_reference_only_ends_the_water_trajectory() {
-    let reached = search(8, 200_000, 11000, Some(-305.5098595 + 0.01));
-    let unreached = search(8, 200_000, 11000, Some(-305.5098595 - 1.0));
+    let cfg = Config::for_tip4p(8);
+    let reached = search(&cfg, 200_000, 11000, Some(-305.5098595 + 0.01));
+    let unreached = search(&cfg, 200_000, 11000, Some(-305.5098595 - 1.0));
     assert!(reached.charged < 200_000, "the reference was not reached");
     assert!(f64::from_bits(reached.best) <= -305.5098595 + 0.01);
     assert_eq!(unreached.charged, 200_000);
@@ -129,5 +144,5 @@ fn a_reached_reference_only_ends_the_water_trajectory() {
         reached.quenches[..],
         unreached.quenches[..reached.quenches.len()]
     );
-    assert_eq!(unreached, search(8, 200_000, 11000, None));
+    assert_eq!(unreached, search(&cfg, 200_000, 11000, None));
 }
