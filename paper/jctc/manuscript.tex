@@ -1,0 +1,204 @@
+\documentclass[journal=jctcce,manuscript=article]{achemso}
+
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{amsmath}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\sisetup{scientific-notation=false}
+
+\input{macros}
+
+\author{Rohit Goswami}
+% vale rgoswami.AbbreviationStyle = NO
+\affiliation{SURF B.V., Amsterdam, The Netherlands}
+% vale rgoswami.AbbreviationStyle = YES
+\alsoaffiliation{Science Institute, University of Iceland, Reykjavik, Iceland}
+\alsoaffiliation{TurtleTech ehf., Reykjavik, Iceland}
+\author{Ruhila Goswami}
+\affiliation{Faculty of Life and Environmental Sciences, University of Iceland, Reykjavik, Iceland}
+\author{Amrita Goswami}
+\affiliation{Universidad Complutense de Madrid, Madrid, Spain}
+\author{Moritz Sallermann}
+\affiliation{Universidad Complutense de Madrid, Madrid, Spain}
+\author{Sonaly Goswami}
+\affiliation{Department of Chemistry, Indian Institute of Technology Kanpur, Kanpur, India}
+\author{Debabrata Goswami}
+\affiliation{Center for Bits and Atoms, Massachusetts Institute of Technology, Cambridge, Massachusetts 02139, United States}
+\alsoaffiliation{Department of Chemistry, Indian Institute of Technology Kanpur, Kanpur, India}
+\email{dgoswami@iitk.ac.in}
+
+\title{Recommended basin hopping on Lennard-Jones clusters}
+
+\begin{document}
+
+\begin{abstract}
+The recommended preset lets a full quench run 1000 steps, and the record gradient stays at 0.001.
+The call ceiling is \CallCeiling{} evaluations at every size.
+That count is the LJ98 matched budget, the Oakley mean for the 98-atom cluster.
+We ran six fresh processes at each of 38, 55, 75, 98 and 104 atoms.
+LJ\(_{38}\) hits 4 of 6.
+LJ\(_{55}\) hits 6 of 6.
+LJ\(_{75}\) hits 1 of 6.
+LJ\(_{98}\) and LJ\(_{104}\) hit 0 of 6.
+A hit is the first improvement strictly below the published minimum plus 0.001.
+For six sorted costs the median is the mean of the third and fourth, and the interquartile range is the fifth minus the second.
+\end{abstract}
+
+\section{Introduction}
+The structure that a thermodynamic model of a cluster starts from is a local minimum of the potential, and the global minimum is the structure that model treats as the ground state.\cite{wales2003}
+On the Lennard-Jones pair potential the number of minima grows so quickly with the number of atoms that a search is judged by how many evaluations it spends before it reaches a minimum that is already known.\cite{wales1997,jones1924}
+Basin hopping, introduced by Li and Scheraga for a rough potential-energy surface and made the working method for atomic clusters by Wales and Doye, is a Monte Carlo walk on those minima.\cite{li1987,wales1997}
+A move proposes a new geometry, a local minimisation returns a minimum, and the Metropolis rule at one temperature accepts or rejects that minimum.
+Oakley, Johnston and Wales report mean first-encounter costs, over 100 random starts that all succeed, of 4369 energy evaluations for the 38-atom cluster with the continuous symmetry measure, 50229 for the 75-atom cluster with core orbits, and 109753 for the 98-atom cluster with core orbits.\cite{oakley2013}
+Those three means are the rows of their Table 1 for the continuous-symmetry and core-orbit basin-hopping runs, as listed in \texttt{data/literature.tsv}.
+The starts are random, the runs continue until every start has succeeded, and the counter is an energy or gradient evaluation.
+We measure the recommended preset with a seeded draw, one call ceiling, and a force-call ledger.
+The Oakley table and this ledger do not order each other.
+On main, commit \texttt{\MainCommit}, the recommended preset installs a reseed library at 38 atoms and a compacted surface below 98 atoms, and a full quench runs 200 steps.
+The runs measured here used commit \texttt{\CommitSha}.
+It drops both of those branches.
+The move library is the lean burst library at every size, and the surface list stays empty.
+A full quench runs 1000 steps, and the record gradient stays at 0.001.
+The Cambridge global minimisation program sets both iteration caps to 1000 on its LJ98 deck.
+The screen still ends at 25 steps.
+The Bayes threshold is the closed form \((R-S)/(2R-S)\) at that screen and the 200-step quench.
+That quotient is \(175/375\), which is \(7/15\).
+No logged run compares it with the quotient at the 1000-step cap.
+\texttt{Config::derived} recomputes the threshold from that cap.
+That quotient is \(975/1975\), which is \(39/79\).
+
+\section{The search}
+\subsection{One step of basin hopping}
+A chain stores a minimum \(x\) with energy \(E(x)\).
+The move adds a displacement, the local minimiser returns a new minimum \(y\), and the chain accepts \(y\) with the Metropolis probability at temperature \(T\),
+\begin{equation}
+\min\bigl(1,\exp[-(E(y)-E(x))/T]\bigr).
+\label{eq:metropolis}
+\end{equation}
+\(T\) is \(\TempReduced\) in the reduced units where the pair well depth is 1.
+Wales and Doye use that reduced temperature for Lennard-Jones basin hopping, and the preset stores it as \texttt{LennardJonesPreset::TEMPERATURE}.\cite{wales1997}
+One temperature is used at every size.
+The hit that scores a run is the first improvement whose energy lies strictly below the published minimum plus \(0.001\).
+A miss is a run whose trace never records such an improvement.
+The penalised cost, written PAR-2 below, is the call count of a hit and twice the ceiling for a miss.
+Twice \CallCeiling{} is \MissPar{}.
+The process spends the whole ceiling.
+A threshold stored on the ledger would also accept an unconverged quench, so the run does not carry one, and the hit is read afterwards from the trace of improvements.
+
+\begin{algorithm}
+\caption{One chain of the recommended preset.}
+\label{alg:chain}
+\begin{algorithmic}[1]
+\State Draw a non-overlapping start from the seed and quench it.
+\While{the call budget remains} \State Draw a move from the library and quench the displaced geometry to a minimum \(y\).
+\State Replace \(x\) by \(y\) with the probability in equation~\ref{eq:metropolis}.
+\State When \(y\) is a new basin, quench the symmetry images of its core.
+\EndWhile
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{What the preset turns on}
+The recommended preset starts from the Wales and Doye displacement and then selects a move library.
+The logs record the lean burst library and an empty surface list at every size.
+A full quench runs up to 1000 steps.
+\texttt{Config::for\_cluster} keeps 200 steps.
+The record gradient is 0.001, the constant \texttt{LennardJonesPreset::RECORD\_GRADIENT}.
+The screen length stays at 25 steps.
+Orbit completion quenches the images of a symmetric core when a new basin appears.
+A continuous-symmetry projection every ten quenches, and a reseed after five hops on an icosahedral plateau, follow the defaults Oakley, Johnston and Wales published for their global minimisation program.\cite{oakley2013}
+Those two numbers are applied at every size.
+The start density passed to \texttt{random\_cluster} is 0.7, the constant \texttt{LJ\_LIQUID\_NUMBER\_DENSITY}.
+Thol and coworkers give 0.702 for the saturated liquid at reduced temperature 1, and the container keeps one decimal place.
+
+\section{How the runs were made}
+Each process called \texttt{Config::recommended} for one size and one seed.
+The start is the non-overlapping draw that the search builds from that seed at the named density, with the preset minimum separation.
+The sizes are 38, 55, 75, 98 and 104.
+The published minima used as references are \(-173.928427\), \(-279.248470\), \(-397.492331\), \(-543.665361\) and \(-582.086642\).
+The call ceiling is \CallCeiling{} at every size.
+The seeds are 0, 1, 2, 3, 4 and 5, six processes at each size.
+The launch order rotates the size inside each seed and takes the seeds in the order 3, 0, 5, 1, 4, 2, so that one size does not occupy the first process of every seed.
+Each process is a fresh invocation, pinned to one core, with \texttt{RAYON\_NUM\_THREADS} set to 1 and \texttt{SEED\_OFFSET} set to the seed.
+The machine is an x86-64 guest with 8 processors.
+The processor string in \texttt{/proc/cpuinfo} is Intel Xeon.
+The binary was built with rustc 1.99.1 from commit \texttt{\CommitSha}.
+For six sorted costs \(x_1 \le \cdots \le x_6\), the median is \((x_3+x_4)/2\) and the interquartile range is \(x_5-x_2\).
+A comparison of hit counts on a later campaign uses Fisher's exact test.
+A comparison of paired penalised costs uses the Wilcoxon signed-rank test.
+This article has no second code on these seeds, so it reports no such test.
+
+\section{Results}
+Table~\ref{tbl:six} records the six-run summary.
+The call median is the median of the penalised costs.
+The wall median is the median of the process wall times.
+Each process spends its ceiling, so the wall time is the time to spend that ceiling, and the call count of a hit is the earlier charge at which the trace crossed the reference.
+Full precision for every seed is in the Supporting Information.
+LJ\(_{38}\) reaches the reference on 4 of 6 seeds, with call median \num{\MedLjxxxviii} and interquartile range \num{\IqrLjxxxviii}.
+LJ\(_{55}\) reaches it on 6 of 6, with call median \num{\MedLjlv} and interquartile range \num{\IqrLjlv}.
+LJ\(_{75}\) reaches it on 1 of 6, with call median \num{\MedLjlxxv} and interquartile range \num{\IqrLjlxxv}.
+LJ\(_{98}\) and LJ\(_{104}\) reach it on 0 of 6, and the penalised cost on every seed is \MissPar{}, so the call median is \num{\MedLjxcviii} and the interquartile range is 0.
+
+\begin{table}
+\caption{Six fresh runs of \texttt{Config::recommended} on commit \texttt{\CommitSha}.
+The quench cap is 1000 steps and the record gradient is 0.001.
+The call ceiling is \CallCeiling{} at every size.
+Hits are out of six seeds.
+The call columns are penalised costs.
+The wall columns are the time to spend the ceiling.}
+\label{tbl:six}
+\begin{tabular}{lrrrrr}
+\toprule
+cluster & hits & median calls & interquartile range, calls & median wall / s & interquartile range, wall / s \\
+\midrule
+LJ\(_{38}\) & \HitLjxxxviii{}/\HitsSix{} & \num{\MedLjxxxviii} & \num{\IqrLjxxxviii} & \num{\WallLjxxxviii} & \num{\IqrWallLjxxxviii} \\
+LJ\(_{55}\) & \HitLjlv{}/\HitsSix{} & \num{\MedLjlv} & \num{\IqrLjlv} & \num{\WallLjlv} & \num{\IqrWallLjlv} \\
+LJ\(_{75}\) & \HitLjlxxv{}/\HitsSix{} & \num{\MedLjlxxv} & \num{\IqrLjlxxv} & \num{\WallLjlxxv} & \num{\IqrWallLjlxxv} \\
+LJ\(_{98}\) & \HitLjxcviii{}/\HitsSix{} & \num{\MedLjxcviii} & \num{\IqrLjxcviii} & \num{\WallLjxcviii} & \num{\IqrWallLjxcviii} \\
+LJ\(_{104}\) & \HitLjcv{}/\HitsSix{} & \num{\MedLjcv} & \num{\IqrLjcv} & \num{\WallLjcv} & \num{\IqrWallLjcv} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Conclusions}
+The six-run table is the result for the recommended preset with a 1000-step quench and a record gradient of 0.001.
+The medians and the interquartile ranges are the entries in Table~\ref{tbl:six}.
+The Oakley means remain the published scale for symmetrised basin hopping under a different protocol.
+The Supporting Information lists the experiments that a later campaign still has to run, including a paired comparison on shared starts.
+
+\section*{Author contributions}
+The roles follow the CRediT taxonomy.
+Rohit Goswami: conceptualization, methodology, software, formal analysis, and writing of the original draft.
+Ruhila Goswami: software and visualization.
+Amrita Goswami: methodology and review of the draft.
+Moritz Sallermann: software, methodology, and review of the draft.
+Sonaly Goswami: validation and review of the draft.
+Debabrata Goswami: supervision and review of the draft.
+
+\section*{Acknowledgments}
+Rohit Goswami thanks his pets Ar\'{\i}, Yoda, Jude, Crystee, Thor, and Loki, and the garden cats.
+In memoriam TuiTui, Snoopy, and Cosmo.
+He thanks his cactus Ami and his in-laws Nagaselvamani and Sankaranarayan.
+Ruhila Goswami set the figure colour palette.
+Generative AI tools assisted with drafting and editing the text; the authors reviewed and edited all content and take full responsibility for it.
+
+\section*{Funding}
+This research did not receive any specific grant from funding agencies in the public, commercial, or not-for-profit sectors.
+
+\section*{Notes}
+The authors declare no competing financial interest.
+
+\begin{suppinfo}
+The Supporting Information gives the board constants, every seed at full precision, the TIP4P pair constants, the Oakley rows, and the rerun plan.
+\end{suppinfo}
+
+\section*{Data and software availability}
+The runs used commit \texttt{\CommitSha}.
+That commit drops the atom-count branches from \texttt{Config::recommended} and from \texttt{Config::communicating}, and it names the 1000-step quench.
+Main, commit \texttt{\MainCommit}, still installs the reseed library at 38 atoms and a compacted surface below 98 atoms.
+The repository root Cargo.toml reports version 0.12.0.
+The source is under the MIT licence at \url{https://github.com/HaoZeke/anneal}, with documentation at \url{https://anneal.rgoswami.me}, and the archive of that line is the Zenodo concept record \url{https://doi.org/10.5281/zenodo.10672746}.
+
+\bibliography{refs}
+
+\end{document}
