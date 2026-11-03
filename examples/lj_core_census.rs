@@ -18,6 +18,11 @@ use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
+/// A quench hits when its energy is at or below the target plus the tolerance.
+fn energy_hits(energy: f64, target: f64) -> bool {
+    energy <= target + 1e-4
+}
+
 fn env_f64(key: &str, default: f64) -> f64 {
     std::env::var(key)
         .ok()
@@ -103,7 +108,7 @@ fn main() {
     let mut by_class: BTreeMap<u8, (usize, usize, f64, f64, usize)> = BTreeMap::new();
     let mut hits_by_class1: BTreeMap<u8, usize> = BTreeMap::new();
     for r in &rows {
-        let hit = r.e1 < target + 1e-4;
+        let hit = energy_hits(r.e1, target);
         let entry = by_class
             .entry(r.class0.index())
             .or_insert((0, 0, f64::INFINITY, 0.0, 0));
@@ -136,4 +141,18 @@ fn main() {
     );
     let mean_e0: f64 = rows.iter().map(|r| r.e0).sum::<f64>() / rows.len().max(1) as f64;
     println!("mean energy after quench {mean_e0:.4}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::energy_hits;
+
+    #[test]
+    fn the_boundary_energy_is_a_hit() {
+        let target = -543.665361;
+        let boundary = target + 1e-4;
+        assert!(energy_hits(boundary, target));
+        assert!(energy_hits(target - 0.01, target));
+        assert!(!energy_hits(boundary + 1e-8, target));
+    }
 }
