@@ -1,9 +1,12 @@
 """Pytest for Config, Ledger, and cluster_search on the pyo3 surface."""
 
+import importlib.util
+from pathlib import Path
+
 import numpy as np
 import pytest
 
-from anneal import Config, Ledger, cluster_search
+from anneal import Config, Ledger, check_stop_limit, cluster_search
 
 
 def lj_energy(x: np.ndarray) -> float:
@@ -262,3 +265,97 @@ def test_cluster_search_ras_true_uses_archive_outcome():
     assert "events" in out
     assert out["charged"] > 0
     assert out["floors"] >= 1
+
+
+LJ98_GLOBAL = -543.665361
+LJ98_SHELF = -543.642957
+LJ75_SHELF = -396.282249
+HARNESS_WINDOW = 0.001
+
+
+def test_check_stop_limit_refuses_known_shelves():
+    with pytest.raises(ValueError, match="LJ98"):
+        check_stop_limit(98, LJ98_SHELF)
+    with pytest.raises(ValueError, match="LJ75"):
+        check_stop_limit(75, LJ75_SHELF)
+
+
+def test_check_stop_limit_keeps_the_minimum_and_the_window(capfd):
+    assert check_stop_limit(98, LJ98_GLOBAL) == LJ98_GLOBAL
+    window = LJ98_GLOBAL + HARNESS_WINDOW
+    assert check_stop_limit(98, window) == window
+    assert capfd.readouterr().err == ""
+
+
+def test_check_stop_limit_warns_above_the_window(capfd):
+    limit = LJ98_GLOBAL + 0.01
+    assert check_stop_limit(98, limit) == limit
+    err = capfd.readouterr().err
+    assert "warning" in err
+    assert "LJ98" in err
+    # -543.641 is not the Cs shelf, and it sits above the harness window.
+    missed = -543.641
+    assert check_stop_limit(98, missed) == missed
+    assert "warning" in capfd.readouterr().err
+
+
+def test_cluster_search_rejects_known_shelves():
+    with pytest.raises(ValueError, match="LJ98"):
+        cluster_search(lj_energy, lj_grad, 98, 1, seed=0, target=LJ98_SHELF)
+    with pytest.raises(ValueError, match="LJ75"):
+        cluster_search(lj_energy, lj_grad, 75, 1, seed=0, target=LJ75_SHELF)
+
+
+def _globalopt_driver():
+    path = Path(__file__).resolve().parents[1] / "scripts" / "optbench" / "anneal_globalopt.py"
+    spec = importlib.util.spec_from_file_location("anneal_globalopt_stop", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _write_problem(root: Path, name: str, energy: float, kind: str = "lennard-jones") -> None:
+    path = root / "problems" / "globalopt"
+    path.mkdir(parents=True, exist_ok=True)
+    (path / f"{name}.toml").write_text(
+        "\n".join(
+            [
+                f'id = "globalopt/{name}"',
+                f'problem = "{name}"',
+                "[potential]",
+                f'kind = "{kind}"',
+                "[reference]",
+                f"energy = {energy}",
+                "[convergence]",
+                "max_force_calls = 10",
+                "energy_above_minimum = 0.001",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_load_problem_checks_the_published_minimum(tmp_path, capfd):
+    driver = _globalopt_driver()
+    _write_problem(tmp_path, "lj98", LJ98_GLOBAL)
+    problem = driver.load_problem(tmp_path, "lj98")
+    assert problem["convergence"]["energy_minimum"] == LJ98_GLOBAL
+    assert capfd.readouterr().err == ""
+
+    _write_problem(tmp_path, "lj98", LJ98_GLOBAL + 0.01)
+    warned = driver.load_problem(tmp_path, "lj98")
+    assert warned["convergence"]["energy_minimum"] == LJ98_GLOBAL + 0.01
+    assert "warning" in capfd.readouterr().err
+
+    _write_problem(tmp_path, "lj98", LJ98_SHELF)
+    with pytest.raises(ValueError, match="LJ98"):
+        driver.load_problem(tmp_path, "lj98")
+
+    _write_problem(tmp_path, "lj75", LJ75_SHELF)
+    with pytest.raises(ValueError, match="LJ75"):
+        driver.load_problem(tmp_path, "lj75")
+
+    _write_problem(tmp_path, "lj100-binary", -1.0, kind="binary-lennard-jones")
+    binary = driver.load_problem(tmp_path, "lj100-binary")
+    assert binary["convergence"]["energy_minimum"] == -1.0

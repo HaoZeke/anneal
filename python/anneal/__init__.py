@@ -47,6 +47,7 @@ from anneal._core import (
     Ledger,
     PyObjective,
     __version__,
+    check_stop_limit,
     cluster_search as _core_cluster_search,
     low_discrepancy_points as _core_low_discrepancy_points,
     pilot_draws_qmc as _core_pilot_draws_qmc,
@@ -290,7 +291,9 @@ def cluster_search(
         and the lowest minimum is kept.
       layout: ``block`` or ``interleaved``. Interleaved is the per-body
         centre and angle-axis order, with rotations negated at the boundary.
-      target: stop once a recorded energy is at or below this value.
+      target: stop once a recorded energy is at or below this value. A
+        Lennard-Jones limit equal to the LJ75 or LJ98 icosahedral shelf is
+        refused. A limit above the published minimum plus 0.001 warns.
       water_sites: optional ``(3, 3)`` body-frame O, H, H positions of a
         rigid water, in angstrom, about its rotation centre. ``n`` then counts
         molecules and the state is ``n`` centres followed by ``n``
@@ -1480,6 +1483,7 @@ __all__ = [
     "Ledger",
     "PyObjective",
     "Anneal",
+    "check_stop_limit",
     "cluster_search",
     "TvmFfiTensorMetadata",
     "__version__",
