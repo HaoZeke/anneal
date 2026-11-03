@@ -100,6 +100,13 @@ pub fn print_report(
                 .unwrap_or_else(|| "NO STATE".into()),
             if hit { "  SOLVED" } else { "" }
         );
+        if let Some(sb) = &run.outcome.superbasin {
+            println!(
+                "    seed {seed} replica {} {}",
+                run.replica,
+                superbasin_line(sb)
+            );
+        }
     }
     let hit = report.solved(ens.target);
     tally.seeds += 1;
@@ -126,6 +133,34 @@ pub fn print_report(
         if hit { "  SOLVED" } else { "" }
     );
     let _ = io::stdout().flush();
+}
+
+/// One chain's superbasin tracker: the transition graph it saw, and the
+/// escapes it was offered, took and refused.
+///
+/// An escape is offered every `superbasin_period` hops, so a chain whose
+/// run is shorter than one period shows no jumps and no refusals.
+pub fn superbasin_line(sb: &anneal_core::superbasin::SuperbasinReport) -> String {
+    let refusals: Vec<String> = anneal_core::superbasin::Refusal::KINDS
+        .iter()
+        .zip(sb.refusals_by_kind.iter())
+        .filter(|(_, n)| **n > 0)
+        .map(|(kind, n)| format!("{kind} {n}"))
+        .collect();
+    format!(
+        "superbasin: {} basins {} transitions, {} archived, bias distortion {:.3}, \
+         jumps {} refused {} [{}], worst revisits {:.2}, improved {} by {:.4}",
+        sb.nodes,
+        sb.edges,
+        sb.archived,
+        sb.distortion,
+        sb.jumps,
+        sb.refusals,
+        refusals.join(", "),
+        sb.mixed_ratio_max,
+        sb.improvements.0,
+        sb.improvements.1
+    )
 }
 
 /// The campaign-arm footer the summariser and the note read.

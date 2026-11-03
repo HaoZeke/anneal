@@ -145,6 +145,9 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
                     | "acq"
                     | "early"
                     | "catalog"
+                    | "sbreport"
+                    | "sbasin"
+                    | "plainsurface"
             ),
             "unknown search mechanism: {option}"
         );
@@ -166,6 +169,12 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
     let nosym = opts.contains(&"nosym");
     assert!(!(sym && nosym), "sym and nosym are contradictory");
     cfg.symmetrise_on_stall = (cfg.symmetrise_on_stall || sym) && !nosym;
+
+    // The superbasin tracker over the chain's own transitions, and the
+    // escape from a trapping superbasin every superbasin_period hops.
+    cfg.superbasin_escape = cfg.superbasin_escape || opts.contains(&"sbasin");
+    cfg.superbasin_report =
+        cfg.superbasin_report || cfg.superbasin_escape || opts.contains(&"sbreport");
 }
 
 /// Occupancy catalog: leftover-SOAP packing key plus AS-KMC height
@@ -315,6 +324,19 @@ mod option_tests {
             apply_boolean_options(&mut cfg, &["rec", "unknown_mechanism"]);
         });
         assert!(result.is_err(), "an unknown mechanism must not label a run");
+    }
+
+    #[test]
+    fn sbasin_turns_on_the_superbasin_report_and_escape() {
+        let mut cfg = Config::communicating(38);
+        apply_boolean_options(&mut cfg, &["comm", "sbasin"]);
+        assert!(cfg.superbasin_report && cfg.superbasin_escape);
+        let mut cfg = Config::communicating(38);
+        apply_boolean_options(&mut cfg, &["comm", "sbreport"]);
+        assert!(cfg.superbasin_report && !cfg.superbasin_escape);
+        let mut cfg = Config::communicating(38);
+        apply_boolean_options(&mut cfg, &["comm"]);
+        assert!(!cfg.superbasin_report && !cfg.superbasin_escape);
     }
 
     #[test]
@@ -1816,6 +1838,24 @@ fn main() {
         cfg.surfaces = arms;
         println!("  surface portfolio: plain + {:?}", cfg.surfaces);
     }
+    // Ensemble chains relax on the plain surface, so a single-process arm
+    // measured against them can drop the portfolio and the two-phase
+    // surface as well.
+    if opts.contains(&"plainsurface") {
+        cfg.surfaces.clear();
+        cfg.two_phase = None;
+        println!("  plain surface only");
+    }
+    if cfg.superbasin_report {
+        println!(
+            "  superbasin report{}",
+            if cfg.superbasin_escape {
+                format!(", escape offered every {} hops", cfg.superbasin_period)
+            } else {
+                String::new()
+            }
+        );
+    }
     cfg.path_on_stall = opts.contains(&"path");
     // Stall exits through the recorded basin entry, named so it is
     // measurable against the Lanczos climb rather than replacing it.
@@ -2870,6 +2910,9 @@ fn main() {
                 .unwrap_or_else(|| "NO STATE".into()),
             if hit { "  SOLVED" } else { "" }
         );
+        if let Some(sb) = &out.superbasin {
+            println!("  seed {seed} {}", ensemble_report::superbasin_line(sb));
+        }
         let _ = io::stdout().flush();
     }
     // Both counts, since a force budget and a hop budget are different
@@ -7598,6 +7641,11 @@ fn run_history_ensembles(
         cfg.shared_deposits = cap;
     }
     ens.validate(&cfg).unwrap_or_else(|error| panic!("{error}"));
+    if !cfg.surfaces.is_empty() || cfg.two_phase.is_some() {
+        println!(
+            "  surface portfolio and two-phase surface inert: ensemble chains relax on the plain surface"
+        );
+    }
     let pair_cache_bytes: usize =
         anneal_core::env::parsed("HISTORY_PAIR_CACHE_BYTES").unwrap_or(128 * 1024 * 1024);
     let descriptor = anneal_core::catalog::lj::descriptor_space();
