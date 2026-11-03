@@ -81,24 +81,15 @@ fn recommended_differs_from_for_cluster() {
     let base = Config::for_cluster(38);
     assert_eq!(rec.n_points, 38);
     assert_eq!(base.n_points, 38);
-    assert!(matches!(rec.move_library, MoveLibrary::Reseed));
-    let names: Vec<String> = rec
-        .move_library
-        .kernels(&rec)
-        .iter()
-        .map(|kernel| kernel.name())
-        .collect();
-    assert!(
-        names.iter().any(|name| name == "grow:fcc"),
-        "LJ38 recommended must be able to grow the octahedron: {names:?}"
-    );
+    assert!(matches!(rec.move_library, MoveLibrary::LeanBurst));
+    assert!(rec.surfaces.is_empty());
     assert!(matches!(
         Config::recommended(75).move_library,
         MoveLibrary::LeanBurst
     ));
     assert!(matches!(
         Config::derived(38).move_library,
-        MoveLibrary::Reseed
+        MoveLibrary::LeanBurst
     ));
     assert!(rec.allocate_moves && rec.depth_reward && rec.tabu_on_stall);
     assert!(rec.trail_on_stall && rec.escape_on_stall && rec.restart_on_stall);
@@ -109,10 +100,13 @@ fn recommended_differs_from_for_cluster() {
 }
 
 #[test]
-fn recommended_draws_the_compacted_surface_below_98() {
-    let rec = Config::recommended(75);
-    assert!(rec.two_phase.is_none());
-    assert_eq!(rec.surfaces, Config::communicating(75).surfaces);
-    assert!(rec.orbit_complete_on_new);
-    assert!(Config::recommended(98).surfaces.is_empty());
+fn recommended_does_not_install_a_surface_from_the_atom_count() {
+    for n in [38usize, 75, 97, 98, 104] {
+        let rec = Config::recommended(n);
+        assert!(rec.two_phase.is_none());
+        assert!(rec.surfaces.is_empty(), "n={n}");
+        assert_eq!(rec.surfaces, Config::communicating(n).surfaces);
+        assert!(rec.orbit_complete_on_new);
+        assert_eq!(rec.relax_steps, Config::RECOMMENDED_RELAX_STEPS);
+    }
 }

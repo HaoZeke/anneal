@@ -1,0 +1,17 @@
+LJ98, budget 2000000 charged evaluations, 1 seeds, reference -543.665361
+  recommended configuration
+  SOAP hop: in-crate leftover (rebuild with --features featomic)
+  mechanisms: rec
+ANSWER_AUDIT seed 27 objective_calls 1 read_only true
+      last improvement at hop 2226 of 9892 (22.5% in), 480406 charged, 274 basins, -541.613086
+    arm single     draws    1444  accepts     750  best -541.886022
+    arm surface    draws    2015  accepts    1122  best -541.894959
+    arm sym        draws    1299  accepts     891  best -541.885521
+    arm burst      draws    2750  accepts     997  best -541.613086
+    arm soap       draws     753  accepts     186  best -541.894959
+  seed 27: best -541.938932  hops 9892  screened 3627  charged 2000000  basins 1002 (9.9 hops each)  returned 2633  swaps 0/0  paths 0 improved 0 gain 0.000  escape 4.000 thr 0.8000 same/known/new 327/93/177 soft 329/370 sub 0/0 lmin -230.3454 climbs 370 gain 80.04 radius 0.700 step 0.700 restarts 0 xrefused 0 jumps 0 angular 0/0 R 0.420 tabu 0 vetoed 0 screen 0/0 expl 0 obs 0 ctx [0, 0, 0, 0, 0] sym 0/0.00 orbits 1260/493.02  relaxed 4204/12793 converged  early 0 saved 0  verified -541.938932 |g| 1.0e-6
+  TRACE seed 27: full_relaxations 4531 full_unvalidated 327 unconverged_records 6261 first_hit none
+0/1 solved, deepest -541.938932   mean hops 9892, force per hop 202
+gap to reference +1.726429
+exit=0
+wall_seconds=75.01

@@ -43,7 +43,11 @@ use ndarray::{Array1, Array2, ArrayView1};
 /// `p R - (1-p) Q`, which is positive exactly when
 /// `p > Q / (Q + R) = (R - S) / (2 R - S)`.
 ///
-/// For the measured hop (`S = 25`, `R = 200`) this is `7/15`, not a knob.
+/// At `S = 25` and `R = 200` the closed form is `175/375`, which is `7/15`.
+/// [`crate::methods::cluster_hopping::Config::recommended`] keeps that
+/// value when its quench cap is 1000 steps.
+/// [`crate::methods::cluster_hopping::Config::derived`] recomputes it from
+/// the cap.
 pub fn cost_asymmetric_threshold(screen_steps: usize, relax_steps: usize) -> f64 {
     assert!(
         screen_steps < relax_steps && relax_steps > 0,
@@ -523,9 +527,12 @@ mod tests {
     }
 
     #[test]
-    fn cost_threshold_is_seven_fifteenths_on_the_measured_hop() {
-        let t = cost_asymmetric_threshold(25, 200);
-        assert!((t - 7.0 / 15.0).abs() < 1e-12, "{t}");
+    fn cost_threshold_matches_the_closed_form() {
+        let s = 25usize;
+        let r = 200usize;
+        let t = cost_asymmetric_threshold(s, r);
+        let closed = (r - s) as f64 / (2 * r - s) as f64;
+        assert!((t - closed).abs() < 1e-12, "{t} {closed}");
         assert!(t > 0.0 && t < 1.0);
     }
 

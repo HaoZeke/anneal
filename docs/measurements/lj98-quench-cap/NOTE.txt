@@ -1,0 +1,8 @@
+These seed logs are a separate earlier experiment.
+The develop directory is the 200-step build.
+The branch directory is the 1000-step build.
+The code still drew a compacted surface.
+The call ceiling is the budget column of traces.tsv.
+On the 200-step build, 63088 of 400366 full quenches were unvalidated, and 43 of 64 seeds hit.
+On the 1000-step build, 21815 of 353480 full quenches were unvalidated, and 45 of 64 seeds hit.
+The sums are the column totals of traces.tsv.

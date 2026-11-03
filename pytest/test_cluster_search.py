@@ -33,10 +33,10 @@ def test_config_recommended_and_for_cluster():
     comm = Config.communicating(38)
     assert rec.n_points == 38
     assert base.n_points == 38
-    # 38 points use the reseed library. The burst library is the default
-    # at every other size.
-    assert not rec.burst_moves
+    # The lean burst library is the preset at every size.
+    assert rec.burst_moves
     assert Config.recommended(75).burst_moves
+    assert Config.recommended(97).burst_moves
     assert rec.allocate_moves
     assert rec.depth_reward
     assert rec.tabu_on_stall
@@ -197,8 +197,9 @@ def test_cluster_search_ras_flag_exists_and_recommended_defaults():
     assert ras.kind is inspect.Parameter.KEYWORD_ONLY
 
     rec = Config.recommended(38)
-    assert not rec.burst_moves
+    assert rec.burst_moves
     assert Config.recommended(75).burst_moves
+    assert Config.recommended(97).burst_moves
     assert rec.allocate_moves
     assert rec.depth_reward
     assert rec.tabu_on_stall
