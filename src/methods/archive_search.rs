@@ -773,7 +773,6 @@ mod tests {
 
     fn lj(x: ArrayView1<f64>) -> f64 {
         let n = x.len() / 3;
-        let mut e = 0.0;
         for i in 0..n {
             for j in (i + 1)..n {
                 let mut r2 = 0.0;
@@ -784,12 +783,9 @@ mod tests {
                 if r2 < 1e-12 {
                     return f64::INFINITY;
                 }
-                let ir2 = 1.0 / r2;
-                let ir6 = ir2 * ir2 * ir2;
-                e += 4.0 * (ir6 * ir6 - ir6);
             }
         }
-        e
+        crate::potentials::reduced_lennard_jones(x).0
     }
 
     fn crude_relax(led: &mut Ledger, x: ArrayView1<f64>, steps: usize) -> (f64, Array1<f64>) {

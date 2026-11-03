@@ -1485,29 +1485,7 @@ mod tests {
     use ndarray::Array1;
 
     fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-        let n = x.len() / 3;
-        let mut energy = 0.0;
-        let mut gradient = Array1::zeros(x.len());
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let mut d = [0.0; 3];
-                let mut r2 = 0.0;
-                for k in 0..3 {
-                    d[k] = x[3 * i + k] - x[3 * j + k];
-                    r2 += d[k] * d[k];
-                }
-                let inv2 = 1.0 / r2;
-                let inv6 = inv2 * inv2 * inv2;
-                let inv12 = inv6 * inv6;
-                energy += 4.0 * (inv12 - inv6);
-                let coef = 24.0 * inv2 * (2.0 * inv12 - inv6);
-                for k in 0..3 {
-                    gradient[3 * i + k] -= coef * d[k];
-                    gradient[3 * j + k] += coef * d[k];
-                }
-            }
-        }
-        (energy, gradient)
+        crate::potentials::reduced_lennard_jones(x)
     }
 
     fn quench(x: ArrayView1<f64>) -> Array1<f64> {
