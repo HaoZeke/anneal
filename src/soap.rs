@@ -55,6 +55,38 @@ impl Default for SoapSpec {
 }
 
 impl SoapSpec {
+    /// The default resolution, with the cutoff written at `length`.
+    ///
+    /// The default is written at length one, the Lennard-Jones diameter.
+    /// A preset at another length passes its own, so the cutoff covers the
+    /// same shells.
+    pub fn at_length(length: f64) -> Self {
+        let unit = Self::default();
+        Self {
+            rcut_nn: unit.rcut_nn * length,
+            ..unit
+        }
+    }
+}
+
+/// Common-neighbour contact cutoff of [`SoapSpec::default`].
+///
+/// It lies between the first and second neighbour shells of a
+/// Lennard-Jones cluster.
+pub const CONTACT_CUTOFF: f64 = 1.35;
+
+/// Common-neighbour contact cutoff at the length `spec` is written in.
+///
+/// It is [`CONTACT_CUTOFF`] times the ratio of `spec`'s cutoff to the
+/// default's. In Cambridge units a Sutton-Chen cluster has nearest
+/// neighbours near 0.71. There the unscaled 1.35 also bonds the second shell.
+/// Every pair then shares a dense set of common neighbours, and no pair
+/// reads as 555.
+pub fn contact_cutoff(spec: SoapSpec) -> f64 {
+    CONTACT_CUTOFF * (spec.rcut_nn / SoapSpec::default().rcut_nn)
+}
+
+impl SoapSpec {
     /// Length of the packed power spectrum `n ≤ n', l ≤ l_max`.
     pub fn dim(self) -> usize {
         let n = self.n_max;
@@ -1268,7 +1300,7 @@ fn mu_weighted(loc: &Array2<f64>, w: &[f64], dim: usize) -> (Vec<f64>, f64) {
 fn target_421(x: ArrayView1<f64>, loc: &Array2<f64>, _w555: &[f64], spec: SoapSpec) -> Array1<f64> {
     let n_at = loc.nrows();
     let dim = spec.dim();
-    let fr = crate::structure::atom_triplet_fracs(x, n_at, 1.35);
+    let fr = crate::structure::atom_triplet_fracs(x, n_at, contact_cutoff(spec));
     let mut w421 = vec![0.0; n_at];
     for i in 0..n_at {
         w421[i] = fr[i][1];
@@ -1375,8 +1407,7 @@ fn atom_w555(x: ArrayView1<f64>, spec: SoapSpec) -> Vec<f64> {
         prototype_spectrum(2, spec),
     ];
     let tau = prototype_tau(&proto);
-    let cna_cut = 1.35;
-    let fr = crate::structure::atom_triplet_fracs(x, n_at, cna_cut);
+    let fr = crate::structure::atom_triplet_fracs(x, n_at, contact_cutoff(spec));
     for i in 0..n_at {
         // Hard 555 membership. Soft SOAP weights leak surface atoms into
         // the ico class and the same-class mean no longer vanishes.
@@ -1397,7 +1428,7 @@ pub fn class_masses(x: ArrayView1<f64>, spec: SoapSpec) -> [f64; 3] {
         return [0.0; 3];
     }
     let w555 = atom_w555(x, spec);
-    let fr = crate::structure::atom_triplet_fracs(x, n_at, 1.35);
+    let fr = crate::structure::atom_triplet_fracs(x, n_at, contact_cutoff(spec));
     let mut mass = [0.0; 3];
     for i in 0..n_at {
         mass[0] += w555[i];
@@ -1410,14 +1441,14 @@ pub fn class_masses(x: ArrayView1<f64>, spec: SoapSpec) -> [f64; 3] {
 /// True when the contact graph carries a substantial 555 (icosahedral) fraction.
 ///
 /// Observation, not a hop target. Used to *withhold* Ih-preserving
-/// symmetrise. Does not name a destination packing.
+/// symmetrise. Does not name a destination packing. The bond cutoff is
+/// [`contact_cutoff`], so `spec` has to be written at the structure's length.
 pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
     let n = x.len() / 3;
     if n == 0 {
         return false;
     }
-    let _ = spec;
-    let c = crate::structure::cna(x, n, 1.35);
+    let c = crate::structure::cna(x, n, contact_cutoff(spec));
     c.fraction((5, 5, 5)) > 0.12
 }
 

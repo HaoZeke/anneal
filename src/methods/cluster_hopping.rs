@@ -52,7 +52,7 @@ mod packing_bank;
 mod preset;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
-pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, SoapProposalMode};
+pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, SoapProposalMode};
 pub use moves::*;
 
 #[cfg(test)]
@@ -933,6 +933,12 @@ pub struct Outcome {
     pub symmetrised: (usize, f64),
     /// Orbit completions attempted, and the energy they gained.
     pub orbits: (usize, f64),
+    /// Orbit candidates skipped unquenched because an earlier candidate of
+    /// the same completion was the identical structure.
+    pub orbit_duplicates: usize,
+    /// Surface hops quenched, how many of their sweeps went below the
+    /// structure they started from, and the energy those sweeps gained.
+    pub surface_hops: (usize, usize, f64),
     /// Continuous-symmetry quenches attempted, and downhill energy gained.
     pub continuous_symmetry: (usize, f64),
     /// Restarts triggered by a stall.
@@ -1877,6 +1883,140 @@ mod rigid_step_tests {
     }
 }
 
+/// Metropolis on the rise in energy plus deposits from `here` to `offer`,
+/// each an energy and a state, the test an ordinary hop faces at
+/// `temperature`.
+fn biased_metropolis<R: Rng + ?Sized>(
+    biases: &[&dyn Bias],
+    here: (f64, ArrayView1<f64>),
+    offer: (f64, ArrayView1<f64>),
+    temperature: f64,
+    rng: &mut R,
+) -> bool {
+    let deposits = |state: ArrayView1<f64>| {
+        biases
+            .iter()
+            .map(|b| b.potential(b.cv(state).view()))
+            .sum::<f64>()
+    };
+    // The energies are differenced before the deposits are added. A deposit
+    // added to a Sutton-Chen total near 7e4 first loses its low bits, and an
+    // offer at the chain's own energy in its own basin then rounds to either
+    // side of zero, which decides whether a random number is drawn.
+    let rise = offer.0 - here.0 + deposits(offer.1) - deposits(here.1);
+    let d = rise / temperature.max(1e-12);
+    d < 0.0 || rng.random::<f64>() < (-d).exp()
+}
+
+/// Whether `state` lies in a basin the history has deposited on, by the
+/// bias's own fingerprint and merge radius.
+fn returns_to_deposit<F: Fingerprint>(bias: &BasinBias<F>, state: ArrayView1<f64>) -> bool {
+    bias.potential(bias.cv(state).view()) > 0.0
+}
+
+/// Whether `state` lies in the same deposited basin as `best`, the lowest
+/// structure the run has seen, by the bias's own lookup.
+fn returns_to_best<F: Fingerprint>(
+    bias: &BasinBias<F>,
+    best: Option<&Array1<f64>>,
+    state: ArrayView1<f64>,
+) -> bool {
+    let well = |x: ArrayView1<f64>| bias.index().lookup(bias.cv(x).view());
+    match (well(state), best) {
+        (Some(here), Some(b)) => well(b.view()) == Some(here),
+        _ => false,
+    }
+}
+
+/// Stuck means stuck for longer than this chain has ever been stuck before,
+/// not stuck for some number someone chose. On a 75-point trace, a
+/// successful run goes tens of thousands of hops between improvements on its
+/// way to the crossing, so a fixed patience of 400 fires about 180 climbs
+/// into a healthy search.
+fn stalled(cfg: &Config, quiet: usize, longest_quiet: usize) -> bool {
+    quiet
+        >= cfg
+            .escape_stall_patience
+            .max((cfg.escape_stall_factor * longest_quiet as f64) as usize)
+}
+
+#[cfg(test)]
+mod biased_metropolis_tests {
+    use super::{Config, biased_metropolis, returns_to_best, returns_to_deposit, stalled};
+    use crate::bias::{BasinBias, Bias, SortedPairs};
+    use ndarray::array;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    /// The seed 14100 trace on Sutton-Chen 12-6 at 73 points: a completion
+    /// 200 below the chain at temperature 30, into a basin 511 deeper in
+    /// deposits. On raw energy it is always taken; with the deposits it
+    /// is a rise of 311, and refused.
+    #[test]
+    fn deposits_at_the_offer_refuse_a_drop_in_energy() {
+        let here = array![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0];
+        let offer = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.9, 0.0];
+        let empty = BasinBias::new(SortedPairs { n_points: 3 }, 0.05, 511.0, 5.0);
+        let mut filled = BasinBias::new(SortedPairs { n_points: 3 }, 0.05, 511.0, 5.0);
+        let s = filled.cv(offer.view());
+        filled.deposit(s.view(), 30.0);
+        assert_eq!(filled.potential(s.view()), 511.0);
+        let mut rng = StdRng::seed_from_u64(14100);
+        let mut taken = |bias: &dyn Bias| {
+            (0..1000)
+                .filter(|_| {
+                    biased_metropolis(
+                        &[bias],
+                        (0.0, here.view()),
+                        (-200.0, offer.view()),
+                        30.0,
+                        &mut rng,
+                    )
+                })
+                .count()
+        };
+        assert_eq!(taken(&empty), 1000);
+        assert_eq!(taken(&filled), 0);
+    }
+
+    #[test]
+    fn only_a_deposited_basin_is_a_return() {
+        let here = array![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0];
+        let offer = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.9, 0.0];
+        let mut bias = BasinBias::new(SortedPairs { n_points: 3 }, 0.05, 511.0, 5.0);
+        assert!(!returns_to_deposit(&bias, offer.view()));
+        let s = bias.cv(offer.view());
+        bias.deposit(s.view(), 30.0);
+        assert!(returns_to_deposit(&bias, offer.view()));
+        assert!(!returns_to_deposit(&bias, here.view()));
+    }
+
+    #[test]
+    fn only_the_basin_of_the_best_is_a_return_to_it() {
+        let here = array![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0];
+        let offer = array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.9, 0.0];
+        let mut bias = BasinBias::new(SortedPairs { n_points: 3 }, 0.05, 511.0, 5.0);
+        assert!(!returns_to_best(&bias, Some(&offer), offer.view()));
+        for x in [&here, &offer] {
+            let s = bias.cv(x.view());
+            bias.deposit(s.view(), 30.0);
+        }
+        assert!(returns_to_best(&bias, Some(&offer), offer.view()));
+        assert!(!returns_to_best(&bias, Some(&here), offer.view()));
+        assert!(!returns_to_best(&bias, None, offer.view()));
+    }
+
+    #[test]
+    fn a_chain_is_stalled_past_twice_its_longest_quiet_stretch() {
+        let cfg = Config::with_scales(13, 1.0, 1.0);
+        let patience = cfg.escape_stall_patience;
+        assert!(!stalled(&cfg, patience - 1, 0));
+        assert!(stalled(&cfg, patience, 0));
+        assert!(!stalled(&cfg, 2 * patience - 1, patience));
+        assert!(stalled(&cfg, 2 * patience, patience));
+    }
+}
+
 fn rigid_factor_cap(n_bodies: usize) -> f64 {
     if n_bodies > RIGID_HOT_BODIES {
         RIGID_FACTOR_CAP_LARGE
@@ -2492,7 +2632,9 @@ where
     let species_kinetic_floor = (4.0 * cfg.energy_scale).max(f64::MIN_POSITIVE);
     let species_kinetic_cap = (1.5 * n as f64 * cfg.energy_scale).max(species_kinetic);
     let mut orbits_completed = 0usize;
+    let mut orbit_duplicates = 0usize;
     let mut orbit_gain = 0.0_f64;
+    let mut surface_hops = (0usize, 0usize, 0.0_f64);
     let mut accepted_transitions = Vec::new();
     // All live-state replacement consumes one complete destination record.
     // Ordinary hops supply their paid history report; auxiliary adoptions
@@ -3430,7 +3572,10 @@ where
         if csm_reseed_hops > 0
             && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
             && cfg.packing_cna_applies()
-            && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+            && crate::soap::ih_dominated(
+                x.view(),
+                crate::soap::SoapSpec::at_length(cfg.length_scale),
+            )
             && ledger.remaining() > 0
         {
             csm_reseed_stamp = hops;
@@ -5219,49 +5364,102 @@ where
         }
         // Orbit completion of a newly entered basin: the core's point group
         // applied to the whole cluster, so surface atoms move onto the empty
-        // orbit positions the core implies. Same terms as the core
-        // symmetrisation above: once per new basin, quenched, offered.
+        // orbit positions the core implies. Once per new basin, quenched,
+        // and offered to the raw Metropolis test. When the chain is stuck
+        // and the completion ends in the filled basin of the lowest
+        // structure seen, it faces the biased test a hop faces instead: on
+        // raw energy alone it carries the chain back to the shelf it is
+        // stuck on. A filled basin above that shelf is often where the
+        // chain goes on to the minimum, so a return there stays raw.
+        // Under a shared history each minimum is completed by one chain only,
+        // and every product is reported, so other chains recognise it.
+        let mut orbit_offer = None;
         if cfg.packing_surface().orbit_on_new
             && accept
             && hop_room(hops)
             && (moved_basin || cfg.point_symmetrise_every_accept)
-            && let Some(y) = crate::packing::on_new_basin(
+            && history_here
+                .zip(history.as_deref_mut())
+                .is_none_or(|(m, h)| h.claim_completion(m))
+        {
+            let candidates = crate::packing::orbit_candidates(
                 x.view(),
                 n,
+                cfg.orbit_core,
                 cfg.symmetry_tolerance,
                 cfg.symmetry_merge_radius,
                 cfg.symmetrise_core_fraction,
                 cfg.min_separation,
-            )
-        {
-            let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
-            if es.is_finite() && xs.len() == x.len() {
-                let sym_gradient = record_quenched_answer(
-                    cfg,
-                    ledger,
-                    &mut grad,
-                    es,
-                    xs.view(),
-                    &mut unconverged_records,
-                );
-                hops += 1;
-                orbits_completed += 1;
-                let d = (es - e) / temperature.max(1e-12);
-                if d < 0.0 || rng.random::<f64>() < (-d).exp() {
-                    if es < e {
-                        orbit_gain += e - es;
-                    }
-                    adopt_minimum!(
-                        es,
-                        xs,
-                        sym_gradient,
-                        None,
-                        AdoptionHistory::Fresh,
-                        None,
-                        Some("orbit-completion"),
-                        hops
-                    );
+            );
+            for (k, y) in candidates.iter().enumerate() {
+                if candidates[..k]
+                    .iter()
+                    .any(|earlier| hop_is_identity(earlier.view(), y.view()))
+                {
+                    orbit_duplicates += 1;
+                    continue;
                 }
+                let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
+                if es.is_finite() && xs.len() == x.len() {
+                    let sym_gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        es,
+                        xs.view(),
+                        &mut unconverged_records,
+                    );
+                    hops += 1;
+                    orbits_completed += 1;
+                    let product_report = match (history.as_deref_mut(), sym_gradient.as_ref()) {
+                        (Some(h), Some(g)) => {
+                            let report = h.observe(es, xs.view(), g.view());
+                            if let Some(r) = report {
+                                history_observations += 1;
+                                history_new += usize::from(r.is_new);
+                            }
+                            report
+                        }
+                        _ => None,
+                    };
+                    if orbit_offer
+                        .as_ref()
+                        .is_none_or(|(lowest, _, _, _)| es < *lowest)
+                    {
+                        orbit_offer = Some((es, xs, sym_gradient, product_report));
+                    }
+                }
+            }
+        }
+        if let Some((es, xs, sym_gradient, product_report)) = orbit_offer {
+            let mut biases: Vec<&dyn Bias> = Vec::new();
+            if stalled(cfg, quiet, longest_quiet)
+                && returns_to_deposit(&bias, xs.view())
+                && returns_to_best(&bias, ledger.best_state.as_ref(), xs.view())
+            {
+                biases.push(&bias);
+                if let Some(sp) = spectral.as_ref() {
+                    biases.push(sp);
+                }
+            }
+            if biased_metropolis(&biases, (e, x.view()), (es, xs.view()), temperature, rng) {
+                if es < e {
+                    orbit_gain += e - es;
+                }
+                let evidence = match product_report {
+                    Some(report) => AdoptionHistory::Observed(Some(report)),
+                    None => AdoptionHistory::Fresh,
+                };
+                adopt_minimum!(
+                    es,
+                    xs,
+                    sym_gradient,
+                    None,
+                    evidence,
+                    None,
+                    Some("orbit-completion"),
+                    hops
+                );
             }
         }
         // Graph edge + Fiedler deposit at the chain's current basin. Called
@@ -5283,15 +5481,7 @@ where
         } else {
             quiet += 1;
         }
-        // Stuck means stuck for longer than this chain has ever been stuck
-        // before, not stuck for some number someone chose. Traced on 75
-        // points, a run that succeeds goes tens of thousands of hops between
-        // improvements on its way to the crossing, so a fixed patience of 400
-        // fires about 180 climbs into a healthy search.
-        let stuck = quiet
-            >= cfg
-                .escape_stall_patience
-                .max((cfg.escape_stall_factor * longest_quiet as f64) as usize);
+        let stuck = stalled(cfg, quiet, longest_quiet);
         // Basin hopping with occasional jumping (Iwamatsu and Okabe, Chem.
         // Phys. Lett. 399, 396 (2004)): after `jump_patience` hops without
         // improvement, take `jump_steps` collective displacements with no
@@ -5398,10 +5588,7 @@ where
             continue;
         }
         if cfg.symmetrise_on_stall && stuck && hop_room(hops) {
-            let soap_spec = crate::soap::SoapSpec {
-                rcut_nn: 3.5 * cfg.length_scale,
-                ..Default::default()
-            };
+            let soap_spec = crate::soap::SoapSpec::at_length(cfg.length_scale);
             let withhold = (cfg.packing_cna_applies()
                 && crate::soap::ih_dominated(x.view(), soap_spec))
                 || cfg.active_region.is_some()
@@ -5626,7 +5813,10 @@ where
             // move.
             if directed_leave
                 && cfg.packing_cna_applies()
-                && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+                && crate::soap::ih_dominated(
+                    x.view(),
+                    crate::soap::SoapSpec::at_length(cfg.length_scale),
+                )
                 && let Some((other_energy, other_state)) =
                     packing.better_other(x.view(), e, packing_cutoff)
             {
@@ -5653,7 +5843,10 @@ where
             if directed_leave
                 && cfg.budget_window
                 && hop_room(hops)
-                && !crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+                && !crate::soap::ih_dominated(
+                    x.view(),
+                    crate::soap::SoapSpec::at_length(cfg.length_scale),
+                )
             {
                 let best_before_growth = ledger.best;
                 let mut best_growth: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
@@ -5710,7 +5903,10 @@ where
             if directed_leave
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
-                && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+                && crate::soap::ih_dominated(
+                    x.view(),
+                    crate::soap::SoapSpec::at_length(cfg.length_scale),
+                )
             {
                 let best_before_growth = ledger.best;
                 let mut side = StdRng::seed_from_u64(
@@ -5889,6 +6085,78 @@ where
                     }
                 } else {
                     unconverged_records += 1;
+                }
+            }
+        }
+        // A new lowest structure on a metal cluster is often its core with a
+        // surface atom one site away from where it belongs. At the search
+        // temperature the chain wanders among such isomers and rarely tries
+        // that one site, so the least-bound atoms are tried on every vacant
+        // hollow site of the new best, and the descent follows the lowest
+        // product while it goes down. Bounded by the improvement events.
+        if cfg.surface_hop_on_best && ledger.best < best_before_iteration - 1e-10 {
+            let cutoff =
+                crate::soap::contact_cutoff(crate::soap::SoapSpec::at_length(cfg.length_scale));
+            let mut from = ledger.best_state.clone().map(|s| (ledger.best, s));
+            while let Some((from_energy, base)) = from.take() {
+                let mut lowest: Option<(f64, Array1<f64>, Option<Array1<f64>>, _)> = None;
+                for y in crate::packing::surface_hops(base.view(), n, cutoff, cfg.min_separation) {
+                    if !hop_room(hops) || ledger.stopped() || ledger.target_reached() {
+                        break;
+                    }
+                    let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
+                    if !(es.is_finite() && xs.len() == x.len()) {
+                        continue;
+                    }
+                    let gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        es,
+                        xs.view(),
+                        &mut unconverged_records,
+                    );
+                    let certified = quench_is_sane(cfg, es, xs.view())
+                        && (grad.is_none() || gradient.is_some());
+                    hops += 1;
+                    surface_hops.0 += 1;
+                    let report = match (history.as_deref_mut(), gradient.as_ref()) {
+                        (Some(h), Some(g)) => {
+                            let report = h.observe(es, xs.view(), g.view());
+                            if let Some(r) = report {
+                                history_observations += 1;
+                                history_new += usize::from(r.is_new);
+                            }
+                            report
+                        }
+                        _ => None,
+                    };
+                    if certified && lowest.as_ref().is_none_or(|(l, ..)| es < *l) {
+                        lowest = Some((es, xs, gradient, report));
+                    }
+                }
+                if let Some((es, xs, gradient, report)) = lowest
+                    && es < from_energy - 1e-10
+                {
+                    surface_hops.1 += 1;
+                    surface_hops.2 += from_energy - es;
+                    from = Some((es, xs.clone()));
+                    if es < e - 1e-10 {
+                        let evidence = match report {
+                            Some(report) => AdoptionHistory::Observed(Some(report)),
+                            None => AdoptionHistory::Fresh,
+                        };
+                        adopt_minimum!(
+                            es,
+                            xs,
+                            gradient,
+                            None,
+                            evidence,
+                            None,
+                            Some("surface-hop"),
+                            hops
+                        );
+                    }
                 }
             }
         }
@@ -6303,6 +6571,8 @@ where
         }),
         symmetrised: (symmetrised, symmetry_gain),
         orbits: (orbits_completed, orbit_gain),
+        orbit_duplicates,
+        surface_hops,
         continuous_symmetry: (continuous_symmetry_attempts, continuous_symmetry_gain),
         restarts,
         exchanges_refused,
