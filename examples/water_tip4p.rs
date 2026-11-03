@@ -11,8 +11,9 @@
 //! `selft` lets each chain regulate its own temperature, `boost` accepts a
 //! chain's next new minimum after a stall, and `rotamer` merges rotamers
 //! under GOAT's energy and rotational-constant test into one basin of a
-//! chain. An unknown name stops the run, so a label cannot stand for a
-//! mechanism the binary does not bind.
+//! chain. `ensemble` reports the conformer ensemble and `estop` stops on
+//! its entropy. An unknown name stops the run, so a label cannot stand for
+//! a mechanism the binary does not bind.
 //!
 //! `HISTORY_REPLICAS` runs that many thread replicas per seed, splitting the
 //! budget, over the channels `HISTORY` and the other ensemble variables of
@@ -52,7 +53,14 @@ fn apply_options(cfg: &mut Config, opts: &[&str]) {
         assert!(
             matches!(
                 *option,
-                "sbreport" | "sbasin" | "goat" | "selft" | "boost" | "rotamer"
+                "sbreport"
+                    | "sbasin"
+                    | "goat"
+                    | "selft"
+                    | "boost"
+                    | "rotamer"
+                    | "ensemble"
+                    | "estop"
             ),
             "unknown search mechanism: {option}"
         );
@@ -63,6 +71,8 @@ fn apply_options(cfg: &mut Config, opts: &[&str]) {
     cfg.self_regulating_temperature = cfg.self_regulating_temperature || opts.contains(&"selft");
     cfg.boost_on_stall = cfg.boost_on_stall || opts.contains(&"boost");
     cfg.rotamer_test = cfg.rotamer_test || opts.contains(&"rotamer");
+    cfg.entropy_stop = cfg.entropy_stop || opts.contains(&"estop");
+    cfg.ensemble_report = cfg.ensemble_report || cfg.entropy_stop || opts.contains(&"ensemble");
     if opts.contains(&"goat") {
         *cfg = cfg.clone().with_goat_ladder();
     }
@@ -507,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn goat_and_selft_bind_their_fields() {
+    fn goat_options_bind_their_fields() {
         let mut cfg = Config::communicating_tip4p(4);
         apply_options(&mut cfg, &["sbasin", "selft"]);
         assert!(cfg.self_regulating_temperature && cfg.replicas == 1);
@@ -521,6 +531,9 @@ mod tests {
         let mut cfg = Config::communicating_tip4p(4);
         apply_options(&mut cfg, &["sbasin", "rotamer"]);
         assert!(cfg.rotamer_test);
+        let mut cfg = Config::communicating_tip4p(4);
+        apply_options(&mut cfg, &["sbasin", "estop"]);
+        assert!(cfg.ensemble_report && cfg.entropy_stop);
     }
 
     #[test]

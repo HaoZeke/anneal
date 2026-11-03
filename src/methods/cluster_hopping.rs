@@ -502,6 +502,9 @@ pub enum HopStop {
     MaxHops,
     /// The Hamiltonian proposal returned no trajectory while budget was left.
     NoTrajectory,
+    /// The conformer ensemble's entropy converged under
+    /// [`Config::entropy_stop`].
+    EntropyConverged,
 }
 
 impl HopStop {
@@ -515,6 +518,7 @@ impl HopStop {
             Self::NveUnavailable => "nve_unavailable",
             Self::MaxHops => "max_hops",
             Self::NoTrajectory => "no_trajectory",
+            Self::EntropyConverged => "entropy_converged",
         }
     }
 
@@ -993,6 +997,9 @@ pub struct Outcome {
     /// hopping, by the controller's basin identity. A trial is counted once,
     /// and a screened trial that was never fully quenched is not counted.
     pub rotamers: usize,
+    /// The conformer ensemble under [`Config::ensemble_report`] or
+    /// [`Config::entropy_stop`].
+    pub conformers: Option<crate::goat::ConformerEnsemble>,
     /// Swap attempts, each from the active rung to the next one up, the
     /// hottest offering to the coldest.
     pub swaps_tried: usize,
@@ -2472,6 +2479,26 @@ where
         .collect();
     let mut rotamer_basins = crate::goat::RotamerArchive::<usize>::new(rotamer_window);
     let mut rotamers = 0usize;
+    let ensemble_on = cfg.ensemble_report || cfg.entropy_stop;
+    let mut ensemble_index = BasinIndex::new(
+        ClusterFingerprint::of_config(cfg, &canonical_reference),
+        cfg.merge_radius,
+    );
+    let mut ensemble_rotamers = crate::goat::RotamerArchive::<usize>::new(rotamer_window);
+    let mut ensemble_energies: Vec<f64> = Vec::new();
+    let mut entropy_stop = crate::goat::EntropyStop::new();
+    let round_length = cfg.entropy_round();
+    let mut round_quenched = 0usize;
+    if ensemble_on && e.is_finite() {
+        rotamer_basin(
+            cfg,
+            &mut ensemble_index,
+            &mut ensemble_rotamers,
+            x.view(),
+            e,
+        );
+        ensemble_energies.push(e);
+    }
     if cfg.minima_hopping {
         let (initial_basin, _) =
             rotamer_basin(cfg, &mut identity, &mut rotamer_basins, x.view(), e);
@@ -2731,6 +2758,14 @@ where
         // and most of them have just taken a hop.
         if !hop_room(hops) {
             break HopStop::MaxHops;
+        }
+        if cfg.entropy_stop && round_quenched >= round_length {
+            round_quenched = 0;
+            let (_, entropy, _) =
+                crate::goat::ensemble_entropy(&ensemble_energies, cfg.conformer_temperature());
+            if entropy_stop.end_round(ledger.best, entropy) {
+                break HopStop::EntropyConverged;
+            }
         }
         if ledger.best < best_seen - 1e-9 {
             best_seen = ledger.best;
@@ -4421,6 +4456,20 @@ where
         // record. Gap and energy are not that comparison.
         let channel_floor_energy = ledger.best;
         let channel_floor_state = seam.as_ref().and_then(|_| ledger.best_state.clone());
+        if ensemble_on && recordable && !unquenched {
+            let (member, _) = rotamer_basin(
+                cfg,
+                &mut ensemble_index,
+                &mut ensemble_rotamers,
+                x_new.view(),
+                e_new,
+            );
+            match ensemble_energies.get_mut(member) {
+                Some(energy) => *energy = energy.min(e_new),
+                None => ensemble_energies.push(e_new),
+            }
+            round_quenched += 1;
+        }
         if recordable {
             ledger.record(e_new, x_new.view());
             if ledger.target_reached() {
@@ -6430,6 +6479,17 @@ where
         },
         boosts,
         rotamers,
+        conformers: ensemble_on.then(|| {
+            let (members, entropy, free_energy) =
+                crate::goat::ensemble_entropy(&ensemble_energies, cfg.conformer_temperature());
+            crate::goat::ConformerEnsemble {
+                temperature: cfg.conformer_temperature(),
+                members,
+                entropy,
+                free_energy,
+                rounds: entropy_stop.rounds(),
+            }
+        }),
         swaps_tried,
         transport: match (&ladder, &transport) {
             (Some(l), _) => Some((l.index().round_trips(), l.sweeps(), l.barrier())),

@@ -389,6 +389,155 @@ impl<T> RotamerArchive<T> {
     }
 }
 
+/// Molar gas constant in kcal/(mol K), from the exact CODATA 2018 value
+/// of 8.314462618 J/(mol K) and 4.184 J per calorie.
+const GAS_CONSTANT_KCAL: f64 = 8.314_462_618e-3 / 4.184;
+
+/// Temperature of GOAT's conformer ensemble, in kelvin.
+///
+/// The paper reports its ensemble entropies and free energies at 298.15 K
+/// (de Souza 2025), and ORCA's `CONFTEMP` defaults to it (ORCA 6.1
+/// manual, GOAT keyword list).
+pub const CONFORMER_KELVIN: f64 = 298.15;
+
+/// Highest energy of a conformer above the lowest, in kcal/mol.
+///
+/// ORCA's `MAXEN` default for GOAT (ORCA 6.1 manual, GOAT keyword list).
+pub const MAXEN_KCAL: f64 = 6.0;
+
+/// [`MAXEN_KCAL`] in units of `k_B T` at [`CONFORMER_KELVIN`], about 10.13.
+///
+/// A member at the edge carries a Boltzmann factor of about 4e-5 against
+/// the lowest. Stated in `k_B T`, the window keeps that meaning in a run
+/// that has no kelvin, one in reduced units.
+pub const ENSEMBLE_WINDOW: f64 = MAXEN_KCAL / (GAS_CONSTANT_KCAL * CONFORMER_KELVIN);
+
+/// Change of the ensemble entropy between rounds below which the entropy
+/// counts as converged, in units of `k_B`, about 0.0503.
+///
+/// ORCA's `MINDELS` default of 0.1 cal/(mol K) for GOAT-ENTROPY (ORCA 6.1
+/// manual), divided by the gas constant.
+pub const ENTROPY_TOLERANCE: f64 = 0.1e-3 / GAS_CONSTANT_KCAL;
+
+/// Rounds a run completes before it may stop.
+///
+/// GOAT runs at least three global cycles by default (de Souza 2025),
+/// ORCA's `MINGLOBALITER`.
+pub const MIN_ROUNDS: usize = 3;
+
+/// `k_B T` at `kelvin`, in a unit where one kcal/mol is `kcal_per_mol`.
+pub fn thermal_energy(kelvin: f64, kcal_per_mol: f64) -> f64 {
+    GAS_CONSTANT_KCAL * kelvin * kcal_per_mol
+}
+
+/// GOAT's optimisations per base worker and global cycle for `atoms`
+/// atoms in `fragments` fragments.
+///
+/// This is eq. (4) of de Souza 2025, `max(f_flex N^(3/2), N, 15)` with
+/// `N` the atom count. With no rotatable bonds, as in a water cluster, the
+/// paper sets `f_flex = 0.5 sqrt(N_frag)`. A chart here moves atoms and
+/// rigid bodies and has no rotatable bond, so that value applies to every
+/// chart, and the fragment count is the caller's.
+pub fn optimizations_per_worker(atoms: usize, fragments: usize) -> usize {
+    let flex = 0.5 * (fragments.max(1) as f64).sqrt();
+    let scaled = (flex * (atoms as f64).powf(1.5)).ceil() as usize;
+    scaled.max(atoms).max(15)
+}
+
+/// Quenched minima in one round of the entropy stop.
+///
+/// A GOAT global cycle runs [`optimizations_per_worker`] optimisations on
+/// each of its four base workers, however many workers the base is split
+/// into (de Souza 2025). A round here is that work, by however many chains
+/// share it.
+pub fn round_length(atoms: usize, fragments: usize) -> usize {
+    LADDER_STEPS_KCAL.len() * optimizations_per_worker(atoms, fragments)
+}
+
+/// Boltzmann summary of a conformer ensemble at one temperature.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ConformerEnsemble {
+    /// `k_B T` the weights are taken at, in energy units.
+    pub temperature: f64,
+    /// Unique minima within [`ENSEMBLE_WINDOW`] of the lowest.
+    pub members: usize,
+    /// Conformational entropy `-sum p_i ln p_i`, in units of `k_B`.
+    pub entropy: f64,
+    /// Conformational free energy `-k_B T ln sum exp(-dE_i / k_B T)`
+    /// relative to the lowest member, in energy units.
+    pub free_energy: f64,
+    /// Rounds of the entropy stop completed.
+    pub rounds: usize,
+}
+
+/// Member count, entropy and free energy of minima at `energies`, at
+/// `k_B T = temperature`.
+///
+/// With every degeneracy one, as GOAT reports its ensembles (de Souza
+/// 2025), the weights are `p_i = exp(-x_i) / Z` for `x_i = dE_i / k_B T`
+/// and `Z = sum exp(-x_i)`. The entropy is then `S / k_B = ln Z + <x>`
+/// and the free energy `G = -k_B T ln Z`. Minima more than
+/// [`ENSEMBLE_WINDOW`] `k_B T` above the lowest are left out. Returns the
+/// member count, `S / k_B` and `G` relative to the lowest member.
+pub fn ensemble_entropy(energies: &[f64], temperature: f64) -> (usize, f64, f64) {
+    let Some(lowest) = energies
+        .iter()
+        .copied()
+        .filter(|e| e.is_finite())
+        .reduce(f64::min)
+    else {
+        return (0, 0.0, 0.0);
+    };
+    if !(temperature > 0.0) {
+        return (1, 0.0, 0.0);
+    }
+    let reduced: Vec<f64> = energies
+        .iter()
+        .map(|e| (e - lowest) / temperature)
+        .filter(|x| x.is_finite() && *x <= ENSEMBLE_WINDOW)
+        .collect();
+    let z: f64 = reduced.iter().map(|x| (-x).exp()).sum();
+    let mean = reduced.iter().map(|x| x * (-x).exp()).sum::<f64>() / z;
+    (reduced.len(), z.ln() + mean, -temperature * z.ln())
+}
+
+/// GOAT-ENTROPY's stop over the rounds of a run.
+///
+/// GOAT stops after its minimum number of global cycles, at the end of a
+/// cycle that found no lower minimum (de Souza 2025). GOAT-ENTROPY also
+/// asks the conformational entropy to have moved by less than its
+/// tolerance (ORCA 6.1 manual). The rounds here stand for the cycles, and
+/// the stop takes both conditions after at least [`MIN_ROUNDS`] rounds.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct EntropyStop {
+    rounds: usize,
+    last: Option<(f64, f64)>,
+}
+
+impl EntropyStop {
+    /// A stop that has seen no round.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Closes a round whose lowest energy so far is `best` and whose
+    /// ensemble entropy is `entropy`, and says whether to stop.
+    pub fn end_round(&mut self, best: f64, entropy: f64) -> bool {
+        self.rounds += 1;
+        let previous = self.last.replace((best, entropy));
+        previous.is_some_and(|(last_best, last_entropy)| {
+            self.rounds >= MIN_ROUNDS
+                && best >= last_best
+                && (entropy - last_entropy).abs() < ENTROPY_TOLERANCE
+        })
+    }
+
+    /// Rounds closed so far.
+    pub fn rounds(&self) -> usize {
+        self.rounds
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -604,5 +753,63 @@ mod tests {
         assert_eq!(standard_atomic_weight(8), Some(15.999));
         assert_eq!(standard_atomic_weight(78), Some(195.08));
         assert_eq!(standard_atomic_weight(0), None);
+    }
+
+    #[test]
+    fn orca_constants_in_thermal_units() {
+        assert!((ENSEMBLE_WINDOW - 10.13).abs() < 5e-3, "{ENSEMBLE_WINDOW}");
+        assert!(
+            (ENTROPY_TOLERANCE - 0.0503).abs() < 5e-5,
+            "{ENTROPY_TOLERANCE}"
+        );
+        let room_kj = thermal_energy(CONFORMER_KELVIN, 4.184);
+        assert!((room_kj - 2.4790).abs() < 1e-4, "{room_kj}");
+    }
+
+    #[test]
+    fn rounds_follow_the_papers_iteration_count() {
+        // A water decamer: 30 atoms in 10 fragments.
+        assert_eq!(optimizations_per_worker(30, 10), 260);
+        assert_eq!(round_length(30, 10), 1040);
+        // Small systems fall back to the floor of 15 and to the atom count.
+        assert_eq!(optimizations_per_worker(3, 1), 15);
+        assert_eq!(optimizations_per_worker(4, 1), 15);
+        assert_eq!(optimizations_per_worker(75, 75), 2813);
+    }
+
+    #[test]
+    fn degenerate_minima_give_ln_n() {
+        let (members, s, g) = ensemble_entropy(&[-1.0; 4], 0.5);
+        assert_eq!(members, 4);
+        assert!((s - 4.0_f64.ln()).abs() < 1e-12);
+        assert!((g + 0.5 * 4.0_f64.ln()).abs() < 1e-12);
+        let (members, s, _) = ensemble_entropy(&[0.0, 100.0], 1.0);
+        assert_eq!(members, 1);
+        assert_eq!(s, 0.0);
+    }
+
+    #[test]
+    fn two_levels_match_the_closed_form() {
+        let (t, de) = (0.7, 0.3);
+        let (_, s, g) = ensemble_entropy(&[0.0, de], t);
+        let p = 1.0 / (1.0 + (-de / t).exp());
+        let closed = -(p * p.ln() + (1.0 - p) * (1.0 - p).ln());
+        assert!((s - closed).abs() < 1e-12);
+        assert!((g + t * (1.0 + (-de / t).exp()).ln()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_stop_waits_three_rounds_and_a_quiet_one() {
+        let mut stop = EntropyStop::new();
+        assert!(!stop.end_round(-1.0, 1.0));
+        assert!(!stop.end_round(-1.0, 1.0));
+        assert!(stop.end_round(-1.0, 1.0 + 0.5 * ENTROPY_TOLERANCE));
+        let mut moving = EntropyStop::new();
+        assert!(!moving.end_round(-1.0, 1.0));
+        assert!(!moving.end_round(-1.0, 1.1));
+        assert!(!moving.end_round(-1.0, 1.2));
+        assert!(!moving.end_round(-1.5, 1.2));
+        assert!(moving.end_round(-1.5, 1.2));
+        assert_eq!(moving.rounds(), 5);
     }
 }

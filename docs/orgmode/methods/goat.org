@@ -92,3 +92,26 @@ The shared history of an ensemble keeps its exact witness and does not consult t
 The rotamer test is a tolerance test that can join two distinct minima, and the history is the record of exact identity.
 The superbasin tracker keeps the descriptor merge as well.
 =rotamer= turns the test on in both binaries, and each chain then prints its count of merges on its =goat:= line.
+
+* Conformer ensemble and entropy stop
+
+=Config.ensemble_report= reports the Boltzmann ensemble of the unique minima a run found, as GOAT does.
+=Outcome.conformers= gives the members within =ENSEMBLE_WINDOW= =k_B T= of the lowest.
+It also gives their entropy in units of =k_B= and their free energy, with every degeneracy at one.
+The temperature is =Config::conformer_temperature=, which is =k_B= times 298.15 K in the run's unit.
+GOAT reports its ensembles at 298.15 K, and ORCA's =CONFTEMP= defaults to it.
+The window is ORCA's =MAXEN= default of 6 kcal/mol, stated in =k_B T= at that temperature.
+
+=Config.entropy_stop= cuts the run into rounds of =Config::entropy_round= quenched hops.
+A round is the work of one GOAT global cycle.
+In that cycle each of four base workers runs the optimisations of eq. (4) of the GOAT paper.
+That count is =max(f_flex N^(3/2), N, 15)= for =N= atoms, with =f_flex = 0.5 sqrt(N_frag)= when no bond rotates.
+A water cluster counts its atoms and molecules, and an atomic cluster counts as one fragment.
+The stop fires with =HopStop::EntropyConverged= after at least =MIN_ROUNDS= rounds, GOAT's three global cycles.
+It fires at the end of a round that found no lower minimum and moved the entropy by less than =ENTROPY_TOLERANCE= =k_B=.
+The tolerance is ORCA's =MINDELS= default of 0.1 cal/(mol K) for GOAT-ENTROPY.
+
+On a single chain the report and the stop read the minima that chain found.
+
+=ensemble= and =estop= turn them on in both binaries.
+A single chain prints its members, entropy and stop on its =goat:= line.

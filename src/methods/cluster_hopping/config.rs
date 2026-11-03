@@ -877,6 +877,29 @@ pub struct Config {
     /// [`Config::species`], and are one for unlabelled points.
     #[serde(skip_serializing_if = "is_false")]
     pub rotamer_test: bool,
+    /// Report the Boltzmann conformer ensemble of the minima the run found.
+    ///
+    /// GOAT's ensemble output (de Souza, Angew. Chem. Int. Ed. 64,
+    /// e202500393 (2025)). Every certified quenched minimum joins a list of
+    /// unique minima under the descriptor merge, and under
+    /// [`Config::rotamer_test`] the rotamer test as well, keeping the lowest
+    /// energy of each. [`Outcome::conformers`] gives the members within
+    /// [`crate::goat::ENSEMBLE_WINDOW`] `k_B T` of the lowest, their
+    /// entropy and their free energy at [`Config::conformer_temperature`],
+    /// by [`crate::goat::ensemble_entropy`].
+    #[serde(skip_serializing_if = "is_false")]
+    pub ensemble_report: bool,
+    /// Stop once the ensemble entropy has converged.
+    ///
+    /// GOAT-ENTROPY's stop (de Souza 2025). The run is cut into rounds of
+    /// [`Config::entropy_round`] quenched hops, and it stops with
+    /// [`HopStop::EntropyConverged`] after at least
+    /// [`crate::goat::MIN_ROUNDS`] rounds, at the end of a round that found
+    /// no lower minimum and moved the entropy by less than
+    /// [`crate::goat::ENTROPY_TOLERANCE`] `k_B`. Turns on
+    /// [`Config::ensemble_report`]. The budget still caps the run.
+    #[serde(skip_serializing_if = "is_false")]
+    pub entropy_stop: bool,
     /// Abandon a trial whose short relaxation is heading back to the current
     /// basin, before paying for the full one.
     ///
@@ -1467,6 +1490,8 @@ impl Config {
             self_regulating_temperature: false,
             boost_on_stall: false,
             rotamer_test: false,
+            ensemble_report: false,
+            entropy_stop: false,
             return_screen: false,
             soap_class_residual: false,
             soap_mode: SoapProposalMode::Flexible,
@@ -1658,6 +1683,35 @@ impl Config {
             EnergyUnit::KilojoulePerMole => 4.184,
             EnergyUnit::KilocaloriePerMole => 1.0,
         }
+    }
+
+    /// `k_B T` at GOAT's conformer temperature of 298.15 K, in the
+    /// objective's energy unit.
+    ///
+    /// In reduced units the kelvin are read through
+    /// [`Config::kcal_per_mol`], so `k_B T` is about 0.593 energy scales.
+    pub fn conformer_temperature(&self) -> f64 {
+        crate::goat::thermal_energy(crate::goat::CONFORMER_KELVIN, self.kcal_per_mol())
+    }
+
+    /// Quenched minima in one round of the entropy stop.
+    ///
+    /// [`crate::goat::round_length`] for the atoms and fragments of the
+    /// chart. A rigid chart counts the sites of
+    /// [`Config::rigid_body_geometry`] as atoms and each body as a
+    /// fragment, and a molecular library counts each declared group as a
+    /// fragment. An atomic cluster is one fragment, since every atom of a
+    /// compact cluster is bonded to a neighbour.
+    pub fn entropy_round(&self) -> usize {
+        let (atoms, fragments) = match (&self.move_library, &self.rigid_body_geometry) {
+            (MoveLibrary::RigidBody { .. }, Some(geometry)) => {
+                (self.n_points * geometry.species().len(), self.n_points)
+            }
+            (MoveLibrary::RigidBody { .. }, None) => (self.n_points, self.n_points),
+            (MoveLibrary::Molecular { groups, .. }, _) => (self.n_points, groups.len()),
+            _ => (self.n_points, 1),
+        };
+        crate::goat::round_length(atoms, fragments)
     }
 
     /// Put a preset on GOAT's ladder of self-regulating walkers.

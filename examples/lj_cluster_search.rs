@@ -152,6 +152,8 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
                     | "selft"
                     | "boost"
                     | "rotamer"
+                    | "ensemble"
+                    | "estop"
             ),
             "unknown search mechanism: {option}"
         );
@@ -182,6 +184,8 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
     cfg.self_regulating_temperature = cfg.self_regulating_temperature || opts.contains(&"selft");
     cfg.boost_on_stall = cfg.boost_on_stall || opts.contains(&"boost");
     cfg.rotamer_test = cfg.rotamer_test || opts.contains(&"rotamer");
+    cfg.entropy_stop = cfg.entropy_stop || opts.contains(&"estop");
+    cfg.ensemble_report = cfg.ensemble_report || cfg.entropy_stop || opts.contains(&"ensemble");
 }
 
 /// Occupancy catalog: leftover-SOAP packing key plus AS-KMC height
@@ -371,6 +375,16 @@ mod option_tests {
         assert!(!cfg.rotamer_test);
         apply_boolean_options(&mut cfg, &["comm", "sbasin", "rotamer"]);
         assert!(cfg.rotamer_test);
+    }
+
+    #[test]
+    fn ensemble_and_estop_turn_on_the_report_and_the_stop() {
+        let mut cfg = Config::communicating(38);
+        apply_boolean_options(&mut cfg, &["comm", "sbasin", "ensemble"]);
+        assert!(cfg.ensemble_report && !cfg.entropy_stop);
+        let mut cfg = Config::communicating(38);
+        apply_boolean_options(&mut cfg, &["comm", "sbasin", "estop"]);
+        assert!(cfg.ensemble_report && cfg.entropy_stop);
     }
 
     #[test]

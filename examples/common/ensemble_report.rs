@@ -187,7 +187,28 @@ pub fn goat_line(
     if cfg.rotamer_test {
         parts.push(format!("rotamers {}", outcome.rotamers));
     }
+    if let Some(conformers) = &outcome.conformers {
+        parts.push(conformer_text(conformers));
+    }
+    if cfg.entropy_stop {
+        parts.push(format!(
+            "stop {}",
+            outcome.stop.as_ref().map_or("-", |stop| stop.code())
+        ));
+    }
     (!parts.is_empty()).then(|| format!("goat: {}", parts.join(", ")))
+}
+
+/// A conformer ensemble's members, entropy, free energy and rounds.
+pub fn conformer_text(conformers: &anneal_core::goat::ConformerEnsemble) -> String {
+    format!(
+        "conformers {} at T {:.4}, entropy {:.4} k_B, free energy {:.4}, rounds {}",
+        conformers.members,
+        conformers.temperature,
+        conformers.entropy,
+        conformers.free_energy,
+        conformers.rounds
+    )
 }
 
 /// The campaign-arm footer the summariser and the note read.
