@@ -68,6 +68,7 @@ dependencies = [
  "readcon-db",
  "rgmin",
  "rgpot-core",
+ "rgpot-pair",
  "rgsaddle",
  "serde",
  "serde_json",
@@ -1833,12 +1834,17 @@ dependencies = [
 
 [[package]]
 name = "rgpot-core"
-version = "3.0.2"
-source = "git+https://github.com/HaoZeke/potlib.git?rev=386c0342e008903472925ad78f8f32a91db51e14#386c0342e008903472925ad78f8f32a91db51e14"
+version = "3.5.1"
+source = "git+https://github.com/OmniPotentRPC/rgpot?rev=789f19c87e53216ab31f854d1cc6157dce943faa#789f19c87e53216ab31f854d1cc6157dce943faa"
 dependencies = [
  "dlpk",
  "eindir-core",
 ]
+
+[[package]]
+name = "rgpot-pair"
+version = "3.5.1"
+source = "git+https://github.com/OmniPotentRPC/rgpot?rev=789f19c87e53216ab31f854d1cc6157dce943faa#789f19c87e53216ab31f854d1cc6157dce943faa"
 
 [[package]]
 name = "rgsaddle"
