@@ -121,6 +121,12 @@ pub fn print_report(
         tally.first_target.push(calls);
     }
     tally.deepest = tally.deepest.min(report.best);
+    if let Some(conformers) = &report.conformers {
+        println!(
+            "  seed {seed} ensemble goat: {}",
+            conformer_text(conformers)
+        );
+    }
     println!(
         "  seed {seed} ensemble: best {:.6}{unit}  aggregate charged {}  first_target_calls {}  \
          history minima/accepted/visits {:?}  bias exchange published {} delivered {}  wall {:.1}s{}",
@@ -191,10 +197,14 @@ pub fn goat_line(
         parts.push(conformer_text(conformers));
     }
     if cfg.entropy_stop {
-        parts.push(format!(
-            "stop {}",
-            outcome.stop.as_ref().map_or("-", |stop| stop.code())
-        ));
+        let stop = match &outcome.stop {
+            Some(anneal_core::methods::cluster_hopping::HopStop::Retired { reason }) => {
+                format!("retired {reason}")
+            }
+            Some(stop) => stop.code().to_owned(),
+            None => "-".to_owned(),
+        };
+        parts.push(format!("stop {stop}"));
     }
     (!parts.is_empty()).then(|| format!("goat: {}", parts.join(", ")))
 }

@@ -80,6 +80,15 @@ impl MinimumHistory {
         self.total_visits
     }
 
+    /// Energy of every exact minimum identity, in admission order.
+    pub fn energies(&self) -> Vec<f64> {
+        self.network
+            .minima()
+            .iter()
+            .map(|minimum| minimum.energy)
+            .collect()
+    }
+
     /// Number of exact identities adopted by at least one chain.
     pub fn accepted_count(&self) -> usize {
         self.accepted_visits

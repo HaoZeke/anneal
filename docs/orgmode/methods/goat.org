@@ -112,6 +112,17 @@ It fires at the end of a round that found no lower minimum and moved the entropy
 The tolerance is ORCA's =MINDELS= default of 0.1 cal/(mol K) for GOAT-ENTROPY.
 
 On a single chain the report and the stop read the minima that chain found.
+In a thread ensemble they read the shared history instead, which keeps every minimum any chain certified.
+The chains then keep no list of their own.
+A round is then =Config::entropy_round= visits to the history by any replica.
+The first checkpoint past the end of a round closes it.
+Once the entropy has converged, every replica still running retires at its next checkpoint.
+Its reason is then =entropy_converged=.
+A replica that spends its budget first keeps the reason =budget=.
+Which replica closes a round follows the scheduler.
+The summed call count at the stop can therefore differ between two runs of one seed.
+=EnsembleConfig::validate= refuses the report and the stop without =HistoryMode::Shared=.
 
 =ensemble= and =estop= turn them on in both binaries.
 A single chain prints its members, entropy and stop on its =goat:= line.
+An ensemble prints the shared ensemble on its =ensemble goat:= line and each replica's stop on its own line.

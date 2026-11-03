@@ -886,7 +886,10 @@ pub struct Config {
     /// energy of each. [`Outcome::conformers`] gives the members within
     /// [`crate::goat::ENSEMBLE_WINDOW`] `k_B T` of the lowest, their
     /// entropy and their free energy at [`Config::conformer_temperature`],
-    /// by [`crate::goat::ensemble_entropy`].
+    /// by [`crate::goat::ensemble_entropy`]. Under
+    /// [`crate::methods::ensemble::run_ensemble`] the ensemble is the
+    /// shared history instead and the chains keep no list of their own;
+    /// see [`crate::methods::ensemble::EnsembleReport::conformers`].
     #[serde(skip_serializing_if = "is_false")]
     pub ensemble_report: bool,
     /// Stop once the ensemble entropy has converged.
@@ -897,7 +900,12 @@ pub struct Config {
     /// [`crate::goat::MIN_ROUNDS`] rounds, at the end of a round that found
     /// no lower minimum and moved the entropy by less than
     /// [`crate::goat::ENTROPY_TOLERANCE`] `k_B`. Turns on
-    /// [`Config::ensemble_report`]. The budget still caps the run.
+    /// [`Config::ensemble_report`]. The budget still caps the run. Under
+    /// [`crate::methods::ensemble::run_ensemble`] a round is that many
+    /// visits to the shared history by any replica. Once the shared
+    /// entropy converges, every replica still running retires at its next
+    /// checkpoint, and a replica that spent its budget first keeps that
+    /// reason.
     #[serde(skip_serializing_if = "is_false")]
     pub entropy_stop: bool,
     /// Abandon a trial whose short relaxation is heading back to the current

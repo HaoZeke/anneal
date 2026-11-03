@@ -143,6 +143,12 @@ impl EnsembleConfig {
         if cfg.replicas > 1 {
             return Err("an ensemble runs single-rung chains; a ladder owns its own bias".into());
         }
+        if (cfg.ensemble_report || cfg.entropy_stop) && self.history != HistoryMode::Shared {
+            return Err(
+                "the conformer ensemble of an ensemble is its shared history; use HistoryMode::Shared"
+                    .into(),
+            );
+        }
         if self.checkpoint_interval == 0 {
             return Err("the checkpoint interval must be positive".into());
         }
@@ -246,6 +252,9 @@ pub struct EnsembleReport {
     pub histories: Vec<(usize, usize, u64)>,
     /// Bias exchange: visits published and delivered.
     pub exchange: (u64, u64),
+    /// Conformer ensemble of the shared history, under
+    /// [`Config::ensemble_report`] or [`Config::entropy_stop`].
+    pub conformers: Option<crate::goat::ConformerEnsemble>,
 }
 
 impl EnsembleReport {
@@ -512,7 +521,60 @@ impl OccupiedBoard {
     }
 }
 
+/// GOAT's entropy stop over the shared history of an ensemble.
+///
+/// A round is [`Config::entropy_round`] visits to the history, by any
+/// replica. The first checkpoint past the end of a round closes it on the
+/// minima the history contains at that moment. Which replica gets there first
+/// follows the scheduler, and so does the summed call count at which the
+/// ensemble stops.
+struct ConformerRounds {
+    stop: crate::goat::EntropyStop,
+    round: u64,
+    next: u64,
+    converged: bool,
+}
+
+impl ConformerRounds {
+    fn new(round: usize) -> Self {
+        let round = round.max(1) as u64;
+        Self {
+            stop: crate::goat::EntropyStop::new(),
+            round,
+            next: round,
+            converged: false,
+        }
+    }
+
+    /// Closes the round the history has finished, if it has, and says
+    /// whether the entropy has converged.
+    fn advance(&mut self, history: &Mutex<MinimumHistory>, temperature: f64) -> bool {
+        if self.converged {
+            return true;
+        }
+        let history = history.lock().expect("minimum history");
+        let visits = history.total_visits();
+        if visits < self.next {
+            return false;
+        }
+        let energies = history.energies();
+        drop(history);
+        let best = energies.iter().copied().fold(f64::INFINITY, f64::min);
+        let (_, entropy, _) = crate::goat::ensemble_entropy(&energies, temperature);
+        self.converged = self.stop.end_round(best, entropy);
+        self.next = (visits / self.round + 1) * self.round;
+        self.converged
+    }
+}
+
 /// Runs one ensemble seed.
+///
+/// Under [`Config::ensemble_report`] or [`Config::entropy_stop`] the
+/// conformer ensemble is the shared history: the chains keep no store of
+/// their own, and [`EnsembleReport::conformers`] reports it. Once the
+/// entropy has converged, every replica still running retires at its next
+/// checkpoint with the reason `entropy_converged`. A replica that spent its
+/// budget first keeps the reason `budget`.
 ///
 /// The witness is called from every replica thread, so a non-reentrant
 /// matcher goes behind [`crate::methods::minima_hopping::SerializedWitness`].
@@ -538,6 +600,14 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
     );
     let started = Instant::now();
     let replicas = ens.replicas;
+    let conformers_on = cfg.ensemble_report || cfg.entropy_stop;
+    let entropy_stop = cfg.entropy_stop;
+    let temperature = cfg.conformer_temperature();
+    let rounds = Mutex::new(ConformerRounds::new(cfg.entropy_round()));
+    let mut chain_cfg = cfg.clone();
+    chain_cfg.ensemble_report = false;
+    chain_cfg.entropy_stop = false;
+    let cfg = &chain_cfg;
     let budgets = ens.budgets();
     let replica_seeds = ens.replica_seeds(seed);
     let history_count = match ens.history {
@@ -571,8 +641,13 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                     HistoryMode::Private => Some(&histories[replica]),
                     HistoryMode::Shared => Some(&histories[0]),
                 };
-                let (exchange, mailboxes, occupied, charged_total) =
-                    (&exchange, &mailboxes, occupied.as_ref(), &charged_total);
+                let (exchange, mailboxes, occupied, charged_total, rounds) = (
+                    &exchange,
+                    &mailboxes,
+                    occupied.as_ref(),
+                    &charged_total,
+                    &rounds,
+                );
                 let context = context.clone();
                 let caller_stop = crate::caller_stop::bound();
                 scope.spawn(move || -> Result<ReplicaReport, String> {
@@ -643,6 +718,17 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                         if snapshot.best_energy() < best_seen - 1e-9 {
                             best_seen = snapshot.best_energy();
                             charged_at_best = snapshot.charged();
+                        }
+                        if entropy_stop
+                            && let Some(history) = history
+                            && rounds
+                                .lock()
+                                .expect("conformer rounds")
+                                .advance(history, temperature)
+                        {
+                            return CheckpointAction::Retire {
+                                reason: "entropy_converged".to_owned(),
+                            };
                         }
                         // Two-choice restart: post the occupied state, and on a
                         // stall sample two peers; both in this family means
@@ -807,6 +893,17 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
         .iter()
         .filter_map(|report| report.first_target_calls)
         .min();
+    let conformers = conformers_on.then(|| {
+        let energies = histories[0].lock().expect("minimum history").energies();
+        let (members, entropy, free_energy) = crate::goat::ensemble_entropy(&energies, temperature);
+        crate::goat::ConformerEnsemble {
+            temperature,
+            members,
+            entropy,
+            free_energy,
+            rounds: rounds.lock().map_or(0, |rounds| rounds.stop.rounds()),
+        }
+    });
     let histories = histories
         .iter()
         .map(|history| {
@@ -830,6 +927,7 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
         wall_seconds: started.elapsed().as_secs_f64(),
         histories,
         exchange,
+        conformers,
     })
 }
 

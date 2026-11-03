@@ -398,7 +398,8 @@ pub enum CheckpointAction {
     /// Occupancy MixingCertified conjuncts. CatalogSaturated is
     /// not this action. A published energy is not this action.
     Retire {
-        /// `mixing` or `saturated`.
+        /// `mixing` or `saturated`, or `entropy_converged` from the entropy
+        /// stop of a thread ensemble.
         reason: String,
     },
 }
