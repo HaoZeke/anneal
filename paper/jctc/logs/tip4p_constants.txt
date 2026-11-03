@@ -1,0 +1,7 @@
+# command: python3 scripts/tip4p_constants.py (scripts/ of this handoff)
+Jorgensen A = 2510400.0000 kJ A^12/mol, C = 2552.240000 kJ A^6/mol
+exact epsilon = 0.6486943 kJ/mol, sigma = 3.153578 A
+anneal epsilon = 0.6485, sigma = 3.15365: C6 = 2551.8252, C12 = 2510336.2
+GMIN C6 = 2552.24, C12 = 2510.4e3: equal to Jorgensen C and A: True
+relative epsilon rounding (anneal/exact - 1) = -2.996e-04; sigma (anneal/exact - 1) = 2.285e-05
+# rc=0

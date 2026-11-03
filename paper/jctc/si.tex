@@ -1,0 +1,103 @@
+\documentclass[journal=jctcce,manuscript=suppinfo]{achemso}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{siunitx}
+\sisetup{scientific-notation=true,exponent-product=\times}
+\input{macros}
+\title{Supporting Information: Basin hopping on Lennard-Jones clusters with one preset at every size}
+\author{Rohit Goswami}
+\affiliation{SURF B.V., Amsterdam, The Netherlands}
+\alsoaffiliation{Science Institute, University of Iceland, Reykjavik, Iceland}
+\alsoaffiliation{TurtleTech ehf., Reykjavik, Iceland}
+\author{Ruhila Goswami}
+\affiliation{Faculty of Life and Environmental Sciences, University of Iceland, Reykjavik, Iceland}
+\author{Amrita Goswami}
+\affiliation{Universidad Complutense de Madrid, Madrid, Spain}
+\author{Moritz Sallermann}
+\affiliation{Universidad Complutense de Madrid, Madrid, Spain}
+\author{Sonaly Goswami}
+\affiliation{Department of Chemistry, Indian Institute of Technology Kanpur, Kanpur, India}
+\author{Debabrata Goswami}
+\affiliation{Center for Bits and Atoms, Massachusetts Institute of Technology, Cambridge, Massachusetts 02139, United States}
+\alsoaffiliation{Department of Chemistry, Indian Institute of Technology Kanpur, Kanpur, India}
+\email{dgoswami@iitk.ac.in}
+\begin{document}
+
+\section{Board constants}
+The hit rule is an energy strictly below the reference plus \(0.001\), read from a converged improvement.
+The references are \(-173.928427\) (LJ\(_{38}\)), \(-279.248470\) (LJ\(_{55}\)), \(-397.492331\) (LJ\(_{75}\)), \(-543.665361\) (LJ\(_{98}\)) and \(-582.086642\) (LJ\(_{104}\)), in reduced units.
+The temperature is \(0.8\), the value Wales and Doye used for Lennard-Jones basin hopping and the value stored at \texttt{src/methods/cluster\_hopping/preset.rs:8}.\cite{wales1997}
+The start density passed to \texttt{random\_cluster} is \(0.7\), at \texttt{src/methods/cluster\_hopping.rs:6709}.
+The function comment calls the draw liquid-like, and a derivation that selects \(0.7\) is still open.
+For six sorted values the median is the mean of the third and fourth, and the interquartile range is the fifth minus the second.
+A miss is charged twice its ceiling.
+
+\section{Six fresh runs}
+The binary was built from commit \texttt{\CommitShort}, the head of \texttt{lib/recommended-no-size-switches}.
+Main still contains both atom-count tests.
+The 38-atom numbers in the article are these six processes, and they are not a row from an earlier campaign.
+Every log header records \texttt{uname -m}, \texttt{nproc}, and the processor string.
+The launch order is the file \texttt{logs/order.txt}.
+The move library on every run is \texttt{LeanBurst}, and the surface list is empty.
+At 38 atoms the sorted penalised costs are 10249, 55324, 65670, 69471, 91412 and 208674.
+The median is \((65670+69471)/2 = 67570.5\).
+The interquartile range is \(91412-55324 = 36088\).
+\begin{center}
+\input{si-six}
+\end{center}
+
+\section{Plain walk}
+One further process runs the recommended preset at 38 atoms with the stall exits and the Bayes screen turned off, seed 0, budget 30000.
+The record is \texttt{logs/lj38-plain-seed0.log}.
+The best energy in that log is \PlainEnergy, after \PlainCalls{} charged evaluations.
+
+\section{Published symmetrised costs}
+\texttt{data/literature.tsv} quotes Oakley, Johnston and Wales, Table 1.\cite{oakley2013}
+The continuous-symmetry basin-hopping mean at 38 atoms is 4369 evaluations over 100 successful runs.
+The core-orbit basin-hopping means are 50229 at 75 atoms and 109753 at 98 atoms, again over 100 successful runs.
+The same file's Table 2 rows are genetic-algorithm means at 75 and 98 atoms.
+No row in that file is a genetic algorithm at 104 atoms.
+
+\section{TIP4P pair constants}
+\texttt{logs/tip4p\_constants.txt} records Jorgensen's \(A = 2510400\) and \(C = 2552.24\), in kJ\,\AA\(^{12}\)\,mol\(^{-1}\) and kJ\,\AA\(^{6}\)\,mol\(^{-1}\).\cite{jorgensen1983}
+GMIN's \(C_6\) and \(C_{12}\) match those two numbers.
+The anneal pair built from a rounded well depth and a rounded \(\sigma\) gives \(C_6 = 2551.8252\) and \(C_{12} = 2510336.2\).
+This article reports no TIP4P hit count.
+A later TIP4P campaign has to use one pair of coefficients on every code.
+
+\section{Earlier campaign}
+\texttt{data/campaign-scores.csv} is an earlier 64-seed campaign, and on TIP4P\(_{20}\) a 16-seed campaign.
+Its recommended rows were scored with a preset that still branched on the atom count.
+The referee table for LJ\(_{98}\) records a hop at 24 of 64 and GMIN at 62 of 64, with penalised-cost medians 2000000 and 158540.5.
+The campaign file records the recommended preset at 36 of 64, median 824807, and GMIN basin hopping at 61 of 64, median 321201.5.
+\texttt{logs/paired\_bootstrap\_lj98.txt} records the paired-bootstrap interval of the median ratio for the 24-of-64 hop, 12.62 with endpoints 8.52 and 15.22, from 2000 resamples.
+None of those rows is the preset measured above.
+OGOLEM, cited as Dieterich and Hartke, is in the campaign file at 6 of 64 on LJ\(_{104}\).\cite{dieterich2010}
+ABCluster, cited as Zhang and Dolg, is in the same file.\cite{zhang2015}
+The reconciliation of the two LJ\(_{98}\) tables, of the TIP4P\(_{20}\) seed counts, and of the TIP4P\(_{10}\) medians is \texttt{RECONCILE.md} in the archive that accompanies this article.
+
+\section{Rerun plan}
+We have not run the eight experiments in this list.
+E1 defines the calls-to-target of a multi-replica run, then runs one chain, four independent chains, four communicating chains, and a bank of forty chains, on the shared starts of LJ\(_{38}\), LJ\(_{55}\), LJ\(_{75}\), LJ\(_{98}\) and TIP4P\(_{10}\).
+E2 runs GMIN with the archived keyword file for each size, dynamic lattice search, a cut-and-splice genetic algorithm, ABCluster, and minima hopping, on the same starts, with one force-call ledger.
+E3 adds an arm with retirement off and an arm that is plain basin hopping plus orbit completion, and scores them where a screen can refuse a trial before the hit.
+E4 uses one hit rule on every code, a minimum relaxed to a stated gradient bound, and pairs the archived GMIN files on the shared starts.
+E5 is the constructor measured in the article, which does not read the system size, scored again on held-out sizes from LJ\(_{31}\) to LJ\(_{37}\), LJ\(_{76}\) to LJ\(_{97}\), and LJ\(_{102}\) to LJ\(_{104}\).
+E6 uses Jorgensen's \(A\) and \(C\) on every TIP4P code and scores every size at \(0.001\,\mathrm{kJ\,mol^{-1}}\).
+E7 runs the external potential path and the built-in surface on one system and compares hits and calls.
+E8 is a bond-constrained conformer comparison against CREST on valid records, or the absence of that section.
+Hit counts in that campaign are compared by Fisher's exact test.
+Paired penalised costs are compared by the Wilcoxon signed-rank test, with Holm's correction over a family written down before the run.\cite{holm1979}
+
+\section{Repeating the six runs}
+Build \texttt{examples/lj38\_honest} in release and run, for each pair in \texttt{logs/order.txt},
+\begin{verbatim}
+taskset -c 0 lj38_honest N SEED CEILING
+\end{verbatim}
+with the ceilings 1200000, 100000, 400000, 1000000 and 1000000 at 38, 55, 75, 98 and 104.
+The plain walk is \texttt{lj38\_honest plain 0 30000}.
+A header with \texttt{uname -m}, \texttt{nproc}, and the processor string is written on every log, and the hostname is left out.
+
+\bibliography{refs}
+
+\end{document}

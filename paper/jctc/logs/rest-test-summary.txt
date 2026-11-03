@@ -1,0 +1,3 @@
+integration tests not reached before compile_contracts
+result lines: 107 ok, 0 failed
+REST:0

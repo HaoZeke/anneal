@@ -1,0 +1,4 @@
+# Earlier hop, not the preset measured in this article.
+# Source: referee pack logs/paper_stats.txt
+# Columns include hits and the paired-bootstrap interval of the PAR-2 median ratio.
+lj98 | 24/64 62/64 | 9.09e-14 | 2000000 158540.5 | 12.62 [8.52, 15.22] | 2064988.6 272061.9 | 2.55e-17 | 1.41e-09
