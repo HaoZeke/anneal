@@ -1761,6 +1761,37 @@ where
     )
 }
 
+/// As [`run_with_gradient`], reporting every certified quench and every
+/// adoption to a minimum history.
+///
+/// [`run_with_history_at_checkpoints`] without the observations, for a
+/// chain whose only channel to its peers is the history itself.
+pub fn run_with_history<'g, R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    history: Option<&mut dyn HistoryHook>,
+    rng: &mut R,
+) -> Result<Outcome, SearchError> {
+    let mut checkpoint = continue_without_checkpoint;
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        None,
+        None,
+        None,
+        history,
+        None,
+        &mut checkpoint,
+        rng,
+    )
+}
+
 /// As [`run_with_gradient_settle`], reporting every certified quench and
 /// every adoption to a minimum history, with periodic observations.
 ///
