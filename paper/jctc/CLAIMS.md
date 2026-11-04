@@ -43,7 +43,7 @@ The before count is 26 sentences.
 Ceiling 109753, miss charge 219506, six seeds, commit 90c898dd.
 These counts are a code problem for the anneal head.
 They are not the finding of the article.
-The article keeps the six-run table as a placeholder for the head that replaces this one.
+The 109753 section and the six-run table are out of the article until that head is rerun.
 
 LJ38: 5/6, median PAR-2 67570.5, type-7 interquartile range 28016.25.
 Sorted PAR-2: 10249, 55324, 65670, 69471, 91412, 219506.
