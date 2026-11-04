@@ -7,7 +7,7 @@ The title, the author block, the Metropolis step, and the bibliography stay.
 
 ## What changed
 
-The Oakley means stay a published scale.
+The 38-atom and 75-atom Oakley means stay in the data file.
 The preset keeps one move library at every size.
 The hit is read from converged improvements.
 The sealed LJ75 campaign is 200 seeds.

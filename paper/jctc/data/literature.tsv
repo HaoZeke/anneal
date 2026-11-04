@@ -16,7 +16,6 @@ DLS-TPIO	188	250	12	fixed independent run protocol	1614	local searches	total sea
 DLS-TPIO	236	250	6	fixed independent run protocol	3299	local searches	total searches divided by hits; not conditional first-hit mean	Lai et al., Sci. China Chem. 54 (2011) 986-991, doi:10.1007/s11426-011-4280-4, Tables 2-3
 GMIN CSM BH	38	100	100	run until success	4369	energy/gradient evaluations	mean first encounter	Oakley et al., PCCP 15 (2013) 3965-3976, doi:10.1039/C3CP44332A, Table 1
 GMIN core-orbit BH	75	100	100	run until success	50229	energy/gradient evaluations	mean first encounter	Oakley et al., PCCP 15 (2013) 3965-3976, doi:10.1039/C3CP44332A, Table 1
-GMIN core-orbit BH	98	100	100	run until success	109753	energy/gradient evaluations	mean first encounter	Oakley et al., PCCP 15 (2013) 3965-3976, doi:10.1039/C3CP44332A, Table 1
 GMIN core-orbit GA	75	100	100	run until success	87250	energy/gradient evaluations	mean first encounter	Oakley et al., PCCP 15 (2013) 3965-3976, doi:10.1039/C3CP44332A, Table 2
 GMIN core-orbit GA	98	100	100	run until success	178651	energy/gradient evaluations	mean first encounter	Oakley et al., PCCP 15 (2013) 3965-3976, doi:10.1039/C3CP44332A, Table 2
 basin hopping	38	5	4	long unseeded runs	about 1000	Monte Carlo steps	approximate conditional first-hit mean	Wales and Doye, J. Phys. Chem. A 101 (1997) 5111-5116, doi:10.1021/jp970984n, section III

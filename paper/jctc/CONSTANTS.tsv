@@ -10,9 +10,8 @@ LJ55 reference	-279.248470	Published minimum used as the hit threshold.	manuscri
 LJ75 reference	-397.492331	Published minimum used as the hit threshold.	manuscript, How the runs were made	manuscript and SI	stated reference	pass	none
 LJ98 reference	-543.665361	Published minimum used as the hit threshold.	manuscript, How the runs were made	manuscript and SI	stated reference	pass	none
 LJ104 reference	-582.086642	Published minimum used as the hit threshold.	manuscript, Results	manuscript and SI	stated reference	pass	none
-Oakley LJ38 mean	4369	Mean first encounter, 100 successful runs, continuous-symmetry basin hopping, energy or gradient evaluations.	data/literature.tsv; Oakley, Johnston and Wales 2013, Table 1	manuscript introduction	published, different protocol	pass	none
-Oakley LJ75 mean	50229	Mean first encounter, 100 successful runs, core-orbit basin hopping.	data/literature.tsv; Oakley, Johnston and Wales 2013, Table 1	manuscript introduction	published, different protocol	pass	none
-Oakley LJ98 mean	109753	Mean first encounter, 100 successful runs, core-orbit basin hopping.	data/literature.tsv; Oakley, Johnston and Wales 2013, Table 1	manuscript introduction	published, different protocol	pass	none
+Oakley LJ38 mean	4369	Mean first encounter, 100 successful runs, continuous-symmetry basin hopping, energy or gradient evaluations.	data/literature.tsv; Oakley, Johnston and Wales 2013, Table 1	SI, Published symmetrised costs	published, different protocol	pass	none
+Oakley LJ75 mean	50229	Mean first encounter, 100 successful runs, core-orbit basin hopping.	data/literature.tsv; Oakley, Johnston and Wales 2013, Table 1	data/literature.tsv	published, different protocol	pass	none
 Jorgensen A	2510400	kJ A^12/mol. GMIN matches it.	logs/tip4p_constants.txt; Jorgensen et al. 1983	SI, TIP4P pair constants	logged	pass	none
 Jorgensen C	2552.24	kJ A^6/mol. GMIN matches it.	logs/tip4p_constants.txt; Jorgensen et al. 1983	SI, TIP4P pair constants	logged	pass	none
 anneal TIP4P C6	2551.8252	From rounded epsilon 0.6485 and sigma 3.15365. Differs from Jorgensen C.	logs/tip4p_constants.txt	SI, TIP4P pair constants	logged difference	pass	E6 uses Jorgensen A and C on every code
