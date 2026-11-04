@@ -1206,6 +1206,30 @@ pub(crate) fn contain(x: &mut Array1<f64>, n: usize, radius: f64) {
     }
 }
 
+/// Pulls each covalent fragment whose centroid has left the container back
+/// until the centroid sits on its surface. Bond lengths are unchanged.
+///
+/// [`contain`] scales every far atom onto the sphere, which shortens the bonds
+/// of anything that spans more than the sphere. A flexible molecule can, so
+/// under the molecular move library with species known the wall acts on
+/// whole fragments instead: a molecule
+/// centred on the origin is left alone, and a fragment that drifted off is
+/// translated back rigidly.
+pub(crate) fn contain_fragments(x: &mut Array1<f64>, species: &[u32], tolerance: f64, radius: f64) {
+    for fragment in connectivity_groups_z(x.view(), species, tolerance) {
+        let c = moves::group_centroid(x.view(), &fragment);
+        let r = (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt();
+        if r > radius && r > 0.0 {
+            let shift = 1.0 - radius / r;
+            for &a in &fragment {
+                for k in 0..3 {
+                    x[3 * a + k] -= c[k] * shift;
+                }
+            }
+        }
+    }
+}
+
 /// Pushes overlapping points apart to `min_sep`.
 ///
 /// A configuration with two points on top of each other has an enormous value
@@ -4361,7 +4385,11 @@ where
         match hop_frozen.as_ref() {
             None => {
                 recentre(&mut trial, n);
-                contain(&mut trial, n, cfg.container);
+                let molecular = matches!(cfg.move_library, MoveLibrary::Molecular { .. });
+                match cfg.species.as_deref().filter(|z| molecular && z.len() == n) {
+                    Some(z) => contain_fragments(&mut trial, z, cfg.bond_tolerance, cfg.container),
+                    None => contain(&mut trial, n, cfg.container),
+                }
             }
             Some(f) => {
                 let mut lo = [f64::INFINITY; 3];
@@ -8775,6 +8803,56 @@ mod tests {
             let r = (0..3).map(|k| x[3 * i + k].powi(2)).sum::<f64>().sqrt();
             assert!(r <= 1.0 + 1e-9, "point {i} left the container at {r}");
         }
+    }
+
+    fn pair_distance(x: &Array1<f64>, i: usize, j: usize) -> f64 {
+        (0..3)
+            .map(|k| (x[3 * i + k] - x[3 * j + k]).powi(2))
+            .sum::<f64>()
+            .sqrt()
+    }
+
+    /// A six-carbon chain spans 7.5 Å, more than a 2 Å container. Scaling
+    /// atoms onto the sphere shortens its bonds; containing the fragment
+    /// leaves every bond where it was.
+    #[test]
+    fn fragment_containment_keeps_a_long_chain_intact() {
+        let n = 6usize;
+        let mut x = Array1::zeros(3 * n);
+        for i in 0..n {
+            x[3 * i] = 1.5 * i as f64;
+        }
+        recentre(&mut x, n);
+        let mut crushed = x.clone();
+        contain(&mut crushed, n, 2.0);
+        let crushed_bond = pair_distance(&crushed, 0, 1);
+        assert!(
+            (crushed_bond - 1.5).abs() > 0.2,
+            "per-atom containment left the end bond at {crushed_bond}"
+        );
+        let species = vec![6u32; n];
+        let mut kept = x.clone();
+        contain_fragments(&mut kept, &species, 1.25, 2.0);
+        assert_eq!(kept, x, "a centred molecule was moved");
+    }
+
+    /// A fragment that drifted off comes back as a rigid body with its
+    /// centroid on the sphere; the fragment at the centre is untouched.
+    #[test]
+    fn fragment_containment_returns_a_stray_fragment_rigidly() {
+        let species = vec![6u32, 6, 6, 6];
+        let mut x = Array1::from(vec![
+            -0.75, 0.0, 0.0, 0.75, 0.0, 0.0, 20.0, 0.0, 0.0, 21.5, 0.0, 0.0,
+        ]);
+        let stray_bond = pair_distance(&x, 2, 3);
+        contain_fragments(&mut x, &species, 1.25, 5.0);
+        assert!((pair_distance(&x, 2, 3) - stray_bond).abs() < 1e-12);
+        let centroid = (x[6] + x[9]) / 2.0;
+        assert!(
+            (centroid - 5.0).abs() < 1e-12,
+            "stray centroid at {centroid}"
+        );
+        assert_eq!((x[0], x[3]), (-0.75, 0.75));
     }
 
     #[test]

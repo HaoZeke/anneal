@@ -1116,7 +1116,7 @@ fn components(n: usize, neighbours: impl Fn(usize) -> Vec<usize>) -> Vec<Vec<usi
 }
 
 /// Centroid of one group.
-fn group_centroid(x: ArrayView1<f64>, atoms: &[usize]) -> [f64; 3] {
+pub(crate) fn group_centroid(x: ArrayView1<f64>, atoms: &[usize]) -> [f64; 3] {
     let n = x.len() / 3;
     let mut c = [0.0_f64; 3];
     let mut m = 0usize;
