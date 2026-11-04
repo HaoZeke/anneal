@@ -126,7 +126,7 @@ jobs:
         shell: bash
         run: |
           oversized=$(
-            git rev-list --objects --all |
+            git rev-list --objects HEAD |
               git cat-file --batch-check='%(objecttype) %(objectsize) %(objectname) %(rest)' |
               awk '$1 == "blob" && $2 > 1048576'
           )
