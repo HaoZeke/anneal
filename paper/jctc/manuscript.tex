@@ -44,9 +44,6 @@ The structure that a thermodynamic model of a cluster starts from is a local min
 On the Lennard-Jones pair potential the number of minima grows so quickly with the number of atoms that a search is judged by how many evaluations it spends before it reaches a minimum that is already known.\cite{wales1997,jones1924}
 Basin hopping, introduced by Li and Scheraga for a rough potential-energy surface and made the working method for atomic clusters by Wales and Doye, is a Monte Carlo walk on those minima.\cite{li1987,wales1997}
 A move proposes a new geometry, a local minimisation returns a minimum, and the Metropolis rule at one temperature accepts or rejects that minimum.
-Oakley, Johnston and Wales report mean first-encounter costs, over 100 random starts that all succeed, of 4369 energy evaluations for the 38-atom cluster with the continuous symmetry measure, 50229 for the 75-atom cluster with core orbits, and 109753 for the 98-atom cluster with core orbits.\cite{oakley2013}
-Those three means are the rows of their Tables 1 for the continuous-symmetry and core-orbit basin-hopping runs, as listed in \texttt{data/literature.tsv}.
-The starts are random, the runs continue until every start has succeeded, and the counter is an energy or gradient evaluation.
 We report the sealed LJ\(_{75}\) campaign, 200 seeds at a cap of \(4\times 10^{6}\) force calls, and the water hexamer on 192 seeds.
 The preset measured here draws move arms by Thompson sampling from a posterior on the depth of the quench, it abandons a quench that is returning to the occupied basin, and it restarts when the chain has stopped improving.\cite{thompson1933,goedecker2004}
 The constructor installs the lean burst library at every size and leaves the surface list empty.
