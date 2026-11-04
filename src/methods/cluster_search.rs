@@ -15,6 +15,7 @@
 //! there arrives at the cluster driver by the same route as one written here
 //! and neither the driver nor this function can tell them apart.
 
+use crate::methods::bond_preconditioner::BondPreconditioner;
 use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 use crate::methods::cluster_hopping::min_pair_distance;
 #[cfg(any(feature = "bank-rpc", test))]
@@ -325,6 +326,11 @@ where
     let polish_iters = cfg.polish_records;
     let adaptive = cfg.adaptive_screen;
     let probe = cfg.probe_screen;
+    let species = cfg
+        .species
+        .as_deref()
+        .filter(|_| cfg.precondition_bonds)
+        .filter(|z| z.len() == cfg.n_points);
     let mut surfaces = (!cfg.surfaces.is_empty())
         .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
     let mut anchor: Option<Array1<f64>> = None;
@@ -434,7 +440,7 @@ where
         // A descent from where the previous one ended, the full pass after
         // a screen among them, opens by asking for an answer already paid.
         let mut opening = prior.clone();
-        let evaluate = |v: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+        let mut evaluate = |v: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
             if let Some(check) = opening.take_if(|check| check.at == v) {
                 let answer = (check.energy, check.gradient.clone());
                 *last.borrow_mut() = Some(check);
@@ -445,7 +451,7 @@ where
             remember(v, energy, &gradient, physical);
             Some((energy, gradient))
         };
-        let watch = |_: usize, fv: f64| {
+        let mut watch = |_: usize, fv: f64| {
             if stop_at.is_some_and(|limit| fv <= limit) {
                 return false;
             }
@@ -475,7 +481,37 @@ where
             early = true;
             false
         };
-        let (f, xr, _) = opt.minimize_watched(x, iters, evaluate, watch);
+        let preconditioner = species.and_then(|z| BondPreconditioner::new(x, z));
+        let (f, xr) = match preconditioner {
+            None => {
+                let (f, xr, _) = opt.minimize_watched(x, iters, &mut evaluate, &mut watch);
+                (f, xr)
+            }
+            Some(pre) => {
+                // The reduced gradient has other units, so the solver's own
+                // test is off and the stop reads the Cartesian one.
+                let origin = x.to_owned();
+                let gtol = opt.gtol;
+                opt.gtol = 0.0;
+                let (f, zr, _) = opt.minimize_watched(
+                    Array1::zeros(x.len()).view(),
+                    iters,
+                    |z| {
+                        let v = pre.expand(origin.view(), z);
+                        evaluate(v.view()).map(|(e, g)| (e, pre.reduce(g.view())))
+                    },
+                    |it, fv| {
+                        let settled = last
+                            .borrow()
+                            .as_ref()
+                            .is_some_and(|c| largest_component(c.gradient.view()) <= gtol);
+                        !settled && watch(it, fv)
+                    },
+                );
+                opt.gtol = gtol;
+                (f, pre.expand(origin.view(), zr.view()))
+            }
+        };
         if let Some((at, claim)) = probe_at {
             stats.probe_stops += 1;
             stats.probe_steps += at;
@@ -2254,6 +2290,33 @@ mod tests {
             }
             (e, g)
         }
+    }
+
+    fn chain_relax_cost(precondition: bool) -> (usize, f64) {
+        let chain = SpringChain::new(30);
+        let mut cfg = Config::for_molecular(vec![6; 30], vec![(0..30).collect()], 1.0);
+        cfg.record_gradient = 1e-4;
+        cfg.precondition_bonds = precondition;
+        let paid = PaidCheck::default();
+        let mut stats = RelaxStats::default();
+        let mut led = Ledger::new(20_000);
+        let mut relax = warm_relax(&chain, &cfg, &mut stats, 0, &paid);
+        let (_, x) = relax(&mut led, chain.start().view(), 5_000);
+        (
+            led.spent(),
+            largest_component(chain.value_and_gradient(x.view()).1.view()),
+        )
+    }
+
+    #[test]
+    fn a_bond_preconditioned_quench_settles_a_stiff_chain_in_fewer_calls() {
+        let (plain, plain_g) = chain_relax_cost(false);
+        let (pre, pre_g) = chain_relax_cost(true);
+        assert!(plain_g <= 1e-4 && pre_g <= 1e-4, "{plain_g} {pre_g}");
+        assert!(
+            2 * pre < plain,
+            "preconditioned {pre} calls against plain {plain}"
+        );
     }
 
     #[test]

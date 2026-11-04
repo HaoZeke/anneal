@@ -963,6 +963,12 @@ pub struct Config {
     /// comes back near 1e-6, and tight enough to bar a partial quench, which
     /// comes back near 1e-1 or worse.
     pub record_gradient: f64,
+    /// Precondition each molecular quench with the covalent bond graph.
+    ///
+    /// See [`crate::methods::bond_preconditioner`]. Needs
+    /// [`Config::species`]; without it the quench is unpreconditioned.
+    #[serde(skip_serializing_if = "is_false")]
+    pub precondition_bonds: bool,
     /// Whether every quenched energy is kept, not only the improving ones:
     /// the sample [`crate::tail`] fits an endpoint to. Truncated by
     /// [`Config::screen_margin`], since the full relaxation runs only where
@@ -1487,6 +1493,7 @@ impl Config {
             screen_steps: 25,
             adaptive_screen: false,
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
+            precondition_bonds: false,
             trace_quenched: false,
             polish_records: 0,
             surrogate_tolerance: 0.5,
