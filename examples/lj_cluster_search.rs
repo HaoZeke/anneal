@@ -1285,16 +1285,10 @@ fn lj_partial_grad(x: ndarray::ArrayView1<f64>, moved: &[usize]) -> Array1<f64> 
 /// Published global minima. A score for known hurdles; occupancy
 /// does not stop on these numbers.
 fn reference(n: usize) -> Option<f64> {
-    Some(match n {
-        13 => -44.326801,
-        38 => -173.928427,
-        55 => -279.248470,
-        75 => -397.492331,
-        98 => -543.665361,
-        102 => -569.363652,
-        104 => -582.086642,
-        _ => return None,
-    })
+    match n {
+        13 | 38 | 55 | 75 | 98 | 102 | 104 => anneal_core::published_minima::lennard_jones(n),
+        _ => None,
+    }
 }
 
 fn main() {

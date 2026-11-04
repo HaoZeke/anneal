@@ -45,9 +45,9 @@ use rand::{Rng, SeedableRng};
 const N: usize = 98;
 const K: usize = 40;
 const MAX_STEP: u64 = 1500;
-const TARGET: f64 = -543.665361;
+const TARGET: f64 = anneal_core::published_minima::LJ98_GLOBAL;
 const HIT: f64 = 1e-3;
-const REFERENCE: f64 = -543.665361;
+const REFERENCE: f64 = anneal_core::published_minima::LJ98_GLOBAL;
 
 fn pair_unit() -> f64 {
     2f64.powf(1.0 / 6.0)
