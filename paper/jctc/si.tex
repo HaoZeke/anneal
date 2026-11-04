@@ -52,13 +52,16 @@ The water hexamer figure in the article uses the sealed GFN2-xTB campaign, and t
 \section{Earlier campaign}
 \texttt{data/campaign-scores.csv} is an earlier 64-seed campaign, and on TIP4P\(_{20}\) a 16-seed campaign.
 Its recommended rows were scored with a preset that still branched on the atom count.
-The referee table for LJ\(_{98}\) records a hop at 24 of 64 and GMIN at 62 of 64, with penalised-cost medians 2000000 and 158540.5.
-The campaign file records the recommended preset at 36 of 64, median 824807, and GMIN basin hopping at 61 of 64, median 321201.5.
+\texttt{data/lj55\_lj98/seeds.csv} scores LJ\(_{98}\) by the energy rule.
+The full arm hits 24 of 64.
+Its call PAR-2 median is 2000000 and its type-7 interquartile range is 1513982.75.
+The GMIN arm hits 64 of 64.
+Its call PAR-2 median is 158540.5 and its type-7 interquartile range is 201463.5.
 \texttt{logs/paired\_bootstrap\_lj98.txt} records the paired-bootstrap interval of the median ratio for the 24-of-64 hop, 12.62 with endpoints 8.52 and 15.22, from 2000 resamples.
 None of those rows is the sealed LJ\(_{75}\) campaign of 200 seeds.
 OGOLEM, cited as Dieterich and Hartke, is in the campaign file at 6 of 64 on LJ\(_{104}\).\cite{dieterich2010}
 ABCluster, cited as Zhang and Dolg, is in the same file.\cite{zhang2015}
-The reconciliation of the two LJ\(_{98}\) tables, of the TIP4P\(_{20}\) seed counts, and of the TIP4P\(_{10}\) medians is \texttt{RECONCILE.md} in the archive that accompanies this article.
+The seed file is the record of those LJ\(_{98}\) medians.
 
 \section{Structure plates, sketch-maps, and landfold}
 \begin{center}

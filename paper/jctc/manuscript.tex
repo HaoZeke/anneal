@@ -32,7 +32,7 @@
 \begin{document}
 
 \begin{abstract}
-On the head of \texttt{lib/recommended-no-size-switches} we keep one move library at every cluster size.
+The recommended preset keeps one move library at every cluster size.
 Lattice regrowth and a compacted pair surface are settings the caller adds.
 The search is a Metropolis walk on quenched minima at one reduced temperature, with a depth posterior on the moves, a Good-Turing census of the packings, and chains that share minima.
 Figure~\ref{fig:stack} sets those pieces in the order a force call meets them.
@@ -102,7 +102,7 @@ The figure is drawn from the search, and no campaign count enters it.
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{algorithm_stack.pdf}
-\caption{The stack of the search, in the Ruhi palette.
+\caption{The stack of the search, in the Ruhi colour scheme.
 The chains share minima through the annealed-flow bank.
 In one hop the Thompson draw picks the arm, the quench is screened, and the acceptance test runs at the held temperature \(T=0.8\).
 The depth of the quench updates the posterior of the arm that played, and a saturated packing retires.
@@ -195,7 +195,7 @@ The figure is drawn from the search, and no campaign count enters it.
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{rec_arms.pdf}
-\caption{The arms of the recommended hop and the law of its burst, in the Ruhi palette.
+\caption{The arms of the recommended hop and the law of its burst, in the Ruhi colour scheme.
 The Thompson draw picks one arm.
 Whichever arm plays, its proposal is quenched once and meets one acceptance test, and the depth updates the posterior of that arm.
 The burst length is capped at eight relocations.}
@@ -218,25 +218,31 @@ The Supporting Information draws the full structure plates.
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{systems.pdf}
-\caption{Structures of the benchmark, rendered in the Ruhi palette.
+\caption{Structures of the benchmark, rendered in the Ruhi colour scheme.
 (a) The global minima of LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\) and LJ\(_{104}\).
 (b) The TIP4P minima of 10, 15 and 20 molecules, and the lowest GFN2-xTB hexamer of each class.}
 \label{fig:systems}
 \end{figure}
 
 \subsection{Rates and the water hexamer}
-On LJ\(_{75}\), at a cap of \(4\times 10^{6}\) force calls, the recommended hop hit 200 of 200 seeds, call PAR-2 \(32363.98\).
-The derived hop hit 200 of 200, call PAR-2 \(27107.045\).
-GMIN with core orbits hit 200 of 200, call PAR-2 \(58029.630\).
+On LJ\(_{75}\), at a cap of \(4\times 10^{6}\) force calls, the recommended hop hit 200 of 200 seeds.
+The mean call PAR-2 is \(32363.98\).
+The median is \(28593.5\) and the type-7 interquartile range is \(32890.5\).
+The derived hop hit 200 of 200.
+Its mean call PAR-2 is \(27107.045\), its median is \(19974\), and its type-7 interquartile range is \(29912.75\).
+GMIN with core orbits hit 200 of 200.
+Its mean call PAR-2 is \(58029.63\), its median is \(33122\), and its type-7 interquartile range is \(73623.5\).
 Figure~\ref{fig:lj75-ecdf} draws those three encounter curves, and Figure~\ref{fig:summary} places the same LJ\(_{75}\) row on the rate map.
-On that map the recommended hop also hit 72 of 72 seeds at LJ\(_{38}\) (cap \(4\times 10^{5}\), call PAR-2 \(805.60\)) and 47 of 48 seeds at LJ\(_{98}\) (cap \(4\times 10^{6}\), call PAR-2 \(928259.96\)).
-GMIN hit 72 of 72 at LJ\(_{38}\) (call PAR-2 \(4744.89\)) and 48 of 48 at LJ\(_{98}\) (call PAR-2 \(285752.4\)).
-These counts are the sealed campaign on anneal commit 36086e98.
+The recommended hop hit 72 of 72 seeds at LJ\(_{38}\).
+The sealed summary records a median of 726 force calls on those hits.
+It hit 47 of 48 seeds at LJ\(_{98}\).
+The sealed summary records a median of 450877 force calls on those hits.
+These counts are the sealed campaign.
 
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{summary_rates.pdf}
-\caption{Fraction of seeds that reach the reference, sealed campaign, Ruhi palette.
+\caption{Fraction of seeds that reach the reference, sealed campaign, Ruhi colour scheme.
 Lennard-Jones takes one row a size.
 The LJ\(_{75}\) row is the recommended hop and GMIN with core orbits over 200 seeds.
 The hexamer row is the default hop and CREST on seeds 0 to 191.
@@ -287,16 +293,23 @@ The default arm is the hop.
 The budget-fair polish is an opt-in mode that charges an external polish against the same budget.
 The third arm is CREST, and the fourth runs the same polish after CREST inside the same budget.
 A run hits when the iterative rotations and assignments alignment (IRA) matches a structure to a Malloum prism, cage, book, or cyclic chair reoptimised at GFN2-xTB.\cite{gundeIraShapeMatching2021,malloumStructuresRelativeStability2019,perezStructuresCagePrism2012}
-The default hop hit 121 of 192 seeds and CREST hit 97 of 192.
+The default hop hit 121 of 192 seeds.
+Its call PAR-2 median is 4000 and its type-7 interquartile range is 4000.
+CREST hit 97 of 192 seeds.
+Its call PAR-2 median is 4000 and its type-7 interquartile range is 4000.
 Paired by seed, the exact McNemar test of the discordant pairs gives \(p=0.0264\).\cite{mcnemarNoteSamplingError1947}
-The budget-fair polish hit 148 of 192, and CREST plus that polish hit 114 of 192.
-The exact McNemar \(p\) of the polish against CREST is \(1.37\times 10^{-6}\), and against CREST plus the polish it is \(0.000374\).
-Figure~\ref{fig:water-crest} draws the four arms on the same commit.
+The budget-fair polish hit 148 of 192.
+Its call PAR-2 median is 4000 and its type-7 interquartile range is 0.
+CREST plus that polish hit 114 of 192.
+Its call PAR-2 median is 3560 and its type-7 interquartile range is 4546.25.
+The exact McNemar \(p\) of the polish against CREST is \(1.37\times 10^{-6}\).
+The exact McNemar \(p\) against CREST plus the polish is \(0.000374\).
+Figure~\ref{fig:water-crest} draws the four arms.
 
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{water_crest.pdf}
-\caption{The water hexamer against CREST, sealed campaign, Ruhi palette.
+\caption{The water hexamer against CREST, sealed campaign, Ruhi colour scheme.
 (a) The share of 192 seeds that each arm hit, with the Wilson interval.\cite{wilsonProbableInferenceLaw1927}
 (b) For each hop arm paired with CREST, the difference in hit rate, with the Newcombe interval and the exact McNemar \(p\).\cite{newcombeImprovedConfidenceIntervals1998,mcnemarNoteSamplingError1947}}
 \label{fig:water-crest}
@@ -320,23 +333,28 @@ Debabrata Goswami: supervision and review of the draft.
 Rohit Goswami thanks his pets Ar\'{\i}, Yoda, Jude, Crystee, Thor, and Loki, and the garden cats.
 In memoriam TuiTui, Snoopy, and Cosmo.
 He thanks his cactus Ami and his in-laws Nagaselvamani and Sankaranarayan.
-Ruhila Goswami set the figure colour palette.
-Generative AI tools assisted with drafting and editing the text; the authors reviewed and edited all content and take full responsibility for it.
+Ruhila Goswami set the Ruhi colour scheme.
+Generative AI tools assisted with drafting and editing the text.
+The authors reviewed and edited all content and take full responsibility for it.
 
 \section*{Funding}
-This research did not receive any specific grant from funding agencies in the public, commercial, or not-for-profit sectors.
+This research did not receive any specific grant.
+No funding agency in the public, commercial, or not-for-profit sectors supported it.
 
 \section*{Notes}
 The authors declare no competing financial interest.
 
 \begin{suppinfo}
-The Supporting Information gives the board constants, the structure plates, the sketch-map panels, and the landfold panels.
+The Supporting Information gives the board constants.
+It also gives the structure plates, the sketch-map panels, and the landfold panels.
 \end{suppinfo}
 
 \section*{Data and software availability}
-The sealed Lennard-Jones and hexamer counts were taken on anneal commit 36086e98.
-The crate reports version 0.12.0, and the newest tag on the repository is v0.11.1.
-The source is under the MIT licence at \url{https://github.com/HaoZeke/anneal}, with documentation at \url{https://anneal.rgoswami.me}, and the archive of that line is the Zenodo concept record \url{https://doi.org/10.5281/zenodo.10672746}.
+The sealed Lennard-Jones and hexamer counts are the campaigns named in the results.
+The newest tag on the repository is v0.11.1.
+The source is under the MIT licence at \url{https://github.com/HaoZeke/anneal}.
+Documentation is at \url{https://anneal.rgoswami.me}.
+The archive of that line is the Zenodo concept record \url{https://doi.org/10.5281/zenodo.10672746}.
 
 \bibliography{refs}
 
