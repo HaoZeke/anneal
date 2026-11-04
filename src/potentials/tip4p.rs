@@ -70,6 +70,13 @@ pub struct Tip4pCluster {
 
 const IDENTITY: [[f64; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
+#[derive(Clone, Copy)]
+struct PlacedMolecule {
+    sites: [[f64; 3]; 4],
+    rotation: [[f64; 3]; 3],
+    jacobian_t: [[f64; 3]; 3],
+}
+
 impl Tip4pCluster {
     /// A cluster of `n_molecules` rigid TIP4P waters.
     pub fn new(n_molecules: usize) -> Self {
@@ -129,14 +136,22 @@ impl Tip4pCluster {
     pub fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let n = self.n_molecules;
         assert_eq!(x.len(), 6 * n, "TIP4P state is 6 coordinates per molecule");
-        let mut sites = vec![[[0.0; 3]; 4]; n];
-        let mut rots = vec![IDENTITY; n];
+        let mut placed = vec![
+            PlacedMolecule {
+                sites: [[0.0; 3]; 4],
+                rotation: IDENTITY,
+                jacobian_t: IDENTITY,
+            };
+            n
+        ];
         for i in 0..n {
             let com = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
             let w = [x[3 * n + 3 * i], x[3 * n + 3 * i + 1], x[3 * n + 3 * i + 2]];
-            rots[i] = rotation_matrix(w);
-            for (s, body) in sites[i].iter_mut().zip(self.body.iter()) {
-                let p = mat_vec(rots[i], *body);
+            let (rotation, jacobian_t) = rotation_and_left_jacobian_t(w);
+            placed[i].rotation = rotation;
+            placed[i].jacobian_t = jacobian_t;
+            for (s, body) in placed[i].sites.iter_mut().zip(self.body.iter()) {
+                let p = mat_vec(rotation, *body);
                 *s = [com[0] + p[0], com[1] + p[1], com[2] + p[2]];
             }
         }
@@ -147,9 +162,9 @@ impl Tip4pCluster {
         for i in 0..n {
             for j in (i + 1)..n {
                 let d = [
-                    sites[i][0][0] - sites[j][0][0],
-                    sites[i][0][1] - sites[j][0][1],
-                    sites[i][0][2] - sites[j][0][2],
+                    placed[i].sites[0][0] - placed[j].sites[0][0],
+                    placed[i].sites[0][1] - placed[j].sites[0][1],
+                    placed[i].sites[0][2] - placed[j].sites[0][2],
                 ];
                 let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
                 if r2 > 0.0 {
@@ -166,9 +181,9 @@ impl Tip4pCluster {
                 for a in 1..4 {
                     for b in 1..4 {
                         let d = [
-                            sites[i][a][0] - sites[j][b][0],
-                            sites[i][a][1] - sites[j][b][1],
-                            sites[i][a][2] - sites[j][b][2],
+                            placed[i].sites[a][0] - placed[j].sites[b][0],
+                            placed[i].sites[a][1] - placed[j].sites[b][1],
+                            placed[i].sites[a][2] - placed[j].sites[b][2],
                         ];
                         let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
                         if r2 <= 0.0 {
@@ -194,15 +209,13 @@ impl Tip4pCluster {
                 for k in 0..3 {
                     g[3 * i + k] += force[i][a][k];
                 }
-                let rel = mat_vec(rots[i], self.body[a]);
+                let rel = mat_vec(placed[i].rotation, self.body[a]);
                 let t = cross(rel, force[i][a]);
                 for k in 0..3 {
                     torque[k] += t[k];
                 }
             }
-            let w = [x[3 * n + 3 * i], x[3 * n + 3 * i + 1], x[3 * n + 3 * i + 2]];
-            let jl_t = left_jacobian_t(w);
-            let gw = mat_vec(jl_t, torque);
+            let gw = mat_vec(placed[i].jacobian_t, torque);
             for k in 0..3 {
                 g[3 * n + 3 * i + k] = gw[k];
             }
@@ -480,6 +493,44 @@ pub(crate) fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     ]
 }
 
+fn rotation_and_left_jacobian_t(w: [f64; 3]) -> ([[f64; 3]; 3], [[f64; 3]; 3]) {
+    let theta2 = w[0] * w[0] + w[1] * w[1] + w[2] * w[2];
+    if theta2 < 1e-16 {
+        return (IDENTITY, IDENTITY);
+    }
+    let theta = theta2.sqrt();
+    let k = hat(w);
+    let k2 = mat_mul(k, k);
+    let (sin, cos) = theta.sin_cos();
+    let rotation_slope = if theta < 1e-4 {
+        1.0 - theta2 / 6.0
+    } else {
+        sin / theta
+    };
+    let jacobian_slope = if theta < 1e-4 {
+        0.5 - theta2 / 24.0
+    } else {
+        (1.0 - cos) / theta2
+    };
+    let jacobian_curvature = if theta < 1e-4 {
+        1.0 / 6.0 - theta2 / 120.0
+    } else {
+        (theta - sin) / (theta2 * theta)
+    };
+    let rotation = mat_add(
+        IDENTITY,
+        mat_add(mat_scale(rotation_slope, k), mat_scale(jacobian_slope, k2)),
+    );
+    let jacobian = mat_add(
+        IDENTITY,
+        mat_add(
+            mat_scale(jacobian_slope, k),
+            mat_scale(jacobian_curvature, k2),
+        ),
+    );
+    (rotation, mat_transpose(jacobian))
+}
+
 pub(crate) fn rotation_matrix(w: [f64; 3]) -> [[f64; 3]; 3] {
     let theta2 = w[0] * w[0] + w[1] * w[1] + w[2] * w[2];
     if theta2 < 1e-16 {
@@ -628,6 +679,33 @@ mod tests {
     use crate::methods::warm_lbfgs::WarmLbfgs;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+
+    #[test]
+    fn fused_rotation_and_jacobian_are_bit_identical() {
+        for w in [
+            [0.0, 0.0, 0.0],
+            [1.0e-7, -2.0e-7, 3.0e-7],
+            [1.0e-3, -2.0e-3, 3.0e-3],
+            [0.31, -0.47, 0.83],
+            [2.7, -0.2, 0.1],
+        ] {
+            let expected_rotation = rotation_matrix(w);
+            let expected_jacobian = left_jacobian_t(w);
+            let (rotation, jacobian) = rotation_and_left_jacobian_t(w);
+            for row in 0..3 {
+                for column in 0..3 {
+                    assert_eq!(
+                        rotation[row][column].to_bits(),
+                        expected_rotation[row][column].to_bits()
+                    );
+                    assert_eq!(
+                        jacobian[row][column].to_bits(),
+                        expected_jacobian[row][column].to_bits()
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn the_jorgensen_dimer_sits_near_minus_twenty_six() {

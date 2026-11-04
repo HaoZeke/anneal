@@ -185,6 +185,33 @@ impl PairPotential {
         let n = self.n_points;
         let mut e = 0.0;
         let mut g = Array1::zeros(x.len());
+        if let Some(coordinates) = x.as_slice() {
+            let gradient = g.as_slice_mut().expect("owned gradient is contiguous");
+            for i in 0..n {
+                let base_i = 3 * i;
+                let mut gradient_i = [gradient[base_i], gradient[base_i + 1], gradient[base_i + 2]];
+                for j in (i + 1)..n {
+                    let base_j = 3 * j;
+                    let d = [
+                        coordinates[base_i] - coordinates[base_j],
+                        coordinates[base_i + 1] - coordinates[base_j + 1],
+                        coordinates[base_i + 2] - coordinates[base_j + 2],
+                    ];
+                    let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+                    if r2 <= 0.0 {
+                        continue;
+                    }
+                    let (v, coef) = self.kind.pair(r2);
+                    e += v;
+                    for k in 0..3 {
+                        gradient_i[k] += coef * d[k];
+                        gradient[base_j + k] -= coef * d[k];
+                    }
+                }
+                gradient[base_i..base_i + 3].copy_from_slice(&gradient_i);
+            }
+            return (e, g);
+        }
         for i in 0..n {
             for j in (i + 1)..n {
                 let d = [
@@ -268,6 +295,51 @@ impl crate::pes_exploration::PesSurface for PairPotential {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contiguous_pair_kernel_matches_the_ordered_reference_bit_for_bit() {
+        fn reference(potential: &PairPotential, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let mut energy = 0.0;
+            let mut gradient = Array1::zeros(x.len());
+            for i in 0..potential.n_points {
+                for j in (i + 1)..potential.n_points {
+                    let d = [
+                        x[3 * i] - x[3 * j],
+                        x[3 * i + 1] - x[3 * j + 1],
+                        x[3 * i + 2] - x[3 * j + 2],
+                    ];
+                    let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+                    if r2 <= 0.0 {
+                        continue;
+                    }
+                    let (value, coefficient) = potential.kind.pair(r2);
+                    energy += value;
+                    for k in 0..3 {
+                        gradient[3 * i + k] += coefficient * d[k];
+                        gradient[3 * j + k] -= coefficient * d[k];
+                    }
+                }
+            }
+            (energy, gradient)
+        }
+
+        let x = Array1::from_shape_fn(21, |index| {
+            let point = index / 3;
+            let axis = index % 3;
+            ((point * 17 + axis * 11 + 3) as f64).sin() + point as f64 * 0.37
+        });
+        for potential in [
+            PairPotential::lennard_jones(7),
+            PairPotential::morse(7, 6.0),
+        ] {
+            let expected = reference(&potential, x.view());
+            let observed = potential.value_and_gradient(x.view());
+            assert_eq!(observed.0.to_bits(), expected.0.to_bits());
+            for (actual, reference) in observed.1.iter().zip(expected.1.iter()) {
+                assert_eq!(actual.to_bits(), reference.to_bits());
+            }
+        }
+    }
 
     /// Two points at the pair minimum: energy is minus the well depth and the
     /// force vanishes. Fixes depth, position and the sign of the derivative
