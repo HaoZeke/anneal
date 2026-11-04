@@ -621,6 +621,13 @@ pub struct Config {
     ///
     /// See [`crate::allocate::DepthAllocator`].
     pub depth_reward: bool,
+    /// Quench a closed Wulff shell instead of the liquid when one exists.
+    ///
+    /// A peel is closed when every atom of that body shares one positive
+    /// coordination. The test reads that peel. It does not consult a template
+    /// neighbour count and it does not compare another size.
+    /// Other clusters keep the liquid start and the same hop stream.
+    pub grow_shells: bool,
     /// Reward the move allocator only for accepted hops that land in a new
     /// basin, not for accepted returns.
     ///
@@ -1096,21 +1103,24 @@ impl Config {
     /// override. Basin identity stays the measured pair-spectrum merge at 0.7.
     /// Orbit completion runs on every new basin. The constructor does not
     /// branch on the atom count. The move library is the lean burst library
-    /// at every size, and the surface list stays empty. A caller who wants
-    /// lattice regrowth or a compacted surface sets it.
+    /// at every size. A closed Wulff shell replaces the liquid start when the
+    /// lattice has one, and every other size keeps the liquid. The surface
+    /// portfolio is the plain surface plus the relative diameter penalty, at
+    /// every size. The allocator holds one arm for a block and keeps the one
+    /// whose blocks go deeper.
     /// [`Config::for_cluster`] remains the plain Wales-Doye baseline.
     /// [`Config::packing_superbasin`] adds the unmeasured SOAP-packing key
     /// and adaptive height.
-    /// A full quench runs [`Self::FOR_CLUSTER_RELAX_STEPS`] steps.
-    /// The record gradient stays at 0.001.
-    /// The Bayes threshold is the closed form at a screen of 25 and that
-    /// cap. The quotient is 175/375, which is 7/15.
-    /// [`Config::derived`] recomputes the threshold from the cap.
+    /// A full quench stops at the record gradient. The iteration cap stays
+    /// [`Self::FOR_CLUSTER_RELAX_STEPS`]. The record gradient stays at 0.001.
+    /// The Bayes threshold is the closed form at a screen of 25 and that cap.
+    /// That quotient is 175/375, which is 7/15.
     pub fn recommended(n_points: usize) -> Self {
         let mut cfg = Self::for_cluster(n_points);
         cfg.move_library = MoveLibrary::LeanBurst;
         cfg.allocate_moves = true;
         cfg.depth_reward = true;
+        cfg.grow_shells = true;
         cfg.tabu_on_stall = true;
         cfg.return_screen = true;
         cfg.symmetrise_on_stall = true;
@@ -1120,10 +1130,10 @@ impl Config {
         cfg.trail_on_stall = true;
         cfg.escape_on_stall = true;
         cfg.restart_on_stall = true;
-        cfg.bayes_threshold = crate::screen::cost_asymmetric_threshold(
-            cfg.screen_steps,
-            cfg.relax_steps,
-        );
+        cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
+        cfg.relax_steps = Self::FOR_CLUSTER_RELAX_STEPS;
+        cfg.bayes_threshold =
+            crate::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
         // The Cambridge global minimisation program calls its symmetry
         // measure every 10 quenches, and the LJ75 table in the same paper
         // restarts for about five basin-hopping steps once that measure is
@@ -1310,6 +1320,7 @@ impl Config {
             statistical_temperature: false,
             energy_bias: false,
             depth_reward: false,
+            grow_shells: false,
             novel_reward: false,
             soft_perturb: false,
             soft_modes: 6,

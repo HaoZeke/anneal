@@ -6735,12 +6735,24 @@ pub fn optimize_with_energy_gradient<'g>(
     seed: u64,
 ) -> Result<Outcome, SearchError> {
     let mut rng = StdRng::seed_from_u64(seed);
-    let start = random_cluster(
+    let mut start = random_cluster(
         cfg.n_points,
         LJ_LIQUID_NUMBER_DENSITY,
         cfg.min_separation,
         &mut rng,
     );
+    // A closed Wulff shell is a finished body of this lattice. Quenching it
+    // is the same first relaxation the liquid start would have paid for.
+    // The hop stream is untouched: the shell is drawn on its own generator.
+    if cfg.grow_shells {
+        // The shell draw is seed 1. It reads one peel of this cluster.
+        // The hop generator keeps `seed`, so the test does not move it.
+        let mut side = StdRng::seed_from_u64(1);
+        if let Some(body) = crate::lattice::best_closed_shell(start.view(), cfg.n_points, &mut side)
+        {
+            start = body;
+        }
+    }
     run_with_energy_gradient(
         cfg,
         start.view(),
@@ -6974,6 +6986,8 @@ mod tests {
         );
         assert!((rec.bayes_threshold - kept).abs() < 1e-12);
         assert_eq!(rec.relax_steps, Config::FOR_CLUSTER_RELAX_STEPS);
+        assert!(rec.grow_shells);
+        assert_eq!(rec.surfaces.len(), 1);
     }
 
     #[test]
@@ -6993,15 +7007,16 @@ mod tests {
         assert!(!matches!(comm.move_library, MoveLibrary::LeanBurst));
         assert!(matches!(rec.move_library, MoveLibrary::LeanBurst));
         assert!(comm.surfaces.is_empty());
-        assert!(rec.surfaces.is_empty());
-        assert_eq!(rec.surfaces, comm.surfaces);
+        assert_eq!(rec.surfaces.len(), 1);
+        assert_ne!(rec.surfaces.len(), comm.surfaces.len());
         assert!(Config::communicating(98).surfaces.is_empty());
         let sizes = [13usize, 38, 55, 75, 97, 98, 104];
         let reference = Config::recommended(sizes[0]);
         for &n in &sizes {
             let cfg = Config::recommended(n);
             assert!(matches!(cfg.move_library, MoveLibrary::LeanBurst));
-            assert!(cfg.surfaces.is_empty(), "n={n}");
+            assert_eq!(cfg.surfaces.len(), 1, "n={n}");
+            assert!(cfg.grow_shells, "n={n}");
             assert_eq!(cfg.relax_steps, Config::FOR_CLUSTER_RELAX_STEPS);
             let mut left = cfg;
             let mut right = reference.clone();

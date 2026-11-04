@@ -42,6 +42,21 @@ use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 use std::f64::consts::PI;
 
+/// Squared neighbour cutoff on a growth lattice.
+///
+/// Sites are measured in units of the Lennard-Jones minimum, which Jones,
+/// Proc. R. Soc. Lond. A 106, 463 (1924), places at `2^(1/6)` sigma, so the
+/// first neighbour sits at 1. The second face-centred neighbour sits at
+/// `sqrt(2)`. The margin `6/5` lies between those shells. The comparison is
+/// on squared distance, so the cutoff is `(6/5)^2`. One value at every size.
+fn neighbour_shell_cutoff_squared() -> f64 {
+    let first_shell = 1.0;
+    let second_shell = 2.0_f64.sqrt();
+    let margin = 6.0 / 5.0;
+    debug_assert!(first_shell < margin && margin < second_shell);
+    margin * margin
+}
+
 /// Where the local order to grow comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
@@ -298,6 +313,101 @@ pub fn candidate<R: Rng + ?Sized>(
     candidate_keeping(source, x, n, 0.0, rng)
 }
 
+/// The closed Wulff shell to quench, when one lattice's peel is a finished surface.
+///
+/// The test reads one peel of this cluster. It does not compare other atom
+/// counts and it does not consult the template's neighbour count. A peel is
+/// closed when every atom in that body has the same positive coordination, so
+/// the median atom is no better bound than the worst one. Several sources can
+/// close. The start uses the strictly best one, so a tie stays on the liquid.
+pub(crate) fn best_closed_shell<R: Rng + ?Sized>(
+    parent: ArrayView1<f64>,
+    n: usize,
+    rng: &mut R,
+) -> Option<Array1<f64>> {
+    if n < 2 || parent.len() < 3 {
+        return None;
+    }
+    let mut chosen: Option<(usize, Source)> = None;
+    let mut tied = false;
+    for source in Source::library() {
+        let Some((min, _mult, median)) = coordination_profile(source, parent, n, rng) else {
+            continue;
+        };
+        if !uniform_surface(min, median) {
+            continue;
+        }
+        match chosen {
+            Some((best, _)) if min > best => {
+                chosen = Some((min, source));
+                tied = false;
+            }
+            Some((best, _)) if min == best => tied = true,
+            None => chosen = Some((min, source)),
+            Some(_) => {}
+        }
+    }
+    let (_, source) = chosen.filter(|_| !tied)?;
+    Some(candidate(source, parent, n, rng))
+}
+
+/// A finished surface of this peel: every atom has the same positive coordination.
+fn uniform_surface(min: usize, median: usize) -> bool {
+    min > 0 && min == median
+}
+
+/// Coordination of one peel: minimum, how many atoms sit at it, and the median.
+fn coordination_profile<R: Rng + ?Sized>(
+    source: Source,
+    parent: ArrayView1<f64>,
+    n: usize,
+    rng: &mut R,
+) -> Option<(usize, usize, usize)> {
+    if n == 0 {
+        return None;
+    }
+    let body = candidate(source, parent, n, rng);
+    let count = body.len() / 3;
+    if count == 0 {
+        return None;
+    }
+    let mut nearest = vec![f64::INFINITY; count];
+    for i in 0..count {
+        for j in (i + 1)..count {
+            let mut r2 = 0.0;
+            for k in 0..3 {
+                let d = body[3 * i + k] - body[3 * j + k];
+                r2 += d * d;
+            }
+            if r2 > 0.0 {
+                nearest[i] = nearest[i].min(r2);
+                nearest[j] = nearest[j].min(r2);
+            }
+        }
+    }
+    nearest.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let cut = nearest[count / 2] * neighbour_shell_cutoff_squared();
+    let mut coord = vec![0usize; count];
+    for i in 0..count {
+        for j in (i + 1)..count {
+            let mut r2 = 0.0;
+            for k in 0..3 {
+                let d = body[3 * i + k] - body[3 * j + k];
+                r2 += d * d;
+            }
+            if r2 < cut && r2 > 0.0 {
+                coord[i] += 1;
+                coord[j] += 1;
+            }
+        }
+    }
+    coord.sort_unstable();
+    let min = coord[0];
+    let mult = coord.iter().take_while(|c| **c == min).count();
+    let median = coord[count / 2];
+    Some((min, mult, median))
+}
+
 /// As [`candidate`], retaining a `keep` fraction of the current structure as
 /// the seed the new order grows from.
 ///
@@ -357,7 +467,7 @@ pub fn candidate_keeping<R: Rng + ?Sized>(
             .iter()
             .map(|a| {
                 pts.iter()
-                    .filter(|b| sq(a, b) < 1.44 && sq(a, b) > 1e-9)
+                    .filter(|b| sq(a, b) < neighbour_shell_cutoff_squared() && sq(a, b) > 0.0)
                     .count()
             })
             .collect();
@@ -403,7 +513,7 @@ pub fn candidate_keeping<R: Rng + ?Sized>(
     for i in 0..m {
         for j in (i + 1)..m {
             let d = sq(&sites[i], &sites[j]);
-            if d < 1.44 && d > 1e-9 {
+            if d < neighbour_shell_cutoff_squared() && d > 0.0 {
                 adj[i].push(j);
                 adj[j].push(i);
             }
@@ -497,6 +607,42 @@ mod tests {
 
     fn rng() -> StdRng {
         StdRng::seed_from_u64(11)
+    }
+
+    #[test]
+    fn a_uniform_surface_needs_no_atom_count() {
+        assert!(uniform_surface(6, 6));
+        assert!(!uniform_surface(5, 8));
+        assert!(uniform_surface(3, 3));
+        assert!(!uniform_surface(0, 0));
+    }
+
+    #[test]
+    fn best_closed_shell_follows_the_uniform_surface() {
+        let parent = Array1::from(vec![0.0, 0.0, 0.0, 1.122, 0.0, 0.0]);
+        for n in 4usize..36 {
+            let mut draw = StdRng::seed_from_u64(1);
+            let got = best_closed_shell(parent.view(), n, &mut draw).is_some();
+            let mut probe = StdRng::seed_from_u64(1);
+            let mut eligible = Vec::new();
+            for source in Source::library() {
+                let Some((min, _, median)) =
+                    coordination_profile(source, parent.view(), n, &mut probe)
+                else {
+                    continue;
+                };
+                if uniform_surface(min, median) {
+                    eligible.push(min);
+                }
+            }
+            eligible.sort_unstable();
+            let expect = match eligible.as_slice() {
+                [] => false,
+                [_] => true,
+                _ => eligible[eligible.len() - 1] > eligible[eligible.len() - 2],
+            };
+            assert_eq!(got, expect, "n={n}");
+        }
     }
 
     /// A relaxed close-packed fragment, built by growing the ideal shell, which

@@ -544,8 +544,8 @@ mod tests {
             apply_arm(38, Arm::Recommended).move_library,
             MoveLibrary::LeanBurst
         );
-        assert!(apply_arm(38, Arm::Recommended).surfaces.is_empty());
-        assert!(apply_arm(97, Arm::Recommended).surfaces.is_empty());
+        assert_eq!(apply_arm(38, Arm::Recommended).surfaces.len(), 1);
+        assert_eq!(apply_arm(97, Arm::Recommended).surfaces.len(), 1);
         assert_eq!(
             apply_arm(38, Arm::SoapOn).move_library,
             MoveLibrary::LeanBurst

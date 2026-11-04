@@ -68,9 +68,10 @@ fn assert_preset() {
             matches!(cfg.move_library, MoveLibrary::LeanBurst),
             "recommended({n}) keeps the lean burst library"
         );
+        assert_eq!(cfg.surfaces.len(), 1, "recommended({n}) keeps one surface");
         assert!(
-            cfg.surfaces.is_empty(),
-            "recommended({n}) leaves surfaces empty"
+            cfg.grow_shells,
+            "recommended({n}) may quench a closed shell"
         );
         assert_eq!(cfg.relax_steps, Config::FOR_CLUSTER_RELAX_STEPS);
         assert!((cfg.record_gradient - 1.0e-3).abs() < 1.0e-15);

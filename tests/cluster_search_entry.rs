@@ -82,7 +82,8 @@ fn recommended_differs_from_for_cluster() {
     assert_eq!(rec.n_points, 38);
     assert_eq!(base.n_points, 38);
     assert!(matches!(rec.move_library, MoveLibrary::LeanBurst));
-    assert!(rec.surfaces.is_empty());
+    assert_eq!(rec.surfaces.len(), 1);
+    assert!(rec.grow_shells);
     assert!(matches!(
         Config::recommended(75).move_library,
         MoveLibrary::LeanBurst
@@ -100,12 +101,13 @@ fn recommended_differs_from_for_cluster() {
 }
 
 #[test]
-fn recommended_does_not_install_a_surface_from_the_atom_count() {
+fn recommended_installs_the_same_surface_at_every_size() {
     for n in [38usize, 75, 97, 98, 104] {
         let rec = Config::recommended(n);
         assert!(rec.two_phase.is_none());
-        assert!(rec.surfaces.is_empty(), "n={n}");
-        assert_eq!(rec.surfaces, Config::communicating(n).surfaces);
+        assert_eq!(rec.surfaces.len(), 1, "n={n}");
+        assert!(rec.grow_shells, "n={n}");
+        assert_ne!(rec.surfaces.len(), Config::communicating(n).surfaces.len());
         assert!(rec.orbit_complete_on_new);
         assert_eq!(rec.relax_steps, Config::FOR_CLUSTER_RELAX_STEPS);
     }
