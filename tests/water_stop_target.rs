@@ -39,6 +39,10 @@ fn translation_and_rotation(n: usize) -> Config {
 /// Returns the trace of one search under `cfg` with the seed and start of
 /// the head-to-head runner. The search is stopped at `target` when one is
 /// given, and otherwise after `budget` calls.
+///
+/// The hydrogen-bond cycle reversal is off. With it, seed 11030 at n=14
+/// reaches -582.974479 kJ/mol, and the upper reference stops the search
+/// after 154553 calls.
 fn search(cfg: &Config, budget: usize, seed: u64, target: Option<f64>) -> Trace {
     let n = cfg.n_points;
     let pot = Tip4pCluster::new(n);
