@@ -341,10 +341,10 @@ impl HeavyAtomRmsd {
         let mut s = [[0.0; 3]; 3];
         let mut inner = 0.0;
         for (p, q) in a.iter().zip(&b) {
-            for i in 0..3 {
+            for (i, row) in s.iter_mut().enumerate() {
                 inner += p[i] * p[i] + q[i] * q[i];
-                for j in 0..3 {
-                    s[i][j] += p[i] * q[j];
+                for (cell, qj) in row.iter_mut().zip(q) {
+                    *cell += p[i] * qj;
                 }
             }
         }
