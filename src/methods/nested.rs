@@ -37,7 +37,9 @@
 //! moves are the library's own, the constraint is the energy the run measures
 //! for itself, and the one dimensionless choice is the population size.
 
-use crate::methods::cluster_hopping::{ClusterMove, Ledger, Relax, random_cluster};
+use crate::methods::cluster_hopping::{
+    ClusterMove, LJ_LIQUID_NUMBER_DENSITY, Ledger, Relax, random_cluster,
+};
 use ndarray::Array1;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -118,7 +120,7 @@ pub fn nested_search(
     let mut best_x = Array1::zeros(3 * n);
     // The population starts as quenched random clusters, each paid for.
     for _ in 0..cfg.live.max(2) {
-        let x0 = random_cluster(n, 0.7, 0.5, &mut rng);
+        let x0 = random_cluster(n, LJ_LIQUID_NUMBER_DENSITY, 0.5, &mut rng);
         let (e, x) = relax(ledger, x0.view(), cfg.relax_steps);
         if e < best {
             best = e;
@@ -148,7 +150,7 @@ pub fn nested_search(
             repopulations += 1;
             curve = VolumeCurve::default();
             for slot in live.iter_mut() {
-                let x0 = random_cluster(n, 0.7, 0.5, &mut rng);
+                let x0 = random_cluster(n, LJ_LIQUID_NUMBER_DENSITY, 0.5, &mut rng);
                 let (e, x) = relax(ledger, x0.view(), cfg.relax_steps);
                 *slot = (e, x);
                 if e < best {

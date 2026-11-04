@@ -26,7 +26,7 @@
 //! excursion, the depth bandit) rides along unchanged.
 
 use crate::methods::cluster_hopping::{
-    Config, GradFn, Ledger, Relax, random_cluster, run_with_gradient,
+    Config, GradFn, LJ_LIQUID_NUMBER_DENSITY, Ledger, Relax, random_cluster, run_with_gradient,
 };
 use ndarray::Array1;
 use rand::SeedableRng;
@@ -67,7 +67,7 @@ pub fn committor_population(
     let mut pop: Vec<(Array1<f64>, f64, f64, f64)> = (0..walkers.max(2))
         .map(|_| {
             (
-                random_cluster(n, 0.7, cfg.min_separation, &mut rng),
+                random_cluster(n, LJ_LIQUID_NUMBER_DENSITY, cfg.min_separation, &mut rng),
                 f64::INFINITY,
                 1.0,
                 1.0,
