@@ -327,6 +327,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d262e149917187838d5b42777c8253bcb64500067342904e7d429499a6f277e"
 dependencies = [
  "find-msvc-tools",
+ "jobserver",
+ "libc",
  "shlex 2.0.1",
 ]
 
@@ -1324,6 +1326,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
+name = "jobserver"
+version = "0.1.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
+dependencies = [
+ "getrandom 0.4.3",
+ "libc",
+]
+
+[[package]]
 name = "js-sys"
 version = "0.3.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1359,8 +1371,7 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 [[package]]
 name = "linkcell"
 version = "0.3.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c3dda532d851012acca8717b8635166fe9e99d73a4af2e3e95d958995616f17"
+source = "git+https://github.com/d-SEAMS/linkcell?rev=74a513cc41c2730815bcd9110a96286f53ccf353#74a513cc41c2730815bcd9110a96286f53ccf353"
 dependencies = [
  "minimage",
 ]
@@ -1453,9 +1464,8 @@ dependencies = [
 
 [[package]]
 name = "minimage"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e0c930112bcf7c3606a5e4dd67c90522432cb536a250d879967d094f1803abe"
+version = "0.2.0"
+source = "git+https://github.com/lode-org/minimage.git?rev=3abded515f2e3d0af40d8816a533a2941b1a36cf#3abded515f2e3d0af40d8816a533a2941b1a36cf"
 
 [[package]]
 name = "minimal-lexical"
@@ -1814,6 +1824,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
+name = "pkg-config"
+version = "0.3.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
+
+[[package]]
 name = "plotters"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2162,9 +2178,9 @@ dependencies = [
 
 [[package]]
 name = "readcon-core"
-version = "0.14.8"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a056eead97a09120c0fb07bc4e5c591653af39aa6535d0e068bfa46b838187f0"
+checksum = "8aef54a62236d969f4b328cc9846b5fcab31979547f39c21ad8628fff6b348ec"
 dependencies = [
  "dlpk",
  "fast-float2",
@@ -2174,14 +2190,14 @@ dependencies = [
  "memmap2",
  "ndarray 0.17.2",
  "rustc-hash",
+ "ryu",
  "serde_json",
 ]
 
 [[package]]
 name = "readcon-db"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ab5ecd43ce548ceb516818420a2797e2e1414066036bec7d7d7a86985e25afd"
+version = "0.2.0"
+source = "git+https://github.com/lode-org/readcon-db?rev=1e0eb2bc6034c259fe2a789edfae3481de22a944#1e0eb2bc6034c259fe2a789edfae3481de22a944"
 dependencies = [
  "heed",
  "readcon-core",
@@ -2189,6 +2205,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "xxhash-rust",
+ "zstd",
 ]
 
 [[package]]
@@ -2248,9 +2265,9 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "rgmin"
-version = "0.5.0"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0f31d99cd0ac55c273927e5cd56f3f79d756823b283c22faf3789877d3af75d"
+checksum = "2f5fec1e2ba0832a2209321e8cf69332455d80bc9fed88038c2de0232ef1f30b"
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
@@ -2274,9 +2291,8 @@ dependencies = [
 
 [[package]]
 name = "rgsaddle"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3855348c141e8e625ba89f057fe59876bda42c677131f792b07c4dd1a3cbd86"
+version = "0.3.2"
+source = "git+https://github.com/OmniPotentRPC/rgsaddle?rev=06d86a490364da0f595cdc12e6514b32088dc94e#06d86a490364da0f595cdc12e6514b32088dc94e"
 dependencies = [
  "dlpk",
  "eindir-core",
@@ -2324,6 +2340,12 @@ dependencies = [
  "tempfile",
  "wait-timeout",
 ]
+
+[[package]]
+name = "ryu"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "same-file"
@@ -3190,3 +3212,31 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[package]]
+name = "zstd"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cdb02c3132d251ab1606e9fc913a7da6c6ed08cc263df15edf082e1dc497d157"
+dependencies = [
+ "zstd-safe",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "7.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c8ea04668f5de8d8d51051714ba560c9536519cadcdb8829bba4fe2ad159b03"
+dependencies = [
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-sys"
+version = "2.1.2+zstd.1.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "481ada9c543b2323cbb7bbdbb5249177fbf0188ed959ed2c15e4b22421c84ed3"
+dependencies = [
+ "cc",
+ "pkg-config",
+]
