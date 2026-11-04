@@ -695,10 +695,11 @@ pub struct RotatableBond {
 ///
 /// A bond is rotatable when it is single by [`SINGLE_BOND_FRACTION`], is a
 /// bridge of the bond graph (not in a ring), and has at least two atoms on
-/// each side. The smaller side is the one that turns. A bond whose turning
-/// side is a symmetric top, a pivot carrying two or more identical terminal
-/// atoms and nothing else such as a methyl, is left out: turning it maps the
-/// group back onto itself and a quench undoes the rest.
+/// each side. The smaller side is the one that turns, and of two sides of one
+/// size, one that is not a symmetric top. A bond whose turning side is a
+/// symmetric top, a pivot carrying two or more identical terminal atoms and
+/// nothing else such as a methyl, is left out: turning it maps the group back
+/// onto itself and a quench undoes the rest.
 pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> Vec<RotatableBond> {
     let n = species.len().min(x.len() / 3);
     let mut adj = vec![Vec::<usize>::new(); n];
@@ -735,6 +736,13 @@ pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> V
         }
         seen
     };
+    let symmetric_top = |pivot: usize, side: &[usize]| {
+        let tips: Vec<usize> = side.iter().copied().filter(|&a| a != pivot).collect();
+        tips.len() >= 2
+            && tips
+                .iter()
+                .all(|&t| adj[t].len() == 1 && species[t] == species[tips[0]])
+    };
     let mut out = Vec::new();
     for (i, j) in single {
         let from_i = reach(i, j);
@@ -747,17 +755,14 @@ pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> V
         if side_i.len() < 2 || side_j.len() < 2 {
             continue;
         }
-        let (fixed, pivot, side) = if side_i.len() < side_j.len() {
+        let turn_i = side_i.len() < side_j.len()
+            || (side_i.len() == side_j.len() && symmetric_top(j, &side_j));
+        let (fixed, pivot, side) = if turn_i {
             (j, i, side_i)
         } else {
             (i, j, side_j)
         };
-        let tips: Vec<usize> = side.iter().copied().filter(|&a| a != pivot).collect();
-        let symmetric_top = tips.len() >= 2
-            && tips
-                .iter()
-                .all(|&t| adj[t].len() == 1 && species[t] == species[tips[0]]);
-        if symmetric_top {
+        if symmetric_top(pivot, &side) {
             continue;
         }
         out.push(RotatableBond { fixed, pivot, side });
@@ -3237,6 +3242,57 @@ mod torsion_tests {
         assert_eq!(bonds.len(), 1, "{bonds:?}");
         assert_eq!(bonds[0].pivot, 1);
         assert_eq!(bonds[0].side, vec![1, 2]);
+    }
+
+    /// Ethane with one hydrogen of the second carbon replaced by
+    /// `substituent` at `length`, the two carbons listed in either order.
+    /// Each side of the C-C bond has four atoms.
+    fn substituted_ethane(
+        substituent: u32,
+        length: f64,
+        carbons_swapped: bool,
+    ) -> (Array1<f64>, Vec<u32>) {
+        let (cc, ch) = (1.52, 1.09);
+        let mut atoms = vec![
+            [0.0, 0.0, 0.0],
+            [cc, 0.0, 0.0],
+            [-ch / 3.0, ch * 0.943, 0.0],
+            [-ch / 3.0, -ch * 0.471, ch * 0.816],
+            [-ch / 3.0, -ch * 0.471, -ch * 0.816],
+            [cc + ch / 3.0, -ch * 0.943, 0.0],
+            [cc + ch / 3.0, ch * 0.471, ch * 0.816],
+            [cc + length / 3.0, length * 0.471, -length * 0.816],
+        ];
+        if carbons_swapped {
+            atoms.swap(0, 1);
+        }
+        let x = Array1::from_iter(atoms.into_iter().flatten());
+        (x, vec![6, 6, 1, 1, 1, 1, 1, substituent])
+    }
+
+    /// Fluoroethane splits four atoms to four. The methyl is a symmetric top,
+    /// so the CH2F side turns whichever carbon is listed first.
+    #[test]
+    fn an_equal_split_turns_the_side_that_is_not_a_symmetric_top() {
+        for swapped in [false, true] {
+            let (x, species) = substituted_ethane(9, 1.39, swapped);
+            let (methyl, fluorinated) = if swapped { (1, 0) } else { (0, 1) };
+            let bonds = rotatable_bonds(x.view(), &species, 1.25);
+            assert_eq!(bonds.len(), 1, "swapped {swapped}: {bonds:?}");
+            assert_eq!((bonds[0].fixed, bonds[0].pivot), (methyl, fluorinated));
+            let mut side = vec![fluorinated, 5, 6, 7];
+            side.sort_unstable();
+            assert_eq!(bonds[0].side, side, "swapped {swapped}");
+        }
+    }
+
+    #[test]
+    fn a_bond_between_two_symmetric_tops_is_not_turned() {
+        for swapped in [false, true] {
+            let (x, species) = substituted_ethane(1, 1.09, swapped);
+            let bonds = rotatable_bonds(x.view(), &species, 1.25);
+            assert!(bonds.is_empty(), "swapped {swapped}: {bonds:?}");
+        }
     }
 
     #[test]

@@ -557,7 +557,10 @@ where
             // The water census reads these boundaries. A screened descent is
             // not a minimum, so it is recorded without a validation gradient.
             led.record_quench_boundary(before, f, xr.clone(), None);
-            *paid.lock().expect("paid check") = last.borrow().clone();
+            // `f` is the extrapolated energy, so the stored check is the
+            // descent's own evaluation at `xr`.
+            *paid.lock().expect("paid check") =
+                last.borrow().clone().filter(|check| check.at == xr);
             return (f, xr);
         }
         // Charged like any other evaluation: asking whether a relaxation
@@ -2692,6 +2695,37 @@ mod tests {
         let at_end = points.iter().filter(|p| **p == x).count();
         assert_eq!(at_end, 1, "the end point was evaluated {at_end} times");
         assert_eq!(stats.check_charged, 0);
+    }
+
+    /// An incumbent far below the chain's floor makes every screen hopeless.
+    #[test]
+    fn an_adaptive_early_stop_keeps_its_last_paid_evaluation() {
+        let chain = SpringChain::new(12);
+        let mut cfg = Config::for_molecular(vec![6; 12], vec![(0..12).collect()], 1.0);
+        cfg.adaptive_screen = true;
+        let paid = PaidCheck::default();
+        let mut stats = RelaxStats::default();
+        let mut led = Ledger::new(20_000);
+        led.best = -1.0e6;
+        let mut relax = warm_relax(&chain, &cfg, &mut stats, 0, &paid);
+        let (_, x) = relax(&mut led, chain.start().view(), cfg.screen_steps);
+        drop(relax);
+        assert_eq!(stats.capped, 1);
+        assert!(
+            stats.screen_steps_taken < cfg.screen_steps,
+            "the screen ran {} of {} steps",
+            stats.screen_steps_taken,
+            cfg.screen_steps
+        );
+        let kept = paid
+            .lock()
+            .unwrap()
+            .take()
+            .expect("no paid evaluation kept");
+        let (energy, gradient) = chain.value_and_gradient(x.view());
+        assert_eq!(kept.at, x);
+        assert_eq!(kept.energy, energy);
+        assert_eq!(kept.gradient, gradient);
     }
 
     #[test]
