@@ -4,8 +4,6 @@
 //! Species-separated distance spectra retain orientation information without
 //! treating equivalent atoms or equivalent rotation charts as distinct states.
 
-use std::collections::BTreeMap;
-
 use ndarray::{Array1, ArrayView1};
 
 /// Site geometry relative to the center used by the objective's rigid-body chart.
@@ -13,6 +11,10 @@ use ndarray::{Array1, ArrayView1};
 pub struct RigidBodyGeometry {
     sites: Vec<[f64; 3]>,
     species: Vec<u32>,
+    #[serde(skip)]
+    block_keys: Vec<(u32, u32)>,
+    #[serde(skip)]
+    block_of_pair: Vec<usize>,
 }
 
 impl RigidBodyGeometry {
@@ -25,7 +27,30 @@ impl RigidBodyGeometry {
         {
             return Err("invalid rigid-body site geometry");
         }
-        Ok(Self { sites, species })
+        let mut block_keys = Vec::new();
+        for &a in &species {
+            for &b in &species {
+                block_keys.push((a.min(b), a.max(b)));
+            }
+        }
+        block_keys.sort_unstable();
+        block_keys.dedup();
+        let block_of_pair = species
+            .iter()
+            .flat_map(|&a| {
+                let keys = &block_keys;
+                species.iter().map(move |&b| {
+                    keys.binary_search(&(a.min(b), a.max(b)))
+                        .expect("species pair was collected")
+                })
+            })
+            .collect();
+        Ok(Self {
+            sites,
+            species,
+            block_keys,
+            block_of_pair,
+        })
     }
 
     /// Expand centers followed by exponential-map rotations into Cartesian sites.
@@ -83,25 +108,38 @@ impl RigidBodyGeometry {
     /// Sorted site distances in stable species-pair blocks.
     pub fn describe(&self, molecules: usize, state: ArrayView1<f64>) -> Array1<f64> {
         let points = self.expand(molecules, state);
-        let n = molecules * self.sites.len();
-        let mut blocks = BTreeMap::<(u32, u32), Vec<f64>>::new();
+        let sites_per_molecule = self.sites.len();
+        let n = molecules * sites_per_molecule;
+        let mut blocks: Vec<Vec<f64>> = self
+            .block_keys
+            .iter()
+            .map(|&(a, b)| {
+                let count_a =
+                    molecules * self.species.iter().filter(|&&species| species == a).count();
+                let count_b =
+                    molecules * self.species.iter().filter(|&&species| species == b).count();
+                let capacity = if a == b {
+                    count_a * count_a.saturating_sub(1) / 2
+                } else {
+                    count_a * count_b
+                };
+                Vec::with_capacity(capacity)
+            })
+            .collect();
         for i in 0..n {
             for j in i + 1..n {
-                let a = self.species[i % self.sites.len()];
-                let b = self.species[j % self.sites.len()];
                 let distance = (0..3)
                     .map(|k| (points[3 * i + k] - points[3 * j + k]).powi(2))
                     .sum::<f64>()
                     .sqrt();
-                blocks
-                    .entry((a.min(b), a.max(b)))
-                    .or_default()
-                    .push(distance);
+                let site_i = i % sites_per_molecule;
+                let site_j = j % sites_per_molecule;
+                blocks[self.block_of_pair[site_i * sites_per_molecule + site_j]].push(distance);
             }
         }
-        for distances in blocks.values_mut() {
-            distances.sort_by(f64::total_cmp);
+        for distances in &mut blocks {
+            distances.sort_unstable_by(f64::total_cmp);
         }
-        Array1::from(blocks.into_values().flatten().collect::<Vec<_>>())
+        Array1::from(blocks.into_iter().flatten().collect::<Vec<_>>())
     }
 }

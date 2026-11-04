@@ -1,0 +1,1 @@
+Cluster searches reuse pure structural descriptors, avoid stable-sort scratch allocation, build open neighbour rows from one distance calculation per pair, and share TIP4P rotation work while preserving seeded output bit for bit.

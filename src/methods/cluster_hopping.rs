@@ -4251,6 +4251,10 @@ where
         // force calls are refunded.
         let ds = bias.cv(x_screen.view());
         let dc = bias.cv(x.view());
+        // SOAP projection learns its basis while descriptors arrive. Every
+        // other key is a pure function, so its incumbent descriptor can be
+        // carried through the hop instead of sorted again.
+        let reusable_descriptor = effective_keying(cfg) != Keying::Soap;
         let known_stand_in: Option<(f64, Array1<f64>)> = if shared_screen && !screen_bank.is_empty()
         {
             let radius2 = cfg.merge_radius * cfg.merge_radius;
@@ -4600,7 +4604,11 @@ where
         } else {
             (0.0, 0.0)
         };
-        let s_old = bias.cv(x.view());
+        let s_old = if reusable_descriptor {
+            dc
+        } else {
+            bias.cv(x.view())
+        };
         let s_new = bias.cv(x_new.view());
         // A draw from the region's density of states, recorded before the
         // acceptance rule reweights it towards the low tail.
@@ -5196,7 +5204,14 @@ where
             // larger rises a hot rung declines would otherwise heat every rung.
             law.observe_rejection(delta / ratios[rep]);
         }
-        bias.deposit(bias.cv(x.view()).view(), temperature);
+        if reusable_descriptor {
+            bias.deposit(
+                if accept { s_new.view() } else { s_old.view() },
+                temperature,
+            );
+        } else {
+            bias.deposit(bias.cv(x.view()).view(), temperature);
+        }
         // Visits other chains made to the minimum this quench reached, paid
         // into this chain's bias as if it had made them. The count is under
         // the history's membership policy, so with accepted membership only
@@ -8627,5 +8642,206 @@ impl Fingerprint for ClusterFingerprint {
                 crate::featomic_hop::soap_cloud_mean(x, *rcut, species.as_deref(), None)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod descriptor_reuse_tests {
+    use super::*;
+    use crate::methods::warm_lbfgs::WarmLbfgs;
+    use crate::potentials::{PairPotential, random_tip4p_cluster};
+
+    const POINTS: usize = 13;
+    const WATERS: usize = 10;
+
+    /// Three quenched Lennard-Jones minima and one unquenched start, the
+    /// kinds of state a hop describes.
+    fn lennard_jones_states() -> Vec<Array1<f64>> {
+        let cfg = Config::for_cluster(POINTS);
+        let potential = PairPotential::lennard_jones(POINTS);
+        let mut rng = StdRng::seed_from_u64(29);
+        [true, true, true, false]
+            .into_iter()
+            .map(|quench| {
+                let start = random_cluster_in_radius(
+                    POINTS,
+                    cfg.start_radius(),
+                    cfg.min_separation,
+                    &mut rng,
+                );
+                if quench {
+                    let (_, minimum, _) = WarmLbfgs::default()
+                        .minimize(start.view(), 500, |x| Some(potential.value_and_gradient(x)));
+                    minimum
+                } else {
+                    start
+                }
+            })
+            .collect()
+    }
+
+    fn assert_same_bits(label: &str, observed: &Array1<f64>, expected: &Array1<f64>) {
+        assert_eq!(observed.len(), expected.len(), "{label}: length changed");
+        for (component, (a, b)) in observed.iter().zip(expected).enumerate() {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "{label}: component {component} changed"
+            );
+        }
+    }
+
+    /// The hop computes `bias.cv(x)` for the incumbent before the quench and
+    /// carries that descriptor to the acceptance test and the deposit. This
+    /// is exact only if a later call on the same coordinates returns the same
+    /// bits, after calls on other states and after deposits, and if a bias
+    /// built the same way returns them too.
+    fn assert_repeat_calls_bit_identical(cfg: &Config, states: &[Array1<f64>]) {
+        let keying = effective_keying(cfg);
+        assert_ne!(keying, Keying::Soap, "the hop recomputes SOAP descriptors");
+        let build = || {
+            BasinBias::new(
+                ClusterFingerprint::of_config(cfg, &states[0]),
+                cfg.merge_radius,
+                cfg.bias_height,
+                cfg.bias_gamma,
+            )
+        };
+        let mut bias = build();
+        let first: Vec<Array1<f64>> = states.iter().map(|x| bias.cv(x.view())).collect();
+        assert!(
+            first.iter().all(|descriptor| !descriptor.is_empty()),
+            "{keying:?}: an empty descriptor checks nothing"
+        );
+        for descriptor in &first {
+            bias.deposit(descriptor.view(), cfg.temperature);
+        }
+        for (x, expected) in states.iter().zip(&first).rev() {
+            assert_same_bits(&format!("{keying:?} repeat"), &bias.cv(x.view()), expected);
+        }
+        let fresh = build();
+        for (x, expected) in states.iter().zip(&first) {
+            assert_same_bits(&format!("{keying:?} fresh"), &fresh.cv(x.view()), expected);
+        }
+    }
+
+    fn assert_keying_repeats(keying: Keying, builds: fn(&ClusterFingerprint) -> bool) {
+        let mut cfg = Config::for_cluster(POINTS);
+        cfg.keying = keying;
+        let states = lennard_jones_states();
+        assert!(
+            builds(&ClusterFingerprint::of_config(&cfg, &states[0])),
+            "{keying:?} built another descriptor"
+        );
+        assert_repeat_calls_bit_identical(&cfg, &states);
+    }
+
+    #[test]
+    fn distances_descriptor_repeats_bit_for_bit() {
+        assert_keying_repeats(Keying::Distances, |fingerprint| {
+            matches!(fingerprint, ClusterFingerprint::Spectrum(_))
+        });
+    }
+
+    #[test]
+    fn sites_descriptor_repeats_bit_for_bit() {
+        assert_keying_repeats(Keying::Sites, |fingerprint| {
+            matches!(fingerprint, ClusterFingerprint::Sites(_))
+        });
+    }
+
+    #[test]
+    fn triplet_descriptor_repeats_bit_for_bit() {
+        assert_keying_repeats(Keying::Triplet, |fingerprint| {
+            matches!(fingerprint, ClusterFingerprint::Triplet(_))
+        });
+    }
+
+    #[test]
+    fn core_descriptor_repeats_bit_for_bit() {
+        assert_keying_repeats(Keying::Core, |fingerprint| {
+            matches!(fingerprint, ClusterFingerprint::Core { .. })
+        });
+    }
+
+    #[test]
+    fn coordination_descriptor_repeats_bit_for_bit() {
+        assert_keying_repeats(Keying::Coordination, |fingerprint| {
+            matches!(fingerprint, ClusterFingerprint::Coordination(_))
+        });
+    }
+
+    #[test]
+    fn shape_descriptor_repeats_bit_for_bit() {
+        assert_keying_repeats(Keying::Shape, |fingerprint| {
+            matches!(fingerprint, ClusterFingerprint::Coordinates)
+        });
+    }
+
+    /// With `featomic`, SOAP packing keys on the mean SOAP descriptor.
+    #[cfg(feature = "featomic")]
+    #[test]
+    fn soap_packing_descriptor_repeats_bit_for_bit() {
+        assert_keying_repeats(Keying::SoapPacking, |fingerprint| {
+            matches!(fingerprint, ClusterFingerprint::SoapMean { .. })
+        });
+    }
+
+    /// Without `featomic`, SOAP packing keys on the distance spectrum.
+    #[cfg(not(feature = "featomic"))]
+    #[test]
+    fn soap_packing_descriptor_repeats_bit_for_bit() {
+        assert_keying_repeats(Keying::SoapPacking, |fingerprint| {
+            matches!(fingerprint, ClusterFingerprint::Spectrum(_))
+        });
+    }
+
+    /// With `ira`, the canonical keying orders and aligns each structure
+    /// against the reference.
+    #[cfg(feature = "ira")]
+    #[test]
+    fn canonical_descriptor_repeats_bit_for_bit() {
+        assert_keying_repeats(Keying::Canonical, |fingerprint| {
+            matches!(fingerprint, ClusterFingerprint::Canonical(_))
+        });
+    }
+
+    /// Without `ira`, the canonical keying falls back to the distance spectrum.
+    #[cfg(not(feature = "ira"))]
+    #[test]
+    fn canonical_descriptor_repeats_bit_for_bit() {
+        assert_keying_repeats(Keying::Canonical, |fingerprint| {
+            matches!(fingerprint, ClusterFingerprint::Spectrum(_))
+        });
+    }
+
+    #[cfg(feature = "featomic")]
+    #[test]
+    fn q4_descriptor_repeats_bit_for_bit() {
+        assert_keying_repeats(Keying::Q4, |fingerprint| {
+            matches!(fingerprint, ClusterFingerprint::Steinhardt(_))
+        });
+    }
+
+    #[cfg(feature = "featomic")]
+    #[test]
+    fn q4q6_descriptor_repeats_bit_for_bit() {
+        assert_keying_repeats(Keying::Q4Q6, |fingerprint| {
+            matches!(fingerprint, ClusterFingerprint::Steinhardt(_))
+        });
+    }
+
+    #[test]
+    fn rigid_body_descriptor_repeats_bit_for_bit() {
+        let cfg = Config::for_tip4p(WATERS);
+        let mut rng = StdRng::seed_from_u64(31);
+        let states: Vec<Array1<f64>> = (0..4)
+            .map(|_| random_tip4p_cluster(WATERS, &mut rng))
+            .collect();
+        assert!(matches!(
+            ClusterFingerprint::of_config(&cfg, &states[0]),
+            ClusterFingerprint::RigidBodies { .. }
+        ));
+        assert_repeat_calls_bit_identical(&cfg, &states);
     }
 }
