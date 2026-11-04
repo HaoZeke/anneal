@@ -110,7 +110,6 @@ libm = { version = "0.2.16", default-features = false }
 [dev-dependencies]
 criterion = { version = "0.6", features = ["html_reports"] }
 proptest  = "1"
-trybuild  = "1.0"
 tempfile = "3"
 capnp = "0.21"
 capnp-rpc = "0.21"
