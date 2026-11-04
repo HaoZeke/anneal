@@ -214,6 +214,11 @@ name = "ttt_lj38"
 required-features = []
 
 [[example]]
+name = "conformer_search"
+required-features = []
+test = true
+
+[[example]]
 name = "catalog_journal_scan"
 required-features = ["bank-rpc"]
 
