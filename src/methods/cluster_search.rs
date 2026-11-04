@@ -26,6 +26,7 @@ use crate::methods::cluster_hopping::{
     ChainCheckpoint, CheckpointAction, Config, Ledger, Outcome, SearchError,
     optimize_with_energy_gradient, run_with_energy_gradient_at_checkpoints,
 };
+use crate::methods::minima_hopping::HistoryHook;
 use crate::methods::warm_lbfgs::WarmLbfgs;
 use crate::quench::{QuenchPredictor, Verdict};
 use eindir_core::gradient::DifferentiableObjective;
@@ -613,6 +614,45 @@ where
             &mut rng,
             checkpoint_interval,
             checkpoint,
+        )?
+    };
+    Ok((out, stats))
+}
+
+/// As [`search_from`], reporting every certified quench to `history`.
+///
+/// Several chains that hold hooks over one
+/// [`crate::methods::minima_hopping::MinimumHistory`] share exact minimum
+/// identity and visit counts. Each chain keeps its own coordinates, random
+/// stream, ledger and bias. Visits other chains made to a minimum this
+/// chain reaches are paid into its bias ([`Config::shared_deposits`]), or
+/// feed the escape controller under [`Config::minima_hopping`]. Without a
+/// history this is [`search_from`].
+pub fn search_from_with_history<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    start: ArrayView1<f64>,
+    seed: u64,
+    history: Option<&mut dyn HistoryHook>,
+) -> Result<(Outcome, RelaxStats), SearchError>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let mut stats = RelaxStats::default();
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let paid = PaidCheck::default();
+    let out = {
+        let mut relax = warm_relax(objective, cfg, &mut stats, seed, &paid);
+        let mut grad = gated_grad(objective, &paid);
+        crate::methods::cluster_hopping::run_with_history(
+            cfg,
+            start,
+            ledger,
+            &mut relax,
+            Some(&mut grad),
+            history,
+            &mut rng,
         )?
     };
     Ok((out, stats))
@@ -1940,6 +1980,97 @@ mod tests {
             assert!(gmax < cfg.record_gradient, "validated at {gmax}");
             assert!(b.energy().is_finite());
         }
+    }
+
+    fn lj13_start(cfg: &Config, seed: u64) -> Array1<f64> {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        crate::methods::cluster_hopping::random_cluster_in_radius(
+            13,
+            cfg.start_radius(),
+            cfg.min_separation,
+            &mut rng,
+        )
+    }
+
+    #[test]
+    fn a_search_without_a_history_is_search_from() {
+        let pot = PairPotential::lennard_jones(13);
+        let cfg = Config::for_cluster(13);
+        let start = lj13_start(&cfg, 11);
+        let mut plain_ledger = Ledger::new(6_000);
+        let (plain, _) =
+            search_from(&pot, &cfg, &mut plain_ledger, start.view(), 3).expect("search");
+        let mut ledger = Ledger::new(6_000);
+        let (out, _) = search_from_with_history(&pot, &cfg, &mut ledger, start.view(), 3, None)
+            .expect("search");
+        assert_eq!(out.best.to_bits(), plain.best.to_bits());
+        assert_eq!(out.hops, plain.hops);
+        assert_eq!(ledger.spent(), plain_ledger.spent());
+    }
+
+    #[test]
+    fn a_second_chain_pays_the_first_chains_visits_into_its_bias() {
+        use crate::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
+        use crate::methods::minima_hopping::{
+            HistoryMembership, MinimumHistory, SharedMinimumHistory,
+        };
+        use crate::pes_exploration::StructureContext;
+        let pot = PairPotential::lennard_jones(13);
+        let cfg = Config::for_cluster(13);
+        assert!(cfg.shared_deposits > 0 && !cfg.minima_hopping);
+        let start = lj13_start(&cfg, 11);
+        let history = Mutex::new(MinimumHistory::new(cfg.record_gradient).expect("tolerance"));
+        let descriptor = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+        let context = StructureContext::new(Some(vec![18; 13]), None, Some("lj13".into()));
+        let sorted_pairs = |x: ArrayView1<f64>| {
+            let mut d = Vec::new();
+            for i in 0..13 {
+                for j in i + 1..13 {
+                    let r2: f64 = (0..3).map(|k| (x[3 * i + k] - x[3 * j + k]).powi(2)).sum();
+                    d.push(r2.sqrt());
+                }
+            }
+            d.sort_by(f64::total_cmp);
+            d
+        };
+        let witness = |l: ArrayView1<f64>, r: ArrayView1<f64>| {
+            sorted_pairs(l)
+                .iter()
+                .zip(sorted_pairs(r).iter())
+                .all(|(a, b)| (a - b).abs() < 1e-3)
+        };
+        let chain = |seed: u64| {
+            let mut hook = SharedMinimumHistory::new(
+                &history,
+                &descriptor,
+                context.clone(),
+                &witness,
+                HistoryMembership::Observed,
+            );
+            let mut ledger = Ledger::new(4_000);
+            let (out, _) = search_from_with_history(
+                &pot,
+                &cfg,
+                &mut ledger,
+                start.view(),
+                seed,
+                Some(&mut hook),
+            )
+            .expect("search");
+            (out, hook.cost().0)
+        };
+        let (first, first_seen) = chain(3);
+        let (second, second_seen) = chain(3);
+        assert!(first_seen > 0, "the first chain reported no minimum");
+        assert_eq!(
+            history.lock().expect("history").total_visits(),
+            (first_seen + second_seen) as u64
+        );
+        assert_eq!(first.shared_deposits, 0, "nothing was there before it");
+        assert!(
+            second.shared_deposits > 0,
+            "the second chain walked the first chain's minima and paid nothing"
+        );
     }
 
     /// A carbon chain held by stiff bond, middling angle and soft torsion
