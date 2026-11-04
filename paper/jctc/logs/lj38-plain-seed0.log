@@ -1,17 +1,32 @@
-uname_m=x86_64
-nproc=8
-cpu_model=Intel(R) Xeon(R) Processor
-git_commit=90c898dd2971c8753268b153d96b9b54429b081c
-mode=plain
-arm=lj38-plain
-seed=0
-n=38
-ceiling=30000
-library=LeanBurst
-surfaces=0
-stall_exits=off
-energy=-173.928427
-calls=30000
-wall_s=0.718809
-hops=443
-exit=0
+Wed Nov  4 03:11:32 PM UTC 2026
+x86_64
+8
+Intel(R) Xeon(R) Processor
+clone=/src/anneal
+a658b880b57db24fb466e8e5ba639dfbcf4e4860
+## paper/claimcheck-v2...origin/paper/claimcheck-v2
+TMPDIR=/src/scratch
+cwd=/src/anneal
+command=SEED_OFFSET=0 /src/scratch/anneal-target/release/examples/lj_cluster_search 38 30000 1 rec,noclimb,nosym
+LJ38, budget 30000 charged evaluations, 1 seeds, reference -173.928427
+  recommended configuration
+  SOAP hop: in-crate leftover (rebuild with --features featomic)
+  mechanisms: rec, noclimb, nosym
+ANSWER_AUDIT seed 0 objective_calls 1 read_only true
+      crossed at hop 12 of 390 (3.1% in), 1374 charged, 2 basins, -173.928427
+    arm all        draws       1  accepts       0  best -155.860681
+    arm single     draws      37  accepts      23  best -173.928427
+    arm surface    draws      22  accepts      13  best -173.928427
+    arm shell      draws      12  accepts       0  best -164.347289
+    arm sym        draws     113  accepts     102  best -173.928427
+    arm grow:observed draws      22  accepts       8  best -173.928427
+    arm grow:fcc   draws     154  accepts      99  best -173.928427
+    arm grow:hcp   draws       1  accepts       0  best -142.190479
+    arm grow:ico   draws       1  accepts       0  best -152.288925
+    arm grow:sc    draws       1  accepts       0  best -156.144605
+SURFACE_EVIDENCE seed 0 local_blocks 3 peer_blocks 0 local_draws [3, 0] local_means [-1.894779997100268e-14, 0.0]
+  seed 0: best -173.928427  hops 390  screened 57  charged 30000  basins 29 (13.4 hops each)  returned 210  swaps 0/0  paths 0 improved 0 gain 0.000  escape 4.000 thr 0.8000 same/known/new 21/4/10 soft 0/0 sub 0/0 lmin NaN climbs 0 gain 0.00 radius 0.700 step 0.700 restarts 0 xrefused 0 jumps 0 angular 0/0 R 0.420 tabu 0 vetoed 0 screen 0/0 expl 0 obs 0 ctx [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] sym 0/0.00 orbits 25/25.14  relaxed 203/537 converged  early 0 saved 0  verified -173.928427 |g| 4.1e-7  SOLVED
+1/1 solved, deepest -173.928427   mean hops 390, force per hop 77
+gap to reference +0.000000
+Wed Nov  4 03:11:32 PM UTC 2026
+exit_code=0

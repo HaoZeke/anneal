@@ -1,19 +1,27 @@
-uname_m=x86_64
-nproc=8
-cpu_model=Intel(R) Xeon(R) Processor
-git_commit=90c898dd2971c8753268b153d96b9b54429b081c
-launch=10
-order_seed_block=2
-order_arm_slot=0
-arm=lj75
-seed=5
-n=75
-ceiling=400000
-library=LeanBurst
-surfaces=0
-hit=0
-calls=400000
-energy=-394.477962
-wall_s=41.025962
-hops=5945
-exit=0
+Wed Nov  4 03:09:47 PM UTC 2026
+x86_64
+8
+Intel(R) Xeon(R) Processor
+clone=/src/anneal
+a658b880b57db24fb466e8e5ba639dfbcf4e4860
+## paper/claimcheck-v2...origin/paper/claimcheck-v2
+TMPDIR=/src/scratch
+cwd=/src/anneal
+command=SEED_OFFSET=5 /src/scratch/anneal-target/release/examples/lj_cluster_search 75 400000 1 rec,bayes,restart,trail
+LJ75, budget 400000 charged evaluations, 1 seeds, reference -397.492331
+  recommended configuration
+  SOAP hop: in-crate leftover (rebuild with --features featomic)
+  mechanisms: rec, bayes, restart, trail
+ANSWER_AUDIT seed 5 objective_calls 1 read_only true
+      last improvement at hop 16 of 1643 (1.0% in), 10574 charged, 3 basins, -392.429077
+    arm single     draws     299  accepts     154  best -397.492331
+    arm surface    draws     209  accepts      98  best -397.492331
+    arm sym        draws     407  accepts     274  best -397.492331
+    arm burst      draws     105  accepts      34  best -397.487692
+    arm soap       draws     333  accepts     221  best -397.492331
+SURFACE_EVIDENCE seed 5 local_blocks 13 peer_blocks 0 local_draws [4, 9] local_means [-4.831689395246332e-13, -0.3225081015276252]
+  seed 5: best -397.492331  hops 1643  screened 358  charged 400000  basins 98 (16.8 hops each)  returned 647  swaps 0/0  paths 0 improved 0 gain 0.000  escape 3.810 thr 0.8000 same/known/new 54/18/16 soft 66/73 sub 0/0 lmin -99.0334 climbs 73 gain 20.54 radius 0.700 step 0.700 restarts 0 xrefused 0 jumps 0 angular 0/0 R 0.420 tabu 0 vetoed 0 screen 656/1353 expl 153 obs 348 ctx [0, 0, 0, 0, 0] sym 0/0.00 orbits 217/316.13  relaxed 702/2164 converged  early 0 saved 0  verified -397.492331 |g| 1.8e-6  SOLVED
+1/1 solved, deepest -397.492331   mean hops 1643, force per hop 243
+gap to reference +0.000000
+Wed Nov  4 03:10:00 PM UTC 2026
+exit_code=0

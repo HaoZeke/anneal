@@ -1,19 +1,27 @@
-uname_m=x86_64
-nproc=8
-cpu_model=Intel(R) Xeon(R) Processor
-git_commit=90c898dd2971c8753268b153d96b9b54429b081c
-launch=1
-order_seed_block=0
-order_arm_slot=1
-arm=lj55
-seed=3
-n=55
-ceiling=100000
-library=LeanBurst
-surfaces=0
-hit=1
-calls=7338
-energy=-279.248470
-wall_s=3.455468
-hops=1233
-exit=0
+Wed Nov  4 03:05:29 PM UTC 2026
+x86_64
+8
+Intel(R) Xeon(R) Processor
+clone=/src/anneal
+a658b880b57db24fb466e8e5ba639dfbcf4e4860
+## paper/claimcheck-v2...origin/paper/claimcheck-v2
+TMPDIR=/src/scratch
+cwd=/src/anneal
+command=SEED_OFFSET=3 /src/scratch/anneal-target/release/examples/lj_cluster_search 55 100000 1 rec,bayes,restart,trail
+LJ55, budget 100000 charged evaluations, 1 seeds, reference -279.248470
+  recommended configuration
+  SOAP hop: in-crate leftover (rebuild with --features featomic)
+  mechanisms: rec, bayes, restart, trail
+ANSWER_AUDIT seed 3 objective_calls 1 read_only true
+      last improvement at hop 1 of 348 (0.3% in), 1383 charged, 0 basins, -269.091446
+    arm single     draws      92  accepts      71  best -279.248470
+    arm surface    draws      26  accepts      12  best -279.248470
+    arm sym        draws      87  accepts      71  best -279.248470
+    arm burst      draws      22  accepts      11  best -273.980622
+    arm soap       draws      92  accepts      76  best -279.248470
+SURFACE_EVIDENCE seed 3 local_blocks 3 peer_blocks 0 local_draws [0, 3] local_means [0.0, -0.8839033215907708]
+  seed 3: best -279.248470  hops 348  screened 0  charged 100000  basins 17 (20.5 hops each)  returned 205  swaps 0/0  paths 0 improved 0 gain 0.000  escape 4.000 thr 0.8000 same/known/new 21/4/5 soft 16/18 sub 0/0 lmin -55.9253 climbs 18 gain 10.77 radius 0.700 step 0.700 restarts 0 xrefused 0 jumps 0 angular 0/0 R 0.420 tabu 0 vetoed 0 screen 312/312 expl 39 obs 114 ctx [0, 0, 0, 0, 0] sym 0/0.00 orbits 11/10.16  relaxed 192/506 converged  early 0 saved 0  verified -279.248470 |g| 2.7e-7  SOLVED
+1/1 solved, deepest -279.248470   mean hops 348, force per hop 287
+gap to reference -0.000000
+Wed Nov  4 03:05:30 PM UTC 2026
+exit_code=0

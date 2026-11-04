@@ -1,19 +1,26 @@
-uname_m=x86_64
-nproc=8
-cpu_model=Intel(R) Xeon(R) Processor
-git_commit=90c898dd2971c8753268b153d96b9b54429b081c
-launch=12
-order_seed_block=2
-order_arm_slot=2
-arm=lj104
-seed=5
-n=104
-ceiling=1000000
-library=LeanBurst
-surfaces=0
-hit=0
-calls=1000000
-energy=-580.421266
-wall_s=268.447216
-hops=20733
-exit=0
+Wed Nov  4 03:10:00 PM UTC 2026
+x86_64
+8
+Intel(R) Xeon(R) Processor
+clone=/src/anneal
+a658b880b57db24fb466e8e5ba639dfbcf4e4860
+## paper/claimcheck-v2...origin/paper/claimcheck-v2
+TMPDIR=/src/scratch
+cwd=/src/anneal
+command=SEED_OFFSET=5 /src/scratch/anneal-target/release/examples/lj_cluster_search 104 1000000 1 rec,bayes,restart,trail
+LJ104, budget 1000000 charged evaluations, 1 seeds, reference -582.086642
+  recommended configuration
+  SOAP hop: in-crate leftover (rebuild with --features featomic)
+  mechanisms: rec, bayes, restart, trail
+ANSWER_AUDIT seed 5 objective_calls 1 read_only true
+      last improvement at hop 4618 of 7262 (63.6% in), 712940 charged, 773 basins, -578.395184
+    arm single     draws    1091  accepts     519  best -578.162566
+    arm surface    draws    1380  accepts     825  best -578.162566
+    arm sym        draws    1379  accepts     924  best -578.235539
+    arm burst      draws    1530  accepts     592  best -578.395176
+    arm soap       draws     798  accepts     196  best -577.887954
+  seed 5: best -578.395184  hops 7262  screened 3511  charged 1000000  basins 997 (7.3 hops each)  returned 1959  swaps 0/0  paths 0 improved 0 gain 0.000  escape 3.810 thr 0.8000 same/known/new 241/99/225 soft 167/187 sub 0/0 lmin -254.5268 climbs 187 gain 65.19 radius 0.700 step 0.700 restarts 0 xrefused 0 jumps 0 angular 0/0 R 0.420 tabu 0 vetoed 0 screen 1009/6167 expl 621 obs 709 ctx [0, 0, 0, 0, 0] sym 0/0.00 orbits 895/142.56  relaxed 1702/8677 converged  early 0 saved 0  verified -578.395184 |g| 9.9e-7
+0/1 solved, deepest -578.395184   mean hops 7262, force per hop 138
+gap to reference +3.691458
+Wed Nov  4 03:12:02 PM UTC 2026
+exit_code=0

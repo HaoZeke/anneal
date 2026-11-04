@@ -1,19 +1,26 @@
-uname_m=x86_64
-nproc=8
-cpu_model=Intel(R) Xeon(R) Processor
-git_commit=90c898dd2971c8753268b153d96b9b54429b081c
-launch=8
-order_seed_block=1
-order_arm_slot=3
-arm=lj104
-seed=0
-n=104
-ceiling=1000000
-library=LeanBurst
-surfaces=0
-hit=0
-calls=1000000
-energy=-581.801802
-wall_s=233.021856
-hops=17068
-exit=0
+Wed Nov  4 02:59:42 PM UTC 2026
+x86_64
+8
+Intel(R) Xeon(R) Processor
+clone=/src/anneal
+a658b880b57db24fb466e8e5ba639dfbcf4e4860
+## paper/claimcheck-v2...origin/paper/claimcheck-v2
+TMPDIR=/src/scratch
+cwd=/src/anneal
+command=SEED_OFFSET=0 /src/scratch/anneal-target/release/examples/lj_cluster_search 104 1000000 1 rec,bayes,restart,trail
+LJ104, budget 1000000 charged evaluations, 1 seeds, reference -582.086642
+  recommended configuration
+  SOAP hop: in-crate leftover (rebuild with --features featomic)
+  mechanisms: rec, bayes, restart, trail
+ANSWER_AUDIT seed 0 objective_calls 1 read_only true
+      last improvement at hop 251 of 6571 (3.8% in), 91517 charged, 23 basins, -579.101979
+    arm single     draws    1111  accepts     548  best -579.023180
+    arm surface    draws    1305  accepts     763  best -579.101979
+    arm sym        draws    1518  accepts     968  best -579.101979
+    arm burst      draws     769  accepts     314  best -578.511300
+    arm soap       draws     775  accepts     185  best -578.821381
+  seed 0: best -579.101979  hops 6571  screened 2660  charged 1000000  basins 592 (11.1 hops each)  returned 2231  swaps 0/0  paths 0 improved 0 gain 0.000  escape 4.000 thr 0.8000 same/known/new 260/69/120 soft 167/188 sub 0/0 lmin -193.7388 climbs 188 gain 52.64 radius 0.700 step 0.700 restarts 0 xrefused 0 jumps 0 angular 0/0 R 0.420 tabu 0 vetoed 0 screen 1014/5471 expl 577 obs 587 ctx [0, 0, 0, 0, 0] sym 0/0.00 orbits 904/623.46  relaxed 1517/7762 converged  early 0 saved 0  verified -579.101979 |g| 1.4e-6
+0/1 solved, deepest -579.101979   mean hops 6571, force per hop 152
+gap to reference +2.984663
+Wed Nov  4 03:01:32 PM UTC 2026
+exit_code=0

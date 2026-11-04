@@ -1,19 +1,26 @@
-uname_m=x86_64
-nproc=8
-cpu_model=Intel(R) Xeon(R) Processor
-git_commit=90c898dd2971c8753268b153d96b9b54429b081c
-launch=16
-order_seed_block=3
-order_arm_slot=1
-arm=lj104
-seed=1
-n=104
-ceiling=1000000
-library=LeanBurst
-surfaces=0
-hit=0
-calls=1000000
-energy=-579.833397
-wall_s=229.882488
-hops=14699
-exit=0
+Wed Nov  4 03:01:53 PM UTC 2026
+x86_64
+8
+Intel(R) Xeon(R) Processor
+clone=/src/anneal
+a658b880b57db24fb466e8e5ba639dfbcf4e4860
+## paper/claimcheck-v2...origin/paper/claimcheck-v2
+TMPDIR=/src/scratch
+cwd=/src/anneal
+command=SEED_OFFSET=1 /src/scratch/anneal-target/release/examples/lj_cluster_search 104 1000000 1 rec,bayes,restart,trail
+LJ104, budget 1000000 charged evaluations, 1 seeds, reference -582.086642
+  recommended configuration
+  SOAP hop: in-crate leftover (rebuild with --features featomic)
+  mechanisms: rec, bayes, restart, trail
+ANSWER_AUDIT seed 1 objective_calls 1 read_only true
+      last improvement at hop 5823 of 6796 (85.7% in), 884031 charged, 629 basins, -580.664161
+    arm single     draws     846  accepts     431  best -580.277818
+    arm surface    draws    1167  accepts     688  best -580.664161
+    arm sym        draws    1182  accepts     758  best -580.280313
+    arm burst      draws    1882  accepts     784  best -580.279887
+    arm soap       draws     494  accepts     150  best -579.790250
+  seed 1: best -580.664161  hops 6796  screened 3083  charged 1000000  basins 723 (9.4 hops each)  returned 1829  swaps 0/0  paths 0 improved 0 gain 0.000  escape 3.810 thr 0.8000 same/known/new 216/111/147 soft 168/186 sub 0/0 lmin -157.5520 climbs 186 gain 49.91 radius 0.700 step 0.700 restarts 0 xrefused 0 jumps 0 angular 0/0 R 0.420 tabu 0 vetoed 0 screen 939/5553 expl 556 obs 659 ctx [0, 0, 0, 0, 0] sym 0/0.00 orbits 1038/272.72  relaxed 1734/8086 converged  early 0 saved 0  verified -580.664161 |g| 2.1e-6
+0/1 solved, deepest -580.664161   mean hops 6796, force per hop 147
+gap to reference +1.422481
+Wed Nov  4 03:03:53 PM UTC 2026
+exit_code=0

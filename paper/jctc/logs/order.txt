@@ -1,30 +1,43 @@
-launch=0 n=38 seed=3
-launch=1 n=55 seed=3
-launch=2 n=75 seed=3
-launch=3 n=98 seed=3
-launch=4 n=104 seed=3
-launch=5 n=55 seed=0
-launch=6 n=75 seed=0
-launch=7 n=98 seed=0
-launch=8 n=104 seed=0
-launch=9 n=38 seed=0
-launch=10 n=75 seed=5
-launch=11 n=98 seed=5
-launch=12 n=104 seed=5
-launch=13 n=38 seed=5
-launch=14 n=55 seed=5
-launch=15 n=98 seed=1
-launch=16 n=104 seed=1
-launch=17 n=38 seed=1
-launch=18 n=55 seed=1
-launch=19 n=75 seed=1
-launch=20 n=104 seed=4
-launch=21 n=38 seed=4
-launch=22 n=55 seed=4
-launch=23 n=75 seed=4
-launch=24 n=98 seed=4
-launch=25 n=38 seed=2
-launch=26 n=55 seed=2
-launch=27 n=75 seed=2
-launch=28 n=98 seed=2
-launch=29 n=104 seed=2
+Wed Nov  4 02:59:25 PM UTC 2026
+x86_64
+8
+Intel(R) Xeon(R) Processor
+clone=/src/anneal
+a658b880b57db24fb466e8e5ba639dfbcf4e4860
+## paper/claimcheck-v2...origin/paper/claimcheck-v2
+TMPDIR=/src/scratch
+cwd=/src/anneal
+command=bash /src/scratch/run-v25-logs.sh
+launch=0 n=38 seed=0 name=lj38-seed0.log
+launch=1 n=55 seed=0 name=lj55-seed0.log
+launch=2 n=75 seed=0 name=lj75-seed0.log
+launch=3 n=98 seed=0 name=lj98-seed0.log
+launch=4 n=104 seed=0 name=lj104-seed0.log
+launch=5 n=38 seed=1 name=lj38-seed1.log
+launch=6 n=55 seed=1 name=lj55-seed1.log
+launch=7 n=75 seed=1 name=lj75-seed1.log
+launch=8 n=98 seed=1 name=lj98-seed1.log
+launch=9 n=104 seed=1 name=lj104-seed1.log
+launch=10 n=38 seed=2 name=lj38-seed2.log
+launch=11 n=55 seed=2 name=lj55-seed2.log
+launch=12 n=75 seed=2 name=lj75-seed2.log
+launch=13 n=98 seed=2 name=lj98-seed2.log
+launch=14 n=104 seed=2 name=lj104-seed2.log
+launch=15 n=38 seed=3 name=lj38-seed3.log
+launch=16 n=55 seed=3 name=lj55-seed3.log
+launch=17 n=75 seed=3 name=lj75-seed3.log
+launch=18 n=98 seed=3 name=lj98-seed3.log
+launch=19 n=104 seed=3 name=lj104-seed3.log
+launch=20 n=38 seed=4 name=lj38-seed4.log
+launch=21 n=55 seed=4 name=lj55-seed4.log
+launch=22 n=75 seed=4 name=lj75-seed4.log
+launch=23 n=98 seed=4 name=lj98-seed4.log
+launch=24 n=104 seed=4 name=lj104-seed4.log
+launch=25 n=38 seed=5 name=lj38-seed5.log
+launch=26 n=55 seed=5 name=lj55-seed5.log
+launch=27 n=75 seed=5 name=lj75-seed5.log
+launch=28 n=98 seed=5 name=lj98-seed5.log
+launch=29 n=104 seed=5 name=lj104-seed5.log
+launch=30 n=38 seed=0 name=lj38-plain-seed0.log
+Wed Nov  4 03:12:02 PM UTC 2026
+exit_code=0

@@ -1,19 +1,27 @@
-uname_m=x86_64
-nproc=8
-cpu_model=Intel(R) Xeon(R) Processor
-git_commit=90c898dd2971c8753268b153d96b9b54429b081c
-launch=22
-order_seed_block=4
-order_arm_slot=2
-arm=lj55
-seed=4
-n=55
-ceiling=100000
-library=LeanBurst
-surfaces=0
-hit=1
-calls=14391
-energy=-279.248470
-wall_s=3.607689
-hops=1308
-exit=0
+Wed Nov  4 03:07:44 PM UTC 2026
+x86_64
+8
+Intel(R) Xeon(R) Processor
+clone=/src/anneal
+a658b880b57db24fb466e8e5ba639dfbcf4e4860
+## paper/claimcheck-v2...origin/paper/claimcheck-v2
+TMPDIR=/src/scratch
+cwd=/src/anneal
+command=SEED_OFFSET=4 /src/scratch/anneal-target/release/examples/lj_cluster_search 55 100000 1 rec,bayes,restart,trail
+LJ55, budget 100000 charged evaluations, 1 seeds, reference -279.248470
+  recommended configuration
+  SOAP hop: in-crate leftover (rebuild with --features featomic)
+  mechanisms: rec, bayes, restart, trail
+ANSWER_AUDIT seed 4 objective_calls 1 read_only true
+      last improvement at hop 19 of 396 (4.8% in), 10190 charged, 3 basins, -273.980622
+    arm single     draws      49  accepts      40  best -279.248470
+    arm surface    draws      53  accepts      34  best -279.248470
+    arm sym        draws      74  accepts      63  best -279.248470
+    arm burst      draws      53  accepts      27  best -279.248470
+    arm soap       draws      67  accepts      56  best -279.248470
+SURFACE_EVIDENCE seed 4 local_blocks 2 peer_blocks 0 local_draws [1, 1] local_means [0.0, 0.0]
+  seed 4: best -279.248470  hops 396  screened 0  charged 100000  basins 37 (10.7 hops each)  returned 141  swaps 0/0  paths 0 improved 0 gain 0.000  escape 2.354 thr 0.8000 same/known/new 10/6/6 soft 15/16 sub 0/0 lmin -95.2186 climbs 16 gain 4.83 radius 0.700 step 0.700 restarts 0 xrefused 0 jumps 0 angular 0/0 R 0.420 tabu 0 vetoed 0 screen 292/292 expl 24 obs 155 ctx [0, 0, 0, 0, 0] sym 0/0.00 orbits 83/36.86  relaxed 295/603 converged  early 0 saved 0  verified -279.248470 |g| 9.9e-7  SOLVED
+1/1 solved, deepest -279.248470   mean hops 396, force per hop 253
+gap to reference -0.000000
+Wed Nov  4 03:07:46 PM UTC 2026
+exit_code=0

@@ -1,19 +1,26 @@
-uname_m=x86_64
-nproc=8
-cpu_model=Intel(R) Xeon(R) Processor
-git_commit=90c898dd2971c8753268b153d96b9b54429b081c
-launch=11
-order_seed_block=2
-order_arm_slot=1
-arm=lj98
-seed=5
-n=98
-ceiling=1000000
-library=LeanBurst
-surfaces=0
-hit=1
-calls=834444
-energy=-543.665361
-wall_s=209.226048
-hops=16605
-exit=0
+Wed Nov  4 03:09:48 PM UTC 2026
+x86_64
+8
+Intel(R) Xeon(R) Processor
+clone=/src/anneal
+a658b880b57db24fb466e8e5ba639dfbcf4e4860
+## paper/claimcheck-v2...origin/paper/claimcheck-v2
+TMPDIR=/src/scratch
+cwd=/src/anneal
+command=SEED_OFFSET=5 /src/scratch/anneal-target/release/examples/lj_cluster_search 98 1000000 1 rec,bayes,restart,trail
+LJ98, budget 1000000 charged evaluations, 1 seeds, reference -543.665361
+  recommended configuration
+  SOAP hop: in-crate leftover (rebuild with --features featomic)
+  mechanisms: rec, bayes, restart, trail
+ANSWER_AUDIT seed 5 objective_calls 1 read_only true
+      last improvement at hop 2527 of 7884 (32.1% in), 368299 charged, 197 basins, -541.894959
+    arm single     draws    1017  accepts     486  best -541.891791
+    arm surface    draws    1355  accepts     739  best -541.894959
+    arm sym        draws    1501  accepts    1011  best -541.874486
+    arm burst      draws    2095  accepts     777  best -541.886022
+    arm soap       draws     770  accepts     227  best -541.402427
+  seed 5: best -541.894959  hops 7884  screened 3682  charged 1000000  basins 579 (13.6 hops each)  returned 2370  swaps 0/0  paths 0 improved 0 gain 0.000  escape 4.000 thr 0.8000 same/known/new 288/200/122 soft 171/187 sub 0/0 lmin -152.6006 climbs 187 gain 72.26 radius 0.700 step 0.700 restarts 0 xrefused 0 jumps 0 angular 0/0 R 0.420 tabu 0 vetoed 0 screen 1050/6733 expl 653 obs 687 ctx [0, 0, 0, 0, 0] sym 0/0.00 orbits 958/385.69  relaxed 1980/9330 converged  early 0 saved 0  verified -541.894959 |g| 3.0e-6
+0/1 solved, deepest -541.894959   mean hops 7884, force per hop 127
+gap to reference +1.770402
+Wed Nov  4 03:11:32 PM UTC 2026
+exit_code=0

@@ -1,19 +1,26 @@
-uname_m=x86_64
-nproc=8
-cpu_model=Intel(R) Xeon(R) Processor
-git_commit=90c898dd2971c8753268b153d96b9b54429b081c
-launch=15
-order_seed_block=3
-order_arm_slot=0
-arm=lj98
-seed=1
-n=98
-ceiling=1000000
-library=LeanBurst
-surfaces=0
-hit=0
-calls=1000000
-energy=-541.894959
-wall_s=187.859483
-hops=14319
-exit=0
+Wed Nov  4 03:01:48 PM UTC 2026
+x86_64
+8
+Intel(R) Xeon(R) Processor
+clone=/src/anneal
+a658b880b57db24fb466e8e5ba639dfbcf4e4860
+## paper/claimcheck-v2...origin/paper/claimcheck-v2
+TMPDIR=/src/scratch
+cwd=/src/anneal
+command=SEED_OFFSET=1 /src/scratch/anneal-target/release/examples/lj_cluster_search 98 1000000 1 rec,bayes,restart,trail
+LJ98, budget 1000000 charged evaluations, 1 seeds, reference -543.665361
+  recommended configuration
+  SOAP hop: in-crate leftover (rebuild with --features featomic)
+  mechanisms: rec, bayes, restart, trail
+ANSWER_AUDIT seed 1 objective_calls 1 read_only true
+      last improvement at hop 1231 of 7232 (17.0% in), 263021 charged, 142 basins, -541.391267
+    arm single     draws     984  accepts     663  best -543.665361
+    arm surface    draws    1057  accepts     783  best -543.665361
+    arm sym        draws    1412  accepts    1039  best -543.665361
+    arm burst      draws    1161  accepts     626  best -543.665361
+    arm soap       draws     684  accepts     412  best -543.665361
+  seed 1: best -543.665361  hops 7232  screened 2758  charged 1000000  basins 333 (21.7 hops each)  returned 1931  swaps 0/0  paths 0 improved 0 gain 0.000  escape 4.000 thr 0.8000 same/known/new 222/90/42 soft 163/188 sub 0/0 lmin -139.5355 climbs 188 gain 60.43 radius 0.700 step 0.700 restarts 0 xrefused 0 jumps 0 angular 0/0 R 0.420 tabu 0 vetoed 0 screen 1213/5289 expl 544 obs 609 ctx [0, 0, 0, 0, 0] sym 0/0.00 orbits 1745/6416.55  relaxed 2814/8435 converged  early 0 saved 0  verified -543.665361 |g| 1.3e-6  SOLVED
+1/1 solved, deepest -543.665361   mean hops 7232, force per hop 138
+gap to reference +0.000000
+Wed Nov  4 03:03:05 PM UTC 2026
+exit_code=0

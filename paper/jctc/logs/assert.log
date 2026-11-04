@@ -1,6 +1,22 @@
-uname_m=x86_64
-nproc=8
-cpu_model=Intel(R) Xeon(R) Processor
-git_commit=90c898dd2971c8753268b153d96b9b54429b081c
-mode=assert
-assert_exit=0
+Wed Nov  4 03:07:09 PM UTC 2026
+x86_64
+8
+Intel(R) Xeon(R) Processor
+clone=/src/anneal
+a658b880b57db24fb466e8e5ba639dfbcf4e4860
+## paper/claimcheck-v2...origin/paper/claimcheck-v2
+TMPDIR=/src/scratch
+cwd=/src/anneal
+command=rustup run 1.91.0 cargo test --offline --test resolved_config
+   Compiling anneal-core v0.12.0 (/src/anneal)
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.60s
+     Running tests/resolved_config.rs (/src/scratch/anneal-test-target/debug/deps/resolved_config-0739d35d4ddea657)
+
+running 2 tests
+test default_witness_ceiling_is_absent_from_the_resolved_json ... ok
+test resolved_configuration_is_stable_and_mode_sensitive ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Wed Nov  4 03:07:09 PM UTC 2026
+exit_code=0
