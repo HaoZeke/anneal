@@ -8,19 +8,131 @@ fn crate_publication_keeps_cargo_verification_enabled() {
 
 #[test]
 fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
-    let manifest = include_str!("../Cargo.toml");
+    fn strings(value: &toml::Value) -> Vec<&str> {
+        value
+            .as_array()
+            .expect("manifest string array")
+            .iter()
+            .map(|entry| entry.as_str().expect("manifest string entry"))
+            .collect()
+    }
+
+    let manifest: toml::Value =
+        toml::from_str(include_str!("../Cargo.toml")).expect("Cargo.toml parses");
+    let dependencies = manifest
+        .get("dependencies")
+        .and_then(toml::Value::as_table)
+        .expect("[dependencies]");
     let workflow = include_str!("../.github/workflows/ci.yml");
 
-    assert!(manifest.contains("rgpot-core = { version = \"=3.5.1\", optional = true }"));
-    assert!(manifest.contains("linkcell    = { version = \"=0.3.11\", default-features = false }"));
-    assert!(manifest.contains("eindir-core = { version = \"0.6.0\", features = [\"capi\"] }"));
-    assert!(manifest.contains("rgmin = \"0.5.0\""));
-    assert!(manifest.contains("rgsaddle = { version = \"0.3.0\", optional = true }"));
-    assert!(manifest.contains("rgsaddle = [\"dep:rgsaddle\"]"));
-    assert!(manifest.contains("default = []"));
-    assert!(manifest.contains("python = [\"dep:pyo3\", \"dep:numpy\", \"dlpk/pyo3\", \"eindir-core/py-objective\", \"rgsaddle\"]"));
-    assert!(manifest.contains("bank-rpc = [\"dep:capnp\", \"dep:capnp-rpc\", \"dep:futures\", \"dep:nng\", \"dep:tokio\", \"dep:tokio-util\", \"dep:libc\", \"rgsaddle\"]"));
-    assert!(manifest.contains("exclude = [\".cargo/config.toml\"]"));
+    for (name, version, git) in [
+        ("linkcell", "=0.3.11", "https://github.com/d-SEAMS/linkcell"),
+        ("rgmin", "0.5.2", "https://github.com/OmniPotentRPC/rgmin"),
+        (
+            "rgsaddle",
+            "0.3.2",
+            "https://github.com/OmniPotentRPC/rgsaddle",
+        ),
+        (
+            "readcon-db",
+            "0.2.0",
+            "https://github.com/lode-org/readcon-db",
+        ),
+    ] {
+        let dependency = dependencies
+            .get(name)
+            .and_then(toml::Value::as_table)
+            .unwrap_or_else(|| panic!("missing dependency table {name}"));
+        assert_eq!(
+            dependency.get("version").and_then(toml::Value::as_str),
+            Some(version),
+            "{name} registry fallback"
+        );
+        assert_eq!(
+            dependency.get("git").and_then(toml::Value::as_str),
+            Some(git),
+            "{name} source"
+        );
+    }
+
+    for section in ["dependencies", "build-dependencies", "dev-dependencies"] {
+        if let Some(dependencies) = manifest.get(section).and_then(toml::Value::as_table) {
+            for (name, value) in dependencies {
+                let Some(dependency) = value.as_table() else {
+                    continue;
+                };
+                if dependency.contains_key("git") {
+                    let version = dependency
+                        .get("version")
+                        .and_then(toml::Value::as_str)
+                        .unwrap_or_else(|| panic!("{section}.{name} lacks a registry fallback"));
+                    assert!(
+                        !version.trim().is_empty(),
+                        "{section}.{name} empty fallback"
+                    );
+                    let rev = dependency
+                        .get("rev")
+                        .and_then(toml::Value::as_str)
+                        .unwrap_or_else(|| panic!("{section}.{name} lacks a revision"));
+                    assert!(
+                        rev.len() == 40 && rev.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                        "{section}.{name} requires a full Git revision"
+                    );
+                }
+            }
+        }
+    }
+
+    assert_eq!(
+        dependencies["rgpot-core"]["version"].as_str(),
+        Some("=3.5.1")
+    );
+    assert_eq!(dependencies["rgpot-core"]["optional"].as_bool(), Some(true));
+    assert_eq!(
+        dependencies["linkcell"]["default-features"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        dependencies["eindir-core"]["version"].as_str(),
+        Some("0.6.0")
+    );
+    assert_eq!(
+        strings(&dependencies["eindir-core"]["features"]),
+        vec!["capi"]
+    );
+    assert_eq!(dependencies["rgsaddle"]["optional"].as_bool(), Some(true));
+    assert_eq!(
+        strings(&manifest["features"]["rgsaddle"]),
+        vec!["dep:rgsaddle"]
+    );
+    assert!(strings(&manifest["features"]["default"]).is_empty());
+    assert_eq!(
+        strings(&manifest["features"]["python"]),
+        vec![
+            "dep:pyo3",
+            "dep:numpy",
+            "dlpk/pyo3",
+            "eindir-core/py-objective",
+            "rgsaddle"
+        ]
+    );
+    assert_eq!(
+        strings(&manifest["features"]["bank-rpc"]),
+        vec![
+            "dep:capnp",
+            "dep:capnp-rpc",
+            "dep:futures",
+            "dep:nng",
+            "dep:tokio",
+            "dep:tokio-util",
+            "dep:libc",
+            "rgsaddle"
+        ]
+    );
+    assert_eq!(
+        strings(&manifest["package"]["exclude"]),
+        vec![".cargo/config.toml"]
+    );
     // `cargo package` writes anneal-core-${version}.crate. The version
     // comes from cargo metadata.
     assert!(workflow.contains("cargo package"));
