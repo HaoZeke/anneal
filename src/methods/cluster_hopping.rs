@@ -52,7 +52,7 @@ mod packing_bank;
 mod preset;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
-pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, SoapProposalMode};
+pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, SoapProposalMode};
 pub use moves::*;
 
 #[cfg(test)]
@@ -5219,49 +5219,61 @@ where
         }
         // Orbit completion of a newly entered basin: the core's point group
         // applied to the whole cluster, so surface atoms move onto the empty
-        // orbit positions the core implies. Same terms as the core
-        // symmetrisation above: once per new basin, quenched, offered.
+        // orbit positions the core implies. Once per new basin, every
+        // candidate the core asks for is quenched and recorded, and the
+        // lowest is offered to the acceptance rule.
+        let mut orbit_offer = None;
         if cfg.packing_surface().orbit_on_new
             && accept
             && hop_room(hops)
             && (moved_basin || cfg.point_symmetrise_every_accept)
-            && let Some(y) = crate::packing::on_new_basin(
+        {
+            for y in crate::packing::orbit_candidates(
                 x.view(),
                 n,
+                cfg.orbit_core,
                 cfg.symmetry_tolerance,
                 cfg.symmetry_merge_radius,
                 cfg.symmetrise_core_fraction,
                 cfg.min_separation,
-            )
-        {
-            let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
-            if es.is_finite() && xs.len() == x.len() {
-                let sym_gradient = record_quenched_answer(
-                    cfg,
-                    ledger,
-                    &mut grad,
-                    es,
-                    xs.view(),
-                    &mut unconverged_records,
-                );
-                hops += 1;
-                orbits_completed += 1;
-                let d = (es - e) / temperature.max(1e-12);
-                if d < 0.0 || rng.random::<f64>() < (-d).exp() {
-                    if es < e {
-                        orbit_gain += e - es;
-                    }
-                    adopt_minimum!(
+            ) {
+                let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
+                if es.is_finite() && xs.len() == x.len() {
+                    let sym_gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
                         es,
-                        xs,
-                        sym_gradient,
-                        None,
-                        AdoptionHistory::Fresh,
-                        None,
-                        Some("orbit-completion"),
-                        hops
+                        xs.view(),
+                        &mut unconverged_records,
                     );
+                    hops += 1;
+                    orbits_completed += 1;
+                    if orbit_offer
+                        .as_ref()
+                        .is_none_or(|(lowest, _, _)| es < *lowest)
+                    {
+                        orbit_offer = Some((es, xs, sym_gradient));
+                    }
                 }
+            }
+        }
+        if let Some((es, xs, sym_gradient)) = orbit_offer {
+            let d = (es - e) / temperature.max(1e-12);
+            if d < 0.0 || rng.random::<f64>() < (-d).exp() {
+                if es < e {
+                    orbit_gain += e - es;
+                }
+                adopt_minimum!(
+                    es,
+                    xs,
+                    sym_gradient,
+                    None,
+                    AdoptionHistory::Fresh,
+                    None,
+                    Some("orbit-completion"),
+                    hops
+                );
             }
         }
         // Graph edge + Fiedler deposit at the chain's current basin. Called
@@ -6892,6 +6904,37 @@ mod tests {
         let surface = cfg.packing_surface();
         assert!(surface.orbit_on_new);
         assert!(surface.twin_as_move);
+    }
+
+    #[test]
+    fn the_dual_orbit_core_is_opt_in() {
+        let plain = Config::for_cluster(13);
+        assert_eq!(plain.orbit_core, OrbitCore::Fraction);
+        assert!(!plain.resolved_json().unwrap().contains("orbit_core"));
+        let dual = Config::for_cluster_dual_core(13);
+        assert!(dual.packing_surface().orbit_on_new);
+        assert_eq!(
+            dual.orbit_core,
+            OrbitCore::Both(crate::symmetrise::ShellCore::scaled(dual.length_scale))
+        );
+        assert!(dual.restart_on_stall);
+        assert!(!dual.escape_on_stall);
+        assert_eq!(dual.restart_patience, 4_000);
+        assert!(
+            dual.resolved_json()
+                .unwrap()
+                .contains(r#""orbit_core":{"both":"#)
+        );
+        assert_eq!(
+            dual.resolved_json().unwrap(),
+            Config::for_cluster(13)
+                .with_dual_orbit_core()
+                .resolved_json()
+                .unwrap()
+        );
+        let rigid = dual.with_rigid_bodies(crate::potentials::gmin_water_geometry());
+        assert!(!rigid.orbit_complete_on_new);
+        assert_eq!(rigid.orbit_core, OrbitCore::Fraction);
     }
 
     /// The claim the bank rests on: a bias handed to one chain and then to the
