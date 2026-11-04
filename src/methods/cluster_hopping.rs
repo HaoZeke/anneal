@@ -2823,7 +2823,12 @@ where
             && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1);
         let mut directed_leave = false;
         if internal_action.is_none() && cfg.restart_on_stall && !cfg.escape_on_stall && call_due {
-            let fresh = random_cluster(x.len() / 3, 0.7, cfg.min_separation, rng);
+            let fresh = random_cluster(
+                x.len() / 3,
+                LJ_LIQUID_NUMBER_DENSITY,
+                cfg.min_separation,
+                rng,
+            );
             let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
             charged_at_best = ledger.spent();
             best_seen = ledger.best;
@@ -3500,7 +3505,7 @@ where
             let classes = continuous_symmetry_classes
                 .as_deref()
                 .expect("a CSM reseed has equivalence classes");
-            let mut fresh = random_cluster(n, 0.7, cfg.min_separation, rng);
+            let mut fresh = random_cluster(n, LJ_LIQUID_NUMBER_DENSITY, cfg.min_separation, rng);
             if let Some(closed) = crate::packing::on_new_basin(
                 fresh.view(),
                 n,
@@ -6488,10 +6493,19 @@ where
     })
 }
 
+/// Saturated liquid number density of the Lennard-Jones fluid at reduced
+/// temperature 1, kept to one decimal place.
+///
+/// Thol, Rutkai, Koster, Lustig, Span and Vrabec, J. Phys. Chem. Ref. Data
+/// 45, 023101 (2016), ancillary equation (45) with Tc = 1.32 and critical
+/// density 0.31, gives 0.702. The container uses 0.7.
+pub const LJ_LIQUID_NUMBER_DENSITY: f64 = 0.7;
+
 /// Seeds a non-overlapping configuration at liquid-like density.
 ///
 /// Uniform draws over a container overlap almost surely at the sizes of
 /// interest, and a relaxation cannot recover from that.
+/// The density argument on the search paths is [`LJ_LIQUID_NUMBER_DENSITY`].
 pub fn random_cluster<R: Rng + ?Sized>(
     n: usize,
     density: f64,
@@ -6706,7 +6720,12 @@ pub fn optimize_with_energy_gradient<'g>(
     seed: u64,
 ) -> Result<Outcome, SearchError> {
     let mut rng = StdRng::seed_from_u64(seed);
-    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    let start = random_cluster(
+        cfg.n_points,
+        LJ_LIQUID_NUMBER_DENSITY,
+        cfg.min_separation,
+        &mut rng,
+    );
     run_with_energy_gradient(
         cfg,
         start.view(),
@@ -6926,7 +6945,7 @@ mod tests {
         assert!(rec.bayes_screen);
         assert!(matches!(
             Config::recommended(38).move_library,
-            MoveLibrary::Reseed
+            MoveLibrary::LeanBurst
         ));
         assert!(matches!(
             Config::recommended(75).move_library,
@@ -6934,7 +6953,12 @@ mod tests {
         ));
         let want = crate::screen::cost_asymmetric_threshold(der.screen_steps, der.relax_steps);
         assert!((der.bayes_threshold - want).abs() < 1e-12);
-        assert!((der.bayes_threshold - 7.0 / 15.0).abs() < 1e-12);
+        let kept = crate::screen::cost_asymmetric_threshold(
+            super::preset::LennardJonesPreset::SCREEN_STEPS,
+            super::preset::LennardJonesPreset::RELAX_STEPS,
+        );
+        assert!((rec.bayes_threshold - kept).abs() < 1e-12);
+        assert_eq!(rec.relax_steps, Config::RECOMMENDED_RELAX_STEPS);
     }
 
     #[test]
@@ -6953,10 +6977,26 @@ mod tests {
         assert!(!comm.tabu_on_stall);
         assert!(!matches!(comm.move_library, MoveLibrary::LeanBurst));
         assert!(matches!(rec.move_library, MoveLibrary::LeanBurst));
-        assert_eq!(comm.surfaces.len(), 1);
-        assert!(comm.surfaces[0].is_active());
+        assert!(comm.surfaces.is_empty());
+        assert!(rec.surfaces.is_empty());
         assert_eq!(rec.surfaces, comm.surfaces);
         assert!(Config::communicating(98).surfaces.is_empty());
+        let sizes = [13usize, 38, 55, 75, 97, 98, 104];
+        let reference = Config::recommended(sizes[0]);
+        for &n in &sizes {
+            let cfg = Config::recommended(n);
+            assert!(matches!(cfg.move_library, MoveLibrary::LeanBurst));
+            assert!(cfg.surfaces.is_empty(), "n={n}");
+            assert_eq!(cfg.relax_steps, Config::RECOMMENDED_RELAX_STEPS);
+            let mut left = cfg;
+            let mut right = reference.clone();
+            left.n_points = 0;
+            right.n_points = 0;
+            // The container radius is 0.9 n^(1/3). It is the count, not a branch.
+            left.container = 0.0;
+            right.container = 0.0;
+            assert_eq!(format!("{left:?}"), format!("{right:?}"), "n={n}");
+        }
         assert!(matches!(
             rec.continuous_symmetry,
             ContinuousSymmetry::Measure {
@@ -7000,7 +7040,7 @@ mod tests {
             cfg.bias_gamma,
         );
         let mut rng = StdRng::seed_from_u64(4);
-        let start = random_cluster(8, 0.7, cfg.min_separation, &mut rng);
+        let start = random_cluster(8, LJ_LIQUID_NUMBER_DENSITY, cfg.min_separation, &mut rng);
 
         let mut l1 = Ledger::new(3_000);
         let mut r1 = |led: &mut Ledger, x: ArrayView1<f64>, n: usize| toy_relax(led, x, n);
@@ -7200,7 +7240,7 @@ mod tests {
         cfg.merge_radius = 1.0e3;
 
         let mut rng = StdRng::seed_from_u64(1);
-        let start = random_cluster(7, 0.7, cfg.min_separation, &mut rng);
+        let start = random_cluster(7, LJ_LIQUID_NUMBER_DENSITY, cfg.min_separation, &mut rng);
         let mut ledger = Ledger::new(400);
         let polish = cfg.return_polish;
         let mut first_half_polish = 0usize;
@@ -7241,7 +7281,7 @@ mod tests {
         cfg.merge_radius = 1.0e3;
 
         let mut rng = StdRng::seed_from_u64(1);
-        let start = random_cluster(7, 0.7, cfg.min_separation, &mut rng);
+        let start = random_cluster(7, LJ_LIQUID_NUMBER_DENSITY, cfg.min_separation, &mut rng);
         let mut ledger = Ledger::new(400);
         let polish = cfg.return_polish;
         let after = cfg.return_polish_after;
@@ -7353,7 +7393,7 @@ mod tests {
         }));
         let history = Mutex::new(MinimumHistory::new(10.0).unwrap());
         let mut rng = StdRng::seed_from_u64(7);
-        let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+        let start = random_cluster(n, LJ_LIQUID_NUMBER_DENSITY, cfg.min_separation, &mut rng);
         let run = |seed: u64, hook: &mut dyn HistoryHook| {
             let mut ledger = Ledger::new(12_000);
             let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
@@ -7451,7 +7491,7 @@ mod tests {
         }));
         let history = Mutex::new(MinimumHistory::new(10.0).unwrap());
         let mut rng = StdRng::seed_from_u64(7);
-        let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+        let start = random_cluster(n, LJ_LIQUID_NUMBER_DENSITY, cfg.min_separation, &mut rng);
         let run = |seed: u64, hook: &mut dyn HistoryHook| {
             let mut ledger = Ledger::new(12_000);
             let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
@@ -7525,7 +7565,7 @@ mod tests {
             well_relax(&target, led, x, steps)
         };
         let mut rng = StdRng::seed_from_u64(7);
-        let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+        let start = random_cluster(n, LJ_LIQUID_NUMBER_DENSITY, cfg.min_separation, &mut rng);
         let mut ledger = Ledger::new(8_000);
         let _ = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
         assert!(full >= 1, "the first descent must certify the well");
@@ -7793,7 +7833,7 @@ mod tests {
             Some((e, x.mapv(|v| 2.0 * v)))
         };
         let mut rng = StdRng::seed_from_u64(11);
-        let start = random_cluster(6, 0.7, cfg.min_separation, &mut rng);
+        let start = random_cluster(6, LJ_LIQUID_NUMBER_DENSITY, cfg.min_separation, &mut rng);
         let out = run_with_energy_gradient(
             &cfg,
             start.view(),
@@ -7913,7 +7953,7 @@ mod tests {
 
         let out = run_with_gradient(
             &cfg,
-            random_cluster(6, 0.7, cfg.min_separation, &mut rng).view(),
+            random_cluster(6, LJ_LIQUID_NUMBER_DENSITY, cfg.min_separation, &mut rng).view(),
             &mut ledger,
             &mut relax,
             Some(&mut grad),
@@ -8340,7 +8380,7 @@ mod tests {
     fn seeded_cluster_has_no_overlapping_points() {
         let mut rng = StdRng::seed_from_u64(3);
         let n = 38;
-        let x = random_cluster(n, 0.7, 0.85, &mut rng);
+        let x = random_cluster(n, LJ_LIQUID_NUMBER_DENSITY, 0.85, &mut rng);
         assert_eq!(x.len(), 3 * n, "seeding fell short of the requested size");
         for a in 0..n {
             for b in (a + 1)..n {

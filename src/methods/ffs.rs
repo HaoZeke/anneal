@@ -27,7 +27,9 @@
 //! threshold, no reference, no morphology.
 
 use crate::graphkey::contact_key;
-use crate::methods::cluster_hopping::{ClusterMove, Ledger, Relax, random_cluster};
+use crate::methods::cluster_hopping::{
+    ClusterMove, LJ_LIQUID_NUMBER_DENSITY, Ledger, Relax, random_cluster,
+};
 use ndarray::Array1;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -107,7 +109,7 @@ pub fn ffs_descent(
     let mut stored = 0usize;
     let mut launches = 0usize;
     let mut barren = 0usize;
-    let x0 = random_cluster(n, 0.7, 0.5, &mut rng);
+    let x0 = random_cluster(n, LJ_LIQUID_NUMBER_DENSITY, 0.5, &mut rng);
     let (e0, xq) = relax(ledger, x0.view(), cfg.relax_steps);
     best = best.min(e0);
     archive.insert(

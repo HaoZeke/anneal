@@ -18,7 +18,9 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
-use crate::methods::cluster_hopping::{Ledger, Outcome, Relax, random_cluster};
+use crate::methods::cluster_hopping::{
+    LJ_LIQUID_NUMBER_DENSITY, Ledger, Outcome, Relax, random_cluster,
+};
 use crate::potentials::PairKind;
 
 use std::collections::VecDeque;
@@ -689,7 +691,7 @@ pub fn run(cfg: &LatticeSearchConfig, ledger: &mut Ledger, relax: Relax<'_>, see
     let mut constructions = 0usize;
     let mut improvements = 0usize;
     let mut charged_at_best = 0usize;
-    let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+    let start = random_cluster(n, LJ_LIQUID_NUMBER_DENSITY, cfg.min_separation, &mut rng);
     let (mut e, mut x) = relax(ledger, start.view(), cfg.relax_steps);
     ledger.record(e, x.view());
     let mut stalls = 0usize;
@@ -719,7 +721,7 @@ pub fn run(cfg: &LatticeSearchConfig, ledger: &mut Ledger, relax: Relax<'_>, see
             stalls += 1;
         }
         if stalls >= cfg.patience {
-            let fresh = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+            let fresh = random_cluster(n, LJ_LIQUID_NUMBER_DENSITY, cfg.min_separation, &mut rng);
             let (e_fresh, x_fresh) = relax(ledger, fresh.view(), cfg.relax_steps);
             ledger.record(e_fresh, x_fresh.view());
             e = e_fresh;

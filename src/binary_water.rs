@@ -309,7 +309,7 @@ mod tests {
         assert!(!water.orbit_complete_on_new);
 
         let communicating = Config::communicating(10);
-        assert_eq!(communicating.surfaces.len(), 1);
+        assert!(communicating.surfaces.is_empty());
         let adapted = communicating.with_rigid_bodies(gmin_water_geometry());
         assert!(adapted.surfaces.is_empty());
         assert_eq!(adapted.temperature, Config::communicating(10).temperature);
