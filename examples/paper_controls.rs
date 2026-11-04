@@ -525,8 +525,11 @@ mod tests {
             control.relax_steps,
         );
         assert!((control.bayes_threshold - tau).abs() < 1e-12);
-        assert!((tau - 7.0 / 15.0).abs() < 1e-12);
         assert_eq!(control.screen_steps, 25);
+        assert_eq!(
+            control.relax_steps,
+            anneal_core::methods::cluster_hopping::Config::FOR_CLUSTER_RELAX_STEPS
+        );
         assert_eq!(control.temperature.to_bits(), 0.8_f64.to_bits());
         let recommended = apply_arm(13, Arm::Recommended);
         let off = apply_arm(13, Arm::SoapOff);
@@ -539,8 +542,10 @@ mod tests {
         assert_eq!(recommended.move_library, MoveLibrary::LeanBurst);
         assert_eq!(
             apply_arm(38, Arm::Recommended).move_library,
-            MoveLibrary::Reseed
+            MoveLibrary::LeanBurst
         );
+        assert!(apply_arm(38, Arm::Recommended).surfaces.is_empty());
+        assert!(apply_arm(97, Arm::Recommended).surfaces.is_empty());
         assert_eq!(
             apply_arm(38, Arm::SoapOn).move_library,
             MoveLibrary::LeanBurst

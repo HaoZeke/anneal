@@ -60,23 +60,28 @@ fn library_name(library: &MoveLibrary) -> &'static str {
 }
 
 fn assert_preset() {
-    let at_38 = Config::recommended(38);
-    let at_97 = Config::recommended(97);
-    let at_98 = Config::recommended(98);
-    assert!(
-        matches!(at_38.move_library, MoveLibrary::Reseed),
-        "recommended(38) keeps the reseed library"
-    );
-    assert_eq!(at_38.surfaces.len(), 1, "recommended(38) keeps one surface");
-    assert!(
-        matches!(at_97.move_library, MoveLibrary::LeanBurst),
-        "recommended(97) keeps the lean burst library"
-    );
-    assert_eq!(at_97.surfaces.len(), 1, "recommended(97) keeps one surface");
-    assert!(matches!(at_98.move_library, MoveLibrary::LeanBurst));
-    assert!(at_98.surfaces.is_empty());
-    assert_eq!(at_97.screen_steps, 25);
-    assert!((at_97.record_gradient - 1.0e-3).abs() < 1.0e-15);
+    let sizes = [13usize, 38, 55, 75, 97, 98, 104];
+    let reference = Config::recommended(sizes[0]);
+    for &n in &sizes {
+        let cfg = Config::recommended(n);
+        assert!(
+            matches!(cfg.move_library, MoveLibrary::LeanBurst),
+            "recommended({n}) keeps the lean burst library"
+        );
+        assert!(
+            cfg.surfaces.is_empty(),
+            "recommended({n}) leaves surfaces empty"
+        );
+        assert_eq!(cfg.relax_steps, Config::FOR_CLUSTER_RELAX_STEPS);
+        assert!((cfg.record_gradient - 1.0e-3).abs() < 1.0e-15);
+        let mut left = cfg;
+        let mut right = reference.clone();
+        left.n_points = 0;
+        right.n_points = 0;
+        left.container = 0.0;
+        right.container = 0.0;
+        assert_eq!(format!("{left:?}"), format!("{right:?}"), "n={n}");
+    }
 }
 
 fn reference(n: usize) -> f64 {

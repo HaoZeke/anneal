@@ -29,6 +29,17 @@ impl LennardJonesPreset {
     pub(super) const ESCAPE_AMPLITUDE: f64 = 0.25;
     pub(super) const SCREEN_MARGIN: f64 = 2.0;
     pub(super) const RECORD_GRADIENT: f64 = 1.0e-3;
+    /// Screen length of the Lennard-Jones preset.
+    pub(super) const SCREEN_STEPS: usize = 25;
+    /// Quench length on [`super::Config::for_cluster`].
+    ///
+    /// The Bayes threshold of [`super::Config::recommended`] is
+    /// [`crate::screen::cost_asymmetric_threshold`] at [`SCREEN_STEPS`] and
+    /// this length. The closed form `(R - S) / (2 R - S)` is `175/375`,
+    /// which reduces to `7/15`. [`super::Config::recommended`] uses this
+    /// same cap, so the screen pair and the quench cap are one length.
+    /// [`super::Config::derived`] recomputes the threshold from the cap.
+    pub(super) const RELAX_STEPS: usize = 200;
     pub(super) const CONTAINER_RADIUS: f64 = 0.9;
     pub(super) const MIN_SEPARATION: f64 = 0.85;
 }

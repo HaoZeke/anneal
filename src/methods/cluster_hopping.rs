@@ -6960,7 +6960,7 @@ mod tests {
         assert!(rec.bayes_screen);
         assert!(matches!(
             Config::recommended(38).move_library,
-            MoveLibrary::Reseed
+            MoveLibrary::LeanBurst
         ));
         assert!(matches!(
             Config::recommended(75).move_library,
@@ -6968,7 +6968,12 @@ mod tests {
         ));
         let want = crate::screen::cost_asymmetric_threshold(der.screen_steps, der.relax_steps);
         assert!((der.bayes_threshold - want).abs() < 1e-12);
-        assert!((der.bayes_threshold - 7.0 / 15.0).abs() < 1e-12);
+        let kept = crate::screen::cost_asymmetric_threshold(
+            super::preset::LennardJonesPreset::SCREEN_STEPS,
+            super::preset::LennardJonesPreset::RELAX_STEPS,
+        );
+        assert!((rec.bayes_threshold - kept).abs() < 1e-12);
+        assert_eq!(rec.relax_steps, Config::FOR_CLUSTER_RELAX_STEPS);
     }
 
     #[test]
@@ -6987,10 +6992,26 @@ mod tests {
         assert!(!comm.tabu_on_stall);
         assert!(!matches!(comm.move_library, MoveLibrary::LeanBurst));
         assert!(matches!(rec.move_library, MoveLibrary::LeanBurst));
-        assert_eq!(comm.surfaces.len(), 1);
-        assert!(comm.surfaces[0].is_active());
+        assert!(comm.surfaces.is_empty());
+        assert!(rec.surfaces.is_empty());
         assert_eq!(rec.surfaces, comm.surfaces);
         assert!(Config::communicating(98).surfaces.is_empty());
+        let sizes = [13usize, 38, 55, 75, 97, 98, 104];
+        let reference = Config::recommended(sizes[0]);
+        for &n in &sizes {
+            let cfg = Config::recommended(n);
+            assert!(matches!(cfg.move_library, MoveLibrary::LeanBurst));
+            assert!(cfg.surfaces.is_empty(), "n={n}");
+            assert_eq!(cfg.relax_steps, Config::FOR_CLUSTER_RELAX_STEPS);
+            let mut left = cfg;
+            let mut right = reference.clone();
+            left.n_points = 0;
+            right.n_points = 0;
+            // The container radius is 0.9 n^(1/3). It is the count, not a branch.
+            left.container = 0.0;
+            right.container = 0.0;
+            assert_eq!(format!("{left:?}"), format!("{right:?}"), "n={n}");
+        }
         assert!(matches!(
             rec.continuous_symmetry,
             ContinuousSymmetry::Measure {

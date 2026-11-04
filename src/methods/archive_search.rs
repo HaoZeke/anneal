@@ -919,7 +919,7 @@ mod tests {
         );
         assert!(rec.symmetrise_on_stall);
         assert_eq!(rec.screen_steps, 25);
-        assert_eq!(rec.relax_steps, 200);
+        assert_eq!(rec.relax_steps, Config::FOR_CLUSTER_RELAX_STEPS);
         let rec2 = Config::recommended(75);
         assert!(rec2.return_screen);
         assert!(rec2.allocate_moves);
@@ -956,13 +956,16 @@ mod tests {
         assert_eq!(rec.return_polish_after, 0);
         assert!(rec.symmetrise_on_stall);
         assert_eq!(rec.screen_steps, 25);
-        assert_eq!(rec.relax_steps, 200);
+        assert_eq!(rec.relax_steps, Config::FOR_CLUSTER_RELAX_STEPS);
     }
 
     #[test]
     fn a_tiny_run_records_floors_and_refuses_returns() {
         let mut rng = StdRng::seed_from_u64(1);
-        let cfg = Config::recommended(7);
+        let mut cfg = Config::recommended(7);
+        // crude_relax charges every step. The ledger is sized for the
+        // for_cluster quench length.
+        cfg.relax_steps = Config::FOR_CLUSTER_RELAX_STEPS;
         let start = random_cluster(
             7,
             crate::methods::cluster_hopping::LJ_LIQUID_NUMBER_DENSITY,
@@ -1054,7 +1057,10 @@ mod tests {
     #[test]
     fn a_tiny_run_does_not_starve_full_quenches() {
         let mut rng = StdRng::seed_from_u64(2);
-        let cfg = Config::recommended(7);
+        let mut cfg = Config::recommended(7);
+        // crude_relax charges every step. The ledger is sized for the
+        // for_cluster quench length.
+        cfg.relax_steps = Config::FOR_CLUSTER_RELAX_STEPS;
         let start = random_cluster(
             7,
             crate::methods::cluster_hopping::LJ_LIQUID_NUMBER_DENSITY,

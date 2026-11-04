@@ -1082,6 +1082,9 @@ impl Config {
         Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
     }
 
+    /// Quench length on [`Self::for_cluster`] and [`Self::recommended`].
+    pub const FOR_CLUSTER_RELAX_STEPS: usize = LennardJonesPreset::RELAX_STEPS;
+
     /// Settings for `n_points` at the campaign's measured defaults.
     ///
     /// LeanBurst carries the observed-cloud SOAP pullback. Thompson
@@ -1091,15 +1094,18 @@ impl Config {
     /// [`Config::trail_on_stall`], [`Config::escape_on_stall`], and
     /// [`Config::restart_on_stall`]. There is no `RESTART_STALL_ARM`
     /// override. Basin identity stays the measured pair-spectrum merge at 0.7.
-    /// Orbit completion runs on every new basin, and below 98 points the
-    /// relaxation draws between the plain surface and the two-phase
-    /// relative 0.7 surface, the same rule as [`Config::communicating`].
-    /// On optbench archive starts at development seeds, without them this
-    /// stack needed a median 1.4e5 force calls on 32 LJ38 starts and solved
-    /// 2 of 16 LJ75 starts in 1e6; with them, 4.9e3 and 16 of 16.
+    /// Orbit completion runs on every new basin. The constructor does not
+    /// branch on the atom count. The move library is the lean burst library
+    /// at every size, and the surface list stays empty. A caller who wants
+    /// lattice regrowth or a compacted surface sets it.
     /// [`Config::for_cluster`] remains the plain Wales-Doye baseline.
     /// [`Config::packing_superbasin`] adds the unmeasured SOAP-packing key
     /// and adaptive height.
+    /// A full quench runs [`Self::FOR_CLUSTER_RELAX_STEPS`] steps.
+    /// The record gradient stays at 0.001.
+    /// The Bayes threshold is the closed form at a screen of 25 and that
+    /// cap. The quotient is 175/375, which is 7/15.
+    /// [`Config::derived`] recomputes the threshold from the cap.
     pub fn recommended(n_points: usize) -> Self {
         let mut cfg = Self::for_cluster(n_points);
         cfg.move_library = MoveLibrary::LeanBurst;
@@ -1114,25 +1120,16 @@ impl Config {
         cfg.trail_on_stall = true;
         cfg.escape_on_stall = true;
         cfg.restart_on_stall = true;
-        // The displacement stack, LeanBurst included, leaves the Mackay
-        // minimum in place: 17 of 72 seeds at 4e5 calls ended at
-        // -173.252378. Named lattice growth builds the truncated
-        // octahedron instead of searching for it. Measured on seeds
-        // 2000-2071 at that budget, this library solves 72 of 72.
-        // At 75 and 98 points the global minimum is not one of these
-        // packings, and the same library is worse than none, so those
-        // sizes keep LeanBurst.
-        if n_points == 38 {
-            cfg.move_library = MoveLibrary::Reseed;
-        }
-        if n_points < 98 {
-            cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
-        }
-        // GMIN calls SYMMETRYCSM every NSYMINTERVAL quenches, default 10.
-        // The same paper's LJ75 table used a restart of about five basin
-        // hopping steps once symmetrisation was on. Both run inside this
-        // chain. The reseed fires only on an icosahedral plateau, so a
-        // face-centred construction is not abandoned.
+        cfg.bayes_threshold = crate::screen::cost_asymmetric_threshold(
+            cfg.screen_steps,
+            cfg.relax_steps,
+        );
+        // The Cambridge global minimisation program calls its symmetry
+        // measure every 10 quenches, and the LJ75 table in the same paper
+        // restarts for about five basin-hopping steps once that measure is
+        // on. Both run inside this chain. The reseed fires only on an
+        // icosahedral plateau, so a face-centred construction is not
+        // abandoned.
         cfg.continuous_symmetry = ContinuousSymmetry::Measure {
             interval: 10,
             reseed_hops: 5,
@@ -1146,9 +1143,9 @@ impl Config {
     /// Thompson, the return screen, and orbit completion: 31/48 Marks,
     /// 30/48 Leary), not [`Self::recommended`] (LeanBurst, SOAP leftover
     /// as a burst library, tabu-on-stall, stall jump). Peer visit counts
-    /// stay off the escape controller. Two-phase relative 0.7 stays on
-    /// below 98 (occupancy-measured on 38 and 75; 18/48 Leary when left
-    /// on at 98). Grosso replacement is not installed.
+    /// stay off the escape controller. The surface list is empty at every
+    /// size. The constructor does not install a compacted surface from the
+    /// atom count. Grosso replacement is not installed.
     pub fn communicating(n_points: usize) -> Self {
         let mut cfg = Self::for_cluster(n_points);
         cfg.allocate_moves = true;
@@ -1156,9 +1153,6 @@ impl Config {
         cfg.orbit_complete_on_new = true;
         cfg.shared_deposits = 0;
         cfg.shared_visit_policy = crate::methods::minima_hopping::SharedVisitPolicy::Recognition;
-        if n_points < 98 {
-            cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
-        }
         cfg.continuous_symmetry = ContinuousSymmetry::Measure {
             interval: 10,
             reseed_hops: 5,
@@ -1252,9 +1246,9 @@ impl Config {
     ///
     /// The Bayes screen is on. Its threshold is
     /// [`crate::screen::cost_asymmetric_threshold`] at this hop's screen
-    /// and relax steps, `7/15` when those are 25 and 200. The old
-    /// hand-set pair, screen off and threshold `0.05`, is not a second
-    /// default.
+    /// and relax steps. At 25 and 200 the closed form is `175/375`,
+    /// which is `7/15`. The old hand-set pair, screen off and threshold
+    /// `0.05`, is not a second default.
     pub fn for_cluster(n_points: usize) -> Self {
         let mut cfg = Self::with_scales(
             n_points,
@@ -1397,7 +1391,7 @@ impl Config {
             screen_margin: LennardJonesPreset::SCREEN_MARGIN * energy_scale,
             calibrated_screen: true,
             finish_improving: true,
-            screen_steps: 25,
+            screen_steps: LennardJonesPreset::SCREEN_STEPS,
             adaptive_screen: false,
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
             trace_quenched: false,
@@ -1408,7 +1402,7 @@ impl Config {
             probe_screen: false,
             quench_warmup: 4,
             quench_confidence: 2.0,
-            relax_steps: 200,
+            relax_steps: LennardJonesPreset::RELAX_STEPS,
             two_phase: None,
             reoccupy: None,
             reoccupy_interval: 5_000,
