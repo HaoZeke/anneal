@@ -2266,7 +2266,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "rgmin"
 version = "0.5.2"
-source = "git+https://github.com/OmniPotentRPC/rgmin?rev=634379548cf66bec652988a351229cb18154870a#634379548cf66bec652988a351229cb18154870a"
+source = "git+https://github.com/OmniPotentRPC/rgmin?rev=bdb615551b3428c92976514d81b7198e21885a96#bdb615551b3428c92976514d81b7198e21885a96"
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
@@ -2291,7 +2291,7 @@ dependencies = [
 [[package]]
 name = "rgsaddle"
 version = "0.3.2"
-source = "git+https://github.com/OmniPotentRPC/rgsaddle?rev=81866d789ccf4fcf5c17ff31b6a314467de28fcd#81866d789ccf4fcf5c17ff31b6a314467de28fcd"
+source = "git+https://github.com/OmniPotentRPC/rgsaddle?rev=2411b94cad9760dd4778fd1436b0249b32c3c5ba#2411b94cad9760dd4778fd1436b0249b32c3c5ba"
 dependencies = [
  "dlpk",
  "eindir-core",
