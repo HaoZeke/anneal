@@ -15,6 +15,7 @@
 //! there arrives at the cluster driver by the same route as one written here
 //! and neither the driver nor this function can tell them apart.
 
+use crate::methods::bond_preconditioner::BondPreconditioner;
 #[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 #[cfg(test)]
@@ -25,11 +26,14 @@ use crate::methods::cluster_hopping::{
     ChainCheckpoint, CheckpointAction, Config, Ledger, Outcome, SearchError,
     optimize_with_energy_gradient, run_with_energy_gradient_at_checkpoints,
 };
+use crate::methods::minima_hopping::HistoryHook;
 use crate::methods::warm_lbfgs::WarmLbfgs;
 use crate::quench::{QuenchPredictor, Verdict};
 use eindir_core::gradient::DifferentiableObjective;
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
+use std::cell::RefCell;
+use std::sync::Mutex;
 
 /// What a search did, beyond the outcome the driver reports.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -119,10 +123,53 @@ fn two_phase_penalty(
 }
 
 fn gradient_is_converged(gradient: ArrayView1<f64>, threshold: f64) -> bool {
+    largest_component(gradient) < threshold
+}
+
+/// The convergence check a relaxation paid for at the point it ended.
+#[derive(Clone)]
+struct Check {
+    at: Array1<f64>,
+    energy: f64,
+    gradient: Array1<f64>,
+}
+
+type PaidCheck = Mutex<Option<Check>>;
+
+fn largest_component(gradient: ArrayView1<f64>) -> f64 {
     gradient
         .iter()
         .fold(0.0_f64, |largest, value| largest.max(value.abs()))
-        < threshold
+}
+
+/// The gradient driver's record gate, reusing the relaxation's paid check.
+///
+/// The driver validates a quench by asking for the gradient at the point the
+/// relaxation returned, and the relaxation has just paid for that gradient.
+/// Charging it twice spends a potential call on an answer already in hand.
+/// Any other point is evaluated and charged as before.
+fn gated_grad<'a, O>(
+    objective: &'a O,
+    paid: &'a PaidCheck,
+) -> impl FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>> + 'a
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    move |led, x| {
+        let reused = paid
+            .lock()
+            .expect("paid check")
+            .as_ref()
+            .filter(|check| check.at == x)
+            .map(|check| check.gradient.clone());
+        if reused.is_some() {
+            return reused;
+        }
+        if !led.charge() {
+            return None;
+        }
+        Some(objective.grad(x))
+    }
 }
 
 fn warm_relax<'a, O>(
@@ -130,6 +177,7 @@ fn warm_relax<'a, O>(
     cfg: &'a Config,
     stats: &'a mut RelaxStats,
     seed: u64,
+    paid: &'a PaidCheck,
 ) -> impl FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + 'a
 where
     O: DifferentiableObjective<f64> + ?Sized,
@@ -140,21 +188,63 @@ where
     // the communicating preset a PAR-2 of 5792 force calls on 32 LJ38 starts
     // against 4269 here, and a median of 5726 against 3253. Rigid bodies and
     // species diameters record at that same tolerance.
-    opt.gtol = cfg.record_gradient;
-    // The driver calls the screening pass with `screen_steps` and the full one
-    // with `relax_steps`, so the iteration count identifies which is which.
+    //
+    // A record polish is the exception. Its answer is the energy a run
+    // reports, and an energy at the gate is not settled. Take 16 bests of a
+    // 42-atom peptide at GFN2-xTB, stopped at 5e-2 eV/Å. The xtb optimiser
+    // lowered them by 2.07 kcal/mol on average. The polish descends to the
+    // solver's own default.
+    let settled = opt.gtol;
+    let stop = cfg.record_gradient;
+    // The driver calls the screening pass with `screen_steps`, the full one
+    // with `relax_steps` and a record polish with `polish_records`, so the
+    // iteration count identifies which is which.
     let screen_iters = cfg.screen_steps;
+    let polish_iters = cfg.polish_records;
     let adaptive = cfg.adaptive_screen;
     let probe = cfg.probe_screen;
+    let species = cfg
+        .species
+        .as_deref()
+        .filter(|_| cfg.precondition_bonds)
+        .filter(|z| z.len() == cfg.n_points);
     let mut surfaces = (!cfg.surfaces.is_empty())
         .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
     move |led, x, iters| {
         opt.forget();
+        let polishing = polish_iters > 0
+            && iters == polish_iters
+            && iters != cfg.relax_steps
+            && iters > screen_iters;
+        opt.gtol = if polishing { settled } else { stop };
+        let prior = paid
+            .lock()
+            .expect("paid check")
+            .take()
+            .filter(|check| check.at == x);
         let before = led.spent();
         let screening = iters <= screen_iters;
         // A rigid chart uses this same descent. A line-search-free capped
         // step reached a different basin, and the small-cluster walk then
         // took more hops at the same cost per quench.
+        //
+        // A start the previous relaxation already certified at or below the
+        // stop has nothing left to descend, and the descent's first call
+        // would pay again for the energy and gradient on file.
+        let plain = surfaces.is_none() && !cfg.two_phase.is_some_and(|two| two.is_active());
+        if plain
+            && let Some(check) = prior.as_ref()
+            && largest_component(check.gradient.view()) <= opt.gtol
+        {
+            if gradient_is_converged(check.gradient.view(), cfg.record_gradient) {
+                stats.converged += 1;
+            } else {
+                stats.capped += 1;
+            }
+            let energy = check.energy;
+            *paid.lock().expect("paid check") = prior;
+            return (energy, x.to_owned());
+        }
         // The screening pass stops when its own trajectory says the question is
         // settled; the full relaxation runs to its tolerance, because there the
         // answer is the structure and not a verdict about it.
@@ -197,46 +287,92 @@ where
             None => x,
         };
         let stop_at = led.target();
-        let (f, xr, _) = opt.minimize_watched(
-            x,
-            iters,
-            |v| {
-                if !led.charge() {
-                    return None;
-                }
-                Some(objective.value_and_gradient(v))
-            },
-            |_, fv| {
-                if stop_at.is_some_and(|limit| fv <= limit) {
-                    return false;
-                }
-                if screening && probe {
-                    // Never stops. Records where a stop would have happened and
-                    // what it would have claimed, so the claim can be scored
-                    // against the value the full pass actually reaches.
-                    pred.observe(fv);
-                    if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
-                        probe_at = pred.predict().map(|p| (pred.len(), p.limit));
-                    }
-                    return true;
-                }
-                if !(screening && adaptive) {
-                    return true;
-                }
+        // The last point the descent paid for, kept so the convergence check
+        // below does not pay for it again, and so a preconditioned descent
+        // can stop on the Cartesian gradient.
+        let last: RefCell<Option<Check>> = RefCell::new(None);
+        // A descent from where the previous one ended, the full pass after
+        // a screen among them, opens by asking for an answer already paid.
+        let mut opening = prior.clone();
+        let mut evaluate = |v: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+            if let Some(check) = opening.take_if(|check| check.at == v) {
+                let answer = (check.energy, check.gradient.clone());
+                *last.borrow_mut() = Some(check);
+                return Some(answer);
+            }
+            if !led.charge() {
+                return None;
+            }
+            let (e, g) = objective.value_and_gradient(v);
+            *last.borrow_mut() = Some(Check {
+                at: v.to_owned(),
+                energy: e,
+                gradient: g.clone(),
+            });
+            Some((e, g))
+        };
+        let mut watch = |_: usize, fv: f64| {
+            if stop_at.is_some_and(|limit| fv <= limit) {
+                return false;
+            }
+            if screening && probe {
+                // Never stops. Records where a stop would have happened and
+                // what it would have claimed, so the claim can be scored
+                // against the value the full pass actually reaches.
                 pred.observe(fv);
-                // Only the hopeless verdict stops the descent. A promising one
-                // is followed by the full relaxation anyway, so cutting its
-                // screen short saves at most the tail of a pass that 2 per cent
-                // of trials reach, and it hands the return screen an
-                // extrapolated energy below the incumbent attached to a
-                // structure that was never relaxed.
-                if pred.verdict(target) != Verdict::Hopeless {
-                    return true;
+                if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
+                    probe_at = pred.predict().map(|p| (pred.len(), p.limit));
                 }
-                early = true;
-                false
-            },
-        );
+                return true;
+            }
+            if !(screening && adaptive) {
+                return true;
+            }
+            pred.observe(fv);
+            // Only the hopeless verdict stops the descent. A promising one
+            // is followed by the full relaxation anyway, so cutting its
+            // screen short saves at most the tail of a pass that 2 per cent
+            // of trials reach, and it hands the return screen an
+            // extrapolated energy below the incumbent attached to a
+            // structure that was never relaxed.
+            if pred.verdict(target) != Verdict::Hopeless {
+                return true;
+            }
+            early = true;
+            false
+        };
+        let preconditioner = species.and_then(|z| BondPreconditioner::new(x, z));
+        let (f, xr) = match preconditioner {
+            None => {
+                let (f, xr, _) = opt.minimize_watched(x, iters, &mut evaluate, &mut watch);
+                (f, xr)
+            }
+            Some(pre) => {
+                // The reduced gradient has other units, so the solver's own
+                // test is off and the stop reads the Cartesian one.
+                let origin = x.to_owned();
+                let gtol = opt.gtol;
+                opt.gtol = 0.0;
+                let (f, zr, _) = opt.minimize_watched(
+                    Array1::zeros(x.len()).view(),
+                    iters,
+                    |z| {
+                        let v = pre.expand(origin.view(), z);
+                        evaluate(v.view()).map(|(e, g)| (e, pre.reduce(g.view())))
+                    },
+                    |it, fv| {
+                        let settled = last
+                            .borrow()
+                            .as_ref()
+                            .is_some_and(|c| largest_component(c.gradient.view()) <= gtol);
+                        !settled && watch(it, fv)
+                    },
+                );
+                opt.gtol = gtol;
+                (f, pre.expand(origin.view(), zr.view()))
+            }
+        };
+        let last = last.into_inner();
         if let Some((at, claim)) = probe_at {
             stats.probe_stops += 1;
             stats.probe_steps += at;
@@ -281,25 +417,32 @@ where
             // The water census reads these boundaries. A screened descent is
             // not a minimum, so it is recorded without a validation gradient.
             led.record_quench_boundary(before, f, xr.clone(), None);
+            // `f` is the extrapolated energy, so the stored check is the
+            // descent's own evaluation at `xr`.
+            *paid.lock().expect("paid check") = last.filter(|check| check.at == xr);
             return (f, xr);
         }
         // Charged like any other evaluation: asking whether a relaxation
         // converged is asking the potential a question, and a protocol that
         // counts evaluations has to count this one.
+        // A descent that never left a certified start already has its answer,
+        // and so does one whose last paid evaluation is where it stopped.
+        let paid_at_end = prior
+            .filter(|check| check.at == xr)
+            .or(last.filter(|check| check.at == xr));
         let mut f = f;
         let mut xr = xr;
-        let mut validated = None;
-        let mut converged = if led.charge() {
-            stats.check_charged += 1;
-            let g = objective.grad(xr.view());
-            let ok = gradient_is_converged(g.view(), cfg.record_gradient);
-            if ok {
-                validated = Some(g);
+        let mut checked = match paid_at_end {
+            Some(check) => Some(check.gradient),
+            None if led.charge() => {
+                stats.check_charged += 1;
+                Some(objective.grad(xr.view()))
             }
-            ok
-        } else {
-            false
+            None => None,
         };
+        let mut converged = checked
+            .as_ref()
+            .is_some_and(|g| gradient_is_converged(g.view(), cfg.record_gradient));
         // A binary quench often hits the iteration cap with the infinity
         // norm still above the record tolerance, so the ledger would drop
         // a finite minimum. One more pass from that point finishes the
@@ -314,20 +457,15 @@ where
             });
             f = f2;
             xr = xr2;
-            converged = if led.charge() {
+            checked = if led.charge() {
                 stats.check_charged += 1;
-                let g = objective.grad(xr.view());
-                let ok = gradient_is_converged(g.view(), cfg.record_gradient);
-                if ok {
-                    validated = Some(g);
-                } else {
-                    validated = None;
-                }
-                ok
+                Some(objective.grad(xr.view()))
             } else {
-                validated = None;
-                false
+                None
             };
+            converged = checked
+                .as_ref()
+                .is_some_and(|g| gradient_is_converged(g.view(), cfg.record_gradient));
             let extra = led.spent() - before - cost;
             if extra > 0 {
                 stats.full_charged += extra;
@@ -337,11 +475,16 @@ where
             stats.converged += 1;
         } else {
             stats.capped += 1;
-            validated = None;
         }
         // Good-Turing retires from the checkpoint's quench list. Leaving this
         // empty made that stop observe nothing and run out the budget.
+        let validated = checked.as_ref().filter(|_| converged).cloned();
         led.record_quench_boundary(before, f, xr.clone(), validated);
+        *paid.lock().expect("paid check") = checked.map(|gradient| Check {
+            at: xr.clone(),
+            energy: f,
+            gradient,
+        });
         (f, xr)
     }
 }
@@ -365,14 +508,10 @@ where
     // Split deliberately: the relaxation needs the optimizer mutably, the
     // gradient needs only the objective. Sharing the objective by reference is
     // what lets both closures exist at once.
+    let paid = PaidCheck::default();
     let out = {
-        let mut relax = warm_relax(objective, cfg, &mut stats, seed);
-        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
-            if !led.charge() {
-                return None;
-            }
-            Some(objective.grad(x))
-        };
+        let mut relax = warm_relax(objective, cfg, &mut stats, seed, &paid);
+        let mut grad = gated_grad(objective, &paid);
 
         // Value and gradient in one charge, which is what a Hamiltonian leapfrog
         // leaf needs. On a pairwise potential both come out of one pass over the
@@ -413,14 +552,10 @@ where
 {
     let mut stats = RelaxStats::default();
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let paid = PaidCheck::default();
     let out = {
-        let mut relax = warm_relax(objective, cfg, &mut stats, seed);
-        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
-            if !led.charge() {
-                return None;
-            }
-            Some(objective.grad(x))
-        };
+        let mut relax = warm_relax(objective, cfg, &mut stats, seed, &paid);
+        let mut grad = gated_grad(objective, &paid);
         let mut energy_grad =
             |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
                 if !led.charge() {
@@ -461,14 +596,10 @@ where
 {
     let mut stats = RelaxStats::default();
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let paid = PaidCheck::default();
     let out = {
-        let mut relax = warm_relax(objective, cfg, &mut stats, seed);
-        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
-            if !led.charge() {
-                return None;
-            }
-            Some(objective.grad(x))
-        };
+        let mut relax = warm_relax(objective, cfg, &mut stats, seed, &paid);
+        let mut grad = gated_grad(objective, &paid);
         let mut energy_grad =
             |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
                 if !led.charge() {
@@ -489,6 +620,154 @@ where
         )?
     };
     Ok((out, stats))
+}
+
+/// As [`search_from`], reporting every certified quench to `history`.
+///
+/// Several chains that hold hooks over one
+/// [`crate::methods::minima_hopping::MinimumHistory`] share exact minimum
+/// identity and visit counts. Each chain keeps its own coordinates, random
+/// stream, ledger and bias. Visits other chains made to a minimum this
+/// chain reaches are paid into its bias ([`Config::shared_deposits`]), or
+/// feed the escape controller under [`Config::minima_hopping`]. Without a
+/// history this is [`search_from`].
+pub fn search_from_with_history<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    start: ArrayView1<f64>,
+    seed: u64,
+    history: Option<&mut dyn HistoryHook>,
+) -> Result<(Outcome, RelaxStats), SearchError>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let mut stats = RelaxStats::default();
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let paid = PaidCheck::default();
+    let out = {
+        let mut relax = warm_relax(objective, cfg, &mut stats, seed, &paid);
+        let mut grad = gated_grad(objective, &paid);
+        crate::methods::cluster_hopping::run_with_history(
+            cfg,
+            start,
+            ledger,
+            &mut relax,
+            Some(&mut grad),
+            history,
+            &mut rng,
+        )?
+    };
+    Ok((out, stats))
+}
+
+/// A minimum descended further than a search quench goes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Settled {
+    /// Energy at [`Settled::state`].
+    pub energy: f64,
+    /// Where the descent ended.
+    pub state: Array1<f64>,
+    /// Largest gradient component there.
+    pub gradient: f64,
+}
+
+/// Descends `x` until no gradient component exceeds `gtol`, charging
+/// `ledger`, with the quench [`search`] uses.
+///
+/// A search stops each quench at [`Config::record_gradient`]. A minimum is
+/// recordable there, but its energy is not settled. Take 16 Ac-Ala3-NHMe
+/// bests at GFN2-xTB, stopped at 5e-2 eV/Å with bond preconditioning. The
+/// xtb optimiser at its normal level lowered them by 0.93 kcal/mol on
+/// average and by 5.04 at most. A caller that reports energies settles the
+/// minima it keeps, with calls it held back from the search.
+///
+/// The descent ends at `gtol`, after `max_iters` iterations, or when the
+/// ledger runs out. What comes back is the lowest point it evaluated whose
+/// gradient passes [`Config::record_gradient`], because a descent cut off by
+/// the ledger can end with a larger gradient than it started with. `None`
+/// means no evaluated point passed, which includes an empty ledger.
+pub fn settle<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    x: ArrayView1<f64>,
+    gtol: f64,
+    max_iters: usize,
+) -> Option<Settled>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    if ledger.remaining() == 0 {
+        return None;
+    }
+    let mut tight = cfg.clone();
+    tight.record_gradient = gtol;
+    tight.polish_records = 0;
+    tight.adaptive_screen = false;
+    tight.probe_screen = false;
+    let iters = max_iters.max(tight.screen_steps + 1);
+    let watched = Lowest {
+        objective,
+        gate: cfg.record_gradient,
+        best: Mutex::new(None),
+    };
+    let paid = PaidCheck::default();
+    let mut stats = RelaxStats::default();
+    let _ = warm_relax(&watched, &tight, &mut stats, 0, &paid)(ledger, x, iters);
+    watched.best.into_inner().expect("lowest point")
+}
+
+/// An objective that keeps the lowest evaluated point under a gradient gate.
+struct Lowest<'a, O: ?Sized> {
+    objective: &'a O,
+    gate: f64,
+    best: Mutex<Option<Settled>>,
+}
+
+impl<O: DifferentiableObjective<f64> + ?Sized> eindir_core::Objective<f64> for Lowest<'_, O> {
+    fn dim(&self) -> usize {
+        eindir_core::Objective::dim(self.objective)
+    }
+
+    fn bounds(&self) -> &eindir_core::Bounds<f64> {
+        self.objective.bounds()
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        self.value_and_gradient(x).0
+    }
+}
+
+impl<O: DifferentiableObjective<f64> + ?Sized> eindir_core::gradient::Gradient<f64>
+    for Lowest<'_, O>
+{
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        self.value_and_gradient(x).1
+    }
+
+    fn dim(&self) -> usize {
+        eindir_core::Objective::dim(self.objective)
+    }
+}
+
+impl<O: DifferentiableObjective<f64> + ?Sized> DifferentiableObjective<f64> for Lowest<'_, O> {
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let (energy, gradient) = self.objective.value_and_gradient(x);
+        let largest = largest_component(gradient.view());
+        let mut best = self.best.lock().expect("lowest point");
+        if energy.is_finite()
+            && largest < self.gate
+            && best.as_ref().is_none_or(|b| energy < b.energy)
+        {
+            *best = Some(Settled {
+                energy,
+                state: x.to_owned(),
+                gradient: largest,
+            });
+        }
+        (energy, gradient)
+    }
 }
 
 /// [`search_from`] when `BANK_RPC` is unset; [`search_from_bank`] when it is.
@@ -761,13 +1040,9 @@ where
 
     let mut stats = RelaxStats::default();
     let mut bank_validation_charged = 0usize;
-    let mut relax = warm_relax(objective, cfg, &mut stats, seed);
-    let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
-        if !led.charge() {
-            return None;
-        }
-        Some(objective.grad(x))
-    };
+    let paid = PaidCheck::default();
+    let mut relax = warm_relax(objective, cfg, &mut stats, seed, &paid);
+    let mut grad = gated_grad(objective, &paid);
 
     let mut cfg = cfg.clone();
     cfg.budget_window = true;
@@ -1728,5 +2003,427 @@ mod tests {
         wells.push((Array1::from(vec![99.0]), 1.0));
         // 10*2 + 1 = 21 observations, one singleton: n1/N = 1/21 < 0.2
         assert!(catalog_saturated(&wells, 1.0));
+    }
+
+    /// Every evaluation, in order, so a test can see one point paid for
+    /// twice.
+    struct GradientLog<'a> {
+        inner: &'a PairPotential,
+        points: std::sync::Mutex<Vec<Array1<f64>>>,
+    }
+
+    impl eindir_core::Objective<f64> for GradientLog<'_> {
+        fn dim(&self) -> usize {
+            eindir_core::Objective::dim(self.inner)
+        }
+
+        fn bounds(&self) -> &eindir_core::Bounds<f64> {
+            self.inner.bounds()
+        }
+
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.inner.eval(x)
+        }
+    }
+
+    impl eindir_core::gradient::Gradient<f64> for GradientLog<'_> {
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.points.lock().expect("log").push(x.to_owned());
+            self.inner.grad(x)
+        }
+
+        fn dim(&self) -> usize {
+            eindir_core::gradient::Gradient::dim(self.inner)
+        }
+    }
+
+    impl DifferentiableObjective<f64> for GradientLog<'_> {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            self.points.lock().expect("log").push(x.to_owned());
+            self.inner.value_and_gradient(x)
+        }
+    }
+
+    #[test]
+    fn the_record_gate_reuses_the_paid_convergence_check() {
+        let pot = PairPotential::lennard_jones(13);
+        let log = GradientLog {
+            inner: &pot,
+            points: std::sync::Mutex::new(Vec::new()),
+        };
+        let cfg = Config::for_cluster(13);
+        let mut ledger = Ledger::new(20_000);
+        let (out, _) = search(&log, &cfg, &mut ledger, 5).expect("search");
+        let points = log.points.lock().expect("log");
+        let repeats = points.windows(2).filter(|w| w[0] == w[1]).count();
+        assert!(out.hops > 0, "no hops were taken");
+        assert_eq!(
+            points.len(),
+            ledger.spent(),
+            "every charge is one evaluation"
+        );
+        assert_eq!(
+            repeats,
+            0,
+            "{repeats} of {} evaluations were paid twice at one point",
+            points.len()
+        );
+    }
+
+    #[test]
+    fn a_full_quench_leaves_a_validated_boundary() {
+        use crate::methods::cluster_hopping::QuenchStatus;
+        let pot = PairPotential::lennard_jones(13);
+        let cfg = Config::for_cluster(13);
+        let mut ledger = Ledger::new(20_000);
+        let _ = search(&pot, &cfg, &mut ledger, 5);
+        let validated: Vec<_> = ledger
+            .quench_boundaries()
+            .iter()
+            .filter(|b| b.status() == QuenchStatus::Validated)
+            .collect();
+        assert!(!validated.is_empty(), "no quench boundary was validated");
+        for b in validated {
+            let gmax = b
+                .gradient()
+                .expect("a validated boundary carries its gradient")
+                .iter()
+                .fold(0.0_f64, |m, v| m.max(v.abs()));
+            assert!(gmax < cfg.record_gradient, "validated at {gmax}");
+            assert!(b.energy().is_finite());
+        }
+    }
+
+    fn lj13_start(cfg: &Config, seed: u64) -> Array1<f64> {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        crate::methods::cluster_hopping::random_cluster_in_radius(
+            13,
+            cfg.start_radius(),
+            cfg.min_separation,
+            &mut rng,
+        )
+    }
+
+    #[test]
+    fn a_search_without_a_history_is_search_from() {
+        let pot = PairPotential::lennard_jones(13);
+        let cfg = Config::for_cluster(13);
+        let start = lj13_start(&cfg, 11);
+        let mut plain_ledger = Ledger::new(6_000);
+        let (plain, _) =
+            search_from(&pot, &cfg, &mut plain_ledger, start.view(), 3).expect("search");
+        let mut ledger = Ledger::new(6_000);
+        let (out, _) = search_from_with_history(&pot, &cfg, &mut ledger, start.view(), 3, None)
+            .expect("search");
+        assert_eq!(out.best.to_bits(), plain.best.to_bits());
+        assert_eq!(out.hops, plain.hops);
+        assert_eq!(ledger.spent(), plain_ledger.spent());
+    }
+
+    #[test]
+    fn a_second_chain_pays_the_first_chains_visits_into_its_bias() {
+        use crate::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
+        use crate::methods::minima_hopping::{
+            HistoryMembership, MinimumHistory, SharedMinimumHistory,
+        };
+        use crate::pes_exploration::StructureContext;
+        let pot = PairPotential::lennard_jones(13);
+        let cfg = Config::for_cluster(13);
+        assert!(cfg.shared_deposits > 0 && !cfg.minima_hopping);
+        let start = lj13_start(&cfg, 11);
+        let history = Mutex::new(MinimumHistory::new(cfg.record_gradient).expect("tolerance"));
+        let descriptor = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
+        let context = StructureContext::new(Some(vec![18; 13]), None, Some("lj13".into()));
+        let sorted_pairs = |x: ArrayView1<f64>| {
+            let mut d = Vec::new();
+            for i in 0..13 {
+                for j in i + 1..13 {
+                    let r2: f64 = (0..3).map(|k| (x[3 * i + k] - x[3 * j + k]).powi(2)).sum();
+                    d.push(r2.sqrt());
+                }
+            }
+            d.sort_by(f64::total_cmp);
+            d
+        };
+        let witness = |l: ArrayView1<f64>, r: ArrayView1<f64>| {
+            sorted_pairs(l)
+                .iter()
+                .zip(sorted_pairs(r).iter())
+                .all(|(a, b)| (a - b).abs() < 1e-3)
+        };
+        let chain = |seed: u64| {
+            let mut hook = SharedMinimumHistory::new(
+                &history,
+                &descriptor,
+                context.clone(),
+                &witness,
+                HistoryMembership::Observed,
+            );
+            let mut ledger = Ledger::new(4_000);
+            let (out, _) = search_from_with_history(
+                &pot,
+                &cfg,
+                &mut ledger,
+                start.view(),
+                seed,
+                Some(&mut hook),
+            )
+            .expect("search");
+            (out, hook.cost().0)
+        };
+        let (first, first_seen) = chain(3);
+        let (second, second_seen) = chain(3);
+        assert!(first_seen > 0, "the first chain reported no minimum");
+        assert_eq!(
+            history.lock().expect("history").total_visits(),
+            (first_seen + second_seen) as u64
+        );
+        assert_eq!(first.shared_deposits, 0, "nothing was there before it");
+        assert!(
+            second.shared_deposits > 0,
+            "the second chain walked the first chain's minima and paid nothing"
+        );
+    }
+
+    /// A carbon chain held by stiff bond, middling angle and soft torsion
+    /// springs: the spread of curvatures a covalent molecule has.
+    struct SpringChain {
+        atoms: usize,
+        bounds: eindir_core::Bounds<f64>,
+    }
+
+    impl SpringChain {
+        fn new(atoms: usize) -> Self {
+            Self {
+                atoms,
+                bounds: eindir_core::Bounds::new(
+                    Array1::from_elem(3 * atoms, -50.0),
+                    Array1::from_elem(3 * atoms, 50.0),
+                    0.0,
+                ),
+            }
+        }
+
+        fn springs(&self) -> impl Iterator<Item = (usize, usize, f64, f64)> + '_ {
+            let bonds = (0..self.atoms - 1).map(|i| (i, i + 1, 30.0, 1.52));
+            let angles = (0..self.atoms - 2).map(|i| (i, i + 2, 5.0, 2.5));
+            let torsions = (0..self.atoms - 3).map(|i| (i, i + 3, 0.5, 3.4));
+            bonds.chain(angles).chain(torsions)
+        }
+
+        fn start(&self) -> Array1<f64> {
+            Array1::from_iter((0..self.atoms).flat_map(|i| {
+                let t = i as f64;
+                [1.3 * t, 0.9 * (1.7 * t).sin(), 0.7 * (0.9 * t).cos()]
+            }))
+        }
+    }
+
+    impl eindir_core::Objective<f64> for SpringChain {
+        fn dim(&self) -> usize {
+            3 * self.atoms
+        }
+
+        fn bounds(&self) -> &eindir_core::Bounds<f64> {
+            &self.bounds
+        }
+
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.value_and_gradient(x).0
+        }
+    }
+
+    impl eindir_core::gradient::Gradient<f64> for SpringChain {
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.value_and_gradient(x).1
+        }
+
+        fn dim(&self) -> usize {
+            3 * self.atoms
+        }
+    }
+
+    impl DifferentiableObjective<f64> for SpringChain {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let mut e = 0.0;
+            let mut g = Array1::zeros(x.len());
+            for (i, j, k, r0) in self.springs() {
+                let d: Vec<f64> = (0..3).map(|c| x[3 * i + c] - x[3 * j + c]).collect();
+                let r = d.iter().map(|v| v * v).sum::<f64>().sqrt();
+                e += 0.5 * k * (r - r0).powi(2);
+                for c in 0..3 {
+                    let f = k * (r - r0) * d[c] / r;
+                    g[3 * i + c] += f;
+                    g[3 * j + c] -= f;
+                }
+            }
+            (e, g)
+        }
+    }
+
+    fn chain_relax_cost(precondition: bool) -> (usize, f64) {
+        let chain = SpringChain::new(30);
+        let mut cfg = Config::for_molecular(vec![6; 30], vec![(0..30).collect()], 1.0);
+        cfg.record_gradient = 1e-4;
+        cfg.precondition_bonds = precondition;
+        let paid = PaidCheck::default();
+        let mut stats = RelaxStats::default();
+        let mut led = Ledger::new(20_000);
+        let mut relax = warm_relax(&chain, &cfg, &mut stats, 0, &paid);
+        let (_, x) = relax(&mut led, chain.start().view(), 5_000);
+        (
+            led.spent(),
+            largest_component(chain.value_and_gradient(x.view()).1.view()),
+        )
+    }
+
+    #[test]
+    fn a_bond_preconditioned_quench_settles_a_stiff_chain_in_fewer_calls() {
+        let (plain, plain_g) = chain_relax_cost(false);
+        let (pre, pre_g) = chain_relax_cost(true);
+        assert!(plain_g <= 1e-4 && pre_g <= 1e-4, "{plain_g} {pre_g}");
+        assert!(
+            2 * pre < plain,
+            "preconditioned {pre} calls against plain {plain}"
+        );
+    }
+
+    #[test]
+    fn the_convergence_check_reuses_the_descents_last_evaluation() {
+        let chain = SpringChain::new(12);
+        let log = std::sync::Mutex::new(Vec::<Array1<f64>>::new());
+        struct Logged<'a>(&'a SpringChain, &'a std::sync::Mutex<Vec<Array1<f64>>>);
+        impl eindir_core::Objective<f64> for Logged<'_> {
+            fn dim(&self) -> usize {
+                eindir_core::Objective::dim(self.0)
+            }
+            fn bounds(&self) -> &eindir_core::Bounds<f64> {
+                self.0.bounds()
+            }
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                self.value_and_gradient(x).0
+            }
+        }
+        impl eindir_core::gradient::Gradient<f64> for Logged<'_> {
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                self.value_and_gradient(x).1
+            }
+            fn dim(&self) -> usize {
+                eindir_core::Objective::dim(self.0)
+            }
+        }
+        impl DifferentiableObjective<f64> for Logged<'_> {
+            fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+                self.1.lock().unwrap().push(x.to_owned());
+                self.0.value_and_gradient(x)
+            }
+        }
+        let logged = Logged(&chain, &log);
+        let mut cfg = Config::for_molecular(vec![6; 12], vec![(0..12).collect()], 1.0);
+        cfg.record_gradient = 1e-3;
+        let paid = PaidCheck::default();
+        let mut stats = RelaxStats::default();
+        let mut led = Ledger::new(20_000);
+        let mut relax = warm_relax(&logged, &cfg, &mut stats, 0, &paid);
+        let (_, x) = relax(&mut led, chain.start().view(), 5_000);
+        drop(relax);
+        let points = log.lock().unwrap();
+        assert_eq!(led.spent(), points.len(), "every charge is one evaluation");
+        let at_end = points.iter().filter(|p| **p == x).count();
+        assert_eq!(at_end, 1, "the end point was evaluated {at_end} times");
+        assert_eq!(stats.check_charged, 0);
+    }
+
+    /// An incumbent far below the chain's floor makes every screen hopeless.
+    #[test]
+    fn an_adaptive_early_stop_keeps_its_last_paid_evaluation() {
+        let chain = SpringChain::new(12);
+        let mut cfg = Config::for_molecular(vec![6; 12], vec![(0..12).collect()], 1.0);
+        cfg.adaptive_screen = true;
+        let paid = PaidCheck::default();
+        let mut stats = RelaxStats::default();
+        let mut led = Ledger::new(20_000);
+        led.best = -1.0e6;
+        let mut relax = warm_relax(&chain, &cfg, &mut stats, 0, &paid);
+        let (_, x) = relax(&mut led, chain.start().view(), cfg.screen_steps);
+        drop(relax);
+        assert_eq!(stats.capped, 1);
+        assert!(
+            stats.screen_steps_taken < cfg.screen_steps,
+            "the screen ran {} of {} steps",
+            stats.screen_steps_taken,
+            cfg.screen_steps
+        );
+        let kept = paid
+            .lock()
+            .unwrap()
+            .take()
+            .expect("no paid evaluation kept");
+        let (energy, gradient) = chain.value_and_gradient(x.view());
+        assert_eq!(kept.at, x);
+        assert_eq!(kept.energy, energy);
+        assert_eq!(kept.gradient, gradient);
+    }
+
+    #[test]
+    fn a_record_polish_descends_past_the_quench_stop() {
+        let chain = SpringChain::new(12);
+        let mut cfg = Config::for_molecular(vec![6; 12], vec![(0..12).collect()], 1.0);
+        cfg.record_gradient = 1e-1;
+        cfg.polish_records = cfg.relax_steps + 300;
+        let paid = PaidCheck::default();
+        let mut stats = RelaxStats::default();
+        let mut led = Ledger::new(20_000);
+        let mut relax = warm_relax(&chain, &cfg, &mut stats, 0, &paid);
+        let (quenched, x) = relax(&mut led, chain.start().view(), cfg.relax_steps);
+        let (polished, y) = relax(&mut led, x.view(), cfg.polish_records);
+        drop(relax);
+        assert!(largest_component(chain.value_and_gradient(x.view()).1.view()) <= 1e-1);
+        assert!(polished < quenched, "polish {polished} quench {quenched}");
+        assert!(largest_component(chain.value_and_gradient(y.view()).1.view()) < 1e-3);
+    }
+
+    #[test]
+    fn settling_descends_past_the_record_gate_on_the_callers_ledger() {
+        let chain = SpringChain::new(12);
+        let mut cfg = Config::for_molecular(vec![6; 12], vec![(0..12).collect()], 1.0);
+        cfg.record_gradient = 1e-1;
+        let paid = PaidCheck::default();
+        let mut stats = RelaxStats::default();
+        let mut led = Ledger::new(20_000);
+        let (quenched, x) =
+            warm_relax(&chain, &cfg, &mut stats, 0, &paid)(&mut led, chain.start().view(), 500);
+        let mut tail = Ledger::new(400);
+        let settled = settle(&chain, &cfg, &mut tail, x.view(), 1e-4, 1_000).expect("settled");
+        assert!(settled.energy < quenched, "{} {quenched}", settled.energy);
+        assert!(
+            settled.gradient < cfg.record_gradient,
+            "kept {}",
+            settled.gradient
+        );
+        let (energy, gradient) = chain.value_and_gradient(settled.state.view());
+        assert_eq!(energy, settled.energy);
+        assert_eq!(largest_component(gradient.view()), settled.gradient);
+        assert!(tail.spent() > 0 && tail.spent() <= 400);
+        let mut empty = Ledger::new(0);
+        assert!(settle(&chain, &cfg, &mut empty, x.view(), 1e-4, 1_000).is_none());
+        // Cut off long before 1e-4, it still hands back a point under the
+        // record gate and no higher than where it started.
+        let mut short = Ledger::new(3);
+        let cut = settle(&chain, &cfg, &mut short, x.view(), 1e-4, 1_000).expect("cut");
+        assert!(cut.gradient < cfg.record_gradient && cut.energy <= quenched);
+        assert_eq!(short.spent(), 3);
+    }
+
+    #[test]
+    fn the_molecular_record_gate_sits_above_a_gfn_quench_floor() {
+        let cfg = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
+        let reduced = 1.0e-3 / cfg.length_scale;
+        assert!(
+            cfg.record_gradient > 10.0 * reduced,
+            "gate {:.3e} is still the reduced-unit floor {reduced:.3e}",
+            cfg.record_gradient
+        );
+        assert!((cfg.record_gradient - 5.0e-2).abs() < 1e-15);
     }
 }

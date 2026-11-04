@@ -204,7 +204,14 @@ impl MoveLibrary {
                 };
                 let mobile = mobile_atoms(cfg, groups);
                 if cfg.soap_mode != SoapProposalMode::Off {
-                    kernels.push(soap_arm(cfg, mobile, Some(groups.clone())));
+                    kernels.push(soap_arm(cfg, mobile.clone(), Some(groups.clone())));
+                }
+                if let Some(species) = cfg.species.as_ref() {
+                    kernels.push(ClusterMove::Torsion {
+                        species: species.clone(),
+                        tolerance: cfg.bond_tolerance,
+                        mobile,
+                    });
                 }
                 kernels
             }
@@ -595,6 +602,163 @@ pub enum ClusterMove {
         /// nearest finite rigid motions before the proposal is returned.
         groups: Option<Vec<Vec<usize>>>,
     },
+    /// Turn the smaller side of one rotatable covalent bond by a uniform angle.
+    ///
+    /// Rigid-group moves leave a molecule's internal geometry alone, and the
+    /// conformer coordinate of a flexible molecule is its torsions. The bonds
+    /// are read off covalent radii in the current geometry, never off a
+    /// residue table; see [`rotatable_bonds`].
+    Torsion {
+        /// Atomic numbers, one per atom.
+        species: Vec<u32>,
+        /// Bond when closer than this factor times the covalent-radius sum.
+        tolerance: f64,
+        /// Atoms allowed to move. `None` is all atoms.
+        mobile: Option<Vec<usize>>,
+    },
+}
+
+/// Fraction of the covalent-radius sum below which a bond is treated as
+/// multiple or conjugated, and so not turned.
+///
+/// The Cordero radii are single-bond radii, so a single bond sits near the
+/// sum. In GFN2-xTB geometries an sp3 C–C or C–N bond sits at 0.98 to 1.02 of
+/// it, a peptide amide C–N at 0.91 to 0.92 and a carbonyl at 0.85.
+const SINGLE_BOND_FRACTION: f64 = 0.93;
+
+/// One rotatable covalent bond and the side that turns about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RotatableBond {
+    /// Bonded atom on the side that stays put.
+    pub fixed: usize,
+    /// Bonded atom on the turning side.
+    pub pivot: usize,
+    /// Atoms that turn, `pivot` included.
+    pub side: Vec<usize>,
+}
+
+/// Rotatable bonds of a covalent structure.
+///
+/// A bond is rotatable when it is single by [`SINGLE_BOND_FRACTION`], is a
+/// bridge of the bond graph (not in a ring), and has at least two atoms on
+/// each side. The smaller side is the one that turns, and of two sides of one
+/// size, one that is not a symmetric top. A bond whose turning side is a
+/// symmetric top, a pivot carrying two or more identical terminal atoms and
+/// nothing else such as a methyl, is left out: turning it maps the group back
+/// onto itself and a quench undoes the rest.
+pub fn rotatable_bonds(x: ArrayView1<f64>, species: &[u32], tolerance: f64) -> Vec<RotatableBond> {
+    let n = species.len().min(x.len() / 3);
+    let mut adj = vec![Vec::<usize>::new(); n];
+    let mut single = Vec::new();
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let sum = covalent_radius(species[i]) + covalent_radius(species[j]);
+            if sum <= 0.0 {
+                continue;
+            }
+            let d = atom_distance(x, i, j);
+            if d >= tolerance * sum {
+                continue;
+            }
+            adj[i].push(j);
+            adj[j].push(i);
+            if d >= SINGLE_BOND_FRACTION * sum {
+                single.push((i, j));
+            }
+        }
+    }
+    let reach = |from: usize, across: usize| {
+        let mut seen = vec![false; n];
+        seen[from] = true;
+        let mut stack = vec![from];
+        while let Some(a) = stack.pop() {
+            for &b in &adj[a] {
+                if (a == from && b == across) || seen[b] {
+                    continue;
+                }
+                seen[b] = true;
+                stack.push(b);
+            }
+        }
+        seen
+    };
+    let symmetric_top = |pivot: usize, side: &[usize]| {
+        let tips: Vec<usize> = side.iter().copied().filter(|&a| a != pivot).collect();
+        tips.len() >= 2
+            && tips
+                .iter()
+                .all(|&t| adj[t].len() == 1 && species[t] == species[tips[0]])
+    };
+    let mut out = Vec::new();
+    for (i, j) in single {
+        let from_i = reach(i, j);
+        if from_i[j] {
+            continue;
+        }
+        let from_j = reach(j, i);
+        let side_i: Vec<usize> = (0..n).filter(|&a| from_i[a]).collect();
+        let side_j: Vec<usize> = (0..n).filter(|&a| from_j[a]).collect();
+        if side_i.len() < 2 || side_j.len() < 2 {
+            continue;
+        }
+        let turn_i = side_i.len() < side_j.len()
+            || (side_i.len() == side_j.len() && symmetric_top(j, &side_j));
+        let (fixed, pivot, side) = if turn_i {
+            (j, i, side_i)
+        } else {
+            (i, j, side_j)
+        };
+        if symmetric_top(pivot, &side) {
+            continue;
+        }
+        out.push(RotatableBond { fixed, pivot, side });
+    }
+    out
+}
+
+fn atom_distance(x: ArrayView1<f64>, i: usize, j: usize) -> f64 {
+    (0..3)
+        .map(|k| (x[3 * i + k] - x[3 * j + k]).powi(2))
+        .sum::<f64>()
+        .sqrt()
+}
+
+/// Turns `bond.side` by `angle` radians about the axis from `fixed` to `pivot`.
+pub fn turn_bond(x: &mut Array1<f64>, bond: &RotatableBond, angle: f64) {
+    let origin = [
+        x[3 * bond.fixed],
+        x[3 * bond.fixed + 1],
+        x[3 * bond.fixed + 2],
+    ];
+    let mut axis = [
+        x[3 * bond.pivot] - origin[0],
+        x[3 * bond.pivot + 1] - origin[1],
+        x[3 * bond.pivot + 2] - origin[2],
+    ];
+    let norm = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+    if norm < 1e-8 {
+        return;
+    }
+    for v in axis.iter_mut() {
+        *v /= norm;
+    }
+    let (sa, ca) = angle.sin_cos();
+    for &a in &bond.side {
+        let p = [
+            x[3 * a] - origin[0],
+            x[3 * a + 1] - origin[1],
+            x[3 * a + 2] - origin[2],
+        ];
+        let dot = p[0] * axis[0] + p[1] * axis[1] + p[2] * axis[2];
+        let cross = [
+            axis[1] * p[2] - axis[2] * p[1],
+            axis[2] * p[0] - axis[0] * p[2],
+            axis[0] * p[1] - axis[1] * p[0],
+        ];
+        for k in 0..3 {
+            x[3 * a + k] = origin[k] + p[k] * ca + cross[k] * sa + axis[k] * dot * (1.0 - ca);
+        }
+    }
 }
 
 fn soap_arm(
@@ -1062,7 +1226,7 @@ fn components(n: usize, neighbours: impl Fn(usize) -> Vec<usize>) -> Vec<Vec<usi
 }
 
 /// Centroid of one group.
-fn group_centroid(x: ArrayView1<f64>, atoms: &[usize]) -> [f64; 3] {
+pub(crate) fn group_centroid(x: ArrayView1<f64>, atoms: &[usize]) -> [f64; 3] {
     let n = x.len() / 3;
     let mut c = [0.0_f64; 3];
     let mut m = 0usize;
@@ -1378,6 +1542,7 @@ impl ClusterMove {
             ClusterMove::Angular { .. } => "angular".into(),
             ClusterMove::Twin { .. } => "twin".into(),
             ClusterMove::Soap { .. } => "soap".into(),
+            ClusterMove::Torsion { .. } => "torsion".into(),
             ClusterMove::Reseed { source, .. } => format!("grow:{}", source.name()),
             ClusterMove::SpeciesSwap { .. } => "swap".into(),
             ClusterMove::RigidTranslate { .. } => "rtrans".into(),
@@ -1831,6 +1996,27 @@ impl ClusterMove {
                         rng,
                     )
                 }
+            }
+            ClusterMove::Torsion {
+                species,
+                tolerance,
+                mobile,
+            } => {
+                let mut y = x.to_owned();
+                let bonds: Vec<RotatableBond> = rotatable_bonds(x, species, *tolerance)
+                    .into_iter()
+                    .filter(|bond| {
+                        mobile
+                            .as_ref()
+                            .is_none_or(|free| bond.side.iter().all(|a| free.contains(a)))
+                    })
+                    .collect();
+                if bonds.is_empty() {
+                    return y;
+                }
+                let bond = &bonds[rng.random_range(0..bonds.len())];
+                turn_bond(&mut y, bond, rng.random::<f64>() * std::f64::consts::TAU);
+                y
             }
         }
     }
@@ -2817,5 +3003,225 @@ mod move_scaling_tests {
         let p = mv.propose(x.view(), 0.8, &mut a);
         let q = mv.propose_scaled(x.view(), 0.8, 1.0, &mut b);
         assert_eq!(p, q);
+    }
+}
+
+#[cfg(test)]
+mod torsion_tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    fn dihedral(x: &Array1<f64>, a: usize, b: usize, c: usize, d: usize) -> f64 {
+        let p = |i: usize| [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+        let sub = |u: [f64; 3], v: [f64; 3]| [u[0] - v[0], u[1] - v[1], u[2] - v[2]];
+        let cross = |u: [f64; 3], v: [f64; 3]| {
+            [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            ]
+        };
+        let dot = |u: [f64; 3], v: [f64; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+        let b1 = sub(p(b), p(a));
+        let b2 = sub(p(c), p(b));
+        let b3 = sub(p(d), p(c));
+        let n1 = cross(b1, b2);
+        let n2 = cross(b2, b3);
+        let m = cross(n1, n2);
+        (dot(m, b2) / dot(b2, b2).sqrt()).atan2(dot(n1, n2))
+    }
+
+    fn angle_gap(a: f64, b: f64) -> f64 {
+        let d = (a - b).abs() % std::f64::consts::TAU;
+        d.min(std::f64::consts::TAU - d)
+    }
+
+    fn chain(central: f64) -> Array1<f64> {
+        Array1::from_vec(vec![
+            0.0,
+            0.0,
+            0.0,
+            1.50,
+            0.0,
+            0.0,
+            1.50 + 0.5 * central,
+            0.866 * central,
+            0.0,
+            3.0 + 0.5 * central,
+            0.866 * central,
+            0.0,
+        ])
+    }
+
+    /// A rigid shake of the whole molecule cannot change a dihedral. A turn
+    /// about the central bond does, and leaves every bond length alone.
+    #[test]
+    fn a_torsion_changes_a_chain_dihedral_and_keeps_the_bonds() {
+        let species = vec![6u32; 4];
+        let x = chain(1.52);
+        let bonds = rotatable_bonds(x.view(), &species, 1.25);
+        assert_eq!(
+            bonds.len(),
+            1,
+            "a four-carbon chain has one torsion: {bonds:?}"
+        );
+        let rigid = ClusterMove::GroupShake {
+            groups: vec![(0..4).collect()],
+            amplitude: 0.4,
+        };
+        let shaken = rigid.propose(x.view(), 1.0, &mut StdRng::seed_from_u64(7));
+        let d0 = dihedral(&x, 0, 1, 2, 3);
+        assert!(angle_gap(d0, dihedral(&shaken, 0, 1, 2, 3)) < 1e-8);
+        let mut turned = x.clone();
+        turn_bond(&mut turned, &bonds[0], std::f64::consts::FRAC_PI_2);
+        let d1 = dihedral(&turned, 0, 1, 2, 3);
+        assert!((angle_gap(d1, d0) - std::f64::consts::FRAC_PI_2).abs() < 1e-8);
+        for (i, j) in [(0, 1), (1, 2), (2, 3)] {
+            let before = atom_distance(x.view(), i, j);
+            let after = atom_distance(turned.view(), i, j);
+            assert!(
+                (after - before).abs() < 1e-10,
+                "bond {i}-{j} moved to {after}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_short_conjugated_bond_is_not_turned() {
+        let species = vec![6u32; 4];
+        assert!(rotatable_bonds(chain(1.36).view(), &species, 1.25).is_empty());
+    }
+
+    #[test]
+    fn a_ring_has_no_rotatable_bond() {
+        let n = 6usize;
+        let r = 1.52_f64 / (2.0 * (std::f64::consts::PI / n as f64).sin());
+        let mut x = Array1::zeros(3 * n);
+        for i in 0..n {
+            let a = i as f64 * std::f64::consts::TAU / n as f64;
+            x[3 * i] = r * a.cos();
+            x[3 * i + 1] = r * a.sin();
+        }
+        assert!(rotatable_bonds(x.view(), &[6u32; 6], 1.25).is_empty());
+    }
+
+    /// Methanol: the hydroxyl turns, the methyl it would also turn is a
+    /// symmetric top and is left out.
+    fn methanol() -> (Array1<f64>, Vec<u32>) {
+        let ch = 1.09;
+        let x = Array1::from_vec(vec![
+            0.0,
+            0.0,
+            0.0,
+            1.43,
+            0.0,
+            0.0,
+            1.75,
+            0.905,
+            0.0,
+            -ch / 3.0,
+            ch * 0.943,
+            0.0,
+            -ch / 3.0,
+            -ch * 0.471,
+            ch * 0.816,
+            -ch / 3.0,
+            -ch * 0.471,
+            -ch * 0.816,
+        ]);
+        (x, vec![6, 8, 1, 1, 1, 1])
+    }
+
+    #[test]
+    fn a_hydroxyl_turns_and_a_methyl_does_not() {
+        let (x, species) = methanol();
+        let bonds = rotatable_bonds(x.view(), &species, 1.25);
+        assert_eq!(bonds.len(), 1, "{bonds:?}");
+        assert_eq!(bonds[0].pivot, 1);
+        assert_eq!(bonds[0].side, vec![1, 2]);
+    }
+
+    /// Ethane with one hydrogen of the second carbon replaced by
+    /// `substituent` at `length`, the two carbons listed in either order.
+    /// Each side of the C-C bond has four atoms.
+    fn substituted_ethane(
+        substituent: u32,
+        length: f64,
+        carbons_swapped: bool,
+    ) -> (Array1<f64>, Vec<u32>) {
+        let (cc, ch) = (1.52, 1.09);
+        let mut atoms = vec![
+            [0.0, 0.0, 0.0],
+            [cc, 0.0, 0.0],
+            [-ch / 3.0, ch * 0.943, 0.0],
+            [-ch / 3.0, -ch * 0.471, ch * 0.816],
+            [-ch / 3.0, -ch * 0.471, -ch * 0.816],
+            [cc + ch / 3.0, -ch * 0.943, 0.0],
+            [cc + ch / 3.0, ch * 0.471, ch * 0.816],
+            [cc + length / 3.0, length * 0.471, -length * 0.816],
+        ];
+        if carbons_swapped {
+            atoms.swap(0, 1);
+        }
+        let x = Array1::from_iter(atoms.into_iter().flatten());
+        (x, vec![6, 6, 1, 1, 1, 1, 1, substituent])
+    }
+
+    /// Fluoroethane splits four atoms to four. The methyl is a symmetric top,
+    /// so the CH2F side turns whichever carbon is listed first.
+    #[test]
+    fn an_equal_split_turns_the_side_that_is_not_a_symmetric_top() {
+        for swapped in [false, true] {
+            let (x, species) = substituted_ethane(9, 1.39, swapped);
+            let (methyl, fluorinated) = if swapped { (1, 0) } else { (0, 1) };
+            let bonds = rotatable_bonds(x.view(), &species, 1.25);
+            assert_eq!(bonds.len(), 1, "swapped {swapped}: {bonds:?}");
+            assert_eq!((bonds[0].fixed, bonds[0].pivot), (methyl, fluorinated));
+            let mut side = vec![fluorinated, 5, 6, 7];
+            side.sort_unstable();
+            assert_eq!(bonds[0].side, side, "swapped {swapped}");
+        }
+    }
+
+    #[test]
+    fn a_bond_between_two_symmetric_tops_is_not_turned() {
+        for swapped in [false, true] {
+            let (x, species) = substituted_ethane(1, 1.09, swapped);
+            let bonds = rotatable_bonds(x.view(), &species, 1.25);
+            assert!(bonds.is_empty(), "swapped {swapped}: {bonds:?}");
+        }
+    }
+
+    #[test]
+    fn a_torsion_leaves_immobile_atoms_where_they_are() {
+        let (x, species) = methanol();
+        let held = ClusterMove::Torsion {
+            species: species.clone(),
+            tolerance: 1.25,
+            mobile: Some(vec![0, 3, 4, 5]),
+        };
+        let mut rng = StdRng::seed_from_u64(3);
+        assert_eq!(held.propose(x.view(), 1.0, &mut rng), x);
+        let free = ClusterMove::Torsion {
+            species,
+            tolerance: 1.25,
+            mobile: None,
+        };
+        let y = free.propose(x.view(), 1.0, &mut rng);
+        assert_ne!(y, x);
+        assert_eq!(y.slice(ndarray::s![..6]), x.slice(ndarray::s![..6]));
+    }
+
+    #[test]
+    fn the_molecular_library_offers_a_torsion() {
+        let cfg = Config::recommended_molecular(vec![6, 6, 6, 6], vec![vec![0, 1, 2, 3]], 1.0);
+        let names: Vec<String> = cfg
+            .move_library
+            .kernels(&cfg)
+            .iter()
+            .map(|k| k.name())
+            .collect();
+        assert!(names.iter().any(|n| n == "torsion"), "{names:?}");
     }
 }
