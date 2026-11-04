@@ -2266,8 +2266,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "rgmin"
 version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f5fec1e2ba0832a2209321e8cf69332455d80bc9fed88038c2de0232ef1f30b"
+source = "git+https://github.com/OmniPotentRPC/rgmin?rev=5ff48fb9dabcf17f4516884efb95b8a39dad99af#5ff48fb9dabcf17f4516884efb95b8a39dad99af"
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
@@ -2292,7 +2291,7 @@ dependencies = [
 [[package]]
 name = "rgsaddle"
 version = "0.3.2"
-source = "git+https://github.com/OmniPotentRPC/rgsaddle?rev=06d86a490364da0f595cdc12e6514b32088dc94e#06d86a490364da0f595cdc12e6514b32088dc94e"
+source = "git+https://github.com/OmniPotentRPC/rgsaddle?rev=ae8237e2853f3d77f87e81c09355729c54d7e34a#ae8237e2853f3d77f87e81c09355729c54d7e34a"
 dependencies = [
  "dlpk",
  "eindir-core",
