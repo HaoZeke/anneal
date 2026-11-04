@@ -1,13 +1,13 @@
-Wed Nov  4 02:59:25 PM UTC 2026
+Wed Nov  4 03:41:25 PM UTC 2026
 x86_64
 8
 Intel(R) Xeon(R) Processor
 clone=/src/anneal
-a658b880b57db24fb466e8e5ba639dfbcf4e4860
+12e20af5267b371b6748b40dd4e886ed4e0da88d
 ## paper/claimcheck-v2...origin/paper/claimcheck-v2
 TMPDIR=/src/scratch
 cwd=/src/anneal
-command=bash /src/scratch/run-v25-logs.sh
+command=bash /src/scratch/run-v26-logs.sh
 launch=0 n=38 seed=0 name=lj38-seed0.log
 launch=1 n=55 seed=0 name=lj55-seed0.log
 launch=2 n=75 seed=0 name=lj75-seed0.log
@@ -39,5 +39,5 @@ launch=27 n=75 seed=5 name=lj75-seed5.log
 launch=28 n=98 seed=5 name=lj98-seed5.log
 launch=29 n=104 seed=5 name=lj104-seed5.log
 launch=30 n=38 seed=0 name=lj38-plain-seed0.log
-Wed Nov  4 03:12:02 PM UTC 2026
+Wed Nov  4 03:54:00 PM UTC 2026
 exit_code=0

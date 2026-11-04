@@ -1,9 +1,9 @@
-Wed Nov  4 03:00:02 PM UTC 2026
+Wed Nov  4 03:39:31 PM UTC 2026
 x86_64
 8
 Intel(R) Xeon(R) Processor
 clone=/src/anneal
-a658b880b57db24fb466e8e5ba639dfbcf4e4860
+12e20af5267b371b6748b40dd4e886ed4e0da88d
 ## paper/claimcheck-v2...origin/paper/claimcheck-v2
 TMPDIR=/src/scratch
 cwd=/src/anneal
@@ -21,5 +21,5 @@ type7_interval=8.52 15.22
 resamples=2000
 rng=random.Random(2)
 lj98 | 24/64 64/64 | 2000000.0 158540.5 | 12.62 [8.52, 15.22]
-Wed Nov  4 03:00:02 PM UTC 2026
+Wed Nov  4 03:39:31 PM UTC 2026
 exit_code=0

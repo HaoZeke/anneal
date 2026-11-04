@@ -1,13 +1,13 @@
-Wed Nov  4 03:03:36 PM UTC 2026
+Wed Nov  4 03:45:36 PM UTC 2026
 x86_64
 8
 Intel(R) Xeon(R) Processor
 clone=/src/anneal
-a658b880b57db24fb466e8e5ba639dfbcf4e4860
+12e20af5267b371b6748b40dd4e886ed4e0da88d
 ## paper/claimcheck-v2...origin/paper/claimcheck-v2
 TMPDIR=/src/scratch
 cwd=/src/anneal
-command=SEED_OFFSET=2 /src/scratch/anneal-target/release/examples/lj_cluster_search 98 1000000 1 rec,bayes,restart,trail
+command=SEED_OFFSET=2 /src/scratch/anneal-v26-target/release/examples/lj_cluster_search 98 1000000 1 rec,bayes,restart,trail
 LJ98, budget 1000000 charged evaluations, 1 seeds, reference -543.665361
   recommended configuration
   SOAP hop: in-crate leftover (rebuild with --features featomic)
@@ -22,5 +22,5 @@ ANSWER_AUDIT seed 2 objective_calls 1 read_only true
   seed 2: best -543.665361  hops 7783  screened 3909  charged 1000000  basins 1007 (7.7 hops each)  returned 1909  swaps 0/0  paths 0 improved 0 gain 0.000  escape 4.000 thr 0.8000 same/known/new 242/133/212 soft 168/186 sub 0/0 lmin -159.3594 climbs 186 gain 58.38 radius 0.700 step 0.700 restarts 0 xrefused 0 jumps 0 angular 0/0 R 0.420 tabu 0 vetoed 0 screen 1061/6571 expl 691 obs 760 ctx [0, 0, 0, 0, 0] sym 0/0.00 orbits 1018/635.68  relaxed 1985/9293 converged  early 0 saved 0  verified -543.665361 |g| 6.8e-7  SOLVED
 1/1 solved, deepest -543.665361   mean hops 7783, force per hop 128
 gap to reference +0.000000
-Wed Nov  4 03:05:27 PM UTC 2026
+Wed Nov  4 03:47:24 PM UTC 2026
 exit_code=0

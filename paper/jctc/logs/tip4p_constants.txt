@@ -1,32 +1,17 @@
-Wed Nov  4 03:00:02 PM UTC 2026
+Wed Nov  4 03:39:31 PM UTC 2026
 x86_64
 8
 Intel(R) Xeon(R) Processor
 clone=/src/anneal
-a658b880b57db24fb466e8e5ba639dfbcf4e4860
+12e20af5267b371b6748b40dd4e886ed4e0da88d
 ## paper/claimcheck-v2...origin/paper/claimcheck-v2
 TMPDIR=/src/scratch
 cwd=/src/anneal
-command=python3 -c "
-A=2510400.0
-C=2552.24
-sig6=A/C
-sigma=sig6**(1/6)
-eps=C/(4*sig6)
-ea, sa = 0.6485, 3.15365
-c6=4*ea*sa**6
-c12=4*ea*sa**12
-g6, g12 = 2552.24, 2510.4e3
-print(f\"Jorgensen A = {A:.4f} kJ A^12/mol, C = {C:.6f} kJ A^6/mol\")
-print(f\"exact epsilon = {eps:.7f} kJ/mol, sigma = {sigma:.6f} A\")
-print(f\"anneal epsilon = {ea}, sigma = {sa}: C6 = {c6:.4f}, C12 = {c12:.1f}\")
-print(f\"GMIN C6 = {g6}, C12 = {g12:.1e}: equal to Jorgensen C and A: {abs(g6-C)<1e-9 and abs(g12-A)<1e-3}\")
-print(f\"relative epsilon rounding (anneal/exact - 1) = {ea/eps-1:.3e}; sigma (anneal/exact - 1) = {sa/sigma-1:.3e}\")
-"
+command=python3 /src/scratch/lj98_tip4p.py
 Jorgensen A = 2510400.0000 kJ A^12/mol, C = 2552.240000 kJ A^6/mol
 exact epsilon = 0.6486943 kJ/mol, sigma = 3.153578 A
 anneal epsilon = 0.6485, sigma = 3.15365: C6 = 2551.8252, C12 = 2510336.2
-GMIN C6 = 2552.24, C12 = 2.5e+06: equal to Jorgensen C and A: True
+GMIN C6 = 2552.24, C12 = 2.5104e+06: equal to Jorgensen C and A: True
 relative epsilon rounding (anneal/exact - 1) = -2.996e-04; sigma (anneal/exact - 1) = 2.285e-05
-Wed Nov  4 03:00:02 PM UTC 2026
+Wed Nov  4 03:39:31 PM UTC 2026
 exit_code=0
