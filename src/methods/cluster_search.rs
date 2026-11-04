@@ -884,6 +884,115 @@ where
     Ok((out, stats))
 }
 
+/// A minimum descended further than a search quench goes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Settled {
+    /// Energy at [`Settled::state`].
+    pub energy: f64,
+    /// Where the descent ended.
+    pub state: Array1<f64>,
+    /// Largest gradient component there.
+    pub gradient: f64,
+}
+
+/// Descends `x` until no gradient component exceeds `gtol`, charging
+/// `ledger`, with the quench [`search`] uses.
+///
+/// A search stops each quench at [`Config::record_gradient`]. A minimum is
+/// recordable there, but its energy is not settled. Take 16 Ac-Ala3-NHMe
+/// bests at GFN2-xTB, stopped at 5e-2 eV/Å with bond preconditioning. The
+/// xtb optimiser at its normal level lowered them by 0.93 kcal/mol on
+/// average and by 5.04 at most. A caller that reports energies settles the
+/// minima it keeps, with calls it held back from the search.
+///
+/// The descent ends at `gtol`, after `max_iters` iterations, or when the
+/// ledger runs out. What comes back is the lowest point it evaluated whose
+/// gradient passes [`Config::record_gradient`], because a descent cut off by
+/// the ledger can end with a larger gradient than it started with. `None`
+/// means no evaluated point passed, which includes an empty ledger.
+pub fn settle<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    x: ArrayView1<f64>,
+    gtol: f64,
+    max_iters: usize,
+) -> Option<Settled>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    if ledger.remaining() == 0 {
+        return None;
+    }
+    let mut tight = cfg.clone();
+    tight.record_gradient = gtol;
+    tight.polish_records = 0;
+    tight.adaptive_screen = false;
+    tight.probe_screen = false;
+    let iters = max_iters.max(tight.screen_steps + 1);
+    let watched = Lowest {
+        objective,
+        gate: cfg.record_gradient,
+        best: Mutex::new(None),
+    };
+    let paid = PaidCheck::default();
+    let mut stats = RelaxStats::default();
+    let _ = warm_relax(&watched, &tight, &mut stats, 0, &paid)(ledger, x, iters);
+    watched.best.into_inner().expect("lowest point")
+}
+
+/// An objective that keeps the lowest evaluated point under a gradient gate.
+struct Lowest<'a, O: ?Sized> {
+    objective: &'a O,
+    gate: f64,
+    best: Mutex<Option<Settled>>,
+}
+
+impl<O: DifferentiableObjective<f64> + ?Sized> eindir_core::Objective<f64> for Lowest<'_, O> {
+    fn dim(&self) -> usize {
+        eindir_core::Objective::dim(self.objective)
+    }
+
+    fn bounds(&self) -> &eindir_core::Bounds<f64> {
+        self.objective.bounds()
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        self.value_and_gradient(x).0
+    }
+}
+
+impl<O: DifferentiableObjective<f64> + ?Sized> eindir_core::gradient::Gradient<f64>
+    for Lowest<'_, O>
+{
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        self.value_and_gradient(x).1
+    }
+
+    fn dim(&self) -> usize {
+        eindir_core::Objective::dim(self.objective)
+    }
+}
+
+impl<O: DifferentiableObjective<f64> + ?Sized> DifferentiableObjective<f64> for Lowest<'_, O> {
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let (energy, gradient) = self.objective.value_and_gradient(x);
+        let largest = largest_component(gradient.view());
+        let mut best = self.best.lock().expect("lowest point");
+        if energy.is_finite()
+            && largest < self.gate
+            && best.as_ref().is_none_or(|b| energy < b.energy)
+        {
+            *best = Some(Settled {
+                energy,
+                state: x.to_owned(),
+                gradient: largest,
+            });
+        }
+        (energy, gradient)
+    }
+}
+
 /// [`search_from`] when `BANK_RPC` is unset; [`search_from_bank`] when it is.
 ///
 /// One binary, two arms. The control is the same walk without the shared
@@ -2601,6 +2710,38 @@ mod tests {
         assert!(largest_component(chain.value_and_gradient(x.view()).1.view()) <= 1e-1);
         assert!(polished < quenched, "polish {polished} quench {quenched}");
         assert!(largest_component(chain.value_and_gradient(y.view()).1.view()) < 1e-3);
+    }
+
+    #[test]
+    fn settling_descends_past_the_record_gate_on_the_callers_ledger() {
+        let chain = SpringChain::new(12);
+        let mut cfg = Config::for_molecular(vec![6; 12], vec![(0..12).collect()], 1.0);
+        cfg.record_gradient = 1e-1;
+        let paid = PaidCheck::default();
+        let mut stats = RelaxStats::default();
+        let mut led = Ledger::new(20_000);
+        let (quenched, x) =
+            warm_relax(&chain, &cfg, &mut stats, 0, &paid)(&mut led, chain.start().view(), 500);
+        let mut tail = Ledger::new(400);
+        let settled = settle(&chain, &cfg, &mut tail, x.view(), 1e-4, 1_000).expect("settled");
+        assert!(settled.energy < quenched, "{} {quenched}", settled.energy);
+        assert!(
+            settled.gradient < cfg.record_gradient,
+            "kept {}",
+            settled.gradient
+        );
+        let (energy, gradient) = chain.value_and_gradient(settled.state.view());
+        assert_eq!(energy, settled.energy);
+        assert_eq!(largest_component(gradient.view()), settled.gradient);
+        assert!(tail.spent() > 0 && tail.spent() <= 400);
+        let mut empty = Ledger::new(0);
+        assert!(settle(&chain, &cfg, &mut empty, x.view(), 1e-4, 1_000).is_none());
+        // Cut off long before 1e-4, it still hands back a point under the
+        // record gate and no higher than where it started.
+        let mut short = Ledger::new(3);
+        let cut = settle(&chain, &cfg, &mut short, x.view(), 1e-4, 1_000).expect("cut");
+        assert!(cut.gradient < cfg.record_gradient && cut.energy <= quenched);
+        assert_eq!(short.spent(), 3);
     }
 
     #[test]
