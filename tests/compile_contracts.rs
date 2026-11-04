@@ -2,9 +2,9 @@
 //! downstream `match` on `HopStop` that has no wildcard arm.
 //!
 //! The fixtures must fail, and the failure must be the sealed-trait or
-//! non-exhaustive error. Rustc's help text for "other types implement this
-//! trait" changed layout after 1.88, so the check reads that error instead
-//! of a snapshot of the help text.
+//! non-exhaustive error. Rustc 1.99 abbreviates the primary bound to
+//! `CertifiedMoveFor<f64, _>`. The box-move fixture reads the help line that
+//! names `BoxConstrained<f64>` and `Gaussian`.
 
 use std::path::Path;
 use std::process::Command;
@@ -26,7 +26,7 @@ fn checked_rejects_uncertified_component_combinations() {
         "tests/ui/checked_rejects_unbounded_box_move.rs",
         &[
             "error[E0277]",
-            "the trait bound `anneal_core::movekernel::Gaussian: CertifiedMoveFor<f64, BoxConstrained<f64>>` is not satisfied",
+            "the trait `CertifiedMoveFor<_, BoxConstrained<f64>>` is not implemented for `anneal_core::movekernel::Gaussian`",
         ],
     );
     expect_compile_fail(
@@ -40,11 +40,7 @@ fn checked_rejects_uncertified_component_combinations() {
     expect_compile_fail(
         &facts,
         "tests/ui/hop_stop_needs_a_wildcard_arm.rs",
-        &[
-            "error[E0004]",
-            "non-exhaustive patterns",
-            "HopStop",
-        ],
+        &["error[E0004]", "non-exhaustive patterns", "HopStop"],
     );
 }
 
@@ -88,7 +84,9 @@ fn probe_facts() -> ProbeFacts {
 
 fn dependency(metadata: &str, name: &str) -> (String, Vec<String>) {
     let marker = format!("\"name\":\"{name}\"");
-    let start = metadata.find(&marker).unwrap_or_else(|| panic!("missing {name}"));
+    let start = metadata
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing {name}"));
     let rest = &metadata[start..];
     let end = rest.find("},{\"name\"").unwrap_or(rest.len());
     let object = &rest[..end];
