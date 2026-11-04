@@ -68,7 +68,7 @@ nauty-pet = { version = "0.14", optional = true }
 thiserror   = "2"
 ndarray     = "0.17"
 dlpk        = { version = "0.1.5", features = ["ndarray", "half"] }
-linkcell    = { version = "0.3.11", git = "https://github.com/d-SEAMS/linkcell", rev = "74a513cc41c2730815bcd9110a96286f53ccf353", default-features = false }
+linkcell    = { version = "=0.3.11", git = "https://github.com/d-SEAMS/linkcell", rev = "74a513cc41c2730815bcd9110a96286f53ccf353", default-features = false }
 # eindir-core 0.6.0 on crates.io matches the previous git pin's sources.
 eindir-core = { version = "0.6.0", features = ["capi"] }
 rgmin = { version = "0.5.2", git = "https://github.com/OmniPotentRPC/rgmin", rev = "d721485c7973167d3d0b65473103c21ec5a62396" }
