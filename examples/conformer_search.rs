@@ -27,6 +27,11 @@
 //!   --settle F           share of the budget held back from the search to
 //!                        settle the best minimum to 1e-3 eV/angstrom once
 //!                        every chain has finished (default 0.1)
+//!   --arm ARM            recommended or communicating: the search controls
+//!                        laid over the molecular preset (default
+//!                        recommended)
+//!   --superbasin B       on or off: report the superbasin hierarchy and
+//!                        escape it at the preset's period (default off)
 //!   --corpus DIR         readcon-db root (default <prefix>.corpus)
 //!
 //! The engine is the persistent helper in `ase_objective.py`
@@ -43,6 +48,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::time::Instant;
 
+use anneal_core::catalog::molecular::{WaterSearchArm, configure_water_arm};
 use anneal_core::catalog::{DescriptorSignature, EngineSignature, SystemSignature};
 use anneal_core::descriptor_space::{
     DescriptorGeometry, DescriptorSpace, universal_descriptor_space,
@@ -95,6 +101,22 @@ impl History {
     }
 }
 
+fn parse_switch(flag: &str, value: &str) -> bool {
+    match value {
+        "on" => true,
+        "off" => false,
+        other => panic!("{flag} must be on or off; got {other}"),
+    }
+}
+
+fn parse_arm(value: &str) -> Option<WaterSearchArm> {
+    match value {
+        "recommended" => None,
+        "communicating" => Some(WaterSearchArm::Communicating),
+        other => panic!("--arm must be recommended or communicating; got {other}"),
+    }
+}
+
 struct Options {
     xyz: String,
     budget: usize,
@@ -107,6 +129,8 @@ struct Options {
     precondition: Option<bool>,
     height_revisits: Option<f64>,
     settle: f64,
+    arm: Option<WaterSearchArm>,
+    superbasin: bool,
     corpus: PathBuf,
 }
 
@@ -114,7 +138,8 @@ fn options() -> Options {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let usage = "usage: conformer_search <xyz> <budget> <seed> <prefix> [--replicas R] \
                  [--history shared|private|none] [--identity A] [--polish N] \
-                 [--precondition on|off] [--height-revisits K] [--settle F] [--corpus DIR]";
+                 [--precondition on|off] [--height-revisits K] [--settle F] \
+                 [--arm recommended|communicating] [--superbasin on|off] [--corpus DIR]";
     let positional: Vec<&String> = args.iter().take_while(|a| !a.starts_with("--")).collect();
     assert_eq!(positional.len(), 4, "{usage}");
     let prefix = positional[3].clone();
@@ -131,6 +156,8 @@ fn options() -> Options {
         precondition: Some(true),
         height_revisits: None,
         settle: 0.1,
+        arm: None,
+        superbasin: false,
     };
     let mut rest = args[4..].iter();
     while let Some(flag) = rest.next() {
@@ -142,17 +169,13 @@ fn options() -> Options {
             "--history" => out.history = History::parse(value),
             "--identity" => out.identity = value.parse().expect("identity"),
             "--polish" => out.polish = Some(value.parse().expect("polish steps")),
-            "--precondition" => {
-                out.precondition = Some(match value.as_str() {
-                    "on" => true,
-                    "off" => false,
-                    other => panic!("--precondition must be on or off; got {other}"),
-                })
-            }
+            "--precondition" => out.precondition = Some(parse_switch(flag, value)),
             "--height-revisits" => {
                 out.height_revisits = Some(value.parse().expect("height revisits"))
             }
             "--settle" => out.settle = value.parse().expect("settle share"),
+            "--arm" => out.arm = parse_arm(value),
+            "--superbasin" => out.superbasin = parse_switch(flag, value),
             "--corpus" => out.corpus = PathBuf::from(value),
             other => panic!("unknown option {other}; {usage}"),
         }
@@ -174,6 +197,14 @@ impl Options {
     /// Calls held back from the search to settle the best.
     fn reserve(&self) -> usize {
         (self.settle * self.budget as f64).floor() as usize
+    }
+
+    fn arm_name(&self) -> &'static str {
+        match self.arm {
+            None => "recommended",
+            Some(WaterSearchArm::Communicating) => "communicating",
+            Some(_) => unreachable!("only the communicating overlay is parsed"),
+        }
     }
 }
 
@@ -543,6 +574,11 @@ fn main() {
         groups: fragments.clone(),
         reactive: false,
     };
+    if let Some(arm) = opt.arm {
+        configure_water_arm(&mut cfg, arm);
+    }
+    cfg.superbasin_report = opt.superbasin;
+    cfg.superbasin_escape = opt.superbasin;
     if let Some(steps) = opt.polish {
         cfg.polish_records = steps;
     }
@@ -564,6 +600,17 @@ fn main() {
         cfg.precondition_bonds,
         cfg.height_revisits,
         opt.settle
+    );
+    println!(
+        "arm {}  depth_reward {}  return_screen {}  orbit_complete_on_new {}  \
+         shared_visit_policy {:?}  superbasin {}  superbasin_period {}",
+        opt.arm_name(),
+        cfg.depth_reward,
+        cfg.return_screen,
+        cfg.orbit_complete_on_new,
+        cfg.shared_visit_policy,
+        if opt.superbasin { "on" } else { "off" },
+        cfg.superbasin_period
     );
     let reserve = opt.reserve();
 
@@ -737,6 +784,13 @@ fn main() {
         for &(hops, at, basins, e) in &r.outcome.improvements {
             println!("improve replica={chain} hops={hops} charged={at} basins={basins} eV={e:.8}");
         }
+        if let Some(sb) = r.outcome.superbasin.as_ref() {
+            println!(
+                "superbasin replica={chain} nodes={} edges={} jumps={} refusals={} \
+                 archived={}",
+                sb.nodes, sb.edges, sb.jumps, sb.refusals, sb.archived
+            );
+        }
         for b in r.ledger.quench_boundaries() {
             if b.status() == QuenchStatus::Validated && b.energy().is_finite() {
                 entries.push((b.energy(), b.state().to_owned()));
@@ -833,6 +887,9 @@ fn main() {
                 "settle_reserve": reserve,
                 "settle_gradient": SETTLE_GRADIENT,
                 "record_gradient": cfg.record_gradient,
+                "arm": opt.arm_name(),
+                "superbasin": opt.superbasin,
+                "superbasin_period": cfg.superbasin_period,
                 "budget": opt.budget,
             }),
         )
