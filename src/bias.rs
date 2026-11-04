@@ -734,6 +734,15 @@ pub struct SiteEnergies {
     pub n_points: usize,
 }
 
+fn sort_site_energies(values: &mut [f64]) {
+    for value in values.iter_mut() {
+        if *value == 0.0 {
+            *value = 0.0;
+        }
+    }
+    values.sort_unstable_by(f64::total_cmp);
+}
+
 impl Fingerprint for SiteEnergies {
     fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
         let n = self.n_points;
@@ -753,7 +762,7 @@ impl Fingerprint for SiteEnergies {
                 e[j] += v;
             }
         }
-        e.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        sort_site_energies(&mut e);
         Array1::from(e)
     }
 }
@@ -770,7 +779,7 @@ impl Fingerprint for SortedPairs {
                 d.push((dx * dx + dy * dy + dz * dz).sqrt());
             }
         }
-        d.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        d.sort_unstable_by(f64::total_cmp);
         Array1::from(d)
     }
 }
@@ -1238,6 +1247,15 @@ mod basin_bias_tests {
         for (p, q) in da.iter().zip(db.iter()) {
             assert!((p - q).abs() < 1e-12, "{p} against {q}");
         }
+    }
+
+    #[test]
+    fn site_energy_sort_canonicalises_signed_zero() {
+        let mut values = [1.0, -0.0, -1.0, 0.0];
+        sort_site_energies(&mut values);
+        assert_eq!(values, [-1.0, 0.0, 0.0, 1.0]);
+        assert!(values[1].is_sign_positive());
+        assert!(values[2].is_sign_positive());
     }
 
     #[test]

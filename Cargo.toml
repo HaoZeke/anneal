@@ -165,6 +165,10 @@ harness = false
 name    = "tensor_id_bench"
 harness = false
 
+[[bench]]
+name    = "globalopt_hotpaths"
+harness = false
+
 [[example]]
 name = "rgpot_minimize"
 required-features = ["capi", "rgpot-ex"]
