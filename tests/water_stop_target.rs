@@ -7,7 +7,7 @@
 
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger,
+    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, MoveLibrary,
     run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
@@ -28,9 +28,16 @@ struct Trace {
 /// Returns the trace of one `Config::for_tip4p` search with the seed and
 /// start of the head-to-head runner. The search is stopped at `target`
 /// when one is given, and otherwise after `budget` calls.
+///
+/// The hydrogen-bond cycle reversal is off. With it, seed 11030 at n=14
+/// reaches -582.974479 kJ/mol, and the upper reference stops the search
+/// after 154553 calls.
 fn search(n: usize, budget: usize, seed: u64, target: Option<f64>) -> Trace {
     let pot = Tip4pCluster::new(n);
-    let cfg = Config::for_tip4p(n);
+    let mut cfg = Config::for_tip4p(n);
+    if let MoveLibrary::RigidBody { reverse_cycles, .. } = &mut cfg.move_library {
+        *reverse_cycles = false;
+    }
     let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(3));
     let start = random_tip4p_cluster(n, &mut rng);
     let mut ledger = Ledger::new(budget);
