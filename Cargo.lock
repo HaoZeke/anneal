@@ -2178,8 +2178,7 @@ dependencies = [
 [[package]]
 name = "readcon-core"
 version = "0.17.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8aef54a62236d969f4b328cc9846b5fcab31979547f39c21ad8628fff6b348ec"
+source = "git+https://github.com/lode-org/readcon-core?rev=1465d5344f2dfa2dc64e60d063739e33f58c3745#1465d5344f2dfa2dc64e60d063739e33f58c3745"
 dependencies = [
  "dlpk",
  "fast-float2",
@@ -2196,7 +2195,7 @@ dependencies = [
 [[package]]
 name = "readcon-db"
 version = "0.2.0"
-source = "git+https://github.com/lode-org/readcon-db?rev=1e0eb2bc6034c259fe2a789edfae3481de22a944#1e0eb2bc6034c259fe2a789edfae3481de22a944"
+source = "git+https://github.com/lode-org/readcon-db?rev=4199499cc796056047361959eb8ec83cf2188932#4199499cc796056047361959eb8ec83cf2188932"
 dependencies = [
  "heed",
  "readcon-core",
@@ -2606,7 +2605,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys",
