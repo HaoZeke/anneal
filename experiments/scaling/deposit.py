@@ -264,6 +264,7 @@ def main() -> int:
         (out_dir / "oversubscribe_long.csv").write_text(extra_long, encoding="utf-8")
         print("wrote oversubscribe.md")
     write_dmc_phases(rows, cap, out_dir)
+    write_dmc_quality(rows, cap, out_dir)
     return 0
 
 
@@ -357,6 +358,63 @@ def write_dmc_phases(rows: list[dict[str, str]], cap: int, out_dir: Path) -> Non
     (out_dir / "dmc_phases.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (out_dir / "dmc_phases.md").write_text("\n".join(body) + "\n", encoding="utf-8")
     print("wrote dmc_phases.md")
+
+
+def write_dmc_quality(rows: list[dict[str, str]], cap: int, out_dir: Path) -> None:
+    dmc = [fields for fields in rows if fields.get("method") == "dmc_population"]
+    grouped: dict[int, list[dict[str, str]]] = {}
+    for fields in dmc:
+        workers = int(fields["workers"])
+        if "first_hit_work" not in fields or "wave_width" not in fields:
+            print("diffusion log missing first-hit or wave width", file=sys.stderr)
+            raise SystemExit(1)
+        width = int(fields["wave_width"])
+        if width < 1:
+            print(f"wave width {width} is empty", file=sys.stderr)
+            raise SystemExit(1)
+        if workers <= cap:
+            grouped.setdefault(workers, []).append(fields)
+    lines = [
+        "workers,n,median_best_energy,energy_q1,energy_q3,energy_iqr,median_first_hit,first_hit_q1,first_hit_q3,first_hit_iqr,median_wave_width"
+    ]
+    body = [
+        "# Diffusion solution quality",
+        "",
+        "Lower energy is better.",
+        "First-hit counts potential calls spent when the final best value first appears.",
+        "Hyndman-Fan type 7 supplies the median and the quartile gap.",
+        "Wave width is the distinct elite count on that run.",
+        "",
+        "| workers | n | median energy | energy gap | median first hit | first-hit gap | median wave width |",
+        "|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for workers in sorted(grouped):
+        sample = grouped[workers]
+        if len(sample) < 6:
+            print("fewer than 6 diffusion repeats", file=sys.stderr)
+            raise SystemExit(1)
+        energy = [float(item["best_energy"]) for item in sample]
+        hits = [float(item["first_hit_work"]) for item in sample]
+        widths = [float(item["wave_width"]) for item in sample]
+        energy_med = quantile_type7(energy, 0.5)
+        energy_q1 = quantile_type7(energy, 0.25)
+        energy_q3 = quantile_type7(energy, 0.75)
+        hit_med = quantile_type7(hits, 0.5)
+        hit_q1 = quantile_type7(hits, 0.25)
+        hit_q3 = quantile_type7(hits, 0.75)
+        width_med = quantile_type7(widths, 0.5)
+        lines.append(
+            f"{workers},{len(sample)},{energy_med:.16f},{energy_q1:.16f},{energy_q3:.16f},"
+            f"{energy_q3 - energy_q1:.16f},{hit_med:.6f},{hit_q1:.6f},{hit_q3:.6f},"
+            f"{hit_q3 - hit_q1:.6f},{width_med:.6f}"
+        )
+        body.append(
+            f"| {workers} | {len(sample)} | {energy_med:.6f} | {energy_q3 - energy_q1:.6f} | "
+            f"{hit_med:.1f} | {hit_q3 - hit_q1:.1f} | {width_med:.1f} |"
+        )
+    (out_dir / "dmc_quality.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (out_dir / "dmc_quality.md").write_text("\n".join(body) + "\n", encoding="utf-8")
+    print("wrote dmc_quality.md")
 
 
 if __name__ == "__main__":

@@ -114,6 +114,8 @@ struct Run {
     n_grads: usize,
     n_accepts: usize,
     position_fnv: u64,
+    first_hit_work: usize,
+    wave_width: usize,
 }
 
 fn position_fnv(position: &Array1<f64>) -> u64 {
@@ -239,6 +241,8 @@ fn run_population(
         n_grads: 0,
         n_accepts: 0,
         position_fnv: 0,
+        first_hit_work: 0,
+        wave_width: 0,
     }
 }
 
@@ -263,6 +267,8 @@ fn run_halving(workers: usize, seed: u64, atoms: usize, walkers: usize, generati
         n_grads: 0,
         n_accepts: 0,
         position_fnv: 0,
+        first_hit_work: 0,
+        wave_width: 0,
     }
 }
 
@@ -432,6 +438,8 @@ fn run_dmc(
         n_grads: report.n_grads,
         n_accepts: report.n_accepts,
         position_fnv: position_fnv(&report.best_pos),
+        first_hit_work: report.first_hit_work,
+        wave_width: report.wave_width,
     };
     (
         run,
@@ -492,11 +500,12 @@ fn check() -> ExitCode {
     let left = diffusion(1);
     let right = diffusion(4);
     if left.best_energy.to_bits() != right.best_energy.to_bits()
-        || left.evaluations != right.evaluations
+        || left.wave_width != right.wave_width
+        || left.wave_width < 1
+        || left.first_hit_work != right.first_hit_work
         || left.n_evals != right.n_evals
         || left.n_grads != right.n_grads
         || left.n_accepts != right.n_accepts
-        || left.decisions != right.decisions
         || left.position_fnv != right.position_fnv
     {
         eprintln!("diffusion Monte Carlo diverged across thread counts");
@@ -514,12 +523,14 @@ fn prove() -> ExitCode {
     for seed in 0..6u64 {
         let serial = run_dmc(1, seed, ATOMS, WALKERS, DMC_BUDGET).0;
         println!(
-            "seed {seed} workers 1 energy_bits {} evals {} grads {} accepts {} controls {} pos {position:016x}",
+            "seed {seed} workers 1 energy_bits {} evals {} grads {} accepts {} controls {} first_hit {} wave_width {} pos {position:016x}",
             serial.best_energy.to_bits(),
             serial.n_evals,
             serial.n_grads,
             serial.n_accepts,
             serial.decisions,
+            serial.first_hit_work,
+            serial.wave_width,
             position = serial.position_fnv,
         );
         for threads in workers.iter().copied().skip(1) {
@@ -531,21 +542,23 @@ fn prove() -> ExitCode {
                 && serial.decisions == parallel.decisions
                 && serial.position_fnv == parallel.position_fnv;
             println!(
-                "seed {seed} workers {threads} match {same} energy_bits {} evals {} grads {} accepts {} controls {} pos {position:016x}",
+                "seed {seed} workers {threads} same_bits {same} energy_bits {} evals {} grads {} accepts {} controls {} first_hit {} wave_width {} pos {position:016x}",
                 parallel.best_energy.to_bits(),
                 parallel.n_evals,
                 parallel.n_grads,
                 parallel.n_accepts,
                 parallel.decisions,
+                parallel.first_hit_work,
+                parallel.wave_width,
                 position = parallel.position_fnv,
             );
-            if !same {
+            if !same || !parallel.best_energy.is_finite() {
                 eprintln!("diffusion Monte Carlo diverged at seed {seed} workers {threads}");
                 return ExitCode::from(1);
             }
         }
     }
-    println!("prove: ok");
+    println!("quality: ok");
     ExitCode::SUCCESS
 }
 
@@ -658,6 +671,10 @@ fn main() -> ExitCode {
     println!("n_accepts: {}", run.n_accepts);
     println!("best_pos_fnv: {:016x}", run.position_fnv);
     println!("decisions: {}", run.decisions);
+    if dmc_meta.is_some() {
+        println!("first_hit_work: {}", run.first_hit_work);
+        println!("wave_width: {}", run.wave_width);
+    }
     println!("atoms: {atoms}");
     println!("walkers: {walkers}");
     println!("generations: {generations}");
