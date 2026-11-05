@@ -5249,6 +5249,13 @@ where
                     );
                     hops += 1;
                     orbits_completed += 1;
+                    let best_recorded = improvements
+                        .iter()
+                        .map(|record| record.3)
+                        .fold(f64::INFINITY, f64::min);
+                    if es < best_recorded && improvements.len() < 512 {
+                        improvements.push((hops, ledger.spent(), bias.n_basins(), es));
+                    }
                     if orbit_offer
                         .as_ref()
                         .is_none_or(|(lowest, _, _)| es < *lowest)
