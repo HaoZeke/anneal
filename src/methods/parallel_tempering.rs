@@ -10,11 +10,36 @@
 use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rayon::prelude::*;
 
 use crate::cool::Cooling;
 use crate::exchange::{Exchange, MetropolisExchange};
 use crate::history::{EpochLine, History, State};
 use crate::sampler::Sampler;
+
+fn advance_chain<S: Sampler<f64>>(
+    sampler: &S,
+    state: &mut State,
+    rng: &mut StdRng,
+    epoch: usize,
+    steps: usize,
+    record: bool,
+) -> (usize, usize, Vec<f64>) {
+    let mut accepted = 0usize;
+    let mut rejected = 0usize;
+    let mut trace = Vec::new();
+    for _ in 0..steps {
+        if sampler.step(state, epoch, rng) {
+            accepted += 1;
+        } else {
+            rejected += 1;
+        }
+        if record {
+            trace.push(state.cur.val);
+        }
+    }
+    (accepted, rejected, trace)
+}
 
 /// Per-temperature chain state for a PT run.
 #[derive(Clone, Debug)]
@@ -157,11 +182,44 @@ impl<S: Sampler<f64>, E: Exchange<f64>> ParallelTemperingSampler<S, E> {
     /// pair swaps every `swap_period` steps. The Cool inside the inner
     /// sampler is ignored at the chain temperature; the swap rule
     /// targets the Boltzmann distribution at each chain's fixed temp.
-    pub fn run<C>(&self, _cooling: &C, n_epochs: usize, seed: u64) -> PtResult
+    pub fn run<C>(&self, cooling: &C, n_epochs: usize, seed: u64) -> PtResult
+    where
+        C: Cooling<f64>,
+    {
+        self.run_threads(cooling, n_epochs, seed, 1)
+    }
+
+    /// Runs the ladder of [`Self::run`] on `threads` workers.
+    ///
+    /// One worker keeps the chain loop on the calling thread. That loop
+    /// stays available because a Python or CUTEst objective holds the GIL,
+    /// and a Rayon fan-out from that attach deadlocks. More than one worker
+    /// runs the steps between swaps together, then the calling thread draws
+    /// the adjacent swap. Each chain keeps its own generator, so the visited
+    /// states match the single-worker loop. The caller stop flag is read
+    /// between swaps.
+    pub fn run_threads<C>(
+        &self,
+        _cooling: &C,
+        n_epochs: usize,
+        seed: u64,
+        threads: usize,
+    ) -> PtResult
     where
         C: Cooling<f64>,
     {
         let m = self.temps.len();
+        let threads = threads.max(1);
+        let pool = if threads > 1 {
+            Some(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads)
+                    .build()
+                    .expect("rayon pool"),
+            )
+        } else {
+            None
+        };
         let mut rngs: Vec<StdRng> = (0..m)
             .map(|c| StdRng::seed_from_u64(seed.wrapping_add(c as u64)))
             .collect();
@@ -186,25 +244,48 @@ impl<S: Sampler<f64>, E: Exchange<f64>> ParallelTemperingSampler<S, E> {
             }
             let mut accepted = vec![0usize; m];
             let mut rejected = vec![0usize; m];
-            for inner in 0..self.k_inner {
+            let period = self.swap_period.max(1);
+            let mut done = 0usize;
+            while done < self.k_inner {
                 if crate::caller_stop::raised() {
                     break 'epochs;
                 }
-                // Serial chain steps: Python/CUTEst objectives hold the GIL;
-                // Rayon fan-out deadlocks under pyo3 attach. Native Sync
-                // objectives still scale via multi-walker dmc_pop batches.
-                for c in 0..m {
-                    if self.sampler.step(&mut states[c], epoch, &mut rngs[c]) {
-                        accepted[c] += 1;
-                    } else {
-                        rejected[c] += 1;
+                let chunk = period.min(self.k_inner - done);
+                let hot = m.saturating_sub(1);
+                let stepped: Vec<(usize, usize, Vec<f64>)> = if let Some(pool) = pool.as_ref() {
+                    pool.install(|| {
+                        states
+                            .par_iter_mut()
+                            .zip(rngs.par_iter_mut())
+                            .enumerate()
+                            .map(|(c, (state, rng))| {
+                                advance_chain(&self.sampler, state, rng, epoch, chunk, c == hot)
+                            })
+                            .collect()
+                    })
+                } else {
+                    states
+                        .iter_mut()
+                        .zip(rngs.iter_mut())
+                        .enumerate()
+                        .map(|(c, (state, rng))| {
+                            advance_chain(&self.sampler, state, rng, epoch, chunk, c == hot)
+                        })
+                        .collect()
+                };
+                for (c, (took, missed, trace)) in stepped.into_iter().enumerate() {
+                    accepted[c] += took;
+                    rejected[c] += missed;
+                    if c == hot {
+                        hot_energies.extend(trace);
                     }
-                    if states[c].cur.val < best_val {
-                        best_val = states[c].cur.val;
-                        best_pos = states[c].cur.pos.to_vec();
+                    if states[c].best.val < best_val {
+                        best_val = states[c].best.val;
+                        best_pos = states[c].best.pos.to_vec();
                     }
                 }
-                if (inner + 1) % self.swap_period == 0 {
+                done += chunk;
+                if m >= 2 && done.is_multiple_of(period) {
                     let i = swap_rng.random_range(0..m - 1);
                     let alpha = self.exchange.swap_accept_prob(
                         states[i].cur.val,
@@ -219,7 +300,6 @@ impl<S: Sampler<f64>, E: Exchange<f64>> ParallelTemperingSampler<S, E> {
                         swap_accepts += 1;
                     }
                 }
-                hot_energies.push(states[m - 1].cur.val);
             }
             for c in 0..m {
                 chain_histories[c].epochs.push(EpochLine {
@@ -249,6 +329,49 @@ impl<S: Sampler<f64>, E: Exchange<f64>> ParallelTemperingSampler<S, E> {
             swap_accepts,
             log_z_ratio_est,
             log_z_ratio_se,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cool::LogCool;
+    use crate::potentials::PairPotential;
+    use crate::variant::boltzmann;
+
+    fn ladder(threads: usize) -> PtResult {
+        let potential = PairPotential::lennard_jones(4);
+        let sampler = boltzmann(potential, 0.8, 0.38).expect("variant");
+        let temps = geometric_ladder(0.05, 0.8, 4);
+        let tempering = ParallelTemperingSampler::new(sampler, temps, 6, 2);
+        let cooling = LogCool::new(0.8, 2.0);
+        tempering.run_threads(&cooling, 2, 11, threads)
+    }
+
+    #[test]
+    fn threaded_steps_match_the_serial_ladder() {
+        let serial = ladder(1);
+        let threaded = ladder(2);
+        assert_eq!(serial.best_val.to_bits(), threaded.best_val.to_bits());
+        assert_eq!(serial.best_pos, threaded.best_pos);
+        assert_eq!(serial.swap_attempts, threaded.swap_attempts);
+        assert_eq!(serial.swap_accepts, threaded.swap_accepts);
+        assert_eq!(serial.chain_histories.len(), threaded.chain_histories.len());
+        for (left, right) in serial
+            .chain_histories
+            .iter()
+            .zip(threaded.chain_histories.iter())
+        {
+            assert_eq!(left.epochs.len(), right.epochs.len());
+            for (epoch_left, epoch_right) in left.epochs.iter().zip(right.epochs.iter()) {
+                assert_eq!(epoch_left.accepted, epoch_right.accepted);
+                assert_eq!(epoch_left.rejected, epoch_right.rejected);
+                assert_eq!(
+                    epoch_left.best_val.to_bits(),
+                    epoch_right.best_val.to_bits()
+                );
+            }
         }
     }
 }

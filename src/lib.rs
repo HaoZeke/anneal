@@ -261,6 +261,8 @@ pub mod universal_coverage;
 pub mod variant;
 /// Package version metadata.
 pub mod version;
+/// Weak-scaling schedules for parallel tempering and population methods.
+pub mod weak_scale;
 
 /// C ABI surface (cargo-c builds).
 #[cfg(feature = "capi")]

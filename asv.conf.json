@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "project": "anneal",
+  "project_url": "https://github.com/HaoZeke/anneal",
+  "repo": ".",
+  "branches": ["paper/weak-scaling-2026-11-05"],
+  "environment_type": "existing",
+  "build_command": "true",
+  "install_command": "true",
+  "benchmark_dir": "asv_bench",
+  "results_dir": "results/weak_scale/asv/asv-results"
+}

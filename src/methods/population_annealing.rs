@@ -9,8 +9,10 @@
 
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
+use rand::SeedableRng;
 use rand::distr::Distribution;
 use rand::distr::weighted::WeightedIndex;
+use rayon::prelude::*;
 
 use super::cluster_hopping::{self, Ledger};
 
@@ -253,6 +255,191 @@ where
     }
 }
 
+/// Counts from one synchronous population-annealing generation schedule.
+///
+/// The schedule draws every proposal and every accept variate on the
+/// calling thread, and evaluates the proposals together. The reference
+/// [`population_anneal`] loop evaluates inside the same walk that draws
+/// the next proposal. This schedule keeps those draws in two blocks so
+/// the parallel evaluations do not change the generator stream.
+#[derive(Clone, Debug)]
+pub struct SyncPopulationReport {
+    /// Deepest energy among the initial draw and the accepted proposals.
+    pub best_energy: f64,
+    /// Generations completed.
+    pub generations: usize,
+    /// Temperature after the last generation.
+    pub final_temperature: f64,
+    /// Energy evaluations charged. One per walker at the start, plus
+    /// `steps_per_generation` per walker per generation.
+    pub charged: usize,
+    /// Walkers in the population.
+    pub walkers: usize,
+}
+
+/// Synchronous population annealing on a fixed generation count.
+///
+/// `threads` is the pool width. `walkers` is the population. Each
+/// generation gives every walker `steps_per_generation` Metropolis steps,
+/// then one half-sample resampling step, the same temperature rule as
+/// [`population_anneal`]. One thread walks the population in order. More
+/// threads run one generation's walker steps together. Walker generators
+/// are drawn on the calling thread, so a wider pool visits the same states.
+#[allow(clippy::too_many_arguments)]
+pub fn population_anneal_sync<E>(
+    n: usize,
+    walkers: usize,
+    threads: usize,
+    generations: usize,
+    steps_per_generation: usize,
+    step: f64,
+    temperature_high: f64,
+    temperature_low: f64,
+    radius: f64,
+    min_separation: f64,
+    energy: E,
+    seed: u64,
+) -> SyncPopulationReport
+where
+    E: Fn(ArrayView1<f64>) -> f64 + Sync,
+{
+    let threads = threads.max(1);
+    let walkers = walkers.max(1);
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let mut states = Vec::with_capacity(walkers);
+    for _ in 0..walkers {
+        states.push(cluster_hopping::random_cluster_in_radius(
+            n,
+            radius,
+            min_separation,
+            &mut rng,
+        ));
+    }
+    assert!(
+        states.iter().all(|state| state.len() == 3 * n),
+        "cluster draw returned a short configuration"
+    );
+    let pool = if threads > 1 {
+        Some(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("rayon pool"),
+        )
+    } else {
+        None
+    };
+    let mut energies = evaluate_all(&pool, &states, &energy);
+    let mut charged = energies.len();
+    let mut best_energy = energies.iter().copied().fold(f64::INFINITY, f64::min);
+    let mut beta = 1.0 / temperature_high;
+    let steps_per_generation = steps_per_generation.max(1);
+    for _ in 0..generations {
+        let temperature = 1.0 / beta;
+        let seeds: Vec<u64> = (0..states.len()).map(|_| rng.random()).collect();
+        let updated = advance_walkers(
+            &pool,
+            &states,
+            &energies,
+            &seeds,
+            steps_per_generation,
+            temperature,
+            step,
+            n,
+            radius,
+            &energy,
+        );
+        charged += states.len() * steps_per_generation;
+        for (index, (state, value)) in updated.into_iter().enumerate() {
+            states[index] = state;
+            energies[index] = value;
+            if value < best_energy {
+                best_energy = value;
+            }
+        }
+        if temperature > temperature_low {
+            let dbeta = choose_dbeta(&energies, states.len() as f64 / 2.0);
+            let previous = beta;
+            beta = (beta + dbeta).min(1.0 / temperature_low);
+            let floor = energies.iter().copied().fold(f64::INFINITY, f64::min);
+            let weights: Vec<f64> = energies
+                .iter()
+                .map(|value| (-(beta - previous) * (value - floor)).exp())
+                .collect();
+            let index = draw_indices(&weights, states.len(), &mut rng);
+            let next_states: Vec<Array1<f64>> = index.iter().map(|i| states[*i].clone()).collect();
+            let next_energies: Vec<f64> = index.iter().map(|i| energies[*i]).collect();
+            states = next_states;
+            energies = next_energies;
+        }
+    }
+    SyncPopulationReport {
+        best_energy,
+        generations,
+        final_temperature: 1.0 / beta,
+        charged,
+        walkers,
+    }
+}
+
+fn advance_walkers<E>(
+    pool: &Option<rayon::ThreadPool>,
+    states: &[Array1<f64>],
+    energies: &[f64],
+    seeds: &[u64],
+    steps: usize,
+    temperature: f64,
+    step: f64,
+    n: usize,
+    radius: f64,
+    energy: &E,
+) -> Vec<(Array1<f64>, f64)>
+where
+    E: Fn(ArrayView1<f64>) -> f64 + Sync,
+{
+    let one = |index: usize| -> (Array1<f64>, f64) {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seeds[index]);
+        let mut state = states[index].clone();
+        let mut value = energies[index];
+        for _ in 0..steps {
+            let mut proposal = state.clone();
+            for coordinate in proposal.iter_mut() {
+                *coordinate += rng.random_range(-step..step);
+            }
+            cluster_hopping::contain(&mut proposal, n, radius);
+            let proposed = energy(proposal.view());
+            let draw: f64 = rng.random();
+            let accept = proposed <= value || draw < (-(proposed - value) / temperature).exp();
+            if accept {
+                state = proposal;
+                value = proposed;
+            }
+        }
+        (state, value)
+    };
+    if let Some(pool) = pool.as_ref() {
+        pool.install(|| (0..states.len()).into_par_iter().map(one).collect())
+    } else {
+        (0..states.len()).map(one).collect()
+    }
+}
+
+fn evaluate_all<E>(pool: &Option<rayon::ThreadPool>, states: &[Array1<f64>], energy: &E) -> Vec<f64>
+where
+    E: Fn(ArrayView1<f64>) -> f64 + Sync,
+{
+    if let Some(pool) = pool.as_ref() {
+        pool.install(|| {
+            states
+                .par_iter()
+                .map(|state| energy(state.view()))
+                .collect()
+        })
+    } else {
+        states.iter().map(|state| energy(state.view())).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,5 +513,42 @@ mod tests {
         assert_eq!(report.best_state.len(), 3 * n);
         assert!(report.final_temperature <= cfg.temperature_high + 1e-12);
         assert!(ledger.spent() > 0);
+    }
+
+    #[test]
+    fn synchronous_workers_keep_the_serial_population() {
+        let n = 5usize;
+        let potential = PairPotential::lennard_jones(n);
+        let reference = PopulationAnneal::reference(n);
+        let once = |threads: usize| {
+            population_anneal_sync(
+                n,
+                4,
+                threads,
+                3,
+                2,
+                reference.step,
+                reference.temperature_high,
+                reference.temperature_low,
+                reference.radius,
+                reference.min_separation,
+                |x| potential.value_and_gradient(x).0,
+                11,
+            )
+        };
+        let serial = once(1);
+        let threaded = once(2);
+        assert_eq!(serial.charged, threaded.charged);
+        assert_eq!(serial.walkers, threaded.walkers);
+        assert_eq!(serial.generations, threaded.generations);
+        assert_eq!(serial.best_energy.to_bits(), threaded.best_energy.to_bits());
+        assert_eq!(
+            serial.final_temperature.to_bits(),
+            threaded.final_temperature.to_bits()
+        );
+        assert_eq!(
+            serial.charged,
+            serial.walkers * (1 + serial.generations * 2)
+        );
     }
 }
