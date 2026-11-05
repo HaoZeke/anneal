@@ -40,8 +40,9 @@ const OH_WALL_EV_PER_A2: f64 = 200.0;
 /// Quenched maximum force bar. 0.001 Hartree per Bohr is 0.0514221 eV per angstrom.
 const FORCE_BAR_EV_PER_A: f64 = 0.0514221;
 
-/// Preset source. The harness commit sits on this tree and does not edit presets.
-const SOURCE_COMMIT: &str = "49bc7a2dbaa1de773169c63d307584289ba39c7a";
+fn source_stamp(name: &str) -> String {
+    std::env::var(name).unwrap_or_else(|_| "unset".to_string())
+}
 
 type ForceEval = Box<dyn FnMut(&[f64]) -> (f64, Vec<f64>) + Send>;
 
@@ -397,7 +398,13 @@ fn main() {
         std::process::exit(2);
     }
     writeln!(meta, "orbit_complete_on_new: {}", cfg.orbit_complete_on_new).ok();
-    writeln!(meta, "source_commit: {SOURCE_COMMIT}").ok();
+    writeln!(
+        meta,
+        "source_commit: {}",
+        source_stamp("ANNEAL_SOURCE_COMMIT")
+    )
+    .ok();
+    writeln!(meta, "source_tree: {}", source_stamp("ANNEAL_SOURCE_TREE")).ok();
     writeln!(
         meta,
         "config_sha256: {}",
@@ -465,8 +472,32 @@ fn main() {
     };
     writeln!(meta, "hops: {}", outcome.hops).ok();
     writeln!(meta, "basins: {}", outcome.basins).ok();
+    let overlap_rejected = stats.overlap_rejected + outcome.overlap_rejected;
+    writeln!(meta, "overlap_rejected: {overlap_rejected}").ok();
+    writeln!(
+        meta,
+        "proposal_overlap_rejected: {}",
+        outcome.overlap_rejected
+    )
+    .ok();
+    writeln!(
+        meta,
+        "linesearch_overlap_rejected: {}",
+        stats.overlap_rejected
+    )
+    .ok();
+    writeln!(
+        meta,
+        "overlap_note: a geometry closer than 0.35 angstrom is refused before the energy call and is not charged"
+    )
+    .ok();
     writeln!(meta, "quenches_converged: {}", stats.converged).ok();
     writeln!(meta, "quenches_capped: {}", stats.capped).ok();
+    writeln!(
+        meta,
+        "best_record: converged quench at the preset record gradient"
+    )
+    .ok();
     writeln!(meta, "screens: {}", stats.screens).ok();
     writeln!(meta, "objective_best_eV: {:.10}", outcome.best).ok();
     let mut trace = fs::File::create(outdir.join("improvements.txt")).expect("trace");
