@@ -1,12 +1,12 @@
-HEAD: 078d6c0f1ec213d79f0298eeaa3f4a84bcb5ae23
-tree: a2eea9722b5125f785802b227239176bc607ad77
+HEAD: 86fbbd90fb2a7f71cc3404486014f0484c1c6b03
+tree: ff9ad78bd2785146320bcf95088fb4d7650c83e2
 command: experiments/scaling/bin/pop_strong_scale --method dmc_population --workers 4 --repeat 1
 method: dmc_population
 scaling: strong
 workers: 4
 repeat: 1
 seed: 1
-wall_s: 0.159240637
+wall_s: 0.156522117
 best_energy: -60.9080706523882398
 best_energy_bits: 13857140903048461185
 evaluations: 20000
@@ -25,4 +25,17 @@ logical_cpus: 8
 physical_cpus: 8
 memory_kib: 49342768
 gpu: none
+cpu_mhz_before: 2400.000,2400.000,2400.000,2400.000,2400.000,2400.000,2400.000,2400.000
+cpu_mhz_after: 2400.000,2400.000,2400.000,2400.000,2400.000,2400.000,2400.000,2400.000
+setup_s: 0.000747529
+selection_s: 0.006182396
+pes_s: 0.115918549
+sync_s: 0.033413913
+alloc_s: 0.000259730
+phase_sum_s: 0.156522117
+thread_order: round-robin
+affinity_cpus: 0,1,2,3
+sync_batch_s: 0.002079012
+sync_polish_s: 0.004434431
+sync_wave_s: 0.026900470
 exit: 0

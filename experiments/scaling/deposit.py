@@ -256,8 +256,7 @@ def main() -> int:
             baselines,
             [
                 "These worker counts exceed the physical core count on this host.",
-                "They are an oversubscription note.",
-                "They are not a published strong-scaling row.",
+                "The rows record oversubscription, and they stay out of the published table.",
             ],
         )
         (out_dir / "oversubscribe.csv").write_text(extra_summary, encoding="utf-8")
@@ -324,11 +323,12 @@ def write_dmc_phases(rows: list[dict[str, str]], cap: int, out_dir: Path) -> Non
     body = [
         "# Diffusion phase walls",
         "",
-        "Each column is a Hyndman-Fan type 7 median of the raw phase walls.",
-        "Setup, selection, potential-energy calls, synchronization, and allocation sum to the run wall.",
-        "Batch, polish, and wave synchronization are the three parts inside the synchronization column.",
-        "Round-robin pins place pool thread i on physical CPU i modulo the physical core count.",
-        "Rows above the physical core count stay out of this table.",
+        "Hyndman-Fan type 7 gives every median below.",
+        "The five phase medians add up to the measured wall.",
+        "Those phases are setup, selection, potential-energy calls, synchronization, and allocation.",
+        "Three later columns split synchronization into the evaluation batch, the per-control polish, and the endgame wave.",
+        "Pool thread i is pinned to physical core i, wrapping after the last core.",
+        "Worker counts above the physical core count stay out of this table.",
         "",
         "| workers | n | wall s | setup s | selection s | potential s | sync s | allocation s | batch sync s | polish sync s | wave sync s |",
         "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
