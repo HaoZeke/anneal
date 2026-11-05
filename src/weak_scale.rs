@@ -12,9 +12,9 @@
 //! evaluations and do not take the interpreter lock.
 
 use std::hint::black_box;
-use std::io::{Read, Write};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::time::Instant;
 
 use eindir_core::{FPair, Objective};
@@ -311,16 +311,31 @@ pub fn lj_ladder_result(spec: &LjLadder, worker_bin: Option<&Path>) -> PtResult 
     spec.check();
     let m = spec.chain_count();
     let reference = PopulationAnneal::reference(spec.atoms);
+    let profile = std::env::var_os("ANNEAL_PT_PROFILE").is_some();
+    let started_profile = Instant::now();
     let (begin, count) = worker_range(spec, 0);
-    let mut local = WorkerChains::new(spec, begin, count);
-    let mut remotes = Vec::new();
+    // Spawn the other processes while this process builds its own chains.
+    // A serial exec loop was a large share of the 8-worker wall.
+    let mut spawn_joins = Vec::new();
     if spec.workers > 1 {
-        let bin = worker_bin.expect("process ladder needs the worker executable");
+        let bin = worker_bin
+            .expect("process ladder needs the worker executable")
+            .to_path_buf();
         for worker in 1..spec.workers {
-            let (begin, count) = worker_range(spec, worker);
-            remotes.push(Remote::spawn(bin, spec, begin, count));
+            let spec_worker = spec.clone();
+            let bin_worker = bin.clone();
+            spawn_joins.push(std::thread::spawn(move || {
+                let (begin, count) = worker_range(&spec_worker, worker);
+                Remote::spawn(&bin_worker, &spec_worker, begin, count)
+            }));
         }
     }
+    let mut local = WorkerChains::new(spec, begin, count);
+    let mut remotes = Vec::with_capacity(spawn_joins.len());
+    for join in spawn_joins {
+        remotes.push(join.join().expect("pt worker spawn thread"));
+    }
+    let spawn_s = started_profile.elapsed().as_secs_f64();
     let mut states = vec![blank_state(spec.atoms); m];
     install_local(&mut states, &local);
     for remote in &remotes {
@@ -339,6 +354,9 @@ pub fn lj_ladder_result(spec: &LjLadder, worker_bin: Option<&Path>) -> PtResult 
     let mut hot_energies = Vec::with_capacity(spec.epochs.saturating_mul(spec.steps));
     let temps = geometric_ladder(reference.temperature_low, reference.temperature_high, m);
     let exchange = MetropolisExchange;
+    let mut local_s = 0.0;
+    let mut read_s = 0.0;
+    let mut swap_s = 0.0;
 
     'epochs: for epoch in 0..spec.epochs {
         if crate::caller_stop::raised() {
@@ -360,10 +378,14 @@ pub fn lj_ladder_result(spec: &LjLadder, worker_bin: Option<&Path>) -> PtResult 
             for remote in &mut remotes {
                 remote.request_step(epoch, chunk, step_base);
             }
+            let local_started = Instant::now();
             reports.push(local.advance(epoch, chunk, step_base, m));
+            local_s += local_started.elapsed().as_secs_f64();
+            let read_started = Instant::now();
             for remote in &mut remotes {
                 reports.push(remote.read_step());
             }
+            read_s += read_started.elapsed().as_secs_f64();
             for report in &reports {
                 for chain in &report.chains {
                     let index = chain.index;
@@ -388,6 +410,7 @@ pub fn lj_ladder_result(spec: &LjLadder, worker_bin: Option<&Path>) -> PtResult 
                 "hot-rung trace missed a step"
             );
             done += chunk;
+            let swap_started = Instant::now();
             if m >= 2 && done.is_multiple_of(spec.swap_period) {
                 let i = swap_rng.random_range(0..m - 1);
                 let alpha = exchange.swap_accept_prob(
@@ -401,14 +424,21 @@ pub fn lj_ladder_result(spec: &LjLadder, worker_bin: Option<&Path>) -> PtResult 
                 if draw < alpha {
                     states.swap(i, i + 1);
                     swap_accepts += 1;
-                    local.install_from(&states);
+                    if (local.begin..local.begin + local.slots.len()).contains(&i)
+                        || (local.begin..local.begin + local.slots.len()).contains(&(i + 1))
+                    {
+                        local.install_from(&states);
+                    }
                     for remote in &mut remotes {
-                        remote.install_from(&states);
+                        if remote.owns(i) || remote.owns(i + 1) {
+                            remote.install_from(&states);
+                        }
                     }
                 }
                 hot_energies.pop();
                 hot_energies.push(states[m - 1].cur.val);
             }
+            swap_s += swap_started.elapsed().as_secs_f64();
         }
         for (index, history) in chain_histories.iter_mut().enumerate() {
             history.epochs.push(EpochLine {
@@ -423,6 +453,12 @@ pub fn lj_ladder_result(spec: &LjLadder, worker_bin: Option<&Path>) -> PtResult 
 
     for remote in &mut remotes {
         remote.finish();
+    }
+    if profile {
+        eprintln!(
+            "pt_profile workers={} spawn_s={spawn_s:.6} local_s={local_s:.6} read_s={read_s:.6} swap_s={swap_s:.6}",
+            spec.workers
+        );
     }
     for history in &mut chain_histories {
         history.refresh_stationarity_flags();
@@ -607,8 +643,8 @@ struct StepReport {
 
 struct Remote {
     child: Child,
-    stdin: std::process::ChildStdin,
-    stdout: std::process::ChildStdout,
+    stdin: BufWriter<ChildStdin>,
+    stdout: BufReader<ChildStdout>,
     begin: usize,
     count: usize,
     atoms: usize,
@@ -624,8 +660,10 @@ impl Remote {
             .stderr(Stdio::inherit())
             .spawn()
             .expect("spawn pt worker");
-        let mut stdin = child.stdin.take().expect("pt worker stdin");
-        let mut stdout = child.stdout.take().expect("pt worker stdout");
+        let mut stdin =
+            BufWriter::with_capacity(1 << 20, child.stdin.take().expect("pt worker stdin"));
+        let mut stdout =
+            BufReader::with_capacity(1 << 20, child.stdout.take().expect("pt worker stdout"));
         write_config(&mut stdin, spec, begin, count);
         let states = read_ready(&mut stdout, count, spec.atoms);
         Self {
@@ -637,6 +675,10 @@ impl Remote {
             atoms: spec.atoms,
             states,
         }
+    }
+
+    fn owns(&self, index: usize) -> bool {
+        index >= self.begin && index < self.begin + self.count
     }
 
     fn request_step(&mut self, epoch: usize, steps: usize, step_base: u64) {
@@ -670,10 +712,7 @@ impl Remote {
             });
         }
         let hot_len = read_u32(&mut self.stdout) as usize;
-        let mut hot = Vec::with_capacity(hot_len);
-        for _ in 0..hot_len {
-            hot.push(read_f64(&mut self.stdout));
-        }
+        let hot = read_f64s(&mut self.stdout, hot_len);
         StepReport { chains, hot }
     }
 
@@ -698,11 +737,11 @@ impl Remote {
 
 fn pt_worker() {
     let stdin = std::io::stdin();
-    let mut input = stdin.lock();
+    let mut input = BufReader::with_capacity(1 << 20, stdin.lock());
     let (spec, begin, count, n_chains) = read_config(&mut input);
     let mut chains = WorkerChains::new(&spec, begin, count);
     let stdout = std::io::stdout();
-    let mut output = stdout.lock();
+    let mut output = BufWriter::with_capacity(1 << 20, stdout.lock());
     write_ready(&mut output, &chains);
     loop {
         let mut tag = [0u8; 1];
@@ -727,9 +766,7 @@ fn pt_worker() {
                     }
                 }
                 write_u32(&mut output, report.hot.len() as u32);
-                for value in &report.hot {
-                    write_f64(&mut output, *value);
-                }
+                write_f64s(&mut output, &report.hot);
                 output.flush().expect("pt worker step flush");
             }
             TAG_LOAD => {
@@ -847,6 +884,26 @@ fn read_f64(r: &mut impl Read) -> f64 {
     let mut buf = [0u8; 8];
     r.read_exact(&mut buf).expect("pt read");
     f64::from_le_bytes(buf)
+}
+
+fn write_f64s(w: &mut impl Write, values: &[f64]) {
+    let mut bytes = Vec::with_capacity(values.len().saturating_mul(8));
+    for value in values {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    w.write_all(&bytes).expect("pt write");
+}
+
+fn read_f64s(r: &mut impl Read, len: usize) -> Vec<f64> {
+    if len == 0 {
+        return Vec::new();
+    }
+    let mut bytes = vec![0u8; len.saturating_mul(8)];
+    r.read_exact(&mut bytes).expect("pt read");
+    bytes
+        .chunks_exact(8)
+        .map(|chunk| f64::from_le_bytes(chunk.try_into().expect("8 bytes")))
+        .collect()
 }
 
 fn read_vec(r: &mut impl Read, len: usize) -> Vec<f64> {

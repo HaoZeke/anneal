@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RAW = ROOT / "results" / "weak_scale" / "raw"
 OUT_CSV = ROOT / "results" / "weak_scale" / "summary.csv"
 OUT_MD = ROOT / "results" / "weak_scale" / "table.md"
+OUT_SCALE = ROOT / "results" / "weak_scale" / "scaling.md"
 FAMILIES = ("pt", "population", "dmc")
 WORKERS = (1, 2, 4, 8)
 SEEDS = tuple(range(6))
@@ -208,7 +209,67 @@ def main() -> int:
     lines.append(f"tree: {next(iter(trees))}")
     lines.append("")
     OUT_MD.write_text("\n".join(lines))
+    OUT_SCALE.write_text(scaling_report(summary, cpu, cores))
     return 0
+
+
+def scaling_report(summary: list[dict], cpu: str, cores: str) -> str:
+    """Amdahl and Gustafson rows from the measured weak-scaling walls.
+
+    Weak efficiency is eta(p) = T(1) / T(p).
+    Gustafson scaled speedup is S_G(p) = p * eta(p).
+    Gustafson serial fraction of the parallel wall is
+    s_G(p) = p * (1 - eta(p)) / (p - 1) for p > 1.
+    Karp-Flatt serial fraction of that speedup is
+    e(p) = (1 / S_G(p) - 1 / p) / (1 - 1 / p).
+    Amdahl speedup if e(p) were the fixed-work serial fraction is
+    S_A(p) = 1 / (e(p) + (1 - e(p)) / p).
+    """
+
+    host = f"Host CPU: {cpu}, {cores} physical cores."
+    blocks = [
+        "# Amdahl and Gustafson",
+        "",
+        host,
+        "GPU: none. CUDA: none.",
+        "Worker counts are 1, 2, 4, and 8, each at most the physical core count.",
+        "The walls are the medians in summary.csv.",
+        "eta(p) is the weak efficiency T(1) / T(p).",
+        "Gustafson scaled speedup is S_G(p) = p * eta(p).",
+        "Gustafson serial fraction is s_G(p) = p * (1 - eta(p)) / (p - 1) for p > 1.",
+        "Karp-Flatt serial fraction is e(p) = (1 / S_G(p) - 1 / p) / (1 - 1 / p).",
+        "Amdahl speedup uses that e(p) as a fixed-work serial fraction:",
+        "S_A(p) = 1 / (e(p) + (1 - e(p)) / p).",
+        "",
+    ]
+    for family in FAMILIES:
+        rows = [row for row in summary if row["family"] == family]
+        blocks.append(f"## {family}")
+        blocks.append("")
+        blocks.append(host)
+        blocks.append("")
+        blocks.append(
+            "| family | workers | cores | eta | Gustafson S_G | Gustafson s_G | Karp-Flatt e | Amdahl S_A |"
+        )
+        blocks.append("|---|---:|---:|---:|---:|---:|---:|---:|")
+        for row in rows:
+            workers = int(row["workers"])
+            eta = float(row["weak_efficiency"])
+            if workers == 1:
+                gustafson_s = 0.0
+                karp = 0.0
+                amdahl = 1.0
+                scaled = 1.0
+            else:
+                scaled = workers * eta
+                gustafson_s = workers * (1.0 - eta) / (workers - 1)
+                karp = (1.0 / scaled - 1.0 / workers) / (1.0 - 1.0 / workers)
+                amdahl = 1.0 / (karp + (1.0 - karp) / workers)
+            blocks.append(
+                f"| {family} | {workers} | {cores} | {eta:.6f} | {scaled:.6f} | {gustafson_s:.6f} | {karp:.6f} | {amdahl:.6f} |"
+            )
+        blocks.append("")
+    return "\n".join(blocks) + "\n"
 
 
 if __name__ == "__main__":
