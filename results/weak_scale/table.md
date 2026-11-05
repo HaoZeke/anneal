@@ -2,11 +2,16 @@
 
 Host CPU: Intel Xeon Processor, 8 cores.
 GPU: none. CUDA: none.
-Workers are threads in one process on this host.
+Parallel tempering uses one process per worker.
+The parent process draws every swap after each swap interval.
+Population annealing and the diffusion population use threads.
+Those threads call the native Lennard-Jones energy.
+They do not take the interpreter lock.
 Snakemake exports OMP_NUM_THREADS as 1.
 The Rayon pools and the diffusion threads use the worker count.
-Worker counts are 1, 2, 4, 8, and 16.
-Sixteen threads share 8 cores.
+Worker counts are 1, 2, 4, and 8.
+Every published row uses at most 8 workers on this 8-core host.
+A sixteen-worker row would share the cores and is omitted.
 Each cell is six seeds, numbered 0 through 5.
 The wall time is the median.
 The IQR is the type 7 interquartile range of those six wall times.
@@ -22,21 +27,18 @@ This host has no second node and no MPI library, so those rows are absent.
 
 | family | workers | atoms | replicas | charged | median wall s | type 7 IQR s | weak efficiency |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| pt | 1 | 13 | 2 | 524290 | 0.322771 | 0.001348 | 1.000000 |
-| pt | 2 | 13 | 4 | 1048580 | 0.329815 | 0.002622 | 0.978643 |
-| pt | 4 | 13 | 8 | 2097160 | 0.421145 | 0.017405 | 0.766415 |
-| pt | 8 | 13 | 16 | 4194320 | 0.487797 | 0.011387 | 0.661692 |
-| pt | 16 | 13 | 32 | 8388640 | 0.789296 | 0.004308 | 0.408936 |
-| population | 1 | 13 | 8 | 524296 | 0.295314 | 0.007089 | 1.000000 |
-| population | 2 | 13 | 16 | 1048592 | 0.305168 | 0.002625 | 0.967710 |
-| population | 4 | 13 | 32 | 2097184 | 0.311790 | 0.012381 | 0.947159 |
-| population | 8 | 13 | 64 | 4194368 | 0.307402 | 0.003983 | 0.960679 |
-| population | 16 | 13 | 128 | 8388736 | 0.627817 | 0.005351 | 0.470383 |
-| dmc | 1 | 13 | 8 | 262144 | 0.226654 | 0.001601 | 1.000000 |
-| dmc | 2 | 13 | 16 | 524288 | 0.230339 | 0.000880 | 0.984002 |
-| dmc | 4 | 13 | 32 | 1048576 | 0.238804 | 0.002444 | 0.949120 |
-| dmc | 8 | 13 | 64 | 2097152 | 0.259108 | 0.001191 | 0.874745 |
-| dmc | 16 | 13 | 128 | 4194304 | 0.544750 | 0.004071 | 0.416069 |
+| pt | 1 | 13 | 2 | 524290 | 0.334411 | 0.022259 | 1.000000 |
+| pt | 2 | 13 | 4 | 1048580 | 0.400257 | 0.010201 | 0.835491 |
+| pt | 4 | 13 | 8 | 2097160 | 0.402512 | 0.011356 | 0.830810 |
+| pt | 8 | 13 | 16 | 4194320 | 0.563656 | 0.006234 | 0.593290 |
+| population | 1 | 13 | 8 | 524296 | 0.300684 | 0.014117 | 1.000000 |
+| population | 2 | 13 | 16 | 1048592 | 0.309041 | 0.003381 | 0.972956 |
+| population | 4 | 13 | 32 | 2097184 | 0.329608 | 0.031387 | 0.912246 |
+| population | 8 | 13 | 64 | 4194368 | 0.381900 | 0.002763 | 0.787336 |
+| dmc | 1 | 13 | 8 | 262144 | 0.232455 | 0.001422 | 1.000000 |
+| dmc | 2 | 13 | 16 | 524288 | 0.235264 | 0.000513 | 0.988063 |
+| dmc | 4 | 13 | 32 | 1048576 | 0.242265 | 0.004645 | 0.959509 |
+| dmc | 8 | 13 | 64 | 2097152 | 0.349850 | 0.029170 | 0.664442 |
 
-HEAD: 3548427fbfaf4b70d82564c2ed0d479063b88fd2
-tree: a43ccd5efa0c8138199a3b78b233e7876c99e93f
+HEAD: 9bd090b55a39da1a2ef474750a8f42d41e7a6efc
+tree: 8b3d122f454b326de2789012605973f589ae29ce

@@ -1,7 +1,7 @@
 {
-    "cpu": "Intel Xeon Processor",
+    "cpu": "Intel Xeon Processor (8 cores)",
     "machine": "host",
-    "os": "Linux",
+    "os": "Linux 6.12",
     "ram": "47GB",
     "version": 1
 }
