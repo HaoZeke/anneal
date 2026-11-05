@@ -1,18 +1,20 @@
-//! Process workers match `ParallelTemperingSampler::run` on the Lennard-Jones ladder.
+//! Process workers on [`ParallelTemperingSampler::run_processes`] match `run`.
 
-use anneal_core::PtResult;
-use anneal_core::weak_scale::{LjLadder, lj_ladder_result, serial_lj_pt};
+use anneal_core::cool::LogCool;
+use anneal_core::potentials::PairPotential;
+use anneal_core::variant::boltzmann;
+use anneal_core::{ParallelTemperingSampler, PtResult, geometric_ladder};
 
-fn tiny(workers: usize, seed: u64) -> LjLadder {
-    LjLadder {
-        atoms: 4,
-        chains_per_worker: 2,
-        steps: 23,
-        swap_period: 5,
-        epochs: 2,
-        workers,
-        seed,
-    }
+fn run_pair(workers: usize, seed: u64, bin: Option<&std::path::Path>) -> (PtResult, PtResult) {
+    let chains = 2 * workers;
+    let potential = PairPotential::lennard_jones(4);
+    let sampler = boltzmann(potential, 0.8, 0.38).expect("variant");
+    let temps = geometric_ladder(0.05, 0.8, chains);
+    let tempering = ParallelTemperingSampler::new(sampler, temps, 23, 5);
+    let cooling = LogCool::new(0.8, 2.0);
+    let serial = tempering.run(&cooling, 2, seed);
+    let parallel = tempering.run_processes(&cooling, 2, seed, workers, bin);
+    (serial, parallel)
 }
 
 fn assert_same_ladder(serial: &PtResult, parallel: &PtResult) {
@@ -57,12 +59,10 @@ fn assert_same_ladder(serial: &PtResult, parallel: &PtResult) {
 }
 
 #[test]
-fn process_workers_match_the_serial_ladder() {
+fn library_process_workers_match_the_serial_ladder() {
     let bin = env!("CARGO_BIN_EXE_weak_scale");
     for (workers, seed) in [(2usize, 11u64), (3, 4), (4, 19)] {
-        let spec = tiny(workers, seed);
-        let serial = serial_lj_pt(&spec);
-        let parallel = lj_ladder_result(&spec, Some(std::path::Path::new(bin)));
+        let (serial, parallel) = run_pair(workers, seed, Some(std::path::Path::new(bin)));
         assert_same_ladder(&serial, &parallel);
     }
 }

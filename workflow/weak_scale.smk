@@ -17,14 +17,14 @@ rule all:
 
 rule build_weak_scale:
     output:
-        "../tmp/anneal-target/release/examples/weak_scale",
+        "target/release/examples/weak_scale",
     shell:
-        "cargo +1.88.0 build --release --example weak_scale"
+        "CARGO_TARGET_DIR=\"${{CARGO_TARGET_DIR:-$PWD/target}}\" cargo +1.88.0 build --release --example weak_scale"
 
 
 rule weak_scale_cell:
     input:
-        "../tmp/anneal-target/release/examples/weak_scale",
+        "target/release/examples/weak_scale",
     output:
         "results/weak_scale/raw/{family}/w{workers}/seed{seed}.log",
     resources:

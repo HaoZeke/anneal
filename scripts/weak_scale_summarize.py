@@ -237,8 +237,8 @@ def scaling_report(summary: list[dict], cpu: str, cores: str) -> str:
         "eta(p) is the weak efficiency T(1) / T(p).",
         "Gustafson scaled speedup is S_G(p) = p * eta(p).",
         "Gustafson serial fraction is s_G(p) = p * (1 - eta(p)) / (p - 1) for p > 1.",
-        "Karp-Flatt serial fraction is e(p) = (1 / S_G(p) - 1 / p) / (1 - 1 / p).",
-        "Amdahl speedup uses that e(p) as a fixed-work serial fraction:",
+        "The Karp-Flatt serial fraction is e(p) = (1 / S_G(p) - 1 / p) / (1 - 1 / p).",
+        "The fixed-work speedup that uses the Karp-Flatt fraction is",
         "S_A(p) = 1 / (e(p) + (1 - e(p)) / p).",
         "",
     ]
@@ -249,7 +249,7 @@ def scaling_report(summary: list[dict], cpu: str, cores: str) -> str:
         blocks.append(host)
         blocks.append("")
         blocks.append(
-            "| family | workers | cores | eta | Gustafson S_G | Gustafson s_G | Karp-Flatt e | Amdahl S_A |"
+            "| family | workers | cores | eta | Gustafson S_G | Gustafson s_G | Karp-Flatt | fixed-work S |"
         )
         blocks.append("|---|---:|---:|---:|---:|---:|---:|---:|")
         for row in rows:

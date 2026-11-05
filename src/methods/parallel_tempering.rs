@@ -426,6 +426,41 @@ impl<S: Sampler<f64>, E: Exchange<f64>> ParallelTemperingSampler<S, E> {
     }
 }
 
+impl
+    ParallelTemperingSampler<
+        crate::variant::BoltzmannVariant<crate::potentials::PairPotential>,
+        crate::exchange::MetropolisExchange,
+    >
+{
+    /// Runs [`Self::run`] on `workers` processes.
+    ///
+    /// Worker 0 stays in this process. Each other worker is `worker_bin`
+    /// with the `pt-worker` argument, which enters [`process_worker`].
+    /// One worker stays on the calling thread and does not read `worker_bin`.
+    /// Chain `c` uses the generator seeded with `seed + c`. The swap
+    /// generator is seeded with `seed + chain count + 1`. With the caller
+    /// stop flag clear, the energies, positions, swap counts, and accept
+    /// counts match [`Self::run`].
+    pub fn run_processes<C>(
+        &self,
+        _cooling: &C,
+        n_epochs: usize,
+        seed: u64,
+        workers: usize,
+        worker_bin: Option<&std::path::Path>,
+    ) -> PtResult
+    where
+        C: Cooling<f64>,
+    {
+        super::pt_process::run(self, n_epochs, seed, workers, worker_bin)
+    }
+}
+
+/// Reads the `pt-worker` protocol on standard input.
+pub fn process_worker() {
+    super::pt_process::process_worker();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
