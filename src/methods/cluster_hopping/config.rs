@@ -1176,20 +1176,28 @@ impl Config {
     /// below 98 (occupancy-measured on 38 and 75; 18/48 Leary when left
     /// on at 98). Grosso replacement is not installed.
     pub fn communicating(n_points: usize) -> Self {
-        let mut cfg = Self::for_cluster(n_points);
-        cfg.allocate_moves = true;
-        cfg.return_screen = true;
-        cfg.orbit_complete_on_new = true;
-        cfg.shared_deposits = 0;
-        cfg.shared_visit_policy = crate::methods::minima_hopping::SharedVisitPolicy::Recognition;
-        if n_points < 98 {
-            cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
+        Self::for_cluster(n_points).into_communicating()
+    }
+
+    /// The switches [`Self::communicating`] adds, on top of `self`.
+    ///
+    /// None of them reads a length or an energy, so a configuration built
+    /// at other scales by [`Self::with_scales`] keeps those scales and takes
+    /// the same arm.
+    pub fn into_communicating(mut self) -> Self {
+        self.allocate_moves = true;
+        self.return_screen = true;
+        self.orbit_complete_on_new = true;
+        self.shared_deposits = 0;
+        self.shared_visit_policy = crate::methods::minima_hopping::SharedVisitPolicy::Recognition;
+        if self.n_points < 98 {
+            self.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
         }
-        cfg.continuous_symmetry = ContinuousSymmetry::Measure {
+        self.continuous_symmetry = ContinuousSymmetry::Measure {
             interval: 10,
             reseed_hops: 5,
         };
-        cfg
+        self
     }
 
     /// The packing-mutate flags as one record. Twin is a library arm;
