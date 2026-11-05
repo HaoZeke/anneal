@@ -51,6 +51,7 @@ dependencies = [
  "futures",
  "libc",
  "libloading",
+ "libm",
  "linkcell 0.3.11",
  "metatensor",
  "nauty-pet",

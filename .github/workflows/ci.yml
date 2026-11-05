@@ -28,7 +28,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: rustfmt, clippy
 
@@ -120,8 +120,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # compile_contracts compares rustc 1.88.0 stderr. Keep this
+      # channel in step with rust-toolchain.toml.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.88.0
 
       - uses: actions/setup-python@v6
         with:
@@ -308,7 +310,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.88.0
 
       - name: Install system dependencies
         run: |

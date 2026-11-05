@@ -1,0 +1,1 @@
+Clippy on rustc 1.88.0 passes with the CI features. Three format strings name their arguments inline, and the GSA preset check folds its two negations into one. Messages and accepted values are unchanged.
