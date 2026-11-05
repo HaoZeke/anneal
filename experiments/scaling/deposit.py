@@ -200,7 +200,7 @@ def main() -> int:
         gib = int(memory) / (1024 * 1024)
         physical = anchor.get("physical_cpus", str(cap))
         header = [
-            f"# Strong scaling on {cpu}",
+            "# Strong scaling on this host",
             "",
             f"Host: {cpu}, {physical} physical cores, {logical} logical CPUs, {memory} KiB memory ({gib:.2f} GiB).",
             f"GPU: {anchor['gpu']}.",
@@ -324,8 +324,8 @@ def write_dmc_phases(rows: list[dict[str, str]], cap: int, out_dir: Path) -> Non
     body = [
         "# Diffusion phase walls",
         "",
-        "Hyndman-Fan type 7 gives every median below.",
-        "The five phase medians add up to the measured wall.",
+        "Hyndman-Fan type 7 gives every median in this table.",
+        "On each run, the five phase walls add up to that run's wall.",
         "Those phases are setup, selection, potential-energy calls, synchronization, and allocation.",
         "Three later columns split synchronization into the evaluation batch, the per-control polish, and the endgame wave.",
         "Pool thread i is pinned to physical core i, wrapping after the last core.",

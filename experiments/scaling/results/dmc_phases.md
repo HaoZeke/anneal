@@ -1,7 +1,7 @@
 # Diffusion phase walls
 
-Hyndman-Fan type 7 gives every median below.
-The five phase medians add up to the measured wall.
+Hyndman-Fan type 7 gives every median in this table.
+On each run, the five phase walls add up to that run's wall.
 Those phases are setup, selection, potential-energy calls, synchronization, and allocation.
 Three later columns split synchronization into the evaluation batch, the per-control polish, and the endgame wave.
 Pool thread i is pinned to physical core i, wrapping after the last core.
@@ -9,7 +9,7 @@ Worker counts above the physical core count stay out of this table.
 
 | workers | n | wall s | setup s | selection s | potential s | sync s | allocation s | batch sync s | polish sync s | wave sync s |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 6 | 0.452942 | 0.000938 | 0.006347 | 0.445419 | 0.000070 | 0.000155 | 0.000032 | 0.000034 | 0.000005 |
-| 2 | 6 | 0.256359 | 0.001106 | 0.006486 | 0.225164 | 0.023092 | 0.000240 | 0.001874 | 0.003227 | 0.017654 |
-| 4 | 6 | 0.157801 | 0.001040 | 0.006641 | 0.116032 | 0.033789 | 0.000261 | 0.002075 | 0.004504 | 0.026969 |
-| 8 | 6 | 0.097259 | 0.001156 | 0.006653 | 0.066413 | 0.022491 | 0.000288 | 0.002687 | 0.005643 | 0.013782 |
+| 1 | 6 | 0.452514 | 0.001078 | 0.006443 | 0.444680 | 0.000074 | 0.000149 | 0.000034 | 0.000033 | 0.000006 |
+| 2 | 6 | 0.239127 | 0.001268 | 0.006592 | 0.226472 | 0.005222 | 0.000244 | 0.001539 | 0.003408 | 0.000182 |
+| 4 | 6 | 0.135552 | 0.000921 | 0.006679 | 0.116426 | 0.011221 | 0.000259 | 0.001855 | 0.004403 | 0.004865 |
+| 8 | 6 | 0.096052 | 0.000916 | 0.006946 | 0.064549 | 0.022022 | 0.000284 | 0.002326 | 0.005889 | 0.012853 |
