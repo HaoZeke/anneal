@@ -954,7 +954,10 @@ mod tests {
     #[test]
     fn a_tiny_run_records_floors_and_refuses_returns() {
         let mut rng = StdRng::seed_from_u64(1);
-        let cfg = Config::recommended(7);
+        let mut cfg = Config::recommended(7);
+        // crude_relax charges every step, and the 400-call ledger is sized
+        // for 200-step quenches.
+        cfg.relax_steps = 200;
         let start = random_cluster(7, 0.7, cfg.min_separation, &mut rng);
         let mut ledger = Ledger::new(400);
         let mut relax =
@@ -1031,7 +1034,10 @@ mod tests {
     #[test]
     fn a_tiny_run_does_not_starve_full_quenches() {
         let mut rng = StdRng::seed_from_u64(2);
-        let cfg = Config::recommended(7);
+        let mut cfg = Config::recommended(7);
+        // crude_relax charges every step, and the 400-call ledger is sized
+        // for 200-step quenches.
+        cfg.relax_steps = 200;
         let start = random_cluster(7, 0.7, cfg.min_separation, &mut rng);
         let mut ledger = Ledger::new(400);
         let mut relax =
