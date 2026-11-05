@@ -106,6 +106,11 @@ def write_header(handle, command):
 
 
 def scrub(text):
+    text = re.sub(
+        r"(?<![\w])/(?:home|tmp|opt|agent|workspace|usr|proc|lib|lib64|var|etc)(?:/[\w.+@=-]+)+",
+        "path",
+        text,
+    )
     for key in (
         "XTB_BIN",
         "CREST_BIN",
@@ -119,7 +124,6 @@ def scrub(text):
         value = os.environ.get(key)
         if value:
             text = text.replace(value, key.lower())
-    text = re.sub(r"/[\w.+@=-]+(?:/[\w.+@=-]+)+", "path", text)
     return text
 
 
