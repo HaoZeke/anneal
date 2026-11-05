@@ -1,15 +1,19 @@
-HEAD: d35e955fe26c092236cfef81c82b17c3cf1c705e
-tree: c77efbdaccbc2393a021e3ca9cf7137b5df68df4
+HEAD: 078d6c0f1ec213d79f0298eeaa3f4a84bcb5ae23
+tree: a2eea9722b5125f785802b227239176bc607ad77
 command: experiments/scaling/bin/pop_strong_scale --method successive_halving --workers 8 --repeat 1
-exit: 0
 method: successive_halving
 scaling: strong
 workers: 8
 repeat: 1
 seed: 1
-wall_s: 0.053706849
+wall_s: 0.064343139
 best_energy: -11.2991605252893006
+best_energy_bits: 13845922516800945747
 evaluations: 12800
+n_evals: 12800
+n_grads: 0
+n_accepts: 0
+best_pos_fnv: 0000000000000000
 decisions: 136
 atoms: 98
 walkers: 32
@@ -18,5 +22,7 @@ quench_steps: 40
 dmc_budget: 20000
 cpu_model: Intel Xeon Processor
 logical_cpus: 8
+physical_cpus: 8
 memory_kib: 49342768
 gpu: none
+exit: 0

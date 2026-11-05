@@ -153,7 +153,7 @@ def main() -> int:
     def table_text(
         selected: list[dict[str, str]],
         baselines: dict[str, float],
-        intro: str,
+        intro: list[str],
     ) -> tuple[str, str, str]:
         grouped = grouped_of(selected)
         summary_lines = [
@@ -193,10 +193,8 @@ def main() -> int:
         header = [
             f"# Strong scaling on {cpu}",
             "",
-            (
-                f"Host: {cpu}, {physical} physical cores, {logical} logical CPUs, "
-                f"{memory} KiB memory ({gib:.2f} GiB). GPU: {anchor['gpu']}."
-            ),
+            f"Host: {cpu}, {physical} physical cores, {logical} logical CPUs, {memory} KiB memory ({gib:.2f} GiB).",
+            f"GPU: {anchor['gpu']}.",
             (
                 "Fixed problem: Lennard-Jones, "
                 f"{anchor['atoms']} atoms, {anchor['walkers']} walkers, "
@@ -204,11 +202,10 @@ def main() -> int:
                 f"quench length {anchor['quench_steps']}, "
                 f"diffusion Monte Carlo budget {anchor['dmc_budget']}."
             ),
-            intro,
-            (
-                "Six repeats. The quartile is Hyndman-Fan type 7. "
-                "Speedup and parallel efficiency use the median wall time against one worker."
-            ),
+            *intro,
+            "Six repeats.",
+            "The quartile is Hyndman-Fan type 7.",
+            "Speedup and parallel efficiency use the median wall time against one worker.",
             "This is a scaling table.",
             "",
             "| method | workers | n | median wall s | Q1 | Q3 | IQR | speedup | efficiency |",
@@ -225,10 +222,10 @@ def main() -> int:
     summary, long_text, text = table_text(
         paper_rows,
         baselines,
-        (
-            "The worker count is the thread pool. "
-            f"Published rows use at most {cap} workers, the physical core count on this host."
-        ),
+        [
+            "The worker count is the thread pool.",
+            f"Published rows use at most {cap} workers, the physical core count on this host.",
+        ],
     )
     out_dir = Path("experiments/scaling/results")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -247,10 +244,11 @@ def main() -> int:
         extra_summary, extra_long, extra_text = table_text(
             extra_rows,
             baselines,
-            (
-                "These worker counts exceed the physical core count on this host. "
-                "They are an oversubscription note, not a published strong-scaling row."
-            ),
+            [
+                "These worker counts exceed the physical core count on this host.",
+                "They are an oversubscription note.",
+                "They are not a published strong-scaling row.",
+            ],
         )
         (out_dir / "oversubscribe.csv").write_text(extra_summary, encoding="utf-8")
         (out_dir / "oversubscribe.md").write_text(extra_text, encoding="utf-8")
