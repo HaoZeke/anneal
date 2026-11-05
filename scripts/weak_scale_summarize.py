@@ -176,7 +176,7 @@ def main() -> int:
         "The parent process draws every swap after each swap interval.",
         "Population annealing and the diffusion population use threads.",
         "Those threads call the native Lennard-Jones energy.",
-        "They do not take the interpreter lock.",
+        "The energy evaluation stays in native code.",
         "Snakemake exports OMP_NUM_THREADS as 1.",
         "The Rayon pools and the diffusion threads use the worker count.",
         "Worker counts are 1, 2, 4, and 8.",
@@ -193,7 +193,8 @@ def main() -> int:
         "A multi-node path needs an MPI launcher or the bank RPC sockets,",
         "one chain group or one population per rank, and an exchange of energies",
         "at each swap or resampling step.",
-        "This host has no second node and no MPI library, so those rows are absent.",
+        "Multi-node rows need a second host or an MPI library.",
+        "This host has neither, so those rows are absent.",
         "",
         "| family | workers | atoms | replicas | charged | median wall s | type 7 IQR s | weak efficiency |",
         "|---|---:|---:|---:|---:|---:|---:|---:|",
@@ -228,7 +229,7 @@ def scaling_report(summary: list[dict], cpu: str, cores: str) -> str:
 
     host = f"Host CPU: {cpu}, {cores} physical cores."
     blocks = [
-        "# Amdahl and Gustafson",
+        "# Gustafson and Karp-Flatt",
         "",
         host,
         "GPU: none. CUDA: none.",
