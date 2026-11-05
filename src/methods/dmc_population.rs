@@ -15,16 +15,19 @@
 //! Public API: [`dmc_population_optimize`], [`run_dmc_population_seeded`]
 //! (Python `anneal.dmc_population_optimize`, portfolio `DmcPop` arm).
 
+use std::cell::RefCell;
+use std::time::{Duration, Instant};
+
 use eindir_core::{Bounds, Gradient, Objective};
 use ndarray::{Array1, Array2, ArrayView1};
-use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use rayon::prelude::*;
 
 use crate::accept::{AcceptRule, TsallisAccept};
 use crate::methods::local_polish::projected_gradient_polish;
-use crate::movekernel::{reflect_into_box, MoveKernel, TsallisVisit};
+use crate::movekernel::{MoveKernel, TsallisVisit, reflect_into_box};
 
 /// Default target walker population when the caller does not set one.
 pub const DEFAULT_TARGET_WALKERS: usize = 24;
@@ -563,6 +566,117 @@ pub fn default_sigma(bounds: &Bounds<f64>) -> f64 {
     (0.15 * mean / dim.sqrt()).max(1e-6)
 }
 
+/// Wall-clock phases for one diffusion population run.
+///
+/// The five fields sum to the search wall. Setup is construction before
+/// the main loop. Selection is ranking, proposals, and population control.
+/// Potential-energy calls are objective and gradient work. Synchronization
+/// is join and idle time inside a parallel region. Allocation is the
+/// roster snapshot and the trial matrix.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DmcPhaseSeconds {
+    /// Construction before the main loop, including pool setup folded in later.
+    pub setup_s: f64,
+    /// Ranking, proposals, accepts, and population control.
+    pub selection_s: f64,
+    /// Objective and gradient work, as a share of the wall.
+    pub pes_s: f64,
+    /// Join and idle time inside parallel regions.
+    pub sync_s: f64,
+    /// Roster snapshots and the trial matrix.
+    pub alloc_s: f64,
+}
+
+impl DmcPhaseSeconds {
+    /// Sum of the five phase walls.
+    pub fn total_s(self) -> f64 {
+        self.setup_s + self.selection_s + self.pes_s + self.sync_s + self.alloc_s
+    }
+}
+
+const PH_SETUP: usize = 0;
+const PH_SELECTION: usize = 1;
+const PH_PES: usize = 2;
+const PH_SYNC: usize = 3;
+const PH_ALLOC: usize = 4;
+
+struct PhaseMeter {
+    cursor: Instant,
+    bucket: usize,
+    ns: [u128; 5],
+    polish_sync_ns: u128,
+    wave_sync_ns: u128,
+}
+
+impl PhaseMeter {
+    fn new() -> Self {
+        Self {
+            cursor: Instant::now(),
+            bucket: PH_SETUP,
+            ns: [0; 5],
+            polish_sync_ns: 0,
+            wave_sync_ns: 0,
+        }
+    }
+
+    fn flush(&mut self) {
+        let now = Instant::now();
+        let dt = now.saturating_duration_since(self.cursor).as_nanos();
+        self.ns[self.bucket] = self.ns[self.bucket].saturating_add(dt);
+        self.cursor = now;
+    }
+
+    fn set_bucket(&mut self, bucket: usize) {
+        self.flush();
+        self.bucket = bucket;
+    }
+
+    fn pause(&mut self) {
+        self.flush();
+    }
+
+    fn resume_pes(&mut self, ns: u128) {
+        self.ns[PH_PES] = self.ns[PH_PES].saturating_add(ns);
+        self.cursor = Instant::now();
+    }
+
+    fn resume_parallel(&mut self, wall: Duration, busy: Duration, threads: usize, wave: bool) {
+        let threads = threads.max(1) as u128;
+        let wall_ns = wall.as_nanos();
+        let pes_ns = busy.as_nanos() / threads;
+        let pes_ns = pes_ns.min(wall_ns);
+        let sync_ns = wall_ns.saturating_sub(pes_ns);
+        self.ns[PH_PES] = self.ns[PH_PES].saturating_add(pes_ns);
+        self.ns[PH_SYNC] = self.ns[PH_SYNC].saturating_add(sync_ns);
+        if wave {
+            self.wave_sync_ns = self.wave_sync_ns.saturating_add(sync_ns);
+        } else {
+            self.polish_sync_ns = self.polish_sync_ns.saturating_add(sync_ns);
+        }
+        self.cursor = Instant::now();
+    }
+
+    fn snapshot(&mut self) -> DmcPhaseSeconds {
+        self.flush();
+        let sec = |ns: u128| ns as f64 / 1.0e9;
+        DmcPhaseSeconds {
+            setup_s: sec(self.ns[PH_SETUP]),
+            selection_s: sec(self.ns[PH_SELECTION]),
+            pes_s: sec(self.ns[PH_PES]),
+            sync_s: sec(self.ns[PH_SYNC]),
+            alloc_s: sec(self.ns[PH_ALLOC]),
+        }
+    }
+
+    fn polish_sync_s(&self) -> f64 {
+        self.polish_sync_ns as f64 / 1.0e9
+    }
+
+    fn wave_sync_s(&self) -> f64 {
+        self.wave_sync_ns as f64 / 1.0e9
+    }
+}
+
 /// Result of a budgeted population-controlled diffusion run.
 #[derive(Clone, Debug)]
 pub struct DmcPopulationResult {
@@ -580,6 +694,12 @@ pub struct DmcPopulationResult {
     pub controls: usize,
     /// Proposal accepts. Gradient polish updates are not accepts.
     pub n_accepts: usize,
+    /// Phase walls for this run. The fields sum to the search wall.
+    pub phases: DmcPhaseSeconds,
+    /// Idle time inside per-control gradient passes. This is already part of `phases.sync_s`.
+    pub polish_sync_s: f64,
+    /// Idle time inside endgame elite waves. This is already part of `phases.sync_s`.
+    pub wave_sync_s: f64,
 }
 
 /// Run population-controlled diffusion under a hard evaluation budget.
@@ -798,6 +918,7 @@ fn gradient_polish_waves<O, G, R>(
     budget: usize,
     dim: usize,
     e_span: f64,
+    meter: &RefCell<PhaseMeter>,
 ) where
     O: Objective<f64> + Sync,
     G: Gradient<f64> + Sync,
@@ -834,11 +955,15 @@ fn gradient_polish_waves<O, G, R>(
             });
         }
         let spent_before = n_evals.saturating_add(*n_grads);
-        let passes: Vec<ElitePass> = jobs
+        let threads = rayon::current_num_threads().max(1);
+        meter.borrow_mut().pause();
+        let wave_started = Instant::now();
+        let passes: Vec<(ElitePass, Duration)> = jobs
             .par_iter()
             .map(|job| {
                 let mut child = StdRng::seed_from_u64(job.seed);
-                gradient_elite_pass(
+                let task_started = Instant::now();
+                let pass = gradient_elite_pass(
                     obj,
                     gr,
                     job.x.clone(),
@@ -849,10 +974,16 @@ fn gradient_polish_waves<O, G, R>(
                     bounds,
                     visit,
                     &mut child,
-                )
+                );
+                (pass, task_started.elapsed())
             })
             .collect();
-        for (job, pass) in jobs.iter().zip(passes.iter()) {
+        let wave_wall = wave_started.elapsed();
+        let wave_busy = passes.iter().map(|(_, busy)| *busy).sum();
+        meter
+            .borrow_mut()
+            .resume_parallel(wave_wall, wave_busy, threads, true);
+        for (job, (pass, _)) in jobs.iter().zip(passes.iter()) {
             let room = budget.saturating_sub(n_evals.saturating_add(*n_grads));
             let charged = (pass.n_evals + pass.n_grads).min(room);
             let ce = pass.n_evals.min(charged);
@@ -879,7 +1010,11 @@ fn gradient_polish_waves<O, G, R>(
                 let trial = reflect_into_box(trial.view(), bounds);
                 if n_evals.saturating_add(*n_grads) < budget {
                     *n_evals += 1;
+                    meter.borrow_mut().pause();
+                    let eval_started = Instant::now();
                     let energy = obj.eval(trial.view());
+                    let eval_ns = eval_started.elapsed().as_nanos();
+                    meter.borrow_mut().resume_pes(eval_ns);
                     if energy < elites[k_elite - 1].1 {
                         elites[k_elite - 1] = (trial.clone(), energy);
                         elites.sort_by(|p, q| {
@@ -930,12 +1065,18 @@ where
     let mut n_accepts = 0usize;
 
     let work = |ne: usize, ng: usize| ne + ng;
+    let meter = RefCell::new(PhaseMeter::new());
     let charge_obj = |x: ArrayView1<f64>, ne: &mut usize, ng: usize| -> Option<f64> {
         if work(*ne, ng) >= budget {
             return None;
         }
         *ne += 1;
-        Some(obj.eval(x))
+        meter.borrow_mut().pause();
+        let eval_started = Instant::now();
+        let value = obj.eval(x);
+        let eval_ns = eval_started.elapsed().as_nanos();
+        meter.borrow_mut().resume_pes(eval_ns);
+        Some(value)
     };
 
     // Seed population: QMC covering set, with walker 0 optionally forced to seed_x.
@@ -1010,6 +1151,9 @@ where
                 final_population: 0,
                 controls: 0,
                 n_accepts: 0,
+                phases: meter.borrow_mut().snapshot(),
+                polish_sync_s: meter.borrow().polish_sync_s(),
+                wave_sync_s: meter.borrow().wave_sync_s(),
             };
         }
         Population { target_n, walkers }
@@ -1061,6 +1205,7 @@ where
         && !pop.walkers.is_empty()
         && !crate::caller_stop::raised()
     {
+        meter.borrow_mut().set_bucket(PH_SELECTION);
         let polishing = work(n_evals, n_grads) >= polish_start;
         if polishing {
             // Multi-start elite polish: L-BFGS when grad is available (dual
@@ -1070,6 +1215,7 @@ where
             if let Some(gr) = grad
                 && prepare.is_none()
             {
+                meter.borrow_mut().set_bucket(PH_ALLOC);
                 let mut elites: Vec<(Array1<f64>, f64)> = pop
                     .walkers
                     .iter()
@@ -1078,6 +1224,7 @@ where
                 elites.push((best_pos.clone(), best_val));
                 elites.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
                 elites.dedup_by(|a, b| (a.1 - b.1).abs() < 1e-14);
+                meter.borrow_mut().set_bucket(PH_SELECTION);
                 gradient_polish_waves(
                     obj,
                     gr,
@@ -1092,6 +1239,7 @@ where
                     budget,
                     dim,
                     e_span,
+                    &meter,
                 );
                 break;
             }
@@ -1319,8 +1467,10 @@ where
         }
 
         // Population phase: propose (serial RNG) → batch-eval (rayon) → accept.
+        meter.borrow_mut().set_bucket(PH_ALLOC);
         let n_walkers = pop.walkers.len();
         let snapshot: Vec<Walker> = pop.walkers.clone();
+        meter.borrow_mut().set_bucket(PH_SELECTION);
         let mut order: Vec<usize> = (0..n_walkers).collect();
         order.sort_by(|&a, &b| {
             snapshot[a]
@@ -1350,8 +1500,10 @@ where
             cr_i: f64,
             u_accept: f64,
         }
+        meter.borrow_mut().set_bucket(PH_ALLOC);
         let mut metas = Vec::with_capacity(n_prop);
         let mut trial_mat = Array2::<f64>::zeros((n_prop, dim));
+        meter.borrow_mut().set_bucket(PH_SELECTION);
 
         for (pi, wi) in (0..n_prop).enumerate() {
             let w = &snapshot[wi];
@@ -1476,7 +1628,11 @@ where
         // - Native Sync: eindir default is serial; use Rayon via eval_batch
         //   override only where provided (see eval_batch_parallel for explicit
         //   native fan-out at other call sites).
+        meter.borrow_mut().pause();
+        let batch_started = Instant::now();
         let energies = obj.eval_batch(trial_mat.view());
+        let batch_ns = batch_started.elapsed().as_nanos();
+        meter.borrow_mut().resume_pes(batch_ns);
         n_evals += energies.len();
 
         for (pi, meta) in metas.into_iter().enumerate() {
@@ -1606,6 +1762,7 @@ where
                 let width = order_w.len().clamp(1, 32);
                 let each = (per / width).max(4);
                 let step0 = (default_sigma(&bounds) * 0.5).max(1e-4);
+                meter.borrow_mut().set_bucket(PH_ALLOC);
                 let mut plan = Vec::new();
                 let mut shadow = work(n_evals, n_grads);
                 for &wi in order_w.iter().take(width) {
@@ -1620,17 +1777,25 @@ where
                     ));
                     shadow = shadow.saturating_add(each.saturating_mul(2));
                 }
+                let threads = rayon::current_num_threads().max(1);
+                meter.borrow_mut().pause();
+                let polish_started = Instant::now();
                 let polished: Vec<_> = plan
                     .par_iter()
                     .map(|(wi, x0, f0, max_fe)| {
-                        (
-                            *wi,
-                            *f0,
-                            projected_gradient_polish(obj, gr, x0.clone(), *max_fe, step0, 1e-10),
-                        )
+                        let task_started = Instant::now();
+                        let pol =
+                            projected_gradient_polish(obj, gr, x0.clone(), *max_fe, step0, 1e-10);
+                        (*wi, *f0, pol, task_started.elapsed())
                     })
                     .collect();
-                for (wi, f0, pol) in polished {
+                let polish_wall = polish_started.elapsed();
+                let polish_busy = polished.iter().map(|(_, _, _, busy)| *busy).sum();
+                meter
+                    .borrow_mut()
+                    .resume_parallel(polish_wall, polish_busy, threads, false);
+                meter.borrow_mut().set_bucket(PH_SELECTION);
+                for (wi, f0, pol, _) in polished {
                     let room = budget.saturating_sub(work(n_evals, n_grads));
                     let charge = (pol.n_evals + pol.n_grads).min(room);
                     let ce = pol.n_evals.min(charge);
@@ -1753,6 +1918,13 @@ where
         }
     }
 
+    let (phases, polish_sync_s, wave_sync_s) = {
+        let mut guard = meter.borrow_mut();
+        let phases = guard.snapshot();
+        let polish_sync_s = guard.polish_sync_s();
+        let wave_sync_s = guard.wave_sync_s();
+        (phases, polish_sync_s, wave_sync_s)
+    };
     DmcPopulationResult {
         best_pos,
         best_val,
@@ -1761,6 +1933,9 @@ where
         final_population: pop.walkers.len(),
         controls,
         n_accepts,
+        phases,
+        polish_sync_s,
+        wave_sync_s,
     }
 }
 

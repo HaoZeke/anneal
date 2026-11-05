@@ -32,6 +32,12 @@ def quantile_type7(values: list[float], probability: float) -> float:
     return left + fraction * (ordered[lower] - left)
 
 
+def karp_flatt(speedup: float, workers: int) -> float | None:
+    if workers <= 1 or speedup <= 0.0:
+        return None
+    return (1.0 / speedup - 1.0 / workers) / (1.0 - 1.0 / workers)
+
+
 def check_type7() -> None:
     sample = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
     if quantile_type7(sample, 0.25) != 2.25:
@@ -157,7 +163,7 @@ def main() -> int:
     ) -> tuple[str, str, str]:
         grouped = grouped_of(selected)
         summary_lines = [
-            "method,workers,n,median_wall_s,q1_wall_s,q3_wall_s,iqr_wall_s,speedup,parallel_efficiency"
+            "method,workers,n,median_wall_s,q1_wall_s,q3_wall_s,iqr_wall_s,speedup,parallel_efficiency,karp_flatt"
         ]
         long_lines = ["method,workers,repeat,wall_s"]
         for fields in selected:
@@ -177,13 +183,16 @@ def main() -> int:
                 iqr = q3 - q1
                 speedup = base_median / median
                 efficiency = speedup / workers
+                fraction = karp_flatt(speedup, workers)
+                fraction_csv = "" if fraction is None else f"{fraction:.9f}"
+                fraction_md = "n/a" if fraction is None else f"{fraction:.6f}"
                 summary_lines.append(
                     f"{method},{workers},{len(times)},{median:.9f},{q1:.9f},{q3:.9f},"
-                    f"{iqr:.9f},{speedup:.6f},{efficiency:.6f}"
+                    f"{iqr:.9f},{speedup:.6f},{efficiency:.6f},{fraction_csv}"
                 )
                 body.append(
                     f"| {method} | {workers} | {len(times)} | {median:.6f} | {q1:.6f} | "
-                    f"{q3:.6f} | {iqr:.6f} | {speedup:.4f} | {efficiency:.4f} |"
+                    f"{q3:.6f} | {iqr:.6f} | {speedup:.4f} | {efficiency:.4f} | {fraction_md} |"
                 )
         cpu = anchor["cpu_model"]
         logical = anchor["logical_cpus"]
@@ -203,13 +212,14 @@ def main() -> int:
                 f"diffusion Monte Carlo budget {anchor['dmc_budget']}."
             ),
             *intro,
-            "Six repeats.",
-            "The quartile is Hyndman-Fan type 7.",
-            "Speedup and parallel efficiency use the median wall time against one worker.",
-            "This is a scaling table.",
+            "Six repeats sit behind each row.",
+            "Hyndman-Fan type 7 supplies the median and the quartile gap.",
+            "Speedup divides the one-worker median by the row median.",
+            "Parallel efficiency divides that speedup by the worker count.",
+            "The Karp-Flatt column is the serial fraction from those unrounded medians.",
             "",
-            "| method | workers | n | median wall s | Q1 | Q3 | IQR | speedup | efficiency |",
-            "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "| method | workers | n | median wall s | Q1 | Q3 | quartile gap | speedup | efficiency | Karp-Flatt |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
         text = "\n".join(header + body) + "\n"
         return "\n".join(summary_lines) + "\n", "\n".join(long_lines) + "\n", text
@@ -254,7 +264,99 @@ def main() -> int:
         (out_dir / "oversubscribe.md").write_text(extra_text, encoding="utf-8")
         (out_dir / "oversubscribe_long.csv").write_text(extra_long, encoding="utf-8")
         print("wrote oversubscribe.md")
+    write_dmc_phases(rows, cap, out_dir)
     return 0
+
+
+def write_dmc_phases(rows: list[dict[str, str]], cap: int, out_dir: Path) -> None:
+    phase_keys = ["setup_s", "selection_s", "pes_s", "sync_s", "alloc_s"]
+    detail_keys = ["sync_batch_s", "sync_polish_s", "sync_wave_s"]
+    dmc = [fields for fields in rows if fields.get("method") == "dmc_population"]
+    if not dmc:
+        print("no diffusion rows", file=sys.stderr)
+        raise SystemExit(1)
+    logical = int(dmc[0]["logical_cpus"])
+    physical = int(dmc[0].get("physical_cpus", str(cap)))
+    for fields in dmc:
+        for key in phase_keys + detail_keys + [
+            "phase_sum_s",
+            "thread_order",
+            "affinity_cpus",
+            "cpu_mhz_before",
+            "cpu_mhz_after",
+        ]:
+            if key not in fields:
+                print(f"missing {key}", file=sys.stderr)
+                raise SystemExit(1)
+        if "(R)" in " ".join(fields.values()) or "(TM)" in " ".join(fields.values()):
+            print("trademark mark in a raw log", file=sys.stderr)
+            raise SystemExit(1)
+        wall = float(fields["wall_s"])
+        total = sum(float(fields[key]) for key in phase_keys)
+        if abs(total - wall) > 1e-6 or abs(float(fields["phase_sum_s"]) - wall) > 1e-6:
+            print("phase walls do not sum to the run wall", file=sys.stderr)
+            raise SystemExit(1)
+        if fields["thread_order"] != "round-robin":
+            print("thread order is not round-robin", file=sys.stderr)
+            raise SystemExit(1)
+        for label in ("cpu_mhz_before", "cpu_mhz_after"):
+            samples = [part for part in fields[label].split(",") if part]
+            if len(samples) != logical:
+                print(f"{label} does not cover every logical CPU", file=sys.stderr)
+                raise SystemExit(1)
+        workers = int(fields["workers"])
+        cpus = [int(part) for part in fields["affinity_cpus"].split(",") if part]
+        if len(cpus) != workers:
+            print("affinity list length mismatch", file=sys.stderr)
+            raise SystemExit(1)
+        expected = [index % physical for index in range(workers)]
+        if cpus != expected:
+            print(f"affinity {cpus} != {expected}", file=sys.stderr)
+            raise SystemExit(1)
+    grouped: dict[int, list[dict[str, str]]] = {}
+    for fields in dmc:
+        workers = int(fields["workers"])
+        if workers <= cap:
+            grouped.setdefault(workers, []).append(fields)
+    lines = [
+        "workers,n,median_wall_s,median_setup_s,median_selection_s,median_pes_s,median_sync_s,median_alloc_s,median_sync_batch_s,median_sync_polish_s,median_sync_wave_s"
+    ]
+    body = [
+        "# Diffusion phase walls",
+        "",
+        "Each column is a Hyndman-Fan type 7 median of the raw phase walls.",
+        "Setup, selection, potential-energy calls, synchronization, and allocation sum to the run wall.",
+        "Batch, polish, and wave synchronization are the three parts inside the synchronization column.",
+        "Round-robin pins place pool thread i on physical CPU i modulo the physical core count.",
+        "Rows above the physical core count stay out of this table.",
+        "",
+        "| workers | n | wall s | setup s | selection s | potential s | sync s | allocation s | batch sync s | polish sync s | wave sync s |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for workers in sorted(grouped):
+        sample = grouped[workers]
+        if len(sample) < 6:
+            print("fewer than 6 diffusion repeats", file=sys.stderr)
+            raise SystemExit(1)
+        medians = {
+            key: quantile_type7([float(item[key]) for item in sample], 0.5)
+            for key in ["wall_s", *phase_keys, *detail_keys]
+        }
+        lines.append(
+            f"{workers},{len(sample)},{medians['wall_s']:.9f},{medians['setup_s']:.9f},"
+            f"{medians['selection_s']:.9f},{medians['pes_s']:.9f},{medians['sync_s']:.9f},"
+            f"{medians['alloc_s']:.9f},{medians['sync_batch_s']:.9f},"
+            f"{medians['sync_polish_s']:.9f},{medians['sync_wave_s']:.9f}"
+        )
+        body.append(
+            f"| {workers} | {len(sample)} | {medians['wall_s']:.6f} | {medians['setup_s']:.6f} | "
+            f"{medians['selection_s']:.6f} | {medians['pes_s']:.6f} | {medians['sync_s']:.6f} | "
+            f"{medians['alloc_s']:.6f} | {medians['sync_batch_s']:.6f} | "
+            f"{medians['sync_polish_s']:.6f} | {medians['sync_wave_s']:.6f} |"
+        )
+    (out_dir / "dmc_phases.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (out_dir / "dmc_phases.md").write_text("\n".join(body) + "\n", encoding="utf-8")
+    print("wrote dmc_phases.md")
 
 
 if __name__ == "__main__":

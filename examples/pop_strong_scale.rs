@@ -7,20 +7,21 @@
 
 use std::env;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use anneal_core::methods::dmc_population::{
-    run_dmc_population, DEFAULT_BETA0, DEFAULT_STEPS_PER_CONTROL,
+    DEFAULT_BETA0, DEFAULT_STEPS_PER_CONTROL, DmcPhaseSeconds, run_dmc_population,
 };
 use anneal_core::methods::population_annealing::{
-    population_anneal_threads, population_halving_threads, PopulationAnneal,
+    PopulationAnneal, population_anneal_threads, population_halving_threads,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use eindir_core::{Bounds, Gradient, Objective};
 use ndarray::{Array1, ArrayView1, ArrayView2};
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 /// Lennard-Jones atoms. Fixed for every worker count.
 const ATOMS: usize = 98;
@@ -38,6 +39,8 @@ const DMC_BUDGET: usize = 20000;
 /// search schedules one wave of elite passes and merges them in order.
 struct BatchPotential {
     pot: PairPotential,
+    pes_busy_ns: AtomicU64,
+    batch_wall_ns: AtomicU64,
 }
 
 impl Objective<f64> for BatchPotential {
@@ -54,12 +57,42 @@ impl Objective<f64> for BatchPotential {
     }
 
     fn eval_batch(&self, x: ArrayView2<f64>) -> Array1<f64> {
-        let mut out = vec![0.0; x.nrows()];
-        use rayon::prelude::*;
-        out.par_iter_mut().enumerate().for_each(|(i, slot)| {
-            *slot = self.pot.eval(x.row(i));
+        let nrows = x.nrows();
+        if nrows == 0 {
+            return Array1::zeros(0);
+        }
+        // Deal rows round-robin. Thread t owns rows t, t + width, t + 2 width.
+        let width = rayon::current_num_threads().max(1).min(nrows);
+        let slots: Vec<AtomicU64> = (0..nrows).map(|_| AtomicU64::new(0)).collect();
+        let busy: Vec<AtomicU64> = (0..width).map(|_| AtomicU64::new(0)).collect();
+        let started = Instant::now();
+        rayon::scope(|scope| {
+            for thread in 0..width {
+                let slots = &slots;
+                let busy_thread = &busy[thread];
+                scope.spawn(move |_| {
+                    let mut local = 0u128;
+                    let mut row = thread;
+                    while row < nrows {
+                        let task = Instant::now();
+                        let value = self.pot.eval(x.row(row));
+                        local = local.saturating_add(task.elapsed().as_nanos());
+                        slots[row].store(value.to_bits(), Ordering::Relaxed);
+                        row += width;
+                    }
+                    busy_thread.store(local as u64, Ordering::Relaxed);
+                });
+            }
         });
-        Array1::from(out)
+        let wall_ns = started.elapsed().as_nanos() as u64;
+        let busy_ns: u64 = busy.iter().map(|item| item.load(Ordering::Relaxed)).sum();
+        self.batch_wall_ns.fetch_add(wall_ns, Ordering::Relaxed);
+        self.pes_busy_ns.fetch_add(busy_ns, Ordering::Relaxed);
+        let values: Vec<f64> = slots
+            .into_iter()
+            .map(|slot| f64::from_bits(slot.into_inner()))
+            .collect();
+        Array1::from(values)
     }
 }
 
@@ -233,14 +266,138 @@ fn run_halving(workers: usize, seed: u64, atoms: usize, walkers: usize, generati
     }
 }
 
-fn run_dmc(workers: usize, seed: u64, atoms: usize, walkers: usize, budget: usize) -> Run {
+struct DmcMeta {
+    phases: DmcPhaseSeconds,
+    wall_s: f64,
+    thread_order: String,
+    affinity_cpus: String,
+    polish_sync_s: f64,
+    wave_sync_s: f64,
+    batch_sync_s: f64,
+}
+
+fn pin_cpu(cpu: usize) -> bool {
+    if cpu >= 1024 {
+        return false;
+    }
+    let mut set = [0u8; 128];
+    set[cpu / 8] |= 1u8 << (cpu % 8);
+    let rc: i64;
+    unsafe {
+        std::arch::asm!(
+            "syscall",
+            in("rax") 203i64,
+            in("rdi") 0i64,
+            in("rsi") set.len(),
+            in("rdx") set.as_ptr(),
+            lateout("rax") rc,
+            lateout("rcx") _,
+            lateout("r11") _,
+        );
+    }
+    rc == 0
+}
+
+fn current_tid() -> i64 {
+    let tid: i64;
+    unsafe {
+        std::arch::asm!(
+            "syscall",
+            in("rax") 186i64,
+            lateout("rax") tid,
+            lateout("rcx") _,
+            lateout("r11") _,
+        );
+    }
+    tid
+}
+
+fn cpus_allowed_list() -> String {
+    let path = format!("/proc/self/task/{}/status", current_tid());
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("Cpus_allowed_list:") {
+            return rest.trim().to_string();
+        }
+    }
+    "unknown".to_string()
+}
+
+fn fold_phases(
+    mut phases: DmcPhaseSeconds,
+    elapsed: f64,
+    batch_wall_ns: u64,
+    batch_busy_ns: u64,
+    threads: usize,
+) -> DmcPhaseSeconds {
+    let batch_wall = batch_wall_ns as f64 / 1.0e9;
+    let batch_busy = batch_busy_ns as f64 / 1.0e9;
+    let width = threads.max(1) as f64;
+    let batch_pes = (batch_busy / width).min(batch_wall);
+    let batch_sync = (batch_wall - batch_pes).max(0.0);
+    phases.pes_s = (phases.pes_s - batch_sync).max(0.0);
+    phases.sync_s += batch_sync;
+    let mut over = phases.total_s() - elapsed;
+    if over <= 0.0 {
+        phases.setup_s += -over;
+        return phases;
+    }
+    for part in [
+        &mut phases.pes_s,
+        &mut phases.selection_s,
+        &mut phases.sync_s,
+        &mut phases.alloc_s,
+        &mut phases.setup_s,
+    ] {
+        let take = over.min(*part);
+        *part -= take;
+        over -= take;
+    }
+    phases
+}
+
+fn run_dmc(
+    workers: usize,
+    seed: u64,
+    atoms: usize,
+    walkers: usize,
+    budget: usize,
+) -> (Run, DmcMeta) {
+    let workers = workers.max(1);
+    let physical = physical_cpus().max(1);
+    let started = Instant::now();
     let pot = PairPotential::lennard_jones(atoms);
     let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(workers.max(1))
+        .num_threads(workers)
+        .start_handler(move |index| {
+            let cpu = index % physical;
+            if !pin_cpu(cpu) {
+                panic!("failed to pin worker {index} to cpu {cpu}");
+            }
+        })
         .build()
         .expect("thread pool");
+    let pins = pool.broadcast(|ctx| (ctx.index(), cpus_allowed_list()));
+    let mut pins = pins;
+    pins.sort_by_key(|(index, _)| *index);
+    let pinned = pins.len() == workers
+        && pins
+            .iter()
+            .all(|(index, allowed)| allowed == &(index % physical).to_string());
+    if !pinned {
+        panic!("round-robin affinity missing: {pins:?}");
+    }
+    let affinity_cpus = pins
+        .iter()
+        .map(|(_, allowed)| allowed.clone())
+        .collect::<Vec<_>>()
+        .join(",");
+    let obj = BatchPotential {
+        pot,
+        pes_busy_ns: AtomicU64::new(0),
+        batch_wall_ns: AtomicU64::new(0),
+    };
     let report = pool.install(|| {
-        let obj = BatchPotential { pot };
         let mut rng = StdRng::seed_from_u64(seed);
         run_dmc_population(
             &obj,
@@ -253,7 +410,21 @@ fn run_dmc(workers: usize, seed: u64, atoms: usize, walkers: usize, budget: usiz
             &mut rng,
         )
     });
-    Run {
+    let elapsed = started.elapsed().as_secs_f64();
+    let batch_wall_ns = obj.batch_wall_ns.load(Ordering::Relaxed);
+    let batch_busy_ns = obj.pes_busy_ns.load(Ordering::Relaxed);
+    let batch_wall = batch_wall_ns as f64 / 1.0e9;
+    let batch_busy = batch_busy_ns as f64 / 1.0e9;
+    let batch_pes = (batch_busy / workers.max(1) as f64).min(batch_wall);
+    let batch_sync_s = (batch_wall - batch_pes).max(0.0);
+    let phases = fold_phases(
+        report.phases,
+        elapsed,
+        batch_wall_ns,
+        batch_busy_ns,
+        workers,
+    );
+    let run = Run {
         best_energy: report.best_val,
         evaluations: report.n_evals.saturating_add(report.n_grads),
         decisions: report.controls,
@@ -261,7 +432,19 @@ fn run_dmc(workers: usize, seed: u64, atoms: usize, walkers: usize, budget: usiz
         n_grads: report.n_grads,
         n_accepts: report.n_accepts,
         position_fnv: position_fnv(&report.best_pos),
-    }
+    };
+    (
+        run,
+        DmcMeta {
+            phases,
+            wall_s: elapsed,
+            thread_order: "round-robin".to_string(),
+            affinity_cpus,
+            polish_sync_s: report.polish_sync_s,
+            wave_sync_s: report.wave_sync_s,
+            batch_sync_s,
+        },
+    )
 }
 
 fn probe(atoms: usize, quench_steps: usize) {
@@ -305,7 +488,7 @@ fn check() -> ExitCode {
         eprintln!("successive halving diverged across thread counts");
         return ExitCode::from(1);
     }
-    let diffusion = |workers: usize| run_dmc(workers, 9, 8, 8, 200);
+    let diffusion = |workers: usize| run_dmc(workers, 9, 8, 8, 200).0;
     let left = diffusion(1);
     let right = diffusion(4);
     if left.best_energy.to_bits() != right.best_energy.to_bits()
@@ -329,7 +512,7 @@ fn prove() -> ExitCode {
     println!("prove_problem: lennard_jones atoms {ATOMS} walkers {WALKERS} budget {DMC_BUDGET}");
     println!("prove_workers: 1 2 4 8");
     for seed in 0..6u64 {
-        let serial = run_dmc(1, seed, ATOMS, WALKERS, DMC_BUDGET);
+        let serial = run_dmc(1, seed, ATOMS, WALKERS, DMC_BUDGET).0;
         println!(
             "seed {seed} workers 1 energy_bits {} evals {} grads {} accepts {} controls {} pos {position:016x}",
             serial.best_energy.to_bits(),
@@ -340,7 +523,7 @@ fn prove() -> ExitCode {
             position = serial.position_fnv,
         );
         for threads in workers.iter().copied().skip(1) {
-            let parallel = run_dmc(threads, seed, ATOMS, WALKERS, DMC_BUDGET);
+            let parallel = run_dmc(threads, seed, ATOMS, WALKERS, DMC_BUDGET).0;
             let same = serial.best_energy.to_bits() == parallel.best_energy.to_bits()
                 && serial.n_evals == parallel.n_evals
                 && serial.n_grads == parallel.n_grads
@@ -364,6 +547,24 @@ fn prove() -> ExitCode {
     }
     println!("prove: ok");
     ExitCode::SUCCESS
+}
+
+fn cpu_mhz_list() -> String {
+    let text = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+    let mut values = Vec::new();
+    for line in text.lines() {
+        let Some(rest) = line.strip_prefix("cpu MHz") else {
+            continue;
+        };
+        let value = rest
+            .split_once(':')
+            .map(|(_, item)| item.trim())
+            .unwrap_or("");
+        if !value.is_empty() {
+            values.push(value.replace("(R)", "").replace("(TM)", ""));
+        }
+    }
+    values.join(",")
 }
 
 fn main() -> ExitCode {
@@ -419,19 +620,29 @@ fn main() -> ExitCode {
         Err(code) => return code,
     };
     let seed = repeat as u64;
+    let mhz_before = cpu_mhz_list();
     let start = Instant::now();
+    let mut dmc_meta = None;
     let run = match method.as_str() {
         "population_annealing" => {
             run_population(workers, seed, atoms, walkers, generations, quench_steps)
         }
-        "dmc_population" => run_dmc(workers, seed, atoms, walkers, budget),
+        "dmc_population" => {
+            let (run, meta) = run_dmc(workers, seed, atoms, walkers, budget);
+            dmc_meta = Some(meta);
+            run
+        }
         "successive_halving" => run_halving(workers, seed, atoms, walkers, generations),
         _ => {
             eprintln!("unknown method {method}");
             return ExitCode::from(2);
         }
     };
-    let wall_s = start.elapsed().as_secs_f64();
+    let wall_s = dmc_meta
+        .as_ref()
+        .map(|meta| meta.wall_s)
+        .unwrap_or_else(|| start.elapsed().as_secs_f64());
+    let mhz_after = cpu_mhz_list();
     let best = std::hint::black_box(run.best_energy);
     println!("method: {method}");
     println!("scaling: strong");
@@ -457,5 +668,21 @@ fn main() -> ExitCode {
     println!("physical_cpus: {}", physical_cpus());
     println!("memory_kib: {}", memory_kib());
     println!("gpu: {}", gpu_name());
+    println!("cpu_mhz_before: {mhz_before}");
+    println!("cpu_mhz_after: {mhz_after}");
+    if let Some(meta) = dmc_meta {
+        let phases = meta.phases;
+        println!("setup_s: {:.9}", phases.setup_s);
+        println!("selection_s: {:.9}", phases.selection_s);
+        println!("pes_s: {:.9}", phases.pes_s);
+        println!("sync_s: {:.9}", phases.sync_s);
+        println!("alloc_s: {:.9}", phases.alloc_s);
+        println!("phase_sum_s: {:.9}", phases.total_s());
+        println!("thread_order: {}", meta.thread_order);
+        println!("affinity_cpus: {}", meta.affinity_cpus);
+        println!("sync_batch_s: {:.9}", meta.batch_sync_s);
+        println!("sync_polish_s: {:.9}", meta.polish_sync_s);
+        println!("sync_wave_s: {:.9}", meta.wave_sync_s);
+    }
     ExitCode::SUCCESS
 }
