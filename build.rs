@@ -146,10 +146,10 @@ print("1" if on(shared) or on(pyframework) else "0")
 }
 
 fn python_interpreter() -> String {
-    if let Ok(python) = std::env::var("PYO3_PYTHON") {
-        if !python.is_empty() {
-            return python;
-        }
+    if let Ok(python) = std::env::var("PYO3_PYTHON")
+        && !python.is_empty()
+    {
+        return python;
     }
     for candidate in ["python3", "python"] {
         let found = std::process::Command::new(candidate)
