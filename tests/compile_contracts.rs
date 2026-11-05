@@ -40,11 +40,7 @@ fn checked_rejects_uncertified_component_combinations() {
     expect_compile_fail(
         &facts,
         "tests/ui/hop_stop_needs_a_wildcard_arm.rs",
-        &[
-            "error[E0004]",
-            "non-exhaustive patterns",
-            "HopStop",
-        ],
+        &["error[E0004]", "non-exhaustive patterns", "HopStop"],
     );
 }
 
@@ -88,7 +84,9 @@ fn probe_facts() -> ProbeFacts {
 
 fn dependency(metadata: &str, name: &str) -> (String, Vec<String>) {
     let marker = format!("\"name\":\"{name}\"");
-    let start = metadata.find(&marker).unwrap_or_else(|| panic!("missing {name}"));
+    let start = metadata
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing {name}"));
     let rest = &metadata[start..];
     let end = rest.find("},{\"name\"").unwrap_or(rest.len());
     let object = &rest[..end];
