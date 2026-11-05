@@ -1,196 +1,346 @@
-//! One seed of the ABCluster head-to-head, on the default or the dual-core arm.
+//! One arm-3 seed for the ABCluster head-to-head.
 //!
-//! ```text
-//! h2h_arm3 <system> <default|arm3> <budget> <seed>
-//! ```
+//! `h2h_arm3 <system> <budget> <seed>`
 //!
-//! `system` is one of `lj38 lj55 lj75 lj98 m55r6 m55r14 m80r6 m80r14 w6 w10
-//! w15 w20`. Atomic clusters run [`Config::for_cluster`], or
-//! [`Config::for_cluster_dual_core`] on `arm3`, from `random_cluster` at
-//! density 0.7. Morse then scales the minimum separation and the container
-//! by `r_min / 2^(1/6)`, as `cluster_bench` does. Water runs
-//! [`Config::for_tip4p`] on both arms: a rigid-body chain has no orbit
-//! completion, so the two arms are one configuration there.
-//!
-//! The ledger stops at the first recorded minimum below the reference plus
-//! the tolerance. `first_calls` is the charged count at that record, read on
-//! the first closure entry or charge after it, or the final count when the
-//! driver returns first. `first_relax` counts the relaxation calls before
-//! it and `first_hops` is the hop counter on the improvement record, when the
-//! trace holds one (an orbit completion records without it). `relaxations`
-//! counts every call of the relaxation closure, screens included. One
-//! `system=` line is printed per run.
+//! Systems: lj38 lj55 lj75 lj98 m55r6 m55r14 m80r6 m80r14 w6 w10 w15 w20.
+//! The start is the driver's random cluster. The reference only scores a hit.
+//! The atomic systems run [`Config::for_cluster`] with orbit completion on
+//! every new basin from both cores; water runs [`Config::for_tip4p`].
 
+use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, Outcome, random_cluster, run_with_gradient,
+    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, OrbitCore,
+    random_cluster, run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
-use anneal_core::potentials::{PairKind, PairPotential, Tip4pCluster, random_tip4p_cluster};
-use ndarray::{Array1, ArrayView1};
+use anneal_core::potentials::{
+    PairPotential, Tip4pCluster, random_tip4p_cluster, wales_hodges_minimum,
+};
+use anneal_core::symmetrise::ShellCore;
+use ndarray::ArrayView1;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-#[derive(Clone, Copy)]
+struct Spec {
+    name: &'static str,
+    kind: Kind,
+    n: usize,
+    reference: f64,
+    tol: f64,
+}
+
 enum Kind {
     Lj,
     Morse(f64),
-    Water,
+    Tip4p,
 }
 
-/// Size, potential, reference and hit tolerance. LJ98 is the Leary Td
-/// global minimum; the Deaven icosahedral minimum -543.642957 is above it.
-fn system(name: &str) -> Option<(usize, Kind, f64, f64)> {
-    Some(match name {
-        "lj38" => (38, Kind::Lj, -173.928427, 0.001),
-        "lj55" => (55, Kind::Lj, -279.248470, 0.001),
-        "lj75" => (75, Kind::Lj, -397.492331, 0.001),
-        "lj98" => (98, Kind::Lj, -543.665361, 0.001),
-        "m55r6" => (55, Kind::Morse(6.0), -250.286609, 0.001),
-        "m55r14" => (55, Kind::Morse(14.0), -220.646208, 0.001),
-        "m80r6" => (80, Kind::Morse(6.0), -378.333471, 0.001),
-        "m80r14" => (80, Kind::Morse(14.0), -340.811371, 0.001),
-        "w6" => (6, Kind::Water, -197.78, 0.01),
-        "w10" => (10, Kind::Water, -391.02, 0.01),
-        "w15" => (15, Kind::Water, -628.37225, 0.01),
-        "w20" => (20, Kind::Water, -872.99, 0.01),
-        _ => return None,
-    })
+fn spec(name: &str) -> Spec {
+    match name {
+        "lj38" => lj(38, -173.928427),
+        "lj55" => lj(55, -279.248470),
+        "lj75" => lj(75, -397.492331),
+        // Cambridge/Doye table. The crate constant -543.665361 is below it.
+        "lj98" => lj(98, -543.642957),
+        "m55r6" => morse("m55r6", 55, 6.0, -250.286609),
+        "m55r14" => morse("m55r14", 55, 14.0, -220.646208),
+        "m80r6" => morse("m80r6", 80, 6.0, -378.333471),
+        "m80r14" => morse("m80r14", 80, 14.0, -340.811371),
+        "w6" => water(6),
+        "w10" => water(10),
+        "w15" => water(15),
+        "w20" => water(20),
+        other => panic!("unknown system {other}"),
+    }
+}
+
+fn lj(n: usize, reference: f64) -> Spec {
+    Spec {
+        name: match n {
+            38 => "lj38",
+            55 => "lj55",
+            75 => "lj75",
+            98 => "lj98",
+            _ => unreachable!(),
+        },
+        kind: Kind::Lj,
+        n,
+        reference,
+        tol: 1e-3,
+    }
+}
+
+fn morse(name: &'static str, n: usize, rho: f64, reference: f64) -> Spec {
+    Spec {
+        name,
+        kind: Kind::Morse(rho),
+        n,
+        reference,
+        tol: 1e-3,
+    }
+}
+
+fn water(n: usize) -> Spec {
+    let reference = match n {
+        6 => wales_hodges_minimum(6).unwrap(),
+        10 => wales_hodges_minimum(10).unwrap(),
+        15 => -628.37225,
+        20 => wales_hodges_minimum(20).unwrap(),
+        _ => panic!("no water reference for {n}"),
+    };
+    Spec {
+        name: match n {
+            6 => "w6",
+            10 => "w10",
+            15 => "w15",
+            20 => "w20",
+            _ => unreachable!(),
+        },
+        kind: Kind::Tip4p,
+        n,
+        reference,
+        tol: 0.01,
+    }
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let name = args.first().map(String::as_str).unwrap_or("lj38");
-    let arm = args.get(1).map(String::as_str).unwrap_or("default");
-    let budget: usize = args.get(2).and_then(|v| v.parse().ok()).expect("budget");
-    let seed: u64 = args.get(3).and_then(|v| v.parse().ok()).expect("seed");
-    let Some((n, kind, reference, tol)) = system(name) else {
-        eprintln!("unknown system {name}");
-        std::process::exit(2);
-    };
-    let dual = match arm {
-        "default" => false,
-        "arm3" => true,
-        _ => {
-            eprintln!("unknown arm {arm}; expected default or arm3");
-            std::process::exit(2);
-        }
-    };
-    let level = reference + tol;
+    let args: Vec<String> = std::env::args().collect();
+    let system = args.get(1).map(String::as_str).unwrap_or("lj38");
+    let budget: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(20_000);
+    let seed: u64 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(0);
+    let spec = spec(system);
+    let started = Instant::now();
+    match spec.kind {
+        Kind::Lj => atomic(
+            &spec,
+            PairPotential::lennard_jones(spec.n),
+            budget,
+            seed,
+            started,
+        ),
+        Kind::Morse(rho) => atomic(
+            &spec,
+            PairPotential::morse(spec.n, rho),
+            budget,
+            seed,
+            started,
+        ),
+        Kind::Tip4p => tip4p(&spec, budget, seed, started),
+    }
+}
 
-    type Energy = Box<dyn Fn(ArrayView1<f64>) -> (f64, Array1<f64>) + Send + Sync>;
-    let (cfg, start, energy): (Config, Array1<f64>, Energy) = match kind {
-        Kind::Water => {
-            let pot = Tip4pCluster::new(n);
-            let cfg = Config::for_tip4p(n);
-            let mut rng = StdRng::seed_from_u64(seed);
-            let start = random_tip4p_cluster(n, &mut rng);
-            (cfg, start, Box::new(move |x| pot.value_and_gradient(x)))
-        }
-        Kind::Lj | Kind::Morse(_) => {
-            let (pot, pair) = match kind {
-                Kind::Morse(rho) => (PairPotential::morse(n, rho), PairKind::Morse { rho }),
-                _ => (PairPotential::lennard_jones(n), PairKind::LennardJones),
-            };
-            let mut cfg = if dual {
-                Config::for_cluster_dual_core(n)
-            } else {
-                Config::for_cluster(n)
-            };
-            let scale = pair.r_min() / 2.0_f64.powf(1.0 / 6.0);
-            cfg.min_separation *= scale;
-            cfg.container *= scale;
-            let mut rng = StdRng::seed_from_u64(seed);
-            let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
-            (cfg, start, Box::new(move |x| pot.value_and_gradient(x)))
-        }
-    };
-    let water = matches!(kind, Kind::Water);
-    let folder = water.then(|| Tip4pCluster::new(n));
+struct Hit {
+    calls: usize,
+    hops: usize,
+}
 
+fn atomic(spec: &Spec, pot: PairPotential, budget: usize, seed: u64, started: Instant) {
+    let mut cfg = Config::for_cluster(spec.n);
+    cfg.orbit_complete_on_new = true;
+    cfg.orbit_core = OrbitCore::Both(ShellCore::scaled(cfg.length_scale));
+    let scale = pot.kind().r_min() / 2.0_f64.powf(1.0 / 6.0);
+    cfg.min_separation *= scale;
+    cfg.container *= scale;
+    let mut rng = StdRng::seed_from_u64(seed);
+    let start = random_cluster(spec.n, 0.7, cfg.min_separation, &mut rng);
     let mut ledger = Ledger::new(budget);
-    ledger.stop_below(level);
-    let mut optimiser = WarmLbfgs::default();
-    let mut relaxations = 0usize;
-    // Calls spent when the ledger first holds a record below the level,
-    // read on the next closure entry or charge after that record.
-    let first_seen = AtomicUsize::new(usize::MAX);
-    let first_relax = AtomicUsize::new(usize::MAX);
-    let mark = |led: &Ledger, relaxations: usize| {
-        if led.target_reached() && first_seen.load(Ordering::Relaxed) == usize::MAX {
-            first_seen.store(led.spent(), Ordering::Relaxed);
-            first_relax.store(relaxations, Ordering::Relaxed);
-        }
-    };
-    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
-        mark(led, relaxations);
-        relaxations += 1;
-        optimiser.forget();
-        let (value, mut relaxed, _) = optimiser.minimize(x, iterations, |v| {
-            mark(led, relaxations - 1);
+    let mut opt = WarmLbfgs::default();
+    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+        opt.forget();
+        let (f, xr, _) = opt.minimize(x, iters, |v| {
             if !led.charge() {
                 return None;
             }
-            Some(energy(v))
+            Some(pot.value_and_gradient(v))
         });
-        if let (Some(pot), Some(slice)) = (folder.as_ref(), relaxed.as_slice_mut()) {
-            pot.fold_rotations(slice);
-        }
-        (value, relaxed)
+        (f, xr)
     };
-    let mut grad = |led: &mut Ledger, v: ArrayView1<f64>| {
-        mark(led, usize::MAX);
+    let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<ndarray::Array1<f64>> {
         if !led.charge() {
             return None;
         }
-        Some(energy(v).1)
+        Some(pot.value_and_gradient(x).1)
     };
-    let mut rng = StdRng::seed_from_u64(seed);
-    let started = Instant::now();
-    let outcome: Outcome = run_with_gradient(
+    let mut bias = BasinBias::new(
+        ClusterFingerprint::of_config(&cfg, &start),
+        cfg.merge_radius,
+        cfg.bias_height,
+        cfg.bias_gamma,
+    );
+    let target = spec.reference + spec.tol;
+    let mut seen: Option<Hit> = None;
+    let mut checkpoint = |ck: ChainCheckpoint<'_>| {
+        if ck.best_energy() < target {
+            if seen.is_none() {
+                seen = Some(Hit {
+                    calls: ck.charged(),
+                    hops: ck.hops(),
+                });
+            }
+            CheckpointAction::Retire {
+                reason: "hit".into(),
+            }
+        } else {
+            CheckpointAction::Continue
+        }
+    };
+    let out = run_with_bias_at_checkpoints(
         &cfg,
         start.view(),
         &mut ledger,
         &mut relax,
         Some(&mut grad),
+        &mut bias,
         &mut rng,
+        1,
+        &mut checkpoint,
     )
     .expect("finite start");
-    let wall = started.elapsed().as_secs_f64();
+    let hit = earlier(seen, &out.improvements, target);
+    emit(
+        spec,
+        &cfg,
+        seed,
+        budget,
+        out.best,
+        hit,
+        ledger.spent(),
+        out.hops,
+        started,
+    );
+}
 
-    let best = outcome.best;
-    let hit = best < level;
-    let trace = outcome
-        .improvements
+fn tip4p(spec: &Spec, budget: usize, seed: u64, started: Instant) {
+    let n = spec.n;
+    let pot = Tip4pCluster::new(n);
+    let cfg = Config::for_tip4p(n);
+    let mut rng = StdRng::seed_from_u64(seed);
+    let start = random_tip4p_cluster(n, &mut rng);
+    let mut ledger = Ledger::new(budget);
+    let mut opt = WarmLbfgs::default();
+    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+        opt.forget();
+        let (f, mut xr, _) = opt.minimize(x, iters, |v| {
+            if !led.charge() {
+                return None;
+            }
+            Some(pot.value_and_gradient(v))
+        });
+        if let Some(slice) = xr.as_slice_mut() {
+            pot.fold_rotations(slice);
+        }
+        (f, xr)
+    };
+    let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<ndarray::Array1<f64>> {
+        if !led.charge() {
+            return None;
+        }
+        Some(pot.value_and_gradient(x).1)
+    };
+    let mut bias = BasinBias::new(
+        ClusterFingerprint::of_config(&cfg, &start),
+        cfg.merge_radius,
+        cfg.bias_height,
+        cfg.bias_gamma,
+    );
+    let target = spec.reference + spec.tol;
+    let mut seen: Option<Hit> = None;
+    let mut checkpoint = |ck: ChainCheckpoint<'_>| {
+        if ck.best_energy() < target {
+            if seen.is_none() {
+                seen = Some(Hit {
+                    calls: ck.charged(),
+                    hops: ck.hops(),
+                });
+            }
+            CheckpointAction::Retire {
+                reason: "hit".into(),
+            }
+        } else {
+            CheckpointAction::Continue
+        }
+    };
+    let mut out = run_with_bias_at_checkpoints(
+        &cfg,
+        start.view(),
+        &mut ledger,
+        &mut relax,
+        Some(&mut grad),
+        &mut bias,
+        &mut rng,
+        1,
+        &mut checkpoint,
+    )
+    .expect("finite start");
+    if let Some(state) = out.best_state.as_ref() {
+        out.best = pot.value_and_gradient(state.view()).0;
+    }
+    let hit = earlier(seen, &out.improvements, target);
+    emit(
+        spec,
+        &cfg,
+        seed,
+        budget,
+        out.best,
+        hit,
+        ledger.spent(),
+        out.hops,
+        started,
+    );
+}
+
+/// The improvement log is exact until it caps at 512 records. The checkpoint
+/// still sees a later crossing. Keep the earlier of the two.
+fn earlier(
+    seen: Option<Hit>,
+    improvements: &[(usize, usize, usize, f64)],
+    target: f64,
+) -> Option<Hit> {
+    let logged = improvements
         .iter()
-        .find(|(_, _, _, e)| *e < level)
-        .map(|(hops, _, _, _)| hops.to_string());
-    let seen = first_seen.load(Ordering::Relaxed);
-    let (first_calls, first_source) = match (hit, seen) {
-        (false, _) => ("-".to_string(), "-"),
-        (true, usize::MAX) => (outcome.charged.to_string(), "stop"),
-        (true, calls) => (calls.to_string(), "ledger"),
-    };
-    let first_hops = if hit {
-        trace.unwrap_or_else(|| "-".into())
-    } else {
-        "-".into()
-    };
-    let first_relax = match (hit, first_relax.load(Ordering::Relaxed)) {
-        (true, usize::MAX) => relaxations.to_string(),
-        (true, count) => count.to_string(),
-        (false, _) => "-".into(),
-    };
+        .find(|(_, _, _, e)| *e < target)
+        .map(|(hops, calls, _, _)| Hit {
+            calls: *calls,
+            hops: *hops,
+        });
+    match (seen, logged) {
+        (Some(a), Some(b)) => Some(if a.calls <= b.calls { a } else { b }),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
+fn emit(
+    spec: &Spec,
+    cfg: &Config,
+    seed: u64,
+    budget: usize,
+    best: f64,
+    hit: Option<Hit>,
+    charged: usize,
+    hops: usize,
+    started: Instant,
+) {
     println!(
-        "system={name} code=anneal arm={arm} seed={seed} budget={budget} hit={} best={best:.8} \
-         first_calls={first_calls} first_hops={first_hops} first_relax={first_relax} \
-         first_source={first_source} charged={} hops={} relaxations={} reference={reference:.6} tol={tol} wall_s={wall:.3} \
-         config_sha256={}",
-        u8::from(hit),
-        outcome.charged,
-        outcome.hops,
-        relaxations,
-        cfg.resolved_sha256().unwrap_or_else(|_| "unset".into()),
+        "system={system} seed={seed} budget={budget} reference={reference:.8} tol={tol} \
+         best={best:.8} hit={hit} first_calls={fc} first_hops={fh} charged={charged} \
+         hops={hops} wall_s={wall:.3} config_sha256={digest}",
+        system = spec.name,
+        reference = spec.reference,
+        tol = spec.tol,
+        best = best,
+        hit = usize::from(hit.is_some()),
+        fc = hit
+            .as_ref()
+            .map(|h| h.calls.to_string())
+            .unwrap_or_else(|| "-".into()),
+        fh = hit
+            .as_ref()
+            .map(|h| h.hops.to_string())
+            .unwrap_or_else(|| "-".into()),
+        wall = started.elapsed().as_secs_f64(),
+        digest = cfg.resolved_sha256().expect("the configuration serialises"),
     );
 }
