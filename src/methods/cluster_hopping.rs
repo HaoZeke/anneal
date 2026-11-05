@@ -456,6 +456,12 @@ impl QuenchBoundary {
     }
 }
 
+/// Encounter rows kept on a ledger and on [`Outcome::improvements`].
+///
+/// A run that improves past this is still descending. The tail row stays
+/// the incumbent, so a reference reached after the cap remains a hit.
+const IMPROVEMENT_CAP: usize = 512;
+
 /// A search stopped because no initial quench was finite.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SearchError {
@@ -549,6 +555,12 @@ pub struct Ledger {
     start_attempts: usize,
     /// Geometries drawn after a non-finite initial quench, in order.
     start_redraws: Vec<Array1<f64>>,
+    /// Charged count and energy each time [`Ledger::record`] lowered the incumbent.
+    ///
+    /// The count is [`Ledger::spent`] at that call. Capped at
+    /// [`IMPROVEMENT_CAP`] rows. The last row is the incumbent once the cap
+    /// is full.
+    encounters: Vec<(usize, f64)>,
 }
 
 struct DiagnosticQuench<'a> {
@@ -591,6 +603,7 @@ impl Ledger {
             stop: None,
             start_attempts: Self::DEFAULT_START_ATTEMPTS,
             start_redraws: Vec::new(),
+            encounters: Vec::new(),
         }
     }
 
@@ -748,10 +761,21 @@ impl Ledger {
     }
 
     /// Records a value and its state when it improves the incumbent.
+    ///
+    /// A new incumbent is an encounter. Auxiliary quenches call this and
+    /// do not otherwise name the improvement. The charged count is
+    /// [`Ledger::spent`] at this call. The list holds at most 512 rows.
+    /// Once that cap is full, the last row stays the incumbent, so a
+    /// reference reached on a later sample remains.
     pub fn record(&mut self, value: f64, state: ArrayView1<f64>) {
         if value < self.best {
             self.best = value;
             self.best_state = Some(state.to_owned());
+            if self.encounters.len() < IMPROVEMENT_CAP {
+                self.encounters.push((self.spent, value));
+            } else if let Some(last) = self.encounters.last_mut() {
+                *last = (self.spent, value);
+            }
         }
     }
 
@@ -860,6 +884,13 @@ pub struct Outcome {
     pub soft_crossed: usize,
     /// Hop, charged evaluations spent, basin count and value at each new
     /// global best.
+    ///
+    /// Every [`Ledger::record`] that lowers the incumbent is a row,
+    /// including an auxiliary quench the search loop does not push. The
+    /// charged count is [`Ledger::spent`] at that record. Hop and basin
+    /// count come from the loop's own push when it named the same energy,
+    /// and are zero otherwise. Once 512 rows are stored, the last row
+    /// stays the incumbent.
     ///
     /// This is what a first-encounter time is computed from, and it is the
     /// statistic worth reporting. A success rate at a fixed budget is the same
@@ -1996,6 +2027,32 @@ fn finish_improving(
 
 /// Continuations [`finish_improving`] grants one relaxation.
 const FINISH_ROUNDS: usize = 8;
+
+/// Rows a first-encounter scorer reads, one per incumbent [`Ledger::record`] kept.
+///
+/// `pushed` carries the hop and basin count the search loop wrote beside a
+/// record it named. The charged count stays the one on the ledger, taken
+/// at the record. Orbit completion and the other auxiliary quenches call
+/// [`Ledger::record`] and do not push. Those incumbents are still rows.
+fn improvements_from_encounters(
+    pushed: &[(usize, usize, usize, f64)],
+    encounters: &[(usize, f64)],
+) -> Vec<(usize, usize, usize, f64)> {
+    let mut out = Vec::with_capacity(encounters.len());
+    for &(spent, energy) in encounters {
+        if out.len() == IMPROVEMENT_CAP {
+            break;
+        }
+        let noted = pushed
+            .iter()
+            .find(|(_, _, _, noted_energy)| *noted_energy == energy);
+        let (hop, basins) = noted
+            .map(|(hop, _, basins, _)| (*hop, *basins))
+            .unwrap_or((0, 0));
+        out.push((hop, spent, basins, energy));
+    }
+    out
+}
 
 /// A caller stop during the opening quench is not a refused potential.
 ///
@@ -6263,6 +6320,10 @@ where
     };
 
     let n_basins = bias.n_basins();
+    // The ledger is the list of incumbents. A push beside `Ledger::record`
+    // carries the hop and basin count. An auxiliary quench that only
+    // records still appears, with the charged count from the record.
+    let improvements = improvements_from_encounters(&improvements, &ledger.encounters);
     // Per-rung sampler diagnostics, with the active rung put back at its own
     // index so the report reads in ladder order.
     let hmc_diag: Vec<crate::hmc::hop::HopDiagnostics> = match hop {
@@ -7828,6 +7889,48 @@ mod tests {
             "record at {spent} is not earlier than the final spend {}",
             out.charged
         );
+    }
+
+    /// Five hundred and twelve earlier incumbents sit above the LJ104
+    /// reference. The next record is the reference. The cap keeps it, and
+    /// the board's strict window scores a hit.
+    #[test]
+    fn a_reference_after_the_improvement_cap_is_still_a_hit() {
+        let mut ledger = Ledger::new(600);
+        let state = Array1::zeros(3);
+        for i in 0..IMPROVEMENT_CAP {
+            assert!(ledger.charge());
+            ledger.record(-(i as f64), state.view());
+        }
+        assert!(ledger.charge());
+        ledger.record(LJ104_REFERENCE, state.view());
+        assert_eq!(ledger.best, LJ104_REFERENCE);
+        assert_eq!(ledger.encounters.len(), IMPROVEMENT_CAP);
+        assert_eq!(ledger.encounters[0].1, 0.0);
+        assert!(ledger.encounters[0].1 > LJ104_REFERENCE + BOARD_HIT);
+        assert_eq!(
+            ledger.encounters.last().copied().unwrap().1,
+            LJ104_REFERENCE
+        );
+        let improvements = improvements_from_encounters(&[], &ledger.encounters);
+        let out = Outcome {
+            best: ledger.best,
+            charged: ledger.spent(),
+            improvements,
+            ..Outcome::default()
+        };
+        let encounter = crate::methods::cluster_search::first_encounter(
+            &out,
+            LJ104_REFERENCE,
+            BOARD_HIT,
+            ledger.spent(),
+        );
+        assert!(
+            encounter.found(),
+            "cap dropped the reference: {:?}",
+            out.improvements.last()
+        );
+        assert_eq!(encounter.charged(), ledger.spent());
     }
 
     /// Each rung adapts its own step size and metric, and a swap moves
