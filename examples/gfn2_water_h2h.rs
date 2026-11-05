@@ -370,6 +370,7 @@ fn main() {
     cfg.move_library = MoveLibrary::Molecular {
         groups: groups.clone(),
         reactive: false,
+        reverse_cycles: true,
     };
     let template = reference_coordinates(m).expect("template");
     let mut rng = StdRng::seed_from_u64(seed);

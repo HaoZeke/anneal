@@ -197,6 +197,125 @@ fn mat_vec(m: [[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
     m.map(|row| dot(row, v))
 }
 
+/// Whether groups are three-atom water: one oxygen and two hydrogens each.
+pub(crate) fn is_water_groups(groups: &[Vec<usize>]) -> bool {
+    !groups.is_empty() && groups.iter().all(|g| g.len() == 3)
+}
+
+/// Lab-frame atom positions of each molecule from Cartesian coordinates.
+fn cartesian_sites(groups: &[Vec<usize>], x: &ndarray::Array1<f64>) -> Vec<[[f64; 3]; 3]> {
+    groups
+        .iter()
+        .map(|atoms| {
+            std::array::from_fn(|s| {
+                let a = atoms.get(s).copied().unwrap_or(0);
+                std::array::from_fn(|k| x.get(3 * a + k).copied().unwrap_or(0.0))
+            })
+        })
+        .collect()
+}
+
+/// H-bond donations in Cartesian water: for each molecule, the acceptor index
+/// and which hydrogen (0 or 1) donates.
+fn cartesian_donations(sites: &[[[f64; 3]; 3]]) -> Vec<Vec<(usize, usize)>> {
+    let n = sites.len();
+    (0..n)
+        .map(|i| {
+            let _oxygen_i = sites[i][0];
+            (0..n)
+                .filter(|&j| j != i)
+                .flat_map(|j| {
+                    let oxygen_j = sites[j][0];
+                    [1, 2].iter().enumerate().filter_map(move |(which, &h)| {
+                        let hydrogen = sites[i][h];
+                        if norm(sub(hydrogen, oxygen_j)) < BOND {
+                            Some((j, which))
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// Reverses a directed H-bond cycle in Cartesian water coordinates.
+///
+/// Each group must be `[O, H, H]` in that order. The function finds a directed
+/// cycle of H-bonds and rotates each molecule on the cycle about its oxygen
+/// so the donations point the other way. The quench settles each molecule.
+///
+/// Returns `true` when a cycle was reversed, `false` otherwise.
+pub(crate) fn reverse_cycle_cartesian<R: rand::Rng + ?Sized>(
+    groups: &[Vec<usize>],
+    x: &mut ndarray::Array1<f64>,
+    rng: &mut R,
+) -> bool {
+    if !is_water_groups(groups) || groups.len() < 2 {
+        return false;
+    }
+    let sites = cartesian_sites(groups, x);
+    let donated = cartesian_donations(&sites);
+    let donors: Vec<usize> = (0..groups.len())
+        .filter(|&i| !donated[i].is_empty())
+        .collect();
+    if donors.is_empty() {
+        return false;
+    }
+    let mut path: Vec<(usize, usize)> = Vec::new();
+    let mut at = donors[rng.random_range(0..donors.len())];
+    let cycle = loop {
+        let back = path.last().map(|&(m, _)| m);
+        let out: Vec<(usize, usize)> = donated[at]
+            .iter()
+            .copied()
+            .filter(|&(j, _)| Some(j) != back)
+            .collect();
+        if out.is_empty() || path.len() > groups.len() {
+            return false;
+        }
+        let (next, which) = out[rng.random_range(0..out.len())];
+        path.push((at, which));
+        if let Some(start) = path.iter().position(|&(m, _)| m == next) {
+            break path.split_off(start);
+        }
+        at = next;
+    };
+    if cycle.len() < 3 {
+        return false;
+    }
+    let mut turns: Vec<(usize, [f64; 3], [[f64; 3]; 3])> = Vec::with_capacity(cycle.len());
+    for (s, &(k, which)) in cycle.iter().enumerate() {
+        let prev = cycle[(s + cycle.len() - 1) % cycle.len()].0;
+        let oxygen = sites[k][0];
+        let h_donating = sites[k][1 + which];
+        let h_other = sites[k][1 + (1 - which)];
+        let bonded = unit(sub(h_donating, oxygen));
+        let other = unit(sub(h_other, oxygen));
+        let target = unit(sub(sites[prev][0], oxygen));
+        if norm(cross(target, other)) < 1e-6 {
+            return false;
+        }
+        turns.push((k, oxygen, frame_rotation((bonded, other), (target, other))));
+    }
+    for (k, oxygen, turn) in turns {
+        let atoms = &groups[k];
+        for (s, &a) in atoms.iter().enumerate() {
+            let old = std::array::from_fn(|axis| x[3 * a + axis]);
+            let new = if s == 0 {
+                old
+            } else {
+                add(oxygen, mat_vec(turn, sub(old, oxygen)))
+            };
+            for axis in 0..3 {
+                x[3 * a + axis] = new[axis];
+            }
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

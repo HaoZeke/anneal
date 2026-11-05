@@ -482,6 +482,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                         let mut c3 = c2.clone();
                         if let crate::methods::cluster_hopping::MoveLibrary::Molecular {
                             groups,
+                            reverse_cycles,
                             ..
                         } = &cfg.move_library
                         {
@@ -489,6 +490,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                                 crate::methods::cluster_hopping::MoveLibrary::Molecular {
                                     groups: groups.clone(),
                                     reactive: true,
+                                    reverse_cycles: *reverse_cycles,
                                 };
                         }
                         let x3 = hop2.best_state.clone().unwrap();

@@ -3654,7 +3654,12 @@ where
             ),
             _ => cfg.frozen.clone(),
         };
-        if let MoveLibrary::Molecular { reactive, .. } = &cfg.move_library {
+        if let MoveLibrary::Molecular {
+            reactive,
+            reverse_cycles,
+            ..
+        } = &cfg.move_library
+        {
             let fresh = match cfg.species.as_ref() {
                 Some(z) => connectivity_groups_z(x.view(), z, cfg.bond_tolerance),
                 None => connectivity_groups(x.view(), n, cfg.covalent_cutoff),
@@ -3677,6 +3682,7 @@ where
                 kernels = MoveLibrary::Molecular {
                     groups: movable,
                     reactive: *reactive,
+                    reverse_cycles: *reverse_cycles,
                 }
                 .kernels(cfg);
             }

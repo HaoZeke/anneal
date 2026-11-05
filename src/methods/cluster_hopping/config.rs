@@ -1662,9 +1662,19 @@ impl Config {
         assert!(length_scale > 0.0, "species must have known covalent radii");
         let mut cfg = Self::with_scales(species.len(), length_scale, energy_scale);
         cfg.group_cutoff = MolecularPreset::GROUP_CUTOFF * length_scale;
+        let is_water = groups.iter().all(|g| g.len() == 3)
+            && groups.iter().enumerate().all(|(i, g)| {
+                g.iter()
+                    .zip([8u32, 1, 1])
+                    .all(|(&a, z)| species.get(a).copied() == Some(z))
+                    || g.iter()
+                        .zip([8u32, 1, 1])
+                        .all(|(&a, z)| species.get(3 * i + (a - g[0])).copied() == Some(z))
+            });
         cfg.move_library = MoveLibrary::Molecular {
             groups: groups.clone(),
             reactive: false,
+            reverse_cycles: is_water,
         };
         cfg.species = Some(species);
         cfg
