@@ -916,7 +916,7 @@ mod tests {
         );
         assert!(rec.symmetrise_on_stall);
         assert_eq!(rec.screen_steps, 25);
-        assert_eq!(rec.relax_steps, 200);
+        assert_eq!(rec.relax_steps, 1000);
         let rec2 = Config::recommended(75);
         assert!(rec2.return_screen);
         assert!(rec2.allocate_moves);
@@ -948,7 +948,7 @@ mod tests {
         assert_eq!(rec.return_polish_after, 0);
         assert!(rec.symmetrise_on_stall);
         assert_eq!(rec.screen_steps, 25);
-        assert_eq!(rec.relax_steps, 200);
+        assert_eq!(rec.relax_steps, 1000);
     }
 
     #[test]
