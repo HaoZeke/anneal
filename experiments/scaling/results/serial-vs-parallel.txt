@@ -1,27 +1,28 @@
 prove_problem: lennard_jones atoms 98 walkers 32 budget 20000
 prove_workers: 1 2 4 8
-seed 0 workers 1 energy_bits 13853199886556990994 evals 12302 grads 7698 accepts 214 controls 15 first_hit 14023 wave_width 8 pos 1d6933e69ec0ab85
-seed 0 workers 2 same_bits true energy_bits 13853199886556990994 evals 12302 grads 7698 accepts 214 controls 15 first_hit 14023 wave_width 8 pos 1d6933e69ec0ab85
-seed 0 workers 4 same_bits true energy_bits 13853199886556990994 evals 12302 grads 7698 accepts 214 controls 15 first_hit 14023 wave_width 8 pos 1d6933e69ec0ab85
-seed 0 workers 8 same_bits true energy_bits 13853199886556990994 evals 12302 grads 7698 accepts 214 controls 15 first_hit 14023 wave_width 8 pos 1d6933e69ec0ab85
-seed 1 workers 1 energy_bits 13854744261676347529 evals 12192 grads 7808 accepts 181 controls 14 first_hit 13008 wave_width 8 pos 0cd5801185804ffd
-seed 1 workers 2 same_bits true energy_bits 13854744261676347529 evals 12192 grads 7808 accepts 181 controls 14 first_hit 13008 wave_width 8 pos 0cd5801185804ffd
-seed 1 workers 4 same_bits true energy_bits 13854744261676347529 evals 12192 grads 7808 accepts 181 controls 14 first_hit 13008 wave_width 8 pos 0cd5801185804ffd
-seed 1 workers 8 same_bits true energy_bits 13854744261676347529 evals 12192 grads 7808 accepts 181 controls 14 first_hit 13008 wave_width 8 pos 0cd5801185804ffd
-seed 2 workers 1 energy_bits 13854457006650025210 evals 12196 grads 7804 accepts 230 controls 14 first_hit 14392 wave_width 10 pos 99d88f609e6bbfa7
-seed 2 workers 2 same_bits true energy_bits 13854457006650025210 evals 12196 grads 7804 accepts 230 controls 14 first_hit 14392 wave_width 10 pos 99d88f609e6bbfa7
-seed 2 workers 4 same_bits true energy_bits 13854457006650025210 evals 12196 grads 7804 accepts 230 controls 14 first_hit 14392 wave_width 10 pos 99d88f609e6bbfa7
-seed 2 workers 8 same_bits true energy_bits 13854457006650025210 evals 12196 grads 7804 accepts 230 controls 14 first_hit 14392 wave_width 10 pos 99d88f609e6bbfa7
-seed 3 workers 1 energy_bits 13852960886030507177 evals 12191 grads 7809 accepts 220 controls 14 first_hit 19977 wave_width 9 pos d1aebfc95627f5f9
-seed 3 workers 2 same_bits true energy_bits 13852960886030507177 evals 12191 grads 7809 accepts 220 controls 14 first_hit 19977 wave_width 9 pos d1aebfc95627f5f9
-seed 3 workers 4 same_bits true energy_bits 13852960886030507177 evals 12191 grads 7809 accepts 220 controls 14 first_hit 19977 wave_width 9 pos d1aebfc95627f5f9
-seed 3 workers 8 same_bits true energy_bits 13852960886030507177 evals 12191 grads 7809 accepts 220 controls 14 first_hit 19977 wave_width 9 pos d1aebfc95627f5f9
-seed 4 workers 1 energy_bits 13853675139393376058 evals 12314 grads 7686 accepts 192 controls 14 first_hit 19990 wave_width 8 pos e9737417855dbcc3
-seed 4 workers 2 same_bits true energy_bits 13853675139393376058 evals 12314 grads 7686 accepts 192 controls 14 first_hit 19990 wave_width 8 pos e9737417855dbcc3
-seed 4 workers 4 same_bits true energy_bits 13853675139393376058 evals 12314 grads 7686 accepts 192 controls 14 first_hit 19990 wave_width 8 pos e9737417855dbcc3
-seed 4 workers 8 same_bits true energy_bits 13853675139393376058 evals 12314 grads 7686 accepts 192 controls 14 first_hit 19990 wave_width 8 pos e9737417855dbcc3
-seed 5 workers 1 energy_bits 13854531902333435559 evals 12319 grads 7681 accepts 221 controls 15 first_hit 14664 wave_width 9 pos bf8029355d27229b
-seed 5 workers 2 same_bits true energy_bits 13854531902333435559 evals 12319 grads 7681 accepts 221 controls 15 first_hit 14664 wave_width 9 pos bf8029355d27229b
-seed 5 workers 4 same_bits true energy_bits 13854531902333435559 evals 12319 grads 7681 accepts 221 controls 15 first_hit 14664 wave_width 9 pos bf8029355d27229b
-seed 5 workers 8 same_bits true energy_bits 13854531902333435559 evals 12319 grads 7681 accepts 221 controls 15 first_hit 14664 wave_width 9 pos bf8029355d27229b
+seed 0 workers 1 energy_bits 13855341503506384847 evals 12286 grads 7714 accepts 214 controls 15 first_hit 19996 wave_width 5 pos 3d33b5f7cb9ba7eb
+seed 0 workers 2 same_bits true energy_bits 13855341503506384847 evals 12286 grads 7714 accepts 214 controls 15 first_hit 19996 wave_width 5 pos 3d33b5f7cb9ba7eb
+seed 0 workers 4 same_bits true energy_bits 13855341503506384847 evals 12286 grads 7714 accepts 214 controls 15 first_hit 19996 wave_width 5 pos 3d33b5f7cb9ba7eb
+seed 0 workers 8 same_bits true energy_bits 13855341503506384847 evals 12286 grads 7714 accepts 214 controls 15 first_hit 19996 wave_width 5 pos 3d33b5f7cb9ba7eb
+seed 1 workers 1 energy_bits 13857140903048461185 evals 12201 grads 7799 accepts 181 controls 14 first_hit 19992 wave_width 5 pos 21e9c4551df57428
+seed 1 workers 2 same_bits true energy_bits 13857140903048461185 evals 12201 grads 7799 accepts 181 controls 14 first_hit 19992 wave_width 5 pos 21e9c4551df57428
+seed 1 workers 4 same_bits true energy_bits 13857140903048461185 evals 12201 grads 7799 accepts 181 controls 14 first_hit 19992 wave_width 5 pos 21e9c4551df57428
+seed 1 workers 8 same_bits true energy_bits 13857140903048461185 evals 12201 grads 7799 accepts 181 controls 14 first_hit 19992 wave_width 5 pos 21e9c4551df57428
+seed 2 workers 1 energy_bits 13856082458806460368 evals 12248 grads 7752 accepts 230 controls 14 first_hit 20000 wave_width 5 pos b8c02c35c318d0fc
+seed 2 workers 2 same_bits true energy_bits 13856082458806460368 evals 12248 grads 7752 accepts 230 controls 14 first_hit 20000 wave_width 5 pos b8c02c35c318d0fc
+seed 2 workers 4 same_bits true energy_bits 13856082458806460368 evals 12248 grads 7752 accepts 230 controls 14 first_hit 20000 wave_width 5 pos b8c02c35c318d0fc
+seed 2 workers 8 same_bits true energy_bits 13856082458806460368 evals 12248 grads 7752 accepts 230 controls 14 first_hit 20000 wave_width 5 pos b8c02c35c318d0fc
+seed 3 workers 1 energy_bits 13854340333691596739 evals 12168 grads 7832 accepts 220 controls 14 first_hit 20000 wave_width 5 pos 3fef77e802db8276
+seed 3 workers 2 same_bits true energy_bits 13854340333691596739 evals 12168 grads 7832 accepts 220 controls 14 first_hit 20000 wave_width 5 pos 3fef77e802db8276
+seed 3 workers 4 same_bits true energy_bits 13854340333691596739 evals 12168 grads 7832 accepts 220 controls 14 first_hit 20000 wave_width 5 pos 3fef77e802db8276
+seed 3 workers 8 same_bits true energy_bits 13854340333691596739 evals 12168 grads 7832 accepts 220 controls 14 first_hit 20000 wave_width 5 pos 3fef77e802db8276
+seed 4 workers 1 energy_bits 13855208006071282830 evals 12287 grads 7713 accepts 192 controls 14 first_hit 19997 wave_width 5 pos 0a4c16e119821275
+seed 4 workers 2 same_bits true energy_bits 13855208006071282830 evals 12287 grads 7713 accepts 192 controls 14 first_hit 19997 wave_width 5 pos 0a4c16e119821275
+seed 4 workers 4 same_bits true energy_bits 13855208006071282830 evals 12287 grads 7713 accepts 192 controls 14 first_hit 19997 wave_width 5 pos 0a4c16e119821275
+seed 4 workers 8 same_bits true energy_bits 13855208006071282830 evals 12287 grads 7713 accepts 192 controls 14 first_hit 19997 wave_width 5 pos 0a4c16e119821275
+seed 5 workers 1 energy_bits 13857398775810409449 evals 12210 grads 7790 accepts 221 controls 15 first_hit 18393 wave_width 5 pos bb4d481979352405
+seed 5 workers 2 same_bits true energy_bits 13857398775810409449 evals 12210 grads 7790 accepts 221 controls 15 first_hit 18393 wave_width 5 pos bb4d481979352405
+seed 5 workers 4 same_bits true energy_bits 13857398775810409449 evals 12210 grads 7790 accepts 221 controls 15 first_hit 18393 wave_width 5 pos bb4d481979352405
+seed 5 workers 8 same_bits true energy_bits 13857398775810409449 evals 12210 grads 7790 accepts 221 controls 15 first_hit 18393 wave_width 5 pos bb4d481979352405
 quality: ok
+prove: ok
