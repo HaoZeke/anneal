@@ -2,7 +2,9 @@
 //!
 //! `h2h_arm3 <system> <budget> <seed>`
 //!
-//! Systems: lj38 lj55 lj75 lj98 m55r6 m55r14 m80r6 m80r14 w6 w10 w15 w20.
+//! Systems: lj38 lj55 lj75 lj98 lj98-points m55r6 m55r14 m80r6 m80r14 w6 w10
+//! w15 w20. `lj98-points` scores LJ98 against the energy of the Cambridge
+//! points file, the Leary tetrahedron, where `lj98` reads the table.
 //! The start is the driver's random cluster. The reference only scores a hit.
 //! The atomic systems run [`Config::for_cluster`] with orbit completion on
 //! every new basin from both cores; water runs [`Config::for_tip4p`].
@@ -51,6 +53,10 @@ fn spec(name: &str) -> Spec {
         "lj75" => lj(75, -397.492331),
         // Cambridge/Doye table. The crate constant -543.665361 is below it.
         "lj98" => lj(98, -543.642957),
+        "lj98-points" => Spec {
+            name: "lj98-points",
+            ..lj(98, -543.665361)
+        },
         "m55r6" => morse("m55r6", 55, 6.0, -250.286609),
         "m55r14" => morse("m55r14", 55, 14.0, -220.646208),
         "m80r6" => morse("m80r6", 80, 6.0, -378.333471),
