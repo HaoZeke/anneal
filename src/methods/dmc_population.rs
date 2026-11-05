@@ -688,9 +688,21 @@ fn mark_best(best_val: &mut f64, candidate: f64, work_now: usize, first_hit: &mu
     }
 }
 
-/// Wave width is the distinct elite count already ranked for the wave.
-fn derived_wave_width(elite_count: usize) -> usize {
-    elite_count.max(1)
+/// p-best focus already used when a proposal picks parents.
+///
+/// The count is the ceiling of fifteen percent of the roster, and it is
+/// at least two when the roster can hold two parents.
+fn focus_slots(roster: usize) -> usize {
+    let upper = roster.max(2);
+    ((0.15 * roster as f64).ceil() as usize).clamp(2, upper)
+}
+
+/// Wave width is the p-best focus of the roster, limited by the elites on hand.
+///
+/// The tail budget is split across that focus, not across every elite.
+/// A wider split would thin each L-BFGS. The pool only schedules those passes.
+fn derived_wave_width(elite_count: usize, roster: usize) -> usize {
+    focus_slots(roster).min(elite_count.max(1)).max(1)
 }
 
 /// Result of a budgeted population-controlled diffusion run.
@@ -921,8 +933,8 @@ where
 ///
 /// Each wave snapshots every slot it will polish and draws that slot's
 /// generator on the calling thread. The pool runs the passes, and the
-/// merge writes them in slot order. Width is the distinct elite count.
-/// One worker and many workers share that list.
+/// merge writes them in slot order. Width is the p-best focus of the roster.
+/// One worker and many workers share that list and the same per-pass cap.
 #[allow(clippy::too_many_arguments)]
 fn gradient_polish_waves<O, G, R>(
     obj: &O,
@@ -938,6 +950,7 @@ fn gradient_polish_waves<O, G, R>(
     budget: usize,
     dim: usize,
     e_span: f64,
+    roster: usize,
     first_hit: &mut usize,
     wave_width: &mut usize,
     meter: &RefCell<PhaseMeter>,
@@ -946,7 +959,7 @@ fn gradient_polish_waves<O, G, R>(
     G: Gradient<f64> + Sync,
     R: Rng,
 {
-    let k_elite = derived_wave_width(elites.len());
+    let k_elite = derived_wave_width(elites.len(), roster);
     *wave_width = k_elite;
     let mut ei = 0usize;
     while n_evals.saturating_add(*n_grads) < budget && !crate::caller_stop::raised() {
@@ -1274,6 +1287,7 @@ where
                     budget,
                     dim,
                     e_span,
+                    target_n0,
                     &mut first_hit_work,
                     &mut wave_width,
                     &meter,
@@ -1288,7 +1302,7 @@ where
             elites.push((best_pos.clone(), best_val));
             elites.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
             elites.dedup_by(|a, b| (a.1 - b.1).abs() < 1e-14);
-            let k_elite = elites.len().max(1);
+            let k_elite = derived_wave_width(elites.len(), target_n0);
             let mut ei = 0usize;
             // Dual annealing endgame: visit (Tsallis) → local (L-BFGS) cycles.
             while work(n_evals, n_grads) < budget && !crate::caller_stop::raised() {
@@ -1535,7 +1549,7 @@ where
                 .partial_cmp(&snapshot[b].energy)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        let p_best_n = ((0.15 * n_walkers as f64).ceil() as usize).clamp(2, n_walkers.max(2));
+        let p_best_n = focus_slots(n_walkers);
         let mut sf_success = Vec::new();
         let mut scr_success = Vec::new();
         let mut s_delta = Vec::new();
