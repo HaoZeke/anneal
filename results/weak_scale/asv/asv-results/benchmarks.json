@@ -1,0 +1,153 @@
+{
+    "benchmarks.WeakScaling.track_atoms": {
+        "code": "class WeakScaling:\n    def track_atoms(self, family, workers):\n        return float(_row(family, workers)[\"atoms\"])",
+        "name": "benchmarks.WeakScaling.track_atoms",
+        "param_names": [
+            "family",
+            "workers"
+        ],
+        "params": [
+            [
+                "'pt'",
+                "'population'",
+                "'dmc'"
+            ],
+            [
+                "1",
+                "2",
+                "4",
+                "8",
+                "16"
+            ]
+        ],
+        "type": "track",
+        "unit": "unit",
+        "version": "fca7ee43c8b8f3bca3fe0d1584dd7099a8a3b7884153be204f6d3808802e894d"
+    },
+    "benchmarks.WeakScaling.track_charged": {
+        "code": "class WeakScaling:\n    def track_charged(self, family, workers):\n        return float(_row(family, workers)[\"charged\"])",
+        "name": "benchmarks.WeakScaling.track_charged",
+        "param_names": [
+            "family",
+            "workers"
+        ],
+        "params": [
+            [
+                "'pt'",
+                "'population'",
+                "'dmc'"
+            ],
+            [
+                "1",
+                "2",
+                "4",
+                "8",
+                "16"
+            ]
+        ],
+        "type": "track",
+        "unit": "unit",
+        "version": "e5c1b015b6ca9ac129d20e94ca954952f2bbebb4c557f0fc76563af28c1b395e"
+    },
+    "benchmarks.WeakScaling.track_iqr_s": {
+        "code": "class WeakScaling:\n    def track_iqr_s(self, family, workers):\n        return float(_row(family, workers)[\"iqr_s\"])",
+        "name": "benchmarks.WeakScaling.track_iqr_s",
+        "param_names": [
+            "family",
+            "workers"
+        ],
+        "params": [
+            [
+                "'pt'",
+                "'population'",
+                "'dmc'"
+            ],
+            [
+                "1",
+                "2",
+                "4",
+                "8",
+                "16"
+            ]
+        ],
+        "type": "track",
+        "unit": "unit",
+        "version": "77003aba6317a3104768a4cfb95f32c39c4e0d2b63b369b08002eb7860f28562"
+    },
+    "benchmarks.WeakScaling.track_median_wall_s": {
+        "code": "class WeakScaling:\n    def track_median_wall_s(self, family, workers):\n        return float(_row(family, workers)[\"median_wall_s\"])",
+        "name": "benchmarks.WeakScaling.track_median_wall_s",
+        "param_names": [
+            "family",
+            "workers"
+        ],
+        "params": [
+            [
+                "'pt'",
+                "'population'",
+                "'dmc'"
+            ],
+            [
+                "1",
+                "2",
+                "4",
+                "8",
+                "16"
+            ]
+        ],
+        "type": "track",
+        "unit": "unit",
+        "version": "843f3b6d03e312b2852474a36fd9a608761112e5f807216c018fb32392ac721a"
+    },
+    "benchmarks.WeakScaling.track_replicas": {
+        "code": "class WeakScaling:\n    def track_replicas(self, family, workers):\n        return float(_row(family, workers)[\"replicas\"])",
+        "name": "benchmarks.WeakScaling.track_replicas",
+        "param_names": [
+            "family",
+            "workers"
+        ],
+        "params": [
+            [
+                "'pt'",
+                "'population'",
+                "'dmc'"
+            ],
+            [
+                "1",
+                "2",
+                "4",
+                "8",
+                "16"
+            ]
+        ],
+        "type": "track",
+        "unit": "unit",
+        "version": "7a8c9f3bfd771d2da11b8bed40729afe35afb1d1bdc94137c0f2e136b90d6325"
+    },
+    "benchmarks.WeakScaling.track_weak_efficiency": {
+        "code": "class WeakScaling:\n    def track_weak_efficiency(self, family, workers):\n        return float(_row(family, workers)[\"weak_efficiency\"])",
+        "name": "benchmarks.WeakScaling.track_weak_efficiency",
+        "param_names": [
+            "family",
+            "workers"
+        ],
+        "params": [
+            [
+                "'pt'",
+                "'population'",
+                "'dmc'"
+            ],
+            [
+                "1",
+                "2",
+                "4",
+                "8",
+                "16"
+            ]
+        ],
+        "type": "track",
+        "unit": "unit",
+        "version": "d2890626cf651ea7e020bf893aa210948e591eeb4684021aa9d4fa74d555e271"
+    },
+    "version": 2
+}
