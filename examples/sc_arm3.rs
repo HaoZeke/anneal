@@ -8,15 +8,30 @@
 //! ```text
 //! sc_arm3 <12-6|9-6> <n> <budget> <seed> <reference-energy>
 //! ```
+//!
+//! `H2H_ARM` runs communicating chains instead, as `common/h2h_chains.rs`
+//! describes, on the same scaled configuration and from the same random
+//! start in the start radius.
+//! Those chains relax with the ensemble's own quench, certified at the
+//! record gradient of the configuration, not with the GMIN quench below.
+//! A hit is then a chain best below the Cambridge energy plus the window.
+
+#[path = "common/ensemble_report.rs"]
+mod ensemble_report;
+#[path = "common/h2h_chains.rs"]
+mod h2h_chains;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Instant;
 
-use anneal_core::methods::cluster_hopping::{Config, Ledger, OrbitCore, optimize};
+use anneal_core::methods::cluster_hopping::{
+    Config, Ledger, OrbitCore, optimize, random_cluster_in_radius,
+};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::{SuttonChen, SuttonChenFamily};
 use anneal_core::symmetrise::ShellCore;
+use h2h_chains::{Arm, run_chains};
 use ndarray::{Array1, ArrayView1};
 
 /// GMIN's default basin-hopping quench: RMS force `1e-3`, at most 500 steps.
@@ -104,8 +119,54 @@ fn main() {
     cfg.relax_steps = QUENCH_ITERS;
     cfg.bayes_threshold =
         anneal_core::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
+    let base = cfg.clone();
     cfg.orbit_complete_on_new = true;
     cfg.orbit_core = OrbitCore::Both(ShellCore::scaled(cfg.length_scale));
+
+    let arm = Arm::from_env();
+    if arm != Arm::Single {
+        let chain = arm.chain_config(&cfg, base);
+        let (radius, min_separation) = (chain.start_radius(), chain.min_separation);
+        let run = run_chains(
+            &chain,
+            budget,
+            seed,
+            target,
+            &|x| potential.value_and_gradient(x),
+            &|_, rng| random_cluster_in_radius(n, radius, min_separation, rng),
+        );
+        println!("code: anneal");
+        println!("arm: {}", arm.name());
+        println!("replicas: {}", run.replicas);
+        println!("witness: {}", h2h_chains::witness_name());
+        println!("family: {}", family.label());
+        println!("n: {n}");
+        println!("budget: {budget}");
+        println!("seed: {seed}");
+        println!("reference: {reference:.10}");
+        println!("hit_window: {HIT_WINDOW}");
+        println!("temperature: {temperature}");
+        println!("length_scale: {length_scale:.10}");
+        println!("energy_scale: {:.10}", chain.energy_scale);
+        println!("record_gradient: {:e}", chain.record_gradient);
+        println!(
+            "resolved_sha256: {}",
+            chain
+                .resolved_sha256()
+                .unwrap_or_else(|_| "unavailable".into())
+        );
+        println!("wall_s: {:.6}", run.wall_seconds);
+        println!("spent: {}", run.charged);
+        println!("best: {:.10}", run.best);
+        println!("hops: {}", run.hops);
+        println!("hit: {}", run.first_target_calls.is_some());
+        println!(
+            "hit_calls: {}",
+            run.first_target_calls
+                .map_or_else(|| "none".to_string(), |calls| calls.to_string())
+        );
+        return;
+    }
 
     let stop = Arc::new(AtomicBool::new(false));
     let full_quenches = Arc::new(AtomicUsize::new(0));

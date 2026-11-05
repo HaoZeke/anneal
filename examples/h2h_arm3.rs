@@ -6,6 +6,13 @@
 //! The start is the driver's random cluster. The reference only scores a hit.
 //! The atomic systems run [`Config::for_cluster`] with orbit completion on
 //! every new basin from both cores; water runs [`Config::for_tip4p`].
+//! `H2H_ARM` runs an atomic system as communicating chains instead, as
+//! `common/h2h_chains.rs` describes.
+
+#[path = "common/ensemble_report.rs"]
+mod ensemble_report;
+#[path = "common/h2h_chains.rs"]
+mod h2h_chains;
 
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
@@ -17,6 +24,7 @@ use anneal_core::potentials::{
     PairPotential, Tip4pCluster, random_tip4p_cluster, wales_hodges_minimum,
 };
 use anneal_core::symmetrise::ShellCore;
+use h2h_chains::{Arm, run_chains};
 use ndarray::ArrayView1;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -132,16 +140,46 @@ fn main() {
 
 struct Hit {
     calls: usize,
-    hops: usize,
+    hops: Option<usize>,
 }
 
 fn atomic(spec: &Spec, pot: PairPotential, budget: usize, seed: u64, started: Instant) {
-    let mut cfg = Config::for_cluster(spec.n);
+    let scale = pot.kind().r_min() / 2.0_f64.powf(1.0 / 6.0);
+    let mut base = Config::for_cluster(spec.n);
+    base.min_separation *= scale;
+    base.container *= scale;
+    let mut cfg = base.clone();
     cfg.orbit_complete_on_new = true;
     cfg.orbit_core = OrbitCore::Both(ShellCore::scaled(cfg.length_scale));
-    let scale = pot.kind().r_min() / 2.0_f64.powf(1.0 / 6.0);
-    cfg.min_separation *= scale;
-    cfg.container *= scale;
+    let arm = Arm::from_env();
+    if arm != Arm::Single {
+        let chain = arm.chain_config(&cfg, base);
+        let min_separation = chain.min_separation;
+        let run = run_chains(
+            &chain,
+            budget,
+            seed,
+            spec.reference + spec.tol,
+            &|x| pot.value_and_gradient(x),
+            &|_, rng| random_cluster(spec.n, 0.7, min_separation, rng),
+        );
+        emit(Record {
+            spec,
+            cfg: &chain,
+            arm,
+            replicas: run.replicas,
+            seed,
+            budget,
+            best: run.best,
+            hit: run
+                .first_target_calls
+                .map(|calls| Hit { calls, hops: None }),
+            charged: run.charged,
+            hops: run.hops,
+            started,
+        });
+        return;
+    }
     let mut rng = StdRng::seed_from_u64(seed);
     let start = random_cluster(spec.n, 0.7, cfg.min_separation, &mut rng);
     let mut ledger = Ledger::new(budget);
@@ -175,7 +213,7 @@ fn atomic(spec: &Spec, pot: PairPotential, budget: usize, seed: u64, started: In
             if seen.is_none() {
                 seen = Some(Hit {
                     calls: ck.charged(),
-                    hops: ck.hops(),
+                    hops: Some(ck.hops()),
                 });
             }
             CheckpointAction::Retire {
@@ -198,20 +236,27 @@ fn atomic(spec: &Spec, pot: PairPotential, budget: usize, seed: u64, started: In
     )
     .expect("finite start");
     let hit = earlier(seen, &out.improvements, target);
-    emit(
+    emit(Record {
         spec,
-        &cfg,
+        cfg: &cfg,
+        arm: Arm::Single,
+        replicas: 1,
         seed,
         budget,
-        out.best,
+        best: out.best,
         hit,
-        ledger.spent(),
-        out.hops,
+        charged: ledger.spent(),
+        hops: out.hops,
         started,
-    );
+    });
 }
 
 fn tip4p(spec: &Spec, budget: usize, seed: u64, started: Instant) {
+    assert_eq!(
+        Arm::from_env(),
+        Arm::Single,
+        "the communicating arms run the atomic systems"
+    );
     let n = spec.n;
     let pot = Tip4pCluster::new(n);
     let cfg = Config::for_tip4p(n);
@@ -251,7 +296,7 @@ fn tip4p(spec: &Spec, budget: usize, seed: u64, started: Instant) {
             if seen.is_none() {
                 seen = Some(Hit {
                     calls: ck.charged(),
-                    hops: ck.hops(),
+                    hops: Some(ck.hops()),
                 });
             }
             CheckpointAction::Retire {
@@ -277,17 +322,19 @@ fn tip4p(spec: &Spec, budget: usize, seed: u64, started: Instant) {
         out.best = pot.value_and_gradient(state.view()).0;
     }
     let hit = earlier(seen, &out.improvements, target);
-    emit(
+    emit(Record {
         spec,
-        &cfg,
+        cfg: &cfg,
+        arm: Arm::Single,
+        replicas: 1,
         seed,
         budget,
-        out.best,
+        best: out.best,
         hit,
-        ledger.spent(),
-        out.hops,
+        charged: ledger.spent(),
+        hops: out.hops,
         started,
-    );
+    });
 }
 
 /// The improvement log is exact until it caps at 512 records. The checkpoint
@@ -302,7 +349,7 @@ fn earlier(
         .find(|(_, _, _, e)| *e < target)
         .map(|(hops, calls, _, _)| Hit {
             calls: *calls,
-            hops: *hops,
+            hops: Some(*hops),
         });
     match (seen, logged) {
         (Some(a), Some(b)) => Some(if a.calls <= b.calls { a } else { b }),
@@ -312,9 +359,12 @@ fn earlier(
     }
 }
 
-fn emit(
-    spec: &Spec,
-    cfg: &Config,
+/// One output line.
+struct Record<'a> {
+    spec: &'a Spec,
+    cfg: &'a Config,
+    arm: Arm,
+    replicas: usize,
     seed: u64,
     budget: usize,
     best: f64,
@@ -322,11 +372,27 @@ fn emit(
     charged: usize,
     hops: usize,
     started: Instant,
-) {
+}
+
+fn emit(record: Record<'_>) {
+    let Record {
+        spec,
+        cfg,
+        arm,
+        replicas,
+        seed,
+        budget,
+        best,
+        hit,
+        charged,
+        hops,
+        started,
+    } = record;
     println!(
         "system={system} seed={seed} budget={budget} reference={reference:.8} tol={tol} \
          best={best:.8} hit={hit} first_calls={fc} first_hops={fh} charged={charged} \
-         hops={hops} wall_s={wall:.3} config_sha256={digest}",
+         hops={hops} wall_s={wall:.3} arm={arm} replicas={replicas} witness={witness} \
+         config_sha256={digest}",
         system = spec.name,
         reference = spec.reference,
         tol = spec.tol,
@@ -338,9 +404,16 @@ fn emit(
             .unwrap_or_else(|| "-".into()),
         fh = hit
             .as_ref()
-            .map(|h| h.hops.to_string())
+            .and_then(|h| h.hops)
+            .map(|h| h.to_string())
             .unwrap_or_else(|| "-".into()),
         wall = started.elapsed().as_secs_f64(),
+        arm = arm.name(),
+        witness = if arm == Arm::Single {
+            "-"
+        } else {
+            h2h_chains::witness_name()
+        },
         digest = cfg.resolved_sha256().expect("the configuration serialises"),
     );
 }
