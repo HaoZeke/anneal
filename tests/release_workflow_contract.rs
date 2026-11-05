@@ -97,6 +97,22 @@ fn ci_audits_large_blobs_without_a_deprecated_action_runtime() {
     assert!(!workflow.contains("HaoZeke/large-file-auditor"));
 }
 
+/// pyo3's `extension-module` feature does not link libpython. Test binaries
+/// need that library, and macOS must not paper over the missing symbols
+/// with `-undefined dynamic_lookup`.
+#[test]
+fn python_executables_link_libpython_without_an_open_symbol_lookup() {
+    let workflow = include_str!("../.github/workflows/ci.yml");
+    let build = include_str!("../build.rs");
+
+    assert!(!workflow.contains("link-arg=dynamic_lookup"));
+    assert!(workflow.contains("run: cargo test\n"));
+    assert!(workflow.contains("run: cargo test --features \"$CI_FEATURES\"\n"));
+    assert!(build.contains("PYO3_BUILD_EXTENSION_MODULE"));
+    assert!(build.contains("cargo:rustc-link-lib=dylib="));
+    assert!(build.contains("CARGO_FEATURE_PYTHON"));
+}
+
 /// cargo-c joins `to` with the asset path relative to the asset's parent
 /// directory, so `to = "dlpack"` installs `include/dlpack/dlpack.h`.
 #[test]

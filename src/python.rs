@@ -3850,3 +3850,17 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(global_optimize_objective, m)?)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod harness_link {
+    #[test]
+    fn module_initializer_is_linked() {
+        // The address keeps the extension entry point in this harness.
+        // The harness is an ordinary executable, so the link fails unless
+        // libpython is present.
+        let init: fn(&pyo3::Bound<'_, pyo3::types::PyModule>) -> pyo3::PyResult<()> =
+            std::hint::black_box(super::_core);
+        let rendered = format!("{:p}", init as *const ());
+        assert_eq!(&rendered[..2], "0x");
+    }
+}
