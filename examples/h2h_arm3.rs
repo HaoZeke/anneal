@@ -152,19 +152,19 @@ struct Hit {
 
 /// Charged calls without a new best before a random restart.
 ///
-/// Finishing a quench costs `Q = R - S` extra evaluations, and discarding
-/// a winner costs one full hop `R`. Net value is positive when
-/// `p > (R - S) / (2R - S)`, the same ratio as
-/// [`anneal_core::screen::cost_asymmetric_threshold`].
-/// The stall wait is that share of the run budget. `R` is
-/// [`Config::relax_steps`] and `S` is [`Config::screen_steps`].
-/// The budget is the caller's. The atom count does not enter.
-fn stall_restart_calls(budget: usize, cfg: &Config) -> usize {
-    let relax = cfg.relax_steps;
-    let screen = cfg.screen_steps.min(relax.saturating_sub(1));
-    let numer = relax.saturating_sub(screen);
-    let denom = relax.saturating_mul(2).saturating_sub(screen).max(1);
-    budget.saturating_mul(numer) / denom
+/// `(R - S) / (2R - S)` is the probability that finishing one quench pays
+/// for itself ([`anneal_core::screen::cost_asymmetric_threshold`]).
+/// It is not a share of the campaign budget. Taking that share of a
+/// multi-million-call run holds a shelf for most of the budget, and the
+/// chain redraws once or not at all. The stall clock is local: it waits
+/// one screen of full relaxations, `screen_steps * relax_steps`, which is
+/// the evidence the screen itself spends, then draws a fresh cluster.
+/// `R` is [`Config::relax_steps`] and `S` is [`Config::screen_steps`].
+/// The atom count does not enter. The budget only stops the run.
+fn stall_restart_calls(_budget: usize, cfg: &Config) -> usize {
+    let relax = cfg.relax_steps.max(1);
+    let screen = cfg.screen_steps.max(1).min(relax);
+    screen.saturating_mul(relax)
 }
 
 fn atomic(spec: &Spec, pot: PairPotential, budget: usize, seed: u64, started: Instant) {
@@ -481,29 +481,21 @@ fn emit(record: Record<'_>) {
 mod stall_wait_tests {
     use super::stall_restart_calls;
     use anneal_core::methods::cluster_hopping::Config;
-    use anneal_core::screen::cost_asymmetric_threshold;
 
     #[test]
-    fn the_stall_wait_is_the_bayes_share_of_the_run_budget() {
+    fn the_stall_wait_is_one_screen_of_full_quenches() {
         let cfg = Config::for_cluster(13);
-        let ratio = cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
-        for budget in [400_000usize, 1_000_000, 4_000_000] {
-            let wait = stall_restart_calls(budget, &cfg);
-            let from_ratio = (budget as f64 * ratio).floor() as usize;
-            assert!(
-                wait == from_ratio || wait + 1 == from_ratio,
-                "budget {budget}: wait {wait}, ratio share {from_ratio}"
-            );
-            assert_ne!(wait, 5_000);
-            assert_ne!(wait, 4_000);
-            assert!(wait < budget);
-        }
-        // 7/15 of each paper budget, the measured hop S = 25, R = 200.
         assert_eq!(cfg.screen_steps, 25);
         assert_eq!(cfg.relax_steps, 200);
-        assert_eq!(stall_restart_calls(400_000, &cfg), 400_000 * 7 / 15);
-        assert_eq!(stall_restart_calls(1_000_000, &cfg), 1_000_000 * 7 / 15);
-        assert_eq!(stall_restart_calls(4_000_000, &cfg), 4_000_000 * 7 / 15);
+        let local = cfg.screen_steps * cfg.relax_steps;
+        for budget in [400_000usize, 1_000_000, 4_000_000] {
+            let wait = stall_restart_calls(budget, &cfg);
+            assert_eq!(wait, local, "budget {budget} must not scale the stall clock");
+            assert!(wait < budget);
+            let share = budget * (cfg.relax_steps - cfg.screen_steps)
+                / (cfg.relax_steps * 2 - cfg.screen_steps);
+            assert_ne!(wait, share);
+        }
         let small = Config::for_cluster(8);
         let large = Config::for_cluster(98);
         assert_eq!(
