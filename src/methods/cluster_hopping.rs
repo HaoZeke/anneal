@@ -7724,6 +7724,112 @@ mod tests {
         );
     }
 
+    /// Cambridge LJ104 minimum, and the window `first_encounter` uses.
+    ///
+    /// The board scores a hit from the improvement trace. An auxiliary
+    /// quench can store this energy on the ledger and leave the trace
+    /// on the shelf above the window.
+    const LJ104_REFERENCE: f64 = -582.086642;
+    const BOARD_HIT: f64 = 0.001;
+
+    /// Orbit completion stores the LJ104 reference. The hop push names
+    /// only the shelf. The scored trace has to carry the reference.
+    #[test]
+    fn lj104_reference_on_an_unpushed_quench_is_a_hit() {
+        let n = 6;
+        let mut shelf_state = Array1::from(vec![
+            1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            -1.0,
+        ]);
+        for (i, value) in shelf_state.iter_mut().enumerate() {
+            *value += 0.08 * (((i * 37 + 11) % 17) as f64 / 8.0 - 1.0);
+        }
+        let mut cfg = Config::for_cluster(n);
+        cfg.max_hops = Some(4);
+        cfg.bayes_screen = false;
+        cfg.calibrated_screen = false;
+        cfg.finish_improving = false;
+        cfg.return_screen = false;
+        cfg.screen_margin = f64::INFINITY;
+        cfg.screen_steps = 1;
+        cfg.relax_steps = 1;
+        cfg.polish_records = 0;
+        cfg.orbit_complete_on_new = true;
+        cfg.point_symmetrise_on_new = false;
+        let orbit_state = crate::packing::on_new_basin(
+            shelf_state.view(),
+            n,
+            cfg.symmetry_tolerance,
+            cfg.symmetry_merge_radius,
+            cfg.symmetrise_core_fraction,
+            cfg.min_separation,
+        )
+        .expect("jittered octahedron completes an orbit");
+        let moved = orbit_state
+            .iter()
+            .zip(shelf_state.iter())
+            .any(|(a, b)| (a - b).abs() > 1e-8);
+        assert!(moved, "orbit completion returned the input");
+
+        const SHELF: f64 = -1.0;
+        let same = |left: ArrayView1<f64>, right: ArrayView1<f64>| {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right.iter())
+                    .all(|(a, b)| (a - b).abs() <= 1e-8)
+        };
+        let found_at = std::sync::atomic::AtomicUsize::new(usize::MAX);
+        let mut relax = |ledger: &mut Ledger, state: ArrayView1<f64>, _steps: usize| {
+            assert!(ledger.charge());
+            if same(state, orbit_state.view()) {
+                let _ = found_at.compare_exchange(
+                    usize::MAX,
+                    ledger.spent(),
+                    std::sync::atomic::Ordering::Relaxed,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                (LJ104_REFERENCE, orbit_state.clone())
+            } else {
+                (SHELF, shelf_state.clone())
+            }
+        };
+        let mut ledger = Ledger::new(64);
+        let mut rng = StdRng::seed_from_u64(11);
+        let out =
+            run(&cfg, shelf_state.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
+
+        let spent = found_at.load(std::sync::atomic::Ordering::Relaxed);
+        assert_ne!(spent, usize::MAX, "orbit quench did not run");
+        assert!(out.orbits.0 >= 1, "orbit completion did not run");
+        assert_eq!(out.best, LJ104_REFERENCE);
+        assert!(
+            out.improvements
+                .iter()
+                .any(|(_, _, _, energy)| (*energy - SHELF).abs() <= 1e-12),
+            "shelf row missing from {:?}",
+            out.improvements
+        );
+        let encounter = crate::methods::cluster_search::first_encounter(
+            &out,
+            LJ104_REFERENCE,
+            BOARD_HIT,
+            out.charged,
+        );
+        assert!(
+            encounter.found(),
+            "best {} equals the LJ104 reference but the trace scored a miss: {:?}",
+            out.best,
+            out.improvements
+        );
+        assert_eq!(encounter.charged(), spent);
+        assert!(
+            encounter.charged() < out.charged,
+            "record at {spent} is not earlier than the final spend {}",
+            out.charged
+        );
+    }
+
     /// Each rung adapts its own step size and metric, and a swap moves
     /// configurations without moving the adaptation.
     #[test]
