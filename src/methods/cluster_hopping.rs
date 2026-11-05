@@ -6837,7 +6837,7 @@ mod tests {
         assert!(rec.bayes_screen);
         assert!(matches!(
             Config::recommended(38).move_library,
-            MoveLibrary::Reseed
+            MoveLibrary::LeanBurst
         ));
         assert!(matches!(
             Config::recommended(75).move_library,
