@@ -1,9 +1,10 @@
 # Weak scaling for parallel tempering and the population methods.
-# Run one cell at a time so the threads are not sharing the host:
+# Run one cell at a time so the workers are not sharing the host:
 #   snakemake -s workflow/weak_scale.smk -j 1 --cores 1
+# Published rows stop at the physical core count. This host has 8 cores.
 
 FAMILIES = ["pt", "population", "dmc"]
-WORKERS = [1, 2, 4, 8, 16]
+WORKERS = [1, 2, 4, 8]
 SEEDS = list(range(6))
 
 

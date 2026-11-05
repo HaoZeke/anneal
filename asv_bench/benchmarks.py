@@ -24,7 +24,7 @@ def _row(family: str, workers: int) -> dict[str, str]:
 class WeakScaling:
     """Cited weak-scaling statistics."""
 
-    params = (["pt", "population", "dmc"], [1, 2, 4, 8, 16])
+    params = (["pt", "population", "dmc"], [1, 2, 4, 8])
     param_names = ["family", "workers"]
 
     def track_median_wall_s(self, family, workers):

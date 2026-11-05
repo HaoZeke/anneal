@@ -20,7 +20,7 @@ RAW = ROOT / "results" / "weak_scale" / "raw"
 OUT_CSV = ROOT / "results" / "weak_scale" / "summary.csv"
 OUT_MD = ROOT / "results" / "weak_scale" / "table.md"
 FAMILIES = ("pt", "population", "dmc")
-WORKERS = (1, 2, 4, 8, 16)
+WORKERS = (1, 2, 4, 8)
 SEEDS = tuple(range(6))
 
 
@@ -111,6 +111,14 @@ def main() -> int:
             pools = [int(row["pool_threads"]) for row in sample]
             if any(pool != workers for pool in pools):
                 raise SystemExit(f"pool width {pools} at {workers} workers")
+            if workers > int(cores):
+                raise SystemExit(
+                    f"{family} w{workers} exceeds {cores} physical cores"
+                )
+            kinds = {row.get("worker_kind", "") for row in sample}
+            expected_kind = "process" if family == "pt" else "thread"
+            if kinds != {expected_kind}:
+                raise SystemExit(f"{family} worker_kind {kinds}, expected {expected_kind}")
             if len(set(charged)) != 1 or len(set(replicas)) != 1 or len(set(atoms)) != 1:
                 raise SystemExit(f"schedule drifted for {family} w{workers}")
             per_worker = charged[0] / workers
@@ -163,11 +171,16 @@ def main() -> int:
         "",
         f"Host CPU: {cpu}, {cores} cores.",
         "GPU: none. CUDA: none.",
-        "Workers are threads in one process on this host.",
+        "Parallel tempering uses one process per worker.",
+        "The parent process draws every swap after each swap interval.",
+        "Population annealing and the diffusion population use threads.",
+        "Those threads call the native Lennard-Jones energy.",
+        "They do not take the interpreter lock.",
         "Snakemake exports OMP_NUM_THREADS as 1.",
         "The Rayon pools and the diffusion threads use the worker count.",
-        "Worker counts are 1, 2, 4, 8, and 16.",
-        f"Sixteen threads share {cores} cores.",
+        "Worker counts are 1, 2, 4, and 8.",
+        f"Every published row uses at most {cores} workers on this {cores}-core host.",
+        "A sixteen-worker row would share the cores and is omitted.",
         "Each cell is six seeds, numbered 0 through 5.",
         "The wall time is the median.",
         "The IQR is the type 7 interquartile range of those six wall times.",

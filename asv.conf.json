@@ -3,7 +3,7 @@
   "project": "anneal",
   "project_url": "https://github.com/HaoZeke/anneal",
   "repo": ".",
-  "branches": ["paper/weak-scaling-2026-11-05"],
+  "branches": ["paper/weak-scaling-pt-processes-2026-11-05"],
   "environment_type": "existing",
   "build_command": "true",
   "install_command": "true",

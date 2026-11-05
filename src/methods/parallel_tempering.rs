@@ -182,22 +182,115 @@ impl<S: Sampler<f64>, E: Exchange<f64>> ParallelTemperingSampler<S, E> {
     /// pair swaps every `swap_period` steps. The Cool inside the inner
     /// sampler is ignored at the chain temperature; the swap rule
     /// targets the Boltzmann distribution at each chain's fixed temp.
-    pub fn run<C>(&self, cooling: &C, n_epochs: usize, seed: u64) -> PtResult
+    ///
+    /// Chains share the calling thread. One proposal finishes on every
+    /// chain before the next proposal starts, and the swap is drawn on
+    /// that same thread. The weak-scaling table does not time this
+    /// function with extra threads. It runs the same ladder in one
+    /// process per worker.
+    pub fn run<C>(&self, _cooling: &C, n_epochs: usize, seed: u64) -> PtResult
     where
         C: Cooling<f64>,
     {
-        self.run_threads(cooling, n_epochs, seed, 1)
+        let m = self.temps.len();
+        let mut rngs: Vec<StdRng> = (0..m)
+            .map(|c| StdRng::seed_from_u64(seed.wrapping_add(c as u64)))
+            .collect();
+        let mut swap_rng = StdRng::seed_from_u64(seed.wrapping_add(m as u64 + 1));
+        let mut states: Vec<State> = rngs
+            .iter_mut()
+            .map(|rng| self.sampler.initial_state(rng))
+            .collect();
+        let mut chain_histories: Vec<History> = states
+            .iter()
+            .map(|s| History::with_capacity(n_epochs, s.best.clone()))
+            .collect();
+        let mut best_val = f64::INFINITY;
+        let mut best_pos = states[0].cur.pos.to_vec();
+        let mut swap_attempts = 0;
+        let mut swap_accepts = 0;
+        let mut hot_energies = Vec::with_capacity(n_epochs.saturating_mul(self.k_inner));
+
+        'epochs: for epoch in 0..n_epochs {
+            if crate::caller_stop::raised() {
+                break;
+            }
+            let mut accepted = vec![0usize; m];
+            let mut rejected = vec![0usize; m];
+            for inner in 0..self.k_inner {
+                if crate::caller_stop::raised() {
+                    break 'epochs;
+                }
+                // Serial chain steps: Python/CUTEst objectives hold the GIL;
+                // Rayon fan-out deadlocks under pyo3 attach. Native Sync
+                // objectives still scale via multi-walker dmc_pop batches.
+                for c in 0..m {
+                    if self.sampler.step(&mut states[c], epoch, &mut rngs[c]) {
+                        accepted[c] += 1;
+                    } else {
+                        rejected[c] += 1;
+                    }
+                    if states[c].cur.val < best_val {
+                        best_val = states[c].cur.val;
+                        best_pos = states[c].cur.pos.to_vec();
+                    }
+                }
+                if (inner + 1) % self.swap_period == 0 {
+                    let i = swap_rng.random_range(0..m - 1);
+                    let alpha = self.exchange.swap_accept_prob(
+                        states[i].cur.val,
+                        self.temps[i],
+                        states[i + 1].cur.val,
+                        self.temps[i + 1],
+                    );
+                    swap_attempts += 1;
+                    let u: f64 = swap_rng.random();
+                    if u < alpha {
+                        states.swap(i, i + 1);
+                        swap_accepts += 1;
+                    }
+                }
+                hot_energies.push(states[m - 1].cur.val);
+            }
+            for c in 0..m {
+                chain_histories[c].epochs.push(EpochLine {
+                    epoch,
+                    temp: self.temps[c],
+                    accepted: accepted[c],
+                    rejected: rejected[c],
+                    best_val: states[c].best.val,
+                });
+            }
+        }
+
+        for history in &mut chain_histories {
+            history.refresh_stationarity_flags();
+        }
+        let (log_z_ratio_est, log_z_ratio_se) = if self.exchange.satisfies_detailed_balance() {
+            estimate_log_z_ratio(&hot_energies, self.temps[0], self.temps[m - 1])
+        } else {
+            (f64::NAN, f64::NAN)
+        };
+
+        PtResult {
+            chain_histories,
+            best_pos,
+            best_val,
+            swap_attempts,
+            swap_accepts,
+            log_z_ratio_est,
+            log_z_ratio_se,
+        }
     }
 
-    /// Runs the ladder of [`Self::run`] on `threads` workers.
+    /// Runs each chain for a full swap interval before the next chain.
     ///
-    /// One worker keeps the chain loop on the calling thread. That loop
-    /// stays available because a Python or CUTEst objective holds the GIL,
-    /// and a Rayon fan-out from that attach deadlocks. More than one worker
-    /// runs the steps between swaps together, then the calling thread draws
-    /// the adjacent swap. Each chain keeps its own generator, so the visited
-    /// states match the single-worker loop. The caller stop flag is read
-    /// between swaps.
+    /// One worker stays on the calling thread. More than one worker runs
+    /// those intervals at the same time, then the calling thread draws the
+    /// swap. A Python or CUTEst objective holds the interpreter lock, so
+    /// this fan-out does not measure the ladder. The weak-scaling table
+    /// uses one process per worker instead. Each chain keeps the generator
+    /// seeded in [`Self::run`]. The caller stop flag is read between swaps.
     pub fn run_threads<C>(
         &self,
         _cooling: &C,
