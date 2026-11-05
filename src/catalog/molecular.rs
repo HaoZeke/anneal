@@ -1360,9 +1360,14 @@ mod water_hexamer_tests {
             assert_eq!(cfg.move_library, library);
             assert!(cfg.surfaces.is_empty());
             match &cfg.move_library {
-                MoveLibrary::Molecular { groups, reactive } => {
+                MoveLibrary::Molecular {
+                    groups,
+                    reactive,
+                    reverse_cycles,
+                } => {
                     assert_eq!(groups.len(), WATER_HEXAMER_MOLECULES);
                     assert!(!reactive);
+                    assert!(reverse_cycles, "water should have reverse_cycles enabled");
                 }
                 other => panic!("molecular library replaced by {other:?}"),
             }

@@ -42,6 +42,9 @@ pub enum MoveLibrary {
         groups: Vec<Vec<usize>>,
         /// Keep atomic moves reachable for bond breaking and formation.
         reactive: bool,
+        /// Offer the reversal of a directed hydrogen-bond cycle as one more
+        /// arm. Needs three-atom water groups (O, H, H).
+        reverse_cycles: bool,
     },
     /// Separate centre-of-mass translation and rotation, Wales--Hodges style.
     ///
@@ -191,7 +194,11 @@ impl MoveLibrary {
                 });
                 kernels
             }
-            Self::Molecular { groups, reactive } => {
+            Self::Molecular {
+                groups,
+                reactive,
+                reverse_cycles,
+            } => {
                 let mut kernels = if *reactive {
                     ClusterMove::library_combined_scaled(
                         cfg.n_points,
@@ -209,6 +216,11 @@ impl MoveLibrary {
                 let mobile = mobile_atoms(cfg, groups);
                 if cfg.soap_mode != SoapProposalMode::Off {
                     kernels.push(soap_arm(cfg, mobile, Some(groups.clone())));
+                }
+                if *reverse_cycles && super::cycles::is_water_groups(groups) {
+                    kernels.push(ClusterMove::GroupCycleReverse {
+                        groups: groups.clone(),
+                    });
                 }
                 kernels
             }
@@ -598,6 +610,15 @@ pub enum ClusterMove {
         n_molecules: usize,
         /// Site geometry of one water: one oxygen, two hydrogens.
         geometry: crate::rigid_body::RigidBodyGeometry,
+    },
+    /// Reverse a directed H-bond cycle in Cartesian water coordinates.
+    ///
+    /// Like [`ClusterMove::RigidReverseCycle`] but for flexible Cartesian
+    /// coordinates with three-atom water groups (O, H, H). Each molecule on
+    /// the cycle rotates about its oxygen so the cycle points the other way.
+    GroupCycleReverse {
+        /// Atom indices of each three-atom water group: `[O, H, H]`.
+        groups: Vec<Vec<usize>>,
     },
     /// Step in the SOAP power spectrum and pull back through \(J = \partial p/\partial R\).
     ///
@@ -1413,6 +1434,7 @@ impl ClusterMove {
             ClusterMove::RigidReorient { .. } => "rreor".into(),
             ClusterMove::RigidOrientAll { .. } => "rorient".into(),
             ClusterMove::RigidReverseCycle { .. } => "rcycle".into(),
+            ClusterMove::GroupCycleReverse { .. } => "gcycle".into(),
         }
     }
 
@@ -1811,6 +1833,11 @@ impl ClusterMove {
             } => {
                 let mut y = x.to_owned();
                 super::cycles::reverse_cycle(geometry, *n_molecules, &mut y, rng);
+                y
+            }
+            ClusterMove::GroupCycleReverse { groups } => {
+                let mut y = x.to_owned();
+                super::cycles::reverse_cycle_cartesian(groups, &mut y, rng);
                 y
             }
             ClusterMove::SpeciesSwap {
