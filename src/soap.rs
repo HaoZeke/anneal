@@ -1412,12 +1412,28 @@ pub fn class_masses(x: ArrayView1<f64>, spec: SoapSpec) -> [f64; 3] {
 /// Observation, not a hop target. Used to *withhold* Ih-preserving
 /// symmetrise. Does not name a destination packing.
 pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
+    let _ = spec;
+    ih_dominated_at(x, 1.0)
+}
+
+/// Common-neighbour cutoff of [`ih_dominated_at`], in units of the length
+/// scale: above the Lennard-Jones first shell at `2^(1/6)` and below the
+/// second.
+pub const IH_CNA_CUTOFF: f64 = 1.35;
+
+/// As [`ih_dominated`], for a structure whose length unit is
+/// `length_scale` times the Lennard-Jones `sigma`.
+///
+/// The contact graph is cut at [`IH_CNA_CUTOFF`] times `length_scale`.
+/// A cutoff past the second shell makes the common neighbours of a pair
+/// a dense graph, and the longest-trail search over that graph is
+/// exponential in its bonds.
+pub fn ih_dominated_at(x: ArrayView1<f64>, length_scale: f64) -> bool {
     let n = x.len() / 3;
     if n == 0 {
         return false;
     }
-    let _ = spec;
-    let c = crate::structure::cna(x, n, 1.35);
+    let c = crate::structure::cna(x, n, IH_CNA_CUTOFF * length_scale);
     c.fraction((5, 5, 5)) > 0.12
 }
 
@@ -3325,6 +3341,15 @@ mod tests {
             moved >= 2,
             "SOAP pullback moved {moved} atoms; expected a concerted step"
         );
+    }
+
+    #[test]
+    fn the_icosahedral_reading_follows_the_length_scale() {
+        let nn = 2.0_f64.powf(1.0 / 6.0);
+        let x = ico13().mapv(|v| v * nn);
+        assert!(ih_dominated(x.view(), SoapSpec::default()));
+        let scale = std::f64::consts::FRAC_1_SQRT_2 / nn;
+        assert!(ih_dominated_at(x.mapv(|v| v * scale).view(), scale));
     }
 
     #[test]
