@@ -1,0 +1,9 @@
+HEAD: 3548427fbfaf4b70d82564c2ed0d479063b88fd2
+tree: a43ccd5efa0c8138199a3b78b233e7876c99e93f
+command: /agent/repos/anneal/../tmp/anneal-target/release/examples/weak_scale dmc 1 4
+exit: 0
+cpu_model: Intel Xeon Processor
+cores: 8
+gpu: none
+cuda: none
+family=dmc workers=1 pool_threads=1 atoms=13 replicas=8 charged=262144 wall_s=0.226223286 best=-1.5140347904691453e1 seed=4

@@ -155,7 +155,7 @@ def main() -> int:
         "cuda",
     ]
     with OUT_CSV.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         writer.writerows(summary)
     lines = [
@@ -164,6 +164,8 @@ def main() -> int:
         f"Host CPU: {cpu}, {cores} cores.",
         "GPU: none. CUDA: none.",
         "Workers are threads in one process on this host.",
+        "Snakemake exports OMP_NUM_THREADS as 1.",
+        "The Rayon pools and the diffusion threads use the worker count.",
         "Worker counts are 1, 2, 4, 8, and 16.",
         f"Sixteen threads share {cores} cores.",
         "Each cell is six seeds, numbered 0 through 5.",

@@ -1,0 +1,9 @@
+HEAD: 3548427fbfaf4b70d82564c2ed0d479063b88fd2
+tree: a43ccd5efa0c8138199a3b78b233e7876c99e93f
+command: /agent/repos/anneal/../tmp/anneal-target/release/examples/weak_scale population 4 1
+exit: 0
+cpu_model: Intel Xeon Processor
+cores: 8
+gpu: none
+cuda: none
+family=population workers=4 pool_threads=4 atoms=13 replicas=32 charged=2097184 wall_s=0.323290005 best=-1.6802455609507945e1 seed=1

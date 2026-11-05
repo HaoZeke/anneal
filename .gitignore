@@ -2,8 +2,6 @@
 .pdm.toml
 *.ipynb
 .bench/
-# Cited weak-scaling logs stay in the tree.
-!results/weak_scale/**/*.log
 
 # Created by https://www.toptal.com/developers/gitignore/api/python
 # Edit at https://www.toptal.com/developers/gitignore?templates=python
@@ -68,6 +66,8 @@ cover/
 
 # Django stuff:
 *.log
+# Cited weak-scaling logs stay in the tree.
+!results/weak_scale/**/*.log
 local_settings.py
 db.sqlite3
 db.sqlite3-journal

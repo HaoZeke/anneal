@@ -34,7 +34,9 @@ def main() -> int:
     OUT.parent.mkdir(parents=True, exist_ok=True)
     with OUT.open("w", newline="") as handle:
         writer = csv.DictWriter(
-            handle, fieldnames=["track", "family", "workers", "value"]
+            handle,
+            fieldnames=["track", "family", "workers", "value"],
+            lineterminator="\n",
         )
         writer.writeheader()
         for family in families:

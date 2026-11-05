@@ -1,0 +1,9 @@
+HEAD: 3548427fbfaf4b70d82564c2ed0d479063b88fd2
+tree: a43ccd5efa0c8138199a3b78b233e7876c99e93f
+command: /agent/repos/anneal/../tmp/anneal-target/release/examples/weak_scale pt 16 1
+exit: 0
+cpu_model: Intel Xeon Processor
+cores: 8
+gpu: none
+cuda: none
+family=pt workers=16 pool_threads=16 atoms=13 replicas=32 charged=8388640 wall_s=0.793723842 best=-1.8248329617869836e0 seed=1
