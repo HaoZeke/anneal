@@ -113,6 +113,10 @@ pub struct EnsembleConfig {
     pub checkpoint_interval: usize,
     /// Energy below which a replica has found the target.
     pub target: Option<f64>,
+    /// Retire every replica once one has found the target: the replica that
+    /// finds it at that checkpoint, the others at their next one. The
+    /// first-target record is taken before any replica retires.
+    pub stop_at_target: bool,
 }
 
 impl EnsembleConfig {
@@ -559,6 +563,7 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
     let occupied =
         (ens.two_choice_stall.is_some() && replicas > 1).then(|| OccupiedBoard::new(replicas));
     let target = ens.target;
+    let target_found = std::sync::atomic::AtomicBool::new(false);
 
     let reports: Vec<Result<ReplicaReport, String>> = std::thread::scope(|scope| {
         let handles: Vec<_> = budgets
@@ -571,8 +576,13 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                     HistoryMode::Private => Some(&histories[replica]),
                     HistoryMode::Shared => Some(&histories[0]),
                 };
-                let (exchange, mailboxes, occupied, charged_total) =
-                    (&exchange, &mailboxes, occupied.as_ref(), &charged_total);
+                let (exchange, mailboxes, occupied, charged_total, target_found) = (
+                    &exchange,
+                    &mailboxes,
+                    occupied.as_ref(),
+                    &charged_total,
+                    &target_found,
+                );
                 let context = context.clone();
                 let caller_stop = crate::caller_stop::bound();
                 scope.spawn(move || -> Result<ReplicaReport, String> {
@@ -639,6 +649,12 @@ pub fn run_ensemble<W: ExactStructureWitness + Sync + ?Sized>(
                             && target.is_some_and(|t| snapshot.best_energy() < t)
                         {
                             first_target_calls = Some(charged_total.load(Ordering::SeqCst));
+                            target_found.store(true, Ordering::SeqCst);
+                        }
+                        if ens.stop_at_target && target_found.load(Ordering::SeqCst) {
+                            return CheckpointAction::Retire {
+                                reason: "target".into(),
+                            };
                         }
                         if snapshot.best_energy() < best_seen - 1e-9 {
                             best_seen = snapshot.best_energy();
@@ -873,6 +889,7 @@ mod tests {
             two_choice_stall: Some(2_000),
             checkpoint_interval: 300,
             target: Some(-0.4),
+            stop_at_target: false,
         }
     }
 

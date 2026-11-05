@@ -179,7 +179,8 @@ pub fn executable_sha256() -> String {
 /// `SHARED_BIAS_WEIGHT`; `GOSSIP` ring or random with `GOSSIP_INTERVAL`,
 /// `GOSSIP_WEIGHT`, `GOSSIP_TOP` (0 sends the whole table) and
 /// `GOSSIP_ADAPTIVE=1`; `TWO_CHOICE_STALL` in charged calls;
-/// `HISTORY_CHECKPOINT` for the exchange lag.
+/// `HISTORY_CHECKPOINT` for the exchange lag; `STOP_AT_TARGET=1` retires
+/// the ensemble once a replica reaches the target.
 pub fn config_from_env(replicas: usize, budget: usize, target: Option<f64>) -> EnsembleConfig {
     use anneal_core::methods::ensemble::{GossipConfig, GossipTopology, HistoryMode};
     use anneal_core::methods::minima_hopping::HistoryMembership;
@@ -225,6 +226,7 @@ pub fn config_from_env(replicas: usize, budget: usize, target: Option<f64>) -> E
             .unwrap_or(1_000)
             .max(1),
         target,
+        stop_at_target: anneal_core::env::flag("STOP_AT_TARGET"),
     }
 }
 

@@ -40,6 +40,7 @@ fn run(shared: bool, gossip: bool, restart: bool) -> EnsembleReport {
         two_choice_stall: restart.then_some(1),
         checkpoint_interval: 1,
         target: None,
+        stop_at_target: false,
     };
     let descriptor = universal_descriptor_space(DescriptorGeometry::finite(1.0).unwrap());
     let context = StructureContext::new(Some(vec![18; 4]), None, Some("channel-contract".into()));
