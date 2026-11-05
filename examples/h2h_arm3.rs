@@ -7,7 +7,9 @@
 //! points file, the Leary tetrahedron, where `lj98` reads the table.
 //! The start is the driver's random cluster. The reference only scores a hit.
 //! The atomic systems run [`Config::for_cluster`] with orbit completion on
-//! every new basin from both cores; water runs [`Config::for_tip4p`].
+//! every new basin from both cores, and a random restart after
+//! [`stall_restart_calls`] charged calls without a new best. Water runs
+//! [`Config::for_tip4p`].
 //! `H2H_ARM` runs an atomic system as communicating chains instead, as
 //! `common/h2h_chains.rs` describes.
 
@@ -18,14 +20,13 @@ mod h2h_chains;
 
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, OrbitCore,
-    random_cluster, run_with_bias_at_checkpoints,
+    ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, random_cluster,
+    run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::{
     PairPotential, Tip4pCluster, random_tip4p_cluster, wales_hodges_minimum,
 };
-use anneal_core::symmetrise::ShellCore;
 use h2h_chains::{Arm, run_chains};
 use ndarray::ArrayView1;
 use rand::SeedableRng;
@@ -149,14 +150,22 @@ struct Hit {
     hops: Option<usize>,
 }
 
+/// Charged calls without a new best before a random restart.
+///
+/// A quench costs `relax_steps` evaluations. The stall clock waits
+/// `screen_steps` of those quenches. The product does not read the atom
+/// count. It replaces the hand-set 4000 on the dual-core preset.
+fn stall_restart_calls(cfg: &Config) -> usize {
+    cfg.screen_steps.saturating_mul(cfg.relax_steps).max(1)
+}
+
 fn atomic(spec: &Spec, pot: PairPotential, budget: usize, seed: u64, started: Instant) {
     let scale = pot.kind().r_min() / 2.0_f64.powf(1.0 / 6.0);
     let mut base = Config::for_cluster(spec.n);
     base.min_separation *= scale;
     base.container *= scale;
-    let mut cfg = base.clone();
-    cfg.orbit_complete_on_new = true;
-    cfg.orbit_core = OrbitCore::Both(ShellCore::scaled(cfg.length_scale));
+    let mut cfg = base.clone().with_dual_orbit_core();
+    cfg.restart_patience = stall_restart_calls(&cfg);
     let arm = Arm::from_env();
     if arm != Arm::Single {
         let chain = arm.chain_config(&cfg, base);
