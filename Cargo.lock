@@ -2289,7 +2289,7 @@ dependencies = [
 [[package]]
 name = "rgsaddle"
 version = "0.3.2"
-source = "git+https://github.com/OmniPotentRPC/rgsaddle?rev=ec278c8364a27bebbb5781cfcb6ba1a285dbcf1a#ec278c8364a27bebbb5781cfcb6ba1a285dbcf1a"
+source = "git+https://github.com/OmniPotentRPC/rgsaddle?rev=31f48d2cb0f196bd28b2ac9774fecdaad8571688#31f48d2cb0f196bd28b2ac9774fecdaad8571688"
 dependencies = [
  "dlpk",
  "eindir-core",
