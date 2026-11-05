@@ -2401,6 +2401,11 @@ where
     // unseen-environment share before the arrival is added.
     let mut trace_book = seam_trace.then(crate::catalog::PackingBook::default);
     let mut restarts = 0usize;
+    // Read once. The tally is a diagnostic of proposal outcomes and does
+    // not enter the acceptance draw.
+    let tally_moves = std::env::var("ANNEAL_MOVE_TALLY").is_ok();
+    let mut move_tally: std::collections::BTreeMap<String, [u64; 2]> =
+        std::collections::BTreeMap::new();
     let mut exchanges_refused = 0usize;
     let mut jumps = 0usize;
     let mut symmetrised = 0usize;
@@ -4822,6 +4827,13 @@ where
                 tabu_hits += 1;
             }
         }
+        if tally_moves {
+            let row = move_tally.entry(proposal_action.clone()).or_insert([0, 0]);
+            row[0] += 1;
+            if accept {
+                row[1] += 1;
+            }
+        }
         // The energy bias is one function on every rung, so its factor and its
         // deposits read one temperature whichever rung fills the sample or
         // deposits: the one the coldest rung hops at from the state it holds,
@@ -6265,6 +6277,14 @@ where
         }
     };
 
+    if tally_moves {
+        for (name, row) in &move_tally {
+            eprintln!(
+                "move_tally action={name} trials={} accepts={}",
+                row[0], row[1]
+            );
+        }
+    }
     let n_basins = bias.n_basins();
     // Per-rung sampler diagnostics, with the active rung put back at its own
     // index so the report reads in ladder order.

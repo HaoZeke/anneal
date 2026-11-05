@@ -231,7 +231,38 @@ fn atomic(spec: &Spec, pot: PairPotential, budget: usize, seed: u64, started: In
     );
     let target = spec.reference + spec.tol;
     let mut seen: Option<Hit> = None;
+    let trace = std::env::var("H2H_TRACE").is_ok();
+    if trace {
+        println!(
+            "stall_wait={patience} budget={budget} relax={relax} screen={screen} ratio_num={ratio_num} ratio_den={ratio_den}",
+            patience = cfg.restart_patience,
+            relax = cfg.relax_steps,
+            screen = cfg.screen_steps,
+            ratio_num = cfg.relax_steps.saturating_sub(cfg.screen_steps),
+            ratio_den = cfg
+                .relax_steps
+                .saturating_mul(2)
+                .saturating_sub(cfg.screen_steps),
+        );
+    }
+    let mut traced_best = f64::INFINITY;
+    let mut accept_by_type: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
     let mut checkpoint = |ck: ChainCheckpoint<'_>| {
+        if trace {
+            for step in ck.accepted_transitions() {
+                *accept_by_type.entry(step.action.clone()).or_default() += 1;
+            }
+            if ck.best_energy() < traced_best - 1e-12 {
+                println!(
+                    "best_e calls={} best={:.8} hops={}",
+                    ck.charged(),
+                    ck.best_energy(),
+                    ck.hops()
+                );
+                traced_best = ck.best_energy();
+            }
+        }
         if ck.best_energy() < target {
             if seen.is_none() {
                 seen = Some(Hit {
@@ -259,6 +290,11 @@ fn atomic(spec: &Spec, pot: PairPotential, budget: usize, seed: u64, started: In
     )
     .expect("finite start");
     let hit = earlier(seen, &out.improvements, target);
+    if trace {
+        for (name, n) in &accept_by_type {
+            println!("accepted_type action={name} accepts={n}");
+        }
+    }
     emit(Record {
         spec,
         cfg: &cfg,
