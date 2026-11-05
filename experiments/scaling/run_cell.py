@@ -30,12 +30,14 @@ def main() -> int:
         f"HEAD: {head}",
         f"tree: {tree}",
         f"command: {command}",
-        f"exit: {completed.returncode}",
-        completed.stdout.rstrip("\n"),
     ]
+    stdout = completed.stdout.rstrip("\n")
+    if stdout:
+        lines.append(stdout)
     if completed.stderr.strip():
         lines.append("stderr:")
         lines.append(completed.stderr.rstrip("\n"))
+    lines.append(f"exit: {completed.returncode}")
     text = "\n".join(lines) + "\n"
     with open(output, "w", encoding="utf-8") as handle:
         handle.write(text)

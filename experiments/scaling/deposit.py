@@ -44,9 +44,15 @@ def check_type7() -> None:
 
 def parse_log(path: Path) -> dict[str, str]:
     fields: dict[str, str] = {}
+    in_stderr = False
     for line in path.read_text(encoding="utf-8").splitlines():
         if line == "stderr:" or line.startswith("stderr:"):
-            break
+            in_stderr = True
+            continue
+        if in_stderr and not (
+            line.startswith("exit:") or line.startswith("exit_code:")
+        ):
+            continue
         if ": " not in line:
             continue
         key, value = line.split(": ", 1)
@@ -101,13 +107,21 @@ def main() -> int:
             if fields.get(key) != anchor.get(key):
                 print(f"logs disagree on {key}", file=sys.stderr)
                 return 1
+    identity_keys = [
+        "best_energy",
+        "best_energy_bits",
+        "evaluations",
+        "decisions",
+        "n_evals",
+        "n_grads",
+        "n_accepts",
+        "best_pos_fnv",
+    ]
     identity: dict[tuple[str, str], dict[str, str]] = {}
     for fields in rows:
         key = (fields["method"], fields["repeat"])
         signature = {
-            "best_energy": fields["best_energy"],
-            "evaluations": fields["evaluations"],
-            "decisions": fields["decisions"],
+            name: fields[name] for name in identity_keys if name in fields
         }
         previous = identity.setdefault(key, signature)
         if previous != signature:
@@ -116,104 +130,132 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-    grouped: dict[tuple[str, str], list[float]] = {}
-    for fields in rows:
-        key = (fields["method"], fields["workers"])
-        grouped.setdefault(key, []).append(float(fields["wall_s"]))
-    for times in grouped.values():
-        if len(times) < 6:
-            print("fewer than 6 repeats", file=sys.stderr)
-            return 1
-    methods = sorted({key[0] for key in grouped})
-    out_dir = Path("experiments/scaling/results")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    summary_lines = [
-        "method,workers,n,median_wall_s,q1_wall_s,q3_wall_s,iqr_wall_s,speedup,parallel_efficiency"
+    physical_values = [
+        int(fields["physical_cpus"])
+        for fields in rows
+        if fields.get("physical_cpus", "").isdigit()
     ]
-    long_lines = ["method,workers,repeat,wall_s"]
-    for fields in rows:
-        long_lines.append(
-            f"{fields['method']},{fields['workers']},{fields['repeat']},{fields['wall_s']}"
-        )
-    table_rows = []
-    for method in methods:
-        baseline = grouped[(method, "1")]
-        base_median = quantile_type7(baseline, 0.5)
-        worker_ids = sorted({int(key[1]) for key in grouped if key[0] == method})
-        for workers in worker_ids:
-            times = grouped[(method, str(workers))]
-            median = quantile_type7(times, 0.5)
-            q1 = quantile_type7(times, 0.25)
-            q3 = quantile_type7(times, 0.75)
-            iqr = q3 - q1
-            speedup = base_median / median
-            efficiency = speedup / workers
-            summary_lines.append(
-                f"{method},{workers},{len(times)},{median:.9f},{q1:.9f},{q3:.9f},"
-                f"{iqr:.9f},{speedup:.6f},{efficiency:.6f}"
+    logical_values = [int(fields["logical_cpus"]) for fields in rows]
+    cap = min(physical_values) if physical_values else min(logical_values)
+    paper_rows = [fields for fields in rows if int(fields["workers"]) <= cap]
+    extra_rows = [fields for fields in rows if int(fields["workers"]) > cap]
+    def grouped_of(selected: list[dict[str, str]]) -> dict[tuple[str, str], list[float]]:
+        grouped: dict[tuple[str, str], list[float]] = {}
+        for fields in selected:
+            key = (fields["method"], fields["workers"])
+            grouped.setdefault(key, []).append(float(fields["wall_s"]))
+        for times in grouped.values():
+            if len(times) < 6:
+                print("fewer than 6 repeats", file=sys.stderr)
+                raise SystemExit(1)
+        return grouped
+
+    def table_text(
+        selected: list[dict[str, str]],
+        baselines: dict[str, float],
+        intro: str,
+    ) -> tuple[str, str, str]:
+        grouped = grouped_of(selected)
+        summary_lines = [
+            "method,workers,n,median_wall_s,q1_wall_s,q3_wall_s,iqr_wall_s,speedup,parallel_efficiency"
+        ]
+        long_lines = ["method,workers,repeat,wall_s"]
+        for fields in selected:
+            long_lines.append(
+                f"{fields['method']},{fields['workers']},{fields['repeat']},{fields['wall_s']}"
             )
-            table_rows.append(
-                (
-                    method,
-                    workers,
-                    len(times),
-                    median,
-                    q1,
-                    q3,
-                    iqr,
-                    speedup,
-                    efficiency,
+        methods = sorted({key[0] for key in grouped})
+        body = []
+        for method in methods:
+            base_median = baselines[method]
+            worker_ids = sorted({int(key[1]) for key in grouped if key[0] == method})
+            for workers in worker_ids:
+                times = grouped[(method, str(workers))]
+                median = quantile_type7(times, 0.5)
+                q1 = quantile_type7(times, 0.25)
+                q3 = quantile_type7(times, 0.75)
+                iqr = q3 - q1
+                speedup = base_median / median
+                efficiency = speedup / workers
+                summary_lines.append(
+                    f"{method},{workers},{len(times)},{median:.9f},{q1:.9f},{q3:.9f},"
+                    f"{iqr:.9f},{speedup:.6f},{efficiency:.6f}"
                 )
-            )
-    cpu = anchor["cpu_model"]
-    logical = anchor["logical_cpus"]
-    memory = anchor["memory_kib"]
-    gib = int(memory) / (1024 * 1024)
-    header = [
-        f"# Strong scaling on {cpu}",
-        "",
-        (
-            f"Host: {cpu}, {logical} logical CPUs, {memory} KiB memory "
-            f"({gib:.2f} GiB). GPU: {anchor['gpu']}."
-        ),
-        (
-            "Fixed problem: Lennard-Jones, "
-            f"{anchor['atoms']} atoms, {anchor['walkers']} walkers, "
-            f"{anchor['generations']} generations, "
-            f"quench length {anchor['quench_steps']}, "
-            f"diffusion Monte Carlo budget {anchor['dmc_budget']}."
-        ),
+                body.append(
+                    f"| {method} | {workers} | {len(times)} | {median:.6f} | {q1:.6f} | "
+                    f"{q3:.6f} | {iqr:.6f} | {speedup:.4f} | {efficiency:.4f} |"
+                )
+        cpu = anchor["cpu_model"]
+        logical = anchor["logical_cpus"]
+        memory = anchor["memory_kib"]
+        gib = int(memory) / (1024 * 1024)
+        physical = anchor.get("physical_cpus", str(cap))
+        header = [
+            f"# Strong scaling on {cpu}",
+            "",
+            (
+                f"Host: {cpu}, {physical} physical cores, {logical} logical CPUs, "
+                f"{memory} KiB memory ({gib:.2f} GiB). GPU: {anchor['gpu']}."
+            ),
+            (
+                "Fixed problem: Lennard-Jones, "
+                f"{anchor['atoms']} atoms, {anchor['walkers']} walkers, "
+                f"{anchor['generations']} generations, "
+                f"quench length {anchor['quench_steps']}, "
+                f"diffusion Monte Carlo budget {anchor['dmc_budget']}."
+            ),
+            intro,
+            (
+                "Six repeats. The quartile is Hyndman-Fan type 7. "
+                "Speedup and parallel efficiency use the median wall time against one worker."
+            ),
+            "This is a scaling table.",
+            "",
+            "| method | workers | n | median wall s | Q1 | Q3 | IQR | speedup | efficiency |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+        text = "\n".join(header + body) + "\n"
+        return "\n".join(summary_lines) + "\n", "\n".join(long_lines) + "\n", text
+
+    paper_grouped = grouped_of(paper_rows)
+    baselines = {
+        method: quantile_type7(paper_grouped[(method, "1")], 0.5)
+        for method in {key[0] for key in paper_grouped}
+    }
+    summary, long_text, text = table_text(
+        paper_rows,
+        baselines,
         (
             "The worker count is the thread pool. "
-            "Six repeats. The quartile is Hyndman-Fan type 7. "
-            "Speedup and parallel efficiency use the median wall time against one worker."
+            f"Published rows use at most {cap} workers, the physical core count on this host."
         ),
-        "This is a scaling table.",
-        "",
-        (
-            "| method | workers | n | median wall s | Q1 | Q3 | IQR | speedup | efficiency |"
-        ),
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
-    ]
-    body = []
-    for row in table_rows:
-        method, workers, count, median, q1, q3, iqr, speedup, efficiency = row
-        body.append(
-            f"| {method} | {workers} | {count} | {median:.6f} | {q1:.6f} | "
-            f"{q3:.6f} | {iqr:.6f} | {speedup:.4f} | {efficiency:.4f} |"
-        )
-    text = "\n".join(header + body) + "\n"
+    )
+    out_dir = Path("experiments/scaling/results")
+    out_dir.mkdir(parents=True, exist_ok=True)
     stable_csv = out_dir / "pop_strong_scaling.csv"
     stable_md = out_dir / "pop_strong_scaling.md"
     long_csv = out_dir / "pop_strong_scaling_long.csv"
-    stable_csv.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
+    stable_csv.write_text(summary, encoding="utf-8")
     stable_md.write_text(text, encoding="utf-8")
-    long_csv.write_text("\n".join(long_lines) + "\n", encoding="utf-8")
-    named = slug(cpu, logical)
-    (out_dir / f"{named}.csv").write_text(stable_csv.read_text(encoding="utf-8"), encoding="utf-8")
+    long_csv.write_text(long_text, encoding="utf-8")
+    named = slug(anchor["cpu_model"], anchor["logical_cpus"])
+    (out_dir / f"{named}.csv").write_text(summary, encoding="utf-8")
     (out_dir / f"{named}.md").write_text(text, encoding="utf-8")
     print(f"wrote {stable_csv}")
     print(f"wrote {named}.csv")
+    if extra_rows:
+        extra_summary, extra_long, extra_text = table_text(
+            extra_rows,
+            baselines,
+            (
+                "These worker counts exceed the physical core count on this host. "
+                "They are an oversubscription note, not a published strong-scaling row."
+            ),
+        )
+        (out_dir / "oversubscribe.csv").write_text(extra_summary, encoding="utf-8")
+        (out_dir / "oversubscribe.md").write_text(extra_text, encoding="utf-8")
+        (out_dir / "oversubscribe_long.csv").write_text(extra_long, encoding="utf-8")
+        print("wrote oversubscribe.md")
     return 0
 
 

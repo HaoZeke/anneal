@@ -17,13 +17,14 @@
 
 use eindir_core::{Bounds, Gradient, Objective};
 use ndarray::{Array1, Array2, ArrayView1};
+use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use rand::rngs::StdRng;
+use rayon::prelude::*;
 
 use crate::accept::{AcceptRule, TsallisAccept};
 use crate::methods::local_polish::projected_gradient_polish;
-use crate::movekernel::{MoveKernel, TsallisVisit, reflect_into_box};
+use crate::movekernel::{reflect_into_box, MoveKernel, TsallisVisit};
 
 /// Default target walker population when the caller does not set one.
 pub const DEFAULT_TARGET_WALKERS: usize = 24;
@@ -577,6 +578,8 @@ pub struct DmcPopulationResult {
     pub final_population: usize,
     /// Number of population-control (branch/kill) events.
     pub controls: usize,
+    /// Proposal accepts. Gradient polish updates are not accepts.
+    pub n_accepts: usize,
 }
 
 /// Run population-controlled diffusion under a hard evaluation budget.
@@ -599,8 +602,8 @@ pub fn run_dmc_population<O, G, R>(
     rng: &mut R,
 ) -> DmcPopulationResult
 where
-    O: Objective<f64>,
-    G: Gradient<f64>,
+    O: Objective<f64> + Sync,
+    G: Gradient<f64> + Sync,
     R: Rng,
 {
     run_dmc_population_seeded(
@@ -630,8 +633,8 @@ pub fn run_dmc_population_seeded<O, G, R>(
     rng: &mut R,
 ) -> DmcPopulationResult
 where
-    O: Objective<f64>,
-    G: Gradient<f64>,
+    O: Objective<f64> + Sync,
+    G: Gradient<f64> + Sync,
     R: Rng,
 {
     run_dmc_population_seeded_with_proposals(
@@ -646,6 +649,254 @@ where
         rng,
         None,
     )
+}
+
+struct ElitePass {
+    pos: Array1<f64>,
+    energy: f64,
+    n_evals: usize,
+    n_grads: usize,
+}
+
+/// One gradient-polish iteration with a private budget and a private generator.
+///
+/// The caller snapshots the elite and the generator before the pool runs a
+/// wave, so the iteration does not read another slot's result.
+fn gradient_elite_pass<O, G>(
+    obj: &O,
+    gr: &G,
+    mut x: Array1<f64>,
+    mut fx: f64,
+    cap: usize,
+    dim: usize,
+    e_span: f64,
+    bounds: &Bounds<f64>,
+    visit: &TsallisVisit,
+    rng: &mut StdRng,
+) -> ElitePass
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    let mut n_evals = 0usize;
+    let mut n_grads = 0usize;
+    let spent = |ne: usize, ng: usize| ne + ng;
+    if cap < 3 {
+        return ElitePass {
+            pos: x,
+            energy: fx,
+            n_evals,
+            n_grads,
+        };
+    }
+    let remain = cap;
+    let max_fe = (remain / 3).max(4).min((2 * dim + 24).max(16));
+    let step0 = (default_sigma(bounds) * 0.5).max(1e-4);
+    let pol = projected_gradient_polish(obj, gr, x.clone(), max_fe, step0, 1e-10);
+    let room = cap.saturating_sub(spent(n_evals, n_grads));
+    let charged = (pol.n_evals + pol.n_grads).min(room);
+    let ce = pol.n_evals.min(charged);
+    n_evals += ce;
+    n_grads += (charged - ce).min(pol.n_grads);
+    if pol.best_val.is_finite() && pol.best_val <= fx {
+        x = pol.best_pos;
+        fx = pol.best_val;
+    }
+    let hops = if remain > 4 * dim { 3 } else { 2 };
+    for hop in 0..hops {
+        if spent(n_evals, n_grads) + 8 >= cap {
+            break;
+        }
+        let t_hop = (e_span * (0.8 / (1.0 + hop as f64))).max(0.5);
+        let raw = visit.propose(x.view(), t_hop, rng);
+        let y = reflect_into_box(raw.view(), bounds);
+        if spent(n_evals, n_grads) >= cap {
+            break;
+        }
+        n_evals += 1;
+        let ey = obj.eval(y.view());
+        if !ey.is_finite() {
+            continue;
+        }
+        let room2 = cap.saturating_sub(spent(n_evals, n_grads));
+        if room2 < 6 {
+            if ey < fx {
+                x = y;
+                fx = ey;
+            }
+            break;
+        }
+        let max_fe2 = (room2 / 2).max(4).min((2 * dim + 20).max(12));
+        let pol2 = projected_gradient_polish(obj, gr, y.clone(), max_fe2, step0, 1e-10);
+        let room3 = cap.saturating_sub(spent(n_evals, n_grads));
+        let charged2 = (pol2.n_evals + pol2.n_grads).min(room3);
+        let ce2 = pol2.n_evals.min(charged2);
+        n_evals += ce2;
+        n_grads += (charged2 - ce2).min(pol2.n_grads);
+        if pol2.best_val.is_finite() && pol2.best_val < fx {
+            x = pol2.best_pos;
+            fx = pol2.best_val;
+        } else if ey < fx {
+            x = y;
+            fx = ey;
+        }
+    }
+    for hop in 0..3 {
+        if spent(n_evals, n_grads) + 10 >= cap {
+            break;
+        }
+        let t_hop = (e_span * (0.5 / (1.0 + hop as f64))).max(0.3);
+        let raw = visit.propose(x.view(), t_hop, rng);
+        let y = reflect_into_box(raw.view(), bounds);
+        if spent(n_evals, n_grads) >= cap {
+            break;
+        }
+        n_evals += 1;
+        let _ey = obj.eval(y.view());
+        let room2 = cap.saturating_sub(spent(n_evals, n_grads));
+        if room2 < 8 {
+            break;
+        }
+        let max_fe2 = (room2 / 2).max(6).min((3 * dim + 24).max(16));
+        let pol2 = projected_gradient_polish(obj, gr, y, max_fe2, step0, 1e-10);
+        let room3 = cap.saturating_sub(spent(n_evals, n_grads));
+        let charged2 = (pol2.n_evals + pol2.n_grads).min(room3);
+        let ce2 = pol2.n_evals.min(charged2);
+        n_evals += ce2;
+        n_grads += (charged2 - ce2).min(pol2.n_grads);
+        if pol2.best_val.is_finite() && pol2.best_val < fx {
+            x = pol2.best_pos;
+            fx = pol2.best_val;
+        }
+    }
+    ElitePass {
+        pos: x,
+        energy: fx,
+        n_evals,
+        n_grads,
+    }
+}
+
+/// Gradient-polish waves on the current rayon pool.
+///
+/// Each wave snapshots every slot it will polish and draws that slot's
+/// generator on the calling thread. The pool runs the passes, and the
+/// merge writes them in slot order. One worker and many workers share
+/// that schedule, so the energies, coordinates, and later accepts match.
+#[allow(clippy::too_many_arguments)]
+fn gradient_polish_waves<O, G, R>(
+    obj: &O,
+    gr: &G,
+    bounds: &Bounds<f64>,
+    visit: &TsallisVisit,
+    rng: &mut R,
+    elites: &mut Vec<(Array1<f64>, f64)>,
+    best_pos: &mut Array1<f64>,
+    best_val: &mut f64,
+    n_evals: &mut usize,
+    n_grads: &mut usize,
+    budget: usize,
+    dim: usize,
+    e_span: f64,
+) where
+    O: Objective<f64> + Sync,
+    G: Gradient<f64> + Sync,
+    R: Rng,
+{
+    let k_elite = elites.len().clamp(1, 5);
+    let mut ei = 0usize;
+    while n_evals.saturating_add(*n_grads) < budget && !crate::caller_stop::raised() {
+        let remain = budget.saturating_sub(n_evals.saturating_add(*n_grads));
+        if remain < 3 {
+            break;
+        }
+        let slots = k_elite.min((remain / 3).max(1));
+        let share = (remain / slots).max(3);
+        let mut caps = vec![share; slots];
+        caps[slots - 1] = remain - share * (slots - 1);
+        struct WaveJob {
+            x: Array1<f64>,
+            fx: f64,
+            cap: usize,
+            seed: u64,
+            write_at: usize,
+        }
+        let mut jobs = Vec::with_capacity(slots);
+        for s in 0..slots {
+            let read_at = (ei + s) % k_elite;
+            let (x, fx) = elites[read_at].clone();
+            jobs.push(WaveJob {
+                x,
+                fx,
+                cap: caps[s],
+                seed: rng.random::<u64>(),
+                write_at: (ei + s + 1) % k_elite,
+            });
+        }
+        let spent_before = n_evals.saturating_add(*n_grads);
+        let passes: Vec<ElitePass> = jobs
+            .par_iter()
+            .map(|job| {
+                let mut child = StdRng::seed_from_u64(job.seed);
+                gradient_elite_pass(
+                    obj,
+                    gr,
+                    job.x.clone(),
+                    job.fx,
+                    job.cap,
+                    dim,
+                    e_span,
+                    bounds,
+                    visit,
+                    &mut child,
+                )
+            })
+            .collect();
+        for (job, pass) in jobs.iter().zip(passes.iter()) {
+            let room = budget.saturating_sub(n_evals.saturating_add(*n_grads));
+            let charged = (pass.n_evals + pass.n_grads).min(room);
+            let ce = pass.n_evals.min(charged);
+            *n_evals += ce;
+            *n_grads += (charged - ce).min(pass.n_grads);
+            if pass.energy < *best_val {
+                *best_val = pass.energy;
+                *best_pos = pass.pos.clone();
+            }
+            elites[job.write_at] = (pass.pos.clone(), pass.energy);
+            ei += 1;
+            if k_elite >= 2 && ei.is_multiple_of(4) && n_evals.saturating_add(*n_grads) + 1 < budget
+            {
+                let a = elites[0].0.clone();
+                let b = elites[1 + (ei % (k_elite - 1))].0.clone();
+                let mut trial = Array1::zeros(dim);
+                for i in 0..dim {
+                    trial[i] = if rng.random::<f64>() < 0.5 {
+                        a[i]
+                    } else {
+                        b[i]
+                    };
+                }
+                let trial = reflect_into_box(trial.view(), bounds);
+                if n_evals.saturating_add(*n_grads) < budget {
+                    *n_evals += 1;
+                    let energy = obj.eval(trial.view());
+                    if energy < elites[k_elite - 1].1 {
+                        elites[k_elite - 1] = (trial.clone(), energy);
+                        elites.sort_by(|p, q| {
+                            p.1.partial_cmp(&q.1).unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                    }
+                    if energy < *best_val {
+                        *best_val = energy;
+                        *best_pos = trial;
+                    }
+                }
+            }
+        }
+        if n_evals.saturating_add(*n_grads) == spent_before {
+            break;
+        }
+    }
 }
 
 /// Global proposal correction precedes evaluation and walker-state updates.
@@ -664,8 +915,8 @@ pub(crate) fn run_dmc_population_seeded_with_proposals<O, G, R>(
     prepare: Option<&dyn Fn(ArrayView1<f64>, &mut Array1<f64>, Option<usize>) -> bool>,
 ) -> DmcPopulationResult
 where
-    O: Objective<f64>,
-    G: Gradient<f64>,
+    O: Objective<f64> + Sync,
+    G: Gradient<f64> + Sync,
     R: Rng,
 {
     let bounds = obj.bounds().clone();
@@ -676,6 +927,7 @@ where
     let mut n_evals = 0usize;
     let mut n_grads = 0usize;
     let mut controls = 0usize;
+    let mut n_accepts = 0usize;
 
     let work = |ne: usize, ng: usize| ne + ng;
     let charge_obj = |x: ArrayView1<f64>, ne: &mut usize, ng: usize| -> Option<f64> {
@@ -757,6 +1009,7 @@ where
                 n_grads,
                 final_population: 0,
                 controls: 0,
+                n_accepts: 0,
             };
         }
         Population { target_n, walkers }
@@ -812,6 +1065,36 @@ where
         if polishing {
             // Multi-start elite polish: L-BFGS when grad is available (dual
             // annealing style), else continuous coordinate/pattern DF search.
+            // With a gradient and no proposal correction, each wave polishes
+            // disjoint elite slots on the current rayon pool.
+            if let Some(gr) = grad
+                && prepare.is_none()
+            {
+                let mut elites: Vec<(Array1<f64>, f64)> = pop
+                    .walkers
+                    .iter()
+                    .map(|w| (w.pos.clone(), w.energy))
+                    .collect();
+                elites.push((best_pos.clone(), best_val));
+                elites.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                elites.dedup_by(|a, b| (a.1 - b.1).abs() < 1e-14);
+                gradient_polish_waves(
+                    obj,
+                    gr,
+                    &bounds,
+                    &visit,
+                    rng,
+                    &mut elites,
+                    &mut best_pos,
+                    &mut best_val,
+                    &mut n_evals,
+                    &mut n_grads,
+                    budget,
+                    dim,
+                    e_span,
+                );
+                break;
+            }
             let mut elites: Vec<(Array1<f64>, f64)> = pop
                 .walkers
                 .iter()
@@ -1241,6 +1524,7 @@ where
             mem_cr[mem_pos] = lehmer_mean(&scr_success, &s_delta);
             mem_pos = (mem_pos + 1) % SHADE_H;
         }
+        n_accepts += n_accept;
         if n_trial > 0 {
             let rate = n_accept as f64 / n_trial as f64;
             accept_ema = 0.8 * accept_ema + 0.2 * rate;
@@ -1315,16 +1599,38 @@ where
                         .partial_cmp(&pop.walkers[b].energy)
                         .unwrap_or(std::cmp::Ordering::Equal)
                 });
-                let n_pol = if progress > 0.3 { 2 } else { 1 }.min(order_w.len());
-                for &wi in order_w.iter().take(n_pol) {
-                    if work(n_evals, n_grads) + 8 >= polish_start.min(budget) {
+                // One long polish is serial inside the timed wall. Split the same
+                // per-control budget across the live walkers. The width is the
+                // roster, not the thread count, so one worker and many workers
+                // polish the same starts for the same step cap.
+                let width = order_w.len().clamp(1, 32);
+                let each = (per / width).max(4);
+                let step0 = (default_sigma(&bounds) * 0.5).max(1e-4);
+                let mut plan = Vec::new();
+                let mut shadow = work(n_evals, n_grads);
+                for &wi in order_w.iter().take(width) {
+                    if shadow + 8 >= polish_start.min(budget) {
                         break;
                     }
-                    let x0 = pop.walkers[wi].pos.clone();
-                    let f0 = pop.walkers[wi].energy;
-                    let max_fe = (per / 2).max(4);
-                    let step0 = (default_sigma(&bounds) * 0.5).max(1e-4);
-                    let pol = projected_gradient_polish(obj, gr, x0.clone(), max_fe, step0, 1e-10);
+                    plan.push((
+                        wi,
+                        pop.walkers[wi].pos.clone(),
+                        pop.walkers[wi].energy,
+                        each,
+                    ));
+                    shadow = shadow.saturating_add(each.saturating_mul(2));
+                }
+                let polished: Vec<_> = plan
+                    .par_iter()
+                    .map(|(wi, x0, f0, max_fe)| {
+                        (
+                            *wi,
+                            *f0,
+                            projected_gradient_polish(obj, gr, x0.clone(), *max_fe, step0, 1e-10),
+                        )
+                    })
+                    .collect();
+                for (wi, f0, pol) in polished {
                     let room = budget.saturating_sub(work(n_evals, n_grads));
                     let charge = (pol.n_evals + pol.n_grads).min(room);
                     let ce = pol.n_evals.min(charge);
@@ -1454,6 +1760,7 @@ where
         n_grads,
         final_population: pop.walkers.len(),
         controls,
+        n_accepts,
     }
 }
 
@@ -1465,8 +1772,8 @@ pub fn dmc_population_optimize<O, G>(
     seed: u64,
 ) -> DmcPopulationResult
 where
-    O: Objective<f64>,
-    G: Gradient<f64>,
+    O: Objective<f64> + Sync,
+    G: Gradient<f64> + Sync,
 {
     let mut rng = StdRng::seed_from_u64(seed ^ 0xd1c_00b0_u64);
     let dim = obj.dim().max(1);
@@ -1982,5 +2289,37 @@ mod tests {
             res.best_val
         );
         assert!(obj.bounds().contains(res.best_pos.view()));
+    }
+
+    /// Gradient polish on the caller pool matches the one-thread trajectory.
+    #[test]
+    fn parallel_gradient_polish_matches_serial_bits() {
+        use crate::potentials::PairPotential;
+
+        let once = |threads: usize| {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("thread pool");
+            pool.install(|| {
+                let obj = PairPotential::lennard_jones(16);
+                let mut rng = StdRng::seed_from_u64(7);
+                run_dmc_population(&obj, Some(&obj), 600, 7, 8, 2, 1.0, &mut rng)
+            })
+        };
+        let serial = once(1);
+        let parallel = once(4);
+        assert_eq!(serial.best_val.to_bits(), parallel.best_val.to_bits());
+        assert_eq!(serial.best_pos.len(), parallel.best_pos.len());
+        for (left, right) in serial.best_pos.iter().zip(parallel.best_pos.iter()) {
+            assert_eq!(left.to_bits(), right.to_bits());
+        }
+        assert_eq!(serial.n_evals, parallel.n_evals);
+        assert_eq!(serial.n_grads, parallel.n_grads);
+        assert_eq!(serial.n_accepts, parallel.n_accepts);
+        assert_eq!(serial.controls, parallel.controls);
+        assert_eq!(serial.final_population, parallel.final_population);
+        assert!(serial.n_grads > 0, "gradient polish did not run");
+        assert!(serial.n_accepts > 0, "no proposal accepts");
     }
 }
