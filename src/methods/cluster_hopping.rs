@@ -748,8 +748,11 @@ impl Ledger {
     }
 
     /// Records a value and its state when it improves the incumbent.
+    ///
+    /// A non-finite value is not an improvement. −∞ compares below every
+    /// finite incumbent, and adopting it leaves the run with no geometry.
     pub fn record(&mut self, value: f64, state: ArrayView1<f64>) {
-        if value < self.best {
+        if value.is_finite() && value < self.best {
             self.best = value;
             self.best_state = Some(state.to_owned());
         }
