@@ -1,0 +1,9 @@
+{
+    "arch": "x86_64",
+    "cpu": "Intel Xeon Processor",
+    "machine": "scaling-host",
+    "num_cpu": "8",
+    "os": "Linux 6.12.94+",
+    "ram": "50526994432",
+    "version": 1
+}

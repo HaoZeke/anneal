@@ -1,0 +1,38 @@
+{
+    "pop_strong.PopulationStrong.track_wall_seconds": {
+        "code": "class PopulationStrong:\n    def track_wall_seconds(self, method, workers, repeat):\n        path = os.path.join(\n            SCALE_DIR,\n            \"results\",\n            \"raw\",\n            str(method),\n            f\"w{workers}\",\n            f\"r{repeat}.txt\",\n        )\n        if os.path.isfile(path):\n            with open(path, encoding=\"utf-8\") as handle:\n                return _wall_seconds(handle.read())\n        completed = subprocess.run(\n            [\n                BINARY,\n                \"--method\",\n                str(method),\n                \"--workers\",\n                str(workers),\n                \"--repeat\",\n                str(repeat),\n            ],\n            check=True,\n            capture_output=True,\n            text=True,\n        )\n        return _wall_seconds(completed.stdout)",
+        "name": "pop_strong.PopulationStrong.track_wall_seconds",
+        "param_names": [
+            "method",
+            "workers",
+            "repeat"
+        ],
+        "params": [
+            [
+                "'population_annealing'",
+                "'dmc_population'",
+                "'successive_halving'"
+            ],
+            [
+                "1",
+                "2",
+                "4",
+                "8",
+                "16",
+                "32"
+            ],
+            [
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5"
+            ]
+        ],
+        "type": "track",
+        "unit": "seconds",
+        "version": "13211bf4ec21da6a65c369f5f9e32f3bbd8b75821b159a28eca79ca66518e75f"
+    },
+    "version": 2
+}

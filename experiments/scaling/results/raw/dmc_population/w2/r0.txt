@@ -1,0 +1,22 @@
+HEAD: d35e955fe26c092236cfef81c82b17c3cf1c705e
+tree: c77efbdaccbc2393a021e3ca9cf7137b5df68df4
+command: experiments/scaling/bin/pop_strong_scale --method dmc_population --workers 2 --repeat 0
+exit: 0
+method: dmc_population
+scaling: strong
+workers: 2
+repeat: 0
+seed: 0
+wall_s: 0.450544488
+best_energy: -192.6641297313871064
+evaluations: 19998
+decisions: 18
+atoms: 98
+walkers: 32
+generations: 400
+quench_steps: 40
+dmc_budget: 20000
+cpu_model: Intel Xeon Processor
+logical_cpus: 8
+memory_kib: 49342768
+gpu: none

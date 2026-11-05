@@ -1,0 +1,22 @@
+HEAD: d35e955fe26c092236cfef81c82b17c3cf1c705e
+tree: c77efbdaccbc2393a021e3ca9cf7137b5df68df4
+command: experiments/scaling/bin/pop_strong_scale --method population_annealing --workers 2 --repeat 0
+exit: 0
+method: population_annealing
+scaling: strong
+workers: 2
+repeat: 0
+seed: 0
+wall_s: 0.190437230
+best_energy: -40.3467456134363758
+evaluations: 14706
+decisions: 0
+atoms: 98
+walkers: 32
+generations: 400
+quench_steps: 40
+dmc_budget: 20000
+cpu_model: Intel Xeon Processor
+logical_cpus: 8
+memory_kib: 49342768
+gpu: none
