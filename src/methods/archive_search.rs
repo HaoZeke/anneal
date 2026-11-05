@@ -994,8 +994,10 @@ mod tests {
         assert_eq!(rec.escape_stall_patience, 5_000);
         assert!(!rec.symmetrise_on_stall);
 
+        // The preset keeps the start's covalent graph, so the start is a
+        // water molecule whose two O-H bonds the surrogate quench keeps.
         let mut rng = StdRng::seed_from_u64(3);
-        let start = random_cluster(3, 0.7, rec.min_separation, &mut rng);
+        let start = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -0.25, 0.97, 0.0]);
         let mut ledger = Ledger::new(200);
         let mut relax =
             |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| crude_relax(led, x, steps);
