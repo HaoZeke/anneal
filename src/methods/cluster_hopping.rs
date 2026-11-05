@@ -7281,7 +7281,8 @@ mod tests {
         ));
         let want = crate::screen::cost_asymmetric_threshold(der.screen_steps, der.relax_steps);
         assert!((der.bayes_threshold - want).abs() < 1e-12);
-        assert!((der.bayes_threshold - 7.0 / 15.0).abs() < 1e-12);
+        assert!((der.bayes_threshold - 39.0 / 79.0).abs() < 1e-12);
+        assert!((rec.bayes_threshold - 7.0 / 15.0).abs() < 1e-12);
     }
 
     #[test]
