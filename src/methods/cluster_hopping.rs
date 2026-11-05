@@ -845,6 +845,11 @@ pub struct Outcome {
     pub basins: usize,
     /// Charged evaluations spent.
     pub charged: usize,
+    /// Proposals closer than [`OVERLAP_SEPARATION`] before any energy call.
+    ///
+    /// Each one was separated, or dropped when separation failed. Neither the
+    /// raw geometry nor a dropped geometry is charged to [`Outcome::charged`].
+    pub overlap_rejected: usize,
     /// Trials abandoned because their partial relaxation was going home.
     pub returned: usize,
     /// Escape scale at the end of the run, when the controller is used.
@@ -1174,6 +1179,103 @@ pub fn structure_is_sane(x: ArrayView1<f64>, min_sep: f64) -> bool {
 /// Pair distance below which an external molecular potential is observing an
 /// overlap artifact rather than a physical bond.
 pub const OVERLAP_SEPARATION: f64 = 0.35;
+
+/// Push pairs closer than `min_sep` apart until the geometry clears that rule.
+///
+/// A declared group is translated as a rigid body when the close pair belongs
+/// to two groups, so the repair does not stretch a bond to cure a clash
+/// between molecules. A close pair inside one group, or a geometry with no
+/// groups, is pushed atom by atom. The function does not evaluate a potential.
+/// It returns whether every pair is now at least `min_sep` apart.
+pub(crate) fn separate_to_overlap_rule(
+    x: &mut Array1<f64>,
+    groups: Option<&[Vec<usize>]>,
+    min_sep: f64,
+) -> bool {
+    if !(min_sep.is_finite() && min_sep > 0.0) || x.iter().any(|value| !value.is_finite()) {
+        return false;
+    }
+    let n = x.len() / 3;
+    if n < 2 {
+        return true;
+    }
+    let owner = groups.map(|groups| {
+        let mut owner = vec![usize::MAX; n];
+        for (group, atoms) in groups.iter().enumerate() {
+            for &atom in atoms {
+                if atom < n {
+                    owner[atom] = group;
+                }
+            }
+        }
+        owner
+    });
+    let n_groups = groups.map(|groups| groups.len()).unwrap_or(0);
+    // A fraction of an angstrom past the rule, so a later strict comparison
+    // does not reject the same pair on a rounding residue.
+    let target = min_sep + 1.0e-8;
+    for _ in 0..64 {
+        if min_pair_distance(x.view()) >= min_sep {
+            return x.iter().all(|value| value.is_finite());
+        }
+        let mut group_shift = vec![[0.0_f64; 3]; n_groups];
+        let mut atom_shift = vec![[0.0_f64; 3]; n];
+        let mut moved = false;
+        for a in 0..n {
+            for b in (a + 1)..n {
+                let mut delta = [0.0_f64; 3];
+                let mut distance_squared = 0.0;
+                for axis in 0..3 {
+                    delta[axis] = x[3 * a + axis] - x[3 * b + axis];
+                    distance_squared += delta[axis] * delta[axis];
+                }
+                let distance = distance_squared.sqrt();
+                if distance >= target {
+                    continue;
+                }
+                let (direction, scale) = if distance < 1.0e-12 {
+                    ([1.0, 0.0, 0.0], 0.5 * target)
+                } else {
+                    let push = 0.5 * (target - distance) / distance;
+                    (delta, push)
+                };
+                let left = owner.as_ref().map(|owner| owner[a]).unwrap_or(usize::MAX);
+                let right = owner.as_ref().map(|owner| owner[b]).unwrap_or(usize::MAX);
+                if left != usize::MAX && right != usize::MAX && left != right {
+                    for axis in 0..3 {
+                        group_shift[left][axis] += scale * direction[axis];
+                        group_shift[right][axis] -= scale * direction[axis];
+                    }
+                } else {
+                    for axis in 0..3 {
+                        atom_shift[a][axis] += scale * direction[axis];
+                        atom_shift[b][axis] -= scale * direction[axis];
+                    }
+                }
+                moved = true;
+            }
+        }
+        if !moved {
+            break;
+        }
+        if let Some(owner) = owner.as_ref() {
+            for atom in 0..n {
+                let group = owner[atom];
+                if group != usize::MAX {
+                    for axis in 0..3 {
+                        x[3 * atom + axis] += group_shift[group][axis];
+                    }
+                }
+            }
+        }
+        for atom in 0..n {
+            for axis in 0..3 {
+                x[3 * atom + axis] += atom_shift[atom][axis];
+            }
+        }
+    }
+    x.iter().all(|value| value.is_finite()) && min_pair_distance(x.view()) >= min_sep
+}
 
 fn quench_is_sane(cfg: &Config, energy: f64, x: ArrayView1<f64>) -> bool {
     let minimum = if cfg.species.is_some() {
@@ -2668,6 +2770,7 @@ where
     let mut orient_window = 0usize;
     let mut orient_yes = 0usize;
     let mut hops = 0usize;
+    let mut proposal_overlaps = 0usize;
     let mut checkpoint_hops = 0usize;
     let mut checkpoint_quench_start = 0usize;
     let mut checkpoint_transition_start = 0usize;
@@ -4054,6 +4157,27 @@ where
             && let Some(slice) = trial.as_slice_mut()
         {
             crate::potentials::fold_rotation_vectors(n, slice);
+        }
+
+        // A molecular potential refuses a pair closer than the overlap rule
+        // before it will compute an energy. The hop has to hand that potential
+        // a geometry the rule already accepts. Separation is geometry only.
+        // The raw overlapping proposal is not an energy call.
+        if cfg.species.is_some() && !structure_is_sane(trial.view(), OVERLAP_SEPARATION) {
+            proposal_overlaps += 1;
+            let separated = separate_to_overlap_rule(
+                &mut trial,
+                cfg.move_library.declared_groups(),
+                OVERLAP_SEPARATION,
+            );
+            if !separated {
+                hops += 1;
+                bias.deposit(x.view(), temperature);
+                if proposal_overlaps > ledger.budget().saturating_mul(4) {
+                    break HopStop::Budget;
+                }
+                continue;
+            }
         }
 
         // Screen cheaply, then carry on regardless. A screened trial does not
@@ -6292,6 +6416,7 @@ where
         screened_out,
         basins: n_basins,
         charged: ledger.spent(),
+        overlap_rejected: proposal_overlaps,
         returned,
         escape_scale: feedback.escape(),
         escape_threshold: feedback.threshold(),
@@ -7370,6 +7495,30 @@ mod tests {
             1,
             "one well is one identity"
         );
+    }
+
+    #[test]
+    fn separated_groups_clear_the_overlap_rule_without_stretching_a_bond() {
+        let mut x = Array1::from(vec![
+            0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0, 0.10, 0.0, 0.0, 1.06, 0.0, 0.0, -0.14,
+            0.93, 0.0,
+        ]);
+        let groups = vec![vec![0, 1, 2], vec![3, 4, 5]];
+        let bond = |state: &Array1<f64>| {
+            let dx = state[3] - state[0];
+            let dy = state[4] - state[1];
+            let dz = state[5] - state[2];
+            (dx * dx + dy * dy + dz * dz).sqrt()
+        };
+        let before = bond(&x);
+        assert!(min_pair_distance(x.view()) < OVERLAP_SEPARATION);
+        assert!(separate_to_overlap_rule(
+            &mut x,
+            Some(&groups),
+            OVERLAP_SEPARATION
+        ));
+        assert!(min_pair_distance(x.view()) >= OVERLAP_SEPARATION);
+        assert!((bond(&x) - before).abs() < 1.0e-9);
     }
 
     #[test]

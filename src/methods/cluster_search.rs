@@ -15,9 +15,7 @@
 //! there arrives at the cluster driver by the same route as one written here
 //! and neither the driver nor this function can tell them apart.
 
-#[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
-#[cfg(test)]
 use crate::methods::cluster_hopping::min_pair_distance;
 #[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::structure_is_sane;
@@ -69,6 +67,11 @@ pub struct RelaxStats {
     /// twenty steps are buying precision nothing uses. If it does not, the
     /// screen is not overhead around the quench, it is the quench.
     pub probe_error: f64,
+    /// Line-search geometries closer than the overlap rule.
+    ///
+    /// Each one is refused before the potential is called, and it is not
+    /// included in [`RelaxStats::charged`].
+    pub overlap_rejected: usize,
     /// Descent steps those passes took, summed.
     ///
     /// Against `screens * screen_steps` this is what stopping on a decision
@@ -201,6 +204,50 @@ where
         .then_some(gradient)
 }
 
+/// Uphill stand-in for a geometry the overlap rule refuses.
+///
+/// The potential is not called. The line search still receives a step it
+/// will shorten, so a later trial can land on a separated geometry.
+fn overlap_rejection_step(
+    point: ArrayView1<f64>,
+    anchor: Option<&Array1<f64>>,
+) -> Option<(f64, Array1<f64>)> {
+    if let Some(step) = failed_step(point, anchor) {
+        return Some(step);
+    }
+    if point.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    let mut gradient = Array1::zeros(point.len());
+    if let Some(value) = gradient.first_mut() {
+        *value = FAILED_STEP_SLOPE;
+    }
+    Some((FAILED_STEP_ENERGY, gradient))
+}
+
+/// Charge a physical evaluation, or refuse an overlap without charging it.
+fn charge_or_refuse_overlap<O>(
+    objective: &O,
+    led: &mut Ledger,
+    stats: &mut RelaxStats,
+    point: ArrayView1<f64>,
+    anchor: &mut Option<Array1<f64>>,
+    refuse_overlap: bool,
+) -> Option<(f64, Array1<f64>, bool)>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    if refuse_overlap && min_pair_distance(point) < OVERLAP_SEPARATION {
+        stats.overlap_rejected += 1;
+        return overlap_rejection_step(point, anchor.as_ref())
+            .map(|(energy, gradient)| (energy, gradient, false));
+    }
+    if !led.charge() {
+        return None;
+    }
+    evaluated_pair(objective, point, anchor)
+}
+
 fn warm_relax<'a, O>(
     objective: &'a O,
     cfg: &'a Config,
@@ -225,6 +272,7 @@ where
     let mut surfaces = (!cfg.surfaces.is_empty())
         .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
     let mut anchor: Option<Array1<f64>> = None;
+    let refuse_overlap = cfg.species.is_some();
     move |led, x, iters| {
         opt.forget();
         let before = led.spent();
@@ -253,10 +301,14 @@ where
                 let cutoff = two.cutoff_for(x);
                 let shape = two.shape_for(x);
                 let (_, phase_one, _) = opt.minimize(x, iters, |v| {
-                    if !led.charge() {
-                        return None;
-                    }
-                    let (e, g, physical) = evaluated_pair(objective, v, &mut anchor)?;
+                    let (e, g, physical) = charge_or_refuse_overlap(
+                        objective,
+                        led,
+                        stats,
+                        v,
+                        &mut anchor,
+                        refuse_overlap,
+                    )?;
                     if !physical {
                         return Some((e, g));
                     }
@@ -281,10 +333,7 @@ where
             x,
             iters,
             |v| {
-                if !led.charge() {
-                    return None;
-                }
-                evaluated_pair(objective, v, &mut anchor)
+                charge_or_refuse_overlap(objective, led, stats, v, &mut anchor, refuse_overlap)
                     .map(|(energy, gradient, _)| (energy, gradient))
             },
             |_, fv| {
@@ -370,61 +419,68 @@ where
         let mut f = f;
         let mut xr = xr;
         let mut validated = None;
-        let mut converged = if led.charge() {
-            stats.check_charged += 1;
-            match finite_gradient(objective, xr.view()).filter(|_| f.is_finite()) {
-                Some(g) => {
-                    let ok = gradient_is_converged(g.view(), cfg.record_gradient);
-                    if ok {
-                        validated = Some(g);
-                    }
-                    ok
-                }
-                None => false,
+        let confirm = |led: &mut Ledger,
+                       stats: &mut RelaxStats,
+                       energy: f64,
+                       point: ArrayView1<f64>|
+         -> Option<Array1<f64>> {
+            if refuse_overlap && min_pair_distance(point) < OVERLAP_SEPARATION {
+                stats.overlap_rejected += 1;
+                return None;
             }
-        } else {
-            false
+            if !energy.is_finite() || !led.charge() {
+                return None;
+            }
+            stats.check_charged += 1;
+            finite_gradient(objective, point)
+                .filter(|gradient| gradient_is_converged(gradient.view(), cfg.record_gradient))
         };
-        // A binary quench often hits the iteration cap with the infinity
-        // norm still above the record tolerance, so the ledger would drop
-        // a finite minimum. One more pass from that point finishes the
-        // descent. Screening passes stay short, and the preset cap is
-        // unchanged.
-        if !converged && !screening && cfg.species_sigma.is_some() && led.remaining() > 0 {
+        let mut converged = match confirm(led, stats, f, xr.view()) {
+            Some(gradient) => {
+                validated = Some(gradient);
+                true
+            }
+            None => false,
+        };
+        // A capped descent is not a minimum the ledger may keep. One more
+        // pass is enough for a binary quench. A molecular potential, whose
+        // line search otherwise stops inside an overlap, is continued until
+        // the same record gradient is met or the budget ends. Screening
+        // passes stay short, and the tolerance is the preset's own.
+        let continuation_rounds = if screening {
+            0
+        } else if cfg.species.is_some() && cfg.species_sigma.is_none() {
+            8
+        } else if cfg.species_sigma.is_some() {
+            1
+        } else {
+            0
+        };
+        for _ in 0..continuation_rounds {
+            if converged || led.remaining() == 0 {
+                break;
+            }
+            let spent_at = led.spent();
             let (f2, xr2, _) = opt.minimize(xr.view(), iters, |v| {
-                if !led.charge() {
-                    return None;
-                }
-                evaluated_pair(objective, v, &mut anchor)
+                charge_or_refuse_overlap(objective, led, stats, v, &mut anchor, refuse_overlap)
                     .map(|(energy, gradient, _)| (energy, gradient))
             });
-            f = f2;
-            xr = xr2;
-            converged = if led.charge() {
-                stats.check_charged += 1;
-                match finite_gradient(objective, xr.view()).filter(|_| f.is_finite()) {
-                    Some(g) => {
-                        let ok = gradient_is_converged(g.view(), cfg.record_gradient);
-                        if ok {
-                            validated = Some(g);
-                        } else {
-                            validated = None;
-                        }
-                        ok
-                    }
-                    None => {
-                        validated = None;
-                        false
-                    }
-                }
-            } else {
-                validated = None;
-                false
-            };
-            let extra = led.spent() - before - cost;
+            let extra = led.spent() - spent_at;
             if extra > 0 {
                 stats.full_charged += extra;
             }
+            f = f2;
+            xr = xr2;
+            converged = match confirm(led, stats, f, xr.view()) {
+                Some(gradient) => {
+                    validated = Some(gradient);
+                    true
+                }
+                None => {
+                    validated = None;
+                    false
+                }
+            };
         }
         if converged {
             stats.converged += 1;

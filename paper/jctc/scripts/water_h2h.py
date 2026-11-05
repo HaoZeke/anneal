@@ -24,8 +24,13 @@ SEEDS = range(6)
 MOLECULES = 6
 PAPER_BUDGET = 4000
 FORCE_BAR = 0.0514221
-SOURCE_COMMIT = "49bc7a2dbaa1de773169c63d307584289ba39c7a"
 GFN2_ACCURACY = 0.01
+
+
+def git_stamp():
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
+    return head, tree
 
 
 def type7_quantile(values, probability):
@@ -83,10 +88,16 @@ def cpu_description():
     return f"{model}, family {family}, model {model_number}"
 
 
-def write_header(handle, command):
+SOURCE_HEAD = "unset"
+SOURCE_TREE = "unset"
+
+
+def write_header(handle, command, head=None, tree=None):
+    head = SOURCE_HEAD if head is None else head
+    tree = SOURCE_TREE if tree is None else tree
     host = subprocess.check_output(["nproc", "--all"], text=True).strip()
     machine = subprocess.check_output(["uname", "-m"], text=True).strip()
-    date = subprocess.check_output(["date", "-u"], text=True).rstrip("\n")
+    date = subprocess.check_output(["date"], text=True).rstrip("\n")
     handle.write(
         "\n".join(
             [
@@ -95,7 +106,8 @@ def write_header(handle, command):
                 host,
                 cpu_description(),
                 "clone=https://github.com/HaoZeke/anneal.git",
-                f"source_commit={SOURCE_COMMIT}",
+                f"source_commit={head}",
+                f"source_tree={tree}",
                 "cwd=.",
                 "TMPDIR=paper/jctc/logs/scratch",
                 f"command={command}",
@@ -133,7 +145,49 @@ def child_env():
     env["OPENBLAS_NUM_THREADS"] = "1"
     env["GOTO_NUM_THREADS"] = "1"
     env["TMPDIR"] = "paper/jctc/logs/scratch"
+    env["ANNEAL_SOURCE_COMMIT"] = SOURCE_HEAD
+    env["ANNEAL_SOURCE_TREE"] = SOURCE_TREE
     return env
+
+
+def md_length_lines(text):
+    kept = []
+    for line in text.splitlines():
+        lowered = line.lower()
+        if "md simulation time" in lowered or "timestep dt" in lowered or "md length" in lowered:
+            kept.append(line.strip())
+    return kept
+
+
+def xyz_coordinates(path):
+    rows = []
+    for line in Path(path).read_text(errors="ignore").splitlines()[2:]:
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        rows.append([float(parts[1]), float(parts[2]), float(parts[3])])
+    return rows
+
+
+def alignment_rmsd(reference, trial):
+    """Root-mean-square deviation after translating and rotating `trial` onto `reference`."""
+    import numpy as np
+
+    left = np.asarray(xyz_coordinates(reference), dtype=float)
+    right = np.asarray(xyz_coordinates(trial), dtype=float)
+    if left.shape != right.shape or left.size == 0:
+        return None
+    left = left - left.mean(axis=0)
+    right = right - right.mean(axis=0)
+    covariance = right.T @ left
+    unitary, _, vt = np.linalg.svd(covariance)
+    correction = np.eye(3)
+    if np.linalg.det(unitary @ vt) < 0.0:
+        correction[2, 2] = -1.0
+    rotation = unitary @ correction @ vt
+    aligned = right @ rotation
+    gap = aligned - left
+    return float(np.sqrt((gap * gap).sum() / left.shape[0]))
 
 
 def dynamics_steps(text):
@@ -215,11 +269,15 @@ def run_crest(work, log_path, seed):
         handle.write(f"calls={calls}\n")
         handle.write(f"dynamics_steps={dynamics}\n")
         handle.write(f"opt_steps={opt_steps}\n")
+        for line in md_length_lines(proc.stdout):
+            handle.write(f"md_length_line={line}\n")
         handle.write("call_counter=MD steps from the log plus Etot lines in crestopt.log\n")
         handle.write(f"wall_s={wall:.6f}\n")
-        handle.write(f"exit_code={proc.returncode}\n")
         handle.write("best=" + ("crest_best.xyz" if best.exists() else "missing") + "\n")
         handle.write(scrub(proc.stdout))
+        if proc.stdout and not proc.stdout.endswith("\n"):
+            handle.write("\n")
+        handle.write(f"exit_code={proc.returncode}\n")
     return proc.returncode, calls, wall, best if best.exists() else None
 
 
@@ -262,9 +320,11 @@ def anneal_run(binary, seed, budget, outdir, log_path, label):
         handle.write("defaults=recommended_molecular\n")
         handle.write("water_arm=recommended\n")
         handle.write(f"wall_s={wall:.6f}\n")
-        handle.write(f"exit_code={proc.returncode}\n")
         handle.write(meta)
         handle.write(scrub(proc.stdout))
+        if not meta.endswith("\n") and meta:
+            handle.write("\n")
+        handle.write(f"exit_code={proc.returncode}\n")
     return proc.returncode, wall
 
 
@@ -289,9 +349,11 @@ def audit_geometry(binary, seed, xyz, outdir, log_path):
         write_header(handle, command)
         handle.write(f"code=force-audit seed={seed}\n")
         handle.write(f"wall_s={wall:.6f}\n")
-        handle.write(f"exit_code={proc.returncode}\n")
         handle.write(meta)
         handle.write(text)
+        if text and not text.endswith("\n"):
+            handle.write("\n")
+        handle.write(f"exit_code={proc.returncode}\n")
     return proc.returncode, text
 
 
@@ -402,7 +464,7 @@ def write_versions():
     (LOGS / "VERSIONS").write_text("\n".join(lines) + "\n")
 
 
-def arm_row(seed, arm, calls, wall, success, energy, force, force_pass, window, delta, energy_pass, objective, exit_code):
+def arm_row(seed, arm, calls, wall, success, energy, force, force_pass, window, delta, energy_pass, objective, exit_code, rmsd):
     def cell(value):
         if value is None:
             return "nan"
@@ -421,6 +483,7 @@ def arm_row(seed, arm, calls, wall, success, energy, force, force_pass, window, 
         "1" if force_pass else "0",
         cell(window),
         cell(delta),
+        cell(rmsd),
         "1" if energy_pass else "0",
         cell(objective),
         cell(exit_code),
@@ -439,6 +502,7 @@ def write_numbers(rows):
         "force_pass",
         "window_Eh",
         "abs_dE_Eh",
+        "rmsd_A",
         "energy_pass",
         "objective_best_eV",
         "exit_code",
@@ -485,6 +549,8 @@ def finished_log(path, needle):
 
 
 def main():
+    global SOURCE_HEAD, SOURCE_TREE
+    SOURCE_HEAD, SOURCE_TREE = git_stamp()
     check_type7()
     assert_paper_budget()
     binary = os.environ["ANNEAL_WATER_BIN"]
@@ -559,11 +625,12 @@ def main():
                     crest_energy is not None,
                     None,
                     crest_exit or "nan",
+                    0.0 if best_xyz.exists() else None,
                 )
             )
             if calls is None or calls < 1:
                 print(f"fair seed {seed} skipped, crest calls missing", flush=True)
-                rows.append(arm_row(seed, "fair", None, None, 0, None, None, False, window, None, False, None, "nan"))
+                rows.append(arm_row(seed, "fair", None, None, 0, None, None, False, window, None, False, None, "nan", None))
             elif not finished_log(fair_log, "FORCE_AUDIT"):
                 status, awall = anneal_run(binary, seed, int(calls), fair_dir, fair_log, "fair")
                 print(f"anneal fair seed {seed} exit {status} budget {int(calls)} wall {awall:.1f}", flush=True)
@@ -576,7 +643,10 @@ def main():
             fair_xyz = fair_dir / "best.xyz"
             fair_energy = None
             fair_delta = None
+            fair_rmsd = None
             fair_energy_pass = False
+            if fair_xyz.exists() and best_xyz.exists():
+                fair_rmsd = alignment_rmsd(best_xyz, fair_xyz)
             if fair_xyz.exists() and crest_energy is not None:
                 fair_energy, fair_window, fair_sp = single_point(fair_xyz)
                 (LOGS / f"anneal-sp-seed{seed}.txt").write_text(fair_sp)
@@ -608,6 +678,7 @@ def main():
                         fair_energy_pass,
                         fair_objective,
                         fair_exit or "nan",
+                        fair_rmsd,
                     )
                 )
             if not finished_log(paper_log, "FORCE_AUDIT"):
@@ -622,7 +693,10 @@ def main():
             paper_xyz = paper_dir / "best.xyz"
             paper_energy = None
             paper_delta = None
+            paper_rmsd = None
             paper_energy_pass = False
+            if paper_xyz.exists() and best_xyz.exists():
+                paper_rmsd = alignment_rmsd(best_xyz, paper_xyz)
             if paper_xyz.exists() and crest_energy is not None:
                 paper_energy, paper_window, paper_sp = single_point(paper_xyz)
                 (LOGS / f"anneal-paper-sp-seed{seed}.txt").write_text(paper_sp)
@@ -653,9 +727,11 @@ def main():
                     paper_energy_pass,
                     paper_objective,
                     paper_exit or "nan",
+                    paper_rmsd,
                 )
             )
             with (LOGS / f"pair-seed{seed}.log").open("w") as handle:
+                write_header(handle, f"pair-seed {seed}")
                 handle.write(f"seed={seed}\n")
                 handle.write(f"crest_calls={calls if calls is not None else 'nan'}\n")
                 handle.write(f"crest_wall_s={crest_wall if crest_wall is not None else 'nan'}\n")
@@ -682,16 +758,18 @@ def main():
                 handle.write(f"gfn2_accuracy={GFN2_ACCURACY}\n")
                 handle.write(f"force_bar={FORCE_BAR}\n")
                 handle.write("score=xtb --gfn 2 --sp --acc 0.01 --iterations 500\n")
-                handle.write("exit_code=0\n")
-            fair_start = fair_dir / "start.xyz"
-            paper_start = paper_dir / "start.xyz"
-            if fair_start.exists() and paper_start.exists():
-                same_start = fair_start.read_bytes() == paper_start.read_bytes()
-                handle_note = "1" if same_start else "0"
-            else:
-                handle_note = "missing"
-            with (LOGS / f"pair-seed{seed}.log").open("a") as handle:
+                fair_start = fair_dir / "start.xyz"
+                paper_start = paper_dir / "start.xyz"
+                if fair_start.exists() and paper_start.exists():
+                    same_start = fair_start.read_bytes() == paper_start.read_bytes()
+                    handle_note = "1" if same_start else "0"
+                else:
+                    handle_note = "missing"
+                handle.write(f"fair_rmsd_A={fair_rmsd if fair_rmsd is not None else 'nan'}\n")
+                handle.write(f"paper_rmsd_A={paper_rmsd if paper_rmsd is not None else 'nan'}\n")
+                handle.write("rmsd_definition=Kabsch alignment of all atoms against crest_best.xyz\n")
                 handle.write(f"shared_start={handle_note}\n")
+                handle.write("exit_code=0\n")
             print(
                 f"pair seed {seed} crest {crest_success} fair {fair_success} paper {paper_success}",
                 flush=True,
