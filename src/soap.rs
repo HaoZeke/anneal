@@ -1433,7 +1433,7 @@ pub fn ih_dominated_at(x: ArrayView1<f64>, length_scale: f64) -> bool {
     if n == 0 {
         return false;
     }
-    let c = crate::structure::cna(x, n, IH_CNA_CUTOFF * length_scale);
+    let c = crate::structure::cna_of(x, n, IH_CNA_CUTOFF * length_scale, &[(5, 5, 5)]);
     c.fraction((5, 5, 5)) > 0.12
 }
 

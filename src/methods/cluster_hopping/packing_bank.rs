@@ -16,7 +16,7 @@
 
 use ndarray::{Array1, ArrayView1};
 
-use crate::structure::cna;
+use crate::structure::cna_of;
 
 /// L1 gap above which two common-neighbour vectors are different packings.
 pub const GAP: f64 = 0.12;
@@ -48,7 +48,7 @@ impl PackingBank {
         if n < 3 || state.len() != 3 * n || !(cutoff.is_finite() && cutoff > 0.0) {
             return [0.0; 3];
         }
-        let counts = cna(state, n, cutoff);
+        let counts = cna_of(state, n, cutoff, &[(5, 5, 5), (4, 2, 1), (4, 2, 2)]);
         [
             counts.fraction((5, 5, 5)),
             counts.fraction((4, 2, 1)),

@@ -163,6 +163,33 @@ fn longest_trail(sub: &[Vec<bool>]) -> usize {
 /// second neighbour shells, where the radial distribution is near zero, so the
 /// bond set is insensitive to its exact value.
 pub fn cna(x: ArrayView1<f64>, n: usize, cutoff: f64) -> CnaCounts {
+    triplets(x, n, cutoff, |_, _| true)
+}
+
+/// Common-neighbour triplets of the listed signatures over every bonded pair.
+///
+/// Each listed triplet gets the count [`cna`] gives it, and the bond count is
+/// the same. The longest trail is searched only on a pair whose shared
+/// neighbours and bonds match a listed triplet. [`cna`] searches every pair,
+/// and that search grows with the bonds among the shared neighbours, which a
+/// cutoff past the first shell makes dense.
+pub fn cna_of(
+    x: ArrayView1<f64>,
+    n: usize,
+    cutoff: f64,
+    keys: &[(usize, usize, usize)],
+) -> CnaCounts {
+    triplets(x, n, cutoff, |r, s| {
+        keys.iter().any(|&(kr, ks, _)| kr == r && ks == s)
+    })
+}
+
+fn triplets(
+    x: ArrayView1<f64>,
+    n: usize,
+    cutoff: f64,
+    wanted: impl Fn(usize, usize) -> bool,
+) -> CnaCounts {
     let adj = adjacency(x, n, cutoff);
     let mut counts: Vec<((usize, usize, usize), usize)> = Vec::new();
     let mut bonds = 0usize;
@@ -175,6 +202,9 @@ pub fn cna(x: ArrayView1<f64>, n: usize, cutoff: f64) -> CnaCounts {
             let common: Vec<usize> = (0..n).filter(|&k| adj[i][k] && adj[j][k]).collect();
             let r = common.len();
             let key = if r == 0 {
+                if !wanted(0, 0) {
+                    continue;
+                }
                 (0, 0, 0)
             } else {
                 let sub: Vec<Vec<bool>> = common
@@ -186,6 +216,9 @@ pub fn cna(x: ArrayView1<f64>, n: usize, cutoff: f64) -> CnaCounts {
                     .enumerate()
                     .map(|(a, row)| row.iter().enumerate().filter(|&(b, &v)| v && b > a).count())
                     .sum();
+                if !wanted(r, s) {
+                    continue;
+                }
                 (r, s, longest_trail(&sub))
             };
             match counts.iter_mut().find(|(k, _)| *k == key) {
@@ -225,7 +258,10 @@ pub fn atom_triplet_fracs(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<[f64
                 .enumerate()
                 .map(|(a, row)| row.iter().enumerate().filter(|&(b, &v)| v && b > a).count())
                 .sum();
-            let t = longest_trail(&sub);
+            let t = match (r, s) {
+                (5, 5) | (4, 2) => longest_trail(&sub),
+                _ => continue,
+            };
             match (r, s, t) {
                 (5, 5, 5) => n555 += 1,
                 (4, 2, 1) => n421 += 1,
@@ -691,7 +727,12 @@ pub fn ptm(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<Match> {
 /// bonded pair, including the surface, and costs less because no rotational
 /// alignment is involved.
 pub fn cna_descriptor(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Array1<f64> {
-    let c = cna(x, n, cutoff);
+    let c = cna_of(
+        x,
+        n,
+        cutoff,
+        &[(5, 5, 5), (4, 2, 1), (4, 2, 2), (5, 4, 4), (4, 3, 3)],
+    );
     Array1::from(vec![
         c.fraction((5, 5, 5)),
         c.fraction((4, 2, 1)),
@@ -780,6 +821,44 @@ mod tests {
             "centre atom 555 fraction {}, counts {:?}",
             fr[0][0],
             c.counts
+        );
+    }
+
+    /// A listed triplet gets the count of the full analysis, on the shells of
+    /// an icosahedron and on a strained copy where other triplets appear.
+    #[test]
+    fn a_listed_triplet_is_counted_as_the_full_analysis_counts_it() {
+        let ico = icosahedron13();
+        let mut strained = ico.clone();
+        for (i, v) in strained.iter_mut().enumerate() {
+            *v *= 1.0 + 0.04 * ((i * 7 % 11) as f64 / 11.0 - 0.5);
+        }
+        for x in [ico, strained] {
+            for cutoff in [1.1, 1.2, 1.3] {
+                let full = cna(x.view(), 13, cutoff);
+                for &(key, _) in &full.counts {
+                    let only = cna_of(x.view(), 13, cutoff, &[key]);
+                    assert_eq!(only.get(key), full.get(key), "{key:?} at {cutoff}");
+                    assert_eq!(only.bonds, full.bonds);
+                }
+                assert_eq!(cna_descriptor(x.view(), 13, cutoff).len(), 6);
+            }
+        }
+    }
+
+    /// With every pair of an icosahedron bonded, each pair shares eleven
+    /// neighbours and fifty-five bonds, a set the trail search of [`cna`]
+    /// does not finish. No such pair can carry `555`, so it is not searched.
+    #[test]
+    fn a_dense_pair_is_not_searched_for_an_unlisted_triplet() {
+        let x = icosahedron13();
+        let c = cna_of(x.view(), 13, 10.0, &[(5, 5, 5)]);
+        assert_eq!(c.bonds, 78);
+        assert_eq!(c.get((5, 5, 5)), 0);
+        assert!(
+            atom_triplet_fracs(x.view(), 13, 10.0)
+                .iter()
+                .all(|f| *f == [0.0; 3])
         );
     }
 
