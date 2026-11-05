@@ -36,8 +36,8 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
     const SEEDS: u64 = 16;
     let budget = 30_000;
     let mut plain = Config::recommended(38);
-    // The surface comparison is the LeanBurst walk. The 38-point reseed
-    // and the stall exits are a different measurement.
+    // The surface comparison is the LeanBurst walk. Stall exits are a
+    // different measurement, and this walk does not grow a named template.
     plain.move_library = MoveLibrary::LeanBurst;
     plain.trail_on_stall = false;
     plain.escape_on_stall = false;

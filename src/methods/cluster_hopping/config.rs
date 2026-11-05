@@ -1145,17 +1145,12 @@ impl Config {
         cfg.orbit_complete_on_new = true;
         cfg.trail_on_stall = true;
         cfg.escape_on_stall = true;
-        // The displacement stack, LeanBurst included, leaves the Mackay
-        // minimum in place: 17 of 72 seeds at 4e5 calls ended at
-        // -173.252378. Named lattice growth builds the truncated
-        // octahedron instead of searching for it. Measured on seeds
-        // 2000-2071 at that budget, this library solves 72 of 72.
-        // At 75 and 98 points the global minimum is not one of these
-        // packings, and the same library is worse than none, so those
-        // sizes keep LeanBurst.
-        if n_points == 38 {
-            cfg.move_library = MoveLibrary::Reseed;
-        }
+        // Named lattice growth builds the truncated octahedron instead of
+        // searching for it. On seeds 2000-2071 at 4e5 calls that library
+        // solves 72 of 72 at 38 points, and at 75 and 98 points, whose
+        // global minima are not those packings, it is worse than none.
+        // Installing it only at 38 atoms was per-system tuning, so the
+        // preset keeps LeanBurst at every size.
         if n_points < 98 {
             cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
         }

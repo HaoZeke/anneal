@@ -539,7 +539,7 @@ mod tests {
         assert_eq!(recommended.move_library, MoveLibrary::LeanBurst);
         assert_eq!(
             apply_arm(38, Arm::Recommended).move_library,
-            MoveLibrary::Reseed
+            MoveLibrary::LeanBurst
         );
         assert_eq!(
             apply_arm(38, Arm::SoapOn).move_library,
