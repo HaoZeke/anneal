@@ -152,11 +152,19 @@ struct Hit {
 
 /// Charged calls without a new best before a random restart.
 ///
-/// A quench costs `relax_steps` evaluations. The stall clock waits
-/// `screen_steps` of those quenches. The product does not read the atom
-/// count. It replaces the hand-set 4000 on the dual-core preset.
-fn stall_restart_calls(cfg: &Config) -> usize {
-    cfg.screen_steps.saturating_mul(cfg.relax_steps).max(1)
+/// Finishing a quench costs `Q = R - S` extra evaluations, and discarding
+/// a winner costs one full hop `R`. Net value is positive when
+/// `p > (R - S) / (2R - S)`, the same ratio as
+/// [`anneal_core::screen::cost_asymmetric_threshold`].
+/// The stall wait is that share of the run budget. `R` is
+/// [`Config::relax_steps`] and `S` is [`Config::screen_steps`].
+/// The budget is the caller's. The atom count does not enter.
+fn stall_restart_calls(budget: usize, cfg: &Config) -> usize {
+    let relax = cfg.relax_steps;
+    let screen = cfg.screen_steps.min(relax.saturating_sub(1));
+    let numer = relax.saturating_sub(screen);
+    let denom = relax.saturating_mul(2).saturating_sub(screen).max(1);
+    budget.saturating_mul(numer) / denom
 }
 
 fn atomic(spec: &Spec, pot: PairPotential, budget: usize, seed: u64, started: Instant) {
@@ -165,7 +173,7 @@ fn atomic(spec: &Spec, pot: PairPotential, budget: usize, seed: u64, started: In
     base.min_separation *= scale;
     base.container *= scale;
     let mut cfg = base.clone().with_dual_orbit_core();
-    cfg.restart_patience = stall_restart_calls(&cfg);
+    cfg.restart_patience = stall_restart_calls(budget, &cfg);
     let arm = Arm::from_env();
     if arm != Arm::Single {
         let chain = arm.chain_config(&cfg, base);
@@ -431,4 +439,40 @@ fn emit(record: Record<'_>) {
         },
         digest = cfg.resolved_sha256().expect("the configuration serialises"),
     );
+}
+
+#[cfg(test)]
+mod stall_wait_tests {
+    use super::stall_restart_calls;
+    use anneal_core::methods::cluster_hopping::Config;
+    use anneal_core::screen::cost_asymmetric_threshold;
+
+    #[test]
+    fn the_stall_wait_is_the_bayes_share_of_the_run_budget() {
+        let cfg = Config::for_cluster(13);
+        let ratio = cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
+        for budget in [400_000usize, 1_000_000, 4_000_000] {
+            let wait = stall_restart_calls(budget, &cfg);
+            let from_ratio = (budget as f64 * ratio).floor() as usize;
+            assert!(
+                wait == from_ratio || wait + 1 == from_ratio,
+                "budget {budget}: wait {wait}, ratio share {from_ratio}"
+            );
+            assert_ne!(wait, 5_000);
+            assert_ne!(wait, 4_000);
+            assert!(wait < budget);
+        }
+        // 7/15 of each paper budget, the measured hop S = 25, R = 200.
+        assert_eq!(cfg.screen_steps, 25);
+        assert_eq!(cfg.relax_steps, 200);
+        assert_eq!(stall_restart_calls(400_000, &cfg), 400_000 * 7 / 15);
+        assert_eq!(stall_restart_calls(1_000_000, &cfg), 1_000_000 * 7 / 15);
+        assert_eq!(stall_restart_calls(4_000_000, &cfg), 4_000_000 * 7 / 15);
+        let small = Config::for_cluster(8);
+        let large = Config::for_cluster(98);
+        assert_eq!(
+            stall_restart_calls(4_000_000, &small),
+            stall_restart_calls(4_000_000, &large)
+        );
+    }
 }
