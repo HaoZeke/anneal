@@ -1,0 +1,77 @@
+# Strong scaling for the population methods.
+# Fixed Lennard-Jones problem. Worker counts are the thread pool.
+# Run from the repository root:
+#   snakemake -s experiments/scaling/Snakefile -c 1
+
+METHODS = ["population_annealing", "dmc_population", "successive_halving"]
+WORKERS = [1, 2, 4, 8, 16, 32]
+REPEATS = list(range(6))
+
+
+rule all:
+    input:
+        "experiments/scaling/results/pop_strong_scaling.csv",
+        "experiments/scaling/results/pop_strong_scaling.md",
+        "experiments/scaling/results/pop_strong_scaling_long.csv",
+        "experiments/scaling/results/asv.stamp",
+
+
+rule binary:
+    output:
+        "experiments/scaling/bin/pop_strong_scale",
+    shell:
+        """
+        set -euo pipefail
+        export CARGO_TARGET_DIR=experiments/scaling/target
+        cargo build --release --example pop_strong_scale
+        mkdir -p experiments/scaling/bin
+        cp experiments/scaling/target/release/examples/pop_strong_scale {output}
+        chmod +x {output}
+        """
+
+
+rule cell:
+    input:
+        "experiments/scaling/bin/pop_strong_scale",
+    output:
+        "experiments/scaling/results/raw/{method}/w{workers}/r{repeat}.txt",
+    shell:
+        """
+        set -euo pipefail
+        mkdir -p $(dirname {output})
+        python3 experiments/scaling/run_cell.py {wildcards.method} {wildcards.workers} {wildcards.repeat} {output}
+        """
+
+
+rule table:
+    input:
+        expand(
+            "experiments/scaling/results/raw/{method}/w{workers}/r{repeat}.txt",
+            method=METHODS,
+            workers=WORKERS,
+            repeat=REPEATS,
+        ),
+    output:
+        "experiments/scaling/results/pop_strong_scaling.csv",
+        "experiments/scaling/results/pop_strong_scaling.md",
+        "experiments/scaling/results/pop_strong_scaling_long.csv",
+    shell:
+        """
+        set -euo pipefail
+        python3 experiments/scaling/deposit.py
+        """
+
+
+rule asv:
+    input:
+        "experiments/scaling/bin/pop_strong_scale",
+        "experiments/scaling/results/pop_strong_scaling.csv",
+    output:
+        "experiments/scaling/results/asv.stamp",
+    shell:
+        """
+        set -euo pipefail
+        python3 experiments/scaling/prepare_asv_machine.py
+        asv run --config experiments/scaling/asv.conf.json --machine scaling-host --no-pull --launch-method forkserver --set-commit-hash HEAD
+        touch {output}
+        """

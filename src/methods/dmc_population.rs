@@ -1901,6 +1901,72 @@ mod tests {
 
     /// Budget accounting: work units never exceed the requested budget.
     #[test]
+    fn batch_eval_matches_across_thread_counts() {
+        use rayon::prelude::*;
+
+        struct BatchSphere {
+            bounds: Bounds<f64>,
+        }
+
+        impl BatchSphere {
+            fn new(dim: usize) -> Self {
+                Self {
+                    bounds: Bounds::new(
+                        Array1::from_elem(dim, -2.0),
+                        Array1::from_elem(dim, 2.0),
+                        1e-12,
+                    ),
+                }
+            }
+        }
+
+        impl Objective<f64> for BatchSphere {
+            fn dim(&self) -> usize {
+                self.bounds.dims
+            }
+            fn bounds(&self) -> &Bounds<f64> {
+                &self.bounds
+            }
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                x.iter().map(|v| v * v).sum()
+            }
+            fn eval_batch(&self, x: ndarray::ArrayView2<f64>) -> Array1<f64> {
+                let mut out = vec![0.0; x.nrows()];
+                out.par_iter_mut().enumerate().for_each(|(i, slot)| {
+                    *slot = self.eval(x.row(i));
+                });
+                Array1::from(out)
+            }
+        }
+
+        impl Gradient<f64> for BatchSphere {
+            fn dim(&self) -> usize {
+                self.bounds.dims
+            }
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                x.mapv(|v| 2.0 * v)
+            }
+        }
+
+        let once = |threads: usize| {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("thread pool");
+            pool.install(|| {
+                let obj = BatchSphere::new(4);
+                let mut rng = StdRng::seed_from_u64(11);
+                run_dmc_population::<_, BatchSphere, _>(&obj, None, 80, 11, 8, 2, 1.0, &mut rng)
+            })
+        };
+        let one = once(1);
+        let three = once(3);
+        assert_eq!(one.best_val.to_bits(), three.best_val.to_bits());
+        assert_eq!(one.n_evals, three.n_evals);
+        assert_eq!(one.final_population, three.final_population);
+    }
+
+    #[test]
     fn dmc_population_optimize_respects_budget() {
         let obj = Sphere::new(4);
         let res = dmc_population_optimize::<_, Sphere>(&obj, Some(&obj), 500, 42);

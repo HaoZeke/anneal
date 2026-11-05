@@ -207,6 +207,10 @@ name = "ttt_lj38"
 required-features = []
 
 [[example]]
+name = "pop_strong_scale"
+required-features = []
+
+[[example]]
 name = "catalog_journal_scan"
 required-features = ["bank-rpc"]
 

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "project": "anneal",
+  "project_url": "https://github.com/HaoZeke/anneal",
+  "repo": "../..",
+  "branches": ["paper/pop-strong-scaling"],
+  "environment_type": "existing",
+  "pythons": ["same"],
+  "benchmark_dir": "benchmarks",
+  "results_dir": "asv-results",
+  "html_dir": "asv-html",
+  "env_dir": "asv-env"
+}
