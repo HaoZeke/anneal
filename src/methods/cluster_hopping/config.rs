@@ -1021,6 +1021,23 @@ pub struct Config {
     pub quench_warmup: usize,
     /// Standard deviations of separation a verdict needs.
     pub quench_confidence: f64,
+    /// Relax a Cartesian trial once, to [`Config::relax_steps`].
+    ///
+    /// The split screen is a short prefix and then a second relaxation
+    /// that starts with an empty Hessian. On the GFN2 hexamer the prefix
+    /// still sits hundreds of meV above the basin, so it neither rejects
+    /// the hop nor names the minimum. One pass spends the calls on the
+    /// descent. Off by default; the water arms turn it on.
+    pub quench_once: bool,
+    /// Relaunch from the incumbent when the chain is this far above it.
+    ///
+    /// Zero leaves the walk where acceptance put it. A positive gap, in
+    /// the objective's energy unit, moves the chain back to the best
+    /// recorded minimum before the next proposal once the current
+    /// minimum is more than the gap above that best. The water arms set
+    /// 0.02 eV, wider than the 4.2 meV hexamer shelf and below the next
+    /// family the walk otherwise sits in.
+    pub incumbent_gap: f64,
     /// Relaxation steps in the full pass.
     pub relax_steps: usize,
     /// First-phase transform of every relaxation: relax on a compacted
@@ -1467,6 +1484,8 @@ impl Config {
             probe_screen: false,
             quench_warmup: 4,
             quench_confidence: 2.0,
+            quench_once: false,
+            incumbent_gap: 0.0,
             relax_steps: 200,
             two_phase: None,
             reoccupy: None,

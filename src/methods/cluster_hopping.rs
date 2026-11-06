@@ -3991,6 +3991,17 @@ where
                 };
             }
         }
+        // A high accepted minimum is a poor place to spend the next
+        // proposal. Water sets `incumbent_gap` so the hop leaves from
+        // the best minimum once the chain has climbed past that gap.
+        if cfg.incumbent_gap > 0.0
+            && e > ledger.best + cfg.incumbent_gap
+            && let Some(state) = ledger.best_state.clone()
+            && state.len() == x.len()
+        {
+            x = state;
+            e = ledger.best;
+        }
         let mut trial = if let Some(t) = hmc_trial {
             t
         } else if cov_fire {
@@ -4274,7 +4285,7 @@ where
         // The species escape is already a point past a barrier. A 25-step
         // screen of that point falls back into the well it left, and the
         // return test then skips the quench. Relax it once, in full.
-        let quenched_in_place = rigid_quench || species_escape_trial;
+        let quenched_in_place = rigid_quench || species_escape_trial || cfg.quench_once;
         let (e_screen, x_screen) = relax(
             ledger,
             trial.view(),
@@ -4388,7 +4399,15 @@ where
             !cfg.move_library.is_rigid_body() && e_screen > ledger.best + cfg.screen_margin
         };
         let (e_new, x_new) = if quenched_in_place && known_stand_in.is_none() {
-            (e_screen, x_screen)
+            let mut out = (e_screen, x_screen);
+            // The rigid path stops at its cap. A water one-pass quench
+            // still continues while a point below the incumbent is
+            // descending, which is what the split path's second stage
+            // does through `finish_improving`.
+            if cfg.quench_once && cfg.finish_improving {
+                out = finish_improving(ledger, relax, out, cfg.relax_steps);
+            }
+            out
         } else if let Some((known_e, known_x)) = known_stand_in {
             // The refund: the basin is on file, its minimum stands in for
             // the descent, and the force calls the relaxation would have
