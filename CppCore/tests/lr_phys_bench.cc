@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -113,9 +114,43 @@ System make_system(int n, unsigned seed) {
   return s;
 }
 
+std::string pipe_first(const std::string &cmd) {
+  FILE *pipe = popen(cmd.c_str(), "r");
+  if (pipe == nullptr) {
+    return "unknown";
+  }
+  char buf[256] = {};
+  if (fgets(buf, sizeof(buf), pipe) == nullptr) {
+    pclose(pipe);
+    return "unknown";
+  }
+  pclose(pipe);
+  std::string text(buf);
+  const auto cut = text.find_first_of(" \n");
+  if (cut != std::string::npos) {
+    text.resize(cut);
+  }
+  return text;
+}
+
+const std::string &binary_sha() {
+  static const std::string value = pipe_first("sha256sum /proc/self/exe");
+  return value;
+}
+
+#ifndef RGPOT_GIT_HEAD
+#define RGPOT_GIT_HEAD "unknown"
+#endif
+#ifndef RGPOT_GIT_TREE
+#define RGPOT_GIT_TREE "unknown"
+#endif
+
+const char *git_head() { return RGPOT_GIT_HEAD; }
+
+const char *git_tree() { return RGPOT_GIT_TREE; }
+
 template <class Fn>
 std::vector<double> repeat(int nrep, Fn &&fn) {
-  fn();
   std::vector<double> samples;
   samples.reserve(static_cast<std::size_t>(nrep));
   for (int i = 0; i < nrep; ++i) {
@@ -132,9 +167,15 @@ void report(std::ostream &out, const std::string &ladder, const std::string &nam
   const double med = quantile7(samples, 0.5);
   const double iqr = quantile7(samples, 0.75) - quantile7(samples, 0.25);
   out << "run hostname=" << hostname() << " date=" << date_now() << " cpu=" << cpu_model() << '\n';
+  out << "binary_sha256=" << binary_sha() << " head=" << git_head() << " tree=" << git_tree() << '\n';
   out << ladder << ' ' << name << " n=" << n << " threads=" << threads
       << " repeats=" << samples.size() << " median_us=" << med << " iqr7_us=" << iqr
       << " energy_eV=" << energy << '\n';
+  out << "samples_us";
+  for (double sample : samples) {
+    out << ' ' << sample;
+  }
+  out << '\n';
   out.flush();
 }
 
