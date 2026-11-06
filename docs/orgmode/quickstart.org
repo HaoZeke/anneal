@@ -7,35 +7,130 @@ Quickstart
 ==========
 #+end_export
 
-This page shows the current stable surface with minimal runnable examples.
-All examples use only symbols from =anneal= top level after =pip install anneal= (or =pixi -e python=).
+In this tutorial you minimize a five-dimensional Rastrigin function on a box with =global_optimize=, the budget-only portfolio optimizer.
+You will read what the run spent, run it again with the same seed, add a gradient, and start from a known point.
+A tour of the other drivers on the same box follows the lesson.
 
-* Installation
-
-There are three installation modes.
-
-** Core (pip)
+* Step 1: Install anneal
 
 #+begin_src bash
 pip install anneal
 #+end_src
 
-Gives the full public API: presets, =run=, =pilot_draws_qmc=, =additive_independence=, =gle_langevin=, polish variants, device runners, and low-discrepancy helpers.
+Building from source, with pixi or with maturin, is covered in [[file:howto/install.org][Install anneal]].
 
-** Extras (none required today)
+* Step 2: Minimize with one budget
 
-Anneal ships with no mandatory heavy optional dependencies at the top level.
-JAX or CuPy are only pulled if you choose to supply array namespaces that need them (e.g.
-CuPy bounds to =run_device=).
+Rastrigin has a regular grid of local minima and one global minimum, 0 at the origin.
+=global_optimize= takes the objective, the box, and a budget of evaluations.
+Objective and gradient calls share the budget, one unit each.
 
-** Full reproducible stack (pixi)
+#+begin_src python
+import numpy as np
+from anneal import global_optimize
 
-#+begin_src bash
-pixi install
-pixi run -e python python -c "import anneal; print(anneal.__version__)"
+def rastrigin(x):
+    return float(10.0 * len(x) + np.sum(x * x - 10.0 * np.cos(2.0 * np.pi * x)))
+
+low = np.full(5, -5.0)
+high = np.full(5, 5.0)
+
+out = global_optimize(rastrigin, low, high, budget=4000, seed=0)
+print("best value:", round(out["best_val"], 4))
+print("best point:", np.round(out["best_pos"], 3) + 0.0)
+print("objective calls:", out["n_evals"], "gradient calls:", out["n_grads"])
 #+end_src
 
-This pulls the pinned Rust toolchain, maturin build, test and docs tooling.
+#+begin_example
+best value: 0.995
+best point: [0.    0.    0.995 0.    0.   ]
+objective calls: 4000 gradient calls: 0
+#+end_example
+
+The run spent the whole budget on objective calls, since no gradient was given.
+The best value is 0.995 rather than 0, because the third coordinate stopped in the neighbouring minimum near 1 while the other four reached 0.
+
+* Step 3: See where the budget went
+
+#+begin_src python
+print("slices per arm:", out["arm_pulls"])
+print("slices that improved:", out["arm_successes"])
+#+end_src
+
+#+begin_example
+slices per arm: {'cma': 17, 'qn': 8, 'gsa': 18, 'de': 1, 'surrogate': 3, 'explore': 2}
+slices that improved: {'cma': 11, 'qn': 3, 'gsa': 8, 'de': 0, 'surrogate': 0, 'explore': 0}
+#+end_example
+
+The portfolio hands the budget out in slices to its building blocks, called arms.
+Without a gradient the arms are the covariance matrix adaptation evolution strategy (=cma=), a finite-difference quasi-Newton descent (=qn=), generalized simulated annealing (=gsa=), differential evolution (=de=), the additive surrogate (=surrogate=), and quasi-Monte Carlo (QMC) restarts (=explore=).
+=arm_successes= counts the slices that lowered the best value, and the allocation gives more slices to the arms that do.
+
+* Step 4: Run it again with the same seed
+
+#+begin_src python
+again = global_optimize(rastrigin, low, high, budget=4000, seed=0)
+assert again["best_val"] == out["best_val"]
+assert np.array_equal(again["best_pos"], out["best_pos"])
+#+end_src
+
+The result is the same when the objective, box, budget and seed are the same, so a run can be repeated exactly.
+
+* Step 5: Add a gradient
+
+#+begin_src python
+def grad_rastrigin(x):
+    return 2.0 * x + 20.0 * np.pi * np.sin(2.0 * np.pi * x)
+
+with_grad = global_optimize(
+    rastrigin, low, high, budget=4000, seed=0, grad_fn=grad_rastrigin
+)
+print("best value:", round(with_grad["best_val"], 4))
+print("objective calls:", with_grad["n_evals"],
+      "gradient calls:", with_grad["n_grads"])
+assert with_grad["n_evals"] + with_grad["n_grads"] <= 4000
+#+end_src
+
+#+begin_example
+best value: 0.0
+objective calls: 3107 gradient calls: 362
+#+end_example
+
+=grad_fn= enables the gradient arms and a final polish.
+This run reached the global minimum, and its 3107 objective calls and 362 gradient calls stay inside the budget of 4000.
+
+* Step 6: Start from a known point
+
+#+begin_src python
+seen = []
+
+def recorded(x):
+    seen.append(np.array(x))
+    return rastrigin(x)
+
+start = np.full(5, 2.0)
+from_start = global_optimize(recorded, low, high, budget=4000, seed=0, x0=start)
+print("first point evaluated:", seen[0])
+print("best value:", round(from_start["best_val"], 4))
+#+end_src
+
+#+begin_example
+first point evaluated: [2. 2. 2. 2. 2.]
+best value: 0.0
+#+end_example
+
+=x0= is the first point evaluated and the first incumbent, which is how you start from parameters you already have.
+
+* What you did
+
+You minimized a bounded objective with one budget, read how the portfolio spent it, repeated the run exactly, added a gradient, and started from a known point.
+To pick a driver for your own problem, see [[file:howto/choose-driver.org][Choose a driver]].
+[[file:reference/presets-and-advanced.org][Presets and advanced drivers]] lists the entry points, and =help(global_optimize)= prints every argument and returned field.
+
+* Tour of the other drivers
+
+The rest of this page tours the other drivers, with one short example each.
+Run the blocks in order, since later blocks reuse names that earlier blocks define.
 
 * Runtime Configuration
 
@@ -73,17 +168,15 @@ print("Gsa best:", h3.best_pos, h3.best_val)
 #+end_src
 
 Each returns a =History= with =best_pos=, =best_val=, =epochs= (list of =EpochLine=), etc.
-The bounds constrain every objective evaluation. Proposals are reflected at
-the box faces, and an optional =x0= supplies the first point.
+The bounds constrain every objective evaluation.
+Proposals are reflected at the box faces, and an optional =x0= supplies the first point.
 
 ** ChemFit
 
-Flatten only at the optimizer boundary, and pass the initial positions as
-=x0=. =fit_anneal=, =fit_chemfit=, =run_benchmark= and =run_fitter= do that
-for a fitter. They drive =evaluate= / =step= on current ChemFit and =ask= /
-=tell= on ChemFit 3.1, and the first exception the fitter raises stops the
-fit and reaches the caller without =finish=. A positions-only objective is
-the same loop as their Boltzmann driver:
+Flatten only at the optimizer boundary, and pass the initial positions as =x0=.
+=fit_anneal=, =fit_chemfit=, =run_benchmark= and =run_fitter= do that for a fitter.
+They drive =evaluate= / =step= on current ChemFit and =ask= / =tell= on ChemFit 3.1, and the first exception the fitter raises stops the fit and reaches the caller without =finish=.
+A positions-only objective is the same loop as their Boltzmann driver:
 
 #+begin_src python
 import numpy as np
@@ -125,16 +218,13 @@ def fit_positions(fitter, initial_positions, budget):
     })
 #+end_src
 
-The temperature drops once per epoch, so the loop cools over =budget // 100=
-epochs of 100 steps, and =max_evals= counts the start and stops the run at
-the budget. The expression =positions.reshape(...)= does not modify an array
-in place. In a loop like this one, an exception from =evaluate= is scored as
-the worst value and reported once as a =RuntimeWarning=; the bridges raise it
-instead.
+The temperature drops once per epoch, so the loop cools over =budget // 100= epochs of 100 steps, and =max_evals= counts the start and stops the run at the budget.
+The expression =positions.reshape(...)= does not modify an array in place.
+In a loop like this one, an exception from =evaluate= is scored as the worst value and reported once as a =RuntimeWarning=; the bridges raise it instead.
 
 * Pilot draws for Bayesian warm-start
 
-= pilot_draws_qmc= returns (n,3) draws of (T0, sigma, q_v) from the BGSA pilot prior (log-normal on scale quantities, truncated on q_v).
+=pilot_draws_qmc= returns (n,3) draws of (T0, sigma, q_v) from the Bayesian pilot prior (log-normal on scale quantities, truncated on q_v).
 These are the "no-tuning" entry point.
 
 #+begin_src python
@@ -189,21 +279,27 @@ print("Polish best:", out["best_pos"], out["best_val"])
 * Device and scale
 
 =run_device= and =run_ensemble= use the identical transition kernel; only the array namespace and leading batch axis change.
+The ensemble calls the objective on a =(n_chains, dim)= batch and needs one value per row, so this objective sums the terms within each row.
 
 #+begin_src python
 import numpy as np
 from anneal import Boltzmann, run_device, run_ensemble
 
+def rastrigin_rows(x):
+    return 10.0 * x.shape[-1] + np.sum(
+        x**2 - 10.0 * np.cos(2.0 * np.pi * x), axis=-1
+    )
+
 low = np.full(5, -5.0)
 high = np.full(5, 5.0)
 
 # Single chain on host (NumPy)
-h_dev = run_device(rastrigin, low, high, Boltzmann(t_init=10.0, sigma=1.0),
+h_dev = run_device(rastrigin_rows, low, high, Boltzmann(t_init=10.0, sigma=1.0),
                    n_epochs=10, steps_per_epoch=50, seed=1)
 print("Device best val:", h_dev.best_val)
 
 # Batched ensemble (still the same kernel)
-h_ens = run_ensemble(rastrigin, low, high, Boltzmann(t_init=10.0, sigma=1.0),
+h_ens = run_ensemble(rastrigin_rows, low, high, Boltzmann(t_init=10.0, sigma=1.0),
                      n_chains=128, n_epochs=5, steps_per_epoch=30, seed=1)
 print("Ensemble global best:", h_ens.global_best_val)
 #+end_src
@@ -212,10 +308,16 @@ Pass CuPy arrays instead of NumPy and the kernels stay on GPU (see device.org).
 
 * Next steps
 
-- Full step-by-step: [[file:tutorials.org][tutorials]] (legacy) and the new per-family tutorials (classical, Bayesian pilot+mixer, GLE colored noise, polish+device).
+- Tutorials by driver family:
+  - [[file:tutorials/classical-and-presets.org][classical presets]]
+  - [[file:tutorials/box-search.org][box search]]
+  - [[file:tutorials/cluster-search.org][cluster search]]
+  - [[file:tutorials/bayesian-pilot-mixer.org][Bayesian pilot and mixer]]
+  - [[file:tutorials/gle-colored-noise.org][generalized Langevin equation colored noise]]
+  - [[file:tutorials/polish-device-scale.org][polish, device and scale]]
 - Why the algebra lets one change serve all drivers: [[file:architecture.org][architecture]] and [[file:explanation/algebra.org][algebra]] (T4).
 - Practical recipes: [[file:faq.org][faq]] and how-to guides (T4).
 - The typed specification and TLA+ invariants: [[file:spec.org][spec]].
 - The IISE/INFORMS paper and full reproducibility package: [[file:used_by.org][used_by]].
 
-All examples above are copy-paste runnable under =pip install anneal= or inside the =pixi -e python= environment.
+Every example above runs as written after =pip install anneal=, or in the pixi environment after the build in [[file:howto/install.org][Install anneal]].
