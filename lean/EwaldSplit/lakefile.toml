@@ -1,0 +1,10 @@
+name = "EwaldSplit"
+version = "0.1.0"
+defaultTargets = ["EwaldSplit"]
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+
+[[lean_lib]]
+name = "EwaldSplit"
