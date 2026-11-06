@@ -4,6 +4,7 @@
 #include "rgpot/LongRange/Dispersion.hpp"
 
 #include "rgpot/LongRange/Compensate.hpp"
+#include "rgpot/LongRange/Lattice.hpp"
 #include "rgpot/ParamHash.hpp"
 #include "rgpot/stress.hpp"
 #include "rgpot/units.hpp"
@@ -11,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <numbers>
 #include <stdexcept>
 #include <vector>
@@ -125,7 +127,7 @@ bool invert(Mat a, Mat *inv) {
 void jacobi(Mat a, std::vector<double> *eval) {
   const int n = a.n;
   eval->assign(static_cast<std::size_t>(n), 0.0);
-  for (int sweep = 0; sweep < 60; ++sweep) {
+  for (int sweep = 0; sweep < 100; ++sweep) {
     double off = 0.0;
     for (int p = 0; p < n; ++p) {
       for (int q = p + 1; q < n; ++q) {
@@ -291,9 +293,14 @@ void accumulate_T(Mat *m, const std::vector<Pair> &pairs, const std::vector<doub
   }
 }
 
+#include "rgpot/LongRange/MbdEwald.inc"
+
 double mbd_energy_hartree(const double *pos, std::size_t n, const int *z, const std::vector<Pair> &pairs,
                           const std::vector<double> &h, const std::vector<double> *c6ratio,
-                          const DispersionConfig &cfg) {
+                          const DispersionConfig &cfg, const double *box) {
+  if (cfg.periodic) {
+    return mbd_periodic_hartree(pos, n, z, box, h, c6ratio, cfg);
+  }
   std::vector<Pair> gas;
   const std::vector<Pair> *use = &pairs;
   if (!cfg.periodic) {
@@ -401,7 +408,7 @@ public:
   void evaluate(const ForceInput &in, const std::vector<Pair> &pairs, const std::vector<double> &h,
                 const std::vector<double> *c6, const DispersionConfig &cfg, double *energy, double *F,
                 double strain[6], int *has_stress) const override {
-    const double eh = mbd_energy_hartree(in.pos, in.nAtoms, in.atmnrs, pairs, h, c6, cfg);
+    const double eh = mbd_energy_hartree(in.pos, in.nAtoms, in.atmnrs, pairs, h, c6, cfg, in.box);
     *energy = eh * kHartree;
     *has_stress = 0;
     std::fill(strain, strain + 6, 0.0);
@@ -413,9 +420,11 @@ public:
       for (int c = 0; c < 3; ++c) {
         std::vector<double> pos(in.pos, in.pos + 3 * in.nAtoms);
         pos[3 * i + static_cast<std::size_t>(c)] += step;
-        const double ep = mbd_energy_hartree(pos.data(), in.nAtoms, in.atmnrs, pairs, h, c6, cfg);
+        const double ep =
+            mbd_energy_hartree(pos.data(), in.nAtoms, in.atmnrs, pairs, h, c6, cfg, in.box);
         pos[3 * i + static_cast<std::size_t>(c)] -= 2.0 * step;
-        const double em = mbd_energy_hartree(pos.data(), in.nAtoms, in.atmnrs, pairs, h, c6, cfg);
+        const double em =
+            mbd_energy_hartree(pos.data(), in.nAtoms, in.atmnrs, pairs, h, c6, cfg, in.box);
         const double dedr = (ep - em) / (2.0 * step) * kHartree;
         F[3 * i + static_cast<std::size_t>(c)] += -dedr;
       }
@@ -457,9 +466,6 @@ public:
     int nt = 1;
 #ifdef _OPENMP
     nt = omp_get_max_threads();
-    if (nt < 1) {
-      nt = 1;
-    }
 #endif
     std::vector<Neumaier> enes(static_cast<std::size_t>(nt));
     std::vector<std::vector<double>> forces(static_cast<std::size_t>(nt));
@@ -633,6 +639,12 @@ public:
     if (dftd3_check_error(err_) != 0) {
       throw std::runtime_error("s-dftd3 structure update failed");
     }
+    if (cfg.lib_disp2 > 0.0 && cfg.lib_disp3 > 0.0 && cfg.lib_cn > 0.0) {
+      dftd3_set_model_realspace_cutoff(err_, model_, cfg.lib_disp2, cfg.lib_disp3, cfg.lib_cn);
+      if (dftd3_check_error(err_) != 0) {
+        throw std::runtime_error("s-dftd3 realspace cutoff failed");
+      }
+    }
     double eh = 0.0;
     std::vector<double> grad(static_cast<std::size_t>(nat) * 3);
     double sigma[9] = {};
@@ -721,6 +733,12 @@ public:
     }
     if (dftd4_check_error(err_) != 0) {
       throw std::runtime_error("dftd4 structure update failed");
+    }
+    if (cfg.lib_disp2 > 0.0 && cfg.lib_disp3 > 0.0 && cfg.lib_cn > 0.0) {
+      dftd4_set_model_realspace_cutoff(err_, model_, cfg.lib_disp2, cfg.lib_disp3, cfg.lib_cn);
+      if (dftd4_check_error(err_) != 0) {
+        throw std::runtime_error("dftd4 realspace cutoff failed");
+      }
     }
     double eh = 0.0;
     std::vector<double> grad(static_cast<std::size_t>(nat) * 3);
@@ -834,6 +852,9 @@ DispersionPot::DispersionPot(DispersionConfig cfg, std::shared_ptr<RatioSource> 
   fp.f64(cfg_.charge);
   fp.f64(cfg_.mbd_beta);
   fp.f64(cfg_.mbd_a);
+  fp.i64(cfg_.mbd_k[0]);
+  fp.i64(cfg_.mbd_k[1]);
+  fp.i64(cfg_.mbd_k[2]);
   fp.f64(cfg_.qdo_scale);
   fp.f64(cfg_.cutoff);
   fp.u64(cfg_.qdo_legacy ? 1 : 0);

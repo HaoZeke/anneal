@@ -153,6 +153,12 @@ option(
     description: 'Directory of liblinkcell when pkg-config is not installed.',
 )
 option(
+    'with_cuda',
+    type: 'boolean',
+    value: false,
+    description: 'Compile the Ewald, PME and pair-sum kernels with nvcc.',
+)
+option(
     'linkcell_incdir',
     type: 'string',
     value: '',

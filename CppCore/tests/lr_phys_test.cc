@@ -1,6 +1,7 @@
 // MIT License
 // Copyright 2023--present rgpot developers
 
+#include "rgpot/LongRange/CudaPath.hpp"
 #include "rgpot/LongRange/Dispersion.hpp"
 #include "rgpot/LongRange/Electro.hpp"
 #include "rgpot/LongRange/Lattice.hpp"
@@ -926,6 +927,360 @@ void test_edges() {
   run(d4pot, pos, z, nullptr);
 }
 
+void test_cuda_and_periodic_mbd() {
+  const double pos[] = {0.1, 0.2, 0.3, 1.4, 0.2, 0.5, 0.4, 1.6, 0.2, 1.2, 1.1, 1.3};
+  const double q[] = {0.4, -0.2, 0.5, -0.7};
+  const double box[] = {6, 0.3, 0.1, -0.2, 5.5, 0.2, 0.1, -0.4, 6.2};
+  DualList lists(3, 8, 0.5);
+  lists.update(pos, 4, box, true);
+  const auto &pairs = lists.long_pairs();
+  std::vector<int> pi, pj;
+  std::vector<double> px, py, pz, pr;
+  for (const auto &p : pairs) {
+    pi.push_back(p.i);
+    pj.push_back(p.j);
+    px.push_back(p.x);
+    py.push_back(p.y);
+    pz.push_back(p.z);
+    pr.push_back(p.r);
+  }
+  CoulombConfig cfg;
+  cfg.cutoff = 8;
+  cfg.alpha = 0.35;
+  cfg.kmax = 4;
+  cfg.periodic = true;
+  cfg.short_cutoff = 3;
+  cfg.skin = 0.5;
+  std::vector<double> serialF(12, 0.0);
+  rgpot::lr::ElecOut serial;
+  rgpot::lr::evaluate_electrostatics(CoulombMethod::Ewald, cfg, pos, q, 4, 0.0, box, pairs,
+                                    serialF.data(), nullptr, &serial);
+  rgpot::lr::CudaCoulombIn in;
+  in.pos = pos;
+  in.q = q;
+  in.n = 4;
+  in.box = box;
+  in.pair_i = pi.data();
+  in.pair_j = pj.data();
+  in.pair_x = px.data();
+  in.pair_y = py.data();
+  in.pair_z = pz.data();
+  in.pair_r = pr.data();
+  in.npair = pairs.size();
+  in.alpha = 0.35;
+  in.cutoff = 8;
+  in.kmax = 4;
+  in.method = 0;
+  double ene = 0.0;
+  std::vector<double> Fc(12, 0.0);
+  int used = 1;
+  rgpot::lr::coulomb_cuda(in, &ene, Fc.data(), &used);
+  check(used == 0 || used == 1, "cuda reports whether a device ran");
+  check_close(ene, serial.energy, 1e-8, "cuda Ewald matches the serial energy");
+  for (int i = 0; i < 12; ++i) {
+    check_close(Fc[i], serialF[i], 1e-8, "cuda Ewald matches the serial force");
+  }
+  cfg.method = CoulombMethod::SPME;
+  cfg.grid[0] = cfg.grid[1] = cfg.grid[2] = 16;
+  cfg.spline_order = 4;
+  std::fill(serialF.begin(), serialF.end(), 0.0);
+  rgpot::lr::evaluate_electrostatics(CoulombMethod::SPME, cfg, pos, q, 4, 0.0, box, pairs,
+                                    serialF.data(), nullptr, &serial);
+  in.method = 1;
+  in.grid = 16;
+  in.order = 4;
+  rgpot::lr::coulomb_cuda(in, &ene, Fc.data(), &used);
+  check_close(ene, serial.energy, 1e-8, "cuda PME matches the serial energy");
+  for (int i = 0; i < 12; ++i) {
+    check_close(Fc[i], serialF[i], 1e-8, "cuda PME matches the serial force");
+  }
+  check(rgpot::lr::cuda_device_count() == 0, "this host has no CUDA device");
+  const double c6[] = {12.0, 4.0};
+  const double r0[] = {3.0, 2.5};
+  const double rr[] = {3.4, 2.8};
+  const double damp = rgpot::lr::damp_sum_cuda(c6, r0, rr, 2, 0.4, 1.2, &used);
+  check_close(damp, rgpot::lr::damp_sum_host(c6, r0, rr, 2, 0.4, 1.2), 1e-15, "BJ pair sum");
+  const double mat[] = {0.2, -0.1, 0.05};
+  check_close(rgpot::lr::pair_sum_cuda(mat, 3, &used), 0.15, 1e-15, "pairwise dispersion sum");
+  bool threw = false;
+  try {
+    rgpot::lr::coulomb_cuda(in, &ene, Fc.data(), nullptr);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "cuda status pointer is required");
+  threw = false;
+  try {
+    rgpot::lr::coulomb_host(in, nullptr, nullptr);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "cuda energy pointer is required");
+  threw = false;
+  in.alpha = -1;
+  try {
+    rgpot::lr::coulomb_host(in, &ene, nullptr);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "cuda alpha must be positive");
+  in.alpha = 0.35;
+  in.method = 3;
+  threw = false;
+  try {
+    rgpot::lr::coulomb_host(in, &ene, nullptr);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "cuda method must be known");
+  in.method = 0;
+  in.kmax = 0;
+  threw = false;
+  try {
+    rgpot::lr::coulomb_host(in, &ene, nullptr);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "cuda Ewald kmax must be positive");
+  in.kmax = 4;
+  in.method = 1;
+  in.order = 2;
+  threw = false;
+  try {
+    rgpot::lr::coulomb_host(in, &ene, nullptr);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "cuda PME order must be at least 3");
+  in.order = 4;
+  in.n = 0;
+  threw = false;
+  try {
+    rgpot::lr::coulomb_host(in, &ene, nullptr);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "cuda coulomb needs atoms");
+  in.n = 4;
+  double badq[] = {0.4, std::numeric_limits<double>::quiet_NaN(), 0.5, -0.7};
+  in.q = badq;
+  threw = false;
+  try {
+    rgpot::lr::coulomb_host(in, &ene, nullptr);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "cuda charges must be finite");
+  in.q = q;
+  threw = false;
+  try {
+    rgpot::lr::pair_sum_host(nullptr, 2);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "pair sum pointer is required");
+  double badp[] = {1.0, std::numeric_limits<double>::infinity()};
+  threw = false;
+  try {
+    rgpot::lr::pair_sum_host(badp, 2);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "pair sum entries must be finite");
+  threw = false;
+  try {
+    rgpot::lr::damp_sum_host(c6, r0, rr, 2, 0.4, 0.0);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "BJ a2 must be positive");
+  double badr[] = {0.0, 1.0};
+  threw = false;
+  try {
+    rgpot::lr::damp_sum_host(c6, r0, badr, 2, 0.4, 1.0);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "BJ distances must be positive");
+  threw = false;
+  try {
+    rgpot::lr::pair_sum_cuda(mat, 3, nullptr);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "pair-sum status pointer is required");
+  threw = false;
+  try {
+    rgpot::lr::damp_sum_cuda(c6, r0, rr, 2, 0.4, 1.0, nullptr);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "damped-sum status pointer is required");
+
+  DispersionConfig mcfg;
+  mcfg.kind = DispersionKind::MBD;
+  mcfg.periodic = true;
+  mcfg.cutoff = 20;
+  mcfg.short_cutoff = 4;
+  mcfg.mbd_k[0] = mcfg.mbd_k[1] = mcfg.mbd_k[2] = 4;
+  const double apos[] = {0.3, 0.1, 0.2, 4.1, -0.2, -0.1};
+  const int az[] = {18, 18};
+  const double abox[] = {8.1, 0.1, -0.2, 0.3, 3.9, -0.1, -0.1, 0.2, 4.2};
+  auto model = rgpot::lr::make_dispersion(DispersionKind::MBD);
+  std::vector<rgpot::lr::Pair> none;
+  std::vector<double> h(2, 1.0);
+  double energy = 0.0;
+  double strain[6] = {};
+  int has = 0;
+  rgpot::ForceInput fin{2, apos, az, abox};
+  model->evaluate(fin, none, h, nullptr, mcfg, &energy, nullptr, strain, &has);
+  const double ha = energy * rgpot::units::EV_TO_HARTREE;
+  check_close(ha, -0.0021037562496878173, 1e-8, "periodic MBD matches pymbd argon");
+  mcfg.mbd_k[0] = 0;
+  threw = false;
+  try {
+    model->evaluate(fin, none, h, nullptr, mcfg, &energy, nullptr, strain, &has);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "MBD k-mesh must be positive");
+  mcfg.mbd_k[0] = 4;
+  fin.box = nullptr;
+  threw = false;
+  try {
+    model->evaluate(fin, none, h, nullptr, mcfg, &energy, nullptr, strain, &has);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "periodic MBD needs a cell");
+
+  const double nanpos[] = {std::numeric_limits<double>::quiet_NaN(), 0, 0};
+  const double oneq[] = {0.0};
+  std::vector<rgpot::lr::Pair> nopairs;
+  rgpot::lr::ElecOut eout;
+  threw = false;
+  try {
+    rgpot::lr::evaluate_electrostatics(CoulombMethod::Ewald, cfg, nanpos, oneq, 1, 0.0, box, nopairs,
+                                      nullptr, nullptr, &eout);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "a non-finite position is rejected");
+
+  {
+    DispersionConfig cut;
+    cut.kind = DispersionKind::D3BJ;
+    cut.functional = "pbe";
+    cut.cutoff = 12;
+    cut.short_cutoff = 3;
+    cut.lib_disp2 = 15;
+    cut.lib_disp3 = 10;
+    cut.lib_cn = 10;
+    DispersionPot d3(cut);
+    std::vector<double> wpos = {0, 0, 0, 0.96, 0, 0, -0.24, 0.93, 0};
+    std::vector<int> wz = {8, 1, 1};
+    run(d3, wpos, wz, nullptr);
+    cut.kind = DispersionKind::D4;
+    DispersionPot d4(cut);
+    run(d4, wpos, wz, nullptr);
+  }
+  threw = false;
+  try {
+    rgpot::lr::make_dispersion(static_cast<DispersionKind>(99));
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "an unknown dispersion kind is rejected");
+
+  {
+    DispersionConfig sw;
+    sw.kind = DispersionKind::QDO;
+    sw.cutoff = 2.0;
+    sw.switch_width = 1.5;
+    sw.short_cutoff = 0.5;
+    DispersionPot pot(sw);
+    std::vector<double> wpos = {0, 0, 0, 1.2, 0.1, 0, 0.2, 1.3, 0.2};
+    std::vector<int> wz = {6, 1, 8};
+    const Eval e = run(pot, wpos, wz, nullptr);
+    check(std::isfinite(e.energy), "switched QDO energy is finite");
+  }
+  {
+    rgpot::lr::NlhConfig ncfg;
+    ncfg.cutoff = 2;
+    NlhPot pot(ncfg);
+    std::vector<double> one = {0, 0, 0};
+    std::vector<int> z1 = {6};
+    run(pot, one, z1, nullptr);
+    std::vector<double> same = {0, 0, 0, 0, 0, 0};
+    std::vector<int> z2 = {6, 6};
+    run(pot, same, z2, nullptr);
+  }
+  {
+    mcfg.mbd_gamma = true;
+    fin.box = abox;
+    model->evaluate(fin, none, h, nullptr, mcfg, &energy, nullptr, strain, &has);
+    check(std::isfinite(energy), "Gamma-point MBD energy is finite");
+    mcfg.mbd_gamma = false;
+  }
+  {
+    const double badbox[] = {0, 0, 0, 0, 4, 0, 0, 0, 4};
+    fin.box = badbox;
+    threw = false;
+    try {
+      model->evaluate(fin, none, h, nullptr, mcfg, &energy, nullptr, strain, &has);
+    } catch (const std::invalid_argument &) {
+      threw = true;
+    }
+    check(threw, "a singular MBD cell is rejected");
+    fin.box = abox;
+  }
+  {
+    mcfg.mbd_beta = 0.05;
+    const double piled[] = {0, 0, 0, 0.02, 0, 0};
+    const double pbox[] = {8, 0, 0, 0, 8, 0, 0, 0, 8};
+    fin.pos = piled;
+    fin.box = pbox;
+    try {
+      model->evaluate(fin, none, h, nullptr, mcfg, &energy, nullptr, strain, &has);
+    } catch (const std::runtime_error &) {
+    }
+    mcfg.mbd_beta = 0.83;
+  }
+  in.pos = nullptr;
+  in.q = q;
+  in.n = 4;
+  in.method = 0;
+  in.kmax = 4;
+  in.order = 4;
+  in.alpha = 0.35;
+  threw = false;
+  try {
+    rgpot::lr::coulomb_host(in, &ene, nullptr);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "cuda coulomb needs a position pointer");
+  in.pos = pos;
+  std::vector<int> far_i = {0}, far_j = {1};
+  std::vector<double> far_x = {20}, far_y = {0}, far_z = {0}, far_r = {20};
+  in.pair_i = far_i.data();
+  in.pair_j = far_j.data();
+  in.pair_x = far_x.data();
+  in.pair_y = far_y.data();
+  in.pair_z = far_z.data();
+  in.pair_r = far_r.data();
+  in.npair = 1;
+  rgpot::lr::coulomb_host(in, &ene, nullptr);
+  check(std::isfinite(ene), "a pair outside the cutoff is skipped");
+  threw = false;
+  try {
+    rgpot::lr::damp_sum_host(nullptr, nullptr, nullptr, 1, 0.4, 1.0);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "a damped pair sum needs its coefficients");
+}
+
 } // namespace
 
 int main() {
@@ -943,6 +1298,7 @@ int main() {
     test_sum_and_charge();
     test_edges();
     test_nve();
+    test_cuda_and_periodic_mbd();
   } catch (const std::exception &ex) {
     std::cerr << "FAIL exception " << ex.what() << '\n';
     return 1;

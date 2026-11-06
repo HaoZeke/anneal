@@ -32,11 +32,6 @@ void switch_w(double r, double off, double *w, double *dw) {
     *dw = 0.0;
     return;
   }
-  if (!(r > 0.0)) {
-    *w = 1.0;
-    *dw = 0.0;
-    return;
-  }
   const double c = r / off;
   const double s1 = sigma(1.0 - c);
   const double s2 = sigma(c);

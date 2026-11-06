@@ -1,17 +1,19 @@
 // MIT License
 // Copyright 2023--present rgpot developers
 
-// Serial head-to-head and OpenMP scaling for the long-range kernels.
-// Each sample is one force evaluation. The log records hostname, date
-// and the CPU model. Repeats are at least 6. The reported spread is the
-// type-7 interquartile range.
+// Strong and weak OpenMP ladders for Ewald, PME, D3 and D4.
+// Sizes run from 128 to 8192 atoms. Thread counts are powers of two
+// up to the physical cores. Each point is at least 6 repeats and the
+// spread is the type-7 interquartile range. Every point records the
+// hostname, the date and the CPU.
 
-#include "rgpot/LongRange/Electro.hpp"
 #include "rgpot/LongRange/Dispersion.hpp"
+#include "rgpot/LongRange/Electro.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <random>
@@ -74,11 +76,20 @@ std::string hostname() {
   return host;
 }
 
+std::string date_now() {
+  const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+  std::string text = std::ctime(&now);
+  if (!text.empty() && text.back() == '\n') {
+    text.pop_back();
+  }
+  return text;
+}
+
 struct System {
   std::vector<double> pos;
   std::vector<int> z;
   std::vector<double> q;
-  double box[9];
+  double box[9]{};
 };
 
 System make_system(int n, unsigned seed) {
@@ -105,6 +116,7 @@ template <class Fn>
 std::vector<double> repeat(int nrep, Fn &&fn) {
   fn();
   std::vector<double> samples;
+  samples.reserve(static_cast<std::size_t>(nrep));
   for (int i = 0; i < nrep; ++i) {
     const auto t0 = std::chrono::steady_clock::now();
     fn();
@@ -114,84 +126,152 @@ std::vector<double> repeat(int nrep, Fn &&fn) {
   return samples;
 }
 
-void report(std::ostream &out, const std::string &name, int n, int threads,
+void report(std::ostream &out, const std::string &ladder, const std::string &name, int n, int threads,
             const std::vector<double> &samples, double energy) {
   const double med = quantile7(samples, 0.5);
   const double iqr = quantile7(samples, 0.75) - quantile7(samples, 0.25);
-  out << name << " n=" << n << " threads=" << threads << " repeats=" << samples.size()
-      << " median_us=" << med << " iqr7_us=" << iqr << " energy_eV=" << energy << '\n';
+  out << "run hostname=" << hostname() << " date=" << date_now() << " cpu=" << cpu_model() << '\n';
+  out << ladder << ' ' << name << " n=" << n << " threads=" << threads
+      << " repeats=" << samples.size() << " median_us=" << med << " iqr7_us=" << iqr
+      << " energy_eV=" << energy << '\n';
+  out.flush();
+}
+
+double time_ewald(const System &s, int threads, int nrep, std::ostream &log, std::ostream &echo,
+                  const std::string &ladder) {
+  set_threads(threads);
+  rgpot::lr::CoulombConfig cfg;
+  cfg.method = rgpot::lr::CoulombMethod::Ewald;
+  cfg.cutoff = 8.0;
+  cfg.alpha = 0.35;
+  cfg.kmax = 5;
+  cfg.short_cutoff = 3.0;
+  cfg.skin = 0.5;
+  cfg.periodic = true;
+  rgpot::lr::CoulombPot pot(cfg, std::make_shared<rgpot::lr::FixedCharges>(s.q, 0.0));
+  std::vector<double> f(s.pos.size());
+  auto eval = [&]() {
+    rgpot::ForceOut out{};
+    out.F = f.data();
+    rgpot::ForceInput in{s.pos.size() / 3, s.pos.data(), s.z.data(), s.box};
+    pot.forceImpl(in, &out);
+    return out.energy;
+  };
+  const auto samples = repeat(nrep, eval);
+  const double energy = eval();
+  report(log, ladder, "ewald", static_cast<int>(s.z.size()), threads_now(), samples, energy);
+  report(echo, ladder, "ewald", static_cast<int>(s.z.size()), threads_now(), samples, energy);
+  return energy;
+}
+
+double time_pme(const System &s, int threads, int nrep, std::ostream &log, std::ostream &echo,
+                const std::string &ladder) {
+  set_threads(threads);
+  rgpot::lr::CoulombConfig cfg;
+  cfg.method = rgpot::lr::CoulombMethod::SPME;
+  cfg.cutoff = 8.0;
+  cfg.alpha = 0.35;
+  cfg.grid[0] = cfg.grid[1] = cfg.grid[2] = 32;
+  cfg.spline_order = 4;
+  cfg.short_cutoff = 3.0;
+  cfg.skin = 0.5;
+  cfg.periodic = true;
+  rgpot::lr::CoulombPot pot(cfg, std::make_shared<rgpot::lr::FixedCharges>(s.q, 0.0));
+  std::vector<double> f(s.pos.size());
+  auto eval = [&]() {
+    rgpot::ForceOut out{};
+    out.F = f.data();
+    rgpot::ForceInput in{s.pos.size() / 3, s.pos.data(), s.z.data(), s.box};
+    pot.forceImpl(in, &out);
+    return out.energy;
+  };
+  const auto samples = repeat(nrep, eval);
+  const double energy = eval();
+  report(log, ladder, "pme", static_cast<int>(s.z.size()), threads_now(), samples, energy);
+  report(echo, ladder, "pme", static_cast<int>(s.z.size()), threads_now(), samples, energy);
+  return energy;
+}
+
+double time_disp(const System &s, int threads, int nrep, std::ostream &log, std::ostream &echo,
+                 const std::string &ladder, rgpot::lr::DispersionKind kind, const char *name) {
+  set_threads(threads);
+  rgpot::lr::DispersionConfig cfg;
+  cfg.kind = kind;
+  cfg.functional = "pbe";
+  cfg.atm = true;
+  cfg.charge = 0.0;
+  cfg.cutoff = 12.0;
+  cfg.short_cutoff = 3.0;
+  cfg.periodic = true;
+  // Bohr. The same radii are used for the s-dftd3 and dftd4 timings.
+  cfg.lib_disp2 = 15.0;
+  cfg.lib_disp3 = 10.0;
+  cfg.lib_cn = 10.0;
+  rgpot::lr::DispersionPot pot(cfg);
+  std::vector<double> f(s.pos.size());
+  auto eval = [&]() {
+    rgpot::ForceOut out{};
+    out.F = f.data();
+    rgpot::ForceInput in{s.pos.size() / 3, s.pos.data(), s.z.data(), s.box};
+    pot.forceImpl(in, &out);
+    return out.energy;
+  };
+  const auto samples = repeat(nrep, eval);
+  const double energy = eval();
+  report(log, ladder, name, static_cast<int>(s.z.size()), threads_now(), samples, energy);
+  report(echo, ladder, name, static_cast<int>(s.z.size()), threads_now(), samples, energy);
+  return energy;
 }
 
 } // namespace
 
 int main(int argc, char **argv) {
   const int nrep = argc > 1 ? std::atoi(argv[1]) : 6;
+  if (nrep < 6) {
+    std::cerr << "repeats must be at least 6\n";
+    return 2;
+  }
   const int physical = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
+  int max_threads = 1;
+  for (int t = 1; t <= physical; t *= 2) {
+    max_threads = t;
+  }
   std::ofstream log("lr_phys_bench.log");
   log << "hostname " << hostname() << '\n';
-  log << "date " << std::chrono::system_clock::now().time_since_epoch().count() << '\n';
-  {
-    const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    log << "date_utc " << std::ctime(&now);
-  }
+  log << "date " << date_now() << '\n';
   log << "cpu " << cpu_model() << '\n';
   log << "physical_cores " << physical << '\n';
+  log << "max_threads " << max_threads << '\n';
   log << "repeats " << nrep << '\n';
+  log << "pme_grid 32\n";
+  log << "ewald_kmax 5\n";
+  log << "disp_cutoff_bohr disp2=15 disp3=10 cn=10\n";
 
-  auto time_ewald = [&](const System &s, int threads) {
-    set_threads(threads);
-    rgpot::lr::CoulombConfig cfg;
-    cfg.method = rgpot::lr::CoulombMethod::Ewald;
-    cfg.cutoff = 8.0;
-    cfg.alpha = 0.35;
-    cfg.kmax = 6;
-    cfg.short_cutoff = 3.0;
-    cfg.skin = 0.5;
-    cfg.periodic = true;
-    rgpot::lr::CoulombPot pot(cfg, std::make_shared<rgpot::lr::FixedCharges>(s.q, 0.0));
-    std::vector<double> f(s.pos.size());
-    auto eval = [&]() {
-      rgpot::ForceOut out{};
-      out.F = f.data();
-      rgpot::ForceInput in{s.pos.size() / 3, s.pos.data(), s.z.data(), s.box};
-      pot.forceImpl(in, &out);
-      return out.energy;
-    };
-    const auto samples = repeat(nrep, eval);
-    report(log, "ewald", static_cast<int>(s.z.size()), threads_now(), samples, eval());
-    report(std::cout, "ewald", static_cast<int>(s.z.size()), threads_now(), samples, eval());
-  };
-
-  auto time_qdo = [&](const System &s, int threads) {
-    set_threads(threads);
-    rgpot::lr::DispersionConfig cfg;
-    cfg.kind = rgpot::lr::DispersionKind::QDO;
-    cfg.cutoff = 10.0;
-    cfg.short_cutoff = 3.0;
-    cfg.periodic = true;
-    rgpot::lr::DispersionPot pot(cfg);
-    std::vector<double> f(s.pos.size());
-    auto eval = [&]() {
-      rgpot::ForceOut out{};
-      out.F = f.data();
-      rgpot::ForceInput in{s.pos.size() / 3, s.pos.data(), s.z.data(), s.box};
-      pot.forceImpl(in, &out);
-      return out.energy;
-    };
-    const auto samples = repeat(nrep, eval);
-    report(log, "qdo", static_cast<int>(s.z.size()), threads_now(), samples, eval());
-    report(std::cout, "qdo", static_cast<int>(s.z.size()), threads_now(), samples, eval());
-  };
-
-  const System base = make_system(128, 7);
-  for (int threads = 1; threads <= physical; threads *= 2) {
-    time_ewald(base, threads);
-    time_qdo(base, threads);
+  const int sizes[] = {128, 256, 512, 1024, 2048, 4096, 8192};
+  for (int n : sizes) {
+    const System sys = make_system(n, 1000u + static_cast<unsigned>(n));
+    for (int threads = 1; threads <= max_threads; threads *= 2) {
+      time_ewald(sys, threads, nrep, log, std::cout, "strong");
+      time_pme(sys, threads, nrep, log, std::cout, "strong");
+      time_disp(sys, threads, nrep, log, std::cout, "strong", rgpot::lr::DispersionKind::D3BJ, "d3");
+      time_disp(sys, threads, nrep, log, std::cout, "strong", rgpot::lr::DispersionKind::D4, "d4");
+    }
   }
-  for (int threads = 1; threads <= physical; threads *= 2) {
-    const System grown = make_system(32 * threads, 11 + threads);
-    time_ewald(grown, threads);
+  // Weak ladder: atoms per thread stay at 1024, so 1 thread is 1024
+  // atoms and the full machine is 8192. A second ladder starts at 128.
+  for (int base : {128, 1024}) {
+    for (int threads = 1; threads <= max_threads; threads *= 2) {
+      const int n = base * threads;
+      if (n > 8192) {
+        continue;
+      }
+      const System sys = make_system(n, 2000u + static_cast<unsigned>(n));
+      const std::string ladder = base == 128 ? "weak128" : "weak1024";
+      time_ewald(sys, threads, nrep, log, std::cout, ladder);
+      time_pme(sys, threads, nrep, log, std::cout, ladder);
+      time_disp(sys, threads, nrep, log, std::cout, ladder, rgpot::lr::DispersionKind::D3BJ, "d3");
+      time_disp(sys, threads, nrep, log, std::cout, ladder, rgpot::lr::DispersionKind::D4, "d4");
+    }
   }
-  log.close();
   return 0;
 }

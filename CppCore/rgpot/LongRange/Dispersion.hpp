@@ -23,10 +23,19 @@ struct DispersionConfig {
   double charge = 0.0; // D4 total charge
   double mbd_beta = 0.83;
   double mbd_a = 6.0;
+  // Monkhorst-Pack mesh for periodic MBD. Gas phase ignores it.
+  int mbd_k[3] = {4, 4, 4};
+  // One k-point at Gamma. The shifted mesh is the default.
+  bool mbd_gamma = false;
   double qdo_scale = 1.0;
   bool qdo_legacy = false;
   bool qdo_damped = true;
   double cutoff = 15.0;
+  // Library real-space cutoffs in Bohr. Zero keeps the library default,
+  // which is what the molecular reference comparisons use.
+  double lib_disp2 = 0.0;
+  double lib_disp3 = 0.0;
+  double lib_cn = 0.0;
   double switch_width = 0.0; // 0 keeps a hard list cutoff
   double short_cutoff = 4.0;
   double skin = 1.0;
