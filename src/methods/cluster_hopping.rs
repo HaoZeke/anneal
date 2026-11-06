@@ -5113,6 +5113,22 @@ where
                 c.observe(f.view(), e_new, e);
             }
         }
+        // Every hop, accepted or not, so a basin census can tell a minimum
+        // that was never proposed from one that was proposed and then lost
+        // to the return screen, the record gate or the acceptance test.
+        if std::env::var("ANNEAL_HOP_TRACE").is_ok() {
+            let max_gradient = validation_gradient
+                .as_ref()
+                .map(|g| g.iter().fold(0.0_f64, |m, v| m.max(v.abs())))
+                .unwrap_or(f64::NAN);
+            let coordinates: Vec<String> = x_new.iter().map(|v| format!("{v:.6}")).collect();
+            eprintln!(
+                "HOPTRACE {{\"hop\":{hops},\"spent\":{},\"arm\":\"{proposal_action}\",\"e\":{e:.8},\"e_screen\":{e_screen:.8},\"e_new\":{e_new:.8},\"best\":{:.8},\"drift\":{drift:.6},\"returning\":{returning},\"screened\":{screened_this},\"unquenched\":{unquenched},\"recordable\":{recordable},\"max_gradient\":{max_gradient:.6e},\"accept\":{accept},\"x\":[{}]}}",
+                ledger.spent(),
+                ledger.best,
+                coordinates.join(",")
+            );
+        }
         if accept && cfg.calibrate_radius {
             // How far this hop actually moved, in the metric the bias keys on.
             let d: f64 = s_old
