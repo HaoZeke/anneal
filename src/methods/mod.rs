@@ -31,6 +31,8 @@ pub mod ensemble;
 pub mod ffs;
 /// Cover, minimum-mode climb, and plain quench from one starting structure.
 pub mod floor_exit;
+/// Basin hopping with surface, splice and rigid-water moves, after GMIN.
+pub mod gmin_hop;
 /// Spectral referee over the explored landscape's transition graph.
 pub mod landscape_graph;
 /// Lattice-searching chains pooling their funnel bottoms in one bank.
