@@ -3,6 +3,7 @@
 
 #include "rgpot/LongRange/CudaPath.hpp"
 #include "rgpot/LongRange/Dispersion.hpp"
+#include "rgpot/LongRange/FastD3.hpp"
 #include "rgpot/LongRange/FastD4.hpp"
 #include "rgpot/LongRange/Electro.hpp"
 #include "rgpot/LongRange/Lattice.hpp"
@@ -376,6 +377,28 @@ void test_library_dispersion() {
   }
   std::cout << '\n';
   check(e.energy < 0.0, "D3 energy is negative");
+  rgpot::lr::D3BjParam blyp;
+  rgpot::lr::D3BjParam b3lyp;
+  check(rgpot::lr::d3bj_param("blyp", &blyp) && rgpot::lr::d3bj_param("b3lyp", &b3lyp),
+        "BLYP and B3LYP D3 parameters");
+  check(!rgpot::lr::d3bj_param(nullptr, &blyp), "a null D3 functional is rejected");
+  cfg.functional = "blyp";
+  cfg.atm = false;
+  rgpot::lr::DispersionPot blyp_pot(cfg);
+  const Eval blyp_e = run(blyp_pot, pos, z, nullptr);
+  check(std::isfinite(blyp_e.energy), "BLYP D3 without ATM is finite");
+  cfg.functional = "pbe";
+  cfg.atm = true;
+  bool threw = false;
+  try {
+    rgpot::lr::DispersionPot badz(cfg);
+    std::vector<double> one = {0, 0, 0};
+    std::vector<int> zz = {200};
+    run(badz, one, zz, nullptr);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "D3 rejects an atomic number outside the table");
   for (std::size_t i = 0; i < 3; ++i) {
     const double f = fd_force(
         [&](const std::vector<double> &p) { return run(d3, p, z, nullptr).energy; }, pos, i, 1e-6);
@@ -407,6 +430,8 @@ void test_library_dispersion() {
   check(e.energy < 0.0, "D4 energy is negative");
   rgpot::lr::D4BjParam bj;
   check(rgpot::lr::d4bj_param("pbe", &bj), "PBE D4 parameters");
+  check(!rgpot::lr::d4bj_param(nullptr, &bj) && !rgpot::lr::d4bj_param("nope", &bj),
+        "an unknown D4 parameter name is rejected");
   double native = 0.0;
   double nF[9] = {};
   double nstrain[6] = {};

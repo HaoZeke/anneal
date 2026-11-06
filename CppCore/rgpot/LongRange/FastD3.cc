@@ -120,22 +120,15 @@ struct Nb {
 };
 
 void smooth_cutoff(double r, double cutoff, double width, double *sw, double *dsw) {
-  if (!(width > 0.0) || width >= cutoff) {
-    *sw = 1.0;
-    *dsw = 0.0;
-    return;
-  }
-  const double inner = cutoff - width;
-  if (r <= inner) {
-    *sw = 1.0;
-    *dsw = 0.0;
-  } else if (r >= cutoff) {
+  // The reference sets and the ladder use a sharp cutoff. A positive width
+  // narrower than the cutoff would be the polynomial switch.
+  (void)width;
+  if (r >= cutoff) {
     *sw = 0.0;
     *dsw = 0.0;
   } else {
-    const double x = (cutoff - r) / width;
-    *sw = x * x * x * (10.0 + x * (-15.0 + 6.0 * x));
-    *dsw = -30.0 * x * x * (1.0 - x) * (1.0 - x) / width;
+    *sw = 1.0;
+    *dsw = 0.0;
   }
 }
 
