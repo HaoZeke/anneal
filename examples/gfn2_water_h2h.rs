@@ -6,6 +6,8 @@
 //! `StdRng::seed_from_u64(seed)`, then the hexamer driver's overlap
 //! separation. `H2H_START_ONLY=1` writes that start and exits before
 //! any energy call, so CREST can be given the same geometry.
+//! `H2H_START_XYZ=<file>` starts from that geometry instead, which is how
+//! a run is seeded from the CREST minimum.
 //!
 //! The objective is the rgpot GFN2 handle (eV, angstrom) plus the
 //! hexamer O-H wall, which is zero inside 1.15 angstrom. The reported
@@ -380,7 +382,14 @@ fn main() {
         cfg.length_scale,
         &mut rng,
     );
-    let (start, spread_steps) = separate_overlapped_start(packed, m);
+    let (start, spread_steps) = match std::env::var("H2H_START_XYZ") {
+        Ok(xyz) => {
+            let coords = read_xyz(std::path::Path::new(&xyz));
+            assert_eq!(coords.len(), 9 * m, "start geometry atom count");
+            (Array1::from_vec(coords), 0)
+        }
+        Err(_) => separate_overlapped_start(packed, m),
+    };
     let start_slice = start.as_slice().expect("contiguous start");
     let start_path = outdir.join("start.xyz");
     write_xyz(
