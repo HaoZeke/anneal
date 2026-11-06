@@ -593,6 +593,15 @@ pub const GOOD_TURING_CHECKPOINT_INTERVAL: usize = 1;
 /// 0.3 eV above their own minima and ranked a higher basin first.
 pub const WATER_RECORD_GRADIENT: f64 = 2.0e-4 * 27.211_386_245_988 / 0.529_177_210_903;
 
+/// Energy above the incumbent at which a water walk relaunches from it.
+///
+/// A 4000-call GFN2 hexamer accepts nearly every quenched minimum, so
+/// the chain leaves a shelf a few meV above the prism for basins tens
+/// of meV higher and spends the budget there. 0.02 eV is several times
+/// the 4.2 meV shelf and below the next family in the hop trace, so a
+/// walk that is still near the incumbent is left alone.
+pub const WATER_INCUMBENT_GAP_EV: f64 = 0.02;
+
 /// Search arm on the molecular preset.
 ///
 /// Communicating and derived keep the molecular groups. They do not
@@ -617,6 +626,11 @@ pub enum WaterSearchArm {
 /// [`WATER_RECORD_GRADIENT`].
 pub fn configure_water_arm(cfg: &mut Config, arm: WaterSearchArm) {
     cfg.record_gradient = WATER_RECORD_GRADIENT;
+    // The split screen does not identify a GFN2 hexamer basin, and a
+    // walk that has climbed off its best minimum does not find the prism
+    // by sampling that high basin. Both apply to every water arm.
+    cfg.quench_once = true;
+    cfg.incumbent_gap = WATER_INCUMBENT_GAP_EV;
     match arm {
         WaterSearchArm::Recommended | WaterSearchArm::GoodTuring => {}
         WaterSearchArm::Communicating => {
@@ -1373,6 +1387,8 @@ mod water_hexamer_tests {
             configure_water_arm(&mut cfg, arm);
             assert_eq!(cfg.record_gradient, WATER_RECORD_GRADIENT);
             assert!((WATER_RECORD_GRADIENT - 1.0285e-2).abs() < 1e-6);
+            assert!(cfg.quench_once);
+            assert_eq!(cfg.incumbent_gap, WATER_INCUMBENT_GAP_EV);
             assert_eq!(cfg.move_library, library);
             assert!(cfg.surfaces.is_empty());
             match &cfg.move_library {
