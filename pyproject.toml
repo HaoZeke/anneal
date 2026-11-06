@@ -17,7 +17,11 @@ maintainers = [
     { name = "Ruhila S",       email = "ruhila@ieee.org" },
     { name = "Amrita Goswami", email = "amrita@hi.is" },
 ]
+# [[[cog
+# cog.outl('version = "%s"' % anneal_version.package_version())
+# ]]]
 version = "0.12.0"
+# [[[end]]]
 requires-python = ">=3.10"
 license = "MIT"
 readme = "README.md"
@@ -31,6 +35,11 @@ dependencies = [
     "array-api-compat>=1.12",
     "numpy>=1.24.1",
 ]
+
+# Python 3.10 has no tomllib. scripts/anneal_version.py falls back to tomli.
+# https://peps.python.org/pep-0735/
+[dependency-groups]
+dev = ["tomli>=2; python_version < '3.11'"]
 
 [project.optional-dependencies]
 plotter = ["matplotlib>=3.6.3"]

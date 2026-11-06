@@ -18,28 +18,64 @@ start the workflow, so it does not upload wheels, does not publish
 Leave a mistaken unprefixed tag in place. Add the =v= tag on the same
 commit. Do not move or delete the old name.
 
-* Version triple
+* Version
 
-=validate-release= reads three files and requires them to equal the
-tag with the leading =v= stripped:
+The handwritten package version is =[package].version= in the workspace
+=Cargo.toml=. Edit that one line, then run cogapp
+(https://nedbatchelder.com/code/cog/) from the repository root:
 
-- =Cargo.toml= =[package].version=
-- =pyproject.toml= =[project].version=
-- =CITATION.cff= =version:=
+#+BEGIN_SRC bash
+python3 scripts/version_cog.py -r @scripts/cogfiles
+python3 scripts/version_cog.py -d -o .zenodo.json packaging/zenodo.cog
+#+END_SRC
 
-If any one disagrees, the workflow must stop before wheels and
-nothing is published. The validate step uses =set -euo pipefail= so a
-failed =test= fails the job. Bump all three in the same
-=chore(release):= commit.
+That refreshes =pyproject.toml=, =pixi.toml=, =meson.build=,
+=CITATION.cff=, =include/anneal-version.h=, the README badge, and
+=.zenodo.json=. The Zenodo creators come from =CITATION.cff=.
+CMake, Sphinx, and the Rust crate read the field
+themselves. CMake records =Cargo.toml= in =CMAKE_CONFIGURE_DEPENDS=
+so an existing build directory reconfigures after a bump.
+=cargo update --workspace --offline= refreshes the =anneal-core= entry in =Cargo.lock=
+(https://doc.rust-lang.org/cargo/commands/cargo-update.html).
+Towncrier (https://towncrier.readthedocs.io/en/stable/)
+reads the field through =scripts/anneal_version.py=. Do not write a version
+into =towncrier.toml=, and do not edit =CHANGELOG.md= by hand.
+Contributor notes stay in =docs/orgmode/= and are exported with
+=emacs --batch -l docs/export.el=.
+
+=cog bump= (https://docs.cocogitto.io/) does not rewrite
+=CHANGELOG.md= (=disable_changelog = true=).
+Its pre-bump hook sets the workspace version, restamps the generated
+copies, refreshes =Cargo.lock=, runs towncrier
+(https://towncrier.readthedocs.io/en/stable/), and runs the drift checks
+before the bump commit.
+Its post-bump hook runs the drift checks again.
+
+=validate-release= reads the workspace manifest, =pyproject.toml=, and
+=CITATION.cff=, and requires them to equal the tag with the leading
+=v= stripped. It also runs =python scripts/version_cog.py --check @scripts/cogfiles=
+(https://nedbatchelder.com/code/cog/) and =scripts/check_version_sot.py=. If any copy disagrees, the workflow
+stops before wheels and nothing is published. The validate step uses
+=set -euo pipefail= so a failed =test= fails the job.
 
 * Steps
 
-1. Add towncrier fragments under =docs/newsfragments/= for every
-   user-visible change.
-2. Bump the version triple to the new =X.Y.Z=.
-3. Run =pixi r towncrier-build= so =CHANGELOG.md= carries that version.
-4. Commit. Push =main=.
-5. Create an annotated, signed tag named *exactly* =vX.Y.Z= on that
+1. Add towncrier (https://towncrier.readthedocs.io/en/stable/) fragments
+   under =docs/newsfragments/= for every user-visible change.
+2. Edit the one version line in the workspace =Cargo.toml=.
+3. Run =python3 scripts/version_cog.py -r @scripts/cogfiles= and
+   =python3 scripts/version_cog.py -d -o .zenodo.json packaging/zenodo.cog=
+   (https://nedbatchelder.com/code/cog/), then
+   =cargo update --workspace --offline= so =Cargo.lock= matches.
+   =cog.toml= is the cocogitto
+   config (https://docs.cocogitto.io/), so this step does not call a
+   bare =cog=.
+4. Run =pixi r towncrier-build= so =CHANGELOG.md= carries that version.
+5. Run =python3 scripts/version_cog.py --check @scripts/cogfiles= and
+   =python3 scripts/check_version_sot.py= so a drifted copy stops the
+   release before the commit.
+6. Commit. Push =main=.
+7. Create an annotated, signed tag named *exactly* =vX.Y.Z= on that
    commit (the same object the changelog describes, not a later
    campaign commit):
 
@@ -48,7 +84,7 @@ git tag -a vX.Y.Z <commit> -m "vX.Y.Z"
 git push origin vX.Y.Z
 #+END_SRC
 
-6. Confirm the =Release= workflow on that tag is green and that
+8. Confirm the =Release= workflow on that tag is green and that
    https://pypi.org/project/anneal/X.Y.Z/ exists.
 
 Do not use =workflow_dispatch= as a substitute for the tag. Dispatch

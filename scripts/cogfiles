@@ -1,0 +1,13 @@
+# In-place copies of the package version.
+# scripts/version_cog.py imports anneal_version once, then calls cogapp.
+# https://nedbatchelder.com/code/cog/
+#   python3 scripts/version_cog.py --check @scripts/cogfiles
+#   python3 scripts/version_cog.py -r @scripts/cogfiles
+#   python3 scripts/version_cog.py -d -o .zenodo.json packaging/zenodo.cog
+pyproject.toml
+pixi.toml
+meson.build
+CITATION.cff
+include/anneal-version.h
+README.md
+packaging/zenodo.cog
