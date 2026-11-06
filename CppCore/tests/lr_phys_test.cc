@@ -3,6 +3,7 @@
 
 #include "rgpot/LongRange/CudaPath.hpp"
 #include "rgpot/LongRange/Dispersion.hpp"
+#include "rgpot/LongRange/FastD4.hpp"
 #include "rgpot/LongRange/Electro.hpp"
 #include "rgpot/LongRange/Lattice.hpp"
 #include "rgpot/LongRange/Nlh.hpp"
@@ -404,9 +405,49 @@ void test_library_dispersion() {
   }
   std::cout << '\n';
   check(e.energy < 0.0, "D4 energy is negative");
+  rgpot::lr::D4BjParam bj;
+  check(rgpot::lr::d4bj_param("pbe", &bj), "PBE D4 parameters");
+  double native = 0.0;
+  double nF[9] = {};
+  double nstrain[6] = {};
+  const double bohr = 0.529177210903;
+  rgpot::lr::d4_evaluate(pos.data(), z.data(), pos.size() / 3, nullptr, false, 0.0, bj, 60.0 * bohr,
+                         40.0 * bohr, 30.0 * bohr, &native, nF, nstrain);
+  check_close(native, e.energy, 1e-8, "native D4 matches dftd4 on water");
   }
 #else
   std::cout << "CASE d4_water skipped\n";
+#endif
+#if defined(RGPOT_HAS_DFTD4)
+  {
+    rgpot::lr::DispersionConfig cfg;
+    cfg.kind = rgpot::lr::DispersionKind::D4;
+    cfg.functional = "pbe";
+    cfg.atm = true;
+    cfg.periodic = true;
+    cfg.cutoff = 8.0;
+    cfg.short_cutoff = 3.0;
+    cfg.lib_disp2 = 15.0;
+    cfg.lib_disp3 = 10.0;
+    cfg.lib_cn = 10.0;
+    const double box[9] = {12, 0, 0, 0, 12, 0, 0, 0, 12};
+    std::vector<double> pos;
+    std::vector<int> z;
+    for (int i = 0; i < 8; ++i) {
+      pos.push_back(1.0 + (i % 2) * 4.0);
+      pos.push_back(1.0 + ((i / 2) % 2) * 4.0);
+      pos.push_back(1.0 + (i / 4) * 4.0);
+      z.push_back(i % 2 == 0 ? 8 : 1);
+    }
+    rgpot::lr::DispersionPot pot(cfg);
+    const Eval e = run(pot, pos, z, box);
+    check(std::isfinite(e.energy) && e.energy < 0.0, "periodic D4 energy is finite and negative");
+    bool finite_force = true;
+    for (double f : e.f) {
+      finite_force = finite_force && std::isfinite(f);
+    }
+    check(finite_force, "periodic D4 forces are finite");
+  }
 #endif
 }
 

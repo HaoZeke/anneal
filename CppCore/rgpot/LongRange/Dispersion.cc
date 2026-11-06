@@ -3,6 +3,8 @@
 
 #include "rgpot/LongRange/Dispersion.hpp"
 
+#include "rgpot/LongRange/FastD3.hpp"
+#include "rgpot/LongRange/FastD4.hpp"
 #include "rgpot/LongRange/Compensate.hpp"
 #include "rgpot/LongRange/Lattice.hpp"
 #include "rgpot/ParamHash.hpp"
@@ -588,94 +590,26 @@ public:
 #if defined(RGPOT_HAS_DFTD3)
 class D3Model final : public DispersionModel {
 public:
-  D3Model() {
-    err_ = dftd3_new_error();
-    if (!err_) {
-      throw std::runtime_error("dftd3_new_error failed");
-    }
-  }
-  ~D3Model() override {
-    if (param_) dftd3_delete_param(&param_);
-    if (model_) dftd3_delete_model(&model_);
-    if (mol_) dftd3_delete_structure(&mol_);
-    if (err_) dftd3_delete_error(&err_);
-  }
   [[nodiscard]] const char *name() const override { return "D3BJ"; }
   [[nodiscard]] DispersionKind kind() const override { return DispersionKind::D3BJ; }
-  void evaluate(const ForceInput &in, const std::vector<Pair> &, const std::vector<double> &,
+  void evaluate(const ForceInput &in, const std::vector<Pair> &pairs, const std::vector<double> &,
                 const std::vector<double> *, const DispersionConfig &cfg, double *energy, double *F,
                 double strain[6], int *has_stress) const override {
-    if (!param_ || functional_ != cfg.functional || atm_ != cfg.atm) {
-      if (param_) dftd3_delete_param(&param_);
-      std::vector<char> method(cfg.functional.begin(), cfg.functional.end());
-      method.push_back('\0');
-      param_ = dftd3_load_rational_damping(err_, method.data(), cfg.atm);
-      if (dftd3_check_error(err_) != 0 || !param_) {
-        throw std::runtime_error("s-dftd3 rational damping failed");
-      }
-      functional_ = cfg.functional;
-      atm_ = cfg.atm;
+    D3BjParam bj;
+    if (!d3bj_param(cfg.functional.c_str(), &bj)) {
+      throw std::runtime_error("s-dftd3 rational damping failed");
     }
-    const int nat = static_cast<int>(in.nAtoms);
-    pos_.resize(static_cast<std::size_t>(nat) * 3);
-    for (std::size_t i = 0; i < pos_.size(); ++i) {
-      pos_[i] = in.pos[i] * units::ANGSTROM_TO_BOHR;
+    if (!cfg.atm) {
+      bj.s9 = 0.0;
     }
-    double box[9];
-    const bool periodic = cfg.periodic && in.box != nullptr;
-    const bool pbc[3] = {periodic, periodic, periodic};
-    for (int i = 0; i < 9; ++i) {
-      box[i] = periodic ? in.box[i] * units::ANGSTROM_TO_BOHR : (i % 4 == 0 ? 100.0 : 0.0);
-    }
-    if (!mol_ || nat_ != nat) {
-      if (model_) dftd3_delete_model(&model_);
-      if (mol_) dftd3_delete_structure(&mol_);
-      mol_ = dftd3_new_structure(err_, nat, in.atmnrs, pos_.data(), box, pbc);
-      model_ = dftd3_new_d3_model(err_, mol_);
-      nat_ = nat;
-    } else {
-      dftd3_update_structure(err_, mol_, pos_.data(), box);
-    }
-    if (dftd3_check_error(err_) != 0) {
-      throw std::runtime_error("s-dftd3 structure update failed");
-    }
-    if (cfg.lib_disp2 > 0.0 && cfg.lib_disp3 > 0.0 && cfg.lib_cn > 0.0) {
-      dftd3_set_model_realspace_cutoff(err_, model_, cfg.lib_disp2, cfg.lib_disp3, cfg.lib_cn);
-      if (dftd3_check_error(err_) != 0) {
-        throw std::runtime_error("s-dftd3 realspace cutoff failed");
-      }
-    }
-    double eh = 0.0;
-    std::vector<double> grad(static_cast<std::size_t>(nat) * 3);
-    double sigma[9] = {};
-    dftd3_get_dispersion(err_, mol_, model_, param_, &eh, grad.data(), sigma);
-    if (dftd3_check_error(err_) != 0) {
-      throw std::runtime_error("s-dftd3 dispersion failed");
-    }
-    *energy = eh * kHartree;
-    if (F != nullptr) {
-      for (std::size_t i = 0; i < grad.size(); ++i) {
-        F[i] += grad[i] * units::NEG_GRAD_TO_FORCE;
-      }
-    }
-    strain[0] = sigma[0] * kHartree;
-    strain[1] = sigma[4] * kHartree;
-    strain[2] = sigma[8] * kHartree;
-    strain[3] = sigma[5] * kHartree;
-    strain[4] = sigma[2] * kHartree;
-    strain[5] = sigma[1] * kHartree;
+    const double bohr = units::BOHR_TO_ANGSTROM;
+    const double cut2 = (cfg.lib_disp2 > 0.0 ? cfg.lib_disp2 : 60.0) * bohr;
+    const double cut3 = (cfg.lib_disp3 > 0.0 ? cfg.lib_disp3 : 40.0) * bohr;
+    const double cutn = (cfg.lib_cn > 0.0 ? cfg.lib_cn : 40.0) * bohr;
+    d3bj_evaluate(in.pos, in.atmnrs, in.nAtoms, in.box, cfg.periodic && in.box != nullptr, pairs, bj,
+                  cut2, cut3, cutn, energy, F, strain);
     *has_stress = 1;
   }
-
-private:
-  mutable dftd3_error err_ = nullptr;
-  mutable dftd3_structure mol_ = nullptr;
-  mutable dftd3_model model_ = nullptr;
-  mutable dftd3_param param_ = nullptr;
-  mutable std::string functional_;
-  mutable bool atm_ = true;
-  mutable int nat_ = 0;
-  mutable std::vector<double> pos_;
 };
 #endif
 
@@ -699,6 +633,26 @@ public:
   void evaluate(const ForceInput &in, const std::vector<Pair> &, const std::vector<double> &,
                 const std::vector<double> *, const DispersionConfig &cfg, double *energy, double *F,
                 double strain[6], int *has_stress) const override {
+    const bool periodic = cfg.periodic && in.box != nullptr;
+    // The dense dftd4 factorization is the reference for the gas-phase sets.
+    // Periodic and large systems use the cutoff conjugate-gradient kernel.
+    if (periodic || in.nAtoms > 256) {
+      D4BjParam bj;
+      if (!d4bj_param(cfg.functional.c_str(), &bj)) {
+        throw std::invalid_argument("dftd4 load param failed");
+      }
+      if (!cfg.atm) {
+        bj.s9 = 0.0;
+      }
+      const double bohr = units::BOHR_TO_ANGSTROM;
+      const double cut2 = (cfg.lib_disp2 > 0.0 ? cfg.lib_disp2 : 60.0) * bohr;
+      const double cut3 = (cfg.lib_disp3 > 0.0 ? cfg.lib_disp3 : 40.0) * bohr;
+      const double cutn = (cfg.lib_cn > 0.0 ? cfg.lib_cn : 30.0) * bohr;
+      d4_evaluate(in.pos, in.atmnrs, in.nAtoms, in.box, periodic, cfg.charge, bj, cut2, cut3, cutn,
+                  energy, F, strain);
+      *has_stress = 1;
+      return;
+    }
     if (!param_ || functional_ != cfg.functional || atm_ != cfg.atm) {
       if (param_) dftd4_delete_param(&param_);
       std::vector<char> method(cfg.functional.begin(), cfg.functional.end());
@@ -716,7 +670,6 @@ public:
       pos_[i] = in.pos[i] * units::ANGSTROM_TO_BOHR;
     }
     double box[9] = {};
-    const bool periodic = cfg.periodic && in.box != nullptr;
     const bool pbc[3] = {periodic, periodic, periodic};
     for (int i = 0; i < 9; ++i) {
       box[i] = periodic ? in.box[i] * units::ANGSTROM_TO_BOHR : (i % 4 == 0 ? 100.0 : 0.0);

@@ -5,6 +5,8 @@ lr_src = files(
     'Pairs.cc',
     'Electro.cc',
     'Dispersion.cc',
+    'FastD3.cc',
+    'FastD4.cc',
     'Nlh.cc',
     'SumPot.cc',
     'CudaPath.cc',
