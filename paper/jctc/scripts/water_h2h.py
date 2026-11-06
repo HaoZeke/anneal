@@ -7,17 +7,29 @@ The fair anneal budget for that seed is the number of xtb energy
 evaluations CREST produced.
 The start geometry is the anneal rigid repack for that seed.
 A second anneal uses the named paper budget of 4000 evaluations.
+
+Scoring follows the Papers B' bar. Every final, CREST and anneal alike,
+is relaxed with the same xtb --opt vtight before the energies are
+compared, and the comparison uses a symmetric 1e-8 Eh window on the
+polished pair. An anneal minimum more than the window below CREST is a
+lower minimum found by anneal and passes. A CREST answer that is not one
+intact cluster is a CREST failure and is not the reference; the
+reference is then the lowest intact polished minimum from either code
+that is a confirmed minimum (force at or below the bar and no imaginary
+vibrational mode). Success stays exit + energy + force. Both RMSD
+columns are reported and neither is a gate.
 """
 
 import math
 import os
 import re
 import shutil
+import socket
 import subprocess
 import time
 from pathlib import Path
 
-from water_census import label_free_rmsd
+from water_census import HBOND_OO_A, label_free_rmsd, molecules, read_xyz
 
 ROOT = Path("paper/jctc")
 LOGS = ROOT / "logs" / "water"
@@ -27,6 +39,13 @@ MOLECULES = 6
 PAPER_BUDGET = 4000
 FORCE_BAR = 0.0514221
 GFN2_ACCURACY = 0.01
+WINDOW_EH = 1e-8
+OH_BOND_A = 1.15
+PAPER_CREST_SHA256 = "16c5de4578000dfd8ea5758da9f5c497778be0dd7a6a1c1e8933030479d0e56e"
+PAPER_CREST_CONDA = "crest 3.0.2 h8876d29_1"
+POLISH_ARGS = ["--gfn", "2", "--opt", "vtight", "--acc", "0.01", "--iterations", "500"]
+HESSIAN_ARGS = ["--gfn", "2", "--hess", "--acc", "0.01", "--iterations", "500"]
+DISSOCIATED = "CREST 3.0.2 returned a dissociated structure"
 
 
 def git_stamp():
@@ -416,6 +435,7 @@ def write_host_topology():
     machine = subprocess.check_output(["uname", "-m"], text=True).strip()
     text = "\n".join(
         [
+            f"host={socket.gethostname()}",
             f"machine={machine}",
             f"cores={host}",
             f"cpu={cpu_description()}",
@@ -443,15 +463,22 @@ def write_versions():
     crest = os.environ["CREST_BIN"]
     xtb = os.environ["XTB_BIN"]
     engine = os.environ["RGPOT_XTB_ENGINE"]
+    crest_sha256 = file_sha256(crest)
+    if crest_sha256 != PAPER_CREST_SHA256:
+        raise SystemExit(f"CREST binary {crest_sha256} is not the paper pin {PAPER_CREST_SHA256}")
     lines = [
-        f"crest_sha256={file_sha256(crest)}",
+        f"crest_sha256={crest_sha256}",
+        f"paper_pin_crest_sha256={PAPER_CREST_SHA256}",
+        f"paper_pin_crest_conda={PAPER_CREST_CONDA}",
         f"xtb_sha256={file_sha256(xtb)}",
         f"engine_sha256={file_sha256(engine)}",
-        "crest_reference_sha256=57857d81dd5bc363081c285d756b18aad02679abce52ae797a38069ab774324b",
         "gfn2_accuracy=0.01",
         "paper_budget=4000",
         "force_bar_eV_per_A=0.0514221",
         "force_bar_Ha_per_Bohr=0.001",
+        f"window_Eh={WINDOW_EH}",
+        "polish=xtb " + " ".join(POLISH_ARGS),
+        "hessian=xtb " + " ".join(HESSIAN_ARGS),
     ]
     banner = command_output([crest, "--version"])
     version_line = ""
@@ -466,66 +493,284 @@ def write_versions():
     (LOGS / "VERSIONS").write_text("\n".join(lines) + "\n")
 
 
-def arm_row(seed, arm, calls, wall, success, energy, force, force_pass, window, delta, energy_pass, objective, exit_code, rmsd, signed=None, free_rmsd=None):
-    def cell(value):
-        if value is None:
-            return "nan"
-        if isinstance(value, float):
-            return f"{value:.10g}"
-        return str(value)
+def cluster_intact(path):
+    """(intact, farthest nearest-neighbour O...O in angstrom) for an xyz of whole waters.
 
-    return [
-        str(seed),
-        arm,
-        cell(calls),
-        cell(wall),
-        str(int(success)),
-        cell(energy),
-        cell(force),
-        "1" if force_pass else "0",
-        cell(window),
-        cell(delta),
-        cell(rmsd),
-        "1" if energy_pass else "0",
-        cell(objective),
-        cell(exit_code),
-        cell(signed),
-        cell(free_rmsd),
+    A cluster is intact when every oxygen keeps two hydrogens inside the
+    O-H wall onset and the oxygens form one network under the Luzar and
+    Chandler hydrogen-bond O...O distance.
+    """
+    import numpy as np
+
+    mol = molecules(*read_xyz(path))
+    if mol is None:
+        return False, None
+    oxygens = mol[:, 0, :]
+    bonds = np.linalg.norm(mol[:, 1:, :] - mol[:, :1, :], axis=2)
+    distances = np.linalg.norm(oxygens[:, None, :] - oxygens[None, :, :], axis=2)
+    np.fill_diagonal(distances, np.inf)
+    nearest = float(distances.min(axis=1).max())
+    seen = {0}
+    frontier = [0]
+    while frontier:
+        here = frontier.pop()
+        for there in np.nonzero(distances[here] < HBOND_OO_A)[0]:
+            if int(there) not in seen:
+                seen.add(int(there))
+                frontier.append(int(there))
+    return bool(bonds.max() <= OH_BOND_A and len(seen) == len(oxygens)), nearest
+
+
+def xtb_in(work, xyz, args):
+    xtb = os.environ["XTB_BIN"]
+    if work.exists():
+        shutil.rmtree(work)
+    work.mkdir(parents=True)
+    shutil.copy(xyz, work / "in.xyz")
+    env = child_env()
+    env["TMPDIR"] = "."
+    return subprocess.run(
+        [xtb, "in.xyz", *args],
+        cwd=work,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+
+
+def hessian_modes(xyz, work):
+    """(imaginary vibrational modes, lowest vibrational frequency in cm-1, xtb's own count) from xtb --hess.
+
+    The six modes nearest zero are the projected translations and rotations.
+    Every other negative frequency counts, with no cutoff.
+    """
+    proc = xtb_in(work, xyz, HESSIAN_ARGS)
+    (work / "hess.out").write_text(scrub(proc.stdout))
+    blocks = re.findall(r"projected vibrational frequencies[^\n]*\n((?:\s*eigval :[^\n]*\n)+)", proc.stdout)
+    xtb_count = re.search(r"# imaginary freq\.\s+(\d+)", proc.stdout)
+    if proc.returncode != 0 or not blocks:
+        return None, None, None
+    values = [float(value) for line in blocks[-1].splitlines() for value in line.split(":", 1)[1].split()]
+    vibrations = sorted(values, key=abs)[6:]
+    imaginary = sum(1 for value in vibrations if value < 0.0)
+    return imaginary, min(vibrations), int(xtb_count.group(1)) if xtb_count else None
+
+
+def polish_candidate(binary, seed, arm, xyz):
+    """Relax one final with the shared vtight polish and check that it is a true minimum."""
+    work = LOGS / f"polish-seed{seed}-{arm}"
+    proc = xtb_in(work, xyz, POLISH_ARGS)
+    (work / "opt.out").write_text(scrub(proc.stdout))
+    polished = work / "xtbopt.xyz"
+    converged = proc.returncode == 0 and "GEOMETRY OPTIMIZATION CONVERGED" in proc.stdout and polished.exists()
+    raw_intact, raw_nearest = cluster_intact(xyz)
+    found = {
+        "arm": arm,
+        "xyz": polished if polished.exists() else None,
+        "converged": converged,
+        "raw_intact": raw_intact,
+        "raw_nearest_oo_A": raw_nearest,
+        "intact": False,
+        "nearest_oo_A": None,
+        "energy": None,
+        "scf": None,
+        "force": None,
+        "force_pass": False,
+        "imaginary": None,
+        "lowest_cm1": None,
+        "xtb_imaginary": None,
+        "confirmed": False,
+    }
+    if polished.exists():
+        polished_intact, found["nearest_oo_A"] = cluster_intact(polished)
+        found["intact"] = raw_intact and polished_intact
+        found["energy"], found["scf"], sp = single_point(polished)
+        (work / "sp.out").write_text(sp)
+        _, audit = audit_geometry(binary, seed, polished, work, work / "force.log")
+        found["force"], found["force_pass"] = parse_force(audit)
+        found["imaginary"], found["lowest_cm1"], found["xtb_imaginary"] = hessian_modes(polished, work / "hessian")
+    found["confirmed"] = bool(
+        found["converged"]
+        and found["intact"]
+        and found["energy"] is not None
+        and found["force_pass"]
+        and found["imaginary"] == 0
+    )
+    with (work / "polish.txt").open("w") as handle:
+        for key, value in found.items():
+            handle.write(f"{key}={value if key != 'xyz' else (value.name if value else 'missing')}\n")
+    return found
+
+
+def choose_reference(candidates, crest_intact):
+    """The polished minimum every arm is scored against, and the rule that picked it."""
+    crest = candidates.get("crest")
+    if crest_intact and crest is not None and crest["confirmed"]:
+        return crest, "crest_polished"
+    pool = [
+        found
+        for found in candidates.values()
+        if found["confirmed"] and (found["arm"] != "crest" or crest_intact)
     ]
+    if not pool:
+        return None, "no_confirmed_intact_minimum"
+    return min(pool, key=lambda found: found["energy"]), "lowest_intact_confirmed_polished"
+
+
+def energy_verdict(found, reference):
+    """(energy pass, polished signed gap to the reference, plain-text reason)."""
+    if found is None or found["energy"] is None:
+        return False, None, "no polished energy"
+    if reference is None:
+        return False, None, "no confirmed intact reference"
+    signed = found["energy"] - reference["energy"]
+    if abs(signed) <= WINDOW_EH:
+        if reference["arm"] == found["arm"]:
+            return True, signed, "is the reference"
+        return True, signed, f"matches the {reference['arm']} polished reference within {WINDOW_EH:g} Eh"
+    if signed < 0.0:
+        if found["confirmed"] and reference["arm"] == "crest" and found["arm"] != "crest":
+            return True, signed, f"lower minimum found by anneal, {-signed:.3e} Eh below CREST polished"
+        return False, signed, f"{-signed:.3e} Eh below the reference but not a confirmed minimum"
+    return False, signed, f"{signed:.3e} Eh above the {reference['arm']} polished reference"
+
+
+def anneal_raw(log_path, xyz, crest_xyz, crest_energy, sp_path):
+    text = log_path.read_text(errors="ignore") if log_path.exists() else ""
+    force, force_pass = parse_force(text)
+    found = {
+        "calls": finite_number(log_field(text, "energy_calls")),
+        "wall": finite_number(log_field(text, "wall_s")),
+        "exit": log_field(text, "exit_code"),
+        "objective": finite_number(log_field(text, "objective_best_eV")),
+        "force": force,
+        "force_pass": force_pass,
+        "xyz": xyz if xyz.exists() else None,
+        "energy": None,
+        "signed": None,
+        "rmsd": None,
+        "free_rmsd": None,
+    }
+    if xyz.exists() and crest_xyz.exists():
+        found["rmsd"] = alignment_rmsd(crest_xyz, xyz)
+        found["free_rmsd"] = label_free_rmsd(crest_xyz, xyz)
+    if xyz.exists():
+        found["energy"], _, sp = single_point(xyz)
+        sp_path.write_text(sp)
+        if found["energy"] is not None and crest_energy is not None:
+            found["signed"] = found["energy"] - crest_energy
+    return found
+
+
+HEADER = [
+    "seed",
+    "arm",
+    "pes_calls",
+    "wall_s",
+    "success",
+    "exit_code",
+    "force_pass",
+    "max_force_eV_per_A",
+    "energy_pass",
+    "window_Eh",
+    "raw_energy_Eh",
+    "polished_energy_Eh",
+    "signed_dE_raw_Eh",
+    "signed_dE_polished_Eh",
+    "reference_arm",
+    "reference_rule",
+    "reference_Eh",
+    "intact",
+    "nearest_oo_A",
+    "polish_converged",
+    "polished_max_force_eV_per_A",
+    "imaginary_modes",
+    "lowest_mode_cm1",
+    "confirmed_minimum",
+    "rmsd_A",
+    "rmsd_label_free_A",
+    "rmsd_raw_A",
+    "rmsd_label_free_raw_A",
+    "objective_best_eV",
+    "verdict",
+]
+
+
+def cell(value):
+    if value is None:
+        return "nan"
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, float):
+        return f"{value:.10g}"
+    return str(value)
+
+
+def arm_row(seed, arm, raw, polished, reference, rule, success, energy_pass, signed, verdict):
+    reference_xyz = reference["xyz"] if reference is not None else None
+    rmsd = None
+    free_rmsd = None
+    if polished is not None and polished["xyz"] is not None and reference_xyz is not None:
+        rmsd = alignment_rmsd(reference_xyz, polished["xyz"])
+        free_rmsd = label_free_rmsd(reference_xyz, polished["xyz"])
+    polished = polished or {}
+    values = {
+        "seed": seed,
+        "arm": arm,
+        "pes_calls": raw.get("calls"),
+        "wall_s": raw.get("wall"),
+        "success": bool(success),
+        "exit_code": raw.get("exit") or "nan",
+        "force_pass": bool(raw.get("force_pass")),
+        "max_force_eV_per_A": raw.get("force"),
+        "energy_pass": bool(energy_pass),
+        "window_Eh": WINDOW_EH,
+        "raw_energy_Eh": raw.get("energy"),
+        "polished_energy_Eh": polished.get("energy"),
+        "signed_dE_raw_Eh": raw.get("signed"),
+        "signed_dE_polished_Eh": signed,
+        "reference_arm": reference["arm"] if reference is not None else "none",
+        "reference_rule": rule,
+        "reference_Eh": reference["energy"] if reference is not None else None,
+        "intact": bool(polished.get("intact")),
+        "nearest_oo_A": polished.get("raw_nearest_oo_A"),
+        "polish_converged": bool(polished.get("converged")),
+        "polished_max_force_eV_per_A": polished.get("force"),
+        "imaginary_modes": polished.get("imaginary"),
+        "lowest_mode_cm1": polished.get("lowest_cm1"),
+        "confirmed_minimum": bool(polished.get("confirmed")),
+        "rmsd_A": rmsd,
+        "rmsd_label_free_A": free_rmsd,
+        "rmsd_raw_A": raw.get("rmsd"),
+        "rmsd_label_free_raw_A": raw.get("free_rmsd"),
+        "objective_best_eV": raw.get("objective"),
+        "verdict": verdict,
+    }
+    return [cell(values[name]) for name in HEADER]
 
 
 def write_numbers(rows):
-    header = [
-        "seed",
-        "arm",
-        "pes_calls",
-        "wall_s",
-        "success",
-        "energy_Eh",
-        "max_force_eV_per_A",
-        "force_pass",
-        "window_Eh",
-        "abs_dE_Eh",
-        "rmsd_A",
-        "energy_pass",
-        "objective_best_eV",
-        "exit_code",
-        "signed_dE_Eh",
-        "rmsd_label_free_A",
-    ]
     lines = [
         "# n=6 serial same host no best-of",
         "# quartile=Hyndman-Fan type 7",
-        "# window=absolute energy gap at or below the SCF convergence printed by the scoring single point",
-        "# signed_dE_Eh=anneal minus crest; rmsd_label_free_A minimises over molecule and hydrogen labels and reflection",
-        "# " + "\t".join(header),
+        "# bar=Papers B': success = exit + energy + force; force is the reported answer's maximum force at 0.001 Eh/bohr",
+        "# polish=xtb " + " ".join(POLISH_ARGS) + " on every final, CREST and anneal alike",
+        "# score=xtb --gfn 2 --sp --acc 0.01 --iterations 500 on the raw and on the polished final",
+        f"# window={WINDOW_EH:g} Eh symmetric on the polished pair; anneal more than the window below CREST polished is a lower minimum found by anneal and passes",
+        "# reference=CREST polished when CREST returned an intact cluster that is a confirmed minimum, else the lowest intact confirmed polished minimum from either code",
+        f"# intact=every oxygen keeps two hydrogens within {OH_BOND_A} A and the oxygens form one network under {HBOND_OO_A} A; nearest_oo_A is the farthest nearest-neighbour O...O of the raw final",
+        "# confirmed_minimum=intact, polish converged, polished maximum force at or below the bar, no imaginary vibrational mode in xtb --hess",
+        "# signed_dE_raw_Eh=anneal minus crest on the unpolished finals; signed_dE_polished_Eh=arm minus reference after the polish",
+        "# rmsd_A=labelled Kabsch of the polished final on the polished reference; rmsd_label_free_A minimises over molecule and hydrogen labels and reflection; the _raw columns are the unpolished finals on crest_best.xyz; no RMSD column is a gate",
+        "# " + "\t".join(HEADER),
     ]
     for row in rows:
         lines.append("\t".join(row))
     by_arm = {}
     for row in rows:
         by_arm.setdefault(row[1], []).append(row)
-    lines.append("# summary arm n calls_median calls_iqr wall_median wall_iqr success_median success_iqr success_rate")
+    lines.append("# summary arm n calls_median calls_iqr wall_median wall_iqr success_median success_iqr success_rate passes")
     for arm in ("crest", "fair", "paper4000"):
         group = by_arm.get(arm, [])
         calls = [float(item[2]) for item in group if item[2] != "nan"]
@@ -533,7 +778,7 @@ def write_numbers(rows):
         success = [float(item[4]) for item in group]
         rate = sum(success) / len(success) if success else float("nan")
         lines.append(
-            "summary\t{arm}\t{n}\t{cm:.10g}\t{ci:.10g}\t{wm:.10g}\t{wi:.10g}\t{sm:.10g}\t{si:.10g}\t{rate:.10g}".format(
+            "summary\t{arm}\t{n}\t{cm:.10g}\t{ci:.10g}\t{wm:.10g}\t{wi:.10g}\t{sm:.10g}\t{si:.10g}\t{rate:.10g}\t{passes}".format(
                 arm=arm,
                 n=len(group),
                 cm=type7_quantile(calls, 0.5) if calls else float("nan"),
@@ -543,6 +788,7 @@ def write_numbers(rows):
                 sm=type7_quantile(success, 0.5) if success else float("nan"),
                 si=type7_iqr(success) if success else float("nan"),
                 rate=rate,
+                passes=int(sum(success)),
             )
         )
     (LOGS / "NUMBERS.tsv").write_text("\n".join(lines) + "\n")
@@ -553,6 +799,30 @@ def finished_log(path, needle):
         return False
     text = path.read_text(errors="ignore")
     return "exit_code=0" in text and needle in text
+
+
+def anneal_verdict(raw, energy_pass, reason):
+    if raw.get("exit") != "0":
+        return f"anneal exited with code {raw.get('exit') or 'nan'}"
+    if raw.get("xyz") is None or raw.get("objective") is None:
+        return "anneal reported no answer"
+    if not raw.get("force_pass"):
+        return "reported answer is above the force bar"
+    return ("pass: " if energy_pass else "") + reason
+
+
+def crest_verdict(crest, polished, energy_pass, reason):
+    if crest["exit"] != "0" or crest["xyz"] is None:
+        return f"CREST 3.0.2 exited with code {crest['exit'] or 'nan'} and no structure"
+    if not polished["raw_intact"]:
+        return DISSOCIATED
+    if not polished["intact"]:
+        return "CREST 3.0.2 structure dissociated under the shared polish"
+    if crest["energy"] is None:
+        return "CREST 3.0.2 structure has no single-point energy"
+    if not crest["force_pass"]:
+        return "CREST 3.0.2 answer is above the force bar"
+    return ("pass: " if energy_pass else "") + reason
 
 
 def main():
@@ -599,204 +869,116 @@ def main():
                     shutil.copy(best, fair_dir / "crest_best.xyz")
             crest_text = crest_log.read_text(errors="ignore") if crest_log.exists() else ""
             calls = finite_number(log_field(crest_text, "calls"))
-            crest_wall = finite_number(log_field(crest_text, "wall_s"))
-            crest_exit = log_field(crest_text, "exit_code")
             best_xyz = fair_dir / "crest_best.xyz"
             if best_xyz.exists() and not finished_log(crest_force_log, "FORCE_AUDIT"):
                 audit_geometry(binary, seed, best_xyz, crest_audit_dir, crest_force_log)
             crest_force_text = crest_force_log.read_text(errors="ignore") if crest_force_log.exists() else ""
             crest_force, crest_force_pass = parse_force(crest_force_text)
-            crest_energy = None
-            window = None
+            crest = {
+                "calls": calls,
+                "wall": finite_number(log_field(crest_text, "wall_s")),
+                "exit": log_field(crest_text, "exit_code"),
+                "objective": None,
+                "force": crest_force,
+                "force_pass": crest_force_pass,
+                "xyz": best_xyz if best_xyz.exists() else None,
+                "energy": None,
+                "signed": None,
+                "rmsd": None,
+                "free_rmsd": None,
+            }
+            scf = None
             if best_xyz.exists():
-                crest_energy, window, crest_sp = single_point(best_xyz)
+                crest["energy"], scf, crest_sp = single_point(best_xyz)
                 (LOGS / f"crest-sp-seed{seed}.txt").write_text(crest_sp)
-            crest_success = int(
-                crest_exit == "0"
-                and best_xyz.exists()
-                and crest_energy is not None
-                and crest_force_pass
-            )
-            rows.append(
-                arm_row(
-                    seed,
-                    "crest",
-                    calls,
-                    crest_wall,
-                    crest_success,
-                    crest_energy,
-                    crest_force,
-                    crest_force_pass,
-                    window,
-                    0.0 if crest_energy is not None else None,
-                    crest_energy is not None,
-                    None,
-                    crest_exit or "nan",
-                    0.0 if best_xyz.exists() else None,
-                    0.0 if crest_energy is not None else None,
-                    0.0 if best_xyz.exists() else None,
-                )
-            )
-            if calls is None or calls < 1:
+                crest["signed"] = 0.0 if crest["energy"] is not None else None
+                crest["rmsd"] = 0.0
+                crest["free_rmsd"] = 0.0
+            fair_ran = calls is not None and calls >= 1
+            if not fair_ran:
                 print(f"fair seed {seed} skipped, crest calls missing", flush=True)
-                rows.append(arm_row(seed, "fair", None, None, 0, None, None, False, window, None, False, None, "nan", None))
             elif not finished_log(fair_log, "FORCE_AUDIT"):
                 status, awall = anneal_run(binary, seed, int(calls), fair_dir, fair_log, "fair")
                 print(f"anneal fair seed {seed} exit {status} budget {int(calls)} wall {awall:.1f}", flush=True)
-            fair_text = fair_log.read_text(errors="ignore") if fair_log.exists() else ""
-            fair_calls = finite_number(log_field(fair_text, "energy_calls"))
-            fair_wall = finite_number(log_field(fair_text, "wall_s"))
-            fair_exit = log_field(fair_text, "exit_code")
-            fair_objective = finite_number(log_field(fair_text, "objective_best_eV"))
-            fair_force, fair_force_pass = parse_force(fair_text)
-            fair_xyz = fair_dir / "best.xyz"
-            fair_energy = None
-            fair_delta = None
-            fair_rmsd = None
-            fair_free_rmsd = None
-            fair_signed = None
-            fair_energy_pass = False
-            if fair_xyz.exists() and best_xyz.exists():
-                fair_rmsd = alignment_rmsd(best_xyz, fair_xyz)
-                fair_free_rmsd = label_free_rmsd(best_xyz, fair_xyz)
-            if fair_xyz.exists() and crest_energy is not None:
-                fair_energy, fair_window, fair_sp = single_point(fair_xyz)
-                (LOGS / f"anneal-sp-seed{seed}.txt").write_text(fair_sp)
-                if window is None:
-                    window = fair_window
-                if fair_energy is not None and window is not None:
-                    fair_signed = fair_energy - crest_energy
-                    fair_delta = abs(fair_signed)
-                    fair_energy_pass = fair_delta <= window
-            fair_success = int(
-                fair_exit == "0"
-                and fair_xyz.exists()
-                and fair_objective is not None
-                and fair_energy_pass
-                and fair_force_pass
-            )
-            if calls is not None and calls >= 1:
-                rows.append(
-                    arm_row(
-                        seed,
-                        "fair",
-                        fair_calls,
-                        fair_wall,
-                        fair_success,
-                        fair_energy,
-                        fair_force,
-                        fair_force_pass,
-                        window,
-                        fair_delta,
-                        fair_energy_pass,
-                        fair_objective,
-                        fair_exit or "nan",
-                        fair_rmsd,
-                        fair_signed,
-                        fair_free_rmsd,
-                    )
-                )
+            fair = anneal_raw(fair_log, fair_dir / "best.xyz", best_xyz, crest["energy"], LOGS / f"anneal-sp-seed{seed}.txt")
             if not finished_log(paper_log, "FORCE_AUDIT"):
                 status, pwall = anneal_run(binary, seed, PAPER_BUDGET, paper_dir, paper_log, "paper4000")
                 print(f"anneal paper seed {seed} exit {status} budget {PAPER_BUDGET} wall {pwall:.1f}", flush=True)
-            paper_text = paper_log.read_text(errors="ignore") if paper_log.exists() else ""
-            paper_calls = finite_number(log_field(paper_text, "energy_calls"))
-            paper_wall = finite_number(log_field(paper_text, "wall_s"))
-            paper_exit = log_field(paper_text, "exit_code")
-            paper_objective = finite_number(log_field(paper_text, "objective_best_eV"))
-            paper_force, paper_force_pass = parse_force(paper_text)
-            paper_xyz = paper_dir / "best.xyz"
-            paper_energy = None
-            paper_delta = None
-            paper_rmsd = None
-            paper_free_rmsd = None
-            paper_signed = None
-            paper_energy_pass = False
-            if paper_xyz.exists() and best_xyz.exists():
-                paper_rmsd = alignment_rmsd(best_xyz, paper_xyz)
-                paper_free_rmsd = label_free_rmsd(best_xyz, paper_xyz)
-            if paper_xyz.exists() and crest_energy is not None:
-                paper_energy, paper_window, paper_sp = single_point(paper_xyz)
-                (LOGS / f"anneal-paper-sp-seed{seed}.txt").write_text(paper_sp)
-                if window is None:
-                    window = paper_window
-                if paper_energy is not None and window is not None:
-                    paper_signed = paper_energy - crest_energy
-                    paper_delta = abs(paper_signed)
-                    paper_energy_pass = paper_delta <= window
-            paper_success = int(
-                paper_exit == "0"
-                and paper_xyz.exists()
-                and paper_objective is not None
-                and paper_energy_pass
-                and paper_force_pass
+            paper = anneal_raw(
+                paper_log, paper_dir / "best.xyz", best_xyz, crest["energy"], LOGS / f"anneal-paper-sp-seed{seed}.txt"
             )
-            rows.append(
-                arm_row(
-                    seed,
-                    "paper4000",
-                    paper_calls,
-                    paper_wall,
-                    paper_success,
-                    paper_energy,
-                    paper_force,
-                    paper_force_pass,
-                    window,
-                    paper_delta,
-                    paper_energy_pass,
-                    paper_objective,
-                    paper_exit or "nan",
-                    paper_rmsd,
-                    paper_signed,
-                    paper_free_rmsd,
-                )
-            )
+
+            raws = {"crest": crest, "fair": fair, "paper4000": paper}
+            candidates = {}
+            for arm, raw in raws.items():
+                if raw["xyz"] is not None and (arm != "fair" or fair_ran):
+                    candidates[arm] = polish_candidate(binary, seed, arm, raw["xyz"])
+            crest_intact = crest["exit"] == "0" and "crest" in candidates and candidates["crest"]["intact"]
+            reference, rule = choose_reference(candidates, crest_intact)
+            outcome = {}
+            for arm, raw in raws.items():
+                polished = candidates.get(arm)
+                energy_pass, signed, reason = energy_verdict(polished, reference)
+                if arm == "crest":
+                    if polished is None:
+                        verdict = crest_verdict(crest, {"raw_intact": False, "intact": False}, False, reason)
+                    else:
+                        verdict = crest_verdict(crest, polished, energy_pass, reason)
+                    success = verdict.startswith("pass: ")
+                elif arm == "fair" and not fair_ran:
+                    verdict = "skipped, crest calls missing"
+                    success = False
+                else:
+                    verdict = anneal_verdict(raw, energy_pass, reason)
+                    success = bool(
+                        raw["exit"] == "0"
+                        and raw["xyz"] is not None
+                        and raw["objective"] is not None
+                        and energy_pass
+                        and raw["force_pass"]
+                    )
+                outcome[arm] = (success, energy_pass, signed, verdict)
+                rows.append(arm_row(seed, arm, raw, polished, reference, rule, success, energy_pass, signed, verdict))
             with (LOGS / f"pair-seed{seed}.log").open("w") as handle:
                 write_header(handle, f"pair-seed {seed}")
                 handle.write(f"seed={seed}\n")
-                handle.write(f"crest_calls={calls if calls is not None else 'nan'}\n")
-                handle.write(f"crest_wall_s={crest_wall if crest_wall is not None else 'nan'}\n")
-                handle.write(f"crest_Eh={crest_energy if crest_energy is not None else 'nan'}\n")
-                handle.write(f"crest_max_force={crest_force if crest_force is not None else 'nan'}\n")
-                handle.write(f"crest_success={crest_success}\n")
-                handle.write(f"fair_calls={fair_calls if fair_calls is not None else 'nan'}\n")
-                handle.write(f"fair_wall_s={fair_wall if fair_wall is not None else 'nan'}\n")
-                handle.write(f"fair_Eh={fair_energy if fair_energy is not None else 'nan'}\n")
-                handle.write(f"fair_objective_eV={fair_objective if fair_objective is not None else 'nan'}\n")
-                handle.write(f"fair_max_force={fair_force if fair_force is not None else 'nan'}\n")
-                handle.write(f"fair_success={fair_success}\n")
-                handle.write(f"paper_calls={paper_calls if paper_calls is not None else 'nan'}\n")
-                handle.write(f"paper_wall_s={paper_wall if paper_wall is not None else 'nan'}\n")
-                handle.write(f"paper_Eh={paper_energy if paper_energy is not None else 'nan'}\n")
-                handle.write(
-                    f"paper_objective_eV={paper_objective if paper_objective is not None else 'nan'}\n"
-                )
-                handle.write(f"paper_max_force={paper_force if paper_force is not None else 'nan'}\n")
-                handle.write(f"paper_success={paper_success}\n")
-                handle.write(f"window_Eh={window if window is not None else 'nan'}\n")
-                handle.write("window_definition=abs(anneal_Eh-crest_Eh)<=scf_convergence\n")
-                handle.write("window_source=SCF convergence printed by xtb --gfn 2 --sp --acc 0.01\n")
+                for arm, raw in raws.items():
+                    polished = candidates.get(arm) or {}
+                    success, energy_pass, signed, verdict = outcome[arm]
+                    for key in ("calls", "wall", "exit", "objective", "force", "energy", "signed", "rmsd", "free_rmsd"):
+                        value = raw.get(key)
+                        handle.write(f"{arm}_{key}={value if value is not None else 'nan'}\n")
+                    for key in ("converged", "raw_intact", "raw_nearest_oo_A", "intact", "energy", "force", "imaginary", "lowest_cm1", "xtb_imaginary", "confirmed"):
+                        value = polished.get(key)
+                        handle.write(f"{arm}_polished_{key}={value if value is not None else 'nan'}\n")
+                    handle.write(f"{arm}_signed_dE_polished_Eh={signed if signed is not None else 'nan'}\n")
+                    handle.write(f"{arm}_energy_pass={int(energy_pass)}\n")
+                    handle.write(f"{arm}_success={int(success)}\n")
+                    handle.write(f"{arm}_verdict={verdict}\n")
+                handle.write(f"reference_arm={reference['arm'] if reference is not None else 'none'}\n")
+                handle.write(f"reference_rule={rule}\n")
+                handle.write(f"reference_Eh={reference['energy'] if reference is not None else 'nan'}\n")
+                handle.write(f"window_Eh={WINDOW_EH}\n")
+                handle.write(f"scf_convergence_Eh={scf if scf is not None else 'nan'}\n")
+                handle.write("window_definition=abs(arm_polished_Eh-reference_polished_Eh)<=1e-8, or anneal below CREST polished\n")
+                handle.write("polish=xtb " + " ".join(POLISH_ARGS) + "\n")
+                handle.write("score=xtb --gfn 2 --sp --acc 0.01 --iterations 500\n")
                 handle.write(f"gfn2_accuracy={GFN2_ACCURACY}\n")
                 handle.write(f"force_bar={FORCE_BAR}\n")
-                handle.write("score=xtb --gfn 2 --sp --acc 0.01 --iterations 500\n")
                 fair_start = fair_dir / "start.xyz"
                 paper_start = paper_dir / "start.xyz"
                 if fair_start.exists() and paper_start.exists():
-                    same_start = fair_start.read_bytes() == paper_start.read_bytes()
-                    handle_note = "1" if same_start else "0"
+                    handle_note = "1" if fair_start.read_bytes() == paper_start.read_bytes() else "0"
                 else:
                     handle_note = "missing"
-                handle.write(f"fair_rmsd_A={fair_rmsd if fair_rmsd is not None else 'nan'}\n")
-                handle.write(f"paper_rmsd_A={paper_rmsd if paper_rmsd is not None else 'nan'}\n")
-                handle.write(f"fair_rmsd_label_free_A={fair_free_rmsd if fair_free_rmsd is not None else 'nan'}\n")
-                handle.write(f"paper_rmsd_label_free_A={paper_free_rmsd if paper_free_rmsd is not None else 'nan'}\n")
-                handle.write(f"fair_signed_dE_Eh={fair_signed if fair_signed is not None else 'nan'}\n")
-                handle.write(f"paper_signed_dE_Eh={paper_signed if paper_signed is not None else 'nan'}\n")
-                handle.write("rmsd_definition=Kabsch alignment of all atoms against crest_best.xyz\n")
+                handle.write("rmsd_definition=Kabsch alignment of all atoms; polished against the polished reference, raw against crest_best.xyz\n")
                 handle.write(f"shared_start={handle_note}\n")
                 handle.write("exit_code=0\n")
             print(
-                f"pair seed {seed} crest {crest_success} fair {fair_success} paper {paper_success}",
+                "pair seed {} crest {} fair {} paper {} reference {}".format(
+                    seed, int(outcome["crest"][0]), int(outcome["fair"][0]), int(outcome["paper4000"][0]),
+                    reference["arm"] if reference is not None else "none",
+                ),
                 flush=True,
             )
             write_numbers(rows)
