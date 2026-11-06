@@ -595,6 +595,38 @@ where
     Ok((out, stats))
 }
 
+/// Relaxes a reported answer until every gradient component is below
+/// `tolerance`, charging each evaluation to `ledger`.
+///
+/// A hop records a minimum at [`Config::record_gradient`], which ranks
+/// basins but leaves the stored energy above the minimum by the residual
+/// curvature term. A comparison that reads the energy to a tighter window
+/// needs the answer at its own stationary-point gate. Returns `None` when
+/// the ledger closes before the first evaluation.
+pub fn polish_answer<O>(
+    objective: &O,
+    ledger: &mut Ledger,
+    start: ArrayView1<f64>,
+    tolerance: f64,
+    max_iter: usize,
+) -> Option<(f64, Array1<f64>)>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let mut opt = WarmLbfgs::default();
+    opt.gtol = tolerance;
+    let mut anchor = None;
+    let mut evaluated = false;
+    let (energy, state, _) = opt.minimize(start, max_iter, |v| {
+        if !ledger.charge() {
+            return None;
+        }
+        evaluated = true;
+        evaluated_pair(objective, v, &mut anchor).map(|(energy, gradient, _)| (energy, gradient))
+    });
+    (evaluated && energy.is_finite()).then_some((energy, state))
+}
+
 /// [`search_from`] with a checkpoint after each block of charged work.
 ///
 /// The water Good-Turing arm retires from this hook once the census of
