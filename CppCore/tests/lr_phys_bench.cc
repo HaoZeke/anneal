@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <random>
@@ -236,7 +237,8 @@ int main(int argc, char **argv) {
   for (int t = 1; t <= physical; t *= 2) {
     max_threads = t;
   }
-  std::ofstream log("lr_phys_bench.log");
+  const char *log_path = std::getenv("LR_LOG");
+  std::ofstream log(log_path != nullptr ? log_path : "lr_phys_bench.log");
   log << "hostname " << hostname() << '\n';
   log << "date " << date_now() << '\n';
   log << "cpu " << cpu_model() << '\n';
@@ -247,30 +249,72 @@ int main(int argc, char **argv) {
   log << "ewald_kmax 5\n";
   log << "disp_cutoff_bohr disp2=15 disp3=10 cn=10\n";
 
+  const char *methods = std::getenv("LR_METHODS");
+  const char *ladders = std::getenv("LR_LADDERS");
+  auto ladder_on = [&](const char *name) {
+    if (ladders == nullptr || ladders[0] == '\0') {
+      return true;
+    }
+    return std::strstr(ladders, name) != nullptr;
+  };
+  const int nmin = std::getenv("LR_NMIN") ? std::atoi(std::getenv("LR_NMIN")) : 0;
+  const int nmax = std::getenv("LR_NMAX") ? std::atoi(std::getenv("LR_NMAX")) : 1000000;
+  const int tmin = std::getenv("LR_TMIN") ? std::atoi(std::getenv("LR_TMIN")) : 1;
+  const int tmax = std::getenv("LR_TMAX") ? std::atoi(std::getenv("LR_TMAX")) : 1000000;
+  auto wanted = [&](const char *name) {
+    if (methods == nullptr || methods[0] == '\0') {
+      return true;
+    }
+    return std::strstr(methods, name) != nullptr;
+  };
   const int sizes[] = {128, 256, 512, 1024, 2048, 4096, 8192};
+  if (ladder_on("strong"))
   for (int n : sizes) {
+    if (n < nmin || n > nmax) {
+      continue;
+    }
     const System sys = make_system(n, 1000u + static_cast<unsigned>(n));
-    for (int threads = 1; threads <= max_threads; threads *= 2) {
-      time_ewald(sys, threads, nrep, log, std::cout, "strong");
-      time_pme(sys, threads, nrep, log, std::cout, "strong");
-      time_disp(sys, threads, nrep, log, std::cout, "strong", rgpot::lr::DispersionKind::D3BJ, "d3");
-      time_disp(sys, threads, nrep, log, std::cout, "strong", rgpot::lr::DispersionKind::D4, "d4");
+    for (int threads = 1; threads <= max_threads && threads <= tmax; threads *= 2) {
+      if (threads < tmin) {
+        continue;
+      }
+      if (wanted("ewald")) {
+        time_ewald(sys, threads, nrep, log, std::cout, "strong");
+      }
+      if (wanted("pme")) {
+        time_pme(sys, threads, nrep, log, std::cout, "strong");
+      }
+      if (wanted("d3")) {
+        time_disp(sys, threads, nrep, log, std::cout, "strong", rgpot::lr::DispersionKind::D3BJ, "d3");
+      }
+      if (wanted("d4")) {
+        time_disp(sys, threads, nrep, log, std::cout, "strong", rgpot::lr::DispersionKind::D4, "d4");
+      }
     }
   }
   // Weak ladder: atoms per thread stay at 1024, so 1 thread is 1024
   // atoms and the full machine is 8192. A second ladder starts at 128.
+  if (ladder_on("weak"))
   for (int base : {128, 1024}) {
     for (int threads = 1; threads <= max_threads; threads *= 2) {
       const int n = base * threads;
-      if (n > 8192) {
+      if (n > 8192 || n < nmin || n > nmax || threads < tmin || threads > tmax) {
         continue;
       }
       const System sys = make_system(n, 2000u + static_cast<unsigned>(n));
       const std::string ladder = base == 128 ? "weak128" : "weak1024";
-      time_ewald(sys, threads, nrep, log, std::cout, ladder);
-      time_pme(sys, threads, nrep, log, std::cout, ladder);
-      time_disp(sys, threads, nrep, log, std::cout, ladder, rgpot::lr::DispersionKind::D3BJ, "d3");
-      time_disp(sys, threads, nrep, log, std::cout, ladder, rgpot::lr::DispersionKind::D4, "d4");
+      if (wanted("ewald")) {
+        time_ewald(sys, threads, nrep, log, std::cout, ladder);
+      }
+      if (wanted("pme")) {
+        time_pme(sys, threads, nrep, log, std::cout, ladder);
+      }
+      if (wanted("d3")) {
+        time_disp(sys, threads, nrep, log, std::cout, ladder, rgpot::lr::DispersionKind::D3BJ, "d3");
+      }
+      if (wanted("d4")) {
+        time_disp(sys, threads, nrep, log, std::cout, ladder, rgpot::lr::DispersionKind::D4, "d4");
+      }
     }
   }
   return 0;
