@@ -140,3 +140,21 @@ option(
     value: 'auto',
     description: 'PLUMED RGPOT collective variable.',
 )
+option(
+    'with_long_range',
+    type: 'boolean',
+    value: false,
+    description: 'Ewald, PME, dispersion and NLH summands. Needs linkcell.',
+)
+option(
+    'linkcell_libdir',
+    type: 'string',
+    value: '',
+    description: 'Directory of liblinkcell when pkg-config is not installed.',
+)
+option(
+    'linkcell_incdir',
+    type: 'string',
+    value: '',
+    description: 'Directory of linkcell.hpp when pkg-config is not installed.',
+)

@@ -316,6 +316,11 @@ if not get_option('with_rpc_client_only')
         rgpotentials += [d4pot]
     endif
 
+    if has_long_range
+        subdir('rgpot/LongRange')  # 'lr_phys'
+        rgpotentials += [lr_phys]
+    endif
+
     if has_expr
         subdir('rgpot/ExprPot')  # 'exprpot'
         rgpotentials += [exprpot]
