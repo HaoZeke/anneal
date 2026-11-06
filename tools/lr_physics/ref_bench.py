@@ -7,6 +7,7 @@ lr_phys_bench. Each line records the hostname, the date and the CPU.
 
 import platform
 import socket
+import sys
 import time
 from datetime import datetime, timezone
 
@@ -116,7 +117,7 @@ def time_openmm(pos, q, box):
 
 
 def main():
-    sizes = [128, 512, 2048, 8192]
+    sizes = [int(x) for x in sys.argv[1:]] or [128, 512, 2048, 8192]
     print(f"cpu {platform.processor()}", flush=True)
     print(f"hostname {socket.gethostname()}", flush=True)
     print("disp_cutoff_bohr disp2=15 disp3=10 cn=10", flush=True)
