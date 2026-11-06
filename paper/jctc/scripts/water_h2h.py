@@ -17,6 +17,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from water_census import label_free_rmsd
+
 ROOT = Path("paper/jctc")
 LOGS = ROOT / "logs" / "water"
 SCRATCH = ROOT / "logs" / "scratch" / "water"
@@ -464,7 +466,7 @@ def write_versions():
     (LOGS / "VERSIONS").write_text("\n".join(lines) + "\n")
 
 
-def arm_row(seed, arm, calls, wall, success, energy, force, force_pass, window, delta, energy_pass, objective, exit_code, rmsd):
+def arm_row(seed, arm, calls, wall, success, energy, force, force_pass, window, delta, energy_pass, objective, exit_code, rmsd, signed=None, free_rmsd=None):
     def cell(value):
         if value is None:
             return "nan"
@@ -487,6 +489,8 @@ def arm_row(seed, arm, calls, wall, success, energy, force, force_pass, window, 
         "1" if energy_pass else "0",
         cell(objective),
         cell(exit_code),
+        cell(signed),
+        cell(free_rmsd),
     ]
 
 
@@ -506,11 +510,14 @@ def write_numbers(rows):
         "energy_pass",
         "objective_best_eV",
         "exit_code",
+        "signed_dE_Eh",
+        "rmsd_label_free_A",
     ]
     lines = [
         "# n=6 serial same host no best-of",
         "# quartile=Hyndman-Fan type 7",
         "# window=absolute energy gap at or below the SCF convergence printed by the scoring single point",
+        "# signed_dE_Eh=anneal minus crest; rmsd_label_free_A minimises over molecule and hydrogen labels and reflection",
         "# " + "\t".join(header),
     ]
     for row in rows:
@@ -626,6 +633,8 @@ def main():
                     None,
                     crest_exit or "nan",
                     0.0 if best_xyz.exists() else None,
+                    0.0 if crest_energy is not None else None,
+                    0.0 if best_xyz.exists() else None,
                 )
             )
             if calls is None or calls < 1:
@@ -644,16 +653,20 @@ def main():
             fair_energy = None
             fair_delta = None
             fair_rmsd = None
+            fair_free_rmsd = None
+            fair_signed = None
             fair_energy_pass = False
             if fair_xyz.exists() and best_xyz.exists():
                 fair_rmsd = alignment_rmsd(best_xyz, fair_xyz)
+                fair_free_rmsd = label_free_rmsd(best_xyz, fair_xyz)
             if fair_xyz.exists() and crest_energy is not None:
                 fair_energy, fair_window, fair_sp = single_point(fair_xyz)
                 (LOGS / f"anneal-sp-seed{seed}.txt").write_text(fair_sp)
                 if window is None:
                     window = fair_window
                 if fair_energy is not None and window is not None:
-                    fair_delta = abs(fair_energy - crest_energy)
+                    fair_signed = fair_energy - crest_energy
+                    fair_delta = abs(fair_signed)
                     fair_energy_pass = fair_delta <= window
             fair_success = int(
                 fair_exit == "0"
@@ -679,6 +692,8 @@ def main():
                         fair_objective,
                         fair_exit or "nan",
                         fair_rmsd,
+                        fair_signed,
+                        fair_free_rmsd,
                     )
                 )
             if not finished_log(paper_log, "FORCE_AUDIT"):
@@ -694,16 +709,20 @@ def main():
             paper_energy = None
             paper_delta = None
             paper_rmsd = None
+            paper_free_rmsd = None
+            paper_signed = None
             paper_energy_pass = False
             if paper_xyz.exists() and best_xyz.exists():
                 paper_rmsd = alignment_rmsd(best_xyz, paper_xyz)
+                paper_free_rmsd = label_free_rmsd(best_xyz, paper_xyz)
             if paper_xyz.exists() and crest_energy is not None:
                 paper_energy, paper_window, paper_sp = single_point(paper_xyz)
                 (LOGS / f"anneal-paper-sp-seed{seed}.txt").write_text(paper_sp)
                 if window is None:
                     window = paper_window
                 if paper_energy is not None and window is not None:
-                    paper_delta = abs(paper_energy - crest_energy)
+                    paper_signed = paper_energy - crest_energy
+                    paper_delta = abs(paper_signed)
                     paper_energy_pass = paper_delta <= window
             paper_success = int(
                 paper_exit == "0"
@@ -728,6 +747,8 @@ def main():
                     paper_objective,
                     paper_exit or "nan",
                     paper_rmsd,
+                    paper_signed,
+                    paper_free_rmsd,
                 )
             )
             with (LOGS / f"pair-seed{seed}.log").open("w") as handle:
@@ -767,6 +788,10 @@ def main():
                     handle_note = "missing"
                 handle.write(f"fair_rmsd_A={fair_rmsd if fair_rmsd is not None else 'nan'}\n")
                 handle.write(f"paper_rmsd_A={paper_rmsd if paper_rmsd is not None else 'nan'}\n")
+                handle.write(f"fair_rmsd_label_free_A={fair_free_rmsd if fair_free_rmsd is not None else 'nan'}\n")
+                handle.write(f"paper_rmsd_label_free_A={paper_free_rmsd if paper_free_rmsd is not None else 'nan'}\n")
+                handle.write(f"fair_signed_dE_Eh={fair_signed if fair_signed is not None else 'nan'}\n")
+                handle.write(f"paper_signed_dE_Eh={paper_signed if paper_signed is not None else 'nan'}\n")
                 handle.write("rmsd_definition=Kabsch alignment of all atoms against crest_best.xyz\n")
                 handle.write(f"shared_start={handle_note}\n")
                 handle.write("exit_code=0\n")
