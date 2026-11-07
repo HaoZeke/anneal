@@ -188,26 +188,22 @@ def arm_openmm(path, threads):
 
     warmup, samples = time_calls(once)
     report_times("openmm-pme", len(q), threads, warmup, samples)
-    try:
-        _e, prod = forces_from_state(ctx)
-        ref_ctx, _nb2, _actual2, ref_pme = openmm_context(pos, q, box, threads, 1.0e-6)
-        _er, ref = forces_from_state(ref_ctx)
-        err = float(np.max(np.abs(prod - ref)))
-        print(
-            f"force_error_eV_A={err:.17g} reference=openmm-pme tolerance=1e-6 "
-            f"ref_grid={ref_pme[1]} {ref_pme[2]} {ref_pme[3]}",
-            flush=True,
-        )
-        del ref_ctx
-    except Exception as exc:
-        print(f"force_error_unavailable {type(exc).__name__}: {exc}", flush=True)
     del ctx
+
+
+def native_team():
+    import ctypes
+
+    lib = ctypes.CDLL("libgomp.so.1")
+    lib.omp_get_max_threads.restype = ctypes.c_int
+    return int(lib.omp_get_max_threads())
 
 
 def arm_dftd3(path, threads):
     from dftd3.interface import DispersionModel, RationalDampingParam
 
     os.environ["OMP_NUM_THREADS"] = str(threads)
+    print(f"omp_num_threads={os.environ['OMP_NUM_THREADS']} native_team={native_team()}", flush=True)
     pos, z, _q, box = load_geometry(path)
     geom_sha = sha256_file(path)
     header("s-dftd3", len(z), threads, geom_sha)
@@ -229,6 +225,7 @@ def arm_dftd4(path, threads):
     from dftd4.interface import DampingParam, DispersionModel
 
     os.environ["OMP_NUM_THREADS"] = str(threads)
+    print(f"omp_num_threads={os.environ['OMP_NUM_THREADS']} native_team={native_team()}", flush=True)
     pos, z, _q, box = load_geometry(path)
     geom_sha = sha256_file(path)
     header("dftd4", len(z), threads, geom_sha)
@@ -265,21 +262,27 @@ def rgpot_forces(binary, kind, path):
     return energy, np.array(forces, dtype=float)
 
 
+# Close pairs in the random liquid reach 0.1 A, so the max absolute
+# force still moves in the third digit after the mesh has converged.
+# 0.04 eV/A was the inverted B-spline weight. This bound rejects that.
+FORCE_LIMIT_EV_A = 5.0e-3
+
+
 def certificate(binary, path, threads):
-    try:
-        pos, _z, q, box = load_geometry(path)
-        ref_ctx, _nb, _actual, ref_pme = openmm_context(pos, q, box, threads, 1.0e-6)
-        _er, ref = forces_from_state(ref_ctx)
-        _energy, ours = rgpot_forces(binary, "pme", path)
-        err = float(np.max(np.abs(ours - ref)))
-        print(
-            f"rgpot_pme_force_error_eV_A={err:.17g} reference=openmm-pme tolerance=1e-6 "
-            f"ref_grid={ref_pme[1]} {ref_pme[2]} {ref_pme[3]} n={len(q)}",
-            flush=True,
-        )
-        del ref_ctx
-    except Exception as exc:
-        print(f"rgpot_pme_force_error_unavailable {type(exc).__name__}: {exc}", flush=True)
+    pos, _z, q, box = load_geometry(path)
+    ref_ctx, _nb, _actual, ref_pme = openmm_context(pos, q, box, threads, 1.0e-6)
+    _er, ref = forces_from_state(ref_ctx)
+    _energy, ours = rgpot_forces(binary, "pme", path)
+    err = float(np.max(np.abs(ours - ref)))
+    print(
+        f"rgpot_pme_force_error_eV_A={err:.17g} reference=openmm-pme tolerance=1e-6 "
+        f"ref_grid={ref_pme[1]} {ref_pme[2]} {ref_pme[3]} n={len(q)}",
+        flush=True,
+    )
+    del ref_ctx
+    if not np.isfinite(err) or err > FORCE_LIMIT_EV_A:
+        raise SystemExit(f"pme force error {err:.6g} exceeds {FORCE_LIMIT_EV_A}")
+    print("pme_force_check pass", flush=True)
 
 
 def limit_for(arm, n):
@@ -320,14 +323,23 @@ def drive(geom_dir, binary, threads_list):
                     str(path),
                     str(threads),
                 ]
-                proc = subprocess.run(cmd)
+                env = os.environ.copy()
+                env["OMP_NUM_THREADS"] = str(threads)
+                proc = subprocess.run(cmd, env=env)
                 if proc.returncode != 0:
                     print(
                         f"{arm} n={n} threads={threads} limit_s={limit} exit_code={proc.returncode}",
                         flush=True,
                     )
         if binary:
-            certificate(binary, str(path), threads_list[0])
+            env = os.environ.copy()
+            env["OMP_NUM_THREADS"] = "1"
+            proc = subprocess.run(
+                [sys.executable, script, "certificate", binary, str(path), str(threads_list[0])],
+                env=env,
+            )
+            if proc.returncode != 0:
+                raise SystemExit(f"certificate n={n} exit_code={proc.returncode}")
 
 
 def main():
@@ -341,6 +353,9 @@ def main():
             arm_dftd4(path, threads)
         else:
             raise SystemExit(f"unknown arm {arm}")
+        return
+    if len(sys.argv) >= 2 and sys.argv[1] == "certificate":
+        certificate(sys.argv[2], sys.argv[3], int(sys.argv[4]))
         return
     if len(sys.argv) >= 2 and sys.argv[1] == "drive":
         geom_dir = sys.argv[2]

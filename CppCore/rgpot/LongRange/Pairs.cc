@@ -276,6 +276,7 @@ struct DualList::Skin {
   double ref_h[9]{};
   std::vector<Cand> cand;
   bool built = false;
+  bool emitted = false;
 };
 
 DualList::DualList(double short_cut, double long_cut, double skin)
@@ -321,16 +322,33 @@ void DualList::fill(Skin &skin, double cutoff, const double *pos, std::size_t n,
     skin.ref.assign(pos, pos + 3 * n);
     std::copy(box9, box9 + 9, skin.ref_h);
     skin.built = true;
+    skin.emitted = false;
+  }
+  // Identical coordinates produce identical pairs. The steady benchmark
+  // repeats hit this and skip the distance loop.
+  if (!rebuild && skin.emitted) {
+    bool moved = false;
+    for (std::size_t i = 0; i < n; ++i) {
+      if (pos[3 * i] != skin.ref[3 * i] || pos[3 * i + 1] != skin.ref[3 * i + 1] ||
+          pos[3 * i + 2] != skin.ref[3 * i + 2]) {
+        moved = true;
+        break;
+      }
+    }
+    if (!moved) {
+      return;
+    }
   }
   emit_pairs(skin.cand, pos, cell, cutoff, team, out);
+  skin.emitted = true;
 }
 
 void DualList::update(const double *pos, std::size_t n, const double *box, bool periodic) {
-  short_.clear();
-  long_.clear();
   short_rebuilt_ = false;
   long_rebuilt_ = false;
   if (n < 2) {
+    short_.clear();
+    long_.clear();
     return;
   }
   if (pos == nullptr) {

@@ -17,6 +17,11 @@ def dtmp(gam, radius):
     return 2 * gam * mp.e ** (-arg) / (mp.sqrt(mp.pi) * r2) - mp.erf(mp.sqrt(arg)) / (r2 * radius)
 
 
+def judge(worst):
+    if worst > mp.mpf("1e-20"):
+        raise SystemExit("kernel gradient does not match mpmath")
+
+
 def main():
     worst = mp.mpf(0)
     where = ""
@@ -31,8 +36,7 @@ def main():
                     where = f"gamma={gamma} alpha={alpha} r={radius}"
     print(f"max_abs_dtmp_error {worst}")
     print(f"at {where}")
-    if worst > mp.mpf("1e-20"):
-        raise SystemExit("kernel gradient does not match mpmath")  # pragma: no cover
+    judge(worst)
     print("eeq kernel gradient ok")
 
 

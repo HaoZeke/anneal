@@ -233,10 +233,8 @@ void bmod_axis(int order, int n, std::vector<double> *mod) {
       sum += bspline(order, static_cast<double>(k + 1)) *
              std::complex<double>(std::cos(ang), std::sin(ang));
     }
-    const double angb = 2.0 * kPi * static_cast<double>((order - 1) * m) / static_cast<double>(n);
-    const std::complex<double> num(std::cos(angb), std::sin(angb));
-    const std::complex<double> b = num / sum;
-    (*mod)[static_cast<std::size_t>(m)] = std::norm(b);
+    // |sum|^2. The mesh kernel divides by this. |num/sum|^2 is the inverse.
+    (*mod)[static_cast<std::size_t>(m)] = std::norm(sum);
   }
 }
 

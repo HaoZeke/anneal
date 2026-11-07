@@ -20,13 +20,43 @@ ENERGY_TOL = 1e-8
 GRADIENT_TOL = 1e-8
 
 
+def version_of(module):
+    for name in ("__version__", "version"):
+        if hasattr(module, name):
+            return str(getattr(module, name))
+    return "dftd4-python"
+
+
 def dftd4_version():
     import dftd4
 
-    for name in ("__version__", "version"):
-        if hasattr(dftd4, name):
-            return str(getattr(dftd4, name))
-    return "dftd4-python"  # pragma: no cover
+    return version_of(dftd4)
+
+
+def judge(e_err, g_err):
+    if not np.isfinite(e_err) or not np.isfinite(g_err):
+        raise SystemExit("non-finite periodic D4 comparison")
+    if e_err > ENERGY_TOL or g_err > GRADIENT_TOL:
+        raise SystemExit(f"periodic D4 outside 1e-8: energy {e_err:.3e} gradient {g_err:.3e}")
+
+
+def parse_rgpot(text):
+    provenance = ""
+    energy = None
+    forces = []
+    for line in text.splitlines():
+        if line.startswith("provenance "):
+            provenance = line
+            continue
+        parts = line.split()
+        if not parts:
+            continue
+        if parts[0] == "energy_eV":
+            energy = float(parts[1]) / HARTREE
+        elif parts[0] == "force_eV_A":
+            scale = BOHR / HARTREE
+            forces.extend([-float(parts[1]) * scale, -float(parts[2]) * scale, -float(parts[3]) * scale])
+    return provenance, energy, np.array(forces)
 
 
 def one_cell(binary, n, lengths, seed):
@@ -55,21 +85,7 @@ def one_cell(binary, n, lengths, seed):
             handle.write(f"{int(zi)} {point[0]:.16g} {point[1]:.16g} {point[2]:.16g}\n")
 
     proc = subprocess.run([binary, geom], check=True, capture_output=True, text=True)
-    provenance = ""
-    energy = None
-    forces = []
-    for line in proc.stdout.splitlines():
-        if line.startswith("provenance "):
-            provenance = line
-            continue
-        parts = line.split()
-        if not parts:
-            continue  # pragma: no cover
-        if parts[0] == "energy_eV":
-            energy = float(parts[1]) / HARTREE
-        elif parts[0] == "force_eV_A":
-            scale = BOHR / HARTREE
-            forces.extend([-float(parts[1]) * scale, -float(parts[2]) * scale, -float(parts[3]) * scale])
+    provenance, energy, forces = parse_rgpot(proc.stdout)
     forces = np.array(forces)
     e_err = abs(energy - ref_e)
     g_err = float(np.max(np.abs(forces - ref_g)))
@@ -80,12 +96,7 @@ def one_cell(binary, n, lengths, seed):
     print(f"rgpot_energy_Ha {energy:.17g}")
     print(f"max_abs_energy_Ha {e_err:.17g}")
     print(f"max_abs_gradient_Ha_Bohr {g_err:.17g}")
-    if not np.isfinite(e_err) or not np.isfinite(g_err):
-        raise SystemExit("non-finite periodic D4 comparison")  # pragma: no cover
-    if e_err > ENERGY_TOL or g_err > GRADIENT_TOL:
-        raise SystemExit(  # pragma: no cover
-            f"periodic D4 outside 1e-8: energy {e_err:.3e} gradient {g_err:.3e}"
-        )
+    judge(e_err, g_err)
 
 
 def main():

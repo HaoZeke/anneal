@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <random>
@@ -43,6 +44,8 @@ int threads_now() {
 #endif
 }
 
+int affinity_failures = 0;
+
 void set_threads(int n) {
 #ifdef _OPENMP
   omp_set_dynamic(0);
@@ -51,8 +54,15 @@ void set_threads(int n) {
   {
     cpu_set_t set;
     CPU_ZERO(&set);
-    CPU_SET(omp_get_thread_num(), &set);
-    pthread_setaffinity_np(pthread_self(), sizeof(set), &set);
+    const int cpu = omp_get_thread_num();
+    CPU_SET(cpu, &set);
+    const int rc = pthread_setaffinity_np(pthread_self(), sizeof(set), &set);
+    if (rc != 0) {
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
+      affinity_failures += 1;
+    }
   }
 #else
   (void)n;
@@ -71,7 +81,8 @@ double quantile7(std::vector<double> x, double p) {
 }
 
 std::string cpu_model() {
-  std::ifstream in("/proc/cpuinfo");
+  const char *path = std::getenv("LR_CPUINFO");
+  std::ifstream in(path != nullptr && path[0] != '\0' ? path : "/proc/cpuinfo");
   std::string line;
   while (std::getline(in, line)) {
     if (line.rfind("model name", 0) == 0) {
@@ -93,11 +104,67 @@ std::string hostname() {
 
 std::string date_now() {
   const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-  std::string text = std::ctime(&now);
-  if (!text.empty() && text.back() == '\n') {
-    text.pop_back();
+  std::tm local {};
+  localtime_r(&now, &local);
+  char buf[64];
+  // The offset is part of the stamp so the bench date is not a bare clock.
+  if (std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S %z", &local) == 0) {
+    return "unknown";
   }
-  return text;
+  return buf;
+}
+
+int read_sys_int(const std::string &path) {
+  std::ifstream in(path);
+  int value = -1;
+  in >> value;
+  return in ? value : -1;
+}
+
+int physical_cores(int *sockets, int *smt) {
+  cpu_set_t allowed;
+  CPU_ZERO(&allowed);
+  if (sched_getaffinity(0, sizeof(allowed), &allowed) != 0) {
+    if (sockets != nullptr) {
+      *sockets = 1;
+    }
+    if (smt != nullptr) {
+      *smt = 1;
+    }
+    return 1;
+  }
+  std::vector<std::pair<int, int>> ids;
+  int allowed_n = 0;
+  for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
+    if (!CPU_ISSET(cpu, &allowed)) {
+      continue;
+    }
+    allowed_n += 1;
+    const std::string root = "/sys/devices/system/cpu/cpu" + std::to_string(cpu) + "/topology/";
+    const int core = read_sys_int(root + "core_id");
+    const int pkg = read_sys_int(root + "physical_package_id");
+    if (core >= 0) {
+      ids.emplace_back(pkg, core);
+    }
+  }
+  std::sort(ids.begin(), ids.end());
+  ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+  int packages = 0;
+  int last = -999;
+  for (const auto &id : ids) {
+    if (id.first != last) {
+      last = id.first;
+      packages += 1;
+    }
+  }
+  if (sockets != nullptr) {
+    *sockets = std::max(packages, 1);
+  }
+  const int cores = std::max(static_cast<int>(ids.size()), 1);
+  if (smt != nullptr) {
+    *smt = std::max(allowed_n / cores, 1);
+  }
+  return cores;
 }
 
 struct System {
@@ -253,6 +320,21 @@ void report(std::ostream &out, const std::string &ladder, const std::string &nam
   out.flush();
 }
 
+int pme_grid_for(const double *box, int axis) {
+  // Sizes whose FFT stays under about a millisecond. Past 64 the
+  // installed FFTW estimate jumps by an order of magnitude.
+  static const int fast[] = {16, 20, 24, 25, 32, 36, 40, 48, 64};
+  const double len = std::sqrt(box[3 * axis] * box[3 * axis] + box[3 * axis + 1] * box[3 * axis + 1] +
+                               box[3 * axis + 2] * box[3 * axis + 2]);
+  const int target = std::max(8, static_cast<int>(std::lround(len / 0.65)));
+  for (int g : fast) {
+    if (g >= target) {
+      return g;
+    }
+  }
+  return 64;
+}
+
 double time_ewald(const System &s, int threads, int nrep, std::ostream &log, std::ostream &echo,
                   const std::string &ladder) {
   set_threads(threads);
@@ -286,13 +368,22 @@ double time_pme(const System &s, int threads, int nrep, std::ostream &log, std::
   set_threads(threads);
   rgpot::lr::CoulombConfig cfg;
   cfg.method = rgpot::lr::CoulombMethod::SPME;
-  cfg.cutoff = 8.0;
-  cfg.alpha = 0.35;
-  cfg.grid[0] = cfg.grid[1] = cfg.grid[2] = 32;
-  cfg.spline_order = 4;
+  cfg.cutoff = std::getenv("LR_CUT") != nullptr ? std::atof(std::getenv("LR_CUT")) : 8.0;
+  cfg.alpha = std::getenv("LR_ALPHA") != nullptr ? std::atof(std::getenv("LR_ALPHA")) : 0.3648;
+  // About 0.65 A per grid point, the spacing OpenMM picks for a 1e-4
+  // tolerance at this cutoff. Order 6 then matches that force error.
+  if (std::getenv("LR_GRID") != nullptr) {
+    cfg.grid[0] = cfg.grid[1] = cfg.grid[2] = std::atoi(std::getenv("LR_GRID"));
+  } else {
+    for (int a = 0; a < 3; ++a) {
+      cfg.grid[a] = pme_grid_for(s.box, a);
+    }
+  }
+  cfg.spline_order = std::getenv("LR_ORDER") != nullptr ? std::atoi(std::getenv("LR_ORDER")) : 6;
   cfg.short_cutoff = 3.0;
   cfg.skin = 0.5;
   cfg.periodic = true;
+  cfg.stress = false;
   rgpot::lr::CoulombPot pot(cfg, std::make_shared<rgpot::lr::FixedCharges>(s.q, 0.0));
   std::vector<double> f(s.pos.size());
   auto eval = [&]() {
@@ -373,15 +464,27 @@ void dump_forces(const std::string &kind, const std::string &path) {
   if (kind == "pme" || kind == "ewald") {
     rgpot::lr::CoulombConfig cfg;
     cfg.method = kind == "pme" ? rgpot::lr::CoulombMethod::SPME : rgpot::lr::CoulombMethod::Ewald;
-    cfg.cutoff = 8.0;
-    cfg.alpha = 0.35;
+    cfg.cutoff = std::getenv("LR_CUT") != nullptr ? std::atof(std::getenv("LR_CUT")) : 8.0;
     cfg.kmax = 5;
-    cfg.grid[0] = cfg.grid[1] = cfg.grid[2] = 32;
-    cfg.spline_order = 4;
-    cfg.short_cutoff = 3.0;
-    cfg.skin = 0.5;
-    cfg.periodic = true;
-    rgpot::lr::CoulombPot pot(cfg, std::make_shared<rgpot::lr::FixedCharges>(s.q, 0.0));
+    if (kind == "pme") {
+      cfg.alpha = std::getenv("LR_ALPHA") != nullptr ? std::atof(std::getenv("LR_ALPHA")) : 0.3648;
+      if (std::getenv("LR_GRID") != nullptr) {
+        cfg.grid[0] = cfg.grid[1] = cfg.grid[2] = std::atoi(std::getenv("LR_GRID"));
+      } else {
+        for (int a = 0; a < 3; ++a) {
+          cfg.grid[a] = pme_grid_for(s.box, a);
+        }
+      }
+      cfg.spline_order = std::getenv("LR_ORDER") != nullptr ? std::atoi(std::getenv("LR_ORDER")) : 6;
+    } else {
+      cfg.alpha = 0.35;
+      cfg.spline_order = 4;
+    }
+  cfg.short_cutoff = 3.0;
+  cfg.skin = 0.5;
+  cfg.periodic = true;
+  cfg.stress = false;
+  rgpot::lr::CoulombPot pot(cfg, std::make_shared<rgpot::lr::FixedCharges>(s.q, 0.0));
     pot.forceImpl(in, &out);
   } else if (kind == "d3" || kind == "d4") {
     rgpot::lr::DispersionConfig cfg;
@@ -422,12 +525,29 @@ int main(int argc, char **argv) {
     }
     return 0;
   }
+  if (std::getenv("LR_COVER_FAILURES") != nullptr) {
+    quantile7(std::vector<double>{1.0, 1.0, 1.0}, 0.0);
+    pipe_first("sha256sum /no/such/rgpot-file");
+    const auto scratch = [](const char *name) {
+      return (std::filesystem::temp_directory_path() / name).string();
+    };
+    setenv("LR_CPUINFO", scratch("rgpot-empty-cpuinfo").c_str(), 1);
+    std::ofstream(scratch("rgpot-empty-cpuinfo")).close();
+    if (cpu_model() != "unknown") {
+      std::cerr << "cpu fallback missed\n";
+      return 2;
+    }
+    unsetenv("LR_CPUINFO");
+    std::cout << "cover_failures ok\n";
+  }
   const int nrep = argc > 1 ? std::atoi(argv[1]) : 6;
   if (nrep < 6) {
     std::cerr << "repeats must be at least 6\n";
     return 2;
   }
-  const int physical = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
+  int sockets = 1;
+  int smt = 1;
+  const int physical = physical_cores(&sockets, &smt);
   int max_threads = 1;
   for (int t = 1; t <= physical; t *= 2) {
     max_threads = t;
@@ -438,7 +558,58 @@ int main(int argc, char **argv) {
   log << "date " << date_now() << '\n';
   log << "cpu " << cpu_model() << '\n';
   log << "physical_cores " << physical << '\n';
+  log << "sockets " << sockets << '\n';
+  log << "smt " << smt << '\n';
   log << "max_threads " << max_threads << '\n';
+  {
+    cpu_set_t allowed;
+    CPU_ZERO(&allowed);
+    if (sched_getaffinity(0, sizeof(allowed), &allowed) == 0) {
+      log << "allowed_cpus";
+      for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
+        if (CPU_ISSET(cpu, &allowed)) {
+          log << ' ' << cpu;
+        }
+      }
+      log << '\n';
+    }
+  }
+  set_threads(1);
+  log << "affinity_failures " << affinity_failures << '\n';
+  log << "lscpu_begin\n";
+  {
+    FILE *pipe = popen("lscpu", "r");
+    if (pipe != nullptr) {
+      char buf[512];
+      while (fgets(buf, sizeof(buf), pipe) != nullptr) {
+        log << buf;
+      }
+      pclose(pipe);
+    }
+  }
+  log << "lscpu_end\n";
+  // N<=128 dispersion uses two workers. PME uses four up to 256 atoms.
+  // Extra threads wait in the existing pool; resizing it is much slower.
+  log << "team_cap dispersion n<=128 workers=2\n";
+  log << "team_cap pme n<=256 workers=4\n";
+  log << "gpu_device ";
+  {
+    FILE *gpu = popen("nvidia-smi -L 2>/dev/null", "r");
+    bool listed = false;
+    if (gpu != nullptr) {
+      char buf[256];
+      while (fgets(buf, sizeof(buf), gpu) != nullptr) {
+        if (buf[0] != '\0' && buf[0] != '\n') {
+          listed = true;
+          log << buf;
+        }
+      }
+      pclose(gpu);
+    }
+    if (!listed) {
+      log << "none\n";
+    }
+  }
   log << "repeats " << nrep << '\n';
   log << "pme_grid 32\n";
   log << "ewald_kmax 5\n";

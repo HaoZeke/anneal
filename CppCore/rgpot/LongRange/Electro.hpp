@@ -29,6 +29,8 @@ struct CoulombConfig {
   double short_cutoff = 4.0;
   double skin = 1.0;
   bool periodic = true;
+  // The benchmark asks for energy and force. Stress is optional.
+  bool stress = true;
 };
 
 class ChargeSource {

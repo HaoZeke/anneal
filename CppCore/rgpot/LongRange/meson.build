@@ -11,7 +11,8 @@ lr_src = files(
     'SumPot.cc',
     'CudaPath.cc',
 )
-lr_deps = _deps
+# The mesh transform is an FFTW plan.
+lr_deps = _deps + [dependency('fftw3')]
 if get_option('with_cuda')
     nvcc = find_program('nvcc', required: true)
     lr_src += custom_target(
