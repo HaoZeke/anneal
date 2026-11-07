@@ -1177,14 +1177,16 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
   }
   const auto t_kern0 = std::chrono::steady_clock::now();
   static std::vector<std::complex<double>> phihat;
-  if (group_leader()) {
+  if (!mesh_float && group_leader()) {
     if (phihat.size() != ntot) {
       phihat.assign(ntot, std::complex<double>(0.0, 0.0));
     } else {
       std::fill(phihat.begin(), phihat.end(), std::complex<double>(0.0, 0.0));
     }
   }
-  group_arrive();
+  if (!mesh_float) {
+    group_arrive();
+  }
   struct KernelLocal {
     Neumaier rec;
     double strain[6]{};
