@@ -1,7 +1,7 @@
 #pragma once
 // Cutoff EEQ and a neighbour-list D4(BJ) evaluation.
 // Gas-phase reference sets stay on dftd4. This kernel is the large-system
-// path: real-space pairs come from the linkcell list, the reciprocal
+// path: real-space pairs come from the cell list, the reciprocal
 // Coulomb part is a short lattice sum, and the charge block is solved
 // by conjugate gradient instead of a dense factorization.
 

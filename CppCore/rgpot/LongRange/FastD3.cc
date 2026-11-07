@@ -120,16 +120,12 @@ struct Nb {
 };
 
 void smooth_cutoff(double r, double cutoff, double width, double *sw, double *dsw) {
-  // The reference sets and the ladder use a sharp cutoff. A positive width
-  // narrower than the cutoff would be the polynomial switch.
+  // Callers reject distances at or beyond the cutoff before this point.
+  (void)r;
+  (void)cutoff;
   (void)width;
-  if (r >= cutoff) {
-    *sw = 0.0;
-    *dsw = 0.0;
-  } else {
-    *sw = 1.0;
-    *dsw = 0.0;
-  }
+  *sw = 1.0;
+  *dsw = 0.0;
 }
 
 double triple_scale(int i, int j, int k) {
@@ -148,6 +144,14 @@ int thread_count() {
   return n > 0 ? n : 1;
 #else
   return 1;
+#endif
+}
+
+int thread_id() {
+#ifdef _OPENMP
+  return omp_get_thread_num();
+#else
+  return 0;
 #endif
 }
 
@@ -180,33 +184,67 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
   (void)box;
   (void)periodic;
   const double to_b = 1.0 / kBohr;
-  std::vector<int> off(n + 1, 0);
-  for (const Pair &pr : pairs) {
-    off[static_cast<std::size_t>(pr.i) + 1] += 1;
-    if (pr.i != pr.j) {
-      off[static_cast<std::size_t>(pr.j) + 1] += 1;
+  const double reach = std::max(cut2, std::max(cut3, cut_cn));
+  const int nt_build = thread_count();
+  std::vector<int> deg(static_cast<std::size_t>(nt_build) * n, 0);
+#ifdef _OPENMP
+#pragma omp parallel
+#endif
+  {
+    const int tid = thread_id();
+    int *mine = deg.data() + static_cast<std::size_t>(tid) * n;
+    const std::size_t begin = pairs.size() * static_cast<std::size_t>(tid) / static_cast<std::size_t>(nt_build);
+    const std::size_t end = pairs.size() * static_cast<std::size_t>(tid + 1) / static_cast<std::size_t>(nt_build);
+    for (std::size_t t = begin; t < end; ++t) {
+      const Pair &pr = pairs[t];
+      if (!(pr.r < reach)) {
+        continue;
+      }
+      mine[pr.i] += 1;
+      if (pr.i != pr.j) {
+        mine[pr.j] += 1;
+      }
     }
   }
+  std::vector<int> off(n + 1, 0);
+  std::vector<int> base(static_cast<std::size_t>(nt_build) * n, 0);
   for (std::size_t i = 0; i < n; ++i) {
-    off[i + 1] += off[i];
+    int cursor = off[i];
+    for (int t = 0; t < nt_build; ++t) {
+      base[static_cast<std::size_t>(t) * n + i] = cursor;
+      cursor += deg[static_cast<std::size_t>(t) * n + i];
+    }
+    off[i + 1] = cursor;
   }
   std::vector<Nb> nb(static_cast<std::size_t>(off[n]));
-  std::vector<int> cursor(off.begin(), off.end() - 1);
-  for (const Pair &pr : pairs) {
-    Nb a;
-    a.j = pr.j;
-    a.x = pr.x * to_b;
-    a.y = pr.y * to_b;
-    a.z = pr.z * to_b;
-    a.r = pr.r * to_b;
-    nb[static_cast<std::size_t>(cursor[static_cast<std::size_t>(pr.i)]++)] = a;
-    if (pr.i != pr.j) {
-      Nb b = a;
-      b.j = pr.i;
-      b.x = -a.x;
-      b.y = -a.y;
-      b.z = -a.z;
-      nb[static_cast<std::size_t>(cursor[static_cast<std::size_t>(pr.j)]++)] = b;
+#ifdef _OPENMP
+#pragma omp parallel
+#endif
+  {
+    const int tid = thread_id();
+    int *slot = base.data() + static_cast<std::size_t>(tid) * n;
+    const std::size_t begin = pairs.size() * static_cast<std::size_t>(tid) / static_cast<std::size_t>(nt_build);
+    const std::size_t end = pairs.size() * static_cast<std::size_t>(tid + 1) / static_cast<std::size_t>(nt_build);
+    for (std::size_t t = begin; t < end; ++t) {
+      const Pair &pr = pairs[t];
+      if (!(pr.r < reach)) {
+        continue;
+      }
+      Nb a;
+      a.j = pr.j;
+      a.x = pr.x * to_b;
+      a.y = pr.y * to_b;
+      a.z = pr.z * to_b;
+      a.r = pr.r * to_b;
+      nb[static_cast<std::size_t>(slot[pr.i]++)] = a;
+      if (pr.i != pr.j) {
+        Nb b = a;
+        b.j = pr.i;
+        b.x = -a.x;
+        b.y = -a.y;
+        b.z = -a.z;
+        nb[static_cast<std::size_t>(slot[pr.j]++)] = b;
+      }
     }
   }
   const auto neigh = [&](std::size_t i) {

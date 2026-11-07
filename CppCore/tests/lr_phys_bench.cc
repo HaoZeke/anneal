@@ -24,6 +24,9 @@
 #include <thread>
 #include <vector>
 
+#include <pthread.h>
+#include <sched.h>
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -40,7 +43,15 @@ int threads_now() {
 
 void set_threads(int n) {
 #ifdef _OPENMP
+  omp_set_dynamic(0);
   omp_set_num_threads(n);
+#pragma omp parallel
+  {
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(omp_get_thread_num(), &set);
+    pthread_setaffinity_np(pthread_self(), sizeof(set), &set);
+  }
 #else
   (void)n;
 #endif
@@ -173,7 +184,9 @@ void report(std::ostream &out, const std::string &ladder, const std::string &nam
       << " energy_eV=" << energy << '\n';
   out << "samples_us";
   for (double sample : samples) {
-    out << ' ' << sample;
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), " %.17g", sample);
+    out << buf;
   }
   out << '\n';
   out.flush();

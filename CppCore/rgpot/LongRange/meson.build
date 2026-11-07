@@ -1,4 +1,4 @@
-# Long-range summands. linkcell is the neighbour-list dependency.
+# Long-range summands. Pairs.cc builds the neighbour lists.
 # The CUDA translation unit is optional. The host fallback in
 # CudaPath.cc is always part of the library.
 lr_src = files(
@@ -11,7 +11,7 @@ lr_src = files(
     'SumPot.cc',
     'CudaPath.cc',
 )
-lr_deps = _deps + [linkcell_dep]
+lr_deps = _deps
 if get_option('with_cuda')
     nvcc = find_program('nvcc', required: true)
     lr_src += custom_target(

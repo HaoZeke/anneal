@@ -2,10 +2,11 @@
 // MIT License
 // Copyright 2023--present rgpot developers
 
-// Dual cutoff lists on d-SEAMS/linkcell. The short list is the local
-// model. The long list is Coulomb real space and dispersion. Each list
-// is a half list with a Verlet skin: candidates live at cutoff + skin
-// and are rebuilt when an atom, or a cell corner, leaves the skin.
+// Dual cutoff lists. The short list is the local model. The long list
+// is Coulomb real space and dispersion. Each list is a half list with a
+// Verlet skin: candidates live at cutoff + skin and are rebuilt when an
+// atom, or a cell corner, leaves the skin. The rebuild and the filter
+// run with the current OpenMP team, so one thread stays one thread.
 
 #include <cstddef>
 #include <memory>

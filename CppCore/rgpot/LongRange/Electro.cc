@@ -50,6 +50,25 @@ struct Scratch {
   double strain[6]{};
 };
 
+// One buffer for the whole process. The ladder is a single caller, and
+// keeping the storage removes allocator jitter from the timed samples.
+std::vector<Scratch> &scratch_for(int nt, std::size_t n3) {
+  static std::vector<Scratch> parts;
+  if (static_cast<int>(parts.size()) != nt) {
+    parts.assign(static_cast<std::size_t>(nt), Scratch{});
+  }
+  for (auto &p : parts) {
+    if (p.f.size() != n3) {
+      p.f.assign(n3, 0.0);
+    } else {
+      std::fill(p.f.begin(), p.f.end(), 0.0);
+    }
+    p.energy = Neumaier{};
+    std::fill(std::begin(p.strain), std::end(p.strain), 0.0);
+  }
+  return parts;
+}
+
 void add_scratch(const std::vector<Scratch> &parts, double *F, ElecOut *out) {
   Neumaier energy;
   for (const auto &p : parts) {
@@ -100,10 +119,7 @@ void real_space(const CoulombConfig &cfg, bool dsf, const double *q, std::size_t
   const double e_shift = dsf ? erfc_over_r(alpha, rc) : 0.0;
   const double bare_prime_rc = dsf ? derfc_over_r(alpha, rc) : 0.0;
   const int nt = thread_count();
-  std::vector<Scratch> parts(static_cast<std::size_t>(nt));
-  for (auto &p : parts) {
-    p.f.assign(3 * n, 0.0);
-  }
+  std::vector<Scratch> &parts = scratch_for(nt, 3 * n);
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
@@ -180,11 +196,9 @@ void ewald_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doub
   const double pref = kKe * (2.0 * kPi) / cell.volume;
   const int mmax = cfg.kmax;
   const int nt = thread_count();
-  std::vector<Scratch> parts(static_cast<std::size_t>(nt));
-  for (auto &p : parts) {
-    p.f.assign(3 * n, 0.0);
-  }
-  std::vector<double> s(3 * n);
+  std::vector<Scratch> &parts = scratch_for(nt, 3 * n);
+  static std::vector<double> s;
+  s.resize(3 * n);
   for (std::size_t i = 0; i < n; ++i) {
     double r[3] = {pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]};
     double fs[3];

@@ -233,7 +233,7 @@ Shell shell_of(const std::vector<Pair> &pairs, std::size_t n) {
 }
 
 void accumulate_cn(const Shell &sh, const int *z, std::size_t n, double cut_b, bool electroneg,
-                   bool do_log, std::vector<double> *cn) {
+                   std::vector<double> *cn) {
   cn->assign(n, 0.0);
   for (std::size_t i = 0; i < n; ++i) {
     for (const Nb &a : sh.of(i)) {
@@ -249,11 +249,6 @@ void accumulate_cn(const Shell &sh, const int *z, std::size_t n, double cut_b, b
       if (a.j != static_cast<int>(i)) {
         (*cn)[static_cast<std::size_t>(a.j)] += count;
       }
-    }
-  }
-  if (do_log) {
-    for (double &c : *cn) {
-      c = log_cut(c);
     }
   }
 }
@@ -348,6 +343,30 @@ void fft3_lines(std::vector<std::complex<double>> &g, int ng, bool inverse) {
   }
 }
 
+double bspline_order(int order, double x) {
+  if (order == 1) {
+    return (x >= 0.0 && x < 1.0) ? 1.0 : 0.0;
+  }
+  const double inv = 1.0 / static_cast<double>(order - 1);
+  return x * inv * bspline_order(order - 1, x) + (order - x) * inv * bspline_order(order - 1, x - 1.0);
+}
+
+void bmod_axis(int n, std::vector<double> *mod) {
+  constexpr int order = 4;
+  mod->assign(static_cast<std::size_t>(n), 0.0);
+  for (int m = 0; m < n; ++m) {
+    std::complex<double> sum(0.0, 0.0);
+    for (int k = 0; k < order - 1; ++k) {
+      const double ang = 2.0 * kPi * static_cast<double>(m * k) / static_cast<double>(n);
+      sum += bspline_order(order, static_cast<double>(k + 1)) * std::complex<double>(std::cos(ang), std::sin(ang));
+    }
+    const double angb = 2.0 * kPi * static_cast<double>((order - 1) * m) / static_cast<double>(n);
+    const std::complex<double> num(std::cos(angb), std::sin(angb));
+    const std::complex<double> b = num / sum;
+    (*mod)[static_cast<std::size_t>(m)] = std::norm(b);
+  }
+}
+
 double bspline4(double x) {
   // Order-4 cardinal B-spline on x in [0, 4).
   if (x <= 0.0 || x >= 4.0) {
@@ -390,6 +409,10 @@ struct Operator {
     mat_inv(box, inv, &vol);
     const double vol_b = vol / (kBohr * kBohr * kBohr);
     const double fac = 4.0 * kPi / vol_b;
+    std::vector<double> bmx, bmy, bmz;
+    bmod_axis(kGrid, &bmx);
+    bmod_axis(kGrid, &bmy);
+    bmod_axis(kGrid, &bmz);
     for (int iz = 0; iz < kGrid; ++iz) {
       for (int iy = 0; iy < kGrid; ++iy) {
         for (int ix = 0; ix < kGrid; ++ix) {
@@ -403,8 +426,10 @@ struct Operator {
           const double gy = (inv[1] * sx + inv[4] * sy + inv[7] * sz) * kBohr * 2.0 * kPi;
           const double gz = (inv[2] * sx + inv[5] * sy + inv[8] * sz) * kBohr * 2.0 * kPi;
           const double g2 = gx * gx + gy * gy + gz * gz;
+          const double bden = bmx[static_cast<std::size_t>(ix)] * bmy[static_cast<std::size_t>(iy)] *
+                              bmz[static_cast<std::size_t>(iz)];
           recip_kernel[static_cast<std::size_t>(ix + kGrid * (iy + kGrid * iz))] =
-              fac * std::exp(-0.25 * g2 / (alpha * alpha)) / g2;
+              fac * std::exp(-0.25 * g2 / (alpha * alpha)) / g2 / std::max(bden, 1e-30);
         }
       }
     }
@@ -805,8 +830,8 @@ void d4_evaluate(const double *pos, const int *z, std::size_t n, const double *b
   const Shell sh = shell_of(*use, n);
   std::vector<double> cn_disp;
   std::vector<double> cn_eeq_raw(n, 0.0);
-  accumulate_cn(sh, z, n, cut_cn * to_b, true, false, &cn_disp);
-  accumulate_cn(sh, z, n, std::min(kEeqCut, ewald_cut * to_b), false, false, &cn_eeq_raw);
+  accumulate_cn(sh, z, n, cut_cn * to_b, true, &cn_disp);
+  accumulate_cn(sh, z, n, std::min(kEeqCut, ewald_cut * to_b), false, &cn_eeq_raw);
   std::vector<double> cn_eeq(n);
   for (std::size_t i = 0; i < n; ++i) {
     cn_eeq[i] = log_cut(cn_eeq_raw[i]);

@@ -379,26 +379,7 @@ if get_option('with_dftd3')
     has_dftd3 = true
 endif
 
-has_long_range = false
-linkcell_dep = disabler()
-if get_option('with_long_range')
-    linkcell_dep = dependency('linkcell', required: false)
-    if not linkcell_dep.found()
-        _lc_dirs = []
-        if get_option('linkcell_libdir') != ''
-            _lc_dirs = [get_option('linkcell_libdir')]
-        endif
-        linkcell_dep = cppc.find_library(
-            'linkcell',
-            dirs: _lc_dirs,
-            required: true,
-        )
-    endif
-    has_long_range = true
-    if get_option('linkcell_incdir') != ''
-        _incdirs += include_directories(get_option('linkcell_incdir'))
-    endif
-endif
+has_long_range = get_option('with_long_range')
 
 has_dftd4 = false
 if get_option('with_dftd4')
