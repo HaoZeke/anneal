@@ -36,7 +36,7 @@ def parse(path):
                 pending = None
                 continue
             parts = line.split()
-            if len(parts) >= 3 and parts[0] in ("strong", "weak128", "weak1024") and parts[1] in (
+            if len(parts) >= 3 and parts[0] in ("strong", "weak128", "weak1024", "matched") and parts[1] in (
                 "ewald",
                 "pme",
                 "d3",

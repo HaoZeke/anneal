@@ -87,13 +87,19 @@ def time_calls(fn):
     return warmup, samples
 
 
+def load_fields():
+    one, five, fifteen = Path("/proc/loadavg").read_text().split()[:3]
+    return f"load1={float(one):.17g} load5={float(five):.17g} load15={float(fifteen):.17g}"
+
+
 def report_times(name, n, threads, warmup, samples):
     med = quantile7(samples, 0.5)
     iqr = quantile7(samples, 0.75) - quantile7(samples, 0.25)
     print(f"warmup_us={warmup:.17g}", flush=True)
+    print(load_fields(), flush=True)
     print(
         f"ref {name} n={n} threads={threads} repeats={len(samples)} "
-        f"median_us={med:.17g} iqr7_us={iqr:.17g}",
+        f"median_us={med:.17g} iqr7_us={iqr:.17g} {load_fields()}",
         flush=True,
     )
     print("samples_us " + " ".join(f"{v:.17g}" for v in samples), flush=True)
@@ -460,18 +466,21 @@ def reference_and_match(path, binary=None):
             flush=True,
         )
     if binary:
-        rgpot_med, rgpot_grid, rgpot_samples, _out = time_rgpot_pme(binary, path, 1, floor_err)
-        if rgpot_med is None:
-            raise SystemExit(f"rgpot matched timing produced no median n={n}")
-        print(
-            f"matched_head_to_head n={n} threads=1 "
-            f"openmm_median_us={floor_row[2]:.17g} openmm_max_abs_eV_A={floor_err:.17g} "
-            f"rgpot_tol={floor_err:.17g} rgpot_median_us={rgpot_med:.17g} "
-            f"rgpot_grid={rgpot_grid}",
-            flush=True,
-        )
-        if rgpot_samples:
-            print("rgpot_" + rgpot_samples, flush=True)
+        for threads in (1, 2, 4, 8):
+            rgpot_med, rgpot_grid, rgpot_samples, _out = time_rgpot_pme(
+                binary, path, threads, floor_err
+            )
+            if rgpot_med is None:
+                raise SystemExit(f"rgpot matched timing produced no median n={n} threads={threads}")
+            print(
+                f"matched_head_to_head n={n} threads={threads} "
+                f"openmm_median_us={floor_row[2]:.17g} openmm_max_abs_eV_A={floor_err:.17g} "
+                f"rgpot_tol={floor_err:.17g} rgpot_median_us={rgpot_med:.17g} "
+                f"rgpot_grid={rgpot_grid} {load_fields()}",
+                flush=True,
+            )
+            if rgpot_samples:
+                print("rgpot_" + rgpot_samples, flush=True)
 
 
 def drive(geom_dir, binary, threads_list):
@@ -546,6 +555,21 @@ def main():
         return
     if len(sys.argv) >= 2 and sys.argv[1] == "certificate":
         certificate(sys.argv[2], sys.argv[3], int(sys.argv[4]))
+        return
+    if len(sys.argv) >= 2 and sys.argv[1] == "match":
+        geom = sys.argv[2]
+        binary = sys.argv[3]
+        head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+        tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
+        print("command ref_bench.py match", flush=True)
+        print(f"head {head}", flush=True)
+        print(f"tree {tree}", flush=True)
+        print(f"binary {binary}", flush=True)
+        print(f"hostname {socket.gethostname()}", flush=True)
+        print(f"cpu {cpu_model()}", flush=True)
+        print(load_fields(), flush=True)
+        reference_and_match(geom, binary)
+        print("exit_code=0", flush=True)
         return
     if len(sys.argv) >= 2 and sys.argv[1] == "drive":
         geom_dir = sys.argv[2]

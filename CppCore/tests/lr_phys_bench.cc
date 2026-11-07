@@ -320,11 +320,42 @@ std::vector<double> repeat(int nrep, Fn &&fn, double *warmup_us) {
   return samples;
 }
 
+// LR_FLOORS is "N tol" per line. The 1e-4 column stays. A positive
+// return adds the matched column for that N on the same geometry.
+double floor_for_n(int n) {
+  const char *path = std::getenv("LR_FLOORS");
+  if (path == nullptr || path[0] == '\0') {
+    return 0.0;
+  }
+  std::ifstream in(path);
+  int got = 0;
+  double tol = 0.0;
+  while (in >> got >> tol) {
+    if (got == n && tol > 0.0) {
+      return tol;
+    }
+  }
+  return 0.0;
+}
+
+std::string load_fields() {
+  std::ifstream in("/proc/loadavg");
+  double one = 0.0;
+  double five = 0.0;
+  double fifteen = 0.0;
+  in >> one >> five >> fifteen;
+  char buf[160];
+  std::snprintf(buf, sizeof(buf), "load1=%.17g load5=%.17g load15=%.17g", one, five, fifteen);
+  return buf;
+}
+
 void report(std::ostream &out, const std::string &ladder, const std::string &name, int n, int threads,
             const std::vector<double> &samples, double warmup_us, double energy) {
   const double med = quantile7(samples, 0.5);
   const double iqr = quantile7(samples, 0.75) - quantile7(samples, 0.25);
+  const std::string load = load_fields();
   out << "run hostname=" << hostname() << " date=" << date_now() << " cpu=" << cpu_model() << '\n';
+  out << load << '\n';
   out << "binary_sha256=" << binary_sha() << " head=" << git_head() << " tree=" << git_tree()
       << " dirty=" << RGPOT_GIT_DIRTY << '\n';
   out << "compiler=" << RGPOT_COMPILER << '\n';
@@ -335,7 +366,7 @@ void report(std::ostream &out, const std::string &ladder, const std::string &nam
   out << "warmup_us=" << warm << '\n';
   out << ladder << ' ' << name << " n=" << n << " threads=" << threads
       << " repeats=" << samples.size() << " median_us=" << med << " iqr7_us=" << iqr
-      << " energy_eV=" << energy << '\n';
+      << " energy_eV=" << energy << ' ' << load << '\n';
   out << "samples_us";
   for (double sample : samples) {
     char buf[64];
@@ -759,7 +790,16 @@ int main(int argc, char **argv) {
         time_ewald(sys, threads, nrep, log, std::cout, "strong");
       }
       if (wanted("pme")) {
+        unsetenv("LR_PME_TOL");
         time_pme(sys, threads, nrep, log, std::cout, "strong");
+        const double floor_tol = floor_for_n(n);
+        if (floor_tol > 0.0) {
+          char buf[64];
+          std::snprintf(buf, sizeof(buf), "%.17g", floor_tol);
+          setenv("LR_PME_TOL", buf, 1);
+          time_pme(sys, threads, nrep, log, std::cout, "matched");
+          unsetenv("LR_PME_TOL");
+        }
       }
       if (wanted("d3")) {
         time_disp(sys, threads, nrep, log, std::cout, "strong", rgpot::lr::DispersionKind::D3BJ, "d3");
