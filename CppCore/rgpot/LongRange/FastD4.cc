@@ -270,6 +270,10 @@ void fft3_lines(std::vector<std::complex<double>> &g, int ng, bool inverse) {
 #ifdef _OPENMP
   team = std::max(1, omp_get_max_threads());
 #endif
+  // Eight workers on a 32-point axis are slower than four.
+  if (ng <= 32 && team > 4) {
+    team = 4;
+  }
   pocketfft::c2c(shape, stride, stride, axes, !inverse, g.data(), g.data(), scale,
                  static_cast<std::size_t>(team));
 }
@@ -333,6 +337,33 @@ struct Operator {
   mutable std::vector<double> acc_buf;
   mutable std::vector<int> sp_at;
   mutable std::vector<double> sp_w;
+  mutable std::vector<double> ker;
+  mutable bool ker_ready = false;
+
+  void prepare_ker() const {
+    if (ker_ready) {
+      return;
+    }
+    ker.assign(real->nb.size(), 0.0);
+    for (std::size_t i = 0; i < n; ++i) {
+      const double radi = kD4Rad[elem(z[i])];
+      for (std::size_t k = static_cast<std::size_t>(real->off[i]);
+           k < static_cast<std::size_t>(real->off[i + 1]); ++k) {
+        const Nb &a = real->nb[k];
+        if (a.j > static_cast<int>(i) || !(a.r > 1e-12)) {
+          continue;
+        }
+        const double radj = kD4Rad[elem(z[a.j])];
+        const double gam = 1.0 / std::sqrt(radi * radi + radj * radj);
+        double value = std::erf(gam * a.r) / a.r;
+        if (periodic) {
+          value -= std::erf(alpha * a.r) / a.r;
+        }
+        ker[k] = value;
+      }
+    }
+    ker_ready = true;
+  }
 
   void prepare_spread() const {
     if (sp_at.size() == n * 64) {
@@ -486,6 +517,7 @@ struct Operator {
       std::fill(acc_buf.begin(), acc_buf.end(), 0.0);
     }
     double *acc = acc_buf.data();
+    prepare_ker();
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
@@ -501,20 +533,17 @@ struct Operator {
 #pragma omp for schedule(static)
 #endif
       for (std::size_t i = 0; i < n; ++i) {
-        const double radi = kD4Rad[elem(z[i])];
-        for (const Nb &a : real->of(i)) {
+        const std::size_t begin = static_cast<std::size_t>(real->off[i]);
+        const std::size_t end = static_cast<std::size_t>(real->off[i + 1]);
+        for (std::size_t k = begin; k < end; ++k) {
+          const Nb &a = real->nb[k];
+          const double coeff = ker[k];
           if (a.j > static_cast<int>(i) || !(a.r > 1e-12)) {
             continue;
           }
-          const double radj = kD4Rad[elem(z[a.j])];
-          const double gam = 1.0 / std::sqrt(radi * radi + radj * radj);
-          double ker = std::erf(gam * a.r) / a.r;
-          if (periodic) {
-            ker -= std::erf(alpha * a.r) / a.r;
-          }
-          loc[i] += ker * q[a.j];
+          loc[i] += coeff * q[a.j];
           if (a.j != static_cast<int>(i)) {
-            loc[a.j] += ker * q[i];
+            loc[a.j] += coeff * q[i];
           }
         }
       }
