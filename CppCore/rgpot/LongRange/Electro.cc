@@ -121,12 +121,74 @@ double derfc_over_r(double alpha, double r) {
   return -std::erfc(ar) / (r * r) - (2.0 * alpha / std::sqrt(kPi)) * e / r;
 }
 
+struct ScreenTable {
+  double alpha = 0.0;
+  double rc = 0.0;
+  double inv_dr = 0.0;
+  std::vector<double> phi;
+  std::vector<double> dphi;
+};
+
+ScreenTable &screen_table(double alpha, double rc) {
+  static ScreenTable table;
+  if (table.alpha == alpha && table.rc == rc && !table.phi.empty()) {
+    return table;
+  }
+  // Hermite samples of erfc(alpha r)/r. The pair loop interpolates them
+  // instead of calling erfc once per neighbour.
+  constexpr int nnode = 8192;
+  table.alpha = alpha;
+  table.rc = rc;
+  table.phi.assign(static_cast<std::size_t>(nnode), 0.0);
+  table.dphi.assign(static_cast<std::size_t>(nnode), 0.0);
+  const double dr = rc / static_cast<double>(nnode - 1);
+  table.inv_dr = 1.0 / dr;
+  for (int i = 1; i < nnode; ++i) {
+    const double r = dr * static_cast<double>(i);
+    table.phi[static_cast<std::size_t>(i)] = erfc_over_r(alpha, r);
+    table.dphi[static_cast<std::size_t>(i)] = derfc_over_r(alpha, r);
+  }
+  table.phi[0] = table.phi[1];
+  table.dphi[0] = table.dphi[1];
+  return table;
+}
+
+void screened_pair(const ScreenTable &table, double r, double *phi, double *dphi) {
+  const double x = r * table.inv_dr;
+  const int i0 = static_cast<int>(x);
+  const int last = static_cast<int>(table.phi.size()) - 2;
+  if (i0 < 1 || i0 > last) {
+    *phi = erfc_over_r(table.alpha, r);
+    *dphi = derfc_over_r(table.alpha, r);
+    return;
+  }
+  const double t = x - static_cast<double>(i0);
+  const double t2 = t * t;
+  const double t3 = t2 * t;
+  const double h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+  const double h10 = t3 - 2.0 * t2 + t;
+  const double h01 = -2.0 * t3 + 3.0 * t2;
+  const double h11 = t3 - t2;
+  const double dr = 1.0 / table.inv_dr;
+  const double p0 = table.phi[static_cast<std::size_t>(i0)];
+  const double p1 = table.phi[static_cast<std::size_t>(i0 + 1)];
+  const double d0 = table.dphi[static_cast<std::size_t>(i0)];
+  const double d1 = table.dphi[static_cast<std::size_t>(i0 + 1)];
+  *phi = h00 * p0 + h10 * dr * d0 + h01 * p1 + h11 * dr * d1;
+  const double dh00 = 6.0 * t2 - 6.0 * t;
+  const double dh10 = 3.0 * t2 - 4.0 * t + 1.0;
+  const double dh01 = -6.0 * t2 + 6.0 * t;
+  const double dh11 = 3.0 * t2 - 2.0 * t;
+  *dphi = (dh00 * p0 + dh10 * dr * d0 + dh01 * p1 + dh11 * dr * d1) * table.inv_dr;
+}
+
 void real_space(const CoulombConfig &cfg, bool dsf, const double *q, std::size_t n,
                 const std::vector<Pair> &pairs, double *F, double *dE_dq, ElecOut *out) {
   const double alpha = cfg.alpha;
   const double rc = cfg.cutoff;
   const double e_shift = dsf ? erfc_over_r(alpha, rc) : 0.0;
   const double bare_prime_rc = dsf ? derfc_over_r(alpha, rc) : 0.0;
+  const ScreenTable &screen = screen_table(alpha, rc);
   const int nt = thread_count();
   std::vector<Scratch> &parts = scratch_for(nt, 3 * n);
 #ifdef _OPENMP
@@ -142,8 +204,9 @@ void real_space(const CoulombConfig &cfg, bool dsf, const double *q, std::size_t
       if (!(pr.r > 0.0) || pr.r >= rc) {
         continue;
       }
-      const double phi_bare = erfc_over_r(alpha, pr.r);
-      const double dphi_bare = derfc_over_r(alpha, pr.r);
+      double phi_bare = 0.0;
+      double dphi_bare = 0.0;
+      screened_pair(screen, pr.r, &phi_bare, &dphi_bare);
       double phi = phi_bare;
       double dphi = dphi_bare;
       if (dsf) {
@@ -355,7 +418,60 @@ double bspline3(double x) {
   return 0.5 * (x - 3.0) * (x - 3.0);
 }
 
+double horner(double u, const double *c, int n) {
+  double s = c[n - 1];
+  for (int i = n - 2; i >= 0; --i) {
+    s = s * u + c[i];
+  }
+  return s;
+}
+
+// Cardinal B-spline on each unit interval, powers of the local coordinate.
+// The coefficients match the recurrence to a rounding error.
+double bspline5(double x) {
+  if (!(x > 0.0) || x >= 5.0) {
+    return 0.0;
+  }
+  const int k = static_cast<int>(x);
+  const double u = x - static_cast<double>(k);
+  static const double c[5][5] = {
+      {0.0, 0.0, 0.0, 0.0, 0.041666666666666664},
+      {0.041666666666666664, 0.16666666666666666, 0.25, 0.16666666666666666, -0.16666666666666666},
+      {0.45833333333333331, 0.5, -0.25, -0.5, 0.25},
+      {0.45833333333333331, -0.5, -0.25, 0.5, -0.16666666666666666},
+      {0.041666666666666664, -0.16666666666666666, 0.25, -0.16666666666666666, 0.041666666666666664},
+  };
+  return horner(u, c[k], 5);
+}
+
+double bspline6(double x) {
+  if (!(x > 0.0) || x >= 6.0) {
+    return 0.0;
+  }
+  const int k = static_cast<int>(x);
+  const double u = x - static_cast<double>(k);
+  static const double c[6][6] = {
+      {0.0, 0.0, 0.0, 0.0, 0.0, 0.0083333333333333332},
+      {0.0083333333333333332, 0.041666666666666664, 0.083333333333333329, 0.083333333333333329,
+       0.041666666666666664, -0.041666666666666664},
+      {0.21666666666666667, 0.41666666666666669, 0.16666666666666669, -0.16666666666666669,
+       -0.16666666666666666, 0.083333333333333343},
+      {0.55000000000000004, 0.0, -0.5, 0.0, 0.25, -0.083333333333333343},
+      {0.21666666666666667, -0.41666666666666669, 0.16666666666666669, 0.16666666666666669,
+       -0.16666666666666669, 0.041666666666666664},
+      {0.0083333333333333332, -0.041666666666666664, 0.083333333333333343, -0.083333333333333343,
+       0.041666666666666664, -0.0083333333333333332},
+  };
+  return horner(u, c[k], 6);
+}
+
 double bspline(int order, double x) {
+  if (order == 6) {
+    return bspline6(x);
+  }
+  if (order == 5) {
+    return bspline5(x);
+  }
   if (order == 4) {
     return bspline4(x);
   }
@@ -367,25 +483,49 @@ double bspline(int order, double x) {
 }
 
 double bspline_derivative(int order, double x) {
+  if (order == 6) {
+    return bspline5(x) - bspline5(x - 1.0);
+  }
+  if (order == 5) {
+    return bspline4(x) - bspline4(x - 1.0);
+  }
   if (order == 4) {
     return bspline3(x) - bspline3(x - 1.0);
   }
   return bspline(order - 1, x) - bspline(order - 1, x - 1.0);
 }
 
-void fft3(std::vector<std::complex<double>> &g, int nx, int ny, int nz, bool inverse, int team) {
-  // The caller pins each OpenMP worker to one core. The transform's own
-  // pool is started while this thread can run on every allowed core, or
-  // those workers all inherit a single core and the transform does not scale.
-  if (team > 1) {
-    cpu_set_t all;
-    CPU_ZERO(&all);
-    const int ncpu = static_cast<int>(sysconf(_SC_NPROCESSORS_ONLN));
-    for (int cpu = 0; cpu < ncpu && cpu < CPU_SETSIZE; ++cpu) {
-      CPU_SET(cpu, &all);
-    }
-    pthread_setaffinity_np(pthread_self(), sizeof(all), &all);
+void ensure_fft_workers() {
+  // The worker pool is created once. The calling thread may already be
+  // pinned to a single core, so the pool is started while this thread can
+  // run anywhere and each worker then pins itself. The caller's pin is put back.
+  static bool ready = false;
+  if (ready) {
+    return;
   }
+  cpu_set_t saved;
+  CPU_ZERO(&saved);
+  pthread_getaffinity_np(pthread_self(), sizeof(saved), &saved);
+  cpu_set_t all;
+  CPU_ZERO(&all);
+  const int ncpu = static_cast<int>(sysconf(_SC_NPROCESSORS_ONLN));
+  for (int cpu = 0; cpu < ncpu && cpu < CPU_SETSIZE; ++cpu) {
+    CPU_SET(cpu, &all);
+  }
+  pthread_setaffinity_np(pthread_self(), sizeof(all), &all);
+  std::vector<std::complex<double>> tiny(8);
+  const pocketfft::shape_t shape{2, 2, 2};
+  const auto step = static_cast<std::ptrdiff_t>(sizeof(std::complex<double>));
+  const pocketfft::stride_t stride{step * 4, step * 2, step};
+  const pocketfft::shape_t axes{0, 1, 2};
+  pocketfft::c2c(shape, stride, stride, axes, true, tiny.data(), tiny.data(), 1.0,
+                 static_cast<std::size_t>(std::max(ncpu, 2)));
+  pthread_setaffinity_np(pthread_self(), sizeof(saved), &saved);
+  ready = true;
+}
+
+void fft3(std::vector<std::complex<double>> &g, int nx, int ny, int nz, bool inverse, int team) {
+  ensure_fft_workers();
   // z is the slowest index: x + nx * (y + ny * z). Plans are cached inside
   // the transform, so a repeated mesh size does not rebuild them.
   pocketfft::shape_t shape{static_cast<std::size_t>(nz), static_cast<std::size_t>(ny),
@@ -415,6 +555,134 @@ void bmod_axis(int order, int n, std::vector<double> *mod) {
     }
     (*mod)[static_cast<std::size_t>(m)] = std::norm(sum);
   }
+}
+
+// Real-to-complex float mesh. The charge grid is real, so the negative x
+// frequencies are the conjugates of the stored half and are not transformed.
+double float_reciprocal(std::vector<std::complex<double>> &charged,
+                        std::vector<std::complex<double>> &phi, int nx, int ny, int nz,
+                        const std::vector<double> &bmx, const std::vector<double> &bmy,
+                        const std::vector<double> &bmz, const CellGeom &cell, double alpha,
+                        double pref, int team) {
+  const std::size_t ntot = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+                           static_cast<std::size_t>(nz);
+  const int nkx = nx / 2 + 1;
+  const std::size_t nspec = static_cast<std::size_t>(nz) * static_cast<std::size_t>(ny) *
+                            static_cast<std::size_t>(nkx);
+  static std::vector<float> real;
+  static std::vector<std::complex<float>> spec;
+  if (real.size() != ntot) {
+    real.assign(ntot, 0.0f);
+  }
+  if (spec.size() != nspec) {
+    spec.assign(nspec, std::complex<float>(0.0f, 0.0f));
+  }
+  for (std::size_t i = 0; i < ntot; ++i) {
+    real[i] = static_cast<float>(charged[i].real());
+  }
+  const pocketfft::shape_t shape{static_cast<std::size_t>(nz), static_cast<std::size_t>(ny),
+                                 static_cast<std::size_t>(nx)};
+  const pocketfft::stride_t sreal{static_cast<std::ptrdiff_t>(sizeof(float)) * nx * ny,
+                                  static_cast<std::ptrdiff_t>(sizeof(float)) * nx,
+                                  static_cast<std::ptrdiff_t>(sizeof(float))};
+  const pocketfft::stride_t sspec{static_cast<std::ptrdiff_t>(sizeof(std::complex<float>)) * ny * nkx,
+                                  static_cast<std::ptrdiff_t>(sizeof(std::complex<float>)) * nkx,
+                                  static_cast<std::ptrdiff_t>(sizeof(std::complex<float>))};
+  const pocketfft::shape_t axes{0, 1, 2};
+  const std::size_t nth = team > 1 ? static_cast<std::size_t>(team) : 1;
+  pocketfft::r2c(shape, sreal, sspec, axes, true, real.data(), spec.data(), 1.0f, nth);
+  struct FloatFactor {
+    int nx = 0;
+    int ny = 0;
+    int nz = 0;
+    double alpha = 0.0;
+    double pref = 0.0;
+    double H[9]{};
+    std::vector<float> scale;
+    std::vector<float> efac;
+  };
+  static FloatFactor saved;
+  bool stale = saved.nx != nx || saved.ny != ny || saved.nz != nz || saved.alpha != alpha ||
+               saved.pref != pref || saved.scale.size() != nspec;
+  if (!stale) {
+    for (int r = 0; r < 3 && !stale; ++r) {
+      for (int c = 0; c < 3; ++c) {
+        if (saved.H[3 * r + c] != cell.H[r][c]) {
+          stale = true;
+          break;
+        }
+      }
+    }
+  }
+  if (stale) {
+    saved.nx = nx;
+    saved.ny = ny;
+    saved.nz = nz;
+    saved.alpha = alpha;
+    saved.pref = pref;
+    for (int r = 0; r < 3; ++r) {
+      for (int c = 0; c < 3; ++c) {
+        saved.H[3 * r + c] = cell.H[r][c];
+      }
+    }
+    saved.scale.assign(nspec, 0.0f);
+    saved.efac.assign(nspec, 0.0f);
+    const double two_n = 2.0 * static_cast<double>(ntot);
+    for (int iz = 0; iz < nz; ++iz) {
+      for (int iy = 0; iy < ny; ++iy) {
+        for (int ix = 0; ix < nkx; ++ix) {
+          const int sy = iy <= ny / 2 ? iy : iy - ny;
+          const int sz = iz <= nz / 2 ? iz : iz - nz;
+          const std::size_t at = static_cast<std::size_t>((iz * ny + iy) * nkx + ix);
+          if (ix == 0 && sy == 0 && sz == 0) {
+            continue;
+          }
+          double mc[3];
+          for (int c = 0; c < 3; ++c) {
+            mc[c] = static_cast<double>(ix) * cell.recip[0][c] + static_cast<double>(sy) * cell.recip[1][c] +
+                    static_cast<double>(sz) * cell.recip[2][c];
+          }
+          const double m2 = mc[0] * mc[0] + mc[1] * mc[1] + mc[2] * mc[2];
+          const double bden = bmx[static_cast<std::size_t>(ix)] * bmy[static_cast<std::size_t>(iy)] *
+                              bmz[static_cast<std::size_t>(iz)];
+          if (!(m2 > 0.0) || !(bden > 1e-12)) {
+            continue;
+          }
+          const double gauss = std::exp(-kPi * kPi * m2 / (alpha * alpha));
+          const double factor = pref * gauss / m2 / bden;
+          const double weight = (ix == 0 || ix == nx / 2) ? 1.0 : 2.0;
+          saved.scale[at] = static_cast<float>(two_n * factor);
+          saved.efac[at] = static_cast<float>(weight * factor);
+        }
+      }
+    }
+  }
+  double energy = 0.0;
+  const float *scale = saved.scale.data();
+  const float *efac = saved.efac.data();
+#ifdef _OPENMP
+#pragma omp parallel for reduction(+ : energy) schedule(static)
+#endif
+  for (std::size_t at = 0; at < nspec; ++at) {
+    const float s = scale[at];
+    if (!(s > 0.0f)) {
+      spec[at] = std::complex<float>(0.0f, 0.0f);
+      continue;
+    }
+    const float re = spec[at].real();
+    const float im = spec[at].imag();
+    energy += static_cast<double>(efac[at]) * (static_cast<double>(re) * re + static_cast<double>(im) * im);
+    spec[at] = std::complex<float>(s * re, s * im);
+  }
+  const float inv = 1.0f / static_cast<float>(ntot);
+  pocketfft::c2r(shape, sspec, sreal, axes, false, spec.data(), real.data(), inv, nth);
+  if (phi.size() != ntot) {
+    phi.assign(ntot, std::complex<double>(0.0, 0.0));
+  }
+  for (std::size_t i = 0; i < ntot; ++i) {
+    phi[i] = std::complex<double>(static_cast<double>(real[i]), 0.0);
+  }
+  return energy;
 }
 
 void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const double *pos,
@@ -545,7 +813,10 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
                  std::chrono::duration<double, std::micro>(t_reduce0 - t_spread0).count(),
                  std::chrono::duration<double, std::micro>(t_fft0 - t_reduce0).count());
   }
-  fft3(grid, nx, ny, nz, false, nthreads);
+  const bool mesh_float = !cfg.stress;
+  if (!mesh_float) {
+    fft3(grid, nx, ny, nz, false, nthreads);
+  }
   const auto t_kern0 = std::chrono::steady_clock::now();
   static std::vector<std::complex<double>> phihat;
   if (phihat.size() != ntot) {
@@ -730,7 +1001,9 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
       }
     }
   };
-  if (cfg.stress) {
+  if (mesh_float) {
+    out->energy += float_reciprocal(grid, phihat, nx, ny, nz, bmx, bmy, bmz, cell, alpha, pref, nthreads);
+  } else if (cfg.stress) {
     run_kernel(apply_stress);
   } else {
     run_kernel(apply_cached);
@@ -742,14 +1015,18 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
       out->strain[k] += part.strain[k];
     }
   }
-  out->energy += rec.total();
+  if (!mesh_float) {
+    out->energy += rec.total();
+  }
   const double ebg = -kKe * kPi * total * total / (2.0 * cell.volume * alpha * alpha);
   out->energy += ebg;
   out->strain[0] += -ebg;
   out->strain[1] += -ebg;
   out->strain[2] += -ebg;
   const auto t_gather0 = std::chrono::steady_clock::now();
-  fft3(phihat, nx, ny, nz, true, nthreads);
+  if (!mesh_float) {
+    fft3(phihat, nx, ny, nz, true, nthreads);
+  }
   const auto t_force0 = std::chrono::steady_clock::now();
   auto gather_atom = [&](std::size_t i) {
     double pot = 0.0;

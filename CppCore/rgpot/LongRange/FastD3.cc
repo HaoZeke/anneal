@@ -177,9 +177,12 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
   (void)periodic;
   const double to_b = 1.0 / kBohr;
   const double reach = std::max(cut2, std::max(cut3, cut_cn));
-  // Two threads are the most that help at 128 atoms. Extra threads
-  // sit out so the pool does not get rebuilt.
-  const int nt_build = work_team(n, 128, 2);
+  // Every requested thread does pair work. Leaving threads idle made
+  // the next thread count no faster than the previous one.
+  int nt_build = 1;
+#ifdef _OPENMP
+  nt_build = std::max(omp_get_max_threads(), 1);
+#endif
   std::vector<int> deg(static_cast<std::size_t>(nt_build) * n, 0);
 #ifdef _OPENMP
 #pragma omp parallel

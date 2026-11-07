@@ -420,7 +420,7 @@ double time_pme(const System &s, int threads, int nrep, std::ostream &log, std::
       cfg.grid[a] = pme_grid_for(s.box, a, cfg.alpha);
     }
   }
-  cfg.spline_order = std::getenv("LR_ORDER") != nullptr ? std::atoi(std::getenv("LR_ORDER")) : 6;
+  cfg.spline_order = std::getenv("LR_ORDER") != nullptr ? std::atoi(std::getenv("LR_ORDER")) : 5;
   cfg.short_cutoff = 3.0;
   cfg.skin = 0.5;
   cfg.periodic = true;
@@ -526,7 +526,7 @@ void dump_forces(const std::string &kind, const std::string &path) {
           cfg.grid[a] = pme_grid_for(s.box, a, cfg.alpha);
         }
       }
-      cfg.spline_order = std::getenv("LR_ORDER") != nullptr ? std::atoi(std::getenv("LR_ORDER")) : 6;
+      cfg.spline_order = std::getenv("LR_ORDER") != nullptr ? std::atoi(std::getenv("LR_ORDER")) : 5;
     } else {
       cfg.alpha = 0.35;
       cfg.spline_order = 4;
@@ -566,6 +566,11 @@ void dump_forces(const std::string &kind, const std::string &path) {
 }
 
 int main(int argc, char **argv) {
+  // OpenMP workers that keep spinning sit on the cores the transform pool
+  // needs. Sleeping between regions lets that pool run.
+  if (std::getenv("OMP_WAIT_POLICY") == nullptr) {
+    setenv("OMP_WAIT_POLICY", "PASSIVE", 0);
+  }
   if (const char *dump = std::getenv("LR_DUMP")) {
     const char *geom = std::getenv("LR_GEOM");
     if (geom == nullptr) {
@@ -672,10 +677,10 @@ int main(int argc, char **argv) {
     }
   }
   log << "lscpu_end\n";
-  // N<=128 dispersion uses two workers. PME uses four up to 256 atoms.
-  // Extra threads wait in the existing pool; resizing it is much slower.
-  log << "team_cap dispersion n<=128 workers=2\n";
-  log << "team_cap pme n<=256 workers=4\n";
+  // Dispersion and PME use every thread the ladder asked for. A smaller
+  // team left the next thread count no faster than the one before it.
+  log << "team_cap dispersion none\n";
+  log << "team_cap pme none\n";
   log << "gpu_device ";
   {
     FILE *gpu = popen("nvidia-smi -L 2>/dev/null", "r");
