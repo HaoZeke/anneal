@@ -290,6 +290,10 @@ DualList::DualList(double short_cut, double long_cut, double skin)
 
 DualList::~DualList() = default;
 
+const std::vector<Pair> &DualList::short_pairs() const noexcept { return short_; }
+
+const std::vector<Pair> &DualList::long_pairs() const noexcept { return long_; }
+
 void DualList::fill(Skin &skin, double cutoff, const double *pos, std::size_t n, const double *box9,
                     std::vector<Pair> *out, bool *rebuilt) {
   const CellGeom cell = cell_from_box(box9);

@@ -36,8 +36,8 @@ public:
   // the long cutoff.
   void update(const double *pos, std::size_t n, const double *box, bool periodic);
 
-  [[nodiscard]] const std::vector<Pair> &short_pairs() const noexcept { return short_; }
-  [[nodiscard]] const std::vector<Pair> &long_pairs() const noexcept { return long_; }
+  [[nodiscard]] const std::vector<Pair> &short_pairs() const noexcept;
+  [[nodiscard]] const std::vector<Pair> &long_pairs() const noexcept;
   [[nodiscard]] bool short_rebuilt() const noexcept { return short_rebuilt_; }
   [[nodiscard]] bool long_rebuilt() const noexcept { return long_rebuilt_; }
 

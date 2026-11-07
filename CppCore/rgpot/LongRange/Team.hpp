@@ -18,9 +18,6 @@ namespace rgpot::lr {
 inline int work_team(std::size_t n, std::size_t n_max, int cap) {
 #ifdef _OPENMP
   int team = omp_get_max_threads();
-  if (team < 1) {
-    team = 1;
-  }
   if (n <= n_max && cap > 0 && team > cap) {
     team = cap;
   }
