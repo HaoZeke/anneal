@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <cstdlib>
 #include <numbers>
 #include <span>
 #include <stdexcept>
@@ -22,6 +23,11 @@
 
 namespace rgpot::lr {
 namespace {
+
+// When a worker is building one column of the dense charge matrix it
+// must not start another OpenMP team inside the transform.
+thread_local int g_fft_team = 0;
+thread_local int g_serial_apply = 0;
 
 constexpr double kPi = std::numbers::pi;
 constexpr double kBohr = units::BOHR_TO_ANGSTROM;
@@ -270,6 +276,11 @@ void fft3_lines(std::vector<std::complex<double>> &g, int ng, bool inverse) {
 #ifdef _OPENMP
   team = std::max(1, omp_get_max_threads());
 #endif
+  // Column assembly of the dense charge system runs one serial transform
+  // per thread. The outer parallel loop is the team.
+  if (g_fft_team > 0) {
+    team = g_fft_team;
+  }
   // Eight workers on a 32-point axis are slower than four.
   if (ng <= 32 && team > 4) {
     team = 4;
@@ -457,37 +468,44 @@ struct Operator {
     }
   }
 
+  std::vector<std::complex<double>> &mesh_buf() const {
+    // One buffer per worker so column assembly can run side by side.
+    thread_local std::vector<std::complex<double>> local;
+    return local;
+  }
+
   void add_reciprocal(const double *q, double *y) const {
     if (!periodic || recip_kernel.empty()) {
       return;
     }
     constexpr int ng = kGrid;
     const std::size_t ntot = static_cast<std::size_t>(ng) * ng * ng;
-    if (grid.size() != ntot) {
-      grid.assign(ntot, std::complex<double>(0.0, 0.0));
+    auto &mesh = mesh_buf();
+    if (mesh.size() != ntot) {
+      mesh.assign(ntot, std::complex<double>(0.0, 0.0));
     } else {
-      std::fill(grid.begin(), grid.end(), std::complex<double>(0.0, 0.0));
+      std::fill(mesh.begin(), mesh.end(), std::complex<double>(0.0, 0.0));
     }
     prepare_spread();
     for (std::size_t i = 0; i < n; ++i) {
       const double qi = q[i];
       const std::size_t base = i * 64;
       for (int k = 0; k < 64; ++k) {
-        grid[static_cast<std::size_t>(sp_at[base + static_cast<std::size_t>(k)])] +=
+        mesh[static_cast<std::size_t>(sp_at[base + static_cast<std::size_t>(k)])] +=
             qi * sp_w[base + static_cast<std::size_t>(k)];
       }
     }
-    fft3_lines(grid, ng, false);
+    fft3_lines(mesh, ng, false);
     for (std::size_t m = 0; m < ntot; ++m) {
-      grid[m] *= recip_kernel[m];
+      mesh[m] *= recip_kernel[m];
     }
-    fft3_lines(grid, ng, true);
+    fft3_lines(mesh, ng, true);
     const double nscale = static_cast<double>(ntot);
     for (std::size_t i = 0; i < n; ++i) {
       const std::size_t base = i * 64;
       double acc = 0.0;
       for (int k = 0; k < 64; ++k) {
-        acc += grid[static_cast<std::size_t>(sp_at[base + static_cast<std::size_t>(k)])].real() *
+        acc += mesh[static_cast<std::size_t>(sp_at[base + static_cast<std::size_t>(k)])].real() *
                sp_w[base + static_cast<std::size_t>(k)];
       }
       // The inverse FFT already divides by ng^3. The forward transform of a
@@ -496,7 +514,35 @@ struct Operator {
     }
   }
 
+  // One thread, no nested team. Column assembly calls this.
+  void apply_one(const double *q, double *y) const {
+    prepare_ker();
+    for (std::size_t i = 0; i < n; ++i) {
+      y[i] = diag[i] * q[i];
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+      const std::size_t begin = static_cast<std::size_t>(real->off[i]);
+      const std::size_t end = static_cast<std::size_t>(real->off[i + 1]);
+      for (std::size_t k = begin; k < end; ++k) {
+        const Nb &a = real->nb[k];
+        if (a.j > static_cast<int>(i) || !(a.r > 1e-12)) {
+          continue;
+        }
+        const double coeff = ker[k];
+        y[i] += coeff * q[a.j];
+        if (a.j != static_cast<int>(i)) {
+          y[a.j] += coeff * q[i];
+        }
+      }
+    }
+    add_reciprocal(q, y);
+  }
+
   void apply(const double *q, double *y) const {
+    if (g_serial_apply) {
+      apply_one(q, y);
+      return;
+    }
     std::fill(y, y + n, 0.0);
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
@@ -556,6 +602,99 @@ struct Operator {
     }
     add_reciprocal(q, y);
   }
+
+  // Dense LU of A. N matvecs, then one factorization reused for every
+  // right hand side. At N=128 that is cheaper than four conjugate gradients.
+  mutable std::vector<double> fact;
+  mutable std::vector<int> ipiv;
+  mutable bool factored = false;
+
+  void factorize() const {
+    if (factored) {
+      return;
+    }
+    prepare_ker();
+    if (periodic) {
+      prepare_spread();
+    }
+    fact.assign(n * n, 0.0);
+    const int cols = static_cast<int>(n);
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for (int j = 0; j < cols; ++j) {
+      g_serial_apply = 1;
+      g_fft_team = 1;
+      std::vector<double> basis(n, 0.0), column(n, 0.0);
+      basis[static_cast<std::size_t>(j)] = 1.0;
+      apply_one(basis.data(), column.data());
+      for (std::size_t i = 0; i < n; ++i) {
+        fact[i + n * static_cast<std::size_t>(j)] = column[i];
+      }
+      g_serial_apply = 0;
+      g_fft_team = 0;
+    }
+    ipiv.assign(n, 0);
+    for (int k = 0; k < cols; ++k) {
+      int piv = k;
+      double best = std::abs(fact[static_cast<std::size_t>(k) + n * static_cast<std::size_t>(k)]);
+      for (int i = k + 1; i < cols; ++i) {
+        const double v = std::abs(fact[static_cast<std::size_t>(i) + n * static_cast<std::size_t>(k)]);
+        if (v > best) {
+          best = v;
+          piv = i;
+        }
+      }
+      ipiv[static_cast<std::size_t>(k)] = piv;
+      if (!(best > 0.0)) {
+        throw std::runtime_error("EEQ matrix is singular");
+      }
+      if (piv != k) {
+        for (int j = 0; j < cols; ++j) {
+          std::swap(fact[static_cast<std::size_t>(k) + n * static_cast<std::size_t>(j)],
+                    fact[static_cast<std::size_t>(piv) + n * static_cast<std::size_t>(j)]);
+        }
+      }
+      const double diag = fact[static_cast<std::size_t>(k) + n * static_cast<std::size_t>(k)];
+      for (int i = k + 1; i < cols; ++i) {
+        const double f = fact[static_cast<std::size_t>(i) + n * static_cast<std::size_t>(k)] / diag;
+        fact[static_cast<std::size_t>(i) + n * static_cast<std::size_t>(k)] = f;
+        for (int j = k + 1; j < cols; ++j) {
+          fact[static_cast<std::size_t>(i) + n * static_cast<std::size_t>(j)] -=
+              f * fact[static_cast<std::size_t>(k) + n * static_cast<std::size_t>(j)];
+        }
+      }
+    }
+    factored = true;
+  }
+
+  void solve_linear(const double *b, double *x) const {
+    factorize();
+    std::vector<double> y(b, b + n);
+    const int cols = static_cast<int>(n);
+    for (int k = 0; k < cols; ++k) {
+      const int piv = ipiv[static_cast<std::size_t>(k)];
+      if (piv != k) {
+        std::swap(y[static_cast<std::size_t>(k)], y[static_cast<std::size_t>(piv)]);
+      }
+    }
+    for (int i = 0; i < cols; ++i) {
+      double s = y[static_cast<std::size_t>(i)];
+      for (int k = 0; k < i; ++k) {
+        s -= fact[static_cast<std::size_t>(i) + n * static_cast<std::size_t>(k)] * y[static_cast<std::size_t>(k)];
+      }
+      y[static_cast<std::size_t>(i)] = s;
+    }
+    for (int i = cols - 1; i >= 0; --i) {
+      double s = y[static_cast<std::size_t>(i)];
+      for (int k = i + 1; k < cols; ++k) {
+        s -= fact[static_cast<std::size_t>(i) + n * static_cast<std::size_t>(k)] * y[static_cast<std::size_t>(k)];
+      }
+      y[static_cast<std::size_t>(i)] =
+          s / fact[static_cast<std::size_t>(i) + n * static_cast<std::size_t>(i)];
+    }
+    std::copy(y.begin(), y.end(), x);
+  }
 };
 
 double dot(const double *a, const double *b, std::size_t n) {
@@ -604,9 +743,23 @@ void solve_charges(const Operator &op, const double *xvec, double qtot, std::vec
     q0[i] = xvec[i] / op.diag[i];
     q1[i] = 1.0 / op.diag[i];
   }
-  const int maxit = 80;
-  cg(op, xvec, q0.data(), maxit, 1e-10);
-  cg(op, ones.data(), q1.data(), maxit, 1e-10);
+  // N^3 is a fraction of one matvec once N is this small. Above it the
+  // conjugate gradient, which never forms A, is the faster solve.
+  // The crossover is measured; LR_EEQ_DIRECT overrides it for that measurement.
+  const std::size_t direct_n = []() {
+    if (const char *env = std::getenv("LR_EEQ_DIRECT")) {
+      return static_cast<std::size_t>(std::atoi(env));
+    }
+    return static_cast<std::size_t>(160);
+  }();
+  if (n <= direct_n) {
+    op.solve_linear(xvec, q0.data());
+    op.solve_linear(ones.data(), q1.data());
+  } else {
+    const int maxit = 80;
+    cg(op, xvec, q0.data(), maxit, 1e-10);
+    cg(op, ones.data(), q1.data(), maxit, 1e-10);
+  }
   double s0 = 0.0;
   double s1 = 0.0;
   for (std::size_t i = 0; i < n; ++i) {
@@ -1302,8 +1455,22 @@ void d4_evaluate(const double *pos, const int *z, std::size_t n, const double *b
       y[i] = dedq[i] / op.diag[i];
       zsol[i] = 1.0 / op.diag[i];
     }
-    cg(op, dedq.data(), y.data(), 80, 1e-10);
-    cg(op, ones.data(), zsol.data(), 80, 1e-10);
+    const std::size_t direct_n = []() {
+      if (const char *env = std::getenv("LR_EEQ_DIRECT")) {
+        return static_cast<std::size_t>(std::atoi(env));
+      }
+      return static_cast<std::size_t>(160);
+    }();
+    // Systems at or under 64 periodic atoms keep the lattice factorization
+    // used for the charges. This response is the conjugate gradient one.
+    const bool lattice = op.periodic && op.n <= 64;
+    if (op.n <= direct_n && !lattice) {
+      op.solve_linear(dedq.data(), y.data());
+      op.solve_linear(ones.data(), zsol.data());
+    } else {
+      cg(op, dedq.data(), y.data(), 80, 1e-10);
+      cg(op, ones.data(), zsol.data(), 80, 1e-10);
+    }
     double sy = 0.0;
     double sz = 0.0;
     for (std::size_t i = 0; i < n; ++i) {
