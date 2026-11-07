@@ -20,6 +20,7 @@
 #include <iostream>
 #include <random>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -126,6 +127,30 @@ System make_system(int n, unsigned seed) {
   return s;
 }
 
+std::string pipe_first(const std::string &cmd);
+
+std::string write_geometry(const System &s, int n) {
+  const char *dir = std::getenv("LR_GEOM_DIR");
+  if (dir == nullptr || dir[0] == '\0') {
+    return "none";
+  }
+  const std::string path = std::string(dir) + "/n" + std::to_string(n) + ".txt";
+  std::ofstream out(path);
+  out.setf(std::ios::scientific);
+  out.precision(17);
+  out << s.z.size() << '\n';
+  for (int k = 0; k < 9; ++k) {
+    out << (k == 0 ? "" : " ") << s.box[k];
+  }
+  out << '\n';
+  for (std::size_t i = 0; i < s.z.size(); ++i) {
+    out << s.z[i] << ' ' << s.pos[3 * i] << ' ' << s.pos[3 * i + 1] << ' ' << s.pos[3 * i + 2] << ' '
+        << s.q[i] << '\n';
+  }
+  out.close();
+  return pipe_first(std::string("sha256sum ") + path);
+}
+
 std::string pipe_first(const std::string &cmd) {
   FILE *pipe = popen(cmd.c_str(), "r");
   if (pipe == nullptr) {
@@ -164,13 +189,33 @@ const std::string &binary_sha() {
 #ifndef RGPOT_GIT_TREE
 #define RGPOT_GIT_TREE "unknown"
 #endif
+#ifndef RGPOT_GIT_DIRTY
+#define RGPOT_GIT_DIRTY -1
+#endif
+#ifndef RGPOT_COMPILER
+#define RGPOT_COMPILER "unknown"
+#endif
+#ifndef RGPOT_LIB_LINKCELL
+#define RGPOT_LIB_LINKCELL "unknown"
+#endif
+#ifndef RGPOT_LIB_DFTD3
+#define RGPOT_LIB_DFTD3 "unknown"
+#endif
+#ifndef RGPOT_LIB_DFTD4
+#define RGPOT_LIB_DFTD4 "unknown"
+#endif
 
 const char *git_head() { return RGPOT_GIT_HEAD; }
-
 const char *git_tree() { return RGPOT_GIT_TREE; }
 
 template <class Fn>
-std::vector<double> repeat(int nrep, Fn &&fn) {
+std::vector<double> repeat(int nrep, Fn &&fn, double *warmup_us) {
+  {
+    const auto t0 = std::chrono::steady_clock::now();
+    fn();
+    const auto t1 = std::chrono::steady_clock::now();
+    *warmup_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
+  }
   std::vector<double> samples;
   samples.reserve(static_cast<std::size_t>(nrep));
   for (int i = 0; i < nrep; ++i) {
@@ -183,11 +228,18 @@ std::vector<double> repeat(int nrep, Fn &&fn) {
 }
 
 void report(std::ostream &out, const std::string &ladder, const std::string &name, int n, int threads,
-            const std::vector<double> &samples, double energy) {
+            const std::vector<double> &samples, double warmup_us, double energy) {
   const double med = quantile7(samples, 0.5);
   const double iqr = quantile7(samples, 0.75) - quantile7(samples, 0.25);
   out << "run hostname=" << hostname() << " date=" << date_now() << " cpu=" << cpu_model() << '\n';
-  out << "binary_sha256=" << binary_sha() << " head=" << git_head() << " tree=" << git_tree() << '\n';
+  out << "binary_sha256=" << binary_sha() << " head=" << git_head() << " tree=" << git_tree()
+      << " dirty=" << RGPOT_GIT_DIRTY << '\n';
+  out << "compiler=" << RGPOT_COMPILER << '\n';
+  out << "linkcell_sha256=" << RGPOT_LIB_LINKCELL << " dftd3_sha256=" << RGPOT_LIB_DFTD3
+      << " dftd4_sha256=" << RGPOT_LIB_DFTD4 << '\n';
+  char warm[64];
+  std::snprintf(warm, sizeof(warm), "%.17g", warmup_us);
+  out << "warmup_us=" << warm << '\n';
   out << ladder << ' ' << name << " n=" << n << " threads=" << threads
       << " repeats=" << samples.size() << " median_us=" << med << " iqr7_us=" << iqr
       << " energy_eV=" << energy << '\n';
@@ -221,10 +273,11 @@ double time_ewald(const System &s, int threads, int nrep, std::ostream &log, std
     pot.forceImpl(in, &out);
     return out.energy;
   };
-  const auto samples = repeat(nrep, eval);
+  double warmup_us = 0.0;
+  const auto samples = repeat(nrep, eval, &warmup_us);
   const double energy = eval();
-  report(log, ladder, "ewald", static_cast<int>(s.z.size()), threads_now(), samples, energy);
-  report(echo, ladder, "ewald", static_cast<int>(s.z.size()), threads_now(), samples, energy);
+  report(log, ladder, "ewald", static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
+  report(echo, ladder, "ewald", static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
   return energy;
 }
 
@@ -249,10 +302,11 @@ double time_pme(const System &s, int threads, int nrep, std::ostream &log, std::
     pot.forceImpl(in, &out);
     return out.energy;
   };
-  const auto samples = repeat(nrep, eval);
+  double warmup_us = 0.0;
+  const auto samples = repeat(nrep, eval, &warmup_us);
   const double energy = eval();
-  report(log, ladder, "pme", static_cast<int>(s.z.size()), threads_now(), samples, energy);
-  report(echo, ladder, "pme", static_cast<int>(s.z.size()), threads_now(), samples, energy);
+  report(log, ladder, "pme", static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
+  report(echo, ladder, "pme", static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
   return energy;
 }
 
@@ -280,16 +334,94 @@ double time_disp(const System &s, int threads, int nrep, std::ostream &log, std:
     pot.forceImpl(in, &out);
     return out.energy;
   };
-  const auto samples = repeat(nrep, eval);
+  double warmup_us = 0.0;
+  const auto samples = repeat(nrep, eval, &warmup_us);
   const double energy = eval();
-  report(log, ladder, name, static_cast<int>(s.z.size()), threads_now(), samples, energy);
-  report(echo, ladder, name, static_cast<int>(s.z.size()), threads_now(), samples, energy);
+  report(log, ladder, name, static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
+  report(echo, ladder, name, static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
   return energy;
 }
 
 } // namespace
 
+System read_geometry(const std::string &path) {
+  std::ifstream in(path);
+  System s;
+  std::size_t n = 0;
+  in >> n;
+  for (int k = 0; k < 9; ++k) {
+    in >> s.box[k];
+  }
+  s.pos.resize(3 * n);
+  s.z.resize(n);
+  s.q.resize(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    in >> s.z[i] >> s.pos[3 * i] >> s.pos[3 * i + 1] >> s.pos[3 * i + 2] >> s.q[i];
+  }
+  if (!in) {
+    throw std::runtime_error("bad geometry file");
+  }
+  return s;
+}
+
+void dump_forces(const std::string &kind, const std::string &path) {
+  const System s = read_geometry(path);
+  std::vector<double> f(s.pos.size());
+  rgpot::ForceOut out{};
+  out.F = f.data();
+  rgpot::ForceInput in{s.z.size(), s.pos.data(), s.z.data(), s.box};
+  if (kind == "pme" || kind == "ewald") {
+    rgpot::lr::CoulombConfig cfg;
+    cfg.method = kind == "pme" ? rgpot::lr::CoulombMethod::SPME : rgpot::lr::CoulombMethod::Ewald;
+    cfg.cutoff = 8.0;
+    cfg.alpha = 0.35;
+    cfg.kmax = 5;
+    cfg.grid[0] = cfg.grid[1] = cfg.grid[2] = 32;
+    cfg.spline_order = 4;
+    cfg.short_cutoff = 3.0;
+    cfg.skin = 0.5;
+    cfg.periodic = true;
+    rgpot::lr::CoulombPot pot(cfg, std::make_shared<rgpot::lr::FixedCharges>(s.q, 0.0));
+    pot.forceImpl(in, &out);
+  } else if (kind == "d3" || kind == "d4") {
+    rgpot::lr::DispersionConfig cfg;
+    cfg.kind = kind == "d3" ? rgpot::lr::DispersionKind::D3BJ : rgpot::lr::DispersionKind::D4;
+    cfg.functional = "pbe";
+    cfg.atm = true;
+    cfg.cutoff = 12.0;
+    cfg.short_cutoff = 3.0;
+    cfg.periodic = true;
+    cfg.lib_disp2 = 15.0;
+    cfg.lib_disp3 = 10.0;
+    cfg.lib_cn = 10.0;
+    rgpot::lr::DispersionPot pot(cfg);
+    pot.forceImpl(in, &out);
+  } else {
+    throw std::runtime_error("unknown dump kind");
+  }
+  std::cout.setf(std::ios::scientific);
+  std::cout.precision(17);
+  std::cout << "energy_eV " << out.energy << '\n';
+  for (std::size_t i = 0; i < s.z.size(); ++i) {
+    std::cout << "force_eV_A " << f[3 * i] << ' ' << f[3 * i + 1] << ' ' << f[3 * i + 2] << '\n';
+  }
+}
+
 int main(int argc, char **argv) {
+  if (const char *dump = std::getenv("LR_DUMP")) {
+    const char *geom = std::getenv("LR_GEOM");
+    if (geom == nullptr) {
+      std::cerr << "LR_GEOM is required with LR_DUMP\n";
+      return 2;
+    }
+    try {
+      dump_forces(dump, geom);
+    } catch (const std::exception &ex) {
+      std::cerr << ex.what() << '\n';
+      return 2;
+    }
+    return 0;
+  }
   const int nrep = argc > 1 ? std::atoi(argv[1]) : 6;
   if (nrep < 6) {
     std::cerr << "repeats must be at least 6\n";
@@ -337,6 +469,9 @@ int main(int argc, char **argv) {
       continue;
     }
     const System sys = make_system(n, 1000u + static_cast<unsigned>(n));
+    const std::string geom = write_geometry(sys, n);
+    log << "geometry n=" << n << " sha256=" << geom << '\n';
+    std::cout << "geometry n=" << n << " sha256=" << geom << '\n';
     for (int threads = 1; threads <= max_threads && threads <= tmax; threads *= 2) {
       if (threads < tmin) {
         continue;

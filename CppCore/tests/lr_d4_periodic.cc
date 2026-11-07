@@ -6,10 +6,25 @@
 
 #include "rgpot/LongRange/Dispersion.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
+
+#ifndef RGPOT_GIT_HEAD
+#define RGPOT_GIT_HEAD "unknown"
+#endif
+#ifndef RGPOT_GIT_TREE
+#define RGPOT_GIT_TREE "unknown"
+#endif
+#ifndef RGPOT_GIT_DIRTY
+#define RGPOT_GIT_DIRTY -1
+#endif
+#ifndef RGPOT_COMPILER
+#define RGPOT_COMPILER "unknown"
+#endif
 
 int main(int argc, char **argv) {
   if (argc != 2) {
@@ -17,10 +32,21 @@ int main(int argc, char **argv) {
     return 2;
   }
   std::ifstream in(argv[1]);
+  std::string header;
+  std::getline(in, header);
+  std::istringstream hs(header);
   int n = 0;
-  double side = 0.0;
-  in >> n >> side;
-  if (!in || n < 1 || !(side > 0.0)) {
+  double ax = 0.0;
+  double ay = 0.0;
+  double az = 0.0;
+  hs >> n >> ax;
+  if (!(hs >> ay)) {
+    ay = ax;
+  }
+  if (!(hs >> az)) {
+    az = ax;
+  }
+  if (!hs || n < 1 || !(ax > 0.0) || !(ay > 0.0) || !(az > 0.0)) {
     std::cerr << "bad geometry\n";
     return 2;
   }
@@ -31,13 +57,15 @@ int main(int argc, char **argv) {
         pos[static_cast<std::size_t>(3 * i + 1)] >> pos[static_cast<std::size_t>(3 * i + 2)];
   }
   double box[9] = {};
-  box[0] = box[4] = box[8] = side;
+  box[0] = ax;
+  box[4] = ay;
+  box[8] = az;
   rgpot::lr::DispersionConfig cfg;
   cfg.kind = rgpot::lr::DispersionKind::D4;
   cfg.functional = "pbe";
   cfg.atm = true;
   cfg.periodic = true;
-  cfg.cutoff = side;
+  cfg.cutoff = std::min(ax, std::min(ay, az));
   cfg.short_cutoff = 2.0;
   cfg.skin = 0.0;
   cfg.lib_disp2 = 60.0;
@@ -51,6 +79,8 @@ int main(int argc, char **argv) {
   pot.forceImpl(fin, &out);
   std::cout.setf(std::ios::scientific);
   std::cout.precision(17);
+  std::cout << "provenance head=" << RGPOT_GIT_HEAD << " tree=" << RGPOT_GIT_TREE
+            << " dirty=" << RGPOT_GIT_DIRTY << " compiler=" << RGPOT_COMPILER << '\n';
   std::cout << "energy_eV " << out.energy << '\n';
   for (int i = 0; i < n; ++i) {
     std::cout << "force_eV_A " << force[static_cast<std::size_t>(3 * i)] << ' '
