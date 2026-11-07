@@ -6,6 +6,7 @@
 #include "rgpot/LongRange/Compensate.hpp"
 #include "rgpot/LongRange/Team.hpp"
 #include "rgpot/LongRange/Lattice.hpp"
+#include "rgpot/LongRange/pocketfft.hpp"
 #include "rgpot/ParamHash.hpp"
 #include "rgpot/stress.hpp"
 #include "rgpot/units.hpp"
@@ -19,6 +20,9 @@
 #include <numbers>
 #include <stdexcept>
 #include <vector>
+
+#include <pthread.h>
+#include <unistd.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -369,54 +373,34 @@ double bspline_derivative(int order, double x) {
   return bspline(order - 1, x) - bspline(order - 1, x - 1.0);
 }
 
-extern "C" {
-struct fftw_plan_s;
-typedef struct fftw_plan_s *fftw_plan;
-void fftw_execute_dft(fftw_plan p, std::complex<double> *in, std::complex<double> *out);
-fftw_plan fftw_plan_dft_3d(int n0, int n1, int n2, std::complex<double> *in, std::complex<double> *out, int sign,
-                           unsigned flags);
-void fftw_destroy_plan(fftw_plan p);
-}
-
-fftw_plan mesh_plan(int nx, int ny, int nz, int sign, std::complex<double> *data) {
-  struct Saved {
-    int nx = 0;
-    int ny = 0;
-    int nz = 0;
-    int sign = 0;
-    fftw_plan plan = nullptr;
-  };
-  static Saved forward;
-  static Saved backward;
-  Saved &slot = sign < 0 ? forward : backward;
-  if (slot.plan == nullptr || slot.nx != nx || slot.ny != ny || slot.nz != nz) {
-    if (slot.plan != nullptr) {
-      fftw_destroy_plan(slot.plan);
-    }
-    // z is the slowest index: x + nx * (y + ny * z).
-    // Estimate does not overwrite the charge grid. A measured plan does,
-    // and the first force would then be wrong.
-    slot.plan = fftw_plan_dft_3d(nz, ny, nx, data, data, sign, 1U << 6);
-    slot.nx = nx;
-    slot.ny = ny;
-    slot.nz = nz;
-    slot.sign = sign;
-  }
-  return slot.plan;
-}
-
 void fft3(std::vector<std::complex<double>> &g, int nx, int ny, int nz, bool inverse, int team) {
-  (void)team;
-  const int sign = inverse ? +1 : -1;
-  fftw_plan plan = mesh_plan(nx, ny, nz, sign, g.data());
-  fftw_execute_dft(plan, g.data(), g.data());
-  if (inverse) {
-    const double inv = 1.0 / static_cast<double>(static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
-                                                 static_cast<std::size_t>(nz));
-    for (auto &z : g) {
-      z *= inv;
+  // The caller pins each OpenMP worker to one core. The transform's own
+  // pool is started while this thread can run on every allowed core, or
+  // those workers all inherit a single core and the transform does not scale.
+  if (team > 1) {
+    cpu_set_t all;
+    CPU_ZERO(&all);
+    const int ncpu = static_cast<int>(sysconf(_SC_NPROCESSORS_ONLN));
+    for (int cpu = 0; cpu < ncpu && cpu < CPU_SETSIZE; ++cpu) {
+      CPU_SET(cpu, &all);
     }
+    pthread_setaffinity_np(pthread_self(), sizeof(all), &all);
   }
+  // z is the slowest index: x + nx * (y + ny * z). Plans are cached inside
+  // the transform, so a repeated mesh size does not rebuild them.
+  pocketfft::shape_t shape{static_cast<std::size_t>(nz), static_cast<std::size_t>(ny),
+                           static_cast<std::size_t>(nx)};
+  const auto step = static_cast<std::ptrdiff_t>(sizeof(std::complex<double>));
+  pocketfft::stride_t stride{step * nx * ny, step * nx, step};
+  pocketfft::shape_t axes{0, 1, 2};
+  const std::size_t nth = team > 1 ? static_cast<std::size_t>(team) : 1;
+  if (!inverse) {
+    pocketfft::c2c(shape, stride, stride, axes, true, g.data(), g.data(), 1.0, nth);
+    return;
+  }
+  const double inv = 1.0 / static_cast<double>(static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+                                               static_cast<std::size_t>(nz));
+  pocketfft::c2c(shape, stride, stride, axes, false, g.data(), g.data(), inv, nth);
 }
 
 void bmod_axis(int order, int n, std::vector<double> *mod) {
@@ -467,23 +451,26 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
   auto slot = [span](std::size_t atom, int axis, int knot) {
     return (atom * 3 + static_cast<std::size_t>(axis)) * span + static_cast<std::size_t>(knot);
   };
-  // One core is faster than a forked team while the mesh is this small.
-  // The four-worker cap still applies once the team is worth starting:
-  // extra threads sit the call out, because resizing the pool is slower.
-  const int nthreads = work_team(n, 256, 4);
+  // Every requested thread does mesh work. A private copy of a large
+  // grid makes the reduction slower than the deposit, so threads add
+  // into the one charge grid instead.
+  const int nthreads = thread_count();
   const bool trace = std::getenv("LR_PME_PROFILE") != nullptr;
   const auto t_spread0 = std::chrono::steady_clock::now();
-  // Reuse the per-thread grids. A fresh allocation faults during the
-  // deposit, and eight threads faulting at once dominate the spread.
-  static std::vector<std::vector<std::complex<double>>> partial;
-  if (static_cast<int>(partial.size()) != nthreads || partial[0].size() != ntot) {
-    partial.assign(static_cast<std::size_t>(nthreads), std::vector<std::complex<double>>(ntot));
-  } else {
-    for (auto &grid_t : partial) {
-      std::fill(grid_t.begin(), grid_t.end(), std::complex<double>(0.0, 0.0));
-    }
+  std::vector<std::size_t> order_z(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    order_z[i] = i;
   }
-  auto deposit = [&](std::size_t i, std::complex<double> *dest) {
+  std::sort(order_z.begin(), order_z.end(), [&](std::size_t a, std::size_t b) {
+    double ra[3] = {pos[3 * a], pos[3 * a + 1], pos[3 * a + 2]};
+    double rb[3] = {pos[3 * b], pos[3 * b + 1], pos[3 * b + 2]};
+    double sa[3], sb[3];
+    cell.fractional(ra, sa);
+    cell.fractional(rb, sb);
+    return sa[2] < sb[2];
+  });
+  double *real_grid = reinterpret_cast<double *>(grid.data());
+  auto deposit = [&](std::size_t i, bool atomic_add) {
     double r[3] = {pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]};
     double fs[3];
     cell.fractional(r, fs);
@@ -517,15 +504,23 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
       for (int iy = 0; iy < ord; ++iy) {
         const double wyz = wax[1][iy] * wax[2][iz];
         for (int ix = 0; ix < ord; ++ix) {
-          dest[index(gax[0][ix], gax[1][iy], gax[2][iz])] += qi * wax[0][ix] * wyz;
+          const std::size_t at = 2 * index(gax[0][ix], gax[1][iy], gax[2][iz]);
+          const double add = qi * wax[0][ix] * wyz;
+          if (atomic_add) {
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
+            real_grid[at] += add;
+          } else {
+            real_grid[at] += add;
+          }
         }
       }
     }
   };
   if (nthreads <= 1) {
-    std::complex<double> *dest = partial[0].data();
-    for (std::size_t i = 0; i < n; ++i) {
-      deposit(i, dest);
+    for (std::size_t k = 0; k < n; ++k) {
+      deposit(order_z[k], false);
     }
   } else {
 #ifdef _OPENMP
@@ -534,25 +529,16 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
     {
       const int tid_cap = thread_id();
       if (tid_cap < nthreads) {
-        std::complex<double> *dest = partial[static_cast<std::size_t>(tid_cap)].data();
-        // Contiguous atoms keep each thread's spline table on its own
-        // cache lines. A stride of one shares those lines and slows down.
         const std::size_t chunk = (n + static_cast<std::size_t>(nthreads) - 1) / static_cast<std::size_t>(nthreads);
         const std::size_t begin = static_cast<std::size_t>(tid_cap) * chunk;
         const std::size_t end = std::min(n, begin + chunk);
-        for (std::size_t i = begin; i < end; ++i) {
-          deposit(i, dest);
+        for (std::size_t k = begin; k < end; ++k) {
+          deposit(order_z[k], true);
         }
       }
     }
   }
   const auto t_reduce0 = std::chrono::steady_clock::now();
-  for (int t = 0; t < nthreads; ++t) {
-    const auto &src = partial[static_cast<std::size_t>(t)];
-    for (std::size_t m = 0; m < ntot; ++m) {
-      grid[m] += src[m];
-    }
-  }
   const auto t_fft0 = std::chrono::steady_clock::now();
   if (trace) {
     std::fprintf(stderr, "pme_reduce workers=%d deposit_us=%.3f reduce_us=%.3f\n", nthreads,

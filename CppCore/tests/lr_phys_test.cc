@@ -201,6 +201,9 @@ void test_madelung() {
   cfg.skin = 0.2;
   cfg.periodic = true;
   CoulombPot pot(cfg, std::make_shared<FixedCharges>(q, 0.0));
+  check(pot.caps().periodic && pot.caps().stress, "coulomb caps report periodic stress");
+  const auto key = pot.paramsKey();
+  check(key == pot.paramsKey(), "coulomb params key is stable");
   const Eval e = run(pot, pos, z, box);
   std::cout << "CASE nacl " << e.energy << '\n';
   const double M = 1.7475645946331821;

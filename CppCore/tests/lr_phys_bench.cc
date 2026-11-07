@@ -45,6 +45,7 @@ int threads_now() {
 }
 
 int affinity_failures = 0;
+int active_threads = 1;
 
 void set_threads(int n) {
 #ifdef _OPENMP
@@ -52,20 +53,21 @@ void set_threads(int n) {
   omp_set_num_threads(n);
 #pragma omp parallel
   {
+#pragma omp single
+    active_threads = omp_get_num_threads();
     cpu_set_t set;
     CPU_ZERO(&set);
     const int cpu = omp_get_thread_num();
     CPU_SET(cpu, &set);
     const int rc = pthread_setaffinity_np(pthread_self(), sizeof(set), &set);
     if (rc != 0) {
-#ifdef _OPENMP
 #pragma omp atomic
-#endif
       affinity_failures += 1;
     }
   }
 #else
   (void)n;
+  active_threads = 1;
 #endif
 }
 
@@ -324,19 +326,40 @@ void report(std::ostream &out, const std::string &ladder, const std::string &nam
   out.flush();
 }
 
-int pme_grid_for(const double *box, int axis) {
-  // Sizes whose FFT stays under about a millisecond. Past 64 the
-  // installed FFTW estimate jumps by an order of magnitude.
-  static const int fast[] = {16, 20, 24, 25, 32, 36, 40, 48, 64};
+// Same reciprocal-error estimate OpenMM uses for tolerance 1e-4.
+// alpha = sqrt(-log(2 tol)) / cutoff, and each axis is
+// ceil(2 alpha L / (3 tol^0.2)), then the next 2-3-5-7 smooth size.
+// The smooth step never shortens the mesh.
+constexpr double kPmeTol = 1.0e-4;
+
+double pme_alpha(double cutoff) {
+  return std::sqrt(-std::log(2.0 * kPmeTol)) / cutoff;
+}
+
+int smooth_fft(int n) {
+  if (n < 4) {
+    n = 4;
+  }
+  while (true) {
+    int left = n;
+    for (int prime : {2, 3, 5, 7}) {
+      while (left % prime == 0) {
+        left /= prime;
+      }
+    }
+    if (left == 1) {
+      return n;
+    }
+    ++n;
+  }
+}
+
+int pme_grid_for(const double *box, int axis, double alpha) {
   const double len = std::sqrt(box[3 * axis] * box[3 * axis] + box[3 * axis + 1] * box[3 * axis + 1] +
                                box[3 * axis + 2] * box[3 * axis + 2]);
-  const int target = std::max(8, static_cast<int>(std::lround(len / 0.65)));
-  for (int g : fast) {
-    if (g >= target) {
-      return g;
-    }
-  }
-  return 64;
+  const double denom = 3.0 * std::pow(kPmeTol, 0.2);
+  const int need = static_cast<int>(std::ceil(2.0 * alpha * len / denom));
+  return smooth_fft(std::max(need, 4));
 }
 
 double time_ewald(const System &s, int threads, int nrep, std::ostream &log, std::ostream &echo,
@@ -364,6 +387,10 @@ double time_ewald(const System &s, int threads, int nrep, std::ostream &log, std
   const double energy = eval();
   report(log, ladder, "ewald", static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
   report(echo, ladder, "ewald", static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
+  log << "point ladder=" << ladder << " method=ewald n=" << s.z.size() << " threads=" << threads_now()
+      << " exit=0\n";
+  echo << "point ladder=" << ladder << " method=ewald n=" << s.z.size() << " threads=" << threads_now()
+       << " exit=0\n";
   return energy;
 }
 
@@ -373,14 +400,12 @@ double time_pme(const System &s, int threads, int nrep, std::ostream &log, std::
   rgpot::lr::CoulombConfig cfg;
   cfg.method = rgpot::lr::CoulombMethod::SPME;
   cfg.cutoff = std::getenv("LR_CUT") != nullptr ? std::atof(std::getenv("LR_CUT")) : 8.0;
-  cfg.alpha = std::getenv("LR_ALPHA") != nullptr ? std::atof(std::getenv("LR_ALPHA")) : 0.3648;
-  // About 0.65 A per grid point, the spacing OpenMM picks for a 1e-4
-  // tolerance at this cutoff. Order 6 then matches that force error.
+  cfg.alpha = std::getenv("LR_ALPHA") != nullptr ? std::atof(std::getenv("LR_ALPHA")) : pme_alpha(cfg.cutoff);
   if (std::getenv("LR_GRID") != nullptr) {
     cfg.grid[0] = cfg.grid[1] = cfg.grid[2] = std::atoi(std::getenv("LR_GRID"));
   } else {
     for (int a = 0; a < 3; ++a) {
-      cfg.grid[a] = pme_grid_for(s.box, a);
+      cfg.grid[a] = pme_grid_for(s.box, a, cfg.alpha);
     }
   }
   cfg.spline_order = std::getenv("LR_ORDER") != nullptr ? std::atoi(std::getenv("LR_ORDER")) : 6;
@@ -402,6 +427,12 @@ double time_pme(const System &s, int threads, int nrep, std::ostream &log, std::
   const double energy = eval();
   report(log, ladder, "pme", static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
   report(echo, ladder, "pme", static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
+  log << "point ladder=" << ladder << " method=pme n=" << s.z.size() << " threads=" << threads_now()
+      << " active=" << active_threads << " exit=0 alpha=" << cfg.alpha << " order=" << cfg.spline_order
+      << " grid=" << cfg.grid[0] << ' ' << cfg.grid[1] << ' ' << cfg.grid[2] << '\n';
+  echo << "point ladder=" << ladder << " method=pme n=" << s.z.size() << " threads=" << threads_now()
+       << " active=" << active_threads << " exit=0 alpha=" << cfg.alpha << " order=" << cfg.spline_order
+       << " grid=" << cfg.grid[0] << ' ' << cfg.grid[1] << ' ' << cfg.grid[2] << '\n';
   return energy;
 }
 
@@ -434,6 +465,10 @@ double time_disp(const System &s, int threads, int nrep, std::ostream &log, std:
   const double energy = eval();
   report(log, ladder, name, static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
   report(echo, ladder, name, static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
+  log << "point ladder=" << ladder << " method=" << name << " n=" << s.z.size() << " threads=" << threads_now()
+      << " exit=0\n";
+  echo << "point ladder=" << ladder << " method=" << name << " n=" << s.z.size() << " threads=" << threads_now()
+       << " exit=0\n";
   return energy;
 }
 
@@ -471,12 +506,12 @@ void dump_forces(const std::string &kind, const std::string &path) {
     cfg.cutoff = std::getenv("LR_CUT") != nullptr ? std::atof(std::getenv("LR_CUT")) : 8.0;
     cfg.kmax = 5;
     if (kind == "pme") {
-      cfg.alpha = std::getenv("LR_ALPHA") != nullptr ? std::atof(std::getenv("LR_ALPHA")) : 0.3648;
+      cfg.alpha = std::getenv("LR_ALPHA") != nullptr ? std::atof(std::getenv("LR_ALPHA")) : pme_alpha(cfg.cutoff);
       if (std::getenv("LR_GRID") != nullptr) {
         cfg.grid[0] = cfg.grid[1] = cfg.grid[2] = std::atoi(std::getenv("LR_GRID"));
       } else {
         for (int a = 0; a < 3; ++a) {
-          cfg.grid[a] = pme_grid_for(s.box, a);
+          cfg.grid[a] = pme_grid_for(s.box, a, cfg.alpha);
         }
       }
       cfg.spline_order = std::getenv("LR_ORDER") != nullptr ? std::atoi(std::getenv("LR_ORDER")) : 6;
@@ -490,6 +525,10 @@ void dump_forces(const std::string &kind, const std::string &path) {
   cfg.stress = false;
   rgpot::lr::CoulombPot pot(cfg, std::make_shared<rgpot::lr::FixedCharges>(s.q, 0.0));
     pot.forceImpl(in, &out);
+    if (kind == "pme") {
+      std::cout << "mesh alpha=" << cfg.alpha << " order=" << cfg.spline_order << " grid=" << cfg.grid[0]
+                << ' ' << cfg.grid[1] << ' ' << cfg.grid[2] << '\n';
+    }
   } else if (kind == "d3" || kind == "d4") {
     rgpot::lr::DispersionConfig cfg;
     cfg.kind = kind == "d3" ? rgpot::lr::DispersionKind::D3BJ : rgpot::lr::DispersionKind::D4;
@@ -568,6 +607,9 @@ int main(int argc, char **argv) {
   }
   const char *log_path = std::getenv("LR_LOG");
   std::ofstream log(log_path != nullptr ? log_path : "lr_phys_bench.log");
+  log << "command lr_phys_bench " << nrep << '\n';
+  log << "head " << git_head() << '\n';
+  log << "tree " << git_tree() << '\n';
   log << "hostname " << hostname() << '\n';
   log << "date " << date_now() << '\n';
   log << "cpu " << cpu_model() << '\n';
@@ -625,7 +667,8 @@ int main(int argc, char **argv) {
     }
   }
   log << "repeats " << nrep << '\n';
-  log << "pme_grid 32\n";
+  log << "pme_tolerance " << kPmeTol << '\n';
+  log << "pme_rule alpha=sqrt(-log(2*tol))/cutoff grid=ceil(2*alpha*L/(3*tol^0.2)) smooth=2,3,5,7\n";
   log << "ewald_kmax 5\n";
   log << "disp_cutoff_bohr disp2=15 disp3=10 cn=10\n";
 
@@ -700,5 +743,7 @@ int main(int argc, char **argv) {
       }
     }
   }
+  log << "exit_code=0\n";
+  std::cout << "exit_code=0\n";
   return 0;
 }

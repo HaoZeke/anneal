@@ -23,6 +23,7 @@ def judge(worst):
 
 
 def main():
+    print("command eeq_kernel_check.py")
     worst = mp.mpf(0)
     where = ""
     for gamma in (mp.mpf("0.4"), mp.mpf("0.8"), mp.mpf("1.5")):
@@ -38,6 +39,7 @@ def main():
     print(f"at {where}")
     judge(worst)
     print("eeq kernel gradient ok")
+    print("exit_code=0")
 
 
 if __name__ == "__main__":

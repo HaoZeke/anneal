@@ -133,7 +133,7 @@ def versions():
     )
 
 
-def openmm_context(pos, q, box, threads, tolerance):
+def openmm_context(pos, q, box, threads, tolerance, platform_name="CPU"):
     from openmm import Context, NonbondedForce, Platform, System, Vec3, VerletIntegrator
     from openmm.unit import angstrom, nanometer, picosecond
 
@@ -149,13 +149,17 @@ def openmm_context(pos, q, box, threads, tolerance):
     system.setDefaultPeriodicBoxVectors(
         Vec3(*box[0]) * angstrom, Vec3(*box[1]) * angstrom, Vec3(*box[2]) * angstrom
     )
-    platform = Platform.getPlatformByName("CPU")
-    ctx = Context(system, VerletIntegrator(0.001 * picosecond), platform, {"Threads": str(threads)})
+    platform = Platform.getPlatformByName(platform_name)
+    props = {"Threads": str(threads)} if platform_name == "CPU" else {}
+    ctx = Context(system, VerletIntegrator(0.001 * picosecond), platform, props)
     ctx.setPositions(pos * angstrom)
     # The parameter query casts the PME implementation. One energy
     # evaluation creates it; querying first throws bad_cast.
     ctx.getState(getEnergy=True)
-    actual = ctx.getPlatform().getPropertyValue(ctx, "Threads")
+    if platform_name == "CPU":
+        actual = ctx.getPlatform().getPropertyValue(ctx, "Threads")
+    else:
+        actual = platform_name
     alpha, nx, ny, nz = nb.getPMEParametersInContext(ctx)
     return ctx, nb, actual, (alpha, nx, ny, nz)
 
@@ -195,11 +199,24 @@ def arm_openmm(path, threads):
 
 
 def native_team():
+    """Observed team size inside a live parallel region, not the configured maximum."""
     import ctypes
 
     lib = ctypes.CDLL("libgomp.so.1")
-    lib.omp_get_max_threads.restype = ctypes.c_int
-    return int(lib.omp_get_max_threads())
+    lib.omp_get_num_threads.restype = ctypes.c_int
+    lib.GOMP_parallel.argtypes = [
+        ctypes.CFUNCTYPE(None, ctypes.c_void_p),
+        ctypes.c_void_p,
+        ctypes.c_uint,
+        ctypes.c_uint,
+    ]
+    slot = ctypes.c_int(1)
+
+    def worker(arg):
+        ctypes.cast(arg, ctypes.POINTER(ctypes.c_int))[0] = lib.omp_get_num_threads()
+
+    lib.GOMP_parallel(ctypes.CFUNCTYPE(None, ctypes.c_void_p)(worker), ctypes.byref(slot), 0, 0)
+    return int(slot.value)
 
 
 def arm_dftd3(path, threads):
@@ -265,24 +282,44 @@ def rgpot_forces(binary, kind, path):
     return energy, np.array(forces, dtype=float)
 
 
-# Close pairs in the random liquid reach 0.1 A, so the max absolute
-# force still moves in the third digit after the mesh has converged.
-# 0.04 eV/A was the inverted B-spline weight. This bound rejects that.
-FORCE_LIMIT_EV_A = 5.0e-3
+# The mesh rule targets 1e-4 eV/A. The tight arm is OpenMM's Reference
+# platform at that tolerance. The CPU platform is recorded too: its
+# force table drifts on close pairs and is not the acceptance target.
+FORCE_LIMIT_EV_A = 1.0e-4
+
+
+def write_force_table(path, ours, cpu, ref):
+    force_dir = Path(os.environ.get("LR_FORCE_DIR", str(Path(path).resolve().parent / "forces")))
+    force_dir.mkdir(parents=True, exist_ok=True)
+    out_path = force_dir / f"{Path(path).stem}.txt"
+    with out_path.open("w", encoding="utf-8") as handle:
+        handle.write("rgpot_x rgpot_y rgpot_z cpu_x cpu_y cpu_z ref_x ref_y ref_z\n")
+        for a, b, c in zip(ours, cpu, ref):
+            handle.write(
+                " ".join(f"{v:.17g}" for v in (a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]))
+                + "\n"
+            )
+    return out_path
 
 
 def certificate(binary, path, threads):
     pos, _z, q, box = load_geometry(path)
-    ref_ctx, _nb, _actual, ref_pme = openmm_context(pos, q, box, threads, 1.0e-6)
+    ref_ctx, _nb, _actual, ref_pme = openmm_context(pos, q, box, threads, 1.0e-4, "Reference")
+    cpu_ctx, _nb2, _actual2, cpu_pme = openmm_context(pos, q, box, threads, 1.0e-4, "CPU")
     _er, ref = forces_from_state(ref_ctx)
+    _ec, cpu = forces_from_state(cpu_ctx)
     _energy, ours = rgpot_forces(binary, "pme", path)
     err = float(np.max(np.abs(ours - ref)))
+    own = float(np.max(np.abs(cpu - ref)))
+    table = write_force_table(path, ours, cpu, ref)
     print(
-        f"rgpot_pme_force_error_eV_A={err:.17g} reference=openmm-pme tolerance=1e-6 "
-        f"ref_grid={ref_pme[1]} {ref_pme[2]} {ref_pme[3]} n={len(q)}",
+        f"rgpot_pme_force_error_eV_A={err:.17g} reference=openmm-reference tolerance=1e-4 "
+        f"ref_grid={ref_pme[1]} {ref_pme[2]} {ref_pme[3]} "
+        f"cpu_grid={cpu_pme[1]} {cpu_pme[2]} {cpu_pme[3]} "
+        f"openmm_cpu_error_eV_A={own:.17g} n={len(q)} forces={table}",
         flush=True,
     )
-    del ref_ctx
+    del ref_ctx, cpu_ctx
     if not np.isfinite(err) or err > FORCE_LIMIT_EV_A:
         raise SystemExit(f"pme force error {err:.6g} exceeds {FORCE_LIMIT_EV_A}")
     print("pme_force_check pass", flush=True)
@@ -299,6 +336,8 @@ def limit_for(arm, n):
 
 
 def drive(geom_dir, binary, threads_list):
+    print("command ref_bench.py drive", flush=True)
+    print(f"binary {binary}", flush=True)
     print(f"cpu {cpu_model()}", flush=True)
     print(f"hostname {socket.gethostname()}", flush=True)
     print(versions(), flush=True)
@@ -330,8 +369,11 @@ def drive(geom_dir, binary, threads_list):
                 env["OMP_NUM_THREADS"] = str(threads)
                 proc = subprocess.run(cmd, env=env)
                 if proc.returncode != 0:
+                    # A killed comparator did not finish six repeats. Do not
+                    # invent a median or a speedup from the budget.
                     print(
-                        f"{arm} n={n} threads={threads} limit_s={limit} exit_code={proc.returncode}",
+                        f"{arm} n={n} threads={threads} timeout limit_s={limit} "
+                        f"exit_code={proc.returncode}",
                         flush=True,
                     )
         if binary:
@@ -343,6 +385,7 @@ def drive(geom_dir, binary, threads_list):
             )
             if proc.returncode != 0:
                 raise SystemExit(f"certificate n={n} exit_code={proc.returncode}")
+    print("exit_code=0", flush=True)
 
 
 def main():

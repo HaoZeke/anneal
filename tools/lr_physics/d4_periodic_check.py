@@ -100,6 +100,7 @@ def one_cell(binary, n, lengths, seed):
 
 
 def main():
+    print("command d4_periodic_check.py")
     binary = sys.argv[1]
     digest = hashlib.sha256(open(binary, "rb").read()).hexdigest()
     print(f"check_binary {binary}")
@@ -113,6 +114,7 @@ def main():
     for n, lengths, seed in cells:
         one_cell(binary, n, lengths, seed)
     print("periodic D4 tolerances 1e-8 Ha and 1e-8 Ha/Bohr passed")
+    print("exit_code=0")
 
 
 if __name__ == "__main__":

@@ -11,18 +11,23 @@ import d4_periodic_check
 import mpmath as mp
 
 
-def expect_exit(fn):
+def raised_system_exit(fn):
     try:
         fn()
     except SystemExit:
-        return
-    raise SystemExit("expected SystemExit")
+        return True
+    return False
 
 
 def main():
-    expect_exit(lambda: d4_periodic_check.judge(float("nan"), 0.0))
-    expect_exit(lambda: d4_periodic_check.judge(1.0, 0.0))
-    expect_exit(lambda: eeq_kernel_check.judge(mp.mpf("1e-6")))
+    if not raised_system_exit(lambda: d4_periodic_check.judge(float("nan"), 0.0)):
+        raise SystemExit("expected SystemExit")
+    if not raised_system_exit(lambda: d4_periodic_check.judge(1.0, 0.0)):
+        raise SystemExit("expected SystemExit")
+    if not raised_system_exit(lambda: eeq_kernel_check.judge(mp.mpf("1e-6"))):
+        raise SystemExit("expected SystemExit")
+    if raised_system_exit(lambda: d4_periodic_check.judge(0.0, 0.0)):
+        raise SystemExit("a passing comparison must not exit")
     if d4_periodic_check.version_of(object()) != "dftd4-python":
         raise SystemExit("version fallback did not run")
     text = "\nprovenance head=x\n\nenergy_eV 1.0\nforce_eV_A 0.1 0.0 0.0\n"
