@@ -26,6 +26,7 @@
 
 #include <pthread.h>
 #include <sched.h>
+#include <unistd.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -145,7 +146,15 @@ std::string pipe_first(const std::string &cmd) {
 }
 
 const std::string &binary_sha() {
-  static const std::string value = pipe_first("sha256sum /proc/self/exe");
+  static const std::string value = [] {
+    char path[4096];
+    const ssize_t n = ::readlink("/proc/self/exe", path, sizeof(path) - 1);
+    if (n <= 0) {
+      return std::string("unknown");
+    }
+    path[n] = '\0';
+    return pipe_first(std::string("sha256sum ") + path);
+  }();
   return value;
 }
 
