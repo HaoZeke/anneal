@@ -237,16 +237,20 @@ std::string pipe_first(const std::string &cmd) {
   return text;
 }
 
+std::string exe_link() {
+  char path[4096];
+  const char *exe = std::getenv("LR_EXE");
+  const ssize_t n = ::readlink(exe != nullptr && exe[0] != '\0' ? exe : "/proc/self/exe", path,
+                               sizeof(path) - 1);
+  if (n <= 0) {
+    return "unknown";
+  }
+  path[n] = '\0';
+  return pipe_first(std::string("sha256sum ") + path);
+}
+
 const std::string &binary_sha() {
-  static const std::string value = [] {
-    char path[4096];
-    const ssize_t n = ::readlink("/proc/self/exe", path, sizeof(path) - 1);
-    if (n <= 0) {
-      return std::string("unknown");
-    }
-    path[n] = '\0';
-    return pipe_first(std::string("sha256sum ") + path);
-  }();
+  static const std::string value = exe_link();
   return value;
 }
 
@@ -531,13 +535,23 @@ int main(int argc, char **argv) {
     const auto scratch = [](const char *name) {
       return (std::filesystem::temp_directory_path() / name).string();
     };
-    setenv("LR_CPUINFO", scratch("rgpot-empty-cpuinfo").c_str(), 1);
     std::ofstream(scratch("rgpot-empty-cpuinfo")).close();
-    if (cpu_model() != "unknown") {
+    setenv("LR_CPUINFO", scratch("rgpot-empty-cpuinfo").c_str(), 1);
+    const std::string missing = cpu_model();
+    std::ofstream(scratch("rgpot-named-cpuinfo")) << "model name : Test CPU\n";
+    setenv("LR_CPUINFO", scratch("rgpot-named-cpuinfo").c_str(), 1);
+    const std::string named = cpu_model();
+    unsetenv("LR_CPUINFO");
+    if (missing != "unknown" || named == "unknown") {
       std::cerr << "cpu fallback missed\n";
       return 2;
     }
-    unsetenv("LR_CPUINFO");
+    setenv("LR_EXE", scratch("rgpot-not-a-link").c_str(), 1);
+    if (exe_link() != "unknown") {
+      std::cerr << "exe fallback missed\n";
+      return 2;
+    }
+    unsetenv("LR_EXE");
     std::cout << "cover_failures ok\n";
   }
   const int nrep = argc > 1 ? std::atoi(argv[1]) : 6;
