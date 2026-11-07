@@ -352,8 +352,18 @@ void report(std::ostream &out, const std::string &ladder, const std::string &nam
 // The smooth step never shortens the mesh.
 constexpr double kPmeTol = 1.0e-4;
 
+// LR_PME_TOL retargets the same alpha and grid rule at another error.
+// The default column stays at 1e-4.
+double pme_tol() {
+  const char *env = std::getenv("LR_PME_TOL");
+  if (env == nullptr || env[0] == '\0') {
+    return kPmeTol;
+  }
+  return std::atof(env);
+}
+
 double pme_alpha(double cutoff) {
-  return std::sqrt(-std::log(2.0 * kPmeTol)) / cutoff;
+  return std::sqrt(-std::log(2.0 * pme_tol())) / cutoff;
 }
 
 int smooth_fft(int n) {
@@ -377,7 +387,7 @@ int smooth_fft(int n) {
 int pme_grid_for(const double *box, int axis, double alpha) {
   const double len = std::sqrt(box[3 * axis] * box[3 * axis] + box[3 * axis + 1] * box[3 * axis + 1] +
                                box[3 * axis + 2] * box[3 * axis + 2]);
-  const double denom = 3.0 * std::pow(kPmeTol, 0.2);
+  const double denom = 3.0 * std::pow(pme_tol(), 0.2);
   const int need = static_cast<int>(std::ceil(2.0 * alpha * len / denom));
   return smooth_fft(std::max(need, 4));
 }
@@ -430,7 +440,7 @@ double time_pme(const System &s, int threads, int nrep, std::ostream &log, std::
   }
   cfg.spline_order = std::getenv("LR_ORDER") != nullptr ? std::atoi(std::getenv("LR_ORDER")) : 5;
   cfg.short_cutoff = 3.0;
-  cfg.skin = 0.5;
+  cfg.skin = 0.0;
   cfg.periodic = true;
   cfg.stress = false;
   rgpot::lr::CoulombPot pot(cfg, std::make_shared<rgpot::lr::FixedCharges>(s.q, 0.0));
@@ -547,7 +557,7 @@ void dump_forces(const std::string &kind, const std::string &path) {
       cfg.spline_order = 4;
     }
   cfg.short_cutoff = 3.0;
-  cfg.skin = 0.5;
+  cfg.skin = kind == "pme" ? 0.0 : 0.5;
   cfg.periodic = true;
   cfg.stress = false;
   rgpot::lr::CoulombPot pot(cfg, std::make_shared<rgpot::lr::FixedCharges>(s.q, 0.0));
@@ -708,7 +718,7 @@ int main(int argc, char **argv) {
     }
   }
   log << "repeats " << nrep << '\n';
-  log << "pme_tolerance " << kPmeTol << '\n';
+  log << "pme_tolerance " << pme_tol() << '\n';
   log << "pme_rule alpha=sqrt(-log(2*tol))/cutoff grid=ceil(2*alpha*L/(3*tol^0.2)) smooth=2,3,5,7\n";
   log << "ewald_kmax 5\n";
   log << "disp_cutoff_bohr disp2=15 disp3=10 cn=10\n";
