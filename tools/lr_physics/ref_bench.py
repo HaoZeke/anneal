@@ -43,30 +43,53 @@ def system(n, seed):
     return pos, z, q, box
 
 
-def samples(fn):
-    fn()
+def samples(fn, limit_s):
+    """First NREP calls. A call that exceeds limit_s aborts the point."""
+    import signal
+
+    class Alarm(Exception):
+        pass
+
+    def handler(signum, frame):
+        raise Alarm()
+
+    signal.signal(signal.SIGALRM, handler)
     out = []
     for _ in range(NREP):
-        t0 = time.perf_counter()
-        fn()
-        out.append((time.perf_counter() - t0) * 1e6)
+        signal.alarm(limit_s)
+        try:
+            t0 = time.perf_counter()
+            fn()
+            out.append((time.perf_counter() - t0) * 1e6)
+        except Alarm:
+            signal.alarm(0)
+            return None
+        finally:
+            signal.alarm(0)
     return out
 
 
-def report(name, n, values):
-    med = quantile7(values, 0.5)
-    iqr = quantile7(values, 0.75) - quantile7(values, 0.25)
+def report(name, n, values, threads, limit_s):
     host = socket.gethostname()
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     cpu = platform.processor() or "unknown"
+    print(f"run hostname={host} date={date} cpu={cpu}", flush=True)
+    print(f"threads={threads}", flush=True)
+    if values is None:
+        cmd = f"OMP_NUM_THREADS={threads} python3 tools/lr_physics/ref_bench.py {n}"
+        print(
+            f"timeout {name} n={n} threads={threads} after {limit_s}s command={cmd}",
+            flush=True,
+        )
+        return
+    med = quantile7(values, 0.5)
+    iqr = quantile7(values, 0.75) - quantile7(values, 0.25)
     print(
-        f"run hostname={host} date={date} cpu={cpu}",
+        f"ref {name} n={n} threads={threads} repeats={len(values)} "
+        f"median_us={med:.17g} iqr7_us={iqr:.17g}",
         flush=True,
     )
-    print(
-        f"ref {name} n={n} repeats={len(values)} median_us={med:.6g} iqr7_us={iqr:.6g}",
-        flush=True,
-    )
+    print("samples_us " + " ".join(f"{v:.17g}" for v in values), flush=True)
 
 
 def time_dftd3(pos, z, box):
@@ -77,7 +100,7 @@ def time_dftd3(pos, z, box):
     def once():
         model.get_dispersion(param, grad=True)
 
-    report("s-dftd3", len(z), samples(once))
+    report("s-dftd3", len(z), samples(once, 180), threads(), 180)
 
 
 def time_dftd4(pos, z, box):
@@ -88,7 +111,7 @@ def time_dftd4(pos, z, box):
     def once():
         model.get_dispersion(param, grad=True)
 
-    report("dftd4", len(z), samples(once))
+    report("dftd4", len(z), samples(once, 180), threads(), 180)
 
 
 def time_openmm(pos, q, box):
@@ -113,7 +136,13 @@ def time_openmm(pos, q, box):
     def once():
         ctx.getState(getEnergy=True, getForces=True)
 
-    report("openmm-pme", len(q), samples(once))
+    report("openmm-pme", len(q), samples(once, 180), threads(), 180)
+
+
+def threads():
+    import os
+
+    return int(os.environ.get("OMP_NUM_THREADS", "1"))
 
 
 def main():

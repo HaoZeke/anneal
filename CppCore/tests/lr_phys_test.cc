@@ -399,6 +399,27 @@ void test_library_dispersion() {
     threw = true;
   }
   check(threw, "D3 rejects an atomic number outside the table");
+  {
+    // Hydrogen first, so the centre of the pair has the larger atomic number
+    // and the van der Waals table swaps its arguments. A short cell adds a
+    // self image, which is the repeated-index three-body weight.
+    rgpot::lr::DispersionConfig img;
+    img.kind = rgpot::lr::DispersionKind::D3BJ;
+    img.functional = "pbe";
+    img.atm = true;
+    img.periodic = true;
+    img.cutoff = 8;
+    img.short_cutoff = 2;
+    img.lib_disp2 = 12;
+    img.lib_disp3 = 12;
+    img.lib_cn = 12;
+    const double ibox[9] = {6, 0, 0, 0, 6, 0, 0, 0, 6};
+    std::vector<double> ipos = {1, 1, 1, 3.2, 1.2, 1.1};
+    std::vector<int> iz = {1, 8};
+    rgpot::lr::DispersionPot ipot(img);
+    const Eval ie = run(ipot, ipos, iz, ibox);
+    check(std::isfinite(ie.energy), "periodic D3 with a self image is finite");
+  }
   for (std::size_t i = 0; i < 3; ++i) {
     const double f = fd_force(
         [&](const std::vector<double> &p) { return run(d3, p, z, nullptr).energy; }, pos, i, 1e-6);
@@ -472,6 +493,45 @@ void test_library_dispersion() {
       finite_force = finite_force && std::isfinite(f);
     }
     check(finite_force, "periodic D4 forces are finite");
+    cfg.atm = false;
+    rgpot::lr::DispersionPot noatm(cfg);
+    const Eval bare = run(noatm, pos, z, box);
+    check(std::isfinite(bare.energy), "periodic D4 without the three-body term is finite");
+    bool threw = false;
+    try {
+      std::vector<int> badz = z;
+      badz[0] = 200;
+      run(pot, pos, badz, box);
+    } catch (const std::invalid_argument &) {
+      threw = true;
+    }
+    check(threw, "periodic D4 rejects an atomic number outside the table");
+    threw = false;
+    try {
+      rgpot::lr::DispersionConfig bad = cfg;
+      bad.atm = true;
+      bad.functional = "not-a-functional";
+      rgpot::lr::DispersionPot badpot(bad);
+      run(badpot, pos, z, box);
+    } catch (const std::invalid_argument &) {
+      threw = true;
+    }
+    check(threw, "periodic D4 rejects an unknown functional");
+    std::vector<double> many(3 * 100);
+    std::vector<int> mz(100, 6);
+    for (int i = 0; i < 100; ++i) {
+      many[static_cast<std::size_t>(3 * i)] = 1.2 * i;
+      many[static_cast<std::size_t>(3 * i + 1)] = 0.1;
+      many[static_cast<std::size_t>(3 * i + 2)] = 0.2;
+    }
+    double genergy = 0.0;
+    std::vector<double> gF(many.size());
+    double gstrain[6] = {};
+    rgpot::lr::D4BjParam gp;
+    rgpot::lr::d4bj_param("pbe", &gp);
+    rgpot::lr::d4_evaluate(many.data(), mz.data(), 100, nullptr, false, 0.0, gp, 20, 15, 15, &genergy,
+                           gF.data(), gstrain);
+    check(std::isfinite(genergy), "a gas-phase D4 above the dense cutoff is finite");
   }
 #endif
 }

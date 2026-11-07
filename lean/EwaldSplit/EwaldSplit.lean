@@ -1,5 +1,6 @@
 import Mathlib.Analysis.SpecialFunctions.Gaussian.GaussianIntegral
 import Mathlib.MeasureTheory.Integral.IntervalIntegral.Basic
+import Mathlib.MeasureTheory.Integral.IntervalIntegral.FundThmCalculus
 import Mathlib.MeasureTheory.Measure.Lebesgue.Integral
 
 open Real MeasureTheory Set Filter intervalIntegral
@@ -61,6 +62,20 @@ theorem ewaldErfc_zero : ewaldErfc 0 = 1 := by
   have h := ewald_split 0
   rw [ewaldErf_zero, zero_add] at h
   exact h
+
+theorem ewaldErf_hasDerivAt (x : ℝ) :
+    HasDerivAt ewaldErf ((2 / √π) * exp (-x ^ 2)) x := by
+  unfold ewaldErf
+  have hf : IntervalIntegrable (fun t : ℝ => exp (-t ^ 2)) volume 0 x :=
+    integrable_exp_neg_sq.intervalIntegrable
+  have hcont : Continuous (fun t : ℝ => exp (-t ^ 2)) :=
+    continuous_exp.comp (continuous_neg.comp (continuous_pow 2))
+  have hmeas : StronglyMeasurableAtFilter (fun t : ℝ => exp (-t ^ 2)) (nhds x) :=
+    hcont.stronglyMeasurableAtFilter volume (nhds x)
+  simpa using (integral_hasDerivAt_right hf hmeas hcont.continuousAt).const_mul (2 / √π)
+
+theorem ewaldErf_deriv (x : ℝ) : deriv ewaldErf x = (2 / √π) * exp (-x ^ 2) :=
+  (ewaldErf_hasDerivAt x).deriv
 
 theorem ewaldErfc_tendsto_atTop : Tendsto ewaldErfc atTop (nhds 0) := by
   unfold ewaldErfc
