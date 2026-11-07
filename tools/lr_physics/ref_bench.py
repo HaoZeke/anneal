@@ -152,6 +152,9 @@ def openmm_context(pos, q, box, threads, tolerance):
     platform = Platform.getPlatformByName("CPU")
     ctx = Context(system, VerletIntegrator(0.001 * picosecond), platform, {"Threads": str(threads)})
     ctx.setPositions(pos * angstrom)
+    # The parameter query casts the PME implementation. One energy
+    # evaluation creates it; querying first throws bad_cast.
+    ctx.getState(getEnergy=True)
     actual = ctx.getPlatform().getPropertyValue(ctx, "Threads")
     alpha, nx, ny, nz = nb.getPMEParametersInContext(ctx)
     return ctx, nb, actual, (alpha, nx, ny, nz)
