@@ -32,7 +32,7 @@ def main():
     print(f"max_abs_dtmp_error {worst}")
     print(f"at {where}")
     if worst > mp.mpf("1e-20"):
-        raise SystemExit("kernel gradient does not match mpmath")
+        raise SystemExit("kernel gradient does not match mpmath")  # pragma: no cover
     print("eeq kernel gradient ok")
 
 

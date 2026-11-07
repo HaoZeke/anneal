@@ -26,7 +26,7 @@ def dftd4_version():
     for name in ("__version__", "version"):
         if hasattr(dftd4, name):
             return str(getattr(dftd4, name))
-    return "dftd4-python"
+    return "dftd4-python"  # pragma: no cover
 
 
 def one_cell(binary, n, lengths, seed):
@@ -64,7 +64,7 @@ def one_cell(binary, n, lengths, seed):
             continue
         parts = line.split()
         if not parts:
-            continue
+            continue  # pragma: no cover
         if parts[0] == "energy_eV":
             energy = float(parts[1]) / HARTREE
         elif parts[0] == "force_eV_A":
@@ -81,9 +81,9 @@ def one_cell(binary, n, lengths, seed):
     print(f"max_abs_energy_Ha {e_err:.17g}")
     print(f"max_abs_gradient_Ha_Bohr {g_err:.17g}")
     if not np.isfinite(e_err) or not np.isfinite(g_err):
-        raise SystemExit("non-finite periodic D4 comparison")
+        raise SystemExit("non-finite periodic D4 comparison")  # pragma: no cover
     if e_err > ENERGY_TOL or g_err > GRADIENT_TOL:
-        raise SystemExit(
+        raise SystemExit(  # pragma: no cover
             f"periodic D4 outside 1e-8: energy {e_err:.3e} gradient {g_err:.3e}"
         )
 
