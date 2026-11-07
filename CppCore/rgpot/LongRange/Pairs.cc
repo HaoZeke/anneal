@@ -91,10 +91,6 @@ int wrap_cell(int c, int nc, int *shift) {
   return c;
 }
 
-bool positive_shift(int sa, int sb, int sc) {
-  return sa > 0 || (sa == 0 && (sb > 0 || (sb == 0 && sc > 0)));
-}
-
 struct Grid {
   int nc[3] = {1, 1, 1};
   int rad[3] = {1, 1, 1};
@@ -152,10 +148,11 @@ Grid grid_of(const double *pos, std::size_t n, const CellGeom &cell, double reac
   return g;
 }
 
-void gather(const double *pos, std::size_t n, const CellGeom &cell, double reach, std::vector<Cand> *out) {
+void gather(const double *pos, std::size_t n, const CellGeom &cell, double reach, int team,
+            std::vector<Cand> *out) {
   const Grid g = grid_of(pos, n, cell, reach);
   const double reach2 = reach * reach;
-  const int nt = thread_count();
+  const int nt = team;
   std::vector<std::vector<Cand>> local(static_cast<std::size_t>(nt));
 #ifdef _OPENMP
 #pragma omp parallel
@@ -198,7 +195,7 @@ void gather(const double *pos, std::size_t n, const CellGeom &cell, double reach
               if (j < static_cast<int>(i)) {
                 continue;
               }
-              if (j == static_cast<int>(i) && !positive_shift(sa, sb, sc)) {
+              if (j == static_cast<int>(i) && sa == 0 && sb == 0 && sc == 0) {
                 continue;
               }
               const double dx = pos[3 * j] - ri[0] + sa * cell.H[0][0] + sb * cell.H[1][0] + sc * cell.H[2][0];
@@ -227,9 +224,9 @@ void gather(const double *pos, std::size_t n, const CellGeom &cell, double reach
 }
 
 void emit_pairs(const std::vector<Cand> &cand, const double *pos, const CellGeom &cell, double cutoff,
-                std::vector<Pair> *out) {
+                int team, std::vector<Pair> *out) {
   const double cut2 = cutoff * cutoff;
-  const int nt = thread_count();
+  const int nt = team;
   std::vector<std::vector<Pair>> local(static_cast<std::size_t>(nt));
 #ifdef _OPENMP
 #pragma omp parallel
@@ -313,14 +310,15 @@ void DualList::fill(Skin &skin, double cutoff, const double *pos, std::size_t n,
     }
   }
   *rebuilt = rebuild;
+  const int team = thread_count();
   if (rebuild) {
     // One OpenMP team. omp_set_num_threads(1) keeps this a single thread.
-    gather(pos, n, cell, cutoff + skin_, &skin.cand);
+    gather(pos, n, cell, cutoff + skin_, team, &skin.cand);
     skin.ref.assign(pos, pos + 3 * n);
     std::copy(box9, box9 + 9, skin.ref_h);
     skin.built = true;
   }
-  emit_pairs(skin.cand, pos, cell, cutoff, out);
+  emit_pairs(skin.cand, pos, cell, cutoff, team, out);
 }
 
 void DualList::update(const double *pos, std::size_t n, const double *box, bool periodic) {

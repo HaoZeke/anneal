@@ -3,6 +3,7 @@
 
 #include "rgpot/LongRange/FastD4.hpp"
 
+#include "rgpot/LongRange/Lattice.hpp"
 #include "rgpot/units.hpp"
 
 #include <algorithm>
@@ -664,6 +665,177 @@ void solve_charges(const Operator &op, const double *xvec, double qtot, std::vec
   }
 }
 
+double ewald_alpha(const CellGeom &cell) {
+  const double a0 = std::sqrt(cell.H[0][0] * cell.H[0][0] + cell.H[0][1] * cell.H[0][1] +
+                              cell.H[0][2] * cell.H[0][2]);
+  const double a1 = std::sqrt(cell.H[1][0] * cell.H[1][0] + cell.H[1][1] * cell.H[1][1] +
+                              cell.H[1][2] * cell.H[1][2]);
+  const double a2 = std::sqrt(cell.H[2][0] * cell.H[2][0] + cell.H[2][1] * cell.H[2][1] +
+                              cell.H[2][2] * cell.H[2][2]);
+  const double dlen = std::min(a0, std::min(a1, a2)) / kBohr;
+  const double b0 = std::sqrt(cell.recip[0][0] * cell.recip[0][0] + cell.recip[0][1] * cell.recip[0][1] +
+                              cell.recip[0][2] * cell.recip[0][2]);
+  const double b1 = std::sqrt(cell.recip[1][0] * cell.recip[1][0] + cell.recip[1][1] * cell.recip[1][1] +
+                              cell.recip[1][2] * cell.recip[1][2]);
+  const double b2 = std::sqrt(cell.recip[2][0] * cell.recip[2][0] + cell.recip[2][1] * cell.recip[2][1] +
+                              cell.recip[2][2] * cell.recip[2][2]);
+  const double rlen = 2.0 * kPi * std::min(b0, std::min(b1, b2)) * kBohr;
+  const double vol = cell.volume / (kBohr * kBohr * kBohr);
+  const double tol = 1.4901161193847656e-8;
+  auto rec = [&](double alpha, double g) {
+    return 4.0 * kPi * std::exp(-0.25 * g * g / (alpha * alpha)) / (vol * g * g);
+  };
+  auto dir = [&](double alpha, double r) { return std::erfc(alpha * r) / r; };
+  auto diff = [&](double alpha) {
+    return (rec(alpha, 4.0 * rlen) - rec(alpha, 5.0 * rlen)) -
+           (dir(alpha, 2.0 * dlen) - dir(alpha, 3.0 * dlen));
+  };
+  double alpha = 1.0e-8;
+  double gap = diff(alpha);
+  int stat = 0;
+  while (gap < -tol && alpha < 1e300) {
+    alpha *= 2.0;
+    gap = diff(alpha);
+  }
+  if (!(alpha < 1e300)) {
+    stat = 1;
+  } else if (alpha == 1.0e-8) {
+    stat = 2;
+  }
+  double alpl = 0.5 * alpha;
+  if (stat == 0) {
+    while (gap < tol && alpha < 1e300) {
+      alpha *= 2.0;
+      gap = diff(alpha);
+    }
+    if (!(alpha < 1e300)) {
+      stat = 3;
+    }
+  }
+  if (stat == 0) {
+    double alpr = alpha;
+    alpha = 0.5 * (alpl + alpr);
+    gap = diff(alpha);
+    for (int it = 0; it <= 30 && std::abs(gap) > tol; ++it) {
+      if (gap < 0.0) {
+        alpl = alpha;
+      } else {
+        alpr = alpha;
+      }
+      alpha = 0.5 * (alpl + alpr);
+      gap = diff(alpha);
+      if (it == 30) {
+        stat = 4;
+      }
+    }
+  }
+  if (stat != 0) {
+    alpha = 0.25;
+  }
+  return alpha;
+}
+
+double ewald_pair(const double *ri, const double *rj, double gam, double alpha, const CellGeom &cell) {
+  const double to_b = 1.0 / kBohr;
+  double acc = 0.0;
+  const double eps = 1.4901161193847656e-8;
+  const double vol = cell.volume / (kBohr * kBohr * kBohr);
+  double base[3] = {(rj[0] - ri[0]) * to_b, (rj[1] - ri[1]) * to_b, (rj[2] - ri[2]) * to_b};
+  for (int ia = -2; ia <= 2; ++ia) {
+    for (int ib = -2; ib <= 2; ++ib) {
+      for (int ic = -2; ic <= 2; ++ic) {
+        double v[3];
+        for (int c = 0; c < 3; ++c) {
+          v[c] = base[c] + (ia * cell.H[0][c] + ib * cell.H[1][c] + ic * cell.H[2][c]) * to_b;
+        }
+        const double r = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        if (r >= eps) {
+          acc += std::erf(gam * r) / r - std::erf(alpha * r) / r;
+        }
+        if (ia == 0 && ib == 0 && ic == 0) {
+          continue;
+        }
+        const double gx =
+            2.0 * kPi * (ia * cell.recip[0][0] + ib * cell.recip[1][0] + ic * cell.recip[2][0]) * kBohr;
+        const double gy =
+            2.0 * kPi * (ia * cell.recip[0][1] + ib * cell.recip[1][1] + ic * cell.recip[2][1]) * kBohr;
+        const double gz =
+            2.0 * kPi * (ia * cell.recip[0][2] + ib * cell.recip[1][2] + ic * cell.recip[2][2]) * kBohr;
+        const double g2 = gx * gx + gy * gy + gz * gz;
+        if (g2 < eps) {
+          continue;
+        }
+        const double w = 4.0 * kPi * std::exp(-0.25 * g2 / (alpha * alpha)) / (vol * g2);
+        acc += w * std::cos(gx * base[0] + gy * base[1] + gz * base[2]);
+      }
+    }
+  }
+  return acc;
+}
+
+void dense_solve_3d(const double *pos, const int *z, std::size_t n, const double *box, const double *xvec,
+                    double qtot, std::vector<double> *q) {
+  const CellGeom cell = cell_from_box(box);
+  const double alpha = ewald_alpha(cell);
+  const int m = static_cast<int>(n) + 1;
+  std::vector<double> amat(static_cast<std::size_t>(m * m), 0.0);
+  std::vector<double> rhs(static_cast<std::size_t>(m), 0.0);
+  auto A = [&](int i, int j) -> double & { return amat[static_cast<std::size_t>(i * m + j)]; };
+  for (std::size_t i = 0; i < n; ++i) {
+    rhs[i] = xvec[i];
+    const double radi = kD4Rad[elem(z[i])];
+    for (std::size_t j = i; j < n; ++j) {
+      const double radj = kD4Rad[elem(z[j])];
+      const double gam = 1.0 / std::sqrt(radi * radi + radj * radj);
+      double tmp = ewald_pair(pos + 3 * i, pos + 3 * j, gam, alpha, cell);
+      if (i == j) {
+        tmp += kD4Eta[elem(z[i])] + kSqrt2Pi / radi - 2.0 * alpha / kSqrtPi;
+      }
+      A(static_cast<int>(i), static_cast<int>(j)) = tmp;
+      A(static_cast<int>(j), static_cast<int>(i)) = tmp;
+    }
+    A(static_cast<int>(i), m - 1) = 1.0;
+    A(m - 1, static_cast<int>(i)) = 1.0;
+  }
+  rhs[n] = qtot;
+  for (int k = 0; k < m; ++k) {
+    int piv = k;
+    double best = std::abs(A(k, k));
+    for (int i = k + 1; i < m; ++i) {
+      if (std::abs(A(i, k)) > best) {
+        best = std::abs(A(i, k));
+        piv = i;
+      }
+    }
+    if (!(best > 0.0)) {
+      throw std::runtime_error("EEQ matrix is singular");
+    }
+    if (piv != k) {
+      for (int j = k; j < m; ++j) {
+        std::swap(A(k, j), A(piv, j));
+      }
+      std::swap(rhs[static_cast<std::size_t>(k)], rhs[static_cast<std::size_t>(piv)]);
+    }
+    const double diag = A(k, k);
+    for (int i = k + 1; i < m; ++i) {
+      const double f = A(i, k) / diag;
+      A(i, k) = f;
+      for (int j = k + 1; j < m; ++j) {
+        A(i, j) -= f * A(k, j);
+      }
+      rhs[static_cast<std::size_t>(i)] -= f * rhs[static_cast<std::size_t>(k)];
+    }
+  }
+  for (int i = m - 1; i >= 0; --i) {
+    double s = rhs[static_cast<std::size_t>(i)];
+    for (int j = i + 1; j < m; ++j) {
+      s -= A(i, j) * rhs[static_cast<std::size_t>(j)];
+    }
+    rhs[static_cast<std::size_t>(i)] = s / A(i, i);
+  }
+  q->assign(rhs.begin(), rhs.begin() + static_cast<std::ptrdiff_t>(n));
+}
+
 void dense_solve(const double *pos, const int *z, std::size_t n, const double *xvec, double qtot,
                  std::vector<double> *q) {
   const int m = static_cast<int>(n) + 1;
@@ -861,8 +1033,10 @@ void d4_evaluate(const double *pos, const int *z, std::size_t n, const double *b
       op.diag[i] -= 2.0 * op.alpha / kSqrtPi;
     }
   }
-  if (op.periodic) {
-    // Lattice vectors were passed in Angstrom. build_k converts them.
+  if (op.periodic && n <= 64) {
+    // Same real and reciprocal lattice sums dftd4 uses for the EEQ matrix.
+    dense_solve_3d(pos, z, n, box, xvec.data(), charge, &q);
+  } else if (op.periodic) {
     op.prepare_kernel();
     solve_charges(op, xvec.data(), charge, &q);
   } else if (n <= 96) {
@@ -907,9 +1081,10 @@ void d4_evaluate(const double *pos, const int *z, std::size_t n, const double *b
       const double gdisp = param.s6 * d6 + param.s8 * rrij * d8;
       const double pair = -c6 * edisp;
       ene += (a.j == static_cast<int>(i) ? 0.5 * pair : pair);
-      const double half = a.j == static_cast<int>(i) ? 0.5 : 1.0;
-      dedcn[i] += dni * (-edisp) * half;
-      dedq[i] += dqi * (-edisp) * half;
+      // dftd4 accumulates the charge and CN derivatives with the full
+      // kernel on a self image, while the energy of that image stays halved.
+      dedcn[i] += dni * (-edisp);
+      dedq[i] += dqi * (-edisp);
       if (a.j != static_cast<int>(i)) {
         dedcn[static_cast<std::size_t>(a.j)] += dnj * (-edisp);
         dedq[static_cast<std::size_t>(a.j)] += dqj * (-edisp);
@@ -1033,7 +1208,85 @@ void d4_evaluate(const double *pos, const int *z, std::size_t n, const double *b
 
   // Charge response: A lambda = dEdq with a vanishing charge sum, then
   // contract the same real and reciprocal kernels used to build A.
-  if (op.periodic || n > 96) {
+  if (op.periodic && n <= 64) {
+    const CellGeom cell = cell_from_box(box);
+    const double alpha = ewald_alpha(cell);
+    std::vector<double> y;
+    // The saddle solve enforces a vanishing charge sum, which is the
+    // adjoint of the same Ewald matrix used for the charges.
+    dense_solve_3d(pos, z, n, box, dedq.data(), 0.0, &y);
+    const double to_b = 1.0 / kBohr;
+    const double eps = 1.4901161193847656e-8;
+    const double vol = cell.volume / (kBohr * kBohr * kBohr);
+    auto dradial = [](double c, double r) {
+      const double arg = c * r;
+      return 2.0 * c * std::exp(-arg * arg) / (kSqrtPi * r) - std::erf(arg) / (r * r);
+    };
+    for (std::size_t i = 0; i < n; ++i) {
+      for (std::size_t j = i; j < n; ++j) {
+        const double gam =
+            1.0 / std::sqrt(kD4Rad[elem(z[i])] * kD4Rad[elem(z[i])] + kD4Rad[elem(z[j])] * kD4Rad[elem(z[j])]);
+        const double couple = (i == j) ? y[i] * q[i] : y[i] * q[j] + y[j] * q[i];
+        if (!(std::abs(couple) > 0.0)) {
+          continue;
+        }
+        double base[3] = {(pos[3 * j] - pos[3 * i]) * to_b, (pos[3 * j + 1] - pos[3 * i + 1]) * to_b,
+                          (pos[3 * j + 2] - pos[3 * i + 2]) * to_b};
+        double gx = 0, gy = 0, gz = 0;
+        for (int ia = -2; ia <= 2; ++ia) {
+          for (int ib = -2; ib <= 2; ++ib) {
+            for (int ic = -2; ic <= 2; ++ic) {
+              double v[3];
+              for (int c = 0; c < 3; ++c) {
+                v[c] = base[c] + (ia * cell.H[0][c] + ib * cell.H[1][c] + ic * cell.H[2][c]) * to_b;
+              }
+              const double r = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+              if (r >= eps) {
+                const double d = (dradial(gam, r) - dradial(alpha, r)) / r;
+                gx += d * v[0];
+                gy += d * v[1];
+                gz += d * v[2];
+              }
+              if (ia == 0 && ib == 0 && ic == 0) {
+                continue;
+              }
+              const double gxv =
+                  2.0 * kPi * (ia * cell.recip[0][0] + ib * cell.recip[1][0] + ic * cell.recip[2][0]) * kBohr;
+              const double gyv =
+                  2.0 * kPi * (ia * cell.recip[0][1] + ib * cell.recip[1][1] + ic * cell.recip[2][1]) * kBohr;
+              const double gzv =
+                  2.0 * kPi * (ia * cell.recip[0][2] + ib * cell.recip[1][2] + ic * cell.recip[2][2]) * kBohr;
+              const double g2 = gxv * gxv + gyv * gyv + gzv * gzv;
+              if (g2 < eps) {
+                continue;
+              }
+              const double w = 4.0 * kPi * std::exp(-0.25 * g2 / (alpha * alpha)) / (vol * g2);
+              const double s = -w * std::sin(gxv * base[0] + gyv * base[1] + gzv * base[2]);
+              gx += s * gxv;
+              gy += s * gyv;
+              gz += s * gzv;
+            }
+          }
+        }
+        // Same direction as the mesh response: atom i receives dA/d(rj-ri).
+        grad[3 * i] += couple * gx;
+        grad[3 * i + 1] += couple * gy;
+        grad[3 * i + 2] += couple * gz;
+        if (i != j) {
+          grad[3 * j] -= couple * gx;
+          grad[3 * j + 1] -= couple * gy;
+          grad[3 * j + 2] -= couple * gz;
+        }
+      }
+    }
+    std::vector<double> eeq_w(n);
+    for (std::size_t i = 0; i < n; ++i) {
+      const double c = cn_eeq[i];
+      const double dx = kD4Kcn[elem(z[i])] * (0.5 * c + kReg) / std::pow(c + kReg, 1.5);
+      eeq_w[i] = y[i] * dx;
+    }
+    cn_force(sh, z, n, std::min(kEeqCut, ewald_cut * to_b), false, true, cn_eeq_raw, eeq_w, grad.data());
+  } else if (op.periodic || n > 96) {
     std::vector<double> y(n, 0.0), ones(n, 1.0), zsol(n, 0.0);
     for (std::size_t i = 0; i < n; ++i) {
       y[i] = dedq[i] / op.diag[i];
