@@ -76,6 +76,23 @@ struct ElecOut {
   bool has_stress = false;
 };
 
+// Last smooth particle-mesh evaluation. Times are microseconds.
+// Team sizes are the OpenMP teams that did the work, not a second pool.
+struct PmeTrace {
+  double spread_us = 0;
+  double fft_us = 0;
+  double kernel_us = 0;
+  double gather_us = 0;
+  double real_us = 0;
+  int spread_team = 1;
+  int fft_team = 1;
+  int kernel_team = 1;
+  int gather_team = 1;
+  int real_team = 1;
+};
+
+PmeTrace pme_trace();
+
 // Writes energy, adds forces into F (length 3 n, caller zeroes), and
 // optionally dE/dq (length n). pairs is the long half list. For DSF the
 // list cutoff is the DSF cutoff. For Ewald and SPME it is the real-space

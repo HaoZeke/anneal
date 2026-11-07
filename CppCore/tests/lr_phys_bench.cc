@@ -443,12 +443,19 @@ double time_pme(const System &s, int threads, int nrep, std::ostream &log, std::
   const double energy = eval();
   report(log, ladder, "pme", static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
   report(echo, ladder, "pme", static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
-  log << "point ladder=" << ladder << " method=pme n=" << s.z.size() << " threads=" << threads_now()
-      << " active=" << active_threads << " exit=0 alpha=" << cfg.alpha << " order=" << cfg.spline_order
-      << " grid=" << cfg.grid[0] << ' ' << cfg.grid[1] << ' ' << cfg.grid[2] << '\n';
-  echo << "point ladder=" << ladder << " method=pme n=" << s.z.size() << " threads=" << threads_now()
-       << " active=" << active_threads << " exit=0 alpha=" << cfg.alpha << " order=" << cfg.spline_order
-       << " grid=" << cfg.grid[0] << ' ' << cfg.grid[1] << ' ' << cfg.grid[2] << '\n';
+  const auto phase = rgpot::lr::pme_trace();
+  auto phase_line = [&](std::ostream &out) {
+    out << "point ladder=" << ladder << " method=pme n=" << s.z.size() << " threads=" << threads_now()
+        << " active=" << active_threads << " exit=0 alpha=" << cfg.alpha << " order=" << cfg.spline_order
+        << " grid=" << cfg.grid[0] << ' ' << cfg.grid[1] << ' ' << cfg.grid[2]
+        << " spread_us=" << phase.spread_us << " fft_us=" << phase.fft_us << " kernel_us=" << phase.kernel_us
+        << " gather_us=" << phase.gather_us << " real_us=" << phase.real_us
+        << " spread_team=" << phase.spread_team << " fft_team=" << phase.fft_team
+        << " kernel_team=" << phase.kernel_team << " gather_team=" << phase.gather_team
+        << " real_team=" << phase.real_team << '\n';
+  };
+  phase_line(log);
+  phase_line(echo);
   return energy;
 }
 

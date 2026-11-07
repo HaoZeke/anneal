@@ -2,6 +2,7 @@
 // Copyright 2023--present rgpot developers
 
 #include "rgpot/LongRange/FastD4.hpp"
+#include "rgpot/LongRange/pocketfft.hpp"
 
 #include "rgpot/LongRange/Lattice.hpp"
 #include "rgpot/units.hpp"
@@ -256,92 +257,15 @@ void accumulate_cn(const Shell &sh, const int *z, std::size_t n, double cut_b, b
 
 void mat_inv(const double *box, double inv[9], double *vol);
 
-void fft_radix2(std::vector<std::complex<double>> &a, bool inverse) {
-  const std::size_t n = a.size();
-  for (std::size_t i = 1, j = 0; i < n; ++i) {
-    std::size_t bit = n >> 1;
-    for (; j & bit; bit >>= 1) {
-      j ^= bit;
-    }
-    j ^= bit;
-    if (i < j) {
-      std::swap(a[i], a[j]);
-    }
-  }
-  for (std::size_t len = 2; len <= n; len <<= 1) {
-    const double ang = (inverse ? 2.0 : -2.0) * kPi / static_cast<double>(len);
-    const std::complex<double> wlen(std::cos(ang), std::sin(ang));
-    for (std::size_t i = 0; i < n; i += len) {
-      std::complex<double> w(1.0, 0.0);
-      for (std::size_t j = 0; j < len / 2; ++j) {
-        const auto u = a[i + j];
-        const auto v = a[i + j + len / 2] * w;
-        a[i + j] = u + v;
-        a[i + j + len / 2] = u - v;
-        w *= wlen;
-      }
-    }
-  }
-  if (inverse) {
-    const double invn = 1.0 / static_cast<double>(n);
-    for (auto &z : a) {
-      z *= invn;
-    }
-  }
-}
-
 void fft3_lines(std::vector<std::complex<double>> &g, int ng, bool inverse) {
-  auto index = [ng](int x, int y, int z) {
-    return static_cast<std::size_t>(x + ng * (y + ng * z));
-  };
-#ifdef _OPENMP
-#pragma omp parallel
-#endif
-  {
-    std::vector<std::complex<double>> line(static_cast<std::size_t>(ng));
-#ifdef _OPENMP
-#pragma omp for schedule(static)
-#endif
-    for (int z = 0; z < ng; ++z) {
-      for (int y = 0; y < ng; ++y) {
-        for (int x = 0; x < ng; ++x) {
-          line[static_cast<std::size_t>(x)] = g[index(x, y, z)];
-        }
-        fft_radix2(line, inverse);
-        for (int x = 0; x < ng; ++x) {
-          g[index(x, y, z)] = line[static_cast<std::size_t>(x)];
-        }
-      }
-    }
-#ifdef _OPENMP
-#pragma omp for schedule(static)
-#endif
-    for (int z = 0; z < ng; ++z) {
-      for (int x = 0; x < ng; ++x) {
-        for (int y = 0; y < ng; ++y) {
-          line[static_cast<std::size_t>(y)] = g[index(x, y, z)];
-        }
-        fft_radix2(line, inverse);
-        for (int y = 0; y < ng; ++y) {
-          g[index(x, y, z)] = line[static_cast<std::size_t>(y)];
-        }
-      }
-    }
-#ifdef _OPENMP
-#pragma omp for schedule(static)
-#endif
-    for (int y = 0; y < ng; ++y) {
-      for (int x = 0; x < ng; ++x) {
-        for (int z = 0; z < ng; ++z) {
-          line[static_cast<std::size_t>(z)] = g[index(x, y, z)];
-        }
-        fft_radix2(line, inverse);
-        for (int z = 0; z < ng; ++z) {
-          g[index(x, y, z)] = line[static_cast<std::size_t>(z)];
-        }
-      }
-    }
-  }
+  const pocketfft::shape_t shape{static_cast<std::size_t>(ng), static_cast<std::size_t>(ng),
+                                 static_cast<std::size_t>(ng)};
+  const auto step = static_cast<std::ptrdiff_t>(sizeof(std::complex<double>));
+  const pocketfft::stride_t stride{step * ng * ng, step * ng, step};
+  const pocketfft::shape_t axes{0, 1, 2};
+  const double ntot = static_cast<double>(ng) * static_cast<double>(ng) * static_cast<double>(ng);
+  const double scale = inverse ? 1.0 / ntot : 1.0;
+  pocketfft::c2c(shape, stride, stride, axes, !inverse, g.data(), g.data(), scale, 1);
 }
 
 double bspline_order(int order, double x) {
@@ -1059,149 +983,204 @@ void d4_evaluate(const double *pos, const int *z, std::size_t n, const double *b
   std::vector<double> grad(3 * n, 0.0);
   std::vector<double> dedcn(n, 0.0);
   std::vector<double> dedq(n, 0.0);
+  int pair_nt = 1;
+#ifdef _OPENMP
+  pair_nt = std::max(1, omp_get_max_threads());
+#endif
+  std::vector<std::vector<double>> pair_g(static_cast<std::size_t>(pair_nt), std::vector<double>(3 * n, 0.0));
+  std::vector<std::vector<double>> pair_c(static_cast<std::size_t>(pair_nt), std::vector<double>(n, 0.0));
+  std::vector<std::vector<double>> pair_q(static_cast<std::size_t>(pair_nt), std::vector<double>(n, 0.0));
+  std::vector<double> pair_e(static_cast<std::size_t>(pair_nt), 0.0);
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
   for (std::size_t i = 0; i < n; ++i) {
-    for (const Nb &a : sh.of(i)) {
-      if (a.j > static_cast<int>(i) || a.r >= cut2_b) {
-        continue;
+    const int tid =
+#ifdef _OPENMP
+        omp_get_thread_num();
+#else
+        0;
+#endif
+    double *const G = pair_g[static_cast<std::size_t>(tid)].data();
+    double *const C = pair_c[static_cast<std::size_t>(tid)].data();
+    double *const Q = pair_q[static_cast<std::size_t>(tid)].data();
+    double &eadd = pair_e[static_cast<std::size_t>(tid)];
+      for (const Nb &a : sh.of(i)) {
+        if (a.j > static_cast<int>(i) || a.r >= cut2_b) {
+          continue;
+        }
+        double c6 = 0, dni = 0, dnj = 0, dqi = 0, dqj = 0;
+        c6_of(gw[i], gw[static_cast<std::size_t>(a.j)], z[i], z[a.j], &c6, &dni, &dnj, &dqi, &dqj);
+        const double rrij = 3.0 * r4[i] * r4[static_cast<std::size_t>(a.j)];
+        const double r0 = param.a1 * std::sqrt(rrij) + param.a2;
+        const double r0_2 = r0 * r0;
+        const double r0_6 = r0_2 * r0_2 * r0_2;
+        const double r0_8 = r0_6 * r0_2;
+        const double r2 = a.r * a.r;
+        const double r4p = r2 * r2;
+        const double t6 = 1.0 / (r4p * r2 + r0_6);
+        const double t8 = 1.0 / (r4p * r4p + r0_8);
+        const double d6 = -6.0 * r4p * t6 * t6;
+        const double d8 = -8.0 * r4p * r2 * t8 * t8;
+        const double edisp = param.s6 * t6 + param.s8 * rrij * t8;
+        const double gdisp = param.s6 * d6 + param.s8 * rrij * d8;
+        const double pair = -c6 * edisp;
+        eadd += (a.j == static_cast<int>(i) ? 0.5 * pair : pair);
+        // dftd4 accumulates the charge and CN derivatives with the full
+        // kernel on a self image, while the energy of that image stays halved.
+        C[i] += dni * (-edisp);
+        Q[i] += dqi * (-edisp);
+        if (a.j != static_cast<int>(i)) {
+          C[static_cast<std::size_t>(a.j)] += dnj * (-edisp);
+          Q[static_cast<std::size_t>(a.j)] += dqj * (-edisp);
+        }
+        const double gx = c6 * gdisp * a.x;
+        const double gy = c6 * gdisp * a.y;
+        const double gz = c6 * gdisp * a.z;
+        G[3 * i] += gx;
+        G[3 * i + 1] += gy;
+        G[3 * i + 2] += gz;
+        if (a.j != static_cast<int>(i)) {
+          G[3 * a.j] -= gx;
+          G[3 * a.j + 1] -= gy;
+          G[3 * a.j + 2] -= gz;
+        }
       }
-      double c6 = 0, dni = 0, dnj = 0, dqi = 0, dqj = 0;
-      c6_of(gw[i], gw[static_cast<std::size_t>(a.j)], z[i], z[a.j], &c6, &dni, &dnj, &dqi, &dqj);
-      const double rrij = 3.0 * r4[i] * r4[static_cast<std::size_t>(a.j)];
-      const double r0 = param.a1 * std::sqrt(rrij) + param.a2;
-      const double r0_2 = r0 * r0;
-      const double r0_6 = r0_2 * r0_2 * r0_2;
-      const double r0_8 = r0_6 * r0_2;
-      const double r2 = a.r * a.r;
-      const double r4p = r2 * r2;
-      const double t6 = 1.0 / (r4p * r2 + r0_6);
-      const double t8 = 1.0 / (r4p * r4p + r0_8);
-      const double d6 = -6.0 * r4p * t6 * t6;
-      const double d8 = -8.0 * r4p * r2 * t8 * t8;
-      const double edisp = param.s6 * t6 + param.s8 * rrij * t8;
-      const double gdisp = param.s6 * d6 + param.s8 * rrij * d8;
-      const double pair = -c6 * edisp;
-      ene += (a.j == static_cast<int>(i) ? 0.5 * pair : pair);
-      // dftd4 accumulates the charge and CN derivatives with the full
-      // kernel on a self image, while the energy of that image stays halved.
-      dedcn[i] += dni * (-edisp);
-      dedq[i] += dqi * (-edisp);
-      if (a.j != static_cast<int>(i)) {
-        dedcn[static_cast<std::size_t>(a.j)] += dnj * (-edisp);
-        dedq[static_cast<std::size_t>(a.j)] += dqj * (-edisp);
-      }
-      const double gx = c6 * gdisp * a.x;
-      const double gy = c6 * gdisp * a.y;
-      const double gz = c6 * gdisp * a.z;
-      grad[3 * i] += gx;
-      grad[3 * i + 1] += gy;
-      grad[3 * i + 2] += gz;
-      if (a.j != static_cast<int>(i)) {
-        grad[3 * a.j] -= gx;
-        grad[3 * a.j + 1] -= gy;
-        grad[3 * a.j + 2] -= gz;
-      }
-    }
+  }
+  for (int t = 0; t < pair_nt; ++t) {
+    ene += pair_e[static_cast<std::size_t>(t)];
+    const auto &lg = pair_g[static_cast<std::size_t>(t)];
+    const auto &lc = pair_c[static_cast<std::size_t>(t)];
+    const auto &lq = pair_q[static_cast<std::size_t>(t)];
+    for (std::size_t k = 0; k < grad.size(); ++k) grad[k] += lg[k];
+    for (std::size_t k = 0; k < n; ++k) { dedcn[k] += lc[k]; dedq[k] += lq[k]; }
   }
   if (param.s9 != 0.0) {
+    int atm_nt = 1;
+#ifdef _OPENMP
+    atm_nt = std::max(1, omp_get_max_threads());
+#endif
+    std::vector<std::vector<double>> atm_g(static_cast<std::size_t>(atm_nt), std::vector<double>(3 * n, 0.0));
+    std::vector<std::vector<double>> atm_c(static_cast<std::size_t>(atm_nt), std::vector<double>(n, 0.0));
+    std::vector<double> atm_e(static_cast<std::size_t>(atm_nt), 0.0);
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
     for (std::size_t i = 0; i < n; ++i) {
-      for (const Nb &a : sh.of(i)) {
-        if (a.j > static_cast<int>(i) || a.r >= cut3_b) {
-          continue;
-        }
-        double c6ij = 0, dni = 0, dnj = 0, dqi = 0, dqj = 0;
-        c6_of(gw0[i], gw0[static_cast<std::size_t>(a.j)], z[i], z[a.j], &c6ij, &dni, &dnj, &dqi, &dqj);
-        if (!(std::abs(c6ij) > 0.0)) {
-          continue;
-        }
-        const double r0ij =
-            param.a1 * std::sqrt(3.0 * r4[i] * r4[static_cast<std::size_t>(a.j)]) + param.a2;
-        for (const Nb &b : sh.of(i)) {
-          if (b.j > a.j || b.r >= cut3_b) {
+      const int tid =
+#ifdef _OPENMP
+          omp_get_thread_num();
+#else
+          0;
+#endif
+      double *const G = atm_g[static_cast<std::size_t>(tid)].data();
+      double *const C = atm_c[static_cast<std::size_t>(tid)].data();
+      double &eadd = atm_e[static_cast<std::size_t>(tid)];
+        for (const Nb &a : sh.of(i)) {
+          if (a.j > static_cast<int>(i) || a.r >= cut3_b) {
             continue;
           }
-          double c6ik = 0, dik_i = 0, dik_k = 0, u1 = 0, u2 = 0;
-          c6_of(gw0[i], gw0[static_cast<std::size_t>(b.j)], z[i], z[b.j], &c6ik, &dik_i, &dik_k, &u1, &u2);
-          double c6jk = 0, djk_j = 0, djk_k = 0;
-          c6_of(gw0[static_cast<std::size_t>(a.j)], gw0[static_cast<std::size_t>(b.j)], z[a.j], z[b.j],
-                &c6jk, &djk_j, &djk_k, &u1, &u2);
-          if (!(std::abs(c6ik) > 0.0) || !(std::abs(c6jk) > 0.0)) {
+          double c6ij = 0, dni = 0, dnj = 0, dqi = 0, dqj = 0;
+          c6_of(gw0[i], gw0[static_cast<std::size_t>(a.j)], z[i], z[a.j], &c6ij, &dni, &dnj, &dqi, &dqj);
+          if (!(std::abs(c6ij) > 0.0)) {
             continue;
           }
-          const double vjkx = b.x - a.x;
-          const double vjky = b.y - a.y;
-          const double vjkz = b.z - a.z;
-          const double rjk = std::sqrt(vjkx * vjkx + vjky * vjky + vjkz * vjkz);
-          if (!(rjk > 0.0) || rjk >= cut3_b) {
-            continue;
+          const double r0ij =
+              param.a1 * std::sqrt(3.0 * r4[i] * r4[static_cast<std::size_t>(a.j)]) + param.a2;
+          for (const Nb &b : sh.of(i)) {
+            if (b.j > a.j || b.r >= cut3_b) {
+              continue;
+            }
+            double c6ik = 0, dik_i = 0, dik_k = 0, u1 = 0, u2 = 0;
+            c6_of(gw0[i], gw0[static_cast<std::size_t>(b.j)], z[i], z[b.j], &c6ik, &dik_i, &dik_k, &u1, &u2);
+            double c6jk = 0, djk_j = 0, djk_k = 0;
+            c6_of(gw0[static_cast<std::size_t>(a.j)], gw0[static_cast<std::size_t>(b.j)], z[a.j], z[b.j],
+                  &c6jk, &djk_j, &djk_k, &u1, &u2);
+            if (!(std::abs(c6ik) > 0.0) || !(std::abs(c6jk) > 0.0)) {
+              continue;
+            }
+            const double vjkx = b.x - a.x;
+            const double vjky = b.y - a.y;
+            const double vjkz = b.z - a.z;
+            const double rjk = std::sqrt(vjkx * vjkx + vjky * vjky + vjkz * vjkz);
+            if (!(rjk > 0.0) || rjk >= cut3_b) {
+              continue;
+            }
+            const double r2ij = a.r * a.r;
+            const double r2ik = b.r * b.r;
+            const double r2jk = rjk * rjk;
+            const double r2 = r2ij * r2ik * r2jk;
+            const double r1 = std::sqrt(r2);
+            const double r3 = r2 * r1;
+            const double r5 = r3 * r2;
+            const double r0ik =
+                param.a1 * std::sqrt(3.0 * r4[i] * r4[static_cast<std::size_t>(b.j)]) + param.a2;
+            const double r0jk = param.a1 * std::sqrt(3.0 * r4[static_cast<std::size_t>(a.j)] *
+                                                     r4[static_cast<std::size_t>(b.j)]) +
+                                param.a2;
+            const double r0 = r0ij * r0ik * r0jk;
+            const double alp3 = param.alp / 3.0;
+            const double fdmp = 1.0 / (1.0 + 6.0 * std::pow(r0 / r1, alp3));
+            const double ang = 0.375 * (r2ij + r2jk - r2ik) * (r2ij - r2jk + r2ik) *
+                                   (-r2ij + r2jk + r2ik) / r5 +
+                               1.0 / r3;
+            const double c9 = -param.s9 * std::sqrt(std::abs(c6ij * c6ik * c6jk));
+            const double triple = triple_weight(static_cast<int>(i), a.j, b.j);
+            const double dE = ang * fdmp * c9 * triple;
+            eadd -= dE;
+            C[i] -= dE * 0.5 * (dni / c6ij + dik_i / c6ik);
+            C[static_cast<std::size_t>(a.j)] -= dE * 0.5 * (dnj / c6ij + djk_j / c6jk);
+            C[static_cast<std::size_t>(b.j)] -= dE * 0.5 * (dik_k / c6ik + djk_k / c6jk);
+            const double r0r = std::pow(r0 / r1, alp3);
+            const double dfdmp = -2.0 * param.alp * r0r * fdmp * fdmp;
+            const double dij =
+                -0.375 *
+                (r2ij * r2ij * r2ij + r2ij * r2ij * (r2jk + r2ik) +
+                 r2ij * (3.0 * r2jk * r2jk + 2.0 * r2jk * r2ik + 3.0 * r2ik * r2ik) -
+                 5.0 * (r2jk - r2ik) * (r2jk - r2ik) * (r2jk + r2ik)) /
+                r5;
+            const double dik =
+                -0.375 *
+                (r2ik * r2ik * r2ik + r2ik * r2ik * (r2jk + r2ij) +
+                 r2ik * (3.0 * r2jk * r2jk + 2.0 * r2jk * r2ij + 3.0 * r2ij * r2ij) -
+                 5.0 * (r2jk - r2ij) * (r2jk - r2ij) * (r2jk + r2ij)) /
+                r5;
+            const double djk =
+                -0.375 *
+                (r2jk * r2jk * r2jk + r2jk * r2jk * (r2ik + r2ij) +
+                 r2jk * (3.0 * r2ik * r2ik + 2.0 * r2ik * r2ij + 3.0 * r2ij * r2ij) -
+                 5.0 * (r2ik - r2ij) * (r2ik - r2ij) * (r2ik + r2ij)) /
+                r5;
+            const double scale_ij = c9 * (-dij * fdmp + ang * dfdmp) / r2ij;
+            const double scale_ik = c9 * (-dik * fdmp + ang * dfdmp) / r2ik;
+            const double scale_jk = c9 * (-djk * fdmp + ang * dfdmp) / r2jk;
+            const double gijx = scale_ij * a.x;
+            const double gijy = scale_ij * a.y;
+            const double gijz = scale_ij * a.z;
+            const double gikx = scale_ik * b.x;
+            const double giky = scale_ik * b.y;
+            const double gikz = scale_ik * b.z;
+            const double gjkx = scale_jk * (b.x - a.x);
+            const double gjky = scale_jk * (b.y - a.y);
+            const double gjkz = scale_jk * (b.z - a.z);
+            G[3 * i] -= (gijx + gikx) * triple;
+            G[3 * i + 1] -= (gijy + giky) * triple;
+            G[3 * i + 2] -= (gijz + gikz) * triple;
+            G[3 * a.j] += (gijx - gjkx) * triple;
+            G[3 * a.j + 1] += (gijy - gjky) * triple;
+            G[3 * a.j + 2] += (gijz - gjkz) * triple;
+            G[3 * b.j] += (gikx + gjkx) * triple;
+            G[3 * b.j + 1] += (giky + gjky) * triple;
+            G[3 * b.j + 2] += (gikz + gjkz) * triple;
           }
-          const double r2ij = a.r * a.r;
-          const double r2ik = b.r * b.r;
-          const double r2jk = rjk * rjk;
-          const double r2 = r2ij * r2ik * r2jk;
-          const double r1 = std::sqrt(r2);
-          const double r3 = r2 * r1;
-          const double r5 = r3 * r2;
-          const double r0ik =
-              param.a1 * std::sqrt(3.0 * r4[i] * r4[static_cast<std::size_t>(b.j)]) + param.a2;
-          const double r0jk = param.a1 * std::sqrt(3.0 * r4[static_cast<std::size_t>(a.j)] *
-                                                   r4[static_cast<std::size_t>(b.j)]) +
-                              param.a2;
-          const double r0 = r0ij * r0ik * r0jk;
-          const double alp3 = param.alp / 3.0;
-          const double fdmp = 1.0 / (1.0 + 6.0 * std::pow(r0 / r1, alp3));
-          const double ang = 0.375 * (r2ij + r2jk - r2ik) * (r2ij - r2jk + r2ik) *
-                                 (-r2ij + r2jk + r2ik) / r5 +
-                             1.0 / r3;
-          const double c9 = -param.s9 * std::sqrt(std::abs(c6ij * c6ik * c6jk));
-          const double triple = triple_weight(static_cast<int>(i), a.j, b.j);
-          const double dE = ang * fdmp * c9 * triple;
-          ene -= dE;
-          dedcn[i] -= dE * 0.5 * (dni / c6ij + dik_i / c6ik);
-          dedcn[static_cast<std::size_t>(a.j)] -= dE * 0.5 * (dnj / c6ij + djk_j / c6jk);
-          dedcn[static_cast<std::size_t>(b.j)] -= dE * 0.5 * (dik_k / c6ik + djk_k / c6jk);
-          const double r0r = std::pow(r0 / r1, alp3);
-          const double dfdmp = -2.0 * param.alp * r0r * fdmp * fdmp;
-          const double dij =
-              -0.375 *
-              (r2ij * r2ij * r2ij + r2ij * r2ij * (r2jk + r2ik) +
-               r2ij * (3.0 * r2jk * r2jk + 2.0 * r2jk * r2ik + 3.0 * r2ik * r2ik) -
-               5.0 * (r2jk - r2ik) * (r2jk - r2ik) * (r2jk + r2ik)) /
-              r5;
-          const double dik =
-              -0.375 *
-              (r2ik * r2ik * r2ik + r2ik * r2ik * (r2jk + r2ij) +
-               r2ik * (3.0 * r2jk * r2jk + 2.0 * r2jk * r2ij + 3.0 * r2ij * r2ij) -
-               5.0 * (r2jk - r2ij) * (r2jk - r2ij) * (r2jk + r2ij)) /
-              r5;
-          const double djk =
-              -0.375 *
-              (r2jk * r2jk * r2jk + r2jk * r2jk * (r2ik + r2ij) +
-               r2jk * (3.0 * r2ik * r2ik + 2.0 * r2ik * r2ij + 3.0 * r2ij * r2ij) -
-               5.0 * (r2ik - r2ij) * (r2ik - r2ij) * (r2ik + r2ij)) /
-              r5;
-          const double scale_ij = c9 * (-dij * fdmp + ang * dfdmp) / r2ij;
-          const double scale_ik = c9 * (-dik * fdmp + ang * dfdmp) / r2ik;
-          const double scale_jk = c9 * (-djk * fdmp + ang * dfdmp) / r2jk;
-          const double gijx = scale_ij * a.x;
-          const double gijy = scale_ij * a.y;
-          const double gijz = scale_ij * a.z;
-          const double gikx = scale_ik * b.x;
-          const double giky = scale_ik * b.y;
-          const double gikz = scale_ik * b.z;
-          const double gjkx = scale_jk * (b.x - a.x);
-          const double gjky = scale_jk * (b.y - a.y);
-          const double gjkz = scale_jk * (b.z - a.z);
-          grad[3 * i] -= (gijx + gikx) * triple;
-          grad[3 * i + 1] -= (gijy + giky) * triple;
-          grad[3 * i + 2] -= (gijz + gikz) * triple;
-          grad[3 * a.j] += (gijx - gjkx) * triple;
-          grad[3 * a.j + 1] += (gijy - gjky) * triple;
-          grad[3 * a.j + 2] += (gijz - gjkz) * triple;
-          grad[3 * b.j] += (gikx + gjkx) * triple;
-          grad[3 * b.j + 1] += (giky + gjky) * triple;
-          grad[3 * b.j + 2] += (gikz + gjkz) * triple;
         }
-      }
+    }
+    for (int t = 0; t < atm_nt; ++t) {
+      ene += atm_e[static_cast<std::size_t>(t)];
+      const auto &lg = atm_g[static_cast<std::size_t>(t)];
+      const auto &lc = atm_c[static_cast<std::size_t>(t)];
+      for (std::size_t k = 0; k < grad.size(); ++k) grad[k] += lg[k];
+      for (std::size_t k = 0; k < n; ++k) dedcn[k] += lc[k];
     }
   }
   cn_force(sh, z, n, cut_cn * to_b, true, false, cn_disp, dedcn, grad.data());
