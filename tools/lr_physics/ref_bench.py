@@ -406,6 +406,10 @@ def reference_and_match(path):
 
 def drive(geom_dir, binary, threads_list):
     print("command ref_bench.py drive", flush=True)
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
+    print(f"head {head}", flush=True)
+    print(f"tree {tree}", flush=True)
     print(f"binary {binary}", flush=True)
     print(f"cpu {cpu_model()}", flush=True)
     print(f"hostname {socket.gethostname()}", flush=True)
