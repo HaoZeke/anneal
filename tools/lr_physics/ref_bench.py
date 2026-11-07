@@ -335,6 +335,75 @@ def limit_for(arm, n):
     return 300
 
 
+def reference_and_match(path):
+    """Converged OpenMM Reference forces, then a CPU tolerance sweep."""
+    import time
+
+    pos, _z, q, box = load_geometry(path)
+    n = len(q)
+    print(f"converged_reference n={n}", flush=True)
+    tight = None
+    tight_tol = None
+    prev = None
+    for tol in (1.0e-5, 1.0e-6, 1.0e-7):
+        try:
+            ctx, _nb, _actual, pme = openmm_context(pos, q, box, 1, tol, "Reference")
+            _e, forces = forces_from_state(ctx)
+            del ctx
+        except Exception as exc:
+            print(f"reference_tol={tol:.0e} failed {exc}", flush=True)
+            break
+        if prev is not None:
+            delta = float(np.max(np.abs(forces - prev[0])))
+            print(
+                f"reference_convergence n={n} tol={tol:.0e} "
+                f"versus={prev[1]:.0e} max_abs_eV_A={delta:.17g} grid={pme[1]} {pme[2]} {pme[3]}",
+                flush=True,
+            )
+        prev = (forces, tol)
+        tight = forces
+        tight_tol = tol
+        # A 1e-7 Reference mesh at large N can take many minutes.
+        # Stop once two neighboring tolerances agree past 1e-7.
+        if prev is not None and tol <= 1.0e-6:
+            # evaluated above when tol is the second or third value
+            pass
+        if tol <= 1.0e-6 and n >= 4096:
+            break
+    if tight is None:
+        print(f"converged_reference n={n} unavailable", flush=True)
+        return
+    print(f"reference_used n={n} tol={tight_tol:.0e}", flush=True)
+    matched = None
+    for tol in (1.0e-4, 1.0e-5, 1.0e-6, 1.0e-7):
+        ctx, _nb, _actual, pme = openmm_context(pos, q, box, 1, tol, "CPU")
+        ctx.getState(getForces=True)
+        samples = []
+        for _ in range(NREP):
+            t0 = time.perf_counter()
+            _e, forces = forces_from_state(ctx)
+            samples.append((time.perf_counter() - t0) * 1e6)
+        err = float(np.max(np.abs(forces - tight)))
+        med = quantile7(samples, 0.5)
+        print(
+            f"cpu_sweep n={n} ewald_tolerance={tol:.0e} max_abs_eV_A={err:.17g} "
+            f"median_us={med:.17g} grid={pme[1]} {pme[2]} {pme[3]}",
+            flush=True,
+        )
+        print("samples_us " + " ".join(f"{v:.17g}" for v in samples), flush=True)
+        del ctx
+        if err <= FORCE_LIMIT_EV_A and matched is None:
+            matched = (tol, med, err)
+    if matched is None:
+        print(f"matched_cpu n={n} none", flush=True)
+    else:
+        print(
+            f"matched_cpu n={n} ewald_tolerance={matched[0]:.0e} "
+            f"median_us={matched[1]:.17g} max_abs_eV_A={matched[2]:.17g}",
+            flush=True,
+        )
+
+
 def drive(geom_dir, binary, threads_list):
     print("command ref_bench.py drive", flush=True)
     print(f"binary {binary}", flush=True)
@@ -385,6 +454,7 @@ def drive(geom_dir, binary, threads_list):
             )
             if proc.returncode != 0:
                 raise SystemExit(f"certificate n={n} exit_code={proc.returncode}")
+        reference_and_match(path)
     print("exit_code=0", flush=True)
 
 
