@@ -907,21 +907,6 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
     slab_base = slabs.data();
   }
   const auto t_spread0 = std::chrono::steady_clock::now();
-  std::vector<std::size_t> order_z;
-  if (nthreads <= 1 || slab_base == nullptr) {
-    order_z.resize(n);
-    for (std::size_t i = 0; i < n; ++i) {
-      order_z[i] = i;
-    }
-    std::sort(order_z.begin(), order_z.end(), [&](std::size_t a, std::size_t b) {
-      double ra[3] = {pos[3 * a], pos[3 * a + 1], pos[3 * a + 2]};
-      double rb[3] = {pos[3 * b], pos[3 * b + 1], pos[3 * b + 2]};
-      double sa[3], sb[3];
-      cell.fractional(ra, sa);
-      cell.fractional(rb, sb);
-      return sa[2] < sb[2];
-    });
-  }
   double *real_grid = reinterpret_cast<double *>(grid.data());
   auto deposit = [&](std::size_t i, bool atomic_add, float *dest) {
     double r[3] = {pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]};
@@ -1006,8 +991,8 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
     }
   };
   if (nthreads <= 1 || slab_base == nullptr) {
-    for (std::size_t k = 0; k < n; ++k) {
-      deposit(order_z[k], false, nullptr);
+    for (std::size_t i = 0; i < n; ++i) {
+      deposit(i, false, nullptr);
     }
   } else {
     auto z_lo = [nz, nthreads](int tid) { return tid * nz / nthreads; };
