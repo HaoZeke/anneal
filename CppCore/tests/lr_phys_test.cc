@@ -201,6 +201,20 @@ void test_madelung() {
   cfg.skin = 0.2;
   cfg.periodic = true;
   CoulombPot pot(cfg, std::make_shared<FixedCharges>(q, 0.0));
+  std::vector<double> hq;
+  double htotal = 1.0;
+  rgpot::ForceInput hin{q.size(), pos.data(), z.data(), box};
+  rgpot::lr::FnCharges hooked(
+      [](const rgpot::ForceInput &in, double *qq, double *total, void *) {
+        if (in.nAtoms >= 2) {
+          qq[0] = 1.0;
+          qq[1] = -1.0;
+        }
+        *total = 0.0;
+      },
+      nullptr);
+  hooked.load(hin, &hq, &htotal);
+  check(hq.size() == q.size() && htotal == 0.0, "a charge callback fills the mesh");
   check(pot.caps().periodic && pot.caps().stress, "coulomb caps report periodic stress");
   const auto key = pot.paramsKey();
   check(key == pot.paramsKey(), "coulomb params key is stable");

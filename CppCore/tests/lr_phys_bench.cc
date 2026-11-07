@@ -123,17 +123,21 @@ int read_sys_int(const std::string &path) {
   return in ? value : -1;
 }
 
+int topology_fallback(int *sockets, int *smt) {
+  if (sockets != nullptr) {
+    *sockets = 1;
+  }
+  if (smt != nullptr) {
+    *smt = 1;
+  }
+  return 1;
+}
+
 int physical_cores(int *sockets, int *smt) {
   cpu_set_t allowed;
   CPU_ZERO(&allowed);
   if (sched_getaffinity(0, sizeof(allowed), &allowed) != 0) {
-    if (sockets != nullptr) {
-      *sockets = 1;
-    }
-    if (smt != nullptr) {
-      *smt = 1;
-    }
-    return 1;
+    return topology_fallback(sockets, smt);
   }
   std::vector<std::pair<int, int>> ids;
   int allowed_n = 0;
@@ -571,6 +575,16 @@ int main(int argc, char **argv) {
   if (std::getenv("LR_COVER_FAILURES") != nullptr) {
     quantile7(std::vector<double>{1.0, 1.0, 1.0}, 0.0);
     pipe_first("sha256sum /no/such/rgpot-file");
+    int sockets = 0;
+    int smt = 0;
+    if (topology_fallback(&sockets, &smt) != 1 || sockets != 1 || smt != 1) {
+      std::cerr << "topology fallback missed\n";
+      return 2;
+    }
+    if (smooth_fft(79) != 80) {
+      std::cerr << "smooth size missed\n";
+      return 2;
+    }
     const auto scratch = [](const char *name) {
       return (std::filesystem::temp_directory_path() / name).string();
     };
