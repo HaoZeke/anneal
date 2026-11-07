@@ -335,8 +335,44 @@ def limit_for(arm, n):
     return 300
 
 
-def reference_and_match(path):
-    """Converged OpenMM Reference forces, then a CPU tolerance sweep."""
+def time_rgpot_pme(binary, path, threads, tol):
+    """Time rgpot on the accuracy-rule mesh for one force error."""
+    env = os.environ.copy()
+    env["LR_PME_TOL"] = f"{tol:.17g}"
+    env["LR_LADDERS"] = "strong"
+    env["LR_METHODS"] = "pme"
+    n = int(Path(path).stem[1:])
+    env["LR_NMIN"] = str(n)
+    env["LR_NMAX"] = str(n)
+    env["LR_TMIN"] = str(threads)
+    env["LR_TMAX"] = str(threads)
+    env["LR_GEOM_DIR"] = str(Path(path).resolve().parent)
+    env.pop("OMP_NUM_THREADS", None)
+    env.pop("OMP_PROC_BIND", None)
+    env.pop("OMP_PLACES", None)
+    proc = subprocess.run([binary, "6"], check=True, capture_output=True, text=True, env=env)
+    median = None
+    grid = None
+    samples = None
+    for line in proc.stdout.splitlines():
+        if line.startswith("strong pme "):
+            for part in line.split():
+                if part.startswith("median_us="):
+                    median = float(part.split("=", 1)[1])
+        if " grid=" in line and line.startswith("point "):
+            grid = line.split(" grid=", 1)[1].split(" spread_us=", 1)[0]
+        if line.startswith("samples_us "):
+            samples = line
+    return median, grid, samples, proc.stdout
+
+
+def reference_and_match(path, binary=None):
+    """Converged OpenMM Reference forces, then a CPU tolerance sweep.
+
+    The head-to-head column times OpenMM at the tolerance that reached
+    its force-error floor, and rgpot on the accuracy-rule mesh for that
+    same error. The 1e-4 rgpot column is a separate run.
+    """
     import time
 
     pos, _z, q, box = load_geometry(path)
@@ -375,6 +411,7 @@ def reference_and_match(path):
         return
     print(f"reference_used n={n} tol={tight_tol:.0e}", flush=True)
     matched = None
+    sweep = []
     for tol in (1.0e-4, 1.0e-5, 1.0e-6, 1.0e-7):
         ctx, _nb, _actual, pme = openmm_context(pos, q, box, 1, tol, "CPU")
         ctx.getState(getForces=True)
@@ -392,6 +429,7 @@ def reference_and_match(path):
         )
         print("samples_us " + " ".join(f"{v:.17g}" for v in samples), flush=True)
         del ctx
+        sweep.append((tol, err, med, pme[1], pme[2], pme[3]))
         if err <= FORCE_LIMIT_EV_A and matched is None:
             matched = (tol, med, err)
     if matched is None:
@@ -402,6 +440,38 @@ def reference_and_match(path):
             f"median_us={matched[1]:.17g} max_abs_eV_A={matched[2]:.17g}",
             flush=True,
         )
+    if not sweep:
+        return
+    floor_err = min(row[1] for row in sweep)
+    # The loosest tolerance that sits on the floor. Tighter knobs that
+    # do not move the error are not a more accurate comparator.
+    floor_row = next(row for row in sweep if row[1] <= floor_err * (1.0 + 1.0e-9) + 1.0e-18)
+    reaches = floor_err <= FORCE_LIMIT_EV_A
+    print(
+        f"openmm_cpu_floor n={n} max_abs_eV_A={floor_err:.17g} "
+        f"reaches_1e-4={'yes' if reaches else 'no'} "
+        f"ewald_tolerance={floor_row[0]:.0e} median_us={floor_row[2]:.17g} "
+        f"grid={floor_row[3]} {floor_row[4]} {floor_row[5]}",
+        flush=True,
+    )
+    if not reaches:
+        print(
+            f"openmm_cpu_does_not_reach_1e-4 n={n} floor_max_abs_eV_A={floor_err:.17g}",
+            flush=True,
+        )
+    if binary:
+        rgpot_med, rgpot_grid, rgpot_samples, _out = time_rgpot_pme(binary, path, 1, floor_err)
+        if rgpot_med is None:
+            raise SystemExit(f"rgpot matched timing produced no median n={n}")
+        print(
+            f"matched_head_to_head n={n} threads=1 "
+            f"openmm_median_us={floor_row[2]:.17g} openmm_max_abs_eV_A={floor_err:.17g} "
+            f"rgpot_tol={floor_err:.17g} rgpot_median_us={rgpot_med:.17g} "
+            f"rgpot_grid={rgpot_grid}",
+            flush=True,
+        )
+        if rgpot_samples:
+            print("rgpot_" + rgpot_samples, flush=True)
 
 
 def drive(geom_dir, binary, threads_list):
@@ -458,7 +528,7 @@ def drive(geom_dir, binary, threads_list):
             )
             if proc.returncode != 0:
                 raise SystemExit(f"certificate n={n} exit_code={proc.returncode}")
-        reference_and_match(path)
+        reference_and_match(path, binary)
     print("exit_code=0", flush=True)
 
 
