@@ -4,6 +4,7 @@
 #include "rgpot/LongRange/Electro.hpp"
 
 #include "rgpot/LongRange/Compensate.hpp"
+#include "rgpot/LongRange/Team.hpp"
 #include "rgpot/LongRange/Lattice.hpp"
 #include "rgpot/ParamHash.hpp"
 #include "rgpot/stress.hpp"
@@ -369,21 +370,22 @@ void fft_radix2(std::vector<std::complex<double>> &a, bool inverse) {
   }
 }
 
-void fft3(std::vector<std::complex<double>> &g, int nx, int ny, int nz, bool inverse) {
+void fft3(std::vector<std::complex<double>> &g, int nx, int ny, int nz, bool inverse, int team) {
   auto index = [nx, ny](int x, int y, int z) {
     return static_cast<std::size_t>(x + nx * (y + ny * z));
   };
   // Each pencil is independent. A barrier between axes keeps the next
-  // direction from reading a line that is still being written.
+  // direction from reading a line that is still being written. Threads
+  // past `team` sit out so a small grid does not pay for a full team.
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
   {
+    const int tid = thread_id();
+    const int cap = team > 0 ? team : 1;
     std::vector<std::complex<double>> line(static_cast<std::size_t>(std::max(nx, std::max(ny, nz))));
-#ifdef _OPENMP
-#pragma omp for schedule(static)
-#endif
-    for (int z = 0; z < nz; ++z) {
+    if (tid < cap) {
+    for (int z = tid; z < nz; z += cap) {
       for (int y = 0; y < ny; ++y) {
         for (int x = 0; x < nx; ++x) {
           line[static_cast<std::size_t>(x)] = g[index(x, y, z)];
@@ -396,10 +398,12 @@ void fft3(std::vector<std::complex<double>> &g, int nx, int ny, int nz, bool inv
         }
       }
     }
+    }
 #ifdef _OPENMP
-#pragma omp for schedule(static)
+#pragma omp barrier
 #endif
-    for (int z = 0; z < nz; ++z) {
+    if (tid < cap) {
+    for (int z = tid; z < nz; z += cap) {
       for (int x = 0; x < nx; ++x) {
         for (int y = 0; y < ny; ++y) {
           line[static_cast<std::size_t>(y)] = g[index(x, y, z)];
@@ -412,10 +416,12 @@ void fft3(std::vector<std::complex<double>> &g, int nx, int ny, int nz, bool inv
         }
       }
     }
+    }
 #ifdef _OPENMP
-#pragma omp for schedule(static)
+#pragma omp barrier
 #endif
-    for (int y = 0; y < ny; ++y) {
+    if (tid < cap) {
+    for (int y = tid; y < ny; y += cap) {
       for (int x = 0; x < nx; ++x) {
         for (int z = 0; z < nz; ++z) {
           line[static_cast<std::size_t>(z)] = g[index(x, y, z)];
@@ -427,6 +433,7 @@ void fft3(std::vector<std::complex<double>> &g, int nx, int ny, int nz, bool inv
           g[index(x, y, z)] = line[static_cast<std::size_t>(z)];
         }
       }
+    }
     }
   }
 }
@@ -473,18 +480,18 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
     std::vector<double> wx, wy, wz, dx, dy, dz;
   };
   std::vector<AtomSpline> atoms(n);
-  const int nthreads =
-#ifdef _OPENMP
-      std::max(1, omp_get_max_threads());
-#else
-      1;
-#endif
+  // 256 atoms and below are slower on eight threads than on four.
+  // Extra threads sit the call out. Resizing the pool is much slower.
+  const int nthreads = work_team(n, 256, 4);
   std::vector<std::vector<std::complex<double>>> partial(
       static_cast<std::size_t>(nthreads), std::vector<std::complex<double>>(ntot));
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static)
+#pragma omp parallel
 #endif
-  for (std::size_t i = 0; i < n; ++i) {
+  {
+    const int tid_cap = thread_id();
+    if (tid_cap < nthreads) {
+  for (std::size_t i = static_cast<std::size_t>(tid_cap); i < n; i += static_cast<std::size_t>(nthreads)) {
     double r[3] = {pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]};
     double fs[3];
     cell.fractional(r, fs);
@@ -542,13 +549,15 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
       }
     }
   }
+    }
+  }
   for (int t = 0; t < nthreads; ++t) {
     const auto &src = partial[static_cast<std::size_t>(t)];
     for (std::size_t m = 0; m < ntot; ++m) {
       grid[m] += src[m];
     }
   }
-  fft3(grid, nx, ny, nz, false);
+  fft3(grid, nx, ny, nz, false, nthreads);
   std::vector<std::complex<double>> phihat(ntot);
   Neumaier rec;
   const double pref = kKe / (2.0 * kPi * cell.volume);
@@ -619,11 +628,14 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
   out->strain[0] += -ebg;
   out->strain[1] += -ebg;
   out->strain[2] += -ebg;
-  fft3(phihat, nx, ny, nz, true);
+  fft3(phihat, nx, ny, nz, true, nthreads);
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static)
+#pragma omp parallel
 #endif
-  for (std::size_t i = 0; i < n; ++i) {
+  {
+    const int tid_cap = thread_id();
+    if (tid_cap < nthreads) {
+  for (std::size_t i = static_cast<std::size_t>(tid_cap); i < n; i += static_cast<std::size_t>(nthreads)) {
     const auto &sp = atoms[i];
     double pot = 0.0;
     double dQ[3] = {};
@@ -658,6 +670,8 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
         dE += dQ[d] * scale[d] * cell.inv[a][d];
       }
       F[3 * i + a] += -dE;
+    }
+  }
     }
   }
   if (dE_dq != nullptr) {

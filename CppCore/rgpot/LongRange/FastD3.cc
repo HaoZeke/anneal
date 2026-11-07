@@ -4,6 +4,7 @@
 #include "rgpot/LongRange/FastD3.hpp"
 
 #include "rgpot/LongRange/Pairs.hpp"
+#include "rgpot/LongRange/Team.hpp"
 #include "rgpot/units.hpp"
 
 #include <algorithm>
@@ -138,15 +139,6 @@ double triple_scale(int i, int j, int k) {
   return 0.5;
 }
 
-int thread_count() {
-#ifdef _OPENMP
-  const int n = omp_get_max_threads();
-  return n > 0 ? n : 1;
-#else
-  return 1;
-#endif
-}
-
 int thread_id() {
 #ifdef _OPENMP
   return omp_get_thread_num();
@@ -185,13 +177,16 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
   (void)periodic;
   const double to_b = 1.0 / kBohr;
   const double reach = std::max(cut2, std::max(cut3, cut_cn));
-  const int nt_build = thread_count();
+  // Two threads are the most that help at 128 atoms. Extra threads
+  // sit out so the pool does not get rebuilt.
+  const int nt_build = work_team(n, 128, 2);
   std::vector<int> deg(static_cast<std::size_t>(nt_build) * n, 0);
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
   {
     const int tid = thread_id();
+    if (tid < nt_build) {
     int *mine = deg.data() + static_cast<std::size_t>(tid) * n;
     const std::size_t begin = pairs.size() * static_cast<std::size_t>(tid) / static_cast<std::size_t>(nt_build);
     const std::size_t end = pairs.size() * static_cast<std::size_t>(tid + 1) / static_cast<std::size_t>(nt_build);
@@ -204,6 +199,7 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
       if (pr.i != pr.j) {
         mine[pr.j] += 1;
       }
+    }
     }
   }
   std::vector<int> off(n + 1, 0);
@@ -222,6 +218,9 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
 #endif
   {
     const int tid = thread_id();
+    if (tid >= nt_build) {
+      // This thread is past the work-size cap.
+    } else {
     int *slot = base.data() + static_cast<std::size_t>(tid) * n;
     const std::size_t begin = pairs.size() * static_cast<std::size_t>(tid) / static_cast<std::size_t>(nt_build);
     const std::size_t end = pairs.size() * static_cast<std::size_t>(tid + 1) / static_cast<std::size_t>(nt_build);
@@ -245,6 +244,7 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
         b.z = -a.z;
         nb[static_cast<std::size_t>(slot[pr.j]++)] = b;
       }
+    }
     }
   }
   const auto neigh = [&](std::size_t i) {
@@ -278,7 +278,7 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
     r4[i] = r4r2_of(z[i]);
   }
 
-  const int nt = thread_count();
+  const int nt = nt_build;
   std::vector<double> ene_th(static_cast<std::size_t>(nt), 0.0);
   std::vector<std::vector<double>> dedcn_th(static_cast<std::size_t>(nt), std::vector<double>(n, 0.0));
   std::vector<std::vector<double>> f_th(static_cast<std::size_t>(nt), std::vector<double>(3 * n, 0.0));
@@ -294,14 +294,12 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
 #else
         0;
 #endif
+    if (tid < nt) {
     auto &dedcn = dedcn_th[static_cast<std::size_t>(tid)];
     auto &floc = f_th[static_cast<std::size_t>(tid)];
     auto &sig = sig_th[static_cast<std::size_t>(tid)];
     double ene = 0.0;
-#ifdef _OPENMP
-#pragma omp for schedule(static)
-#endif
-    for (std::size_t i = 0; i < n; ++i) {
+    for (std::size_t i = static_cast<std::size_t>(tid); i < n; i += static_cast<std::size_t>(nt)) {
       for (const Nb &a : neigh(i)) {
         if (a.j > static_cast<int>(i) || a.r >= cut2_b) {
           continue;
@@ -355,10 +353,7 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
         }
       }
     }
-#ifdef _OPENMP
-#pragma omp for schedule(dynamic, 32)
-#endif
-    for (std::size_t i = 0; i < n; ++i) {
+    for (std::size_t i = static_cast<std::size_t>(tid); i < n; i += static_cast<std::size_t>(nt)) {
       for (const Nb &a : neigh(i)) {
         if (a.j > static_cast<int>(i) || a.r >= cut3_b) {
           continue;
@@ -477,6 +472,7 @@ void d3bj_evaluate(const double *pos, const int *z, std::size_t n, const double 
       }
     }
     ene_th[static_cast<std::size_t>(tid)] = ene;
+    }
   }
 
   double ene = 0.0;
