@@ -299,6 +299,10 @@ const char *git_tree() { return RGPOT_GIT_TREE; }
 
 template <class Fn>
 std::vector<double> repeat(int nrep, Fn &&fn, double *warmup_us) {
+  // Two untimed calls settle the allocator and the thread team. The logged
+  // warmup is the last of those, still kept out of the six samples.
+  fn();
+  fn();
   {
     const auto t0 = std::chrono::steady_clock::now();
     fn();
@@ -577,10 +581,10 @@ void dump_forces(const std::string &kind, const std::string &path) {
 }
 
 int main(int argc, char **argv) {
-  // OpenMP workers that keep spinning sit on the cores the transform pool
-  // needs. Sleeping between regions lets that pool run.
+  // The mesh transform runs on this same team. Spinning keeps the next
+  // region from paying a wake-up that is larger than the region itself.
   if (std::getenv("OMP_WAIT_POLICY") == nullptr) {
-    setenv("OMP_WAIT_POLICY", "PASSIVE", 0);
+    setenv("OMP_WAIT_POLICY", "ACTIVE", 0);
   }
   if (const char *dump = std::getenv("LR_DUMP")) {
     const char *geom = std::getenv("LR_GEOM");

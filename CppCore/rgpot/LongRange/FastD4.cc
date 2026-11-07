@@ -256,6 +256,7 @@ void accumulate_cn(const Shell &sh, const int *z, std::size_t n, double cut_b, b
 }
 
 void mat_inv(const double *box, double inv[9], double *vol);
+double bspline4(double x);
 
 void fft3_lines(std::vector<std::complex<double>> &g, int ng, bool inverse) {
   const pocketfft::shape_t shape{static_cast<std::size_t>(ng), static_cast<std::size_t>(ng),
@@ -265,7 +266,12 @@ void fft3_lines(std::vector<std::complex<double>> &g, int ng, bool inverse) {
   const pocketfft::shape_t axes{0, 1, 2};
   const double ntot = static_cast<double>(ng) * static_cast<double>(ng) * static_cast<double>(ng);
   const double scale = inverse ? 1.0 / ntot : 1.0;
-  pocketfft::c2c(shape, stride, stride, axes, !inverse, g.data(), g.data(), scale, 1);
+  int team = 1;
+#ifdef _OPENMP
+  team = std::max(1, omp_get_max_threads());
+#endif
+  pocketfft::c2c(shape, stride, stride, axes, !inverse, g.data(), g.data(), scale,
+                 static_cast<std::size_t>(team));
 }
 
 double bspline_order(int order, double x) {
@@ -323,6 +329,66 @@ struct Operator {
   bool periodic = false;
   std::size_t n = 0;
   static constexpr int kGrid = 32;
+  mutable std::vector<std::complex<double>> grid;
+  mutable std::vector<double> acc_buf;
+  mutable std::vector<int> sp_at;
+  mutable std::vector<double> sp_w;
+
+  void prepare_spread() const {
+    if (sp_at.size() == n * 64) {
+      return;
+    }
+    sp_at.assign(n * 64, 0);
+    sp_w.assign(n * 64, 0.0);
+    double inv[9];
+    double vol = 0.0;
+    mat_inv(box, inv, &vol);
+    constexpr int ng = kGrid;
+    auto index = [](int x, int y, int z) {
+      return x + ng * (y + ng * z);
+    };
+    for (std::size_t i = 0; i < n; ++i) {
+      const double rx = pos[3 * i] * kBohr;
+      const double ry = pos[3 * i + 1] * kBohr;
+      const double rz = pos[3 * i + 2] * kBohr;
+      double fx = inv[0] * rx + inv[1] * ry + inv[2] * rz;
+      double fy = inv[3] * rx + inv[4] * ry + inv[5] * rz;
+      double fz = inv[6] * rx + inv[7] * ry + inv[8] * rz;
+      fx -= std::floor(fx);
+      fy -= std::floor(fy);
+      fz -= std::floor(fz);
+      const double ux = fx * ng;
+      const double uy = fy * ng;
+      const double uz = fz * ng;
+      const int kx = static_cast<int>(std::floor(ux)) - 3;
+      const int ky = static_cast<int>(std::floor(uy)) - 3;
+      const int kz = static_cast<int>(std::floor(uz)) - 3;
+      std::size_t slot = i * 64;
+      for (int iz = 0; iz < 4; ++iz) {
+        int wz = (kz + iz) % ng;
+        if (wz < 0) {
+          wz += ng;
+        }
+        const double tz = bspline4(uz - static_cast<double>(kz + iz));
+        for (int iy = 0; iy < 4; ++iy) {
+          int wy = (ky + iy) % ng;
+          if (wy < 0) {
+            wy += ng;
+          }
+          const double ty = bspline4(uy - static_cast<double>(ky + iy));
+          for (int ix = 0; ix < 4; ++ix) {
+            int wx = (kx + ix) % ng;
+            if (wx < 0) {
+              wx += ng;
+            }
+            sp_at[slot] = index(wx, wy, wz);
+            sp_w[slot] = bspline4(ux - static_cast<double>(kx + ix)) * ty * tz;
+            ++slot;
+          }
+        }
+      }
+    }
+  }
 
   void prepare_kernel() {
     recip_kernel.assign(static_cast<std::size_t>(kGrid) * kGrid * kGrid, 0.0);
@@ -366,53 +432,18 @@ struct Operator {
     }
     constexpr int ng = kGrid;
     const std::size_t ntot = static_cast<std::size_t>(ng) * ng * ng;
-    std::vector<std::complex<double>> grid(ntot);
-    double inv[9];
-    double vol = 0.0;
-    mat_inv(box, inv, &vol);
-    auto index = [](int x, int y, int z) {
-      return static_cast<std::size_t>(x + ng * (y + ng * z));
-    };
+    if (grid.size() != ntot) {
+      grid.assign(ntot, std::complex<double>(0.0, 0.0));
+    } else {
+      std::fill(grid.begin(), grid.end(), std::complex<double>(0.0, 0.0));
+    }
+    prepare_spread();
     for (std::size_t i = 0; i < n; ++i) {
-      const double rx = pos[3 * i] * kBohr;
-      const double ry = pos[3 * i + 1] * kBohr;
-      const double rz = pos[3 * i + 2] * kBohr;
-      double fx = inv[0] * rx + inv[1] * ry + inv[2] * rz;
-      double fy = inv[3] * rx + inv[4] * ry + inv[5] * rz;
-      double fz = inv[6] * rx + inv[7] * ry + inv[8] * rz;
-      fx -= std::floor(fx);
-      fy -= std::floor(fy);
-      fz -= std::floor(fz);
-      const double ux = fx * ng;
-      const double uy = fy * ng;
-      const double uz = fz * ng;
-      const int kx = static_cast<int>(std::floor(ux)) - 3;
-      const int ky = static_cast<int>(std::floor(uy)) - 3;
-      const int kz = static_cast<int>(std::floor(uz)) - 3;
-      for (int iz = 0; iz < 4; ++iz) {
-        const int gz = kz + iz;
-        int wz = gz % ng;
-        if (wz < 0) {
-          wz += ng;
-        }
-        const double tz = bspline4(uz - static_cast<double>(gz));
-        for (int iy = 0; iy < 4; ++iy) {
-          const int gy = ky + iy;
-          int wy = gy % ng;
-          if (wy < 0) {
-            wy += ng;
-          }
-          const double ty = bspline4(uy - static_cast<double>(gy));
-          for (int ix = 0; ix < 4; ++ix) {
-            const int gx = kx + ix;
-            int wx = gx % ng;
-            if (wx < 0) {
-              wx += ng;
-            }
-            const double tx = bspline4(ux - static_cast<double>(gx));
-            grid[index(wx, wy, wz)] += q[i] * tx * ty * tz;
-          }
-        }
+      const double qi = q[i];
+      const std::size_t base = i * 64;
+      for (int k = 0; k < 64; ++k) {
+        grid[static_cast<std::size_t>(sp_at[base + static_cast<std::size_t>(k)])] +=
+            qi * sp_w[base + static_cast<std::size_t>(k)];
       }
     }
     fft3_lines(grid, ng, false);
@@ -420,51 +451,17 @@ struct Operator {
       grid[m] *= recip_kernel[m];
     }
     fft3_lines(grid, ng, true);
+    const double nscale = static_cast<double>(ntot);
     for (std::size_t i = 0; i < n; ++i) {
-      const double rx = pos[3 * i] * kBohr;
-      const double ry = pos[3 * i + 1] * kBohr;
-      const double rz = pos[3 * i + 2] * kBohr;
-      double fx = inv[0] * rx + inv[1] * ry + inv[2] * rz;
-      double fy = inv[3] * rx + inv[4] * ry + inv[5] * rz;
-      double fz = inv[6] * rx + inv[7] * ry + inv[8] * rz;
-      fx -= std::floor(fx);
-      fy -= std::floor(fy);
-      fz -= std::floor(fz);
-      const double ux = fx * ng;
-      const double uy = fy * ng;
-      const double uz = fz * ng;
-      const int kx = static_cast<int>(std::floor(ux)) - 3;
-      const int ky = static_cast<int>(std::floor(uy)) - 3;
-      const int kz = static_cast<int>(std::floor(uz)) - 3;
+      const std::size_t base = i * 64;
       double acc = 0.0;
-      for (int iz = 0; iz < 4; ++iz) {
-        const int gz = kz + iz;
-        int wz = gz % ng;
-        if (wz < 0) {
-          wz += ng;
-        }
-        const double tz = bspline4(uz - static_cast<double>(gz));
-        for (int iy = 0; iy < 4; ++iy) {
-          const int gy = ky + iy;
-          int wy = gy % ng;
-          if (wy < 0) {
-            wy += ng;
-          }
-          const double ty = bspline4(uy - static_cast<double>(gy));
-          for (int ix = 0; ix < 4; ++ix) {
-            const int gx = kx + ix;
-            int wx = gx % ng;
-            if (wx < 0) {
-              wx += ng;
-            }
-            const double tx = bspline4(ux - static_cast<double>(gx));
-            acc += grid[index(wx, wy, wz)].real() * tx * ty * tz;
-          }
-        }
+      for (int k = 0; k < 64; ++k) {
+        acc += grid[static_cast<std::size_t>(sp_at[base + static_cast<std::size_t>(k)])].real() *
+               sp_w[base + static_cast<std::size_t>(k)];
       }
       // The inverse FFT already divides by ng^3. The forward transform of a
       // cosine series needs that factor back so A matches sum_G w cos.
-      y[i] += acc * static_cast<double>(ntot);
+      y[i] += acc * nscale;
     }
   }
 
@@ -483,7 +480,12 @@ struct Operator {
 #else
         1;
 #endif
-    std::vector<double> acc(static_cast<std::size_t>(nt) * n, 0.0);
+    if (acc_buf.size() != static_cast<std::size_t>(nt) * n) {
+      acc_buf.assign(static_cast<std::size_t>(nt) * n, 0.0);
+    } else {
+      std::fill(acc_buf.begin(), acc_buf.end(), 0.0);
+    }
+    double *acc = acc_buf.data();
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
@@ -494,7 +496,7 @@ struct Operator {
 #else
           0;
 #endif
-      double *loc = acc.data() + static_cast<std::size_t>(tid) * n;
+      double *loc = acc + static_cast<std::size_t>(tid) * n;
 #ifdef _OPENMP
 #pragma omp for schedule(static)
 #endif
@@ -518,7 +520,7 @@ struct Operator {
       }
     }
     for (int t = 0; t < nt; ++t) {
-      const double *loc = acc.data() + static_cast<std::size_t>(t) * n;
+      const double *loc = acc + static_cast<std::size_t>(t) * n;
       for (std::size_t i = 0; i < n; ++i) {
         y[i] += loc[i];
       }
