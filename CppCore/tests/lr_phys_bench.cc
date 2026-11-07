@@ -404,9 +404,9 @@ double time_ewald(const System &s, int threads, int nrep, std::ostream &log, std
   report(log, ladder, "ewald", static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
   report(echo, ladder, "ewald", static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
   log << "point ladder=" << ladder << " method=ewald n=" << s.z.size() << " threads=" << threads_now()
-      << " exit=0\n";
+      << " active=" << active_threads << " exit=0\n";
   echo << "point ladder=" << ladder << " method=ewald n=" << s.z.size() << " threads=" << threads_now()
-       << " exit=0\n";
+       << " active=" << active_threads << " exit=0\n";
   return energy;
 }
 
@@ -482,9 +482,9 @@ double time_disp(const System &s, int threads, int nrep, std::ostream &log, std:
   report(log, ladder, name, static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
   report(echo, ladder, name, static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
   log << "point ladder=" << ladder << " method=" << name << " n=" << s.z.size() << " threads=" << threads_now()
-      << " exit=0\n";
+      << " active=" << active_threads << " exit=0\n";
   echo << "point ladder=" << ladder << " method=" << name << " n=" << s.z.size() << " threads=" << threads_now()
-       << " exit=0\n";
+       << " active=" << active_threads << " exit=0\n";
   return energy;
 }
 
