@@ -109,8 +109,16 @@ std::string date_now() {
   std::tm local {};
   localtime_r(&now, &local);
   char buf[64];
+  char tiny[1];
+  char *use = buf;
+  std::size_t nuse = sizeof(buf);
+  // A one-byte buffer makes strftime fail so the unknown date is reachable.
+  if (std::getenv("LR_DATE_TINY") != nullptr) {
+    use = tiny;
+    nuse = sizeof(tiny);
+  }
   // The offset is part of the stamp so the bench date is not a bare clock.
-  if (std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S %z", &local) == 0) {
+  if (std::strftime(use, nuse, "%Y-%m-%d %H:%M:%S %z", &local) == 0) {
     return "unknown";
   }
   return buf;
@@ -585,6 +593,12 @@ int main(int argc, char **argv) {
       std::cerr << "smooth size missed\n";
       return 2;
     }
+    setenv("LR_DATE_TINY", "1", 1);
+    if (date_now() != "unknown") {
+      std::cerr << "date fallback missed\n";
+      return 2;
+    }
+    unsetenv("LR_DATE_TINY");
     const auto scratch = [](const char *name) {
       return (std::filesystem::temp_directory_path() / name).string();
     };
