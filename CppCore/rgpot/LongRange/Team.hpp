@@ -36,9 +36,6 @@ inline int axis_workers(int npoints, int team) {
   } else {
     constexpr int kMinPlanes = 8;
     cap = npoints / kMinPlanes;
-    if (cap < 1) {
-      cap = 1;
-    }
   }
   if (cap > team) {
     cap = team;
@@ -105,9 +102,6 @@ inline int pme_team(int natoms, int npoints, int requested) {
   }
   const int atoms = atom_workers(natoms, requested);
   int team = mesh > atoms ? mesh : atoms;
-  if (team > requested) {
-    team = requested;
-  }
   return team < 1 ? 1 : team;
 }
 

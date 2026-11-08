@@ -1,44 +1,65 @@
-This sweep removed the dead code.
+# Dead code the long-range series removed
 
-## Factor table
+Each entry quotes one deletion in the series diff.
 
-`spme_reciprocal` built a cached table of Gaussian factors.
-The table is a particle mesh Ewald (PME) cache.
-The bench uses the float charge-only path.
-Nothing read the table.
+## Mesh factor table
 
+The commit that runs a capped particle mesh Ewald request as that team
+removes the cached factor table from Electro.cc.
 The float kernel builds its own scale.
-The stress kernel recomputes the factor from the reciprocal vector while
-it accumulates the virial.
-`apply_cached` was the only reader of the cached table.
-That lambda sat in a branch that cannot run.
-The float path runs when stress is off.
-The stress path calls `apply_stress`.
-The sweep deleted the table and `apply_cached` together.
+The stress kernel recomputes the factor from the reciprocal vector.
+It does that while it accumulates the virial.
+No other code read the table or `apply_cached`.
 
-The deleted table is separate from the singular electronegativity
-equilibration (EEQ) checks in the D4 factorization.
-Those checks are the failure mode of a singular matrix.
+```
+-    std::vector<double> factor;
+-  auto apply_cached = [&](int tid) {
+-          const double factor = kfac[at];
+-          rec_plain += factor * (re * re + im * im);
+-          const double scale = two_n * factor;
+-    run_kernel(apply_cached);
+```
 
-## Unused spread arguments
+## Serial flag on the charge matvec
 
-`deposit` ran with atomic adds off and a null private grid.
-`scatter_cached` ran with a null destination.
-Neither branch could run.
-The spread writes the shared float mesh, or the double mesh when the
-float buffer is empty.
+The same commit removes a thread-local flag from FastD4.cc.
+Factorizing the electronegativity equilibration (EEQ) matrix calls
+apply_one directly.
+`apply` never observed that flag.
+The conjugate gradient still calls `apply` for the parallel matvec.
 
-## Serial flag that nothing read
+```
+-thread_local int g_serial_apply = 0;
+-    if (g_serial_apply) {
+-      apply_one(q, y);
+-      g_serial_apply = 1;
+-      g_serial_apply = 0;
+```
 
-Factorizing the EEQ matrix calls `apply_one` directly.
-`apply` checked a thread-local flag that only that factorization set, so
-the check never saw the flag raised.
-The sweep removed the flag and the check.
-`apply` is the parallel matvec the conjugate gradient uses.
+## Order-5 branch of the spline derivative
 
-## Order-5 derivative special case
+The same commit also removes one branch from bspline_derivative in
+Electro.cc.
+`weights_order5` supplies the order-5 spread, and `bspline_derivative`
+does not.
 
-`bspline_derivative` had a branch for order 5.
-The order-5 spread uses
-`weights_order5` and never calls `bspline_derivative`.
-The sweep removed that branch.
+```
+-  if (order == 5) {
+```
+
+## Unreachable team clamps
+
+The commit that drops mesh branches no input can reach removes two
+clamps from Team.hpp.
+A grid longer than 32 points already has at least four planes, so the
+plane cap cannot be zero.
+The mesh cap and the atom cap never exceed the request.
+
+```
+-    if (cap < 1) {
+-      cap = 1;
+-    }
+-  if (team > requested) {
+-    team = requested;
+-  }
+```

@@ -86,13 +86,46 @@ def emit(header, rows):
         print()
 
 
+def lower_bounds(path):
+    """dftd4 cells killed at 1800 s. A bound is not a point time."""
+    rows = []
+    with open(path) as handle:
+        for line in handle:
+            parts = line.split()
+            if len(parts) != 6 or parts[0] != "dftd4" or parts[3] != "timeout":
+                continue
+            if not parts[4].startswith("limit_s=") or not parts[5].startswith("exit_code="):
+                continue
+            limit = int(parts[4].split("=", 1)[1])
+            code = int(parts[5].split("=", 1)[1])
+            if limit != 1800 or code != -9:
+                continue
+            rows.append((int(parts[1].split("=", 1)[1]), int(parts[2].split("=", 1)[1])))
+    return rows
+
+
+def emit_bounds(path):
+    rows = lower_bounds(path)
+    print("## dftd4 lower bounds")
+    print()
+    print("A cell killed at 1800 s is a lower bound. It is not a speedup.")
+    print()
+    print("| arm | n | threads | bound |")
+    print("| --- | --- | --- | --- |")
+    for n, threads in rows:
+        print(f"| dftd4 | {n} | {threads} | >1800 s |")
+    print()
+
+
 def main():
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: report_from_log.py BENCH_LOG")
+    if len(sys.argv) not in (2, 3):
+        raise SystemExit("usage: report_from_log.py BENCH_LOG [REF_LOG]")
     header, rows = parse(sys.argv[1])
     if not rows:
         raise SystemExit("no samples in the log")
     emit(header, rows)
+    if len(sys.argv) == 3:
+        emit_bounds(sys.argv[2])
 
 
 if __name__ == "__main__":
