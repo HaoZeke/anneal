@@ -1455,7 +1455,8 @@ void test_worker_cap() {
   check(rgpot::lr::beside_real_workers(128, 25, 8) == 4, "four spare threads run real space");
   check(rgpot::lr::beside_real_workers(128, 25, 4) == 0, "four threads have no spare real team");
   check(rgpot::lr::beside_real_workers(256, 32, 8) == 4, "a 32-point mesh still hides real space");
-  check(rgpot::lr::beside_real_workers(512, 40, 8) == 0, "a longer mesh keeps one team");
+  check(rgpot::lr::beside_real_workers(512, 40, 8) == 3, "a 40-point mesh hides real space on three threads");
+  check(rgpot::lr::beside_real_workers(1024, 50, 8) == 0, "a 50-point mesh keeps one team");
   check(rgpot::lr::pme_team(128, 25, 4) == 4, "a request of 4 on 128 atoms is a team of 4");
   check(rgpot::lr::pme_team(128, 25, 2) == 2, "a request of 2 keeps the real-space pair");
   check(rgpot::lr::pme_team(4096, 80, 8) == 8, "a long mesh keeps the whole request");

@@ -72,11 +72,13 @@ inline int atom_workers(int natoms, int team) {
 //   N=256 grid 32: real space is 11us on four threads and 12us on
 //     eight. The extra four threads do not speed real space, and an
 //     eight-thread pool leaves them spinning inside the transform.
-// Longer meshes (40 points and up) already fill more than four
-// workers and real space does get faster, so those stay on one team.
+//   N=512 grid 40: real space is 22us on four threads. The pipeline
+//     is about 240us, so the three threads past the five-worker mesh
+//     hide that 22us. A 50-point mesh already fills six workers and
+//     real space does get faster, so those stay on one team.
 inline int beside_real_workers(int natoms, int npoints, int requested) {
   const int mesh = axis_workers(npoints, requested);
-  if (requested <= mesh || mesh < 4 || npoints > 32 || natoms < 32) {
+  if (requested <= mesh || mesh < 4 || npoints > 40 || natoms < 32) {
     return 0;
   }
   int spare = requested - mesh;
