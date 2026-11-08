@@ -49,6 +49,13 @@ int active_threads = 1;
 
 void set_threads(int n) {
 #ifdef _OPENMP
+  // A shrink would leave the spare workers spinning through the next
+  // cell. Growing the team does not.
+  static int live = 0;
+  if (live > n) {
+    omp_pause_resource_all(omp_pause_hard);
+  }
+  live = n;
   omp_set_dynamic(0);
   omp_set_num_threads(n);
 #pragma omp parallel

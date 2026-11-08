@@ -1735,8 +1735,9 @@ void evaluate_electrostatics(CoulombMethod method, const CoulombConfig &cfg, con
   const CellGeom cell = cell_from_box(box);
   // Two threads on a short mesh: one thread in the transform does not
   // beat one thread, so the second thread runs real space beside it.
-  const bool beside = method == CoulombMethod::SPME && thread_count() == 2 && cfg.grid[0] < 32 &&
-                      cfg.grid[1] < 32 && cfg.grid[2] < 32 && !cfg.stress && dE_dq == nullptr;
+  const bool small_mesh = cfg.grid[0] < 32 && cfg.grid[1] < 32 && cfg.grid[2] < 32;
+  const bool beside = method == CoulombMethod::SPME && thread_count() == 2 && small_mesh && !cfg.stress &&
+                      dE_dq == nullptr;
   if (beside) {
     std::vector<double> extra(3 * n, 0.0);
     ElecOut local{};
