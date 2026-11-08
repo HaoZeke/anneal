@@ -250,6 +250,111 @@ void screened_pair(const ScreenTable &table, double r, double *phi, double *dphi
   *dphi = (dh00 * p0 + dh10 * dr * d0 + dh01 * p1 + dh11 * dr * d1) * table.inv_dr;
 }
 
+struct BesideCache {
+  const Pair *seen = nullptr;
+  std::size_t seen_n = 0;
+  double alpha = 0.0;
+  double rc = 0.0;
+  std::vector<int> ord;
+  std::vector<double> phi;
+  std::vector<double> dphi;
+};
+
+BesideCache &beside_cache() {
+  static BesideCache cache;
+  return cache;
+}
+
+void ensure_beside_cache(const CoulombConfig &cfg, const std::vector<Pair> &pairs) {
+  BesideCache &cache = beside_cache();
+  if (cache.seen == pairs.data() && cache.seen_n == pairs.size() && cache.alpha == cfg.alpha &&
+      cache.rc == cfg.cutoff) {
+    return;
+  }
+  const ScreenTable &screen = screen_table(cfg.alpha, cfg.cutoff);
+  cache.ord.resize(pairs.size());
+  cache.phi.resize(pairs.size());
+  cache.dphi.resize(pairs.size());
+  for (std::size_t t = 0; t < pairs.size(); ++t) {
+    cache.ord[t] = static_cast<int>(t);
+    screened_pair(screen, pairs[t].r, &cache.phi[t], &cache.dphi[t]);
+  }
+  std::sort(cache.ord.begin(), cache.ord.end(), [&](int a, int b) {
+    return pairs[static_cast<std::size_t>(a)].i < pairs[static_cast<std::size_t>(b)].i;
+  });
+  cache.seen = pairs.data();
+  cache.seen_n = pairs.size();
+  cache.alpha = cfg.alpha;
+  cache.rc = cfg.cutoff;
+}
+
+// One rank of the real-space team that runs beside the mesh. The caller
+// owns the scratch slot and adds the self term once after the join.
+void real_beside_rank(const CoulombConfig &cfg, const double *q, const std::vector<Pair> &pairs,
+                      Scratch &slot, int rank, int ranks) {
+  const auto t0 = std::chrono::steady_clock::now();
+  const BesideCache &cache = beside_cache();
+  const std::size_t nord = cache.ord.size();
+  const std::size_t base = ranks > 0 ? nord / static_cast<std::size_t>(ranks) : nord;
+  const std::size_t extra = ranks > 0 ? nord % static_cast<std::size_t>(ranks) : 0;
+  std::size_t begin = 0;
+  std::size_t end = 0;
+  if (rank < static_cast<int>(extra)) {
+    begin = static_cast<std::size_t>(rank) * (base + 1);
+    end = begin + base + 1;
+  } else {
+    begin = extra * (base + 1) + static_cast<std::size_t>(rank - static_cast<int>(extra)) * base;
+    end = begin + base;
+  }
+  double energy = 0.0;
+  int cur = -1;
+  double ax = 0.0;
+  double ay = 0.0;
+  double az = 0.0;
+  auto flush = [&]() {
+    if (cur >= 0) {
+      slot.f[3 * cur] += ax;
+      slot.f[3 * cur + 1] += ay;
+      slot.f[3 * cur + 2] += az;
+    }
+  };
+  const double rc = cfg.cutoff;
+  for (std::size_t t = begin; t < end; ++t) {
+    const Pair &pr = pairs[static_cast<std::size_t>(cache.ord[t])];
+    if (!(pr.r > 0.0) || pr.r >= rc) {
+      continue;
+    }
+    if (pr.i != cur) {
+      flush();
+      cur = pr.i;
+      ax = 0.0;
+      ay = 0.0;
+      az = 0.0;
+    }
+    const std::size_t slot_i = static_cast<std::size_t>(cache.ord[t]);
+    const double qq = q[pr.i] * q[pr.j];
+    energy += kKe * qq * cache.phi[slot_i];
+    const double dedr = kKe * qq * cache.dphi[slot_i];
+    const double invr = 1.0 / pr.r;
+    const double fx = dedr * pr.x * invr;
+    const double fy = dedr * pr.y * invr;
+    const double fz = dedr * pr.z * invr;
+    ax += fx;
+    ay += fy;
+    az += fz;
+    slot.f[3 * pr.j] -= fx;
+    slot.f[3 * pr.j + 1] -= fy;
+    slot.f[3 * pr.j + 2] -= fz;
+  }
+  flush();
+  slot.energy.add(energy);
+  if (rank == 0) {
+    g_pme_trace.real_us =
+        std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count();
+    g_pme_trace.real_team = ranks;
+  }
+}
+
 void real_space(const CoulombConfig &cfg, bool dsf, const double *q, std::size_t n,
                 const std::vector<Pair> &pairs, double *F, double *dE_dq, ElecOut *out) {
   const auto t_real0 = std::chrono::steady_clock::now();
@@ -1018,6 +1123,17 @@ double float_reciprocal(std::vector<std::complex<double>> &charged,
   if (knt <= 1) {
     kernel_body(0);
     g_pme_trace.kernel_team = 1;
+  } else if (in_group()) {
+    // Already inside the mesh team. A nested region would run the body
+    // again on every mesh thread.
+    const int tid = thread_id();
+    if (tid < knt) {
+      kernel_body(tid);
+    }
+    group_arrive();
+    if (group_leader()) {
+      g_pme_trace.kernel_team = knt;
+    }
   } else {
     int kernel_seen = 1;
 #ifdef _OPENMP
@@ -1072,18 +1188,27 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
   const std::size_t ntot = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
                            static_cast<std::size_t>(nz);
   static std::vector<std::complex<double>> grid;
-  if (grid.size() != ntot) {
-    grid.assign(ntot, std::complex<double>(0.0, 0.0));
-  } else {
-    std::fill(grid.begin(), grid.end(), std::complex<double>(0.0, 0.0));
+  if (!in_group() || group_leader()) {
+    if (grid.size() != ntot) {
+      grid.assign(ntot, std::complex<double>(0.0, 0.0));
+    } else {
+      std::fill(grid.begin(), grid.end(), std::complex<double>(0.0, 0.0));
+    }
   }
+  group_arrive();
   auto index = [nx, ny](int x, int y, int z) {
     return static_cast<std::size_t>(x + nx * (y + ny * z));
   };
-  std::vector<double> bmx, bmy, bmz;
-  bmod_axis(order, nx, &bmx);
-  bmod_axis(order, ny, &bmy);
-  bmod_axis(order, nz, &bmz);
+  static std::vector<double> bmx_s, bmy_s, bmz_s;
+  if (!in_group() || group_leader()) {
+    bmod_axis(order, nx, &bmx_s);
+    bmod_axis(order, ny, &bmy_s);
+    bmod_axis(order, nz, &bmz_s);
+  }
+  group_arrive();
+  std::vector<double> &bmx = bmx_s;
+  std::vector<double> &bmy = bmy_s;
+  std::vector<double> &bmz = bmz_s;
 
   const std::size_t span = static_cast<std::size_t>(order);
   static std::vector<int> gtab_s;
@@ -1168,7 +1293,7 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
     seen_grid[2] = nz;
     seen_grid[3] = order;
   };
-  auto scatter_cached = [&](std::size_t i) {
+  auto scatter_cached = [&](std::size_t i, float *dest) {
     const double qi = q[i];
     const int *gx = gtab.data() + (i * 3 + 0) * span;
     const int *gy = gtab.data() + (i * 3 + 1) * span;
@@ -1177,13 +1302,14 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
     const double *wy = wtab.data() + (i * 3 + 1) * span;
     const double *wz = wtab.data() + (i * 3 + 2) * span;
     const int ord = order;
+    float *grid_f = dest != nullptr ? dest : g_charge_f.data();
     for (int iz = 0; iz < ord; ++iz) {
       for (int iy = 0; iy < ord; ++iy) {
         const double wyz = wy[iy] * wz[iz];
         const int base = nx * (gy[iy] + ny * gz[iz]);
         for (int ix = 0; ix < ord; ++ix) {
           const float add = static_cast<float>(qi * wx[ix] * wyz);
-          g_charge_f[static_cast<std::size_t>(base + gx[ix])] += add;
+          grid_f[static_cast<std::size_t>(base + gx[ix])] += add;
         }
       }
     }
@@ -1263,7 +1389,41 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
     // second, larger pool waiting outside.
     if (nthreads <= 1) {
       for (std::size_t i = 0; i < n; ++i) {
-        scatter_cached(i);
+        scatter_cached(i, nullptr);
+      }
+    } else if (in_group()) {
+      // Each mesh thread owns a private charge grid, then the planes are
+      // summed in thread order. The spare threads are in real space, so
+      // this team is only the mesh cap.
+      static std::vector<float> spread_part[8];
+      const int tid = thread_id();
+      auto &mine = spread_part[tid < 8 ? tid : 0];
+      if (mine.size() != ntot) {
+        mine.assign(ntot, 0.0f);
+      } else {
+        std::fill(mine.begin(), mine.end(), 0.0f);
+      }
+      for (std::size_t i = static_cast<std::size_t>(tid); i < n; i += static_cast<std::size_t>(nthreads)) {
+        scatter_cached(i, mine.data());
+      }
+      group_arrive();
+      const int plane = nx * ny;
+      const int z0 = tid * nz / nthreads;
+      const int z1 = (tid + 1) * nz / nthreads;
+      for (int z = z0; z < z1; ++z) {
+        float *dst = g_charge_f.data() + static_cast<std::size_t>(z) * static_cast<std::size_t>(plane);
+        std::fill(dst, dst + plane, 0.0f);
+        const int npart = nthreads < 8 ? nthreads : 8;
+        for (int t = 0; t < npart; ++t) {
+          const float *src = spread_part[t].data() + static_cast<std::size_t>(z) * static_cast<std::size_t>(plane);
+          for (int k = 0; k < plane; ++k) {
+            dst[k] += src[k];
+          }
+        }
+      }
+      group_arrive();
+      if (group_leader()) {
+        spread_seen = nthreads;
       }
     } else {
 #ifdef _OPENMP
@@ -1279,7 +1439,7 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
 #endif
           std::fill(g_charge_f.begin(), g_charge_f.end(), 0.0f);
           for (std::size_t i = 0; i < n; ++i) {
-            scatter_cached(i);
+            scatter_cached(i, nullptr);
           }
         }
       }
@@ -1446,7 +1606,9 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
   const auto t_reduce0 = std::chrono::steady_clock::now();
   const auto t_fft0 = std::chrono::steady_clock::now();
   g_pme_trace.spread_us = std::chrono::duration<double, std::micro>(t_fft0 - t_spread0).count();
-  g_pme_trace.spread_team = tables_hit ? spread_seen : nthreads;
+  if (!in_group() || group_leader()) {
+    g_pme_trace.spread_team = tables_hit ? spread_seen : nthreads;
+  }
   if (trace) {
     std::fprintf(stderr, "pme_reduce workers=%d deposit_us=%.3f reduce_us=%.3f\n", nthreads,
                  std::chrono::duration<double, std::micro>(t_reduce0 - t_spread0).count(),
@@ -1663,6 +1825,20 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
     for (std::size_t i = 0; i < n; ++i) {
       gather_atom(i);
     }
+  } else if (in_group()) {
+    const int tid_cap = thread_id();
+    if (tid_cap < gather_cap) {
+      const std::size_t chunk =
+          (n + static_cast<std::size_t>(gather_cap) - 1) / static_cast<std::size_t>(gather_cap);
+      const std::size_t begin = static_cast<std::size_t>(tid_cap) * chunk;
+      const std::size_t end = std::min(n, begin + chunk);
+      for (std::size_t i = begin; i < end; ++i) {
+        gather_atom(i);
+      }
+    }
+    if (group_leader()) {
+      g_pme_trace.gather_team = gather_cap;
+    }
   } else {
     int gather_seen = gather_cap;
 #ifdef _OPENMP
@@ -1831,6 +2007,46 @@ void evaluate_electrostatics(CoulombMethod method, const CoulombConfig &cfg, con
   // beat one thread, so the second thread runs real space beside it.
   const int asked = std::max(caller_team(), thread_count());
   const int mesh_cap = axis_workers(std::min(cfg.grid[0], std::min(cfg.grid[1], cfg.grid[2])), asked);
+  const int real_beside =
+      method == CoulombMethod::SPME && !cfg.stress && dE_dq == nullptr
+          ? beside_real_workers(static_cast<int>(n),
+                                std::min(cfg.grid[0], std::min(cfg.grid[1], cfg.grid[2])), asked)
+          : 0;
+  // Spare threads hide real space behind the reciprocal pipeline. The
+  // mesh team is the axis cap. The threads past it own real space.
+  if (real_beside > 0 && mesh_cap >= 4) {
+    ensure_beside_cache(cfg, pairs);
+    std::vector<double> extra(3 * n, 0.0);
+    ElecOut local{};
+    std::vector<Scratch> &parts = scratch_for(real_beside, 3 * n);
+    mesh_group_limit() = mesh_cap;
+#ifdef _OPENMP
+#pragma omp parallel num_threads(mesh_cap + real_beside)
+#endif
+    {
+      const int tid = thread_id();
+      if (tid < mesh_cap) {
+        spme_reciprocal(cfg, cell, pos, q, n, total_charge, F, dE_dq, out);
+      } else {
+        real_beside_rank(cfg, q, pairs, parts[static_cast<std::size_t>(tid - mesh_cap)], tid - mesh_cap,
+                         real_beside);
+      }
+    }
+    mesh_group_limit() = 0;
+    add_scratch(parts, extra.data(), &local);
+    const double self = -kKe * cfg.alpha / std::sqrt(kPi);
+    for (std::size_t i = 0; i < n; ++i) {
+      local.energy += self * q[i] * q[i];
+    }
+    for (std::size_t i = 0; i < extra.size(); ++i) {
+      F[i] += extra[i];
+    }
+    out->energy += local.energy;
+    for (int k = 0; k < 6; ++k) {
+      out->strain[k] += local.strain[k];
+    }
+    return;
+  }
   // Two threads do not speed a short transform, so the second thread runs
   // real space in the same OpenMP region.
   const bool beside_pair = method == CoulombMethod::SPME && thread_count() == 2 && mesh_cap == 1 &&

@@ -1451,7 +1451,11 @@ void test_worker_cap() {
   check(atom_workers(128, 8) == 4, "128 atoms feed four spread workers");
   check(atom_workers(128, 8) <= atom_workers(4096, 8), "more atoms can feed more workers");
   check(atom_workers(31, 8) == 1, "fewer than 32 atoms stay on one worker");
-  check(rgpot::lr::pme_team(128, 25, 8) == 4, "a request of 8 on 128 atoms is a team of 4");
+  check(rgpot::lr::pme_team(128, 25, 8) == 8, "a request of 8 keeps the spare real-space threads");
+  check(rgpot::lr::beside_real_workers(128, 25, 8) == 4, "four spare threads run real space");
+  check(rgpot::lr::beside_real_workers(128, 25, 4) == 0, "four threads have no spare real team");
+  check(rgpot::lr::beside_real_workers(256, 32, 8) == 4, "a 32-point mesh still hides real space");
+  check(rgpot::lr::beside_real_workers(512, 40, 8) == 0, "a longer mesh keeps one team");
   check(rgpot::lr::pme_team(128, 25, 4) == 4, "a request of 4 on 128 atoms is a team of 4");
   check(rgpot::lr::pme_team(128, 25, 2) == 2, "a request of 2 keeps the real-space pair");
   check(rgpot::lr::pme_team(4096, 80, 8) == 8, "a long mesh keeps the whole request");
@@ -1480,6 +1484,26 @@ void test_capped_phase_team() {
   }
 #ifdef _OPENMP
   omp_set_dynamic(0);
+  omp_set_num_threads(1);
+#endif
+  rgpot::lr::caller_team() = 1;
+  CoulombConfig serial_cfg;
+  serial_cfg.method = CoulombMethod::SPME;
+  serial_cfg.periodic = true;
+  serial_cfg.cutoff = 8.0;
+  serial_cfg.alpha = 0.364803;
+  serial_cfg.grid[0] = serial_cfg.grid[1] = serial_cfg.grid[2] = 25;
+  serial_cfg.spline_order = 5;
+  serial_cfg.stress = false;
+  CoulombPot serial_pot(serial_cfg, std::make_shared<FixedCharges>(q, 0.0));
+  const Eval serial = run(serial_pot, pos, z, box);
+#ifdef _OPENMP
+  omp_set_num_threads(4);
+#endif
+  rgpot::lr::caller_team() = 4;
+  CoulombPot four(serial_cfg, std::make_shared<FixedCharges>(q, 0.0));
+  const Eval team4 = run(four, pos, z, box);
+#ifdef _OPENMP
   omp_set_num_threads(8);
 #pragma omp parallel
   {
@@ -1498,15 +1522,28 @@ void test_capped_phase_team() {
   cfg.stress = false;
   CoulombPot pot(cfg, std::make_shared<FixedCharges>(q, 0.0));
   run(pot, pos, z, box);
-  run(pot, pos, z, box);
+  const Eval wide = run(pot, pos, z, box);
   const rgpot::lr::PmeTrace tr = rgpot::lr::pme_trace();
   check(tr.spread_team == 4, "spread runs the capped team");
   check(tr.fft_team == 4, "the transform runs the capped team");
   check(tr.kernel_team == 4, "the kernel runs the capped team");
   check(tr.gather_team == 4, "gather runs the capped team");
-  check(tr.real_team == 4, "real space runs the capped team");
+  check(tr.real_team == 4, "real space runs on the spare threads");
+  check(wide.energy == team4.energy && wide.f == team4.f,
+        "beside real space matches the four-thread mesh bit for bit");
+  check_close(wide.energy, serial.energy, 1e-12, "beside energy matches the serial energy");
+  double versus_serial = 0.0;
+  double versus_four = 0.0;
+  for (std::size_t i = 0; i < wide.f.size(); ++i) {
+    versus_serial = std::max(versus_serial, std::abs(wide.f[i] - serial.f[i]));
+    versus_four = std::max(versus_four, std::abs(wide.f[i] - team4.f[i]));
+  }
+  // The float slab transform already moves forces by about 2e-10 against
+  // one thread. The beside run adds nothing on top of that.
+  check(versus_four == 0.0, "beside forces match the four-thread forces bit for bit");
+  check(versus_serial <= 1e-9, "beside forces stay inside the float-transform gap");
 #ifdef _OPENMP
-  check(omp_get_max_threads() == 4, "the capped call leaves no extra workers");
+  check(omp_get_max_threads() == 8, "the pool is the mesh team plus real space");
 #endif
   rgpot::lr::caller_team() = 1;
 }

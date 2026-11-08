@@ -63,14 +63,44 @@ inline int atom_workers(int natoms, int team) {
   return cap;
 }
 
-// The OpenMP pool for one PME call. It is the larger of the mesh cap
-// and the atom cap, and never the raw request when that is bigger.
-// N=128 on a 25-point mesh at a request of 8 is 4.
+// Real-space workers that run beside the mesh, on threads the mesh
+// cannot feed. Zero when the mesh already uses the whole request.
+//
+// Measured on this host, four threads versus eight:
+//   N=128 grid 25: spread 20, transform 48, kernel 8, gather 9, real 7.
+//     The pipeline is about 85us, so four spare threads hide the 7us.
+//   N=256 grid 32: real space is 11us on four threads and 12us on
+//     eight. The extra four threads do not speed real space, and an
+//     eight-thread pool leaves them spinning inside the transform.
+// Longer meshes (40 points and up) already fill more than four
+// workers and real space does get faster, so those stay on one team.
+inline int beside_real_workers(int natoms, int npoints, int requested) {
+  const int mesh = axis_workers(npoints, requested);
+  if (requested <= mesh || mesh < 4 || npoints > 32 || natoms < 32) {
+    return 0;
+  }
+  int spare = requested - mesh;
+  // Real space on these short meshes saturates at four threads.
+  if (spare > 4) {
+    spare = 4;
+  }
+  return spare;
+}
+
+// The OpenMP pool for one PME call. When spare threads can hide real
+// space, the pool is the mesh team plus that real team. Otherwise it
+// is the larger of the mesh cap and the atom cap, and never the raw
+// request when that is bigger. N=128 on a 25-point mesh at a request
+// of 8 is eight threads: four on the mesh and four on real space.
 inline int pme_team(int natoms, int npoints, int requested) {
   if (requested <= 1) {
     return 1;
   }
   const int mesh = axis_workers(npoints, requested);
+  const int beside = beside_real_workers(natoms, npoints, requested);
+  if (beside > 0) {
+    return mesh + beside;
+  }
   const int atoms = atom_workers(natoms, requested);
   int team = mesh > atoms ? mesh : atoms;
   if (team > requested) {
