@@ -9,6 +9,7 @@
 #include "rgpot/LongRange/Lattice.hpp"
 #include "rgpot/LongRange/Nlh.hpp"
 #include "rgpot/LongRange/SumPot.hpp"
+#include "rgpot/LongRange/Team.hpp"
 #include "rgpot/units.hpp"
 
 #include <algorithm>
@@ -1424,6 +1425,34 @@ void test_cuda_and_periodic_mbd() {
   check(threw, "a damped pair sum needs its coefficients");
 }
 
+void test_worker_cap() {
+  using rgpot::lr::atom_workers;
+  using rgpot::lr::axis_workers;
+  // A 25-point axis: one worker below four threads, four workers after that.
+  // Eight threads must not be given more work than four.
+  check(axis_workers(25, 1) == 1, "one thread stays one worker");
+  check(axis_workers(25, 2) == 1, "two threads do not split a 25-point axis");
+  check(axis_workers(25, 4) == 4, "four threads fit a 25-point axis");
+  check(axis_workers(25, 8) == 4, "eight threads cap a 25-point axis at four");
+  check(axis_workers(32, 8) == 4, "a 32-point axis stays at four workers");
+  check(axis_workers(40, 8) == 5, "40 points feed five workers at eight planes each");
+  check(axis_workers(80, 8) == 8, "80 points feed eight workers");
+  check(axis_workers(80, 8) <= 8, "workers never exceed the team");
+  // More threads never reduce the worker count.
+  for (int n : {25, 32, 40, 63, 80}) {
+    int prev = 0;
+    for (int team : {1, 2, 4, 8}) {
+      const int got = axis_workers(n, team);
+      check(got >= prev, "axis workers do not shrink as the team grows");
+      check(got <= team, "axis workers stay inside the team");
+      prev = got;
+    }
+  }
+  check(atom_workers(128, 8) == 4, "128 atoms feed four spread workers");
+  check(atom_workers(128, 8) <= atom_workers(4096, 8), "more atoms can feed more workers");
+  check(atom_workers(31, 8) == 1, "fewer than 32 atoms stay on one worker");
+}
+
 } // namespace
 
 int main() {
@@ -1442,6 +1471,7 @@ int main() {
     test_edges();
     test_nve();
     test_cuda_and_periodic_mbd();
+    test_worker_cap();
   } catch (const std::exception &ex) {
     std::cerr << "FAIL exception " << ex.what() << '\n';
     return 1;

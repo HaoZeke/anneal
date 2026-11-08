@@ -2,9 +2,13 @@
 // Copyright 2023--present rgpot developers
 
 #include "rgpot/LongRange/FastD4.hpp"
+#ifndef POCKETFFT_CACHE_SIZE
+#define POCKETFFT_CACHE_SIZE 16
+#endif
 #include "rgpot/LongRange/pocketfft.hpp"
 
 #include "rgpot/LongRange/Lattice.hpp"
+#include "rgpot/LongRange/Team.hpp"
 #include "rgpot/units.hpp"
 
 #include <algorithm>
@@ -265,13 +269,6 @@ void mat_inv(const double *box, double inv[9], double *vol);
 double bspline4(double x);
 
 void fft3_lines(std::vector<std::complex<double>> &g, int ng, bool inverse) {
-  const pocketfft::shape_t shape{static_cast<std::size_t>(ng), static_cast<std::size_t>(ng),
-                                 static_cast<std::size_t>(ng)};
-  const auto step = static_cast<std::ptrdiff_t>(sizeof(std::complex<double>));
-  const pocketfft::stride_t stride{step * ng * ng, step * ng, step};
-  const pocketfft::shape_t axes{0, 1, 2};
-  const double ntot = static_cast<double>(ng) * static_cast<double>(ng) * static_cast<double>(ng);
-  const double scale = inverse ? 1.0 / ntot : 1.0;
   int team = 1;
 #ifdef _OPENMP
   team = std::max(1, omp_get_max_threads());
@@ -281,12 +278,56 @@ void fft3_lines(std::vector<std::complex<double>> &g, int ng, bool inverse) {
   if (g_fft_team > 0) {
     team = g_fft_team;
   }
-  // Eight workers on a 32-point axis are slower than four.
-  if (ng <= 32 && team > 4) {
-    team = 4;
+  const int cap = axis_workers(ng, team);
+  const double ntot = static_cast<double>(ng) * static_cast<double>(ng) * static_cast<double>(ng);
+  const double scale = inverse ? 1.0 / ntot : 1.0;
+  const auto step = static_cast<std::ptrdiff_t>(sizeof(std::complex<double>));
+  auto axis = [&](int which, int tid, double fct) {
+    const int along = which == 0 ? ng : ng;
+    const int mine0 = tid * along / cap;
+    const int mine1 = (tid + 1) * along / cap;
+    if (mine1 <= mine0) {
+      return;
+    }
+    std::complex<double> *base = g.data();
+    pocketfft::shape_t shape;
+    pocketfft::stride_t stride{step * ng * ng, step * ng, step};
+    if (which == 0) {
+      base += static_cast<std::size_t>(mine0) * static_cast<std::size_t>(ng);
+      shape = {static_cast<std::size_t>(ng), static_cast<std::size_t>(mine1 - mine0), static_cast<std::size_t>(ng)};
+    } else {
+      base += static_cast<std::size_t>(mine0) * static_cast<std::size_t>(ng) * static_cast<std::size_t>(ng);
+      shape = {static_cast<std::size_t>(mine1 - mine0), static_cast<std::size_t>(ng), static_cast<std::size_t>(ng)};
+    }
+    pocketfft::shape_t axes{static_cast<std::size_t>(which)};
+    pocketfft::c2c(shape, stride, stride, axes, !inverse, base, base, fct, 1);
+  };
+  if (cap <= 1) {
+    axis(2, 0, 1.0);
+    axis(1, 0, 1.0);
+    axis(0, 0, scale);
+    return;
   }
-  pocketfft::c2c(shape, stride, stride, axes, !inverse, g.data(), g.data(), scale,
-                 static_cast<std::size_t>(team));
+#ifdef _OPENMP
+#pragma omp parallel num_threads(cap)
+#endif
+  {
+    const int tid =
+#ifdef _OPENMP
+        omp_get_thread_num();
+#else
+        0;
+#endif
+    axis(2, tid, 1.0);
+#ifdef _OPENMP
+#pragma omp barrier
+#endif
+    axis(1, tid, 1.0);
+#ifdef _OPENMP
+#pragma omp barrier
+#endif
+    axis(0, tid, scale);
+  }
 }
 
 double bspline_order(int order, double x) {

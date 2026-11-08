@@ -6,6 +6,9 @@
 #include "rgpot/LongRange/Compensate.hpp"
 #include "rgpot/LongRange/Team.hpp"
 #include "rgpot/LongRange/Lattice.hpp"
+#ifndef POCKETFFT_CACHE_SIZE
+#define POCKETFFT_CACHE_SIZE 16
+#endif
 #include "rgpot/LongRange/pocketfft.hpp"
 #include "rgpot/ParamHash.hpp"
 #include "rgpot/stress.hpp"
@@ -40,8 +43,34 @@ std::vector<float> g_charge_f;
 constexpr double kKe = units::HARTREE_TO_EV * units::BOHR_TO_ANGSTROM;
 constexpr double kPi = std::numbers::pi;
 
+// Threads inside one parallel region that are running a different phase
+// stay out of this gate. pocketfft itself is only ever called serially.
+int &mesh_group_limit() {
+  static int limit = 0;
+  return limit;
+}
+
+void mesh_group_sync(int npart) {
+  if (npart <= 1) {
+    return;
+  }
+  struct Gate {
+    std::atomic<int> count{0};
+    std::atomic<int> generation{0};
+  };
+  static Gate gate;
+  const int gen = gate.generation.load(std::memory_order_acquire);
+  if (gate.count.fetch_add(1, std::memory_order_acq_rel) + 1 == npart) {
+    gate.count.store(0, std::memory_order_relaxed);
+    gate.generation.fetch_add(1, std::memory_order_release);
+  } else {
+    while (gate.generation.load(std::memory_order_acquire) == gen) {
+    }
+  }
+}
+
 int thread_count() {
-  const int grouped = pocketfft::detail::threading::group_limit();
+  const int grouped = mesh_group_limit();
   if (grouped > 0) {
     return grouped;
   }
@@ -61,13 +90,13 @@ int thread_id() {
 #endif
 }
 
-bool in_group() { return pocketfft::detail::threading::group_limit() > 0; }
+bool in_group() { return mesh_group_limit() > 0; }
 
 bool group_leader() { return !in_group() || thread_id() == 0; }
 
 void group_arrive() {
   if (in_group()) {
-    pocketfft::detail::threading::group_sync(thread_count());
+    mesh_group_sync(thread_count());
   }
 }
 
@@ -258,11 +287,12 @@ void real_space(const CoulombConfig &cfg, bool dsf, const double *q, std::size_t
       seen_alpha = alpha;
       seen_rc = rc;
     }
+  const int rcap = atom_workers(static_cast<int>(n), nt);
 #ifdef _OPENMP
-#pragma omp parallel
+#pragma omp parallel num_threads(rcap) if (rcap > 1)
 #endif
     {
-      const int me = nt <= 1 ? 0 : thread_id();
+      const int me = rcap <= 1 ? 0 : thread_id();
       auto &p = parts[static_cast<std::size_t>(me)];
       double energy = 0.0;
       int cur = -1;
@@ -648,68 +678,166 @@ double bspline_derivative(int order, double x) {
   return bspline(order - 1, x) - bspline(order - 1, x - 1.0);
 }
 
-void fft3(std::vector<std::complex<double>> &g, int nx, int ny, int nz, bool inverse, int team) {
-  // thread_map runs this on the calling OpenMP team. The count above 1
-  // only asks for that team; it does not start another pool.
-  const auto workers = static_cast<std::size_t>(std::max(team, 1));
-  pocketfft::shape_t shape{static_cast<std::size_t>(nz), static_cast<std::size_t>(ny),
-                           static_cast<std::size_t>(nx)};
-  const auto step = static_cast<std::ptrdiff_t>(sizeof(std::complex<double>));
-  pocketfft::stride_t stride{step * nx * ny, step * nx, step};
-  pocketfft::shape_t axes{0, 1, 2};
-  if (!inverse) {
-    pocketfft::c2c(shape, stride, stride, axes, true, g.data(), g.data(), 1.0, workers);
+// One serial pocketfft call on a contiguous slab. nthreads stays 1 so the
+// vendored header never starts its own worker pool.
+template <class T>
+void c2c_slab(std::complex<T> *data, int n0, int n1, int n2, int axis, bool forward, T scale, int tid,
+              int cap) {
+  const auto step = static_cast<std::ptrdiff_t>(sizeof(std::complex<T>));
+  const int along = axis == 0 ? n1 : n0;
+  const int mine0 = tid * along / cap;
+  const int mine1 = (tid + 1) * along / cap;
+  if (mine1 <= mine0) {
     return;
   }
-  const double inv = 1.0 / static_cast<double>(static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
-                                               static_cast<std::size_t>(nz));
-  pocketfft::c2c(shape, stride, stride, axes, false, g.data(), g.data(), inv, workers);
+  std::complex<T> *base = data;
+  pocketfft::shape_t shape;
+  pocketfft::stride_t stride{step * n1 * n2, step * n2, step};
+  pocketfft::shape_t axes{static_cast<std::size_t>(axis)};
+  if (axis == 0) {
+    base += static_cast<std::size_t>(mine0) * static_cast<std::size_t>(n2);
+    shape = {static_cast<std::size_t>(n0), static_cast<std::size_t>(mine1 - mine0), static_cast<std::size_t>(n2)};
+  } else {
+    base += static_cast<std::size_t>(mine0) * static_cast<std::size_t>(n1) * static_cast<std::size_t>(n2);
+    shape = {static_cast<std::size_t>(mine1 - mine0), static_cast<std::size_t>(n1), static_cast<std::size_t>(n2)};
+  }
+  pocketfft::c2c(shape, stride, stride, axes, forward, base, base, scale, 1);
 }
 
-// Real-to-complex on the calling OpenMP team. The library splits each
-// axis across that team, so the vectorized kernels stay in use.
-int mesh_workers(int n, int team) {
-  // A 25-wide axis is slower with eight workers than with four, and two
-  // workers do not beat one. Keep the extra threads for the real space.
-  if (n < 32 && team > 4) {
-    return 4;
+void fft3(std::vector<std::complex<double>> &g, int nx, int ny, int nz, bool inverse, int team) {
+  const int cap = axis_workers(std::min(nx, std::min(ny, nz)), std::max(team, 1));
+  const double inv = inverse ? 1.0 / static_cast<double>(static_cast<std::size_t>(nx) * ny * nz) : 1.0;
+  auto stage = [&](int axis, int tid, double scale) {
+    c2c_slab(g.data(), nz, ny, nx, axis, !inverse, scale, tid, cap);
+  };
+  if (cap <= 1) {
+    stage(2, 0, 1.0);
+    stage(1, 0, 1.0);
+    stage(0, 0, inv);
+    return;
   }
-  if (n < 32 && team < 4) {
-    return 1;
+#ifdef _OPENMP
+#pragma omp parallel num_threads(cap)
+#endif
+  {
+    const int tid = thread_id();
+    stage(2, tid, 1.0);
+    mesh_group_sync(cap);
+    stage(1, tid, 1.0);
+    mesh_group_sync(cap);
+    stage(0, tid, inv);
   }
-  return team;
+}
+
+void mesh_xy_z(float *real, std::complex<float> *spec, int nx, int ny, int nz, bool forward, float xy_scale,
+               int tid, int cap) {
+  const int nkx = nx / 2 + 1;
+  const auto zreal = static_cast<std::ptrdiff_t>(sizeof(float)) * nx * ny;
+  const auto yreal = static_cast<std::ptrdiff_t>(sizeof(float)) * nx;
+  const auto zspec = static_cast<std::ptrdiff_t>(sizeof(std::complex<float>)) * ny * nkx;
+  const auto yspec = static_cast<std::ptrdiff_t>(sizeof(std::complex<float>)) * nkx;
+  const int z0 = tid * nz / cap;
+  const int z1 = (tid + 1) * nz / cap;
+  if (z1 > z0) {
+    pocketfft::shape_t shape{static_cast<std::size_t>(z1 - z0), static_cast<std::size_t>(ny),
+                             static_cast<std::size_t>(nx)};
+    pocketfft::stride_t sreal{zreal, yreal, static_cast<std::ptrdiff_t>(sizeof(float))};
+    pocketfft::stride_t sspec{zspec, yspec, static_cast<std::ptrdiff_t>(sizeof(std::complex<float>))};
+    pocketfft::shape_t xy{1, 2};
+    float *rbase = real + static_cast<std::size_t>(z0) * static_cast<std::size_t>(ny) * static_cast<std::size_t>(nx);
+    std::complex<float> *sbase =
+        spec + static_cast<std::size_t>(z0) * static_cast<std::size_t>(ny) * static_cast<std::size_t>(nkx);
+    if (forward) {
+      pocketfft::r2c(shape, sreal, sspec, xy, true, rbase, sbase, 1.0f, 1);
+    } else {
+      pocketfft::c2r(shape, sspec, sreal, xy, false, sbase, rbase, xy_scale, 1);
+    }
+  }
+  mesh_group_sync(cap);
+  const int y0 = tid * ny / cap;
+  const int y1 = (tid + 1) * ny / cap;
+  if (y1 > y0) {
+    pocketfft::shape_t shape{static_cast<std::size_t>(nz), static_cast<std::size_t>(y1 - y0),
+                             static_cast<std::size_t>(nkx)};
+    pocketfft::stride_t sspec{zspec, yspec, static_cast<std::ptrdiff_t>(sizeof(std::complex<float>))};
+    pocketfft::shape_t zax{0};
+    std::complex<float> *sbase = spec + static_cast<std::size_t>(y0) * static_cast<std::size_t>(nkx);
+    pocketfft::c2c(shape, sspec, sspec, zax, forward, sbase, sbase, 1.0f, 1);
+  }
 }
 
 int mesh_r2c(float *real, std::complex<float> *spec, int nx, int ny, int nz) {
-  const int nkx = nx / 2 + 1;
-  const int team = mesh_workers(std::min(nx, std::min(ny, nz)), std::max(thread_count(), 1));
-  const pocketfft::shape_t shape{static_cast<std::size_t>(nz), static_cast<std::size_t>(ny),
-                                 static_cast<std::size_t>(nx)};
-  const pocketfft::stride_t sreal{static_cast<std::ptrdiff_t>(sizeof(float)) * nx * ny,
-                                  static_cast<std::ptrdiff_t>(sizeof(float)) * nx,
-                                  static_cast<std::ptrdiff_t>(sizeof(float))};
-  const pocketfft::stride_t sspec{static_cast<std::ptrdiff_t>(sizeof(std::complex<float>)) * ny * nkx,
-                                  static_cast<std::ptrdiff_t>(sizeof(std::complex<float>)) * nkx,
-                                  static_cast<std::ptrdiff_t>(sizeof(std::complex<float>))};
-  const pocketfft::shape_t axes{0, 1, 2};
-  pocketfft::r2c(shape, sreal, sspec, axes, true, real, spec, 1.0f, static_cast<std::size_t>(team));
-  return team;
+  const int cap = axis_workers(std::min(nx, std::min(ny, nz)), std::max(thread_count(), 1));
+  auto work = [&](int tid) { mesh_xy_z(real, spec, nx, ny, nz, true, 1.0f, tid, cap); };
+  if (cap <= 1) {
+    work(0);
+    return 1;
+  }
+#ifdef _OPENMP
+  if (omp_in_parallel()) {
+    const int tid = thread_id();
+    if (tid < cap) {
+      work(tid);
+    }
+    return cap;
+  }
+#pragma omp parallel
+#endif
+  { work(thread_id()); }
+  return cap;
 }
 
 int mesh_c2r(const std::complex<float> *spec, float *real, int nx, int ny, int nz, float inv) {
-  const int nkx = nx / 2 + 1;
-  const int team = mesh_workers(std::min(nx, std::min(ny, nz)), std::max(thread_count(), 1));
-  const pocketfft::shape_t shape{static_cast<std::size_t>(nz), static_cast<std::size_t>(ny),
-                                 static_cast<std::size_t>(nx)};
-  const pocketfft::stride_t sreal{static_cast<std::ptrdiff_t>(sizeof(float)) * nx * ny,
-                                  static_cast<std::ptrdiff_t>(sizeof(float)) * nx,
-                                  static_cast<std::ptrdiff_t>(sizeof(float))};
-  const pocketfft::stride_t sspec{static_cast<std::ptrdiff_t>(sizeof(std::complex<float>)) * ny * nkx,
-                                  static_cast<std::ptrdiff_t>(sizeof(std::complex<float>)) * nkx,
-                                  static_cast<std::ptrdiff_t>(sizeof(std::complex<float>))};
-  const pocketfft::shape_t axes{0, 1, 2};
-  pocketfft::c2r(shape, sspec, sreal, axes, false, spec, real, inv, static_cast<std::size_t>(team));
-  return team;
+  const int cap = axis_workers(std::min(nx, std::min(ny, nz)), std::max(thread_count(), 1));
+  // Inverse along z first, then the real axes, matching a single c2r.
+  auto work = [&](int tid) {
+    const int nkx = nx / 2 + 1;
+    const auto zspec = static_cast<std::ptrdiff_t>(sizeof(std::complex<float>)) * ny * nkx;
+    const auto yspec = static_cast<std::ptrdiff_t>(sizeof(std::complex<float>)) * nkx;
+    const int y0 = tid * ny / cap;
+    const int y1 = (tid + 1) * ny / cap;
+    std::complex<float> *mutable_spec = const_cast<std::complex<float> *>(spec);
+    if (y1 > y0) {
+      pocketfft::shape_t shape{static_cast<std::size_t>(nz), static_cast<std::size_t>(y1 - y0),
+                               static_cast<std::size_t>(nkx)};
+      pocketfft::stride_t sspec{zspec, yspec, static_cast<std::ptrdiff_t>(sizeof(std::complex<float>))};
+      pocketfft::shape_t zax{0};
+      std::complex<float> *sbase = mutable_spec + static_cast<std::size_t>(y0) * static_cast<std::size_t>(nkx);
+      pocketfft::c2c(shape, sspec, sspec, zax, false, sbase, sbase, 1.0f, 1);
+    }
+    mesh_group_sync(cap);
+    const int z0 = tid * nz / cap;
+    const int z1 = (tid + 1) * nz / cap;
+    if (z1 > z0) {
+      const auto zreal = static_cast<std::ptrdiff_t>(sizeof(float)) * nx * ny;
+      const auto yreal = static_cast<std::ptrdiff_t>(sizeof(float)) * nx;
+      pocketfft::shape_t shape{static_cast<std::size_t>(z1 - z0), static_cast<std::size_t>(ny),
+                               static_cast<std::size_t>(nx)};
+      pocketfft::stride_t sreal{zreal, yreal, static_cast<std::ptrdiff_t>(sizeof(float))};
+      pocketfft::stride_t sspec{zspec, yspec, static_cast<std::ptrdiff_t>(sizeof(std::complex<float>))};
+      pocketfft::shape_t xy{1, 2};
+      float *rbase = real + static_cast<std::size_t>(z0) * static_cast<std::size_t>(ny) * static_cast<std::size_t>(nx);
+      std::complex<float> *sbase =
+          mutable_spec + static_cast<std::size_t>(z0) * static_cast<std::size_t>(ny) * static_cast<std::size_t>(nkx);
+      pocketfft::c2r(shape, sspec, sreal, xy, false, sbase, rbase, inv, 1);
+    }
+  };
+  if (cap <= 1) {
+    work(0);
+    return 1;
+  }
+#ifdef _OPENMP
+  if (omp_in_parallel()) {
+    const int tid = thread_id();
+    if (tid < cap) {
+      work(tid);
+    }
+    return cap;
+  }
+#pragma omp parallel
+#endif
+  { work(thread_id()); }
+  return cap;
 }
 
 void bmod_axis(int order, int n, std::vector<double> *mod) {
@@ -834,11 +962,10 @@ double float_reciprocal(std::vector<std::complex<double>> &charged,
   const auto t_kern_a = std::chrono::steady_clock::now();
   const float *scale = saved.scale.data();
   const float *efac = saved.efac.data();
-  g_pme_trace.kernel_team = thread_count();
+  const int knt = axis_workers(std::min(nx, std::min(ny, nz)), std::max(thread_count(), 1));
+  g_pme_trace.kernel_team = knt;
   static double kernel_part[8];
-  const int knt = std::max(thread_count(), 1);
-  team_invoke([&]() {
-    const int tid = thread_id();
+  auto kernel_body = [&](int tid) {
     double local = 0.0;
     const std::size_t chunk = (nspec + static_cast<std::size_t>(knt) - 1) / static_cast<std::size_t>(knt);
     const std::size_t begin = static_cast<std::size_t>(tid) * chunk;
@@ -857,7 +984,20 @@ double float_reciprocal(std::vector<std::complex<double>> &charged,
     if (tid >= 0 && tid < 8) {
       kernel_part[tid] = local;
     }
-  });
+  };
+  if (knt <= 1) {
+    kernel_body(0);
+  } else {
+#ifdef _OPENMP
+#pragma omp parallel
+#endif
+    {
+      const int tid = thread_id();
+      if (tid < knt) {
+        kernel_body(tid);
+      }
+    }
+  }
   if (group_leader() || !in_group()) {
     const int nsum = in_group() ? knt : knt;
     for (int t = 0; t < nsum && t < 8; ++t) {
@@ -1593,23 +1733,28 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
       F[3 * i + a] += -dE;
     }
   };
-  if (nthreads <= 1 || (n < 256 && nthreads < 4)) {
-    g_pme_trace.gather_team = 1;
+  const int gather_cap = atom_workers(static_cast<int>(n), nthreads);
+  g_pme_trace.gather_team = gather_cap;
+  if (gather_cap <= 1) {
     for (std::size_t i = 0; i < n; ++i) {
       gather_atom(i);
     }
   } else {
-    team_invoke([&]() {
+#ifdef _OPENMP
+#pragma omp parallel
+#endif
+    {
       const int tid_cap = thread_id();
-      if (tid_cap < nthreads) {
-        const std::size_t chunk = (n + static_cast<std::size_t>(nthreads) - 1) / static_cast<std::size_t>(nthreads);
+      if (tid_cap < gather_cap) {
+        const std::size_t chunk =
+            (n + static_cast<std::size_t>(gather_cap) - 1) / static_cast<std::size_t>(gather_cap);
         const std::size_t begin = static_cast<std::size_t>(tid_cap) * chunk;
         const std::size_t end = std::min(n, begin + chunk);
         for (std::size_t i = begin; i < end; ++i) {
           gather_atom(i);
         }
       }
-    });
+    }
   }
   if (dE_dq != nullptr) {
     const double dbg = -kKe * kPi * total / (cell.volume * alpha * alpha);
@@ -1735,13 +1880,16 @@ void evaluate_electrostatics(CoulombMethod method, const CoulombConfig &cfg, con
   const CellGeom cell = cell_from_box(box);
   // Two threads on a short mesh: one thread in the transform does not
   // beat one thread, so the second thread runs real space beside it.
-  const bool small_mesh = cfg.grid[0] < 32 && cfg.grid[1] < 32 && cfg.grid[2] < 32;
-  const bool beside = method == CoulombMethod::SPME && thread_count() == 2 && small_mesh && !cfg.stress &&
-                      dE_dq == nullptr;
-  if (beside) {
+  const int asked = std::max(caller_team(), thread_count());
+  const int mesh_cap = axis_workers(std::min(cfg.grid[0], std::min(cfg.grid[1], cfg.grid[2])), asked);
+  // Two threads do not speed a short transform, so the second thread runs
+  // real space in the same OpenMP region.
+  const bool beside_pair = method == CoulombMethod::SPME && thread_count() == 2 && mesh_cap == 1 &&
+                           !cfg.stress && dE_dq == nullptr;
+  if (beside_pair) {
     std::vector<double> extra(3 * n, 0.0);
     ElecOut local{};
-    pocketfft::detail::threading::group_limit() = 1;
+    mesh_group_limit() = 1;
 #ifdef _OPENMP
 #pragma omp parallel num_threads(2)
 #endif
@@ -1752,7 +1900,7 @@ void evaluate_electrostatics(CoulombMethod method, const CoulombConfig &cfg, con
         real_space(cfg, false, q, n, pairs, extra.data(), nullptr, &local);
       }
     }
-    pocketfft::detail::threading::group_limit() = 0;
+    mesh_group_limit() = 0;
     for (std::size_t i = 0; i < extra.size(); ++i) {
       F[i] += extra[i];
     }

@@ -9,6 +9,7 @@
 
 #include "rgpot/LongRange/Dispersion.hpp"
 #include "rgpot/LongRange/Electro.hpp"
+#include "rgpot/LongRange/Team.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -306,10 +307,11 @@ const char *git_tree() { return RGPOT_GIT_TREE; }
 
 template <class Fn>
 std::vector<double> repeat(int nrep, Fn &&fn, double *warmup_us) {
-  // Two untimed calls settle the allocator and the thread team. The logged
-  // warmup is the last of those, still kept out of the six samples.
-  fn();
-  fn();
+  // Untimed calls settle the allocator and a freshly grown thread team.
+  // The logged warmup is the last of those, still kept out of the six samples.
+  for (int i = 0; i < 4; ++i) {
+    fn();
+  }
   {
     const auto t0 = std::chrono::steady_clock::now();
     fn();
@@ -481,6 +483,32 @@ double time_pme(const System &s, int threads, int nrep, std::ostream &log, std::
   cfg.skin = 0.0;
   cfg.periodic = true;
   cfg.stress = false;
+  rgpot::lr::caller_team() = threads;
+  const int mesh_cap = rgpot::lr::axis_workers(
+      std::min(cfg.grid[0], std::min(cfg.grid[1], cfg.grid[2])), threads);
+  const int asked = active_threads;
+  if (mesh_cap < threads && mesh_cap >= 4) {
+    // The pool matches the workers the mesh can feed. The extra threads
+    // are not kept in an active wait outside the smaller team.
+    omp_set_num_threads(mesh_cap);
+#ifdef _OPENMP
+#pragma omp parallel
+#endif
+    {
+      cpu_set_t pin;
+      CPU_ZERO(&pin);
+      CPU_SET(
+#ifdef _OPENMP
+          omp_get_thread_num()
+#else
+          0
+#endif
+          ,
+          &pin);
+      pthread_setaffinity_np(pthread_self(), sizeof(pin), &pin);
+    }
+  }
+  active_threads = asked;
   rgpot::lr::CoulombPot pot(cfg, std::make_shared<rgpot::lr::FixedCharges>(s.q, 0.0));
   std::vector<double> f(s.pos.size());
   auto eval = [&]() {
@@ -493,11 +521,11 @@ double time_pme(const System &s, int threads, int nrep, std::ostream &log, std::
   double warmup_us = 0.0;
   const auto samples = repeat(nrep, eval, &warmup_us);
   const double energy = eval();
-  report(log, ladder, "pme", static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
-  report(echo, ladder, "pme", static_cast<int>(s.z.size()), threads_now(), samples, warmup_us, energy);
+  report(log, ladder, "pme", static_cast<int>(s.z.size()), threads, samples, warmup_us, energy);
+  report(echo, ladder, "pme", static_cast<int>(s.z.size()), threads, samples, warmup_us, energy);
   const auto phase = rgpot::lr::pme_trace();
   auto phase_line = [&](std::ostream &out) {
-    out << "point ladder=" << ladder << " method=pme n=" << s.z.size() << " threads=" << threads_now()
+    out << "point ladder=" << ladder << " method=pme n=" << s.z.size() << " threads=" << threads
         << " active=" << active_threads << " exit=0 alpha=" << cfg.alpha << " order=" << cfg.spline_order
         << " grid=" << cfg.grid[0] << ' ' << cfg.grid[1] << ' ' << cfg.grid[2]
         << " spread_us=" << phase.spread_us << " fft_us=" << phase.fft_us << " kernel_us=" << phase.kernel_us
