@@ -308,7 +308,9 @@ void fft3_lines(std::vector<std::complex<double>> &g, int ng, bool inverse) {
     return;
   }
 #ifdef _OPENMP
-#pragma omp parallel num_threads(cap)
+  // The region is the live pool. Asking for a smaller team while the
+  // spare workers are still in an active wait stalls the transform.
+#pragma omp parallel
 #endif
   {
     const int tid =
@@ -317,15 +319,21 @@ void fft3_lines(std::vector<std::complex<double>> &g, int ng, bool inverse) {
 #else
         0;
 #endif
-    axis(2, tid, 1.0);
+    if (tid < cap) {
+      axis(2, tid, 1.0);
+    }
 #ifdef _OPENMP
 #pragma omp barrier
 #endif
-    axis(1, tid, 1.0);
+    if (tid < cap) {
+      axis(1, tid, 1.0);
+    }
 #ifdef _OPENMP
 #pragma omp barrier
 #endif
-    axis(0, tid, scale);
+    if (tid < cap) {
+      axis(0, tid, scale);
+    }
   }
 }
 
