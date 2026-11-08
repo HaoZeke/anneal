@@ -1444,11 +1444,19 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
         }
       }
     }
-  } else if (nthreads <= 1 || slab_base == nullptr) {
-    for (std::size_t i = 0; i < n; ++i) {
-      deposit(i);
+  } else if (nthreads <= 1 || slab_base == nullptr || in_group()) {
+    // Spare real-space threads share this region. A private slab per mesh
+    // thread on the first call corrupts the heap, so that spread stays on
+    // the lead thread. Later calls use the cached scatter above.
+    if (!in_group() || group_leader()) {
+      for (std::size_t i = 0; i < n; ++i) {
+        deposit(i);
+      }
+      remember_tables();
     }
-    remember_tables();
+    if (in_group()) {
+      group_arrive();
+    }
   } else {
     auto z_lo = [nz, nthreads](int tid) { return tid * nz / nthreads; };
     auto z_hi = [nz, nthreads](int tid) { return (tid + 1) * nz / nthreads; };
