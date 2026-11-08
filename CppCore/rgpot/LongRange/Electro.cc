@@ -287,12 +287,17 @@ void real_space(const CoulombConfig &cfg, bool dsf, const double *q, std::size_t
       seen_alpha = alpha;
       seen_rc = rc;
     }
-  const int rcap = atom_workers(static_cast<int>(n), nt);
+  int real_seen = 1;
 #ifdef _OPENMP
-#pragma omp parallel num_threads(rcap) if (rcap > 1)
+#pragma omp parallel if (nt > 1)
 #endif
     {
-      const int me = rcap <= 1 ? 0 : thread_id();
+#ifdef _OPENMP
+      if (omp_get_thread_num() == 0) {
+        real_seen = omp_in_parallel() ? omp_get_num_threads() : 1;
+      }
+#endif
+      const int me = nt <= 1 ? 0 : thread_id();
       auto &p = parts[static_cast<std::size_t>(me)];
       double energy = 0.0;
       int cur = -1;
@@ -348,13 +353,19 @@ void real_space(const CoulombConfig &cfg, bool dsf, const double *q, std::size_t
     }
     g_pme_trace.real_us =
         std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t_real0).count();
-    g_pme_trace.real_team = nt;
+    g_pme_trace.real_team = real_seen;
     return;
   }
+  int real_seen = 1;
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
   {
+#ifdef _OPENMP
+    if (omp_get_thread_num() == 0) {
+      real_seen = omp_in_parallel() ? omp_get_num_threads() : 1;
+    }
+#endif
     const int me = nt <= 1 ? 0 : thread_id();
     auto &p = parts[static_cast<std::size_t>(me)];
 #ifdef _OPENMP
@@ -423,7 +434,7 @@ void real_space(const CoulombConfig &cfg, bool dsf, const double *q, std::size_t
     }
   }
   g_pme_trace.real_us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t_real0).count();
-  g_pme_trace.real_team = thread_count();
+  g_pme_trace.real_team = real_seen;
 }
 
 void ewald_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const double *pos,
@@ -669,9 +680,6 @@ double bspline_derivative(int order, double x) {
   if (order == 6) {
     return bspline5(x) - bspline5(x - 1.0);
   }
-  if (order == 5) {
-    return bspline4(x) - bspline4(x - 1.0);
-  }
   if (order == 4) {
     return bspline3(x) - bspline3(x - 1.0);
   }
@@ -773,6 +781,7 @@ int mesh_r2c(float *real, std::complex<float> *spec, int nx, int ny, int nz) {
     work(0);
     return 1;
   }
+  int seen = cap;
 #ifdef _OPENMP
   if (omp_in_parallel()) {
     const int tid = thread_id();
@@ -783,8 +792,18 @@ int mesh_r2c(float *real, std::complex<float> *spec, int nx, int ny, int nz) {
   }
 #pragma omp parallel
 #endif
-  { work(thread_id()); }
-  return cap;
+  {
+    const int tid = thread_id();
+#ifdef _OPENMP
+    if (tid == 0) {
+      seen = omp_get_num_threads();
+    }
+#endif
+    if (tid < cap) {
+      work(tid);
+    }
+  }
+  return seen;
 }
 
 int mesh_c2r(const std::complex<float> *spec, float *real, int nx, int ny, int nz, float inv) {
@@ -826,6 +845,7 @@ int mesh_c2r(const std::complex<float> *spec, float *real, int nx, int ny, int n
     work(0);
     return 1;
   }
+  int seen = cap;
 #ifdef _OPENMP
   if (omp_in_parallel()) {
     const int tid = thread_id();
@@ -836,8 +856,18 @@ int mesh_c2r(const std::complex<float> *spec, float *real, int nx, int ny, int n
   }
 #pragma omp parallel
 #endif
-  { work(thread_id()); }
-  return cap;
+  {
+    const int tid = thread_id();
+#ifdef _OPENMP
+    if (tid == 0) {
+      seen = omp_get_num_threads();
+    }
+#endif
+    if (tid < cap) {
+      work(tid);
+    }
+  }
+  return seen;
 }
 
 void bmod_axis(int order, int n, std::vector<double> *mod) {
@@ -987,16 +1017,24 @@ double float_reciprocal(std::vector<std::complex<double>> &charged,
   };
   if (knt <= 1) {
     kernel_body(0);
+    g_pme_trace.kernel_team = 1;
   } else {
+    int kernel_seen = 1;
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
     {
       const int tid = thread_id();
+#ifdef _OPENMP
+      if (tid == 0) {
+        kernel_seen = omp_get_num_threads();
+      }
+#endif
       if (tid < knt) {
         kernel_body(tid);
       }
     }
+    g_pme_trace.kernel_team = kernel_seen;
   }
   if (group_leader() || !in_group()) {
     const int nsum = in_group() ? knt : knt;
@@ -1130,7 +1168,7 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
     seen_grid[2] = nz;
     seen_grid[3] = order;
   };
-  auto scatter_cached = [&](std::size_t i, float *dest) {
+  auto scatter_cached = [&](std::size_t i) {
     const double qi = q[i];
     const int *gx = gtab.data() + (i * 3 + 0) * span;
     const int *gy = gtab.data() + (i * 3 + 1) * span;
@@ -1145,17 +1183,13 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
         const int base = nx * (gy[iy] + ny * gz[iz]);
         for (int ix = 0; ix < ord; ++ix) {
           const float add = static_cast<float>(qi * wx[ix] * wyz);
-          if (dest != nullptr) {
-            dest[static_cast<std::size_t>(base + gx[ix])] += add;
-          } else {
-            g_charge_f[static_cast<std::size_t>(base + gx[ix])] += add;
-          }
+          g_charge_f[static_cast<std::size_t>(base + gx[ix])] += add;
         }
       }
     }
   };
   double *real_grid = reinterpret_cast<double *>(grid.data());
-  auto deposit = [&](std::size_t i, bool atomic_add, float *dest) {
+  auto deposit = [&](std::size_t i) {
     double r[3] = {pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]};
     double fs[3];
     cell.fractional(r, fs);
@@ -1212,61 +1246,47 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
           const double add = qi * wax[0][ix] * wyz;
           if (!g_charge_f.empty()) {
             const std::size_t at = index(gax[0][ix], gax[1][iy], gax[2][iz]);
-            if (dest != nullptr) {
-              dest[at] += static_cast<float>(add);
-            } else if (atomic_add) {
-#ifdef _OPENMP
-#pragma omp atomic
-#endif
-              g_charge_f[at] += static_cast<float>(add);
-            } else {
-              g_charge_f[at] += static_cast<float>(add);
-            }
+            g_charge_f[at] += static_cast<float>(add);
           } else {
             const std::size_t at = 2 * index(gax[0][ix], gax[1][iy], gax[2][iz]);
-            if (atomic_add) {
-#ifdef _OPENMP
-#pragma omp atomic
-#endif
-              real_grid[at] += add;
-            } else {
-              real_grid[at] += add;
-            }
+            real_grid[at] += add;
           }
         }
       }
     }
   };
+  int spread_seen = 1;
   if (tables_hit) {
     // The cached stencil is a scatter of a few hundred microseconds.
     // A private copy of the mesh is slower than doing it on one thread.
-    // Threads above one only clear the mesh, which the single-thread
-    // path already cleared before the timer.
-    if (nthreads > 1) {
-      // A team launch costs more than clearing a small mesh.
-      if (ntot >= 100000) {
-        team_invoke([&]() {
-          const int tid = thread_id();
-          if (tid >= nthreads) {
-            return;
-          }
-          const std::size_t chunk =
-              (ntot + static_cast<std::size_t>(nthreads) - 1) / static_cast<std::size_t>(nthreads);
-          const std::size_t begin = static_cast<std::size_t>(tid) * chunk;
-          const std::size_t end = std::min(ntot, begin + chunk);
-          std::fill(g_charge_f.begin() + static_cast<std::ptrdiff_t>(begin),
-                    g_charge_f.begin() + static_cast<std::ptrdiff_t>(end), 0.0f);
-        });
-      } else {
-        std::fill(g_charge_f.begin(), g_charge_f.end(), 0.0f);
+    // The whole capped team enters so the region is that team and not a
+    // second, larger pool waiting outside.
+    if (nthreads <= 1) {
+      for (std::size_t i = 0; i < n; ++i) {
+        scatter_cached(i);
       }
-    }
-    for (std::size_t i = 0; i < n; ++i) {
-      scatter_cached(i, nullptr);
+    } else {
+#ifdef _OPENMP
+#pragma omp parallel
+#endif
+      {
+#ifdef _OPENMP
+        if (omp_get_thread_num() == 0) {
+          spread_seen = omp_get_num_threads();
+#else
+        if (true) {
+          spread_seen = 1;
+#endif
+          std::fill(g_charge_f.begin(), g_charge_f.end(), 0.0f);
+          for (std::size_t i = 0; i < n; ++i) {
+            scatter_cached(i);
+          }
+        }
+      }
     }
   } else if (nthreads <= 1 || slab_base == nullptr) {
     for (std::size_t i = 0; i < n; ++i) {
-      deposit(i, false, nullptr);
+      deposit(i);
     }
     remember_tables();
   } else {
@@ -1426,7 +1446,7 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
   const auto t_reduce0 = std::chrono::steady_clock::now();
   const auto t_fft0 = std::chrono::steady_clock::now();
   g_pme_trace.spread_us = std::chrono::duration<double, std::micro>(t_fft0 - t_spread0).count();
-  g_pme_trace.spread_team = tables_hit ? 1 : nthreads;
+  g_pme_trace.spread_team = tables_hit ? spread_seen : nthreads;
   if (trace) {
     std::fprintf(stderr, "pme_reduce workers=%d deposit_us=%.3f reduce_us=%.3f\n", nthreads,
                  std::chrono::duration<double, std::micro>(t_reduce0 - t_spread0).count(),
@@ -1455,102 +1475,6 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
   };
   std::vector<KernelLocal> local(static_cast<std::size_t>(nthreads));
   const double pref = kKe / (2.0 * kPi * cell.volume);
-  struct MeshFactor {
-    int nx = 0;
-    int ny = 0;
-    int nz = 0;
-    int order = 0;
-    double alpha = 0.0;
-    double pref = 0.0;
-    double H[9]{};
-    std::vector<double> factor;
-  };
-  static MeshFactor saved;
-  bool stale = saved.nx != nx || saved.ny != ny || saved.nz != nz || saved.order != order ||
-               saved.alpha != alpha || saved.pref != pref || saved.factor.size() != ntot;
-  if (!stale) {
-    for (int r = 0; r < 3 && !stale; ++r) {
-      for (int c = 0; c < 3; ++c) {
-        if (saved.H[3 * r + c] != cell.H[r][c]) {
-          stale = true;
-          break;
-        }
-      }
-    }
-  }
-  if (stale) {
-    saved.nx = nx;
-    saved.ny = ny;
-    saved.nz = nz;
-    saved.order = order;
-    saved.alpha = alpha;
-    saved.pref = pref;
-    for (int r = 0; r < 3; ++r) {
-      for (int c = 0; c < 3; ++c) {
-        saved.H[3 * r + c] = cell.H[r][c];
-      }
-    }
-    saved.factor.assign(ntot, 0.0);
-    for (int iz = 0; iz < nz; ++iz) {
-      for (int iy = 0; iy < ny; ++iy) {
-        for (int ix = 0; ix < nx; ++ix) {
-          const int sx = ix <= nx / 2 ? ix : ix - nx;
-          const int sy = iy <= ny / 2 ? iy : iy - ny;
-          const int sz = iz <= nz / 2 ? iz : iz - nz;
-          if (sx == 0 && sy == 0 && sz == 0) {
-            continue;
-          }
-          double mc[3];
-          for (int c = 0; c < 3; ++c) {
-            mc[c] = static_cast<double>(sx) * cell.recip[0][c] +
-                    static_cast<double>(sy) * cell.recip[1][c] +
-                    static_cast<double>(sz) * cell.recip[2][c];
-          }
-          const double m2 = mc[0] * mc[0] + mc[1] * mc[1] + mc[2] * mc[2];
-          const double bden = bmx[static_cast<std::size_t>(ix)] * bmy[static_cast<std::size_t>(iy)] *
-                              bmz[static_cast<std::size_t>(iz)];
-          if (!(m2 > 0.0) || !(bden > 1e-12)) {
-            continue;
-          }
-          const double gauss = std::exp(-kPi * kPi * m2 / (alpha * alpha));
-          saved.factor[index(ix, iy, iz)] = pref * gauss / m2 / bden;
-        }
-      }
-    }
-  }
-  const double *kfac = saved.factor.data();
-  if (trace) {
-    double fmax = 0.0;
-    for (double f : saved.factor) {
-      fmax = std::max(fmax, f);
-    }
-    std::fprintf(stderr, "pme_factor ntot=%zu fmax=%.6e stale_built=%d\n", ntot, fmax, stale ? 1 : 0);
-  }
-  auto apply_cached = [&](int tid) {
-    // Every term is non-negative, so a plain sum matches the compensated
-    // sum well past the force tolerance.
-    double rec_plain = 0.0;
-    const double two_n = 2.0 * static_cast<double>(ntot);
-    const double *gd = reinterpret_cast<const double *>(grid.data());
-    double *pd = reinterpret_cast<double *>(phihat.data());
-    for (int iz = tid; iz < nz; iz += nthreads) {
-      for (int iy = 0; iy < ny; ++iy) {
-        const std::size_t row = static_cast<std::size_t>(nx) * (static_cast<std::size_t>(iy) +
-                                                                static_cast<std::size_t>(ny) * static_cast<std::size_t>(iz));
-        for (int ix = 0; ix < nx; ++ix) {
-          const std::size_t at = row + static_cast<std::size_t>(ix);
-          const double factor = kfac[at];
-          const double re = gd[2 * at];
-          const double im = gd[2 * at + 1];
-          rec_plain += factor * (re * re + im * im);
-          const double scale = two_n * factor;
-          pd[2 * at] = scale * re;
-          pd[2 * at + 1] = scale * im;
-        }
-      }
-    }
-    local[static_cast<std::size_t>(tid)].rec.add(rec_plain);
-  };
   auto apply_stress = [&](int tid) {
     Neumaier &rec = local[static_cast<std::size_t>(tid)].rec;
     double *st = local[static_cast<std::size_t>(tid)].strain;
@@ -1631,10 +1555,10 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
     if (group_leader()) {
       out->energy += mesh_e;
     }
-  } else if (cfg.stress) {
-    run_kernel(apply_stress);
   } else {
-    run_kernel(apply_cached);
+    // Stress is the only double-precision mesh. The charge-only path uses
+    // the float kernel above, so there is no second consumer of a factor table.
+    run_kernel(apply_stress);
   }
   Neumaier rec;
   for (const KernelLocal &part : local) {
@@ -1734,17 +1658,23 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
     }
   };
   const int gather_cap = atom_workers(static_cast<int>(n), nthreads);
-  g_pme_trace.gather_team = gather_cap;
   if (gather_cap <= 1) {
+    g_pme_trace.gather_team = 1;
     for (std::size_t i = 0; i < n; ++i) {
       gather_atom(i);
     }
   } else {
+    int gather_seen = gather_cap;
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
     {
       const int tid_cap = thread_id();
+#ifdef _OPENMP
+      if (tid_cap == 0) {
+        gather_seen = omp_get_num_threads();
+      }
+#endif
       if (tid_cap < gather_cap) {
         const std::size_t chunk =
             (n + static_cast<std::size_t>(gather_cap) - 1) / static_cast<std::size_t>(gather_cap);
@@ -1755,6 +1685,7 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
         }
       }
     }
+    g_pme_trace.gather_team = gather_seen;
   }
   if (dE_dq != nullptr) {
     const double dbg = -kKe * kPi * total / (cell.volume * alpha * alpha);
@@ -1878,6 +1809,24 @@ void evaluate_electrostatics(CoulombMethod method, const CoulombConfig &cfg, con
     throw std::invalid_argument("Ewald kmax must be at least 1");
   }
   const CellGeom cell = cell_from_box(box);
+  if (method == CoulombMethod::SPME) {
+    // A request of eight on a short mesh is a team of four. Shrink the
+    // pool before any phase so the spare workers are not created and do
+    // not sit in an active wait outside a smaller region.
+    const int requested = std::max(caller_team(), thread_count());
+    const int npoints = std::min(cfg.grid[0], std::min(cfg.grid[1], cfg.grid[2]));
+    const int cap = pme_team(static_cast<int>(n), npoints, requested);
+#ifdef _OPENMP
+    omp_set_dynamic(0);
+    const int cur = std::max(1, omp_get_max_threads());
+    if (cur > cap) {
+      omp_pause_resource_all(omp_pause_soft);
+      omp_set_num_threads(cap);
+    } else if (cur < cap) {
+      omp_set_num_threads(cap);
+    }
+#endif
+  }
   // Two threads on a short mesh: one thread in the transform does not
   // beat one thread, so the second thread runs real space beside it.
   const int asked = std::max(caller_team(), thread_count());

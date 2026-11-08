@@ -31,7 +31,6 @@ namespace {
 // When a worker is building one column of the dense charge matrix it
 // must not start another OpenMP team inside the transform.
 thread_local int g_fft_team = 0;
-thread_local int g_serial_apply = 0;
 
 constexpr double kPi = std::numbers::pi;
 constexpr double kBohr = units::BOHR_TO_ANGSTROM;
@@ -580,10 +579,6 @@ struct Operator {
   }
 
   void apply(const double *q, double *y) const {
-    if (g_serial_apply) {
-      apply_one(q, y);
-      return;
-    }
     std::fill(y, y + n, 0.0);
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
@@ -664,7 +659,6 @@ struct Operator {
 #pragma omp parallel for schedule(static)
 #endif
     for (int j = 0; j < cols; ++j) {
-      g_serial_apply = 1;
       g_fft_team = 1;
       std::vector<double> basis(n, 0.0), column(n, 0.0);
       basis[static_cast<std::size_t>(j)] = 1.0;
@@ -672,7 +666,6 @@ struct Operator {
       for (std::size_t i = 0; i < n; ++i) {
         fact[i + n * static_cast<std::size_t>(j)] = column[i];
       }
-      g_serial_apply = 0;
       g_fft_team = 0;
     }
     ipiv.assign(n, 0);

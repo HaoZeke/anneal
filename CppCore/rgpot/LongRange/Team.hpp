@@ -63,6 +63,22 @@ inline int atom_workers(int natoms, int team) {
   return cap;
 }
 
+// The OpenMP pool for one PME call. It is the larger of the mesh cap
+// and the atom cap, and never the raw request when that is bigger.
+// N=128 on a 25-point mesh at a request of 8 is 4.
+inline int pme_team(int natoms, int npoints, int requested) {
+  if (requested <= 1) {
+    return 1;
+  }
+  const int mesh = axis_workers(npoints, requested);
+  const int atoms = atom_workers(natoms, requested);
+  int team = mesh > atoms ? mesh : atoms;
+  if (team > requested) {
+    team = requested;
+  }
+  return team < 1 ? 1 : team;
+}
+
 // Cap the OpenMP team when a call has too little work. n_max is the
 // largest atom count that uses the cap. Bigger calls keep every thread
 // the caller asked for. Callers leave the extra threads idle instead of

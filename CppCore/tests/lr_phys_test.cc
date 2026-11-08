@@ -1451,6 +1451,195 @@ void test_worker_cap() {
   check(atom_workers(128, 8) == 4, "128 atoms feed four spread workers");
   check(atom_workers(128, 8) <= atom_workers(4096, 8), "more atoms can feed more workers");
   check(atom_workers(31, 8) == 1, "fewer than 32 atoms stay on one worker");
+  check(rgpot::lr::pme_team(128, 25, 8) == 4, "a request of 8 on 128 atoms is a team of 4");
+  check(rgpot::lr::pme_team(128, 25, 4) == 4, "a request of 4 on 128 atoms is a team of 4");
+  check(rgpot::lr::pme_team(128, 25, 2) == 2, "a request of 2 keeps the real-space pair");
+  check(rgpot::lr::pme_team(4096, 80, 8) == 8, "a long mesh keeps the whole request");
+}
+
+// N=128 on the 25-point mesh. A request of 8 must run a team of 4 in
+// every phase, and must not leave the other four workers in the pool.
+void test_capped_phase_team() {
+  constexpr int n = 128;
+  const double side = 24.0;
+  const double box[9] = {side, 0, 0, 0, side, 0, 0, 0, side};
+  std::vector<double> pos(3 * n);
+  std::vector<int> z(n, 1);
+  std::vector<double> q(n);
+  int k = 0;
+  for (int ix = 0; ix < 4; ++ix) {
+    for (int iy = 0; iy < 4; ++iy) {
+      for (int iz = 0; iz < 8; ++iz) {
+        pos[3 * k] = (static_cast<double>(ix) + 0.5) * side / 4.0;
+        pos[3 * k + 1] = (static_cast<double>(iy) + 0.5) * side / 4.0;
+        pos[3 * k + 2] = (static_cast<double>(iz) + 0.5) * side / 8.0;
+        q[k] = (k % 2 == 0) ? 0.1 : -0.1;
+        ++k;
+      }
+    }
+  }
+#ifdef _OPENMP
+  omp_set_dynamic(0);
+  omp_set_num_threads(8);
+#pragma omp parallel
+  {
+    (void)omp_get_thread_num();
+  }
+  check(omp_get_max_threads() == 8, "the request starts as a team of 8");
+#endif
+  rgpot::lr::caller_team() = 8;
+  CoulombConfig cfg;
+  cfg.method = CoulombMethod::SPME;
+  cfg.periodic = true;
+  cfg.cutoff = 8.0;
+  cfg.alpha = 0.364803;
+  cfg.grid[0] = cfg.grid[1] = cfg.grid[2] = 25;
+  cfg.spline_order = 5;
+  cfg.stress = false;
+  CoulombPot pot(cfg, std::make_shared<FixedCharges>(q, 0.0));
+  run(pot, pos, z, box);
+  run(pot, pos, z, box);
+  const rgpot::lr::PmeTrace tr = rgpot::lr::pme_trace();
+  check(tr.spread_team == 4, "spread runs the capped team");
+  check(tr.fft_team == 4, "the transform runs the capped team");
+  check(tr.kernel_team == 4, "the kernel runs the capped team");
+  check(tr.gather_team == 4, "gather runs the capped team");
+  check(tr.real_team == 4, "real space runs the capped team");
+#ifdef _OPENMP
+  check(omp_get_max_threads() == 4, "the capped call leaves no extra workers");
+#endif
+  rgpot::lr::caller_team() = 1;
+}
+
+// Paths the ladder does not take: a spline order other than 5, a team that
+// has to grow, a non-finite coordinate, and a D4 system past the dense
+// cutoff so the conjugate gradient runs.
+void test_edge_paths() {
+  bool threw = false;
+  try {
+    const double box[9] = {10, 0, 0, 0, 10, 0, 0, 0, 10};
+    std::vector<double> pos = {1, 1, 1, 2, 2, std::numeric_limits<double>::infinity()};
+    std::vector<int> z = {1, 8};
+    std::vector<double> q = {0.2, -0.2};
+    CoulombConfig cfg;
+    cfg.method = CoulombMethod::SPME;
+    cfg.periodic = true;
+    cfg.cutoff = 4.0;
+    cfg.alpha = 0.3;
+    cfg.grid[0] = cfg.grid[1] = cfg.grid[2] = 16;
+    cfg.spline_order = 5;
+    cfg.stress = false;
+    CoulombPot pot(cfg, std::make_shared<FixedCharges>(q, 0.0));
+    run(pot, pos, z, box);
+  } catch (const std::invalid_argument &) {
+    threw = true;
+  }
+  check(threw, "a non-finite position is rejected");
+
+  const double box[9] = {20, 0, 0, 0, 20, 0, 0, 0, 20};
+  constexpr int n = 32;
+  std::vector<double> pos(3 * n);
+  std::vector<int> z(n, 1);
+  std::vector<double> q(n);
+  for (int i = 0; i < n; ++i) {
+    pos[3 * i] = 1.0 + (i % 4) * 4.0;
+    pos[3 * i + 1] = 1.0 + ((i / 4) % 4) * 4.0;
+    pos[3 * i + 2] = 1.0 + (i / 16) * 8.0;
+    q[i] = (i % 2 == 0) ? 0.1 : -0.1;
+    z[i] = (i % 2 == 0) ? 8 : 1;
+  }
+#ifdef _OPENMP
+  omp_set_dynamic(0);
+  omp_set_num_threads(1);
+#endif
+  rgpot::lr::caller_team() = 8;
+  CoulombConfig cfg;
+  cfg.method = CoulombMethod::SPME;
+  cfg.periodic = true;
+  cfg.cutoff = 6.0;
+  cfg.alpha = 0.3;
+  cfg.grid[0] = cfg.grid[1] = cfg.grid[2] = 40;
+  cfg.spline_order = 6;
+  cfg.stress = false;
+  CoulombPot pot(cfg, std::make_shared<FixedCharges>(q, 0.0));
+  const Eval grown = run(pot, pos, z, box);
+  check(std::isfinite(grown.energy), "order-6 PME energy is finite");
+#ifdef _OPENMP
+  omp_set_num_threads(4);
+#endif
+  setenv("LR_PME_PROFILE", "1", 1);
+  const Eval profiled = run(pot, pos, z, box);
+  unsetenv("LR_PME_PROFILE");
+  check(std::isfinite(profiled.energy), "a profiled PME call stays finite");
+  rgpot::lr::caller_team() = 1;
+
+  // A pair closer than the screen table's first node uses the direct erfc.
+  // One atom sits on the box edge so a stencil index wraps through zero.
+  std::vector<double> close_pos = {0.02, 0.2, 0.2, 0.02005, 0.2, 0.2};
+  std::vector<int> close_z = {1, 1};
+  std::vector<double> close_q = {0.3, -0.3};
+  CoulombConfig near_cfg;
+  near_cfg.method = CoulombMethod::SPME;
+  near_cfg.periodic = true;
+  near_cfg.cutoff = 8.0;
+  near_cfg.alpha = 0.25;
+  near_cfg.grid[0] = near_cfg.grid[1] = near_cfg.grid[2] = 16;
+  near_cfg.spline_order = 5;
+  near_cfg.stress = false;
+  const double near_box[9] = {12, 0, 0, 0, 12, 0, 0, 0, 12};
+  CoulombPot near_pot(near_cfg, std::make_shared<FixedCharges>(close_q, 0.0));
+  const Eval near = run(near_pot, close_pos, close_z, near_box);
+  check(std::isfinite(near.energy), "a very short pair stays finite");
+
+  // Orders other than 5 and 6 use the recursive cardinal spline. A second
+  // box rebuilds the mesh kernel, and a stress call drops the float buffer.
+  for (int order : {3, 4}) {
+    CoulombConfig alt = cfg;
+    alt.spline_order = order;
+    alt.grid[0] = alt.grid[1] = alt.grid[2] = 24;
+    CoulombPot alt_pot(alt, std::make_shared<FixedCharges>(q, 0.0));
+    const Eval a = run(alt_pot, pos, z, box);
+    double box2[9];
+    std::copy(box, box + 9, box2);
+    box2[0] = box2[4] = box2[8] = 24.0;
+    std::vector<double> edge = pos;
+    edge[2] = 24.0;
+    const Eval b = run(alt_pot, edge, z, box2);
+    check(std::isfinite(a.energy) && std::isfinite(b.energy), "lower-order PME stays finite");
+    alt.stress = true;
+    CoulombPot stress_pot(alt, std::make_shared<FixedCharges>(q, 0.0));
+    const Eval c = run(stress_pot, pos, z, box);
+    check(c.has_stress && std::isfinite(c.energy), "stress PME publishes a stress");
+  }
+
+#if defined(RGPOT_HAS_DFTD4)
+#ifdef _OPENMP
+  omp_set_num_threads(1);
+#endif
+  setenv("LR_EEQ_DIRECT", "8", 1);
+  rgpot::lr::DispersionConfig d4;
+  d4.kind = rgpot::lr::DispersionKind::D4;
+  d4.functional = "pbe";
+  d4.atm = false;
+  d4.periodic = true;
+  d4.cutoff = 8.0;
+  d4.short_cutoff = 3.0;
+  constexpr int nd4 = 80;
+  const double side = 18.0;
+  const double dbox[9] = {side, 0, 0, 0, side, 0, 0, 0, side};
+  std::vector<double> dpos(3 * nd4);
+  std::vector<int> dz(nd4);
+  for (int i = 0; i < nd4; ++i) {
+    dpos[3 * i] = 0.8 + (i % 5) * 3.2;
+    dpos[3 * i + 1] = 0.8 + ((i / 5) % 4) * 4.0;
+    dpos[3 * i + 2] = 0.8 + (i / 20) * 4.0;
+    dz[i] = (i % 2 == 0) ? 6 : 1;
+  }
+  rgpot::lr::DispersionPot d4pot(d4);
+  const Eval ed4 = run(d4pot, dpos, dz, dbox);
+  check(std::isfinite(ed4.energy), "periodic D4 above the dense cutoff is finite");
+  unsetenv("LR_EEQ_DIRECT");
+#endif
 }
 
 } // namespace
@@ -1472,6 +1661,8 @@ int main() {
     test_nve();
     test_cuda_and_periodic_mbd();
     test_worker_cap();
+    test_edge_paths();
+    test_capped_phase_team();
   } catch (const std::exception &ex) {
     std::cerr << "FAIL exception " << ex.what() << '\n';
     return 1;

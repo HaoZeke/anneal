@@ -54,7 +54,10 @@ void set_threads(int n) {
   // cell. Growing the team does not.
   static int live = 0;
   if (live > n) {
-    omp_pause_resource_all(omp_pause_hard);
+    // Soft pause drops the spare workers and keeps the threads that stay.
+    // A hard pause frees those too, and the replacement team is slower
+    // for the whole cell.
+    omp_pause_resource_all(omp_pause_soft);
   }
   live = n;
   omp_set_dynamic(0);
@@ -466,7 +469,6 @@ double time_ewald(const System &s, int threads, int nrep, std::ostream &log, std
 
 double time_pme(const System &s, int threads, int nrep, std::ostream &log, std::ostream &echo,
                 const std::string &ladder) {
-  set_threads(threads);
   rgpot::lr::CoulombConfig cfg;
   cfg.method = rgpot::lr::CoulombMethod::SPME;
   cfg.cutoff = std::getenv("LR_CUT") != nullptr ? std::atof(std::getenv("LR_CUT")) : 8.0;
@@ -483,32 +485,12 @@ double time_pme(const System &s, int threads, int nrep, std::ostream &log, std::
   cfg.skin = 0.0;
   cfg.periodic = true;
   cfg.stress = false;
+  // Build only the capped pool. set_threads(8) followed by a region of 4
+  // leaves four workers spinning for the whole cell.
+  const int run_team = rgpot::lr::pme_team(
+      static_cast<int>(s.z.size()), std::min(cfg.grid[0], std::min(cfg.grid[1], cfg.grid[2])), threads);
   rgpot::lr::caller_team() = threads;
-  const int mesh_cap = rgpot::lr::axis_workers(
-      std::min(cfg.grid[0], std::min(cfg.grid[1], cfg.grid[2])), threads);
-  const int asked = active_threads;
-  if (mesh_cap < threads && mesh_cap >= 4) {
-    // The pool matches the workers the mesh can feed. The extra threads
-    // are not kept in an active wait outside the smaller team.
-    omp_set_num_threads(mesh_cap);
-#ifdef _OPENMP
-#pragma omp parallel
-#endif
-    {
-      cpu_set_t pin;
-      CPU_ZERO(&pin);
-      CPU_SET(
-#ifdef _OPENMP
-          omp_get_thread_num()
-#else
-          0
-#endif
-          ,
-          &pin);
-      pthread_setaffinity_np(pthread_self(), sizeof(pin), &pin);
-    }
-  }
-  active_threads = asked;
+  set_threads(run_team);
   rgpot::lr::CoulombPot pot(cfg, std::make_shared<rgpot::lr::FixedCharges>(s.q, 0.0));
   std::vector<double> f(s.pos.size());
   auto eval = [&]() {
@@ -683,6 +665,7 @@ int main(int argc, char **argv) {
     int smt = 0;
     if (topology_fallback(&sockets, &smt) != 1 || sockets != 1 || smt != 1) return 2;
     if (smooth_fft(79) != 80) return 2;
+    if (smooth_fft(2) != 4) return 2;
     setenv("LR_AFFINITY_FAIL", "1", 1);
     int failed_sockets = 0;
     int failed_smt = 0;
