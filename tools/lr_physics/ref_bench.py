@@ -490,6 +490,8 @@ def drive(geom_dir, binary, threads_list):
     print(f"head {head}", flush=True)
     print(f"tree {tree}", flush=True)
     print(f"binary {binary}", flush=True)
+    if binary:
+        print(f"binary_sha256={sha256_file(binary)}", flush=True)
     print(f"cpu {cpu_model()}", flush=True)
     print(f"hostname {socket.gethostname()}", flush=True)
     print(versions(), flush=True)
@@ -528,6 +530,7 @@ def drive(geom_dir, binary, threads_list):
                         f"exit_code={proc.returncode}",
                         flush=True,
                     )
+                    print(load_fields(), flush=True)
         if binary:
             env = os.environ.copy()
             env["OMP_NUM_THREADS"] = "1"
