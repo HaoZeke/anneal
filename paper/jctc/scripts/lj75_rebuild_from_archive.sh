@@ -9,8 +9,8 @@
 # Its rigid_body.rs is a third version.
 # The log records the time, the archive sha, the toolchain, the command,
 # the exit code and the sha256.
-# redact_paths.py writes the redacted log. The raw log stays where the
-# caller points it.
+# redact_paths.py writes the redacted log and the sha map.
+# With no raw path, mktemp creates the raw log outside the work tree.
 # logs/lj75-rebuild-log.txt shows sha256
 # 6887e36a368f9fa81eded591dcfa22904fa317fe2208b1bc58ba6500c8937118,
 # the same digest as the running binary.
@@ -18,7 +18,12 @@ set -eu
 archive=${1:-paper/jctc/logs/lj75-source-37535ec1.tar.xz}
 dest=${2:-lj75-source}
 log=${3:-paper/jctc/logs/lj75-rebuild-log.txt}
-raw=${4:-$log.raw}
+if [ $# -ge 4 ] && [ -n "$4" ]; then
+  raw=$4
+else
+  raw=$(mktemp)
+fi
+printf '%s\n' "$raw" >&2
 map=${5:-$(dirname "$log")/lj75-rebuild-log-map.txt}
 here=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 mkdir -p "$dest" "$(dirname "$log")" "$(dirname "$raw")"
