@@ -36,9 +36,11 @@ largest pair distance, and restart on stall stays off.
 On the water hexamer, the six crest rows are single draws from CREST
 3.0.2.
 That build exposes no seed, and the anneal seed fixes only start.xyz.
-This draft states no success rate from those rows.
+The novelty is that one preset, fixed at every size, carries the depth
+posterior and the unseen-mass census.
+Those rows are single draws, so they are not a success rate.
 Five polished gaps lie within \(1\times 10^{-7}\)~Eh.
-Seed 1 lies at \(1.35\times 10^{-7}\)~Eh, just outside that threshold.
+Seed 1 lies at \(1.35\times 10^{-7}\)~Eh, above that line.
 \end{abstract}
 
 \section{Introduction}
@@ -209,19 +211,24 @@ Basin hopping (BH) and minima hopping (MH) run a single walker.\cite{wales1997,g
 The conformer-rotamer ensemble sampling tool (CREST) samples a molecular ensemble by metadynamics.\cite{prachtCrestProgramExploration2024}
 The bank in this section adds the depth posterior and the unseen-mass census to that list.
 
-Figure~\ref{fig:lj75-ecdf} draws that LJ\(_{75}\) comparison.\cite{oakley2013}
+Figure~\ref{fig:lj75-ecdf} draws the encounter curves of main's earlier sealed LJ\(_{75}\) campaign.\cite{oakley2013}
 
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{lj75_ecdf.pdf}
-\caption{Encounter curves of the earlier sealed LJ\(_{75}\) campaign.
-The plot covers 200 seeds from that sealed run.}
+\caption{Encounter curves of main's earlier sealed LJ\(_{75}\) campaign.
+That run used an empty surface list and restart on stall.
+The arms are the recommended hop, the derived hop, and the Wales-group
+basin-hopping program (GMIN).
+The plot covers 200 seeds.
+It is not the campaign that is still running.}
 \label{fig:lj75-ecdf}
 \end{figure}
-A move that has stopped finding depth can still take the next trial.
 \section{Information theory in the hop}
-\label{sec:info} The recommended hop guards against that takeover with a
-posterior on the depth each move reaches.
+\label{sec:info} A move that has stopped finding depth can still take
+the next trial.
+The recommended hop guards against that takeover with a posterior on the
+depth each move reaches.
 
 \subsection{Depth posterior}
 On a deep cluster few of the available moves improve the incumbent.
@@ -280,13 +287,8 @@ No hit count is reported until that run finishes.
 Figure~\ref{fig:lj75-ecdf} draws the encounter curves of the earlier
 sealed LJ\(_{75}\) campaign, which covered 200 seeds.
 \subsection{Rates and the water hexamer}
-Counts that wait for a new run carry the stale marker (STALE).
-\todo{STALE: rerun on main. The recommended hop hit 72 of 72 seeds at
-LJ\(_{38}\). On those hits the median is 726 force calls and the type-7
-interquartile range is 912.25. It hit 47 of 48 seeds at LJ\(_{98}\). On
-those hits the median is 450877 force calls and the type-7 interquartile
-range is 902434.5. The seed rows are
-data/lj38-recommended-seeds.csv and data/lj98-recommended-seeds.csv.}
+The earlier LJ\(_{38}\) and LJ\(_{98}\) board is not repeated in this
+version.
 
 Figure~\ref{fig:minima-maps} maps the minima one seed of basin hopping
 and of the recommended hop accepted at LJ\(_{38}\), LJ\(_{75}\) and
@@ -361,8 +363,7 @@ Figure~\ref{fig:water-crest} draws the four arms.
 Its metadynamics is stochastic for a fixed start geometry.
 This build exposes no seed.
 The anneal seed fixes only start.xyz.
-The crest rows are single draws, so this draft states no success rate
-from them.
+The crest rows are single draws, so they are not a success rate.
 CREST's cost is the energy and gradient call count.
 The driver-count budget spends the driver count.
 The matched comparison and the 30-start statistics are pending from the
@@ -412,8 +413,8 @@ The gap is the anneal energy minus the CREST energy.
 A negative value means the anneal energy sits lower.
 Five seeds lie within \(1\times 10^{-7}\)~Eh on both ledgers.
 Seed 1 reaches \(1.3509\times 10^{-7}\)~Eh on the 4000-evaluation ledger
-and \(1.3505\times 10^{-7}\)~Eh on the old-counter ledger, just outside
-that threshold.
+and \(1.3505\times 10^{-7}\)~Eh on the old-counter ledger, above the
+\(1\times 10^{-7}\)~Eh line.
 The label-free root-mean-square deviation of each polished pair is at
 most 0.00212~Å.
 
@@ -454,15 +455,14 @@ No CREST structure dissociated.
 \label{fig:water-crest}
 \end{figure}
 
-\todo{The counter table leaves the 16-mer count open. A count waits until both arms share one Hamiltonian.}
-
-\todo{Measurement is still open for the Atomic Simulation Environment panel and for the atomistic global optimization framework (AGOX). No count is added here.}
-
-\todo{Measurement is still open for the Wales-group basin-hopping program (GMIN) head-to-head. This draft adds no new count.}
+The 16-mer count is not reported.
+The Atomic Simulation Environment, the atomistic global optimization
+framework (AGOX), and the Wales-group basin-hopping program (GMIN) are
+not compared here.
 
 \section{Conclusions}
-That Wales-group measurement stays open, and the hexamer comparison
-keeps the lean burst library at every size, including 38 atoms.
+The Lennard-Jones preset keeps the lean burst library at every size,
+including 38 atoms.
 In contrast with a size-specific library, that choice does not change
 with the atom count.
 The constructor installs the diameter penalty below 98 atoms.
@@ -473,7 +473,7 @@ at every size.
 Figure~\ref{fig:water-crest} draws the 192-seed campaign.
 
 \section*{Author contributions}
-The hexamer comparison names the roles under the CRediT taxonomy.
+Author contributions follow the CRediT taxonomy.
 Rohit Goswami contributed conceptualization, methodology, software,
 formal analysis, and the original draft.
 Ruhila Goswami contributed software and visualization.
@@ -514,8 +514,8 @@ landfold panels.
 \end{suppinfo}
 
 \section*{Data and software availability}
-The landfold panels in the Supporting Information accompany the six-seed
-hexamer comparison in the text.
+The landfold panels in the Supporting Information are the Lennard-Jones
+maps.
 The source is the repository \url{https://github.com/HaoZeke/anneal}
 under the Massachusetts Institute of Technology (MIT) licence.
 Documentation is at \url{https://anneal.rgoswami.me}.
@@ -525,7 +525,7 @@ The Zenodo digital object identifier (DOI) for this submission is
 \todo{DOI}.
 The newest released tag is v0.11.1.
 The crate records version 0.12.0.
-\todo{release pending}
+The release tag for version 0.12.0 is not assigned.
 % Table-of-contents graphic slot, 3.25 in by 1.75 in: toc-graphic.tex and figs/toc-graphic.pdf.
 
 \bibliography{refs}
