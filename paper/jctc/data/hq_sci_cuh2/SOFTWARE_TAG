@@ -1,0 +1,5 @@
+campaign: hq-sci-cuh2
+remote: ljwork/hq-sci-cuh2
+protocol: recommended slab, CuH2 eindir, 2500 evaluations, 8 seeds
+count: 8/8 at -415.971529
+  cuh2_fcc_rec_0..7 all best -415.971529

@@ -1,0 +1,4 @@
+  eindir objective from rgpot cuh2 (anneal-build/engines/librgpot_cuh2.so)
+anneal-build/examples/fixtures/cuh2_fcc_slab.con: 130 atoms through eindir/rgpot cuh2, 2 free, budget 2500, seeds 5..6
+  seed 5: best -415.971529 eV  hops 124  charged 2500  converged 102/160  verify e=-415.971529 |g|_mobile=2.634e-8
+  wrote best_slab_eindir_s5.xyz
