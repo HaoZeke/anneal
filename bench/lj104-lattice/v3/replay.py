@@ -127,7 +127,11 @@ def main():
             input_text=reflow(message),
         ).strip()
         stamp = git(
-            "log", "-1", "--format=%ad %cd", "--date=format:%Y-%m-%dT%H:%M:%S%z", new
+            "log",
+            "-1",
+            "--format=%ad %cd",
+            "--date=format:%Y-%m-%dT%H:%M:%S%z",
+            new,
         ).strip()
         parent_stamp = git(
             "log",
@@ -137,7 +141,14 @@ def main():
             parent,
         ).strip()
         if stamp.split()[0] < parent_stamp:
-            sys.exit(f"child earlier than parent: {new} {stamp} parent {parent_stamp}")
+            sys.exit(
+                "child earlier than parent: "
+                + new
+                + " "
+                + stamp
+                + " parent "
+                + parent_stamp
+            )
         rows.append((old, new, tree, stamp))
         parent = new
     git("update-ref", BRANCH, parent)
