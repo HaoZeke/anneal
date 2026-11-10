@@ -1,16 +1,19 @@
-Copyright (c) anneal developers
+Copyright © anneal developers
 
-The command is snapper -w 72 --check --color never.
+We ran snapper at width 72 in check mode.
 The exit code is 0.
 Stdout has 0 bytes.
 Stderr has 0 bytes.
 Diagnostic lines are 0.
-The files follow.
+We hashed the eight tip inputs below.
+The sha256 of that concatenation follows.
+0ad1c5add6a860682de1c1b704eea0a1ca1d129f3df5384b27e9d46223825986.
+The byte count is 42190.
 Path docs/prereg/lj104-sota/PREDICTIONS.md.
-Path docs/prereg/lj104-sota/floors.md.
-Path docs/prereg/lj104-sota/requench.md.
+Path docs/prereg/lj104-sota/PUSH.txt.
 Path docs/prereg/lj104-sota/REPLAY.txt.
+Path docs/prereg/lj104-sota/SCOPE.md.
 Path docs/prereg/lj104-sota/TREE_DIFF_STAT.txt.
 Path docs/prereg/lj104-sota/TREE_EQUAL.txt.
-Path docs/prereg/lj104-sota/PUSH.txt.
-Path docs/prereg/lj104-sota/SCOPE.md.
+Path docs/prereg/lj104-sota/floors.md.
+Path docs/prereg/lj104-sota/requench.md.

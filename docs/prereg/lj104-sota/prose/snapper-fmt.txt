@@ -1,8 +1,9 @@
-Copyright (c) anneal developers
+Copyright © anneal developers
 
-The command is snapper-fmt -w 72 --color never.
-The eight files each exit 0.
-Stdout has 32062 bytes.
+We ran snapper-fmt at width 72.
+Each of the eight tip inputs exits 0.
 Stdout matches the concatenated input bytes.
 The sha256 of that stdout follows.
-041c94b2237465caeb0d53b9bd277636c45f065060ce6808bae093d89f45bcb4.
+0ad1c5add6a860682de1c1b704eea0a1ca1d129f3df5384b27e9d46223825986.
+The byte count is 42190.
+The inputs are the same eight paths as the check note.

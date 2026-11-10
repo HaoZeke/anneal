@@ -1,0 +1,2558 @@
+Copyright © anneal developers
+
+We collect the prose files and the commit messages below.
+Each block is fenced so a later run can read it.
+The paths are relative to the repository.
+We keep the block text equal to the file bytes.
+
+File docs/prereg/lj104-sota/NOTES.md.
+```
+Copyright © anneal developers
+
+We record the basin-hopping program (GMIN) baseline here.
+The GMIN_BEST digest is unverified.
+The recorded string follows.
+b8eeddfa6d18a697a76d0714c0a6b356c98c1d40022bd639ac55581e119baf95.
+The source archive sha256 follows.
+3f31e4a4cb234aa602470440fa1996b789725e537d47b20eb3101a0749525b70.
+The patch sha256 follows.
+e9e8395c210375ac33c7f174c85726b1ccbeed4bbfd9d2e130e6cbb4a253eb35.
+The GMIN source has no pinned upstream commit.
+`GNU Fortran 13.3.0` produced the baseline.
+That baseline carries the recorded digest.
+The source archive is identified by the sha256 above.
+The patch file is identified by the sha256 above.
+The original executable stays out of this tree.
+The keyword block is the shared settings file.
+We keep the keyword digest separate from the executable digest.
+The keyword file is gmin_best.keywords.
+Its sha256 follows.
+62618de90c53478bbfe724efe527dd1fa67cd6386da0cf00cb0cc8431bd7037d.
+A local gfortran 13.3.0 rebuild is logged apart from the baseline.
+We do not claim that rebuild matches the recorded string.
+```
+
+File docs/prereg/lj104-sota/PREDICTIONS.md.
+```
+Copyright © anneal developers
+
+# LJ104 held-out comparison
+
+We register the LJ104 comparison before any scored run.
+We leave seeds 5000-5029 unrun in this note.
+The runner beside this note refuses those seeds.
+Seeds 5000 through 5029 are registered for this held-out comparison.
+Their scored receipt comes later.
+We do not run those seeds here.
+
+## Codes
+
+The candidate is anneal.
+It runs arm B v2's preset together with arm D v3.
+Dynamic lattice search (DLS) is the faithful arm D search.
+The basin-hopping program (GMIN) supplies the symmetrisation.
+GMIN also supplies the surface moves in arm B v2.
+The exact preset id is UNFILLED.
+We fill that id only from arm B's serial angular on/off grid.
+That later commit is made before any run of seeds 5000-5029.
+
+The arm D v3 tip sha is UNFILLED.
+We fill that sha in the same later commit.
+That fill still comes before any of those seeds.
+
+GMIN_BEST is the patched GMIN binary.
+Its sha256 begins b8eeddfa6d18a697.
+That binary prints h2h_row.
+On seeds 3000-3029 that binary scored 19 of 30.
+We leave that block as already scored.
+The prediction below carries the count across.
+
+The recorded sha256 string follows.
+b8eeddfa6d18a697a76d0714c0a6b356c98c1d40022bd639ac55581e119baf95.
+The executable is absent from this tree.
+The digest is unverified.
+We do not treat that string as a rebuilt match.
+The source archive sha256 follows.
+3f31e4a4cb234aa602470440fa1996b789725e537d47b20eb3101a0749525b70.
+The patch sha256 follows.
+e9e8395c210375ac33c7f174c85726b1ccbeed4bbfd9d2e130e6cbb4a253eb35.
+The GMIN source has no pinned upstream commit.
+`GNU Fortran 13.3.0` produced the baseline with the recorded digest.
+A local rebuild is recorded apart from that baseline.
+We do not claim the local digest equals the recorded string.
+The shared keyword block is gmin_best.keywords.
+Its sha256 follows.
+62618de90c53478bbfe724efe527dd1fa67cd6386da0cf00cb0cc8431bd7037d.
+A scored data file is that block, then a blank line.
+RANSEED is set to the seed.
+
+## Evidence rows
+
+We keep every file and number in the rows below.
+The rows are the file, the number, and the record.
+
+| file | n | record |
+| --- | --- | --- |
+| source/potential.f90 | 221 | call-count comment |
+| source/potential.f90 | 222 | NPCALL=NPCALL+1 |
+| source/potential.f90 | 220 | hunk start |
+| source/mymylbfgs.F90 | 287 | POTENTIAL, gradient on |
+| source/mymylbfgs.F90 | 285 | hunk start |
+| src/methods/lattice_search.rs | 779 | value-and-gradient unit |
+| src/methods/cluster_hopping.rs | 720 | Ledger::charge_frac |
+| src/methods/lattice_search.rs | 1388 | 1.0 + (m * n) / pairs |
+| examples/h2h_arm3.rs | 46 | LJ38 -173.928427 |
+| examples/h2h_arm3.rs | 47 | LJ55 -279.248470 |
+| examples/h2h_arm3.rs | 48 | LJ75 -397.492331 |
+| examples/h2h_arm3.rs | 49 | LJ98 -543.665361 |
+| examples/lj_cluster_search.rs | 1295 | LJ104 -582.086642 |
+| scripts/elja_submit_jcc_lj.sh | 15 | PAPER_BUDGETS start |
+| scripts/elja_submit_jcc_lj.sh | 16 | LJ38 400000 |
+| scripts/elja_submit_jcc_lj.sh | 17 | LJ55 1000000 |
+| scripts/elja_submit_jcc_lj.sh | 18 | LJ75 4000000 |
+| scripts/elja_submit_jcc_lj.sh | 19 | LJ98 4000000 |
+| scripts/elja_submit_jcc_lj.sh | 21 | LJ104 4000000 |
+| scripts/elja_submit_jcc_lj.sh | 22 | PAPER_BUDGETS end |
+| paper/seeds.toml | 65 | 5000-5063 start |
+| paper/seeds.toml | 71 | 5000-5063 end |
+
+GMIN counts one unit per entry to POTENTIAL.
+The comment text is "Count the number of potential calls."
+One entry is one value-and-gradient evaluation.
+That unit matches the lattice search record in the rows above.
+No conversion sits between the two counters.
+
+Plain DLS is the in-tree reader in src/methods/lattice_search.rs.
+It is a separate column from arm D v3.
+
+## Seeds
+
+The held-out seeds are 5000 through 5029, thirty seeds.
+We did not use them to tune the candidate.
+We did not use them to tune GMIN_BEST.
+We did not use them to tune plain DLS.
+paper/seeds.toml registers 5000-5063 for a different comparison.
+The evidence rows name that registration.
+That comparison is soap on against off.
+It uses an icosahedral 38-mer and 12 Lennard-Jones sites.
+That block is a different comparison from the three codes here.
+
+## Predicted hit rates
+
+A hit is the LJ104 rule below.
+Each prediction is a count out of these thirty seeds.
+
+GMIN_BEST is predicted to hit 19 of 30.
+The binary is the one already scored at 19 of 30 on seeds 3000-3029.
+The held-out prediction is that same count.
+
+The candidate is predicted to hit 19 of 30.
+No combined run of the unfilled preset and the unfilled tip exists.
+There is no pilot count to scale.
+We register parity with the GMIN_BEST carry-forward.
+Parity is reported as parity.
+The number stays as it is when the preset id and the tip sha are filled.
+
+Plain DLS is predicted to hit 20 of 30.
+That count is Papers' recompute of lattice v2 on seeds 3000-3029.
+The lowest-index count is 20 of 30.
+The uniform count is 22 of 30.
+The GMIN count on those seeds is 19 of 30.
+The prediction takes the lowest-index count.
+Those seeds are 3000-3029.
+They are different seeds from 5000-5029.
+This prediction is a carry from those other seeds.
+
+## Win rule
+
+We compare the candidate and GMIN_BEST with one test.
+The test is a one-sided exact McNemar test.
+The test uses the paired outcomes of the same thirty seeds.
+A seed is discordant when exactly one of the two codes hits.
+n is the number of discordant seeds.
+b is the number of those seeds that only the candidate hits.
+Under the null, b is binomial with n trials and probability 1/2.
+The p-value is the probability of b or more.
+Alpha is 0.05, which is the fraction 1/20.
+The candidate wins when that exact tail is at most 1/20.
+The integer form used by the script follows.
+20 times the upper tail, counted in successes, is at most 2 to the n.
+
+The threshold in hits is the smallest such b at the observed n.
+mcnemar_threshold.py prints that minimum for every discordant count.
+The counts run from 0 through 30.
+The print includes the exact tail and the tail to eight decimal places.
+mcnemar_threshold.tsv is the script's stdout and is the table of record.
+The decimal column is a rendering.
+The decision uses the exact tail.
+
+Below 5 discordant seeds, no split wins.
+At 5 discordant seeds the candidate wins only with b = 5.
+The exact tail is 1/32, which is 0.03125.
+At 30 discordant seeds the minimum is b = 20.
+The exact tail is 26504551/536870912, which renders as 0.04936857.
+```
+discordant  candidate_only_min  p_exact                 p_decimal
+0           none
+1           none
+2           none
+3           none
+4           none
+5           5                   1/32                    0.03125000
+6           6                   1/64                    0.01562500
+7           7                   1/128                   0.00781250
+8           7                   9/256                   0.03515625
+9           8                   5/256                   0.01953125
+10          9                   11/1024                 0.01074219
+11          9                   67/2048                 0.03271484
+12          10                  79/4096                 0.01928711
+13          10                  189/4096                0.04614258
+14          11                  235/8192                0.02868652
+15          12                  9/512                   0.01757812
+16          12                  2517/65536              0.03840637
+17          13                  1607/65536              0.02452087
+18          13                  1577/32768              0.04812622
+19          14                  2083/65536              0.03178406
+20          15                  5425/262144             0.02069473
+21          15                  5135/131072             0.03917694
+22          16                  13757/524288            0.02623940
+23          16                  763/16384               0.04656982
+24          17                  536155/16777216         0.03195733
+25          18                  363103/16777216         0.02164263
+26          18                  2533987/67108864        0.03775935
+27          19                  3505699/134217728       0.02611949
+28          19                  11698223/268435456      0.04357928
+29          20                  8244773/268435456       0.03071417
+30          20                  26504551/536870912      0.04936857
+```
+A tie is reported as a tie.
+Parity, the case b = n - b, is equal hit counts.
+It is reported as parity.
+Neither is reported as a win.
+A candidate lead short of the table minimum is reported as that lead.
+The report includes its p-value, and the lead stays a lead.
+We award a win only to the candidate.
+We award that win only at the threshold above.
+The point predictions stay separate from the paired test.
+
+## No-regression panel
+
+We score the panel at LJ38 with n = 6.
+We score LJ55 with the same n.
+We score LJ75 with the same n.
+We score LJ98 with the same n.
+The six seeds are 6000, 6001, 6002, 6003, 6004, and 6005.
+They were never used for tuning.
+They sit outside 5000-5029.
+They also sit outside the ranges named in paper/seeds.toml.
+Those ranges are 0-31, 2000-2247, and 3000-3029.
+They also include 3100-3199, 4000-4047, and 5000-5063.
+We name the seeds before any run of the panel.
+
+The floor at each size is the hit count of the current anneal default.
+We take the count on these same six seeds, after `lj_requench`.
+The default search is `Config::recommended`.
+That is the `recommended` arm of `examples/h2h_seed.rs`.
+Each size runs at its PAPER_BUDGETS entry.
+The evidence rows list 400000, 1000000, and 4000000.
+The search may stop at E_known + 0.001.
+That stop is a search stop.
+A panel hit is the re-quenched energy at or below E_known + 1e-6.
+The four E_known values are the Cambridge Cluster Database minima.
+The evidence rows list those four energies.
+A count below its floor is a mechanical FAIL.
+
+LJ38 floor: 6/6.
+LJ55 floor: 6/6.
+LJ75 floor: 6/6.
+LJ98 floor: 6/6.
+
+The four lines above are the re-quench floors from requench.tsv.
+requench_panel.py writes them.
+A hit is re-quenched E <= E_known + 1e-6.
+Per-seed raw energy and re-quenched energy are in requench.md.
+The hit flag and the re-quench calls are in that same note.
+floors.md keeps the earlier 0.001 window count.
+The window count is a separate tally from the floor.
+A count below its floor is a mechanical FAIL.
+
+## Matched compute
+
+The budget is in energy calls.
+It comes from PAPER_BUDGETS in scripts/elja_submit_jcc_lj.sh.
+The evidence rows name the array bounds and each size budget.
+LJ104 receives 4000000 energy calls.
+The array entry is `[104]=4000000`.
+The candidate, GMIN_BEST, and plain DLS each receive that budget.
+
+The panel uses the same array.
+LJ38 receives 400000 energy calls.
+LJ55 receives 1000000 energy calls.
+LJ75 receives 4000000 energy calls.
+LJ98 receives 4000000 energy calls.
+
+Every energy call is charged.
+That includes each per-generation atom energy call.
+One call is one unit of the budget.
+The in-tree ledger prices a partial evaluation in `Ledger::charge_frac`.
+The evidence rows name that routine.
+It accumulates the partial payment.
+A residue under one call stays uncharged.
+One greedy pass pays `1.0 + (m * n) / pairs`.
+The evidence rows name `Lattice::search` for that payment.
+We charge each of those calls as a whole call in this comparison.
+
+Wall time is recorded for a strictly serial run, one process at a time.
+The runner takes an exclusive lock.
+It refuses to start while another scored run keeps that lock.
+The receipt is written at the start of the process.
+It is written again at the end.
+The receipt records the kernel boot_id and the uptime reading.
+The receipt also records the lscpu listing.
+The start receipt and the end receipt are both kept.
+A run whose two boot_id values differ is a different boot.
+We leave that run unused.
+
+## Hit rule
+
+We score every code in this comparison, GMIN_BEST included, one way.
+The re-quench is `lj_requench`.
+`lj_requench` is `WarmLbfgs::minimize` in `src/methods/warm_lbfgs.rs`.
+`lj_requench` lives in `src/methods/lattice_search.rs`.
+`lj_requench_calls` lives in that same file.
+The solver is `WarmLbfgs::default` and the iteration cap is 5000.
+The calls that minimization returns are the re-quench charge.
+They are recorded apart from the search calls.
+A hit is re-quenched E <= E_known + 1e-6.
+E_known values are the Cambridge Cluster Database minima.
+The list is `e_known.tsv`.
+The evidence rows list the LJ38, LJ55, LJ75, and LJ98 energies.
+LJ104 is -582.086642.
+The evidence rows name `examples/lj_cluster_search.rs` for that value.
+Its hit line is E <= -582.086641.
+The test re-quenches the known LJ104 minimum to the hit line.
+The test name follows.
+`lj_requench_brings_the_known_lj104_minimum_to_the_hit_line`.
+The fixture is `tests/fixtures/lj104_gm.xyz`.
+The test requires that hit line.
+
+## Scored rows
+
+The runner is lj104_sota_runner.py.
+Every scored row cites the git blob id of that file.
+The git commit identifier (HEAD) is the second citation.
+The row also cites the tree of that commit.
+The columns are runner_blob, head, and tree.
+A row that omits any of the three is outside the scored set.
+test_lj104_sota_runner.py checks the concurrent-start refusal.
+A second scored start is refused.
+The test also checks that a written row carries those three fields.
+```
+
+File docs/prereg/lj104-sota/PUSH.txt.
+```
+Copyright © anneal developers
+
+We publish one branch from this record.
+The published reference follows.
+refs/heads/prereg/lj104-sota-v1.
+Archive refs are never pushed.
+The archive list stays in REPLAY.txt.
+Nothing is pushed from this record.
+The plan names that one branch only.
+The seal copies the bundle without a push.
+```
+
+File docs/prereg/lj104-sota/REPLAY.txt.
+```
+Copyright © anneal developers
+
+This replay is one git commit-tree pass.
+There is no sleep.
+GIT_AUTHOR_DATE is not set.
+GIT_COMMITTER_DATE is not set.
+The seconds are the ones git writes.
+A commit may share its parent's second.
+None is earlier than its parent.
+Shared seconds are real.
+These dates replace the archived author dates.
+
+Archive refs are never pushed.
+The only published reference follows.
+refs/heads/prereg/lj104-sota-v1.
+We keep every archive ref in this note.
+
+The v1.3 archive follows.
+835b90741211f2fd00b5b9ea68cde4cc877b31af.
+The v1.3.1 archive follows.
+6cde8551b2791cc33b1060311dd334a04d3d1042.
+The v1.3.2 archive follows.
+97cbaac64e7621a8bddec0052fe0b1851d17a3b9.
+The v1.3.3 archive follows.
+cf5f134b915d9a8da3fa7882c4fcda659edff20f.
+The v1.3.4 archive follows.
+a12e423d4a4aa9fe9b360e7b0cdf30c509d11659.
+replay-map.tsv is the old-to-new map.
+Thirty-three commits were replayed.
+We keep the shared seconds from the real clock.
+The zone is America/Chicago.
+The offset is -0600.
+Author and committer are Rohit Goswami.
+The email is rgoswami@ieee.org.
+The commits are unsigned.
+```
+
+File docs/prereg/lj104-sota/REPORT.md.
+```
+Copyright © anneal developers
+
+We register the LJ104 held-out comparison in this note.
+
+## Registered
+
+The basin-hopping program (GMIN) baseline is predicted at 19 of 30.
+The candidate is predicted at 19 of 30.
+Dynamic lattice search (DLS) is predicted at 20 of 30.
+The uniform lattice count on the other seeds is 22 of 30.
+The held-out seeds are 5000 through 5029.
+We do not run those seeds in this record.
+The panel seeds are 6000 through 6005.
+The re-quench floors are 6/6 at LJ38, LJ55, LJ75, and LJ98.
+A hit is re-quenched energy at or below the known minimum plus 1e-6.
+The win rule is a one-sided exact McNemar test.
+Alpha is 0.05.
+
+## Still UNFILLED
+
+The arm B v2 preset id is UNFILLED.
+The arm D v3 tip sha is UNFILLED.
+We fill both only in a later commit, before any 5000-5029 run.
+
+## Known gaps
+
+The recorded GMIN_BEST digest is unverified.
+That string follows.
+b8eeddfa6d18a697a76d0714c0a6b356c98c1d40022bd639ac55581e119baf95.
+The source archive sha256 follows.
+3f31e4a4cb234aa602470440fa1996b789725e537d47b20eb3101a0749525b70.
+The patch sha256 follows.
+e9e8395c210375ac33c7f174c85726b1ccbeed4bbfd9d2e130e6cbb4a253eb35.
+The GMIN source has no pinned upstream commit.
+The baseline compiler is `GNU Fortran 13.3.0`.
+A local compile with that compiler produced no binary.
+A rebuilt match remains open.
+The original executable stays outside this record.
+The prose profiles are for the box to rerun after this seal.
+
+## Push plan
+
+Archive refs are never pushed.
+The only published reference follows.
+refs/heads/prereg/lj104-sota-v1.
+Nothing is pushed from this record.
+```
+
+File docs/prereg/lj104-sota/SCOPE.md.
+```
+Copyright © anneal developers
+
+We read every commit after 91b15a02 through the tip.
+The tip identifier follows.
+3d0838e0e71bd209031dff87dff0a71ff963c335.
+Subjects and paths come from git.
+An added path is a diff-tree addition.
+A modified path is a diff-tree modification.
+The listing below is one code block.
+Each subject is copied whole.
+
+```
+Commit 149aa73d5cf4e1afb0546ad86fb401d524d66244
+Subject: lj104-prereg: record predictions and McNemar table
+Adds 3 paths.
+docs/prereg/lj104-sota/PREDICTIONS.md
+docs/prereg/lj104-sota/mcnemar_threshold.py
+docs/prereg/lj104-sota/mcnemar_threshold.tsv
+
+Commit 6f07484e2bfc413202596a640dd68995f48bad9e
+Subject: lj104-prereg: add the serial runner and its tests
+Adds 2 paths.
+docs/prereg/lj104-sota/lj104_sota_runner.py
+docs/prereg/lj104-sota/test_lj104_sota_runner.py
+
+Commit 20313a8794da66e85ec9fbe95a2d41c02bd43390
+Subject: lj104-prereg: name panel seeds 6000-6005
+Adds no path.
+Modifies 1 path.
+docs/prereg/lj104-sota/PREDICTIONS.md
+
+Commit d3b8cd189afea533a93d5790c030cf322d2be487
+Subject: lj104-prereg: bind lj_requench for the LJ104 minimum
+Adds no path.
+Modifies 2 paths.
+docs/prereg/lj104-sota/PREDICTIONS.md
+src/methods/lattice_search.rs
+
+Commit ed7b340da4fd3c87161a26fe78fd86cd27438be2
+Subject: lj104-prereg: set the plain DLS prediction to 20/30
+Adds no path.
+Modifies 1 path.
+docs/prereg/lj104-sota/PREDICTIONS.md
+
+Commit c85cdcf46eb58e71e9194bfceec28e5c0261ddbf
+Subject: lj104-prereg: run the default panel from the runner
+Adds no path.
+Modifies 3 paths.
+docs/prereg/lj104-sota/PREDICTIONS.md
+docs/prereg/lj104-sota/lj104_sota_runner.py
+docs/prereg/lj104-sota/test_lj104_sota_runner.py
+
+Commit ca034201ec3d2ab08f482428c6f3eb4abebd0644
+Subject: lj104-prereg: restore the LJ104 occupation test
+Adds no path.
+Modifies 1 path.
+src/methods/lattice_search.rs
+
+Commit a338054c7afabbaf76ab4a273cadfccb2755877a
+Subject: lj104-prereg: commit raw panel traces and receipts
+Adds 100 paths.
+docs/prereg/lj104-sota/panel/01-lj38-6000.span
+docs/prereg/lj104-sota/panel/01-lj38-6000.stderr
+docs/prereg/lj104-sota/panel/01-lj38-6000.trace.csv
+docs/prereg/lj104-sota/panel/01-lj38-6000.xyz
+docs/prereg/lj104-sota/panel/02-lj38-6001.span
+docs/prereg/lj104-sota/panel/02-lj38-6001.stderr
+docs/prereg/lj104-sota/panel/02-lj38-6001.trace.csv
+docs/prereg/lj104-sota/panel/02-lj38-6001.xyz
+docs/prereg/lj104-sota/panel/03-lj38-6002.span
+docs/prereg/lj104-sota/panel/03-lj38-6002.stderr
+docs/prereg/lj104-sota/panel/03-lj38-6002.trace.csv
+docs/prereg/lj104-sota/panel/03-lj38-6002.xyz
+docs/prereg/lj104-sota/panel/04-lj38-6003.span
+docs/prereg/lj104-sota/panel/04-lj38-6003.stderr
+docs/prereg/lj104-sota/panel/04-lj38-6003.trace.csv
+docs/prereg/lj104-sota/panel/04-lj38-6003.xyz
+docs/prereg/lj104-sota/panel/05-lj38-6004.span
+docs/prereg/lj104-sota/panel/05-lj38-6004.stderr
+docs/prereg/lj104-sota/panel/05-lj38-6004.trace.csv
+docs/prereg/lj104-sota/panel/05-lj38-6004.xyz
+docs/prereg/lj104-sota/panel/06-lj38-6005.span
+docs/prereg/lj104-sota/panel/06-lj38-6005.stderr
+docs/prereg/lj104-sota/panel/06-lj38-6005.trace.csv
+docs/prereg/lj104-sota/panel/06-lj38-6005.xyz
+docs/prereg/lj104-sota/panel/07-lj55-6000.span
+docs/prereg/lj104-sota/panel/07-lj55-6000.stderr
+docs/prereg/lj104-sota/panel/07-lj55-6000.trace.csv
+docs/prereg/lj104-sota/panel/07-lj55-6000.xyz
+docs/prereg/lj104-sota/panel/08-lj55-6001.span
+docs/prereg/lj104-sota/panel/08-lj55-6001.stderr
+docs/prereg/lj104-sota/panel/08-lj55-6001.trace.csv
+docs/prereg/lj104-sota/panel/08-lj55-6001.xyz
+docs/prereg/lj104-sota/panel/09-lj55-6002.span
+docs/prereg/lj104-sota/panel/09-lj55-6002.stderr
+docs/prereg/lj104-sota/panel/09-lj55-6002.trace.csv
+docs/prereg/lj104-sota/panel/09-lj55-6002.xyz
+docs/prereg/lj104-sota/panel/10-lj55-6003.span
+docs/prereg/lj104-sota/panel/10-lj55-6003.stderr
+docs/prereg/lj104-sota/panel/10-lj55-6003.trace.csv
+docs/prereg/lj104-sota/panel/10-lj55-6003.xyz
+docs/prereg/lj104-sota/panel/11-lj55-6004.span
+docs/prereg/lj104-sota/panel/11-lj55-6004.stderr
+docs/prereg/lj104-sota/panel/11-lj55-6004.trace.csv
+docs/prereg/lj104-sota/panel/11-lj55-6004.xyz
+docs/prereg/lj104-sota/panel/12-lj55-6005.span
+docs/prereg/lj104-sota/panel/12-lj55-6005.stderr
+docs/prereg/lj104-sota/panel/12-lj55-6005.trace.csv
+docs/prereg/lj104-sota/panel/12-lj55-6005.xyz
+docs/prereg/lj104-sota/panel/13-lj75-6000.span
+docs/prereg/lj104-sota/panel/13-lj75-6000.stderr
+docs/prereg/lj104-sota/panel/13-lj75-6000.trace.csv
+docs/prereg/lj104-sota/panel/13-lj75-6000.xyz
+docs/prereg/lj104-sota/panel/14-lj75-6001.span
+docs/prereg/lj104-sota/panel/14-lj75-6001.stderr
+docs/prereg/lj104-sota/panel/14-lj75-6001.trace.csv
+docs/prereg/lj104-sota/panel/14-lj75-6001.xyz
+docs/prereg/lj104-sota/panel/15-lj75-6002.span
+docs/prereg/lj104-sota/panel/15-lj75-6002.stderr
+docs/prereg/lj104-sota/panel/15-lj75-6002.trace.csv
+docs/prereg/lj104-sota/panel/15-lj75-6002.xyz
+docs/prereg/lj104-sota/panel/16-lj75-6003.span
+docs/prereg/lj104-sota/panel/16-lj75-6003.stderr
+docs/prereg/lj104-sota/panel/16-lj75-6003.trace.csv
+docs/prereg/lj104-sota/panel/16-lj75-6003.xyz
+docs/prereg/lj104-sota/panel/17-lj75-6004.span
+docs/prereg/lj104-sota/panel/17-lj75-6004.stderr
+docs/prereg/lj104-sota/panel/17-lj75-6004.trace.csv
+docs/prereg/lj104-sota/panel/17-lj75-6004.xyz
+docs/prereg/lj104-sota/panel/18-lj75-6005.span
+docs/prereg/lj104-sota/panel/18-lj75-6005.stderr
+docs/prereg/lj104-sota/panel/18-lj75-6005.trace.csv
+docs/prereg/lj104-sota/panel/18-lj75-6005.xyz
+docs/prereg/lj104-sota/panel/19-lj98-6000.span
+docs/prereg/lj104-sota/panel/19-lj98-6000.stderr
+docs/prereg/lj104-sota/panel/19-lj98-6000.trace.csv
+docs/prereg/lj104-sota/panel/19-lj98-6000.xyz
+docs/prereg/lj104-sota/panel/20-lj98-6001.span
+docs/prereg/lj104-sota/panel/20-lj98-6001.stderr
+docs/prereg/lj104-sota/panel/20-lj98-6001.trace.csv
+docs/prereg/lj104-sota/panel/20-lj98-6001.xyz
+docs/prereg/lj104-sota/panel/21-lj98-6002.span
+docs/prereg/lj104-sota/panel/21-lj98-6002.stderr
+docs/prereg/lj104-sota/panel/21-lj98-6002.trace.csv
+docs/prereg/lj104-sota/panel/21-lj98-6002.xyz
+docs/prereg/lj104-sota/panel/22-lj98-6003.span
+docs/prereg/lj104-sota/panel/22-lj98-6003.stderr
+docs/prereg/lj104-sota/panel/22-lj98-6003.trace.csv
+docs/prereg/lj104-sota/panel/22-lj98-6003.xyz
+docs/prereg/lj104-sota/panel/23-lj98-6004.span
+docs/prereg/lj104-sota/panel/23-lj98-6004.stderr
+docs/prereg/lj104-sota/panel/23-lj98-6004.trace.csv
+docs/prereg/lj104-sota/panel/23-lj98-6004.xyz
+docs/prereg/lj104-sota/panel/24-lj98-6005.span
+docs/prereg/lj104-sota/panel/24-lj98-6005.stderr
+docs/prereg/lj104-sota/panel/24-lj98-6005.trace.csv
+docs/prereg/lj104-sota/panel/24-lj98-6005.xyz
+docs/prereg/lj104-sota/panel/end.receipt
+docs/prereg/lj104-sota/panel/rows.tsv
+docs/prereg/lj104-sota/panel/session.txt
+docs/prereg/lj104-sota/panel/start.receipt
+
+Commit 09116a9c1929359881eb9ef0e2bd996b95cbaad0
+Subject: lj104-prereg: add the untouched panel stdout logs
+Adds 24 paths.
+docs/prereg/lj104-sota/panel/01-lj38-6000.log
+docs/prereg/lj104-sota/panel/02-lj38-6001.log
+docs/prereg/lj104-sota/panel/03-lj38-6002.log
+docs/prereg/lj104-sota/panel/04-lj38-6003.log
+docs/prereg/lj104-sota/panel/05-lj38-6004.log
+docs/prereg/lj104-sota/panel/06-lj38-6005.log
+docs/prereg/lj104-sota/panel/07-lj55-6000.log
+docs/prereg/lj104-sota/panel/08-lj55-6001.log
+docs/prereg/lj104-sota/panel/09-lj55-6002.log
+docs/prereg/lj104-sota/panel/10-lj55-6003.log
+docs/prereg/lj104-sota/panel/11-lj55-6004.log
+docs/prereg/lj104-sota/panel/12-lj55-6005.log
+docs/prereg/lj104-sota/panel/13-lj75-6000.log
+docs/prereg/lj104-sota/panel/14-lj75-6001.log
+docs/prereg/lj104-sota/panel/15-lj75-6002.log
+docs/prereg/lj104-sota/panel/16-lj75-6003.log
+docs/prereg/lj104-sota/panel/17-lj75-6004.log
+docs/prereg/lj104-sota/panel/18-lj75-6005.log
+docs/prereg/lj104-sota/panel/19-lj98-6000.log
+docs/prereg/lj104-sota/panel/20-lj98-6001.log
+docs/prereg/lj104-sota/panel/21-lj98-6002.log
+docs/prereg/lj104-sota/panel/22-lj98-6003.log
+docs/prereg/lj104-sota/panel/23-lj98-6004.log
+docs/prereg/lj104-sota/panel/24-lj98-6005.log
+
+Commit 3aaed17c83d2120ea33aecf1d21d1acbce80eac8
+Subject: lj104-prereg: write floors from the raw panel logs
+Adds 2 paths.
+docs/prereg/lj104-sota/floors.md
+docs/prereg/lj104-sota/write_floors.py
+Modifies 1 path.
+docs/prereg/lj104-sota/PREDICTIONS.md
+
+Commit aaf3bae7114d52a5f835636ff3d01b2f7fbad642
+Subject: lj104-prereg: score hits by re-quench at 1e-6
+Adds 3 paths.
+docs/prereg/lj104-sota/e_known.tsv
+docs/prereg/lj104-sota/requench_panel.py
+examples/lj_requench_xyz.rs
+Modifies 2 paths.
+docs/prereg/lj104-sota/PREDICTIONS.md
+src/methods/lattice_search.rs
+
+Commit 1a761592355acbe0213361953d4b6e2216ab71d4
+Subject: lj104-prereg: record re-quenched energies and calls
+Adds 2 paths.
+docs/prereg/lj104-sota/requench.md
+docs/prereg/lj104-sota/requench.tsv
+Modifies 2 paths.
+docs/prereg/lj104-sota/PREDICTIONS.md
+docs/prereg/lj104-sota/requench_panel.py
+
+Commit b7effec3901d59cf179aecbbeba27817949a72b0
+Subject: lj104-prereg: list commit subjects and added paths
+Adds 2 paths.
+docs/prereg/lj104-sota/SCOPE.md
+docs/prereg/lj104-sota/scope_paths.py
+
+Commit c41f33f17c15924fed4fa0c02cd7727fae2933e8
+Subject: lj104-prereg: pin the GMIN digest and charge line
+Adds 1 paths.
+docs/prereg/lj104-sota/gmin_best.keywords
+Modifies 2 paths.
+docs/prereg/lj104-sota/PREDICTIONS.md
+docs/prereg/lj104-sota/requench_panel.py
+
+Commit 5519f1a4fa559fb59c83512db41898c8178eda73
+Subject: lj104-prereg: record replay notes and map
+Adds 8 paths.
+docs/prereg/lj104-sota/REPLAY.txt
+docs/prereg/lj104-sota/TREE_DIFF_STAT.txt
+docs/prereg/lj104-sota/TREE_EQUAL.txt
+docs/prereg/lj104-sota/prose/proseguard-prose-human.txt
+docs/prereg/lj104-sota/prose/proseguard-rohit-paper.txt
+docs/prereg/lj104-sota/prose/snapper-fmt.txt
+docs/prereg/lj104-sota/prose/snapper.txt
+docs/prereg/lj104-sota/replay-map.tsv
+
+Commit 4bc4fdd924e2a6f567f35998ed4a96e2f4f58528
+Subject: lj104-prereg: record the untimed replay pass
+Adds 1 paths.
+docs/prereg/lj104-sota/replay_commit_tree.py
+Modifies 3 paths.
+docs/prereg/lj104-sota/REPLAY.txt
+docs/prereg/lj104-sota/TREE_EQUAL.txt
+docs/prereg/lj104-sota/replay-map.tsv
+
+Commit eb467d8d34796744168c255692098abdd350db39
+Subject: lj104-prereg: store the replay raw log
+Adds 1 paths.
+docs/prereg/lj104-sota/replay-commit-tree.log
+
+Commit 846709f303cc4afb2aa2b0e351fc854781de515b
+Subject: lj104-prereg: fix the scope script syntax
+Adds no path.
+Modifies 1 path.
+docs/prereg/lj104-sota/scope_paths.py
+
+Commit 3420b91b54dc704977c8463b684f99897f592b02
+Subject: lj104-prereg: rewrap the registration prose
+Adds no path.
+Modifies 4 paths.
+docs/prereg/lj104-sota/PREDICTIONS.md
+docs/prereg/lj104-sota/TREE_DIFF_STAT.txt
+docs/prereg/lj104-sota/floors.md
+docs/prereg/lj104-sota/requench.md
+
+Commit 87153f7d6735a853f730516a5894027e75478b52
+Subject: lj104-prereg: record the push plan
+Adds 1 paths.
+docs/prereg/lj104-sota/PUSH.txt
+
+Commit 927fa5e397988f936d0f4ed0e312da3927e0005a
+Subject: lj104-prereg: record the GMIN digest check
+Adds 2 paths.
+docs/prereg/lj104-sota/gmin-best-verify.log
+docs/prereg/lj104-sota/verify_gmin_best.py
+
+Commit c493107e0300ac9164593463a4582034ecf695e6
+Subject: lj104-prereg: write the scope as sentences
+Adds no path.
+Modifies 2 paths.
+docs/prereg/lj104-sota/SCOPE.md
+docs/prereg/lj104-sota/scope_paths.py
+
+Commit 0f6f85e1e0c999d5d70e25e1c26f7de81d92a56b
+Subject: lj104-prereg: record the prose checker output
+Adds 2 paths.
+docs/prereg/lj104-sota/prose/proseguard-commit-msg.txt
+docs/prereg/lj104-sota/prose/snapper-fmt.md
+Modifies 4 paths.
+docs/prereg/lj104-sota/prose/proseguard-prose-human.txt
+docs/prereg/lj104-sota/prose/proseguard-rohit-paper.txt
+docs/prereg/lj104-sota/prose/snapper-fmt.txt
+docs/prereg/lj104-sota/prose/snapper.txt
+
+Commit 9cd85c55fca6268a132d1a91e57a66550af1b921
+Subject: lj104-prereg: record the diff against v1.2
+Adds no path.
+Modifies 1 path.
+docs/prereg/lj104-sota/TREE_DIFF_STAT.txt
+
+Commit 79a3b2dcd3ad5b2b0747338788b968089402afd9
+Subject: lj104-prereg: record the GMIN digest status
+Adds 3 paths.
+docs/prereg/lj104-sota/NOTES.md
+docs/prereg/lj104-sota/build_gmin_best.py
+docs/prereg/lj104-sota/gmin-best-build.log
+Modifies 3 paths.
+docs/prereg/lj104-sota/PREDICTIONS.md
+docs/prereg/lj104-sota/gmin-best-verify.log
+docs/prereg/lj104-sota/verify_gmin_best.py
+
+Commit 31ac8719696e342fe71e0cc8c0340c33f6a40c4e
+Subject: lj104-prereg: record the proseguard search
+Adds no path.
+Modifies 3 paths.
+docs/prereg/lj104-sota/prose/proseguard-commit-msg.txt
+docs/prereg/lj104-sota/prose/proseguard-prose-human.txt
+docs/prereg/lj104-sota/prose/proseguard-rohit-paper.txt
+
+Commit e2002273e12109c45ae02c187263cfe5d67c3269
+Subject: lj104-prereg: record the diff against v1.2
+Adds no path.
+Modifies 1 path.
+docs/prereg/lj104-sota/TREE_DIFF_STAT.txt
+
+Commit c74219ae28a5b1dd69bb1441320cb2fa48707892
+Subject: lj104-prereg: record the full-history bundle verify
+Adds 1 paths.
+docs/prereg/lj104-sota/bundle-verify.txt
+
+Commit 2f18d4c8bf2fe74cd2e008e709085b271bf3dbf0
+Subject: lj104-prereg: keep the bundle verify within 72 columns
+Adds no path.
+Modifies 1 path.
+docs/prereg/lj104-sota/bundle-verify.txt
+
+Commit d278b120473d2481c3225dc1b3eff9829bbe968b
+Subject: lj104-prereg: keep the verify note one sentence wide
+Adds no path.
+Modifies 1 path.
+docs/prereg/lj104-sota/bundle-verify.txt
+
+Commit 3f8c57f8300b99b2b85ab35526d0bfcd86286af1
+Subject: lj104-prereg: clear the registration prose hits
+Adds 1 paths.
+docs/prereg/lj104-sota/REPORT.md
+Modifies 6 paths.
+docs/prereg/lj104-sota/NOTES.md
+docs/prereg/lj104-sota/PREDICTIONS.md
+docs/prereg/lj104-sota/SCOPE.md
+docs/prereg/lj104-sota/floors.md
+docs/prereg/lj104-sota/prose/snapper-fmt.md
+docs/prereg/lj104-sota/requench.md
+
+Commit fe4e9d5bdc63f31034180fae07f5a20dadb194a2
+Subject: lj104-prereg: record the replay and the GMIN attempt
+Adds 1 paths.
+docs/prereg/lj104-sota/replay-v134.log
+Modifies 4 paths.
+docs/prereg/lj104-sota/REPLAY.txt
+docs/prereg/lj104-sota/build_gmin_best.py
+docs/prereg/lj104-sota/gmin-best-build.log
+docs/prereg/lj104-sota/replay-map.tsv
+
+Commit 3d0838e0e71bd209031dff87dff0a71ff963c335
+Subject: lj104-prereg: record the diff against v1.2
+Adds no path.
+Modifies 1 path.
+docs/prereg/lj104-sota/TREE_DIFF_STAT.txt
+
+```
+```
+
+File docs/prereg/lj104-sota/TREE_DIFF_STAT.txt.
+```
+Copyright © anneal developers
+
+We record this stat against the v1.2 tree.
+That tree follows.
+4b168122d30bc00afa0e27a26c67863ffc7b312c.
+We leave this note out of its own count.
+We keep bundle-verify.txt in the list when git shows it.
+We read each insertion count from git numstat.
+We read each deletion count from the same numstat.
+
+Path docs/prereg/lj104-sota/NOTES.md.
+23 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/PREDICTIONS.md.
+246 insertions and 38 deletions.
+Path docs/prereg/lj104-sota/PUSH.txt.
+10 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/REPLAY.txt.
+35 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/REPORT.md.
+46 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/SCOPE.md.
+378 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/TREE_EQUAL.txt.
+171 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/build_gmin_best.py.
+60 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/bundle-verify.txt.
+21 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/floors.md.
+61 insertions and 33 deletions.
+Path docs/prereg/lj104-sota/gmin-best-build.log.
+15 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/gmin-best-verify.log.
+6 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/gmin_best.keywords.
+12 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/prose/proseguard-commit-msg.txt.
+10 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/prose/proseguard-prose-human.txt.
+10 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/prose/proseguard-rohit-paper.txt.
+10 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/prose/snapper-fmt.md.
+707 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/prose/snapper-fmt.txt.
+8 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/prose/snapper.txt.
+16 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/replay-commit-tree.log.
+327 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/replay-map.tsv.
+34 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/replay-v134.log.
+154 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/replay-v135.log.
+136 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/replay_commit_tree.py.
+279 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/requench.md.
+51 insertions and 43 deletions.
+Path docs/prereg/lj104-sota/requench_panel.py.
+11 insertions and 7 deletions.
+Path docs/prereg/lj104-sota/scope_paths.py.
+100 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/verify_gmin_best.py.
+42 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/write_floors.py.
+33 insertions and 13 deletions.
+```
+
+File docs/prereg/lj104-sota/TREE_EQUAL.txt.
+```
+Copyright © anneal developers
+
+We record tree equality for this replay.
+Each pair below shares one tree.
+The old commit and the new commit name that tree.
+
+The old commit is 0eab0cc259f6f73fc33fc29f4ec9e41ae9861d27.
+The new commit is 149aa73d5cf4e1afb0546ad86fb401d524d66244.
+The tree is 31925e50d57ee6e1cd4d733adf5bad02eadf6a13.
+We record equal yes.
+
+The old commit is 98d80c5f774af803306e1c6a08e8801e6c6cff79.
+The new commit is 6f07484e2bfc413202596a640dd68995f48bad9e.
+The tree is 53722e6405b930b174415d60c23c0717b33ca7e1.
+equal yes.
+
+The old commit is 27602bfac86d7e95764df2ba176c2f76010007b8.
+The new commit is 20313a8794da66e85ec9fbe95a2d41c02bd43390.
+The tree is c1b79198488fa3234bf3cf50d2c22d9ce710d4cd.
+equal yes.
+
+The old commit is 22b1509c561c1b5a2c27c495b7d4301eb390d6aa.
+The new commit is d3b8cd189afea533a93d5790c030cf322d2be487.
+The tree is 7bef65dc8612e9e0454c6c565422d1a5e8d20a81.
+equal yes.
+
+The old commit is 7c09c983c789b52f45c16a3415ef37c2b6f60008.
+The new commit is ed7b340da4fd3c87161a26fe78fd86cd27438be2.
+The tree is 927a0cc7b3db6525f8bb7f4255d6ce9fa03ce08c.
+equal yes.
+
+The old commit is 8d2adbc24b3d1fb888df36db6ebb6bf07692c2f5.
+The new commit is c85cdcf46eb58e71e9194bfceec28e5c0261ddbf.
+The tree is 034b4ae9d4b7f4a56a1e29d68b885a712558998d.
+equal yes.
+
+The old commit is 9c139dc538ed7889c295bac6d8637ee5bc69f7e6.
+The new commit is ca034201ec3d2ab08f482428c6f3eb4abebd0644.
+The tree is b8f8a9a73a839235bf3d34a17ef9d27a5afed9fb.
+equal yes.
+
+The old commit is 9d7f04651ac96446ac9fa41c5cbefd70fbf551ec.
+The new commit is a338054c7afabbaf76ab4a273cadfccb2755877a.
+The tree is beac7bacf893c5af2cde198237aed8448e1a44a7.
+equal yes.
+
+The old commit is 005eeebde194c50e1f85b2a7bc07a7de07fb1bd4.
+The new commit is 09116a9c1929359881eb9ef0e2bd996b95cbaad0.
+The tree is bebd8a1e882787bb9c7741e763b6160155d85411.
+We record equal yes.
+
+The old commit is 713a62486f56ca064f876d259905d7c4ff81068d.
+The new commit is 3aaed17c83d2120ea33aecf1d21d1acbce80eac8.
+The tree is ef739091ff6e6e8dd49f159314a9af41f550ca46.
+equal yes.
+
+The old commit is 82b7032b4eec499dfc66566c31f4a95fc9e770a0.
+The new commit is aaf3bae7114d52a5f835636ff3d01b2f7fbad642.
+The tree is d882caf066b85850023036d51c8c8edfc221bcfe.
+equal yes.
+
+The old commit is 81cc157348f7e79c2e4ce8bc1b1589fc637753ed.
+The new commit is 1a761592355acbe0213361953d4b6e2216ab71d4.
+The tree is 4b168122d30bc00afa0e27a26c67863ffc7b312c.
+equal yes.
+
+The old commit is 297584f00a7e8801564315129754fe2588e02fdd.
+The new commit is b7effec3901d59cf179aecbbeba27817949a72b0.
+The tree is 279a3721f5203bf624fc5efd41b478b3a1b5e136.
+equal yes.
+
+The old commit is 59f941178e90f18abbb1bc817117bd7b3237d8a8.
+The new commit is c41f33f17c15924fed4fa0c02cd7727fae2933e8.
+The tree is b5d20591f6ce08f7878cfee614b022127779df7d.
+equal yes.
+
+The old commit is 9dabfb59a2d46d7d768c170df28e5224cd56a761.
+The new commit is 5519f1a4fa559fb59c83512db41898c8178eda73.
+The tree is f300067d17a971b7466825aaa54bbc4fd324064a.
+equal yes.
+
+The old commit is 31b5b2c73ae6a82a26570a675e0c180f9c7336a7.
+The new commit is 4bc4fdd924e2a6f567f35998ed4a96e2f4f58528.
+The tree is 3be3cef6981a3fbdb0d63b8ce5623320a32cf3fa.
+equal yes.
+
+The old commit is 98860f3c930dd7d030560502f2654329c1a828e7.
+The new commit is eb467d8d34796744168c255692098abdd350db39.
+The tree is af78a6f1c8fd87f66f883e04a376e92d9db5c801.
+We record equal yes.
+
+The old commit is 9aa3c8bb2e62d26c5c4e8a456b468d16ad760163.
+The new commit is 846709f303cc4afb2aa2b0e351fc854781de515b.
+The tree is a901f18d4f0ab60314e009a165477494a61604cc.
+equal yes.
+
+The old commit is db55b2d5e000912fab5ed799c6f64c64489a5f17.
+The new commit is 3420b91b54dc704977c8463b684f99897f592b02.
+The tree is c35e349c602fd0e999e48867da26336591e5da8a.
+equal yes.
+
+The old commit is 19201645c676bd0bea33c973740d929cb8e736de.
+The new commit is 87153f7d6735a853f730516a5894027e75478b52.
+The tree is ea1a9ef855b2745cc770f957c81f11543b70adf8.
+equal yes.
+
+The old commit is 2756892fd61a18c30f8b6005cca00ac88a80ef71.
+The new commit is 927fa5e397988f936d0f4ed0e312da3927e0005a.
+The tree is 8ccbf89961763e0c2109530f2993d88c9d52af6c.
+equal yes.
+
+The old commit is cb467e972d11cffde84ee030ed79a63b6aa78b7d.
+The new commit is c493107e0300ac9164593463a4582034ecf695e6.
+The tree is db9a28272195280dad9a424fac6a885d3c3a1152.
+equal yes.
+
+The old commit is f811dc31a6d5015799da1140b3864cef1c9e9352.
+The new commit is 0f6f85e1e0c999d5d70e25e1c26f7de81d92a56b.
+The tree is 1c041331e239e8a218c5477d883010c30ae9cbcb.
+equal yes.
+
+The old commit is 5aff992f7d9084e7de4e807522d9efdd28f4a245.
+The new commit is 9cd85c55fca6268a132d1a91e57a66550af1b921.
+The tree is 9d8138952f4199505ea880215a511d21a14cb0aa.
+equal yes.
+
+The old commit is 37c5a3a2c12a590b88826ddc47f20950366a0e44.
+The new commit is 79a3b2dcd3ad5b2b0747338788b968089402afd9.
+The tree is 9112de6c64b2d3b295b0e7041b22fbaca5e0100a.
+We record equal yes.
+
+The old commit is 79d884f4a98e82b3e191b42b634a26afb17221fc.
+The new commit is 31ac8719696e342fe71e0cc8c0340c33f6a40c4e.
+The tree is 12ac142ddbd16dedd1d810f164eac43ee1ca508f.
+equal yes.
+
+The old commit is 6acb56870013670fea86e8462e5eae4610f02945.
+The new commit is e2002273e12109c45ae02c187263cfe5d67c3269.
+The tree is 7c4edc17b4aae34bf51197a0a6a1b484d8784161.
+equal yes.
+
+The old commit is bd7e915a67f6dc0237efe7bd95890cabaa59103b.
+The new commit is c74219ae28a5b1dd69bb1441320cb2fa48707892.
+The tree is a207e19531e695df8791b8385157086027a4e912.
+equal yes.
+
+The old commit is 5bd5afd8e9a613f99d1de9c5bcf7d95a2f270ebd.
+The new commit is 2f18d4c8bf2fe74cd2e008e709085b271bf3dbf0.
+The tree is f7874b89bbe6ad671dc1359717bd5eacfbd12d01.
+equal yes.
+
+The old commit is e68af0d1381821a48cdff575ace620c91dcd7686.
+The new commit is d278b120473d2481c3225dc1b3eff9829bbe968b.
+The tree is cf0e9624ce798174c9fe1d09be1ed23fff7f5a42.
+equal yes.
+
+The old commit is 92d247acc5821eb44d51ff5bb40ceb2a4e7cbb5f.
+The new commit is 3f8c57f8300b99b2b85ab35526d0bfcd86286af1.
+The tree is 810b428fc2e26c703c56c4424a917ebf8dbf46b1.
+equal yes.
+
+The old commit is 75b546541e5b540fac24b04b94eb17d2822a79f9.
+The new commit is fe4e9d5bdc63f31034180fae07f5a20dadb194a2.
+The tree is a9ce2f34287615942b703c2f9885f8e482abb7d7.
+equal yes.
+
+The old commit is a12e423d4a4aa9fe9b360e7b0cdf30c509d11659.
+The new commit is 3d0838e0e71bd209031dff87dff0a71ff963c335.
+The tree is c08c42fcdce0bbd0f4b7e0a7b767f4c07cb6f28a.
+We record equal yes.
+```
+
+File docs/prereg/lj104-sota/bundle-verify.txt.
+```
+Copyright (c) anneal developers
+
+git bundle verify of a full-history bundle.
+The verified tip follows.
+4839c201d631965d0485baaec8b23cdc0507a419.
+The bundle is okay.
+The bundle lists four references.
+Branch ref refs/heads/prereg/lj104-sota-v1.
+4839c201d631965d0485baaec8b23cdc0507a419.
+Ref refs/archive/prereg/lj104-sota-v1.3.
+835b90741211f2fd00b5b9ea68cde4cc877b31af.
+Ref refs/archive/prereg/lj104-sota-v1.3.1.
+6cde8551b2791cc33b1060311dd334a04d3d1042.
+Ref refs/archive/prereg/lj104-sota-v1.3.2.
+97cbaac64e7621a8bddec0052fe0b1851d17a3b9.
+The bundle records a complete history.
+The bundle uses this hash algorithm: sha1.
+The output has no requires line.
+We record an earlier verify in this note.
+That verify predates the later commits.
+The sealed log is the verify of the shipped bundle.
+```
+
+File docs/prereg/lj104-sota/floors.md.
+```
+Copyright © anneal developers
+
+We record the window-count floors from the raw panel logs.
+We keep a hit as lowest <= reference + 0.001.
+We store the runner blob below.
+We store the wall sums below.
+We leave each seed row unchanged.
+runner_blob d9575213d875f6a43fd9ea7aa17dac63208acc3d.
+head cc0587fa24b9bd72c4e0399b942bd3a5c3c8cff5.
+The archive panel head follows.
+cc0587fa24b9bd72c4e0399b942bd3a5c3c8cff5.
+The branch commit with the same tree follows.
+8ad608bb6f2a717b2e860f694a3e7c39567af76e.
+The shared tree follows.
+b8f8a9a73a839235bf3d34a17ef9d27a5afed9fb.
+tree b8f8a9a73a839235bf3d34a17ef9d27a5afed9fb.
+boot_id b3fc2d5f-65ed-490e-ba1a-5f1ba891ad20.
+wall_sum_seconds 272.291000.
+span_sum_seconds 272.499802.
+session_uptime_seconds 272.510000.
+
+LJ38 floor: 6/6.
+LJ38 seed 6000 hit energy -173.9274484071 calls 3158 wall_seconds 0.040.
+LJ38 seed 6001 hit energy -173.9275632824 calls 25651.
+wall_seconds 0.434.
+LJ38 seed 6002 hit energy -173.9279904767 calls 1314 wall_seconds 0.009.
+LJ38 seed 6003 hit energy -173.9280191945 calls 399 wall_seconds 0.002.
+LJ38 seed 6004 hit energy -173.9282706652 calls 24072.
+wall_seconds 0.438.
+LJ38 seed 6005 hit energy -173.9283968304 calls 43871.
+wall_seconds 0.796.
+
+LJ55 floor: 6/6.
+LJ55 seed 6000 hit energy -279.2475359835 calls 7219 wall_seconds 0.244.
+LJ55 seed 6001 hit energy -279.2475972189 calls 15360.
+wall_seconds 0.468.
+LJ55 seed 6002 hit energy -279.2478492651 calls 25536.
+wall_seconds 0.535.
+LJ55 seed 6003 hit energy -279.2479422126 calls 7316 wall_seconds 0.151.
+LJ55 seed 6004 hit energy -279.2481782004 calls 11580.
+wall_seconds 0.366.
+LJ55 seed 6005 hit energy -279.2480728953 calls 13770.
+wall_seconds 0.526.
+
+LJ75 floor: 6/6.
+LJ75 seed 6000 hit energy -397.4917169053 calls 85509.
+wall_seconds 6.286.
+LJ75 seed 6001 hit energy -397.4916116384 calls 47598.
+wall_seconds 2.763.
+LJ75 seed 6002 hit energy -397.4916902116 calls 4822 wall_seconds 0.089.
+LJ75 seed 6003 hit energy -397.4916758791 calls 14511.
+wall_seconds 0.618.
+LJ75 seed 6004 hit energy -397.4916003635 calls 48418.
+wall_seconds 2.677.
+LJ75 seed 6005 hit energy -397.4914148662 calls 39590.
+wall_seconds 2.906.
+
+LJ98 floor: 6/6.
+LJ98 seed 6000 hit energy -543.6648665531 calls 228802.
+wall_seconds 20.052.
+LJ98 seed 6001 hit energy -543.6645044718 calls 707953.
+wall_seconds 67.271.
+LJ98 seed 6002 hit energy -543.6647250813 calls 233766.
+wall_seconds 22.132.
+LJ98 seed 6003 hit energy -543.6648616953 calls 554532.
+wall_seconds 48.458.
+LJ98 seed 6004 hit energy -543.6645439642 calls 53643.
+wall_seconds 3.525.
+LJ98 seed 6005 hit energy -543.6646655690 calls 1032010.
+wall_seconds 91.505.
+```
+
+File docs/prereg/lj104-sota/panel/session.txt.
+```
+elapsed_seconds 272.528144
+runs 24
+```
+
+File docs/prereg/lj104-sota/prose/proseguard-commit-msg.txt.
+```
+Copyright © anneal developers
+
+proseguard was not run.
+We record that status for the box.
+The commit-msg profile waits for the box.
+The counts arrive with that later run.
+The note keeps the status only.
+The commit messages stay in the history.
+The same status covers the other profiles.
+A later box run reads those messages.
+```
+
+File docs/prereg/lj104-sota/prose/proseguard-prose-human.txt.
+```
+Copyright © anneal developers
+
+proseguard was not run.
+We record that status for the box.
+The prose-human profile waits for the box.
+The counts arrive with that later run.
+The note keeps the status only.
+The registration prose stays in PREDICTIONS.md.
+The same status covers the other profiles.
+A later box run reads those files.
+```
+
+File docs/prereg/lj104-sota/prose/proseguard-rohit-paper.txt.
+```
+Copyright © anneal developers
+
+proseguard was not run.
+We record that status for the box.
+The rohit-paper profile waits for the box.
+The counts arrive with that later run.
+The note keeps the status only.
+The registration prose stays in PREDICTIONS.md.
+The same status covers the other profiles.
+A later box run reads those files.
+```
+
+File docs/prereg/lj104-sota/prose/snapper-fmt.md.
+```
+Copyright © anneal developers
+
+# LJ104 held-out comparison
+
+We register the LJ104 comparison before any scored run.
+We leave seeds 5000-5029 unrun in this note.
+The runner beside this note refuses those seeds.
+Seeds 5000 through 5029 are registered for this held-out comparison.
+Their scored receipt comes later.
+We do not run those seeds here.
+
+## Codes
+
+The candidate is anneal.
+It runs arm B v2's preset together with arm D v3.
+Dynamic lattice search (DLS) is the faithful arm D search.
+The basin-hopping program (GMIN) supplies the symmetrisation.
+GMIN also supplies the surface moves in arm B v2.
+The exact preset id is UNFILLED.
+We fill that id only from arm B's serial angular on/off grid.
+That later commit is made before any run of seeds 5000-5029.
+
+The arm D v3 tip sha is UNFILLED.
+We fill that sha in the same later commit.
+That fill still comes before any of those seeds.
+
+GMIN_BEST is the patched GMIN binary.
+Its sha256 begins b8eeddfa6d18a697.
+That binary prints h2h_row.
+On seeds 3000-3029 that binary scored 19 of 30.
+We leave that block as already scored.
+The prediction below carries the count across.
+
+The recorded sha256 string follows.
+b8eeddfa6d18a697a76d0714c0a6b356c98c1d40022bd639ac55581e119baf95.
+The executable is absent from this tree.
+The digest is unverified.
+We do not treat that string as a rebuilt match.
+The source archive sha256 follows.
+3f31e4a4cb234aa602470440fa1996b789725e537d47b20eb3101a0749525b70.
+The patch sha256 follows.
+e9e8395c210375ac33c7f174c85726b1ccbeed4bbfd9d2e130e6cbb4a253eb35.
+The GMIN source has no pinned upstream commit.
+GNU Fortran 13.3.0 produced the baseline with the recorded digest.
+A local rebuild is recorded apart from that baseline.
+We do not claim the local digest equals the recorded string.
+The shared keyword block is gmin_best.keywords.
+Its sha256 follows.
+62618de90c53478bbfe724efe527dd1fa67cd6386da0cf00cb0cc8431bd7037d.
+A scored data file is that block, then a blank line.
+RANSEED is set to the seed.
+
+## Evidence rows
+
+We keep every file and number in the rows below.
+The rows are the file, the number, and the record.
+
+| file | n | record |
+| --- | --- | --- |
+| source/potential.f90 | 221 | call-count comment |
+| source/potential.f90 | 222 | NPCALL=NPCALL+1 |
+| source/potential.f90 | 220 | hunk start |
+| source/mymylbfgs.F90 | 287 | POTENTIAL, gradient on |
+| source/mymylbfgs.F90 | 285 | hunk start |
+| src/methods/lattice_search.rs | 779 | value-and-gradient unit |
+| src/methods/cluster_hopping.rs | 720 | Ledger::charge_frac |
+| src/methods/lattice_search.rs | 1388 | 1.0 + (m * n) / pairs |
+| examples/h2h_arm3.rs | 46 | LJ38 -173.928427 |
+| examples/h2h_arm3.rs | 47 | LJ55 -279.248470 |
+| examples/h2h_arm3.rs | 48 | LJ75 -397.492331 |
+| examples/h2h_arm3.rs | 49 | LJ98 -543.665361 |
+| examples/lj_cluster_search.rs | 1295 | LJ104 -582.086642 |
+| scripts/elja_submit_jcc_lj.sh | 15 | PAPER_BUDGETS start |
+| scripts/elja_submit_jcc_lj.sh | 16 | LJ38 400000 |
+| scripts/elja_submit_jcc_lj.sh | 17 | LJ55 1000000 |
+| scripts/elja_submit_jcc_lj.sh | 18 | LJ75 4000000 |
+| scripts/elja_submit_jcc_lj.sh | 19 | LJ98 4000000 |
+| scripts/elja_submit_jcc_lj.sh | 21 | LJ104 4000000 |
+| scripts/elja_submit_jcc_lj.sh | 22 | PAPER_BUDGETS end |
+| paper/seeds.toml | 65 | 5000-5063 start |
+| paper/seeds.toml | 71 | 5000-5063 end |
+
+GMIN counts one unit per entry to POTENTIAL.
+The comment text is "Count the number of potential calls."
+One entry is one value-and-gradient evaluation.
+That unit matches the lattice search record in the rows above.
+No conversion sits between the two counters.
+
+Plain DLS is the in-tree reader in src/methods/lattice_search.rs.
+It is a separate column from arm D v3.
+
+## Seeds
+
+The held-out seeds are 5000 through 5029, thirty seeds.
+We did not use them to tune the candidate.
+We did not use them to tune GMIN_BEST.
+We did not use them to tune plain DLS.
+paper/seeds.toml registers 5000-5063 for a different comparison.
+The evidence rows name that registration.
+That comparison is soap on against off.
+It uses an icosahedral 38-mer and 12 Lennard-Jones sites.
+That block is a different comparison from the three codes here.
+
+## Predicted hit rates
+
+A hit is the LJ104 rule below.
+Each prediction is a count out of these thirty seeds.
+
+GMIN_BEST is predicted to hit 19 of 30.
+The binary is the one already scored at 19 of 30 on seeds 3000-3029.
+The held-out prediction is that same count.
+
+The candidate is predicted to hit 19 of 30.
+No combined run of the unfilled preset and the unfilled tip exists.
+There is no pilot count to scale.
+We register parity with the GMIN_BEST carry-forward.
+Parity is reported as parity.
+The number stays as it is when the preset id and the tip sha are filled.
+
+Plain DLS is predicted to hit 20 of 30.
+That count is Papers' recompute of lattice v2 on seeds 3000-3029.
+The lowest-index count is 20 of 30.
+The uniform count is 22 of 30.
+The GMIN count on those seeds is 19 of 30.
+The prediction takes the lowest-index count.
+Those seeds are 3000-3029.
+They are different seeds from 5000-5029.
+This prediction is a carry from those other seeds.
+
+## Win rule
+
+We compare the candidate and GMIN_BEST with one test.
+The test is a one-sided exact McNemar test.
+The test uses the paired outcomes of the same thirty seeds.
+A seed is discordant when exactly one of the two codes hits.
+n is the number of discordant seeds.
+b is the number of those seeds that only the candidate hits.
+Under the null, b is binomial with n trials and probability 1/2.
+The p-value is the probability of b or more.
+Alpha is 0.05, which is the fraction 1/20.
+The candidate wins when that exact tail is at most 1/20.
+The integer form used by the script follows.
+20 times the upper tail, counted in successes, is at most 2 to the n.
+
+The threshold in hits is the smallest such b at the observed n.
+mcnemar_threshold.py prints that minimum for every discordant count.
+The counts run from 0 through 30.
+The print includes the exact tail and the tail to eight decimal places.
+mcnemar_threshold.tsv is the script's stdout and is the table of record.
+The decimal column is a rendering.
+The decision uses the exact tail.
+
+Below 5 discordant seeds, no split wins.
+At 5 discordant seeds the candidate wins only with b = 5.
+The exact tail is 1/32, which is 0.03125.
+At 30 discordant seeds the minimum is b = 20.
+The exact tail is 26504551/536870912, which renders as 0.04936857.
+```
+discordant  candidate_only_min  p_exact                 p_decimal
+0           none
+1           none
+2           none
+3           none
+4           none
+5           5                   1/32                    0.03125000
+6           6                   1/64                    0.01562500
+7           7                   1/128                   0.00781250
+8           7                   9/256                   0.03515625
+9           8                   5/256                   0.01953125
+10          9                   11/1024                 0.01074219
+11          9                   67/2048                 0.03271484
+12          10                  79/4096                 0.01928711
+13          10                  189/4096                0.04614258
+14          11                  235/8192                0.02868652
+15          12                  9/512                   0.01757812
+16          12                  2517/65536              0.03840637
+17          13                  1607/65536              0.02452087
+18          13                  1577/32768              0.04812622
+19          14                  2083/65536              0.03178406
+20          15                  5425/262144             0.02069473
+21          15                  5135/131072             0.03917694
+22          16                  13757/524288            0.02623940
+23          16                  763/16384               0.04656982
+24          17                  536155/16777216         0.03195733
+25          18                  363103/16777216         0.02164263
+26          18                  2533987/67108864        0.03775935
+27          19                  3505699/134217728       0.02611949
+28          19                  11698223/268435456      0.04357928
+29          20                  8244773/268435456       0.03071417
+30          20                  26504551/536870912      0.04936857
+```
+A tie is reported as a tie.
+Parity, the case b = n - b, is equal hit counts.
+It is reported as parity.
+Neither is reported as a win.
+A candidate lead short of the table minimum is reported as that lead.
+The report includes its p-value, and the lead stays a lead.
+We award a win only to the candidate.
+We award that win only at the threshold above.
+The point predictions stay separate from the paired test.
+
+## No-regression panel
+
+We score the panel at LJ38 with n = 6.
+We score LJ55 with the same n.
+We score LJ75 with the same n.
+We score LJ98 with the same n.
+The six seeds are 6000, 6001, 6002, 6003, 6004, and 6005.
+They were never used for tuning.
+They sit outside 5000-5029.
+They also sit outside the ranges named in paper/seeds.toml.
+Those ranges are 0-31, 2000-2247, and 3000-3029.
+They also include 3100-3199, 4000-4047, and 5000-5063.
+We name the seeds before any run of the panel.
+
+The floor at each size is the hit count of the current anneal default.
+We take the count on these same six seeds, after `lj_requench`.
+The default search is `Config::recommended`.
+That is the `recommended` arm of `examples/h2h_seed.rs`.
+Each size runs at its PAPER_BUDGETS entry.
+The evidence rows list 400000, 1000000, and 4000000.
+The search may stop at E_known + 0.001.
+That stop is a search stop.
+A panel hit is the re-quenched energy at or below E_known + 1e-6.
+The four E_known values are the Cambridge Cluster Database minima.
+The evidence rows list those four energies.
+A count below its floor is a mechanical FAIL.
+
+LJ38 floor: 6/6.
+LJ55 floor: 6/6.
+LJ75 floor: 6/6.
+LJ98 floor: 6/6.
+
+The four lines above are the re-quench floors from requench.tsv.
+requench_panel.py writes them.
+A hit is re-quenched E <= E_known + 1e-6.
+Per-seed raw energy and re-quenched energy are in requench.md.
+The hit flag and the re-quench calls are in that same note.
+floors.md keeps the earlier 0.001 window count.
+The window count is a separate tally from the floor.
+A count below its floor is a mechanical FAIL.
+
+## Matched compute
+
+The budget is in energy calls.
+It comes from PAPER_BUDGETS in scripts/elja_submit_jcc_lj.sh.
+The evidence rows name the array bounds and each size budget.
+LJ104 receives 4000000 energy calls.
+The array entry is `[104]=4000000`.
+The candidate, GMIN_BEST, and plain DLS each receive that budget.
+
+The panel uses the same array.
+LJ38 receives 400000 energy calls.
+LJ55 receives 1000000 energy calls.
+LJ75 receives 4000000 energy calls.
+LJ98 receives 4000000 energy calls.
+
+Every energy call is charged.
+That includes each per-generation atom energy call.
+One call is one unit of the budget.
+The in-tree ledger prices a partial evaluation in `Ledger::charge_frac`.
+The evidence rows name that routine.
+It accumulates the partial payment.
+A residue under one call stays uncharged.
+One greedy pass pays `1.0 + (m * n) / pairs`.
+The evidence rows name `Lattice::search` for that payment.
+We charge each of those calls as a whole call in this comparison.
+
+Wall time is recorded for a strictly serial run, one process at a time.
+The runner takes an exclusive lock.
+It refuses to start while another scored run keeps that lock.
+The receipt is written at the start of the process.
+It is written again at the end.
+The receipt records the kernel boot_id and the uptime reading.
+The receipt also records the lscpu listing.
+The start receipt and the end receipt are both kept.
+A run whose two boot_id values differ is a different boot.
+We leave that run unused.
+
+## Hit rule
+
+We score every code in this comparison, GMIN_BEST included, one way.
+The re-quench is `lj_requench`.
+`lj_requench` is `WarmLbfgs::minimize` in `src/methods/warm_lbfgs.rs`.
+`lj_requench` lives in `src/methods/lattice_search.rs`.
+`lj_requench_calls` lives in that same file.
+The solver is `WarmLbfgs::default` and the iteration cap is 5000.
+The calls that minimization returns are the re-quench charge.
+They are recorded apart from the search calls.
+A hit is re-quenched E <= E_known + 1e-6.
+E_known values are the Cambridge Cluster Database minima.
+The list is `e_known.tsv`.
+The evidence rows list the LJ38, LJ55, LJ75, and LJ98 energies.
+LJ104 is -582.086642.
+The evidence rows name `examples/lj_cluster_search.rs` for that value.
+Its hit line is E <= -582.086641.
+The test re-quenches the known LJ104 minimum to the hit line.
+The test name follows.
+`lj_requench_brings_the_known_lj104_minimum_to_the_hit_line`.
+The fixture is `tests/fixtures/lj104_gm.xyz`.
+The test requires that hit line.
+
+## Scored rows
+
+The runner is lj104_sota_runner.py.
+Every scored row cites the git blob id of that file.
+The git commit identifier (HEAD) is the second citation.
+The row also cites the tree of that commit.
+The columns are runner_blob, head, and tree.
+A row that omits any of the three is outside the scored set.
+test_lj104_sota_runner.py checks the concurrent-start refusal.
+A second scored start is refused.
+The test also checks that a written row carries those three fields.
+Copyright © anneal developers
+
+We record the basin-hopping program (GMIN) baseline here.
+The GMIN_BEST digest is unverified.
+The recorded string follows.
+b8eeddfa6d18a697a76d0714c0a6b356c98c1d40022bd639ac55581e119baf95.
+The source archive sha256 follows.
+3f31e4a4cb234aa602470440fa1996b789725e537d47b20eb3101a0749525b70.
+The patch sha256 follows.
+e9e8395c210375ac33c7f174c85726b1ccbeed4bbfd9d2e130e6cbb4a253eb35.
+The GMIN source has no pinned upstream commit.
+GNU Fortran 13.3.0 produced the baseline.
+That baseline carries the recorded digest.
+The source archive is identified by the sha256 above.
+The patch file is identified by the sha256 above.
+The original executable stays out of this tree.
+The keyword block is the shared settings file.
+We keep the keyword digest separate from the executable digest.
+The keyword file is gmin_best.keywords.
+Its sha256 follows.
+62618de90c53478bbfe724efe527dd1fa67cd6386da0cf00cb0cc8431bd7037d.
+A local gfortran 13.3.0 rebuild is logged apart from the baseline.
+We do not claim that rebuild matches the recorded string.
+Copyright © anneal developers
+
+The scope listing (SCOPE) names twelve commits after 91b15a02.
+HEAD means the git commit identifier.
+DLS means dynamic lattice search.
+GMIN means the basin-hopping program.
+We read each subject from git.
+We read each added path from git.
+We keep the twelve commit identifiers below.
+We keep every path that git marks as added.
+We leave the archived subjects in the sentences below.
+We checked the range through 5fb7368d.
+We still require exactly twelve commits.
+We still start from 91b15a02.
+We list a modified path when git reports one.
+We write one sentence for each path.
+We do not drop a path to shorten the note.
+We do not retune any seed in this listing.
+We do not run seeds 5000-5029 in this listing.
+We keep the panel seeds 6000-6005 as names only.
+We keep the recorded hit counts as they stand.
+Subjects and paths are taken from git.
+An added path is a diff-tree addition.
+A modified path is a diff-tree modification.
+
+Commit fdc321918537e44ea452b887ee4d818289e95884.
+Subject follows.
+Register the LJ104 held-out predictions, the one-sided McNemar.
+thresholds, and the unfilled six-seed floors..
+Adds 3 paths.
+Path docs/prereg/lj104-sota/PREDICTIONS.md.
+Path docs/prereg/lj104-sota/mcnemar_threshold.py.
+Path docs/prereg/lj104-sota/mcnemar_threshold.tsv.
+
+Commit 8004d790392e4f8614cc0e9e64a1aead7d0f3ce7.
+Subject follows.
+Add the serial LJ104 runner and tests that it refuses a second scored.
+start, writes its blob, HEAD, and tree, and leaves seeds 5000-5029.
+unrun..
+Adds 2 paths.
+Path docs/prereg/lj104-sota/lj104_sota_runner.py.
+Path docs/prereg/lj104-sota/test_lj104_sota_runner.py.
+
+Commit c9bac09f0d3328f35e767d4c5059eebe737f1729.
+Subject follows.
+Name the no-regression panel seeds 6000-6005 and record that they were.
+not used for tuning..
+Adds no path.
+Modifies 1 path.
+Path docs/prereg/lj104-sota/PREDICTIONS.md.
+
+Commit 45139a21e18d0c911c7c60149d62e4c87e5428e0.
+Subject follows.
+Bind lj_requench to WarmLbfgs::minimize and test it on the known LJ104.
+minimum..
+Adds no path.
+Modifies 2 paths.
+Path docs/prereg/lj104-sota/PREDICTIONS.md.
+Path src/methods/lattice_search.rs.
+
+Commit 54818da1e54c6dc4e3bfce7a8c6a129f2af289d4.
+Subject follows.
+Record the plain DLS prediction of 20 of 30 from the lattice v2.
+recompute on seeds 3000-3029..
+Adds no path.
+Modifies 1 path.
+Path docs/prereg/lj104-sota/PREDICTIONS.md.
+
+Commit d77d8eb557e4288c9eeee1ecd553e4de2525599a.
+Subject follows.
+Define the default panel as recommended at the paper budgets, and teach.
+the serial runner to execute those 24 seeds one at a time..
+Adds no path.
+Modifies 3 paths.
+Path docs/prereg/lj104-sota/PREDICTIONS.md.
+Path docs/prereg/lj104-sota/lj104_sota_runner.py.
+Path docs/prereg/lj104-sota/test_lj104_sota_runner.py.
+
+Commit cc0587fa24b9bd72c4e0399b942bd3a5c3c8cff5.
+Subject follows.
+Restore the LJ104 occupation test attribute that the requench test.
+displaced..
+Adds no path.
+Modifies 1 path.
+Path src/methods/lattice_search.rs.
+
+Commit 380ceedd7fcd3db9bd0184fd987216822de684d3.
+Subject follows.
+Commit the untouched default-panel logs, geometries, traces, spans,.
+scored rows, and the start and end receipts..
+Adds 100 paths.
+Path docs/prereg/lj104-sota/panel/01-lj38-6000.span.
+Path docs/prereg/lj104-sota/panel/01-lj38-6000.stderr.
+Path docs/prereg/lj104-sota/panel/01-lj38-6000.trace.csv.
+Path docs/prereg/lj104-sota/panel/01-lj38-6000.xyz.
+Path docs/prereg/lj104-sota/panel/02-lj38-6001.span.
+Path docs/prereg/lj104-sota/panel/02-lj38-6001.stderr.
+Path docs/prereg/lj104-sota/panel/02-lj38-6001.trace.csv.
+Path docs/prereg/lj104-sota/panel/02-lj38-6001.xyz.
+Path docs/prereg/lj104-sota/panel/03-lj38-6002.span.
+Path docs/prereg/lj104-sota/panel/03-lj38-6002.stderr.
+Path docs/prereg/lj104-sota/panel/03-lj38-6002.trace.csv.
+Path docs/prereg/lj104-sota/panel/03-lj38-6002.xyz.
+Path docs/prereg/lj104-sota/panel/04-lj38-6003.span.
+Path docs/prereg/lj104-sota/panel/04-lj38-6003.stderr.
+Path docs/prereg/lj104-sota/panel/04-lj38-6003.trace.csv.
+Path docs/prereg/lj104-sota/panel/04-lj38-6003.xyz.
+Path docs/prereg/lj104-sota/panel/05-lj38-6004.span.
+Path docs/prereg/lj104-sota/panel/05-lj38-6004.stderr.
+Path docs/prereg/lj104-sota/panel/05-lj38-6004.trace.csv.
+Path docs/prereg/lj104-sota/panel/05-lj38-6004.xyz.
+Path docs/prereg/lj104-sota/panel/06-lj38-6005.span.
+Path docs/prereg/lj104-sota/panel/06-lj38-6005.stderr.
+Path docs/prereg/lj104-sota/panel/06-lj38-6005.trace.csv.
+Path docs/prereg/lj104-sota/panel/06-lj38-6005.xyz.
+Path docs/prereg/lj104-sota/panel/07-lj55-6000.span.
+Path docs/prereg/lj104-sota/panel/07-lj55-6000.stderr.
+Path docs/prereg/lj104-sota/panel/07-lj55-6000.trace.csv.
+Path docs/prereg/lj104-sota/panel/07-lj55-6000.xyz.
+Path docs/prereg/lj104-sota/panel/08-lj55-6001.span.
+Path docs/prereg/lj104-sota/panel/08-lj55-6001.stderr.
+Path docs/prereg/lj104-sota/panel/08-lj55-6001.trace.csv.
+Path docs/prereg/lj104-sota/panel/08-lj55-6001.xyz.
+Path docs/prereg/lj104-sota/panel/09-lj55-6002.span.
+Path docs/prereg/lj104-sota/panel/09-lj55-6002.stderr.
+Path docs/prereg/lj104-sota/panel/09-lj55-6002.trace.csv.
+Path docs/prereg/lj104-sota/panel/09-lj55-6002.xyz.
+Path docs/prereg/lj104-sota/panel/10-lj55-6003.span.
+Path docs/prereg/lj104-sota/panel/10-lj55-6003.stderr.
+Path docs/prereg/lj104-sota/panel/10-lj55-6003.trace.csv.
+Path docs/prereg/lj104-sota/panel/10-lj55-6003.xyz.
+Path docs/prereg/lj104-sota/panel/11-lj55-6004.span.
+Path docs/prereg/lj104-sota/panel/11-lj55-6004.stderr.
+Path docs/prereg/lj104-sota/panel/11-lj55-6004.trace.csv.
+Path docs/prereg/lj104-sota/panel/11-lj55-6004.xyz.
+Path docs/prereg/lj104-sota/panel/12-lj55-6005.span.
+Path docs/prereg/lj104-sota/panel/12-lj55-6005.stderr.
+Path docs/prereg/lj104-sota/panel/12-lj55-6005.trace.csv.
+Path docs/prereg/lj104-sota/panel/12-lj55-6005.xyz.
+Path docs/prereg/lj104-sota/panel/13-lj75-6000.span.
+Path docs/prereg/lj104-sota/panel/13-lj75-6000.stderr.
+Path docs/prereg/lj104-sota/panel/13-lj75-6000.trace.csv.
+Path docs/prereg/lj104-sota/panel/13-lj75-6000.xyz.
+Path docs/prereg/lj104-sota/panel/14-lj75-6001.span.
+Path docs/prereg/lj104-sota/panel/14-lj75-6001.stderr.
+Path docs/prereg/lj104-sota/panel/14-lj75-6001.trace.csv.
+Path docs/prereg/lj104-sota/panel/14-lj75-6001.xyz.
+Path docs/prereg/lj104-sota/panel/15-lj75-6002.span.
+Path docs/prereg/lj104-sota/panel/15-lj75-6002.stderr.
+Path docs/prereg/lj104-sota/panel/15-lj75-6002.trace.csv.
+Path docs/prereg/lj104-sota/panel/15-lj75-6002.xyz.
+Path docs/prereg/lj104-sota/panel/16-lj75-6003.span.
+Path docs/prereg/lj104-sota/panel/16-lj75-6003.stderr.
+Path docs/prereg/lj104-sota/panel/16-lj75-6003.trace.csv.
+Path docs/prereg/lj104-sota/panel/16-lj75-6003.xyz.
+Path docs/prereg/lj104-sota/panel/17-lj75-6004.span.
+Path docs/prereg/lj104-sota/panel/17-lj75-6004.stderr.
+Path docs/prereg/lj104-sota/panel/17-lj75-6004.trace.csv.
+Path docs/prereg/lj104-sota/panel/17-lj75-6004.xyz.
+Path docs/prereg/lj104-sota/panel/18-lj75-6005.span.
+Path docs/prereg/lj104-sota/panel/18-lj75-6005.stderr.
+Path docs/prereg/lj104-sota/panel/18-lj75-6005.trace.csv.
+Path docs/prereg/lj104-sota/panel/18-lj75-6005.xyz.
+Path docs/prereg/lj104-sota/panel/19-lj98-6000.span.
+Path docs/prereg/lj104-sota/panel/19-lj98-6000.stderr.
+Path docs/prereg/lj104-sota/panel/19-lj98-6000.trace.csv.
+Path docs/prereg/lj104-sota/panel/19-lj98-6000.xyz.
+Path docs/prereg/lj104-sota/panel/20-lj98-6001.span.
+Path docs/prereg/lj104-sota/panel/20-lj98-6001.stderr.
+Path docs/prereg/lj104-sota/panel/20-lj98-6001.trace.csv.
+Path docs/prereg/lj104-sota/panel/20-lj98-6001.xyz.
+Path docs/prereg/lj104-sota/panel/21-lj98-6002.span.
+Path docs/prereg/lj104-sota/panel/21-lj98-6002.stderr.
+Path docs/prereg/lj104-sota/panel/21-lj98-6002.trace.csv.
+Path docs/prereg/lj104-sota/panel/21-lj98-6002.xyz.
+Path docs/prereg/lj104-sota/panel/22-lj98-6003.span.
+Path docs/prereg/lj104-sota/panel/22-lj98-6003.stderr.
+Path docs/prereg/lj104-sota/panel/22-lj98-6003.trace.csv.
+Path docs/prereg/lj104-sota/panel/22-lj98-6003.xyz.
+Path docs/prereg/lj104-sota/panel/23-lj98-6004.span.
+Path docs/prereg/lj104-sota/panel/23-lj98-6004.stderr.
+Path docs/prereg/lj104-sota/panel/23-lj98-6004.trace.csv.
+Path docs/prereg/lj104-sota/panel/23-lj98-6004.xyz.
+Path docs/prereg/lj104-sota/panel/24-lj98-6005.span.
+Path docs/prereg/lj104-sota/panel/24-lj98-6005.stderr.
+Path docs/prereg/lj104-sota/panel/24-lj98-6005.trace.csv.
+Path docs/prereg/lj104-sota/panel/24-lj98-6005.xyz.
+Path docs/prereg/lj104-sota/panel/end.receipt.
+Path docs/prereg/lj104-sota/panel/rows.tsv.
+Path docs/prereg/lj104-sota/panel/session.txt.
+Path docs/prereg/lj104-sota/panel/start.receipt.
+
+Commit 3c1069acdc90306feda50f770489d892bd8ade85.
+Subject follows.
+Add the untouched default-panel stdout logs that the ignore rule had.
+left out..
+Adds 24 paths.
+Path docs/prereg/lj104-sota/panel/01-lj38-6000.log.
+Path docs/prereg/lj104-sota/panel/02-lj38-6001.log.
+Path docs/prereg/lj104-sota/panel/03-lj38-6002.log.
+Path docs/prereg/lj104-sota/panel/04-lj38-6003.log.
+Path docs/prereg/lj104-sota/panel/05-lj38-6004.log.
+Path docs/prereg/lj104-sota/panel/06-lj38-6005.log.
+Path docs/prereg/lj104-sota/panel/07-lj55-6000.log.
+Path docs/prereg/lj104-sota/panel/08-lj55-6001.log.
+Path docs/prereg/lj104-sota/panel/09-lj55-6002.log.
+Path docs/prereg/lj104-sota/panel/10-lj55-6003.log.
+Path docs/prereg/lj104-sota/panel/11-lj55-6004.log.
+Path docs/prereg/lj104-sota/panel/12-lj55-6005.log.
+Path docs/prereg/lj104-sota/panel/13-lj75-6000.log.
+Path docs/prereg/lj104-sota/panel/14-lj75-6001.log.
+Path docs/prereg/lj104-sota/panel/15-lj75-6002.log.
+Path docs/prereg/lj104-sota/panel/16-lj75-6003.log.
+Path docs/prereg/lj104-sota/panel/17-lj75-6004.log.
+Path docs/prereg/lj104-sota/panel/18-lj75-6005.log.
+Path docs/prereg/lj104-sota/panel/19-lj98-6000.log.
+Path docs/prereg/lj104-sota/panel/20-lj98-6001.log.
+Path docs/prereg/lj104-sota/panel/21-lj98-6002.log.
+Path docs/prereg/lj104-sota/panel/22-lj98-6003.log.
+Path docs/prereg/lj104-sota/panel/23-lj98-6004.log.
+Path docs/prereg/lj104-sota/panel/24-lj98-6005.log.
+
+Commit 9c072e5faa7f28d815b917c3d330f91190480829.
+Subject follows.
+Write the four default-panel floors from the raw logs, with the.
+per-seed outcomes beside them..
+Adds 2 paths.
+Path docs/prereg/lj104-sota/floors.md.
+Path docs/prereg/lj104-sota/write_floors.py.
+Modifies 1 path.
+Path docs/prereg/lj104-sota/PREDICTIONS.md.
+
+Commit 6a813084d36962c1d61154eeafd1ea377d150390.
+Subject follows.
+Score every code, GMIN included, by lj_requench at E_known plus 1e-6,.
+and count those calls apart from the search..
+Adds 3 paths.
+Path docs/prereg/lj104-sota/e_known.tsv.
+Path docs/prereg/lj104-sota/requench_panel.py.
+Path examples/lj_requench_xyz.rs.
+Modifies 2 paths.
+Path docs/prereg/lj104-sota/PREDICTIONS.md.
+Path src/methods/lattice_search.rs.
+
+Commit 5fb7368d5ea15cdf517c8bc48e2f56286ccb8b33.
+Subject follows.
+Re-quench the 24 saved structures and set the floors from those.
+energies and their separate call counts..
+Adds 2 paths.
+Path docs/prereg/lj104-sota/requench.md.
+Path docs/prereg/lj104-sota/requench.tsv.
+Modifies 2 paths.
+Path docs/prereg/lj104-sota/PREDICTIONS.md.
+Path docs/prereg/lj104-sota/requench_panel.py.
+Copyright © anneal developers
+
+We record the window-count floors from the raw panel logs.
+We keep a hit as lowest <= reference + 0.001.
+We store the runner blob below.
+We store the wall sums below.
+We leave each seed row unchanged.
+runner_blob d9575213d875f6a43fd9ea7aa17dac63208acc3d.
+head cc0587fa24b9bd72c4e0399b942bd3a5c3c8cff5.
+tree b8f8a9a73a839235bf3d34a17ef9d27a5afed9fb.
+boot_id b3fc2d5f-65ed-490e-ba1a-5f1ba891ad20.
+wall_sum_seconds 272.291000.
+span_sum_seconds 272.499802.
+session_uptime_seconds 272.510000.
+
+LJ38 floor: 6/6.
+LJ38 seed 6000 hit energy -173.9274484071 calls 3158 wall_seconds 0.040.
+LJ38 seed 6001 hit energy -173.9275632824 calls 25651.
+wall_seconds 0.434.
+LJ38 seed 6002 hit energy -173.9279904767 calls 1314 wall_seconds 0.009.
+LJ38 seed 6003 hit energy -173.9280191945 calls 399 wall_seconds 0.002.
+LJ38 seed 6004 hit energy -173.9282706652 calls 24072.
+wall_seconds 0.438.
+LJ38 seed 6005 hit energy -173.9283968304 calls 43871.
+wall_seconds 0.796.
+
+LJ55 floor: 6/6.
+LJ55 seed 6000 hit energy -279.2475359835 calls 7219 wall_seconds 0.244.
+LJ55 seed 6001 hit energy -279.2475972189 calls 15360.
+wall_seconds 0.468.
+LJ55 seed 6002 hit energy -279.2478492651 calls 25536.
+wall_seconds 0.535.
+LJ55 seed 6003 hit energy -279.2479422126 calls 7316 wall_seconds 0.151.
+LJ55 seed 6004 hit energy -279.2481782004 calls 11580.
+wall_seconds 0.366.
+LJ55 seed 6005 hit energy -279.2480728953 calls 13770.
+wall_seconds 0.526.
+
+LJ75 floor: 6/6.
+LJ75 seed 6000 hit energy -397.4917169053 calls 85509.
+wall_seconds 6.286.
+LJ75 seed 6001 hit energy -397.4916116384 calls 47598.
+wall_seconds 2.763.
+LJ75 seed 6002 hit energy -397.4916902116 calls 4822 wall_seconds 0.089.
+LJ75 seed 6003 hit energy -397.4916758791 calls 14511.
+wall_seconds 0.618.
+LJ75 seed 6004 hit energy -397.4916003635 calls 48418.
+wall_seconds 2.677.
+LJ75 seed 6005 hit energy -397.4914148662 calls 39590.
+wall_seconds 2.906.
+
+LJ98 floor: 6/6.
+LJ98 seed 6000 hit energy -543.6648665531 calls 228802.
+wall_seconds 20.052.
+LJ98 seed 6001 hit energy -543.6645044718 calls 707953.
+wall_seconds 67.271.
+LJ98 seed 6002 hit energy -543.6647250813 calls 233766.
+wall_seconds 22.132.
+LJ98 seed 6003 hit energy -543.6648616953 calls 554532.
+wall_seconds 48.458.
+LJ98 seed 6004 hit energy -543.6645439642 calls 53643.
+wall_seconds 3.525.
+LJ98 seed 6005 hit energy -543.6646655690 calls 1032010.
+wall_seconds 91.505.
+Copyright © anneal developers
+
+We record the re-quenched panel below.
+We keep a hit as requenched_e <= E_known + 1e-6.
+We store the call counts below.
+We leave each seed row unchanged.
+requench_calls are the WarmLbfgs::minimize evaluations.
+They are not search calls.
+raw_e is the lowest line of the untouched search log.
+
+LJ38 floor: 6/6.
+E_known -173.928427.
+
+seed raw_e requenched_e hit requench_calls.
+6000 -173.9274484071 -173.9284265906289022 hit 35.
+6001 -173.9275632824 -173.9284265906287033 hit 77.
+6002 -173.9279904767 -173.9284265906287033 hit 23.
+6003 -173.9280191945 -173.9284265906284759 hit 65.
+6004 -173.9282706652 -173.9284265906287317 hit 99.
+6005 -173.9283968304 -173.9284265906284190 hit 22.
+
+LJ55 floor: 6/6.
+E_known -279.248470.
+
+seed raw_e requenched_e hit requench_calls.
+6000 -279.2475359835 -279.2484704630212491 hit 42.
+6001 -279.2475972189 -279.2484704630215333 hit 118.
+6002 -279.2478492651 -279.2484704630214196 hit 82.
+6003 -279.2479422126 -279.2484704630213059 hit 109.
+6004 -279.2481782004 -279.2484704630215333 hit 33.
+6005 -279.2480728953 -279.2484704630219312 hit 110.
+
+LJ75 floor: 6/6.
+E_known -397.492331.
+
+seed raw_e requenched_e hit requench_calls.
+6000 -397.4917169053 -397.4923309828757851 hit 164.
+6001 -397.4916116384 -397.4923309828761830 hit 165.
+6002 -397.4916902116 -397.4923309828768083 hit 160.
+6003 -397.4916758791 -397.4923309828760125 hit 115.
+6004 -397.4916003635 -397.4923309828762399 hit 110.
+6005 -397.4914148662 -397.4923309828763536 hit 248.
+
+LJ98 floor: 6/6.
+E_known -543.665361.
+
+seed raw_e requenched_e hit requench_calls.
+6000 -543.6648665531 -543.6653607708954041 hit 163.
+6001 -543.6645044718 -543.6653607708961999 hit 122.
+6002 -543.6647250813 -543.6653607708951768 hit 160.
+6003 -543.6648616953 -543.6653607708943809 hit 119.
+6004 -543.6645439642 -543.6653607708940399 hit 157.
+6005 -543.6646655690 -543.6653607708948357 hit 112.
+```
+
+File docs/prereg/lj104-sota/prose/snapper-fmt.txt.
+```
+Copyright © anneal developers
+
+We ran snapper-fmt at width 72.
+Each of the eight tip inputs exits 0.
+Stdout matches the concatenated input bytes.
+The sha256 of that stdout follows.
+0ad1c5add6a860682de1c1b704eea0a1ca1d129f3df5384b27e9d46223825986.
+The byte count is 42190.
+The inputs are the same eight paths as the check note.
+```
+
+File docs/prereg/lj104-sota/prose/snapper.txt.
+```
+Copyright © anneal developers
+
+We ran snapper at width 72 in check mode.
+The exit code is 0.
+Stdout has 0 bytes.
+Stderr has 0 bytes.
+Diagnostic lines are 0.
+We hashed the eight tip inputs below.
+The sha256 of that concatenation follows.
+0ad1c5add6a860682de1c1b704eea0a1ca1d129f3df5384b27e9d46223825986.
+The byte count is 42190.
+Path docs/prereg/lj104-sota/PREDICTIONS.md.
+Path docs/prereg/lj104-sota/PUSH.txt.
+Path docs/prereg/lj104-sota/REPLAY.txt.
+Path docs/prereg/lj104-sota/SCOPE.md.
+Path docs/prereg/lj104-sota/TREE_DIFF_STAT.txt.
+Path docs/prereg/lj104-sota/TREE_EQUAL.txt.
+Path docs/prereg/lj104-sota/floors.md.
+Path docs/prereg/lj104-sota/requench.md.
+```
+
+File docs/prereg/lj104-sota/requench.md.
+```
+Copyright © anneal developers
+
+We record the re-quenched panel below.
+We keep a hit as requenched_e <= E_known + 1e-6.
+We store the call counts below.
+We leave each seed row unchanged.
+requench_calls are the WarmLbfgs::minimize evaluations.
+They are not search calls.
+raw_e is the lowest line of the untouched search log.
+
+LJ38 floor: 6/6.
+E_known -173.928427.
+
+seed raw_e requenched_e hit requench_calls.
+6000 -173.9274484071 -173.9284265906289022 hit 35.
+6001 -173.9275632824 -173.9284265906287033 hit 77.
+6002 -173.9279904767 -173.9284265906287033 hit 23.
+6003 -173.9280191945 -173.9284265906284759 hit 65.
+6004 -173.9282706652 -173.9284265906287317 hit 99.
+6005 -173.9283968304 -173.9284265906284190 hit 22.
+
+LJ55 floor: 6/6.
+E_known -279.248470.
+
+seed raw_e requenched_e hit requench_calls.
+6000 -279.2475359835 -279.2484704630212491 hit 42.
+6001 -279.2475972189 -279.2484704630215333 hit 118.
+6002 -279.2478492651 -279.2484704630214196 hit 82.
+6003 -279.2479422126 -279.2484704630213059 hit 109.
+6004 -279.2481782004 -279.2484704630215333 hit 33.
+6005 -279.2480728953 -279.2484704630219312 hit 110.
+
+LJ75 floor: 6/6.
+E_known -397.492331.
+
+seed raw_e requenched_e hit requench_calls.
+6000 -397.4917169053 -397.4923309828757851 hit 164.
+6001 -397.4916116384 -397.4923309828761830 hit 165.
+6002 -397.4916902116 -397.4923309828768083 hit 160.
+6003 -397.4916758791 -397.4923309828760125 hit 115.
+6004 -397.4916003635 -397.4923309828762399 hit 110.
+6005 -397.4914148662 -397.4923309828763536 hit 248.
+
+LJ98 floor: 6/6.
+E_known -543.665361.
+
+seed raw_e requenched_e hit requench_calls.
+6000 -543.6648665531 -543.6653607708954041 hit 163.
+6001 -543.6645044718 -543.6653607708961999 hit 122.
+6002 -543.6647250813 -543.6653607708951768 hit 160.
+6003 -543.6648616953 -543.6653607708943809 hit 119.
+6004 -543.6645439642 -543.6653607708940399 hit 157.
+6005 -543.6646655690 -543.6653607708948357 hit 112.
+```
+
+Commit 149aa73d5cf4e1afb0546ad86fb401d524d66244.
+```
+lj104-prereg: record predictions and McNemar table
+
+The registration records the held-out predictions.
+It records the one-sided exact McNemar rule.
+It records the table printed by the threshold script.
+Path docs/prereg/lj104-sota/PREDICTIONS.md.
+Path docs/prereg/lj104-sota/mcnemar_threshold.py.
+Path docs/prereg/lj104-sota/mcnemar_threshold.tsv.
+```
+
+Commit 6f07484e2bfc413202596a640dd68995f48bad9e.
+```
+lj104-prereg: add the serial runner and its tests
+
+The serial runner refuses a second scored start.
+Each scored row records the runner blob, the git commit, and the tree.
+Path docs/prereg/lj104-sota/lj104_sota_runner.py.
+Path docs/prereg/lj104-sota/test_lj104_sota_runner.py.
+```
+
+Commit 20313a8794da66e85ec9fbe95a2d41c02bd43390.
+```
+lj104-prereg: name panel seeds 6000-6005
+
+Panel seeds 6000 through 6005 are named before any panel run.
+The note states that those seeds were never used for tuning.
+The edit is docs/prereg/lj104-sota/PREDICTIONS.md.
+No path is added.
+```
+
+Commit d3b8cd189afea533a93d5790c030cf322d2be487.
+```
+lj104-prereg: bind lj_requench for the LJ104 minimum
+
+lj_requench is bound to WarmLbfgs minimize.
+The LJ104 minimum test requires energy at or below -582.086641.
+The function and the test are in src/methods/lattice_search.rs.
+The citation is in docs/prereg/lj104-sota/PREDICTIONS.md.
+```
+
+Commit ed7b340da4fd3c87161a26fe78fd86cd27438be2.
+```
+lj104-prereg: set the plain DLS prediction to 20/30
+
+Plain DLS is registered at 20 of 30.
+The count comes from the lattice v2 recompute.
+Those seeds are 3000 through 3029.
+The sentence is in docs/prereg/lj104-sota/PREDICTIONS.md.
+```
+
+Commit c85cdcf46eb58e71e9194bfceec28e5c0261ddbf.
+```
+lj104-prereg: run the default panel from the runner
+
+The runner gains the 24-job default panel.
+The panel stays inside the serial lock.
+The tests cover that command.
+The floor paragraph names the budgets and the 0.001 window.
+That paragraph is in docs/prereg/lj104-sota/PREDICTIONS.md.
+```
+
+Commit ca034201ec3d2ab08f482428c6f3eb4abebd0644.
+```
+lj104-prereg: restore the LJ104 occupation test
+
+The test attribute is restored on the LJ104 occupation test.
+The edit is in src/methods/lattice_search.rs.
+No path is added.
+```
+
+Commit a338054c7afabbaf76ab4a273cadfccb2755877a.
+```
+lj104-prereg: commit raw panel traces and receipts
+
+The raw default-panel deposit is stored.
+Each of the twenty-four jobs contributes a span.
+Each job also contributes a stderr note.
+Each job also contributes a trace.
+Each job also contributes coordinates.
+The deposit stores the scored rows.
+The deposit stores the session note.
+The deposit stores the start receipt.
+The deposit stores the end receipt.
+Path docs/prereg/lj104-sota/panel/01-lj38-6000.span.
+Path docs/prereg/lj104-sota/panel/01-lj38-6000.stderr.
+Path docs/prereg/lj104-sota/panel/01-lj38-6000.trace.csv.
+Path docs/prereg/lj104-sota/panel/01-lj38-6000.xyz.
+Path docs/prereg/lj104-sota/panel/02-lj38-6001.span.
+Path docs/prereg/lj104-sota/panel/02-lj38-6001.stderr.
+Path docs/prereg/lj104-sota/panel/02-lj38-6001.trace.csv.
+Path docs/prereg/lj104-sota/panel/02-lj38-6001.xyz.
+Path docs/prereg/lj104-sota/panel/03-lj38-6002.span.
+Path docs/prereg/lj104-sota/panel/03-lj38-6002.stderr.
+Path docs/prereg/lj104-sota/panel/03-lj38-6002.trace.csv.
+Path docs/prereg/lj104-sota/panel/03-lj38-6002.xyz.
+Path docs/prereg/lj104-sota/panel/04-lj38-6003.span.
+Path docs/prereg/lj104-sota/panel/04-lj38-6003.stderr.
+Path docs/prereg/lj104-sota/panel/04-lj38-6003.trace.csv.
+Path docs/prereg/lj104-sota/panel/04-lj38-6003.xyz.
+Path docs/prereg/lj104-sota/panel/05-lj38-6004.span.
+Path docs/prereg/lj104-sota/panel/05-lj38-6004.stderr.
+Path docs/prereg/lj104-sota/panel/05-lj38-6004.trace.csv.
+Path docs/prereg/lj104-sota/panel/05-lj38-6004.xyz.
+Path docs/prereg/lj104-sota/panel/06-lj38-6005.span.
+Path docs/prereg/lj104-sota/panel/06-lj38-6005.stderr.
+Path docs/prereg/lj104-sota/panel/06-lj38-6005.trace.csv.
+Path docs/prereg/lj104-sota/panel/06-lj38-6005.xyz.
+Path docs/prereg/lj104-sota/panel/07-lj55-6000.span.
+Path docs/prereg/lj104-sota/panel/07-lj55-6000.stderr.
+Path docs/prereg/lj104-sota/panel/07-lj55-6000.trace.csv.
+Path docs/prereg/lj104-sota/panel/07-lj55-6000.xyz.
+Path docs/prereg/lj104-sota/panel/08-lj55-6001.span.
+Path docs/prereg/lj104-sota/panel/08-lj55-6001.stderr.
+Path docs/prereg/lj104-sota/panel/08-lj55-6001.trace.csv.
+Path docs/prereg/lj104-sota/panel/08-lj55-6001.xyz.
+Path docs/prereg/lj104-sota/panel/09-lj55-6002.span.
+Path docs/prereg/lj104-sota/panel/09-lj55-6002.stderr.
+Path docs/prereg/lj104-sota/panel/09-lj55-6002.trace.csv.
+Path docs/prereg/lj104-sota/panel/09-lj55-6002.xyz.
+Path docs/prereg/lj104-sota/panel/10-lj55-6003.span.
+Path docs/prereg/lj104-sota/panel/10-lj55-6003.stderr.
+Path docs/prereg/lj104-sota/panel/10-lj55-6003.trace.csv.
+Path docs/prereg/lj104-sota/panel/10-lj55-6003.xyz.
+Path docs/prereg/lj104-sota/panel/11-lj55-6004.span.
+Path docs/prereg/lj104-sota/panel/11-lj55-6004.stderr.
+Path docs/prereg/lj104-sota/panel/11-lj55-6004.trace.csv.
+Path docs/prereg/lj104-sota/panel/11-lj55-6004.xyz.
+Path docs/prereg/lj104-sota/panel/12-lj55-6005.span.
+Path docs/prereg/lj104-sota/panel/12-lj55-6005.stderr.
+Path docs/prereg/lj104-sota/panel/12-lj55-6005.trace.csv.
+Path docs/prereg/lj104-sota/panel/12-lj55-6005.xyz.
+Path docs/prereg/lj104-sota/panel/13-lj75-6000.span.
+Path docs/prereg/lj104-sota/panel/13-lj75-6000.stderr.
+Path docs/prereg/lj104-sota/panel/13-lj75-6000.trace.csv.
+Path docs/prereg/lj104-sota/panel/13-lj75-6000.xyz.
+Path docs/prereg/lj104-sota/panel/14-lj75-6001.span.
+Path docs/prereg/lj104-sota/panel/14-lj75-6001.stderr.
+Path docs/prereg/lj104-sota/panel/14-lj75-6001.trace.csv.
+Path docs/prereg/lj104-sota/panel/14-lj75-6001.xyz.
+Path docs/prereg/lj104-sota/panel/15-lj75-6002.span.
+Path docs/prereg/lj104-sota/panel/15-lj75-6002.stderr.
+Path docs/prereg/lj104-sota/panel/15-lj75-6002.trace.csv.
+Path docs/prereg/lj104-sota/panel/15-lj75-6002.xyz.
+Path docs/prereg/lj104-sota/panel/16-lj75-6003.span.
+Path docs/prereg/lj104-sota/panel/16-lj75-6003.stderr.
+Path docs/prereg/lj104-sota/panel/16-lj75-6003.trace.csv.
+Path docs/prereg/lj104-sota/panel/16-lj75-6003.xyz.
+Path docs/prereg/lj104-sota/panel/17-lj75-6004.span.
+Path docs/prereg/lj104-sota/panel/17-lj75-6004.stderr.
+Path docs/prereg/lj104-sota/panel/17-lj75-6004.trace.csv.
+Path docs/prereg/lj104-sota/panel/17-lj75-6004.xyz.
+Path docs/prereg/lj104-sota/panel/18-lj75-6005.span.
+Path docs/prereg/lj104-sota/panel/18-lj75-6005.stderr.
+Path docs/prereg/lj104-sota/panel/18-lj75-6005.trace.csv.
+Path docs/prereg/lj104-sota/panel/18-lj75-6005.xyz.
+Path docs/prereg/lj104-sota/panel/19-lj98-6000.span.
+Path docs/prereg/lj104-sota/panel/19-lj98-6000.stderr.
+Path docs/prereg/lj104-sota/panel/19-lj98-6000.trace.csv.
+Path docs/prereg/lj104-sota/panel/19-lj98-6000.xyz.
+Path docs/prereg/lj104-sota/panel/20-lj98-6001.span.
+Path docs/prereg/lj104-sota/panel/20-lj98-6001.stderr.
+Path docs/prereg/lj104-sota/panel/20-lj98-6001.trace.csv.
+Path docs/prereg/lj104-sota/panel/20-lj98-6001.xyz.
+Path docs/prereg/lj104-sota/panel/21-lj98-6002.span.
+Path docs/prereg/lj104-sota/panel/21-lj98-6002.stderr.
+Path docs/prereg/lj104-sota/panel/21-lj98-6002.trace.csv.
+Path docs/prereg/lj104-sota/panel/21-lj98-6002.xyz.
+Path docs/prereg/lj104-sota/panel/22-lj98-6003.span.
+Path docs/prereg/lj104-sota/panel/22-lj98-6003.stderr.
+Path docs/prereg/lj104-sota/panel/22-lj98-6003.trace.csv.
+Path docs/prereg/lj104-sota/panel/22-lj98-6003.xyz.
+Path docs/prereg/lj104-sota/panel/23-lj98-6004.span.
+Path docs/prereg/lj104-sota/panel/23-lj98-6004.stderr.
+Path docs/prereg/lj104-sota/panel/23-lj98-6004.trace.csv.
+Path docs/prereg/lj104-sota/panel/23-lj98-6004.xyz.
+Path docs/prereg/lj104-sota/panel/24-lj98-6005.span.
+Path docs/prereg/lj104-sota/panel/24-lj98-6005.stderr.
+Path docs/prereg/lj104-sota/panel/24-lj98-6005.trace.csv.
+Path docs/prereg/lj104-sota/panel/24-lj98-6005.xyz.
+Path docs/prereg/lj104-sota/panel/end.receipt.
+Path docs/prereg/lj104-sota/panel/rows.tsv.
+Path docs/prereg/lj104-sota/panel/session.txt.
+Path docs/prereg/lj104-sota/panel/start.receipt.
+```
+
+Commit 09116a9c1929359881eb9ef0e2bd996b95cbaad0.
+```
+lj104-prereg: add the untouched panel stdout logs
+
+The untouched panel stdout logs are stored beside the traces.
+They are the twenty-four run logs.
+Nothing in them is edited.
+Path docs/prereg/lj104-sota/panel/01-lj38-6000.log.
+Path docs/prereg/lj104-sota/panel/02-lj38-6001.log.
+Path docs/prereg/lj104-sota/panel/03-lj38-6002.log.
+Path docs/prereg/lj104-sota/panel/04-lj38-6003.log.
+Path docs/prereg/lj104-sota/panel/05-lj38-6004.log.
+Path docs/prereg/lj104-sota/panel/06-lj38-6005.log.
+Path docs/prereg/lj104-sota/panel/07-lj55-6000.log.
+Path docs/prereg/lj104-sota/panel/08-lj55-6001.log.
+Path docs/prereg/lj104-sota/panel/09-lj55-6002.log.
+Path docs/prereg/lj104-sota/panel/10-lj55-6003.log.
+Path docs/prereg/lj104-sota/panel/11-lj55-6004.log.
+Path docs/prereg/lj104-sota/panel/12-lj55-6005.log.
+Path docs/prereg/lj104-sota/panel/13-lj75-6000.log.
+Path docs/prereg/lj104-sota/panel/14-lj75-6001.log.
+Path docs/prereg/lj104-sota/panel/15-lj75-6002.log.
+Path docs/prereg/lj104-sota/panel/16-lj75-6003.log.
+Path docs/prereg/lj104-sota/panel/17-lj75-6004.log.
+Path docs/prereg/lj104-sota/panel/18-lj75-6005.log.
+Path docs/prereg/lj104-sota/panel/19-lj98-6000.log.
+Path docs/prereg/lj104-sota/panel/20-lj98-6001.log.
+Path docs/prereg/lj104-sota/panel/21-lj98-6002.log.
+Path docs/prereg/lj104-sota/panel/22-lj98-6003.log.
+Path docs/prereg/lj104-sota/panel/23-lj98-6004.log.
+Path docs/prereg/lj104-sota/panel/24-lj98-6005.log.
+```
+
+Commit 3aaed17c83d2120ea33aecf1d21d1acbce80eac8.
+```
+lj104-prereg: write floors from the raw panel logs
+
+Floors are derived from the raw panel logs.
+The writer is docs/prereg/lj104-sota/write_floors.py.
+The window-count table is docs/prereg/lj104-sota/floors.md.
+The registration cites those counts.
+That registration is docs/prereg/lj104-sota/PREDICTIONS.md.
+```
+
+Commit aaf3bae7114d52a5f835636ff3d01b2f7fbad642.
+```
+lj104-prereg: score hits by re-quench at 1e-6
+
+A hit is a re-quenched energy at or below the known minimum plus 1e-6.
+The known energies are docs/prereg/lj104-sota/e_known.tsv.
+The driver is docs/prereg/lj104-sota/requench_panel.py.
+The example that prints energy and calls is examples/lj_requench_xyz.rs.
+The function and the LJ104 test live in src/methods/lattice_search.rs.
+The rule is stated in docs/prereg/lj104-sota/PREDICTIONS.md.
+```
+
+Commit 1a761592355acbe0213361953d4b6e2216ab71d4.
+```
+lj104-prereg: record re-quenched energies and calls
+
+The re-quenched energies and the separate call counts are recorded.
+The table is docs/prereg/lj104-sota/requench.tsv.
+The readable note is docs/prereg/lj104-sota/requench.md.
+The driver docs/prereg/lj104-sota/requench_panel.py writes both.
+docs/prereg/lj104-sota/PREDICTIONS.md records the floors.
+```
+
+Commit b7effec3901d59cf179aecbbeba27817949a72b0.
+```
+lj104-prereg: list commit subjects and added paths
+
+The scope note lists each subject and each added path.
+The range is the twelve commits from 91b15a02 through 5fb7368d.
+The note is docs/prereg/lj104-sota/SCOPE.md.
+The generator is docs/prereg/lj104-sota/scope_paths.py.
+```
+
+Commit c41f33f17c15924fed4fa0c02cd7727fae2933e8.
+```
+lj104-prereg: pin the GMIN digest and charge line
+
+The GMIN digest is recorded in docs/prereg/lj104-sota/PREDICTIONS.md.
+The charge citation names lattice_search.rs.
+The evidence number there is 1388.
+The shared keyword block is docs/prereg/lj104-sota/gmin_best.keywords.
+The search list drops one fallback.
+That list is docs/prereg/lj104-sota/requench_panel.py.
+```
+
+Commit 5519f1a4fa559fb59c83512db41898c8178eda73.
+```
+lj104-prereg: record replay notes and map
+
+The replay map is stored.
+The tree-equality note is stored.
+The diff stat is stored.
+The replay note is stored.
+Four checker notes are stored.
+The map is docs/prereg/lj104-sota/replay-map.tsv.
+The equality note is docs/prereg/lj104-sota/TREE_EQUAL.txt.
+The stat is docs/prereg/lj104-sota/TREE_DIFF_STAT.txt.
+The replay note is docs/prereg/lj104-sota/REPLAY.txt.
+The four notes say the prose commands had not been run.
+Path docs/prereg/lj104-sota/prose/proseguard-prose-human.txt.
+Path docs/prereg/lj104-sota/prose/proseguard-rohit-paper.txt.
+Path docs/prereg/lj104-sota/prose/snapper-fmt.txt.
+Path docs/prereg/lj104-sota/prose/snapper.txt.
+```
+
+Commit 4bc4fdd924e2a6f567f35998ed4a96e2f4f58528.
+```
+lj104-prereg: record the untimed replay pass
+
+The pass is one commit-tree run with no sleep and no date variables.
+Shared seconds are real.
+These dates replace the archived author dates.
+The script is docs/prereg/lj104-sota/replay_commit_tree.py.
+The raw log is docs/prereg/lj104-sota/replay-commit-tree.log.
+The note is docs/prereg/lj104-sota/REPLAY.txt.
+The map is docs/prereg/lj104-sota/replay-map.tsv.
+The tree check is docs/prereg/lj104-sota/TREE_EQUAL.txt.
+```
+
+Commit eb467d8d34796744168c255692098abdd350db39.
+```
+lj104-prereg: store the replay raw log
+
+The log pattern skipped docs/prereg/lj104-sota/replay-commit-tree.log.
+The raw log of the commit-tree pass is stored.
+```
+
+Commit 846709f303cc4afb2aa2b0e351fc854781de515b.
+```
+lj104-prereg: fix the scope script syntax
+
+docs/prereg/lj104-sota/scope_paths.py parses again.
+The range stays 91b15a02 through 5fb7368d.
+The script still requires exactly twelve commits.
+```
+
+Commit 3420b91b54dc704977c8463b684f99897f592b02.
+```
+lj104-prereg: rewrap the registration prose
+
+docs/prereg/lj104-sota/PREDICTIONS.md is rewrapped.
+No number, seed, or threshold changes.
+Seeds 5000 through 5029 stay registered.
+Their scored receipt comes later.
+docs/prereg/lj104-sota/floors.md is rewrapped.
+docs/prereg/lj104-sota/requench.md is rewrapped.
+docs/prereg/lj104-sota/TREE_DIFF_STAT.txt records the diff counts.
+```
+
+Commit 87153f7d6735a853f730516a5894027e75478b52.
+```
+lj104-prereg: record the push plan
+
+The push note names one published reference.
+That reference is refs/heads/prereg/lj104-sota-v1.
+Archive refs are never pushed.
+Nothing is pushed.
+Path docs/prereg/lj104-sota/PUSH.txt.
+```
+
+Commit 927fa5e397988f936d0f4ed0e312da3927e0005a.
+```
+lj104-prereg: record the GMIN digest check
+
+docs/prereg/lj104-sota/verify_gmin_best.py hashes a relative executable.
+The registered digest follows.
+b8eeddfa6d18a697a76d0714c0a6b356c98c1d40022bd639ac55581e119baf95.
+docs/prereg/lj104-sota/gmin-best-verify.log is the run.
+The executable bytes are not in this tree.
+```
+
+Commit c493107e0300ac9164593463a4582034ecf695e6.
+```
+lj104-prereg: write the scope as sentences
+
+docs/prereg/lj104-sota/scope_paths.py still requires twelve commits.
+The range stays 91b15a02 through 5fb7368d.
+docs/prereg/lj104-sota/SCOPE.md is rewritten from that git range.
+Each subject and each path is one sentence.
+```
+
+Commit 0f6f85e1e0c999d5d70e25e1c26f7de81d92a56b.
+```
+lj104-prereg: record the prose checker output
+
+The snapper check uses width 72.
+The recorded snapper diagnostic count is zero.
+The proseguard notes record that the program was absent.
+Path docs/prereg/lj104-sota/prose/proseguard-commit-msg.txt.
+Path docs/prereg/lj104-sota/prose/snapper-fmt.md.
+```
+
+Commit 9cd85c55fca6268a132d1a91e57a66550af1b921.
+```
+lj104-prereg: record the diff against v1.2
+
+docs/prereg/lj104-sota/TREE_DIFF_STAT.txt lists the numstat.
+The comparison tree is 4b168122d30bc00afa0e27a26c67863ffc7b312c.
+This note is left out of its own count.
+```
+
+Commit 79a3b2dcd3ad5b2b0747338788b968089402afd9.
+```
+lj104-prereg: record the GMIN digest status
+
+The recorded string awaits a byte comparison.
+docs/prereg/lj104-sota/PREDICTIONS.md states that status.
+docs/prereg/lj104-sota/NOTES.md states the same status.
+docs/prereg/lj104-sota/build_gmin_best.py is the attempt.
+docs/prereg/lj104-sota/gmin-best-build.log is its output.
+docs/prereg/lj104-sota/verify_gmin_best.py hashes a relative file.
+docs/prereg/lj104-sota/gmin-best-verify.log records the byte check.
+```
+
+Commit 31ac8719696e342fe71e0cc8c0340c33f6a40c4e.
+```
+lj104-prereg: record the proseguard search
+
+The profile runs remain for the box.
+The finding total waits for that run.
+```
+
+Commit e2002273e12109c45ae02c187263cfe5d67c3269.
+```
+lj104-prereg: record the diff against v1.2
+
+docs/prereg/lj104-sota/TREE_DIFF_STAT.txt lists the numstat.
+The comparison tree is 4b168122d30bc00afa0e27a26c67863ffc7b312c.
+This note is left out of its own count.
+```
+
+Commit c74219ae28a5b1dd69bb1441320cb2fa48707892.
+```
+lj104-prereg: record the full-history bundle verify
+
+docs/prereg/lj104-sota/bundle-verify.txt is the verify output.
+The bundle records a complete history.
+The output has no requires line.
+```
+
+Commit 2f18d4c8bf2fe74cd2e008e709085b271bf3dbf0.
+```
+lj104-prereg: keep the bundle verify within 72 columns
+
+docs/prereg/lj104-sota/bundle-verify.txt keeps every ref and hash.
+The bundle records a complete history.
+The output has no requires line.
+```
+
+Commit d278b120473d2481c3225dc1b3eff9829bbe968b.
+```
+lj104-prereg: keep the verify note one sentence wide
+
+docs/prereg/lj104-sota/bundle-verify.txt stays within 72 columns.
+The bundle records a complete history.
+The output has no requires line.
+```
+
+Commit 3f8c57f8300b99b2b85ab35526d0bfcd86286af1.
+```
+lj104-prereg: clear the registration prose hits
+
+We keep every number, seed, and threshold.
+Line facts sit in the evidence rows.
+Path docs/prereg/lj104-sota/PREDICTIONS.md.
+Path docs/prereg/lj104-sota/NOTES.md.
+Path docs/prereg/lj104-sota/floors.md.
+Path docs/prereg/lj104-sota/requench.md.
+Path docs/prereg/lj104-sota/SCOPE.md.
+Path docs/prereg/lj104-sota/REPORT.md.
+Path docs/prereg/lj104-sota/prose/snapper-fmt.md.
+```
+
+Commit fe4e9d5bdc63f31034180fae07f5a20dadb194a2.
+```
+lj104-prereg: record the replay and the GMIN attempt
+
+Archive refs are never pushed.
+The map is docs/prereg/lj104-sota/replay-map.tsv.
+The note is docs/prereg/lj104-sota/REPLAY.txt.
+The log is docs/prereg/lj104-sota/replay-v134.log.
+The build note is docs/prereg/lj104-sota/build_gmin_best.py.
+The build log is docs/prereg/lj104-sota/gmin-best-build.log.
+No rebuilt binary was produced.
+```
+
+Commit 3d0838e0e71bd209031dff87dff0a71ff963c335.
+```
+lj104-prereg: record the diff against v1.2
+
+docs/prereg/lj104-sota/TREE_DIFF_STAT.txt lists the numstat.
+The comparison tree is 4b168122d30bc00afa0e27a26c67863ffc7b312c.
+This note is left out of its own count.
+```
+
+Commit 87872d119a28d3d13ab65fed5dc027dd74efa5a2.
+```
+lj104-prereg: close the v1.3.3 receipt gaps
+
+The panel head maps to the branch commit with the same tree.
+The scope note lists every commit after 91b15a02.
+The floor script writes the current floors note.
+The requench script writes the current requench note.
+Archive refs are never pushed.
+Path docs/prereg/lj104-sota/floors.md.
+Path docs/prereg/lj104-sota/write_floors.py.
+Path docs/prereg/lj104-sota/requench_panel.py.
+Path docs/prereg/lj104-sota/scope_paths.py.
+Path docs/prereg/lj104-sota/SCOPE.md.
+Path docs/prereg/lj104-sota/REPLAY.txt.
+Path docs/prereg/lj104-sota/replay-map.tsv.
+Path docs/prereg/lj104-sota/replay-v135.log.
+Path docs/prereg/lj104-sota/TREE_EQUAL.txt.
+Path docs/prereg/lj104-sota/REPORT.md.
+Path docs/prereg/lj104-sota/PUSH.txt.
+Path docs/prereg/lj104-sota/bundle-verify.txt.
+Path docs/prereg/lj104-sota/PREDICTIONS.md.
+Path docs/prereg/lj104-sota/NOTES.md.
+Path docs/prereg/lj104-sota/prose/proseguard-rohit-paper.txt.
+Path docs/prereg/lj104-sota/prose/proseguard-prose-human.txt.
+Path docs/prereg/lj104-sota/prose/proseguard-commit-msg.txt.
+```
+Commit pending for this extract.
+```
+lj104-prereg: ship the prose extract and the tip hashes
+
+The snapper notes hash the eight tip inputs.
+The diff stat lists bundle-verify.txt.
+PROSE_EXTRACT.txt holds the prose files and the commit messages.
+Path docs/prereg/lj104-sota/TREE_DIFF_STAT.txt.
+Path docs/prereg/lj104-sota/prose/snapper.txt.
+Path docs/prereg/lj104-sota/prose/snapper-fmt.txt.
+Path docs/prereg/lj104-sota/PROSE_EXTRACT.txt.
+```
