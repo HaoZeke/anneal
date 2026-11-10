@@ -173,3 +173,37 @@ Each affiliation line cites the author decision.
 The box prose items from that pass are closed.
 This pass did not replay.
 The replay count stays seven.
+
+## Gaps
+
+The per-seed gaps to -415.971529 eV follow.
+Seed 0 is 0.000040 eV.
+Seed 1 is 0.000087 eV.
+Seed 2 is 0.000039 eV.
+Seed 3 is 0.000008 eV.
+Seed 4 is 0.000060 eV.
+Seed 5 is 0.000062 eV.
+Seed 6 is 0.000065 eV.
+Seed 7 is 0.000368 eV.
+The largest gap is 0.000368 eV.
+The reference count is 8/8.
+
+## Host
+
+The copper writer records the output of hostname.
+This machine reports cursor.
+The LJ75 writer prints the literal host host-a.
+That line was not edited by hand.
+
+## rohit-paper
+
+The profile sha follows.
+
+654d0de1c2632feb93ddfc2f72a08372ad672a8c7cb4a6ad30cca69b2783ddc6
+
+The profile file is not in this repo.
+logs/rohit-paper.txt is the raw run.
+rgoswami.AbbreviationStyle hits the affiliation abbreviation.
+Rohit set that affiliation, so the hits stay.
+rgoswami.TricolonAbuse names cited authors.
+Those names stay.
