@@ -26,7 +26,7 @@ GMIN_BEST is predicted to hit 19 of 30. The binary is the one already scored at 
 
 The candidate is predicted to hit 19 of 30. No combined run of the unfilled preset and the unfilled tip exists, so there is no pilot count to scale. The registered prediction is parity with the GMIN_BEST carry-forward. Parity is reported as parity. The number stays as it is when the preset id and the tip sha are filled.
 
-Plain DLS has no committed LJ104 hit count at the paper budget under the charging rule in this note. Its predicted hit rate is UNFILLED. Seeds 5000-5029 do not fill it.
+Plain DLS is predicted to hit 20 of 30. That count is Papers' recompute of lattice v2 on seeds 3000-3029: lowest-index 20 of 30, uniform 22 of 30, and GMIN 19 of 30. The prediction takes the lowest-index count. Those seeds are 3000-3029. They are different seeds from 5000-5029, and this prediction is not a measurement on the held-out block.
 
 ## Win rule
 
