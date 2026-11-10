@@ -21,11 +21,20 @@ fn a_recorded_quench_the_chain_rejects_reaches_the_dump() {
     }
     let mut refused = Ledger::new(1);
     refused.record(-1.0, Array1::zeros(12).view());
+    assert!(
+        !std::path::Path::new("dump-on-record-missing/nope.txt").exists(),
+        "a refused open must not create a minima file"
+    );
     unsafe {
         std::env::set_var("ANNEAL_MIN_DUMP", path);
     }
     let mut nonfinite = Ledger::new(1);
     nonfinite.record(f64::NAN, Array1::zeros(12).view());
+    let nonfinite_text = std::fs::read_to_string(path).unwrap_or_default();
+    assert!(
+        nonfinite_text.lines().all(|line| line.is_empty()),
+        "a non-finite record must not be written, saw {nonfinite_text}"
+    );
     let _ = std::fs::remove_file(path);
 
     let mut cfg = Config::for_cluster(4);
