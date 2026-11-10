@@ -81,7 +81,7 @@ fn recommended_differs_from_for_cluster() {
     let base = Config::for_cluster(38);
     assert_eq!(rec.n_points, 38);
     assert_eq!(base.n_points, 38);
-    assert!(matches!(rec.move_library, MoveLibrary::Reseed));
+    assert!(matches!(rec.move_library, MoveLibrary::LeanBurst));
     let names: Vec<String> = rec
         .move_library
         .kernels(&rec)
@@ -89,19 +89,23 @@ fn recommended_differs_from_for_cluster() {
         .map(|kernel| kernel.name())
         .collect();
     assert!(
-        names.iter().any(|name| name == "grow:fcc"),
-        "LJ38 recommended must be able to grow the octahedron: {names:?}"
+        names.iter().all(|name| !name.starts_with("grow:")),
+        "recommended must not grow a named template: {names:?}"
     );
     assert!(matches!(
         Config::recommended(75).move_library,
         MoveLibrary::LeanBurst
     ));
     assert!(matches!(
+        Config::recommended(98).move_library,
+        MoveLibrary::LeanBurst
+    ));
+    assert!(matches!(
         Config::derived(38).move_library,
-        MoveLibrary::Reseed
+        MoveLibrary::LeanBurst
     ));
     assert!(rec.allocate_moves && rec.depth_reward && rec.tabu_on_stall);
-    assert!(rec.trail_on_stall && rec.escape_on_stall && rec.restart_on_stall);
+    assert!(rec.trail_on_stall && rec.escape_on_stall && !rec.restart_on_stall);
     assert!(rec.bayes_screen && base.bayes_screen);
     assert!(matches!(base.move_library, MoveLibrary::Atomic));
     assert!(!(base.allocate_moves || base.depth_reward || base.tabu_on_stall));

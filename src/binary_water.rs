@@ -13,11 +13,14 @@
 //! acceptance ratio of one half. Ten bodies or fewer keep the factor
 //! window and the fixed orientation cap. The rigid quench is the same
 //! L-BFGS descent, and a rigid record accepts the root-mean-square
-//! force. After 1000 hops with no new lowest minimum the walker
-//! returns to that minimum when it lies within one hopping temperature
-//! of the run target. Farther above the target the walker is drawn
-//! again, and the lowest minimum is kept. The preset temperature
-//! is left where it is.
+//! force. The chain keeps the eight lowest distinct minima of its
+//! quenched start, accepted quenches and lowest recorded minimum.
+//! Each stall follows 1000 hops with no new lowest minimum. At
+//! each stall the walker moves to the lowest kept minimum that is
+//! neither its own nor one of the last four stall destinations. When no
+//! kept minimum qualifies, the walker stays put. Nothing is drawn, the
+//! run target is not read, and the lowest minimum is kept. The preset
+//! temperature is left where it is.
 
 use ndarray::{Array1, ArrayView1};
 

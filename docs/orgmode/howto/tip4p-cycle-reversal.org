@@ -1,0 +1,92 @@
+#+TITLE: Turn hydrogen-bond cycle reversal off
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+#+begin_export rst
+=====================================
+Turn hydrogen-bond cycle reversal off
+=====================================
+#+end_export
+
+The rigid water presets reverse directed hydrogen-bond cycles as one of their moves.
+Their water model is the transferable intermolecular potential with four points (TIP4P).
+This guide turns that move off on a preset, and counts the accepted hops each move made.
+Use it to compare a search with and without the move on your own clusters.
+
+* Switch the move on the preset
+
+Three presets turn the move on: =Config::for_tip4p=, =Config::recommended_tip4p= and =Config::communicating_tip4p=.
+The switch is =reverse_cycles= on =MoveLibrary::RigidBody=.
+Set it to =false= before the search starts.
+
+#+begin_src rust
+use anneal_core::methods::cluster_hopping::{Config, MoveLibrary};
+
+let mut cfg = Config::recommended_tip4p(12);
+if let MoveLibrary::RigidBody { reverse_cycles, .. } = &mut cfg.move_library {
+    *reverse_cycles = false;
+}
+#+end_src
+
+The library then offers =rtrans= and =rrot= only.
+The Python =Config= has no switch for this move.
+
+* Count accepted hops per move
+
+=Outcome::accepted_transitions= records every accepted hop with the name of the move that proposed it.
+This program runs one start with the move on and then off, at 200,000 calls each.
+The objective is =GminTip4p=, so the program installs its body frame with =gmin_water_geometry=.
+The move finds the hydrogens through that geometry.
+
+#+begin_src rust
+use std::collections::BTreeMap;
+
+use anneal_core::methods::cluster_hopping::{Config, Ledger, MoveLibrary};
+use anneal_core::methods::cluster_search::search_from;
+use anneal_core::potentials::{GminTip4p, gmin_water_geometry, random_tip4p_cluster};
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+
+fn main() {
+    let n = 12;
+    let water = GminTip4p::new(n);
+    let start = random_tip4p_cluster(n, &mut StdRng::seed_from_u64(7));
+    for reverse in [true, false] {
+        let mut cfg = Config::recommended_tip4p(n);
+        cfg.rigid_body_geometry = Some(gmin_water_geometry());
+        if let MoveLibrary::RigidBody { reverse_cycles, .. } = &mut cfg.move_library {
+            *reverse_cycles = reverse;
+        }
+        let mut ledger = Ledger::new(200_000);
+        let (out, _) = search_from(&water, &cfg, &mut ledger, start.view(), 1).expect("finite start");
+        let mut accepted: BTreeMap<&str, usize> = BTreeMap::new();
+        for t in &out.accepted_transitions {
+            *accepted.entry(t.action.as_str()).or_default() += 1;
+        }
+        println!("reverse_cycles: {reverse}");
+        println!("best: {:.6}", out.best);
+        println!("accepted: {accepted:?}");
+    }
+}
+#+end_src
+
+It prints:
+
+#+begin_example
+reverse_cycles: true
+best: -479.316795
+accepted: {"rcycle": 578, "rrot": 48, "rtrans": 27}
+reverse_cycles: false
+best: -488.323527
+accepted: {"rrot": 110, "rtrans": 94}
+#+end_example
+
+With the move on, most accepted hops come from =rcycle=.
+On this start the search without the move still ends lower.
+One start cannot rank two settings.
+Run many seeds and pair the runs by seed.
+[[file:../explanation/water-cycle-reversal.org][Hydrogen-bond cycle reversal]] does that over 288 pairs.
+
+* See also
+
+- [[file:../reference/rigid-water-moves.org][Rigid water moves]] for every move and setting.
+- [[file:../tutorials/water-hopping.org][Find a water cluster minimum]] for a first run from the command line.
