@@ -7,24 +7,32 @@ This note is left out of the count.
 
 Path docs/prereg/lj104-sota/PREDICTIONS.md.
 211 insertions and 35 deletions.
+Path docs/prereg/lj104-sota/PUSH.txt.
+5 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/REPLAY.txt.
 37 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/SCOPE.md.
-223 insertions and 0 deletions.
+236 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/TREE_EQUAL.txt.
 82 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/floors.md.
 51 insertions and 32 deletions.
+Path docs/prereg/lj104-sota/gmin-best-verify.log.
+2 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/gmin_best.keywords.
 12 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/prose/proseguard-commit-msg.txt.
+28 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/prose/proseguard-prose-human.txt.
-6 insertions and 0 deletions.
+7 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/prose/proseguard-rohit-paper.txt.
-6 insertions and 0 deletions.
+7 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/prose/snapper-fmt.md.
+792 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/prose/snapper-fmt.txt.
-6 insertions and 0 deletions.
+8 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/prose/snapper.txt.
-6 insertions and 0 deletions.
+16 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/replay-commit-tree.log.
 327 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/replay-map.tsv.
@@ -36,4 +44,6 @@ Path docs/prereg/lj104-sota/requench.md.
 Path docs/prereg/lj104-sota/requench_panel.py.
 0 insertions and 1 deletions.
 Path docs/prereg/lj104-sota/scope_paths.py.
-96 insertions and 0 deletions.
+110 insertions and 0 deletions.
+Path docs/prereg/lj104-sota/verify_gmin_best.py.
+41 insertions and 0 deletions.
