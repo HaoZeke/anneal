@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Draw the water-hexamer counter figure from the crest logs.
+"""Draw the six-seed CREST counter chart.
+
+This is not the 192-seed figure figs/water_crest.pdf.
 
 The bar labels are the same integers as the manuscript table.
 From the repository root:
@@ -73,7 +75,7 @@ def main() -> None:
     axis.legend(frameon=False)
     axis.set_title("Water hexamer, both CREST counters")
     figure.tight_layout()
-    dest = Path(__file__).resolve().parents[1] / "figs" / "water_crest.pdf"
+    dest = Path(__file__).resolve().parents[1] / "figs" / "water_crest_counters.pdf"
     figure.savefig(dest)
     plt.close(figure)
 
