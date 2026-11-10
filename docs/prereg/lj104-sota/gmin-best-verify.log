@@ -1,2 +1,6 @@
-expected b8eeddfa6d18a697a76d0714c0a6b356c98c1d40022bd639ac55581e119baf95
+expected digest follows
+b8eeddfa6d18a697a76d0714c0a6b356c98c1d40022bd639ac55581e119baf95
 executable bytes are absent
+VERIFY_EXIT:2
+digest unverified
+no rebuilt executable matched the recorded string

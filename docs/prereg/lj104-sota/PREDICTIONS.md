@@ -30,11 +30,13 @@ On seeds 3000-3029 that binary scored 19 of 30.
 This commit does not remeasure that block.
 The prediction below carries the count across.
 
-The full sha256 of that binary follows.
+The recorded sha256 string follows.
 b8eeddfa6d18a697a76d0714c0a6b356c98c1d40022bd639ac55581e119baf95.
 The executable is not in this tree.
-That digest is the one recorded for the binary that prints h2h_row.
-The recorded digest begins with this prefix.
+The digest is unverified.
+No rebuilt executable matched that string.
+This repository does not pin the GMIN Fortran source.
+The build log records that no binary was produced.
 The shared keyword block is gmin_best.keywords.
 Its sha256 follows.
 62618de90c53478bbfe724efe527dd1fa67cd6386da0cf00cb0cc8431bd7037d.
