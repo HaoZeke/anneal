@@ -1678,13 +1678,7 @@ impl ClusterMove {
             ClusterMove::SurfaceRelocate(k) => k.propose(x, t, rng),
             ClusterMove::HollowRelocate(k) => k.propose(x, t, rng),
             ClusterMove::HollowFill(k) => k.propose(x, t, rng),
-            ClusterMove::EnergyLattice => {
-                // The kernel's pair sums are charged on the search ledger.
-                // This arm has no ledger, so it does not evaluate the
-                // potential on a scratch budget.
-                let _ = (t, rng);
-                x.to_owned()
-            }
+            ClusterMove::EnergyLattice => x.to_owned(),
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
             ClusterMove::Symmetrise(k) => k.propose(x, t, rng),
             ClusterMove::PointSymmetrise {
