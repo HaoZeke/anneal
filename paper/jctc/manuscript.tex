@@ -212,16 +212,12 @@ Figure~\ref{fig:lj75-ecdf} draws that LJ\(_{75}\) comparison.\cite{oakley2013}
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{lj75_ecdf.pdf}
-\caption{This figure is the LJ\(_{75}\) campaign of 200 seeds.
-Each curve plots 200 runs against the force calls to the first hit.
-The curves come from an earlier sealed campaign.
-The hit count for the run now in progress is pending.}
+\caption{Encounter curves from an earlier sealed campaign.}
 \label{fig:lj75-ecdf}
 \end{figure}
+A move that has stopped finding depth can still take the next trial.
 \section{Information theory in the hop}
-It can still hand the next trial to a move that has stopped finding
-depth.
-\label{sec:info} The recommended hop guards against that with a
+\label{sec:info} The recommended hop guards against that takeover with a
 posterior on the depth each move reaches.
 
 \subsection{Depth posterior}
@@ -275,9 +271,8 @@ LJ\(_{104}\).
 hexamer of each class.}
 \label{fig:systems}
 \end{figure}
-
+The pending LJ\(_{75}\) hit count waits.
 \subsection{Rates and the water hexamer}
-The LJ\(_{75}\) hit count is pending.
 Seeds 0 through 199 are running serially at a cap of \(4\times 10^{6}\)
 force calls.
 No hit count is reported until that run finishes.
@@ -388,8 +383,7 @@ The old counter undercounted CREST on every seed.
 \begin{table}
 \caption{CREST effort on the water hexamer.
 The old counter is dynamics steps plus optimization steps.
-The energy and gradient column is CREST's own summary line.
-The columns list those two counters.}
+The energy and gradient column is CREST's own summary line.}
 \label{tab:crest-counters}
 \centering
 \begin{tabular}{crr}
@@ -406,7 +400,7 @@ Seed & Old counter & Energy+gradient \\
 \end{tabular}
 \end{table}
 
-Anneal's ledger is 4000 evaluations in one setting.
+Anneal's ledger spends 4000 evaluations in one setting.
 The other setting spends the old counter, from 32112 to 50063
 evaluations.
 CREST's energy and gradient totals run from 142110 to 209931.
@@ -463,13 +457,14 @@ No CREST structure dissociated.
 \label{fig:water-crest}
 \end{figure}
 
+The water hexamer figure leaves the next count open.
 \todo{The counter table leaves the 16-mer count open. A count waits until both arms share one Hamiltonian.}
 \todo{Measurement is still open for the Atomic Simulation Environment panel and for the atomistic global optimization framework (AGOX). No count is added here.}
 \todo{Measurement is still open for the Wales-group basin-hopping program (GMIN) head-to-head. This draft adds no new count.}
 
 \section{Conclusions}
-That count stays open, and the hexamer comparison keeps the lean burst
-library at every size, including 38 atoms.
+That Wales-group measurement stays open, and the hexamer comparison
+keeps the lean burst library at every size, including 38 atoms.
 In contrast with a size-specific library, that choice does not change
 with the atom count.
 The constructor installs the diameter penalty below 98 atoms.
