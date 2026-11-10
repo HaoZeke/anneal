@@ -1206,6 +1206,71 @@ fn position(x: &[f64], i: usize) -> [f64; 3] {
     [x[3 * i], x[3 * i + 1], x[3 * i + 2]]
 }
 
+fn coord_cmp(a: [f64; 3], b: [f64; 3]) -> std::cmp::Ordering {
+    a[0].total_cmp(&b[0])
+        .then(a[1].total_cmp(&b[1]))
+        .then(a[2].total_cmp(&b[2]))
+}
+
+/// Points in coordinate order, so later sums do not follow atom labels.
+fn label_free_points(x: &[f64]) -> Vec<[f64; 3]> {
+    let n = x.len() / 3;
+    let mut atoms: Vec<[f64; 3]> = (0..n).map(|i| position(x, i)).collect();
+    atoms.sort_by(|a, b| coord_cmp(*a, *b));
+    atoms
+}
+
+fn centroid_of(atoms: &[[f64; 3]]) -> [f64; 3] {
+    let mut c = [0.0; 3];
+    if atoms.is_empty() {
+        return c;
+    }
+    for p in atoms {
+        c[0] += p[0];
+        c[1] += p[1];
+        c[2] += p[2];
+    }
+    let scale = 1.0 / atoms.len() as f64;
+    [c[0] * scale, c[1] * scale, c[2] * scale]
+}
+
+/// Collapses points closer than `tol` to the one nearer `centre`.
+///
+/// The order is distance to the cluster centroid, then the coordinates.
+/// Which point arrives first does not matter, and neither do atom labels.
+pub(crate) fn merge_toward_centroid(
+    points: &[[f64; 3]],
+    centre: [f64; 3],
+    tol: f64,
+) -> Vec<[f64; 3]> {
+    let mut order: Vec<usize> = (0..points.len()).collect();
+    order.sort_by(|&i, &j| {
+        pair_dist2(points[i], centre)
+            .total_cmp(&pair_dist2(points[j], centre))
+            .then_with(|| coord_cmp(points[i], points[j]))
+    });
+    let mut kept: Vec<[f64; 3]> = Vec::new();
+    for i in order {
+        let site = points[i];
+        if kept.iter().all(|q| pair_dist2(site, *q) >= tol * tol) {
+            kept.push(site);
+        }
+    }
+    kept
+}
+
+/// Highest-energy indices, ties broken by coordinates rather than labels.
+fn highest_energy(energy: &[f64], atoms: &[[f64; 3]], pool: &[usize], k: usize) -> Vec<usize> {
+    let mut ranked = pool.to_vec();
+    ranked.sort_by(|&a, &b| {
+        energy[b]
+            .total_cmp(&energy[a])
+            .then_with(|| coord_cmp(atoms[a], atoms[b]))
+    });
+    ranked.truncate(k.min(ranked.len()));
+    ranked
+}
+
 fn pair_dist2(a: [f64; 3], b: [f64; 3]) -> f64 {
     let d = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
     d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
@@ -1247,8 +1312,15 @@ impl Lattice {
 
     /// Vacant sites: hollows over the cluster's own triangles, clear of every
     /// atom, with near-coincident hollows merged.
+    ///
+    /// A hollow is built with its vertices in coordinate order, so the
+    /// construction does not follow atom labels. Hollows closer than
+    /// [`Lattice::merge_distance`] collapse to the one nearer the cluster
+    /// centroid.
     pub fn sites(&self, x: &[f64]) -> Vec<[f64; 3]> {
-        let n = x.len() / 3;
+        let atoms = label_free_points(x);
+        let n = atoms.len();
+        let centre = centroid_of(&atoms);
         let hollow2 = self.hollow_cutoff * self.hollow_cutoff;
         let reach = self.hollow_cutoff + self.site_distance + self.clearance;
         let reach2 = reach * reach;
@@ -1257,12 +1329,12 @@ impl Lattice {
         let mut near: Vec<Vec<usize>> = vec![Vec::new(); n];
         let mut hollow: Vec<Vec<usize>> = vec![Vec::new(); n];
         for i in 0..n {
-            let pi = position(x, i);
+            let pi = atoms[i];
             for j in 0..n {
                 if j == i {
                     continue;
                 }
-                let r2 = pair_dist2(pi, position(x, j));
+                let r2 = pair_dist2(pi, atoms[j]);
                 if r2 < reach2 {
                     near[i].push(j);
                 }
@@ -1273,11 +1345,11 @@ impl Lattice {
         }
         let mut found: Vec<[f64; 3]> = Vec::new();
         for a in 0..n {
-            let pa = position(x, a);
+            let pa = atoms[a];
             for (bi, &b) in hollow[a].iter().enumerate() {
-                let pb = position(x, b);
+                let pb = atoms[b];
                 for &c in &hollow[a][bi + 1..] {
-                    let pc = position(x, c);
+                    let pc = atoms[c];
                     if pair_dist2(pb, pc) >= hollow2 {
                         continue;
                     }
@@ -1309,7 +1381,7 @@ impl Lattice {
                         ];
                         let clear = near[a]
                             .iter()
-                            .all(|&k| k == b || k == c || pair_dist2(p, position(x, k)) >= clear2);
+                            .all(|&k| k == b || k == c || pair_dist2(p, atoms[k]) >= clear2);
                         if clear {
                             found.push(p);
                         }
@@ -1317,14 +1389,7 @@ impl Lattice {
                 }
             }
         }
-        let merge2 = self.merge_distance * self.merge_distance;
-        let mut sites: Vec<[f64; 3]> = Vec::with_capacity(found.len() / 4);
-        for p in found {
-            if sites.iter().all(|q| pair_dist2(p, *q) >= merge2) {
-                sites.push(p);
-            }
-        }
-        sites
+        merge_toward_centroid(&found, centre, self.merge_distance)
     }
 
     /// One greedy pass. Each move makes the exchange that lowers the unrelaxed
@@ -1365,19 +1430,25 @@ impl Lattice {
         }
         let mut atom_energy = vec![0.0; n];
         for i in 0..n {
-            for j in (i + 1)..n {
-                let v = self.pair_energy(pair_dist2(atoms[i], atoms[j]));
-                atom_energy[i] += v;
-                atom_energy[j] += v;
+            let mut terms = Vec::with_capacity(n - 1);
+            for j in 0..n {
+                if i == j {
+                    continue;
+                }
+                terms.push(self.pair_energy(pair_dist2(atoms[i], atoms[j])));
             }
+            terms.sort_by(|a, b| a.total_cmp(b));
+            atom_energy[i] = terms.iter().sum();
         }
         let mut site_energy: Vec<f64> = vacant
             .iter()
             .map(|&p| {
-                atoms
+                let mut terms: Vec<f64> = atoms
                     .iter()
                     .map(|&q| self.pair_energy(pair_dist2(p, q)))
-                    .sum()
+                    .collect();
+                terms.sort_by(|a, b| a.total_cmp(b));
+                terms.iter().sum()
             })
             .collect();
         let limit = if self.max_moves == 0 {
@@ -1391,10 +1462,8 @@ impl Lattice {
         let mut worst: Vec<usize> = Vec::with_capacity(movable.len());
         while moves < limit {
             worst.clear();
-            worst.extend_from_slice(&movable);
-            let ka = k.min(worst.len());
-            worst
-                .select_nth_unstable_by(ka - 1, |&a, &b| atom_energy[b].total_cmp(&atom_energy[a]));
+            worst.extend(highest_energy(&atom_energy, &atoms, &movable, k));
+            let ka = worst.len();
             // A site's energy includes its bond to the atom that would move
             // there, so the moving atom's own term comes off every site.
             let mut best: Option<(f64, usize, usize, f64)> = None;
@@ -1581,56 +1650,12 @@ impl Lattice {
         if !charge_oracle(ledger, 1.0 + ((m * n) + (k * m)) as f64 / pairs) {
             return None;
         }
-        let atoms: Vec<[f64; 3]> = (0..n).map(|i| position(x, i)).collect();
-        let mut atom_energy = vec![0.0; n];
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let v = ranked_pair(self, pair_dist2(atoms[i], atoms[j]), well);
-                atom_energy[i] += v;
-                atom_energy[j] += v;
-            }
-        }
-        let site_energy: Vec<f64> = vacant
-            .iter()
-            .map(|&p| {
-                atoms
-                    .iter()
-                    .map(|&q| ranked_pair(self, pair_dist2(p, q), well))
-                    .sum()
-            })
-            .collect();
-        let mut ranked = movable;
-        ranked.select_nth_unstable_by(k - 1, |&a, &b| atom_energy[b].total_cmp(&atom_energy[a]));
-        let mut offers: Vec<(f64, usize, usize)> = Vec::new();
-        for &i in &ranked[..k] {
-            for s in 0..m {
-                let r2 = pair_dist2(atoms[i], vacant[s]);
-                if r2 < 1e-8 {
-                    continue;
-                }
-                let own = ranked_pair(self, r2, well);
-                let delta = site_energy[s] - own - atom_energy[i];
-                offers.push((delta, i, s));
-            }
-        }
-        if offers.is_empty() {
+        let Some((offers, weights, _atoms, vacant)) =
+            self.boltzmann_offers(x, &vacant, well, temperature, &movable, k)
+        else {
             return None;
-        }
-        let pool = ENERGY_EXCHANGE_POOL.min(offers.len());
-        offers.select_nth_unstable_by(pool - 1, |a, b| a.0.total_cmp(&b.0));
-        offers.truncate(pool);
-        let temp = temperature.max(1e-8);
-        let best = offers
-            .iter()
-            .fold(f64::INFINITY, |lo, offer| lo.min(offer.0));
-        let weights: Vec<f64> = offers
-            .iter()
-            .map(|offer| (-(offer.0 - best) / temp).exp())
-            .collect();
+        };
         let sum: f64 = weights.iter().sum();
-        if !(sum > 0.0) {
-            return None;
-        }
         let mut draw = rng.random::<f64>() * sum;
         let mut pick = offers.len() - 1;
         for (index, weight) in weights.iter().enumerate() {
@@ -1646,6 +1671,134 @@ impl Lattice {
         state[3 * atom + 1] = vacant[site][1];
         state[3 * atom + 2] = vacant[site][2];
         Some(state)
+    }
+
+    /// Boltzmann weights of one exchange, as `(atom, site, probability)`.
+    ///
+    /// The same offers [`Lattice::propose_energy_exchange`] draws. Nothing
+    /// is charged. `None` means the geometry has no exchange to offer.
+    pub(crate) fn exchange_probabilities(
+        &self,
+        x: &[f64],
+        temperature: f64,
+    ) -> Option<Vec<([f64; 3], [f64; 3], f64)>> {
+        let n = x.len() / 3;
+        if n < 4 {
+            return None;
+        }
+        let well = median_bond(x)
+            .filter(|b| *b > 1e-6)
+            .unwrap_or(self.site_distance);
+        let mut lattice = self.clone();
+        let ratio = well / self.site_distance.max(1e-6);
+        lattice.bond_cutoff *= ratio;
+        lattice.hollow_cutoff *= ratio;
+        lattice.site_distance = well;
+        lattice.clearance *= ratio;
+        lattice.merge_distance *= ratio;
+        let vacant = lattice.sites(x);
+        if vacant.is_empty() {
+            return None;
+        }
+        let coordination = lattice.coordination(x);
+        let movable: Vec<usize> = (0..n)
+            .filter(|&i| coordination[i] < lattice.interior_coordination)
+            .collect();
+        if movable.is_empty() {
+            return None;
+        }
+        let k = lattice.candidates.max(1).min(movable.len());
+        let (offers, weights, atoms, vacant) =
+            self.boltzmann_offers(x, &vacant, well, temperature, &movable, k)?;
+        let sum: f64 = weights.iter().sum();
+        if !(sum > 0.0) {
+            return None;
+        }
+        Some(
+            offers
+                .iter()
+                .zip(weights)
+                .map(|((_, atom, site), weight)| (atoms[*atom], vacant[*site], weight / sum))
+                .collect(),
+        )
+    }
+
+    fn boltzmann_offers(
+        &self,
+        x: &[f64],
+        vacant: &[[f64; 3]],
+        well: f64,
+        temperature: f64,
+        movable: &[usize],
+        k: usize,
+    ) -> Option<(
+        Vec<(f64, usize, usize)>,
+        Vec<f64>,
+        Vec<[f64; 3]>,
+        Vec<[f64; 3]>,
+    )> {
+        let n = x.len() / 3;
+        let m = vacant.len();
+        let atoms: Vec<[f64; 3]> = (0..n).map(|i| position(x, i)).collect();
+        let mut atom_energy = vec![0.0; n];
+        for i in 0..n {
+            let mut terms = Vec::with_capacity(n - 1);
+            for j in 0..n {
+                if i == j {
+                    continue;
+                }
+                terms.push(ranked_pair(self, pair_dist2(atoms[i], atoms[j]), well));
+            }
+            terms.sort_by(|a, b| a.total_cmp(b));
+            atom_energy[i] = terms.iter().sum();
+        }
+        let site_energy: Vec<f64> = vacant
+            .iter()
+            .map(|&p| {
+                let mut terms: Vec<f64> = atoms
+                    .iter()
+                    .map(|&q| ranked_pair(self, pair_dist2(p, q), well))
+                    .collect();
+                terms.sort_by(|a, b| a.total_cmp(b));
+                terms.iter().sum()
+            })
+            .collect();
+        let ranked = highest_energy(&atom_energy, &atoms, movable, k);
+        let mut offers: Vec<(f64, usize, usize)> = Vec::new();
+        for &i in &ranked {
+            for s in 0..m {
+                let r2 = pair_dist2(atoms[i], vacant[s]);
+                if r2 < 1e-8 {
+                    continue;
+                }
+                let own = ranked_pair(self, r2, well);
+                let delta = site_energy[s] - own - atom_energy[i];
+                offers.push((delta, i, s));
+            }
+        }
+        if offers.is_empty() {
+            return None;
+        }
+        offers.sort_by(|a, b| {
+            a.0.total_cmp(&b.0)
+                .then_with(|| coord_cmp(atoms[a.1], atoms[b.1]))
+                .then_with(|| coord_cmp(vacant[a.2], vacant[b.2]))
+        });
+        let pool = ENERGY_EXCHANGE_POOL.min(offers.len());
+        offers.truncate(pool);
+        let temp = temperature.max(1e-8);
+        let best = offers
+            .iter()
+            .fold(f64::INFINITY, |lo, offer| lo.min(offer.0));
+        let weights: Vec<f64> = offers
+            .iter()
+            .map(|offer| (-(offer.0 - best) / temp).exp())
+            .collect();
+        let sum: f64 = weights.iter().sum();
+        if !(sum > 0.0) {
+            return None;
+        }
+        Some((offers, weights, atoms, vacant.to_vec()))
     }
 }
 
@@ -2118,5 +2271,119 @@ mod tests {
             "best {best} did not leave {}",
             start.energy
         );
+    }
+
+    fn relabel(x: &[f64], order: &[usize]) -> Vec<f64> {
+        let mut out = vec![0.0; x.len()];
+        for (slot, &atom) in order.iter().enumerate() {
+            out[3 * slot..3 * slot + 3].copy_from_slice(&x[3 * atom..3 * atom + 3]);
+        }
+        out
+    }
+
+    fn same_points(left: &[[f64; 3]], right: &[[f64; 3]]) -> bool {
+        if left.len() != right.len() {
+            return false;
+        }
+        let mut used = vec![false; right.len()];
+        for p in left {
+            let hit = right.iter().enumerate().position(|(i, q)| {
+                !used[i]
+                    && (p[0] - q[0]).abs() <= 1e-10
+                    && (p[1] - q[1]).abs() <= 1e-10
+                    && (p[2] - q[2]).abs() <= 1e-10
+            });
+            let Some(i) = hit else {
+                return false;
+            };
+            used[i] = true;
+        }
+        true
+    }
+
+    fn same_law(left: &[([f64; 3], [f64; 3], f64)], right: &[([f64; 3], [f64; 3], f64)]) -> bool {
+        if left.len() != right.len() {
+            return false;
+        }
+        let mut used = vec![false; right.len()];
+        for (atom, site, weight) in left {
+            let hit = right.iter().enumerate().position(|(i, (a, s, w))| {
+                !used[i]
+                    && (atom[0] - a[0]).abs() <= 1e-10
+                    && (atom[1] - a[1]).abs() <= 1e-10
+                    && (atom[2] - a[2]).abs() <= 1e-10
+                    && (site[0] - s[0]).abs() <= 1e-10
+                    && (site[1] - s[1]).abs() <= 1e-10
+                    && (site[2] - s[2]).abs() <= 1e-10
+                    && (weight - w).abs() <= 1e-10
+            });
+            let Some(i) = hit else {
+                return false;
+            };
+            used[i] = true;
+        }
+        true
+    }
+
+    /// Relabelling a minimum must not move a vacant site or a draw.
+    #[test]
+    fn vacant_sites_and_move_probabilities_ignore_labels() {
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+        use rand::seq::SliceRandom;
+        let lattice = Lattice::default();
+        let quench = Quench {
+            max_iterations: 80,
+            rms_tolerance: 1.0e-3,
+            ..Quench::default()
+        };
+        let mut minima: Vec<Vec<f64>> = Vec::new();
+        for seed in [11_u64, 29, 47] {
+            let n = 38;
+            let cfg = crate::methods::cluster_hopping::Config::for_cluster(n);
+            let mut rng = StdRng::seed_from_u64(seed);
+            let start = crate::methods::cluster_hopping::random_cluster_in_radius(
+                n,
+                cfg.start_radius(),
+                cfg.min_separation,
+                &mut rng,
+            );
+            let mut ledger = Ledger::new(80_000);
+            let relaxed = quench
+                .relax(&mut ledger, start.as_slice().unwrap())
+                .expect("quench");
+            minima.push(relaxed.state);
+        }
+        minima.push(fixture("lj104-trap-c2v").to_vec());
+        for state in &minima {
+            let n = state.len() / 3;
+            let sites = lattice.sites(state);
+            let law = lattice
+                .exchange_probabilities(state, 0.8)
+                .expect("the minimum offers an exchange");
+            assert!(!sites.is_empty(), "a packed minimum has a vacant site");
+            let mut orders = vec![(0..n).rev().collect::<Vec<_>>()];
+            let mut rotated: Vec<usize> = (0..n).collect();
+            rotated.rotate_left(n / 3);
+            orders.push(rotated);
+            let mut shuffled: Vec<usize> = (0..n).collect();
+            shuffled.shuffle(&mut StdRng::seed_from_u64(5));
+            orders.push(shuffled);
+            for order in orders {
+                let moved = relabel(state, &order);
+                let sites_b = lattice.sites(&moved);
+                assert!(
+                    same_points(&sites, &sites_b),
+                    "vacant sites moved under a relabelling"
+                );
+                let law_b = lattice
+                    .exchange_probabilities(&moved, 0.8)
+                    .expect("relabelled minimum offers an exchange");
+                assert!(
+                    same_law(&law, &law_b),
+                    "move probabilities moved under a relabelling"
+                );
+            }
+        }
     }
 }

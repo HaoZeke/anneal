@@ -17,7 +17,10 @@
 //! sites are one Mackay icosahedral shell, used only as a uniform set
 //! of directions. The shell's topology is not read. A probe atom is
 //! relaxed at each primary site with the cluster held fixed. Candidates
-//! closer than 0.05 are one site.
+//! closer than 0.05 collapse to the site nearer the cluster centroid.
+//! A coordinate comparison breaks a remaining tie. Atom labels are not
+//! read: the atoms are sorted by coordinates before the probe and the
+//! pair sums.
 //!
 //! "DL Searching": the `Nmov` atoms of highest pair energy join the
 //! lattice. Equations (2), (3) and (4) are the core energy, the
@@ -39,13 +42,16 @@ use rand::Rng;
 use rand::seq::SliceRandom;
 
 use crate::methods::cluster_hopping::{Ledger, Outcome, random_cluster_in_radius};
-use crate::methods::lattice_search::{Quench, charge_oracle};
+use crate::methods::lattice_search::{Quench, charge_oracle, merge_toward_centroid};
 use crate::potentials::PairKind;
 
 /// How a tied selection cut is broken.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TieCut {
-    /// The lowest index among equal energies.
+    /// The lowest coordinate-ordered index among equal energies.
+    ///
+    /// Atoms and sites are ordered by their coordinates first, so this
+    /// cut does not follow the caller's atom labels.
     LowestIndex,
     /// A uniform draw among equal energies.
     Uniform,
@@ -376,7 +382,8 @@ fn build_lattice<R: Rng + ?Sized>(
     rng: &mut R,
     tie: TieCut,
 ) -> Option<(Vec<[f64; 3]>, Vec<[f64; 3]>)> {
-    let atoms: Vec<[f64; 3]> = (0..n).map(|i| point(x, i)).collect();
+    let mut atoms: Vec<[f64; 3]> = (0..n).map(|i| point(x, i)).collect();
+    atoms.sort_by(|a, b| coord_cmp(*a, *b));
     let centre = centroid(&atoms);
     let rmax = atoms
         .iter()
@@ -397,12 +404,7 @@ fn build_lattice<R: Rng + ?Sized>(
             candidates.push(placed);
         }
     }
-    let mut vacant = Vec::new();
-    for site in candidates {
-        if vacant.iter().all(|kept| dist(*kept, site) >= MERGE) {
-            vacant.push(site);
-        }
-    }
+    let vacant = merge_toward_centroid(&candidates, centre, MERGE);
     let sub = atom_energies(&atoms);
     let active = select_highest(&sub, params.n_mov.min(n), tie, rng);
     let mut sites = vacant;
@@ -554,6 +556,78 @@ fn pick<R: Rng + ?Sized>(highest: bool, terms: &[(usize, f64)], tie: TieCut, rng
         TieCut::LowestIndex => pool[0],
         TieCut::Uniform => pool[rng.random_range(0..pool.len())],
     }
+}
+
+fn extreme_pool(highest: bool, terms: &[(usize, f64)]) -> Vec<usize> {
+    let extreme = terms.iter().fold(terms[0].1, |held, (_, energy)| {
+        if highest {
+            held.max(*energy)
+        } else {
+            held.min(*energy)
+        }
+    });
+    let mut pool: Vec<usize> = terms
+        .iter()
+        .filter(|(_, energy)| {
+            (*energy - extreme).abs() <= TIE_ABS || energy.total_cmp(&extreme).is_eq()
+        })
+        .map(|(site, _)| *site)
+        .collect();
+    pool.sort_unstable();
+    pool
+}
+
+/// Probabilities of the first greedy exchange, keyed by site coordinates.
+fn first_exchange_probabilities<R: Rng + ?Sized>(
+    edlc: &[f64],
+    edl: &[f64],
+    sites: &[[f64; 3]],
+    n_mov: usize,
+    rng: &mut R,
+    tie: TieCut,
+) -> Vec<([f64; 3], [f64; 3], f64)> {
+    let chosen = sample(sites.len(), n_mov, rng);
+    let occupied = site_terms(edlc, edl, &chosen, None);
+    let from_pool = extreme_pool(true, &occupied);
+    let mut out = Vec::new();
+    for &from in &from_pool {
+        let p_from = match tie {
+            TieCut::LowestIndex => {
+                if from == from_pool[0] {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            TieCut::Uniform => 1.0 / from_pool.len() as f64,
+        };
+        if p_from == 0.0 {
+            continue;
+        }
+        let vacant_pool: Vec<usize> = (0..sites.len()).filter(|i| !chosen.contains(i)).collect();
+        let mut vacant_terms = Vec::with_capacity(vacant_pool.len());
+        for site in vacant_pool {
+            vacant_terms.push((site, term(edlc, edl, site, &chosen, Some(from))));
+        }
+        let to_pool = extreme_pool(false, &vacant_terms);
+        for &to in &to_pool {
+            let p_to = match tie {
+                TieCut::LowestIndex => {
+                    if to == to_pool[0] {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                }
+                TieCut::Uniform => 1.0 / to_pool.len() as f64,
+            };
+            if p_to == 0.0 {
+                continue;
+            }
+            out.push((sites[from], sites[to], p_from * p_to));
+        }
+    }
+    out
 }
 
 fn sample<R: Rng + ?Sized>(n_sites: usize, n_mov: usize, rng: &mut R) -> Vec<usize> {
@@ -723,6 +797,12 @@ fn atom_energies(atoms: &[[f64; 3]]) -> Vec<f64> {
 
 fn lj_pair(r2: f64) -> f64 {
     PairKind::LennardJones.pair(r2).0
+}
+
+fn coord_cmp(a: [f64; 3], b: [f64; 3]) -> std::cmp::Ordering {
+    a[0].total_cmp(&b[0])
+        .then(a[1].total_cmp(&b[1]))
+        .then(a[2].total_cmp(&b[2]))
 }
 
 fn point(x: &[f64], i: usize) -> [f64; 3] {
@@ -910,5 +990,105 @@ mod tests {
             "best {} did not reach the thirteen-atom icosahedron",
             outcome.best
         );
+    }
+
+    fn relabel(x: &[f64], order: &[usize]) -> Vec<f64> {
+        let mut out = vec![0.0; x.len()];
+        for (slot, &atom) in order.iter().enumerate() {
+            out[3 * slot..3 * slot + 3].copy_from_slice(&x[3 * atom..3 * atom + 3]);
+        }
+        out
+    }
+
+    fn same_sites(left: &[[f64; 3]], right: &[[f64; 3]]) -> bool {
+        if left.len() != right.len() {
+            return false;
+        }
+        left.iter().zip(right.iter()).all(|(p, q)| {
+            (p[0] - q[0]).abs() <= 1e-10
+                && (p[1] - q[1]).abs() <= 1e-10
+                && (p[2] - q[2]).abs() <= 1e-10
+        })
+    }
+
+    fn same_law(left: &[([f64; 3], [f64; 3], f64)], right: &[([f64; 3], [f64; 3], f64)]) -> bool {
+        if left.len() != right.len() {
+            return false;
+        }
+        left.iter().zip(right.iter()).all(|(p, q)| {
+            (p.0[0] - q.0[0]).abs() <= 1e-10
+                && (p.0[1] - q.0[1]).abs() <= 1e-10
+                && (p.0[2] - q.0[2]).abs() <= 1e-10
+                && (p.1[0] - q.1[0]).abs() <= 1e-10
+                && (p.1[1] - q.1[1]).abs() <= 1e-10
+                && (p.1[2] - q.1[2]).abs() <= 1e-10
+                && (p.2 - q.2).abs() <= 1e-10
+        })
+    }
+
+    fn lattice_law(
+        x: &[f64],
+        tie: TieCut,
+        build_seed: u64,
+        draw_seed: u64,
+    ) -> (Vec<[f64; 3]>, Vec<([f64; 3], [f64; 3], f64)>) {
+        let n = x.len() / 3;
+        let params = table1(n);
+        let mut ledger = Ledger::new(2_000_000);
+        let mut rng = StdRng::seed_from_u64(build_seed);
+        let (core, sites) = build_lattice(n, &params, &mut ledger, x, &mut rng, tie)
+            .expect("the probe fits in the ledger");
+        let (edlc, edl) = pair_tables(n, &mut ledger, &core, &sites).expect("pair tables");
+        let n_mov = params.n_mov.min(sites.len());
+        let mut draw = StdRng::seed_from_u64(draw_seed);
+        let law = first_exchange_probabilities(&edlc, &edl, &sites, n_mov, &mut draw, tie);
+        (sites, law)
+    }
+
+    /// Relabelling a minimum must not move a lattice site or a greedy draw.
+    #[test]
+    fn lattice_sites_and_move_probabilities_ignore_labels() {
+        use rand::seq::SliceRandom;
+        let quench = Quench {
+            max_iterations: 80,
+            rms_tolerance: 1.0e-3,
+            ..Quench::default()
+        };
+        let mut minima = Vec::new();
+        for seed in [11_u64, 29, 47] {
+            let n = 13;
+            let mut rng = StdRng::seed_from_u64(seed);
+            let start = random_cluster_in_radius(n, 2.2, 0.5, &mut rng);
+            let mut ledger = Ledger::new(40_000);
+            let relaxed = quench
+                .relax(&mut ledger, start.as_slice().unwrap())
+                .expect("quench");
+            minima.push(relaxed.state);
+        }
+        for tie in [TieCut::LowestIndex, TieCut::Uniform] {
+            for state in &minima {
+                let n = state.len() / 3;
+                let (sites, law) = lattice_law(state, tie, 1, 2);
+                let mut orders = vec![(0..n).rev().collect::<Vec<_>>()];
+                let mut rotated: Vec<usize> = (0..n).collect();
+                rotated.rotate_left(n / 3);
+                orders.push(rotated);
+                let mut shuffled: Vec<usize> = (0..n).collect();
+                shuffled.shuffle(&mut StdRng::seed_from_u64(5));
+                orders.push(shuffled);
+                for order in orders {
+                    let moved = relabel(state, &order);
+                    let (sites_b, law_b) = lattice_law(&moved, tie, 1, 2);
+                    assert!(
+                        same_sites(&sites, &sites_b),
+                        "lattice sites moved under a relabelling"
+                    );
+                    assert!(
+                        same_law(&law, &law_b),
+                        "move probabilities moved under a relabelling"
+                    );
+                }
+            }
+        }
     }
 }
