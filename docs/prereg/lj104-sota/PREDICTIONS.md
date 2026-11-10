@@ -77,7 +77,7 @@ A tie is reported as a tie. Parity, the case b = n - b, is the same event as equ
 
 The panel is LJ38, LJ55, LJ75, and LJ98, with n = 6 seeds at each size. The six seeds are 6000, 6001, 6002, 6003, 6004, and 6005. They were never used for tuning. They sit outside 5000-5029, and outside the ranges named in paper/seeds.toml: 0-31, 2000-2247, 3000-3029, 3100-3199, 4000-4047, and 5000-5063. This paragraph names them before any run of the panel.
 
-The floor at each size is the current anneal default hit count on that panel. A count below its floor is a mechanical FAIL.
+The floor at each size is the hit count of the current anneal default on these same six seeds. The default is `Config::recommended`, the `recommended` arm of `examples/h2h_seed.rs`. Each size runs at its PAPER_BUDGETS entry: LJ38 line 16 is 400000, LJ55 line 17 is 1000000, LJ75 line 18 is 4000000, and LJ98 line 19 is 4000000. A panel hit is a lowest energy at or below the reference plus 0.001. The references are the Lennard-Jones lines in `examples/h2h_arm3.rs`: LJ38 is -173.928427, LJ55 is -279.248470, LJ75 is -397.492331, and LJ98 is -543.665361. The search stops when the best reaches that line. A miss spends the budget. A count below its floor is a mechanical FAIL.
 
 LJ38 floor: UNFILLED.
 LJ55 floor: UNFILLED.
