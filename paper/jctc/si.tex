@@ -73,6 +73,7 @@ live process.
 The 200-seed binary was built from tree
 \texttt{37535ec1a6e99d47a2afe0752072a33af64dccb3}, the tree of the
 unpublished build commit.
+A public reader gets the archived blob-hash check only.
 That tree has the \#56 copies of \texttt{bias.rs}, \texttt{neighbors.rs}
 and \texttt{potentials.rs}, the hot-path bench file, the newsfragment
 and \texttt{precision-policy.org}.
@@ -80,6 +81,8 @@ It lacks the \texttt{cluster\_hopping.rs} and \texttt{tip4p.rs} parts of
 \#56 and the bench entry in \texttt{Cargo.toml}.
 Its \texttt{rigid\_body.rs} is a third version.
 The source archive is \texttt{logs/lj75-source-37535ec1.tar.xz}.
+It includes \texttt{LICENSE.txt}.
+The notice reads Copyright (c) 2023 anneal core developers.
 \texttt{scripts/lj75\_rebuild\_from\_archive.sh} rebuilds the example
 with the bank-rpc feature.
 The build receipt is \texttt{logs/cargo-build-receipt.txt}.
