@@ -63,8 +63,8 @@ with the number of atoms.
 evaluations it spends before it reaches a minimum that is already known.
 Li and Scheraga introduced basin hopping for a rough potential-energy
 surface.
-\cite{li1987} Wales and Doye made that Monte Carlo walk the working
-method for atomic clusters.
+\cite{li1987} Wales and Doye made that
+Monte Carlo walk the working method for atomic clusters.
 \cite{wales1997} A move proposes a new geometry, a local minimisation
 returns a minimum, and the Metropolis rule at one temperature accepts or
 rejects that minimum.
@@ -270,18 +270,6 @@ and minima hopping (MH) run a single walker.
 tool (CREST) samples a molecular ensemble by metadynamics.
 \cite{prachtCrestProgramExploration2024} The bank in this section adds
 the depth posterior and the unseen-mass census to that list.
-
-\begin{figure}
-\centering
-\includegraphics[width=\linewidth]{lj75_ecdf.pdf}
-\caption{Encounter curves of main's earlier sealed LJ\(_{75}\) campaign.
-The panel prints that run's PAR-2 values.
-The run used an empty surface list and restart on stall.
-The arms are the recommended hop, the derived hop, and the Wales-group
-basin-hopping program (GMIN).
-The plot covers 200 seeds.}
-\label{fig:lj75-ecdf}
-\end{figure}
 \section{Information theory in the hop}
 \label{sec:info} A move that has stopped finding depth can still take
 over the next trial.
@@ -347,6 +335,17 @@ LJ\(_{104}\).
 (b) The TIP4P minima of 10, 15 and 20 molecules, and the lowest GFN2-xTB
 hexamer of each class.}
 \label{fig:systems}
+\end{figure}
+\begin{figure}
+\centering
+\includegraphics[width=\linewidth]{lj75_ecdf.pdf}
+\caption{Encounter curves of main's earlier sealed LJ\(_{75}\) campaign.
+The panel prints that run's PAR-2 values.
+The run used an empty surface list and restart on stall.
+The arms are the recommended hop, the derived hop, and the Wales-group
+basin-hopping program (GMIN).
+The plot covers 200 seeds.}
+\label{fig:lj75-ecdf}
 \end{figure}
 The LJ\(_{75}\) seeds 0 through 199 run serially at a cap of
 \(4\times 10^{6}\) force calls.
@@ -489,9 +488,9 @@ Table~\ref{tab:hexamer-gaps} gives the polished gap on each seed.
 The gap is the anneal energy minus the CREST energy.
 A negative value means the anneal energy sits lower.
 Five seeds lie within \(1\times 10^{-7}\)~Eh on both gap ledgers.
-Seed 1 reaches \(1.3509\times 10^{-7}\)~Eh on the 4000-call ledger and
-\(1.3505\times 10^{-7}\)~Eh on the driver-count ledger, above the
-\(1\times 10^{-7}\)~Eh line.
+Seed 1 exceeds that line, at \(1.3509\times 10^{-7}\)~Eh on the
+4000-call ledger and \(1.3505\times 10^{-7}\)~Eh on the driver-count
+ledger.
 The label-free root-mean-square deviation of each polished pair is at
 most 0.00212~Å.
 
@@ -541,20 +540,20 @@ No CREST structure dissociated.
 (a) The share of 192 seeds that each arm hit, with the Wilson interval.
 \cite{wilsonProbableInferenceLaw1927} (b) For each hop arm paired with
 CREST, the difference in hit rate, with the Newcombe interval and the
-exact McNemar \(p\).
-\cite{newcombeImprovedConfidenceIntervals1998,mcnemarNoteSamplingError1947}}
+exact McNemar \(p\)~\cite{newcombeImprovedConfidenceIntervals1998,%
+mcnemarNoteSamplingError1947}.}
 \label{fig:water-crest}
 \end{figure}
 
 The water 16-mer count is separate open work, apart from the hexamer
 campaign.
-The Atomic Simulation Environment, the atomistic global optimization
-framework (AGOX), and the Wales-group basin-hopping program (GMIN) are
-not compared here.
+This comparison leaves out the Atomic Simulation Environment, the
+atomistic global optimization framework (AGOX), and the Wales-group
+basin-hopping program (GMIN).
 
 \section{Conclusions}
 On the water hexamer the sealed 192-seed hop hit 121 of 192 seeds.
-CREST hit 97 of 192 seeds.
+In contrast, CREST hit 97 of 192 seeds.
 The budget-fair polish hit 148 of 192, and CREST followed by that polish
 hit 114 of 192.
 Five of the six hexamer seeds lie within \(1\times 10^{-7}\)~Eh on both
