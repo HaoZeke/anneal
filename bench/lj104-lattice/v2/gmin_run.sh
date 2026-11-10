@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) anneal developers
 # One GMIN seed at the published temperature-1.5 keywords.
 #
 # Usage:
