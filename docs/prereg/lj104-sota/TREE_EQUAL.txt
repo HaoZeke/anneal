@@ -2,73 +2,81 @@ Copyright (c) anneal developers
 
 Each replayed commit uses the archived commit's tree.
 equal is yes when the two tree ids are the same object.
+Shared seconds in the clock are real.
+These dates replace the archived author dates.
 
-old fdc321918537e44ea452b887ee4d818289e95884
-new 4082f82f75c2a79f0e0a007856c21a1a0422e58f
-tree 31925e50d57ee6e1cd4d733adf5bad02eadf6a13
-equal yes
+The old commit is 4082f82f75c2a79f0e0a007856c21a1a0422e58f.
+The new commit is b519432afb9cd316687ae11088601b4799816175.
+The tree is 31925e50d57ee6e1cd4d733adf5bad02eadf6a13.
+equal yes.
 
-old 8004d790392e4f8614cc0e9e64a1aead7d0f3ce7
-new 33532452f0d768255aeed36eb7d7fdfc99530716
-tree 53722e6405b930b174415d60c23c0717b33ca7e1
-equal yes
+The old commit is 33532452f0d768255aeed36eb7d7fdfc99530716.
+The new commit is 88efd07f80b6476c6cfb31b711fbbfca8aceee45.
+The tree is 53722e6405b930b174415d60c23c0717b33ca7e1.
+equal yes.
 
-old c9bac09f0d3328f35e767d4c5059eebe737f1729
-new 44b64369a209221e599a27f0808e5a0d63e64044
-tree c1b79198488fa3234bf3cf50d2c22d9ce710d4cd
-equal yes
+The old commit is 44b64369a209221e599a27f0808e5a0d63e64044.
+The new commit is 005bd6a340d1396f436adf90d770de958278f020.
+The tree is c1b79198488fa3234bf3cf50d2c22d9ce710d4cd.
+equal yes.
 
-old 45139a21e18d0c911c7c60149d62e4c87e5428e0
-new 218defbd87ddf38db9015c9799f9f7d600a3c369
-tree 7bef65dc8612e9e0454c6c565422d1a5e8d20a81
-equal yes
+The old commit is 218defbd87ddf38db9015c9799f9f7d600a3c369.
+The new commit is fa8c75a6b66c36fdbb02a6c5cea06185f96782ed.
+The tree is 7bef65dc8612e9e0454c6c565422d1a5e8d20a81.
+equal yes.
 
-old 54818da1e54c6dc4e3bfce7a8c6a129f2af289d4
-new 4391ceb7c8b24ce3c38cb5ba371db8d75d835277
-tree 927a0cc7b3db6525f8bb7f4255d6ce9fa03ce08c
-equal yes
+The old commit is 4391ceb7c8b24ce3c38cb5ba371db8d75d835277.
+The new commit is 5a4c00306a9fbf1cd3b6de6781b19ae78f7fa9d7.
+The tree is 927a0cc7b3db6525f8bb7f4255d6ce9fa03ce08c.
+equal yes.
 
-old d77d8eb557e4288c9eeee1ecd553e4de2525599a
-new 75e2a125287f9ea76055d20b4a4254ef2a6b9a53
-tree 034b4ae9d4b7f4a56a1e29d68b885a712558998d
-equal yes
+The old commit is 75e2a125287f9ea76055d20b4a4254ef2a6b9a53.
+The new commit is 24583692a005eec3527cd20a4cc1e22ecc1d1e2c.
+The tree is 034b4ae9d4b7f4a56a1e29d68b885a712558998d.
+equal yes.
 
-old cc0587fa24b9bd72c4e0399b942bd3a5c3c8cff5
-new b488fef50c97e23183c349311537267eb02f300a
-tree b8f8a9a73a839235bf3d34a17ef9d27a5afed9fb
-equal yes
+The old commit is b488fef50c97e23183c349311537267eb02f300a.
+The new commit is 8ad608bb6f2a717b2e860f694a3e7c39567af76e.
+The tree is b8f8a9a73a839235bf3d34a17ef9d27a5afed9fb.
+equal yes.
 
-old 380ceedd7fcd3db9bd0184fd987216822de684d3
-new 4c9b32008ff0f4e3851a89aedf036b47f48f9fb2
-tree beac7bacf893c5af2cde198237aed8448e1a44a7
-equal yes
+The old commit is 4c9b32008ff0f4e3851a89aedf036b47f48f9fb2.
+The new commit is b185455047ab8978e97d887a3d290860929ff29f.
+The tree is beac7bacf893c5af2cde198237aed8448e1a44a7.
+equal yes.
 
-old 3c1069acdc90306feda50f770489d892bd8ade85
-new e8426dc301a6ec81ac4eca129496fcadb625770f
-tree bebd8a1e882787bb9c7741e763b6160155d85411
-equal yes
+The old commit is e8426dc301a6ec81ac4eca129496fcadb625770f.
+The new commit is f13ea87479e75a408e1cc8167a1b77ab7a055bfa.
+The tree is bebd8a1e882787bb9c7741e763b6160155d85411.
+equal yes.
 
-old 9c072e5faa7f28d815b917c3d330f91190480829
-new 66bf4acac19dcdccf9e1e5989e03e863b5704106
-tree ef739091ff6e6e8dd49f159314a9af41f550ca46
-equal yes
+The old commit is 66bf4acac19dcdccf9e1e5989e03e863b5704106.
+The new commit is adf7d96c4a861b66b1e019d93da51e7248464dab.
+The tree is ef739091ff6e6e8dd49f159314a9af41f550ca46.
+equal yes.
 
-old 6a813084d36962c1d61154eeafd1ea377d150390
-new 26240c31db7b8de658081396b4407b1efb5903c3
-tree d882caf066b85850023036d51c8c8edfc221bcfe
-equal yes
+The old commit is 26240c31db7b8de658081396b4407b1efb5903c3.
+The new commit is 43e517387af2812644fa517182372826af6fb42e.
+The tree is d882caf066b85850023036d51c8c8edfc221bcfe.
+equal yes.
 
-old 5fb7368d5ea15cdf517c8bc48e2f56286ccb8b33
-new bb5c667a5a6774e7d5073437f78bf778a394f580
-tree 4b168122d30bc00afa0e27a26c67863ffc7b312c
-equal yes
+The old commit is bb5c667a5a6774e7d5073437f78bf778a394f580.
+The new commit is adaea980d3e5e59823b76880db9e189b3bdd849b.
+The tree is 4b168122d30bc00afa0e27a26c67863ffc7b312c.
+equal yes.
 
-old 044505bb5f2b7aab318ecc99374dc0cfdcc18fa8
-new 2a3e8f2d8115156cbb2db88785124d69aafb4f95
-tree 279a3721f5203bf624fc5efd41b478b3a1b5e136
-equal yes
+The old commit is 2a3e8f2d8115156cbb2db88785124d69aafb4f95.
+The new commit is c39f2e58deca7be3f7e0e1cf4bd59056c09a50fb.
+The tree is 279a3721f5203bf624fc5efd41b478b3a1b5e136.
+equal yes.
 
-old 835b90741211f2fd00b5b9ea68cde4cc877b31af
-new 0bfcb3727f7b78aa0ac221278164d5c97f1188a4
-tree b5d20591f6ce08f7878cfee614b022127779df7d
-equal yes
+The old commit is 0bfcb3727f7b78aa0ac221278164d5c97f1188a4.
+The new commit is 9556c0b115063606a7b4ba3bfdf28a83f21b3dca.
+The tree is b5d20591f6ce08f7878cfee614b022127779df7d.
+equal yes.
+
+The old commit is 6cde8551b2791cc33b1060311dd334a04d3d1042.
+The new commit is 846c4d6ec4c7178b690f08a145175a4b881cc697.
+The tree is f300067d17a971b7466825aaa54bbc4fd324064a.
+equal yes.
+
