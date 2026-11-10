@@ -1,8 +1,8 @@
 # Replay
 
-We replayed the three later commits onto this ref.
+We replayed commits onto this ref four times.
 
-We kept commit 42 as it was.
+We record each replay below.
 
 ## The v1.16 series
 
@@ -372,5 +372,8 @@ refs/archive/paper-integration-v1.20 names the previous tip.
 
 7d20cca206fb50cce9f2e393078eaa1e03e9c86f
 
-paper-integration-v1.21 names the commit that replaces it.
+The commit that replaced it follows.
+
+a2ca5d9ab1c1ba3be51ffab5aa06c9983d12d2d5
+
 The notes file and this file are the tree change.
