@@ -77,14 +77,14 @@ A tie is reported as a tie. Parity, the case b = n - b, is the same event as equ
 
 The panel is LJ38, LJ55, LJ75, and LJ98, with n = 6 seeds at each size. The six seeds are 6000, 6001, 6002, 6003, 6004, and 6005. They were never used for tuning. They sit outside 5000-5029, and outside the ranges named in paper/seeds.toml: 0-31, 2000-2247, 3000-3029, 3100-3199, 4000-4047, and 5000-5063. This paragraph names them before any run of the panel.
 
-The floor at each size is the hit count of the current anneal default on these same six seeds. The default is `Config::recommended`, the `recommended` arm of `examples/h2h_seed.rs`. Each size runs at its PAPER_BUDGETS entry: LJ38 line 16 is 400000, LJ55 line 17 is 1000000, LJ75 line 18 is 4000000, and LJ98 line 19 is 4000000. A panel hit is a lowest energy at or below the reference plus 0.001. The references are the Lennard-Jones lines in `examples/h2h_arm3.rs`: LJ38 is -173.928427, LJ55 is -279.248470, LJ75 is -397.492331, and LJ98 is -543.665361. The search stops when the best reaches that line. A miss spends the budget. A count below its floor is a mechanical FAIL.
+The floor at each size is the hit count of the current anneal default on these same six seeds, after `lj_requench`. The default search is `Config::recommended`, the `recommended` arm of `examples/h2h_seed.rs`. Each size runs at its PAPER_BUDGETS entry: LJ38 line 16 is 400000, LJ55 line 17 is 1000000, LJ75 line 18 is 4000000, and LJ98 line 19 is 4000000. The search may stop at E_known + 0.001. That stop is not a hit. A panel hit is the re-quenched energy at or below E_known + 1e-6. The four E_known values are the Cambridge Cluster Database minima stored in `examples/h2h_arm3.rs` lines 46-49 and listed in `e_known.tsv`. A count below its floor is a mechanical FAIL.
 
 LJ38 floor: 6/6.
 LJ55 floor: 6/6.
 LJ75 floor: 6/6.
 LJ98 floor: 6/6.
 
-The four floors are the hit counts in the raw logs under panel/, written by write_floors.py. Per-seed energies, calls, and wall times are in floors.md. A count below its floor is a mechanical FAIL.
+The four lines above were counted inside the 0.001 stop window. They are not re-quenched hits. `requench_panel.py` replaces them from the re-quenched energies. `floors.md` keeps the window count. A count below its floor is a mechanical FAIL.
 
 ## Matched compute
 
@@ -98,7 +98,7 @@ Wall time is recorded for a strictly serial run, one process at a time. The runn
 
 ## Hit rule
 
-Every final structure from the candidate, from GMIN_BEST, and from plain DLS is re-quenched with the same lj_requench. A hit means E <= -582.086641. `lj_requench` is `WarmLbfgs::minimize` in `src/methods/warm_lbfgs.rs`, called by `lj_requench` in `src/methods/lattice_search.rs`. The solver is `WarmLbfgs::default` and the iteration cap is 5000. The test `lj_requench_brings_the_known_lj104_minimum_to_the_hit_line` re-quenches `tests/fixtures/lj104_gm.xyz` and requires that energy.
+Every code in this comparison, GMIN_BEST included, is scored with the same re-quench and the same hit rule. The re-quench is `lj_requench`, which is `WarmLbfgs::minimize` in `src/methods/warm_lbfgs.rs`, called by `lj_requench` and `lj_requench_calls` in `src/methods/lattice_search.rs`. The solver is `WarmLbfgs::default` and the iteration cap is 5000. The calls that minimization returns are the re-quench charge. They are recorded apart from the search calls. A hit is re-quenched E <= E_known + 1e-6. E_known values are the Cambridge Cluster Database minima in `e_known.tsv`. LJ38, LJ55, LJ75, and LJ98 are the lines in `examples/h2h_arm3.rs` at lines 46, 47, 48, and 49. LJ104 is -582.086642 at `examples/lj_cluster_search.rs` line 1295, so its hit line is E <= -582.086641. The test `lj_requench_brings_the_known_lj104_minimum_to_the_hit_line` re-quenches `tests/fixtures/lj104_gm.xyz` to that line.
 
 ## Scored rows
 
