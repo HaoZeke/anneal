@@ -264,6 +264,14 @@ The hexamer block matches the file in the tree.
 The copper hit count uses the fixed target.
 The set_relative_0.01 line records the 0.01 eV rate.
 
+`paper/jctc/logs/archive/figure-provenance-v128.txt`
+
+The writer is `scripts/write_figure_provenance_v128.py`.
+
+`paper/jctc/logs/rohit-paper.txt`
+
+The writer is `scripts/run_rohit_paper.sh`.
+
 `paper/jctc/data/hq_sci_cuh2/cuh2_fcc_rec_0.txt`
 
 `paper/jctc/data/hq_sci_cuh2/cuh2_fcc_rec_1.txt`
