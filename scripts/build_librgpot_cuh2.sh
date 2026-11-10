@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build librgpot_cuh2.so from an OmniPotentRPC/rgpot checkout.
-# The cluster scripts do not pin a commit, so this pins develop.
+# This script pins commit 25c759da82eececa8897e4634046fab27409c81a.
 set -euo pipefail
 
 expected=25c759da82eececa8897e4634046fab27409c81a

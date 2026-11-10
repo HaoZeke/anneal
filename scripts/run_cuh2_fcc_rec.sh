@@ -5,6 +5,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 unset CARGO_TARGET_DIR
+msrv=$(awk -F'"' '/^rust-version = / { print $2; exit }' Cargo.toml)
+case $msrv in
+  *.*.*) tool=$msrv ;;
+  *.*) tool=${msrv}.0 ;;
+  *) echo "Cargo.toml has no rust-version" >&2; exit 1 ;;
+esac
+export RUSTUP_TOOLCHAIN=$tool
 lib=${1:-engines/librgpot_cuh2.so}
 con=examples/fixtures/cuh2_fcc_slab.con
 outdir=paper/jctc/logs
@@ -39,18 +46,18 @@ mkdir -p "$outdir"
 {
   capture start
   printf 'rustc\n'
-  rustc +stable -V
+  rustc -V
   printf 'cargo\n'
-  cargo +stable -V
-  printf 'gfortran\n'
-  gfortran --version
-} >"$receipt"
+  cargo -V
+  printf 'gfortran_v\n'
+  gfortran -v
+} >"$receipt" 2>&1
 
 target=$(
-  cargo +stable metadata --format-version 1 --no-deps |
+  cargo metadata --format-version 1 --no-deps |
     python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])'
 )
-cargo +stable build --locked --release \
+cargo build --locked --release \
   --features rgpot-ex,featomic,bank-rpc \
   --example slab_adsorption
 bin=$target/release/examples/slab_adsorption
