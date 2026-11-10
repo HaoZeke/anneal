@@ -1,0 +1,664 @@
+{
+  "anneal_commit": "da7f942298a666843fa61118fef786a0e2b73b4c",
+  "arm": "derived",
+  "budget": 1000000,
+  "call_par2": 25385.270833333332,
+  "config_digests": [
+    "82deeca1b076ae1d1680521cd04b19fa8825e75183c2f68215b1e9d25a456ca9"
+  ],
+  "cpu_family": 6,
+  "cpu_model": 207,
+  "cpu_model_name": "Intel(R) Xeon(R) Processor",
+  "first": 2000,
+  "hits": 48,
+  "hypervisor": "KVM",
+  "kind": "anneal",
+  "last": 2047,
+  "machine_class": "not paper machine",
+  "median_calls_on_hits": 20121.0,
+  "median_wall_seconds": 0.5299215,
+  "n_atoms": 55,
+  "n_seeds": 48,
+  "name": "lj55-derived",
+  "paper_cpu_model": 173,
+  "path": "cluster_search",
+  "reference": -279.24847,
+  "saddle": {
+    "budget_differences": [
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2000"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2001"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2002"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2003"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2004"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2005"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2006"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2007"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2008"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2009"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2010"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2011"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2012"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2013"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2014"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2015"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2016"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2017"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2018"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2019"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2020"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2021"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2022"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2023"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2024"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2025"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2026"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2027"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2028"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2029"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2030"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2031"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2032"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2033"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2034"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2035"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2036"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2037"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2038"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2039"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2040"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2041"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2042"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2043"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2044"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2045"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2046"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2047"
+      }
+    ],
+    "compared": true,
+    "saddle_call_par2": 21955.083333333332,
+    "saddle_hits": 48,
+    "saddle_median_wall_seconds": 0.5128225,
+    "saddle_rows": 48,
+    "scientific_mismatches": [
+      {
+        "field": "best",
+        "ours": "-279.247736",
+        "saddle": "-279.247811",
+        "seed": "2001"
+      },
+      {
+        "field": "force_count",
+        "ours": "49497",
+        "saddle": "23225",
+        "seed": "2001"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "49497",
+        "saddle": "23225",
+        "seed": "2001"
+      },
+      {
+        "field": "best",
+        "ours": "-279.247808",
+        "saddle": "-279.247693",
+        "seed": "2002"
+      },
+      {
+        "field": "force_count",
+        "ours": "6796",
+        "saddle": "17769",
+        "seed": "2002"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "6796",
+        "saddle": "17769",
+        "seed": "2002"
+      },
+      {
+        "field": "best",
+        "ours": "-279.247562",
+        "saddle": "-279.247509",
+        "seed": "2004"
+      },
+      {
+        "field": "force_count",
+        "ours": "74310",
+        "saddle": "9632",
+        "seed": "2004"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "74310",
+        "saddle": "9632",
+        "seed": "2004"
+      },
+      {
+        "field": "best",
+        "ours": "-279.247491",
+        "saddle": "-279.248365",
+        "seed": "2008"
+      },
+      {
+        "field": "force_count",
+        "ours": "52215",
+        "saddle": "15832",
+        "seed": "2008"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "52215",
+        "saddle": "15832",
+        "seed": "2008"
+      },
+      {
+        "field": "best",
+        "ours": "-279.247719",
+        "saddle": "-279.247588",
+        "seed": "2009"
+      },
+      {
+        "field": "force_count",
+        "ours": "23696",
+        "saddle": "33627",
+        "seed": "2009"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "23696",
+        "saddle": "33627",
+        "seed": "2009"
+      },
+      {
+        "field": "best",
+        "ours": "-279.248365",
+        "saddle": "-279.247589",
+        "seed": "2011"
+      },
+      {
+        "field": "force_count",
+        "ours": "20451",
+        "saddle": "8397",
+        "seed": "2011"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "20451",
+        "saddle": "8397",
+        "seed": "2011"
+      },
+      {
+        "field": "best",
+        "ours": "-279.247817",
+        "saddle": "-279.248365",
+        "seed": "2012"
+      },
+      {
+        "field": "force_count",
+        "ours": "9215",
+        "saddle": "14813",
+        "seed": "2012"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "9215",
+        "saddle": "14813",
+        "seed": "2012"
+      },
+      {
+        "field": "best",
+        "ours": "-279.248373",
+        "saddle": "-279.248368",
+        "seed": "2013"
+      },
+      {
+        "field": "force_count",
+        "ours": "15553",
+        "saddle": "20379",
+        "seed": "2013"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "15553",
+        "saddle": "20379",
+        "seed": "2013"
+      },
+      {
+        "field": "best",
+        "ours": "-279.247692",
+        "saddle": "-279.248369",
+        "seed": "2017"
+      },
+      {
+        "field": "force_count",
+        "ours": "40280",
+        "saddle": "38930",
+        "seed": "2017"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "40280",
+        "saddle": "38930",
+        "seed": "2017"
+      },
+      {
+        "field": "best",
+        "ours": "-279.247797",
+        "saddle": "-279.248370",
+        "seed": "2018"
+      },
+      {
+        "field": "force_count",
+        "ours": "38945",
+        "saddle": "20026",
+        "seed": "2018"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "38945",
+        "saddle": "20026",
+        "seed": "2018"
+      },
+      {
+        "field": "best",
+        "ours": "-279.247865",
+        "saddle": "-279.247752",
+        "seed": "2019"
+      },
+      {
+        "field": "force_count",
+        "ours": "21665",
+        "saddle": "22198",
+        "seed": "2019"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "21665",
+        "saddle": "22198",
+        "seed": "2019"
+      },
+      {
+        "field": "force_count",
+        "ours": "34200",
+        "saddle": "31835",
+        "seed": "2022"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "34200",
+        "saddle": "31835",
+        "seed": "2022"
+      },
+      {
+        "field": "best",
+        "ours": "-279.247868",
+        "saddle": "-279.248372",
+        "seed": "2023"
+      },
+      {
+        "field": "force_count",
+        "ours": "30693",
+        "saddle": "4598",
+        "seed": "2023"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "30693",
+        "saddle": "4598",
+        "seed": "2023"
+      },
+      {
+        "field": "best",
+        "ours": "-279.247624",
+        "saddle": "-279.247590",
+        "seed": "2026"
+      },
+      {
+        "field": "force_count",
+        "ours": "31900",
+        "saddle": "23825",
+        "seed": "2026"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "31900",
+        "saddle": "23825",
+        "seed": "2026"
+      },
+      {
+        "field": "best",
+        "ours": "-279.248370",
+        "saddle": "-279.248112",
+        "seed": "2029"
+      },
+      {
+        "field": "force_count",
+        "ours": "21436",
+        "saddle": "62340",
+        "seed": "2029"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "21436",
+        "saddle": "62340",
+        "seed": "2029"
+      },
+      {
+        "field": "best",
+        "ours": "-279.248379",
+        "saddle": "-279.248366",
+        "seed": "2033"
+      },
+      {
+        "field": "force_count",
+        "ours": "45648",
+        "saddle": "25667",
+        "seed": "2033"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "45648",
+        "saddle": "25667",
+        "seed": "2033"
+      },
+      {
+        "field": "best",
+        "ours": "-279.247790",
+        "saddle": "-279.248041",
+        "seed": "2037"
+      },
+      {
+        "field": "force_count",
+        "ours": "109815",
+        "saddle": "66854",
+        "seed": "2037"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "109815",
+        "saddle": "66854",
+        "seed": "2037"
+      },
+      {
+        "field": "best",
+        "ours": "-279.247490",
+        "saddle": "-279.247590",
+        "seed": "2039"
+      },
+      {
+        "field": "force_count",
+        "ours": "13761",
+        "saddle": "9034",
+        "seed": "2039"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "13761",
+        "saddle": "9034",
+        "seed": "2039"
+      },
+      {
+        "field": "best",
+        "ours": "-279.247618",
+        "saddle": "-279.248000",
+        "seed": "2040"
+      },
+      {
+        "field": "force_count",
+        "ours": "71296",
+        "saddle": "104649",
+        "seed": "2040"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "71296",
+        "saddle": "104649",
+        "seed": "2040"
+      },
+      {
+        "field": "force_count",
+        "ours": "32509",
+        "saddle": "32508",
+        "seed": "2043"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "32509",
+        "saddle": "32508",
+        "seed": "2043"
+      },
+      {
+        "field": "best",
+        "ours": "-279.248368",
+        "saddle": "-279.248366",
+        "seed": "2046"
+      },
+      {
+        "field": "force_count",
+        "ours": "33875",
+        "saddle": "48688",
+        "seed": "2046"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "33875",
+        "saddle": "48688",
+        "seed": "2046"
+      },
+      {
+        "field": "best",
+        "ours": "-279.248366",
+        "saddle": "-279.247989",
+        "seed": "2047"
+      },
+      {
+        "field": "force_count",
+        "ours": "50456",
+        "saddle": "28737",
+        "seed": "2047"
+      },
+      {
+        "field": "force_to_hit",
+        "ours": "50456",
+        "saddle": "28737",
+        "seed": "2047"
+      }
+    ]
+  },
+  "tolerance": 0.001,
+  "wilson_95_high": 0.9999999999999999,
+  "wilson_95_low": 0.9258998703338824
+}

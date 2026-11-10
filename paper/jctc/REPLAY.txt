@@ -1,0 +1,376 @@
+# Replay
+
+We replayed the three later commits onto this ref.
+
+We kept commit 42 as it was.
+
+## The v1.16 series
+
+The v1.16 series was not written in one untimed pass.
+A driver replayed the 41 commits of paper-integration-v1.15.
+The old tip follows.
+
+12de8866efaaf801853336302f972c5e0faa7966
+
+The new tip follows.
+
+fd4e691db9152bea8086c2102af84a1b0ea39444
+
+The range starts at the main tip.
+
+3675c9c375bbe560773cdf860bc672b8cbfe74d2
+
+It ends at the old tip above.
+After each message check the driver read the live clock.
+The zone was America/Chicago.
+It set both git dates to that clock.
+It then ran commit-tree.
+A second of 00, or a used second, caused a quarter-second sleep.
+The driver then sampled the clock again.
+Commits 1 through 30 span 65 seconds.
+Commit 1 carries this time.
+
+2026-11-10 02:55:27 -0600
+
+The last of that span carries this time.
+
+2026-11-10 02:56:32 -0600
+
+The old chain is refs/archive/paper-integration-v1.15.
+
+## Map of that replay
+
+Each record gives the index and whether the trees match.
+The old sha follows, then the new sha.
+
+01 equal
+
+3c4698b8ce265b4729f7d298ec64009634ade24a
+
+2ab0093b50f597c3dc15c054633fe191d7d28831
+
+02 equal
+
+6b0f7c2967695b791b38b61922f6056cc651b982
+
+ec78f241fa0c90ea56ef829493cdaad2d65f77f0
+
+03 equal
+
+be6c09e60b1afeb9b384e029f9d2a4ea765267f3
+
+a6b57a682a15f1e43a3961d0a093ca2e0858927c
+
+04 equal
+
+f92226cbcd42b13e4df0eb88d69882611b26d8a0
+
+d70e844a15abe46fca03a2725e35e25e40a57b3e
+
+05 equal
+
+49b1f71e97ca36fd3680400b3aa0ef4dc20b381c
+
+95fd383c59d40c10599c90ca86384524fabf4cb1
+
+06 equal
+
+0113d56cdbd9b413b9e08c81c27d416cd57245b0
+
+1d32e9beed6f4daf7fdafc122a7b42f8eb6fb942
+
+07 equal
+
+85881610d89dcdc82553ca2314e6b26c1a10d432
+
+7026cc4f7c099c1276de9b2fc21405600ad3f217
+
+08 equal
+
+2927095ed1f30093c53d7783ca1086347fe44bc8
+
+3915b0715d2016044d1432e5828c5c57c295ec37
+
+09 equal
+
+855feac9fd4c54783478a268376a2d26191be839
+
+5096939d5c5b8f2b4734c5901d565a777d313d4a
+
+10 equal
+
+a3be089af655fdaf78683290676f4bee3dc63ee3
+
+620ad1cb6ba439d67a249201cfc5ce58d7aa2328
+
+11 equal
+
+ba160512737ffec3db3e911fd6aecbd12ca9cbbc
+
+98a1156a9b33a2d7ffa82acd9ed2f794837898a2
+
+12 equal
+
+788db3c7f91d429d33d92076380c7894bad789ac
+
+3efc6393d793fcc35f98f70d1c2aa5183402911a
+
+13 equal
+
+839c15d0d6ee13eeeca99eea95c98ceac7c87889
+
+ad2467946e91d62416d403e7521036b9d12f5ba4
+
+14 equal
+
+e019698ebe5c8224863a2b18cada6947435dcb16
+
+4b72c9fe95138f9e181a5d48a32d68682021cc9d
+
+15 equal
+
+ca287cf4c83b67ee6af773ec2d8737091ca0be52
+
+e21f3efed26cb370e61a1f0a98e63c32bd605ecb
+
+16 equal
+
+02e386fcb61c245e3933b5458b2dc39824ebbe51
+
+cb6336120ea64f2afc7120d8bc4decebe72332c9
+
+17 equal
+
+d34f843fc6d6057ef772b4d842d831b93a7ee8ef
+
+2e44a8a1f70f68a55f575ba844a38a6f00dd95f8
+
+18 equal
+
+4201e25493733dced203e8ae59d63b900546dd5e
+
+4234826dde86a8e991f5b57e4b204966cd027f72
+
+19 equal
+
+72e817a02c9b89968c2a793f0658cfa29a935df7
+
+7bba5a2f72d3b181eb40adc8d915b72f66822b4a
+
+20 equal
+
+81419338951e1a8acd86bd178c847572fd7ef2cc
+
+5639159c3e06297dbaa4cace0369c3dd526bac12
+
+21 equal
+
+3650475734f8d504897b04b969e3ce4772e58f48
+
+747926f50f4a49e056bdfa85cfbf3d044cbfb887
+
+22 equal
+
+da611c14280319879708e9136b5fe2bc31a20e3e
+
+dc681233465378ceca3952793fd7703ee9889800
+
+23 equal
+
+bee07d6a84a00f6734833fb3f89f511c6d1ea99d
+
+e1ecdf56cef105889eece202d438bf61b1f2634c
+
+24 equal
+
+a4a1a5a61337d2ed1de4e3ba566774c448adcc39
+
+05c58ccb1363e0c96ecb8f1ea6a385002c8a70e6
+
+25 equal
+
+2d39d7ae635b769df99ba6dbf35d5fda4039ad26
+
+876335fab02e7d947aca9c736a4a90e340b0bea8
+
+26 equal
+
+9a337c9c0fa93313bde2b4fc2a77d68b79ca0537
+
+b7d4358c22a77d6a3a5b5219845da7b77699f5f9
+
+27 equal
+
+87e8d94e65ec320ab8f0b01c93eb6fbdbcb8ea42
+
+8cf65ce78ce8df27ad0794726a23cc51722a3b43
+
+28 equal
+
+22106fb2d69c877999153fb8da655530ff6f0549
+
+3789c861cef2bc2af8cfe4e5209055c35f23c572
+
+29 equal
+
+9bdc0d8faf92f2b58dbd19353dc9b2b786aebd3e
+
+6fac731f19341c39236e3435395ce3b99d0cf199
+
+30 equal
+
+a0c32e5c31f0895b72badd2fb1a99c5fa52b22d8
+
+f68ee16f1c3a9f67c89800401c6a58fe7e3bc60d
+
+31 differ
+
+4ba8453c012b5e4e162a47bf236af4256113cdcd
+
+2f4a79326137729f3e680aa36ecf6e1de67ccb2d
+
+32 differ
+
+07fb1aa36f7afa1ea62dbfe562ce8001e9a93dcc
+
+12fa8865bfd4c8563d7bafdff33139f2ef1e0ad6
+
+33 differ
+
+0c43bedc365aead09b33b9fcea173064bd02a464
+
+46e9c66a451d2e6cf091bae64b9cf1aebd7a8ae7
+
+34 differ
+
+871dda7da3998073b3c30323e65ba34f10e60e0b
+
+f9cf80fda1d91492fa3140d143d658524048d238
+
+35 differ
+
+813bfe58939e423c9d368b48544e08682d604a85
+
+2a7342318a09f9b0925c32303f6450a846b504a6
+
+36 differ
+
+e544aa26298f6e49134564698d4d3f98e3856578
+
+a4b407147f237c8961c04aea10c9eb1b99afbd02
+
+37 differ
+
+eeddc7a175e9e6e714b3bfb06ed581f27bfadeac
+
+917b5f309ce89d991aae02315a47a3c9397c9386
+
+38 differ
+
+2e420a29c554f5815e3e1422a5f39fce92186d93
+
+723f812fd1b6e2479f16ef581576f1af8085c3de
+
+39 differ
+
+833a1dd8b1ef34375f52baa4caf35650c16346af
+
+5fb7088350a66c4dfc35a80cb710fa41ed95e4d4
+
+40 differ
+
+e0ae768465bca57276e3aa9828a1cc1b1cc04072
+
+3591ade9d5bbdef2d2a37e7562d1ca77a33e26c2
+
+41 differ
+
+12de8866efaaf801853336302f972c5e0faa7966
+
+fd4e691db9152bea8086c2102af84a1b0ea39444
+
+## This replay
+
+Commits 43 to 45 of paper-integration-v1.18 were replayed.
+Commit 42 keeps its sha.
+The old tip is archived at refs/archive/paper-integration-v1.18.
+That tip follows.
+
+31e4535d5416223c1cbf0342348170a5ea002590
+
+Record 42 keeps its sha.
+
+634176ad73c6d87a2b2e3de3112b804b0af73ebb
+
+Record 43 has a different tree.
+Its old sha follows.
+
+130e82d64e66a972e672293b820fb7cc71dd6b5f
+
+Its new sha follows.
+
+2ba13e102a64b44a3f7910e503501367c710fc32
+
+Record 44 has a different tree.
+Its old sha follows.
+
+8cd1d9c4b4a971e06a4657e826a7d76b9f1ed7a1
+
+Its new sha follows.
+
+1f4aa3847654f3c4c46988e0e6609517e03466d9
+
+Record 45 has a different tree.
+Its old sha follows.
+
+31e4535d5416223c1cbf0342348170a5ea002590
+
+The replacement for that commit is the tip of this branch.
+The captions, the driver and the notes cause the tree change.
+Commit 44 adds the same landscape dumps.
+Its tree also includes the new si.tex.
+
+## Replay from v1.19
+
+Commits 43 to 45 of paper-integration-v1.19 were replayed.
+Commit 42 stays 634176ad.
+The old tip is refs/archive/paper-integration-v1.19.
+That tip follows.
+
+27279cbb08176d7c045229d5d8ad96ed4fafd399
+
+Record 43 has a different tree.
+Its old sha follows.
+
+2ba13e102a64b44a3f7910e503501367c710fc32
+
+Its new sha follows.
+
+1ebbe9c2b7e072e88536f8b5e17d7a4577ad26fd
+
+Record 44 has a different tree.
+The old sha of that commit follows.
+
+1f4aa3847654f3c4c46988e0e6609517e03466d9
+
+The new sha of that commit follows.
+
+3bccdddd1e9c5a13016892fbfcd719aeebd00a61
+
+Record 45 has a different tree.
+The v1.19 tip follows.
+
+27279cbb08176d7c045229d5d8ad96ed4fafd399
+
+The replacement is the tip of paper-integration-v1.20.
+The water caption and five of the six notes cause that tree change.
+
+## Replay from v1.20
+
+This pass rewrote commit 45 and left 42, 43 and 44 untouched.
+refs/archive/paper-integration-v1.20 names the previous tip.
+
+7d20cca206fb50cce9f2e393078eaa1e03e9c86f
+
+paper-integration-v1.21 names the commit that replaces it.
+The notes file and this file are the tree change.

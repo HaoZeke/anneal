@@ -1,0 +1,116 @@
+{
+  "campaign": "tip4p",
+  "system": "hexamer",
+  "config": "for_tip4p",
+  "run": true,
+  "reason": null,
+  "driver_commit": "d9c1a93003664250f82e298fc510795149d86812",
+  "driver_base": "36086e988c5a71c156ffcbde152bf321a6f5ef25",
+  "landfold_commit": "fc7e8654c597478aa89b4abbff1af1072ab87713",
+  "landfold_binary_sha256": "89a8319e153010a823ef51b67b3ef812517c9c680b48206751d97bafff8dc929",
+  "budget": 20000,
+  "seed_first": 0,
+  "seed_last": 3,
+  "reference": null,
+  "tolerance": 0.001,
+  "embed": {
+    "low": 2,
+    "knn": 12,
+    "temperature": 0.5,
+    "lambda": 2
+  },
+  "fes": {
+    "kt": 0.2,
+    "nx": 48,
+    "ny": 48,
+    "blur": 1.2,
+    "fmax": 2.0,
+    "floor": 0.05
+  },
+  "features": "rigid_state",
+  "start_xyz_sha256_named": "e03358ddb1c1f063a7f659ca78cbe62150775442aae2c5de2e757fdb41dcd647",
+  "start_xyz_status": "those bytes are not in the v7 handoff; water_tip4p builds the rigid start itself",
+  "hardware_start": {
+    "lscpu_model_name": "Intel(R) Xeon(R) Processor",
+    "lscpu_model": "207",
+    "lscpu_stepping": "2",
+    "cpus": "8",
+    "cores_per_socket": "8",
+    "threads_per_core": "1",
+    "sockets": "1",
+    "mem_total": "MemTotal:       49342768 kB",
+    "uname_r": "6.12.94+",
+    "os_release": "PRETTY_NAME=\"Ubuntu 24.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.5 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo\n",
+    "rustc": "rustc 1.88.0 (6b00bc388 2025-06-23)",
+    "gcc": [
+      "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+    ],
+    "gfortran": [
+      "absent"
+    ],
+    "blas_resolved": "/usr/lib/x86_64-linux-gnu/blas/libblas.so.3.12.0"
+  },
+  "driver_binary_sha256": "e75b4f8337e440fc4c75bbe30a46bbac7c679fb65fcf060f80efe458cf8b6477",
+  "seeds_finished": 4,
+  "hits": [
+    0,
+    1,
+    2
+  ],
+  "first_hit_seed": 0,
+  "finite_best_seeds": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "representative_seed": 0,
+  "representative": {
+    "rows": 87,
+    "dimension": 36,
+    "knn_used": 12,
+    "embed_exit": 0,
+    "embed_stderr": "# landscape knn 12 T 0.5 lambda 2 edges 632 evals [0.9999999999999999, 0.9999999999992734, 0.9999999999928536]",
+    "fes_exit": 0,
+    "fes_nx": 40,
+    "fes_ny": 40,
+    "fes_stderr": "Error: Msg(\"2d histogram edges must be uniformly spaced\")",
+    "map": "wrote landscape.png and fes.png"
+  },
+  "sealed_table_bytes": 504463,
+  "free_bytes_before_aggregate": 207019458560,
+  "aggregate_rows": 349,
+  "aggregate_reclaimed_local_seeds": false,
+  "aggregate": {
+    "rows": 349,
+    "dimension": 36,
+    "knn_used": 12,
+    "embed_exit": 0,
+    "embed_stderr": "# landscape knn 12 T 0.5 lambda 2 edges 2654 evals [1.000000000000001, 0.9999999999999992, 0.999999999999999]",
+    "fes_exit": 0,
+    "fes_nx": 16,
+    "fes_ny": 16,
+    "fes_stderr": "Error: Msg(\"2d histogram edges must be uniformly spaced\")",
+    "map": "wrote landscape.png and fes.png"
+  },
+  "hardware_end": {
+    "lscpu_model_name": "Intel(R) Xeon(R) Processor",
+    "lscpu_model": "207",
+    "lscpu_stepping": "2",
+    "cpus": "8",
+    "cores_per_socket": "8",
+    "threads_per_core": "1",
+    "sockets": "1",
+    "mem_total": "MemTotal:       49342768 kB",
+    "uname_r": "6.12.94+",
+    "os_release": "PRETTY_NAME=\"Ubuntu 24.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.5 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo\n",
+    "rustc": "rustc 1.88.0 (6b00bc388 2025-06-23)",
+    "gcc": [
+      "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+    ],
+    "gfortran": [
+      "absent"
+    ],
+    "blas_resolved": "/usr/lib/x86_64-linux-gnu/blas/libblas.so.3.12.0"
+  }
+}

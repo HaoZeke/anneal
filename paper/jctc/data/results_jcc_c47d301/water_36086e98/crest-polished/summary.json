@@ -1,0 +1,33 @@
+{
+  "anneal_commit": "36086e988c5a71c156ffcbde152bf321a6f5ef25",
+  "arm": "crest-polished",
+  "binary_sha256": "063433d26da59816d08e842c44cbd680c8d7657331b14feb86ad35089c34a812",
+  "budget": 4000,
+  "contrast_vs_recorded_polish": {
+    "both_hit": 50,
+    "difference": "recorded polish minus polished CREST",
+    "hit_rate_difference": 0.09375,
+    "mcnemar_exact_p": 0.16275565745308995,
+    "n": 96,
+    "neither_hit": 13,
+    "newcombe": "Newcombe 1998 method 10",
+    "newcombe_95": [
+      -0.02424178443439655,
+      0.20826853443131377
+    ],
+    "newcombe_95_6": [
+      -0.024242,
+      0.208269
+    ],
+    "only_anneal_hit": 21,
+    "only_crest_hit": 12
+  },
+  "hits": 62,
+  "max_total_calls": 4618,
+  "n": 96,
+  "seeds": "0-95",
+  "wilson_95_6": [
+    0.546243,
+    0.734202
+  ]
+}

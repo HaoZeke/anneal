@@ -1,0 +1,14 @@
+GOFEE/AGOX vs recommended GFN2-xTB water hexamer at 4000 counted
+force evaluations, ten seeds (Elja array 1777730).
+
+- calls_w6_s{0-9}.dat  -- GOFEE/AGOX true-call ledger (energy per call)
+- rec4k_w6_{0-9}.log   -- recommended cluster_search summary
+- rec4k_w6_{0-9}.min   -- recommended accepted-minima dumps
+- gofee_w6_s{0-9}.xyz  -- deepest structure in each AGOX database
+  (Elja run4k_w6_{seed}/db_w6_s{seed}.db)
+
+Recommended deepest / median / spread in the manuscript come from
+the .log best lines, not from the first line of each .min dump.
+GOFEE deepest / median / spread come from min(energy) of each
+calls file. GOFEE isomers are O--O contacts at 3.2 Angstrom on
+gofee_w6_s*.xyz (4 ring, 3 cage, 1 prism, 2 other).

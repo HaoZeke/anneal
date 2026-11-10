@@ -1,0 +1,15 @@
+{
+  "arm": "SYMMETRISE",
+  "binary_sha256": "ea3b030cb10381bb9092f1fbc6310b469ddcae982f7a9eed87380b137915fdd4",
+  "budget": 4000000,
+  "hits": 200,
+  "n": 200,
+  "par2": 58029.63,
+  "reference": -397.492331,
+  "rule": "competitor_cell",
+  "seeds": "1-200",
+  "wilson_95": [
+    0.9811546736227335,
+    1.0
+  ]
+}

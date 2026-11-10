@@ -1,0 +1,8 @@
+anneal_commit=36086e988c5a71c156ffcbde152bf321a6f5ef25
+binary_sha256=063433d26da59816d08e842c44cbd680c8d7657331b14feb86ad35089c34a812
+arm=budget-fair
+rule=water_budget
+max_total_calls=4000
+rerun_seeds=36
+copied_inside_binary=1c9c975172d057ca390d471a661034023601f868c87895ae987449b964a18b03
+copied_inside_seeds=60

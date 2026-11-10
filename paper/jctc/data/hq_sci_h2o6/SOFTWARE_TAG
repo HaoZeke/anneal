@@ -1,0 +1,13 @@
+campaign: hq-sci-h2o6
+remote: ljwork/hq-sci-h2o6
+protocol: recommended molecular, GFN2-xTB eindir, 4000 evaluations, 8 seeds
+count: 6/8 printed bests (rec_0,1,4,5 -829.852228; rec_2 -829.852227; rec_6 -829.848048)
+  rec_0 -829.852228
+  rec_1 -829.852228
+  rec_2 -829.852227
+  rec_3 -829.801530
+  rec_4 -829.852228
+  rec_5 -829.852228
+  rec_6 -829.848048
+  rec_7 inf; rec_7_rerun -826.548136
+do_not_kill: hq-sci-h2o6-20260812 (1/8, not this count)
