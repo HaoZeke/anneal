@@ -7,8 +7,8 @@ This rerun is not a blind test.
 Commit 6f74d439 repeats that known count.
 Its central clock is 02:55:01 on 2026-11-10.
 
-The arm opened at 02:55:36 the same morning.
-The receipts name 6f74d439 as timed_head.
+The arm opened at 14:41:04 and closed at 14:57:28.
+The receipt head is f724a4c4 and the receipt tree is 7af429c6.
 
 The repeated count comes from commit 88d1cca.
 

@@ -14,6 +14,7 @@ Paper text:
   REPRODUCE.md
   PROGRESS.md
   REPORT.md
+  PROSE_EXTRACT.txt
 
 Receipt outputs:
   logs/budget/2000/curve.txt
@@ -45,6 +46,7 @@ PAPER = (
     "REPRODUCE.md",
     "PROGRESS.md",
     "REPORT.md",
+    "PROSE_EXTRACT.txt",
 )
 
 RECEIPTS = tuple(

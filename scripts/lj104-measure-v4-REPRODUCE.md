@@ -1,6 +1,6 @@
 The measured arm reruns seeds 2000 through 2005, one seed at a time.
 
-The engine is commit 88d1cca1 and tree d16cabd3.
+The engine is commit f724a4c4 and tree 7af429c6.
 
 The binary is the release example h2h_gmin_proof from that tree.
 

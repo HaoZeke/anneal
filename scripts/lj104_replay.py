@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Replay archive commits with git commit-tree.
+"""Replay the v4.11 history with git commit-tree.
 
 No sleep is used. No author date or committer date is set.
-The seconds in the new commits are the seconds git writes.
-A child is rejected when its committer clock is earlier than its parent.
+The seconds are the ones git writes.
+A child earlier than its parent is rejected.
+One message is rewrapped so its lines stay within 72 columns.
+Every tree is the archived tree.
 """
 
 import os
@@ -12,51 +14,19 @@ import subprocess
 import sys
 
 BASE = "91b15a024749320b9463e4abbdf10d37e933174b"
-ARCHIVE = "refs/archive/fix/lj104-measure-v4.9"
-NEW_REF = "refs/heads/fix/lj104-measure-v4.11"
+OLD_TIP = "3f51ecf4e19796366ceac4005e17499e0ec2a16e"
+NEW_REF = "refs/heads/fix/lj104-measure-v4.13"
+REWRAP = "243afc94749722c9b6567a59884a4570cf5d6181"
 
-SHA_MAP = """fix(lj104-kit): add the sha-map script
+MESSAGE = """bench(h2h): count both searches on one budget
 
-The script scripts/lj104_sha_map.py is new in this commit.
-It rewrites the sha-map from the kit files.
-It checks each row against the file, the sums line, and the tip blob.
-A mismatch makes the script fail.
+The example runs Config::recommended for one Lennard-Jones seed.
+Each quench returns energy and gradient as one ledger charge.
+Each climb gradient is one charge.
+A miss is stored as the full paper budget.
+The shell runs that binary and the basin-hopping program from one start.
+The order is anneal, then GMIN, one seed at a time, on one thread.
 """
-
-WRAP_42 = """docs: close three prose findings in the measure notes
-
-Three sentences in the measure notes are split.
-The subject sits next to the verb.
-Adjacent paragraphs share a landing.
-"""
-
-PLAIN_560 = """fix(lj104-kit): check the sha-map before any write
-
-The check mode reads logs/sha-map.tsv and does not rewrite it.
-It compares every row with the file, the sums line, and the tip blob.
-A mismatch is named and the script exits non-zero.
-The refresh mode is the only mode that rewrites the map.
-A git error is fatal, and a missing tip path is not.
-The script names the safe.directory setting for a store mount.
-The script gains the copyright and licence header.
-The notes name the corrected row and the check mode.
-The reproduce file names them too.
-"""
-
-REDACT = """chore(lj104): remove the log redactor
-
-scripts/redact.py is deleted.
-The deletion is 71 lines.
-The file rewrote path tokens and a commit token.
-The measure no longer rewrites logs.
-"""
-
-REPLACEMENTS = {
-    "d7597244d124ab7b7945cac2d755883d2a11109a": SHA_MAP,
-    "42e60888c3f74b7e54b6cc1f32af020099e5e03c": WRAP_42,
-    "560e1989f66629354ab68ce3a54f4d2b8aaf2d0a": PLAIN_560,
-    "ac6bb80b42c46c7fba3889e444b4b5349bb76714": REDACT,
-}
 
 
 def git(*args: str, input_text: str | None = None) -> str:
@@ -84,32 +54,35 @@ def git(*args: str, input_text: str | None = None) -> str:
 
 
 def main() -> int:
-    olds = git(
-        "rev-list", "--reverse", f"{BASE}..{ARCHIVE}"
-    ).split()
+    olds = git("rev-list", "--reverse", f"{BASE}..{OLD_TIP}").split()
     parent = BASE
-    print("clock=git")
     print("dates=unset")
-    print("sleeps=none")
+    print("The replay does not sleep.")
+    print("The seconds are the ones git writes.")
     print("Archive refs are never pushed.")
-    print("Push plan: refs/heads/fix/lj104-measure-v4.11")
-    print(f"archive={ARCHIVE}")
-    print(f"old_tip={git('rev-parse', ARCHIVE).strip()}")
+    print("Push plan: refs/heads/fix/lj104-measure-v4.13")
+    print("archive=refs/archive/fix/lj104-measure-v4.9")
+    print("archive=refs/archive/fix/lj104-measure-v4.10 87147482ce9c25b51d26b19e9d3cc2be1ad0c1d8")
+    print("archive=refs/archive/fix/lj104-measure-v4.11 3f51ecf4e19796366ceac4005e17499e0ec2a16e")
+    print("archive=refs/archive/fix/lj104-measure-v4.12 3f51ecf4e19796366ceac4005e17499e0ec2a16e")
+    print(f"old_tip={OLD_TIP}")
     for old in olds:
         tree = git("rev-parse", f"{old}^{{tree}}").strip()
-        if old in REPLACEMENTS:
-            message = REPLACEMENTS[old]
+        if old == REWRAP:
+            message = MESSAGE
             changed = "yes"
         else:
             message = git("log", "-1", "--format=%B", old)
             changed = "no"
-        new = git(
-            "commit-tree", tree, "-p", parent, input_text=message
-        ).strip()
+        new = git("commit-tree", tree, "-p", parent, input_text=message).strip()
         parent_ct = int(git("log", "-1", "--format=%ct", parent).strip())
         new_ct = int(git("log", "-1", "--format=%ct", new).strip())
         if new_ct < parent_ct:
             print(f"earlier than parent {old} {new}", file=sys.stderr)
+            return 1
+        same = git("rev-parse", f"{new}^{{tree}}").strip() == tree
+        if not same:
+            print(f"tree mismatch {old}", file=sys.stderr)
             return 1
         print(
             f"{old} {new} {tree} committer={new_ct} "

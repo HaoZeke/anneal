@@ -1,5 +1,0 @@
-NOT_RUN
-proseguard is not installed.
-The prose-human profile on the public dotfiles is age-encrypted.
-No prose-human receipt was produced.
-No commit-msg receipt was produced.
