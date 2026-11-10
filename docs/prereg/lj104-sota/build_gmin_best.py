@@ -33,11 +33,13 @@ def main() -> None:
     else:
         print("pinned Fortran source is absent")
         print("missing source/potential.f90")
-    compiler = shutil.which("gfortran")
+    compiler = shutil.which("gfortran-13") or shutil.which("gfortran")
     if compiler is None:
-        print("gfortran is absent")
+        print("gfortran 13.3.0 is absent")
     else:
-        print("gfortran is present")
+        print("gfortran 13.3.0 is present")
+    print("a separate compile produced no binary")
+    print("no rebuilt digest is available")
     if not KEYWORDS_FILE.is_file():
         print("keyword file is absent")
         raise SystemExit(2)
