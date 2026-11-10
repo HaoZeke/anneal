@@ -4,6 +4,7 @@ We collect the prose files and the commit messages below.
 Each block is fenced so a later run can read it.
 The paths are relative to the repository.
 We keep the block text equal to the file bytes.
+We leave this extract out of its own list.
 
 File docs/prereg/lj104-sota/NOTES.md.
 ```
@@ -393,7 +394,7 @@ cf5f134b915d9a8da3fa7882c4fcda659edff20f.
 The v1.3.4 archive follows.
 a12e423d4a4aa9fe9b360e7b0cdf30c509d11659.
 replay-map.tsv is the old-to-new map.
-Thirty-three commits were replayed.
+Thirty-five commits were replayed.
 We keep the shared seconds from the real clock.
 The zone is America/Chicago.
 The offset is -0600.
@@ -850,6 +851,8 @@ Path docs/prereg/lj104-sota/NOTES.md.
 23 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/PREDICTIONS.md.
 246 insertions and 38 deletions.
+Path docs/prereg/lj104-sota/PROSE_EXTRACT.txt.
+2558 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/PUSH.txt.
 10 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/REPLAY.txt.
@@ -859,7 +862,7 @@ Path docs/prereg/lj104-sota/REPORT.md.
 Path docs/prereg/lj104-sota/SCOPE.md.
 378 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/TREE_EQUAL.txt.
-171 insertions and 0 deletions.
+181 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/build_gmin_best.py.
 60 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/bundle-verify.txt.
@@ -881,13 +884,13 @@ Path docs/prereg/lj104-sota/prose/proseguard-rohit-paper.txt.
 Path docs/prereg/lj104-sota/prose/snapper-fmt.md.
 707 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/prose/snapper-fmt.txt.
-8 insertions and 0 deletions.
+9 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/prose/snapper.txt.
-16 insertions and 0 deletions.
+19 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/replay-commit-tree.log.
 327 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/replay-map.tsv.
-34 insertions and 0 deletions.
+36 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/replay-v134.log.
 154 insertions and 0 deletions.
 Path docs/prereg/lj104-sota/replay-v135.log.
@@ -914,170 +917,180 @@ We record tree equality for this replay.
 Each pair below shares one tree.
 The old commit and the new commit name that tree.
 
-The old commit is 0eab0cc259f6f73fc33fc29f4ec9e41ae9861d27.
-The new commit is 149aa73d5cf4e1afb0546ad86fb401d524d66244.
+The old commit is 149aa73d5cf4e1afb0546ad86fb401d524d66244.
+The new commit is 2391ff6053e0c9993b56ddee602fc2aa5ee6b750.
 The tree is 31925e50d57ee6e1cd4d733adf5bad02eadf6a13.
 We record equal yes.
 
-The old commit is 98d80c5f774af803306e1c6a08e8801e6c6cff79.
-The new commit is 6f07484e2bfc413202596a640dd68995f48bad9e.
+The old commit is 6f07484e2bfc413202596a640dd68995f48bad9e.
+The new commit is ce973b7b50cc2d99192d5ae19cc1ed75da423a66.
 The tree is 53722e6405b930b174415d60c23c0717b33ca7e1.
 equal yes.
 
-The old commit is 27602bfac86d7e95764df2ba176c2f76010007b8.
-The new commit is 20313a8794da66e85ec9fbe95a2d41c02bd43390.
+The old commit is 20313a8794da66e85ec9fbe95a2d41c02bd43390.
+The new commit is 934d582cb10c79eff9434791fcf9562d67d9b575.
 The tree is c1b79198488fa3234bf3cf50d2c22d9ce710d4cd.
 equal yes.
 
-The old commit is 22b1509c561c1b5a2c27c495b7d4301eb390d6aa.
-The new commit is d3b8cd189afea533a93d5790c030cf322d2be487.
+The old commit is d3b8cd189afea533a93d5790c030cf322d2be487.
+The new commit is 47c230432da7e084fddce7503b988724f294a998.
 The tree is 7bef65dc8612e9e0454c6c565422d1a5e8d20a81.
 equal yes.
 
-The old commit is 7c09c983c789b52f45c16a3415ef37c2b6f60008.
-The new commit is ed7b340da4fd3c87161a26fe78fd86cd27438be2.
+The old commit is ed7b340da4fd3c87161a26fe78fd86cd27438be2.
+The new commit is 641102810c6948f41fd062db01b2fd9ca7cc3bd2.
 The tree is 927a0cc7b3db6525f8bb7f4255d6ce9fa03ce08c.
 equal yes.
 
-The old commit is 8d2adbc24b3d1fb888df36db6ebb6bf07692c2f5.
-The new commit is c85cdcf46eb58e71e9194bfceec28e5c0261ddbf.
+The old commit is c85cdcf46eb58e71e9194bfceec28e5c0261ddbf.
+The new commit is af531d9217cdccb43166c13b1855277bc7a6d516.
 The tree is 034b4ae9d4b7f4a56a1e29d68b885a712558998d.
 equal yes.
 
-The old commit is 9c139dc538ed7889c295bac6d8637ee5bc69f7e6.
-The new commit is ca034201ec3d2ab08f482428c6f3eb4abebd0644.
+The old commit is ca034201ec3d2ab08f482428c6f3eb4abebd0644.
+The new commit is 38f51b8086b0332c2774c418977863072ee4019e.
 The tree is b8f8a9a73a839235bf3d34a17ef9d27a5afed9fb.
 equal yes.
 
-The old commit is 9d7f04651ac96446ac9fa41c5cbefd70fbf551ec.
-The new commit is a338054c7afabbaf76ab4a273cadfccb2755877a.
+The old commit is a338054c7afabbaf76ab4a273cadfccb2755877a.
+The new commit is 07a97a2846c91c12b6b3fbae1b1b3619a23c49ff.
 The tree is beac7bacf893c5af2cde198237aed8448e1a44a7.
 equal yes.
 
-The old commit is 005eeebde194c50e1f85b2a7bc07a7de07fb1bd4.
-The new commit is 09116a9c1929359881eb9ef0e2bd996b95cbaad0.
+The old commit is 09116a9c1929359881eb9ef0e2bd996b95cbaad0.
+The new commit is 9f8170bfec0428ea899e6516076dd3c94f64b621.
 The tree is bebd8a1e882787bb9c7741e763b6160155d85411.
-We record equal yes.
+equal yes.
 
-The old commit is 713a62486f56ca064f876d259905d7c4ff81068d.
-The new commit is 3aaed17c83d2120ea33aecf1d21d1acbce80eac8.
+The old commit is 3aaed17c83d2120ea33aecf1d21d1acbce80eac8.
+The new commit is aa636ed0bfcff8f9bb8580b46f60984d6eb6a242.
 The tree is ef739091ff6e6e8dd49f159314a9af41f550ca46.
 equal yes.
 
-The old commit is 82b7032b4eec499dfc66566c31f4a95fc9e770a0.
-The new commit is aaf3bae7114d52a5f835636ff3d01b2f7fbad642.
+The old commit is aaf3bae7114d52a5f835636ff3d01b2f7fbad642.
+The new commit is 2395bbc2ed48d6d31652cd2e0a0fb6aea9e2c97d.
 The tree is d882caf066b85850023036d51c8c8edfc221bcfe.
 equal yes.
 
-The old commit is 81cc157348f7e79c2e4ce8bc1b1589fc637753ed.
-The new commit is 1a761592355acbe0213361953d4b6e2216ab71d4.
+The old commit is 1a761592355acbe0213361953d4b6e2216ab71d4.
+The new commit is b53dd945d31f14f10b88e69c6a02b38f2ac3d23b.
 The tree is 4b168122d30bc00afa0e27a26c67863ffc7b312c.
 equal yes.
 
-The old commit is 297584f00a7e8801564315129754fe2588e02fdd.
-The new commit is b7effec3901d59cf179aecbbeba27817949a72b0.
+The old commit is b7effec3901d59cf179aecbbeba27817949a72b0.
+The new commit is 801d7e64ecf6149ff7216c96e1a485d8733d1304.
 The tree is 279a3721f5203bf624fc5efd41b478b3a1b5e136.
-equal yes.
+We record equal yes.
 
-The old commit is 59f941178e90f18abbb1bc817117bd7b3237d8a8.
-The new commit is c41f33f17c15924fed4fa0c02cd7727fae2933e8.
+The old commit is c41f33f17c15924fed4fa0c02cd7727fae2933e8.
+The new commit is efe7f62a5707c268c6e9d2929dd87b2512b39942.
 The tree is b5d20591f6ce08f7878cfee614b022127779df7d.
 equal yes.
 
-The old commit is 9dabfb59a2d46d7d768c170df28e5224cd56a761.
-The new commit is 5519f1a4fa559fb59c83512db41898c8178eda73.
+The old commit is 5519f1a4fa559fb59c83512db41898c8178eda73.
+The new commit is e21106c0d813da101120c009d7a0e086df448ad0.
 The tree is f300067d17a971b7466825aaa54bbc4fd324064a.
 equal yes.
 
-The old commit is 31b5b2c73ae6a82a26570a675e0c180f9c7336a7.
-The new commit is 4bc4fdd924e2a6f567f35998ed4a96e2f4f58528.
+The old commit is 4bc4fdd924e2a6f567f35998ed4a96e2f4f58528.
+The new commit is d5640455d889378e33c7e469e3c134d515fc25aa.
 The tree is 3be3cef6981a3fbdb0d63b8ce5623320a32cf3fa.
 equal yes.
 
-The old commit is 98860f3c930dd7d030560502f2654329c1a828e7.
-The new commit is eb467d8d34796744168c255692098abdd350db39.
+The old commit is eb467d8d34796744168c255692098abdd350db39.
+The new commit is c84022ea37d12d96f0a0f6a7bf1f05ad2834ad00.
 The tree is af78a6f1c8fd87f66f883e04a376e92d9db5c801.
-We record equal yes.
+equal yes.
 
-The old commit is 9aa3c8bb2e62d26c5c4e8a456b468d16ad760163.
-The new commit is 846709f303cc4afb2aa2b0e351fc854781de515b.
+The old commit is 846709f303cc4afb2aa2b0e351fc854781de515b.
+The new commit is f076d8ab1d378706897894738d2be87707ad2f48.
 The tree is a901f18d4f0ab60314e009a165477494a61604cc.
 equal yes.
 
-The old commit is db55b2d5e000912fab5ed799c6f64c64489a5f17.
-The new commit is 3420b91b54dc704977c8463b684f99897f592b02.
+The old commit is 3420b91b54dc704977c8463b684f99897f592b02.
+The new commit is 9f716d8f00226adf7d1280945465764de0f7dc1d.
 The tree is c35e349c602fd0e999e48867da26336591e5da8a.
 equal yes.
 
-The old commit is 19201645c676bd0bea33c973740d929cb8e736de.
-The new commit is 87153f7d6735a853f730516a5894027e75478b52.
+The old commit is 87153f7d6735a853f730516a5894027e75478b52.
+The new commit is 653539783be6b313f5b261d3aca39dd358c50dae.
 The tree is ea1a9ef855b2745cc770f957c81f11543b70adf8.
 equal yes.
 
-The old commit is 2756892fd61a18c30f8b6005cca00ac88a80ef71.
-The new commit is 927fa5e397988f936d0f4ed0e312da3927e0005a.
+The old commit is 927fa5e397988f936d0f4ed0e312da3927e0005a.
+The new commit is 1ec840e476ada65a87e02bf52b37f58360215691.
 The tree is 8ccbf89961763e0c2109530f2993d88c9d52af6c.
 equal yes.
 
-The old commit is cb467e972d11cffde84ee030ed79a63b6aa78b7d.
-The new commit is c493107e0300ac9164593463a4582034ecf695e6.
+The old commit is c493107e0300ac9164593463a4582034ecf695e6.
+The new commit is 9f18695fcd96d01abaff194365d67d6540c21ca7.
 The tree is db9a28272195280dad9a424fac6a885d3c3a1152.
 equal yes.
 
-The old commit is f811dc31a6d5015799da1140b3864cef1c9e9352.
-The new commit is 0f6f85e1e0c999d5d70e25e1c26f7de81d92a56b.
+The old commit is 0f6f85e1e0c999d5d70e25e1c26f7de81d92a56b.
+The new commit is bf7e8e8ba8b80a75e4abc7b645c49586f52e6346.
 The tree is 1c041331e239e8a218c5477d883010c30ae9cbcb.
 equal yes.
 
-The old commit is 5aff992f7d9084e7de4e807522d9efdd28f4a245.
-The new commit is 9cd85c55fca6268a132d1a91e57a66550af1b921.
+The old commit is 9cd85c55fca6268a132d1a91e57a66550af1b921.
+The new commit is 348524a9beacdf8119752a7de45f12db5e742d73.
 The tree is 9d8138952f4199505ea880215a511d21a14cb0aa.
 equal yes.
 
-The old commit is 37c5a3a2c12a590b88826ddc47f20950366a0e44.
-The new commit is 79a3b2dcd3ad5b2b0747338788b968089402afd9.
+The old commit is 79a3b2dcd3ad5b2b0747338788b968089402afd9.
+The new commit is 4f9f5d2436e0db63cdb2b588f64480411dcc4317.
 The tree is 9112de6c64b2d3b295b0e7041b22fbaca5e0100a.
 We record equal yes.
 
-The old commit is 79d884f4a98e82b3e191b42b634a26afb17221fc.
-The new commit is 31ac8719696e342fe71e0cc8c0340c33f6a40c4e.
+The old commit is 31ac8719696e342fe71e0cc8c0340c33f6a40c4e.
+The new commit is dfe1a56dc6d130ca9667ab723b9511f03ad89724.
 The tree is 12ac142ddbd16dedd1d810f164eac43ee1ca508f.
 equal yes.
 
-The old commit is 6acb56870013670fea86e8462e5eae4610f02945.
-The new commit is e2002273e12109c45ae02c187263cfe5d67c3269.
+The old commit is e2002273e12109c45ae02c187263cfe5d67c3269.
+The new commit is 784c5576d6958f7b519770613359b071b14c83dd.
 The tree is 7c4edc17b4aae34bf51197a0a6a1b484d8784161.
 equal yes.
 
-The old commit is bd7e915a67f6dc0237efe7bd95890cabaa59103b.
-The new commit is c74219ae28a5b1dd69bb1441320cb2fa48707892.
+The old commit is c74219ae28a5b1dd69bb1441320cb2fa48707892.
+The new commit is 352a0429c4cbf754ee1ef930c7d5086107fbfe5e.
 The tree is a207e19531e695df8791b8385157086027a4e912.
 equal yes.
 
-The old commit is 5bd5afd8e9a613f99d1de9c5bcf7d95a2f270ebd.
-The new commit is 2f18d4c8bf2fe74cd2e008e709085b271bf3dbf0.
+The old commit is 2f18d4c8bf2fe74cd2e008e709085b271bf3dbf0.
+The new commit is 4ba52dc1804569355a368a8cb56903224a77287b.
 The tree is f7874b89bbe6ad671dc1359717bd5eacfbd12d01.
 equal yes.
 
-The old commit is e68af0d1381821a48cdff575ace620c91dcd7686.
-The new commit is d278b120473d2481c3225dc1b3eff9829bbe968b.
+The old commit is d278b120473d2481c3225dc1b3eff9829bbe968b.
+The new commit is 3852aac046f89259d19745254fcf83383b886b8d.
 The tree is cf0e9624ce798174c9fe1d09be1ed23fff7f5a42.
 equal yes.
 
-The old commit is 92d247acc5821eb44d51ff5bb40ceb2a4e7cbb5f.
-The new commit is 3f8c57f8300b99b2b85ab35526d0bfcd86286af1.
+The old commit is 3f8c57f8300b99b2b85ab35526d0bfcd86286af1.
+The new commit is 7c34ccf4e465f91f595e693bd9ff7457d7069388.
 The tree is 810b428fc2e26c703c56c4424a917ebf8dbf46b1.
 equal yes.
 
-The old commit is 75b546541e5b540fac24b04b94eb17d2822a79f9.
-The new commit is fe4e9d5bdc63f31034180fae07f5a20dadb194a2.
+The old commit is fe4e9d5bdc63f31034180fae07f5a20dadb194a2.
+The new commit is 9eac05cdc147180aa2def9a4ac9c38fd937f32b6.
 The tree is a9ce2f34287615942b703c2f9885f8e482abb7d7.
 equal yes.
 
-The old commit is a12e423d4a4aa9fe9b360e7b0cdf30c509d11659.
-The new commit is 3d0838e0e71bd209031dff87dff0a71ff963c335.
+The old commit is 3d0838e0e71bd209031dff87dff0a71ff963c335.
+The new commit is 99729fca4da9449bcc709987d7f46d384e4fd31a.
 The tree is c08c42fcdce0bbd0f4b7e0a7b767f4c07cb6f28a.
-We record equal yes.
+equal yes.
+
+The old commit is 87872d119a28d3d13ab65fed5dc027dd74efa5a2.
+The new commit is fc81ac336b08235f5aedc5294a06c643ca8dfde3.
+The tree is b5722e8a9757a35aad211e4a0ef1ceb517312d5b.
+equal yes.
+
+The old commit is ae44eef3e8f58d48a228d46773b230a19217d254.
+The new commit is 2bcb98aee65988d86a1bed85a14e27241c3197b6.
+The tree is 33a6854ce35956d4e0ad0539a1e330b5468aef26.
+equal yes.
 ```
 
 File docs/prereg/lj104-sota/bundle-verify.txt.
@@ -1102,7 +1115,7 @@ The bundle uses this hash algorithm: sha1.
 The output has no requires line.
 We record an earlier verify in this note.
 That verify predates the later commits.
-The sealed log is the verify of the shipped bundle.
+The sealed log is the verify of the sealed bundle.
 ```
 
 File docs/prereg/lj104-sota/floors.md.
@@ -1946,8 +1959,8 @@ We ran snapper-fmt at width 72.
 Each of the eight tip inputs exits 0.
 Stdout matches the concatenated input bytes.
 The sha256 of that stdout follows.
-0ad1c5add6a860682de1c1b704eea0a1ca1d129f3df5384b27e9d46223825986.
-The byte count is 42190.
+2dde1587dccee6a5d9a2b1a124b9e8cc3c96caeccd8a10301f6b68b9be216d26.
+The byte count is 42621.
 The inputs are the same eight paths as the check note.
 ```
 
@@ -1962,8 +1975,8 @@ Stderr has 0 bytes.
 Diagnostic lines are 0.
 We hashed the eight tip inputs below.
 The sha256 of that concatenation follows.
-0ad1c5add6a860682de1c1b704eea0a1ca1d129f3df5384b27e9d46223825986.
-The byte count is 42190.
+2dde1587dccee6a5d9a2b1a124b9e8cc3c96caeccd8a10301f6b68b9be216d26.
+The byte count is 42621.
 Path docs/prereg/lj104-sota/PREDICTIONS.md.
 Path docs/prereg/lj104-sota/PUSH.txt.
 Path docs/prereg/lj104-sota/REPLAY.txt.
@@ -2031,7 +2044,7 @@ seed raw_e requenched_e hit requench_calls.
 6005 -543.6646655690 -543.6653607708948357 hit 112.
 ```
 
-Commit 149aa73d5cf4e1afb0546ad86fb401d524d66244.
+Commit 2391ff6053e0c9993b56ddee602fc2aa5ee6b750.
 ```
 lj104-prereg: record predictions and McNemar table
 
@@ -2043,7 +2056,7 @@ Path docs/prereg/lj104-sota/mcnemar_threshold.py.
 Path docs/prereg/lj104-sota/mcnemar_threshold.tsv.
 ```
 
-Commit 6f07484e2bfc413202596a640dd68995f48bad9e.
+Commit ce973b7b50cc2d99192d5ae19cc1ed75da423a66.
 ```
 lj104-prereg: add the serial runner and its tests
 
@@ -2053,7 +2066,7 @@ Path docs/prereg/lj104-sota/lj104_sota_runner.py.
 Path docs/prereg/lj104-sota/test_lj104_sota_runner.py.
 ```
 
-Commit 20313a8794da66e85ec9fbe95a2d41c02bd43390.
+Commit 934d582cb10c79eff9434791fcf9562d67d9b575.
 ```
 lj104-prereg: name panel seeds 6000-6005
 
@@ -2063,7 +2076,7 @@ The edit is docs/prereg/lj104-sota/PREDICTIONS.md.
 No path is added.
 ```
 
-Commit d3b8cd189afea533a93d5790c030cf322d2be487.
+Commit 47c230432da7e084fddce7503b988724f294a998.
 ```
 lj104-prereg: bind lj_requench for the LJ104 minimum
 
@@ -2073,7 +2086,7 @@ The function and the test are in src/methods/lattice_search.rs.
 The citation is in docs/prereg/lj104-sota/PREDICTIONS.md.
 ```
 
-Commit ed7b340da4fd3c87161a26fe78fd86cd27438be2.
+Commit 641102810c6948f41fd062db01b2fd9ca7cc3bd2.
 ```
 lj104-prereg: set the plain DLS prediction to 20/30
 
@@ -2083,7 +2096,7 @@ Those seeds are 3000 through 3029.
 The sentence is in docs/prereg/lj104-sota/PREDICTIONS.md.
 ```
 
-Commit c85cdcf46eb58e71e9194bfceec28e5c0261ddbf.
+Commit af531d9217cdccb43166c13b1855277bc7a6d516.
 ```
 lj104-prereg: run the default panel from the runner
 
@@ -2094,7 +2107,7 @@ The floor paragraph names the budgets and the 0.001 window.
 That paragraph is in docs/prereg/lj104-sota/PREDICTIONS.md.
 ```
 
-Commit ca034201ec3d2ab08f482428c6f3eb4abebd0644.
+Commit 38f51b8086b0332c2774c418977863072ee4019e.
 ```
 lj104-prereg: restore the LJ104 occupation test
 
@@ -2103,7 +2116,7 @@ The edit is in src/methods/lattice_search.rs.
 No path is added.
 ```
 
-Commit a338054c7afabbaf76ab4a273cadfccb2755877a.
+Commit 07a97a2846c91c12b6b3fbae1b1b3619a23c49ff.
 ```
 lj104-prereg: commit raw panel traces and receipts
 
@@ -2218,7 +2231,7 @@ Path docs/prereg/lj104-sota/panel/session.txt.
 Path docs/prereg/lj104-sota/panel/start.receipt.
 ```
 
-Commit 09116a9c1929359881eb9ef0e2bd996b95cbaad0.
+Commit 9f8170bfec0428ea899e6516076dd3c94f64b621.
 ```
 lj104-prereg: add the untouched panel stdout logs
 
@@ -2251,7 +2264,7 @@ Path docs/prereg/lj104-sota/panel/23-lj98-6004.log.
 Path docs/prereg/lj104-sota/panel/24-lj98-6005.log.
 ```
 
-Commit 3aaed17c83d2120ea33aecf1d21d1acbce80eac8.
+Commit aa636ed0bfcff8f9bb8580b46f60984d6eb6a242.
 ```
 lj104-prereg: write floors from the raw panel logs
 
@@ -2262,7 +2275,7 @@ The registration cites those counts.
 That registration is docs/prereg/lj104-sota/PREDICTIONS.md.
 ```
 
-Commit aaf3bae7114d52a5f835636ff3d01b2f7fbad642.
+Commit 2395bbc2ed48d6d31652cd2e0a0fb6aea9e2c97d.
 ```
 lj104-prereg: score hits by re-quench at 1e-6
 
@@ -2274,7 +2287,7 @@ The function and the LJ104 test live in src/methods/lattice_search.rs.
 The rule is stated in docs/prereg/lj104-sota/PREDICTIONS.md.
 ```
 
-Commit 1a761592355acbe0213361953d4b6e2216ab71d4.
+Commit b53dd945d31f14f10b88e69c6a02b38f2ac3d23b.
 ```
 lj104-prereg: record re-quenched energies and calls
 
@@ -2285,7 +2298,7 @@ The driver docs/prereg/lj104-sota/requench_panel.py writes both.
 docs/prereg/lj104-sota/PREDICTIONS.md records the floors.
 ```
 
-Commit b7effec3901d59cf179aecbbeba27817949a72b0.
+Commit 801d7e64ecf6149ff7216c96e1a485d8733d1304.
 ```
 lj104-prereg: list commit subjects and added paths
 
@@ -2295,7 +2308,7 @@ The note is docs/prereg/lj104-sota/SCOPE.md.
 The generator is docs/prereg/lj104-sota/scope_paths.py.
 ```
 
-Commit c41f33f17c15924fed4fa0c02cd7727fae2933e8.
+Commit efe7f62a5707c268c6e9d2929dd87b2512b39942.
 ```
 lj104-prereg: pin the GMIN digest and charge line
 
@@ -2307,7 +2320,7 @@ The search list drops one fallback.
 That list is docs/prereg/lj104-sota/requench_panel.py.
 ```
 
-Commit 5519f1a4fa559fb59c83512db41898c8178eda73.
+Commit e21106c0d813da101120c009d7a0e086df448ad0.
 ```
 lj104-prereg: record replay notes and map
 
@@ -2327,7 +2340,7 @@ Path docs/prereg/lj104-sota/prose/snapper-fmt.txt.
 Path docs/prereg/lj104-sota/prose/snapper.txt.
 ```
 
-Commit 4bc4fdd924e2a6f567f35998ed4a96e2f4f58528.
+Commit d5640455d889378e33c7e469e3c134d515fc25aa.
 ```
 lj104-prereg: record the untimed replay pass
 
@@ -2341,7 +2354,7 @@ The map is docs/prereg/lj104-sota/replay-map.tsv.
 The tree check is docs/prereg/lj104-sota/TREE_EQUAL.txt.
 ```
 
-Commit eb467d8d34796744168c255692098abdd350db39.
+Commit c84022ea37d12d96f0a0f6a7bf1f05ad2834ad00.
 ```
 lj104-prereg: store the replay raw log
 
@@ -2349,7 +2362,7 @@ The log pattern skipped docs/prereg/lj104-sota/replay-commit-tree.log.
 The raw log of the commit-tree pass is stored.
 ```
 
-Commit 846709f303cc4afb2aa2b0e351fc854781de515b.
+Commit f076d8ab1d378706897894738d2be87707ad2f48.
 ```
 lj104-prereg: fix the scope script syntax
 
@@ -2358,7 +2371,7 @@ The range stays 91b15a02 through 5fb7368d.
 The script still requires exactly twelve commits.
 ```
 
-Commit 3420b91b54dc704977c8463b684f99897f592b02.
+Commit 9f716d8f00226adf7d1280945465764de0f7dc1d.
 ```
 lj104-prereg: rewrap the registration prose
 
@@ -2371,7 +2384,7 @@ docs/prereg/lj104-sota/requench.md is rewrapped.
 docs/prereg/lj104-sota/TREE_DIFF_STAT.txt records the diff counts.
 ```
 
-Commit 87153f7d6735a853f730516a5894027e75478b52.
+Commit 653539783be6b313f5b261d3aca39dd358c50dae.
 ```
 lj104-prereg: record the push plan
 
@@ -2382,7 +2395,7 @@ Nothing is pushed.
 Path docs/prereg/lj104-sota/PUSH.txt.
 ```
 
-Commit 927fa5e397988f936d0f4ed0e312da3927e0005a.
+Commit 1ec840e476ada65a87e02bf52b37f58360215691.
 ```
 lj104-prereg: record the GMIN digest check
 
@@ -2393,7 +2406,7 @@ docs/prereg/lj104-sota/gmin-best-verify.log is the run.
 The executable bytes are not in this tree.
 ```
 
-Commit c493107e0300ac9164593463a4582034ecf695e6.
+Commit 9f18695fcd96d01abaff194365d67d6540c21ca7.
 ```
 lj104-prereg: write the scope as sentences
 
@@ -2403,7 +2416,7 @@ docs/prereg/lj104-sota/SCOPE.md is rewritten from that git range.
 Each subject and each path is one sentence.
 ```
 
-Commit 0f6f85e1e0c999d5d70e25e1c26f7de81d92a56b.
+Commit bf7e8e8ba8b80a75e4abc7b645c49586f52e6346.
 ```
 lj104-prereg: record the prose checker output
 
@@ -2414,7 +2427,7 @@ Path docs/prereg/lj104-sota/prose/proseguard-commit-msg.txt.
 Path docs/prereg/lj104-sota/prose/snapper-fmt.md.
 ```
 
-Commit 9cd85c55fca6268a132d1a91e57a66550af1b921.
+Commit 348524a9beacdf8119752a7de45f12db5e742d73.
 ```
 lj104-prereg: record the diff against v1.2
 
@@ -2423,7 +2436,7 @@ The comparison tree is 4b168122d30bc00afa0e27a26c67863ffc7b312c.
 This note is left out of its own count.
 ```
 
-Commit 79a3b2dcd3ad5b2b0747338788b968089402afd9.
+Commit 4f9f5d2436e0db63cdb2b588f64480411dcc4317.
 ```
 lj104-prereg: record the GMIN digest status
 
@@ -2436,7 +2449,7 @@ docs/prereg/lj104-sota/verify_gmin_best.py hashes a relative file.
 docs/prereg/lj104-sota/gmin-best-verify.log records the byte check.
 ```
 
-Commit 31ac8719696e342fe71e0cc8c0340c33f6a40c4e.
+Commit dfe1a56dc6d130ca9667ab723b9511f03ad89724.
 ```
 lj104-prereg: record the proseguard search
 
@@ -2444,7 +2457,7 @@ The profile runs remain for the box.
 The finding total waits for that run.
 ```
 
-Commit e2002273e12109c45ae02c187263cfe5d67c3269.
+Commit 784c5576d6958f7b519770613359b071b14c83dd.
 ```
 lj104-prereg: record the diff against v1.2
 
@@ -2453,7 +2466,7 @@ The comparison tree is 4b168122d30bc00afa0e27a26c67863ffc7b312c.
 This note is left out of its own count.
 ```
 
-Commit c74219ae28a5b1dd69bb1441320cb2fa48707892.
+Commit 352a0429c4cbf754ee1ef930c7d5086107fbfe5e.
 ```
 lj104-prereg: record the full-history bundle verify
 
@@ -2462,7 +2475,7 @@ The bundle records a complete history.
 The output has no requires line.
 ```
 
-Commit 2f18d4c8bf2fe74cd2e008e709085b271bf3dbf0.
+Commit 4ba52dc1804569355a368a8cb56903224a77287b.
 ```
 lj104-prereg: keep the bundle verify within 72 columns
 
@@ -2471,7 +2484,7 @@ The bundle records a complete history.
 The output has no requires line.
 ```
 
-Commit d278b120473d2481c3225dc1b3eff9829bbe968b.
+Commit 3852aac046f89259d19745254fcf83383b886b8d.
 ```
 lj104-prereg: keep the verify note one sentence wide
 
@@ -2480,7 +2493,7 @@ The bundle records a complete history.
 The output has no requires line.
 ```
 
-Commit 3f8c57f8300b99b2b85ab35526d0bfcd86286af1.
+Commit 7c34ccf4e465f91f595e693bd9ff7457d7069388.
 ```
 lj104-prereg: clear the registration prose hits
 
@@ -2495,7 +2508,7 @@ Path docs/prereg/lj104-sota/REPORT.md.
 Path docs/prereg/lj104-sota/prose/snapper-fmt.md.
 ```
 
-Commit fe4e9d5bdc63f31034180fae07f5a20dadb194a2.
+Commit 9eac05cdc147180aa2def9a4ac9c38fd937f32b6.
 ```
 lj104-prereg: record the replay and the GMIN attempt
 
@@ -2508,7 +2521,7 @@ The build log is docs/prereg/lj104-sota/gmin-best-build.log.
 No rebuilt binary was produced.
 ```
 
-Commit 3d0838e0e71bd209031dff87dff0a71ff963c335.
+Commit 99729fca4da9449bcc709987d7f46d384e4fd31a.
 ```
 lj104-prereg: record the diff against v1.2
 
@@ -2517,7 +2530,7 @@ The comparison tree is 4b168122d30bc00afa0e27a26c67863ffc7b312c.
 This note is left out of its own count.
 ```
 
-Commit 87872d119a28d3d13ab65fed5dc027dd74efa5a2.
+Commit fc81ac336b08235f5aedc5294a06c643ca8dfde3.
 ```
 lj104-prereg: close the v1.3.3 receipt gaps
 
@@ -2544,9 +2557,10 @@ Path docs/prereg/lj104-sota/prose/proseguard-rohit-paper.txt.
 Path docs/prereg/lj104-sota/prose/proseguard-prose-human.txt.
 Path docs/prereg/lj104-sota/prose/proseguard-commit-msg.txt.
 ```
-Commit pending for this extract.
+
+Commit 2bcb98aee65988d86a1bed85a14e27241c3197b6.
 ```
-lj104-prereg: ship the prose extract and the tip hashes
+lj104-prereg: record the prose extract and the tip hashes
 
 The snapper notes hash the eight tip inputs.
 The diff stat lists bundle-verify.txt.
@@ -2556,3 +2570,20 @@ Path docs/prereg/lj104-sota/prose/snapper.txt.
 Path docs/prereg/lj104-sota/prose/snapper-fmt.txt.
 Path docs/prereg/lj104-sota/PROSE_EXTRACT.txt.
 ```
+
+Commit pending for this extract.
+```
+lj104-prereg: record the replay map and the tip hashes
+
+The map covers the thirty-five commit replay.
+The snapper notes hash the eight tip inputs.
+PROSE_EXTRACT.txt holds the prose files and the commit messages.
+Path docs/prereg/lj104-sota/replay-map.tsv.
+Path docs/prereg/lj104-sota/REPLAY.txt.
+Path docs/prereg/lj104-sota/TREE_EQUAL.txt.
+Path docs/prereg/lj104-sota/TREE_DIFF_STAT.txt.
+Path docs/prereg/lj104-sota/prose/snapper.txt.
+Path docs/prereg/lj104-sota/prose/snapper-fmt.txt.
+Path docs/prereg/lj104-sota/PROSE_EXTRACT.txt.
+```
+
