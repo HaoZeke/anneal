@@ -1,3 +1,5 @@
 The host line in water/HOST-TOPOLOGY was replaced by the label host-a.
+scripts/water_host_relabel.py performs that replacement.
 Old sha256 98f318d37756f5ecbb144e02b7149bbcddf859412e21322b42d5e24f2ab1594b
-New sha256 0511d84370b9f40ab8c90641b2ee33d7bcccf9329203f1fd201243a68d08de15
+New sha256 3ca1f0dcae5162701a2fbcdfc66de9fde5acabe61576a65973554610d75a3ecc
+Every other member is unchanged, including mtime, owner, and mode.
