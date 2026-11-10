@@ -98,7 +98,7 @@ Wall time is recorded for a strictly serial run, one process at a time. The runn
 
 ## Hit rule
 
-Every final structure from the candidate, from GMIN_BEST, and from plain DLS is re-quenched with the same lj_requench. A hit means E <= -582.086641. No symbol named lj_requench is committed in this tree. The binding of that name to an implementation is UNFILLED. The inequality is the hit rule.
+Every final structure from the candidate, from GMIN_BEST, and from plain DLS is re-quenched with the same lj_requench. A hit means E <= -582.086641. `lj_requench` is `WarmLbfgs::minimize` in `src/methods/warm_lbfgs.rs`, called by `lj_requench` in `src/methods/lattice_search.rs`. The solver is `WarmLbfgs::default` and the iteration cap is 5000. The test `lj_requench_brings_the_known_lj104_minimum_to_the_hit_line` re-quenches `tests/fixtures/lj104_gm.xyz` and requires that energy.
 
 ## Scored rows
 

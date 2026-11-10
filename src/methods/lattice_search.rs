@@ -818,6 +818,23 @@ pub fn lj_value(x: &[f64]) -> f64 {
     4.0 * e
 }
 
+/// Re-quench one Lennard-Jones cluster.
+///
+/// `lj_requench` is [`crate::methods::warm_lbfgs::WarmLbfgs::minimize`]
+/// in `src/methods/warm_lbfgs.rs`. The solver is the default
+/// [`crate::methods::warm_lbfgs::WarmLbfgs`], the iteration cap is 5000,
+/// and the gradient is the cluster's own pair gradient. That is the call
+/// the fixture quench in this file's tests makes.
+pub fn lj_requench(x: &[f64]) -> f64 {
+    let n = x.len() / 3;
+    let pot = crate::potentials::PairPotential::lennard_jones(n);
+    let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+    let (energy, _, _) = opt.minimize(ArrayView1::from(x), 5000, |v| {
+        Some(pot.value_and_gradient(v))
+    });
+    energy
+}
+
 thread_local! {
     static ORACLE: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
 }
@@ -1638,6 +1655,27 @@ mod tests {
     }
 
     #[test]
+    fn lj_requench_brings_the_known_lj104_minimum_to_the_hit_line() {
+        let text = include_str!("../../tests/fixtures/lj104_gm.xyz");
+        let mut coords = Vec::new();
+        for line in text.lines().skip(2) {
+            if line.is_empty() {
+                continue;
+            }
+            let mut parts = line.split_whitespace();
+            let _symbol = parts.next().expect("element");
+            for _ in 0..3 {
+                coords.push(parts.next().expect("coordinate").parse::<f64>().unwrap());
+            }
+        }
+        assert_eq!(coords.len(), 312);
+        let energy = lj_requench(&coords);
+        assert!(
+            energy <= -582.086641,
+            "lj_requench returned {energy}"
+        );
+    }
+
     fn occupation_optimisation_restores_displaced_surface_atoms_of_lj104() {
         let (occupied, reoccupied) = restores("lj104_gm", 104, -582.086642, 1);
         assert!(occupied < -582.086642 + 1e-3, "occupation gave {occupied}");
