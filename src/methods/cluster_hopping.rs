@@ -1,3 +1,4 @@
+// Copyright (c) anneal developers
 //! Basin hopping over quenched minima with a bias keyed on basin identity.
 //!
 //! Cluster global optimisation happens on the quenched landscape,
@@ -549,6 +550,12 @@ pub struct Ledger {
     start_attempts: usize,
     /// Geometries drawn after a non-finite initial quench, in order.
     start_redraws: Vec<Array1<f64>>,
+    /// Minima file named by `ANNEAL_MIN_DUMP`, opened on the first finite record.
+    dump_file: Option<std::fs::File>,
+    /// The environment variable was unset, so later records skip the lookup.
+    dump_disabled: bool,
+    /// Byte offset of the acceptance mark on the line just written.
+    dump_accept_at: Option<u64>,
 }
 
 struct DiagnosticQuench<'a> {
@@ -591,6 +598,9 @@ impl Ledger {
             stop: None,
             start_attempts: Self::DEFAULT_START_ATTEMPTS,
             start_redraws: Vec::new(),
+            dump_file: None,
+            dump_disabled: false,
+            dump_accept_at: None,
         }
     }
 
@@ -751,11 +761,88 @@ impl Ledger {
     ///
     /// A non-finite value is not an improvement. −∞ compares below every
     /// finite incumbent, and adopting it leaves the run with no geometry.
+    /// Every finite value passed here is also appended to the minima file
+    /// when `ANNEAL_MIN_DUMP` names one. The acceptance column starts at 0.
     pub fn record(&mut self, value: f64, state: ArrayView1<f64>) {
         if value.is_finite() && value < self.best {
             self.best = value;
             self.best_state = Some(state.to_owned());
         }
+        self.note_recorded_minimum(value, state);
+    }
+
+    /// Appends one recorded minimum. The acceptance column is 0 until
+    /// [`Ledger::mark_last_recorded`] sets it.
+    fn note_recorded_minimum(&mut self, value: f64, state: ArrayView1<f64>) {
+        self.dump_accept_at = None;
+        if !value.is_finite() {
+            return;
+        }
+        let Some(file) = self.dump_out() else {
+            return;
+        };
+        use std::io::{Seek, SeekFrom, Write};
+        let Some(end) = file.seek(SeekFrom::End(0)).ok() else {
+            return;
+        };
+        let mut line = format!("{value:.8} 0");
+        for coordinate in state.iter() {
+            line.push(' ');
+            line.push_str(&format!("{coordinate:.6}"));
+        }
+        line.push('\n');
+        if file.write_all(line.as_bytes()).is_err() || file.flush().is_err() {
+            return;
+        }
+        let marker = format!("{value:.8} ").len() as u64;
+        self.dump_accept_at = Some(end + marker);
+    }
+
+    fn dump_out(&mut self) -> Option<&mut std::fs::File> {
+        if self.dump_file.is_some() {
+            return self.dump_file.as_mut();
+        }
+        if self.dump_disabled {
+            return None;
+        }
+        let Ok(path) = std::env::var("ANNEAL_MIN_DUMP") else {
+            self.dump_disabled = true;
+            return None;
+        };
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path)
+        {
+            Ok(file) => {
+                self.dump_file = Some(file);
+                self.dump_file.as_mut()
+            }
+            Err(_) => {
+                self.dump_disabled = true;
+                None
+            }
+        }
+    }
+
+    /// Sets the acceptance column on the minimum [`Ledger::record`] just wrote.
+    fn mark_last_recorded(&mut self, accepted: bool) {
+        let Some(offset) = self.dump_accept_at.take() else {
+            return;
+        };
+        if !accepted {
+            return;
+        }
+        let Some(file) = self.dump_file.as_mut() else {
+            return;
+        };
+        use std::io::{Seek, SeekFrom, Write};
+        let _ = file
+            .seek(SeekFrom::Start(offset))
+            .and_then(|_| file.write_all(b"1"))
+            .and_then(|_| file.flush());
     }
 
     /// Charged evaluations the ledger was created with.
@@ -2251,6 +2338,7 @@ where
     }
     if initial_recordable {
         ledger.record(e, x.view());
+        ledger.mark_last_recorded(true);
     }
     let mut current_validation_gradient = initial_validation_gradient;
     let canonical_reference = x.clone();
@@ -3480,6 +3568,9 @@ where
                     unconverged_records += 1;
                 }
                 let adopted = recordable && candidate_energy < e - 1e-10;
+                if recordable {
+                    ledger.mark_last_recorded(adopted);
+                }
                 if adopted {
                     continuous_symmetry_gain += e - candidate_energy;
                     let from_basin = here.unwrap_or_else(|| identity.basin_of(x.view()));
@@ -4982,6 +5073,11 @@ where
                 tabu_hits += 1;
             }
         }
+        // The quench was recorded before this test. The minima file already
+        // has the line; this sets the acceptance column.
+        if recordable {
+            ledger.mark_last_recorded(accept);
+        }
         // The energy bias is one function on every rung, so its factor and its
         // deposits read one temperature whichever rung fills the sample or
         // deposits: the one the coldest rung hops at from the state it holds,
@@ -5242,25 +5338,6 @@ where
                     kernels[k].name()
                 };
                 eprintln!("ACCTRACE hop {hops} e {e_new:.6} arm {arm} ord {fcc}/{hcp}/{ico}");
-            }
-            // Every accepted minimum, appended as one line of energy then
-            // flat coordinates, for landscape projections. A campaign sets
-            // ANNEAL_MIN_DUMP to a path prefix; the driver never reads it
-            // back.
-            if let Ok(prefix) = std::env::var("ANNEAL_MIN_DUMP") {
-                use std::io::Write as _;
-                if let Ok(mut fh) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&prefix)
-                {
-                    let mut line = format!("{e_new:.8}");
-                    for v in x_new.iter() {
-                        line.push_str(&format!(" {v:.6}"));
-                    }
-                    line.push('\n');
-                    let _ = fh.write_all(line.as_bytes());
-                }
             }
             // Convergence curves: charged evaluations against the accepted
             // energy, one line per accept; the reader takes the running
