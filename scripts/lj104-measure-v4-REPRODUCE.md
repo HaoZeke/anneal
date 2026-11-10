@@ -6,7 +6,8 @@ The binary is the release example h2h_gmin_proof from that tree.
 
 Every timed arm shares one private mount namespace.
 
-It also shares one UTS namespace.
+It also shares one hostname namespace.
+That namespace sets the nodename.
 
 The receipt script opens that namespace with unshare.
 
