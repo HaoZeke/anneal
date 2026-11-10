@@ -15,5 +15,5 @@ A Cs-minimum hit lies at or below -582.038428.
 The reference program halts at its own 0.001 stop.
 That stop only marks when a reference run ends.
 v4.2 already observed these seeds, so this file is not a blind test.
-The global-minimum count named above stays 0.
+Global-minimum hits named above stay at 0.
 The icosahedral, Cs count named above stays 1 of 6.

@@ -196,13 +196,36 @@ The subject is "docs: close three prose findings in the measure notes".
 Its body is one line of 124 columns.
 The body says three sentences are split.
 It says the subject should sit next to the verb.
-The diff adds scripts/lj104-measure-v4-NOTES.md.
-That added file is 167 lines.
-The file is absent from the parent.
+The diff adds a 167-line file, scripts/lj104-measure-v4-NOTES.md.
+The parent does not contain that file.
 
-Commit 355b0a7d still holds scripts/redact.py.
-The host token built from fragments remains in that blob.
-The commit token built from fragments remains there too.
+Commit 355b0a7d's tree includes scripts/redact.py.
+Fragments in that blob spell the host token.
+The commit token, built the same way, is in that blob too.
+
+Commit ac6bb80b opens with "This commit removes".
+Its diff deletes scripts/redact.py.
+The deletion is 71 lines.
+
+Commit cf864daf changed three lines after the run.
+Those lines are in scripts/lj104_v4_prediction.txt.
+Only the repeated-forecast lines changed.
+The original forecast text is untouched.
+The three old lines follow.
+
+```
+The rerun keeps this forecast.
+The predicted global-minimum count on the rerun equals 0.
+The predicted Cs-minimum count on the rerun equals 1 of 6.
+```
+
+The three new lines follow.
+
+```
+v4.2 already observed these seeds, so this file is not a blind test.
+The global-minimum count named above stays 0.
+The icosahedral, Cs count named above stays 1 of 6.
+```
 
 ```
 299ce4ae replaces 20e03ec6 and keeps tree 826c4ba6
