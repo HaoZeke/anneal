@@ -13,6 +13,11 @@ The 38-atom and 75-atom Oakley means stay in the data file.
 The preset keeps one move library at every size.
 The hit is read from converged improvements.
 The LJ75 hit count in the article is pending.
-The water comparison in this draft includes six seeds.
-The 192-seed paragraph is present, with the McNemar values.
+The six crest rows are single draws, and the draft states no success
+rate from them.
+The six-seed old-counter arm is called the driver-count budget.
+The 192-seed polish arm keeps the name budget-fair polish.
+The matched comparison and the 30-start statistics are pending from the
+water-engrad-matched lane.
+We keep the 192-seed paragraph, with the McNemar values.
 The deferred budget section is not in this article.
