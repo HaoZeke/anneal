@@ -7,10 +7,10 @@ mkdir -p "$(dirname "$out")"
   printf 'UTC %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf 'HEAD %s\n' "$(git rev-parse HEAD)"
   printf 'TREE %s\n' "$(git rev-parse 'HEAD^{tree}')"
-  printf 'command cargo build --all-targets --all-features --locked\n'
-  cargo build --all-targets --all-features --locked
-  printf 'command cargo bench --no-run\n'
-  cargo bench --no-run
+  printf 'command cargo +stable build --all-targets --all-features --locked\n'
+  cargo +stable build --all-targets --all-features --locked
+  printf 'command cargo +stable bench --no-run\n'
+  cargo +stable bench --no-run
 } > "$out.raw" 2>&1
 python3 - "$out.raw" "$out" << 'PY'
 import sys
