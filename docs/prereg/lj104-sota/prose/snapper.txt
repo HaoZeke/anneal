@@ -1,6 +1,16 @@
 Copyright (c) anneal developers
 
-command: snapper -w 72 --check
-NOT_RUN
-The command was not on PATH. A search of the usual install
-locations did not find it. No output was produced.
+The command is snapper -w 72 --check --color never.
+The exit code is 0.
+Stdout has 0 bytes.
+Stderr has 0 bytes.
+Diagnostic lines are 0.
+The files follow.
+Path docs/prereg/lj104-sota/PREDICTIONS.md.
+Path docs/prereg/lj104-sota/floors.md.
+Path docs/prereg/lj104-sota/requench.md.
+Path docs/prereg/lj104-sota/REPLAY.txt.
+Path docs/prereg/lj104-sota/TREE_DIFF_STAT.txt.
+Path docs/prereg/lj104-sota/TREE_EQUAL.txt.
+Path docs/prereg/lj104-sota/PUSH.txt.
+Path docs/prereg/lj104-sota/SCOPE.md.
