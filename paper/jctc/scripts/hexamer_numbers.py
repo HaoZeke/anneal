@@ -126,9 +126,35 @@ def walls(rows: dict[int, dict[str, float]]) -> dict[str, tuple[float, float]]:
     }
 
 
+def _sci(value: float) -> str:
+    """Four digits after the decimal, matching the manuscript rows."""
+    mantissa, exponent = f"{value:.4e}".split("e")
+    return f"${mantissa}\\times 10^{{{int(exponent)}}}$"
+
+
+def table_lines(rows: dict[int, dict[str, float]]) -> list[str]:
+    """LaTeX rows for the two hexamer tables."""
+    lines = ["counters"]
+    for seed in range(6):
+        row = rows[seed]
+        lines.append(f"{seed} & {int(row['old'])} & {int(row['engrad'])} \\\\")
+    lines.append("gaps")
+    for seed in range(6):
+        row = rows[seed]
+        lines.append(
+            f"{seed} & {_sci(row['gap_4000'])} & {_sci(row['gap_old'])} "
+            f"& {row['rmsd_4000']:.6f} & {row['rmsd_old']:.6f} \\\\"
+        )
+    return lines
+
+
 def main() -> None:
-    """Print the wall-time receipt."""
-    stats = walls(load())
+    """Print the wall-time receipt, or the table rows with 'tables'."""
+    rows = load()
+    if len(sys.argv) > 1 and sys.argv[1] == "tables":
+        sys.stdout.write("\n".join(table_lines(rows)) + "\n")
+        return
+    stats = walls(rows)
     lines = [
         "command python3 paper/jctc/scripts/hexamer_numbers.py",
         "source logs/water",
