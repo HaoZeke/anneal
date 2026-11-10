@@ -1,0 +1,90 @@
+# Old chain to new chain
+
+Archive refs are never pushed.
+
+The pre-redate tip is
+refs/archive/lj104-lattice-v3-before
+0a79aadb671e77b87b1edd17b35d0243f37312e9
+
+The three original commits stay reachable.
+refs/archive/v1-841769c3
+841769c30dc6b4fbd693ca801b57edd5644f9af7
+refs/archive/v1-f0b4bbb7
+f0b4bbb7248be232d66b8882bc5a92997a04c70f
+refs/archive/v1-8ee94082
+8ee94082863b0e97b673d931fbf5c2aabea58dd3
+
+One rewrite pass moved those three onto -0600.
+Their instants were 09:38:52, 09:40:03 and 09:54:18
+at +0000. The same instants read 03:38:52, 03:40:03
+and 03:54:18 at -0600.
+
+841769c3
+841769c30dc6b4fbd693ca801b57edd5644f9af7
+cce9fe7e
+cce9fe7ed9e939dbabfcf6e00b45bbddf51d9d30
+
+f0b4bbb7
+f0b4bbb7248be232d66b8882bc5a92997a04c70f
+95590a98
+95590a986846a86620246f7a29a0da8f8e0d2829
+
+8ee94082
+8ee94082863b0e97b673d931fbf5c2aabea58dd3
+2e9bc84a
+2e9bc84ad82702c4a4e500052132f2d5808e2cf4
+
+44bcd8f5
+44bcd8f521e3cc953e22fa8a0129aecc0a548a8c
+030153b6
+030153b663f1d62ce688e811789196d99d114ff8
+
+33a3914a
+33a3914aef551fae65cb6bff4a85e7ba121e5191
+9b5d4947
+9b5d494793be4aad0df29a815e51b4aa6025fd24
+
+4f022418
+4f022418585db20a3d6c22b511c8c4cec4d39d78
+c5fa28da
+c5fa28daf872bf0920fa5221d34f0783021e1313
+
+869f6910
+869f6910a4469f2620e927b2296b675cb63be3ff
+43b5262c
+43b5262cbbe66ab2a4867ac18ac3c45fb3bcccb0
+
+0a79aadb
+0a79aadb671e77b87b1edd17b35d0243f37312e9
+e5037f12
+e5037f12eecaef30bcd90f77dd6c899c97d44023
+
+The chain that held the prediction before the search is
+refs/archive/lj104-lattice-v3-prerun
+f3459a4d596de1754da721a6862ff91a62da3162
+That tip's code commit c8632a4a mixed four files. The
+branch splits that commit.
+
+c8632a4af0049be78291f5c8cc6ca057f90834b5
+src/methods/dls_published.rs
+0d37586b713cb572ba3c2963abe6bbc7940abf00
+
+c8632a4af0049be78291f5c8cc6ca057f90834b5
+src/methods/lattice_search.rs
+a70b62c7aa2c834a3d1f42c57be73cb23e95ef18
+
+c8632a4af0049be78291f5c8cc6ca057f90834b5
+src/methods/cluster_hopping/moves.rs
+1c2233691c4c19776da47f6e3f250a5bba2b6f58
+
+c8632a4af0049be78291f5c8cc6ca057f90834b5
+examples/h2h_seed.rs
+0bfda058c21c3f6122c0edf850a08d3f58af6b58
+
+f3459a4d596de1754da721a6862ff91a62da3162
+bench/lj104-lattice/v3/PREDICTIONS-recount.md
+45b046b085affa8332c1f18bf94981cb581c259a
+
+The brief names ed5849f6. That object is not in this
+clone. 87a1c409 has the same tree
+b8c8d0bc0b0684229c1c7b5862b15e983ffc16c9.
