@@ -1,7 +1,6 @@
+% Copyright (c) anneal developers
 \documentclass[journal=jctcce,manuscript=suppinfo]{achemso}
-\usepackage{booktabs}
-\usepackage{longtable}
-\usepackage{siunitx}
+\usepackage{booktabs,longtable,siunitx}
 \sisetup{scientific-notation=true,exponent-product=\times}
 \graphicspath{{figs/}}
 \input{macros}
@@ -26,15 +25,18 @@
 
 \section{Board constants}
 We read a hit as an energy strictly below the reference plus \(0.001\), taken from a converged improvement.
-The references are \(-173.928427\) (LJ\(_{38}\)), \(-279.248470\) (LJ\(_{55}\)), \(-397.492331\) (LJ\(_{75}\)), \(-543.665361\) (LJ\(_{98}\)) and \(-582.086642\) (LJ\(_{104}\)), in reduced units.
-The temperature is \(0.8\), the value Wales and Doye used for Lennard-Jones basin hopping and the value stored at \texttt{src/methods/cluster\_hopping/preset.rs:8}.\cite{wales1997}
-The start density passed to \texttt{random\_cluster} is \(0.7\), at \texttt{src/methods/cluster\_hopping.rs:6709}.
+The references, in reduced units, are \(-173.928427\) for LJ\(_{38}\), \(-279.248470\) for LJ\(_{55}\), and \(-397.492331\) for LJ\(_{75}\).
+LJ\(_{98}\) uses \(-543.665361\), and LJ\(_{104}\) uses \(-582.086642\).
+The temperature is \(0.8\), the value Wales and Doye used for Lennard-Jones basin hopping and the value stored at \texttt{preset.rs:8}.\cite{wales1997}
+The start density passed to \texttt{random\_cluster} is \(0.7\).
 The function comment calls the draw liquid-like.
 
 \section{Plain walk}
-One further process runs the recommended preset at 38 atoms with the stall exits and the Bayes screen turned off, seed 0, budget 30000.
+One further process runs the recommended preset at 38 atoms with the
+stall exits and the Bayes screen turned off, seed 0, budget 30000.
 The record is \texttt{logs/lj38-plain-seed0.log}.
-The best energy in that log is \PlainEnergy, after \PlainCalls{} charged evaluations.
+The best energy in that log is \PlainEnergy, after \PlainCalls{} charged
+evaluations.
 
 \section{Published symmetrised costs}
 \texttt{data/literature.tsv} quotes Oakley, Johnston and Wales, Table 1.\cite{oakley2013}
@@ -43,10 +45,11 @@ The same file's Table 2 rows are genetic-algorithm means at 75 and 98 atoms.
 No row in that file is a genetic algorithm at 104 atoms.
 
 \section{TIP4P pair constants}
-\texttt{logs/tip4p\_constants.txt} records Jorgensen's \(A = 2510400\) and \(C = 2552.24\), in kJ\,\AA\(^{12}\)\,mol\(^{-1}\) and kJ\,\AA\(^{6}\)\,mol\(^{-1}\).\cite{jorgensen1983}
-GMIN's \(C_6\) and \(C_{12}\) match those two numbers.
-The anneal pair built from a rounded well depth and a rounded \(\sigma\) gives \(C_6 = 2551.8252\) and \(C_{12} = 2510336.2\).
-The water hexamer figure in the article uses the sealed GFN2-xTB campaign, and these two coefficients are the TIP4P pair in the log.
+\texttt{logs/tip4p\_constants.txt} records Jorgensen's \(A = 2510400\) and \(C = 2552.24\).\cite{jorgensen1983}
+The units are kJ \AA\(^{12}\) mol\(^{-1}\) and kJ \AA\(^{6}\) mol\(^{-1}\).
+The Wales-group basin-hopping program (GMIN) matches those two numbers in \(C_6\) and \(C_{12}\).
+A rounded well depth and a rounded \(\sigma\) give the anneal pair \(C_6 = 2551.8252\) and \(C_{12} = 2510336.2\).
+The water hexamer figure in the article uses the six-seed GFN2-xTB comparison, and these two coefficients are the TIP4P pair in the log.
 
 \section{Earlier campaign}
 \texttt{data/campaign-scores.csv} is an earlier 64-seed campaign, and on TIP4P\(_{20}\) a 16-seed campaign.
@@ -57,10 +60,20 @@ Its call PAR-2 median is 2000000 and its type-7 interquartile range is 1513982.7
 The GMIN arm hits 64 of 64.
 Its call PAR-2 median is 158540.5 and its type-7 interquartile range is 201463.5.
 \texttt{logs/paired\_bootstrap\_lj98.txt} records the paired-bootstrap interval of the median ratio for the 24-of-64 hop, 12.62 with endpoints 8.52 and 15.22, from 2000 resamples.
-None of those rows is the sealed LJ\(_{75}\) campaign of 200 seeds.
+None of those rows is the LJ\(_{75}\) campaign of 200 seeds.
 OGOLEM, cited as Dieterich and Hartke, is in the campaign file at 6 of 64 on LJ\(_{104}\).\cite{dieterich2010}
 ABCluster, cited as Zhang and Dolg, is in the same file.\cite{zhang2015}
 The seed file is the record of those LJ\(_{98}\) medians.
+
+\section{Hardware and reproduction}
+The LJ75 receipt is \texttt{logs/lj75-hardware-receipt.txt}.
+\texttt{scripts/lj75\_hardware\_capture.sh} writes that file from the
+live process.
+The hexamer engine digest is the \texttt{engine\_sha256} line of
+\texttt{water/VERSIONS} inside \texttt{logs/logs-water.tar.xz}.
+That digest is
+\texttt{4836648ee77203e9462d51e25a1970b3f0df3a3bcd126f9a7454f6896ac66df8}.
+Hexamer wall times are pending.
 
 \section{Structure plates, sketch-maps, and landfold}
 \begin{center}
@@ -70,16 +83,20 @@ The seed file is the record of those LJ\(_{98}\) medians.
 \includegraphics[width=\textwidth]{si_water.pdf}
 \end{center}
 \begin{center}
-\includegraphics[width=0.48\textwidth]{lj38_sketchmap.png}\hfill \includegraphics[width=0.48\textwidth]{lj38_landscape.png}
+\includegraphics[width=0.48\textwidth]{lj38_sketchmap.png}\hfill
+\includegraphics[width=0.48\textwidth]{lj38_landscape.png}
 \end{center}
 \begin{center}
-\includegraphics[width=0.48\textwidth]{lj75_landscape.png}\hfill \includegraphics[width=0.48\textwidth]{lj98_landscape.png}
+\includegraphics[width=0.48\textwidth]{lj75_landscape.png}\hfill
+\includegraphics[width=0.48\textwidth]{lj98_landscape.png}
 \end{center}
 \begin{center}
-\includegraphics[width=0.48\textwidth]{occupancy_landfold.pdf}\hfill \includegraphics[width=0.48\textwidth]{occupancy_landfold_lj38.pdf}
+\includegraphics[width=0.48\textwidth]{occupancy_landfold.pdf}\hfill
+\includegraphics[width=0.48\textwidth]{occupancy_landfold_lj38.pdf}
 \end{center}
 \begin{center}
-\includegraphics[width=0.48\textwidth]{occupancy_landfold_lj75.pdf}\hfill \includegraphics[width=0.48\textwidth]{occupancy_landfold_lj98.pdf}
+\includegraphics[width=0.48\textwidth]{occupancy_landfold_lj75.pdf}\hfill
+\includegraphics[width=0.48\textwidth]{occupancy_landfold_lj98.pdf}
 \end{center}
 
 \bibliography{refs}
