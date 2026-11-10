@@ -336,6 +336,7 @@ fn median_iqr(values: &[f64]) -> (f64, f64) {
 }
 
 /// Anneal, then GMIN, for each seed, in seed order.
+#[cfg(test)]
 fn schedule(seeds: &[u64]) -> Vec<(u64, &'static str)> {
     let mut order = Vec::with_capacity(seeds.len() * 2);
     for seed in seeds {
