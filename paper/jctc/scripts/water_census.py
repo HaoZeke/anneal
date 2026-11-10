@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Basin census of a water hexamer search against the CREST minimum.
 
 Usage:

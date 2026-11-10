@@ -7,6 +7,8 @@
 
 \input{macros}
 
+\title{Basin hopping on Lennard-Jones clusters with one preset at every size}
+
 \author{Rohit Goswami}
 \affiliation{SURF B.V., Amsterdam, The Netherlands}
 \alsoaffiliation{Science Institute, University of Iceland, Reykjavik, Iceland}
@@ -23,8 +25,6 @@
 \affiliation{Center for Bits and Atoms, Massachusetts Institute of Technology, Cambridge, Massachusetts 02139, United States}
 \alsoaffiliation{Department of Chemistry, Indian Institute of Technology Kanpur, Kanpur, India}
 \email{dgoswami@iitk.ac.in}
-
-\title{Basin hopping on Lennard-Jones clusters with one preset at every size}
 
 \begin{document}
 
@@ -274,11 +274,12 @@ LJ\(_{104}\).
 hexamer of each class.}
 \label{fig:systems}
 \end{figure}
-\subsection{Rates and the water hexamer}
-Seeds 0 through 199 are running serially at a cap of \(4\times 10^{6}\)
-force calls.
+Seeds 0 through 199 run serially at a cap of \(4\times 10^{6}\) force
+calls.
 No hit count is reported until that run finishes.
-Figure~\ref{fig:lj75-ecdf} draws those encounter curves.
+Figure~\ref{fig:lj75-ecdf} draws the encounter curves of the earlier
+sealed LJ\(_{75}\) campaign, which covered 200 seeds.
+\subsection{Rates and the water hexamer}
 Counts that wait for a new run carry the stale marker (STALE).
 \todo{STALE: rerun on main. The recommended hop hit 72 of 72 seeds at
 LJ\(_{38}\). On those hits the median is 726 force calls and the type-7
@@ -453,8 +454,10 @@ No CREST structure dissociated.
 \label{fig:water-crest}
 \end{figure}
 
-\todo{The counter table leaves the 16-mer count open. A count waits until both arms share one Hamiltonian.}
+\todo{The water hexamer campaign leaves the 16-mer count open. A count waits until both arms share one Hamiltonian.}
+
 \todo{Measurement is still open for the Atomic Simulation Environment panel and for the atomistic global optimization framework (AGOX). No count is added here.}
+
 \todo{Measurement is still open for the Wales-group basin-hopping program (GMIN) head-to-head. This draft adds no new count.}
 
 \section{Conclusions}

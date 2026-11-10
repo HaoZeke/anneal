@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Serial water hexamer comparison of anneal and CREST.
 
 CREST runs at its documented default, Geometries, Frequencies, and

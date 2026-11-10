@@ -6,7 +6,9 @@ The input archive sha256 must be
 98f318d37756f5ecbb144e02b7149bbcddf859412e21322b42d5e24f2ab1594b.
 Every member keeps its mtime, owner, group, and mode.
 Members are written in name order.
-The tar format is GNU and the xz stream uses level 9, extreme, CRC64.
+The tar format is GNU.
+xz 5.x is run as xz -9e -T1 --check=crc64.
+Members are written in sorted name order.
 Only the host line of water/HOST-TOPOLOGY changes, to host=host-a.
 """
 
@@ -83,9 +85,11 @@ def main() -> None:
                 clone.size = 0
                 new.addfile(clone)
     packed = subprocess.check_output(
-        ["xz", "-9e", "--check=crc64", "-c"], input=buffer.getvalue()
+        ["xz", "-9e", "-T1", "--check=crc64", "-c"], input=buffer.getvalue()
     )
     dest.write_bytes(packed)
+    with tarfile.open(dest, mode="r:xz") as written:
+        got = {item.name: item for item in written.getmembers()}
     lines = [
         f"original_sha256 {ORIGINAL_SHA}",
         f"new_sha256 {sha256(packed)}",
@@ -95,11 +99,25 @@ def main() -> None:
     for member in members:
         old_body = payloads.get(member.name, b"")
         new_body = new_payloads.get(member.name, b"")
-        same = old_body == new_body
-        if not same:
+        if old_body != new_body:
             changed.append(member.name)
+        written_member = got[member.name]
+        mtime_equal = "yes" if written_member.mtime == member.mtime else "no"
+        mode_equal = "yes" if written_member.mode == member.mode else "no"
+        owner_equal = (
+            "yes"
+            if (
+                written_member.uid,
+                written_member.gid,
+                written_member.uname,
+                written_member.gname,
+            )
+            == (member.uid, member.gid, member.uname, member.gname)
+            else "no"
+        )
         lines.append(
-            f"{member.name} {sha256(old_body)} {sha256(new_body)} yes yes yes"
+            f"{member.name} {sha256(old_body)} {sha256(new_body)} "
+            f"{mtime_equal} {mode_equal} {owner_equal}"
         )
     if changed != [HOST_NAME]:
         raise SystemExit(f"unexpected member changes: {changed}")

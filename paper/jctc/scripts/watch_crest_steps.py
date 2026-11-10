@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Sum Etot lines from crestopt.log, including replacements of that file."""
 
 import time
