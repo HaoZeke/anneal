@@ -1100,3 +1100,15 @@ Each line names the index, the old commit, the new commit and the tree.
 The archive of the previous tip follows.
 
 975f6028338172d2edb6810e216ee2f0caf451f4
+
+## v1.28
+
+These commits sit on 77a9e399.
+They are not a new replay.
+Seven replays remain.
+Archive refs are never pushed.
+The push plan names one branch.
+The branch is refs/heads/paper-integration-v1.28.
+The archive of v1.27 follows.
+
+77a9e399660f2a54f2a5fd17e0da184f0c7312e0
