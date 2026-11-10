@@ -1,17 +1,25 @@
-Two-million evaluation arm, plus the corrections from the earlier check.
+Two-million evaluation rerun, on the same engine.
 
-Prediction commit 88d1cca uses central clock 21:14:07 on 2026-11-09.
+Forecast commit 6f74d439 uses central clock 02:55:01 on 2026-11-10.
 
-The arm opened one second afterward.
+The arm opened at 02:55:36 the same morning.
+
+The forecast repeated there is the one from commit 88d1cca.
 
 Head 88d1cca.
 
 Tree d16cabd3.
 
 Binary hash
-344e7a541d0e9aab445ac180e20b108d5e40afbb8353786c077a85bd368d65d7.
+53e08802ead942e22f97d73fc1c015f85b77a57298e43ddd2511ce9e3b0efbeb.
+
+The receipt wrote that digest before the first seed.
 
 Each seed ran alone on processor 0, and the receipt field pins reads 0.
+
+uname -n reads bench.
+
+REPRODUCE.md records the namespace.
 
 At 100000 evaluations the global-minimum tally was 0 of 100.
 
@@ -40,14 +48,16 @@ Temperature and step stay as they were.
 
 ```
 seed start end energy gm_dist cs_dist
-2000 21:14:08 21:16:52 -580.42126629 0.520497 0.515938
-2001 21:16:52 21:19:29 -580.42126629 0.520497 0.515938
-2002 21:19:29 21:22:04 -578.60157826 0.520577 0.513892
-2003 21:22:04 21:24:42 -580.42126629 0.520497 0.515938
-2004 21:24:42 21:27:15 -578.60157826 0.526995 0.511773
-2005 21:27:15 21:29:46 -581.80180238 0.500292 0.523080
+2000 02:55:36 02:58:29 -580.42126629 0.520497 0.515938
+2001 02:58:29 03:01:12 -580.42126629 0.520497 0.515938
+2002 03:01:12 03:04:06 -578.60157826 0.520577 0.513892
+2003 03:04:06 03:06:51 -580.42126629 0.520497 0.515938
+2004 03:06:51 03:09:29 -578.60157826 0.526995 0.511773
+2005 03:09:29 03:12:08 -581.80180238 0.500292 0.523080
 ```
-Dates in that block are 2026-11-09.
+Dates in that block are 2026-11-10.
+
+Energies and distances match the earlier six-seed table.
 
 No curve crossed either line.
 
@@ -63,17 +73,17 @@ The point is the icosahedral, Cs minimum, far from the global minimum.
 
 Reference logs list energy.
 
-They also list a charge.
+They also list charged evaluations.
 
 Coordinates are absent.
 
 Nothing remains for a re-quench.
 
-Seeds 2003, 2004, and 2005 print gaps.
+Seeds 2003, 2004, and 2005 print best= and hit=1.
 
 The gaps are 6.4e-5, 2.4e-5, and 6.2e-5.
 
-Each gap sits above -582.086642.
+The energies sit above -582.086642.
 
 Seeds 2000 and 2002 sit about 1.6e-5 over the icosahedral, Cs energy.
 
@@ -125,8 +135,15 @@ Seeds run from 2004 to 2103.
 
 Every line is retained.
 
-logs/sha-map.tsv pairs each raw digest, the redacted digest, and both
-line counts.
+The traced panel is carried over unchanged from the v4.2 kit.
+
+Its global-minimum count is 0 of 100.
+
+Its icosahedral, Cs count is 1 of 100, on seed 2017.
+
+The carried rows of logs/sha-map.tsv keep both earlier digests.
+
+The two-million receipts are raw, so their two digest columns match.
 
 Those logs name head ed5849f6, stored here as 87a1c409, and both commits
 share tree b8c8d0bc.
