@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,10 @@ HERE = Path(__file__).resolve().parent
 RUNNER = HERE / "lj104_sota_runner.py"
 TABLE = HERE / "mcnemar_threshold.tsv"
 SCRIPT = HERE / "mcnemar_threshold.py"
+SPEC = importlib.util.spec_from_file_location("lj104_sota_runner", RUNNER)
+assert SPEC is not None and SPEC.loader is not None
+RUNNER_MOD = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(RUNNER_MOD)
 
 
 def git_out(*args: str) -> str:
@@ -109,6 +114,16 @@ class RunnerGate(unittest.TestCase):
             text=True,
         )
         self.assertEqual(proc.stdout, TABLE.read_text(encoding="utf-8"))
+
+    def test_panel_is_the_six_untuned_seeds(self) -> None:
+        jobs = RUNNER_MOD.panel_jobs()
+        self.assertEqual(len(jobs), 24)
+        seeds = {job["seed"] for job in jobs}
+        self.assertEqual(seeds, {6000, 6001, 6002, 6003, 6004, 6005})
+        for seed in seeds:
+            self.assertFalse(5000 <= seed <= 5029)
+        sizes = sorted({job["n"] for job in jobs})
+        self.assertEqual(sizes, [38, 55, 75, 98])
 
     def test_held_out_seeds_are_not_started(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

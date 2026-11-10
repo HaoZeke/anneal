@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import os
 import subprocess
 import sys
 import time
@@ -31,6 +32,16 @@ COLUMNS = (
     "hit",
     "energy",
     "calls",
+    "wall_seconds",
+)
+# examples/h2h_arm3.rs lines 46-49, and PAPER_BUDGETS lines 16-19.
+PANEL_TOL = 0.001
+PANEL_SEEDS = (6000, 6001, 6002, 6003, 6004, 6005)
+PANEL_SYSTEMS = (
+    (38, 400_000, -173.928427),
+    (55, 1_000_000, -279.248470),
+    (75, 4_000_000, -397.492331),
+    (98, 4_000_000, -543.665361),
 )
 
 
@@ -150,6 +161,125 @@ def record_serial_boundary(dest: Path, label: str) -> None:
     )
 
 
+def panel_jobs():
+    """The 24 default-panel runs, one size at a time, seeds 6000-6005."""
+    jobs = []
+    for n, budget, reference in PANEL_SYSTEMS:
+        for seed in PANEL_SEEDS:
+            if HELD_OUT_LO <= seed <= HELD_OUT_HI:
+                raise SystemExit("panel seed list overlaps 5000-5029")
+            jobs.append(
+                {
+                    "n": n,
+                    "budget": budget,
+                    "reference": reference,
+                    "seed": seed,
+                    "stop": reference + PANEL_TOL,
+                }
+            )
+    return jobs
+
+
+def parse_h2h(text: str) -> dict[str, str]:
+    fields = {}
+    for line in text.splitlines():
+        if ": " not in line:
+            continue
+        key, value = line.split(": ", 1)
+        fields[key] = value
+    return fields
+
+
+def cmd_panel(args: argparse.Namespace) -> int:
+    jobs = panel_jobs()
+    if len(jobs) != 24:
+        print("the default panel is 24 runs", file=sys.stderr)
+        return 2
+    root = repo_root()
+    binary = Path(args.binary)
+    if not binary.is_absolute():
+        binary = root / binary
+    if not binary.is_file():
+        print("missing h2h_seed binary", file=sys.stderr)
+        return 2
+    rel = Path(args.output_dir)
+    if rel.is_absolute():
+        print("output dir must be relative", file=sys.stderr)
+        return 2
+    out = root / rel
+    out.mkdir(parents=True, exist_ok=True)
+    handle = acquire_scored_run(Path(args.lock_file))
+    session_start = time.monotonic()
+    try:
+        fields = provenance()
+        record_serial_boundary(out, "start")
+        rows = out / "rows.tsv"
+        rows.write_text("\t".join(COLUMNS) + "\n", encoding="utf-8")
+        for index, job in enumerate(jobs, start=1):
+            stem = f"{index:02d}-lj{job['n']}-{job['seed']}"
+            prefix = rel / stem
+            log_path = out / f"{stem}.log"
+            err_path = out / f"{stem}.stderr"
+            span_path = out / f"{stem}.span"
+            started = time.monotonic()
+            proc = subprocess.run(
+                [
+                    os.path.relpath(binary, root),
+                    "lj",
+                    str(job["n"]),
+                    "0",
+                    str(job["budget"]),
+                    str(job["seed"]),
+                    "recommended",
+                    f"{job['stop']:.10f}",
+                    prefix.as_posix(),
+                ],
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            finished = time.monotonic()
+            log_path.write_text(proc.stdout, encoding="utf-8")
+            err_path.write_text(proc.stderr, encoding="utf-8")
+            span_path.write_text(
+                f"{started - session_start:.6f} {finished - session_start:.6f}\n",
+                encoding="utf-8",
+            )
+            if proc.returncode != 0:
+                print(f"{stem} exited {proc.returncode}", file=sys.stderr)
+                return proc.returncode or 1
+            parsed = parse_h2h(proc.stdout)
+            energy = float(parsed["lowest"])
+            hit = energy <= job["stop"]
+            row = dict(fields)
+            row.update(
+                {
+                    "seed": str(job["seed"]),
+                    "code": f"default-lj{job['n']}",
+                    "hit": "true" if hit else "false",
+                    "energy": f"{energy:.10f}",
+                    "calls": parsed.get("calls", ""),
+                    "wall_seconds": parsed.get("wall_seconds", ""),
+                }
+            )
+            with rows.open("a", encoding="utf-8") as handle_rows:
+                handle_rows.write("\t".join(row.get(column, "") for column in COLUMNS) + "\n")
+            print(
+                f"{stem} hit={row['hit']} energy={row['energy']} calls={row['calls']} wall={row['wall_seconds']}",
+                flush=True,
+            )
+        record_serial_boundary(out, "end")
+        elapsed = time.monotonic() - session_start
+        (out / "session.txt").write_text(
+            f"elapsed_seconds {elapsed:.6f}\nruns {len(jobs)}\n",
+            encoding="utf-8",
+        )
+    finally:
+        release_scored_run(handle)
+    return 0
+
+
 def cmd_hold(args: argparse.Namespace) -> int:
     handle = acquire_scored_run(Path(args.lock_file))
     try:
@@ -220,6 +350,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--seeds", required=True)
     run.add_argument("--receipt-dir", default="lj104-sota-receipts")
     run.set_defaults(func=cmd_run)
+
+    panel = sub.add_parser("panel", help="run the default no-regression panel serially")
+    panel.add_argument("--output-dir", required=True)
+    panel.add_argument("--binary", default="target/release/examples/h2h_seed")
+    panel.set_defaults(func=cmd_panel)
     return parser
 
 
