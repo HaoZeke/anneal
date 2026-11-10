@@ -1,0 +1,16 @@
+This file is the prediction for the 2000000-evaluation arm.
+The global-minimum count at 100000 evaluations was 0 of 100.
+The scale from 100000 to 2000000 equals 20.
+0 of 100 times 20 equals 0.
+The predicted global-minimum count on seeds 2000 through 2005 equals 0.
+The Cs-minimum count at 100000 evaluations was 1 of 100.
+1 of 100 times 20 equals 0.2 per seed.
+Six seeds give 6 times 0.2, which equals 1.2.
+The predicted Cs-minimum count equals 1 of 6.
+Check e found that same single chain in the Cs basin.
+Check e found none at the global minimum.
+One tolerance, 1e-6, covers both published energies.
+A global-minimum hit lies at or below -582.086641.
+A Cs-minimum hit lies at or below -582.038428.
+The reference program halts at its own 0.001 stop.
+That stop only marks when a reference run ends.
