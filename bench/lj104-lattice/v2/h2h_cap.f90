@@ -1,0 +1,127 @@
+! Evaluator cap for a counted comparison.
+! One entry to POTENTIAL is one evaluation, the same unit the
+! annealing ledger charges for an energy and gradient pair.
+! The cap is read from the environment. With H2H_BUDGET unset
+! the module stays idle and a normal GMIN run is unchanged.
+MODULE H2H_CAP
+   USE PREC, ONLY: REAL64
+   IMPLICIT NONE
+   INTEGER :: CAP = 0
+   INTEGER :: CALLS = 0
+   LOGICAL :: READY = .FALSE.
+   LOGICAL :: ABORT = .FALSE.
+   LOGICAL :: FOUND = .FALSE.
+   INTEGER :: HIT_CALLS = -1
+   REAL(REAL64) :: TARGET_ENERGY = 0.0D0
+   REAL(REAL64) :: TOL = 1.0D-3
+   LOGICAL :: HAVE_TARGET = .FALSE.
+   REAL(REAL64) :: BEST = 1.0D100
+   INTEGER :: SEED = 0
+   CHARACTER(LEN=16) :: SYSTEM = 'unset'
+   REAL(REAL64) :: T0 = 0.0D0
+CONTAINS
+
+   SUBROUTINE H2H_INIT()
+      CHARACTER(LEN=64) :: BUF
+      INTEGER :: IOS, N
+      INTEGER(KIND=8) :: TICK, RATE
+      READY = .TRUE.
+      CALL GET_ENVIRONMENT_VARIABLE('H2H_BUDGET', BUF, LENGTH=N, STATUS=IOS)
+      IF (IOS == 0 .AND. N > 0) THEN
+         READ(BUF(1:N), *, IOSTAT=IOS) CAP
+         IF (IOS /= 0) CAP = 0
+      END IF
+      CALL GET_ENVIRONMENT_VARIABLE('H2H_TARGET', BUF, LENGTH=N, STATUS=IOS)
+      IF (IOS == 0 .AND. N > 0) THEN
+         READ(BUF(1:N), *, IOSTAT=IOS) TARGET_ENERGY
+         IF (IOS == 0) HAVE_TARGET = .TRUE.
+      END IF
+      CALL GET_ENVIRONMENT_VARIABLE('H2H_TOL', BUF, LENGTH=N, STATUS=IOS)
+      IF (IOS == 0 .AND. N > 0) THEN
+         READ(BUF(1:N), *, IOSTAT=IOS) TOL
+         IF (IOS /= 0) TOL = 1.0D-3
+      END IF
+      CALL GET_ENVIRONMENT_VARIABLE('H2H_SEED', BUF, LENGTH=N, STATUS=IOS)
+      IF (IOS == 0 .AND. N > 0) THEN
+         READ(BUF(1:N), *, IOSTAT=IOS) SEED
+         IF (IOS /= 0) SEED = 0
+      END IF
+      CALL GET_ENVIRONMENT_VARIABLE('H2H_SYSTEM', BUF, LENGTH=N, STATUS=IOS)
+      IF (IOS == 0 .AND. N > 0) THEN
+         SYSTEM = BUF(1:MIN(N, 16))
+      END IF
+      CALL SYSTEM_CLOCK(TICK, RATE)
+      IF (RATE > 0) T0 = REAL(TICK, REAL64) / REAL(RATE, REAL64)
+   END SUBROUTINE H2H_INIT
+
+   LOGICAL FUNCTION H2H_REFUSE(NPCALL)
+      INTEGER, INTENT(IN) :: NPCALL
+      IF (.NOT. READY) CALL H2H_INIT()
+      CALLS = NPCALL
+      H2H_REFUSE = CAP > 0 .AND. NPCALL > CAP
+      IF (H2H_REFUSE) THEN
+         ABORT = .TRUE.
+         CALLS = CAP
+      END IF
+   END FUNCTION H2H_REFUSE
+
+   LOGICAL FUNCTION H2H_ABORT()
+      IF (.NOT. READY) CALL H2H_INIT()
+      H2H_ABORT = ABORT
+   END FUNCTION H2H_ABORT
+
+   SUBROUTINE H2H_NOTE(ENERGY)
+      REAL(REAL64), INTENT(IN) :: ENERGY
+      IF (.NOT. READY) CALL H2H_INIT()
+      IF (ABORT) RETURN
+      IF (.NOT. (ENERGY < 1.0D10)) RETURN
+      IF (ENERGY /= ENERGY) RETURN
+      IF (ENERGY < BEST) BEST = ENERGY
+      IF (HAVE_TARGET .AND. .NOT. FOUND) THEN
+         IF (ENERGY <= TARGET_ENERGY + TOL) THEN
+            FOUND = .TRUE.
+            HIT_CALLS = CALLS
+            ABORT = .TRUE.
+         END IF
+      END IF
+   END SUBROUTINE H2H_NOTE
+
+   SUBROUTINE H2H_REPORT()
+      INTEGER(KIND=8) :: TICK, RATE
+      REAL(REAL64) :: WALL, REPORTED
+      INTEGER :: EVALS, HIT
+      CHARACTER(LEN=320) :: LINE
+      CHARACTER(LEN=256) :: ROWFILE
+      INTEGER :: UNIT, IOS, N
+      IF (.NOT. READY) CALL H2H_INIT()
+      CALL SYSTEM_CLOCK(TICK, RATE)
+      WALL = 0.0D0
+      IF (RATE > 0) WALL = REAL(TICK, REAL64) / REAL(RATE, REAL64) - T0
+      IF (FOUND) THEN
+         HIT = 1
+         EVALS = HIT_CALLS
+      ELSE
+         HIT = 0
+         EVALS = CAP
+         IF (CAP <= 0) EVALS = CALLS
+      END IF
+      IF (BEST > 1.0D99) THEN
+         REPORTED = 0.0D0
+      ELSE
+         REPORTED = BEST
+      END IF
+      WRITE(LINE, '(A,A,A,I0,A,I0,A,I1,A,I0,A,I0,A,G0.12,A,G0.6)') &
+         'h2h_row system=', TRIM(SYSTEM), ' code=gmin seed=', SEED, &
+         ' budget=', CAP, ' hit=', HIT, ' evals_to_hit=', EVALS, &
+         ' charged=', CALLS, ' best=', REPORTED, ' wall_s=', WALL
+      WRITE(*, '(A)') TRIM(LINE)
+      CALL GET_ENVIRONMENT_VARIABLE('H2H_ROW', ROWFILE, LENGTH=N, STATUS=IOS)
+      IF (IOS == 0 .AND. N > 0) THEN
+         OPEN(NEWUNIT=UNIT, FILE=ROWFILE(1:N), STATUS='REPLACE', ACTION='WRITE', IOSTAT=IOS)
+         IF (IOS == 0) THEN
+            WRITE(UNIT, '(A)') TRIM(LINE)
+            CLOSE(UNIT)
+         END IF
+      END IF
+   END SUBROUTINE H2H_REPORT
+END MODULE H2H_CAP

@@ -7162,12 +7162,12 @@ mod tests {
     fn recommended_offers_the_energy_lattice_and_the_baseline_does_not() {
         let rec = search_kernels(&Config::recommended(104));
         assert!(
-            rec.iter().any(|kernel| kernel.name() == "dlattice"),
-            "recommended kernels: {:?}",
+            rec.iter().any(|kernel| kernel.name() == "dls-kernel"),
+            "recommended kernels miss the DLS-style exchange kernel: {:?}",
             rec.iter().map(|kernel| kernel.name()).collect::<Vec<_>>()
         );
         let base = search_kernels(&Config::for_cluster(104));
-        assert!(base.iter().all(|kernel| kernel.name() != "dlattice"));
+        assert!(base.iter().all(|kernel| kernel.name() != "dls-kernel"));
     }
 
     #[test]
