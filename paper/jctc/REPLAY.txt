@@ -1112,3 +1112,14 @@ The branch is refs/heads/paper-integration-v1.28.
 The archive of v1.27 follows.
 
 77a9e399660f2a54f2a5fd17e0da184f0c7312e0
+
+## v1.29
+
+v1.29 continues from abb65a5b.
+This pass adds generators, not another replay.
+The replay count stays seven.
+The push plan names refs/heads/paper-integration-v1.29.
+No archive ref is on that plan.
+v1.28 is archived at the sha below.
+
+abb65a5b47be2de02dad87a082e539525dba648b

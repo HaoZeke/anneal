@@ -242,14 +242,16 @@ That script submits the hexamer and stores each seed log.
 
 `paper/jctc/data/hq_sci_h2o6/TALLY.txt`
 
-No script in this tree writes that tally.
+The writer is `scripts/hq_sci_tally.py`.
 
-It is the raw count of those seed logs.
+The hexamer block matches the file in the tree.
+The copper block does not.
+No cuh2 rec log is in this tree.
 
 `paper/jctc/logs/figure-provenance.txt`
 
-The hash lines in that file have no writer script.
+`scripts/figure_provenance.py` writes the hash lines.
 
-They were committed as the blob compare.
-
-The water_crest.pdf sentences in that file are prose.
+That output is not the hash lines in the tree.
+Ten tip blobs differ.
+The sentences after those lines are prose.

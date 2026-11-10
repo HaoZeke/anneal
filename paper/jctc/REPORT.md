@@ -1,7 +1,7 @@
-# Report, v1.28
+# Report, v1.29
 
 We drew the eighteen figures with the committed generators.
-The branch is paper-integration-v1.28.
+The branch is paper-integration-v1.29.
 It starts from fd4e691db9152bea8086c2102af84a1b0ea39444.
 The inbox sums file has 359 rows.
 Its sha256 follows.
@@ -63,7 +63,9 @@ Those constants give the committed -197.7750 kJ/mol reported here.
 
 ## Bundle
 
-The bundle ref is refs/heads/paper-integration-v1.28.
+The bundle ref is refs/heads/paper-integration-v1.29.
+It also carries refs/archive/paper-integration-v1.28.
+That ref is abb65a5b47be2de02dad87a082e539525dba648b.
 It also carries refs/archive/paper-integration-v1.27.
 That ref is 77a9e399660f2a54f2a5fd17e0da184f0c7312e0.
 It also carries refs/archive/paper-integration-v1.26.
@@ -80,3 +82,20 @@ It also carries refs/archive/paper-integration-v1.18.
 That ref is 31e4535d5416223c1cbf0342348170a5ea002590.
 It also carries refs/archive/paper-integration-v1.15.
 That ref is 12de8866efaaf801853336302f972c5e0faa7966.
+
+## Generators
+
+`scripts/hq_sci_tally.py` reads the eight h2o6 rec logs.
+The hexamer block matches `data/hq_sci_h2o6/TALLY.txt`.
+The copper block does not.
+No cuh2 rec log is in this tree.
+The regenerated tally sha follows.
+
+ca33451735e77296e9a718c2ecbdf03c40af5781e0603a3e4475d75c462bac70
+
+`scripts/figure_provenance.py` hashes each PDF in `figs/`.
+That output is not the hash lines in the tree.
+Ten tip blobs differ, because the figures were redrawn later.
+The regenerated hash sha follows.
+
+80617359f51cbe43a5faf705a1cf6cb0dbffb95955b3ae9a0c69390146b8e5d0
