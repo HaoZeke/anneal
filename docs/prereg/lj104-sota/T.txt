@@ -1,0 +1,12 @@
+Copyright (c) anneal developers
+
+T is the clock time at the start of this panel.
+2026-11-10T17:21:15-0600.
+The rustc version line follows.
+rustc 1.88.0 (6b00bc388 2025-06-23).
+The cargo version line follows.
+cargo 1.88.0 (873a06493 2025-05-10).
+The wall-clock cap is 600 seconds for each process.
+That cap was stated before this run.
+The panel logs cover seeds 6000, 6001, 6002, 6003, 6004, and 6005 only.
+

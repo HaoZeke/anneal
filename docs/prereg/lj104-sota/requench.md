@@ -1,8 +1,8 @@
 Copyright (c) anneal developers
 
-We record the re-quenched panel below.
+We record the re-quenched panel in this note.
 We keep a hit as requenched_e <= E_known + 1e-6.
-We store the call counts below.
+We store the call counts in this note.
 We leave each seed row unchanged.
 requench_calls are the WarmLbfgs::minimize evaluations.
 They are not search calls.

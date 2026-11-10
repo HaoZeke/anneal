@@ -11,4 +11,4 @@ geometry_energy: -173.9283968304
 best: -173.2523784099
 hops: 402
 basins: 50
-wall_seconds: 0.796
+wall_seconds: 0.866

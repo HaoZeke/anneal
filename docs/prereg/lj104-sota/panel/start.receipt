@@ -1,5 +1,15 @@
 boot_id b3fc2d5f-65ed-490e-ba1a-5f1ba891ad20
-uptime 1741.25 12568.27
+uptime 15986.91 123373.58
+rustc 1.88.0 (6b00bc388 2025-06-23)
+cargo 1.88.0 (873a06493 2025-05-10)
+cpu MHz		: 2400.000
+cpu MHz		: 2400.000
+cpu MHz		: 2400.000
+cpu MHz		: 2400.000
+cpu MHz		: 2400.000
+cpu MHz		: 2400.000
+cpu MHz		: 2400.000
+cpu MHz		: 2400.000
 Architecture:                            x86_64
 CPU op-mode(s):                          32-bit, 64-bit
 Address sizes:                           46 bits physical, 57 bits virtual

@@ -1,2 +1,2 @@
-elapsed_seconds 272.528144
+elapsed_seconds 292.847747
 runs 24
