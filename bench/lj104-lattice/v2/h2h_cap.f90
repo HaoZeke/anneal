@@ -1,5 +1,6 @@
 ! Evaluator cap for a counted comparison.
 ! One entry to POTENTIAL is one evaluation, the same unit the
+! Copyright (c) anneal developers
 ! annealing ledger charges for an energy and gradient pair.
 ! The cap is read from the environment. With H2H_BUDGET unset
 ! the module stays idle and a normal GMIN run is unchanged.

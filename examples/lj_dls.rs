@@ -1,3 +1,4 @@
+// Copyright (c) anneal developers
 //! One published dynamic-lattice search at a charged budget.
 //!
 //! Usage:

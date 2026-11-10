@@ -1,3 +1,4 @@
+// Copyright (c) anneal developers
 //! Published dynamic lattice search.
 //!
 //! Shao, Cheng and Cai, J. Comput. Chem. 25, 1693 (2004),
