@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 import os
 import re
+import sys
 from pathlib import Path
 
 # Polished gap is anneal minus CREST, in hartree.
@@ -120,3 +121,21 @@ def walls(rows: dict[int, dict[str, float]]) -> dict[str, tuple[float, float]]:
             ("old", "wall_old"),
         )
     }
+
+
+def main() -> None:
+    """Print the wall-time receipt."""
+    stats = walls(load())
+    lines = [
+        "command python3 paper/jctc/scripts/hexamer_numbers.py",
+        "source logs/water",
+        "median_iqr type-7",
+    ]
+    for name in ("crest", "eval4000", "old"):
+        median, iqr = stats[name]
+        lines.append(f"{name} median {median:.10f} iqr {iqr:.10f}")
+    sys.stdout.write("\n".join(lines) + "\n")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,6 @@
+command python3 paper/jctc/scripts/hexamer_numbers.py
+source logs/water
+median_iqr type-7
+crest median 544.0265440000 iqr 52.1750250000
+eval4000 median 18.8496550000 iqr 2.0860862500
+old median 195.4883440000 iqr 72.4347560000
