@@ -6,6 +6,10 @@
 
 configfile: "config/elja_lj.yaml"
 
+# ASE and AGOX paper board. The Elja target above does not request it.
+# Production numbers come from `snakemake -s workflow/lj_board.smk -j 1 lj_numbers`.
+include: "lj_board.smk"
+
 
 SIZES = [s.strip() for s in str(config.get("sizes", "")).split(",") if s.strip()]
 SEEDS = [s.strip() for s in str(config.get("seeds", "")).split(",") if s.strip()]

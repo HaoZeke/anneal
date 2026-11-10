@@ -1,0 +1,9 @@
+# Frozen evaluation seeds for the Lennard-Jones board.
+# Written before any run on this branch.
+# Six seeds. No seed is added or removed after a run.
+6400
+6401
+6402
+6403
+6404
+6405
