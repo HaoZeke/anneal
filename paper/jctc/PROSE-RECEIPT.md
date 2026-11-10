@@ -219,3 +219,37 @@ paper/jctc/toc-graphic.tex:4
 Copyright (c) anneal developers
 
 ```
+
+## Non-prose
+
+The class name is non-prose: raw run record.
+These lines stay as the run wrote them.
+No checker is changed.
+
+`paper/jctc/data/hq_sci_h2o6/h2o6_rec_0.txt`
+`paper/jctc/data/hq_sci_h2o6/h2o6_rec_1.txt`
+`paper/jctc/data/hq_sci_h2o6/h2o6_rec_2.txt`
+`paper/jctc/data/hq_sci_h2o6/h2o6_rec_3.txt`
+`paper/jctc/data/hq_sci_h2o6/h2o6_rec_4.txt`
+`paper/jctc/data/hq_sci_h2o6/h2o6_rec_5.txt`
+`paper/jctc/data/hq_sci_h2o6/h2o6_rec_6.txt`
+`paper/jctc/data/hq_sci_h2o6/h2o6_rec_7.txt`
+`paper/jctc/data/hq_sci_h2o6/h2o6_rec_7_rerun.txt`
+
+The writer is `scripts/elja_hq_sci_mol.sh`.
+
+That script submits the hexamer and stores each seed log.
+
+`paper/jctc/data/hq_sci_h2o6/TALLY.txt`
+
+No script in this tree writes that tally.
+
+It is the raw count of those seed logs.
+
+`paper/jctc/logs/figure-provenance.txt`
+
+The hash lines in that file have no writer script.
+
+They were committed as the blob compare.
+
+The water_crest.pdf sentences in that file are prose.
