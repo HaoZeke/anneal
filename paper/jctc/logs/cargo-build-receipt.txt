@@ -1,9 +1,10 @@
-UTC 2026-11-09T21:08:10Z
-HEAD e18f6b2225aaaf5aa291d057933449419758ea13
-TREE 9589b281279ae3d2999628ac89eb54f87fab4811
+UTC 2026-11-09T21:51:04Z
+HEAD 9f2f5577ee73ee8626c0abcd10b9c1b1e2a1addb
+TREE a43eca92b2d3a8f558f31470d467d3db62262987
+VESIN 5ac39b6e57a8f00c717f08c83f93ee4746d6e471
 command cargo +stable build --all-targets --locked
-   Compiling anneal-core v0.12.0 (./wt-v149)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.05s
+   Compiling anneal-core v0.12.0 (.)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 20.94s
 EXIT:0
 command cargo +stable build --all-targets --all-features --locked
 warning: struct `BindgenCallbacks` is never constructed
@@ -15,24 +16,6 @@ warning: struct `BindgenCallbacks` is never constructed
     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
 
 warning: `nng-sys` (build script) generated 1 warning
-   Compiling nng-sys v1.4.0-rc.0 (./wt-v149/vendor/nng-sys)
-   Compiling readcon-db v0.1.5
-   Compiling nauty-pet v0.14.2
-   Compiling featomic v0.6.0
-   Compiling anneal-core v0.12.0 (./wt-v149)
-   Compiling rgsaddle v0.3.0
-   Compiling toml v0.8.23
-   Compiling rgpot-core v3.5.1
-error: failed to run custom build command for `anneal-core v0.12.0 (./wt-v149)`
-
-Caused by:
-  process didn't exit successfully: `./wt-v149/target/debug/build/anneal-core-2c559a1de848fa78/build-script-build` (exit status: 101)
-  --- stderr
-
-  thread 'main' (193242) panicked at build.rs:7:14:
-  feature `vesin-nl` requires VESIN_SRC pointing at a vesin checkout: NotPresent
-  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-warning: build failed, waiting for other jobs to finish...
 warning: unexpected `cfg` condition name: `try_from`
   --> vendor/nng-sys/src/lib.rs:65:7
    |
@@ -114,10 +97,592 @@ warning: unexpected `cfg` condition name: `try_from`
     = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
 
 warning: `nng-sys` (lib) generated 6 warnings
+   Compiling anneal-core v0.12.0 (.)
+warning: use of deprecated constant `std::i32::MAX`: replaced by the `MAX` associated constant on this type
+   --> vendor/nng/src/util.rs:176:32
+    |
+176 | ...   let secs = if d.as_secs() > MAX as u64 { MAX } else { d.as_secs()...
+    |                                   ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated constant `std::i32::MAX`: replaced by the `MAX` associated constant on this type
+   --> vendor/nng/src/util.rs:176:45
+    |
+176 | ...   let secs = if d.as_secs() > MAX as u64 { MAX } else { d.as_secs()...
+    |                                                ^^^
+
+warning: use of deprecated constant `std::i32::MAX`: replaced by the `MAX` associated constant on this type
+   --> vendor/nng/src/util.rs:171:16
+    |
+171 |     use std::i32::MAX;
+    |                   ^^^
+
+warning: `nng` (lib) generated 3 warnings
+warning: anneal-core@0.12.0: In file included from ./.ci/vesin/vesin/src/cpu_cell_list.hpp:9,
+warning: anneal-core@0.12.0:                  from ./.ci/vesin/vesin/src/vesin.cpp:10:
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp: In constructor 'vesin::BoundingBox::BoundingBox(vesin::Matrix, const bool*)':
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:208:12: warning: 'vesin::BoundingBox::max_positions_' will be initialized after [-Wreorder]
+warning: anneal-core@0.12.0:   208 |     Vector max_positions_;
+warning: anneal-core@0.12.0:       |            ^~~~~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:207:12: warning:   'vesin::Vector vesin::BoundingBox::min_positions_' [-Wreorder]
+warning: anneal-core@0.12.0:   207 |     Vector min_positions_;
+warning: anneal-core@0.12.0:       |            ^~~~~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:20:5: warning:   when initialized here [-Wreorder]
+warning: anneal-core@0.12.0:    20 |     BoundingBox(Matrix matrix, const bool periodic[3]):
+warning: anneal-core@0.12.0:       |     ^~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin.cpp: In function 'void vesin_free(VesinNeighborList*)':
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin.cpp:178:16: warning: 'void* memset(void*, int, size_t)' clearing an object of non-trivial type 'struct VesinNeighborList'; use assignment or value-initialization instead [-Wclass-memaccess]
+warning: anneal-core@0.12.0:   178 |     std::memset(neighbors, 0, sizeof(VesinNeighborList));
+warning: anneal-core@0.12.0:       |     ~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+warning: anneal-core@0.12.0: In file included from ./.ci/vesin/vesin/src/cpu_cell_list.hpp:7:
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/include/vesin.h:128:18: note: 'struct VesinNeighborList' declared here
+warning: anneal-core@0.12.0:   128 | struct VESIN_API VesinNeighborList {
+warning: anneal-core@0.12.0:       |                  ^~~~~~~~~~~~~~~~~
+warning: anneal-core@0.12.0: In file included from ./.ci/vesin/vesin/src/cpu_cell_list.hpp:9,
+warning: anneal-core@0.12.0:                  from ./.ci/vesin/vesin/src/cpu_cell_list.cpp:10:
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp: In constructor 'vesin::BoundingBox::BoundingBox(vesin::Matrix, const bool*)':
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:208:12: warning: 'vesin::BoundingBox::max_positions_' will be initialized after [-Wreorder]
+warning: anneal-core@0.12.0:   208 |     Vector max_positions_;
+warning: anneal-core@0.12.0:       |            ^~~~~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:207:12: warning:   'vesin::Vector vesin::BoundingBox::min_positions_' [-Wreorder]
+warning: anneal-core@0.12.0:   207 |     Vector min_positions_;
+warning: anneal-core@0.12.0:       |            ^~~~~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:20:5: warning:   when initialized here [-Wreorder]
+warning: anneal-core@0.12.0:    20 |     BoundingBox(Matrix matrix, const bool periodic[3]):
+warning: anneal-core@0.12.0:       |     ^~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/cpu_cell_list.cpp: At global scope:
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/cpu_cell_list.cpp:262:1: warning: 'std::tuple<std::array<int, 3>, std::array<int, 3> > divmod(std::array<int, 3>, std::array<long unsigned int, 3>)' defined but not used [-Wunused-function]
+warning: anneal-core@0.12.0:   262 | divmod(std::array<int32_t, 3> a, std::array<size_t, 3> b) {
+warning: anneal-core@0.12.0:       | ^~~~~~
+warning: anneal-core@0.12.0: In file included from ./.ci/vesin/vesin/src/cpu_cell_list.hpp:9,
+warning: anneal-core@0.12.0:                  from ./.ci/vesin/vesin/src/verlet.cpp:5:
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp: In constructor 'vesin::BoundingBox::BoundingBox(vesin::Matrix, const bool*)':
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:208:12: warning: 'vesin::BoundingBox::max_positions_' will be initialized after [-Wreorder]
+warning: anneal-core@0.12.0:   208 |     Vector max_positions_;
+warning: anneal-core@0.12.0:       |            ^~~~~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:207:12: warning:   'vesin::Vector vesin::BoundingBox::min_positions_' [-Wreorder]
+warning: anneal-core@0.12.0:   207 |     Vector min_positions_;
+warning: anneal-core@0.12.0:       |            ^~~~~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:20:5: warning:   when initialized here [-Wreorder]
+warning: anneal-core@0.12.0:    20 |     BoundingBox(Matrix matrix, const bool periodic[3]):
+warning: anneal-core@0.12.0:       |     ^~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp: In function 'void vesin::cuda::free_neighbors(VesinNeighborList&)':
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:5:53: warning: unused parameter 'neighbors' [-Wunused-parameter]
+warning: anneal-core@0.12.0:     5 | void vesin::cuda::free_neighbors(VesinNeighborList& neighbors) {
+warning: anneal-core@0.12.0:       |                                  ~~~~~~~~~~~~~~~~~~~^~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp: In function 'void vesin::cuda::neighbors(const double (*)[3], size_t, const double (*)[3], const bool*, VesinOptions, VesinNeighborList&)':
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:10:20: warning: unused parameter 'points' [-Wunused-parameter]
+warning: anneal-core@0.12.0:    10 |     const double (*points)[3],
+warning: anneal-core@0.12.0:       |     ~~~~~~~~~~~~~~~^~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:11:12: warning: unused parameter 'n_points' [-Wunused-parameter]
+warning: anneal-core@0.12.0:    11 |     size_t n_points,
+warning: anneal-core@0.12.0:       |     ~~~~~~~^~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:12:18: warning: unused parameter 'box' [-Wunused-parameter]
+warning: anneal-core@0.12.0:    12 |     const double box[3][3],
+warning: anneal-core@0.12.0:       |     ~~~~~~~~~~~~~^~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:13:16: warning: unused parameter 'periodic' [-Wunused-parameter]
+warning: anneal-core@0.12.0:    13 |     const bool periodic[3],
+warning: anneal-core@0.12.0:       |     ~~~~~~~~~~~^~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:14:18: warning: unused parameter 'options' [-Wunused-parameter]
+warning: anneal-core@0.12.0:    14 |     VesinOptions options,
+warning: anneal-core@0.12.0:       |     ~~~~~~~~~~~~~^~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:15:24: warning: unused parameter 'neighbors' [-Wunused-parameter]
+warning: anneal-core@0.12.0:    15 |     VesinNeighborList& neighbors
+warning: anneal-core@0.12.0:       |     ~~~~~~~~~~~~~~~~~~~^~~~~~~~~
+error: failed to run custom build command for `anneal-core v0.12.0 (.)`
+
+Caused by:
+  process didn't exit successfully: `./target/debug/build/anneal-core-2c559a1de848fa78/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+  CC_FORCE_DISABLE = None
+  cargo:rerun-if-env-changed=CXX_x86_64-unknown-linux-gnu
+  CXX_x86_64-unknown-linux-gnu = None
+  cargo:rerun-if-env-changed=CXX_x86_64_unknown_linux_gnu
+  CXX_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=HOST_CXX
+  HOST_CXX = None
+  cargo:rerun-if-env-changed=CXX
+  CXX = Some(g++)
+  cargo:rerun-if-env-changed=CC_KNOWN_WRAPPER_CUSTOM
+  CC_KNOWN_WRAPPER_CUSTOM = None
+  cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+  cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+  CRATE_CC_NO_DEFAULTS = None
+  cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+  cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+  CRATE_CC_NO_DEFAULTS = None
+  cargo:rerun-if-env-changed=CXXFLAGS
+  CXXFLAGS = None
+  cargo:rerun-if-env-changed=HOST_CXXFLAGS
+  HOST_CXXFLAGS = None
+  cargo:rerun-if-env-changed=CXXFLAGS_x86_64_unknown_linux_gnu
+  CXXFLAGS_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=CXXFLAGS_x86_64-unknown-linux-gnu
+  CXXFLAGS_x86_64-unknown-linux-gnu = None
+  cargo:rerun-if-env-changed=CXXFLAGS
+  CXXFLAGS = None
+  cargo:rerun-if-env-changed=HOST_CXXFLAGS
+  HOST_CXXFLAGS = None
+  cargo:rerun-if-env-changed=CXXFLAGS_x86_64_unknown_linux_gnu
+  CXXFLAGS_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=CXXFLAGS_x86_64-unknown-linux-gnu
+  CXXFLAGS_x86_64-unknown-linux-gnu = None
+  cargo:warning=In file included from ./.ci/vesin/vesin/src/cpu_cell_list.hpp:9,
+  cargo:warning=                 from ./.ci/vesin/vesin/src/vesin.cpp:10:
+  cargo:warning=./.ci/vesin/vesin/src/types.hpp: In constructor 'vesin::BoundingBox::BoundingBox(vesin::Matrix, const bool*)':
+  cargo:warning=./.ci/vesin/vesin/src/types.hpp:208:12: warning: 'vesin::BoundingBox::max_positions_' will be initialized after [-Wreorder]
+  cargo:warning=  208 |     Vector max_positions_;
+  cargo:warning=      |            ^~~~~~~~~~~~~~
+  cargo:warning=./.ci/vesin/vesin/src/types.hpp:207:12: warning:   'vesin::Vector vesin::BoundingBox::min_positions_' [-Wreorder]
+  cargo:warning=  207 |     Vector min_positions_;
+  cargo:warning=      |            ^~~~~~~~~~~~~~
+  cargo:warning=./.ci/vesin/vesin/src/types.hpp:20:5: warning:   when initialized here [-Wreorder]
+  cargo:warning=   20 |     BoundingBox(Matrix matrix, const bool periodic[3]):
+  cargo:warning=      |     ^~~~~~~~~~~
+  cargo:warning=./.ci/vesin/vesin/src/vesin.cpp: In function 'void vesin_free(VesinNeighborList*)':
+  cargo:warning=./.ci/vesin/vesin/src/vesin.cpp:178:16: warning: 'void* memset(void*, int, size_t)' clearing an object of non-trivial type 'struct VesinNeighborList'; use assignment or value-initialization instead [-Wclass-memaccess]
+  cargo:warning=  178 |     std::memset(neighbors, 0, sizeof(VesinNeighborList));
+  cargo:warning=      |     ~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  cargo:warning=In file included from ./.ci/vesin/vesin/src/cpu_cell_list.hpp:7:
+  cargo:warning=./.ci/vesin/vesin/include/vesin.h:128:18: note: 'struct VesinNeighborList' declared here
+  cargo:warning=  128 | struct VESIN_API VesinNeighborList {
+  cargo:warning=      |                  ^~~~~~~~~~~~~~~~~
+  cargo:rerun-if-env-changed=CXX_x86_64-unknown-linux-gnu
+  CXX_x86_64-unknown-linux-gnu = None
+  cargo:rerun-if-env-changed=CXX_x86_64_unknown_linux_gnu
+  CXX_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=HOST_CXX
+  HOST_CXX = None
+  cargo:rerun-if-env-changed=CXX
+  CXX = Some(g++)
+  cargo:rerun-if-env-changed=CC_KNOWN_WRAPPER_CUSTOM
+  CC_KNOWN_WRAPPER_CUSTOM = None
+  cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+  CRATE_CC_NO_DEFAULTS = None
+  cargo:rerun-if-env-changed=CXXFLAGS
+  CXXFLAGS = None
+  cargo:rerun-if-env-changed=HOST_CXXFLAGS
+  HOST_CXXFLAGS = None
+  cargo:rerun-if-env-changed=CXXFLAGS_x86_64_unknown_linux_gnu
+  CXXFLAGS_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=CXXFLAGS_x86_64-unknown-linux-gnu
+  CXXFLAGS_x86_64-unknown-linux-gnu = None
+  cargo:warning=In file included from ./.ci/vesin/vesin/src/cpu_cell_list.hpp:9,
+  cargo:warning=                 from ./.ci/vesin/vesin/src/cpu_cell_list.cpp:10:
+  cargo:warning=./.ci/vesin/vesin/src/types.hpp: In constructor 'vesin::BoundingBox::BoundingBox(vesin::Matrix, const bool*)':
+  cargo:warning=./.ci/vesin/vesin/src/types.hpp:208:12: warning: 'vesin::BoundingBox::max_positions_' will be initialized after [-Wreorder]
+  cargo:warning=  208 |     Vector max_positions_;
+  cargo:warning=      |            ^~~~~~~~~~~~~~
+  cargo:warning=./.ci/vesin/vesin/src/types.hpp:207:12: warning:   'vesin::Vector vesin::BoundingBox::min_positions_' [-Wreorder]
+  cargo:warning=  207 |     Vector min_positions_;
+  cargo:warning=      |            ^~~~~~~~~~~~~~
+  cargo:warning=./.ci/vesin/vesin/src/types.hpp:20:5: warning:   when initialized here [-Wreorder]
+  cargo:warning=   20 |     BoundingBox(Matrix matrix, const bool periodic[3]):
+  cargo:warning=      |     ^~~~~~~~~~~
+  cargo:warning=./.ci/vesin/vesin/src/cpu_cell_list.cpp: At global scope:
+  cargo:warning=./.ci/vesin/vesin/src/cpu_cell_list.cpp:262:1: warning: 'std::tuple<std::array<int, 3>, std::array<int, 3> > divmod(std::array<int, 3>, std::array<long unsigned int, 3>)' defined but not used [-Wunused-function]
+  cargo:warning=  262 | divmod(std::array<int32_t, 3> a, std::array<size_t, 3> b) {
+  cargo:warning=      | ^~~~~~
+  cargo:rerun-if-env-changed=CXX_x86_64-unknown-linux-gnu
+  CXX_x86_64-unknown-linux-gnu = None
+  cargo:rerun-if-env-changed=CXX_x86_64_unknown_linux_gnu
+  CXX_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=HOST_CXX
+  HOST_CXX = None
+  cargo:rerun-if-env-changed=CXX
+  CXX = Some(g++)
+  cargo:rerun-if-env-changed=CC_KNOWN_WRAPPER_CUSTOM
+  CC_KNOWN_WRAPPER_CUSTOM = None
+  cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+  CRATE_CC_NO_DEFAULTS = None
+  cargo:rerun-if-env-changed=CXXFLAGS
+  CXXFLAGS = None
+  cargo:rerun-if-env-changed=HOST_CXXFLAGS
+  HOST_CXXFLAGS = None
+  cargo:rerun-if-env-changed=CXXFLAGS_x86_64_unknown_linux_gnu
+  CXXFLAGS_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=CXXFLAGS_x86_64-unknown-linux-gnu
+  CXXFLAGS_x86_64-unknown-linux-gnu = None
+  cargo:warning=In file included from ./.ci/vesin/vesin/src/cpu_cell_list.hpp:9,
+  cargo:warning=                 from ./.ci/vesin/vesin/src/verlet.cpp:5:
+  cargo:warning=./.ci/vesin/vesin/src/types.hpp: In constructor 'vesin::BoundingBox::BoundingBox(vesin::Matrix, const bool*)':
+  cargo:warning=./.ci/vesin/vesin/src/types.hpp:208:12: warning: 'vesin::BoundingBox::max_positions_' will be initialized after [-Wreorder]
+  cargo:warning=  208 |     Vector max_positions_;
+  cargo:warning=      |            ^~~~~~~~~~~~~~
+  cargo:warning=./.ci/vesin/vesin/src/types.hpp:207:12: warning:   'vesin::Vector vesin::BoundingBox::min_positions_' [-Wreorder]
+  cargo:warning=  207 |     Vector min_positions_;
+  cargo:warning=      |            ^~~~~~~~~~~~~~
+  cargo:warning=./.ci/vesin/vesin/src/types.hpp:20:5: warning:   when initialized here [-Wreorder]
+  cargo:warning=   20 |     BoundingBox(Matrix matrix, const bool periodic[3]):
+  cargo:warning=      |     ^~~~~~~~~~~
+  cargo:rerun-if-env-changed=CXX_x86_64-unknown-linux-gnu
+  CXX_x86_64-unknown-linux-gnu = None
+  cargo:rerun-if-env-changed=CXX_x86_64_unknown_linux_gnu
+  CXX_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=HOST_CXX
+  HOST_CXX = None
+  cargo:rerun-if-env-changed=CXX
+  CXX = Some(g++)
+  cargo:rerun-if-env-changed=CC_KNOWN_WRAPPER_CUSTOM
+  CC_KNOWN_WRAPPER_CUSTOM = None
+  cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+  CRATE_CC_NO_DEFAULTS = None
+  cargo:rerun-if-env-changed=CXXFLAGS
+  CXXFLAGS = None
+  cargo:rerun-if-env-changed=HOST_CXXFLAGS
+  HOST_CXXFLAGS = None
+  cargo:rerun-if-env-changed=CXXFLAGS_x86_64_unknown_linux_gnu
+  CXXFLAGS_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=CXXFLAGS_x86_64-unknown-linux-gnu
+  CXXFLAGS_x86_64-unknown-linux-gnu = None
+  cargo:rerun-if-env-changed=CXX_x86_64-unknown-linux-gnu
+  CXX_x86_64-unknown-linux-gnu = None
+  cargo:rerun-if-env-changed=CXX_x86_64_unknown_linux_gnu
+  CXX_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=HOST_CXX
+  HOST_CXX = None
+  cargo:rerun-if-env-changed=CXX
+  CXX = Some(g++)
+  cargo:rerun-if-env-changed=CC_KNOWN_WRAPPER_CUSTOM
+  CC_KNOWN_WRAPPER_CUSTOM = None
+  cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+  CRATE_CC_NO_DEFAULTS = None
+  cargo:rerun-if-env-changed=CXXFLAGS
+  CXXFLAGS = None
+  cargo:rerun-if-env-changed=HOST_CXXFLAGS
+  HOST_CXXFLAGS = None
+  cargo:rerun-if-env-changed=CXXFLAGS_x86_64_unknown_linux_gnu
+  CXXFLAGS_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=CXXFLAGS_x86_64-unknown-linux-gnu
+  CXXFLAGS_x86_64-unknown-linux-gnu = None
+  cargo:rerun-if-env-changed=CXX_x86_64-unknown-linux-gnu
+  CXX_x86_64-unknown-linux-gnu = None
+  cargo:rerun-if-env-changed=CXX_x86_64_unknown_linux_gnu
+  CXX_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=HOST_CXX
+  HOST_CXX = None
+  cargo:rerun-if-env-changed=CXX
+  CXX = Some(g++)
+  cargo:rerun-if-env-changed=CC_KNOWN_WRAPPER_CUSTOM
+  CC_KNOWN_WRAPPER_CUSTOM = None
+  cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+  CRATE_CC_NO_DEFAULTS = None
+  cargo:rerun-if-env-changed=CXXFLAGS
+  CXXFLAGS = None
+  cargo:rerun-if-env-changed=HOST_CXXFLAGS
+  HOST_CXXFLAGS = None
+  cargo:rerun-if-env-changed=CXXFLAGS_x86_64_unknown_linux_gnu
+  CXXFLAGS_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=CXXFLAGS_x86_64-unknown-linux-gnu
+  CXXFLAGS_x86_64-unknown-linux-gnu = None
+  cargo:warning=./.ci/vesin/vesin/src/vesin_cuda_stub.cpp: In function 'void vesin::cuda::free_neighbors(VesinNeighborList&)':
+  cargo:warning=./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:5:53: warning: unused parameter 'neighbors' [-Wunused-parameter]
+  cargo:warning=    5 | void vesin::cuda::free_neighbors(VesinNeighborList& neighbors) {
+  cargo:warning=      |                                  ~~~~~~~~~~~~~~~~~~~^~~~~~~~~
+  cargo:warning=./.ci/vesin/vesin/src/vesin_cuda_stub.cpp: In function 'void vesin::cuda::neighbors(const double (*)[3], size_t, const double (*)[3], const bool*, VesinOptions, VesinNeighborList&)':
+  cargo:warning=./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:10:20: warning: unused parameter 'points' [-Wunused-parameter]
+  cargo:warning=   10 |     const double (*points)[3],
+  cargo:warning=      |     ~~~~~~~~~~~~~~~^~~~~~~~~~
+  cargo:warning=./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:11:12: warning: unused parameter 'n_points' [-Wunused-parameter]
+  cargo:warning=   11 |     size_t n_points,
+  cargo:warning=      |     ~~~~~~~^~~~~~~~
+  cargo:warning=./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:12:18: warning: unused parameter 'box' [-Wunused-parameter]
+  cargo:warning=   12 |     const double box[3][3],
+  cargo:warning=      |     ~~~~~~~~~~~~~^~~~~~~~~
+  cargo:warning=./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:13:16: warning: unused parameter 'periodic' [-Wunused-parameter]
+  cargo:warning=   13 |     const bool periodic[3],
+  cargo:warning=      |     ~~~~~~~~~~~^~~~~~~~~~~
+  cargo:warning=./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:14:18: warning: unused parameter 'options' [-Wunused-parameter]
+  cargo:warning=   14 |     VesinOptions options,
+  cargo:warning=      |     ~~~~~~~~~~~~~^~~~~~~
+  cargo:warning=./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:15:24: warning: unused parameter 'neighbors' [-Wunused-parameter]
+  cargo:warning=   15 |     VesinNeighborList& neighbors
+  cargo:warning=      |     ~~~~~~~~~~~~~~~~~~~^~~~~~~~~
+  cargo:rerun-if-env-changed=AR_x86_64-unknown-linux-gnu
+  AR_x86_64-unknown-linux-gnu = None
+  cargo:rerun-if-env-changed=AR_x86_64_unknown_linux_gnu
+  AR_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=HOST_AR
+  HOST_AR = None
+  cargo:rerun-if-env-changed=AR
+  AR = None
+  cargo:rerun-if-env-changed=ARFLAGS
+  ARFLAGS = None
+  cargo:rerun-if-env-changed=HOST_ARFLAGS
+  HOST_ARFLAGS = None
+  cargo:rerun-if-env-changed=ARFLAGS_x86_64_unknown_linux_gnu
+  ARFLAGS_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=ARFLAGS_x86_64-unknown-linux-gnu
+  ARFLAGS_x86_64-unknown-linux-gnu = None
+  cargo:rerun-if-env-changed=AR_x86_64-unknown-linux-gnu
+  AR_x86_64-unknown-linux-gnu = None
+  cargo:rerun-if-env-changed=AR_x86_64_unknown_linux_gnu
+  AR_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=HOST_AR
+  HOST_AR = None
+  cargo:rerun-if-env-changed=AR
+  AR = None
+  cargo:rerun-if-env-changed=ARFLAGS
+  ARFLAGS = None
+  cargo:rerun-if-env-changed=HOST_ARFLAGS
+  HOST_ARFLAGS = None
+  cargo:rerun-if-env-changed=ARFLAGS_x86_64_unknown_linux_gnu
+  ARFLAGS_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=ARFLAGS_x86_64-unknown-linux-gnu
+  ARFLAGS_x86_64-unknown-linux-gnu = None
+  cargo:rustc-link-lib=static=vesin
+  cargo:rustc-link-search=native=./target/debug/build/anneal-core-0f1505631b94f67e/out
+  cargo:rerun-if-env-changed=CXXSTDLIB_x86_64-unknown-linux-gnu
+  CXXSTDLIB_x86_64-unknown-linux-gnu = None
+  cargo:rerun-if-env-changed=CXXSTDLIB_x86_64_unknown_linux_gnu
+  CXXSTDLIB_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=HOST_CXXSTDLIB
+  HOST_CXXSTDLIB = None
+  cargo:rerun-if-env-changed=CXXSTDLIB
+  CXXSTDLIB = None
+  cargo:rustc-link-lib=stdc++
+  cargo:rerun-if-env-changed=VESIN_SRC
+  cargo:rerun-if-changed=cbindgen.toml
+  cargo:rerun-if-changed=include/
+
+  --- stderr
+
+  thread 'main' (240899) panicked at build.rs:39:14:
+  feature `lammps` requires LAMMPS_LIB_DIR pointing at liblammps: NotPresent
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 EXIT:101
-command cargo +stable bench --no-run
-   Compiling anneal-core v0.12.0 (./wt-v149)
-    Finished `bench` profile [optimized] target(s) in 1m 14s
+ira needs IRA_LIB_DIR and libira, which are absent
+lammps needs LAMMPS_LIB_DIR and liblammps, which are absent
+gpr needs GPR_OPTIM_LIB_DIR and libgpr_optim, which are absent
+command cargo +stable build --all-targets --features graphkey,featomic,vesin-nl,bank-rpc,history-nng,rgsaddle,capi,python,rgpot-ex --locked
+warning: struct `BindgenCallbacks` is never constructed
+   --> vendor/nng-sys/build.rs:145:8
+    |
+145 | struct BindgenCallbacks;
+    |        ^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `nng-sys` (build script) generated 1 warning
+warning: unexpected `cfg` condition name: `try_from`
+  --> vendor/nng-sys/src/lib.rs:65:7
+   |
+65 | #[cfg(try_from)]
+   |       ^^^^^^^^
+   |
+   = help: expected names are: `docsrs`, `feature`, and `test` and 34 more
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(try_from)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(try_from)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+   = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition name: `try_from`
+   --> vendor/nng-sys/src/lib.rs:102:7
+    |
+102 | #[cfg(try_from)]
+    |       ^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(try_from)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(try_from)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `try_from`
+   --> vendor/nng-sys/src/lib.rs:105:7
+    |
+105 | #[cfg(try_from)]
+    |       ^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(try_from)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(try_from)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `try_from`
+   --> vendor/nng-sys/src/lib.rs:129:7
+    |
+129 | #[cfg(try_from)]
+    |       ^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(try_from)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(try_from)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `try_from`
+   --> vendor/nng-sys/src/lib.rs:152:7
+    |
+152 | #[cfg(try_from)]
+    |       ^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(try_from)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(try_from)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `try_from`
+   --> vendor/nng-sys/src/lib.rs:175:7
+    |
+175 | #[cfg(try_from)]
+    |       ^^^^^^^^
+    |
+    = help: consider using a Cargo feature instead
+    = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+             [lints.rust]
+             unexpected_cfgs = { level = "warn", check-cfg = ['cfg(try_from)'] }
+    = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(try_from)");` to the top of the `build.rs`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: `nng-sys` (lib) generated 6 warnings
+warning: use of deprecated constant `std::i32::MAX`: replaced by the `MAX` associated constant on this type
+   --> vendor/nng/src/util.rs:176:32
+    |
+176 | ...   let secs = if d.as_secs() > MAX as u64 { MAX } else { d.as_secs()...
+    |                                   ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated constant `std::i32::MAX`: replaced by the `MAX` associated constant on this type
+   --> vendor/nng/src/util.rs:176:45
+    |
+176 | ...   let secs = if d.as_secs() > MAX as u64 { MAX } else { d.as_secs()...
+    |                                                ^^^
+
+warning: use of deprecated constant `std::i32::MAX`: replaced by the `MAX` associated constant on this type
+   --> vendor/nng/src/util.rs:171:16
+    |
+171 |     use std::i32::MAX;
+    |                   ^^^
+
+warning: anneal-core@0.12.0: In file included from ./.ci/vesin/vesin/src/cpu_cell_list.hpp:9,
+warning: anneal-core@0.12.0:                  from ./.ci/vesin/vesin/src/vesin.cpp:10:
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp: In constructor 'vesin::BoundingBox::BoundingBox(vesin::Matrix, const bool*)':
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:208:12: warning: 'vesin::BoundingBox::max_positions_' will be initialized after [-Wreorder]
+warning: anneal-core@0.12.0:   208 |     Vector max_positions_;
+warning: anneal-core@0.12.0:       |            ^~~~~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:207:12: warning:   'vesin::Vector vesin::BoundingBox::min_positions_' [-Wreorder]
+warning: anneal-core@0.12.0:   207 |     Vector min_positions_;
+warning: anneal-core@0.12.0:       |            ^~~~~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:20:5: warning:   when initialized here [-Wreorder]
+warning: anneal-core@0.12.0:    20 |     BoundingBox(Matrix matrix, const bool periodic[3]):
+warning: anneal-core@0.12.0:       |     ^~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin.cpp: In function 'void vesin_free(VesinNeighborList*)':
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin.cpp:178:16: warning: 'void* memset(void*, int, size_t)' clearing an object of non-trivial type 'struct VesinNeighborList'; use assignment or value-initialization instead [-Wclass-memaccess]
+warning: anneal-core@0.12.0:   178 |     std::memset(neighbors, 0, sizeof(VesinNeighborList));
+warning: anneal-core@0.12.0:       |     ~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+warning: anneal-core@0.12.0: In file included from ./.ci/vesin/vesin/src/cpu_cell_list.hpp:7:
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/include/vesin.h:128:18: note: 'struct VesinNeighborList' declared here
+warning: anneal-core@0.12.0:   128 | struct VESIN_API VesinNeighborList {
+warning: anneal-core@0.12.0:       |                  ^~~~~~~~~~~~~~~~~
+warning: anneal-core@0.12.0: In file included from ./.ci/vesin/vesin/src/cpu_cell_list.hpp:9,
+warning: anneal-core@0.12.0:                  from ./.ci/vesin/vesin/src/cpu_cell_list.cpp:10:
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp: In constructor 'vesin::BoundingBox::BoundingBox(vesin::Matrix, const bool*)':
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:208:12: warning: 'vesin::BoundingBox::max_positions_' will be initialized after [-Wreorder]
+warning: anneal-core@0.12.0:   208 |     Vector max_positions_;
+warning: anneal-core@0.12.0:       |            ^~~~~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:207:12: warning:   'vesin::Vector vesin::BoundingBox::min_positions_' [-Wreorder]
+warning: anneal-core@0.12.0:   207 |     Vector min_positions_;
+warning: anneal-core@0.12.0:       |            ^~~~~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:20:5: warning:   when initialized here [-Wreorder]
+warning: anneal-core@0.12.0:    20 |     BoundingBox(Matrix matrix, const bool periodic[3]):
+warning: anneal-core@0.12.0:       |     ^~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/cpu_cell_list.cpp: At global scope:
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/cpu_cell_list.cpp:262:1: warning: 'std::tuple<std::array<int, 3>, std::array<int, 3> > divmod(std::array<int, 3>, std::array<long unsigned int, 3>)' defined but not used [-Wunused-function]
+warning: anneal-core@0.12.0:   262 | divmod(std::array<int32_t, 3> a, std::array<size_t, 3> b) {
+warning: anneal-core@0.12.0:       | ^~~~~~
+warning: anneal-core@0.12.0: In file included from ./.ci/vesin/vesin/src/cpu_cell_list.hpp:9,
+warning: anneal-core@0.12.0:                  from ./.ci/vesin/vesin/src/verlet.cpp:5:
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp: In constructor 'vesin::BoundingBox::BoundingBox(vesin::Matrix, const bool*)':
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:208:12: warning: 'vesin::BoundingBox::max_positions_' will be initialized after [-Wreorder]
+warning: anneal-core@0.12.0:   208 |     Vector max_positions_;
+warning: anneal-core@0.12.0:       |            ^~~~~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:207:12: warning:   'vesin::Vector vesin::BoundingBox::min_positions_' [-Wreorder]
+warning: anneal-core@0.12.0:   207 |     Vector min_positions_;
+warning: anneal-core@0.12.0:       |            ^~~~~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/types.hpp:20:5: warning:   when initialized here [-Wreorder]
+warning: anneal-core@0.12.0:    20 |     BoundingBox(Matrix matrix, const bool periodic[3]):
+warning: anneal-core@0.12.0:       |     ^~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp: In function 'void vesin::cuda::free_neighbors(VesinNeighborList&)':
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:5:53: warning: unused parameter 'neighbors' [-Wunused-parameter]
+warning: anneal-core@0.12.0:     5 | void vesin::cuda::free_neighbors(VesinNeighborList& neighbors) {
+warning: anneal-core@0.12.0:       |                                  ~~~~~~~~~~~~~~~~~~~^~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp: In function 'void vesin::cuda::neighbors(const double (*)[3], size_t, const double (*)[3], const bool*, VesinOptions, VesinNeighborList&)':
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:10:20: warning: unused parameter 'points' [-Wunused-parameter]
+warning: anneal-core@0.12.0:    10 |     const double (*points)[3],
+warning: anneal-core@0.12.0:       |     ~~~~~~~~~~~~~~~^~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:11:12: warning: unused parameter 'n_points' [-Wunused-parameter]
+warning: anneal-core@0.12.0:    11 |     size_t n_points,
+warning: anneal-core@0.12.0:       |     ~~~~~~~^~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:12:18: warning: unused parameter 'box' [-Wunused-parameter]
+warning: anneal-core@0.12.0:    12 |     const double box[3][3],
+warning: anneal-core@0.12.0:       |     ~~~~~~~~~~~~~^~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:13:16: warning: unused parameter 'periodic' [-Wunused-parameter]
+warning: anneal-core@0.12.0:    13 |     const bool periodic[3],
+warning: anneal-core@0.12.0:       |     ~~~~~~~~~~~^~~~~~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:14:18: warning: unused parameter 'options' [-Wunused-parameter]
+warning: anneal-core@0.12.0:    14 |     VesinOptions options,
+warning: anneal-core@0.12.0:       |     ~~~~~~~~~~~~~^~~~~~~
+warning: anneal-core@0.12.0: ./.ci/vesin/vesin/src/vesin_cuda_stub.cpp:15:24: warning: unused parameter 'neighbors' [-Wunused-parameter]
+warning: anneal-core@0.12.0:    15 |     VesinNeighborList& neighbors
+warning: anneal-core@0.12.0:       |     ~~~~~~~~~~~~~~~~~~~^~~~~~~~~
+warning: `nng` (lib) generated 3 warnings
+   Compiling anneal-core v0.12.0 (.)
+warning: function `ride_producer_budget` is never used
+    --> examples/lj_cluster_search.rs:3427:4
+     |
+3427 | fn ride_producer_budget(
+     |    ^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `ride_failure_reason` is never used
+    --> examples/lj_cluster_search.rs:3440:4
+     |
+3440 | fn ride_failure_reason(failure: anneal_core::ride_ledger::RideFailure)...
+     |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `discovery_role_allows_ride` is never used
+    --> examples/lj_cluster_search.rs:3462:4
+     |
+3462 | fn discovery_role_allows_ride(role: Option<anneal_core::discovery_rost...
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `settled_external_calls` is never used
+    --> examples/lj_cluster_search.rs:3549:4
+     |
+3549 | fn settled_external_calls(requested: u64, remaining: usize) -> u64 {
+     |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `ride_total_charged_calls` is never used
+    --> examples/lj_cluster_search.rs:3554:4
+     |
+3554 | fn ride_total_charged_calls(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `ride_checkpoint_action` is never used
+    --> examples/lj_cluster_search.rs:3569:4
+     |
+3569 | fn ride_checkpoint_action(
+     |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `anneal-core` (example "lj_cluster_search") generated 6 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 01s
+EXIT:0
+command cargo +stable bench --no-run --locked
+    Finished `bench` profile [optimized] target(s) in 0.56s
   Executable benches src/lib.rs (target/release/deps/anneal_core-aa78221cb56cda75)
   Executable benches/globalopt_hotpaths.rs (target/release/deps/globalopt_hotpaths-0078322090721e07)
   Executable benches/sa_bench.rs (target/release/deps/sa_bench-fa26628480fa8578)
