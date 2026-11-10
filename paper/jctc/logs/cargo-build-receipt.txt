@@ -1,10 +1,10 @@
-UTC 2026-11-09T21:51:04Z
-HEAD 9f2f5577ee73ee8626c0abcd10b9c1b1e2a1addb
-TREE a43eca92b2d3a8f558f31470d467d3db62262987
+UTC 2026-11-09T22:32:01Z
+HEAD e080ef4523504291b11377b50adb1df8c1113953
+TREE 7d6a77efeb440fbf84d4dbd592439b01c267d16b
 VESIN 5ac39b6e57a8f00c717f08c83f93ee4746d6e471
 command cargo +stable build --all-targets --locked
    Compiling anneal-core v0.12.0 (.)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 20.94s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 29.28s
 EXIT:0
 command cargo +stable build --all-targets --all-features --locked
 warning: struct `BindgenCallbacks` is never constructed
@@ -449,13 +449,97 @@ Caused by:
 
   --- stderr
 
-  thread 'main' (240899) panicked at build.rs:39:14:
+  thread 'main' (284710) panicked at build.rs:39:14:
   feature `lammps` requires LAMMPS_LIB_DIR pointing at liblammps: NotPresent
   note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 EXIT:101
-ira needs IRA_LIB_DIR and libira, which are absent
-lammps needs LAMMPS_LIB_DIR and liblammps, which are absent
-gpr needs GPR_OPTIM_LIB_DIR and libgpr_optim, which are absent
+command cargo +stable build --features ira --locked
+   Compiling serde_core v1.0.228
+   Compiling anstyle v1.0.14
+   Compiling rustix v1.1.4
+   Compiling linux-raw-sys v0.12.1
+   Compiling clap_lex v1.1.0
+   Compiling getrandom v0.4.3
+   Compiling fastrand v2.4.1
+   Compiling serde v1.0.228
+   Compiling zerocopy v0.8.54
+   Compiling anstream v1.0.0
+   Compiling either v1.16.0
+   Compiling rayon v1.12.0
+   Compiling clap_builder v4.6.0
+   Compiling tempfile v3.27.0
+   Compiling toml_datetime v0.7.5+spec-1.1.0
+   Compiling serde_spanned v1.1.1
+   Compiling serde_json v1.0.150
+   Compiling clap v4.6.1
+   Compiling toml v0.9.12+spec-1.1.0
+   Compiling bitflags v2.13.0
+   Compiling bincode v1.3.3
+   Compiling serde_spanned v0.6.9
+   Compiling toml_datetime v0.6.11
+   Compiling cbindgen v0.29.4
+   Compiling toml_edit v0.22.27
+   Compiling heed-types v0.21.0
+   Compiling heed v0.21.0
+   Compiling readcon-core v0.14.8
+   Compiling ppv-lite86 v0.2.21
+   Compiling rand_chacha v0.9.0
+   Compiling rand v0.9.5
+   Compiling rand_distr v0.5.1
+   Compiling toml v0.8.23
+   Compiling eindir-core v0.6.0
+   Compiling rgmin v0.5.0
+   Compiling anneal-core v0.12.0 (.)
+error: failed to run custom build command for `anneal-core v0.12.0 (.)`
+
+Caused by:
+  process didn't exit successfully: `./target/debug/build/anneal-core-4eb341ea5ed2dd90/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=cbindgen.toml
+  cargo:rerun-if-changed=include/
+
+  --- stderr
+
+  thread 'main' (285230) panicked at build.rs:47:14:
+  feature `ira` requires IRA_LIB_DIR pointing at libira: NotPresent
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+warning: build failed, waiting for other jobs to finish...
+EXIT:101
+command cargo +stable build --features lammps --locked
+   Compiling rgmin v0.5.0
+   Compiling anneal-core v0.12.0 (.)
+   Compiling readcon-db v0.1.5
+error: failed to run custom build command for `anneal-core v0.12.0 (.)`
+
+Caused by:
+  process didn't exit successfully: `./target/debug/build/anneal-core-e940feeb07065b12/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=cbindgen.toml
+  cargo:rerun-if-changed=include/
+
+  --- stderr
+
+  thread 'main' (285328) panicked at build.rs:39:14:
+  feature `lammps` requires LAMMPS_LIB_DIR pointing at liblammps: NotPresent
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+warning: build failed, waiting for other jobs to finish...
+EXIT:101
+command cargo +stable build --features gpr --locked
+   Compiling anneal-core v0.12.0 (.)
+error: failed to run custom build command for `anneal-core v0.12.0 (.)`
+
+Caused by:
+  process didn't exit successfully: `./target/debug/build/anneal-core-457e943f7c8ab42c/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-changed=cbindgen.toml
+  cargo:rerun-if-changed=include/
+
+  --- stderr
+
+  thread 'main' (285432) panicked at build.rs:60:14:
+  feature `gpr` requires GPR_OPTIM_LIB_DIR pointing at libgpr_optim: NotPresent
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+EXIT:101
 command cargo +stable build --all-targets --features graphkey,featomic,vesin-nl,bank-rpc,history-nng,rgsaddle,capi,python,rgpot-ex --locked
 warning: struct `BindgenCallbacks` is never constructed
    --> vendor/nng-sys/build.rs:145:8
@@ -682,7 +766,7 @@ warning: `anneal-core` (example "lj_cluster_search") generated 6 warnings
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 01s
 EXIT:0
 command cargo +stable bench --no-run --locked
-    Finished `bench` profile [optimized] target(s) in 0.56s
+    Finished `bench` profile [optimized] target(s) in 0.12s
   Executable benches src/lib.rs (target/release/deps/anneal_core-aa78221cb56cda75)
   Executable benches/globalopt_hotpaths.rs (target/release/deps/globalopt_hotpaths-0078322090721e07)
   Executable benches/sa_bench.rs (target/release/deps/sa_bench-fa26628480fa8578)
