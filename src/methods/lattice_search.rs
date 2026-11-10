@@ -1677,6 +1677,7 @@ impl Lattice {
     ///
     /// The same offers [`Lattice::propose_energy_exchange`] draws. Nothing
     /// is charged. `None` means the geometry has no exchange to offer.
+    #[cfg(test)]
     pub(crate) fn exchange_probabilities(
         &self,
         x: &[f64],
