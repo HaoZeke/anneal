@@ -1,35 +1,109 @@
-# LJ75 against GMIN with core-orbit symmetrisation, one run per row of each CSV.
-# The audit on branch bench/lj-csm-da7f9422 of anneal_repro reran every run through the
-# lj_csm campaign and matched each hit and force count of these CSVs; audit/ copies its
-# sealed verdict, and the wall times the draft prints are the medians of that rerun.
-audit_repo anneal_repro
-audit_branch bench/lj-csm-da7f9422
-# 55f9bfcf on audit_branch carries the .gitrepo pin of anneal to anneal_published_commit.
-audit_commit 55f9bfcf
-audit_rule campaign of the lj_csm workflow
-anneal_branch fix/lj-csm-move
-anneal_commit da7f942298a666843fa61118fef786a0e2b73b4c
-# HaoZeke/anneal publishes the snapshot on fix/lj-csm-move as an unsigned rewrite of
-# anneal_commit; its tree is identical to that of da7f9422, so the rerun ran the code it
-# pins. The draft cites it as the published commit.
-anneal_published_repo HaoZeke/anneal
-anneal_published_commit 36086e988c5a71c156ffcbde152bf321a6f5ef25
-anneal_published_tree identical to anneal_commit
-anneal_requires 70520413d6cae72bc8b7f9bcfcfbd7e6b8efe7ed
-anneal_presets recommended derived
-anneal_scorer cluster_search::search through lj_board, Ledger::stop_below at reference plus tolerance
-anneal_threads RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1, 6 processes at a time
-gmin_source OptBench wales-27058.tar.bz2, Last-Modified 7 Aug 2014
-gmin_build GNU Fortran 13.3.0 -O2
-gmin_input published OptBench LJ75 SYMMETRISE data file with EDIFF 0.001 and MAX_NPCALL 4000000
-gmin_starts OptBench coords.1 to coords.200, minimised structures
-gmin_threads OMP_NUM_THREADS=1, 2 processes at a time, overlapping another board on the host
-host Intel Xeon family 6 model 207, 8 cores, 1 thread per core, KVM
-reference -397.492331 Cambridge Cluster Database
-tolerance 0.001
-budget 4000000
-literature Oakley, Johnston and Wales, Phys. Chem. Chem. Phys. 15, 3965 (2013), Table 1: LJ75 core orbits, mean 50229 evaluations from 100 random starts, no call cap
-f3572e4159b76b8b1046c149dc9cf4e24e998a309c3a1bd9cb0ee93baa16d91a  lj75-recommended-seeds-2000-2199.csv
-c673ca23c492241279b147387331c7e2ca024279593ce01708c4cd9eaa758862  lj75-derived-seeds-2000-2199.csv
-42bd0aa163290e2b7599814c90e52583804f3a796f98775a03fe9c549a8cf9eb  gmin-lj75-sym-starts-1-200.csv
-97c2e9841ab74389a0243f0d606b839c8eaad4c2aaa67702e8f4e269ca6a4c8d  audit/SHA256SUMS
+# LJ75 against GMIN with core-orbit symmetrisation, one run per row of.
+
+each CSV.
+
+# The audit on branch bench/lj-csm-da7f9422 of anneal_repro reran every.
+
+run through the.
+
+# lj_csm campaign and matched each hit and force count of these CSVs;.
+
+audit/ copies its.
+
+# sealed verdict, and the wall times the draft prints are the medians.
+
+of that rerun.
+
+audit_repo anneal_repro.
+
+audit_branch bench/lj-csm-da7f9422.
+
+# 55f9bfcf on audit_branch carries the .gitrepo pin of anneal to.
+
+anneal_published_commit.
+
+audit_commit 55f9bfcf.
+
+audit_rule campaign of the lj_csm workflow.
+
+anneal_branch fix/lj-csm-move.
+
+anneal_commit da7f942298a666843fa61118fef786a0e2b73b4c.
+
+# HaoZeke/anneal publishes the snapshot on fix/lj-csm-move as an.
+
+unsigned rewrite of.
+
+# anneal_commit; its tree is identical to that of da7f9422, so the.
+
+rerun ran the code it.
+
+# pins.
+
+The draft cites it as the published commit.
+
+anneal_published_repo HaoZeke/anneal.
+
+anneal_published_commit 36086e988c5a71c156ffcbde152bf321a6f5ef25.
+
+anneal_published_tree identical to anneal_commit.
+
+anneal_requires 70520413d6cae72bc8b7f9bcfcfbd7e6b8efe7ed.
+
+anneal_presets recommended derived.
+
+anneal_scorer cluster_search::search through lj_board,.
+
+Ledger::stop_below at reference plus tolerance.
+
+anneal_threads RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1, 6 processes at a.
+
+time.
+
+gmin_source OptBench wales-27058.tar.bz2, Last-Modified 7 Aug 2014.
+
+gmin_build GNU Fortran 13.3.0 -O2.
+
+gmin_input published OptBench LJ75 SYMMETRISE data file with EDIFF.
+
+0.001 and MAX_NPCALL 4000000.
+
+gmin_starts OptBench coords.1 to coords.200, minimised structures.
+
+gmin_threads OMP_NUM_THREADS=1, 2 processes at a time, overlapping.
+
+another board on the host.
+
+host Intel Xeon family 6 model 207, 8 cores, 1 thread per core, KVM.
+
+reference -397.492331 Cambridge Cluster Database.
+
+tolerance 0.001.
+
+budget 4000000.
+
+literature Oakley, Johnston and Wales, Phys.
+
+Chem.
+
+Chem.
+
+Phys. 15, 3965 (2013), Table 1: LJ75 core orbits, mean 50229.
+
+evaluations from 100 random starts, no call cap.
+
+f3572e4159b76b8b1046c149dc9cf4e24e998a309c3a1bd9cb0ee93baa16d91a.
+
+lj75-recommended-seeds-2000-2199.csv.
+
+c673ca23c492241279b147387331c7e2ca024279593ce01708c4cd9eaa758862.
+
+lj75-derived-seeds-2000-2199.csv.
+
+42bd0aa163290e2b7599814c90e52583804f3a796f98775a03fe9c549a8cf9eb.
+
+gmin-lj75-sym-starts-1-200.csv.
+
+97c2e9841ab74389a0243f0d606b839c8eaad4c2aaa67702e8f4e269ca6a4c8d.
+
+audit/SHA256SUMS.
