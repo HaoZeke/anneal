@@ -1435,6 +1435,38 @@ fn stall_growth_waits(held: Option<f64>, incumbent: f64) -> bool {
     held.is_some_and(|energy| incumbent >= energy - 1e-9)
 }
 
+/// Kernels the chain actually draws, including the energy-lattice arm.
+fn search_kernels(cfg: &Config) -> Vec<ClusterMove> {
+    let mut kernels = cfg.move_library.kernels(cfg);
+    if cfg.displacement_only {
+        kernels = vec![ClusterMove::AllPoints { step: 0.38 }];
+    } else if cfg.energy_lattice && cfg.packing_cna_applies() {
+        kernels.push(ClusterMove::EnergyLattice);
+    }
+    kernels
+}
+
+/// One charged dynamic-lattice exchange, or a single-point step when the
+/// lattice has nothing to offer.
+fn energy_lattice_proposal<R: Rng + ?Sized>(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    x: ArrayView1<f64>,
+    rng: &mut R,
+) -> Array1<f64> {
+    let reduced = cfg.temperature / cfg.energy_scale.max(1e-12);
+    let lattice = crate::methods::lattice_search::Lattice::default();
+    let coords = x.to_vec();
+    if let Some(y) = lattice.propose_energy_exchange(&coords, ledger, reduced, rng) {
+        return Array1::from(y);
+    }
+    ClusterMove::SinglePoint {
+        n_points: cfg.n_points.max(1),
+        step: preset::LennardJonesPreset::SINGLE_POINT_STEP * cfg.length_scale,
+    }
+    .propose(x, cfg.temperature, rng)
+}
+
 /// Runs the driver until the ledger is spent.
 ///
 /// `start` is a starting configuration and `relax` performs a relaxation of the
@@ -2421,10 +2453,7 @@ where
          silently remain a descriptor-space number"
     );
 
-    let mut kernels = cfg.move_library.kernels(cfg);
-    if cfg.displacement_only {
-        kernels = vec![ClusterMove::AllPoints { step: 0.38 }];
-    }
+    let mut kernels = search_kernels(cfg);
     // Which kernel to propose from is learned rather than drawn uniformly. The
     // useful move changes as the search moves through the landscape, so the
     // evidence is discounted and a decaying floor keeps every kernel reachable.
@@ -4178,7 +4207,16 @@ where
                     cand
                 }
                 _ => {
-                    kernels[k].propose_scaled(x.view(), cfg.temperature, escape * orient_scale, rng)
+                    if matches!(kernels[k], ClusterMove::EnergyLattice) {
+                        energy_lattice_proposal(cfg, ledger, x.view(), rng)
+                    } else {
+                        kernels[k].propose_scaled(
+                            x.view(),
+                            cfg.temperature,
+                            escape * orient_scale,
+                            rng,
+                        )
+                    }
                 }
             }
         };
@@ -4211,12 +4249,18 @@ where
                         pending_features = Some(f);
                         cand
                     }
-                    _ => kernels[k].propose_scaled(
-                        x.view(),
-                        cfg.temperature,
-                        escape * orient_scale,
-                        rng,
-                    ),
+                    _ => {
+                        if matches!(kernels[k], ClusterMove::EnergyLattice) {
+                            energy_lattice_proposal(cfg, ledger, x.view(), rng)
+                        } else {
+                            kernels[k].propose_scaled(
+                                x.view(),
+                                cfg.temperature,
+                                escape * orient_scale,
+                                rng,
+                            )
+                        }
+                    }
                 };
                 swapped = true;
                 break;
@@ -7098,6 +7142,18 @@ mod group_move_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recommended_offers_the_energy_lattice_and_the_baseline_does_not() {
+        let rec = search_kernels(&Config::recommended(104));
+        assert!(
+            rec.iter().any(|kernel| kernel.name() == "dlattice"),
+            "recommended kernels: {:?}",
+            rec.iter().map(|kernel| kernel.name()).collect::<Vec<_>>()
+        );
+        let base = search_kernels(&Config::for_cluster(104));
+        assert!(base.iter().all(|kernel| kernel.name() != "dlattice"));
+    }
 
     #[test]
     fn repack_rigid_groups_keeps_internal_distances() {

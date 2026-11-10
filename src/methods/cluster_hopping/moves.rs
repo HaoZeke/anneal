@@ -430,6 +430,11 @@ pub enum ClusterMove {
     HollowRelocate(HollowRelocate),
     /// Greedy fill of hollow sites as one proposal, the dynamic-lattice sweep.
     HollowFill(HollowFill),
+    /// Energy-ranked exchange onto a vacant lattice site.
+    ///
+    /// The hop charges the pair sums and draws the site. See
+    /// [`crate::methods::lattice_search::Lattice::propose_energy_exchange`].
+    EnergyLattice,
     /// Rotate the outer shell against the core.
     ShellRotate(ShellRotate),
     /// Enforce an approximate rotational symmetry.
@@ -1413,6 +1418,7 @@ impl ClusterMove {
             ClusterMove::SurfaceRelocate(_) => "surface".into(),
             ClusterMove::HollowRelocate(_) => "hollow".into(),
             ClusterMove::HollowFill(_) => "fill".into(),
+            ClusterMove::EnergyLattice => "dlattice".into(),
             ClusterMove::GroupRelocate { .. } => "gsurface".into(),
             ClusterMove::GroupShake { .. } => "gshake".into(),
             ClusterMove::GroupBurst { .. } => "gburst".into(),
@@ -1670,6 +1676,16 @@ impl ClusterMove {
             ClusterMove::SurfaceRelocate(k) => k.propose(x, t, rng),
             ClusterMove::HollowRelocate(k) => k.propose(x, t, rng),
             ClusterMove::HollowFill(k) => k.propose(x, t, rng),
+            ClusterMove::EnergyLattice => {
+                let lattice = crate::methods::lattice_search::Lattice::default();
+                let mut scratch = Ledger::new(10_000);
+                let coords = x.to_vec();
+                if let Some(y) = lattice.propose_energy_exchange(&coords, &mut scratch, t, rng) {
+                    Array1::from(y)
+                } else {
+                    x.to_owned()
+                }
+            }
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
             ClusterMove::Symmetrise(k) => k.propose(x, t, rng),
             ClusterMove::PointSymmetrise {
