@@ -16,11 +16,16 @@
 //! `Np` primary sites on the sphere of radius `R0 = Rmax + 0.2`. The
 //! sites are one Mackay icosahedral shell, used only as a uniform set
 //! of directions. The shell's topology is not read. A probe atom is
-//! relaxed at each primary site with the cluster held fixed. Candidates
-//! closer than 0.05 collapse to the site nearer the cluster centroid.
-//! A coordinate comparison breaks a remaining tie. Atom labels are not
-//! read: the atoms are sorted by coordinates before the probe and the
-//! pair sums.
+//! relaxed at each primary site with the cluster held fixed. The Mackay
+//! directions are projected onto the unit sphere and then scaled to
+//! `R0`. The paper states the rescaling and does not state the
+//! projection. The probe stops when its root-mean-square gradient is
+//! below 1e-3 or after 40 iterations. The paper does not state that
+//! stop. Candidates closer than 0.05 collapse to the site nearer the
+//! cluster centroid. A coordinate comparison breaks a remaining tie.
+//! Atom labels are not read: the atoms are sorted by coordinates
+//! before the probe and the pair sums. The pair sum over the whole
+//! cluster is one charged evaluation.
 //!
 //! "DL Searching": the `Nmov` atoms of highest pair energy join the
 //! lattice. Equations (2), (3) and (4) are the core energy, the
@@ -28,9 +33,12 @@
 //! energy of one choice of `Nmov` sites. The simple greedy method
 //! starts from a random choice, then moves the occupied site of
 //! highest energy onto the vacant site of lowest energy while equation
-//! (5) falls. That greedy search is repeated `Ntry` times. The `Nbest`
-//! lowest candidates are quenched, and the lowest quench is the
-//! generation's result.
+//! (5) falls. The paper does not cap the number of steps. This search
+//! stops after one pass over the sites. Identical occupations are
+//! dropped before the quench. The paper does not say to drop them.
+//! That greedy search is repeated `Ntry` times. The `Nbest` lowest
+//! candidates are quenched, and the lowest quench is the generation's
+//! result.
 //!
 //! Equation (1) is the reduced Lennard-Jones potential used here.
 //! Table 1 supplies `Nmov`, `Np`, `Ntry` and `Nbest` from the cluster
@@ -405,6 +413,10 @@ fn build_lattice<R: Rng + ?Sized>(
         }
     }
     let vacant = merge_toward_centroid(&candidates, centre, MERGE);
+    // One full pair sum: N(N-1)/2 pairs, charged as one evaluation.
+    if !charge_oracle(ledger, 1.0) {
+        return None;
+    }
     let sub = atom_energies(&atoms);
     let active = select_highest(&sub, params.n_mov.min(n), tie, rng);
     let mut sites = vacant;
@@ -428,10 +440,11 @@ fn pair_tables(
     let n_core = core.len();
     let n_sites = sites.len();
     let full = ((n * n.saturating_sub(1)) / 2).max(1) as f64;
-    let n_ec = (n_core * n_core.saturating_sub(1)) / 2;
+    // The core energy is a constant of the generation. It is not
+    // evaluated here, so it is not charged. The site rows are.
     let n_edlc = n_sites * n_core;
     let n_edl = (n_sites * n_sites.saturating_sub(1)) / 2;
-    let frac = (n_ec + n_edlc + n_edl) as f64 / full;
+    let frac = (n_edlc + n_edl) as f64 / full;
     if !charge_oracle(ledger, frac) {
         return None;
     }
@@ -462,6 +475,8 @@ fn greedy<R: Rng + ?Sized>(
     let n_sites = edlc.len();
     let mut chosen = sample(n_sites, n_mov, rng);
     let mut energy = selection_energy(edlc, edl, &chosen);
+    // The paper ends the sweep when the energy stops falling. The
+    // iteration count is capped at the number of sites.
     for _ in 0..n_sites.max(1) {
         let occupied = site_terms(edlc, edl, &chosen, None);
         let from = pick(true, &occupied, tie, rng);
@@ -947,6 +962,34 @@ mod tests {
     use super::*;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+
+    /// One lattice build charges the full atom pair sum.
+    ///
+    /// Without that charge the spent count is short by one. The
+    /// assertion fails on the tree that skips it.
+    #[test]
+    fn the_atom_pair_sum_is_charged() {
+        let n = 13;
+        let mut rng = StdRng::seed_from_u64(11);
+        let start = random_cluster_in_radius(n, 2.2, 0.5, &mut rng);
+        let params = table1(n);
+        let mut ledger = Ledger::new(5_000_000);
+        let mut draw = StdRng::seed_from_u64(12);
+        let built = build_lattice(
+            n,
+            &params,
+            &mut ledger,
+            start.as_slice().unwrap(),
+            &mut draw,
+            TieCut::LowestIndex,
+        );
+        assert!(built.is_some(), "the lattice was not built");
+        assert!(
+            ledger.spent() >= 654,
+            "the atom pair sum was not charged: spent {}",
+            ledger.spent()
+        );
+    }
 
     #[test]
     fn mackay_shells_match_the_published_counts() {
