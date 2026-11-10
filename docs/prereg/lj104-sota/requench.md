@@ -1,7 +1,9 @@
-Copyright (c) anneal developers
+Copyright © anneal developers
 
-Re-quenched panel.
-A hit is requenched_e <= E_known + 1e-6.
+We record the re-quenched panel below.
+We keep a hit as requenched_e <= E_known + 1e-6.
+We store the call counts below.
+We leave each seed row unchanged.
 requench_calls are the WarmLbfgs::minimize evaluations.
 They are not search calls.
 raw_e is the lowest line of the untouched search log.

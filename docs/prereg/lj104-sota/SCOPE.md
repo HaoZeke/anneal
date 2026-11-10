@@ -1,6 +1,24 @@
-Copyright (c) anneal developers
+Copyright © anneal developers
 
-Scope of the twelve commits after 91b15a02 through 5fb7368d.
+The scope listing (SCOPE) names twelve commits after 91b15a02.
+HEAD means the git commit identifier.
+DLS means dynamic lattice search.
+GMIN means the basin-hopping program.
+We read each subject from git.
+We read each added path from git.
+We keep the twelve commit identifiers below.
+We keep every path that git marks as added.
+We leave the archived subjects in the sentences below.
+We checked the range through 5fb7368d.
+We still require exactly twelve commits.
+We still start from 91b15a02.
+We list a modified path when git reports one.
+We write one sentence for each path.
+We do not drop a path to shorten the note.
+We do not retune any seed in this listing.
+We do not run seeds 5000-5029 in this listing.
+We keep the panel seeds 6000-6005 as names only.
+We keep the recorded hit counts as they stand.
 Subjects and paths are taken from git.
 An added path is a diff-tree addition.
 A modified path is a diff-tree modification.
