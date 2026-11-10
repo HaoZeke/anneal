@@ -1,0 +1,5 @@
+LJ38, budget 100000 charged evaluations, 1 seeds, reference -173.928427
+      last improvement at hop 1207 of 1697 (71.1% in), 52 basins, -171.499843
+  seed 0: best -171.499843  hops 1697  screened 1447  charged 100000  basins 78 (21.8 hops each)  returned 0  swaps 0/0  paths 0 improved 0 gain 0.000  escape 1.000 thr 0.8000 same/known/new 0/0/0 soft 0/0 sub 0/0 lmin NaN climbs 0 gain 0.00 radius 0.700 step 0.700 restarts 0 angular 0/0 R 0.420 tabu 0 vetoed 0 screen 0/0 expl 0 obs 0 ctx [0, 0, 0, 0, 0]  relaxed 247/1948 converged  early 0 saved 0  verified -171.499843 |g| 1.2e-6
+0/1 solved, deepest -171.499843   mean hops 1697, force per hop 59
+gap to reference +2.428584
