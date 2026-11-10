@@ -4,7 +4,7 @@
 
 A finite best within 0.01 eV of the lowest finite best is a hit.
 An inf best is recorded as best=None and is not a hit.
-The copper block is read from the eight committed cuh2 logs.
+The copper block prefers cuh2_fcc_rec_N.out and falls back to .txt.
 """
 from __future__ import annotations
 
@@ -23,13 +23,18 @@ def best_token(path: Path) -> str:
     return match.group(1)
 
 
+def seed_file(directory: Path, stem: str, index: int) -> Path:
+    for suffix in (".out", ".txt"):
+        path = directory / f"{stem}_{index}{suffix}"
+        if path.is_file():
+            return path
+    raise SystemExit(f"missing {stem}_{index}.out")
+
+
 def block(directory: Path, stem: str, label: str) -> str:
     tokens = []
     for index in range(8):
-        path = directory / f"{stem}_{index}.txt"
-        if not path.is_file():
-            raise SystemExit(f"missing {path.name}")
-        tokens.append(best_token(path))
+        tokens.append(best_token(seed_file(directory, stem, index)))
     finite = [float(token) for token in tokens if token != "inf"]
     if not finite:
         raise SystemExit("no finite best")
