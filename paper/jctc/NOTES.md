@@ -18,4 +18,4 @@ Three TeX files keep the affiliation and the copyright lines.
 They are `manuscript.tex`, `si.tex` and `cover-letter.tex`.
 Only `si.tex` keeps the 2023 notice.
 REPORT.md lists the Rohit items.
-REPLAY.txt records both replays of this series.
+REPLAY.txt records all four replays of this series.
