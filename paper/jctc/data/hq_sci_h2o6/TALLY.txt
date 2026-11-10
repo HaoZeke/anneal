@@ -18,3 +18,4 @@ cu hq_sci_cuh2
   cuh2_fcc_rec_6.out best=-415.971464 hit=True
   cuh2_fcc_rec_7.out best=-415.971161 hit=True
   8/8=8/8
+  set_relative_0.01 8/8
