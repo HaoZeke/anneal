@@ -1,0 +1,10 @@
+hexamer hq_sci_h2o6
+  h2o6_rec_0.out best=-829.852228 hit=True
+  h2o6_rec_1.out best=-829.852228 hit=True
+  h2o6_rec_2.out best=-829.852227 hit=True
+  h2o6_rec_3.out best=-829.801530 hit=False
+  h2o6_rec_4.out best=-829.852228 hit=True
+  h2o6_rec_5.out best=-829.852228 hit=True
+  h2o6_rec_6.out best=-829.848048 hit=True
+  h2o6_rec_7.out best=None hit=False
+  6/8=6/8
