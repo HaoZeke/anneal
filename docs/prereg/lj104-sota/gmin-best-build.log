@@ -1,14 +1,15 @@
-GMIN_BEST rebuild attempt
-expected executable digest follows
-b8eeddfa6d18a697a76d0714c0a6b356c98c1d40022bd639ac55581e119baf95
-digest status unverified
-pinned Fortran source is absent
-missing source/potential.f90
-gfortran is absent
-keyword sha256 follows
-62618de90c53478bbfe724efe527dd1fa67cd6386da0cf00cb0cc8431bd7037d
-keyword file matches its own recorded digest
-that match is not an executable match
-no binary was produced
-rebuild did not match the executable digest
+GMIN rebuild attempt
+compiler GNU Fortran 13.3.0
+source archive sha256 follows
+3f31e4a4cb234aa602470440fa1996b789725e537d47b20eb3101a0749525b70
+patch sha256 follows
+e9e8395c210375ac33c7f174c85726b1ccbeed4bbfd9d2e130e6cbb4a253eb35
+The archive already contains the patch hunks.
+The makefile stops while compiling commons.
+The missing module is prec.mod.
+No binary was produced.
+No rebuilt digest is available.
+The recorded baseline digest stays unverified.
+The GMIN source has no pinned upstream commit.
+The original executable is not shipped.
 BUILD_EXIT:2

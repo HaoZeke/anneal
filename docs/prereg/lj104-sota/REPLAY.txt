@@ -1,4 +1,4 @@
-Copyright (c) anneal developers
+Copyright © anneal developers
 
 This replay is one git commit-tree pass.
 There is no sleep.
@@ -8,30 +8,18 @@ The seconds are the ones git writes.
 A commit may share its parent's second.
 None is earlier than its parent.
 Shared seconds are real.
-
 These dates replace the archived author dates.
-The archived history stays reachable.
-refs/archive/prereg/lj104-sota-v1.3 follows.
-835b90741211f2fd00b5b9ea68cde4cc877b31af.
-refs/archive/prereg/lj104-sota-v1.3.1 follows.
-6cde8551b2791cc33b1060311dd334a04d3d1042.
 
-The clock zone is America/Chicago.
-The offset git writes is -0600.
+Archive refs are never pushed.
+The only published reference follows.
+refs/heads/prereg/lj104-sota-v1.
+
+The v1.3.3 archive follows.
+cf5f134b915d9a8da3fa7882c4fcda659edff20f.
+replay-map.tsv is the old-to-new map.
+Thirty commits were replayed.
+The zone is America/Chicago.
+The offset is -0600.
 Author and committer are Rohit Goswami.
 The email is rgoswami@ieee.org.
 The commits are unsigned.
-
-Each new commit uses the archived commit's tree.
-The subject starts with lj104-prereg.
-The receipt subject is at most 52 columns.
-The other subjects are at most 72 columns.
-replay-map.tsv is the old-to-new map.
-TREE_EQUAL.txt records that each pair of trees is the same object.
-replay_commit_tree.py is the pass.
-replay-commit-tree.log is the raw log of that pass.
-
-The predictions are archived blobs.
-The McNemar table and the seed sets are archived blobs.
-The thresholds are archived blobs too.
-This replay does not edit them.
