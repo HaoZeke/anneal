@@ -11,6 +11,9 @@
 # the exit code and the sha256.
 # redact_paths.py writes the redacted log. The raw log stays where the
 # caller points it.
+# logs/lj75-rebuild-log.txt shows sha256
+# 6887e36a368f9fa81eded591dcfa22904fa317fe2208b1bc58ba6500c8937118,
+# the same digest as the running binary.
 set -eu
 archive=${1:-paper/jctc/logs/lj75-source-37535ec1.tar.xz}
 dest=${2:-lj75-source}
