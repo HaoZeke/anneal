@@ -4,31 +4,44 @@
 \sisetup{scientific-notation=true,exponent-product=\times}
 \graphicspath{{figs/}}
 \input{macros}
-\title{Supporting Information: Basin hopping on Lennard-Jones clusters with one preset at every size}
+\title{Supporting Information:
+Basin hopping on Lennard-Jones clusters
+with one preset at every size}
 \author{Rohit Goswami}
 \affiliation{SURF B.V., Amsterdam, The Netherlands}
-\alsoaffiliation{Science Institute, University of Iceland, Reykjavik, Iceland}
+\alsoaffiliation{Science Institute, University of Iceland,
+Reykjavik, Iceland}
 \alsoaffiliation{TurtleTech ehf., Reykjavik, Iceland}
 \author{Ruhila Goswami}
-\affiliation{Faculty of Life and Environmental Sciences, University of Iceland, Reykjavik, Iceland}
+\affiliation{Faculty of Life and Environmental Sciences,
+University of Iceland, Reykjavik, Iceland}
 \author{Amrita Goswami}
 \affiliation{Universidad Complutense de Madrid, Madrid, Spain}
 \author{Moritz Sallermann}
 \affiliation{Universidad Complutense de Madrid, Madrid, Spain}
 \author{Sonaly Goswami}
-\affiliation{Department of Chemistry, Indian Institute of Technology Kanpur, Kanpur, India}
+\affiliation{Department of Chemistry,
+Indian Institute of Technology Kanpur, Kanpur, India}
 \author{Debabrata Goswami}
-\affiliation{Center for Bits and Atoms, Massachusetts Institute of Technology, Cambridge, Massachusetts 02139, United States}
-\alsoaffiliation{Department of Chemistry, Indian Institute of Technology Kanpur, Kanpur, India}
+\affiliation{Center for Bits and Atoms,
+Massachusetts Institute of Technology, Cambridge,
+Massachusetts 02139, United States}
+\alsoaffiliation{Department of Chemistry,
+Indian Institute of Technology Kanpur, Kanpur, India}
 \email{dgoswami@iitk.ac.in}
 \begin{document}
 
 \section{Board constants}
-We read a hit as an energy strictly below the reference plus \(0.001\), taken from a converged improvement.
-The references, in reduced units, are \(-173.928427\) for LJ\(_{38}\), \(-279.248470\) for LJ\(_{55}\), and \(-397.492331\) for LJ\(_{75}\).
+We read a hit as an energy strictly below the reference plus \(0.001\),
+taken from a converged improvement.
+The references, in reduced units, are \(-173.928427\) for LJ\(_{38}\),
+\(-279.248470\) for LJ\(_{55}\), and \(-397.492331\) for LJ\(_{75}\).
 LJ\(_{98}\) uses \(-543.665361\), and LJ\(_{104}\) uses \(-582.086642\).
-The temperature is \(0.8\), the value Wales and Doye used for Lennard-Jones basin hopping and the value stored at \texttt{preset.rs:8}.\cite{wales1997}
-The start density passed to \texttt{random\_cluster} is \(0.7\).
+The temperature is \(0.8\), the value Wales and Doye used for
+Lennard-Jones basin hopping and the value stored at
+\texttt{preset.rs:8}.
+\cite{wales1997} The start density passed to \texttt{random\_cluster} is
+\(0.7\).
 The function comment calls the draw liquid-like.
 
 \section{Plain walk}
@@ -39,32 +52,48 @@ The best energy in that log is \PlainEnergy, after \PlainCalls{} charged
 evaluations.
 
 \section{Published symmetrised costs}
-\texttt{data/literature.tsv} quotes Oakley, Johnston and Wales, Table 1.\cite{oakley2013}
-The continuous-symmetry basin-hopping mean at 38 atoms is 4369 evaluations over 100 successful runs.
-The same file's Table 2 rows are genetic-algorithm means at 75 and 98 atoms.
+\texttt{data/literature.tsv} quotes Oakley, Johnston and Wales, Table 1.
+\cite{oakley2013} The continuous-symmetry basin-hopping mean at 38 atoms
+is 4369 evaluations over 100 successful runs.
+The same file's Table 2 rows are genetic-algorithm means at 75 and 98
+atoms.
 No row in that file is a genetic algorithm at 104 atoms.
 
 \section{TIP4P pair constants}
-\texttt{logs/tip4p\_constants.txt} records Jorgensen's \(A = 2510400\) and \(C = 2552.24\).\cite{jorgensen1983}
-The units are kJ \AA\(^{12}\) mol\(^{-1}\) and kJ \AA\(^{6}\) mol\(^{-1}\).
-The Wales-group basin-hopping program (GMIN) matches those two numbers in \(C_6\) and \(C_{12}\).
-A rounded well depth and a rounded \(\sigma\) give the anneal pair \(C_6 = 2551.8252\) and \(C_{12} = 2510336.2\).
+\texttt{logs/tip4p\_constants.txt} records Jorgensen's \(A = 2510400\)
+and \(C = 2552.24\).
+\cite{jorgensen1983} The units are kJ \AA\(^{12}\) mol\(^{-1}\) and kJ
+\AA\(^{6}\) mol\(^{-1}\).
+The Wales-group basin-hopping program (GMIN) matches those two numbers
+in \(C_6\) and \(C_{12}\).
+A rounded well depth and a rounded \(\sigma\) give the anneal pair
+\(C_6 = 2551.8252\) and \(C_{12} = 2510336.2\).
 These two coefficients are the TIP4P pair in the log.
 The GFN2-xTB hexamer rows are a separate comparison.
 
 \section{Earlier campaign}
-\texttt{data/campaign-scores.csv} is an earlier 64-seed campaign, and on TIP4P\(_{20}\) a 16-seed campaign.
-Its recommended rows were scored with a preset that still branched on the atom count.
-\texttt{data/lj55\_lj98/seeds.csv} scores LJ\(_{98}\) by the energy rule.
+\texttt{data/campaign-scores.csv} is an earlier 64-seed campaign, and on
+TIP4P\(_{20}\) a 16-seed campaign.
+Its recommended rows were scored with a preset that still branched on
+the atom count.
+\texttt{data/lj55\_lj98/seeds.csv} scores LJ\(_{98}\) by the energy
+rule.
 The full arm hits 24 of 64.
-Its call PAR-2 median is 2000000 and its type-7 interquartile range is 1513982.75.
+Its call PAR-2 median is 2000000 and its type-7 interquartile range is
+1513982.75.
 The GMIN arm hits 64 of 64.
-Its call PAR-2 median is 158540.5 and its type-7 interquartile range is 201463.5.
-\texttt{logs/paired\_bootstrap\_lj98.txt} records the paired-bootstrap interval of the median ratio for the 24-of-64 hop, 12.62 with endpoints 8.52 and 15.22, from 2000 resamples.
+Its call PAR-2 median is 158540.5 and its type-7 interquartile range is
+201463.5.
+\texttt{logs/paired\_bootstrap\_lj98.txt} records the paired-bootstrap
+interval of the median ratio for the 24-of-64 hop, 12.62 with endpoints
+8.52 and 15.22, from 2000 resamples.
 None of those rows is the LJ\(_{75}\) campaign of 200 seeds.
-OGOLEM, cited as Dieterich and Hartke, is in the campaign file at 6 of 64 on LJ\(_{104}\).\cite{dieterich2010}
-ABCluster, cited as Zhang and Dolg, is in the same file.\cite{zhang2015}
-The seed file is the record of those LJ\(_{98}\) medians.
+OGOLEM, cited as Dieterich and Hartke, is in the campaign file at 6 of
+64 on LJ\(_{104}\).
+\cite{dieterich2010} ABCluster, cited as Zhang and Dolg, is in the same
+file.
+\cite{zhang2015} The seed file is the record of those LJ\(_{98}\)
+medians.
 
 \section{Hardware and reproduction}
 The LJ75 receipt is \texttt{logs/lj75-hardware-receipt.txt}.
@@ -74,18 +103,19 @@ The 200-seed binary was built from tree
 \texttt{37535ec1a6e99d47a2afe0752072a33af64dccb3}, the tree of the
 unpublished build commit.
 A public reader gets the archived blob-hash check only.
-Main's sealed LJ75 counts used restart on stall and an empty surface
-list.
-They are not this preset's result.
-The encounter-curve figure draws that earlier campaign: the recommended
-hop, the derived hop, and the Wales-group basin-hopping program (GMIN),
-on 200 seeds.
 That tree has the \#56 copies of \texttt{bias.rs}, \texttt{neighbors.rs}
 and \texttt{potentials.rs}, the hot-path bench file, the newsfragment
 and \texttt{precision-policy.org}.
 It lacks the \texttt{cluster\_hopping.rs} and \texttt{tip4p.rs} parts of
 \#56 and the bench entry in \texttt{Cargo.toml}.
 Its \texttt{rigid\_body.rs} is a third version.
+Main's sealed LJ75 counts used restart on stall and an empty surface
+list.
+They are not the result of the preset in this article.
+The encounter-curve figure draws that earlier campaign: the recommended
+hop, the derived hop, and the Wales-group basin-hopping program (GMIN),
+on 200 seeds.
+The panel prints that run's PAR-2 values.
 The source archive is \texttt{logs/lj75-source-37535ec1.tar.xz}.
 It includes \texttt{LICENSE.txt}.
 The notice reads Copyright (c) 2023 anneal core developers.
@@ -107,7 +137,7 @@ The hexamer engine digest is the \texttt{engine\_sha256} line of
 \texttt{water/VERSIONS} inside \texttt{logs/logs-water.tar.xz}.
 That digest is
 \texttt{4836648ee77203e9462d51e25a1970b3f0df3a3bcd126f9a7454f6896ac66df8}.
-Hexamer wall times are pending.
+The hexamer wall-time medians are in \texttt{logs/hexamer-walls.txt}.
 
 \section{Structure plates, sketch-maps, and landfold}
 \begin{center}
