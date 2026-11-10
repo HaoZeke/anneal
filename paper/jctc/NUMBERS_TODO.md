@@ -1,4 +1,4 @@
-# Copyright (c) anneal developers
+Copyright (c) anneal developers
 
 # Numbers still open
 

@@ -1,7 +1,7 @@
-# Report, v1.29
+# Report, v1.31
 
 We drew the eighteen figures with the committed generators.
-The branch is paper-integration-v1.29.
+The branch is paper-integration-v1.31.
 It starts from fd4e691db9152bea8086c2102af84a1b0ea39444.
 The inbox sums file has 359 rows.
 Its sha256 follows.
@@ -63,8 +63,12 @@ Those constants give the committed -197.7750 kJ/mol reported here.
 
 ## Bundle
 
-The bundle ref is refs/heads/paper-integration-v1.29.
-It also carries refs/archive/paper-integration-v1.28.
+The bundle ref is refs/heads/paper-integration-v1.31.
+It also carries refs/heads/paper-integration-v1.28.
+That name is a branch.
+
+It is not an archive ref.
+
 That ref is abb65a5b47be2de02dad87a082e539525dba648b.
 It also carries refs/archive/paper-integration-v1.27.
 That ref is 77a9e399660f2a54f2a5fd17e0da184f0c7312e0.
@@ -138,7 +142,14 @@ Line 118 of `scripts/elja_hq_sci_molslab_bank.sh` sets it too.
 Commit a8f1092fc8d6937b34e34a18bc50394a559ca9f3 names that energy.
 It is the start energy of the slab con file.
 The tolerance is `TARGET_TOLERANCE` and `TARGET_TOL` in those scripts.
-The pinned rerun count against that reference is 8/8.
+The tolerance is 0.001 eV.
+The script is scripts/elja_hq_sci_molslab_bank.sh.
+The lines are 118 and 119.
+TARGET_TOL there is 1e-3.
+The per-seed gaps run from 8e-6 eV to 3.68e-4 eV above the reference.
+No seed reached the reference within 1e-6 eV.
+These are not exact hits.
+Eight seeds lie inside the 0.001 eV tolerance.
 The set_relative_0.01 line records the 0.01 eV rate.
 That line is a separate figure.
 The hexamer block still uses the 0.01 eV test.
