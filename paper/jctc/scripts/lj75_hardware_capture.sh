@@ -13,7 +13,7 @@ mkdir -p "$(dirname "$out")"
   printf 'UTC %s\n' "$utc"
   printf 'HEAD %s\n' "$head_sha"
   printf 'TREE %s\n' "$tree_sha"
-  printf 'host host-a\n'
+  printf 'host %s\n' "$(hostname)"
   printf 'nproc\n'
   nproc
   printf 'lscpu\n'
