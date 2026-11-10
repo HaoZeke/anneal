@@ -38,15 +38,68 @@ fn main() {
     let potential = PairPotential::lennard_jones(n);
     let mut opt = WarmLbfgs::default();
     opt.gtol = 1e-8;
-    let (energy, state, calls) =
-        opt.minimize(x.view(), 4000, |v| Some(potential.value_and_gradient(v)));
-    let (_, gradient) = potential.value_and_gradient(state.view());
-    let mut inf = 0.0_f64;
-    for value in gradient.iter() {
-        inf = inf.max(value.abs());
+    let mut state = x;
+    let mut energy = 0.0;
+    let mut calls = 0usize;
+    let mut inf = f64::INFINITY;
+    for _ in 0..8 {
+        let (next_energy, next_state, next_calls) = opt.minimize(state.view(), 2000, |v| {
+            Some(potential.value_and_gradient(v))
+        });
+        calls += next_calls;
+        state = next_state;
+        energy = next_energy;
+        let (_, gradient) = potential.value_and_gradient(state.view());
+        calls += 1;
+        inf = 0.0;
+        for value in gradient.iter() {
+            inf = inf.max(value.abs());
+        }
+        if inf <= 1e-8 {
+            break;
+        }
+        opt.forget();
+    }
+    for _ in 0..40 {
+        if inf <= 1e-8 {
+            break;
+        }
+        let (_, gradient) = potential.value_and_gradient(state.view());
+        calls += 1;
+        let mut direction = gradient.clone();
+        for value in direction.iter_mut() {
+            *value = -*value;
+        }
+        let slope: f64 = gradient
+            .iter()
+            .zip(direction.iter())
+            .map(|(g, d)| g * d)
+            .sum();
+        let mut step = 1.0e-2;
+        let mut polished = false;
+        for _ in 0..12 {
+            let mut trial = state.clone();
+            for (coord, slope_component) in trial.iter_mut().zip(direction.iter()) {
+                *coord += step * slope_component;
+            }
+            let (trial_energy, trial_gradient) = potential.value_and_gradient(trial.view());
+            calls += 1;
+            if trial_energy <= energy + 1e-4 * step * slope {
+                state = trial;
+                energy = trial_energy;
+                inf = trial_gradient.iter().fold(0.0, |held, v| held.max(v.abs()));
+                polished = true;
+                break;
+            }
+            step *= 0.3;
+        }
+        if !polished {
+            break;
+        }
     }
     println!("n: {n}");
     println!("calls: {calls}");
     println!("energy: {energy:.12}");
     println!("gradient_inf: {inf:.3e}");
+    println!("reached_1e-8: {}", inf <= 1e-8);
 }
