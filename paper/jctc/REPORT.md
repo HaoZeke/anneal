@@ -86,35 +86,27 @@ That ref is 12de8866efaaf801853336302f972c5e0faa7966.
 ## Generators
 
 `scripts/hq_sci_tally.py` reads the eight h2o6 rec logs.
+It also reads the eight committed cuh2 logs.
 The hexamer block matches `data/hq_sci_h2o6/TALLY.txt`.
-The copper block does not.
-No cuh2 rec log is in this tree.
+The copper block matches that file too.
 The regenerated tally sha follows.
 
-ca33451735e77296e9a718c2ecbdf03c40af5781e0603a3e4475d75c462bac70
+d1baa5017bcf5047d60656faa7e5405cdac93b7d90e3cb527a853d3f1d57884f
+
+The diff command printed no lines.
+`logs/hq-sci-tally-cmp.txt` is that empty diff.
 
 `scripts/rebuild_figures.py` redraws each file in `figs/`.
 It pins `SOURCE_DATE_EPOCH` and `PYTHONHASHSEED` to 0.
 `figstyle.save` drops CreationDate, ModDate and Creator.
 Two clean rebuilds wrote the same bytes.
-Three files rebuilt.
-`algorithm_stack.pdf`, `rec_arms.pdf` and `toc-graphic.pdf`.
-The other generators exit on the committed provenance.
-`fig_lj75_ecdf.py` finds no full published commit.
-`fig_water_crest.py` reads the rule with a trailing period.
-`fig_landfold_maps.py` rejects the lj38 derived run.
-`fig_systems.py` misses a digest.
-`fig_si_structures.py` misses a digest.
-`fig_si_water.py` misses a digest.
-`fig_landscapes.py` misses a digest.
-`fig_disconnectivity.py` misses a digest.
-`fig_si_panels.py` misses a digest.
+All nineteen figures rebuilt.
 No figure lacks a committed generator.
 The old hash record is `logs/archive/figure-provenance-v128.txt`.
 Ten of its fifteen lines were stale.
 The new record is `logs/figure-provenance.txt`.
 The copper rec logs are not in that record.
-They are not in this tree, the branches, or the kits.
+They are in `data/hq_sci_cuh2/`.
 `TALLY.txt` still has the copper block.
 `scripts/elja_hq_sci_slab.sh` is the committed driver.
 It exits before submit.
@@ -128,3 +120,12 @@ This machine has no gfortran.
 The rgpot checkout is not here.
 engines/librgpot_cuh2.so is not in the tree.
 CppCore/rgpot/fortran/rgpot_cuh2_capi.f90 is not committed here.
+`PROVENANCE.txt` names HaoZeke/simmAnnealTeX.
+The source commit is 311d9bcc28b5401780a69898a16fff25707901ad.
+The source path is rewrite_2026/data/hq_sci_cuh2/.
+`scripts/check_cuh2_blobs.py` recomputes each blob id.
+A read-only fetch of that repo returned repository not found.
+The check has not been run against that commit.
+The eight logs do not name an anneal commit.
+No run record from that commit is in this tree.
+The producing engine is not identified.
