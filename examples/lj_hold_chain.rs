@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! One hundred all-points chains from one geometry.
 //!
 //! Each chain takes twenty-five steps at temperature 0.8 and step 0.38,
