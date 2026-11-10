@@ -45,8 +45,11 @@ def median_iqr(values: list[float]) -> tuple[float, float]:
 
 
 def _logs() -> Path:
-    raw = os.environ.get("WATER_LOGS", "paper/jctc/logs/water")
-    path = Path(raw)
+    raw = os.environ.get("WATER_LOGS")
+    if raw:
+        path = Path(raw)
+    else:
+        path = Path(__file__).resolve().parents[1] / "logs" / "water"
     if not (path / "NUMBERS.tsv").is_file():
         raise SystemExit(f"missing water logs: {path}")
     return path
