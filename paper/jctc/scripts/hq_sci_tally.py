@@ -80,12 +80,15 @@ def copper_block(directory: Path) -> str:
             finite.append(value)
             hit = value < REFERENCE_EV + REFERENCE_TOL_EV
         hits += int(hit)
+        gap = None if token == "inf" else value - REFERENCE_EV
         lines.append(f"  cuh2_fcc_rec_{index}.out best={shown} hit={hit}")
+        if gap is not None:
+            lines.append(f"  gap_to_reference {index} {gap:.6f}")
     lines.append(f"  {hits}/8={hits}/8")
     floor = min(finite) if finite else None
     relative = 0
     if floor is not None:
-        relative = sum(value - floor <= HIT_ABOVE_EV for value in finite)
+        relative = sum(item - floor <= HIT_ABOVE_EV for item in finite)
     lines.append(f"  set_relative_0.01 {relative}/8")
     return "\n".join(lines) + "\n"
 

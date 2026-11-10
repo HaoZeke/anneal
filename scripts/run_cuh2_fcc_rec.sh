@@ -32,6 +32,10 @@ fi
 
 capture() {
   printf '%s\n' "$1"
+  printf 'script\n'
+  printf 'scripts/run_cuh2_fcc_rec.sh\n'
+  printf 'host\n'
+  hostname
   printf 'boot_id\n'
   cat /proc/sys/kernel/random/boot_id
   printf 'uptime\n'
