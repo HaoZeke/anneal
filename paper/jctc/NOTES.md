@@ -1,4 +1,4 @@
-# Notes, v1.25
+# Notes, v1.27
 
 We drew the eighteen figures with the committed generators.
 This series starts from the v1.16 tip.
@@ -18,4 +18,4 @@ Three TeX files keep the affiliation and the copyright lines.
 They are `manuscript.tex`, `si.tex` and `cover-letter.tex`.
 Only `si.tex` keeps the 2023 notice.
 REPORT.md lists the Rohit items.
-REPLAY.txt records all five replays of this series.
+REPLAY.txt records all seven replays of this series.
