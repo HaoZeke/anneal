@@ -3,6 +3,9 @@
 set -eu
 out=${1:-paper/jctc/logs/cargo-build-receipt.txt}
 mkdir -p "$(dirname "$out")"
+export CARGO_TARGET_DIR=target
+lib=$(gcc -print-file-name=libstdc++.so)
+export LIBRARY_PATH="$(dirname "$lib")${LIBRARY_PATH:+:$LIBRARY_PATH}"
 {
   printf 'UTC %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf 'HEAD %s\n' "$(git rev-parse HEAD)"
@@ -17,7 +20,7 @@ import sys
 from pathlib import Path
 src, dest = sys.argv[1], sys.argv[2]
 text = Path(src).read_text(errors="replace")
-for token in ("/tmp/", "/home/", "/cursor/", "/root/", "/opt/", "/workspace/", "/agent/"):
+for token in ("/tmp/", "/home/", "/cursor/", "/root/", "/var/", "/opt/", "/workspace/", "/agent/", "/usr/"):
     text = text.replace(token, "./")
 Path(dest).write_text(text)
 Path(src).unlink()
