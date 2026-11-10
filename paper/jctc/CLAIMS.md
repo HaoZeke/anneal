@@ -16,8 +16,9 @@ The LJ75 hit count in the article is pending.
 The six crest rows are single draws, and the draft states no success
 rate from them.
 The six-seed old-counter arm is called the driver-count budget.
+Its cap equals each seed's old counter.
 The 192-seed polish arm keeps the name budget-fair polish.
-The matched comparison and the 30-start statistics are pending from the
-water-engrad-matched lane.
+The matched comparison and the 30-start statistics are not in this
+article.
 We keep the 192-seed paragraph, with the McNemar values.
 The deferred budget section is not in this article.
