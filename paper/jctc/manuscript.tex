@@ -1,10 +1,7 @@
+% Copyright (c) anneal developers
 \documentclass[journal=jctcce,manuscript=article]{achemso}
 
-\usepackage{booktabs}
-\usepackage{siunitx}
-\usepackage{amsmath}
-\usepackage{algorithm}
-\usepackage{algpseudocode}
+\usepackage{booktabs,siunitx,amsmath,algorithm,algpseudocode}
 \sisetup{scientific-notation=true,exponent-product=\times}
 \graphicspath{{figs/}}
 
@@ -32,33 +29,48 @@
 \begin{document}
 
 \begin{abstract}
-The recommended preset keeps one move library at every cluster size.
-Lattice regrowth and a compacted pair surface are settings the caller adds.
-The search is a Metropolis walk on quenched minima at one reduced temperature, with a depth posterior on the moves, a Good-Turing census of the packings, and chains that share minima.
-Figure~\ref{fig:stack} sets those pieces in the order a force call meets them.
-The structures, the rate map, the maps of accepted minima, and the water hexamer comparison are the figures of the sealed campaigns.
+We describe one basin-hopping preset for Lennard-Jones clusters.
+The preset keeps the lean burst library at every size.
+Below 98 atoms the constructor adds a diameter penalty at 0.7 of the
+largest pair distance, and restart on stall stays off.
+On the water hexamer, six seeds, anneal and the conformer rotamer
+ensemble sampling tool (CREST) finish on the same prism.
+Five polished gaps lie within \(1\times 10^{-7}\)~Eh.
+Seed 1 lies at \(1.35\times 10^{-7}\)~Eh, just outside that threshold.
 \end{abstract}
 
 \section{Introduction}
-The structure that a thermodynamic model of a cluster starts from is a local minimum of the potential, and the global minimum is the structure that model treats as the ground state.\cite{wales2003}
-On the Lennard-Jones pair potential the number of minima grows so quickly with the number of atoms that a search is judged by how many evaluations it spends before it reaches a minimum that is already known.\cite{wales1997,jones1924}
-Basin hopping, introduced by Li and Scheraga for a rough potential-energy surface and made the working method for atomic clusters by Wales and Doye, is a Monte Carlo walk on those minima.\cite{li1987,wales1997}
+We describe one preset that a reader can run at every cluster size.
+In contrast, older presets changed with the atom count.
+A thermodynamic model starts from a local minimum of the potential.\cite{wales2003}
+The same model treats the global minimum as the ground state.
+On the Lennard-Jones pair potential the number of minima grows quickly with the number of atoms.\cite{wales1997,jones1924}
+A search is then judged by how many evaluations it spends before it reaches a minimum that is already known.
+Li and Scheraga introduced basin hopping for a rough potential-energy surface.\cite{li1987}
+Wales and Doye made that Monte Carlo walk the working method for atomic clusters.\cite{wales1997}
 A move proposes a new geometry, a local minimisation returns a minimum, and the Metropolis rule at one temperature accepts or rejects that minimum.
-We report the sealed LJ\(_{75}\) campaign, 200 seeds at a cap of \(4\times 10^{6}\) force calls, and the water hexamer on 192 seeds.
-The preset measured here draws move arms by Thompson sampling from a posterior on the depth of the quench, it abandons a quench that is returning to the occupied basin, and it restarts when the chain has stopped improving.\cite{thompson1933,goedecker2004}
-The constructor installs the lean burst library at every size and leaves the surface list empty.
-A caller who wants lattice growth or a compacted surface sets it on the configuration.
+We find the same preset at every size in the campaigns below.
+We report a six-seed water hexamer comparison and the 192-seed campaign.
+The preset measured here draws move arms by Thompson sampling from a posterior on the depth of the quench, and it abandons a quench that is returning to the occupied basin.\cite{thompson1933,goedecker2004}
+A stall applies tabu, symmetrisation, the recorded basin trail, and the climb.
+Restart on stall stays off, so the walker is not redrawn from a random cluster.
+The constructor installs the lean burst library at every size.
+Below 98 atoms it installs one two-phase surface, a relative cutoff of 0.7 with weight 1, and at 98 atoms and above that list stays empty.
+A caller who wants lattice growth sets it on the configuration.
 
 \section{The search}
 \subsection{One step of basin hopping}
 A chain stores a minimum \(x\) with energy \(E(x)\).
-The move adds a displacement, the local minimiser returns a new minimum \(y\), and the chain accepts \(y\) with the Metropolis probability at temperature \(T\),
+The move adds a displacement, the local minimiser returns a new minimum
+\(y\), and the chain accepts \(y\) with the Metropolis probability at
+temperature \(T\),
 \begin{equation}
 \min\bigl(1,\exp[-(E(y)-E(x))/T]\bigr).
 \label{eq:metropolis}
 \end{equation}
 \(T\) is \(\TempReduced\) in the reduced units where the pair well depth is 1.
-Wales and Doye use that reduced temperature for Lennard-Jones basin hopping, and the preset stores it as \texttt{LennardJonesPreset::TEMPERATURE}.\cite{wales1997}
+Wales and Doye use that reduced temperature for Lennard-Jones basin hopping.\cite{wales1997}
+The Lennard-Jones preset stores the value as \texttt{TEMPERATURE}.
 One temperature is used at every size.
 The hit that scores a run is the first converged evaluation whose energy lies below the published minimum by less than \(0.001\).
 A miss is a run that reaches its call ceiling without such an evaluation.
@@ -66,14 +78,18 @@ The penalised average runtime (PAR-2) is the call count of a hit and twice the c
 The hit is read from the trace of converged improvements.
 The ledger stores no stop threshold.
 
+Algorithm~\ref{alg:chain} lists one chain of the recommended preset.
 \begin{algorithm}
 \caption{One chain of the recommended preset.}
 \label{alg:chain}
 \begin{algorithmic}[1]
 \State Draw a non-overlapping start from the seed and quench it.
-\While{the call budget remains} \State Draw a move from the library and quench the displaced geometry to a minimum \(y\).
-\State Replace \(x\) by \(y\) with the probability in equation~\ref{eq:metropolis}.
-\State When \(y\) is a new basin, quench the symmetry images of its core.
+\While{the call budget remains} \State Draw a move from the library and
+quench the displaced geometry to a minimum \(y\).
+\State Replace \(x\) by \(y\) with the probability in
+equation~\ref{eq:metropolis}.
+\State When \(y\) is a new basin, quench the symmetry images of its
+core.
 \EndWhile
 \end{algorithmic}
 \end{algorithm}
@@ -81,15 +97,22 @@ The ledger stores no stop threshold.
 \subsection{What the preset turns on}
 The recommended preset starts from the Wales and Doye displacement and then selects the lean burst library at every size.
 Thompson sampling draws each move from a normal-gamma posterior on the depth reached by earlier quenches of that move.\cite{thompson1933}
-The constructor leaves the surface list empty.
+Below 98 atoms the constructor sets the surface list to one diameter penalty, by calling \texttt{TwoPhase::relative} with \(0.7\) and \(1\).
+The cutoff equals \(0.7\) times the largest pair distance.
+That distance is read on the structure that enters the relaxation.
+The penalty weight equals 1.
+The surface portfolio then draws that penalty or the plain surface, using the same depth posterior.
+The surface list stays empty at 98 atoms and above.
+The relaxation then uses the plain surface.
 The lattice-regrowth library builds a truncated octahedron, a decahedron, or an icosahedron from a named template.
-Which of those is the global minimum changes with size: face-centred cubic at 38 atoms, icosahedral at 55, and Marks decahedral at 75.\cite{wales1997,marksSurfaceStructureEnergetics1984}
-Installing that library only when the count equals 38 searches for a structure the count has already named, which is why the preset keeps the displacement library at every size.
+The global minimum changes with size.\cite{wales1997,marksSurfaceStructureEnergetics1984}
+Face-centred cubic is the minimum at 38 atoms, icosahedral at 55, and Marks decahedral at 75.
+Installing that library only at 38 atoms would search for a structure the count has already named.
+The preset therefore keeps the lean burst library at every size, including 38.
 Doye showed that the Locatelli-Schoen compression, a term that pulls every atom toward the centroid, is a change of the potential.\cite{doye2000,locatelli2002}
-The same paper puts the compression into basin hopping as a two-phase search the caller turns on.
-A caller who wants that cutoff passes \(0.7\) times the largest pair distance in the structure being quenched.
-The cutoff is a property of that geometry.
-The constructor does not test the atom count to install it.
+The installed surface is a diameter penalty, and its centroid weight stays at 0.
+Restart on stall stays at its default, off, so a stalled walker is not redrawn from random coordinates.
+A stall still applies tabu, symmetrisation, the recorded basin trail, and the climb.
 Orbit completion quenches the images of a symmetric core when a new basin appears.
 A continuous-symmetry projection every ten quenches, and a reseed after five hops on an icosahedral plateau, follow the defaults Oakley, Johnston and Wales published for the Wales-group basin-hopping program (GMIN).\cite{oakley2013}
 Those two numbers are applied at every size.
@@ -99,7 +122,7 @@ The figure is drawn from the search, and no campaign count enters it.
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{algorithm_stack.pdf}
-\caption{The stack of the search, in the Ruhi colour scheme.
+\caption{The stack of the search.
 The chains share minima through the annealed-flow bank.
 In one hop the Thompson draw picks the arm, the quench is screened, and the acceptance test runs at the held temperature \(T=0.8\).
 The depth of the quench updates the posterior of the arm that played, and a saturated packing retires.
@@ -110,75 +133,96 @@ Every potential reaches the hop through rgpot.\cite{goswamiOmniPotentRPCRgpot202
 \section{Statistical framework}
 \label{sec:flow}
 A cooling schedule sets the step and the temperature of one chain.
-A population of chains also decides which replicas carry on, and when the census of packings is complete enough that the next minimization belongs to a different packing.
+A population of chains also decides which replicas carry on.
+The census of packings then decides when the next minimization belongs to a different packing.
 We resample replicas on within-epoch ranks, and we close the census with a Good-Turing estimate of the unseen mass.\cite{goodPopulationFrequenciesSpecies1953}
 
 \subsection{Annealed-flow kernel}
 As the search cools, the replicas follow a sequence of distributions that weight lower energies more heavily.
-Del Moral, Doucet, and Jasra write that sequence as
+Del Moral, Doucet, and Jasra write that sequence as the equation below.\cite{DelMoral_Doucet_Jasra_2006}
+
 \begin{equation}
 \eta_t(\mathrm{d}x)\propto\exp(-\beta_t E(x))\,\lambda(\mathrm{d}x),
 \label{eq:target}
 \end{equation}
-with \(\beta_t\) increasing, and they move from one target to the next by reweighting and then applying a move kernel,\cite{DelMoral_Doucet_Jasra_2006}
+
+Beta increases along the sequence.
+They move from one target to the next by reweighting.
+They then apply a move kernel.
+
 \begin{equation}
 \eta_{t+1}=\Psi_{G_t}(\eta_t)\,M_{t+1}.
 \label{eq:fk}
 \end{equation}
-Cluster energies share no scale from one size to the next, so the weight is the within-epoch rank.
+
+Cluster energies share no scale from one size to the next.
+The weight is therefore the within-epoch rank.
 Tied replicas share their average position.
-With positions running from \(0\) to \(R-1\), a tied block from \(b\) inclusive to \(e\) exclusive has rank
+Positions run from \(0\) to \(R-1\).
+A tied block runs from \(b\) inclusive to \(e\) exclusive.
+The block has the rank below when \(R\ge 2\).
+
 \begin{equation}
 r=\frac{b+e-1}{2(R-1)}
 \label{eq:rank}
 \end{equation}
-when \(R\ge 2\).
 A lower energy receives a lower rank.
-The energy rank \(r_E\), the novelty rank \(r_N\), the scarcity rank \(r_S\), and the uncertainty rank \(r_U\) combine as
+The energy rank \(r_E\), the novelty rank \(r_N\), the scarcity rank
+\(r_S\), and the uncertainty rank \(r_U\) combine as
 \begin{equation}
 \log w_i=-r_{E,i}+0.8\,r_{N,i}+0.6\,r_{S,i}+0.4\,r_{U,i}.
 \label{eq:weight}
 \end{equation}
-Offspring go to replicas that are low in energy, rare as packings, and uncertain as basins.
+Offspring go to replicas that are low in energy, rare as packings, and
+uncertain as basins.
 
 \subsection{Occupancy and the temperature of the hop}
-The Good-Turing estimate of the unseen mass closes the census of packings, and a saturated packing retires so the next minimization is spent on a packing the census has barely seen.\cite{goodPopulationFrequenciesSpecies1953}
+Those packings and basins set the occupancy of the hop.
+The Good-Turing estimate of the unseen mass closes that census.\cite{goodPopulationFrequenciesSpecies1953}
+A saturated packing then retires.
+The next minimization is spent on a packing the census has barely seen.
 The temperature of the recommended hop stays at the Wales and Doye value \(0.8\) in reduced units.\cite{wales1997}
 A caller who wants a schedule that tracks the entropy of the occupied states sets it on the configuration.
 The preset itself keeps one temperature at every size.
 
 \section{Communicating chains}
-\label{sec:chains} Several searches already run many chains.
+\label{sec:chains} Many searches already run many chains.
 We call the communication correct when five conditions hold.
-Each chain draws its next move from a posterior on the depth that move reaches.
+Each chain draws its next move from a posterior on the depth that move
+reaches.
 A packing retires on the Good-Turing estimate of its unseen mass.
 Minima are shared under one radial merge distance.
-Every force evaluation is charged to the chain that spent it, so chains are compared at equal budgets.
-The receiver can act on a shared minimum by quenching it and entering it in the acceptance test.
+Every force evaluation is charged to the chain that spent it, so chains
+are compared at equal budgets.
+The receiver can act on a shared minimum by quenching it and entering it
+in the acceptance test.
 
 Parallel tempering (PT) exchanges states along a ladder of temperatures.\cite{swendsenReplicaMonteCarlo1986,hukushimaExchangeMonteCarlo1996}
 Population annealing resamples a population by its Boltzmann weight.\cite{hukushimaPopulationAnnealingIts2003,machtaPopulationAnnealingWeighted2010}
-Conformational space annealing (CSA) keeps a bank of minima and anneals the distance cutoff.\cite{leeUnbiasedGlobalOptimization2003}
-The genetic algorithm of Deaven and Ho mates stored geometries by cut and splice, and so do the Birmingham pool algorithms.\cite{deaven1995,shayeghiPoolbcgaParallelisedGenerationfree2015}
+Conformational space annealing (CSA) keeps a bank of minima.\cite{leeUnbiasedGlobalOptimization2003}
+CSA also anneals the distance cutoff.
+Deaven and Ho mate stored geometries by cut and splice.\cite{deaven1995}
+The Birmingham pool algorithms do the same.\cite{shayeghiPoolbcgaParallelisedGenerationfree2015}
 Basin hopping (BH) and minima hopping (MH) run a single walker.\cite{wales1997,goedecker2004}
 The conformer-rotamer ensemble sampling tool (CREST) samples a molecular ensemble by metadynamics.\cite{prachtCrestProgramExploration2024}
 The bank in this section adds the depth posterior and the unseen-mass census to that list.
 
-Figure~\ref{fig:lj75-ecdf} draws that sealed LJ\(_{75}\) comparison.\cite{oakley2013}
+Figure~\ref{fig:lj75-ecdf} draws that LJ\(_{75}\) comparison.\cite{oakley2013}
 
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{lj75_ecdf.pdf}
-\caption{LJ\(_{75}\), sealed campaign.
-The share of 200 runs of each arm that had reached the global minimum, against the force calls to the first hit, for the recommended hop, the derived hop, and GMIN with core orbits.
-A dotted line marks the call PAR-2 of each arm: \(32363.98\), \(27107.045\), and \(58029.630\).
-The cap on that campaign is \(4\times 10^{6}\) force calls.}
+\caption{This figure is the LJ\(_{75}\) campaign of 200 seeds.
+Each curve plots 200 runs against the force calls to the first hit.
+The curves come from an earlier sealed campaign.
+The hit count for the run now in progress is pending.}
 \label{fig:lj75-ecdf}
 \end{figure}
-
 \section{Information theory in the hop}
-\label{sec:info} A bank that shares good minima can still hand the next trial to a move that has stopped finding depth.
-The recommended hop guards against that with a posterior on the depth each move reaches.
+It can still hand the next trial to a move that has stopped finding
+depth.
+\label{sec:info} The recommended hop guards against that with a
+posterior on the depth each move reaches.
 
 \subsection{Depth posterior}
 On a deep cluster few of the available moves improve the incumbent.
@@ -192,20 +236,29 @@ The figure is drawn from the search, and no campaign count enters it.
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{rec_arms.pdf}
-\caption{The arms of the recommended hop and the law of its burst, in the Ruhi colour scheme.
+\caption{The figure shows the arms of the recommended hop and the law of its
+burst.
 The Thompson draw picks one arm.
-Whichever arm plays, its proposal is quenched once and meets one acceptance test, and the depth updates the posterior of that arm.
+Whichever arm plays, its proposal is quenched once.
+That proposal meets one acceptance test.
+The depth then updates the posterior.
 The burst length is capped at eight relocations.}
 \label{fig:rec-arms}
 \end{figure}
 
 \subsection{Symmetrisation}
-The global minimum of a cluster is often more symmetric than the minima around it.
-On LJ\(_{75}\) the global minimum is a Marks decahedron, and most of the low minima around it are icosahedral.\cite{marksSurfaceStructureEnergetics1984,Doye_Miller_Wales_1999}
-Oakley, Johnston, and Wales symmetrise the structure in GMIN, either by completing the orbits of a symmetric core or by a continuous symmetry measure.\cite{oakley2013}
+The burst drawn above is one arm of the hop.
+After that quench, the search projects the structure toward a more symmetric neighbour.
+A global minimum is often more symmetric than the minima around it.
+On LJ\(_{75}\) the global minimum is a Marks decahedron.\cite{marksSurfaceStructureEnergetics1984,Doye_Miller_Wales_1999}
+Most low minima around that decahedron are icosahedral.
+Oakley, Johnston, and Wales symmetrise the structure in GMIN.\cite{oakley2013}
+One route completes the orbits of a symmetric core.
+Another route uses a continuous symmetry measure.
 The preset applies that projection every ten quenches at every size.
 
 \section{Results}
+We report the rates below.
 \subsection{The structures}
 Figure~\ref{fig:systems} draws the archived structures of the benchmark.
 The Lennard-Jones geometries are the reference minima of the Cambridge Cluster Database, and the TIP4P geometries are the minima of Wales and Hodges.\cite{walesCambridgeClusterDatabase,walesGlobalMinimaWater1998,jorgensen1983}
@@ -215,54 +268,68 @@ The Supporting Information draws the full structure plates.
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{systems.pdf}
-\caption{Structures of the benchmark, rendered in the Ruhi colour scheme.
-(a) The global minima of LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\) and LJ\(_{104}\).
-(b) The TIP4P minima of 10, 15 and 20 molecules, and the lowest GFN2-xTB hexamer of each class.}
+\caption{Structures of the benchmark.
+(a) The global minima of LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\) and
+LJ\(_{104}\).
+(b) The TIP4P minima of 10, 15 and 20 molecules, and the lowest GFN2-xTB
+hexamer of each class.}
 \label{fig:systems}
 \end{figure}
 
 \subsection{Rates and the water hexamer}
-On LJ\(_{75}\), at a cap of \(4\times 10^{6}\) force calls, the recommended hop hit 200 of 200 seeds.
-The mean call PAR-2 is \(32363.98\).
-The median is \(28593.5\) and the type-7 interquartile range is \(32890.5\).
-The derived hop hit 200 of 200.
-Its mean call PAR-2 is \(27107.045\), its median is \(19974\), and its type-7 interquartile range is \(29912.75\).
-GMIN with core orbits hit 200 of 200.
-Its mean call PAR-2 is \(58029.63\), its median is \(33122\), and its type-7 interquartile range is \(73623.5\).
-Figure~\ref{fig:lj75-ecdf} draws those three encounter curves, and Figure~\ref{fig:summary} places the same LJ\(_{75}\) row on the rate map.
-The recommended hop hit 72 of 72 seeds at LJ\(_{38}\).
-On those hits the median is 726 force calls and the type-7 interquartile range is 912.25.
-It hit 47 of 48 seeds at LJ\(_{98}\).
-On those hits the median is 450877 force calls and the type-7 interquartile range is 902434.5.
-The seed rows are \texttt{data/lj38-recommended-seeds.csv} and \texttt{data/lj98-recommended-seeds.csv}.
-These counts are the sealed campaign.
+The LJ\(_{75}\) hit count is pending.
+Seeds 0 through 199 are running serially at a cap of \(4\times 10^{6}\)
+force calls.
+No hit count is reported until that run finishes.
+Figure~\ref{fig:lj75-ecdf} draws the encounter curves from an earlier
+sealed campaign.
+Figure~\ref{fig:summary} shows the water-hexamer success, six seeds out
+of six on each ledger.
+Counts that wait for a new run carry the stale marker (STALE).
+\todo{STALE: rerun on main. The recommended hop hit 72 of 72 seeds at
+LJ\(_{38}\). On those hits the median is 726 force calls and the type-7
+interquartile range is 912.25. It hit 47 of 48 seeds at LJ\(_{98}\). On
+those hits the median is 450877 force calls and the type-7 interquartile
+range is 902434.5. The seed rows are
+data/lj38-recommended-seeds.csv and data/lj98-recommended-seeds.csv.}
 
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{summary_rates.pdf}
-\caption{Fraction of seeds that reach the reference, sealed campaign, Ruhi colour scheme.
-Lennard-Jones takes one row a size.
-The LJ\(_{75}\) row is the recommended hop and GMIN with core orbits over 200 seeds.
-The hexamer row is the default hop and CREST on seeds 0 to 191.
-BH, basin hopping; PT, parallel tempering; CSA, conformational space annealing; MH, minima hopping.}
+\caption{Share of the six water-hexamer seeds that finish.
+Each bar is 6 of 6.
+The two anneal bars are the 4000-evaluation ledger and the old counter.
+The third bar is CREST.
+No other system is plotted.}
 \label{fig:summary}
 \end{figure}
 
-Figure~\ref{fig:minima-maps} maps the minima one seed of basin hopping and of the recommended hop accepted at LJ\(_{38}\), LJ\(_{75}\) and LJ\(_{98}\).
+Figure~\ref{fig:minima-maps} maps the minima one seed of basin hopping
+and of the recommended hop accepted at LJ\(_{38}\), LJ\(_{75}\) and
+LJ\(_{98}\).
 At LJ\(_{38}\) the recommended hop reached the truncated octahedron.
-The LJ\(_{75}\) minima on that map reach the icosahedral competitor at \(-396.282249\), which is \(1.210\) above the decahedral global minimum at \(-397.492331\).
-The LJ\(_{98}\) minima stop \(0.022\) above the tetrahedral global minimum at \(-543.665361\).
-Figure~\ref{fig:disconnectivity} joins the LJ\(_{38}\) minima where they first connect among their nearest neighbours in the coordination descriptor.
-A search records no transition states, so no join of the tree is a barrier.
-Figure~\ref{fig:landfold-maps} shows a landfold panel for each sealed Lennard-Jones size and for the TIP4P hexamer.
+The LJ\(_{75}\) minima on that map reach the icosahedral competitor at
+\(-396.282249\), which is \(1.210\) above the decahedral global minimum
+at \(-397.492331\).
+The LJ\(_{98}\) minima stop \(0.022\) above the tetrahedral global
+minimum at \(-543.665361\).
+Figure~\ref{fig:disconnectivity} joins the LJ\(_{38}\) minima where they
+first connect among their nearest neighbours in the coordination
+descriptor.
+A search records no transition states, so no join of the tree is a
+barrier.
+Figure~\ref{fig:landfold-maps} shows a landfold panel for each sealed
+Lennard-Jones size and for the TIP4P hexamer.
 
 \begin{figure*}
 \centering
 \includegraphics[width=\textwidth]{\MinimaMapFile}
-\caption{Maps of the minima one seed accepted at (a) LJ\(_{38}\), (b) LJ\(_{75}\) and (c) LJ\(_{98}\).
+\caption{Maps of the minima one seed accepted at LJ\(_{38}\), LJ\(_{75}\), and
+LJ\(_{98}\).
 Top, the sketch-map.
 Middle, four deep landmarks.
-Bottom, the landfold map of the same minima, sky in the largest community and coral in the others.}
+Bottom, the landfold map of the same minima, sky in the largest
+community and coral in the others.}
 \label{fig:minima-maps}
 \end{figure*}
 
@@ -280,12 +347,13 @@ No join is a barrier.}
 \centering
 \includegraphics[width=\textwidth]{landfold_maps.pdf}
 \caption{Landfold maps of the sealed Lennard-Jones and TIP4P hexamer runs.
-Each panel is one sealed map, coloured from the lowest free energy to the highest, with the minimum marked.}
+Each panel is one sealed map, coloured from the lowest free energy to
+the highest, with the minimum marked.}
 \label{fig:landfold-maps}
 \end{figure*}
-
-\subsection{Water hexamer against CREST}
-\label{sec:water}
+Six seeds of the water hexamer were compared on one
+Hamiltonian\cite{prachtCrestProgramExploration2024,bannwarthGfn2xtbanAccurateBroadly2019}.
+\subsection{Earlier 192-seed hexamer campaign}
 On the water hexamer the sealed campaign runs four arms, each on seeds 0 to 191 at a budget of 4000 force calls.\cite{prachtCrestProgramExploration2024,bannwarthGfn2xtbanAccurateBroadly2019}
 The default arm is the hop.
 The budget-fair polish is an opt-in mode that charges an external polish against the same budget.
@@ -304,55 +372,168 @@ The exact McNemar \(p\) of the polish against CREST is \(1.37\times 10^{-6}\).
 The exact McNemar \(p\) against CREST plus the polish is \(0.000374\).
 Figure~\ref{fig:water-crest} draws the four arms.
 
+\subsection{Water hexamer against CREST}
+\label{sec:water} CREST here is conda-forge crest 3.0.2.
+A row succeeds when the run exits cleanly, the polished energy is
+finite, and the maximum force is at or below 0.001~Eh/bohr.
+Every final is polished with xtb at GFN2, the vtight setting, accuracy
+0.01, and an iteration limit of 500.
+The vtight energy threshold is \(1\times 10^{-7}\)~Eh.
+
+Table~\ref{tab:crest-counters} lists two CREST counters for each seed.
+The old counter sums the dynamics steps and the optimization steps.
+CREST prints a second total, ``Total number of energy+grad calls''.
+The old counter undercounted CREST on every seed.
+
+\begin{table}
+\caption{CREST effort on the water hexamer.
+The old counter is dynamics steps plus optimization steps.
+The energy and gradient column is CREST's own summary line.
+The columns list those two counters.}
+\label{tab:crest-counters}
+\centering
+\begin{tabular}{crr}
+\toprule
+Seed & Old counter & Energy+gradient \\
+\midrule
+0 & 32112 & 151074 \\
+1 & 50026 & 191132 \\
+2 & 32155 & 142110 \\
+3 & 46062 & 172468 \\
+4 & 50063 & 157643 \\
+5 & 32170 & 209931 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Anneal's ledger is 4000 evaluations in one setting.
+The other setting spends the old counter, from 32112 to 50063
+evaluations.
+CREST's energy and gradient totals run from 142110 to 209931.
+The comparison is that anneal ledger against those energy and gradient
+calls.
+The old-counter setting is not equal effort, because that counter
+undercounted CREST.
+
+Table~\ref{tab:hexamer-gaps} gives the polished gap on each seed.
+The gap is the anneal energy minus the CREST energy.
+A negative value means the anneal energy sits lower.
+Five seeds lie within \(1\times 10^{-7}\)~Eh on both ledgers.
+Seed 1 reaches \(1.3509\times 10^{-7}\)~Eh on the 4000-evaluation ledger
+and \(1.3505\times 10^{-7}\)~Eh on the old-counter ledger, just outside
+that threshold.
+All six seeds share the prism geometry.
+The label-free root-mean-square deviation of each polished pair is at
+most 0.00212~Å.
+
+\begin{table}
+\caption{Polished gap and label-free deviation on the water hexamer.
+The gap is anneal minus CREST, in hartree.
+The deviation is the label-free root-mean-square deviation, in
+angstroms.}
+\label{tab:hexamer-gaps}
+\centering
+\begin{tabular}{crrrr}
+\toprule
+Seed & Gap, 4000 & Gap, old counter & Deviation, 4000 & Deviation, old counter \\
+\midrule
+0 & $-1.1214\times 10^{-8}$ & $-1.1210\times 10^{-8}$ & 0.001004 & 0.000987 \\
+1 & $-1.3509\times 10^{-7}$ & $-1.3505\times 10^{-7}$ & 0.002023 & 0.001964 \\
+2 & $-2.5460\times 10^{-9}$ & $-2.5850\times 10^{-9}$ & 0.000532 & 0.000477 \\
+3 & $-4.1510\times 10^{-9}$ & $-4.1430\times 10^{-9}$ & 0.000322 & 0.000308 \\
+4 & $-6.8980\times 10^{-8}$ & $-6.9022\times 10^{-8}$ & 0.002116 & 0.002068 \\
+5 & $-2.1900\times 10^{-9}$ & $-2.2000\times 10^{-9}$ & 0.000157 & 0.000134 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The logs name the processor Intel Xeon Processor, family 6, model 207.
+Each CREST run selected one thread.
+The hexamer wall times are pending.
+
+The CREST polish converged in one iteration on all 18 finals.
+No CREST structure dissociated.
+
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{water_crest.pdf}
-\caption{The water hexamer against CREST, sealed campaign, Ruhi colour scheme.
+\caption{The water hexamer against CREST, sealed campaign.
 (a) The share of 192 seeds that each arm hit, with the Wilson interval.\cite{wilsonProbableInferenceLaw1927}
 (b) For each hop arm paired with CREST, the difference in hit rate, with the Newcombe interval and the exact McNemar \(p\).\cite{newcombeImprovedConfidenceIntervals1998,mcnemarNoteSamplingError1947}}
 \label{fig:water-crest}
 \end{figure}
 
+\todo{The counter table leaves the 16-mer count open. A count waits until both arms share one Hamiltonian.}
+\todo{Measurement is still open for the Atomic Simulation Environment panel and for the atomistic global optimization framework (AGOX). No count is added here.}
+\todo{Measurement is still open for the Wales-group basin-hopping program (GMIN) head-to-head. This draft adds no new count.}
+
 \section{Conclusions}
-We keep the lean burst library at every size, including 38 atoms, and we leave the surface list empty.
-The same temperature, the same census, and the same orbit completion run at every size.
-The figures carry the sealed LJ\(_{75}\) campaign and the 192-seed water comparison.
+That count stays open, and the hexamer comparison keeps the lean burst
+library at every size, including 38 atoms.
+In contrast with a size-specific library, that choice does not change
+with the atom count.
+The constructor installs the diameter penalty below 98 atoms.
+The surface list is empty from 98 atoms upward.
+Restart on stall stays off.
+The same temperature, the same census, and the same orbit completion run
+at every size.
+The water-hexamer figure uses the six-seed comparison in the text.
 
 \section*{Author contributions}
-The roles follow the CRediT taxonomy.
-Rohit Goswami: conceptualization, methodology, software, formal analysis, and writing of the original draft.
-Ruhila Goswami: software and visualization.
-Amrita Goswami: methodology and review of the draft.
-Moritz Sallermann: software, methodology, and review of the draft.
-Sonaly Goswami: validation and review of the draft.
-Debabrata Goswami: supervision and review of the draft.
+The hexamer comparison names the roles under the CRediT taxonomy.
+Rohit Goswami contributed conceptualization, methodology, software,
+formal analysis, and the original draft.
+Ruhila Goswami contributed software and visualization.
+Amrita Goswami contributed methodology and edited the draft.
+Moritz Sallermann contributed software and methodology, and he edited
+the draft.
+Sonaly Goswami contributed validation and checked the draft.
+Debabrata Goswami contributed supervision and oversaw the draft.
 
 \section*{Acknowledgments}
-Rohit Goswami thanks his pets Ar\'{\i}, Yoda, Jude, Crystee, Thor, and Loki, and the garden cats.
+Rohit Goswami thanks his pets Ar\'{\i}, Yoda, Jude, Crystee, Thor, and
+Loki, and the garden cats.
 In memoriam TuiTui, Snoopy, and Cosmo.
-He thanks his cactus Ami and his in-laws Nagaselvamani and Sankaranarayan.
-Ruhila Goswami set the Ruhi colour scheme.
+He thanks his cactus Ami and his in-laws Nagaselvamani and
+Sankaranarayan.
+Ruhila Goswami set the figure colours.
 Generative AI tools assisted with drafting and editing the text.
-The authors reviewed and edited all content and take full responsibility for it.
+The authors reviewed and edited all content and take full responsibility
+for it.
+% OPTION for Rohit. This comment is not the submitted disclosure.
+% The journal asks for one sentence that names the tool, the version, the purpose,
+% and the portions of the manuscript. A tool is not an author.
+% Rohit fills or deletes the sentence before submission.
+% OPTION: <tool> <version> assisted with <purpose> in <portions>.
 
 \section*{Funding}
-This research did not receive any specific grant.
-No funding agency in the public, commercial, or not-for-profit sectors supported it.
+This research received no specific grant.
+No funding agency in the public, commercial, or not-for-profit sectors
+supported it.
 
 \section*{Notes}
 The authors declare no competing financial interest.
 
 \begin{suppinfo}
 The Supporting Information gives the board constants.
-It also gives the structure plates, the sketch-map panels, and the landfold panels.
+It also gives the structure plates, the sketch-map panels, and the
+landfold panels.
 \end{suppinfo}
 
 \section*{Data and software availability}
-The sealed Lennard-Jones and hexamer counts are the campaigns named in the results.
-The newest tag on the repository is v0.11.1.
-The source is under the MIT licence at \url{https://github.com/HaoZeke/anneal}.
+The landfold panels in the Supporting Information accompany the six-seed
+hexamer comparison in the text.
+The source is the repository \url{https://github.com/HaoZeke/anneal}
+under the Massachusetts Institute of Technology (MIT) licence.
 Documentation is at \url{https://anneal.rgoswami.me}.
-The archive of that line is the Zenodo concept record \url{https://doi.org/10.5281/zenodo.10672746}.
+The archive of the software line is the Zenodo concept record
+\url{https://doi.org/10.5281/zenodo.10672746}.
+The Zenodo digital object identifier (DOI) for this submission is
+\todo{DOI}.
+The newest released tag is v0.11.1.
+The crate records version 0.12.0.
+\todo{release pending}
+% Table-of-contents graphic slot, 3.25 in by 1.75 in: toc-graphic.tex and figs/toc-graphic.pdf.
 
 \bibliography{refs}
 

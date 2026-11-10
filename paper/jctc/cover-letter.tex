@@ -1,0 +1,55 @@
+% Copyright (c) anneal developers
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{url}
+\newcommand{\todo}[1]{\par\noindent\textbf{[TODO]} #1\par}
+
+\begin{document}
+\noindent Rohit Goswami\\ SURF B.V., Amsterdam, The Netherlands\\
+Science Institute, University of Iceland, Reykjavik, Iceland\\
+TurtleTech ehf., Reykjavik, Iceland\\ Email: \url{rgoswami@ieee.org}\\
+Telephone: \todo{Rohit}
+
+\vspace{1em} \noindent Journal of Chemical Theory and Computation\\
+American Chemical Society
+
+\vspace{1em} \noindent Dear Editor,
+
+Please consider the enclosed manuscript, ``Basin hopping on
+Lennard-Jones clusters with one preset at every size,'' as a Full
+Article.
+
+This submission replaces the preprint arXiv:2302.02811, deposited in
+2023 under the title ``Unified Software Design Patterns for Simulated
+Annealing.''
+The title has changed.
+The manuscript now reports one basin-hopping preset.
+That preset keeps the lean burst library at every size.
+Below 98 atoms it adds a diameter penalty, and restart on stall stays
+off.
+On the water hexamer, six seeds, anneal and the conformer rotamer
+ensemble sampling tool (CREST) finish on the same prism.
+Five polished gaps lie within \(1\times 10^{-7}\)~Eh, and seed 1 lies
+just outside that threshold.
+The comparison sets anneal's ledger against CREST's energy and gradient
+calls, which run from 142110 to 209931.
+
+One constructor states the size switch and the stall rule that the code
+runs.
+A referee can check each hexamer gap against the force criterion and
+against the vtight threshold in the text.
+Journal of Chemical Theory and Computation publishes software for
+molecular simulation.
+This article belongs in that journal.
+The molecular test is a water hexamer at the GFN2-xTB model, and the
+software is the preset a reader can rerun.
+
+A table of contents (TOC) graphic at 3.25~in by 1.75~in accompanies the
+submission.
+\todo{TOC placeholder}
+
+Suggested reviewers follow.
+\todo{Rohit} \todo{Rohit} \todo{Rohit}
+
+\noindent Sincerely,\\ Rohit Goswami
+\end{document}
