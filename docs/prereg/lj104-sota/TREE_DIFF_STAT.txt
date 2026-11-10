@@ -1,0 +1,20 @@
+Copyright (c) anneal developers
+
+ docs/prereg/lj104-sota/PREDICTIONS.md     |  36 ++++-
+ docs/prereg/lj104-sota/SCOPE.md           | 223 ++++++++++++++++++++++++++++++
+ docs/prereg/lj104-sota/gmin_best.keywords |  12 ++
+ docs/prereg/lj104-sota/requench_panel.py  |   1 -
+ docs/prereg/lj104-sota/scope_paths.py     | 100 ++++++++++++++
+ 5 files changed, 369 insertions(+), 3 deletions(-)
+
+
+This comparison is the replayed tip against v1.2 tree
+4b168122d30bc00afa0e27a26c67863ffc7b312c, before the receipt
+commit. PREDICTIONS.md carries the GMIN sha256, the counter unit,
+the charge citation at line 1388, and the wrap of the former
+904-column line. SCOPE.md and scope_paths.py are the scope
+receipt. gmin_best.keywords is the shared GMIN keyword block.
+requench_panel.py drops one fallback path that named a temporary
+build directory. The receipt commit then adds REPLAY.txt,
+replay-map.tsv, TREE_EQUAL.txt, TREE_DIFF_STAT.txt, and the four
+prose NOT_RUN notes.
