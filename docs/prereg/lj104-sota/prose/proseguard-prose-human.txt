@@ -1,20 +1,10 @@
-Copyright (c) anneal developers
+Copyright © anneal developers
 
-This file is not a check.
-The prose-human profile was not run.
-proseguard was not obtained, so no actionable count is reported.
-
-The command is absent from PATH.
-The anneal CI workflows do not name an install.
-pip index versions proseguard found no distribution.
-The crates.io search returned no crate named proseguard.
-GitHub HaoZeke/proseguard returned 404.
-GitHub TurtleTech-ehf/proseguard returned 404.
-The TurtleTech Homebrew tap has one formula, snapper-fmt.
-HaoZeke/Dotfiles on chezmoi has profiles only.
-The prose-human profile is public there.
-The program source is not in that tree.
-gitstq/proseguard is a different program.
-It was not used as a substitute.
-Earlier kit receipts show output from version 0.1.0.
-Those receipts do not include the binary or an install command.
+proseguard was not run.
+We record that status for the box.
+The prose-human profile waits for the box.
+The counts arrive with that later run.
+The note keeps the status only.
+The registration prose stays in PREDICTIONS.md.
+The same status covers the other profiles.
+A later box run reads those files.

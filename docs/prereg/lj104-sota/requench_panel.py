@@ -110,10 +110,14 @@ def main() -> None:
     table = "\n".join(lines) + "\n"
     (here / "requench.tsv").write_text(table, encoding="utf-8")
     prose = [
-        "Copyright (c) anneal developers",
+        "Copyright © anneal developers",
         "",
-        "Re-quenched panel. A hit is requenched_e <= E_known + 1e-6.",
-        "requench_calls are the WarmLbfgs::minimize evaluations and are not search calls.",
+        "We record the re-quenched panel below.",
+        "We keep a hit as requenched_e <= E_known + 1e-6.",
+        "We store the call counts below.",
+        "We leave each seed row unchanged.",
+        "requench_calls are the WarmLbfgs::minimize evaluations.",
+        "They are not search calls.",
         "raw_e is the lowest line of the untouched search log.",
         "",
     ]
@@ -122,12 +126,13 @@ def main() -> None:
         group = [row for row in rows if row[0] == n]
         hits = sum(1 for row in group if row[4])
         floors[n] = hits
-        prose.append(f"LJ{n} floor: {hits}/6. E_known {known[n]:.6f}.")
+        prose.append(f"LJ{n} floor: {hits}/6.")
+        prose.append(f"E_known {known[n]:.6f}.")
         prose.append("")
-        prose.append("seed raw_e requenched_e hit requench_calls")
+        prose.append("seed raw_e requenched_e hit requench_calls.")
         for _n, seed, raw, energy, hit, calls in group:
             prose.append(
-                f"{seed} {raw:.10f} {energy:.16f} {'hit' if hit else 'miss'} {calls}"
+                f"{seed} {raw:.10f} {energy:.16f} {'hit' if hit else 'miss'} {calls}."
             )
         prose.append("")
     (here / "requench.md").write_text("\n".join(prose), encoding="utf-8")

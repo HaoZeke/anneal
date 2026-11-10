@@ -16,3 +16,6 @@ Ref refs/archive/prereg/lj104-sota-v1.3.2.
 The bundle records a complete history.
 The bundle uses this hash algorithm: sha1.
 The output has no requires line.
+We record an earlier verify in this note.
+That verify predates the later commits.
+The sealed log is the verify of the shipped bundle.

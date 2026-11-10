@@ -7,6 +7,12 @@ We store the wall sums below.
 We leave each seed row unchanged.
 runner_blob d9575213d875f6a43fd9ea7aa17dac63208acc3d.
 head cc0587fa24b9bd72c4e0399b942bd3a5c3c8cff5.
+The archive panel head follows.
+cc0587fa24b9bd72c4e0399b942bd3a5c3c8cff5.
+The branch commit with the same tree follows.
+8ad608bb6f2a717b2e860f694a3e7c39567af76e.
+The shared tree follows.
+b8f8a9a73a839235bf3d34a17ef9d27a5afed9fb.
 tree b8f8a9a73a839235bf3d34a17ef9d27a5afed9fb.
 boot_id b3fc2d5f-65ed-490e-ba1a-5f1ba891ad20.
 wall_sum_seconds 272.291000.
