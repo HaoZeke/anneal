@@ -1,7 +1,10 @@
-Copyright (c) anneal developers
+Copyright © anneal developers
 
-Floors from the raw logs of the default panel.
-A hit is lowest <= reference + 0.001.
+We record the window-count floors from the raw panel logs.
+We keep a hit as lowest <= reference + 0.001.
+We store the runner blob below.
+We store the wall sums below.
+We leave each seed row unchanged.
 runner_blob d9575213d875f6a43fd9ea7aa17dac63208acc3d.
 head cc0587fa24b9bd72c4e0399b942bd3a5c3c8cff5.
 tree b8f8a9a73a839235bf3d34a17ef9d27a5afed9fb.
