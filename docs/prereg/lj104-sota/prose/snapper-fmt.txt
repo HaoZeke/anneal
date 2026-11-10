@@ -4,6 +4,6 @@ We ran snapper-fmt at width 72.
 Each of the eight tip inputs exits 0.
 Stdout matches the concatenated input bytes.
 The sha256 of that stdout follows.
-0ad1c5add6a860682de1c1b704eea0a1ca1d129f3df5384b27e9d46223825986.
-The byte count is 42190.
+2dde1587dccee6a5d9a2b1a124b9e8cc3c96caeccd8a10301f6b68b9be216d26.
+The byte count is 42621.
 The inputs are the same eight paths as the check note.

@@ -26,7 +26,7 @@ cf5f134b915d9a8da3fa7882c4fcda659edff20f.
 The v1.3.4 archive follows.
 a12e423d4a4aa9fe9b360e7b0cdf30c509d11659.
 replay-map.tsv is the old-to-new map.
-Thirty-three commits were replayed.
+Thirty-five commits were replayed.
 We keep the shared seconds from the real clock.
 The zone is America/Chicago.
 The offset is -0600.
