@@ -1,4 +1,5 @@
 #!/bin/sh
+# Copyright (c) anneal developers
 # Writes paper/jctc/logs/lj75-hardware-receipt.txt from a live process.
 # Usage: BUILD_HEAD=... BUILD_TREE=... sh scripts/lj75_hardware_capture.sh PID
 set -eu
