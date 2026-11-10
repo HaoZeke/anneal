@@ -18,7 +18,8 @@ DIGEST = (
 
 
 def main() -> None:
-    print(f"expected {DIGEST}")
+    print("expected digest follows")
+    print(DIGEST)
     if len(sys.argv) != 2:
         print("usage: verify_gmin_best.py RELATIVE_PATH")
         raise SystemExit(2)
