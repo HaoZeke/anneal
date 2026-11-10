@@ -3,12 +3,16 @@ Copyright (c) anneal developers
 git bundle verify of a full-history bundle.
 The verified tip follows.
 4839c201d631965d0485baaec8b23cdc0507a419.
-
 The bundle is okay.
-The bundle contains these 4 refs:
-4839c201d631965d0485baaec8b23cdc0507a419 refs/heads/prereg/lj104-sota-v1
-835b90741211f2fd00b5b9ea68cde4cc877b31af refs/archive/prereg/lj104-sota-v1.3
-6cde8551b2791cc33b1060311dd334a04d3d1042 refs/archive/prereg/lj104-sota-v1.3.1
-97cbaac64e7621a8bddec0052fe0b1851d17a3b9 refs/archive/prereg/lj104-sota-v1.3.2
+The bundle contains these 4 refs.
+Ref refs/heads/prereg/lj104-sota-v1.
+4839c201d631965d0485baaec8b23cdc0507a419.
+Ref refs/archive/prereg/lj104-sota-v1.3.
+835b90741211f2fd00b5b9ea68cde4cc877b31af.
+Ref refs/archive/prereg/lj104-sota-v1.3.1.
+6cde8551b2791cc33b1060311dd334a04d3d1042.
+Ref refs/archive/prereg/lj104-sota-v1.3.2.
+97cbaac64e7621a8bddec0052fe0b1851d17a3b9.
 The bundle records a complete history.
-The bundle uses this hash algorithm: sha1
+The bundle uses this hash algorithm: sha1.
+The output has no requires line.
