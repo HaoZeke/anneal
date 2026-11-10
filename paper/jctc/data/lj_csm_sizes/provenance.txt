@@ -1,39 +1,113 @@
-# LJ38, LJ55 and LJ98, the recommended and derived presets of the hop, as the lj_csm
-# campaign of anneal_repro sealed them on branch bench/lj-csm-da7f9422. audit/ copies,
-# from results_lj_csm/ of the commit that sealed them, the verdict, its sums and its
-# PROVENANCE, and the PROVENANCE, SHA256SUMS and summary.json of each of these six boards.
-# The sums and the verdict are the ones data/lj75_gmin/audit/ copies for LJ75.
-audit_repo anneal_repro
-audit_branch bench/lj-csm-da7f9422
-audit_seal_commit b9112b8eabcc6778bba6ef1fbdfa377644f6b78b
-audit_seal_subject bench(lj): seal the da7f9422 readiness boards
-audit_seal_body LJ38, LJ75, LJ98, and LJ55 recommended match the handoff seed for seed. LJ55 derived at a 1e6 budget does not.
-audit_rule campaign of the lj_csm workflow
-anneal_commit da7f942298a666843fa61118fef786a0e2b73b4c
-anneal_published_commit 36086e988c5a71c156ffcbde152bf321a6f5ef25
-host Intel Xeon family 6 model 207, KVM
-tolerance 0.001
-reference_38 -173.928427
-reference_55 -279.24847
-reference_98 -543.665361
-budget_38 400000
-budget_55 1000000
-budget_98 4000000
-# Each board: its hits, its seeds, and whether the rerun matched the handoff seed for
-# seed, as verdict.json grades it (no scientific mismatch, the same hits and the same
-# call PAR-2). The numbers come from summary.json of the board and agree with its entry
-# in verdict.json. The handoff ran both LJ55 presets at a cap of 400000 and the rerun at
-# 1000000; every run of the recommended preset hit, at the same count, below both caps.
-board_lj38-recommended 72/72 reproduced
-board_lj38-derived 72/72 reproduced
-board_lj55-recommended 48/48 reproduced
-board_lj55-derived 48/48 not reproduced: the handoff ran its 48 seeds at a cap of 400000 and the rerun at 1000000, with 64 scientific mismatches and a call PAR-2 of 25385.27 against 21955.08
-board_lj98-recommended 47/48 reproduced
-board_lj98-derived 47/48 reproduced
-# Each cell of fig:summary these boards fill: the system, the method column and the board
-# it is read from. A cell is drawn only from a reproduced board; the hop column is the
+# LJ38, LJ55 and LJ98, the recommended and derived presets of the hop,.
+
+as the lj_csm.
+
+# campaign of anneal_repro sealed them on branch bench/lj-csm-da7f9422.
+
+audit/ copies,.
+
+# from results_lj_csm/ of the commit that sealed them, the verdict, its.
+
+sums and its.
+
+# PROVENANCE, and the PROVENANCE, SHA256SUMS and summary.json of each.
+
+of these six boards.
+
+# The sums and the verdict are the ones data/lj75_gmin/audit/ copies.
+
+for LJ75.
+
+audit_repo anneal_repro.
+
+audit_branch bench/lj-csm-da7f9422.
+
+audit_seal_commit b9112b8eabcc6778bba6ef1fbdfa377644f6b78b.
+
+audit_seal_subject bench(lj): seal the da7f9422 readiness boards.
+
+audit_seal_body LJ38, LJ75, LJ98, and LJ55 recommended match the.
+
+handoff seed for seed.
+
+LJ55 derived at a 1e6 budget does not.
+
+audit_rule campaign of the lj_csm workflow.
+
+anneal_commit da7f942298a666843fa61118fef786a0e2b73b4c.
+
+anneal_published_commit 36086e988c5a71c156ffcbde152bf321a6f5ef25.
+
+host Intel Xeon family 6 model 207, KVM.
+
+tolerance 0.001.
+
+reference_38 -173.928427.
+
+reference_55 -279.24847.
+
+reference_98 -543.665361.
+
+budget_38 400000.
+
+budget_55 1000000.
+
+budget_98 4000000.
+
+# Each board: its hits, its seeds, and whether the rerun matched the.
+
+handoff seed for.
+
+# seed, as verdict.json grades it (no scientific mismatch, the same.
+
+hits and the same.
+
+# call PAR-2).
+
+The numbers come from summary.json of the board and agree with its.
+
+Entry.
+
+# in verdict.json.
+
+The handoff ran both LJ55 presets at a cap of 400000 and the rerun at.
+
+# 1000000; every run of the recommended preset hit, at the same count,.
+
+below both caps.
+
+board_lj38-recommended 72/72 reproduced.
+
+board_lj38-derived 72/72 reproduced.
+
+board_lj55-recommended 48/48 reproduced.
+
+board_lj55-derived 48/48 not reproduced: the handoff ran its 48 seeds.
+
+at a cap of 400000 and the rerun at 1000000, with 64 scientific.
+
+mismatches and a call PAR-2 of 25385.27 against 21955.08.
+
+board_lj98-recommended 47/48 reproduced.
+
+board_lj98-derived 47/48 reproduced.
+
+# Each cell of fig:summary these boards fill: the system, the method.
+
+column and the board.
+
+# it is read from.
+
+A cell is drawn only from a reproduced board; the hop column is the.
+
 # recommended preset, as it is for LJ75.
-cell_LJ38 hop lj38-recommended
-cell_LJ55 hop lj55-recommended
-cell_LJ98 hop lj98-recommended
-97c2e9841ab74389a0243f0d606b839c8eaad4c2aaa67702e8f4e269ca6a4c8d  audit/SHA256SUMS
+
+cell_LJ38 hop lj38-recommended.
+
+cell_LJ55 hop lj55-recommended.
+
+cell_LJ98 hop lj98-recommended.
+
+97c2e9841ab74389a0243f0d606b839c8eaad4c2aaa67702e8f4e269ca6a4c8d.
+
+audit/SHA256SUMS.
