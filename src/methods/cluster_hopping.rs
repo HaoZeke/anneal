@@ -2885,8 +2885,8 @@ where
     let mut hops_at_lowest = 0usize;
     let mut csm_reseed_stamp = 0usize;
     // Set when a stall growth fails to lower the incumbent. Later growth
-    // quenches wait until that energy drops, and each waited stall spends
-    // one all-points displacement instead of another lattice quench.
+    // quenches wait until that energy drops, and the proposals until then
+    // are all-points displacements.
     let mut stall_growth_hold: Option<f64> = None;
     let hop_room = |hops: usize| cfg.max_hops.is_none_or(|cap| hops < cap);
     // Distinct minima a rigid chain has quenched. Its stall moves to one.
@@ -4219,7 +4219,18 @@ where
                 continue;
             }
         }
-        let proposal_action = if cov_fire {
+        // A failed stall growth leaves the remaining proposals on the
+        // all-points displacement until the incumbent drops. The test is
+        // the incumbent energy, not the atom count.
+        let held_displacement =
+            stall_growth_waits(stall_growth_hold, ledger.best) && cfg.packing_cna_applies();
+        if held_displacement {
+            let step = preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale;
+            trial = ClusterMove::AllPoints { step }.propose(x.view(), cfg.temperature, rng);
+        }
+        let proposal_action = if held_displacement {
+            "all".to_owned()
+        } else if cov_fire {
             "covariance".to_owned()
         } else if soft_fire && soft_cache.is_some() {
             "soft_mode".to_owned()
@@ -5943,44 +5954,8 @@ where
                 let best_before_growth = ledger.best;
                 if stall_growth_waits(stall_growth_hold, best_before_growth) {
                     // The lattice quench already failed at this incumbent.
-                    // One all-points step takes the charge the next growth
-                    // would have spent. The ordinary moves keep the rest.
-                    if ledger.remaining() > 0 {
-                        let step = preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale;
-                        let proposal =
-                            ClusterMove::AllPoints { step }.propose(x.view(), cfg.temperature, rng);
-                        let (displaced_energy, displaced_state) =
-                            relax(ledger, proposal.view(), cfg.relax_steps);
-                        if displaced_state.len() == x.len() && displaced_energy.is_finite() {
-                            let displaced_gradient = record_quenched_answer(
-                                cfg,
-                                ledger,
-                                &mut grad,
-                                displaced_energy,
-                                displaced_state.view(),
-                                &mut unconverged_records,
-                            );
-                            if displaced_energy < best_before_growth - 1e-9 {
-                                hops += 1;
-                                adopt_minimum!(
-                                    displaced_energy,
-                                    displaced_state,
-                                    displaced_gradient,
-                                    None,
-                                    AdoptionHistory::Fresh,
-                                    None,
-                                    Some("stall-all"),
-                                    hops
-                                );
-                            }
-                        }
-                    }
-                    if ledger.best < best_before_growth - 1e-9 {
-                        stall_growth_hold = None;
-                    }
-                    if ledger.best < best_before_growth - 1e-12 && improvements.len() < 512 {
-                        improvements.push((hops, ledger.spent(), bias.n_basins(), ledger.best));
-                    }
+                    // Further growth waits. The proposals below carry the
+                    // charge as all-points displacements.
                 } else {
                     let mut best_growth: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
                     for source in crate::lattice::Source::library() {
@@ -6049,42 +6024,8 @@ where
             {
                 let best_before_growth = ledger.best;
                 if stall_growth_waits(stall_growth_hold, best_before_growth) {
-                    if ledger.remaining() > 0 {
-                        let step = preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale;
-                        let proposal =
-                            ClusterMove::AllPoints { step }.propose(x.view(), cfg.temperature, rng);
-                        let (displaced_energy, displaced_state) =
-                            relax(ledger, proposal.view(), cfg.relax_steps);
-                        if displaced_state.len() == x.len() && displaced_energy.is_finite() {
-                            let displaced_gradient = record_quenched_answer(
-                                cfg,
-                                ledger,
-                                &mut grad,
-                                displaced_energy,
-                                displaced_state.view(),
-                                &mut unconverged_records,
-                            );
-                            if displaced_energy < best_before_growth - 1e-9 {
-                                hops += 1;
-                                adopt_minimum!(
-                                    displaced_energy,
-                                    displaced_state,
-                                    displaced_gradient,
-                                    None,
-                                    AdoptionHistory::Fresh,
-                                    None,
-                                    Some("stall-all"),
-                                    hops
-                                );
-                            }
-                        }
-                    }
-                    if ledger.best < best_before_growth - 1e-9 {
-                        stall_growth_hold = None;
-                    }
-                    if ledger.best < best_before_growth - 1e-12 && improvements.len() < 512 {
-                        improvements.push((hops, ledger.spent(), bias.n_basins(), ledger.best));
-                    }
+                    // Same wait as the other lattice growth. The proposals
+                    // are all-points displacements until the incumbent drops.
                 } else {
                     let mut side = StdRng::seed_from_u64(
                         (hops as u64).wrapping_mul(0x9E37_79B9)
