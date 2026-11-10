@@ -55,15 +55,15 @@ def main() -> None:
     if not commits:
         raise SystemExit("the range after 91b15a02 is empty")
     intro = [
-        "Copyright © anneal developers",
+        "Copyright (c) anneal developers",
         "",
         "We read every commit after 91b15a02 through the tip.",
         "The tip identifier follows.",
         f"{tip}.",
-        "Subjects and paths come from git.",
-        "An added path is a diff-tree addition.",
-        "A modified path is a diff-tree modification.",
-        "The listing below is one code block.",
+        "Git supplies each subject and each path.",
+        "diff-tree marks an addition with A.",
+        "A modification carries the M mark from that same command.",
+        "The listing is one code block.",
         "Each subject is copied whole.",
         "",
         "```",

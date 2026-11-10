@@ -1,4 +1,4 @@
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We ran snapper-fmt at width 72.
 Each of the eight tip inputs exits 0.

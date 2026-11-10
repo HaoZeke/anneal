@@ -1,4 +1,4 @@
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We record this stat against the v1.2 tree.
 That tree follows.

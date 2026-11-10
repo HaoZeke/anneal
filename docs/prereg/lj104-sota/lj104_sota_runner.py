@@ -17,12 +17,16 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 HELD_OUT_LO = 5000
 HELD_OUT_HI = 5029
 PRESET_ID = "UNFILLED"
 D_V3_TIP = "UNFILLED"
+# Stated before any panel run. Each process stops at this wall-clock cap.
+WALL_CLOCK_CAP_SECONDS = 600
 COLUMNS = (
     "runner_blob",
     "head",
@@ -147,16 +151,37 @@ def record_serial_boundary(dest: Path, label: str) -> None:
     """
     boot_id = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
     uptime = Path("/proc/uptime").read_text(encoding="utf-8").strip()
+    rustc = subprocess.run(["rustc", "-V"], check=False, capture_output=True, text=True)
+    cargo = subprocess.run(["cargo", "-V"], check=False, capture_output=True, text=True)
+    rustc_line = (rustc.stdout if rustc.returncode == 0 else rustc.stderr).strip()
+    cargo_line = (cargo.stdout if cargo.returncode == 0 else cargo.stderr).strip()
+    mhz = [
+        line
+        for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines()
+        if line.lower().startswith("cpu mhz")
+    ]
     listing = subprocess.run(
         ["lscpu"],
         check=False,
         capture_output=True,
         text=True,
     )
-    text = listing.stdout if listing.returncode == 0 else listing.stderr
+    lscpu_text = listing.stdout if listing.returncode == 0 else listing.stderr
     dest.mkdir(parents=True, exist_ok=True)
     (dest / f"{label}.receipt").write_text(
-        "boot_id " + boot_id + "\n" + "uptime " + uptime + "\n" + text,
+        "boot_id "
+        + boot_id
+        + "\n"
+        + "uptime "
+        + uptime
+        + "\n"
+        + rustc_line
+        + "\n"
+        + cargo_line
+        + "\n"
+        + "\n".join(mhz)
+        + "\n"
+        + lscpu_text,
         encoding="utf-8",
     )
 
@@ -208,6 +233,34 @@ def cmd_panel(args: argparse.Namespace) -> int:
         return 2
     out = root / rel
     out.mkdir(parents=True, exist_ok=True)
+    rustc = subprocess.run(["rustc", "-V"], check=False, capture_output=True, text=True)
+    cargo = subprocess.run(["cargo", "-V"], check=False, capture_output=True, text=True)
+    rustc_line = (rustc.stdout if rustc.returncode == 0 else rustc.stderr).strip()
+    cargo_line = (cargo.stdout if cargo.returncode == 0 else cargo.stderr).strip()
+    if rustc_line != "rustc 1.88.0 (6b00bc388 2025-06-23)":
+        print("panel requires rustc 1.88.0", file=sys.stderr)
+        return 2
+    if not cargo_line.startswith("cargo 1.88.0 "):
+        print("panel requires cargo 1.88.0", file=sys.stderr)
+        return 2
+    stamp = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%dT%H:%M:%S%z")
+    t_note = "\n".join(
+        [
+            "Copyright (c) anneal developers",
+            "",
+            "T is the clock time at the start of this panel.",
+            stamp + ".",
+            "The rustc version line follows.",
+            rustc_line + ".",
+            "The cargo version line follows.",
+            cargo_line + ".",
+            "The wall-clock cap is 600 seconds for each process.",
+            "That cap was stated before this run.",
+            "The panel logs cover seeds 6000, 6001, 6002, 6003, 6004, and 6005 only.",
+            "",
+        ]
+    )
+    (Path(__file__).resolve().parent / "T.txt").write_text(t_note + "\n", encoding="utf-8")
     handle = acquire_scored_run(Path(args.lock_file))
     session_start = time.monotonic()
     try:
@@ -238,6 +291,7 @@ def cmd_panel(args: argparse.Namespace) -> int:
                 check=False,
                 capture_output=True,
                 text=True,
+                timeout=WALL_CLOCK_CAP_SECONDS,
             )
             finished = time.monotonic()
             log_path.write_text(proc.stdout, encoding="utf-8")

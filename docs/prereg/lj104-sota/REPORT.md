@@ -1,16 +1,19 @@
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We register the LJ104 held-out comparison in this note.
 
 ## Registered
 
 The basin-hopping program (GMIN) baseline is predicted at 19 of 30.
-The candidate is predicted at 19 of 30.
-Dynamic lattice search (DLS) is predicted at 20 of 30.
+The candidate carries the same 19 of 30 prediction.
+Plain dynamic lattice search is predicted at 20 of 30.
 The uniform lattice count on the other seeds is 22 of 30.
 The held-out seeds are 5000 through 5029.
 We do not run those seeds in this record.
-The panel seeds are 6000 through 6005.
+The panel logs cover seeds 6000, 6001, 6002, 6003, 6004, and 6005 only.
+The wall-clock cap is 600 seconds for each panel process.
+LJ104 reference -582.086642 is the Cambridge Cluster Database value.
+A hit on that reference is E <= the reference plus 1e-6.
 The re-quench floors are 6/6 at LJ38, LJ55, LJ75, and LJ98.
 A hit is re-quenched energy at or below the known minimum plus 1e-6.
 The win rule is a one-sided exact McNemar test.

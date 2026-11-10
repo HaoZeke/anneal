@@ -1,4 +1,4 @@
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We ran snapper at width 72 in check mode.
 The exit code is 0.

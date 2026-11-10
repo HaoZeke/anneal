@@ -1,4 +1,4 @@
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We record the basin-hopping program (GMIN) baseline here.
 The GMIN_BEST digest is unverified.
@@ -11,8 +11,8 @@ e9e8395c210375ac33c7f174c85726b1ccbeed4bbfd9d2e130e6cbb4a253eb35.
 The GMIN source has no pinned upstream commit.
 `GNU Fortran 13.3.0` produced the baseline.
 That baseline carries the recorded digest.
-The source archive is identified by the sha256 above.
-The patch file is identified by the sha256 above.
+The sha256 above names the source archive.
+A second sha256, recorded earlier, names the patch file.
 The original executable stays out of this tree.
 The keyword block is the shared settings file.
 We keep the keyword digest separate from the executable digest.

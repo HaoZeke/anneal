@@ -1,35 +1,175 @@
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 This replay is one git commit-tree pass.
-There is no sleep.
-GIT_AUTHOR_DATE is not set.
-GIT_COMMITTER_DATE is not set.
+Sleep is absent from the pass.
+Neither date variable is set.
 The seconds are the ones git writes.
 A commit may share its parent's second.
 None is earlier than its parent.
 Shared seconds are real.
-These dates replace the archived author dates.
-
+We keep every archive ref in the following block.
 Archive refs are never pushed.
 The only published reference follows.
 refs/heads/prereg/lj104-sota-v1.
-We keep every archive ref in this note.
-
-The v1.3 archive follows.
-835b90741211f2fd00b5b9ea68cde4cc877b31af.
-The v1.3.1 archive follows.
-6cde8551b2791cc33b1060311dd334a04d3d1042.
-The v1.3.2 archive follows.
-97cbaac64e7621a8bddec0052fe0b1851d17a3b9.
-The v1.3.3 archive follows.
-cf5f134b915d9a8da3fa7882c4fcda659edff20f.
-The v1.3.4 archive follows.
-a12e423d4a4aa9fe9b360e7b0cdf30c509d11659.
-replay-map.tsv is the old-to-new map.
-Thirty-five commits were replayed.
-We keep the shared seconds from the real clock.
 The zone is America/Chicago.
 The offset is -0600.
 Author and committer are Rohit Goswami.
 The email is rgoswami@ieee.org.
 The commits are unsigned.
+Thirty-six commits were replayed.
+replay-map.tsv is the old-to-new map.
+
+Archive refs/archive/prereg/lj104-sota-v1.3.
+Object 835b90741211f2fd00b5b9ea68cde4cc877b31af.
+Archive refs/archive/prereg/lj104-sota-v1.3.1.
+Object 6cde8551b2791cc33b1060311dd334a04d3d1042.
+Archive refs/archive/prereg/lj104-sota-v1.3.2.
+Object 97cbaac64e7621a8bddec0052fe0b1851d17a3b9.
+Archive refs/archive/prereg/lj104-sota-v1.3.3.
+Object cf5f134b915d9a8da3fa7882c4fcda659edff20f.
+Archive refs/archive/prereg/lj104-sota-v1.3.4.
+Object a12e423d4a4aa9fe9b360e7b0cdf30c509d11659.
+Archive refs/archive/prereg/lj104-sota-v1.3.5.
+Object dff92fccdc07700d645e53b447be2c06ad2580f7.
+Archive refs/archive/prereg/o/09116a9c19.
+Object 09116a9c1929359881eb9ef0e2bd996b95cbaad0.
+Archive refs/archive/prereg/o/0f6f85e1e0.
+Object 0f6f85e1e0c999d5d70e25e1c26f7de81d92a56b.
+Archive refs/archive/prereg/o/149aa73d5c.
+Object 149aa73d5cf4e1afb0546ad86fb401d524d66244.
+Archive refs/archive/prereg/o/1a76159235.
+Object 1a761592355acbe0213361953d4b6e2216ab71d4.
+Archive refs/archive/prereg/o/20313a8794.
+Object 20313a8794da66e85ec9fbe95a2d41c02bd43390.
+Archive refs/archive/prereg/o/2f18d4c8bf.
+Object 2f18d4c8bf2fe74cd2e008e709085b271bf3dbf0.
+Archive refs/archive/prereg/o/31ac871969.
+Object 31ac8719696e342fe71e0cc8c0340c33f6a40c4e.
+Archive refs/archive/prereg/o/3420b91b54.
+Object 3420b91b54dc704977c8463b684f99897f592b02.
+Archive refs/archive/prereg/o/3aaed17c83.
+Object 3aaed17c83d2120ea33aecf1d21d1acbce80eac8.
+Archive refs/archive/prereg/o/3d0838e0e7.
+Object 3d0838e0e71bd209031dff87dff0a71ff963c335.
+Archive refs/archive/prereg/o/3f8c57f830.
+Object 3f8c57f8300b99b2b85ab35526d0bfcd86286af1.
+Archive refs/archive/prereg/o/4bc4fdd924.
+Object 4bc4fdd924e2a6f567f35998ed4a96e2f4f58528.
+Archive refs/archive/prereg/o/5519f1a4fa.
+Object 5519f1a4fa559fb59c83512db41898c8178eda73.
+Archive refs/archive/prereg/o/6f07484e2b.
+Object 6f07484e2bfc413202596a640dd68995f48bad9e.
+Archive refs/archive/prereg/o/79a3b2dcd3.
+Object 79a3b2dcd3ad5b2b0747338788b968089402afd9.
+Archive refs/archive/prereg/o/846709f303.
+Object 846709f303cc4afb2aa2b0e351fc854781de515b.
+Archive refs/archive/prereg/o/87153f7d67.
+Object 87153f7d6735a853f730516a5894027e75478b52.
+Archive refs/archive/prereg/o/87872d119a.
+Object 87872d119a28d3d13ab65fed5dc027dd74efa5a2.
+Archive refs/archive/prereg/o/927fa5e397.
+Object 927fa5e397988f936d0f4ed0e312da3927e0005a.
+Archive refs/archive/prereg/o/9cd85c55fc.
+Object 9cd85c55fca6268a132d1a91e57a66550af1b921.
+Archive refs/archive/prereg/o/a338054c7a.
+Object a338054c7afabbaf76ab4a273cadfccb2755877a.
+Archive refs/archive/prereg/o/aaf3bae711.
+Object aaf3bae7114d52a5f835636ff3d01b2f7fbad642.
+Archive refs/archive/prereg/o/ae44eef3e8.
+Object ae44eef3e8f58d48a228d46773b230a19217d254.
+Archive refs/archive/prereg/o/b7effec390.
+Object b7effec3901d59cf179aecbbeba27817949a72b0.
+Archive refs/archive/prereg/o/c41f33f17c.
+Object c41f33f17c15924fed4fa0c02cd7727fae2933e8.
+Archive refs/archive/prereg/o/c493107e03.
+Object c493107e0300ac9164593463a4582034ecf695e6.
+Archive refs/archive/prereg/o/c74219ae28.
+Object c74219ae28a5b1dd69bb1441320cb2fa48707892.
+Archive refs/archive/prereg/o/c85cdcf46e.
+Object c85cdcf46eb58e71e9194bfceec28e5c0261ddbf.
+Archive refs/archive/prereg/o/ca034201ec.
+Object ca034201ec3d2ab08f482428c6f3eb4abebd0644.
+Archive refs/archive/prereg/o/d278b12047.
+Object d278b120473d2481c3225dc1b3eff9829bbe968b.
+Archive refs/archive/prereg/o/d3b8cd189a.
+Object d3b8cd189afea533a93d5790c030cf322d2be487.
+Archive refs/archive/prereg/o/e2002273e1.
+Object e2002273e12109c45ae02c187263cfe5d67c3269.
+Archive refs/archive/prereg/o/eb467d8d34.
+Object eb467d8d34796744168c255692098abdd350db39.
+Archive refs/archive/prereg/o/ed7b340da4.
+Object ed7b340da4fd3c87161a26fe78fd86cd27438be2.
+Archive refs/archive/prereg/o/fe4e9d5bdc.
+Object fe4e9d5bdc63f31034180fae07f5a20dadb194a2.
+Archive refs/archive/prereg/p/07a97a2846.
+Object 07a97a2846c91c12b6b3fbae1b1b3619a23c49ff.
+Archive refs/archive/prereg/p/1ec840e476.
+Object 1ec840e476ada65a87e02bf52b37f58360215691.
+Archive refs/archive/prereg/p/2391ff6053.
+Object 2391ff6053e0c9993b56ddee602fc2aa5ee6b750.
+Archive refs/archive/prereg/p/2395bbc2ed.
+Object 2395bbc2ed48d6d31652cd2e0a0fb6aea9e2c97d.
+Archive refs/archive/prereg/p/2bcb98aee6.
+Object 2bcb98aee65988d86a1bed85a14e27241c3197b6.
+Archive refs/archive/prereg/p/348524a9be.
+Object 348524a9beacdf8119752a7de45f12db5e742d73.
+Archive refs/archive/prereg/p/352a0429c4.
+Object 352a0429c4cbf754ee1ef930c7d5086107fbfe5e.
+Archive refs/archive/prereg/p/3852aac046.
+Object 3852aac046f89259d19745254fcf83383b886b8d.
+Archive refs/archive/prereg/p/38f51b8086.
+Object 38f51b8086b0332c2774c418977863072ee4019e.
+Archive refs/archive/prereg/p/47c230432d.
+Object 47c230432da7e084fddce7503b988724f294a998.
+Archive refs/archive/prereg/p/4ba52dc180.
+Object 4ba52dc1804569355a368a8cb56903224a77287b.
+Archive refs/archive/prereg/p/4f9f5d2436.
+Object 4f9f5d2436e0db63cdb2b588f64480411dcc4317.
+Archive refs/archive/prereg/p/641102810c.
+Object 641102810c6948f41fd062db01b2fd9ca7cc3bd2.
+Archive refs/archive/prereg/p/653539783b.
+Object 653539783be6b313f5b261d3aca39dd358c50dae.
+Archive refs/archive/prereg/p/784c5576d6.
+Object 784c5576d6958f7b519770613359b071b14c83dd.
+Archive refs/archive/prereg/p/7c34ccf4e4.
+Object 7c34ccf4e465f91f595e693bd9ff7457d7069388.
+Archive refs/archive/prereg/p/801d7e64ec.
+Object 801d7e64ecf6149ff7216c96e1a485d8733d1304.
+Archive refs/archive/prereg/p/934d582cb1.
+Object 934d582cb10c79eff9434791fcf9562d67d9b575.
+Archive refs/archive/prereg/p/99729fca4d.
+Object 99729fca4da9449bcc709987d7f46d384e4fd31a.
+Archive refs/archive/prereg/p/9eac05cdc1.
+Object 9eac05cdc147180aa2def9a4ac9c38fd937f32b6.
+Archive refs/archive/prereg/p/9f18695fcd.
+Object 9f18695fcd96d01abaff194365d67d6540c21ca7.
+Archive refs/archive/prereg/p/9f716d8f00.
+Object 9f716d8f00226adf7d1280945465764de0f7dc1d.
+Archive refs/archive/prereg/p/9f8170bfec.
+Object 9f8170bfec0428ea899e6516076dd3c94f64b621.
+Archive refs/archive/prereg/p/aa636ed0bf.
+Object aa636ed0bfcff8f9bb8580b46f60984d6eb6a242.
+Archive refs/archive/prereg/p/af531d9217.
+Object af531d9217cdccb43166c13b1855277bc7a6d516.
+Archive refs/archive/prereg/p/b53dd945d3.
+Object b53dd945d31f14f10b88e69c6a02b38f2ac3d23b.
+Archive refs/archive/prereg/p/bf7e8e8ba8.
+Object bf7e8e8ba8b80a75e4abc7b645c49586f52e6346.
+Archive refs/archive/prereg/p/c84022ea37.
+Object c84022ea37d12d96f0a0f6a7bf1f05ad2834ad00.
+Archive refs/archive/prereg/p/ce973b7b50.
+Object ce973b7b50cc2d99192d5ae19cc1ed75da423a66.
+Archive refs/archive/prereg/p/d5640455d8.
+Object d5640455d889378e33c7e469e3c134d515fc25aa.
+Archive refs/archive/prereg/p/dfe1a56dc6.
+Object dfe1a56dc6d130ca9667ab723b9511f03ad89724.
+Archive refs/archive/prereg/p/dff92fccdc.
+Object dff92fccdc07700d645e53b447be2c06ad2580f7.
+Archive refs/archive/prereg/p/e21106c0d8.
+Object e21106c0d813da101120c009d7a0e086df448ad0.
+Archive refs/archive/prereg/p/efe7f62a57.
+Object efe7f62a5707c268c6e9d2929dd87b2512b39942.
+Archive refs/archive/prereg/p/f076d8ab1d.
+Object f076d8ab1d378706897894738d2be87707ad2f48.
+Archive refs/archive/prereg/p/fc81ac336b.
+Object fc81ac336b08235f5aedc5294a06c643ca8dfde3.

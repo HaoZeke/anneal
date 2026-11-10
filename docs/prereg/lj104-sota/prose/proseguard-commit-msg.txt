@@ -1,4 +1,4 @@
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 proseguard was not run.
 We record that status for the box.

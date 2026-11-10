@@ -1,4 +1,4 @@
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We record the re-quenched panel below.
 We keep a hit as requenched_e <= E_known + 1e-6.

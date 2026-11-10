@@ -1,0 +1,9 @@
+Copyright (c) anneal developers
+
+LAND_HOLD holds until every arm is filled.
+Arm B stays UNFILLED.
+Arm D stays UNFILLED.
+Saddle passes those two values later.
+We do not fill either arm in this record.
+The runner refuses a scored search while either value is UNFILLED.
+Seeds 5000 through 5029 stay unrun.

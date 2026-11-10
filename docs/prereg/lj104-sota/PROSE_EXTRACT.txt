@@ -1,4 +1,4 @@
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We collect the prose files and the commit messages below.
 Each block is fenced so a later run can read it.
@@ -8,7 +8,7 @@ We leave this extract out of its own list.
 
 File docs/prereg/lj104-sota/NOTES.md.
 ```
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We record the basin-hopping program (GMIN) baseline here.
 The GMIN_BEST digest is unverified.
@@ -35,7 +35,7 @@ We do not claim that rebuild matches the recorded string.
 
 File docs/prereg/lj104-sota/PREDICTIONS.md.
 ```
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 # LJ104 held-out comparison
 
@@ -352,7 +352,7 @@ The test also checks that a written row carries those three fields.
 
 File docs/prereg/lj104-sota/PUSH.txt.
 ```
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We publish one branch from this record.
 The published reference follows.
@@ -366,7 +366,7 @@ The seal copies the bundle without a push.
 
 File docs/prereg/lj104-sota/REPLAY.txt.
 ```
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 This replay is one git commit-tree pass.
 There is no sleep.
@@ -405,7 +405,7 @@ The commits are unsigned.
 
 File docs/prereg/lj104-sota/REPORT.md.
 ```
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We register the LJ104 held-out comparison in this note.
 
@@ -455,7 +455,7 @@ Nothing is pushed from this record.
 
 File docs/prereg/lj104-sota/SCOPE.md.
 ```
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We read every commit after 91b15a02 through the tip.
 The tip identifier follows.
@@ -837,7 +837,7 @@ docs/prereg/lj104-sota/TREE_DIFF_STAT.txt
 
 File docs/prereg/lj104-sota/TREE_DIFF_STAT.txt.
 ```
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We record this stat against the v1.2 tree.
 That tree follows.
@@ -911,7 +911,7 @@ Path docs/prereg/lj104-sota/write_floors.py.
 
 File docs/prereg/lj104-sota/TREE_EQUAL.txt.
 ```
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We record tree equality for this replay.
 Each pair below shares one tree.
@@ -1120,7 +1120,7 @@ The sealed log is the verify of the sealed bundle.
 
 File docs/prereg/lj104-sota/floors.md.
 ```
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We record the window-count floors from the raw panel logs.
 We keep a hit as lowest <= reference + 0.001.
@@ -1200,7 +1200,7 @@ runs 24
 
 File docs/prereg/lj104-sota/prose/proseguard-commit-msg.txt.
 ```
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 proseguard was not run.
 We record that status for the box.
@@ -1214,7 +1214,7 @@ A later box run reads those messages.
 
 File docs/prereg/lj104-sota/prose/proseguard-prose-human.txt.
 ```
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 proseguard was not run.
 We record that status for the box.
@@ -1228,7 +1228,7 @@ A later box run reads those files.
 
 File docs/prereg/lj104-sota/prose/proseguard-rohit-paper.txt.
 ```
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 proseguard was not run.
 We record that status for the box.
@@ -1242,7 +1242,7 @@ A later box run reads those files.
 
 File docs/prereg/lj104-sota/prose/snapper-fmt.md.
 ```
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 # LJ104 held-out comparison
 
@@ -1555,7 +1555,7 @@ A row that omits any of the three is outside the scored set.
 test_lj104_sota_runner.py checks the concurrent-start refusal.
 A second scored start is refused.
 The test also checks that a written row carries those three fields.
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We record the basin-hopping program (GMIN) baseline here.
 The GMIN_BEST digest is unverified.
@@ -1578,7 +1578,7 @@ Its sha256 follows.
 62618de90c53478bbfe724efe527dd1fa67cd6386da0cf00cb0cc8431bd7037d.
 A local gfortran 13.3.0 rebuild is logged apart from the baseline.
 We do not claim that rebuild matches the recorded string.
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 The scope listing (SCOPE) names twelve commits after 91b15a02.
 HEAD means the git commit identifier.
@@ -1832,7 +1832,7 @@ Path docs/prereg/lj104-sota/requench.tsv.
 Modifies 2 paths.
 Path docs/prereg/lj104-sota/PREDICTIONS.md.
 Path docs/prereg/lj104-sota/requench_panel.py.
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We record the window-count floors from the raw panel logs.
 We keep a hit as lowest <= reference + 0.001.
@@ -1896,7 +1896,7 @@ LJ98 seed 6004 hit energy -543.6645439642 calls 53643.
 wall_seconds 3.525.
 LJ98 seed 6005 hit energy -543.6646655690 calls 1032010.
 wall_seconds 91.505.
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We record the re-quenched panel below.
 We keep a hit as requenched_e <= E_known + 1e-6.
@@ -1953,7 +1953,7 @@ seed raw_e requenched_e hit requench_calls.
 
 File docs/prereg/lj104-sota/prose/snapper-fmt.txt.
 ```
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We ran snapper-fmt at width 72.
 Each of the eight tip inputs exits 0.
@@ -1966,7 +1966,7 @@ The inputs are the same eight paths as the check note.
 
 File docs/prereg/lj104-sota/prose/snapper.txt.
 ```
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We ran snapper at width 72 in check mode.
 The exit code is 0.
@@ -1989,7 +1989,7 @@ Path docs/prereg/lj104-sota/requench.md.
 
 File docs/prereg/lj104-sota/requench.md.
 ```
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We record the re-quenched panel below.
 We keep a hit as requenched_e <= E_known + 1e-6.

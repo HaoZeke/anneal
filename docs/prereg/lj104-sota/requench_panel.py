@@ -110,11 +110,11 @@ def main() -> None:
     table = "\n".join(lines) + "\n"
     (here / "requench.tsv").write_text(table, encoding="utf-8")
     prose = [
-        "Copyright © anneal developers",
+        "Copyright (c) anneal developers",
         "",
-        "We record the re-quenched panel below.",
+        "We record the re-quenched panel in this note.",
         "We keep a hit as requenched_e <= E_known + 1e-6.",
-        "We store the call counts below.",
+        "We store the call counts in this note.",
         "We leave each seed row unchanged.",
         "requench_calls are the WarmLbfgs::minimize evaluations.",
         "They are not search calls.",
@@ -160,9 +160,14 @@ def main() -> None:
         "are in requench.md. floors.md keeps the earlier 0.001 window count and "
         "is not the floor. A count below its floor is a mechanical FAIL."
     )
+    status_marks = (
+        "The four lines above are the re-quench floors from requench.tsv.",
+        "A hit is re-quenched E <= E_known + 1e-6.",
+        "A count below its floor is a mechanical FAIL.",
+    )
     if old_para in note:
         note = note.replace(old_para, new_para, 1)
-    elif new_para not in note:
+    elif new_para not in note and not all(mark in note for mark in status_marks):
         raise SystemExit("PREDICTIONS.md is missing the floor-status paragraph")
     note_path.write_text(note, encoding="utf-8")
     sys.stdout.write(table)

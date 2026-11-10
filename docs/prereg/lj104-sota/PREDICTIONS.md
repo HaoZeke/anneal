@@ -1,4 +1,4 @@
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 # LJ104 held-out comparison
 
@@ -24,6 +24,7 @@ The arm D v3 tip sha is UNFILLED.
 We fill that sha in the same later commit.
 That fill still comes before any of those seeds.
 
+The scored baseline beside those unfilled arms is GMIN_BEST.
 GMIN_BEST is the patched GMIN binary.
 Its sha256 begins b8eeddfa6d18a697.
 That binary prints h2h_row.
@@ -62,9 +63,9 @@ The rows are the file, the number, and the record.
 | source/potential.f90 | 220 | hunk start |
 | source/mymylbfgs.F90 | 287 | POTENTIAL, gradient on |
 | source/mymylbfgs.F90 | 285 | hunk start |
-| src/methods/lattice_search.rs | 779 | value-and-gradient unit |
+| src/methods/lattice_search.rs | 780 | value-and-gradient unit |
 | src/methods/cluster_hopping.rs | 720 | Ledger::charge_frac |
-| src/methods/lattice_search.rs | 1388 | 1.0 + (m * n) / pairs |
+| src/methods/lattice_search.rs | 1389 | 1.0 + (m * n) / pairs |
 | examples/h2h_arm3.rs | 46 | LJ38 -173.928427 |
 | examples/h2h_arm3.rs | 47 | LJ55 -279.248470 |
 | examples/h2h_arm3.rs | 48 | LJ75 -397.492331 |
@@ -92,9 +93,7 @@ It is a separate column from arm D v3.
 ## Seeds
 
 The held-out seeds are 5000 through 5029, thirty seeds.
-We did not use them to tune the candidate.
-We did not use them to tune GMIN_BEST.
-We did not use them to tune plain DLS.
+We did not use them to tune the candidate, GMIN_BEST, or plain DLS.
 paper/seeds.toml registers 5000-5063 for a different comparison.
 The evidence rows name that registration.
 That comparison is soap on against off.
@@ -131,7 +130,7 @@ This prediction is a carry from those other seeds.
 
 We compare the candidate and GMIN_BEST with one test.
 The test is a one-sided exact McNemar test.
-The test uses the paired outcomes of the same thirty seeds.
+Paired outcomes on the same thirty seeds enter that test.
 A seed is discordant when exactly one of the two codes hits.
 n is the number of discordant seeds.
 b is the number of those seeds that only the candidate hits.
@@ -201,17 +200,17 @@ The point predictions stay separate from the paired test.
 
 ## No-regression panel
 
-We score the panel at LJ38 with n = 6.
-We score LJ55 with the same n.
-We score LJ75 with the same n.
-We score LJ98 with the same n.
-The six seeds are 6000, 6001, 6002, 6003, 6004, and 6005.
+We score LJ38, LJ55, LJ75, and LJ98.
+Each of those sizes uses n = 6.
+The panel logs cover seeds 6000, 6001, 6002, 6003, 6004, and 6005 only.
 They were never used for tuning.
 They sit outside 5000-5029.
 They also sit outside the ranges named in paper/seeds.toml.
 Those ranges are 0-31, 2000-2247, and 3000-3029.
 They also include 3100-3199, 4000-4047, and 5000-5063.
 We name the seeds before any run of the panel.
+The wall-clock cap is 600 seconds for each panel process.
+That cap is fixed before the run.
 
 The floor at each size is the hit count of the current anneal default.
 We take the count on these same six seeds, after `lj_requench`.
@@ -250,10 +249,9 @@ The array entry is `[104]=4000000`.
 The candidate, GMIN_BEST, and plain DLS each receive that budget.
 
 The panel uses the same array.
-LJ38 receives 400000 energy calls.
-LJ55 receives 1000000 energy calls.
-LJ75 receives 4000000 energy calls.
-LJ98 receives 4000000 energy calls.
+400000 calls go to LJ38.
+LJ55 gets 1000000 calls.
+LJ75 and LJ98 each get 4000000 calls.
 
 Every energy call is charged.
 That includes each per-generation atom energy call.
@@ -266,6 +264,7 @@ One greedy pass pays `1.0 + (m * n) / pairs`.
 The evidence rows name `Lattice::search` for that payment.
 We charge each of those calls as a whole call in this comparison.
 
+The call budget above is separate from the clock.
 Wall time is recorded for a strictly serial run, one process at a time.
 The runner takes an exclusive lock.
 It refuses to start while another scored run keeps that lock.
@@ -292,7 +291,10 @@ E_known values are the Cambridge Cluster Database minima.
 The list is `e_known.tsv`.
 The evidence rows list the LJ38, LJ55, LJ75, and LJ98 energies.
 LJ104 is -582.086642.
+The source is the Cambridge Cluster Database.
+The source commit is 3bf365ac3a1762b50fbb7a14694b01e836b2e679.
 The evidence rows name `examples/lj_cluster_search.rs` for that value.
+A hit is E <= the reference plus 1e-6.
 Its hit line is E <= -582.086641.
 The test re-quenches the known LJ104 minimum to the hit line.
 The test name follows.

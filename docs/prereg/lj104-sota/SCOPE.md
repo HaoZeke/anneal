@@ -1,4 +1,4 @@
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We read every commit after 91b15a02 through the tip.
 The tip identifier follows.

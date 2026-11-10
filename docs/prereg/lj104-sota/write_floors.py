@@ -11,6 +11,7 @@ PAPER_BUDGETS entries named in PREDICTIONS.md.
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -22,6 +23,9 @@ REFERENCES = {
 }
 TOL = 0.001
 SEEDS = (6000, 6001, 6002, 6003, 6004, 6005)
+ARCHIVED_PANEL_HEAD = "cc0587fa24b9bd72c4e0399b942bd3a5c3c8cff5"
+ARCHIVED_BRANCH = "38f51b8086b0332c2774c418977863072ee4019e"
+ARCHIVED_TREE = "b8f8a9a73a839235bf3d34a17ef9d27a5afed9fb"
 
 
 def parse_log(text: str) -> dict[str, str]:
@@ -32,6 +36,33 @@ def parse_log(text: str) -> dict[str, str]:
         key, value = line.split(": ", 1)
         fields[key] = value
     return fields
+
+
+def git_out(root: Path, *args: str) -> str:
+    proc = subprocess.run(
+        ["git", "-C", str(root), *args],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise SystemExit(proc.stderr.strip() or "git failed")
+    return proc.stdout.strip()
+
+
+def repo_root(here: Path) -> Path:
+    for candidate in (here, *here.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    raise SystemExit("not inside a git work tree")
+
+
+def branch_commit_for_tree(root: Path, tree: str) -> str:
+    listed = git_out(root, "rev-list", "HEAD")
+    for commit in listed.splitlines():
+        if git_out(root, "rev-parse", f"{commit}^{{tree}}") == tree:
+            return commit
+    raise SystemExit("no branch commit has the panel tree")
 
 
 def receipt_field(text: str, name: str) -> str:
@@ -105,23 +136,31 @@ def main() -> None:
 
     head = next(iter(heads))
     tree = next(iter(trees))
+    root = repo_root(here)
+    if git_out(root, "rev-parse", f"{ARCHIVED_BRANCH}^{{tree}}") != ARCHIVED_TREE:
+        raise SystemExit("archived branch commit does not have the recorded tree")
+    branch_commit = branch_commit_for_tree(root, tree)
     lines = [
-        "Copyright © anneal developers",
+        "Copyright (c) anneal developers",
         "",
         "We record the window-count floors from the raw panel logs.",
         "We keep a hit as lowest <= reference + 0.001.",
-        "We store the runner blob below.",
-        "We store the wall sums below.",
+        "The logs cover seeds 6000, 6001, 6002, 6003, 6004, and 6005 only.",
+        "We store the runner blob in the next line.",
+        "We store the wall sums in the following lines.",
         "We leave each seed row unchanged.",
         f"runner_blob {next(iter(blobs))}.",
         f"head {head}.",
-        "The archive panel head follows.",
-        f"{head}.",
         "The branch commit with the same tree follows.",
-        "8ad608bb6f2a717b2e860f694a3e7c39567af76e.",
+        f"{branch_commit}.",
         "The shared tree follows.",
         f"{tree}.",
-        f"tree {tree}.",
+        "The earlier panel head follows.",
+        f"{ARCHIVED_PANEL_HEAD}.",
+        "The archived commit with that tree follows.",
+        f"{ARCHIVED_BRANCH}.",
+        "That shared tree follows.",
+        f"{ARCHIVED_TREE}.",
         f"boot_id {receipt_field(start, 'boot_id')}.",
         f"wall_sum_seconds {wall_sum:.6f}.",
         f"span_sum_seconds {span_sum:.6f}.",

@@ -1,4 +1,4 @@
-Copyright © anneal developers
+Copyright (c) anneal developers
 
 We record the window-count floors from the raw panel logs.
 We keep a hit as lowest <= reference + 0.001.
