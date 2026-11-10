@@ -1,0 +1,7 @@
+anneal_commit=36086e988c5a71c156ffcbde152bf321a6f5ef25
+binary_sha256=063433d26da59816d08e842c44cbd680c8d7657331b14feb86ad35089c34a812
+arm=crest-polished
+rule=water_budget
+post_step=same uncharged polish as the recorded polish arm
+hits=62/96
+max_total_calls=4618

@@ -1,0 +1,48 @@
+class,size,range,structure,energy,unit,file,table
+Lennard-Jones,13,,13,-44.326801,epsilon,system_visuals/ccd/LJ/points/13,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/LJ/tables.150.html
+Lennard-Jones,26,,26,-108.315616,epsilon,system_visuals/ccd/LJ/points/26,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/LJ/tables.150.html
+Lennard-Jones,31,,31,-133.586422,epsilon,system_visuals/ccd/LJ/points/31,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/LJ/tables.150.html
+Lennard-Jones,38,,38,-173.928427,epsilon,system_visuals/structures/lj38_fcc.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/LJ/tables.150.html
+Lennard-Jones,55,,55,-279.248470,epsilon,system_visuals/ccd/LJ/points/55,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/LJ/tables.150.html
+Lennard-Jones,75,,75,-397.492331,epsilon,system_visuals/structures/lj75_marks.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/LJ/tables.150.html
+Lennard-Jones,76,,76,-402.894866,epsilon,system_visuals/ccd/LJ/points/76,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/LJ/tables.150.html
+Lennard-Jones,77,,77,-409.083517,epsilon,system_visuals/ccd/LJ/points/77,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/LJ/tables.150.html
+Lennard-Jones,98,,98,-543.665361,epsilon,system_visuals/structures/lj98_gm.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/LJ/tables.150.html
+Lennard-Jones,102,,102,-569.363652,epsilon,system_visuals/ccd/LJ/points/102,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/LJ/tables.150.html
+Lennard-Jones,103,,103,-575.766131,epsilon,system_visuals/ccd/LJ/points/103,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/LJ/tables.150.html
+Lennard-Jones,104,,104,-582.086642,epsilon,system_visuals/structures/lj104_gm.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/LJ/tables.150.html
+Lennard-Jones,150,,150,-893.310258,epsilon,system_visuals/ccd/LJ/points/150,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/LJ/tables.150.html
+Morse,13,3,13A,-51.737046,epsilon,system_visuals/ccd/Morse/points/13A,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/Morse/tables.html
+Morse,13,6,13A,-42.439863,epsilon,system_visuals/ccd/Morse/points/13A,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/Morse/tables.html
+Morse,13,10,13A,-39.662975,epsilon,system_visuals/ccd/Morse/points/13A,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/Morse/tables.html
+Morse,13,14,13A,-37.258877,epsilon,system_visuals/ccd/Morse/points/13A,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/Morse/tables.html
+Morse,38,3,38A,-249.159174,epsilon,system_visuals/ccd/Morse/points/38A,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/Morse/tables.html
+Morse,38,6,38E,-157.477108,epsilon,system_visuals/ccd/Morse/points/38E,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/Morse/tables.html
+Morse,38,10,38D,-145.849817,epsilon,system_visuals/ccd/Morse/points/38D,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/Morse/tables.html
+Morse,38,14,38D,-144.321054,epsilon,system_visuals/ccd/Morse/points/38D,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/Morse/tables.html
+Morse,55,3,55A,-417.918562,epsilon,system_visuals/ccd/Morse/points/55A,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/Morse/tables.html
+Morse,55,6,55B,-250.286609,epsilon,system_visuals/ccd/Morse/points/55B,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/Morse/tables.html
+Morse,55,10,55B,-225.814286,epsilon,system_visuals/ccd/Morse/points/55B,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/Morse/tables.html
+Morse,55,14,55C,-220.646208,epsilon,system_visuals/ccd/Morse/points/55C,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/Morse/tables.html
+Morse,80,3,80A,-690.577890,epsilon,system_visuals/ccd/Morse/points/80A,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/Morse/tables.html
+Morse,80,6,80B,-378.333471,epsilon,system_visuals/ccd/Morse/points/80B,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/Morse/tables.html
+Morse,80,10,80D,-344.911381,epsilon,system_visuals/ccd/Morse/points/80D,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/Morse/tables.html
+Morse,80,14,80G,-340.811371,epsilon,system_visuals/ccd/Morse/points/80G,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/Morse/tables.html
+Sutton--Chen,38,,38,-10117.2454,epsilon,system_visuals/ccd/SC/10-8/points/38,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/SC/10-8/table.10-8.html
+Sutton--Chen,75,,75,-20431.3452,epsilon,system_visuals/ccd/SC/10-8/points/75,https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/SC/10-8/table.10-8.html
+TIP4P water,6,,TIP4P-6,-197.78053,kJ/mol,system_visuals/ccd/TIP4P/xyz/TIP4P-6.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/TIP4P-water.html
+TIP4P water,7,,TIP4P-7,-243.57240,kJ/mol,system_visuals/ccd/TIP4P/xyz/TIP4P-7.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/TIP4P-water.html
+TIP4P water,8,,TIP4P-8,-305.51832,kJ/mol,system_visuals/ccd/TIP4P/xyz/TIP4P-8.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/TIP4P-water.html
+TIP4P water,9,,TIP4P-9,-344.43521,kJ/mol,system_visuals/ccd/TIP4P/xyz/TIP4P-9.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/TIP4P-water.html
+TIP4P water,10,,TIP4P-10,-391.02268,kJ/mol,system_visuals/structures/tip4p-10.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/TIP4P-water.html
+TIP4P water,11,,TIP4P-11,-431.48907,kJ/mol,system_visuals/ccd/TIP4P/xyz/TIP4P-11.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/TIP4P-water.html
+TIP4P water,12,,TIP4P-12,-492.90824,kJ/mol,system_visuals/ccd/TIP4P/xyz/TIP4P-12.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/TIP4P-water.html
+TIP4P water,13,,TIP4P-13,-532.97054,kJ/mol,system_visuals/ccd/TIP4P/xyz/TIP4P-13.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/TIP4P-water.html
+TIP4P water,14,,TIP4P-14,-582.99110,kJ/mol,system_visuals/ccd/TIP4P/xyz/TIP4P-14.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/TIP4P-water.html
+TIP4P water,15,,TIP4P-15,-628.37225,kJ/mol,system_visuals/structures/tip4p-15.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/TIP4P-water.html
+TIP4P water,16,,TIP4P-16,-681.19259,kJ/mol,system_visuals/ccd/TIP4P/xyz/TIP4P-16.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/TIP4P-water.html
+TIP4P water,17,,TIP4P-17,-723.80775,kJ/mol,system_visuals/ccd/TIP4P/xyz/TIP4P-17.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/TIP4P-water.html
+TIP4P water,18,,TIP4P-18,-773.23187,kJ/mol,system_visuals/ccd/TIP4P/xyz/TIP4P-18.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/TIP4P-water.html
+TIP4P water,19,,TIP4P-19,-821.03692,kJ/mol,system_visuals/ccd/TIP4P/xyz/TIP4P-19.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/TIP4P-water.html
+TIP4P water,20,,TIP4P-20,-872.98875,kJ/mol,system_visuals/structures/tip4p-20.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/TIP4P-water.html
+TIP4P water,21,,TIP4P-21,-916.70743,kJ/mol,system_visuals/ccd/TIP4P/xyz/TIP4P-21.xyz,https://www-wales.ch.cam.ac.uk/~wales/CCD/TIP4P-water.html

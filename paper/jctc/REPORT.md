@@ -1,0 +1,70 @@
+# Report, v1.20
+
+We drew the eighteen figures with the committed generators.
+The branch is paper-integration-v1.20.
+It starts from fd4e691db9152bea8086c2102af84a1b0ea39444.
+The inbox sums file has 359 rows.
+Its sha256 follows.
+
+b236bd7dd327aed1db3672126c577bf342db0f87b5d6668298cf82ddf44f078a
+
+Every row checked clean.
+
+## Rohit decisions pending
+
+The cover letter still has the open items.
+
+- cover-letter.tex:11 is the telephone placeholder.
+- cover-letter.tex:55 is three placeholders.
+- manuscript.tex:586 says the disclosure option is not submitted.
+- manuscript.tex:591 is the option line for the tool and the version.
+- manuscript.tex:614 is the identifier placeholder.
+- manuscript.tex:556 adds "In contrast," before the second count.
+- The LJ75 figure now follows the systems figure.
+- That later place follows the order of first citation.
+
+## Prose
+
+The manuscript patch is applied exactly.
+The data-availability section matches v1.16.
+Paragraph cohesion at patched lines 565 and 607 stays open.
+PROSE-RECEIPT.md lists each patch change and those two hits.
+
+## Captions
+
+The suppinfo sentence still names the plates.
+It names no arm and no offset, so it stays.
+
+The previous LJ38 sketch-map labels an arm "per-basin bias (409)".
+The sealed lj38.csv has no such arm.
+The new caption says colour is the quenched energy.
+The 600 landmarks pool three arms and two references.
+The darkest point is the fcc minimum.
+
+The previous occupancy plate puts the recommended best at +9.669.
+The sealed LJ38 table puts that arm on the fcc minimum.
+Basin hopping stops 2.429 above it.
+The plate does not mark those arms.
+
+The previous LJ98 plate puts the recommended best at +6.622.
+It puts the basin-hopping best at +6.119.
+The sealed table puts the recommended hop 0.022 above the Leary minimum.
+Basin hopping stops 0.119 above it.
+The plate does not mark those arms.
+
+## Water
+
+The plate prints -197.7805 kJ/mol.
+That is the Cambridge Cluster Database value.
+It uses the Jorgensen constants C6 = 2552.24 and C12 = 2510400.
+anneal uses epsilon 0.6485 kJ/mol and sigma 3.15365 Å.
+Its C6 is 2551.8252 and its C12 is 2510336.2.
+Those constants give the committed -197.7750 kJ/mol reported here.
+
+## Bundle
+
+The bundle ref is refs/heads/paper-integration-v1.19.
+It also carries refs/archive/paper-integration-v1.18.
+That ref is 31e4535d5416223c1cbf0342348170a5ea002590.
+It also carries refs/archive/paper-integration-v1.15.
+That ref is 12de8866efaaf801853336302f972c5e0faa7966.

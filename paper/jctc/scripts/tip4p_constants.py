@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 A = 2510400.0
 C = 2552.24
 sig6 = A / C

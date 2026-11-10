@@ -1,0 +1,27 @@
+anneal_base=adfcec345f6f021f335df2ded3cb842c1edcfd4d
+anneal_commit=da7f942298a666843fa61118fef786a0e2b73b4c
+archive=lj55-recommended.tar.zst
+arm=recommended
+budget=1000000
+bundle_csm_sha256=8b90e31b25bf545de32469a733bec4e4eacf09145c621396a1af4cf88a0731f4
+bundle_packing_sha256=576dc61168e59c6442c12f0f23c7a521f0de0352d965fdeac3afd123a85a4cf0
+chain_missing=gmin-data/data150,gmin-data/data38csm,gmin-data/data38sym,gmin-data/data75,gmin-data/data98
+cpu_family=6
+cpu_model=207
+cpu_model_name=Intel(R) Xeon(R) Processor
+first=2000
+gfortran=
+hit_rule=best<=reference+0.001
+hypervisor=KVM
+kind=anneal
+last=2047
+machine_class=not paper machine
+n_atoms=55
+name=lj55-recommended
+packing_bank=70520413d6cae72bc8b7f9bcfcfbd7e6b8efe7ed
+path=cluster_search
+reference=-279.248470
+rustc=rustc 1.88.0 (6b00bc388 2025-06-23)
+threads_per_process=1
+tolerance=0.001
+wales_tarball_sha256=144a703eef674a826191308b9f8dfda548d88fc7a50323687e7cc1f6e64bf348

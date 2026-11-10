@@ -1,0 +1,202 @@
+{
+  "campaign": "lj_csm",
+  "system": "lj55",
+  "config": "derived",
+  "run": true,
+  "reason": null,
+  "driver_commit": "e0ccc9330c65a2688b108186ec33cc587474d565",
+  "driver_base": "36086e988c5a71c156ffcbde152bf321a6f5ef25",
+  "landfold_commit": "fc7e8654c597478aa89b4abbff1af1072ab87713",
+  "landfold_binary_sha256": "89a8319e153010a823ef51b67b3ef812517c9c680b48206751d97bafff8dc929",
+  "budget": 1000000,
+  "seed_first": 2000,
+  "seed_last": 2047,
+  "reference": -279.24847,
+  "tolerance": 0.001,
+  "embed": {
+    "low": 2,
+    "knn": 12,
+    "temperature": 0.5,
+    "lambda": 2
+  },
+  "fes": {
+    "kt": 0.2,
+    "nx": 48,
+    "ny": 48,
+    "blur": 1.2,
+    "fmax": 2.0,
+    "floor": 0.05
+  },
+  "features": "sorted_pairs",
+  "start_xyz_sha256_named": null,
+  "start_xyz_status": null,
+  "hardware_start": {
+    "lscpu_model_name": "Intel(R) Xeon(R) Processor",
+    "lscpu_model": "207",
+    "lscpu_stepping": "2",
+    "cpus": "8",
+    "cores_per_socket": "8",
+    "threads_per_core": "1",
+    "sockets": "1",
+    "mem_total": "MemTotal:       49342768 kB",
+    "uname_r": "6.12.94+",
+    "os_release": "PRETTY_NAME=\"Ubuntu 24.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.5 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo\n",
+    "rustc": "rustc 1.88.0 (6b00bc388 2025-06-23)",
+    "gcc": [
+      "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+    ],
+    "gfortran": [
+      "absent"
+    ],
+    "blas_resolved": "/usr/lib/x86_64-linux-gnu/blas/libblas.so.3.12.0"
+  },
+  "driver_binary_sha256": "f9cd44dbe364858449822359aa294e838da1d8f53843331f5c80ea1db613ce48",
+  "seeds_finished": 48,
+  "hits": [
+    2000,
+    2001,
+    2002,
+    2003,
+    2004,
+    2005,
+    2006,
+    2007,
+    2008,
+    2009,
+    2010,
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025,
+    2026,
+    2027,
+    2028,
+    2029,
+    2030,
+    2031,
+    2032,
+    2033,
+    2034,
+    2035,
+    2036,
+    2037,
+    2038,
+    2039,
+    2040,
+    2041,
+    2042,
+    2043,
+    2044,
+    2045,
+    2046,
+    2047
+  ],
+  "first_hit_seed": 2000,
+  "representative": {
+    "rows": 26,
+    "dimension": 1485,
+    "knn_used": 12,
+    "embed_exit": 0,
+    "embed_stderr": "# landscape knn 12 T 0.5 lambda 2 edges 218 evals [1.0000000000000004, 0.9999993494335727, 0.9952119905609058]",
+    "fes_exit": 0,
+    "fes_nx": 48,
+    "fes_ny": 48,
+    "map": "wrote landscape.png and fes.png"
+  },
+  "sealed_table_bytes": 244169276,
+  "free_bytes_before_aggregate": 219662176256,
+  "aggregate_rows": 4175,
+  "aggregate_reclaimed_local_seeds": false,
+  "aggregate": {
+    "rows": 4175,
+    "dimension": 1485,
+    "knn_used": 12,
+    "embed_exit": 0,
+    "embed_stderr": "# landscape knn 12 T 0.5 lambda 2 edges 36109 evals [1.0000000000000184, 1.0000000000000147, 1.0000000000000133]",
+    "fes_exit": 0,
+    "fes_nx": 48,
+    "fes_ny": 48,
+    "map": "wrote landscape.png and fes.png"
+  },
+  "hardware_end": {
+    "lscpu_model_name": "Intel(R) Xeon(R) Processor",
+    "lscpu_model": "207",
+    "lscpu_stepping": "2",
+    "cpus": "8",
+    "cores_per_socket": "8",
+    "threads_per_core": "1",
+    "sockets": "1",
+    "mem_total": "MemTotal:       49342768 kB",
+    "uname_r": "6.12.94+",
+    "os_release": "PRETTY_NAME=\"Ubuntu 24.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.5 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo\n",
+    "rustc": "rustc 1.88.0 (6b00bc388 2025-06-23)",
+    "gcc": [
+      "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+    ],
+    "gfortran": [
+      "absent"
+    ],
+    "blas_resolved": "/usr/lib/x86_64-linux-gnu/blas/libblas.so.3.12.0"
+  },
+  "cartesian_compare": {
+    "kept": true,
+    "reason": "Cartesian tables for LJ38 derived seed 2000 at budget 400000 are byte-identical across the campaign binary, a rebuild of the same commit, and d9c1a930",
+    "campaign_driver_commit": "e0ccc9330c65a2688b108186ec33cc587474d565",
+    "campaign_driver_binary_sha256": "f9cd44dbe364858449822359aa294e838da1d8f53843331f5c80ea1db613ce48",
+    "seed": 2000,
+    "n": 38,
+    "config": "derived",
+    "budget": 400000,
+    "rebuild_commit": "e0ccc9330c65a2688b108186ec33cc587474d565",
+    "rebuild_binary_sha256": "60bca62f365b5f03fcb8c7a7b76adc8ef365cfb65cead56376ee68f517d8b15e",
+    "rebuild_source_path": "scratch/anneal-e0ccc",
+    "later_commit": "d9c1a93003664250f82e298fc510795149d86812",
+    "later_binary_sha256": "5205c4c46a5921d982eca0bcab719fc4c15e27157e452590e31afe2e71a1cada",
+    "tables_identical": true,
+    "campaign_sealed_seed_matches_both_reruns": true,
+    "stdout": {
+      "campaign_wall_seconds": 0.004596,
+      "rebuild_wall_seconds": 0.004563,
+      "later_wall_seconds": 0.004738,
+      "best": -173.927711,
+      "hit": 1,
+      "force_count": 478,
+      "force_to_hit": 478,
+      "geometry_digest": "cf3947a13625df54b87805bde07e59ceec7d1db76bea1852cb934178cbe052bb"
+    },
+    "tables": {
+      "book.min": {
+        "bytes": 2303,
+        "sha256": "fb62bab6fe89fb711ba6a1a5424e5fc3621792718207464eeee1dc9bd832239c"
+      },
+      "edges.dat": {
+        "bytes": 44,
+        "sha256": "ed93dfceb116038ebdd6b54bbe417800d1d34b4859a1af00efcb22264ac13645"
+      },
+      "energy.dat": {
+        "bytes": 56,
+        "sha256": "0e342bb020c36ba6d60ab8aee1fb347581de4b4053ce2b1845f5311659186e41"
+      },
+      "hd-weighted.dat": {
+        "bytes": 13150,
+        "sha256": "b12986c4051c42ce55d5295b47194ad5ce55c3a3252d43f531e81b813588799c"
+      },
+      "hd.dat": {
+        "bytes": 13148,
+        "sha256": "3fad16468b3cf4929178016041235e23b45ef370ef521e2b59d1c58211fd8c00"
+      }
+    }
+  },
+  "cartesian_compare_note": "The campaign binary file was replaced when d9c1a930 was built into the same target directory, so it cannot be rehashed. Its sealed LJ38 seed 2000 tables match both a rebuild of commit e0ccc933 and the d9c1a930 binary. The three stdout lines differ only in wall_seconds."
+}

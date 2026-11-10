@@ -1,0 +1,11 @@
+anneal_commit=36086e988c5a71c156ffcbde152bf321a6f5ef25
+driver=lj_board
+binary_sha256=ebefa9557ae57fd7d898842fa05af7503e204c34555a6935bf04073412ab3d05
+rule=lj_cell
+completed_snakemake_log=.snakemake/log/2026-10-27T011652.261790.snakemake.log
+completed_jobs=736
+log_index_13=.snakemake/log/2026-10-26T231136.486302.snakemake.log
+log_index_13_is=LJ38 recommended seed 2000 only
+paper_board=the completed 736-job lj_paper run, seals under results/lj
+par2=mean of calls_to_hit, miss charges 2x budget
+port_commit=c47d301fcc71abc7e839480821a5e951976199fb

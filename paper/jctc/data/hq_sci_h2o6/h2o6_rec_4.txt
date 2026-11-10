@@ -1,0 +1,7 @@
+  eindir objective from rgpot xtb (anneal-build/engines/libxtb_engine.so)
+(H2O)6 through eindir/rgpot xtb, arm nobank, budget 4000, seeds 4..5
+  seed 4: best -829.852228 eV  hops 16  charged 4000  converged 2/33  arm nobank
+    quench charged screen/full/check 443/3509/32  screens 16  capped 31
+    verify e=-829.852228 |g|=1.064e-4
+    improve hops=3 charged=955 basins=2 e=-829.85222752
+  wrote best_h2o6_eindir_s4.xyz

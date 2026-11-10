@@ -1,0 +1,8 @@
+anneal_commit=36086e988c5a71c156ffcbde152bf321a6f5ef25
+binary_sha256=1c9c975172d057ca390d471a661034023601f868c87895ae987449b964a18b03
+arm=default
+rule=water_independent
+seeds=0-95
+budget=4000
+hits=60/96
+comparison=anneal minus CREST

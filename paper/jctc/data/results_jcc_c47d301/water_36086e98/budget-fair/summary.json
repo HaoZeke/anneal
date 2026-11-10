@@ -1,0 +1,36 @@
+{
+  "anneal_commit": "36086e988c5a71c156ffcbde152bf321a6f5ef25",
+  "arm": "budget-fair",
+  "binary_sha256": "063433d26da59816d08e842c44cbd680c8d7657331b14feb86ad35089c34a812",
+  "budget": 4000,
+  "contrast_vs_crest": {
+    "both_hit": 34,
+    "difference": "fair polish minus CREST",
+    "hit_rate_difference": 0.19791666666666666,
+    "mcnemar_exact_p": 0.012660335802414213,
+    "n": 96,
+    "neither_hit": 9,
+    "newcombe": "Newcombe 1998 method 10",
+    "newcombe_95": [
+      0.05149404585197484,
+      0.3334397294929585
+    ],
+    "newcombe_95_6": [
+      0.051494,
+      0.33344
+    ],
+    "only_anneal_hit": 36,
+    "only_crest_hit": 17
+  },
+  "copied_inside_binary_sha256": "1c9c975172d057ca390d471a661034023601f868c87895ae987449b964a18b03",
+  "copied_inside_seeds": 60,
+  "hits": 70,
+  "max_total_calls": 4000,
+  "n": 96,
+  "rerun_seeds": 36,
+  "seeds": "0-95",
+  "wilson_95": [
+    0.6327365269279848,
+    0.8079621619705807
+  ]
+}

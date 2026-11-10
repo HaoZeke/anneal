@@ -1,0 +1,279 @@
+{
+  "anneal_commit": "da7f942298a666843fa61118fef786a0e2b73b4c",
+  "arm": "recommended",
+  "budget": 1000000,
+  "call_par2": 17128.583333333332,
+  "config_digests": [
+    "20c980c29c0731a0e5cb57b1d415ee20679b074007ce8e9160879d3a14b5bd2a"
+  ],
+  "cpu_family": 6,
+  "cpu_model": 207,
+  "cpu_model_name": "Intel(R) Xeon(R) Processor",
+  "first": 2000,
+  "hits": 48,
+  "hypervisor": "KVM",
+  "kind": "anneal",
+  "last": 2047,
+  "machine_class": "not paper machine",
+  "median_calls_on_hits": 13051.0,
+  "median_wall_seconds": 0.38372799999999996,
+  "n_atoms": 55,
+  "n_seeds": 48,
+  "name": "lj55-recommended",
+  "paper_cpu_model": 173,
+  "path": "cluster_search",
+  "reference": -279.24847,
+  "saddle": {
+    "budget_differences": [
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2000"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2001"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2002"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2003"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2004"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2005"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2006"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2007"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2008"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2009"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2010"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2011"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2012"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2013"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2014"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2015"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2016"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2017"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2018"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2019"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2020"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2021"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2022"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2023"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2024"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2025"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2026"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2027"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2028"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2029"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2030"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2031"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2032"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2033"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2034"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2035"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2036"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2037"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2038"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2039"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2040"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2041"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2042"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2043"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2044"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2045"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2046"
+      },
+      {
+        "ours": "1000000",
+        "saddle": "400000",
+        "seed": "2047"
+      }
+    ],
+    "compared": true,
+    "saddle_call_par2": 17128.583333333332,
+    "saddle_hits": 48,
+    "saddle_median_wall_seconds": 0.4116075,
+    "saddle_rows": 48,
+    "scientific_mismatches": []
+  },
+  "tolerance": 0.001,
+  "wilson_95_high": 0.9999999999999999,
+  "wilson_95_low": 0.9258998703338824
+}
