@@ -9,12 +9,12 @@ hexamer hq_sci_h2o6
   h2o6_rec_7.out best=None hit=False
   6/8=6/8
 cu hq_sci_cuh2
-  cuh2_fcc_rec_0.out best=-415.971529 hit=True
-  cuh2_fcc_rec_1.out best=-415.971529 hit=True
-  cuh2_fcc_rec_2.out best=-415.971529 hit=True
-  cuh2_fcc_rec_3.out best=-415.971529 hit=True
-  cuh2_fcc_rec_4.out best=-415.971529 hit=True
-  cuh2_fcc_rec_5.out best=-415.971529 hit=True
-  cuh2_fcc_rec_6.out best=-415.971529 hit=True
-  cuh2_fcc_rec_7.out best=-415.971529 hit=True
+  cuh2_fcc_rec_0.out best=-415.971489 hit=True
+  cuh2_fcc_rec_1.out best=-415.971442 hit=True
+  cuh2_fcc_rec_2.out best=-415.971490 hit=True
+  cuh2_fcc_rec_3.out best=-415.971521 hit=True
+  cuh2_fcc_rec_4.out best=-415.971469 hit=True
+  cuh2_fcc_rec_5.out best=-415.971467 hit=True
+  cuh2_fcc_rec_6.out best=-415.971464 hit=True
+  cuh2_fcc_rec_7.out best=-415.971161 hit=True
   8/8=8/8
