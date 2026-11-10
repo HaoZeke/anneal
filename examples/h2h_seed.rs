@@ -122,6 +122,16 @@ fn atomic_config(arm: &str, n: usize) -> Config {
     match arm {
         "recommended" => Config::recommended(n),
         "base" => Config::for_cluster(n),
+        "temperature-1.5" => {
+            let mut cfg = Config::recommended(n);
+            cfg.temperature = 1.5 * cfg.energy_scale;
+            cfg
+        }
+        "angular" => {
+            let mut cfg = Config::recommended(n);
+            cfg.angular_moves = true;
+            cfg
+        }
         other => panic!("no atomic arm {other}"),
     }
 }
