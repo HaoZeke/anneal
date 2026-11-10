@@ -8,6 +8,9 @@
 # It lacks the cluster_hopping.rs and tip4p.rs parts and the [[bench]] entry.
 # Its rigid_body.rs is a third version.
 # The log records the toolchain, the command, the exit code and the sha256.
+# logs/lj75-rebuild-log.txt shows sha256
+# 6887e36a368f9fa81eded591dcfa22904fa317fe2208b1bc58ba6500c8937118,
+# the same digest as the running binary.
 set -eu
 archive=${1:-paper/jctc/logs/lj75-source-37535ec1.tar.xz}
 dest=${2:-lj75-source}
