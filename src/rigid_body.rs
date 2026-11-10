@@ -93,6 +93,16 @@ impl RigidBodyGeometry {
         Array1::from(points)
     }
 
+    /// Body-frame site positions, in declaration order.
+    pub fn sites(&self) -> &[[f64; 3]] {
+        &self.sites
+    }
+
+    /// Atomic number of each site, in declaration order.
+    pub fn species(&self) -> &[u32] {
+        &self.species
+    }
+
     /// Largest body-frame site distance from the centre.
     ///
     /// A rigid chart uses this reach to size the container: the preset's

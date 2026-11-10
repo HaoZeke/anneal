@@ -302,9 +302,8 @@ stopped improving, each answering a different way of being stuck.
   states within the merge radius of a quarantined structure,
   replacing a soft well-tempered penalty that measurably failed to
   outrun the entropic lockout (config.rs:461-479).
-- Restart-on-stall (=restart_on_stall=, config.rs:497): restarts the
-  walker from a fresh random configuration but *keeps the bias*, so
-  the landscape memory (not the walker) survives.
+- Restart-on-stall (=Config::restart_on_stall= in config.rs): restarts the walker from a fresh random configuration but *keeps the bias*, so the landscape memory (not the walker) survives.
+  Off in =Config::recommended= and so in =Config::derived= and the binary and rigid-water stock presets; a caller sets it to opt in.
 - Path-on-stall (=path_on_stall=, config.rs:573; src/path.rs):
   =transverse_path= (src/path.rs:110) relaxes images perpendicular to
   the path tangent between the current structure and an archive

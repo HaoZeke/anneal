@@ -42,6 +42,9 @@ pub enum MoveLibrary {
         groups: Vec<Vec<usize>>,
         /// Keep atomic moves reachable for bond breaking and formation.
         reactive: bool,
+        /// Offer the reversal of a directed hydrogen-bond cycle as one more
+        /// arm. Needs three-atom water groups (O, H, H).
+        reverse_cycles: bool,
     },
     /// Separate centre-of-mass translation and rotation, Wales--Hodges style.
     ///
@@ -57,9 +60,13 @@ pub enum MoveLibrary {
         rotate_step: f64,
         /// All-body orientation step instead of the collective pair.
         ///
-        /// [`Config::for_tip4p`] leaves this off so its kernel names stay
-        /// `rtrans` and `rrot`. [`Config::with_rigid_bodies`] turns it on.
+        /// [`Config::for_tip4p`] leaves this off and keeps the separate
+        /// `rtrans` and `rrot` arms. [`Config::with_rigid_bodies`] turns it on.
         local: bool,
+        /// Offer the reversal of a directed hydrogen-bond cycle as one more
+        /// arm. It needs a site geometry with one oxygen and two hydrogens.
+        /// [`Config::for_tip4p`] turns it on.
+        reverse_cycles: bool,
     },
 }
 
@@ -187,7 +194,11 @@ impl MoveLibrary {
                 });
                 kernels
             }
-            Self::Molecular { groups, reactive } => {
+            Self::Molecular {
+                groups,
+                reactive,
+                reverse_cycles,
+            } => {
                 let mut kernels = if *reactive {
                     ClusterMove::library_combined_scaled(
                         cfg.n_points,
@@ -206,6 +217,11 @@ impl MoveLibrary {
                 if cfg.soap_mode != SoapProposalMode::Off {
                     kernels.push(soap_arm(cfg, mobile, Some(groups.clone())));
                 }
+                if *reverse_cycles && super::cycles::is_water_groups(groups) {
+                    kernels.push(ClusterMove::GroupCycleReverse {
+                        groups: groups.clone(),
+                    });
+                }
                 kernels
             }
             Self::RigidBody {
@@ -213,12 +229,13 @@ impl MoveLibrary {
                 translate_step,
                 rotate_step,
                 local,
+                reverse_cycles,
             } => {
                 // A one-body spin and a collective centre kick both quench
                 // back into the hydrogen-bond basin they left. The local
                 // chart composes one orientation step onto every body and
                 // leaves the centres where they are.
-                if *local {
+                let mut kernels = if *local {
                     vec![ClusterMove::RigidOrientAll {
                         n_molecules: *n_molecules,
                         step: *rotate_step,
@@ -234,7 +251,17 @@ impl MoveLibrary {
                             step: *rotate_step,
                         },
                     ]
+                };
+                if *reverse_cycles
+                    && let Some(geometry) = cfg.rigid_body_geometry.as_ref()
+                    && super::cycles::water_sites(geometry).is_some()
+                {
+                    kernels.push(ClusterMove::RigidReverseCycle {
+                        n_molecules: *n_molecules,
+                        geometry: geometry.clone(),
+                    });
                 }
+                kernels
             }
         };
         if !self.is_rigid_body()
@@ -572,6 +599,26 @@ pub enum ClusterMove {
         n_molecules: usize,
         /// Maximum angle of the draw, in radians.
         step: f64,
+    },
+    /// Reverse a directed cycle of hydrogen bonds between rigid waters.
+    ///
+    /// Each molecule on the cycle turns about its oxygen, so the cycle
+    /// points the other way and the oxygen network stays. A cluster with no
+    /// cycle comes back unchanged.
+    RigidReverseCycle {
+        /// Rigid bodies in the state.
+        n_molecules: usize,
+        /// Site geometry of one water: one oxygen, two hydrogens.
+        geometry: crate::rigid_body::RigidBodyGeometry,
+    },
+    /// Reverse a directed H-bond cycle in Cartesian water coordinates.
+    ///
+    /// Like [`ClusterMove::RigidReverseCycle`] but for flexible Cartesian
+    /// coordinates with three-atom water groups (O, H, H). Each molecule on
+    /// the cycle rotates about its oxygen so the cycle points the other way.
+    GroupCycleReverse {
+        /// Atom indices of each three-atom water group: `[O, H, H]`.
+        groups: Vec<Vec<usize>>,
     },
     /// Step in the SOAP power spectrum and pull back through \(J = \partial p/\partial R\).
     ///
@@ -1386,6 +1433,8 @@ impl ClusterMove {
             ClusterMove::RigidRotateOne { .. } => "rrot1".into(),
             ClusterMove::RigidReorient { .. } => "rreor".into(),
             ClusterMove::RigidOrientAll { .. } => "rorient".into(),
+            ClusterMove::RigidReverseCycle { .. } => "rcycle".into(),
+            ClusterMove::GroupCycleReverse { .. } => "gcycle".into(),
         }
     }
 
@@ -1776,6 +1825,19 @@ impl ClusterMove {
                         y[base + 2] = -updated[2];
                     }
                 }
+                y
+            }
+            ClusterMove::RigidReverseCycle {
+                n_molecules,
+                geometry,
+            } => {
+                let mut y = x.to_owned();
+                super::cycles::reverse_cycle(geometry, *n_molecules, &mut y, rng);
+                y
+            }
+            ClusterMove::GroupCycleReverse { groups } => {
+                let mut y = x.to_owned();
+                super::cycles::reverse_cycle_cartesian(groups, &mut y, rng);
                 y
             }
             ClusterMove::SpeciesSwap {
@@ -2185,7 +2247,7 @@ mod move_scaling_tests {
     }
 
     #[test]
-    fn tip4p_library_is_separate_translation_and_rotation() {
+    fn tip4p_library_is_translation_rotation_and_cycle_reversal() {
         let cfg = Config::for_tip4p(6);
         let names: Vec<String> = cfg
             .move_library
@@ -2193,7 +2255,7 @@ mod move_scaling_tests {
             .iter()
             .map(|k| k.name())
             .collect();
-        assert_eq!(names, ["rtrans", "rrot"]);
+        assert_eq!(names, ["rtrans", "rrot", "rcycle"]);
         assert!(cfg.move_library.is_rigid_body());
         assert_eq!(cfg.n_points, 6);
     }

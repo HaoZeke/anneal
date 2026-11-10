@@ -581,6 +581,27 @@ pub const OXYGEN_DISTANCE_CENSUS_RADIUS_A: f64 = 0.1;
 /// Charged-evaluation interval of the Good-Turing checkpoint.
 pub const GOOD_TURING_CHECKPOINT_INTERVAL: usize = 1;
 
+/// Record and quench gradient of the water arms (eV/A).
+///
+/// This is the `vtight` gradient threshold of xtb, 2e-4 Eh/bohr, in eV/A
+/// with the CODATA 2018 hartree and bohr. The record ranks basins on
+/// quenched energies, so the quench error has to sit below the gap
+/// between basins. At the GFN2 hexamer minimum the softest projected
+/// Hessian eigenvalue is 0.032 eV/A^2 and the next basin is 4.5 meV up,
+/// so the quadratic model asks for |g| below sqrt(0.032 * 0.0045), about
+/// 1.2e-2 eV/A. The molecular preset's 5e-2 left recorded energies up to
+/// 0.3 eV above their own minima and ranked a higher basin first.
+pub const WATER_RECORD_GRADIENT: f64 = 2.0e-4 * 27.211_386_245_988 / 0.529_177_210_903;
+
+/// Energy above the incumbent at which a water walk relaunches from it.
+///
+/// A 4000-call GFN2 hexamer accepts nearly every quenched minimum, so
+/// the chain leaves a shelf a few meV above the prism for basins tens
+/// of meV higher and spends the budget there. 0.02 eV is several times
+/// the 4.2 meV shelf and below the next family in the hop trace, so a
+/// walk that is still near the incumbent is left alone.
+pub const WATER_INCUMBENT_GAP_EV: f64 = 0.02;
+
 /// Search arm on the molecular preset.
 ///
 /// Communicating and derived keep the molecular groups. They do not
@@ -601,8 +622,15 @@ pub enum WaterSearchArm {
 /// Overlay one water arm on a molecular configuration.
 ///
 /// The move library is left as the caller set it. The atomic two-phase
-/// surface is not copied onto these arms.
+/// surface is not copied onto these arms. Every arm records at
+/// [`WATER_RECORD_GRADIENT`].
 pub fn configure_water_arm(cfg: &mut Config, arm: WaterSearchArm) {
+    cfg.record_gradient = WATER_RECORD_GRADIENT;
+    // The split screen does not identify a GFN2 hexamer basin, and a
+    // walk that has climbed off its best minimum does not find the prism
+    // by sampling that high basin. Both apply to every water arm.
+    cfg.quench_once = true;
+    cfg.incumbent_gap = WATER_INCUMBENT_GAP_EV;
     match arm {
         WaterSearchArm::Recommended | WaterSearchArm::GoodTuring => {}
         WaterSearchArm::Communicating => {
@@ -1357,12 +1385,21 @@ mod water_hexamer_tests {
         ] {
             let mut cfg = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
             configure_water_arm(&mut cfg, arm);
+            assert_eq!(cfg.record_gradient, WATER_RECORD_GRADIENT);
+            assert!((WATER_RECORD_GRADIENT - 1.0285e-2).abs() < 1e-6);
+            assert!(cfg.quench_once);
+            assert_eq!(cfg.incumbent_gap, WATER_INCUMBENT_GAP_EV);
             assert_eq!(cfg.move_library, library);
             assert!(cfg.surfaces.is_empty());
             match &cfg.move_library {
-                MoveLibrary::Molecular { groups, reactive } => {
+                MoveLibrary::Molecular {
+                    groups,
+                    reactive,
+                    reverse_cycles,
+                } => {
                     assert_eq!(groups.len(), WATER_HEXAMER_MOLECULES);
                     assert!(!reactive);
+                    assert!(reverse_cycles, "water should have reverse_cycles enabled");
                 }
                 other => panic!("molecular library replaced by {other:?}"),
             }

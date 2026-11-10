@@ -42,6 +42,6 @@ fn default_witness_ceiling_is_absent_from_the_resolved_json() {
     assert!(!json.contains("witness_tripleton"));
     assert_eq!(
         cfg.resolved_sha256().unwrap(),
-        "f11e2d801ba271b6e5873360a9e9af3e805eb3dae9393d8d0aa403e81c4054a8"
+        "4a0918f58928cd270a048ad9ac0a8df73c3d1f497735aa9d39a0675819c2eade"
     );
 }

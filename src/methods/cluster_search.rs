@@ -15,9 +15,7 @@
 //! there arrives at the cluster driver by the same route as one written here
 //! and neither the driver nor this function can tell them apart.
 
-#[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
-#[cfg(test)]
 use crate::methods::cluster_hopping::min_pair_distance;
 #[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::structure_is_sane;
@@ -69,6 +67,11 @@ pub struct RelaxStats {
     /// twenty steps are buying precision nothing uses. If it does not, the
     /// screen is not overhead around the quench, it is the quench.
     pub probe_error: f64,
+    /// Line-search geometries closer than the overlap rule.
+    ///
+    /// Each one is refused before the potential is called, and it is not
+    /// included in [`RelaxStats::charged`].
+    pub overlap_rejected: usize,
     /// Descent steps those passes took, summed.
     ///
     /// Against `screens * screen_steps` this is what stopping on a decision
@@ -119,10 +122,130 @@ fn two_phase_penalty(
 }
 
 fn gradient_is_converged(gradient: ArrayView1<f64>, threshold: f64) -> bool {
-    gradient
-        .iter()
-        .fold(0.0_f64, |largest, value| largest.max(value.abs()))
-        < threshold
+    // `f64::max` returns its other argument against NaN, so an infinity-norm
+    // fold of an all-NaN gradient is zero and a failed evaluation is scored
+    // as converged. A failed call is not a small gradient.
+    !gradient.is_empty()
+        && gradient.iter().all(|value| value.is_finite())
+        && gradient
+            .iter()
+            .fold(0.0_f64, |largest, value| largest.max(value.abs()))
+            < threshold
+}
+
+fn finite_pair(dim: usize, energy: f64, gradient: &Array1<f64>) -> bool {
+    energy.is_finite() && gradient.len() == dim && gradient.iter().all(|value| value.is_finite())
+}
+
+/// Uphill stand-in for a non-finite evaluation.
+///
+/// Large enough that a line search will not accept it over a physical
+/// energy, and steep enough that its infinity norm cannot meet a record
+/// tolerance. The search shortens that step and can still reach a finite
+/// quench. Without an anchor there is no finite point to return to.
+const FAILED_STEP_ENERGY: f64 = 1.0e6;
+const FAILED_STEP_SLOPE: f64 = 1.0;
+
+fn failed_step(point: ArrayView1<f64>, anchor: Option<&Array1<f64>>) -> Option<(f64, Array1<f64>)> {
+    let anchor = anchor?;
+    if anchor.len() != point.len() || point.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    let mut gradient = Array1::zeros(point.len());
+    let mut peak = 0.0_f64;
+    for index in 0..point.len() {
+        let delta = point[index] - anchor[index];
+        gradient[index] = delta;
+        peak = peak.max(delta.abs());
+    }
+    if !(peak >= FAILED_STEP_SLOPE) {
+        let index = gradient
+            .iter()
+            .enumerate()
+            .max_by(|(_, left), (_, right)| {
+                left.abs()
+                    .partial_cmp(&right.abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+        let sign = if gradient[index] < 0.0 { -1.0 } else { 1.0 };
+        gradient[index] = sign * FAILED_STEP_SLOPE;
+    }
+    Some((FAILED_STEP_ENERGY, gradient))
+}
+
+/// Physical `(energy, gradient)`, or an uphill rejection of a non-finite answer.
+///
+/// The anchor is the last finite geometry. A later failure steps back toward
+/// it instead of becoming the quench result.
+fn evaluated_pair<O>(
+    objective: &O,
+    point: ArrayView1<f64>,
+    anchor: &mut Option<Array1<f64>>,
+) -> Option<(f64, Array1<f64>, bool)>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let (energy, gradient) = objective.value_and_gradient(point);
+    if finite_pair(point.len(), energy, &gradient) {
+        *anchor = Some(point.to_owned());
+        return Some((energy, gradient, true));
+    }
+    failed_step(point, anchor.as_ref()).map(|(energy, gradient)| (energy, gradient, false))
+}
+
+fn finite_gradient<O>(objective: &O, x: ArrayView1<f64>) -> Option<Array1<f64>>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let gradient = objective.grad(x);
+    (gradient.len() == x.len() && gradient.iter().all(|value| value.is_finite()))
+        .then_some(gradient)
+}
+
+/// Uphill stand-in for a geometry the overlap rule refuses.
+///
+/// The potential is not called. The line search still receives a step it
+/// will shorten, so a later trial can land on a separated geometry.
+fn overlap_rejection_step(
+    point: ArrayView1<f64>,
+    anchor: Option<&Array1<f64>>,
+) -> Option<(f64, Array1<f64>)> {
+    if let Some(step) = failed_step(point, anchor) {
+        return Some(step);
+    }
+    if point.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    let mut gradient = Array1::zeros(point.len());
+    if let Some(value) = gradient.first_mut() {
+        *value = FAILED_STEP_SLOPE;
+    }
+    Some((FAILED_STEP_ENERGY, gradient))
+}
+
+/// Charge a physical evaluation, or refuse an overlap without charging it.
+fn charge_or_refuse_overlap<O>(
+    objective: &O,
+    led: &mut Ledger,
+    stats: &mut RelaxStats,
+    point: ArrayView1<f64>,
+    anchor: &mut Option<Array1<f64>>,
+    refuse_overlap: bool,
+) -> Option<(f64, Array1<f64>, bool)>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    if refuse_overlap && min_pair_distance(point) < OVERLAP_SEPARATION {
+        stats.overlap_rejected += 1;
+        return overlap_rejection_step(point, anchor.as_ref())
+            .map(|(energy, gradient)| (energy, gradient, false));
+    }
+    if !led.charge() {
+        return None;
+    }
+    evaluated_pair(objective, point, anchor)
 }
 
 fn warm_relax<'a, O>(
@@ -148,6 +271,8 @@ where
     let probe = cfg.probe_screen;
     let mut surfaces = (!cfg.surfaces.is_empty())
         .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
+    let mut anchor: Option<Array1<f64>> = None;
+    let refuse_overlap = cfg.species.is_some();
     move |led, x, iters| {
         opt.forget();
         let before = led.spent();
@@ -176,10 +301,17 @@ where
                 let cutoff = two.cutoff_for(x);
                 let shape = two.shape_for(x);
                 let (_, phase_one, _) = opt.minimize(x, iters, |v| {
-                    if !led.charge() {
-                        return None;
+                    let (e, g, physical) = charge_or_refuse_overlap(
+                        objective,
+                        led,
+                        stats,
+                        v,
+                        &mut anchor,
+                        refuse_overlap,
+                    )?;
+                    if !physical {
+                        return Some((e, g));
                     }
-                    let (e, g) = objective.value_and_gradient(v);
                     let (pe, pg) = two_phase_penalty(
                         v,
                         cfg.move_library.declared_groups(),
@@ -201,10 +333,8 @@ where
             x,
             iters,
             |v| {
-                if !led.charge() {
-                    return None;
-                }
-                Some(objective.value_and_gradient(v))
+                charge_or_refuse_overlap(objective, led, stats, v, &mut anchor, refuse_overlap)
+                    .map(|(energy, gradient, _)| (energy, gradient))
             },
             |_, fv| {
                 if stop_at.is_some_and(|limit| fv <= limit) {
@@ -289,49 +419,68 @@ where
         let mut f = f;
         let mut xr = xr;
         let mut validated = None;
-        let mut converged = if led.charge() {
-            stats.check_charged += 1;
-            let g = objective.grad(xr.view());
-            let ok = gradient_is_converged(g.view(), cfg.record_gradient);
-            if ok {
-                validated = Some(g);
+        let confirm = |led: &mut Ledger,
+                       stats: &mut RelaxStats,
+                       energy: f64,
+                       point: ArrayView1<f64>|
+         -> Option<Array1<f64>> {
+            if refuse_overlap && min_pair_distance(point) < OVERLAP_SEPARATION {
+                stats.overlap_rejected += 1;
+                return None;
             }
-            ok
-        } else {
-            false
+            if !energy.is_finite() || !led.charge() {
+                return None;
+            }
+            stats.check_charged += 1;
+            finite_gradient(objective, point)
+                .filter(|gradient| gradient_is_converged(gradient.view(), cfg.record_gradient))
         };
-        // A binary quench often hits the iteration cap with the infinity
-        // norm still above the record tolerance, so the ledger would drop
-        // a finite minimum. One more pass from that point finishes the
-        // descent. Screening passes stay short, and the preset cap is
-        // unchanged.
-        if !converged && !screening && cfg.species_sigma.is_some() && led.remaining() > 0 {
+        let mut converged = match confirm(led, stats, f, xr.view()) {
+            Some(gradient) => {
+                validated = Some(gradient);
+                true
+            }
+            None => false,
+        };
+        // A capped descent is not a minimum the ledger may keep. One more
+        // pass is enough for a binary quench. A molecular potential, whose
+        // line search otherwise stops inside an overlap, is continued until
+        // the same record gradient is met or the budget ends. Screening
+        // passes stay short, and the tolerance is the preset's own.
+        let continuation_rounds = if screening {
+            0
+        } else if cfg.species.is_some() && cfg.species_sigma.is_none() {
+            8
+        } else if cfg.species_sigma.is_some() {
+            1
+        } else {
+            0
+        };
+        for _ in 0..continuation_rounds {
+            if converged || led.remaining() == 0 {
+                break;
+            }
+            let spent_at = led.spent();
             let (f2, xr2, _) = opt.minimize(xr.view(), iters, |v| {
-                if !led.charge() {
-                    return None;
-                }
-                Some(objective.value_and_gradient(v))
+                charge_or_refuse_overlap(objective, led, stats, v, &mut anchor, refuse_overlap)
+                    .map(|(energy, gradient, _)| (energy, gradient))
             });
-            f = f2;
-            xr = xr2;
-            converged = if led.charge() {
-                stats.check_charged += 1;
-                let g = objective.grad(xr.view());
-                let ok = gradient_is_converged(g.view(), cfg.record_gradient);
-                if ok {
-                    validated = Some(g);
-                } else {
-                    validated = None;
-                }
-                ok
-            } else {
-                validated = None;
-                false
-            };
-            let extra = led.spent() - before - cost;
+            let extra = led.spent() - spent_at;
             if extra > 0 {
                 stats.full_charged += extra;
             }
+            f = f2;
+            xr = xr2;
+            converged = match confirm(led, stats, f, xr.view()) {
+                Some(gradient) => {
+                    validated = Some(gradient);
+                    true
+                }
+                None => {
+                    validated = None;
+                    false
+                }
+            };
         }
         if converged {
             stats.converged += 1;
@@ -371,18 +520,21 @@ where
             if !led.charge() {
                 return None;
             }
-            Some(objective.grad(x))
+            finite_gradient(objective, x)
         };
 
         // Value and gradient in one charge, which is what a Hamiltonian leapfrog
         // leaf needs. On a pairwise potential both come out of one pass over the
         // pairs, so charging twice would understate the arm by a factor of two.
+        // A non-finite answer is an uphill rejection, not a step the leaf can adopt.
+        let mut energy_anchor = None;
         let mut energy_grad =
             |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
                 if !led.charge() {
                     return None;
                 }
-                Some(objective.value_and_gradient(x))
+                evaluated_pair(objective, x, &mut energy_anchor)
+                    .map(|(energy, gradient, _)| (energy, gradient))
             };
 
         optimize_with_energy_gradient(
@@ -419,14 +571,16 @@ where
             if !led.charge() {
                 return None;
             }
-            Some(objective.grad(x))
+            finite_gradient(objective, x)
         };
+        let mut energy_anchor = None;
         let mut energy_grad =
             |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
                 if !led.charge() {
                     return None;
                 }
-                Some(objective.value_and_gradient(x))
+                evaluated_pair(objective, x, &mut energy_anchor)
+                    .map(|(energy, gradient, _)| (energy, gradient))
             };
         crate::methods::cluster_hopping::run_with_energy_gradient(
             cfg,
@@ -439,6 +593,38 @@ where
         )?
     };
     Ok((out, stats))
+}
+
+/// Relaxes a reported answer until every gradient component is below
+/// `tolerance`, charging each evaluation to `ledger`.
+///
+/// A hop records a minimum at [`Config::record_gradient`], which ranks
+/// basins but leaves the stored energy above the minimum by the residual
+/// curvature term. A comparison that reads the energy to a tighter window
+/// needs the answer at its own stationary-point gate. Returns `None` when
+/// the ledger closes before the first evaluation.
+pub fn polish_answer<O>(
+    objective: &O,
+    ledger: &mut Ledger,
+    start: ArrayView1<f64>,
+    tolerance: f64,
+    max_iter: usize,
+) -> Option<(f64, Array1<f64>)>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let mut opt = WarmLbfgs::default();
+    opt.gtol = tolerance;
+    let mut anchor = None;
+    let mut evaluated = false;
+    let (energy, state, _) = opt.minimize(start, max_iter, |v| {
+        if !ledger.charge() {
+            return None;
+        }
+        evaluated = true;
+        evaluated_pair(objective, v, &mut anchor).map(|(energy, gradient, _)| (energy, gradient))
+    });
+    (evaluated && energy.is_finite()).then_some((energy, state))
 }
 
 /// [`search_from`] with a checkpoint after each block of charged work.
@@ -467,14 +653,16 @@ where
             if !led.charge() {
                 return None;
             }
-            Some(objective.grad(x))
+            finite_gradient(objective, x)
         };
+        let mut energy_anchor = None;
         let mut energy_grad =
             |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
                 if !led.charge() {
                     return None;
                 }
-                Some(objective.value_and_gradient(x))
+                evaluated_pair(objective, x, &mut energy_anchor)
+                    .map(|(energy, gradient, _)| (energy, gradient))
             };
         run_with_energy_gradient_at_checkpoints(
             cfg,
@@ -766,7 +954,7 @@ where
         if !led.charge() {
             return None;
         }
-        Some(objective.grad(x))
+        finite_gradient(objective, x)
     };
 
     let mut cfg = cfg.clone();
@@ -1203,7 +1391,13 @@ where
 {
     let x = out.best_state.as_ref()?;
     let (e, g) = objective.value_and_gradient(x.view());
-    Some((e, g.iter().fold(0.0_f64, |a, v| a.max(v.abs()))))
+    let gmax = if g.iter().any(|value| !value.is_finite()) {
+        f64::INFINITY
+    } else {
+        g.iter()
+            .fold(0.0_f64, |largest, value| largest.max(value.abs()))
+    };
+    Some((e, gmax))
 }
 
 #[cfg(test)]
@@ -1217,6 +1411,137 @@ mod tests {
         let gradient = Array1::from_vec(vec![7.2e-5, -3.0e-5]);
         assert!(gradient_is_converged(gradient.view(), 1.0e-3));
         assert!(!gradient_is_converged(gradient.view(), 1.0e-5));
+    }
+
+    /// An all-NaN gradient is a failed evaluation. `f64::max` drops NaN, so
+    /// the infinity-norm fold used to report that failure as a zero gradient.
+    #[test]
+    fn a_nonfinite_gradient_is_not_converged() {
+        let broken = Array1::from_vec(vec![f64::NAN, f64::NAN]);
+        assert!(
+            !gradient_is_converged(broken.view(), 1.0e-3),
+            "NaN gradient was scored as converged"
+        );
+        let empty = Array1::from_vec(vec![]);
+        assert!(!gradient_is_converged(empty.view(), 1.0e-3));
+    }
+
+    /// A non-finite evaluation must not become the recorded best, and a
+    /// finite quench that the line search can still reach must.
+    ///
+    /// The first steepest step from the start leaves the finite bowl and
+    /// the objective answers −∞ with a zero gradient. Adopting that answer
+    /// ends the quench there: the best stays +∞, and the finite minimum is
+    /// never eligible. A shorter step stays inside the bowl.
+    #[test]
+    fn finite_quench_energy_is_eligible_and_nonfinite_is_not_best() {
+        use eindir_core::gradient::Gradient;
+        use eindir_core::{Bounds, Objective};
+
+        let state = Array1::zeros(1);
+        let mut ledger = Ledger::new(1);
+        ledger.record(f64::NAN, state.view());
+        ledger.record(f64::INFINITY, state.view());
+        ledger.record(f64::NEG_INFINITY, state.view());
+        assert!(
+            ledger.best.is_infinite() && ledger.best.is_sign_positive(),
+            "non-finite eval became best {}",
+            ledger.best
+        );
+        assert!(ledger.best_state.is_none());
+        ledger.record(-2.5, state.view());
+        assert_eq!(ledger.best, -2.5);
+        ledger.record(f64::NEG_INFINITY, state.view());
+        ledger.record(f64::NAN, state.view());
+        assert_eq!(ledger.best, -2.5);
+
+        struct Bowl {
+            bounds: Bounds<f64>,
+            target: f64,
+            stiffness: f64,
+            lo: f64,
+            hi: f64,
+        }
+
+        impl Bowl {
+            fn pair(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+                let place = x.get(3).copied().unwrap_or(f64::NAN);
+                if !place.is_finite() || place < self.lo || place > self.hi {
+                    return (f64::NEG_INFINITY, Array1::zeros(x.len()));
+                }
+                let mut energy = 0.0;
+                let mut gradient = Array1::zeros(x.len());
+                for (i, coordinate) in x.iter().enumerate() {
+                    let aim = if i == 3 { self.target } else { 0.0 };
+                    let delta = coordinate - aim;
+                    energy += 0.5 * self.stiffness * delta * delta;
+                    gradient[i] = self.stiffness * delta;
+                }
+                (energy, gradient)
+            }
+        }
+
+        impl Objective<f64> for Bowl {
+            fn dim(&self) -> usize {
+                6
+            }
+            fn bounds(&self) -> &Bounds<f64> {
+                &self.bounds
+            }
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                self.pair(x).0
+            }
+        }
+
+        impl Gradient<f64> for Bowl {
+            fn dim(&self) -> usize {
+                6
+            }
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                self.pair(x).1
+            }
+        }
+
+        impl DifferentiableObjective<f64> for Bowl {
+            fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+                self.pair(x)
+            }
+        }
+
+        let bowl = Bowl {
+            bounds: Bounds::new(Array1::from_elem(6, -8.0), Array1::from_elem(6, 8.0), 0.0),
+            target: 1.5,
+            stiffness: 10.0,
+            lo: 0.4,
+            hi: 1.8,
+        };
+        let mut cfg = Config::for_cluster(2);
+        cfg.max_hops = Some(0);
+        let start = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let mut ledger = Ledger::new(2_000);
+        let (out, _) = search_from(&bowl, &cfg, &mut ledger, start.view(), 1)
+            .expect("the bowl has a finite quench");
+        assert!(
+            out.best.is_finite(),
+            "finite quench was not eligible, best {}",
+            out.best
+        );
+        assert!(
+            out.best < 1.0e-4,
+            "best {} is not the finite minimum of the bowl",
+            out.best
+        );
+        assert!(out.best_state.is_some(), "finite best has no geometry");
+        let best = out.best_state.expect("finite best");
+        assert!(
+            best.iter().all(|value| value.is_finite()),
+            "best geometry is not finite"
+        );
+        assert!(
+            (best[3] - bowl.target).abs() < 1.0e-3,
+            "best landed at {} instead of the finite minimum",
+            best[3]
+        );
     }
 
     /// The water Good-Turing arm retires only from quench boundaries. A search

@@ -42,10 +42,12 @@ pub mod minima_hopping;
 pub mod nested;
 /// Umbrella bridges between two catalog minima in descriptor space.
 pub mod neus_bridge;
-/// Rigid-body record tolerance and the hop count for a reseed.
+/// Rigid-body record tolerance and the hop count for a stall.
 pub mod rigid_quench;
 /// Cut-and-splice mixing of two quenched clusters.
 pub mod splice;
+/// Minima a rigid chain has quenched, and where its stall goes.
+pub(crate) mod stall_archive;
 pub mod two_phase;
 #[cfg(feature = "graphkey")]
 pub use archive_search::{Archive, ArchiveOutcome, archive_search};

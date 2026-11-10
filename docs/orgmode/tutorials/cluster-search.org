@@ -58,22 +58,23 @@ binary = cluster_search(
 )
 #+end_src
 
-A rigid chart uses centre and Rodrigues coordinates. =n= is the number of
-bodies. =layout="block"= stores every centre, then every rotation.
-=layout="interleaved"= is centre then angle-axis per body, and the
-rotations are negated at the boundary. The orientation step turns every
-body and leaves the centres where they are. On a chart of more than ten
-bodies the acceptance factor stays at 4 and the orientation amplitude
-is scaled toward an acceptance ratio of one half. A ten-body chart may
-still climb to 24 and does not scale the amplitude. The rigid quench
-is the same L-BFGS descent as a Cartesian quench, and it returns when
-the energy crosses the run target. A rigid record accepts the
-root-mean-square force. After 1000 hops with no new lowest minimum
-the walker returns to that minimum when it lies within one hopping
-temperature of the run target. Farther above the target the walker
-is drawn again and quenched, and the lowest minimum is kept.
-Preset temperature, screen length, relax length, and record gradient
-are unchanged.
+A rigid chart uses centre and Rodrigues coordinates.
+=n= is the number of bodies.
+=layout="block"= stores every centre, then every rotation.
+=layout="interleaved"= is centre then rotation vector per body, and the rotations are negated at the boundary.
+The orientation step turns every body and leaves the centres where they are.
+On a chart of more than ten bodies the acceptance factor stays at 4.
+Its orientation amplitude is scaled toward an acceptance ratio of one half.
+A ten-body chart may still climb to 24 and does not scale the amplitude.
+The rigid quench is the same L-BFGS descent as a Cartesian quench.
+It returns when the energy crosses the run target.
+A rigid record accepts the root-mean-square force.
+The chain keeps the eight lowest distinct minima of its quenched start, accepted quenches and lowest recorded minimum.
+Each stall follows 1000 hops with no new lowest minimum.
+At each stall the walker moves to the lowest kept minimum that is neither its own nor one of the last four stall destinations.
+When no kept minimum qualifies, the walker stays put.
+Nothing is drawn, the run target is not read, and the lowest minimum is kept.
+Preset temperature, screen length, relax length, and record gradient are unchanged.
 
 #+begin_src python
 water = cluster_search(
