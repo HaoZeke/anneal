@@ -1426,6 +1426,15 @@ fn record_quenched_answer(
     gradient
 }
 
+/// A failed stall growth holds the next growth quench until the incumbent drops.
+///
+/// The margin is the one the adoption uses. The test reads the incumbent
+/// energy and nothing about the number of atoms, so one recommended preset
+/// keeps it at every size.
+fn stall_growth_waits(held: Option<f64>, incumbent: f64) -> bool {
+    held.is_some_and(|energy| incumbent >= energy - 1e-9)
+}
+
 /// Runs the driver until the ledger is spent.
 ///
 /// `start` is a starting configuration and `relax` performs a relaxation of the
@@ -2875,6 +2884,10 @@ where
     // A rigid stall measures 1000 hops from that hop count.
     let mut hops_at_lowest = 0usize;
     let mut csm_reseed_stamp = 0usize;
+    // Set when a stall growth fails to lower the incumbent. Later growth
+    // quenches wait until that energy drops, and each waited stall spends
+    // one all-points displacement instead of another lattice quench.
+    let mut stall_growth_hold: Option<f64> = None;
     let hop_room = |hops: usize| cfg.max_hops.is_none_or(|cap| hops < cap);
     // Distinct minima a rigid chain has quenched. Its stall moves to one.
     let mut stall_archive = crate::methods::stall_archive::StallArchive::default();
@@ -5928,48 +5941,96 @@ where
                 && !crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
             {
                 let best_before_growth = ledger.best;
-                let mut best_growth: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
-                for source in crate::lattice::Source::library() {
-                    if ledger.remaining() == 0 {
-                        break;
+                if stall_growth_waits(stall_growth_hold, best_before_growth) {
+                    // The lattice quench already failed at this incumbent.
+                    // One all-points step takes the charge the next growth
+                    // would have spent. The ordinary moves keep the rest.
+                    if ledger.remaining() > 0 {
+                        let step = preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale;
+                        let proposal =
+                            ClusterMove::AllPoints { step }.propose(x.view(), cfg.temperature, rng);
+                        let (displaced_energy, displaced_state) =
+                            relax(ledger, proposal.view(), cfg.relax_steps);
+                        if displaced_state.len() == x.len() && displaced_energy.is_finite() {
+                            let displaced_gradient = record_quenched_answer(
+                                cfg,
+                                ledger,
+                                &mut grad,
+                                displaced_energy,
+                                displaced_state.view(),
+                                &mut unconverged_records,
+                            );
+                            if displaced_energy < best_before_growth - 1e-9 {
+                                hops += 1;
+                                adopt_minimum!(
+                                    displaced_energy,
+                                    displaced_state,
+                                    displaced_gradient,
+                                    None,
+                                    AdoptionHistory::Fresh,
+                                    None,
+                                    Some("stall-all"),
+                                    hops
+                                );
+                            }
+                        }
                     }
-                    let grown = crate::lattice::candidate(source, x.view(), x.len() / 3, rng);
-                    let (grown_energy, grown_state) = relax(ledger, grown.view(), cfg.relax_steps);
-                    if grown_state.len() != x.len() || !grown_energy.is_finite() {
-                        continue;
+                    if ledger.best < best_before_growth - 1e-9 {
+                        stall_growth_hold = None;
                     }
-                    let grown_gradient = record_quenched_answer(
-                        cfg,
-                        ledger,
-                        &mut grad,
-                        grown_energy,
-                        grown_state.view(),
-                        &mut unconverged_records,
-                    );
-                    let replace = best_growth
-                        .as_ref()
-                        .is_none_or(|(energy, _, _)| grown_energy < *energy);
-                    if replace {
-                        best_growth = Some((grown_energy, grown_state, grown_gradient));
+                    if ledger.best < best_before_growth - 1e-12 && improvements.len() < 512 {
+                        improvements.push((hops, ledger.spent(), bias.n_basins(), ledger.best));
                     }
-                }
-                if let Some((grown_energy, grown_state, grown_gradient)) = best_growth
-                    && grown_energy < best_before_growth - 1e-9
-                {
-                    hops += 1;
-                    adopt_minimum!(
-                        grown_energy,
-                        grown_state,
-                        grown_gradient,
-                        None,
-                        AdoptionHistory::Fresh,
-                        None,
-                        Some("stall-growth"),
-                        hops
-                    );
-                }
-                if ledger.best < best_before_growth - 1e-12 && improvements.len() < 512 {
-                    improvements.push((hops, ledger.spent(), bias.n_basins(), ledger.best));
+                } else {
+                    let mut best_growth: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
+                    for source in crate::lattice::Source::library() {
+                        if ledger.remaining() == 0 {
+                            break;
+                        }
+                        let grown = crate::lattice::candidate(source, x.view(), x.len() / 3, rng);
+                        let (grown_energy, grown_state) =
+                            relax(ledger, grown.view(), cfg.relax_steps);
+                        if grown_state.len() != x.len() || !grown_energy.is_finite() {
+                            continue;
+                        }
+                        let grown_gradient = record_quenched_answer(
+                            cfg,
+                            ledger,
+                            &mut grad,
+                            grown_energy,
+                            grown_state.view(),
+                            &mut unconverged_records,
+                        );
+                        let replace = best_growth
+                            .as_ref()
+                            .is_none_or(|(energy, _, _)| grown_energy < *energy);
+                        if replace {
+                            best_growth = Some((grown_energy, grown_state, grown_gradient));
+                        }
+                    }
+                    if let Some((grown_energy, grown_state, grown_gradient)) = best_growth
+                        && grown_energy < best_before_growth - 1e-9
+                    {
+                        hops += 1;
+                        adopt_minimum!(
+                            grown_energy,
+                            grown_state,
+                            grown_gradient,
+                            None,
+                            AdoptionHistory::Fresh,
+                            None,
+                            Some("stall-growth"),
+                            hops
+                        );
+                    }
+                    if ledger.best < best_before_growth - 1e-9 {
+                        stall_growth_hold = None;
+                    } else {
+                        stall_growth_hold = Some(best_before_growth);
+                    }
+                    if ledger.best < best_before_growth - 1e-12 && improvements.len() < 512 {
+                        improvements.push((hops, ledger.spent(), bias.n_basins(), ledger.best));
+                    }
                 }
             }
             // The same growth while the occupied structure is icosahedral.
@@ -5978,68 +6039,118 @@ where
             // decahedron is built from, are the leave. The draws come from a
             // stream seeded by the hop and the incumbent, so a growth that
             // does not win leaves the chain's own stream where it was. The
-            // quench is kept only when it deepens the incumbent.
+            // quench is kept only when it deepens the incumbent. A growth
+            // that fails holds the next one until the incumbent changes, and
+            // that stalled charge is an all-points displacement.
             if directed_leave
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
                 && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
             {
                 let best_before_growth = ledger.best;
-                let mut side = StdRng::seed_from_u64(
-                    (hops as u64).wrapping_mul(0x9E37_79B9)
-                        ^ best_before_growth.to_bits()
-                        ^ 0x11A7_11CE,
-                );
-                // Close packing and the pentagonal order. Regrowing the
-                // icosahedron the chain is already in does not leave it.
-                let sources = [
-                    crate::lattice::Source::Named(crate::structure::Template::FaceCentredCubic),
-                    crate::lattice::Source::Named(crate::structure::Template::HexagonalClosePacked),
-                    crate::lattice::Source::Pentagonal,
-                ];
-                let mut best_growth: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
-                for source in sources {
-                    if ledger.remaining() == 0 {
-                        break;
+                if stall_growth_waits(stall_growth_hold, best_before_growth) {
+                    if ledger.remaining() > 0 {
+                        let step = preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale;
+                        let proposal =
+                            ClusterMove::AllPoints { step }.propose(x.view(), cfg.temperature, rng);
+                        let (displaced_energy, displaced_state) =
+                            relax(ledger, proposal.view(), cfg.relax_steps);
+                        if displaced_state.len() == x.len() && displaced_energy.is_finite() {
+                            let displaced_gradient = record_quenched_answer(
+                                cfg,
+                                ledger,
+                                &mut grad,
+                                displaced_energy,
+                                displaced_state.view(),
+                                &mut unconverged_records,
+                            );
+                            if displaced_energy < best_before_growth - 1e-9 {
+                                hops += 1;
+                                adopt_minimum!(
+                                    displaced_energy,
+                                    displaced_state,
+                                    displaced_gradient,
+                                    None,
+                                    AdoptionHistory::Fresh,
+                                    None,
+                                    Some("stall-all"),
+                                    hops
+                                );
+                            }
+                        }
                     }
-                    let grown = crate::lattice::candidate(source, x.view(), x.len() / 3, &mut side);
-                    let (grown_energy, grown_state) = relax(ledger, grown.view(), cfg.relax_steps);
-                    if grown_state.len() != x.len() || !grown_energy.is_finite() {
-                        continue;
+                    if ledger.best < best_before_growth - 1e-9 {
+                        stall_growth_hold = None;
                     }
-                    let grown_gradient = record_quenched_answer(
-                        cfg,
-                        ledger,
-                        &mut grad,
-                        grown_energy,
-                        grown_state.view(),
-                        &mut unconverged_records,
+                    if ledger.best < best_before_growth - 1e-12 && improvements.len() < 512 {
+                        improvements.push((hops, ledger.spent(), bias.n_basins(), ledger.best));
+                    }
+                } else {
+                    let mut side = StdRng::seed_from_u64(
+                        (hops as u64).wrapping_mul(0x9E37_79B9)
+                            ^ best_before_growth.to_bits()
+                            ^ 0x11A7_11CE,
                     );
-                    let replace = best_growth
-                        .as_ref()
-                        .is_none_or(|(energy, _, _)| grown_energy < *energy);
-                    if replace {
-                        best_growth = Some((grown_energy, grown_state, grown_gradient));
+                    // Close packing and the pentagonal order. Regrowing the
+                    // icosahedron the chain is already in does not leave it.
+                    let sources = [
+                        crate::lattice::Source::Named(crate::structure::Template::FaceCentredCubic),
+                        crate::lattice::Source::Named(
+                            crate::structure::Template::HexagonalClosePacked,
+                        ),
+                        crate::lattice::Source::Pentagonal,
+                    ];
+                    let mut best_growth: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
+                    for source in sources {
+                        if ledger.remaining() == 0 {
+                            break;
+                        }
+                        let grown =
+                            crate::lattice::candidate(source, x.view(), x.len() / 3, &mut side);
+                        let (grown_energy, grown_state) =
+                            relax(ledger, grown.view(), cfg.relax_steps);
+                        if grown_state.len() != x.len() || !grown_energy.is_finite() {
+                            continue;
+                        }
+                        let grown_gradient = record_quenched_answer(
+                            cfg,
+                            ledger,
+                            &mut grad,
+                            grown_energy,
+                            grown_state.view(),
+                            &mut unconverged_records,
+                        );
+                        let replace = best_growth
+                            .as_ref()
+                            .is_none_or(|(energy, _, _)| grown_energy < *energy);
+                        if replace {
+                            best_growth = Some((grown_energy, grown_state, grown_gradient));
+                        }
                     }
-                }
-                if let Some((grown_energy, grown_state, grown_gradient)) = best_growth
-                    && grown_energy < best_before_growth - 1e-9
-                {
-                    hops += 1;
-                    adopt_minimum!(
-                        grown_energy,
-                        grown_state,
-                        grown_gradient,
-                        None,
-                        AdoptionHistory::Fresh,
-                        None,
-                        Some("stall-growth"),
-                        hops
-                    );
-                    packing.offer(e, x.view(), packing_cutoff);
-                }
-                if ledger.best < best_before_growth - 1e-12 && improvements.len() < 512 {
-                    improvements.push((hops, ledger.spent(), bias.n_basins(), ledger.best));
+                    if let Some((grown_energy, grown_state, grown_gradient)) = best_growth
+                        && grown_energy < best_before_growth - 1e-9
+                    {
+                        hops += 1;
+                        adopt_minimum!(
+                            grown_energy,
+                            grown_state,
+                            grown_gradient,
+                            None,
+                            AdoptionHistory::Fresh,
+                            None,
+                            Some("stall-growth"),
+                            hops
+                        );
+                        packing.offer(e, x.view(), packing_cutoff);
+                    }
+                    if ledger.best < best_before_growth - 1e-9 {
+                        stall_growth_hold = None;
+                    } else {
+                        stall_growth_hold = Some(best_before_growth);
+                    }
+                    if ledger.best < best_before_growth - 1e-12 && improvements.len() < 512 {
+                        improvements.push((hops, ledger.spent(), bias.n_basins(), ledger.best));
+                    }
                 }
             }
             if hop_room(hops)
@@ -7082,6 +7193,14 @@ mod tests {
         assert!((d(&x, 1, 2) - d(&y, 1, 2)).abs() < 1e-12);
         let moved = (0..3).any(|k| (y[k] - x[k]).abs() > 1e-9);
         assert!(moved, "repack left the group on its original centre");
+    }
+
+    #[test]
+    fn a_failed_stall_growth_waits_until_the_incumbent_drops() {
+        assert!(!stall_growth_waits(None, -10.0));
+        assert!(stall_growth_waits(Some(-10.0), -10.0));
+        assert!(stall_growth_waits(Some(-10.0), -10.0 - 1e-9));
+        assert!(!stall_growth_waits(Some(-10.0), -10.0 - 1e-8));
     }
 
     #[test]
