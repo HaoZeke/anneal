@@ -51,8 +51,8 @@ Both hits stay.
 Each record in the block is a file, a line and the exact string.
 The header is the copyright line the ruling keeps.
 The 2023 notice is the restored quotation.
-The affiliation tokens are the letterhead Rohit set.
-None of these strings was rewritten.
+The copyright strings in the block were not rewritten.
+The affiliation lines are the author decision below.
 
 ```
 
@@ -66,10 +66,7 @@ paper/jctc/cover-letter.tex:1
 Copyright (c) anneal developers
 
 paper/jctc/cover-letter.tex:8
-B.V.
-
-paper/jctc/cover-letter.tex:8
-SURF
+SURF B.V., Amsterdam
 
 paper/jctc/macros.tex:1
 Copyright (c) anneal developers
@@ -78,10 +75,7 @@ paper/jctc/manuscript.tex:1
 Copyright (c) anneal developers
 
 paper/jctc/manuscript.tex:14
-B.V.
-
-paper/jctc/manuscript.tex:14
-SURF
+SURF B.V., Amsterdam
 
 paper/jctc/refs.bib:1
 Copyright (c) anneal developers
@@ -207,10 +201,7 @@ paper/jctc/si.tex:1
 Copyright (c) anneal developers
 
 paper/jctc/si.tex:11
-B.V.
-
-paper/jctc/si.tex:11
-SURF
+SURF B.V., Amsterdam
 
 paper/jctc/si.tex:121
 Copyright (c) 2023 anneal core developers
@@ -219,6 +210,16 @@ paper/jctc/toc-graphic.tex:4
 Copyright (c) anneal developers
 
 ```
+
+## Author decision
+
+Rohit chose the affiliation text at 15:51, America/Chicago.
+The lines are `manuscript.tex:14` and `si.tex:11`.
+The third line is `cover-letter.tex:8`.
+Each reads `SURF B.V., Amsterdam`.
+A checker may still flag `B.V.`.
+That flag stays, because the wording is the author's.
+No checker config is changed.
 
 ## Non-prose
 

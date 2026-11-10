@@ -14,11 +14,8 @@ The seventh through tenth differ by one byte in the MuPDF comment.
 The first two match the kit render, which uses a hyphen.
 The previous file uses an en dash in those two.
 The last eight are the plates from fig_si_panels.py.
-Three TeX files keep the affiliation and the copyright lines.
+Three TeX files keep the copyright lines.
 They are `manuscript.tex`, `si.tex` and `cover-letter.tex`.
 Only `si.tex` keeps the 2023 notice.
 REPORT.md lists the Rohit items.
 REPLAY.txt records all seven replays of this series.
-Affiliation `SURF B.V.` stays byte for byte.
-Rohit has not changed that wording.
-Those three files keep the letterhead.
