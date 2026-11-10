@@ -630,11 +630,14 @@ The release tag for version 0.12.0 is not assigned.
 The copper numbers come from the slab runs.
 Commit aef5cf0b2068c4988509066a881eb68682ad9290 produced them.
 The rerun best energies run from -415.971521 eV to -415.971161 eV.
-A copper hit is a best below -415.971529 eV plus 0.001 eV.
-The gaps are 0.000040, 0.000087, 0.000039 and 0.000008 eV.
-The other gaps are 0.000060, 0.000062, 0.000065 and 0.000368 eV.
-The largest gap is 0.000368 eV.
-That count is 8/8.
+The hit tolerance is 0.001 eV.
+The script is scripts/elja_hq_sci_molslab_bank.sh.
+The lines are 118 and 119.
+TARGET_TOL there is 1e-3.
+The per-seed gaps run from 8e-6 eV to 3.68e-4 eV above -415.971529 eV.
+No seed reached the reference within 1e-6 eV.
+These are not exact hits.
+Eight seeds lie inside the 0.001 eV tolerance.
 The set_relative_0.01 line records the 0.01 eV rate.
 That line is a separate figure.
 The library pins rgpot 25c759da82eececa8897e4634046fab27409c81a.
