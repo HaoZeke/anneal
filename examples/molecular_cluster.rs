@@ -79,6 +79,7 @@ fn main() {
     cfg.move_library = MoveLibrary::Molecular {
         groups: groups.clone(),
         reactive: false,
+        reverse_cycles: true,
     };
     cfg.soap_mode = soap_mode_from_env();
     apply_two_phase(&mut cfg);
