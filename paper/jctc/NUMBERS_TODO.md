@@ -29,7 +29,7 @@ No replacement digest is written here.
 
 ## Typed, and not a new measurement
 
-The LJ75 hit count is pending.
+We record the LJ75 hit count as pending.
 Seeds 0 through 199 run at a cap of 4e6 force calls.
 No per-arm hit rate is typed.
 No CSV for that campaign is in the tree.
@@ -45,11 +45,15 @@ CREST's line ``Total number of energy+grad calls'' is larger on every
 seed.
 The old counter undercounted CREST.
 The equal-effort claim is withdrawn.
+The six crest rows are single draws, and this note states no success
+rate from them.
+CREST's cost is the energy and gradient count.
+The six-seed old-counter arm is called the driver-count budget.
+The matched comparison and the 30-start statistics are pending from the
+water-engrad-matched lane.
 Five polished gaps lie within 1e-7 Eh.
 Seed 1 reaches 1.3509e-7 Eh and sits just outside that threshold.
 LJ38 72/72 and LJ98 47/48 stay inside a todo.
-The LJ75 hit count is pending, not typed as a finished rate.
-
 ## Kept
 
 The 192-seed paragraph stays.

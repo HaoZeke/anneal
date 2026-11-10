@@ -33,8 +33,10 @@ We describe one basin-hopping preset for Lennard-Jones clusters.
 The preset keeps the lean burst library at every size.
 Below 98 atoms the constructor adds a diameter penalty at 0.7 of the
 largest pair distance, and restart on stall stays off.
-On the water hexamer, six seeds, anneal and the conformer rotamer
-ensemble sampling tool (CREST) finish on the same prism.
+On the water hexamer, the six crest rows are single draws from CREST
+3.0.2.
+That build exposes no seed, and the anneal seed fixes only start.xyz.
+This draft states no success rate from those rows.
 Five polished gaps lie within \(1\times 10^{-7}\)~Eh.
 Seed 1 lies at \(1.35\times 10^{-7}\)~Eh, just outside that threshold.
 \end{abstract}
@@ -50,7 +52,7 @@ Li and Scheraga introduced basin hopping for a rough potential-energy surface.\c
 Wales and Doye made that Monte Carlo walk the working method for atomic clusters.\cite{wales1997}
 A move proposes a new geometry, a local minimisation returns a minimum, and the Metropolis rule at one temperature accepts or rejects that minimum.
 We find the same preset at every size in the campaigns below.
-We report a six-seed water hexamer comparison and the 192-seed campaign.
+We report the six crest rows as single draws, and we report the 192-seed campaign.
 The preset measured here draws move arms by Thompson sampling from a posterior on the depth of the quench, and it abandons a quench that is returning to the occupied basin.\cite{thompson1933,goedecker2004}
 A stall applies tabu, symmetrisation, the recorded basin trail, and the climb.
 Restart on stall stays off, so the walker is not redrawn from a random cluster.
@@ -212,7 +214,8 @@ Figure~\ref{fig:lj75-ecdf} draws that LJ\(_{75}\) comparison.\cite{oakley2013}
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{lj75_ecdf.pdf}
-\caption{Encounter curves from an earlier sealed campaign.}
+\caption{Encounter curves of the earlier sealed LJ\(_{75}\) campaign.
+The plot covers 200 seeds from that sealed run.}
 \label{fig:lj75-ecdf}
 \end{figure}
 A move that has stopped finding depth can still take the next trial.
@@ -271,15 +274,11 @@ LJ\(_{104}\).
 hexamer of each class.}
 \label{fig:systems}
 \end{figure}
-The pending LJ\(_{75}\) hit count waits.
 \subsection{Rates and the water hexamer}
 Seeds 0 through 199 are running serially at a cap of \(4\times 10^{6}\)
 force calls.
 No hit count is reported until that run finishes.
-Figure~\ref{fig:lj75-ecdf} draws the encounter curves from an earlier
-sealed campaign.
-Figure~\ref{fig:summary} shows the water-hexamer success, six seeds out
-of six on each ledger.
+Figure~\ref{fig:lj75-ecdf} draws those encounter curves.
 Counts that wait for a new run carry the stale marker (STALE).
 \todo{STALE: rerun on main. The recommended hop hit 72 of 72 seeds at
 LJ\(_{38}\). On those hits the median is 726 force calls and the type-7
@@ -287,17 +286,6 @@ interquartile range is 912.25. It hit 47 of 48 seeds at LJ\(_{98}\). On
 those hits the median is 450877 force calls and the type-7 interquartile
 range is 902434.5. The seed rows are
 data/lj38-recommended-seeds.csv and data/lj98-recommended-seeds.csv.}
-
-\begin{figure}
-\centering
-\includegraphics[width=\linewidth]{summary_rates.pdf}
-\caption{Share of the six water-hexamer seeds that finish.
-Each bar is 6 of 6.
-The two anneal bars are the 4000-evaluation ledger and the old counter.
-The third bar is CREST.
-No other system is plotted.}
-\label{fig:summary}
-\end{figure}
 
 Figure~\ref{fig:minima-maps} maps the minima one seed of basin hopping
 and of the recommended hop accepted at LJ\(_{38}\), LJ\(_{75}\) and
@@ -352,7 +340,7 @@ Hamiltonian\cite{prachtCrestProgramExploration2024,bannwarthGfn2xtbanAccurateBro
 On the water hexamer the sealed campaign runs four arms, each on seeds 0 to 191 at a budget of 4000 force calls.\cite{prachtCrestProgramExploration2024,bannwarthGfn2xtbanAccurateBroadly2019}
 The default arm is the hop.
 The budget-fair polish is an opt-in mode that charges an external polish against the same budget.
-The third arm is CREST, and the fourth runs the same polish after CREST inside the same budget.
+The third arm is CREST, and the fourth runs that polish after CREST inside the same budget.
 A run hits when the iterative rotations and assignments alignment (IRA) matches a structure to a Malloum prism, cage, book, or cyclic chair reoptimised at GFN2-xTB.\cite{gundeIraShapeMatching2021,malloumStructuresRelativeStability2019,perezStructuresCagePrism2012}
 The default hop hit 121 of 192 seeds.
 Its call PAR-2 median is 4000 and its type-7 interquartile range is 4000.
@@ -369,6 +357,15 @@ Figure~\ref{fig:water-crest} draws the four arms.
 
 \subsection{Water hexamer against CREST}
 \label{sec:water} CREST here is conda-forge crest 3.0.2.
+Its metadynamics is stochastic for a fixed start geometry.
+This build exposes no seed.
+The anneal seed fixes only start.xyz.
+The crest rows are single draws, so this draft states no success rate
+from them.
+CREST's cost is the energy and gradient call count.
+The driver-count budget spends the driver count.
+The matched comparison and the 30-start statistics are pending from the
+water-engrad-matched lane.
 A row succeeds when the run exits cleanly, the polished energy is
 finite, and the maximum force is at or below 0.001~Eh/bohr.
 Every final is polished with xtb at GFN2, the vtight setting, accuracy
@@ -401,12 +398,12 @@ Seed & Old counter & Energy+gradient \\
 \end{table}
 
 Anneal's ledger spends 4000 evaluations in one setting.
-The other setting spends the old counter, from 32112 to 50063
+The driver-count budget spends the old counter, from 32112 to 50063
 evaluations.
 CREST's energy and gradient totals run from 142110 to 209931.
 The comparison is that anneal ledger against those energy and gradient
 calls.
-The old-counter setting is not equal effort, because that counter
+The driver-count budget is not equal effort, because that counter
 undercounted CREST.
 
 Table~\ref{tab:hexamer-gaps} gives the polished gap on each seed.
@@ -416,7 +413,6 @@ Five seeds lie within \(1\times 10^{-7}\)~Eh on both ledgers.
 Seed 1 reaches \(1.3509\times 10^{-7}\)~Eh on the 4000-evaluation ledger
 and \(1.3505\times 10^{-7}\)~Eh on the old-counter ledger, just outside
 that threshold.
-All six seeds share the prism geometry.
 The label-free root-mean-square deviation of each polished pair is at
 most 0.00212~Å.
 
@@ -457,7 +453,6 @@ No CREST structure dissociated.
 \label{fig:water-crest}
 \end{figure}
 
-The water hexamer figure leaves the next count open.
 \todo{The counter table leaves the 16-mer count open. A count waits until both arms share one Hamiltonian.}
 \todo{Measurement is still open for the Atomic Simulation Environment panel and for the atomistic global optimization framework (AGOX). No count is added here.}
 \todo{Measurement is still open for the Wales-group basin-hopping program (GMIN) head-to-head. This draft adds no new count.}
@@ -472,7 +467,7 @@ The surface list is empty from 98 atoms upward.
 Restart on stall stays off.
 The same temperature, the same census, and the same orbit completion run
 at every size.
-The water-hexamer figure uses the six-seed comparison in the text.
+Figure~\ref{fig:water-crest} draws the 192-seed campaign.
 
 \section*{Author contributions}
 The hexamer comparison names the roles under the CRediT taxonomy.
