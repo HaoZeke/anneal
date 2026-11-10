@@ -77,7 +77,6 @@ def find_binary(root: Path, requested: str | None) -> Path:
         return path
     for rel in (
         "target/release/examples/lj_requench_xyz",
-        "../tmp/anneal-target/release/examples/lj_requench_xyz",
     ):
         path = root / rel
         if path.is_file():

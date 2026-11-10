@@ -12,6 +12,25 @@ The arm D v3 tip sha is UNFILLED. It is filled in that same later commit, still 
 
 GMIN_BEST is the patched GMIN binary whose sha256 begins b8eeddfa6d18a697 and which prints h2h_row. On seeds 3000-3029 that binary scored 19 of 30. This commit does not remeasure that block. The prediction below carries the count across.
 
+The full sha256 of that binary is
+b8eeddfa6d18a697a76d0714c0a6b356c98c1d40022bd639ac55581e119baf95.
+The executable is not in this tree. That digest is the one recorded
+for the binary that prints h2h_row and begins with this prefix.
+The shared keyword block is gmin_best.keywords. Its sha256 is
+62618de90c53478bbfe724efe527dd1fa67cd6386da0cf00cb0cc8431bd7037d.
+A scored data file is that block, a blank line, and RANSEED set to
+the seed.
+
+GMIN counts one unit per entry to POTENTIAL. In source/potential.f90
+line 221 reads "Count the number of potential calls." and line 222
+is NPCALL=NPCALL+1. Those are the old-file lines of the h2h patch
+hunk that starts at line 220. The L-BFGS quench calls POTENTIAL once
+with the gradient requested, at source/mymylbfgs.F90 line 287, the
+old-file line of the hunk that starts at line 285. One entry is one
+value-and-gradient evaluation. That is the same unit as the sentence
+at src/methods/lattice_search.rs line 779. No conversion sits between
+the two counters.
+
 Plain DLS is the in-tree dynamic lattice search, the dls reader in src/methods/lattice_search.rs. It is a separate column from arm D v3.
 
 ## Seeds
@@ -92,13 +111,26 @@ The budget is in energy calls, from PAPER_BUDGETS in scripts/elja_submit_jcc_lj.
 
 The panel uses the same array. LJ38 is line 16, 400000. LJ55 is line 17, 1000000. LJ75 is line 18, 4000000. LJ98 is line 19, 4000000.
 
-Every energy call is charged, including each per-generation atom energy call. One call is one unit of the budget. The in-tree ledger prices a partial evaluation as a fraction of a call: `Ledger::charge_frac` in src/methods/cluster_hopping.rs at line 720 accumulates that fraction and leaves a residue under one call uncharged. `Lattice::search` in src/methods/lattice_search.rs at line 1363 pays `1.0 + (m * n) / pairs` for one greedy pass. This comparison charges each of those calls as a whole call.
+Every energy call is charged, including each per-generation atom energy call. One call is one unit of the budget. The in-tree ledger prices a partial evaluation as a fraction of a call: `Ledger::charge_frac` in src/methods/cluster_hopping.rs at line 720 accumulates that fraction and leaves a residue under one call uncharged. `Lattice::search` in src/methods/lattice_search.rs at line 1388 pays `1.0 + (m * n) / pairs` for one greedy pass. This comparison charges each of those calls as a whole call.
 
 Wall time is recorded for a strictly serial run, one process at a time. The runner takes an exclusive lock and refuses to start while another scored run holds it. At the start of the process, and again at the end, the receipt holds the kernel boot_id, the uptime reading, and the lscpu listing. The start receipt and the end receipt are both kept. A run whose two boot_id values differ is not one boot, and it is not used.
 
 ## Hit rule
 
-Every code in this comparison, GMIN_BEST included, is scored with the same re-quench and the same hit rule. The re-quench is `lj_requench`, which is `WarmLbfgs::minimize` in `src/methods/warm_lbfgs.rs`, called by `lj_requench` and `lj_requench_calls` in `src/methods/lattice_search.rs`. The solver is `WarmLbfgs::default` and the iteration cap is 5000. The calls that minimization returns are the re-quench charge. They are recorded apart from the search calls. A hit is re-quenched E <= E_known + 1e-6. E_known values are the Cambridge Cluster Database minima in `e_known.tsv`. LJ38, LJ55, LJ75, and LJ98 are the lines in `examples/h2h_arm3.rs` at lines 46, 47, 48, and 49. LJ104 is -582.086642 at `examples/lj_cluster_search.rs` line 1295, so its hit line is E <= -582.086641. The test `lj_requench_brings_the_known_lj104_minimum_to_the_hit_line` re-quenches `tests/fixtures/lj104_gm.xyz` to that line.
+Every code in this comparison, GMIN_BEST included, is scored with the
+same re-quench and the same hit rule. The re-quench is `lj_requench`,
+which is `WarmLbfgs::minimize` in `src/methods/warm_lbfgs.rs`, called by
+`lj_requench` and `lj_requench_calls` in
+`src/methods/lattice_search.rs`. The solver is `WarmLbfgs::default` and
+the iteration cap is 5000. The calls that minimization returns are the
+re-quench charge. They are recorded apart from the search calls. A hit
+is re-quenched E <= E_known + 1e-6. E_known values are the Cambridge
+Cluster Database minima in `e_known.tsv`. LJ38, LJ55, LJ75, and LJ98 are
+the lines in `examples/h2h_arm3.rs` at lines 46, 47, 48, and 49. LJ104
+is -582.086642 at `examples/lj_cluster_search.rs` line 1295, so its hit
+line is E <= -582.086641. The test
+`lj_requench_brings_the_known_lj104_minimum_to_the_hit_line` re-quenches
+`tests/fixtures/lj104_gm.xyz` to that line.
 
 ## Scored rows
 
