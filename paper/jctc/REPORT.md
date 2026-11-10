@@ -124,3 +124,7 @@ It also needs `examples/fixtures/cuh2_fcc_slab.con`.
 The budget is 2500 and the seeds are 0 through 7.
 The stdout names are `cuh2_fcc_rec_0.out` through `cuh2_fcc_rec_7.out`.
 HyperQueue has to accept a work directory off the home filer.
+This machine has no gfortran.
+The rgpot checkout is not here.
+engines/librgpot_cuh2.so is not in the tree.
+CppCore/rgpot/fortran/rgpot_cuh2_capi.f90 is not committed here.
