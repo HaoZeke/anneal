@@ -140,28 +140,105 @@ That digest is
 The hexamer wall-time medians are in \texttt{logs/hexamer-walls.txt}.
 
 \section{Structure plates, sketch-maps, and landfold}
-\begin{center}
+Reference plates: \ref{fig:si-structures} and \ref{fig:si-water}.
+Sketch-map of LJ\(_{38}\): \ref{fig:lj38-sketchmap}.
+Landscape of that size: \ref{fig:lj38-landscape}.
+LJ\(_{75}\) panel: \ref{fig:lj75-landscape}.
+LJ\(_{98}\) panel: \ref{fig:lj98-landscape}.
+Fold plots: \ref{fig:occ-landfold}, \ref{fig:occ-lj38},
+\ref{fig:occ-lj75}, \ref{fig:occ-lj98}.
+
+\begin{figure}
+\centering
 \includegraphics[width=\textwidth]{si_structures.pdf}
-\end{center}
-\begin{center}
+\caption{Reference minima of the benchmark.}
+\label{fig:si-structures}
+\end{figure}
+\begin{figure}
+\centering
 \includegraphics[width=\textwidth]{si_water.pdf}
-\end{center}
-\begin{center}
-\includegraphics[width=0.48\textwidth]{lj38_sketchmap.png}\hfill
+\caption{TIP4P plates and the hexamer classes.
+The (H\(_2\)O)\(_6\) plate prints \(-197.7805\)~kJ/mol.
+That is the Cambridge Cluster Database value.
+It uses the Jorgensen TIP4P constants C6 \(= 2552.24\) and C12
+\(= 2510400\).
+anneal uses \(\varepsilon = 0.6485\)~kJ/mol and
+\(\sigma = 3.15365\)~\AA.
+Its C6 is \(2551.8252\) and its C12 is \(2510336.2\).
+Those constants give the committed \(-197.7750\)~kJ/mol reported here.}
+\label{fig:si-water}
+\end{figure}
+\begin{figure}
+\centering
+\includegraphics[width=0.48\textwidth]{lj38_sketchmap.png}
+\caption{LJ\(_{38}\) sketch-map of the sealed landmarks.
+Colour is the quenched energy.
+The 600 landmarks pool basin hopping, the recommended hop, random
+structure search and two references.
+The darkest point is the fcc minimum, which the recommended hop reaches.}
+\label{fig:lj38-sketchmap}
+\end{figure}
+\begin{figure}
+\centering
 \includegraphics[width=0.48\textwidth]{lj38_landscape.png}
-\end{center}
-\begin{center}
-\includegraphics[width=0.48\textwidth]{lj75_landscape.png}\hfill
+\caption{LJ\(_{38}\) landscape on that sketch-map.
+Colour is the energy above the global minimum.
+Basin hopping sits \(2.429\) above it.
+Random structure search sits \(3.051\) above it.}
+\label{fig:lj38-landscape}
+\end{figure}
+\begin{figure}
+\centering
+\includegraphics[width=0.48\textwidth]{lj75_landscape.png}
+\caption{LJ\(_{75}\) landscape on its sketch-map.
+Colour is the energy above the Marks decahedron.
+Basin hopping and the recommended hop both sit \(1.210\) above it.}
+\label{fig:lj75-landscape}
+\end{figure}
+\begin{figure}
+\centering
 \includegraphics[width=0.48\textwidth]{lj98_landscape.png}
-\end{center}
-\begin{center}
-\includegraphics[width=0.48\textwidth]{occupancy_landfold.pdf}\hfill
+\caption{LJ\(_{98}\) landscape on its sketch-map.
+Colour is the energy above the Leary minimum.
+The recommended hop sits \(0.022\) above it.
+Basin hopping sits \(0.119\) above it.}
+\label{fig:lj98-landscape}
+\end{figure}
+\begin{figure}
+\centering
+\includegraphics[width=0.48\textwidth]{occupancy_landfold.pdf}
+\caption{Occupancy folds of LJ\(_{38}\), LJ\(_{75}\) and LJ\(_{98}\).
+Each panel is energy above the lowest minimum, against the fold
+coordinate.}
+\label{fig:occ-landfold}
+\end{figure}
+\begin{figure}
+\centering
 \includegraphics[width=0.48\textwidth]{occupancy_landfold_lj38.pdf}
-\end{center}
-\begin{center}
-\includegraphics[width=0.48\textwidth]{occupancy_landfold_lj75.pdf}\hfill
+\caption{LJ\(_{38}\) occupancy fold.
+The arms are not marked.
+In the sealed table, the recommended hop reaches the fcc minimum and
+basin hopping stops \(2.429\) above it.}
+\label{fig:occ-lj38}
+\end{figure}
+\begin{figure}
+\centering
+\includegraphics[width=0.48\textwidth]{occupancy_landfold_lj75.pdf}
+\caption{LJ\(_{75}\) occupancy fold.
+The arms are not marked.
+In the sealed table, both arms stop \(1.210\) above the Marks
+decahedron.}
+\label{fig:occ-lj75}
+\end{figure}
+\begin{figure}
+\centering
 \includegraphics[width=0.48\textwidth]{occupancy_landfold_lj98.pdf}
-\end{center}
+\caption{LJ\(_{98}\) occupancy fold.
+The arms are not marked.
+In the sealed table, the recommended hop stops \(0.022\) above the Leary
+minimum and basin hopping \(0.119\) above it.}
+\label{fig:occ-lj98}
+\end{figure}
 
 \bibliography{refs}
 
