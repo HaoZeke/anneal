@@ -558,6 +558,7 @@ fn pick<R: Rng + ?Sized>(highest: bool, terms: &[(usize, f64)], tie: TieCut, rng
     }
 }
 
+#[cfg(test)]
 fn extreme_pool(highest: bool, terms: &[(usize, f64)]) -> Vec<usize> {
     let extreme = terms.iter().fold(terms[0].1, |held, (_, energy)| {
         if highest {
@@ -578,6 +579,7 @@ fn extreme_pool(highest: bool, terms: &[(usize, f64)]) -> Vec<usize> {
 }
 
 /// Probabilities of the first greedy exchange, keyed by site coordinates.
+#[cfg(test)]
 fn first_exchange_probabilities<R: Rng + ?Sized>(
     edlc: &[f64],
     edl: &[f64],
