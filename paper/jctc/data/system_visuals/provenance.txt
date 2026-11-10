@@ -1,595 +1,303 @@
-# The structures and maps of fig:systems, fig:landscapes,.
+# The structures and maps of fig:systems, fig:landscapes,
+# fig:disconnectivity and fig:si-structures to fig:si-water.
 
-fig:disconnectivity and fig:si-structures to fig:si-water.
+# structures/.
 
-# structures/ is copied byte for byte from tests/fixtures/ of anneal at.
+# is copied byte for byte from tests/fixtures/ of anneal at
+# anneal_commit; the test of anneal named by each check holds it to its
+# reference energy.
 
-anneal_commit; the.
+# landfold/ is the output of the.
 
-# test of anneal named by each check holds it to its reference energy.
+# occupancy_landfold_book example of that commit on the dumps each map
+# names, run from the folder of those dumps with its stdout to the json:
+# occupancy_landfold_book --label LJ<size> --dump-hist <hist> <inputs> >
+# <json> The water folds are the same command on the hexamer dumps of
+# each engine; they collapse, since the packing book reads every atom
+# alike, and no map draws them.
 
-landfold/ is the.
+# ccd/ is the Cambridge Cluster Database.
 
-# output of the occupancy_landfold_book example of that commit on the.
+# at the paths of its URLs, ccd/TIP4P/ under ccd_tip4p and the rest
+# under ccd_base, fetched on ccd_fetched; references.csv gives the
+# published energy of each reference structure as the table of the
+# database at the URL of its row prints it, and system_visuals.py holds
+# each structure to it by the check of its class.
 
-dumps each map names,.
+# sketchmap/ holds the.
 
-# run from the folder of those dumps with its stdout to the json:.
+# reference minima that campaign_landscape.py of the paper at
+# sketchmap_of_record pinned, copied byte for byte from scripts/ of that
+# commit, and the projection of each size that sketchmap_run writes,
+# with the binaries of sketchmap_build.
 
-# occupancy_landfold_book --label LJ<size> --dump-hist <hist>.
+# Since the build writes its.
 
-<inputs> > <json>.
+# folder into the debug information, the digests of the binaries hold
+# for a build in sketchmap_build_dir.
 
-# The water folds are the same command on the hexamer dumps of each.
+anneal_repository https://github.com/HaoZeke/anneal
 
-engine; they collapse,.
+anneal_commit 36086e988c5a71c156ffcbde152bf321a6f5ef25
 
-# since the packing book reads every atom alike, and no map draws them.
+anneal_build CC=gcc CXX=g++ cargo +1.99.1 build --release --features featomic --example occupancy_landfold_book
 
-# ccd/ is the Cambridge Cluster Database at the paths of its URLs,.
+anneal_toolchain rustc 1.99.1 (58cf8f9c3 2026-10-13); gcc 13.3.0
 
-ccd/TIP4P/ under ccd_tip4p.
+occupancy_landfold_book_sha256 da04c9b4f7b0d77fcf1ccc278108fa0fb2fe54c43882bae5e3818c0751c24c0f
 
-# and the rest under ccd_base, fetched on ccd_fetched; references.csv.
+lj_check the 12-6 energy of the coordinates of each lj*.xyz is the e= of its header, to 1e-5 epsilon; system_visuals.py recomputes it
 
-gives the published energy of each.
+tip4p_check cargo test --release --lib gmin_tip4p at anneal_commit: cartesian_minima_match_the_reference_energies holds each tip4p-*.xyz to the published energy of its header
 
-# reference structure as the table of the database at the URL of its.
+tip4p_source the Cambridge Cluster Database geometries of (H2O)10, (H2O)15 and (H2O)20, added to anneal in 8a1bbf6e, with the published energy in kJ/mol in each header
 
-row prints it, and.
+landfold_lj38_inputs landscapes_7695255/lj38_bh_s0.min landscapes_7695255/lj38_recommended_s0.min landscapes_7695255/lj38_rss_s0.min
 
-# system_visuals.py holds each structure to it by the check of its.
+landfold_lj75_inputs landscapes_7695255/lj75_bh_s0.min landscapes_7695255/lj75_recommended_s0.min
 
-class.
+landfold_lj98_inputs landscapes_7695255/lj98_bh_s0.min landscapes_7695255/lj98_recommended_s0.min
 
-# sketchmap/ holds the reference minima that campaign_landscape.py of.
+landfold_w6_gfn2_inputs w6gofee4k/rec4k_w6_*.min
 
-the paper at.
+landfold_w6_pbe_inputs w6nwpbe/w6_nwpbe_*.min
 
-# sketchmap_of_record pinned, copied byte for byte from scripts/ of.
+renderer xyzrender 0.3.8, --config paton -t --no-orient; water --nci; one-species style thin, sticks under 1.2 sigma, -a 1.6 -b 0.6 --bond-color #7a7a7a --fog -F 1.0 --grad --mol-color #1E88E5; cairosvg 2.9.1; pymupdf places the pictures, all vector
 
-that commit, and the.
+ccd_base https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/
 
-# projection of each size that sketchmap_run writes, with the binaries.
+ccd_tip4p https://www-wales.ch.cam.ac.uk/~wales/CCD/
 
-of sketchmap_build.
+ccd_fetched 27 October 2026
 
-# Since the build writes its folder into the debug information, the.
+lj_ccd_check the 12-6 energy of the coordinates of each LJ file is its energy in references.csv, to 1e-5 epsilon
 
-digests of the.
+morse_check each Morse file, stored at the range rho_0 of its first line, relaxed by L-BFGS-B at the range of its row (gtol 1e-10, ftol 1e-15) is at its energy in references.csv, to 1e-5 epsilon
 
-# binaries hold for a build in sketchmap_build_dir.
+sutton_chen_check the Sutton--Chen energy of each Pt file, at the epsilon, c, a, n, m of its first line, 1, 34.408, 1, 10, 8, is its energy in references.csv, to 1e-4 epsilon
 
-anneal_repository https://github.com/HaoZeke/anneal.
+tip4p_ccd_check the TIP4P energy of GMIN DEFTIP4 of each (H2O)n file is within 5e-3 kJ/mol of its energy in references.csv and no more than 1e-3 above it, the criterion of cartesian_minima_match_the_reference_energies at anneal_commit
 
-anneal_commit 36086e988c5a71c156ffcbde152bf321a6f5ef25.
+sketchmap_repository https://github.com/lab-cosmo/sketchmap
 
-anneal_build CC=gcc CXX=g++ cargo +1.99.1 build --release --features.
+sketchmap_commit c2871db187f4a60377e7727af781da6c6c3426cb
 
-featomic --example occupancy_landfold_book.
+sketchmap_patch scripts/sketchmap-c2871db-gcc12.patch f63018125549bdb7a423339b8cf831cff704761a7526656ca5958f0494f79f18
 
-anneal_toolchain rustc 1.99.1 (58cf8f9c3 2026-10-13); gcc 13.3.0.
+sketchmap_build scripts/make_sketchmap.sh scratch/smbuild: make LLAPACK="-l:liblapack.so.3 -l:libblas.so.3" with g++ 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1), LAPACK and BLAS 3.12.0 (Ubuntu 3.12.0-3build1.1)
 
-occupancy_landfold_book_sha256.
+sketchmap_build_dir scratch/smbuild
 
-da04c9b4f7b0d77fcf1ccc278108fa0fb2fe54c43882bae5e3818c0751c24c0f.
+sketchmap_dimlandmark_sha256 a9dba1ee272135bff860688655468ec919aa58693cb189746e87dd9ba6d96997
 
-lj_check the 12-6 energy of the coordinates of each lj*.xyz is the e=.
+sketchmap_dimred_sha256 7c60556168b1d345587d6b95d108f0d10349c08ee54de644dea49f4387031056
 
-of its header, to 1e-5 epsilon; system_visuals.py recomputes it.
+sketchmap_run python3 scripts/sketchmap_landscapes.py --sketchmap-bin scratch/smbuild/bin --lapack-lib /usr/lib/x86_64-linux-gnu data/system_visuals/sketchmap
 
-tip4p_check cargo test --release --lib gmin_tip4p at anneal_commit:.
+sketchmap_chemparseplot chemparseplot 1.11.0, wheel sha256 583a03d43fb95be499e325b774a85a490c2ade7e686fae630db75308f3b7b5c5
 
-cartesian_minima_match_the_reference_energies holds each tip4p-*.xyz to.
+sketchmap_of_record 028d995a922f25834e25cdb42e96a005f83d3b62 campaign_landscape.py sha256 c1c20aa9ccc5aa7dbc685d2e90a31b92379d3e6aa71c4b5cee36628db20725c0, its renders committed in 490e18b; cap 800, landmarks 600, rng seed 7, cn descriptor at cutoff 1.5
 
-the published energy of its header.
+sketchmap_lj38_sigma 3.0911615219459123
 
-tip4p_source the Cambridge Cluster Database geometries of (H2O)10,.
+sketchmap_lj75_sigma 3.521670596450438
 
-(H2O)15 and (H2O)20, added to anneal in 8a1bbf6e, with the published.
+sketchmap_lj98_sigma 3.76653045424369
 
-energy in kJ/mol in each header.
+020cc52f4b0b41719bf08965e6f394a4d103ac7dbe89f03d0b48017799b65f61 system_visuals/structures/lj104_gm.xyz
 
-landfold_lj38_inputs landscapes_7695255/lj38_bh_s0.min.
+61f5d636d5fc2c66e76249ef3b459c6502b49713b4416f1118340258860182c7 system_visuals/structures/lj38_fcc.xyz
 
-landscapes_7695255/lj38_recommended_s0.min.
+a8e8b3f739984939982e3af6b590981a0dbc93df4fd119a506d6ea07bac70a98 system_visuals/structures/lj75_marks.xyz
 
-landscapes_7695255/lj38_rss_s0.min.
+c9c304c19b5050a68ad6711eb70d6563db29fff10726f8dae7ad4b967628d991 system_visuals/structures/lj98_gm.xyz
 
-landfold_lj75_inputs landscapes_7695255/lj75_bh_s0.min.
+d4cd7c5a6e19e8a08bf21e32bce52b01ef54513a46d15e3008a5e81ab6492349 system_visuals/structures/tip4p-10.xyz
 
-landscapes_7695255/lj75_recommended_s0.min.
+c3505565a759e0fa555e9a44fcc96d32d685083fa55dae3510969c1f283563d8 system_visuals/structures/tip4p-15.xyz
 
-landfold_lj98_inputs landscapes_7695255/lj98_bh_s0.min.
+0f29bf394942df699e08955406642540ee5c31931239ded9cea82a289c1c3d8c system_visuals/structures/tip4p-20.xyz
 
-landscapes_7695255/lj98_recommended_s0.min.
+5c1117cc545215138146736593da7fd81ad8ec8610a256b0e98544c7e86ebc12 system_visuals/references.csv
 
-landfold_w6_gfn2_inputs w6gofee4k/rec4k_w6_*.min.
+f0ee91322d28b2f3a4522e0fd1766085bf7d41144f245485d92afefab10d52ab system_visuals/ccd/LJ/points/102
 
-landfold_w6_pbe_inputs w6nwpbe/w6_nwpbe_*.min.
+325f33ceea62c3ad2b1e575ddac2c99e7e13ab2150b2c0196c0a4079b4ec8998 system_visuals/ccd/LJ/points/103
 
-renderer xyzrender 0.3.8, --config paton -t --no-orient; water --nci;.
+6397b7e9c06f5da94dbfcefe80d122ba068097517ef14454fdf2f2f31699d416 system_visuals/ccd/LJ/points/13
 
-one-species style thin, sticks under 1.2 sigma, -a 1.6 -b 0.6.
+b1f9e6801b6d83f1044325698fb844886f31c5f5417c4fd7d74dc2f1ac523e40 system_visuals/ccd/LJ/points/150
 
---bond-color #7a7a7a --fog -F 1.0 --grad --mol-color #1E88E5; cairosvg.
+2b5e87a6a0753dc93b27cb45f5c2dd2601e242c481636d27ac1c360a1ad84026 system_visuals/ccd/LJ/points/26
 
-2.9.1; pymupdf places the pictures, all vector.
+45549b4bd8fa82b4a61f9a2ad6343e934448b3abb28f7f897b28a60d908e622f system_visuals/ccd/LJ/points/31
 
-ccd_base https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/.
+43f5c2568c7de4fc03273427d4c2772a9104e727f22a7dfb60c87d2d333be7fa system_visuals/ccd/LJ/points/55
 
-ccd_tip4p https://www-wales.ch.cam.ac.uk/~wales/CCD/.
+b5602f9024fa6a2593b9a7c6b6dd053d199bf215f3c9ae98a91383422304f0d8 system_visuals/ccd/LJ/points/76
 
-ccd_fetched 27 October 2026.
+2bb2506e94696f66661d590bd552f28098a3ef47a5504f4b78a2fdea93e4c812 system_visuals/ccd/LJ/points/77
 
-lj_ccd_check the 12-6 energy of the coordinates of each LJ file is its.
+762b719a8479005473e268bc8d3fdecb90d542c326df392dbc83f01b158d1f30 system_visuals/ccd/Morse/points/13A
 
-energy in references.csv, to 1e-5 epsilon.
+19c9480ab9278fe66411133de4c1da15ffc0ebdfa0781b9dd596eff8c5f581ac system_visuals/ccd/Morse/points/38A
 
-morse_check each Morse file, stored at the range rho_0 of its first.
+9a586466c319e70db6310b0e580777e4fe17511573e352b88dcc581a57972484 system_visuals/ccd/Morse/points/38D
 
-line, relaxed by L-BFGS-B at the range of its row (gtol 1e-10, ftol.
+787f3782e2b742577ebb705b8101121bf531e3caa933da4971fa2d24e2ba2374 system_visuals/ccd/Morse/points/38E
 
-1e-15) is at its energy in references.csv, to 1e-5 epsilon.
+a9d5bfd98079ad4e60d248c6184eb91917039b66c1e4cbf2933f5e0127d31736 system_visuals/ccd/Morse/points/55A
 
-sutton_chen_check the Sutton--Chen energy of each Pt file, at the.
+024c4ac51d7fe0a08f8f715998ebc20eed2bbbd542e262061073a421de3e8321 system_visuals/ccd/Morse/points/55B
 
-epsilon, c, a, n, m of its first line, 1, 34.408, 1, 10, 8, is its.
+6f5b9c7d31b3f80c891b4a41a76c98a4f3dda8647eb97944bae2f791c32cb670 system_visuals/ccd/Morse/points/55C
 
-energy in references.csv, to 1e-4 epsilon.
+204468588f65d8f569082c1ecc7ab3edff1b9512d9007d7076ab59e9580c0c8a system_visuals/ccd/Morse/points/80A
 
-tip4p_ccd_check the TIP4P energy of GMIN DEFTIP4 of each (H2O)n file is.
+26c4f969b8eaa1be78b60a17fcf54ea6ee7f2542dfd56092fc6518dcb6b94092 system_visuals/ccd/Morse/points/80B
 
-within 5e-3 kJ/mol of its energy in references.csv and no more than.
+29c591a952c4a11abba3fb5197af1fc6bc297bcdd35d7c4f353bb5b98fa195c3 system_visuals/ccd/Morse/points/80D
 
-1e-3 above it, the criterion of.
+e8ad96e0dce2b7a91dd7a549911a6b935c3990db785aa4b9a8174fa087091ec6 system_visuals/ccd/Morse/points/80G
 
-cartesian_minima_match_the_reference_energies at anneal_commit.
+9b8b14dcc415a3dc0af43f834bd7af9119c9dd2b0264ba7df0dd247ac5855395 system_visuals/ccd/SC/10-8/points/38
 
-sketchmap_repository https://github.com/lab-cosmo/sketchmap.
+c43d37e3dcfdd13b3f8fa568aa8bc3abcc0377031243bbfe42382f3c71d890d5 system_visuals/ccd/SC/10-8/points/75
 
-sketchmap_commit c2871db187f4a60377e7727af781da6c6c3426cb.
+15ffe278e140cb5c146733360ee744eb6f02679904b4410697fa329ef4ebc63a system_visuals/ccd/TIP4P/xyz/TIP4P-11.xyz
 
-sketchmap_patch scripts/sketchmap-c2871db-gcc12.patch.
+3b8ba517dad42bc8a69be3d156819beb1c5b538f336e1fa48c60d261ce0b0b3c system_visuals/ccd/TIP4P/xyz/TIP4P-12.xyz
 
-f63018125549bdb7a423339b8cf831cff704761a7526656ca5958f0494f79f18.
+123d55e0a1cfe8ee785c89dbbd1f9d48d4d0eb81c21153314724ae2c4b90c046 system_visuals/ccd/TIP4P/xyz/TIP4P-13.xyz
 
-sketchmap_build scripts/make_sketchmap.sh scratch/smbuild: make.
+e0d9390e1ab4bdcad42a52586188b952b12a02a6697d0ef9a2ae4f3c5b77b5c0 system_visuals/ccd/TIP4P/xyz/TIP4P-14.xyz
 
-LLAPACK="-l:liblapack.so.3 -l:libblas.so.3" with g++ 13.3.0 (Ubuntu.
+5aedbc79d9acba4efe5bbea1e8fa1a98bc1b7b1be0c79828bcf2ec6cbd03b22a system_visuals/ccd/TIP4P/xyz/TIP4P-16.xyz
 
-13.3.0-6ubuntu2~24.04.1), LAPACK and BLAS 3.12.0 (Ubuntu.
+55888f67a78824efeab6fb11b6b81fe257497ec23fa7708522316551dec423dc system_visuals/ccd/TIP4P/xyz/TIP4P-17.xyz
 
-3.12.0-3build1.1).
+4319711e5fba083c827ee7fa54305b8b454dfb09712847beaad52aa3c32073ec system_visuals/ccd/TIP4P/xyz/TIP4P-18.xyz
 
-sketchmap_build_dir scratch/smbuild.
+19ebb7477b7c040f40dc0073a23f31361da8f827f4047cf6dbadd31ff3113289 system_visuals/ccd/TIP4P/xyz/TIP4P-19.xyz
 
-sketchmap_dimlandmark_sha256.
+1ec2b6312a4942e827f91dd9c0faeeb622d7befa5a8816145ffc7b114271d2d0 system_visuals/ccd/TIP4P/xyz/TIP4P-21.xyz
 
-a9dba1ee272135bff860688655468ec919aa58693cb189746e87dd9ba6d96997.
+ceab821bf48013cb225b4bf65c5733aecb210b1d4d8b309898cab5d9d927cc87 system_visuals/ccd/TIP4P/xyz/TIP4P-6.xyz
 
-sketchmap_dimred_sha256.
+5df92e30c0c931e534dff288a63ca2461cd20e2fec44abc66cf34ed2fe0f2764 system_visuals/ccd/TIP4P/xyz/TIP4P-7.xyz
 
-7c60556168b1d345587d6b95d108f0d10349c08ee54de644dea49f4387031056.
+ad3dfe18c10ba6428c4744424d3a0b982dd1bf082c567a801a8bd285fef855fb system_visuals/ccd/TIP4P/xyz/TIP4P-8.xyz
 
-sketchmap_run python3 scripts/sketchmap_landscapes.py --sketchmap-bin.
+0985e07b9344aef255aecd016fe923903d7085cb6e5ee5e5f229b28a61c14a81 system_visuals/ccd/TIP4P/xyz/TIP4P-9.xyz
 
-scratch/smbuild/bin --lapack-lib /usr/lib/x86_64-linux-gnu.
+032cb8f985bbb6da0ab8b327dc736278e1c4fc0aa8c20e43407894b027bf9992 system_visuals/sketchmap/lj38.csv
 
-data/system_visuals/sketchmap.
+511afb6bc5233d1bc885de790657a7026592dcb98f9af5aa16e06bedaac1e6e0 system_visuals/sketchmap/lj75.csv
 
-sketchmap_chemparseplot chemparseplot 1.11.0, wheel sha256.
+d0ad7666e3d5a973de766c8c578851845d66b1e5f09391e23dda17df1f3daaf2 system_visuals/sketchmap/lj98.csv
 
-583a03d43fb95be499e325b774a85a490c2ade7e686fae630db75308f3b7b5c5.
+0f6d0c28c4bd2144344ae8e5f7c6487a5a38c1ddfd27b24a4c5e74740acf71a1 system_visuals/sketchmap/ref_lj38_fcc.min
 
-sketchmap_of_record 028d995a922f25834e25cdb42e96a005f83d3b62.
+65cfa70e8d610e1ec0022fc31a6ed77a716901f8a29956c337bafc8a65d13b5f system_visuals/sketchmap/ref_lj38_ico.min
 
-campaign_landscape.py sha256.
+6d3ef526bc90b401fea70e6189b7d16b89b28e5220fe9751ff15facceb71470f system_visuals/sketchmap/ref_lj75_marks.min
 
-c1c20aa9ccc5aa7dbc685d2e90a31b92379d3e6aa71c4b5cee36628db20725c0, its.
+bf3ead63ce7ba0a6f66c484260bc0493478d156fc74de4931acdd478773cf806 system_visuals/sketchmap/ref_lj98_tetra.min
 
-renders committed in 490e18b; cap 800, landmarks 600, rng seed 7, cn.
+b9ed8394b6bc0f5306d7506b849a876364237b262ee757162289bb0325fe6393 system_visuals/landfold/lj38.json
 
-descriptor at cutoff 1.5.
+9c384673b2b1fc0d16dad9542abb06ed3492e018eb2c946a9ad0e78483f56b51 system_visuals/landfold/lj38_hist.txt
 
-sketchmap_lj38_sigma 3.0911615219459123.
+83717375a73dc6ddb4682c2bea83796d9782aaf2866d1a9f8469104bc09fc049 system_visuals/landfold/lj75.json
 
-sketchmap_lj75_sigma 3.521670596450438.
+f30d19bb8db232a6a5d217ce2ab6e4a82eb6ea118fd74f6282c2dfd1d7ef27a1 system_visuals/landfold/lj75_hist.txt
 
-sketchmap_lj98_sigma 3.76653045424369.
+b499cbf6a8e0c641ede637d41389da86954eced26b35cb731e41c51b625af924 system_visuals/landfold/lj98.json
 
-020cc52f4b0b41719bf08965e6f394a4d103ac7dbe89f03d0b48017799b65f61.
+bcc51bd746cc39bca02f03b99bc92c747b81930a99c11dc209f23d8b404a72e4 system_visuals/landfold/lj98_hist.txt
 
-system_visuals/structures/lj104_gm.xyz.
+6c472455130f72f2bb81f76c516b04da1dd529270ee44082b2e4a1d8dd8ff4fa system_visuals/landfold/w6_gfn2.json
 
-61f5d636d5fc2c66e76249ef3b459c6502b49713b4416f1118340258860182c7.
+2ba4b15c70ae0ac8dda6f64200488e17672f934b6a86b48521139f964fba5e5e system_visuals/landfold/w6_pbe.json
 
-system_visuals/structures/lj38_fcc.xyz.
+c3af87a0c1de98d13c32be9e08e7d895026f3cbff61984205783f2a67cd6af50 landscapes_7695255/lj38_bh_s0.min
 
-a8e8b3f739984939982e3af6b590981a0dbc93df4fd119a506d6ea07bac70a98.
+dbb28bf1b8d64b3f0c4cd149b7eb180b6f524be470338bdc8b04ad82d811ccd1 landscapes_7695255/lj38_recommended_s0.min
 
-system_visuals/structures/lj75_marks.xyz.
+fa0884621e988cbe3c50a7b39222b65ea8c8aa60363e056ac815d05478ce1529 landscapes_7695255/lj38_rss_s0.min
 
-c9c304c19b5050a68ad6711eb70d6563db29fff10726f8dae7ad4b967628d991.
+d4141a0e8402e955bebbfa24094f195b8b593f6e9fb0cec3b14e80df54991c16 landscapes_7695255/lj75_bh_s0.min
 
-system_visuals/structures/lj98_gm.xyz.
+139040d8ff2555161adec4ae672a025066309aca34f914403265febc62da842d landscapes_7695255/lj75_recommended_s0.min
 
-d4cd7c5a6e19e8a08bf21e32bce52b01ef54513a46d15e3008a5e81ab6492349.
+0605021a36642dd155ad21d36391308167c4dbf15ecd2b8a0dfa95c8aba998de landscapes_7695255/lj98_bh_s0.min
 
-system_visuals/structures/tip4p-10.xyz.
+b5a51ebe081d3c56b0aef547c023a5534085250170c628e947d7ac3e1f4529df landscapes_7695255/lj98_recommended_s0.min
 
-c3505565a759e0fa555e9a44fcc96d32d685083fa55dae3510969c1f283563d8.
+362705310242801dd2bab07b5b1317a49579f742f02e78d809d2e89fd14d346c hq_sci_h2o6/best_h2o6_eindir_s0.xyz
 
-system_visuals/structures/tip4p-15.xyz.
+295fc09cc779b2ebdc8ac407e818247fa8dd2805b2c35e5da9dc58f0d747034a hq_sci_h2o6/best_h2o6_eindir_s1.xyz
 
-0f29bf394942df699e08955406642540ee5c31931239ded9cea82a289c1c3d8c.
+7514315d4caef9014c889cc56ae12a34ebc3f558d64d4090b4975e3b7e6ac0bc hq_sci_h2o6/best_h2o6_eindir_s2.xyz
 
-system_visuals/structures/tip4p-20.xyz.
+2558d61c395d26ae40aadd484d9d4ba1674550e063b893b5b091ba52b6c84980 hq_sci_h2o6/best_h2o6_eindir_s3.xyz
 
-5c1117cc545215138146736593da7fd81ad8ec8610a256b0e98544c7e86ebc12.
+b7b691d39de9ed5d6280b194e87c51adc35eb2a40377dfdaa510018d46ed460a hq_sci_h2o6/best_h2o6_eindir_s4.xyz
 
-system_visuals/references.csv.
+1ebb7c8b0f00a153549bab48f70f2734fcaacb47c7f5f2da03309302fc2477e5 hq_sci_h2o6/best_h2o6_eindir_s5.xyz
 
-f0ee91322d28b2f3a4522e0fd1766085bf7d41144f245485d92afefab10d52ab.
+7d7d57e6ca3392c95eaa2932e72b549d8d6ae7b190b11b0255199d106a3d147c hq_sci_h2o6/best_h2o6_eindir_s6.xyz
 
-system_visuals/ccd/LJ/points/102.
+a4aec2b469ed157c7123e317f0e8bdcfa53e8bfc830ab430cf471d0c79f521c4 hq_sci_h2o6/best_h2o6_eindir_s7.xyz
 
-325f33ceea62c3ad2b1e575ddac2c99e7e13ab2150b2c0196c0a4079b4ec8998.
+405ab925d418aea7bbddae998d44ee4e52f9a05b7dc5bc3cb6ba31c7b4789659 w6gofee4k/rec4k_w6_0.min
 
-system_visuals/ccd/LJ/points/103.
+0e5c0a605a3d42741d70eaf18682de21c8780c8e87e79d79b2edfbca07520503 w6gofee4k/rec4k_w6_1.min
 
-6397b7e9c06f5da94dbfcefe80d122ba068097517ef14454fdf2f2f31699d416.
+5c9baa0a44b2e0a176e85850aff8858a798e8166018ceedac7a95ac8ef4e1034 w6gofee4k/rec4k_w6_2.min
 
-system_visuals/ccd/LJ/points/13.
+2da60744d9d172363394512fcb253c547c0a118be972a0d1aec2b1390ca9400f w6gofee4k/rec4k_w6_3.min
 
-b1f9e6801b6d83f1044325698fb844886f31c5f5417c4fd7d74dc2f1ac523e40.
+64076f2beb57e96d175a6f25cee5f959a0cfef0adf94f88df16ce8dd01ff45d3 w6gofee4k/rec4k_w6_4.min
 
-system_visuals/ccd/LJ/points/150.
+71e30bee488226874ce8711fd7edf87b17a5454835a53a00578b33775f2d322a w6gofee4k/rec4k_w6_5.min
 
-2b5e87a6a0753dc93b27cb45f5c2dd2601e242c481636d27ac1c360a1ad84026.
+b0645f3b3bbbd98d36a418d264428cab6e6d4915d15cb2889150bb540e5b93a2 w6gofee4k/rec4k_w6_6.min
 
-system_visuals/ccd/LJ/points/26.
+8721bebe756f2b5b1951d72b6bd1224ac81c50ae37c71d1fc5420fd7068ddcbe w6gofee4k/rec4k_w6_7.min
 
-45549b4bd8fa82b4a61f9a2ad6343e934448b3abb28f7f897b28a60d908e622f.
+ba3335b94d796e86aa9d3f6dcb5216d9e57bf2724dd1723e837e22d9ea053eba w6gofee4k/rec4k_w6_8.min
 
-system_visuals/ccd/LJ/points/31.
+8a996e94ed065332b05182e8a4cc5146a32933cea96f8fb39f2747f14926512e w6gofee4k/rec4k_w6_9.min
 
-43f5c2568c7de4fc03273427d4c2772a9104e727f22a7dfb60c87d2d333be7fa.
+4c9f19c1ac4ea2ee043d7d72325da933adb09673a97403840118c1a537a91a55 w6nwpbe/best_h2o6_rgpot_s0.xyz
 
-system_visuals/ccd/LJ/points/55.
+e4851785e23d6b2072c86d380a003b582aa2b203c4d4c1143257cf5596883d75 w6nwpbe/best_h2o6_rgpot_s1.xyz
 
-b5602f9024fa6a2593b9a7c6b6dd053d199bf215f3c9ae98a91383422304f0d8.
+8a147e216c59e4ffacbef7686bd93e5bf4e97448e31aa76418fc6e35de2f1dfd w6nwpbe/best_h2o6_rgpot_s2.xyz
 
-system_visuals/ccd/LJ/points/76.
+eb477e859adc6381dd7dd46565fd4760263a3ca30ea98106e05f55a4dac628a2 w6nwpbe/best_h2o6_rgpot_s3.xyz
 
-2bb2506e94696f66661d590bd552f28098a3ef47a5504f4b78a2fdea93e4c812.
+dad4b9b55aae08afc23b9ab7de351a4cf6b1064bbe7dba1c3a9c0a28ec571cc8 w6nwpbe/best_h2o6_rgpot_s4.xyz
 
-system_visuals/ccd/LJ/points/77.
+f14088e9aa650157dba6f3d88b834a7ae427638a5d6f1677af4f8a0693df3b3d w6nwpbe/best_h2o6_rgpot_s5.xyz
 
-762b719a8479005473e268bc8d3fdecb90d542c326df392dbc83f01b158d1f30.
+44b1343bf1f60290cc490897464400af5037e1d275fa13ee776981e728474d5c w6nwpbe/best_h2o6_rgpot_s6.xyz
 
-system_visuals/ccd/Morse/points/13A.
+bcefeede2abc6c3cf140f7ca1c2ef0a76d37b546c3951dc8d5de99230c4eff46 w6nwpbe/best_h2o6_rgpot_s7.xyz
 
-19c9480ab9278fe66411133de4c1da15ffc0ebdfa0781b9dd596eff8c5f581ac.
+44688c454733f07fe7e37a3ed05abc54d115579aedb7f1d820f83ca925ea6884 w6nwpbe/w6_nwpbe_0.min
 
-system_visuals/ccd/Morse/points/38A.
+a9b6f8fc105ba8c3f94ca08c2a5dad2ebb2b3e0534b42dbb19b655509dc0153b w6nwpbe/w6_nwpbe_1.min
 
-9a586466c319e70db6310b0e580777e4fe17511573e352b88dcc581a57972484.
+19eae3f2a4963610a857bd7b9c216b0a0e589349c8d2fa45150258aed099d7d5 w6nwpbe/w6_nwpbe_2.min
 
-system_visuals/ccd/Morse/points/38D.
+77a504875756ab6dda437eadc1923756b80fbc0262bb71c36ad2bdcdd7834383 w6nwpbe/w6_nwpbe_3.min
 
-787f3782e2b742577ebb705b8101121bf531e3caa933da4971fa2d24e2ba2374.
+885fb2ee4e27c296aef933f3b0aea6a679a267e1957d440578f789641c7cade0 w6nwpbe/w6_nwpbe_4.min
 
-system_visuals/ccd/Morse/points/38E.
+0967a805d034d05eb94aa0ac1935835938b57764c826cd3c0fa7610cb7fe9a90 w6nwpbe/w6_nwpbe_5.min
 
-a9d5bfd98079ad4e60d248c6184eb91917039b66c1e4cbf2933f5e0127d31736.
+fdceb9ee9fed1a5a23ff4fa6d5b9230d9db10204b524311117e46ba5d2198b93 w6nwpbe/w6_nwpbe_6.min
 
-system_visuals/ccd/Morse/points/55A.
-
-024c4ac51d7fe0a08f8f715998ebc20eed2bbbd542e262061073a421de3e8321.
-
-system_visuals/ccd/Morse/points/55B.
-
-6f5b9c7d31b3f80c891b4a41a76c98a4f3dda8647eb97944bae2f791c32cb670.
-
-system_visuals/ccd/Morse/points/55C.
-
-204468588f65d8f569082c1ecc7ab3edff1b9512d9007d7076ab59e9580c0c8a.
-
-system_visuals/ccd/Morse/points/80A.
-
-26c4f969b8eaa1be78b60a17fcf54ea6ee7f2542dfd56092fc6518dcb6b94092.
-
-system_visuals/ccd/Morse/points/80B.
-
-29c591a952c4a11abba3fb5197af1fc6bc297bcdd35d7c4f353bb5b98fa195c3.
-
-system_visuals/ccd/Morse/points/80D.
-
-e8ad96e0dce2b7a91dd7a549911a6b935c3990db785aa4b9a8174fa087091ec6.
-
-system_visuals/ccd/Morse/points/80G.
-
-9b8b14dcc415a3dc0af43f834bd7af9119c9dd2b0264ba7df0dd247ac5855395.
-
-system_visuals/ccd/SC/10-8/points/38.
-
-c43d37e3dcfdd13b3f8fa568aa8bc3abcc0377031243bbfe42382f3c71d890d5.
-
-system_visuals/ccd/SC/10-8/points/75.
-
-15ffe278e140cb5c146733360ee744eb6f02679904b4410697fa329ef4ebc63a.
-
-system_visuals/ccd/TIP4P/xyz/TIP4P-11.xyz.
-
-3b8ba517dad42bc8a69be3d156819beb1c5b538f336e1fa48c60d261ce0b0b3c.
-
-system_visuals/ccd/TIP4P/xyz/TIP4P-12.xyz.
-
-123d55e0a1cfe8ee785c89dbbd1f9d48d4d0eb81c21153314724ae2c4b90c046.
-
-system_visuals/ccd/TIP4P/xyz/TIP4P-13.xyz.
-
-e0d9390e1ab4bdcad42a52586188b952b12a02a6697d0ef9a2ae4f3c5b77b5c0.
-
-system_visuals/ccd/TIP4P/xyz/TIP4P-14.xyz.
-
-5aedbc79d9acba4efe5bbea1e8fa1a98bc1b7b1be0c79828bcf2ec6cbd03b22a.
-
-system_visuals/ccd/TIP4P/xyz/TIP4P-16.xyz.
-
-55888f67a78824efeab6fb11b6b81fe257497ec23fa7708522316551dec423dc.
-
-system_visuals/ccd/TIP4P/xyz/TIP4P-17.xyz.
-
-4319711e5fba083c827ee7fa54305b8b454dfb09712847beaad52aa3c32073ec.
-
-system_visuals/ccd/TIP4P/xyz/TIP4P-18.xyz.
-
-19ebb7477b7c040f40dc0073a23f31361da8f827f4047cf6dbadd31ff3113289.
-
-system_visuals/ccd/TIP4P/xyz/TIP4P-19.xyz.
-
-1ec2b6312a4942e827f91dd9c0faeeb622d7befa5a8816145ffc7b114271d2d0.
-
-system_visuals/ccd/TIP4P/xyz/TIP4P-21.xyz.
-
-ceab821bf48013cb225b4bf65c5733aecb210b1d4d8b309898cab5d9d927cc87.
-
-system_visuals/ccd/TIP4P/xyz/TIP4P-6.xyz.
-
-5df92e30c0c931e534dff288a63ca2461cd20e2fec44abc66cf34ed2fe0f2764.
-
-system_visuals/ccd/TIP4P/xyz/TIP4P-7.xyz.
-
-ad3dfe18c10ba6428c4744424d3a0b982dd1bf082c567a801a8bd285fef855fb.
-
-system_visuals/ccd/TIP4P/xyz/TIP4P-8.xyz.
-
-0985e07b9344aef255aecd016fe923903d7085cb6e5ee5e5f229b28a61c14a81.
-
-system_visuals/ccd/TIP4P/xyz/TIP4P-9.xyz.
-
-032cb8f985bbb6da0ab8b327dc736278e1c4fc0aa8c20e43407894b027bf9992.
-
-system_visuals/sketchmap/lj38.csv.
-
-511afb6bc5233d1bc885de790657a7026592dcb98f9af5aa16e06bedaac1e6e0.
-
-system_visuals/sketchmap/lj75.csv.
-
-d0ad7666e3d5a973de766c8c578851845d66b1e5f09391e23dda17df1f3daaf2.
-
-system_visuals/sketchmap/lj98.csv.
-
-0f6d0c28c4bd2144344ae8e5f7c6487a5a38c1ddfd27b24a4c5e74740acf71a1.
-
-system_visuals/sketchmap/ref_lj38_fcc.min.
-
-65cfa70e8d610e1ec0022fc31a6ed77a716901f8a29956c337bafc8a65d13b5f.
-
-system_visuals/sketchmap/ref_lj38_ico.min.
-
-6d3ef526bc90b401fea70e6189b7d16b89b28e5220fe9751ff15facceb71470f.
-
-system_visuals/sketchmap/ref_lj75_marks.min.
-
-bf3ead63ce7ba0a6f66c484260bc0493478d156fc74de4931acdd478773cf806.
-
-system_visuals/sketchmap/ref_lj98_tetra.min.
-
-b9ed8394b6bc0f5306d7506b849a876364237b262ee757162289bb0325fe6393.
-
-system_visuals/landfold/lj38.json.
-
-9c384673b2b1fc0d16dad9542abb06ed3492e018eb2c946a9ad0e78483f56b51.
-
-system_visuals/landfold/lj38_hist.txt.
-
-83717375a73dc6ddb4682c2bea83796d9782aaf2866d1a9f8469104bc09fc049.
-
-system_visuals/landfold/lj75.json.
-
-f30d19bb8db232a6a5d217ce2ab6e4a82eb6ea118fd74f6282c2dfd1d7ef27a1.
-
-system_visuals/landfold/lj75_hist.txt.
-
-b499cbf6a8e0c641ede637d41389da86954eced26b35cb731e41c51b625af924.
-
-system_visuals/landfold/lj98.json.
-
-bcc51bd746cc39bca02f03b99bc92c747b81930a99c11dc209f23d8b404a72e4.
-
-system_visuals/landfold/lj98_hist.txt.
-
-6c472455130f72f2bb81f76c516b04da1dd529270ee44082b2e4a1d8dd8ff4fa.
-
-system_visuals/landfold/w6_gfn2.json.
-
-2ba4b15c70ae0ac8dda6f64200488e17672f934b6a86b48521139f964fba5e5e.
-
-system_visuals/landfold/w6_pbe.json.
-
-c3af87a0c1de98d13c32be9e08e7d895026f3cbff61984205783f2a67cd6af50.
-
-landscapes_7695255/lj38_bh_s0.min.
-
-dbb28bf1b8d64b3f0c4cd149b7eb180b6f524be470338bdc8b04ad82d811ccd1.
-
-landscapes_7695255/lj38_recommended_s0.min.
-
-fa0884621e988cbe3c50a7b39222b65ea8c8aa60363e056ac815d05478ce1529.
-
-landscapes_7695255/lj38_rss_s0.min.
-
-d4141a0e8402e955bebbfa24094f195b8b593f6e9fb0cec3b14e80df54991c16.
-
-landscapes_7695255/lj75_bh_s0.min.
-
-139040d8ff2555161adec4ae672a025066309aca34f914403265febc62da842d.
-
-landscapes_7695255/lj75_recommended_s0.min.
-
-0605021a36642dd155ad21d36391308167c4dbf15ecd2b8a0dfa95c8aba998de.
-
-landscapes_7695255/lj98_bh_s0.min.
-
-b5a51ebe081d3c56b0aef547c023a5534085250170c628e947d7ac3e1f4529df.
-
-landscapes_7695255/lj98_recommended_s0.min.
-
-362705310242801dd2bab07b5b1317a49579f742f02e78d809d2e89fd14d346c.
-
-hq_sci_h2o6/best_h2o6_eindir_s0.xyz.
-
-295fc09cc779b2ebdc8ac407e818247fa8dd2805b2c35e5da9dc58f0d747034a.
-
-hq_sci_h2o6/best_h2o6_eindir_s1.xyz.
-
-7514315d4caef9014c889cc56ae12a34ebc3f558d64d4090b4975e3b7e6ac0bc.
-
-hq_sci_h2o6/best_h2o6_eindir_s2.xyz.
-
-2558d61c395d26ae40aadd484d9d4ba1674550e063b893b5b091ba52b6c84980.
-
-hq_sci_h2o6/best_h2o6_eindir_s3.xyz.
-
-b7b691d39de9ed5d6280b194e87c51adc35eb2a40377dfdaa510018d46ed460a.
-
-hq_sci_h2o6/best_h2o6_eindir_s4.xyz.
-
-1ebb7c8b0f00a153549bab48f70f2734fcaacb47c7f5f2da03309302fc2477e5.
-
-hq_sci_h2o6/best_h2o6_eindir_s5.xyz.
-
-7d7d57e6ca3392c95eaa2932e72b549d8d6ae7b190b11b0255199d106a3d147c.
-
-hq_sci_h2o6/best_h2o6_eindir_s6.xyz.
-
-a4aec2b469ed157c7123e317f0e8bdcfa53e8bfc830ab430cf471d0c79f521c4.
-
-hq_sci_h2o6/best_h2o6_eindir_s7.xyz.
-
-405ab925d418aea7bbddae998d44ee4e52f9a05b7dc5bc3cb6ba31c7b4789659.
-
-w6gofee4k/rec4k_w6_0.min.
-
-0e5c0a605a3d42741d70eaf18682de21c8780c8e87e79d79b2edfbca07520503.
-
-w6gofee4k/rec4k_w6_1.min.
-
-5c9baa0a44b2e0a176e85850aff8858a798e8166018ceedac7a95ac8ef4e1034.
-
-w6gofee4k/rec4k_w6_2.min.
-
-2da60744d9d172363394512fcb253c547c0a118be972a0d1aec2b1390ca9400f.
-
-w6gofee4k/rec4k_w6_3.min.
-
-64076f2beb57e96d175a6f25cee5f959a0cfef0adf94f88df16ce8dd01ff45d3.
-
-w6gofee4k/rec4k_w6_4.min.
-
-71e30bee488226874ce8711fd7edf87b17a5454835a53a00578b33775f2d322a.
-
-w6gofee4k/rec4k_w6_5.min.
-
-b0645f3b3bbbd98d36a418d264428cab6e6d4915d15cb2889150bb540e5b93a2.
-
-w6gofee4k/rec4k_w6_6.min.
-
-8721bebe756f2b5b1951d72b6bd1224ac81c50ae37c71d1fc5420fd7068ddcbe.
-
-w6gofee4k/rec4k_w6_7.min.
-
-ba3335b94d796e86aa9d3f6dcb5216d9e57bf2724dd1723e837e22d9ea053eba.
-
-w6gofee4k/rec4k_w6_8.min.
-
-8a996e94ed065332b05182e8a4cc5146a32933cea96f8fb39f2747f14926512e.
-
-w6gofee4k/rec4k_w6_9.min.
-
-4c9f19c1ac4ea2ee043d7d72325da933adb09673a97403840118c1a537a91a55.
-
-w6nwpbe/best_h2o6_rgpot_s0.xyz.
-
-e4851785e23d6b2072c86d380a003b582aa2b203c4d4c1143257cf5596883d75.
-
-w6nwpbe/best_h2o6_rgpot_s1.xyz.
-
-8a147e216c59e4ffacbef7686bd93e5bf4e97448e31aa76418fc6e35de2f1dfd.
-
-w6nwpbe/best_h2o6_rgpot_s2.xyz.
-
-eb477e859adc6381dd7dd46565fd4760263a3ca30ea98106e05f55a4dac628a2.
-
-w6nwpbe/best_h2o6_rgpot_s3.xyz.
-
-dad4b9b55aae08afc23b9ab7de351a4cf6b1064bbe7dba1c3a9c0a28ec571cc8.
-
-w6nwpbe/best_h2o6_rgpot_s4.xyz.
-
-f14088e9aa650157dba6f3d88b834a7ae427638a5d6f1677af4f8a0693df3b3d.
-
-w6nwpbe/best_h2o6_rgpot_s5.xyz.
-
-44b1343bf1f60290cc490897464400af5037e1d275fa13ee776981e728474d5c.
-
-w6nwpbe/best_h2o6_rgpot_s6.xyz.
-
-bcefeede2abc6c3cf140f7ca1c2ef0a76d37b546c3951dc8d5de99230c4eff46.
-
-w6nwpbe/best_h2o6_rgpot_s7.xyz.
-
-44688c454733f07fe7e37a3ed05abc54d115579aedb7f1d820f83ca925ea6884.
-
-w6nwpbe/w6_nwpbe_0.min.
-
-a9b6f8fc105ba8c3f94ca08c2a5dad2ebb2b3e0534b42dbb19b655509dc0153b.
-
-w6nwpbe/w6_nwpbe_1.min.
-
-19eae3f2a4963610a857bd7b9c216b0a0e589349c8d2fa45150258aed099d7d5.
-
-w6nwpbe/w6_nwpbe_2.min.
-
-77a504875756ab6dda437eadc1923756b80fbc0262bb71c36ad2bdcdd7834383.
-
-w6nwpbe/w6_nwpbe_3.min.
-
-885fb2ee4e27c296aef933f3b0aea6a679a267e1957d440578f789641c7cade0.
-
-w6nwpbe/w6_nwpbe_4.min.
-
-0967a805d034d05eb94aa0ac1935835938b57764c826cd3c0fa7610cb7fe9a90.
-
-w6nwpbe/w6_nwpbe_5.min.
-
-fdceb9ee9fed1a5a23ff4fa6d5b9230d9db10204b524311117e46ba5d2198b93.
-
-w6nwpbe/w6_nwpbe_6.min.
-
-41203962c3668b3f963b81f10569ad16f49667c157e6319c53f4ea885a470d75.
-
-w6nwpbe/w6_nwpbe_7.min.
+41203962c3668b3f963b81f10569ad16f49667c157e6319c53f4ea885a470d75 w6nwpbe/w6_nwpbe_7.min

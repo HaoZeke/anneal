@@ -1,153 +1,89 @@
-# The sealed results_jcc campaigns of the anneal_repro port that the.
+# The sealed results_jcc campaigns of the anneal_repro port that the JCC
+# drafts quote: the LJ boards at lj_cell and GMIN at competitor_cell,
+# and four arms of the water hexamer against CREST.
 
-JCC drafts quote:.
+# Each folder is
 
-# the LJ boards at lj_cell and GMIN at competitor_cell, and four arms.
+# copied byte for byte from the handoff, with its own SHA256SUMS,
+# PROVENANCE and TERMINAL_OK; sha256sum -c passed in each before the
+# copy.
 
-of the water hexamer.
+# The recorded-polish arm, whose polish the seal grants after the
 
-# against CREST.
+# 4000-call search, and the water_66 folders, on another anneal commit,
+# are not copied.
 
-Each folder is copied byte for byte from the handoff, with its own.
+# The LJ75 call PAR-2 cells of RESULTS.md as it prints them;
+# summary.json of lj_cell and gmin_lj75 holds the same values as floats.
 
-# SHA256SUMS, PROVENANCE and TERMINAL_OK; sha256sum -c passed in each.
+tarball results-2016e46-c47d301.tar.gz
 
-before the copy.
+tarball_sha256 24bc06128b1e1e0286f8c2ba9c5849ad805d42339762c13f171c57e66e4ba40f
 
-# The recorded-polish arm, whose polish the seal grants after the.
+results_md_sha256 abc94c9bcfc44927fb5868e44956c7fc1bf9c8cf57fdc21687f3f2f71dec2b3a
 
-4000-call search, and.
+port_branch port/sota-snakemake
 
-# the water_66 folders, on another anneal commit, are not copied.
+port_commit c47d301fcc71abc7e839480821a5e951976199fb
 
-tarball results-2016e46-c47d301.tar.gz.
+port_span 2016e46796d58508a1e58e5dc36dbfb262fb834d..c47d301fcc71abc7e839480821a5e951976199fb
 
-tarball_sha256.
+anneal_commit 36086e988c5a71c156ffcbde152bf321a6f5ef25
 
-24bc06128b1e1e0286f8c2ba9c5849ad805d42339762c13f171c57e66e4ba40f.
+newcombe Newcombe 1998 method 10, at six decimal places
 
-results_md_sha256.
+mcnemar exact
 
-abc94c9bcfc44927fb5868e44956c7fc1bf9c8cf57fdc21687f3f2f71dec2b3a.
+results_md_par2_lj75_recommended 32363.98
 
-port_branch port/sota-snakemake.
+results_md_par2_lj75_derived 27107.045
 
-port_commit c47d301fcc71abc7e839480821a5e951976199fb.
+results_md_par2_lj75_gmin 58029.630
 
-port_span.
+1169e0a84ea220f037e7e75ecb9b3cf6bb10880ac29acf354b8bd2371642f2f5 gmin_lj75/PROVENANCE
 
-2016e46796d58508a1e58e5dc36dbfb262fb834d..c47d301fcc71abc7e839480821a5e951976199fb.
+243fc302fbb7b5e48471a1c451f6768a42319dd2d654ae98cc4bac4002b01b40 gmin_lj75/SHA256SUMS
 
-anneal_commit 36086e988c5a71c156ffcbde152bf321a6f5ef25.
+b3786efc3d60b33b4eb02cee9e9f14d340bdac4c654cfb1e4cd92828fbb1bd25 gmin_lj75/TERMINAL_OK
 
-newcombe Newcombe 1998 method 10, at six decimal places.
+1327c122524bc34ce01e1e19f3c3324ff54a9d38cd11b5767d8adbe8bf8d5c43 gmin_lj75/summary.json
 
-mcnemar exact.
+01084dbf493f83ee35f3854d061caff5f40e111df4cc23479e14c74222eb4813 lj_cell/PROVENANCE
 
-# The LJ75 call PAR-2 cells of RESULTS.md as it prints them;.
+7d4f4b89f36baa680a096c4a01553efa8be11ff7fcfab9158b3024276c8ad154 lj_cell/SHA256SUMS
 
-summary.json of lj_cell and.
+b3786efc3d60b33b4eb02cee9e9f14d340bdac4c654cfb1e4cd92828fbb1bd25 lj_cell/TERMINAL_OK
 
-# gmin_lj75 holds the same values as floats.
+27269a3ec6ff0e778f6b7a511e8bc7d6efc678688918b21ad5fb7e156606dd97 lj_cell/summary.json
 
-results_md_par2_lj75_recommended 32363.98.
+8de0186ee81fbdde62d65a45942464bcac0fb2a47b14b37e83515af2b9171d3f water_36086e98/budget-fair/PROVENANCE
 
-results_md_par2_lj75_derived 27107.045.
+43f5b888349f7c8d6eed78aa3fbf64e5a2fa92b9e3f0f8ad30c9c2ff175ea55a water_36086e98/budget-fair/SHA256SUMS
 
-results_md_par2_lj75_gmin 58029.630.
+b3786efc3d60b33b4eb02cee9e9f14d340bdac4c654cfb1e4cd92828fbb1bd25 water_36086e98/budget-fair/TERMINAL_OK
 
-1169e0a84ea220f037e7e75ecb9b3cf6bb10880ac29acf354b8bd2371642f2f5.
+b14a5611fbf7944df8b946bf520a3f91bd8910cda322c9130bec33271c863ed3 water_36086e98/budget-fair/summary.json
 
-gmin_lj75/PROVENANCE.
+4668fb3d4eac7b9cc008dc6827705a0de97ba897d870d891989ed5b41a0c4f89 water_36086e98/crest/PROVENANCE
 
-243fc302fbb7b5e48471a1c451f6768a42319dd2d654ae98cc4bac4002b01b40.
+fb36a0b40cd6f39fe1f95e3fe9c8ff0816a08a28ca6235c27a0f35a03278d1e8 water_36086e98/crest/SHA256SUMS
 
-gmin_lj75/SHA256SUMS.
+b3786efc3d60b33b4eb02cee9e9f14d340bdac4c654cfb1e4cd92828fbb1bd25 water_36086e98/crest/TERMINAL_OK
 
-b3786efc3d60b33b4eb02cee9e9f14d340bdac4c654cfb1e4cd92828fbb1bd25.
+2bdb895af8fb135ea960199e55c3f0a6d1ade93cf35e9806c8179b2aac16f51c water_36086e98/crest/summary.json
 
-gmin_lj75/TERMINAL_OK.
+a725392b31d19166ff5bc87ee2c1d3e4a67e538ac352b248fd915622b6b8f27e water_36086e98/crest-polished/PROVENANCE
 
-1327c122524bc34ce01e1e19f3c3324ff54a9d38cd11b5767d8adbe8bf8d5c43.
+60d53135cc4f89994c3a4fe10fdf62a688989a7526669d1f87029f4949c9d84b water_36086e98/crest-polished/SHA256SUMS
 
-gmin_lj75/summary.json.
+b3786efc3d60b33b4eb02cee9e9f14d340bdac4c654cfb1e4cd92828fbb1bd25 water_36086e98/crest-polished/TERMINAL_OK
 
-01084dbf493f83ee35f3854d061caff5f40e111df4cc23479e14c74222eb4813.
+71207d3b60d4d448e03605d3e665ea3f1e4ceb220e6b5c30740fa93708d426ec water_36086e98/crest-polished/summary.json
 
-lj_cell/PROVENANCE.
+dfda6d6eb2f89db376b84b9b65c48e427947044f80ba4e0fb144235867579444 water_36086e98/default/PROVENANCE
 
-7d4f4b89f36baa680a096c4a01553efa8be11ff7fcfab9158b3024276c8ad154.
+9fcd98cf3b4fc1c87629ee2637183ae9282652b4817adae644e2fc3ce429061b water_36086e98/default/SHA256SUMS
 
-lj_cell/SHA256SUMS.
+b3786efc3d60b33b4eb02cee9e9f14d340bdac4c654cfb1e4cd92828fbb1bd25 water_36086e98/default/TERMINAL_OK
 
-b3786efc3d60b33b4eb02cee9e9f14d340bdac4c654cfb1e4cd92828fbb1bd25.
-
-lj_cell/TERMINAL_OK.
-
-27269a3ec6ff0e778f6b7a511e8bc7d6efc678688918b21ad5fb7e156606dd97.
-
-lj_cell/summary.json.
-
-8de0186ee81fbdde62d65a45942464bcac0fb2a47b14b37e83515af2b9171d3f.
-
-water_36086e98/budget-fair/PROVENANCE.
-
-43f5b888349f7c8d6eed78aa3fbf64e5a2fa92b9e3f0f8ad30c9c2ff175ea55a.
-
-water_36086e98/budget-fair/SHA256SUMS.
-
-b3786efc3d60b33b4eb02cee9e9f14d340bdac4c654cfb1e4cd92828fbb1bd25.
-
-water_36086e98/budget-fair/TERMINAL_OK.
-
-b14a5611fbf7944df8b946bf520a3f91bd8910cda322c9130bec33271c863ed3.
-
-water_36086e98/budget-fair/summary.json.
-
-4668fb3d4eac7b9cc008dc6827705a0de97ba897d870d891989ed5b41a0c4f89.
-
-water_36086e98/crest/PROVENANCE.
-
-fb36a0b40cd6f39fe1f95e3fe9c8ff0816a08a28ca6235c27a0f35a03278d1e8.
-
-water_36086e98/crest/SHA256SUMS.
-
-b3786efc3d60b33b4eb02cee9e9f14d340bdac4c654cfb1e4cd92828fbb1bd25.
-
-water_36086e98/crest/TERMINAL_OK.
-
-2bdb895af8fb135ea960199e55c3f0a6d1ade93cf35e9806c8179b2aac16f51c.
-
-water_36086e98/crest/summary.json.
-
-a725392b31d19166ff5bc87ee2c1d3e4a67e538ac352b248fd915622b6b8f27e.
-
-water_36086e98/crest-polished/PROVENANCE.
-
-60d53135cc4f89994c3a4fe10fdf62a688989a7526669d1f87029f4949c9d84b.
-
-water_36086e98/crest-polished/SHA256SUMS.
-
-b3786efc3d60b33b4eb02cee9e9f14d340bdac4c654cfb1e4cd92828fbb1bd25.
-
-water_36086e98/crest-polished/TERMINAL_OK.
-
-71207d3b60d4d448e03605d3e665ea3f1e4ceb220e6b5c30740fa93708d426ec.
-
-water_36086e98/crest-polished/summary.json.
-
-dfda6d6eb2f89db376b84b9b65c48e427947044f80ba4e0fb144235867579444.
-
-water_36086e98/default/PROVENANCE.
-
-9fcd98cf3b4fc1c87629ee2637183ae9282652b4817adae644e2fc3ce429061b.
-
-water_36086e98/default/SHA256SUMS.
-
-b3786efc3d60b33b4eb02cee9e9f14d340bdac4c654cfb1e4cd92828fbb1bd25.
-
-water_36086e98/default/TERMINAL_OK.
-
-3cc089b84301596321795ce7503662c6cefc5610df1d9568af239a1896581882.
-
-water_36086e98/default/summary.json.
+3cc089b84301596321795ce7503662c6cefc5610df1d9568af239a1896581882 water_36086e98/default/summary.json

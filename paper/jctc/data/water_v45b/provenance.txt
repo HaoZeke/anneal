@@ -1,35 +1,23 @@
-# Water hexamer per-seed table of anneal_repro v4.5b, rule.
+# Water hexamer per-seed table of anneal_repro v4.5b, rule
+# water_crest_fair, on anneal 36086e988c5a71c156ffcbde152bf321a6f5ef25,
+# seeds 0-191, budget 4000.
 
-water_crest_fair, on.
+# Hits: anneal default 121/192, budget-fair.
 
-# anneal 36086e988c5a71c156ffcbde152bf321a6f5ef25, seeds 0-191, budget.
+# polish 148/192, plain CREST 97/192, budget-fair CREST+polish 114/192.
+# Max crest_fair calls 3907 (reserve 618, CREST cap 3382).
 
-4000.
+# Port tip.
 
-# Hits: anneal default 121/192, budget-fair polish 148/192, plain CREST.
-
-97/192,.
-
-# budget-fair CREST+polish 114/192.
-
-Max crest_fair calls 3907 (reserve 618,.
-
-# CREST cap 3382).
-
-Port tip 507974eb; ledger commit 739c3991; bundle sha256.
-
+# 507974eb; ledger commit 739c3991; bundle sha256
 # ba13a00f75fd7757c2d6bcd3509197d022f4d4273e5048cc70158a1595d6bb28.
 
-anneal_repro_commit 739c3991.
+anneal_repro_commit 739c3991
 
-anneal_repro_tip 507974eb.
+anneal_repro_tip 507974eb
 
-bundle_sha256.
+bundle_sha256 ba13a00f75fd7757c2d6bcd3509197d022f4d4273e5048cc70158a1595d6bb28
 
-ba13a00f75fd7757c2d6bcd3509197d022f4d4273e5048cc70158a1595d6bb28.
+rule water_crest_fair
 
-rule water_crest_fair.
-
-d7c661258f757619b86fbf841ff270d7d872b984d306f819efbb3d933c041b7c.
-
-water-v45b-perseed.csv.
+d7c661258f757619b86fbf841ff270d7d872b984d306f819efbb3d933c041b7c water-v45b-perseed.csv
