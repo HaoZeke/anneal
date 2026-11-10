@@ -1,0 +1,93 @@
+tree 27e0007b898135935f24d9a141e6d915bd7a9495
+patterns four case-insensitive needles
+output
+HEAD:docs/ext/anneal_docutils.py:28:    cursor = 0
+HEAD:docs/ext/anneal_docutils.py:30:        parts.append(_join_region(text[cursor : fence.start()]))
+HEAD:docs/ext/anneal_docutils.py:32:        cursor = fence.end()
+HEAD:docs/ext/anneal_docutils.py:33:    parts.append(_join_region(text[cursor:]))
+HEAD:docs/ext/anneal_docutils.py:39:    cursor = 0
+HEAD:docs/ext/anneal_docutils.py:58:        parts.append(text[cursor:index])
+HEAD:docs/ext/anneal_docutils.py:60:        cursor = end + 1
+HEAD:docs/ext/anneal_docutils.py:61:        index = cursor
+HEAD:docs/ext/anneal_docutils.py:62:    parts.append(text[cursor:])
+HEAD:docs/orgmode/explanation/communication.org:770:exchanges descriptor-centre visit deltas. Each reader has a cursor, excludes
+HEAD:docs/orgmode/methods/catalog.org:1785:below the ceiling is equally admissible, which keeps precursor
+HEAD:examples/binary_water_campaign.rs:204:    let cursor = Mutex::new(0usize);
+HEAD:examples/binary_water_campaign.rs:212:                    let mut cursor = cursor.lock().expect("cursor");
+HEAD:examples/binary_water_campaign.rs:213:                    let index = *cursor;
+HEAD:examples/binary_water_campaign.rs:214:                    *cursor += 1;
+HEAD:examples/binary_water_campaign.rs:268:    let cursor = Mutex::new(0usize);
+HEAD:examples/binary_water_campaign.rs:276:                    let mut cursor = cursor.lock().expect("cursor");
+HEAD:examples/binary_water_campaign.rs:277:                    let index = *cursor;
+HEAD:examples/binary_water_campaign.rs:278:                    *cursor += 1;
+HEAD:paper/jctc/REPORT.md:205:This machine reports cursor.
+HEAD:paper/jctc/logs/cuh2-hardware-receipt.txt:5:cursor
+HEAD:paper/jctc/logs/cuh2-hardware-receipt.txt:81:cursor
+HEAD:pixi.lock:155:      - conda: https://conda.anaconda.org/conda-forge/linux-64/xcb-util-cursor-0.1.6-hb03c661_0.conda
+HEAD:pixi.lock:166:      - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libxcursor-1.2.3-hb9d3cd8_0.conda
+HEAD:pixi.lock:500:      - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libxcursor-1.2.3-hb9d3cd8_0.conda
+HEAD:pixi.lock:1089:      - conda: https://conda.anaconda.org/conda-forge/linux-64/xcb-util-cursor-0.1.6-hb03c661_0.conda
+HEAD:pixi.lock:1100:      - conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libxcursor-1.2.3-hb9d3cd8_0.conda
+HEAD:pixi.lock:2260:  - xorg-libxcursor >=1.2.3,<2.0a0
+HEAD:pixi.lock:4841:  - xcb-util-cursor
+HEAD:pixi.lock:4870:  - xorg-libxcursor >=1.2.3,<2.0a0
+HEAD:pixi.lock:4891:  - xcb-util-cursor >=0.1.6,<0.2.0a0
+HEAD:pixi.lock:4914:  - xcb-util-cursor
+HEAD:pixi.lock:4943:  - xcb-util-cursor >=0.1.6,<0.2.0a0
+HEAD:pixi.lock:4944:  - xorg-libxcursor >=1.2.3,<2.0a0
+HEAD:pixi.lock:5317:- conda: https://conda.anaconda.org/conda-forge/linux-64/xcb-util-cursor-0.1.6-hb03c661_0.conda
+HEAD:pixi.lock:5332:    - xcb-util-cursor >=0.1.6,<0.2.0a0
+HEAD:pixi.lock:5492:- conda: https://conda.anaconda.org/conda-forge/linux-64/xorg-libxcursor-1.2.3-hb9d3cd8_0.conda
+HEAD:pixi.lock:5506:    - xorg-libxcursor >=1.2.3,<2.0a0
+HEAD:python/anneal/chemfit.py:1521:        cursor = out
+HEAD:python/anneal/chemfit.py:1523:            nxt = cursor.get(key)
+HEAD:python/anneal/chemfit.py:1526:                cursor[key] = nxt
+HEAD:python/anneal/chemfit.py:1527:            cursor = nxt
+HEAD:python/anneal/chemfit.py:1530:        cursor[path[-1]] = leaf
+HEAD:src/bank_rpc/client.rs:8:use std::io::Cursor;
+HEAD:src/bank_rpc/client.rs:49:        let reader = serialize::read_message(Cursor::new(&reply[..]), ReaderOptions::new())
+HEAD:src/bank_rpc/server.rs:3:use std::io::Cursor;
+HEAD:src/bank_rpc/server.rs:388:    let reader = match serialize::read_message(Cursor::new(&frame[..]), ReaderOptions::new()) {
+HEAD:src/catalog_rpc/mod.rs:3:use std::io::Cursor;
+HEAD:src/catalog_rpc/mod.rs:1100:    let mut cursor = Cursor::new(bytes);
+HEAD:src/catalog_rpc/mod.rs:1101:    let message = serialize::read_message(&mut cursor, ReaderOptions::new()).map_err(wire_error)?;
+HEAD:src/methods/cluster_hopping.rs:2576:    // Deposit cursors belong to bias owners, not to the coordinates that
+HEAD:src/methods/cluster_hopping/moves.rs:371:    /// answer completes from precursor structures the chain reaches through
+HEAD:src/methods/nested.rs:27://! holds the answer completes from precursor structures *above* the incumbent
+HEAD:src/methods/nested.rs:31://! there is no product: any state below the ceiling is free, so precursors
+HEAD:src/methods/nested.rs:202:            // every state is equally welcome, which is what keeps precursor
+HEAD:src/nd_hybrid.rs:330:    source_cursor: usize,
+HEAD:src/nd_hybrid.rs:338:        let basin = (source_cursor + offset) % minima;
+HEAD:src/nd_hybrid.rs:632:    let mut source_cursor = 0usize;
+HEAD:src/nd_hybrid.rs:640:        let ride_tasks = ride_tasks(network.minimum_count(), &attempted, source_cursor, ranks);
+HEAD:src/nd_hybrid.rs:767:            source_cursor = (source_basin + 1) % network.minimum_count();
+HEAD:src/raft.rs:726:    use std::io::Cursor;
+HEAD:src/raft.rs:852:        let reader = serialize::read_message(&mut Cursor::new(bytes), ReaderOptions::new())?;
+HEAD:src/raft.rs:935:        let reader = serialize::read_message(&mut Cursor::new(bytes), ReaderOptions::new())?;
+HEAD:src/shared_bias.rs:50:    cursors: Vec<Option<u64>>,
+HEAD:src/shared_bias.rs:54:    sample_cursors: Vec<u64>,
+HEAD:src/shared_bias.rs:75:            cursors: vec![Some(0); walkers],
+HEAD:src/shared_bias.rs:79:            sample_cursors: vec![0; walkers],
+HEAD:src/shared_bias.rs:109:    /// Reading samples neither advances visit cursors nor republishes anything.
+HEAD:src/shared_bias.rs:112:        if self.cursors[walker].is_none() {
+HEAD:src/shared_bias.rs:115:        let cursor = self.sample_cursors[walker];
+HEAD:src/shared_bias.rs:121:            for sample in samples.iter().filter(|sample| sample.sequence >= cursor) {
+HEAD:src/shared_bias.rs:125:        self.sample_cursors[walker] = self.samples_published;
+HEAD:src/shared_bias.rs:155:        self.cursors[walker] = None;
+HEAD:src/shared_bias.rs:162:    /// batch back; its cursor skips it.
+HEAD:src/shared_bias.rs:174:    /// advance the read cursor without contributing to delivered visit counts.
+HEAD:src/shared_bias.rs:177:        let Some(cursor) = self.cursors[walker] else {
+HEAD:src/shared_bias.rs:181:        let first = usize::try_from(cursor.saturating_sub(self.base)).expect("cursor offset fits");
+HEAD:src/shared_bias.rs:191:        self.cursors[walker] = Some(next);
+HEAD:src/shared_bias.rs:199:            .cursors
+HEAD:tests/portfolio_coordinate_proposals.rs:123:    let mut cursor = 0usize;
+HEAD:tests/portfolio_coordinate_proposals.rs:128:        if cursor == 0 {
+HEAD:tests/portfolio_coordinate_proposals.rs:136:        while cursor < n_strategy {
+HEAD:tests/portfolio_coordinate_proposals.rs:141:            let j = cursor;
+HEAD:tests/portfolio_coordinate_proposals.rs:143:                cursor += 1;
+HEAD:tests/portfolio_coordinate_proposals.rs:155:            cursor += 1;
+HEAD:tests/portfolio_coordinate_proposals.rs:173:        cursor = 0;
+HEAD:tests/shared_bias_topology.rs:88:fn excluded_events_advance_cursors_without_delivery_or_forwarding() {
+HEAD:vendor/nng-sys/nng/docs/BUILD_ANDROID.adoc:7:NOTE: This work has received only cursory testing.  As always, _caveat emptor_.
+scrubber_message_grep
+receipt_message_grep
