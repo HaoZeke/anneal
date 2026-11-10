@@ -450,7 +450,7 @@ fn a_budget_spent_by_the_icosahedral_reseed_ends_the_run() {
 }
 
 #[test]
-fn a_budget_spent_by_the_rigid_reseed_ends_the_run() {
+fn a_rigid_stall_reseeds_nothing_before_the_budget_ends_the_run() {
     let cfg = quiet(Config::for_tip4p(2));
     let rest = array![-1.5, 0.0, 0.0, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
     let reseeds = AtomicUsize::new(0);
@@ -472,7 +472,9 @@ fn a_budget_spent_by_the_rigid_reseed_ends_the_run() {
     let mut rng = StdRng::seed_from_u64(5);
     let out = run(&cfg, rest.view(), &mut ledger, &mut relax, &mut rng).expect("finite");
     assert_eq!(out.stop, Some(HopStop::Budget));
-    assert_eq!((reseeds.load(Ordering::Relaxed), out.hops), (1, 1001));
+    // None of the 99 stalls is charged a call, so every call after the
+    // opening quench is a hop.
+    assert_eq!((reseeds.load(Ordering::Relaxed), out.hops), (0, 99_999));
 }
 
 /// Runs a flat surface until an NVE escape has spent the budget.

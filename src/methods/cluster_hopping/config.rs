@@ -189,6 +189,31 @@ pub enum ContinuousSymmetry {
     },
 }
 
+/// Which core orbit completion ([`Config::orbit_complete_on_new`]) reads
+/// its point group from.
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OrbitCore {
+    /// The innermost [`Config::symmetrise_core_fraction`] of the points by
+    /// distance from the centroid, up to three of its operations closed
+    /// exactly ([`crate::symmetrise::orbit_complete_core`]).
+    #[default]
+    Fraction,
+    /// The innermost shells about a weighted centre, every operation
+    /// refined and closed tolerantly
+    /// ([`crate::symmetrise::orbit_complete_shells`]).
+    Shells(crate::symmetrise::ShellCore),
+    /// Both completions, shells first, each quenched and recorded; the
+    /// lower quench is offered to the acceptance rule.
+    Both(crate::symmetrise::ShellCore),
+}
+
+impl OrbitCore {
+    fn is_fraction(&self) -> bool {
+        matches!(self, Self::Fraction)
+    }
+}
+
 /// Driver settings.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Config {
@@ -452,6 +477,12 @@ pub struct Config {
     /// quenched and offered to the acceptance rule. With
     /// [`Config::point_symmetrise_on_new`] both are attempted, core first.
     pub orbit_complete_on_new: bool,
+    /// Which core an orbit completion reads its point group from. No
+    /// preset leaves the fraction core; [`Config::with_dual_orbit_core`]
+    /// opts in to both. Fraction is omitted from the resolved JSON, so a
+    /// config that never sets this resolves as it did before the field.
+    #[serde(skip_serializing_if = "OrbitCore::is_fraction")]
+    pub orbit_core: OrbitCore,
     /// Add the population-repulsion SOAP step ([`ClusterMove::SoapRepel`])
     /// as a proposal arm.
     pub soap_repel: bool,
@@ -990,6 +1021,23 @@ pub struct Config {
     pub quench_warmup: usize,
     /// Standard deviations of separation a verdict needs.
     pub quench_confidence: f64,
+    /// Relax a Cartesian trial once, to [`Config::relax_steps`].
+    ///
+    /// The split screen is a short prefix and then a second relaxation
+    /// that starts with an empty Hessian. On the GFN2 hexamer the prefix
+    /// still sits hundreds of meV above the basin, so it neither rejects
+    /// the hop nor names the minimum. One pass spends the calls on the
+    /// descent. Off by default; the water arms turn it on.
+    pub quench_once: bool,
+    /// Relaunch from the incumbent when the chain is this far above it.
+    ///
+    /// Zero leaves the walk where acceptance put it. A positive gap, in
+    /// the objective's energy unit, moves the chain back to the best
+    /// recorded minimum before the next proposal once the current
+    /// minimum is more than the gap above that best. The water arms set
+    /// 0.02 eV, wider than the 4.2 meV hexamer shelf and below the next
+    /// family the walk otherwise sits in.
+    pub incumbent_gap: f64,
     /// Relaxation steps in the full pass.
     pub relax_steps: usize,
     /// First-phase transform of every relaxation: relax on a compacted
@@ -1087,10 +1135,11 @@ impl Config {
     /// LeanBurst carries the observed-cloud SOAP pullback. Thompson
     /// allocates that arm with surface, single, burst, and sym. The return
     /// screen is on, and a stall takes tabu, symmetrisation, the recorded
-    /// basin trail, the climb, and the restart. Those three exits are
-    /// [`Config::trail_on_stall`], [`Config::escape_on_stall`], and
-    /// [`Config::restart_on_stall`]. There is no `RESTART_STALL_ARM`
-    /// override. Basin identity stays the measured pair-spectrum merge at 0.7.
+    /// basin trail, and the climb. Those two exits are
+    /// [`Config::trail_on_stall`] and [`Config::escape_on_stall`].
+    /// [`Config::restart_on_stall`] stays off, so a stalled walker is never
+    /// redrawn from random coordinates. Basin identity stays the measured
+    /// pair-spectrum merge at 0.7.
     /// Orbit completion runs on every new basin, and below 98 points the
     /// relaxation draws between the plain surface and the two-phase
     /// relative 0.7 surface, the same rule as [`Config::communicating`].
@@ -1113,18 +1162,12 @@ impl Config {
         cfg.orbit_complete_on_new = true;
         cfg.trail_on_stall = true;
         cfg.escape_on_stall = true;
-        cfg.restart_on_stall = true;
-        // The displacement stack, LeanBurst included, leaves the Mackay
-        // minimum in place: 17 of 72 seeds at 4e5 calls ended at
-        // -173.252378. Named lattice growth builds the truncated
-        // octahedron instead of searching for it. Measured on seeds
-        // 2000-2071 at that budget, this library solves 72 of 72.
-        // At 75 and 98 points the global minimum is not one of these
-        // packings, and the same library is worse than none, so those
-        // sizes keep LeanBurst.
-        if n_points == 38 {
-            cfg.move_library = MoveLibrary::Reseed;
-        }
+        // Named lattice growth builds the truncated octahedron instead of
+        // searching for it. On seeds 2000-2071 at 4e5 calls that library
+        // solves 72 of 72 at 38 points, and at 75 and 98 points, whose
+        // global minima are not those packings, it is worse than none.
+        // Installing it only at 38 atoms was per-system tuning, so the
+        // preset keeps LeanBurst at every size.
         if n_points < 98 {
             cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
         }
@@ -1267,6 +1310,38 @@ impl Config {
         cfg
     }
 
+    /// [`Config::for_cluster`] with [`Config::with_dual_orbit_core`].
+    ///
+    /// Opt-in only: no other preset builds on this one, and
+    /// [`Config::for_cluster`] itself completes no orbits.
+    pub fn for_cluster_dual_core(n_points: usize) -> Self {
+        Self::for_cluster(n_points).with_dual_orbit_core()
+    }
+
+    /// Orbit completion on two cores, with a random restart on a stall.
+    ///
+    /// Every newly entered basin is completed twice, once with the point
+    /// group of the innermost shells about a weighted centre
+    /// ([`crate::symmetrise::ShellCore::scaled`] at this config's
+    /// [`Config::length_scale`]) and once with the fraction core. Each is
+    /// quenched and recorded, and the lower is offered to the acceptance
+    /// rule ([`OrbitCore::Both`]). A chain without a new ledger best for
+    /// 4000 charged calls restarts from a random cluster
+    /// ([`Config::restart_on_stall`]), and the climb
+    /// ([`Config::escape_on_stall`]) is off.
+    ///
+    /// Call it after the length scale is final. A rigid-body chain has no
+    /// orbit completion: [`Config::with_rigid_bodies`] clears both the
+    /// completion and the core.
+    pub fn with_dual_orbit_core(mut self) -> Self {
+        self.orbit_complete_on_new = true;
+        self.orbit_core = OrbitCore::Both(crate::symmetrise::ShellCore::scaled(self.length_scale));
+        self.restart_on_stall = true;
+        self.escape_on_stall = false;
+        self.restart_patience = 4_000;
+        self
+    }
+
     /// Lennard-Jones preset expressed against declared physical scales.
     pub fn with_scales(n_points: usize, length_scale: f64, energy_scale: f64) -> Self {
         assert!(
@@ -1339,6 +1414,7 @@ impl Config {
             point_symmetrise: false,
             point_symmetrise_on_new: false,
             orbit_complete_on_new: false,
+            orbit_core: OrbitCore::Fraction,
             soap_repel: false,
             exchange_metropolis: false,
             md_escape: false,
@@ -1408,6 +1484,8 @@ impl Config {
             probe_screen: false,
             quench_warmup: 4,
             quench_confidence: 2.0,
+            quench_once: false,
+            incumbent_gap: 0.0,
             relax_steps: 200,
             two_phase: None,
             reoccupy: None,
@@ -1438,6 +1516,7 @@ impl Config {
     /// per molecule (centre of mass plus an exponential-map rotation). The
     /// move library is Wales--Hodges translation and rotation, each with
     /// its own step, not the atomic Cartesian kernels.
+    /// A third arm reverses a directed hydrogen-bond cycle.
     pub fn for_tip4p(n_molecules: usize) -> Self {
         assert!(
             n_molecules >= 2,
@@ -1450,6 +1529,7 @@ impl Config {
             translate_step: 0.35,
             rotate_step: 0.40,
             local: false,
+            reverse_cycles: true,
         };
         cfg.rigid_body_geometry =
             Some(crate::potentials::Tip4pCluster::new(n_molecules).rigid_geometry());
@@ -1537,6 +1617,7 @@ impl Config {
             translate_step: LennardJonesPreset::ALL_POINTS_STEP * self.length_scale,
             rotate_step: super::moves::RIGID_ORIENTATION_CAP,
             local: true,
+            reverse_cycles: false,
         };
         let contact = 4.0 * reach;
         let span = LennardJonesPreset::CONTAINER_RADIUS * contact * (self.n_points as f64).cbrt();
@@ -1553,6 +1634,7 @@ impl Config {
         self.point_symmetrise = false;
         self.point_symmetrise_on_new = false;
         self.orbit_complete_on_new = false;
+        self.orbit_core = OrbitCore::Fraction;
         self.angular_moves = false;
         self.continuous_symmetry = ContinuousSymmetry::Off;
         self.rigid_body_geometry = Some(geometry);
@@ -1599,9 +1681,19 @@ impl Config {
         assert!(length_scale > 0.0, "species must have known covalent radii");
         let mut cfg = Self::with_scales(species.len(), length_scale, energy_scale);
         cfg.group_cutoff = MolecularPreset::GROUP_CUTOFF * length_scale;
+        let is_water = groups.iter().all(|g| g.len() == 3)
+            && groups.iter().enumerate().all(|(i, g)| {
+                g.iter()
+                    .zip([8u32, 1, 1])
+                    .all(|(&a, z)| species.get(a).copied() == Some(z))
+                    || g.iter()
+                        .zip([8u32, 1, 1])
+                        .all(|(&a, z)| species.get(3 * i + (a - g[0])).copied() == Some(z))
+            });
         cfg.move_library = MoveLibrary::Molecular {
             groups: groups.clone(),
             reactive: false,
+            reverse_cycles: is_water,
         };
         cfg.species = Some(species);
         cfg

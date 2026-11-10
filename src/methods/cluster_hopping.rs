@@ -46,12 +46,13 @@ use crate::path::{StallDetector, interpolate_path};
 use crate::screen::Screen;
 
 mod config;
+mod cycles;
 mod moves;
 mod packing_bank;
 mod preset;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
-pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, SoapProposalMode};
+pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, SoapProposalMode};
 pub use moves::*;
 
 #[cfg(test)]
@@ -747,8 +748,11 @@ impl Ledger {
     }
 
     /// Records a value and its state when it improves the incumbent.
+    ///
+    /// A non-finite value is not an improvement. −∞ compares below every
+    /// finite incumbent, and adopting it leaves the run with no geometry.
     pub fn record(&mut self, value: f64, state: ArrayView1<f64>) {
-        if value < self.best {
+        if value.is_finite() && value < self.best {
             self.best = value;
             self.best_state = Some(state.to_owned());
         }
@@ -841,6 +845,11 @@ pub struct Outcome {
     pub basins: usize,
     /// Charged evaluations spent.
     pub charged: usize,
+    /// Proposals closer than [`OVERLAP_SEPARATION`] before any energy call.
+    ///
+    /// Each one was separated, or dropped when separation failed. Neither the
+    /// raw geometry nor a dropped geometry is charged to [`Outcome::charged`].
+    pub overlap_rejected: usize,
     /// Trials abandoned because their partial relaxation was going home.
     pub returned: usize,
     /// Escape scale at the end of the run, when the controller is used.
@@ -1171,6 +1180,103 @@ pub fn structure_is_sane(x: ArrayView1<f64>, min_sep: f64) -> bool {
 /// overlap artifact rather than a physical bond.
 pub const OVERLAP_SEPARATION: f64 = 0.35;
 
+/// Push pairs closer than `min_sep` apart until the geometry clears that rule.
+///
+/// A declared group is translated as a rigid body when the close pair belongs
+/// to two groups, so the repair does not stretch a bond to cure a clash
+/// between molecules. A close pair inside one group, or a geometry with no
+/// groups, is pushed atom by atom. The function does not evaluate a potential.
+/// It returns whether every pair is now at least `min_sep` apart.
+pub(crate) fn separate_to_overlap_rule(
+    x: &mut Array1<f64>,
+    groups: Option<&[Vec<usize>]>,
+    min_sep: f64,
+) -> bool {
+    if !(min_sep.is_finite() && min_sep > 0.0) || x.iter().any(|value| !value.is_finite()) {
+        return false;
+    }
+    let n = x.len() / 3;
+    if n < 2 {
+        return true;
+    }
+    let owner = groups.map(|groups| {
+        let mut owner = vec![usize::MAX; n];
+        for (group, atoms) in groups.iter().enumerate() {
+            for &atom in atoms {
+                if atom < n {
+                    owner[atom] = group;
+                }
+            }
+        }
+        owner
+    });
+    let n_groups = groups.map(|groups| groups.len()).unwrap_or(0);
+    // A fraction of an angstrom past the rule, so a later strict comparison
+    // does not reject the same pair on a rounding residue.
+    let target = min_sep + 1.0e-8;
+    for _ in 0..64 {
+        if min_pair_distance(x.view()) >= min_sep {
+            return x.iter().all(|value| value.is_finite());
+        }
+        let mut group_shift = vec![[0.0_f64; 3]; n_groups];
+        let mut atom_shift = vec![[0.0_f64; 3]; n];
+        let mut moved = false;
+        for a in 0..n {
+            for b in (a + 1)..n {
+                let mut delta = [0.0_f64; 3];
+                let mut distance_squared = 0.0;
+                for axis in 0..3 {
+                    delta[axis] = x[3 * a + axis] - x[3 * b + axis];
+                    distance_squared += delta[axis] * delta[axis];
+                }
+                let distance = distance_squared.sqrt();
+                if distance >= target {
+                    continue;
+                }
+                let (direction, scale) = if distance < 1.0e-12 {
+                    ([1.0, 0.0, 0.0], 0.5 * target)
+                } else {
+                    let push = 0.5 * (target - distance) / distance;
+                    (delta, push)
+                };
+                let left = owner.as_ref().map(|owner| owner[a]).unwrap_or(usize::MAX);
+                let right = owner.as_ref().map(|owner| owner[b]).unwrap_or(usize::MAX);
+                if left != usize::MAX && right != usize::MAX && left != right {
+                    for axis in 0..3 {
+                        group_shift[left][axis] += scale * direction[axis];
+                        group_shift[right][axis] -= scale * direction[axis];
+                    }
+                } else {
+                    for axis in 0..3 {
+                        atom_shift[a][axis] += scale * direction[axis];
+                        atom_shift[b][axis] -= scale * direction[axis];
+                    }
+                }
+                moved = true;
+            }
+        }
+        if !moved {
+            break;
+        }
+        if let Some(owner) = owner.as_ref() {
+            for atom in 0..n {
+                let group = owner[atom];
+                if group != usize::MAX {
+                    for axis in 0..3 {
+                        x[3 * atom + axis] += group_shift[group][axis];
+                    }
+                }
+            }
+        }
+        for atom in 0..n {
+            for axis in 0..3 {
+                x[3 * atom + axis] += atom_shift[atom][axis];
+            }
+        }
+    }
+    x.iter().all(|value| value.is_finite()) && min_pair_distance(x.view()) >= min_sep
+}
+
 fn quench_is_sane(cfg: &Config, energy: f64, x: ArrayView1<f64>) -> bool {
     let minimum = if cfg.species.is_some() {
         OVERLAP_SEPARATION
@@ -1500,6 +1606,37 @@ where
         checkpoint,
         rng,
     )
+}
+
+/// Learned stall response. Each enabled escape is one arm under the
+/// same depth-rewarded Thompson allocation the move set uses: a stall
+/// draws one response and the draw is rewarded with the deepening the
+/// escape realized, a signed number every stall produces, under a
+/// Normal-Gamma posterior whose predictive needs no reward scale. A
+/// success bit was the first version and is exactly the sparse reward
+/// DepthAllocator documents as failing to switch a wrong arm off.
+/// Every arm is domain-free: the trail is the objective's own descent
+/// history, the climb needs a gradient alone, the restart draws fresh
+/// coordinates. With one arm enabled the allocator is never consulted,
+/// so single-flag behaviour is unchanged.
+fn stall_arms(cfg: &Config) -> Vec<&'static str> {
+    [
+        cfg.trail_on_stall.then_some("trail"),
+        cfg.escape_on_stall.then_some("climb"),
+        // RESTART_STALL_ARM=0 keeps the restart out of the stall allocator,
+        // so a restart happens only on the charged-patience rule. Measured:
+        // with the stall arm in, a chain restarted 9 to 16 times a run
+        // whatever RESTART_PATIENCE said, every 5 to 8k hops, shorter than
+        // the descent to the shelf. A rigid chain never takes it: its
+        // stall moves within the chain's own archive instead.
+        (cfg.restart_on_stall
+            && !cfg.move_library.is_rigid_body()
+            && !std::env::var("RESTART_STALL_ARM").is_ok_and(|v| v == "0"))
+        .then_some("restart"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 /// Each rung's temperature as a multiple of the one a single chain would hop
@@ -1842,37 +1979,6 @@ mod rigid_step_tests {
             (rigid_step_scale(0.9, 25, 50) - 0.9).abs() < 1e-12,
             "an acceptance of one half moved the step"
         );
-    }
-}
-
-#[cfg(test)]
-mod rigid_reseed_tests {
-    use super::{Config, random_rigid_reseed};
-    use rand::SeedableRng;
-    use rand::rngs::StdRng;
-
-    #[test]
-    fn a_reseed_fills_the_centre_block_and_the_rotation_block() {
-        let cfg =
-            Config::recommended(4).with_rigid_bodies(crate::potentials::gmin_water_geometry());
-        let mut rng = StdRng::seed_from_u64(3);
-        let x = random_rigid_reseed(&cfg, &mut rng);
-        assert_eq!(x.len(), 24);
-        let radius = cfg.start_radius();
-        for i in 0..4 {
-            let r = (0..3)
-                .map(|k| x[3 * i + k] * x[3 * i + k])
-                .sum::<f64>()
-                .sqrt();
-            assert!(r <= radius + 1.0e-8, "centre {i} left the ball at {r}");
-            for k in 0..3 {
-                let turn = x[12 + 3 * i + k].abs();
-                assert!(
-                    turn <= std::f64::consts::PI,
-                    "rotation {turn} left the cube"
-                );
-            }
-        }
     }
 }
 
@@ -2415,31 +2521,7 @@ where
     // Evaluated screen state of the trial that entered the current basin,
     // kept as the exit point a stalled chain leaves through.
     let mut basin_entry: Option<Array1<f64>> = None;
-    // Learned stall response. Each enabled escape is one arm under the
-    // same depth-rewarded Thompson allocation the move set uses: a stall
-    // draws one response and the draw is rewarded with the deepening the
-    // escape realized, a signed number every stall produces, under a
-    // Normal-Gamma posterior whose predictive needs no reward scale. A
-    // success bit was the first version and is exactly the sparse reward
-    // DepthAllocator documents as failing to switch a wrong arm off.
-    // Every arm is domain-free: the trail is the objective's own descent
-    // history, the climb needs a gradient alone, the restart draws fresh
-    // coordinates. With one arm enabled the allocator is never consulted,
-    // so single-flag behaviour is unchanged.
-    let stall_arms: Vec<&'static str> = [
-        cfg.trail_on_stall.then_some("trail"),
-        cfg.escape_on_stall.then_some("climb"),
-        // RESTART_STALL_ARM=0 keeps the restart out of the stall allocator,
-        // so a restart happens only on the charged-patience rule. Measured:
-        // with the stall arm in, a chain restarted 9 to 16 times a run
-        // whatever RESTART_PATIENCE said, every 5 to 8k hops, shorter than
-        // the descent to the shelf.
-        (cfg.restart_on_stall && !std::env::var("RESTART_STALL_ARM").is_ok_and(|v| v == "0"))
-            .then_some("restart"),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    let stall_arms = stall_arms(cfg);
     let mut stall_allocator = crate::allocate::DepthAllocator::new(stall_arms.len().max(1));
     let mut last_polish_spent = 0usize;
     let mut soft_lambda = 0.0_f64;
@@ -2688,6 +2770,7 @@ where
     let mut orient_window = 0usize;
     let mut orient_yes = 0usize;
     let mut hops = 0usize;
+    let mut proposal_overlaps = 0usize;
     let mut checkpoint_hops = 0usize;
     let mut checkpoint_quench_start = 0usize;
     let mut checkpoint_transition_start = 0usize;
@@ -2701,10 +2784,15 @@ where
     let mut packing = packing_bank::PackingBank::new();
     let packing_cutoff = 1.2 * cfg.length_scale;
     // Hops elapsed when the ledger last recorded a lower minimum.
-    // A rigid reseed compares the live hop count with this stamp.
+    // A rigid stall measures 1000 hops from that hop count.
     let mut hops_at_lowest = 0usize;
     let mut csm_reseed_stamp = 0usize;
     let hop_room = |hops: usize| cfg.max_hops.is_none_or(|cap| hops < cap);
+    // Distinct minima a rigid chain has quenched. Its stall moves to one.
+    let mut stall_archive = crate::methods::stall_archive::StallArchive::default();
+    if cfg.move_library.is_rigid_body() {
+        stall_archive.offer(e, x.view());
+    }
 
     let stop = loop {
         if ledger.stopped() || ledger.target_reached() {
@@ -2722,77 +2810,27 @@ where
             csm_reseed_stamp = hops;
         }
         if cfg.move_library.is_rigid_body()
-            && crate::methods::rigid_quench::stagnation_restart(hops, hops_at_lowest)
+            && crate::methods::rigid_quench::stalled(hops, hops_at_lowest)
         {
-            // One hopping temperature above the target is still the basin the
-            // chain is trying to leave. A fresh cluster quenches far above
-            // that basin, and installing it spends the next thousand hops
-            // climbing back. Return the walker to the lowest minimum instead.
-            // Farther above the target, the fresh draw is the escape.
-            let acceptance = cfg.temperature * rigid_factor;
-            let near_target = ledger.target().is_some_and(|limit| {
-                ledger.best.is_finite() && ledger.best - limit <= acceptance.max(0.0)
-            });
-            if near_target {
-                hops_at_lowest = hops;
-                if let Some(state) = ledger.best_state.clone()
-                    && state.len() == x.len()
-                    && ledger.best + 1.0e-9 < e
-                {
-                    let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
-                    let ok = gradient
-                        .as_ref()
-                        .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len()));
-                    e = ledger.best;
-                    x = state;
-                    current_validation_gradient = gradient.filter(|_| ok);
-                }
-            } else {
-                let mut adopted: Option<(f64, Array1<f64>, Option<Array1<f64>>, bool)> = None;
-                for _attempt in 0..crate::methods::rigid_quench::RESEED_ATTEMPTS {
-                    if ledger.remaining() == 0 {
-                        break;
-                    }
-                    let fresh = random_rigid_reseed(cfg, rng);
-                    if fresh.len() != x.len() {
-                        continue;
-                    }
-                    let (energy, state) = relax(ledger, fresh.view(), cfg.relax_steps);
-                    if !energy.is_finite()
-                        || state.len() != x.len()
-                        || !quench_is_sane(cfg, energy, state.view())
-                    {
-                        continue;
-                    }
-                    let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
-                    let ok = gradient
-                        .as_ref()
-                        .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len()));
-                    let finished = ok;
-                    adopted = Some((energy, state, gradient, ok));
-                    if finished {
-                        break;
-                    }
-                }
-                // The clock resets whether or not a usable geometry came back,
-                // so a failed draw does not reseed on the next hop.
-                hops_at_lowest = hops;
-                if let Some((energy, state, gradient, ok)) = adopted {
-                    if ledger.below_target(energy) || ok {
-                        ledger.record(energy, state.view());
-                    }
-                    e = energy;
-                    x = state;
-                    current_validation_gradient = gradient.filter(|_| ok);
-                    orient_window = 0;
-                    orient_yes = 0;
-                    rigid_window = 0;
-                    rigid_hits = 0;
-                    if ledger.remaining() == 0 || ledger.target_reached() {
-                        break HopStop::of_closed(ledger);
-                    }
-                    continue;
-                }
+            // The stop target is never read here, and no cluster is drawn.
+            // The walker moves to the lowest minimum it has already quenched
+            // that is neither its own nor a recent stall destination. The
+            // ledger best is offered at every stall, so a walker away from
+            // it goes back there unless it did so in the last few stalls.
+            hops_at_lowest = hops;
+            if let Some(state) = ledger.best_state.as_ref() {
+                stall_archive.offer(ledger.best, state.view());
+            }
+            if let Some((energy, state)) = stall_archive.escape(e)
+                && state.len() == x.len()
+            {
+                let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
+                let ok = gradient
+                    .as_ref()
+                    .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len()));
+                e = energy;
+                x = state;
+                current_validation_gradient = gradient.filter(|_| ok);
             }
         }
         // The reoccupation move runs inside the chain and charges the
@@ -2822,7 +2860,12 @@ where
         let call_due = hops > 0
             && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1);
         let mut directed_leave = false;
-        if internal_action.is_none() && cfg.restart_on_stall && !cfg.escape_on_stall && call_due {
+        if internal_action.is_none()
+            && cfg.restart_on_stall
+            && !cfg.escape_on_stall
+            && !cfg.move_library.is_rigid_body()
+            && call_due
+        {
             let fresh = random_cluster(x.len() / 3, 0.7, cfg.min_separation, rng);
             let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
             charged_at_best = ledger.spent();
@@ -3611,7 +3654,12 @@ where
             ),
             _ => cfg.frozen.clone(),
         };
-        if let MoveLibrary::Molecular { reactive, .. } = &cfg.move_library {
+        if let MoveLibrary::Molecular {
+            reactive,
+            reverse_cycles,
+            ..
+        } = &cfg.move_library
+        {
             let fresh = match cfg.species.as_ref() {
                 Some(z) => connectivity_groups_z(x.view(), z, cfg.bond_tolerance),
                 None => connectivity_groups(x.view(), n, cfg.covalent_cutoff),
@@ -3634,6 +3682,7 @@ where
                 kernels = MoveLibrary::Molecular {
                     groups: movable,
                     reactive: *reactive,
+                    reverse_cycles: *reverse_cycles,
                 }
                 .kernels(cfg);
             }
@@ -3942,6 +3991,17 @@ where
                 };
             }
         }
+        // A high accepted minimum is a poor place to spend the next
+        // proposal. Water sets `incumbent_gap` so the hop leaves from
+        // the best minimum once the chain has climbed past that gap.
+        if cfg.incumbent_gap > 0.0
+            && e > ledger.best + cfg.incumbent_gap
+            && let Some(state) = ledger.best_state.clone()
+            && state.len() == x.len()
+        {
+            x = state;
+            e = ledger.best;
+        }
         let mut trial = if let Some(t) = hmc_trial {
             t
         } else if cov_fire {
@@ -4014,11 +4074,13 @@ where
         };
         // Identity SOAP is not an arm. Thompson must not buy a no-op:
         // reselect a real kernel, or skip the hop.
+        // A cycle reversal that finds no cycle returns the state unchanged too.
+        let may_idle = |name: &str| name == "soap" || name == "rcycle";
         if !species_escape_trial
             && !cov_fire
             && !soft_fire
             && !angular
-            && kernels[k].name() == "soap"
+            && may_idle(&kernels[k].name())
             && hop_is_identity(x.view(), trial.view())
         {
             let mut swapped = false;
@@ -4029,7 +4091,7 @@ where
                     (None, true) => allocator.select(rng),
                     (None, false) => rng.random_range(0..kernels.len()),
                 };
-                if kernels[k2].name() == "soap" {
+                if may_idle(&kernels[k2].name()) {
                     continue;
                 }
                 k = k2;
@@ -4112,6 +4174,27 @@ where
             && let Some(slice) = trial.as_slice_mut()
         {
             crate::potentials::fold_rotation_vectors(n, slice);
+        }
+
+        // A molecular potential refuses a pair closer than the overlap rule
+        // before it will compute an energy. The hop has to hand that potential
+        // a geometry the rule already accepts. Separation is geometry only.
+        // The raw overlapping proposal is not an energy call.
+        if cfg.species.is_some() && !structure_is_sane(trial.view(), OVERLAP_SEPARATION) {
+            proposal_overlaps += 1;
+            let separated = separate_to_overlap_rule(
+                &mut trial,
+                cfg.move_library.declared_groups(),
+                OVERLAP_SEPARATION,
+            );
+            if !separated {
+                hops += 1;
+                bias.deposit(x.view(), temperature);
+                if proposal_overlaps > ledger.budget().saturating_mul(4) {
+                    break HopStop::Budget;
+                }
+                continue;
+            }
         }
 
         // Screen cheaply, then carry on regardless. A screened trial does not
@@ -4202,7 +4285,7 @@ where
         // The species escape is already a point past a barrier. A 25-step
         // screen of that point falls back into the well it left, and the
         // return test then skips the quench. Relax it once, in full.
-        let quenched_in_place = rigid_quench || species_escape_trial;
+        let quenched_in_place = rigid_quench || species_escape_trial || cfg.quench_once;
         let (e_screen, x_screen) = relax(
             ledger,
             trial.view(),
@@ -4320,7 +4403,15 @@ where
             !cfg.move_library.is_rigid_body() && e_screen > ledger.best + cfg.screen_margin
         };
         let (e_new, x_new) = if quenched_in_place && known_stand_in.is_none() {
-            (e_screen, x_screen)
+            let mut out = (e_screen, x_screen);
+            // The rigid path stops at its cap. A water one-pass quench
+            // still continues while a point below the incumbent is
+            // descending, which is what the split path's second stage
+            // does through `finish_improving`.
+            if cfg.quench_once && cfg.finish_improving {
+                out = finish_improving(ledger, relax, out, cfg.relax_steps);
+            }
+            out
         } else if let Some((known_e, known_x)) = known_stand_in {
             // The refund: the basin is on file, its minimum stands in for
             // the descent, and the force calls the relaxation would have
@@ -5049,6 +5140,22 @@ where
                 c.observe(f.view(), e_new, e);
             }
         }
+        // Every hop, accepted or not, so a basin census can tell a minimum
+        // that was never proposed from one that was proposed and then lost
+        // to the return screen, the record gate or the acceptance test.
+        if std::env::var("ANNEAL_HOP_TRACE").is_ok() {
+            let max_gradient = validation_gradient
+                .as_ref()
+                .map(|g| g.iter().fold(0.0_f64, |m, v| m.max(v.abs())))
+                .unwrap_or(f64::NAN);
+            let coordinates: Vec<String> = x_new.iter().map(|v| format!("{v:.6}")).collect();
+            eprintln!(
+                "HOPTRACE {{\"hop\":{hops},\"spent\":{},\"arm\":\"{proposal_action}\",\"e\":{e:.8},\"e_screen\":{e_screen:.8},\"e_new\":{e_new:.8},\"best\":{:.8},\"drift\":{drift:.6},\"returning\":{returning},\"screened\":{screened_this},\"unquenched\":{unquenched},\"recordable\":{recordable},\"max_gradient\":{max_gradient:.6e},\"accept\":{accept},\"x\":[{}]}}",
+                ledger.spent(),
+                ledger.best,
+                coordinates.join(",")
+            );
+        }
         if accept && cfg.calibrate_radius {
             // How far this hop actually moved, in the metric the bias keys on.
             let d: f64 = s_old
@@ -5069,6 +5176,9 @@ where
         if accept {
             if !unquenched && cfg.packing_cna_applies() {
                 packing.offer(e_new, x_new.view(), packing_cutoff);
+            }
+            if !unquenched && cfg.move_library.is_rigid_body() {
+                stall_archive.offer(e_new, x_new.view());
             }
             // An accepted uphill step to a different basin samples the escape
             // distribution, which is the quantity the deposit height has to be
@@ -5292,49 +5402,61 @@ where
         }
         // Orbit completion of a newly entered basin: the core's point group
         // applied to the whole cluster, so surface atoms move onto the empty
-        // orbit positions the core implies. Same terms as the core
-        // symmetrisation above: once per new basin, quenched, offered.
+        // orbit positions the core implies. Once per new basin, every
+        // candidate the core asks for is quenched and recorded, and the
+        // lowest is offered to the acceptance rule.
+        let mut orbit_offer = None;
         if cfg.packing_surface().orbit_on_new
             && accept
             && hop_room(hops)
             && (moved_basin || cfg.point_symmetrise_every_accept)
-            && let Some(y) = crate::packing::on_new_basin(
+        {
+            for y in crate::packing::orbit_candidates(
                 x.view(),
                 n,
+                cfg.orbit_core,
                 cfg.symmetry_tolerance,
                 cfg.symmetry_merge_radius,
                 cfg.symmetrise_core_fraction,
                 cfg.min_separation,
-            )
-        {
-            let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
-            if es.is_finite() && xs.len() == x.len() {
-                let sym_gradient = record_quenched_answer(
-                    cfg,
-                    ledger,
-                    &mut grad,
-                    es,
-                    xs.view(),
-                    &mut unconverged_records,
-                );
-                hops += 1;
-                orbits_completed += 1;
-                let d = (es - e) / temperature.max(1e-12);
-                if d < 0.0 || rng.random::<f64>() < (-d).exp() {
-                    if es < e {
-                        orbit_gain += e - es;
-                    }
-                    adopt_minimum!(
+            ) {
+                let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
+                if es.is_finite() && xs.len() == x.len() {
+                    let sym_gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
                         es,
-                        xs,
-                        sym_gradient,
-                        None,
-                        AdoptionHistory::Fresh,
-                        None,
-                        Some("orbit-completion"),
-                        hops
+                        xs.view(),
+                        &mut unconverged_records,
                     );
+                    hops += 1;
+                    orbits_completed += 1;
+                    if orbit_offer
+                        .as_ref()
+                        .is_none_or(|(lowest, _, _)| es < *lowest)
+                    {
+                        orbit_offer = Some((es, xs, sym_gradient));
+                    }
                 }
+            }
+        }
+        if let Some((es, xs, sym_gradient)) = orbit_offer {
+            let d = (es - e) / temperature.max(1e-12);
+            if d < 0.0 || rng.random::<f64>() < (-d).exp() {
+                if es < e {
+                    orbit_gain += e - es;
+                }
+                adopt_minimum!(
+                    es,
+                    xs,
+                    sym_gradient,
+                    None,
+                    AdoptionHistory::Fresh,
+                    None,
+                    Some("orbit-completion"),
+                    hops
+                );
             }
         }
         // Graph edge + Fiedler deposit at the chain's current basin. Called
@@ -6350,6 +6472,7 @@ where
         screened_out,
         basins: n_basins,
         charged: ledger.spent(),
+        overlap_rejected: proposal_overlaps,
         returned,
         escape_scale: feedback.escape(),
         escape_threshold: feedback.threshold(),
@@ -6618,49 +6741,6 @@ pub fn random_cluster_in_radius<R: Rng + ?Sized>(
         }
     }
     out
-}
-
-/// Fresh rigid chart: centres in the container, rotations in `[-π, π]`.
-///
-/// GMIN draws rigid centres uniformly in a ball and draws a fresh
-/// angle-axis rotation for each body. This chart stores Rodrigues
-/// vectors, so the rotation block is uniform in that cube. A short
-/// placement falls back to a draw with no separation constraint.
-fn random_rigid_reseed<R: Rng + ?Sized>(cfg: &Config, rng: &mut R) -> Array1<f64> {
-    let n = cfg.n_points;
-    let radius = cfg.start_radius().max(1.0e-6);
-    let mut centres = random_cluster_in_radius(n, radius, cfg.min_separation, rng);
-    if centres.len() != 3 * n {
-        centres = random_cluster_in_radius(n, radius, 0.0, rng);
-    }
-    let mut x = Array1::zeros(6 * n);
-    let placed = centres.len() / 3;
-    for i in 0..placed.min(n) {
-        for k in 0..3 {
-            x[3 * i + k] = centres[3 * i + k];
-        }
-    }
-    for i in placed..n {
-        let mut v = [0.0; 3];
-        let mut norm = 0.0;
-        for k in 0..3 {
-            let u1: f64 = rng.random::<f64>().max(1e-12);
-            let u2: f64 = rng.random::<f64>();
-            v[k] = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
-            norm += v[k] * v[k];
-        }
-        let norm = norm.sqrt().max(1e-12);
-        let r = radius * rng.random::<f64>().cbrt();
-        for k in 0..3 {
-            x[3 * i + k] = v[k] / norm * r;
-        }
-    }
-    for i in 0..n {
-        for k in 0..3 {
-            x[3 * n + 3 * i + k] = rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
-        }
-    }
-    x
 }
 
 /// Convenience entry point seeding its own start.
@@ -6933,15 +7013,15 @@ mod tests {
         let der = Config::derived(13);
         assert!(matches!(der.move_library, MoveLibrary::LeanBurst));
         assert!(der.allocate_moves && der.depth_reward && der.tabu_on_stall);
-        assert!(der.escape_on_stall && der.restart_on_stall && der.trail_on_stall);
-        assert!(rec.escape_on_stall && rec.restart_on_stall && rec.trail_on_stall);
+        assert!(der.escape_on_stall && der.trail_on_stall && !der.restart_on_stall);
+        assert!(rec.escape_on_stall && rec.trail_on_stall && !rec.restart_on_stall);
         assert!(der.budget_window);
         assert!(der.bayes_screen);
         assert!(!rec.budget_window);
         assert!(rec.bayes_screen);
         assert!(matches!(
             Config::recommended(38).move_library,
-            MoveLibrary::Reseed
+            MoveLibrary::LeanBurst
         ));
         assert!(matches!(
             Config::recommended(75).move_library,
@@ -6990,6 +7070,16 @@ mod tests {
     }
 
     #[test]
+    fn a_rigid_chain_has_no_restart_among_its_stall_arms() {
+        let mut atomic = Config::recommended(6);
+        atomic.restart_on_stall = true;
+        assert_eq!(stall_arms(&atomic), ["trail", "climb", "restart"]);
+        let rigid = atomic.with_rigid_bodies(crate::potentials::gmin_water_geometry());
+        assert!(rigid.restart_on_stall);
+        assert!(!stall_arms(&rigid).contains(&"restart"));
+    }
+
+    #[test]
     fn packing_surface_names_twin_and_orbit_together() {
         let mut cfg = Config::for_cluster(13);
         assert!(!cfg.packing_surface().orbit_on_new);
@@ -6999,6 +7089,37 @@ mod tests {
         let surface = cfg.packing_surface();
         assert!(surface.orbit_on_new);
         assert!(surface.twin_as_move);
+    }
+
+    #[test]
+    fn the_dual_orbit_core_is_opt_in() {
+        let plain = Config::for_cluster(13);
+        assert_eq!(plain.orbit_core, OrbitCore::Fraction);
+        assert!(!plain.resolved_json().unwrap().contains("orbit_core"));
+        let dual = Config::for_cluster_dual_core(13);
+        assert!(dual.packing_surface().orbit_on_new);
+        assert_eq!(
+            dual.orbit_core,
+            OrbitCore::Both(crate::symmetrise::ShellCore::scaled(dual.length_scale))
+        );
+        assert!(dual.restart_on_stall);
+        assert!(!dual.escape_on_stall);
+        assert_eq!(dual.restart_patience, 4_000);
+        assert!(
+            dual.resolved_json()
+                .unwrap()
+                .contains(r#""orbit_core":{"both":"#)
+        );
+        assert_eq!(
+            dual.resolved_json().unwrap(),
+            Config::for_cluster(13)
+                .with_dual_orbit_core()
+                .resolved_json()
+                .unwrap()
+        );
+        let rigid = dual.with_rigid_bodies(crate::potentials::gmin_water_geometry());
+        assert!(!rigid.orbit_complete_on_new);
+        assert_eq!(rigid.orbit_core, OrbitCore::Fraction);
     }
 
     /// The claim the bank rests on: a bias handed to one chain and then to the
@@ -7430,6 +7551,30 @@ mod tests {
             1,
             "one well is one identity"
         );
+    }
+
+    #[test]
+    fn separated_groups_clear_the_overlap_rule_without_stretching_a_bond() {
+        let mut x = Array1::from(vec![
+            0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0, 0.10, 0.0, 0.0, 1.06, 0.0, 0.0, -0.14,
+            0.93, 0.0,
+        ]);
+        let groups = vec![vec![0, 1, 2], vec![3, 4, 5]];
+        let bond = |state: &Array1<f64>| {
+            let dx = state[3] - state[0];
+            let dy = state[4] - state[1];
+            let dz = state[5] - state[2];
+            (dx * dx + dy * dy + dz * dz).sqrt()
+        };
+        let before = bond(&x);
+        assert!(min_pair_distance(x.view()) < OVERLAP_SEPARATION);
+        assert!(separate_to_overlap_rule(
+            &mut x,
+            Some(&groups),
+            OVERLAP_SEPARATION
+        ));
+        assert!(min_pair_distance(x.view()) >= OVERLAP_SEPARATION);
+        assert!((bond(&x) - before).abs() < 1.0e-9);
     }
 
     #[test]

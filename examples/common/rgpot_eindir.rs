@@ -20,8 +20,55 @@ use rgpot_core::tensor::{rgpot_tensor_data, rgpot_tensor_owned_cpu_f64_2d};
 use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
 use std::ffi::c_void;
 use std::fs::File;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// Pair distance below which a geometry is an overlap, not a physical contact.
+/// Same threshold the cluster walk uses before it will record a molecular quench.
+const OVERLAP_SEPARATION_A: f64 = 0.35;
+
+static SCC_REJECTED: AtomicUsize = AtomicUsize::new(0);
+static GEOMETRY_REJECTED: AtomicUsize = AtomicUsize::new(0);
+
+/// How many xtb calls were rejected because the SCC did not return a finite result.
+pub(crate) fn scc_rejected_count() -> usize {
+    SCC_REJECTED.load(Ordering::Relaxed)
+}
+
+/// How many calls were refused before xtb because two atoms occupied the same place.
+pub(crate) fn geometry_rejected_count() -> usize {
+    GEOMETRY_REJECTED.load(Ordering::Relaxed)
+}
+
+fn note_scc_rejected(min_pair_a: f64) {
+    let n = SCC_REJECTED.fetch_add(1, Ordering::Relaxed) + 1;
+    eprintln!("scc_rejected {n} min_pair_A {min_pair_a:.6}");
+    let _ = io::stderr().flush();
+}
+
+fn note_geometry_rejected(min_pair_a: f64) {
+    let n = GEOMETRY_REJECTED.fetch_add(1, Ordering::Relaxed) + 1;
+    eprintln!("geometry_rejected {n} min_pair_A {min_pair_a:.6}");
+    let _ = io::stderr().flush();
+}
+
+fn min_pair_distance_a(positions: &[f64]) -> f64 {
+    let n = positions.len() / 3;
+    if n < 2 {
+        return f64::INFINITY;
+    }
+    let mut best = f64::INFINITY;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let dx = positions[3 * i] - positions[3 * j];
+            let dy = positions[3 * i + 1] - positions[3 * j + 1];
+            let dz = positions[3 * i + 2] - positions[3 * j + 2];
+            best = best.min((dx * dx + dy * dy + dz * dz).sqrt());
+        }
+    }
+    best
+}
 
 const GFN2: i32 = 3;
 
@@ -79,11 +126,244 @@ type XtbForce = unsafe extern "C" fn(
 type Cuh2Force =
     unsafe extern "C" fn(i32, *const f64, *const i32, *const f64, *mut f64, *mut f64) -> i32;
 
+unsafe extern "C" {
+    fn fork() -> i32;
+    fn pipe(fds: *mut i32) -> i32;
+    fn close(fd: i32) -> i32;
+    fn read(fd: i32, buf: *mut c_void, count: usize) -> isize;
+    fn write(fd: i32, buf: *const c_void, count: usize) -> isize;
+    fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
+    fn kill(pid: i32, sig: i32) -> i32;
+    fn _exit(code: i32) -> !;
+}
+
+fn write_full(fd: i32, mut bytes: &[u8]) -> bool {
+    while !bytes.is_empty() {
+        let n = unsafe { write(fd, bytes.as_ptr() as *const c_void, bytes.len()) };
+        if n <= 0 {
+            return false;
+        }
+        bytes = &bytes[n as usize..];
+    }
+    true
+}
+
+fn read_full(fd: i32, bytes: &mut [u8]) -> bool {
+    let mut filled = 0;
+    while filled < bytes.len() {
+        let n = unsafe {
+            read(
+                fd,
+                bytes[filled..].as_mut_ptr() as *mut c_void,
+                bytes.len() - filled,
+            )
+        };
+        if n <= 0 {
+            return false;
+        }
+        filled += n as usize;
+    }
+    true
+}
+
+/// Child side of one xtb evaluator. `ERROR STOP` ends this process only.
+unsafe fn xtb_worker_main(force: XtbForce, pot: *mut c_void, incoming: i32, outgoing: i32) -> ! {
+    loop {
+        let mut n_bytes = [0u8; 8];
+        if !read_full(incoming, &mut n_bytes) {
+            unsafe { _exit(0) };
+        }
+        let n = u64::from_ne_bytes(n_bytes);
+        if n == 0 || n > 10_000 {
+            unsafe { _exit(0) };
+        }
+        let n_atoms = n as usize;
+        let mut positions = vec![0.0f64; 3 * n_atoms];
+        let mut atomic_numbers = vec![0i32; n_atoms];
+        let mut cell = [0.0f64; 9];
+        let pos_bytes = unsafe {
+            std::slice::from_raw_parts_mut(positions.as_mut_ptr() as *mut u8, positions.len() * 8)
+        };
+        let z_bytes = unsafe {
+            std::slice::from_raw_parts_mut(
+                atomic_numbers.as_mut_ptr() as *mut u8,
+                atomic_numbers.len() * 4,
+            )
+        };
+        let cell_bytes =
+            unsafe { std::slice::from_raw_parts_mut(cell.as_mut_ptr() as *mut u8, 9 * 8) };
+        if !read_full(incoming, pos_bytes)
+            || !read_full(incoming, z_bytes)
+            || !read_full(incoming, cell_bytes)
+        {
+            unsafe { _exit(0) };
+        }
+        let mut gradient = vec![0.0f64; 3 * n_atoms];
+        let mut energy = 0.0f64;
+        let mut variance = 0.0f64;
+        let rc = unsafe {
+            force(
+                pot,
+                n as i64,
+                positions.as_ptr(),
+                atomic_numbers.as_ptr(),
+                gradient.as_mut_ptr(),
+                &mut energy,
+                &mut variance,
+                cell.as_ptr(),
+            )
+        };
+        let mut message = Vec::with_capacity(4 + 8 + 8 + gradient.len() * 8);
+        message.extend_from_slice(&rc.to_ne_bytes());
+        message.extend_from_slice(&energy.to_ne_bytes());
+        message.extend_from_slice(&variance.to_ne_bytes());
+        let grad_bytes = unsafe {
+            std::slice::from_raw_parts(gradient.as_ptr() as *const u8, gradient.len() * 8)
+        };
+        message.extend_from_slice(grad_bytes);
+        if !write_full(outgoing, &message) {
+            unsafe { _exit(0) };
+        }
+    }
+}
+
+enum WorkerFail {
+    Dead,
+    Rejected,
+}
+
+struct XtbWorker {
+    pid: i32,
+    to_child: i32,
+    from_child: i32,
+    force: XtbForce,
+    pot: *mut c_void,
+}
+
+impl XtbWorker {
+    fn spawn(force: XtbForce, pot: *mut c_void) -> Self {
+        unsafe {
+            let mut to_child = [0i32; 2];
+            let mut from_child = [0i32; 2];
+            if pipe(to_child.as_mut_ptr()) != 0 || pipe(from_child.as_mut_ptr()) != 0 {
+                panic!("xtb worker pipe failed");
+            }
+            let pid = fork();
+            if pid < 0 {
+                panic!("xtb worker fork failed");
+            }
+            if pid == 0 {
+                close(to_child[1]);
+                close(from_child[0]);
+                xtb_worker_main(force, pot, to_child[0], from_child[1]);
+            }
+            close(to_child[0]);
+            close(from_child[1]);
+            Self {
+                pid,
+                to_child: to_child[1],
+                from_child: from_child[0],
+                force,
+                pot,
+            }
+        }
+    }
+
+    fn shutdown(&mut self) {
+        if self.pid <= 0 {
+            return;
+        }
+        let pid = self.pid;
+        self.pid = 0;
+        unsafe {
+            close(self.to_child);
+            close(self.from_child);
+            let mut status = 0;
+            // WNOHANG: a child that already died from ERROR STOP must be reaped
+            // without signalling a pid that the kernel may have reused.
+            if waitpid(pid, &mut status, 1) == 0 {
+                kill(pid, 9);
+                waitpid(pid, &mut status, 0);
+            }
+        }
+    }
+
+    /// One energy and gradient. A dead child is replaced; the geometry is not retried.
+    fn evaluate(
+        &mut self,
+        n: usize,
+        positions: &[f64],
+        atomic_numbers: &[i32],
+        cell: &[f64],
+        gradient: &mut [f64],
+    ) -> Result<(f64, f64), WorkerFail> {
+        match self.exchange(n, positions, atomic_numbers, cell, gradient) {
+            Ok(answer) => Ok(answer),
+            Err(WorkerFail::Rejected) => Err(WorkerFail::Rejected),
+            Err(WorkerFail::Dead) => {
+                let force = self.force;
+                let pot = self.pot;
+                self.shutdown();
+                *self = Self::spawn(force, pot);
+                Err(WorkerFail::Dead)
+            }
+        }
+    }
+
+    fn exchange(
+        &mut self,
+        n: usize,
+        positions: &[f64],
+        atomic_numbers: &[i32],
+        cell: &[f64],
+        gradient: &mut [f64],
+    ) -> Result<(f64, f64), WorkerFail> {
+        let mut request =
+            Vec::with_capacity(8 + positions.len() * 8 + atomic_numbers.len() * 4 + 72);
+        request.extend_from_slice(&(n as u64).to_ne_bytes());
+        let pos_bytes = unsafe {
+            std::slice::from_raw_parts(positions.as_ptr() as *const u8, positions.len() * 8)
+        };
+        let z_bytes = unsafe {
+            std::slice::from_raw_parts(
+                atomic_numbers.as_ptr() as *const u8,
+                atomic_numbers.len() * 4,
+            )
+        };
+        let cell_bytes = unsafe { std::slice::from_raw_parts(cell.as_ptr() as *const u8, 72) };
+        request.extend_from_slice(pos_bytes);
+        request.extend_from_slice(z_bytes);
+        request.extend_from_slice(cell_bytes);
+        if !write_full(self.to_child, &request) {
+            return Err(WorkerFail::Dead);
+        }
+        let mut header = [0u8; 4 + 8 + 8];
+        if !read_full(self.from_child, &mut header) {
+            return Err(WorkerFail::Dead);
+        }
+        let rc = i32::from_ne_bytes(header[0..4].try_into().unwrap());
+        let energy = f64::from_ne_bytes(header[4..12].try_into().unwrap());
+        let variance = f64::from_ne_bytes(header[12..20].try_into().unwrap());
+        let grad_bytes = unsafe {
+            std::slice::from_raw_parts_mut(gradient.as_mut_ptr() as *mut u8, gradient.len() * 8)
+        };
+        if !read_full(self.from_child, grad_bytes) {
+            return Err(WorkerFail::Dead);
+        }
+        if rc != 0 || !energy.is_finite() || gradient.iter().any(|value| !value.is_finite()) {
+            return Err(WorkerFail::Rejected);
+        }
+        let _ = variance;
+        Ok((energy, variance))
+    }
+}
+
 struct XtbKernel {
     _lib: Library,
     pot: *mut c_void,
     force: Symbol<'static, XtbForce>,
     destroy: Symbol<'static, XtbDestroy>,
+    worker: XtbWorker,
     evaluations: usize,
     /// Force buffer reused across calls. The owned DLPack tensor copies
     /// it before the callback returns.
@@ -92,6 +372,7 @@ struct XtbKernel {
 
 impl Drop for XtbKernel {
     fn drop(&mut self) {
+        self.worker.shutdown();
         unsafe { (self.destroy)(self.pot) };
     }
 }
@@ -167,14 +448,21 @@ unsafe extern "C" fn xtb_callback(
         kernel.scratch.resize(3 * n, 0.0);
     }
     kernel.scratch.fill(0.0);
-    let mut energy = 0.0;
-    let mut var = 0.0;
     kernel.evaluations += 1;
+    let positions = unsafe { std::slice::from_raw_parts(pos, 3 * n) };
+    let atomic_numbers = unsafe { std::slice::from_raw_parts(z, n) };
+    let cell = unsafe { std::slice::from_raw_parts(boxp, 9) };
+    let min_pair = min_pair_distance_a(positions);
+    if min_pair < OVERLAP_SEPARATION_A {
+        // xtb's SCC aborts when a trial step stacks two atoms. That geometry
+        // is not an energy the search can record. The caller turns the error
+        // into an uphill step and shortens it, so a finite quench stays eligible.
+        note_geometry_rejected(min_pair);
+        return rgpot_status_t::RGPOT_INTERNAL_ERROR;
+    }
     if let Some(path) = env_path("RGPOT_XTB_TRACE")
         && let Ok(mut trace) = File::create(path)
     {
-        let positions = unsafe { std::slice::from_raw_parts(pos, 3 * n) };
-        let atomic_numbers = unsafe { std::slice::from_raw_parts(z, n) };
         let _ = writeln!(trace, "{n}");
         let _ = writeln!(trace, "rgpot xtb evaluation {}", kernel.evaluations);
         for i in 0..n {
@@ -188,21 +476,18 @@ unsafe extern "C" fn xtb_callback(
             );
         }
     }
-    let rc = unsafe {
-        (kernel.force)(
-            kernel.pot,
-            n as i64,
-            pos,
-            z,
-            kernel.scratch.as_mut_ptr(),
-            &mut energy,
-            &mut var,
-            boxp,
-        )
-    };
-    if rc != 0 || !energy.is_finite() {
-        return rgpot_status_t::RGPOT_INTERNAL_ERROR;
-    }
+    let (energy, var) =
+        match kernel
+            .worker
+            .evaluate(n, positions, atomic_numbers, cell, &mut kernel.scratch)
+        {
+            Ok(answer) => answer,
+            Err(_) => {
+                note_scc_rejected(min_pair);
+                kernel.scratch.fill(f64::NAN);
+                return rgpot_status_t::RGPOT_INTERNAL_ERROR;
+            }
+        };
     out.energy = energy;
     out.variance = var;
     out.forces = unsafe { rgpot_tensor_owned_cpu_f64_2d(kernel.scratch.as_ptr(), n as i64, 3) };
@@ -329,11 +614,14 @@ impl RgpotObjective {
         let destroy = unsafe {
             std::mem::transmute::<Symbol<XtbDestroy>, Symbol<'static, XtbDestroy>>(destroy)
         };
+        let force_fn: XtbForce = *force;
+        let worker = XtbWorker::spawn(force_fn, pot);
         let kernel = Box::new(XtbKernel {
             _lib: lib,
             pot,
             force,
             destroy,
+            worker,
             evaluations: 0,
             scratch: Vec::new(),
         });

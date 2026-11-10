@@ -1,0 +1,139 @@
+#+TITLE: Find a water cluster minimum
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+#+begin_export rst
+===============================
+Find a water cluster minimum
+===============================
+#+end_export
+
+In this tutorial you run the rigid basin-hopping search on twelve water molecules.
+The water model is the transferable intermolecular potential with four points (TIP4P).
+You read its summary, plot its trace, and check the result against the published minimum.
+
+To run the search and plot its trace you need Rust 1.88 or newer, which this crate requires, and Python with matplotlib.
+Everything runs from the repository root.
+
+* Build the driver
+
+=examples/h2h_seed= runs one seed of one search and writes its results.
+Build it in release mode.
+
+#+begin_src sh
+cargo build --release --locked --example h2h_seed
+#+end_src
+
+Cargo puts the binary in the target directory that =.cargo/config.toml= names, so the next step runs it through =cargo run=.
+
+* Run one search
+
+Run twelve molecules on seed 100 with 500,000 calls into the potential.
+The fifth argument to the driver, =100=, is the seed.
+=recommended= picks =Config::recommended_tip4p=.
+The =-= says not to stop early.
+The last argument is the prefix of the output files.
+
+#+begin_src sh
+cargo run --release --locked --example h2h_seed -- tip4p 12 0 500000 100 recommended - tip4p_n12_s100
+#+end_src
+
+The run takes a few seconds and prints a summary.
+
+#+begin_example
+system: tip4p
+n: 12
+rho: 0
+seed: 100
+arm: recommended
+budget: 500000
+calls: 500000
+charged: 500000
+lowest: -479.3167953411
+geometry_energy: -479.3167953411
+best: -479.3167953411
+hops: 6206
+basins: 1472
+wall_seconds: 3.379
+#+end_example
+
+=wall_seconds= depends on your machine.
+Every other line is the same on every run, because the search is deterministic for a given seed.
+
+The =lowest= line is the lowest energy in kJ/mol over all 500,000 calls.
+The Cambridge Cluster Database lists -492.90824 for twelve TIP4P molecules.
+This run ends 13.591445 kJ/mol above that value, so it is not a hit.
+A hit has to come within 0.01 of the value.
+
+* Read the trace
+
+The run also wrote two files.
+
+- =tip4p_n12_s100.trace.csv= :: one row per new lowest energy, with the call at which it appeared.
+- =tip4p_n12_s100.xyz= :: the lowest geometry, as O, H and H per molecule.
+
+Plot the trace against the Cambridge value.
+Save this as =plot_trace.py= and run it.
+
+#+begin_src python
+import csv
+
+import matplotlib.pyplot as plt
+
+cambridge = -492.90824
+calls, gap = [], []
+with open("tip4p_n12_s100.trace.csv") as f:
+    for row in csv.DictReader(f):
+        calls.append(int(row["calls"]))
+        gap.append(float(row["energy"]) - cambridge)
+
+hits = [c for c, g in zip(calls, gap) if g <= 0.01]
+print("first hit:", hits[0] if hits else "none")
+print(f"last new lowest: call {calls[-1]}, {gap[-1]:.6f} above")
+
+fig, ax = plt.subplots(figsize=(6, 3.5))
+ax.step(calls + [500000], gap + [gap[-1]], where="post")
+ax.axhline(0.01, color="black", lw=0.8, ls="--", label="Cambridge value plus 0.01")
+ax.set_xscale("log")
+ax.set_yscale("symlog", linthresh=0.001)
+ax.set_ylim(bottom=-0.002)
+ax.set_xlabel("calls")
+ax.set_ylabel("lowest energy minus Cambridge, kJ/mol")
+ax.legend()
+fig.tight_layout()
+fig.savefig("tip4p_n12_s100.png", dpi=150)
+#+end_src
+
+The script prints the first call that reached the hit level, and the last new lowest energy.
+The plot carries the last value on to the end of the budget.
+
+#+begin_example
+first hit: none
+last new lowest: call 11751, 13.591445 above
+#+end_example
+
+#+begin_export rst
+.. image:: /_static/water-cycle-trace.png
+   :alt: Lowest energy of the twelve-molecule run against calls.
+         It falls to 28.4 kJ/mol above the Cambridge value by about 600 calls, steps down to 13.59 kJ/mol above by call 11,751, and stays there to 500,000 calls, above the hit level.
+#+end_export
+
+By call 631 the lowest energy is 28.36 kJ/mol above the Cambridge value.
+Over the next 10,000 calls it comes down in small steps, to 17.50 kJ/mol above by call 10,394.
+At call 11,408 a quench starts lower, and by call 11,467 it settles 13.974042 kJ/mol above.
+At call 11,710 another quench goes below that, and by call 11,751 it settles 13.591445 kJ/mol above.
+The search spends the remaining 488,249 calls without finding anything lower.
+
+That last quench settles in a trap.
+Its minimum has 18 hydrogen bonds, against 20 in the lowest twelve-molecule minimum, and its oxygens form a different network.
+[[file:../explanation/water-cycle-reversal.org][Hydrogen-bond cycle reversal]] says how often runs end there, with and without the cycle reversal.
+
+* What you did
+
+You ran the TIP4P search on one seed and read its summary.
+You plotted its trace, found that it never reached the published minimum, and saw where it stopped improving.
+
+* Next steps
+
+- [[file:../howto/tip4p-cycle-reversal.org][Turn hydrogen-bond cycle reversal off]] shows how to switch one move off and count what each move did.
+- [[file:../explanation/water-cycle-reversal.org][Hydrogen-bond cycle reversal]] explains the moves the search makes and what the cycle reversal changes.
+- [[file:../reference/rigid-water-moves.org][Rigid water moves]] lists the moves, their settings and the driver's outputs.

@@ -650,7 +650,23 @@ pub fn complete_orbits(
     if n == 0 || group.len() < 2 {
         return None;
     }
-    let c = centroid(x, n);
+    complete_orbits_about(x, n, group, centroid(x, n), pair_cutoff, min_separation)
+}
+
+/// [`complete_orbits`] with the group acting about `c` rather than the
+/// centroid, for a group read off a core whose centre is not the
+/// centroid of the whole structure.
+pub fn complete_orbits_about(
+    x: ArrayView1<f64>,
+    n: usize,
+    group: &[Rot],
+    c: [f64; 3],
+    pair_cutoff: f64,
+    min_separation: f64,
+) -> Option<Array1<f64>> {
+    if n == 0 || group.len() < 2 {
+        return None;
+    }
     let rel =
         |a: usize| -> [f64; 3] { [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]] };
     // Sites: merged images, with their support (images landing on them).
@@ -801,6 +817,315 @@ pub fn orbit_complete_core(
         return None;
     }
     complete_orbits(x, n, &group, pair_cutoff, min_separation)
+}
+
+/// How [`shell_core_group`] finds a core and reads its point group, after
+/// the `SYMMETRY` routine in Wales's GMIN.
+///
+/// The centre is the centroid weighted by `exp(-decay r)`, iterated until
+/// it moves less than `centre_step`, then moved to the plain centroid of
+/// the points inside the widest gap in distance from it. Points whose
+/// sorted distances from the centre differ by less than `shell_width` form
+/// a shell, and shells are added from the inside until [`detect_all`] at
+/// `tolerance` finds an operation, giving up past `max_points` points.
+/// Each operation found is refined to the orthogonal map that best carries
+/// the core onto the partners it matches, and the refined set is closed by
+/// [`close_group`] at `closure`, at most `cap` elements.
+///
+/// The core is small and found by its own radial structure, so a disordered
+/// surface does not enter detection; and the closure is tolerant, so
+/// operations that are only approximately commensurate still close into
+/// the group they approximate rather than running to the cap.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub struct ShellCore {
+    /// Rate of the exponential weights of the first centre, per length.
+    pub decay: f64,
+    /// Movement below which the weighted centre counts as converged.
+    pub centre_step: f64,
+    /// Largest gap in distance from the centre within one shell.
+    pub shell_width: f64,
+    /// Most points the core may have.
+    pub max_points: usize,
+    /// Largest deviation, as in [`detect_all`], of an operation of the core.
+    pub tolerance: f64,
+    /// Largest difference in any matrix element between two products that
+    /// [`close_group`] counts as one operation.
+    pub closure: f64,
+    /// Most elements of the closed group.
+    pub cap: usize,
+}
+
+impl ShellCore {
+    /// GMIN's 75-point `SYMMETRISE` settings where it has one (`DISTFAC`
+    /// 2.4, `SYMTOL1` 0.01, `MATDIFF` 0.27), a 0.1 detection tolerance, and
+    /// the 120 elements of the full icosahedral group, at `length`.
+    pub fn scaled(length: f64) -> Self {
+        Self {
+            decay: 2.4 / length,
+            centre_step: 1e-4 * length,
+            shell_width: 0.01 * length,
+            max_points: 20,
+            tolerance: 0.1 * length,
+            closure: 0.27,
+            cap: 120,
+        }
+    }
+}
+
+/// A point group read off a core, with the centre it acts about.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoreGroup {
+    /// The closed group, identity first.
+    pub group: Vec<Rot>,
+    /// Indices of the core's points.
+    pub core: Vec<usize>,
+    /// The centre the group acts about.
+    pub centre: [f64; 3],
+}
+
+fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+}
+
+fn point(x: ArrayView1<f64>, a: usize) -> [f64; 3] {
+    [x[3 * a], x[3 * a + 1], x[3 * a + 2]]
+}
+
+fn centroid_of(x: ArrayView1<f64>, idx: &[usize]) -> [f64; 3] {
+    let mut c = [0.0; 3];
+    for &a in idx {
+        for k in 0..3 {
+            c[k] += x[3 * a + k];
+        }
+    }
+    for v in c.iter_mut() {
+        *v /= idx.len().max(1) as f64;
+    }
+    c
+}
+
+fn transpose(a: &Rot) -> Rot {
+    let mut o = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            o[i][j] = a[j][i];
+        }
+    }
+    o
+}
+
+fn inverse(a: &Rot) -> Option<Rot> {
+    let det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1])
+        - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+        + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+    if det.abs() < 1e-12 {
+        return None;
+    }
+    let mut o = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            let (i1, i2) = ((j + 1) % 3, (j + 2) % 3);
+            let (j1, j2) = ((i + 1) % 3, (i + 2) % 3);
+            o[i][j] = (a[i1][j1] * a[i2][j2] - a[i1][j2] * a[i2][j1]) / det;
+        }
+    }
+    Some(o)
+}
+
+fn operation(c: &Candidate) -> Rot {
+    if c.improper {
+        mirror_matrix(c.axis)
+    } else {
+        rot_matrix(c.axis, 2.0 * std::f64::consts::PI / c.order.max(2) as f64)
+    }
+}
+
+/// The orthogonal map nearest `g` that carries the points of `core`
+/// (relative to the centre) onto the partners `g` matches them to: the
+/// orthogonal polar factor of `sum q p^T` over each point `p` and the
+/// point `q` nearest its image, by Newton's iteration, which keeps the
+/// sign of the determinant. `g` itself when that sum is singular.
+pub fn refine_operation(g: &Rot, core: &[[f64; 3]]) -> Rot {
+    let mut h = [[0.0; 3]; 3];
+    for p in core {
+        let w = act(g, *p);
+        let q = core
+            .iter()
+            .min_by(|a, b| {
+                distance(**a, w)
+                    .partial_cmp(&distance(**b, w))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .copied()
+            .unwrap_or(w);
+        for i in 0..3 {
+            for j in 0..3 {
+                h[i][j] += q[i] * p[j];
+            }
+        }
+    }
+    let mut x = h;
+    for _ in 0..60 {
+        let Some(inv) = inverse(&x) else { return *g };
+        let it = transpose(&inv);
+        let mut next = [[0.0; 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                next[i][j] = 0.5 * (x[i][j] + it[i][j]);
+            }
+        }
+        x = next;
+    }
+    x
+}
+
+/// The group generated by `gens`, counting two products as one operation
+/// when every matrix element agrees to `closure`, at most `cap` elements.
+///
+/// [`generate_group`] compares to `1e-6`, which is right for exact
+/// operations and wrong for approximate ones: two products of slightly
+/// incommensurate generators differ by more than that, so the closure
+/// never stops and the group runs to its cap. GMIN compares the same way
+/// at `MATDIFF`.
+pub fn close_group(gens: &[Rot], closure: f64, cap: usize) -> Vec<Rot> {
+    let same =
+        |a: &Rot, b: &Rot| (0..3).all(|i| (0..3).all(|j| (a[i][j] - b[i][j]).abs() <= closure));
+    let identity: Rot = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut group = vec![identity];
+    for g in gens {
+        if !group.iter().any(|q| same(q, g)) {
+            group.push(*g);
+        }
+    }
+    let mut changed = true;
+    while changed && group.len() < cap {
+        changed = false;
+        let snapshot = group.clone();
+        'outer: for a in &snapshot {
+            for b in &snapshot {
+                let p = mul(a, b);
+                if !group.iter().any(|q| same(q, &p)) {
+                    group.push(p);
+                    changed = true;
+                    if group.len() >= cap {
+                        break 'outer;
+                    }
+                }
+            }
+        }
+    }
+    group
+}
+
+/// The point group of the innermost shells of `x`, as [`ShellCore`]
+/// describes. `None` when no core of at most `spec.max_points` points has
+/// an operation.
+pub fn shell_core_group(x: ArrayView1<f64>, n: usize, spec: &ShellCore) -> Option<CoreGroup> {
+    if n < 4 {
+        return None;
+    }
+    let mut c = centroid(x, n);
+    for _ in 0..200 {
+        let mut num = [0.0; 3];
+        let mut den = 0.0;
+        for a in 0..n {
+            let w = (-spec.decay * distance(point(x, a), c)).exp();
+            for k in 0..3 {
+                num[k] += w * x[3 * a + k];
+            }
+            den += w;
+        }
+        let next = [num[0] / den, num[1] / den, num[2] / den];
+        let step = distance(next, c);
+        c = next;
+        if step < spec.centre_step {
+            break;
+        }
+    }
+    let by_radius = |c: [f64; 3]| {
+        let mut radii: Vec<(f64, usize)> = (0..n).map(|a| (distance(point(x, a), c), a)).collect();
+        radii.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
+        radii
+    };
+    let radii = by_radius(c);
+    let mut gap = -1.0;
+    let mut inside = 1;
+    for j in 1..n {
+        let d = radii[j].0 - radii[j - 1].0;
+        if d > gap {
+            gap = d;
+            inside = j;
+        }
+    }
+    let inner: Vec<usize> = radii[..inside].iter().map(|p| p.1).collect();
+    let c = centroid_of(x, &inner);
+    let radii = by_radius(c);
+    let mut m = 0;
+    while m < n {
+        let mut e = m + 1;
+        while e < n && radii[e].0 - radii[e - 1].0 < spec.shell_width {
+            e += 1;
+        }
+        m = e;
+        if m > spec.max_points {
+            return None;
+        }
+        if m <= 3 {
+            continue;
+        }
+        let core: Vec<usize> = radii[..m].iter().map(|p| p.1).collect();
+        let rel: Vec<[f64; 3]> = core
+            .iter()
+            .map(|&a| [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]])
+            .collect();
+        let mut cx = Array1::<f64>::zeros(3 * m);
+        for (k, p) in rel.iter().enumerate() {
+            for d in 0..3 {
+                cx[3 * k + d] = p[d];
+            }
+        }
+        let cands = detect_all(cx.view(), m, &[2, 3, 4, 5, 6], spec.tolerance);
+        if cands.is_empty() {
+            continue;
+        }
+        let mut picked: Vec<Candidate> = Vec::new();
+        for cand in &cands {
+            let seen = picked.iter().any(|g| {
+                let dot =
+                    g.axis[0] * cand.axis[0] + g.axis[1] * cand.axis[1] + g.axis[2] * cand.axis[2];
+                dot.abs() > 0.995 && g.improper == cand.improper
+            });
+            if !seen {
+                picked.push(*cand);
+            }
+        }
+        let gens: Vec<Rot> = picked
+            .iter()
+            .map(|g| refine_operation(&operation(g), &rel))
+            .collect();
+        let group = close_group(&gens, spec.closure, spec.cap);
+        return Some(CoreGroup {
+            group,
+            core,
+            centre: c,
+        });
+    }
+    None
+}
+
+/// Orbit completion with the point group of the innermost shells
+/// ([`shell_core_group`]), every atom placed about the core's centre by
+/// [`complete_orbits_about`]. `None` when the core has no group or nothing
+/// moves.
+pub fn orbit_complete_shells(
+    x: ArrayView1<f64>,
+    n: usize,
+    spec: &ShellCore,
+    pair_cutoff: f64,
+    min_separation: f64,
+) -> Option<Array1<f64>> {
+    let core = shell_core_group(x, n, spec)?;
+    complete_orbits_about(x, n, &core.group, core.centre, pair_cutoff, min_separation)
 }
 
 /// Detects and applies in one step, or returns `None` when there is no
@@ -1262,5 +1587,153 @@ mod orbit_tests {
                 "vertex not on its site"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod shell_tests {
+    use super::*;
+    use ndarray::Array1;
+
+    fn icosahedron() -> Vec<[f64; 3]> {
+        let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let s = 1.0 / (1.0 + phi * phi).sqrt();
+        let mut out = Vec::new();
+        for a in [-1.0, 1.0] {
+            for b in [-1.0, 1.0] {
+                out.push([0.0, a * s, b * phi * s]);
+                out.push([a * s, b * phi * s, 0.0]);
+                out.push([b * phi * s, 0.0, a * s]);
+            }
+        }
+        out
+    }
+
+    /// A centred icosahedron of radius one, each coordinate moved by up to
+    /// `amp`, then a disordered surface on one side only, so the centroid
+    /// of the whole is well away from the core's centre.
+    fn centred_icosahedron_under_a_one_sided_surface(amp: f64) -> (Array1<f64>, usize) {
+        let mut points = vec![[0.0; 3]];
+        points.extend(icosahedron());
+        for i in 0..10 {
+            let a = 2.0 * std::f64::consts::PI * (i as f64) * 0.618_034;
+            let r = 1.9 + 0.05 * ((i % 3) as f64);
+            let z = 0.35 + 0.6 * ((i * 7 % 10) as f64) / 10.0;
+            let rho = (1.0 - z * z).sqrt();
+            points.push([r * rho * a.cos(), r * rho * a.sin(), r * z]);
+        }
+        let mut x = Array1::from(points.iter().flatten().copied().collect::<Vec<f64>>());
+        for (i, v) in x.iter_mut().enumerate().take(3 * 13) {
+            *v += amp * (((i * 37 + 11) % 17) as f64 / 8.0 - 1.0);
+        }
+        (x, points.len())
+    }
+
+    fn spread(x: ArrayView1<f64>) -> f64 {
+        let c = point(x, 0);
+        let r: Vec<f64> = (1..13).map(|a| distance(point(x, a), c)).collect();
+        r.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+            - r.iter().copied().fold(f64::INFINITY, f64::min)
+    }
+
+    /// Two two-fold axes a few degrees from perpendicular are close to a
+    /// dihedral group of order ten with the five-fold, and nowhere near any
+    /// exact group: compared to `1e-6` their products never repeat, so an
+    /// exact closure runs to its cap, while a tolerant one stops at ten.
+    #[test]
+    fn a_tolerant_closure_stops_at_the_group_the_operations_approximate() {
+        let tilt = 0.03_f64;
+        let near = [
+            Candidate {
+                axis: [0.0, 0.0, 1.0],
+                order: 5,
+                improper: false,
+                deviation: 0.0,
+            },
+            Candidate {
+                axis: [tilt.cos(), 0.0, tilt.sin()],
+                order: 2,
+                improper: false,
+                deviation: 0.0,
+            },
+        ];
+        assert_eq!(generate_group(&near, 48).len(), 48);
+        let gens: Vec<Rot> = near.iter().map(operation).collect();
+        assert_eq!(close_group(&gens, 0.27, 120).len(), 10);
+        assert_eq!(close_group(&gens, 1e-6, 120).len(), 120);
+    }
+
+    /// Refinement replaces an operation by the orthogonal map that carries
+    /// the points onto the partners it matched, so a five-fold axis read a
+    /// few degrees off comes back as the exact five-fold of the points.
+    #[test]
+    fn refinement_recovers_the_exact_operation_of_the_points() {
+        let mut core = vec![[0.0; 3]];
+        core.extend(icosahedron());
+        let v = core[1];
+        let exact = rot_matrix(v, 2.0 * std::f64::consts::PI / 5.0);
+        let off = normalise([v[0] + 0.04, v[1] - 0.03, v[2]]).unwrap();
+        let rough = rot_matrix(off, 2.0 * std::f64::consts::PI / 5.0);
+        let refined = refine_operation(&rough, &core);
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!(
+                    (refined[i][j] - exact[i][j]).abs() < 1e-9,
+                    "element ({i}, {j}) is {} against {}",
+                    refined[i][j],
+                    exact[i][j]
+                );
+            }
+        }
+    }
+
+    /// The case the shell core exists for: a surface heavy on one side
+    /// moves the centroid and fills the innermost fraction with surface
+    /// points, while the weighted centre stays on the core and the first
+    /// shell that carries an operation is the icosahedron itself.
+    #[test]
+    fn the_shell_core_reads_the_core_group_through_a_one_sided_surface() {
+        let (x, n) = centred_icosahedron_under_a_one_sided_surface(0.003);
+        let core = shell_core_group(x.view(), n, &ShellCore::scaled(1.0)).expect("a core group");
+        assert_eq!(core.core.len(), 13);
+        assert!(
+            core.core.iter().all(|&a| a < 13),
+            "a surface point in the core"
+        );
+        assert_eq!(core.group.len(), 60, "the icosahedral rotations");
+        assert!(distance(core.centre, point(x.view(), 0)) < 0.01);
+        assert!(distance(centroid(x.view(), n), point(x.view(), 0)) > 0.3);
+    }
+
+    /// Completion about the core's centre puts the jittered core back on
+    /// one radius and leaves the count of points as it was.
+    #[test]
+    fn completion_on_the_shell_core_closes_the_core_onto_its_orbit() {
+        let (x, n) = centred_icosahedron_under_a_one_sided_surface(0.003);
+        let y = orbit_complete_shells(x.view(), n, &ShellCore::scaled(1.0), 0.3, 0.5)
+            .expect("the jittered core moves");
+        assert_eq!(y.len(), x.len());
+        let (before, after) = (spread(x.view()), spread(y.view()));
+        assert!(
+            after < 0.1 * before,
+            "radial spread {before} became {after}"
+        );
+    }
+
+    /// Shells are whole: a first shell with more points than the core may
+    /// have is not cut down to size, and there is no shell group.
+    #[test]
+    fn a_first_shell_past_the_largest_core_gives_no_group() {
+        let (x, n) = centred_icosahedron_under_a_one_sided_surface(0.0);
+        let spec = ShellCore {
+            max_points: 12,
+            ..ShellCore::scaled(1.0)
+        };
+        assert!(shell_core_group(x.view(), n, &spec).is_none());
+        let spec = ShellCore {
+            max_points: 13,
+            ..spec
+        };
+        assert!(shell_core_group(x.view(), n, &spec).is_some());
     }
 }
