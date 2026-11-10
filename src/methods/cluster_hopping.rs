@@ -2770,6 +2770,12 @@ where
                 }
             }
             if let Some(action) = action {
+                if std::env::var("ANNEAL_ACC_TRACE").is_ok() {
+                    eprintln!(
+                        "ACCTRACE hop {} e {:.6} arm {action} ord 0/0/0",
+                        $hop, destination.energy
+                    );
+                }
                 accepted_transitions.push(AcceptedTransition {
                     hop: $hop,
                     action: String::from(action),
@@ -5940,15 +5946,17 @@ where
                     current_validation_gradient = other_gradient;
                 }
             }
-            // Derived search cools inside the budget window, and the climb
-            // is a displacement. On a plateau whose occupied structure is
-            // not icosahedral, also grow the lattice orders. That is the
-            // move that crosses a funnel in one step. The chain takes the
-            // growth only when it deepens the incumbent. A lattice minimum
-            // above the best would pin the search there. The climb still runs.
+            // The budget window only cools a derived search. It does not
+            // decide whether a non-icosahedral plateau may leave. Recommended
+            // leaves that flag off, and the icosahedral test below is false
+            // for the LJ104 minima, so neither growth ran and the hold that
+            // switches later proposals to all-points stayed unset.
+            // The chain takes a growth only when it deepens the incumbent.
+            // A miss sets the hold. Later proposals are all-points
+            // displacements until that incumbent drops.
             if directed_leave
-                && cfg.budget_window
                 && hop_room(hops)
+                && cfg.packing_cna_applies()
                 && !crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
             {
                 let best_before_growth = ledger.best;

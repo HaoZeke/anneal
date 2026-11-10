@@ -189,7 +189,8 @@ fn dry(home: &Array1<f64>, budget_window: bool, budget: usize) {
     let mut rng = StdRng::seed_from_u64(11);
     let outcome = run_with_gradient(&cfg, home.view(), &mut ledger, &mut relax, None, &mut rng)
         .expect("finite start");
-    assert!(outcome.best.is_finite() || ledger.spent() > 0);
+    assert_eq!(ledger.spent(), budget, "the dry ledger did not stop at the budget");
+    assert!(outcome.best.is_finite(), "the dry run has no finite best");
 }
 
 #[test]
@@ -231,8 +232,44 @@ fn a_short_growth_state_is_skipped_and_a_dry_ledger_stops_the_rest() {
     let mut rng = StdRng::seed_from_u64(7);
     let outcome = run_with_gradient(&cfg, home.view(), &mut ledger, &mut relax, None, &mut rng)
         .expect("finite start");
-    assert!(short >= 1, "no short lattice state was returned");
-    assert!(outcome.best.is_finite());
+    assert_eq!(short, 1, "the short lattice state was not returned once");
+    assert!(
+        (outcome.best + 1.0).abs() < 1e-12,
+        "the short state was adopted, best {}",
+        outcome.best
+    );
+}
+
+#[test]
+fn a_non_icosahedral_stall_without_the_budget_window_accepts_all_points() {
+    let home = line(13);
+    assert!(
+        !ih_dominated(home.view(), SoapSpec::default()),
+        "the line was classified icosahedral"
+    );
+    let cfg = stall_cfg(13, false);
+    assert!(
+        !cfg.budget_window,
+        "recommended leaves the budget window off"
+    );
+    let mut relax = |ledger: &mut Ledger, _x: ArrayView1<f64>, _steps: usize| {
+        let _ = ledger.charge();
+        (-1.0, home.clone())
+    };
+    let mut ledger = Ledger::new(20_000);
+    let mut rng = StdRng::seed_from_u64(7);
+    let outcome = run_with_gradient(&cfg, home.view(), &mut ledger, &mut relax, None, &mut rng)
+        .expect("finite start");
+    let all = outcome
+        .accepted_transitions
+        .iter()
+        .filter(|step| step.action == "all")
+        .count();
+    assert!(
+        all >= 1,
+        "the hold never emitted an all-points acceptance ({all} of {})",
+        outcome.accepted_transitions.len()
+    );
 }
 
 #[test]
