@@ -40,7 +40,8 @@ def main_blob(name: str, commit: str) -> str | None:
 
 def records(figs: Path, commit: str) -> str:
     lines = []
-    for path in sorted(figs.glob("*.pdf")):
+    paths = sorted(figs.glob("*.pdf")) + sorted(figs.glob("*.png"))
+    for path in paths:
         tip = blob(path)
         other = main_blob(path.name, commit)
         if other is None:
