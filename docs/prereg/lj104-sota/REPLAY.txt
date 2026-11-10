@@ -1,0 +1,21 @@
+Copyright (c) anneal developers
+
+The commit subjects were longer than 72 columns and did not carry
+a scope. Rewriting them changes history, so this is one replay.
+
+The archived tip is refs/archive/prereg/lj104-sota-v1.3 at
+835b90741211f2fd00b5b9ea68cde4cc877b31af. The replay keeps that
+history reachable. Each new commit uses the old commit's tree, a
+subject of at most 72 columns that starts with lj104-prereg, and a
+real -0600 clock time. Author and committer are Rohit Goswami
+<rgoswami@ieee.org>. The commits are unsigned. No two of them share
+a second, and none falls on second :00.
+
+The five commits that add no file are in the map: c9bac09f,
+45139a21, 54818da1, d77d8eb5, and cc0587fa. Their new subjects name
+the pre-registration scope. replay-map.tsv is the old-to-new map.
+TREE_EQUAL.txt records that each pair of trees is the same object.
+
+The predictions, the McNemar table, the seed sets, and the
+thresholds are the blobs from the archived history. This replay
+does not edit them.
