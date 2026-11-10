@@ -1,6 +1,8 @@
 command=taskset -c 0 env H2H_BUDGET=2000000 ANNEAL_CURVE=logs/budget/2005/curve.txt ANNEAL_MIN_DUMP=logs/budget/2005/minima.txt RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 target/release/examples/h2h_gmin_proof run lj104 2005
-head=f724a4c413f0460d1b6551f883da9ae3664e6330
-tree=7af429c6270ec5c00d3b6536fbaefeb03563e1ac
+head=d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1
+tree=801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a
+rustc_v=rustc 1.88.0 (6b00bc388 2025-06-23)
+cargo_v=cargo 1.88.0 (873a06493 2025-05-10)
 pins=0
 uname_n=bench
 hostname_sha256=4b974ca0ce5be5e07e33a374f76e606769d8c84a7cbec2aad767ecaf988cb792
@@ -12,7 +14,7 @@ package_libstd-8df6be531efb3fd0.rlib=d72ed382331f0f02b08824d38d712dec08a39c35d9a
 package_rustc=ac3e92e45fe15c789939deedf7614f4f9578cc9609cb9ead39c9b1808a316c5b
 binary_sha256=2b07c440a23ec5c5ba0db4df4efecd4494963f590958ca07482f8994c433659e
 boot_id=a985e761-9d8a-42f2-91e2-d2d2b076204c
-uptime_start=22241.55
+uptime_start=28012.52
 nproc=8
 mhz=2400.000
 Architecture:                            x86_64
@@ -57,12 +59,12 @@ Vulnerability Srbds:                     Not affected
 Vulnerability Tsa:                       Not affected
 Vulnerability Tsx async abort:           Mitigation; TSX disabled
 Vulnerability Vmscape:                   Not affected
-start=2026-11-10T20:54:50Z
-start_cst=2026-11-10 14:54:50 CST
+start=2026-11-10T22:49:50Z
+start_cst=2026-11-10 16:49:50 CST
 system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,head,tree,cpu,pins
-lj104,anneal,2005,2000000,false,2000000,2000000,158.590959,-581.80180238,f724a4c413f0460d1b6551f883da9ae3664e6330,7af429c6270ec5c00d3b6536fbaefeb03563e1ac,Intel(R) Xeon(R) Processor,0
+lj104,anneal,2005,2000000,false,2000000,2000000,162.763792,-581.80180238,d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1,801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a,Intel(R) Xeon(R) Processor,0
 exit=0
 boot_id_end=a985e761-9d8a-42f2-91e2-d2d2b076204c
-uptime_end=22400.16
-end=2026-11-10T20:57:28Z
-end_cst=2026-11-10 14:57:28 CST
+uptime_end=28175.31
+end=2026-11-10T22:52:33Z
+end_cst=2026-11-10 16:52:33 CST

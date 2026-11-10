@@ -1,8 +1,8 @@
 The measured arm reruns seeds 2000 through 2005, one seed at a time.
 
-The engine is commit f724a4c413f0 and tree 7af429c6270e.
-Engine commit f724a4c413f0460d1b6551f883da9ae3664e6330.
-Engine tree 7af429c6270ec5c00d3b6536fbaefeb03563e1ac.
+The engine is commit d9eec16a32df and tree 801ff2bc6cb1.
+Engine commit d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1.
+Engine tree 801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a.
 The binary digest follows.
 2b07c440a23ec5c5ba0db4df4efecd4494963f590958ca07482f8994c433659e.
 
