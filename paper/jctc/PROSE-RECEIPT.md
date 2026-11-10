@@ -219,11 +219,16 @@ The time was 15:51 on 2026-11-10.
 Each line is cited below.
 
 ```
-manuscript.tex:14
+manuscript.tex:14.
+
 Rohit decided it at 15:51 CST on 2026-11-10 in the Anneal Paper chat.
-si.tex:11
+
+si.tex:11.
+
 Rohit decided it at 15:51 CST on 2026-11-10 in the Anneal Paper chat.
-cover-letter.tex:8
+
+cover-letter.tex:8.
+
 Rohit decided it at 15:51 CST on 2026-11-10 in the Anneal Paper chat.
 ```
 
@@ -256,8 +261,26 @@ That script submits the hexamer and stores each seed log.
 The writer is `scripts/hq_sci_tally.py`.
 
 The hexamer block matches the file in the tree.
-The copper block does not.
-No cuh2 rec log is in this tree.
+The copper block matches `TALLY.txt` byte for byte.
+
+`paper/jctc/data/hq_sci_cuh2/cuh2_fcc_rec_0.txt`
+
+`paper/jctc/data/hq_sci_cuh2/cuh2_fcc_rec_1.txt`
+
+`paper/jctc/data/hq_sci_cuh2/cuh2_fcc_rec_2.txt`
+
+`paper/jctc/data/hq_sci_cuh2/cuh2_fcc_rec_3.txt`
+
+`paper/jctc/data/hq_sci_cuh2/cuh2_fcc_rec_4.txt`
+
+`paper/jctc/data/hq_sci_cuh2/cuh2_fcc_rec_5.txt`
+
+`paper/jctc/data/hq_sci_cuh2/cuh2_fcc_rec_6.txt`
+
+`paper/jctc/data/hq_sci_cuh2/cuh2_fcc_rec_7.txt`
+
+The writer is `scripts/elja_hq_sci_slab.sh`.
+
 The figure archive is a different raw history.
 logs/archive/figure-provenance-v128.txt is that figure archive.
 No committed script wrote it.
@@ -270,3 +293,18 @@ Ten of its fifteen hash lines were stale.
 `scripts/figure_provenance.py` writes these hash lines.
 All nineteen figures rebuilt.
 Two clean runs matched.
+
+The digest lines of the two provenance records are the same class.
+
+`paper/jctc/data/lj75_gmin/provenance.txt`
+
+`scripts/fig_lj75_ecdf.py` reads that record.
+
+`paper/jctc/data/system_visuals/provenance.txt`
+
+`scripts/fig_systems.py` reads that record.
+`scripts/fig_si_structures.py` reads the same file.
+`scripts/fig_si_water.py` uses those digests.
+`scripts/fig_landscapes.py` checks those digests.
+`scripts/fig_disconnectivity.py` loads those digests.
+`scripts/fig_si_panels.py` draws from those digests.
