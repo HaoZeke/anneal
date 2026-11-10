@@ -261,7 +261,7 @@ That script submits the hexamer and stores each seed log.
 The writer is `scripts/hq_sci_tally.py`.
 
 The hexamer block matches the file in the tree.
-The copper block matches `TALLY.txt` byte for byte.
+The copper block is the rerun in `TALLY.txt`.
 
 `paper/jctc/data/hq_sci_cuh2/cuh2_fcc_rec_0.txt`
 
@@ -280,6 +280,26 @@ The copper block matches `TALLY.txt` byte for byte.
 `paper/jctc/data/hq_sci_cuh2/cuh2_fcc_rec_7.txt`
 
 The writer is `scripts/elja_hq_sci_slab.sh`.
+
+`paper/jctc/logs/cuh2_fcc_rec_0.out`
+
+`paper/jctc/logs/cuh2_fcc_rec_1.out`
+
+`paper/jctc/logs/cuh2_fcc_rec_2.out`
+
+`paper/jctc/logs/cuh2_fcc_rec_3.out`
+
+`paper/jctc/logs/cuh2_fcc_rec_4.out`
+
+`paper/jctc/logs/cuh2_fcc_rec_5.out`
+
+`paper/jctc/logs/cuh2_fcc_rec_6.out`
+
+`paper/jctc/logs/cuh2_fcc_rec_7.out`
+
+`paper/jctc/logs/cuh2-hardware-receipt.txt`
+
+The writer is `scripts/run_cuh2_fcc_rec.sh`.
 
 The figure archive is a different raw history.
 logs/archive/figure-provenance-v128.txt is that figure archive.

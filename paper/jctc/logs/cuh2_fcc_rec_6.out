@@ -1,0 +1,22 @@
+  eindir objective from rgpot cuh2 (engines/librgpot_cuh2.so)
+engine_manifest={"engine_id":"rgpot.cuh2","protocol_family":"rgpot.potentials","protocol":{"major":1,"minor":0},"abi":{"abi_major":1,"abi_minor":0,"layout_revision":1,"objective_size":56,"objective_align":8,"dlpack_major":1,"dlpack_minor":0,"features":3},"build_identity":null}
+examples/fixtures/cuh2_fcc_slab.con: 130 atoms through eindir/rgpot cuh2, 2 free, search recommended, arm nobank, budget 2500, seeds 6..7
+  eval_wall engine=cuh2 repeats=5 mean_us=600
+  seed 6: best -415.971464 eV  hops 467  charged 2500  basins 1  converged 948/948  arm nobank  search recommended
+    quench charged screen/full/check 593/491/948  screens 467  capped 0
+    verify e=-415.971464 |g|_mobile=1.065e-2
+    improve hops=0 charged=13 basins=0 e=-415.92388471
+    improve hops=5 charged=58 basins=1 e=-415.96954706
+    improve hops=20 charged=135 basins=1 e=-415.96962149
+    improve hops=23 charged=152 basins=1 e=-415.97039911
+    improve hops=24 charged=159 basins=1 e=-415.97069887
+    improve hops=128 charged=691 basins=1 e=-415.97072003
+    improve hops=134 charged=723 basins=1 e=-415.97105933
+    improve hops=147 charged=790 basins=1 e=-415.97117960
+    improve hops=158 charged=847 basins=1 e=-415.97118592
+    improve hops=163 charged=874 basins=1 e=-415.97126443
+    improve hops=166 charged=891 basins=1 e=-415.97128950
+    improve hops=170 charged=913 basins=1 e=-415.97137731
+    improve hops=198 charged=1055 basins=1 e=-415.97142693
+    improve hops=206 charged=1097 basins=1 e=-415.97146350
+  wrote best_slab_eindir_s6.xyz
