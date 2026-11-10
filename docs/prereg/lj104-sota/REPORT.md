@@ -32,10 +32,10 @@ The source archive sha256 follows.
 The patch sha256 follows.
 e9e8395c210375ac33c7f174c85726b1ccbeed4bbfd9d2e130e6cbb4a253eb35.
 The GMIN source has no pinned upstream commit.
-GNU Fortran 13.3.0 is the baseline compiler.
+The baseline compiler is `GNU Fortran 13.3.0`.
 A local compile with that compiler produced no binary.
-We do not claim a rebuilt match.
-The original executable is not shipped.
+A rebuilt match remains open.
+The original executable stays outside this record.
 The prose profiles are for the box to rerun after this seal.
 
 ## Push plan

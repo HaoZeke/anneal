@@ -1,5 +1,10 @@
-Copyright (c) anneal developers
+Copyright © anneal developers
 
-The only ref this record publishes is refs/heads/prereg/lj104-sota-v1.
+We publish one branch from this record.
+The published reference follows.
+refs/heads/prereg/lj104-sota-v1.
 Archive refs are never pushed.
-This commit does not push.
+The archive list stays in REPLAY.txt.
+Nothing is pushed from this record.
+The plan names that one branch only.
+The seal copies the bundle without a push.

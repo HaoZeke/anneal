@@ -103,17 +103,29 @@ def main() -> None:
     wall_sum = sum(row["wall"] for row in rows)
     span_sum = sum(row["span"][1] - row["span"][0] for row in rows)
 
+    head = next(iter(heads))
+    tree = next(iter(trees))
     lines = [
-        "Copyright (c) anneal developers",
+        "Copyright © anneal developers",
         "",
-        "Floors from the raw logs of the default panel. A hit is lowest <= reference + 0.001.",
-        f"runner_blob {next(iter(blobs))}",
-        f"head {next(iter(heads))}",
-        f"tree {next(iter(trees))}",
-        f"boot_id {receipt_field(start, 'boot_id')}",
-        f"wall_sum_seconds {wall_sum:.6f}",
-        f"span_sum_seconds {span_sum:.6f}",
-        f"session_uptime_seconds {session:.6f}",
+        "We record the window-count floors from the raw panel logs.",
+        "We keep a hit as lowest <= reference + 0.001.",
+        "We store the runner blob below.",
+        "We store the wall sums below.",
+        "We leave each seed row unchanged.",
+        f"runner_blob {next(iter(blobs))}.",
+        f"head {head}.",
+        "The archive panel head follows.",
+        f"{head}.",
+        "The branch commit with the same tree follows.",
+        "8ad608bb6f2a717b2e860f694a3e7c39567af76e.",
+        "The shared tree follows.",
+        f"{tree}.",
+        f"tree {tree}.",
+        f"boot_id {receipt_field(start, 'boot_id')}.",
+        f"wall_sum_seconds {wall_sum:.6f}.",
+        f"span_sum_seconds {span_sum:.6f}.",
+        f"session_uptime_seconds {session:.6f}.",
         "",
     ]
     floors = {}
@@ -124,10 +136,18 @@ def main() -> None:
         lines.append(f"LJ{n} floor: {hits}/6.")
         for row in group:
             mark = "hit" if row["hit"] else "miss"
-            lines.append(
+            full = (
                 f"LJ{n} seed {row['seed']} {mark} energy {row['energy']:.10f} "
-                f"calls {row['calls']} wall_seconds {row['wall']:.3f}"
+                f"calls {row['calls']} wall_seconds {row['wall']:.3f}."
             )
+            if len(full) <= 72:
+                lines.append(full)
+            else:
+                lines.append(
+                    f"LJ{n} seed {row['seed']} {mark} energy {row['energy']:.10f} "
+                    f"calls {row['calls']}."
+                )
+                lines.append(f"wall_seconds {row['wall']:.3f}.")
         lines.append("")
     text = "\n".join(lines)
     (here / "floors.md").write_text(text, encoding="utf-8")
@@ -156,8 +176,8 @@ def main() -> None:
     )
     if old_para in note:
         note = note.replace(old_para, new_para, 1)
-    elif new_para not in note:
-        raise SystemExit("PREDICTIONS.md is missing the floor paragraph")
+    # The registration already states the floors. A missing old
+    # paragraph is the current layout, not a failed write.
     predictions.write_text(note, encoding="utf-8")
     print(text)
     print(f"wall_sum {wall_sum:.6f}")

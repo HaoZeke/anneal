@@ -41,7 +41,7 @@ The source archive sha256 follows.
 The patch sha256 follows.
 e9e8395c210375ac33c7f174c85726b1ccbeed4bbfd9d2e130e6cbb4a253eb35.
 The GMIN source has no pinned upstream commit.
-GNU Fortran 13.3.0 produced the baseline with the recorded digest.
+`GNU Fortran 13.3.0` produced the baseline with the recorded digest.
 A local rebuild is recorded apart from that baseline.
 We do not claim the local digest equals the recorded string.
 The shared keyword block is gmin_best.keywords.

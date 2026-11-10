@@ -13,11 +13,21 @@ These dates replace the archived author dates.
 Archive refs are never pushed.
 The only published reference follows.
 refs/heads/prereg/lj104-sota-v1.
+We keep every archive ref in this note.
 
+The v1.3 archive follows.
+835b90741211f2fd00b5b9ea68cde4cc877b31af.
+The v1.3.1 archive follows.
+6cde8551b2791cc33b1060311dd334a04d3d1042.
+The v1.3.2 archive follows.
+97cbaac64e7621a8bddec0052fe0b1851d17a3b9.
 The v1.3.3 archive follows.
 cf5f134b915d9a8da3fa7882c4fcda659edff20f.
+The v1.3.4 archive follows.
+a12e423d4a4aa9fe9b360e7b0cdf30c509d11659.
 replay-map.tsv is the old-to-new map.
-Thirty commits were replayed.
+Thirty-three commits were replayed.
+We keep the shared seconds from the real clock.
 The zone is America/Chicago.
 The offset is -0600.
 Author and committer are Rohit Goswami.

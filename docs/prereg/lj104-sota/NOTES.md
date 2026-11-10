@@ -9,7 +9,7 @@ The source archive sha256 follows.
 The patch sha256 follows.
 e9e8395c210375ac33c7f174c85726b1ccbeed4bbfd9d2e130e6cbb4a253eb35.
 The GMIN source has no pinned upstream commit.
-GNU Fortran 13.3.0 produced the baseline.
+`GNU Fortran 13.3.0` produced the baseline.
 That baseline carries the recorded digest.
 The source archive is identified by the sha256 above.
 The patch file is identified by the sha256 above.
