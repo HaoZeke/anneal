@@ -1,19 +1,33 @@
-Two-million evaluation rerun, on the same engine.
+Two-million evaluation reproduction, on the same engine.
 
-Forecast commit 6f74d439 uses central clock 02:55:01 on 2026-11-10.
+Seeds 2000 through 2005 are deterministic.
+v4.2 already recorded their outcome.
+This rerun is not a blind test.
+
+Commit 6f74d439 repeats that known count.
+Its central clock is 02:55:01 on 2026-11-10.
 
 The arm opened at 02:55:36 the same morning.
 
-The forecast repeated there is the one from commit 88d1cca.
+The repeated count comes from commit 88d1cca.
 
 Head 88d1cca.
 
 Tree d16cabd3.
 
-Binary hash
+Recorded binary hash.
 53e08802ead942e22f97d73fc1c015f85b77a57298e43ddd2511ce9e3b0efbeb.
 
 The receipt wrote that digest before the first seed.
+
+The v4.2 note claimed another digest for this same tree.
+344e7a541d0e9aab445ac180e20b108d5e40afbb8353786c077a85bd368d65d7.
+No receipt carries that older digest.
+That claim is withdrawn.
+The curves and the end geometries still match the earlier arm.
+The toolchain behind the withdrawn digest is not recorded.
+The build directory behind it is not recorded either.
+The receipt digest is the rebuild named in these receipts.
 
 Each seed ran alone on processor 0, and the receipt field pins reads 0.
 
@@ -29,9 +43,10 @@ One icosahedral, Cs result showed up in those 100 short runs.
 
 Multiplied by 20 that rate is 0.2 per seed, and six seeds give 1.2.
 
-Forecast global-minimum total on seeds 2000 through 2005: 0.
-
-Forecast icosahedral, Cs total: 1 of 6.
+The note written before the arm named 0 global-minimum hits.
+It also named 1 of 6 icosahedral, Cs hits.
+v4.2 had already observed 0 of 6 and 0 of 6 on these seeds.
+Those written counts are not independent evidence.
 
 Global-minimum line: -582.086641 or lower.
 
@@ -41,8 +56,7 @@ Global-minimum outcomes on the six seeds: none.
 
 No seed finished in the icosahedral, Cs basin.
 
-The icosahedral, Cs forecast missed, while the global-minimum forecast
-held.
+The reproduction matches that known outcome.
 
 Temperature and step stay as they were.
 
@@ -95,15 +109,16 @@ A 1e-6 call would need the missing coordinates.
 
 Hop 321 of trace a accepts infinite energy on the stall-climb arm.
 
-Commit 87a1c409 adopts that quench at cluster_hopping.rs:6137 with no
-finite test.
+Commit 87a1c409 adopts that quench at cluster_hopping.rs:6137.
+The adoption has no finite test.
 
 Commit 65af3318 refuses a non-finite climb at cluster_hopping.rs:6128.
 
 The trail guard sits at cluster_hopping.rs:5891.
 
-The new test fails on 87a1c409 once the tip test file is copied onto a
-clean tree, naming stall-climb with energy inf.
+The new test fails on 87a1c409.
+The run copies the tip test file onto a clean tree.
+The failure names stall-climb with energy inf.
 
 It passes on 88d1cca.
 
@@ -116,15 +131,15 @@ Hold coverage is missing on commit 299ce4ae, tree 826c4ba6.
 The failing run starts there and copies tests/stall_growth_hold.rs from
 88d1cca.
 
-Status and diff: logs/regress/overlay-old-status.txt and
-logs/regress/overlay-old.diff.
+Status file: logs/regress/overlay-old-status.txt.
+Diff file: logs/regress/overlay-old.diff.
 
 Compilation then reports 0 of 5 all-points acceptances.
 
-Failure binary hash
+The failure binary hash follows.
 ca2aee187f2558a84af7c50b3d5fd9c88ae223ffd181a3edd438f529ba388f68.
 
-Passing binary hash
+The passing binary hash follows.
 78879a6a9200b39de3ac14cc0444cba714371078256cf467b1c4343fcb448bf7.
 
 Both filenames use cargo suffix d256e840, and the content hashes differ.
@@ -145,32 +160,49 @@ The carried rows of logs/sha-map.tsv keep both earlier digests.
 
 The two-million receipts are raw, so their two digest columns match.
 
-Those logs name head ed5849f6, stored here as 87a1c409, and both commits
-share tree b8c8d0bc.
+Those logs name head ed5849f6.
+That head is stored here as 87a1c409.
+Both commits share tree b8c8d0bc.
 
-Rerun binary, earlier trace, and the hundred-seed check share hash
+The rerun binary and the earlier trace share one hash.
+The hundred-seed check uses that same hash.
 afcd1454e42f3f7fceb250ff6044ce1c62cd3ac2cb151c333ab333082da7cc94.
 
 End geometries are data/traced-2004.xyz through data/traced-2103.xyz.
 
-Aside from seed 2017, nearest icosahedral, Cs separation is 0.389543 on
-seed 2057.
+Aside from seed 2017, the nearest icosahedral, Cs separation follows.
+The separation is 0.389543.
+That separation is on seed 2057.
 
 Seed 2054 is the closest to the global minimum, at separation 0.394381.
 
-Seed 2004's earlier trace contains 16974 accept lines under
-logs/prefix-trace.
+Seed 2004's earlier trace contains 16974 accept lines.
+Those lines sit under logs/prefix-trace.
 
 Header tree 826c4ba6 belongs to commit 299ce4ae.
 
-All-points chain source examples/lj_hold_chain.rs hashes to
+The all-points chain source is examples/lj_hold_chain.rs.
+Its hash follows.
 138acb71b966124cfcfe1133e36195eaa62ecdf705f743a6440333347cb6bf85.
 
-Binary for that check hashes to
+The binary for that check has the next hash.
 911e16082a0adf1a84b6efa7dd1a8ff23068355b07536a4957a7b94d73092128.
 
-Head-to-head example source hashes to
+The head-to-head example source has the next hash.
 d52e7d219b8b9526ba819b02232271c32d34df3c59930a9c1fb4683fb805ec76.
+
+Commit 42e60888 has no scope in its subject.
+The subject is "docs: close three prose findings in the measure notes".
+Its body is one line of 124 columns.
+The body says three sentences are split.
+It says the subject should sit next to the verb.
+The diff adds scripts/lj104-measure-v4-NOTES.md.
+That added file is 167 lines.
+The file is absent from the parent.
+
+Commit 355b0a7d still holds scripts/redact.py.
+The host token built from fragments remains in that blob.
+The commit token built from fragments remains there too.
 
 ```
 299ce4ae replaces 20e03ec6 and keeps tree 826c4ba6

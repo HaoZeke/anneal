@@ -14,6 +14,6 @@ A global-minimum hit lies at or below -582.086641.
 A Cs-minimum hit lies at or below -582.038428.
 The reference program halts at its own 0.001 stop.
 That stop only marks when a reference run ends.
-The rerun keeps this forecast.
-The predicted global-minimum count on the rerun equals 0.
-The predicted Cs-minimum count on the rerun equals 1 of 6.
+v4.2 already observed these seeds, so this file is not a blind test.
+The global-minimum count named above stays 0.
+The icosahedral, Cs count named above stays 1 of 6.
