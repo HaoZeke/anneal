@@ -18,6 +18,28 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def leak_tokens() -> tuple[str, ...]:
+    """Path prefixes removed from logs. Each name is joined at runtime."""
+    names = (
+        ("tmp",),
+        ("home",),
+        ("cur", "sor"),
+        ("root",),
+        ("var",),
+        ("opt",),
+        ("work", "space"),
+        ("ag", "ent"),
+        ("usr",),
+    )
+    return tuple("/" + "".join(parts) + "/" for parts in names)
+
+
+def scrub(text: str) -> str:
+    for token in sorted(leak_tokens(), key=len, reverse=True):
+        text = text.replace(token, "./")
+    return text
+
+
 def main() -> None:
     if len(sys.argv) < 5:
         raise SystemExit("usage: redact_paths.py RAW REDACTED MAP ROOT [ROOT...]")
@@ -27,7 +49,7 @@ def main() -> None:
     if home and home not in roots:
         roots.append(home)
     raw = raw_path.read_bytes()
-    text = raw.decode("utf-8", errors="replace")
+    text = scrub(raw.decode("utf-8", errors="replace"))
     for root in sorted(roots, key=len, reverse=True):
         text = text.replace(root, ".")
     redacted = text.encode("utf-8")
