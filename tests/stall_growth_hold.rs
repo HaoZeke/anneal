@@ -247,7 +247,10 @@ fn a_non_icosahedral_stall_without_the_budget_window_accepts_all_points() {
         !ih_dominated(home.view(), SoapSpec::default()),
         "the line was classified icosahedral"
     );
-    let cfg = stall_cfg(13, false);
+    let mut cfg = stall_cfg(13, false);
+    // Recommended uses LeanBurst, which has no all-points kernel.
+    // An `all` acceptance can come only from the stall hold.
+    cfg.move_library = MoveLibrary::LeanBurst;
     assert!(
         !cfg.budget_window,
         "recommended leaves the budget window off"
