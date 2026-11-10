@@ -10,10 +10,17 @@ export LIBRARY_PATH="$(dirname "$lib")${LIBRARY_PATH:+:$LIBRARY_PATH}"
   printf 'UTC %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf 'HEAD %s\n' "$(git rev-parse HEAD)"
   printf 'TREE %s\n' "$(git rev-parse 'HEAD^{tree}')"
+  printf 'command cargo +stable build --all-targets --locked\n'
+  set +e
+  cargo +stable build --all-targets --locked
+  printf 'EXIT:%s\n' "$?"
   printf 'command cargo +stable build --all-targets --all-features --locked\n'
   cargo +stable build --all-targets --all-features --locked
+  printf 'EXIT:%s\n' "$?"
   printf 'command cargo +stable bench --no-run\n'
   cargo +stable bench --no-run
+  printf 'EXIT:%s\n' "$?"
+  set -e
 } > "$out.raw" 2>&1
 python3 - "$out.raw" "$out" << 'PY'
 import sys
