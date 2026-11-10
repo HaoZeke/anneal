@@ -43,9 +43,12 @@ def load_known(path: Path) -> dict[int, float]:
 def parse_log(text: str) -> dict[str, str]:
     fields = {}
     for line in text.splitlines():
-        if ": " not in line:
+        if ": " in line:
+            key, value = line.split(": ", 1)
+        elif " " in line:
+            key, value = line.split(" ", 1)
+        else:
             continue
-        key, value = line.split(": ", 1)
         fields[key] = value
     return fields
 

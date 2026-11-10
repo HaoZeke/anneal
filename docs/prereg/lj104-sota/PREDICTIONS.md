@@ -84,7 +84,7 @@ LJ55 floor: 6/6.
 LJ75 floor: 6/6.
 LJ98 floor: 6/6.
 
-The four lines above were counted inside the 0.001 stop window. They are not re-quenched hits. `requench_panel.py` replaces them from the re-quenched energies. `floors.md` keeps the window count. A count below its floor is a mechanical FAIL.
+The four lines above are the re-quench floors from requench.tsv, written by requench_panel.py. A hit is re-quenched E <= E_known + 1e-6. Per-seed raw energy, re-quenched energy, hit flag, and re-quench calls are in requench.md. floors.md keeps the earlier 0.001 window count and is not the floor. A count below its floor is a mechanical FAIL.
 
 ## Matched compute
 
