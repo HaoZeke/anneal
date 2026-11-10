@@ -1,4 +1,4 @@
-# Notes, v1.27
+# Notes, v1.28
 
 We drew the eighteen figures with the committed generators.
 This series starts from the v1.16 tip.
@@ -19,3 +19,6 @@ They are `manuscript.tex`, `si.tex` and `cover-letter.tex`.
 Only `si.tex` keeps the 2023 notice.
 REPORT.md lists the Rohit items.
 REPLAY.txt records all seven replays of this series.
+Affiliation `SURF B.V.` stays byte for byte.
+Rohit has not changed that wording.
+Those three files keep the letterhead.
