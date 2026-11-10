@@ -1,6 +1,6 @@
 # Replay
 
-We replayed commits onto this ref five times.
+We replayed commits onto this ref seven times.
 
 We record each replay below.
 
@@ -382,6 +382,9 @@ The notes file and this file are the tree change.
 
 This pass rewrote the messages of commits 42, 43, 45 and 47.
 Commits 44 and 46 keep their words.
+The seconds of commits 42 through 47 moved.
+The first of those seconds is 2026-11-10 13:31:32 -0600.
+The last of those seconds is 2026-11-10 13:32:24 -0600.
 Each pair below has one tree.
 The previous tip is the archive object.
 
@@ -458,3 +461,1218 @@ The old commit follows.
 The new commit follows.
 
 7f33cfa6c8b9e2ffcdde144c3bf3dc7526388967
+
+## Replay from v1.25
+
+This pass rewrote messages.
+Commits 1 through 47 each keep the archived tree.
+Record 48 does not.
+Its tree in that pass follows.
+
+c339821aa4282dbe4a0e1c116f7e5417fe815aaa
+
+The archived tree follows.
+
+b8d7d982b569c1a136135929df4e9a865828f03e
+
+These 48 commits share one second.
+
+That shared second is real.
+
+No commit is earlier than its parent.
+
+The second is 2026-11-10 14:12:32 -0600.
+
+Archive refs are never pushed.
+
+The push plan names one branch.
+
+The branch is refs/heads/paper-integration-v1.26.
+
+Each record names that tree, then the old commit, then the new commit.
+
+The archive of the previous tip follows.
+
+9109df21fbfd9470c16cff37a7a7b5228bb809e0.
+
+Record 01 keeps one tree.
+
+bcf0a5c5eb8ebb5294e5cec89d51d3c79089c40c.
+
+Old commit 01 follows.
+
+2ab0093b50f597c3dc15c054633fe191d7d28831.
+
+New commit 01 follows.
+
+a4b69ce365f78af60d09ed9a5be42517d9ea06fb.
+
+Record 02 keeps one tree.
+
+4f5d68bec2567ef111efde902c354e41176082cc.
+
+Old commit 02 follows.
+
+ec78f241fa0c90ea56ef829493cdaad2d65f77f0.
+
+New commit 02 follows.
+
+092ceaba3750a4e973858bb39eb2f6b553634680.
+
+Record 03 keeps one tree.
+
+9a84cbe33ec75252ad235590a92ca1beb5157497.
+
+Old commit 03 follows.
+
+a6b57a682a15f1e43a3961d0a093ca2e0858927c.
+
+New commit 03 follows.
+
+fba77822f38909b13daf53fcdcf706d69c1f5293.
+
+Record 04 keeps one tree.
+
+28e1e4eb0672ca1f02a255aa776b6a4a19408d10.
+
+Old commit 04 follows.
+
+d70e844a15abe46fca03a2725e35e25e40a57b3e.
+
+New commit 04 follows.
+
+bbd2fd80423eedd8bf4393f8754529b5213108bb.
+
+Record 05 keeps one tree.
+
+c1a60d7eeb9609e36714f6918c38d6a82dc45585.
+
+Old commit 05 follows.
+
+95fd383c59d40c10599c90ca86384524fabf4cb1.
+
+New commit 05 follows.
+
+e5df480e2ce34a78fdf6530474b9bed9f12b7e73.
+
+Record 06 keeps one tree.
+
+5e796453d98959ac2660f82c85619a613d2bf0eb.
+
+Old commit 06 follows.
+
+1d32e9beed6f4daf7fdafc122a7b42f8eb6fb942.
+
+New commit 06 follows.
+
+c3f6a7fb62069409d9450293a7bda254a5b4ab86.
+
+Record 07 keeps one tree.
+
+619ced4109074ebbdec6e4b265cb31fed62ba04a.
+
+Old commit 07 follows.
+
+7026cc4f7c099c1276de9b2fc21405600ad3f217.
+
+New commit 07 follows.
+
+9a55116317a39c06b7616a1dd05727da9f83b279.
+
+Record 08 keeps one tree.
+
+094668b6a2d2f3f7f81a08d0d378bf133d16eeff.
+
+Old commit 08 follows.
+
+3915b0715d2016044d1432e5828c5c57c295ec37.
+
+New commit 08 follows.
+
+d912a24d505a7fcf9071802460794532b587a670.
+
+Record 09 keeps one tree.
+
+cd46e7a238ee1ea494ceca628cbca94130ca78c0.
+
+Old commit 09 follows.
+
+5096939d5c5b8f2b4734c5901d565a777d313d4a.
+
+New commit 09 follows.
+
+154ee790330374be875d676565abaf395c8c4541.
+
+Record 10 keeps one tree.
+
+5851d6219dd0e776dcbffda9e19e849de85c1a32.
+
+Old commit 10 follows.
+
+620ad1cb6ba439d67a249201cfc5ce58d7aa2328.
+
+New commit 10 follows.
+
+4b16aa7f78b75fbd763ee336b3273c8b8e84ee00.
+
+Record 11 keeps one tree.
+
+e6f4f11e47397965285e743f38f78e5ba47192de.
+
+Old commit 11 follows.
+
+98a1156a9b33a2d7ffa82acd9ed2f794837898a2.
+
+New commit 11 follows.
+
+a1fa153a8f4295912f9b49229f180d72ef9d89a9.
+
+Record 12 keeps one tree.
+
+a633ef90e88bd24cf7d73ef1d3bac3a59f9bd69f.
+
+Old commit 12 follows.
+
+3efc6393d793fcc35f98f70d1c2aa5183402911a.
+
+New commit 12 follows.
+
+30d4ced7e6342d2b08371e7b3eb883c6b4b4b035.
+
+Record 13 keeps one tree.
+
+d1e2cb06ef2e5534d6b153db552f831e1a93f8ca.
+
+Old commit 13 follows.
+
+ad2467946e91d62416d403e7521036b9d12f5ba4.
+
+New commit 13 follows.
+
+853ceb71e1aeabfbaea546fe30835c74166e021c.
+
+Record 14 keeps one tree.
+
+7b46e5918d1f3067f4cc29df7cfa9ec27a13e72b.
+
+Old commit 14 follows.
+
+4b72c9fe95138f9e181a5d48a32d68682021cc9d.
+
+New commit 14 follows.
+
+7e071ae7c31e368abc34db9b5daad885e9ee88f4.
+
+Record 15 keeps one tree.
+
+52f37a25b56532fbb8981739e2175cf8e9ceb700.
+
+Old commit 15 follows.
+
+e21f3efed26cb370e61a1f0a98e63c32bd605ecb.
+
+New commit 15 follows.
+
+e29cc93d742735d6c6f139675d436ddb0812a31d.
+
+Record 16 keeps one tree.
+
+f23d50934025916ce0d71a107856ff1725b9c1d9.
+
+Old commit 16 follows.
+
+cb6336120ea64f2afc7120d8bc4decebe72332c9.
+
+New commit 16 follows.
+
+5759f6b0f79a0eb37dd1a23c26792c0923fc5980.
+
+Record 17 keeps one tree.
+
+0c475109626529e2739bd97c2ae1cce02c630ca1.
+
+Old commit 17 follows.
+
+2e44a8a1f70f68a55f575ba844a38a6f00dd95f8.
+
+New commit 17 follows.
+
+7ef5ffb0704a079fa3bb7e4fddb50a6bef80229c.
+
+Record 18 keeps one tree.
+
+7e5351d599ed23866c74f0042c7fee9f03d29c27.
+
+Old commit 18 follows.
+
+4234826dde86a8e991f5b57e4b204966cd027f72.
+
+New commit 18 follows.
+
+d9994bfdd05f34550d2df95ae4205ab514f42695.
+
+Record 19 keeps one tree.
+
+8ae8c4631fcd15971b313ed439bcec92891482dc.
+
+Old commit 19 follows.
+
+7bba5a2f72d3b181eb40adc8d915b72f66822b4a.
+
+New commit 19 follows.
+
+40214a336a56f847160f71c77be3dc33c946872e.
+
+Record 20 keeps one tree.
+
+4fdabb904994ddcc046d44ce5d511e126cf01353.
+
+Old commit 20 follows.
+
+5639159c3e06297dbaa4cace0369c3dd526bac12.
+
+New commit 20 follows.
+
+9d8a725a51f4a32e7d08589fcb0701ba73290831.
+
+Record 21 keeps one tree.
+
+a5df1ed3058f2aec9b5f6db38d9cda7a4b1810e5.
+
+Old commit 21 follows.
+
+747926f50f4a49e056bdfa85cfbf3d044cbfb887.
+
+New commit 21 follows.
+
+4997b97408e07cf9bd8683787f233968dc15a7f5.
+
+Record 22 keeps one tree.
+
+b9b97b45b97983ebe83b5d02d5cdb13997617a07.
+
+Old commit 22 follows.
+
+dc681233465378ceca3952793fd7703ee9889800.
+
+New commit 22 follows.
+
+e099113d0bf7de482140983fc6c5dfcf769efe9e.
+
+Record 23 keeps one tree.
+
+642cb400b15fd4d32710429871645d62c6c16fa4.
+
+Old commit 23 follows.
+
+e1ecdf56cef105889eece202d438bf61b1f2634c.
+
+New commit 23 follows.
+
+b5a58022bc854f2243ad7123c09ee35970fe6f72.
+
+Record 24 keeps one tree.
+
+0712a2010566cb75876410211c25c52748ea90d8.
+
+Old commit 24 follows.
+
+05c58ccb1363e0c96ecb8f1ea6a385002c8a70e6.
+
+New commit 24 follows.
+
+a394c6b01b857dd3da9199f192f0da76612d3df6.
+
+Record 25 keeps one tree.
+
+76837cfd1beb7b84576436ee633b767b699c66ab.
+
+Old commit 25 follows.
+
+876335fab02e7d947aca9c736a4a90e340b0bea8.
+
+New commit 25 follows.
+
+a06307c04a1968224057dd503313bf10adeca909.
+
+Record 26 keeps one tree.
+
+01611b0dc4e2f401301ad0986a1bfc678371b10f.
+
+Old commit 26 follows.
+
+b7d4358c22a77d6a3a5b5219845da7b77699f5f9.
+
+New commit 26 follows.
+
+14b540e72fbae18a08e5c673eba4d0a4d063e19e.
+
+Record 27 keeps one tree.
+
+b21f53d3bef3e8ba174f1089c5cce15940b993bc.
+
+Old commit 27 follows.
+
+8cf65ce78ce8df27ad0794726a23cc51722a3b43.
+
+New commit 27 follows.
+
+142da82227c2af4b81651f80a8738466da8358e7.
+
+Record 28 keeps one tree.
+
+9745d10b9ad979096b2b42f99bb21a0a03c0d5af.
+
+Old commit 28 follows.
+
+3789c861cef2bc2af8cfe4e5209055c35f23c572.
+
+New commit 28 follows.
+
+a85a833ddea3f7dd0df64c9197bf38e9484f7128.
+
+Record 29 keeps one tree.
+
+1efda8e05b13b0b10901a6efd9b59556a1c75956.
+
+Old commit 29 follows.
+
+6fac731f19341c39236e3435395ce3b99d0cf199.
+
+New commit 29 follows.
+
+f3c0f11a17369da89498d7bb2156df8feaa0497c.
+
+Record 30 keeps one tree.
+
+1ce178355c90a31419002c75934c9f53b7b7fab8.
+
+Old commit 30 follows.
+
+f68ee16f1c3a9f67c89800401c6a58fe7e3bc60d.
+
+New commit 30 follows.
+
+1bf96a6b3d2766f364f9e3898281ce9052babc12.
+
+Record 31 keeps one tree.
+
+cecc9af65adc331a8c34d7492f57c6476c7ba45b.
+
+Old commit 31 follows.
+
+2f4a79326137729f3e680aa36ecf6e1de67ccb2d.
+
+New commit 31 follows.
+
+a498cb4b47cc900a0714a11e12887036efe4ea41.
+
+Record 32 keeps one tree.
+
+8da9d6731ee800a3e9dfc483da391f4d5bcb9ec2.
+
+Old commit 32 follows.
+
+12fa8865bfd4c8563d7bafdff33139f2ef1e0ad6.
+
+New commit 32 follows.
+
+ba738a97d19e0954dd83b9ff0594e888e3d7d971.
+
+Record 33 keeps one tree.
+
+e621ec056039763accc7e83f302a96c8fe7be9d3.
+
+Old commit 33 follows.
+
+46e9c66a451d2e6cf091bae64b9cf1aebd7a8ae7.
+
+New commit 33 follows.
+
+2847ea64ce289f55199f5bfc02a1d85e77485556.
+
+Record 34 keeps one tree.
+
+25585967bb080efbd4a7e1dc5c2efe8e36a2143c.
+
+Old commit 34 follows.
+
+f9cf80fda1d91492fa3140d143d658524048d238.
+
+New commit 34 follows.
+
+87ac713f9649505158b5709c6b9bc29ed5adba2b.
+
+Record 35 keeps one tree.
+
+a8bec7130bba8ac83e2217c9fed44772f22e1996.
+
+Old commit 35 follows.
+
+2a7342318a09f9b0925c32303f6450a846b504a6.
+
+New commit 35 follows.
+
+192800151443fd16edd1c5ba11511ae1065b95a6.
+
+Record 36 keeps one tree.
+
+07fdb19e847a98973de5a4675dad22b78cdeaf7e.
+
+Old commit 36 follows.
+
+a4b407147f237c8961c04aea10c9eb1b99afbd02.
+
+New commit 36 follows.
+
+fddf8c2d7980a3e66b781bfc9ed6b2592429f78c.
+
+Record 37 keeps one tree.
+
+70bafe8be91ad002de92570f3f198776edb5b772.
+
+Old commit 37 follows.
+
+917b5f309ce89d991aae02315a47a3c9397c9386.
+
+New commit 37 follows.
+
+c6de3f9afec26b6a28cab63306028de8c26710cd.
+
+Record 38 keeps one tree.
+
+cfedccb4dc13c6a9dd95099b75eaf37f7611ce72.
+
+Old commit 38 follows.
+
+723f812fd1b6e2479f16ef581576f1af8085c3de.
+
+New commit 38 follows.
+
+6f0caacb0ffa7b598e0837630b0b6632c0fa82f5.
+
+Record 39 keeps one tree.
+
+210ef3a9ec9f233edd9ef81b1137ded4e5af1674.
+
+Old commit 39 follows.
+
+5fb7088350a66c4dfc35a80cb710fa41ed95e4d4.
+
+New commit 39 follows.
+
+b0360411249626e1cfe13ec5889614bc64da1ead.
+
+Record 40 keeps one tree.
+
+3a9aeba645d4d1233eae1745b064373e7098953a.
+
+Old commit 40 follows.
+
+3591ade9d5bbdef2d2a37e7562d1ca77a33e26c2.
+
+New commit 40 follows.
+
+b5dc8792e106400ff1202b42030723801d5c8339.
+
+Record 41 keeps one tree.
+
+3d35599a80af2d24cbce733b0b9ba2e870c17683.
+
+Old commit 41 follows.
+
+fd4e691db9152bea8086c2102af84a1b0ea39444.
+
+New commit 41 follows.
+
+4558a4e1029ad485bc7a91e3f6a70101578b659b.
+
+Record 42 keeps one tree.
+
+50e8b7e1ca632446e461ac2a0b950019b3e9a234.
+
+Old commit 42 follows.
+
+afe6edfe1956db5a6c460a396e64d9d7b58cd3ef.
+
+New commit 42 follows.
+
+c82133472853f27b17926188c90d2686e90fc0d6.
+
+Record 43 keeps one tree.
+
+f454fd1211de9a5a8b8060c4b9f25e1d247040d7.
+
+Old commit 43 follows.
+
+b568d6c2d2e85d6a23ea7ed2891fd0dc6800bb15.
+
+New commit 43 follows.
+
+a551083daa60a7c19d2cba6675ceeb8906bde467.
+
+Record 44 keeps one tree.
+
+23885ff3b4325c899cbba4d99dcd94d978d699dc.
+
+Old commit 44 follows.
+
+e7e77ace3c0734639d1f413306d3da828e5a6cce.
+
+New commit 44 follows.
+
+eb03a72b601f0664a8f215eea76013d07276e24d.
+
+Record 45 keeps one tree.
+
+39af714ebac742fb9ba48fd78b1115ad4cea540d.
+
+Old commit 45 follows.
+
+74849a7fd4366044bd01220cc0295e620f7dc7ef.
+
+New commit 45 follows.
+
+f850837bb4ba17f5c7c07271dfc2811763ae4e5c.
+
+Record 46 keeps one tree.
+
+306b34a14475c84dd5d2a0dcf0aaa8a06ed9baee.
+
+Old commit 46 follows.
+
+8ae8d4403d7798c99d2dcfe500b8d15f054f4af6.
+
+New commit 46 follows.
+
+11e13de43543a821ac28863d11b3ca5686e50fa7.
+
+Record 47 keeps one tree.
+
+f194b2501fb0639acee4afb2e5841987a142f1e6.
+
+Old commit 47 follows.
+
+7f33cfa6c8b9e2ffcdde144c3bf3dc7526388967.
+
+New commit 47 follows.
+
+58995ce9c8badf956499fc8c1efa2b73fddef338.
+
+Record 48 keeps one tree.
+
+c339821aa4282dbe4a0e1c116f7e5417fe815aaa.
+
+Old commit 48 follows.
+
+9109df21fbfd9470c16cff37a7a7b5228bb809e0.
+
+New commit 48 follows.
+
+e102580bd52e6ae0f30f85546e6aeb0d7ebed570.
+
+## Replay from v1.26
+
+This pass keeps every archived tree.
+
+Commits 1 through 48 each keep one tree.
+
+Record 48 keeps this tree.
+
+b8d7d982b569c1a136135929df4e9a865828f03e
+
+These 48 commits share one second.
+
+That shared second is real.
+
+No commit is earlier than its parent.
+
+The second is 2026-11-10 14:52:45 -0600.
+
+Archive refs are never pushed.
+
+The push plan names one branch.
+
+The branch is refs/heads/paper-integration-v1.27.
+
+Each record names that tree, then the old commit, then the new commit.
+
+The archive of the previous tip follows.
+
+975f6028338172d2edb6810e216ee2f0caf451f4
+
+Record 01 keeps one tree.
+
+bcf0a5c5eb8ebb5294e5cec89d51d3c79089c40c.
+
+Old commit 01 follows.
+
+2ab0093b50f597c3dc15c054633fe191d7d28831.
+
+New commit 01 follows.
+
+7ded533f4f971082daff08cfcc10127bb6e2858f.
+
+Record 02 keeps one tree.
+
+4f5d68bec2567ef111efde902c354e41176082cc.
+
+Old commit 02 follows.
+
+ec78f241fa0c90ea56ef829493cdaad2d65f77f0.
+
+New commit 02 follows.
+
+d2475bc24d318de524121c3b9d598f8c241d323e.
+
+Record 03 keeps one tree.
+
+9a84cbe33ec75252ad235590a92ca1beb5157497.
+
+Old commit 03 follows.
+
+a6b57a682a15f1e43a3961d0a093ca2e0858927c.
+
+New commit 03 follows.
+
+f4d81c4bd09dc816398325d0ee11087d6a9349ec.
+
+Record 04 keeps one tree.
+
+28e1e4eb0672ca1f02a255aa776b6a4a19408d10.
+
+Old commit 04 follows.
+
+d70e844a15abe46fca03a2725e35e25e40a57b3e.
+
+New commit 04 follows.
+
+b9fe9d1bde6d64a1bf66bc045571bcfe83da8b79.
+
+Record 05 keeps one tree.
+
+c1a60d7eeb9609e36714f6918c38d6a82dc45585.
+
+Old commit 05 follows.
+
+95fd383c59d40c10599c90ca86384524fabf4cb1.
+
+New commit 05 follows.
+
+a1c20a1c720e598f7411dd6d1b4989e4f8a5cb3f.
+
+Record 06 keeps one tree.
+
+5e796453d98959ac2660f82c85619a613d2bf0eb.
+
+Old commit 06 follows.
+
+1d32e9beed6f4daf7fdafc122a7b42f8eb6fb942.
+
+New commit 06 follows.
+
+ac5fd2611c371f7682bed2f9b6e269d834f530bb.
+
+Record 07 keeps one tree.
+
+619ced4109074ebbdec6e4b265cb31fed62ba04a.
+
+Old commit 07 follows.
+
+7026cc4f7c099c1276de9b2fc21405600ad3f217.
+
+New commit 07 follows.
+
+4b2c3903f6ebf8146160a893ff73c1946e9a25eb.
+
+Record 08 keeps one tree.
+
+094668b6a2d2f3f7f81a08d0d378bf133d16eeff.
+
+Old commit 08 follows.
+
+3915b0715d2016044d1432e5828c5c57c295ec37.
+
+New commit 08 follows.
+
+62a9b761b12ded24d4737be3020b3927c7c959d9.
+
+Record 09 keeps one tree.
+
+cd46e7a238ee1ea494ceca628cbca94130ca78c0.
+
+Old commit 09 follows.
+
+5096939d5c5b8f2b4734c5901d565a777d313d4a.
+
+New commit 09 follows.
+
+51b6f349d805098b941e547065c477ec06b33a07.
+
+Record 10 keeps one tree.
+
+5851d6219dd0e776dcbffda9e19e849de85c1a32.
+
+Old commit 10 follows.
+
+620ad1cb6ba439d67a249201cfc5ce58d7aa2328.
+
+New commit 10 follows.
+
+d3fbd612c8f56b2de6fb312959aa6c804d7c0457.
+
+Record 11 keeps one tree.
+
+e6f4f11e47397965285e743f38f78e5ba47192de.
+
+Old commit 11 follows.
+
+98a1156a9b33a2d7ffa82acd9ed2f794837898a2.
+
+New commit 11 follows.
+
+17ff359127b79683c4dd5bcb2696b2a4ea667aaa.
+
+Record 12 keeps one tree.
+
+a633ef90e88bd24cf7d73ef1d3bac3a59f9bd69f.
+
+Old commit 12 follows.
+
+3efc6393d793fcc35f98f70d1c2aa5183402911a.
+
+New commit 12 follows.
+
+f8a60cc7a3b3600ea84e8501382cfa0cb9c77ffd.
+
+Record 13 keeps one tree.
+
+d1e2cb06ef2e5534d6b153db552f831e1a93f8ca.
+
+Old commit 13 follows.
+
+ad2467946e91d62416d403e7521036b9d12f5ba4.
+
+New commit 13 follows.
+
+ce80337b7507ca12a99913da7ee8606184d4a3e1.
+
+Record 14 keeps one tree.
+
+7b46e5918d1f3067f4cc29df7cfa9ec27a13e72b.
+
+Old commit 14 follows.
+
+4b72c9fe95138f9e181a5d48a32d68682021cc9d.
+
+New commit 14 follows.
+
+154acce55ecbd3dc47334d4e3cf857b4f4c64416.
+
+Record 15 keeps one tree.
+
+52f37a25b56532fbb8981739e2175cf8e9ceb700.
+
+Old commit 15 follows.
+
+e21f3efed26cb370e61a1f0a98e63c32bd605ecb.
+
+New commit 15 follows.
+
+da65cc6df832bcd74a260c9aad8550744b03ba01.
+
+Record 16 keeps one tree.
+
+f23d50934025916ce0d71a107856ff1725b9c1d9.
+
+Old commit 16 follows.
+
+cb6336120ea64f2afc7120d8bc4decebe72332c9.
+
+New commit 16 follows.
+
+19d5a3c67be5cda935200cfa11612072bb3a7814.
+
+Record 17 keeps one tree.
+
+0c475109626529e2739bd97c2ae1cce02c630ca1.
+
+Old commit 17 follows.
+
+2e44a8a1f70f68a55f575ba844a38a6f00dd95f8.
+
+New commit 17 follows.
+
+9b56e98baa8b1ff18142f64722f32dccf0804c37.
+
+Record 18 keeps one tree.
+
+7e5351d599ed23866c74f0042c7fee9f03d29c27.
+
+Old commit 18 follows.
+
+4234826dde86a8e991f5b57e4b204966cd027f72.
+
+New commit 18 follows.
+
+77190b75e14b8e46e1217fcf54f8f262342c6b14.
+
+Record 19 keeps one tree.
+
+8ae8c4631fcd15971b313ed439bcec92891482dc.
+
+Old commit 19 follows.
+
+7bba5a2f72d3b181eb40adc8d915b72f66822b4a.
+
+New commit 19 follows.
+
+f88e8a6e5f971ff098e9b1932ce74bc327e50286.
+
+Record 20 keeps one tree.
+
+4fdabb904994ddcc046d44ce5d511e126cf01353.
+
+Old commit 20 follows.
+
+5639159c3e06297dbaa4cace0369c3dd526bac12.
+
+New commit 20 follows.
+
+1dce3a21c96d4aaa2e017cb57e136afbe76da2b0.
+
+Record 21 keeps one tree.
+
+a5df1ed3058f2aec9b5f6db38d9cda7a4b1810e5.
+
+Old commit 21 follows.
+
+747926f50f4a49e056bdfa85cfbf3d044cbfb887.
+
+New commit 21 follows.
+
+8d33f6c8db85f4a945a742b037ab4f09ab265caa.
+
+Record 22 keeps one tree.
+
+b9b97b45b97983ebe83b5d02d5cdb13997617a07.
+
+Old commit 22 follows.
+
+dc681233465378ceca3952793fd7703ee9889800.
+
+New commit 22 follows.
+
+32f064b4513a06f925bc98123384d2ebece646be.
+
+Record 23 keeps one tree.
+
+642cb400b15fd4d32710429871645d62c6c16fa4.
+
+Old commit 23 follows.
+
+e1ecdf56cef105889eece202d438bf61b1f2634c.
+
+New commit 23 follows.
+
+f52cc2dd55355c5107ff7ef7c68f1d3907c45ead.
+
+Record 24 keeps one tree.
+
+0712a2010566cb75876410211c25c52748ea90d8.
+
+Old commit 24 follows.
+
+05c58ccb1363e0c96ecb8f1ea6a385002c8a70e6.
+
+New commit 24 follows.
+
+b5c4260237c2083b803ef3bdc918e9018b01d3c5.
+
+Record 25 keeps one tree.
+
+76837cfd1beb7b84576436ee633b767b699c66ab.
+
+Old commit 25 follows.
+
+876335fab02e7d947aca9c736a4a90e340b0bea8.
+
+New commit 25 follows.
+
+3365eab79c17bef764958589fde630016d9c0ad1.
+
+Record 26 keeps one tree.
+
+01611b0dc4e2f401301ad0986a1bfc678371b10f.
+
+Old commit 26 follows.
+
+b7d4358c22a77d6a3a5b5219845da7b77699f5f9.
+
+New commit 26 follows.
+
+4bf7dd0091677d8954992b8a6f1dc6dcc7b12b42.
+
+Record 27 keeps one tree.
+
+b21f53d3bef3e8ba174f1089c5cce15940b993bc.
+
+Old commit 27 follows.
+
+8cf65ce78ce8df27ad0794726a23cc51722a3b43.
+
+New commit 27 follows.
+
+22384aeb42b00d36bdda7a559d1737cb7e099ff2.
+
+Record 28 keeps one tree.
+
+9745d10b9ad979096b2b42f99bb21a0a03c0d5af.
+
+Old commit 28 follows.
+
+3789c861cef2bc2af8cfe4e5209055c35f23c572.
+
+New commit 28 follows.
+
+710819a222400ef0f600eacd1449f2256083a23f.
+
+Record 29 keeps one tree.
+
+1efda8e05b13b0b10901a6efd9b59556a1c75956.
+
+Old commit 29 follows.
+
+6fac731f19341c39236e3435395ce3b99d0cf199.
+
+New commit 29 follows.
+
+244eb3d727aa9a6bd0b4bc5aaafa87a28863814f.
+
+Record 30 keeps one tree.
+
+1ce178355c90a31419002c75934c9f53b7b7fab8.
+
+Old commit 30 follows.
+
+f68ee16f1c3a9f67c89800401c6a58fe7e3bc60d.
+
+New commit 30 follows.
+
+b354698652fdea3951ad105bab088a1346b1a80f.
+
+Record 31 keeps one tree.
+
+cecc9af65adc331a8c34d7492f57c6476c7ba45b.
+
+Old commit 31 follows.
+
+2f4a79326137729f3e680aa36ecf6e1de67ccb2d.
+
+New commit 31 follows.
+
+d442f62db56b564d77a1a0f4901d2a5ab6fd0be4.
+
+Record 32 keeps one tree.
+
+8da9d6731ee800a3e9dfc483da391f4d5bcb9ec2.
+
+Old commit 32 follows.
+
+12fa8865bfd4c8563d7bafdff33139f2ef1e0ad6.
+
+New commit 32 follows.
+
+d7e63aa78bdfbbae8bead943e553eed4d8e0df59.
+
+Record 33 keeps one tree.
+
+e621ec056039763accc7e83f302a96c8fe7be9d3.
+
+Old commit 33 follows.
+
+46e9c66a451d2e6cf091bae64b9cf1aebd7a8ae7.
+
+New commit 33 follows.
+
+47590a9f7c2fb35e7e47eac96cb1dcc8c7e9852c.
+
+Record 34 keeps one tree.
+
+25585967bb080efbd4a7e1dc5c2efe8e36a2143c.
+
+Old commit 34 follows.
+
+f9cf80fda1d91492fa3140d143d658524048d238.
+
+New commit 34 follows.
+
+c710e10d5a57aa36e97864f093201da0fefe6974.
+
+Record 35 keeps one tree.
+
+a8bec7130bba8ac83e2217c9fed44772f22e1996.
+
+Old commit 35 follows.
+
+2a7342318a09f9b0925c32303f6450a846b504a6.
+
+New commit 35 follows.
+
+054322a1deee514a886b727dd4cd224a7fc4dfaa.
+
+Record 36 keeps one tree.
+
+07fdb19e847a98973de5a4675dad22b78cdeaf7e.
+
+Old commit 36 follows.
+
+a4b407147f237c8961c04aea10c9eb1b99afbd02.
+
+New commit 36 follows.
+
+321f0d982963a660fe928f0958b593aebafcef82.
+
+Record 37 keeps one tree.
+
+70bafe8be91ad002de92570f3f198776edb5b772.
+
+Old commit 37 follows.
+
+917b5f309ce89d991aae02315a47a3c9397c9386.
+
+New commit 37 follows.
+
+07bded85c30ace2e86192a8629bc613b8b3f509e.
+
+Record 38 keeps one tree.
+
+cfedccb4dc13c6a9dd95099b75eaf37f7611ce72.
+
+Old commit 38 follows.
+
+723f812fd1b6e2479f16ef581576f1af8085c3de.
+
+New commit 38 follows.
+
+b2dda6ecf34d116102540b1068099fde6db5b3d1.
+
+Record 39 keeps one tree.
+
+210ef3a9ec9f233edd9ef81b1137ded4e5af1674.
+
+Old commit 39 follows.
+
+5fb7088350a66c4dfc35a80cb710fa41ed95e4d4.
+
+New commit 39 follows.
+
+771f004b56a1e3018d60e69d6174c3bf959a7a9e.
+
+Record 40 keeps one tree.
+
+3a9aeba645d4d1233eae1745b064373e7098953a.
+
+Old commit 40 follows.
+
+3591ade9d5bbdef2d2a37e7562d1ca77a33e26c2.
+
+New commit 40 follows.
+
+97d4a10f8ebe1a10e42335094ff4836af40a34a4.
+
+Record 41 keeps one tree.
+
+3d35599a80af2d24cbce733b0b9ba2e870c17683.
+
+Old commit 41 follows.
+
+fd4e691db9152bea8086c2102af84a1b0ea39444.
+
+New commit 41 follows.
+
+3afcb7b2578eded4d9a01fb1d6ff258f14a5f871.
+
+Record 42 keeps one tree.
+
+50e8b7e1ca632446e461ac2a0b950019b3e9a234.
+
+Old commit 42 follows.
+
+afe6edfe1956db5a6c460a396e64d9d7b58cd3ef.
+
+New commit 42 follows.
+
+dd94a3f3922a9ad99aeb0bf4ff6f51fb07f22a58.
+
+Record 43 keeps one tree.
+
+f454fd1211de9a5a8b8060c4b9f25e1d247040d7.
+
+Old commit 43 follows.
+
+b568d6c2d2e85d6a23ea7ed2891fd0dc6800bb15.
+
+New commit 43 follows.
+
+f0ec8ed29886502d9118723d4e84868a34848721.
+
+Record 44 keeps one tree.
+
+23885ff3b4325c899cbba4d99dcd94d978d699dc.
+
+Old commit 44 follows.
+
+e7e77ace3c0734639d1f413306d3da828e5a6cce.
+
+New commit 44 follows.
+
+212666bf3bffb32b57d44db4cde1570df3c5092b.
+
+Record 45 keeps one tree.
+
+39af714ebac742fb9ba48fd78b1115ad4cea540d.
+
+Old commit 45 follows.
+
+74849a7fd4366044bd01220cc0295e620f7dc7ef.
+
+New commit 45 follows.
+
+963715517783478a4d77e62e1caf71c749f4f78b.
+
+Record 46 keeps one tree.
+
+306b34a14475c84dd5d2a0dcf0aaa8a06ed9baee.
+
+Old commit 46 follows.
+
+8ae8d4403d7798c99d2dcfe500b8d15f054f4af6.
+
+New commit 46 follows.
+
+18587942d10493fdbe4555a6f4667145d48e361a.
+
+Record 47 keeps one tree.
+
+f194b2501fb0639acee4afb2e5841987a142f1e6.
+
+Old commit 47 follows.
+
+7f33cfa6c8b9e2ffcdde144c3bf3dc7526388967.
+
+New commit 47 follows.
+
+a7e8fb1982428bbed44059876baf37dbc232e092.
+
+Record 48 keeps one tree.
+
+b8d7d982b569c1a136135929df4e9a865828f03e.
+
+Old commit 48 follows.
+
+9109df21fbfd9470c16cff37a7a7b5228bb809e0.
+
+New commit 48 follows.
+
+33be7c06541ac16f662e0e2c169c7e7821590f4f.
