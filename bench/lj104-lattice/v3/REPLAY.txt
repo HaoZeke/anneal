@@ -88,3 +88,18 @@ bench/lj104-lattice/v3/PREDICTIONS-recount.md
 The brief names ed5849f6. That object is not in this
 clone. 87a1c409 has the same tree
 b8c8d0bc0b0684229c1c7b5862b15e983ffc16c9.
+The lattice-search commit's parent is the replayed v1
+tip, not 87a1c409.
+
+Message only, same tree
+b404b73331b40ed9610a7cfb30af7d2c681a4ea2.
+030153b663f1d62ce688e811789196d99d114ff8
+eb604328bf5d27113635af14bd8dcb50b134869d
+
+Branch after that message fix:
+48e3beeb9581524382d3c77be753b09d3f953045
+9e5ceedfc98b45f7f9576d62debf06b34cd18b5e
+1c05ca8a50a3acfd000d03cbc84d77a3f37d4272
+69fe16c7e1a3780d8fbb36ffb35df2318be19be4
+d8714a2b7c0b4fdfdb81ec9742d486c3c7e1bf46
+e6d763ffd347b3a503222e0190d22aabeeacc42e
