@@ -1,0 +1,5 @@
+Copyright (c) anneal developers
+
+The only ref this record publishes is refs/heads/prereg/lj104-sota-v1.
+Archive refs are never pushed.
+This commit does not push.
