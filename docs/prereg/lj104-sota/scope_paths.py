@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
 
 BASE = "91b15a024749320b9463e4abbdf10d37e933174b"
@@ -48,6 +47,25 @@ def names(root: Path, commit: str, diff_filter: str) -> list[str]:
     return [line for line in text.splitlines() if line]
 
 
+def sentences(text: str) -> list[str]:
+    words = text.split()
+    lines: list[str] = []
+    current: list[str] = []
+    for word in words:
+        trial = " ".join([*current, word])
+        if current and len(trial) + 1 > 72:
+            lines.append(" ".join(current) + ".")
+            current = [word]
+        else:
+            current.append(word)
+    if current:
+        lines.append(" ".join(current) + ".")
+    for line in lines:
+        if len(line) > 72:
+            raise SystemExit(f"scope line is {len(line)} columns: {line}")
+    return lines
+
+
 def main() -> None:
     root = repo_root()
     listed = git(root, "rev-list", "--reverse", f"{BASE}..{TIP}")
@@ -58,31 +76,27 @@ def main() -> None:
         "Copyright (c) anneal developers",
         "",
         "Scope of the twelve commits after 91b15a02 through 5fb7368d.",
-        "Subjects and paths are taken from git. An added path is a",
-        "diff-tree addition. A modified path is a diff-tree modification.",
+        "Subjects and paths are taken from git.",
+        "An added path is a diff-tree addition.",
+        "A modified path is a diff-tree modification.",
         "",
     ]
     for commit in commits:
         subject = git(root, "log", "-1", "--format=%s", commit).strip()
         added = names(root, commit, "A")
         modified = names(root, commit, "M")
-        out.append(f"Commit {commit}")
-        subject_lines = textwrap.wrap(
-            f"Subject: {subject}",
-            width=72,
-            break_long_words=False,
-            break_on_hyphens=False,
-        )
-        out.extend(subject_lines)
+        out.append(f"Commit {commit}.")
+        out.append("Subject follows.")
+        out.extend(sentences(subject))
         if added:
             out.append(f"Adds {len(added)} paths.")
-            out.extend(added)
+            out.extend(f"Path {path}." for path in added)
         else:
             out.append("Adds no path.")
         if modified:
             word = "path" if len(modified) == 1 else "paths"
             out.append(f"Modifies {len(modified)} {word}.")
-            out.extend(modified)
+            out.extend(f"Path {path}." for path in modified)
         out.append("")
     text = "\n".join(out)
     if not text.endswith("\n"):
