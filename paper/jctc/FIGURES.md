@@ -186,3 +186,20 @@ Previous hash.
 New hash.
 
 5864d20ec513214e96d9a65183976930bc825b0255e006ab79ace6a6f624b5b1
+
+## What the sealed notes still say
+
+No seed log in this tree records the 192-seed hexamer counts.
+The McNemar values lack that log too.
+No separate receipt records the LJ map energies.
+A figure that matches main has no generator in this tree.
+scripts/toc_graphic.py draws toc-graphic.pdf.
+water_crest.pdf matches the 192-seed figure on main.
+scripts/water_crest_figure.py draws the six-seed counter chart.
+The chart path is figs/water_crest_counters.pdf.
+That script does not write water_crest.pdf.
+lj75_ecdf.pdf matches main.
+landfold_maps.pdf matches main too.
+This tree has no seed table for those two plates.
+The LJ map energies have no seed table.
+No seed table covers the McNemar values.
