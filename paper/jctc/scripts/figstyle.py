@@ -12,7 +12,17 @@ darker than sky, so it does not.
 """
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
+
+# Matplotlib names a font subset from Python's hash of the glyph set.
+# That hash changes unless the process is started with PYTHONHASHSEED=0.
+# A creation date likewise changes unless SOURCE_DATE_EPOCH is 0.
+if os.environ.get("PYTHONHASHSEED") != "0" or os.environ.get("SOURCE_DATE_EPOCH") != "0":
+    os.environ["PYTHONHASHSEED"] = "0"
+    os.environ["SOURCE_DATE_EPOCH"] = "0"
+    os.execv(sys.executable, [sys.executable, *sys.argv])
 
 import matplotlib
 

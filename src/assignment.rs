@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+// Copyright (c) anneal developers
 // Portions Copyright (c) 2022 Theochem @ Háskóli Íslands
 
 //! Dense minimum-cost bipartite assignment.

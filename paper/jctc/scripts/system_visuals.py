@@ -605,8 +605,20 @@ def viewed(structure: Structure):
     return (xyz @ frame.T).tolist()
 
 
-def _bare_pdf(pdf: bytes) -> bytes:
+PYMUPDF = "1.28.2"
+
+
+def _require_pymupdf():
     import pymupdf
+
+    found = getattr(pymupdf, "version", ("",))[0]
+    if found != PYMUPDF:
+        die(f"pymupdf {found} is not the {PYMUPDF} that wrote the committed plates")
+    return pymupdf
+
+
+def _bare_pdf(pdf: bytes) -> bytes:
+    pymupdf = _require_pymupdf()
 
     document = pymupdf.open("pdf", pdf)
     document.set_metadata({key: "" for key in ("producer", "creationDate", "creator", "modDate", "title", "author", "subject", "keywords")})
@@ -676,8 +688,9 @@ def _render_solvis(coords, pairs, radius: float, stick: float, shadows: bool) ->
     atoms, on a transparent ground, in the sky of the Ruhi palette.
     """
     import numpy as np
-    import pymupdf
     from PIL import Image
+
+    pymupdf = _require_pymupdf()
 
     _check_solvis()
     import figstyle
@@ -720,7 +733,8 @@ def _check_solvis() -> None:
 def place(figure, panels, out: Path) -> None:
     """Save a matplotlib figure with each (axes, PDF) of panels drawn into its axes box."""
     import matplotlib.pyplot as plt
-    import pymupdf
+
+    pymupdf = _require_pymupdf()
 
     width, height = figure.get_size_inches()
     boxes = [ax.get_position() for ax, _ in panels]
