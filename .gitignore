@@ -67,6 +67,9 @@ cover/
 
 # Django stuff:
 *.log
+!paper/jctc/logs/water/
+!paper/jctc/logs/water/**
+!paper/jctc/logs/water/**/*.log
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -197,6 +200,7 @@ cython_debug/
 # Executables
 *.exe
 *.out
+!paper/jctc/logs/water/**/*.out
 *.app
 *.i*86
 *.x86_64

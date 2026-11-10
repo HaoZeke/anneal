@@ -1,0 +1,21 @@
+Fri Nov  6 09:20:43 AM UTC 2026
+x86_64
+8
+Intel Xeon Processor, family 6, model 207
+clone=https://github.com/HaoZeke/anneal.git
+source_commit=b397f464d1f9de4489898ecff8cf9d36cf80e6cb
+source_tree=78211bc03f505c431cee0a525ca25f7ca88ef43a
+cwd=.
+TMPDIR=paper/jctc/logs/scratch
+command=gfn2_water_h2h 6 1 0 polish-seed0-paper4000
+code=force-audit seed=0
+wall_s=0.019736
+code: anneal
+audit: quenched maximum force
+seed: 0
+molecules: 6
+objective_eV: -829.8522275293
+FORCE_AUDIT seed 0 quench_gradient 6.113753e-6 bar 0.0514221 PASS
+  eindir objective from rgpot xtb (path)
+FORCE_AUDIT seed 0 quench_gradient 6.113753e-6 bar 0.0514221 PASS
+exit_code=0

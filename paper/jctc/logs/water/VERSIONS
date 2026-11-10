@@ -1,0 +1,14 @@
+crest_sha256=16c5de4578000dfd8ea5758da9f5c497778be0dd7a6a1c1e8933030479d0e56e
+paper_pin_crest_sha256=16c5de4578000dfd8ea5758da9f5c497778be0dd7a6a1c1e8933030479d0e56e
+paper_pin_crest_conda=crest 3.0.2 h8876d29_1
+xtb_sha256=271dd6cdd5da127a8e39919e7e32d924790fb346f0057b4183769ba8b3411887
+engine_sha256=4836648ee77203e9462d51e25a1970b3f0df3a3bcd126f9a7454f6896ac66df8
+gfn2_accuracy=0.01
+paper_budget=4000
+force_bar_eV_per_A=0.0514221
+force_bar_Ha_per_Bohr=0.001
+window_Eh=1e-08
+polish=xtb --gfn 2 --opt vtight --acc 0.01 --iterations 500
+hessian=xtb --gfn 2 --hess --acc 0.01 --iterations 500
+crest_banner=Version 3.0.2, Tue, 05 August 16:25:20, 08/05/2025
+xtb_banner=xtb version 6.7.1 (edcfbbe) compiled by 'conda@5dfe00f5fb80' on 2026-06-10

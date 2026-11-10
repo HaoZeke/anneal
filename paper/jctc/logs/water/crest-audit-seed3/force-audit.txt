@@ -1,0 +1,6 @@
+code: anneal
+audit: quenched maximum force
+seed: 3
+molecules: 6
+objective_eV: -829.8522274162
+FORCE_AUDIT seed 3 quench_gradient 3.912450e-4 bar 0.0514221 PASS
