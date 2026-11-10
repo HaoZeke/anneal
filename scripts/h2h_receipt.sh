@@ -110,6 +110,8 @@ run_arm() {
     echo "command=$cmd"
     echo "head=$head_sha"
     echo "tree=$tree_sha"
+    echo "rustc_v=$(rustc -V)"
+    echo "cargo_v=$(cargo -V)"
     echo "pins=${pins:-unset}"
     echo "uname_n=$(uname -n)"
     echo "hostname_sha256=$(hash_file /etc/hostname)"
