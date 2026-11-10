@@ -1,4 +1,4 @@
-# Notes, v1.29
+# Notes, v1.31
 
 We drew the eighteen figures with the committed generators.
 This series starts from the v1.16 tip.
@@ -19,3 +19,8 @@ They are `manuscript.tex`, `si.tex` and `cover-letter.tex`.
 Only `si.tex` keeps the 2023 notice.
 REPORT.md lists the Rohit items.
 REPLAY.txt records all seven replays of this series.
+The sealed v1.28 tip is refs/heads/paper-integration-v1.28.
+
+That name is a branch.
+
+It is not an archive ref.
