@@ -24,13 +24,17 @@ This submission replaces the preprint arXiv:2302.02811, deposited in
 Annealing.''
 The title has changed.
 The manuscript now reports one basin-hopping preset.
-That preset keeps the lean burst library at every size.
+That preset keeps the move library, the temperature, the census and the
+orbit completion fixed at every size.
 Below 98 atoms it adds a diameter penalty, and restart on stall stays
 off.
-On the water hexamer, the six crest rows are single draws, and this
-letter states no success rate from them.
+The novelty is that fixed core, with the depth posterior choosing the
+move.
+On the water hexamer, the six crest rows are single draws from the
+conformer-rotamer ensemble sampling tool.
+Those rows are not a success rate.
 Five polished gaps lie within \(1\times 10^{-7}\)~Eh, and seed 1 lies
-just outside that threshold.
+above that line.
 The comparison sets anneal's ledger against the conformer-rotamer
 ensemble sampling tool (CREST) energy and gradient calls, which run from
 142110 to 209931.
@@ -45,9 +49,8 @@ This article belongs in that journal.
 The molecular test is a water hexamer at the GFN2-xTB model, and the
 software is the preset a reader can rerun.
 
-A table of contents (TOC) graphic at 3.25~in by 1.75~in accompanies the
+A table of contents graphic at 3.25~in by 1.75~in accompanies the
 submission.
-\todo{TOC placeholder}
 
 Suggested reviewers follow.
 \todo{Rohit} \todo{Rohit} \todo{Rohit}
