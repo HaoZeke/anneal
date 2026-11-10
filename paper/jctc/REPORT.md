@@ -1,7 +1,7 @@
-# Report, v1.23
+# Report, v1.25
 
 We drew the eighteen figures with the committed generators.
-The branch is paper-integration-v1.23.
+The branch is paper-integration-v1.25.
 It starts from fd4e691db9152bea8086c2102af84a1b0ea39444.
 The inbox sums file has 359 rows.
 Its sha256 follows.
@@ -63,7 +63,9 @@ Those constants give the committed -197.7750 kJ/mol reported here.
 
 ## Bundle
 
-The bundle ref is refs/heads/paper-integration-v1.23.
+The bundle ref is refs/heads/paper-integration-v1.25.
+It also carries refs/archive/paper-integration-v1.24.
+That ref is 705fa8a4b4b259023db551a4f20da5efbea361f6.
 It also carries refs/archive/paper-integration-v1.20.
 That ref is 7d20cca206fb50cce9f2e393078eaa1e03e9c86f.
 It also carries refs/archive/paper-integration-v1.19.
