@@ -15,13 +15,13 @@ outer = (root / "OUTER").stat().st_mtime
 ready = (root / "STORE_READY").stat().st_mtime
 if not (sums < outer < ready):
     raise SystemExit(f"seal order sums={sums} outer={outer} ready={ready}")
-newest = max(
-    (path.stat().st_mtime, path.name)
-    for path in root.rglob("*")
-    if path.is_file() and path.name != "STORE_READY"
-)
-if newest[0] > ready:
-    raise SystemExit(f"STORE_READY is older than {newest[1]}")
+for path in root.rglob("*"):
+    if not path.is_file():
+        continue
+    if path.name in {"OUTER", "STORE_READY"}:
+        continue
+    if path.stat().st_mtime > sums:
+        raise SystemExit(f"{path.name} is newer than SHA256SUMS")
 print("seal order ok")
 PY
 fi
