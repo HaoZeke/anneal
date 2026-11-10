@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! End-to-end cluster search on the crate's own machinery.
 //!
 //! Runs the Rust driver against a Lennard-Jones cluster under a charged ledger
