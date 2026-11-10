@@ -17,6 +17,9 @@ The 192-seed hexamer counts and the McNemar values have no seed log in this tree
 The LJ map energies in the manuscript have no separate receipt in this tree.
 Figures whose blob equals main have no generator in this tree.
 toc-graphic.pdf is drawn by scripts/toc_graphic.py.
-water_crest.pdf equals main's 192-seed figure. scripts/water_crest_figure.py draws the six-seed counter chart to figs/water_crest_counters.pdf and does not write water_crest.pdf.
+water_crest.pdf equals main's 192-seed figure.
+scripts/water_crest_figure.py draws the six-seed counter chart.
+That chart is figs/water_crest_counters.pdf.
+It does not write water_crest.pdf.
 lj75_ecdf.pdf and landfold_maps.pdf equal main and have no generator or seed table in this tree.
 The LJ map energies and the 192-seed McNemar values have no seed table in this tree.
