@@ -1,6 +1,7 @@
 Copyright (c) anneal developers
 
-command: proseguard -p rohit-paper
-NOT_RUN
-The command was not on PATH. A search of the usual install
-locations did not find it. No output was produced.
+The command is proseguard -p rohit-paper.
+The file is docs/prereg/lj104-sota/PREDICTIONS.md.
+The exit code is 127.
+Stderr follows.
+proseguard: command not found
