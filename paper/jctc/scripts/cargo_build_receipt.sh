@@ -5,6 +5,8 @@
 # ira, lammps and gpr are built on their own so each error is recorded.
 set -eu
 out=${1:-paper/jctc/logs/cargo-build-receipt.txt}
+raw=${2:-$(mktemp)}
+map=${3:-$(dirname "$out")/cargo-build-receipt-map.txt}
 mkdir -p "$(dirname "$out")" .ci
 if [ ! -f .ci/vesin/vesin/src/vesin.cpp ]; then
   git clone --quiet https://github.com/Luthaf/vesin.git .ci/vesin
@@ -45,13 +47,7 @@ others=graphkey,featomic,vesin-nl,bank-rpc,history-nng,rgsaddle,capi,python,rgpo
   cargo +stable bench --no-run --locked
   printf 'EXIT:%s\n' "$?"
   set -e
-} > "$out.raw" 2>&1
-python3 - "$out.raw" "$out" "$root" << 'PY'
-import sys
-from pathlib import Path
-src, dest, root = sys.argv[1:]
-text = Path(src).read_text(errors="replace")
-text = text.replace(root, ".")
-Path(dest).write_text(text)
-Path(src).unlink()
-PY
+} > "$raw" 2>&1
+here=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+python3 "$here/redact_paths.py" "$raw" "$out" "$map" "$root" "$here"
+printf '%s\n' "$raw" >&2
