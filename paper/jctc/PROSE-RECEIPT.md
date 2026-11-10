@@ -261,7 +261,8 @@ That script submits the hexamer and stores each seed log.
 The writer is `scripts/hq_sci_tally.py`.
 
 The hexamer block matches the file in the tree.
-The copper block is the rerun in `TALLY.txt`.
+The copper hit count uses the fixed target.
+The set_relative_0.01 line records the 0.01 eV rate.
 
 `paper/jctc/data/hq_sci_cuh2/cuh2_fcc_rec_0.txt`
 
