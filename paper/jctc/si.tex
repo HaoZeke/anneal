@@ -49,7 +49,8 @@ No row in that file is a genetic algorithm at 104 atoms.
 The units are kJ \AA\(^{12}\) mol\(^{-1}\) and kJ \AA\(^{6}\) mol\(^{-1}\).
 The Wales-group basin-hopping program (GMIN) matches those two numbers in \(C_6\) and \(C_{12}\).
 A rounded well depth and a rounded \(\sigma\) give the anneal pair \(C_6 = 2551.8252\) and \(C_{12} = 2510336.2\).
-The water hexamer figure in the article uses the six-seed GFN2-xTB comparison, and these two coefficients are the TIP4P pair in the log.
+These two coefficients are the TIP4P pair in the log.
+The GFN2-xTB hexamer rows are a separate comparison.
 
 \section{Earlier campaign}
 \texttt{data/campaign-scores.csv} is an earlier 64-seed campaign, and on TIP4P\(_{20}\) a 16-seed campaign.
@@ -69,6 +70,21 @@ The seed file is the record of those LJ\(_{98}\) medians.
 The LJ75 receipt is \texttt{logs/lj75-hardware-receipt.txt}.
 \texttt{scripts/lj75\_hardware\_capture.sh} writes that file from the
 live process.
+The 200-seed binary was built from tree
+\texttt{37535ec1a6e99d47a2afe0752072a33af64dccb3}.
+That tree does not contain main's \#56 hot-path edits.
+The source archive is \texttt{logs/lj75-source-37535ec1.tar.xz}.
+\texttt{scripts/lj75\_rebuild\_from\_archive.sh} rebuilds the example
+from that archive.
+Against the tip, the compiled files that differ are
+\texttt{cluster\_hopping.rs}, \texttt{tip4p.rs}, and
+\texttt{rigid\_body.rs}.
+On the recommended LJ75 path the hop reuses a pure distance descriptor.
+The added tests require a second call on the same coordinates to match
+bit for bit.
+This run does not use the SOAP key, which still recomputes.
+The random draws, the acceptance test, and the evaluation counter stay
+the same, so this hit count does not need a rerun on the tip.
 The hexamer engine digest is the \texttt{engine\_sha256} line of
 \texttt{water/VERSIONS} inside \texttt{logs/logs-water.tar.xz}.
 That digest is
