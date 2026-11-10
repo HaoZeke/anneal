@@ -1,0 +1,15 @@
+arm=paper4000
+xyz=xtbopt.xyz
+converged=True
+raw_intact=True
+raw_nearest_oo_A=2.7406853275310117
+intact=True
+nearest_oo_A=2.7406853275310117
+energy=-30.496506867658
+scf=1e-08
+force=5.84877e-06
+force_pass=True
+imaginary=0
+lowest_cm1=53.17
+xtb_imaginary=0
+confirmed=True

@@ -1,0 +1,6 @@
+host=host-a
+machine=x86_64
+cores=8
+cpu=Intel Xeon Processor, family 6, model 207
+threads_per_run=1
+omp=1

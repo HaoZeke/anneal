@@ -1,0 +1,15 @@
+arm=crest
+xyz=xtbopt.xyz
+converged=True
+raw_intact=True
+raw_nearest_oo_A=2.740774462826601
+intact=True
+nearest_oo_A=2.740774462826601
+energy=-30.496506863503
+scf=1e-08
+force=0.000391245
+force_pass=True
+imaginary=0
+lowest_cm1=53.15
+xtb_imaginary=0
+confirmed=True

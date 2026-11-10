@@ -1,0 +1,39 @@
+code: anneal
+arm: recommended_molecular
+water_arm: recommended
+orbit_complete_on_new: false
+source_commit: b397f464d1f9de4489898ecff8cf9d36cf80e6cb
+source_tree: 78211bc03f505c431cee0a525ca25f7ca88ef43a
+config_sha256: 626acee8bfe6a7bdf386409d2ace82912e9dcdffe7fc0ea0d5103a0e383bfa93
+molecules: 6
+seed: 2
+budget: 4000
+spread_steps: 8
+start_intact: true
+crate: 0.12.0
+oh_wall_onset_A: 1.15
+oh_wall_eV_per_A2: 200
+wall_s: 18.368875
+energy_calls: 4000
+search_calls: 3800
+polish_calls: 200
+polish_component_tolerance_eV_per_A: 1.360828e-6
+polished_from_eV: -829.8519945468
+scc_rejected: 0
+geometry_rejected: 0
+hops: 24
+basins: 9
+overlap_rejected: 2
+proposal_overlap_rejected: 1
+linesearch_overlap_rejected: 1
+overlap_note: a geometry closer than 0.35 angstrom is refused before the energy call and is not charged
+quenches_converged: 29
+quenches_capped: 1
+best_record: converged quench at the preset record gradient
+screens: 0
+objective_best_eV: -829.8522275283
+wall_at_best_eV: 0.0000000000
+engine_best_eV: -829.8522275283
+gradient_norm_eV_per_A: 4.674693e-5
+FORCE_AUDIT seed 2 quench_gradient 1.525599e-5 bar 0.0514221 PASS
+best_intact: true

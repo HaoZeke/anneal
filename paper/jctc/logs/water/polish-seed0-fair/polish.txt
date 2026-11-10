@@ -1,0 +1,15 @@
+arm=fair
+xyz=xtbopt.xyz
+converged=True
+raw_intact=True
+raw_nearest_oo_A=2.7406846925315564
+intact=True
+nearest_oo_A=2.7406846925315564
+energy=-30.496506867656
+scf=1e-08
+force=7.826892e-06
+force_pass=True
+imaginary=0
+lowest_cm1=53.29
+xtb_imaginary=0
+confirmed=True
