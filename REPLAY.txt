@@ -1,0 +1,7 @@
+dates=unset
+sleeps=none
+The seconds are the ones git writes.
+Archive refs are never pushed.
+Push plan: refs/heads/fix/lj104-measure-v4.11
+The archive ref is refs/archive/fix/lj104-measure-v4.9.
+The raw rows are in logs/replay-pass.txt.
