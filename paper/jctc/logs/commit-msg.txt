@@ -1,0 +1,490 @@
+paper/jctc/logs/commit-msgs/0001.txt:11: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0001.txt:12: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0001.txt:13: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0001.txt:14: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0001.txt:22: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0001.txt:27: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0001.txt:28: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0001.txt:29: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0001.txt:30: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0001.txt:33: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0001.txt:41: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0001.txt:44: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0001.txt:45: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0001.txt:46: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0001.txt:51: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0001.txt:58: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0001.txt:52: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'be' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0001.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'chore' — This sentence does not start with a capital letter → Chore
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'q4' — This word's canonical spelling is all-caps. → Q4
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'toml' — This word's canonical spelling is all-caps. → TOML
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'toml' — This word's canonical spelling is all-caps. → TOML
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'md' — This word's canonical spelling is all-caps. → MD
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'md' — This word's canonical spelling is all-caps. → MD
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'csv' — This word's canonical spelling is all-caps. → CSV
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'csv' — This word's canonical spelling is all-caps. → CSV
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'csv' — This word's canonical spelling is all-caps. → CSV
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'csv' — This word's canonical spelling is all-caps. → CSV
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'png' — This word's canonical spelling is all-caps. → PNG
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'png' — This word's canonical spelling is all-caps. → PNG
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'png' — This word's canonical spelling is all-caps. → PNG
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'png' — This word's canonical spelling is all-caps. → PNG
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'si' — The canonical dictionary spelling is title case: `Si`. → Si
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'si' — The canonical dictionary spelling is title case: `Si`. → Si
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'tex' — The canonical dictionary spelling is `TeX`. → TeX
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'tex' — The canonical dictionary spelling is `TeX`. → TeX
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'tex' — The canonical dictionary spelling is `TeX`. → TeX
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'si' — The canonical dictionary spelling is title case: `Si`. → Si
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'tex' — The canonical dictionary spelling is `TeX`. → TeX
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Style (harper) [Style] 'sites' — An Oxford comma is necessary here. → insert ,
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'compile' — This sentence does not start with a capital letter → Compile
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'rs' — This sentence does not start with a capital letter → Rs
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'lock' — This sentence does not start with a capital letter → Lock
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'water' — This sentence does not start with a capital letter → Water
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'py' — This sentence does not start with a capital letter → Py
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'cluster' — This sentence does not start with a capital letter → Cluster
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'rs' — This sentence does not start with a capital letter → Rs
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 's' — This sentence does not start with a capital letter → S
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'q4' — This sentence does not start with a capital letter → Q4
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'soap' — This sentence does not start with a capital letter → Soap
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'rigid' — This sentence does not start with a capital letter → Rigid
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'rs' — This sentence does not start with a capital letter → Rs
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'rs' — This sentence does not start with a capital letter → Rs
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'cog' — This sentence does not start with a capital letter → Cog
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'docs' — This sentence does not start with a capital letter → Docs
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'src' — This sentence does not start with a capital letter → Src
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'rs' — This sentence does not start with a capital letter → Rs
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'src' — This sentence does not start with a capital letter → Src
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'rs' — This sentence does not start with a capital letter → Rs
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'rs' — This sentence does not start with a capital letter → Rs
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'lock' — This sentence does not start with a capital letter → Lock
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'bib' — This sentence does not start with a capital letter → Bib
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'bib' — This sentence does not start with a capital letter → Bib
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'log' — This sentence does not start with a capital letter → Log
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'bib' — This sentence does not start with a capital letter → Bib
+paper/jctc/logs/commit-msgs/0001.txt:3: [suggestion] harper.Grammar (harper) [Grammar] 'bit' — Use the past participle `bitten` instead of `bit` when using compound tenses or passive voice. → bitten
+proseguard: 111 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0002.txt:5: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0002.txt:10: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0002.txt:14: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0002.txt:22: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0002.txt:27: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0002.txt:30: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0002.txt:43: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0002.txt:44: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0002.txt:3: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0002.txt:4: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0002.txt:22: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0002.txt:29: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0002.txt:41: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0002.txt:32: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'were' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0002.txt:42: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'were' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0002.txt:29: [suggestion] complexity.LongWord (lexical) long word 'acknowledgments' -- consider 'a shorter word' → a shorter word
+paper/jctc/logs/commit-msgs/0002.txt:29: [suggestion] complexity.LongWord (lexical) long word 'contributions' -- consider 'a shorter word' → a shorter word
+paper/jctc/logs/commit-msgs/0002.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'docs' — This sentence does not start with a capital letter → Docs
+paper/jctc/logs/commit-msgs/0002.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'md' — This word's canonical spelling is all-caps. → MD
+paper/jctc/logs/commit-msgs/0002.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'toc' — This word's canonical spelling is all-caps. → TOC
+paper/jctc/logs/commit-msgs/0002.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'si' — The canonical dictionary spelling is title case: `Si`. → Si
+paper/jctc/logs/commit-msgs/0002.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'tex' — The canonical dictionary spelling is `TeX`. → TeX
+paper/jctc/logs/commit-msgs/0002.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0002.txt:3: [suggestion] harper.Style (harper) [Style] 'cover' — An Oxford comma is necessary here. → insert ,
+paper/jctc/logs/commit-msgs/0002.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'summary' — This sentence does not start with a capital letter → Summary
+paper/jctc/logs/commit-msgs/0002.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'py' — This sentence does not start with a capital letter → Py
+paper/jctc/logs/commit-msgs/0002.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'refs' — This sentence does not start with a capital letter → Refs
+paper/jctc/logs/commit-msgs/0002.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'bib' — This sentence does not start with a capital letter → Bib
+paper/jctc/logs/commit-msgs/0002.txt:3: [suggestion] harper.Miscellaneous (harper) [Miscellaneous] 'TODO' — Hyphenate `to-do`. → TO-DO
+paper/jctc/logs/commit-msgs/0002.txt:10: [suggestion] harper.Capitalization (harper) [Capitalization] 'bbl' — This sentence does not start with a capital letter → Bbl
+paper/jctc/logs/commit-msgs/0002.txt:24: [suggestion] harper.Capitalization (harper) [Capitalization] 'todo' — This word's canonical spelling is all-caps. → TODO
+paper/jctc/logs/commit-msgs/0002.txt:24: [suggestion] harper.Miscellaneous (harper) [Miscellaneous] 'todo' — Hyphenate `to-do`. → to-do
+paper/jctc/logs/commit-msgs/0002.txt:29: [suggestion] harper.Capitalization (harper) [Capitalization] 'tex' — The canonical dictionary spelling is `TeX`. → TeX
+paper/jctc/logs/commit-msgs/0002.txt:29: [suggestion] harper.Capitalization (harper) [Capitalization] 'cargo' — This sentence does not start with a capital letter → Cargo
+paper/jctc/logs/commit-msgs/0002.txt:29: [suggestion] harper.Capitalization (harper) [Capitalization] 'sh' — This sentence does not start with a capital letter → Sh
+paper/jctc/logs/commit-msgs/0002.txt:29: [suggestion] harper.Capitalization (harper) [Capitalization] 'lj75' — This sentence does not start with a capital letter → Lj75
+paper/jctc/logs/commit-msgs/0002.txt:29: [suggestion] harper.Capitalization (harper) [Capitalization] 'sh' — This sentence does not start with a capital letter → Sh
+proseguard: 37 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0003.txt:3: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0003.txt:7: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0003.txt:8: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0003.txt:9: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0003.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'logs' — This sentence does not start with a capital letter → Logs
+paper/jctc/logs/commit-msgs/0003.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0003.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sh' — This sentence does not start with a capital letter → Sh
+proseguard: 7 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0004.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+proseguard: 1 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0005.txt:5: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0005.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+paper/jctc/logs/commit-msgs/0005.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'so' — This sentence does not start with a capital letter → So
+paper/jctc/logs/commit-msgs/0005.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'cargo' — This sentence does not start with a capital letter → Cargo
+proseguard: 4 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0006.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+proseguard: 1 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0007.txt:3: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0007.txt:5: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0007.txt:6: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0007.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+paper/jctc/logs/commit-msgs/0007.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'toml' — This word's canonical spelling is all-caps. → TOML
+paper/jctc/logs/commit-msgs/0007.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'toml' — This word's canonical spelling is all-caps. → TOML
+paper/jctc/logs/commit-msgs/0007.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'lock' — This sentence does not start with a capital letter → Lock
+proseguard: 7 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0008.txt:3: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0008.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'logs' — This sentence does not start with a capital letter → Logs
+paper/jctc/logs/commit-msgs/0008.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0008.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sh' — This sentence does not start with a capital letter → Sh
+proseguard: 4 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0009.txt:4: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0009.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'docs' — This sentence does not start with a capital letter → Docs
+proseguard: 2 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0010.txt:1: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0010.txt:7: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0010.txt:9: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0010.txt:11: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0010.txt:3: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0010.txt:4: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0010.txt:5: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0010.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'docs' — This sentence does not start with a capital letter → Docs
+paper/jctc/logs/commit-msgs/0010.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'md' — This word's canonical spelling is all-caps. → MD
+paper/jctc/logs/commit-msgs/0010.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'md' — This word's canonical spelling is all-caps. → MD
+paper/jctc/logs/commit-msgs/0010.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'logs' — This sentence does not start with a capital letter → Logs
+paper/jctc/logs/commit-msgs/0010.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'tar' — This sentence does not start with a capital letter → Tar
+paper/jctc/logs/commit-msgs/0010.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'xz' — This sentence does not start with a capital letter → Xz
+paper/jctc/logs/commit-msgs/0010.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0010.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sh' — This sentence does not start with a capital letter → Sh
+paper/jctc/logs/commit-msgs/0010.txt:3: [suggestion] harper.Miscellaneous (harper) [Miscellaneous] 'TODO' — Hyphenate `to-do`. → TO-DO
+proseguard: 16 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0011.txt:4: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0011.txt:6: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0011.txt:7: [suggestion] rgoswami.TricolonAbuse (lexical) Tricolon (mtime, owner, and mode). Models default to three. Kill it: keep two items, or put the list in a table.
+paper/jctc/logs/commit-msgs/0011.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sha' — This word's canonical spelling is all-caps. → SHA
+paper/jctc/logs/commit-msgs/0011.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0011.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'py' — This sentence does not start with a capital letter → Py
+paper/jctc/logs/commit-msgs/0011.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'logs' — This sentence does not start with a capital letter → Logs
+paper/jctc/logs/commit-msgs/0011.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'tar' — This sentence does not start with a capital letter → Tar
+paper/jctc/logs/commit-msgs/0011.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'xz' — This sentence does not start with a capital letter → Xz
+paper/jctc/logs/commit-msgs/0011.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'logs' — This sentence does not start with a capital letter → Logs
+proseguard: 10 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0012.txt:5: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0012.txt:5: [suggestion] rgoswami.TricolonAbuse (lexical) Tricolon (ira, lammps, and gpr). Models default to three. Kill it: keep two items, or put the list in a table.
+paper/jctc/logs/commit-msgs/0012.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+paper/jctc/logs/commit-msgs/0012.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'ira' — This word's canonical spelling is all-caps. → IRA
+proseguard: 4 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0013.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+proseguard: 1 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0014.txt:3: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0014.txt:4: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0014.txt:5: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0014.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+paper/jctc/logs/commit-msgs/0014.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'paper' — This sentence does not start with a capital letter → Paper
+proseguard: 5 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0015.txt:14: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0015.txt:15: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0015.txt:21: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0015.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'toml' — This word's canonical spelling is all-caps. → TOML
+paper/jctc/logs/commit-msgs/0015.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'ira' — This word's canonical spelling is all-caps. → IRA
+paper/jctc/logs/commit-msgs/0015.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'rs' — This sentence does not start with a capital letter → Rs
+paper/jctc/logs/commit-msgs/0015.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'rs' — This sentence does not start with a capital letter → Rs
+paper/jctc/logs/commit-msgs/0015.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'rs' — This sentence does not start with a capital letter → Rs
+paper/jctc/logs/commit-msgs/0015.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'logs' — This sentence does not start with a capital letter → Logs
+paper/jctc/logs/commit-msgs/0015.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'tar' — This sentence does not start with a capital letter → Tar
+paper/jctc/logs/commit-msgs/0015.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'xz' — This sentence does not start with a capital letter → Xz
+paper/jctc/logs/commit-msgs/0015.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'logs' — This sentence does not start with a capital letter → Logs
+paper/jctc/logs/commit-msgs/0015.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'lst' — This sentence does not start with a capital letter → Lst
+paper/jctc/logs/commit-msgs/0015.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0015.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'py' — This sentence does not start with a capital letter → Py
+paper/jctc/logs/commit-msgs/0015.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0015.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sh' — This sentence does not start with a capital letter → Sh
+paper/jctc/logs/commit-msgs/0015.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0015.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sh' — This sentence does not start with a capital letter → Sh
+paper/jctc/logs/commit-msgs/0015.txt:23: [suggestion] harper.Capitalization (harper) [Capitalization] 'todo' — This word's canonical spelling is all-caps. → TODO
+paper/jctc/logs/commit-msgs/0015.txt:23: [suggestion] harper.Capitalization (harper) [Capitalization] 'todo' — This word's canonical spelling is all-caps. → TODO
+paper/jctc/logs/commit-msgs/0015.txt:23: [suggestion] harper.Miscellaneous (harper) [Miscellaneous] 'todo' — Hyphenate `to-do`. → to-do
+paper/jctc/logs/commit-msgs/0015.txt:23: [suggestion] harper.Miscellaneous (harper) [Miscellaneous] 'todo' — Hyphenate `to-do`. → to-do
+proseguard: 23 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0016.txt:3: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0016.txt:5: [suggestion] rgoswami.TricolonAbuse (lexical) Tricolon (ira, lammps, and gpr). Models default to three. Kill it: keep two items, or put the list in a table.
+paper/jctc/logs/commit-msgs/0016.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'ira' — This word's canonical spelling is all-caps. → IRA
+paper/jctc/logs/commit-msgs/0016.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'paper' — This sentence does not start with a capital letter → Paper
+proseguard: 4 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0017.txt:6: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0017.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+paper/jctc/logs/commit-msgs/0017.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'toml' — This word's canonical spelling is all-caps. → TOML
+paper/jctc/logs/commit-msgs/0017.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'logs' — This sentence does not start with a capital letter → Logs
+paper/jctc/logs/commit-msgs/0017.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'tar' — This sentence does not start with a capital letter → Tar
+paper/jctc/logs/commit-msgs/0017.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'xz' — This sentence does not start with a capital letter → Xz
+paper/jctc/logs/commit-msgs/0017.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'logs' — This sentence does not start with a capital letter → Logs
+paper/jctc/logs/commit-msgs/0017.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'lst' — This sentence does not start with a capital letter → Lst
+proseguard: 8 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0018.txt:3: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0018.txt:7: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0018.txt:8: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0018.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'paper' — This sentence does not start with a capital letter → Paper
+proseguard: 4 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0019.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0019.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sh' — This sentence does not start with a capital letter → Sh
+proseguard: 2 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0020.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'todo' — This word's canonical spelling is all-caps. → TODO
+paper/jctc/logs/commit-msgs/0020.txt:1: [suggestion] harper.Miscellaneous (harper) [Miscellaneous] 'todo' — Hyphenate `to-do`. → to-do
+paper/jctc/logs/commit-msgs/0020.txt:3: [suggestion] harper.WordChoice (harper) [WordChoice] 'open work' — Did you mean the closed compound noun “openwork”? → openwork
+paper/jctc/logs/commit-msgs/0020.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'todo' — This word's canonical spelling is all-caps. → TODO
+paper/jctc/logs/commit-msgs/0020.txt:3: [suggestion] harper.Miscellaneous (harper) [Miscellaneous] 'todo' — Hyphenate `to-do`. → to-do
+paper/jctc/logs/commit-msgs/0020.txt:3: [suggestion] harper.Miscellaneous (harper) [Miscellaneous] 'TODO' — Hyphenate `to-do`. → TO-DO
+proseguard: 6 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0021.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+paper/jctc/logs/commit-msgs/0021.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sha' — This word's canonical spelling is all-caps. → SHA
+paper/jctc/logs/commit-msgs/0021.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0021.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'py' — This sentence does not start with a capital letter → Py
+paper/jctc/logs/commit-msgs/0021.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0021.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'py' — This sentence does not start with a capital letter → Py
+proseguard: 6 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0022.txt:7: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0022.txt:11: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0022.txt:13: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0022.txt:16: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0022.txt:17: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0022.txt:18: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0022.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+paper/jctc/logs/commit-msgs/0022.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sha' — This word's canonical spelling is all-caps. → SHA
+paper/jctc/logs/commit-msgs/0022.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sha' — This word's canonical spelling is all-caps. → SHA
+paper/jctc/logs/commit-msgs/0022.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'logs' — This sentence does not start with a capital letter → Logs
+paper/jctc/logs/commit-msgs/0022.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'tar' — This sentence does not start with a capital letter → Tar
+paper/jctc/logs/commit-msgs/0022.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'xz' — This sentence does not start with a capital letter → Xz
+paper/jctc/logs/commit-msgs/0022.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'logs' — This sentence does not start with a capital letter → Logs
+paper/jctc/logs/commit-msgs/0022.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'lst' — This sentence does not start with a capital letter → Lst
+paper/jctc/logs/commit-msgs/0022.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0022.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'py' — This sentence does not start with a capital letter → Py
+paper/jctc/logs/commit-msgs/0022.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0022.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sh' — This sentence does not start with a capital letter → Sh
+proseguard: 18 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0023.txt:3: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0023.txt:4: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0023.txt:6: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0023.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+paper/jctc/logs/commit-msgs/0023.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sha' — This word's canonical spelling is all-caps. → SHA
+paper/jctc/logs/commit-msgs/0023.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'logs' — This sentence does not start with a capital letter → Logs
+paper/jctc/logs/commit-msgs/0023.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'tar' — This sentence does not start with a capital letter → Tar
+paper/jctc/logs/commit-msgs/0023.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'xz' — This sentence does not start with a capital letter → Xz
+proseguard: 8 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0024.txt:3: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0024.txt:8: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0024.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sha' — This word's canonical spelling is all-caps. → SHA
+paper/jctc/logs/commit-msgs/0024.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'paper' — This sentence does not start with a capital letter → Paper
+paper/jctc/logs/commit-msgs/0024.txt:11: [suggestion] harper.Capitalization (harper) [Capitalization] 'paper' — This sentence does not start with a capital letter → Paper
+proseguard: 5 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0025.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0025.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sh' — This sentence does not start with a capital letter → Sh
+proseguard: 2 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0026.txt:3: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0026.txt:5: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0026.txt:7: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0026.txt:12: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0026.txt:12: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0026.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+paper/jctc/logs/commit-msgs/0026.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'mktemp' — This sentence does not start with a capital letter → Mktemp
+paper/jctc/logs/commit-msgs/0026.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'raw' — This sentence does not start with a capital letter → Raw
+paper/jctc/logs/commit-msgs/0026.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0026.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sh' — This sentence does not start with a capital letter → Sh
+proseguard: 10 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0027.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+paper/jctc/logs/commit-msgs/0027.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0027.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sh' — This sentence does not start with a capital letter → Sh
+proseguard: 3 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0028.txt:5: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0028.txt:7: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0028.txt:4: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0028.txt:4: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0028.txt:14: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0028.txt:15: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0028.txt:18: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0028.txt:3: [suggestion] complexity.LongWord (lexical) long word 'contributions' -- consider 'a shorter word' → a shorter word
+paper/jctc/logs/commit-msgs/0028.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'docs' — This sentence does not start with a capital letter → Docs
+paper/jctc/logs/commit-msgs/0028.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'CRediT' — The canonical dictionary spelling is `credit`. → credit
+proseguard: 10 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0029.txt:7: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0029.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sha' — This word's canonical spelling is all-caps. → SHA
+paper/jctc/logs/commit-msgs/0029.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0029.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'py' — This sentence does not start with a capital letter → Py
+proseguard: 4 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0030.txt:3: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0030.txt:4: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0030.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+paper/jctc/logs/commit-msgs/0030.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sha' — This word's canonical spelling is all-caps. → SHA
+paper/jctc/logs/commit-msgs/0030.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0030.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'py' — This sentence does not start with a capital letter → Py
+paper/jctc/logs/commit-msgs/0030.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0030.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sh' — This sentence does not start with a capital letter → Sh
+paper/jctc/logs/commit-msgs/0030.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'logs' — This sentence does not start with a capital letter → Logs
+proseguard: 9 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0031.txt:3: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0031.txt:4: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0031.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+paper/jctc/logs/commit-msgs/0031.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'paper' — This sentence does not start with a capital letter → Paper
+proseguard: 4 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0032.txt:4: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0032.txt:5: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'be' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0032.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0032.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sh' — This sentence does not start with a capital letter → Sh
+proseguard: 4 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0033.txt:1: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0033.txt:4: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0033.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+proseguard: 3 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0034.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+paper/jctc/logs/commit-msgs/0034.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0034.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0034.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0034.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'py' — This sentence does not start with a capital letter → Py
+proseguard: 5 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0035.txt:4: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0035.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'py' — This sentence does not start with a capital letter → Py
+paper/jctc/logs/commit-msgs/0035.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'logs' — This sentence does not start with a capital letter → Logs
+proseguard: 3 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0036.txt:14: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0036.txt:11: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0036.txt:12: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0036.txt:13: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0036.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'docs' — This sentence does not start with a capital letter → Docs
+paper/jctc/logs/commit-msgs/0036.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
+paper/jctc/logs/commit-msgs/0036.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'logs' — This sentence does not start with a capital letter → Logs
+proseguard: 7 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0037.txt:5: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0037.txt:20: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0037.txt:35: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0037.txt:36: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0037.txt:38: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0037.txt:38: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0037.txt:38: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0037.txt:15: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0037.txt:22: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0037.txt:27: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0037.txt:31: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0037.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'docs' — This sentence does not start with a capital letter → Docs
+paper/jctc/logs/commit-msgs/0037.txt:3: [suggestion] harper.WordChoice (harper) [WordChoice] 's and' — It seems these words would go better together. → sand
+paper/jctc/logs/commit-msgs/0037.txt:3: [suggestion] harper.Style (harper) [Style] 'Johnston' — An Oxford comma is necessary here. → insert ,
+proseguard: 14 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0038.txt:3: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0038.txt:9: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0038.txt:13: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0038.txt:14: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0038.txt:17: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0038.txt:19: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0038.txt:20: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0038.txt:21: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0038.txt:22: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0038.txt:23: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0038.txt:25: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0038.txt:3: [suggestion] harper.Style (harper) [Style] 'census' — An Oxford comma is necessary here. → insert ,
+proseguard: 12 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0039.txt:10: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0039.txt:11: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0039.txt:14: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0039.txt:1: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0039.txt:7: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0039.txt:19: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0039.txt:18: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'was' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0039.txt:3: [suggestion] complexity.LongWord (lexical) long word 'configuration' -- consider 'config' → config
+paper/jctc/logs/commit-msgs/0039.txt:3: [suggestion] complexity.LongWord (lexical) long word 'interquartile' -- consider 'a shorter word' → a shorter word
+paper/jctc/logs/commit-msgs/0039.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'todo' — This word's canonical spelling is all-caps. → TODO
+paper/jctc/logs/commit-msgs/0039.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'todo' — This word's canonical spelling is all-caps. → TODO
+paper/jctc/logs/commit-msgs/0039.txt:3: [suggestion] harper.Miscellaneous (harper) [Miscellaneous] 'TODO' — Hyphenate `to-do`. → TO-DO
+paper/jctc/logs/commit-msgs/0039.txt:3: [suggestion] harper.Miscellaneous (harper) [Miscellaneous] 'todo' — Hyphenate `to-do`. → to-do
+paper/jctc/logs/commit-msgs/0039.txt:3: [suggestion] harper.Miscellaneous (harper) [Miscellaneous] 'todo' — Hyphenate `to-do`. → to-do
+proseguard: 14 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0040.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+paper/jctc/logs/commit-msgs/0040.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0040.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'py' — This sentence does not start with a capital letter → Py
+proseguard: 3 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0041.txt:6: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0041.txt:4: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0041.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'fix' — This sentence does not start with a capital letter → Fix
+paper/jctc/logs/commit-msgs/0041.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'scripts' — This sentence does not start with a capital letter → Scripts
+paper/jctc/logs/commit-msgs/0041.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'py' — This sentence does not start with a capital letter → Py
+proseguard: 5 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0042.txt:7: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'was' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+proseguard: 1 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0043.txt:7: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0043.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'docs' — This sentence does not start with a capital letter → Docs
+paper/jctc/logs/commit-msgs/0043.txt:3: [suggestion] harper.Style (harper) [Style] 'label' — An Oxford comma is necessary here. → insert ,
+proseguard: 3 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0044.txt:3: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0044.txt:3: [suggestion] complexity.LongWord (lexical) long word 'disconnectivity' -- consider 'a shorter word' → a shorter word
+paper/jctc/logs/commit-msgs/0044.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'feat' — This sentence does not start with a capital letter → Feat
+proseguard: 3 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0045.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'feat' — This sentence does not start with a capital letter → Feat
+paper/jctc/logs/commit-msgs/0045.txt:3: [suggestion] harper.Grammar (harper) [Grammar] ' ' — Add a determiner before this noun phrase. →  the 
+paper/jctc/logs/commit-msgs/0045.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'sha' — This word's canonical spelling is all-caps. → SHA
+paper/jctc/logs/commit-msgs/0045.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'md' — This word's canonical spelling is all-caps. → MD
+paper/jctc/logs/commit-msgs/0045.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'md' — This word's canonical spelling is all-caps. → MD
+paper/jctc/logs/commit-msgs/0045.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'md' — This word's canonical spelling is all-caps. → MD
+paper/jctc/logs/commit-msgs/0045.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'md' — This word's canonical spelling is all-caps. → MD
+paper/jctc/logs/commit-msgs/0045.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'md' — This word's canonical spelling is all-caps. → MD
+paper/jctc/logs/commit-msgs/0045.txt:3: [suggestion] harper.Style (harper) [Style] 'generators' — An Oxford comma is necessary here. → insert ,
+paper/jctc/logs/commit-msgs/0045.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'tsv' — This sentence does not start with a capital letter → Tsv
+proseguard: 10 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0046.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'docs' — This sentence does not start with a capital letter → Docs
+paper/jctc/logs/commit-msgs/0046.txt:3: [suggestion] harper.Capitalization (harper) [Capitalization] 'md' — This word's canonical spelling is all-caps. → MD
+proseguard: 2 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0047.txt:1: [suggestion] harper.Capitalization (harper) [Capitalization] 'docs' — This sentence does not start with a capital letter → Docs
+proseguard: 1 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0048.txt:3: [suggestion] harper.Style (harper) [Style] 'report' — An Oxford comma is necessary here. → insert ,
+proseguard: 1 finding(s), 0 actionable
+proseguard: profile 'commit-msg' — 0 findings
+paper/jctc/logs/commit-msgs/0050.txt:11: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0050.txt:3: [suggestion] harper.WordChoice (harper) [WordChoice] 'READY' — Insert `to` to complete the infinitive (e.g., `need to talk`). → insert  to
+paper/jctc/logs/commit-msgs/0050.txt:3: [suggestion] harper.WordChoice (harper) [WordChoice] 'READY' — Insert `to` to complete the infinitive (e.g., `need to talk`). → insert  to
+proseguard: 3 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0051.txt:4: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0051.txt:5: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+proseguard: 2 finding(s), 0 actionable
+paper/jctc/logs/commit-msgs/0052.txt:6: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0052.txt:7: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0052.txt:8: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+paper/jctc/logs/commit-msgs/0052.txt:3: [suggestion] harper.Style (harper) [Style] 'report' — An Oxford comma is necessary here. → insert ,
+proseguard: 4 finding(s), 0 actionable
+proseguard: profile 'commit-msg' — 0 findings
+proseguard: profile 'commit-msg' — 0 findings
