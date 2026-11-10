@@ -1,0 +1,53 @@
+These eight logs come from HaoZeke/simmAnnealTeX.
+
+Commit 311d9bcc28b5401780a69898a16fff25707901ad stores them.
+
+Each path is rewrite_2026/data/hq_sci_cuh2/.
+
+Log cuh2_fcc_rec_0.txt.
+
+Blob d1dacd70a6f751811d9443d143bcd3c2b11c4ba6.
+
+Hash f0fb8a3c21e6baa85ea65457a2fc57579e7c191917fbc819546c45967a71a4f5.
+
+Log cuh2_fcc_rec_1.txt.
+
+Blob 4330e61c77ee08b344d3290a10e8b78ca3b65016.
+
+Hash db20a9ea9b4909886e4b9a1edc29d24c37128aa9041e910343481eac29de2ff0.
+
+Log cuh2_fcc_rec_2.txt.
+
+Blob 5a9e023f30c4cac87aea46352263b07b0dd61862.
+
+Hash 17c767253e099f52dd5d84035eed9de8b00f1acb9eb101c5ff50114ee064b088.
+
+Log cuh2_fcc_rec_3.txt.
+
+Blob 3826611042acae206f6972a16f38d68790c42671.
+
+Hash 79cb9698a26276aa7ca23c59a2250edc4041df11e8d011aa21917ccd3827a378.
+
+Log cuh2_fcc_rec_4.txt.
+
+Blob 5e85777d8006d2ef630c100d6fc16691e75b9d81.
+
+Hash 7f1c6566649399a944ce1c434048a6fd633691d4fb4e94ec124ac4f9d63363ec.
+
+Log cuh2_fcc_rec_5.txt.
+
+Blob 5dceefc98b154a297fd138c8238ed77cb37be164.
+
+Hash f67fcd09952bad3d14b73ec877937fc8ce4ccb5fec35e58b52e4d966f413a6cc.
+
+Log cuh2_fcc_rec_6.txt.
+
+Blob 5a2cbfee25722f5fc5853c6fadc40889e1db455f.
+
+Hash 423dc98bb41c94159bd6c163a8b4b69fa2b47ad02f1ccac4a8e2cd9ee86d2b88.
+
+Log cuh2_fcc_rec_7.txt.
+
+Blob 1c4d3a4d318ce0588b4b1c618b8079b9ade4b7d0.
+
+Hash 15df7295905a45f8e4a921cb28625c799ababbae181a38e7dd141b4abfd465c1.
