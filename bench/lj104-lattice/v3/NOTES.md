@@ -6,8 +6,8 @@ give 20 of 30 and 20 of 30 against the reference 19 of
 That is not a win. The registered test is 5000-5029
 and was not run.
 
-Code tip before these notes:
-e6d763ffd347b3a503222e0190d22aabeeacc42e.
+The charge and its fail-before test are one commit,
+68bb5cf2208654384e6b2cad5bfd9a0950da7d06.
 
 ## Disposition
 
@@ -50,18 +50,18 @@ e6d763ffd347b3a503222e0190d22aabeeacc42e.
    The two development counts differ by the random
    stream. This pass does not rerun them: a search
    is still on cpu 0.
-9. Charge. 48e3beeb charges the full atom pair sum
+9. Charge. 68bb5cf2 charges the full atom pair sum
    as one evaluation and does not charge the
    constant core energy. The serial recount is
    still 20 and 20 of 30. Median charged cost of
    a lowest-index hit is 941310. The uniform
    median is 532260.5.
-10. Propose arm. 1c05ca8a makes that arm
+10. Propose arm. ea78deb5 makes that arm
     unreachable. The test
     energy_lattice_propose_is_unreachable passes.
 11. Fail before. vacant_sites_ignore_atom_labels
     fails on 87a1c409 and passes on this tip.
-12. Message. eb604328 names the five changed files
+12. Message. bbc9cbd9 names the five changed files
     as well as the files it adds. The tree matches
     the previous object. The re-quench program
     prints the achieved norm. The hit flag is the
