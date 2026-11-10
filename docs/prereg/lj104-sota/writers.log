@@ -4,3 +4,6 @@ requench_panel.py exit 0
 cmp requench.md match
 cmp requench.tsv match
 PREDICTIONS.md unchanged
+scope_paths.py exit 0
+write_tree_diff_stat.py exit 0
+write_bundle_verify.py exit 0

@@ -41,15 +41,18 @@ def main() -> None:
         "That tree follows.",
         f"{BASE}.",
         "We leave this note out of its own count.",
-        "The paths sit in one code block.",
         "Insertions and deletions come from git numstat.",
         "",
-        "```",
     ]
     for row in rows:
         ins, dele, path = row.split("\t")
-        lines.append(f"{path} {ins} {dele}")
-    lines.extend(["```", ""])
+        left = f"Path `{path}`."
+        right = f"{ins} insertions and {dele} deletions."
+        if len(left) > 72 or len(right) > 72:
+            raise SystemExit(f"stat line over 72: {len(left)} {left}")
+        lines.append(left)
+        lines.append(right)
+    lines.append("")
     text = "\n".join(lines)
     for line in text.splitlines():
         if not line.startswith("docs/") and len(line) > 72:

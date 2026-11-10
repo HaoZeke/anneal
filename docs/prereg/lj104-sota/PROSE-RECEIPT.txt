@@ -1,0 +1,17 @@
+Copyright (c) anneal developers
+
+We list each raw record and the writer that produced it.
+non-prose: raw run record.
+The panel logs are a raw run record.
+lj104_sota_runner.py writes the panel logs.
+The panel receipts are a raw run record.
+lj104_sota_runner.py writes the start receipt and the end receipt.
+panel/session.txt is a raw run record.
+T.txt is a raw run record.
+lj104_sota_runner.py writes T.txt at the panel start.
+floors.md is written by write_floors.py.
+requench.md is written by requench_panel.py.
+SCOPE.md is written by scope_paths.py.
+TREE_DIFF_STAT.txt is written by write_tree_diff_stat.py.
+bundle-verify.txt is written by write_bundle_verify.py.
+writers.log records each writer exit code and the cmp result.

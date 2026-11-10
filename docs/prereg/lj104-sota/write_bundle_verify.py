@@ -60,13 +60,27 @@ def main() -> None:
         raise SystemExit("bundle has a requires line")
     if not any("complete history" in line for line in lines):
         raise SystemExit("bundle is not a complete history")
+    formatted = []
+    for line in lines:
+        parts = line.split()
+        if len(parts) == 2 and len(parts[0]) == 40 and parts[1].startswith("refs/"):
+            formatted.append(f"Ref {parts[1]}.")
+            formatted.append(f"Object {parts[0]}.")
+            continue
+        if not line.endswith("."):
+            line = line + "."
+        formatted.append(line)
+    for line in formatted:
+        if len(line) > 72:
+            raise SystemExit(f"verify line over 72: {line}")
     body = [
         "Copyright (c) anneal developers",
         "",
         "We record the verify of a full-history bundle.",
         "The verified tip follows.",
         f"{tip}.",
-        *lines,
+        "The commit that adds this note is the child of that tip.",
+        *formatted,
         "VERIFY_EXIT:0",
         "",
     ]

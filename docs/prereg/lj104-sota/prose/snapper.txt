@@ -2,13 +2,11 @@ Copyright (c) anneal developers
 
 We ran snapper at width 72 in check mode.
 The exit code is 0.
-Stdout has 0 bytes.
-Stderr has 0 bytes.
 Diagnostic lines are 0.
-We hashed the eight tip inputs below.
+We hashed the eight tip inputs.
 The sha256 of that concatenation follows.
-2dde1587dccee6a5d9a2b1a124b9e8cc3c96caeccd8a10301f6b68b9be216d26.
-The byte count is 42621.
+3ccc9a75cf8f1d5d089957494987cbd276fcd4203bae932dc8029066f5d4a3de.
+The byte count is 79124.
 Path docs/prereg/lj104-sota/PREDICTIONS.md.
 Path docs/prereg/lj104-sota/PUSH.txt.
 Path docs/prereg/lj104-sota/REPLAY.txt.

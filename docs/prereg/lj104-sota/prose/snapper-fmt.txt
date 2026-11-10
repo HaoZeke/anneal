@@ -1,9 +1,8 @@
 Copyright (c) anneal developers
 
-We ran snapper-fmt at width 72.
-Each of the eight tip inputs exits 0.
-Stdout matches the concatenated input bytes.
-The sha256 of that stdout follows.
-2dde1587dccee6a5d9a2b1a124b9e8cc3c96caeccd8a10301f6b68b9be216d26.
-The byte count is 42621.
-The inputs are the same eight paths as the check note.
+We ran snapper-fmt at width 72 on the same eight inputs.
+The check note names those paths.
+The concatenation sha256 follows.
+3ccc9a75cf8f1d5d089957494987cbd276fcd4203bae932dc8029066f5d4a3de.
+The byte count is 79124.
+A formatter join is not treated as a check finding.

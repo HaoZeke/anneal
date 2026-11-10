@@ -4,67 +4,429 @@ We record this stat against the v1.2 tree.
 That tree follows.
 4b168122d30bc00afa0e27a26c67863ffc7b312c.
 We leave this note out of its own count.
-We keep bundle-verify.txt in the list when git shows it.
-We read each insertion count from git numstat.
-We read each deletion count from the same numstat.
+Insertions and deletions come from git numstat.
 
-Path docs/prereg/lj104-sota/NOTES.md.
-23 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/PREDICTIONS.md.
-246 insertions and 38 deletions.
-Path docs/prereg/lj104-sota/PROSE_EXTRACT.txt.
-2558 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/PUSH.txt.
-10 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/REPLAY.txt.
-35 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/REPORT.md.
-46 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/SCOPE.md.
-378 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/TREE_EQUAL.txt.
-181 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/build_gmin_best.py.
-60 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/bundle-verify.txt.
-21 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/floors.md.
-61 insertions and 33 deletions.
-Path docs/prereg/lj104-sota/gmin-best-build.log.
-15 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/gmin-best-verify.log.
-6 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/gmin_best.keywords.
-12 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/prose/proseguard-commit-msg.txt.
-10 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/prose/proseguard-prose-human.txt.
-10 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/prose/proseguard-rohit-paper.txt.
-10 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/prose/snapper-fmt.md.
-707 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/prose/snapper-fmt.txt.
+Path `docs/prereg/lj104-sota/LAND_HOLD.txt`.
 9 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/prose/snapper.txt.
-19 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/replay-commit-tree.log.
-327 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/replay-map.tsv.
-36 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/replay-v134.log.
-154 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/replay-v135.log.
-136 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/replay_commit_tree.py.
-279 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/requench.md.
-51 insertions and 43 deletions.
-Path docs/prereg/lj104-sota/requench_panel.py.
-11 insertions and 7 deletions.
-Path docs/prereg/lj104-sota/scope_paths.py.
+Path `docs/prereg/lj104-sota/NOTES.md`.
+23 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/PREDICTIONS.md`.
+247 insertions and 37 deletions.
+Path `docs/prereg/lj104-sota/PROSE_EXTRACT.txt`.
+2996 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/PUSH.txt`.
+10 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/REPLAY.txt`.
+175 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/REPORT.md`.
+49 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/SCOPE.md`.
+637 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/T.txt`.
+12 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/TREE_EQUAL.txt`.
+186 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/build_gmin_best.py`.
+60 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/bundle-verify.txt`.
+167 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/REASON.txt`.
+4 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/floors.md`.
+70 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/01-lj38-6000.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/01-lj38-6000.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/01-lj38-6000.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/01-lj38-6000.trace.csv`.
+615 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/01-lj38-6000.xyz`.
+40 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/02-lj38-6001.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/02-lj38-6001.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/02-lj38-6001.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/02-lj38-6001.trace.csv`.
+800 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/02-lj38-6001.xyz`.
+40 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/03-lj38-6002.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/03-lj38-6002.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/03-lj38-6002.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/03-lj38-6002.trace.csv`.
+167 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/03-lj38-6002.xyz`.
+40 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/04-lj38-6003.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/04-lj38-6003.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/04-lj38-6003.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/04-lj38-6003.trace.csv`.
+240 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/04-lj38-6003.xyz`.
+40 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/05-lj38-6004.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/05-lj38-6004.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/05-lj38-6004.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/05-lj38-6004.trace.csv`.
+946 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/05-lj38-6004.xyz`.
+40 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/06-lj38-6005.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/06-lj38-6005.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/06-lj38-6005.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/06-lj38-6005.trace.csv`.
+939 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/06-lj38-6005.xyz`.
+40 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/07-lj55-6000.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/07-lj55-6000.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/07-lj55-6000.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/07-lj55-6000.trace.csv`.
+903 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/07-lj55-6000.xyz`.
+57 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/08-lj55-6001.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/08-lj55-6001.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/08-lj55-6001.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/08-lj55-6001.trace.csv`.
+733 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/08-lj55-6001.xyz`.
+57 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/09-lj55-6002.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/09-lj55-6002.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/09-lj55-6002.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/09-lj55-6002.trace.csv`.
+259 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/09-lj55-6002.xyz`.
+57 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/10-lj55-6003.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/10-lj55-6003.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/10-lj55-6003.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/10-lj55-6003.trace.csv`.
+459 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/10-lj55-6003.xyz`.
+57 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/11-lj55-6004.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/11-lj55-6004.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/11-lj55-6004.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/11-lj55-6004.trace.csv`.
+1032 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/11-lj55-6004.xyz`.
+57 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/12-lj55-6005.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/12-lj55-6005.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/12-lj55-6005.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/12-lj55-6005.trace.csv`.
+1354 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/12-lj55-6005.xyz`.
+57 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/13-lj75-6000.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/13-lj75-6000.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/13-lj75-6000.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/13-lj75-6000.trace.csv`.
+1269 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/13-lj75-6000.xyz`.
+77 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/14-lj75-6001.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/14-lj75-6001.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/14-lj75-6001.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/14-lj75-6001.trace.csv`.
+1238 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/14-lj75-6001.xyz`.
+77 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/15-lj75-6002.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/15-lj75-6002.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/15-lj75-6002.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/15-lj75-6002.trace.csv`.
+592 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/15-lj75-6002.xyz`.
+77 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/16-lj75-6003.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/16-lj75-6003.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/16-lj75-6003.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/16-lj75-6003.trace.csv`.
+781 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/16-lj75-6003.xyz`.
+77 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/17-lj75-6004.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/17-lj75-6004.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/17-lj75-6004.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/17-lj75-6004.trace.csv`.
+1496 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/17-lj75-6004.xyz`.
+77 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/18-lj75-6005.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/18-lj75-6005.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/18-lj75-6005.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/18-lj75-6005.trace.csv`.
+1132 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/18-lj75-6005.xyz`.
+77 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/19-lj98-6000.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/19-lj98-6000.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/19-lj98-6000.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/19-lj98-6000.trace.csv`.
+1577 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/19-lj98-6000.xyz`.
 100 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/verify_gmin_best.py.
+Path `docs/prereg/lj104-sota/discarded/panel/20-lj98-6001.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/20-lj98-6001.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/20-lj98-6001.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/20-lj98-6001.trace.csv`.
+1169 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/20-lj98-6001.xyz`.
+100 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/21-lj98-6002.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/21-lj98-6002.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/21-lj98-6002.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/21-lj98-6002.trace.csv`.
+1658 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/21-lj98-6002.xyz`.
+100 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/22-lj98-6003.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/22-lj98-6003.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/22-lj98-6003.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/22-lj98-6003.trace.csv`.
+1742 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/22-lj98-6003.xyz`.
+100 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/23-lj98-6004.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/23-lj98-6004.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/23-lj98-6004.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/23-lj98-6004.trace.csv`.
+1735 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/23-lj98-6004.xyz`.
+100 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/24-lj98-6005.log`.
+14 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/24-lj98-6005.span`.
+1 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/24-lj98-6005.stderr`.
+0 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/24-lj98-6005.trace.csv`.
+1552 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/24-lj98-6005.xyz`.
+100 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/end.receipt`.
+44 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/rows.tsv`.
+25 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/session.txt`.
+2 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/panel/start.receipt`.
+44 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/floors.md`.
+64 insertions and 32 deletions.
+Path `docs/prereg/lj104-sota/gmin-best-build.log`.
+15 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/gmin-best-verify.log`.
+6 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/gmin_best.keywords`.
+12 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/lj104_sota_runner.py`.
+56 insertions and 2 deletions.
+Path `docs/prereg/lj104-sota/panel/01-lj38-6000.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/01-lj38-6000.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/02-lj38-6001.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/02-lj38-6001.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/03-lj38-6002.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/04-lj38-6003.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/05-lj38-6004.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/05-lj38-6004.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/06-lj38-6005.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/06-lj38-6005.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/07-lj55-6000.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/07-lj55-6000.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/08-lj55-6001.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/08-lj55-6001.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/09-lj55-6002.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/10-lj55-6003.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/10-lj55-6003.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/11-lj55-6004.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/11-lj55-6004.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/12-lj55-6005.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/12-lj55-6005.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/13-lj75-6000.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/13-lj75-6000.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/14-lj75-6001.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/14-lj75-6001.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/15-lj75-6002.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/15-lj75-6002.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/16-lj75-6003.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/16-lj75-6003.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/17-lj75-6004.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/17-lj75-6004.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/18-lj75-6005.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/18-lj75-6005.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/19-lj98-6000.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/19-lj98-6000.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/20-lj98-6001.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/20-lj98-6001.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/21-lj98-6002.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/21-lj98-6002.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/22-lj98-6003.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/22-lj98-6003.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/23-lj98-6004.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/23-lj98-6004.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/24-lj98-6005.log`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/24-lj98-6005.span`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/end.receipt`.
+11 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/rows.tsv`.
+24 insertions and 24 deletions.
+Path `docs/prereg/lj104-sota/panel/session.txt`.
+1 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/panel/start.receipt`.
+11 insertions and 1 deletions.
+Path `docs/prereg/lj104-sota/prose/proseguard-commit-msg.txt`.
+10 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/prose/proseguard-prose-human.txt`.
+10 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/prose/proseguard-rohit-paper.txt`.
+10 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/prose/snapper-fmt.md`.
+9 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/prose/snapper-fmt.txt`.
+8 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/prose/snapper.txt`.
+17 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/replay-commit-tree.log`.
+327 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/replay-map.tsv`.
+37 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/replay-v134.log`.
+154 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/replay-v135.log`.
+136 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/replay_commit_tree.py`.
+279 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/requench.md`.
+49 insertions and 41 deletions.
+Path `docs/prereg/lj104-sota/requench_panel.py`.
+16 insertions and 7 deletions.
+Path `docs/prereg/lj104-sota/scope_paths.py`.
+100 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/verify_gmin_best.py`.
 42 insertions and 0 deletions.
-Path docs/prereg/lj104-sota/write_floors.py.
-33 insertions and 13 deletions.
+Path `docs/prereg/lj104-sota/write_bundle_verify.py`.
+93 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/write_floors.py`.
+71 insertions and 12 deletions.
+Path `docs/prereg/lj104-sota/write_tree_diff_stat.py`.
+64 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/writers.log`.
+9 insertions and 0 deletions.
+Path `src/methods/lattice_search.rs`.
+1 insertions and 0 deletions.
