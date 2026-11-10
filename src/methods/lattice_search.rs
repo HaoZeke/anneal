@@ -1676,6 +1676,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn occupation_optimisation_restores_displaced_surface_atoms_of_lj104() {
         let (occupied, reoccupied) = restores("lj104_gm", 104, -582.086642, 1);
         assert!(occupied < -582.086642 + 1e-3, "occupation gave {occupied}");
