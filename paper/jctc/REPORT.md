@@ -201,10 +201,9 @@ The reference count is 8/8.
 
 ## Host
 
+The LJ75 writer records the output of hostname.
+That receipt names the host bench.
 The copper writer records the output of hostname.
-This machine reports cursor.
-The LJ75 writer prints the literal host host-a.
-That line was not edited by hand.
 
 ## rohit-paper
 

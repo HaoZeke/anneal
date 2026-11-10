@@ -1,2 +1,2 @@
-The receipt labels the host host-a.
+The receipt labels the host from hostname.
 The executable path uses the placeholder target/release.
