@@ -1,6 +1,15 @@
-# GMIN LJ38 and LJ98 of anneal_repro v4.5b, tip 507974eb, ledger 739c3991.
-# Bundle sha256 ba13a00f75fd7757c2d6bcd3509197d022f4d4273e5048cc70158a1595d6bb28.
+# GMIN LJ38 and LJ98 of anneal_repro v4.5b, tip 507974eb, ledger.
+
+739c3991.
+
+# Bundle sha256.
+
+ba13a00f75fd7757c2d6bcd3509197d022f4d4273e5048cc70158a1595d6bb28.
+
 # ASE and AGOX arms wait on v4.5c (source TODO only; not printed).
-system,hits,n,call_par2,wall_median_s,budget,seeds
-lj38,72,72,4744.89,0.0355,400000,72
-lj98,48,48,285752.4,4.79,4000000,48
+
+system,hits,n,call_par2,wall_median_s,budget,seeds.
+
+lj38,72,72,4744.89,0.0355,400000,72.
+
+lj98,48,48,285752.4,4.79,4000000,48.

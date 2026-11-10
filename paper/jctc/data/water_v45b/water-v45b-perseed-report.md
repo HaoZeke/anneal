@@ -1,10 +1,39 @@
-v4.5a2 is on `d75da445` and has not been pushed. The tip is `507974eb8c41970702c6765e0c7f2587f20b1303`. The bundle is `v4.5/port-v4.5a2.bundle`, ref `refs/heads/port/sota-snakemake`, requiring `d75da44596aa289a2f686912c956ae0df4be184e`. Its sha256 is `e801c5e4a3aeddfa6b1375b2547556fb91f7e4cbb0bb6c9085801a4fd2e7c1cc`.
+v4.5a2 is on `d75da445` and has not been pushed.
+The tip is `507974eb8c41970702c6765e0c7f2587f20b1303`.
+The bundle is `v4.5/port-v4.5a2.bundle`.
+Ref `refs/heads/port/sota-snakemake`.
+Requiring `d75da44596aa289a2f686912c956ae0df4be184e`.
+Its sha256.
+Is `e801c5e4a3aeddfa6b1375b2547556fb91f7e4cbb0bb6c9085801a4fd2e7c1cc`.
 
-`sha256sum -c` on `provenance/water/SHA256SUMS` passes. `independent-budget.json` is again `fa99304b59ac89c33b88db9921416612c2fadf770f61edb5327ea669f3c4d1ff` and `independent-summary.json` is again `d2ce152f507c533065eded46339cc2ea9835df8f1ca7521db34b47111d7c7423`. The `first_arm` / `second_arm` names stay on the derived summaries only. In both water supplements, `cpu_model` is line 5, `cpu_model_name` is line 6, and `memory_kib` is line 12. `cores` was already line 3. The `independent-summary.json` hardware-hash citation is still line 22.
+`sha256sum -c` on `provenance/water/SHA256SUMS` passes.
+`independent-budget.json` is again.
+`fa99304b59ac89c33b88db9921416612c2fadf770f61edb5327ea669f3c4d1ff`.
+And `independent-summary.json`.
+Is again.
 
-v4.5b is `56160f2d100fc2c9f7365f4ee6d1d86653c8b31f` on that tip, ledger commit `739c3991ef253d06a954cfc1628a5190618e04c8`. Its bundle `v4.5/port-v4.5b.bundle` carries the same branch ref, requires `507974eb`, and its sha256 is `ba13a00f75fd7757c2d6bcd3509197d022f4d4273e5048cc70158a1595d6bb28`. Both commits are Rohit Goswami, unsigned, with no trailers.
+`d2ce152f507c533065eded46339cc2ea9835df8f1ca7521db34b47111d7c7423`.
+The `first_arm` / `second_arm` names stay on the derived summaries only.
+In both water supplements, `cpu_model` is line 5.
+`cpu_model_name` is line 6.
+And `memory_kib` is line 12.
+`cores` was already line 3.
+The `independent-summary.json` hardware-hash citation is still line 22.
 
-**Water, n=192.** Anneal 121 hits, wall median 16.909285 s. Budget-fair anneal polish 148 hits, wall median 16.4982755 s. Plain CREST 97 hits, wall median 14.0566815 s. Budget-fair CREST+polish 114 hits, wall median 12.0543695 s.
+v4.5b is `56160f2d100fc2c9f7365f4ee6d1d86653c8b31f` on that tip.
+Ledger commit `739c3991ef253d06a954cfc1628a5190618e04c8`.
+Its bundle `v4.5/port-v4.5b.bundle` carries the same branch ref.
+
+Requires `507974eb`.
+And its sha256 is
+`ba13a00f75fd7757c2d6bcd3509197d022f4d4273e5048cc70158a1595d6bb28`.
+Both commits are Rohit Goswami, unsigned, with no trailers.
+
+**Water, n=192.**
+Anneal 121 hits, wall median 16.909285 s.
+Budget-fair anneal polish 148 hits, wall median 16.4982755 s.
+Plain CREST 97 hits, wall median 14.0566815 s.
+Budget-fair CREST+polish 114 hits, wall median 12.0543695 s.
 
 | First arm | Second arm | Both | First only | Second only | Neither | Exact McNemar p |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
@@ -12,7 +41,21 @@ v4.5b is `56160f2d100fc2c9f7365f4ee6d1d86653c8b31f` on that tip, ledger commit `
 | crest-fair | plain CREST | 55 | 59 | 42 | 36 | 0.11091834966064046 |
 | anneal | CREST | 55 | 66 | 42 | 29 | 0.026423520277147814 |
 
-**Competitors.** GMIN had never been started for these cells; it is now sealed. LJ38 is 72/72, call PAR-2 4744.888888888888888888888889, wall median 0.0354545 s. LJ98 is 48/48, call PAR-2 285752.375, wall median 4.7930525 s. One full-cap ASE Lennard-Jones 38 miss took 635 s, so ASE and AGOX across LJ38 and LJ98 are past four hours. They are running for v4.5c. Pt38, Pt75, PBE, PET-MAD, and the water heptamer are in `provenance/v45/CANNOT-RUN.md`: Sutton-Chen pin `789f19c8` and its force interface are not in this tree, GMIN is Lennard-Jones only, PySCF and pet-mad are not installed, and there is no water-heptamer potential or reference.
+**Competitors.**
+GMIN had never been started for these cells.
+It is now sealed.
+LJ38 is 72/72.
+Call PAR-2 4744.888888888888888888888889, wall median 0.0354545 s.
+LJ98 is 48/48, call PAR-2 285752.375, wall median 4.7930525 s.
+One full-cap ASE Lennard-Jones 38 miss took 635 s.
+So ASE and AGOX across LJ38 and LJ98 are past four hours.
+They are running for v4.5c.
+Pt38, Pt75, PBE, PET-MAD, and the water heptamer.
+Are in `provenance/v45/CANNOT-RUN.md`.
+Sutton-Chen pin `789f19c8` and its force interface are not in this tree.
+GMIN is Lennard-Jones only.
+PySCF and pet-mad are not installed.
+And there is no water-heptamer potential or reference.
 
 ```csv
 seed,anneal_hit,anneal_wall_s,anneal_calls,polish_fair_hit,polish_fair_wall_s,polish_fair_calls,crest_hit,crest_wall_s,crest_calls,crest_fair_hit,crest_fair_wall_s,crest_fair_calls

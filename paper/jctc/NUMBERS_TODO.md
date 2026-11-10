@@ -11,11 +11,11 @@ Its median is 450877.
 Neither sentence is in manuscript.tex or si.tex.
 The only manuscript todo is the digital object identifier.
 Both recommended-seed files remain in the tree.
-They are
-data/lj38-recommended-seeds.csv and data/lj98-recommended-seeds.csv.
-CONSTANTS.tsv still records the digest
-dc17734b70a2cc8082919be75440246be3823c0ef7777dcd9f3e9b5fc16e9f0f for
-recommended(38).
+They are data/lj38-recommended-seeds.csv.
+And data/lj98-recommended-seeds.csv.
+CONSTANTS.tsv still records the digest.
+Dc17734b70a2cc8082919be75440246be3823c0ef7777dcd9f3e9b5fc16e9f0f.
+For recommended(38).
 That pin belongs to the removed-branch description.
 We record no replacement digest.
 
@@ -32,8 +32,8 @@ This file does not add a count for it.
 
 The manuscript table uses the hexamer logs.
 The old counter is dynamics steps plus optimization steps.
-CREST's line ``Total number of energy+grad calls'' is larger on every
-seed.
+CREST's line ``Total number of energy+grad calls'' is larger.
+On every seed.
 The old counter undercounted CREST.
 The equal-effort claim is withdrawn.
 The six crest rows are single draws.
@@ -41,8 +41,8 @@ Those rows are not a success rate.
 CREST's cost is the energy and gradient count.
 The six-seed old-counter arm is called the driver-count budget.
 Its cap equals each seed's old counter.
-We leave the matched comparison and the 30-start statistics out of this
-article.
+We leave the matched comparison.
+And the 30-start statistics out of this article.
 Five polished gaps lie within 1e-7 Eh.
 Seed 1 lies above that line.
 
@@ -51,8 +51,9 @@ Seed 1 lies above that line.
 The 192-seed paragraph stays.
 It prints 121/192, 97/192, 148/192, and 114/192.
 The six-seed hexamer logs are a separate subsection.
-Open work remains on the water 16-mer, the Atomic Simulation Environment
-panel, the atomistic global optimization framework (AGOX), and the GMIN
-head-to-head.
+Open work remains on the water 16-mer.
+The Atomic Simulation Environment panel.
+The atomistic global optimization framework (AGOX).
+And the GMIN head-to-head.
 The manuscript does not mark those counts with a todo.
 No number was invented for them.

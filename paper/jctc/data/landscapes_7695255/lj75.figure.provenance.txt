@@ -1,10 +1,27 @@
-paper_commit=028d995a922f25834e25cdb42e96a005f83d3b62
-anneal_commit=76952552116a7bd76b4e4b153073759d59d16377
-sketchmap_commit=c2871db187f4a60377e7727af781da6c6c3426cb
-cap=800
-landmarks=600
-rng_seed=7
-c1c20aa9ccc5aa7dbc685d2e90a31b92379d3e6aa71c4b5cee36628db20725c0  campaign_landscape.py
-0d90438867faf29f2acdcd3374957b7e2eece7d6628348db385e22698d572826  sketchmap-c2871db/dimlandmark
-bfefc17ea9fd3ce1ef8763ffd84df146f212159dd3a45b4c0d99de06e1f36241  sketchmap-c2871db/dimred
-e2e5602478a2cf054056bec5902f2e4b865838252a0cd57a14f0d2b749885303  lj75_landscape.png
+paper_commit=028d995a922f25834e25cdb42e96a005f83d3b62.
+
+anneal_commit=76952552116a7bd76b4e4b153073759d59d16377.
+
+sketchmap_commit=c2871db187f4a60377e7727af781da6c6c3426cb.
+
+cap=800.
+
+landmarks=600.
+
+rng_seed=7.
+
+c1c20aa9ccc5aa7dbc685d2e90a31b92379d3e6aa71c4b5cee36628db20725c0.
+
+campaign_landscape.py.
+
+0d90438867faf29f2acdcd3374957b7e2eece7d6628348db385e22698d572826.
+
+sketchmap-c2871db/dimlandmark.
+
+bfefc17ea9fd3ce1ef8763ffd84df146f212159dd3a45b4c0d99de06e1f36241.
+
+sketchmap-c2871db/dimred.
+
+e2e5602478a2cf054056bec5902f2e4b865838252a0cd57a14f0d2b749885303.
+
+lj75_landscape.png.
