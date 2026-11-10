@@ -1524,6 +1524,147 @@ impl Lattice {
         }
         out
     }
+
+    /// One dynamic-lattice exchange, drawn from the best unrelaxed moves.
+    ///
+    /// Shao, Cheng and Cai, *J. Comput. Chem.* **2004**, *25*, 1693,
+    /// <https://doi.org/10.1002/jcc.20096>, move the atom on the occupied
+    /// site of highest energy onto the vacant site of lowest energy, and
+    /// repeat while that lowers the unrelaxed energy. On a quenched
+    /// minimum the unrelaxed exchange is uphill, so that greedy stop
+    /// leaves the structure where it stands. The draw here is among the
+    /// exchanges with the smallest unrelaxed rise, weighted by
+    /// `exp(-delta / temperature)`, and the caller's quench decides
+    /// whether the move stays. The atom is chosen by its pair energy.
+    /// Coordination only keeps a fully coordinated interior atom in
+    /// place, which is the surface lattice of that paper, not a count
+    /// that triggers the move.
+    ///
+    /// The vacant sites are [`Lattice::sites`] of the current geometry.
+    /// Their distance is the structure's own median nearest-neighbour
+    /// length, so the lattice is not a template and does not know a
+    /// preferred size. Pair sums are charged at their fraction of one
+    /// full evaluation. Returns `None` when the ledger cannot pay or
+    /// the geometry has no vacant site.
+    pub fn propose_energy_exchange<R: Rng + ?Sized>(
+        &self,
+        x: &[f64],
+        ledger: &mut Ledger,
+        temperature: f64,
+        rng: &mut R,
+    ) -> Option<Vec<f64>> {
+        let n = x.len() / 3;
+        if n < 4 {
+            return None;
+        }
+        let well = median_bond(x)
+            .filter(|b| *b > 1e-6)
+            .unwrap_or(self.site_distance);
+        let mut lattice = self.clone();
+        let ratio = well / self.site_distance.max(1e-6);
+        lattice.bond_cutoff *= ratio;
+        lattice.hollow_cutoff *= ratio;
+        lattice.site_distance = well;
+        lattice.clearance *= ratio;
+        lattice.merge_distance *= ratio;
+        let vacant = lattice.sites(x);
+        if vacant.is_empty() {
+            return None;
+        }
+        let coordination = lattice.coordination(x);
+        let movable: Vec<usize> = (0..n)
+            .filter(|&i| coordination[i] < lattice.interior_coordination)
+            .collect();
+        if movable.is_empty() {
+            return None;
+        }
+        let pairs = full_pairs(n);
+        let m = vacant.len();
+        let k = lattice.candidates.max(1).min(movable.len());
+        // Atom rows, site rows, and the own-pair term of each offer.
+        if !charge_oracle(ledger, 1.0 + ((m * n) + (k * m)) as f64 / pairs) {
+            return None;
+        }
+        let atoms: Vec<[f64; 3]> = (0..n).map(|i| position(x, i)).collect();
+        let mut atom_energy = vec![0.0; n];
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let v = ranked_pair(self, pair_dist2(atoms[i], atoms[j]), well);
+                atom_energy[i] += v;
+                atom_energy[j] += v;
+            }
+        }
+        let site_energy: Vec<f64> = vacant
+            .iter()
+            .map(|&p| {
+                atoms
+                    .iter()
+                    .map(|&q| ranked_pair(self, pair_dist2(p, q), well))
+                    .sum()
+            })
+            .collect();
+        let mut ranked = movable;
+        ranked.select_nth_unstable_by(k - 1, |&a, &b| atom_energy[b].total_cmp(&atom_energy[a]));
+        let mut offers: Vec<(f64, usize, usize)> = Vec::new();
+        for &i in &ranked[..k] {
+            for s in 0..m {
+                let r2 = pair_dist2(atoms[i], vacant[s]);
+                if r2 < 1e-8 {
+                    continue;
+                }
+                let own = ranked_pair(self, r2, well);
+                let delta = site_energy[s] - own - atom_energy[i];
+                offers.push((delta, i, s));
+            }
+        }
+        if offers.is_empty() {
+            return None;
+        }
+        let pool = ENERGY_EXCHANGE_POOL.min(offers.len());
+        offers.select_nth_unstable_by(pool - 1, |a, b| a.0.total_cmp(&b.0));
+        offers.truncate(pool);
+        let temp = temperature.max(1e-8);
+        let best = offers
+            .iter()
+            .fold(f64::INFINITY, |lo, offer| lo.min(offer.0));
+        let weights: Vec<f64> = offers
+            .iter()
+            .map(|offer| (-(offer.0 - best) / temp).exp())
+            .collect();
+        let sum: f64 = weights.iter().sum();
+        if !(sum > 0.0) {
+            return None;
+        }
+        let mut draw = rng.random::<f64>() * sum;
+        let mut pick = offers.len() - 1;
+        for (index, weight) in weights.iter().enumerate() {
+            draw -= weight;
+            if draw <= 0.0 {
+                pick = index;
+                break;
+            }
+        }
+        let (_, atom, site) = offers[pick];
+        let mut state = x.to_vec();
+        state[3 * atom] = vacant[site][0];
+        state[3 * atom + 1] = vacant[site][1];
+        state[3 * atom + 2] = vacant[site][2];
+        Some(state)
+    }
+}
+
+/// Exchanges offered to one dynamic-lattice draw.
+const ENERGY_EXCHANGE_POOL: usize = 8;
+
+/// Pair energy with the well moved onto `well`.
+///
+/// [`PairKind::r_min`] is the well of the formula. Dividing distances by
+/// `well` and multiplying by that minimum puts a contact at the
+/// structure's own bond length on the bottom of the well, for whatever
+/// pair `lattice` carries.
+fn ranked_pair(lattice: &Lattice, r2: f64, well: f64) -> f64 {
+    let scale = lattice.kind.r_min() / well.max(1e-6);
+    lattice.pair_energy(r2 * scale * scale)
 }
 
 #[cfg(test)]
@@ -1925,5 +2066,61 @@ mod tests {
         let bond = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
         assert!((bond - 1.0).abs() < 1e-3, "bond {bond}");
         assert_eq!(Quench::default().kind, PairKind::LennardJones);
+    }
+
+    /// The C2v shelf recorded by the 2M search, not a literature geometry.
+    ///
+    /// A walk of energy-ranked lattice exchanges has to leave that shelf.
+    /// Copying this test onto the tree without `propose_energy_exchange`
+    /// does not compile.
+    #[test]
+    fn energy_exchange_leaves_the_recorded_c2v_shelf() {
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+        let x = fixture("lj104-trap-c2v");
+        assert_eq!(x.len(), 104 * 3);
+        let lattice = Lattice::default();
+        let quench = Quench {
+            max_iterations: 160,
+            ..Quench::default()
+        };
+        let mut ledger = Ledger::new(400_000);
+        let start = quench.relax(&mut ledger, x.as_slice().unwrap()).unwrap();
+        assert!(
+            (start.energy + 580.42126628).abs() < 1e-4,
+            "start {}",
+            start.energy
+        );
+        let spent = ledger.spent();
+        let mut rng = StdRng::seed_from_u64(1);
+        let mut energy = start.energy;
+        let mut state = start.state;
+        let mut best = energy;
+        let mut moved = false;
+        for _ in 0..30 {
+            let Some(proposed) =
+                lattice.propose_energy_exchange(&state, &mut ledger, 0.8, &mut rng)
+            else {
+                break;
+            };
+            assert_ne!(proposed, state);
+            moved = true;
+            let Some(relaxed) = quench.relax(&mut ledger, &proposed) else {
+                break;
+            };
+            let delta = relaxed.energy - energy;
+            if delta < 1e-9 || rng.random::<f64>() < (-delta.max(0.0) / 0.8).exp() {
+                energy = relaxed.energy;
+                state = relaxed.state;
+            }
+            best = best.min(energy);
+        }
+        assert!(moved, "the exchange never proposed a different geometry");
+        assert!(ledger.spent() > spent, "site energies were not charged");
+        assert!(
+            best < start.energy - 0.4,
+            "best {best} did not leave {}",
+            start.energy
+        );
     }
 }

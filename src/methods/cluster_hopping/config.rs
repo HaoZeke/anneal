@@ -1054,6 +1054,13 @@ pub struct Config {
     pub reoccupy: Option<crate::methods::lattice_search::LatticeSearchConfig>,
     /// Charged calls between reoccupation moves.
     pub reoccupy_interval: usize,
+    /// Energy-ranked dynamic-lattice exchange as one more proposal arm.
+    ///
+    /// Off on [`Config::for_cluster`]. [`Config::recommended`] turns it on
+    /// for a monoatomic cluster. The arm reads vacant sites off the
+    /// current geometry and ranks them by pair energy. It does not move
+    /// the least-coordinated atom onto a random surface point.
+    pub energy_lattice: bool,
     /// Learned portfolio of relaxation surfaces: the plain surface plus every
     /// transform listed, one drawn per hop by depth-rewarded Thompson
     /// sampling. Empty leaves the choice to `two_phase`.
@@ -1180,6 +1187,10 @@ impl Config {
             interval: 10,
             reseed_hops: 5,
         };
+        // Shao, Cheng and Cai, J. Comput. Chem. 25, 1693 (2004): the
+        // highest-energy occupied site moves onto a vacant site of the
+        // lattice the current structure defines. One arm, at every size.
+        cfg.energy_lattice = true;
         cfg
     }
 
@@ -1490,6 +1501,7 @@ impl Config {
             two_phase: None,
             reoccupy: None,
             reoccupy_interval: 5_000,
+            energy_lattice: false,
             surfaces: Vec::new(),
             // Calibrated against published minima: the largest atomic distance
             // from the centre of mass divides by N^(1/3) to between 0.46 and
