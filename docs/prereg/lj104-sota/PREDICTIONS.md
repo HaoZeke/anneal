@@ -75,7 +75,7 @@ A tie is reported as a tie. Parity, the case b = n - b, is the same event as equ
 
 ## No-regression panel
 
-The panel is LJ38, LJ55, LJ75, and LJ98, with n = 6 seeds at each size. The six integers are outside 5000-5029. No committed file names the current default's six-seed panel, so the six integers are UNFILLED.
+The panel is LJ38, LJ55, LJ75, and LJ98, with n = 6 seeds at each size. The six seeds are 6000, 6001, 6002, 6003, 6004, and 6005. They were never used for tuning. They sit outside 5000-5029, and outside the ranges named in paper/seeds.toml: 0-31, 2000-2247, 3000-3029, 3100-3199, 4000-4047, and 5000-5063. This paragraph names them before any run of the panel.
 
 The floor at each size is the current anneal default hit count on that panel. A count below its floor is a mechanical FAIL.
 
