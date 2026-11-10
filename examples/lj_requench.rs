@@ -7,7 +7,6 @@
 
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
-use eindir_core::gradient::DifferentiableObjective;
 use ndarray::Array1;
 
 fn load(path: &str) -> Array1<f64> {
