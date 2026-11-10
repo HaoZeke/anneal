@@ -30,15 +30,16 @@
 
 \begin{abstract}
 We describe one basin-hopping preset for Lennard-Jones clusters.
-The preset keeps the lean burst library at every size.
+The move library, the temperature, the census and the orbit completion
+stay fixed at every size.
 Below 98 atoms the constructor adds a diameter penalty at 0.7 of the
 largest pair distance, and restart on stall stays off.
+The novelty is that fixed core, with the depth posterior choosing the
+move.
 On the water hexamer, the six crest rows are single draws from CREST
 3.0.2.
 That build exposes no seed, and the anneal seed fixes only start.xyz.
-The novelty is that one preset, fixed at every size, carries the depth
-posterior and the unseen-mass census.
-Those rows are single draws, so they are not a success rate.
+Those rows are not a success rate.
 Five polished gaps lie within \(1\times 10^{-7}\)~Eh.
 Seed 1 lies at \(1.35\times 10^{-7}\)~Eh, above that line.
 \end{abstract}
@@ -54,11 +55,10 @@ Li and Scheraga introduced basin hopping for a rough potential-energy surface.\c
 Wales and Doye made that Monte Carlo walk the working method for atomic clusters.\cite{wales1997}
 A move proposes a new geometry, a local minimisation returns a minimum, and the Metropolis rule at one temperature accepts or rejects that minimum.
 We find the same preset at every size in the campaigns below.
-We report the six crest rows as single draws, and we report the 192-seed campaign.
+We report the 192-seed campaign.
 The preset measured here draws move arms by Thompson sampling from a posterior on the depth of the quench, and it abandons a quench that is returning to the occupied basin.\cite{thompson1933,goedecker2004}
 A stall applies tabu, symmetrisation, the recorded basin trail, and the climb.
-Restart on stall stays off, so the walker is not redrawn from a random cluster.
-The constructor installs the lean burst library at every size.
+The constructor installs the lean burst library.
 Below 98 atoms it installs one two-phase surface, a relative cutoff of 0.7 with weight 1, and at 98 atoms and above that list stays empty.
 A caller who wants lattice growth sets it on the configuration.
 
@@ -99,7 +99,7 @@ core.
 \end{algorithm}
 
 \subsection{What the preset turns on}
-The recommended preset starts from the Wales and Doye displacement and then selects the lean burst library at every size.
+The recommended preset starts from the Wales and Doye displacement and then selects the lean burst library.
 Thompson sampling draws each move from a normal-gamma posterior on the depth reached by earlier quenches of that move.\cite{thompson1933}
 Below 98 atoms the constructor sets the surface list to one diameter penalty, by calling \texttt{TwoPhase::relative} with \(0.7\) and \(1\).
 The cutoff equals \(0.7\) times the largest pair distance.
@@ -211,22 +211,20 @@ Basin hopping (BH) and minima hopping (MH) run a single walker.\cite{wales1997,g
 The conformer-rotamer ensemble sampling tool (CREST) samples a molecular ensemble by metadynamics.\cite{prachtCrestProgramExploration2024}
 The bank in this section adds the depth posterior and the unseen-mass census to that list.
 
-Figure~\ref{fig:lj75-ecdf} draws the encounter curves of main's earlier sealed LJ\(_{75}\) campaign.\cite{oakley2013}
-
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{lj75_ecdf.pdf}
 \caption{Encounter curves of main's earlier sealed LJ\(_{75}\) campaign.
-That run used an empty surface list and restart on stall.
+The panel prints that run's PAR-2 values.
+The run used an empty surface list and restart on stall.
 The arms are the recommended hop, the derived hop, and the Wales-group
 basin-hopping program (GMIN).
-The plot covers 200 seeds.
-It is not the campaign that is still running.}
+The plot covers 200 seeds.}
 \label{fig:lj75-ecdf}
 \end{figure}
 \section{Information theory in the hop}
 \label{sec:info} A move that has stopped finding depth can still take
-the next trial.
+over the next trial.
 The recommended hop guards against that takeover with a posterior on the
 depth each move reaches.
 
@@ -264,7 +262,6 @@ Another route uses a continuous symmetry measure.
 The preset applies that projection every ten quenches at every size.
 
 \section{Results}
-We report the rates below.
 \subsection{The structures}
 Figure~\ref{fig:systems} draws the archived structures of the benchmark.
 The Lennard-Jones geometries are the reference minima of the Cambridge Cluster Database, and the TIP4P geometries are the minima of Wales and Hodges.\cite{walesCambridgeClusterDatabase,walesGlobalMinimaWater1998,jorgensen1983}
@@ -281,14 +278,12 @@ LJ\(_{104}\).
 hexamer of each class.}
 \label{fig:systems}
 \end{figure}
-Seeds 0 through 199 run serially at a cap of \(4\times 10^{6}\) force
-calls.
+The LJ\(_{75}\) seeds 0 through 199 run serially at a cap of
+\(4\times 10^{6}\) force calls.
 No hit count is reported until that run finishes.
 Figure~\ref{fig:lj75-ecdf} draws the encounter curves of the earlier
 sealed LJ\(_{75}\) campaign, which covered 200 seeds.
 \subsection{Rates and the water hexamer}
-The earlier LJ\(_{38}\) and LJ\(_{98}\) board is not repeated in this
-version.
 
 Figure~\ref{fig:minima-maps} maps the minima one seed of basin hopping
 and of the recommended hop accepted at LJ\(_{38}\), LJ\(_{75}\) and
@@ -333,12 +328,12 @@ No join is a barrier.}
 \centering
 \includegraphics[width=\textwidth]{landfold_maps.pdf}
 \caption{Landfold maps of the sealed Lennard-Jones and TIP4P hexamer runs.
+The Lennard-Jones panels use main's preset, including an LJ\(_{38}\)
+derived panel and an LJ\(_{75}\) aggregate of 200 seeds.
 Each panel is one sealed map, coloured from the lowest free energy to
 the highest, with the minimum marked.}
 \label{fig:landfold-maps}
 \end{figure*}
-Six seeds of the water hexamer were compared on one
-Hamiltonian\cite{prachtCrestProgramExploration2024,bannwarthGfn2xtbanAccurateBroadly2019}.
 \subsection{Earlier 192-seed hexamer campaign}
 On the water hexamer the sealed campaign runs four arms, each on seeds 0 to 191 at a budget of 4000 force calls.\cite{prachtCrestProgramExploration2024,bannwarthGfn2xtbanAccurateBroadly2019}
 The default arm is the hop.
@@ -363,11 +358,9 @@ Figure~\ref{fig:water-crest} draws the four arms.
 Its metadynamics is stochastic for a fixed start geometry.
 This build exposes no seed.
 The anneal seed fixes only start.xyz.
-The crest rows are single draws, so they are not a success rate.
 CREST's cost is the energy and gradient call count.
-The driver-count budget spends the driver count.
-The matched comparison and the 30-start statistics are pending from the
-water-engrad-matched lane.
+The matched comparison and the 30-start statistics are not in this
+article.
 A row succeeds when the run exits cleanly, the polished energy is
 finite, and the maximum force is at or below 0.001~Eh/bohr.
 Every final is polished with xtb at GFN2, the vtight setting, accuracy
@@ -399,21 +392,20 @@ Seed & Old counter & Energy+gradient \\
 \end{tabular}
 \end{table}
 
-Anneal's ledger spends 4000 evaluations in one setting.
-The driver-count budget spends the old counter, from 32112 to 50063
-evaluations.
+The 4000-call ledger spends 4000 evaluations in one setting.
+The driver-count budget runs from 32112 to 50063 evaluations.
 CREST's energy and gradient totals run from 142110 to 209931.
-The comparison is that anneal ledger against those energy and gradient
-calls.
-The driver-count budget is not equal effort, because that counter
+The comparison is that 4000-call ledger against those energy and
+gradient calls.
+The driver-count budget is not equal effort, because the old counter
 undercounted CREST.
 
 Table~\ref{tab:hexamer-gaps} gives the polished gap on each seed.
 The gap is the anneal energy minus the CREST energy.
 A negative value means the anneal energy sits lower.
 Five seeds lie within \(1\times 10^{-7}\)~Eh on both ledgers.
-Seed 1 reaches \(1.3509\times 10^{-7}\)~Eh on the 4000-evaluation ledger
-and \(1.3505\times 10^{-7}\)~Eh on the old-counter ledger, above the
+Seed 1 reaches \(1.3509\times 10^{-7}\)~Eh on the 4000-call ledger and
+\(1.3505\times 10^{-7}\)~Eh on the driver-count ledger, above the
 \(1\times 10^{-7}\)~Eh line.
 The label-free root-mean-square deviation of each polished pair is at
 most 0.00212~Å.
@@ -427,7 +419,7 @@ angstroms.}
 \centering
 \begin{tabular}{crrrr}
 \toprule
-Seed & Gap, 4000 & Gap, old counter & Deviation, 4000 & Deviation, old counter \\
+Seed & Gap, 4000-call ledger & Gap, driver-count ledger & Deviation, 4000-call ledger & Deviation, driver-count ledger \\
 \midrule
 0 & $-1.1214\times 10^{-8}$ & $-1.1210\times 10^{-8}$ & 0.001004 & 0.000987 \\
 1 & $-1.3509\times 10^{-7}$ & $-1.3505\times 10^{-7}$ & 0.002023 & 0.001964 \\
@@ -441,7 +433,9 @@ Seed & Gap, 4000 & Gap, old counter & Deviation, 4000 & Deviation, old counter \
 
 The logs name the processor Intel Xeon Processor, family 6, model 207.
 Each CREST run selected one thread.
-The hexamer wall times are pending.
+The hexamer wall-time medians, from \texttt{logs/hexamer-walls.txt}, are
+544.0~s for CREST, 18.8~s for the 4000-call ledger, and 195.5~s for the
+driver-count ledger.
 
 The CREST polish converged in one iteration on all 18 finals.
 No CREST structure dissociated.
@@ -455,22 +449,17 @@ No CREST structure dissociated.
 \label{fig:water-crest}
 \end{figure}
 
-The 16-mer count is not reported.
+The water 16-mer count is separate open work, apart from the hexamer
+campaign.
 The Atomic Simulation Environment, the atomistic global optimization
 framework (AGOX), and the Wales-group basin-hopping program (GMIN) are
 not compared here.
 
 \section{Conclusions}
-The Lennard-Jones preset keeps the lean burst library at every size,
-including 38 atoms.
-In contrast with a size-specific library, that choice does not change
-with the atom count.
 The constructor installs the diameter penalty below 98 atoms.
 The surface list is empty from 98 atoms upward.
-Restart on stall stays off.
 The same temperature, the same census, and the same orbit completion run
 at every size.
-Figure~\ref{fig:water-crest} draws the 192-seed campaign.
 
 \section*{Author contributions}
 Author contributions follow the CRediT taxonomy.
@@ -510,12 +499,10 @@ The authors declare no competing financial interest.
 \begin{suppinfo}
 The Supporting Information gives the board constants.
 It also gives the structure plates, the sketch-map panels, and the
-landfold panels.
+landfold panels of the Lennard-Jones maps.
 \end{suppinfo}
 
 \section*{Data and software availability}
-The landfold panels in the Supporting Information are the Lennard-Jones
-maps.
 The source is the repository \url{https://github.com/HaoZeke/anneal}
 under the Massachusetts Institute of Technology (MIT) licence.
 Documentation is at \url{https://anneal.rgoswami.me}.
