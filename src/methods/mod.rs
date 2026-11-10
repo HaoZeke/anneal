@@ -25,6 +25,8 @@ pub mod cluster_search;
 /// Population resampled by estimated probability of improvement.
 pub mod committor_pop;
 pub mod csa_cluster;
+/// Published dynamic lattice search of Shao, Cheng and Cai (2004).
+pub mod dls_published;
 pub mod ensemble;
 /// Archive-ratcheted exploration of the minima network.
 #[cfg(feature = "graphkey")]

@@ -884,7 +884,7 @@ fn full_pairs(n: usize) -> f64 {
 
 /// Charges `frac` and, while [`oracle_begin`] is active, counts the whole
 /// units that charge settled. The residue under one unit is not a call.
-fn charge_oracle(ledger: &mut Ledger, frac: f64) -> bool {
+pub(crate) fn charge_oracle(ledger: &mut Ledger, frac: f64) -> bool {
     let before = ledger.spent();
     let ok = ledger.charge_frac(frac);
     oracle_add(ledger.spent().saturating_sub(before));
@@ -1525,20 +1525,16 @@ impl Lattice {
         out
     }
 
-    /// One dynamic-lattice exchange, drawn from the best unrelaxed moves.
+    /// DLS-style exchange kernel: one Boltzmann-weighted move.
     ///
-    /// Shao, Cheng and Cai, *J. Comput. Chem.* **2004**, *25*, 1693,
-    /// <https://doi.org/10.1002/jcc.20096>, move the atom on the occupied
-    /// site of highest energy onto the vacant site of lowest energy, and
-    /// repeat while that lowers the unrelaxed energy. On a quenched
-    /// minimum the unrelaxed exchange is uphill, so that greedy stop
-    /// leaves the structure where it stands. The draw here is among the
-    /// exchanges with the smallest unrelaxed rise, weighted by
-    /// `exp(-delta / temperature)`, and the caller's quench decides
-    /// whether the move stays. The atom is chosen by its pair energy.
-    /// Coordination only keeps a fully coordinated interior atom in
-    /// place, which is the surface lattice of that paper, not a count
-    /// that triggers the move.
+    /// This is not the published dynamic lattice search. Shao, Cheng
+    /// and Cai, J. Comput. Chem. 25, 1693 (2004), build a lattice by
+    /// relaxing a probe atom and then repeat a greedy exchange. That
+    /// procedure is [`crate::methods::dls_published`]. The draw here is
+    /// one exchange among the smallest unrelaxed rises, weighted by
+    /// `exp(-delta / temperature)`. The caller's quench decides whether
+    /// it stays. Coordination only keeps a fully coordinated interior
+    /// atom in place.
     ///
     /// The vacant sites are [`Lattice::sites`] of the current geometry.
     /// Their distance is the structure's own median nearest-neighbour
