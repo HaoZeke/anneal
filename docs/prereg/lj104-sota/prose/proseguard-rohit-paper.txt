@@ -1,0 +1,6 @@
+Copyright (c) anneal developers
+
+command: proseguard -p rohit-paper
+NOT_RUN
+The command was not on PATH. A search of the usual install
+locations did not find it. No output was produced.
