@@ -1,0 +1,14 @@
+GMIN_BEST rebuild attempt
+expected executable digest follows
+b8eeddfa6d18a697a76d0714c0a6b356c98c1d40022bd639ac55581e119baf95
+digest status unverified
+pinned Fortran source is absent
+missing source/potential.f90
+gfortran is absent
+keyword sha256 follows
+62618de90c53478bbfe724efe527dd1fa67cd6386da0cf00cb0cc8431bd7037d
+keyword file matches its own recorded digest
+that match is not an executable match
+no binary was produced
+rebuild did not match the executable digest
+BUILD_EXIT:2
