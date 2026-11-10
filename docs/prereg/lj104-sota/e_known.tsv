@@ -1,0 +1,10 @@
+# Copyright (c) anneal developers
+# Cambridge Cluster Database global minima, at the precision stored in this repo.
+# examples/h2h_arm3.rs holds the four panel values. examples/lj_cluster_search.rs
+# reference() holds the same four and the LJ104 value.
+n	e_known	file	line
+38	-173.928427	examples/h2h_arm3.rs	46
+55	-279.248470	examples/h2h_arm3.rs	47
+75	-397.492331	examples/h2h_arm3.rs	48
+98	-543.665361	examples/h2h_arm3.rs	49
+104	-582.086642	examples/lj_cluster_search.rs	1295

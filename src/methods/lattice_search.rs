@@ -818,21 +818,29 @@ pub fn lj_value(x: &[f64]) -> f64 {
     4.0 * e
 }
 
-/// Re-quench one Lennard-Jones cluster.
+/// Re-quench one Lennard-Jones cluster and count that work on its own.
 ///
-/// `lj_requench` is [`crate::methods::warm_lbfgs::WarmLbfgs::minimize`]
+/// `lj_requench_calls` is [`crate::methods::warm_lbfgs::WarmLbfgs::minimize`]
 /// in `src/methods/warm_lbfgs.rs`. The solver is the default
 /// [`crate::methods::warm_lbfgs::WarmLbfgs`], the iteration cap is 5000,
-/// and the gradient is the cluster's own pair gradient. That is the call
-/// the fixture quench in this file's tests makes.
-pub fn lj_requench(x: &[f64]) -> f64 {
+/// and the gradient is the cluster's own pair gradient. The count is the
+/// number of value-and-gradient evaluations that call returns. It is not
+/// added to a search budget.
+pub fn lj_requench_calls(x: &[f64]) -> (f64, usize) {
     let n = x.len() / 3;
     let pot = crate::potentials::PairPotential::lennard_jones(n);
     let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
-    let (energy, _, _) = opt.minimize(ArrayView1::from(x), 5000, |v| {
+    let (energy, _, calls) = opt.minimize(ArrayView1::from(x), 5000, |v| {
         Some(pot.value_and_gradient(v))
     });
-    energy
+    (energy, calls)
+}
+
+/// Re-quench one Lennard-Jones cluster.
+///
+/// This is the energy from [`lj_requench_calls`].
+pub fn lj_requench(x: &[f64]) -> f64 {
+    lj_requench_calls(x).0
 }
 
 thread_local! {
@@ -1669,11 +1677,13 @@ mod tests {
             }
         }
         assert_eq!(coords.len(), 312);
-        let energy = lj_requench(&coords);
+        let (energy, calls) = lj_requench_calls(&coords);
+        assert!(calls >= 1, "re-quench charged no calls");
         assert!(
             energy <= -582.086641,
-            "lj_requench returned {energy}"
+            "lj_requench returned {energy} after {calls} calls"
         );
+        assert_eq!(lj_requench(&coords), energy);
     }
 
     #[test]
