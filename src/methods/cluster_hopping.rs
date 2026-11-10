@@ -5888,19 +5888,20 @@ where
             if ee < e {
                 stall_escape_gain += e - ee;
             }
-            // Taken whatever its energy, exactly as the climb below: the
-            // chain has shown it cannot improve from where it stands.
-            adopt_minimum!(
-                ee,
-                xe,
-                trail_gradient,
-                None,
-                AdoptionHistory::Fresh,
-                None,
-                Some("stall-trail"),
-                hops
-            );
-            stall_outcome = Some(stalled_from - e);
+            // A non-finite quench is a budget failure, not a new place.
+            if ee.is_finite() && xe.iter().all(|value| value.is_finite()) {
+                adopt_minimum!(
+                    ee,
+                    xe,
+                    trail_gradient,
+                    None,
+                    AdoptionHistory::Fresh,
+                    None,
+                    Some("stall-trail"),
+                    hops
+                );
+                stall_outcome = Some(stalled_from - e);
+            }
         }
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
             quiet = 0;
@@ -6124,27 +6125,27 @@ where
                     if ee < e {
                         stall_escape_gain += e - ee;
                     }
-                    // Taken whatever its energy. The chain has already shown it
-                    // cannot improve from where it is, so the value of the new
-                    // structure is that it is somewhere else.
-                    let local_feedback = if cfg.minima_hopping {
-                        let from = here.unwrap_or_else(|| identity.basin_of(x.view()));
-                        let reached = identity.basin_of(xe.view());
-                        Some((Some(from), reached))
-                    } else {
-                        None
-                    };
-                    adopt_minimum!(
-                        ee,
-                        xe,
-                        escape_gradient,
-                        local_feedback.map(|(_, reached)| reached),
-                        AdoptionHistory::Fresh,
-                        local_feedback,
-                        Some("stall-climb"),
-                        hops
-                    );
-                    stall_outcome = Some(stalled_from - e);
+                    // A non-finite quench is a budget failure, not a new place.
+                    if ee.is_finite() && xe.iter().all(|value| value.is_finite()) {
+                        let local_feedback = if cfg.minima_hopping {
+                            let from = here.unwrap_or_else(|| identity.basin_of(x.view()));
+                            let reached = identity.basin_of(xe.view());
+                            Some((Some(from), reached))
+                        } else {
+                            None
+                        };
+                        adopt_minimum!(
+                            ee,
+                            xe,
+                            escape_gradient,
+                            local_feedback.map(|(_, reached)| reached),
+                            AdoptionHistory::Fresh,
+                            local_feedback,
+                            Some("stall-climb"),
+                            hops
+                        );
+                        stall_outcome = Some(stalled_from - e);
+                    }
                 }
             }
         }
