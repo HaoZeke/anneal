@@ -1,5 +1,6 @@
 # Custom
 .pdm.toml
+*.raw
 *.ipynb
 .bench/
 
