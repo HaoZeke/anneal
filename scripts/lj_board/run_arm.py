@@ -136,10 +136,49 @@ def prepare_agox_import():
         ase_constraints.IndexedConstraint = IndexedConstraint
     if not hasattr(ase_constraints, "slice2enlist"):
         ase_constraints.slice2enlist = slice2enlist
+    from agox.generators.ABC_generator import GeneratorBaseClass
+    from agox.helpers.confinement import Confinement
     from agox.utils.constraints.box_constraint import BoxConstraint
+    from ase.data import covalent_radii
 
     if getattr(BoxConstraint, "_board_fast", False):
         return
+    original_check = GeneratorBaseClass.check_new_position
+    original_projection = Confinement.get_projection_coefficients
+
+    def get_projection_coefficients(self, positions):
+        cell = np.asarray(self.effective_cell, dtype=float)
+        diagonal = np.diag(cell)
+        if cell.shape == (3, 3) and np.count_nonzero(cell - np.diag(diagonal)) == 0:
+            coords = np.asarray(positions, dtype=float).reshape(-1, 3)
+            width = self.dimensionality
+            return (coords[:, :width] - self.corner[:width]) / diagonal[:width]
+        return original_projection(self, positions)
+
+    def check_new_position(self, candidate, new_position, number, skipped_indices=None):
+        # Same accept and reject tests as the generator, on whole arrays.
+        if self.use_mic:
+            return original_check(self, candidate, new_position, number, skipped_indices)
+        coords = np.asarray(candidate.positions, dtype=float)
+        numbers = np.asarray(candidate.numbers)
+        if skipped_indices:
+            keep = np.ones(len(coords), dtype=bool)
+            keep[list(skipped_indices)] = False
+            coords = coords[keep]
+            numbers = numbers[keep]
+        if len(coords) == 0:
+            return False
+        delta = coords - np.asarray(new_position, dtype=float)
+        distance = np.sqrt(np.einsum("ij,ij->i", delta, delta))
+        span = covalent_radii[numbers] + covalent_radii[number]
+        near = self.c1 * span
+        far = self.c2 * span
+        if np.any(distance < near):
+            return False
+        return bool(np.any(distance <= far))
+
+    GeneratorBaseClass.check_new_position = check_new_position
+    Confinement.get_projection_coefficients = get_projection_coefficients
     original_adjust = BoxConstraint.adjust_forces
 
     def adjust_forces(self, atoms, forces):
@@ -419,7 +458,8 @@ def run_agox(n, budget, reference, seed, work: Path):
         f"agox={version} AGOX+Database+Environment+RattleGenerator+"
         "MetropolisSampler+LocalOptimizationEvaluator "
         f"temperature={WALES_TEMPERATURE} rattle_amplitude={WALES_STEP} "
-        f"n_rattle={n} c1={c1:.6f} use_mic=0 fmax={FORCE_BAR} steps=200 "
+        f"n_rattle={n} c1={c1:.6f} use_mic=0 position_check=array "
+        f"fmax={FORCE_BAR} steps=200 "
         f"seed={seed} "
         "citation=Christiansen,Ronne,Hammer,J.Chem.Phys.157,054701,2022;"
         "Wales,Doye,J.Phys.Chem.A,101,5111,1997"
