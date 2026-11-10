@@ -26,8 +26,8 @@ done_ok() {
   return 1
 }
 
-for n in 38 55 75 98 104; do
-  for code in ase agox; do
+for code in ase agox; do
+  for n in 38 55 75 98 104; do
     for seed in 6400 6401 6402 6403 6404 6405; do
       log="$LJ_BOARD_ROOT/$code/lj${n}-seed${seed}.log"
       if done_ok "$log"; then

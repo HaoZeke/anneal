@@ -76,15 +76,44 @@ def install_fast_bfgs() -> None:
         width = len(diagonal)
         self._board_inv = np.eye(width, dtype=np.float64) * (1.0 / float(diagonal[0]))
 
+    def _reset_inv(self):
+        width = self._board_inv.shape[0]
+        self._board_inv[:, :] = 0.0
+        diag = np.diag_indices(width)
+        self._board_inv[diag] = 1.0 / 70.0
+
     def _update(self, pos, gradient, pos0, gradient0):
         step = np.ascontiguousarray(pos - pos0, dtype=np.float64)
+        slope_src = np.ascontiguousarray(gradient - gradient0, dtype=np.float64)
+        if (
+            step.shape != slope_src.shape
+            or not np.isfinite(step).all()
+            or not np.isfinite(slope_src).all()
+        ):
+            self._reset_inv()
+            return
         if np.abs(step).max() < 1e-7:
             return
-        slope = np.ascontiguousarray(gradient - gradient0, dtype=np.float64)
-        bfgs_inverse_update(self._board_inv, step, slope)
+        curvature = float(step @ slope_src)
+        if not np.isfinite(curvature) or abs(curvature) <= 1.0e-16:
+            return
+        bfgs_inverse_update(self._board_inv, step, slope_src)
+        if not np.isfinite(self._board_inv).all():
+            self._reset_inv()
 
     def _compute_step(self, gradient):
-        return bfgs_apply(self._board_inv, np.ascontiguousarray(gradient, dtype=np.float64))
+        grad = np.ascontiguousarray(gradient, dtype=np.float64)
+        if grad.shape != (self._board_inv.shape[0],) or not np.isfinite(grad).all():
+            self._reset_inv()
+            return np.zeros_like(grad)
+        direction = bfgs_apply(self._board_inv, grad)
+        if not np.isfinite(direction).all():
+            self._reset_inv()
+            scale = float(np.max(np.abs(grad)))
+            if not np.isfinite(scale) or scale == 0.0:
+                return np.zeros_like(grad)
+            return -grad / scale * 0.1
+        return direction
 
     BFGSMethod.__init__ = _init
     BFGSMethod.update = _update
@@ -233,7 +262,27 @@ def run_ase(n, budget, reference, seed, work: Path):
     atoms.calc = calc
     np.random.seed(seed)
     ase_version = metadata.version("ase")
-    hop = BasinHopping(
+
+    class CappedBasinHopping(BasinHopping):
+        """Same basin hop, with a finite local-step cap.
+
+        A broken curvature would otherwise keep the local optimizer
+        stepping without moving, up to its default of 1e8 iterations.
+        Healthy quenches converge well below this cap.
+        """
+
+        def get_energy(self, positions):
+            if np.any(self.positions != positions):
+                self.positions = positions
+                self.optimizable.set_x(positions.ravel())
+                with self.optimizer(self.optimizable, logfile=self.optimizer_logfile) as opt:
+                    opt.run(fmax=self.fmax, steps=5000)
+                if self.lm_trajectory is not None:
+                    self.lm_trajectory.write(self.optimizable)
+                self.energy = self.optimizable.get_value()
+            return self.energy
+
+    hop = CappedBasinHopping(
         atoms,
         temperature=WALES_TEMPERATURE,
         dr=WALES_STEP,
@@ -246,7 +295,8 @@ def run_ase(n, budget, reference, seed, work: Path):
     )
     note = (
         f"ase={ase_version} BasinHopping temperature={WALES_TEMPERATURE} "
-        f"dr={WALES_STEP} optimizer=BFGS fmax={FORCE_BAR} numpy_seed={seed} "
+        f"dr={WALES_STEP} optimizer=BFGS fmax={FORCE_BAR} local_steps=5000 "
+        f"numpy_seed={seed} "
         "citation=Wales,Doye,J.Phys.Chem.A,101,5111,1997"
     )
     stalled = 0
