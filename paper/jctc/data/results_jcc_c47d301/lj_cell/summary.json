@@ -1,0 +1,135 @@
+{
+  "anneal_commit": "36086e988c5a71c156ffcbde152bf321a6f5ef25",
+  "binary_sha256": "ebefa9557ae57fd7d898842fa05af7503e204c34555a6935bf04073412ab3d05",
+  "boards": [
+    {
+      "arm": "recommended",
+      "binary_sha256": "ebefa9557ae57fd7d898842fa05af7503e204c34555a6935bf04073412ab3d05",
+      "budget": 400000,
+      "hits": 72,
+      "median_calls_on_hits": 726.0,
+      "n": 72,
+      "par2": 805.5972222222222,
+      "seeds": "2000-2071",
+      "system": "lj38",
+      "wilson_95": [
+        0.9493488274035422,
+        1.0
+      ]
+    },
+    {
+      "arm": "derived",
+      "binary_sha256": "ebefa9557ae57fd7d898842fa05af7503e204c34555a6935bf04073412ab3d05",
+      "budget": 400000,
+      "hits": 72,
+      "median_calls_on_hits": 694.5,
+      "n": 72,
+      "par2": 813.375,
+      "seeds": "2000-2071",
+      "system": "lj38",
+      "wilson_95": [
+        0.9493488274035422,
+        1.0
+      ]
+    },
+    {
+      "arm": "recommended",
+      "binary_sha256": "ebefa9557ae57fd7d898842fa05af7503e204c34555a6935bf04073412ab3d05",
+      "budget": 1000000,
+      "hits": 48,
+      "median_calls_on_hits": 13051.0,
+      "n": 48,
+      "par2": 17128.583333333332,
+      "seeds": "2000-2047",
+      "system": "lj55",
+      "wilson_95": [
+        0.9258998703338824,
+        0.9999999999999999
+      ]
+    },
+    {
+      "arm": "derived",
+      "binary_sha256": "ebefa9557ae57fd7d898842fa05af7503e204c34555a6935bf04073412ab3d05",
+      "budget": 1000000,
+      "hits": 48,
+      "median_calls_on_hits": 20121.0,
+      "n": 48,
+      "par2": 25385.270833333332,
+      "seeds": "2000-2047",
+      "system": "lj55",
+      "wilson_95": [
+        0.9258998703338824,
+        0.9999999999999999
+      ]
+    },
+    {
+      "arm": "recommended",
+      "binary_sha256": "ebefa9557ae57fd7d898842fa05af7503e204c34555a6935bf04073412ab3d05",
+      "budget": 4000000,
+      "hits": 200,
+      "median_calls_on_hits": 28593.5,
+      "n": 200,
+      "par2": 32363.98,
+      "seeds": "2000-2199",
+      "system": "lj75",
+      "wilson_95": [
+        0.9811546736227335,
+        1.0
+      ]
+    },
+    {
+      "arm": "derived",
+      "binary_sha256": "ebefa9557ae57fd7d898842fa05af7503e204c34555a6935bf04073412ab3d05",
+      "budget": 4000000,
+      "hits": 200,
+      "median_calls_on_hits": 19974.0,
+      "n": 200,
+      "par2": 27107.045,
+      "seeds": "2000-2199",
+      "system": "lj75",
+      "wilson_95": [
+        0.9811546736227335,
+        1.0
+      ]
+    },
+    {
+      "arm": "recommended",
+      "binary_sha256": "ebefa9557ae57fd7d898842fa05af7503e204c34555a6935bf04073412ab3d05",
+      "budget": 4000000,
+      "hits": 47,
+      "median_calls_on_hits": 450877,
+      "n": 48,
+      "par2": 928259.9583333334,
+      "seeds": "2000-2047",
+      "system": "lj98",
+      "wilson_95": [
+        0.8910078200474814,
+        0.9963128890224893
+      ]
+    },
+    {
+      "arm": "derived",
+      "binary_sha256": "ebefa9557ae57fd7d898842fa05af7503e204c34555a6935bf04073412ab3d05",
+      "budget": 4000000,
+      "hits": 47,
+      "median_calls_on_hits": 1004317,
+      "n": 48,
+      "par2": 1313909.1041666667,
+      "seeds": "2000-2047",
+      "system": "lj98",
+      "wilson_95": [
+        0.8910078200474814,
+        0.9963128890224893
+      ]
+    }
+  ],
+  "completed_jobs": 736,
+  "completed_snakemake_log": ".snakemake/log/2026-10-27T011652.261790.snakemake.log",
+  "driver": "lj_board",
+  "log_index_13": {
+    "file": ".snakemake/log/2026-10-26T231136.486302.snakemake.log",
+    "what": "one lj_cell check, LJ38 recommended seed 2000"
+  },
+  "rule": "lj_cell",
+  "seals": "results/lj"
+}

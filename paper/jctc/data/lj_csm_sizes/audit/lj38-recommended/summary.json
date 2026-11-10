@@ -1,0 +1,38 @@
+{
+  "anneal_commit": "da7f942298a666843fa61118fef786a0e2b73b4c",
+  "arm": "recommended",
+  "budget": 400000,
+  "call_par2": 805.5972222222222,
+  "config_digests": [
+    "f11e2d801ba271b6e5873360a9e9af3e805eb3dae9393d8d0aa403e81c4054a8"
+  ],
+  "cpu_family": 6,
+  "cpu_model": 207,
+  "cpu_model_name": "Intel(R) Xeon(R) Processor",
+  "first": 2000,
+  "hits": 72,
+  "hypervisor": "KVM",
+  "kind": "anneal",
+  "last": 2071,
+  "machine_class": "not paper machine",
+  "median_calls_on_hits": 726.0,
+  "median_wall_seconds": 0.005182,
+  "n_atoms": 38,
+  "n_seeds": 72,
+  "name": "lj38-recommended",
+  "paper_cpu_model": 173,
+  "path": "cluster_search",
+  "reference": -173.928427,
+  "saddle": {
+    "budget_differences": [],
+    "compared": true,
+    "saddle_call_par2": 805.5972222222222,
+    "saddle_hits": 72,
+    "saddle_median_wall_seconds": 0.005281,
+    "saddle_rows": 72,
+    "scientific_mismatches": []
+  },
+  "tolerance": 0.001,
+  "wilson_95_high": 1.0,
+  "wilson_95_low": 0.9493488274035422
+}

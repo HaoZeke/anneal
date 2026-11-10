@@ -1,0 +1,9 @@
+arm=SYMMETRISE
+binary_sha256=ea3b030cb10381bb9092f1fbc6310b469ddcae982f7a9eed87380b137915fdd4
+rule=competitor_cell
+seeds=1-200
+budget=4000000
+hits=200/200
+par2=58029.63
+source=results/competitors/gmin/lj75
+tarball=wales-27058

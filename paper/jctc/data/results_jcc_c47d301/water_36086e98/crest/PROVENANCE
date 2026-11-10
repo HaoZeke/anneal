@@ -1,0 +1,8 @@
+arm=crest
+binary_sha256=57857d81dd5bc363081c285d756b18aad02679abce52ae797a38069ab774324b
+command=crest water.xyz -T 1
+rule=water_independent
+seeds=0-95
+budget=4000
+hits=51/96
+anneal_commit=
