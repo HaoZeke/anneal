@@ -1678,7 +1678,9 @@ impl ClusterMove {
             ClusterMove::SurfaceRelocate(k) => k.propose(x, t, rng),
             ClusterMove::HollowRelocate(k) => k.propose(x, t, rng),
             ClusterMove::HollowFill(k) => k.propose(x, t, rng),
-            ClusterMove::EnergyLattice => x.to_owned(),
+            ClusterMove::EnergyLattice => {
+                unreachable!("the exchange is drawn on the search ledger")
+            }
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
             ClusterMove::Symmetrise(k) => k.propose(x, t, rng),
             ClusterMove::PointSymmetrise {
@@ -2244,6 +2246,17 @@ mod move_scaling_tests {
     use super::*;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+
+    #[test]
+    fn energy_lattice_propose_is_unreachable() {
+        let mv = ClusterMove::EnergyLattice;
+        let x = Array1::zeros(12);
+        let mut rng = StdRng::seed_from_u64(1);
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            mv.propose(x.view(), 0.8, &mut rng);
+        }));
+        assert!(caught.is_err(), "the exchange arm must not propose");
+    }
 
     #[test]
     fn wales_doye_library_is_the_collective_displacement_kernel() {
