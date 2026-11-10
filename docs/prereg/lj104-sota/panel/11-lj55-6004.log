@@ -1,0 +1,14 @@
+system: lj
+n: 55
+rho: 0
+seed: 6004
+arm: recommended
+budget: 1000000
+calls: 11580
+charged: 11580
+lowest: -279.2481782004
+geometry_energy: -279.2481782004
+best: -276.6042888788
+hops: 110
+basins: 14
+wall_seconds: 0.366
