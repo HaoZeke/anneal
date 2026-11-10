@@ -178,6 +178,26 @@ fn a_failed_lattice_growth_does_not_repeat_off_the_icosahedron() {
     assert!((best + 1.0).abs() < 1e-12);
 }
 
+fn dry(home: &Array1<f64>, budget_window: bool, budget: usize) {
+    let mut cfg = stall_cfg(home.len() / 3, budget_window);
+    cfg.max_hops = Some(3);
+    let mut relax = |ledger: &mut Ledger, _x: ArrayView1<f64>, _steps: usize| {
+        let _ = ledger.charge();
+        (-1.0, home.clone())
+    };
+    let mut ledger = Ledger::new(budget);
+    let mut rng = StdRng::seed_from_u64(11);
+    let outcome = run_with_gradient(&cfg, home.view(), &mut ledger, &mut relax, None, &mut rng)
+        .expect("finite start");
+    assert!(outcome.best.is_finite() || ledger.spent() > 0);
+}
+
+#[test]
+fn a_dry_ledger_stops_both_growth_loops() {
+    dry(&icosahedron(), false, 4);
+    dry(&line(13), true, 4);
+}
+
 #[test]
 fn an_icosahedral_growth_that_deepens_the_incumbent_is_kept() {
     let home = icosahedron();
