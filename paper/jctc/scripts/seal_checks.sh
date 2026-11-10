@@ -15,12 +15,18 @@ outer = (root / "OUTER").stat().st_mtime
 ready = (root / "STORE_READY").stat().st_mtime
 if not (sums < outer < ready):
     raise SystemExit(f"seal order sums={sums} outer={outer} ready={ready}")
+later = {"series.bundle", "clone.txt", "bundle-verify.txt", "fsck-strict.txt"}
 for path in root.rglob("*"):
     if not path.is_file():
         continue
     if path.name in {"OUTER", "STORE_READY"}:
         continue
-    if path.stat().st_mtime > sums:
+    mtime = path.stat().st_mtime
+    if path.name in later:
+        if not (outer < mtime < ready):
+            raise SystemExit(f"{path.name} is outside the bundle step")
+        continue
+    if mtime > sums:
         raise SystemExit(f"{path.name} is newer than SHA256SUMS")
 print("seal order ok")
 PY

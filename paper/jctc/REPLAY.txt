@@ -1,6 +1,6 @@
 # Replay
 
-We replayed commits onto this ref four times.
+We replayed commits onto this ref five times.
 
 We record each replay below.
 
@@ -377,3 +377,84 @@ The commit that replaced it follows.
 a2ca5d9ab1c1ba3be51ffab5aa06c9983d12d2d5
 
 The notes file and this file are the tree change.
+
+## Replay from v1.24
+
+This pass rewrote the messages of commits 42, 43, 45 and 47.
+Commits 44 and 46 keep their words.
+Each pair below has one tree.
+The previous tip is the archive object.
+
+705fa8a4b4b259023db551a4f20da5efbea361f6
+
+Record 42 has one tree.
+
+50e8b7e1ca632446e461ac2a0b950019b3e9a234
+
+The old commit follows.
+
+634176ad73c6d87a2b2e3de3112b804b0af73ebb
+
+The new commit follows.
+
+afe6edfe1956db5a6c460a396e64d9d7b58cd3ef
+
+Record 43 has one tree.
+
+f454fd1211de9a5a8b8060c4b9f25e1d247040d7
+
+The old commit follows.
+
+1ebbe9c2b7e072e88536f8b5e17d7a4577ad26fd
+
+The new commit follows.
+
+b568d6c2d2e85d6a23ea7ed2891fd0dc6800bb15
+
+Record 44 has one tree.
+
+23885ff3b4325c899cbba4d99dcd94d978d699dc
+
+The old commit follows.
+
+3bccdddd1e9c5a13016892fbfcd719aeebd00a61
+
+The new commit follows.
+
+e7e77ace3c0734639d1f413306d3da828e5a6cce
+
+Record 45 has one tree.
+
+39af714ebac742fb9ba48fd78b1115ad4cea540d
+
+The old commit follows.
+
+a2ca5d9ab1c1ba3be51ffab5aa06c9983d12d2d5
+
+The new commit follows.
+
+74849a7fd4366044bd01220cc0295e620f7dc7ef
+
+Record 46 has one tree.
+
+306b34a14475c84dd5d2a0dcf0aaa8a06ed9baee
+
+The old commit follows.
+
+ec26797a181c6715976868737f9284a0b8d0ed15
+
+The new commit follows.
+
+8ae8d4403d7798c99d2dcfe500b8d15f054f4af6
+
+Record 47 has one tree.
+
+f194b2501fb0639acee4afb2e5841987a142f1e6
+
+The old commit follows.
+
+705fa8a4b4b259023db551a4f20da5efbea361f6
+
+The new commit follows.
+
+7f33cfa6c8b9e2ffcdde144c3bf3dc7526388967
