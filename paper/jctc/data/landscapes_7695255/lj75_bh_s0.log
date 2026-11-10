@@ -1,0 +1,5 @@
+LJ75, budget 4000000 charged evaluations, 1 seeds, reference -397.492331
+      last improvement at hop 6991 of 136599 (5.1% in), 251 basins, -396.282249
+  seed 0: best -396.282249  hops 136599  screened 135826  charged 4000000  basins 3890 (35.1 hops each)  returned 0  swaps 0/0  paths 0 improved 0 gain 0.000  escape 1.000 thr 0.8000 same/known/new 0/0/0 soft 0/0 sub 0/0 lmin NaN climbs 0 gain 0.00 radius 0.700 step 0.700 restarts 0 angular 0/0 R 0.420 tabu 0 vetoed 0 screen 0/0 expl 0 obs 0 ctx [0, 0, 0, 0, 0]  relaxed 717/137373 converged  early 0 saved 0  verified -396.282249 |g| 9.3e-6
+0/1 solved, deepest -396.282249   mean hops 136599, force per hop 29
+gap to reference +1.210082
