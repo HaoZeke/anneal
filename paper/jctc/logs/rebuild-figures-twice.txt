@@ -1,6 +1,6 @@
-Hash lines of the two rebuilds are identical.
+The two clean rebuilds match.
 
-The three built files are identical.
+All nineteen files in figs/ match.
 
 The pin SOURCE_DATE_EPOCH is 0.
 

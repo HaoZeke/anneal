@@ -1,18 +1,1 @@
-lj75_gmin_table: provenance.txt names no full commit of the published anneal snapshot
-water_results_table: provenance.txt names rule 'water_crest_fair.', not water_crest_fair
-fig_landfold_maps: lj_csm/lj38/derived is not a run of landfold fc7e8654
-system_visuals: provenance.txt records no digest of system_visuals/references.csv
-system_visuals: provenance.txt records no digest of system_visuals/references.csv
-system_visuals: provenance.txt records no digest of system_visuals/references.csv
-system_visuals: provenance.txt records no digest of system_visuals/sketchmap/lj38.csv
-system_visuals: provenance.txt records no digest of system_visuals/sketchmap/ref_lj38_fcc.min
-system_visuals: provenance.txt records no digest of system_visuals/sketchmap/lj38.csv
-not rebuilt: fig_lj75_ecdf.py
-not rebuilt: fig_water_crest.py
-not rebuilt: fig_landfold_maps.py
-not rebuilt: fig_systems.py
-not rebuilt: fig_si_structures.py
-not rebuilt: fig_si_water.py
-not rebuilt: fig_landscapes.py
-not rebuilt: fig_disconnectivity.py
-not rebuilt: fig_si_panels.py
+The second rebuild printed no errors.

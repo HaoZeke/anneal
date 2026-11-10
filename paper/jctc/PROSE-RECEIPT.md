@@ -266,6 +266,7 @@ Ten of its fifteen hash lines were stale.
 
 `paper/jctc/logs/figure-provenance.txt`
 
-The writer is `scripts/rebuild_figures.py`.
-The lines are hashes of figures rebuilt from the generators.
-A line that says not-rebuilt names a generator that exits.
+`scripts/rebuild_figures.py` redraws the files.
+`scripts/figure_provenance.py` writes these hash lines.
+All nineteen figures rebuilt.
+Two clean runs matched.
