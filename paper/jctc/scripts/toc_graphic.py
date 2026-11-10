@@ -8,6 +8,9 @@ No campaign count is printed. From the repository root:
     python3 paper/jctc/scripts/toc_graphic.py
 """
 
+from __future__ import annotations
+
+import sys
 from pathlib import Path
 
 WIDTH = 3.25 * 72
@@ -69,9 +72,12 @@ def pdf(body: bytes) -> bytes:
     return bytes(out)
 
 
-def main() -> None:
-    root = Path(__file__).resolve().parents[1]
-    dest = root / "figs" / "toc-graphic.pdf"
+def main(argv: list[str] | None = None) -> None:
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args:
+        dest = Path(args[0])
+    else:
+        dest = Path(__file__).resolve().parents[1] / "figs" / "toc-graphic.pdf"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(pdf(stream()))
 
