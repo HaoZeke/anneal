@@ -1,0 +1,9 @@
+Hash lines of the two rebuilds are identical.
+
+The three built files are identical.
+
+The pin SOURCE_DATE_EPOCH is 0.
+
+The pin PYTHONHASHSEED is 0.
+
+figstyle.save drops CreationDate, ModDate and Creator.

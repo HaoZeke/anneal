@@ -213,10 +213,20 @@ Copyright (c) anneal developers
 
 ## Author decision
 
-Rohit chose the affiliation text at 15:51, America/Chicago.
-The lines are `manuscript.tex:14` and `si.tex:11`.
-The third line is `cover-letter.tex:8`.
-Each reads `SURF B.V., Amsterdam`.
+Each of the three lines reads `SURF B.V., Amsterdam`.
+Rohit decided that text in the Anneal Paper chat.
+The time was 15:51 on 2026-11-10.
+Each line is cited below.
+
+```
+manuscript.tex:14
+Rohit decided it at 15:51 CST on 2026-11-10 in the Anneal Paper chat.
+si.tex:11
+Rohit decided it at 15:51 CST on 2026-11-10 in the Anneal Paper chat.
+cover-letter.tex:8
+Rohit decided it at 15:51 CST on 2026-11-10 in the Anneal Paper chat.
+```
+
 A checker may still flag `B.V.`.
 That flag stays, because the wording is the author's.
 No checker config is changed.
@@ -248,11 +258,14 @@ The writer is `scripts/hq_sci_tally.py`.
 The hexamer block matches the file in the tree.
 The copper block does not.
 No cuh2 rec log is in this tree.
+The figure archive is a different raw history.
+logs/archive/figure-provenance-v128.txt is that figure archive.
+No committed script wrote it.
+Commit b3546986 added it by hand.
+Ten of its fifteen hash lines were stale.
 
 `paper/jctc/logs/figure-provenance.txt`
 
-`scripts/figure_provenance.py` writes the hash lines.
-
-That output is not the hash lines in the tree.
-Ten tip blobs differ.
-The sentences after those lines are prose.
+The writer is `scripts/rebuild_figures.py`.
+The lines are hashes of figures rebuilt from the generators.
+A line that says not-rebuilt names a generator that exits.

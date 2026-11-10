@@ -1,30 +1,19 @@
-algorithm_stack.pdf tip 3439e28873c74832d5df1f902030e47e06956a5e main 3439e28873c74832d5df1f902030e47e06956a5e equal True
-disconnectivity.pdf tip 046ed52c365d02da45438190b180e27578f9b89b main 046ed52c365d02da45438190b180e27578f9b89b equal True
-landfold_maps.pdf tip e82ff23959d53163235fdc13238ca333fc617095 main e82ff23959d53163235fdc13238ca333fc617095 equal True
-landscapes.pdf tip cdce13a04d28d1807fc3228174eaa2e11d7de063 main cdce13a04d28d1807fc3228174eaa2e11d7de063 equal True
-lj75_ecdf.pdf tip a11495dc3fb93a662db62eeb5fa161d783104cf2 main a11495dc3fb93a662db62eeb5fa161d783104cf2 equal True
-occupancy_landfold.pdf tip c36c8bc7a630f50d1f079a558f110129eed46cc6 main c36c8bc7a630f50d1f079a558f110129eed46cc6 equal True
-occupancy_landfold_lj38.pdf tip e06978880f8370be4ff97416a25800d99625e17e main e06978880f8370be4ff97416a25800d99625e17e equal True
-occupancy_landfold_lj75.pdf tip 728fdc90dbc0d990996eb513c16bf66baad958c9 main 728fdc90dbc0d990996eb513c16bf66baad958c9 equal True
-occupancy_landfold_lj98.pdf tip ec78742a6ef142d2e64d10f646af56798085acbd main ec78742a6ef142d2e64d10f646af56798085acbd equal True
-rec_arms.pdf tip b8777d2c7181e0cc816ec3047f0258c952fd1dee main b8777d2c7181e0cc816ec3047f0258c952fd1dee equal True
-si_structures.pdf tip a4a2d2fd75639bbb4324c61a15efeaed47501c18 main a4a2d2fd75639bbb4324c61a15efeaed47501c18 equal True
-si_water.pdf tip bcb8eac4a8558c63736aae779336c0b533ff5463 main bcb8eac4a8558c63736aae779336c0b533ff5463 equal True
-systems.pdf tip 6e0f848527b4af457294030ec54f13eeeedead5c main 6e0f848527b4af457294030ec54f13eeeedead5c equal True
-toc-graphic.pdf tip e96a9f3ca71e35f7eee0058b16a39231670b68bd main absent equal False
-water_crest.pdf tip 7376d9568a49f9498bf962aaf92738a1e2157031 main 7376d9568a49f9498bf962aaf92738a1e2157031 equal True
-No seed log here records the 192-seed hexamer counts.
-The McNemar values lack that same log.
-No separate receipt here records the LJ map energies.
-A matching main blob has no generator here.
-scripts/toc_graphic.py draws toc-graphic.pdf.
-water_crest.pdf matches the 192-seed figure on main.
-scripts/water_crest_figure.py draws the six-seed counter chart.
-The chart path is figs/water_crest_counters.pdf.
-That script does not write water_crest.pdf.
-lj75_ecdf.pdf matches main.
-landfold_maps.pdf matches main too.
-Neither plate names a generator.
-A seed table for either plate is missing.
-The LJ map energies lack a seed table.
-No seed table covers the McNemar values.
+algorithm_stack.pdf b36aa5e5ba25b1e51e21199ff40b7e6fbd9ef790
+disconnectivity.pdf not-rebuilt
+landfold_maps.pdf not-rebuilt
+landscapes.pdf not-rebuilt
+lj38_landscape.png not-rebuilt
+lj38_sketchmap.png not-rebuilt
+lj75_ecdf.pdf not-rebuilt
+lj75_landscape.png not-rebuilt
+lj98_landscape.png not-rebuilt
+occupancy_landfold.pdf not-rebuilt
+occupancy_landfold_lj38.pdf not-rebuilt
+occupancy_landfold_lj75.pdf not-rebuilt
+occupancy_landfold_lj98.pdf not-rebuilt
+rec_arms.pdf b29eb466d57b7ab74e01d29398e2aff26e0176e5
+si_structures.pdf not-rebuilt
+si_water.pdf not-rebuilt
+systems.pdf not-rebuilt
+toc-graphic.pdf e96a9f3ca71e35f7eee0058b16a39231670b68bd
+water_crest.pdf not-rebuilt
