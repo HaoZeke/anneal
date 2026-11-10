@@ -79,12 +79,12 @@ The panel is LJ38, LJ55, LJ75, and LJ98, with n = 6 seeds at each size. The six 
 
 The floor at each size is the hit count of the current anneal default on these same six seeds. The default is `Config::recommended`, the `recommended` arm of `examples/h2h_seed.rs`. Each size runs at its PAPER_BUDGETS entry: LJ38 line 16 is 400000, LJ55 line 17 is 1000000, LJ75 line 18 is 4000000, and LJ98 line 19 is 4000000. A panel hit is a lowest energy at or below the reference plus 0.001. The references are the Lennard-Jones lines in `examples/h2h_arm3.rs`: LJ38 is -173.928427, LJ55 is -279.248470, LJ75 is -397.492331, and LJ98 is -543.665361. The search stops when the best reaches that line. A miss spends the budget. A count below its floor is a mechanical FAIL.
 
-LJ38 floor: UNFILLED.
-LJ55 floor: UNFILLED.
-LJ75 floor: UNFILLED.
-LJ98 floor: UNFILLED.
+LJ38 floor: 6/6.
+LJ55 floor: 6/6.
+LJ75 floor: 6/6.
+LJ98 floor: 6/6.
 
-No committed file states a six-seed default hit count for these sizes. Counts that are committed use other sample sizes, and this note does not convert them into floors. Those records are src/methods/cluster_hopping/preset.rs lines 20-24, docs/orgmode/architecture.org lines 191-193, and scripts/elja_sota_guard.sh lines 3-8. While a floor is UNFILLED, that size cannot be passed.
+The four floors are the hit counts in the raw logs under panel/, written by write_floors.py. Per-seed energies, calls, and wall times are in floors.md. A count below its floor is a mechanical FAIL.
 
 ## Matched compute
 
