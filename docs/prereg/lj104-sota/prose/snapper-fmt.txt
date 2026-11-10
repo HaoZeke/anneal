@@ -1,6 +1,8 @@
 Copyright (c) anneal developers
 
-command: snapper-fmt
-NOT_RUN
-The command was not on PATH. A search of the usual install
-locations did not find it. No output was produced.
+The command is snapper-fmt -w 72 --color never.
+The eight files each exit 0.
+Stdout has 32062 bytes.
+Stdout matches the concatenated input bytes.
+The sha256 of that stdout follows.
+041c94b2237465caeb0d53b9bd277636c45f065060ce6808bae093d89f45bcb4.

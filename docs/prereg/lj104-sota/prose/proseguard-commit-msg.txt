@@ -1,0 +1,28 @@
+Copyright (c) anneal developers
+
+The command is proseguard -p commit-msg.
+It is run on every commit message.
+The exit code is 127 for each message.
+Stderr is proseguard: command not found.
+Commit b519432afb9cd316687ae11088601b4799816175.
+Commit 88efd07f80b6476c6cfb31b711fbbfca8aceee45.
+Commit 005bd6a340d1396f436adf90d770de958278f020.
+Commit fa8c75a6b66c36fdbb02a6c5cea06185f96782ed.
+Commit 5a4c00306a9fbf1cd3b6de6781b19ae78f7fa9d7.
+Commit 24583692a005eec3527cd20a4cc1e22ecc1d1e2c.
+Commit 8ad608bb6f2a717b2e860f694a3e7c39567af76e.
+Commit b185455047ab8978e97d887a3d290860929ff29f.
+Commit f13ea87479e75a408e1cc8167a1b77ab7a055bfa.
+Commit adf7d96c4a861b66b1e019d93da51e7248464dab.
+Commit 43e517387af2812644fa517182372826af6fb42e.
+Commit adaea980d3e5e59823b76880db9e189b3bdd849b.
+Commit c39f2e58deca7be3f7e0e1cf4bd59056c09a50fb.
+Commit 9556c0b115063606a7b4ba3bfdf28a83f21b3dca.
+Commit 846c4d6ec4c7178b690f08a145175a4b881cc697.
+Commit cf430cd066d6a419e07e351a759f14b3d8f85485.
+Commit 92e0ce714d8f41ede99ba7b708024e496ea9fe13.
+Commit 27d482f0b628703c28462abdc117e2b6892b6b90.
+Commit 6a6e0e5b90155d081953e5b729cd53a20840e1d6.
+Commit a3333a1462ff2a5984486125512a79b5d8c4cf22.
+Commit b52c9ec13dcf45ea6fde6e0211ca5558f75bf91b.
+Commit acd5a78572d913e625ee41db554b5eaeb50796cc.
