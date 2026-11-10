@@ -1,1 +1,12 @@
-proseguard: load profile rohit-paper: profile not found: rohit-paper
+proseguard proseguard 0.1.0
+profile_sha 654d0de1c2632feb93ddfc2f72a08372ad672a8c7cb4a6ad30cca69b2783ddc6
+tip 33fb076679e3fd5266f1ccb74abed3cfdb40ca63
+command proseguard -p <profile> --no-llm paper/jctc/manuscript.tex paper/jctc/si.tex paper/jctc/cover-letter.tex
+output
+paper/jctc/cover-letter.tex:8: [warning] rgoswami.AbbreviationStyle (lexical) 'B.V.' is abbreviation style drift. Use the plain form or spell it out.
+paper/jctc/manuscript.tex:14: [warning] rgoswami.AbbreviationStyle (lexical) 'B.V.' is abbreviation style drift. Use the plain form or spell it out.
+paper/jctc/manuscript.tex:201: [suggestion] rgoswami.TricolonAbuse (lexical) Tricolon (Moral, Doucet, and Jasra). Models default to three. Kill it: keep two items, or put the list in a table.
+paper/jctc/manuscript.tex:318: [suggestion] rgoswami.TricolonAbuse (lexical) Tricolon (Oakley, Johnston, and Wales). Models default to three. Kill it: keep two items, or put the list in a table.
+paper/jctc/manuscript.tex:591: [suggestion] rgoswami.TricolonAbuse (lexical) Tricolon (TuiTui, Snoopy, and Cosmo). Models default to three. Kill it: keep two items, or put the list in a table.
+paper/jctc/si.tex:11: [warning] rgoswami.AbbreviationStyle (lexical) 'B.V.' is abbreviation style drift. Use the plain form or spell it out.
+proseguard: 6 finding(s), 3 actionable
