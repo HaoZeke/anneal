@@ -10,6 +10,24 @@ CLAIMS.md:22: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a '
 NOTES.md:5: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
 NOTES.md:16: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
 NOTES.md:18: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:4: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:5: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:7: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:43: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:45: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:51: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:52: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:53: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:225: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:227: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:239: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:247: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:32: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:54: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:255: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:6: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'was' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:55: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'was' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+PROSE-RECEIPT.md:253: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'were' uses a 'to be' form. Consider restructuring for directness (soft guideline).
 REPLAY.txt:39: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
 REPLAY.txt:296: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
 REPLAY.txt:328: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
@@ -25,9 +43,12 @@ REPLAY.txt:1087: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a
 REPLAY.txt:1089: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
 REPLAY.txt:1095: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
 REPLAY.txt:1097: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+REPLAY.txt:1111: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
 REPLAY.txt:379: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
 REPLAY.txt:485: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
 REPLAY.txt:1091: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+REPLAY.txt:1107: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+REPLAY.txt:1109: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
 REPLAY.txt:9: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'was' uses a 'to be' form. Consider restructuring for directness (soft guideline).
 REPLAY.txt:25: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'was' uses a 'to be' form. Consider restructuring for directness (soft guideline).
 REPLAY.txt:294: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'were' uses a 'to be' form. Consider restructuring for directness (soft guideline).
@@ -52,27 +73,50 @@ REPORT.md:74: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 't
 REPORT.md:76: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
 REPORT.md:78: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
 REPORT.md:80: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+REPORT.md:82: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+REVIEW-NOTES.md:5: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+REVIEW-NOTES.md:15: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+REVIEW-NOTES.md:47: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+REVIEW-NOTES.md:51: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+REVIEW-NOTES.md:53: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+REVIEW-NOTES.md:63: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'is' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+REVIEW-NOTES.md:59: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+REVIEW-NOTES.md:66: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+REVIEW-NOTES.md:68: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'are' uses a 'to be' form. Consider restructuring for directness (soft guideline).
+REVIEW-NOTES.md:3: [suggestion] rgoswami.EPrimeSoft (lexical) E-Prime: 'was' uses a 'to be' form. Consider restructuring for directness (soft guideline).
 CLAIMS.md:1: [suggestion] structure.sentence-length-cv (structure) sentence lengths are too uniform. Kill the rhythm: mix a short sentence with a long one.
 CLAIMS.md:7: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
 NOTES.md:1: [suggestion] structure.sentence-length-cv (structure) sentence lengths are too uniform. Kill the rhythm: mix a short sentence with a long one.
 NOTES.md:6: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
 NOTES.md:12: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
+NOTES.md:22: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
+PROSE-RECEIPT.md:1: [suggestion] structure.sentence-length-cv (structure) sentence lengths are too uniform. Kill the rhythm: mix a short sentence with a long one.
+PROSE-RECEIPT.md:14: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
+PROSE-RECEIPT.md:25: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
+PROSE-RECEIPT.md:53: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
+PROSE-RECEIPT.md:245: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
 REPLAY.txt:24: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
 REPLAY.txt:323: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
 REPLAY.txt:371: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
 REPLAY.txt:386: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
 REPLAY.txt:481: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
 REPLAY.txt:1087: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
+REPLAY.txt:1107: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
 REPORT.md:6: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
 REPORT.md:31: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
 REPORT.md:38: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
 REPORT.md:46: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
 REPORT.md:51: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
 REPORT.md:57: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
+REVIEW-NOTES.md:53: [suggestion] structure.topic-stress-break (structure) topic never picks up the previous stress. Kill it: open on a noun from the last landing.
 CLAIMS.md:12: [suggestion] harper.WordChoice (harper) [WordChoice] 'means' — Insert `to` to complete the infinitive (e.g., `need to talk`). → insert  to
 NOTES.md:11: [suggestion] harper.Capitalization (harper) [Capitalization] 'md' — This word's canonical spelling is all-caps. → MD
 NOTES.md:11: [suggestion] harper.Capitalization (harper) [Capitalization] 'si' — The canonical dictionary spelling is title case: `Si`. → Si
 NOTES.md:11: [suggestion] harper.Capitalization (harper) [Capitalization] 'md' — This word's canonical spelling is all-caps. → MD
+PROSE-RECEIPT.md:21: [suggestion] harper.Grammar (harper) [Grammar] 'both 1e-7' — The word 'both' should not be used before a number.
+PROSE-RECEIPT.md:42: [suggestion] harper.Capitalization (harper) [Capitalization] 'CRediT' — The canonical dictionary spelling is `credit`. → credit
+PROSE-RECEIPT.md:42: [suggestion] harper.Capitalization (harper) [Capitalization] 'paragraph' — This sentence does not start with a capital letter → Paragraph
+PROSE-RECEIPT.md:255: [suggestion] harper.Capitalization (harper) [Capitalization] 'pdf' — This word's canonical spelling is all-caps. → PDF
 REPLAY.txt:43: [suggestion] harper.Capitalization (harper) [Capitalization] 'sha' — This word's canonical spelling is all-caps. → SHA
 REPLAY.txt:43: [suggestion] harper.Capitalization (harper) [Capitalization] 'sha' — This word's canonical spelling is all-caps. → SHA
 REPLAY.txt:294: [suggestion] harper.Punctuation (harper) [Punctuation] 'its' — Use `it's` (short for `it has` or `it is`) here, not the possessive `its`. → it's
@@ -105,4 +149,5 @@ REPORT.md:38: [suggestion] harper.Capitalization (harper) [Capitalization] 'csv'
 REPORT.md:38: [suggestion] harper.Capitalization (harper) [Capitalization] 'fcc' — This word's canonical spelling is all-caps. → FCC
 REPORT.md:44: [suggestion] harper.Capitalization (harper) [Capitalization] 'fcc' — This word's canonical spelling is all-caps. → FCC
 REPORT.md:57: [suggestion] harper.Capitalization (harper) [Capitalization] 'anneal' — This sentence does not start with a capital letter → Anneal
-proseguard: 107 finding(s), 0 actionable
+REVIEW-NOTES.md:3: [suggestion] harper.Style (harper) [Style] 'ref' — An Oxford comma is necessary here. → insert ,
+proseguard: 152 finding(s), 0 actionable
