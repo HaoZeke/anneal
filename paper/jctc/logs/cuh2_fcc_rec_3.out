@@ -1,0 +1,14 @@
+  eindir objective from rgpot cuh2 (engines/librgpot_cuh2.so)
+engine_manifest={"engine_id":"rgpot.cuh2","protocol_family":"rgpot.potentials","protocol":{"major":1,"minor":0},"abi":{"abi_major":1,"abi_minor":0,"layout_revision":1,"objective_size":56,"objective_align":8,"dlpack_major":1,"dlpack_minor":0,"features":3},"build_identity":null}
+examples/fixtures/cuh2_fcc_slab.con: 130 atoms through eindir/rgpot cuh2, 2 free, search recommended, arm nobank, budget 2500, seeds 3..4
+  eval_wall engine=cuh2 repeats=5 mean_us=614
+  seed 3: best -415.971521 eV  hops 494  charged 2500  basins 2  converged 993/994  arm nobank  search recommended
+    quench charged screen/full/check 494/519/993  screens 494  capped 1
+    verify e=-415.971521 |g|_mobile=1.512e-2
+    improve hops=0 charged=23 basins=0 e=-415.97059556
+    improve hops=1 charged=30 basins=0 e=-415.97126673
+    improve hops=2 charged=37 basins=1 e=-415.97145157
+    improve hops=8 charged=69 basins=1 e=-415.97149635
+    improve hops=13 charged=96 basins=1 e=-415.97151935
+    improve hops=15 charged=108 basins=1 e=-415.97152106
+  wrote best_slab_eindir_s3.xyz

@@ -86,15 +86,16 @@ That ref is 12de8866efaaf801853336302f972c5e0faa7966.
 ## Generators
 
 `scripts/hq_sci_tally.py` reads the eight h2o6 rec logs.
-It also reads the eight committed cuh2 logs.
+It also reads the eight rerun logs.
 The hexamer block matches `data/hq_sci_h2o6/TALLY.txt`.
 The copper block matches that file too.
 The regenerated tally sha follows.
 
-d1baa5017bcf5047d60656faa7e5405cdac93b7d90e3cb527a853d3f1d57884f
+ee5cc4f9d39bfa03f4936ea551a7e537f67c03fce6d8007628d5b4a42be40029
 
-The diff command printed no lines.
-`logs/hq-sci-tally-cmp.txt` is that empty diff.
+The new copper energies differ from the archived block.
+`logs/hq-sci-tally-cmp.txt` is the raw diff.
+The paper uses the new energies.
 
 `scripts/rebuild_figures.py` redraws each file in `figs/`.
 It pins `SOURCE_DATE_EPOCH` and `PYTHONHASHSEED` to 0.
@@ -106,26 +107,23 @@ The old hash record is `logs/archive/figure-provenance-v128.txt`.
 Ten of its fifteen lines were stale.
 The new record is `logs/figure-provenance.txt`.
 The copper rec logs are not in that record.
-They are in `data/hq_sci_cuh2/`.
-`TALLY.txt` still has the copper block.
-`scripts/elja_hq_sci_slab.sh` is the committed driver.
-It exits before submit.
-A rerun needs `examples/slab_adsorption`.
-It also needs `engines/librgpot_cuh2.so`.
-It also needs `examples/fixtures/cuh2_fcc_slab.con`.
-The budget is 2500 and the seeds are 0 through 7.
-The stdout names are `cuh2_fcc_rec_0.out` through `cuh2_fcc_rec_7.out`.
-HyperQueue has to accept a work directory off the home filer.
-This machine has no gfortran.
-The rgpot checkout is not here.
-engines/librgpot_cuh2.so is not in the tree.
-CppCore/rgpot/fortran/rgpot_cuh2_capi.f90 is not committed here.
+The archived copper logs are in `data/hq_sci_cuh2/`.
+The rerun logs are
+`logs/cuh2_fcc_rec_0.out` through `logs/cuh2_fcc_rec_7.out`.
+The copper numbers come from the slab runs.
+Commit 4b3a6af3dcb3656ff4fcd579da579370288b3ba6 produced them.
+rgpot develop is 25c759da82eececa8897e4634046fab27409c81a.
+The library sha256 follows.
+
+d399ef1f675e97c1f5e401a987d6a9df1bc30b3a37ba6586044b66d44be8399d
+
+`scripts/elja_hq_sci_slab.sh` still exits before submit.
+`scripts/run_cuh2_fcc_rec.sh` ran the eight seeds.
+The budget is 2500.
 `PROVENANCE.txt` names HaoZeke/simmAnnealTeX.
 The source commit is 311d9bcc28b5401780a69898a16fff25707901ad.
 The source path is rewrite_2026/data/hq_sci_cuh2/.
 `scripts/check_cuh2_blobs.py` recomputes each blob id.
 A read-only fetch of that repo returned repository not found.
 The check has not been run against that commit.
-The eight logs do not name an anneal commit.
-No run record from that commit is in this tree.
-The producing engine is not identified.
+The eight archived logs do not name an anneal commit.
