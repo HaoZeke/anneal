@@ -1,8 +1,12 @@
 start
+script
+scripts/run_cuh2_fcc_rec.sh
+host
+cursor
 boot_id
 8dfa5fef-6e78-4792-b2cb-45d3449a4527
 uptime
- 22:53:48 up 22:09,  0 user,  load average: 0.07, 0.26, 0.60
+ 23:33:40 up 22:39,  0 user,  load average: 6.22, 2.52, 1.26
 cpuinfo_mhz
 2400.000
 2400.000
@@ -71,10 +75,14 @@ Thread model: posix
 Supported LTO compression algorithms: zlib zstd
 gcc version 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 
 end
+script
+scripts/run_cuh2_fcc_rec.sh
+host
+cursor
 boot_id
 8dfa5fef-6e78-4792-b2cb-45d3449a4527
 uptime
- 22:57:05 up 22:13,  0 user,  load average: 2.32, 2.03, 1.30
+ 23:36:05 up 22:42,  0 user,  load average: 16.18, 7.85, 3.42
 cpuinfo_mhz
 2400.000
 2400.000

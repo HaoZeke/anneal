@@ -1,11 +1,11 @@
 # Reproduce
 
-We drew the eighteen figures with the committed generators.
+We drew the nineteen figures with the committed generators.
 Run these from paper/jctc.
 The scripts check chemparseplot 1.11.0.
 They also check xyzrender 0.3.8 and cairosvg 2.9.1.
 
-The driver draws the eighteen figures.
+The driver draws the nineteen figures.
 It also draws the summary-rates figure and the contents graphic.
 
     python3 scripts/render_all.py
@@ -70,3 +70,8 @@ data/results_jcc_c47d301/water_36086e98/crest/SHA256SUMS
 data/results_jcc_c47d301/water_36086e98/crest-polished/SHA256SUMS
 data/results_jcc_c47d301/water_36086e98/default/SHA256SUMS
 ```
+
+The copper slab command is `scripts/run_cuh2_fcc_rec.sh`.
+The budget is 2500.
+The seeds are 0 through 7.
+The host line is the output of `hostname`.

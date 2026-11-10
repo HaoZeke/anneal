@@ -1,7 +1,7 @@
   eindir objective from rgpot cuh2 (engines/librgpot_cuh2.so)
 engine_manifest={"engine_id":"rgpot.cuh2","protocol_family":"rgpot.potentials","protocol":{"major":1,"minor":0},"abi":{"abi_major":1,"abi_minor":0,"layout_revision":1,"objective_size":56,"objective_align":8,"dlpack_major":1,"dlpack_minor":0,"features":3},"build_identity":null}
 examples/fixtures/cuh2_fcc_slab.con: 130 atoms through eindir/rgpot cuh2, 2 free, search recommended, arm nobank, budget 2500, seeds 1..2
-  eval_wall engine=cuh2 repeats=5 mean_us=602
+  eval_wall engine=cuh2 repeats=5 mean_us=1391
   seed 1: best -415.971442 eV  hops 494  charged 2500  basins 2  converged 995/996  arm nobank  search recommended
     quench charged screen/full/check 494/517/995  screens 494  capped 1
     verify e=-415.971442 |g|_mobile=4.489e-2

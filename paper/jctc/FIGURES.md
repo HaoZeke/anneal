@@ -1,6 +1,6 @@
 # Figures
 
-We drew the eighteen figures with the committed generators.
+We drew the nineteen figures with the committed generators.
 Each row names the previous file and the new file.
 The previous file is the one at the v1.16 tip.
 
