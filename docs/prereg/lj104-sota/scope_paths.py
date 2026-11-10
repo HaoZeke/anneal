@@ -50,12 +50,8 @@ def names(root: Path, commit: str, diff_filter: str) -> list[str]:
 
 def main() -> None:
     root = repo_root()
-    commits = [
-        line
-        listed = git(root, "rev-list", "--reverse", f"{BASE}..{TIP}")
-        for line in listed.splitlines()
-        if line
-    ]
+    listed = git(root, "rev-list", "--reverse", f"{BASE}..{TIP}")
+    commits = [line for line in listed.splitlines() if line]
     if len(commits) != 12:
         raise SystemExit(f"expected 12 commits, found {len(commits)}")
     out = [
