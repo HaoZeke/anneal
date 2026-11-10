@@ -430,10 +430,12 @@ pub enum ClusterMove {
     HollowRelocate(HollowRelocate),
     /// Greedy fill of hollow sites as one proposal, the dynamic-lattice sweep.
     HollowFill(HollowFill),
-    /// Energy-ranked exchange onto a vacant lattice site.
+    /// DLS-style exchange kernel.
     ///
-    /// The hop charges the pair sums and draws the site. See
-    /// [`crate::methods::lattice_search::Lattice::propose_energy_exchange`].
+    /// One Boltzmann-weighted exchange of a high-energy atom onto a
+    /// vacant hollow of the current geometry. It is not the published
+    /// dynamic lattice search. The charged draw is
+    /// [`crate::methods::cluster_hopping::energy_lattice_proposal`].
     EnergyLattice,
     /// Rotate the outer shell against the core.
     ShellRotate(ShellRotate),
@@ -1418,7 +1420,7 @@ impl ClusterMove {
             ClusterMove::SurfaceRelocate(_) => "surface".into(),
             ClusterMove::HollowRelocate(_) => "hollow".into(),
             ClusterMove::HollowFill(_) => "fill".into(),
-            ClusterMove::EnergyLattice => "dlattice".into(),
+            ClusterMove::EnergyLattice => "dls-kernel".into(),
             ClusterMove::GroupRelocate { .. } => "gsurface".into(),
             ClusterMove::GroupShake { .. } => "gshake".into(),
             ClusterMove::GroupBurst { .. } => "gburst".into(),
@@ -1677,14 +1679,11 @@ impl ClusterMove {
             ClusterMove::HollowRelocate(k) => k.propose(x, t, rng),
             ClusterMove::HollowFill(k) => k.propose(x, t, rng),
             ClusterMove::EnergyLattice => {
-                let lattice = crate::methods::lattice_search::Lattice::default();
-                let mut scratch = Ledger::new(10_000);
-                let coords = x.to_vec();
-                if let Some(y) = lattice.propose_energy_exchange(&coords, &mut scratch, t, rng) {
-                    Array1::from(y)
-                } else {
-                    x.to_owned()
-                }
+                // The kernel's pair sums are charged on the search ledger.
+                // This arm has no ledger, so it does not evaluate the
+                // potential on a scratch budget.
+                let _ = (t, rng);
+                x.to_owned()
             }
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
             ClusterMove::Symmetrise(k) => k.propose(x, t, rng),

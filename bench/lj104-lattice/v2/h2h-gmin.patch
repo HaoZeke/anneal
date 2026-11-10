@@ -1,0 +1,296 @@
+--- a/source/potential.f90
++++ b/source/potential.f90
+@@ -104,6 +104,7 @@
+    USE PES_SHELL_DP, ONLY: POT_GRAD_DP
+ !yp297> end 
+    USE POWERLAW_MOD, ONLY: POWERLAW
++   USE H2H_CAP, ONLY: H2H_REFUSE
+    IMPLICIT NONE
+    
+ ! gq208> Napshift energy and gradient
+@@ -220,6 +221,12 @@
+ !
+ ! Count the number of potential calls.
+    NPCALL=NPCALL+1
++   IF (H2H_REFUSE(NPCALL)) THEN
++      NPCALL = NPCALL - 1
++      EREAL = 1.0D20
++      IF (GRADT) GRAD(:) = 0.0D0
++      RETURN
++   END IF
+ 10 CONTINUE
+ 
+ ! pp555> shift fractional coordinates into minimum image?
+--- a/source/quench.F90
++++ b/source/quench.F90
+@@ -49,6 +49,7 @@
+       USE BOX_DERIVATIVES, ONLY: CART2FRAC,FRAC2CART,RESTOREMINIMAGE
+       USE THOMSON_MOD, ONLY: THOMSONCTOANG, THOMSONANGTOC
+       USE LAMMPS_INTERFACE_MOD, ONLY: LAMMPS_INIT, LAMMPS_MIN, LAMMPS_CHECKBONDS
++      USE H2H_CAP, ONLY: H2H_ABORT, H2H_NOTE
+       IMPLICIT NONE
+ 
+       INTEGER I, J1, NSQSTEPS, NP, ITER, NOPT, J2, NDUMMY, J5, NUM_ZERO_EVS, HORDER, NMOL, J3, J4, NFRQS   !, IFLAG
+@@ -103,6 +104,7 @@
+ ! and we can test with HYBRIDSWITCH.
+ !
+       HYBRIDSWITCHED=.FALSE.
++      IF (H2H_ABORT()) RETURN
+ 
+ 11    IF (WHICH_POT .EQ. PWELCH .AND. GUIDETOSI) WHICH_POT=PTOSI
+       IF (WHICH_POT .EQ. PPACHECO) AXTELL=.FALSE.
+@@ -798,6 +800,7 @@
+       ENDIF
+ 
+       POTEL=EREAL
++      CALL H2H_NOTE(POTEL)
+ !fh301>{{{ 
+ ! for more effective restraints just compare the CamShift part of the energies
+ !      IF ((CHEMSHIFT2) .AND. (DABS(ENERGYCAMSHIFT).GE.0.0001)) THEN
+--- a/source/mc.F90
++++ b/source/mc.F90
+@@ -58,6 +58,7 @@
+    USE THOMSON_MOD, ONLY: THOMSONCTOANG
+    USE LAMMPS_INTERFACE_MOD, ONLY: LAMMPS_CHECKBONDS, LAMMPS_SCALEBONDS, NLAMMPSBONDS
+    USE MDSTEP_MOD, ONLY : MDSTEP_SUB
++   USE H2H_CAP, ONLY: H2H_ABORT
+    USE GCBHREX_MOD, ONLY : GCBHREX_EXCHANGE
+ #ifdef GMIN_MPI
+    USE MODAMBER9, ONLY : &
+@@ -280,6 +281,9 @@
+ #endif
+       WRITE(MYUNIT, '(A,I10)') 'mc> restore number of previous BH steps=',NDONE
+    ENDIF
++#ifndef GMIN_MPI
++   JP=1
++#endif
+    WRITE(MYUNIT, '(A)') 'mc> ZSYM:'
+    WRITE(MYUNIT, '(20(A2,1X))') ZSYM(1:GCNATOMS,JP)
+ ! csw34> Sets the quench counter so that the GMIN_out file makes sense after using RESTORE
+@@ -419,6 +423,7 @@
+       CALL QUENCH(.FALSE.,JP,ITERATIONS,TIME,QDONE,SCREENC)
+       COMPRESST=SAVECT
+       NQTOT=NQTOT+1
++      IF (H2H_ABORT()) GOTO 37
+ ! write information about quench (we pass POTEL as Markov E, as it is quench 0)
+ !
+ !  If QDONE=1 the quench failed. If GUIDET is still true the energy returned in POTEL is a
+@@ -579,7 +584,7 @@
+    ENDIF
+ 
+ ! check we actually want to enter the basin-hopping loop
+-   IF (HIT.OR.(NSTEPS.EQ.0)) GOTO 37
++   IF (HIT.OR.(NSTEPS.EQ.0).OR.H2H_ABORT()) GOTO 37
+ ! some additional printing
+    IF (NPAR.EQ.1) THEN
+       WRITE(MYUNIT,'(A,I10,A)') ' mc> Starting run of ',NSTEPS,' BH steps'
+@@ -1107,7 +1112,8 @@
+              COMPRESST=.FALSE.
+          ENDIF
+          CALL QUENCH(.FALSE.,JP,ITERATIONS,TIME,QDONE,SCREENC) 
+-         IF (SAVECT) COMPRESST=.TRUE. 
++         IF (SAVECT) COMPRESST=.TRUE.
++         IF (H2H_ABORT()) GOTO 37 
+ !QUERY: should we use SCREENC or COORDS from here on? use COORDS
+ !       SCREENC was never used. Could be removed. DJW 19/11/23
+          NQTOT=NQTOT+1
+--- a/source/mcruns.f90
++++ b/source/mcruns.f90
+@@ -32,6 +32,7 @@
+    USE MC_HELPERS
+    USE MC_MODULE
+    USE FINALIO_MOD
++   USE H2H_CAP, ONLY: H2H_ABORT
+ 
+    IMPLICIT NONE
+ ! Variables
+@@ -140,7 +141,7 @@
+       RELAXFQ = .TRUE.
+       RIGIDINIT = .FALSE.
+    END IF
+-   CALL FINALQ()
++   IF (.NOT. H2H_ABORT()) CALL FINALQ()
+    CALL FINALIO()
+    RETURN
+ 
+--- a/source/main.F90
++++ b/source/main.F90
+@@ -60,6 +60,7 @@
+       USE LAMMPS_INTERFACE_MOD, ONLY: LAMMPS_END, NLAMMPSBONDS
+       USE INTERFACES_EXPORT
+       USE QC1, ONLY: QC_CLEANUP
++      USE H2H_CAP, ONLY: H2H_REPORT
+       IMPLICIT NONE
+       !EXTERNAL READ_CMD_ARGS
+ #ifdef GMIN_MPI
+@@ -959,6 +960,7 @@
+          ENDIF
+       ENDIF
+ 
++      CALL H2H_REPORT()
+       IF (HBONDMATRIX) CALL FINISH_HBONDMATRIX()
+       IF (WHICH_POT .EQ. PLAMMPS) CALL LAMMPS_END(NATOMS)
+       IF (WHICH_POT .EQ. PASE) CALL ASE_END()
+--- a/source/mymylbfgs.F90
++++ b/source/mymylbfgs.F90
+@@ -87,6 +87,7 @@
+                          USEDIPOLARCOUPLING, DC_ENERGY, DC_RMS, FFENERGY_NS, FFRMS_NS, FFENERGY_DC, FFRMS_DC, FFENERGY_NAP_DC, & 
+                          FFRMS_NAP_DC, PRTFRQ
+       USE FINALIO_MOD, ONLY : TIPIO
++      USE H2H_CAP, ONLY: H2H_ABORT
+       USE INTERFACES_EXPORT, ONLY : DFTBP_INIT
+       USE GENRIGID
+       USE MODAMBER9, ONLY : STEEREDMINT, LOCALSTEEREDMINT, SMINK, SMINKINC, SMINKCURRENT
+@@ -285,6 +286,11 @@
+ 
+       QITER=ITER
+       CALL POTENTIAL(XCOORDS,GRAD,ENERGY,.TRUE.,.FALSE.)
++      IF (H2H_ABORT()) THEN
++         MFLAG=.FALSE.
++         IF (ENERGY.GT.1.0D19) ENERGY=1.0D6
++         RETURN
++      END IF
+       IF (BOXDERIVT) THEN
+          BOXG(1:NBOX)=BOXSCALE(1:NBOX)*BOX_PARAMSGRAD(BOX_INDEX(1:NBOX))
+          DUMMY=DDOT_W(N,GRAD,1,GRAD,1)+DDOT_W(NBOX,BOXG,1,BOXG,1)
+@@ -1337,6 +1343,10 @@
+       IF (BOXDERIVT) BOX_GRADSAVE(1:NBOX)=BOX_PARAMSGRAD(BOX_INDEX(1:NBOX))
+       QITER=ITER + 1
+       CALL POTENTIAL(XCOORDS,GNEW,ENEW,.TRUE.,.FALSE.)
++      IF (H2H_ABORT()) THEN
++         MFLAG=.FALSE.
++         RETURN
++      END IF
+ 
+ ! dj337: store new box grad and restore previous box grad
+       IF (BOXDERIVT) THEN
+--- a/source/h2h_cap.f90
++++ b/source/h2h_cap.f90
+@@ -0,0 +1,127 @@
++! Evaluator cap for a counted comparison.
++! One entry to POTENTIAL is one evaluation, the same unit the
++! annealing ledger charges for an energy and gradient pair.
++! The cap is read from the environment. With H2H_BUDGET unset
++! the module stays idle and a normal GMIN run is unchanged.
++MODULE H2H_CAP
++   USE PREC, ONLY: REAL64
++   IMPLICIT NONE
++   INTEGER :: CAP = 0
++   INTEGER :: CALLS = 0
++   LOGICAL :: READY = .FALSE.
++   LOGICAL :: ABORT = .FALSE.
++   LOGICAL :: FOUND = .FALSE.
++   INTEGER :: HIT_CALLS = -1
++   REAL(REAL64) :: TARGET_ENERGY = 0.0D0
++   REAL(REAL64) :: TOL = 1.0D-3
++   LOGICAL :: HAVE_TARGET = .FALSE.
++   REAL(REAL64) :: BEST = 1.0D100
++   INTEGER :: SEED = 0
++   CHARACTER(LEN=16) :: SYSTEM = 'unset'
++   REAL(REAL64) :: T0 = 0.0D0
++CONTAINS
++
++   SUBROUTINE H2H_INIT()
++      CHARACTER(LEN=64) :: BUF
++      INTEGER :: IOS, N
++      INTEGER(KIND=8) :: TICK, RATE
++      READY = .TRUE.
++      CALL GET_ENVIRONMENT_VARIABLE('H2H_BUDGET', BUF, LENGTH=N, STATUS=IOS)
++      IF (IOS == 0 .AND. N > 0) THEN
++         READ(BUF(1:N), *, IOSTAT=IOS) CAP
++         IF (IOS /= 0) CAP = 0
++      END IF
++      CALL GET_ENVIRONMENT_VARIABLE('H2H_TARGET', BUF, LENGTH=N, STATUS=IOS)
++      IF (IOS == 0 .AND. N > 0) THEN
++         READ(BUF(1:N), *, IOSTAT=IOS) TARGET_ENERGY
++         IF (IOS == 0) HAVE_TARGET = .TRUE.
++      END IF
++      CALL GET_ENVIRONMENT_VARIABLE('H2H_TOL', BUF, LENGTH=N, STATUS=IOS)
++      IF (IOS == 0 .AND. N > 0) THEN
++         READ(BUF(1:N), *, IOSTAT=IOS) TOL
++         IF (IOS /= 0) TOL = 1.0D-3
++      END IF
++      CALL GET_ENVIRONMENT_VARIABLE('H2H_SEED', BUF, LENGTH=N, STATUS=IOS)
++      IF (IOS == 0 .AND. N > 0) THEN
++         READ(BUF(1:N), *, IOSTAT=IOS) SEED
++         IF (IOS /= 0) SEED = 0
++      END IF
++      CALL GET_ENVIRONMENT_VARIABLE('H2H_SYSTEM', BUF, LENGTH=N, STATUS=IOS)
++      IF (IOS == 0 .AND. N > 0) THEN
++         SYSTEM = BUF(1:MIN(N, 16))
++      END IF
++      CALL SYSTEM_CLOCK(TICK, RATE)
++      IF (RATE > 0) T0 = REAL(TICK, REAL64) / REAL(RATE, REAL64)
++   END SUBROUTINE H2H_INIT
++
++   LOGICAL FUNCTION H2H_REFUSE(NPCALL)
++      INTEGER, INTENT(IN) :: NPCALL
++      IF (.NOT. READY) CALL H2H_INIT()
++      CALLS = NPCALL
++      H2H_REFUSE = CAP > 0 .AND. NPCALL > CAP
++      IF (H2H_REFUSE) THEN
++         ABORT = .TRUE.
++         CALLS = CAP
++      END IF
++   END FUNCTION H2H_REFUSE
++
++   LOGICAL FUNCTION H2H_ABORT()
++      IF (.NOT. READY) CALL H2H_INIT()
++      H2H_ABORT = ABORT
++   END FUNCTION H2H_ABORT
++
++   SUBROUTINE H2H_NOTE(ENERGY)
++      REAL(REAL64), INTENT(IN) :: ENERGY
++      IF (.NOT. READY) CALL H2H_INIT()
++      IF (ABORT) RETURN
++      IF (.NOT. (ENERGY < 1.0D10)) RETURN
++      IF (ENERGY /= ENERGY) RETURN
++      IF (ENERGY < BEST) BEST = ENERGY
++      IF (HAVE_TARGET .AND. .NOT. FOUND) THEN
++         IF (ENERGY <= TARGET_ENERGY + TOL) THEN
++            FOUND = .TRUE.
++            HIT_CALLS = CALLS
++            ABORT = .TRUE.
++         END IF
++      END IF
++   END SUBROUTINE H2H_NOTE
++
++   SUBROUTINE H2H_REPORT()
++      INTEGER(KIND=8) :: TICK, RATE
++      REAL(REAL64) :: WALL, REPORTED
++      INTEGER :: EVALS, HIT
++      CHARACTER(LEN=320) :: LINE
++      CHARACTER(LEN=256) :: ROWFILE
++      INTEGER :: UNIT, IOS, N
++      IF (.NOT. READY) CALL H2H_INIT()
++      CALL SYSTEM_CLOCK(TICK, RATE)
++      WALL = 0.0D0
++      IF (RATE > 0) WALL = REAL(TICK, REAL64) / REAL(RATE, REAL64) - T0
++      IF (FOUND) THEN
++         HIT = 1
++         EVALS = HIT_CALLS
++      ELSE
++         HIT = 0
++         EVALS = CAP
++         IF (CAP <= 0) EVALS = CALLS
++      END IF
++      IF (BEST > 1.0D99) THEN
++         REPORTED = 0.0D0
++      ELSE
++         REPORTED = BEST
++      END IF
++      WRITE(LINE, '(A,A,A,I0,A,I0,A,I1,A,I0,A,I0,A,G0.12,A,G0.6)') &
++         'h2h_row system=', TRIM(SYSTEM), ' code=gmin seed=', SEED, &
++         ' budget=', CAP, ' hit=', HIT, ' evals_to_hit=', EVALS, &
++         ' charged=', CALLS, ' best=', REPORTED, ' wall_s=', WALL
++      WRITE(*, '(A)') TRIM(LINE)
++      CALL GET_ENVIRONMENT_VARIABLE('H2H_ROW', ROWFILE, LENGTH=N, STATUS=IOS)
++      IF (IOS == 0 .AND. N > 0) THEN
++         OPEN(NEWUNIT=UNIT, FILE=ROWFILE(1:N), STATUS='REPLACE', ACTION='WRITE', IOSTAT=IOS)
++         IF (IOS == 0) THEN
++            WRITE(UNIT, '(A)') TRIM(LINE)
++            CLOSE(UNIT)
++         END IF
++      END IF
++   END SUBROUTINE H2H_REPORT
++END MODULE H2H_CAP
