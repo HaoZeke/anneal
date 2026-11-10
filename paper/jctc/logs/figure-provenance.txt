@@ -13,13 +13,18 @@ si_water.pdf tip bcb8eac4a8558c63736aae779336c0b533ff5463 main bcb8eac4a8558c637
 systems.pdf tip 6e0f848527b4af457294030ec54f13eeeedead5c main 6e0f848527b4af457294030ec54f13eeeedead5c equal True
 toc-graphic.pdf tip e96a9f3ca71e35f7eee0058b16a39231670b68bd main absent equal False
 water_crest.pdf tip 7376d9568a49f9498bf962aaf92738a1e2157031 main 7376d9568a49f9498bf962aaf92738a1e2157031 equal True
-The 192-seed hexamer counts and the McNemar values have no seed log in this tree.
-The LJ map energies in the manuscript have no separate receipt in this tree.
-Figures whose blob equals main have no generator in this tree.
-toc-graphic.pdf is drawn by scripts/toc_graphic.py.
-water_crest.pdf equals main's 192-seed figure.
+No seed log here records the 192-seed hexamer counts.
+The McNemar values lack that same log.
+No separate receipt here records the LJ map energies.
+A matching main blob has no generator here.
+scripts/toc_graphic.py draws toc-graphic.pdf.
+water_crest.pdf matches the 192-seed figure on main.
 scripts/water_crest_figure.py draws the six-seed counter chart.
-That chart is figs/water_crest_counters.pdf.
-It does not write water_crest.pdf.
-lj75_ecdf.pdf and landfold_maps.pdf equal main and have no generator or seed table in this tree.
-The LJ map energies and the 192-seed McNemar values have no seed table in this tree.
+The chart path is figs/water_crest_counters.pdf.
+That script does not write water_crest.pdf.
+lj75_ecdf.pdf matches main.
+landfold_maps.pdf matches main too.
+Neither plate names a generator.
+A seed table for either plate is missing.
+The LJ map energies lack a seed table.
+No seed table covers the McNemar values.
