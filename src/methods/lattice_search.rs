@@ -2326,6 +2326,56 @@ mod tests {
         true
     }
 
+    /// Relabelling must not move a vacant site.
+    ///
+    /// The base merge keeps the first hollow in atom-index order, so
+    /// this assertion fails there. The centroid order passes.
+    #[test]
+    fn vacant_sites_ignore_atom_labels() {
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+        use rand::seq::SliceRandom;
+        let lattice = Lattice::default();
+        let quench = Quench {
+            max_iterations: 40,
+            rms_tolerance: 1.0e-2,
+            ..Quench::default()
+        };
+        for seed in [11_u64, 29, 47] {
+            let n = 38;
+            let cfg = crate::methods::cluster_hopping::Config::for_cluster(n);
+            let mut rng = StdRng::seed_from_u64(seed);
+            let start = crate::methods::cluster_hopping::random_cluster_in_radius(
+                n,
+                cfg.start_radius(),
+                cfg.min_separation,
+                &mut rng,
+            );
+            let mut ledger = Ledger::new(40_000);
+            let relaxed = quench
+                .relax(&mut ledger, start.as_slice().unwrap())
+                .expect("quench");
+            let state = relaxed.state;
+            let sites = lattice.sites(&state);
+            assert!(!sites.is_empty(), "a packed cluster has a vacant site");
+            let mut orders = vec![(0..n).rev().collect::<Vec<_>>()];
+            let mut rotated: Vec<usize> = (0..n).collect();
+            rotated.rotate_left(n / 3);
+            orders.push(rotated);
+            let mut shuffled: Vec<usize> = (0..n).collect();
+            shuffled.shuffle(&mut StdRng::seed_from_u64(5));
+            orders.push(shuffled);
+            for order in orders {
+                let moved = relabel(&state, &order);
+                let sites_b = lattice.sites(&moved);
+                assert!(
+                    same_points(&sites, &sites_b),
+                    "vacant sites moved under a relabelling"
+                );
+            }
+        }
+    }
+
     /// Relabelling a minimum must not move a vacant site or a draw.
     #[test]
     fn vacant_sites_and_move_probabilities_ignore_labels() {
