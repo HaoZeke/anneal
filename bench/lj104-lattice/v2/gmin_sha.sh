@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) anneal developers
 # Receipt of the GMIN executable, written before a scored run.
 #
 # Usage: gmin_sha.sh BINARY RECEIPT
