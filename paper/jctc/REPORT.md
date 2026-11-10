@@ -111,12 +111,10 @@ The archived copper logs are in `data/hq_sci_cuh2/`.
 The rerun logs are
 `logs/cuh2_fcc_rec_0.out` through `logs/cuh2_fcc_rec_7.out`.
 The copper numbers come from the slab runs.
-Commit 4b3a6af3dcb3656ff4fcd579da579370288b3ba6 produced them.
-The library is rgpot develop 25c759da, unpinned.
-The full develop sha follows.
-
-25c759da82eececa8897e4634046fab27409c81a
-
+Commit aef5cf0b2068c4988509066a881eb68682ad9290 produced them.
+rustc -V reports rustc 1.88.0.
+That is the Cargo.toml rust-version pin.
+The library pins rgpot 25c759da82eececa8897e4634046fab27409c81a.
 The library sha256 follows.
 
 d399ef1f675e97c1f5e401a987d6a9df1bc30b3a37ba6586044b66d44be8399d
@@ -134,34 +132,21 @@ The eight archived logs do not name an anneal commit.
 
 ## Hit rule
 
-The hit rule is `HIT_ABOVE_EV = 0.01`.
-The file is `paper/jctc/scripts/hq_sci_tally.py`.
-The line is 15.
-The commit is 6bb3a27714fe993428c7b3857898a80db09daa1a.
-
-That commit is older than T.
-
-A finite best within 0.01 eV of the lowest finite best is a hit.
-
-Copper and the hexamer share that test.
-No other copper hit test is in the paper.
-Every archived row has best=-415.971529 and hit=True.
-Those best tokens match the archived logs.
-The eight archived bests are equal.
-The 0.01 rule therefore counts each archived seed as a hit.
+A copper hit is a best below -415.971529 eV plus 0.001 eV.
 Line 79 of `scripts/elja_jcc_molslab_ensemble.sh` sets that target.
 Line 118 of `scripts/elja_hq_sci_molslab_bank.sh` sets it too.
 Commit a8f1092fc8d6937b34e34a18bc50394a559ca9f3 names that energy.
 It is the start energy of the slab con file.
+The tolerance is `TARGET_TOLERANCE` and `TARGET_TOL` in those scripts.
+The pinned rerun count against that reference is 8/8.
+The set_relative_0.01 line records the 0.01 eV rate.
+That line is a separate figure.
+The hexamer block still uses the 0.01 eV test.
 
 ## Rerun energies
 
 The rerun best energies run from -415.971521 eV to -415.971161 eV.
-The library is rgpot develop 25c759da, unpinned.
-The full develop sha follows.
-
-25c759da82eececa8897e4634046fab27409c81a
-
+The library pins rgpot 25c759da82eececa8897e4634046fab27409c81a.
 The library sha256 follows.
 
 d399ef1f675e97c1f5e401a987d6a9df1bc30b3a37ba6586044b66d44be8399d
@@ -170,16 +155,13 @@ d399ef1f675e97c1f5e401a987d6a9df1bc30b3a37ba6586044b66d44be8399d
 
 `logs/cuh2-hardware-receipt.txt` records the start and the end.
 Each side has boot_id, uptime, cpuinfo MHz and lscpu.
-The version lines are the raw output of `rustc +stable -V`.
-They also include `cargo +stable -V` and `gfortran --version`.
-One commit follows T.
+The version lines are the raw output of `rustc -V` and `cargo -V`.
+They also include `gfortran -v`.
+rustc -V reports rustc 1.88.0.
+cargo -V reports cargo 1.88.0.
+The receipt commit's parent is T.
 
-That commit is ddff310656465cab7a9ddc0779c1832ba2582cec.
-
-Its parent is T.
-
-Its diff has no script and no Rust file.
-The tree check passes.
+T is aef5cf0b2068c4988509066a881eb68682ad9290.
 
 ## Closed items
 
