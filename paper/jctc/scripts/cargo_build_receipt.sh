@@ -1,7 +1,8 @@
 #!/bin/sh
+# Copyright (c) anneal developers
 # Writes paper/jctc/logs/cargo-build-receipt.txt
 # vesin-nl needs the CI checkout of vesin at .ci/vesin.
-# ira, lammps, and gpr need libraries this machine does not have.
+# ira, lammps and gpr are built on their own so each error is recorded.
 set -eu
 out=${1:-paper/jctc/logs/cargo-build-receipt.txt}
 mkdir -p "$(dirname "$out")" .ci
@@ -31,9 +32,11 @@ others=graphkey,featomic,vesin-nl,bank-rpc,history-nng,rgsaddle,capi,python,rgpo
   all_status=$?
   printf 'EXIT:%s\n' "$all_status"
   if [ "$all_status" -ne 0 ]; then
-    printf 'ira needs IRA_LIB_DIR and libira, which are absent\n'
-    printf 'lammps needs LAMMPS_LIB_DIR and liblammps, which are absent\n'
-    printf 'gpr needs GPR_OPTIM_LIB_DIR and libgpr_optim, which are absent\n'
+    for feat in ira lammps gpr; do
+      printf 'command cargo +stable build --features %s --locked\n' "$feat"
+      cargo +stable build --features "$feat" --locked
+      printf 'EXIT:%s\n' "$?"
+    done
     printf 'command cargo +stable build --all-targets --features %s --locked\n' "$others"
     cargo +stable build --all-targets --features "$others" --locked
     printf 'EXIT:%s\n' "$?"
