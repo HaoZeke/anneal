@@ -1,21 +1,37 @@
 Copyright (c) anneal developers
 
-The commit subjects were longer than 72 columns and did not carry
-a scope. Rewriting them changes history, so this is one replay.
+This replay is one git commit-tree pass.
+There is no sleep.
+GIT_AUTHOR_DATE is not set.
+GIT_COMMITTER_DATE is not set.
+The seconds are the ones git writes.
+A commit may share its parent's second.
+None is earlier than its parent.
+Shared seconds are real.
 
-The archived tip is refs/archive/prereg/lj104-sota-v1.3 at
-835b90741211f2fd00b5b9ea68cde4cc877b31af. The replay keeps that
-history reachable. Each new commit uses the old commit's tree, a
-subject of at most 72 columns that starts with lj104-prereg, and a
-real -0600 clock time. Author and committer are Rohit Goswami
-<rgoswami@ieee.org>. The commits are unsigned. No two of them share
-a second, and none falls on second :00.
+These dates replace the archived author dates.
+The archived history stays reachable.
+refs/archive/prereg/lj104-sota-v1.3 follows.
+835b90741211f2fd00b5b9ea68cde4cc877b31af.
+refs/archive/prereg/lj104-sota-v1.3.1 follows.
+6cde8551b2791cc33b1060311dd334a04d3d1042.
 
-The five commits that add no file are in the map: c9bac09f,
-45139a21, 54818da1, d77d8eb5, and cc0587fa. Their new subjects name
-the pre-registration scope. replay-map.tsv is the old-to-new map.
+The clock zone is America/Chicago.
+The offset git writes is -0600.
+Author and committer are Rohit Goswami.
+The email is rgoswami@ieee.org.
+The commits are unsigned.
+
+Each new commit uses the archived commit's tree.
+The subject starts with lj104-prereg.
+The receipt subject is at most 52 columns.
+The other subjects are at most 72 columns.
+replay-map.tsv is the old-to-new map.
 TREE_EQUAL.txt records that each pair of trees is the same object.
+replay_commit_tree.py is the pass.
+replay-commit-tree.log is the raw log of that pass.
 
-The predictions, the McNemar table, the seed sets, and the
-thresholds are the blobs from the archived history. This replay
-does not edit them.
+The predictions are archived blobs.
+The McNemar table and the seed sets are archived blobs.
+The thresholds are archived blobs too.
+This replay does not edit them.
