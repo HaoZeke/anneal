@@ -236,6 +236,9 @@ Global-minimum hits named above stay at 0.
 The icosahedral, Cs count named above stays 1 of 6.
 ```
 
+The corrected v4.6 row scripts/lj104_v4_prediction.txt reads 9c18b867.
+python3 -B scripts/lj104_sha_map.py --check reads that row.
+
 ```
 299ce4ae replaces 20e03ec6 and keeps tree 826c4ba6
 5fe9cb78 replaces 266de4a9 and adds the second trace emitter at cluster_hopping.rs:2774, the packing test at cluster_hopping.rs:5944, and the tighter tests
