@@ -28,7 +28,8 @@ def load(logdir, cut):
     rows = []
     for seed in range(3000, 3030):
         log = (logdir / cut / f"{seed}.log").read_text()
-        quench = (logdir.parent / "requench" / f"{cut}-{seed}.txt").read_text()
+        quench_path = logdir.parent / "requench" / f"{cut}-{seed}.txt"
+        quench = quench_path.read_text()
         energy = float(grab(quench, r"^energy:\s*(\S+)"))
         rows.append(
             {
@@ -78,7 +79,10 @@ def main():
     uniform = load(logdir, "uniform")
     write_cut(outdir / "lowest-index.tsv", lowest)
     write_cut(outdir / "uniform.tsv", uniform)
-    lines = ["seed\tlowest_hit\tlowest_charged\tuniform_hit\tuniform_charged\n"]
+    lines = [
+        "seed\tlowest_hit\tlowest_charged\t"
+        "uniform_hit\tuniform_charged\n"
+    ]
     for left, right in zip(lowest, uniform):
         lines.append(
             f"{left['seed']}\t{left['hit']}\t{left['charged']}\t"
