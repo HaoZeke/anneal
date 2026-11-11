@@ -92,8 +92,15 @@ def run_bonobo(
     reference: float,
     upstream: Path,
     log: Path,
+    population: int | None,
+    max_iter: int | None,
 ) -> dict:
     work = log.parent
+    env = os.environ.copy()
+    if population:
+        env["LJ_BONOBO_POPULATION"] = str(population)
+    if max_iter:
+        env["LJ_BONOBO_MAX_ITER"] = str(max_iter)
     proc = subprocess.run(
         [
             str(python),
@@ -108,6 +115,7 @@ def run_bonobo(
         check=False,
         capture_output=True,
         text=True,
+        env=env,
     )
     log.write_text(proc.stdout + "\n" + proc.stderr)
     lines = [line for line in proc.stdout.splitlines() if line.startswith("arm=")]
@@ -195,6 +203,9 @@ def main() -> int:
     parser.add_argument("--seed", type=int, action="append")
     parser.add_argument("--arm", choices=("lean", "bonobo", "both"), default="both")
     parser.add_argument("--budget", type=int, default=RELAXATION_BUDGET)
+    parser.add_argument("--population", type=int)
+    parser.add_argument("--max-iter", type=int)
+    parser.add_argument("--seeds-out", type=Path)
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--upstream", type=Path, required=True)
@@ -229,6 +240,8 @@ def main() -> int:
                         reference,
                         args.upstream,
                         log,
+                        args.population,
+                        args.max_iter,
                     )
                 rows.append(row)
                 print(
@@ -238,11 +251,18 @@ def main() -> int:
                     flush=True,
                 )
     text = summarise(rows, args.budget)
+    if args.population or args.max_iter:
+        text = (
+            f"# population\t{args.population or ''}\n"
+            f"# max_iter\t{args.max_iter or ''}\n"
+            + text
+        )
     sys.stdout.write(text)
-    if full and args.summary:
+    if args.summary and (full or args.seeds_out):
         args.summary.parent.mkdir(parents=True, exist_ok=True)
         args.summary.write_text(text)
-        args.summary.with_name("seeds.tsv").write_text(seed_table(rows))
+        seeds_path = args.seeds_out or args.summary.with_name("seeds.tsv")
+        seeds_path.write_text(seed_table(rows))
     return 0
 
 

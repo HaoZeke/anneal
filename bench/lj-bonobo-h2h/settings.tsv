@@ -1,0 +1,12 @@
+# Settings named in Chakraborty and Anoop, ChemRxiv 10.26434/chemrxiv.15004614 (11 June 2026),
+# the preprint of J. Comput. Chem. 47, e70484 (2026). The released bo.py is the other column.
+# The first head-to-head used the code defaults and a 2000-relaxation cap.
+setting	paper	released_code	first_head_to_head	rerun
+population	20	N=20 in the generation loop	N=20, but all pyar-tabu files were relaxed first (100)	20
+lj38_iterations	1500 for the LJ38 run without the initialiser; the 20/20 and 25/25 sentences do not give a second cap	max_iter=10000 in the example	about 95 generations inside a 2000-relaxation cap	1500
+relaxation	L-BFGS-B on the analytic Lennard-Jones gradient	L-BFGS-B, maxiter 5000	same function, flattened so all atoms are relaxed	same
+success	a run that reaches the reference global minimum	stop when best_cost < gm_energy	Cambridge energy + 1e-4, and the force maximum under 1e-3	same window
+initialiser	pyar-tabu --make-composite -N (n-1) --distance-scaling 1.5	that command in initial_pop.py	same command; the X atom is written as C	same, and only 20 of the files are kept
+similarity	sorted Coulomb-matrix eigenvalues, Euclidean cutoff	sim_threshold=1	their function	their function
+pxgm_scab_scsb_rcpp_tsgs	varied about the code values; every tested LJ38 case still converged	0.035, 1.3, 1.25, 0.0035, 0.05	those defaults	those defaults
+bounds	the configured box	half-width 3.5	half-width 3.5, length 3N	same

@@ -42,7 +42,9 @@ cp -a "$BONOBO_SRC/bo.py" "$BONOBO_SRC/lbfgs_opt.py" "$BONOBO_SRC/lj.py" \
   "$BONOBO_SRC/make_valid_geom.py" "$BONOBO_SRC/similarity.py" \
   "$BONOBO_SRC/write_traj.py" "$BONOBO_SRC/read_xyz_files.py" \
   "$WORK/upstream/bonobo/"
-cp -a "$HERE/bonobo_arm.py" "$HERE/run_campaign.py" "$HERE/pyar_tabu_seed.py" "$WORK/bin/"
+cp -a "$HERE/bonobo_arm.py" "$HERE/run_campaign.py" "$HERE/pyar_tabu_seed.py" \
+  "$HERE/faithful_rerun.sh" "$WORK/bin/"
+chmod +x "$WORK/bin/faithful_rerun.sh"
 cp -a "$BINARY" "$WORK/bin/lj_lean_relax_budget"
 cat > "$WORK/bin/pyar-tabu" << EOF
 #!/bin/bash
@@ -70,6 +72,9 @@ export OMP_PROC_BIND=TRUE
 export OMP_PLACES=cores
 export RAYON_NUM_THREADS=1
 cd $WORK
+if [ "\${1:-}" = "--faithful" ]; then
+  exec bash $WORK/bin/faithful_rerun.sh
+fi
 exec $WORK/venv/bin/python -u $WORK/bin/run_campaign.py \\
   --fixture $ROOT/bench/lj-bonobo-h2h/cambridge_lj.tsv \\
   --binary $WORK/bin/lj_lean_relax_budget \\
