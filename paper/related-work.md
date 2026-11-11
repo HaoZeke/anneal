@@ -149,3 +149,11 @@ Amore and Wales, arXiv:2610.08122 (6 October 2026), search low-energy minima for
 The manuscript keeps one move library at every Lennard-Jones size and does not install a lattice template that already names the minimum. This paper propagates known structures from one size to the next. The potential is the Thomson problem, not Lennard-Jones, so the new energies do not contradict the Cambridge hit targets or the sealed maps.
 
 Cite `amoreThomson2026`. Do not put the Thomson energies in the Lennard-Jones table.
+
+## 2026-11-11 — A GFN2-xTB reference set is not the low-energy set
+
+Vahediahmar, Zweig, Zhang, and Azizi, arXiv:2610.12523 (8 October 2026), ask whether the GEOM-DRUGS reference ensemble is complete on the GFN2-xTB surface used to build it. After screening, 2.3 to 7.0 percent of conformers from five generators remain outside the 0.75 Å reference radius. On 15 percent of molecules, with an interval from 8 to 22 percent, some generator finds an intact structure below the entire released ensemble. A complementary CREST search matches the released minimum for 65 of 69 molecules, and for 11 of those 69 it lies more than 0.5 kcal/mol below the whole released ensemble.
+
+The manuscript scores the hexamer by an IRA match to a prism, cage, book, or chair reoptimised at GFN2-xTB, and it compares polished energies with CREST 3.0.2. This preprint does not treat the water hexamer, so it does not contradict 121 of 192, 97 of 192, or the six polished gaps. It does contradict any reading in which a CREST ensemble, or a GFN2-xTB reference set, is the complete low-energy answer.
+
+Cite `vahediahmarGeomDrugs2026` beside the CREST section. Keep the hexamer result as a motif hit rate and a polished gap.
