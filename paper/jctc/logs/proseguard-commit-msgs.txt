@@ -1,3 +1,3 @@
-/tmp/commit-msgs.txt:33: [error] rgoswami.ReviewRegister (lexical) 'shipped' is a review-grading register tell (academic, sports, LinkedIn, or AI-grader). Rewrite plain.
+/tmp/commit-msgs.txt:27: [error] rgoswami.ReviewRegister (lexical) 'shipped' is a review-grading register tell (academic, sports, LinkedIn, or AI-grader). Rewrite plain.
 /tmp/commit-msgs.txt:1: [error] voice.WeRate (voice) we-rate 0.000 outside 0.09 ± 0.08 (zone None)
 proseguard: 2 finding(s), 2 actionable
