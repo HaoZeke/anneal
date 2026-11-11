@@ -44,3 +44,7 @@ That path is the GitHub runner disk cleanup.
 scripts/elja_floor_exit.sbatch refuses /users/home/*.
 
 That arm keeps the job off the home filer.
+
+Rohit ruled that coverage and mutants are out of scope.
+
+This seal follows that ruling.
