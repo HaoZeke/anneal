@@ -2,7 +2,7 @@ Copyright (c) anneal developers
 
 We read every commit after 91b15a02 through the tip.
 The tip identifier follows.
-873dfc35642bf5d30d40229dc1409a7d2c84fef6.
+1cc23a157803a1570d5c01468d9089eb77962f3f.
 Git supplies each subject and each path.
 diff-tree uses A for an addition.
 The same command uses M for a modification.
@@ -711,6 +711,25 @@ docs/prereg/lj104-sota/TREE_DIFF_STAT.txt
 
 Commit 873dfc35642bf5d30d40229dc1409a7d2c84fef6
 Subject: lj104-prereg: keep the bundle note stable across note commits
+Adds no path.
+Modifies 1 path.
+docs/prereg/lj104-sota/write_bundle_verify.py
+
+Commit d60374956c4700fa0ed4a08cc07d9374b01ff599
+Subject: lj104-prereg: name the content tip in the scope and bundle notes
+Adds no path.
+Modifies 2 paths.
+docs/prereg/lj104-sota/SCOPE.md
+docs/prereg/lj104-sota/bundle-verify.txt
+
+Commit 70b58966e2e395e699fffc814f8e493a104d240b
+Subject: lj104-prereg: refresh the diff stat after the note commits
+Adds no path.
+Modifies 1 path.
+docs/prereg/lj104-sota/TREE_DIFF_STAT.txt
+
+Commit 1cc23a157803a1570d5c01468d9089eb77962f3f
+Subject: lj104-prereg: end the verify status as a sentence
 Adds no path.
 Modifies 1 path.
 docs/prereg/lj104-sota/write_bundle_verify.py
