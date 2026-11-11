@@ -68,8 +68,13 @@ def main() -> None:
     for line in lines:
         parts = line.split()
         if len(parts) == 2 and len(parts[0]) == 40 and parts[1].startswith("refs/"):
+            obj = parts[0]
+            # The live branch moves when a generated note is committed.
+            # Record the content tip so a re-run stays byte-identical.
+            if parts[1] == "refs/heads/prereg/lj104-sota-v1":
+                obj = tip
             formatted.append(f"Ref {parts[1]}.")
-            formatted.append(f"Object {parts[0]}.")
+            formatted.append(f"Object {obj}.")
             continue
         if not line.endswith("."):
             line = line + "."
