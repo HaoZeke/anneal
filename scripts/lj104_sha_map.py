@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Rewrite logs/sha-map.tsv from the kit files, then check every row.
+# Copyright (c) anneal developers
+# SPDX-License-Identifier: MIT
+"""Check logs/sha-map.tsv, or rewrite it when asked.
 
-A row whose two digests are equal is refreshed from the file.
-A row whose digests differ keeps the earlier raw digest.
-The check fails unless each redacted digest matches the file,
-the SUMS line, and the tip blob when the path is in the tip.
+--check reads the existing map and does not write.
+It compares every row with the file, the SHA256SUMS line, and the tip blob.
+A mismatch is named and the process exits non-zero.
+--refresh is the only mode that rewrites the map.
+A git error is fatal. A path that is absent from the tip is not a git error.
 """
 
 import hashlib
@@ -52,23 +55,41 @@ def read_sums(path: Path):
     return found
 
 
-def tip_digest(repo: Path, name: str):
-    probe = subprocess.run(
-        ["git", "cat-file", "-e", f"HEAD:{name}"],
-        cwd=repo,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    if probe.returncode != 0:
-        return None
-    show = subprocess.run(
-        ["git", "show", f"HEAD:{name}"],
+def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    cmd = ["git", "-c", f"safe.directory={repo.resolve()}", *args]
+    return subprocess.run(
+        cmd,
         cwd=repo,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        check=True,
     )
-    return hashlib.sha256(show.stdout).hexdigest()
+
+
+def git_fatal(result: subprocess.CompletedProcess, what: str) -> None:
+    if result.returncode == 0:
+        return
+    sys.stderr.buffer.write(result.stderr)
+    print(f"git {what} failed", file=sys.stderr)
+    print(
+        "If the repo is reached through a store mount, "
+        "run git with -c safe.directory=<repo> for that call.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
+def require_head(repo: Path) -> None:
+    git_fatal(git(repo, "rev-parse", "--verify", "HEAD"), "rev-parse")
+
+
+def tip_digest(repo: Path, name: str):
+    listed = git(repo, "ls-tree", "HEAD", "--", name)
+    git_fatal(listed, "ls-tree")
+    if not listed.stdout.strip():
+        return None
+    shown = git(repo, "show", f"HEAD:{name}")
+    git_fatal(shown, "show")
+    return hashlib.sha256(shown.stdout).hexdigest()
 
 
 def refresh(kit: Path) -> None:
@@ -88,6 +109,7 @@ def refresh(kit: Path) -> None:
 
 
 def check(kit: Path, repo: Path) -> int:
+    require_head(repo)
     map_path = kit / "logs" / "sha-map.tsv"
     sums = read_sums(kit / "SHA256SUMS")
     _header, rows = read_map(map_path)
@@ -114,13 +136,17 @@ def check(kit: Path, repo: Path) -> int:
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        print("usage: lj104_sha_map.py <kit> <repo>", file=sys.stderr)
+    if len(sys.argv) != 4 or sys.argv[1] not in ("--check", "--refresh"):
+        print("usage: lj104_sha_map.py --check <kit> <repo>", file=sys.stderr)
+        print("       lj104_sha_map.py --refresh <kit> <repo>", file=sys.stderr)
         return 2
-    kit = Path(sys.argv[1])
-    repo = Path(sys.argv[2])
+    mode = sys.argv[1]
+    kit = Path(sys.argv[2])
+    repo = Path(sys.argv[3])
+    if mode == "--check":
+        return check(kit, repo)
     refresh(kit)
-    return check(kit, repo)
+    return 0
 
 
 if __name__ == "__main__":
