@@ -88,3 +88,11 @@ The manuscript's water clusters are TIP4P, with the Wales--Hodges minima as the 
 
 Cite `giriAimnetClusters2025`. A head-to-head counts only if both sides relax on the same potential. No TIP4P or GFN2 energy is contradicted.
 
+## 2026-11-11 — Complementary energy landscapes
+
+Slavensky, Christiansen, and Hammer, Journal of Chemical Physics 159, 024123 (2023), doi:10.1063/5.0156218, propose candidates by relaxing them on a deliberately incomplete machine-learned landscape, then returning to the true surface. They report a new global minimum of the olivine cluster (Mg2SiO4)4, and a test on reduced rutile SnO2(110).
+
+The manuscript's moves are geometric: a surface penalty and Thompson sampling on quench depth, not a surrogate landscape. This paper does not report a Lennard-Jones or water-hexamer energy, so it does not contradict those claims.
+
+Cite `slavenskyComplementary2023` as the AGOX candidate generator. No change to the preset.
+
