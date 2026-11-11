@@ -1,0 +1,921 @@
+===== NOTES.md =====
+Two-million evaluation reproduction, on the same engine.
+
+Seeds 2000 through 2005 are deterministic.
+v4.2 already recorded their outcome.
+This rerun is not a blind test.
+
+The receipt head follows.
+f724a4c413f0460d1b6551f883da9ae3664e6330.
+The receipt tree follows.
+7af429c6270ec5c00d3b6536fbaefeb03563e1ac.
+The binary digest follows.
+The binary printed head f724a4c413f0460d1b6551f883da9ae3664e6330.
+2b07c440a23ec5c5ba0db4df4efecd4494963f590958ca07482f8994c433659e.
+The arm opened at 14:41:04 and closed at 14:57:28.
+
+Global-minimum outcomes on the six seeds: none.
+The best was -581.80 against -582.0866.
+The global-minimum count is 0 of 6.
+Seed 2000 opened at 14:41:04 and closed at 14:44:01.
+Its best energy is -580.42126629.
+Seed 2001 opened at 14:44:01 and closed at 14:46:46.
+Its best energy is -580.42126629.
+Seed 2002 opened at 14:46:46 and closed at 14:49:27.
+Its best energy is -578.60157826.
+Seed 2003 opened at 14:49:27 and closed at 14:52:09.
+Its best energy is -580.42126629.
+Seed 2004 opened at 14:52:09 and closed at 14:54:50.
+Its best energy is -578.60157826.
+Seed 2005 opened at 14:54:50 and closed at 14:57:28.
+Its best energy is -581.80180238.
+
+Each seed ran alone on processor 0.
+The receipt field pins reads 0.
+uname -n reads bench.
+===== REPRODUCE.md =====
+The measured arm reruns seeds 2000 through 2005, one seed at a time.
+
+The engine is commit f724a4c413f0 and tree 7af429c6270e.
+Engine commit f724a4c413f0460d1b6551f883da9ae3664e6330.
+Engine tree 7af429c6270ec5c00d3b6536fbaefeb03563e1ac.
+The binary digest follows.
+2b07c440a23ec5c5ba0db4df4efecd4494963f590958ca07482f8994c433659e.
+
+The receipt script opens one private mount namespace.
+It also opens one hostname namespace.
+That namespace sets the nodename.
+A private file that reads bench is mounted on the hostname file.
+The host copy of the hostname file is left untouched.
+Each receipt records uname -n and the hash of that hostname file.
+The binary digest is taken before the first seed.
+taskset selects processor 0.
+The budget is 2000000 evaluations.
+===== PROGRESS.md =====
+Phase: two-million reproduction finished.
+
+No push.
+Archive refs are never pushed.
+The push plan lists only refs/heads/fix/lj104-measure-v4.13.
+
+Engine commit f724a4c413f0460d1b6551f883da9ae3664e6330.
+
+Engine tree 7af429c6270ec5c00d3b6536fbaefeb03563e1ac.
+The binary digest follows.
+2b07c440a23ec5c5ba0db4df4efecd4494963f590958ca07482f8994c433659e.
+The arm opened at 14:41:04 and closed at 14:57:28.
+
+Jobs left running: none.
+
+Seeds 2000 through 2005 each returned exit 0.
+Each seed ran alone on processor 0.
+The global-minimum count is 0 of 6.
+===== REPORT.md =====
+# LJ104 measure v4.11
+
+The global-minimum count is 0 of 6.
+The best was -581.80 against -582.0866.
+
+The timed commit is f724a4c413f0460d1b6551f883da9ae3664e6330.
+Its tree is 7af429c6270ec5c00d3b6536fbaefeb03563e1ac.
+The arm opened at 14:41:04 and closed at 14:57:28.
+
+proseguard was not run.
+NOT_RUN.
+
+The program is not installed.
+The prose-human profile on the public dotfiles is age-encrypted.
+
+The tree check transcript follows.
+
+```
+producer=python3 -B scripts/lj104_tree_check.py
+receipt_root=logs/budget
+timed=f724a4c413f0460d1b6551f883da9ae3664e6330
+timed_tree=7af429c6270ec5c00d3b6536fbaefeb03563e1ac
+receipt logs/budget/2000/receipt.log
+receipt_head=f724a4c413f0460d1b6551f883da9ae3664e6330
+receipt_tree=7af429c6270ec5c00d3b6536fbaefeb03563e1ac
+head_match=yes
+tree_match=yes
+receipt logs/budget/2001/receipt.log
+receipt_head=f724a4c413f0460d1b6551f883da9ae3664e6330
+receipt_tree=7af429c6270ec5c00d3b6536fbaefeb03563e1ac
+head_match=yes
+tree_match=yes
+receipt logs/budget/2002/receipt.log
+receipt_head=f724a4c413f0460d1b6551f883da9ae3664e6330
+receipt_tree=7af429c6270ec5c00d3b6536fbaefeb03563e1ac
+head_match=yes
+tree_match=yes
+receipt logs/budget/2003/receipt.log
+receipt_head=f724a4c413f0460d1b6551f883da9ae3664e6330
+receipt_tree=7af429c6270ec5c00d3b6536fbaefeb03563e1ac
+head_match=yes
+tree_match=yes
+receipt logs/budget/2004/receipt.log
+receipt_head=f724a4c413f0460d1b6551f883da9ae3664e6330
+receipt_tree=7af429c6270ec5c00d3b6536fbaefeb03563e1ac
+head_match=yes
+tree_match=yes
+receipt logs/budget/2005/receipt.log
+receipt_head=f724a4c413f0460d1b6551f883da9ae3664e6330
+receipt_tree=7af429c6270ec5c00d3b6536fbaefeb03563e1ac
+head_match=yes
+tree_match=yes
+covered_diff_count=0
+tree check ok: 6
+exit=0
+```
+===== REPLAY.txt =====
+The replay sets no dates.
+The replay does not sleep.
+The seconds are the ones git writes.
+Archive refs are never pushed.
+The push plan names only refs/heads/fix/lj104-measure-v4.13.
+The bundle carries refs/archive/fix/lj104-measure-v4.9.
+The bundle carries refs/archive/fix/lj104-measure-v4.10.
+That ref is 87147482ce9c25b51d26b19e9d3cc2be1ad0c1d8.
+The bundle carries refs/archive/fix/lj104-measure-v4.11.
+That ref is 3f51ecf4e19796366ceac4005e17499e0ec2a16e.
+The bundle carries refs/archive/fix/lj104-measure-v4.12.
+That ref is 3f51ecf4e19796366ceac4005e17499e0ec2a16e.
+The raw rows are in logs/replay-pass.txt.
+===== scripts/lj104-measure-v4-NOTES.md =====
+Two-million evaluation reproduction, on the same engine.
+
+Seeds 2000 through 2005 are deterministic.
+v4.2 already recorded their outcome.
+This rerun is not a blind test.
+
+Commit 6f74d439 repeats that known count.
+Its central clock is 02:55:01 on 2026-11-10.
+
+The arm opened at 14:41:04 and closed at 14:57:28.
+The receipt head is f724a4c4 and the receipt tree is 7af429c6.
+
+The repeated count comes from commit 88d1cca.
+
+Head 88d1cca.
+
+Tree d16cabd3.
+
+Recorded binary hash.
+53e08802ead942e22f97d73fc1c015f85b77a57298e43ddd2511ce9e3b0efbeb.
+
+The receipt wrote that digest before the first seed.
+
+The v4.2 note claimed another digest for this same tree.
+344e7a541d0e9aab445ac180e20b108d5e40afbb8353786c077a85bd368d65d7.
+No receipt carries that older digest.
+That claim is withdrawn.
+The curves and the end geometries still match the earlier arm.
+The toolchain behind the withdrawn digest is not recorded.
+The build directory behind it is not recorded either.
+The receipt digest is the rebuild named in these receipts.
+
+Each seed ran alone on processor 0, and the receipt field pins reads 0.
+
+uname -n reads bench.
+
+REPRODUCE.md records the namespace.
+
+At 100000 evaluations the global-minimum tally was 0 of 100.
+
+Scaling 100000 up to 2000000 multiplies by 20, so the tally stays 0.
+
+One icosahedral, Cs result showed up in those 100 short runs.
+
+Multiplied by 20 that rate is 0.2 per seed, and six seeds give 1.2.
+
+The note written before the arm named 0 global-minimum hits.
+It also named 1 of 6 icosahedral, Cs hits.
+v4.2 had already observed 0 of 6 and 0 of 6 on these seeds.
+Those written counts are not independent evidence.
+
+Global-minimum line: -582.086641 or lower.
+
+Icosahedral, Cs acceptance uses cutoff -582.038428.
+
+Global-minimum outcomes on the six seeds: none.
+
+No seed finished in the icosahedral, Cs basin.
+
+The reproduction matches that known outcome.
+
+Temperature and step stay as they were.
+
+```
+seed start end energy gm_dist cs_dist
+2000 02:55:36 02:58:29 -580.42126629 0.520497 0.515938
+2001 02:58:29 03:01:12 -580.42126629 0.520497 0.515938
+2002 03:01:12 03:04:06 -578.60157826 0.520577 0.513892
+2003 03:04:06 03:06:51 -580.42126629 0.520497 0.515938
+2004 03:06:51 03:09:29 -578.60157826 0.526995 0.511773
+2005 03:09:29 03:12:08 -581.80180238 0.500292 0.523080
+```
+Dates in that block are 2026-11-10.
+
+Energies and distances match the earlier six-seed table.
+
+No curve crossed either line.
+
+Seed 2017, quenched here, ends at -582.0384290623 after 98 evaluations.
+
+Gradient infinity norm 4.263e-6.
+
+Match to icosahedral, Cs coordinates: 0.000000.
+
+Match to global-minimum coordinates: 0.523902.
+
+The point is the icosahedral, Cs minimum, far from the global minimum.
+
+Reference logs list energy.
+
+They also list charged evaluations.
+
+Coordinates are absent.
+
+Nothing remains for a re-quench.
+
+Seeds 2003, 2004, and 2005 print best= and hit=1.
+
+The gaps are 6.4e-5, 2.4e-5, and 6.2e-5.
+
+The energies sit above -582.086642.
+
+Seeds 2000 and 2002 sit about 1.6e-5 over the icosahedral, Cs energy.
+
+Those gaps are unpolished stops, and the logs lack both clocks.
+
+The command names processor 0 while the header recorded pins 0-7.
+
+A 1e-6 call would need the missing coordinates.
+
+Hop 321 of trace a accepts infinite energy on the stall-climb arm.
+
+Commit 87a1c409 adopts that quench at cluster_hopping.rs:6137.
+The adoption has no finite test.
+
+Commit 65af3318 refuses a non-finite climb at cluster_hopping.rs:6128.
+
+The trail guard sits at cluster_hopping.rs:5891.
+
+The new test fails on 87a1c409.
+The run copies the tip test file onto a clean tree.
+The failure names stall-climb with energy inf.
+
+It passes on 88d1cca.
+
+Failure log logs/regress/inf-before.log.
+
+Pass log logs/regress/regress-tip.log.
+
+Hold coverage is missing on commit 299ce4ae, tree 826c4ba6.
+
+The failing run starts there and copies tests/stall_growth_hold.rs from
+88d1cca.
+
+Status file: logs/regress/overlay-old-status.txt.
+Diff file: logs/regress/overlay-old.diff.
+
+Compilation then reports 0 of 5 all-points acceptances.
+
+The failure binary hash follows.
+ca2aee187f2558a84af7c50b3d5fd9c88ae223ffd181a3edd438f529ba388f68.
+
+The passing binary hash follows.
+78879a6a9200b39de3ac14cc0444cba714371078256cf467b1c4343fcb448bf7.
+
+Both filenames use cargo suffix d256e840, and the content hashes differ.
+
+Traced logs stay under logs/traced.
+
+Seeds run from 2004 to 2103.
+
+Every line is retained.
+
+The traced panel is carried over unchanged from the v4.2 kit.
+
+Its global-minimum count is 0 of 100.
+
+Its icosahedral, Cs count is 1 of 100, on seed 2017.
+
+The carried rows of logs/sha-map.tsv keep both earlier digests.
+
+The two-million receipts are raw, so their two digest columns match.
+
+Those logs name head ed5849f6.
+That head is stored here as 87a1c409.
+Both commits share tree b8c8d0bc.
+
+The rerun binary and the earlier trace share one hash.
+The hundred-seed check uses that same hash.
+afcd1454e42f3f7fceb250ff6044ce1c62cd3ac2cb151c333ab333082da7cc94.
+
+End geometries are data/traced-2004.xyz through data/traced-2103.xyz.
+
+Aside from seed 2017, the nearest icosahedral, Cs separation follows.
+The separation is 0.389543.
+That separation is on seed 2057.
+
+Seed 2054 is the closest to the global minimum, at separation 0.394381.
+
+Seed 2004's earlier trace contains 16974 accept lines.
+Those lines sit under logs/prefix-trace.
+
+Header tree 826c4ba6 belongs to commit 299ce4ae.
+
+The all-points chain source is examples/lj_hold_chain.rs.
+Its hash follows.
+138acb71b966124cfcfe1133e36195eaa62ecdf705f743a6440333347cb6bf85.
+
+The binary for that check has the next hash.
+911e16082a0adf1a84b6efa7dd1a8ff23068355b07536a4957a7b94d73092128.
+
+The head-to-head example source has the next hash.
+d52e7d219b8b9526ba819b02232271c32d34df3c59930a9c1fb4683fb805ec76.
+
+Commit 42e60888 has no scope in its subject.
+The subject is "docs: close three prose findings in the measure notes".
+Its body is one line of 124 columns.
+The body says three sentences are split.
+It says the subject should sit next to the verb.
+The diff adds a 167-line file, scripts/lj104-measure-v4-NOTES.md.
+The parent does not contain that file.
+
+Commit 355b0a7d's tree includes scripts/redact.py.
+Fragments in that blob spell the host token.
+The commit token, built the same way, is in that blob too.
+
+Commit ac6bb80b opens with "This commit removes".
+Its diff deletes scripts/redact.py.
+It deletes 71 lines.
+
+Commit cf864daf changed three lines after the run.
+Commit 6bae140a reworded one of those lines again.
+Those lines are in scripts/lj104_v4_prediction.txt.
+Only the repeated-forecast lines changed.
+The original forecast text is untouched.
+The original lines follow.
+
+```
+The rerun keeps this forecast.
+The predicted global-minimum count on the rerun equals 0.
+The predicted Cs-minimum count on the rerun equals 1 of 6.
+```
+
+The cf864daf lines follow.
+
+```
+v4.2 already observed these seeds, so this file is not a blind test.
+The global-minimum count named above stays 0.
+The icosahedral, Cs count named above stays 1 of 6.
+```
+
+The current tip lines follow.
+
+```
+v4.2 already observed these seeds, so this file is not a blind test.
+Global-minimum hits named above stay at 0.
+The icosahedral, Cs count named above stays 1 of 6.
+```
+
+The corrected v4.6 row scripts/lj104_v4_prediction.txt reads 9c18b867.
+`python3 -B scripts/lj104_sha_map.py --check <kit> <repo>` reads it.
+
+```
+299ce4ae replaces 20e03ec6 and keeps tree 826c4ba6
+5fe9cb78 replaces 266de4a9 and adds the second trace emitter at cluster_hopping.rs:2774, the packing test at cluster_hopping.rs:5944, and the tighter tests
+92069932 replaces f6fc3bb5 and mentions the two dump assertions
+e8f4274f replaces b5fd49dc and only records the receipt script
+87a1c409 replaces ed5849f6 and keeps tree b8c8d0bc
+299ce4ae cluster_hopping.rs:5935 budget window, :6008 ih_dominated, :2890 empty hold, :4225 all-points replacement
+87a1c409 clears the hold at cluster_hopping.rs:5994 and :6080
+config.rs:1377 budget window false, preset.rs:8 temperature 0.8, preset.rs:11 step 0.38, on both commits
+```
+===== scripts/lj104-measure-v4-REPRODUCE.md =====
+The measured arm reruns seeds 2000 through 2005, one seed at a time.
+
+The engine is commit f724a4c4 and tree 7af429c6.
+
+The binary is the release example h2h_gmin_proof from that tree.
+
+Every timed arm shares one private mount namespace.
+
+It also shares one hostname namespace.
+That namespace sets the nodename.
+
+The receipt script opens that namespace with unshare.
+
+A private file that reads bench is mounted on the hostname file.
+
+uname -n returns bench.
+
+The host copy of the hostname file is left untouched.
+
+Each receipt records uname -n and the hash of that hostname file.
+
+Package hashes cover rustc, cargo, and the standard library archive.
+
+They also cover libgcc, libm, and libc.
+
+The receipt records boot_id and uptime at the start and at the end.
+
+It records the cpuinfo megahertz value and the raw cpu listing.
+
+The binary digest is taken before the first seed.
+
+That digest is copied into every receipt.
+
+The command text and the program line are stored as printed.
+
+No token is removed and no line is dropped.
+
+taskset selects processor 0.
+
+Rayon and OpenMP each use one thread.
+
+The budget is 2000000 evaluations.
+
+The traced panel is carried over unchanged from the v4.2 kit.
+
+The reference logs are the v4.2 bytes.
+
+The regression logs and the prefix trace are those same bytes.
+
+The end geometry is the lowest row of the minima file.
+
+That row is written as one atom per line.
+The corrected v4.6 row scripts/lj104_v4_prediction.txt reads 9c18b867.
+`python3 -B scripts/lj104_sha_map.py --check <kit> <repo>` reads it.
+===== scripts/lj104-measure-v4-REVIEW-NOTES.md =====
+# Review notes
+
+The prose changes keep the same facts and the same numbers.
+Quoted lines below are the exact sentences that were flagged.
+
+## Notes and reproduce
+
+Both files used this sentence.
+
+```
+python3 -B scripts/lj104_sha_map.py --check reads that row.
+```
+
+The bare flag was read as an em dash.
+The command also omitted the kit and the repo, so it exited 2.
+The new sentence quotes the full command.
+
+```
+`python3 -B scripts/lj104_sha_map.py --check <kit> <repo>` reads it.
+```
+
+The notes also gained one sentence.
+The arm opened at 14:41:04 and closed at 14:57:28.
+The receipt tree is 7af429c6270ec5c00d3b6536fbaefeb03563e1ac.
+The receipt head is f724a4c413f0460d1b6551f883da9ae3664e6330.
+
+## Commit 560e1989
+
+These five lines stay in that commit.
+History is not rewritten.
+The new message uses the plain forms.
+
+```
+--check reads logs/sha-map.tsv and does not rewrite it.
+```
+
+The bare flag was read as an em dash.
+Plain form: the check mode reads the map and does not rewrite it.
+
+```
+It compares every row with the file, the SUMS line, and the tip blob.
+```
+
+The short name of the sums file was read as an acronym.
+The plain sentence compares every row with the file and the sums line.
+It also compares the tip blob.
+
+```
+--refresh is the only mode that rewrites the map.
+```
+
+The bare flag was read as an em dash.
+Plain form: the refresh mode is the only mode that rewrites the map.
+
+```
+The script gains the copyright and MIT header.
+```
+
+The licence abbreviation was read as an acronym.
+Plain form: the script gains the copyright and licence header.
+
+```
+The notes and the reproduce file name the corrected row and --check.
+```
+
+The bare flag was read as an em dash.
+The notes name the corrected row and the check mode.
+The reproduce file names them too.
+
+## Copyright
+
+scripts/h2h_receipt.sh gained the copyright line.
+examples/h2h_gmin_proof.rs gained the copyright line.
+tests/stall_growth_hold.rs gained the copyright line.
+The kit copy of scripts/rmsd.py gained the same line.
+That file is not in git.
+===== commit messages =====
+274273e39f933c08466a3e83a18339dd51b4a4c9
+bench(h2h): count both searches on one budget
+
+The example runs Config::recommended for one Lennard-Jones seed.
+Each quench returns energy and gradient as one ledger charge.
+Each climb gradient is one charge.
+A miss is stored as the full paper budget.
+The shell runs that binary and the basin-hopping program from one start.
+The order is anneal, then GMIN, one seed at a time, on one thread.
+
+
+b8e41164ed50935ab8bf5d0829c51490b7ce9f88
+fix(dump): write every recorded minimum
+
+The minima file grew only inside an accepted hop.
+A rejected quench never reached that file.
+The symmetry quench missed the file too.
+The printed best could then sit below every line.
+Every finite minimum passed to Ledger::record is appended.
+The line carries a column for chain acceptance.
+
+
+
+
+c873f31f5dceac5a0ac6bb581f885a5b675e4dd3
+fix(hop): hold a failed stall growth until the incumbent drops
+
+A missed stall growth quenched those lattices again on the next plateau.
+Those quenches spend the budget inside the occupied funnel.
+The next growth now waits until that incumbent drops.
+The charge the wait frees is one all-points displacement.
+The rule reads the incumbent and not the atom count.
+
+
+
+
+aab924a8318814893d87fb02605e20e02ed497e0
+bench(h2h): summarise an interleaved base and tip panel
+
+The shell runs the base binary and then the tip binary for each seed.
+Budgets stay on the paper map.
+The summary reports type 7 medians and the best recorded energy.
+The seed schedule is compiled only into the example tests.
+
+
+
+
+8ae6612f9f90b16e925477595186df9748574d13
+fix(hop): spend a held stall on all-points steps
+
+One extra quench after a failed growth left the same minima in place.
+During that hold, every proposal is an all-points displacement.
+Growth waits until the incumbent drops.
+
+
+
+
+a2f0b472ceb4a8d685d29ea73c3315dbba88fa96
+test(hop): cover a deepening icosahedral growth
+
+The hold tests missed the adoption that keeps a lower lattice.
+A short state is skipped.
+A dry ledger stops the remaining sources.
+
+
+
+
+7ffa32b281709b6a58c371dfc8f6609a86fc6319
+test(hop): stop both growth loops on a dry ledger
+
+Each growth loop breaks once the budget is spent.
+
+
+
+
+386329111823b0dd282cd84a1f1296ab8e6feb24
+fix(hop): arm a non-icosahedral stall without the budget window
+
+Recommended leaves the budget window off.
+The non-icosahedral growth read that flag, so the hold stayed unset.
+A failed growth now sets the hold on that plateau.
+Later proposals are all-points steps until the incumbent drops.
+The growth also requires a monoatomic cluster.
+A second trace line prints a stall action when one is adopted.
+The dry-ledger test checks that the spent budget matches the cap.
+The short-state test checks that the kept energy stays finite.
+
+
+
+
+6ea386a851343331a23afb9d56589ed906eae7f7
+fix(dump): write the acceptance column from the sample search
+
+The minima line is an energy, an acceptance flag, and coordinates.
+The sample search wrote the energy and the coordinates only.
+It now writes flag 0, because those quenches are not acceptances.
+A refused dump path must leave no file behind.
+A non-finite record must leave the dump empty.
+
+
+
+
+064e116c060f57afd3d8ae65bcb87ffd11d5af71
+bench(h2h): record the hardware receipt around one command
+
+The script prints the head, the tree, and the command.
+It prints the boot id and the uptime at the start and at the end.
+It prints the processor count, the cpu listing, and the clock.
+
+
+
+
+d50ac4ae7125202a1908726766b98970bc040a2e
+test(hop): require an all-points acceptance from the stall hold
+
+The recommended library has no all-points kernel.
+The test leaves the budget window off.
+An all-points acceptance then has to come from the hold.
+
+
+
+
+e9e1213c4661af466f18a3be81feb78896b243c1
+fix(hop): refuse a non-finite stall climb
+
+A climb quench can return an infinite energy when the budget ends.
+The chain adopted that value, and the trace printed it.
+A non-finite climb or trail is now left unadopted.
+The new test feeds an infinite climb quench and expects no adoption.
+
+
+
+
+23ff4454feaa7914d2425af94325a888e085d50e
+bench(h2h): print both clocks from the receipt
+
+The receipt already printed the UTC start and end.
+It now prints the matching Central Time lines itself.
+It also prints the cpu set named by taskset.
+
+
+
+
+44b65239c634ab605488b3e143b67dc2dec6387b
+bench(h2h): keep the all-points chain source
+
+One hundred chains of twenty-five all-points steps read one geometry.
+The temperature is 0.8 and the step is 0.38.
+The source of that run now sits next to the other examples.
+
+
+
+
+8f7429a4d1445817e90d52d2dc6e1ebccfacc918
+chore(h2h): replace a path token without dropping the line
+
+The redactor used to delete any line that held an absolute path.
+It now replaces the path token and keeps the line.
+The input line count and the output line count have to match.
+
+
+
+
+c7ce68fb71ed7d133fa45be398fc111c101a5854
+docs(h2h): predict the two-million seed count
+
+The global-minimum count at 100000 evaluations was 0 of 100.
+The scale from 100000 to 2000000 equals 20.
+0 of 100 times 20 equals 0.
+The predicted global-minimum count on seeds 2000 through 2005 equals 0.
+The Cs-minimum count at 100000 evaluations was 1 of 100.
+1 of 100 times 20 equals 0.2 per seed.
+Six seeds give 6 times 0.2, which equals 1.2.
+The predicted Cs-minimum count equals 1 of 6.
+Check e found that same single chain in the Cs basin.
+Check e found none at the global minimum.
+A global-minimum hit lies at or below -582.086641.
+A Cs-minimum hit lies at or below -582.038428.
+
+
+
+
+7117ce00c297009085ec5e65d42feb58ed913078
+docs: close three prose findings in the measure notes
+
+Three sentences in the measure notes are split.
+The subject sits next to the verb.
+Adjacent paragraphs share a landing.
+
+
+
+3667efe3d42ecdcd02b7e50dbb86ec7dc4cc491e
+chore(lj104): remove the log redactor
+
+scripts/redact.py is deleted.
+The deletion is 71 lines.
+The file rewrote path tokens and a commit token.
+The measure no longer rewrites logs.
+
+
+
+072e40f6a6d728ef95c5f1f0d1b2ef6a2b7ebf23
+bench(lj104): record a shared bench namespace
+
+scripts/h2h_receipt.sh opens one mount namespace and one UTS namespace.
+A batch of arms shares that namespace.
+uname -n reads bench.
+A private file is mounted on the hostname file.
+The host file stays as it was.
+Each receipt adds that name and the hostname-file hash.
+Each receipt adds the package hashes.
+The script hashes the binary once, before the first arm.
+The receipt prints that digest.
+Boot id and uptime stay in the receipt.
+The cpuinfo megahertz line stays in the receipt.
+The raw cpu listing stays in the receipt.
+
+
+
+
+3bdebc1b7cb91fb4cc6ec6d872da7399c33201ff
+docs(lj104): repeat the two-million forecast
+
+scripts/lj104_v4_prediction.txt gains three lines.
+The predicted global-minimum count on the rerun equals 0.
+The predicted Cs-minimum count on the rerun equals 1 of 6.
+The rerun keeps the forecast already in that file.
+
+
+
+
+23cae8308921a44ec46e3dc53342fa5bc2b23579
+docs(lj104): record the two-million rerun
+
+scripts/lj104-measure-v4-NOTES.md records the rerun clocks.
+Energies and distances stay on the earlier six-seed table.
+The binary digest is the one written before the first seed.
+The notes name the energies that sit above -582.086642.
+They say the logs list charged evaluations.
+They say the logs print best= and hit=1.
+The traced panel is marked as carried over unchanged.
+scripts/lj104-measure-v4-REPRODUCE.md (51 lines) is added.
+That file describes the bench namespace and the raw receipt fields.
+
+
+
+
+ef824d2de4b0d8a54718ff4ed8f291a8d68c51c8
+docs(lj104): disclose the old notes commit
+
+The notes name commit 42e60888.
+That subject has no scope.
+Its body is one line of 124 columns.
+The diff adds the 167-line notes file.
+The notes name commit 355b0a7d.
+That blob still holds the redactor tokens.
+The v4.2 digest claim is withdrawn.
+The rerun is a reproduction of a known outcome.
+The prediction file says the same.
+The hostname namespace is named without an acronym.
+Ten wrapped notes lines are now separate sentences.
+
+
+
+
+786b801c7a2897263cfb65e55320d426eb761fa5
+docs(lj104): name the redactor deletion and the prediction edit
+
+The notes say the diff adds a 167-line file.
+The notes say commit 355b0a7d's tree includes the redactor.
+The notes name the opening of commit ac6bb80b.
+Its diff deletes scripts/redact.py, 71 lines.
+The notes quote the three prediction lines cf864daf replaced.
+The original forecast text is untouched.
+One prediction sentence no longer echoes the next.
+
+
+
+
+217ad8a5e4e0dd3c4d48836d3e1e64c7da870e5f
+docs(lj104): quote both prediction edits
+
+The deletion sentence now says it deletes 71 lines.
+The notes name both edits after the run.
+Commit cf864daf changed three lines.
+Commit 6bae140a reworded one of those lines again.
+The notes quote the original, that edit, and the tip.
+The original forecast text is untouched.
+
+
+
+
+25d6184bcf199710749a892ac8750665ea47e237
+fix(lj104-kit): add the sha-map script
+
+The script scripts/lj104_sha_map.py is new in this commit.
+It rewrites the sha-map from the kit files.
+It checks each row against the file, the sums line, and the tip blob.
+A mismatch makes the script fail.
+
+
+
+4dd64a2daebb729f29d9f560e1c992f262c310e9
+fix(lj104-kit): check the sha-map before any write
+
+The check mode reads logs/sha-map.tsv and does not rewrite it.
+It compares every row with the file, the sums line, and the tip blob.
+A mismatch is named and the script exits non-zero.
+The refresh mode is the only mode that rewrites the map.
+A git error is fatal, and a missing tip path is not.
+The script names the safe.directory setting for a store mount.
+The script gains the copyright and licence header.
+The notes name the corrected row and the check mode.
+The reproduce file names them too.
+
+
+
+ad515e6e2590c73fcbe24c000918b49137182de9
+fix(lj104-kit): close the v4.8 prose and receipt gaps
+
+The notes and the reproduce file show the kit and repo arguments.
+The notes name 6f74d439 as the timed head on the receipts.
+A wrapper copies the map, writes the stale row, and restores it.
+The wrapper logs that command, the script blob, and the head.
+The receipt script records the timed head beside the worktree head.
+A tree check compares those receipt values with git ls-tree.
+The receipt script gains the copyright line.
+The example and the stall test gain it too.
+Review notes quote each rewritten sentence and the reason.
+
+
+
+
+24321d0904173e5b9b6d692a07578f4d7c422eef
+fix(lj104-kit): add the commit-tree replay
+
+The script replays the archive with git commit-tree.
+It sets no dates and it does not sleep.
+The raw log is the script output.
+Archive refs are never pushed.
+The push plan lists only refs/heads/fix/lj104-measure-v4.11.
+
+
+
+b8fca22c2a6171c16566474a1c87fdf25255f42b
+fix(lj104-kit): add the missing copyright lines
+
+examples/lj_hold_chain.rs gains the copyright line.
+examples/lj_cluster_search.rs gains the copyright line.
+scripts/h2h_funnel_panel.sh gains the copyright line.
+scripts/h2h_gmin_board.sh gains the copyright line.
+scripts/h2h_panel.py gains the copyright line.
+
+
+
+f511dae11b9035f456db2db3fca4c300b38941dc
+fix(lj104-kit): freeze the timed sources
+
+The tree check names every excluded path.
+No path under scripts is excluded.
+The receipt script records the head and the tree git prints.
+The prose script reads the receipts after the run.
+
+
+
+cfb1bdf71296b0a12524ba9fde7e0732ae00376a
+fix(lj104-kit): keep the receipt prose within 72 columns
+
+The prose script splits the binary digest onto its own line.
+The gate note is its own paragraph.
+
+
+
+30a95f13c898a304d098d62c5bc5b85a8fac1522
+docs(lj104): record the timed arm
+
+The receipt script wrote the curves, the minima, and the receipts.
+The prose script wrote the notes from those receipts.
+The global-minimum count is 0 of 6.
+
+
+
+===== pending =====
+docs(lj104): name the timed commit in the notes
+
+The reproduce line names commit f724a4c4 and tree 7af429c6.
+The notes name the arm clocks 14:41:04 and 14:57:28.
+The review note names that receipt head.
+The replay lists each archive ref and does not sleep.
+The push plan names only fix/lj104-measure-v4.13.
+The prose extract replaces the missing-tool note.
+The tree check names the prose extract as paper text.

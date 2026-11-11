@@ -20,9 +20,9 @@ The new sentence quotes the full command.
 ```
 
 The notes also gained one sentence.
-The receipts name 6f74d439 as timed_head.
-That names the branch head at 02:55:36.
-The receipt field head stays 88d1cca1, which is what git printed.
+The arm opened at 14:41:04 and closed at 14:57:28.
+The receipt tree is 7af429c6270ec5c00d3b6536fbaefeb03563e1ac.
+The receipt head is f724a4c413f0460d1b6551f883da9ae3664e6330.
 
 ## Commit 560e1989
 

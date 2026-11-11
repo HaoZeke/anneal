@@ -1,7 +1,13 @@
-dates=unset
-sleeps=none
+The replay sets no dates.
+The replay does not sleep.
 The seconds are the ones git writes.
 Archive refs are never pushed.
-Push plan: refs/heads/fix/lj104-measure-v4.11
-The archive ref is refs/archive/fix/lj104-measure-v4.9.
+The push plan names only refs/heads/fix/lj104-measure-v4.13.
+The bundle carries refs/archive/fix/lj104-measure-v4.9.
+The bundle carries refs/archive/fix/lj104-measure-v4.10.
+That ref is 87147482ce9c25b51d26b19e9d3cc2be1ad0c1d8.
+The bundle carries refs/archive/fix/lj104-measure-v4.11.
+That ref is 3f51ecf4e19796366ceac4005e17499e0ec2a16e.
+The bundle carries refs/archive/fix/lj104-measure-v4.12.
+That ref is 3f51ecf4e19796366ceac4005e17499e0ec2a16e.
 The raw rows are in logs/replay-pass.txt.
