@@ -16,7 +16,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 ZONE = ZoneInfo("America/Chicago")
-BUNDLE_NAME = "anneal-lj104-sota-prereg-v1.3.7.bundle"
+BUNDLE_NAME = "anneal-lj104-sota-armD-v1.4.bundle"
 
 
 def fmt(path: Path) -> str:
@@ -102,6 +102,7 @@ def main() -> None:
         "archive: refs/archive/prereg/lj104-sota-v1.3.4\n"
         "archive: refs/archive/prereg/lj104-sota-v1.3.5\n"
         "archive: refs/archive/prereg/lj104-sota-v1.3.6\n"
+        "archive: refs/archive/prereg/lj104-sota-v1.3.7\n"
         "history: complete\n",
         encoding="utf-8",
     )
@@ -188,12 +189,21 @@ def main() -> None:
     report = dest / "docs" / "prereg" / "lj104-sota" / "REPORT.md"
     report_stat = fmt(report)
     wait_next_second(report_stat)
+    full_sha = sha256_file(bundle)
     placed = dest / BUNDLE_NAME
     placed.write_bytes(bundle.read_bytes())
+    if placed.stat().st_size > 100 * 1024 * 1024:
+        run(["split", "-b", "100M", str(placed), str(dest / (BUNDLE_NAME + "."))])
+        placed.unlink()
+        parts = sorted(dest.glob(BUNDLE_NAME + ".*"))
+        if not parts:
+            raise SystemExit("split produced no parts")
+        bundle = parts[-1]
+    else:
+        bundle = placed
     (dest / "bundle-verify.log").write_text(verify_log, encoding="utf-8")
     (dest / "bundle-clone.log").write_text(clone_log, encoding="utf-8")
     (dest / "bundle-fsck.log").write_text(fsck_log, encoding="utf-8")
-    bundle = placed
     bundle_stat = fmt(bundle)
     wait_next_second(bundle_stat)
     sums_lines = []
@@ -218,7 +228,7 @@ def main() -> None:
     wait_next_second(outer_stat)
     head = run(["git", "-C", str(root), "rev-parse", "HEAD"]).strip()
     tree = run(["git", "-C", str(root), "rev-parse", "HEAD^{tree}"]).strip()
-    bsha = sha256_file(bundle)
+    bsha = full_sha
     # Re-stat after every earlier final write. Do not reuse a typed clock.
     report_stat = fmt(report)
     bundle_stat = fmt(bundle)
