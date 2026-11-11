@@ -1,4 +1,13 @@
-code_tip=59f36d005a268ababc90d48dd1873d444f97b5ba
-code_tree=56bb9baaaf0e62d4a5c3936c160b414de4742879
-charge_commit=68bb5cf2208654384e6b2cad5bfd9a0950da7d06
-binary_predates_copyright_comments=yes
+engine_commit=0d20241baa530a18a93932b8509d72df4a810859
+
+engine_tree=15b6812e17136b2553036c975faa5c1e0c4ef5d9
+
+charge_commit=eaf8665c5f2135ecd71d7e5f9e80c857146614d3
+
+charge_stamp=2026-11-10T16:46:36-0600
+
+author=Rohit Goswami <rgoswami@ieee.org>
+
+unsigned=yes
+
+zone=-0600
