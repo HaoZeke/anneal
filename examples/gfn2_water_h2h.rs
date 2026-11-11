@@ -501,6 +501,12 @@ fn main() {
             writeln!(meta, "objective_best_eV: nan").ok();
             writeln!(meta, "engine_best_eV: nan").ok();
             writeln!(meta, "best_intact: false").ok();
+            write_xyz(
+                &outdir.join("best.xyz"),
+                start_slice,
+                "search failed; start geometry kept",
+            )
+            .expect("best xyz");
             let line = force_audit_line(seed, f64::INFINITY);
             writeln!(meta, "{line}").ok();
             println!("{line}");
@@ -542,35 +548,37 @@ fn main() {
     for &(hops, charged, basins, energy) in &outcome.improvements {
         writeln!(trace, "{hops} {charged} {basins} {energy:.10}").ok();
     }
-    if let Some(state) = outcome.best_state.as_ref() {
-        let coords = state.as_slice().expect("best contiguous");
-        let (wall_e, _) = oh_wall(coords, m);
-        let (engine_e, gradient) = objective.value_and_gradient(state.view());
-        // The objective includes the wall. The engine energy is that total
-        // minus the wall, which is zero when every covalent O-H is inside
-        // the onset.
-        let engine_best = engine_e - wall_e;
-        let gnorm = gradient.iter().map(|v| v * v).sum::<f64>().sqrt();
-        let best_intact = monomers_intact(coords, m).unwrap_or(false);
-        writeln!(meta, "wall_at_best_eV: {wall_e:.10}").ok();
-        writeln!(meta, "engine_best_eV: {engine_best:.10}").ok();
-        writeln!(meta, "gradient_norm_eV_per_A: {gnorm:.6e}").ok();
-        let max_force = max_abs_force(gradient.as_slice().unwrap_or(&[]));
-        let line = force_audit_line(seed, max_force);
-        writeln!(meta, "{line}").ok();
-        println!("{line}");
-        writeln!(meta, "best_intact: {best_intact}").ok();
-        write_xyz(
-            &outdir.join("best.xyz"),
-            coords,
-            &format!("objective {engine_e:.10} eV wall {wall_e:.10} eV"),
-        )
-        .expect("best xyz");
+    let fallback = outcome
+        .final_state
+        .as_ref()
+        .map(|state| state.to_owned())
+        .unwrap_or_else(|| start.clone());
+    let reported = outcome.best_state.as_ref().unwrap_or(&fallback);
+    let coords = reported.as_slice().expect("best contiguous");
+    let (wall_e, _) = oh_wall(coords, m);
+    let (engine_e, gradient) = objective.value_and_gradient(reported.view());
+    // The objective includes the wall. The engine energy is that total
+    // minus the wall, which is zero when every covalent O-H is inside
+    // the onset.
+    let engine_best = if engine_e.is_finite() {
+        engine_e - wall_e
     } else {
-        writeln!(meta, "engine_best_eV: nan").ok();
-        writeln!(meta, "best_intact: false").ok();
-        let line = force_audit_line(seed, f64::INFINITY);
-        writeln!(meta, "{line}").ok();
-        println!("{line}");
-    }
+        f64::NAN
+    };
+    let gnorm = gradient.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let best_intact = monomers_intact(coords, m).unwrap_or(false);
+    writeln!(meta, "wall_at_best_eV: {wall_e:.10}").ok();
+    writeln!(meta, "engine_best_eV: {engine_best:.10}").ok();
+    writeln!(meta, "gradient_norm_eV_per_A: {gnorm:.6e}").ok();
+    let max_force = max_abs_force(gradient.as_slice().unwrap_or(&[]));
+    let line = force_audit_line(seed, max_force);
+    writeln!(meta, "{line}").ok();
+    println!("{line}");
+    writeln!(meta, "best_intact: {best_intact}").ok();
+    write_xyz(
+        &outdir.join("best.xyz"),
+        coords,
+        &format!("objective {engine_e:.10} eV wall {wall_e:.10} eV"),
+    )
+    .expect("best xyz");
 }

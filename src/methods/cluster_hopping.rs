@@ -1269,6 +1269,11 @@ pub fn structure_is_sane(x: ArrayView1<f64>, min_sep: f64) -> bool {
 /// overlap artifact rather than a physical bond.
 pub const OVERLAP_SEPARATION: f64 = 0.35;
 
+/// Distances this close still abort xtb's SCC. The printed value is 0.350000
+/// while the true distance sits just above [`OVERLAP_SEPARATION`], so a strict
+/// `<=` check hands the boundary to the potential.
+pub const OVERLAP_CALL_LIMIT: f64 = OVERLAP_SEPARATION + 1.0e-3;
+
 /// Push pairs closer than `min_sep` apart until the geometry clears that rule.
 ///
 /// A declared group is translated as a rigid body when the close pair belongs
