@@ -1,665 +1,899 @@
 % Copyright (c) anneal developers
 \documentclass[journal=jctcce,manuscript=article]{achemso}
 
-\usepackage{booktabs,siunitx,amsmath,algorithm,algpseudocode}
-\sisetup{scientific-notation=true,exponent-product=\times}
+\usepackage{booktabs,amsmath}
 \graphicspath{{figs/}}
 
 \input{macros}
 
 \title{Basin hopping on Lennard-Jones clusters
-with one preset at every size}.
+with one setting at every size}
 
 \author{Rohit Goswami}
-\affiliation{SURF B.V., Amsterdam}
+\affiliation{SURF BV, Amsterdam}
 \alsoaffiliation{Science Institute, University of Iceland,
 Reykjavik, Iceland}
 \alsoaffiliation{TurtleTech ehf., Reykjavik, Iceland}
 \author{Ruhila Goswami}
 \affiliation{Faculty of Life and Environmental Sciences,
-University of Iceland, Reykjavik, Iceland}.
+University of Iceland, Reykjavik, Iceland}
 \author{Amrita Goswami}
 \affiliation{Universidad Complutense de Madrid, Madrid, Spain}
 \author{Moritz Sallermann}
 \affiliation{Universidad Complutense de Madrid, Madrid, Spain}
 \author{Sonaly Goswami}
 \affiliation{Department of Chemistry,
-Indian Institute of Technology Kanpur, Kanpur, India}.
+Indian Institute of Technology Kanpur, Kanpur, India}
 \author{Debabrata Goswami}
 \affiliation{Center for Bits and Atoms,
-Massachusetts Institute of Technology, Cambridge,.
-Massachusetts 02139, United States}.
+Massachusetts Institute of Technology, Cambridge,
+Massachusetts 02139, United States}
 \alsoaffiliation{Department of Chemistry,
-Indian Institute of Technology Kanpur, Kanpur, India}.
+Indian Institute of Technology Kanpur, Kanpur, India}
 \email{dgoswami@iitk.ac.in}
 
 \begin{document}
 
 \begin{abstract}
-We describe one basin-hopping preset for Lennard-Jones clusters.
-The move library, the temperature, the census.
-And the orbit completion stay fixed at every size.
-Below 98 atoms the constructor adds a diameter penalty.
-At 0.7 of the largest pair distance, and restart on stall stays off.
-The novelty is that fixed core.
-With the depth posterior choosing the move.
-On the water hexamer, the six crest rows are single draws from CREST.
-3.0.2.
-That build exposes no seed, and the anneal seed fixes only start.xyz.
-Those rows are not a success rate.
-Five polished gaps lie within \(1\times 10^{-7}\)~Eh.
-Seed 1 lies at \(1.35\times 10^{-7}\)~Eh, above that line.
+We keep one basin-hopping setting at every Lennard-Jones size.
+The moves stay fixed, and the reduced temperature stays at \(0.8\).
+A run hits when the quenched energy \(E\) and the published energy
+\(E_{\mathrm{ref}}\) satisfy \(|E-E_{\mathrm{ref}}|<10^{-3}\).
+On seeds 2000--2005 the depth posterior and a uniform draw both hit
+LJ\(_{38}\) and LJ\(_{55}\) on 6 of 6 seeds, and both hit LJ\(_{98}\)
+on 5 of 6.
+At LJ\(_{75}\) the posterior hits 6 of 6 and the uniform draw hits 4 of 6.
+Against the Wales-group program GMIN, on the code before the pentagonal
+retry, this setting hits LJ\(_{98}\) on 5 of 6 seeds and GMIN hits 0 of 6.
+On LJ\(_{104}\) both hit 2 of 6.
+\todo{The LJ\(_{104}\) rerun after the pentagonal retry is still running.}
+On seeds 6400--6405 the same retry hits LJ\(_{98}\) on 6 of 6.
+On TIP4P, within \(0.001\)~kcal/mol and \(5\times 10^{5}\) force calls,
+\((\mathrm{H_2O})_{10}\) hits on 6 of 6 seeds.
+\((\mathrm{H_2O})_{15}\) and \((\mathrm{H_2O})_{20}\) hit on 0 of 6.
+On the water hexamer, five of the six polished gaps at GFN2-xTB with
+xtb 6.7.1 lie within \(1\times 10^{-7}\)~Eh.
+On the 4000-call ledger seed 1 lies
+\(1.3509\times 10^{-7}\)~Eh lower.
+\todo{The xtb 6.8.0 re-polish of those finals is still running.}
 \end{abstract}
 
 \section{Introduction}
-We describe one preset that a reader can run at every cluster size.
-In contrast, older presets changed with the atom count.
-A thermodynamic model starts from a local minimum of the potential.
-\cite{wales2003} The same model treats the global minimum.
-As the ground state.
-On the Lennard-Jones pair potential the number of minima grows quickly.
-With the number of atoms.
-\cite{wales1997,jones1924} A search is then judged by how many.
-Evaluations it spends before it reaches a minimum that is already known.
-Li and Scheraga introduced basin hopping for a rough.
-Potential-energy surface.
-\cite{li1987} Wales and Doye made that.
+A basin-hopping step proposes a geometry, quenches it to a local minimum,
+and accepts or rejects that minimum at one temperature.
+\cite{li1987,wales1997}
+On the Lennard-Jones pair potential the number of minima grows quickly
+with the number of atoms.
+\cite{jones1924,wales1997,wales2003}
+The search below uses one setting at every size.
+The move library does not change with the atom count.
+The reduced temperature is \(0.8\), the value Wales and Doye used.
+\cite{wales1997}
+Below 98 atoms the quench chooses between the plain potential and one
+diameter penalty.
+At 98 atoms and above the penalty is absent.
+A stall does not replace the walker with a random cluster.
 
-Monte Carlo walk the working method for atomic clusters.
-\cite{wales1997} A move proposes a new geometry.
-A local minimisation returns a minimum.
-And the Metropolis rule at one temperature accepts or rejects.
-That minimum.
-We find the same preset at every size in the campaigns below.
-We report the 192-seed campaign.
-The preset measured here draws move arms by Thompson sampling.
-From a posterior on the depth of the quench.
-And it abandons a quench that is returning to the occupied basin.
-\cite{thompson1933,goedecker2004} A stall applies tabu, symmetrisation,
-the recorded basin trail, and the climb.
-The constructor installs one move library.
-Below 98 atoms it installs one two-phase surface, a relative cutoff of.
-0.7 with weight 1, and at 98 atoms and above that list stays empty.
-A caller who wants lattice growth sets it on the configuration.
+The published Lennard-Jones minima at 38, 55, 75, 98, and 104 atoms are
+the Cambridge energies.
+\cite{walesCambridgeClusterDatabase,wales1997}
+Kuznetsov and Sahinidis prove the five-atom optimum and the six-atom
+optimum.
+\cite{kuznetsovLennardJones2025}
+Shen proves that the seven-atom global minimiser is the pentagonal
+bipyramid.
+\cite{shenSevenParticle2026}
+Lecomte tightens the diameter bound and leaves every case of 38 atoms
+and larger unproved.
+\cite{lecomteDiameter2026}
+Kiessling states a necessary condition on a list of putative lowest
+pair energies.
+The sizes used here are not among the failures he names.
+\cite{kiesslingLennardJones2023}
+A later argument with Wales bounds the nearest-neighbour distance of a
+stationary Lennard-Jones configuration.
+\cite{kiesslingPairDistance2025}
+Barr\'on Romero enumerates clusters through 13 particles.
+\cite{barronRomeroLennardJones2026}
+The hit targets below remain the Cambridge energies.
 
 \section{The search}
-\subsection{One step of basin hopping}
+\label{sec:search}
 A chain stores a minimum \(x\) with energy \(E(x)\).
-The move adds a displacement, the local minimiser returns a new minimum.
-\(y\), and the chain accepts \(y\).
-With the Metropolis probability at temperature \(T\),.
+One step draws a move, quenches the proposal, and applies the acceptance
+rule of Section~\ref{sec:accept}.
+The reported runs are single chains.
+
+\subsection{Proposal moves}
+\label{sec:moves}
+The library has six moves, in reduced units where the pair minimum lies
+at unit distance and unit depth.
+A uniform draw on an index is the comparison arm of
+Section~\ref{sec:ablation}.
+The depth posterior of Section~\ref{sec:posterior} is the setting used
+everywhere else.
+
+One move displaces a single atom.
+The atom index \(i\) is uniform on the \(N\) atoms, and each of its three
+coordinates is shifted by an independent draw from the uniform interval
+\((-1,1)\):
 \begin{equation}
-\min\bigl(1,\exp[-(E(y)-E(x))/T]\bigr).
+y_{i,a} = x_{i,a} + U(-1,1), \qquad a\in\{1,2,3\}.
+\label{eq:single}
+\end{equation}
+
+One move relocates the atom of lowest coordination.
+Two atoms are neighbours when their separation is below \(1.6\).
+Let \(c\) be the centroid, let \(i^\star\) be a lowest-coordination atom,
+and let \(R_{\mathrm{shell}}\) be the largest distance from \(c\) among
+the other atoms.
+The move places \(i^\star\) at
+\begin{equation}
+y_{i^\star} = c + R_{\mathrm{shell}}\,(0.85 + 0.20\,U(0,1))\,u,
+\label{eq:surface}
+\end{equation}
+where \(u\) is uniform on the unit sphere.
+The other atoms stay in place.
+
+A burst repeats equation~\ref{eq:surface}.
+The first relocation always runs.
+Each further relocation runs with probability \(2/3\), and the burst
+stops at eight relocations:
+\begin{equation}
+K = 1 + \max\{m\in\{0,\ldots,7\}: U_1,\ldots,U_m < 2/3\}.
+\label{eq:burst}
+\end{equation}
+\(U_j\) are independent uniform draws on \((0,1)\), and the maximum over
+the empty set is \(0\).
+
+A symmetrisation move looks for axes of order \(2, 3, 4, 5,\) and \(6\)
+inside a pair cutoff of \(2.5\), projects the cluster onto the group
+those axes generate, and quenches the image.
+If the projection leaves the coordinates unchanged, the move falls back
+to equation~\ref{eq:single}.
+
+A descriptor move steps the cluster in the smooth overlap of atomic
+positions.
+The cutoff is \(3.5\) and the target displacement is \(0.35\), both in
+reduced units.
+
+The last move reads a lattice from the current geometry and moves one
+under-coordinated atom onto a vacant site.
+The site is drawn with Boltzmann weights at the reduced temperature
+\(0.8\).
+\cite{shaoChengCai2004}
+If that lattice offers no site, the move uses equation~\ref{eq:single}.
+
+Below 98 atoms the quench chooses a surface and holds it for 100 hops.
+The two surfaces are the plain potential and the plain potential plus
+the diameter penalty
+\begin{equation}
+\begin{aligned}
+D(x) &= 0.7 \max_{i<j} r_{ij}(x),\\
+V_{\mathrm{pen}}(x) &= \sum_{i<j}
+\max\bigl(0,\, r_{ij}(x)^2 - D(x)^2\bigr)^2.
+\end{aligned}
+\label{eq:penalty}
+\end{equation}
+The centroid weight on this penalty is \(0\).
+The surface is chosen by the same normal-gamma rule as the moves.
+The reward for a block of 100 hops is the best energy at the start of
+the block minus the lowest energy the block reached.
+At 98 atoms and above the penalty is absent and every quench uses the
+plain potential.
+Doye showed that a term pulling every atom toward the centroid changes
+the potential.
+\cite{doye2000,locatelli2002}
+Equation~\ref{eq:penalty} has no such term.
+
+The face-centred cubic truncated octahedron is the published minimum at
+38 atoms, the Mackay icosahedron at 55, and the Marks decahedron at 75.
+\cite{wales1997,marksSurfaceStructureEnergetics1984,Doye_Miller_Wales_1999}
+A library that grows a named lattice of one of those packings would be
+searching for a structure the atom count had already named.
+The moves above carry no such template, at 38 atoms and at every other
+size.
+
+\subsection{Depth posterior over the moves}
+\label{sec:posterior}
+Each move \(k\) carries a normal-gamma posterior on the depth it reaches.
+\cite{thompson1933}
+The depth that updates the posterior is the drop from the best energy
+the chain has stored to the energy of the quench just finished,
+\begin{equation}
+r = E^{\star} - E(y).
+\label{eq:depth}
+\end{equation}
+A positive \(r\) is a quench below the stored best.
+The prior, before any quench, is
+\begin{equation}
+\mu_k = 0, \quad \kappa_k = 10^{-6}, \quad \alpha_k = 1, \quad \beta_k = 1.
+\label{eq:prior}
+\end{equation}
+One observation \(r\) updates the arm that was played:
+\begin{equation}
+\begin{aligned}
+\kappa' &= \kappa + 1,\\
+\mu' &= (\kappa\mu + r)/(\kappa+1),\\
+\alpha' &= \alpha + 1/2,\\
+\beta' &= \beta + \tfrac12 \frac{\kappa}{\kappa+1}(r-\mu)^2.
+\end{aligned}
+\label{eq:update}
+\end{equation}
+The next arm is a Thompson draw.
+For each arm the chain samples the posterior predictive, a Student \(t\)
+random variable with \(2\alpha_k\) degrees of freedom,
+\begin{equation}
+\begin{aligned}
+s_k &= \sqrt{\beta_k(\kappa_k+1)/(\alpha_k\kappa_k)},\\
+\tilde r_k &= \mu_k + s_k\, T_{2\alpha_k},
+\end{aligned}
+\label{eq:thompson}
+\end{equation}
+and plays
+\begin{equation}
+k^{\star} = \operatorname*{argmax}_k \tilde r_k.
+\label{eq:argmax}
+\end{equation}
+An arm with no observations has a very small \(\kappa_k\) and therefore
+a large scale \(s_k\), so it is tried.
+
+The uniform comparison draws
+\begin{equation}
+k^{\star} \sim \mathrm{Uniform}\{0,\ldots,n_{\mathrm{moves}}-1\}
+\label{eq:uniform}
+\end{equation}
+and does not consult equation~\ref{eq:thompson}.
+The library, the screen, and the acceptance rule stay the same.
+
+\subsection{Acceptance}
+\label{sec:accept}
+Let \(y\) be the quenched proposal and let \(V\) be any basin bias that
+has been deposited.
+The rise that the acceptance test sees is
+\begin{equation}
+\Delta = \bigl(E(y)+V(y)\bigr) - \bigl(E(x)+V(x)\bigr).
+\label{eq:delta}
+\end{equation}
+With \(T=0.8\) in reduced units the chain accepts \(y\) when
+\begin{equation}
+\Delta < 0
+\quad\text{or}\quad
+U < \exp(-\Delta/T),
 \label{eq:metropolis}
 \end{equation}
-\(T\) is \(\TempReduced\) in the reduced units where the pair well.
-Depth is 1.
-Wales and Doye use that reduced temperature for Lennard-Jones.
-Basin hopping.
-\cite{wales1997} The Lennard-Jones preset stores the value as
-\texttt{TEMPERATURE}.
-One temperature is used at every size.
-The hit that scores a run is the first converged evaluation whose.
-Energy lies below the published minimum by less than \(0.001\).
-A miss is a run that reaches its call ceiling without such.
-An evaluation.
-The penalised average runtime (PAR-2) is the call count of a hit.
-And twice the cap for a miss.
-The hit is read from the trace of converged improvements.
-The trace stores no stop threshold.
+where \(U\) is uniform on \((0,1)\).
+This is the Metropolis rule at one temperature.
+\cite{wales1997}
+When no bias has been deposited, \(V=0\) and \(\Delta=E(y)-E(x)\).
 
-Algorithm~\ref{alg:chain} lists one chain of the recommended preset.
-\begin{algorithm}
-\caption{One chain of the recommended preset.}
-\label{alg:chain}
-\begin{algorithmic}[1]
-\State Draw a non-overlapping start from the seed and quench it.
-\While{the call budget remains} \State Draw a move from the library.
-And quench the displaced geometry to a minimum \(y\).
-\State Replace \(x\) by \(y\).
-With the probability in equation~\ref{eq:metropolis}.
-\State When \(y\) is a new basin.
-Quench the symmetry images of its core.
-\EndWhile
-\end{algorithmic}
-\end{algorithm}
+Two checks can withhold the full quench.
+A proposal whose descriptor distance from \(x\) is below the merge
+radius \(0.7\) is treated as a return to the occupied basin, and the
+partial relaxation is what enters equation~\ref{eq:metropolis}.
+A partial energy more than \(2\) above the stored best is handled the
+same way.
+Neither check redraws the cluster.
 
-\subsection{What the preset turns on}
-The recommended preset starts from the Wales and Doye displacement.
-And then selects one move library.
-Thompson sampling draws each move from a normal-gamma posterior.
-On the depth reached by earlier quenches of that move.
-\cite{thompson1933} Below 98 atoms the constructor sets the surface.
-List to one diameter penalty.
-By calling \texttt{TwoPhase::relative} with.
-\(0.7\) and \(1\).
-The cutoff equals \(0.7\) times the largest pair distance.
-That distance is read on the structure that enters the relaxation.
-The penalty weight equals 1.
-The surface portfolio then draws that penalty or the plain surface,.
-using the same depth posterior.
-The surface list stays empty at 98 atoms and above.
-The relaxation then uses the plain surface.
-The lattice-regrowth library builds a truncated octahedron.
-A decahedron, or an icosahedron from a named template.
-The published global minimum changes with size.
-\cite{wales1997,marksSurfaceStructureEnergetics1984} Face-centred cubic.
-Is the published global minimum at 38 atoms, icosahedral at 55,.
-And Marks decahedral at 75.
-Kuznetsov and Sahinidis prove optima for five and six atoms.
-\cite{kuznetsovLennardJones2025} Shen reports a proof for seven atoms.
-The minimum is the pentagonal bipyramid.
-\cite{shenSevenParticle2026} Lecomte tightens their diameter bound.
-That note leaves every case of 38 atoms or larger unproved.
-\cite{lecomteDiameter2026}
-Installing that library only at 38 atoms would search for a structure.
-The count has already named.
-The preset therefore keeps the lean burst library at every size,.
-including 38.
-Doye showed that the Locatelli-Schoen compression.
-A term that pulls every atom toward the centroid.
-Is a change of the potential.
-\cite{doye2000,locatelli2002} The installed surface is a diameter.
-Penalty, and its centroid weight stays at 0.
-Restart on stall stays at its default, off.
-So a stalled walker is not redrawn from random coordinates.
-A stall still applies tabu, symmetrisation, the recorded basin trail,.
-and the climb.
-Orbit completion quenches the images of a symmetric core when a new.
-Basin appears.
-A continuous-symmetry projection every ten quenches.
-And a reseed after five hops on an icosahedral plateau.
-Follow the defaults Oakley,.
-Johnston and Wales published for the Wales-group basin-hopping program.
-(GMIN).
-\cite{oakley2013} Those two numbers are applied at every size.
-Figure~\ref{fig:stack} stacks the potential, the hop.
-And the bank that shares the minima.
-The figure is drawn from the search, and no campaign count enters it.
+When the accepted minimum is a new basin, the chain quenches the images
+of a symmetric core and offers the lowest image to
+equation~\ref{eq:metropolis}.
+A continuous-symmetry projection runs every ten quenches, and an
+icosahedral plateau is reseeded after five hops.
+\cite{oakley2013}
+
+\subsection{Stall and restart}
+\label{sec:stall}
+Write \(S\) for the number of force calls charged so far, and
+\(S_{\star}\) for the value of \(S\) at the last time the stored best
+fell by more than \(10^{-9}\).
+A call plateau is due when
+\begin{equation}
+S - S_{\star} \ge 5000.
+\label{eq:plateau}
+\end{equation}
+On that plateau the chain does not draw a new random cluster.
+Random restart is off at every size.
+The plateau takes one climb, of amplitude \(0.25\) in reduced units,
+and continues from the quenched result.
+
+Let \(q\) be the number of hops since the last improvement, and let
+\(q_{\mathrm{long}}\) be the longest such stretch already seen.
+The chain is stuck when
+\begin{equation}
+q \ge \max(5000,\, 2\, q_{\mathrm{long}}).
+\label{eq:stuck}
+\end{equation}
+While it is stuck, two further responses are available.
+The trail steps from the basin entry, back along the direction from
+which the chain arrived, and quenches.
+The symmetry projection of Section~\ref{sec:moves} is quenched and kept
+when its energy is lower than the energy the chain is standing on.
+A structure already dominated by an icosahedral signature skips that
+projection.
+Tabu stores the descriptors of up to eight basins the chain has failed
+to leave.
+Tabu does not redraw the coordinates.
+
+Lattice growth on a plateau is held when it has already failed at the
+current energy.
+Let \(E_{\mathrm{held}}\) be the incumbent at that failure, and let
+\(m\) be the number of plateau leaves skipped since the incumbent last
+fell.
+Growth waits while
+\begin{equation}
+E \ge E_{\mathrm{held}} - 10^{-9}
+\quad\text{and}\quad
+\bigl(N < 98 \;\text{or}\; m < 8\bigr).
+\label{eq:hold}
+\end{equation}
+Below 98 atoms a failed growth stays idle until the incumbent drops.
+At 98 atoms and above, the eighth idle leave is the last wait.
+The next leave proposes the crossing growth again, including the
+pentagonal order, and \(m\) returns to \(0\).
+The proposal used while equation~\ref{eq:hold} holds is a displacement
+of every coordinate by an independent draw from \((-0.38,0.38)\).
+
+A rigid walker, such as a TIP4P chain, uses a different stall.
+Let \(h\) be the hop count and \(h_{\star}\) the hop of the last new
+lowest minimum.
+The walker has stalled when
+\begin{equation}
+h - h_{\star} > 1000.
+\label{eq:rigid}
+\end{equation}
+It then moves to a lower minimum it has already quenched.
+If the archive holds nothing lower, it quenches a new rigid start and
+stands there.
+
+\subsection{The hit}
+\label{sec:hit}
+For a Lennard-Jones run the scorer marks a hit when the best quenched
+energy satisfies
+\begin{equation}
+E \le E_{\mathrm{ref}} + 10^{-3}.
+\label{eq:hit}
+\end{equation}
+Every hit in the tables below also satisfies
+\begin{equation}
+|E - E_{\mathrm{ref}}| < 10^{-3}.
+\label{eq:abs}
+\end{equation}
+A miss is a run that reaches its call ceiling without
+equation~\ref{eq:hit}.
+The Cambridge references, in reduced units, are \(-173.928427\) at 38
+atoms, \(-279.248470\) at 55, \(-397.492331\) at 75, \(-543.665361\) at
+98, and \(-582.086642\) at 104.
+\cite{walesCambridgeClusterDatabase}
+
+For TIP4P the same test is applied in kilojoules per mole, with the
+thermochemical calorie \(4.184\)~kJ:
+\begin{equation}
+E \le E_{\mathrm{ref}} + 0.004184~\mathrm{kJ\,mol^{-1}},
+\label{eq:tip4p-hit}
+\end{equation}
+which is \(0.001\)~kcal/mol.
+The references are the Wales--Hodges minima: \(-391.0226842125\) for 10
+molecules, \(-628.3722525077\) for 15, and \(-872.9887544952\) for 20,
+in kJ/mol.
+\cite{walesGlobalMinimaWater1998,jorgensen1983}
+Those geometries are the TIP4P minima.
+They are not the global minimum of every water model.
+\cite{hernandezRojasWater2026}
+
+Figure~\ref{fig:stack} draws one hop.
+Figure~\ref{fig:rec-arms} draws the moves and the burst length.
 
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{algorithm_stack.pdf}
-\caption{The stack of the search.
-The chains share minima through the annealed-flow bank.
-In one hop the Thompson draw picks the arm, the quench is screened.
-And the acceptance test runs at the held temperature \(T=0.8\).
-The depth of the quench updates the posterior of the arm that played,.
-and a saturated packing retires.
-Every potential reaches the hop through rgpot.
-\cite{goswamiOmniPotentRPCRgpot2026}}
+\caption{One hop.
+The arm is drawn from equation~\ref{eq:thompson}, the proposal is
+quenched, and equation~\ref{eq:metropolis} runs at \(T=0.8\).
+The depth in equation~\ref{eq:depth} updates the arm that played.
+Chains that run together share the minima they quench.}
 \label{fig:stack}
 \end{figure}
-
-\section{Statistical framework}
-\label{sec:flow} A cooling schedule sets the step.
-And the temperature of one chain.
-A population of chains also decides which replicas carry on.
-The census of packings then decides when the next minimization belongs.
-To a different packing.
-We resample replicas on within-epoch ranks, and we close the census.
-With a Good-Turing estimate of the unseen mass.
-\cite{goodPopulationFrequenciesSpecies1953}
-
-\subsection{Annealed-flow kernel}
-As the search cools, the replicas follow a sequence of distributions.
-that weight lower energies more heavily.
-Del Moral, Doucet, and Jasra write that sequence as the equation below.
-\cite{DelMoral_Doucet_Jasra_2006}
-
-\begin{equation}
-\eta_t(\mathrm{d}x)\propto\exp(-\beta_t E(x))\,\lambda(\mathrm{d}x),
-\label{eq:target}
-\end{equation}
-
-Beta increases along the sequence.
-They move from one target to the next by reweighting.
-They then apply a move kernel.
-
-\begin{equation}
-\eta_{t+1}=\Psi_{G_t}(\eta_t)\,M_{t+1}.
-\label{eq:fk}
-\end{equation}
-
-Cluster energies share no scale from one size to the next.
-The weight is therefore the within-epoch rank.
-Tied replicas share their average position.
-Positions run from \(0\) to \(R-1\).
-A tied block runs from \(b\) inclusive to \(e\) exclusive.
-The block has the rank below when \(R\ge 2\).
-
-\begin{equation}
-r=\frac{b+e-1}{2(R-1)}.
-\label{eq:rank}
-\end{equation}
-A lower energy receives a lower rank.
-The energy rank \(r_E\), the novelty rank \(r_N\), the scarcity rank.
-\(r_S\), and the uncertainty rank \(r_U\) combine as
-\begin{equation}
-\log w_i=-r_{E,i}+0.8\,r_{N,i}+0.6\,r_{S,i}+0.4\,r_{U,i}.
-\label{eq:weight}
-\end{equation}
-Offspring go to replicas that are low in energy, rare as packings.
-And uncertain as basins.
-
-\subsection{Occupancy and the temperature of the hop}
-Those packings and basins set the occupancy of the hop.
-The Good-Turing estimate of the unseen mass closes that census.
-\cite{goodPopulationFrequenciesSpecies1953} A saturated packing.
-Then retires.
-The next minimization is spent on a packing the census has barely seen.
-The temperature of the recommended hop stays at the Wales and Doye value
-\(0.8\) in reduced units.
-\cite{wales1997} A caller who wants a schedule that tracks the entropy.
-Of the occupied states sets it on the configuration.
-The preset itself keeps one temperature at every size.
-
-\section{Communicating chains}
-\label{sec:chains} Many searches already run many chains.
-We call the communication correct when five conditions hold.
-Each chain draws its next move from a posterior on the depth.
-That move reaches.
-A packing retires on the Good-Turing estimate of its unseen mass.
-Minima are shared under one radial merge distance.
-Every force evaluation is charged to the chain that spent it.
-So chains are compared at equal budgets.
-The receiver can act on a shared minimum by quenching it.
-And entering it in the acceptance test.
-
-Parallel tempering (PT) exchanges states along a ladder of temperatures.
-\cite{swendsenReplicaMonteCarlo1986,hukushimaExchangeMonteCarlo1996}
-Population annealing resamples a population by its Boltzmann weight.
-\cite{hukushimaPopulationAnnealingIts2003,machtaPopulationAnnealingWeighted2010}
-Conformational space annealing (CSA) keeps a bank of minima.
-\cite{leeUnbiasedGlobalOptimization2003} CSA also anneals.
-The distance cutoff.
-Deaven and Ho mate stored geometries by cut and splice.
-\cite{deaven1995} The Birmingham pool algorithms do the same.
-\cite{shayeghiPoolbcgaParallelisedGenerationfree2015} Basin hopping (BH)
-and minima hopping (MH) run a single walker.
-\cite{wales1997,goedecker2004} The conformer-rotamer ensemble sampling.
-Tool (CREST) samples a molecular ensemble by metadynamics.
-\cite{prachtCrestProgramExploration2024} de Souza reports GOAT.
-For molecules and atomic clusters, and compares it with CREST.
-\cite{deSouzaGoat2025} Carmona and co-workers give a Python.
-Basin-hopping search for Lennard-Jones clusters.
-\cite{carmonaBasinHopping2025} Their iteration counts are not force-call budgets.
-The bank in this section adds.
-The depth posterior and the unseen-mass census to that list.
-\section{Information theory in the hop}
-\label{sec:info} A move that has stopped finding depth can still take.
-Over the next trial.
-The recommended hop guards against that takeover.
-With a posterior on the depth each move reaches.
-
-\subsection{Depth posterior}
-On a deep cluster few of the available moves improve the incumbent.
-We draw the next arm by Thompson sampling from a normal-gamma posterior.
-On the depth earlier quenches of that arm reached.
-\cite{thompson1933} The depth that updates the posterior is the drop.
-From the energy before the quench to the energy after it.
-The same acceptance test meets every arm.
-With the well-tempered bias at zero.
-That test is equation~\ref{eq:metropolis}.
-\cite{Barducci_Bussi_Parrinello_2008} Figure~\ref{fig:rec-arms} draws.
-The arms and the capped burst length.
-The figure is drawn from the search, and no campaign count enters it.
 
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{rec_arms.pdf}
-\caption{The figure shows the arms of the recommended hop.
-And the law of its burst.
-The Thompson draw picks one arm.
-Whichever arm plays, its proposal is quenched once.
-That proposal meets one acceptance test.
-The depth then updates the posterior.
-The burst length is capped at eight relocations.}.
+\caption{The moves of Section~\ref{sec:moves}, and the burst of
+equation~\ref{eq:burst}.
+Whichever move is drawn, its proposal is quenched once and meets
+equation~\ref{eq:metropolis}.}
 \label{fig:rec-arms}
 \end{figure}
 
-\subsection{Symmetrisation}
-The burst drawn above is one arm of the hop.
-After that quench.
-The search projects the structure toward a more symmetric neighbour.
-A global minimum is often more symmetric than the minima around it.
-On LJ\(_{75}\) the published global minimum is a Marks decahedron.
-\cite{marksSurfaceStructureEnergetics1984,Doye_Miller_Wales_1999} Most.
-Low minima around that decahedron are icosahedral.
-Oakley, Johnston, and Wales symmetrise the structure in GMIN.
-\cite{oakley2013} One route completes the orbits of a symmetric core.
-Another route uses a continuous symmetry measure.
-The preset applies that projection every ten quenches at every size.
+\section{Several chains}
+\label{sec:population}
+The runs in Section~\ref{sec:results} are single chains at \(T=0.8\).
+When several chains are resampled, the weight is a within-epoch rank,
+so cluster sizes that do not share an energy scale can sit in one
+population.
+\cite{DelMoral_Doucet_Jasra_2006}
+Positions in a tied block run from \(b\) inclusive to \(e\) exclusive,
+out of \(R\ge 2\) chains, and the rank is
+\begin{equation}
+r = \frac{b+e-1}{2(R-1)}.
+\label{eq:rank}
+\end{equation}
+A single chain has rank \(0\).
+A lower energy receives a lower energy rank.
+Novelty, scarcity, and uncertainty are ranked so that a larger score
+receives a higher rank.
+With the default coefficients the log weight is
+\begin{equation}
+\log w_i = -r_{E,i} + 0.8\, r_{N,i} + 0.6\, r_{S,i} + 0.4\, r_{U,i},
+\label{eq:weight}
+\end{equation}
+and a log weight more than \(4\) below the largest is clipped before
+the weights are normalised.
+Offspring go to chains that are low in energy, rare as packings, and
+uncertain as basins.
+A packing whose Good--Turing unseen mass has collapsed is retired.
+\cite{goodPopulationFrequenciesSpecies1953}
+
+Parallel tempering exchanges states on a temperature ladder.
+\cite{swendsenReplicaMonteCarlo1986,hukushimaExchangeMonteCarlo1996}
+Population annealing resamples by a Boltzmann weight.
+\cite{hukushimaPopulationAnnealingIts2003,machtaPopulationAnnealingWeighted2010}
+Conformational space annealing keeps a bank and anneals a distance
+cutoff.
+\cite{leeUnbiasedGlobalOptimization2003}
+Cut-and-splice mating is the move in the Birmingham pool methods.
+\cite{deaven1995,shayeghiPoolbcgaParallelisedGenerationfree2015}
+Equation~\ref{eq:weight} is a rank weight on a fixed population.
+Baioletti and co-workers compare another population basin hop on
+clusters of 20, 30, and 40 atoms.
+\cite{baiolettiBasinHopping2024}
+
+\section{Related searches}
+\label{sec:related}
+GMIN is the Wales-group basin-hopping program.
+\cite{wales1997,oakley2013}
+Section~\ref{sec:gmin} scores it on LJ\(_{98}\) and LJ\(_{104}\).
+The Atomic Simulation Environment provides a basin-hopping optimiser.
+\cite{larsenAse2017}
+This article reports no force-call count for that optimiser.
+AGOX searches with a local surrogate, and later releases add
+replica exchange.
+\cite{christiansenAgox2022}
+GOFEE is the surrogate search of Bisbo and Hammer.
+\cite{bisboEfficientGlobalStructure2020}
+A later GOFEE run puts a spectral-graph and Voronoi filter in front of
+the sampling step and includes LJ\(_{55}\) and LJ\(_{75}\) among its
+tests.
+\cite{slavenskyClassifier2024}
+Those curves count local optimisations on LJ\(_{75}\).
+They are not the force-call hits of Section~\ref{sec:ablation}.
+The same group has used a deliberately incomplete machine-learned
+landscape to propose candidates, a universal potential as a Gaussian-process
+prior, fractional existence variables, an on-the-fly potential in a
+grand-canonical search, and a delta model on silver--sulfur systems.
+\cite{slavenskyComplementary2023,lyngbyUniversalPrior2024,larsenFractional2023,quinlivanGrandCanonical2026,pitfieldActiveDelta2026}
+Minima hopping on the Atomic Simulation Environment is a separate
+package, with a corrigendum and a deposit dated 7 November 2026.
+\cite{krummenacherMinimaHopping2024,krummenacherAseMh2026,goedecker2004}
+None of those searches is given a hit rate in the tables below.
+
+Several 2024--2026 searches recover published Lennard-Jones minima
+inside the sizes used here.
+Durand reports the best-known energies from 6 to 150 atoms.
+\cite{durandLennardJones2026}
+A tabu initialiser in front of a bonobo optimiser is reported to reach
+the LJ\(_{38}\) minimum.
+\cite{chakrabortyBonobo2026}
+A tensor-train encoding is reported on clusters from 5 to 45 atoms,
+and the journal version carries the same Lennard-Jones account.
+\cite{sozykinTensorTrain2026}
+Hyperspatial relaxation and a TETRIS initialiser are reported on
+LJ\(_{37}\), LJ\(_{38}\), LJ\(_{39}\), LJ\(_{47}\), and LJ\(_{55}\).
+\cite{gochitashviliGosh2025}
+Minima-hopping escape directions are benchmarked on 60 to 74 atoms.
+\cite{schaerfMinimaHopping2026}
+A fingerprint bias during local optimisation is reported on LJ\(_{38}\)
+and LJ\(_{75}\).
+\cite{taoFingerprint2024}
+Population annealing has been used to estimate the free energy of
+LJ\(_{38}\), with the truncated octahedron as the global minimum.
+\cite{kowaguchiLj382026}
+Nested sampling of the 7-atom and 36-atom clusters recovers known phase
+transitions.
+\cite{maillardNested2025}
+An adaptive genetic algorithm prints known energies through 20 atoms at
+higher precision.
+\cite{willneckerGenetic2024}
+A Python basin-hopping code with an adaptive step is reported to find
+the LJ\(_{38}\) truncated octahedron within a few hundred iterations.
+\cite{carmonaBasinHopping2025}
+An iteration count is not the force-call budget of
+equation~\ref{eq:hit}.
+Schneider argues from symmetry that a global minimum sits on a
+symmetric stratum, and he attributes the census of symmetric global
+minima to Wales and Doye.
+\cite{schneiderSymmetry2026,wales1997}
+Olivier reports energies below two Cambridge tables that are not the
+Lennard-Jones table, for the modified Dzugutov potential and the Z1
+potential.
+\cite{olivierPairTables2026}
+Those energies stay out of Table~\ref{tab:ablation}.
+Amore and Wales search Thomson clusters of thousands of particles.
+The journal version is the same search.
+\cite{amoreThomson2026}
+Other Lennard-Jones calculations score a Wasserstein error, an
+adsorbed layer on the 38-atom cluster, or a test function with no named
+size.
+\cite{yallupNested2026,chatbiphoAdsorbate2025,gargLennardJones2025}
+None of those rates is copied into Section~\ref{sec:results}.
+
+CREST samples a molecular ensemble by metadynamics.
+\cite{prachtCrestProgramExploration2024}
+The hexamer comparison uses CREST 3.0.2.
+That build exposes no seed.
+GOAT is a global optimisation method for molecules and atomic clusters,
+and its paper compares it with CREST.
+\cite{deSouzaGoat2025}
+A bio-inspired Goat Optimization Algorithm on analytic test functions
+is a different method, and a proximal basin-hopping guarantee on
+synthetic functions is a different method.
+\cite{nozariGoatAlgorithm2025,laugaProximal2026}
+g-xTB is a tight-binding method aimed at a hybrid density functional.
+\cite{froitzheimGxtb2025}
+It is distinct from the GFN2-xTB surface used below, which is evaluated
+with xtb 6.7.1.
+\cite{bannwarthGfn2xtbanAccurateBroadly2019}
+MARS samples conformers on machine-learned force fields and describes
+semiempirical quantum chemistry as the practical route CREST automates.
+\cite{suarezDouMars2026}
+A GFN2-xTB audit of the GEOM-DRUGS ensemble finds structures below the
+released set.
+\cite{vahediahmarGeomDrugs2026}
+The hexamer result in Section~\ref{sec:hexamer} is a polished gap on six
+seeds.
+It is not a claim that a CREST ensemble is the complete low-energy set.
+
+Water clusters are searched on several surfaces besides the TIP4P and
+GFN2-xTB surfaces used here.
+AIMNet2 has been driven by a tabu search and by a genetic algorithm,
+through ten molecules.
+\cite{giriAimnetClusters2025,zhangGmmlp2026}
+An artificial bee colony on TIP4P has been reoptimised at HCTH.
+\cite{bhattWaterClusters2024}
+Random-phase-approximation forces reorder larger water clusters.
+The same preprint says the hexamer does not show that reordering.
+\cite{tahirRpaWater2024}
+One argon atom, and hydrophobic guests, reorder hexamer-sized water
+topologies on electronic-structure surfaces.
+\cite{rockArgonHexamer2026,baruahWaterSix2026}
+COMPLAX holds a rigid solute and compares CREST with other microsolvation
+tools.
+\cite{lauriaComplax2026}
+A note on geometry optimisation separates a tighter convergence inside
+one basin from a jump into another isomer.
+\cite{doustMohammadiBasins2026}
+The hexamer polish below is a local relaxation of a structure already in
+hand.
+
+Further basin-hopping searches sit on other potentials: adaptive
+basin hopping on density-functional surfaces, Stillinger--Weber silicon,
+surface-supported clusters, a firefly search, minima hopping on ionized
+gold, and doped boron clusters.
+\cite{carmonaAbhDft2026,shuklaSilicon2026,zhangSgmsc2026,leeNara2026,safaGoldIons2026,rodriguezKesslerYttrium2026,rodriguezKesslerB18ca2026,rodriguezKesslerB7ca2026,rodriguezKesslerB18ag2026}
+This article does not assign them a Lennard-Jones or TIP4P hit rate.
 
 \section{Results}
+\label{sec:results}
+
 \subsection{The structures}
-Figure~\ref{fig:systems} draws the archived structures of the benchmark.
-The Lennard-Jones geometries are the published reference minima of the Cambridge.
-Cluster Database.
-The TIP4P geometries are the Wales and Hodges reference minima.
-For that potential, not the global minimum of every water model.
-\cite{walesCambridgeClusterDatabase,walesGlobalMinimaWater1998,jorgensen1983,hernandezRojasWater2026}
-The hexamers are GFN2-xTB motif hits of the hop on that potential.
-\cite{bannwarthGfn2xtbanAccurateBroadly2019} The Supporting Information.
-Draws the full structure plates.
+Figure~\ref{fig:systems} shows the published Lennard-Jones minima and
+the TIP4P reference minima, together with hexamers relaxed at GFN2-xTB
+with xtb 6.7.1.
+\cite{walesCambridgeClusterDatabase,walesGlobalMinimaWater1998,bannwarthGfn2xtbanAccurateBroadly2019}
+Figure~\ref{fig:minima-maps} maps the minima one chain accepted.
+At LJ\(_{75}\) the map reaches the icosahedral competitor at
+\(-396.282249\), which is \(1.210\) above the published decahedral
+minimum at \(-397.492331\).
+At LJ\(_{98}\) the mapped minima stop \(0.022\) above the published
+tetrahedral minimum at \(-543.665361\).
+Figure~\ref{fig:disconnectivity} joins the LJ\(_{38}\) minima where they
+first meet among their nearest neighbours in the coordination
+descriptor.
+The search stores no transition states.
+The drawing joins minima by descriptor distance.
+Figure~\ref{fig:landfold-maps} maps the same minima from low free energy
+to high.
 
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{systems.pdf}
-\caption{Structures of the benchmark.
-(a) The published global minima of LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\) and
-LJ\(_{104}\).
-(b) The TIP4P reference minima of 10, 15 and 20 molecules.
-And the lowest GFN2-xTB hexamer of each class on that potential.}.
+\caption{Structures used as references.
+(a) Published global minima of LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\),
+and LJ\(_{104}\).
+(b) TIP4P reference minima of 10, 15, and 20 molecules, and the lowest
+hexamer of each class relaxed at GFN2-xTB with xtb 6.7.1.}
 \label{fig:systems}
 \end{figure}
-\begin{figure}
-\centering
-\includegraphics[width=\linewidth]{lj75_ecdf.pdf}
-\caption{Encounter curves of main's earlier sealed LJ\(_{75}\) campaign.
-The panel prints that run's PAR-2 values.
-The run used an empty surface list and restart on stall.
-The arms are the recommended hop, the derived hop.
-And the Wales-group basin-hopping program (GMIN).
-The plot covers 200 seeds.}.
-\label{fig:lj75-ecdf}
-\end{figure}
-The LJ\(_{75}\) seeds 0 through 199 run serially at a cap of.
-\(4\times 10^{6}\) force calls.
-No hit count is reported until that run finishes.
-\todo{The LJ75 hit count is not in a sealed kit through v1.30.}
-Figure~\ref{fig:lj75-ecdf} draws the encounter curves of the earlier.
-Sealed LJ\(_{75}\) campaign, which covered 200 seeds.
-\subsection{Rates and the water hexamer}
-
-Figure~\ref{fig:minima-maps} maps the minima one seed of basin hopping
-and of the recommended hop accepted at LJ\(_{38}\), LJ\(_{75}\) and.
-LJ\(_{98}\).
-At LJ\(_{38}\) the recommended hop reached the truncated octahedron.
-The LJ\(_{75}\) minima on that map reach the icosahedral competitor at.
-\(-396.282249\), which is \(1.210\) above the published decahedral global minimum.
-At \(-397.492331\).
-The LJ\(_{98}\) minima stop \(0.022\) above the published tetrahedral global minimum.
-At \(-543.665361\).
-Figure~\ref{fig:disconnectivity} joins the LJ\(_{38}\) minima where.
-They first connect among their nearest neighbours.
-In the coordination descriptor.
-A search records no transition states.
-So no join of the tree is a barrier.
-Figure~\ref{fig:landfold-maps} shows a landfold panel for each sealed
-Lennard-Jones size and for the TIP4P hexamer.
 
 \begin{figure*}
 \centering
 \includegraphics[width=\textwidth]{\MinimaMapFile}
-\caption{Maps of the minima one seed accepted at LJ\(_{38}\), LJ\(_{75}\), and
+\caption{Minima one chain accepted at LJ\(_{38}\), LJ\(_{75}\), and
 LJ\(_{98}\).
-Top, the sketch-map.
+Top, a sketch-map.
 Middle, four deep landmarks.
-Bottom, the landfold map of the same minima.
-Sky in the largest community and coral in the others.}.
+Bottom, a map of the same minima.}
 \label{fig:minima-maps}
 \end{figure*}
 
 \begin{figure}
 \centering
 \includegraphics[width=\linewidth]{disconnectivity.pdf}
-\caption{Approximate disconnectivity graph of LJ\(_{38}\).
-Minima closer than \(0.15\) in the coordination descriptor are merged.
+\caption{Nearest-neighbour joining of the LJ\(_{38}\) minima in the
+coordination descriptor.
+Minima closer than \(0.15\) are merged.
 The stems are coloured by five spectral basins.
-No join is a barrier.}.
+No join is a barrier.}
 \label{fig:disconnectivity}
 \end{figure}
 
 \begin{figure*}
 \centering
 \includegraphics[width=\textwidth]{landfold_maps.pdf}
-\caption{Landfold maps of the sealed Lennard-Jones and TIP4P hexamer runs.
-The Lennard-Jones panels use main's preset, including an LJ\(_{38}\).
-derived panel and an LJ\(_{75}\) aggregate of 200 seeds.
-Each panel is one sealed map.
-Coloured from the lowest free energy to the highest.
-With the minimum marked.}.
+\caption{Maps of the Lennard-Jones minima and of the TIP4P hexamer.
+Each panel runs from the lowest free energy to the highest, and the
+minimum is marked.}
 \label{fig:landfold-maps}
 \end{figure*}
-\subsection{Earlier 192-seed hexamer campaign}
-On the water hexamer the sealed campaign runs four arms.
-Each on seeds 0 to 191 at a budget of 4000 force calls.
-\cite{prachtCrestProgramExploration2024,bannwarthGfn2xtbanAccurateBroadly2019}
-The default arm is the hop.
-The budget-fair polish is an opt-in mode that charges an external.
-Polish against the same budget.
-The third arm is CREST.
-And the fourth runs that polish after CREST inside the same budget.
-A run hits when the iterative rotations and assignments alignment (IRA).
-matches a structure to a Malloum prism, cage, book.
-Or cyclic chair reoptimised at GFN2-xTB.
-That hit is against the reference motif on that potential.
-It is not the global minimum of every water model.
-\cite{gundeIraShapeMatching2021,malloumStructuresRelativeStability2019,perezStructuresCagePrism2012,hernandezRojasWater2026}
-The default hop hit 121 of 192 seeds.
-Its call PAR-2 median is 4000 and its type-7 interquartile range is.
-4000.
-CREST hit 97 of 192 seeds.
-Its call PAR-2 median is 4000 and its type-7 interquartile range is.
-4000.
-Paired by seed, the exact McNemar test of the discordant pairs gives.
-\(p=0.0264\).
-\cite{mcnemarNoteSamplingError1947} The budget-fair polish hit 148 of
-192.
-Its call PAR-2 median is 4000 and its type-7 interquartile range is 0.
-CREST plus that polish hit 114 of 192.
-Its call PAR-2 median is 3560 and its type-7 interquartile range is.
-4546.25.
-The exact McNemar \(p\) of the polish against CREST is.
-\(1.37\times 10^{-6}\).
-The exact McNemar \(p\) against CREST plus the polish is \(0.000374\).
-Figure~\ref{fig:water-crest} draws the four arms.
 
-\subsection{Water hexamer against CREST}
-\label{sec:water} CREST here is conda-forge crest 3.0.2.
-Its metadynamics is stochastic for a fixed start geometry.
-This build exposes no seed.
-The anneal seed fixes only start.xyz.
-CREST's cost is the energy and gradient call count.
-The matched comparison.
-And the 30-start statistics are not in this article.
-A row succeeds when the run exits cleanly.
-The polished energy is finite.
-And the maximum force is at or below 0.001~Eh/bohr.
-Every final is polished with xtb 6.7.1 at GFN2, the vtight setting, accuracy.
-0.01, and an iteration limit of 500.
-The vtight energy threshold is \(1\times 10^{-7}\)~Eh.
+\subsection{Depth posterior against a uniform draw}
+\label{sec:ablation}
+Table~\ref{tab:ablation} is six seeds, 2000 through 2005, on both arms.
+The budgets are \(4\times 10^{5}\) force calls at LJ\(_{38}\),
+\(1\times 10^{6}\) at LJ\(_{55}\), and \(4\times 10^{6}\) at LJ\(_{75}\)
+and LJ\(_{98}\).
+The runs were serial.
+The hit is equation~\ref{eq:hit}.
 
-Table~\ref{tab:crest-counters} lists two CREST counters for each seed.
-The old counter sums the dynamics steps and the optimization steps.
-CREST prints a second total, ``Total number of energy+grad calls''.
-The old counter undercounted CREST on every seed.
+The posterior and the uniform draw both hit LJ\(_{38}\) on 6 of 6 seeds
+and LJ\(_{55}\) on 6 of 6.
+Both hit LJ\(_{98}\) on 5 of 6.
+Both miss seed 2004 at LJ\(_{98}\).
+At LJ\(_{75}\) the posterior hits 6 of 6.
+The uniform draw hits 4 of 6 and misses seeds 2001 and 2002.
+The depth posterior therefore beats uniform arm choice at LJ\(_{75}\),
+6 of 6 against 4 of 6, and the hit counts match at the other three
+sizes.
 
 \begin{table}
-\caption{CREST effort on the water hexamer.
-The old counter is dynamics steps plus optimization steps.
-The energy and gradient column is CREST's own summary line.}.
-\label{tab:crest-counters}
+\caption{Hits on seeds 2000--2005.
+The posterior draws equation~\ref{eq:thompson}.
+The uniform arm draws equation~\ref{eq:uniform}.
+A hit satisfies equation~\ref{eq:hit}.}
+\label{tab:ablation}
 \centering
-\begin{tabular}{crr}
+\begin{tabular}{lrrr}
 \toprule
-Seed & Old counter & Energy+gradient \\.
+Cluster & Budget & Posterior & Uniform \\
 \midrule
-0 & 32112 & 151074 \\.
-1 & 50026 & 191132 \\.
-2 & 32155 & 142110 \\.
-3 & 46062 & 172468 \\.
-4 & 50063 & 157643 \\.
-5 & 32170 & 209931 \\.
+LJ\(_{38}\) & \(4\times 10^{5}\) & 6/6 & 6/6 \\
+LJ\(_{55}\) & \(1\times 10^{6}\) & 6/6 & 6/6 \\
+LJ\(_{75}\) & \(4\times 10^{6}\) & 6/6 & 4/6 \\
+LJ\(_{98}\) & \(4\times 10^{6}\) & 5/6 & 5/6 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The 4000-call arm spends 4000 evaluations in one setting.
-The driver-count budget is the anneal arm whose cap equals each seed's.
-Old counter.
-The driver-count budget runs from 32112 to 50063 evaluations.
-CREST's energy and gradient totals run from 142110 to 209931.
-The comparison is the 4000-call arm against those energy.
-And gradient calls.
-The driver-count budget is not equal effort.
-Because the old counter undercounted CREST.
+On a second list, seeds 6400--6405, with the pentagonal retry of
+equation~\ref{eq:hold}, LJ\(_{98}\) hits on 6 of 6 inside
+\(4\times 10^{6}\) calls.
+On those seeds, the run that holds a failed growth and does not take
+the eighth-leave retry hits 5 of 6.
+Seed 6404 stays at a gap of \(0.022404\) above \(-543.665361\).
+The retry is off below 98 atoms.
+On seeds 6400--6405 that setting hits LJ\(_{38}\), LJ\(_{55}\), and
+LJ\(_{75}\) on 6 of 6.
 
-Table~\ref{tab:hexamer-gaps} gives the polished gap on each seed.
-The gap is the anneal energy minus the CREST energy.
-A negative value means the anneal energy sits lower.
-Five seeds lie within \(1\times 10^{-7}\)~Eh on both gap ledgers.
-Seed 1 exceeds that line, at \(1.3509\times 10^{-7}\)~Eh on the.
-4000-call ledger.
-And \(1.3505\times 10^{-7}\)~Eh on the driver-count ledger.
-The label-free root-mean-square deviation of each polished pair.
-Is at most 0.00212~Å.
+\subsection{GMIN on LJ\(_{98}\) and LJ\(_{104}\)}
+\label{sec:gmin}
+Table~\ref{tab:gmin} is the head-to-head recorded before the pentagonal
+retry.
+Both arms use seeds 2000--2005 and a ceiling of \(4\times 10^{6}\)
+force calls.
+The hit is equation~\ref{eq:hit}.
+On LJ\(_{98}\) this setting hits 5 of 6 and GMIN hits 0 of 6.
+On LJ\(_{104}\) both hit 2 of 6.
+\todo{The LJ\(_{104}\) rerun on the code that retries the pentagonal
+leave is still running.
+No hit count from that rerun is reported here.}
 
 \begin{table}
-\caption{Polished gap and label-free deviation on the water hexamer.
+\caption{Hits against GMIN before the pentagonal retry.
+Six seeds, ceiling \(4\times 10^{6}\) force calls.
+The median and the interquartile range count a miss as the full
+ceiling.}
+\label{tab:gmin}
+\centering
+\begin{tabular}{llrrr}
+\toprule
+Cluster & Arm & Hits & Median calls & IQR \\
+\midrule
+LJ\(_{98}\) & this work & 5/6 & 1801909.5 & 1807535.5 \\
+LJ\(_{98}\) & GMIN & 0/6 & 4000000 & 0 \\
+LJ\(_{104}\) & this work & 2/6 & 4000000 & 200378.25 \\
+LJ\(_{104}\) & GMIN & 2/6 & 4000000 & 1919707.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{TIP4P clusters}
+Ten, fifteen, and twenty TIP4P molecules were run for six seeds,
+0 through 5, at \(5\times 10^{5}\) force calls.
+The hit is equation~\ref{eq:tip4p-hit}.
+\((\mathrm{H_2O})_{10}\) hits on 6 of 6 seeds.
+In seed order the calls to the first hit are 13899, 18441, 5156,
+6699, 8526, and 28702.
+\((\mathrm{H_2O})_{15}\) hits on 0 of 6.
+\((\mathrm{H_2O})_{20}\) hits on 0 of 6.
+The best fifteen-molecule energies lie \(5.3497747446\) to
+\(11.8637176934\)~kJ/mol above the Wales--Hodges reference.
+The best twenty-molecule energies lie \(7.5374382441\) to
+\(18.5741117570\)~kJ/mol above their reference.
+
+\subsection{Water hexamer against CREST}
+\label{sec:hexamer}
+CREST here is release 3.0.2.
+\cite{prachtCrestProgramExploration2024}
+Its metadynamics is stochastic for a fixed start geometry, and this
+build exposes no seed.
+The six rows are six single draws from one start geometry.
+Each final is polished with xtb 6.7.1 at GFN2, the vtight setting,
+accuracy \(0.01\), and an iteration limit of 500.
+\cite{bannwarthGfn2xtbanAccurateBroadly2019}
+The vtight energy threshold is \(1\times 10^{-7}\)~Eh.
+A row is kept when the run exits cleanly, the polished energy is
+finite, and the maximum force is at or below \(0.001\)~Eh/bohr.
+\todo{The same six finals have not been re-polished with xtb 6.8.0.
+That re-polish is still running, and no 6.8.0 gap is reported here.}
+
+Table~\ref{tab:crest-counters} lists two CREST counters.
+The old counter sums the dynamics steps and the optimization steps.
+CREST prints a second total, the energy and gradient calls.
+The old counter is smaller on every seed.
+The 4000-call arm spends 4000 evaluations.
+A second arm uses a cap equal to that seed's old counter, from 32112
+to 50063 evaluations.
+CREST's energy and gradient totals run from 142110 to 209931.
+The old counter is not equal effort against those totals.
+
+\begin{table}
+\caption{CREST 3.0.2 effort on the water hexamer.
+The old counter is dynamics steps plus optimization steps.
+The energy and gradient column is CREST's own summary line.
+The GFN2 evaluations use xtb 6.7.1.}
+\label{tab:crest-counters}
+\centering
+\begin{tabular}{crr}
+\toprule
+Seed & Old counter & Energy+gradient \\
+\midrule
+0 & 32112 & 151074 \\
+1 & 50026 & 191132 \\
+2 & 32155 & 142110 \\
+3 & 46062 & 172468 \\
+4 & 50063 & 157643 \\
+5 & 32170 & 209931 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:hexamer-gaps} gives the polished gap on each seed at
+GFN2-xTB with xtb 6.7.1.
+The gap is the anneal energy minus the CREST energy.
+A negative value means the anneal energy is lower.
+Five seeds lie within \(1\times 10^{-7}\)~Eh on both ledgers.
+Seed 1 lies outside that line, at \(-1.3509\times 10^{-7}\)~Eh on the
+4000-call ledger and \(-1.3505\times 10^{-7}\)~Eh on the ledger whose
+cap equals the old counter.
+The label-free root-mean-square deviation of each polished pair is at
+most \(0.00212\)~\AA.
+The logs name the processor as Intel Xeon, family 6, model 207.
+Each CREST run used one thread.
+The wall-time medians are \(544.0\)~s for CREST, \(18.8\)~s for the
+4000-call arm, and \(195.5\)~s for the arm whose cap equals the old
+counter.
+The CREST polish converged in one iteration on all 18 finals.
+No CREST structure dissociated.
+
+\begin{table}
+\caption{Polished gap and label-free deviation on the water hexamer
+at GFN2-xTB with xtb 6.7.1.
 The gap is anneal minus CREST, in hartree.
-The deviation is the label-free root-mean-square deviation.
-In angstroms.}.
+The deviation is in angstroms.}
 \label{tab:hexamer-gaps}
 \centering
 \begin{tabular}{crrrr}
 \toprule
-Seed & Gap, 4000-call ledger &.
-Gap, driver-count ledger &
-Deviation, 4000-call ledger &
-Deviation, driver-count ledger \\
+Seed & Gap, 4000 calls & Gap, old-counter cap &
+Deviation, 4000 calls & Deviation, old-counter cap \\
 \midrule
-0 & $-1.1214\times 10^{-8}$ &.
+0 & $-1.1214\times 10^{-8}$ &
 $-1.1210\times 10^{-8}$ & 0.001004 & 0.000987 \\
-1 & $-1.3509\times 10^{-7}$ &.
+1 & $-1.3509\times 10^{-7}$ &
 $-1.3505\times 10^{-7}$ & 0.002023 & 0.001964 \\
-2 & $-2.5460\times 10^{-9}$ &.
+2 & $-2.5460\times 10^{-9}$ &
 $-2.5850\times 10^{-9}$ & 0.000532 & 0.000477 \\
-3 & $-4.1510\times 10^{-9}$ &.
+3 & $-4.1510\times 10^{-9}$ &
 $-4.1430\times 10^{-9}$ & 0.000322 & 0.000308 \\
-4 & $-6.8980\times 10^{-8}$ &.
+4 & $-6.8980\times 10^{-8}$ &
 $-6.9022\times 10^{-8}$ & 0.002116 & 0.002068 \\
-5 & $-2.1900\times 10^{-9}$ &.
+5 & $-2.1900\times 10^{-9}$ &
 $-2.2000\times 10^{-9}$ & 0.000157 & 0.000134 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The logs name the processor Intel Xeon Processor, family 6, model 207.
-Each CREST run selected one thread.
-The hexamer wall-time medians, from \texttt{logs/hexamer-walls.txt}, are
-544.0~s for CREST, 18.8~s for the 4000-call arm.
-And 195.5~s for the driver-count budget.
-
-The CREST polish converged in one iteration on all 18 finals.
-No CREST structure dissociated.
-
-\begin{figure}
-\centering
-\includegraphics[width=\linewidth]{water_crest.pdf}
-\caption{The water hexamer against CREST, sealed campaign.
-(a) The share of 192 seeds that each arm hit, with the Wilson interval.
-\cite{wilsonProbableInferenceLaw1927} (b) For each hop arm paired with
-CREST, the difference in hit rate, with the Newcombe interval.
-And the exact McNemar.
-
-\(p\)~\cite{newcombeImprovedConfidenceIntervals1998,
-%
-mcnemarNoteSamplingError1947}.}
-\label{fig:water-crest}
-\end{figure}
-
-The water 16-mer count is separate open work.
-Apart from the hexamer campaign.
-This comparison leaves out the Atomic Simulation Environment.
-The atomistic global optimization framework (AGOX).
-And the Wales-group basin-hopping program (GMIN).
-\todo{ASE, AGOX and GMIN counts are not in a sealed kit through v1.30.}
-
 \section{Conclusions}
-On the water hexamer the sealed 192-seed hop hit 121 of 192 seeds.
-In contrast, CREST hit 97 of 192 seeds.
-The budget-fair polish hit 148 of 192, and CREST followed.
-By that polish hit 114 of 192.
-Five of the six hexamer seeds lie within \(1\times 10^{-7}\)~Eh on both.
-Gap ledgers.
-Seed 1 lies above that line.
-No hit count is reported for the LJ\(_{75}\) seeds 0 through 199,.
-because that run is still going.
+One basin-hopping setting, with the moves of Section~\ref{sec:moves}
+and \(T=0.8\), is the search reported here.
+On seeds 2000--2005 the depth posterior and a uniform draw hit the same
+number of seeds at LJ\(_{38}\), LJ\(_{55}\), and LJ\(_{98}\).
+At LJ\(_{75}\) the counts are 6 of 6 and 4 of 6.
+Before the pentagonal retry, the comparison with GMIN is 5 of 6 against
+0 of 6 on LJ\(_{98}\), and a 2 of 6 tie on LJ\(_{104}\).
+The LJ\(_{104}\) rerun after that retry is still running.
+On TIP4P, 10 molecules hit on 6 of 6 seeds and 15 and 20 molecules hit
+on none, at the tolerance in equation~\ref{eq:tip4p-hit}.
+At GFN2-xTB with xtb 6.7.1, five of the six hexamer seeds lie within
+\(1\times 10^{-7}\)~Eh of the paired CREST energy, and seed 1 lies
+outside that line.
+The xtb 6.8.0 re-polish is still running.
 
 \section*{Author contributions}
 Author contributions follow the CRediT taxonomy.
-Rohit Goswami contributed conceptualization, methodology, software,.
+Rohit Goswami contributed conceptualization, methodology, software,
 formal analysis, and the original draft.
 Ruhila Goswami contributed software and visualization.
 Amrita Goswami contributed methodology and edited the draft.
-Moritz Sallermann contributed software and methodology.
-And he edited the draft.
+Moritz Sallermann contributed software and methodology, and he edited
+the draft.
 Sonaly Goswami contributed validation and checked the draft.
 Debabrata Goswami contributed supervision and oversaw the draft.
 
 \section*{Acknowledgments}
-Rohit Goswami thanks his pets Ar\'{\i}, Yoda, Jude, Crystee, Thor, and.
+Rohit Goswami thanks his pets Ar\'{\i}, Yoda, Jude, Crystee, Thor, and
 Loki, and the garden cats.
-In memoriam TuiTui, Snoopy, and Cosmo.
-He thanks his cactus Ami and his in-laws Nagaselvamani and.
+In memoriam TuiTui.
+In memoriam Snoopy.
+In memoriam Cosmo.
+He thanks his cactus Ami and his in-laws Nagaselvamani and
 Sankaranarayan.
 Ruhila Goswami set the figure colours.
-Generative AI tools assisted with drafting and editing the text.
-The authors reviewed and edited all content.
-And take full responsibility for it.
-% OPTION for Rohit. This comment is not the submitted disclosure.
-% The journal asks for one sentence that names the tool,
-% the version, the purpose,
-% and the portions of the manuscript. A tool is not an author.
-% Rohit fills or deletes the sentence before submission.
-% OPTION: <tool> <version> assisted with <purpose> in <portions>.
+The authors reviewed the text and take responsibility for it.
 
 \section*{Funding}
-This research received no specific grant.
-No funding agency in the public, commercial.
-Or not-for-profit sectors supported it.
+This research received no specific grant from any funding agency in the
+public, commercial, or not-for-profit sectors.
 
 \section*{Notes}
 The authors declare no competing financial interest.
 
 \begin{suppinfo}
-The Supporting Information gives the board constants.
-It also gives the structure plates, the sketch-map panels.
-And the landfold panels of the Lennard-Jones maps.
+The Supporting Information gives the reference energies used in
+equations~\ref{eq:hit} and~\ref{eq:tip4p-hit}, the structure plates,
+and the maps of the Lennard-Jones minima.
 \end{suppinfo}
 
 \section*{Data and software availability}
-The source is the repository \url{https://github.com/HaoZeke/anneal}.
-under the Massachusetts Institute of Technology (MIT) licence.
+The source is \url{https://github.com/HaoZeke/anneal} under the
+Massachusetts Institute of Technology licence.
 Documentation is at \url{https://anneal.rgoswami.me}.
-The archive of the software line is the Zenodo concept record.
+The archive of the software line is
 \url{https://doi.org/10.5281/zenodo.10672746}.
-The Zenodo digital object identifier (DOI) for this submission is.
-\todo{DOI}.
+\todo{The Zenodo DOI for this submission is not yet assigned.}
 The newest released tag is v0.11.1.
-The crate records version 0.12.0.
+The crate version is 0.12.0.
 The release tag for version 0.12.0 is not assigned.
-The copper numbers come from the slab runs.
-Commit aef5cf0b2068c4988509066a881eb68682ad9290 produced them.
-The rerun best energies run from -415.971521 eV to -415.971161 eV.
-The hit tolerance is 0.001 eV.
-The script is scripts/elja_hq_sci_molslab_bank.sh.
-The lines are 118 and 119.
-TARGET_TOL there is 1e-3.
-The per-seed gaps run from 8e-6 eV to 3.68e-4 eV above -415.971529 eV.
-No seed reached the reference within 1e-6 eV.
-These are not exact hits.
-Eight seeds lie inside the 0.001 eV tolerance.
-The set_relative_0.01 line records the 0.01 eV rate.
-That line is a separate figure.
-The library pins rgpot 25c759da82eececa8897e4634046fab27409c81a.
-The library sha256 follows.
-
-d399ef1f675e97c1f5e401a987d6a9df1bc30b3a37ba6586044b66d44be8399d.
-% Table-of-contents graphic slot, 3.25 in by 1.75 in:
-% toc-graphic.tex and figs/toc-graphic.pdf.
 
 \bibliography{refs}
 
