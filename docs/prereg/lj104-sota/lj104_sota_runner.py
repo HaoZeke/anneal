@@ -174,7 +174,10 @@ def record_serial_boundary(dest: Path, label: str) -> None:
     )
     lscpu_text = listing.stdout if listing.returncode == 0 else listing.stderr
     dest.mkdir(parents=True, exist_ok=True)
-    (dest / f"{label}.receipt").write_text(
+    receipt = dest / f"{label}.receipt"
+    if label == "start" and receipt.is_file():
+        return
+    receipt.write_text(
         "boot_id "
         + boot_id
         + "\n"
@@ -452,6 +455,9 @@ def _xyz_from_gmin_lowest(lowest: Path, xyz: Path, n_atoms: int) -> bool:
 
 
 def _write_heldout_t(stamp: str, rustc_line: str, cargo_line: str) -> None:
+    path = script_path().parent / "T-heldout.txt"
+    if path.is_file():
+        return
     note = "\n".join(
         [
             "Copyright (c) anneal developers",
@@ -473,7 +479,7 @@ def _write_heldout_t(stamp: str, rustc_line: str, cargo_line: str) -> None:
             "",
         ]
     )
-    (script_path().parent / "T-heldout.txt").write_text(note + "\n", encoding="utf-8")
+    path.write_text(note + "\n", encoding="utf-8")
 
 
 def cmd_heldout(args: argparse.Namespace) -> int:
@@ -517,7 +523,13 @@ def cmd_heldout(args: argparse.Namespace) -> int:
         fields = provenance()
         record_serial_boundary(out, "start")
         rows = out / "rows.tsv"
-        rows.write_text("\t".join(COLUMNS) + "\n", encoding="utf-8")
+        if not rows.is_file():
+            rows.write_text("\t".join(COLUMNS) + "\n", encoding="utf-8")
+        done = set()
+        for line in rows.read_text(encoding="utf-8").splitlines()[1:]:
+            parts = line.split("\t")
+            if len(parts) >= 5:
+                done.add((parts[3], parts[4]))
         env_base = os.environ.copy()
         env_base["OMP_NUM_THREADS"] = "1"
         env_base["RAYON_NUM_THREADS"] = "1"
@@ -526,6 +538,9 @@ def cmd_heldout(args: argparse.Namespace) -> int:
             arms.append("gmin")
         for seed in held_out_seeds():
             for code in arms:
+                if (str(seed), code) in done:
+                    print(f"skip {code}-{seed}", flush=True)
+                    continue
                 stem = f"{code}-{seed}"
                 print(f"start {stem}", flush=True)
                 row = dict(fields)
