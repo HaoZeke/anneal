@@ -1,0 +1,6 @@
+1..5
+ok 1 message check accepts one trailing newline and rejects two
+ok 2 pack script refuses a tree whose commit is absent
+ok 3 hardware capture records the live host
+ok 4 copper build rejects the wrong rgpot commit
+ok 5 copper driver stops when the library is missing
