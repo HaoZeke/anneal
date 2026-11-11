@@ -110,3 +110,13 @@ The runner TZ is America/Chicago.
 This clone holds 87a1c409 in place of ed5849f6.
 Both name tree b8c8d0bc0b0684229c1c7b5862b15e983ffc16c9.
 The lattice-search commit follows the replayed v1 tip.
+
+## Rebase
+
+The 30-seed panel was measured at 28ece242.
+Its tree is 011a2b3e13379b9b6344b51f8b5ae40ca607a8b9.
+Both cuts are 20 of 30, as the v3.2 kit reports.
+The rebase onto 6c048e30 changes the base only.
+That develop commit is an ancestor of this tip.
+No rebase conflict touched src/ lattice code.
+range-diff marks each of the 34 patches equal.
