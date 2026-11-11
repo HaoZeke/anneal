@@ -13,8 +13,6 @@ ROOT = Path(__file__).resolve().parents[3]
 ENTER = ROOT / "scripts" / "gmin_h2h" / "enter_bench.sh"
 
 PAPER_BUDGETS = {
-    38: 400_000,
-    75: 4_000_000,
     98: 4_000_000,
     104: 4_000_000,
 }

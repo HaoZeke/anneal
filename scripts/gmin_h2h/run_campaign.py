@@ -2,13 +2,12 @@
 # Copyright (c) anneal developers
 """Serial GMIN against the paper preset, at the paper force-call budgets.
 
-Sizes are LJ38, LJ75, LJ98 and LJ104. Six seeds, the same list on both
-arms. Within a size the (seed, arm) pairs are shuffled; sizes run in
-order so a short session still finishes the smaller clusters. A hit is
-a quenched energy within 0.001 of the Cambridge minimum. A miss is
-stored as the full budget, and the median and interquartile range use
-Hyndman-Fan type 7 on that column. The wall ratio is the GMIN median
-wall divided by the anneal median wall.
+Sizes are LJ98 and LJ104. Six seeds, the same list on both arms.
+Within a size the (seed, arm) pairs are shuffled; LJ98 runs before
+LJ104. A hit is a quenched energy within 0.001 of the Cambridge
+minimum. A miss is stored as the full budget, and the median and
+interquartile range use Hyndman-Fan type 7 on that column. The wall
+ratio is the GMIN median wall divided by the anneal median wall.
 
 The search binaries are the existing ``h2h_gmin_proof`` example and a
 GMIN built from Wales's public tarball. This process refuses to run
@@ -26,12 +25,10 @@ import sys
 from pathlib import Path
 
 PAPER_BUDGETS = {
-    38: 400_000,
-    75: 4_000_000,
     98: 4_000_000,
     104: 4_000_000,
 }
-SIZES = (38, 75, 98, 104)
+SIZES = (98, 104)
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
 ARMS = ("anneal", "gmin")
 SCHEDULE_SEED = 20261111
@@ -352,10 +349,10 @@ def self_test() -> None:
     median, iqr = median_iqr(sample)
     if abs(median - 3.5) > 1e-12 or abs(iqr - 2.5) > 1e-12:
         raise SystemExit("median iqr")
-    if PAPER_BUDGETS[38] != 400_000:
-        raise SystemExit("lj38 budget")
-    if any(PAPER_BUDGETS[n] != 4_000_000 for n in (75, 98, 104)):
-        raise SystemExit("large budgets")
+    if any(PAPER_BUDGETS[n] != 4_000_000 for n in (98, 104)):
+        raise SystemExit("paper budgets")
+    if set(PAPER_BUDGETS) != {98, 104}:
+        raise SystemExit("sizes")
     order = schedule(SIZES, SEEDS, ARMS, SCHEDULE_SEED)
     seen: list[int] = []
     for n, _seed, _arm in order:
