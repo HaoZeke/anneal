@@ -190,7 +190,11 @@ fn dry(home: &Array1<f64>, budget_window: bool, budget: usize) {
     let mut rng = StdRng::seed_from_u64(11);
     let outcome = run_with_gradient(&cfg, home.view(), &mut ledger, &mut relax, None, &mut rng)
         .expect("finite start");
-    assert_eq!(ledger.spent(), budget, "the dry ledger did not stop at the budget");
+    assert_eq!(
+        ledger.spent(),
+        budget,
+        "the dry ledger did not stop at the budget"
+    );
     assert!(outcome.best.is_finite(), "the dry run has no finite best");
 }
 

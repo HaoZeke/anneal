@@ -9199,7 +9199,9 @@ mod descriptor_reuse_tests {
 
 #[cfg(test)]
 mod geometry_guards {
-    use super::{contain, min_pair_distance, recentre, separate_to_overlap_rule, structure_is_sane};
+    use super::{
+        contain, min_pair_distance, recentre, separate_to_overlap_rule, structure_is_sane,
+    };
     use ndarray::Array1;
 
     #[test]

@@ -18,9 +18,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use anneal_core::methods::cluster_hopping::{
-    Config, HopStop, Ledger, optimize_with_gradient,
-};
+use anneal_core::methods::cluster_hopping::{Config, HopStop, Ledger, optimize_with_gradient};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use ndarray::{Array1, ArrayView1};
@@ -231,10 +229,7 @@ fn main() {
     let mut stop_name = if hit == 1 { "hit" } else { "ceiling" };
     let mut exit_code = 0;
     if hit == 1 {
-        let state = score
-            .hit_state
-            .as_ref()
-            .expect("hit stores the geometry");
+        let state = score.hit_state.as_ref().expect("hit stores the geometry");
         let (energy, gradient) = potential.value_and_gradient(state.view());
         energy_calls.fetch_add(1, Ordering::Relaxed);
         gradient_calls.fetch_add(1, Ordering::Relaxed);
@@ -255,20 +250,12 @@ fn main() {
             exit_code = 1;
         }
     }
-    let hop_stop = outcome
-        .stop
-        .as_ref()
-        .map(HopStop::code)
-        .unwrap_or("-");
+    let hop_stop = outcome.stop.as_ref().map(HopStop::code).unwrap_or("-");
     let energy_n = energy_calls.load(Ordering::Relaxed);
     let gradient_n = gradient_calls.load(Ordering::Relaxed);
     emit(&format!(
         "best={:.6} hit={hit} calls={calls} charged={charged} energy_calls={energy_n} gradient_calls={gradient_n} hit_energy={:.8} hit_force={:.6e} quenched_best={:.6} hops={} hop_stop={hop_stop} wall_s={wall_s:.6} stop={stop_name} exit_code={exit_code}",
-        score.best,
-        score.hit_energy,
-        score.hit_force,
-        outcome.best,
-        outcome.hops,
+        score.best, score.hit_energy, score.hit_force, outcome.best, outcome.hops,
     ));
     std::process::exit(exit_code);
 }
