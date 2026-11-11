@@ -1,6 +1,6 @@
 # Report, v1.31
 
-We drew the eighteen figures with the committed generators.
+We drew the nineteen figures with the committed generators.
 The branch is paper-integration-v1.31.
 It starts from fd4e691db9152bea8086c2102af84a1b0ea39444.
 The inbox sums file has 359 rows.
