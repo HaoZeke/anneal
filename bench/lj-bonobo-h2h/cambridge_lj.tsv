@@ -1,0 +1,12 @@
+# Cambridge Cluster Database Lennard-Jones global minima.
+# Table: https://www-wales.ch.cam.ac.uk/~jon/structures/LJ/tables.150.html
+# Citation: The Cambridge Cluster Database, D. J. Wales, J. P. K. Doye,
+# A. Dullweber, M. P. Hodges, F. Y. Naumkin, F. Calvo, J. Hernández-Rojas
+# and T. F. Middleton, http://www-wales.ch.cam.ac.uk/CCD.html
+# Energy is the pair well depth. These four values were copied from that
+# table before any head-to-head run and are the only hit targets.
+n	point_group	energy
+38	Oh	-173.928427
+75	D5h	-397.492331
+76	Cs	-402.894866
+77	C2v	-409.083517
