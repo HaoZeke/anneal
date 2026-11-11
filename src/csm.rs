@@ -510,6 +510,40 @@ mod tests {
     }
 
     #[test]
+    fn project_refuses_an_empty_group_a_bad_length_and_a_non_finite_point() {
+        let x = Array1::from_vec(vec![1.0, 0.0, 0.0, -1.0, 0.0, 0.0]);
+        let classes = [0, 0];
+        assert!(project(x.view(), &classes, &[], &[identity()]).is_none());
+        assert!(project(x.view(), &classes, &inversion_ops(), &[]).is_none());
+        assert!(project(x.view(), &[0], &inversion_ops(), &[identity()]).is_none());
+        let mut bad = x.clone();
+        bad[0] = f64::NAN;
+        assert!(project(bad.view(), &classes, &inversion_ops(), &[identity()]).is_none());
+        assert!(centre_and_scale(Array1::zeros(0).view(), 0).is_none());
+    }
+
+    #[test]
+    fn a_zero_orientation_is_not_a_measure() {
+        let x = Array1::from_vec(vec![1.0, 0.0, 0.0, -1.0, 0.0, 0.0]);
+        let zero = [[0.0; 3]; 3];
+        assert!(project(x.view(), &[0, 0], &inversion_ops(), &[zero]).is_none());
+    }
+
+    #[test]
+    fn a_pair_inside_the_singular_distance_is_not_proposed() {
+        let x = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.005, 0.0, 0.0]);
+        assert!(propose(x.view(), &[0, 0]).is_none());
+    }
+
+    #[test]
+    fn a_nearly_axial_vector_uses_the_other_reference() {
+        let along_x = perpendicular([1.0, 0.0, 0.0]);
+        assert!(along_x[0].abs() < 1e-12);
+        let along_z = perpendicular([0.0, 0.0, 1.0]);
+        assert!(along_z[2].abs() < 1e-12);
+    }
+
+    #[test]
     fn d5h_has_twenty_orthogonal_operations() {
         let ops = d5h_ops();
         assert_eq!(ops.len(), 20);
