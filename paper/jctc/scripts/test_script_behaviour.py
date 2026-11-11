@@ -523,6 +523,25 @@ def test_redact_main_rewrites_a_home_path(tmp_path: Path) -> None:
         sys.argv = old
 
 
+def test_house_drawers_write_pdfs(tmp_path: Path) -> None:
+    os.environ["PYTHONHASHSEED"] = "0"
+    os.environ["SOURCE_DATE_EPOCH"] = "0"
+    import fig_algorithm_stack
+    import fig_rec_arms
+    import figstyle
+
+    stack = tmp_path / "stack.pdf"
+    arms = tmp_path / "arms.pdf"
+    fig_algorithm_stack.draw(stack)
+    fig_rec_arms.draw(arms)
+    assert stack.stat().st_size > 100
+    assert arms.stat().st_size > 100
+    figstyle.setup()
+    assert figstyle.plain(0.5) == "0.5"
+    assert "500" in figstyle.plain(1500)
+    runpy.run_path(str(HERE / "tip4p_constants.py"), run_name="__main__")
+
+
 def test_modules_run_as_main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     dest = tmp_path / "toc.pdf"
     monkeypatch.setattr(sys, "argv", ["toc_graphic.py", str(dest)])

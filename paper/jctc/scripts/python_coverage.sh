@@ -7,7 +7,9 @@ set -eu
 out=${1:?output directory}
 cd "$(git rev-parse --show-toplevel)"
 mkdir -p "$out"
-python3 -m coverage run --branch --source=paper/jctc/scripts,python/anneal \
+export PYTHONHASHSEED=0
+export SOURCE_DATE_EPOCH=0
+python3 -m coverage run --branch --source=paper/jctc/scripts,python/anneal,pytest \
   -m pytest \
   paper/jctc/scripts/test_script_behaviour.py \
   paper/jctc/scripts/test_redact_paths.py \
