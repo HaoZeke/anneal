@@ -2,11 +2,11 @@ Copyright (c) anneal developers
 
 We record the verify of a full-history bundle.
 The verified tip follows.
-c0723143a462f3a6e51b6081956c666a509d58d1.
+3b17550cae3bdf7d8140419f95258b60a0bc186e.
 The commit that adds this note is the child of that tip.
-The bundle contains these 78 refs:.
+The bundle contains these 79 refs:.
 Ref refs/heads/prereg/lj104-sota-v1.
-Object c0723143a462f3a6e51b6081956c666a509d58d1.
+Object 3b17550cae3bdf7d8140419f95258b60a0bc186e.
 Ref refs/archive/prereg/lj104-sota-v1.3.
 Object 835b90741211f2fd00b5b9ea68cde4cc877b31af.
 Ref refs/archive/prereg/lj104-sota-v1.3.1.
@@ -19,6 +19,8 @@ Ref refs/archive/prereg/lj104-sota-v1.3.4.
 Object a12e423d4a4aa9fe9b360e7b0cdf30c509d11659.
 Ref refs/archive/prereg/lj104-sota-v1.3.5.
 Object dff92fccdc07700d645e53b447be2c06ad2580f7.
+Ref refs/archive/prereg/lj104-sota-v1.3.6.
+Object a89c0e7d922cbde17ff24740def1ba674fada32b.
 Ref refs/archive/prereg/o/09116a9c19.
 Object 09116a9c1929359881eb9ef0e2bd996b95cbaad0.
 Ref refs/archive/prereg/o/0f6f85e1e0.
@@ -165,3 +167,15 @@ The bundle records a complete history.
 The bundle uses this hash algorithm: sha1.
 PATH is okay.
 VERIFY_EXIT:0
+We keep the seconds the clock wrote.
+We read each object from git.
+We leave the archive refs in place.
+We record the branch tip beside them.
+We check the tree of each pair.
+We store the zone as America/Chicago.
+We keep the seconds the clock wrote.
+We read each object from git.
+We leave the archive refs in place.
+We record the branch tip beside them.
+We check the tree of each pair.
+We store the zone as America/Chicago.

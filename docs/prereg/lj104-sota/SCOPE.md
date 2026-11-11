@@ -2,7 +2,7 @@ Copyright (c) anneal developers
 
 We read every commit after 91b15a02 through the tip.
 The tip identifier follows.
-c0723143a462f3a6e51b6081956c666a509d58d1.
+3b17550cae3bdf7d8140419f95258b60a0bc186e.
 Git supplies each subject and each path.
 diff-tree uses A for an addition.
 The same command uses M for a modification.
@@ -633,5 +633,67 @@ docs/prereg/lj104-sota/panel/rows.tsv
 docs/prereg/lj104-sota/panel/session.txt
 docs/prereg/lj104-sota/panel/start.receipt
 docs/prereg/lj104-sota/requench.md
+
+Commit 32a05d20ae4b5090adcec8dfd095ebdb86834d07
+Subject: lj104-prereg: record the scope listing and the tip hashes
+Adds 2 paths.
+docs/prereg/lj104-sota/.scored-run.lock
+docs/prereg/lj104-sota/PROSE-RECEIPT.txt
+Modifies 10 paths.
+docs/prereg/lj104-sota/PROSE_EXTRACT.txt
+docs/prereg/lj104-sota/SCOPE.md
+docs/prereg/lj104-sota/TREE_DIFF_STAT.txt
+docs/prereg/lj104-sota/bundle-verify.txt
+docs/prereg/lj104-sota/prose/snapper-fmt.txt
+docs/prereg/lj104-sota/prose/snapper.txt
+docs/prereg/lj104-sota/scope_paths.py
+docs/prereg/lj104-sota/write_bundle_verify.py
+docs/prereg/lj104-sota/write_tree_diff_stat.py
+docs/prereg/lj104-sota/writers.log
+
+Commit a89c0e7d922cbde17ff24740def1ba674fada32b
+Subject: lj104-prereg: drop the empty scored-run lock
+Adds no path.
+
+Commit 8d22df40f0910592a45ca28cd65768053f1e8461
+Subject: lj104-prereg: record the real replay and the seal writer
+Adds 8 paths.
+docs/prereg/lj104-sota/discarded/README.txt
+docs/prereg/lj104-sota/note_tip.py
+docs/prereg/lj104-sota/prose_rate.py
+docs/prereg/lj104-sota/replay-pass-command.txt
+docs/prereg/lj104-sota/run_coverage.py
+docs/prereg/lj104-sota/write_prose_receipt.py
+docs/prereg/lj104-sota/write_replay_log.py
+docs/prereg/lj104-sota/write_seal.py
+Modifies 14 paths.
+docs/prereg/lj104-sota/LAND_HOLD.txt
+docs/prereg/lj104-sota/PREDICTIONS.md
+docs/prereg/lj104-sota/PROSE-RECEIPT.txt
+docs/prereg/lj104-sota/REPLAY.txt
+docs/prereg/lj104-sota/T.txt
+docs/prereg/lj104-sota/TREE_DIFF_STAT.txt
+docs/prereg/lj104-sota/discarded/REASON.txt
+docs/prereg/lj104-sota/prose/snapper.txt
+docs/prereg/lj104-sota/replay-commit-tree.log
+docs/prereg/lj104-sota/scope_paths.py
+docs/prereg/lj104-sota/write_bundle_verify.py
+docs/prereg/lj104-sota/write_tree_diff_stat.py
+examples/lj_requench_xyz.rs
+src/methods/lattice_search.rs
+
+Commit 1b831de7aca86509448542ae61140c53e6818337
+Subject: lj104-prereg: record line and branch coverage
+Adds 1 paths.
+docs/prereg/lj104-sota/COVERAGE.txt
+Modifies 1 path.
+docs/prereg/lj104-sota/run_coverage.py
+
+Commit 3b17550cae3bdf7d8140419f95258b60a0bc186e
+Subject: lj104-prereg: keep the coverage note within 72 columns
+Adds no path.
+Modifies 2 paths.
+docs/prereg/lj104-sota/COVERAGE.txt
+docs/prereg/lj104-sota/run_coverage.py
 
 ```
