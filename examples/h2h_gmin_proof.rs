@@ -63,11 +63,11 @@ fn cmd_run(args: &[String]) -> i32 {
     let budget = env_budget().unwrap_or(spec.budget);
     let cfg = Config::recommended(spec.n);
     let start = start_of(&cfg, spec.n, seed);
-    if let Some(path) = args.get(3) {
-        if let Err(err) = write_coords(path, &start) {
-            eprintln!("coords: {err}");
-            return 1;
-        }
+    if let Some(path) = args.get(3)
+        && let Err(err) = write_coords(path, &start)
+    {
+        eprintln!("coords: {err}");
+        return 1;
     }
     let (outcome, wall) = search(&cfg, spec.n, &start, seed, budget, spec.reference);
     let level = spec.reference + HIT_TOL;

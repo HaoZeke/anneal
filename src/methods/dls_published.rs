@@ -406,9 +406,7 @@ fn build_lattice<R: Rng + ?Sized>(
     }
     let mut candidates = Vec::new();
     for site in primary {
-        let Some(placed) = relax_probe(n, ledger, &atoms, site) else {
-            return None;
-        };
+        let placed = relax_probe(n, ledger, &atoms, site)?;
         if placed.iter().all(|v| v.is_finite()) {
             candidates.push(placed);
         }

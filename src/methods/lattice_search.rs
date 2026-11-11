@@ -1652,11 +1652,8 @@ impl Lattice {
         if !charge_oracle(ledger, 1.0 + ((m * n) + (k * m)) as f64 / pairs) {
             return None;
         }
-        let Some((offers, weights, _atoms, vacant)) =
-            self.boltzmann_offers(x, &vacant, well, temperature, &movable, k)
-        else {
-            return None;
-        };
+        let (offers, weights, _atoms, vacant) =
+            self.boltzmann_offers(x, &vacant, well, temperature, &movable, k)?;
         let sum: f64 = weights.iter().sum();
         let mut draw = rng.random::<f64>() * sum;
         let mut pick = offers.len() - 1;
