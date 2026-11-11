@@ -6,9 +6,11 @@
 \graphicspath{{figs/}}
 
 \input{macros}
+\renewcommand*\suppinfoname{Supporting Information}
+\renewcommand*\tocentryname{For Table of Contents Only}
 
 \title{Basin hopping on Lennard-Jones clusters
-with one preset at every size}.
+with one preset at every size}
 
 \author{Rohit Goswami}
 \affiliation{SURF B.V., Amsterdam}
@@ -17,38 +19,29 @@ Reykjavik, Iceland}
 \alsoaffiliation{TurtleTech ehf., Reykjavik, Iceland}
 \author{Ruhila Goswami}
 \affiliation{Faculty of Life and Environmental Sciences,
-University of Iceland, Reykjavik, Iceland}.
+University of Iceland, Reykjavik, Iceland}
 \author{Amrita Goswami}
 \affiliation{Universidad Complutense de Madrid, Madrid, Spain}
 \author{Moritz Sallermann}
 \affiliation{Universidad Complutense de Madrid, Madrid, Spain}
 \author{Sonaly Goswami}
 \affiliation{Department of Chemistry,
-Indian Institute of Technology Kanpur, Kanpur, India}.
+Indian Institute of Technology Kanpur, Kanpur, India}
 \author{Debabrata Goswami}
 \affiliation{Center for Bits and Atoms,
-Massachusetts Institute of Technology, Cambridge,.
-Massachusetts 02139, United States}.
+Massachusetts Institute of Technology, Cambridge,
+Massachusetts 02139, United States}
 \alsoaffiliation{Department of Chemistry,
-Indian Institute of Technology Kanpur, Kanpur, India}.
+Indian Institute of Technology Kanpur, Kanpur, India}
 \email{dgoswami@iitk.ac.in}
 
 \begin{document}
 
 \begin{abstract}
-We describe one basin-hopping preset for Lennard-Jones clusters.
-The move library, the temperature, the census.
-And the orbit completion stay fixed at every size.
-Below 98 atoms the constructor adds a diameter penalty.
-At 0.7 of the largest pair distance, and restart on stall stays off.
-The novelty is that fixed core.
-With the depth posterior choosing the move.
-On the water hexamer, the six crest rows are single draws from CREST.
-3.0.2.
-That build exposes no seed, and the anneal seed fixes only start.xyz.
-Those rows are not a success rate.
-Five polished gaps lie within \(1\times 10^{-7}\)~Eh.
-Seed 1 lies at \(1.35\times 10^{-7}\)~Eh, above that line.
+We describe one basin-hopping preset for Lennard-Jones clusters in which the move library, the temperature, the census, and the orbit completion stay fixed at every size.
+Below 98 atoms the constructor adds a diameter penalty at 0.7 of the largest pair distance, and restart on stall stays off.
+The novelty is that fixed core, with the depth posterior choosing the move.
+On the water hexamer the six rows are single draws from CREST 3.0.2, which exposes no seed, while the anneal seed fixes only start.xyz, so those rows are not a success rate: five polished gaps lie within \(1\times 10^{-7}\)~Eh and seed 1 lies at \(1.35\times 10^{-7}\)~Eh, above that line.
 \end{abstract}
 
 \section{Introduction}
@@ -87,7 +80,7 @@ A caller who wants lattice growth sets it on the configuration.
 A chain stores a minimum \(x\) with energy \(E(x)\).
 The move adds a displacement, the local minimiser returns a new minimum.
 \(y\), and the chain accepts \(y\).
-With the Metropolis probability at temperature \(T\),.
+With the Metropolis probability at temperature \(T\),
 \begin{equation}
 \min\bigl(1,\exp[-(E(y)-E(x))/T]\bigr).
 \label{eq:metropolis}
@@ -136,7 +129,7 @@ By calling \texttt{TwoPhase::relative} with.
 The cutoff equals \(0.7\) times the largest pair distance.
 That distance is read on the structure that enters the relaxation.
 The penalty weight equals 1.
-The surface portfolio then draws that penalty or the plain surface,.
+The surface portfolio then draws that penalty or the plain surface,
 using the same depth posterior.
 The surface list stays empty at 98 atoms and above.
 The relaxation then uses the plain surface.
@@ -148,7 +141,7 @@ Is the minimum at 38 atoms, icosahedral at 55, and Marks decahedral at.
 75.
 Installing that library only at 38 atoms would search for a structure.
 The count has already named.
-The preset therefore keeps the lean burst library at every size,.
+The preset therefore keeps the lean burst library at every size,
 including 38.
 Doye showed that the Locatelli-Schoen compression.
 A term that pulls every atom toward the centroid.
@@ -157,13 +150,13 @@ Is a change of the potential.
 Penalty, and its centroid weight stays at 0.
 Restart on stall stays at its default, off.
 So a stalled walker is not redrawn from random coordinates.
-A stall still applies tabu, symmetrisation, the recorded basin trail,.
+A stall still applies tabu, symmetrisation, the recorded basin trail,
 and the climb.
 Orbit completion quenches the images of a symmetric core when a new.
 Basin appears.
 A continuous-symmetry projection every ten quenches.
 And a reseed after five hops on an icosahedral plateau.
-Follow the defaults Oakley,.
+Follow the defaults Oakley,
 Johnston and Wales published for the Wales-group basin-hopping program.
 (GMIN).
 \cite{oakley2013} Those two numbers are applied at every size.
@@ -178,7 +171,7 @@ The figure is drawn from the search, and no campaign count enters it.
 The chains share minima through the annealed-flow bank.
 In one hop the Thompson draw picks the arm, the quench is screened.
 And the acceptance test runs at the held temperature \(T=0.8\).
-The depth of the quench updates the posterior of the arm that played,.
+The depth of the quench updates the posterior of the arm that played,
 and a saturated packing retires.
 Every potential reaches the hop through rgpot.
 \cite{goswamiOmniPotentRPCRgpot2026}}
@@ -303,7 +296,7 @@ The Thompson draw picks one arm.
 Whichever arm plays, its proposal is quenched once.
 That proposal meets one acceptance test.
 The depth then updates the posterior.
-The burst length is capped at eight relocations.}.
+The burst length is capped at eight relocations.}
 \label{fig:rec-arms}
 \end{figure}
 
@@ -338,7 +331,7 @@ Draws the full structure plates.
 (a) The global minima of LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\) and
 LJ\(_{104}\).
 (b) The TIP4P minima of 10, 15 and 20 molecules.
-And the lowest GFN2-xTB hexamer of each class.}.
+And the lowest GFN2-xTB hexamer of each class.}
 \label{fig:systems}
 \end{figure}
 \begin{figure}
@@ -349,7 +342,7 @@ The panel prints that run's PAR-2 values.
 The run used an empty surface list and restart on stall.
 The arms are the recommended hop, the derived hop.
 And the Wales-group basin-hopping program (GMIN).
-The plot covers 200 seeds.}.
+The plot covers 200 seeds.}
 \label{fig:lj75-ecdf}
 \end{figure}
 The LJ\(_{75}\) seeds 0 through 199 run serially at a cap of.
@@ -385,7 +378,7 @@ LJ\(_{98}\).
 Top, the sketch-map.
 Middle, four deep landmarks.
 Bottom, the landfold map of the same minima.
-Sky in the largest community and coral in the others.}.
+Sky in the largest community and coral in the others.}
 \label{fig:minima-maps}
 \end{figure*}
 
@@ -395,7 +388,7 @@ Sky in the largest community and coral in the others.}.
 \caption{Approximate disconnectivity graph of LJ\(_{38}\).
 Minima closer than \(0.15\) in the coordination descriptor are merged.
 The stems are coloured by five spectral basins.
-No join is a barrier.}.
+No join is a barrier.}
 \label{fig:disconnectivity}
 \end{figure}
 
@@ -407,7 +400,7 @@ The Lennard-Jones panels use main's preset, including an LJ\(_{38}\).
 derived panel and an LJ\(_{75}\) aggregate of 200 seeds.
 Each panel is one sealed map.
 Coloured from the lowest free energy to the highest.
-With the minimum marked.}.
+With the minimum marked.}
 \label{fig:landfold-maps}
 \end{figure*}
 \subsection{Earlier 192-seed hexamer campaign}
@@ -465,19 +458,19 @@ The old counter undercounted CREST on every seed.
 \begin{table}
 \caption{CREST effort on the water hexamer.
 The old counter is dynamics steps plus optimization steps.
-The energy and gradient column is CREST's own summary line.}.
+The energy and gradient column is CREST's own summary line.}
 \label{tab:crest-counters}
 \centering
 \begin{tabular}{crr}
 \toprule
-Seed & Old counter & Energy+gradient \\.
+Seed & Old counter & Energy+gradient \\
 \midrule
-0 & 32112 & 151074 \\.
-1 & 50026 & 191132 \\.
-2 & 32155 & 142110 \\.
-3 & 46062 & 172468 \\.
-4 & 50063 & 157643 \\.
-5 & 32170 & 209931 \\.
+0 & 32112 & 151074 \\
+1 & 50026 & 191132 \\
+2 & 32155 & 142110 \\
+3 & 46062 & 172468 \\
+4 & 50063 & 157643 \\
+5 & 32170 & 209931 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -506,30 +499,31 @@ Is at most 0.00212~Å.
 \caption{Polished gap and label-free deviation on the water hexamer.
 The gap is anneal minus CREST, in hartree.
 The deviation is the label-free root-mean-square deviation.
-In angstroms.}.
+In angstroms.}
 \label{tab:hexamer-gaps}
 \centering
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{crrrr}
 \toprule
-Seed & Gap, 4000-call ledger &.
+Seed & Gap, 4000-call ledger &
 Gap, driver-count ledger &
 Deviation, 4000-call ledger &
 Deviation, driver-count ledger \\
 \midrule
-0 & $-1.1214\times 10^{-8}$ &.
+0 & $-1.1214\times 10^{-8}$ &
 $-1.1210\times 10^{-8}$ & 0.001004 & 0.000987 \\
-1 & $-1.3509\times 10^{-7}$ &.
+1 & $-1.3509\times 10^{-7}$ &
 $-1.3505\times 10^{-7}$ & 0.002023 & 0.001964 \\
-2 & $-2.5460\times 10^{-9}$ &.
+2 & $-2.5460\times 10^{-9}$ &
 $-2.5850\times 10^{-9}$ & 0.000532 & 0.000477 \\
-3 & $-4.1510\times 10^{-9}$ &.
+3 & $-4.1510\times 10^{-9}$ &
 $-4.1430\times 10^{-9}$ & 0.000322 & 0.000308 \\
-4 & $-6.8980\times 10^{-8}$ &.
+4 & $-6.8980\times 10^{-8}$ &
 $-6.9022\times 10^{-8}$ & 0.002116 & 0.002068 \\
-5 & $-2.1900\times 10^{-9}$ &.
+5 & $-2.1900\times 10^{-9}$ &
 $-2.2000\times 10^{-9}$ & 0.000157 & 0.000134 \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \end{table}
 
 The logs name the processor Intel Xeon Processor, family 6, model 207.
@@ -548,9 +542,7 @@ No CREST structure dissociated.
 (a) The share of 192 seeds that each arm hit, with the Wilson interval.
 \cite{wilsonProbableInferenceLaw1927} (b) For each hop arm paired with
 CREST, the difference in hit rate, with the Newcombe interval.
-And the exact McNemar.
-
-\(p\)~\cite{newcombeImprovedConfidenceIntervals1998,
+And the exact McNemar \(p\)~\cite{newcombeImprovedConfidenceIntervals1998,
 %
 mcnemarNoteSamplingError1947}.}
 \label{fig:water-crest}
@@ -571,12 +563,12 @@ By that polish hit 114 of 192.
 Five of the six hexamer seeds lie within \(1\times 10^{-7}\)~Eh on both.
 Gap ledgers.
 Seed 1 lies above that line.
-No hit count is reported for the LJ\(_{75}\) seeds 0 through 199,.
+No hit count is reported for the LJ\(_{75}\) seeds 0 through 199,
 because that run is still going.
 
 \section*{Author contributions}
 Author contributions follow the CRediT taxonomy.
-Rohit Goswami contributed conceptualization, methodology, software,.
+Rohit Goswami contributed conceptualization, methodology, software,
 formal analysis, and the original draft.
 Ruhila Goswami contributed software and visualization.
 Amrita Goswami contributed methodology and edited the draft.
@@ -584,6 +576,10 @@ Moritz Sallermann contributed software and methodology.
 And he edited the draft.
 Sonaly Goswami contributed validation and checked the draft.
 Debabrata Goswami contributed supervision and oversaw the draft.
+
+\begin{suppinfo}
+Board constants, reference-structure plates, sketch-map panels, and landfold panels of the Lennard-Jones maps (PDF)
+\end{suppinfo}
 
 \section*{Acknowledgments}
 Rohit Goswami thanks his pets Ar\'{\i}, Yoda, Jude, Crystee, Thor, and.
@@ -610,13 +606,8 @@ Or not-for-profit sectors supported it.
 \section*{Notes}
 The authors declare no competing financial interest.
 
-\begin{suppinfo}
-The Supporting Information gives the board constants.
-It also gives the structure plates, the sketch-map panels.
-And the landfold panels of the Lennard-Jones maps.
-\end{suppinfo}
-
-\section*{Data and software availability}
+\section*{Data Availability Statement}
+The data supporting the conclusions are in this article, the Supporting Information, and the public repositories named here.
 The source is the repository \url{https://github.com/HaoZeke/anneal}.
 under the Massachusetts Institute of Technology (MIT) licence.
 Documentation is at \url{https://anneal.rgoswami.me}.
@@ -631,22 +622,24 @@ The copper numbers come from the slab runs.
 Commit aef5cf0b2068c4988509066a881eb68682ad9290 produced them.
 The rerun best energies run from -415.971521 eV to -415.971161 eV.
 The hit tolerance is 0.001 eV.
-The script is scripts/elja_hq_sci_molslab_bank.sh.
+The script is \texttt{scripts/elja\_hq\_sci\_molslab\_bank.sh}.
 The lines are 118 and 119.
-TARGET_TOL there is 1e-3.
+TARGET\_TOL there is 1e-3.
 The per-seed gaps run from 8e-6 eV to 3.68e-4 eV above -415.971529 eV.
 No seed reached the reference within 1e-6 eV.
 These are not exact hits.
 Eight seeds lie inside the 0.001 eV tolerance.
-The set_relative_0.01 line records the 0.01 eV rate.
+The \texttt{set\_relative\_0.01} line records the 0.01 eV rate.
 That line is a separate figure.
 The library pins rgpot 25c759da82eececa8897e4634046fab27409c81a.
 The library sha256 follows.
 
 d399ef1f675e97c1f5e401a987d6a9df1bc30b3a37ba6586044b66d44be8399d.
-% Table-of-contents graphic slot, 3.25 in by 1.75 in:
-% toc-graphic.tex and figs/toc-graphic.pdf.
 
 \bibliography{refs}
+
+\begin{tocentry}
+\includegraphics[width=3.25in,height=1.75in,keepaspectratio]{toc-graphic.pdf}
+\end{tocentry}
 
 \end{document}

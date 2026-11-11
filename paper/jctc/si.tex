@@ -4,9 +4,8 @@
 \sisetup{scientific-notation=true,exponent-product=\times}
 \graphicspath{{figs/}}
 \input{macros}
-\title{Supporting Information:
-Basin hopping on Lennard-Jones clusters.
-with one preset at every size}.
+\title{Basin hopping on Lennard-Jones clusters
+with one preset at every size}
 \author{Rohit Goswami}
 \affiliation{SURF B.V., Amsterdam}
 \alsoaffiliation{Science Institute, University of Iceland,
@@ -14,27 +13,27 @@ Reykjavik, Iceland}
 \alsoaffiliation{TurtleTech ehf., Reykjavik, Iceland}
 \author{Ruhila Goswami}
 \affiliation{Faculty of Life and Environmental Sciences,
-University of Iceland, Reykjavik, Iceland}.
+University of Iceland, Reykjavik, Iceland}
 \author{Amrita Goswami}
 \affiliation{Universidad Complutense de Madrid, Madrid, Spain}
 \author{Moritz Sallermann}
 \affiliation{Universidad Complutense de Madrid, Madrid, Spain}
 \author{Sonaly Goswami}
 \affiliation{Department of Chemistry,
-Indian Institute of Technology Kanpur, Kanpur, India}.
+Indian Institute of Technology Kanpur, Kanpur, India}
 \author{Debabrata Goswami}
 \affiliation{Center for Bits and Atoms,
-Massachusetts Institute of Technology, Cambridge,.
-Massachusetts 02139, United States}.
+Massachusetts Institute of Technology, Cambridge,
+Massachusetts 02139, United States}
 \alsoaffiliation{Department of Chemistry,
-Indian Institute of Technology Kanpur, Kanpur, India}.
+Indian Institute of Technology Kanpur, Kanpur, India}
 \email{dgoswami@iitk.ac.in}
 \begin{document}
 
 \section{Board constants}
-We read a hit as an energy strictly below the reference plus \(0.001\),.
+We read a hit as an energy strictly below the reference plus \(0.001\),
 taken from a converged improvement.
-The references, in reduced units, are \(-173.928427\) for LJ\(_{38}\),.
+The references, in reduced units, are \(-173.928427\) for LJ\(_{38}\),
 \(-279.248470\) for LJ\(_{55}\), and \(-397.492331\) for LJ\(_{75}\).
 LJ\(_{98}\) uses \(-543.665361\), and LJ\(_{104}\) uses \(-582.086642\).
 The temperature is \(0.8\), the value Wales and Doye used for.
@@ -126,14 +125,14 @@ With the bank-rpc feature.
 We keep the build receipt in \texttt{logs/cargo-build-receipt.txt}.
 Against the tip, \texttt{cluster\_hopping.rs} differs by 218 insertions.
 and 2 deletions, \texttt{tip4p.rs} by 93 and 15, \texttt{rigid\_body.rs}
-by 52 and 14, \texttt{examples/molecular\_cluster.rs} by 1 insertion,.
+by 52 and 14, \texttt{examples/molecular\_cluster.rs} by 1 insertion,
 \texttt{Cargo.toml} by 4 insertions and 1 deletion, and
 \texttt{Cargo.lock} by 55 deletions.
 On the recommended LJ\(_{75}\) path the hop reuses a pure.
 Distance descriptor.
 The added tests require a second call on the same coordinates to match.
 Bit for bit.
-The smooth overlap of atomic positions (SOAP) key still recomputes,.
+The smooth overlap of atomic positions (SOAP) key still recomputes,
 because its basis learns.
 The hexamer engine digest is the \texttt{engine\_sha256} line of.
 \texttt{water/VERSIONS} inside \texttt{logs/logs-water.tar.xz}.
@@ -147,7 +146,7 @@ Sketch-map of LJ\(_{38}\): \ref{fig:lj38-sketchmap}.
 Landscape of that size: \ref{fig:lj38-landscape}.
 LJ\(_{75}\) panel: \ref{fig:lj75-landscape}.
 LJ\(_{98}\) panel: \ref{fig:lj98-landscape}.
-Fold plots: \ref{fig:occ-landfold}, \ref{fig:occ-lj38},.
+Fold plots: \ref{fig:occ-landfold}, \ref{fig:occ-lj38},
 \ref{fig:occ-lj75}, \ref{fig:occ-lj98}.
 
 \begin{figure}
@@ -167,7 +166,7 @@ It uses the Jorgensen TIP4P constants C6 \(= 2552.24\) and C12.
 anneal uses \(\varepsilon = 0.6485\)~kJ/mol and.
 \(\sigma = 3.15365\)~\AA.
 Its C6 is \(2551.8252\) and its C12 is \(2510336.2\).
-Those constants give the committed \(-197.7750\)~kJ/mol reported here.}.
+Those constants give the committed \(-197.7750\)~kJ/mol reported here.}
 \label{fig:si-water}
 \end{figure}
 \begin{figure}
@@ -186,7 +185,7 @@ The darkest point is the fcc minimum, which the recommended hop reaches.}
 \caption{LJ\(_{38}\) landscape on that sketch-map.
 Colour is the energy above the global minimum.
 Basin hopping sits \(2.429\) above it.
-Random structure search sits \(3.051\) above it.}.
+Random structure search sits \(3.051\) above it.}
 \label{fig:lj38-landscape}
 \end{figure}
 \begin{figure}
@@ -194,7 +193,7 @@ Random structure search sits \(3.051\) above it.}.
 \includegraphics[width=0.48\textwidth]{lj75_landscape.png}
 \caption{LJ\(_{75}\) landscape on its sketch-map.
 Colour is the energy above the Marks decahedron.
-Basin hopping and the recommended hop both sit \(1.210\) above it.}.
+Basin hopping and the recommended hop both sit \(1.210\) above it.}
 \label{fig:lj75-landscape}
 \end{figure}
 \begin{figure}
@@ -203,7 +202,7 @@ Basin hopping and the recommended hop both sit \(1.210\) above it.}.
 \caption{LJ\(_{98}\) landscape on its sketch-map.
 Colour is the energy above the Leary minimum.
 The recommended hop sits \(0.022\) above it.
-Basin hopping sits \(0.119\) above it.}.
+Basin hopping sits \(0.119\) above it.}
 \label{fig:lj98-landscape}
 \end{figure}
 \begin{figure}
@@ -211,7 +210,7 @@ Basin hopping sits \(0.119\) above it.}.
 \includegraphics[width=0.48\textwidth]{occupancy_landfold.pdf}
 \caption{Occupancy folds of LJ\(_{38}\), LJ\(_{75}\) and LJ\(_{98}\).
 Each panel is energy above the lowest minimum.
-Against the fold coordinate.}.
+Against the fold coordinate.}
 \label{fig:occ-landfold}
 \end{figure}
 \begin{figure}
@@ -220,7 +219,7 @@ Against the fold coordinate.}.
 \caption{LJ\(_{38}\) occupancy fold.
 The arms are not marked.
 In the sealed table, the recommended hop reaches the fcc minimum.
-And basin hopping stops \(2.429\) above it.}.
+And basin hopping stops \(2.429\) above it.}
 \label{fig:occ-lj38}
 \end{figure}
 \begin{figure}
@@ -229,7 +228,7 @@ And basin hopping stops \(2.429\) above it.}.
 \caption{LJ\(_{75}\) occupancy fold.
 The arms are not marked.
 In the sealed table.
-Both arms stop \(1.210\) above the Marks decahedron.}.
+Both arms stop \(1.210\) above the Marks decahedron.}
 \label{fig:occ-lj75}
 \end{figure}
 \begin{figure}
@@ -239,15 +238,15 @@ Both arms stop \(1.210\) above the Marks decahedron.}.
 The arms are not marked.
 In the sealed table.
 The recommended hop stops \(0.022\) above the Leary minimum.
-And basin hopping \(0.119\) above it.}.
+And basin hopping \(0.119\) above it.}
 \label{fig:occ-lj98}
 \end{figure}
 
 \section{Copper slab}
 The hit tolerance is 0.001 eV.
-The script is scripts/elja_hq_sci_molslab_bank.sh.
+The script is \texttt{scripts/elja\_hq\_sci\_molslab\_bank.sh}.
 The lines are 118 and 119.
-TARGET_TOL there is 1e-3.
+TARGET\_TOL there is 1e-3.
 The reference is -415.971529 eV.
 The per-seed gaps run from 8e-6 eV to 3.68e-4 eV above that reference.
 No seed reached the reference within 1e-6 eV.
