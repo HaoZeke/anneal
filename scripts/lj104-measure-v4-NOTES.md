@@ -4,17 +4,9 @@ Seeds 2000 through 2005 are deterministic.
 v4.2 already recorded their outcome.
 This rerun is not a blind test.
 
-Commit 6f74d439 repeats that known count.
-Its central clock is 02:55:01 on 2026-11-10.
-
-The arm opened at 14:41:04 and closed at 14:57:28.
-The receipt head is f724a4c4 and the receipt tree is 7af429c6.
-
-The repeated count comes from commit 88d1cca.
-
-Head 88d1cca.
-
-Tree d16cabd3.
+The arm clocks, the receipt head, and the receipt tree are in NOTES.md.
+That file is written from the receipts of this arm.
+The repeated count is the count recorded there.
 
 Recorded binary hash.
 53e08802ead942e22f97d73fc1c015f85b77a57298e43ddd2511ce9e3b0efbeb.
@@ -61,18 +53,12 @@ The reproduction matches that known outcome.
 
 Temperature and step stay as they were.
 
-```
-seed start end energy gm_dist cs_dist
-2000 02:55:36 02:58:29 -580.42126629 0.520497 0.515938
-2001 02:58:29 03:01:12 -580.42126629 0.520497 0.515938
-2002 03:01:12 03:04:06 -578.60157826 0.520577 0.513892
-2003 03:04:06 03:06:51 -580.42126629 0.520497 0.515938
-2004 03:06:51 03:09:29 -578.60157826 0.526995 0.511773
-2005 03:09:29 03:12:08 -581.80180238 0.500292 0.523080
-```
-Dates in that block are 2026-11-10.
+Seeds 2000, 2001, and 2003 reached -580.42126629.
+Seeds 2002 and 2004 reached -578.60157826.
+Seed 2005 reached -581.80180238.
+The seed clocks for this arm are in NOTES.md.
 
-Energies and distances match the earlier six-seed table.
+Energies match the earlier six-seed table.
 
 No curve crossed either line.
 
@@ -121,7 +107,7 @@ The new test fails on 87a1c409.
 The run copies the tip test file onto a clean tree.
 The failure names stall-climb with energy inf.
 
-It passes on 88d1cca.
+It passes on the commit that added the finite guard.
 
 Failure log logs/regress/inf-before.log.
 
@@ -129,8 +115,7 @@ Pass log logs/regress/regress-tip.log.
 
 Hold coverage is missing on commit 299ce4ae, tree 826c4ba6.
 
-The failing run starts there and copies tests/stall_growth_hold.rs from
-88d1cca.
+The failing run copies the stall test from the finite-guard commit.
 
 Status file: logs/regress/overlay-old-status.txt.
 Diff file: logs/regress/overlay-old.diff.

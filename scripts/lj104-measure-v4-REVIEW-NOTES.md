@@ -1,7 +1,7 @@
 # Review notes
 
 The prose changes keep the same facts and the same numbers.
-Quoted lines below are the exact sentences that were flagged.
+The flagged sentences are quoted in this note.
 
 ## Notes and reproduce
 
@@ -20,9 +20,8 @@ The new sentence quotes the full command.
 ```
 
 The notes also gained one sentence.
-The arm opened at 14:41:04 and closed at 14:57:28.
-The receipt tree is 7af429c6270ec5c00d3b6536fbaefeb03563e1ac.
-The receipt head is f724a4c413f0460d1b6551f883da9ae3664e6330.
+The arm clocks, the receipt head, and the receipt tree are in NOTES.md.
+That file is written from the receipts of this arm.
 
 ## Commit 560e1989
 
@@ -45,12 +44,8 @@ The short name of the sums file was read as an acronym.
 The plain sentence compares every row with the file and the sums line.
 It also compares the tip blob.
 
-```
---refresh is the only mode that rewrites the map.
-```
-
-The bare flag was read as an em dash.
-Plain form: the refresh mode is the only mode that rewrites the map.
+The refresh mode is the only mode that rewrites the map.
+Its bare flag was the same em dash already described above.
 
 ```
 The script gains the copyright and MIT header.

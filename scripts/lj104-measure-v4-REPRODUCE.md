@@ -1,6 +1,7 @@
 The measured arm reruns seeds 2000 through 2005, one seed at a time.
 
-The engine is commit f724a4c4 and tree 7af429c6.
+The engine commit and the engine tree are named in REPRODUCE.md.
+That file is written from the receipts of this arm.
 
 The binary is the release example h2h_gmin_proof from that tree.
 
