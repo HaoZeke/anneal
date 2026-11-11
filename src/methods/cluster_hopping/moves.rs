@@ -67,6 +67,11 @@ pub enum MoveLibrary {
         /// arm. It needs a site geometry with one oxygen and two hydrogens.
         /// [`Config::for_tip4p`] turns it on.
         reverse_cycles: bool,
+        /// Move one molecule onto a new oxygen site.
+        ///
+        /// [`Config::for_tip4p`] leaves this off. [`Config::recommended_tip4p`]
+        /// turns it on, because a collective kick does not change the cage.
+        relocate: bool,
     },
 }
 
@@ -230,6 +235,7 @@ impl MoveLibrary {
                 rotate_step,
                 local,
                 reverse_cycles,
+                relocate,
             } => {
                 // A one-body spin and a collective centre kick both quench
                 // back into the hydrogen-bond basin they left. The local
@@ -252,6 +258,7 @@ impl MoveLibrary {
                         },
                     ]
                 };
+                let _ = relocate;
                 if *reverse_cycles
                     && let Some(geometry) = cfg.rigid_body_geometry.as_ref()
                     && super::cycles::water_sites(geometry).is_some()
@@ -570,6 +577,16 @@ pub enum ClusterMove {
         n_molecules: usize,
         /// Half-width of the per-component rotation-vector increment, radians.
         step: f64,
+    },
+    /// Move one molecule to a new site in the oxygen cage and reorient it.
+    ///
+    /// The centre is drawn in the shell of the cluster, clear of the other
+    /// centres. The other molecules stay put, so the oxygen topology can change.
+    RigidRelocate {
+        /// Rigid bodies in the state.
+        n_molecules: usize,
+        /// Minimum centre-centre distance of the new site, in length units.
+        min_separation: f64,
     },
     /// Translate one rigid-body centre, leaving the others and every orientation fixed.
     RigidTranslateOne {
@@ -1437,6 +1454,7 @@ impl ClusterMove {
             ClusterMove::SpeciesSwap { .. } => "swap".into(),
             ClusterMove::RigidTranslate { .. } => "rtrans".into(),
             ClusterMove::RigidRotate { .. } => "rrot".into(),
+            ClusterMove::RigidRelocate { .. } => "rreloc".into(),
             ClusterMove::RigidTranslateOne { .. } => "rtrans1".into(),
             ClusterMove::RigidRotateOne { .. } => "rrot1".into(),
             ClusterMove::RigidReorient { .. } => "rreor".into(),
@@ -1760,6 +1778,183 @@ impl ClusterMove {
                 }
                 if let Some(slice) = y.as_slice_mut() {
                     crate::potentials::fold_rotation_vectors(n, slice);
+                }
+                y
+            }
+            ClusterMove::RigidRelocate {
+                n_molecules,
+                min_separation,
+            } => {
+                let _ = (t, scale);
+                let mut y = x.to_owned();
+                let n = *n_molecules;
+                if n >= 2 && y.len() >= 6 * n {
+                    let mut centres = vec![[0.0; 3]; n];
+                    for i in 0..n {
+                        for k in 0..3 {
+                            centres[i][k] = y[3 * i + k];
+                        }
+                    }
+                    let mut coordination = vec![0usize; n];
+                    for i in 0..n {
+                        for j in (i + 1)..n {
+                            let mut d2 = 0.0;
+                            for k in 0..3 {
+                                let d = centres[i][k] - centres[j][k];
+                                d2 += d * d;
+                            }
+                            if d2 < 3.3 * 3.3 {
+                                coordination[i] += 1;
+                                coordination[j] += 1;
+                            }
+                        }
+                    }
+                    let fewest = coordination.iter().copied().min().unwrap_or(0);
+                    let mut loose = Vec::new();
+                    for i in 0..n {
+                        if coordination[i] == fewest {
+                            loose.push(i);
+                        }
+                    }
+                    let body = loose[rng.random_range(0..loose.len())];
+                    let mut com = [0.0; 3];
+                    for centre in &centres {
+                        for k in 0..3 {
+                            com[k] += centre[k];
+                        }
+                    }
+                    let inv = 1.0 / n as f64;
+                    for value in &mut com {
+                        *value *= inv;
+                    }
+                    let mut outer = 0.0_f64;
+                    for centre in &centres {
+                        let mut d2 = 0.0;
+                        for k in 0..3 {
+                            let d = centre[k] - com[k];
+                            d2 += d * d;
+                        }
+                        outer = outer.max(d2.sqrt());
+                    }
+                    outer = outer.max(*min_separation);
+                    let clear_of = |candidate: [f64; 3]| {
+                        centres.iter().enumerate().all(|(j, centre)| {
+                            if j == body {
+                                return true;
+                            }
+                            let mut d2 = 0.0;
+                            for k in 0..3 {
+                                let d = candidate[k] - centre[k];
+                                d2 += d * d;
+                            }
+                            d2.sqrt() >= *min_separation
+                        })
+                    };
+                    // Sit the loose molecule on a missing contact, 2.8 Å out
+                    // from an under-coordinated non-neighbour.
+                    let mut anchors: Vec<usize> = (0..n)
+                        .filter(|&j| j != body)
+                        .filter(|&j| {
+                            let mut d2 = 0.0;
+                            for k in 0..3 {
+                                let d = centres[body][k] - centres[j][k];
+                                d2 += d * d;
+                            }
+                            d2.sqrt() > 3.3
+                        })
+                        .collect();
+                    anchors.sort_by_key(|&j| coordination[j]);
+                    let mut placed = None;
+                    for &anchor in anchors.iter().take(8) {
+                        let mut outward = [0.0; 3];
+                        for k in 0..3 {
+                            outward[k] = centres[anchor][k] - com[k];
+                        }
+                        let on = (outward[0] * outward[0]
+                            + outward[1] * outward[1]
+                            + outward[2] * outward[2])
+                            .sqrt()
+                            .max(1e-8);
+                        for value in &mut outward {
+                            *value /= on;
+                        }
+                        let helper = if outward[0].abs() < 0.9 {
+                            [1.0, 0.0, 0.0]
+                        } else {
+                            [0.0, 1.0, 0.0]
+                        };
+                        let mut tangent = [
+                            outward[1] * helper[2] - outward[2] * helper[1],
+                            outward[2] * helper[0] - outward[0] * helper[2],
+                            outward[0] * helper[1] - outward[1] * helper[0],
+                        ];
+                        let tn = (tangent[0] * tangent[0]
+                            + tangent[1] * tangent[1]
+                            + tangent[2] * tangent[2])
+                            .sqrt()
+                            .max(1e-8);
+                        for value in &mut tangent {
+                            *value /= tn;
+                        }
+                        let bitangent = [
+                            outward[1] * tangent[2] - outward[2] * tangent[1],
+                            outward[2] * tangent[0] - outward[0] * tangent[2],
+                            outward[0] * tangent[1] - outward[1] * tangent[0],
+                        ];
+                        for spoke in 0..8 {
+                            let angle = spoke as f64 * std::f64::consts::TAU / 8.0;
+                            let (s, c) = angle.sin_cos();
+                            let reach = 2.8;
+                            let candidate = [
+                                centres[anchor][0]
+                                    + (outward[0] * 0.35
+                                        + (tangent[0] * c + bitangent[0] * s) * 0.94)
+                                        * reach,
+                                centres[anchor][1]
+                                    + (outward[1] * 0.35
+                                        + (tangent[1] * c + bitangent[1] * s) * 0.94)
+                                        * reach,
+                                centres[anchor][2]
+                                    + (outward[2] * 0.35
+                                        + (tangent[2] * c + bitangent[2] * s) * 0.94)
+                                        * reach,
+                            ];
+                            if clear_of(candidate) {
+                                placed = Some(candidate);
+                                break;
+                            }
+                        }
+                        if placed.is_some() {
+                            break;
+                        }
+                    }
+                    let placed = placed.unwrap_or_else(|| {
+                        let mut dir = [0.0; 3];
+                        let mut norm = 0.0;
+                        for k in 0..3 {
+                            let u1 = rng.random::<f64>().max(1e-12);
+                            let u2 = rng.random::<f64>();
+                            dir[k] = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
+                            norm += dir[k] * dir[k];
+                        }
+                        let norm = norm.sqrt().max(1e-12);
+                        [
+                            com[0] + dir[0] / norm * (outer + 1.2),
+                            com[1] + dir[1] / norm * (outer + 1.2),
+                            com[2] + dir[2] / norm * (outer + 1.2),
+                        ]
+                    });
+                    for k in 0..3 {
+                        y[3 * body + k] = placed[k];
+                    }
+                    let base = 3 * n + 3 * body;
+                    let spun = crate::potentials::compose_rotation(
+                        haar_rotation(rng),
+                        [y[base], y[base + 1], y[base + 2]],
+                    );
+                    for k in 0..3 {
+                        y[base + k] = spun[k];
+                    }
                 }
                 y
             }
@@ -2280,6 +2475,53 @@ mod move_scaling_tests {
         assert_eq!(names, ["rtrans", "rrot", "rcycle"]);
         assert!(cfg.move_library.is_rigid_body());
         assert_eq!(cfg.n_points, 6);
+    }
+
+    /// Depth reward, stall tabu and the return screen pin a rigid TIP4P
+    /// walk about 5 kJ/mol above the Wales-Hodges minimum. The paper
+    /// preset leaves those atomic controls off.
+    #[test]
+    fn recommended_tip4p_leaves_the_atomic_stall_controls_off() {
+        let recommended = Config::recommended_tip4p(15);
+        assert!(!recommended.depth_reward);
+        assert!(!recommended.tabu_on_stall);
+        assert!(!recommended.return_screen);
+        let plain = Config::for_tip4p(15);
+        assert_eq!(recommended.depth_reward, plain.depth_reward);
+        assert_eq!(recommended.tabu_on_stall, plain.tabu_on_stall);
+        assert_eq!(recommended.return_screen, plain.return_screen);
+    }
+
+    /// One centre leaves its site by more than a 0.35 Å kick. The other
+    /// centres stay. That is what changes an oxygen cage.
+    #[test]
+    fn relocation_moves_exactly_one_centre() {
+        let mv = ClusterMove::RigidRelocate {
+            n_molecules: 6,
+            min_separation: 2.7,
+        };
+        let mut x = Array1::zeros(36);
+        for i in 0..6 {
+            x[3 * i] = i as f64 * 2.8;
+        }
+        let mut rng = StdRng::seed_from_u64(3);
+        let y = mv.propose(x.view(), 2.0, &mut rng);
+        let mut moved = 0usize;
+        let mut far = false;
+        for i in 0..6 {
+            let mut d2 = 0.0;
+            for k in 0..3 {
+                let d = y[3 * i + k] - x[3 * i + k];
+                d2 += d * d;
+            }
+            let dist = d2.sqrt();
+            if dist > 1e-8 {
+                moved += 1;
+                far |= dist > 1.0;
+            }
+        }
+        assert_eq!(moved, 1);
+        assert!(far, "the molecule did not leave its site");
     }
 
     /// The escape scale has to reach the step, which is the whole mechanism.

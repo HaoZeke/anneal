@@ -2985,6 +2985,9 @@ where
     // Hops elapsed when the ledger last recorded a lower minimum.
     // A rigid stall measures 1000 hops from that hop count.
     let mut hops_at_lowest = 0usize;
+    // Set after a rigid stall when the preset relocates one molecule.
+    // Cleared when a new lowest minimum is recorded.
+    let mut cage_edit = false;
     let mut csm_reseed_stamp = 0usize;
     // Set when a stall growth fails to lower the incumbent. Later growth
     // quenches wait until that energy drops. Only the leave whose growth
@@ -3015,25 +3018,22 @@ where
             charged_at_best = ledger.spent();
             hops_at_lowest = hops;
             csm_reseed_stamp = hops;
+            cage_edit = false;
         }
         if cfg.move_library.is_rigid_body()
             && crate::methods::rigid_quench::stalled(hops, hops_at_lowest)
         {
-            // The stop target is never read here. The walker moves to the
-            // lowest minimum it has already quenched that is below the
-            // incumbent and is neither its own nor a recent stall
-            // destination. When the archive has nothing lower, a new rigid
-            // start is quenched and the walker stands there.
+            // The stop target is never read here, and no cluster is drawn.
+            // The walker moves to the lowest minimum it has already quenched
+            // that is neither its own nor a recent stall destination. The
+            // ledger best is offered at every stall, so a walker away from
+            // it goes back there unless it did so in the last few stalls.
             hops_at_lowest = hops;
             if let Some(state) = ledger.best_state.as_ref() {
                 stall_archive.offer(ledger.best, state.view());
             }
-            let archived = stall_archive.escape(e);
-            let archived_is_lower = archived.as_ref().is_some_and(|(energy, state)| {
-                *energy < ledger.best - 1e-9 && state.len() == x.len()
-            });
-            if let Some((energy, state)) = archived
-                && archived_is_lower
+            if let Some((energy, state)) = stall_archive.escape(e)
+                && state.len() == x.len()
             {
                 let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
                 let ok = gradient
@@ -3042,21 +3042,15 @@ where
                 e = energy;
                 x = state;
                 current_validation_gradient = gradient.filter(|_| ok);
-            } else if let Some(fresh) = rigid_stall_reseed(cfg, rng) {
-                // The archive has nothing below the incumbent. Another jump
-                // inside it repeats the funnel. A new rigid start is quenched
-                // and the walker stands there, so the next hops leave.
-                let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
-                if energy.is_finite() && relaxed.len() == x.len() {
-                    stall_archive.offer(energy, relaxed.view());
-                    let gradient = grad.as_deref_mut().and_then(|g| g(ledger, relaxed.view()));
-                    let ok = gradient.as_ref().is_some_and(|values| {
-                        answer_gradient_ok(cfg, values.view(), relaxed.len())
-                    });
-                    e = energy;
-                    x = relaxed;
-                    current_validation_gradient = gradient.filter(|_| ok);
-                }
+            }
+            // Translation, rotation and cycle reversal leave the oxygen cage
+            // where it is. After a thousand hops with no new lowest minimum,
+            // the proposals that follow move one molecule onto a missing contact.
+            if matches!(
+                cfg.move_library,
+                MoveLibrary::RigidBody { relocate: true, .. }
+            ) {
+                cage_edit = true;
             }
         }
         // The reoccupation move runs inside the chain and charges the
@@ -4380,6 +4374,13 @@ where
             let step = preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale;
             trial = ClusterMove::AllPoints { step }.propose(x.view(), cfg.temperature, rng);
         }
+        if cage_edit {
+            trial = ClusterMove::RigidRelocate {
+                n_molecules: cfg.n_points,
+                min_separation: cfg.min_separation,
+            }
+            .propose(x.view(), cfg.temperature, rng);
+        }
         let proposal_action = if held_displacement {
             "all".to_owned()
         } else if cov_fire {
@@ -4661,7 +4662,13 @@ where
             e_screen >= ledger.best
                 && !screen.decide(feats.view(), ledger.best, rng.random::<f64>())
         } else if cfg.calibrated_screen {
-            e_screen - descent.allowance() > ledger.best + cfg.screen_margin && !descent.audit()
+            // Relocating one molecule starts far above the incumbent. A
+            // 15-step screen then refuses it, so the oxygen cage never
+            // changes. That move is quenched in full.
+            let relocating = cage_edit || kernels.get(k).is_some_and(|mv| mv.name() == "rreloc");
+            !relocating
+                && e_screen - descent.allowance() > ledger.best + cfg.screen_margin
+                && !descent.audit()
         } else {
             // A rigid partial quench sits far above the incumbent by an
             // absolute margin copied from a reduced-unit cluster. Skipping
@@ -6973,31 +6980,6 @@ where
     })
 }
 
-/// Centres inside the preset sphere and one rotation in (-π, π) per body.
-///
-/// `None` when the sphere cannot hold every centre at the minimum
-/// separation. A rigid stall uses this when its archive has nothing
-/// below the incumbent, so the walker can leave that funnel.
-fn rigid_stall_reseed<R: Rng + ?Sized>(cfg: &Config, rng: &mut R) -> Option<Array1<f64>> {
-    let n = cfg.n_points;
-    let centres = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
-    if centres.len() != 3 * n {
-        return None;
-    }
-    let mut state = Array1::zeros(6 * n);
-    for i in 0..n {
-        for k in 0..3 {
-            state[3 * i + k] = centres[3 * i + k];
-            state[3 * n + 3 * i + k] =
-                rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
-        }
-    }
-    if let Some(slice) = state.as_slice_mut() {
-        crate::potentials::fold_rotation_vectors(n, slice);
-    }
-    Some(state)
-}
-
 /// Seeds a non-overlapping configuration at liquid-like density.
 ///
 /// Uniform draws over a container overlap almost surely at the sizes of
@@ -7459,33 +7441,6 @@ mod tests {
         let rigid =
             Config::recommended(4).with_rigid_bodies(crate::potentials::gmin_water_geometry());
         assert!(matches!(rigid.continuous_symmetry, ContinuousSymmetry::Off));
-    }
-
-    #[test]
-    fn a_rigid_stall_reseed_places_every_body_inside_the_sphere() {
-        let cfg = Config::for_tip4p(6);
-        let mut rng = StdRng::seed_from_u64(1);
-        let state = rigid_stall_reseed(&cfg, &mut rng).expect("six waters fit");
-        assert_eq!(state.len(), 36);
-        for value in state.iter().skip(18) {
-            assert!(value.abs() <= std::f64::consts::PI);
-        }
-        for i in 0..6 {
-            let centre = &state.as_slice().unwrap()[3 * i..3 * i + 3];
-            let radius = centre.iter().map(|v| v * v).sum::<f64>().sqrt();
-            assert!(radius <= cfg.start_radius() + 1e-9);
-            for j in (i + 1)..6 {
-                let other = &state.as_slice().unwrap()[3 * j..3 * j + 3];
-                let dist = (0..3)
-                    .map(|k| {
-                        let d = centre[k] - other[k];
-                        d * d
-                    })
-                    .sum::<f64>()
-                    .sqrt();
-                assert!(dist + 1e-9 >= cfg.min_separation);
-            }
-        }
     }
 
     #[test]

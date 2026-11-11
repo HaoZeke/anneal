@@ -84,8 +84,12 @@ cat > "$WORK/bin/campaign.sh" << EOF
 #!/bin/bash
 set -euo pipefail
 cd /work
-budget=$BUDGET
 tol=$TOL_KJ
+declare -A budget_of=(
+  [10]=500000
+  [15]=500000
+  [20]=2000000
+)
 size_only='${SIZE_ARG}'
 seed_only='${SEED_ARG}'
 declare -A ref=(
@@ -104,7 +108,8 @@ for n in "\${sizes[@]}"; do
   for seed in "\${seeds[@]}"; do
     log=$WORK/logs/n\${n}-seed\${seed}.log
     prefix=$WORK/logs/n\${n}-seed\${seed}
-    echo "start n=\$n seed=\$seed \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    budget=\${budget_of[\$n]}
+    echo "start n=\$n seed=\$seed budget=\$budget \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     $WORK/bin/one.sh "\$n" "\$seed" "\$budget" "\${ref[\$n]}" "\$tol" "\$log" "\$prefix"
     if ! grep -q '^hostname=bench$' "\$log"; then
       echo "hostname was not bench" >&2
