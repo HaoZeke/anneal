@@ -136,3 +136,9 @@ This does not contradict the sentence that CREST 3.0.2 exposes no seed. Keep the
 
 The CREST paper is already in `refs.bib` as `prachtCrestProgramExploration2024`. No new entry.
 
+## 2026-11-11 — A different BEACON
+
+Tang, Chakrabarty, and Paulson, Digital Discovery 5, 3116--3127 (2026), doi:10.1039/d6dd00123h, use the name BEACON for a Bayesian novelty search aimed at diverse outcomes rather than one optimum. The abstract is not about atomic clusters, basin hopping, or water.
+
+Do not cite this paper as an atomic-structure code. The structure-search papers from this watch are `lyngbyUniversalPrior2024` and `larsenFractional2023`, and neither uses this title. No anneal claim is contradicted.
+
