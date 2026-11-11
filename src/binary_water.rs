@@ -568,4 +568,42 @@ mod tests {
         assert_eq!(plain_water.energy, flagged_water.energy);
         assert_eq!(plain_water.state, flagged_water.state);
     }
+
+    #[test]
+    fn a_batch_keeps_one_ledger_per_start() {
+        let binary = BinaryLennardJonesProblem {
+            n_a: 2,
+            n_b: 1,
+            epsilon_aa: 1.0,
+            epsilon_ab: 1.0,
+            epsilon_bb: 1.0,
+            sigma_aa: 1.0,
+            sigma_ab: 1.0,
+            sigma_bb: 1.0,
+        };
+        let mut rng = StdRng::seed_from_u64(3);
+        let start = random_cluster_in_radius(3, 2.0, 0.9, &mut rng);
+        let found = search_binary_batch(
+            &binary,
+            &[start.to_vec()],
+            40,
+            f64::NEG_INFINITY,
+            &[3],
+            false,
+        );
+        assert_eq!(found.len(), 1);
+        assert!(found[0].energy.is_finite(), "{}", found[0].energy);
+        assert_eq!(found[0].state.len(), start.len());
+        assert!(found[0].charged > 0);
+
+        let centres = random_cluster_in_radius(2, 4.0, 2.5, &mut rng);
+        let mut water = vec![0.0; 12];
+        for (index, value) in centres.iter().enumerate() {
+            water[index] = *value;
+        }
+        let waters = search_gmin_tip4p_batch(2, &[water], 40, f64::NEG_INFINITY, &[4], true);
+        assert_eq!(waters.len(), 1);
+        assert_eq!(waters[0].state.len(), 12);
+        assert!(waters[0].charged > 0);
+    }
 }
