@@ -1,0 +1,17 @@
+Copyright (c) anneal developers
+
+The kept pass used this command.
+Dates were unset and the clock was real.
+We record that command in this note.
+Sleep was not called.
+The author date variable was absent.
+The committer date variable was absent.
+The zone was America/Chicago.
+The offset was -0600.
+unset GIT_AUTHOR_DATE GIT_COMMITTER_DATE
+export TZ=America/Chicago
+export GIT_AUTHOR_NAME='Rohit Goswami'
+export GIT_AUTHOR_EMAIL='rgoswami@ieee.org'
+export GIT_COMMITTER_NAME='Rohit Goswami'
+export GIT_COMMITTER_EMAIL='rgoswami@ieee.org'
+git -c commit.gpgsign=false commit-tree TREE -p PARENT -F -

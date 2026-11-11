@@ -7,6 +7,8 @@ We hashed the eight tip inputs.
 The sha256 of that concatenation follows.
 3ccc9a75cf8f1d5d089957494987cbd276fcd4203bae932dc8029066f5d4a3de.
 The byte count is 79124.
+The push plan (PUSH) is one of the eight inputs.
+The subject listing (SCOPE) is another of those inputs.
 Path docs/prereg/lj104-sota/PREDICTIONS.md.
 Path docs/prereg/lj104-sota/PUSH.txt.
 Path docs/prereg/lj104-sota/REPLAY.txt.

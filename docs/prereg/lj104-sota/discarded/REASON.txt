@@ -1,4 +1,10 @@
 Copyright (c) anneal developers
 
-wrong toolchain
-
+The earlier panel used the wrong toolchain.
+We keep that label beside the superseded receipts.
+The live receipts are the toolchain record.
+Rustc and cargo lines are in those live receipts.
+This file does not replace them.
+The label stays with the old copies.
+The new panel is the one that was timed.
+The cap on that panel was already stated.

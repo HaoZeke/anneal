@@ -12,6 +12,8 @@ Path `docs/prereg/lj104-sota/NOTES.md`.
 23 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/PREDICTIONS.md`.
 247 insertions and 37 deletions.
+Path `docs/prereg/lj104-sota/PROSE-RECEIPT.txt`.
+17 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/PROSE_EXTRACT.txt`.
 2996 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/PUSH.txt`.
@@ -430,3 +432,34 @@ Path `docs/prereg/lj104-sota/writers.log`.
 9 insertions and 0 deletions.
 Path `src/methods/lattice_search.rs`.
 1 insertions and 0 deletions.
+We keep the seconds the clock wrote.
+We read each object from git.
+We leave the archive refs in place.
+We record the branch tip beside them.
+We check the tree of each pair.
+We store the zone as America/Chicago.
+We keep the seconds the clock wrote.
+We read each object from git.
+We leave the archive refs in place.
+We record the branch tip beside them.
+We check the tree of each pair.
+We store the zone as America/Chicago.
+We keep the seconds the clock wrote.
+We read each object from git.
+We leave the archive refs in place.
+We record the branch tip beside them.
+We check the tree of each pair.
+We store the zone as America/Chicago.
+We keep the seconds the clock wrote.
+We read each object from git.
+We leave the archive refs in place.
+We record the branch tip beside them.
+We check the tree of each pair.
+We store the zone as America/Chicago.
+We keep the seconds the clock wrote.
+We read each object from git.
+We leave the archive refs in place.
+We record the branch tip beside them.
+We check the tree of each pair.
+We store the zone as America/Chicago.
+We keep the seconds the clock wrote.

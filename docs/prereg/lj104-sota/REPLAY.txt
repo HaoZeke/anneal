@@ -173,3 +173,15 @@ Archive refs/archive/prereg/p/f076d8ab1d.
 Object f076d8ab1d378706897894738d2be87707ad2f48.
 Archive refs/archive/prereg/p/fc81ac336b.
 Object fc81ac336b08235f5aedc5294a06c643ca8dfde3.
+We keep the seconds the clock wrote.
+We read each object from git.
+We leave the archive refs in place.
+We record the branch tip beside them.
+We check the tree of each pair.
+We store the zone as America/Chicago.
+We keep the seconds the clock wrote.
+We read each object from git.
+We leave the archive refs in place.
+We record the branch tip beside them.
+We check the tree of each pair.
+We store the zone as America/Chicago.

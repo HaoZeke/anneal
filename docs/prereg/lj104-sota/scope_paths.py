@@ -49,7 +49,9 @@ def names(root: Path, commit: str, diff_filter: str) -> list[str]:
 
 def main() -> None:
     root = repo_root()
-    tip = git(root, "rev-parse", TIP).strip()
+    from note_tip import content_tip
+
+    tip = content_tip(root)
     listed = git(root, "rev-list", "--reverse", f"{BASE}..{tip}")
     commits = [line for line in listed.splitlines() if line]
     if not commits:

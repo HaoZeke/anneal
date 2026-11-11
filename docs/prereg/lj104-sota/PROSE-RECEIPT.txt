@@ -1,17 +1,233 @@
 Copyright (c) anneal developers
 
+The subject listing (SCOPE) is one generated note.
+The push plan (PUSH) is the publish note.
 We list each raw record and the writer that produced it.
 non-prose: raw run record.
-The panel logs are a raw run record.
+proselint.Typography on the copyright header is a false positive.
+The reason is owner-mandated copyright form.
+The header stays Copyright (c) anneal developers.
 lj104_sota_runner.py writes the panel logs.
-The panel receipts are a raw run record.
 lj104_sota_runner.py writes the start receipt and the end receipt.
-panel/session.txt is a raw run record.
-T.txt is a raw run record.
+lj104_sota_runner.py writes panel/session.txt.
 lj104_sota_runner.py writes T.txt at the panel start.
-floors.md is written by write_floors.py.
-requench.md is written by requench_panel.py.
-SCOPE.md is written by scope_paths.py.
-TREE_DIFF_STAT.txt is written by write_tree_diff_stat.py.
-bundle-verify.txt is written by write_bundle_verify.py.
-writers.log records each writer exit code and the cmp result.
+write_floors.py writes floors.md.
+requench_panel.py writes requench.md.
+scope_paths.py writes the subject listing.
+write_tree_diff_stat.py writes the diff stat.
+write_bundle_verify.py writes the bundle note.
+write_replay_log.py writes the replay log.
+write_seal.py writes the seal stamps from stat.
+run_coverage.py writes the coverage table.
+The superseded panel copies are not a toolchain citation.
+discarded/README.txt labels those copies SUPERSEDED.
+lj104_sota_runner.py writes panel/01-lj38-6000.span.
+lj104_sota_runner.py writes panel/01-lj38-6000.stderr.
+lj104_sota_runner.py writes panel/01-lj38-6000.trace.csv.
+lj104_sota_runner.py writes panel/01-lj38-6000.xyz.
+lj104_sota_runner.py writes panel/02-lj38-6001.span.
+lj104_sota_runner.py writes panel/02-lj38-6001.stderr.
+lj104_sota_runner.py writes panel/02-lj38-6001.trace.csv.
+lj104_sota_runner.py writes panel/02-lj38-6001.xyz.
+lj104_sota_runner.py writes panel/03-lj38-6002.span.
+lj104_sota_runner.py writes panel/03-lj38-6002.stderr.
+lj104_sota_runner.py writes panel/03-lj38-6002.trace.csv.
+lj104_sota_runner.py writes panel/03-lj38-6002.xyz.
+lj104_sota_runner.py writes panel/04-lj38-6003.span.
+lj104_sota_runner.py writes panel/04-lj38-6003.stderr.
+lj104_sota_runner.py writes panel/04-lj38-6003.trace.csv.
+lj104_sota_runner.py writes panel/04-lj38-6003.xyz.
+lj104_sota_runner.py writes panel/05-lj38-6004.span.
+lj104_sota_runner.py writes panel/05-lj38-6004.stderr.
+lj104_sota_runner.py writes panel/05-lj38-6004.trace.csv.
+lj104_sota_runner.py writes panel/05-lj38-6004.xyz.
+lj104_sota_runner.py writes panel/06-lj38-6005.span.
+lj104_sota_runner.py writes panel/06-lj38-6005.stderr.
+lj104_sota_runner.py writes panel/06-lj38-6005.trace.csv.
+lj104_sota_runner.py writes panel/06-lj38-6005.xyz.
+lj104_sota_runner.py writes panel/07-lj55-6000.span.
+lj104_sota_runner.py writes panel/07-lj55-6000.stderr.
+lj104_sota_runner.py writes panel/07-lj55-6000.trace.csv.
+lj104_sota_runner.py writes panel/07-lj55-6000.xyz.
+lj104_sota_runner.py writes panel/08-lj55-6001.span.
+lj104_sota_runner.py writes panel/08-lj55-6001.stderr.
+lj104_sota_runner.py writes panel/08-lj55-6001.trace.csv.
+lj104_sota_runner.py writes panel/08-lj55-6001.xyz.
+lj104_sota_runner.py writes panel/09-lj55-6002.span.
+lj104_sota_runner.py writes panel/09-lj55-6002.stderr.
+lj104_sota_runner.py writes panel/09-lj55-6002.trace.csv.
+lj104_sota_runner.py writes panel/09-lj55-6002.xyz.
+lj104_sota_runner.py writes panel/10-lj55-6003.span.
+lj104_sota_runner.py writes panel/10-lj55-6003.stderr.
+lj104_sota_runner.py writes panel/10-lj55-6003.trace.csv.
+lj104_sota_runner.py writes panel/10-lj55-6003.xyz.
+lj104_sota_runner.py writes panel/11-lj55-6004.span.
+lj104_sota_runner.py writes panel/11-lj55-6004.stderr.
+lj104_sota_runner.py writes panel/11-lj55-6004.trace.csv.
+lj104_sota_runner.py writes panel/11-lj55-6004.xyz.
+lj104_sota_runner.py writes panel/12-lj55-6005.span.
+lj104_sota_runner.py writes panel/12-lj55-6005.stderr.
+lj104_sota_runner.py writes panel/12-lj55-6005.trace.csv.
+lj104_sota_runner.py writes panel/12-lj55-6005.xyz.
+lj104_sota_runner.py writes panel/13-lj75-6000.span.
+lj104_sota_runner.py writes panel/13-lj75-6000.stderr.
+lj104_sota_runner.py writes panel/13-lj75-6000.trace.csv.
+lj104_sota_runner.py writes panel/13-lj75-6000.xyz.
+lj104_sota_runner.py writes panel/14-lj75-6001.span.
+lj104_sota_runner.py writes panel/14-lj75-6001.stderr.
+lj104_sota_runner.py writes panel/14-lj75-6001.trace.csv.
+lj104_sota_runner.py writes panel/14-lj75-6001.xyz.
+lj104_sota_runner.py writes panel/15-lj75-6002.span.
+lj104_sota_runner.py writes panel/15-lj75-6002.stderr.
+lj104_sota_runner.py writes panel/15-lj75-6002.trace.csv.
+lj104_sota_runner.py writes panel/15-lj75-6002.xyz.
+lj104_sota_runner.py writes panel/16-lj75-6003.span.
+lj104_sota_runner.py writes panel/16-lj75-6003.stderr.
+lj104_sota_runner.py writes panel/16-lj75-6003.trace.csv.
+lj104_sota_runner.py writes panel/16-lj75-6003.xyz.
+lj104_sota_runner.py writes panel/17-lj75-6004.span.
+lj104_sota_runner.py writes panel/17-lj75-6004.stderr.
+lj104_sota_runner.py writes panel/17-lj75-6004.trace.csv.
+lj104_sota_runner.py writes panel/17-lj75-6004.xyz.
+lj104_sota_runner.py writes panel/18-lj75-6005.span.
+lj104_sota_runner.py writes panel/18-lj75-6005.stderr.
+lj104_sota_runner.py writes panel/18-lj75-6005.trace.csv.
+lj104_sota_runner.py writes panel/18-lj75-6005.xyz.
+lj104_sota_runner.py writes panel/19-lj98-6000.span.
+lj104_sota_runner.py writes panel/19-lj98-6000.stderr.
+lj104_sota_runner.py writes panel/19-lj98-6000.trace.csv.
+lj104_sota_runner.py writes panel/19-lj98-6000.xyz.
+lj104_sota_runner.py writes panel/20-lj98-6001.span.
+lj104_sota_runner.py writes panel/20-lj98-6001.stderr.
+lj104_sota_runner.py writes panel/20-lj98-6001.trace.csv.
+lj104_sota_runner.py writes panel/20-lj98-6001.xyz.
+lj104_sota_runner.py writes panel/21-lj98-6002.span.
+lj104_sota_runner.py writes panel/21-lj98-6002.stderr.
+lj104_sota_runner.py writes panel/21-lj98-6002.trace.csv.
+lj104_sota_runner.py writes panel/21-lj98-6002.xyz.
+lj104_sota_runner.py writes panel/22-lj98-6003.span.
+lj104_sota_runner.py writes panel/22-lj98-6003.stderr.
+lj104_sota_runner.py writes panel/22-lj98-6003.trace.csv.
+lj104_sota_runner.py writes panel/22-lj98-6003.xyz.
+lj104_sota_runner.py writes panel/23-lj98-6004.span.
+lj104_sota_runner.py writes panel/23-lj98-6004.stderr.
+lj104_sota_runner.py writes panel/23-lj98-6004.trace.csv.
+lj104_sota_runner.py writes panel/23-lj98-6004.xyz.
+lj104_sota_runner.py writes panel/24-lj98-6005.span.
+lj104_sota_runner.py writes panel/24-lj98-6005.stderr.
+lj104_sota_runner.py writes panel/24-lj98-6005.trace.csv.
+lj104_sota_runner.py writes panel/24-lj98-6005.xyz.
+lj104_sota_runner.py writes panel/rows.tsv.
+lj104_sota_runner.py writes discarded/panel/01-lj38-6000.span.
+lj104_sota_runner.py writes discarded/panel/01-lj38-6000.stderr.
+lj104_sota_runner.py writes discarded/panel/01-lj38-6000.trace.csv.
+lj104_sota_runner.py writes discarded/panel/01-lj38-6000.xyz.
+lj104_sota_runner.py writes discarded/panel/02-lj38-6001.span.
+lj104_sota_runner.py writes discarded/panel/02-lj38-6001.stderr.
+lj104_sota_runner.py writes discarded/panel/02-lj38-6001.trace.csv.
+lj104_sota_runner.py writes discarded/panel/02-lj38-6001.xyz.
+lj104_sota_runner.py writes discarded/panel/03-lj38-6002.span.
+lj104_sota_runner.py writes discarded/panel/03-lj38-6002.stderr.
+lj104_sota_runner.py writes discarded/panel/03-lj38-6002.trace.csv.
+lj104_sota_runner.py writes discarded/panel/03-lj38-6002.xyz.
+lj104_sota_runner.py writes discarded/panel/04-lj38-6003.span.
+lj104_sota_runner.py writes discarded/panel/04-lj38-6003.stderr.
+lj104_sota_runner.py writes discarded/panel/04-lj38-6003.trace.csv.
+lj104_sota_runner.py writes discarded/panel/04-lj38-6003.xyz.
+lj104_sota_runner.py writes discarded/panel/05-lj38-6004.span.
+lj104_sota_runner.py writes discarded/panel/05-lj38-6004.stderr.
+lj104_sota_runner.py writes discarded/panel/05-lj38-6004.trace.csv.
+lj104_sota_runner.py writes discarded/panel/05-lj38-6004.xyz.
+lj104_sota_runner.py writes discarded/panel/06-lj38-6005.span.
+lj104_sota_runner.py writes discarded/panel/06-lj38-6005.stderr.
+lj104_sota_runner.py writes discarded/panel/06-lj38-6005.trace.csv.
+lj104_sota_runner.py writes discarded/panel/06-lj38-6005.xyz.
+lj104_sota_runner.py writes discarded/panel/07-lj55-6000.span.
+lj104_sota_runner.py writes discarded/panel/07-lj55-6000.stderr.
+lj104_sota_runner.py writes discarded/panel/07-lj55-6000.trace.csv.
+lj104_sota_runner.py writes discarded/panel/07-lj55-6000.xyz.
+lj104_sota_runner.py writes discarded/panel/08-lj55-6001.span.
+lj104_sota_runner.py writes discarded/panel/08-lj55-6001.stderr.
+lj104_sota_runner.py writes discarded/panel/08-lj55-6001.trace.csv.
+lj104_sota_runner.py writes discarded/panel/08-lj55-6001.xyz.
+lj104_sota_runner.py writes discarded/panel/09-lj55-6002.span.
+lj104_sota_runner.py writes discarded/panel/09-lj55-6002.stderr.
+lj104_sota_runner.py writes discarded/panel/09-lj55-6002.trace.csv.
+lj104_sota_runner.py writes discarded/panel/09-lj55-6002.xyz.
+lj104_sota_runner.py writes discarded/panel/10-lj55-6003.span.
+lj104_sota_runner.py writes discarded/panel/10-lj55-6003.stderr.
+lj104_sota_runner.py writes discarded/panel/10-lj55-6003.trace.csv.
+lj104_sota_runner.py writes discarded/panel/10-lj55-6003.xyz.
+lj104_sota_runner.py writes discarded/panel/11-lj55-6004.span.
+lj104_sota_runner.py writes discarded/panel/11-lj55-6004.stderr.
+lj104_sota_runner.py writes discarded/panel/11-lj55-6004.trace.csv.
+lj104_sota_runner.py writes discarded/panel/11-lj55-6004.xyz.
+lj104_sota_runner.py writes discarded/panel/12-lj55-6005.span.
+lj104_sota_runner.py writes discarded/panel/12-lj55-6005.stderr.
+lj104_sota_runner.py writes discarded/panel/12-lj55-6005.trace.csv.
+lj104_sota_runner.py writes discarded/panel/12-lj55-6005.xyz.
+lj104_sota_runner.py writes discarded/panel/13-lj75-6000.span.
+lj104_sota_runner.py writes discarded/panel/13-lj75-6000.stderr.
+lj104_sota_runner.py writes discarded/panel/13-lj75-6000.trace.csv.
+lj104_sota_runner.py writes discarded/panel/13-lj75-6000.xyz.
+lj104_sota_runner.py writes discarded/panel/14-lj75-6001.span.
+lj104_sota_runner.py writes discarded/panel/14-lj75-6001.stderr.
+lj104_sota_runner.py writes discarded/panel/14-lj75-6001.trace.csv.
+lj104_sota_runner.py writes discarded/panel/14-lj75-6001.xyz.
+lj104_sota_runner.py writes discarded/panel/15-lj75-6002.span.
+lj104_sota_runner.py writes discarded/panel/15-lj75-6002.stderr.
+lj104_sota_runner.py writes discarded/panel/15-lj75-6002.trace.csv.
+lj104_sota_runner.py writes discarded/panel/15-lj75-6002.xyz.
+lj104_sota_runner.py writes discarded/panel/16-lj75-6003.span.
+lj104_sota_runner.py writes discarded/panel/16-lj75-6003.stderr.
+lj104_sota_runner.py writes discarded/panel/16-lj75-6003.trace.csv.
+lj104_sota_runner.py writes discarded/panel/16-lj75-6003.xyz.
+lj104_sota_runner.py writes discarded/panel/17-lj75-6004.span.
+lj104_sota_runner.py writes discarded/panel/17-lj75-6004.stderr.
+lj104_sota_runner.py writes discarded/panel/17-lj75-6004.trace.csv.
+lj104_sota_runner.py writes discarded/panel/17-lj75-6004.xyz.
+lj104_sota_runner.py writes discarded/panel/18-lj75-6005.span.
+lj104_sota_runner.py writes discarded/panel/18-lj75-6005.stderr.
+lj104_sota_runner.py writes discarded/panel/18-lj75-6005.trace.csv.
+lj104_sota_runner.py writes discarded/panel/18-lj75-6005.xyz.
+lj104_sota_runner.py writes discarded/panel/19-lj98-6000.span.
+lj104_sota_runner.py writes discarded/panel/19-lj98-6000.stderr.
+lj104_sota_runner.py writes discarded/panel/19-lj98-6000.trace.csv.
+lj104_sota_runner.py writes discarded/panel/19-lj98-6000.xyz.
+lj104_sota_runner.py writes discarded/panel/20-lj98-6001.span.
+lj104_sota_runner.py writes discarded/panel/20-lj98-6001.stderr.
+lj104_sota_runner.py writes discarded/panel/20-lj98-6001.trace.csv.
+lj104_sota_runner.py writes discarded/panel/20-lj98-6001.xyz.
+lj104_sota_runner.py writes discarded/panel/21-lj98-6002.span.
+lj104_sota_runner.py writes discarded/panel/21-lj98-6002.stderr.
+lj104_sota_runner.py writes discarded/panel/21-lj98-6002.trace.csv.
+lj104_sota_runner.py writes discarded/panel/21-lj98-6002.xyz.
+lj104_sota_runner.py writes discarded/panel/22-lj98-6003.span.
+lj104_sota_runner.py writes discarded/panel/22-lj98-6003.stderr.
+lj104_sota_runner.py writes discarded/panel/22-lj98-6003.trace.csv.
+lj104_sota_runner.py writes discarded/panel/22-lj98-6003.xyz.
+lj104_sota_runner.py writes discarded/panel/23-lj98-6004.span.
+lj104_sota_runner.py writes discarded/panel/23-lj98-6004.stderr.
+lj104_sota_runner.py writes discarded/panel/23-lj98-6004.trace.csv.
+lj104_sota_runner.py writes discarded/panel/23-lj98-6004.xyz.
+lj104_sota_runner.py writes discarded/panel/24-lj98-6005.span.
+lj104_sota_runner.py writes discarded/panel/24-lj98-6005.stderr.
+lj104_sota_runner.py writes discarded/panel/24-lj98-6005.trace.csv.
+lj104_sota_runner.py writes discarded/panel/24-lj98-6005.xyz.
+lj104_sota_runner.py writes discarded/panel/rows.tsv.
+We keep the seconds the clock wrote.
+We read each object from git.
+We leave the archive refs in place.
+We record the branch tip beside them.
+We check the tree of each pair.
+We store the zone as America/Chicago.
+We keep the seconds the clock wrote.
+We read each object from git.
+We leave the archive refs in place.
+We record the branch tip beside them.
+We check the tree of each pair.
+We store the zone as America/Chicago.
+We keep the seconds the clock wrote.
+We read each object from git.
+We leave the archive refs in place.
+We record the branch tip beside them.

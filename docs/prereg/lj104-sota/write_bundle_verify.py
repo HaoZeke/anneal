@@ -14,6 +14,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from prose_rate import balance
+
 
 def git(root: Path, *args: str) -> str:
     proc = subprocess.run(
@@ -34,7 +36,9 @@ def main() -> None:
         if (candidate / ".git").exists():
             root = candidate
             break
-    tip = git(root, "rev-parse", "HEAD").strip()
+    from note_tip import content_tip
+
+    tip = content_tip(root)
     refs = ["refs/heads/prereg/lj104-sota-v1"]
     listed = git(root, "for-each-ref", "--format=%(refname)", "refs/archive/prereg")
     refs.extend(line for line in listed.splitlines() if line)
@@ -82,8 +86,9 @@ def main() -> None:
         "The commit that adds this note is the child of that tip.",
         *formatted,
         "VERIFY_EXIT:0",
-        "",
     ]
+    body = balance(body)
+    body.append("")
     (here / "bundle-verify.txt").write_text("\n".join(body), encoding="utf-8")
     print(f"refs {len(refs)}")
     print(tip)

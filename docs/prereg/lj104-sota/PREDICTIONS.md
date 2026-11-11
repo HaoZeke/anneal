@@ -132,8 +132,8 @@ We compare the candidate and GMIN_BEST with one test.
 The test is a one-sided exact McNemar test.
 Paired outcomes on the same thirty seeds enter that test.
 A seed is discordant when exactly one of the two codes hits.
-n is the number of discordant seeds.
-b is the number of those seeds that only the candidate hits.
+Discordant seeds are the count n.
+The candidate-only seeds are the count b.
 Under the null, b is binomial with n trials and probability 1/2.
 The p-value is the probability of b or more.
 Alpha is 0.05, which is the fraction 1/20.

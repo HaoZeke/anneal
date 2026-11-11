@@ -1,6 +1,6 @@
 Copyright (c) anneal developers
 
-LAND_HOLD holds until every arm is filled.
+LAND_HOLD remains until every arm is filled.
 Arm B stays UNFILLED.
 Arm D stays UNFILLED.
 Saddle passes those two values later.

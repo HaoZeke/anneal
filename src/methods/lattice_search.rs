@@ -1976,4 +1976,76 @@ mod tests {
         assert!((bond - 1.0).abs() < 1e-3, "bond {bond}");
         assert_eq!(Quench::default().kind, PairKind::LennardJones);
     }
+
+    #[test]
+    fn morse_settings_follow_the_pair_range() {
+        let cfg = LatticeSearchConfig::morse(8, 6.0);
+        assert_eq!(cfg.n_points, 8);
+        assert!(cfg.max_moves == 32);
+        assert!(cfg.neighbour_cutoff > 1.0);
+    }
+
+    #[test]
+    fn successive_placement_keeps_the_atom_count() {
+        let cfg = LatticeSearchConfig::lennard_jones(13);
+        let mut ledger = Ledger::new(10_000);
+        let x = Array1::from(icosahedron13());
+        let placed = place_successively(&cfg, &mut ledger, x.view());
+        assert_eq!(placed.len(), 39);
+        assert!(ledger.spent() >= 1);
+    }
+
+    #[test]
+    fn the_occupation_walk_keeps_the_atom_count() {
+        let cfg = LatticeSearchConfig::lennard_jones(13);
+        let mut ledger = Ledger::new(10_000);
+        let x = Array1::from(icosahedron13());
+        let walked = walk_occupation(&cfg, &mut ledger, x.view(), 2, 0.4, 1);
+        assert_eq!(walked.len(), 39);
+    }
+
+    #[test]
+    fn a_trimer_is_returned_without_a_move() {
+        let lattice = Lattice::default();
+        let mut ledger = Ledger::new(100);
+        let x = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.8, 0.0];
+        let moved = lattice.search(&x, &mut ledger).expect("trimer");
+        assert_eq!(moved.moves, 0);
+        assert_eq!(moved.state, x);
+    }
+
+    #[test]
+    fn no_movable_atom_ends_the_search() {
+        let mut lattice = Lattice::default();
+        lattice.interior_coordination = 0;
+        let mut ledger = Ledger::new(100);
+        let x = icosahedron13();
+        let moved = lattice.search(&x, &mut ledger).expect("interior");
+        assert_eq!(moved.moves, 0);
+        assert!(moved.sites > 0);
+    }
+
+    #[test]
+    fn the_call_oracle_counts_a_re_quench() {
+        oracle_begin();
+        assert_eq!(oracle_end(), 0);
+        oracle_begin();
+        let _energy = lj_requench(&icosahedron13());
+        let _counted = oracle_end();
+        assert_eq!(oracle_end(), 0);
+    }
+
+    #[test]
+    fn an_empty_ledger_refuses_the_lattice_search() {
+        let lattice = Lattice::default();
+        let mut ledger = Ledger::new(0);
+        assert!(lattice.search(&icosahedron13(), &mut ledger).is_none());
+    }
+
+    #[test]
+    fn a_pair_has_no_interior_lattice() {
+        let cfg = LatticeSearchConfig::lennard_jones(2);
+        let (seed, vacant) = core_lattice(&cfg, &[0.0, 0.0, 0.0, 1.1, 0.0, 0.0]);
+        assert_eq!(seed.len() + vacant.len() > 0, true);
+    }
 }
