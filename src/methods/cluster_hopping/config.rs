@@ -1740,3 +1740,120 @@ impl Config {
         ClusterProposal::new(self.move_library.kernels(self))
     }
 }
+
+#[cfg(test)]
+mod coverage_behaviour {
+    use super::{Config, Keying};
+
+    #[test]
+    fn morphology_keying_carries_its_own_deposition_width() {
+        assert!(Keying::Q4.is_morphology());
+        assert!(Keying::Q4Q6.is_morphology());
+        assert!(Keying::Soap.is_morphology());
+        assert!(Keying::Coordination.is_morphology());
+        assert!(!Keying::Distances.is_morphology());
+        assert!(!Keying::Triplet.is_morphology());
+        assert_eq!(Keying::Q4.default_merge_radius(), Some(0.01));
+        assert_eq!(Keying::Q4Q6.default_merge_radius(), Some(0.01));
+        assert_eq!(Keying::Soap.default_merge_radius(), Some(0.25));
+        assert_eq!(Keying::Coordination.default_merge_radius(), Some(0.5));
+        assert_eq!(Keying::Distances.default_merge_radius(), None);
+        assert_eq!(Keying::SoapPacking.default_merge_radius(), None);
+    }
+
+    #[test]
+    fn a_resolved_preset_has_a_hex_digest() {
+        let digest = Config::for_tip4p(2).resolved_sha256().expect("json");
+        assert_eq!(digest.len(), 64);
+        assert!(digest.chars().all(|ch| ch.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn tip4p_presets_keep_the_rigid_search_controls() {
+        let communicating = Config::communicating_tip4p(3);
+        assert!(communicating.allocate_moves);
+        assert!(communicating.return_screen);
+        assert_eq!(communicating.shared_deposits, 0);
+        let recommended = Config::recommended_tip4p(4);
+        assert!(recommended.depth_reward);
+        assert!(recommended.tabu_on_stall);
+        assert!(recommended.return_screen);
+        assert!(recommended.allocate_moves);
+    }
+
+    #[test]
+    fn species_diameters_widen_the_neighbour_shell() {
+        let bare = Config::with_scales(2, 1.0, 1.0);
+        let labelled = bare.clone().with_species(vec![1, 8], None);
+        assert_eq!(labelled.species, Some(vec![1, 8]));
+        assert!(labelled.species_sigma.is_none());
+        assert_eq!(labelled.neighbour_cutoff, bare.neighbour_cutoff);
+        let wide = Config::with_scales(2, 1.0, 1.0).with_species(vec![1, 8], Some(vec![1.5, 2.5]));
+        assert!(wide.neighbour_cutoff > bare.neighbour_cutoff);
+        assert!(wide.min_separation > 0.0);
+    }
+
+    #[test]
+    fn a_water_group_in_local_indices_selects_the_cycle_arm() {
+        let cfg = Config::for_molecular(vec![6, 6, 6, 8, 1, 1], vec![vec![3, 4, 5]], 1.0);
+        match cfg.move_library {
+            super::MoveLibrary::Molecular {
+                reverse_cycles, ..
+            } => assert!(reverse_cycles),
+            other => panic!("molecular library, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_rigid_chart_replaces_the_cartesian_library() {
+        let geometry = crate::rigid_body::RigidBodyGeometry::new(vec![[0.1, 0.0, 0.0]], vec![8])
+            .expect("site");
+        let cfg = Config::with_scales(2, 1.0, 1.0).with_rigid_bodies(geometry);
+        assert!(cfg.rigid_body_geometry.is_some());
+        assert!(!cfg.angular_moves);
+    }
+
+    #[test]
+    #[should_panic(expected = "length_scale must be finite and positive")]
+    fn a_non_positive_length_scale_is_refused() {
+        let _ = Config::with_scales(2, 0.0, 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "energy_scale must be finite and positive")]
+    fn a_non_finite_energy_scale_is_refused() {
+        let _ = Config::with_scales(2, 1.0, f64::NAN);
+    }
+
+    #[test]
+    #[should_panic(expected = "at least two waters")]
+    fn one_water_is_not_a_tip4p_cluster() {
+        let _ = Config::for_tip4p(1);
+    }
+
+    #[test]
+    #[should_panic(expected = "species length must match")]
+    fn a_species_list_must_name_every_point() {
+        let _ = Config::with_scales(2, 1.0, 1.0).with_species(vec![1], None);
+    }
+
+    #[test]
+    #[should_panic(expected = "sigma length must match")]
+    fn a_diameter_list_must_name_every_point() {
+        let _ = Config::with_scales(2, 1.0, 1.0).with_species(vec![1, 8], Some(vec![1.0]));
+    }
+
+    #[test]
+    #[should_panic(expected = "sigma must be finite and positive")]
+    fn a_non_positive_diameter_is_refused() {
+        let _ = Config::with_scales(2, 1.0, 1.0).with_species(vec![1, 8], Some(vec![1.0, 0.0]));
+    }
+
+    #[test]
+    #[should_panic(expected = "at least two bodies")]
+    fn one_body_is_not_a_rigid_cluster() {
+        let geometry = crate::rigid_body::RigidBodyGeometry::new(vec![[0.1, 0.0, 0.0]], vec![8])
+            .expect("site");
+        let _ = Config::with_scales(1, 1.0, 1.0).with_rigid_bodies(geometry);
+    }
+}

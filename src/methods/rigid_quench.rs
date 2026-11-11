@@ -68,4 +68,14 @@ mod tests {
         assert!(!stalled(1500, 500));
         assert!(stalled(1501, 500));
     }
+
+    #[test]
+    fn an_empty_or_non_finite_force_is_not_a_record() {
+        let empty = Array1::<f64>::zeros(0);
+        assert!(rms_force(empty.view()).is_infinite());
+        assert!(!rms_is_converged(empty.view(), 0, 1.0));
+        let broken = Array1::from_vec(vec![1.0, f64::NAN]);
+        assert!(rms_force(broken.view()).is_infinite());
+        assert!(!rms_is_converged(broken.view(), 2, 1.0e9));
+    }
 }
