@@ -142,10 +142,12 @@ The surface list stays empty at 98 atoms and above.
 The relaxation then uses the plain surface.
 The lattice-regrowth library builds a truncated octahedron.
 A decahedron, or an icosahedron from a named template.
-The global minimum changes with size.
+The published global minimum changes with size.
 \cite{wales1997,marksSurfaceStructureEnergetics1984} Face-centred cubic.
-Is the minimum at 38 atoms, icosahedral at 55, and Marks decahedral at.
-75.
+Is the published global minimum at 38 atoms, icosahedral at 55,.
+And Marks decahedral at 75.
+Kuznetsov and Sahinidis prove optima only for five and six atoms.
+\cite{kuznetsovLennardJones2025}
 Installing that library only at 38 atoms would search for a structure.
 The count has already named.
 The preset therefore keeps the lean burst library at every size,.
@@ -273,7 +275,12 @@ Deaven and Ho mate stored geometries by cut and splice.
 and minima hopping (MH) run a single walker.
 \cite{wales1997,goedecker2004} The conformer-rotamer ensemble sampling.
 Tool (CREST) samples a molecular ensemble by metadynamics.
-\cite{prachtCrestProgramExploration2024} The bank in this section adds.
+\cite{prachtCrestProgramExploration2024} de Souza reports GOAT.
+For molecules and atomic clusters, and compares it with CREST.
+\cite{deSouzaGoat2025} Carmona and co-workers give a Python.
+Basin-hopping search for Lennard-Jones clusters.
+\cite{carmonaBasinHopping2025} Their iteration counts are not force-call budgets.
+The bank in this section adds.
 The depth posterior and the unseen-mass census to that list.
 \section{Information theory in the hop}
 \label{sec:info} A move that has stopped finding depth can still take.
@@ -312,7 +319,7 @@ The burst drawn above is one arm of the hop.
 After that quench.
 The search projects the structure toward a more symmetric neighbour.
 A global minimum is often more symmetric than the minima around it.
-On LJ\(_{75}\) the global minimum is a Marks decahedron.
+On LJ\(_{75}\) the published global minimum is a Marks decahedron.
 \cite{marksSurfaceStructureEnergetics1984,Doye_Miller_Wales_1999} Most.
 Low minima around that decahedron are icosahedral.
 Oakley, Johnston, and Wales symmetrise the structure in GMIN.
@@ -323,11 +330,12 @@ The preset applies that projection every ten quenches at every size.
 \section{Results}
 \subsection{The structures}
 Figure~\ref{fig:systems} draws the archived structures of the benchmark.
-The Lennard-Jones geometries are the reference minima of the Cambridge.
-Cluster Database, and the TIP4P geometries are the minima of Wales and.
-Hodges.
-\cite{walesCambridgeClusterDatabase,walesGlobalMinimaWater1998,jorgensen1983}
-The hexamers are minima of the hop at the GFN2-xTB tight-binding model.
+The Lennard-Jones geometries are the published reference minima of the Cambridge.
+Cluster Database.
+The TIP4P geometries are the Wales and Hodges reference minima.
+For that potential, not the global minimum of every water model.
+\cite{walesCambridgeClusterDatabase,walesGlobalMinimaWater1998,jorgensen1983,hernandezRojasWater2026}
+The hexamers are GFN2-xTB motif hits of the hop on that potential.
 \cite{bannwarthGfn2xtbanAccurateBroadly2019} The Supporting Information.
 Draws the full structure plates.
 
@@ -335,10 +343,10 @@ Draws the full structure plates.
 \centering
 \includegraphics[width=\linewidth]{systems.pdf}
 \caption{Structures of the benchmark.
-(a) The global minima of LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\) and
+(a) The published global minima of LJ\(_{38}\), LJ\(_{75}\), LJ\(_{98}\) and
 LJ\(_{104}\).
-(b) The TIP4P minima of 10, 15 and 20 molecules.
-And the lowest GFN2-xTB hexamer of each class.}.
+(b) The TIP4P reference minima of 10, 15 and 20 molecules.
+And the lowest GFN2-xTB hexamer of each class on that potential.}.
 \label{fig:systems}
 \end{figure}
 \begin{figure}
@@ -365,10 +373,10 @@ and of the recommended hop accepted at LJ\(_{38}\), LJ\(_{75}\) and.
 LJ\(_{98}\).
 At LJ\(_{38}\) the recommended hop reached the truncated octahedron.
 The LJ\(_{75}\) minima on that map reach the icosahedral competitor at.
-\(-396.282249\), which is \(1.210\) above the decahedral global minimum.
+\(-396.282249\), which is \(1.210\) above the published decahedral global minimum.
 At \(-397.492331\).
-The LJ\(_{98}\) minima stop \(0.022\) above the tetrahedral global.
-Minimum at \(-543.665361\).
+The LJ\(_{98}\) minima stop \(0.022\) above the published tetrahedral global minimum.
+At \(-543.665361\).
 Figure~\ref{fig:disconnectivity} joins the LJ\(_{38}\) minima where.
 They first connect among their nearest neighbours.
 In the coordination descriptor.
@@ -422,7 +430,9 @@ And the fourth runs that polish after CREST inside the same budget.
 A run hits when the iterative rotations and assignments alignment (IRA).
 matches a structure to a Malloum prism, cage, book.
 Or cyclic chair reoptimised at GFN2-xTB.
-\cite{gundeIraShapeMatching2021,malloumStructuresRelativeStability2019,perezStructuresCagePrism2012}
+That hit is against the reference motif on that potential.
+It is not the global minimum of every water model.
+\cite{gundeIraShapeMatching2021,malloumStructuresRelativeStability2019,perezStructuresCagePrism2012,hernandezRojasWater2026}
 The default hop hit 121 of 192 seeds.
 Its call PAR-2 median is 4000 and its type-7 interquartile range is.
 4000.
