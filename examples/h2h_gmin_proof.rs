@@ -329,6 +329,32 @@ fn type7(sorted: &[f64], p: f64) -> f64 {
     }
 }
 
+#[cfg(test)]
+mod coverage_checks {
+    use super::{evals_to_hit, paper_budget, type7};
+
+    #[test]
+    fn paper_budget_names_the_published_sizes() {
+        assert_eq!(paper_budget(55), Some(1_000_000));
+        assert_eq!(paper_budget(104), Some(4_000_000));
+        assert!(paper_budget(1).is_none());
+    }
+
+    #[test]
+    fn a_hit_keeps_the_charged_count() {
+        assert_eq!(evals_to_hit(true, Some(4), 30), 4);
+        assert_eq!(evals_to_hit(true, None, 30), 30);
+        assert_eq!(evals_to_hit(false, Some(4), 30), 30);
+    }
+
+    #[test]
+    fn type7_lands_on_a_recorded_sample() {
+        assert_eq!(type7(&[1.0, 3.0, 5.0], 0.0), 1.0);
+        assert_eq!(type7(&[1.0, 3.0, 5.0], 1.0), 5.0);
+        assert_eq!(type7(&[5.0], 0.5), 5.0);
+    }
+}
+
 fn median_iqr(values: &[f64]) -> (f64, f64) {
     let mut sorted = values.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
