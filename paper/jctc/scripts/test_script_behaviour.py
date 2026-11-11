@@ -693,6 +693,12 @@ def test_shipped_tree_has_no_private_paths() -> None:
     assert bad == []
 
 
+def test_source_constants_receipt_matches_the_sources() -> None:
+    import claim_fields
+
+    assert claim_fields.RECEIPT.read_text().splitlines() == claim_fields.extract_sources()
+
+
 def test_lj104_v414_baseline_matches_the_receipts() -> None:
     import lj104_v414_baseline
 

@@ -1,0 +1,34 @@
+command python3 paper/jctc/scripts/claim_fields.py --write
+source src/methods/feynman_kac.rs 60d59e551ba4fb47ffb4fa63af8d43aca56a8e4edd54c1f2813842a346f1ec98
+source src/methods/cluster_hopping/preset.rs 97a7514cf02b120c28ca28d535ee9b2961608f8a39ec0121c904e46a57224059
+source src/methods/cluster_hopping/config.rs bdce8438b260e38bd190a75fb7fe7cb29f61803b129ee7829fb80a33d97df8e7
+source src/methods/two_phase.rs 21c4472d728c19fc40ce717a55b67341c1a23f69f5f0886fee962531680fef33
+source src/potentials.rs c7ca17269f074068524c4309144026f8fe41074fd389d9adbb7a859730418638
+source src/superbasin.rs 54164186565be7fee88d4b0792097702f416de180ede8d5df724406629ede359
+source scripts/elja_hq_sci_molslab_bank.sh 6547000393c7f724e9abd329eb7048f78089acd284aa5c2d1a28f5abdfca9a3b
+source paper/jctc/scripts/hq_sci_tally.py c4723bf3e6612838e263a8fca94df35fa40ab8affbb6cda4791ce6a54d9de7ea
+source paper/jctc/scripts/water_h2h.py 53854653aa44ad5a5b002bd9837cd1b9dfbc63d6a78ec7e1f4b61744d19d924a
+selection_energy 1.0
+selection_novelty 0.8
+selection_scarcity 0.6
+selection_uncertainty 0.4
+rank_average_factor 0.5
+rank_divisor 2
+rank_offset 1
+rank_singleton 0
+temperature 0.8
+merge_radius 0.7
+temperature_line 8
+surface_below 98
+surface_kappa 0.7
+surface_beta 1.0
+reduced_gate 1e-3
+centroid_mu 0.0
+lj_epsilon 1
+metropolis_cap 1
+target_energy_line 118
+target_energy -415.971529
+target_tol_line 119
+target_tol 1e-3
+copper_relative 0.01
+force_bar_eh 0.001

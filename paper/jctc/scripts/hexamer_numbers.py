@@ -2,8 +2,10 @@
 # Copyright (c) anneal developers
 """Numbers for the water-hexamer figure and table.
 
-The values are read from the crest logs and from NUMBERS.tsv.
-A missing log directory is an error. There is no fallback table.
+The counters are read from the crest logs. The gaps, RMSDs, and wall
+times are read from pair-seedN.log when that receipt is present, and from
+NUMBERS.tsv only when the pair receipts are absent. A missing log
+directory is an error. There is no fallback table.
 """
 
 from __future__ import annotations
@@ -50,9 +52,9 @@ def _logs() -> Path:
         path = Path(raw)
     else:
         path = Path(__file__).resolve().parents[1] / "logs" / "water"
-    if not (path / "NUMBERS.tsv").is_file():
-        raise SystemExit(f"missing water logs: {path}")
-    return path
+    if (path / "pair-seed0.log").is_file() or (path / "NUMBERS.tsv").is_file():
+        return path
+    raise SystemExit(f"missing water logs: {path}")
 
 
 def _engrad(log: Path) -> int:
@@ -74,9 +76,40 @@ def _old_counter(log: Path) -> int:
     return int(dynamics.group(1)) + int(optim.group(1))
 
 
-def load() -> dict[int, dict[str, float]]:
-    """Return one record per seed from the log directory."""
-    logs = _logs()
+def _grab(text: str, key: str) -> str:
+    prefix = key + "="
+    for line in text.splitlines():
+        if line.startswith(prefix):
+            return line.split("=", 1)[1]
+    raise SystemExit(f"missing {key}")
+
+
+def _load_pairs(logs: Path) -> dict[int, dict[str, float]]:
+    rows: dict[int, dict[str, float]] = {}
+    for seed in range(6):
+        pair_path = logs / f"pair-seed{seed}.log"
+        text = pair_path.read_text(errors="replace")
+        crest_log = logs / f"crest-hexamer-seed{seed}.log"
+        if not crest_log.is_file():
+            raise SystemExit(f"missing {crest_log}")
+        cpu = crest_log.read_text(errors="replace").splitlines()[3]
+        if cpu != CPU:
+            raise SystemExit(f"seed {seed} cpu {cpu!r}")
+        rows[seed] = {
+            "old": float(_old_counter(crest_log)),
+            "engrad": float(_engrad(crest_log)),
+            "gap_4000": float(_grab(text, "paper4000_signed_dE_polished_Eh")),
+            "gap_old": float(_grab(text, "fair_signed_dE_polished_Eh")),
+            "rmsd_4000": float(_grab(text, "paper4000_free_rmsd")),
+            "rmsd_old": float(_grab(text, "fair_free_rmsd")),
+            "wall_crest": float(_grab(text, "crest_wall")),
+            "wall_4000": float(_grab(text, "paper4000_wall")),
+            "wall_old": float(_grab(text, "fair_wall")),
+        }
+    return rows
+
+
+def _load_tsv(logs: Path) -> dict[int, dict[str, float]]:
     header = None
     by_seed_arm: dict[tuple[int, str], dict[str, str]] = {}
     for line in (logs / "NUMBERS.tsv").read_text().splitlines():
@@ -113,6 +146,14 @@ def load() -> dict[int, dict[str, float]]:
             "wall_old": float(matched["wall_s"]),
         }
     return rows
+
+
+def load() -> dict[int, dict[str, float]]:
+    """Return one record per seed from the pair receipts, or the summary table."""
+    logs = _logs()
+    if (logs / "pair-seed0.log").is_file():
+        return _load_pairs(logs)
+    return _load_tsv(logs)
 
 
 def walls(rows: dict[int, dict[str, float]]) -> dict[str, tuple[float, float]]:

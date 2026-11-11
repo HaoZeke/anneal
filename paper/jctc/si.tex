@@ -24,7 +24,7 @@ Indian Institute of Technology Kanpur, Kanpur, India}
 \author{Debabrata Goswami}
 \affiliation{Center for Bits and Atoms,
 Massachusetts Institute of Technology, Cambridge,
-Massachusetts 02139, United States}
+Massachusetts, United States}
 \alsoaffiliation{Department of Chemistry,
 Indian Institute of Technology Kanpur, Kanpur, India}
 \email{dgoswami@iitk.ac.in}
@@ -52,18 +52,18 @@ The best energy in that log is \PlainEnergy.
 After \PlainCalls{} charged evaluations.
 
 \section{Published symmetrised costs}
-\texttt{data/literature.tsv} quotes Oakley, Johnston and Wales, Table 1.
+\texttt{data/literature.tsv} quotes Oakley, Johnston and Wales.
 \cite{oakley2013} The continuous-symmetry basin-hopping mean.
-At 38 atoms is 4369 evaluations over 100 successful runs.
-The same file's Table 2 rows are genetic-algorithm means.
+At 38 atoms the table gives the mean over the successful runs.
+The same file's other rows are genetic-algorithm means.
 At 75 and 98 atoms.
 No row in that file is a genetic algorithm at 104 atoms.
 
 \section{TIP4P pair constants}
 \texttt{logs/tip4p\_constants.txt} records Jorgensen's \(A = 2510400\)
 and \(C = 2552.24\).
-\cite{jorgensen1983} The units are kJ \AA\(^{12}\) mol\(^{-1}\) and kJ
-\AA\(^{6}\) mol\(^{-1}\).
+\cite{jorgensen1983} The units are kJ \AA\(^{12}\) per mole and kJ
+\AA\(^{6}\) per mole.
 The Wales-group basin-hopping program (GMIN) matches those two numbers.
 In \(C_6\) and \(C_{12}\).
 A rounded well depth and a rounded \(\sigma\) give the anneal pair.
@@ -72,8 +72,8 @@ These two coefficients are the TIP4P pair in the log.
 The GFN2-xTB hexamer rows are a separate comparison.
 
 \section{Earlier campaign}
-\texttt{data/campaign-scores.csv} is an earlier 64-seed campaign, and on
-TIP4P\(_{20}\) a 16-seed campaign.
+\texttt{data/campaign-scores.csv} is an earlier campaign, and a shorter one on
+TIP4P\(_{20}\).
 Its recommended rows were scored.
 With a preset that still branched on the atom count.
 \texttt{data/lj55\_lj98/seeds.csv} scores LJ\(_{98}\).
@@ -87,9 +87,9 @@ Its call PAR-2 median is 158540.5 and its type-7 interquartile range is.
 \texttt{logs/paired\_bootstrap\_lj98.txt} records the paired-bootstrap.
 Interval of the median ratio for the 24-of-64 hop, 12.62 with endpoints.
 8.52 and 15.22, from 2000 resamples.
-None of those rows is the LJ\(_{75}\) campaign of 200 seeds.
-OGOLEM, cited as Dieterich and Hartke, is in the campaign file at 6 of
-64 on LJ\(_{104}\).
+None of those rows is the LJ\(_{75}\) campaign drawn in the encounter figure.
+OGOLEM, cited as Dieterich and Hartke, is in the campaign file on
+LJ\(_{104}\).
 \cite{dieterich2010} ABCluster, cited as Zhang and Dolg.
 Is in the same file.
 \cite{zhang2015} The seed file is the record of those LJ\(_{98}\)
@@ -100,22 +100,22 @@ We keep the LJ75 receipt in \texttt{logs/lj75-hardware-receipt.txt}.
 We run \texttt{scripts/lj75\_hardware\_capture.sh}.
 That script writes the file.
 From the live process.
-The 200-seed binary was built from tree.
+The encounter-curve binary was built from tree.
 \texttt{37535ec1a6e99d47a2afe0752072a33af64dccb3}.
 The tree of the unpublished build commit.
 A public reader gets the archived blob-hash check only.
-That tree has the \#56 copies of \texttt{bias.rs}, \texttt{neighbors.rs}
+That tree has copies of \texttt{bias.rs}, \texttt{neighbors.rs}
 and \texttt{potentials.rs}, the hot-path bench file, the newsfragment.
 and \texttt{precision-policy.org}.
 It lacks the \texttt{cluster\_hopping.rs} and \texttt{tip4p.rs} parts of
-\#56 and the bench entry in \texttt{Cargo.toml}.
+that copy and the bench entry in \texttt{Cargo.toml}.
 Its \texttt{rigid\_body.rs} is a third version.
 Main's sealed LJ75 counts used restart on stall.
 And an empty surface list.
 They are not the result of the preset in this article.
 The encounter-curve figure draws that earlier campaign: the recommended.
 Hop, the derived hop, and the Wales-group basin-hopping program (GMIN),
-on 200 seeds.
+on the seeds of that earlier campaign.
 The panel prints that run's PAR-2 values.
 We keep the source archive at \texttt{logs/lj75-source-37535ec1.tar.xz}.
 It includes \texttt{LICENSE.txt}.
@@ -123,11 +123,9 @@ The notice reads Copyright (c) 2023 anneal core developers.
 \texttt{scripts/lj75\_rebuild\_from\_archive.sh} rebuilds the example.
 With the bank-rpc feature.
 We keep the build receipt in \texttt{logs/cargo-build-receipt.txt}.
-Against the tip, \texttt{cluster\_hopping.rs} differs by 218 insertions.
-and 2 deletions, \texttt{tip4p.rs} by 93 and 15, \texttt{rigid\_body.rs}
-by 52 and 14, \texttt{examples/molecular\_cluster.rs} by 1 insertion,
-\texttt{Cargo.toml} by 4 insertions and 1 deletion, and
-\texttt{Cargo.lock} by 55 deletions.
+Against the tip, \texttt{cluster\_hopping.rs}, \texttt{tip4p.rs},
+\texttt{rigid\_body.rs}, \texttt{examples/molecular\_cluster.rs},
+\texttt{Cargo.toml}, and \texttt{Cargo.lock} differ.
 On the recommended LJ\(_{75}\) path the hop reuses a pure.
 Distance descriptor.
 The added tests require a second call on the same coordinates to match.
@@ -159,7 +157,7 @@ Fold plots: \ref{fig:occ-landfold}, \ref{fig:occ-lj38},
 \centering
 \includegraphics[width=\textwidth]{si_water.pdf}
 \caption{TIP4P plates and the hexamer classes.
-The (H\(_2\)O)\(_6\) plate prints \(-197.7805\)~kJ/mol.
+The hexamer plate prints \(-197.7805\)~kJ/mol.
 That is the Cambridge Cluster Database value.
 It uses the Jorgensen TIP4P constants C6 \(= 2552.24\) and C12.
 \(= 2510400\).
@@ -170,17 +168,17 @@ Its C6 is \(2551.8252\) and its C12 is \(2510336.2\).}
 \end{figure}
 \begin{figure}
 \centering
-\includegraphics[width=0.48\textwidth]{lj38_sketchmap.png}
+\includegraphics[width=\FigHalfWidth]{lj38_sketchmap.png}
 \caption{LJ\(_{38}\) sketch-map of the sealed landmarks.
 Colour is the quenched energy.
-The 600 landmarks pool basin hopping, the recommended hop.
+The landmarks pool basin hopping, the recommended hop.
 Random structure search and two references.
 The darkest point is the fcc minimum, which the recommended hop reaches.}
 \label{fig:lj38-sketchmap}
 \end{figure}
 \begin{figure}
 \centering
-\includegraphics[width=0.48\textwidth]{lj38_landscape.png}
+\includegraphics[width=\FigHalfWidth]{lj38_landscape.png}
 \caption{LJ\(_{38}\) landscape on that sketch-map.
 Colour is the energy above the global minimum.
 Basin hopping sits \(2.429\) above it.
@@ -189,7 +187,7 @@ Random structure search sits \(3.051\) above it.}
 \end{figure}
 \begin{figure}
 \centering
-\includegraphics[width=0.48\textwidth]{lj75_landscape.png}
+\includegraphics[width=\FigHalfWidth]{lj75_landscape.png}
 \caption{LJ\(_{75}\) landscape on its sketch-map.
 Colour is the energy above the Marks decahedron.
 Basin hopping and the recommended hop both sit \(1.210\) above it.}
@@ -197,7 +195,7 @@ Basin hopping and the recommended hop both sit \(1.210\) above it.}
 \end{figure}
 \begin{figure}
 \centering
-\includegraphics[width=0.48\textwidth]{lj98_landscape.png}
+\includegraphics[width=\FigHalfWidth]{lj98_landscape.png}
 \caption{LJ\(_{98}\) landscape on its sketch-map.
 Colour is the energy above the Leary minimum.
 The recommended hop sits \(0.022\) above it.
@@ -206,7 +204,7 @@ Basin hopping sits \(0.119\) above it.}
 \end{figure}
 \begin{figure}
 \centering
-\includegraphics[width=0.48\textwidth]{occupancy_landfold.pdf}
+\includegraphics[width=\FigHalfWidth]{occupancy_landfold.pdf}
 \caption{Occupancy folds of LJ\(_{38}\), LJ\(_{75}\) and LJ\(_{98}\).
 Each panel is energy above the lowest minimum.
 Against the fold coordinate.}
@@ -214,7 +212,7 @@ Against the fold coordinate.}
 \end{figure}
 \begin{figure}
 \centering
-\includegraphics[width=0.48\textwidth]{occupancy_landfold_lj38.pdf}
+\includegraphics[width=\FigHalfWidth]{occupancy_landfold_lj38.pdf}
 \caption{LJ\(_{38}\) occupancy fold.
 The arms are not marked.
 In the sealed table, the recommended hop reaches the fcc minimum.
@@ -223,7 +221,7 @@ And basin hopping stops \(2.429\) above it.}
 \end{figure}
 \begin{figure}
 \centering
-\includegraphics[width=0.48\textwidth]{occupancy_landfold_lj75.pdf}
+\includegraphics[width=\FigHalfWidth]{occupancy_landfold_lj75.pdf}
 \caption{LJ\(_{75}\) occupancy fold.
 The arms are not marked.
 In the sealed table.
@@ -232,7 +230,7 @@ Both arms stop \(1.210\) above the Marks decahedron.}
 \end{figure}
 \begin{figure}
 \centering
-\includegraphics[width=0.48\textwidth]{occupancy_landfold_lj98.pdf}
+\includegraphics[width=\FigHalfWidth]{occupancy_landfold_lj98.pdf}
 \caption{LJ\(_{98}\) occupancy fold.
 The arms are not marked.
 In the sealed table.
@@ -248,7 +246,7 @@ The lines are 118 and 119.
 TARGET\_TOL there is 1e-3.
 The reference is -415.971529 eV.
 The per-seed gaps run from 8e-6 eV to 3.68e-4 eV above that reference.
-No seed reached the reference within 1e-6 eV.
+No seed's recorded best equals the reference.
 These are not exact hits.
 Eight seeds lie inside the 0.001 eV tolerance.
 

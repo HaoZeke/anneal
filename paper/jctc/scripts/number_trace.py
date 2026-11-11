@@ -21,6 +21,7 @@ SOURCES = (
 )
 sys.path.insert(0, str(JCTC / "scripts"))
 
+import claim_fields  # noqa: E402
 import hexamer_numbers  # noqa: E402
 import hq_sci_tally  # noqa: E402
 import lj104_v414_baseline  # noqa: E402
@@ -176,6 +177,9 @@ def tip4p_text() -> str:
 
 def classify(path: Path, line_no: int, line: str, token: str, helpers: dict) -> tuple[str, str, str]:
     """Return raw log, script, match."""
+    found = claim_fields.lookup(line, token)
+    if found is not None:
+        return (*found, "yes")
     script_hex = rel(JCTC / "scripts" / "hexamer_numbers.py")
     script_cu = rel(JCTC / "scripts" / "hq_sci_tally.py")
     script_tip = rel(JCTC / "scripts" / "tip4p_constants.py")
