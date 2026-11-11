@@ -3818,12 +3818,17 @@ where
             if !movable.is_empty() {
                 // Same shape as the initial pool: the allocator's arm
                 // statistics stay aligned across the per-hop rebuild.
-                kernels = MoveLibrary::Molecular {
+                // A connectivity change can drop the cycle arm. That
+                // shorter list would make the next draw index off the end.
+                let rebuilt = MoveLibrary::Molecular {
                     groups: movable,
                     reactive: *reactive,
                     reverse_cycles: *reverse_cycles,
                 }
                 .kernels(cfg);
+                if rebuilt.len() == allocator.len() {
+                    kernels = rebuilt;
+                }
             }
         }
         // Extra fixed-composition proposal. The wide-ratio escape and the
