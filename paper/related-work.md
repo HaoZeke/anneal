@@ -227,3 +227,17 @@ Willnecker and Moodley, arXiv:2411.18087 (27 November 2024), run an adaptive gen
 This does not contradict the Cambridge energies at 38 atoms and above. It does not call for a head-to-head at the manuscript sizes.
 
 Cite `willneckerGenetic2024`. Read "more accurate" as a longer print of the known energies.
+
+## 2026-11-11 — Journal version of the Thomson search
+
+Amore and Wales, Journal of Chemical Physics 165, 164104 (22 October 2026), doi:10.1063/5.0355867, is the journal version of the preprint already filed as `amoreThomson2026`. The abstract is the same search on the Thomson problem. The Lennard-Jones hit targets are unchanged.
+
+The key `amoreThomson2026` now carries the journal DOI beside the arXiv id.
+
+## 2026-11-11 — Lower energies on two Cambridge tables that are not Lennard-Jones
+
+Olivier, doi:10.5281/zenodo.23775350 (29 October 2026), deposits six clusters and reports energies below the minima listed in the Cambridge Cluster Database for the modified Dzugutov potential at 74, 134, 177, and 186 atoms, and for the Z1 potential at 54 and 68 atoms. The deposit says nothing is claimed about global optimality. The Doye copies of those two tables, read on 11 November 2026, still show the listed energies the deposit quotes. Modified Dzugutov 74 is -180.982763, 134 is -343.386067, 177 is -462.579581, and 186 is -487.786110. Z1 54 is -146.333923 and 68 is -185.275450. Both pages were last modified on 4 March 2025. This note does not recompute his geometries.
+
+The Lennard-Jones table on the same site was last modified the same day. It still lists the published minima the manuscript uses: -173.928427 at 38 atoms, -279.248470 at 55, -397.492331 at 75, -543.665361 at 98, and -582.086642 at 104. Those six deposited energies are modified Dzugutov and Z1 energies. They do not contradict the Lennard-Jones hit targets.
+
+Cite `olivierPairTables2026`. Keep them out of the Lennard-Jones table.
