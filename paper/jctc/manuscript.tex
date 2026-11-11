@@ -51,11 +51,15 @@ On seeds 6400--6405 the same retry hits LJ\(_{98}\) on 6 of 6.
 On TIP4P, within \(0.001\)~kcal/mol and \(5\times 10^{5}\) force calls,
 \((\mathrm{H_2O})_{10}\) hits on 6 of 6 seeds.
 \((\mathrm{H_2O})_{15}\) and \((\mathrm{H_2O})_{20}\) hit on 0 of 6.
-On the water hexamer, five of the six polished gaps at GFN2-xTB with
-xtb 6.7.1 lie within \(1\times 10^{-7}\)~Eh.
-On the 4000-call ledger seed 1 lies
-\(1.3509\times 10^{-7}\)~Eh lower.
-\todo{The xtb 6.8.0 re-polish of those finals is still running.}
+On the water hexamer the motif match hits 121 of 192 seeds for the
+default hop and 97 of 192 for CREST, both at GFN2-xTB with xtb 6.7.1.
+The polished gaps on seeds 0--5 hold at GFN2-xTB with xtb 6.7.1 and
+with xtb 6.8.0.
+On xtb 6.7.1, five of six gaps lie within \(1\times 10^{-7}\)~Eh, and
+on the 4000-call ledger seed 1 lies \(1.3509\times 10^{-7}\)~Eh lower.
+On xtb 6.8.0 both the 4000-call arm and the old-counter arm lie within
+\(1\times 10^{-7}\)~Eh on 6 of 6 seeds, and seed 1 lies at
+\(-4.34\times 10^{-8}\)~Eh.
 \end{abstract}
 
 \section{Introduction}
@@ -541,7 +545,7 @@ synthetic functions is a different method.
 g-xTB is a tight-binding method aimed at a hybrid density functional.
 \cite{froitzheimGxtb2025}
 It is distinct from the GFN2-xTB surface used below, which is evaluated
-with xtb 6.7.1.
+with xtb 6.7.1 and re-polished with xtb 6.8.0.
 \cite{bannwarthGfn2xtbanAccurateBroadly2019}
 MARS samples conformers on machine-learned force fields and describes
 semiempirical quantum chemistry as the practical route CREST automates.
@@ -750,11 +754,20 @@ The six rows are six single draws from one start geometry.
 Each final is polished with xtb 6.7.1 at GFN2, the vtight setting,
 accuracy \(0.01\), and an iteration limit of 500.
 \cite{bannwarthGfn2xtbanAccurateBroadly2019}
+The same eighteen finals, from CREST, the 4000-call arm, and the
+old-counter arm on seeds 0--5, were optimised again and evaluated as
+single points with xtb 6.8.0 at GFN2, the same vtight setting, and
+accuracy \(0.01\).
+The totals moved by about \(1\times 10^{-8}\)~Eh.
 The vtight energy threshold is \(1\times 10^{-7}\)~Eh.
 A row is kept when the run exits cleanly, the polished energy is
 finite, and the maximum force is at or below \(0.001\)~Eh/bohr.
-\todo{The same six finals have not been re-polished with xtb 6.8.0.
-That re-polish is still running, and no 6.8.0 gap is reported here.}
+The iterative-rotations-and-assignments match on the 192-seed campaign
+hits 121 of 192 seeds for the default hop and 97 of 192 for CREST, at
+GFN2-xTB with xtb 6.7.1.
+\cite{gundeIraShapeMatching2021}
+The 192-seed geometries were not kept, so those two counts stay at
+that scoring.
 
 Table~\ref{tab:crest-counters} lists two CREST counters.
 The old counter sums the dynamics steps and the optimization steps.
@@ -797,6 +810,11 @@ Seed 1 lies outside that line, at \(-1.3509\times 10^{-7}\)~Eh on the
 cap equals the old counter.
 The label-free root-mean-square deviation of each polished pair is at
 most \(0.00212\)~\AA.
+On xtb 6.8.0 the gaps hold.
+Both the 4000-call arm and the old-counter arm lie within
+\(1\times 10^{-7}\)~Eh on 6 of 6 seeds.
+Seed 1, outside the line at xtb 6.7.1, lies inside it at
+\(-4.34\times 10^{-8}\)~Eh.
 The logs name the processor as Intel Xeon, family 6, model 207.
 Each CREST run used one thread.
 The wall-time medians are \(544.0\)~s for CREST, \(18.8\)~s for the
@@ -844,10 +862,13 @@ Before the pentagonal retry, the comparison with GMIN is 5 of 6 against
 The LJ\(_{104}\) rerun after that retry is still running.
 On TIP4P, 10 molecules hit on 6 of 6 seeds and 15 and 20 molecules hit
 on none, at the tolerance in equation~\ref{eq:tip4p-hit}.
-At GFN2-xTB with xtb 6.7.1, five of the six hexamer seeds lie within
-\(1\times 10^{-7}\)~Eh of the paired CREST energy, and seed 1 lies
-outside that line.
-The xtb 6.8.0 re-polish is still running.
+At GFN2-xTB the polished hexamer gaps hold on xtb 6.7.1 and on
+xtb 6.8.0.
+On xtb 6.7.1, five of six seeds lie within \(1\times 10^{-7}\)~Eh.
+On xtb 6.8.0 both arms lie within that line on 6 of 6 seeds, and
+seed 1 lies at \(-4.34\times 10^{-8}\)~Eh.
+The motif match remains 121 of 192 for the default hop and 97 of 192
+for CREST, at xtb 6.7.1.
 
 \section*{Author contributions}
 Author contributions follow the CRediT taxonomy.
