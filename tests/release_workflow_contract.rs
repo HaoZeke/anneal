@@ -92,7 +92,7 @@ fn ci_lints_only_the_new_commit_range() {
 fn ci_audits_large_blobs_without_a_deprecated_action_runtime() {
     let workflow = include_str!("../.github/workflows/ci.yml");
 
-    assert!(workflow.contains("git rev-list --objects --all"));
+    assert!(workflow.contains("git rev-list --objects HEAD"));
     assert!(workflow.contains("git cat-file --batch-check"));
     assert!(!workflow.contains("HaoZeke/large-file-auditor"));
 }
