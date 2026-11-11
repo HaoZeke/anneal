@@ -1,3 +1,4 @@
-/tmp/commit-msgs.txt:27: [error] rgoswami.ReviewRegister (lexical) 'shipped' is a review-grading register tell (academic, sports, LinkedIn, or AI-grader). Rewrite plain.
-/tmp/commit-msgs.txt:1: [error] voice.WeRate (voice) we-rate 0.000 outside 0.09 ± 0.08 (zone None)
-proseguard: 2 finding(s), 2 actionable
+paper/jctc/logs/commit-msgs-body.txt:5: [warning] rgoswami.DenialCadence (lexical) 'does not name' defines the result by denial. State what it is.
+paper/jctc/logs/commit-msgs-body.txt:10: [warning] rgoswami.DenialCadence (lexical) 'does not draw' defines the result by denial. State what it is.
+paper/jctc/logs/commit-msgs-body.txt:40: [error] rgoswami.ReviewRegister (lexical) 'shipped' is a review-grading register tell (academic, sports, LinkedIn, or AI-grader). Rewrite plain.
+paper/jctc/logs/commit-msgs-body.txt:1: [error] voice.WeRate (voice) we-rate 0.000 outside 0.09 ± 0.08 (zone None)
