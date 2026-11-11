@@ -67,3 +67,20 @@ rule lj_bonobo_h2h:
         set -euo pipefail
         bash scripts/lj_bonobo_h2h/enter_bench.sh
         """
+
+
+# GFN2-xTB (H2O)20 anneal versus CREST. Not part of `rule all`.
+# Write bench/water-h2o20-goat/reference.csv with
+# scripts/h2o20_goat_reference.sh before this rule. GOAT rows are
+# skipped unless `orca` is on PATH.
+#   snakemake -s workflow/Snakefile water_h2o20_goat
+rule water_h2o20_goat:
+    input:
+        "bench/water-h2o20-goat/reference.csv",
+    output:
+        "bench/water-h2o20-goat/results.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/h2o20_goat_campaign.sh
+        """
