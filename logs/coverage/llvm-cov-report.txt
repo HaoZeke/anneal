@@ -1,5 +1,0 @@
-The file is examples/h2h_gmin_proof.rs.
-It has 870 regions and 28 missed regions, which is 96.78 percent.
-It has 63 functions and 6 missed functions, which is 90.48 percent.
-It has 496 lines and 8 missed lines, which is 98.39 percent.
-It has 0 branches and 0 missed branches.

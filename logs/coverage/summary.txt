@@ -1,0 +1,39 @@
+The stable compiler is rustc 1.88.0 (6b00bc388 2025-06-23).
+The stable cargo is cargo 1.88.0 (873a06493 2025-05-10).
+The nightly compiler is rustc 1.90.0-nightly (0fa4ec6cd 2025-06-25).
+The nightly cargo is cargo 1.90.0-nightly (409fed7dc 2025-06-23).
+The nightly date pin is nightly-2025-06-26.
+No toolchain file is added.
+
+Lines and the example tests run on the 1.88 compiler.
+That example test run finished in 0.00s.
+The 1.88 build of those tests took 1 minute 59 seconds.
+On 1.88 the example has 496 lines and 8 missed lines.
+That is 98.39 percent.
+The 1.88 branch column is 0 of 0.
+
+Branches use nightly-2025-06-26 and -Zcoverage-options=branch.
+The script is scripts/lj104_coverage.sh.
+On that nightly the example has 496 lines and 5 missed lines.
+That is 98.99 percent.
+It has 54 branches and 0 missed branches.
+That is 100 percent.
+It has 870 regions and 21 missed regions.
+That is 97.59 percent.
+It has 63 functions and 5 missed functions.
+That is 92.06 percent.
+
+The line gap between 1.88 and the nightly is 0.60 points.
+The nightly covers three closure lines the 1.88 profile still misses.
+Region cover sits 1.40 points under the nightly line cover.
+Those regions are the edges around the five missed lines.
+
+The library files the example calls are in the same profile.
+src/methods/cluster_hopping.rs has 5949 lines and 55.82 percent covered.
+Its branch cover is 35.21 percent.
+src/methods/cluster_hopping/config.rs has 90.00 percent of its lines.
+Its branch cover is 61.11 percent.
+src/methods/warm_lbfgs.rs has 28.66 percent of its lines.
+Its branch column is 0 of 4.
+The search function contains arms this example run does not take.
+No file is excluded from the report.
