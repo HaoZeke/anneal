@@ -331,4 +331,23 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn an_empty_problem_is_an_empty_permutation() {
+        assert_eq!(minimum_cost_assignment(&[], 0), Some(Vec::new()));
+        assert_eq!(minimum_cost_assignment(&[0.0], 0), None);
+    }
+
+    #[test]
+    fn a_bad_shape_or_a_non_finite_cost_is_refused() {
+        assert_eq!(minimum_cost_assignment(&[0.0, 1.0], 2), None);
+        assert_eq!(minimum_cost_assignment(&[f64::NAN], 1), None);
+        assert_eq!(minimum_cost_assignment(&[f64::INFINITY], 1), None);
+    }
+
+    #[test]
+    fn a_non_finite_reduced_cost_has_no_shortest_path() {
+        assert!(successive_shortest_paths(&[f64::NAN], 1).is_none());
+        assert!(kuhn_munkres(&[f64::NAN], 1).is_none());
+    }
 }
