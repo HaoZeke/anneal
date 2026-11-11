@@ -104,3 +104,11 @@ The Lennard-Jones preset uses no prior, and this paper does not re-rank LJ38 thr
 
 Cite `lyngbyUniversalPrior2024`. No contradiction. The 2026 Digital Discovery paper that uses the name BEACON is a different method.
 
+## 2026-11-11 — Fractional existence
+
+Larsen, Kaappa, Vishart, Bligaard, and Jacobsen, Physical Review B 107, 214101 (2023), doi:10.1103/PhysRevB.107.214101, add atoms of fractional existence so a search can move atoms past barriers. Positions may stay on a lattice while the existence variables move, or both may move. On copper clusters the existence variables speed up the harder sizes.
+
+The hard sizes in the manuscript are Lennard-Jones 38, 75, and 98, not copper. This does not contradict the fixed preset.
+
+Cite `larsenFractional2023`. A head-to-head would need one shared potential.
+
