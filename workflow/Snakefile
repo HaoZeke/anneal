@@ -262,3 +262,39 @@ rule tip4p_rates:
         set -euo pipefail
         bash scripts/tip4p_rates/enter_bench.sh
         """
+
+
+# Paper preset against ASE basin hopping. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile ase_bh_h2h
+rule ase_bh_h2h:
+    output:
+        "bench/ase-gofee-h2h/ase_bh.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/ase_gofee_h2h/enter_bench.sh --comparison ase_bh
+        """
+
+
+# Paper preset against ASE minima hopping. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile ase_mh_h2h
+rule ase_mh_h2h:
+    output:
+        "bench/ase-gofee-h2h/ase_mh.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/ase_gofee_h2h/enter_bench.sh --comparison ase_mh
+        """
+
+
+# Paper preset against AGOX GOFEE. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile agox_gofee_h2h
+rule agox_gofee_h2h:
+    output:
+        "bench/ase-gofee-h2h/agox_gofee.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/ase_gofee_h2h/enter_bench.sh --comparison agox_gofee
+        """

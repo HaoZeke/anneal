@@ -1,0 +1,9 @@
+ase=3.29.0
+agox=3.11.1
+numpy=2.2.6
+numba=0.61.2
+hit_tol=0.001
+seeds=2000,2001,2002,2003,2004,2005
+order_seed=20261111
+lj38_budget=400000
+lj75_budget=4000000
