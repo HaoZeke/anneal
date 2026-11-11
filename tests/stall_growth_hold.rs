@@ -179,6 +179,43 @@ fn a_failed_lattice_growth_does_not_repeat_off_the_icosahedron() {
 }
 
 #[test]
+fn an_icosahedral_growth_that_deepens_the_incumbent_is_kept() {
+    let home = icosahedron();
+    let cfg = stall_cfg(13, false);
+    let (_calls, far, best) = count_far(
+        &cfg,
+        &home,
+        |distance, _gyration, steps| steps > 0 && distance > 3.0,
+        |_call, distance| if distance > 3.0 { -80.0 } else { -1.0 },
+    );
+    assert!(far >= 3, "the three lattice sources did not quench");
+    assert!((best + 80.0).abs() < 1e-12);
+}
+
+#[test]
+fn a_short_growth_state_is_skipped_and_a_dry_ledger_stops_the_rest() {
+    let home = icosahedron();
+    let mut cfg = stall_cfg(13, false);
+    cfg.max_hops = Some(3);
+    let mut short = 0usize;
+    let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+        let distance = rms(x, home.view());
+        let _ = ledger.charge();
+        if steps > 0 && distance > 3.0 && short < 1 {
+            short += 1;
+            return (-1.0, Array1::zeros(3));
+        }
+        (-1.0, home.clone())
+    };
+    let mut ledger = Ledger::new(8);
+    let mut rng = StdRng::seed_from_u64(7);
+    let outcome = run_with_gradient(&cfg, home.view(), &mut ledger, &mut relax, None, &mut rng)
+        .expect("finite start");
+    assert!(short >= 1, "no short lattice state was returned");
+    assert!(outcome.best.is_finite());
+}
+
+#[test]
 fn an_all_points_improvement_allows_growth_again() {
     let home = icosahedron();
     let cfg = stall_cfg(13, false);
