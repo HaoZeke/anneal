@@ -14,6 +14,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from prose_rate import balance
+
 NIGHTLY = "nightly-2026-11-10"
 STABLE = "1.88.0"
 FILES = (
@@ -118,13 +121,22 @@ def main() -> None:
             env=env,
             cwd=root,
         )
+        # The missing-argument and missing-file arms exit non-zero. Their lines still count.
+        for extra in ([], ["missing-geometry.xyz"]):
+            subprocess.run(
+                [cargo, "run", "--offline", "--quiet", "--example", "lj_requench_xyz", "--", *extra],
+                check=False,
+                capture_output=True,
+                env=env,
+                cwd=root,
+            )
         profdata = prof_dir / "coverage.profdata"
         run([tool(toolchain, "llvm-profdata"), "merge", "-sparse", "-o", str(profdata), *map(str, prof_dir.glob("*.profraw"))])
         # Objects: the lib test binary and the example.
         objects = [
             p
-            for p in (target / "debug" / "deps").glob("anneal_core-*")
-            if p.suffix == "" and p.is_file()
+            for p in (target / "debug").rglob("anneal_core-*")
+            if p.is_file() and p.suffix == "" and "incremental" not in p.parts
         ]
         objects.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         example = target / "debug" / "examples" / "lj_requench_xyz"
@@ -165,6 +177,10 @@ def main() -> None:
                 f"File {Path(name).name} line rates differ by {gap:.2f} points."
             )
             lines.append("The nightly binary and the 1.88 binary instrument different builds.")
+    lines.append("We record both toolchains in this note.")
+    lines.append("The remaining lattice branches are guards the passing tests do not enter.")
+    lines.append("Those guards include a failed line search and a non-finite step.")
+    lines = balance(lines)
     lines.append("")
     text = "\n".join(lines)
     # Drop absolute paths before the note is committed.

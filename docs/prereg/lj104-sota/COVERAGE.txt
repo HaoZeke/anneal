@@ -1,0 +1,26 @@
+Copyright (c) anneal developers
+
+Toolchain nightly-2026-11-10.
+rustc 1.102.0-nightly (ac8310ba6 2026-11-09).
+cargo 1.102.0-nightly (c07ac2c4d 2026-11-06).
+Toolchain 1.88.0.
+rustc 1.88.0 (6b00bc388 2025-06-23).
+cargo 1.88.0 (873a06493 2025-05-10).
+Mode branch.
+File lattice_search.rs.
+Lines 1420/1469 at 96.66 percent.
+Branches 177/234 at 75.64%.
+File lj_requench_xyz.rs.
+Lines 20/21 at 95.24 percent.
+Branches 1/2 at 50.00%.
+Mode lines-regions.
+File lattice_search.rs.
+Lines 1469/1523 at 96.45 percent.
+Branches 0/0 at -.
+File lj_requench_xyz.rs.
+Lines 21/22 at 95.45 percent.
+Branches 0/0 at -.
+We record both toolchains in this note.
+The remaining lattice branches are guards the passing tests do not enter.
+Those guards include a failed line search and a non-finite step.
+We keep the seconds the clock wrote.
