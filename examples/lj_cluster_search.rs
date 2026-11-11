@@ -1354,7 +1354,10 @@ fn main() {
                         .append(true)
                         .open(&prefix)
                     {
-                        let mut line = format!("{e:.8}");
+                        // Same record as Ledger::record: energy, then 0/1 for
+                        // whether the chain accepted it, then coordinates.
+                        // These quenches are samples, not chain acceptances.
+                        let mut line = format!("{e:.8} 0");
                         for v in _xr.iter() {
                             line.push_str(&format!(" {v:.6}"));
                         }
