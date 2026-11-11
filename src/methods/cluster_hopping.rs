@@ -1481,6 +1481,27 @@ fn stall_growth_waits(held: Option<f64>, incumbent: f64) -> bool {
     held.is_some_and(|energy| incumbent >= energy - 1e-9)
 }
 
+/// Leaves skipped while the incumbent stays at the held energy before the
+/// crossing growth is allowed to run again.
+///
+/// One miss is not a proof that the other packing is absent. The paper leave
+/// is thousands of force calls apart, so eight skips is one retry about every
+/// forty thousand calls. A five-hop test never reaches the eighth skip, and
+/// the single growth it counts stays single.
+const GROWTH_RETRY_LEAVES: u32 = 8;
+
+/// True while a failed growth should stay idle.
+///
+/// The energy test is [`stall_growth_waits`]. At 98 atoms and above, after
+/// [`GROWTH_RETRY_LEAVES`] idle leaves the pentagonal order is due again.
+/// That is the leave the plateau was not taking: the live chain's 555
+/// fraction sits near 0.06, under the 0.12 icosahedral cut, so that branch
+/// never opened. Below 98 the displacement library still leaves the floor,
+/// and a retry would move the call clock those hits were measured on.
+fn growth_held(held: Option<f64>, incumbent: f64, skipped: u32, n_points: usize) -> bool {
+    stall_growth_waits(held, incumbent) && (n_points < 98 || skipped < GROWTH_RETRY_LEAVES)
+}
+
 /// Kernels the chain actually draws, including the energy-lattice arm.
 fn search_kernels(cfg: &Config) -> Vec<ClusterMove> {
     let mut kernels = cfg.move_library.kernels(cfg);
@@ -2966,9 +2987,13 @@ where
     let mut hops_at_lowest = 0usize;
     let mut csm_reseed_stamp = 0usize;
     // Set when a stall growth fails to lower the incumbent. Later growth
-    // quenches wait until that energy drops, and the proposals until then
-    // are all-points displacements.
+    // quenches wait until that energy drops. Only the leave whose growth
+    // was skipped is an all-points displacement. The hops between leaves
+    // keep the move library: replacing every one of them locks the chain
+    // on the icosahedral floor (LJ75 about 1.21 above Marks, LJ98 about
+    // 0.022 above the Leary tetrahedron).
     let mut stall_growth_hold: Option<f64> = None;
+    let mut stall_growth_skips: u32 = 0;
     let hop_room = |hops: usize| cfg.max_hops.is_none_or(|cap| hops < cap);
     // Distinct minima a rigid chain has quenched. Its stall moves to one.
     let mut stall_archive = crate::methods::stall_archive::StallArchive::default();
@@ -4320,11 +4345,18 @@ where
                 continue;
             }
         }
-        // A failed stall growth leaves the remaining proposals on the
-        // all-points displacement until the incumbent drops. The test is
-        // the incumbent energy, not the atom count.
-        let held_displacement =
-            stall_growth_waits(stall_growth_hold, ledger.best) && cfg.packing_cna_applies();
+        // A failed stall growth does not quench another lattice until the
+        // incumbent drops. The leave that would have grown is one all-points
+        // displacement. Other proposals keep the kernel they drew. The test
+        // is the incumbent energy, not the atom count.
+        let held_displacement = directed_leave
+            && growth_held(
+                stall_growth_hold,
+                ledger.best,
+                stall_growth_skips,
+                cfg.n_points,
+            )
+            && cfg.packing_cna_applies();
         if held_displacement {
             let step = preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale;
             trial = ClusterMove::AllPoints { step }.propose(x.view(), cfg.temperature, rng);
@@ -6044,46 +6076,103 @@ where
             // The budget window only cools a derived search. It does not
             // decide whether a non-icosahedral plateau may leave. Recommended
             // leaves that flag off, and the icosahedral test below is false
-            // for the LJ104 minima, so neither growth ran and the hold that
-            // switches later proposals to all-points stayed unset.
+            // for the LJ104 minima, so neither growth ran and the hold
+            // stayed unset.
             // The chain takes a growth only when it deepens the incumbent.
-            // A miss sets the hold. Later proposals are all-points
-            // displacements until that incumbent drops.
+            // A miss sets the hold. The leave that then skips growth is the
+            // all-points displacement above. The library keeps proposing
+            // until the incumbent drops.
             if directed_leave
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
                 && !crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
             {
                 let best_before_growth = ledger.best;
-                if stall_growth_waits(stall_growth_hold, best_before_growth) {
+                if growth_held(
+                    stall_growth_hold,
+                    best_before_growth,
+                    stall_growth_skips,
+                    cfg.n_points,
+                ) {
                     // The lattice quench already failed at this incumbent.
-                    // Further growth waits. The proposals below carry the
-                    // charge as all-points displacements.
+                    // Further growth waits. This leave's proposal is the
+                    // all-points displacement. After several idle leaves the
+                    // pentagonal order is tried again below.
+                    stall_growth_skips = stall_growth_skips.saturating_add(1);
                 } else {
+                    let retry = stall_growth_waits(stall_growth_hold, best_before_growth);
+                    stall_growth_skips = 0;
                     let mut best_growth: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
-                    for source in crate::lattice::Source::library() {
-                        if ledger.remaining() == 0 {
-                            break;
+                    // A flat incumbent whose live chain is under the
+                    // icosahedral cut never opened the pentagonal branch.
+                    // The retry writes that order, plus the two close
+                    // packings, from a side stream so a miss leaves the
+                    // chain's own draws where they were.
+                    let mut side = StdRng::seed_from_u64(
+                        (hops as u64).wrapping_mul(0x9E37_79B9)
+                            ^ best_before_growth.to_bits()
+                            ^ 0x0C05_11CE,
+                    );
+                    let crossing = [
+                        crate::lattice::Source::Named(crate::structure::Template::FaceCentredCubic),
+                        crate::lattice::Source::Named(
+                            crate::structure::Template::HexagonalClosePacked,
+                        ),
+                        crate::lattice::Source::Pentagonal,
+                    ];
+                    if retry {
+                        for source in crossing {
+                            if ledger.remaining() == 0 {
+                                break;
+                            }
+                            let grown =
+                                crate::lattice::candidate(source, x.view(), x.len() / 3, &mut side);
+                            let (grown_energy, grown_state) =
+                                relax(ledger, grown.view(), cfg.relax_steps);
+                            if grown_state.len() != x.len() || !grown_energy.is_finite() {
+                                continue;
+                            }
+                            let grown_gradient = record_quenched_answer(
+                                cfg,
+                                ledger,
+                                &mut grad,
+                                grown_energy,
+                                grown_state.view(),
+                                &mut unconverged_records,
+                            );
+                            let replace = best_growth
+                                .as_ref()
+                                .is_none_or(|(energy, _, _)| grown_energy < *energy);
+                            if replace {
+                                best_growth = Some((grown_energy, grown_state, grown_gradient));
+                            }
                         }
-                        let grown = crate::lattice::candidate(source, x.view(), x.len() / 3, rng);
-                        let (grown_energy, grown_state) =
-                            relax(ledger, grown.view(), cfg.relax_steps);
-                        if grown_state.len() != x.len() || !grown_energy.is_finite() {
-                            continue;
-                        }
-                        let grown_gradient = record_quenched_answer(
-                            cfg,
-                            ledger,
-                            &mut grad,
-                            grown_energy,
-                            grown_state.view(),
-                            &mut unconverged_records,
-                        );
-                        let replace = best_growth
-                            .as_ref()
-                            .is_none_or(|(energy, _, _)| grown_energy < *energy);
-                        if replace {
-                            best_growth = Some((grown_energy, grown_state, grown_gradient));
+                    } else {
+                        for source in crate::lattice::Source::library() {
+                            if ledger.remaining() == 0 {
+                                break;
+                            }
+                            let grown =
+                                crate::lattice::candidate(source, x.view(), x.len() / 3, rng);
+                            let (grown_energy, grown_state) =
+                                relax(ledger, grown.view(), cfg.relax_steps);
+                            if grown_state.len() != x.len() || !grown_energy.is_finite() {
+                                continue;
+                            }
+                            let grown_gradient = record_quenched_answer(
+                                cfg,
+                                ledger,
+                                &mut grad,
+                                grown_energy,
+                                grown_state.view(),
+                                &mut unconverged_records,
+                            );
+                            let replace = best_growth
+                                .as_ref()
+                                .is_none_or(|(energy, _, _)| grown_energy < *energy);
+                            if replace {
+                                best_growth = Some((grown_energy, grown_state, grown_gradient));
+                            }
                         }
                     }
                     if let Some((grown_energy, grown_state, grown_gradient)) = best_growth
@@ -6118,18 +6207,25 @@ where
             // stream seeded by the hop and the incumbent, so a growth that
             // does not win leaves the chain's own stream where it was. The
             // quench is kept only when it deepens the incumbent. A growth
-            // that fails holds the next one until the incumbent changes, and
-            // that stalled charge is an all-points displacement.
+            // that fails holds the next one until the incumbent changes.
+            // The skipped leave is one all-points displacement.
             if directed_leave
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
                 && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
             {
                 let best_before_growth = ledger.best;
-                if stall_growth_waits(stall_growth_hold, best_before_growth) {
-                    // Same wait as the other lattice growth. The proposals
-                    // are all-points displacements until the incumbent drops.
+                if growth_held(
+                    stall_growth_hold,
+                    best_before_growth,
+                    stall_growth_skips,
+                    cfg.n_points,
+                ) {
+                    // Same wait as the other lattice growth. This leave's
+                    // proposal is the all-points displacement.
+                    stall_growth_skips = stall_growth_skips.saturating_add(1);
                 } else {
+                    stall_growth_skips = 0;
                     let mut side = StdRng::seed_from_u64(
                         (hops as u64).wrapping_mul(0x9E37_79B9)
                             ^ best_before_growth.to_bits()

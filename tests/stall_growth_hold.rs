@@ -281,6 +281,93 @@ fn a_non_icosahedral_stall_without_the_budget_window_accepts_all_points() {
 }
 
 #[test]
+fn a_held_growth_keeps_the_move_set() {
+    let home = icosahedron();
+    assert!(
+        ih_dominated(home.view(), SoapSpec::default()),
+        "the fixture is not icosahedral"
+    );
+    let mut cfg = stall_cfg(13, false);
+    // LeanBurst has no all-points kernel. An `all` acceptance is the hold.
+    // The paper patience is thousands of force calls, so hops between leaves
+    // must keep the library. Patience 1 makes every hop a leave and hides that.
+    cfg.move_library = MoveLibrary::LeanBurst;
+    cfg.soap_mode = anneal_core::methods::cluster_hopping::SoapProposalMode::Off;
+    cfg.restart_patience = 20;
+    cfg.max_hops = Some(40);
+    cfg.allocate_moves = false;
+    let mut actions = Vec::new();
+    let mut relax = |ledger: &mut Ledger, _x: ArrayView1<f64>, _steps: usize| {
+        let _ = ledger.charge();
+        (-1.0, home.clone())
+    };
+    let mut ledger = Ledger::new(20_000);
+    let mut rng = StdRng::seed_from_u64(7);
+    let outcome = run_with_gradient(&cfg, home.view(), &mut ledger, &mut relax, None, &mut rng)
+        .expect("finite start");
+    for step in &outcome.accepted_transitions {
+        actions.push(step.action.clone());
+    }
+    let held = actions.iter().position(|action| action == "all");
+    let Some(held_at) = held else {
+        panic!("the hold never emitted an all-points acceptance: {actions:?}");
+    };
+    let library = ["single", "surface", "sym", "burst"];
+    let kept = actions[held_at + 1..]
+        .iter()
+        .any(|action| library.contains(&action.as_str()));
+    assert!(
+        kept,
+        "after the hold at {held_at} the move set was only all-points: {actions:?}"
+    );
+}
+
+#[test]
+fn a_flat_non_icosahedral_plateau_retries_the_pentagonal_leave() {
+    let home = line(98);
+    assert!(
+        !ih_dominated(home.view(), SoapSpec::default()),
+        "the line was classified icosahedral"
+    );
+    let mut cfg = stall_cfg(98, false);
+    // Patience 1 makes every hop a leave. Eight idle leaves fit in this
+    // budget, which is the retry. Five hops, the other test's window, do not.
+    cfg.max_hops = Some(40);
+    cfg.restart_patience = 1;
+    let compact = std::sync::Mutex::new(Vec::new());
+    let (calls, _far, best) = count_far(
+        &cfg,
+        &home,
+        |distance, gyration, steps| {
+            let hit = steps > 0 && distance > 3.0 && gyration < 3.0;
+            compact.lock().unwrap().push(hit);
+            hit
+        },
+        |_call, _distance| -1.0,
+    );
+    let flags = compact.lock().unwrap().clone();
+    let mut streaks = Vec::new();
+    let mut streak = 0usize;
+    for hit in flags {
+        if hit {
+            streak += 1;
+        } else if streak > 0 {
+            streaks.push(streak);
+            streak = 0;
+        }
+    }
+    if streak > 0 {
+        streaks.push(streak);
+    }
+    let bursts = streaks.iter().filter(|run| **run >= 3).count();
+    assert!(
+        bursts >= 2,
+        "the pentagonal leave did not follow the library miss ({streaks:?}, {calls} calls)"
+    );
+    assert!((best + 1.0).abs() < 1e-12);
+}
+
+#[test]
 fn an_all_points_improvement_allows_growth_again() {
     let home = icosahedron();
     let cfg = stall_cfg(13, false);
