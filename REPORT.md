@@ -27,13 +27,54 @@ The rohit-paper profile was not run.
 The program proseguard is not installed on this machine.
 The profile sha follows.
 654d0de1c2632feb93ddfc2f72a08372ad672a8c7cb4a6ad30cca69b2783ddc6.
-The sentences named in the v4.13 verdict were rewritten before this report.
+Those v4.13 sentences were rewritten before this report.
 
 PROSE_EXTRACT.txt is a raw record.
-python3 -B scripts/lj104_prose_extract.py writes it.
-The writer copies each prose file and each commit message.
+Its writer copies each prose file and each commit message.
 snapper is not applied to that copy.
 
 The sha-map writer rewrites only rows it already has.
 Paths that were never rows stay outside the map.
 logs/sha-map-gap.txt names each of those paths.
+
+The tree check transcript follows.
+
+```
+producer=python3 -B scripts/lj104_tree_check.py
+receipt_root=logs/budget
+timed=7a05b51318dad29e03780d981dd3543aa8cd0457
+timed_tree=e2120c08e91f9698e121d0c38e79ce64de8a74e3
+receipt logs/budget/2000/receipt.log
+receipt_head=7a05b51318dad29e03780d981dd3543aa8cd0457
+receipt_tree=e2120c08e91f9698e121d0c38e79ce64de8a74e3
+head_match=yes
+tree_match=yes
+receipt logs/budget/2001/receipt.log
+receipt_head=7a05b51318dad29e03780d981dd3543aa8cd0457
+receipt_tree=e2120c08e91f9698e121d0c38e79ce64de8a74e3
+head_match=yes
+tree_match=yes
+receipt logs/budget/2002/receipt.log
+receipt_head=7a05b51318dad29e03780d981dd3543aa8cd0457
+receipt_tree=e2120c08e91f9698e121d0c38e79ce64de8a74e3
+head_match=yes
+tree_match=yes
+receipt logs/budget/2003/receipt.log
+receipt_head=7a05b51318dad29e03780d981dd3543aa8cd0457
+receipt_tree=e2120c08e91f9698e121d0c38e79ce64de8a74e3
+head_match=yes
+tree_match=yes
+receipt logs/budget/2004/receipt.log
+receipt_head=7a05b51318dad29e03780d981dd3543aa8cd0457
+receipt_tree=e2120c08e91f9698e121d0c38e79ce64de8a74e3
+head_match=yes
+tree_match=yes
+receipt logs/budget/2005/receipt.log
+receipt_head=7a05b51318dad29e03780d981dd3543aa8cd0457
+receipt_tree=e2120c08e91f9698e121d0c38e79ce64de8a74e3
+head_match=yes
+tree_match=yes
+covered_diff_count=0
+tree check ok: 6
+exit=0
+```

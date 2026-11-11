@@ -1,3 +1,7 @@
+This file is a raw record.
+Its writer copies each prose file and each commit message.
+snapper is not applied to this copy.
+
 ===== NOTES.md =====
 Two-million evaluation reproduction, on the same engine.
 
@@ -6,30 +10,30 @@ v4.2 already recorded their outcome.
 This rerun is not a blind test.
 
 The receipt head follows.
-d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1.
+7a05b51318dad29e03780d981dd3543aa8cd0457.
 The receipt tree follows.
-801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a.
+e2120c08e91f9698e121d0c38e79ce64de8a74e3.
 The binary digest follows.
-The binary printed head d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1.
-2b07c440a23ec5c5ba0db4df4efecd4494963f590958ca07482f8994c433659e.
+The binary printed head 7a05b51318dad29e03780d981dd3543aa8cd0457.
+565b531d948819eac74b7a223a4fa6ae4ba7d8dcf70163d62b4b14ae8fae37a0.
 The receipt records rustc 1.88.0 (6b00bc388 2025-06-23).
 The receipt records cargo 1.88.0 (873a06493 2025-05-10).
-The arm opened at 16:35:59 and closed at 16:52:33.
+The arm opened at 19:08:07 and closed at 19:24:09.
 
 Global-minimum outcomes on the six seeds: none.
 The best was -581.80 against -582.0866.
 The global-minimum count is 0 of 6.
-Seed 2000 opened at 16:35:59 and closed at 16:38:47.
+Seed 2000 opened at 19:08:07 and closed at 19:10:58.
 Its best energy is -580.42126629.
-Seed 2001 opened at 16:38:47 and closed at 16:41:28.
+Seed 2001 opened at 19:10:58 and closed at 19:13:40.
 Its best energy is -580.42126629.
-Seed 2002 opened at 16:41:28 and closed at 16:44:06.
+Seed 2002 opened at 19:13:40 and closed at 19:16:17.
 Its best energy is -578.60157826.
-Seed 2003 opened at 16:44:06 and closed at 16:47:01.
+Seed 2003 opened at 19:16:17 and closed at 19:18:57.
 Its best energy is -580.42126629.
-Seed 2004 opened at 16:47:01 and closed at 16:49:50.
+Seed 2004 opened at 19:18:57 and closed at 19:21:35.
 Its best energy is -578.60157826.
-Seed 2005 opened at 16:49:50 and closed at 16:52:33.
+Seed 2005 opened at 19:21:35 and closed at 19:24:09.
 Its best energy is -581.80180238.
 
 Each seed ran alone on processor 0.
@@ -39,11 +43,10 @@ uname -n reads bench.
 ===== REPRODUCE.md =====
 The measured arm reruns seeds 2000 through 2005, one seed at a time.
 
-The engine is commit d9eec16a32df and tree 801ff2bc6cb1.
-Engine commit d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1.
-Engine tree 801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a.
+The timed commit is 7a05b51318dad29e03780d981dd3543aa8cd0457.
+The timed tree is e2120c08e91f9698e121d0c38e79ce64de8a74e3.
 The binary digest follows.
-2b07c440a23ec5c5ba0db4df4efecd4494963f590958ca07482f8994c433659e.
+565b531d948819eac74b7a223a4fa6ae4ba7d8dcf70163d62b4b14ae8fae37a0.
 
 The receipt script opens one private mount namespace.
 It also opens one hostname namespace.
@@ -60,14 +63,13 @@ Phase: two-million reproduction finished.
 
 No push.
 Archive refs are never pushed.
-The push plan lists only refs/heads/fix/lj104-measure-v4.13.
+The push plan lists only refs/heads/fix/lj104-measure-v4.14.
 
-Engine commit d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1.
-
-Engine tree 801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a.
+The timed commit is 7a05b51318dad29e03780d981dd3543aa8cd0457.
+The timed tree is e2120c08e91f9698e121d0c38e79ce64de8a74e3.
 The binary digest follows.
-2b07c440a23ec5c5ba0db4df4efecd4494963f590958ca07482f8994c433659e.
-The arm opened at 16:35:59 and closed at 16:52:33.
+565b531d948819eac74b7a223a4fa6ae4ba7d8dcf70163d62b4b14ae8fae37a0.
+The arm opened at 19:08:07 and closed at 19:24:09.
 
 Jobs left running: none.
 
@@ -76,60 +78,80 @@ Each seed ran alone on processor 0.
 The global-minimum count is 0 of 6.
 
 ===== REPORT.md =====
-# LJ104 measure v4.13
+# LJ104 measure v4.14
 
 The global-minimum count is 0 of 6.
-The best was -581.80 against -582.0866.
+The best energy is -581.80180238.
+A hit requires energy at or below -582.086642 plus 1e-6.
+None of the six seeds reached that level.
 
-The timed commit is d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1.
-Its tree is 801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a.
-The arm opened at 16:35:59 and closed at 16:52:33.
+The timed commit is 7a05b51318dad29e03780d981dd3543aa8cd0457.
+The timed tree is e2120c08e91f9698e121d0c38e79ce64de8a74e3.
+The arm opened at 19:08:07 and closed at 19:24:09.
 
 Each receipt records rustc 1.88.0 (6b00bc388 2025-06-23).
 Each receipt records cargo 1.88.0 (873a06493 2025-05-10).
-rust-toolchain.toml is absent at that commit.
+rust-toolchain.toml is absent.
 The pin was not added.
 
-proseguard was not run.
-The program is not installed.
-The prose-human profile on the public dotfiles is age-encrypted.
-PROSE_EXTRACT.txt holds the prose and the commit messages.
+The example line cover on rustc 1.88.0 is 98.39 percent.
+The example line cover on nightly-2025-06-26 is 98.99 percent.
+The example branch cover on that nightly is 100 percent.
+The line gap is 0.60 points, three closure lines.
+Region cover on that nightly is 97.59 percent.
+That is 1.40 points under the line cover, on the same five missed lines.
+The library files the example calls are in logs/coverage/summary.txt.
+No coverage file is excluded.
+
+The rohit-paper profile was not run.
+The program proseguard is not installed on this machine.
+The profile sha follows.
+654d0de1c2632feb93ddfc2f72a08372ad672a8c7cb4a6ad30cca69b2783ddc6.
+Those v4.13 sentences were rewritten before this report.
+
+PROSE_EXTRACT.txt is a raw record.
+Its writer copies each prose file and each commit message.
+snapper is not applied to that copy.
+
+The sha-map writer rewrites only rows it already has.
+Paths that were never rows stay outside the map.
+logs/sha-map-gap.txt names each of those paths.
 
 The tree check transcript follows.
 
 ```
 producer=python3 -B scripts/lj104_tree_check.py
 receipt_root=logs/budget
-timed=d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1
-timed_tree=801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a
+timed=7a05b51318dad29e03780d981dd3543aa8cd0457
+timed_tree=e2120c08e91f9698e121d0c38e79ce64de8a74e3
 receipt logs/budget/2000/receipt.log
-receipt_head=d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1
-receipt_tree=801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a
+receipt_head=7a05b51318dad29e03780d981dd3543aa8cd0457
+receipt_tree=e2120c08e91f9698e121d0c38e79ce64de8a74e3
 head_match=yes
 tree_match=yes
 receipt logs/budget/2001/receipt.log
-receipt_head=d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1
-receipt_tree=801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a
+receipt_head=7a05b51318dad29e03780d981dd3543aa8cd0457
+receipt_tree=e2120c08e91f9698e121d0c38e79ce64de8a74e3
 head_match=yes
 tree_match=yes
 receipt logs/budget/2002/receipt.log
-receipt_head=d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1
-receipt_tree=801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a
+receipt_head=7a05b51318dad29e03780d981dd3543aa8cd0457
+receipt_tree=e2120c08e91f9698e121d0c38e79ce64de8a74e3
 head_match=yes
 tree_match=yes
 receipt logs/budget/2003/receipt.log
-receipt_head=d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1
-receipt_tree=801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a
+receipt_head=7a05b51318dad29e03780d981dd3543aa8cd0457
+receipt_tree=e2120c08e91f9698e121d0c38e79ce64de8a74e3
 head_match=yes
 tree_match=yes
 receipt logs/budget/2004/receipt.log
-receipt_head=d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1
-receipt_tree=801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a
+receipt_head=7a05b51318dad29e03780d981dd3543aa8cd0457
+receipt_tree=e2120c08e91f9698e121d0c38e79ce64de8a74e3
 head_match=yes
 tree_match=yes
 receipt logs/budget/2005/receipt.log
-receipt_head=d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1
-receipt_tree=801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a
+receipt_head=7a05b51318dad29e03780d981dd3543aa8cd0457
+receipt_tree=e2120c08e91f9698e121d0c38e79ce64de8a74e3
 head_match=yes
 tree_match=yes
 covered_diff_count=0
@@ -142,37 +164,133 @@ The replay sets no dates.
 The replay does not sleep.
 The seconds are the ones git writes.
 Archive refs are never pushed.
-The push plan names only refs/heads/fix/lj104-measure-v4.13.
-The bundle carries refs/archive/fix/lj104-measure-v4.9.
-The bundle carries refs/archive/fix/lj104-measure-v4.10.
+The push plan names only refs/heads/fix/lj104-measure-v4.14.
+The v4.9 archive is refs/archive/fix/lj104-measure-v4.9.
+That ref is 5cac8c407840222aac2288946f3eb5888ac73c40.
+The v4.10 archive is refs/archive/fix/lj104-measure-v4.10.
 That ref is 87147482ce9c25b51d26b19e9d3cc2be1ad0c1d8.
-The bundle carries refs/archive/fix/lj104-measure-v4.11.
+The v4.11 archive is refs/archive/fix/lj104-measure-v4.11.
 That ref is 3f51ecf4e19796366ceac4005e17499e0ec2a16e.
-The bundle carries refs/archive/fix/lj104-measure-v4.12.
+The v4.12 archive is refs/archive/fix/lj104-measure-v4.12.
 That ref is 3f51ecf4e19796366ceac4005e17499e0ec2a16e.
+The v4.13 archive is refs/archive/fix/lj104-measure-v4.13.
+That ref is cebb875ddd00364924fca91a1c95c1bc4f0865d1.
 The raw rows are in logs/replay-pass.txt.
+The writer of that log is python3 -B scripts/lj104_replay_v414.py.
 
-===== logs/coverage/toolchain.txt =====
-The file rust-toolchain.toml is absent at this commit.
-The pin was not added.
+===== REVIEW-NOTES.md =====
+# Review notes
 
-Rustup selects rustc 1.83.0 (90b35a623 2024-11-26).
-Rustup selects cargo 1.83.0 (5ffbef321 2024-10-29).
-That cargo cannot parse edition 2024.
+The prose changes keep the same facts and the same numbers.
+The flagged sentences are quoted in this note.
 
-The profile uses rustc 1.88.0 (6b00bc388 2025-06-23).
-The profile uses cargo 1.88.0 (873a06493 2025-05-10).
+## Notes and reproduce
 
-Line cover on examples/h2h_gmin_proof.rs is 98.39 percent.
-Region cover on that file is 96.78 percent.
-The branch column is 0 of 0.
+Both files used this sentence.
 
-===== logs/coverage/llvm-cov-report.txt =====
-The file is examples/h2h_gmin_proof.rs.
-It has 870 regions and 28 missed regions, which is 96.78 percent.
-It has 63 functions and 6 missed functions, which is 90.48 percent.
-It has 496 lines and 8 missed lines, which is 98.39 percent.
-It has 0 branches and 0 missed branches.
+```
+python3 -B scripts/lj104_sha_map.py --check reads that row.
+```
+
+The bare flag was read as an em dash.
+The command also omitted the kit and the repo, so it exited 2.
+The new sentence quotes the full command.
+
+```
+`python3 -B scripts/lj104_sha_map.py --check <kit> <repo>` reads it.
+```
+
+The notes also gained one sentence.
+The arm clocks, the receipt head, and the receipt tree are in NOTES.md.
+That file is written from the receipts of this arm.
+
+## Commit 560e1989
+
+These five lines stay in that commit.
+History is not rewritten.
+The new message uses the plain forms.
+
+```
+--check reads logs/sha-map.tsv and does not rewrite it.
+```
+
+The bare flag was read as an em dash.
+Plain form: the check mode reads the map and does not rewrite it.
+
+```
+It compares every row with the file, the SUMS line, and the tip blob.
+```
+
+The short name of the sums file was read as an acronym.
+The plain sentence compares every row with the file and the sums line.
+It also compares the tip blob.
+
+The refresh mode is the only mode that rewrites the map.
+Its bare flag was the same em dash already described above.
+
+```
+The script gains the copyright and MIT header.
+```
+
+The licence abbreviation was read as an acronym.
+Plain form: the script gains the copyright and licence header.
+
+```
+The notes and the reproduce file name the corrected row and --check.
+```
+
+The bare flag was read as an em dash.
+The notes name the corrected row and the check mode.
+The reproduce file names them too.
+
+## Copyright
+
+scripts/h2h_receipt.sh gained the copyright line.
+examples/h2h_gmin_proof.rs gained the copyright line.
+tests/stall_growth_hold.rs gained the copyright line.
+The kit copy of scripts/rmsd.py gained the same line.
+That file is not in git.
+
+===== logs/coverage/summary.txt =====
+The stable compiler is rustc 1.88.0 (6b00bc388 2025-06-23).
+The stable cargo is cargo 1.88.0 (873a06493 2025-05-10).
+The nightly compiler is rustc 1.90.0-nightly (0fa4ec6cd 2025-06-25).
+The nightly cargo is cargo 1.90.0-nightly (409fed7dc 2025-06-23).
+The nightly date pin is nightly-2025-06-26.
+No toolchain file is added.
+
+Lines and the example tests run on the 1.88 compiler.
+That example test run finished in 0.00s.
+The 1.88 build of those tests took 1 minute 59 seconds.
+On 1.88 the example has 496 lines and 8 missed lines.
+That is 98.39 percent.
+The 1.88 branch column is 0 of 0.
+
+Branches use nightly-2025-06-26 and -Zcoverage-options=branch.
+The script is scripts/lj104_coverage.sh.
+On that nightly the example has 496 lines and 5 missed lines.
+That is 98.99 percent.
+It has 54 branches and 0 missed branches.
+That is 100 percent.
+It has 870 regions and 21 missed regions.
+That is 97.59 percent.
+It has 63 functions and 5 missed functions.
+That is 92.06 percent.
+
+The line gap between 1.88 and the nightly is 0.60 points.
+The nightly covers three closure lines the 1.88 profile still misses.
+Region cover sits 1.40 points under the nightly line cover.
+Those regions are the edges around the five missed lines.
+
+The library files the example calls are in the same profile.
+src/methods/cluster_hopping.rs has 5949 lines and 55.82 percent covered.
+Its branch cover is 35.21 percent.
+src/methods/cluster_hopping/config.rs has 90.00 percent of its lines.
+Its branch cover is 61.11 percent.
+src/methods/warm_lbfgs.rs has 28.66 percent of its lines.
+Its branch column is 0 of 4.
+The search function contains arms this example run does not take.
+No file is excluded from the report.
 
 ===== scripts/lj104-measure-v4-NOTES.md =====
 Two-million evaluation reproduction, on the same engine.
@@ -181,17 +299,9 @@ Seeds 2000 through 2005 are deterministic.
 v4.2 already recorded their outcome.
 This rerun is not a blind test.
 
-Commit 6f74d439 repeats that known count.
-Its central clock is 02:55:01 on 2026-11-10.
-
-The arm opened at 14:41:04 and closed at 14:57:28.
-The receipt head is f724a4c4 and the receipt tree is 7af429c6.
-
-The repeated count comes from commit 88d1cca.
-
-Head 88d1cca.
-
-Tree d16cabd3.
+The arm clocks, the receipt head, and the receipt tree are in NOTES.md.
+That file is written from the receipts of this arm.
+The repeated count is the count recorded there.
 
 Recorded binary hash.
 53e08802ead942e22f97d73fc1c015f85b77a57298e43ddd2511ce9e3b0efbeb.
@@ -238,18 +348,12 @@ The reproduction matches that known outcome.
 
 Temperature and step stay as they were.
 
-```
-seed start end energy gm_dist cs_dist
-2000 02:55:36 02:58:29 -580.42126629 0.520497 0.515938
-2001 02:58:29 03:01:12 -580.42126629 0.520497 0.515938
-2002 03:01:12 03:04:06 -578.60157826 0.520577 0.513892
-2003 03:04:06 03:06:51 -580.42126629 0.520497 0.515938
-2004 03:06:51 03:09:29 -578.60157826 0.526995 0.511773
-2005 03:09:29 03:12:08 -581.80180238 0.500292 0.523080
-```
-Dates in that block are 2026-11-10.
+Seeds 2000, 2001, and 2003 reached -580.42126629.
+Seeds 2002 and 2004 reached -578.60157826.
+Seed 2005 reached -581.80180238.
+The seed clocks for this arm are in NOTES.md.
 
-Energies and distances match the earlier six-seed table.
+Energies match the earlier six-seed table.
 
 No curve crossed either line.
 
@@ -298,7 +402,7 @@ The new test fails on 87a1c409.
 The run copies the tip test file onto a clean tree.
 The failure names stall-climb with energy inf.
 
-It passes on 88d1cca.
+It passes on the commit that added the finite guard.
 
 Failure log logs/regress/inf-before.log.
 
@@ -306,8 +410,7 @@ Pass log logs/regress/regress-tip.log.
 
 Hold coverage is missing on commit 299ce4ae, tree 826c4ba6.
 
-The failing run starts there and copies tests/stall_growth_hold.rs from
-88d1cca.
+The failing run copies the stall test from the finite-guard commit.
 
 Status file: logs/regress/overlay-old-status.txt.
 Diff file: logs/regress/overlay-old.diff.
@@ -431,7 +534,8 @@ config.rs:1377 budget window false, preset.rs:8 temperature 0.8, preset.rs:11 st
 ===== scripts/lj104-measure-v4-REPRODUCE.md =====
 The measured arm reruns seeds 2000 through 2005, one seed at a time.
 
-The engine is commit f724a4c4 and tree 7af429c6.
+The engine commit and the engine tree are named in REPRODUCE.md.
+That file is written from the receipts of this arm.
 
 The binary is the release example h2h_gmin_proof from that tree.
 
@@ -488,7 +592,7 @@ The corrected v4.6 row scripts/lj104_v4_prediction.txt reads 9c18b867.
 # Review notes
 
 The prose changes keep the same facts and the same numbers.
-Quoted lines below are the exact sentences that were flagged.
+The flagged sentences are quoted in this note.
 
 ## Notes and reproduce
 
@@ -507,9 +611,8 @@ The new sentence quotes the full command.
 ```
 
 The notes also gained one sentence.
-The arm opened at 14:41:04 and closed at 14:57:28.
-The receipt tree is 7af429c6270ec5c00d3b6536fbaefeb03563e1ac.
-The receipt head is f724a4c413f0460d1b6551f883da9ae3664e6330.
+The arm clocks, the receipt head, and the receipt tree are in NOTES.md.
+That file is written from the receipts of this arm.
 
 ## Commit 560e1989
 
@@ -532,12 +635,8 @@ The short name of the sums file was read as an acronym.
 The plain sentence compares every row with the file and the sums line.
 It also compares the tip blob.
 
-```
---refresh is the only mode that rewrites the map.
-```
-
-The bare flag was read as an em dash.
-Plain form: the refresh mode is the only mode that rewrites the map.
+The refresh mode is the only mode that rewrites the map.
+Its bare flag was the same em dash already described above.
 
 ```
 The script gains the copyright and MIT header.
@@ -563,7 +662,7 @@ The kit copy of scripts/rmsd.py gained the same line.
 That file is not in git.
 
 ===== commit messages =====
-274273e39f933c08466a3e83a18339dd51b4a4c9
+c91b9f37b9bd51586dba437e408318622553c4cf
 bench(h2h): count both searches on one budget
 
 The example runs Config::recommended for one Lennard-Jones seed.
@@ -573,7 +672,8 @@ A miss is stored as the full paper budget.
 The shell runs that binary and the basin-hopping program from one start.
 The order is anneal, then GMIN, one seed at a time, on one thread.
 
-b8e41164ed50935ab8bf5d0829c51490b7ce9f88
+
+51716ef1c4a799844ea6f9d94cfa1c659f904658
 fix(dump): write every recorded minimum
 
 The minima file grew only inside an accepted hop.
@@ -585,7 +685,8 @@ The line carries a column for chain acceptance.
 
 
 
-c873f31f5dceac5a0ac6bb581f885a5b675e4dd3
+
+a07e458a28df3618fe65f43c1ff5637c39f8d3e8
 fix(hop): hold a failed stall growth until the incumbent drops
 
 A missed stall growth quenched those lattices again on the next plateau.
@@ -596,7 +697,8 @@ The rule reads the incumbent and not the atom count.
 
 
 
-aab924a8318814893d87fb02605e20e02ed497e0
+
+d66abb4e24e0668116348f0a275cccdfb7e3ac7f
 bench(h2h): summarise an interleaved base and tip panel
 
 The shell runs the base binary and then the tip binary for each seed.
@@ -606,7 +708,8 @@ The seed schedule is compiled only into the example tests.
 
 
 
-8ae6612f9f90b16e925477595186df9748574d13
+
+df89a07e4524d1a2eb4f52841319c420e8cc40b2
 fix(hop): spend a held stall on all-points steps
 
 One extra quench after a failed growth left the same minima in place.
@@ -615,7 +718,8 @@ Growth waits until the incumbent drops.
 
 
 
-a2f0b472ceb4a8d685d29ea73c3315dbba88fa96
+
+bfa8785497109aa8519e8c7662a0475c5cf24403
 test(hop): cover a deepening icosahedral growth
 
 The hold tests missed the adoption that keeps a lower lattice.
@@ -624,14 +728,16 @@ A dry ledger stops the remaining sources.
 
 
 
-7ffa32b281709b6a58c371dfc8f6609a86fc6319
+
+68c65986b2c88a47d4fabed45a18823d9a581f1d
 test(hop): stop both growth loops on a dry ledger
 
 Each growth loop breaks once the budget is spent.
 
 
 
-386329111823b0dd282cd84a1f1296ab8e6feb24
+
+4e719a0306cc10c6858e4fad2d67b2f7a5bf0f05
 fix(hop): arm a non-icosahedral stall without the budget window
 
 Recommended leaves the budget window off.
@@ -645,7 +751,8 @@ The short-state test checks that the kept energy stays finite.
 
 
 
-6ea386a851343331a23afb9d56589ed906eae7f7
+
+54228e7378349c596ed5f715e4e4349683685f55
 fix(dump): write the acceptance column from the sample search
 
 The minima line is an energy, an acceptance flag, and coordinates.
@@ -656,7 +763,8 @@ A non-finite record must leave the dump empty.
 
 
 
-064e116c060f57afd3d8ae65bcb87ffd11d5af71
+
+d47708ae4d82871351631a51403eb7ce5de2cd1d
 bench(h2h): record the hardware receipt around one command
 
 The script prints the head, the tree, and the command.
@@ -665,7 +773,8 @@ It prints the processor count, the cpu listing, and the clock.
 
 
 
-d50ac4ae7125202a1908726766b98970bc040a2e
+
+7cb4d0c41841555c6174c5e9491cb7936cd67bca
 test(hop): require an all-points acceptance from the stall hold
 
 The recommended library has no all-points kernel.
@@ -674,7 +783,8 @@ An all-points acceptance then has to come from the hold.
 
 
 
-e9e1213c4661af466f18a3be81feb78896b243c1
+
+40248b1a73dd114139dc1d3307c55a772eef8fd2
 fix(hop): refuse a non-finite stall climb
 
 A climb quench can return an infinite energy when the budget ends.
@@ -684,7 +794,8 @@ The new test feeds an infinite climb quench and expects no adoption.
 
 
 
-23ff4454feaa7914d2425af94325a888e085d50e
+
+49f4c42b10a4dac069338bfa0508628989ba98d0
 bench(h2h): print both clocks from the receipt
 
 The receipt already printed the UTC start and end.
@@ -693,7 +804,8 @@ It also prints the cpu set named by taskset.
 
 
 
-44b65239c634ab605488b3e143b67dc2dec6387b
+
+956f6b7e00d679562524448f2144363a5b606c31
 bench(h2h): keep the all-points chain source
 
 One hundred chains of twenty-five all-points steps read one geometry.
@@ -702,7 +814,8 @@ The source of that run now sits next to the other examples.
 
 
 
-8f7429a4d1445817e90d52d2dc6e1ebccfacc918
+
+e61e75b8fca354eef5390fb463e24a5e106ac706
 chore(h2h): replace a path token without dropping the line
 
 The redactor used to delete any line that held an absolute path.
@@ -711,7 +824,8 @@ The input line count and the output line count have to match.
 
 
 
-c7ce68fb71ed7d133fa45be398fc111c101a5854
+
+3eaa94e39a5b88340a5a8be36898c65944847b86
 docs(h2h): predict the two-million seed count
 
 The global-minimum count at 100000 evaluations was 0 of 100.
@@ -729,7 +843,8 @@ A Cs-minimum hit lies at or below -582.038428.
 
 
 
-7117ce00c297009085ec5e65d42feb58ed913078
+
+65bae5ad6236b756929f362b61823f9acd71aea4
 docs: close three prose findings in the measure notes
 
 Three sentences in the measure notes are split.
@@ -737,7 +852,8 @@ The subject sits next to the verb.
 Adjacent paragraphs share a landing.
 
 
-3667efe3d42ecdcd02b7e50dbb86ec7dc4cc491e
+
+3f90fe036830e036ca97fb253d9047494ecb5395
 chore(lj104): remove the log redactor
 
 scripts/redact.py is deleted.
@@ -746,7 +862,8 @@ The file rewrote path tokens and a commit token.
 The measure no longer rewrites logs.
 
 
-072e40f6a6d728ef95c5f1f0d1b2ef6a2b7ebf23
+
+79dbf70edc6c57aaa1a7d643633803deb759a042
 bench(lj104): record a shared bench namespace
 
 scripts/h2h_receipt.sh opens one mount namespace and one UTS namespace.
@@ -764,7 +881,8 @@ The raw cpu listing stays in the receipt.
 
 
 
-3bdebc1b7cb91fb4cc6ec6d872da7399c33201ff
+
+5d2bc505f9d74d95b48c77cc44a12c7f4e4d5bec
 docs(lj104): repeat the two-million forecast
 
 scripts/lj104_v4_prediction.txt gains three lines.
@@ -774,7 +892,8 @@ The rerun keeps the forecast already in that file.
 
 
 
-23cae8308921a44ec46e3dc53342fa5bc2b23579
+
+94b19318eb419859f4f724edbc4a04fc7eeb0100
 docs(lj104): record the two-million rerun
 
 scripts/lj104-measure-v4-NOTES.md records the rerun clocks.
@@ -789,7 +908,8 @@ That file describes the bench namespace and the raw receipt fields.
 
 
 
-ef824d2de4b0d8a54718ff4ed8f291a8d68c51c8
+
+841f2cf908e614dee64756c94676b35137aa805e
 docs(lj104): disclose the old notes commit
 
 The notes name commit 42e60888.
@@ -806,7 +926,8 @@ Ten wrapped notes lines are now separate sentences.
 
 
 
-786b801c7a2897263cfb65e55320d426eb761fa5
+
+a21711d58320618e81cef8d10d8796dbf6cd5201
 docs(lj104): name the redactor deletion and the prediction edit
 
 The notes say the diff adds a 167-line file.
@@ -819,7 +940,8 @@ One prediction sentence no longer echoes the next.
 
 
 
-217ad8a5e4e0dd3c4d48836d3e1e64c7da870e5f
+
+76e86750239e38da106fbde87959baff32548b4e
 docs(lj104): quote both prediction edits
 
 The deletion sentence now says it deletes 71 lines.
@@ -831,7 +953,8 @@ The original forecast text is untouched.
 
 
 
-25d6184bcf199710749a892ac8750665ea47e237
+
+c49506391b91461d94be835c31bedf26a6a72fd0
 fix(lj104-kit): add the sha-map script
 
 The script scripts/lj104_sha_map.py is new in this commit.
@@ -840,7 +963,8 @@ It checks each row against the file, the sums line, and the tip blob.
 A mismatch makes the script fail.
 
 
-4dd64a2daebb729f29d9f560e1c992f262c310e9
+
+46ada3ab0c47bf4d266bd0d644e1b521c52601d7
 fix(lj104-kit): check the sha-map before any write
 
 The check mode reads logs/sha-map.tsv and does not rewrite it.
@@ -854,7 +978,8 @@ The notes name the corrected row and the check mode.
 The reproduce file names them too.
 
 
-ad515e6e2590c73fcbe24c000918b49137182de9
+
+98910cc564619d597d84e0f4a2f96502d096c0b3
 fix(lj104-kit): close the v4.8 prose and receipt gaps
 
 The notes and the reproduce file show the kit and repo arguments.
@@ -869,7 +994,8 @@ Review notes quote each rewritten sentence and the reason.
 
 
 
-24321d0904173e5b9b6d692a07578f4d7c422eef
+
+af37cb506de866c69162eb2111beee14ed7cf30f
 fix(lj104-kit): add the commit-tree replay
 
 The script replays the archive with git commit-tree.
@@ -879,7 +1005,8 @@ Archive refs are never pushed.
 The push plan lists only refs/heads/fix/lj104-measure-v4.11.
 
 
-b8fca22c2a6171c16566474a1c87fdf25255f42b
+
+b51d4fcdda4184de819e7f189626059f9e7c5051
 fix(lj104-kit): add the missing copyright lines
 
 examples/lj_hold_chain.rs gains the copyright line.
@@ -889,7 +1016,8 @@ scripts/h2h_gmin_board.sh gains the copyright line.
 scripts/h2h_panel.py gains the copyright line.
 
 
-f511dae11b9035f456db2db3fca4c300b38941dc
+
+aa58063a96d941ae478a9e3ed559e87658ba14bc
 fix(lj104-kit): freeze the timed sources
 
 The tree check names every excluded path.
@@ -898,14 +1026,16 @@ The receipt script records the head and the tree git prints.
 The prose script reads the receipts after the run.
 
 
-cfb1bdf71296b0a12524ba9fde7e0732ae00376a
+
+5f6aeab018e730ed8bb65435fe76303eed2728ef
 fix(lj104-kit): keep the receipt prose within 72 columns
 
 The prose script splits the binary digest onto its own line.
 The gate note is its own paragraph.
 
 
-30a95f13c898a304d098d62c5bc5b85a8fac1522
+
+f65bbb384874e3f3fd7d0c58f5744fba1bdd5e52
 docs(lj104): record the timed arm
 
 The receipt script wrote the curves, the minima, and the receipts.
@@ -913,7 +1043,8 @@ The prose script wrote the notes from those receipts.
 The global-minimum count is 0 of 6.
 
 
-7ab478329e4ff29a1ed5d0dd8a92b81b284fc2ed
+
+5cfde50a68c7e522adf6d38d5b8f791bad606429
 docs(lj104): name the timed commit in the notes
 
 The reproduce line names commit f724a4c4 and tree 7af429c6.
@@ -924,8 +1055,9 @@ The push plan names only fix/lj104-measure-v4.13.
 The prose extract replaces the missing-tool note.
 The tree check names the prose extract as paper text.
 
-d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1
-test(lj104): record the compiler and cover the proof example
+
+fad726d024ddf266668b332f19fe5fa38d6057cc
+test(lj104): record the compiler and cover the example
 
 The receipt prints rustc -V and cargo -V.
 The example tests the published budgets.
@@ -934,7 +1066,7 @@ The profile is the llvm-cov data for that example.
 Line cover on the example is 98.39 percent.
 rust-toolchain.toml is absent, and the pin was not added.
 
-4ec9e3aee9840d9db000451f8aae120f39397e01
+b912313887af8c54a2feba43ff294081542aa7c8
 bench(lj104): record the six-seed arm at the coverage commit
 
 The receipts name head d9eec16a and tree 801ff2bc.
@@ -943,7 +1075,56 @@ The best energy is -581.80180238.
 The global-minimum count is 0 of 6.
 The arm opened at 16:35:59 and closed at 16:52:33.
 
+
+947f4bfbf1ac9f9f806e13eab01959b072bd062b
 docs(lj104): keep the tree check and the prose extract
 
-The report holds the tree check transcript.
-The extract holds the prose files and the commit messages.
+The report records the tree check transcript.
+The extract records the prose files and the commit messages.
+
+b0470225e751b1cc5fe5a516678a166203577582
+docs(lj104): replay the history onto v4.14
+
+The replay sets no dates and does not sleep.
+Two messages lose one flagged word each.
+The v4.9 archive sha is on its own line.
+The raw pass log is logs/replay-pass.txt.
+
+5d9b45c14471efeb2e5769abff3ae8a177f73daa
+fix(lj104): count a hit at the published tolerance
+
+The example stops at the published minimum plus 1e-6.
+The pre-registered level is -582.086642 plus that tolerance.
+The board test checks that tolerance.
+
+6d97aa0c82173303c149f9245bddba59946833e1
+docs(lj104): point the notes copies at this arm
+
+The scripts copies no longer name the earlier clocks.
+They no longer name the earlier commits.
+The arm clocks and the receipt head are written in NOTES.md.
+The review note quotes the flagged sentences in place.
+
+7a05b51318dad29e03780d981dd3543aa8cd0457
+test(lj104): record line and branch cover
+
+Lines and the example tests run on rustc 1.88.0.
+Branches run on nightly-2025-06-26 with the branch option.
+No toolchain file is added.
+The example line cover on that nightly is 98.99 percent.
+The example branch cover is 100 percent.
+The library files the example calls are in the same profile.
+
+6f0452148ac8e39b6c607b5f9959256dac5b8f9e
+bench(lj104): record the six-seed arm at the coverage commit
+
+The receipts name head 7a05b513 and tree e2120c08.
+Each receipt records rustc -V and cargo -V.
+The best energy is -581.80180238.
+The global-minimum count is 0 of 6.
+The arm opened at 19:08:07 and closed at 19:24:09.
+
+docs(lj104): keep the tree check and the prose record
+
+The report records the tree check transcript.
+The extract is the raw prose record.
