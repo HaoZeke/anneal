@@ -40,3 +40,17 @@ rule lj_seed:
           > "$ELJA_SCRATCH/seed.log" 2>&1
         elja_publish "$ELJA_SCRATCH/seed.log" {output}
         """
+
+
+# Lennard-Jones head-to-head against the published bonobo initialiser.
+# Not part of `rule all`. Run it by name:
+#   snakemake -s workflow/Snakefile lj_bonobo_h2h
+rule lj_bonobo_h2h:
+    output:
+        "bench/lj-bonobo-h2h/summary.tsv",
+        "bench/lj-bonobo-h2h/seeds.tsv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/lj_bonobo_h2h/enter_bench.sh
+        """
