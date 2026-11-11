@@ -142,3 +142,10 @@ Tang, Chakrabarty, and Paulson, Digital Discovery 5, 3116--3127 (2026), doi:10.1
 
 Do not cite this paper as an atomic-structure code. The structure-search papers from this watch are `lyngbyUniversalPrior2024` and `larsenFractional2023`, and neither uses this title. No anneal claim is contradicted.
 
+## 2026-11-11 — Thomson clusters of thousands of particles
+
+Amore and Wales, arXiv:2610.08122 (6 October 2026), search low-energy minima for thousands of particles on a sphere. Symmetric or known structures seed a run, and a new minimum is reused at neighbouring sizes. On the Thomson problem they improve many earlier solutions, especially at large size. They say the defect patterns may carry over to other spherical packings, from atomistic to mesoscopic scales.
+
+The manuscript keeps one move library at every Lennard-Jones size and does not install a lattice template that already names the minimum. This paper propagates known structures from one size to the next. The potential is the Thomson problem, not Lennard-Jones, so the new energies do not contradict the Cambridge hit targets or the sealed maps.
+
+Cite `amoreThomson2026`. Do not put the Thomson energies in the Lennard-Jones table.
