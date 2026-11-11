@@ -11,6 +11,9 @@
 # The standing measurement of this protocol is arm D
 # 24/30, median 56.984 s, best -582.0866420676, against
 # GMIN 0/30. This script does not rewrite those logs.
+#
+# Logs, trajectories and frames stay in WORK. Git does
+# not store them. A later Hugging Face dataset will.
 set -eu
 work=$1
 bin=$2
