@@ -323,6 +323,52 @@ fn a_held_growth_keeps_the_move_set() {
 }
 
 #[test]
+fn a_flat_non_icosahedral_plateau_retries_the_pentagonal_leave() {
+    let home = line(13);
+    assert!(
+        !ih_dominated(home.view(), SoapSpec::default()),
+        "the line was classified icosahedral"
+    );
+    let mut cfg = stall_cfg(13, false);
+    // Patience 1 makes every hop a leave. Eight idle leaves fit in this
+    // budget, which is the retry. Five hops, the other test's window, do not.
+    cfg.max_hops = Some(40);
+    cfg.restart_patience = 1;
+    let compact = std::sync::Mutex::new(Vec::new());
+    let (calls, _far, best) = count_far(
+        &cfg,
+        &home,
+        |distance, gyration, steps| {
+            let hit = steps > 0 && distance > 3.0 && gyration < 3.0;
+            compact.lock().unwrap().push(hit);
+            hit
+        },
+        |_call, _distance| -1.0,
+    );
+    let flags = compact.lock().unwrap().clone();
+    let mut streaks = Vec::new();
+    let mut streak = 0usize;
+    for hit in flags {
+        if hit {
+            streak += 1;
+        } else if streak > 0 {
+            streaks.push(streak);
+            streak = 0;
+        }
+    }
+    if streak > 0 {
+        streaks.push(streak);
+    }
+    let library = streaks.iter().position(|run| *run >= 5);
+    let retried = library.is_some_and(|at| streaks[at + 1..].iter().any(|run| *run >= 3));
+    assert!(
+        retried,
+        "the pentagonal leave did not follow the library miss ({streaks:?}, {calls} calls)"
+    );
+    assert!((best + 1.0).abs() < 1e-12);
+}
+
+#[test]
 fn an_all_points_improvement_allows_growth_again() {
     let home = icosahedron();
     let cfg = stall_cfg(13, false);
