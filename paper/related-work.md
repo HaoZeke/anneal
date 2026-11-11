@@ -203,3 +203,27 @@ Slavensky and Hammer, Journal of Chemical Physics 161, 014713 (2024), doi:10.106
 The article prints no LJ55 hit count, and the LJ75 count is withheld, so these curves contradict no printed number. They give no energy below the Cambridge values. A head-to-head on LJ55 and on LJ75 has to use one relaxation budget. Their single-point count is not the force-call count the hop charges.
 
 Cite `slavenskyClassifier2024`. Keep the GOFEE curves out of the basin-hopping hit table.
+
+## 2026-11-11 — Population annealing on the LJ38 funnels
+
+Kowaguchi and Hukushima, Journal of Chemical Physics 164, 214110 (2026), doi:10.1063/5.0333811, also arXiv:2603.04157, estimate the free energy of LJ38 by population annealing. They treat the global minimum as the face-centred cubic truncated octahedron, in competition with an icosahedral funnel. The low-temperature energy extrapolates to the known minimum, which they write as -173.92. Quenches of configurations drawn below the crossover relax to that truncated octahedron.
+
+The Doye Lennard-Jones table, read on 11 November 2026, still lists -173.928427 for the 38-atom Oh minimum. The manuscript's LJ38 map puts the recommended hop on that same truncated octahedron. This paper does not report a lower potential energy, and it does not report a force-call hit rate. The population is a free-energy sample, not a seed count.
+
+Cite `kowaguchiLj382026`. Leave the sealed LJ38 map as a search record.
+
+## 2026-11-11 — Nested sampling of the 7-atom and 36-atom clusters
+
+Maillard, Finocchi, Godinho, and Trassinelli, Physical Sciences Forum 12, 8 (2025), doi:10.3390/psf2025012008, also arXiv:2501.11370, use nested sampling in nested_fit to estimate the partition function of the 7-atom and 36-atom Lennard-Jones clusters. They recover the known phase transitions. For the 36-atom cluster that includes the low-temperature solid-solid transition, provided the live-point count is high enough. They do not report a new global minimum.
+
+Seven atoms are the pentagonal bipyramid already proved by Shen. The sizes 38, 55, 75, 98, and 104 are absent. This does not contradict that proof or the Cambridge hit targets.
+
+Cite `maillardNested2025`. A nested-sampling likelihood count is not a hop hit rate.
+
+## 2026-11-11 — Extra printed digits through twenty atoms
+
+Willnecker and Moodley, arXiv:2411.18087 (27 November 2024), run an adaptive genetic algorithm on Lennard-Jones clusters from 2 to 20 atoms. The abstract says the energies are more accurate than the literature. The table matches a basin-hopping reference through six decimals. The longer print is the same energies at machine precision. At ten atoms the extra digits sit above the six-decimal reference, so they are not a lower minimum. The search stops at 20 atoms.
+
+This does not contradict the Cambridge energies at 38 atoms and above. It does not call for a head-to-head at the manuscript sizes.
+
+Cite `willneckerGenetic2024`. Read "more accurate" as a longer print of the known energies.
