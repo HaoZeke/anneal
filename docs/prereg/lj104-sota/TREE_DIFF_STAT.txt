@@ -25,7 +25,7 @@ Path `docs/prereg/lj104-sota/REPLAY.txt`.
 Path `docs/prereg/lj104-sota/REPORT.md`.
 49 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/SCOPE.md`.
-718 insertions and 0 deletions.
+737 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/T.txt`.
 12 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/TREE_EQUAL.txt`.
