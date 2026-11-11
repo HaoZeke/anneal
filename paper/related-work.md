@@ -195,3 +195,11 @@ Carmona, Arroyo-Valdez, Muñoz-Castro, and Rodríguez-Kessler, Journal of Nanopa
 Shukla, ChemRxiv (30 October 2026), doi:10.26434/chemrxiv.15011323/v1, builds Stillinger--Weber silicon clusters by trilateration at a fixed bond length. At an equal number of relaxations that initialiser reaches lower minima than a basin-hopping code with single-atom, collective, and surface moves, at every reported size from 32 to 60 atoms. The manuscript preset is Lennard-Jones and TIP4P, not silicon, so those gaps do not contradict the sealed maps. A head-to-head is the silicon cluster at a shared relaxation budget.
 
 Cite `carmonaAbhDft2026` and `shuklaSilicon2026`.
+
+## 2026-11-11 — GOFEE on LJ55 and LJ75
+
+Slavensky and Hammer, Journal of Chemical Physics 161, 014713 (2024), doi:10.1063/5.0207801, also arXiv:2407.13471, put a spectral-graph and Voronoi classifier in front of the sampling step in GOFEE. The classifier drops structures from basins the search has already exploited. They test it on two-dimensional pyroxene, on olivine (Mg2SiO4)4, on Au12, and on the Lennard-Jones clusters LJ55 and LJ75. The Lennard-Jones targets are the known global minima. On LJ55, with the filter, they say the search finds the minimum almost every time within 2000 single-point evaluations. On LJ75 they turn the surrogate off and relax every candidate in the Lennard-Jones potential, because the surrogate was taking the time. Without the filter they call that modified search really difficult. With the filter the chance of finding the minimum rises. The LJ75 curves count local optimisations, not single-point evaluations.
+
+The article prints no LJ55 hit count, and the LJ75 count is withheld, so these curves contradict no printed number. They give no energy below the Cambridge values. A head-to-head on LJ55 and on LJ75 has to use one relaxation budget. Their single-point count is not the force-call count the hop charges.
+
+Cite `slavenskyClassifier2024`. Keep the GOFEE curves out of the basin-hopping hit table.
