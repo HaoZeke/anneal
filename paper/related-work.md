@@ -128,3 +128,11 @@ AGOX 3.11.0 added grand-canonical modules in the same period. The manuscript's p
 
 Cite `quinlivanGrandCanonical2026`, so a fixed-N hit is not described as a search over composition.
 
+## 2026-11-11 — CREST 3.0.2 still has no user seed
+
+The newest numbered CREST release is still v3.0.2, published 25 August 2024, the build named in the manuscript. The development line was updated on 16 June 2026. It adds g-xTB refinement, dated July 2025, and input-parser maintenance. The input parser on v3.0.2 and on that later line has no seed keyword. The dynamics initialiser either draws an unseeded generator or, when a same-random flag is set, writes a seed of all ones.
+
+This does not contradict the sentence that CREST 3.0.2 exposes no seed. Keep the hexamer table pinned to 3.0.2. Do not rerun it on the unreleased line unless the question is the g-xTB refiner itself.
+
+The CREST paper is already in `refs.bib` as `prachtCrestProgramExploration2024`. No new entry.
+
