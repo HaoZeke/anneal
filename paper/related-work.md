@@ -167,3 +167,31 @@ The manuscript said Kuznetsov and Sahinidis prove optima only for five and six a
 Lecomte, arXiv:2607.09555 (10 July 2026), certifies a one-layer improvement of the Kuznetsov--Sahinidis diameter bound at 92 sizes from 5 to 200 atoms. The note says the improvement resolves no open global-optimisation case. It also says the diameter box is not what limits a solver at six atoms or fewer, and that no solver is run at 38 atoms or larger, the sizes the refinement would affect.
 
 Cite `shenSevenParticle2026` and `lecomteDiameter2026` beside Kuznetsov. Drop "only" from the sentence. Keep the hit targets as the published Cambridge energies.
+
+## 2026-11-11 — Searches that recover the published Lennard-Jones minima
+
+Durand, Journal of Optimization Theory and Applications 210, 53 (2026), doi:10.1007/s10957-026-03085-0, chooses one atom with an interval-arithmetic heuristic and moves it inside a population search. The abstract says the method recovers every best-known energy from 6 to 150 atoms, finds the current best-known energies at 200, 250, and 300 atoms, and finds no new optimum.
+
+The manuscript sizes 38, 75, 98, and 104 all sit inside that 6-to-150 range. This paper does not contradict the Cambridge energies. It says a 2026 search found nothing lower. A head-to-head has to use the same force-call budget. Do not copy those sizes into the hit table.
+
+Chakraborty and Anoop, Journal of Computational Chemistry 47, e70484 (2026), doi:10.1002/jcc.70484, put a PyAR-style tabu initialiser in front of a bonobo optimiser. Without that initialiser the search is unreliable past 13 atoms, and local relaxation with similarity filtering reaches the LJ38 minimum in 6 of 25 runs. With the initialiser, LJ38 is found in all 20 runs. From LJ2 through LJ100 they report 943 successes in 1030 runs, and the failures that remain are LJ75, LJ76, and LJ77.
+
+The article no longer prints an LJ38 or LJ98 hit count, and the LJ75 count is withheld, so these rates contradict no printed number. They do not report an energy below the Cambridge values. They do ask for a head-to-head on LJ38 and on LJ75 through LJ77, at one relaxation budget, against the lean preset rather than against a template that already names the minimum.
+
+Sozykin and co-workers, arXiv:2601.18592 (26 January 2026), encode a cluster as a tensor train and search Lennard-Jones clusters from 5 to 45 atoms. They single out LJ38 and report success rates of 16 percent and 33 percent, depending on the encoding. They describe the hit as the known LJ38 minimum. The search stops at 45 atoms, so LJ75, LJ98, and LJ104 are absent. A head-to-head on LJ38 has to charge the evaluations the hop charges. Do not read a tensor-train success rate as a force-call hit rate.
+
+Gochitashvili, Meyers, Wang, and Kolmogorov, Physical Chemistry Chemical Physics 27, 25636--25647 (2025), doi:10.1039/d5cp02412a, also arXiv:2507.13791, test hyperspatial relaxation and a TETRIS initialiser on LJ37, LJ38, LJ39, LJ47, and LJ55. They take the Wales--Doye structures as the ground states. An extra dimension raises the chance of hitting those states, and the TETRIS initialiser helps more than the extra dimension once the cost is counted. They report no lower Lennard-Jones energy. LJ75, LJ98, and LJ104 are not in the set. A head-to-head is LJ38 and LJ55.
+
+Schärf and Kühne, Theoretical Chemistry Accounts 145, 70 (2026), doi:10.1007/s00214-026-03321-w, benchmark minima-hopping escape directions on Lennard-Jones clusters of 60 to 74 particles. Softened random directions with L-BFGS remain the lowest-cost baseline. A dense BFGS history can cut repeated local exploration, and one deterministic mode oversamples a funnel. The set stops at 74 particles, so it does not reach LJ75, and the move is a short molecular-dynamics escape, not the preset. No sealed basin-hopping count is contradicted. A comparison, if it is run, is minima hopping on 60 to 74 atoms.
+
+Kiessling and Wales, Molecular Physics 124, e2590148 (2025), doi:10.1080/00268976.2025.2590148, also arXiv:2511.15008, prove that a stationary Lennard-Jones configuration has a nearest-neighbour distance no larger than the dimer equilibrium distance, with equality for a global minimum only at 2, 3, and 4 atoms. They conjecture that every global minimum has a nearest neighbour longer than 1, in units where the dimer distance is the sixth root of two. On the Cambridge list through 150 atoms, and on an extension through 1000, the shortest distance they record is at 923 atoms. The sizes 38, 55, 75, 98, and 104 are not named as failures. This does not replace the Cambridge energies.
+
+Cite `durandLennardJones2026`, `chakrabortyBonobo2026`, `sozykinTensorTrain2026`, `gochitashviliGosh2025`, `schaerfMinimaHopping2026`, and `kiesslingPairDistance2025`. Do not import their rates into the article.
+
+## 2026-11-11 — Basin hopping away from the Lennard-Jones preset
+
+Carmona, Arroyo-Valdez, Muñoz-Castro, and Rodríguez-Kessler, Journal of Nanoparticle Research 28, 197 (2026), doi:10.1007/s11051-026-06714-x, run adaptive basin hopping on ORCA density-functional surfaces, with species exchange and a hierarchical refinement. This is not the Lennard-Jones preprint already cited as `carmonaBasinHopping2025`. It does not report LJ38 through LJ104 or the water hexamer, so it does not contradict those counts, and it does not fill the open ASE, AGOX, and GMIN kit. A head-to-head would be on one shared density-functional surface.
+
+Shukla, ChemRxiv (30 October 2026), doi:10.26434/chemrxiv.15011323/v1, builds Stillinger--Weber silicon clusters by trilateration at a fixed bond length. At an equal number of relaxations that initialiser reaches lower minima than a basin-hopping code with single-atom, collective, and surface moves, at every reported size from 32 to 60 atoms. The manuscript preset is Lennard-Jones and TIP4P, not silicon, so those gaps do not contradict the sealed maps. A head-to-head is the silicon cluster at a shared relaxation budget.
+
+Cite `carmonaAbhDft2026` and `shuklaSilicon2026`.
