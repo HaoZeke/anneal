@@ -61,6 +61,13 @@ def mask(line: str) -> str:
     return MASK.sub(lambda m: " " * len(m.group(0)), line)
 
 
+def bounded(line: str, start: int, end: int) -> bool:
+    """A bare integer glued to a word is not a number. sha256, PAR-2, 11pt."""
+    before = line[start - 1] if start else ""
+    after = line[end] if end < len(line) else ""
+    return not before.isalpha() and not after.isalpha()
+
+
 def spans(line: str) -> list[tuple[int, int, str]]:
     found: list[tuple[int, int, str]] = []
     taken: list[tuple[int, int]] = []
@@ -70,11 +77,36 @@ def spans(line: str) -> list[tuple[int, int, str]]:
 
     for pattern in (SCI, SCI_E, VER, NUM):
         for match in pattern.finditer(line):
+            if pattern is NUM and not bounded(line, match.start(), match.end()):
+                continue
             if free(match.start(), match.end()):
                 found.append((match.start(), match.end(), match.group(0)))
                 taken.append((match.start(), match.end()))
     found.sort()
     return found
+
+
+def hide_cites(line: str, in_cite: bool) -> tuple[str, bool]:
+    """Blank citation keys, including a key that continues on the next line."""
+    if in_cite:
+        if "}" in line:
+            cut = line.index("}") + 1
+            line = " " * cut + line[cut:]
+            in_cite = False
+        else:
+            return " " * len(line), True
+    while True:
+        start = line.find("\\cite")
+        if start < 0:
+            break
+        brace = line.find("{", start)
+        if brace < 0:
+            break
+        end = line.find("}", brace)
+        if end < 0:
+            return line[:start] + " " * (len(line) - start), True
+        line = line[:start] + " " * (end + 1 - start) + line[end + 1 :]
+    return line, in_cite
 
 
 def canon_sci(token: str) -> str:
@@ -176,7 +208,7 @@ def classify(path: Path, line_no: int, line: str, token: str, helpers: dict) -> 
         return (helpers["copper_forms"][token], script_cu, "yes")
     # Printed copper forms that equal a logged best or gap.
     number = as_float(token)
-    if number is not None and "415.971" in line:
+    if number is not None and ("415.971" in line or "e" in token.lower()):
         for key, raw in helpers["copper"].items():
             if same(token, float(key)):
                 return (raw, script_cu, "yes")
@@ -218,8 +250,10 @@ def main() -> int:
     # Attach the printed scientific copper gaps by float, not by a second dict.
     rows = []
     for path in SOURCES:
+        in_cite = False
         for line_no, raw_line in enumerate(path.read_text().splitlines(), start=1):
             line = strip_comment(raw_line)
+            line, in_cite = hide_cites(line, in_cite)
             if not line.strip():
                 continue
             masked = mask(line)

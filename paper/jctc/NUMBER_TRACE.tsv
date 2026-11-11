@@ -15,7 +15,6 @@ paper/jctc/manuscript.tex:85	1			no
 paper/jctc/manuscript.tex:88	0.8			no
 paper/jctc/manuscript.tex:89	1			no
 paper/jctc/manuscript.tex:96	0.001			no
-paper/jctc/manuscript.tex:99	-2			no
 paper/jctc/manuscript.tex:108	1			no
 paper/jctc/manuscript.tex:125	98			no
 paper/jctc/manuscript.tex:128	0.7			no
@@ -33,37 +32,26 @@ paper/jctc/manuscript.tex:173	0.8			no
 paper/jctc/manuscript.tex:207	1			no
 paper/jctc/manuscript.tex:207	1			no
 paper/jctc/manuscript.tex:214	0			no
-paper/jctc/manuscript.tex:214	-1			no
 paper/jctc/manuscript.tex:216	2			no
-paper/jctc/manuscript.tex:219	-1			no
 paper/jctc/manuscript.tex:219	2			no
-paper/jctc/manuscript.tex:219	-1			no
 paper/jctc/manuscript.tex:226	0.8			no
 paper/jctc/manuscript.tex:226	0.6			no
 paper/jctc/manuscript.tex:226	0.4			no
 paper/jctc/manuscript.tex:239	0.8			no
 paper/jctc/manuscript.tex:308	75			no
-paper/jctc/manuscript.tex:320	4			no
-paper/jctc/manuscript.tex:323	2			no
 paper/jctc/manuscript.tex:331	38			no
 paper/jctc/manuscript.tex:331	75			no
 paper/jctc/manuscript.tex:331	98			no
 paper/jctc/manuscript.tex:332	104			no
-paper/jctc/manuscript.tex:333	4			no
 paper/jctc/manuscript.tex:333	10			no
 paper/jctc/manuscript.tex:333	15			no
 paper/jctc/manuscript.tex:333	20			no
-paper/jctc/manuscript.tex:334	2			no
-paper/jctc/manuscript.tex:339	75			no
 paper/jctc/manuscript.tex:340	75			no
-paper/jctc/manuscript.tex:341	-2			no
 paper/jctc/manuscript.tex:345	200			no
 paper/jctc/manuscript.tex:348	75			no
 paper/jctc/manuscript.tex:348	0			no
 paper/jctc/manuscript.tex:348	199			no
 paper/jctc/manuscript.tex:349	4\times 10^{6}			no
-paper/jctc/manuscript.tex:351	75			no
-paper/jctc/manuscript.tex:351	1.30			no
 paper/jctc/manuscript.tex:353	75			no
 paper/jctc/manuscript.tex:353	200			no
 paper/jctc/manuscript.tex:357	38			no
@@ -78,13 +66,11 @@ paper/jctc/manuscript.tex:363	98			no
 paper/jctc/manuscript.tex:363	0.022			no
 paper/jctc/manuscript.tex:364	-543.665361			no
 paper/jctc/manuscript.tex:365	38			no
-paper/jctc/manuscript.tex:371	4			no
 paper/jctc/manuscript.tex:376	38			no
 paper/jctc/manuscript.tex:376	75			no
 paper/jctc/manuscript.tex:377	98			no
 paper/jctc/manuscript.tex:388	38			no
 paper/jctc/manuscript.tex:389	0.15			no
-paper/jctc/manuscript.tex:398	4			no
 paper/jctc/manuscript.tex:399	38			no
 paper/jctc/manuscript.tex:400	75			no
 paper/jctc/manuscript.tex:400	200			no
@@ -92,38 +78,28 @@ paper/jctc/manuscript.tex:406	192		paper/jctc/scripts/water_results_table.py	no
 paper/jctc/manuscript.tex:408	0			no
 paper/jctc/manuscript.tex:408	191			no
 paper/jctc/manuscript.tex:408	4000			no
-paper/jctc/manuscript.tex:417	2			no
 paper/jctc/manuscript.tex:419	121		paper/jctc/scripts/water_results_table.py	no
 paper/jctc/manuscript.tex:419	192		paper/jctc/scripts/water_results_table.py	no
-paper/jctc/manuscript.tex:420	-2			no
 paper/jctc/manuscript.tex:420	4000			no
-paper/jctc/manuscript.tex:420	-7			no
 paper/jctc/manuscript.tex:421	4000			no
 paper/jctc/manuscript.tex:422	97		paper/jctc/scripts/water_results_table.py	no
 paper/jctc/manuscript.tex:422	192		paper/jctc/scripts/water_results_table.py	no
-paper/jctc/manuscript.tex:423	-2			no
 paper/jctc/manuscript.tex:423	4000			no
-paper/jctc/manuscript.tex:423	-7			no
 paper/jctc/manuscript.tex:424	4000			no
 paper/jctc/manuscript.tex:426	0.0264		paper/jctc/scripts/water_results_table.py	no
 paper/jctc/manuscript.tex:427	148			no
 paper/jctc/manuscript.tex:428	192		paper/jctc/scripts/water_results_table.py	no
-paper/jctc/manuscript.tex:429	-2			no
 paper/jctc/manuscript.tex:429	4000			no
-paper/jctc/manuscript.tex:429	-7			no
 paper/jctc/manuscript.tex:429	0			no
 paper/jctc/manuscript.tex:430	114		paper/jctc/scripts/water_results_table.py	no
 paper/jctc/manuscript.tex:430	192		paper/jctc/scripts/water_results_table.py	no
-paper/jctc/manuscript.tex:431	-2			no
 paper/jctc/manuscript.tex:431	3560			no
-paper/jctc/manuscript.tex:431	-7			no
 paper/jctc/manuscript.tex:432	4546.25			no
 paper/jctc/manuscript.tex:434	1.37\times 10^{-6}		paper/jctc/scripts/water_results_table.py	no
 paper/jctc/manuscript.tex:435	0.000374		paper/jctc/scripts/water_results_table.py	no
 paper/jctc/manuscript.tex:439	3.0.2			no
 paper/jctc/manuscript.tex:445	30			no
 paper/jctc/manuscript.tex:448	0.001			no
-paper/jctc/manuscript.tex:449	2			no
 paper/jctc/manuscript.tex:450	0.01			no
 paper/jctc/manuscript.tex:450	500			no
 paper/jctc/manuscript.tex:451	1\times 10^{-7}			no
@@ -198,10 +174,7 @@ paper/jctc/manuscript.tex:532	4000			no
 paper/jctc/manuscript.tex:533	195.5		paper/jctc/scripts/hexamer_numbers.py	no
 paper/jctc/manuscript.tex:535	18			no
 paper/jctc/manuscript.tex:542	192		paper/jctc/scripts/water_results_table.py	no
-paper/jctc/manuscript.tex:545	1998			no
-paper/jctc/manuscript.tex:547	1947			no
 paper/jctc/manuscript.tex:551	16			no
-paper/jctc/manuscript.tex:556	1.30			no
 paper/jctc/manuscript.tex:559	192		paper/jctc/scripts/water_results_table.py	no
 paper/jctc/manuscript.tex:559	121		paper/jctc/scripts/water_results_table.py	no
 paper/jctc/manuscript.tex:559	192		paper/jctc/scripts/water_results_table.py	no
@@ -232,9 +205,6 @@ paper/jctc/manuscript.tex:629	1e-6			no
 paper/jctc/manuscript.tex:631	0.001			no
 paper/jctc/manuscript.tex:632	0.01			no
 paper/jctc/manuscript.tex:632	0.01			no
-paper/jctc/manuscript.tex:635	256			no
-paper/jctc/manuscript.tex:642	3.25			no
-paper/jctc/manuscript.tex:642	1.75			no
 paper/jctc/si.tex:27	02139			no
 paper/jctc/si.tex:34	0.001			no
 paper/jctc/si.tex:36	-173.928427			no
@@ -253,8 +223,6 @@ paper/jctc/si.tex:43	0.7			no
 paper/jctc/si.tex:47	38			no
 paper/jctc/si.tex:49	0			no
 paper/jctc/si.tex:49	30000			no
-paper/jctc/si.tex:50	38			no
-paper/jctc/si.tex:50	0			no
 paper/jctc/si.tex:51	-173.928427	paper/jctc/logs/lj38-plain-seed0.log		no
 paper/jctc/si.tex:52	30000	paper/jctc/logs/lj38-plain-seed0.log		no
 paper/jctc/si.tex:55	1			no
@@ -265,8 +233,6 @@ paper/jctc/si.tex:58	2			no
 paper/jctc/si.tex:59	75			no
 paper/jctc/si.tex:59	98			no
 paper/jctc/si.tex:60	104			no
-paper/jctc/si.tex:62	4			no
-paper/jctc/si.tex:63	4			no
 paper/jctc/si.tex:63	2510400	paper/jctc/logs/tip4p_constants.txt	paper/jctc/scripts/tip4p_constants.py	yes
 paper/jctc/si.tex:64	2552.24	paper/jctc/logs/tip4p_constants.txt	paper/jctc/scripts/tip4p_constants.py	yes
 paper/jctc/si.tex:65	12			no
@@ -279,30 +245,19 @@ paper/jctc/si.tex:70	6			no
 paper/jctc/si.tex:70	2551.8252	paper/jctc/logs/tip4p_constants.txt	paper/jctc/scripts/tip4p_constants.py	yes
 paper/jctc/si.tex:70	12			no
 paper/jctc/si.tex:70	2510336.2	paper/jctc/logs/tip4p_constants.txt	paper/jctc/scripts/tip4p_constants.py	yes
-paper/jctc/si.tex:71	4			no
-paper/jctc/si.tex:72	2			no
 paper/jctc/si.tex:75	64			no
-paper/jctc/si.tex:76	4			no
 paper/jctc/si.tex:76	20			no
 paper/jctc/si.tex:76	16			no
-paper/jctc/si.tex:79	55			no
-paper/jctc/si.tex:79	98			no
 paper/jctc/si.tex:79	98			no
 paper/jctc/si.tex:81	24			no
 paper/jctc/si.tex:81	64			no
-paper/jctc/si.tex:82	-2			no
 paper/jctc/si.tex:82	2000000	paper/jctc/logs/paired_bootstrap_lj98.txt		no
-paper/jctc/si.tex:82	-7			no
 paper/jctc/si.tex:83	1513982.75	paper/jctc/logs/paired_bootstrap_lj98.txt		no
 paper/jctc/si.tex:84	64			no
 paper/jctc/si.tex:84	64			no
-paper/jctc/si.tex:85	-2			no
 paper/jctc/si.tex:85	158540.5	paper/jctc/logs/paired_bootstrap_lj98.txt		no
-paper/jctc/si.tex:85	-7			no
 paper/jctc/si.tex:86	201463.5	paper/jctc/logs/paired_bootstrap_lj98.txt		no
-paper/jctc/si.tex:87	98			no
 paper/jctc/si.tex:88	24			no
-paper/jctc/si.tex:88	-64			no
 paper/jctc/si.tex:88	12.62	paper/jctc/logs/paired_bootstrap_lj98.txt		no
 paper/jctc/si.tex:89	8.52	paper/jctc/logs/paired_bootstrap_lj98.txt		no
 paper/jctc/si.tex:89	15.22	paper/jctc/logs/paired_bootstrap_lj98.txt		no
@@ -313,24 +268,13 @@ paper/jctc/si.tex:91	6			no
 paper/jctc/si.tex:92	64			no
 paper/jctc/si.tex:92	104			no
 paper/jctc/si.tex:95	98			no
-paper/jctc/si.tex:99	75			no
-paper/jctc/si.tex:99	75			no
-paper/jctc/si.tex:100	75			no
 paper/jctc/si.tex:103	200			no
 paper/jctc/si.tex:107	56			no
-paper/jctc/si.tex:110	4			no
 paper/jctc/si.tex:111	56			no
-paper/jctc/si.tex:113	75			no
 paper/jctc/si.tex:118	200			no
-paper/jctc/si.tex:119	-2			no
-paper/jctc/si.tex:120	75			no
-paper/jctc/si.tex:120	-37535			no
-paper/jctc/si.tex:120	1			no
 paper/jctc/si.tex:122	2023			no
-paper/jctc/si.tex:123	75			no
 paper/jctc/si.tex:126	218			no
 paper/jctc/si.tex:127	2			no
-paper/jctc/si.tex:127	4			no
 paper/jctc/si.tex:127	93			no
 paper/jctc/si.tex:127	15			no
 paper/jctc/si.tex:128	52			no
@@ -340,41 +284,30 @@ paper/jctc/si.tex:129	4			no
 paper/jctc/si.tex:129	1			no
 paper/jctc/si.tex:130	55			no
 paper/jctc/si.tex:131	75			no
-paper/jctc/si.tex:137	256			no
 paper/jctc/si.tex:145	38			no
 paper/jctc/si.tex:147	75			no
 paper/jctc/si.tex:148	98			no
-paper/jctc/si.tex:161	4			no
 paper/jctc/si.tex:162	2			no
 paper/jctc/si.tex:162	6			no
 paper/jctc/si.tex:162	-197.7805			no
-paper/jctc/si.tex:164	4			no
-paper/jctc/si.tex:164	6			no
 paper/jctc/si.tex:164	2552.24	paper/jctc/logs/tip4p_constants.txt	paper/jctc/scripts/tip4p_constants.py	yes
-paper/jctc/si.tex:164	12			no
 paper/jctc/si.tex:165	2510400	paper/jctc/logs/tip4p_constants.txt	paper/jctc/scripts/tip4p_constants.py	yes
 paper/jctc/si.tex:166	0.6485	paper/jctc/logs/tip4p_constants.txt	paper/jctc/scripts/tip4p_constants.py	yes
 paper/jctc/si.tex:167	3.15365	paper/jctc/logs/tip4p_constants.txt	paper/jctc/scripts/tip4p_constants.py	yes
-paper/jctc/si.tex:168	6			no
 paper/jctc/si.tex:168	2551.8252	paper/jctc/logs/tip4p_constants.txt	paper/jctc/scripts/tip4p_constants.py	yes
-paper/jctc/si.tex:168	12			no
 paper/jctc/si.tex:168	2510336.2	paper/jctc/logs/tip4p_constants.txt	paper/jctc/scripts/tip4p_constants.py	yes
 paper/jctc/si.tex:169	-197.7750			no
 paper/jctc/si.tex:174	0.48			no
-paper/jctc/si.tex:174	38			no
 paper/jctc/si.tex:175	38			no
 paper/jctc/si.tex:177	600			no
 paper/jctc/si.tex:184	0.48			no
-paper/jctc/si.tex:184	38			no
 paper/jctc/si.tex:185	38			no
 paper/jctc/si.tex:187	2.429			no
 paper/jctc/si.tex:188	3.051			no
 paper/jctc/si.tex:193	0.48			no
-paper/jctc/si.tex:193	75			no
 paper/jctc/si.tex:194	75			no
 paper/jctc/si.tex:196	1.210			no
 paper/jctc/si.tex:201	0.48			no
-paper/jctc/si.tex:201	98			no
 paper/jctc/si.tex:202	98			no
 paper/jctc/si.tex:204	0.022			no
 paper/jctc/si.tex:205	0.119			no
@@ -383,15 +316,12 @@ paper/jctc/si.tex:211	38			no
 paper/jctc/si.tex:211	75			no
 paper/jctc/si.tex:211	98			no
 paper/jctc/si.tex:218	0.48			no
-paper/jctc/si.tex:218	38			no
 paper/jctc/si.tex:219	38			no
 paper/jctc/si.tex:222	2.429			no
 paper/jctc/si.tex:227	0.48			no
-paper/jctc/si.tex:227	75			no
 paper/jctc/si.tex:228	75			no
 paper/jctc/si.tex:231	1.210			no
 paper/jctc/si.tex:236	0.48			no
-paper/jctc/si.tex:236	98			no
 paper/jctc/si.tex:237	98			no
 paper/jctc/si.tex:240	0.022			no
 paper/jctc/si.tex:241	0.119			no
@@ -400,16 +330,12 @@ paper/jctc/si.tex:248	118			no
 paper/jctc/si.tex:248	119			no
 paper/jctc/si.tex:249	1e-3			no
 paper/jctc/si.tex:250	-415.971529			no
-paper/jctc/si.tex:251	8e-6			no
-paper/jctc/si.tex:251	3.68e-4			no
+paper/jctc/si.tex:251	8e-6	paper/jctc/logs/cuh2_fcc_rec_3.out	paper/jctc/scripts/hq_sci_tally.py	yes
+paper/jctc/si.tex:251	3.68e-4	paper/jctc/logs/cuh2_fcc_rec_7.out	paper/jctc/scripts/hq_sci_tally.py	yes
 paper/jctc/si.tex:252	1e-6			no
 paper/jctc/si.tex:254	0.001			no
-paper/jctc/cover-letter.tex:2	11			no
-paper/jctc/cover-letter.tex:3	1			no
 paper/jctc/cover-letter.tex:5	1			no
 paper/jctc/cover-letter.tex:5	1			no
-paper/jctc/cover-letter.tex:15	1			no
-paper/jctc/cover-letter.tex:19	1			no
 paper/jctc/cover-letter.tex:24	2023			no
 paper/jctc/cover-letter.tex:28	98			no
 paper/jctc/cover-letter.tex:32	1\times 10^{-7}			no
@@ -417,6 +343,5 @@ paper/jctc/cover-letter.tex:32	1			no
 paper/jctc/cover-letter.tex:33	4000			no
 paper/jctc/cover-letter.tex:33	142110	paper/jctc/logs/water/crest-hexamer-seed2.log	paper/jctc/scripts/hexamer_numbers.py	yes
 paper/jctc/cover-letter.tex:33	209931	paper/jctc/logs/water/crest-hexamer-seed5.log	paper/jctc/scripts/hexamer_numbers.py	yes
-paper/jctc/cover-letter.tex:39	2			no
 paper/jctc/cover-letter.tex:41	3.25			no
 paper/jctc/cover-letter.tex:41	1.75			no
