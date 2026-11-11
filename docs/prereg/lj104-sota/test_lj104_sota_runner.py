@@ -145,7 +145,12 @@ class RunnerGate(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(proc.returncode, 3)
-            self.assertIn("seeds 5000-5029 are not run from this commit", proc.stderr)
+            self.assertIn("arm B preset id is UNFILLED", proc.stderr)
+            self.assertEqual(RUNNER_MOD.PRESET_ID, "UNFILLED")
+            self.assertTrue(RUNNER_MOD.D_V3_TIP.startswith("28ece242"))
+            self.assertEqual(RUNNER_MOD.LJ104_BUDGET, 4_000_000)
+            self.assertEqual(RUNNER_MOD.DLS_STOP, "-582.086641")
+            self.assertAlmostEqual(RUNNER_MOD.HIT_LINE, RUNNER_MOD.E_KNOWN_LJ104 + 1e-6)
             self.assertFalse((Path(tmp) / "receipts").exists())
 
 

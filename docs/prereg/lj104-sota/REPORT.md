@@ -22,8 +22,9 @@ Alpha is 0.05.
 ## Still UNFILLED
 
 The arm B v2 preset id is UNFILLED.
-The arm D v3 tip sha is UNFILLED.
-We fill both only in a later commit, before any 5000-5029 run.
+The arm D v3 tip sha follows.
+28ece242da192e769865bc1b1d93fa8e3a50b7a2.
+We fill the preset only in a later commit.
 
 ## Known gaps
 

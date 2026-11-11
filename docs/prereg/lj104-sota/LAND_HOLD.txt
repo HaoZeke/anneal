@@ -2,8 +2,9 @@ Copyright (c) anneal developers
 
 LAND_HOLD remains until every arm is filled.
 Arm B stays UNFILLED.
-Arm D stays UNFILLED.
-Saddle passes those two values later.
-We do not fill either arm in this record.
-The runner refuses a scored search while either value is UNFILLED.
-Seeds 5000 through 5029 stay unrun.
+Arm D is the lattice v3.2 tip.
+The tip sha follows.
+28ece242da192e769865bc1b1d93fa8e3a50b7a2.
+We leave the preset id UNFILLED.
+The runner refuses arm B while that id is UNFILLED.
+Seeds 5000 through 5029 stay unrun in this commit.

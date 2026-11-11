@@ -4,9 +4,8 @@
 
 A scored start takes an exclusive lock and will not start while another
 scored start holds it. Every row this process writes cites the git blob
-of this file, HEAD, and the tree of HEAD. Seeds 5000-5029 are refused.
-The arm B v2 preset id and the arm D v3 tip are UNFILLED, so this commit
-does not dispatch a search.
+of this file, HEAD, and the tree of HEAD. Arm B stays UNFILLED.
+Arm D is the lattice v3.2 tip. The held-out seeds are 5000-5029.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import os
+import re
 import subprocess
 import sys
 import time
@@ -24,7 +24,13 @@ from zoneinfo import ZoneInfo
 HELD_OUT_LO = 5000
 HELD_OUT_HI = 5029
 PRESET_ID = "UNFILLED"
-D_V3_TIP = "UNFILLED"
+D_V3_TIP = "28ece242da192e769865bc1b1d93fa8e3a50b7a2"
+LJ104_N = 104
+LJ104_BUDGET = 4_000_000
+E_KNOWN_LJ104 = -582.086642
+HIT_LINE = E_KNOWN_LJ104 + 1e-6
+DLS_TIE = "lowest-index"
+DLS_STOP = "-582.086641"
 # Stated before any panel run. Each process stops at this wall-clock cap.
 WALL_CLOCK_CAP_SECONDS = 600
 COLUMNS = (
@@ -363,27 +369,277 @@ def cmd_emit_row(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_run(args: argparse.Namespace) -> int:
-    if touches_held_out(args.seeds):
-        print("seeds 5000-5029 are not run from this commit", file=sys.stderr)
-        return 3
-    if PRESET_ID == "UNFILLED" or D_V3_TIP == "UNFILLED":
-        print(
-            "preset id or D v3 tip is UNFILLED; no scored search is started",
-            file=sys.stderr,
-        )
-        return 3
-    # The identifiers are filled only by a later commit, and that commit
-    # still has to keep the lock and the two receipts around the search.
-    handle = acquire_scored_run(Path(args.lock_file))
+def held_out_seeds() -> list[int]:
+    return list(range(HELD_OUT_LO, HELD_OUT_HI + 1))
+
+
+def _require_tool(path: Path, label: str) -> Path:
+    if not path.is_file():
+        print(f"missing {label}", file=sys.stderr)
+        raise SystemExit(2)
+    return path
+
+
+def _run_capped(cmd: list[str], cwd: Path, env: dict[str, str] | None = None) -> tuple[int, str, str, float]:
+    started = time.monotonic()
     try:
-        receipt_dir = Path(args.receipt_dir)
-        record_serial_boundary(receipt_dir, "start")
-        print("this commit does not dispatch a scored search", file=sys.stderr)
-        record_serial_boundary(receipt_dir, "end")
-        return 3
+        proc = subprocess.run(
+            cmd,
+            cwd=cwd,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=WALL_CLOCK_CAP_SECONDS,
+        )
+        return proc.returncode, _public(proc.stdout), _public(proc.stderr), time.monotonic() - started
+    except subprocess.TimeoutExpired as exc:
+        out = exc.stdout or ""
+        err = exc.stderr or ""
+        if isinstance(out, bytes):
+            out = out.decode("utf-8", "replace")
+        if isinstance(err, bytes):
+            err = err.decode("utf-8", "replace")
+        err = err + "\nwall-clock cap reached\n"
+        return 124, _public(out), _public(err), float(WALL_CLOCK_CAP_SECONDS)
+
+
+def _public(text: str) -> str:
+    return re.sub(r"(^|\s)(/[^\s]+)", r"\1PATH", text)
+
+
+def _parse_kv(text: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        if ": " not in line:
+            continue
+        key, value = line.split(": ", 1)
+        fields[key.strip()] = value.strip()
+    return fields
+
+
+def _requench(binary: Path, xyz: Path, cwd: Path) -> tuple[str, str]:
+    code, out, err, _wall = _run_capped([str(binary), str(xyz)], cwd, None)
+    (xyz.parent / (xyz.stem + ".requench.err")).write_text(err, encoding="utf-8")
+    if code != 0:
+        return "", ""
+    fields = _parse_kv(out)
+    return fields.get("energy", ""), fields.get("calls", "")
+
+
+def _xyz_from_gmin_lowest(lowest: Path, xyz: Path, n_atoms: int) -> bool:
+    if not lowest.is_file():
+        return False
+    lines = [line for line in lowest.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+    coords = []
+    for line in lines:
+        parts = line.split()
+        nums = []
+        for part in parts:
+            try:
+                nums.append(float(part))
+            except ValueError:
+                continue
+        if len(nums) >= 3:
+            coords.append(nums[-3:])
+    if len(coords) < n_atoms:
+        return False
+    body = [f"{n_atoms}", "gmin lowest"]
+    for x, y, z in coords[:n_atoms]:
+        body.append(f"X {x:.10f} {y:.10f} {z:.10f}")
+    xyz.write_text("\n".join(body) + "\n", encoding="utf-8")
+    return True
+
+
+def _write_heldout_t(stamp: str, rustc_line: str, cargo_line: str) -> None:
+    note = "\n".join(
+        [
+            "Copyright (c) anneal developers",
+            "",
+            "T is the clock time at the start of the held-out run.",
+            stamp + ".",
+            "Arm D is the lattice v3.2 tip.",
+            D_V3_TIP + ".",
+            "Arm B stays UNFILLED.",
+            "The rustc version line follows.",
+            rustc_line + ".",
+            "The cargo version line follows.",
+            cargo_line + ".",
+            "The wall-clock cap is 600 seconds for each process.",
+            "That cap was stated before this run.",
+            "The seeds are 5000 through 5029.",
+            "The call budget is 4000000.",
+            "The tie cut is lowest-index.",
+            "",
+        ]
+    )
+    (script_path().parent / "T-heldout.txt").write_text(note + "\n", encoding="utf-8")
+
+
+def cmd_heldout(args: argparse.Namespace) -> int:
+    if PRESET_ID != "UNFILLED":
+        print("arm B was filled; this command leaves it UNFILLED", file=sys.stderr)
+        return 2
+    if not D_V3_TIP.startswith("28ece242"):
+        print("arm D tip is not the lattice v3.2 tip", file=sys.stderr)
+        return 2
+    root = repo_root()
+    dls = _require_tool(Path(args.dls), "lj_dls")
+    requench = _require_tool(Path(args.requench), "lj_requench")
+    gmin = _require_tool(Path(args.gmin), "GMIN")
+    coords_bin = _require_tool(Path(args.coords), "coords helper")
+    rel = Path(args.output_dir)
+    if rel.is_absolute():
+        print("output dir must be relative", file=sys.stderr)
+        return 2
+    out = root / rel
+    out.mkdir(parents=True, exist_ok=True)
+    rustc = subprocess.run(["rustc", "-V"], check=False, capture_output=True, text=True)
+    cargo = subprocess.run(["cargo", "-V"], check=False, capture_output=True, text=True)
+    rustc_line = (rustc.stdout if rustc.returncode == 0 else rustc.stderr).strip()
+    cargo_line = (cargo.stdout if cargo.returncode == 0 else cargo.stderr).strip()
+    if rustc_line != "rustc 1.88.0 (6b00bc388 2025-06-23)":
+        print("held-out run requires rustc 1.88.0", file=sys.stderr)
+        return 2
+    if not cargo_line.startswith("cargo 1.88.0 "):
+        print("held-out run requires cargo 1.88.0", file=sys.stderr)
+        return 2
+    keywords = (script_path().parent / "gmin_best.keywords").read_text(encoding="utf-8").rstrip() + "\n\n"
+    stamp = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%dT%H:%M:%S%z")
+    _write_heldout_t(stamp, rustc_line, cargo_line)
+    handle = acquire_scored_run(Path(args.lock_file))
+    session_start = time.monotonic()
+    try:
+        fields = provenance()
+        record_serial_boundary(out, "start")
+        rows = out / "rows.tsv"
+        rows.write_text("\t".join(COLUMNS) + "\n", encoding="utf-8")
+        env_base = os.environ.copy()
+        env_base["OMP_NUM_THREADS"] = "1"
+        env_base["RAYON_NUM_THREADS"] = "1"
+        for seed in held_out_seeds():
+            for code in ("dls", "gmin"):
+                stem = f"{code}-{seed}"
+                print(f"start {stem}", flush=True)
+                row = dict(fields)
+                row.update({"seed": str(seed), "code": code, "hit": "false", "energy": "", "calls": "", "wall_seconds": ""})
+                if code == "dls":
+                    prefix = out / "dls" / str(seed)
+                    prefix.parent.mkdir(parents=True, exist_ok=True)
+                    code_rc, stdout, stderr, wall = _run_capped(
+                        [
+                            "taskset",
+                            "-c",
+                            "0",
+                            str(dls),
+                            str(LJ104_N),
+                            str(LJ104_BUDGET),
+                            str(seed),
+                            DLS_TIE,
+                            DLS_STOP,
+                            str(prefix),
+                        ],
+                        root,
+                        env_base,
+                    )
+                    (out / "dls" / f"{seed}.log").write_text(stdout, encoding="utf-8")
+                    (out / "dls" / f"{seed}.err").write_text(stderr, encoding="utf-8")
+                    parsed = _parse_kv(stdout)
+                    row["calls"] = parsed.get("charged", "")
+                    row["wall_seconds"] = parsed.get("wall_seconds", f"{wall:.3f}")
+                    xyz = Path(str(prefix) + ".xyz")
+                    energy, rq_calls = ("", "")
+                    if xyz.is_file():
+                        energy, rq_calls = _requench(requench, xyz, root)
+                        (out / "requench").mkdir(parents=True, exist_ok=True)
+                        (out / "requench" / f"dls-{seed}.txt").write_text(
+                            f"energy: {energy}\ncalls: {rq_calls}\n",
+                            encoding="utf-8",
+                        )
+                    if energy:
+                        row["energy"] = energy
+                        row["hit"] = "true" if float(energy) <= HIT_LINE else "false"
+                    if code_rc not in (0,):
+                        (out / "dls" / f"{seed}.status").write_text(f"exit {code_rc}\n", encoding="utf-8")
+                else:
+                    work = out / "gmin" / str(seed)
+                    work.mkdir(parents=True, exist_ok=True)
+                    coords = work / "coords"
+                    helper = _run_capped(
+                        [str(coords_bin), "coords", "lj104", str(seed), str(coords)],
+                        root,
+                        env_base,
+                    )
+                    (work / "coords.err").write_text(helper[2], encoding="utf-8")
+                    (work / "data").write_text(keywords + f"RANSEED {seed}\n", encoding="utf-8")
+                    gmin_env = dict(env_base)
+                    gmin_env.update(
+                        {
+                            "H2H_SYSTEM": "lj104",
+                            "H2H_SEED": str(seed),
+                            "H2H_BUDGET": str(LJ104_BUDGET),
+                            "H2H_TARGET": f"{E_KNOWN_LJ104:.6f}",
+                            "H2H_TOL": "1e-6",
+                            "H2H_ROW": "row.txt",
+                        }
+                    )
+                    code_rc, stdout, stderr, wall = _run_capped(
+                        ["taskset", "-c", "0", str(gmin)],
+                        work,
+                        gmin_env,
+                    )
+                    (work / "stdout.txt").write_text(stdout, encoding="utf-8")
+                    (work / "stderr.txt").write_text(stderr, encoding="utf-8")
+                    charged = ""
+                    for line in stdout.splitlines():
+                        if line.startswith("h2h_row "):
+                            parts = {}
+                            for item in line.split()[1:]:
+                                if "=" in item:
+                                    key, value = item.split("=", 1)
+                                    parts[key] = value
+                            charged = parts.get("charged", "")
+                            row["wall_seconds"] = parts.get("wall_s", f"{wall:.3f}")
+                    row["calls"] = charged
+                    lowest = work / "lowest"
+                    xyz = work / "lowest.xyz"
+                    energy = ""
+                    if _xyz_from_gmin_lowest(lowest, xyz, LJ104_N):
+                        energy, rq_calls = _requench(requench, xyz, root)
+                        (out / "requench").mkdir(parents=True, exist_ok=True)
+                        (out / "requench" / f"gmin-{seed}.txt").write_text(
+                            f"energy: {energy}\ncalls: {rq_calls}\n",
+                            encoding="utf-8",
+                        )
+                    if energy:
+                        row["energy"] = energy
+                        row["hit"] = "true" if float(energy) <= HIT_LINE else "false"
+                    if code_rc not in (0,):
+                        (work / "status.txt").write_text(f"exit {code_rc}\n", encoding="utf-8")
+                with rows.open("a", encoding="utf-8") as handle_rows:
+                    handle_rows.write("\t".join(row.get(column, "") for column in COLUMNS) + "\n")
+                print(
+                    f"{stem} hit={row['hit']} energy={row['energy']} calls={row['calls']} wall={row['wall_seconds']}",
+                    flush=True,
+                )
+        record_serial_boundary(out, "end")
+        elapsed = time.monotonic() - session_start
+        (out / "session.txt").write_text(
+            f"elapsed_seconds {elapsed:.6f}\nruns {len(held_out_seeds()) * 2}\n",
+            encoding="utf-8",
+        )
     finally:
         release_scored_run(handle)
+    return 0
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    code = args.code.strip().lower()
+    if code in {"b", "candidate", "preset"} or PRESET_ID == "UNFILLED":
+        print("arm B preset id is UNFILLED; no scored search is started", file=sys.stderr)
+        return 3
+    print("use the heldout command for a scored search", file=sys.stderr)
+    return 3
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -399,11 +655,19 @@ def build_parser() -> argparse.ArgumentParser:
     emit.add_argument("--output", required=True)
     emit.set_defaults(func=cmd_emit_row)
 
-    run = sub.add_parser("run", help="refused until the pre-registration is filled")
+    run = sub.add_parser("run", help="refused while arm B is UNFILLED")
     run.add_argument("--code", required=True)
     run.add_argument("--seeds", required=True)
     run.add_argument("--receipt-dir", default="lj104-sota-receipts")
     run.set_defaults(func=cmd_run)
+
+    held = sub.add_parser("heldout", help="score arm D and GMIN on seeds 5000-5029")
+    held.add_argument("--output-dir", required=True)
+    held.add_argument("--dls", required=True)
+    held.add_argument("--requench", required=True)
+    held.add_argument("--gmin", required=True)
+    held.add_argument("--coords", required=True)
+    held.set_defaults(func=cmd_heldout)
 
     panel = sub.add_parser("panel", help="run the default no-regression panel serially")
     panel.add_argument("--output-dir", required=True)

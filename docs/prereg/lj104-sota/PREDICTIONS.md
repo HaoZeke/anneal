@@ -20,9 +20,10 @@ The exact preset id is UNFILLED.
 We fill that id only from arm B's serial angular on/off grid.
 That later commit is made before any run of seeds 5000-5029.
 
-The arm D v3 tip sha is UNFILLED.
-We fill that sha in the same later commit.
-That fill still comes before any of those seeds.
+The arm D v3 tip sha follows.
+28ece242da192e769865bc1b1d93fa8e3a50b7a2.
+That sha is the lattice v3.2 tip.
+The fill comes before any run of seeds 5000-5029.
 
 The scored baseline beside those unfilled arms is GMIN_BEST.
 GMIN_BEST is the patched GMIN binary.
