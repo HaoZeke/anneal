@@ -112,3 +112,11 @@ The hard sizes in the manuscript are Lennard-Jones 38, 75, and 98, not copper. T
 
 Cite `larsenFractional2023`. A head-to-head would need one shared potential.
 
+## 2026-11-11 — Population basin hopping on LJ20, LJ30, and LJ40
+
+Baioletti, Santucci, and Tomassini, Journal of Global Optimization 89, 803--832 (2024), doi:10.1007/s10898-024-01373-5, also arXiv:2403.05877, compare basin hopping and two population variants with differential evolution, particle swarm optimisation, and CMA-ES. On Lennard-Jones and Morse clusters of 20, 30, and 40 atoms, their population basin hopping does well on Lennard-Jones and is slower on Morse. They say basin hopping beats CMA-ES on these cluster problems.
+
+The manuscript's population is a fixed-size resampled set of replicas with a Good--Turing census, not replacement of the worst member. Their sizes stop at 40, so LJ38 is nearby and LJ75, LJ98, and LJ104 are absent. This does not contradict the withheld LJ75 hit count, or the LJ38 and LJ98 counts removed from the article.
+
+Cite `baiolettiBasinHopping2024` as a population basin-hopping baseline. Do not import the 20, 30, and 40 results into the article.
+
