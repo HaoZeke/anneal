@@ -241,3 +241,35 @@ Olivier, doi:10.5281/zenodo.23775350 (29 October 2026), deposits six clusters an
 The Lennard-Jones table on the same site was last modified the same day. It still lists the published minima the manuscript uses: -173.928427 at 38 atoms, -279.248470 at 55, -397.492331 at 75, -543.665361 at 98, and -582.086642 at 104. Those six deposited energies are modified Dzugutov and Z1 energies. They do not contradict the Lennard-Jones hit targets.
 
 Cite `olivierPairTables2026`. Keep them out of the Lennard-Jones table.
+
+## 2026-11-11 — An AIMNet2 genetic search through ten molecules
+
+Zhang, Cheng, and Zhang, Journal of Computational Chemistry 47, e70389 (2026), doi:10.1002/jcc.70389, release GMMLP. An improved genetic algorithm searches on AIMNet2, trained at ωB97M-D3/def2-TZVPP. The benchmarks are nine molecular clusters with one to ten molecules: formaldehyde, methylamine, methanol, methane, water, sulfuric acid, nitric acid, ammonia, and urea. Across those benchmarks the abstract counts 9869 isomers.
+
+Giri and Anoop already search water clusters of that size on AIMNet2, with a tabu driver rather than this genetic algorithm. The manuscript's water surfaces are TIP4P and GFN2-xTB. GMMLP does not report those energies, so it does not contradict them. A comparison with the sealed hexamer counts only if both sides relax on the same potential.
+
+Cite `zhangGmmlp2026` beside `giriAimnetClusters2025`.
+
+## 2026-11-11 — One argon atom on the water hexamer isomers
+
+Rock, Clothier, and Tschumper, ACS Physical Chemistry Au (2026), doi:10.1021/acsphyschemau.6c00129, optimise Ar(H2O)6. The water topologies are prism, cage, two books, bag, glove, ring, and two boats. Geometry and frequencies are MP2, and the relative energies are compared at CCSD(T). At every level they report, one argon atom changes the spacing of those topologies, and the harmonic zero-point correction is nearly the same with and without the argon, so the reordering is electronic. The record has no volume or pages yet.
+
+The manuscript scores bare GFN2-xTB motif hits, and it keeps a separate TIP4P reference. This paper does not report 121 of 192 or 97 of 192. An argon-tagged MP2 order is a different surface from GFN2-xTB.
+
+Cite `rockArgonHexamer2026` beside the water section. Leave the CREST table on the bare hexamer.
+
+## 2026-11-11 — Hydrophobic guests around six water molecules
+
+Baruah, ACS Omega (2026), doi:10.1021/acsomega.6c10192, optimises assemblies of six water molecules at ωB97X with the def2-TZV basis, with hydrophobic guests present. The guests stabilise an open book, a closed bag, a prism, and a double envelope. Weak contacts, including C-H···O, O-H···π, and O-H···F-C, move the hydrogen-bond pattern. The record has no volume or pages yet. This is a guest-stabilised density-functional assembly, not a bare-cluster global optimisation.
+
+It does not contradict 121 of 192, 97 of 192, or the Wales-Hodges TIP4P geometries.
+
+Cite `baruahWaterSix2026`. Keep those guest-stabilised geometries apart from the GFN2 motifs.
+
+## 2026-11-11 — A local tightening is not a new basin
+
+Doust Mohammadi, ChemRxiv (26 October 2026), doi:10.26434/chemrxiv.15011046/v1, separates two ways a geometry optimisation can fail. Inside one basin, on the stiff closed-shell cases in the benchmarks he reviews, bond lengths settle to a few tenths of a picometre and the coordinate system mostly changes the cost. A jump into another basin, including a wrong cluster isomer, can move the energy by more than a change of functional or basis. He does not report a water-hexamer hit rate or a Lennard-Jones energy.
+
+The manuscript's polish is a local relaxation of a structure already scored as a motif. This note does not contradict the polished gaps. A lower energy in another basin would be another isomer.
+
+Cite `doustMohammadiBasins2026` beside the polish. A tighter threshold inside one basin is not a new motif.
