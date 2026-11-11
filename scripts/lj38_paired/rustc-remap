@@ -1,0 +1,10 @@
+#!/bin/bash
+# Copyright (c) anneal developers
+# Neutral build-tree prefixes. Panic paths are rewritten before they reach the binary.
+real=$1
+shift
+exec "$real" \
+  --remap-path-prefix=/work/anneal=/src \
+  --remap-path-prefix=/work/target=/src \
+  --remap-path-prefix=/work/scratch=/build \
+  "$@"
