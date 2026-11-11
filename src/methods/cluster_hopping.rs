@@ -1492,12 +1492,14 @@ const GROWTH_RETRY_LEAVES: u32 = 8;
 
 /// True while a failed growth should stay idle.
 ///
-/// The energy test is [`stall_growth_waits`]. After [`GROWTH_RETRY_LEAVES`]
-/// idle leaves the pentagonal order is due again, which is the leave the
-/// icosahedral funnel was not taking: the live chain's 555 fraction sits near
-/// 0.06, under the 0.12 icosahedral cut, so that branch never opened.
-fn growth_held(held: Option<f64>, incumbent: f64, skipped: u32) -> bool {
-    stall_growth_waits(held, incumbent) && skipped < GROWTH_RETRY_LEAVES
+/// The energy test is [`stall_growth_waits`]. At 98 atoms and above, after
+/// [`GROWTH_RETRY_LEAVES`] idle leaves the pentagonal order is due again.
+/// That is the leave the plateau was not taking: the live chain's 555
+/// fraction sits near 0.06, under the 0.12 icosahedral cut, so that branch
+/// never opened. Below 98 the displacement library still leaves the floor,
+/// and a retry would move the call clock those hits were measured on.
+fn growth_held(held: Option<f64>, incumbent: f64, skipped: u32, n_points: usize) -> bool {
+    stall_growth_waits(held, incumbent) && (n_points < 98 || skipped < GROWTH_RETRY_LEAVES)
 }
 
 /// Kernels the chain actually draws, including the energy-lattice arm.
@@ -4348,7 +4350,12 @@ where
         // displacement. Other proposals keep the kernel they drew. The test
         // is the incumbent energy, not the atom count.
         let held_displacement = directed_leave
-            && growth_held(stall_growth_hold, ledger.best, stall_growth_skips)
+            && growth_held(
+                stall_growth_hold,
+                ledger.best,
+                stall_growth_skips,
+                cfg.n_points,
+            )
             && cfg.packing_cna_applies();
         if held_displacement {
             let step = preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale;
@@ -6081,7 +6088,12 @@ where
                 && !crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
             {
                 let best_before_growth = ledger.best;
-                if growth_held(stall_growth_hold, best_before_growth, stall_growth_skips) {
+                if growth_held(
+                    stall_growth_hold,
+                    best_before_growth,
+                    stall_growth_skips,
+                    cfg.n_points,
+                ) {
                     // The lattice quench already failed at this incumbent.
                     // Further growth waits. This leave's proposal is the
                     // all-points displacement. After several idle leaves the
@@ -6203,7 +6215,12 @@ where
                 && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
             {
                 let best_before_growth = ledger.best;
-                if growth_held(stall_growth_hold, best_before_growth, stall_growth_skips) {
+                if growth_held(
+                    stall_growth_hold,
+                    best_before_growth,
+                    stall_growth_skips,
+                    cfg.n_points,
+                ) {
                     // Same wait as the other lattice growth. This leave's
                     // proposal is the all-points displacement.
                     stall_growth_skips = stall_growth_skips.saturating_add(1);
