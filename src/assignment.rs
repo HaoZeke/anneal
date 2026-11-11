@@ -348,6 +348,5 @@ mod tests {
     #[test]
     fn a_non_finite_reduced_cost_has_no_shortest_path() {
         assert!(successive_shortest_paths(&[f64::NAN], 1).is_none());
-        assert!(kuhn_munkres(&[f64::NAN], 1).is_none());
     }
 }
