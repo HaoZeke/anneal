@@ -1,0 +1,1 @@
+h2h_row system=lj104 code=gmin seed=5026 budget=4000000 hit=0 evals_to_hit=4000000 charged=4000000 best=-582.086624340 wall_s=417.029
