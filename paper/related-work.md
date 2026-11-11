@@ -120,3 +120,11 @@ The manuscript's population is a fixed-size resampled set of replicas with a Goo
 
 Cite `baiolettiBasinHopping2024` as a population basin-hopping baseline. Do not import the 20, 30, and 40 results into the article.
 
+## 2026-11-11 — Grand-canonical search with an on-the-fly potential
+
+Quinlivan Domínguez, Christiansen, Neyman, Hammer, and Bruix, Journal of Chemical Physics 165, 034115 (2026), doi:10.1063/5.0302876, train a SOAP Gaussian process during a grand-canonical search and rank candidates by an ab initio Gibbs energy. The abstract says the method reproduces selected literature examples across stoichiometries.
+
+AGOX 3.11.0 added grand-canonical modules in the same period. The manuscript's preset is fixed-N Lennard-Jones and fixed-size water. No fixed-N energy is contradicted.
+
+Cite `quinlivanGrandCanonical2026`, so a fixed-N hit is not described as a search over composition.
+
