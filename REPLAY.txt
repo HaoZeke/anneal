@@ -2,12 +2,16 @@ The replay sets no dates.
 The replay does not sleep.
 The seconds are the ones git writes.
 Archive refs are never pushed.
-The push plan names only refs/heads/fix/lj104-measure-v4.13.
-The bundle carries refs/archive/fix/lj104-measure-v4.9.
-The bundle carries refs/archive/fix/lj104-measure-v4.10.
+The push plan names only refs/heads/fix/lj104-measure-v4.14.
+The v4.9 archive is refs/archive/fix/lj104-measure-v4.9.
+That ref is 5cac8c407840222aac2288946f3eb5888ac73c40.
+The v4.10 archive is refs/archive/fix/lj104-measure-v4.10.
 That ref is 87147482ce9c25b51d26b19e9d3cc2be1ad0c1d8.
-The bundle carries refs/archive/fix/lj104-measure-v4.11.
+The v4.11 archive is refs/archive/fix/lj104-measure-v4.11.
 That ref is 3f51ecf4e19796366ceac4005e17499e0ec2a16e.
-The bundle carries refs/archive/fix/lj104-measure-v4.12.
+The v4.12 archive is refs/archive/fix/lj104-measure-v4.12.
 That ref is 3f51ecf4e19796366ceac4005e17499e0ec2a16e.
+The v4.13 archive is refs/archive/fix/lj104-measure-v4.13.
+That ref is cebb875ddd00364924fca91a1c95c1bc4f0865d1.
 The raw rows are in logs/replay-pass.txt.
+The writer of that log is python3 -B scripts/lj104_replay_v414.py.
