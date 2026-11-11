@@ -58,12 +58,22 @@ class LjCalculator(Calculator):
 
     implemented_properties = ["energy", "forces"]
 
-    def __init__(self, budget: int, reference: float, tol: float, fmax: float):
+    def __init__(
+        self,
+        budget: int,
+        reference: float,
+        tol: float,
+        fmax: float,
+        sigma: float = 1.0,
+        epsilon: float = 1.0,
+    ):
         super().__init__()
         self.budget = budget
         self.reference = reference
         self.tol = tol
         self.fmax = fmax
+        self.sigma = sigma
+        self.epsilon = epsilon
         self.calls = 0
         self.inside_s = 0.0
         self.hit_calls = None
@@ -75,18 +85,23 @@ class LjCalculator(Calculator):
             raise BudgetReached()
         positions = np.ascontiguousarray(atoms.positions.ravel(), dtype=np.float64)
         started = time.perf_counter()
-        energy, grad = lj_value_and_gradient(positions)
+        reduced_energy, grad = lj_value_and_gradient(positions / self.sigma)
         self.inside_s += time.perf_counter() - started
         self.calls += 1
-        forces = (-grad).reshape(-1, 3)
-        energy = float(energy)
+        forces = (-grad * self.epsilon / self.sigma).reshape(-1, 3)
+        energy = float(reduced_energy) * self.epsilon
+        reduced_energy = float(reduced_energy)
         self.results = {"energy": energy, "forces": forces}
-        if energy < self.best:
-            self.best = energy
+        if reduced_energy < self.best:
+            self.best = reduced_energy
         peak = float(np.max(np.abs(forces))) if forces.size else 0.0
-        if peak <= self.fmax and energy < self.best_quenched:
-            self.best_quenched = energy
-        if self.hit_calls is None and peak <= self.fmax and energy <= self.reference + self.tol:
+        if peak <= self.fmax and reduced_energy < self.best_quenched:
+            self.best_quenched = reduced_energy
+        if (
+            self.hit_calls is None
+            and peak <= self.fmax
+            and reduced_energy <= self.reference + self.tol
+        ):
             self.hit_calls = self.calls
             raise HitReached()
         if self.calls % 20000 == 0:

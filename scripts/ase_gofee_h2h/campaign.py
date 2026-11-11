@@ -18,8 +18,11 @@ steps, so the cap here is 1000 steps at that same fmax. The collector and
 the surrogate relaxation run in this process. The GPR fit stays on this
 process (``use_ray`` false) and does not restart kernel hyperparameters, and
 it trains on at most 512 stored structures, which is what lets a force-call
-budget be spent. Generator bond windows are set so a reduced Lennard-Jones
-nearest neighbour is allowed; the page's windows are for the EMT example.
+budget be spent. Lengths are in Angstroms with sigma = 3.4, which is the scale the
+repulsive prior uses. The energy unit equals that length, so the page's
+force threshold of 0.05 is a reduced force of 0.05, and the hit is read
+from the untruncated reduced energy. The bond window is the one already
+used for that box.
 
 A hit is a quenched energy within 0.001 of the Cambridge minimum. Misses
 stop at the paper force-call budget. Jobs run one at a time in an order
@@ -269,7 +272,6 @@ def run_gofee(system: str, seed: int, budget: int, work: Path) -> dict:
     matplotlib.use("Agg")
     import numpy as np
     from ase import Atoms
-    from ase.data import atomic_numbers, covalent_radii
 
     install_constraint_shim()
     from agox import AGOX
@@ -306,14 +308,26 @@ def run_gofee(system: str, seed: int, budget: int, work: Path) -> dict:
 
     n = int(system[2:])
     os.chdir(work)
-    radius = (3.0 * n / (4.0 * math.pi * 0.7)) ** (1.0 / 3.0)
-    conf = 2.0 * radius + 6.0
-    cell = conf + 2.0
+    # Angstrom box from the in-repo GOFEE driver. The repulsive prior is
+    # written in Angstroms. The energy is still the untruncated reduced
+    # Lennard-Jones energy: positions are divided by sigma = 3.4.
+    scale = (n / 38.0) ** (1.0 / 3.0)
+    cell = 24.0 * scale
+    conf = 16.0 * scale
     corner = (cell - conf) / 2.0
-    rsum = 2.0 * float(covalent_radii[atomic_numbers["Ar"]])
-    pair_min = 2.0 ** (1.0 / 6.0)
-    bond = {"c1": 0.90 * pair_min / rsum, "c2": 2.50 / rsum}
-    calc = LjCalculator(budget, REFERENCES[system], HIT_TOL, FMAX["agox_gofee"])
+    bond = {"c1": 1.6, "c2": 2.2}
+    # sigma puts distances on the Angstrom scale of the repulsive prior.
+    # epsilon = sigma makes the documented 0.05 eV/A force threshold a
+    # reduced force of 0.05, so a finished relaxation can sit within the
+    # 0.001 hit window. The reported energy is divided back by epsilon.
+    calc = LjCalculator(
+        budget,
+        REFERENCES[system],
+        HIT_TOL,
+        FMAX["agox_gofee"],
+        sigma=3.4,
+        epsilon=3.4,
+    )
     template = Atoms("", cell=np.eye(3) * cell, pbc=False)
     environment = Environment(
         template=template,
