@@ -1,0 +1,8 @@
+# population	20
+# max_iter	999
+n	arm	hits	runs	median_relaxations_to_hit	median_wall_s	wall_ratio_bonobo_over_lean
+# budget_relaxations	20000
+# hit_window	0.0001
+# wall_ratio is the median bonobo wall divided by the median lean wall
+75	lean	1	6	16999.0	201.574313	1.239
+75	bonobo	0	6		249.757384	1.239

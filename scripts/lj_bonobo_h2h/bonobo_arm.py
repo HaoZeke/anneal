@@ -19,8 +19,15 @@ default is 267 numbers, which is 89 atoms and will not reshape at 38 or 75.
 A local relaxation is one call of their ``optimize_structure`` (L-BFGS-B,
 ``maxiter`` 5000). Their initial loop hands that function an ``(N, 3)``
 array, and ``len(array) // 3`` then under-counts the atoms; the generation
-loop already passes a flat vector. This arm flattens both. The run stops at
-the shared budget or at the first relaxation inside the Cambridge window.
+loop already passes a flat vector. This arm flattens both.
+
+The preprint states a population of 20 and, for the LJ38 test without the
+initialiser, a cap of 1500 iterations. ``pyar-tabu --make-composite`` writes
+100 files, and the first head-to-head relaxed all of them before spending
+the rest of a 2000-relaxation cap on the loop, which is about 95 generations.
+``LJ_BONOBO_POPULATION`` keeps that many of the generated structures, and
+``LJ_BONOBO_MAX_ITER`` is the generation cap. The run still stops at the
+relaxation budget or at the first relaxation inside the Cambridge window.
 """
 
 from __future__ import annotations
@@ -72,8 +79,24 @@ def run_seed(n: int, seed: int, budget: int, reference: float, work: Path, upstr
     import lj
     import lbfgs_opt
 
+    population_size = int(os.environ.get("LJ_BONOBO_POPULATION", "0"))
+    max_iter = int(os.environ.get("LJ_BONOBO_MAX_ITER", "0")) or budget
+    loop_n = population_size or POPULATION
     state = {"n": 0, "hit": None, "best": float("inf")}
     original = lbfgs_opt.optimize_structure
+    original_init = bo.initialize_population
+
+    def initialize_population(num_atoms):
+        population = original_init(num_atoms)
+        if population_size and len(population) > population_size:
+            population = population[:population_size]
+        if population_size and len(population) < population_size:
+            raise RuntimeError(
+                f"pyar-tabu returned {len(population)} structures, need {population_size}"
+            )
+        return population
+
+    bo.initialize_population = initialize_population
 
     def optimize_structure(positions, epsilon=1.0):
         # The initial loop passes an (N, 3) array. len() on that is N, and
@@ -108,8 +131,8 @@ def run_seed(n: int, seed: int, budget: int, reference: float, work: Path, upstr
             bounds=[(-BOX, BOX)] * (3 * n),
             formula=f"C{n}",
             gm_energy=reference + HIT_TOL,
-            N=POPULATION,
-            max_iter=budget,
+            N=loop_n,
+            max_iter=max_iter,
             p_xgm_initial=0.035,
             scab=1.3,
             scsb=1.25,
