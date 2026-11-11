@@ -34,3 +34,11 @@ The manuscript scores LJ38, LJ55, LJ75, LJ98, and LJ104 against the published Ca
 
 Cite `kuznetsovLennardJones2025`. Keep the hit rule as agreement with the published energy.
 
+## 2026-11-11 — A necessary condition on published Lennard-Jones lists
+
+Kiessling, Journal of Chemical Physics 159, 014301 (2023), doi:10.1063/5.0158931, states a necessary condition on a list of putative lowest pair energies. On a pooled list from N = 2 to N = 1610, the N = 447 entry fails. Passing the test is not a proof.
+
+The manuscript sizes 38, 55, 75, 98, and 104 are not among the failures he names. This does not contradict the Cambridge energies used as references.
+
+Cite `kiesslingLennardJones2023` if the reference list is extended. No change to the current energies.
+
