@@ -6,6 +6,8 @@ That tree follows.
 We leave this note out of its own count.
 Insertions and deletions come from git numstat.
 
+Path `docs/prereg/lj104-sota/COVERAGE.txt`.
+26 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/LAND_HOLD.txt`.
 9 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/NOTES.md`.
@@ -13,17 +15,17 @@ Path `docs/prereg/lj104-sota/NOTES.md`.
 Path `docs/prereg/lj104-sota/PREDICTIONS.md`.
 247 insertions and 37 deletions.
 Path `docs/prereg/lj104-sota/PROSE-RECEIPT.txt`.
-17 insertions and 0 deletions.
+233 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/PROSE_EXTRACT.txt`.
 2996 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/PUSH.txt`.
 10 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/REPLAY.txt`.
-175 insertions and 0 deletions.
+187 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/REPORT.md`.
 49 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/SCOPE.md`.
-637 insertions and 0 deletions.
+699 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/T.txt`.
 12 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/TREE_EQUAL.txt`.
@@ -31,9 +33,11 @@ Path `docs/prereg/lj104-sota/TREE_EQUAL.txt`.
 Path `docs/prereg/lj104-sota/build_gmin_best.py`.
 60 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/bundle-verify.txt`.
-167 insertions and 0 deletions.
+181 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/discarded/README.txt`.
+10 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/discarded/REASON.txt`.
-4 insertions and 0 deletions.
+10 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/discarded/floors.md`.
 70 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/discarded/panel/01-lj38-6000.log`.
@@ -294,6 +298,8 @@ Path `docs/prereg/lj104-sota/gmin_best.keywords`.
 12 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/lj104_sota_runner.py`.
 56 insertions and 2 deletions.
+Path `docs/prereg/lj104-sota/note_tip.py`.
+57 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/panel/01-lj38-6000.log`.
 1 insertions and 1 deletions.
 Path `docs/prereg/lj104-sota/panel/01-lj38-6000.span`.
@@ -403,11 +409,15 @@ Path `docs/prereg/lj104-sota/prose/snapper-fmt.md`.
 Path `docs/prereg/lj104-sota/prose/snapper-fmt.txt`.
 8 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/prose/snapper.txt`.
-17 insertions and 0 deletions.
+19 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/prose_rate.py`.
+65 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/replay-commit-tree.log`.
-327 insertions and 0 deletions.
+152 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/replay-map.tsv`.
 37 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/replay-pass-command.txt`.
+17 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/replay-v134.log`.
 154 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/replay-v135.log`.
@@ -418,20 +428,30 @@ Path `docs/prereg/lj104-sota/requench.md`.
 49 insertions and 41 deletions.
 Path `docs/prereg/lj104-sota/requench_panel.py`.
 16 insertions and 7 deletions.
+Path `docs/prereg/lj104-sota/run_coverage.py`.
+193 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/scope_paths.py`.
-100 insertions and 0 deletions.
+102 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/verify_gmin_best.py`.
 42 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/write_bundle_verify.py`.
-93 insertions and 0 deletions.
+98 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/write_floors.py`.
 71 insertions and 12 deletions.
+Path `docs/prereg/lj104-sota/write_prose_receipt.py`.
+65 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/write_replay_log.py`.
+98 insertions and 0 deletions.
+Path `docs/prereg/lj104-sota/write_seal.py`.
+254 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/write_tree_diff_stat.py`.
-64 insertions and 0 deletions.
+82 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/writers.log`.
 9 insertions and 0 deletions.
+Path `examples/lj_requench_xyz.rs`.
+14 insertions and 0 deletions.
 Path `src/methods/lattice_search.rs`.
-1 insertions and 0 deletions.
+73 insertions and 0 deletions.
 We keep the seconds the clock wrote.
 We read each object from git.
 We leave the archive refs in place.
@@ -463,3 +483,4 @@ We record the branch tip beside them.
 We check the tree of each pair.
 We store the zone as America/Chicago.
 We keep the seconds the clock wrote.
+We read each object from git.
