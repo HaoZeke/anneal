@@ -64,7 +64,7 @@ A local minimisation returns a minimum.
 And the Metropolis rule at one temperature accepts or rejects.
 That minimum.
 We find the same preset at every size in the campaigns below.
-We report the 192-seed campaign.
+The earlier four-arm hexamer campaign is not given counts in this article.
 The preset measured here draws move arms by Thompson sampling.
 From a posterior on the depth of the quench.
 And it abandons a quench that is returning to the occupied basin.
@@ -406,37 +406,19 @@ Coloured from the lowest free energy to the highest.
 With the minimum marked.}
 \label{fig:landfold-maps}
 \end{figure*}
-\subsection{Earlier 192-seed hexamer campaign}
-On the water hexamer the sealed campaign runs four arms.
-Each on seeds 0 to 191 at a budget of 4000 force calls.
+\subsection{Earlier four-arm hexamer campaign}
+The earlier four-arm hexamer campaign is not reported here.
+Its raw seed logs are not in the record.
+The hit counts and the McNemar tests are omitted.
 \cite{prachtCrestProgramExploration2024,bannwarthGfn2xtbanAccurateBroadly2019}
 The default arm is the hop.
-The budget-fair polish is an opt-in mode that charges an external.
-Polish against the same budget.
+The budget-fair polish is an opt-in mode that charges an external polish.
 The third arm is CREST.
-And the fourth runs that polish after CREST inside the same budget.
-A run hits when the iterative rotations and assignments alignment (IRA).
-matches a structure to a Malloum prism, cage, book.
-Or cyclic chair reoptimised at GFN2-xTB.
+And the fourth runs that polish after CREST.
+A run would hit when the iterative rotations and assignments alignment (IRA)
+matches a structure to a Malloum prism, cage, book,
+or cyclic chair reoptimised at GFN2-xTB.
 \cite{gundeIraShapeMatching2021,malloumStructuresRelativeStability2019,perezStructuresCagePrism2012}
-The default hop hit 121 of 192 seeds.
-Its call PAR-2 median is 4000 and its type-7 interquartile range is.
-4000.
-CREST hit 97 of 192 seeds.
-Its call PAR-2 median is 4000 and its type-7 interquartile range is.
-4000.
-Paired by seed, the exact McNemar test of the discordant pairs gives.
-\(p=0.0264\).
-\cite{mcnemarNoteSamplingError1947} The budget-fair polish hit 148 of
-192.
-Its call PAR-2 median is 4000 and its type-7 interquartile range is 0.
-CREST plus that polish hit 114 of 192.
-Its call PAR-2 median is 3560 and its type-7 interquartile range is.
-4546.25.
-The exact McNemar \(p\) of the polish against CREST is.
-\(1.37\times 10^{-6}\).
-The exact McNemar \(p\) against CREST plus the polish is \(0.000374\).
-Figure~\ref{fig:water-crest} draws the four arms.
 
 \subsection{Water hexamer against CREST}
 \label{sec:water} CREST here is conda-forge crest 3.0.2.
@@ -538,19 +520,6 @@ And 195.5~s for the driver-count budget.
 The CREST polish converged in one iteration on all 18 finals.
 No CREST structure dissociated.
 
-\begin{figure}
-\centering
-\includegraphics[width=\linewidth]{water_crest.pdf}
-\caption{The water hexamer against CREST, sealed campaign.
-(a) The share of 192 seeds that each arm hit, with the Wilson interval.
-\cite{wilsonProbableInferenceLaw1927} (b) For each hop arm paired with
-CREST, the difference in hit rate, with the Newcombe interval.
-And the exact McNemar \(p\)~\cite{newcombeImprovedConfidenceIntervals1998,
-%
-mcnemarNoteSamplingError1947}.}
-\label{fig:water-crest}
-\end{figure}
-
 The water 16-mer count is separate open work.
 Apart from the hexamer campaign.
 This comparison leaves out the Atomic Simulation Environment.
@@ -558,10 +527,7 @@ The atomistic global optimization framework (AGOX).
 And the Wales-group basin-hopping program (GMIN).
 
 \section{Conclusions}
-On the water hexamer the sealed 192-seed hop hit 121 of 192 seeds.
-In contrast, CREST hit 97 of 192 seeds.
-The budget-fair polish hit 148 of 192, and CREST followed.
-By that polish hit 114 of 192.
+The earlier four-arm hexamer campaign is not given hit counts here.
 Five of the six hexamer seeds lie below seed 1 on both.
 Gap ledgers.
 Seed 1 lies above that line.

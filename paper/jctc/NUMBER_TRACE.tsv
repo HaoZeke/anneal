@@ -4,7 +4,6 @@ paper/jctc/manuscript.tex:42	0.7	paper/jctc/logs/source-constants.txt	paper/jctc
 paper/jctc/manuscript.tex:44	3.0.2	paper/jctc/logs/water/crest-hexamer-seed0.log	paper/jctc/scripts/claim_fields.py	yes
 paper/jctc/manuscript.tex:44	1	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
 paper/jctc/manuscript.tex:44	1.35\times 10^{-7}	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:67	192	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
 paper/jctc/manuscript.tex:74	98	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
 paper/jctc/manuscript.tex:75	0.7	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
 paper/jctc/manuscript.tex:75	1	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
@@ -72,131 +71,98 @@ paper/jctc/manuscript.tex:380	98	paper/jctc/logs/lj98-seed0.log	paper/jctc/scrip
 paper/jctc/manuscript.tex:391	38	paper/jctc/logs/lj38-seed0.log	paper/jctc/scripts/claim_fields.py	yes
 paper/jctc/manuscript.tex:402	38	paper/jctc/logs/lj38-seed0.log	paper/jctc/scripts/claim_fields.py	yes
 paper/jctc/manuscript.tex:403	75	paper/jctc/logs/lj75-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:409	192	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:411	0	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:411	191	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:411	4000	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:422	121	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:422	192	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:423	4000	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:424	4000	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:425	97	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:425	192	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:426	4000	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:427	4000	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:429	0.0264	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:430	148	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:431	192	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:432	4000	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:432	0	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:433	114	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:433	192	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:434	3560	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:435	4546.25	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:437	1.37\times 10^{-6}	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:438	0.000374	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:442	3.0.2	paper/jctc/logs/water/crest-hexamer-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:451	0.001	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:453	0.01	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:453	500	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:471	0	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:471	32112	paper/jctc/logs/water/crest-hexamer-seed0.log	paper/jctc/scripts/hexamer_numbers.py	yes
-paper/jctc/manuscript.tex:471	151074	paper/jctc/logs/water/crest-hexamer-seed0.log	paper/jctc/scripts/hexamer_numbers.py	yes
-paper/jctc/manuscript.tex:472	1	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:472	50026	paper/jctc/logs/water/crest-hexamer-seed1.log	paper/jctc/scripts/hexamer_numbers.py	yes
-paper/jctc/manuscript.tex:472	191132	paper/jctc/logs/water/crest-hexamer-seed1.log	paper/jctc/scripts/hexamer_numbers.py	yes
-paper/jctc/manuscript.tex:473	2	paper/jctc/logs/water/pair-seed2.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:473	32155	paper/jctc/logs/water/crest-hexamer-seed2.log	paper/jctc/scripts/hexamer_numbers.py	yes
-paper/jctc/manuscript.tex:473	142110	paper/jctc/logs/water/crest-hexamer-seed2.log	paper/jctc/scripts/hexamer_numbers.py	yes
-paper/jctc/manuscript.tex:474	3	paper/jctc/logs/water/pair-seed3.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:474	46062	paper/jctc/logs/water/crest-hexamer-seed3.log	paper/jctc/scripts/hexamer_numbers.py	yes
-paper/jctc/manuscript.tex:474	172468	paper/jctc/logs/water/crest-hexamer-seed3.log	paper/jctc/scripts/hexamer_numbers.py	yes
-paper/jctc/manuscript.tex:475	4	paper/jctc/logs/water/pair-seed4.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:475	50063	paper/jctc/logs/water/crest-hexamer-seed4.log	paper/jctc/scripts/hexamer_numbers.py	yes
-paper/jctc/manuscript.tex:475	157643	paper/jctc/logs/water/crest-hexamer-seed4.log	paper/jctc/scripts/hexamer_numbers.py	yes
-paper/jctc/manuscript.tex:476	5	paper/jctc/logs/water/pair-seed5.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:476	32170	paper/jctc/logs/water/crest-hexamer-seed5.log	paper/jctc/scripts/hexamer_numbers.py	yes
-paper/jctc/manuscript.tex:476	209931	paper/jctc/logs/water/crest-hexamer-seed5.log	paper/jctc/scripts/hexamer_numbers.py	yes
-paper/jctc/manuscript.tex:481	4000	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:481	4000	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:484	32112	paper/jctc/logs/water/crest-hexamer-seed0.log	paper/jctc/scripts/hexamer_numbers.py	yes
-paper/jctc/manuscript.tex:484	50063	paper/jctc/logs/water/crest-hexamer-seed4.log	paper/jctc/scripts/hexamer_numbers.py	yes
-paper/jctc/manuscript.tex:485	142110	paper/jctc/logs/water/crest-hexamer-seed2.log	paper/jctc/scripts/hexamer_numbers.py	yes
-paper/jctc/manuscript.tex:485	209931	paper/jctc/logs/water/crest-hexamer-seed5.log	paper/jctc/scripts/hexamer_numbers.py	yes
-paper/jctc/manuscript.tex:486	4000	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:494	1	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:495	1	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:495	1.3509\times 10^{-7}	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:496	4000	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:497	1.3505\times 10^{-7}	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:499	0.00212	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:511	4000	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:513	4000	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:516	0	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:516	-1.1214\times 10^{-8}	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:517	-1.1210\times 10^{-8}	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:517	0.001004	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:517	0.000987	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:518	1	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:518	-1.3509\times 10^{-7}	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:519	-1.3505\times 10^{-7}	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:519	0.002023	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:519	0.001964	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:520	2	paper/jctc/logs/water/pair-seed2.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:520	-2.5460\times 10^{-9}	paper/jctc/logs/water/pair-seed2.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:521	-2.5850\times 10^{-9}	paper/jctc/logs/water/pair-seed2.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:521	0.000532	paper/jctc/logs/water/pair-seed2.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:521	0.000477	paper/jctc/logs/water/pair-seed2.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:522	3	paper/jctc/logs/water/pair-seed3.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:522	-4.1510\times 10^{-9}	paper/jctc/logs/water/pair-seed3.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:523	-4.1430\times 10^{-9}	paper/jctc/logs/water/pair-seed3.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:523	0.000322	paper/jctc/logs/water/pair-seed3.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:523	0.000308	paper/jctc/logs/water/pair-seed3.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:524	4	paper/jctc/logs/water/pair-seed4.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:524	-6.8980\times 10^{-8}	paper/jctc/logs/water/pair-seed4.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:525	-6.9022\times 10^{-8}	paper/jctc/logs/water/pair-seed4.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:525	0.002116	paper/jctc/logs/water/pair-seed4.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:525	0.002068	paper/jctc/logs/water/pair-seed4.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:526	5	paper/jctc/logs/water/pair-seed5.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:526	-2.1900\times 10^{-9}	paper/jctc/logs/water/pair-seed5.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:527	-2.2000\times 10^{-9}	paper/jctc/logs/water/pair-seed5.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:527	0.000157	paper/jctc/logs/water/pair-seed5.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:527	0.000134	paper/jctc/logs/water/pair-seed5.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:532	6	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:532	207	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:535	544.0	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:535	18.8	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:535	4000	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:536	195.5	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:538	18	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:545	192	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:554	16			no
-paper/jctc/manuscript.tex:561	192	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:561	121	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:561	192	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:562	97	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:562	192	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:563	148	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:563	192	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:564	114	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:564	192	paper/jctc/data/water_v45b/water-v45b-perseed.csv	paper/jctc/scripts/water_results_table.py	yes
-paper/jctc/manuscript.tex:565	1	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:567	1	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:568	75	paper/jctc/logs/lj75-seed0.log	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:618	0.12.0	paper/jctc/logs/cargo-build-receipt.txt	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:619	0.12.0	paper/jctc/logs/cargo-build-receipt.txt	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:622	-415.971521	paper/jctc/logs/cuh2_fcc_rec_3.out	paper/jctc/scripts/hq_sci_tally.py	yes
-paper/jctc/manuscript.tex:622	-415.971161	paper/jctc/logs/cuh2_fcc_rec_7.out	paper/jctc/scripts/hq_sci_tally.py	yes
-paper/jctc/manuscript.tex:623	0.001	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:625	118	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:625	119	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:626	1e-3	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:627	8e-6	paper/jctc/logs/cuh2_fcc_rec_3.out	paper/jctc/scripts/hq_sci_tally.py	yes
-paper/jctc/manuscript.tex:627	3.68e-4	paper/jctc/logs/cuh2_fcc_rec_7.out	paper/jctc/scripts/hq_sci_tally.py	yes
-paper/jctc/manuscript.tex:627	-415.971529	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:630	0.001	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:631	0.01	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
-paper/jctc/manuscript.tex:631	0.01	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:424	3.0.2	paper/jctc/logs/water/crest-hexamer-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:433	0.001	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:435	0.01	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:435	500	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:453	0	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:453	32112	paper/jctc/logs/water/crest-hexamer-seed0.log	paper/jctc/scripts/hexamer_numbers.py	yes
+paper/jctc/manuscript.tex:453	151074	paper/jctc/logs/water/crest-hexamer-seed0.log	paper/jctc/scripts/hexamer_numbers.py	yes
+paper/jctc/manuscript.tex:454	1	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:454	50026	paper/jctc/logs/water/crest-hexamer-seed1.log	paper/jctc/scripts/hexamer_numbers.py	yes
+paper/jctc/manuscript.tex:454	191132	paper/jctc/logs/water/crest-hexamer-seed1.log	paper/jctc/scripts/hexamer_numbers.py	yes
+paper/jctc/manuscript.tex:455	2	paper/jctc/logs/water/pair-seed2.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:455	32155	paper/jctc/logs/water/crest-hexamer-seed2.log	paper/jctc/scripts/hexamer_numbers.py	yes
+paper/jctc/manuscript.tex:455	142110	paper/jctc/logs/water/crest-hexamer-seed2.log	paper/jctc/scripts/hexamer_numbers.py	yes
+paper/jctc/manuscript.tex:456	3	paper/jctc/logs/water/pair-seed3.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:456	46062	paper/jctc/logs/water/crest-hexamer-seed3.log	paper/jctc/scripts/hexamer_numbers.py	yes
+paper/jctc/manuscript.tex:456	172468	paper/jctc/logs/water/crest-hexamer-seed3.log	paper/jctc/scripts/hexamer_numbers.py	yes
+paper/jctc/manuscript.tex:457	4	paper/jctc/logs/water/pair-seed4.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:457	50063	paper/jctc/logs/water/crest-hexamer-seed4.log	paper/jctc/scripts/hexamer_numbers.py	yes
+paper/jctc/manuscript.tex:457	157643	paper/jctc/logs/water/crest-hexamer-seed4.log	paper/jctc/scripts/hexamer_numbers.py	yes
+paper/jctc/manuscript.tex:458	5	paper/jctc/logs/water/pair-seed5.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:458	32170	paper/jctc/logs/water/crest-hexamer-seed5.log	paper/jctc/scripts/hexamer_numbers.py	yes
+paper/jctc/manuscript.tex:458	209931	paper/jctc/logs/water/crest-hexamer-seed5.log	paper/jctc/scripts/hexamer_numbers.py	yes
+paper/jctc/manuscript.tex:463	4000	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:463	4000	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:466	32112	paper/jctc/logs/water/crest-hexamer-seed0.log	paper/jctc/scripts/hexamer_numbers.py	yes
+paper/jctc/manuscript.tex:466	50063	paper/jctc/logs/water/crest-hexamer-seed4.log	paper/jctc/scripts/hexamer_numbers.py	yes
+paper/jctc/manuscript.tex:467	142110	paper/jctc/logs/water/crest-hexamer-seed2.log	paper/jctc/scripts/hexamer_numbers.py	yes
+paper/jctc/manuscript.tex:467	209931	paper/jctc/logs/water/crest-hexamer-seed5.log	paper/jctc/scripts/hexamer_numbers.py	yes
+paper/jctc/manuscript.tex:468	4000	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:476	1	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:477	1	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:477	1.3509\times 10^{-7}	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:478	4000	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:479	1.3505\times 10^{-7}	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:481	0.00212	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:493	4000	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:495	4000	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:498	0	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:498	-1.1214\times 10^{-8}	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:499	-1.1210\times 10^{-8}	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:499	0.001004	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:499	0.000987	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:500	1	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:500	-1.3509\times 10^{-7}	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:501	-1.3505\times 10^{-7}	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:501	0.002023	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:501	0.001964	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:502	2	paper/jctc/logs/water/pair-seed2.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:502	-2.5460\times 10^{-9}	paper/jctc/logs/water/pair-seed2.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:503	-2.5850\times 10^{-9}	paper/jctc/logs/water/pair-seed2.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:503	0.000532	paper/jctc/logs/water/pair-seed2.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:503	0.000477	paper/jctc/logs/water/pair-seed2.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:504	3	paper/jctc/logs/water/pair-seed3.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:504	-4.1510\times 10^{-9}	paper/jctc/logs/water/pair-seed3.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:505	-4.1430\times 10^{-9}	paper/jctc/logs/water/pair-seed3.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:505	0.000322	paper/jctc/logs/water/pair-seed3.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:505	0.000308	paper/jctc/logs/water/pair-seed3.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:506	4	paper/jctc/logs/water/pair-seed4.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:506	-6.8980\times 10^{-8}	paper/jctc/logs/water/pair-seed4.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:507	-6.9022\times 10^{-8}	paper/jctc/logs/water/pair-seed4.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:507	0.002116	paper/jctc/logs/water/pair-seed4.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:507	0.002068	paper/jctc/logs/water/pair-seed4.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:508	5	paper/jctc/logs/water/pair-seed5.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:508	-2.1900\times 10^{-9}	paper/jctc/logs/water/pair-seed5.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:509	-2.2000\times 10^{-9}	paper/jctc/logs/water/pair-seed5.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:509	0.000157	paper/jctc/logs/water/pair-seed5.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:509	0.000134	paper/jctc/logs/water/pair-seed5.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:514	6	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:514	207	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:517	544.0	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:517	18.8	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:517	4000	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:518	195.5	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:520	18	paper/jctc/logs/water/pair-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:523	16			no
+paper/jctc/manuscript.tex:531	1	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:533	1	paper/jctc/logs/water/pair-seed1.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:534	75	paper/jctc/logs/lj75-seed0.log	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:584	0.12.0	paper/jctc/logs/cargo-build-receipt.txt	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:585	0.12.0	paper/jctc/logs/cargo-build-receipt.txt	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:588	-415.971521	paper/jctc/logs/cuh2_fcc_rec_3.out	paper/jctc/scripts/hq_sci_tally.py	yes
+paper/jctc/manuscript.tex:588	-415.971161	paper/jctc/logs/cuh2_fcc_rec_7.out	paper/jctc/scripts/hq_sci_tally.py	yes
+paper/jctc/manuscript.tex:589	0.001	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:591	118	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:591	119	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:592	1e-3	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:593	8e-6	paper/jctc/logs/cuh2_fcc_rec_3.out	paper/jctc/scripts/hq_sci_tally.py	yes
+paper/jctc/manuscript.tex:593	3.68e-4	paper/jctc/logs/cuh2_fcc_rec_7.out	paper/jctc/scripts/hq_sci_tally.py	yes
+paper/jctc/manuscript.tex:593	-415.971529	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:596	0.001	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:597	0.01	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
+paper/jctc/manuscript.tex:597	0.01	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
 paper/jctc/si.tex:34	0.001	paper/jctc/logs/source-constants.txt	paper/jctc/scripts/claim_fields.py	yes
 paper/jctc/si.tex:36	-173.928427	paper/jctc/logs/lj38-seed0.log	paper/jctc/scripts/claim_fields.py	yes
 paper/jctc/si.tex:36	38	paper/jctc/logs/lj38-seed0.log	paper/jctc/scripts/claim_fields.py	yes

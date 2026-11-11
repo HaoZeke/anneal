@@ -281,11 +281,11 @@ LaTeX Warning: Reference `fig:landfold-maps' on page 9 undefined on input line
 [9 <./figs/systems.pdf>] [10 <./figs/lj75_ecdf.pdf>]
 
 Package natbib Warning: Citation `prachtCrestProgramExploration2024' on page 11
- undefined on input line 412.
+ undefined on input line 413.
 
 
 Package natbib Warning: Citation `bannwarthGfn2xtbanAccurateBroadly2019' on pag
-e 11 undefined on input line 412.
+e 11 undefined on input line 413.
 
 
 Package natbib Warning: Citation `gundeIraShapeMatching2021' on page 11 undefin
@@ -300,55 +300,23 @@ Package natbib Warning: Citation `perezStructuresCagePrism2012' on page 11 unde
 fined on input line 421.
 
 
-Package natbib Warning: Citation `mcnemarNoteSamplingError1947' on page 11 unde
-fined on input line 430.
+LaTeX Warning: Reference `tab:crest-counters' on page 11 undefined on input lin
+e 438.
 
-
-LaTeX Warning: Reference `fig:water-crest' on page 11 undefined on input line 4
-39.
-
-[11] [12 <./figs/landscapes.pdf>]
-
-LaTeX Warning: Reference `tab:crest-counters' on page 13 undefined on input lin
-e 456.
-
-[13 <./figs/disconnectivity.pdf>] [14 <./figs/landfold_maps.pdf>]
+[11] [12 <./figs/landscapes.pdf>] [13 <./figs/disconnectivity.pdf>] [14 <./figs
+/landfold_maps.pdf>]
 
 LaTeX Warning: Reference `tab:hexamer-gaps' on page 15 undefined on input line 
-491.
+473.
 
-
-Package natbib Warning: Citation `wilsonProbableInferenceLaw1927' on page 15 un
-defined on input line 550.
-
-
-Package natbib Warning: Citation `newcombeImprovedConfidenceIntervals1998' on p
-age 15 undefined on input line 550.
-
-
-Package natbib Warning: Citation `mcnemarNoteSamplingError1947' on page 15 unde
-fined on input line 550.
-
-
-Package natbib Warning: Citation `wilsonProbableInferenceLaw1927' on page 15 un
-defined on input line 550.
-
-
-Package natbib Warning: Citation `newcombeImprovedConfidenceIntervals1998' on p
-age 15 undefined on input line 550.
-
-
-Package natbib Warning: Citation `mcnemarNoteSamplingError1947' on page 15 unde
-fined on input line 550.
-
-[15] [16 <./figs/water_crest.pdf>] [17]
+[15] [16]
 No file manuscript.bbl.
 
 Package natbib Warning: There were undefined citations.
 
-[18]
-Underfull \vbox (badness 10000) detected at line 644
-[19 <./figs/toc-graphic.pdf>] (./manuscript.aux)
+[17]
+Underfull \vbox (badness 10000) detected at line 610
+[18 <./figs/toc-graphic.pdf>] (./manuscript.aux)
 
 LaTeX Warning: There were undefined references.
 
@@ -374,7 +342,7 @@ type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texlive/texmf-dist/fonts/type1/
 public/amsfonts/cm/cmsy8.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/
 amsfonts/cm/cmti12.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfon
 ts/cm/cmtt12.pfb>
-Output written on manuscript.pdf (19 pages, 2668572 bytes).
+Output written on manuscript.pdf (18 pages, 2654047 bytes).
 Transcript written on manuscript.log.
 $ bibtex manuscript
 This is BibTeX, Version 0.99d (TeX Live 2023/Debian)
@@ -616,11 +584,11 @@ e 8 undefined on input line 324.
 [8 <./figs/rec_arms.pdf>] [9 <./figs/systems.pdf>] [10 <./figs/lj75_ecdf.pdf>]
 
 Package natbib Warning: Citation `prachtCrestProgramExploration2024' on page 11
- undefined on input line 412.
+ undefined on input line 413.
 
 
 Package natbib Warning: Citation `bannwarthGfn2xtbanAccurateBroadly2019' on pag
-e 11 undefined on input line 412.
+e 11 undefined on input line 413.
 
 
 Package natbib Warning: Citation `gundeIraShapeMatching2021' on page 11 undefin
@@ -634,37 +602,8 @@ ge 11 undefined on input line 421.
 Package natbib Warning: Citation `perezStructuresCagePrism2012' on page 11 unde
 fined on input line 421.
 
-
-Package natbib Warning: Citation `mcnemarNoteSamplingError1947' on page 11 unde
-fined on input line 430.
-
 [11] [12 <./figs/landscapes.pdf>] [13 <./figs/disconnectivity.pdf>] [14 <./figs
-/landfold_maps.pdf>]
-
-Package natbib Warning: Citation `wilsonProbableInferenceLaw1927' on page 15 un
-defined on input line 550.
-
-
-Package natbib Warning: Citation `newcombeImprovedConfidenceIntervals1998' on p
-age 15 undefined on input line 550.
-
-
-Package natbib Warning: Citation `mcnemarNoteSamplingError1947' on page 15 unde
-fined on input line 550.
-
-
-Package natbib Warning: Citation `wilsonProbableInferenceLaw1927' on page 15 un
-defined on input line 550.
-
-
-Package natbib Warning: Citation `newcombeImprovedConfidenceIntervals1998' on p
-age 15 undefined on input line 550.
-
-
-Package natbib Warning: Citation `mcnemarNoteSamplingError1947' on page 15 unde
-fined on input line 550.
-
-[15] [16 <./figs/water_crest.pdf>] [17] (./manuscript.bbl [18] [19] [20]
+/landfold_maps.pdf>] [15] [16] (./manuscript.bbl [17] [18] [19] [20]
 
 LaTeX Warning: Mciteplus max count has changed.
 
@@ -679,17 +618,13 @@ Package natbib Warning: There were undefined citations.
 LaTeX Warning: Rerun to ensure correct mciteplus label max width/count.
 
 [21]
-Underfull \vbox (badness 10000) detected at line 644
+Underfull \vbox (badness 10000) detected at line 610
 [22 <./figs/toc-graphic.pdf>] (./manuscript.aux
 
 Package natbib Warning: Citation(s) may have changed.
 (natbib)                Rerun to get citations correct.
 
-)
-
-LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
-
- )
+) )
 (see the transcript file for additional information)</usr/share/texlive/texmf-d
 ist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/share/texlive/texmf-dist/fo
 nts/type1/public/amsfonts/cm/cmbx12.pfb></usr/share/texlive/texmf-dist/fonts/ty
@@ -708,7 +643,7 @@ type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texlive/texmf-dist/fonts/type1/
 public/amsfonts/cm/cmsy8.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/
 amsfonts/cm/cmti12.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfon
 ts/cm/cmtt12.pfb>
-Output written on manuscript.pdf (22 pages, 2682295 bytes).
+Output written on manuscript.pdf (22 pages, 2667477 bytes).
 Transcript written on manuscript.log.
 $ pdflatex -interaction=nonstopmode -halt-on-error manuscript.tex
 This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex)
@@ -781,9 +716,8 @@ nary-english.trsl) [1{/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}]
 [2] [3] [4] [5 <./figs/algorithm_stack.pdf>] [6] [7] [8 <./figs/rec_arms.pdf>]
 [9 <./figs/systems.pdf>] [10 <./figs/lj75_ecdf.pdf>] [11] [12 <./figs/landscape
 s.pdf>] [13 <./figs/disconnectivity.pdf>] [14 <./figs/landfold_maps.pdf>]
-[15] [16 <./figs/water_crest.pdf>] [17] (./manuscript.bbl [18] [19] [20])
-[21]
-Underfull \vbox (badness 10000) detected at line 644
+[15] [16] (./manuscript.bbl [17] [18] [19] [20]) [21]
+Underfull \vbox (badness 10000) detected at line 610
 [22 <./figs/toc-graphic.pdf>] (./manuscript.aux) )
 (see the transcript file for additional information)</usr/share/texlive/texmf-d
 ist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/share/texlive/texmf-dist/fo
@@ -802,7 +736,7 @@ dist/fonts/type1/public/amsfonts/cm/cmssbx10.pfb></usr/share/texlive/texmf-dist
 /type1/public/amsfonts/cm/cmsy8.pfb></usr/share/texlive/texmf-dist/fonts/type1/
 public/amsfonts/cm/cmti12.pfb></usr/share/texlive/texmf-dist/fonts/type1/public
 /amsfonts/cm/cmtt12.pfb>
-Output written on manuscript.pdf (22 pages, 2674465 bytes).
+Output written on manuscript.pdf (22 pages, 2659642 bytes).
 Transcript written on manuscript.log.
 $ pdflatex -interaction=nonstopmode -halt-on-error si.tex
 This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex)
