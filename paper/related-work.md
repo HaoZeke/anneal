@@ -96,3 +96,11 @@ The manuscript's moves are geometric: a surface penalty and Thompson sampling on
 
 Cite `slavenskyComplementary2023` as the AGOX candidate generator. No change to the preset.
 
+## 2026-11-11 — Universal potentials as Bayesian priors
+
+Lyngby, Larsen, and Jacobsen, Physical Review Materials 8, 123802 (2024), doi:10.1103/PhysRevMaterials.8.123802, also arXiv:2408.15590, take a universal machine-learning potential as the prior of a Gaussian process, so the process learns only the difference from the target surface. They report faster location of the global optimum when that potential behaves well, on bulk crystals, surfaces, and a cluster.
+
+The Lennard-Jones preset uses no prior, and this paper does not re-rank LJ38 through LJ104.
+
+Cite `lyngbyUniversalPrior2024`. No contradiction. The 2026 Digital Discovery paper that uses the name BEACON is a different method.
+
