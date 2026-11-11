@@ -2,9 +2,10 @@
 # Copyright (c) anneal developers
 """Replay the branch in one commit-tree pass.
 
-The clock supplies every stamp. This script does not sleep and does
-not set author or committer dates. Shared seconds stay as the clock
-wrote them. Archive refs are never pushed.
+The clock supplies every stamp. Sleep stays out of this pass.
+Author dates and committer dates stay unset.
+Shared seconds stay as the clock wrote them.
+Archive refs are never pushed.
 """
 
 import os
@@ -154,22 +155,22 @@ def main():
     git("update-ref", BRANCH, parent)
     log_path = os.path.join(ROOT, "replay.log")
     with open(log_path, "w", encoding="utf-8") as handle:
-        handle.write("replay commit-tree pass\n")
-        handle.write("dates come from the clock\n")
-        handle.write("shared seconds are real\n")
-        handle.write("archive refs are never pushed\n")
+        handle.write("Replay commit-tree pass.\n\n")
+        handle.write("Dates come from the clock.\n")
+        handle.write("Shared seconds are real.\n")
+        handle.write("Archive refs are never pushed.\n\n")
         for old, new, tree, stamp in rows:
-            handle.write(f"old {old}\n")
-            handle.write(f"new {new}\n")
-            handle.write(f"tree {tree}\n")
-            handle.write(f"stamp {stamp}\n")
+            handle.write(f"old {old}\n\n")
+            handle.write(f"new {new}\n\n")
+            handle.write(f"tree {tree}\n\n")
+            handle.write(f"stamp {stamp}\n\n")
     map_path = os.path.join(ROOT, "REPLAY.txt")
     with open(map_path, "w", encoding="utf-8") as handle:
         handle.write("Old chain to new chain.\n\n")
         handle.write("Shared seconds are real.\n")
         handle.write("Archive refs are never pushed.\n\n")
         for old, new, tree, stamp in rows:
-            handle.write(f"{old}\n{new}\n{tree}\n{stamp}\n\n")
+            handle.write(f"{old}\n\n{new}\n\n{tree}\n\n{stamp}\n\n")
     print(f"tip {parent}")
     print(f"commits {len(rows)}")
 
