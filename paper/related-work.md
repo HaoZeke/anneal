@@ -319,3 +319,47 @@ Schneider, arXiv:2603.00011 (27 January 2026), argues that a landscape invariant
 The manuscript already says a global minimum is often more symmetric than the minima around it. This preprint does not replace the Cambridge energies, and it does not change the symmetrisation preset.
 
 Cite `schneiderSymmetry2026`. No contradiction, and no new head-to-head.
+
+## 2026-11-11 — Known minima through thirteen atoms
+
+Barrón Romero, Pesquisa e Docência em Ciências Exatas e Naturais, pages 32--47 (27 June 2026), doi:10.37572/edart_2706261093, enumerates clusters of 4 to 13 particles on Lennard-Jones and Morse wells. The abstract says a proved optimum is known only for 2, 3, and 4 particles. The same abstract then says a 2022 argument fixes the 13-particle icosahedron, and that the known candidate geometries from 5 to 13 particles are the true global minima of those wells. The chapter points at the Cambridge Cluster Database as the source of those models. The 13-atom Lennard-Jones ranking in the chapter is a count of near-neighbour contacts. It is not an energy from the Cambridge table.
+
+The manuscript cites proofs for five and six atoms, and Shen's proof for seven. The abstract sentence that stops at four particles does not survive those proofs. The enumeration stops at 13 particles. It gives no energy at 38, 55, 75, 98, or 104. The Cambridge hit targets stand, and Lecomte's statement that 38 atoms and larger stay unproved stands.
+
+Cite `barronRomeroLennardJones2026` beside the small-size proofs. Keep the five-, six-, and seven-atom sentences. Leave the chapter's contact sum out of the Lennard-Jones table. No head-to-head at the manuscript sizes.
+
+## 2026-11-11 — A TIP4P generator ranked on another surface
+
+Bhatt, Chacko, Bijewar, and Nagare, arXiv:2411.00754 (1 November 2024), generate water clusters of 1 to 20 molecules with an artificial bee colony on TIP4P, then relax the lowest candidates at HCTH/407 with the 6-311++G(d,p) basis. They compare those geometries with coordinates from the Cambridge Cluster Database. At their density functional they call stacked pentagonal and cage-like structures lower than the stacked cubes in the database for 11 molecules and for 13 through 20 molecules. The hexamer is outside that list. At the same level they say a prism relaxes into a book.
+
+The manuscript's water reference is the 1998 Wales--Hodges TIP4P minima, and the sealed hexamer table is GFN2-xTB. This preprint reports neither a TIP4P energy below those Wales--Hodges minima nor the sealed hit counts. An HCTH book is a third surface.
+
+Cite `bhattWaterClusters2024` beside the water section. Keep TIP4P, GFN2-xTB, and HCTH apart. Leave the CREST table on GFN2-xTB. A comparison with this search counts only if both sides relax at HCTH.
+
+## 2026-11-11 — RPA relaxation reorders the larger water clusters
+
+Tahir, Shang, Li, and Ren, arXiv:2404.10492 (16 April 2024), relax water clusters with random-phase-approximation forces. For the five low-energy isomers of the 25-molecule cluster, the energy order on RPA geometries differs from the order on geometries relaxed by lower-level theories. They say the water hexamer does not show that reordering. The record has no DOI.
+
+The manuscript's hexamer is TIP4P and GFN2-xTB. This preprint leaves those two surfaces alone. The 25-molecule reordering stays out of the hexamer table.
+
+Cite `tahirRpaWater2024`. The hexamer comparison remains the one already sealed.
+
+## 2026-11-11 — Lennard-Jones benchmarks that score something else
+
+Yallup and Handley, arXiv:2609.29413 (24 September 2026), benchmark Neural Transport Nested Sampling on Lennard-Jones clusters of 13 and 55 particles. The score is a Wasserstein error against a Markov-chain reference, and a partition function from one run. They recover the known phase structure. They report no new global minimum and no force-call hit rate.
+
+Chatbipho, Yang, Wexler, and Pártay, Journal of Chemical Physics 163, 174701 (3 November 2025), doi:10.1063/5.0283538, also arXiv:2506.01295, run nested sampling of adsorbates on the truncated-octahedral 38-atom Lennard-Jones cluster. The cluster is the substrate. The search is the adsorbed layer. They report no lower cluster energy.
+
+Garg, Deep, and Kulkarni, Engineering Optimization 58, 1000--1031 (21 May 2025), doi:10.1080/0305215x.2025.2496941, put the Lennard-Jones potential problem among the tests of a hybrid metaheuristic. The Crossref record gives the title, the pages, and no energy and no cluster size.
+
+The Cambridge hit targets stand. A Wasserstein error, an adsorption partition function, and a Lennard-Jones test with no named size are outside the hop's hit rate. Open a head-to-head only when a paper names a size and charges force calls.
+
+Cite `yallupNested2026`, `chatbiphoAdsorbate2025`, and `gargLennardJones2025`.
+
+## 2026-11-11 — Further basin-hopping searches of doped boron clusters
+
+Rodríguez-Kessler, arXiv:2601.01261 (3 January 2026), arXiv:2603.02428 (2 March 2026), and arXiv:2604.25908 (28 April 2026), report basin-hopping global minima for B18Ca2, B7Ca2, and B18Ag2. Each minimum is a boron ring or a double ring with the dopant atoms on opposite sides. None of the three reports a Lennard-Jones energy or a water energy.
+
+These are the same kind of search as `rodriguezKesslerYttrium2026`. The sealed maps stand, and the open ASE, AGOX, and GMIN kit stays open. A head-to-head would be one of these clusters on one shared potential. The Lennard-Jones and water counts do not require it.
+
+Cite `rodriguezKesslerB18ca2026`, `rodriguezKesslerB7ca2026`, and `rodriguezKesslerB18ag2026`.
