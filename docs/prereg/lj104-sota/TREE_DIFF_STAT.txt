@@ -25,7 +25,7 @@ Path `docs/prereg/lj104-sota/REPLAY.txt`.
 Path `docs/prereg/lj104-sota/REPORT.md`.
 49 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/SCOPE.md`.
-699 insertions and 0 deletions.
+718 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/T.txt`.
 12 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/TREE_EQUAL.txt`.
@@ -435,7 +435,7 @@ Path `docs/prereg/lj104-sota/scope_paths.py`.
 Path `docs/prereg/lj104-sota/verify_gmin_best.py`.
 42 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/write_bundle_verify.py`.
-98 insertions and 0 deletions.
+103 insertions and 0 deletions.
 Path `docs/prereg/lj104-sota/write_floors.py`.
 71 insertions and 12 deletions.
 Path `docs/prereg/lj104-sota/write_prose_receipt.py`.
