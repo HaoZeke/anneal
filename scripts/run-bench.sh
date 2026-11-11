@@ -83,7 +83,10 @@ run_one() {
     exit 1
   fi
   local got
-  got=$(sed -n 's/^wrapper=//p' "$log" | head -n 1)
+  # Read every wrapper line. Taking the first one after sed finishes
+  # keeps the producer from dying under pipefail.
+  got=$(sed -n 's/^wrapper=//p' "$log")
+  got=${got%%$'\n'*}
   local again
   again=$(command_for "$n" "$seed" "$side")
   again=${again%$'\n'}
@@ -109,7 +112,11 @@ run_one() {
     echo "tool exit was not 0" >&2
     exit 1
   fi
-  if ! grep -q 'energy_calls=' "$log" || ! grep -q 'gradient_calls=' "$log"; then
+  if ! grep -q 'energy_calls=' "$log"; then
+    echo "call counts missing" >&2
+    exit 1
+  fi
+  if ! grep -q 'gradient_calls=' "$log"; then
     echo "call counts missing" >&2
     exit 1
   fi
