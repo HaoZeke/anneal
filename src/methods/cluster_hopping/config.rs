@@ -1809,9 +1809,7 @@ mod coverage_behaviour {
     fn a_water_group_in_local_indices_selects_the_cycle_arm() {
         let cfg = Config::for_molecular(vec![6, 6, 6, 8, 1, 1], vec![vec![3, 4, 5]], 1.0);
         match cfg.move_library {
-            super::MoveLibrary::Molecular {
-                reverse_cycles, ..
-            } => assert!(reverse_cycles),
+            super::MoveLibrary::Molecular { reverse_cycles, .. } => assert!(reverse_cycles),
             other => panic!("molecular library, got {other:?}"),
         }
     }
