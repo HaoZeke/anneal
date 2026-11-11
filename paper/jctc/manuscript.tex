@@ -41,7 +41,7 @@ Indian Institute of Technology Kanpur, Kanpur, India}
 We describe one basin-hopping preset for Lennard-Jones clusters in which the move library, the temperature, the census, and the orbit completion stay fixed at every size.
 Below 98 atoms the constructor adds a diameter penalty at 0.7 of the largest pair distance, and restart on stall stays off.
 The novelty is that fixed core, with the depth posterior choosing the move.
-On the water hexamer the six rows are single draws from CREST 3.0.2, which exposes no seed, while the anneal seed fixes only start.xyz, so those rows are not a success rate: seed 1 lies at \(1.35\times 10^{-7}\)~Eh and the other five polished gaps lie below it.
+On the water hexamer the six rows are single draws from CREST 3.0.2, which exposes no seed, while the anneal seed fixes only start.xyz, so a success rate needs a repeated seed: seed 1 lies at \(1.35\times 10^{-7}\)~Eh and the other five polished gaps lie below it.
 \end{abstract}
 
 \section{Introduction}
@@ -213,7 +213,8 @@ The weight is therefore the within-epoch rank.
 Tied replicas share their average position.
 Positions run from \(0\) to \(R-1\).
 A tied block runs from \(b\) inclusive to \(e\) exclusive.
-The block has the rank below when \(R\ge 2\).
+One replica takes the zero rank.
+Every larger population takes the rank below.
 
 \begin{equation}
 r=\frac{b+e-1}{2(R-1)}.
@@ -557,10 +558,10 @@ Ruhila Goswami set the figure colours.
 Generative AI tools assisted with drafting and editing the text.
 The authors reviewed and edited all content.
 And take full responsibility for it.
-% OPTION for Rohit. This comment is not the submitted disclosure.
+% OPTION for Rohit. Rohit replaces this comment with the submitted disclosure.
 % The journal asks for one sentence that names the tool,
 % the version, the purpose,
-% and the portions of the manuscript. A tool is not an author.
+% and the portions of the manuscript. The author list keeps the human authors.
 % Rohit fills or deletes the sentence before submission.
 % OPTION: <tool> <version> assisted with <purpose> in <portions>.
 
@@ -590,7 +591,7 @@ The script is \texttt{scripts/elja\_hq\_sci\_molslab\_bank.sh}.
 The lines are 118 and 119.
 TARGET\_TOL there is 1e-3.
 The per-seed gaps run from 8e-6 eV to 3.68e-4 eV above -415.971529 eV.
-These are not exact hits.
+Each gap misses the reference energy.
 Eight seeds lie inside the 0.001 eV tolerance.
 The \texttt{set\_relative\_0.01} line records the 0.01 eV rate.
 That line is a separate figure.

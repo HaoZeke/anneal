@@ -43,10 +43,11 @@ MACRO = {
 }
 # Layout sizes are traced on purpose. They are not measured results, and the
 # tracer must not drop them by gluing them to a unit or hiding them in a macro.
+# The value is the prefix of the definition line the row must name.
 LAYOUT_WHITELIST = {
-    "0.48": "FigHalfWidth: SI figure width is 0.48 of the text width, a layout size",
-    "3.25": "ACS table-of-contents graphic width, 3.25 in",
-    "1.75": "ACS table-of-contents graphic height, 1.75 in",
+    "0.48": "paper/jctc/macros.tex:",
+    "3.25": "paper/jctc/scripts/toc_graphic.py:",
+    "1.75": "paper/jctc/scripts/toc_graphic.py:",
 }
 
 
@@ -183,19 +184,8 @@ def tip4p_text() -> str:
     return (JCTC / "logs" / "tip4p_constants.txt").read_text()
 
 
-def layout_reason(line: str, token: str) -> str | None:
-    if token == "0.48" and "FigHalfWidth" in line:
-        return LAYOUT_WHITELIST["0.48"]
-    if token in {"3.25", "1.75"} and re.search(rf"{re.escape(token)}\s*in\b", line):
-        return LAYOUT_WHITELIST[token]
-    return None
-
-
 def classify(path: Path, line_no: int, line: str, token: str, helpers: dict) -> tuple[str, str, str]:
     """Return raw log, script, match."""
-    reason = layout_reason(line, token)
-    if reason is not None:
-        return ("LAYOUT_WHITELIST", reason, "yes")
     found = claim_fields.lookup(line, token)
     if found is not None:
         return (*found, "yes")
@@ -336,6 +326,11 @@ def main() -> int:
             reason = "committed script reproduces the value from a table that is not a raw log"
         fail_lines.append("\t".join(row + (reason,)))
     fail.write_text("\n".join(fail_lines) + "\n")
+    for row in rows:
+        prefix = LAYOUT_WHITELIST.get(row[1])
+        if prefix is not None and not row[2].startswith(prefix):
+            print(f"layout token {row[1]} at {row[0]} is {row[2]}", file=sys.stderr)
+            return 1
     return 0
 
 

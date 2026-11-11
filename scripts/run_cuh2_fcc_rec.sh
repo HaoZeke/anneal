@@ -5,6 +5,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 unset CARGO_TARGET_DIR
+receipt_only=0
+if [[ ${1:-} == receipt-only ]]; then
+  receipt_only=1
+  shift
+fi
 msrv=$(awk -F'"' '/^rust-version = / { print $2; exit }' Cargo.toml)
 case $msrv in
   *.*.*) tool=$msrv ;;
@@ -17,15 +22,15 @@ con=examples/fixtures/cuh2_fcc_slab.con
 outdir=paper/jctc/logs
 receipt=$outdir/cuh2-hardware-receipt.txt
 
-if [[ ! -s $lib ]]; then
+if [[ $receipt_only -eq 0 && ! -s $lib ]]; then
   echo "missing $lib" >&2
   exit 1
 fi
-if [[ ! -f $con ]]; then
+if [[ $receipt_only -eq 0 && ! -f $con ]]; then
   echo "missing $con" >&2
   exit 1
 fi
-if [[ ! -s engines/rgpot.sha ]]; then
+if [[ $receipt_only -eq 0 && ! -s engines/rgpot.sha ]]; then
   echo "missing engines/rgpot.sha" >&2
   exit 1
 fi
@@ -53,11 +58,28 @@ mkdir -p "$outdir"
   rustc -V
   printf 'cargo\n'
   cargo -V
+  # --version, not -v. The configure dump names the Debian build directory,
+  # and the working directory does not change that dump.
   printf 'gfortran_v\n'
-  gfortran -v
+  gfortran --version
   printf 'gpp_v\n'
-  g++ -v
+  g++ --version
 } >"$receipt" 2>&1
+
+if [[ $receipt_only -eq 1 ]]; then
+  {
+    capture end
+    if [[ -s engines/rgpot.sha ]]; then
+      printf 'rgpot\n'
+      cat engines/rgpot.sha
+    fi
+    if [[ -s $lib ]]; then
+      printf 'library_sha256\n'
+      sha256sum "$lib" | awk '{print $1}'
+    fi
+  } >>"$receipt"
+  exit 0
+fi
 
 target=$(
   cargo metadata --format-version 1 --no-deps |

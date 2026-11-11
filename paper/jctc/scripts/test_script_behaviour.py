@@ -673,10 +673,12 @@ def _git_repo(path: Path, old: str, new: str) -> None:
 
 def test_shipped_tree_has_no_private_paths() -> None:
     """The needles are built so this test does not contain them itself."""
+    home = "ho" + "me"
+    scratch = "tm" + "p"
     needles = (
-        "/home/" + "linuxbrew",
-        "/" + "users" + "/" + "home/" + "rog32",
-        "ipc:///" + "tmp",
+        "/" + home + "/" + "linuxbrew",
+        "/" + "users" + "/" + home + "/" + "rog32",
+        "ipc:" + "/" * 3 + scratch,
     )
     skip = {".git"}
     bad = []

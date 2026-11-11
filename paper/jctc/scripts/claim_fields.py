@@ -262,8 +262,6 @@ def _numstat() -> dict[str, tuple[int, int]]:
 def _restored(line: str, token: str) -> tuple[str, str] | None:
     """Parameters and input rows the manuscript quotes."""
     script = "paper/jctc/scripts/claim_fields.py"
-    if token == "2" and r"R\ge 2" in line:
-        return (_line_of(ROOT / "src/methods/feynman_kac.rs", "if values.len() == 1"), script)
     if token == "0.15" and "0.15" in line and "coordination" in line:
         return (_line_of(JCTC / "scripts/fig_disconnectivity.py", "DEDUP = 0.15"), script)
     if token in {r"1\times 10^{-7}", "1e-7"} and "vtight" in line.lower() and "threshold" in line.lower():
@@ -346,6 +344,12 @@ def _restored(line: str, token: str) -> tuple[str, str] | None:
 def lookup(line: str, token: str) -> tuple[str, str] | None:
     """Return (raw log, script) when this line's token is that field."""
     script = "paper/jctc/scripts/claim_fields.py"
+    if token == "0.48" and "FigHalfWidth" in line:
+        return (_line_of(JCTC / "macros.tex", r"\newcommand{\FigHalfWidth}{0.48\textwidth}"), script)
+    if token == "3.25" and re.search(r"3\.25\s*in\b", line):
+        return (_line_of(JCTC / "scripts/toc_graphic.py", "WIDTH = 3.25 * 72"), script)
+    if token == "1.75" and re.search(r"1\.75\s*in\b", line):
+        return (_line_of(JCTC / "scripts/toc_graphic.py", "HEIGHT = 1.75 * 72"), script)
     receipt = _receipt()
     rel_receipt = "paper/jctc/logs/source-constants.txt"
 
