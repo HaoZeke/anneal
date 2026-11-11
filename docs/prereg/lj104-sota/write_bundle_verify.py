@@ -90,7 +90,7 @@ def main() -> None:
         f"{tip}.",
         "The commit that adds this note is the child of that tip.",
         *formatted,
-        "VERIFY_EXIT:0",
+        "VERIFY_EXIT:0.",
     ]
     body = balance(body)
     body.append("")
