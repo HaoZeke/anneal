@@ -3019,17 +3019,21 @@ where
         if cfg.move_library.is_rigid_body()
             && crate::methods::rigid_quench::stalled(hops, hops_at_lowest)
         {
-            // The stop target is never read here, and no cluster is drawn.
-            // The walker moves to the lowest minimum it has already quenched
-            // that is neither its own nor a recent stall destination. The
-            // ledger best is offered at every stall, so a walker away from
-            // it goes back there unless it did so in the last few stalls.
+            // The stop target is never read here. The walker moves to the
+            // lowest minimum it has already quenched that is below the
+            // incumbent and is neither its own nor a recent stall
+            // destination. When the archive has nothing lower, a new rigid
+            // start is quenched and the walker stands there.
             hops_at_lowest = hops;
             if let Some(state) = ledger.best_state.as_ref() {
                 stall_archive.offer(ledger.best, state.view());
             }
-            if let Some((energy, state)) = stall_archive.escape(e)
-                && state.len() == x.len()
+            let archived = stall_archive.escape(e);
+            let archived_is_lower = archived.as_ref().is_some_and(|(energy, state)| {
+                *energy < ledger.best - 1e-9 && state.len() == x.len()
+            });
+            if let Some((energy, state)) = archived
+                && archived_is_lower
             {
                 let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
                 let ok = gradient
@@ -3038,6 +3042,21 @@ where
                 e = energy;
                 x = state;
                 current_validation_gradient = gradient.filter(|_| ok);
+            } else if let Some(fresh) = rigid_stall_reseed(cfg, rng) {
+                // The archive has nothing below the incumbent. Another jump
+                // inside it repeats the funnel. A new rigid start is quenched
+                // and the walker stands there, so the next hops leave.
+                let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
+                if energy.is_finite() && relaxed.len() == x.len() {
+                    stall_archive.offer(energy, relaxed.view());
+                    let gradient = grad.as_deref_mut().and_then(|g| g(ledger, relaxed.view()));
+                    let ok = gradient.as_ref().is_some_and(|values| {
+                        answer_gradient_ok(cfg, values.view(), relaxed.len())
+                    });
+                    e = energy;
+                    x = relaxed;
+                    current_validation_gradient = gradient.filter(|_| ok);
+                }
             }
         }
         // The reoccupation move runs inside the chain and charges the
@@ -6954,6 +6973,31 @@ where
     })
 }
 
+/// Centres inside the preset sphere and one rotation in (-π, π) per body.
+///
+/// `None` when the sphere cannot hold every centre at the minimum
+/// separation. A rigid stall uses this when its archive has nothing
+/// below the incumbent, so the walker can leave that funnel.
+fn rigid_stall_reseed<R: Rng + ?Sized>(cfg: &Config, rng: &mut R) -> Option<Array1<f64>> {
+    let n = cfg.n_points;
+    let centres = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
+    if centres.len() != 3 * n {
+        return None;
+    }
+    let mut state = Array1::zeros(6 * n);
+    for i in 0..n {
+        for k in 0..3 {
+            state[3 * i + k] = centres[3 * i + k];
+            state[3 * n + 3 * i + k] =
+                rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
+        }
+    }
+    if let Some(slice) = state.as_slice_mut() {
+        crate::potentials::fold_rotation_vectors(n, slice);
+    }
+    Some(state)
+}
+
 /// Seeds a non-overlapping configuration at liquid-like density.
 ///
 /// Uniform draws over a container overlap almost surely at the sizes of
@@ -7415,6 +7459,33 @@ mod tests {
         let rigid =
             Config::recommended(4).with_rigid_bodies(crate::potentials::gmin_water_geometry());
         assert!(matches!(rigid.continuous_symmetry, ContinuousSymmetry::Off));
+    }
+
+    #[test]
+    fn a_rigid_stall_reseed_places_every_body_inside_the_sphere() {
+        let cfg = Config::for_tip4p(6);
+        let mut rng = StdRng::seed_from_u64(1);
+        let state = rigid_stall_reseed(&cfg, &mut rng).expect("six waters fit");
+        assert_eq!(state.len(), 36);
+        for value in state.iter().skip(18) {
+            assert!(value.abs() <= std::f64::consts::PI);
+        }
+        for i in 0..6 {
+            let centre = &state.as_slice().unwrap()[3 * i..3 * i + 3];
+            let radius = centre.iter().map(|v| v * v).sum::<f64>().sqrt();
+            assert!(radius <= cfg.start_radius() + 1e-9);
+            for j in (i + 1)..6 {
+                let other = &state.as_slice().unwrap()[3 * j..3 * j + 3];
+                let dist = (0..3)
+                    .map(|k| {
+                        let d = centre[k] - other[k];
+                        d * d
+                    })
+                    .sum::<f64>()
+                    .sqrt();
+                assert!(dist + 1e-9 >= cfg.min_separation);
+            }
+        }
     }
 
     #[test]
