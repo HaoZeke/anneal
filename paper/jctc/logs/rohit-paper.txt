@@ -1,6 +1,6 @@
 proseguard proseguard 0.1.0
 profile_sha 654d0de1c2632feb93ddfc2f72a08372ad672a8c7cb4a6ad30cca69b2783ddc6
-tip c96abd40a5fedc6ee76eca165b967bddc2a63cc4
+tip d912a656f15188ffd51988f8a0d10174933de46b
 command proseguard -p <profile> --no-llm paper/jctc/manuscript.tex paper/jctc/si.tex paper/jctc/cover-letter.tex
 output
 paper/jctc/cover-letter.tex:8: [warning] rgoswami.AbbreviationStyle (lexical) 'B.V.' is abbreviation style drift. Use the plain form or spell it out.
