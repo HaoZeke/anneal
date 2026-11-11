@@ -12,7 +12,7 @@
 //! `run` charges the ledger the way `paper_controls` does: one charge for
 //! each energy-and-gradient pair inside a quench, and one charge for each
 //! gradient the climb reads. The search stops when the quenched energy is
-//! at or below the published minimum plus 0.001, or when the budget is
+//! at or below the published minimum plus 1e-6, or when the budget is
 //! spent. A miss is reported as the full budget. The configuration is
 //! `Config::recommended` with no further change.
 //!
@@ -29,7 +29,7 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::time::Instant;
 
-const HIT_TOL: f64 = 0.001;
+const HIT_TOL: f64 = 1e-6;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -569,7 +569,7 @@ mod tests {
         assert_eq!(system_spec("lj98").unwrap().budget, 4_000_000);
         assert_eq!(system_spec("lj104").unwrap().budget, 4_000_000);
         assert!((system_spec("lj104").unwrap().reference + 582.086642).abs() < 1e-12);
-        assert!((HIT_TOL - 0.001).abs() < 1e-15);
+        assert!((HIT_TOL - 1e-6).abs() < 1e-18);
         assert!(system_spec("lj31").is_none());
     }
 
