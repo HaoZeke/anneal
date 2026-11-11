@@ -12,7 +12,9 @@ The water archive in this tree has seeds 0 through 5.
 `origin` has no `water-v45b` ref.
 The CSV provenance names `anneal_repro` bundle `v4.5/port-v4.5b.bundle`, and that bundle is not on this machine.
 `HaoZeke/anneal_repro` returns 404 to this token.
-`figs/water_crest.pdf` is removed because it drew those rates.
+`figs/water_crest.pdf` is the six-seed CREST counter chart from `logs/water/crest-hexamer-seedN.log`.
+It does not draw the 192-seed rates, PAR-2, or McNemar values.
+`water-v45b-perseed.csv` is not evidence for any number in the paper.
 
 The LJ98 rates (24 of 64, the PAR-2 medians, the ratio, and the 2000 resamples) are removed.
 `data/lj55_lj98/seeds.csv` is a per-seed table. The tree has no raw stdout for those 64 seeds.

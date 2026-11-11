@@ -12,9 +12,8 @@ The hash is unchanged.
 036cb5d0143e305e6139e5305498ede81908f6521851c597b1dcef2d8c9827fe
 
 Row 4 is water_crest.pdf.
-The hash is unchanged.
-
-467258ab05c77a8fae70f2f583a1cb116c4726fbfcb7f4ef4eee332ab3346855
+It is the six-seed CREST counter chart.
+The 192-seed rate panel is not this file.
 
 Row 5 is disconnectivity.pdf.
 The hash is unchanged.
@@ -194,10 +193,9 @@ The McNemar values lack that log too.
 No separate receipt records the LJ map energies.
 A figure that matches main has no generator in this tree.
 scripts/toc_graphic.py draws toc-graphic.pdf.
-water_crest.pdf is removed. It drew the 192-seed rates and the McNemar p values, and those raw logs are not in the record.
-scripts/water_crest_figure.py draws the six-seed counter chart.
-The chart path is figs/water_crest_counters.pdf.
-That script does not write water_crest.pdf.
+water_crest.pdf is redrawn from the six CREST logs. It does not use water-v45b-perseed.csv.
+scripts/fig_water_crest.py writes figs/water_crest.pdf from the six CREST logs.
+scripts/water_crest_figure.py writes the same counters to figs/water_crest_counters.pdf.
 lj75_ecdf.pdf matches main.
 landfold_maps.pdf matches main too.
 This tree has no seed table for those two plates.

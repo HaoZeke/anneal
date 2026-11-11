@@ -219,22 +219,6 @@ def _bootstrap() -> dict[str, str]:
 
 
 @functools.cache
-def _water_rows() -> list[dict[str, str]]:
-    path = JCTC / "data/water_v45b/water-v45b-perseed.csv"
-    with path.open() as handle:
-        return list(csv.DictReader(handle))
-
-
-def _par2(rows: list[dict[str, str]], hit: str, calls: str, budget: float) -> tuple[float, float]:
-    values = [
-        float(row[calls]) if row[hit] == "1" else 2 * budget for row in rows
-    ]
-    median = _type7(values, 0.5)
-    iqr = _type7(values, 0.75) - _type7(values, 0.25)
-    return median, iqr
-
-
-@functools.cache
 def _license_year() -> str:
     archive = LOGS / "lj75-source-37535ec1.tar.xz"
     with tarfile.open(archive, "r:xz") as tar:
@@ -514,34 +498,6 @@ def lookup(line: str, token: str) -> tuple[str, str] | None:
     crest = LOGS / "water/crest-hexamer-seed0.log"
     if token == "3.0.2" and "3.0.2" in line and "Version 3.0.2" in crest.read_text(errors="replace"):
         return hit(crest.relative_to(ROOT).as_posix())
-
-    # 192-seed per-seed table.
-    rows = _water_rows()
-    water_path = "paper/jctc/data/water_v45b/water-v45b-perseed.csv"
-    seeds = [int(row["seed"]) for row in rows]
-    budget = float(rows[0]["anneal_calls"])
-    if token == str(min(seeds)) and "seeds 0" in line:
-        return hit(water_path)
-    if token == str(max(seeds)) and "191" in line:
-        return hit(water_path)
-    if token == str(int(budget)) and "4000" in line and ("budget" in line or "PAR-2" in line or "arm" in line):
-        return hit(water_path)
-    arms = (
-        ("anneal_hit", "anneal_calls"),
-        ("polish_fair_hit", "polish_fair_calls"),
-        ("crest_hit", "crest_calls"),
-        ("crest_fair_hit", "crest_fair_calls"),
-    )
-    for hit_key, call_key in arms:
-        median, iqr = _par2(rows, hit_key, call_key, budget)
-        if token in {str(int(median)) if median == int(median) else str(median), f"{iqr:.2f}".rstrip("0")}:
-            if token in line:
-                return hit(water_path)
-        if iqr == 0 and token == "0" and "interquartile" in line:
-            return hit(water_path)
-        if token == f"{median:.0f}" or token == f"{iqr:.2f}":
-            if token in line and ("PAR-2" in line or token in {"3560", "4546.25", "4000"}):
-                return hit(water_path)
 
     # Crate version from the rebuild receipt.
     cargo = LOGS / "cargo-build-receipt.txt"
