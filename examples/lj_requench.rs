@@ -1,3 +1,4 @@
+// Copyright (c) anneal developers
 //! Re-quench one Lennard-Jones geometry and print the tightened energy.
 //!
 //! Usage: `lj_requench <xyz>`
