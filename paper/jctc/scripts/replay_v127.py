@@ -5,7 +5,6 @@ import subprocess
 from pathlib import Path
 
 REPO = Path(".")
-MSGDIR = Path(os.environ["REPLAY_MSGDIR"])
 MAIN = "3675c9c375bbe560773cdf860bc672b8cbfe74d2"
 DEVELOP = "91b15a024749320b9463e4abbdf10d37e933174b"
 OLDTIP = "9109df21fbfd9470c16cff37a7a7b5228bb809e0"
@@ -24,6 +23,7 @@ def git(*args, env=None, data=None):
 
 
 def main():
+    msgdir = Path(os.environ["REPLAY_MSGDIR"])
     rows = git(
         "log", "--first-parent", "--reverse", "--format=%H %T",
         f"{MAIN}..{OLDTIP}",
@@ -42,7 +42,7 @@ def main():
     made = []
     for index, line in enumerate(rows, 1):
         old, tree = line.split()
-        path = MSGDIR / f"{index:04d}.txt"
+        path = msgdir / f"{index:04d}.txt"
         if path.exists():
             body = path.read_bytes()
         else:
