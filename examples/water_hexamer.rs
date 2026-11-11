@@ -498,6 +498,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
     cfg.move_library = MoveLibrary::Molecular {
         groups: groups.clone(),
         reactive: false,
+        reverse_cycles: true,
     };
     let references = load_references();
     let reference_views: Vec<(&str, &[f64])> = references
