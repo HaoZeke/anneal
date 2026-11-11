@@ -8990,3 +8990,57 @@ mod descriptor_reuse_tests {
         assert_repeat_calls_bit_identical(&cfg, &states);
     }
 }
+
+#[cfg(test)]
+mod geometry_guards {
+    use super::{contain, min_pair_distance, recentre, separate_to_overlap_rule, structure_is_sane};
+    use ndarray::Array1;
+
+    #[test]
+    fn recentre_puts_the_centre_of_mass_at_the_origin() {
+        let mut x = Array1::from_vec(vec![1.0, 2.0, 3.0, 3.0, 4.0, 5.0]);
+        recentre(&mut x, 2);
+        for axis in 0..3 {
+            let centre = 0.5 * (x[axis] + x[3 + axis]);
+            assert!(centre.abs() < 1e-12, "{centre}");
+        }
+    }
+
+    #[test]
+    fn contain_pulls_an_outside_point_onto_the_sphere() {
+        let mut x = Array1::from_vec(vec![3.0, 0.0, 0.0, 0.2, 0.0, 0.0]);
+        contain(&mut x, 2, 1.0);
+        let radius = (x[0] * x[0] + x[1] * x[1] + x[2] * x[2]).sqrt();
+        assert!((radius - 1.0).abs() < 1e-12);
+        assert!((x[3] - 0.2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn one_atom_has_no_pair_and_a_non_finite_state_is_not_sane() {
+        assert!(min_pair_distance(Array1::from_vec(vec![1.0, 0.0, 0.0]).view()).is_infinite());
+        let pair = Array1::from_vec(vec![0.0, 0.0, 0.0, 3.0, 0.0, 0.0]);
+        assert!((min_pair_distance(pair.view()) - 3.0).abs() < 1e-12);
+        assert!(structure_is_sane(pair.view(), 1.0));
+        assert!(!structure_is_sane(pair.view(), 4.0));
+        let mut broken = pair.clone();
+        broken[0] = f64::NAN;
+        assert!(!structure_is_sane(broken.view(), 1.0));
+    }
+
+    #[test]
+    fn overlap_repair_refuses_a_bad_rule_and_separates_a_clash() {
+        let mut x = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.1, 0.0, 0.0]);
+        let before = x.clone();
+        assert!(!separate_to_overlap_rule(&mut x, None, 0.0));
+        assert!(!separate_to_overlap_rule(&mut x, None, f64::NAN));
+        assert_eq!(x, before);
+        assert!(separate_to_overlap_rule(&mut x, None, 0.5));
+        assert!(min_pair_distance(x.view()) >= 0.5);
+        let mut one = Array1::from_vec(vec![1.0, 2.0, 3.0]);
+        assert!(separate_to_overlap_rule(&mut one, None, 0.5));
+        let groups = vec![vec![0], vec![1]];
+        let mut grouped = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.05, 0.0, 0.0]);
+        assert!(separate_to_overlap_rule(&mut grouped, Some(&groups), 0.4));
+        assert!(min_pair_distance(grouped.view()) >= 0.4);
+    }
+}

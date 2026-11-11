@@ -2880,4 +2880,22 @@ mod move_scaling_tests {
         let q = mv.propose_scaled(x.view(), 0.8, 1.0, &mut b);
         assert_eq!(p, q);
     }
+
+    #[test]
+    fn an_unknown_element_has_no_covalent_radius() {
+        assert_eq!(covalent_radius(0), 0.0);
+        assert_eq!(covalent_radius(200), 0.0);
+        assert!((covalent_radius(1) - 0.31).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_unit_pair_has_no_lennard_jones_binding() {
+        let x = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let energy = pair_energies(x.view(), 2);
+        assert!(energy.iter().all(|value| value.abs() < 1e-12));
+        assert!(worst_bound(x.view(), 0, 0.5).is_none());
+        let groups = connectivity_groups(x.view(), 2, 1.5);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].len(), 2);
+    }
 }
