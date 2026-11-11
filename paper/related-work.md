@@ -363,3 +363,57 @@ Rodríguez-Kessler, arXiv:2601.01261 (3 January 2026), arXiv:2603.02428 (2 March
 These are the same kind of search as `rodriguezKesslerYttrium2026`. The sealed maps stand, and the open ASE, AGOX, and GMIN kit stays open. A head-to-head would be one of these clusters on one shared potential. The Lennard-Jones and water counts do not require it.
 
 Cite `rodriguezKesslerB18ca2026`, `rodriguezKesslerB7ca2026`, and `rodriguezKesslerB18ag2026`.
+
+## 2026-11-11 — xtb 6.8.0 moves GFN2 total energies
+
+The grimme-lab xtb release v6.8.0 is dated 5 November 2026. The release page says absolute total energies can differ from earlier releases by as much as a millihartree, especially for large systems, and that relative energies usually move very little. Against xtb 6.7.1, the GMTKN55 WTMAD2 for GFN0-xTB through GFN2-xTB changes by less than 0.0002 kcal/mol. The same note gives a 1988-atom nylon complex whose GFN2-xTB total energy changes by about 0.0013 hartree and whose binding energy changes by 0.041 kcal/mol. The notes also mention constraint-algorithm work that includes minimum hopping. They publish no cluster hit rate.
+
+The hexamer single-point logs print xtb 6.7.1, commit edcfbbe, and those single points reproduce the polished energies. The article said the polish was xtb at GFN2 and did not name the release. It now names 6.7.1. CREST's newest numbered release is still v3.0.2, so that build does not absorb 6.8.0. ASE tag 3.29.0, AGOX tag v3.11.1, pele v0.1.2, and the GMIN page of 17 March 2022 are unchanged.
+
+0.0002 kcal/mol is about \(3\times 10^{-7}\) Eh, and 0.041 kcal/mol is about \(6.5\times 10^{-5}\) Eh. The printed gaps sit at \(1\times 10^{-7}\) Eh. The release does not show that those six gaps survive on 6.8.0. It also does not recompute them, so it does not contradict the 6.7.1 gaps, 121 of 192, or 97 of 192. It does contradict any reading in which the gaps are properties of GFN2 with no release attached. Keep the table on 6.7.1. A later check can re-polish the same finals on 6.8.0. Do not start a new CREST search for this release.
+
+No bibliographic entry: the release has no DOI.
+
+## 2026-11-11 — g-xTB is a different tight-binding method
+
+Froitzheim, Müller, Hansen, and Grimme, ChemRxiv (23 June 2025), doi:10.26434/chemrxiv-2025-bjxvt, present g-xTB. The abstract says it aims at the ωB97M-V functional with a large basis, keeps tight-binding speed, and is parameterized through the actinides. The record has no journal volume.
+
+The CREST development line already noted here adds a g-xTB refiner. This preprint is that method. It is not GFN2-xTB, and it does not report the hexamer hit rates, so it does not contradict 121 of 192, 97 of 192, or the 6.7.1 gaps. Cite `froitzheimGxtb2025` beside the CREST section. Leave the hexamer table on GFN2-xTB with xtb 6.7.1.
+
+## 2026-11-11 — COMPLAX keeps a rigid solute
+
+Lauria and Maranzana, Journal of Chemical Information and Modeling 66, 13050--13055 (2026), doi:10.1021/acs.jcim.6c02105, release COMPLAX for targeted microsolvation. The abstract says it is unlike an unconstrained global optimiser: a rigid core holds the solute, and a Fibonacci lattice places the solvent. The comparison is CREST, the ORCA Solvator, OGOLEM, and ABCluster, followed by a density-functional relaxation at ωB97X-D3/def2-SVP. Relative to the COMPLAX minimum, CREST lies 4.6 kcal/mol higher for an organolithium in tetrahydrofuran and matches it for pyridine with two waters. ABCluster lies 4.7 kcal/mol lower for acetate in water. They say CREST put that water on the pyridine π system rather than the nitrogen lone pair. The same section names GOAT and QCG among unconstrained searches.
+
+The manuscript's hexamer is a bare GFN2-xTB cluster, scored by motif. COMPLAX does not report 121 of 192, 97 of 192, or the polished gaps. A head-to-head would be one of their microsolvated solutes, and they say the score is fidelity to the input solute. Do not retarget the hexamer table. The GOAT comparison already asked for stays the bare hexamer at one energy and gradient budget.
+
+Cite `lauriaComplax2026`.
+
+## 2026-11-11 — A symmetry bias in the local optimisation of LJ38 and LJ75
+
+Tao, Shao, and Zhu, arXiv:2401.13953 (25 January 2024), add a fingerprint energy so a local optimisation prefers high-symmetry structures. They test silicon, silicon carbide, and Lennard-Jones clusters. For LJ38 and LJ75 they name the double funnels. Two hundred random starts come from CALYPSO. Energies and forces use the ASE calculator, and the trajectories use FIRE. The fingerprint search shifts the density of local minima toward lower energy. The note gives no Cambridge energy and no force-call hit rate.
+
+The missing ASE arm is basin hopping on tag 3.29.0. This preprint is a biased local relaxation, and it does not fill that arm. It does not contradict a printed ASE count, because none is printed, and it gives no energy below the Cambridge values. A comparison, if it is run, is LJ38 and LJ75 at one relaxation budget, and it has to be named as this fingerprint relaxation.
+
+Cite `taoFingerprint2024`. Keep it out of the basin-hopping hit table.
+
+## 2026-11-11 — A firefly search that reports a gain on basin hopping
+
+Lee, Stampfl, and Soon, AI Agent 2, no. 1 (31 March 2026), doi:10.20517/aiagent.2025.13, release NARA. A firefly search keeps several structures and trains on the fly. For the "8" surface oxide on Cu(111) they say it is more efficient than basin hopping. For gold clusters one run recovers planar and non-planar structures. The record has no page numbers. They do not report LJ38 through LJ104 or the water hexamer.
+
+This does not contradict those counts, and it does not fill the open ASE, AGOX, and GMIN kit. A head-to-head would be the surface oxide, or the gold cluster, on one shared potential.
+
+Cite `leeNara2026`.
+
+## 2026-11-11 — Minima hopping on ionized gold
+
+Safa, Rahmatizad Khajehpasha, and Goedecker, arXiv:2602.15646 (17 February 2026), search gold clusters of 22 to 100 atoms. Neutral clusters in the upper part of that range prefer compact structures. They say a large enough positive charge makes planar structures the ground states, and that finite temperature stabilizes the planar forms further. The search is minima hopping on a machine-learned potential, with a charge correction because the potential was not trained on ions.
+
+The note gives no Lennard-Jones energy and no water energy. It does not contradict the sealed maps. A head-to-head would be one of these ions on the same potential. The Lennard-Jones and water counts do not require it.
+
+Cite `safaGoldIons2026`.
+
+## 2026-11-11 — Journal version of the tensor-train search
+
+Sozykin and co-workers, Physical Review B 113, 224111 (22 June 2026), doi:10.1103/sv5r-mryz, is the journal version of the preprint already filed as `sozykinTensorTrain2026`. The arXiv record still has no journal-ref line. The DOI, the volume, and the article number were read from the Crossref record, and that record names the same eight authors. The Lennard-Jones success rates in the earlier note are unchanged.
+
+The key `sozykinTensorTrain2026` now carries the journal DOI beside the arXiv id.
