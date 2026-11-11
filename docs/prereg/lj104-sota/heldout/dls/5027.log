@@ -1,0 +1,9 @@
+n: 104
+seed: 5027
+tie: lowest-index
+budget: 4000000
+charged: 4000000
+best: -582.0384290577
+generations: 6206
+restarts: 1644
+wall_seconds: 216.589
