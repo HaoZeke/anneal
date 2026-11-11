@@ -2,6 +2,8 @@
 //! until that incumbent drops. The charge it would have spent is one
 //! all-points displacement.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use anneal_core::methods::cluster_hopping::{Config, Ledger, MoveLibrary, run_with_gradient};
 use anneal_core::soap::{SoapSpec, ih_dominated};
 use ndarray::{Array1, ArrayView1};
@@ -189,7 +191,11 @@ fn dry(home: &Array1<f64>, budget_window: bool, budget: usize) {
     let mut rng = StdRng::seed_from_u64(11);
     let outcome = run_with_gradient(&cfg, home.view(), &mut ledger, &mut relax, None, &mut rng)
         .expect("finite start");
-    assert_eq!(ledger.spent(), budget, "the dry ledger did not stop at the budget");
+    assert_eq!(
+        ledger.spent(),
+        budget,
+        "the dry ledger did not stop at the budget"
+    );
     assert!(outcome.best.is_finite(), "the dry run has no finite best");
 }
 
@@ -299,4 +305,68 @@ fn an_all_points_improvement_allows_growth_again() {
         "growth did not run again after the incumbent dropped ({far} lattice quenches, {calls} total)"
     );
     assert!((best + 40.0).abs() < 1e-12);
+}
+
+#[test]
+fn a_non_finite_stall_climb_is_not_adopted() {
+    let dim = 24;
+    let mut home = Array1::from_shape_fn(dim, |i| ((i % 5) as f64 - 2.0) + 0.25);
+    let norm = home.iter().map(|z| z * z).sum::<f64>().sqrt();
+    home /= norm;
+    let stiffness = Array1::from_shape_fn(dim, |i| 12.0 + 1.7 * (i % 7) as f64);
+    let mut cfg = stall_cfg(8, false);
+    cfg.move_library = MoveLibrary::LeanBurst;
+    cfg.max_hops = Some(4);
+    cfg.escape_stall_patience = 1;
+    cfg.escape_stall_factor = 0.0;
+    let calls = AtomicUsize::new(0);
+    let since = AtomicUsize::new(0);
+    let infinite = AtomicUsize::new(0);
+    // A proposal quench follows at most one gradient, so it stays finite
+    // and the hop is not dropped as insane. The climb calls the gradient
+    // many times and then quenches, and that quench comes back infinite.
+    let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+        calls.fetch_add(1, Ordering::Relaxed);
+        let _ = ledger.charge();
+        if since.load(Ordering::Relaxed) > 5 {
+            infinite.fetch_add(1, Ordering::Relaxed);
+            since.store(0, Ordering::Relaxed);
+            return (f64::INFINITY, x.to_owned());
+        }
+        since.store(0, Ordering::Relaxed);
+        (-1.0, home.clone())
+    };
+    let mut grad = |ledger: &mut Ledger, v: ArrayView1<f64>| {
+        let _ = ledger.charge();
+        since.fetch_add(1, Ordering::Relaxed);
+        Some(Array1::from_shape_fn(v.len(), |i| stiffness[i] * v[i]))
+    };
+    let mut ledger = Ledger::new(20_000);
+    let mut rng = StdRng::seed_from_u64(3);
+    let outcome = run_with_gradient(
+        &cfg,
+        home.view(),
+        &mut ledger,
+        &mut relax,
+        Some(&mut grad),
+        &mut rng,
+    )
+    .expect("finite start");
+    let bad = outcome
+        .accepted_transitions
+        .iter()
+        .filter(|step| !step.to_energy.is_finite())
+        .count();
+    let shown: Vec<_> = outcome
+        .accepted_transitions
+        .iter()
+        .map(|step| (step.action.clone(), step.to_energy))
+        .collect();
+    assert!(
+        infinite.load(Ordering::Relaxed) > 0,
+        "the climb quench never returned a non-finite energy ({} quenches, {} hops)",
+        calls.load(Ordering::Relaxed),
+        outcome.hops
+    );
+    assert_eq!(bad, 0, "a non-finite climb was adopted: {shown:?}");
 }
