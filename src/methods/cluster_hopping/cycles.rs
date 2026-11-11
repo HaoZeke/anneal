@@ -424,4 +424,25 @@ mod tests {
         assert!(water_sites(&g).is_none());
         assert_eq!(water_sites(&geometry()), Some((0, [1, 2])));
     }
+
+    #[test]
+    fn empty_or_short_groups_are_not_water() {
+        assert!(!is_water_groups(&[]));
+        assert!(!is_water_groups(&[vec![0, 1]]));
+        assert!(is_water_groups(&[vec![0, 1, 2], vec![3, 4, 5]]));
+    }
+
+    #[test]
+    fn cartesian_reversal_needs_a_directed_cycle() {
+        let mut rng = StdRng::seed_from_u64(2);
+        let mut x = Array1::zeros(18);
+        for atom in 3..6 {
+            x[3 * atom] = 20.0;
+        }
+        let groups = vec![vec![0, 1, 2], vec![3, 4, 5]];
+        let before = x.clone();
+        assert!(!reverse_cycle_cartesian(&groups, &mut x, &mut rng));
+        assert_eq!(x, before);
+        assert!(!reverse_cycle_cartesian(&[], &mut x, &mut rng));
+    }
 }

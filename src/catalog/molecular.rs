@@ -1482,4 +1482,29 @@ mod water_hexamer_tests {
         assert_eq!(PBE_HEXAMER_BUDGET, 4000);
         assert_eq!(GFN2_HEXAMER_BUDGET, 4000);
     }
+
+    #[test]
+    fn zero_molecules_and_an_unknown_species_are_refused() {
+        assert_eq!(
+            water_species(0),
+            Err(MolecularCatalogPresetError::InvalidMoleculeCount)
+        );
+        assert_eq!(
+            water_groups(0),
+            Err(MolecularCatalogPresetError::InvalidMoleculeCount)
+        );
+        assert_eq!(
+            length_scale(&[]),
+            Err(MolecularCatalogPresetError::InvalidMoleculeCount)
+        );
+        assert_eq!(
+            length_scale(&[200]),
+            Err(MolecularCatalogPresetError::SpeciesMismatch)
+        );
+        assert_eq!(water_species(2).unwrap(), vec![8, 1, 1, 8, 1, 1]);
+        assert_eq!(water_groups(1).unwrap(), vec![vec![0, 1, 2]]);
+        assert_eq!(assignment_cutoff(&[]), None);
+        assert_eq!(assignment_cutoff(&[0.0, f64::NAN]), None);
+        assert_eq!(assignment_cutoff(&[0.4, 0.2]), Some(0.1));
+    }
 }
