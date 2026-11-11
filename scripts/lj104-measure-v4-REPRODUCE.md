@@ -51,4 +51,4 @@ The end geometry is the lowest row of the minima file.
 
 That row is written as one atom per line.
 The corrected v4.6 row scripts/lj104_v4_prediction.txt reads 9c18b867.
-python3 -B scripts/lj104_sha_map.py --check reads that row.
+`python3 -B scripts/lj104_sha_map.py --check <kit> <repo>` reads it.

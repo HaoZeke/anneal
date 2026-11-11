@@ -1,4 +1,5 @@
 #!/bin/sh
+# Copyright (c) anneal developers
 # Record one or more commands with the head, the tree, and both clocks.
 # Every arm in one invocation shares a private mount namespace and a
 # private UTS namespace. uname -n and the hostname file both read bench.
@@ -103,12 +104,19 @@ run_arm() {
   prepare_binary "$cmd"
   head_sha=$(git rev-parse HEAD)
   tree_sha=$(git rev-parse 'HEAD^{tree}')
+  # A detached worktree still has to name the branch tip that was current.
+  if [ "$(git rev-parse --abbrev-ref HEAD)" = "HEAD" ]; then
+    timed_head=${H2H_TIMED_HEAD:-unset}
+  else
+    timed_head=$head_sha
+  fi
   pins=$(printf '%s' "$cmd" | sed -n 's/.*taskset -c \([^ ]*\).*/\1/p')
   mkdir -p "$(dirname "$log")"
   {
     echo "command=$cmd"
     echo "head=$head_sha"
     echo "tree=$tree_sha"
+    echo "timed_head=$timed_head"
     echo "pins=${pins:-unset}"
     echo "uname_n=$(uname -n)"
     echo "hostname_sha256=$(hash_file /etc/hostname)"

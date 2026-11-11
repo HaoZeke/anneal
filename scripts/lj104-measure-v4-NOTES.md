@@ -8,6 +8,7 @@ Commit 6f74d439 repeats that known count.
 Its central clock is 02:55:01 on 2026-11-10.
 
 The arm opened at 02:55:36 the same morning.
+The receipts name 6f74d439 as timed_head.
 
 The repeated count comes from commit 88d1cca.
 
@@ -237,7 +238,7 @@ The icosahedral, Cs count named above stays 1 of 6.
 ```
 
 The corrected v4.6 row scripts/lj104_v4_prediction.txt reads 9c18b867.
-python3 -B scripts/lj104_sha_map.py --check reads that row.
+`python3 -B scripts/lj104_sha_map.py --check <kit> <repo>` reads it.
 
 ```
 299ce4ae replaces 20e03ec6 and keeps tree 826c4ba6
