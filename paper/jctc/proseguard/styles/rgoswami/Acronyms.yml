@@ -1,0 +1,140 @@
+extends: conditional
+message: "Spell out '%s', if it's unfamiliar to the audience."
+link: 'https://developers.google.com/style/abbreviations'
+level: error
+scope: text
+ignorecase: false
+# Ensures that the existence of 'first' implies the existence of 'second'.
+# 'second' is the definition; allow lower-case and hyphenated expansions,
+# for example "foreign function interface (FFI)". The trailing `s?` lets a
+# plural definition like "machine-learned interatomic potentials (MLIPs)" count
+# as defining the singular acronym. Only acronyms never defined anywhere in the
+# document are flagged.
+first: '\b([A-Z]{3,5})\b'
+second: '(?:\b[A-Za-z][a-z]+[ -]){1,6}\(([A-Z]{3,5})s?\)'
+# ... with the exception of these:
+exceptions:
+  - NODE
+  - DDS
+  - PID
+  - CUDA
+  - ESDF
+  - GTSAM
+  - TSDF
+  - ROS
+  - DOF
+  - API
+  - ASP
+  - CLI
+  - CPU
+  - CSS
+  - CSV
+  - DEBUG
+  - DOM
+  - DPI
+  - FAQ
+  - GCC
+  - GDB
+  - GET
+  - GPU
+  - GTK
+  - GUI
+  - CMAKE
+  - HTML
+  - HTTP
+  - HTTPS
+  - IDE
+  - JAR
+  - JSON
+  - JSX
+  - LESS
+  - LLDB
+  - NET
+  - NOT
+  - NOTE
+  - NVDA
+  - OSS
+  - PATH
+  - PDF
+  - PHP
+  - POST
+  - RAM
+  - REPL
+  - PWD
+  - RSA
+  - SCM
+  - SHA
+  - SCSS
+  - SDK
+  - SQL
+  - SSH
+  - SSL
+  - SVG
+  - TBD
+  - TCP
+  - URI
+  - URL
+  - USB
+  - UTF
+  - XML
+  - XSS
+  - YAML
+  - ZIP
+  # Build tools and compilers
+  - ABI
+  - BLAS
+  - BSD
+  - CMake
+  - CPP
+  - CXX
+  - FOSS
+  - GIL
+  - HPC
+  - ICC
+  - LAPACK
+  - LIBS
+  - LLVM
+  - MSVC
+  - PGI
+  - POSIX
+  - UNIX
+  # Fortran keywords (appear in inline code)
+  - FYPP
+  # Emacs org-mode TODO states
+  - TODO
+  - HOLD
+  - BLOCKED
+  - INPROGRESS
+  - RESCHEDULE
+  - PROJ
+  - DECLINED
+  - CANCELLED
+  - MOVE
+  - DONE
+  - KILL
+  # Emacs org-mode clock states
+  - CLOCK
+
+  # C / systems programming (standard across all C/Rust/Go docs)
+  - "NULL"
+  - EOF
+  - WASM
+  - ESM
+  - CJS
+
+  # Test result head-tags used in single-turn review org files
+  - PASS
+  - FAIL
+  - FIXED
+  - ERROR
+  - PARTIAL
+
+  # Math / numerics notation (validated, not expandable as words)
+  - JTJ
+  - LDLT
+  - LLT
+  - SVD
+  - QR
+
+# References
+# [1]: https://github.com/cashpw/dotfiles/blob/main/config/vale/styles/cashpw/Acronyms.yml

@@ -1,0 +1,26 @@
+extends: existence
+message: "'%s' adds no information. Quantify or cut."
+ignorecase: true
+level: warning
+tokens:
+  # SentenceFillers already covers: very unique, very important, very significant,
+  # really important, actually quite, basically just
+  - extremely important
+  - highly significant
+  - quite significant
+  - particularly important
+  - particularly interesting
+  - particularly notable
+  - rather interesting
+  - rather important
+  - fairly straightforward
+  - relatively straightforward
+  - quite straightforward
+  - extremely straightforward
+  - incredibly important
+  - fundamentally important
+  - absolutely essential
+  - absolutely critical
+  - incredibly useful
+  - incredibly powerful
+  - extremely useful

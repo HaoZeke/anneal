@@ -1,0 +1,503 @@
+extends: existence
+message: "'%s' is a model style-word. Kill it: use the concrete verb (measure, compute, write, cut) or delete the clause."
+link: "https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing"
+ignorecase: true
+level: warning
+tokens:
+  # Classic style-words
+  - crucial
+  - pivotal
+  - vibrant
+  - intricate
+  - tapestry
+  - testament
+  - enduring
+  - garner
+  - showcase
+  - showcasing
+  - interplay
+  - delve
+  - profound
+  - renowned
+  - groundbreaking
+  - valuable
+  - fostering
+  - enhance
+  - enhancing
+  - the landscape of
+  - broader landscape
+  - evolving landscape
+  - competitive landscape
+  - shifting landscape
+  - research landscape
+  - technological landscape
+  - underscores
+  - notably
+  - noteworthy
+  - comprehensive
+  - utilize
+  - utilizing
+  - leveraging
+  - multifaceted
+  - paradigm
+  - synergy
+  - holistic
+  - streamline
+  - cutting-edge
+  - seamless
+  - seamlessly
+  - robust
+  - transformative
+  - empower
+  - empowering
+  - unlock
+  - unlocking
+  - elevate
+  - elevating
+  - spearhead
+  - spearheading
+  - harness
+  - harnessing
+  - leverage
+  - embark
+  - embark on
+  - embarking on
+  - blazingly fast
+  - blazingly
+  - bolster
+  - bolstering
+  - navigate
+  - navigating
+  - underscore
+  - underscoring
+  - realm
+  - meticulous
+  - nuanced
+  - nuance
+  - surpass
+  - surpassing
+  - facilitates
+  - facilitate
+  - fostering
+  - foster
+  - vital
+  - focal point
+  - indelible mark
+  - deeply rooted
+  - lasting impact
+  - lasting legacy
+  - ongoing legacy
+  - broader trend
+  - broader trends
+  - broader context
+  - broader history
+  - broader movement
+  - marking a shift
+  - marks a shift
+  - setting the stage
+  - set the stage
+  - shaped the evolution
+  - shaping the evolution
+  - rich history
+  - distinctive blend
+  - dynamic landscape
+  - rapidly evolving
+  - ever-evolving
+  - increasingly important
+  - increasingly vital
+  # Later style-word additions
+  - at its core
+  - rich cultural heritage
+  - enduring legacy
+  - serves as a testament
+  - serves as a reminder
+  - serves as a bridge
+  - offers a unique
+  - offers a glimpse
+  - shed light on
+  - sheds light on
+  - it bears mentioning
+  - it bears noting
+  - a nuanced understanding
+  - a deeper understanding
+  - a rich tapestry
+  - a testament to
+  - a cornerstone of
+  - a beacon of
+  - paves the way
+  - on the cusp of
+  - a myriad of
+  - the intricacies of
+  - the complexities of
+  - the nuances of
+  - a significant role
+  - plays a key role
+  - play a key role
+  - plays a vital role
+  - play a vital role
+  - plays an important role
+  - play an important role
+  - pivotal role
+  - pivotal moment
+  - key turning point
+  - plays a significant role
+  - play a crucial role
+  - underscored the importance
+  - underscored the need
+  - it is important to note
+  - it is worth noting
+  - it is worth mentioning
+  - it should be noted
+  # Connector abuse
+  - furthermore
+  - moreover
+  - additionally
+  - consequently
+  - subsequently
+  - accordingly
+  - in this regard
+  - in this context
+  # Grading- and review-register verdict verbs (R<n> X. constructions)
+  - holds
+  - holds up
+  - holds cleanly
+  - lands
+  - lands cleanly
+  - stands
+  - sticks
+  - checks out
+  - works cleanly
+  - falls short
+  - falls down
+  - misses on
+  - hits all
+  # AI-typical "ship/land/come back" framing
+  - ship at
+  - ships at
+  - shipped at
+  - comes back as
+  - come back as
+  - came back as
+  - lands at
+  - landed at
+  # "X side" / "Y side" wraps
+  - the c\+\+ side
+  - the python side
+  - the lua side
+  - the model side
+  # End-to-end and lock-step corpo
+  - end-to-end
+  - in lock-step
+  - stays in lock-step
+  - lock-step
+  - hourglass design
+  - both halves
+  - both legs
+  - one leg
+  - half the rubric
+  - half of the rubric
+  # Walk-through / talking-about-the-task tells
+  - the trap is
+  - the non-obvious bit
+  - the non-obvious part
+  - the obvious
+  - obvious move
+  - obvious answer
+  - to be fair
+  - all of which
+  # "real X" / "do real Y" framing the model uses to claim authentic execution
+  - do real work
+  - does real work
+  - did real work
+  - real work
+  - real C\+\+
+  - real Python
+  - real code
+  - actually run
+  - actually ran
+  - actually does
+  - actually doing
+  # Size-as-judgement framing in prose ("604 lines of raw Lua C API",
+  # "2200-line diff", "comes in at N lines").  Reviewers count lines
+  # themselves; the form-paste field describes what changed, not how big.
+  - \d+\s*lines of
+  - \d+-line diff
+  - \d+-line patch
+  - comes in at \d+ lines
+  - lands at \d+ lines
+  - is \d+ lines
+  # "X matters here because..." is a textbook AI explainer transition.
+  # Rewrite to state the relationship directly.
+  - matters here because
+  - matters because
+  - is important here because
+  - is what matters
+  - here is why
+  # "Container has everything" filler.  Prompts should list the venv path,
+  # env-var names, and the test commands; saying "preconfigured" or "ready
+  # to go" adds tokens without adding signal.
+  - has everything (pre-?)?installed
+  - has everything (it )?needs
+  - ships? pre-?configured
+  - ships? ready to go
+  - is pre-?configured
+  - is fully populated
+  - fully populated
+  - ready to go
+  - out of the box
+  - set up for you
+  - comes (already )?pre-?installed
+  - comes pre-?baked
+  - pre-?baked
+  - pre-?installed and ready
+
+  # 2024–2026 focal / signpost AI-isms (Kobak arxiv:2412.11385 + Wikipedia WP:AISIGNS)
+  # Prefer phrase forms for words that collide with engineering jargon.
+  - commendable
+  - resonate
+  - resonates
+  - resonating
+  - compelling
+  - paramount
+  - unwavering
+  - align with
+  - aligns with
+  - aligning with
+  - in alignment with
+  - perfect alignment
+  - seamless alignment
+  - strategic alignment
+  - meticulously
+  - underpins
+  - underpinning
+  - underpinned
+  - in the realm of
+  - in today's
+  - in today's landscape
+  - in today's digital landscape
+  - in today's rapidly evolving
+  - in today's fast-paced
+  # Extra high-signal excess verbs/forms from Kobak / field guides
+  - delves
+  - delving
+  - showcases
+  - garnered
+  - garnering
+  - bolstered
+  - emphasizing
+  - emphasizes
+  - emphasize
+  - boasts
+  - demystify
+  - demystifying
+  - unleash
+  - unleashing
+  - ignite
+  - igniting
+  - beacon of
+  - symphony of
+  - firstly
+  - cultivate
+  - cultivating
+  - cultivates
+  - transcend
+  - transcending
+  - transcends
+  - exemplify
+  - exemplifies
+  - exemplifying
+  - reshape
+  - reshaping
+  - reshapes
+  - redefine
+  - redefining
+  - redefines
+  - lean into
+  - leaning into
+  - double down
+  - doubling down
+  - breathe new life
+  - breathes new life
+
+  # Residual forms (WP:AISIGNS)
+  - highlighting
+  - highlights the
+  - streamlines
+  - streamlining
+  - elevates
+  - bolsters
+  - pivots
+  - pivoting
+  - fosters
+  - enhances
+  - navigates
+  - harnesses
+  - empowers
+  - unlocks
+  - reimagine
+  - reimagining
+  - reimagines
+  - elucidate
+  - elucidates
+  - elucidating
+  - catalyze
+  - catalyzing
+  - catalyst for
+  - burgeoning
+  - nascent
+  - plethora
+  - a plethora of
+  - unparalleled
+  - aforementioned
+  - encompasses
+  - encompassing
+  - endeavor
+  - endeavors
+  - endeavoring
+  - foundational
+  - holistically
+  - synergies
+  - synergistic
+  - paradigms
+  - cornerstones
+  - cornerstone of
+
+  # 2025–2026 field-guide / vale-ai-tells / Pangram high-signal (phrase-first)
+  - game-changer
+  - game changer
+  - game-changing
+  - supercharge
+  - supercharging
+  - supercharges
+  - democratize
+  - democratizing
+  - democratizes
+  - unprecedented
+  - unprecedentedly
+  - salient
+  - cognizant
+  - palpable
+  - amidst
+  - nestled
+  - bustling
+  - thought-provoking
+  - paradigm shift
+  - sea change
+  - watershed moment
+  - tipping point
+  - double-edged sword
+  - tip of the iceberg
+  - at the forefront
+  - on the cutting edge
+  - moving the needle
+  - moves the needle
+  - move the needle
+  - unlocks new
+  - unlock new
+  - unlock the potential
+  - unlocks the potential
+  - unlock the power
+  - unlock the full potential
+  - take to the next level
+  - take your .* to the next level
+  - revolutionize
+  - revolutionizing
+  - revolutionizes
+  - state-of-the-art
+  - best-in-class
+  - world-class
+  - next-generation
+  - next-level
+  - new normal
+  - in this day and age
+  - in an era of
+  - against this backdrop
+  - poised to
+  - a closer look reveals
+  - what this means is
+  - this begs the question
+  - make no mistake
+  - the reality is
+  - the fact of the matter
+  - it goes without saying
+  - needless to say
+  - at first glance
+  - actionable insights
+  - drive impact
+  - data-driven
+  - significant impact
+  - broader implications
+  - stands as a testament
+  - stands as a
+  - serves as a
+  - holds the distinction
+  - paints a picture
+  - paint a picture
+  - laid the groundwork
+  - lays the groundwork
+  - is not without its challenges
+  - not without challenges
+  - only time will tell
+  - the jury is still out
+  - it remains to be seen
+  - takes center stage
+  - take center stage
+  - the transformative power of
+  - a hallmark of
+  - the hallmark of
+  - intricate interplay
+  - delicate balance
+  - dynamic interplay
+  - complex and multifaceted
+  - instrumental role
+  - played a crucial role
+  - plays a crucial role
+  - dive deeper
+  - take a deep dive
+  - dive deep into
+  - unpack the
+  - unpacking the
+  - unpacking
+  - unpacks the
+  - going forward
+  - moving forward
+  - circle back
+  - low-hanging fruit
+  - let's break this down
+  - lets break this down
+  - as previously mentioned
+  - as mentioned earlier
+  - as outlined above
+  - as discussed above
+  - in the following sections
+  - in this article we
+  - in this blog post
+  - the good news is
+  - the bad news is
+  - whether you're a
+  - whether you are a
+  - hope this message finds you
+  - hope this email finds you
+  - i hope this email finds you
+  - with that in mind
+  - in other words
+  - to put it simply
+  - does the heavy lifting
+  - pulls its weight
+  - earns its keep
+  - speaks for itself
+  # Grok-idiosyncratic overuse noted on WP:AISIGNS (2026); phrase forms only
+  - causal relationship
+  - empirically validated
+  - strongly correlate
+  - strongly correlates
+  - concrete evidence
+  - concrete examples
+exceptions:
+  - 'Holistic Fusion'
+
+  # Course-prose pastiche (Between Minima 2026-07)
+  - beautiful fact
+  - the game is clear
+  - powerful framework
+  - representation first

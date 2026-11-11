@@ -1,0 +1,15 @@
+paper/jctc/cover-letter.tex:31: [warning] rgoswami.DenialCadence (lexical) 'are not a success' defines the result by denial. State what it is.
+paper/jctc/manuscript.tex:592: [warning] rgoswami.DenialCadence (lexical) '.
+These are not' defines the result by denial. State what it is.
+paper/jctc/manuscript.tex:44: [warning] rgoswami.DenialCadence (lexical) 'are not a success' defines the result by denial. State what it is.
+paper/jctc/manuscript.tex:560: [warning] rgoswami.DenialCadence (lexical) 'is not the submitted' defines the result by denial. State what it is.
+paper/jctc/manuscript.tex:563: [warning] rgoswami.DenialCadence (lexical) 'is not an author' defines the result by denial. State what it is.
+paper/jctc/manuscript.tex:194: [suggestion] rgoswami.TricolonAbuse (lexical) Tricolon (Moral, Doucet, and Jasra). Models default to three. Kill it: keep two items, or put the list in a table.
+paper/jctc/manuscript.tex:311: [suggestion] rgoswami.TricolonAbuse (lexical) Tricolon (Oakley, Johnston, and Wales). Models default to three. Kill it: keep two items, or put the list in a table.
+paper/jctc/manuscript.tex:553: [suggestion] rgoswami.TricolonAbuse (lexical) Tricolon (TuiTui, Snoopy, and Cosmo). Models default to three. Kill it: keep two items, or put the list in a table.
+paper/jctc/si.tex:106: [warning] rgoswami.DenialCadence (lexical) '.
+They are not' defines the result by denial. State what it is.
+paper/jctc/si.tex:242: [warning] rgoswami.DenialCadence (lexical) '.
+These are not' defines the result by denial. State what it is.
+paper/jctc/si.tex:107: [warning] rgoswami.DenialCadence (lexical) 'are not the result' defines the result by denial. State what it is.
+proseguard: 11 finding(s), 8 actionable

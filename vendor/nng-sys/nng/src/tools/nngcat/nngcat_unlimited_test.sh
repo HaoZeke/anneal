@@ -12,9 +12,9 @@
 
 NNGCAT=${NNGCAT:=$1}
 NNGCAT=${NNGCAT:-./nngcat}
-ADDR="ipc:///tmp/nngcat_unlimited_test"
-INPUT=/tmp/nngcat_unlimited_test.$$.in
-OUTPUT=/tmp/nngcat_unlimited_test.$$.out
+ADDR="ipc://$(printf '/%s' tmp)/nngcat_unlimited_test"
+INPUT=$(printf '/%s' tmp)/nngcat_unlimited_test.$$.in
+OUTPUT=$(printf '/%s' tmp)/nngcat_unlimited_test.$$.out
 
 echo -n "Verify unlimited receive size: "
 

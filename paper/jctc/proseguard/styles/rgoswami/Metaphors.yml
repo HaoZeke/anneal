@@ -1,0 +1,48 @@
+extends: existence
+message: "'%s' is a metaphorical framing. State the relationship directly."
+ignorecase: true
+level: warning
+tokens:
+  - load-bearing
+  - cornerstone of
+  - serves as a bridge
+  - paves the way
+  - opens the door
+  - lays the groundwork
+  - lays the foundation
+  - building block
+  - stepping stone
+  - tip of the iceberg
+  - double-edged sword
+  - silver bullet
+  - game changer
+  - game-changer
+  - low-hanging fruit
+  - needle in a haystack
+  - shines when
+  - shines at
+  - earns its keep
+  - crosses the line
+  - cross the line
+  - crossed the line
+  - pulls ahead
+  - pull ahead
+  - drops into
+  - drop into
+  - lifts into
+  - lift into
+  - feels different
+  - feel different
+  - plays a role
+  - play a role
+  - breaks down
+  - break down
+  - falls outside
+  - fall outside
+  - hangs on
+  - picks up
+  - picked up
+  - elegant code
+  - an elegant way to
+  - elegantly solves
+  - such an elegant

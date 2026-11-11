@@ -1,0 +1,8 @@
+extends: existence
+message: "'%s' uses a dash as punctuation. Use a period, comma, colon, or parentheses instead."
+ignorecase: false
+level: error
+nonword: true
+tokens:
+  - ' -- '
+  - ' --- '

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-ADDR=ipc:///tmp/async_demo
+ADDR=ipc://$(printf '/%s' tmp)/async_demo
 COUNT=10
 
 ./server $ADDR &

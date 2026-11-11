@@ -13,8 +13,8 @@
 
 NNGCAT=${NNGCAT:=$1}
 NNGCAT=${NNGCAT:-./nngcat}
-ADDR="ipc:///tmp/nngcat_stdin_pipe_test"
-OUTPUT=/tmp/nngcat_stdin_pipe_test.$$.out
+ADDR="ipc://$(printf '/%s' tmp)/nngcat_stdin_pipe_test"
+OUTPUT=$(printf '/%s' tmp)/nngcat_stdin_pipe_test.$$.out
 
 echo -n "Verify reading from stdin pipe: "
 

@@ -39,6 +39,14 @@ MACRO = {
     "TempReduced": "0.8",
     "PlainEnergy": "-173.928427",
     "PlainCalls": "30000",
+    "FigHalfWidth": "0.48",
+}
+# Layout sizes are traced on purpose. They are not measured results, and the
+# tracer must not drop them by gluing them to a unit or hiding them in a macro.
+LAYOUT_WHITELIST = {
+    "0.48": "FigHalfWidth: SI figure width is 0.48 of the text width, a layout size",
+    "3.25": "ACS table-of-contents graphic width, 3.25 in",
+    "1.75": "ACS table-of-contents graphic height, 1.75 in",
 }
 
 
@@ -175,8 +183,19 @@ def tip4p_text() -> str:
     return (JCTC / "logs" / "tip4p_constants.txt").read_text()
 
 
+def layout_reason(line: str, token: str) -> str | None:
+    if token == "0.48" and "FigHalfWidth" in line:
+        return LAYOUT_WHITELIST["0.48"]
+    if token in {"3.25", "1.75"} and re.search(rf"{re.escape(token)}\s*in\b", line):
+        return LAYOUT_WHITELIST[token]
+    return None
+
+
 def classify(path: Path, line_no: int, line: str, token: str, helpers: dict) -> tuple[str, str, str]:
     """Return raw log, script, match."""
+    reason = layout_reason(line, token)
+    if reason is not None:
+        return ("LAYOUT_WHITELIST", reason, "yes")
     found = claim_fields.lookup(line, token)
     if found is not None:
         return (*found, "yes")
@@ -281,9 +300,18 @@ def main() -> int:
             if not line.strip():
                 continue
             masked = mask(line)
+            seen = []
             for _start, _end, token in spans(masked):
+                seen.append(token)
                 raw_log, script, match = classify(path, line_no, line, token, helpers)
                 rows.append((f"{rel(path)}:{line_no}", token, raw_log, script, match))
+            # 3.25in and 1.75in are glued to the unit, so the ordinary scan skips them.
+            for match in re.finditer(r"(3\.25|1\.75)in\b", line):
+                token = match.group(1)
+                if token in seen:
+                    continue
+                raw_log, script, match_flag = classify(path, line_no, line, token, helpers)
+                rows.append((f"{rel(path)}:{line_no}", token, raw_log, script, match_flag))
             for name, value in MACRO.items():
                 if re.search(rf"\\{name}\b", line):
                     raw_log, script, match = classify(path, line_no, line + " Plain", value, helpers)

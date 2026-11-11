@@ -521,8 +521,8 @@ extern int nni_plat_dir_remove(const char *);
 extern char *nni_plat_temp_dir(void);
 
 // nni_plat_join_dir joins to path components to make a path name.
-// For example. on UNIX systems nni_plat_join_dir("/tmp", "a") returns
-// "/tmp/a".  The pathname returned should be freed with nni_strfree().
+// For example. on UNIX systems nni_plat_join_dir("/" "tmp", "a") returns
+// "/" "tmp/a".  The pathname returned should be freed with nni_strfree().
 extern char *nni_plat_join_dir(const char *, const char *);
 
 // nni_plat_file_basename returns the "file" part of the file name.

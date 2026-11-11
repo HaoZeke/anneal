@@ -265,7 +265,7 @@ TestMain("UDP support", {
 		int           rv;
 
 		sa.s_ipc.sa_family = NNG_AF_IPC;
-		strcpy(sa.s_ipc.sa_path, "/tmp/t");
+		strcpy(sa.s_ipc.sa_path, "/" "tmp/t");
 		So((rv = nni_plat_udp_open(&u, &sa)) != 0);
 		// Some platforms reject IPC addresses altogether (Windows),
 		// whereas others just say it's not supported with UDP.

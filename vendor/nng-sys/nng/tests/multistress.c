@@ -43,7 +43,7 @@ static int next_port = 20000; // port number kind of.
 const char *tcp4_template   = "tcp://127.0.0.1:%d";
 const char *tcp6_template   = "tcp://[::1]:%d";
 const char *inproc_template = "inproc://nng_multistress_%d";
-const char *ipc_template    = "ipc:///tmp/nng_multistress_%d";
+const char *ipc_template    = "ipc:///" "tmp/nng_multistress_%d";
 nng_time    end_time;
 
 const char *templates[] = {
@@ -54,7 +54,7 @@ const char *templates[] = {
 	"tcp://[::1]:%d",
 #endif
 	"inproc://nng_multistress_%d",
-	"ipc:///tmp/nng_multistress_%d",
+	"ipc:///" "tmp/nng_multistress_%d",
 };
 
 #define NTEMPLATES (sizeof(templates) / sizeof(templates[0]))

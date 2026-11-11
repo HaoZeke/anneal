@@ -2,7 +2,7 @@
 # Launch with the profile, which caps concurrency:
 #   snakemake --profile profiles/elja --config sizes=75 seeds=0
 # An empty config submits nothing. The build script refuses to write
-# the cargo target onto /users/home.
+# the cargo target onto the NFS filer.
 
 configfile: "config/elja_lj.yaml"
 

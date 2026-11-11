@@ -1,0 +1,32 @@
+extends: existence
+message: "Trailing participle '%s'. Kill the tacked-on analysis: end the sentence, then state the measured result."
+ignorecase: true
+level: warning
+nonword: true
+tokens:
+  - ', highlighting\b'
+  - ', demonstrating\b'
+  - ', enabling\b'
+  - ', ensuring\b'
+  - ', reflecting\b'
+  - ', showcasing\b'
+  - ', illustrating\b'
+  - ', indicating\b'
+  - ', suggesting\b'
+  - ', allowing\b'
+  - ', making\b'
+  - ', providing\b'
+  - ', rendering\b'
+  - ', yielding\b'
+  - ', facilitating\b'
+  - ', underscoring\b'
+  - ', emphasizing\b'
+  - ', representing\b'
+  - ', signifying\b'
+  - ', paving\b'
+  - ', signaling\b'
+  - ', signalling\b'
+  - ', solidifying\b'
+  - ', cementing\b'
+  - ', reinforcing\b'
+  - ', underlining\b'

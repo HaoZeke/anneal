@@ -72,7 +72,7 @@ nuts_scratch_addr(const char *scheme, size_t sz, char *addr)
 		if (((tmpdir = getenv("TMPDIR")) == NULL) &&
 		    ((tmpdir = getenv("TEMP")) == NULL) &&
 		    ((tmpdir = getenv("TMP")) == NULL)) {
-			tmpdir = "/tmp";
+			tmpdir = "/" "tmp";
 		}
 
 		(void) snprintf(addr, sz, "%s://%s/nuts%04x%04x%04x%04x",

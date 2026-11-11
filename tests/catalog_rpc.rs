@@ -438,8 +438,8 @@ fn rejected_ledger_batch_does_not_apply_a_valid_prefix() {
 
 #[test]
 fn durable_ledger_batch_is_one_frame_and_replays_every_boundary() {
-    let directory = PathBuf::from(format!(
-        "/tmp/anneal-catalog-batch-{}-{}",
+    let directory = std::env::temp_dir().join(format!(
+        "anneal-catalog-batch-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -517,8 +517,8 @@ fn durable_ledger_batch_is_one_frame_and_replays_every_boundary() {
 
 #[test]
 fn coordinator_restart_replays_its_durable_request_journal() {
-    let directory = PathBuf::from(format!(
-        "/tmp/anneal-catalog-journal-{}-{}-{}",
+    let directory = std::env::temp_dir().join(format!(
+        "anneal-catalog-journal-{}-{}-{}",
         std::process::id(),
         std::thread::current().name().unwrap_or("catalog-rpc"),
         std::time::SystemTime::now()
@@ -1152,8 +1152,8 @@ fn detach_leaves_the_barrier_so_a_two_replica_epoch_closes_on_one_submission() {
 #[test]
 fn ticks_close_a_half_submitted_epoch_and_replay_to_the_same_open_epoch() {
     let ensemble = "roster-tick";
-    let directory = PathBuf::from(format!(
-        "/tmp/anneal-catalog-tick-{}-{}",
+    let directory = std::env::temp_dir().join(format!(
+        "anneal-catalog-tick-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

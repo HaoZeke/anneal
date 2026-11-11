@@ -260,6 +260,105 @@ def _plain() -> tuple[str, str, Path]:
     return charged.group(1), verified.group(1), path
 
 
+@functools.cache
+def _line_of(path: Path, needle: str) -> str:
+    for number, text in enumerate(path.read_text().splitlines(), start=1):
+        if needle in text:
+            return f"{path.relative_to(ROOT).as_posix()}:{number}"
+    raise SystemExit(f"{path} lacks {needle}")
+
+
+@functools.cache
+def _numstat() -> dict[str, tuple[int, int]]:
+    import lj75_archive_numstat
+
+    return {name: (added, deleted) for name, added, deleted in lj75_archive_numstat.counts()}
+
+
+def _restored(line: str, token: str) -> tuple[str, str] | None:
+    """Parameters and input rows the manuscript quotes."""
+    script = "paper/jctc/scripts/claim_fields.py"
+    if token == "2" and r"R\ge 2" in line:
+        return (_line_of(ROOT / "src/methods/feynman_kac.rs", "if values.len() == 1"), script)
+    if token == "0.15" and "0.15" in line and "coordination" in line:
+        return (_line_of(JCTC / "scripts/fig_disconnectivity.py", "DEDUP = 0.15"), script)
+    if token in {r"1\times 10^{-7}", "1e-7"} and "vtight" in line.lower() and "threshold" in line.lower():
+        return (_line_of(JCTC / "scripts/hexamer_numbers.py", "VTIGHT_EH = 1e-7"), script)
+    if token == "200" and "200 seeds" in line:
+        path = JCTC / "data/lj75_gmin/lj75-recommended-seeds-2000-2199.csv"
+        rows = path.read_text().splitlines()
+        if len(rows) - 1 == 200:
+            return (path.relative_to(ROOT).as_posix(), script)
+    if token == "600" and "600 landmarks" in line:
+        path = JCTC / "data/system_visuals/sketchmap/lj38.csv"
+        if len(path.read_text().splitlines()) - 1 == 600:
+            return (path.relative_to(ROOT).as_posix(), script)
+    literature = JCTC / "data/literature.tsv"
+    oakley = [
+        row for row in literature.read_text().splitlines()
+        if row.startswith("GMIN CSM BH\t38\t100\t") and "\t4369\t" in row and "Table 1" in row
+    ]
+    if oakley:
+        if token == "4369" and "4369" in line:
+            return (literature.relative_to(ROOT).as_posix(), script)
+        if token == "100" and "100 successful" in line:
+            return (literature.relative_to(ROOT).as_posix(), script)
+        if token == "1" and "Table 1" in line:
+            return (literature.relative_to(ROOT).as_posix(), script)
+    if token == "2" and "Table 2" in line and any(
+        "Table 2" in row and row.startswith("GMIN core-orbit GA\t")
+        for row in literature.read_text().splitlines()
+    ):
+        return (literature.relative_to(ROOT).as_posix(), script)
+    scores = JCTC / "data/campaign-scores.csv"
+    table = list(csv.DictReader(scores.open()))
+    if token == "64" and "64-seed" in line and any(
+        row["seeds"] == "64" and row["board"] == "lj38" for row in table
+    ):
+        return (scores.relative_to(ROOT).as_posix(), script)
+    if token == "16" and "16-seed" in line and any(
+        row["board"] == "tip4p20" and row["seeds"] == "16" for row in table
+    ):
+        return (scores.relative_to(ROOT).as_posix(), script)
+    ogolem = any(
+        row["board"] == "lj104" and row["code"] == "ogolem" and row["hits"] == "6" and row["seeds"] == "64"
+        for row in table
+    )
+    if ogolem and (
+        (token == "6" and "6 of" in line) or (token == "64" and ("6 of" in line or "on LJ" in line))
+    ):
+        return (scores.relative_to(ROOT).as_posix(), script)
+    stats = _numstat()
+    expected = {
+        "218": ("src/methods/cluster_hopping.rs", 0),
+        "2": ("src/methods/cluster_hopping.rs", 1),
+        "93": ("src/potentials/tip4p.rs", 0),
+        "15": ("src/potentials/tip4p.rs", 1),
+        "52": ("src/rigid_body.rs", 0),
+        "14": ("src/rigid_body.rs", 1),
+        "4": ("Cargo.toml", 0),
+        "55": ("Cargo.lock", 1),
+    }
+    # The lone insertion on molecular_cluster.rs is token 1, which is too common
+    # unless the line names that file and "insertion".
+    if "da65cc6d" in line or "insertion" in line or "deletion" in line:
+        if token in expected:
+            name, side = expected[token]
+            added, deleted = stats[name]
+            got = (added, deleted)[side]
+            if str(got) == token:
+                return (f"paper/jctc/logs/lj75-source-37535ec1.tar.xz", script)
+        if token == "1" and "molecular" in line and "insertion" in line:
+            added, deleted = stats["examples/molecular_cluster.rs"]
+            if added == 1 and deleted == 0:
+                return ("paper/jctc/logs/lj75-source-37535ec1.tar.xz", script)
+        if token == "1" and "Cargo.toml" in line and "deletion" in line:
+            added, deleted = stats["Cargo.toml"]
+            if deleted == 1 and str(deleted) == token:
+                return ("paper/jctc/logs/lj75-source-37535ec1.tar.xz", script)
+    return None
+
+
 def lookup(line: str, token: str) -> tuple[str, str] | None:
     """Return (raw log, script) when this line's token is that field."""
     script = "paper/jctc/scripts/claim_fields.py"
@@ -494,6 +593,10 @@ def lookup(line: str, token: str) -> tuple[str, str] | None:
             raise SystemExit(f"{name} has {oxygens} oxygens")
         if token == str(count) and ("molecule" in line or "TIP4P" in line):
             return hit(path.relative_to(ROOT).as_posix())
+
+    restored = _restored(line, token)
+    if restored is not None:
+        return restored
 
     # TIP4P unit powers from the constants log.
     tip = (LOGS / "tip4p_constants.txt").read_text()

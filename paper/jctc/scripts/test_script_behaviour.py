@@ -675,10 +675,10 @@ def test_shipped_tree_has_no_private_paths() -> None:
     """The needles are built so this test does not contain them itself."""
     needles = (
         "/home/" + "linuxbrew",
-        "/users/home/" + "rog32",
+        "/" + "users" + "/" + "home/" + "rog32",
         "ipc:///" + "tmp",
     )
-    skip = {".git", "vendor"}
+    skip = {".git"}
     bad = []
     for path in ROOT.rglob("*"):
         if not path.is_file() or skip.intersection(path.parts):
@@ -691,6 +691,12 @@ def test_shipped_tree_has_no_private_paths() -> None:
             if needle in text:
                 bad.append(f"{path.relative_to(ROOT)}:{needle}")
     assert bad == []
+
+
+def test_submission_commits_have_no_trailers() -> None:
+    import check_trailers
+
+    assert check_trailers.trailers(check_trailers.BASE) == []
 
 
 def test_source_constants_receipt_matches_the_sources() -> None:

@@ -1,0 +1,20 @@
+extends: existence
+message: "'%s' opens weakly. Lead with the subject or action."
+ignorecase: true
+level: warning
+scope: sentence
+tokens:
+  # SentenceFillers covers: it is clear that, it can be seen that, it is evident/apparent/obvious
+  # EssaySpeak covers: as mentioned earlier, as previously discussed
+  - '^There is '
+  - '^There are '
+  - '^There was '
+  - '^There were '
+  - '^There exists '
+  - '^It has been shown that'
+  - '^It has been demonstrated'
+  - '^It has been established'
+  - '^It goes without saying'
+  - '^Needless to say'
+  - '^As stated before'
+  - '^As noted above'

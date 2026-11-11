@@ -1,0 +1,200 @@
+extends: existence
+message: "'%s' is a structural model hinge. Kill it: write the two facts as two sentences, or keep one fact and drop the contrast."
+ignorecase: true
+level: error
+tokens:
+  - the common thread is
+  - the practical advice is
+  - the practical upshot
+  - the key takeaway here
+  - none of these issues are particularly
+  - the short answer is
+  - in summary
+  - to summarize
+  - in conclusion
+  - to conclude
+  - at the end of the day
+  - all in all
+  - the bottom line is
+  - it bears mentioning
+  - it bears noting
+  - this is not particularly
+  - not particularly deep
+  - not particularly surprising
+  - the answer is simple
+  - the fix is straightforward
+  - the solution is straightforward
+  - perhaps unsurprisingly
+  - unsurprisingly
+  # review-prose clefts and telegraphic frames (single-turn 2026-06-08)
+  - cuts against
+  - the order matches
+  - is where it loses ground
+  - which is the one place
+  - the one place its
+  - the one place it
+  - sits poorly with
+  - the wrong shape for
+  - the cost is
+  - its weakness is the
+  - that is the catch
+  - what saves
+  - is where it
+  # anthropomorphizing code / the spec (single-turn 2026-06-08)
+  - asks the parse tree
+  - the code knows
+  - the parser knows
+  - the compiler knows
+  - the prompt wants
+  - the code wants
+  - tells the compiler
+  - the function decides
+  - what it loses is
+  - sits second only because
+  - places second only because
+  - the prompt says
+  - the prompt forbids
+  - the prompt demands
+  - the prompt insists
+  - the same gap
+  - the same gap b
+  - the same reason
+  - for the same reason
+  - the same story
+  - the same problem
+  - the same trick
+  - made the right call
+  - the right call
+  - rightly
+  - to its credit
+  - wisely
+  - sensibly chooses
+  - the smart move
+  - gets right
+  - gets it right
+  - the catch is
+  - the upshot is
+  - the takeaway is
+  - the net effect is
+  - the bottom line
+  - it is worth noting
+  - worth noting
+  - that said,
+  - when it comes to
+  - does not surface
+  - doesn't surface
+  - surface the
+  - surfaces the
+  - to surface
+  - surface a
+  - no matter what
+  - whatever happens
+  - come what may
+  - rest assured
+  - keeps redrawing
+  - the prompt names
+  - on every comment position
+  - on every position
+  - at every position
+  - easy to fake
+  - however complete
+  - the rest looks
+  - untrustworthy code
+  - does not make up for
+  - the hard-to-catch kind
+  - the point of
+  - is the part that
+  - the real test is
+  - the whole point is
+  # 2025–2026 structural formulas (WP:AIPARALLEL + field guides)
+  - it's not just
+  - it is not just
+  - it isn't just
+  - it's not about
+  - it is not about
+  - it isn't about
+  - it's not merely
+  - it is not merely
+  - it's not simply
+  - it is not simply
+  - it's not only
+  - it is not only
+  - this isn't just
+  - this is not just
+  - this isn't merely
+  - this is not merely
+  - not just about
+  - more than just
+  - rather than merely
+  - far from being
+  - what this means is
+  - this begs the question
+  - a closer look reveals
+  - make no mistake
+  - the reality is
+  - the truth is
+  - the fact of the matter
+  - it goes without saying
+  - needless to say
+  - at first glance
+  - against this backdrop
+  - in an era of
+  - as we navigate
+  - as we embark
+  - going forward
+  - moving forward
+  - with that in mind
+  - in other words
+  - to put it simply
+  - put another way
+  - stated differently
+  - the good news is
+  - the bad news is
+  - here's the thing
+  - heres the thing
+  - here's why that matters
+  - that distinction matters
+  - the common misconception
+  - contrary to popular belief
+  - it remains to be seen
+  - only time will tell
+  - the jury is still out
+  - is not without its challenges
+  - not without challenges
+  - whether we like it or not
+  - whether you like it or not
+  - when all is said and done
+  - all things considered
+  - taking everything into account
+  - does the heavy lifting
+  - pulls its weight
+  - earns its keep
+  - speaks for itself
+  - lands cleanly
+  - really lands
+  - ships cleaner
+  # Announcing that a thing matters instead of stating the thing (2026-08-02,
+  # rsx BMC: "This identity matters computationally:").
+  - matters computationally
+  - matters here because
+  - this matters because
+  - why this matters
+  - the important thing here
+  - the key point is
+  - it is worth noting that
+  - it is worth emphasising that
+  - it is worth emphasizing that
+  # Counting the points before making them (2026-08-02, rsx BMC: "Two choices
+  # set rsx apart from typical RAD-seq tooling. First ... Second ...").
+  - two choices set
+  - two things set
+  - three things set
+  - two factors set
+  - sets it apart from typical
+  - sets them apart from typical
+  - there are two reasons
+  - there are three reasons
+  - for two reasons
+  - rests on two
+  - comes down to two
+  - comes down to three

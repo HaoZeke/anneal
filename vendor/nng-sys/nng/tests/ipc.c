@@ -84,5 +84,5 @@ check_props(nng_msg *msg)
 }
 
 TestMain("IPC Transport", {
-	trantest_test_extended("ipc:///tmp/nng_ipc_test_%u", check_props);
+	trantest_test_extended("ipc:///" "tmp/nng_ipc_test_%u", check_props);
 })

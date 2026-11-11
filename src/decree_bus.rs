@@ -243,7 +243,11 @@ mod tests {
 
     #[test]
     fn two_brains_exchange_over_job_scoped_ipc_endpoints() {
-        let prefix = format!("/tmp/anneal-decree-ipc-{}", std::process::id());
+        let prefix = std::env::temp_dir().join(format!(
+            "anneal-decree-ipc-{}",
+            std::process::id()
+        ));
+        let prefix = prefix.display();
         let first = format!("ipc://{prefix}-0.sock");
         let second = format!("ipc://{prefix}-1.sock");
         let a = DecreeBus::new(0, &first, &[(1, second.clone())]).unwrap();

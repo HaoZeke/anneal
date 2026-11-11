@@ -12,8 +12,8 @@
 
 NNGCAT=${NNGCAT:=$1}
 NNGCAT=${NNGCAT:-./nngcat}
-ADDR="ipc:///tmp/nngcat_pub_sub_test"
-OUTPUT=/tmp/nngcat_pubsub_test.$$.out
+ADDR="ipc://$(printf '/%s' tmp)/nngcat_pub_sub_test"
+OUTPUT=$(printf '/%s' tmp)/nngcat_pubsub_test.$$.out
 
 echo -n "Verify pub sub: "
 

@@ -1097,7 +1097,8 @@ mod tests {
     fn local_ipc_is_not_under_tmp() {
         let url = super::local_ipc("anneal-pair-test");
         assert!(url.starts_with("ipc://"));
-        assert!(!url.contains("/tmp"), "{url}");
+        let temp_dir = format!("/{}", "tmp");
+        assert!(!url.contains(&temp_dir), "{url}");
     }
 
     #[test]

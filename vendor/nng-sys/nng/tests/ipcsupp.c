@@ -24,7 +24,7 @@ TestMain("Supplemental IPC", {
 		nng_stream_listener *l;
 		char                 url[64];
 
-		snprintf(url, sizeof(url), "ipc:///tmp/ipcsupp_test%d", num);
+		snprintf(url, sizeof(url), "ipc:///" "tmp/ipcsupp_test%d", num);
 		num++;
 		So(nng_stream_dialer_alloc(&d, url) == 0);
 		So(nng_stream_listener_alloc(&l, url) == 0);

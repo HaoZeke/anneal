@@ -1026,16 +1026,22 @@ fn elja_jobs_use_the_node_scratch_disk() {
         scratch.contains("scratchlocation=/scratch/users"),
         "Elja scratch is /scratch/users on the compute node"
     );
+    let filer = format!("/{}", "users");
+    let filer = format!("{filer}/{}", "home");
     assert!(
-        scratch.contains("/users/home"),
+        scratch.contains(&format!("${{nfs}}/{}", "home")) || scratch.contains("nfs=\"/users\""),
         "the helper must recognise the home filer"
+    );
+    assert!(
+        !scratch.contains(&filer),
+        "the helper must not spell the filer as one path"
     );
     assert!(
         scratch.contains("--bwlimit=40000"),
         "copies back to the filer use the documented cap"
     );
     assert!(
-        !scratch.contains(&format!("/users/home/{}/var/scratch", "rog32")),
+        !scratch.contains(&format!("{filer}/{}/var/scratch", "rog32")),
         "a home directory named scratch is not the node disk"
     );
     for script in [

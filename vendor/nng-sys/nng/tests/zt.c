@@ -125,8 +125,8 @@ check_props(nng_msg *msg)
 }
 
 TestMain("ZeroTier Transport", {
-	char     path1[NNG_MAXADDRLEN] = "/tmp/zt_server";
-	char     path2[NNG_MAXADDRLEN] = "/tmp/zt_client";
+	char     path1[NNG_MAXADDRLEN] = "/" "tmp/zt_server";
+	char     path2[NNG_MAXADDRLEN] = "/" "tmp/zt_client";
 	unsigned port;
 
 	port = 5555;

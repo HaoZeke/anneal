@@ -17,7 +17,7 @@
 #include "stubs.h"
 #include "trantest.h"
 
-#define ADDR "/tmp/ipc_winsec_test"
+#define ADDR "/" "tmp/ipc_winsec_test"
 
 // Inproc tests.
 

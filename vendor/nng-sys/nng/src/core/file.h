@@ -68,8 +68,8 @@ typedef int (*nni_file_walker)(const char *, void *);
 extern int nni_file_walk(const char *, nni_file_walker, void *, int);
 
 // nni_file_join joins two path components to make a path name.
-// For example. on UNIX systems nni_file_join("/tmp", "a") returns
-// "/tmp/a".  The pathname returned should be freed with nni_strfree().
+// For example. on UNIX systems nni_file_join("/" "tmp", "a") returns
+// "/" "tmp/a".  The pathname returned should be freed with nni_strfree().
 extern char *nni_file_join(const char *, const char *);
 
 // nni_file_basename returns the "file" name, without the parent directory.

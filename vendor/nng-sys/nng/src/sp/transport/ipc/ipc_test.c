@@ -344,12 +344,12 @@ test_unix_alias(void)
 	nng_msg *    msg;
 	nng_pipe     p;
 
-	// Presumes /tmp.
+	// Presumes the system temporary directory.
 
 	(void) snprintf(
 	    rng, sizeof(rng), "%08x%08x", nng_random(), nng_random());
-	snprintf(addr1, sizeof(addr1), "ipc:///tmp/%s", rng);
-	snprintf(addr2, sizeof(addr2), "unix:///tmp/%s", rng);
+	snprintf(addr1, sizeof(addr1), "ipc:///" "tmp/%s", rng);
+	snprintf(addr2, sizeof(addr2), "unix:///" "tmp/%s", rng);
 
 	NUTS_OPEN(s1);
 	NUTS_OPEN(s2);

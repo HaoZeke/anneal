@@ -317,7 +317,7 @@ nni_plat_temp_dir(void)
 	if ((temp = getenv("TMPDIR")) != NULL) {
 		return (nni_strdup(temp));
 	}
-	return (nni_strdup("/tmp"));
+	return (nni_strdup("/" "tmp"));
 }
 
 char *

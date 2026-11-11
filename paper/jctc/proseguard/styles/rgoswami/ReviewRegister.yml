@@ -1,0 +1,280 @@
+extends: existence
+message: "'%s' is a review-grading register tell (academic, sports, LinkedIn, or AI-grader). Rewrite plain."
+ignorecase: true
+level: error
+tokens:
+  # Academic: "axis" used for ranking criteria. Bare words banned outright in review prose.
+  - axis
+  - axes
+  - ranking axis
+  - ranking axes
+  - response-quality axis
+  - response quality axis
+  - code-quality axis
+  - code quality axis
+  - overall axis
+  - the two axes
+  - on this axis
+  - on that axis
+  - on both axes
+  - on these axes
+  - on all three axes
+  - across the axes
+  - across all axes
+  # LinkedIn / marketing-speak verbs
+  - underclaim
+  - underclaiming
+  - underclaimed
+  - overclaim
+  - overclaiming
+  - overclaimed
+  # Workshop framing
+  - the deciding aspect
+  - the deciding aspects
+  - the deciding factor
+  - deciding factors are
+  - the deciding line
+  - the thing that matters most
+  - the things that matter most
+  - the aspects that matter
+  - what matters most
+  # "decisive" grader-adjective: name the requirement, do not label it decisive.
+  - decisive
+  - decisively
+  - decisive miss
+  - decisive misses
+  - decisive feature
+  - decisive features
+  # "gate" as editorial verb for a guard (describe the actual condition instead)
+  - ungated
+  - leaves the call ungated
+  - gates the call
+  - gate the call
+  - leaves it ungated
+  # bare "gate"/"gating" for a guard: name the actual condition (checks isatty, only when ...)
+  - gate
+  - gates
+  - gated
+  - gating
+  # "is what X buys" / "X buys" value-framing
+  - buys
+  - is what \w[\w ]* buys
+  - which is what
+  # "is honest" / "honest(ly)" reviewer-praise AIism
+  - honest
+  - honestly
+  - is honest about
+  # editorial verdict-flourish closers ("A response whose X ... ranks last")
+  - ranks last
+  - ranks first
+  - ranks below
+  - ranks above
+  - ranks it last
+  - a response whose
+  - a response that
+  # "ship/ships/shipped" marketing-delivery verb (use includes/adds/provides/has);
+  # word-bounded so it never fires inside relationship/membership/township.
+  - \bship(s|ped|ping)?\b
+  # "stamp/stamps/stamped" AI-tell verb (clang stamps optnone -> clang marks /
+  # adds / sets); word-bounded so it never fires inside e.g. timestamp.
+  - \bstamp(s|ed|ing)?\b
+  # "on spec" / "feature on spec" filler
+  - on spec
+  - on-spec
+  # "highest/lowest-risk path" and risk-ranking filler
+  - the highest-risk path
+  - highest-risk path
+  - the lowest-risk path
+  - the riskiest path
+  - highest-risk approach
+  # "the exact X the prompt cares about" pattern
+  - the prompt cares about
+  - exactly what the prompt
+  - the exact properties
+  - the exact behavior
+  - the exact behaviour
+  # trailing vagueness
+  - and stuff
+  - and so on
+  - and the like
+  - and whatnot
+  # meta-commentary that adds nothing (AI throat-clearing)
+  - worth stating plainly
+  - worth noting
+  - it is worth noting
+  - it is worth stating
+  - and that is worth
+  - to be clear
+  - it bears noting
+  # "clean win" / "keep(s) it from a X win" sportscaster framing
+  - a clean win
+  - keep it from a clean win
+  - keeps it from a clean win
+  - kept it from a clean win
+  - from a clean win
+  - clean sweep
+  - clear win
+  # Reviewer-confidence boilerplate
+  - i am confident in this comparison
+  - confident in this comparison
+  - based on the model responses' own
+  - based on the responses' own
+  # AI-grader filler that sounds plausible but says nothing
+  - concrete
+  - concretely
+  - tangible
+  - tangibly
+  - real, reproducible
+  # "which is real" / "that is real" -- empty reassurance filler; state the fact or cut it.
+  - which is real
+  - that is real
+  - which is genuinely
+  - this is real
+  # AI-tell phrasing: name the scope concretely, not these stock intensifiers.
+  - end to end
+  - end-to-end
+  - weak spot
+  - weak spots
+  - one weak spot
+  # "carry/carries the (real) weight" / "real design weight" load-bearing metaphor:
+  # say "decisive", "decides the ranking", or name the requirement plainly.
+  - carry the real weight
+  - carries the real weight
+  - carry the weight
+  - carries the weight
+  - carr(y|ies) (the )?(real )?weight
+  - real design weight
+  - the real weight
+  # Line-number citation patterns: reviewers describe by name, not by line.
+  - on lines \d+
+  - on line \d+
+  - at lines \d+
+  - at line \d+
+  - lines \d+ to \d+
+  - line \d+ to line \d+
+  # "pulls in two directions" / "pulls both ways": metaphor filler.
+  # State the two requirements and their trade-off plainly.
+  - pulls? in two directions
+  - pulls? in different directions
+  - pulls? in opposite directions
+  - pulls? two ways
+  - pulls? both ways
+  - pulled in two directions
+  - tension between
+  # Anthropomorphizing the model's intent: describe what the code DOES (evidence),
+  # never what the model "believes/thinks/assumes". That framing flip-flops and is
+  # not evidence-based; state the observable mapping/value/condition instead.
+  - \bbelieve(s|d)?\b
+  - \bbelieving\b
+  - \bthinks\b
+  - \bis convinced\b
+  - \bassume(s|d)?\b
+  - \bassuming\b
+  - \bintends? to\b
+  - \bwants? to\b
+  - \btries to\b
+  - \btrying to\b
+  # "build-verified" reads as an awkward grader tag and, in the public answer,
+  # leaks the internal build step. Say it in plain words: "builds", "the build
+  # shows", "confirmed by building", or state the covariance behaviour directly.
+  - build-verified
+  - build verified
+  # Essay-register AI tells in starfleet justifications: state the fact plainly,
+  # do not narrate or intensify. The submitted answers read declarative and
+  # code-dense ("Model B is the best because its scanner ... ; the split is ...").
+  # "genuinely/truly correct" intensifies; "land(s) the feature" and "the moment
+  # it sees" are essay framing; "buy back", "slip/sail past", "backs this up" are
+  # conversational filler. Rewrite to the fact. ("what separates them is" and "the
+  # split is" stay; those are the real voice.)
+  - \bgenuinely\b
+  - \btruly\b
+  - lands? the feature
+  - the moment it (sees|hits)
+  - buys? back
+  - slip past
+  - sail through
+  - backs this up
+  # "the one subtlety/catch/trick is" is essay framing; state the fact. "every
+  # listed position" and "the listed cases" are vague hand-waves, name the
+  # positions (before a key, around the colon, before a closing brace) so a cold
+  # reader does not have to re-read the prompt. (NOT banning bare "carry/carries":
+  # the kiss-icp 7-Perfect uses "the adjoint A and C both carry".)
+  - the one (subtlety|catch|trick|wrinkle)
+  - every listed position
+  - on every (comment )?position
+  # "richest of the three / richest-looking" is vague superlative filler; count
+  # the concrete thing instead (colors the most node categories, the full 6x6).
+  - richest(-looking)?
+  # Grading-essay filler. Say what the code/test DOES, not that it "proves" or
+  # "demonstrates" something: "it builds a real diamond and relinks the binary on
+  # a source edit", not "it proves the whole incremental contract". State the
+  # behaviour; drop the abstraction.
+  - \bproves?\b
+  - \bproof\b
+  - \bdemonstrat(e|es|ed|ing|ion)\b
+  - the (whole |entire )?\w+ contract
+  - to a good standard
+  - point for point
+  # "headline" feature/case/relink + "undemonstrated": grader-flourish. Name the
+  # specific behaviour and say plainly the example does not build a case that runs
+  # it, or that no test commits it.
+  - \bheadline\b
+  - undemonstrated
+  - the propagation is real
+  - the \w+ is real
+  # "grounds/grounded" as a verb for "rests on / is based on": AI-tell. Say the
+  # plain relation (rests on, uses, is computed from).
+  - \bground(s|ed)\b
+  # "realistic" / "the most realistic topology": grader-adjective. Name the
+  # concrete property (the only example that links a diamond, a real cc link
+  # step) instead of labelling a topology "realistic".
+  - \brealistic\b
+  # Hedged-failure adverbs: describe the failure explicitly, never as quiet/
+  # silent/subtle. "B drops the relink and the binary keeps the old string",
+  # not "B silently skips the relink". (review feedback 2026-06: quiet/silent
+  # register extension)
+  - \bquietly\b
+  - \bsilently\b
+  - soft-fail(s|ed|ing)?
+  - soft fail(s|ed|ing)?
+  - \bsubtly\b
+  # Marketing-delivery and verdict-flourish verbs: name what the diff adds or
+  # includes. "the math holds" asserts without showing; "delivers" sells.
+  # (review feedback 2026-06: voice extension)
+  - the math holds
+  - \bdeliver(s|ed|ing)?\b
+  - transcribed verbatim
+  - first-class
+  - first class citizen
+  - table-stakes
+  - table stakes
+  # (trace-review 2026-06): describe a trace plainly as "tracing the model steps",
+  # not anthropomorphic "reading its thoughts". Extends the believes/thinks block.
+  - read(ing)? (its|his|her|their|the|my) thoughts
+  - read(ing)? the model'?s thoughts
+  - its (own )?thoughts
+  # editorializing aphoristic opener ("Above all, recognize that X is not the same
+  # as Y"): state the gap concretely, do not moralize.
+  - above all,?
+  - is not the same as
+  # (2026-06-30) AI-compound / marketing / sportscaster tells that slipped the gate.
+  # These are grader-flourish, NOT the blunt descriptive voice (lazy, cop-out,
+  # papered over, made up, fabricated stay -- those describe the model plainly).
+  - byte-identical
+  - byte identical
+  - \bnails? it\b
+  - \bnailed it\b
+  - green-?light(s|ed|ing)?
+  - best-in-class
+  - best in class
+  - \bseamless(ly)?\b
+  - a testament to
+  - moves? the needle
+  - needle-moving
+  - knocks? it out of the park
+  - crushes? it
+  - \bshowcase(s|d)?\b
+  - \bunlocks?\b
+  - \bsupercharge(s|d)?\b
+  - game-changer
+  - game changer

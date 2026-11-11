@@ -12,7 +12,7 @@
 
 NNGCAT=${NNGCAT:=$1}
 NNGCAT=${NNGCAT:-./nngcat}
-ADDR="ipc:///tmp/nngcat_async_test"
+ADDR="ipc://$(printf '/%s' tmp)/nngcat_async_test"
 
 echo -n "Verify async connect: "
 

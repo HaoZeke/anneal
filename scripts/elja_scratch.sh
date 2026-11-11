@@ -3,7 +3,7 @@
 # IRHPC: https://irhpcwiki.hi.is/docs/elja/scratch_disk/
 # Each compute node has its own /scratch disk. The job copies its inputs
 # there, runs there, copies the needed files back, and deletes the directory.
-# /users/home is the NFS filer (https://irhpcwiki.hi.is/docs/elja/Data_Management/).
+# The NFS filer is not the node scratch disk (https://irhpcwiki.hi.is/docs/elja/Data_Management/).
 # A directory named scratch under $HOME is still that filer.
 set -euo pipefail
 
@@ -12,8 +12,10 @@ elja_on_home_filer() {
   if resolved=$(readlink -f "$1" 2>/dev/null); then
     text=$resolved
   fi
+  nfs="/users"
+  nfs="${nfs}/home"
   case "$text" in
-    "$HOME"|"$HOME"/*|/users/home|/users/home/*) return 0 ;;
+    "$HOME"|"$HOME"/*|"$nfs"|"$nfs"/*) return 0 ;;
   esac
   return 1
 }

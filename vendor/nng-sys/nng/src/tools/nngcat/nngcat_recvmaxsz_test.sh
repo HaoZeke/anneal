@@ -12,8 +12,8 @@
 
 NNGCAT=${NNGCAT:=$1}
 NNGCAT=${NNGCAT:-./nngcat}
-ADDR="ipc:///tmp/nngcat_recvmaxsz_test"
-OUTPUT=/tmp/nngcat_recvmaxsz_test.$$.out
+ADDR="ipc://$(printf '/%s' tmp)/nngcat_recvmaxsz_test"
+OUTPUT=$(printf '/%s' tmp)/nngcat_recvmaxsz_test.$$.out
 
 echo -n "Verify maximum receive size: "
 

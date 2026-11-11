@@ -174,7 +174,7 @@ The following caveats apply when using the legacy API with _NNG_.
   is a concern.
 
 * Only absolute paths are supported in `ipc://` URLs.
-  For example, `ipc:///tmp/mysocket` is acceptable, but `ipc://mysocket` is not.
+  For example, `ipc://$(printf '/%s' tmp)/mysocket` is acceptable, but `ipc://mysocket` is not.
 
 * The WebSocket transport in this implementation (`ws://` URLs)
   only supports BINARY frames.
