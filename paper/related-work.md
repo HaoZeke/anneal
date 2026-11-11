@@ -273,3 +273,33 @@ Doust Mohammadi, ChemRxiv (26 October 2026), doi:10.26434/chemrxiv.15011046/v1, 
 The manuscript's polish is a local relaxation of a structure already scored as a motif. This note does not contradict the polished gaps. A lower energy in another basin would be another isomer.
 
 Cite `doustMohammadiBasins2026` beside the polish. A tighter threshold inside one basin is not a new motif.
+
+## 2026-11-11 — Surface-supported basin hopping
+
+Zhang, Cheng, Zhang, and Dai, Journal of Chemical Theory and Computation 22, 7436--7455 (2026), doi:10.1021/acs.jctc.6c00328, release SGMSC. A refined basin hop on embedded-atom potentials searches surface-supported clusters: Cu7 on Zr, W, Ti, Ta, Pt, Pd, Pb, Ni, Mo, Mg, Fe, Cu, Co, Au, Al, and Ag, Pt10 on Au(100), and Au20 on Pt(110). On the cases they checked, the embedded-atom minimum stayed the lowest isomer after a density-functional relaxation. The supported Pt10 and Au20 minima differ from the gas-phase structures.
+
+The manuscript preset is a free Lennard-Jones or water cluster. SGMSC does not report those energies, and it does not fill the open ASE, AGOX, and GMIN kit. A head-to-head would be a supported cluster on one shared potential.
+
+Cite `zhangSgmsc2026`. A free-cluster hit is not a supported-cluster hit.
+
+## 2026-11-11 — Minima hopping on top of ASE
+
+Krummenacher, Gubler, Finkler, Huber, Sommer-Jörgensen, and Goedecker, SoftwareX 25, 101632 (2024), doi:10.1016/j.softx.2024.101632, implement minima hopping on the Atomic Simulation Environment, for clusters and for bulk. A corrigendum is SoftwareX 26, 101645 (2024), doi:10.1016/j.softx.2024.101645. The current code deposit is doi:10.5281/zenodo.24035625, published 7 November 2026. The deposit says any ASE calculator can be attached, and that periodic runs can move the cell. It publishes no hit rate.
+
+The missing ASE arm in the manuscript is basin hopping on tag 3.29.0. This package is minima hopping. It does not fill that kit, and it does not contradict the open count, because no ASE number is printed.
+
+Cite `krummenacherMinimaHopping2024` for the paper and `krummenacherAseMh2026` for the November deposit. A comparison that uses this code has to be named as minima hopping, and it has to charge force calls.
+
+## 2026-11-11 — A MACE basin hop on a doped boron cluster
+
+Rodríguez-Kessler, arXiv:2609.31533 (25 September 2026), searches B18Y2 by basin hopping on a pretrained MACE potential and then relaxes the candidate with density-functional theory. He reports a double-ring global minimum, with one yttrium above the boron framework and one below. The note gives no Lennard-Jones energy and no water energy.
+
+This is not the adaptive basin hop on ORCA surfaces already filed as `carmonaAbhDft2026`. It does not contradict the sealed maps, and it does not fill the open kit. A head-to-head would be this boron cluster on one shared potential.
+
+Cite `rodriguezKesslerYttrium2026`.
+
+## 2026-11-11 — Release tags checked again
+
+ASE tag 3.29.0, dated 21 June 2026, is still the newest tag. Master moved on 11 November 2026, with a fix for a fixed cell that has no positional degrees of freedom and a fix for copying atoms.info. Those commits are not a release. AGOX tag v3.11.1, dated 4 February 2026, is still the newest tag. The dev branch moved on 5 May 2026 so the constraint import accepts ASE 3.28, and that commit is not a tag. CREST's newest numbered release is still v3.0.2. The master tip is still the 16 June 2026 CMake fix. pele is still v0.1.2, dated 12 October 2026, and that tag is still the tip. The GMIN page was last modified on 17 March 2022 and still points at the group git image.
+
+Pin the open arms to ASE 3.29.0, AGOX v3.11.1, CREST 3.0.2, and pele 0.1.2. The May AGOX commit and the November ASE commits are not those arms. No bibliographic entry for this check: a tag date is not a DOI.
