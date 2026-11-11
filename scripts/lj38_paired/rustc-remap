@@ -1,0 +1,10 @@
+#!/bin/sh
+# Cargo rustc wrapper. Remap source prefixes out of panic strings.
+real=$1
+shift
+exec "$real" \
+  --remap-path-prefix=/work/anneal=/src \
+  --remap-path-prefix=/work/target=/src \
+  --remap-path-prefix=/agent=/src \
+  --remap-path-prefix=/tmp=/build \
+  "$@"
