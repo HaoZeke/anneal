@@ -19,9 +19,8 @@ pub(crate) const SLOPPY_RMS: f64 = 1.0e-3;
 /// only positive MC-cycle count initialised beside a restart in
 /// `keywords.f90` is `DUMPINT = 1000`: `mc.f` writes a restart file
 /// every 1000 cycles. The stall waits that many hops. It is not
-/// `NRELAX`. The walker moves to a lower minimum from the chain's own
-/// archive when one is kept. When none is, the hop quenches a new
-/// rigid start.
+/// `NRELAX`, and nothing is drawn: the walker moves to a minimum from
+/// the chain's own archive.
 pub(crate) const STAGNATION_HOPS: usize = 1000;
 
 /// True when `hops` since the last new lowest minimum exceeds [`STAGNATION_HOPS`].

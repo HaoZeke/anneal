@@ -1542,6 +1542,7 @@ impl Config {
             rotate_step: 0.40,
             local: false,
             reverse_cycles: true,
+            relocate: false,
         };
         cfg.rigid_body_geometry =
             Some(crate::potentials::Tip4pCluster::new(n_molecules).rigid_geometry());
@@ -1630,6 +1631,7 @@ impl Config {
             rotate_step: super::moves::RIGID_ORIENTATION_CAP,
             local: true,
             reverse_cycles: false,
+            relocate: false,
         };
         let contact = 4.0 * reach;
         let span = LennardJonesPreset::CONTAINER_RADIUS * contact * (self.n_points as f64).cbrt();
@@ -1674,10 +1676,15 @@ impl Config {
     /// [`Config::communicating_tip4p`].
     pub fn recommended_tip4p(n_molecules: usize) -> Self {
         let mut cfg = Self::for_tip4p(n_molecules);
+        // Depth reward, stall tabu and the return screen are the atomic
+        // Lennard-Jones controls. On rigid TIP4P they pin the walk in a
+        // cage about 5 kJ/mol above the Wales-Hodges minimum, and further
+        // calls do not leave it. The Wales-Hodges translation, rotation
+        // and cycle reversal already on `for_tip4p` do leave.
         cfg.allocate_moves = true;
-        cfg.depth_reward = true;
-        cfg.tabu_on_stall = true;
-        cfg.return_screen = true;
+        cfg.depth_reward = false;
+        cfg.tabu_on_stall = false;
+        cfg.return_screen = false;
         cfg
     }
 
@@ -1787,9 +1794,9 @@ mod coverage_behaviour {
         assert!(communicating.return_screen);
         assert_eq!(communicating.shared_deposits, 0);
         let recommended = Config::recommended_tip4p(4);
-        assert!(recommended.depth_reward);
-        assert!(recommended.tabu_on_stall);
-        assert!(recommended.return_screen);
+        assert!(!recommended.depth_reward);
+        assert!(!recommended.tabu_on_stall);
+        assert!(!recommended.return_screen);
         assert!(recommended.allocate_moves);
     }
 
