@@ -486,8 +486,12 @@ def cmd_heldout(args: argparse.Namespace) -> int:
     root = repo_root()
     dls = _require_tool(Path(args.dls), "lj_dls")
     requench = _require_tool(Path(args.requench), "lj_requench")
-    gmin = _require_tool(Path(args.gmin), "GMIN")
-    coords_bin = _require_tool(Path(args.coords), "coords helper")
+    gmin = Path(args.gmin) if args.gmin else None
+    if gmin is not None:
+        gmin = _require_tool(gmin, "GMIN")
+    coords_bin = Path(args.coords) if args.coords else None
+    if gmin is not None:
+        coords_bin = _require_tool(Path(args.coords), "coords helper")
     rel = Path(args.output_dir)
     if rel.is_absolute():
         print("output dir must be relative", file=sys.stderr)
@@ -517,8 +521,11 @@ def cmd_heldout(args: argparse.Namespace) -> int:
         env_base = os.environ.copy()
         env_base["OMP_NUM_THREADS"] = "1"
         env_base["RAYON_NUM_THREADS"] = "1"
+        arms = ["dls"]
+        if gmin is not None:
+            arms.append("gmin")
         for seed in held_out_seeds():
-            for code in ("dls", "gmin"):
+            for code in arms:
                 stem = f"{code}-{seed}"
                 print(f"start {stem}", flush=True)
                 row = dict(fields)
@@ -665,8 +672,8 @@ def build_parser() -> argparse.ArgumentParser:
     held.add_argument("--output-dir", required=True)
     held.add_argument("--dls", required=True)
     held.add_argument("--requench", required=True)
-    held.add_argument("--gmin", required=True)
-    held.add_argument("--coords", required=True)
+    held.add_argument("--gmin", default="")
+    held.add_argument("--coords", default="")
     held.set_defaults(func=cmd_heldout)
 
     panel = sub.add_parser("panel", help="run the default no-regression panel serially")
