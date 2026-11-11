@@ -573,8 +573,8 @@ where
         let stored_gradient = |point: &Array1<f64>| -> Option<Array1<f64>> {
             last.borrow()
                 .clone()
-                .filter(|check| &check.at == point)
-                .or_else(|| prior.clone().filter(|check| &check.at == point))
+                .filter(|check| check.at == *point)
+                .or_else(|| prior.clone().filter(|check| check.at == *point))
                 .map(|check| check.gradient)
         };
         let mut validated = None;
