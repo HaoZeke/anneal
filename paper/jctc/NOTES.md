@@ -24,3 +24,23 @@ The sealed v1.28 tip is refs/heads/paper-integration-v1.28.
 That name is a branch.
 
 It is not an archive ref.
+
+The water host line stays host=host-a.
+
+paper/jctc/scripts/water_host_relabel.py writes that label.
+
+That label is the redaction of the archived water logs.
+
+A hardware receipt records the output of hostname.
+
+.cargo/config.toml keeps the cargo target beside the workspace.
+
+The nested featomic build then does not read this file.
+
+.github/workflows/ci.yml removes /home/linuxbrew.
+
+That path is the GitHub runner disk cleanup.
+
+scripts/elja_floor_exit.sbatch refuses /users/home/*.
+
+That arm keeps the job off the home filer.
