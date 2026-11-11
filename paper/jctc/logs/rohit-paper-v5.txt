@@ -1,6 +1,6 @@
 proseguard proseguard 0.1.0
 profile_sha 654d0de1c2632feb93ddfc2f72a08372ad672a8c7cb4a6ad30cca69b2783ddc6
-tip 2a5babdd3e250aa30f3d77b60bb935e1698cf4fb
+tip 09a36514a344bc753accd609cafdde3e6e762459
 command proseguard -p <profile> --no-llm paper/jctc/manuscript.tex paper/jctc/si.tex paper/jctc/cover-letter.tex
 output
 paper/jctc/manuscript.tex:194: [suggestion] rgoswami.TricolonAbuse (lexical) Tricolon (Moral, Doucet, and Jasra). Models default to three. Kill it: keep two items, or put the list in a table.
