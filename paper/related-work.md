@@ -308,13 +308,13 @@ Pin the open arms to ASE 3.29.0, AGOX v3.11.1, CREST 3.0.2, and pele 0.1.2. The 
 
 Nozari, Abdi, and Szmelter-Jarosz, arXiv:2503.02331 (4 March 2025), name a bio-inspired metaheuristic the Goat Optimization Algorithm. The tests are analytic benchmark functions. It is not de Souza's GOAT, and it does not search a molecule or an atomic cluster.
 
-Lauga, Molinari, and Vaiter, arXiv:2605.18364 (18 May 2026), propose proximal basin hopping. They prove a high-probability guarantee for a finite sample of their proximal scheme. The tests they report are synthetic functions and fits of deep-learning scaling laws. The note does not treat a Lennard-Jones cluster. It does not prove a minimum at 38 atoms or beyond, so the sentence that leaves those sizes unproved still stands.
+Lauga, Molinari, and Vaiter, arXiv:2605.18364 (18 May 2026), propose proximal basin hopping. The abstract states a high-probability guarantee for a finite sample of their proximal scheme. The tests they report are synthetic functions and fits of deep-learning scaling laws. The note does not treat a Lennard-Jones cluster. It does not prove a minimum at 38 atoms or beyond, so the sentence that leaves those sizes unproved still stands.
 
 Cite `nozariGoatAlgorithm2025` and `laugaProximal2026` only to keep the names apart. The molecular GOAT citation stays `deSouzaGoat2025`.
 
 ## 2026-11-11 — A geometric argument for symmetric Lennard-Jones minima
 
-Schneider, arXiv:2603.00011 (27 January 2026), argues that a landscape invariant under a finite group pushes the global minimum onto a symmetric stratum, because the fully asymmetric part of the real quotient is metrically rare. For LJ13 he reads the Cambridge database as about 78 percent of the documented local minima having a trivial stabiliser, while the global minimum is the regular icosahedron. The figure of about 83 percent of global minima from one to 150 atoms having a non-trivial point group is his citation of Wales, not a new census of the database.
+Schneider, arXiv:2603.00011 (27 January 2026), argues that a landscape invariant under a finite group pushes the global minimum onto a symmetric stratum, because the fully asymmetric part of the real quotient is metrically rare. For LJ13 he reads the Cambridge database as about 78 percent of the documented local minima having a trivial stabiliser, while the global minimum is the regular icosahedron. The figure of about 83 percent of global minima from one to 150 atoms having a non-trivial point group is his citation of Wales and Doye, not a new census of the database.
 
 The manuscript already says a global minimum is often more symmetric than the minima around it. This preprint does not replace the Cambridge energies, and it does not change the symmetrisation preset.
 
