@@ -1,3 +1,4 @@
+// Copyright (c) anneal developers
 //! A stall growth that misses the incumbent does not quench another lattice
 //! until that incumbent drops. The charge it would have spent is one
 //! all-points displacement.
