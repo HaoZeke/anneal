@@ -832,12 +832,18 @@ pub fn nng_io(error: nng::Error) -> io::Error {
     io::Error::new(kind, error)
 }
 
+/// Same-node ipc URL under `ANNEAL_IPC_DIR`, or `./` when that variable is unset.
+pub fn local_ipc(name: &str) -> String {
+    let dir = std::env::var("ANNEAL_IPC_DIR").unwrap_or_else(|_| ".".to_string());
+    format!("ipc://{dir}/{name}")
+}
+
 fn pair_bind_spec() -> String {
     // Occupancy and tests are same-node. ipc keeps the vat off a second
     // TCP port per replica. Remote hosts still reach the advertised
     // Rep URL over tcp://; the pair stays on the node.
     let seq = PAIR_SEQ.fetch_add(1, Ordering::Relaxed);
-    format!("ipc:///tmp/anneal-pair-{}-{seq}", std::process::id())
+    local_ipc(&format!("anneal-pair-{}-{seq}", std::process::id()))
 }
 
 fn bound_endpoint(
@@ -1084,7 +1090,14 @@ mod tests {
     fn host_port_becomes_tcp_url() {
         assert_eq!(url("127.0.0.1:9"), "tcp://127.0.0.1:9");
         assert_eq!(url("tcp://127.0.0.1:9"), "tcp://127.0.0.1:9");
-        assert_eq!(url("ipc:///tmp/x"), "ipc:///tmp/x");
+        assert_eq!(url("ipc://./x"), "ipc://./x");
+    }
+
+    #[test]
+    fn local_ipc_is_not_under_tmp() {
+        let url = super::local_ipc("anneal-pair-test");
+        assert!(url.starts_with("ipc://"));
+        assert!(!url.contains("/tmp"), "{url}");
     }
 
     #[test]

@@ -16,9 +16,11 @@ set -euo pipefail
 SCRATCH=/scratch/users/${USER}/${SLURM_JOB_ID}
 mkdir -p "$SCRATCH"
 df -PT "$SCRATCH" | awk 'NR==2 { if ($2 ~ /^nfs/) { print "scratch is nfs" > "/dev/stderr"; exit 1 } }'
-case "$SCRATCH" in
-  /users/home/*) echo "work directory is the home filer" >&2; exit 1 ;;
-esac
+filer=${ANNEAL_HOME_FILER:-}
+if [[ -n $filer && ( $SCRATCH == "$filer" || $SCRATCH == "$filer"/* ) ]]; then
+  echo "work directory is the home filer" >&2
+  exit 1
+fi
 export UV_CACHE_DIR=$SCRATCH/uv-cache
 mkdir -p "$UV_CACHE_DIR"
 git clone --depth 1 --branch main https://github.com/HaoZeke/anneal.git "$SCRATCH/src"

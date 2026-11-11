@@ -33,15 +33,11 @@ That label is the redaction of the archived water logs.
 
 A hardware receipt records the output of hostname.
 
-.cargo/config.toml keeps the cargo target beside the workspace.
+.cargo/config.toml leaves the cargo target at the workspace default.
 
-The nested featomic build then does not read this file.
+.github/workflows/ci.yml no longer names a linuxbrew prefix.
 
-.github/workflows/ci.yml removes /home/linuxbrew.
-
-That path is the GitHub runner disk cleanup.
-
-scripts/elja_floor_exit.sbatch refuses /users/home/*.
+scripts/elja_floor_exit.sbatch refuses the directory named by ANNEAL_HOME_FILER.
 
 That arm keeps the job off the home filer.
 

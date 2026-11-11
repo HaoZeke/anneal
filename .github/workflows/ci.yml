@@ -204,8 +204,7 @@ jobs:
             /opt/google \
             /opt/microsoft \
             /opt/az \
-            /usr/lib/jvm \
-            /home/linuxbrew
+            /usr/lib/jvm
           if [[ -d /opt/hostedtoolcache ]]; then
             find /opt/hostedtoolcache -mindepth 1 -maxdepth 1 ! -name Python \
               -exec sudo rm -rf {} +

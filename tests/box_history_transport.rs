@@ -160,7 +160,7 @@ fn box_driver_admissions_reach_an_independent_nng_client() {
 
     for driver in ["gradient", "values"] {
         let url = format!(
-            "ipc:///tmp/anneal-box-history-{}-{driver}",
+            "ipc://./anneal-box-history-{}-{driver}",
             std::process::id()
         );
         let output = Command::new(std::env::current_exe().unwrap())

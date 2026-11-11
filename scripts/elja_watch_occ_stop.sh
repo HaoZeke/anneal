@@ -2,11 +2,12 @@
 # One-shot occupancy harvest for anneal-stop ensembles.
 set -euo pipefail
 echo "=== jobs ==="
-squeue -u rog32 -h -o "%i %P %j %t %M %R" | grep -E "lj(38|75|98)-occ" || echo none
+squeue -u "${USER}" -h -o "%i %P %j %t %M %R" | grep -E "lj(38|75|98)-occ" || echo none
+work=${ANNEAL_WORK:?set ANNEAL_WORK to the occupancy directory}
 for spec in \
-  "lj38 /users/home/rog32/ljwork/jcc/lj38-occ-sb/lj38/shared/lj38-shared-0001 -173.928427" \
-  "lj75 /users/home/rog32/ljwork/jcc/lj75-occ-sb/lj75/shared/lj75-shared-0004 -397.492331" \
-  "lj98 /users/home/rog32/ljwork/jcc/lj98-occ-sb/lj98/shared/lj98-shared-0004 -543.665361"
+  "lj38 ${work}/lj38-occ-sb/lj38/shared/lj38-shared-0001 -173.928427" \
+  "lj75 ${work}/lj75-occ-sb/lj75/shared/lj75-shared-0004 -397.492331" \
+  "lj98 ${work}/lj98-occ-sb/lj98/shared/lj98-shared-0004 -543.665361"
 do
   set -- $spec
   label=$1

@@ -59,7 +59,7 @@ That is the Cambridge Cluster Database value.
 It uses the Jorgensen constants C6 = 2552.24 and C12 = 2510400.
 anneal uses epsilon 0.6485 kJ/mol and sigma 3.15365 Å.
 Its C6 is 2551.8252 and its C12 is 2510336.2.
-Those constants give the committed -197.7750 kJ/mol reported here.
+The plate does not print an anneal hexamer energy.
 
 ## Bundle
 

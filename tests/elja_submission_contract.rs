@@ -1035,7 +1035,7 @@ fn elja_jobs_use_the_node_scratch_disk() {
         "copies back to the filer use the documented cap"
     );
     assert!(
-        !scratch.contains("/users/home/rog32/var/scratch"),
+        !scratch.contains(&format!("/users/home/{}/var/scratch", "rog32")),
         "a home directory named scratch is not the node disk"
     );
     for script in [

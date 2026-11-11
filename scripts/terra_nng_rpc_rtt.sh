@@ -16,7 +16,7 @@ cleanup_tcp_test() {
     if command -v rtrash >/dev/null; then
       rtrash -f "$TCP_TEST"
     else
-      mv -f "$TCP_TEST" /tmp/catalog_carrier_rtt.rs.bak
+      mv -f "$TCP_TEST" "${TCP_TEST}.bak"
     fi
   fi
 }

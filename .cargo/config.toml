@@ -1,7 +1,1 @@
-# Development builds keep the cargo target tree beside the workspace.
-# featomic's metatensor build runs `cargo rustc --locked` with its working
-# directory inside the cargo target tree. An unused patch there makes
-# `--locked` fail. Keep that tree beside the workspace so the nested cargo
-# does not walk up to this file.
-[build]
-target-dir = "../tmp/anneal-target"
+# The cargo target directory is Cargo's default, target/, inside the workspace.

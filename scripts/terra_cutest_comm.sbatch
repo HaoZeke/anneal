@@ -19,7 +19,7 @@ METHODS=${METHODS:-comm_hop}
 OUTDIR=${ROOT}/shards/box_hist
 export PATH="${VERIFY}/bin:/usr/bin:${PATH}"
 export PYTHONPATH="${ANNEAL}${PYTHONPATH:+:$PYTHONPATH}"
-export HISTORY_NNG="ipc:///tmp/anneal-hist-${SLURM_JOB_ID:-$$}"
+export HISTORY_NNG="ipc://./anneal-hist-${SLURM_JOB_ID:-$$}"
 export HISTORY_NNG_SERVE=1
 mkdir -p "$OUTDIR"
 cd "$ANNEAL"

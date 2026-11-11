@@ -64,7 +64,7 @@ pub struct HistoryNngServer {
 }
 
 impl HistoryNngServer {
-    /// Bind `url` (`ipc:///tmp/...` or `tcp://127.0.0.1:port`) and serve.
+    /// Bind `url` (`ipc://./...` or `tcp://127.0.0.1:port`) and serve.
     pub fn bind(
         url: &str,
         identity_tol: f64,
@@ -474,6 +474,11 @@ impl HistoryHook for HistoryNngClient {
     }
 }
 
+fn local_ipc(name: &str) -> String {
+    let dir = std::env::var("ANNEAL_IPC_DIR").unwrap_or_else(|_| ".".to_string());
+    format!("ipc://{dir}/{name}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -481,7 +486,7 @@ mod tests {
 
     #[test]
     fn two_clients_share_one_nng_history() {
-        let url = format!("ipc:///tmp/anneal-hist-nng-{}", std::process::id());
+        let url = local_ipc(&format!("anneal-hist-nng-{}", std::process::id()));
         let _server = HistoryNngServer::bind(&url, 1e-3, 1e-3).expect("bind");
         let widths = array![10.0, 10.0];
         let mut first =
@@ -516,7 +521,7 @@ mod tests {
             assert_eq!(report.observed_visits, 2);
             return;
         }
-        let url = format!("ipc:///tmp/anneal-hist-proc-{}", std::process::id());
+        let url = local_ipc(&format!("anneal-hist-proc-{}", std::process::id()));
         let _server = HistoryNngServer::bind(&url, 1e-3, 1e-3).expect("bind");
         let mut parent =
             HistoryNngClient::dial(&url, widths, HistoryMembership::Accepted).expect("parent");

@@ -55,6 +55,8 @@ mkdir -p "$outdir"
   cargo -V
   printf 'gfortran_v\n'
   gfortran -v
+  printf 'gpp_v\n'
+  g++ -v
 } >"$receipt" 2>&1
 
 target=$(

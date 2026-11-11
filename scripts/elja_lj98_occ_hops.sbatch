@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=44G
 #SBATCH --time=4-00:00:00
-#SBATCH --output=/users/home/rog32/ljwork/jcc/lj98-occ-sb/slurm.%j.out
+#SBATCH --output=slurm.%j.out
 # Occupancy catalog: inverted GR leave, leftover-SOAP / DECAF packing
 # identity, mixing / Good-Turing stop. Binary: anneal-stop 41ad564.
 set -euo pipefail

@@ -215,10 +215,19 @@ def classify(path: Path, line_no: int, line: str, token: str, helpers: dict) -> 
     tip_values = {"2510400", "2552.24", "0.6485", "3.15365", "2551.8252", "2510336.2"}
     if token in tip_values and token in helpers["tip"]:
         return (rel(JCTC / "logs" / "tip4p_constants.txt"), script_tip, "yes")
+    perseed = rel(JCTC / "data" / "water_v45b" / "water-v45b-perseed.csv")
     if token in {"0.0264", "0.000374"} or (number is not None and same(token, 1.37e-6)):
-        return ("", script_water, "no")
-    if token in {"121", "97", "148", "114", "192"} and ("192" in line or "McNemar" in line):
-        return ("", script_water, "no")
+        return (perseed, script_water, "yes")
+    if token in {"121", "97", "148", "114"} or (
+        token == "192" and ("192" in line or "seed" in line.lower())
+    ):
+        return (perseed, script_water, "yes")
+    if token == "-197.7805":
+        return (
+            rel(JCTC / "data" / "system_visuals" / "ccd" / "TIP4P" / "xyz" / "TIP4P-6.xyz"),
+            rel(JCTC / "scripts" / "system_visuals.py"),
+            "yes",
+        )
     bootstrap_values = {
         "2000000",
         "1513982.75",

@@ -1,0 +1,12 @@
+pymupdf 1.28.2
+xyzrender 0.3.8
+cairosvg 2.9.1
+SOURCE_DATE_EPOCH 0
+PYTHONHASHSEED 0
+passes 2
+passes_equal yes
+committed_equal yes
+systems.pdf 17307642b42136d7fb6db2e4803da11dda989c0acb535e79a3cc1aab27b7f5ce
+landscapes.pdf 7916b04a2d6c1e1d34677525f66c93b5874ff90b567da94f47504123aa82fbe5
+si_structures.pdf 97335b0647c36dfae974ea0609483b956cd92a66463eb69f2302c32c01387c94
+si_water.pdf 16bd29d14310f2f762f334edeba633b5d7e03925203e4f6145ddd8236abe1596

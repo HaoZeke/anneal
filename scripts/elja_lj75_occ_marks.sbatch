@@ -4,7 +4,7 @@
 #SBATCH --account=chem-ui
 #SBATCH --cpus-per-task=32
 #SBATCH --time=4-00:00:00
-#SBATCH --output=/users/home/rog32/ljwork/jcc/lj75-occ-dwell/slurm.%j.out
+#SBATCH --output=slurm.%j.out
 # LJ75 occupancy on packing-gt-stop 9dde60d. Paper budget 4e6,
 # 48 replicas, WAVE 24 on one 32-core node. Extras Walk while
 # leftover SOAP is unsaturated. Isolated from anneal-stop.

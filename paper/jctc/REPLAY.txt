@@ -1120,6 +1120,17 @@ This pass adds generators, not another replay.
 The replay count stays seven.
 The push plan names refs/heads/paper-integration-v1.29.
 No archive ref is on that plan.
-v1.28 is archived at the sha below.
+The v1.28 tip follows.
+This bundle does not store that tip as a ref.
 
 abb65a5b47be2de02dad87a082e539525dba648b
+
+## Bundle heads
+
+The sealed bundle carries one head.
+The head is refs/heads/submission/jctc-v1.
+It does not carry refs/heads/paper-integration-v1.28.
+It does not carry refs/heads/paper-integration-v1.29.
+It does not carry refs/heads/paper-integration-v1.30.
+It does not carry refs/heads/paper-integration-v1.31.
+It does not carry refs/archive.

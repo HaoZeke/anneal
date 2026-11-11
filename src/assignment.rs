@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) anneal developers
-// Portions Copyright (c) 2022 Theochem @ Háskóli Íslands
 
 //! Dense minimum-cost bipartite assignment.
 //!
@@ -125,6 +124,9 @@ fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<usize>> {
 /// The numerical scheme follows the Kuhn-Munkres implementation
 /// used by gpr_optim's MIT-licensed `Distance.cpp`.
 fn kuhn_munkres(costs: &[f64], n: usize) -> Option<Vec<usize>> {
+    if costs.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
     let scale = costs
         .iter()
         .fold(1.0_f64, |largest, value| largest.max(value.abs()));
@@ -348,5 +350,19 @@ mod tests {
     #[test]
     fn a_non_finite_reduced_cost_has_no_shortest_path() {
         assert!(successive_shortest_paths(&[f64::NAN], 1).is_none());
+        assert!(kuhn_munkres(&[f64::NAN], 1).is_none());
+    }
+
+    #[test]
+    fn copyright_names_only_the_anneal_developers() {
+        let text = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/assignment.rs"
+        ))
+        .unwrap();
+        let header: String = text.lines().take(6).collect::<Vec<_>>().join("\n");
+        assert!(header.contains("// Copyright (c) anneal developers"));
+        assert!(!header.contains(&format!("{}chem", "Theo")));
+        assert!(!header.contains(&["Portions ", "Copyright"].concat()));
     }
 }

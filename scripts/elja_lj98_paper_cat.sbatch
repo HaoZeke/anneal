@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=44G
 #SBATCH --time=4-00:00:00
-#SBATCH --output=/users/home/rog32/ljwork/jcc/lj98-paper-cat/slurm.%j.out
+#SBATCH --output=slurm.%j.out
 # Paper-budget cooperative catalog: 48 x 4e6 recommended, no hop cap.
 # Binary: anneal-occ @ 0883b4a. Serial rec at this budget is 16/48 Leary.
 # Occupancy 0002 (1000 hops) is 0/96 Leary, deepest -543.546726.

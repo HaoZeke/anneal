@@ -669,3 +669,25 @@ def _git_repo(path: Path, old: str, new: str) -> None:
     lock.write_text(new)
     subprocess.check_call(["git", "add", "Cargo.lock"], cwd=path)
     subprocess.check_call(["git", "commit", "-m", "new\n"], cwd=path)
+
+
+def test_shipped_tree_has_no_private_paths() -> None:
+    """The needles are built so this test does not contain them itself."""
+    needles = (
+        "/home/" + "linuxbrew",
+        "/users/home/" + "rog32",
+        "ipc:///" + "tmp",
+    )
+    skip = {".git", "vendor"}
+    bad = []
+    for path in ROOT.rglob("*"):
+        if not path.is_file() or skip.intersection(path.parts):
+            continue
+        try:
+            text = path.read_text(errors="strict")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for needle in needles:
+            if needle in text:
+                bad.append(f"{path.relative_to(ROOT)}:{needle}")
+    assert bad == []
