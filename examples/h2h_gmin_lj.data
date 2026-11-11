@@ -1,0 +1,19 @@
+! Basin-hopping input taken from the Wales group LJ38 introduction
+! (examples/LJ38/01_Introducing_GMIN/input/data). The same file is used
+! at every size. STEPS is long so the evaluator cap in H2H_BUDGET is
+! the stop. The driver appends one RANSEED line per run.
+! MONITOR, DUMPINT and TRACKDATA are omitted. They schedule output.
+
+SLOPPYCONV 5.0D-3
+TIGHTCONV 1.0D-3
+EDIFF 0.003
+MAXIT 600 500
+SAVE 2
+CENTRE
+SORT
+
+TEMPERATURE 1.0
+STEPS 90000000 1.0
+STEP 0.40 0.51
+NEWRESTART 40
+AVOID 4.0 20 F
