@@ -2,11 +2,11 @@ Copyright (c) anneal developers
 
 We record the verify of a full-history bundle.
 The verified tip follows.
-3b17550cae3bdf7d8140419f95258b60a0bc186e.
+873dfc35642bf5d30d40229dc1409a7d2c84fef6.
 The commit that adds this note is the child of that tip.
 The bundle contains these 79 refs:.
 Ref refs/heads/prereg/lj104-sota-v1.
-Object 3b17550cae3bdf7d8140419f95258b60a0bc186e.
+Object 873dfc35642bf5d30d40229dc1409a7d2c84fef6.
 Ref refs/archive/prereg/lj104-sota-v1.3.
 Object 835b90741211f2fd00b5b9ea68cde4cc877b31af.
 Ref refs/archive/prereg/lj104-sota-v1.3.1.

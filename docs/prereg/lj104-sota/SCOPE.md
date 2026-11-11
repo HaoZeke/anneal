@@ -2,7 +2,7 @@ Copyright (c) anneal developers
 
 We read every commit after 91b15a02 through the tip.
 The tip identifier follows.
-3b17550cae3bdf7d8140419f95258b60a0bc186e.
+873dfc35642bf5d30d40229dc1409a7d2c84fef6.
 Git supplies each subject and each path.
 diff-tree uses A for an addition.
 The same command uses M for a modification.
@@ -695,5 +695,24 @@ Adds no path.
 Modifies 2 paths.
 docs/prereg/lj104-sota/COVERAGE.txt
 docs/prereg/lj104-sota/run_coverage.py
+
+Commit 79a2963e72af7e7e6ddde16de8ef934d500d4f81
+Subject: lj104-prereg: refresh the scope listing and the bundle note
+Adds no path.
+Modifies 2 paths.
+docs/prereg/lj104-sota/SCOPE.md
+docs/prereg/lj104-sota/bundle-verify.txt
+
+Commit b599cee34b6cc791229e72f16e886d5540589d28
+Subject: lj104-prereg: include the prose receipt in the diff stat
+Adds no path.
+Modifies 1 path.
+docs/prereg/lj104-sota/TREE_DIFF_STAT.txt
+
+Commit 873dfc35642bf5d30d40229dc1409a7d2c84fef6
+Subject: lj104-prereg: keep the bundle note stable across note commits
+Adds no path.
+Modifies 1 path.
+docs/prereg/lj104-sota/write_bundle_verify.py
 
 ```
