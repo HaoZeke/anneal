@@ -21,6 +21,6 @@ File lj_requench_xyz.rs.
 Lines 21/22 at 95.45 percent.
 Branches 0/0 at -.
 We record both toolchains in this note.
-The remaining lattice branches are guards the passing tests do not enter.
+The remaining lattice branches are untaken guards.
 Those guards include a failed line search and a non-finite step.
 We keep the seconds the clock wrote.

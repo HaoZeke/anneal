@@ -178,7 +178,7 @@ def main() -> None:
             )
             lines.append("The nightly binary and the 1.88 binary instrument different builds.")
     lines.append("We record both toolchains in this note.")
-    lines.append("The remaining lattice branches are guards the passing tests do not enter.")
+    lines.append("The remaining lattice branches are untaken guards.")
     lines.append("Those guards include a failed line search and a non-finite step.")
     lines = balance(lines)
     lines.append("")
