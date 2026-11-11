@@ -1278,6 +1278,7 @@ pub(crate) fn separate_to_overlap_rule(
     x: &mut Array1<f64>,
     groups: Option<&[Vec<usize>]>,
     min_sep: f64,
+    frozen: Option<&[bool]>,
 ) -> bool {
     if !(min_sep.is_finite() && min_sep > 0.0) || x.iter().any(|value| !value.is_finite()) {
         return false;
@@ -1298,6 +1299,24 @@ pub(crate) fn separate_to_overlap_rule(
         owner
     });
     let n_groups = groups.map(|groups| groups.len()).unwrap_or(0);
+    let held = |atom: usize| frozen.is_some_and(|mask| mask.get(atom).copied().unwrap_or(false));
+    // A group that is entirely frozen is the frame. The repair pushes the
+    // other side by the whole gap and leaves the frame where it stands.
+    let group_held: Vec<bool> = groups
+        .map(|groups| {
+            groups
+                .iter()
+                .map(|atoms| !atoms.is_empty() && atoms.iter().copied().all(held))
+                .collect()
+        })
+        .unwrap_or_default();
+    let side_held = |atom: usize, group: usize| {
+        if group != usize::MAX {
+            group_held.get(group).copied().unwrap_or(false)
+        } else {
+            held(atom)
+        }
+    };
     // A fraction of an angstrom past the rule, so a later strict comparison
     // does not reject the same pair on a rounding residue.
     let target = min_sep + 1.0e-8;
@@ -1328,15 +1347,36 @@ pub(crate) fn separate_to_overlap_rule(
                 };
                 let left = owner.as_ref().map(|owner| owner[a]).unwrap_or(usize::MAX);
                 let right = owner.as_ref().map(|owner| owner[b]).unwrap_or(usize::MAX);
+                let left_held = side_held(a, left);
+                let right_held = side_held(b, right);
+                if left_held && right_held {
+                    continue;
+                }
+                // `scale` is half the gap. A frozen side stays put, so the
+                // free side takes the whole gap.
+                let left_weight = if right_held {
+                    2.0
+                } else if left_held {
+                    0.0
+                } else {
+                    1.0
+                };
+                let right_weight = if left_held {
+                    2.0
+                } else if right_held {
+                    0.0
+                } else {
+                    1.0
+                };
                 if left != usize::MAX && right != usize::MAX && left != right {
                     for axis in 0..3 {
-                        group_shift[left][axis] += scale * direction[axis];
-                        group_shift[right][axis] -= scale * direction[axis];
+                        group_shift[left][axis] += left_weight * scale * direction[axis];
+                        group_shift[right][axis] -= right_weight * scale * direction[axis];
                     }
                 } else {
                     for axis in 0..3 {
-                        atom_shift[a][axis] += scale * direction[axis];
-                        atom_shift[b][axis] -= scale * direction[axis];
+                        atom_shift[a][axis] += left_weight * scale * direction[axis];
+                        atom_shift[b][axis] -= right_weight * scale * direction[axis];
                     }
                 }
                 moved = true;
@@ -1347,6 +1387,9 @@ pub(crate) fn separate_to_overlap_rule(
         }
         if let Some(owner) = owner.as_ref() {
             for atom in 0..n {
+                if held(atom) {
+                    continue;
+                }
                 let group = owner[atom];
                 if group != usize::MAX {
                     for axis in 0..3 {
@@ -1356,6 +1399,9 @@ pub(crate) fn separate_to_overlap_rule(
             }
         }
         for atom in 0..n {
+            if held(atom) {
+                continue;
+            }
             for axis in 0..3 {
                 x[3 * atom + axis] += atom_shift[atom][axis];
             }
@@ -4356,6 +4402,7 @@ where
                 &mut trial,
                 cfg.move_library.declared_groups(),
                 OVERLAP_SEPARATION,
+                hop_frozen.as_deref(),
             );
             if !separated {
                 hops += 1;
@@ -4366,7 +4413,6 @@ where
                 continue;
             }
         }
-
         // Screen cheaply, then carry on regardless. A screened trial does not
         // leave the chain: it goes through the acceptance test on its screened
         // energy and, whether accepted or not, a hill is deposited on wherever
@@ -7777,7 +7823,8 @@ mod tests {
         assert!(separate_to_overlap_rule(
             &mut x,
             Some(&groups),
-            OVERLAP_SEPARATION
+            OVERLAP_SEPARATION,
+            None
         ));
         assert!(min_pair_distance(x.view()) >= OVERLAP_SEPARATION);
         assert!((bond(&x) - before).abs() < 1.0e-9);
@@ -9239,16 +9286,21 @@ mod geometry_guards {
     fn overlap_repair_refuses_a_bad_rule_and_separates_a_clash() {
         let mut x = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.1, 0.0, 0.0]);
         let before = x.clone();
-        assert!(!separate_to_overlap_rule(&mut x, None, 0.0));
-        assert!(!separate_to_overlap_rule(&mut x, None, f64::NAN));
+        assert!(!separate_to_overlap_rule(&mut x, None, 0.0, None));
+        assert!(!separate_to_overlap_rule(&mut x, None, f64::NAN, None));
         assert_eq!(x, before);
-        assert!(separate_to_overlap_rule(&mut x, None, 0.5));
+        assert!(separate_to_overlap_rule(&mut x, None, 0.5, None));
         assert!(min_pair_distance(x.view()) >= 0.5);
         let mut one = Array1::from_vec(vec![1.0, 2.0, 3.0]);
-        assert!(separate_to_overlap_rule(&mut one, None, 0.5));
+        assert!(separate_to_overlap_rule(&mut one, None, 0.5, None));
         let groups = vec![vec![0], vec![1]];
         let mut grouped = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.05, 0.0, 0.0]);
-        assert!(separate_to_overlap_rule(&mut grouped, Some(&groups), 0.4));
+        assert!(separate_to_overlap_rule(
+            &mut grouped,
+            Some(&groups),
+            0.4,
+            None
+        ));
         assert!(min_pair_distance(grouped.view()) >= 0.4);
     }
 }
