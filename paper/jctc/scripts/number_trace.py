@@ -23,6 +23,7 @@ sys.path.insert(0, str(JCTC / "scripts"))
 
 import hexamer_numbers  # noqa: E402
 import hq_sci_tally  # noqa: E402
+import lj104_v414_baseline  # noqa: E402
 
 SCI = re.compile(r"-?\d+(?:\.\d+)?\s*\\times\s*10\^\{-?\d+\}")
 SCI_E = re.compile(r"-?\d+(?:\.\d+)?[eE][-+]?\d+")
@@ -243,6 +244,15 @@ def classify(path: Path, line_no: int, line: str, token: str, helpers: dict) -> 
         return (rel(JCTC / "logs" / "lj38-plain-seed0.log"), "", "no")
     if token == "4369":
         return ("", "", "no")
+    script_lj = rel(JCTC / "scripts" / "lj104_v414_baseline.py")
+    base = helpers["lj104"]
+    if token == base["reference"]:
+        return (rel(JCTC / "logs" / "lj104-seed0.log"), script_lj, "yes")
+    if "0 of 6 hits" in line or "581.80180238" in line:
+        seed_logs = {row["seed"]: rel(row["path"]) for row in base["rows"]}
+        best_log = seed_logs[base["seed"]]
+        if token in {base["hits"], base["n"], base["best"], base["seed"]} or token in seed_logs:
+            return (seed_logs.get(token, best_log), script_lj, "yes")
     return ("", "", "no")
 
 
@@ -254,6 +264,7 @@ def main() -> int:
         "copper_forms": {},
         "tip": tip4p_text(),
         "bootstrap": (JCTC / "logs" / "paired_bootstrap_lj98.txt").read_text(),
+        "lj104": lj104_v414_baseline.baseline(),
     }
     helpers["bootstrap_floats"] = re.findall(r"-?\d+\.\d+|-?\d+", helpers["bootstrap"])
     # Attach the printed scientific copper gaps by float, not by a second dict.

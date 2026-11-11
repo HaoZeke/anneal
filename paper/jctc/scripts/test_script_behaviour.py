@@ -691,3 +691,14 @@ def test_shipped_tree_has_no_private_paths() -> None:
             if needle in text:
                 bad.append(f"{path.relative_to(ROOT)}:{needle}")
     assert bad == []
+
+
+def test_lj104_v414_baseline_matches_the_receipts() -> None:
+    import lj104_v414_baseline
+
+    found = lj104_v414_baseline.baseline()
+    assert found["hits"] == "0"
+    assert found["n"] == "6"
+    assert found["best"] == "-581.80180238"
+    assert found["seed"] == "2005"
+    assert found["reference"] == "-582.086642"

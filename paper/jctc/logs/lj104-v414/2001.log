@@ -1,0 +1,70 @@
+command=taskset -c 0 env H2H_BUDGET=2000000 ANNEAL_CURVE=logs/budget/2001/curve.txt ANNEAL_MIN_DUMP=logs/budget/2001/minima.txt RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 target/release/examples/h2h_gmin_proof run lj104 2001
+head=7a05b51318dad29e03780d981dd3543aa8cd0457
+tree=e2120c08e91f9698e121d0c38e79ce64de8a74e3
+rustc_v=rustc 1.88.0 (6b00bc388 2025-06-23)
+cargo_v=cargo 1.88.0 (873a06493 2025-05-10)
+pins=0
+uname_n=bench
+hostname_sha256=4b974ca0ce5be5e07e33a374f76e606769d8c84a7cbec2aad767ecaf988cb792
+package_cargo=de9be4299324f5c1f5d12103792d35e8b8ab195df3a374194b8ffc33562c7e3d
+package_libc.so.6=3a15d66867d83762c7f2f1e37359cb8f6c5743edb369c65285cb0b1c4f7498bf
+package_libgcc_s.so.1=d93224d2b0dab4247598be683adca02f5cf00586f99c187579cd7e92058fb7cb
+package_libm.so.6=fce00b6f25f459cf4ae0b7fae4257909a1a8a86f9149e7c029a5d617baf1ccd0
+package_libstd-8df6be531efb3fd0.rlib=d72ed382331f0f02b08824d38d712dec08a39c35d9af27a9c941593efe5e610e
+package_rustc=ac3e92e45fe15c789939deedf7614f4f9578cc9609cb9ead39c9b1808a316c5b
+binary_sha256=565b531d948819eac74b7a223a4fa6ae4ba7d8dcf70163d62b4b14ae8fae37a0
+boot_id=a985e761-9d8a-42f2-91e2-d2d2b076204c
+uptime_start=31041.68
+nproc=8
+mhz=2400.000
+Architecture:                            x86_64
+CPU op-mode(s):                          32-bit, 64-bit
+Address sizes:                           46 bits physical, 57 bits virtual
+Byte Order:                              Little Endian
+CPU(s):                                  8
+On-line CPU(s) list:                     0-7
+Vendor ID:                               GenuineIntel
+Model name:                              Intel(R) Xeon(R) Processor
+CPU family:                              6
+Model:                                   207
+Thread(s) per core:                      1
+Core(s) per socket:                      8
+Socket(s):                               1
+Stepping:                                2
+BogoMIPS:                                4800.00
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc pebs bts rep_good nopl xtopology nonstop_tsc cpuid tsc_known_freq pni pclmulqdq dtes64 vmx ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault ssbd ibrs ibpb stibp ibrs_enhanced tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves avx_vnni avx512_bf16 wbnoinvd arat vnmi avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid bus_lock_detect cldemote movdiri movdir64b fsrm md_clear serialize tsxldtrk amx_bf16 avx512_fp16 amx_tile amx_int8 flush_l1d arch_capabilities
+Virtualization:                          VT-x
+Hypervisor vendor:                       KVM
+Virtualization type:                     full
+L1d cache:                               384 KiB (8 instances)
+L1i cache:                               256 KiB (8 instances)
+L2 cache:                                16 MiB (8 instances)
+L3 cache:                                320 MiB (1 instance)
+NUMA node(s):                            1
+NUMA node0 CPU(s):                       0-7
+Vulnerability Gather data sampling:      Not affected
+Vulnerability Indirect target selection: Not affected
+Vulnerability Itlb multihit:             Not affected
+Vulnerability L1tf:                      Not affected
+Vulnerability Mds:                       Not affected
+Vulnerability Meltdown:                  Not affected
+Vulnerability Mmio stale data:           Not affected
+Vulnerability Reg file data sampling:    Not affected
+Vulnerability Retbleed:                  Not affected
+Vulnerability Spec rstack overflow:      Not affected
+Vulnerability Spec store bypass:         Mitigation; Speculative Store Bypass disabled via prctl
+Vulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization
+Vulnerability Spectre v2:                Mitigation; Enhanced / Automatic IBRS; IBPB conditional; PBRSB-eIBRS SW sequence; BHI BHI_DIS_S
+Vulnerability Srbds:                     Not affected
+Vulnerability Tsa:                       Not affected
+Vulnerability Tsx async abort:           Mitigation; TSX disabled
+Vulnerability Vmscape:                   Not affected
+start=2026-11-11T01:10:58Z
+start_cst=2026-11-10 19:10:58 CST
+system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,head,tree,cpu,pins
+lj104,anneal,2001,2000000,false,2000000,2000000,162.075841,-580.42126629,7a05b51318dad29e03780d981dd3543aa8cd0457,e2120c08e91f9698e121d0c38e79ce64de8a74e3,Intel(R) Xeon(R) Processor,0
+exit=0
+boot_id_end=a985e761-9d8a-42f2-91e2-d2d2b076204c
+uptime_end=31203.77
+end=2026-11-11T01:13:40Z
+end_cst=2026-11-10 19:13:40 CST

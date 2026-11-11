@@ -19,31 +19,31 @@ These campaigns are named and not sealed. No count is guessed.
 No hit count for those seeds is in the sealed record.
 ```
 
-`paper/jctc/manuscript.tex:550`
+`paper/jctc/manuscript.tex:554`
 
 ```
 The water 16-mer count is separate open work.
 ```
 
-`paper/jctc/manuscript.tex:551`
+`paper/jctc/manuscript.tex:555`
 
 ```
 Apart from the hexamer campaign.
 ```
 
-`paper/jctc/manuscript.tex:552`
+`paper/jctc/manuscript.tex:556`
 
 ```
 This comparison leaves out the Atomic Simulation Environment.
 ```
 
-`paper/jctc/manuscript.tex:553`
+`paper/jctc/manuscript.tex:557`
 
 ```
 The atomistic global optimization framework (AGOX).
 ```
 
-`paper/jctc/manuscript.tex:564`
+`paper/jctc/manuscript.tex:568`
 
 ```
 No hit count for the LJ\(_{75}\) seeds 0 through 199 is in the sealed record.
@@ -54,19 +54,19 @@ No hit count for the LJ\(_{75}\) seeds 0 through 199 is in the sealed record.
 
 The AI-drafting sentence is unchanged.
 
-`paper/jctc/manuscript.tex:588`
+`paper/jctc/manuscript.tex:592`
 
 ```
 Generative AI tools assisted with drafting and editing the text.
 ```
 
-`paper/jctc/manuscript.tex:589`
+`paper/jctc/manuscript.tex:593`
 
 ```
 The authors reviewed and edited all content.
 ```
 
-`paper/jctc/manuscript.tex:590`
+`paper/jctc/manuscript.tex:594`
 
 ```
 And take full responsibility for it.
@@ -75,7 +75,7 @@ And take full responsibility for it.
 
 The submission DOI is not assigned.
 
-`paper/jctc/manuscript.tex:613`
+`paper/jctc/manuscript.tex:617`
 
 ```
 The Zenodo digital object identifier (DOI) for this submission is not assigned.
@@ -108,13 +108,13 @@ Suggested reviewers follow.
 
 Version 0.12.0 has no release tag.
 
-`paper/jctc/manuscript.tex:615`
+`paper/jctc/manuscript.tex:619`
 
 ```
 The crate records version 0.12.0.
 ```
 
-`paper/jctc/manuscript.tex:616`
+`paper/jctc/manuscript.tex:620`
 
 ```
 The release tag for version 0.12.0 is not assigned.
@@ -153,7 +153,7 @@ The cover letter has no telephone number, no street address, and no reviewers.
 
 ## Number trace
 
-345 numbers. 64 match a committed script and a raw or per-seed log. 10 have a log and no committed script. 271 have no log. No number was filled in.
+353 numbers. 72 match a committed script and a raw or per-seed log. 10 have a log and no committed script. 271 have no log. No number was filled in.
 
 paper/jctc/manuscript.tex:33	02139	raw_log=	script=	match=no	no raw log
 paper/jctc/manuscript.tex:42	98	raw_log=	script=	match=no	no raw log
@@ -209,109 +209,110 @@ paper/jctc/manuscript.tex:348	199	raw_log=	script=	match=no	no raw log
 paper/jctc/manuscript.tex:349	4\times 10^{6}	raw_log=	script=	match=no	no raw log
 paper/jctc/manuscript.tex:352	75	raw_log=	script=	match=no	no raw log
 paper/jctc/manuscript.tex:352	200	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:356	38	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:356	75	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:357	98	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:358	38	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:359	75	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:360	-396.282249	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:360	1.210	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:361	-397.492331	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:362	98	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:362	0.022	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:363	-543.665361	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:364	38	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:375	38	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:375	75	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:376	98	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:387	38	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:388	0.15	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:398	38	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:399	75	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:399	200	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:407	0	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:407	191	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:407	4000	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:419	4000	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:420	4000	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:422	4000	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:353	104	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:360	38	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:360	75	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:361	98	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:362	38	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:363	75	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:364	-396.282249	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:364	1.210	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:365	-397.492331	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:366	98	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:366	0.022	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:367	-543.665361	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:368	38	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:379	38	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:379	75	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:380	98	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:391	38	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:392	0.15	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:402	38	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:403	75	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:403	200	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:411	0	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:411	191	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:411	4000	raw_log=	script=	match=no	no raw log
 paper/jctc/manuscript.tex:423	4000	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:428	4000	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:428	0	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:430	3560	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:431	4546.25	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:438	3.0.2	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:444	30	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:447	0.001	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:449	0.01	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:449	500	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:450	1\times 10^{-7}	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:477	4000	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:477	4000	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:482	4000	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:490	1\times 10^{-7}	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:491	1	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:491	1.3509\times 10^{-7}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:492	4000	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:493	1.3505\times 10^{-7}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:495	0.00212	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:507	4000	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:509	4000	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:512	0	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:512	-1.1214\times 10^{-8}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:513	-1.1210\times 10^{-8}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:513	0.001004	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:513	0.000987	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:514	1	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:514	-1.3509\times 10^{-7}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:515	-1.3505\times 10^{-7}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:515	0.002023	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:515	0.001964	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:516	2	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:516	-2.5460\times 10^{-9}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:517	-2.5850\times 10^{-9}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:517	0.000532	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:517	0.000477	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:518	3	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:518	-4.1510\times 10^{-9}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:519	-4.1430\times 10^{-9}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:519	0.000322	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:519	0.000308	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:520	4	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:520	-6.8980\times 10^{-8}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:521	-6.9022\times 10^{-8}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:521	0.002116	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:521	0.002068	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:522	5	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:522	-2.1900\times 10^{-9}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:523	-2.2000\times 10^{-9}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:523	0.000157	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:523	0.000134	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:528	6	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:528	207	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:531	544.0	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:531	18.8	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:531	4000	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:532	195.5	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
-paper/jctc/manuscript.tex:534	18	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:550	16	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:561	1\times 10^{-7}	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:563	1	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:564	75	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:564	0	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:564	199	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:614	0.11.1	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:615	0.12.0	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:616	0.12.0	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:620	0.001	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:622	118	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:622	119	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:623	1e-3	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:624	-415.971529	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:625	1e-6	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:627	0.001	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:628	0.01	raw_log=	script=	match=no	no raw log
-paper/jctc/manuscript.tex:628	0.01	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:424	4000	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:426	4000	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:427	4000	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:432	4000	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:432	0	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:434	3560	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:435	4546.25	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:442	3.0.2	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:448	30	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:451	0.001	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:453	0.01	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:453	500	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:454	1\times 10^{-7}	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:481	4000	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:481	4000	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:486	4000	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:494	1\times 10^{-7}	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:495	1	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:495	1.3509\times 10^{-7}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:496	4000	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:497	1.3505\times 10^{-7}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:499	0.00212	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:511	4000	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:513	4000	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:516	0	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:516	-1.1214\times 10^{-8}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:517	-1.1210\times 10^{-8}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:517	0.001004	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:517	0.000987	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:518	1	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:518	-1.3509\times 10^{-7}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:519	-1.3505\times 10^{-7}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:519	0.002023	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:519	0.001964	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:520	2	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:520	-2.5460\times 10^{-9}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:521	-2.5850\times 10^{-9}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:521	0.000532	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:521	0.000477	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:522	3	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:522	-4.1510\times 10^{-9}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:523	-4.1430\times 10^{-9}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:523	0.000322	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:523	0.000308	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:524	4	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:524	-6.8980\times 10^{-8}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:525	-6.9022\times 10^{-8}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:525	0.002116	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:525	0.002068	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:526	5	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:526	-2.1900\times 10^{-9}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:527	-2.2000\times 10^{-9}	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:527	0.000157	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:527	0.000134	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:532	6	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:532	207	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:535	544.0	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:535	18.8	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:535	4000	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:536	195.5	raw_log=	script=paper/jctc/scripts/hexamer_numbers.py	match=no	committed script reproduces the value from a table that is not a raw log
+paper/jctc/manuscript.tex:538	18	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:554	16	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:565	1\times 10^{-7}	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:567	1	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:568	75	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:568	0	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:568	199	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:618	0.11.1	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:619	0.12.0	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:620	0.12.0	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:624	0.001	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:626	118	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:626	119	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:627	1e-3	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:628	-415.971529	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:629	1e-6	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:631	0.001	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:632	0.01	raw_log=	script=	match=no	no raw log
+paper/jctc/manuscript.tex:632	0.01	raw_log=	script=	match=no	no raw log
 paper/jctc/si.tex:27	02139	raw_log=	script=	match=no	no raw log
 paper/jctc/si.tex:34	0.001	raw_log=	script=	match=no	no raw log
 paper/jctc/si.tex:36	-173.928427	raw_log=	script=	match=no	no raw log
@@ -323,7 +324,6 @@ paper/jctc/si.tex:37	75	raw_log=	script=	match=no	no raw log
 paper/jctc/si.tex:38	98	raw_log=	script=	match=no	no raw log
 paper/jctc/si.tex:38	-543.665361	raw_log=	script=	match=no	no raw log
 paper/jctc/si.tex:38	104	raw_log=	script=	match=no	no raw log
-paper/jctc/si.tex:38	-582.086642	raw_log=	script=	match=no	no raw log
 paper/jctc/si.tex:39	0.8	raw_log=	script=	match=no	no raw log
 paper/jctc/si.tex:41	8	raw_log=	script=	match=no	no raw log
 paper/jctc/si.tex:43	0.7	raw_log=	script=	match=no	no raw log
