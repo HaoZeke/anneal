@@ -1,0 +1,9 @@
+proseguard proseguard 0.1.0
+profile_sha 654d0de1c2632feb93ddfc2f72a08372ad672a8c7cb4a6ad30cca69b2783ddc6
+tip 9f372471de39e8ddf24883c8add066fff80c507d
+command proseguard -p <profile> --no-llm paper/jctc/manuscript.tex paper/jctc/si.tex paper/jctc/cover-letter.tex
+output
+paper/jctc/manuscript.tex:194: [suggestion] rgoswami.TricolonAbuse (lexical) Tricolon (Moral, Doucet, and Jasra). Models default to three. Kill it: keep two items, or put the list in a table.
+paper/jctc/manuscript.tex:312: [suggestion] rgoswami.TricolonAbuse (lexical) Tricolon (Oakley, Johnston, and Wales). Models default to three. Kill it: keep two items, or put the list in a table.
+paper/jctc/manuscript.tex:552: [suggestion] rgoswami.TricolonAbuse (lexical) Tricolon (TuiTui, Snoopy, and Cosmo). Models default to three. Kill it: keep two items, or put the list in a table.
+proseguard: 3 finding(s), 0 actionable

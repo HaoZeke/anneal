@@ -40,17 +40,8 @@ These campaigns are named and not sealed. No count is guessed.
 No hit count for those seeds is in the sealed record.
 ```
 
-`paper/jctc/manuscript.tex:522`
-
-```
-The water 16-mer count is separate open work.
-```
-
-`paper/jctc/manuscript.tex:523`
-
-```
-Apart from the hexamer campaign.
-```
+The manuscript no longer prints the water 16-mer count.
+H2O16 v9 stays open work, and no count is guessed.
 
 `paper/jctc/manuscript.tex:524`
 
@@ -178,8 +169,5 @@ The cover letter has no telephone number, no street address, and no reviewers.
 
 ## Number trace
 
-284 numbers. 283 match a committed script and a raw log, a per-seed table, a source line, or the layout whitelist. 0 are unmatched. 1 has no source. No number was filled in.
-
-The one missing number is the water 16-mer, waiting on H2O16 v9. The 192-seed rates, the McNemar values, and the LJ98 rates from seeds.csv are removed. ASE/AGOX v5 and armD v1.4 have no count in the text.
-
-paper/jctc/manuscript.tex:522	16	raw_log=	script=	match=no	no raw log
+The water 16-mer sentence is gone, so that digit is not in the trace.
+The 192-seed rates, the McNemar values, and the LJ98 rates from seeds.csv are removed. ASE/AGOX v5 and armD v1.4 have no count in the text.

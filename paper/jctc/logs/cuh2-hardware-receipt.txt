@@ -2,11 +2,11 @@ start
 script
 scripts/run_cuh2_fcc_rec.sh
 host
-cursor
+bench
 boot_id
-e1f9a1b4-e4e4-4e61-ab8c-1ad0fc3322f9
+8dfa5fef-6e78-4792-b2cb-45d3449a4527
 uptime
- 05:24:09 up  2:14,  0 user,  load average: 0.28, 1.07, 1.10
+ 23:47:55 up 22:54,  0 user,  load average: 10.17, 9.54, 6.49
 cpuinfo_mhz
 2400.000
 2400.000
@@ -64,26 +64,36 @@ rustc 1.88.0 (6b00bc388 2025-06-23)
 cargo
 cargo 1.88.0 (873a06493 2025-05-10)
 gfortran_v
-GNU Fortran (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
-Copyright (C) 2023 Free Software Foundation, Inc.
-This is free software; see the source for copying conditions.  There is NO
-warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-
+Using built-in specs.
+COLLECT_GCC=gfortran
+COLLECT_LTO_WRAPPER=/usr/libexec/gcc/x86_64-linux-gnu/13/lto-wrapper
+OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa
+OFFLOAD_TARGET_DEFAULT=1
+Target: x86_64-linux-gnu
+Configured with: ../src/configure -v --with-pkgversion='Ubuntu 13.3.0-6ubuntu2~24.04.1' --with-bugurl=file:///usr/share/doc/gcc-13/README.Bugs --enable-languages=c,ada,c++,go,d,fortran,objc,obj-c++,m2 --prefix=/usr --with-gcc-major-version-only --program-suffix=-13 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-nvptx/usr,amdgcn-amdhsa=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2
+Thread model: posix
+Supported LTO compression algorithms: zlib zstd
+gcc version 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 
 gpp_v
-g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
-Copyright (C) 2023 Free Software Foundation, Inc.
-This is free software; see the source for copying conditions.  There is NO
-warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-
+Using built-in specs.
+COLLECT_GCC=g++
+COLLECT_LTO_WRAPPER=/usr/libexec/gcc/x86_64-linux-gnu/13/lto-wrapper
+OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa
+OFFLOAD_TARGET_DEFAULT=1
+Target: x86_64-linux-gnu
+Configured with: ../src/configure -v --with-pkgversion='Ubuntu 13.3.0-6ubuntu2~24.04.1' --with-bugurl=file:///usr/share/doc/gcc-13/README.Bugs --enable-languages=c,ada,c++,go,d,fortran,objc,obj-c++,m2 --prefix=/usr --with-gcc-major-version-only --program-suffix=-13 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-nvptx/usr,amdgcn-amdhsa=/build/gcc-13-EldibY/gcc-13-13.3.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=2
+Thread model: posix
+Supported LTO compression algorithms: zlib zstd
+gcc version 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 
 end
 script
 scripts/run_cuh2_fcc_rec.sh
 host
-cursor
+bench
 boot_id
-e1f9a1b4-e4e4-4e61-ab8c-1ad0fc3322f9
+8dfa5fef-6e78-4792-b2cb-45d3449a4527
 uptime
- 05:24:09 up  2:14,  0 user,  load average: 0.28, 1.07, 1.10
+ 23:56:31 up 23:02,  0 user,  load average: 18.24, 16.33, 11.26
 cpuinfo_mhz
 2400.000
 2400.000
@@ -138,3 +148,5 @@ Vulnerability Tsx async abort:           Mitigation; TSX disabled
 Vulnerability Vmscape:                   Not affected
 rgpot
 25c759da82eececa8897e4634046fab27409c81a
+library_sha256
+d399ef1f675e97c1f5e401a987d6a9df1bc30b3a37ba6586044b66d44be8399d
