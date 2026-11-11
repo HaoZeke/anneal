@@ -84,3 +84,15 @@ rule water_h2o20_goat:
         set -euo pipefail
         bash scripts/h2o20_goat_campaign.sh
         """
+
+
+# TIP4P (H2O)10, 15 and 20 on the paper preset. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile tip4p_rates
+rule tip4p_rates:
+    output:
+        "bench/tip4p-water-rates/rates.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/tip4p_rates/enter_bench.sh
+        """
