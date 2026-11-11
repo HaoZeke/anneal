@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! Dynamic lattice search for pair-potential clusters.
 //!
 //! Shao, Cheng and Cai (*J. Comput. Chem.* **2004**, *25*, 1693,
