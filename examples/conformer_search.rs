@@ -570,9 +570,18 @@ fn main() {
     let mut cfg = Config::recommended_molecular(species.clone(), vec![(0..n).collect()], 1.0);
     let fragments = connectivity_groups_z(x0.view(), &species, cfg.bond_tolerance);
     println!("molecules: {}", fragments.len());
+    // A water trimer is (O, H, H). The cycle arm is that case; a peptide
+    // fragment is not a water, and turning it as one would move the wrong atoms.
+    let reverse_cycles = fragments.iter().all(|group| {
+        group.len() == 3
+            && species.get(group[0]).copied() == Some(8)
+            && species.get(group[1]).copied() == Some(1)
+            && species.get(group[2]).copied() == Some(1)
+    });
     cfg.move_library = MoveLibrary::Molecular {
         groups: fragments.clone(),
         reactive: false,
+        reverse_cycles,
     };
     if let Some(arm) = opt.arm {
         configure_water_arm(&mut cfg, arm);
