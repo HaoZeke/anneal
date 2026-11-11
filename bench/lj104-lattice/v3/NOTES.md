@@ -120,3 +120,6 @@ The rebase onto 6c048e30 changes the base only.
 That develop commit is an ancestor of this tip.
 No rebase conflict touched src/ lattice code.
 range-diff marks each of the 34 patches equal.
+A molecular rebuild can drop the cycle arm.
+The allocator still has the original count.
+The rebuilt list is kept only when the counts match.
