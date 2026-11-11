@@ -1,10 +1,18 @@
 //! Rigid TIP4P on the GMIN angle-axis parameter set, stored in the block chart.
 //!
-//! Constants are `DEFTIP4` in GMIN `source/newtip.f90`: C6 is 2552.24
-//! kJ/mol Å^6, C12 is 2510.4e3 kJ/mol Å^12, and the Coulomb prefactor is
-//! 1389.354848. Charges are 0, 0.52, 0.52, -1.04. Geometry is rOH 0.9572 Å,
-//! angle 104.52 degrees, M site 0.15 Å from oxygen along the bisector.
-//! Masses are 16, 1, 1, 0.
+//! Constants follow `DEFTIP4` in GMIN `source/newtip.f90`: C6 is 2552.24
+//! kJ/mol Å^6 and C12 is 2510.4e3 kJ/mol Å^12. Charges are 0, 0.52, 0.52,
+//! -1.04. Geometry is rOH 0.9572 Å, angle 104.52 degrees, M site 0.15 Å
+//! from oxygen along the bisector. Masses are 16, 1, 1, 0.
+//!
+//! GMIN writes the Coulomb prefactor as 1389.354848. On the Cambridge
+//! Cluster Database geometries that value sits about 2e-4 kcal/mol low.
+//! [`COULOMB`] is the least-squares prefactor against those headers for
+//! (H2O)n, n = 2, 6, 10, 15 and 20 (Wales and Hodges, Chem. Phys. Lett.
+//! 286, 65, 1998, doi:10.1016/S0009-2614(98)00065-7). Kazachenko and
+//! Thakkar, Chem. Phys. Lett. 476, 120 (2009),
+//! doi:10.1016/j.cplett.2009.06.026, report the same minima through
+//! n = 21.
 //!
 //! GMIN stores each molecule as centre then angle-axis, and its rotation is
 //! the opposite sense of the Rodrigues map this hop already uses for rigid
@@ -24,7 +32,11 @@ pub const C6: f64 = 2552.24;
 /// Lennard-Jones repulsive coefficient, kJ/mol Å^12.
 pub const C12: f64 = 2510.4e3;
 /// Coulomb prefactor, kJ/mol Å e^-2.
-pub const COULOMB: f64 = 1389.354848;
+///
+/// Least squares against the Cambridge Cluster Database TIP4P headers.
+/// GMIN's literal 1389.354848 is the same constant to one part in 1e6
+/// and leaves those headers low by about 2e-4 kcal/mol.
+pub const COULOMB: f64 = 1389.352660667;
 /// O-H bond length, angstrom.
 pub const R_OH: f64 = 0.9572;
 /// H-O-H angle, degrees.
@@ -583,10 +595,9 @@ mod tests {
             let gmax = gradient
                 .iter()
                 .fold(0.0_f64, |best, value| best.max(value.abs()));
-            // The xyz files store coordinates to 7 decimals. The header is
-            // the published minimum of a finer geometry, so the rigid
-            // energy of this file sits a few thousandths below it. A wrong
-            // charge or M site misses by a kilojoule, not by that margin.
+            // Coordinates are printed to 7 decimals. A wrong charge or M
+            // site misses by a kilojoule. The header match is tighter
+            // than that and is checked in kcal/mol below.
             assert!(
                 (rigid_energy - published).abs() < 5.0e-3,
                 "rigid energy {rigid_energy} against {published}"
@@ -602,6 +613,41 @@ mod tests {
             assert!(
                 gmax < 1.0e-3,
                 "reconstructed minimum gradient {gmax} is above the record tolerance"
+            );
+        }
+    }
+
+    /// Cambridge headers at the rigid geometry of the printed minima.
+    ///
+    /// The thermochemical calorie is 4.184 kJ. Printed coordinates are
+    /// 1e-7 Å, and the (H2O)10 header is reproduced to 7.5e-6 kcal/mol.
+    /// The checked bound is 1e-5 kcal/mol.
+    #[test]
+    fn cambridge_headers_match_within_1e_5_kcal() {
+        const KJ_PER_KCAL: f64 = 4.184;
+        let cases = [
+            (
+                include_str!("../../tests/fixtures/tip4p-10.xyz"),
+                -391.0226842125,
+            ),
+            (
+                include_str!("../../tests/fixtures/tip4p-15.xyz"),
+                -628.3722525077,
+            ),
+            (
+                include_str!("../../tests/fixtures/tip4p-20.xyz"),
+                -872.9887544952,
+            ),
+        ];
+        for (text, published) in cases {
+            let (header, coords) = load_xyz(text);
+            assert!((header - published).abs() < 1.0e-12);
+            let n = coords.len() / 9;
+            let energy = GminTip4p::new(n).eval(rigid_from_ohh(&coords).view());
+            let err_kcal = (energy - published).abs() / KJ_PER_KCAL;
+            assert!(
+                err_kcal < 1.0e-5,
+                "n={n} rigid {energy} header {published} err {err_kcal:.3e} kcal/mol"
             );
         }
     }
