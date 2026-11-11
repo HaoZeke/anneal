@@ -1,3 +1,4 @@
+// Copyright (c) anneal developers
 //! One seed of `Config::recommended` on a paper Lennard-Jones size.
 //!
 //! ```text
