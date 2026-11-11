@@ -1,0 +1,92 @@
+coverage.py 7.13.0
+PYTHONHASHSEED 0
+SOURCE_DATE_EPOCH 0
+command python3 -m coverage run --branch --source=paper/jctc/scripts,python/anneal,pytest -m pytest paper/jctc/scripts/test_script_behaviour.py paper/jctc/scripts/test_redact_paths.py paper/jctc/scripts/test_seal_outer.py
+output
+Name                                                 Stmts   Miss Branch BrPart  Cover   Missing
+------------------------------------------------------------------------------------------------
+paper/jctc/scripts/check_cuh2_blobs.py                  61     19     28      5    64%   40, 48-52, 64-77, 86-88, 92
+paper/jctc/scripts/coverage_receipts.py                 68      3     22      4    92%   44, 93, 101->103, 109
+paper/jctc/scripts/emit_sealed_stats.py                 38     38      8      0     0%   8-55
+paper/jctc/scripts/extract_water_logs.py                35      1     16      1    96%   51
+paper/jctc/scripts/fig_algorithm_stack.py               54      4     10      1    92%   104-106, 110
+paper/jctc/scripts/fig_disconnectivity.py               94     94     10      0     0%   21-147
+paper/jctc/scripts/fig_landfold_maps.py                195    195     68      0     0%   13-264
+paper/jctc/scripts/fig_landscapes.py                   162    162     26      0     0%   21-244
+paper/jctc/scripts/fig_lj75_ecdf.py                     40     40      4      0     0%   15-75
+paper/jctc/scripts/fig_rec_arms.py                      52      4      4      1    91%   94-96, 100
+paper/jctc/scripts/fig_si_panels.py                     85     85     10      0     0%   13-130
+paper/jctc/scripts/fig_si_structures.py                 35     35      6      0     0%   13-60
+paper/jctc/scripts/fig_si_water.py                      41     41     10      0     0%   12-68
+paper/jctc/scripts/fig_summary_rates.py                 77     77     20      0     0%   21-131
+paper/jctc/scripts/fig_systems.py                       43     43      8      0     0%   13-70
+paper/jctc/scripts/fig_water_crest.py                   47     47      8      0     0%   16-91
+paper/jctc/scripts/figstyle.py                          67     11      6      2    82%   23-25, 43, 61-63, 96, 103, 114-117
+paper/jctc/scripts/figure_provenance.py                 37      1     10      1    96%   66
+paper/jctc/scripts/hexamer_numbers.py                   99      3     34      3    95%   52, 89, 170
+paper/jctc/scripts/hq_sci_tally.py                      76      1     26      2    97%   90->92, 111
+paper/jctc/scripts/lj75_gmin_table.py                  249    249     80      0     0%   41-469
+paper/jctc/scripts/lj75_source_verify.py                60     60     22      0     0%   10-95
+paper/jctc/scripts/lj_csm_sizes_table.py               114    114     44      0     0%   26-183
+paper/jctc/scripts/lockfile_delta.py                    74      3     38      5    93%   24->19, 26->28, 37->30, 90-91, 96
+paper/jctc/scripts/rebuild_figures.py                   49     49     18      0     0%   9-103
+paper/jctc/scripts/redact_paths.py                      30      2     10      2    90%   50, 63
+paper/jctc/scripts/render_all.py                        21     21      6      0     0%   11-52
+paper/jctc/scripts/replay_v127.py                       53      2     20      3    93%   22, 63->62, 84
+paper/jctc/scripts/results_jcc.py                       79     79     34      0     0%   15-122
+paper/jctc/scripts/sketchmap_landscapes.py              79     79     22      0     0%   22-139
+paper/jctc/scripts/system_visuals.py                   539    539    164      0     0%   43-881
+paper/jctc/scripts/test_redact_paths.py                 23     15      8      1    29%   15, 19-41, 45
+paper/jctc/scripts/test_script_behaviour.py            454      4     38      4    98%   195, 424, 450, 494
+paper/jctc/scripts/test_seal_outer.py                   52     41     10      1    19%   14-16, 20-43, 47-48, 56-76, 80
+paper/jctc/scripts/tip4p_constants.py                   14      0      0      0   100%
+paper/jctc/scripts/toc_graphic.py                       45      1     12      1    96%   80
+paper/jctc/scripts/watch_crest_steps.py                 32      1     14      3    91%   16->39, 33->36, 43
+paper/jctc/scripts/water_census.py                     215    215     80      0     0%   27-312
+paper/jctc/scripts/water_crest_figure.py                35     35      6      0     0%   13-84
+paper/jctc/scripts/water_h2h.py                        592    592    200      0     0%   24-997
+paper/jctc/scripts/water_host_relabel.py                83     83     28      0     0%   15-132
+paper/jctc/scripts/water_results_table.py              347    347    120      0     0%   15-649
+paper/jctc/scripts/write_figure_provenance_v128.py      12      1      4      1    88%   24
+pytest/chemfit_doubles.py                               79     79     24      0     0%   10-143
+pytest/test_ase_optimizer.py                           171    171     10      0     0%   3-244
+pytest/test_box_coverage.py                             41     41      4      0     0%   3-81
+pytest/test_box_coverage_escape.py                      38     38      4      0     0%   3-94
+pytest/test_box_coverage_influence.py                   38     38      4      0     0%   3-82
+pytest/test_box_ensemble.py                             37     37      0      0     0%   3-54
+pytest/test_box_history_cost.py                         82     82      6      0     0%   3-144
+pytest/test_box_objective_origin.py                     28     28      2      0     0%   3-54
+pytest/test_box_peer_geometry.py                        29     29      4      0     0%   3-39
+pytest/test_box_sample_repulsion.py                     30     30      2      0     0%   3-71
+pytest/test_chemfit.py                                  68     68      4      0     0%   3-124
+pytest/test_chemfit_adapter.py                          92     92      4      0     0%   8-158
+pytest/test_chemfit_bridge.py                          101    101      6      0     0%   9-189
+pytest/test_chemfit_compat.py                          317    317     24      0     0%   17-2143
+pytest/test_chemfit_contract.py                        204    204     24      0     0%   7-430
+pytest/test_chemfit_protocol.py                        223    223      4      0     0%   11-395
+pytest/test_chemfit_reporter.py                         42     42      6      0     0%   10-75
+pytest/test_chemfit_run_fitter.py                       52     52      0      0     0%   3-98
+pytest/test_cluster_search.py                          182    182      2      0     0%   3-270
+pytest/test_coverage_topology.py                        63     63      6      0     0%   3-120
+pytest/test_device.py                                   83     83      4      0     0%   1-166
+pytest/test_device_domain.py                            37     37      4      0     0%   3-71
+pytest/test_device_native.py                            84     84     10      0     0%   1-127
+pytest/test_device_policy.py                            74     74      6      0     0%   3-128
+pytest/test_ensemble_optimize.py                        68     68      2      0     0%   3-110
+pytest/test_ensemble_start.py                           23     23      0      0     0%   3-42
+pytest/test_gle_standalone_work.py                      83     83     10      0     0%   3-120
+pytest/test_minimize.py                                 35     35      0      0     0%   3-52
+pytest/test_minimize_diagnostics.py                     60     60      4      0     0%   3-123
+pytest/test_portfolio.py                               156    156      6      0     0%   3-219
+pytest/test_portfolio_peers.py                          69     69      4      0     0%   3-113
+pytest/test_portfolio_tiny_budget.py                    29     29      0      0     0%   3-46
+pytest/test_run.py                                     487    487     26      0     0%   5-1027
+pytest/test_tvm_ffi.py                                  43     43      2      0     0%   1-84
+pytest/test_values_only_coverage.py                     56     56      6      0     0%   3-88
+python/anneal/__init__.py                              301    301     64      0     0%   34-1557
+python/anneal/ase.py                                   203    203     72      0     0%   15-327
+python/anneal/chemfit.py                               863    863    380      0     0%   39-1796
+python/anneal/device.py                                140    140     44      0     0%   1-274
+python/anneal/tvm_ffi.py                                46     46      8      0     0%   1-92
+------------------------------------------------------------------------------------------------
+TOTAL                                                 9514   8293   2104     41    13%
