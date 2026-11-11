@@ -13,9 +13,8 @@ Arms, one shared seed list, one force-call budget per size:
   surrogate relaxation from iteration 8, true-potential fmax 0.05)
 
 The page's true-potential step cap is 1, and the page says that cap is too
-low for a real search. This run keeps fmax at 0.05 and lets that relaxation
-run until the force-call budget, so a charged candidate can reach the
-threshold. The collector and
+low for a real search. A 75-atom quench reaches fmax 0.05 in a few hundred
+steps, so the cap here is 1000 steps at that same fmax. The collector and
 the surrogate relaxation run in this process. The GPR fit stays on this
 process (``use_ray`` false) and does not restart kernel hyperparameters, and
 it trains on at most 512 stored structures, which is what lets a force-call
@@ -369,7 +368,7 @@ def run_gofee(system: str, seed: int, budget: int, work: Path) -> dict:
         calc,
         gets={"get_key": "prioritized_candidates"},
         optimizer_kwargs={"logfile": None},
-        optimizer_run_kwargs={"fmax": 0.05, "steps": budget},
+        optimizer_run_kwargs={"fmax": 0.05, "steps": 1000},
         constraints=environment.get_constraints(),
         store_trajectory=False,
         order=4,
