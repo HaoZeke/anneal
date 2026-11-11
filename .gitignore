@@ -286,3 +286,7 @@ proofs/lean/.lake/
 # Bonobo head-to-head scratch. The summary tables are the committed record.
 bench/lj-bonobo-h2h/runs/
 bench/lj-bonobo-h2h/.asv/
+
+# GMIN head-to-head scratch. The results CSV is the committed record.
+bench/gmin-h2h/runs/
+bench/gmin-h2h/.asv/

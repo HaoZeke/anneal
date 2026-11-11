@@ -42,6 +42,19 @@ rule lj_seed:
         """
 
 
+# GMIN against the paper preset at the paper force-call budgets.
+# Not part of `rule all`. Run it by name:
+#   snakemake -s workflow/Snakefile gmin_h2h
+rule gmin_h2h:
+    output:
+        "bench/gmin-h2h/results.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/gmin_h2h/enter_bench.sh
+        """
+
+
 # Lennard-Jones head-to-head against the published bonobo initialiser.
 # Not part of `rule all`. Run it by name:
 #   snakemake -s workflow/Snakefile lj_bonobo_h2h
