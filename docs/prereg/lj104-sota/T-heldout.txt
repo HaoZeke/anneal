@@ -1,0 +1,17 @@
+Copyright (c) anneal developers
+
+T is the clock time at the start of the held-out run.
+2026-11-10T20:53:58-0600.
+Arm D is the lattice v3.2 tip.
+28ece242da192e769865bc1b1d93fa8e3a50b7a2.
+Arm B stays UNFILLED.
+The rustc version line follows.
+rustc 1.88.0 (6b00bc388 2025-06-23).
+The cargo version line follows.
+cargo 1.88.0 (873a06493 2025-05-10).
+The wall-clock cap is 600 seconds for each process.
+That cap was stated before this run.
+The seeds are 5000 through 5029.
+The call budget is 4000000.
+The tie cut is lowest-index.
+
