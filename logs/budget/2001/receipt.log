@@ -1,6 +1,6 @@
 command=taskset -c 0 env H2H_BUDGET=2000000 ANNEAL_CURVE=logs/budget/2001/curve.txt ANNEAL_MIN_DUMP=logs/budget/2001/minima.txt RAYON_NUM_THREADS=1 OMP_NUM_THREADS=1 target/release/examples/h2h_gmin_proof run lj104 2001
-head=d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1
-tree=801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a
+head=7a05b51318dad29e03780d981dd3543aa8cd0457
+tree=e2120c08e91f9698e121d0c38e79ce64de8a74e3
 rustc_v=rustc 1.88.0 (6b00bc388 2025-06-23)
 cargo_v=cargo 1.88.0 (873a06493 2025-05-10)
 pins=0
@@ -12,9 +12,9 @@ package_libgcc_s.so.1=d93224d2b0dab4247598be683adca02f5cf00586f99c187579cd7e9205
 package_libm.so.6=fce00b6f25f459cf4ae0b7fae4257909a1a8a86f9149e7c029a5d617baf1ccd0
 package_libstd-8df6be531efb3fd0.rlib=d72ed382331f0f02b08824d38d712dec08a39c35d9af27a9c941593efe5e610e
 package_rustc=ac3e92e45fe15c789939deedf7614f4f9578cc9609cb9ead39c9b1808a316c5b
-binary_sha256=2b07c440a23ec5c5ba0db4df4efecd4494963f590958ca07482f8994c433659e
+binary_sha256=565b531d948819eac74b7a223a4fa6ae4ba7d8dcf70163d62b4b14ae8fae37a0
 boot_id=a985e761-9d8a-42f2-91e2-d2d2b076204c
-uptime_start=27349.86
+uptime_start=31041.68
 nproc=8
 mhz=2400.000
 Architecture:                            x86_64
@@ -59,12 +59,12 @@ Vulnerability Srbds:                     Not affected
 Vulnerability Tsa:                       Not affected
 Vulnerability Tsx async abort:           Mitigation; TSX disabled
 Vulnerability Vmscape:                   Not affected
-start=2026-11-10T22:38:47Z
-start_cst=2026-11-10 16:38:47 CST
+start=2026-11-11T01:10:58Z
+start_cst=2026-11-10 19:10:58 CST
 system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,head,tree,cpu,pins
-lj104,anneal,2001,2000000,false,2000000,2000000,160.784260,-580.42126629,d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1,801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a,Intel(R) Xeon(R) Processor,0
+lj104,anneal,2001,2000000,false,2000000,2000000,162.075841,-580.42126629,7a05b51318dad29e03780d981dd3543aa8cd0457,e2120c08e91f9698e121d0c38e79ce64de8a74e3,Intel(R) Xeon(R) Processor,0
 exit=0
 boot_id_end=a985e761-9d8a-42f2-91e2-d2d2b076204c
-uptime_end=27510.67
-end=2026-11-10T22:41:28Z
-end_cst=2026-11-10 16:41:28 CST
+uptime_end=31203.77
+end=2026-11-11T01:13:40Z
+end_cst=2026-11-10 19:13:40 CST

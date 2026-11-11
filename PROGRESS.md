@@ -2,14 +2,13 @@ Phase: two-million reproduction finished.
 
 No push.
 Archive refs are never pushed.
-The push plan lists only refs/heads/fix/lj104-measure-v4.13.
+The push plan lists only refs/heads/fix/lj104-measure-v4.14.
 
-Engine commit d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1.
-
-Engine tree 801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a.
+The timed commit is 7a05b51318dad29e03780d981dd3543aa8cd0457.
+The timed tree is e2120c08e91f9698e121d0c38e79ce64de8a74e3.
 The binary digest follows.
-2b07c440a23ec5c5ba0db4df4efecd4494963f590958ca07482f8994c433659e.
-The arm opened at 16:35:59 and closed at 16:52:33.
+565b531d948819eac74b7a223a4fa6ae4ba7d8dcf70163d62b4b14ae8fae37a0.
+The arm opened at 19:08:07 and closed at 19:24:09.
 
 Jobs left running: none.
 

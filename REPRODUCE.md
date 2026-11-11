@@ -1,10 +1,9 @@
 The measured arm reruns seeds 2000 through 2005, one seed at a time.
 
-The engine is commit d9eec16a32df and tree 801ff2bc6cb1.
-Engine commit d9eec16a32dfe85e30c06837dc4e2a2eebc8fdd1.
-Engine tree 801ff2bc6cb1ecce3b8321a2c99a2ec24eec1c5a.
+The timed commit is 7a05b51318dad29e03780d981dd3543aa8cd0457.
+The timed tree is e2120c08e91f9698e121d0c38e79ce64de8a74e3.
 The binary digest follows.
-2b07c440a23ec5c5ba0db4df4efecd4494963f590958ca07482f8994c433659e.
+565b531d948819eac74b7a223a4fa6ae4ba7d8dcf70163d62b4b14ae8fae37a0.
 
 The receipt script opens one private mount namespace.
 It also opens one hostname namespace.
