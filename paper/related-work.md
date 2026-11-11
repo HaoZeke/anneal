@@ -157,3 +157,13 @@ Vahediahmar, Zweig, Zhang, and Azizi, arXiv:2610.12523 (8 October 2026), ask whe
 The manuscript scores the hexamer by an IRA match to a prism, cage, book, or chair reoptimised at GFN2-xTB, and it compares polished energies with CREST 3.0.2. This preprint does not treat the water hexamer, so it does not contradict 121 of 192, 97 of 192, or the six polished gaps. It does contradict any reading in which a CREST ensemble, or a GFN2-xTB reference set, is the complete low-energy answer.
 
 Cite `vahediahmarGeomDrugs2026` beside the CREST section. Keep the hexamer result as a motif hit rate and a polished gap.
+
+## 2026-11-11 — Seven atoms are proved, and the diameter bound is tighter
+
+Shen, arXiv:2611.09925 (23 September 2026), reports a proof that the pentagonal bipyramid is the unique global minimiser of the seven-particle Lennard-Jones energy, up to rigid motion and relabelling. The same letter treats the seven-charge Thomson problem.
+
+The manuscript said Kuznetsov and Sahinidis prove optima only for five and six atoms. That "only" does not survive this letter. The proof stops at seven atoms. It gives no energy at 38, 55, 75, 98, or 104, and it does not prove those sizes.
+
+Lecomte, arXiv:2607.09555 (10 July 2026), certifies a one-layer improvement of the Kuznetsov--Sahinidis diameter bound at 92 sizes from 5 to 200 atoms. The note says the improvement resolves no open global-optimisation case. It also says the diameter box is not what limits a solver at six atoms or fewer, and that no solver is run at 38 atoms or larger, the sizes the refinement would affect.
+
+Cite `shenSevenParticle2026` and `lecomteDiameter2026` beside Kuznetsov. Drop "only" from the sentence. Keep the hit targets as the published Cambridge energies.
