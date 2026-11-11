@@ -2966,8 +2966,11 @@ where
     let mut hops_at_lowest = 0usize;
     let mut csm_reseed_stamp = 0usize;
     // Set when a stall growth fails to lower the incumbent. Later growth
-    // quenches wait until that energy drops, and the proposals until then
-    // are all-points displacements.
+    // quenches wait until that energy drops. Only the leave whose growth
+    // was skipped is an all-points displacement. The hops between leaves
+    // keep the move library: replacing every one of them locks the chain
+    // on the icosahedral floor (LJ75 about 1.21 above Marks, LJ98 about
+    // 0.022 above the Leary tetrahedron).
     let mut stall_growth_hold: Option<f64> = None;
     let hop_room = |hops: usize| cfg.max_hops.is_none_or(|cap| hops < cap);
     // Distinct minima a rigid chain has quenched. Its stall moves to one.
@@ -4320,11 +4323,13 @@ where
                 continue;
             }
         }
-        // A failed stall growth leaves the remaining proposals on the
-        // all-points displacement until the incumbent drops. The test is
-        // the incumbent energy, not the atom count.
-        let held_displacement =
-            stall_growth_waits(stall_growth_hold, ledger.best) && cfg.packing_cna_applies();
+        // A failed stall growth does not quench another lattice until the
+        // incumbent drops. The leave that would have grown is one all-points
+        // displacement. Other proposals keep the kernel they drew. The test
+        // is the incumbent energy, not the atom count.
+        let held_displacement = directed_leave
+            && stall_growth_waits(stall_growth_hold, ledger.best)
+            && cfg.packing_cna_applies();
         if held_displacement {
             let step = preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale;
             trial = ClusterMove::AllPoints { step }.propose(x.view(), cfg.temperature, rng);
@@ -6044,11 +6049,12 @@ where
             // The budget window only cools a derived search. It does not
             // decide whether a non-icosahedral plateau may leave. Recommended
             // leaves that flag off, and the icosahedral test below is false
-            // for the LJ104 minima, so neither growth ran and the hold that
-            // switches later proposals to all-points stayed unset.
+            // for the LJ104 minima, so neither growth ran and the hold
+            // stayed unset.
             // The chain takes a growth only when it deepens the incumbent.
-            // A miss sets the hold. Later proposals are all-points
-            // displacements until that incumbent drops.
+            // A miss sets the hold. The leave that then skips growth is the
+            // all-points displacement above. The library keeps proposing
+            // until the incumbent drops.
             if directed_leave
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
@@ -6057,8 +6063,8 @@ where
                 let best_before_growth = ledger.best;
                 if stall_growth_waits(stall_growth_hold, best_before_growth) {
                     // The lattice quench already failed at this incumbent.
-                    // Further growth waits. The proposals below carry the
-                    // charge as all-points displacements.
+                    // Further growth waits. This leave's proposal is the
+                    // all-points displacement.
                 } else {
                     let mut best_growth: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
                     for source in crate::lattice::Source::library() {
@@ -6118,8 +6124,8 @@ where
             // stream seeded by the hop and the incumbent, so a growth that
             // does not win leaves the chain's own stream where it was. The
             // quench is kept only when it deepens the incumbent. A growth
-            // that fails holds the next one until the incumbent changes, and
-            // that stalled charge is an all-points displacement.
+            // that fails holds the next one until the incumbent changes.
+            // The skipped leave is one all-points displacement.
             if directed_leave
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
@@ -6127,8 +6133,8 @@ where
             {
                 let best_before_growth = ledger.best;
                 if stall_growth_waits(stall_growth_hold, best_before_growth) {
-                    // Same wait as the other lattice growth. The proposals
-                    // are all-points displacements until the incumbent drops.
+                    // Same wait as the other lattice growth. This leave's
+                    // proposal is the all-points displacement.
                 } else {
                     let mut side = StdRng::seed_from_u64(
                         (hops as u64).wrapping_mul(0x9E37_79B9)
