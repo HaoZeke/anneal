@@ -102,6 +102,26 @@ fn reference_of(n: usize) -> Option<f64> {
     }
 }
 
+fn read_trimmed(path: &str) -> String {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+/// Hostname and boot id, read when the run starts.
+fn announce_host() {
+    let hostname = read_trimmed("/proc/sys/kernel/hostname");
+    let boot_id = read_trimmed("/proc/sys/kernel/random/boot_id");
+    if hostname.is_empty() || boot_id.is_empty() {
+        eprintln!("host identity unread");
+        std::process::exit(2);
+    }
+    emit(&format!("hostname={hostname}"));
+    emit(&format!("boot_id={boot_id}"));
+    emit("boot_id_path=/proc/sys/kernel/random/boot_id");
+}
+
 fn main() {
     let threads = std::env::var("RAYON_NUM_THREADS").unwrap_or_default();
     if threads != "1" {
@@ -132,6 +152,7 @@ fn main() {
         std::process::exit(2);
     }
 
+    announce_host();
     let started = Instant::now();
     let cfg = Config::recommended(n);
     let digest = match cfg.resolved_sha256() {
