@@ -64,6 +64,10 @@ Those constants give the committed -197.7750 kJ/mol reported here.
 ## Bundle
 
 The bundle ref is refs/heads/paper-integration-v1.31.
+It also carries refs/heads/paper-integration-v1.30.
+That ref is 6bdb3305aaa92ae0780b6b0c04fdfd64f2f38449.
+It also carries refs/heads/paper-integration-v1.29.
+That ref is df6efccd79358453fe6343c421bd7e6196017a31.
 It also carries refs/heads/paper-integration-v1.28.
 That name is a branch.
 
@@ -217,3 +221,9 @@ rgoswami.AbbreviationStyle hits the affiliation abbreviation.
 Rohit set that affiliation, so the hits stay.
 rgoswami.TricolonAbuse names cited authors.
 Those names stay.
+
+## Scope
+
+Rohit ruled that coverage and mutants are out of scope.
+
+This seal follows that ruling.
