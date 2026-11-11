@@ -205,13 +205,14 @@ The commit token, built the same way, is in that blob too.
 
 Commit ac6bb80b opens with "This commit removes".
 Its diff deletes scripts/redact.py.
-The deletion is 71 lines.
+It deletes 71 lines.
 
 Commit cf864daf changed three lines after the run.
+Commit 6bae140a reworded one of those lines again.
 Those lines are in scripts/lj104_v4_prediction.txt.
 Only the repeated-forecast lines changed.
 The original forecast text is untouched.
-The three old lines follow.
+The original lines follow.
 
 ```
 The rerun keeps this forecast.
@@ -219,11 +220,19 @@ The predicted global-minimum count on the rerun equals 0.
 The predicted Cs-minimum count on the rerun equals 1 of 6.
 ```
 
-The three new lines follow.
+The cf864daf lines follow.
 
 ```
 v4.2 already observed these seeds, so this file is not a blind test.
 The global-minimum count named above stays 0.
+The icosahedral, Cs count named above stays 1 of 6.
+```
+
+The current tip lines follow.
+
+```
+v4.2 already observed these seeds, so this file is not a blind test.
+Global-minimum hits named above stay at 0.
 The icosahedral, Cs count named above stays 1 of 6.
 ```
 
