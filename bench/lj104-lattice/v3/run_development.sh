@@ -7,8 +7,8 @@
 # WORK receives the logs. BIN holds lj_dls and lj_requench.
 set -eu
 export TZ=America/Chicago
-if [[ "${ANNEAL_BENCH_UTS:-}" != 1 ]]; then
-  export ANNEAL_BENCH_UTS=1
+# sudo drops the environment, so the re-exec is gated on the host name.
+if [[ "$(hostname)" != bench ]]; then
   exec sudo unshare --uts sh -c 'hostname bench; exec "$@"' _ "$0" "$@"
 fi
 work=$1
