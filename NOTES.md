@@ -34,3 +34,14 @@ Its best energy is -581.80180238.
 Each seed ran alone on processor 0.
 The receipt field pins reads 0.
 uname -n reads bench.
+
+The measure lane bar is the example, at 98/98 on both toolchains.
+Library files at 98/98 are owned by the integration lane.
+
+On 1.88 the example lines are 98.39 percent and the branches are 0 of 0.
+On the nightly the example lines are 98.99 percent.
+On the nightly the example branches are 100 percent.
+cluster_hopping.rs lines are 55.82 percent.
+cluster_hopping.rs branches are 35.21 percent.
+config.rs lines are 90.00 percent and its branches are 61.11 percent.
+warm_lbfgs.rs lines are 28.66 percent and its branches are 0 of 4.

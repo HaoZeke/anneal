@@ -14,3 +14,6 @@ Each receipt records uname -n and the hash of that hostname file.
 The binary digest is taken before the first seed.
 taskset selects processor 0.
 The budget is 2000000 evaluations.
+
+Reassemble with cat bundle.bundle.part-* > bundle.bundle.
+Then run git bundle verify bundle.bundle.

@@ -40,6 +40,17 @@ Each seed ran alone on processor 0.
 The receipt field pins reads 0.
 uname -n reads bench.
 
+The measure lane bar is the example, at 98/98 on both toolchains.
+Library files at 98/98 are owned by the integration lane.
+
+On 1.88 the example lines are 98.39 percent and the branches are 0 of 0.
+On the nightly the example lines are 98.99 percent.
+On the nightly the example branches are 100 percent.
+cluster_hopping.rs lines are 55.82 percent.
+cluster_hopping.rs branches are 35.21 percent.
+config.rs lines are 90.00 percent and its branches are 61.11 percent.
+warm_lbfgs.rs lines are 28.66 percent and its branches are 0 of 4.
+
 ===== REPRODUCE.md =====
 The measured arm reruns seeds 2000 through 2005, one seed at a time.
 
@@ -57,6 +68,9 @@ Each receipt records uname -n and the hash of that hostname file.
 The binary digest is taken before the first seed.
 taskset selects processor 0.
 The budget is 2000000 evaluations.
+
+Reassemble with cat bundle.bundle.part-* > bundle.bundle.
+Then run git bundle verify bundle.bundle.
 
 ===== PROGRESS.md =====
 Phase: two-million reproduction finished.
@@ -1124,7 +1138,14 @@ The best energy is -581.80180238.
 The global-minimum count is 0 of 6.
 The arm opened at 19:08:07 and closed at 19:24:09.
 
+4bce485a9b46aeb9f031829ed5525d2853dc60a8
 docs(lj104): keep the tree check and the prose record
 
 The report records the tree check transcript.
 The extract is the raw prose record.
+
+docs(lj104): name the bundle parts and the coverage bar
+
+The reproduce file gives the reassembly command.
+The notes state the example bar and keep the coverage table.
+Library files at 98/98 belong to the integration lane.
