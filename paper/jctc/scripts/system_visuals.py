@@ -56,6 +56,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paper_data import fetch_paper_data
+
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data" / "system_visuals"
 XYZRENDER = "0.3.8"
@@ -163,6 +166,7 @@ def _resolve(data: Path, name: str) -> Path:
 
 
 def _read(data: Path, digests: dict[str, str], name: str) -> str:
+    fetch_paper_data()
     if name not in digests:
         die(f"provenance.txt records no digest of {name}")
     path = _resolve(data, name)

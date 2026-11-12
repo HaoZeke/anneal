@@ -30,6 +30,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from paper_data import fetch_paper_data
 from water_census import HBOND_OO_A, label_free_rmsd, molecules, read_xyz
 
 ROOT = Path("paper/jctc")
@@ -827,6 +828,7 @@ def crest_verdict(crest, polished, energy_pass, reason):
 
 
 def main():
+    fetch_paper_data()
     global SOURCE_HEAD, SOURCE_TREE
     SOURCE_HEAD, SOURCE_TREE = git_stamp()
     check_type7()

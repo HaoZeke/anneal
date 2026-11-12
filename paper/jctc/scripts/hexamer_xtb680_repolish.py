@@ -34,6 +34,9 @@ import sys
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paper_data import fetch_paper_data
+
 SEEDS = range(6)
 ARMS = ("crest", "fair", "paper4000")
 OH_BOND_A = 1.15
@@ -236,6 +239,7 @@ def main() -> None:
     require_bench(args.work)
     if not args.xtb.is_file():
         fail(f"missing xtb binary {args.xtb}")
+    fetch_paper_data()
     logs = paper / "logs" / "water"
     numbers = logs / "NUMBERS.tsv"
     if not numbers.is_file():

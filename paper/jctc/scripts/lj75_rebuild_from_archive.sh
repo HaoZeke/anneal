@@ -15,6 +15,8 @@
 # 6887e36a368f9fa81eded591dcfa22904fa317fe2208b1bc58ba6500c8937118,
 # the same digest as the running binary.
 set -eu
+repo=$(CDPATH= cd -- "$(dirname "$0")/../../.." && pwd)
+python3 "$repo/scripts/data/fetch_data.py"
 archive=${1:-paper/jctc/logs/lj75-source-37535ec1.tar.xz}
 dest=${2:-lj75-source}
 log=${3:-paper/jctc/logs/lj75-rebuild-log.txt}
