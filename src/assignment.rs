@@ -148,11 +148,23 @@ unsafe fn scan_avx2(
     };
 
     let n = row.len();
+    // Columns are numbered `1..=n`, with a dummy at 0. Every scratch
+    // slice therefore has an entry at `n`, and `column` is one of `0..=n`.
+    debug_assert!(column <= n);
+    debug_assert!(column_potential.len() > n);
+    debug_assert!(min_reduced.len() > n);
+    debug_assert!(predecessor.len() > n);
+    debug_assert!(used.len() > n);
     let mut delta = f64::INFINITY;
     let mut next_column = 0usize;
     let mut candidate = 1usize;
     let dual = _mm256_set1_pd(row_dual);
     let zero = _mm_setzero_si128();
+    let pred = predecessor.as_mut_ptr();
+    let used_p = used.as_ptr();
+    let min_p = min_reduced.as_mut_ptr();
+    let row_p = row.as_ptr();
+    let pot_p = column_potential.as_ptr();
     while candidate + 3 <= n {
         let packed =
             unsafe { std::ptr::read_unaligned(used.as_ptr().add(candidate) as *const i32) };
@@ -170,37 +182,55 @@ unsafe fn scan_avx2(
             lower
         };
         let improved = _mm256_movemask_pd(lower);
-        if improved & 1 != 0 {
-            predecessor[candidate] = column;
-        }
-        if improved & 2 != 0 {
-            predecessor[candidate + 1] = column;
-        }
-        if improved & 4 != 0 {
-            predecessor[candidate + 2] = column;
-        }
-        if improved & 8 != 0 {
-            predecessor[candidate + 3] = column;
+        // SAFETY: the loop condition is `candidate + 3 <= n`, and
+        // `predecessor` is longer than `n`, so `candidate..=candidate+3`
+        // is inside that slice.
+        unsafe {
+            if improved & 1 != 0 {
+                *pred.add(candidate) = column;
+            }
+            if improved & 2 != 0 {
+                *pred.add(candidate + 1) = column;
+            }
+            if improved & 4 != 0 {
+                *pred.add(candidate + 2) = column;
+            }
+            if improved & 8 != 0 {
+                *pred.add(candidate + 3) = column;
+            }
         }
         for offset in 0..4 {
             let index = candidate + offset;
-            if used[index] == 0 && min_reduced[index] < delta {
-                delta = min_reduced[index];
-                next_column = index;
+            // SAFETY: `index` is in `candidate..=candidate+3`, hence `1..=n`,
+            // and both `used` and `min_reduced` are longer than `n`.
+            unsafe {
+                if *used_p.add(index) == 0 {
+                    let slot = *min_p.add(index);
+                    if slot < delta {
+                        delta = slot;
+                        next_column = index;
+                    }
+                }
             }
         }
         candidate += 4;
     }
     while candidate <= n {
-        if used[candidate] == 0 {
-            let reduced = row[candidate - 1] - row_dual - column_potential[candidate];
-            if reduced < min_reduced[candidate] {
-                min_reduced[candidate] = reduced;
-                predecessor[candidate] = column;
-            }
-            if min_reduced[candidate] < delta {
-                delta = min_reduced[candidate];
-                next_column = candidate;
+        // SAFETY: `candidate` is in `1..=n`, so `candidate - 1` is a lane of
+        // `row` and `candidate` is inside `used`, `min_reduced`,
+        // `predecessor`, and `column_potential`.
+        unsafe {
+            if *used_p.add(candidate) == 0 {
+                let reduced = *row_p.add(candidate - 1) - row_dual - *pot_p.add(candidate);
+                let slot = min_p.add(candidate);
+                if reduced < *slot {
+                    *slot = reduced;
+                    *pred.add(candidate) = column;
+                }
+                if *slot < delta {
+                    delta = *slot;
+                    next_column = candidate;
+                }
             }
         }
         candidate += 1;
@@ -285,6 +315,12 @@ unsafe fn adjust_reduced_avx2(
         _mm256_castsi256_pd, _mm256_cvtepi8_epi64, _mm256_loadu_pd, _mm256_set1_pd,
         _mm256_storeu_pd, _mm256_sub_pd,
     };
+    // The same `0..=n` indexing as the scalar adjustment.
+    debug_assert!(used.len() > n);
+    debug_assert!(min_reduced.len() > n);
+    debug_assert!(column_potential.len() > n);
+    debug_assert!(column_match.len() > n);
+    debug_assert!(row_potential.len() > n);
     adjust_one(
         0,
         delta,
@@ -307,11 +343,22 @@ unsafe fn adjust_reduced_avx2(
             let updated = _mm256_blendv_pd(previous, subtracted, open);
             _mm256_storeu_pd(min_reduced.as_mut_ptr().add(index), updated);
         }
+        let used_p = used.as_ptr();
+        let matched = column_match.as_ptr();
+        let row_p = row_potential.as_mut_ptr();
+        let col_p = column_potential.as_mut_ptr();
         for offset in 0..4 {
-            if used[index + offset] == 1 {
-                let at = index + offset;
-                row_potential[column_match[at]] += delta;
-                column_potential[at] -= delta;
+            let at = index + offset;
+            // SAFETY: `index + 3 <= n`, so `at` is in `1..=n` and is inside
+            // `used`, `column_match`, and `column_potential`. A used column's
+            // match is a row in `0..=n`, which is inside `row_potential`.
+            unsafe {
+                if *used_p.add(at) == 1 {
+                    let row = *matched.add(at);
+                    debug_assert!(row <= n);
+                    *row_p.add(row) += delta;
+                    *col_p.add(at) -= delta;
+                }
             }
         }
         index += 4;
@@ -713,6 +760,67 @@ mod tests {
     fn colliding_row_minima_are_left_to_the_solver() {
         let costs = [0.0, 5.0, 1.0, 4.0];
         assert!(strict_unique_row_minima(&costs, 2).is_none());
+    }
+
+    /// Vector and scalar scans agree on every remainder of the 4-lane loop.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn the_vector_column_scan_matches_the_scalar_scan_at_awkward_sizes() {
+        if !std::is_x86_feature_detected!("avx2") {
+            return;
+        }
+        for n in [1usize, 2, 3, 4, 5, 7, 8, 9, 104, 105] {
+            let row: Vec<f64> = (0..n).map(|i| ((i * 17 + 3) % 11) as f64 - 2.0).collect();
+            let potential: Vec<f64> = (0..=n).map(|i| 0.05 * i as f64).collect();
+            let mut used = vec![0u8; n + 1];
+            used[1] = 1;
+            if n >= 4 {
+                used[n - 1] = 1;
+            }
+            let mut min_reduced = vec![f64::INFINITY; n + 1];
+            if n >= 3 {
+                min_reduced[2] = 0.25;
+            }
+            let predecessor = vec![0usize; n + 1];
+            for column in [0usize, n] {
+                let mut min_a = min_reduced.clone();
+                let mut pred_a = predecessor.clone();
+                let mut min_b = min_reduced.clone();
+                let mut pred_b = predecessor.clone();
+                let (delta_a, next_a) = unsafe {
+                    super::scan_avx2(
+                        &row,
+                        0.25,
+                        &potential,
+                        &mut min_a,
+                        &mut pred_a,
+                        &used,
+                        column,
+                    )
+                };
+                let (delta_b, next_b) = unsafe {
+                    super::scan_scalar(
+                        &row,
+                        0.25,
+                        &potential,
+                        &mut min_b,
+                        &mut pred_b,
+                        &used,
+                        column,
+                    )
+                };
+                assert_eq!(next_a, next_b, "n={n} column={column}");
+                assert_eq!(
+                    delta_a.to_bits(),
+                    delta_b.to_bits(),
+                    "n={n} column={column}"
+                );
+                assert_eq!(pred_a, pred_b, "n={n} column={column}");
+                for (left, right) in min_a.iter().zip(min_b.iter()) {
+                    assert_eq!(left.to_bits(), right.to_bits(), "n={n} column={column}");
+                }
+            }
+        }
     }
 
     fn brute(costs: &[f64], n: usize) -> f64 {
