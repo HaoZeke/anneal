@@ -149,11 +149,11 @@ fn expect_compile_fail(facts: &ProbeFacts, relative: &str, fragments: &[&str]) {
         .env("CARGO_TARGET_DIR", probe_target())
         .output()
         .expect("cargo check");
-    let text = format!(
+    let text = without_ansi(&format!(
         "{}\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
-    );
+    ));
     assert!(
         !output.status.success(),
         "{relative} compiled, but the contract says it must fail\n{text}"
@@ -164,6 +164,26 @@ fn expect_compile_fail(facts: &ProbeFacts, relative: &str, fragments: &[&str]) {
             "{relative} failed without {fragment}\n{text}"
         );
     }
+}
+
+/// rustc colors the help line in the middle of the type, so a fragment
+/// search has to see the text without those escapes.
+fn without_ansi(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for done in chars.by_ref() {
+                if done.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+            continue;
+        }
+        out.push(ch);
+    }
+    out
 }
 
 fn probe_target() -> &'static Path {
