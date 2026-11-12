@@ -33,10 +33,12 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 /// nothing else did, 13 of 16, on the same image and the same rustc. The
 /// proposals, the initial cluster and the acceptance test now call the
 /// `libm` crate, the pair force is an IEEE `mul_add`, and
-/// `search_lennard_jones` is monomorphized in the library. Five runs
-/// here, with one thread and with eight, all gave the same masks: the
-/// cutoff walk hits every seed (`0xffff`) and the plain walk hits
-/// `0x9acd` (9 of 16). Both platforms have to reproduce those masks.
+/// `search_lennard_jones` is monomorphized in the library and forces
+/// rgmin's scalar dot product. The AVX-512 and AVX2 clones match that
+/// mask on x86. The NEON clone does not: macOS reported plain mask
+/// `0x9204`. Five reruns of the scalar path, at one thread and at
+/// eight, all gave the same masks. The `ira` feature replaces the
+/// permutation and has its own mask, measured on the feature build.
 #[test]
 fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not() {
     const SEEDS: u64 = 16;
@@ -70,12 +72,19 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
             plain_mask |= 1 << seed;
         }
     }
+    // Without `ira`: cutoff 0xffff, plain 0x9acd (9 seeds).
+    // With `ira`: cutoff 0xffff, plain 0x18f5 (8 seeds).
+    let plain_exact = if cfg!(feature = "ira") {
+        0x18f5
+    } else {
+        0x9acd
+    };
     assert_eq!(
         compact_mask, 0xffff,
         "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds (mask {compact_mask:#06x})"
     );
     assert_eq!(
-        plain_mask, 0x9acd,
+        plain_mask, plain_exact,
         "the plain walk reached the octahedron on {plain_hits} of {SEEDS} seeds (mask {plain_mask:#06x})"
     );
 }

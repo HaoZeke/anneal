@@ -739,6 +739,10 @@ pub fn search_lennard_jones(
     ledger: &mut Ledger,
     seed: u64,
 ) -> Result<(Outcome, RelaxStats), SearchError> {
+    // The AVX2, AVX-512 and NEON clones of rgmin's dot product are not the
+    // same walk. On x86 the plain seeds are 0x9acd; on macOS NEON they were
+    // 0x9204. The scalar `mul_add` path is the one every target can run.
+    let _ = rgmin::vecops::force_simd_path("scalar");
     search(potential, cfg, ledger, seed)
 }
 
