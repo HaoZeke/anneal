@@ -26,7 +26,7 @@ fn checked_rejects_uncertified_component_combinations() {
         "tests/ui/checked_rejects_unbounded_box_move.rs",
         &[
             "error[E0277]",
-            "the trait bound `anneal_core::movekernel::Gaussian: CertifiedMoveFor<f64, BoxConstrained<f64>>` is not satisfied",
+            "the trait `CertifiedMoveFor<_, BoxConstrained<f64>>` is not implemented for `anneal_core::movekernel::Gaussian`",
         ],
     );
     expect_compile_fail(

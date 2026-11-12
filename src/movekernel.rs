@@ -56,8 +56,17 @@ impl Gaussian {
 }
 
 impl MoveKernel<f64> for Gaussian {
+    #[inline(always)]
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
-        self.step(i.len(), rng) + i
+        // One buffer: the displacement and the sum used to be two allocations
+        // of the same length. Samples stay in coordinate order, and each
+        // coordinate is `sample + x` so the bits match the old sum.
+        let dist = NormalDist::new(0.0, self.sigma).expect("sigma > 0");
+        let mut out = i.to_owned();
+        for value in out.iter_mut() {
+            *value = dist.sample(rng) + *value;
+        }
+        out
     }
 
     fn displacement<R: Rng + ?Sized>(
@@ -94,6 +103,7 @@ impl Cauchy {
         Self { gamma }
     }
 
+    #[inline(always)]
     fn step<R: Rng + ?Sized>(&self, dim: usize, rng: &mut R) -> Array1<f64> {
         let dist = CauchyDist::new(0.0, self.gamma).expect("gamma > 0");
         Array1::from_iter((0..dim).map(|_| dist.sample(rng)))
@@ -101,6 +111,9 @@ impl Cauchy {
 }
 
 impl MoveKernel<f64> for Cauchy {
+    // Same reason as `SaVariant::step`: the tan that draws the step has to
+    // stay in the epoch loop.
+    #[inline(always)]
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
         self.step(i.len(), rng) + i
     }
@@ -200,7 +213,7 @@ impl TsallisVisit {
     /// `ln sigma(T, q_v)` of the visiting scale. Near `q_v = 3` the scale
     /// itself underflows to zero while `|y|^{-exponent}` overflows, and their
     /// product is NaN; the step is formed from logarithms instead.
-    fn log_sigma(&self, t: f64) -> f64 {
+    fn log_sigma_uncached(&self, t: f64) -> f64 {
         let qv = self.q_v;
         // SciPy dual_annealing VisitingDistribution constants (qv-dependent).
         let ln_factor2 = (4.0 - qv) * (qv - 1.0).ln();
@@ -217,26 +230,93 @@ impl TsallisVisit {
 
     /// Prepare the native visiting transform at the supplied temperature.
     pub fn parameters(&self, t: f64) -> TsallisVisitParameters {
-        let exponent = (self.q_v - 1.0) / (3.0 - self.q_v);
-        let ln_sigma = self.log_sigma(t);
-        let scale = if ln_sigma.is_finite() {
-            ln_sigma.exp()
-        } else {
-            0.0
-        };
-        TsallisVisitParameters {
-            scale,
-            exponent,
-            tail_limit: VISIT_TAIL_LIMIT,
-        }
+        self.prepared(t).0
+    }
+
+    /// `log_sigma` and the scale derived from it.
+    ///
+    /// Both depend only on `(q_v, T)`. A step used to recompute the Lanczos
+    /// logarithm twice, and the next two hundred steps of the epoch did it
+    /// again. The memo returns those bits.
+    #[inline(always)]
+    fn prepared(&self, t: f64) -> (TsallisVisitParameters, f64) {
+        let q_bits = self.q_v.to_bits();
+        let t_bits = t.to_bits();
+        VISIT_PREPARED.with(|cell| {
+            let hit = cell.get();
+            if hit.valid && hit.q_bits == q_bits && hit.t_bits == t_bits {
+                return (
+                    TsallisVisitParameters {
+                        scale: f64::from_bits(hit.scale_bits),
+                        exponent: f64::from_bits(hit.exponent_bits),
+                        tail_limit: VISIT_TAIL_LIMIT,
+                    },
+                    f64::from_bits(hit.ln_sigma_bits),
+                );
+            }
+            let exponent = (self.q_v - 1.0) / (3.0 - self.q_v);
+            let ln_sigma = self.log_sigma_uncached(t);
+            let scale = if ln_sigma.is_finite() {
+                ln_sigma.exp()
+            } else {
+                0.0
+            };
+            cell.set(VisitPrepared {
+                q_bits,
+                t_bits,
+                ln_sigma_bits: ln_sigma.to_bits(),
+                scale_bits: scale.to_bits(),
+                exponent_bits: exponent.to_bits(),
+                valid: true,
+            });
+            (
+                TsallisVisitParameters {
+                    scale,
+                    exponent,
+                    tail_limit: VISIT_TAIL_LIMIT,
+                },
+                ln_sigma,
+            )
+        })
     }
 }
 
+#[derive(Clone, Copy)]
+struct VisitPrepared {
+    q_bits: u64,
+    t_bits: u64,
+    ln_sigma_bits: u64,
+    scale_bits: u64,
+    exponent_bits: u64,
+    valid: bool,
+}
+
+impl VisitPrepared {
+    const EMPTY: Self = Self {
+        q_bits: 0,
+        t_bits: 0,
+        ln_sigma_bits: 0,
+        scale_bits: 0,
+        exponent_bits: 0,
+        valid: false,
+    };
+}
+
+thread_local! {
+    static VISIT_PREPARED: std::cell::Cell<VisitPrepared> =
+        const { std::cell::Cell::new(VisitPrepared::EMPTY) };
+}
+
+fn visit_ln_tail() -> f64 {
+    static LN: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *LN.get_or_init(|| VISIT_TAIL_LIMIT.ln())
+}
+
 impl MoveKernel<f64> for TsallisVisit {
+    #[inline(always)]
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
-        let parameters = self.parameters(t);
-        let ln_sigma = self.log_sigma(t);
-        let ln_tail = VISIT_TAIL_LIMIT.ln();
+        let (parameters, ln_sigma) = self.prepared(t);
+        let ln_tail = visit_ln_tail();
         let normal = NormalDist::new(0.0, 1.0).expect("std normal");
         Array1::from_iter(i.iter().map(|&xi| {
             let x: f64 = normal.sample(rng);

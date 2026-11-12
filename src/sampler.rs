@@ -227,6 +227,10 @@ where
         })
     }
 
+    // The epoch loop is the annealing hot path. Leaving this out of line
+    // also drops the proposal kernel out of line, which showed up as a
+    // slower Fast preset with the same arithmetic.
+    #[inline(always)]
     fn step<R: Rng>(&self, state: &mut State, epoch: usize, rng: &mut R) -> bool {
         let temp = self.cool.temperature(epoch);
         let proposal_pos = self.mover.propose(state.cur.pos.view(), temp, rng);

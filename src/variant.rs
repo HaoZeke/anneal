@@ -26,9 +26,9 @@ pub trait CertifiedCooling<T: Float>: Cooling<T> + sealed::Cooling {}
 impl<T: Float> sealed::Cooling for LogCool<T> {}
 impl<T: Float> sealed::Cooling for ReciprocalCool<T> {}
 impl<T: Float> sealed::Cooling for TsallisCool<T> {}
-impl<T: Float + Send + Sync> CertifiedCooling<T> for LogCool<T> {}
+impl<T: Float + Send + Sync + 'static> CertifiedCooling<T> for LogCool<T> {}
 impl<T: Float + Send + Sync> CertifiedCooling<T> for ReciprocalCool<T> {}
-impl<T: Float + Send + Sync> CertifiedCooling<T> for TsallisCool<T> {}
+impl<T: Float + Send + Sync + 'static> CertifiedCooling<T> for TsallisCool<T> {}
 
 /// Neighborhood relations whose implementations establish L1.
 pub trait CertifiedNeighborhood<T: Float>: Neighborhood<T> + sealed::Neighborhood {}
