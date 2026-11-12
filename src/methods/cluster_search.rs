@@ -2190,7 +2190,7 @@ mod tests {
         cfg.species = Some(vec![8, 1]);
         cfg.max_hops = Some(0);
         cfg.relax_steps = 8;
-        let start = Array1::from_vec(vec![0.0, 0.0, 0.0, OVERLAP_SEPARATION + 5.0e-7, 0.0, 0.0]);
+        let start = Array1::from_vec(vec![0.0, 0.0, 0.0, OVERLAP_SEPARATION + 1.5e-3, 0.0, 0.0]);
         let mut ledger = Ledger::new(40);
         let (out, _) = search_from(&gate, &cfg, &mut ledger, start.view(), 7).expect("search");
         assert_eq!(

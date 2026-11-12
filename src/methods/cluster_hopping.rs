@@ -1269,10 +1269,13 @@ pub fn structure_is_sane(x: ArrayView1<f64>, min_sep: f64) -> bool {
 /// overlap artifact rather than a physical bond.
 pub const OVERLAP_SEPARATION: f64 = 0.35;
 
-/// Distances this close still abort xtb's SCC. The printed value is 0.350000
-/// while the true distance sits just above [`OVERLAP_SEPARATION`], so a strict
-/// `<=` check hands the boundary to the potential.
-pub const OVERLAP_CALL_LIMIT: f64 = OVERLAP_SEPARATION + 1.0e-3;
+/// Distances this close still abort xtb's SCC.
+///
+/// A gate 0.001 Å above [`OVERLAP_SEPARATION`] still handed the line search a
+/// shell that prints as that gate and fails SCC, one probe at a time. The
+/// failed attempts are the slow ones. 0.40 Å is above that shell and below a
+/// covalent O–H contact, so a real bond is not refused.
+pub const OVERLAP_CALL_LIMIT: f64 = OVERLAP_SEPARATION + 0.05;
 
 /// Push pairs closer than `min_sep` apart until the geometry clears that rule.
 ///
