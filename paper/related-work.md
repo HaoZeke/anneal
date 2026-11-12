@@ -527,3 +527,17 @@ Bengtsson, Hewitt, Saha, Sarwar, Collis, Erlebach, Grajciar, and Heard, Digital 
 Christiansen and Hammer, Journal of Chemical Physics 162, 184701 (8 May 2025), doi:10.1063/5.0268264, correct a universal potential by a Gaussian process on the potential's own embedding. In a global structure optimisation, CHGNet describes the "8" surface oxide on Cu(111) and prefers a structure the abstract calls more favorable than one in the density-functional literature. Sulfur adlayers on Cu(111), Ag(111), and Au(111) need the correction. MACE-MP0, SevenNet-0, and ORB-v2-only-MPtrj show the same kind of error. This precedes the silver--sulfur delta search filed as `pitfieldActiveDelta2026`, and the oxide is the system in `leeNara2026`. The note gives no Lennard-Jones energy and no water energy. It does not fill the open kit, and it does not warrant a head-to-head on LJ38 through LJ104 or on the hexamer.
 
 Cite `rothGlycine2026`, `bengtssonZeolite2026`, `bengtssonZeoliteChemrxiv2026`, and `christiansenDelta2025`. The ChemRxiv key is the 5 February 2026 preprint of the Digital Discovery record.
+
+## 2026-11-12 — BHSMS
+
+Zhang, Cheng, Zhang, and Dai, Physical Chemistry Chemical Physics 28, 26341--26362 (4 November 2026), doi:10.1039/d6cp00638h, release BHSMS. The abstract says the package searches the global minimum of atomic and molecular clusters. The pieces it names are an improved basin hop, a structure relaxation, a similarity filter, a planarity check, and a constraint on molecular rotation. The interfaces it names include xTB, ORCA, and VASP. The tests it names are Au6, Au20, B8, B40, C20, C60, Be2O2, Si2O2, (CO2)3, (CO2)6, (NH3)4, (NH3)5, (H2O)5, (H2O)8, (HNO3)3(NH3)3, and (HNO3)3(NH3)3(H2O)2. The abstract gives no energy and no hit rate.
+
+These authors already have the surface-supported package filed as `zhangSgmsc2026`, the AIMNet2 genetic search filed as `zhangGmmlp2026`, and the giant-cluster packages filed as `chengGmupc2026` and `chengGmscg2026`. BHSMS is the free-cluster basin hop. It does not name LJ38 through LJ104, and it does not name the water hexamer, so it does not contradict the Cambridge hit targets, 121 of 192, or 97 of 192. It does not fill the open ASE, AGOX, and GMIN kit. A comparison on (H2O)5, (H2O)8, or Au20 would need one shared potential, and the abstract does not name that potential. It does not warrant a head-to-head on the sealed Lennard-Jones maps or on the CREST hexamer table.
+
+Cite `zhangBhsms2026`.
+
+## 2026-11-12 — Release tags checked on 12 November
+
+ASE tag 3.29.0, dated 21 June 2026, is still the newest tag. The master tip is still the 11 November 2026 merge. AGOX tag v3.11.1, dated 4 February 2026, is still the newest tag. The dev tip is still the 5 May 2026 ASE 3.28 import fix. The GOFEE page on the documentation site is titled as AGOX 3.11.2. The changelog on dev has an unreleased note and no 3.11.2 section, and the tag list has no 3.11.2. That banner is not a release. CREST's newest numbered release is still v3.0.2, and the master tip is still the 16 June 2026 CMake fix. pele is still v0.1.2, and that tag is still the tip, dated 12 October 2026. xtb v6.8.0, dated 5 November 2026, is still the newest release.
+
+Pin the open arms to ASE 3.29.0, AGOX v3.11.1, CREST 3.0.2, and pele 0.1.2. Do not move the AGOX arm to 3.11.2. No bibliographic entry for this check: a tag date is not a DOI.
