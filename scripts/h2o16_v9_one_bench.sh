@@ -32,7 +32,7 @@ esac
 #   sudo unshare --uts sh -c 'hostname bench; exec <cmd>'
 # sudo resets PATH, so the shell sources the wrapper env before exec.
 timed() {
-  sudo -n unshare --uts sh -c 'hostname bench; . /home/ubuntu/work/bench-env.sh; exec "$@"' timed-sh "$@"
+  sudo -n unshare --uts sh -c 'hostname bench; . /work/bench-env.sh; exec "$@"' timed-sh "$@"
 }
 stamp() {
   python3 - << 'PY'
@@ -112,14 +112,26 @@ seed="$SEED"
   base="$OUT/runs/$seed"
   mkdir -p "$base"
   cp "$START_ROOT/$seed/start.xyz" "$base/start.xyz"
-
   anneal="$base/anneal"
+  crest="$base/crest"
+
+set_start_xyz() {
+  local xyz=$1
+  grep -v '^export H2H_START_XYZ=' /work/bench-env.sh > /work/bench-env.sh.tmp
+  if [[ -n $xyz ]]; then
+    printf 'export H2H_START_XYZ=%s\n' "$xyz" >> /work/bench-env.sh.tmp
+  fi
+  mv /work/bench-env.sh.tmp /work/bench-env.sh
+}
+
+run_anneal() {
   mkdir -p "$anneal"
   cp "$base/start.xyz" "$anneal/start.xyz"
   write_definition "$anneal"
   pins "$anneal" anneal
   machine_raw "$anneal" start
   echo "ARM_START anneal $seed $(stamp)" >> "$OUT/schedule.txt"
+  set_start_xyz "$anneal/start.xyz"
   (
     cd "$anneal"
     set +e
@@ -128,13 +140,15 @@ seed="$SEED"
     wait $!
     echo $? > exit.code
   )
+  set_start_xyz ""
   machine_raw "$anneal" end
   echo "ARM_DONE anneal $seed $(stamp)" >> "$OUT/schedule.txt"
   if [[ -f $anneal/best.xyz ]]; then
     score_one "$anneal/best.xyz" "$anneal/score"
   fi
+}
 
-  crest="$base/crest"
+run_crest() {
   mkdir -p "$crest"
   cp "$base/start.xyz" "$crest/start.xyz"
   write_definition "$crest"
@@ -146,6 +160,7 @@ seed="$SEED"
   } > "$crest/command.txt"
   machine_raw "$crest" start
   echo "ARM_START crest $seed $(stamp)" >> "$OUT/schedule.txt"
+  set_start_xyz ""
   (
     cd "$crest"
     set +e
@@ -159,11 +174,27 @@ seed="$SEED"
   if [[ -f $crest/crest_best.xyz ]]; then
     score_one "$crest/crest_best.xyz" "$crest/score"
   fi
+}
+
+order_byte=$(od -An -N1 -tu1 /dev/urandom | tr -d ' ')
+if (( order_byte % 2 == 0 )); then
+  arm_order=(anneal crest)
+else
+  arm_order=(crest anneal)
+fi
+echo "ARM_ORDER ${arm_order[*]} $(stamp)" >> "$OUT/schedule.txt"
+for arm in "${arm_order[@]}"; do
+  case "$arm" in
+    anneal) run_anneal ;;
+    crest) run_crest ;;
+  esac
+done
 
   {
     echo "seed: $seed"
     echo "budget: $BUDGET"
     echo "date: $(stamp)"
+    echo "arm_order: ${arm_order[*]}"
     echo "anneal_exit: $(cat "$anneal/exit.code" 2>/dev/null || echo missing)"
     echo "anneal_score_exit: $(cat "$anneal/score/exit.code" 2>/dev/null || echo missing)"
     echo "crest_exit: $(cat "$crest/exit.code" 2>/dev/null || echo missing)"
