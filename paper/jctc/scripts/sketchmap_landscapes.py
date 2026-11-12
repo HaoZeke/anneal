@@ -60,6 +60,9 @@ COLUMNS = ("landmark", "label", "source", "line", "energy", "x", "y")
 
 def rows_of(path: Path) -> list[tuple[int, float, np.ndarray]]:
     """Each minimum of a dump: its line, its energy and its flat coordinates."""
+    import sealed_parts
+
+    path = sealed_parts.materialize(path)
     out = []
     for number, line in enumerate(path.read_text().splitlines(), 1):
         fields = line.split()

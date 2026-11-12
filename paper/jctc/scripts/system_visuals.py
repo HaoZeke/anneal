@@ -138,7 +138,9 @@ def die(message: str) -> NoReturn:
 
 
 def digest_of(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    import sealed_parts
+
+    return hashlib.sha256(sealed_parts.materialize(path).read_bytes()).hexdigest()
 
 
 def provenance(data: Path = DATA) -> tuple[dict[str, str], dict[str, str]]:
