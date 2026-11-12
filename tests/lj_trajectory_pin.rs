@@ -5,12 +5,15 @@
 //! The recommended full quench is 1000 steps, so this pin is that
 //! trajectory, not the earlier 200-step one.
 //!
-//! The hash is the scalar, portable-libm walk. Host `exp` and the NEON
-//! dot product are a different trajectory: every macOS runner produced
-//! `4f747b8c…` while glibc produced `31a8df4a…` from the same source.
-//! Proposals, the acceptance test, the SOAP cutoff and the pair force go
-//! through one implementation, and this test forces rgmin's scalar dots,
-//! so one seed has one hash on every target.
+//! The hash is the scalar walk. Host `exp` and the NEON dot product are
+//! a different trajectory. Proposals, the acceptance test, the SOAP
+//! cutoff, the pair force, and the move-arm gamma draw go through one
+//! `libm`, and this test forces rgmin's scalar dots.
+//!
+//! Without `ira` that hash is `c6233151…` on every target. With `ira`
+//! the permutation is libira, and libira calls host `sincos`, so the
+//! walk is the one linked against that library. On glibc it is
+//! `c7f6e1c9…`.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, random_cluster_in_radius, run_with_gradient,
@@ -85,8 +88,11 @@ fn trajectory_hash() -> String {
 #[test]
 fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     let hash = trajectory_hash();
-    assert_eq!(
-        hash, "c6233151644f6d3c0b8a35ae965ee36d4a306543d58cc08c1b3569e6227d16b9",
-        "trajectory hash changed: {hash}"
-    );
+    let expected = if cfg!(feature = "ira") {
+        // libira calls host `sincos`. This is the glibc-linked walk.
+        "c7f6e1c909e2588db66d274fa704e66d267d0db64e0a1e8af3a7c71f87913980"
+    } else {
+        "c6233151644f6d3c0b8a35ae965ee36d4a306543d58cc08c1b3569e6227d16b9"
+    };
+    assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }
