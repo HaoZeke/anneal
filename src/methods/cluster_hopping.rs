@@ -2379,6 +2379,14 @@ const RIGID_FACTOR_CAP_LARGE: f64 = 4.0;
 const RIGID_ACCEPT_TARGET: f64 = 0.5;
 /// Quenched trials between orientation-amplitude updates.
 const RIGID_ACCEPT_BLOCK: usize = 50;
+/// Patience windows with no new lowest minimum before a second rigid chain
+/// walks another oxygen cage.
+///
+/// The main walker is not moved and its generator is not advanced, so a
+/// chain that is still descending is left alone. A chain that has been
+/// quiet for this long spends the calls it has left on a cage it already
+/// quenched, on a separate generator.
+const RIGID_CAGE_WINDOWS: usize = 160;
 /// Multiplier applied when a block misses [`RIGID_ACCEPT_TARGET`].
 const RIGID_STEP_FACTOR: f64 = 1.05;
 
@@ -2420,6 +2428,37 @@ fn rigid_cage_kernel(mv: &ClusterMove) -> bool {
             | ClusterMove::RigidTranslateOne { .. }
             | ClusterMove::RigidKick { .. }
     )
+}
+
+/// Quantised oxygen-oxygen distances, so proton isomers of one cage share a key.
+///
+/// The bin width is a fraction of the preset contact length. A rearrangement
+/// that changes a contact moves at least one distance by more than that bin.
+fn rigid_cage_key(state: ArrayView1<f64>, n: usize, quantum: f64) -> u64 {
+    let quantum = if quantum > 0.0 { quantum } else { 1.0 };
+    if n < 2 || state.len() < 3 * n {
+        return 0;
+    }
+    let mut bins = Vec::with_capacity(n * (n - 1) / 2);
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut distance = 0.0;
+            for k in 0..3 {
+                let delta = state[3 * i + k] - state[3 * j + k];
+                distance += delta * delta;
+            }
+            bins.push((distance.sqrt() / quantum).round() as i64);
+        }
+    }
+    bins.sort_unstable();
+    let mut hash = 0xcbf29ce484222325u64;
+    hash ^= n as u64;
+    hash = hash.wrapping_mul(0x100000001b3);
+    for bin in bins {
+        hash ^= bin as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 fn rigid_step_scale(scale: f64, accepted: usize, trials: usize) -> f64 {
@@ -3384,8 +3423,17 @@ where
     let hop_room = |hops: usize| cfg.max_hops.is_none_or(|cap| hops < cap);
     // Distinct minima a rigid chain has quenched. Its stall moves to one.
     let mut stall_archive = crate::methods::stall_archive::StallArchive::default();
+    // One seat per oxygen cage. The energy archive fills with proton
+    // isomers of the lowest cage and then has nowhere else to walk.
+    let mut cage_archive = crate::methods::stall_archive::StallArchive::new(
+        crate::methods::stall_archive::CAGE_SEATS,
+        crate::methods::stall_archive::MEMORY,
+    );
+    let cage_quantum = cfg.min_separation / 50.0;
+    let mut cage_walked = false;
     if cfg.move_library.is_rigid_body() {
         stall_archive.offer(e, x.view());
+        cage_archive.offer_cage(e, x.view(), rigid_cage_key(x.view(), cfg.n_points, cage_quantum));
     }
 
     let stop = loop {
@@ -3489,6 +3537,80 @@ where
                 }
             }
             polished_best = ledger.best;
+        }
+        // The main walker stays put and its generator is not advanced.
+        // After many patience windows with no new lowest minimum, the calls
+        // that remain are spent on another cage the chain already quenched.
+        // A chain that is still descending never enters, so its proposals
+        // and its evaluation count stay what they were.
+        let cage_patience = cfg.restart_patience.saturating_mul(RIGID_CAGE_WINDOWS).max(1);
+        if cfg.move_library.is_rigid_body()
+            && !cage_walked
+            && !kernels.is_empty()
+            && ledger.spent().saturating_sub(charged_at_best) >= cage_patience
+        {
+            cage_walked = true;
+            let key = rigid_cage_key(x.view(), cfg.n_points, cage_quantum);
+            cage_archive.offer_cage(e, x.view(), key);
+            if let Some(best) = ledger.best_state.as_ref() {
+                cage_archive.offer_cage(
+                    ledger.best,
+                    best.view(),
+                    rigid_cage_key(best.view(), cfg.n_points, cage_quantum),
+                );
+            }
+            let (mut side_energy, mut side_state) =
+                match cage_archive.escape_other_cage(key) {
+                    Some((energy, state)) if state.len() == x.len() => (energy, state),
+                    _ => (e, x.clone()),
+                };
+            // A fresh generator, not a draw on the walker's.
+            let mut side_rng = StdRng::seed_from_u64(
+                (hops as u64)
+                    .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    .wrapping_add(key)
+                    .wrapping_add(side_energy.to_bits()),
+            );
+            let side_scale = orient_scale;
+            let mut side_hops = 0usize;
+            while ledger.remaining() > 0 && !ledger.stopped() {
+                if side_hops > 0
+                    && side_hops.is_multiple_of(crate::methods::rigid_quench::STAGNATION_HOPS)
+                {
+                    let next_key =
+                        rigid_cage_key(side_state.view(), cfg.n_points, cage_quantum);
+                    if let Some((energy, state)) = cage_archive.escape_other_cage(next_key)
+                        && state.len() == side_state.len()
+                    {
+                        side_energy = energy;
+                        side_state = state;
+                    }
+                }
+                side_hops += 1;
+                let arm = side_rng.random_range(0..kernels.len());
+                let mut trial = kernels[arm].propose_scaled(
+                    side_state.view(),
+                    cfg.temperature,
+                    side_scale,
+                    &mut side_rng,
+                );
+                recentre(&mut trial, cfg.n_points);
+                contain(&mut trial, cfg.n_points, cfg.container);
+                let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
+                if !quenched.is_finite() || relaxed.len() != side_state.len() {
+                    break;
+                }
+                let rise = (quenched - side_energy) / cfg.temperature.max(1e-12);
+                if rise <= 0.0 || side_rng.random::<f64>() < (-rise).exp() {
+                    cage_archive.offer_cage(
+                        quenched,
+                        relaxed.view(),
+                        rigid_cage_key(relaxed.view(), cfg.n_points, cage_quantum),
+                    );
+                    side_energy = quenched;
+                    side_state = relaxed;
+                }
+            }
         }
         if cfg.move_library.is_rigid_body()
             && crate::methods::rigid_quench::stalled(hops, hops_at_lowest)
@@ -4560,6 +4682,7 @@ where
         } else {
             1.0
         };
+        let proposal_scale = escape * orient_scale;
         // Ordinary hops: scale the library move by the escape feedback. Soft
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
@@ -4831,7 +4954,7 @@ where
                         kernels[k].propose_scaled(
                             x.view(),
                             cfg.temperature,
-                            escape * orient_scale,
+                            proposal_scale,
                             rng,
                         )
                     }
@@ -4877,7 +5000,7 @@ where
                             kernels[k].propose_scaled(
                                 x.view(),
                                 cfg.temperature,
-                                escape * orient_scale,
+                                proposal_scale,
                                 rng,
                             )
                         }
@@ -6032,6 +6155,11 @@ where
             }
             if !unquenched && cfg.move_library.is_rigid_body() {
                 stall_archive.offer(e_new, x_new.view());
+                cage_archive.offer_cage(
+                    e_new,
+                    x_new.view(),
+                    rigid_cage_key(x_new.view(), cfg.n_points, cage_quantum),
+                );
             }
             // An accepted uphill step to a different basin samples the escape
             // distribution, which is the quantity the deposit height has to be
