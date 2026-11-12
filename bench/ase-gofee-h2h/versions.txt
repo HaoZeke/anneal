@@ -6,4 +6,6 @@ hit_tol=0.001
 seeds=2000,2001,2002,2003,2004,2005
 order_seed=20261111
 lj38_budget=400000
+lj55_budget=1000000
 lj75_budget=4000000
+lj75_mh_gofee_wall_cap_s=7200

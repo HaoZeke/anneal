@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Serial head-to-head on LJ38 and LJ75.
+"""Serial head-to-head on LJ38, LJ55 and LJ75.
 
 Arms, one shared seed list, one force-call budget per size:
 
@@ -25,8 +25,10 @@ from the untruncated reduced energy. The bond window is the one already
 used for that box.
 
 A hit is a quenched energy within 0.001 of the Cambridge minimum. Misses
-stop at the paper force-call budget. Jobs run one at a time in an order
-shuffled with seed 20261111.
+stop at the paper force-call budget. ASE minima hopping and AGOX GOFEE on
+LJ75 also stop at a wall cap of two hours per seed. A seed stopped by that
+cap is recorded as capped, which is a miss, and the budget column stays the
+paper budget. Jobs run one at a time in an order shuffled with seed 20261111.
 """
 
 from __future__ import annotations
@@ -42,11 +44,22 @@ import time
 import traceback
 from pathlib import Path
 
-from potential import BudgetReached, HitReached, LjCalculator, lj_value_and_gradient, warmup
+from potential import (
+    BudgetReached,
+    CapReached,
+    HitReached,
+    LjCalculator,
+    lj_value_and_gradient,
+    warmup,
+)
 
 HERE = Path(__file__).resolve().parent
-PAPER_BUDGETS = {"lj38": 400_000, "lj75": 4_000_000}
-REFERENCES = {"lj38": -173.928427, "lj75": -397.492331}
+REPO = Path(".")
+PAPER_BUDGETS = {"lj38": 400_000, "lj55": 1_000_000, "lj75": 4_000_000}
+REFERENCES = {"lj38": -173.928427, "lj55": -279.248470, "lj75": -397.492331}
+# ASE minima hopping and AGOX GOFEE on LJ75. The paper budget stays in the
+# budget column. A seed that reaches this wall is a miss marked capped.
+LJ75_WALL_CAP_S = 7200.0
 HIT_TOL = 0.001
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
 ARMS = ("paper", "ase_bh", "ase_mh", "agox_gofee")
@@ -184,16 +197,14 @@ def run_paper(binary: Path, repo: Path, system: str, seed: int, work: Path) -> d
             row = dict(zip(header, fields))
     if not row:
         raise RuntimeError(f"paper {system} {seed} produced no row")
-    inside = None
-    for line in proc.stderr.splitlines():
-        if line.startswith("potential_inside_s="):
-            inside = float(line.split("=", 1)[1])
-    if inside is None:
+    if "pot_s" not in row:
         raise RuntimeError("paper run did not report potential time")
+    inside = float(row["pot_s"])
     hit = row["hit"] in {"1", "true"}
     wall = float(row["wall_s"])
     return {
         "hit": int(hit),
+        "stop": "hit" if hit else "budget",
         "calls_to_hit": int(row["evals_to_hit"]) if hit else "",
         "charged": int(row["charged"]),
         "wall_s": wall,
@@ -204,11 +215,18 @@ def run_paper(binary: Path, repo: Path, system: str, seed: int, work: Path) -> d
     }
 
 
-def _finish(calc: LjCalculator, wall: float, head: str) -> dict:
-    hit = calc.hit_calls is not None
+def _finish(calc: LjCalculator, wall: float, head: str, capped: bool) -> dict:
+    hit = calc.hit_calls is not None and not capped
     best = calc.best_quenched if calc.best_quenched < 1.0e299 else calc.best
+    if capped:
+        stop = "capped"
+    elif hit:
+        stop = "hit"
+    else:
+        stop = "budget"
     return {
         "hit": int(hit),
+        "stop": stop,
         "calls_to_hit": calc.hit_calls if hit else "",
         "charged": calc.calls,
         "wall_s": wall,
@@ -242,10 +260,12 @@ def run_ase_bh(system: str, seed: int, budget: int, work: Path, start: Path) -> 
         dyn.run(10**9)
     except (HitReached, BudgetReached):
         pass
-    return _finish(calc, time.perf_counter() - started, git_head())
+    return _finish(calc, time.perf_counter() - started, git_head(), capped=False)
 
 
-def run_ase_mh(system: str, seed: int, budget: int, work: Path, start: Path) -> dict:
+def run_ase_mh(
+    system: str, seed: int, budget: int, work: Path, start: Path, wall_cap_s: float | None
+) -> dict:
     import numpy as np
     from ase import Atoms
     from ase.optimize.minimahopping import MinimaHopping
@@ -253,18 +273,24 @@ def run_ase_mh(system: str, seed: int, budget: int, work: Path, start: Path) -> 
     n = int(system[2:])
     os.chdir(work)
     np.random.seed(seed)
-    atoms = Atoms(f"Ar{n}", positions=read_coords(start, n), pbc=False)
-    calc = LjCalculator(budget, REFERENCES[system], HIT_TOL, FMAX["ase_mh"])
-    atoms.calc = calc
     started = time.perf_counter()
+    deadline = None if wall_cap_s is None else started + wall_cap_s
+    atoms = Atoms(f"Ar{n}", positions=read_coords(start, n), pbc=False)
+    calc = LjCalculator(budget, REFERENCES[system], HIT_TOL, FMAX["ase_mh"], deadline=deadline)
+    atoms.calc = calc
+    capped = False
     try:
         MinimaHopping(atoms)(totalsteps=10**9)
     except (HitReached, BudgetReached):
         pass
-    return _finish(calc, time.perf_counter() - started, git_head())
+    except CapReached:
+        capped = True
+    return _finish(calc, time.perf_counter() - started, git_head(), capped)
 
 
-def run_gofee(system: str, seed: int, budget: int, work: Path) -> dict:
+def run_gofee(system: str, seed: int, budget: int, work: Path, wall_cap_s: float | None) -> dict:
+    started = time.perf_counter()
+    deadline = None if wall_cap_s is None else started + wall_cap_s
     import contextlib
 
     import matplotlib
@@ -327,6 +353,7 @@ def run_gofee(system: str, seed: int, budget: int, work: Path) -> dict:
         FMAX["agox_gofee"],
         sigma=3.4,
         epsilon=3.4,
+        deadline=deadline,
     )
     template = Atoms("", cell=np.eye(3) * cell, pbc=False)
     environment = Environment(
@@ -388,8 +415,8 @@ def run_gofee(system: str, seed: int, budget: int, work: Path) -> dict:
         order=4,
     )
     search = AGOX(collector, relaxer, acquisitor, evaluator, database, seed=seed)
-    started = time.perf_counter()
     log = (work / "gofee.stdio").open("w")
+    capped = False
     try:
         with contextlib.redirect_stdout(log):
             try:
@@ -400,13 +427,20 @@ def run_gofee(system: str, seed: int, budget: int, work: Path) -> dict:
                 atexit.unregister(search.on_failure)
     except (HitReached, BudgetReached):
         pass
+    except CapReached:
+        capped = True
     finally:
         log.close()
-    return _finish(calc, time.perf_counter() - started, git_head())
+    return _finish(calc, time.perf_counter() - started, git_head(), capped)
 
 
 def git_head() -> str:
-    proc = subprocess.run(["git", "rev-parse", "HEAD"], check=False, capture_output=True, text=True)
+    proc = subprocess.run(
+        ["git", "-C", str(REPO), "rev-parse", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
     if proc.returncode != 0:
         return "unknown"
     return proc.stdout.strip()
@@ -414,6 +448,7 @@ def git_head() -> str:
 
 def run_job(binary, repo, runs, system, seed, arm, head) -> dict:
     budget = PAPER_BUDGETS[system]
+    cap = LJ75_WALL_CAP_S if system == "lj75" and arm in {"ase_mh", "agox_gofee"} else None
     work = runs / system / arm / f"seed{seed}"
     if work.exists():
         shutil.rmtree(work)
@@ -425,9 +460,9 @@ def run_job(binary, repo, runs, system, seed, arm, head) -> dict:
     elif arm == "ase_bh":
         row = run_ase_bh(system, seed, budget, work, start)
     elif arm == "ase_mh":
-        row = run_ase_mh(system, seed, budget, work, start)
+        row = run_ase_mh(system, seed, budget, work, start, cap)
     elif arm == "agox_gofee":
-        row = run_gofee(system, seed, budget, work)
+        row = run_gofee(system, seed, budget, work, cap)
     else:
         raise RuntimeError(arm)
     row.update(
@@ -461,6 +496,7 @@ COLUMNS = [
     "ase",
     "agox",
     "head",
+    "stop",
 ]
 
 
@@ -478,22 +514,29 @@ def format_results(rows: list[dict]) -> str:
                     str(row["hit"]),
                     "" if row["calls_to_hit"] == "" else str(row["calls_to_hit"]),
                     str(row["charged"]),
-                    f"{row['wall_s']:.6f}",
-                    f"{row['inside_s']:.6f}",
-                    f"{row['outside_s']:.6f}",
-                    f"{row['best']:.8f}",
+                    num(row["wall_s"], 6),
+                    num(row["inside_s"], 6),
+                    num(row["outside_s"], 6),
+                    num(row["best"], 8),
                     row["ase"],
                     row["agox"],
                     row["head"],
+                    row.get("stop") or ("hit" if row["hit"] else "budget"),
                 ]
             )
         )
     return "\n".join(lines) + "\n"
 
 
+def num(value, digits: int) -> str:
+    if value == "" or value is None:
+        return ""
+    return f"{float(value):.{digits}f}"
+
+
 def summarise(rows: list[dict]) -> str:
     header = (
-        "system,arm,n,hits,budget,calls_to_hit_median,calls_to_hit_iqr,"
+        "system,arm,n,hits,capped,budget,calls_to_hit_median,calls_to_hit_iqr,"
         "wall_median_s,wall_ratio,inside_median_s,outside_median_s"
     )
     grouped: dict[tuple[str, str], list[dict]] = {}
@@ -510,9 +553,9 @@ def summarise(rows: list[dict]) -> str:
             if not group:
                 continue
             hits = [float(item["calls_to_hit"]) for item in group if item["hit"]]
-            walls = [item["wall_s"] for item in group]
-            insides = [item["inside_s"] for item in group]
-            outsides = [item["outside_s"] for item in group]
+            walls = [float(item["wall_s"]) for item in group if item["wall_s"] != ""]
+            insides = [float(item["inside_s"]) for item in group if item["inside_s"] != ""]
+            outsides = [float(item["outside_s"]) for item in group if item["outside_s"] != ""]
             wall_median = median_iqr(walls)[0]
             ratio = ""
             if paper_wall[system]:
@@ -522,19 +565,21 @@ def summarise(rows: list[dict]) -> str:
                 call_text = f"{call_median:.6f},{call_iqr:.6f}"
             else:
                 call_text = ","
+            capped = sum(1 for item in group if item.get("stop") == "capped")
             lines.append(
                 ",".join(
                     [
                         system,
                         arm,
                         str(len(group)),
-                        str(sum(item["hit"] for item in group)),
+                        str(sum(int(item["hit"]) for item in group)),
+                        str(capped),
                         str(group[0]["budget"]),
                         call_text,
                         f"{wall_median:.6f}",
                         ratio,
-                        f"{median_iqr(insides)[0]:.6f}",
-                        f"{median_iqr(outsides)[0]:.6f}",
+                        "" if not insides else f"{median_iqr(insides)[0]:.6f}",
+                        "" if not outsides else f"{median_iqr(outsides)[0]:.6f}",
                     ]
                 )
             )
@@ -570,10 +615,12 @@ def load_journal(path: Path) -> list[dict]:
         row["hit"] = int(row["hit"])
         row["charged"] = int(row["charged"])
         row["calls_to_hit"] = int(row["calls_to_hit"]) if row["calls_to_hit"] else ""
-        row["wall_s"] = float(row["wall_s"])
-        row["inside_s"] = float(row["inside_s"])
-        row["outside_s"] = float(row["outside_s"])
+        row["wall_s"] = float(row["wall_s"]) if row["wall_s"] else ""
+        row["inside_s"] = float(row["inside_s"]) if row.get("inside_s") else ""
+        row["outside_s"] = float(row["outside_s"]) if row.get("outside_s") else ""
         row["best"] = float(row["best"])
+        if not row.get("stop"):
+            row["stop"] = "hit" if row["hit"] else "budget"
         rows.append(row)
     return rows
 
@@ -610,6 +657,8 @@ def main() -> int:
     if not args.binary.is_file():
         print(f"missing binary {args.binary}", file=sys.stderr)
         return 2
+    global REPO
+    REPO = args.repo
     head = git_head()
     start = args.runs / "starts" / "lj38" / "seed2000.txt"
     ensure_start(args.binary, args.repo, "lj38", 2000, start)
@@ -647,10 +696,12 @@ def main() -> int:
         journal_path.parent.mkdir(parents=True, exist_ok=True)
         journal_path.write_text(format_results(rows))
         write_tables(rows, args.repo, args.comparison)
+        inside_text = "" if row["inside_s"] == "" else f"{row['inside_s']:.3f}"
         print(
             f"done {index}/{len(jobs)} {system} {arm} seed={seed} hit={row['hit']} "
             f"charged={row['charged']} calls_to_hit={row['calls_to_hit']} "
-            f"wall={row['wall_s']:.3f} inside={row['inside_s']:.3f} best={row['best']:.6f}",
+            f"stop={row.get('stop')} wall={row['wall_s']:.3f} "
+            f"inside={inside_text} best={row['best']:.6f}",
             flush=True,
         )
     write_tables(rows, args.repo, args.comparison)

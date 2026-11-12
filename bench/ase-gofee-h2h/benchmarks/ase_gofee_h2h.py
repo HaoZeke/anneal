@@ -14,7 +14,7 @@ ENTER = ROOT / "scripts" / "ase_gofee_h2h" / "enter_bench.sh"
 
 
 class AseGofeeHeadToHead:
-    params = ([38, 75], ["paper", "ase_bh", "ase_mh", "agox_gofee"])
+    params = ([38, 55, 75], ["paper", "ase_bh", "ase_mh", "agox_gofee"])
     param_names = ["size", "arm"]
     timeout = 86400
 

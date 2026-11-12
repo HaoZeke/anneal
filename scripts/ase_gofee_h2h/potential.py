@@ -22,6 +22,10 @@ class HitReached(BaseException):
     """A quenched energy is within the hit window."""
 
 
+class CapReached(BaseException):
+    """The wall cap for this seed is spent."""
+
+
 @njit(cache=True)
 def lj_value_and_gradient(x):
     n = x.shape[0] // 3
@@ -66,6 +70,7 @@ class LjCalculator(Calculator):
         fmax: float,
         sigma: float = 1.0,
         epsilon: float = 1.0,
+        deadline: float | None = None,
     ):
         super().__init__()
         self.budget = budget
@@ -74,6 +79,7 @@ class LjCalculator(Calculator):
         self.fmax = fmax
         self.sigma = sigma
         self.epsilon = epsilon
+        self.deadline = deadline
         self.calls = 0
         self.inside_s = 0.0
         self.hit_calls = None
@@ -81,6 +87,8 @@ class LjCalculator(Calculator):
         self.best_quenched = 1.0e300
 
     def calculate(self, atoms=None, properties=None, system_changes=None):
+        if self.deadline is not None and time.perf_counter() >= self.deadline:
+            raise CapReached()
         if self.calls >= self.budget:
             raise BudgetReached()
         positions = np.ascontiguousarray(atoms.positions.ravel(), dtype=np.float64)
