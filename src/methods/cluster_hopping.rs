@@ -1732,6 +1732,14 @@ fn growth_held(held: Option<f64>, incumbent: f64, skipped: u32, n_points: usize)
 /// the paper preset does not build one. [`ArmSelection::Uniform`] replaces
 /// the depth posterior and the floored Thompson draw with one uniform index
 /// and consumes nothing else from the generator.
+/// Round-robin arm on every `period`th hop, so a dropped arm is still drawn.
+fn forced_library_arm(hop: usize, period: usize, n_arms: usize) -> Option<usize> {
+    if period == 0 || n_arms == 0 || !hop.is_multiple_of(period) {
+        return None;
+    }
+    Some((hop / period) % n_arms)
+}
+
 fn choose_arm<R: Rng + ?Sized>(
     cfg: &Config,
     context: Option<ArrayView1<f64>>,
@@ -4248,6 +4256,9 @@ where
             && let Some(swap_at) = kernels.iter().position(|kernel| kernel.name() == "swap")
         {
             k = swap_at;
+        }
+        if let Some(arm) = forced_library_arm(hops, cfg.arm_draw_period, kernels.len()) {
+            k = arm;
         }
         // The move scale stays the configured temperature. The law's
         // temperature is an acceptance temperature: it governs which uphill
@@ -7608,6 +7619,29 @@ mod group_move_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_draw_period_keeps_a_dropped_arm_in_the_rotation() {
+        assert_eq!(forced_library_arm(0, 0, 6), None);
+        assert_eq!(forced_library_arm(7, 8, 6), None);
+        assert_eq!(forced_library_arm(0, 8, 6), Some(0));
+        assert_eq!(forced_library_arm(8, 8, 6), Some(1));
+        assert_eq!(forced_library_arm(40, 8, 6), Some(5));
+        assert_eq!(forced_library_arm(48, 8, 6), Some(0));
+        let water = Config::recommended_molecular(
+            (0..16).flat_map(|_| [8, 1, 1]).collect(),
+            (0..16).map(|i| vec![3 * i, 3 * i + 1, 3 * i + 2]).collect(),
+            1.0,
+        );
+        assert_eq!(water.arm_draw_period, 8);
+        let hexamer = Config::recommended_molecular(
+            (0..6).flat_map(|_| [8, 1, 1]).collect(),
+            (0..6).map(|i| vec![3 * i, 3 * i + 1, 3 * i + 2]).collect(),
+            1.0,
+        );
+        assert_eq!(hexamer.arm_draw_period, 0);
+        assert_eq!(Config::recommended(13).arm_draw_period, 0);
+    }
 
     #[test]
     fn an_arm_count_separates_proposals_from_accepts_and_improvements() {

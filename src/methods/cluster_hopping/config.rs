@@ -274,6 +274,14 @@ pub struct Config {
     pub budget_window: bool,
     /// Choose the move kernel by discounted Thompson allocation.
     pub allocate_moves: bool,
+    /// Hops between forced round-robin draws. Zero leaves the posterior alone.
+    ///
+    /// A positive period hands hop 0, `period`, `2 * period`, and so on to
+    /// successive library arms. The depth posterior otherwise drops an arm
+    /// after one poor quench and never draws it again, which is what happened
+    /// to the square close on (H2O)16. The floor keeps every arm in the sample
+    /// for the whole budget. Lennard-Jones and the hexamer leave it at zero.
+    pub arm_draw_period: usize,
     /// Set the deposit height from the escape gaps the chain observes.
     pub adaptive_height: bool,
     /// Hops a single `run` may take before returning, when set.
@@ -1414,6 +1422,7 @@ impl Config {
             theta: 0.5,
             budget_window: false,
             allocate_moves: false,
+            arm_draw_period: 0,
             adaptive_height: false,
             max_hops: None,
             replicas: 1,
@@ -1757,10 +1766,17 @@ impl Config {
         groups: Vec<Vec<usize>>,
         energy_scale: f64,
     ) -> Self {
+        // A cage larger than the hexamer has an arm the posterior can starve
+        // after a single miss. The period keeps that arm in the draw.
+        let large_water = groups.len() > crate::catalog::molecular::WATER_HEXAMER_MOLECULES
+            && groups.iter().all(|group| group.len() == 3);
         let mut cfg = Self::for_molecular(species, groups, energy_scale);
         cfg.allocate_moves = true;
         cfg.depth_reward = true;
         cfg.tabu_on_stall = true;
+        if large_water {
+            cfg.arm_draw_period = 8;
+        }
         cfg.soap_class_residual = false;
         cfg.soap_mode = SoapProposalMode::Flexible;
         cfg.adaptive_height = true;
