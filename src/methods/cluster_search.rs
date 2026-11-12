@@ -2478,7 +2478,6 @@ mod tests {
             stop: Arc<AtomicBool>,
             calls: AtomicUsize,
             best: Mutex<f64>,
-            record_gradient: f64,
         }
 
         impl Objective<f64> for Halt {
@@ -2506,17 +2505,8 @@ mod tests {
             fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
                 let n = self.calls.fetch_add(1, Ordering::SeqCst);
                 let (energy, gradient) = self.inner.value_and_gradient(x);
-                // Line-search probes and the screen's unfinished points are not
-                // minima. The portable pair force moves those probes, and a
-                // probe below the quenched minimum is not a state the run
-                // adopted. The best that has to survive the stop is the best
-                // point whose gradient already met the record tolerance.
                 let mut best = self.best.lock().expect("best");
-                let stationary = gradient.len() == x.len()
-                    && gradient
-                        .iter()
-                        .all(|value| value.is_finite() && value.abs() < self.record_gradient);
-                if stationary && energy < *best {
+                if energy < *best {
                     *best = energy;
                 }
                 if n + 1 >= AFTER {
@@ -2555,7 +2545,6 @@ mod tests {
                 stop: Arc::clone(&stop),
                 calls: AtomicUsize::new(0),
                 best: Mutex::new(f64::INFINITY),
-                record_gradient: cfg.record_gradient,
             };
             let mut ledger = Ledger::with_stop(BUDGET, Arc::clone(&stop));
             let started = Instant::now();
@@ -2582,7 +2571,7 @@ mod tests {
                 assert!(out.best_state.is_some(), "{name} dropped the best state");
                 assert!(
                     out.best <= best_seen + 1e-8,
-                    "{name} returned {} above the best stationary energy {best_seen}",
+                    "{name} returned {} above the best energy seen {best_seen}",
                     out.best
                 );
             }
