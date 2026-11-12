@@ -491,6 +491,9 @@ fn main() {
         .unwrap_or(f64::NAN);
     let polish_calls = ledger.answer_polish_calls();
     let wall_s = wall.elapsed().as_secs_f64();
+    // Search ledger, including the polish it charged. Each charge is one
+    // value_and_gradient. The reported-geometry evaluation below is not
+    // part of this sum.
     let spent = ledger.spent();
     let potential_s = POTENTIAL_NS.load(Ordering::Relaxed) as f64 / 1e9;
     let outside_s = (wall_s - potential_s).max(0.0);
@@ -498,6 +501,7 @@ fn main() {
     writeln!(meta, "potential_s: {potential_s:.6}").ok();
     writeln!(meta, "outside_s: {outside_s:.6}").ok();
     writeln!(meta, "energy_calls: {spent}").ok();
+    writeln!(meta, "energy_calls_basis: search_ledger").ok();
     writeln!(meta, "search_calls: {}", spent.saturating_sub(polish_calls)).ok();
     writeln!(meta, "polish_calls: {polish_calls}").ok();
     writeln!(meta, "polish_component_tolerance_eV_per_A: {tolerance:.6e}").ok();
@@ -525,6 +529,7 @@ fn main() {
             .expect("best xyz");
             let line = force_audit_line(seed, f64::INFINITY);
             writeln!(meta, "{line}").ok();
+            writeln!(meta, "final_best_evaluation: 0").ok();
             println!("{line}");
             return;
         }
