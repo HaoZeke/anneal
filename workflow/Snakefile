@@ -42,6 +42,19 @@ rule lj_seed:
         """
 
 
+# Gupta zinc and Cu19Au19 against the ASE genetic algorithm.
+# Not part of `rule all`. One serial session, both arms, Cambridge budgets:
+#   snakemake -s workflow/Snakefile metal_h2h
+rule metal_h2h:
+    output:
+        "bench/metal-cluster-h2h/results.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/metal_h2h/enter_bench.sh
+        """
+
+
 # GMIN against the paper preset at the paper force-call budgets.
 # Not part of `rule all`. Run it by name:
 #   snakemake -s workflow/Snakefile gmin_h2h

@@ -3117,6 +3117,48 @@ mod move_scaling_tests {
     }
 
     #[test]
+    fn recommended_binary_exchanges_unlike_coordinates() {
+        let n = 6;
+        let species = vec![29_u32, 29, 29, 79, 79, 79];
+        let bare = Config::recommended(n);
+        assert!(
+            bare.move_library
+                .kernels(&bare)
+                .iter()
+                .all(|kernel| kernel.name() != "swap"),
+            "a one-species preset has no homotop"
+        );
+        let cfg = Config::recommended(n).with_species(species.clone(), None);
+        let swap = cfg
+            .move_library
+            .kernels(&cfg)
+            .into_iter()
+            .find(|kernel| kernel.name() == "swap")
+            .expect("binary recommended library has no homotop");
+        let mut coords = vec![0.0; 3 * n];
+        for index in 0..n {
+            coords[3 * index] = index as f64;
+            coords[3 * index + 1] = (index * index) as f64;
+        }
+        let x = Array1::from_vec(coords);
+        let mut rng = StdRng::seed_from_u64(11);
+        let y = swap.propose(x.view(), 0.8, &mut rng);
+        let mut crossed = false;
+        for index in 0..n {
+            let source =
+                (0..n).find(|&other| (0..3).all(|axis| y[3 * index + axis] == x[3 * other + axis]));
+            let source = source.expect("a homotop permutes the coordinates");
+            if species[index] != species[source] {
+                crossed = true;
+            }
+        }
+        assert!(
+            crossed,
+            "the recommended homotop left every species on its own site"
+        );
+    }
+
+    #[test]
     fn rigid_stock_preset_orients_every_body() {
         let bare = Config::recommended(4);
         let cfg = bare

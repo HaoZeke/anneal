@@ -267,6 +267,7 @@ impl DifferentiableObjective<f64> for PairPotential {
 
 mod binary_lj;
 mod gmin_tip4p;
+mod gupta;
 mod tip4p;
 pub use binary_lj::BinaryLennardJones;
 pub use gmin_tip4p::{
@@ -274,6 +275,7 @@ pub use gmin_tip4p::{
     block_from_interleaved_gmin, energy_ohh, gmin_water_geometry, interleaved_gmin_from_block,
     reference_sites as gmin_tip4p_sites, rigid_from_ohh,
 };
+pub use gupta::{COPPER_Z, GOLD_Z, Gupta};
 // The rigid orientation move composes through this name. The helper
 // stays on the chart so that move and the potential share one Rodrigues
 // product. A target that does not include the move still has to compile.
