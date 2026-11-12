@@ -39,3 +39,24 @@ On seed 2000 the adaptive step finished at an acceptance ratio of 0.016 and a st
 LJ75 and LJ104 at 4_000_000 calls, seeds 2000–2005, are 6/6 on this tip and on `4fdc37e8`. Each seed spends the same number of evaluations on both binaries. The medians are 979291 calls at 75 atoms and 1_812_258 at 104.
 
 The new rows are in `rows.csv`. The medians of those rows are `summary-followup.csv`. The 4fdc37e8 water binary does not time the potential, so those inside and outside cells are blank.
+
+## Cage walk
+
+`scripts/tip4p_h2h/enter_cage.sh` appends the `anneal-cage` arm. The budget, seeds, core, and hostname are the same. The five misses on the previous tip are different oxygen cages, not proton arrangements of the global-minimum cage. (H₂O)₁₅ misses have 24 oxygen contacts against 25 in the global minimum. (H₂O)₂₀ misses differ by one contact, including a five-coordinate water.
+
+The energy archive was keeping proton isomers of the lowest cage, so a stall had no other cage to walk. The cage archive keeps one structure per oxygen framework. After 160 patience windows with no new lowest minimum, the calls that remain are spent on another stored cage. That walk uses its own generator. The main walker is not moved, and a seed that is still descending keeps the same proposals and the same evaluation count.
+
+(H₂O)₁₅ seed 2002, previously −623.022 kJ/mol, now reaches −628.372. Seed 2004 stays at −623.877. The three (H₂O)₂₀ misses stay at −864.746, −859.404 and −863.975. Every previous hit keeps its evaluation count.
+
+The descriptor of a rigid minimum is reused when the centres and rotations are unchanged. A full-budget (H₂O)₁₅ miss drops from 5.90 s outside the potential to 4.57 s. The three (H₂O)₂₀ misses drop from 9.58, 8.79 and 9.26 s to 6.37, 8.87 and 5.72 s. GMIN's full-budget outside time stays near 3.4 s at 15 molecules and 3.6 s at 20.
+
+| Size | Arm | Hits | Median evals | Median wall (s) | Ratio | Inside (s) | Outside (s) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| (H₂O)₁₅ | anneal-cage | 5/6 | 988081 | 7.679 | 5.236 | 5.279 | 2.400 |
+| (H₂O)₁₅ | GMIN, fixed step | 0/6 | 2000000 | 40.212 | 5.236 | 36.866 | 3.359 |
+| (H₂O)₂₀ | anneal-cage | 3/6 | 1396032 | 16.656 | 4.101 | 12.364 | 4.291 |
+| (H₂O)₂₀ | GMIN, fixed step | 0/6 | 2000000 | 68.305 | 4.101 | 64.713 | 3.580 |
+
+LJ38 at 400_000 calls is 6/6, LJ75 at 4_000_000 is 6/6, LJ98 at 4_000_000 is 5/6, and LJ104 at 4_000_000 is 6/6. Each seed spends the same number of evaluations as on `4fdc37e8` and on `91c8a9c3`. The medians are 10_190, 979_291, 1_387_169 and 1_812_258 calls.
+
+The new rows are in `rows.csv`. The medians of those rows are `summary-cage.csv`.
