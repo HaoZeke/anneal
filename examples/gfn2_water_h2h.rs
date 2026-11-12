@@ -1,6 +1,10 @@
 //! One (H2O)m GFN2-xTB seed for the arm-3 head-to-head.
 //!
-//! Usage: gfn2_water_h2h <m_molecules> <budget> <seed> <outdir>
+//! Usage: gfn2_water_h2h <m_molecules> <budget> <seed> <outdir> [target_energy]
+//!
+//! `target_energy`, or `H2O_TARGET_EV` when the argument is omitted, is an
+//! optional stop in eV. Unset, the search runs out the budget. The binary
+//! has no built-in reference.
 //!
 //! The start is a rigid repack of the isolated-water template from
 //! `StdRng::seed_from_u64(seed)`, then the hexamer driver's overlap
@@ -358,6 +362,14 @@ fn main() {
     let budget: usize = args.get(1).and_then(|v| v.parse().ok()).expect("budget");
     let seed: u64 = args.get(2).and_then(|v| v.parse().ok()).expect("seed");
     let outdir = PathBuf::from(args.get(3).expect("outdir"));
+    let target_energy = args
+        .get(4)
+        .map(|v| v.parse::<f64>().expect("target_energy"))
+        .or_else(|| {
+            std::env::var("H2O_TARGET_EV")
+                .ok()
+                .map(|v| v.parse::<f64>().expect("H2O_TARGET_EV"))
+        });
     fs::create_dir_all(&outdir).expect("outdir");
     assert!(budget > 0 && m > 0, "budget and m must be positive");
     if let Ok(xyz) = std::env::var("H2H_AUDIT_XYZ") {
@@ -369,6 +381,7 @@ fn main() {
     let groups = water_groups(m).expect("groups");
     let mut cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
     configure_water_arm(&mut cfg, WaterSearchArm::Recommended);
+    cfg.target_energy = target_energy;
     cfg.move_library = MoveLibrary::Molecular {
         groups: groups.clone(),
         reactive: false,
@@ -425,6 +438,10 @@ fn main() {
     writeln!(meta, "molecules: {m}").ok();
     writeln!(meta, "seed: {seed}").ok();
     writeln!(meta, "budget: {budget}").ok();
+    match cfg.target_energy {
+        Some(energy) => writeln!(meta, "target_energy_eV: {energy:.6}").ok(),
+        None => writeln!(meta, "target_energy_eV: off").ok(),
+    };
     writeln!(meta, "spread_steps: {spread_steps}").ok();
     writeln!(meta, "start_intact: {intact}").ok();
     writeln!(meta, "crate: {}", env!("CARGO_PKG_VERSION")).ok();

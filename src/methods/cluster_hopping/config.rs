@@ -1039,6 +1039,16 @@ pub struct Config {
     /// the hop nor names the minimum. One pass spends the calls on the
     /// descent. Off by default; the water arms turn it on.
     pub quench_once: bool,
+    /// Stop once a recorded energy is at or below this value.
+    ///
+    /// `None`, the default, leaves the budget as the only energy-blind
+    /// stop. A finite value is the harness equivalent of GMIN's TARGET:
+    /// the search ends at the first recorded minimum that reaches it, and
+    /// the walk is not steered before that. The library does not supply
+    /// a value; a benchmark that knows its reference passes one in.
+    /// Absent from the resolved JSON until it is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_energy: Option<f64>,
     /// Relaunch from the incumbent when the chain is this far above it.
     ///
     /// Zero leaves the walk where acceptance put it. A positive gap, in
@@ -1524,6 +1534,7 @@ impl Config {
             quench_warmup: 4,
             quench_confidence: 2.0,
             quench_once: false,
+            target_energy: None,
             incumbent_gap: 0.0,
             relax_steps: 200,
             two_phase: None,

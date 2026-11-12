@@ -116,6 +116,22 @@ fn an_opening_quench_at_the_target_ends_before_the_first_hop() {
 }
 
 #[test]
+fn a_configured_target_is_the_same_stop_and_stays_off_by_default() {
+    let mut cfg = bare(3);
+    assert!(cfg.target_energy.is_none());
+    cfg.target_energy = Some(1.0);
+    let mut ledger = Ledger::new(64);
+    let out = flat_run(&cfg, &mut ledger);
+    assert_eq!(out.stop, Some(HopStop::Target));
+    assert_eq!(out.hops, 0);
+    let mut open = bare(3);
+    open.target_energy = None;
+    let mut budget = Ledger::new(9);
+    let full = flat_run(&open, &mut budget);
+    assert_eq!(full.stop, Some(HopStop::Budget));
+}
+
+#[test]
 fn a_stop_raised_after_the_full_quench_ends_at_the_next_hop() {
     let stop = Arc::new(AtomicBool::new(false));
     let grads = AtomicUsize::new(0);

@@ -42,6 +42,19 @@ fn default_witness_ceiling_is_absent_from_the_resolved_json() {
     assert!(!json.contains("witness_tripleton"));
     assert_eq!(cfg.arm_selection, ArmSelection::Posterior);
     assert!(!cfg.resolved_json().unwrap().contains("arm_selection"));
+    assert!(!cfg.resolved_json().unwrap().contains("target_energy"));
+    let mut aimed = cfg.clone();
+    aimed.target_energy = Some(-1.0);
+    assert!(
+        aimed
+            .resolved_json()
+            .unwrap()
+            .contains("\"target_energy\":-1.0")
+    );
+    assert_ne!(
+        aimed.resolved_sha256().unwrap(),
+        cfg.resolved_sha256().unwrap()
+    );
     assert_eq!(
         cfg.resolved_sha256().unwrap(),
         "a1bd030f28c13e57f6dbaa50302b8f1312139fc1684f2fa24801a361664cf5d2"

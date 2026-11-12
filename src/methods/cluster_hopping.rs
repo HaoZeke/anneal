@@ -2586,6 +2586,14 @@ where
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
     let _caller_stop = ledger.bind_stop();
+    // A target on the configuration is the same stop a caller can raise
+    // on the ledger. A ledger target already set is left alone, so an
+    // explicit `stop_below` still wins.
+    if ledger.target().is_none()
+        && let Some(energy) = cfg.target_energy
+    {
+        ledger.stop_below(energy);
+    }
     let n = cfg.n_points;
     let (continuous_symmetry_classes, csm_reseed_hops) = match cfg.continuous_symmetry {
         ContinuousSymmetry::Off => (None, 0),

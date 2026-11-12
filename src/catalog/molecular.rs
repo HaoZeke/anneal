@@ -1387,6 +1387,7 @@ mod water_hexamer_tests {
             configure_water_arm(&mut cfg, arm);
             assert_eq!(cfg.record_gradient, WATER_RECORD_GRADIENT);
             assert!((WATER_RECORD_GRADIENT - 1.0285e-2).abs() < 1e-6);
+            assert!(cfg.target_energy.is_none());
             assert!(cfg.quench_once);
             assert_eq!(cfg.incumbent_gap, WATER_INCUMBENT_GAP_EV);
             assert_eq!(cfg.move_library, library);
