@@ -2382,11 +2382,15 @@ const RIGID_ACCEPT_BLOCK: usize = 50;
 /// Patience windows with no new lowest minimum before a second rigid chain
 /// walks another oxygen cage.
 ///
-/// The main walker is not moved and its generator is not advanced, so a
-/// chain that is still descending is left alone. A chain that has been
-/// quiet for this long spends the calls it has left on a cage it already
-/// quenched, on a separate generator.
-const RIGID_CAGE_WINDOWS: usize = 160;
+/// The main walker is not moved and its generator is not advanced. Forty
+/// windows is a quiet stretch long enough to be a stalled cage, and the
+/// walk itself is capped at the same length so the main chain resumes.
+const RIGID_CAGE_WINDOWS: usize = 40;
+/// Orientation steps in the shell turn that opens the second walk.
+///
+/// Two steps still quench back into the cage. Three steps, the preset
+/// orientation amplitude taken three times, land in a different basin.
+const RIGID_SHELL_STEPS: f64 = 3.0;
 /// Multiplier applied when a block misses [`RIGID_ACCEPT_TARGET`].
 const RIGID_STEP_FACTOR: f64 = 1.05;
 
@@ -2459,6 +2463,76 @@ fn rigid_cage_key(state: ArrayView1<f64>, n: usize, quantum: f64) -> u64 {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash
+}
+
+/// Turn the outer half of a rigid cage about its core.
+///
+/// The angle is a multiple of the preset orientation step. The inner half
+/// stays, so the turn is a rearrangement of the surface about the hollow
+/// rather than a rigid rotation of the whole cluster.
+fn rigid_shell_turn(state: ArrayView1<f64>, n: usize, axis: usize, angle: f64) -> Array1<f64> {
+    let mut y = state.to_owned();
+    if n < 4 || y.len() < 6 * n || !angle.is_finite() {
+        return y;
+    }
+    let mut com = [0.0; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            com[k] += y[3 * i + k];
+        }
+    }
+    for value in &mut com {
+        *value /= n as f64;
+    }
+    let mut radial = vec![0.0; n];
+    for i in 0..n {
+        let mut r = 0.0;
+        for k in 0..3 {
+            let d = y[3 * i + k] - com[k];
+            r += d * d;
+        }
+        radial[i] = r;
+    }
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| radial[a].total_cmp(&radial[b]));
+    let (sin, cos) = angle.sin_cos();
+    let a = (axis + 1) % 3;
+    let b = (axis + 2) % 3;
+    for &i in &order[n / 2..] {
+        let mut p = [0.0; 3];
+        for k in 0..3 {
+            p[k] = y[3 * i + k] - com[k];
+        }
+        let pa = cos * p[a] - sin * p[b];
+        let pb = sin * p[a] + cos * p[b];
+        p[a] = pa;
+        p[b] = pb;
+        for k in 0..3 {
+            y[3 * i + k] = com[k] + p[k];
+        }
+    }
+    y
+}
+
+/// True when every pair of rigid centres is at least `min_d` apart.
+fn rigid_centres_clear(state: ArrayView1<f64>, n: usize, min_d: f64) -> bool {
+    if n < 2 || state.len() < 3 * n || !(min_d > 0.0) {
+        return false;
+    }
+    let min2 = min_d * min_d;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut d2 = 0.0;
+            for k in 0..3 {
+                let d = state[3 * i + k] - state[3 * j + k];
+                d2 += d * d;
+            }
+            if d2 < min2 {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 fn rigid_step_scale(scale: f64, accepted: usize, trials: usize) -> f64 {
@@ -3431,6 +3505,7 @@ where
     );
     let cage_quantum = cfg.min_separation / 50.0;
     let mut cage_walked = false;
+    let mut archive_walked = false;
     if cfg.move_library.is_rigid_body() {
         stall_archive.offer(e, x.view());
         cage_archive.offer_cage(e, x.view(), rigid_cage_key(x.view(), cfg.n_points, cage_quantum));
@@ -3550,6 +3625,184 @@ where
             && ledger.spent().saturating_sub(charged_at_best) >= cage_patience
         {
             cage_walked = true;
+            let shell_mark = ledger.spent();
+            // Start from the walker itself. Touching the shared cage archive
+            // here would change the later walk's destination.
+            let key = rigid_cage_key(x.view(), cfg.n_points, cage_quantum);
+            let (mut side_energy, mut side_state) = (e, x.clone());
+            // A fresh generator, not a draw on the walker's.
+            let mut side_rng = StdRng::seed_from_u64(
+                (hops as u64)
+                    .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    .wrapping_add(key)
+                    .wrapping_add(side_energy.to_bits()),
+            );
+            let side_scale = orient_scale;
+            macro_rules! hop_side {
+                ($rng:ident, $energy:ident, $state:ident) => {{
+                    let mut going = false;
+                    if ledger.remaining() > 0 && !ledger.stopped() {
+                        let arm = $rng.random_range(0..kernels.len());
+                        let mut trial = kernels[arm].propose_scaled(
+                            $state.view(),
+                            cfg.temperature,
+                            side_scale,
+                            &mut $rng,
+                        );
+                        recentre(&mut trial, cfg.n_points);
+                        contain(&mut trial, cfg.n_points, cfg.container);
+                        let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
+                        if quenched.is_finite() && relaxed.len() == $state.len() {
+                            let rise = (quenched - $energy) / cfg.temperature.max(1e-12);
+                            if rise <= 0.0 || $rng.random::<f64>() < (-rise).exp() {
+                                $energy = quenched;
+                                $state = relaxed;
+                            }
+                            going = true;
+                        }
+                    }
+                    going
+                }};
+            }
+            // The outer half turns about the core by three orientation
+            // steps. A single-molecule move into a hollow quenches back
+            // into the same cage; this turn does not.
+            if !ledger.stopped() && ledger.remaining() > 0 {
+                let angle = match cfg.move_library {
+                    MoveLibrary::RigidBody { rotate_step, .. } => {
+                        RIGID_SHELL_STEPS * rotate_step
+                    }
+                    _ => 0.0,
+                };
+                let mut turned: Option<(f64, Array1<f64>)> = None;
+                if angle > 0.0 {
+                    for axis in 0..3 {
+                        let trial = rigid_shell_turn(side_state.view(), cfg.n_points, axis, angle);
+                        let (quenched, relaxed) =
+                            relax(ledger, trial.view(), cfg.relax_steps);
+                        if quenched.is_finite()
+                            && rigid_centres_clear(
+                                relaxed.view(),
+                                cfg.n_points,
+                                0.5 * cfg.min_separation,
+                            )
+                            && turned
+                                .as_ref()
+                                .is_none_or(|(held, _)| quenched < *held)
+                        {
+                            turned = Some((quenched, relaxed));
+                        }
+                    }
+                }
+                if let Some((energy, state)) = turned
+                    && (energy - side_energy).abs() > 1.0e-3
+                {
+                    side_energy = energy;
+                    side_state = state;
+                    let twist_end = ledger.spent().saturating_add(cage_patience);
+                    while ledger.spent() < twist_end && hop_side!(side_rng, side_energy, side_state)
+                    {}
+                }
+            }
+            // The shell of the walker is one leave. When it comes up short,
+            // walk a stored cage and turn that shell. The stored-cage turn
+            // is what reaches the contact the walker's own shell does not.
+            if !ledger.stopped() && ledger.remaining() > 0 {
+                cage_archive.offer_cage(e, x.view(), key);
+                if let Some(best) = ledger.best_state.as_ref() {
+                    cage_archive.offer_cage(
+                        ledger.best,
+                        best.view(),
+                        rigid_cage_key(best.view(), cfg.n_points, cage_quantum),
+                    );
+                }
+                if let Some((energy, state)) = cage_archive.escape_other_cage(key)
+                    && state.len() == x.len()
+                {
+                    side_energy = energy;
+                    side_state = state;
+                }
+                side_rng = StdRng::seed_from_u64(
+                    (hops as u64)
+                        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                        .wrapping_add(key)
+                        .wrapping_add(side_energy.to_bits()),
+                );
+                let stored_end = ledger.spent().saturating_add(cage_patience);
+                let mut stored_hops = 0usize;
+                while ledger.spent() < stored_end && hop_side!(side_rng, side_energy, side_state) {
+                    if stored_hops > 0
+                        && stored_hops.is_multiple_of(crate::methods::rigid_quench::STAGNATION_HOPS)
+                    {
+                        let next_key =
+                            rigid_cage_key(side_state.view(), cfg.n_points, cage_quantum);
+                        if let Some((energy, state)) = cage_archive.escape_other_cage(next_key)
+                            && state.len() == side_state.len()
+                        {
+                            side_energy = energy;
+                            side_state = state;
+                        }
+                    }
+                    stored_hops += 1;
+                }
+                if !ledger.stopped() && ledger.remaining() > 0 {
+                    let angle = match cfg.move_library {
+                        MoveLibrary::RigidBody { rotate_step, .. } => {
+                            RIGID_SHELL_STEPS * rotate_step
+                        }
+                        _ => 0.0,
+                    };
+                    let mut turned: Option<(f64, Array1<f64>)> = None;
+                    if angle > 0.0 {
+                        for axis in 0..3 {
+                            let trial =
+                                rigid_shell_turn(side_state.view(), cfg.n_points, axis, angle);
+                            let (quenched, relaxed) =
+                                relax(ledger, trial.view(), cfg.relax_steps);
+                            if quenched.is_finite()
+                                && rigid_centres_clear(
+                                    relaxed.view(),
+                                    cfg.n_points,
+                                    0.5 * cfg.min_separation,
+                                )
+                                && turned.as_ref().is_none_or(|(held, _)| quenched < *held)
+                            {
+                                turned = Some((quenched, relaxed));
+                            }
+                        }
+                    }
+                    if let Some((energy, state)) = turned
+                        && (energy - side_energy).abs() > 1.0e-3
+                    {
+                        side_energy = energy;
+                        side_state = state;
+                        let twist_end = ledger.spent().saturating_add(cage_patience);
+                        while ledger.spent() < twist_end
+                            && hop_side!(side_rng, side_energy, side_state)
+                        {}
+                    }
+                }
+            }
+            // The calls just spent are not a new lowest of the main chain.
+            // Leaving them on the quiet clock would start the later walk
+            // before the main chain has actually stalled.
+            charged_at_best =
+                charged_at_best.saturating_add(ledger.spent().saturating_sub(shell_mark));
+        }
+        // The shell turn above is the early leave. A longer walk on a stored
+        // cage is what reaches the minimum when the shell lands short of it,
+        // and it waits out a longer quiet stretch so a chain that is still
+        // descending is not spent here.
+        let archive_patience = cfg
+            .restart_patience
+            .saturating_mul(RIGID_CAGE_WINDOWS.saturating_mul(4))
+            .max(1);
+        if cfg.move_library.is_rigid_body()
+            && !archive_walked
+            && !kernels.is_empty()
+            && ledger.spent().saturating_sub(charged_at_best) >= archive_patience
+        {
+            archive_walked = true;
             let key = rigid_cage_key(x.view(), cfg.n_points, cage_quantum);
             cage_archive.offer_cage(e, x.view(), key);
             if let Some(best) = ledger.best_state.as_ref() {
@@ -3559,12 +3812,10 @@ where
                     rigid_cage_key(best.view(), cfg.n_points, cage_quantum),
                 );
             }
-            let (mut side_energy, mut side_state) =
-                match cage_archive.escape_other_cage(key) {
-                    Some((energy, state)) if state.len() == x.len() => (energy, state),
-                    _ => (e, x.clone()),
-                };
-            // A fresh generator, not a draw on the walker's.
+            let (mut side_energy, mut side_state) = match cage_archive.escape_other_cage(key) {
+                Some((energy, state)) if state.len() == x.len() => (energy, state),
+                _ => (e, x.clone()),
+            };
             let mut side_rng = StdRng::seed_from_u64(
                 (hops as u64)
                     .wrapping_mul(0x9E37_79B9_7F4A_7C15)
@@ -3573,12 +3824,12 @@ where
             );
             let side_scale = orient_scale;
             let mut side_hops = 0usize;
-            while ledger.remaining() > 0 && !ledger.stopped() {
+            let archive_end = ledger.spent().saturating_add(archive_patience);
+            while ledger.spent() < archive_end && ledger.remaining() > 0 && !ledger.stopped() {
                 if side_hops > 0
                     && side_hops.is_multiple_of(crate::methods::rigid_quench::STAGNATION_HOPS)
                 {
-                    let next_key =
-                        rigid_cage_key(side_state.view(), cfg.n_points, cage_quantum);
+                    let next_key = rigid_cage_key(side_state.view(), cfg.n_points, cage_quantum);
                     if let Some((energy, state)) = cage_archive.escape_other_cage(next_key)
                         && state.len() == side_state.len()
                     {
@@ -3602,11 +3853,6 @@ where
                 }
                 let rise = (quenched - side_energy) / cfg.temperature.max(1e-12);
                 if rise <= 0.0 || side_rng.random::<f64>() < (-rise).exp() {
-                    cage_archive.offer_cage(
-                        quenched,
-                        relaxed.view(),
-                        rigid_cage_key(relaxed.view(), cfg.n_points, cage_quantum),
-                    );
                     side_energy = quenched;
                     side_state = relaxed;
                 }
