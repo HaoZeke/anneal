@@ -23,6 +23,7 @@ from typing import NoReturn
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import figstyle
+from paper_data import fetch_paper_data
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,6 +75,7 @@ def provenance(data: Path) -> tuple[dict[str, str], dict[str, str]]:
 
 
 def load(data: Path = DATA) -> tuple[dict[str, str], list[Map], list[str]]:
+    fetch_paper_data()
     keys, digests = provenance(data)
     for name, want in digests.items():
         path = data / name

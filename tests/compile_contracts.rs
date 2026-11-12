@@ -2,9 +2,9 @@
 //! downstream `match` on `HopStop` that has no wildcard arm.
 //!
 //! The fixtures must fail, and the failure must be the sealed-trait or
-//! non-exhaustive error. Rustc's help text for "other types implement this
-//! trait" changed layout after 1.88, so the check reads that error instead
-//! of a snapshot of the help text.
+//! non-exhaustive error. Rustc 1.99 shortens the primary bound to
+//! `Gaussian: CertifiedMoveFor<f64, _>` and puts the full types on the
+//! help line, so the check reads that line.
 
 use std::path::Path;
 use std::process::Command;
@@ -26,7 +26,7 @@ fn checked_rejects_uncertified_component_combinations() {
         "tests/ui/checked_rejects_unbounded_box_move.rs",
         &[
             "error[E0277]",
-            "the trait bound `anneal_core::movekernel::Gaussian: CertifiedMoveFor<f64, BoxConstrained<f64>>` is not satisfied",
+            "the trait `CertifiedMoveFor<_, BoxConstrained<f64>>` is not implemented for `anneal_core::movekernel::Gaussian`",
         ],
     );
     expect_compile_fail(

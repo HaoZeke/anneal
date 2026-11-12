@@ -1,4 +1,4 @@
-use anneal_core::methods::cluster_hopping::{Config, SoapProposalMode};
+use anneal_core::methods::cluster_hopping::{ArmSelection, Config, SoapProposalMode};
 
 #[test]
 fn resolved_configuration_is_stable_and_mode_sensitive() {
@@ -40,8 +40,24 @@ fn default_witness_ceiling_is_absent_from_the_resolved_json() {
     assert!(!cfg.witness_tripleton_ceiling);
     let json = cfg.resolved_json().unwrap();
     assert!(!json.contains("witness_tripleton"));
+    assert_eq!(cfg.arm_selection, ArmSelection::Posterior);
+    assert!(!cfg.resolved_json().unwrap().contains("arm_selection"));
     assert_eq!(
         cfg.resolved_sha256().unwrap(),
         "577fbe8078d3218aa947111e965ea8851558293195112af5ebae64e567b84365"
+    );
+    let mut uniform = cfg;
+    uniform.arm_selection = ArmSelection::Uniform;
+    assert!(uniform.depth_reward);
+    assert!(uniform.allocate_moves);
+    assert!(
+        uniform
+            .resolved_json()
+            .unwrap()
+            .contains(r#""arm_selection":"uniform""#)
+    );
+    assert_ne!(
+        uniform.resolved_sha256().unwrap(),
+        "a1bd030f28c13e57f6dbaa50302b8f1312139fc1684f2fa24801a361664cf5d2"
     );
 }

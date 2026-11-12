@@ -27,6 +27,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// Pair distance below which a geometry is an overlap, not a physical contact.
 /// Same threshold the cluster walk uses before it will record a molecular quench.
 const OVERLAP_SEPARATION_A: f64 = 0.35;
+/// Same gate as `OVERLAP_CALL_LIMIT`. Below a covalent O–H, above the shell
+/// where xtb's SCC fails.
+const OVERLAP_CALL_LIMIT_A: f64 = 0.90;
 
 static SCC_REJECTED: AtomicUsize = AtomicUsize::new(0);
 static GEOMETRY_REJECTED: AtomicUsize = AtomicUsize::new(0);
@@ -453,7 +456,7 @@ unsafe extern "C" fn xtb_callback(
     let atomic_numbers = unsafe { std::slice::from_raw_parts(z, n) };
     let cell = unsafe { std::slice::from_raw_parts(boxp, 9) };
     let min_pair = min_pair_distance_a(positions);
-    if min_pair < OVERLAP_SEPARATION_A {
+    if min_pair <= OVERLAP_CALL_LIMIT_A {
         // xtb's SCC aborts when a trial step stacks two atoms. That geometry
         // is not an energy the search can record. The caller turns the error
         // into an uphill step and shortens it, so a finite quench stays eligible.

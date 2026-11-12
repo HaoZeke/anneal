@@ -316,6 +316,203 @@ pub(crate) fn reverse_cycle_cartesian<R: rand::Rng + ?Sized>(
     true
 }
 
+/// Oxygen–oxygen distances that can still become a hydrogen bond.
+///
+/// The first peak of the water O–O distribution is near 2.8 Å and the first
+/// minimum is near 3.5 Å (Soper, *Chem. Phys.* **2000**, *258*, 121). A
+/// neighbour inside that window is an acceptor a hydrogen can be turned onto.
+const REWIRE_OO_MIN: f64 = 2.4;
+const REWIRE_OO_MAX: f64 = 3.5;
+
+/// Smallest turn, in radians, that is not the half-radian group shake.
+///
+/// The shake draws its angle from `(-1/2, 1/2)`. A turn inside that interval
+/// quenches back into the hydrogen bond it left.
+const SHAKE_CEILING: f64 = 0.5;
+
+/// Point one hydrogen at a different oxygen, or turn the molecule over.
+///
+/// A directed-cycle reversal needs a cycle. A cage of three-coordinate waters
+/// often has none, and the half-radian shake then falls back into the bond it
+/// left. This move turns one water about its oxygen so a hydrogen that was
+/// not donating points at a neighbouring oxygen. The turn is larger than the
+/// shake. When no such neighbour exists, both hydrogens turn by half a
+/// revolution about the normal of their plane, which exchanges the two sides
+/// of the molecule. Oxygen–hydrogen distances are unchanged. Returns false,
+/// with `x` unchanged, when the geometry is not water or every candidate
+/// would stack two atoms.
+pub(crate) fn rewire_cartesian<R: rand::Rng + ?Sized>(
+    groups: &[Vec<usize>],
+    x: &mut ndarray::Array1<f64>,
+    rng: &mut R,
+) -> bool {
+    if !is_water_groups(groups) || groups.len() < 2 {
+        return false;
+    }
+    let sites = cartesian_sites(groups, x);
+    let mut options = Vec::new();
+    for i in 0..groups.len() {
+        let oxygen = sites[i][0];
+        for j in 0..groups.len() {
+            if i == j {
+                continue;
+            }
+            let toward_v = sub(sites[j][0], oxygen);
+            let oo = norm(toward_v);
+            if !(oo > REWIRE_OO_MIN && oo < REWIRE_OO_MAX) {
+                continue;
+            }
+            let toward = unit(toward_v);
+            let already = (0..2).any(|which| norm(sub(sites[i][1 + which], sites[j][0])) < BOND);
+            if already {
+                continue;
+            }
+            for which in 0..2 {
+                let hdir = unit(sub(sites[i][1 + which], oxygen));
+                let angle = dot(hdir, toward).clamp(-1.0, 1.0).acos();
+                if angle > SHAKE_CEILING {
+                    options.push((i, j, which));
+                }
+            }
+        }
+    }
+    if options.is_empty() {
+        return flip_about_normal(groups, x, &sites, rng);
+    }
+    let start = rng.random_range(0..options.len());
+    for step in 0..options.len().min(8) {
+        let (i, j, which) = options[(start + step) % options.len()];
+        if retarget(groups, x, &sites, i, j, which) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Rotate molecule `i` about its oxygen so hydrogen `which` points at molecule `j`.
+fn retarget(
+    groups: &[Vec<usize>],
+    x: &mut ndarray::Array1<f64>,
+    sites: &[[[f64; 3]; 3]],
+    i: usize,
+    j: usize,
+    which: usize,
+) -> bool {
+    let oxygen = sites[i][0];
+    let hdir = unit(sub(sites[i][1 + which], oxygen));
+    let toward = unit(sub(sites[j][0], oxygen));
+    let Some(turn) = rotation_taking(hdir, toward) else {
+        return false;
+    };
+    rotate_hydrogens(groups, x, i, oxygen, turn)
+}
+
+/// Half-revolution about the normal of the water plane.
+fn flip_about_normal<R: rand::Rng + ?Sized>(
+    groups: &[Vec<usize>],
+    x: &mut ndarray::Array1<f64>,
+    sites: &[[[f64; 3]; 3]],
+    rng: &mut R,
+) -> bool {
+    let i = rng.random_range(0..groups.len());
+    let oxygen = sites[i][0];
+    let u = unit(sub(sites[i][1], oxygen));
+    let v = unit(sub(sites[i][2], oxygen));
+    let normal = cross(u, v);
+    if norm(normal) < 1e-8 {
+        return false;
+    }
+    let turn = rodrigues(unit(normal), std::f64::consts::PI);
+    rotate_hydrogens(groups, x, i, oxygen, turn)
+}
+
+fn rotate_hydrogens(
+    groups: &[Vec<usize>],
+    x: &mut ndarray::Array1<f64>,
+    molecule: usize,
+    oxygen: [f64; 3],
+    turn: [[f64; 3]; 3],
+) -> bool {
+    let atoms = &groups[molecule];
+    let saved: Vec<[f64; 3]> = atoms
+        .iter()
+        .map(|&a| std::array::from_fn(|axis| x[3 * a + axis]))
+        .collect();
+    for (s, &a) in atoms.iter().enumerate() {
+        if s == 0 {
+            continue;
+        }
+        let old = saved[s];
+        let new = add(oxygen, mat_vec(turn, sub(old, oxygen)));
+        for axis in 0..3 {
+            x[3 * a + axis] = new[axis];
+        }
+    }
+    if intermolecular_clash(groups, x, molecule) {
+        for (s, &a) in atoms.iter().enumerate() {
+            for axis in 0..3 {
+                x[3 * a + axis] = saved[s][axis];
+            }
+        }
+        return false;
+    }
+    true
+}
+
+fn intermolecular_clash(groups: &[Vec<usize>], x: &ndarray::Array1<f64>, molecule: usize) -> bool {
+    let limit = super::OVERLAP_CALL_LIMIT;
+    let mine = &groups[molecule];
+    let n = x.len() / 3;
+    for &a in mine.iter().skip(1) {
+        if 3 * a + 2 >= x.len() {
+            continue;
+        }
+        for b in 0..n {
+            if mine.contains(&b) {
+                continue;
+            }
+            let mut square = 0.0;
+            for axis in 0..3 {
+                let d = x[3 * a + axis] - x[3 * b + axis];
+                square += d * d;
+            }
+            if square.sqrt() <= limit {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Rotation taking unit vector `from` onto unit vector `to`.
+fn rotation_taking(from: [f64; 3], to: [f64; 3]) -> Option<[[f64; 3]; 3]> {
+    let cosine = dot(from, to).clamp(-1.0, 1.0);
+    if cosine > 0.999 {
+        return None;
+    }
+    let mut axis = cross(from, to);
+    if norm(axis) < 1e-8 {
+        let helper = if from[0].abs() < 0.9 {
+            [1.0, 0.0, 0.0]
+        } else {
+            [0.0, 1.0, 0.0]
+        };
+        axis = cross(from, helper);
+    }
+    Some(rodrigues(unit(axis), cosine.acos()))
+}
+
+fn rodrigues(axis: [f64; 3], angle: f64) -> [[f64; 3]; 3] {
+    let (s, c) = angle.sin_cos();
+    let t = 1.0 - c;
+    let [x, y, z] = axis;
+    [
+        [t * x * x + c, t * x * y - s * z, t * x * z + s * y],
+        [t * x * y + s * z, t * y * y + c, t * y * z - s * x],
+        [t * x * z - s * y, t * y * z + s * x, t * z * z + c],
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -444,5 +641,85 @@ mod tests {
         assert!(!reverse_cycle_cartesian(&groups, &mut x, &mut rng));
         assert_eq!(x, before);
         assert!(!reverse_cycle_cartesian(&[], &mut x, &mut rng));
+    }
+
+    /// A hydrogen a right angle away from a free oxygen is past the shake.
+    ///
+    /// The group shake draws at most half a radian, so it cannot point that
+    /// hydrogen at the oxygen. The rewire turns about the donor oxygen until
+    /// it does, and it leaves the O–H length alone.
+    #[test]
+    fn a_right_angle_hydrogen_is_turned_onto_a_free_oxygen() {
+        let mut x = Array1::zeros(27);
+        // Donor. H1 along +x, H2 in the xy plane at the water angle.
+        let hoh = 104.5_f64.to_radians();
+        x[3] = 0.96;
+        x[6] = 0.96 * hoh.cos();
+        x[7] = 0.96 * hoh.sin();
+        // Acceptor already taking H1, and a free oxygen on +z.
+        x[9] = 2.8;
+        x[12] = 3.6;
+        x[13] = 0.3;
+        x[15] = 3.6;
+        x[16] = -0.3;
+        x[20] = 2.8;
+        x[24] = 0.3;
+        x[25] = 2.8;
+        x[26] = 0.4;
+        let groups = vec![vec![0, 1, 2], vec![3, 4, 5], vec![6, 7, 8]];
+        let oh = |coords: &Array1<f64>, h: usize| {
+            let mut s = 0.0;
+            for axis in 0..3 {
+                let d = coords[3 * h + axis] - coords[axis];
+                s += d * d;
+            }
+            s.sqrt()
+        };
+        let before = (oh(&x, 1), oh(&x, 2));
+        let mut rng = StdRng::seed_from_u64(11);
+        assert!(rewire_cartesian(&groups, &mut x, &mut rng));
+        assert!((oh(&x, 1) - before.0).abs() < 1e-9);
+        assert!((oh(&x, 2) - before.1).abs() < 1e-9);
+        let mut aligned = false;
+        for h in [1, 2] {
+            let mut along = [0.0; 3];
+            let mut n = 0.0;
+            for axis in 0..3 {
+                along[axis] = x[3 * h + axis] - x[axis];
+                n += along[axis] * along[axis];
+            }
+            n = n.sqrt();
+            // Unit direction toward the free oxygen on +z.
+            let dot_z = along[2] / n;
+            if dot_z > 0.999 {
+                aligned = true;
+            }
+        }
+        assert!(aligned, "neither hydrogen was turned onto the free oxygen");
+    }
+
+    #[test]
+    fn an_isolated_water_turns_by_half_a_revolution() {
+        let mut x = Array1::zeros(18);
+        x[3] = 0.96;
+        x[6] = -0.24;
+        x[7] = 0.93;
+        x[9] = 10.0;
+        x[12] = 10.96;
+        x[15] = 9.76;
+        x[16] = 0.93;
+        let groups = vec![vec![0, 1, 2], vec![3, 4, 5]];
+        let before = x.clone();
+        let mut rng = StdRng::seed_from_u64(3);
+        assert!(rewire_cartesian(&groups, &mut x, &mut rng));
+        let moved: f64 = x
+            .iter()
+            .zip(before.iter())
+            .map(|(after, prior)| (after - prior).abs())
+            .sum();
+        assert!(
+            moved > 1.0,
+            "half-revolution should carry the hydrogens off their old sites, moved {moved}"
+        );
     }
 }

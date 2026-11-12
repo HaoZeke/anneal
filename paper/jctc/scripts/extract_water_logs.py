@@ -14,6 +14,9 @@ import sys
 import tarfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paper_data import fetch_paper_data
+
 
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -23,6 +26,7 @@ def main() -> None:
     if len(sys.argv) != 4:
         raise SystemExit("usage: extract_water_logs.py ARCHIVE MAP DEST")
     archive, map_path, dest = map(Path, sys.argv[1:])
+    fetch_paper_data()
     if not archive.is_file():
         raise SystemExit(f"missing archive {archive}")
     expected = {}

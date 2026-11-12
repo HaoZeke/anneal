@@ -13,6 +13,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paper_data import fetch_paper_data
+
 ROOT = Path(__file__).resolve().parent.parent
 
 # Each step is a generator and the figs/ names it writes.
@@ -52,6 +55,7 @@ def pinned_env() -> dict[str, str]:
 
 
 def rebuild(out: Path) -> list[str]:
+    fetch_paper_data()
     out.mkdir(parents=True, exist_ok=True)
     env = pinned_env()
     failed: list[str] = []

@@ -652,6 +652,16 @@ pub struct Config {
     ///
     /// See [`crate::allocate::DepthAllocator`].
     pub depth_reward: bool,
+    /// Which rule picks the move arm.
+    ///
+    /// [`ArmSelection::Posterior`] is the historical rule and the paper
+    /// preset: the Normal-Gamma depth posterior when [`Config::depth_reward`]
+    /// is on, otherwise the floored Thompson allocator when
+    /// [`Config::allocate_moves`] is on, otherwise a uniform draw.
+    /// [`ArmSelection::Uniform`] draws an arm uniformly and does not consult
+    /// that posterior. Rewards, screens, and the move library stay as they are.
+    #[serde(skip_serializing_if = "arm_selection_is_posterior")]
+    pub arm_selection: ArmSelection,
     /// Reward the move allocator only for accepted hops that land in a new
     /// basin, not for accepted returns.
     ///
@@ -1113,6 +1123,23 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+fn arm_selection_is_posterior(value: &ArmSelection) -> bool {
+    *value == ArmSelection::Posterior
+}
+
+/// How a hop picks its move arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArmSelection {
+    /// Depth posterior when [`Config::depth_reward`] is set, otherwise the
+    /// floored Thompson allocator when [`Config::allocate_moves`] is set,
+    /// otherwise a uniform draw.
+    #[default]
+    Posterior,
+    /// Draw one arm uniformly. The depth posterior is not consulted.
+    Uniform,
+}
+
 impl Config {
     /// Canonical, versioned JSON for the fully resolved configuration.
     pub fn resolved_json(&self) -> Result<String, serde_json::Error> {
@@ -1413,6 +1440,7 @@ impl Config {
             statistical_temperature: false,
             energy_bias: false,
             depth_reward: false,
+            arm_selection: ArmSelection::Posterior,
             novel_reward: false,
             soft_perturb: false,
             soft_modes: 6,
@@ -1553,6 +1581,7 @@ impl Config {
             rotate_step: 0.40,
             local: false,
             reverse_cycles: true,
+            relocate: false,
         };
         cfg.rigid_body_geometry =
             Some(crate::potentials::Tip4pCluster::new(n_molecules).rigid_geometry());
@@ -1641,6 +1670,7 @@ impl Config {
             rotate_step: super::moves::RIGID_ORIENTATION_CAP,
             local: true,
             reverse_cycles: false,
+            relocate: false,
         };
         let contact = 4.0 * reach;
         let span = LennardJonesPreset::CONTAINER_RADIUS * contact * (self.n_points as f64).cbrt();
@@ -1685,10 +1715,15 @@ impl Config {
     /// [`Config::communicating_tip4p`].
     pub fn recommended_tip4p(n_molecules: usize) -> Self {
         let mut cfg = Self::for_tip4p(n_molecules);
+        // Depth reward, stall tabu and the return screen are the atomic
+        // Lennard-Jones controls. On rigid TIP4P they pin the walk in a
+        // cage about 5 kJ/mol above the Wales-Hodges minimum, and further
+        // calls do not leave it. The Wales-Hodges translation, rotation
+        // and cycle reversal already on `for_tip4p` do leave.
         cfg.allocate_moves = true;
-        cfg.depth_reward = true;
-        cfg.tabu_on_stall = true;
-        cfg.return_screen = true;
+        cfg.depth_reward = false;
+        cfg.tabu_on_stall = false;
+        cfg.return_screen = false;
         cfg
     }
 
@@ -1766,7 +1801,7 @@ impl Config {
 
 #[cfg(test)]
 mod coverage_behaviour {
-    use super::{Config, Keying};
+    use super::{ArmSelection, Config, Keying};
 
     #[test]
     fn morphology_keying_carries_its_own_deposition_width() {
@@ -1798,9 +1833,10 @@ mod coverage_behaviour {
         assert!(communicating.return_screen);
         assert_eq!(communicating.shared_deposits, 0);
         let recommended = Config::recommended_tip4p(4);
-        assert!(recommended.depth_reward);
-        assert!(recommended.tabu_on_stall);
-        assert!(recommended.return_screen);
+        assert!(!recommended.depth_reward);
+        assert_eq!(recommended.arm_selection, ArmSelection::Posterior);
+        assert!(!recommended.tabu_on_stall);
+        assert!(!recommended.return_screen);
         assert!(recommended.allocate_moves);
     }
 

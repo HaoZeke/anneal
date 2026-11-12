@@ -1676,76 +1676,41 @@ fn ico_axes() -> [[f64; 3]; 6] {
 /// not change which points are matched. An index-order greedy pass does.
 #[cfg_attr(feature = "ira", allow(dead_code))]
 fn hungarian(cost: &[f64], n: usize) -> Vec<usize> {
-    let mut u = vec![0.0; n + 1];
-    let mut v = vec![0.0; n + 1];
-    let mut p = vec![0usize; n + 1];
-    let mut way = vec![0usize; n + 1];
-    for i in 1..=n {
-        p[0] = i;
-        let mut j0 = 0usize;
-        let mut minv = vec![f64::INFINITY; n + 1];
-        let mut used = vec![false; n + 1];
-        loop {
-            used[j0] = true;
-            let i0 = p[j0];
-            let mut delta = f64::INFINITY;
-            let mut j1 = 0usize;
-            for j in 1..=n {
-                if used[j] {
-                    continue;
-                }
-                let cur = cost[(i0 - 1) * n + (j - 1)] - u[i0] - v[j];
-                if cur < minv[j] {
-                    minv[j] = cur;
-                    way[j] = j0;
-                }
-                if minv[j] < delta {
-                    delta = minv[j];
-                    j1 = j;
-                }
-            }
-            for j in 0..=n {
-                if used[j] {
-                    u[p[j]] += delta;
-                    v[j] -= delta;
-                } else {
-                    minv[j] -= delta;
-                }
-            }
-            j0 = j1;
-            if p[j0] == 0 {
-                break;
-            }
-        }
-        loop {
-            let j1 = way[j0];
-            p[j0] = p[j1];
-            j0 = j1;
-            if j0 == 0 {
-                break;
-            }
-        }
-    }
-    let mut perm = vec![0usize; n];
-    for j in 1..=n {
-        perm[p[j] - 1] = j - 1;
-    }
-    perm
+    // Same column scan as the continuous-symmetry assignment. The scratch
+    // lives for the whole matrix instead of being allocated once per row.
+    crate::assignment::successive_shortest_paths(cost, n).unwrap_or_else(|| (0..n).collect())
 }
 
 /// Columns matched to each row of `x` under the minimum sum of squared distances.
 #[cfg_attr(feature = "ira", allow(dead_code))]
 fn optimal_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
     let n = x.len() / 3;
+    if y.len() < 3 * n {
+        return (0..n).collect();
+    }
+    let mut left = Vec::with_capacity(n);
+    let mut right = Vec::with_capacity(n);
+    for atom in 0..n {
+        left.push([x[3 * atom], x[3 * atom + 1], x[3 * atom + 2]]);
+        right.push([y[3 * atom], y[3 * atom + 1], y[3 * atom + 2]]);
+    }
+    // Below 98 atoms the dense scan is the one this matching was measured
+    // with. At and above that size the duals are reduced before the scan,
+    // and a tie still keeps the lowest column index.
+    if n >= crate::assignment::SHORTEST_PATH_FROM
+        && let Some(permutation) = crate::assignment::minimum_cost_squared_distance(&left, &right)
+    {
+        return permutation;
+    }
     let mut cost = vec![0.0; n * n];
     for i in 0..n {
         for j in 0..n {
-            let mut d2 = 0.0;
-            for a in 0..3 {
-                let d = x[3 * i + a] - y[3 * j + a];
-                d2 += d * d;
+            let mut distance = 0.0;
+            for axis in 0..3 {
+                let delta = left[i][axis] - right[j][axis];
+                distance += delta * delta;
             }
-            cost[i * n + j] = d2;
+            cost[i * n + j] = distance;
         }
     }
     hungarian(&cost, n)

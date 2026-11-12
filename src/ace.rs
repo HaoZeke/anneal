@@ -228,4 +228,24 @@ mod tests {
         assert!(t.contains(&(0, 0, 0)));
         assert!(!t.contains(&(1, 1, 1)));
     }
+
+    /// The water SOAP pullback asks for this derivative once per atom per
+    /// channel. A finite-difference pass at l_max 6 is a few seconds each,
+    /// and sixty waters times two channels never returns to the quench.
+    #[test]
+    fn the_lmax6_derivative_returns_before_a_quench_could() {
+        let n_max = 3;
+        let l_max = 6;
+        let n_c = n_max * (l_max + 1) * (l_max + 1);
+        let c: Vec<f64> = (0..n_c).map(|i| ((i * 17) % 11) as f64 * 0.01).collect();
+        let started = std::time::Instant::now();
+        let j = d_from_c(&c, n_max, l_max);
+        let elapsed = started.elapsed();
+        assert_eq!(j.nrows(), dim(n_max, l_max));
+        assert_eq!(j.ncols(), n_c);
+        assert!(
+            elapsed.as_millis() < 200,
+            "ACE derivative took {elapsed:?}; a (H2O)20 pullback would not return"
+        );
+    }
 }

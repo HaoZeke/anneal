@@ -20,6 +20,7 @@ MODULE H2H_CAP
    INTEGER :: SEED = 0
    CHARACTER(LEN=16) :: SYSTEM = 'unset'
    REAL(REAL64) :: T0 = 0.0D0
+   REAL(REAL64) :: POT_S = 0.0D0
 CONTAINS
 
    SUBROUTINE H2H_INIT()
@@ -71,6 +72,26 @@ CONTAINS
       H2H_ABORT = ABORT
    END FUNCTION H2H_ABORT
 
+   SUBROUTINE H2H_POT_ENTER(TICK)
+      INTEGER(KIND=8), INTENT(OUT) :: TICK
+      INTEGER(KIND=8) :: RATE
+      IF (.NOT. READY) CALL H2H_INIT()
+      TICK = 0
+      IF (CAP <= 0) RETURN
+      CALL SYSTEM_CLOCK(TICK, RATE)
+   END SUBROUTINE H2H_POT_ENTER
+
+   SUBROUTINE H2H_POT_LEAVE(TICK)
+      INTEGER(KIND=8), INTENT(IN) :: TICK
+      INTEGER(KIND=8) :: NOW, RATE
+      IF (.NOT. READY) CALL H2H_INIT()
+      IF (CAP <= 0 .OR. TICK == 0) RETURN
+      CALL SYSTEM_CLOCK(NOW, RATE)
+      IF (RATE > 0 .AND. NOW >= TICK) THEN
+         POT_S = POT_S + REAL(NOW - TICK, REAL64) / REAL(RATE, REAL64)
+      END IF
+   END SUBROUTINE H2H_POT_LEAVE
+
    SUBROUTINE H2H_NOTE(ENERGY)
       REAL(REAL64), INTENT(IN) :: ENERGY
       IF (.NOT. READY) CALL H2H_INIT()
@@ -91,7 +112,7 @@ CONTAINS
       INTEGER(KIND=8) :: TICK, RATE
       REAL(REAL64) :: WALL, REPORTED
       INTEGER :: EVALS, HIT
-      CHARACTER(LEN=320) :: LINE
+      CHARACTER(LEN=400) :: LINE
       CHARACTER(LEN=256) :: ROWFILE
       INTEGER :: UNIT, IOS, N
       IF (.NOT. READY) CALL H2H_INIT()
@@ -111,10 +132,11 @@ CONTAINS
       ELSE
          REPORTED = BEST
       END IF
-      WRITE(LINE, '(A,A,A,I0,A,I0,A,I1,A,I0,A,I0,A,G0.12,A,G0.6)') &
+      WRITE(LINE, '(A,A,A,I0,A,I0,A,I1,A,I0,A,I0,A,G0.12,A,G0.6,A,G0.9)') &
          'h2h_row system=', TRIM(SYSTEM), ' code=gmin seed=', SEED, &
          ' budget=', CAP, ' hit=', HIT, ' evals_to_hit=', EVALS, &
-         ' charged=', CALLS, ' best=', REPORTED, ' wall_s=', WALL
+         ' charged=', CALLS, ' best=', REPORTED, ' wall_s=', WALL, &
+         ' pot_s=', POT_S
       WRITE(*, '(A)') TRIM(LINE)
       CALL GET_ENVIRONMENT_VARIABLE('H2H_ROW', ROWFILE, LENGTH=N, STATUS=IOS)
       IF (IOS == 0 .AND. N > 0) THEN

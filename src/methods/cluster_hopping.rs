@@ -53,7 +53,9 @@ mod packing_bank;
 mod preset;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
-pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, SoapProposalMode};
+pub use config::{
+    ArmSelection, Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, SoapProposalMode,
+};
 pub use moves::*;
 
 #[cfg(test)]
@@ -1267,6 +1269,12 @@ pub fn structure_is_sane(x: ArrayView1<f64>, min_sep: f64) -> bool {
 /// overlap artifact rather than a physical bond.
 pub const OVERLAP_SEPARATION: f64 = 0.35;
 
+/// Distances this close still abort xtb's SCC, and the line search walks the
+/// gate one probe at a time. Each probe runs a full SCC that fails. 0.90 Å
+/// is below a covalent O–H and above that failing shell, so the first probe
+/// the potential sees is a bond, not a contact xtb cannot converge.
+pub const OVERLAP_CALL_LIMIT: f64 = 0.90;
+
 /// Push pairs closer than `min_sep` apart until the geometry clears that rule.
 ///
 /// A declared group is translated as a rigid body when the close pair belongs
@@ -1479,6 +1487,57 @@ fn record_quenched_answer(
 /// keeps it at every size.
 fn stall_growth_waits(held: Option<f64>, incumbent: f64) -> bool {
     held.is_some_and(|energy| incumbent >= energy - 1e-9)
+}
+
+/// Leaves skipped while the incumbent stays at the held energy before the
+/// crossing growth is allowed to run again.
+///
+/// One miss is not a proof that the other packing is absent. The paper leave
+/// is thousands of force calls apart, so eight skips is one retry about every
+/// forty thousand calls. A five-hop test never reaches the eighth skip, and
+/// the single growth it counts stays single.
+const GROWTH_RETRY_LEAVES: u32 = 8;
+
+/// True while a failed growth should stay idle.
+///
+/// The energy test is [`stall_growth_waits`]. At 98 atoms and above, after
+/// [`GROWTH_RETRY_LEAVES`] idle leaves the pentagonal order is due again.
+/// That is the leave the plateau was not taking: the live chain's 555
+/// fraction sits near 0.06, under the 0.12 icosahedral cut, so that branch
+/// never opened. Below 98 the displacement library still leaves the floor,
+/// and a retry would move the call clock those hits were measured on.
+fn growth_held(held: Option<f64>, incumbent: f64, skipped: u32, n_points: usize) -> bool {
+    stall_growth_waits(held, incumbent) && (n_points < 98 || skipped < GROWTH_RETRY_LEAVES)
+}
+
+/// The arm a hop plays.
+///
+/// A contextual decision, when one was built, stays in front of this choice:
+/// the paper preset does not build one. [`ArmSelection::Uniform`] replaces
+/// the depth posterior and the floored Thompson draw with one uniform index
+/// and consumes nothing else from the generator.
+fn choose_arm<R: Rng + ?Sized>(
+    cfg: &Config,
+    context: Option<ArrayView1<f64>>,
+    contextual: &mut ContextualAllocator,
+    depth_allocator: &crate::allocate::DepthAllocator,
+    allocator: &mut FlooredThompson,
+    n_arms: usize,
+    rng: &mut R,
+) -> usize {
+    if let Some(features) = context {
+        return contextual.select(features, rng);
+    }
+    if cfg.arm_selection == ArmSelection::Uniform {
+        return rng.random_range(0..n_arms);
+    }
+    if cfg.allocate_moves && cfg.depth_reward {
+        return depth_allocator.select(rng);
+    }
+    if cfg.allocate_moves {
+        return allocator.select(rng);
+    }
+    rng.random_range(0..n_arms)
 }
 
 /// Kernels the chain actually draws, including the energy-lattice arm.
@@ -2964,11 +3023,18 @@ where
     // Hops elapsed when the ledger last recorded a lower minimum.
     // A rigid stall measures 1000 hops from that hop count.
     let mut hops_at_lowest = 0usize;
+    // Set after a rigid stall when the preset relocates one molecule.
+    // Cleared when a new lowest minimum is recorded.
+    let mut cage_edit = false;
     let mut csm_reseed_stamp = 0usize;
     // Set when a stall growth fails to lower the incumbent. Later growth
-    // quenches wait until that energy drops, and the proposals until then
-    // are all-points displacements.
+    // quenches wait until that energy drops. Only the leave whose growth
+    // was skipped is an all-points displacement. The hops between leaves
+    // keep the move library: replacing every one of them locks the chain
+    // on the icosahedral floor (LJ75 about 1.21 above Marks, LJ98 about
+    // 0.022 above the Leary tetrahedron).
     let mut stall_growth_hold: Option<f64> = None;
+    let mut stall_growth_skips: u32 = 0;
     let hop_room = |hops: usize| cfg.max_hops.is_none_or(|cap| hops < cap);
     // Distinct minima a rigid chain has quenched. Its stall moves to one.
     let mut stall_archive = crate::methods::stall_archive::StallArchive::default();
@@ -2977,7 +3043,7 @@ where
     }
 
     let stop = loop {
-        if ledger.stopped() || ledger.target_reached() {
+        if ledger.stopped() || ledger.target_reached() || ledger.remaining() == 0 {
             break HopStop::of_closed(ledger);
         }
         // The cap is read here because every early `continue` returns here,
@@ -2990,6 +3056,7 @@ where
             charged_at_best = ledger.spent();
             hops_at_lowest = hops;
             csm_reseed_stamp = hops;
+            cage_edit = false;
         }
         if cfg.move_library.is_rigid_body()
             && crate::methods::rigid_quench::stalled(hops, hops_at_lowest)
@@ -3013,6 +3080,15 @@ where
                 e = energy;
                 x = state;
                 current_validation_gradient = gradient.filter(|_| ok);
+            }
+            // Translation, rotation and cycle reversal leave the oxygen cage
+            // where it is. After a thousand hops with no new lowest minimum,
+            // the proposals that follow move one molecule onto a missing contact.
+            if matches!(
+                cfg.move_library,
+                MoveLibrary::RigidBody { relocate: true, .. }
+            ) {
+                cage_edit = true;
             }
         }
         // The reoccupation move runs inside the chain and charges the
@@ -3931,12 +4007,15 @@ where
                 break HopStop::of_closed(ledger);
             }
         }
-        let mut k = match (&context, cfg.allocate_moves) {
-            (Some(c), _) => contextual.select(c.view(), rng),
-            (None, true) if cfg.depth_reward => depth_allocator.select(rng),
-            (None, true) => allocator.select(rng),
-            (None, false) => rng.random_range(0..kernels.len()),
-        };
+        let mut k = choose_arm(
+            cfg,
+            context.as_ref().map(|value| value.view()),
+            &mut contextual,
+            &depth_allocator,
+            &mut allocator,
+            kernels.len(),
+            rng,
+        );
         if hops == 0
             && let Some(swap_at) = kernels.iter().position(|kernel| kernel.name() == "swap")
         {
@@ -4274,7 +4353,7 @@ where
         // Identity SOAP is not an arm. Thompson must not buy a no-op:
         // reselect a real kernel, or skip the hop.
         // A cycle reversal that finds no cycle returns the state unchanged too.
-        let may_idle = |name: &str| name == "soap" || name == "rcycle";
+        let may_idle = |name: &str| name == "soap" || name == "rcycle" || name == "hbrewire";
         if !species_escape_trial
             && !cov_fire
             && !soft_fire
@@ -4284,12 +4363,15 @@ where
         {
             let mut swapped = false;
             for _ in 0..kernels.len() {
-                let k2 = match (&context, cfg.allocate_moves) {
-                    (Some(c), _) => contextual.select(c.view(), rng),
-                    (None, true) if cfg.depth_reward => depth_allocator.select(rng),
-                    (None, true) => allocator.select(rng),
-                    (None, false) => rng.random_range(0..kernels.len()),
-                };
+                let k2 = choose_arm(
+                    cfg,
+                    context.as_ref().map(|value| value.view()),
+                    &mut contextual,
+                    &depth_allocator,
+                    &mut allocator,
+                    kernels.len(),
+                    rng,
+                );
                 if may_idle(&kernels[k2].name()) {
                     continue;
                 }
@@ -4320,14 +4402,28 @@ where
                 continue;
             }
         }
-        // A failed stall growth leaves the remaining proposals on the
-        // all-points displacement until the incumbent drops. The test is
-        // the incumbent energy, not the atom count.
-        let held_displacement =
-            stall_growth_waits(stall_growth_hold, ledger.best) && cfg.packing_cna_applies();
+        // A failed stall growth does not quench another lattice until the
+        // incumbent drops. The leave that would have grown is one all-points
+        // displacement. Other proposals keep the kernel they drew. The test
+        // is the incumbent energy, not the atom count.
+        let held_displacement = directed_leave
+            && growth_held(
+                stall_growth_hold,
+                ledger.best,
+                stall_growth_skips,
+                cfg.n_points,
+            )
+            && cfg.packing_cna_applies();
         if held_displacement {
             let step = preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale;
             trial = ClusterMove::AllPoints { step }.propose(x.view(), cfg.temperature, rng);
+        }
+        if cage_edit {
+            trial = ClusterMove::RigidRelocate {
+                n_molecules: cfg.n_points,
+                min_separation: cfg.min_separation,
+            }
+            .propose(x.view(), cfg.temperature, rng);
         }
         let proposal_action = if held_displacement {
             "all".to_owned()
@@ -4396,12 +4492,12 @@ where
         // before it will compute an energy. The hop has to hand that potential
         // a geometry the rule already accepts. Separation is geometry only.
         // The raw overlapping proposal is not an energy call.
-        if cfg.species.is_some() && !structure_is_sane(trial.view(), OVERLAP_SEPARATION) {
+        if cfg.species.is_some() && !structure_is_sane(trial.view(), OVERLAP_CALL_LIMIT) {
             proposal_overlaps += 1;
             let separated = separate_to_overlap_rule(
                 &mut trial,
                 cfg.move_library.declared_groups(),
-                OVERLAP_SEPARATION,
+                OVERLAP_CALL_LIMIT,
                 hop_frozen.as_deref(),
             );
             if !separated {
@@ -4610,7 +4706,13 @@ where
             e_screen >= ledger.best
                 && !screen.decide(feats.view(), ledger.best, rng.random::<f64>())
         } else if cfg.calibrated_screen {
-            e_screen - descent.allowance() > ledger.best + cfg.screen_margin && !descent.audit()
+            // Relocating one molecule starts far above the incumbent. A
+            // 15-step screen then refuses it, so the oxygen cage never
+            // changes. That move is quenched in full.
+            let relocating = cage_edit || kernels.get(k).is_some_and(|mv| mv.name() == "rreloc");
+            !relocating
+                && e_screen - descent.allowance() > ledger.best + cfg.screen_margin
+                && !descent.audit()
         } else {
             // A rigid partial quench sits far above the incumbent by an
             // absolute margin copied from a reduced-unit cluster. Skipping
@@ -6044,46 +6146,103 @@ where
             // The budget window only cools a derived search. It does not
             // decide whether a non-icosahedral plateau may leave. Recommended
             // leaves that flag off, and the icosahedral test below is false
-            // for the LJ104 minima, so neither growth ran and the hold that
-            // switches later proposals to all-points stayed unset.
+            // for the LJ104 minima, so neither growth ran and the hold
+            // stayed unset.
             // The chain takes a growth only when it deepens the incumbent.
-            // A miss sets the hold. Later proposals are all-points
-            // displacements until that incumbent drops.
+            // A miss sets the hold. The leave that then skips growth is the
+            // all-points displacement above. The library keeps proposing
+            // until the incumbent drops.
             if directed_leave
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
                 && !crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
             {
                 let best_before_growth = ledger.best;
-                if stall_growth_waits(stall_growth_hold, best_before_growth) {
+                if growth_held(
+                    stall_growth_hold,
+                    best_before_growth,
+                    stall_growth_skips,
+                    cfg.n_points,
+                ) {
                     // The lattice quench already failed at this incumbent.
-                    // Further growth waits. The proposals below carry the
-                    // charge as all-points displacements.
+                    // Further growth waits. This leave's proposal is the
+                    // all-points displacement. After several idle leaves the
+                    // pentagonal order is tried again below.
+                    stall_growth_skips = stall_growth_skips.saturating_add(1);
                 } else {
+                    let retry = stall_growth_waits(stall_growth_hold, best_before_growth);
+                    stall_growth_skips = 0;
                     let mut best_growth: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
-                    for source in crate::lattice::Source::library() {
-                        if ledger.remaining() == 0 {
-                            break;
+                    // A flat incumbent whose live chain is under the
+                    // icosahedral cut never opened the pentagonal branch.
+                    // The retry writes that order, plus the two close
+                    // packings, from a side stream so a miss leaves the
+                    // chain's own draws where they were.
+                    let mut side = StdRng::seed_from_u64(
+                        (hops as u64).wrapping_mul(0x9E37_79B9)
+                            ^ best_before_growth.to_bits()
+                            ^ 0x0C05_11CE,
+                    );
+                    let crossing = [
+                        crate::lattice::Source::Named(crate::structure::Template::FaceCentredCubic),
+                        crate::lattice::Source::Named(
+                            crate::structure::Template::HexagonalClosePacked,
+                        ),
+                        crate::lattice::Source::Pentagonal,
+                    ];
+                    if retry {
+                        for source in crossing {
+                            if ledger.remaining() == 0 {
+                                break;
+                            }
+                            let grown =
+                                crate::lattice::candidate(source, x.view(), x.len() / 3, &mut side);
+                            let (grown_energy, grown_state) =
+                                relax(ledger, grown.view(), cfg.relax_steps);
+                            if grown_state.len() != x.len() || !grown_energy.is_finite() {
+                                continue;
+                            }
+                            let grown_gradient = record_quenched_answer(
+                                cfg,
+                                ledger,
+                                &mut grad,
+                                grown_energy,
+                                grown_state.view(),
+                                &mut unconverged_records,
+                            );
+                            let replace = best_growth
+                                .as_ref()
+                                .is_none_or(|(energy, _, _)| grown_energy < *energy);
+                            if replace {
+                                best_growth = Some((grown_energy, grown_state, grown_gradient));
+                            }
                         }
-                        let grown = crate::lattice::candidate(source, x.view(), x.len() / 3, rng);
-                        let (grown_energy, grown_state) =
-                            relax(ledger, grown.view(), cfg.relax_steps);
-                        if grown_state.len() != x.len() || !grown_energy.is_finite() {
-                            continue;
-                        }
-                        let grown_gradient = record_quenched_answer(
-                            cfg,
-                            ledger,
-                            &mut grad,
-                            grown_energy,
-                            grown_state.view(),
-                            &mut unconverged_records,
-                        );
-                        let replace = best_growth
-                            .as_ref()
-                            .is_none_or(|(energy, _, _)| grown_energy < *energy);
-                        if replace {
-                            best_growth = Some((grown_energy, grown_state, grown_gradient));
+                    } else {
+                        for source in crate::lattice::Source::library() {
+                            if ledger.remaining() == 0 {
+                                break;
+                            }
+                            let grown =
+                                crate::lattice::candidate(source, x.view(), x.len() / 3, rng);
+                            let (grown_energy, grown_state) =
+                                relax(ledger, grown.view(), cfg.relax_steps);
+                            if grown_state.len() != x.len() || !grown_energy.is_finite() {
+                                continue;
+                            }
+                            let grown_gradient = record_quenched_answer(
+                                cfg,
+                                ledger,
+                                &mut grad,
+                                grown_energy,
+                                grown_state.view(),
+                                &mut unconverged_records,
+                            );
+                            let replace = best_growth
+                                .as_ref()
+                                .is_none_or(|(energy, _, _)| grown_energy < *energy);
+                            if replace {
+                                best_growth = Some((grown_energy, grown_state, grown_gradient));
+                            }
                         }
                     }
                     if let Some((grown_energy, grown_state, grown_gradient)) = best_growth
@@ -6118,18 +6277,25 @@ where
             // stream seeded by the hop and the incumbent, so a growth that
             // does not win leaves the chain's own stream where it was. The
             // quench is kept only when it deepens the incumbent. A growth
-            // that fails holds the next one until the incumbent changes, and
-            // that stalled charge is an all-points displacement.
+            // that fails holds the next one until the incumbent changes.
+            // The skipped leave is one all-points displacement.
             if directed_leave
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
                 && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
             {
                 let best_before_growth = ledger.best;
-                if stall_growth_waits(stall_growth_hold, best_before_growth) {
-                    // Same wait as the other lattice growth. The proposals
-                    // are all-points displacements until the incumbent drops.
+                if growth_held(
+                    stall_growth_hold,
+                    best_before_growth,
+                    stall_growth_skips,
+                    cfg.n_points,
+                ) {
+                    // Same wait as the other lattice growth. This leave's
+                    // proposal is the all-points displacement.
+                    stall_growth_skips = stall_growth_skips.saturating_add(1);
                 } else {
+                    stall_growth_skips = 0;
                     let mut side = StdRng::seed_from_u64(
                         (hops as u64).wrapping_mul(0x9E37_79B9)
                             ^ best_before_growth.to_bits()
@@ -7208,6 +7374,93 @@ mod group_move_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Uniform selection is one `random_range` over the preset's arms, and
+    /// the untouched preset still draws from the depth posterior.
+    #[test]
+    fn uniform_arm_selection_matches_a_uniform_draw() {
+        let preset = Config::recommended(38);
+        assert_eq!(preset.arm_selection, ArmSelection::Posterior);
+        assert!(preset.depth_reward && preset.allocate_moves);
+        let n_arms = search_kernels(&preset).len();
+        assert!(n_arms >= 2, "the paper preset needs more than one arm");
+        let mut depth = crate::allocate::DepthAllocator::new(n_arms);
+        for _ in 0..40 {
+            depth.update(0, 8.0);
+            for arm in 1..n_arms {
+                depth.update(arm, -8.0);
+            }
+        }
+        let mut thompson = FlooredThompson::new(n_arms);
+        let mut contextual = ContextualAllocator::new(n_arms, 3, preset.contextual_floor);
+        let mut uniform_cfg = preset.clone();
+        uniform_cfg.arm_selection = ArmSelection::Uniform;
+        assert!(uniform_cfg.depth_reward && uniform_cfg.allocate_moves);
+        let mut rng = StdRng::seed_from_u64(20261111);
+        let mut twin = StdRng::seed_from_u64(20261111);
+        let mut counts = vec![0usize; n_arms];
+        for _ in 0..4_000 {
+            let got = choose_arm(
+                &uniform_cfg,
+                None,
+                &mut contextual,
+                &depth,
+                &mut thompson,
+                n_arms,
+                &mut rng,
+            );
+            let expect = twin.random_range(0..n_arms);
+            assert_eq!(got, expect);
+            counts[got] += 1;
+        }
+        let low = 4_000 / n_arms / 2;
+        let high = 4_000 / n_arms + 4_000 / n_arms / 2;
+        for count in &counts {
+            assert!(
+                *count > low && *count < high,
+                "uniform draws were {counts:?}, expected each arm near {}",
+                4_000 / n_arms
+            );
+        }
+        let mut posterior_rng = StdRng::seed_from_u64(7);
+        let mut direct_rng = posterior_rng.clone();
+        let mut posterior_counts = vec![0usize; n_arms];
+        for _ in 0..400 {
+            let via_preset = choose_arm(
+                &preset,
+                None,
+                &mut contextual,
+                &depth,
+                &mut thompson,
+                n_arms,
+                &mut posterior_rng,
+            );
+            let via_posterior = depth.select(&mut direct_rng);
+            assert_eq!(via_preset, via_posterior);
+            posterior_counts[via_preset] += 1;
+        }
+        assert!(
+            posterior_counts[0] > 300,
+            "the depth posterior did not keep the deep arm: {posterior_counts:?}"
+        );
+        let mut uniform_seq = Vec::new();
+        let mut posterior_seq = Vec::new();
+        let mut left = StdRng::seed_from_u64(99);
+        let mut right = StdRng::seed_from_u64(99);
+        for _ in 0..64 {
+            uniform_seq.push(choose_arm(
+                &uniform_cfg,
+                None,
+                &mut contextual,
+                &depth,
+                &mut thompson,
+                n_arms,
+                &mut left,
+            ));
+            posterior_seq.push(depth.select(&mut right));
+        }
+        assert_ne!(uniform_seq, posterior_seq);
+    }
 
     #[test]
     fn recommended_offers_the_energy_lattice_and_the_baseline_does_not() {

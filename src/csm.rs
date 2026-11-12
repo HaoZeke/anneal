@@ -12,8 +12,6 @@ use std::collections::BTreeMap;
 
 use ndarray::{Array1, ArrayView1};
 
-use crate::assignment::minimum_cost_assignment;
-
 /// Projects `x` onto `ops` at the best of `orientations`.
 ///
 /// `ops` and `orientations` are row-major orthogonal 3 by 3 matrices.
@@ -35,11 +33,14 @@ pub fn project(
     }
     let (centred, centroid, scale) = centre_and_scale(x, n)?;
     let mut best: Option<(f64, [[f64; 3]; 3], Vec<[f64; 3]>)> = None;
+    // One group shares column duals across its operations and orientations.
+    // A warm start is used only when it matches more rows than a cold one.
+    let mut warm = crate::assignment::WarmColumns::default();
     for rotation in orientations {
         let y = apply_all(rotation, &centred);
         let mut hat = vec![[0.0; 3]; n];
         for op in ops {
-            let assignment = match_operated(&y, classes, op)?;
+            let assignment = match_operated(&y, classes, op, &mut warm)?;
             for atom in 0..n {
                 let image = mul_vec(op, y[assignment[atom]]);
                 for axis in 0..3 {
@@ -102,6 +103,9 @@ pub struct GroupProjection {
 
 /// Projects onto the library group with the lowest measure.
 pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
+    if let Some(cached) = cached_propose(x, classes) {
+        return cached;
+    }
     let orientations = inertia_orientations(x, classes.len())?;
     let mut best: Option<GroupProjection> = None;
     for (name, ops) in [
@@ -126,7 +130,45 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
             });
         }
     }
+    store_propose(x, classes, best.as_ref());
     best
+}
+
+struct ProposeCache {
+    coordinates: Vec<u64>,
+    classes: Vec<u32>,
+    value: Option<GroupProjection>,
+}
+
+std::thread_local! {
+    static PROPOSE_CACHE: std::cell::RefCell<Option<ProposeCache>> = const { std::cell::RefCell::new(None) };
+}
+
+fn same_bits(cached: &[u64], x: ArrayView1<'_, f64>) -> bool {
+    cached.len() == x.len()
+        && cached
+            .iter()
+            .zip(x.iter())
+            .all(|(bits, value)| *bits == value.to_bits())
+}
+
+fn cached_propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<Option<GroupProjection>> {
+    PROPOSE_CACHE.with(|slot| {
+        let slot = slot.borrow();
+        let cached = slot.as_ref()?;
+        (same_bits(&cached.coordinates, x) && cached.classes == classes)
+            .then(|| cached.value.clone())
+    })
+}
+
+fn store_propose(x: ArrayView1<'_, f64>, classes: &[u32], value: Option<&GroupProjection>) {
+    PROPOSE_CACHE.with(|slot| {
+        *slot.borrow_mut() = Some(ProposeCache {
+            coordinates: x.iter().map(|value| value.to_bits()).collect(),
+            classes: classes.to_vec(),
+            value: value.cloned(),
+        });
+    });
 }
 
 pub(crate) fn inversion_ops() -> Vec<[[f64; 3]; 3]> {
@@ -182,7 +224,12 @@ fn is_identity(op: &[[f64; 3]; 3]) -> bool {
     true
 }
 
-fn match_operated(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option<Vec<usize>> {
+fn match_operated(
+    y: &[[f64; 3]],
+    classes: &[u32],
+    op: &[[f64; 3]; 3],
+    warm: &mut crate::assignment::WarmColumns,
+) -> Option<Vec<usize>> {
     let n = classes.len();
     // The identity sends every atom to itself, so the diagonal is a minimum
     // of cost zero and the assignment problem is unnecessary.
@@ -196,19 +243,10 @@ fn match_operated(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option
     }
     let mut assignment = vec![usize::MAX; n];
     for atoms in blocks.values() {
-        let width = atoms.len();
-        let mut costs = vec![0.0; width * width];
-        for (row_i, &row) in atoms.iter().enumerate() {
-            for (col_i, &col) in atoms.iter().enumerate() {
-                let mut squared = 0.0;
-                for axis in 0..3 {
-                    let delta = y[row][axis] - images[col][axis];
-                    squared += delta * delta;
-                }
-                costs[row_i * width + col_i] = squared;
-            }
-        }
-        let local = minimum_cost_assignment(&costs, width)?;
+        let left: Vec<[f64; 3]> = atoms.iter().map(|&row| y[row]).collect();
+        let right: Vec<[f64; 3]> = atoms.iter().map(|&column| images[column]).collect();
+        let local =
+            crate::assignment::minimum_cost_squared_distance_warm(&left, &right, Some(warm))?;
         for (row_i, &col_i) in local.iter().enumerate() {
             assignment[atoms[row_i]] = atoms[col_i];
         }

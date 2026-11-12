@@ -28,6 +28,9 @@ from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paper_data import fetch_paper_data
+
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
 CAP = 800
@@ -81,6 +84,7 @@ def capped(rows: list, rng: np.random.Generator) -> list:
 
 
 def project(size: int, sketchmap_bin: Path, lapack_lib: Path, workdir: Path):
+    fetch_paper_data()
     from chemparseplot.plot.landscape import cn_matrix, run_sketchmap
 
     arms, refs = SIZES[size]

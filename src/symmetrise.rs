@@ -100,26 +100,39 @@ fn normalise(v: [f64; 3]) -> Option<[f64; 3]> {
 /// approximate symmetry rather than of exact symmetry: an exactly symmetric
 /// structure permutes onto itself and every distance is zero.
 pub fn deviation(x: ArrayView1<f64>, n: usize, axis: [f64; 3], order: usize) -> f64 {
+    deviation_under(x, n, axis, order, f64::INFINITY).unwrap_or(f64::INFINITY)
+}
+
+/// [`deviation`], or `None` once the partial sum already exceeds `cap`.
+///
+/// Callers that keep only a value strictly below `cap` get the same
+/// decision and the same bits. The early return is past `cap`, with a
+/// margin so a later addition cannot round the reported root back under it.
+fn deviation_under(
+    x: ArrayView1<f64>,
+    n: usize,
+    axis: [f64; 3],
+    order: usize,
+    cap: f64,
+) -> Option<f64> {
     if n == 0 || order < 2 {
-        return f64::INFINITY;
+        return None;
     }
-    let c = centroid(x, n);
+    let (points, _centroid) = centred(x, n);
     let angle = 2.0 * std::f64::consts::PI / order as f64;
     let mut total = 0.0;
-    for a in 0..n {
-        let v = [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]];
-        let w = rotate(v, axis, angle);
-        let mut best = f64::INFINITY;
-        for b in 0..n {
-            let u = [x[3 * b] - c[0], x[3 * b + 1] - c[1], x[3 * b + 2] - c[2]];
-            let d = (w[0] - u[0]).powi(2) + (w[1] - u[1]).powi(2) + (w[2] - u[2]).powi(2);
-            if d < best {
-                best = d;
+    let stop = cap.is_finite();
+    for point in &points {
+        let w = rotate(*point, axis, angle);
+        total += nearest_squared(&points, w);
+        if stop && total > cap * cap * n as f64 {
+            let partial = (total / n as f64).sqrt();
+            if partial >= cap * (1.0 + 1.0e-6) {
+                return None;
             }
         }
-        total += best;
     }
-    (total / n as f64).sqrt()
+    Some((total / n as f64).sqrt())
 }
 
 /// How far `x` is from being symmetric under the plane whose normal is `axis`.
@@ -128,30 +141,60 @@ pub fn deviation(x: ArrayView1<f64>, n: usize, axis: [f64; 3], order: usize) -> 
 /// and matched to its nearest partner, and the root-mean-square of those
 /// distances is what "approximately symmetric" means here.
 pub fn plane_deviation(x: ArrayView1<f64>, n: usize, axis: [f64; 3]) -> f64 {
+    plane_deviation_under(x, n, axis, f64::INFINITY).unwrap_or(f64::INFINITY)
+}
+
+fn plane_deviation_under(x: ArrayView1<f64>, n: usize, axis: [f64; 3], cap: f64) -> Option<f64> {
     if n == 0 {
-        return f64::INFINITY;
+        return None;
     }
-    let c = centroid(x, n);
+    let (points, _centroid) = centred(x, n);
     let m = mirror_matrix(axis);
     let mut total = 0.0;
-    for a in 0..n {
-        let v = [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]];
+    let stop = cap.is_finite();
+    for point in &points {
+        let v = *point;
         let w = [
             m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
             m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
             m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
         ];
-        let mut best = f64::INFINITY;
-        for b in 0..n {
-            let u = [x[3 * b] - c[0], x[3 * b + 1] - c[1], x[3 * b + 2] - c[2]];
-            let d = (w[0] - u[0]).powi(2) + (w[1] - u[1]).powi(2) + (w[2] - u[2]).powi(2);
-            if d < best {
-                best = d;
+        total += nearest_squared(&points, w);
+        if stop && total > cap * cap * n as f64 {
+            let partial = (total / n as f64).sqrt();
+            if partial >= cap * (1.0 + 1.0e-6) {
+                return None;
             }
         }
-        total += best;
     }
-    (total / n as f64).sqrt()
+    Some((total / n as f64).sqrt())
+}
+
+fn centred(x: ArrayView1<f64>, n: usize) -> (Vec<[f64; 3]>, [f64; 3]) {
+    let c = centroid(x, n);
+    let mut points = Vec::with_capacity(n);
+    for atom in 0..n {
+        points.push([
+            x[3 * atom] - c[0],
+            x[3 * atom + 1] - c[1],
+            x[3 * atom + 2] - c[2],
+        ]);
+    }
+    (points, c)
+}
+
+fn nearest_squared(points: &[[f64; 3]], image: [f64; 3]) -> f64 {
+    let mut best = f64::INFINITY;
+    for point in points {
+        let dx = image[0] - point[0];
+        let dy = image[1] - point[1];
+        let dz = image[2] - point[2];
+        let distance = dx * dx + dy * dy + dz * dz;
+        if distance < best {
+            best = distance;
+        }
+    }
+    best
 }
 
 /// Axes worth testing, taken from the structure rather than at random.
@@ -203,7 +246,9 @@ pub fn detect(x: ArrayView1<f64>, n: usize, orders: &[usize], tolerance: f64) ->
     let mut best: Option<Candidate> = None;
     for axis in candidate_axes(x, n) {
         for &order in orders {
-            let d = deviation(x, n, axis, order);
+            let Some(d) = deviation_under(x, n, axis, order, tolerance) else {
+                continue;
+            };
             if d < tolerance && best.map(|b| d < b.deviation).unwrap_or(true) {
                 best = Some(Candidate {
                     axis,
@@ -232,7 +277,9 @@ pub fn detect_all(
     let mut out = Vec::new();
     for axis in candidate_axes(x, n) {
         for &order in orders {
-            let d = deviation(x, n, axis, order);
+            let Some(d) = deviation_under(x, n, axis, order, tolerance) else {
+                continue;
+            };
             if d < tolerance {
                 out.push(Candidate {
                     axis,
@@ -242,7 +289,9 @@ pub fn detect_all(
                 });
             }
         }
-        let d = plane_deviation(x, n, axis);
+        let Some(d) = plane_deviation_under(x, n, axis, tolerance) else {
+            continue;
+        };
         if d < tolerance {
             out.push(Candidate {
                 axis,
