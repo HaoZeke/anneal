@@ -54,6 +54,18 @@ rule metal_h2h:
         bash scripts/metal_h2h/enter_bench.sh
         """
 
+# Darby Cu-Au against GMIN's binary Gupta, at the paper call budgets.
+# Not part of `rule all`. Run it by name:
+#   snakemake -s workflow/Snakefile metal_darby_h2h
+rule metal_darby_h2h:
+    output:
+        "bench/metal-cluster-h2h/darby.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/metal_h2h/enter_darby.sh
+        """
+
 
 # GMIN against the paper preset at the paper force-call budgets.
 # Not part of `rule all`. Run it by name:

@@ -40,7 +40,11 @@ const ZINC: GuptaPair = GuptaPair {
     r0: 1.0,
 };
 
-/// Cleri–Rosato copper. `A`, `ξ`, `p`, `q`, `r0` in eV and Å.
+/// Copper parameters used for the Cambridge Au–Cu archives.
+///
+/// Darby, Mortimer-Jones, Johnston and Roberts, J. Chem. Phys. 116, 1536
+/// (2002), model Cu–Au with this Cleri–Rosato row. `A`, `ξ`, `p`, `q`,
+/// `r0` are in eV and Å.
 const COPPER: GuptaPair = GuptaPair {
     a: 0.0855,
     xi: 1.224,
@@ -49,7 +53,7 @@ const COPPER: GuptaPair = GuptaPair {
     r0: 2.556,
 };
 
-/// Cleri–Rosato gold.
+/// Gold parameters from the same Darby Cu–Au set.
 const GOLD: GuptaPair = GuptaPair {
     a: 0.2061,
     xi: 1.790,
@@ -58,10 +62,10 @@ const GOLD: GuptaPair = GuptaPair {
     r0: 2.884,
 };
 
-/// Cleri–Rosato copper–gold cross term.
+/// Copper–gold cross term from the same Darby set.
 ///
-/// `r0` is the copper nearest-neighbour distance. This is the cross term
-/// that reproduces every composition in the Cambridge `CuAu_38` archive.
+/// `r0` is the copper nearest-neighbour distance. With the two pure rows
+/// this reproduces the Cambridge `CuAu_38` and `CuAu_55` archives.
 const COPPER_GOLD: GuptaPair = GuptaPair {
     a: 0.1539,
     xi: 1.5605,

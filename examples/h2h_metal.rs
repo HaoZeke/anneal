@@ -17,8 +17,10 @@
 //! `Config::recommended` installs for two species.
 //!
 //! The Cambridge energies are the Gupta zinc table of Doye, Phys. Rev. B 68,
-//! 195418 (2003), and the `CuAu_38` archive (Wu, Cai and Shao, J. Comput.
-//! Chem. 30, 1992, 2009).
+//! 195418 (2003), and the `CuAu_38` and `CuAu_55` archives. Copper–gold uses
+//! the Darby, Mortimer-Jones, Johnston and Roberts, J. Chem. Phys. 116, 1536
+//! (2002), parameter rows. `au38`, `cu6au32`, `au55` and `cu27au28` take the
+//! size budgets from the Lennard-Jones paper map, 400000 and 1000000 calls.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, Outcome, random_cluster_in_radius, run_with_gradient,
@@ -69,6 +71,20 @@ fn system_spec(name: &str) -> Option<Spec> {
         "zn75" => (75, -100.203580, 100_000, Kind::Zinc),
         "zn80" => (80, -106.927940, 100_000, Kind::Zinc),
         "cu19au19" => (38, -122.99148391, 80_000, Kind::CopperGold { n_copper: 19 }),
+        "au38" => (38, -130.54001708, 400_000, Kind::CopperGold { n_copper: 0 }),
+        "cu6au32" => (38, -130.79994836, 400_000, Kind::CopperGold { n_copper: 6 }),
+        "au55" => (
+            55,
+            -191.03085280,
+            1_000_000,
+            Kind::CopperGold { n_copper: 0 },
+        ),
+        "cu27au28" => (
+            55,
+            -182.93136675,
+            1_000_000,
+            Kind::CopperGold { n_copper: 27 },
+        ),
         _ => return None,
     };
     Some(Spec {
@@ -363,6 +379,14 @@ mod tests {
         let mixed = system_spec("cu19au19").unwrap();
         assert_eq!(mixed.n, 38);
         assert!((mixed.reference + 122.99148391).abs() < 1e-12);
+        assert_eq!(system_spec("au38").unwrap().budget, 400_000);
+        assert_eq!(system_spec("cu6au32").unwrap().budget, 400_000);
+        assert_eq!(system_spec("au55").unwrap().budget, 1_000_000);
+        assert_eq!(system_spec("cu27au28").unwrap().budget, 1_000_000);
+        assert!((system_spec("au38").unwrap().reference + 130.54001708).abs() < 1e-12);
+        assert!((system_spec("cu6au32").unwrap().reference + 130.79994836).abs() < 1e-12);
+        assert!((system_spec("au55").unwrap().reference + 191.03085280).abs() < 1e-12);
+        assert!((system_spec("cu27au28").unwrap().reference + 182.93136675).abs() < 1e-12);
         assert!(system_spec("zn31").is_none());
     }
 
@@ -386,6 +410,13 @@ mod tests {
         assert_eq!(
             Gupta::copper_gold_species(19, 19),
             cfg.species.clone().unwrap()
+        );
+        let pure = super::config(&system_spec("au38").unwrap());
+        assert!(
+            pure.move_library
+                .kernels(&pure)
+                .iter()
+                .all(|kernel| kernel.name() != "swap")
         );
     }
 

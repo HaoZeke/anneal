@@ -29,6 +29,10 @@ CASES = (
     ("zn55", FIXTURES / "gupta_zn" / "55", None, -73.310032),
     ("zn80", FIXTURES / "gupta_zn" / "80", None, -106.927940),
     ("cu19au19", FIXTURES / "cuau38" / "Cu19Au19.txt", "header", -122.99148391),
+    ("au38", FIXTURES / "cuau38" / "Cu0Au38.txt", "header", -130.54001708),
+    ("cu6au32", FIXTURES / "cuau38" / "Cu6Au32.txt", "header", -130.79994836),
+    ("au55", FIXTURES / "cuau55" / "Cu0Au55.txt", "header", -191.03085280),
+    ("cu27au28", FIXTURES / "cuau55" / "Cu27Au28.txt", "header", -182.93136675),
 )
 
 
