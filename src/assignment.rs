@@ -41,48 +41,214 @@ pub fn minimum_cost_assignment(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     }
 }
 
-fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<usize>> {
+/// # Safety
+///
+/// `row` has one entry per column `1..=row.len()`, and the other slices
+/// are addressable at `0..=row.len()`. `column` is one of those indices.
+#[allow(clippy::too_many_arguments)]
+unsafe fn scan_columns(
+    row: &[f64],
+    row_dual: f64,
+    column_potential: &[f64],
+    min_reduced: &mut [f64],
+    predecessor: &mut [usize],
+    used: &[u8],
+    column: usize,
+) -> (f64, usize) {
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") {
+        return unsafe {
+            scan_avx2(
+                row,
+                row_dual,
+                column_potential,
+                min_reduced,
+                predecessor,
+                used,
+                column,
+            )
+        };
+    }
+    unsafe {
+        scan_scalar(
+            row,
+            row_dual,
+            column_potential,
+            min_reduced,
+            predecessor,
+            used,
+            column,
+        )
+    }
+}
+
+/// # Safety
+///
+/// Same slice contract as [`scan_columns`].
+#[allow(clippy::too_many_arguments)]
+unsafe fn scan_scalar(
+    row: &[f64],
+    row_dual: f64,
+    column_potential: &[f64],
+    min_reduced: &mut [f64],
+    predecessor: &mut [usize],
+    used: &[u8],
+    column: usize,
+) -> (f64, usize) {
+    let n = row.len();
+    let mut delta = f64::INFINITY;
+    let mut next_column = 0usize;
+    let mut candidate = 1usize;
+    while candidate <= n {
+        unsafe {
+            if *used.as_ptr().add(candidate) == 0 {
+                let reduced = *row.as_ptr().add(candidate - 1)
+                    - row_dual
+                    - *column_potential.as_ptr().add(candidate);
+                let slot = min_reduced.as_mut_ptr().add(candidate);
+                if reduced < *slot {
+                    *slot = reduced;
+                    *predecessor.as_mut_ptr().add(candidate) = column;
+                }
+                if *slot < delta {
+                    delta = *slot;
+                    next_column = candidate;
+                }
+            }
+        }
+        candidate += 1;
+    }
+    (delta, next_column)
+}
+
+/// Four columns at a time. A used column keeps its reduced cost and is
+/// not eligible for the running minimum. The minimum is still taken from
+/// the lowest column index, which is the scalar tie break.
+///
+/// # Safety
+///
+/// AVX2 must be enabled. Slice lengths are the same contract as [`scan_scalar`].
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(clippy::too_many_arguments)]
+unsafe fn scan_avx2(
+    row: &[f64],
+    row_dual: f64,
+    column_potential: &[f64],
+    min_reduced: &mut [f64],
+    predecessor: &mut [usize],
+    used: &[u8],
+    column: usize,
+) -> (f64, usize) {
+    use std::arch::x86_64::{
+        _CMP_LT_OQ, _mm_cmpeq_epi8, _mm_cvtsi32_si128, _mm_setzero_si128, _mm256_and_pd,
+        _mm256_blendv_pd, _mm256_castsi256_pd, _mm256_cmp_pd, _mm256_cvtepi8_epi64,
+        _mm256_loadu_pd, _mm256_movemask_pd, _mm256_set1_pd, _mm256_storeu_pd, _mm256_sub_pd,
+    };
+
+    let n = row.len();
+    let mut delta = f64::INFINITY;
+    let mut next_column = 0usize;
+    let mut candidate = 1usize;
+    let dual = _mm256_set1_pd(row_dual);
+    let zero = _mm_setzero_si128();
+    while candidate + 3 <= n {
+        let packed =
+            unsafe { std::ptr::read_unaligned(used.as_ptr().add(candidate) as *const i32) };
+        let bytes = _mm_cvtsi32_si128(packed);
+        let eq = _mm_cmpeq_epi8(bytes, zero);
+        let open = _mm256_castsi256_pd(_mm256_cvtepi8_epi64(eq));
+        let lower = unsafe {
+            let cost = _mm256_loadu_pd(row.as_ptr().add(candidate - 1));
+            let potential = _mm256_loadu_pd(column_potential.as_ptr().add(candidate));
+            let reduced = _mm256_sub_pd(_mm256_sub_pd(cost, dual), potential);
+            let previous = _mm256_loadu_pd(min_reduced.as_ptr().add(candidate));
+            let lower = _mm256_and_pd(_mm256_cmp_pd(reduced, previous, _CMP_LT_OQ), open);
+            let updated = _mm256_blendv_pd(previous, reduced, lower);
+            _mm256_storeu_pd(min_reduced.as_mut_ptr().add(candidate), updated);
+            lower
+        };
+        let improved = _mm256_movemask_pd(lower);
+        if improved & 1 != 0 {
+            predecessor[candidate] = column;
+        }
+        if improved & 2 != 0 {
+            predecessor[candidate + 1] = column;
+        }
+        if improved & 4 != 0 {
+            predecessor[candidate + 2] = column;
+        }
+        if improved & 8 != 0 {
+            predecessor[candidate + 3] = column;
+        }
+        for offset in 0..4 {
+            let index = candidate + offset;
+            if used[index] == 0 && min_reduced[index] < delta {
+                delta = min_reduced[index];
+                next_column = index;
+            }
+        }
+        candidate += 4;
+    }
+    while candidate <= n {
+        if used[candidate] == 0 {
+            let reduced = row[candidate - 1] - row_dual - column_potential[candidate];
+            if reduced < min_reduced[candidate] {
+                min_reduced[candidate] = reduced;
+                predecessor[candidate] = column;
+            }
+            if min_reduced[candidate] < delta {
+                delta = min_reduced[candidate];
+                next_column = candidate;
+            }
+        }
+        candidate += 1;
+    }
+    (delta, next_column)
+}
+
+pub(crate) fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<usize>> {
+    successive_shortest_paths_scanned(costs, n)
+}
+
+fn successive_shortest_paths_scanned(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     // Column 0 is the dummy used to grow the matching. Rows and columns of
     // `costs` are 1-indexed in the dual update so the dummy sits at index 0.
+    // `used` is a byte flag, not `Vec<bool>`: the bit-packed form turns this
+    // scan into a shift per column.
     let mut row_potential = vec![0.0; n + 1];
     let mut column_potential = vec![0.0; n + 1];
     let mut column_match = vec![0usize; n + 1];
     let mut predecessor = vec![0usize; n + 1];
     let mut min_reduced = vec![0.0; n + 1];
-    let mut used = vec![false; n + 1];
+    let mut used = vec![0u8; n + 1];
 
     for row in 1..=n {
         column_match[0] = row;
         let mut column = 0usize;
         min_reduced.fill(f64::INFINITY);
-        used.fill(false);
+        used.fill(0);
         loop {
-            used[column] = true;
+            used[column] = 1;
             let matched_row = column_match[column];
             let row_base = (matched_row - 1) * n;
-            let mut delta = f64::INFINITY;
-            let mut next_column = 0usize;
             let row_dual = row_potential[matched_row];
-            for candidate in 1..=n {
-                if used[candidate] {
-                    continue;
-                }
-                let reduced =
-                    costs[row_base + candidate - 1] - row_dual - column_potential[candidate];
-                if reduced < min_reduced[candidate] {
-                    min_reduced[candidate] = reduced;
-                    predecessor[candidate] = column;
-                }
-                if min_reduced[candidate] < delta {
-                    delta = min_reduced[candidate];
-                    next_column = candidate;
-                }
-            }
+            let (delta, next_column) = unsafe {
+                scan_columns(
+                    &costs[row_base..row_base + n],
+                    row_dual,
+                    &column_potential,
+                    &mut min_reduced,
+                    &mut predecessor,
+                    &used,
+                    column,
+                )
+            };
             if !delta.is_finite() {
                 return None;
             }
             for index in 0..=n {
-                if used[index] {
+                if used[index] == 1 {
                     row_potential[column_match[index]] += delta;
                     column_potential[index] -= delta;
                 } else {
@@ -250,7 +416,10 @@ fn augment_tight(
 
 #[cfg(test)]
 mod tests {
-    use super::{kuhn_munkres, minimum_cost_assignment, successive_shortest_paths};
+    use super::{
+        kuhn_munkres, minimum_cost_assignment, successive_shortest_paths,
+        successive_shortest_paths_scanned,
+    };
 
     fn brute(costs: &[f64], n: usize) -> f64 {
         fn walk(costs: &[f64], n: usize, row: usize, used: &mut [bool], acc: f64, best: &mut f64) {
@@ -348,5 +517,126 @@ mod tests {
     #[test]
     fn a_non_finite_reduced_cost_has_no_shortest_path() {
         assert!(successive_shortest_paths(&[f64::NAN], 1).is_none());
+    }
+
+    /// The byte-flag scan and the AVX2 scan have to pick the same column
+    /// the original bit-vector scan picked, including on ties.
+    #[test]
+    fn the_faster_scan_keeps_the_original_permutation() {
+        let mut state = 0x0b0b_5eed_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            state
+        };
+        for n in [1usize, 2, 7, 17, 32, 98, 104] {
+            for trial in 0..4 {
+                let costs: Vec<f64> = (0..n * n)
+                    .map(|_| (next() % 5) as f64 + ((next() % 3) as f64) * 0.125)
+                    .collect();
+                let legacy = legacy_scan(&costs, n).expect("legacy");
+                let scalar = successive_shortest_paths_scanned(&costs, n).expect("scalar");
+                assert_eq!(scalar, legacy, "n={n} trial={trial} scalar");
+                let chosen = successive_shortest_paths(&costs, n).expect("chosen");
+                assert_eq!(chosen, legacy, "n={n} trial={trial} chosen");
+            }
+            let mut points = vec![[0.0; 3]; n];
+            for point in &mut points {
+                for axis in point.iter_mut() {
+                    *axis = (next() % 1000) as f64 / 50.0;
+                }
+            }
+            if n > 2 {
+                points[1] = points[0];
+            }
+            let mut costs = vec![0.0; n * n];
+            for row in 0..n {
+                for column in 0..n {
+                    let mut squared = 0.0;
+                    for axis in 0..3 {
+                        let delta = points[row][axis] - points[(column + 1) % n][axis];
+                        squared += delta * delta;
+                    }
+                    costs[row * n + column] = squared;
+                }
+            }
+            let legacy = legacy_scan(&costs, n).expect("legacy geometry");
+            let scalar = successive_shortest_paths_scanned(&costs, n).expect("scalar geometry");
+            assert_eq!(scalar, legacy, "geometry n={n}");
+            let chosen = successive_shortest_paths(&costs, n).expect("chosen geometry");
+            assert_eq!(chosen, legacy, "geometry chosen n={n}");
+        }
+    }
+
+    fn legacy_scan(costs: &[f64], n: usize) -> Option<Vec<usize>> {
+        let mut row_potential = vec![0.0; n + 1];
+        let mut column_potential = vec![0.0; n + 1];
+        let mut column_match = vec![0usize; n + 1];
+        let mut predecessor = vec![0usize; n + 1];
+        let mut min_reduced = vec![0.0; n + 1];
+        let mut used = vec![false; n + 1];
+        for row in 1..=n {
+            column_match[0] = row;
+            let mut column = 0usize;
+            min_reduced.fill(f64::INFINITY);
+            used.fill(false);
+            loop {
+                used[column] = true;
+                let matched_row = column_match[column];
+                let row_base = (matched_row - 1) * n;
+                let mut delta = f64::INFINITY;
+                let mut next_column = 0usize;
+                let row_dual = row_potential[matched_row];
+                for candidate in 1..=n {
+                    if used[candidate] {
+                        continue;
+                    }
+                    let reduced =
+                        costs[row_base + candidate - 1] - row_dual - column_potential[candidate];
+                    if reduced < min_reduced[candidate] {
+                        min_reduced[candidate] = reduced;
+                        predecessor[candidate] = column;
+                    }
+                    if min_reduced[candidate] < delta {
+                        delta = min_reduced[candidate];
+                        next_column = candidate;
+                    }
+                }
+                if !delta.is_finite() {
+                    return None;
+                }
+                for index in 0..=n {
+                    if used[index] {
+                        row_potential[column_match[index]] += delta;
+                        column_potential[index] -= delta;
+                    } else {
+                        min_reduced[index] -= delta;
+                    }
+                }
+                column = next_column;
+                if column_match[column] == 0 {
+                    break;
+                }
+            }
+            while column != 0 {
+                let previous = predecessor[column];
+                column_match[column] = column_match[previous];
+                column = previous;
+            }
+        }
+        let mut assignment = vec![0usize; n];
+        let mut seen = vec![false; n];
+        for column in 1..=n {
+            let row = column_match[column];
+            if row == 0 || row > n {
+                return None;
+            }
+            let slot = row - 1;
+            if seen[slot] {
+                return None;
+            }
+            seen[slot] = true;
+            assignment[slot] = column - 1;
+        }
+        Some(assignment)
     }
 }
