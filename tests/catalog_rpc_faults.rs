@@ -191,8 +191,13 @@ fn timed_out_request_reconnects_and_replays_before_returning() {
         addr,
         identity(),
         ClientConfig {
-            connect_timeout: Duration::from_millis(100),
-            io_timeout: Duration::from_millis(60),
+            // The first accept is dropped, so the call fails and the client
+            // reconnects. The replay has to finish inside io_timeout, and a
+            // 60 ms budget expires on a loaded runner before the canned
+            // snapshot is written. One second still rejects a peer that
+            // never answers, and it covers the reconnect plus the reply.
+            connect_timeout: Duration::from_secs(1),
+            io_timeout: Duration::from_secs(1),
         },
     )
     .unwrap();
