@@ -1726,12 +1726,6 @@ fn growth_held(held: Option<f64>, incumbent: f64, skipped: u32, n_points: usize)
     stall_growth_waits(held, incumbent) && (n_points < 98 || skipped < GROWTH_RETRY_LEAVES)
 }
 
-/// The arm a hop plays.
-///
-/// A contextual decision, when one was built, stays in front of this choice:
-/// the paper preset does not build one. [`ArmSelection::Uniform`] replaces
-/// the depth posterior and the floored Thompson draw with one uniform index
-/// and consumes nothing else from the generator.
 /// Round-robin arm on every `period`th hop, so a dropped arm is still drawn.
 fn forced_library_arm(hop: usize, period: usize, n_arms: usize) -> Option<usize> {
     if period == 0 || n_arms == 0 || !hop.is_multiple_of(period) {
@@ -1740,6 +1734,12 @@ fn forced_library_arm(hop: usize, period: usize, n_arms: usize) -> Option<usize>
     Some((hop / period) % n_arms)
 }
 
+/// The arm a hop plays.
+///
+/// A contextual decision, when one was built, stays in front of this choice:
+/// the paper preset does not build one. [`ArmSelection::Uniform`] replaces
+/// the depth posterior and the floored Thompson draw with one uniform index
+/// and consumes nothing else from the generator.
 fn choose_arm<R: Rng + ?Sized>(
     cfg: &Config,
     context: Option<ArrayView1<f64>>,
