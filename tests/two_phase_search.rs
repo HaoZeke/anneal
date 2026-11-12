@@ -38,6 +38,11 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 /// stall-growth hold moves it to `0x91e4` (7 seeds). The fivefold
 /// residual keeps the built-in assignment when IRA is linked, so the
 /// IRA build has the same mask.
+///
+/// Those masks were measured at a 200-step quench. `recommended` now
+/// quenches for 1000 steps, and at that length the plain walk reaches
+/// the octahedron on more seeds, so this comparison keeps the 200-step
+/// quench the masks were measured on.
 #[test]
 fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not() {
     const SEEDS: u64 = 16;
@@ -45,6 +50,8 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
     let mut plain = Config::recommended(38);
     // The surface comparison is the LeanBurst walk. Stall exits are a
     // different measurement, and this walk does not grow a named template.
+    // The 30_000-call bars above were measured at a 200-step quench.
+    plain.relax_steps = 200;
     plain.move_library = MoveLibrary::LeanBurst;
     plain.trail_on_stall = false;
     plain.escape_on_stall = false;
