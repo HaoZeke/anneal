@@ -26,21 +26,16 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 /// ira       16/16    5/16
 /// ```
 ///
-/// The hit pattern is exact, not a ceiling. Host `libm` (`exp`/`log`/`sin`
-/// of glibc or libSystem) is not one function, and LLVM contracts the
-/// generic search in whatever context the test crate gives it. macOS then
-/// reported 11 of 16 plain hits and, after the test text changed and
-/// nothing else did, 13 of 16, on the same image and the same rustc. The
-/// proposals, the initial cluster and the acceptance test now call the
-/// `libm` crate, the pair force is an IEEE `mul_add`, and
-/// `search_lennard_jones` is monomorphized in the library and forces
-/// rgmin's scalar dot product. AVX2, AVX-512, and an aarch64 Linux
-/// build all reproduce the x86 mask, so the NEON clone is not the
-/// split. macOS still reported plain mask `0x9204` from that scalar
-/// path. The screen's log-linear stop, the SOAP cutoff, and the shell
-/// weight were still calling host `exp`/`sin`/`cos`; they now call the
-/// `libm` crate too. The x86 masks were checked again after that. The
-/// `ira` feature replaces the permutation and has its own mask.
+/// The hit pattern is exact, not a ceiling. Host `libm` is not one
+/// function: macOS reported 11 of 16 plain hits, then 13 of 16, then the
+/// stable mask `0x9204`, on the same image and the same rustc, while
+/// Linux held `0x9acd`. Scalar dots, the SOAP cutoff and the screen stop
+/// did not move `0x9204`. Surface and symmetry proposals still drew their
+/// axis from `rand_distr`'s ziggurat, and that tail calls host `exp` and
+/// `ln`. The axis is now Box-Muller through the `libm` crate, so the
+/// same uniforms name the same direction on every target. The masks
+/// below are that walk. The `ira` feature replaces the permutation and
+/// has its own mask.
 #[test]
 fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not() {
     const SEEDS: u64 = 16;
@@ -74,12 +69,12 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
             plain_mask |= 1 << seed;
         }
     }
-    // Without `ira`: cutoff 0xffff, plain 0x9acd (9 seeds).
-    // With `ira`: cutoff 0xffff, plain 0x18f5 (8 seeds).
+    // Without `ira`: cutoff 0xffff, plain 0xb74a (9 seeds).
+    // With `ira`: cutoff 0xffff, plain 0x9e04 (6 seeds).
     let plain_exact = if cfg!(feature = "ira") {
-        0x18f5
+        0x9e04
     } else {
-        0x9acd
+        0xb74a
     };
     assert_eq!(
         compact_mask, 0xffff,

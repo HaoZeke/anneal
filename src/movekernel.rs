@@ -742,7 +742,8 @@ fn centroid(x: ArrayView1<f64>, n: usize) -> [f64; 3] {
 
 /// Rodrigues rotation of `v` about a unit `axis` by `angle`.
 fn rotate(v: [f64; 3], axis: [f64; 3], angle: f64) -> [f64; 3] {
-    let (s, c) = angle.sin_cos();
+    let s = libm::sin(angle);
+    let c = libm::cos(angle);
     let dot = v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2];
     let cross = [
         axis[1] * v[2] - axis[2] * v[1],
@@ -757,10 +758,22 @@ fn rotate(v: [f64; 3], axis: [f64; 3], angle: f64) -> [f64; 3] {
 }
 
 fn random_unit<R: Rng + ?Sized>(rng: &mut R) -> [f64; 3] {
-    let nd = NormalDist::new(0.0, 1.0).expect("unit normal");
+    // Box-Muller through `libm`, not `rand_distr`'s ziggurat. The ziggurat
+    // tail calls host `exp` and `ln`. The same uniforms then name a
+    // different direction on glibc and on libSystem, and the plain LJ38
+    // walk leaves the octahedron on a different set of seeds. macOS kept
+    // reporting mask `0x9204` after the scalar dots and the SOAP cutoff
+    // had already moved.
     loop {
-        let v = [nd.sample(rng), nd.sample(rng), nd.sample(rng)];
-        let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        let mut v = [0.0; 3];
+        let mut n2 = 0.0;
+        for item in &mut v {
+            let u1 = rng.random::<f64>().max(1e-12);
+            let u2 = rng.random::<f64>();
+            *item = libm::sqrt(-2.0 * libm::log(u1)) * libm::cos(2.0 * std::f64::consts::PI * u2);
+            n2 += *item * *item;
+        }
+        let n = libm::sqrt(n2);
         if n > 1e-12 {
             return [v[0] / n, v[1] / n, v[2] / n];
         }
