@@ -22,23 +22,20 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 ///
 /// ```text
 /// matcher   cutoff   plain
-/// local     16/16    6/16
-/// ira       16/16    5/16
+/// local     16/16    9/16
+/// ira       16/16    8/16
 /// ```
 ///
 /// The hit pattern is exact, not a ceiling. Host `libm` is not one
-/// function: macOS reported 11 of 16 plain hits, then 13 of 16, then the
-/// stable mask `0x9204`, on the same image and the same rustc, while
-/// Linux held `0x9acd`. Scalar dots, the SOAP cutoff and the screen stop
-/// did not move `0x9204`. Surface and symmetry proposals still drew their
-/// axis from `rand_distr`'s ziggurat, and that tail calls host `exp` and
-/// `ln`. Proposal axes are Box-Muller through the `libm` crate. The
-/// gamma sampler moved too, and macOS stayed on plain mask `0x513a`:
-/// the recommended walk rewards depth, so the arm is a Student-t draw
-/// whose normal sample was still host `ln` and `cos`. That draw, and
-/// the symmetry rotation, now use the `libm` crate. The Linux masks
-/// did not move. The `ira` feature replaces the permutation and has
-/// its own mask.
+/// function: macOS reported 11 of 16 plain hits, then 13 of 16, then
+/// `0x9204`, then `0x513a`, while Linux held a different mask on the
+/// same seeds. Proposal axes, the gamma sampler, the depth-rewarded
+/// Student-t draw, and the symmetry rotation already go through the
+/// `libm` crate. Three calls were still the host: the fivefold turn
+/// (`2π/5` and `3π/5`), the continuous-symmetry orientation (`τ/5`),
+/// and the energy-lattice softmax. Those use the `libm` crate as well.
+/// On that walk Linux plain is `0x517b` (9 seeds). With `ira` the
+/// permutation is libira, and Linux plain is `0x76c2` (8 seeds).
 #[test]
 fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not() {
     const SEEDS: u64 = 16;
@@ -72,12 +69,13 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
             plain_mask |= 1 << seed;
         }
     }
-    // Without `ira`: cutoff 0xffff, plain 0xb74a (9 seeds).
-    // With `ira`: cutoff 0xffff, plain 0x9e04 (6 seeds).
+    // Without `ira`: cutoff 0xffff, plain 0x517b (9 seeds).
+    // With `ira`: cutoff 0xffff, plain 0x76c2 (8 seeds). libira's
+    // rotation is its own sincos, so this mask is the glibc build.
     let plain_exact = if cfg!(feature = "ira") {
-        0x9e04
+        0x76c2
     } else {
-        0xb74a
+        0x517b
     };
     assert_eq!(
         compact_mask, 0xffff,

@@ -366,7 +366,11 @@ fn jacobi(mut tensor: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
 }
 
 fn rot_z(angle: f64) -> [[f64; 3]; 3] {
-    let (sine, cosine) = angle.sin_cos();
+    // The extra orientation is a turn by `τ/5`. Host `sin` and `cos` of
+    // that angle are not the same function on glibc and libSystem, and
+    // the continuous-symmetry proposal is built from this matrix.
+    let sine = libm::sin(angle);
+    let cosine = libm::cos(angle);
     [[cosine, -sine, 0.0], [sine, cosine, 0.0], [0.0, 0.0, 1.0]]
 }
 

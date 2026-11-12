@@ -1639,9 +1639,12 @@ fn rot_apply(r: &[f64; 9], p: [f64; 3]) -> [f64; 3] {
 }
 
 fn rotation_about(axis: [f64; 3], angle: f64) -> [f64; 9] {
-    let n = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+    let n = libm::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
     let [x, y, z] = [axis[0] / n, axis[1] / n, axis[2] / n];
-    let (s, c) = angle.sin_cos();
+    // `2π/5` and `3π/5` are not correctly rounded by the host. glibc and
+    // libSystem pick different fivefold assignments from that turn.
+    let s = libm::sin(angle);
+    let c = libm::cos(angle);
     let t = 1.0 - c;
     [
         t * x * x + c,
