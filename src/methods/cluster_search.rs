@@ -726,6 +726,22 @@ where
     Ok((out, stats))
 }
 
+/// [`search`] of a [`crate::potentials::PairPotential`], instantiated in this crate.
+///
+/// `search` is generic, so an integration test monomorphizes it in the test
+/// crate. LLVM then contracts the quench in whatever context that test
+/// happens to have, and the basins move when the test text changes. This
+/// wrapper is monomorphized here, next to the portable `libm` calls the
+/// proposals and the acceptance test use.
+pub fn search_lennard_jones(
+    potential: &crate::potentials::PairPotential,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    seed: u64,
+) -> Result<(Outcome, RelaxStats), SearchError> {
+    search(potential, cfg, ledger, seed)
+}
+
 /// As [`search`], from a geometry the caller already has.
 ///
 /// A slab or a packed molecular start is not a random cluster in a sphere.

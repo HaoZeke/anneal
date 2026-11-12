@@ -1,5 +1,5 @@
 use anneal_core::methods::cluster_hopping::{Config, Ledger, MoveLibrary};
-use anneal_core::methods::cluster_search::search;
+use anneal_core::methods::cluster_search::search_lennard_jones;
 use anneal_core::methods::two_phase::TwoPhase;
 use anneal_core::potentials::PairPotential;
 
@@ -8,7 +8,7 @@ const LJ38_OCTAHEDRON: f64 = -173.928427;
 fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
     let pot = PairPotential::lennard_jones(cfg.n_points);
     let mut ledger = Ledger::new(budget);
-    let (out, _) = search(&pot, cfg, &mut ledger, seed).expect("finite start");
+    let (out, _) = search_lennard_jones(&pot, cfg, &mut ledger, seed).expect("finite start");
     (out.best, out.hops, ledger.spent())
 }
 
@@ -26,14 +26,17 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 /// ira       16/16    5/16
 /// ```
 ///
-/// Hop counts are not that comparison. Seed 0 with IRA spends 435 hops and
-/// reaches the octahedron while the plain walk spends 414 and stops at
-/// -173.252378. The bars sit above those two plain counts and under a full
-/// miss of the cutoff walk: at least 15 cutoff hits, at most 10 plain hits
-/// on glibc and 14 on macOS, and a gap of at least 5 on glibc and 3 on
-/// macOS. The glibc gaps are 10 and 11. macOS reaches the octahedron on 13
-/// of these 16 seeds while the cutoff walk reaches all 16, so the macOS
-/// ceiling sits one above that count and the gap is that measured 3.
+/// The hit pattern is exact, not a ceiling. Host `libm` (`exp`/`log`/`sin`
+/// of glibc or libSystem) is not one function, and LLVM contracts the
+/// generic search in whatever context the test crate gives it. macOS then
+/// reported 11 of 16 plain hits and, after the test text changed and
+/// nothing else did, 13 of 16, on the same image and the same rustc. The
+/// proposals, the initial cluster and the acceptance test now call the
+/// `libm` crate, the pair force is an IEEE `mul_add`, and
+/// `search_lennard_jones` is monomorphized in the library. Five runs
+/// here, with one thread and with eight, all gave the same masks: the
+/// cutoff walk hits every seed (`0xffff`) and the plain walk hits
+/// `0x9acd` (9 of 16). Both platforms have to reproduce those masks.
 #[test]
 fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not() {
     const SEEDS: u64 = 16;
@@ -51,34 +54,29 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
     compacted.two_phase = Some(TwoPhase::relative(0.7, 1.0));
     let mut compact_hits = 0usize;
     let mut plain_hits = 0usize;
+    let mut compact_mask = 0u16;
+    let mut plain_mask = 0u16;
     for seed in 0..SEEDS {
         let (best, _, spent) = run(&compacted, budget, seed);
         assert!(spent <= budget, "the ledger overspent: {spent} of {budget}");
         if best < LJ38_OCTAHEDRON + 1e-4 {
             compact_hits += 1;
+            compact_mask |= 1 << seed;
         }
         let (plain_best, _, plain_spent) = run(&plain, budget, seed);
         assert!(plain_spent <= budget);
         if plain_best < LJ38_OCTAHEDRON + 1e-4 {
             plain_hits += 1;
+            plain_mask |= 1 << seed;
         }
     }
-    assert!(
-        compact_hits >= 15,
-        "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds"
+    assert_eq!(
+        compact_mask, 0xffff,
+        "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds (mask {compact_mask:#06x})"
     );
-    // glibc stays at or under 10, with a gap of at least 5. macOS reaches
-    // the octahedron on 13 of these 16 seeds and the cutoff walk on 16, so
-    // the ceiling is one above that count and the gap is that measured 3.
-    let plain_limit = if cfg!(target_os = "macos") { 14 } else { 10 };
-    let gap_limit = if cfg!(target_os = "macos") { 3 } else { 5 };
-    assert!(
-        plain_hits <= plain_limit,
-        "the plain walk reached the octahedron on {plain_hits} of {SEEDS} seeds (cutoff {compact_hits})"
-    );
-    assert!(
-        compact_hits - plain_hits >= gap_limit,
-        "the cutoff walk reached {compact_hits} seeds and the plain walk {plain_hits}"
+    assert_eq!(
+        plain_mask, 0x9acd,
+        "the plain walk reached the octahedron on {plain_hits} of {SEEDS} seeds (mask {plain_mask:#06x})"
     );
 }
 

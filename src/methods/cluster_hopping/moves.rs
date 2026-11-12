@@ -1726,7 +1726,7 @@ impl ClusterMove {
                     let dx = y[3 * i] - c[0];
                     let dy = y[3 * i + 1] - c[1];
                     let dz = y[3 * i + 2] - c[2];
-                    rmax = rmax.max((dx * dx + dy * dy + dz * dz).sqrt());
+                    rmax = rmax.max(super::portable_sqrt(dx * dx + dy * dy + dz * dz));
                 }
                 let i = worst_bound_scaled(y.view(), n, 0.42, *length_scale, *energy_scale)
                     .unwrap_or_else(|| {
@@ -1742,10 +1742,10 @@ impl ClusterMove {
                 // Uniform on the sphere: cos(theta) uniform in [-1, 1], not
                 // theta itself, or the poles are oversampled.
                 let cos_t: f64 = rng.random_range(-1.0..1.0);
-                let sin_t = (1.0 - cos_t * cos_t).max(0.0).sqrt();
+                let sin_t = super::portable_sqrt((1.0 - cos_t * cos_t).max(0.0));
                 let phi: f64 = rng.random_range(0.0..std::f64::consts::TAU);
-                y[3 * i] = c[0] + rmax * sin_t * phi.cos();
-                y[3 * i + 1] = c[1] + rmax * sin_t * phi.sin();
+                y[3 * i] = c[0] + rmax * sin_t * super::portable_cos(phi);
+                y[3 * i + 1] = c[1] + rmax * sin_t * super::portable_sin(phi);
                 y[3 * i + 2] = c[2] + rmax * cos_t;
                 y
             }
@@ -1768,7 +1768,9 @@ impl ClusterMove {
                 for v in shift.iter_mut() {
                     let u1: f64 = rng.random::<f64>().max(1e-12);
                     let u2: f64 = rng.random::<f64>();
-                    *v = amplitude * (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
+                    *v = amplitude
+                        * super::portable_sqrt(-2.0 * super::portable_ln(u1))
+                        * super::portable_cos(std::f64::consts::TAU * u2);
                 }
                 let axis = {
                     let mut v;
@@ -2155,14 +2157,14 @@ fn small_orientation_angle<R: Rng + ?Sized>(rng: &mut R, max_theta: f64) -> f64 
     }
     let half_cap = 0.5 * max_theta;
     let peak = if half_cap <= std::f64::consts::FRAC_PI_2 {
-        half_cap.sin().powi(2).max(1.0e-12)
+        super::portable_sin(half_cap).powi(2).max(1.0e-12)
     } else {
         1.0
     };
     let envelope = 1.0 / peak;
     for _ in 0..64 {
         let angle = rng.random::<f64>() * max_theta;
-        let weight = envelope * (0.5 * angle).sin().powi(2);
+        let weight = envelope * super::portable_sin(0.5 * angle).powi(2);
         if rng.random::<f64>() <= weight {
             return angle;
         }
@@ -2173,11 +2175,11 @@ fn small_orientation_angle<R: Rng + ?Sized>(rng: &mut R, max_theta: f64) -> f64 
 fn aa_to_quat(p: [f64; 3]) -> [f64; 4] {
     let theta = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
     let half = 0.5 * theta;
-    let q0 = half.cos();
+    let q0 = super::portable_cos(half);
     let qv = if half < 1.0e-6 {
         [0.5 * p[0], 0.5 * p[1], 0.5 * p[2]]
     } else {
-        let scale = half.sin() / theta;
+        let scale = super::portable_sin(half) / theta;
         [scale * p[0], scale * p[1], scale * p[2]]
     };
     let mut q = [q0, qv[0], qv[1], qv[2]];

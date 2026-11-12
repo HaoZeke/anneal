@@ -30,6 +30,41 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
+/// Host `sin`/`exp` are glibc on one runner and libSystem on another, and
+/// they are not the same function. A seeded walk that calls them starts
+/// from a different geometry and accepts a different trial. The `libm`
+/// crate is one implementation on every target, so a seed names one
+/// trajectory.
+#[inline]
+pub(crate) fn portable_exp(x: f64) -> f64 {
+    libm::exp(x)
+}
+
+#[inline]
+pub(crate) fn portable_ln(x: f64) -> f64 {
+    libm::log(x)
+}
+
+#[inline]
+pub(crate) fn portable_sin(x: f64) -> f64 {
+    libm::sin(x)
+}
+
+#[inline]
+pub(crate) fn portable_cos(x: f64) -> f64 {
+    libm::cos(x)
+}
+
+#[inline]
+pub(crate) fn portable_sqrt(x: f64) -> f64 {
+    libm::sqrt(x)
+}
+
+#[inline]
+pub(crate) fn portable_cbrt(x: f64) -> f64 {
+    libm::cbrt(x)
+}
+
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
 use crate::bias::{
     AdaptiveHeight, BasinBias, BasinIndex, Bias, Fingerprint, SiteEnergies, SortedPairs,
@@ -3588,7 +3623,7 @@ where
                     let v_there = bias.potential(bias.cv(proposal_state.view()).view());
                     let d = ((proposal_energy + v_there) - (from_energy + v_here))
                         / cfg.temperature.max(1e-12);
-                    d <= 0.0 || rng.random::<f64>() < (-d).exp()
+                    d <= 0.0 || rng.random::<f64>() < portable_exp(-d)
                 } else {
                     true
                 };
@@ -4260,7 +4295,7 @@ where
             let mut gauss = || {
                 let u1: f64 = rng.random::<f64>().max(1e-12);
                 let u2: f64 = rng.random::<f64>();
-                (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+                portable_sqrt(-2.0 * portable_ln(u1)) * portable_cos(std::f64::consts::TAU * u2)
             };
             let iso = (1.0 - gamma).sqrt() * sigma0;
             for i in 0..dim {
@@ -4287,7 +4322,7 @@ where
                 let z = {
                     let u1: f64 = rng.random::<f64>().max(1e-12);
                     let u2: f64 = rng.random::<f64>();
-                    (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+                    portable_sqrt(-2.0 * portable_ln(u1)) * portable_cos(std::f64::consts::TAU * u2)
                 };
                 let c = z * (cfg.temperature / lam.max(0.05)).sqrt() * escape;
                 for i in 0..t.len() {
@@ -4992,7 +5027,7 @@ where
                 let a = if e_new <= e {
                     1.0
                 } else {
-                    (-(e_new - e) / temperature.max(1e-12)).exp()
+                    portable_exp(-(e_new - e) / temperature.max(1e-12))
                 };
                 sb.observe(from, identity.lookup(x_new.view()), a);
             }
@@ -5100,7 +5135,8 @@ where
                 // against, so the first sweep runs the rule it is replacing and
                 // its energies are what set the window.
                 None => {
-                    delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp()
+                    delta < 0.0
+                        || rng.random::<f64>() < portable_exp(-delta / temperature.max(1e-12))
                 }
             }
         } else {
@@ -5111,7 +5147,7 @@ where
                 .map(|b| b.delta(e, e_new, temperature))
                 .unwrap_or(0.0);
             let d = delta / temperature.max(1e-12) + eb;
-            d < 0.0 || rng.random::<f64>() < (-d).exp()
+            d < 0.0 || rng.random::<f64>() < portable_exp(-d)
         };
         let mut accept = accept;
         if cfg.move_library.is_rigid_body() && cfg.n_points > RIGID_HOT_BODIES {
@@ -5644,7 +5680,7 @@ where
                 hops += 1;
                 symmetrised += 1;
                 let d = (es - e) / temperature.max(1e-12);
-                if d < 0.0 || rng.random::<f64>() < (-d).exp() {
+                if d < 0.0 || rng.random::<f64>() < portable_exp(-d) {
                     if es < e {
                         symmetry_gain += e - es;
                     }
@@ -5704,7 +5740,7 @@ where
         }
         if let Some((es, xs, sym_gradient)) = orbit_offer {
             let d = (es - e) / temperature.max(1e-12);
-            if d < 0.0 || rng.random::<f64>() < (-d).exp() {
+            if d < 0.0 || rng.random::<f64>() < portable_exp(-d) {
                 if es < e {
                     orbit_gain += e - es;
                 }
@@ -6530,7 +6566,11 @@ where
                                     ej + vj_xj,
                                     ek + vj_xk,
                                 );
-                                if log_a >= 0.0 { 1.0 } else { log_a.exp() }
+                                if log_a >= 0.0 {
+                                    1.0
+                                } else {
+                                    portable_exp(log_a)
+                                }
                             })
                         };
                         for k in taken {
@@ -6584,7 +6624,11 @@ where
                             ej + vj_xj,
                             ek + vj_xk,
                         );
-                        let p = if log_a >= 0.0 { 1.0 } else { log_a.exp() };
+                        let p = if log_a >= 0.0 {
+                            1.0
+                        } else {
+                            portable_exp(log_a)
+                        };
                         if rng.random::<f64>() < p {
                             swaps_accepted += 1;
                             chains.swap(k, j);
@@ -6927,7 +6971,7 @@ pub fn random_cluster<R: Rng + ?Sized>(
     min_sep: f64,
     rng: &mut R,
 ) -> Array1<f64> {
-    let radius = (3.0 * n as f64 / (4.0 * std::f64::consts::PI * density)).cbrt();
+    let radius = portable_cbrt(3.0 * n as f64 / (4.0 * std::f64::consts::PI * density));
     random_cluster_in_radius(n, radius, min_sep, rng)
 }
 
@@ -6958,7 +7002,7 @@ pub fn repack_rigid_groups<R: Rng + ?Sized>(
         let th = rng.random::<f64>() * std::f64::consts::TAU;
         let ct = 2.0 * rng.random::<f64>() - 1.0;
         let st = (1.0 - ct * ct).sqrt();
-        let new_c = [r * st * th.cos(), r * st * th.sin(), r * ct];
+        let new_c = [r * st * portable_cos(th), r * st * portable_sin(th), r * ct];
         let n = atoms.len() as f64;
         let mut com = [0.0; 3];
         for &i in atoms {
@@ -7012,11 +7056,12 @@ pub fn random_cluster_in_radius<R: Rng + ?Sized>(
             // Box-Muller from two uniforms, avoiding a distribution dependency.
             let u1: f64 = rng.random::<f64>().max(1e-12);
             let u2: f64 = rng.random::<f64>();
-            v[k] = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+            v[k] = portable_sqrt(-2.0 * portable_ln(u1))
+                * portable_cos(2.0 * std::f64::consts::PI * u2);
             norm += v[k] * v[k];
         }
-        let norm = norm.sqrt().max(1e-12);
-        let r = radius * rng.random::<f64>().cbrt();
+        let norm = portable_sqrt(norm).max(1e-12);
+        let r = radius * portable_cbrt(rng.random::<f64>());
         let p = [v[0] / norm * r, v[1] / norm * r, v[2] / norm * r];
         if pts.iter().all(|q| {
             ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()

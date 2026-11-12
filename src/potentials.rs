@@ -55,7 +55,7 @@ impl PairKind {
     /// Separation at the pair minimum, which sets the natural length scale.
     pub fn r_min(&self) -> f64 {
         match self {
-            PairKind::LennardJones => 2.0_f64.powf(1.0 / 6.0),
+            PairKind::LennardJones => libm::pow(2.0, 1.0 / 6.0),
             PairKind::Morse { .. } => 1.0,
         }
     }
@@ -204,8 +204,11 @@ impl PairPotential {
                     let (v, coef) = self.kind.pair(r2);
                     e += v;
                     for k in 0..3 {
-                        gradient_i[k] += coef * d[k];
-                        gradient[base_j + k] -= coef * d[k];
+                        // One rounding, the IEEE fused product-sum, on every
+                        // target. A contracted `+=` follows the inlining
+                        // context and is not the same walk.
+                        gradient_i[k] = coef.mul_add(d[k], gradient_i[k]);
+                        gradient[base_j + k] = (-coef).mul_add(d[k], gradient[base_j + k]);
                     }
                 }
                 gradient[base_i..base_i + 3].copy_from_slice(&gradient_i);
@@ -226,8 +229,8 @@ impl PairPotential {
                 let (v, coef) = self.kind.pair(r2);
                 e += v;
                 for k in 0..3 {
-                    g[3 * i + k] += coef * d[k];
-                    g[3 * j + k] -= coef * d[k];
+                    g[3 * i + k] = coef.mul_add(d[k], g[3 * i + k]);
+                    g[3 * j + k] = (-coef).mul_add(d[k], g[3 * j + k]);
                 }
             }
         }
@@ -315,8 +318,8 @@ mod tests {
                     let (value, coefficient) = potential.kind.pair(r2);
                     energy += value;
                     for k in 0..3 {
-                        gradient[3 * i + k] += coefficient * d[k];
-                        gradient[3 * j + k] -= coefficient * d[k];
+                        gradient[3 * i + k] = coefficient.mul_add(d[k], gradient[3 * i + k]);
+                        gradient[3 * j + k] = (-coefficient).mul_add(d[k], gradient[3 * j + k]);
                     }
                 }
             }
