@@ -1290,18 +1290,156 @@ pub const OVERLAP_SEPARATION: f64 = 0.35;
 /// the potential sees is a bond, not a contact xtb cannot converge.
 pub const OVERLAP_CALL_LIMIT: f64 = 0.90;
 
-/// Push pairs closer than `min_sep` apart until the geometry clears that rule.
+/// How far past [`OVERLAP_CALL_LIMIT`] a non-bonded spike is opened.
 ///
-/// A declared group is translated as a rigid body when the close pair belongs
-/// to two groups, so the repair does not stretch a bond to cure a clash
-/// between molecules. A close pair inside one group, or a geometry with no
-/// groups, is pushed atom by atom. The function does not evaluate a potential.
-/// It returns whether every pair is now at least `min_sep` apart.
+/// Only pairs closer than [`OVERLAP_SPIKE`] move. 1.30 Å past the call limit
+/// puts such a pair at 2.20 Å, where the force is a contact the line search
+/// can follow. A hydrogen bond already longer than the spike is not moved.
+pub const OVERLAP_CLASH_CLEARANCE: f64 = 1.30;
+
+/// A non-bonded pair closer than this is a repulsive spike. Pairs already
+/// past it, including a hydrogen bond, are left where they stand.
+const OVERLAP_SPIKE: f64 = 1.40;
+
+/// Whether `a` and `b` are a covalent bond inside one declared group.
+///
+/// Judged on the geometry before any repair. A missing species treats the
+/// whole group as bonded, which is the rigid-body repair.
+fn pair_is_covalent_bond(
+    a: usize,
+    b: usize,
+    distance: f64,
+    left: usize,
+    right: usize,
+    species: Option<&[u32]>,
+    bond_tolerance: f64,
+) -> bool {
+    if left == usize::MAX || left != right {
+        return false;
+    }
+    // No species: a declared group is treated as bonded, which is what the
+    // rigid-body repair has always done.
+    let Some(species) = species else {
+        return true;
+    };
+    let za = species.get(a).copied().unwrap_or(0);
+    let zb = species.get(b).copied().unwrap_or(0);
+    let reach = bond_tolerance
+        * (crate::methods::cluster_hopping::moves::covalent_radius(za)
+            + crate::methods::cluster_hopping::moves::covalent_radius(zb));
+    reach > 0.0 && distance <= reach
+}
+
+fn open_target(
+    a: usize,
+    b: usize,
+    distance: f64,
+    left: usize,
+    right: usize,
+    bonded: bool,
+    species: Option<&[u32]>,
+    bond_target: f64,
+    clash_target: f64,
+) -> f64 {
+    if bonded {
+        // Classified once, at the geometry we were handed. A later stretch
+        // must not turn the bond into a clash or the repair dissociates it.
+        // A bond already near the covalent length is left alone, so a healthy
+        // molecule is not rewritten on the way past an unrelated spike.
+        let Some(species) = species else {
+            return if distance >= bond_target {
+                distance
+            } else {
+                bond_target
+            };
+        };
+        let reach = crate::methods::cluster_hopping::moves::covalent_radius(
+            species.get(a).copied().unwrap_or(0),
+        ) + crate::methods::cluster_hopping::moves::covalent_radius(
+            species.get(b).copied().unwrap_or(0),
+        );
+        let restore = bond_target.max(reach);
+        return if distance + 0.02 >= restore {
+            distance
+        } else {
+            restore
+        };
+    }
+    // A same-group pair that is not a bond is an angle, not a contact
+    // between molecules. Open it off the gate and no further.
+    if left != usize::MAX && left == right {
+        let angle = bond_target + 0.30;
+        return if distance >= angle { distance } else { angle };
+    }
+    if distance >= OVERLAP_SPIKE {
+        distance
+    } else {
+        clash_target
+    }
+}
+
+fn contacts_are_open(
+    x: ArrayView1<f64>,
+    owner: Option<&[usize]>,
+    species: Option<&[u32]>,
+    bonded: &[bool],
+    bond_target: f64,
+    clash_target: f64,
+) -> bool {
+    let n = x.len() / 3;
+    for a in 0..n {
+        for b in (a + 1)..n {
+            let mut square = 0.0;
+            for axis in 0..3 {
+                let delta = x[3 * a + axis] - x[3 * b + axis];
+                square += delta * delta;
+            }
+            let distance = square.sqrt();
+            let left = owner.map(|owner| owner[a]).unwrap_or(usize::MAX);
+            let right = owner.map(|owner| owner[b]).unwrap_or(usize::MAX);
+            let target = open_target(
+                a,
+                b,
+                distance,
+                left,
+                right,
+                bonded[a * n + b],
+                species,
+                bond_target,
+                clash_target,
+            );
+            if distance < target {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+#[cfg(test)]
 pub(crate) fn separate_to_overlap_rule(
     x: &mut Array1<f64>,
     groups: Option<&[Vec<usize>]>,
     min_sep: f64,
     frozen: Option<&[bool]>,
+) -> bool {
+    separate_contacts(x, groups, min_sep, 1.0e-8, frozen, None, 1.25)
+}
+
+/// Push clashing pairs apart.
+///
+/// A pair inside one declared group is a bond and is opened only to
+/// `min_sep`. Every other pair is opened to `min_sep + clash_clearance`,
+/// so a quench is not handed a contact sitting on the call limit. The
+/// clearance is `1e-8` for a repair that only has to clear the gate.
+pub(crate) fn separate_contacts(
+    x: &mut Array1<f64>,
+    groups: Option<&[Vec<usize>]>,
+    min_sep: f64,
+    clash_clearance: f64,
+    frozen: Option<&[bool]>,
+    species: Option<&[u32]>,
+    bond_tolerance: f64,
 ) -> bool {
     if !(min_sep.is_finite() && min_sep > 0.0) || x.iter().any(|value| !value.is_finite()) {
         return false;
@@ -1341,11 +1479,38 @@ pub(crate) fn separate_to_overlap_rule(
         }
     };
     // A fraction of an angstrom past the rule, so a later strict comparison
-    // does not reject the same pair on a rounding residue.
-    let target = min_sep + 1.0e-8;
+    // does not reject the same pair on a rounding residue. Bonds stay at
+    // the call limit. A clash between groups is opened by the clearance,
+    // which is the room a unit line-search step needs.
+    let bond_target = min_sep + 1.0e-8;
+    let clash_target = min_sep + clash_clearance.max(1.0e-8);
+    // Bond identity is fixed on the geometry we were handed. Reclassifying
+    // after a push turns a stretched O–H into a clash and dissociates it.
+    let mut bonded = vec![false; n * n];
+    for a in 0..n {
+        for b in (a + 1)..n {
+            let mut square = 0.0;
+            for axis in 0..3 {
+                let delta = x[3 * a + axis] - x[3 * b + axis];
+                square += delta * delta;
+            }
+            let left = owner.as_ref().map(|owner| owner[a]).unwrap_or(usize::MAX);
+            let right = owner.as_ref().map(|owner| owner[b]).unwrap_or(usize::MAX);
+            bonded[a * n + b] =
+                pair_is_covalent_bond(a, b, square.sqrt(), left, right, species, bond_tolerance);
+        }
+    }
     for _ in 0..64 {
-        if min_pair_distance(x.view()) >= min_sep {
-            return x.iter().all(|value| value.is_finite());
+        if contacts_are_open(
+            x.view(),
+            owner.as_deref(),
+            species,
+            &bonded,
+            bond_target,
+            clash_target,
+        ) {
+            return x.iter().all(|value| value.is_finite())
+                && min_pair_distance(x.view()) >= min_sep;
         }
         let mut group_shift = vec![[0.0_f64; 3]; n_groups];
         let mut atom_shift = vec![[0.0_f64; 3]; n];
@@ -1359,6 +1524,19 @@ pub(crate) fn separate_to_overlap_rule(
                     distance_squared += delta[axis] * delta[axis];
                 }
                 let distance = distance_squared.sqrt();
+                let left = owner.as_ref().map(|owner| owner[a]).unwrap_or(usize::MAX);
+                let right = owner.as_ref().map(|owner| owner[b]).unwrap_or(usize::MAX);
+                let target = open_target(
+                    a,
+                    b,
+                    distance,
+                    left,
+                    right,
+                    bonded[a * n + b],
+                    species,
+                    bond_target,
+                    clash_target,
+                );
                 if distance >= target {
                     continue;
                 }
@@ -1368,8 +1546,6 @@ pub(crate) fn separate_to_overlap_rule(
                     let push = 0.5 * (target - distance) / distance;
                     (delta, push)
                 };
-                let left = owner.as_ref().map(|owner| owner[a]).unwrap_or(usize::MAX);
-                let right = owner.as_ref().map(|owner| owner[b]).unwrap_or(usize::MAX);
                 let left_held = side_held(a, left);
                 let right_held = side_held(b, right);
                 if left_held && right_held {
@@ -4547,11 +4723,14 @@ where
         // The raw overlapping proposal is not an energy call.
         if cfg.species.is_some() && !structure_is_sane(trial.view(), OVERLAP_CALL_LIMIT) {
             proposal_overlaps += 1;
-            let separated = separate_to_overlap_rule(
+            let separated = separate_contacts(
                 &mut trial,
                 cfg.move_library.declared_groups(),
                 OVERLAP_CALL_LIMIT,
+                OVERLAP_CLASH_CLEARANCE,
                 hop_frozen.as_deref(),
+                cfg.species.as_deref(),
+                cfg.bond_tolerance,
             );
             if !separated {
                 hops += 1;
