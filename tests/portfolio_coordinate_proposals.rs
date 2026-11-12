@@ -264,10 +264,10 @@ fn shared_scalar_gsa_preserves_coordinate_support_with_effective_separation() {
 #[test]
 fn private_scalar_gsa_does_not_resume_a_slice_that_gained_nothing() {
     let (result, traces) = run(false);
-    for replica in 0..2 {
+    for (replica, replica_result) in result.replicas.iter().enumerate().take(2) {
         let (which, start, _, replay) = strategy_start(&traces, replica);
         let trace = &traces[which];
-        let gsa_pulls = result.replicas[replica]
+        let gsa_pulls = replica_result
             .arm_stats
             .iter()
             .find(|arm| arm.name == "gsa")

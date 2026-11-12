@@ -870,14 +870,17 @@ fn student_t<R: Rng + ?Sized>(nu: f64, rng: &mut R) -> f64 {
     let z = {
         let u1: f64 = rng.random::<f64>().max(1e-12);
         let u2: f64 = rng.random::<f64>();
-        (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+        // Host `ln` and `cos` pick a different arm on libSystem than on
+        // glibc. The recommended walk rewards depth, so this draw is the
+        // move.
+        libm::sqrt(-2.0 * libm::log(u1)) * libm::cos(std::f64::consts::TAU * u2)
     };
     // Chi-square with nu degrees of freedom is Gamma(nu/2, 2).
     let g = sample_gamma(nu * 0.5, rng) * 2.0;
     if g <= 0.0 {
         return z;
     }
-    z / (g / nu).sqrt()
+    z / libm::sqrt(g / nu)
 }
 
 #[cfg(test)]
