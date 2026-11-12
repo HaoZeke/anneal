@@ -14,3 +14,21 @@ The anneal mean wall is 1203.0 s. The CREST mean wall is 690.9 s. The ratio of t
 | 15004 | −2768.714624 | 1283.792 | 358.224 | 7813 | none | −2768.378376 | 930.325 | anneal | 204 | 69 |
 | 15005 | −2768.448144 | 1194.045 | none | none | MTD 5 tight | −2768.613713 | 603.027 | crest | 143 | 70 |
 | 15006 | −2768.532340 | 1185.160 | none | none | none | −2764.338592 | 434.034 | neither | 158 | 72 |
+
+## Where the (H2O)16 wall goes
+
+Seed 16001, 28000 calls, same wrapper as the table above, scored −2214.506788 eV in 655.035 s. CREST on the same start scored −2214.590238 eV in 292.682 s. Of the anneal wall, 649.696 s is inside xtb and 5.338 s is outside it, 0.206 ms per call. That remainder does not account for the gap.
+
+The 28000 charged calls are 191 converged quenches and 1 capped quench, 146.6 calls per converged quench. There were 177 hops. Every hop started inside the overlap gate (`proposal_overlap_rejected` 177) and was separated, then quenched in full (`screens` 0). Line-search overlap rejections (665) and geometry rejections (0) are not charged. SCC rejections were 0.
+
+Of 177 proposals, 171 were accepted and 14 improved the incumbent:
+
+| Move | Proposed | Accepted | Improved |
+| --- | --- | --- | --- |
+| hbrewire | 41 | 39 | 7 |
+| gshake | 42 | 39 | 1 |
+| gsurface | 29 | 29 | 1 |
+| gcycle | 37 | 36 | 3 |
+| gburst | 28 | 28 | 2 |
+
+The wall is those full quenches. Shortening one is the quench-convergence work and is left untouched here.
