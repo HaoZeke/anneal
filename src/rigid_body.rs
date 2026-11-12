@@ -146,7 +146,7 @@ impl RigidBodyGeometry {
         let n = molecules * sites_per_molecule;
         let nblocks = self.block_keys.len();
         thread_local! {
-            static BLOCKS: RefCell<Vec<Vec<f64>>> = RefCell::new(Vec::new());
+            static BLOCKS: RefCell<Vec<Vec<f64>>> = const { RefCell::new(Vec::new()) };
         }
         BLOCKS.with(|cell| {
             let mut blocks = cell.borrow_mut();
