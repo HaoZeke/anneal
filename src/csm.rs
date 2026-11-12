@@ -106,11 +106,15 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
         return cached;
     }
     let orientations = inertia_orientations(x, classes.len())?;
-    let mut best: Option<GroupProjection> = None;
-    for (name, ops) in [
-        ("C_i", inversion_ops()),
-        ("C_5", cyclic_about_z(5)),
-        ("D_5h", d5h_ops()),
+    // D_5h contains every C_5 turn, so it is solved first and those
+    // permutations are reused. Equal measures keep the earlier group
+    // in the published order C_i, C_5, D_5h.
+    clear_op_cache();
+    let mut best: Option<(usize, GroupProjection)> = None;
+    for (rank, name, ops) in [
+        (2, "D_5h", d5h_ops()),
+        (1, "C_5", cyclic_about_z(5)),
+        (0, "C_i", inversion_ops()),
     ] {
         let Some((coordinates, measure)) = project(x, classes, &ops, &orientations) else {
             continue;
@@ -118,17 +122,25 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
         if closest_pair(&coordinates) < SINGULAR_PAIR {
             continue;
         }
-        if best
-            .as_ref()
-            .is_none_or(|incumbent| measure < incumbent.measure)
-        {
-            best = Some(GroupProjection {
-                coordinates,
-                measure,
-                group: name,
-            });
+        let replace = match &best {
+            None => true,
+            Some((incumbent_rank, incumbent)) => {
+                measure < incumbent.measure
+                    || (measure == incumbent.measure && rank < *incumbent_rank)
+            }
+        };
+        if replace {
+            best = Some((
+                rank,
+                GroupProjection {
+                    coordinates,
+                    measure,
+                    group: name,
+                },
+            ));
         }
     }
+    let best = best.map(|(_, projection)| projection);
     store_propose(x, classes, best.as_ref());
     best
 }
@@ -223,6 +235,84 @@ fn is_identity(op: &[[f64; 3]; 3]) -> bool {
     true
 }
 
+struct SolvedOp {
+    y: Vec<u64>,
+    classes: Vec<u32>,
+    op: [[f64; 3]; 3],
+    perm: Vec<usize>,
+    unique: bool,
+}
+
+std::thread_local! {
+    static OP_CACHE: std::cell::RefCell<Vec<SolvedOp>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn clear_op_cache() {
+    OP_CACHE.with(|slot| slot.borrow_mut().clear());
+}
+
+fn coordinate_bits(y: &[[f64; 3]]) -> Vec<u64> {
+    y.iter().flatten().map(|value| value.to_bits()).collect()
+}
+
+fn same_matrix(left: &[[f64; 3]; 3], right: &[[f64; 3]; 3]) -> bool {
+    left.iter()
+        .flatten()
+        .zip(right.iter().flatten())
+        .all(|(left, right)| left.to_bits() == right.to_bits())
+}
+
+fn matrix_close(left: &[[f64; 3]; 3], right: &[[f64; 3]; 3]) -> bool {
+    left.iter()
+        .flatten()
+        .zip(right.iter().flatten())
+        .all(|(left, right)| (*left - *right).abs() <= 1.0e-8)
+}
+
+fn invert_perm(perm: &[usize]) -> Vec<usize> {
+    let mut inverse = vec![0; perm.len()];
+    for (row, &column) in perm.iter().enumerate() {
+        inverse[column] = row;
+    }
+    inverse
+}
+
+fn recall_op(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option<Vec<usize>> {
+    let bits = coordinate_bits(y);
+    let transposed = transpose(*op);
+    OP_CACHE.with(|slot| {
+        let slot = slot.borrow();
+        for saved in slot.iter().rev() {
+            if saved.y != bits || saved.classes != classes {
+                continue;
+            }
+            if same_matrix(&saved.op, op) {
+                return Some(saved.perm.clone());
+            }
+            if saved.unique && matrix_close(&saved.op, &transposed) {
+                return Some(invert_perm(&saved.perm));
+            }
+        }
+        None
+    })
+}
+
+fn remember_op(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3], perm: &[usize], unique: bool) {
+    OP_CACHE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.len() > 800 {
+            slot.clear();
+        }
+        slot.push(SolvedOp {
+            y: coordinate_bits(y),
+            classes: classes.to_vec(),
+            op: *op,
+            perm: perm.to_vec(),
+            unique,
+        });
+    });
+}
+
 fn match_operated(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option<Vec<usize>> {
     let n = classes.len();
     // The identity sends every atom to itself, so the diagonal is a minimum
@@ -230,12 +320,16 @@ fn match_operated(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option
     if is_identity(op) {
         return Some((0..n).collect());
     }
+    if let Some(saved) = recall_op(y, classes, op) {
+        return Some(saved);
+    }
     let images: Vec<[f64; 3]> = y.iter().map(|point| mul_vec(op, *point)).collect();
     let mut blocks: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
     for (atom, &class) in classes.iter().enumerate() {
         blocks.entry(class).or_default().push(atom);
     }
     let mut assignment = vec![usize::MAX; n];
+    let mut unique = true;
     for atoms in blocks.values() {
         let width = atoms.len();
         let mut costs = vec![0.0; width * width];
@@ -250,11 +344,19 @@ fn match_operated(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option
             }
         }
         let local = minimum_cost_assignment(&costs, width)?;
+        // Below 98 atoms the recorded permutation is Kuhn-Munkres. Its
+        // tie break is not the inverse of the transposed problem, so an
+        // inverse is reused only for a unique dense optimum.
+        unique &= width >= 98 && crate::assignment::last_dense_optimum_was_unique();
         for (row_i, &col_i) in local.iter().enumerate() {
             assignment[atoms[row_i]] = atoms[col_i];
         }
     }
-    (!assignment.contains(&usize::MAX)).then_some(assignment)
+    if assignment.contains(&usize::MAX) {
+        return None;
+    }
+    remember_op(y, classes, op, &assignment, unique);
+    Some(assignment)
 }
 
 pub(crate) fn identity() -> [[f64; 3]; 3] {

@@ -28,6 +28,7 @@ const SHORTEST_PATH_FROM: usize = 98;
 /// column occurs exactly once. Invalid shapes, non-finite entries, or failure
 /// to construct a perfect matching return `None`.
 pub fn minimum_cost_assignment(costs: &[f64], n: usize) -> Option<Vec<usize>> {
+    ASSIGNMENT_IS_UNIQUE.with(|cell| cell.set(false));
     if n == 0 {
         return costs.is_empty().then(Vec::new);
     }
@@ -208,10 +209,25 @@ unsafe fn scan_avx2(
 }
 
 pub(crate) fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<usize>> {
-    successive_shortest_paths_scanned(costs, n)
+    successive_shortest_paths_scanned(costs, n).map(|(assignment, unique)| {
+        ASSIGNMENT_IS_UNIQUE.with(|cell| cell.set(unique));
+        assignment
+    })
 }
 
-fn successive_shortest_paths_scanned(costs: &[f64], n: usize) -> Option<Vec<usize>> {
+/// Whether the last successful dense scan had no other optimal edge.
+///
+/// A Kuhn-Munkres result reports false: the smaller walks keep that
+/// solver's own tie break, and an inverse permutation is not reused.
+pub(crate) fn last_dense_optimum_was_unique() -> bool {
+    ASSIGNMENT_IS_UNIQUE.with(|cell| cell.get())
+}
+
+std::thread_local! {
+    static ASSIGNMENT_IS_UNIQUE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn successive_shortest_paths_scanned(costs: &[f64], n: usize) -> Option<(Vec<usize>, bool)> {
     // Column 0 is the dummy used to grow the matching. Rows and columns of
     // `costs` are 1-indexed in the dual update so the dummy sits at index 0.
     // `used` is a byte flag, not `Vec<bool>`: the bit-packed form turns this
@@ -281,7 +297,70 @@ fn successive_shortest_paths_scanned(costs: &[f64], n: usize) -> Option<Vec<usiz
         seen[slot] = true;
         assignment[slot] = column - 1;
     }
-    Some(assignment)
+    let unique = optimum_is_unique(costs, n, &assignment, &row_potential, &column_potential);
+    Some((assignment, unique))
+}
+
+fn optimum_is_unique(
+    costs: &[f64],
+    n: usize,
+    assignment: &[usize],
+    row_potential: &[f64],
+    column_potential: &[f64],
+) -> bool {
+    let mut scale = 1.0_f64;
+    for value in costs {
+        scale = scale.max(value.abs());
+    }
+    // A negative reduced cost of one ulp is dual noise. An edge within this
+    // slack of zero can belong to another optimum; anything larger cannot.
+    let slack = 1.0e-8 * (1.0 + scale);
+    let mut matched_row = vec![0usize; n];
+    for (row, &column) in assignment.iter().enumerate() {
+        matched_row[column] = row;
+    }
+    let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for row in 0..n {
+        let matched = assignment[row];
+        let base = row * n;
+        for column in 0..n {
+            if column == matched {
+                continue;
+            }
+            let reduced =
+                costs[base + column] - row_potential[row + 1] - column_potential[column + 1];
+            if reduced <= slack {
+                outgoing[row].push(matched_row[column]);
+            }
+        }
+    }
+    let mut color = vec![0u8; n];
+    let mut stack = Vec::new();
+    let mut unique = true;
+    'search: for start in 0..n {
+        if color[start] != 0 {
+            continue;
+        }
+        color[start] = 1;
+        stack.push((start, 0usize));
+        while let Some((node, edge)) = stack.pop() {
+            if edge == outgoing[node].len() {
+                color[node] = 2;
+                continue;
+            }
+            stack.push((node, edge + 1));
+            let next = outgoing[node][edge];
+            if color[next] == 1 {
+                unique = false;
+                break 'search;
+            }
+            if color[next] == 0 {
+                color[next] = 1;
+                stack.push((next, 0));
+            }
+        }
+    }
+    unique
 }
 
 /// Column-first Kuhn-Munkres.
@@ -534,7 +613,9 @@ mod tests {
                     .map(|_| (next() % 5) as f64 + ((next() % 3) as f64) * 0.125)
                     .collect();
                 let legacy = legacy_scan(&costs, n).expect("legacy");
-                let scalar = successive_shortest_paths_scanned(&costs, n).expect("scalar");
+                let scalar = successive_shortest_paths_scanned(&costs, n)
+                    .expect("scalar")
+                    .0;
                 assert_eq!(scalar, legacy, "n={n} trial={trial} scalar");
                 let chosen = successive_shortest_paths(&costs, n).expect("chosen");
                 assert_eq!(chosen, legacy, "n={n} trial={trial} chosen");
@@ -560,7 +641,9 @@ mod tests {
                 }
             }
             let legacy = legacy_scan(&costs, n).expect("legacy geometry");
-            let scalar = successive_shortest_paths_scanned(&costs, n).expect("scalar geometry");
+            let scalar = successive_shortest_paths_scanned(&costs, n)
+                .expect("scalar geometry")
+                .0;
             assert_eq!(scalar, legacy, "geometry n={n}");
             let chosen = successive_shortest_paths(&costs, n).expect("chosen geometry");
             assert_eq!(chosen, legacy, "geometry chosen n={n}");
