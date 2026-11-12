@@ -176,11 +176,12 @@ def run(system: str, seed: int, budget: int, level: float, work: Path) -> dict[s
             if calc.calls >= budget:
                 break
             continue
+        connection.add_unrelaxed_candidate(child, description=description)
         if rng.random() < 0.3:
             mutated, mutated_description = mutations.get_new_individual([child])
             if mutated is not None:
-                child, description = mutated, mutated_description
-        connection.add_unrelaxed_candidate(child, description=description)
+                connection.add_unrelaxed_step(mutated, mutated_description)
+                child = mutated
         if relax(child, calc):
             connection.add_relaxed_step(child)
             population.update()
