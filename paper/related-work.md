@@ -483,3 +483,47 @@ A deposit under the name mizopl, doi:10.5281/zenodo.23466237 (19 October 2026), 
 Meadows, doi:10.5281/zenodo.24111878 (10 November 2026), deposits candidate improvements to packing and energy tables. One file is a Thomson configuration at 436 particles. The deposit says it lies 0.0348 below the minimum over the live tables it compares, including the Cambridge Cluster Database and Wayne Deeter's table. This note does not recompute that configuration. The potential is the Thomson problem. Amore and Wales search that problem at large size. Their citation is not a claim that the Cambridge Thomson table is frozen, and this deposit is not a Lennard-Jones energy.
 
 Cite `colbrookPlanarLennardJones2026`, `mizoplGuptaRecords2026`, and `meadowsThomson2026`. Keep all three out of the Lennard-Jones hit table.
+
+## 2026-11-12 — What a layer relaxation can certify
+
+Lecomte, arXiv:2607.12134 (13 July 2026), asks what a Kuznetsov--Sahinidis layer relaxation can certify. Above a singleton-layer cost of \(-1/2\), and for the geometric Lennard-Jones system down through that endpoint, the certified deficit is at most of order \(\sqrt{N}\). Farther below the threshold a valid relaxation of the Lennard-Jones system has a linear deficit. Once the singleton cost passes the stability constant, the relaxation certifies nothing. The six-atom minimiser enters only as a lower bound on that constant. The letter does not name 38, 55, 75, 98, or 104 atoms, and it proves no minimum at those sizes.
+
+The same author, doi:10.5281/zenodo.21280557 (9 July 2026), shows that a one-dimensional layer bound with a summable kernel cannot certify a diameter of order \(N^{1/3}\). Inside that class the best correction is of order \(\sqrt{N}\). The 13 July letter cites this deposit beside the diameter-bound preprint already filed as `lecomteDiameter2026`.
+
+The manuscript says that diameter preprint leaves every case of 38 atoms and larger unproved. These two notes do not prove those cases, so that sentence stands. They give no energy below the Cambridge values. They do not warrant a head-to-head.
+
+Cite `lecomteCertification2026` and `lecomteScalingCeiling2026` beside Kuznetsov. Keep the hit targets as the Cambridge energies.
+
+The Wales copy of the table from 3 to 150 atoms, read on 12 November 2026, was last modified on 22 February 2026. It still lists \(-173.928427\) at 38 atoms, \(-279.248470\) at 55, \(-397.492331\) at 75, \(-543.665361\) at 98, and \(-582.086642\) at 104. The Doye copy of that table is still last modified on 4 March 2025. The February timestamp is not a new minimum.
+
+## 2026-11-12 — Lennard-Jones coordinates through sixteen atoms, in several dimensions
+
+Varas, Acevedo, Carrasco, Rogan, and Valdivia, doi:10.5281/zenodo.19826810 (27 April 2026), deposit minimum-energy coordinates for the Lennard-Jones potential in more than one dimension. The directories run from 9 to 16 atoms. The files are labelled by dimension, and the highest label in the archive is dimension 15, on the 16-atom set. This note does not recompute the energies.
+
+The sizes 38, 55, 75, 98, and 104 are absent. The deposit does not contradict the Cambridge hit targets, and it does not warrant a head-to-head at those sizes.
+
+Cite `varasLennardJones2026`. Keep the coordinates out of the Lennard-Jones table.
+
+## 2026-11-12 — Fullerene, platinum, and alloy searches
+
+Chen, Liang, Chen, and Wang, Journal of Chemical Theory and Computation 22, 6218--6226 (2026), doi:10.1021/acs.jctc.6c00329, search \(({\rm C}_{60})_N\) with a fuzzy global optimisation that keeps three-body terms. On the PPR surface they extend the search from 105 to 320 molecules. Against the literature from 11 to 105 molecules they report 14 new lower energies on the pair potential and 3 on the potential that includes three-body terms. With the three-body terms, the structures at 85, 87, 94, 98, 100, 153, 224, 231, 253, 269, and 285 molecules change from decahedral to close-packed.
+
+The 98 in that list counts \({\rm C}_{60}\) molecules. It is not the 98-atom Lennard-Jones cluster. The paper gives no Cambridge energy. It does not contradict the hit targets, and it does not warrant a head-to-head on LJ38 through LJ104. A comparison, if it is run, is \(({\rm C}_{60})_N\) on the PPR potential.
+
+Li, Yang, and Guo, Physical Chemistry Chemical Physics 28, 16106--16120 (2026), doi:10.1039/d6cp00865h, search platinum clusters from 6 to 50 atoms with a deep potential and a hybrid differential-evolution algorithm. The abstract says the structures are more stable than structures taken from the S-C empirical potential, and it names magic sizes 10, 17, 30, 36, 42, and 43. The potential is platinum. No sealed Lennard-Jones count is contradicted. A head-to-head would be one of these platinum clusters on their deep potential, not LJ38 through LJ104.
+
+Wu, Tang, He, Shi, and Lin, Physica Scripta 101, 345911 (2026), doi:10.1088/1402-4896/ae980f, optimise PtCo clusters at 13 and 38 atoms. The 13-atom clusters stay icosahedral. The 38-atom clusters change motif with composition. That 38-atom cluster is PtCo, not the Lennard-Jones truncated octahedron. The abstract gives no Cambridge energy. It does not contradict the LJ38 map, and it does not warrant a head-to-head on LJ38.
+
+Tang, Zhang, Shi, Chen, and Wu, Journal of Nanoparticle Research 28, 188 (2026), doi:10.1007/s11051-026-06711-0, optimise Au--Cu clusters on the Gupta potential at 13, 19, 23, and 38 atoms. The landing page says the search reaches the 38-atom global minimum in 70 percent of runs, and that twenty runs at 55 atoms have a best-energy standard deviation of 0.002 eV. It says the search outperforms basin hopping, a genetic algorithm, and plain differential evolution. It also says the structures are a consistency check: a copper core, a gold surface, and the truncated octahedron at 38 atoms. Those sizes are Au--Cu on the Gupta potential. They do not contradict the Cambridge Lennard-Jones energies or a printed Lennard-Jones hit count. They do warrant a head-to-head on that Gupta surface, against the basin-hopping baseline the paper names, and not on LJ38 or LJ55.
+
+Cite `chenFullerene2026`, `liPlatinum2026`, `wuPtco2026`, and `tangAucur2026`.
+
+## 2026-11-12 — Glycine, a zeolite basin hop, and a CHGNet correction
+
+Roth First, Anabi, Licht, Major, and Toker, Journal of Chemical Physics 165, 174314 (4 November 2026), doi:10.1063/5.0350852, search protonated glycine clusters through seven molecules. The mass spectrum has magic numbers at three and at six. The hexamer is the first size at which a fully zwitterionic structure is preferred. The trimer's abundance is kinetic. This hexamer is glycine. The note gives no GFN2-xTB energy and no TIP4P energy. It does not contradict 121 of 192 or 97 of 192, and it does not warrant a head-to-head on the CREST table.
+
+Bengtsson, Hewitt, Saha, Sarwar, Collis, Erlebach, Grajciar, and Heard, Digital Discovery (2026), doi:10.1039/d6dd00356g, also ChemRxiv (5 February 2026), doi:10.26434/chemrxiv.10001878/v2, place aluminium in chabazite, mordenite, and zeolite RHO by basin hopping on a neural-network potential. The journal record has no volume or pages yet. Low-energy aluminium arrangements are a few percent of the structures they count. Random placements sit high relative to the basin-hopping minima. The search is a zeolite framework. It does not fill the open ASE, AGOX, and GMIN kit, and it does not contradict the sealed maps. A head-to-head would be one of these zeolites on their potential. It does not warrant a head-to-head on the Lennard-Jones preset.
+
+Christiansen and Hammer, Journal of Chemical Physics 162, 184701 (8 May 2025), doi:10.1063/5.0268264, correct a universal potential by a Gaussian process on the potential's own embedding. In a global structure optimisation, CHGNet describes the "8" surface oxide on Cu(111) and prefers a structure the abstract calls more favorable than one in the density-functional literature. Sulfur adlayers on Cu(111), Ag(111), and Au(111) need the correction. MACE-MP0, SevenNet-0, and ORB-v2-only-MPtrj show the same kind of error. This precedes the silver--sulfur delta search filed as `pitfieldActiveDelta2026`, and the oxide is the system in `leeNara2026`. The note gives no Lennard-Jones energy and no water energy. It does not fill the open kit, and it does not warrant a head-to-head on LJ38 through LJ104 or on the hexamer.
+
+Cite `rothGlycine2026`, `bengtssonZeolite2026`, `bengtssonZeoliteChemrxiv2026`, and `christiansenDelta2025`. The ChemRxiv key is the 5 February 2026 preprint of the Digital Discovery record.
