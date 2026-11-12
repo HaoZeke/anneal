@@ -2514,6 +2514,68 @@ fn rigid_shell_turn(state: ArrayView1<f64>, n: usize, axis: usize, angle: f64) -
     y
 }
 
+/// Swing one contact through a right angle about its midpoint.
+///
+/// Pulling the open edge of a near-square back to the contact length
+/// quenches into the cage it started from. Turning the bond itself
+/// puts both centres on the other side of that contact.
+fn rigid_bond_swing(state: ArrayView1<f64>, i: usize, j: usize) -> Array1<f64> {
+    let mut y = state.to_owned();
+    if i == j || y.len() < 3 * (i.max(j) + 1) {
+        return y;
+    }
+    let mut mid = [0.0; 3];
+    let mut edge = [0.0; 3];
+    for k in 0..3 {
+        mid[k] = 0.5 * (y[3 * i + k] + y[3 * j + k]);
+        edge[k] = y[3 * j + k] - y[3 * i + k];
+    }
+    let bodies = y.len() / 6;
+    let mut arm = [0.0; 3];
+    let mut found = false;
+    for body in 0..bodies {
+        if body == i || body == j {
+            continue;
+        }
+        for k in 0..3 {
+            arm[k] = y[3 * body + k] - mid[k];
+        }
+        found = true;
+        break;
+    }
+    if !found {
+        return y;
+    }
+    let mut normal = [
+        edge[1] * arm[2] - edge[2] * arm[1],
+        edge[2] * arm[0] - edge[0] * arm[2],
+        edge[0] * arm[1] - edge[1] * arm[0],
+    ];
+    let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+    if norm < 1.0e-8 {
+        return y;
+    }
+    for value in &mut normal {
+        *value /= norm;
+    }
+    for body in [i, j] {
+        let mut radius = [0.0; 3];
+        for k in 0..3 {
+            radius[k] = state[3 * body + k] - mid[k];
+        }
+        let dot = normal[0] * radius[0] + normal[1] * radius[1] + normal[2] * radius[2];
+        let cross = [
+            normal[1] * radius[2] - normal[2] * radius[1],
+            normal[2] * radius[0] - normal[0] * radius[2],
+            normal[0] * radius[1] - normal[1] * radius[0],
+        ];
+        for k in 0..3 {
+            y[3 * body + k] = mid[k] + normal[k] * dot + cross[k];
+        }
+    }
+    y
+}
+
 /// True when every pair of rigid centres is at least `min_d` apart.
 fn rigid_centres_clear(state: ArrayView1<f64>, n: usize, min_d: f64) -> bool {
     if n < 2 || state.len() < 3 * n || !(min_d > 0.0) {
@@ -3816,6 +3878,45 @@ where
                 Some((energy, state)) if state.len() == x.len() => (energy, state),
                 _ => (e, x.clone()),
             };
+            // The reference cage is square-rich. The misses that remain are
+            // pentagon-rich, and closing one missing square quenches back.
+            // A right-angle swing of a contact leaves that cage.
+            {
+                let shell2 = (cfg.min_separation * 1.25) * (cfg.min_separation * 1.25);
+                let mut swing_rng = StdRng::seed_from_u64(key ^ 0x51A5);
+                let mut best_swing: Option<(f64, Array1<f64>)> = None;
+                for _ in 0..4 {
+                    let i = swing_rng.random_range(0..cfg.n_points);
+                    let j = swing_rng.random_range(0..cfg.n_points);
+                    if i == j {
+                        continue;
+                    }
+                    let mut d2 = 0.0;
+                    for k in 0..3 {
+                        let d = x[3 * i + k] - x[3 * j + k];
+                        d2 += d * d;
+                    }
+                    if d2 <= 0.0 || d2 >= shell2 {
+                        continue;
+                    }
+                    let trial = rigid_bond_swing(x.view(), i, j);
+                    let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
+                    if quenched.is_finite()
+                        && rigid_centres_clear(
+                            relaxed.view(),
+                            cfg.n_points,
+                            0.5 * cfg.min_separation,
+                        )
+                        && best_swing.as_ref().is_none_or(|(held, _)| quenched < *held)
+                    {
+                        best_swing = Some((quenched, relaxed));
+                    }
+                }
+                if let Some((energy, state)) = best_swing {
+                    side_energy = energy;
+                    side_state = state;
+                }
+            }
             let mut side_rng = StdRng::seed_from_u64(
                 (hops as u64)
                     .wrapping_mul(0x9E37_79B9_7F4A_7C15)
