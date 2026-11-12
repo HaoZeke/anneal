@@ -1,85 +1,48 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Write the TOC graphic slot at the JCTC size, 3.25 in by 1.75 in.
-
-The drawing is three labeled boxes: potential, hop, and bank.
-No campaign count is printed. From the repository root:
-
-    python3 paper/jctc/scripts/toc_graphic.py
-"""
+"""Table-of-contents graphic, 3.25 in by 1.75 in, with the LJ38 count filled in."""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-WIDTH = 3.25 * 72
-HEIGHT = 1.75 * 72
+import matplotlib
 
-
-def stream() -> bytes:
-    """PDF content stream: a frame and three boxes."""
-    boxes = [
-        (12, 36, 66, 78, "potential"),
-        (90, 36, 144, 78, "hop"),
-        (168, 36, 222, 78, "bank"),
-    ]
-    parts = ["0.15 w", "12 18 210 96 re S"]
-    for x0, y0, x1, y1, _label in boxes:
-        parts.append(f"{x0} {y0} {x1 - x0} {y1 - y0} re S")
-    parts.append("BT /F1 9 Tf")
-    for x0, y0, x1, _y1, label in boxes:
-        parts.append(f"1 0 0 1 {x0 + 4} {y0 + 16} Tm ({label}) Tj")
-    parts.append("ET")
-    body = "\n".join(parts).encode("ascii")
-    return body
-
-
-def pdf(body: bytes) -> bytes:
-    objects = []
-    objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
-    objects.append(
-        b"<< /Type /Pages /Count 1 /Kids [3 0 R] >>"
-    )
-    media = f"[0 0 {WIDTH:.2f} {HEIGHT:.2f}]".encode("ascii")
-    objects.append(
-        b"<< /Type /Page /Parent 2 0 R /MediaBox "
-        + media
-        + b" /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>"
-    )
-    objects.append(
-        b"<< /Length "
-        + str(len(body)).encode("ascii")
-        + b" >>\nstream\n"
-        + body
-        + b"\nendstream"
-    )
-    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
-    out = bytearray(b"%PDF-1.4\n")
-    offsets = [0]
-    for index, obj in enumerate(objects, start=1):
-        offsets.append(len(out))
-        out += f"{index} 0 obj\n".encode("ascii") + obj + b"\nendobj\n"
-    xref = len(out)
-    out += f"xref\n0 {len(objects) + 1}\n".encode("ascii")
-    out += b"0000000000 65535 f \n"
-    for offset in offsets[1:]:
-        out += f"{offset:010d} 00000 n \n".encode("ascii")
-    out += (
-        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
-        f"startxref\n{xref}\n%%EOF\n"
-    ).encode("ascii")
-    return bytes(out)
+matplotlib.use("pdf")
+import matplotlib.pyplot as plt
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 
 
 def main(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
-    if args:
-        dest = Path(args[0])
-    else:
-        dest = Path(__file__).resolve().parents[1] / "figs" / "toc-graphic.pdf"
+    dest = Path(args[0]) if args else Path(__file__).resolve().parents[1] / "figs" / "toc-graphic.pdf"
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(pdf(stream()))
+    figure, axis = plt.subplots(figsize=(3.25, 1.75))
+    axis.set_xlim(0, 3.25)
+    axis.set_ylim(0, 1.75)
+    axis.axis("off")
+    boxes = [
+        (0.10, 0.55, 0.95, 0.95, "#d9efe8", "LJ38\n6/6 hits\n400000 calls"),
+        (1.15, 0.55, 0.95, 0.95, "#d6e6f5", "One hop\nquench, then\nMetropolis"),
+        (2.20, 0.55, 0.95, 0.95, "#f8e3c4", "Library fixed\nsurface list\nchanges at 98"),
+    ]
+    for x, y, width, height, colour, text in boxes:
+        axis.add_patch(
+            FancyBboxPatch(
+                (x, y), width, height,
+                boxstyle="round,pad=0.02,rounding_size=0.06",
+                facecolor=colour, edgecolor="#222222", linewidth=0.8,
+            )
+        )
+        axis.text(x + width / 2, y + height / 2, text, ha="center", va="center", fontsize=7)
+    for left, right in ((1.05, 1.15), (2.10, 2.20)):
+        axis.add_patch(
+            FancyArrowPatch((left, 1.02), (right, 1.02), arrowstyle="-|>", mutation_scale=8, linewidth=0.8, color="#222222")
+        )
+    axis.text(0.10, 0.22, "Shared starts. GMIN hits 3/6 at this size.", fontsize=7)
+    figure.savefig(dest)
+    plt.close(figure)
 
 
 if __name__ == "__main__":

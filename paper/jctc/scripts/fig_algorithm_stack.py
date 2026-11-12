@@ -25,8 +25,7 @@ import figstyle
 
 CHAINS = ("chain 1", "chain 2", "chain 3", "\N{HORIZONTAL ELLIPSIS}", "chain 40")
 POTENTIALS = (
-    "Lennard-Jones", "Morse", "Sutton-Chen", "EMT", "EAM", "Stillinger-Weber",
-    "Tersoff", "TIP4P", "GFN2-xTB", "GFN-FF", "PBE/6-31G*", "PET-MAD",
+    "Lennard-Jones", "TIP4P", "GFN2-xTB", "Gupta",
 )
 WIDTH = figstyle.DOUBLE
 HEIGHT = 3.35
@@ -89,10 +88,9 @@ def draw(out: Path) -> None:
     )
 
     engine = figstyle.box(ax, 0.15, 0.18, 1.2, 0.52, "rgpot: energy and\nforces through\none interface")
-    chip, gap, left = 0.78, 0.05, 1.45
+    chip, gap, left = 1.15, 0.08, 1.45
     for i, name in enumerate(POTENTIALS):
-        column, line = i % 6, i // 6
-        figstyle.box(ax, left + column * (chip + gap), 0.45 - line * 0.27, chip, 0.22, name, size=figstyle.SMALLEST)
+        figstyle.box(ax, left + i * (chip + gap), 0.32, chip, 0.28, name, size=figstyle.SMALLEST)
     centre = quench[0] + quench[2] / 2
     figstyle.arrow(ax, (engine[0] + engine[2], 0.44), (left, 0.44), both=True)
     figstyle.arrow(ax, (centre, 0.74), (centre, row), both=True)

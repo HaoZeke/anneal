@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import figstyle
 
-ARMS = ("single", "surface", "sym", "burst", "soap", "resample")
+ARMS = ("single", "surface", "sym", "burst", "soap")
 CONTINUE = Fraction(2, 3)
 CAP = 8
 
@@ -55,7 +55,7 @@ def draw(out: Path) -> None:
         fill=figstyle.TEAL + "33",
     )
     accept = figstyle.box(
-        ax, 0.7, 0.3, 2.4, 0.32, "one acceptance test on the quenched energy\nplus the bias, at temperature $T$", fill=figstyle.SUNSHINE + "66"
+        ax, 0.55, 0.3, 2.7, 0.32, "one acceptance test on the quenched energy\nplus the basin bias, at temperature $T$", fill=figstyle.SUNSHINE + "66"
     )
     for i, name in enumerate(ARMS):
         x = left + i * (width + gap)

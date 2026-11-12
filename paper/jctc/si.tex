@@ -1,11 +1,11 @@
 % Copyright (c) anneal developers
 \documentclass[journal=jctcce,manuscript=suppinfo]{achemso}
-\usepackage{booktabs,longtable,siunitx,seqsplit}
+\usepackage{booktabs,longtable,siunitx,amsmath}
 \sisetup{scientific-notation=true,exponent-product=\times}
 \graphicspath{{figs/}}
 \input{macros}
-\title{Basin hopping on Lennard-Jones clusters
-with one preset at every size}
+\title{Basin hopping for atomic clusters
+with a fixed move library}
 \author{Rohit Goswami}
 \affiliation{SURF B.V., Amsterdam}
 \alsoaffiliation{Science Institute, University of Iceland,
@@ -30,219 +30,213 @@ Indian Institute of Technology Kanpur, Kanpur, India}
 \email{dgoswami@iitk.ac.in}
 \begin{document}
 
-\section{Board constants}
-We read a hit as an energy strictly below the reference plus \(0.001\),
-taken from a converged improvement.
-The references, in reduced units, are \(-173.928427\) for LJ\(_{38}\),
-\(-279.248470\) for LJ\(_{55}\), and \(-397.492331\) for LJ\(_{75}\).
-LJ\(_{98}\) uses \(-543.665361\), and LJ\(_{104}\) uses \(-582.086642\).
-The temperature is \(0.8\), the value Wales and Doye used for.
-Lennard-Jones basin hopping and the value stored at
-\texttt{preset.rs:8}.
-\cite{wales1997} The start density passed to \texttt{random\_cluster} is
-\(0.7\).
-The function comment calls the draw liquid-like.
+\section{Rank weights and communicating chains}
+The preset in the article holds the temperature at \(0.8\) in reduced units.
+A population of chains can instead be reweighted by within-epoch ranks.
+Positions in a population of \(R\ge 2\) replicas run from \(0\) to \(R-1\).
+A tied block from \(b\) inclusive to \(e\) exclusive receives the average rank
+\begin{equation}
+r=(b+e-1)/(2(R-1)).
+\end{equation}
+A lower energy receives a lower rank.
+The energy rank \(r_E\), the novelty rank \(r_N\), the scarcity rank \(r_S\) and the uncertainty rank \(r_U\) combine as
+\begin{equation}
+\log w_i=-r_{E,i}+0.8\,r_{N,i}+0.6\,r_{S,i}+0.4\,r_{U,i}.
+\end{equation}
+No sweep of the coefficients \(0.8\), \(0.6\) and \(0.4\) is in the campaigns of the article, and those weights do not set the temperature of the tables.
 
-\section{Plain walk}
-We run one further process on the recommended preset at 38 atoms.
-With the stall exits.
-And the Bayes screen turned off, seed 0, budget 30000.
-We keep the record in \texttt{logs/lj38-plain-seed0.log}.
-The best energy in that log is \PlainEnergy.
-After \PlainCalls{} charged evaluations.
+A bank of chains is called communicating when five conditions hold.
+Each chain draws its next move from a posterior on the depth that move reaches.
+A packing retires on the Good-Turing estimate of its unseen mass.
+Minima are shared under one radial merge distance.
+Every force evaluation is charged to the chain that spent it.
+The receiver can quench a shared minimum and enter it in the acceptance test.
+The campaigns in the article are single chains.
+Parallel tempering, population annealing, conformational space annealing, and cut-and-splice mating are the neighbouring methods.\cite{swendsenReplicaMonteCarlo1986,hukushimaExchangeMonteCarlo1996,hukushimaPopulationAnnealingIts2003,machtaPopulationAnnealingWeighted2010,leeUnbiasedGlobalOptimization2003,deaven1995,geudtner2025}
 
-\section{Published symmetrised costs}
-\texttt{data/literature.tsv} quotes Oakley, Johnston and Wales, Table 1.
-\cite{oakley2013} The continuous-symmetry basin-hopping mean.
-At 38 atoms is 4369 evaluations over 100 successful runs.
-The same file's Table 2 rows are genetic-algorithm means.
-At 75 and 98 atoms.
-No row in that file is a genetic algorithm at 104 atoms.
+\section{Oakley means}
+Oakley, Johnston and Wales report means over successful runs with no call cap.\cite{oakley2013}
+The continuous-symmetry basin-hopping mean at 38 atoms is 4369 evaluations over 100 runs.
+The core-orbit mean at 75 atoms is 50229 evaluations over 100 runs.
+The core-orbit genetic-algorithm means are 87250 at 75 atoms and 178651 at 98 atoms.
+These means are not PAR-2 values and they are not medians of a capped sample.
 
-\section{TIP4P pair constants}
-\texttt{logs/tip4p\_constants.txt} records Jorgensen's \(A = 2510400\)
-and \(C = 2552.24\).
-\cite{jorgensen1983} The units are kJ \AA\(^{12}\) per mole and kJ
-\AA\(^{6}\) per mole.
-The Wales-group basin-hopping program (GMIN) matches those two numbers.
-In \(C_6\) and \(C_{12}\).
-A rounded well depth and a rounded \(\sigma\) give the anneal pair.
-\(C_6 = 2551.8252\) and \(C_{12} = 2510336.2\).
-These two coefficients are the TIP4P pair in the log.
-The GFN2-xTB hexamer rows are a separate comparison.
+\section{Earlier multi-code campaign}
+The rows below are an earlier campaign.
+The recommended arm in that campaign still changed with the atom count.
+On LJ\(_{98}\) it hits 36 of 64 against 61 of 64 for GMIN basin hopping.
+On TIP4P with 15 molecules it hits 0 of 64 against 64 of 64.
+On TIP4P with 20 molecules it hits 0 of 16 against 8 of 16 for GMIN basin hopping and 10 of 16 for the GMIN tipping-and-basin-hopping row.
+{\scriptsize
+\input{tables/campaign.tex}
+}
 
-\section{Earlier campaign}
-\texttt{data/campaign-scores.csv} is an earlier 64-seed campaign, and on
-TIP4P\(_{20}\) a 16-seed campaign.
-Its recommended rows were scored.
-With a preset that still branched on the atom count.
-\texttt{data/lj55\_lj98/seeds.csv} scores LJ\(_{98}\).
-By the energy rule.
-The raw run logs for the LJ\(_{98}\) rows of that seed file are not in this record.
-None of those rows is the LJ\(_{75}\) campaign of 200 seeds.
-OGOLEM, cited as Dieterich and Hartke, is in the campaign file at 6 of
-64 on LJ\(_{104}\).
-\cite{dieterich2010} ABCluster, cited as Zhang and Dolg.
-Is in the same file.
-\cite{zhang2015} The seed file is the record of those LJ\(_{98}\)
-medians.
+A paired file of 64 seeds, with an arm labelled full, records 24 of 64 hits against 64 of 64 for GMIN on LJ\(_{98}\).
+The median of the paired call ratios is 12.62, and 2000 resamples give the interval 8.52--15.22.
+On LJ\(_{55}\) that full arm hits 63 of 64 and GMIN hits 64 of 64.
+Plain basin hopping in the same file hits 26 of 64 on LJ\(_{55}\) and 7 of 64 on LJ\(_{98}\).
+ABCluster hits 64 of 64 on LJ\(_{55}\) and 1 of 64 on LJ\(_{98}\).
+Inside the family of those six comparisons, each with a McNemar test and a Wilcoxon test, the Holm-adjusted tests that remain below 0.05 are the losses of the full arm, plain basin hopping and ABCluster to GMIN on LJ\(_{98}\), and of plain basin hopping to GMIN on LJ\(_{55}\).
 
-\section{Hardware and reproduction}
-We keep the LJ75 receipt in \path{logs/lj75-hardware-receipt.txt}.
-We run \path{scripts/lj75_hardware_capture.sh}.
-That script writes the file.
-From the live process.
-The encounter-curve binary was built from tree.
-\seqsplit{37535ec1a6e99d47a2afe0752072a33af64dccb3}.
-The tree of the unpublished build commit.
-A public reader gets the archived blob-hash check only.
-That tree has copies of \texttt{bias.rs}, \texttt{neighbors.rs}
-and \texttt{potentials.rs}, the hot-path bench file, the newsfragment.
-and \texttt{precision-policy.org}.
-It lacks the \texttt{cluster\_hopping.rs} and \texttt{tip4p.rs} parts of
-that copy and the bench entry in \texttt{Cargo.toml}.
-Its \texttt{rigid\_body.rs} is a third version.
-Main's sealed LJ75 counts used restart on stall.
-And an empty surface list.
-This article uses the preset with restart left off.
-The encounter-curve figure draws that earlier campaign: the recommended.
-Hop, the derived hop, and the Wales-group basin-hopping program (GMIN),
-on 200 seeds.
-The panel prints that run's PAR-2 values.
-We keep the source archive at \path{logs/lj75-source-37535ec1.tar.xz}.
-It includes \texttt{LICENSE.txt}.
-The notice reads Copyright (c) 2023 anneal core developers.
-\path{scripts/lj75_rebuild_from_archive.sh} rebuilds the example.
-With the bank-rpc feature.
-We keep the build receipt in \path{logs/cargo-build-receipt.txt}.
-Against commit \texttt{da65cc6d}, \texttt{cluster\_hopping.rs} differs by 218 insertions
-and 2 deletions, \texttt{tip4p.rs} by 93 and 15, \texttt{rigid\_body.rs}
-by 52 and 14, \texttt{examples/molecular\_cluster.rs} by 1 insertion,
-\texttt{Cargo.toml} by 4 insertions and 1 deletion, and
-\texttt{Cargo.lock} by 55 deletions.
-On the recommended LJ\(_{75}\) path the hop reuses a pure.
-Distance descriptor.
-The added tests require a second call on the same coordinates to match.
-Bit for bit.
-The smooth overlap of atomic positions (SOAP) key still recomputes,
-because its basis learns.
-The hexamer engine digest is the \texttt{engine\_sha256} line of.
-\path{water/VERSIONS} inside \path{logs/logs-water.tar.xz}.
-That digest is.
-\seqsplit{4836648ee77203e9462d51e25a1970b3f0df3a3bcd126f9a7454f6896ac66df8}.
-The hexamer wall-time medians are in \path{logs/hexamer-walls.txt}.
+\section{CREST counters on the hexamer}
+The energy-and-gradient column is the cost used in the article.
+The other column is dynamics steps plus optimisation steps.
 
-\section{Structure plates, sketch-maps, and landfold}
-Reference plates: \ref{fig:si-structures} and \ref{fig:si-water}.
-Sketch-map of LJ\(_{38}\): \ref{fig:lj38-sketchmap}.
-Landscape of that size: \ref{fig:lj38-landscape}.
-LJ\(_{75}\) panel: \ref{fig:lj75-landscape}.
-LJ\(_{98}\) panel: \ref{fig:lj98-landscape}.
-Fold plots: \ref{fig:occ-landfold}, \ref{fig:occ-lj38},
-\ref{fig:occ-lj75}, \ref{fig:occ-lj98}.
+\begin{table}[h]
+\caption{CREST effort on the water hexamer.}
+\centering
+\begin{tabular}{crr}
+\toprule
+Seed & Dynamics plus optimisation & Energy and gradient \\
+\midrule
+0 & 32112 & 151074 \\
+1 & 50026 & 191132 \\
+2 & 32155 & 142110 \\
+3 & 46062 & 172468 \\
+4 & 50063 & 157643 \\
+5 & 32170 & 209931 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-\begin{figure}
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{water_crest.pdf}
+\caption{The two CREST counters on the hexamer.
+The cost in the article is the energy-and-gradient total.}
+\label{fig:si-crest}
+\end{figure}
+
+\section{TIP4P constants}
+Jorgensen's pair is \(A=2510400\)~kJ~\AA\(^{12}\)/mol and \(C=2552.24\)~kJ~\AA\(^{6}\)/mol.\cite{jorgensen1983}
+GMIN uses those two numbers as \(C_{12}\) and \(C_6\).
+The anneal TIP4P objective used for the campaign rows is built from \(\varepsilon=0.6485\)~kJ/mol and \(\sigma=3.15365\)~\AA, which produces \(C_6=2551.8252\) and \(C_{12}=2510336.2\).
+That pair is not \((A,C)\).
+The relative difference in the well depth is \(-3.0\times 10^{-4}\) and the relative difference in \(\sigma\) is \(2.3\times 10^{-5}\).
+A Cambridge energy on the Jorgensen pair is not an exact target at \(10^{-3}\) on the rounded surface.
+
+\section{Gupta clusters and the copper slab}
+Six seeds, serial.
+The ASE arm is a genetic algorithm.
+The wall ratio is the ASE median wall divided by the anneal median wall.
+
+\begin{table}[h]
+\caption{Gupta zinc and a copper-gold cluster.
+A blank call median means no hit, so the median of calls to a hit is undefined.}
+\centering
+\begin{tabular}{llrrrr}
+\toprule
+System & Arm & Hits & Budget & Median wall (s) & Ratio \\
+\midrule
+Zn\(_{38}\) & anneal & 1/6 & 50000 & 1.285 & 183 \\
+Zn\(_{38}\) & ASE & 2/6 & 50000 & 235.3 & 183 \\
+Zn\(_{55}\) & anneal & 0/6 & 80000 & 4.542 & 169 \\
+Zn\(_{55}\) & ASE & 0/6 & 80000 & 768.1 & 169 \\
+Zn\(_{75}\) & anneal & 0/6 & 100000 & 11.32 & 147 \\
+Zn\(_{75}\) & ASE & 0/6 & 100000 & 1659 & 147 \\
+Zn\(_{80}\) & anneal & 0/6 & 100000 & 13.24 & 158 \\
+Zn\(_{80}\) & ASE & 0/6 & 100000 & 2093 & 158 \\
+Cu\(_{19}\)Au\(_{19}\) & anneal & 0/6 & 80000 & 4.012 & 141 \\
+Cu\(_{19}\)Au\(_{19}\) & ASE & 0/6 & 80000 & 565.8 & 141 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The FCC Cu--H slab has eight seeds and reference \(-415.971529\)~eV.
+A hit is an energy below that reference plus \(0.001\)~eV.
+All eight seeds hit.
+The best energies run from \(-415.971521\)~eV to \(-415.971161\)~eV.
+The gaps above the reference run from \(8\times 10^{-6}\)~eV to \(3.68\times 10^{-4}\)~eV.
+Every gap is positive, and every gap lies inside the tolerance.
+
+\section{Structure plates}
+Figure~\ref{fig:si-structures} collects reference geometries.
+Some plates are clusters this article does not score.
+Figure~\ref{fig:si-water} prints \(-197.7805\)~kJ/mol on the TIP4P hexamer, the Cambridge value on Jorgensen's \(A\) and \(C\).
+The GFN2 and other plates on that figure are drawings.
+This article does not report a PBE energy.
+
+\begin{figure}[h]
 \centering
 \includegraphics[width=\textwidth]{si_structures.pdf}
-\caption{Reference minima of the benchmark.}
+\caption{Reference geometries.
+Plates that are not LJ, TIP4P, GFN2 or Gupta are not scored in the article.}
 \label{fig:si-structures}
 \end{figure}
-\begin{figure}
+\begin{figure}[h]
 \centering
 \includegraphics[width=\textwidth]{si_water.pdf}
-\caption{TIP4P plates and the hexamer classes.
-The hexamer plate prints \(-197.7805\)~kJ/mol.
-That is the Cambridge Cluster Database value.
-It uses the Jorgensen TIP4P constants C6 \(= 2552.24\) and C12.
-\(= 2510400\).
-anneal uses \(\varepsilon = 0.6485\)~kJ/mol and.
-\(\sigma = 3.15365\)~\AA.
-Its C6 is \(2551.8252\) and its C12 is \(2510336.2\).}
+\caption{Water plates.
+The printed hexamer energy is the TIP4P Cambridge value on Jorgensen's constants.}
 \label{fig:si-water}
 \end{figure}
-\begin{figure}
+
+\section{Maps}
+The sketch-map and the landscapes are sealed maps of one seed at each size.\cite{ceriotti2011}
+On LJ\(_{38}\) the recommended hop reaches the face-centred minimum.
+Basin hopping on that map sits \(2.429\) above it, and random structure search sits \(3.051\) above it.
+On LJ\(_{75}\) both arms sit \(1.210\) above the Marks decahedron, at the icosahedral energy \(-396.282249\).
+On LJ\(_{98}\) the recommended hop sits \(0.022\) above the Leary minimum and basin hopping sits \(0.119\) above it.
+Those gaps are outside the hit tolerance of \(0.001\), so the mapped seeds are not hits.
+The global-minimum marker can sit outside the cloud of accepted minima.
+
+\begin{figure}[h]
 \centering
 \includegraphics[width=\FigHalfWidth]{lj38_sketchmap.png}
-\caption{LJ\(_{38}\) sketch-map of the sealed landmarks.
-Colour is the quenched energy.
-The 600 landmarks pool basin hopping, the recommended hop.
-Random structure search and two references.
-The darkest point is the fcc minimum, which the recommended hop reaches.}
+\caption{LJ\(_{38}\) sketch-map.
+Colour is the quenched energy.}
 \label{fig:lj38-sketchmap}
 \end{figure}
-\begin{figure}
+\begin{figure}[h]
 \centering
 \includegraphics[width=\FigHalfWidth]{lj38_landscape.png}
-\caption{LJ\(_{38}\) landscape on that sketch-map.
-Colour is the energy above the global minimum.
-Basin hopping sits \(2.429\) above it.
-Random structure search sits \(3.051\) above it.}
+\caption{LJ\(_{38}\) landscape.
+Colour is the energy above the global minimum.}
 \label{fig:lj38-landscape}
 \end{figure}
-\begin{figure}
+\begin{figure}[h]
 \centering
 \includegraphics[width=\FigHalfWidth]{lj75_landscape.png}
-\caption{LJ\(_{75}\) landscape on its sketch-map.
-Colour is the energy above the Marks decahedron.
-Basin hopping and the recommended hop both sit \(1.210\) above it.}
+\caption{LJ\(_{75}\) landscape.
+Both arms sit \(1.210\) above the Marks decahedron.}
 \label{fig:lj75-landscape}
 \end{figure}
-\begin{figure}
+\begin{figure}[h]
 \centering
 \includegraphics[width=\FigHalfWidth]{lj98_landscape.png}
-\caption{LJ\(_{98}\) landscape on its sketch-map.
-Colour is the energy above the Leary minimum.
-The recommended hop sits \(0.022\) above it.
-Basin hopping sits \(0.119\) above it.}
+\caption{LJ\(_{98}\) landscape.
+The recommended hop sits \(0.022\) above the Leary minimum.}
 \label{fig:lj98-landscape}
 \end{figure}
-\begin{figure}
+
+Figure~\ref{fig:link} links LJ\(_{38}\) minima that are neighbours in a coordination descriptor.
+A join is the level at which two sets first meet in that graph.
+The search records no transition states, so a join is not a barrier.
+The legend repeats community labels at several energies.
+Figure~\ref{fig:landfold} shows occupancy folds of the packing book.
+Several panels contain only a few points.
+The colour is the scale drawn on the figure.
+A temperature for that scale is not stated.
+The arms are not marked on the occupancy panels.
+
+\begin{figure}[h]
 \centering
-\includegraphics[width=\FigHalfWidth]{occupancy_landfold.pdf}
-\caption{Occupancy folds of LJ\(_{38}\), LJ\(_{75}\) and LJ\(_{98}\).
-Each panel is energy above the lowest minimum.
-Against the fold coordinate.}
-\label{fig:occ-landfold}
+\includegraphics[width=\linewidth]{disconnectivity.pdf}
+\caption{Nearest-neighbour linkage of LJ\(_{38}\) minima in the coordination descriptor.
+Minima closer than \(0.15\) are merged.
+A join is not a barrier.}
+\label{fig:link}
 \end{figure}
-\begin{figure}
+\begin{figure}[h]
 \centering
-\includegraphics[width=\FigHalfWidth]{occupancy_landfold_lj38.pdf}
-\caption{LJ\(_{38}\) occupancy fold.
-The arms are not marked.
-In the sealed table, the recommended hop reaches the fcc minimum.
-And basin hopping stops \(2.429\) above it.}
-\label{fig:occ-lj38}
-\end{figure}
-\begin{figure}
-\centering
-\includegraphics[width=\FigHalfWidth]{occupancy_landfold_lj75.pdf}
-\caption{LJ\(_{75}\) occupancy fold.
-The arms are not marked.
-In the sealed table.
-Both arms stop \(1.210\) above the Marks decahedron.}
-\label{fig:occ-lj75}
-\end{figure}
-\begin{figure}
-\centering
-\includegraphics[width=\FigHalfWidth]{occupancy_landfold_lj98.pdf}
-\caption{LJ\(_{98}\) occupancy fold.
-The arms are not marked.
-In the sealed table.
-The recommended hop stops \(0.022\) above the Leary minimum.
-And basin hopping \(0.119\) above it.}
-\label{fig:occ-lj98}
+\includegraphics[width=\textwidth]{landfold_maps.pdf}
+\caption{Occupancy-fold panels.
+Several panels are sparse.
+The colour scale is the one drawn on the figure.}
+\label{fig:landfold}
 \end{figure}
 
-\section{Copper slab}
-The hit tolerance is 0.001 eV.
-The script is \texttt{scripts/elja\_hq\_sci\_molslab\_bank.sh}.
-The lines are 118 and 119.
-TARGET\_TOL there is 1e-3.
-The reference is -415.971529 eV.
-The per-seed gaps run from 8e-6 eV to 3.68e-4 eV above that reference.
-Each gap misses the reference energy.
-Eight seeds lie inside the 0.001 eV tolerance.
+One further 38-atom walk, with climb and symmetrisation off, seed 0 and a budget of 30000 charged evaluations, reaches \(-173.928427\).
 
 \bibliography{refs}
-
 \end{document}
