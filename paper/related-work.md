@@ -557,3 +557,13 @@ Woo, arXiv:2611.13143 (9 November 2026), runs an agent loop on algorithms in the
 The missing ASE arm is basin hopping on tag 3.29.0. This preprint is a local relaxation and a band calculation. It does not run that arm, and it publishes no basin-hopping hit rate. ASE tag 3.29.0, checked again on 12 November 2026, is still the newest tag, and the master tip is still the 11 November 2026 merge. AGOX is still v3.11.1, CREST is still v3.0.2 with the 16 June 2026 master tip, pele is still v0.1.2, and xtb is still v6.8.0. The preprint does not contradict the open count, because no ASE number is printed. A comparison that uses these optimisers has to be named as this local relaxation. Its force-call ratio is not the hop's hit rate.
 
 Cite `wooAseOptimizers2026`. Keep the open arm on stock basin hopping in ASE 3.29.0.
+
+## 2026-11-12 — GrowPAL
+
+López-Castro, Ortiz-Chi, and Merino, Journal of Chemical Theory and Computation 20, 4939--4948 (2024), doi:10.1021/acs.jctc.4c00365, introduce GrowPAL. An interstitial addition builds a seed of \(n+1\) atoms from a cluster of \(n\) atoms. The abstract says the Lennard-Jones tests run through 80 atoms, and that the search finds the LJ38 minimum and the partially icosahedral LJ69 minimum with fewer local optimisations than the methods they compare. A deconstruction of the growth path names the forebear of a minimum. On Sutton-Chen clusters from 5 to 80 atoms the abstract reports three new lowest-energy forms. On boron clusters from 8 to 15 atoms it reports the known minima.
+
+The manuscript sizes 38 and 55 sit inside that range, and so does 75. The abstract does not name LJ75, LJ98, or LJ104, and it gives no energy below the Cambridge values. A count of local optimisations is not the force-call hit rate. The three new forms are Sutton-Chen energies. They do not contradict the Cambridge Lennard-Jones targets, 121 of 192, or 97 of 192.
+
+The repository that continues the search says the 2024 tests showed the growth strategy through 74 atoms, and that a later diversity-preserving selection recovers the reported Lennard-Jones minima through 130 atoms, including LJ75 through LJ78, LJ98, and LJ102 through LJ104. That statement is the repository, not the 2024 abstract. It names the reported minima, so it does not contradict the hit targets. A head-to-head is LJ38, LJ75, LJ98, and LJ104, at one relaxation budget, against this growth search. The growth step is not the manuscript's move library. No bibliographic entry for the repository: it has no verified DOI or arXiv id.
+
+Cite `lopezCastroGrowpal2024`. Keep the Sutton-Chen forms out of the Lennard-Jones table. The open arms stay on ASE 3.29.0, AGOX v3.11.1, CREST 3.0.2, and pele 0.1.2. Those tags were unchanged on this check.
