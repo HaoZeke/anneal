@@ -4,6 +4,13 @@
 //! search result. A faster evaluation path has to leave them unchanged.
 //! The recommended full quench is 1000 steps, so this pin is that
 //! trajectory, not the earlier 200-step one.
+//!
+//! The hash is the scalar, portable-libm walk. Host `exp` and the NEON
+//! dot product are a different trajectory: every macOS runner produced
+//! `4f747b8c…` while glibc produced `31a8df4a…` from the same source.
+//! Proposals, the acceptance test, the SOAP cutoff and the pair force go
+//! through one implementation, and this test forces rgmin's scalar dots,
+//! so one seed has one hash on every target.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, random_cluster_in_radius, run_with_gradient,
@@ -19,6 +26,9 @@ const ATOMS: usize = 98;
 const BUDGET: usize = 5_000;
 
 fn trajectory_hash() -> String {
+    // AVX2, AVX-512 and NEON dots are not the same quench. Scalar `mul_add`
+    // is the path every target can run.
+    let _ = rgmin::vecops::force_simd_path("scalar");
     let cfg = Config::recommended(ATOMS);
     let potential = PairPotential::lennard_jones(ATOMS);
     let mut rng = StdRng::seed_from_u64(SEED);
@@ -76,7 +86,7 @@ fn trajectory_hash() -> String {
 fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     let hash = trajectory_hash();
     assert_eq!(
-        hash, "31a8df4a366b0323077240a516769f208b23377549479f9a2ceb9dbd6be92b0f",
+        hash, "c6233151644f6d3c0b8a35ae965ee36d4a306543d58cc08c1b3569e6227d16b9",
         "trajectory hash changed: {hash}"
     );
 }

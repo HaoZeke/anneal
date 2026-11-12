@@ -2282,7 +2282,8 @@ impl ClusterMove {
                         for k in 0..3 {
                             let u1 = rng.random::<f64>().max(1e-12);
                             let u2 = rng.random::<f64>();
-                            dir[k] = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
+                            dir[k] = super::portable_sqrt(-2.0 * super::portable_ln(u1))
+                                * super::portable_cos(std::f64::consts::TAU * u2);
                             norm += dir[k] * dir[k];
                         }
                         let norm = norm.sqrt().max(1e-12);
