@@ -25,6 +25,9 @@ import sys
 from pathlib import Path
 
 PAPER_BUDGETS = {
+    38: 400_000,
+    55: 1_000_000,
+    75: 4_000_000,
     98: 4_000_000,
     104: 4_000_000,
 }
@@ -349,9 +352,10 @@ def self_test() -> None:
     median, iqr = median_iqr(sample)
     if abs(median - 3.5) > 1e-12 or abs(iqr - 2.5) > 1e-12:
         raise SystemExit("median iqr")
-    if any(PAPER_BUDGETS[n] != 4_000_000 for n in (98, 104)):
+    expected = {38: 400_000, 55: 1_000_000, 75: 4_000_000, 98: 4_000_000, 104: 4_000_000}
+    if PAPER_BUDGETS != expected:
         raise SystemExit("paper budgets")
-    if set(PAPER_BUDGETS) != {98, 104}:
+    if SIZES != (98, 104):
         raise SystemExit("sizes")
     order = schedule(SIZES, SEEDS, ARMS, SCHEDULE_SEED)
     seen: list[int] = []
