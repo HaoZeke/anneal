@@ -3043,7 +3043,18 @@ where
     }
 
     let stop = loop {
-        if ledger.stopped() || ledger.target_reached() || ledger.remaining() == 0 {
+        // A finished checkpoint interval is delivered before the budget
+        // exit. The loop otherwise returns here with nothing left to
+        // charge, and the callback that the last hop completed never runs.
+        let interval_finished = matches!(
+            (checkpoint_interval, next_checkpoint),
+            (Some(_), Some(threshold))
+                if hops > checkpoint_hops && ledger.spent() >= threshold
+        );
+        if ledger.stopped()
+            || ledger.target_reached()
+            || (ledger.remaining() == 0 && !interval_finished)
+        {
             break HopStop::of_closed(ledger);
         }
         // The cap is read here because every early `continue` returns here,
