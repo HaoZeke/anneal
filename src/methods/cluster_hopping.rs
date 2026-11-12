@@ -2607,6 +2607,20 @@ fn species_count(species: &[u32]) -> usize {
     labels.len()
 }
 
+/// The all-pairs quench is an atomic binary homotop.
+///
+/// Water carries oxygen and hydrogen labels too, and so does a rigid
+/// body. Swapping those atoms breaks the molecule. The polish belongs
+/// on an atomic library, where the labels are the sites being ordered.
+fn polishes_unlike_pairs(cfg: &Config) -> bool {
+    if cfg.move_library.is_molecular() || cfg.move_library.is_rigid_body() {
+        return false;
+    }
+    cfg.species
+        .as_deref()
+        .is_some_and(|species| species_count(species) >= 2)
+}
+
 fn species_groups(species: &[u32]) -> (Vec<usize>, Vec<usize>) {
     let mut labels = Vec::new();
     for label in species {
@@ -3587,12 +3601,13 @@ where
         // Every unlike pair, quenched, kept when it is lower. One random
         // exchange every fourth hop does not finish the ordering. Absent
         // unless two labels are present, so an unlabelled chain is unchanged.
-        if let Some(species) = cfg.species.as_deref()
-            && species_count(species) >= 2
+        // A molecular or rigid library keeps its atoms inside a body.
+        if polishes_unlike_pairs(cfg)
             && ledger.best.is_finite()
             && (polished_best.is_nan() || ledger.best < polished_best - 1e-8)
             && let Some(best_state) = ledger.best_state.clone()
         {
+            let species = cfg.species.as_deref().expect("a binary polish has species");
             let mut current = best_state;
             let mut current_e = ledger.best;
             let (group_a, group_b) = species_groups(species);
@@ -8513,6 +8528,23 @@ mod group_move_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_molecular_water_search_is_not_a_binary_homotop() {
+        let species = crate::catalog::molecular::water_species(4).expect("species");
+        let groups = crate::catalog::molecular::water_groups(4).expect("groups");
+        let mut water = Config::recommended_molecular(species, groups.clone(), 1.0);
+        water.move_library = MoveLibrary::Molecular {
+            groups,
+            reactive: false,
+            reverse_cycles: true,
+        };
+        assert!(!polishes_unlike_pairs(&water));
+        assert!(!polishes_unlike_pairs(&Config::for_tip4p(4)));
+        let binary = Config::recommended(6).with_species(vec![29, 29, 29, 79, 79, 79], None);
+        assert!(polishes_unlike_pairs(&binary));
+        assert!(!polishes_unlike_pairs(&Config::recommended(6)));
+    }
 
     #[test]
     fn an_arm_count_separates_proposals_from_accepts_and_improvements() {
