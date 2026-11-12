@@ -2570,10 +2570,28 @@ mod tests {
         // the Cartesian transform, which carries no entropy and no
         // tempering, and a two-atom toy reports the same hill either way
         // whatever is standing on it.
+        //
+        // The height is the slope of E along the centre-of-mass-free
+        // packing mode. A uniform force is a translation, and
+        // [`strip_com`] leaves every mode orthogonal to it, so that dot
+        // product is a rounding residual. Its sign flipped when the SOAP
+        // cutoff moved from the host libm onto the portable one, and the
+        // fresh hill collapsed to zero on every platform. The force below
+        // is the mode itself, so the slope is \(1/\|P\|\) wherever the
+        // basis is evaluated and the e-fold is the only thing measured.
         let origin = ico13();
         let mut x = origin.clone();
         x[3] += 0.25;
-        let g = Array1::from(vec![0.05; origin.len()]);
+        let mu = packing_mean(x.view()).expect("the displaced icosahedron has a packing mean");
+        let mu_k = packing_mean(origin.view()).expect("the icosahedron has a packing mean");
+        let jacobian = jacobian_nu3(x.view(), PACKING_SPEC, None);
+        let (mode, r_phi, p_norm) = lift_packing_mode(x.view(), mu.view(), mu_k.view(), &jacobian)
+            .expect("the displacement lifts a packing mode");
+        assert!(
+            r_phi > 1e-12 && p_norm > 1e-15,
+            "the mode must sit off the well, r_phi={r_phi} ||P||={p_norm}"
+        );
+        let g = mode;
         let fresh = vec![crate::catalog::PackingReference {
             coordinates: origin.to_vec(),
             visits: 1,
