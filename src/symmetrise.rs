@@ -1029,7 +1029,7 @@ pub fn shell_core_group(x: ArrayView1<f64>, n: usize, spec: &ShellCore) -> Optio
         let mut num = [0.0; 3];
         let mut den = 0.0;
         for a in 0..n {
-            let w = (-spec.decay * distance(point(x, a), c)).exp();
+            let w = libm::exp(-spec.decay * distance(point(x, a), c));
             for k in 0..3 {
                 num[k] += w * x[3 * a + k];
             }

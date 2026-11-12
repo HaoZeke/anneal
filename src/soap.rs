@@ -972,8 +972,8 @@ pub fn kick_packing_nu3<R: Rng + ?Sized>(
     for v in &mut u {
         let a: f64 = rng.random();
         let b: f64 = rng.random();
-        let r = (-2.0 * a.max(1e-15).ln()).sqrt();
-        *v = r * (2.0 * PI * b).cos();
+        let r = libm::sqrt(-2.0 * libm::log(a.max(1e-15)));
+        *v = r * libm::cos(2.0 * PI * b);
     }
     let proj = u.iter().zip(mu.iter()).map(|(a, c)| a * c).sum::<f64>();
     let n2 = mu.iter().map(|c| c * c).sum::<f64>();
@@ -1344,7 +1344,7 @@ fn class_softmax(phi: ArrayView1<f64>, proto: &[Array1<f64>; 3], tau: f64) -> [f
     let mut m = [0.0; 3];
     let mut z = 0.0;
     for a in 0..3 {
-        m[a] = (-(d2[a] - lo) / tau).exp();
+        m[a] = libm::exp(-(d2[a] - lo) / tau);
         z += m[a];
     }
     let z = z.max(1e-300);
@@ -2691,7 +2691,7 @@ fn radial(n: usize, r: f64, rcut: f64) -> f64 {
         return if n == 0 { 1.0 } else { 0.0 };
     }
     let u = (r / rcut).clamp(0.0, 1.0);
-    u.powi(n as i32) * (-0.5 * (r / (rcut / 3.0)).powi(2)).exp()
+    u.powi(n as i32) * libm::exp(-0.5 * (r / (rcut / 3.0)).powi(2))
 }
 
 fn dradial(n: usize, r: f64, rcut: f64) -> f64 {
@@ -2707,7 +2707,7 @@ fn fcut(r: f64, rcut: f64) -> f64 {
     if r >= rcut {
         0.0
     } else {
-        0.5 * (1.0 + (PI * r / rcut).cos())
+        0.5 * (1.0 + libm::cos(PI * r / rcut))
     }
 }
 
@@ -2715,7 +2715,7 @@ fn dfcut(r: f64, rcut: f64) -> f64 {
     if r >= rcut || r <= 0.0 {
         0.0
     } else {
-        -0.5 * (PI / rcut) * (PI * r / rcut).sin()
+        -0.5 * (PI / rcut) * libm::sin(PI * r / rcut)
     }
 }
 

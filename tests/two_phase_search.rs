@@ -34,11 +34,13 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 /// proposals, the initial cluster and the acceptance test now call the
 /// `libm` crate, the pair force is an IEEE `mul_add`, and
 /// `search_lennard_jones` is monomorphized in the library and forces
-/// rgmin's scalar dot product. The AVX-512 and AVX2 clones match that
-/// mask on x86. The NEON clone does not: macOS reported plain mask
-/// `0x9204`. Five reruns of the scalar path, at one thread and at
-/// eight, all gave the same masks. The `ira` feature replaces the
-/// permutation and has its own mask, measured on the feature build.
+/// rgmin's scalar dot product. AVX2, AVX-512, and an aarch64 Linux
+/// build all reproduce the x86 mask, so the NEON clone is not the
+/// split. macOS still reported plain mask `0x9204` from that scalar
+/// path. The screen's log-linear stop, the SOAP cutoff, and the shell
+/// weight were still calling host `exp`/`sin`/`cos`; they now call the
+/// `libm` crate too. The x86 masks were checked again after that. The
+/// `ira` feature replaces the permutation and has its own mask.
 #[test]
 fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not() {
     const SEEDS: u64 = 16;
