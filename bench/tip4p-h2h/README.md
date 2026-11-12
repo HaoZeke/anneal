@@ -60,3 +60,26 @@ The descriptor of a rigid minimum is reused when the centres and rotations are u
 LJ38 at 400_000 calls is 6/6, LJ75 at 4_000_000 is 6/6, LJ98 at 4_000_000 is 5/6, and LJ104 at 4_000_000 is 6/6. Each seed spends the same number of evaluations as on `4fdc37e8` and on `91c8a9c3`. The medians are 10_190, 979_291, 1_387_169 and 1_812_258 calls.
 
 The new rows are in `rows.csv`. The medians of those rows are `summary-cage.csv`.
+
+## Shell turn
+
+`scripts/tip4p_h2h/enter_shell.sh` appends the `anneal-shell` arm and, for (H₂O)₂₁, a fixed-step GMIN arm in the same session. (H₂O)₂₁ is the next Wales–Hodges size. Its reference is the Cambridge header, −916.7074302940 kJ/mol. Seeds, budget, core, and hostname match the earlier arms.
+
+A stalled rigid chain turns the outer half of the cage about the core by three orientation steps, on a generator of its own, and also walks a stored cage before turning that shell. One molecule moved into a hollow quenches back into the same oxygen cage. The shell turn does not. The main walker is left where it is.
+
+(H₂O)₁₅ is 6/6. Seeds 2002 and 2004, the two one-contact misses, reach −628.372. The three (H₂O)₂₀ misses stay one contact off, at −864.746, −859.404 and −863.975. (H₂O)₂₁ is 0/6 on both arms. Anneal's six bests lie between −915.230 and −907.019. GMIN's lie between −903.037 and −893.409.
+
+A full-budget call on (H₂O)₂₁ costs 9.68 µs inside the potential and 3.55 µs outside it for anneal, and 35.67 µs inside and 1.92 µs outside for GMIN. On (H₂O)₂₀ the three full-budget anneal misses are 8.85 µs inside and about 3.1 µs outside. On (H₂O)₁₅, where every seed hits, a call is 5.33 µs inside.
+
+| Size | Arm | Hits | Median evals | Median wall (s) | Ratio | Inside (s) | Outside (s) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| (H₂O)₁₅ | anneal-shell | 6/6 | 1158631 | 8.140 | 4.941 | 6.180 | 1.960 |
+| (H₂O)₁₅ | GMIN, fixed step | 0/6 | 2000000 | 40.212 | 4.941 | 36.866 | 3.359 |
+| (H₂O)₂₀ | anneal-shell | 3/6 | 1696341 | 19.749 | 3.459 | 15.022 | 4.728 |
+| (H₂O)₂₀ | GMIN, fixed step | 0/6 | 2000000 | 68.305 | 3.459 | 64.713 | 3.580 |
+| (H₂O)₂₁ | anneal-shell | 0/6 | 2000000 | 26.470 | 2.842 | 19.366 | 7.093 |
+| (H₂O)₂₁ | GMIN, fixed step | 0/6 | 2000000 | 75.215 | 2.842 | 71.339 | 3.835 |
+
+LJ38, LJ75, LJ98 and LJ104 keep the same evaluation counts as on `4fdc37e8`, including on the outside-cut at `2d00f044`. LJ38 is 6/6, LJ75 is 6/6, LJ98 is 5/6, and LJ104 is 6/6.
+
+The new rows are in `rows.csv`. The medians of those rows are `summary-shell.csv`.
