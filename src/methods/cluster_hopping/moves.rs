@@ -240,6 +240,9 @@ impl MoveLibrary {
                         kernels.push(ClusterMove::GroupRewire {
                             groups: groups.clone(),
                         });
+                        kernels.push(ClusterMove::GroupCloseSquare {
+                            groups: groups.clone(),
+                        });
                     }
                 }
                 kernels
@@ -669,6 +672,15 @@ pub enum ClusterMove {
         /// Atom indices of each three-atom water group: `[O, H, H]`.
         groups: Vec<Vec<usize>>,
     },
+    /// Close one missing edge of an open square.
+    ///
+    /// Two three-coordinate waters that already share the other corners of a
+    /// face are moved as one rigid monomer until that monomer donates across
+    /// the gap. The O-H bonds stay at their original lengths.
+    GroupCloseSquare {
+        /// Atom indices of each three-atom water group: `[O, H, H]`.
+        groups: Vec<Vec<usize>>,
+    },
     /// Step in the SOAP power spectrum and pull back through \(J = \partial p/\partial R\).
     ///
     /// Concerted, not a one-atom hop. The featomic direction is the observed
@@ -874,6 +886,14 @@ fn group_relocate_on_slab<R: Rng + ?Sized>(
             out[3 * a + k] = x[3 * a + k] - gc[k] + target[k];
         }
     }
+    out
+}
+
+/// Close one missing square edge. See
+/// [`crate::methods::cluster_hopping::cycles::close_square_cartesian`].
+fn close_square(x: ArrayView1<f64>, groups: &[Vec<usize>]) -> Array1<f64> {
+    let mut out = x.to_owned();
+    super::cycles::close_square_cartesian(groups, &mut out);
     out
 }
 
@@ -1487,6 +1507,7 @@ impl ClusterMove {
             ClusterMove::RigidReverseCycle { .. } => "rcycle".into(),
             ClusterMove::GroupCycleReverse { .. } => "gcycle".into(),
             ClusterMove::GroupRewire { .. } => "hbrewire".into(),
+            ClusterMove::GroupCloseSquare { .. } => "gsquare".into(),
         }
     }
 
@@ -2076,6 +2097,10 @@ impl ClusterMove {
                 let mut y = x.to_owned();
                 super::cycles::rewire_cartesian(groups, &mut y, rng);
                 y
+            }
+            ClusterMove::GroupCloseSquare { groups } => {
+                let _ = rng;
+                close_square(x, groups)
             }
             ClusterMove::SpeciesSwap {
                 n_points,
@@ -3234,5 +3259,288 @@ mod move_scaling_tests {
         let groups = connectivity_groups(x.view(), 2, 1.5);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].len(), 2);
+    }
+
+    /// Seed 15001's open cage. Two three-coordinate waters share two corners
+    /// of a square and sit 3.73 A apart. Closing that edge must donate a
+    /// hydrogen bond and leave every O-H length alone.
+    #[test]
+    fn closing_a_square_donates_across_the_open_edge() {
+        let coords = vec![
+            -0.8123252175,
+            1.9960233919,
+            -2.7982538584,
+            -0.4084337895,
+            2.3665123729,
+            -1.9874971342,
+            -0.7180726585,
+            2.6625040610,
+            -3.4784966029,
+            -0.0354009439,
+            0.1437708009,
+            -0.1859414994,
+            0.0523385060,
+            1.1187525338,
+            -0.2959520895,
+            0.7513360054,
+            -0.2219688718,
+            -0.6316654620,
+            0.2094045378,
+            0.2634024646,
+            2.4735575088,
+            -0.4532278678,
+            -0.3076124027,
+            2.8689691710,
+            0.0978230475,
+            0.1368651914,
+            1.5019945354,
+            0.2841863968,
+            -2.7082773703,
+            0.8431954065,
+            -0.0227257448,
+            -2.6969663396,
+            -0.0803684633,
+            -0.3964468980,
+            -2.2318727418,
+            1.3440323045,
+            2.3841633530,
+            -0.2783094964,
+            -1.3671921549,
+            2.6861089484,
+            0.5855097829,
+            -1.0367195947,
+            2.7050691746,
+            -0.9346126962,
+            -0.7256693992,
+            -0.7850355306,
+            2.8016987529,
+            1.8940387205,
+            -1.6673037886,
+            2.4026561931,
+            1.7442635814,
+            -0.2879426434,
+            2.0966701178,
+            2.3388800222,
+            -2.8939501278,
+            1.1649718728,
+            1.4174792946,
+            -2.5960533453,
+            0.3099871422,
+            1.7594808184,
+            -2.9541680827,
+            1.0429853875,
+            0.4556851376,
+            2.7921159796,
+            -1.9382154743,
+            0.7692555945,
+            3.3068994176,
+            -2.7276479504,
+            0.9348549464,
+            1.8381301175,
+            -2.2088519544,
+            0.8521029778,
+            -2.0119374868,
+            -1.5240521394,
+            2.0181509645,
+            -2.4183013559,
+            -1.7573256997,
+            1.1352678336,
+            -2.4996582650,
+            -2.0341909589,
+            2.6652800467,
+            -2.5216359660,
+            0.4052226944,
+            -1.2217700656,
+            -1.6318562722,
+            0.1701983029,
+            -0.8844932605,
+            -2.3506932961,
+            1.0027629912,
+            -1.9570902455,
+            -0.6834249388,
+            -2.6211498773,
+            -1.7500257249,
+            -0.3950713390,
+            -1.8225578412,
+            -2.2632953996,
+            -0.5821127741,
+            -3.3656367243,
+            -2.3429564614,
+            2.9496169515,
+            2.0318822491,
+            0.0393695134,
+            2.9334856414,
+            1.4927780958,
+            0.8820469094,
+            3.7224185325,
+            2.5928963573,
+            0.0975045514,
+            0.3480879246,
+            2.7703595895,
+            -0.4681468213,
+            1.3031420088,
+            2.7079845874,
+            -0.2977457426,
+            -0.0849382729,
+            2.9590894740,
+            0.4073224656,
+            2.8994967463,
+            0.4581955974,
+            2.1254916387,
+            1.9878544178,
+            0.4651662729,
+            2.4662898376,
+            3.0014015276,
+            -0.4206322819,
+            1.7203398238,
+            -2.9999201670,
+            -2.1223301363,
+            -0.3392678242,
+            -2.2366448550,
+            -2.4426448517,
+            -0.8512481976,
+            -3.1882427727,
+            -1.2493926394,
+            -0.7184321243,
+            0.2563957210,
+            -0.5740388589,
+            -3.1427920149,
+            1.1293285893,
+            -0.4622606170,
+            -2.7370847041,
+            -0.1815649913,
+            0.2916533891,
+            -3.0801987568,
+        ];
+        let x = Array1::from_vec(coords);
+        let groups: Vec<Vec<usize>> = (0..16).map(|i| vec![3 * i, 3 * i + 1, 3 * i + 2]).collect();
+        let before = monomer_bonds(&x, &groups);
+        let (left, right, gap) = open_square_edge(&x, &groups);
+        assert!(gap > 3.3, "fixture edge is already closed: {gap}");
+        let kernel = ClusterMove::GroupCloseSquare {
+            groups: groups.clone(),
+        };
+        let mut rng = StdRng::seed_from_u64(1);
+        let y = kernel.propose(x.view(), 1.0, &mut rng);
+        let closed = oxygen_distance(&y, &groups, left, right);
+        assert!(
+            closed < 2.9,
+            "open edge {left}-{right} stayed at {closed} (was {gap})"
+        );
+        let donated = hydrogen_reaches(&y, &groups, left, right)
+            || hydrogen_reaches(&y, &groups, right, left);
+        assert!(donated, "neither water donates across the closed edge");
+        let after = monomer_bonds(&y, &groups);
+        for (old, new) in before.iter().zip(&after) {
+            assert!((old - new).abs() < 1e-8, "O-H changed from {old} to {new}");
+        }
+        let names = |n: usize| {
+            let species: Vec<u32> = (0..n).flat_map(|_| [8, 1, 1]).collect();
+            let grouped: Vec<Vec<usize>> =
+                (0..n).map(|i| vec![3 * i, 3 * i + 1, 3 * i + 2]).collect();
+            let cfg = Config::recommended_molecular(species, grouped, 1.0);
+            cfg.move_library
+                .kernels(&cfg)
+                .iter()
+                .map(|k| k.name())
+                .collect::<Vec<_>>()
+        };
+        assert!(names(16).iter().any(|name| name == "gsquare"));
+        assert!(!names(6).iter().any(|name| name == "gsquare"));
+        let lj = Config::recommended(13);
+        assert!(
+            lj.move_library
+                .kernels(&lj)
+                .iter()
+                .all(|k| k.name() != "gsquare")
+        );
+    }
+
+    fn oxygen_of(x: &Array1<f64>, groups: &[Vec<usize>], molecule: usize) -> [f64; 3] {
+        let atom = groups[molecule][0];
+        [x[3 * atom], x[3 * atom + 1], x[3 * atom + 2]]
+    }
+
+    fn oxygen_distance(x: &Array1<f64>, groups: &[Vec<usize>], left: usize, right: usize) -> f64 {
+        let a = oxygen_of(x, groups, left);
+        let b = oxygen_of(x, groups, right);
+        (0..3)
+            .map(|k| a[k] - b[k])
+            .map(|d| d * d)
+            .sum::<f64>()
+            .sqrt()
+    }
+
+    fn open_square_edge(x: &Array1<f64>, groups: &[Vec<usize>]) -> (usize, usize, f64) {
+        let n = groups.len();
+        let mut neigh = vec![Vec::new(); n];
+        for i in 0..n {
+            for j in (i + 1)..n {
+                if oxygen_distance(x, groups, i, j) < 3.3 {
+                    neigh[i].push(j);
+                    neigh[j].push(i);
+                }
+            }
+        }
+        let mut best: Option<(usize, f64, usize, usize)> = None;
+        for i in 0..n {
+            if neigh[i].len() != 3 {
+                continue;
+            }
+            for j in (i + 1)..n {
+                if neigh[j].len() != 3 || neigh[i].contains(&j) {
+                    continue;
+                }
+                let gap = oxygen_distance(x, groups, i, j);
+                if !(3.3..5.5).contains(&gap) {
+                    continue;
+                }
+                let common = neigh[i].iter().filter(|n| neigh[j].contains(n)).count();
+                if common == 0 {
+                    continue;
+                }
+                let rank = (common, -gap, i, j);
+                if best.is_none_or(|held| (held.0, held.1) < (rank.0, rank.1)) {
+                    best = Some((common, -gap, i, j));
+                }
+            }
+        }
+        let (_, neg, i, j) = best.expect("the open cage has a missing square edge");
+        (i, j, -neg)
+    }
+
+    fn hydrogen_reaches(
+        x: &Array1<f64>,
+        groups: &[Vec<usize>],
+        donor: usize,
+        acceptor: usize,
+    ) -> bool {
+        let oxygen = oxygen_of(x, groups, acceptor);
+        groups[donor][1..].iter().any(|&atom| {
+            let hydrogen = [x[3 * atom], x[3 * atom + 1], x[3 * atom + 2]];
+            (0..3)
+                .map(|k| hydrogen[k] - oxygen[k])
+                .map(|d| d * d)
+                .sum::<f64>()
+                .sqrt()
+                < 2.2
+        })
+    }
+
+    fn monomer_bonds(x: &Array1<f64>, groups: &[Vec<usize>]) -> Vec<f64> {
+        groups
+            .iter()
+            .flat_map(|atoms| {
+                let oxygen = [x[3 * atoms[0]], x[3 * atoms[0] + 1], x[3 * atoms[0] + 2]];
+                atoms[1..].iter().map(move |atom| {
+                    let hydrogen = [x[3 * atom], x[3 * atom + 1], x[3 * atom + 2]];
+                    (0..3)
+                        .map(|k| oxygen[k] - hydrogen[k])
+                        .map(|d| d * d)
+                        .sum::<f64>()
+                        .sqrt()
+                })
+            })
+            .collect()
     }
 }

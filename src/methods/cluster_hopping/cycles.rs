@@ -389,6 +389,174 @@ pub(crate) fn rewire_cartesian<R: rand::Rng + ?Sized>(
     false
 }
 
+/// Oxygen–oxygen length of a closed square edge.
+///
+/// The first peak of the water oxygen–oxygen distribution sits near 2.8 Å
+/// (Soper, *Chem. Phys.* **2000**, *258*, 121). A hydrogen aimed along an
+/// edge of this length donates.
+const SQUARE_OO: f64 = 2.75;
+
+/// An open square edge is past a hydrogen-bonded neighbour and inside the
+/// next oxygen shell.
+const SQUARE_NEIGHBOUR: f64 = 3.3;
+const SQUARE_GAP_MAX: f64 = 5.5;
+
+/// Slide one water across a missing square edge and donate along it.
+///
+/// Two three-coordinate oxygens that share the other corners of a face sit
+/// past the hydrogen-bond window on the open cages the (H2O)16 search
+/// stops in. One of those monomers is translated along the gap until the
+/// oxygens are 2.75 Å apart, then rotated about its oxygen so a
+/// hydrogen points at the acceptor. Every other monomer stays where it is.
+/// Oxygen–hydrogen distances are unchanged. Returns false, with `x`
+/// unchanged, when the cluster is not water or no such edge exists.
+pub(crate) fn close_square_cartesian(groups: &[Vec<usize>], x: &mut Array1<f64>) -> bool {
+    if !is_water_groups(groups) || groups.len() < 4 {
+        return false;
+    }
+    let sites = cartesian_sites(groups, x);
+    let Some((left, right)) = missing_square_edge(&sites) else {
+        return false;
+    };
+    let Some((donor, placed)) = square_donor(&sites, left, right) else {
+        return false;
+    };
+    for (s, &atom) in groups[donor].iter().enumerate() {
+        for axis in 0..3 {
+            x[3 * atom + axis] = placed[s][axis];
+        }
+    }
+    true
+}
+
+/// The open square edge with the most shared corners, then the shortest gap.
+///
+/// Both oxygens are three-coordinate, they are not already neighbours, and
+/// the gap lies in `[SQUARE_NEIGHBOUR]`, [`SQUARE_GAP_MAX`]. Ties keep the
+/// earlier pair.
+fn missing_square_edge(sites: &[[[f64; 3]; 3]]) -> Option<(usize, usize)> {
+    let n = sites.len();
+    let mut neigh = vec![Vec::new(); n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            if norm(sub(sites[i][0], sites[j][0])) < SQUARE_NEIGHBOUR {
+                neigh[i].push(j);
+                neigh[j].push(i);
+            }
+        }
+    }
+    let mut best: Option<(usize, f64, usize, usize)> = None;
+    for i in 0..n {
+        if neigh[i].len() != 3 {
+            continue;
+        }
+        for j in (i + 1)..n {
+            if neigh[j].len() != 3 || neigh[i].contains(&j) {
+                continue;
+            }
+            let gap = norm(sub(sites[i][0], sites[j][0]));
+            if !(SQUARE_NEIGHBOUR..SQUARE_GAP_MAX).contains(&gap) {
+                continue;
+            }
+            let common = neigh[i]
+                .iter()
+                .filter(|other| neigh[j].contains(other))
+                .count();
+            if common == 0 {
+                continue;
+            }
+            let rank = (common, -gap);
+            if best.is_none_or(|held| (held.0, held.1) < rank) {
+                best = Some((common, -gap, i, j));
+            }
+        }
+    }
+    best.map(|(_, _, i, j)| (i, j))
+}
+
+/// The monomer and its placed atoms. A dangling hydrogen that already faces
+/// the gap moves first; a placement that stacks two atoms is kept only when
+/// every candidate stacks.
+fn square_donor(
+    sites: &[[[f64; 3]; 3]],
+    left: usize,
+    right: usize,
+) -> Option<(usize, [[f64; 3]; 3])> {
+    let mut ranked = Vec::new();
+    for (donor, acceptor) in [(left, right), (right, left)] {
+        let toward = unit(sub(sites[acceptor][0], sites[donor][0]));
+        for which in 0..2 {
+            let hydrogen = sites[donor][1 + which];
+            let dangling = sites
+                .iter()
+                .enumerate()
+                .all(|(k, site)| k == donor || norm(sub(hydrogen, site[0])) >= BOND);
+            let hdir = unit(sub(hydrogen, sites[donor][0]));
+            let angle = dot(hdir, toward).clamp(-1.0, 1.0).acos();
+            ranked.push((dangling, angle, donor, which, acceptor));
+        }
+    }
+    ranked.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .then(a.2.cmp(&b.2))
+            .then(a.3.cmp(&b.3))
+    });
+    let mut fallback = None;
+    for &(_, _, donor, which, acceptor) in &ranked {
+        let Some(placed) = place_donor(sites, donor, acceptor, which) else {
+            continue;
+        };
+        if fallback.is_none() {
+            fallback = Some((donor, placed));
+        }
+        if !monomer_overlaps(sites, donor, &placed) {
+            return Some((donor, placed));
+        }
+    }
+    fallback
+}
+
+/// Translate `donor` along the gap to 2.75 Å, then aim hydrogen
+/// `which` at the acceptor. The monomer stays rigid.
+fn place_donor(
+    sites: &[[[f64; 3]; 3]],
+    donor: usize,
+    acceptor: usize,
+    which: usize,
+) -> Option<[[f64; 3]; 3]> {
+    let from = sites[donor][0];
+    let toward_v = sub(sites[acceptor][0], from);
+    let gap = norm(toward_v);
+    if gap <= SQUARE_OO {
+        return None;
+    }
+    let shift = scale(unit(toward_v), gap - SQUARE_OO);
+    let oxygen = add(from, shift);
+    let mut placed = sites[donor];
+    for site in &mut placed {
+        *site = add(*site, shift);
+    }
+    let hdir = unit(sub(sites[donor][1 + which], from));
+    let target = unit(sub(sites[acceptor][0], oxygen));
+    if let Some(turn) = rotation_taking(hdir, target) {
+        for site in placed.iter_mut().skip(1) {
+            *site = add(oxygen, mat_vec(turn, sub(*site, oxygen)));
+        }
+    }
+    Some(placed)
+}
+
+fn monomer_overlaps(sites: &[[[f64; 3]; 3]], donor: usize, placed: &[[f64; 3]; 3]) -> bool {
+    let limit = super::OVERLAP_CALL_LIMIT;
+    sites.iter().enumerate().any(|(k, other)| {
+        k != donor
+            && other
+                .iter()
+                .any(|theirs| placed.iter().any(|mine| norm(sub(*mine, *theirs)) <= limit))
+    })
+}
+
 /// Rotate molecule `i` about its oxygen so hydrogen `which` points at molecule `j`.
 fn retarget(
     groups: &[Vec<usize>],
