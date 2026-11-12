@@ -2360,22 +2360,10 @@ fn species_swap<R: Rng + ?Sized>(
         }
         swapped = pair_limit;
     }
-    if swapped == 0 {
-        let draws = if sigma.is_some() {
-            1
-        } else {
-            1 + (n_points as f64).cbrt().round() as usize
-        };
-        for _ in 0..draws {
-            for _try in 0..16 {
-                let i = rng.random_range(0..n_points);
-                let j = rng.random_range(0..n_points);
-                if i != j && species[i] != species[j] {
-                    swap_atoms(&mut y, i, j);
-                    break;
-                }
-            }
-        }
+    if swapped == 0
+        && let Some(exchanged) = doye_unlike_exchange(y.view(), species, rng)
+    {
+        return exchanged;
     }
     y
 }
@@ -3143,6 +3131,10 @@ mod move_scaling_tests {
         let x = Array1::from_vec(coords);
         let mut rng = StdRng::seed_from_u64(11);
         let y = swap.propose(x.view(), 0.8, &mut rng);
+        let moved = (0..n)
+            .filter(|&index| (0..3).any(|axis| y[3 * index + axis] != x[3 * index + axis]))
+            .count();
+        assert_eq!(moved, 2, "one unlike pair, not a block exchange");
         let mut crossed = false;
         for index in 0..n {
             let source =

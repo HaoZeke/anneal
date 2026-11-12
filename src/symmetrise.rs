@@ -611,6 +611,19 @@ pub fn symmetrise_group(
     group: &[Rot],
     pair_cutoff: f64,
 ) -> Array1<f64> {
+    symmetrise_group_within(x, n, group, pair_cutoff, &[])
+}
+
+/// As [`symmetrise_group`], but an orbit may not pair atoms of different
+/// `classes`. An empty `classes` slice is the unlabelled group. A labelled
+/// orbit that cannot close inside one class is left unmoved.
+pub fn symmetrise_group_within(
+    x: ArrayView1<f64>,
+    n: usize,
+    group: &[Rot],
+    pair_cutoff: f64,
+    classes: &[u32],
+) -> Array1<f64> {
     let mut out = x.to_owned();
     if n == 0 || group.len() < 2 {
         return out;
@@ -624,7 +637,9 @@ pub fn symmetrise_group(
         if done[a] {
             continue;
         }
-        // Partner of `a` under each group element.
+        // Partner of `a` under each group element. Different classes
+        // cannot be images of each other: a species label is not a
+        // point-group orbit.
         let mut members: Vec<(usize, usize)> = Vec::with_capacity(group.len());
         let mut closed = true;
         for (gi, g) in group.iter().enumerate() {
@@ -632,6 +647,9 @@ pub fn symmetrise_group(
             let mut best = usize::MAX;
             let mut best_d = f64::INFINITY;
             for b in 0..n {
+                if classes.len() == n && classes[a] != classes[b] {
+                    continue;
+                }
                 let u = rel(b);
                 let d =
                     ((w[0] - u[0]).powi(2) + (w[1] - u[1]).powi(2) + (w[2] - u[2]).powi(2)).sqrt();

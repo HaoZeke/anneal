@@ -4049,6 +4049,9 @@ where
             && ledger.remaining() > 0
         {
             csm_reseed_stamp = hops;
+            // Orbit completion stays. The fresh cluster keeps its atom order,
+            // so species labels stay put. Projection is the stall gate below,
+            // not every reseed.
             let classes = continuous_symmetry_classes
                 .as_deref()
                 .expect("a CSM reseed has equivalence classes");
@@ -4289,8 +4292,12 @@ where
             kernels.len(),
             rng,
         );
-        if hops == 0
-            && let Some(swap_at) = kernels.iter().position(|kernel| kernel.name() == "swap")
+        // One unlike-pair exchange on a fixed cadence. The depth allocator
+        // drops the homotop once geometry moves pay more, and a binary
+        // minimum is a chemical ordering as well as a geometry. Absent on a
+        // one-species library, so a monoatomic chain draws exactly as before.
+        if let Some(swap_at) = kernels.iter().position(|kernel| kernel.name() == "swap")
+            && hops.is_multiple_of(4)
         {
             k = swap_at;
         }
@@ -6220,12 +6227,23 @@ where
                 }
                 let group = crate::symmetrise::generate_group(&cands, 60);
                 let symmetrised_state = if group.len() > 1 {
-                    Some(crate::symmetrise::symmetrise_group(
-                        x.view(),
-                        n,
-                        &group,
-                        cfg.symmetry_merge_radius,
-                    ))
+                    Some(match cfg.species.as_deref() {
+                        Some(species) if species.len() == n => {
+                            crate::symmetrise::symmetrise_group_within(
+                                x.view(),
+                                n,
+                                &group,
+                                cfg.symmetry_merge_radius,
+                                species,
+                            )
+                        }
+                        _ => crate::symmetrise::symmetrise_group(
+                            x.view(),
+                            n,
+                            &group,
+                            cfg.symmetry_merge_radius,
+                        ),
+                    })
                 } else {
                     crate::symmetrise::symmetrise_detected(
                         x.view(),

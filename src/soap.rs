@@ -170,30 +170,29 @@ pub fn local_nu3(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
 }
 
 /// Species-aware SOAP plus the same 4-body scalars (all neighbors).
+///
+/// The power spectrum and the ν=3 contraction share one spherical
+/// expansion per atom. A second expansion would repeat the same
+/// harmonics and return the same coefficients.
 pub fn local_nu3_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Array2<f64> {
-    let soap = local_spectra_z(x, spec, species);
-    let n_at = soap.nrows();
-    let d0 = soap.ncols();
+    let n_at = x.len() / 3;
+    let d0 = spec.feat_dim(species);
     let d1 = spec.nu3_feat_dim(species);
     let mut out = Array2::<f64>::zeros((n_at, d0 + d1));
+    let rcut = spec.rcut_nn;
+    if n_at < 2 || !(rcut > 0.0) {
+        return out;
+    }
+    let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
     let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
     let channels = neighbor_channels(species);
     let n_chan = channels.len();
     let ace1 = spec.nu3_dim();
-    let rcut = spec.rcut_nn;
-    let table = if n_at >= 2 && rcut > 0.0 {
-        Some(crate::neighbors::NeighborTable::build(x, n_at, rcut))
-    } else {
-        None
-    };
     for i in 0..n_at {
+        let (p, c) = atom_expand(x, i, n_at, rcut, spec, species, &table);
         for t in 0..d0 {
-            out[[i, t]] = soap[[i, t]];
+            out[[i, t]] = p[t];
         }
-        let Some(table) = table.as_ref() else {
-            continue;
-        };
-        let (_, c) = atom_expand(x, i, n_at, rcut, spec, species, table);
         for ch in 0..n_chan {
             let c0 = ch * spec.n_max * n_lm;
             let sl = &c[c0..c0 + spec.n_max * n_lm];
@@ -2675,7 +2674,14 @@ fn atom_expand(
         }
         let ch = neighbor_channel(species, j, &channels);
         let u = [d[0] / r, d[1] / r, d[2] / r];
-        let (ylm, _) = tesseral(u, l_max);
+        // Values only. The Cartesian derivatives in `tesseral` are for the
+        // pullback, and for `l > 3` they are six extra harmonic evaluations
+        // that this contraction discards.
+        let ylm = if l_max <= 3 {
+            tesseral(u, l_max).0
+        } else {
+            ylm_real(u, l_max)
+        };
         let fc = fcut(r, rcut);
         for n in 0..n_max {
             let w = radial(n, r, rcut) * fc;
@@ -2730,7 +2736,11 @@ pub(crate) fn central_spectrum_from_displacements(
             displacement[1] / distance,
             displacement[2] / distance,
         ];
-        let (harmonics, _) = tesseral(direction, spec.l_max);
+        let harmonics = if spec.l_max <= 3 {
+            tesseral(direction, spec.l_max).0
+        } else {
+            ylm_real(direction, spec.l_max)
+        };
         let cutoff = fcut(distance, spec.rcut_nn);
         for radial_index in 0..spec.n_max {
             let weight = neighbor_weight * radial(radial_index, distance, spec.rcut_nn) * cutoff;
