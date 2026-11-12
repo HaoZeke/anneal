@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Draw the water hexamer against CREST from the water_v45b per-seed table.
+"""Draw the six-seed CREST counter chart as figs/water_crest.pdf.
 
-Reads the four arms through water_results_table.load, which recomputes Wilson, McNemar and
-Newcombe method 10 from data/water_v45b/water-v45b-perseed.csv, so the figure draws what
-tbl:water prints and nothing else. The CSV carries no run-by-run force-call trace beyond
-the sealed totals, so nothing is drawn against force calls to the first hit.
+The bars are the old counter and CREST's energy-and-gradient total for seeds
+0 through 5. Both come from logs/water/crest-hexamer-seedN.log through
+hexamer_numbers.load. This script does not read water-v45b-perseed.csv and
+does not draw a hit rate, a PAR-2, or a McNemar value.
 
-  (a) the hits of each arm out of the 192 seeds, with the Wilson interval;
-  (b) for each arm of the hop scored against CREST, the hit rate of the hop less that of
-      CREST, with the Newcombe interval and the exact McNemar p.
-
-Usage: fig_water_crest.py [--data DIR] OUT.pdf
+Usage: fig_water_crest.py OUT.pdf
 """
 from __future__ import annotations
 
@@ -22,70 +18,53 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import figstyle
-import water_results_table
-
-COLOURS = {
-    "anneal": figstyle.SKY,
-    "polish_fair": figstyle.TEAL,
-    water_results_table.CREST_FOLDER: figstyle.CORAL,
-    "crest_fair": figstyle.SUNSHINE,
-}
-# The label of each arm on the axis of the figure, broken to fit it.
-SHORT = {
-    "anneal": "anneal,\ndefault hop",
-    "polish_fair": "anneal, budget-fair\npolish, opt-in",
-    water_results_table.CREST_FOLDER: "CREST",
-    "crest_fair": "CREST plus the\npolish, budget-fair",
-}
+from hexamer_numbers import load
 
 
-def draw(data: Path, out: Path) -> None:
+def draw(out: Path) -> None:
     import matplotlib.pyplot as plt
 
     figstyle.setup()
-    _, arms, _ = water_results_table.load(data)
-    fig, (a, b) = plt.subplots(
-        1, 2, figsize=(figstyle.DOUBLE, 2.3), layout="constrained", gridspec_kw={"width_ratios": [1.15, 1]}
+    rows = load()
+    seeds = list(range(6))
+    old = [rows[seed]["old"] for seed in seeds]
+    engrad = [rows[seed]["engrad"] for seed in seeds]
+    figure, axis = plt.subplots(figsize=(figstyle.DOUBLE, 2.6), layout="constrained")
+    positions = list(range(6))
+    width = 0.36
+    axis.bar(
+        [item - width / 2 for item in positions],
+        old,
+        width=width,
+        color=figstyle.SKY,
+        edgecolor=figstyle.BLACK,
+        linewidth=0.4,
+        label="Old counter",
     )
-    for y, arm in enumerate(arms):
-        share = arm.summary["hits"] / arm.summary["n"]
-        low, high = (float(bound) for bound in arm.wilson)
-        a.barh(y, share, color=COLOURS[arm.folder], height=0.62, edgecolor=figstyle.BLACK, linewidth=0.4)
-        a.errorbar(share, y, xerr=[[share - low], [high - share]], fmt="none", ecolor=figstyle.BLACK,
-                   elinewidth=0.8, capsize=2.5)
-        a.text(high + 0.02, y, arm.hits, va="center", ha="left", fontsize=figstyle.SMALLEST)
-    a.set_yticks(range(len(arms)), [SHORT[arm.folder] for arm in arms])
-    a.invert_yaxis()
-    a.set_xlim(0, 1.0)
-    a.set_xlabel(f"Share of the {water_results_table.RUNS} seeds that hit")
-
-    scored = [arm for arm in arms if arm.contrast]
-    for y, arm in enumerate(scored):
-        c = arm.contrast
-        low, high = c["newcombe_95_6"]
-        difference = c["hit_rate_difference"]
-        b.errorbar(difference, y, xerr=[[difference - low], [high - difference]], fmt="o",
-                   color=COLOURS[arm.folder], ecolor=figstyle.BLACK, markeredgecolor=figstyle.BLACK,
-                   markeredgewidth=0.5, markersize=5, elinewidth=0.9, capsize=3)
-        b.text(high + 0.015, y, f"p {water_results_table.cells(arm)['p']}", va="center", ha="left",
-               fontsize=figstyle.SMALLEST)
-    b.axvline(0, color=figstyle.GREY, linewidth=0.7, linestyle=":")
-    b.set_yticks(range(len(scored)), [SHORT[arm.folder] for arm in scored])
-    b.set_ylim(len(scored) - 0.5, -0.5)
-    b.set_xlim(-0.1, 0.75)
-    b.set_xlabel("Hit rate of the hop less CREST's")
-    for ax, letter in zip((a, b), "ab"):
-        figstyle.label(ax, letter)
-    figstyle.save(fig, out)
+    axis.bar(
+        [item + width / 2 for item in positions],
+        engrad,
+        width=width,
+        color=figstyle.SUNSHINE,
+        edgecolor=figstyle.BLACK,
+        linewidth=0.4,
+        label="Energy and gradient",
+    )
+    axis.set_xticks(positions, [str(seed) for seed in seeds])
+    axis.set_xlabel("Seed")
+    axis.set_ylabel("CREST calls")
+    axis.set_ylim(0, 250000)
+    axis.legend()
+    figstyle.save(figure, out)
 
 
-def main(argv: list[str]) -> None:
+def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--data", type=Path, default=water_results_table.DATA)
     parser.add_argument("out", type=Path)
     args = parser.parse_args(argv)
-    draw(args.data, args.out)
+    draw(args.out)
+    return 0
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    raise SystemExit(main(sys.argv[1:]))

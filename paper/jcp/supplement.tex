@@ -1,0 +1,132 @@
+% Copyright (c) anneal developers
+\documentclass[aip,jcp,preprint,amsmath,amssymb]{revtex4-2}
+\usepackage{graphicx,booktabs,longtable}
+\graphicspath{{figs/}{../jctc/figs/}}
+
+\begin{document}
+\title{Supplementary material: Basin hopping for atomic clusters with a fixed move library}
+\author{Rohit Goswami}
+\affiliation{SURF B.V., Amsterdam, The Netherlands}
+\maketitle
+
+\section{Rank weights}
+The campaigns in the article use \(T=0.8\,\varepsilon\).
+A population can instead be reweighted by within-epoch ranks.
+In a population of \(R\ge 2\), a tied block from \(b\) inclusive to \(e\) exclusive has rank
+\begin{equation}
+r=(b+e-1)/(2(R-1)).
+\end{equation}
+The energy, novelty, scarcity and uncertainty ranks combine as
+\begin{equation}
+\log w_i=-r_{E,i}+0.8\,r_{N,i}+0.6\,r_{S,i}+0.4\,r_{U,i}.
+\end{equation}
+The coefficients are those of the communicating-chain account.\cite{goswami2023}
+A bank is communicating when each chain draws its move from a depth posterior, a packing retires on the Good-Turing mass, minima are merged at one radial distance, every force call is charged to the chain that spent it, and a receiver may quench a shared minimum.
+Parallel tempering, population annealing, conformational space annealing and cut-and-splice are the neighbouring constructions.\cite{swendsenReplicaMonteCarlo1986,hukushimaExchangeMonteCarlo1996,hukushimaPopulationAnnealingIts2003,machtaPopulationAnnealingWeighted2010,leeUnbiasedGlobalOptimization2003,deaven1995,geudtner2025}
+
+\section{Oakley means}
+Means below are over runs that continued until success, with no call cap.\cite{oakley2013}
+Continuous-symmetry basin hopping at 38 atoms averages 4369 evaluations over 100 runs.
+Core-orbit basin hopping at 75 atoms averages 50229 evaluations over 100 runs.
+Core-orbit genetic-algorithm means are 87250 at 75 atoms and 178651 at 98 atoms.
+
+\section{Sixty-four seed campaign}
+{\scriptsize
+\input{../jctc/tables/campaign.tex}
+}
+
+The paired full arm hits 24/64 on \(\mathrm{LJ}_{98}\) against 64/64 for GMIN.
+The median paired call ratio is 12.62, and 2000 resamples give 8.52--15.22.
+On \(\mathrm{LJ}_{55}\) that arm hits 63/64 and GMIN hits 64/64.
+Plain basin hopping hits 26/64 and 7/64.
+ABCluster hits 64/64 and 1/64.
+In the family of these six comparisons, the Holm-adjusted McNemar and Wilcoxon tests below 0.05 are the \(\mathrm{LJ}_{98}\) comparisons of the full arm, plain basin hopping and ABCluster with GMIN, and the \(\mathrm{LJ}_{55}\) comparison of plain basin hopping with GMIN.
+
+\section{Hexamer counters}
+\begin{table}
+\caption{CREST effort on the water hexamer.
+The energy-and-gradient column is the cost in the article.}
+\begin{ruledtabular}
+\begin{tabular}{crr}
+Seed & Dynamics + optimisation & Energy and gradient \\
+\hline
+0 & 32112 & 151074 \\
+1 & 50026 & 191132 \\
+2 & 32155 & 142110 \\
+3 & 46062 & 172468 \\
+4 & 50063 & 157643 \\
+5 & 32170 & 209931 \\
+\end{tabular}
+\end{ruledtabular}
+\end{table}
+
+\section{TIP4P constants}
+Jorgensen's pair is \(A=2510400\,\mathrm{kJ\,mol^{-1}\,\text{\AA}^{12}}\) and \(C=2552.24\,\mathrm{kJ\,mol^{-1}\,\text{\AA}^{6}}\).\cite{jorgensen1983}
+GMIN stores these as \(C_{12}\) and \(C_6\).
+The anneal rows use \(\varepsilon=0.6485\,\mathrm{kJ\,mol^{-1}}\) and \(\sigma=3.15365\,\text{\AA}\), giving \(C_6=2551.8252\) and \(C_{12}=2510336.2\).
+The relative difference is \(-3.0\times 10^{-4}\) in the well depth and \(2.3\times 10^{-5}\) in \(\sigma\).
+
+\section{Gupta clusters and the Cu--H slab}
+\begin{table}
+\caption{Gupta zinc and Cu\(_{19}\)Au\(_{19}\).
+The ratio is the ASE median wall divided by the anneal median wall.}
+\begin{ruledtabular}
+\begin{tabular}{llrrrr}
+System & Arm & Hits & Budget & Wall (s) & Ratio \\
+\hline
+Zn\(_{38}\) & anneal & 1/6 & 50000 & 1.285 & 183 \\
+Zn\(_{38}\) & ASE & 2/6 & 50000 & 235.3 & 183 \\
+Zn\(_{55}\) & anneal & 0/6 & 80000 & 4.542 & 169 \\
+Zn\(_{55}\) & ASE & 0/6 & 80000 & 768.1 & 169 \\
+Zn\(_{75}\) & anneal & 0/6 & 100000 & 11.32 & 147 \\
+Zn\(_{75}\) & ASE & 0/6 & 100000 & 1659 & 147 \\
+Zn\(_{80}\) & anneal & 0/6 & 100000 & 13.24 & 158 \\
+Zn\(_{80}\) & ASE & 0/6 & 100000 & 2093 & 158 \\
+Cu\(_{19}\)Au\(_{19}\) & anneal & 0/6 & 80000 & 4.012 & 141 \\
+Cu\(_{19}\)Au\(_{19}\) & ASE & 0/6 & 80000 & 565.8 & 141 \\
+\end{tabular}
+\end{ruledtabular}
+\end{table}
+
+Eight seeds on the FCC Cu--H slab, reference \(-415.971529\,\mathrm{eV}\), all lie inside \(0.001\,\mathrm{eV}\).
+Best energies run from \(-415.971521\,\mathrm{eV}\) to \(-415.971161\,\mathrm{eV}\).
+Gaps above the reference run from \(8\times 10^{-6}\,\mathrm{eV}\) to \(3.68\times 10^{-4}\,\mathrm{eV}\).
+
+\section{Plates and maps}
+\begin{figure}
+\includegraphics[width=\textwidth]{si_structures.pdf}
+\caption{Reference geometries used to draw the benchmark.}
+\end{figure}
+\begin{figure}
+\includegraphics[width=\textwidth]{si_water.pdf}
+\caption{Water plates.
+The printed hexamer energy, \(-197.7805\,\mathrm{kJ\,mol^{-1}}\), is the TIP4P Cambridge value on Jorgensen's \(A\) and \(C\).}
+\end{figure}
+\begin{figure}
+\includegraphics[width=0.48\textwidth]{lj38_sketchmap.png}
+\caption{\(\mathrm{LJ}_{38}\) sketch-map.\cite{ceriotti2011}
+Colour is the quenched energy.}
+\end{figure}
+\begin{figure}
+\includegraphics[width=0.48\textwidth]{lj38_landscape.png}
+\caption{\(\mathrm{LJ}_{38}\) landscape.
+Colour is the energy above the global minimum.
+Basin hopping sits \(2.429\,\varepsilon\) above it and random structure search \(3.051\,\varepsilon\) above it.}
+\end{figure}
+\begin{figure}
+\includegraphics[width=0.48\textwidth]{lj75_landscape.png}
+\caption{\(\mathrm{LJ}_{75}\) landscape.
+Both arms sit \(1.210\,\varepsilon\) above the Marks decahedron.}
+\end{figure}
+\begin{figure}
+\includegraphics[width=0.48\textwidth]{lj98_landscape.png}
+\caption{\(\mathrm{LJ}_{98}\) landscape.
+The recommended hop sits \(0.022\,\varepsilon\) above the Leary minimum and basin hopping \(0.119\,\varepsilon\) above it.}
+\end{figure}
+
+One 38-atom walk with climb and symmetrisation off, seed 0 and 30000 charged evaluations, reaches \(-173.928427\).
+
+\bibliographystyle{aipnum4-2}
+\bibliography{../jctc/refs}
+
+\end{document}
