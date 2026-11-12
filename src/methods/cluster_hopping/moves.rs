@@ -240,6 +240,14 @@ impl MoveLibrary {
                         kernels.push(ClusterMove::GroupRewire {
                             groups: groups.clone(),
                         });
+                        // An open cage of three-coordinate waters is already a
+                        // converged minimum. Pulling every monomer toward the
+                        // centroid, without stretching a bond, is the step
+                        // that leaves that shape.
+                        kernels.push(ClusterMove::GroupCompress {
+                            groups: groups.clone(),
+                            scale: CAGE_COMPRESSION,
+                        });
                     }
                 }
                 kernels
@@ -669,6 +677,17 @@ pub enum ClusterMove {
         /// Atom indices of each three-atom water group: `[O, H, H]`.
         groups: Vec<Vec<usize>>,
     },
+    /// Translate every rigid group toward the cluster centroid.
+    ///
+    /// `scale` multiplies the centroid-to-group vector. Internal geometry is
+    /// unchanged. 0.87 is inside the 0.85–0.9 range that pulls an open water
+    /// cage in without landing the oxygens on top of each other.
+    GroupCompress {
+        /// Atom indices of each rigid group.
+        groups: Vec<Vec<usize>>,
+        /// Factor applied to each group centroid's offset from the cluster centroid.
+        scale: f64,
+    },
     /// Step in the SOAP power spectrum and pull back through \(J = \partial p/\partial R\).
     ///
     /// Concerted, not a one-atom hop. The featomic direction is the observed
@@ -872,6 +891,65 @@ fn group_relocate_on_slab<R: Rng + ?Sized>(
         }
         for k in 0..3 {
             out[3 * a + k] = x[3 * a + k] - gc[k] + target[k];
+        }
+    }
+    out
+}
+
+/// Factor applied to each monomer's offset from the cage centroid.
+///
+/// Inside 0.85–0.9: enough to leave an open water cage, short of stacking
+/// the oxygens.
+const CAGE_COMPRESSION: f64 = 0.87;
+
+/// Translate every group so its first atom moves toward the centroid of those atoms.
+///
+/// The other atoms of the group take the same translation, so a water's two
+/// O-H bonds are unchanged.
+fn water_compress(x: ArrayView1<f64>, groups: &[Vec<usize>], scale: f64) -> Array1<f64> {
+    let mut out = x.to_owned();
+    if !scale.is_finite() || groups.is_empty() {
+        return out;
+    }
+    let n = x.len() / 3;
+    let mut centroid = [0.0_f64; 3];
+    let mut count = 0.0_f64;
+    for atoms in groups {
+        let Some(&origin) = atoms.first() else {
+            continue;
+        };
+        if origin >= n {
+            continue;
+        }
+        for axis in 0..3 {
+            centroid[axis] += x[3 * origin + axis];
+        }
+        count += 1.0;
+    }
+    if count == 0.0 {
+        return out;
+    }
+    for value in &mut centroid {
+        *value /= count;
+    }
+    for atoms in groups {
+        let Some(&origin) = atoms.first() else {
+            continue;
+        };
+        if origin >= n {
+            continue;
+        }
+        let mut shift = [0.0_f64; 3];
+        for axis in 0..3 {
+            shift[axis] = (x[3 * origin + axis] - centroid[axis]) * (scale - 1.0);
+        }
+        for &atom in atoms {
+            if atom >= n {
+                continue;
+            }
+            for axis in 0..3 {
+                out[3 * atom + axis] = x[3 * atom + axis] + shift[axis];
+            }
         }
     }
     out
@@ -1487,6 +1565,7 @@ impl ClusterMove {
             ClusterMove::RigidReverseCycle { .. } => "rcycle".into(),
             ClusterMove::GroupCycleReverse { .. } => "gcycle".into(),
             ClusterMove::GroupRewire { .. } => "hbrewire".into(),
+            ClusterMove::GroupCompress { .. } => "gcompress".into(),
         }
     }
 
@@ -2077,6 +2156,7 @@ impl ClusterMove {
                 super::cycles::rewire_cartesian(groups, &mut y, rng);
                 y
             }
+            ClusterMove::GroupCompress { groups, scale } => water_compress(x, groups, *scale),
             ClusterMove::SpeciesSwap {
                 n_points,
                 species,
@@ -2740,7 +2820,14 @@ mod move_scaling_tests {
             !names.iter().any(|name| *name == "soap"),
             "atomic SOAP pullback is still drawn for (H2O)20: {names:?}"
         );
-        for required in ["gshake", "gsurface", "gburst", "gcycle", "hbrewire"] {
+        for required in [
+            "gshake",
+            "gsurface",
+            "gburst",
+            "gcycle",
+            "hbrewire",
+            "gcompress",
+        ] {
             assert!(
                 names.iter().any(|name| *name == required),
                 "missing {required} on (H2O)20: {names:?}"
@@ -2761,6 +2848,10 @@ mod move_scaling_tests {
         assert!(
             !small_names.iter().any(|name| *name == "hbrewire"),
             "the hexamer library gained a rewire arm: {small_names:?}"
+        );
+        assert!(
+            !small_names.iter().any(|name| *name == "gcompress"),
+            "the hexamer library gained a compression arm: {small_names:?}"
         );
     }
 
@@ -3234,5 +3325,259 @@ mod move_scaling_tests {
         let groups = connectivity_groups(x.view(), 2, 1.5);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].len(), 2);
+    }
+
+    /// Seed 15001's recorded open cage. Compression must pull every oxygen
+    /// toward the centroid by 0.87 and leave both O-H lengths alone.
+    #[test]
+    fn compression_pulls_an_open_cage_in_without_stretching_bonds() {
+        let coords: Vec<f64> = [
+            -0.8123252175,
+            1.9960233919,
+            -2.7982538584,
+            -0.4084337895,
+            2.3665123729,
+            -1.9874971342,
+            -0.7180726585,
+            2.6625040610,
+            -3.4784966029,
+            -0.0354009439,
+            0.1437708009,
+            -0.1859414994,
+            0.0523385060,
+            1.1187525338,
+            -0.2959520895,
+            0.7513360054,
+            -0.2219688718,
+            -0.6316654620,
+            0.2094045378,
+            0.2634024646,
+            2.4735575088,
+            -0.4532278678,
+            -0.3076124027,
+            2.8689691710,
+            0.0978230475,
+            0.1368651914,
+            1.5019945354,
+            0.2841863968,
+            -2.7082773703,
+            0.8431954065,
+            -0.0227257448,
+            -2.6969663396,
+            -0.0803684633,
+            -0.3964468980,
+            -2.2318727418,
+            1.3440323045,
+            2.3841633530,
+            -0.2783094964,
+            -1.3671921549,
+            2.6861089484,
+            0.5855097829,
+            -1.0367195947,
+            2.7050691746,
+            -0.9346126962,
+            -0.7256693992,
+            -0.7850355306,
+            2.8016987529,
+            1.8940387205,
+            -1.6673037886,
+            2.4026561931,
+            1.7442635814,
+            -0.2879426434,
+            2.0966701178,
+            2.3388800222,
+            -2.8939501278,
+            1.1649718728,
+            1.4174792946,
+            -2.5960533453,
+            0.3099871422,
+            1.7594808184,
+            -2.9541680827,
+            1.0429853875,
+            0.4556851376,
+            2.7921159796,
+            -1.9382154743,
+            0.7692555945,
+            3.3068994176,
+            -2.7276479504,
+            0.9348549464,
+            1.8381301175,
+            -2.2088519544,
+            0.8521029778,
+            -2.0119374868,
+            -1.5240521394,
+            2.0181509645,
+            -2.4183013559,
+            -1.7573256997,
+            1.1352678336,
+            -2.4996582650,
+            -2.0341909589,
+            2.6652800467,
+            -2.5216359660,
+            0.4052226944,
+            -1.2217700656,
+            -1.6318562722,
+            0.1701983029,
+            -0.8844932605,
+            -2.3506932961,
+            1.0027629912,
+            -1.9570902455,
+            -0.6834249388,
+            -2.6211498773,
+            -1.7500257249,
+            -0.3950713390,
+            -1.8225578412,
+            -2.2632953996,
+            -0.5821127741,
+            -3.3656367243,
+            -2.3429564614,
+            2.9496169515,
+            2.0318822491,
+            0.0393695134,
+            2.9334856414,
+            1.4927780958,
+            0.8820469094,
+            3.7224185325,
+            2.5928963573,
+            0.0975045514,
+            0.3480879246,
+            2.7703595895,
+            -0.4681468213,
+            1.3031420088,
+            2.7079845874,
+            -0.2977457426,
+            -0.0849382729,
+            2.9590894740,
+            0.4073224656,
+            2.8994967463,
+            0.4581955974,
+            2.1254916387,
+            1.9878544178,
+            0.4651662729,
+            2.4662898376,
+            3.0014015276,
+            -0.4206322819,
+            1.7203398238,
+            -2.9999201670,
+            -2.1223301363,
+            -0.3392678242,
+            -2.2366448550,
+            -2.4426448517,
+            -0.8512481976,
+            -3.1882427727,
+            -1.2493926394,
+            -0.7184321243,
+            0.2563957210,
+            -0.5740388589,
+            -3.1427920149,
+            1.1293285893,
+            -0.4622606170,
+            -2.7370847041,
+            -0.1815649913,
+            0.2916533891,
+            -3.0801987568,
+        ]
+        .to_vec();
+        let x = Array1::from_vec(coords);
+        let groups: Vec<Vec<usize>> = (0..16).map(|i| vec![3 * i, 3 * i + 1, 3 * i + 2]).collect();
+        let before = oh_bond_lengths(&x, &groups);
+        let kernel = ClusterMove::GroupCompress {
+            groups: groups.clone(),
+            scale: CAGE_COMPRESSION,
+        };
+        let mut rng = StdRng::seed_from_u64(1);
+        let y = kernel.propose(x.view(), 1.0, &mut rng);
+        let after = oh_bond_lengths(&y, &groups);
+        for (left, right) in before.iter().zip(&after) {
+            assert!(
+                (left - right).abs() < 1e-9,
+                "O-H changed from {left} to {right}"
+            );
+        }
+        let (c0, r0) = oxygen_radii(&x, &groups);
+        let (c1, r1) = oxygen_radii(&y, &groups);
+        for (before_r, after_r) in r0.iter().zip(&r1) {
+            let expect = CAGE_COMPRESSION * before_r;
+            assert!(
+                (after_r - expect).abs() < 1e-8,
+                "radius {before_r} became {after_r}, expected {expect}"
+            );
+        }
+        for axis in 0..3 {
+            assert!((c0[axis] - c1[axis]).abs() < 1e-8);
+        }
+        let sixteen = water_arm_names(16);
+        assert!(sixteen.iter().any(|name| name == "gcompress"));
+        let hexamer = water_arm_names(6);
+        assert!(
+            !hexamer.iter().any(|name| name == "gcompress"),
+            "{hexamer:?}"
+        );
+        let lennard_jones = Config::recommended(13);
+        assert!(
+            lennard_jones
+                .move_library
+                .kernels(&lennard_jones)
+                .iter()
+                .all(|kernel| kernel.name() != "gcompress")
+        );
+    }
+
+    fn water_arm_names(molecules: usize) -> Vec<String> {
+        let species: Vec<u32> = (0..molecules).flat_map(|_| [8, 1, 1]).collect();
+        let groups: Vec<Vec<usize>> = (0..molecules)
+            .map(|index| vec![3 * index, 3 * index + 1, 3 * index + 2])
+            .collect();
+        let cfg = Config::recommended_molecular(species, groups, 1.0);
+        cfg.move_library
+            .kernels(&cfg)
+            .iter()
+            .map(|kernel| kernel.name())
+            .collect()
+    }
+
+    fn oh_bond_lengths(x: &Array1<f64>, groups: &[Vec<usize>]) -> Vec<f64> {
+        groups
+            .iter()
+            .flat_map(|atoms| {
+                let oxygen = [x[3 * atoms[0]], x[3 * atoms[0] + 1], x[3 * atoms[0] + 2]];
+                atoms[1..].iter().map(move |atom| {
+                    let hydrogen = [x[3 * atom], x[3 * atom + 1], x[3 * atom + 2]];
+                    (0..3)
+                        .map(|axis| oxygen[axis] - hydrogen[axis])
+                        .map(|delta| delta * delta)
+                        .sum::<f64>()
+                        .sqrt()
+                })
+            })
+            .collect()
+    }
+
+    fn oxygen_radii(x: &Array1<f64>, groups: &[Vec<usize>]) -> ([f64; 3], Vec<f64>) {
+        let oxygens: Vec<[f64; 3]> = groups
+            .iter()
+            .map(|atoms| [x[3 * atoms[0]], x[3 * atoms[0] + 1], x[3 * atoms[0] + 2]])
+            .collect();
+        let mut centroid = [0.0; 3];
+        for oxygen in &oxygens {
+            for axis in 0..3 {
+                centroid[axis] += oxygen[axis];
+            }
+        }
+        let n = oxygens.len() as f64;
+        for value in &mut centroid {
+            *value /= n;
+        }
+        let radii = oxygens
+            .iter()
+            .map(|oxygen| {
+                (0..3)
+                    .map(|axis| oxygen[axis] - centroid[axis])
+                    .map(|delta| delta * delta)
+                    .sum::<f64>()
+                    .sqrt()
+            })
+            .collect();
+        (centroid, radii)
     }
 }
