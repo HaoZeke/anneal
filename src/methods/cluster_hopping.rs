@@ -4049,6 +4049,9 @@ where
             && ledger.remaining() > 0
         {
             csm_reseed_stamp = hops;
+            let classes = continuous_symmetry_classes
+                .as_deref()
+                .expect("a CSM reseed has equivalence classes");
             let mut fresh = random_cluster(n, 0.7, cfg.min_separation, rng);
             if let Some(closed) = crate::packing::on_new_basin(
                 fresh.view(),
@@ -4060,7 +4063,35 @@ where
             ) {
                 fresh = closed;
             }
-            let (reseed_energy, reseed_state) = relax(ledger, fresh.view(), cfg.relax_steps);
+            // The unprojected reseed is the incumbent path. Projecting every
+            // reseed leaves the LJ75 icosahedral floor and also pulls LJ104
+            // off seeds that already hit. Project only when the best state
+            // is still icosahedral and the plain quench did not beat it.
+            let best_before = ledger.best;
+            let best_ih = ledger.best_state.as_ref().is_some_and(|state| {
+                crate::soap::ih_dominated(state.view(), crate::soap::SoapSpec::default())
+            });
+            // Successful LJ104 paths leave an icosahedral best within about
+            // thirty hops. The LJ75 Marks search sits on that best for the
+            // rest of the budget. Project only after the longer stall, and
+            // only when the plain quench did not already beat it.
+            let stalled = hops.saturating_sub(hops_at_lowest) >= csm_reseed_hops.saturating_mul(8);
+            let (plain_energy, plain_state) = relax(ledger, fresh.view(), cfg.relax_steps);
+            let (reseed_energy, reseed_state) = if best_ih
+                && stalled
+                && plain_energy >= best_before - 1e-10
+                && let Some(projected) = crate::csm::propose(fresh.view(), classes)
+            {
+                let (projected_energy, projected_state) =
+                    relax(ledger, projected.coordinates.view(), cfg.relax_steps);
+                if projected_energy < best_before - 1e-10 {
+                    (projected_energy, projected_state)
+                } else {
+                    (plain_energy, plain_state)
+                }
+            } else {
+                (plain_energy, plain_state)
+            };
             let reseed_gradient = record_quenched_answer(
                 cfg,
                 ledger,
