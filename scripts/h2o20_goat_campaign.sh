@@ -27,6 +27,9 @@ MOLECULES=${H2O_MOLECULES:-20}
 BUDGET=${H2O_BUDGET:-4000}
 CREST_LEN=${H2O_CREST_LEN:-0.2}
 SEEDS=${H2O_SEEDS:-15001,15002,15003}
+# Reuse CREST rows already in the results CSV. Set only when this VM still
+# holds the CREST binaries and the previous rows; a changed VM reruns both.
+SKIP_CREST=${H2O_SKIP_CREST:-0}
 COMMIT=${ANNEAL_SOURCE_COMMIT:-$(git -C "$ROOT" rev-parse HEAD)}
 TREE=${ANNEAL_SOURCE_TREE:-$(git -C "$ROOT" rev-parse 'HEAD^{tree}')}
 
@@ -50,6 +53,9 @@ case "$(rustc +1.88.0 -V 2>/dev/null || rustc -V)" in
 esac
 
 mkdir -p "$WORK" "$(dirname "$OUT_CSV")"
+if [[ $SKIP_CREST == 1 && -s $OUT_CSV ]]; then
+  cp "$OUT_CSV" "$WORK/previous.csv"
+fi
 cat > "$WORK/bench-env.sh" << EOF
 export RGPOT_XTB_ENGINE=$ENGINE
 export LD_LIBRARY_PATH=$LIB
@@ -184,6 +190,25 @@ for seed in "${seed_list[@]}"; do
   for arm in "${arms[@]}"; do
     position=$((position + 1))
     echo "SEED $seed ARM $arm ORDER $position" | tee -a "$WORK/schedule.txt"
+    if [[ $arm == crest && $SKIP_CREST == 1 ]]; then
+      python3 - "$WORK/previous.csv" "$OUT_CSV" "$seed" "$position" << 'PY'
+import csv, sys
+from pathlib import Path
+previous, out, seed, position = sys.argv[1:]
+rows = list(csv.DictReader(Path(previous).open(newline="")))
+kept = [row for row in rows if row["seed"] == seed and row["arm"] == "crest"]
+if len(kept) != 1:
+    raise SystemExit(f"no stored CREST row for seed {seed}")
+row = kept[0]
+row["order"] = position
+with Path(out).open("a") as handle:
+    handle.write(
+        "{molecules},{seed},{arm},{order},{energy_eV},{hit},{wall_s},{reference_eV},{status}\n".format(**row)
+    )
+print(f"ROW {seed} crest {row['energy_eV']} {row['hit']} {row['wall_s']} kept")
+PY
+      continue
+    fi
     if [[ $arm == anneal ]]; then
       run_anneal "$seed" "$base"
       geom=$base/anneal/best.xyz

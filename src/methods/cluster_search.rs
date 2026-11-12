@@ -598,6 +598,11 @@ where
     let out = {
         let mut relax = warm_relax(objective, cfg, &mut stats, seed);
         let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+            // A validation gradient is an evaluation. An overlap is not one:
+            // charging it spends the budget on a geometry the potential refuses.
+            if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+                return None;
+            }
             if !led.charge() {
                 return None;
             }
@@ -611,6 +616,9 @@ where
         let mut energy_anchor = None;
         let mut energy_grad =
             |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+                    return None;
+                }
                 if !led.charge() {
                     return None;
                 }
@@ -649,6 +657,11 @@ where
     let out = {
         let mut relax = warm_relax(objective, cfg, &mut stats, seed);
         let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+            // A validation gradient is an evaluation. An overlap is not one:
+            // charging it spends the budget on a geometry the potential refuses.
+            if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+                return None;
+            }
             if !led.charge() {
                 return None;
             }
@@ -657,6 +670,9 @@ where
         let mut energy_anchor = None;
         let mut energy_grad =
             |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+                    return None;
+                }
                 if !led.charge() {
                     return None;
                 }
@@ -731,6 +747,11 @@ where
     let out = {
         let mut relax = warm_relax(objective, cfg, &mut stats, seed);
         let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+            // A validation gradient is an evaluation. An overlap is not one:
+            // charging it spends the budget on a geometry the potential refuses.
+            if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+                return None;
+            }
             if !led.charge() {
                 return None;
             }
@@ -739,6 +760,9 @@ where
         let mut energy_anchor = None;
         let mut energy_grad =
             |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+                    return None;
+                }
                 if !led.charge() {
                     return None;
                 }

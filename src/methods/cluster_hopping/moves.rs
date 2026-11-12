@@ -233,6 +233,14 @@ impl MoveLibrary {
                     kernels.push(ClusterMove::GroupCycleReverse {
                         groups: groups.clone(),
                     });
+                    // The hexamer library stays the one its arm was measured
+                    // with. A larger cage needs a turn onto a free oxygen; the
+                    // half-radian shake quenches back into the bond it left.
+                    if large_water {
+                        kernels.push(ClusterMove::GroupRewire {
+                            groups: groups.clone(),
+                        });
+                    }
                 }
                 kernels
             }
@@ -648,6 +656,16 @@ pub enum ClusterMove {
     /// coordinates with three-atom water groups (O, H, H). Each molecule on
     /// the cycle rotates about its oxygen so the cycle points the other way.
     GroupCycleReverse {
+        /// Atom indices of each three-atom water group: `[O, H, H]`.
+        groups: Vec<Vec<usize>>,
+    },
+    /// Turn one water about its oxygen onto a free neighbour oxygen.
+    ///
+    /// The turn is past the half-radian shake, so the quench does not fall
+    /// back into the hydrogen bond that was left. A cluster with no free
+    /// neighbour turns the molecule over instead. See
+    /// [`crate::methods::cluster_hopping::cycles::rewire_cartesian`].
+    GroupRewire {
         /// Atom indices of each three-atom water group: `[O, H, H]`.
         groups: Vec<Vec<usize>>,
     },
@@ -1468,6 +1486,7 @@ impl ClusterMove {
             ClusterMove::RigidOrientAll { .. } => "rorient".into(),
             ClusterMove::RigidReverseCycle { .. } => "rcycle".into(),
             ClusterMove::GroupCycleReverse { .. } => "gcycle".into(),
+            ClusterMove::GroupRewire { .. } => "hbrewire".into(),
         }
     }
 
@@ -2051,6 +2070,11 @@ impl ClusterMove {
             ClusterMove::GroupCycleReverse { groups } => {
                 let mut y = x.to_owned();
                 super::cycles::reverse_cycle_cartesian(groups, &mut y, rng);
+                y
+            }
+            ClusterMove::GroupRewire { groups } => {
+                let mut y = x.to_owned();
+                super::cycles::rewire_cartesian(groups, &mut y, rng);
                 y
             }
             ClusterMove::SpeciesSwap {
@@ -2716,12 +2740,28 @@ mod move_scaling_tests {
             !names.iter().any(|name| *name == "soap"),
             "atomic SOAP pullback is still drawn for (H2O)20: {names:?}"
         );
-        for required in ["gshake", "gsurface", "gburst", "gcycle"] {
+        for required in ["gshake", "gsurface", "gburst", "gcycle", "hbrewire"] {
             assert!(
                 names.iter().any(|name| *name == required),
                 "missing {required} on (H2O)20: {names:?}"
             );
         }
+        let hexamer = 6;
+        let species: Vec<u32> = (0..hexamer).flat_map(|_| [8, 1, 1]).collect();
+        let groups: Vec<Vec<usize>> = (0..hexamer)
+            .map(|index| vec![3 * index, 3 * index + 1, 3 * index + 2])
+            .collect();
+        let small = Config::recommended_molecular(species, groups, 1.0);
+        let small_names: Vec<_> = small
+            .move_library
+            .kernels(&small)
+            .iter()
+            .map(|kernel| kernel.name())
+            .collect();
+        assert!(
+            !small_names.iter().any(|name| *name == "hbrewire"),
+            "the hexamer library gained a rewire arm: {small_names:?}"
+        );
     }
 
     #[test]

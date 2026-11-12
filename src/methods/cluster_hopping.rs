@@ -3042,7 +3042,7 @@ where
     }
 
     let stop = loop {
-        if ledger.stopped() || ledger.target_reached() {
+        if ledger.stopped() || ledger.target_reached() || ledger.remaining() == 0 {
             break HopStop::of_closed(ledger);
         }
         // The cap is read here because every early `continue` returns here,
@@ -4352,7 +4352,7 @@ where
         // Identity SOAP is not an arm. Thompson must not buy a no-op:
         // reselect a real kernel, or skip the hop.
         // A cycle reversal that finds no cycle returns the state unchanged too.
-        let may_idle = |name: &str| name == "soap" || name == "rcycle";
+        let may_idle = |name: &str| name == "soap" || name == "rcycle" || name == "hbrewire";
         if !species_escape_trial
             && !cov_fire
             && !soft_fire
@@ -4491,12 +4491,12 @@ where
         // before it will compute an energy. The hop has to hand that potential
         // a geometry the rule already accepts. Separation is geometry only.
         // The raw overlapping proposal is not an energy call.
-        if cfg.species.is_some() && !structure_is_sane(trial.view(), OVERLAP_SEPARATION) {
+        if cfg.species.is_some() && !structure_is_sane(trial.view(), OVERLAP_CALL_LIMIT) {
             proposal_overlaps += 1;
             let separated = separate_to_overlap_rule(
                 &mut trial,
                 cfg.move_library.declared_groups(),
-                OVERLAP_SEPARATION,
+                OVERLAP_CALL_LIMIT,
                 hop_frozen.as_deref(),
             );
             if !separated {
