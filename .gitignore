@@ -67,9 +67,6 @@ cover/
 
 # Django stuff:
 *.log
-!paper/jctc/logs/water/
-!paper/jctc/logs/water/**
-!paper/jctc/logs/water/**/*.log
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -200,7 +197,6 @@ cython_debug/
 # Executables
 *.exe
 *.out
-!paper/jctc/logs/water/**/*.out
 *.app
 *.i*86
 *.x86_64
@@ -290,3 +286,14 @@ bench/lj-bonobo-h2h/.asv/
 # GMIN head-to-head scratch. The results CSV is the committed record.
 bench/gmin-h2h/runs/
 bench/gmin-h2h/.asv/
+
+# Raw logs, trajectories, frames, and Zenodo-bound archives.
+# paper/jctc/scripts/fetch_bench_data.py restores them.
+paper/jctc/logs/
+paper/jctc/data/**/*.min
+paper/jctc/data/**/*.xyz
+paper/jctc/data/**/*.ld
+paper/jctc/data/**/*.log
+paper/jctc/data/**/*.png
+paper/jctc/data/**/*hist.txt
+paper/jctc/**/*.tar.xz
