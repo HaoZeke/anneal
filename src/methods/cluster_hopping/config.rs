@@ -1581,7 +1581,7 @@ impl Config {
             rotate_step: 0.40,
             local: false,
             reverse_cycles: true,
-            relocate: false,
+            relocate: true,
         };
         cfg.rigid_body_geometry =
             Some(crate::potentials::Tip4pCluster::new(n_molecules).rigid_geometry());
@@ -1670,7 +1670,7 @@ impl Config {
             rotate_step: super::moves::RIGID_ORIENTATION_CAP,
             local: true,
             reverse_cycles: false,
-            relocate: false,
+            relocate: true,
         };
         let contact = 4.0 * reach;
         let span = LennardJonesPreset::CONTAINER_RADIUS * contact * (self.n_points as f64).cbrt();

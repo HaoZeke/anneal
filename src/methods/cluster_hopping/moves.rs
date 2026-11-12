@@ -67,10 +67,10 @@ pub enum MoveLibrary {
         /// arm. It needs a site geometry with one oxygen and two hydrogens.
         /// [`Config::for_tip4p`] turns it on.
         reverse_cycles: bool,
-        /// Move one molecule onto a new oxygen site.
+        /// Move one body onto a vacant contact.
         ///
-        /// [`Config::for_tip4p`] leaves this off. [`Config::recommended_tip4p`]
-        /// turns it on, because a collective kick does not change the cage.
+        /// On for every rigid preset. A collective kick does not change
+        /// which bodies are neighbours.
         relocate: bool,
     },
 }
@@ -252,10 +252,13 @@ impl MoveLibrary {
                 reverse_cycles,
                 relocate,
             } => {
-                // A one-body spin and a collective centre kick both quench
-                // back into the hydrogen-bond basin they left. The local
-                // chart composes one orientation step onto every body and
-                // leaves the centres where they are.
+                // A collective kick and a cycle reversal leave every centre
+                // in the cage it started in. On the centre-and-rotation
+                // chart, one body moved onto a vacant contact or turned
+                // through a full orientation lets the quench land in a
+                // different cage. The contact length is the preset's
+                // minimum separation. The local chart stays one
+                // orientation step: that preset does not move centres.
                 let mut kernels = if *local {
                     vec![ClusterMove::RigidOrientAll {
                         n_molecules: *n_molecules,
@@ -263,6 +266,11 @@ impl MoveLibrary {
                     }]
                 } else {
                     vec![
+                        ClusterMove::RigidKick {
+                            n_molecules: *n_molecules,
+                            translate_step: *translate_step,
+                            rotate_step: *rotate_step,
+                        },
                         ClusterMove::RigidTranslate {
                             n_molecules: *n_molecules,
                             step: *translate_step,
@@ -271,9 +279,21 @@ impl MoveLibrary {
                             n_molecules: *n_molecules,
                             step: *rotate_step,
                         },
+                        ClusterMove::RigidTranslateOne {
+                            n_molecules: *n_molecules,
+                            step: cfg.min_separation.max(*translate_step),
+                        },
+                        ClusterMove::RigidReorient {
+                            n_molecules: *n_molecules,
+                        },
                     ]
                 };
-                let _ = relocate;
+                if *relocate && !*local {
+                    kernels.push(ClusterMove::RigidRelocate {
+                        n_molecules: *n_molecules,
+                        min_separation: cfg.min_separation,
+                    });
+                }
                 if *reverse_cycles
                     && let Some(geometry) = cfg.rigid_body_geometry.as_ref()
                     && super::cycles::water_sites(geometry).is_some()
@@ -585,6 +605,19 @@ pub enum ClusterMove {
         n_molecules: usize,
         /// Half-width of the per-coordinate displacement.
         step: f64,
+    },
+    /// Translate and rotate every rigid body in one proposal.
+    ///
+    /// This is the basin-hopping move for a rigid chart: a centre step
+    /// and an orientation step together. Either one alone quenches
+    /// back into the cage it left.
+    RigidKick {
+        /// Rigid bodies in the state.
+        n_molecules: usize,
+        /// Half-width of the per-coordinate centre displacement.
+        translate_step: f64,
+        /// Half-width of the per-component rotation-vector increment, radians.
+        rotate_step: f64,
     },
     /// Add a rotation-vector increment to every rigid body.
     RigidRotate {
@@ -1478,6 +1511,7 @@ impl ClusterMove {
             ClusterMove::Reseed { source, .. } => format!("grow:{}", source.name()),
             ClusterMove::SpeciesSwap { .. } => "swap".into(),
             ClusterMove::RigidTranslate { .. } => "rtrans".into(),
+            ClusterMove::RigidKick { .. } => "rkick".into(),
             ClusterMove::RigidRotate { .. } => "rrot".into(),
             ClusterMove::RigidRelocate { .. } => "rreloc".into(),
             ClusterMove::RigidTranslateOne { .. } => "rtrans1".into(),
@@ -1792,6 +1826,31 @@ impl ClusterMove {
                 }
                 y
             }
+            ClusterMove::RigidKick {
+                n_molecules,
+                translate_step,
+                rotate_step,
+            } => {
+                let mut y = x.to_owned();
+                let n = *n_molecules;
+                let ht = translate_step * scale;
+                let hr = rotate_step * scale;
+                if n > 0 && y.len() >= 6 * n && ht > 0.0 {
+                    for i in 0..n {
+                        for k in 0..3 {
+                            y[3 * i + k] += rng.random_range(-ht..ht);
+                        }
+                        let base = 3 * n + 3 * i;
+                        for k in 0..3 {
+                            y[base + k] += rng.random_range(-hr..hr);
+                        }
+                    }
+                    if let Some(slice) = y.as_slice_mut() {
+                        crate::potentials::fold_rotation_vectors(n, slice);
+                    }
+                }
+                y
+            }
             ClusterMove::RigidRotate { n_molecules, step } => {
                 let mut y = x.to_owned();
                 let h = step * scale;
@@ -1815,6 +1874,13 @@ impl ClusterMove {
                 let mut y = x.to_owned();
                 let n = *n_molecules;
                 if n >= 2 && y.len() >= 6 * n {
+                    // Neighbours lie inside 5/4 of the contact distance.
+                    // The new site sits one contact away. Both lengths
+                    // come from the preset, so a larger body moves further.
+                    let contact = (*min_separation).max(1.0e-6);
+                    let shell2 = (contact * 1.25) * (contact * 1.25);
+                    let reach = contact;
+                    let clearance = contact * 0.5;
                     let mut centres = vec![[0.0; 3]; n];
                     for i in 0..n {
                         for k in 0..3 {
@@ -1829,7 +1895,7 @@ impl ClusterMove {
                                 let d = centres[i][k] - centres[j][k];
                                 d2 += d * d;
                             }
-                            if d2 < 3.3 * 3.3 {
+                            if d2 < shell2 {
                                 coordination[i] += 1;
                                 coordination[j] += 1;
                             }
@@ -1876,8 +1942,9 @@ impl ClusterMove {
                             d2.sqrt() >= *min_separation
                         })
                     };
-                    // Sit the loose molecule on a missing contact, 2.8 Å out
-                    // from an under-coordinated non-neighbour.
+                    // Sit the loose body on a missing contact, one
+                    // contact length out from an under-coordinated
+                    // non-neighbour.
                     let mut anchors: Vec<usize> = (0..n)
                         .filter(|&j| j != body)
                         .filter(|&j| {
@@ -1886,7 +1953,7 @@ impl ClusterMove {
                                 let d = centres[body][k] - centres[j][k];
                                 d2 += d * d;
                             }
-                            d2.sqrt() > 3.3
+                            d2 > shell2
                         })
                         .collect();
                     anchors.sort_by_key(|&j| coordination[j]);
@@ -1930,7 +1997,6 @@ impl ClusterMove {
                         for spoke in 0..8 {
                             let angle = spoke as f64 * std::f64::consts::TAU / 8.0;
                             let (s, c) = angle.sin_cos();
-                            let reach = 2.8;
                             let candidate = [
                                 centres[anchor][0]
                                     + (outward[0] * 0.35
@@ -1965,9 +2031,9 @@ impl ClusterMove {
                         }
                         let norm = norm.sqrt().max(1e-12);
                         [
-                            com[0] + dir[0] / norm * (outer + 1.2),
-                            com[1] + dir[1] / norm * (outer + 1.2),
-                            com[2] + dir[2] / norm * (outer + 1.2),
+                            com[0] + dir[0] / norm * (outer + clearance),
+                            com[1] + dir[1] / norm * (outer + clearance),
+                            com[2] + dir[2] / norm * (outer + clearance),
                         ]
                     });
                     for k in 0..3 {
@@ -2491,7 +2557,10 @@ mod move_scaling_tests {
             .iter()
             .map(|k| k.name())
             .collect();
-        assert_eq!(names, ["rtrans", "rrot", "rcycle"]);
+        assert_eq!(
+            names,
+            ["rkick", "rtrans", "rrot", "rtrans1", "rreor", "rreloc", "rcycle"]
+        );
         assert!(cfg.move_library.is_rigid_body());
         assert_eq!(cfg.n_points, 6);
     }

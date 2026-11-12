@@ -33,8 +33,9 @@ use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::fmt::Write as _;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 /// A new lowest energy enters the trace only when it is this much lower.
 const TRACE_STEP: f64 = 1.0e-7;
@@ -57,14 +58,18 @@ struct Counted {
     stop_at: Option<f64>,
     stop: Arc<AtomicBool>,
     seen: Mutex<Seen>,
+    pot_ns: AtomicU64,
 }
 
 impl Counted {
     fn counted(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let mark = Instant::now();
         let (e, g) = match &self.model {
             Model::Pair(p) => p.value_and_gradient(x),
             Model::Water(p) => p.value_and_gradient(x),
         };
+        self.pot_ns
+            .fetch_add(mark.elapsed().as_nanos() as u64, Ordering::Relaxed);
         let mut seen = self.seen.lock().unwrap();
         seen.calls += 1;
         if seen.calls <= self.budget && e < seen.lowest {
@@ -217,6 +222,10 @@ fn main() {
             random_cluster_in_radius(n, sphere.start_radius(), sphere.min_separation, &mut rng);
         (Model::Pair(pair), start)
     };
+    if water {
+        std::fs::write(format!("{prefix}.start.gmin"), gmin_block(n, start.view()))
+            .expect("start");
+    }
     let stop = Arc::new(AtomicBool::new(false));
     let objective = Counted {
         model,
@@ -229,9 +238,10 @@ fn main() {
             at: start.clone(),
             trace: Vec::new(),
         }),
+        pot_ns: AtomicU64::new(0),
     };
     let mut ledger = Ledger::with_stop(budget, stop);
-    let started = std::time::Instant::now();
+    let started = Instant::now();
     let out: Outcome = match (water, arm) {
         (true, _) => {
             search_from(
@@ -257,6 +267,8 @@ fn main() {
         }
     };
     let wall = started.elapsed().as_secs_f64();
+    let pot_s = objective.pot_ns.load(Ordering::Relaxed) as f64 / 1.0e9;
+    let outside_s = (wall - pot_s).max(0.0);
     let seen = objective.seen.into_inner().unwrap();
 
     let mut trace = String::from("calls,energy\n");
@@ -292,5 +304,50 @@ fn main() {
     println!("best: {:.10}", out.best);
     println!("hops: {}", out.hops);
     println!("basins: {}", out.basins);
-    println!("wall_seconds: {wall:.3}");
+    println!("wall_seconds: {wall:.6}");
+    println!("pot_s: {pot_s:.6}");
+    println!("outside_s: {outside_s:.6}");
+    for (name, draws, accepts, best) in &out.arms {
+        println!("arm {name} draws {draws} accepts {accepts} best {best:.6}");
+    }
+    let hit = stop_at.is_some_and(|level| seen.lowest <= level);
+    println!(
+        "h2h_row system={kind}{n} code=anneal seed={seed} budget={budget} hit={} evals_to_hit={} charged={} best={:.10} wall_s={wall:.6} pot_s={pot_s:.6} outside_s={outside_s:.6} basins={}",
+        u8::from(hit),
+        if hit { seen.calls.min(budget) } else { budget },
+        ledger.spent(),
+        seen.lowest,
+        out.basins,
+    );
+    if water {
+        std::fs::write(format!("{prefix}.gmin"), gmin_block(n, seen.at.view())).expect("gmin coords");
+    }
+}
+
+/// Centres, then angle-axis with the opposite sense of the Rodrigues chart.
+/// NEWTIP reads that block: `OFFSET = 3 NATOMS / 2`.
+fn gmin_block(n: usize, x: ArrayView1<f64>) -> String {
+    let mut text = String::new();
+    for i in 0..n {
+        writeln!(
+            text,
+            "{:.10} {:.10} {:.10}",
+            x[3 * i],
+            x[3 * i + 1],
+            x[3 * i + 2]
+        )
+        .unwrap();
+    }
+    for i in 0..n {
+        let base = 3 * n + 3 * i;
+        writeln!(
+            text,
+            "{:.10} {:.10} {:.10}",
+            -x[base],
+            -x[base + 1],
+            -x[base + 2]
+        )
+        .unwrap();
+    }
+    text
 }

@@ -471,12 +471,22 @@ fn a_rigid_stall_reseeds_nothing_before_the_budget_ends_the_run() {
     let rest = array![-1.5, 0.0, 0.0, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
     let reseeds = AtomicUsize::new(0);
     let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _: usize| {
-        // A rigid move turns or translates. Only a reseed redraws both.
-        let moved = |part: ArrayView1<f64>, rest: ArrayView1<f64>| {
-            part.iter().zip(rest).any(|(a, b)| (a - b).abs() > 1e-9)
+        // A reseed puts every centre more than an angstrom from the
+        // incumbent. A rigid kick is a fraction of an angstrom, and a
+        // one-body relocation leaves the other centre where it was.
+        let scattered = |part: ArrayView1<f64>, rest: ArrayView1<f64>| {
+            let bodies = part.len() / 3;
+            (0..bodies).all(|i| {
+                let mut d2 = 0.0;
+                for k in 0..3 {
+                    let d = part[3 * i + k] - rest[3 * i + k];
+                    d2 += d * d;
+                }
+                d2 > 1.0
+            })
         };
-        if moved(x.slice(s![..6]), rest.slice(s![..6]))
-            && moved(x.slice(s![6..]), rest.slice(s![6..]))
+        if scattered(x.slice(s![..6]), rest.slice(s![..6]))
+            && scattered(x.slice(s![6..]), rest.slice(s![6..]))
         {
             reseeds.fetch_add(1, Ordering::Relaxed);
             drain(ledger);

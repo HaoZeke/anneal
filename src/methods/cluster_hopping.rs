@@ -2388,6 +2388,40 @@ const RIGID_STEP_FACTOR: f64 = 1.05;
 /// result stays inside `(1e-3, 1]`. One is the orientation cap already
 /// stored on the move: a larger kick is the regime the factor cap exists
 /// to keep a large water chart out of.
+/// True when some rigid centre has moved by more than `tol`.
+///
+/// A cycle reversal turns bodies about their own centres. That is a new
+/// proton arrangement of the same cage, not a new oxygen framework.
+fn rigid_centres_parted(
+    before: ArrayView1<f64>,
+    after: ArrayView1<f64>,
+    n: usize,
+    tol: f64,
+) -> bool {
+    if n == 0 || before.len() < 3 * n || after.len() < 3 * n {
+        return false;
+    }
+    let tol2 = tol * tol;
+    (0..n).any(|i| {
+        let mut d2 = 0.0;
+        for k in 0..3 {
+            let d = before[3 * i + k] - after[3 * i + k];
+            d2 += d * d;
+        }
+        d2 > tol2
+    })
+}
+
+fn rigid_cage_kernel(mv: &ClusterMove) -> bool {
+    matches!(
+        mv,
+        ClusterMove::RigidRelocate { .. }
+            | ClusterMove::RigidReorient { .. }
+            | ClusterMove::RigidTranslateOne { .. }
+            | ClusterMove::RigidKick { .. }
+    )
+}
+
 fn rigid_step_scale(scale: f64, accepted: usize, trials: usize) -> f64 {
     if trials == 0 {
         return scale;
@@ -2550,6 +2584,50 @@ fn finish_improving(
 
 /// Continuations [`finish_improving`] grants one relaxation.
 const FINISH_ROUNDS: usize = 8;
+
+/// Keep relaxing a rigid trial until the root-mean-square force is at the
+/// record tolerance, or the block stops descending.
+///
+/// A fixed step cap on a rigid chart converges a small fraction of the
+/// quenches. A trial that has reached the global basin is then not a
+/// record, and the chain walks on. The continuation is the same block
+/// length, up to [`FINISH_ROUNDS`] more times, whether or not the trial
+/// is below the incumbent.
+fn finish_rigid<'g>(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: &mut Option<&mut GradFn<'g>>,
+    mut out: (f64, Array1<f64>),
+) -> (f64, Array1<f64>) {
+    if !cfg.move_library.is_rigid_body() {
+        return out;
+    }
+    for _ in 0..FINISH_ROUNDS {
+        if ledger.remaining() == 0 {
+            break;
+        }
+        let rms = match grad.as_deref_mut() {
+            Some(evaluate) => match evaluate(ledger, out.1.view()) {
+                Some(gradient) => crate::methods::rigid_quench::rms_force(gradient.view()),
+                None => break,
+            },
+            None => break,
+        };
+        if rms <= cfg.record_gradient {
+            break;
+        }
+        let more = relax(ledger, out.1.view(), cfg.relax_steps);
+        let descended = more.0 < out.0 - 1e-10 * (1.0 + out.0.abs());
+        if more.0 <= out.0 {
+            out = more;
+        }
+        if !descended {
+            break;
+        }
+    }
+    out
+}
 
 /// A caller stop during the opening quench is not a refused potential.
 ///
@@ -2988,6 +3066,12 @@ where
     // The escape scale starts at the move library's own amplitude, so a run
     // without feedback and one with it begin identically.
     let mut feedback = EscapeFeedback::new(1.0, cfg.temperature.max(1e-6));
+    if cfg.move_library.is_rigid_body() {
+        // The shrink on every accept otherwise closes the window below
+        // the barriers between rigid cages. The preset temperature is
+        // the floor, so a rise of that size stays acceptable.
+        feedback.set_threshold_floor(cfg.temperature.max(1e-6));
+    }
     // The entropy the chain accepts against, and the weight frozen for the
     // sweep in progress. Both stay empty until the first sweep has said what
     // range of quenched energies this problem occupies: the window is read off
@@ -3292,7 +3376,15 @@ where
         if !hop_room(hops) {
             break HopStop::MaxHops;
         }
-        if ledger.best < best_seen - 1e-9 {
+        // A rigid quench creeps by far less than an isomer gap. Treating
+        // that creep as a new lowest restarts the stall clock forever, so
+        // the chain never edits the cage.
+        let new_lowest = if cfg.move_library.is_rigid_body() {
+            5.0e-2
+        } else {
+            1e-9
+        };
+        if ledger.best < best_seen - new_lowest {
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
             hops_at_lowest = hops;
@@ -4347,7 +4439,10 @@ where
                 }
             }
         }
-        let escape = if cfg.minima_hopping {
+        // A rigid chart takes the preset step. The minima-hopping escape
+        // scale is in a reduced energy unit and either freezes the kick
+        // or throws the bodies apart.
+        let escape = if cfg.minima_hopping && !cfg.move_library.is_rigid_body() {
             feedback.escape()
         } else {
             1.0
@@ -4698,12 +4793,18 @@ where
             let step = preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale;
             trial = ClusterMove::AllPoints { step }.propose(x.view(), cfg.temperature, rng);
         }
-        if cage_edit {
+        let editing_cage = cage_edit;
+        if editing_cage {
+            // One edit, then the library again. Replacing every later
+            // proposal locks the chain on the relocation and it never
+            // returns to the kick that was deepening the cage.
             trial = ClusterMove::RigidRelocate {
                 n_molecules: cfg.n_points,
                 min_separation: cfg.min_separation,
             }
             .propose(x.view(), cfg.temperature, rng);
+            cage_edit = false;
+            hops_at_lowest = hops;
         }
         let proposal_action = if held_displacement {
             "all".to_owned()
@@ -4990,10 +5091,10 @@ where
             e_screen >= ledger.best
                 && !screen.decide(feats.view(), ledger.best, rng.random::<f64>())
         } else if cfg.calibrated_screen {
-            // Relocating one molecule starts far above the incumbent. A
-            // 15-step screen then refuses it, so the oxygen cage never
-            // changes. That move is quenched in full.
-            let relocating = cage_edit || kernels.get(k).is_some_and(|mv| mv.name() == "rreloc");
+            // A cage-changing proposal starts far above the incumbent. A
+            // short screen then refuses it, and the centres never move.
+            // That move is quenched in full.
+            let relocating = editing_cage || kernels.get(k).is_some_and(rigid_cage_kernel);
             !relocating
                 && e_screen - descent.allowance() > ledger.best + cfg.screen_margin
                 && !descent.audit()
@@ -5036,6 +5137,7 @@ where
             if cfg.finish_improving {
                 out = finish_improving(ledger, relax, out, cfg.relax_steps);
             }
+            out = finish_rigid(cfg, ledger, relax, &mut grad, out);
             if cfg.bayes_screen {
                 // The answer to the question the posterior was asked.
                 screen.observe(feats.view(), out.0);
@@ -5380,7 +5482,21 @@ where
                     };
                     visit == Visit::New && feedback.accept(delta)
                 } else {
-                    feedback.observe_driver_local(Some(from), reached);
+                    // A rigid basin above the incumbent by more than the
+                    // preset temperature is not a discovery, and neither is
+                    // a proton rearrangement that leaves the centres put.
+                    // Counting either as a discovery shrinks the kick.
+                    let cage_changed = cfg.move_library.is_rigid_body()
+                        && rigid_centres_parted(
+                            x.view(),
+                            x_new.view(),
+                            cfg.n_points,
+                            0.5 * cfg.min_separation,
+                        );
+                    let competitive = !cfg.move_library.is_rigid_body()
+                        || (cage_changed && e_new <= ledger.best + cfg.temperature)
+                        || e_new < ledger.best - 5.0e-2;
+                    feedback.observe_driver_local_scored(Some(from), reached, competitive);
                     reached != from && feedback.accept(delta)
                 };
                 if ok {
@@ -5441,6 +5557,13 @@ where
             d < 0.0 || rng.random::<f64>() < (-d).exp()
         };
         let mut accept = accept;
+        if cfg.move_library.is_rigid_body() && !unquenched {
+            // Metropolis at the preset temperature. The threshold rule
+            // collapses under a run of small accepts and then cannot
+            // cross the gap between rigid cages.
+            let rise = (e_new - e) / cfg.temperature.max(1e-12);
+            accept = rise <= 0.0 || rng.random::<f64>() < (-rise).exp();
+        }
         if cfg.move_library.is_rigid_body() && cfg.n_points > RIGID_HOT_BODIES {
             orient_window += 1;
             if accept {
@@ -5735,7 +5858,16 @@ where
                 // because its size says how deep rather than merely whether.
                 depth_allocator.update(k, -(e_new - ledger.best));
             }
-            allocator.update(k, improved || (accept && !(cfg.novel_reward && returning)));
+            // A rigid accept that only moves centres, or only turns a
+            // hydrogen-bond cycle, is not evidence the arm is useful.
+            // Paying for it fills the draw with that arm. An improvement
+            // of the incumbent is the payment.
+            let reward = if cfg.move_library.is_rigid_body() {
+                improved
+            } else {
+                improved || (accept && !(cfg.novel_reward && returning))
+            };
+            allocator.update(k, reward);
             arm_draws[k] += 1;
             if accept {
                 arm_accepts[k] += 1;
