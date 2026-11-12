@@ -17,8 +17,8 @@ cat > "$WORK/bin/inside.sh" << EOF
 set -eu
 export HOME=$WORK/home
 export TMPDIR=$WORK/tmp
-export PATH=$WORK/bin:\$PATH
-export PYTHONPATH=$WORK/bin
+export PATH=$WORK/bin:/home/ubuntu/.local/bin:\$PATH
+export PYTHONPATH=$WORK/bin:/home/ubuntu/.local/lib/python3.12/site-packages
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
