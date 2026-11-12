@@ -3014,6 +3014,15 @@ where
     // useful move changes as the search moves through the landscape, so the
     // evidence is discounted and a decaying floor keeps every kernel reachable.
     let mut allocator = FlooredThompson::new(kernels.len());
+    // A water rewire is the move that improves the incumbent. The prior
+    // starts it ahead of the shake; the improvement rate takes over.
+    if cfg.improvement_rewards {
+        for (index, kernel) in kernels.iter().enumerate() {
+            if matches!(kernel, ClusterMove::GroupRewire { .. }) {
+                allocator.credit(index, crate::catalog::molecular::WATER_REWIRE_PRIOR);
+            }
+        }
+    }
     // Rewarded by the depth a move reaches rather than by whether it was
     // accepted. See [`crate::allocate::DepthAllocator`].
     let mut depth_allocator = crate::allocate::DepthAllocator::new(kernels.len());
@@ -3496,6 +3505,10 @@ where
     // Hops elapsed when the ledger last recorded a lower minimum.
     // A rigid stall measures 1000 hops from that hop count.
     let mut hops_at_lowest = 0usize;
+    // Water restarts from a stored basin on its own clock, and then
+    // stays there for a few hops before the incumbent gap applies.
+    let mut last_basin_restart = 0usize;
+    let mut basin_hold = 0usize;
     // Set after a rigid stall when the preset relocates one molecule.
     // Cleared when a new lowest minimum is recorded.
     let mut cage_edit = false;
@@ -3526,7 +3539,13 @@ where
     let mut archive_walked = false;
     if cfg.move_library.is_rigid_body() {
         stall_archive.offer(e, x.view());
-        cage_archive.offer_cage(e, x.view(), rigid_cage_key(x.view(), cfg.n_points, cage_quantum));
+        cage_archive.offer_cage(
+            e,
+            x.view(),
+            rigid_cage_key(x.view(), cfg.n_points, cage_quantum),
+        );
+    } else if cfg.improvement_rewards {
+        stall_archive.offer(e, x.view());
     }
 
     let stop = loop {
@@ -3636,7 +3655,10 @@ where
         // that remain are spent on another cage the chain already quenched.
         // A chain that is still descending never enters, so its proposals
         // and its evaluation count stay what they were.
-        let cage_patience = cfg.restart_patience.saturating_mul(RIGID_CAGE_WINDOWS).max(1);
+        let cage_patience = cfg
+            .restart_patience
+            .saturating_mul(RIGID_CAGE_WINDOWS)
+            .max(1);
         if cfg.move_library.is_rigid_body()
             && !cage_walked
             && !kernels.is_empty()
@@ -3834,6 +3856,7 @@ where
                 Some((energy, state)) if state.len() == x.len() => (energy, state),
                 _ => (e, x.clone()),
             };
+            // A fresh generator, not a draw on the walker's.
             let mut side_rng = StdRng::seed_from_u64(
                 (hops as u64)
                     .wrapping_mul(0x9E37_79B9_7F4A_7C15)
@@ -3907,6 +3930,31 @@ where
                 MoveLibrary::RigidBody { relocate: true, .. }
             ) {
                 cage_edit = true;
+            }
+        }
+        if cfg.improvement_rewards
+            && hops.saturating_sub(hops_at_lowest)
+                >= crate::catalog::molecular::WATER_BASIN_STALL_HOPS
+            && hops.saturating_sub(last_basin_restart)
+                >= crate::catalog::molecular::WATER_BASIN_STALL_HOPS
+        {
+            // The proposals have stopped lowering the best. Leave from
+            // another stored minimum instead of the basin the chain is in.
+            last_basin_restart = hops;
+            if let Some(state) = ledger.best_state.as_ref() {
+                stall_archive.offer(ledger.best, state.view());
+            }
+            if let Some((energy, state)) = stall_archive.escape(e)
+                && state.len() == x.len()
+            {
+                let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
+                let ok = gradient
+                    .as_ref()
+                    .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len()));
+                e = energy;
+                x = state;
+                current_validation_gradient = gradient.filter(|_| ok);
+                basin_hold = crate::catalog::molecular::WATER_BASIN_HOLD;
             }
         }
         // The reoccupation move runs inside the chain and charges the
@@ -5298,7 +5346,9 @@ where
         // A high accepted minimum is a poor place to spend the next
         // proposal. Water sets `incumbent_gap` so the hop leaves from
         // the best minimum once the chain has climbed past that gap.
-        if cfg.incumbent_gap > 0.0
+        if basin_hold > 0 {
+            basin_hold -= 1;
+        } else if cfg.incumbent_gap > 0.0
             && e > ledger.best + cfg.incumbent_gap
             && let Some(state) = ledger.best_state.clone()
             && state.len() == x.len()
@@ -5375,12 +5425,7 @@ where
                     if matches!(kernels[k], ClusterMove::EnergyLattice) {
                         energy_lattice_proposal(cfg, ledger, x.view(), rng)
                     } else {
-                        kernels[k].propose_scaled(
-                            x.view(),
-                            cfg.temperature,
-                            proposal_scale,
-                            rng,
-                        )
+                        kernels[k].propose_scaled(x.view(), cfg.temperature, proposal_scale, rng)
                     }
                 }
             }
@@ -6522,7 +6567,7 @@ where
             // hydrogen-bond cycle, is not evidence the arm is useful.
             // Paying for it fills the draw with that arm. An improvement
             // of the incumbent is the payment.
-            let reward = if cfg.move_library.is_rigid_body() {
+            let reward = if cfg.move_library.is_rigid_body() || cfg.improvement_rewards {
                 improved
             } else {
                 improved || (accept && !(cfg.novel_reward && returning))
@@ -6577,7 +6622,7 @@ where
             if !unquenched && cfg.packing_cna_applies() {
                 packing.offer(e_new, x_new.view(), packing_cutoff);
             }
-            if !unquenched && cfg.move_library.is_rigid_body() {
+            if !unquenched && (cfg.move_library.is_rigid_body() || cfg.improvement_rewards) {
                 stall_archive.offer(e_new, x_new.view());
                 cage_archive.offer_cage(
                     e_new,

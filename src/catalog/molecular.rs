@@ -608,6 +608,24 @@ pub const WATER_RECORD_GRADIENT: f64 = 2.0e-4 * 27.211_386_245_988 / 0.529_177_2
 /// walk that is still near the incumbent is left alone.
 pub const WATER_INCUMBENT_GAP_EV: f64 = 0.02;
 
+/// Hops without a new lowest minimum before a water chain leaves its basin.
+///
+/// A (H2O)16 walk of 28000 calls takes about 180 hops, so the rigid
+/// stall of a thousand hops never arrives. Thirty-two hops is inside
+/// that walk and longer than the gaps between its early improvements.
+pub const WATER_BASIN_STALL_HOPS: usize = 32;
+
+/// Hops a water chain stays on a stored basin before the incumbent gap
+/// may pull it back to the lowest minimum.
+pub const WATER_BASIN_HOLD: usize = 8;
+
+/// Prior improvements credited to a hydrogen-bond rewire before any hop.
+///
+/// On (H2O)16 the rewire improved the incumbent seven times in 41
+/// proposals and the group shake once in 42. The prior starts the
+/// allocator there; later hops replace it with the measured rate.
+pub const WATER_REWIRE_PRIOR: u32 = 3;
+
 /// Search arm on the molecular preset.
 ///
 /// Communicating and derived keep the molecular groups. They do not
@@ -638,7 +656,14 @@ pub fn configure_water_arm(cfg: &mut Config, arm: WaterSearchArm) {
     cfg.quench_once = true;
     cfg.incumbent_gap = WATER_INCUMBENT_GAP_EV;
     match arm {
-        WaterSearchArm::Recommended | WaterSearchArm::GoodTuring => {}
+        WaterSearchArm::Recommended | WaterSearchArm::GoodTuring => {
+            // Nearly every molecular proposal is accepted, so an
+            // acceptance reward cannot tell the rewire from the shake.
+            // The weight follows improvements, and a stall leaves from
+            // a stored basin instead of the one the chain is sitting in.
+            cfg.allocate_moves = true;
+            cfg.improvement_rewards = true;
+        }
         WaterSearchArm::Communicating => {
             cfg.depth_reward = false;
             cfg.allocate_moves = true;
@@ -1395,6 +1420,14 @@ mod water_hexamer_tests {
             assert!((WATER_RECORD_GRADIENT - 1.0285e-2).abs() < 1e-6);
             assert!(cfg.target_energy.is_none());
             assert!(cfg.quench_once);
+            let weights_improvements = matches!(
+                arm,
+                WaterSearchArm::Recommended | WaterSearchArm::GoodTuring
+            );
+            assert_eq!(cfg.improvement_rewards, weights_improvements);
+            if weights_improvements {
+                assert!(cfg.allocate_moves);
+            }
             assert_eq!(cfg.incumbent_gap, WATER_INCUMBENT_GAP_EV);
             assert_eq!(cfg.move_library, library);
             assert!(cfg.surfaces.is_empty());

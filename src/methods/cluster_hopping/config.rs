@@ -1049,6 +1049,15 @@ pub struct Config {
     /// Absent from the resolved JSON until it is set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_energy: Option<f64>,
+    /// Pay the move allocator only for an improvement of the incumbent.
+    ///
+    /// Off by default: an accepted step still counts. A molecular water
+    /// walk accepts nearly every proposal, so that reward keeps an
+    /// unproductive arm in the draw. On, the weight follows the
+    /// improvement rate, and a stalled chain restarts from a stored
+    /// low basin other than the one it is in.
+    #[serde(skip_serializing_if = "is_false")]
+    pub improvement_rewards: bool,
     /// Relaunch from the incumbent when the chain is this far above it.
     ///
     /// Zero leaves the walk where acceptance put it. A positive gap, in
@@ -1535,6 +1544,7 @@ impl Config {
             quench_confidence: 2.0,
             quench_once: false,
             target_energy: None,
+            improvement_rewards: false,
             incumbent_gap: 0.0,
             relax_steps: 200,
             two_phase: None,

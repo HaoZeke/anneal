@@ -156,6 +156,17 @@ impl FlooredThompson {
         self.alpha.is_empty()
     }
 
+    /// Prior successes for one arm, before any hop is observed.
+    ///
+    /// The uniform prior is one success and one failure. Extra successes
+    /// start that arm ahead of the others; the discount and the floor
+    /// still let the rest of the library be drawn.
+    pub fn credit(&mut self, arm: usize, successes: u32) {
+        if let Some(alpha) = self.alpha.get_mut(arm) {
+            *alpha += f64::from(successes);
+        }
+    }
+
     /// Times each arm was chosen.
     pub fn pulls(&self) -> &[usize] {
         &self.pulls
