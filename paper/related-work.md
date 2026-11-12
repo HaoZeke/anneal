@@ -541,3 +541,19 @@ Cite `zhangBhsms2026`.
 ASE tag 3.29.0, dated 21 June 2026, is still the newest tag. The master tip is still the 11 November 2026 merge. AGOX tag v3.11.1, dated 4 February 2026, is still the newest tag. The dev tip is still the 5 May 2026 ASE 3.28 import fix. The GOFEE page on the documentation site is titled as AGOX 3.11.2. The changelog on dev has an unreleased note and no 3.11.2 section, and the tag list has no 3.11.2. That banner is not a release. CREST's newest numbered release is still v3.0.2, and the master tip is still the 16 June 2026 CMake fix. pele is still v0.1.2, and that tag is still the tip, dated 12 October 2026. xtb v6.8.0, dated 5 November 2026, is still the newest release.
 
 Pin the open arms to ASE 3.29.0, AGOX v3.11.1, CREST 3.0.2, and pele 0.1.2. Do not move the AGOX arm to 3.11.2. No bibliographic entry for this check: a tag date is not a DOI.
+
+## 2026-11-12 — A reinforcement-learning search of Pd6Mo7
+
+Ahmad, Bin Qamar, Farooq, and Chen, Next Materials 13, 103127 (October 2026), doi:10.1016/j.nxmate.2026.103127, search Pd6Mo7 with proximal policy optimisation on an embedded-atom potential. The abstract says no earlier global-optimisation study had resolved that cluster. Candidates are re-ranked with a MACE potential and with density-functional calculations. Those calculations find the sixth-ranked embedded-atom configuration to be the lowest structure. A molecular-dynamics run at 500 K keeps that structure compact for 200 ps.
+
+Farooq and Chen are also authors of the embedded-atom search already filed as `mubeenDrLClusters2026`. That paper is Ag--Ni and Pt--Co. This one is Pd6Mo7. It gives no Lennard-Jones energy and no water energy, so it does not contradict the Cambridge hit targets, 121 of 192, or 97 of 192. The embedded-atom order is not the density-functional order. A head-to-head would be this cluster on one shared potential. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `ahmadPdmo2026`.
+
+## 2026-11-12 — An agent-rewritten local optimiser in ASE
+
+Woo, arXiv:2611.13143 (9 November 2026), runs an agent loop on algorithms in the Atomic Simulation Environment. One target rewrites an implementation so that it runs faster and returns the same results. The other redesigns the method so that a relaxation uses fewer force evaluations. On problems held out from the agent, the note says the best optimisers need 3.1 to 3.4 times fewer force evaluations than L-BFGS for a structure relaxation, and 4.6 to 17 times fewer than a standard climbing-image nudged elastic band. The record has no DOI.
+
+The missing ASE arm is basin hopping on tag 3.29.0. This preprint is a local relaxation and a band calculation. It does not run that arm, and it publishes no basin-hopping hit rate. ASE tag 3.29.0, checked again on 12 November 2026, is still the newest tag, and the master tip is still the 11 November 2026 merge. AGOX is still v3.11.1, CREST is still v3.0.2 with the 16 June 2026 master tip, pele is still v0.1.2, and xtb is still v6.8.0. The preprint does not contradict the open count, because no ASE number is printed. A comparison that uses these optimisers has to be named as this local relaxation. Its force-call ratio is not the hop's hit rate.
+
+Cite `wooAseOptimizers2026`. Keep the open arm on stock basin hopping in ASE 3.29.0.
