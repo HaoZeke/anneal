@@ -40,9 +40,13 @@ The moves stay fixed, and the reduced temperature stays at \(0.8\).
 A run hits when the quenched energy \(E\) and the published energy
 \(E_{\mathrm{ref}}\) satisfy \(|E-E_{\mathrm{ref}}|<10^{-3}\).
 On seeds 2000--2005 the depth posterior and a uniform draw both hit
-LJ\(_{38}\) and LJ\(_{55}\) on 6 of 6 seeds, and both hit LJ\(_{98}\)
-on 5 of 6.
-At LJ\(_{75}\) the posterior hits 6 of 6 and the uniform draw hits 4 of 6.
+LJ\(_{38}\) and LJ\(_{55}\) on 6 of 6 seeds.
+Pooled with seeds 7000--7005, the posterior hits LJ\(_{75}\) on 11 of
+12 and the uniform draw hits 12 of 12.
+Both hit LJ\(_{98}\) on 9 of 12.
+At LJ\(_{104}\) the counts are 5 of 12 and 6 of 12.
+The arm rule makes no difference beyond the seed-to-seed spread at
+these sizes.
 Against the Wales-group program GMIN, on the code before the pentagonal
 retry, this setting hits LJ\(_{98}\) on 5 of 6 seeds and GMIN hits 0 of 6.
 On LJ\(_{104}\) both hit 2 of 6.
@@ -669,43 +673,54 @@ minimum is marked.}
 
 \subsection{Depth posterior against a uniform draw}
 \label{sec:ablation}
-Table~\ref{tab:ablation} is six seeds, 2000 through 2005, on both arms.
+Two lists compare the depth posterior with a uniform arm draw.
+Seeds 2000 through 2005 are the first list.
+Seeds 7000 through 7005 are the second, at LJ\(_{75}\), LJ\(_{98}\),
+and LJ\(_{104}\).
 The budgets are \(4\times 10^{5}\) force calls at LJ\(_{38}\),
-\(1\times 10^{6}\) at LJ\(_{55}\), and \(4\times 10^{6}\) at LJ\(_{75}\)
-and LJ\(_{98}\).
+\(1\times 10^{6}\) at LJ\(_{55}\), and \(4\times 10^{6}\) at the three
+larger sizes.
 The runs were serial.
 The hit is equation~\ref{eq:hit}.
-
-The posterior and the uniform draw both hit LJ\(_{38}\) on 6 of 6 seeds
-and LJ\(_{55}\) on 6 of 6.
-Both hit LJ\(_{98}\) on 5 of 6.
-Both miss seed 2004 at LJ\(_{98}\).
-At LJ\(_{75}\) the posterior hits 6 of 6.
-The uniform draw hits 4 of 6 and misses seeds 2001 and 2002.
-The depth posterior therefore beats uniform arm choice at LJ\(_{75}\),
-6 of 6 against 4 of 6, and the hit counts match at the other three
-sizes.
-
-\begin{table}
-\caption{Hits on seeds 2000--2005.
 The posterior draws equation~\ref{eq:thompson}.
 The uniform arm draws equation~\ref{eq:uniform}.
+
+On the first list both arms hit LJ\(_{38}\) and LJ\(_{55}\) on 6 of 6
+seeds.
+Pooled over the twelve seeds, the posterior hits LJ\(_{75}\) on 11 of
+12 and the uniform draw hits 12 of 12.
+Both hit LJ\(_{98}\) on 9 of 12.
+The posterior hits LJ\(_{104}\) on 5 of 12 and the uniform draw hits
+6 of 12.
+The arm rule makes no difference beyond the seed-to-seed spread at
+these sizes.
+The two-sided Fisher exact probability is 1 at each size in
+Table~\ref{tab:ablation}.
+\texttt{paper/jctc/scripts/selector\_fisher.py} reads the two result
+files and computes that probability.
+
+\begin{table}
+\caption{Hits for the depth posterior and a uniform draw.
+LJ\(_{38}\) and LJ\(_{55}\) are seeds 2000--2005.
+The other rows pool those seeds with 7000--7005.
+The column \(p\) is the two-sided Fisher exact probability.
 A hit satisfies equation~\ref{eq:hit}.}
 \label{tab:ablation}
 \centering
-\begin{tabular}{lrrr}
+\begin{tabular}{lrrrr}
 \toprule
-Cluster & Budget & Posterior & Uniform \\
+Cluster & Budget & Posterior & Uniform & \(p\) \\
 \midrule
-LJ\(_{38}\) & \(4\times 10^{5}\) & 6/6 & 6/6 \\
-LJ\(_{55}\) & \(1\times 10^{6}\) & 6/6 & 6/6 \\
-LJ\(_{75}\) & \(4\times 10^{6}\) & 6/6 & 4/6 \\
-LJ\(_{98}\) & \(4\times 10^{6}\) & 5/6 & 5/6 \\
+LJ\(_{38}\) & \(4\times 10^{5}\) & 6/6 & 6/6 & 1 \\
+LJ\(_{55}\) & \(1\times 10^{6}\) & 6/6 & 6/6 & 1 \\
+LJ\(_{75}\) & \(4\times 10^{6}\) & 11/12 & 12/12 & 1 \\
+LJ\(_{98}\) & \(4\times 10^{6}\) & 9/12 & 9/12 & 1 \\
+LJ\(_{104}\) & \(4\times 10^{6}\) & 5/12 & 6/12 & 1 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-On a second list, seeds 6400--6405, with the pentagonal retry of
+On seeds 6400--6405, with the pentagonal retry of
 equation~\ref{eq:hold}, LJ\(_{98}\) hits on 6 of 6 inside
 \(4\times 10^{6}\) calls.
 On those seeds, the run that holds a failed growth and does not take
@@ -919,9 +934,12 @@ Neither arm is part of the recommended preset.
 \section{Conclusions}
 One basin-hopping setting, with the moves of Section~\ref{sec:moves}
 and \(T=0.8\), is the search reported here.
-On seeds 2000--2005 the depth posterior and a uniform draw hit the same
-number of seeds at LJ\(_{38}\), LJ\(_{55}\), and LJ\(_{98}\).
-At LJ\(_{75}\) the counts are 6 of 6 and 4 of 6.
+On seeds 2000--2005 both arms hit LJ\(_{38}\) and LJ\(_{55}\) on 6 of 6.
+Pooled with seeds 7000--7005, LJ\(_{75}\) is 11 of 12 against 12 of 12,
+LJ\(_{98}\) is 9 of 12 on both arms, and LJ\(_{104}\) is 5 of 12
+against 6 of 12.
+The arm rule makes no difference beyond the seed-to-seed spread at
+these sizes.
 Before the pentagonal retry, the comparison with GMIN is 5 of 6 against
 0 of 6 on LJ\(_{98}\), and a 2 of 6 tie on LJ\(_{104}\).
 The retry rows stored for that leave hit 3 of 6 on LJ\(_{104}\).
