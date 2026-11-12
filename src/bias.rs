@@ -767,8 +767,56 @@ impl Fingerprint for SiteEnergies {
     }
 }
 
+struct SortedPairCache {
+    n_points: usize,
+    bits: Vec<u64>,
+    distances: Vec<f64>,
+}
+
+std::thread_local! {
+    static SORTED_PAIR_CACHE: std::cell::RefCell<SortedPairCache> = const {
+        std::cell::RefCell::new(SortedPairCache {
+            n_points: 0,
+            bits: Vec::new(),
+            distances: Vec::new(),
+        })
+    };
+}
+
+fn cached_sorted_pairs(n_points: usize, x: ArrayView1<f64>) -> Option<Array1<f64>> {
+    SORTED_PAIR_CACHE.with(|slot| {
+        let slot = slot.borrow();
+        if slot.n_points != n_points || slot.bits.len() != x.len() {
+            return None;
+        }
+        if slot
+            .bits
+            .iter()
+            .zip(x.iter())
+            .any(|(bits, value)| *bits != value.to_bits())
+        {
+            return None;
+        }
+        Some(Array1::from(slot.distances.clone()))
+    })
+}
+
+fn remember_sorted_pairs(n_points: usize, x: ArrayView1<f64>, distances: &[f64]) {
+    SORTED_PAIR_CACHE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        slot.n_points = n_points;
+        slot.bits.clear();
+        slot.bits.extend(x.iter().map(|value| value.to_bits()));
+        slot.distances.clear();
+        slot.distances.extend_from_slice(distances);
+    });
+}
+
 impl Fingerprint for SortedPairs {
     fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        if let Some(cached) = cached_sorted_pairs(self.n_points, x) {
+            return cached;
+        }
         let n = self.n_points;
         let mut d = Vec::with_capacity(n * (n - 1) / 2);
         for i in 0..n {
@@ -780,6 +828,7 @@ impl Fingerprint for SortedPairs {
             }
         }
         d.sort_unstable_by(f64::total_cmp);
+        remember_sorted_pairs(self.n_points, x, &d);
         Array1::from(d)
     }
 }
@@ -1214,6 +1263,18 @@ mod basin_bias_tests {
         for k in 0..da.len() {
             assert!((da[k] - db[k]).abs() < 1e-12, "component {k} differs");
         }
+    }
+
+    #[test]
+    fn a_repeated_distance_spectrum_keeps_the_same_values() {
+        let fp = SortedPairs { n_points: 4 };
+        let a = tetra(1.2);
+        let first = fp.describe(a.view());
+        assert_eq!(fp.describe(a.view()), first);
+        let mut moved = a.clone();
+        moved[0] += 0.3;
+        assert_ne!(fp.describe(moved.view()), first);
+        assert_eq!(fp.describe(a.view()), first);
     }
 
     #[test]
