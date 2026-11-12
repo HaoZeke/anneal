@@ -417,3 +417,69 @@ Cite `safaGoldIons2026`.
 Sozykin and co-workers, Physical Review B 113, 224111 (22 June 2026), doi:10.1103/sv5r-mryz, is the journal version of the preprint already filed as `sozykinTensorTrain2026`. The arXiv record still has no journal-ref line. The DOI, the volume, and the article number were read from the Crossref record, and that record names the same eight authors. The Lennard-Jones success rates in the earlier note are unchanged.
 
 The key `sozykinTensorTrain2026` now carries the journal DOI beside the arXiv id.
+
+## 2026-11-12 — Two packages for giant cluster global minima
+
+Cheng, Dai, Zhang, and Zhang, Journal of Molecular Modeling 32, 414 (13 October 2026), doi:10.1007/s00894-026-07000-2, release GMUPC for fullerene-like uranyl peroxide clusters from U20 to U10260. The workflow builds symmetric structures from Wyckoff positions, perturbs isomers, drops duplicates, and searches with particle swarm optimisation, a genetic algorithm, standard basin hopping, and an improved basin hop. The generator prefers high-symmetry cages. A machine-learning potential carries the broad search.
+
+The same authors, Structural Chemistry (23 October 2026), doi:10.1007/s11224-026-02938-8, release GMSGC for fullerene-like gadolinium--oxygen clusters from 50 to 25650 gadolinium atoms. The record has no volume or pages yet. The package again combines symmetric generation, a random perturbation, duplicate removal, standard and improved basin hopping, a genetic algorithm, and particle swarm optimisation. Relativistic density-functional calculations follow. They say the giant icosahedral shells they report obey the isolated-pentagon rule.
+
+Zhang, Cheng, and Zhang already search molecular clusters through ten molecules on AIMNet2, filed as `zhangGmmlp2026`. GMUPC and GMSGC are later packages, on uranyl peroxide and on gadolinium oxide. Neither reports a Lennard-Jones energy or a water energy, so neither contradicts the Cambridge hit targets, 121 of 192, or 97 of 192. A head-to-head would be one of their clusters, on the potential that package uses. The symmetry-seeded cage is not the manuscript's move library.
+
+Cite `chengGmupc2026` and `chengGmscg2026`.
+
+## 2026-11-12 — A reinforcement-learning search against the Birmingham genetic algorithm
+
+Mubeen, Farooq, and Chen, AIP Advances 16, 095003 (1 September 2026), doi:10.1063/5.0344056, search transition-metal nanoclusters with proximal policy optimisation on an embedded-atom potential. The clusters are Ag1Ni12, Ag6Ni7, Ag7Ni6, Ag12Ni1, and Pt6Co7. The abstract says the search finds lower-energy minima than a Birmingham cluster genetic algorithm, and that the changes are largest for Ag6Ni7 and for Pt6Co7. A later atomic-cluster-expansion relaxation is used to compare those embedded-atom minima with effective-medium ones. The abstract gives no Lennard-Jones energy.
+
+The manuscript names cut-and-splice as the move in the Birmingham pool methods. It prints no genetic-algorithm hit rate. These bimetallic energies do not contradict the Cambridge Lennard-Jones targets or the sealed water counts. A head-to-head would be one of these clusters on the embedded-atom surface.
+
+Cite `mubeenDrLClusters2026`.
+
+## 2026-11-12 — Basin hopping away from the Lennard-Jones sizes
+
+Park, Pillai, Pracht, and Wales, Journal of Chemical Physics 165, 054310 (6 August 2026), doi:10.1063/5.0343219, map n-alkanes from n-C14H30 to n-C20H42 with the Cambridge energy-landscape software. Basin hopping finds the low minima, and discrete path sampling connects the families. On their many-body surface the lowest family changes with chain length: all-trans at 14 carbons, a hairpin from 15 to 17, and a compact fold from 18. DLPNO-CCSD(T1)-F12 calculations put the hairpin lower again for the longer chains. The compact folds remain relevant. The chains are not Lennard-Jones clusters, and the note gives no water energy.
+
+Du, Kim, and Warren, arXiv:2608.27680 (27 August 2026), test four nonlocal perturbations, each followed by a local relaxation, as basin-hopping moves on amorphous alumina. Moving one oxygen so that two aluminium coordination numbers change reaches low-energy configurations in fewer trials than a conventional Monte Carlo trajectory. The moves are not the manuscript's six geometric moves. The note gives no Lennard-Jones energy.
+
+Xu and co-workers, arXiv:2608.17149 (17 August 2026), globally optimise supported Zn3 clusters on Cu(111) with a machine-learning potential. Compact triangles are favoured among the zero-temperature minima. Free-energy calculations shift the weight toward extended linear forms as the temperature rises, and the shift is mostly entropic. The cluster is supported zinc, not Lennard-Jones or water. A zero-temperature hit is not that finite-temperature ensemble.
+
+None of the three contradicts the Cambridge hit targets, 121 of 192, or 97 of 192. The GMIN rows stay the LJ98 and LJ104 comparison. Cite `parkAlkaneLandscape2026`, `duBasinHopping2026`, and `xuZincClusters2026`.
+
+## 2026-11-12 — CREST, a GOAT geometry search, and a Bayesian conformer search
+
+Moshchenkov, Ryzhako, Rozov, Otlyotov, and Minenkov, Journal of Computational Chemistry 47, e70520 (14 October 2026), doi:10.1002/jcc.70520, compare an exhaustive conformer search with CREST metadynamics for 13 gas-phase forms of clinical drugs. GFN1-xTB and GFN2-xTB complement each other on which conformer is the lowest. The GFN force field does worse, because its surface and the density-functional surface differ. Conformational entropies from the systematic search, and from the standard CREST entropy mode with the single-point Hessian off, agree reasonably with a molecular-dynamics estimate. Turning the single-point Hessian on, after a density-functional refinement, makes the CREST entropy too large for some species. The set is not the water hexamer, so the note does not contradict 121 of 192, 97 of 192, or the polished gaps.
+
+Masys, Jonauskas, and Rinkevičius, Lithuanian Journal of Physics 66, no. 3 (11 September 2026), doi:10.3952/physics.2026.66.3.3, apply an algorithm they call GOAT to dangling bonds on hydroxylated and aminated nanodiamonds. The abstract reports more than five million geometry optimisations. The landing page does not name ORCA and does not name de Souza. The search is a geometry optimisation of a nanodiamond, so it is not the analytic Goat Optimization Algorithm already filed as `nozariGoatAlgorithm2025`. It does not report a water cluster. The missing hexamer comparison with de Souza's GOAT stays open.
+
+Lewis-Atwell, Farrar, and Grayson, Chem Catalysis, 101905 (November 2026), doi:10.1016/j.checat.2026.101905, use Bayesian optimisation to locate the minimum-energy conformer. The record has no volume. The abstract says the method needs fewer high-level geometry optimisations than a screen based on a force field, on GFN2-xTB, or on single-point energies, and that a few tens of high-level optimisations are typical. Transition states are treated in the same way. The abstract does not report the water hexamer, so it does not contradict 121 of 192 or 97 of 192. A GFN2-xTB screen is not that high-level minimum. A comparison with this search is one of their catalytic transition states.
+
+Cite `moshchenkovCrestEntropy2026`, `masysGoatNanodiamond2026`, and `lewisAtwellConformers2026`.
+
+## 2026-11-12 — Structure searches that are not the cluster preset
+
+Song, Shi, She, Sun, Cao, and Xuan, Crystal Growth and Design (5 November 2026), doi:10.1021/acs.cgd.6c00574, also arXiv:2604.08972, release selective random structure search. The record has no volume or pages yet. Symmetry-constrained random crystals are filtered for diversity and relaxed with universal machine-learning potentials. The tests are SiC, BaPtAs, layered NbSe2, and GaN nanotubes. They recover known ground states and report further polymorphs. The search is a crystal, not a Lennard-Jones cluster and not a water cluster.
+
+Agada, Wang, and Biswas, arXiv:2609.20592 (17 September 2026), use the name CrystalMO-TuRBO for multi-objective trust-region Bayesian optimisation of a joint X-ray and neutron crystal refinement. The test is single-crystal Ho2Ti2O7. The objective is a diffraction residual. The manuscript's trust-region arm is the local Bayesian optimiser measured on the hop and not kept. This preprint does not run that arm, and it does not report a Lennard-Jones hit rate.
+
+Cite `songSelectiveSearch2026` and `agadaCrystalTurbo2026`. Keep CrystalMO-TuRBO apart from the hop's trust-region arm.
+
+## 2026-11-12 — Cross-field optimisers checked against the printed arms
+
+Nedanovski, Nenov, and Pilev, arXiv:2606.15830 (14 June 2026), seed CMA-ES restarts from a nearest-better clustering of a Sobol sample. On the composition functions of the CEC suites they report, the fixed-budget target coverage is higher than BIPOP-CMA-ES. The tests are analytic benchmark functions. They do not run LJ98. The cross-field section prints a BIPOP arm at 6 of 6 on LJ98, with median 1324848 calls, against retry rows at 6 of 6 with median 813591. Those counts are this hop's arm. The preprint does not contradict them. Do not replace the Hansen citation with this restart.
+
+Wolfson, arXiv:2606.26164 (24 June 2026), and Swarm and Evolutionary Computation 110, 102574 (November 2026), doi:10.1016/j.swevo.2026.102574, release ChiSao, a GPU-resident multimodal optimiser. The preprint names basin hopping among sequential baselines and reports a wall-clock speedup against it on analytic functions where the methods it compares all succeed. The suite is analytic. It is not a Lennard-Jones force-call hit rate, and it does not contradict a printed basin-hopping count.
+
+Miyata, Arai, and Takabe, Physical Review E (6 November 2026), doi:10.1103/664f-wjpj, also arXiv:2601.13542, choose replica-exchange temperatures by a gradient step on the variance of the acceptance rates. The record has no volume or pages yet. The tests are the Ising model, the XY model, and the Edwards--Anderson model. The manuscript says parallel tempering exchanges states on a temperature ladder. This paper does not report a cluster hit rate, so that sentence stands.
+
+Cite `nedanovskiCmaEs2026`, `wolfsonChisao2026`, and `miyataReplicaExchange2026`.
+
+## 2026-11-12 — A planar bound, and two Cambridge tables that are not Lennard-Jones
+
+Colbrook, doi:10.5281/zenodo.23835694 (31 October 2026), proves a lower bound on the classical planar Lennard-Jones energy. For every finite set of distinct points in the plane, the energy is at least the particle count times the energy per particle of the optimally scaled triangular lattice, and finite triangular patches meet that bound in the thermodynamic limit. The potential is two-dimensional. The note gives no energy at 38, 55, 75, 98, or 104 atoms in three dimensions. Lecomte's statement that every case of 38 atoms and larger stays unproved is a statement about those three-dimensional clusters. This deposit does not change it.
+
+A deposit under the name mizopl, doi:10.5281/zenodo.23466237 (19 October 2026), claims eight putative global minima for 55-atom copper--silver Gupta nanoalloys below entries in the Cambridge Cluster Database. The largest gap it names is Cu39Ag16, with a difference of -1.18984440 eV. This note does not recompute the geometries. The potential is the Gupta potential, not Lennard-Jones. The Cambridge Lennard-Jones energies used as hit targets are a different table.
+
+Meadows, doi:10.5281/zenodo.24111878 (10 November 2026), deposits candidate improvements to packing and energy tables. One file is a Thomson configuration at 436 particles. The deposit says it lies 0.0348 below the minimum over the live tables it compares, including the Cambridge Cluster Database and Wayne Deeter's table. This note does not recompute that configuration. The potential is the Thomson problem. Amore and Wales search that problem at large size. Their citation is not a claim that the Cambridge Thomson table is frozen, and this deposit is not a Lennard-Jones energy.
+
+Cite `colbrookPlanarLennardJones2026`, `mizoplGuptaRecords2026`, and `meadowsThomson2026`. Keep all three out of the Lennard-Jones hit table.
