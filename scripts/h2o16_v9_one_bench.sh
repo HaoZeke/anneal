@@ -199,8 +199,8 @@ score_one() {
   judge "$dest"
 }
 case "$SEED" in
-  15001|15002|15003|15004|15005) ;;
-  *) echo "this handoff is for seeds 15001-15005" >&2; exit 1 ;;
+  15000|15001|15002|15003|15004|15005) ;;
+  *) echo "this handoff is for seeds 15000-15005" >&2; exit 1 ;;
 esac
 mkdir -p "$OUT"
 seed="$SEED"
@@ -330,6 +330,9 @@ if (( order_byte % 2 == 0 )); then
   arm_order=(anneal crest)
 else
   arm_order=(crest anneal)
+fi
+if [[ ${H2O_SKIP_ANNEAL:-0} == 1 ]]; then
+  arm_order=(crest)
 fi
 echo "ARM_ORDER ${arm_order[*]} $(stamp)" >> "$OUT/schedule.txt"
 for arm in "${arm_order[@]}"; do
