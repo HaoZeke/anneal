@@ -46,8 +46,9 @@ At LJ\(_{75}\) the posterior hits 6 of 6 and the uniform draw hits 4 of 6.
 Against the Wales-group program GMIN, on the code before the pentagonal
 retry, this setting hits LJ\(_{98}\) on 5 of 6 seeds and GMIN hits 0 of 6.
 On LJ\(_{104}\) both hit 2 of 6.
-\todo{The LJ\(_{104}\) rerun after the pentagonal retry is still running.}
-On seeds 6400--6405 the same retry hits LJ\(_{98}\) on 6 of 6.
+On seeds 6400--6405 the retry rows hit LJ\(_{104}\) on 3 of 6 and
+LJ\(_{98}\) on 6 of 6.
+Section~\ref{sec:cross-field} does not improve those counts.
 
 On TIP4P, within \(0.001\)~kcal/mol and \(5\times 10^{5}\) force calls,
 \((\mathrm{H_2O})_{10}\) hits on 6 of 6 seeds.
@@ -506,6 +507,21 @@ LJ\(_{38}\), with the truncated octahedron as the global minimum.
 Nested sampling of the 7-atom and 36-atom clusters recovers known phase
 transitions.
 \cite{maillardNested2025}
+A bi-population CMA-ES restart and a local Bayesian trust region were
+measured as opt-in arms of this hop and were not kept.
+Section~\ref{sec:cross-field} records the counts.
+\cite{hansenBipop2009,erikssonTurbo2019}
+Sep-CMA was not added.
+The hop already learns a low-rank covariance of accepted moves and
+leaves that arm off the recommended preset.
+\cite{rosSepCma2008}
+BEACON searches for novelty rather than for the reference energy.
+\cite{tangBeaconNovelty2026}
+A tensor-train distribution over site indices was not added.
+A relabeling of the atoms changes the index, and the tensor-train
+searches already cited stop at 45 atoms.
+Population annealing was not given a new force-call hit rate.
+The citation above is a free-energy estimate for LJ\(_{38}\).
 An adaptive genetic algorithm prints known energies through 20 atoms at
 higher precision.
 \cite{willneckerGenetic2024}
@@ -708,9 +724,10 @@ force calls.
 The hit is equation~\ref{eq:hit}.
 On LJ\(_{98}\) this setting hits 5 of 6 and GMIN hits 0 of 6.
 On LJ\(_{104}\) both hit 2 of 6.
-\todo{The LJ\(_{104}\) rerun on the code that retries the pentagonal
-leave is still running.
-No hit count from that rerun is reported here.}
+The retry rows stored for that leave hit 3 of 6 on LJ\(_{104}\) and
+6 of 6 on LJ\(_{98}\).
+They are the baseline in Section~\ref{sec:cross-field}.
+They are not a new comparison with GMIN.
 
 \begin{table}
 \caption{Hits against GMIN before the pentagonal retry.
@@ -854,6 +871,51 @@ $-2.2000\times 10^{-9}$ & 0.000157 & 0.000134 \\
 \end{tabular}
 \end{table}
 
+\subsection{Arms that were measured and not kept}
+\label{sec:cross-field}
+The recommended preset was not changed.
+The comparison uses the retry rows of the funnel table and the TIP4P
+rate file, on the same seeds.
+A miss counts as the full budget when a median is taken.
+The runs are serial, on one machine, under hostname bench.
+
+The first arm multiplies the all-points step of a failed directed
+leave by a BIPOP schedule.
+\cite{hansenBipop2009}
+The large regime spends the population ratio as that multiplier,
+because the chain is one walker.
+The small regime uses the reduced step.
+The planner does not draw on the chain's random stream.
+On seeds 6400--6405 and \(4\times 10^{6}\) force calls, LJ\(_{98}\)
+hit on 6 of 6.
+In seed order the calls to the first hit are 242295, 217610, 3911207,
+1878578, 3724410, and 771118.
+The median is 1324848.
+The retry rows also hit on 6 of 6, and their median is 813591.
+LJ\(_{104}\) hit on 2 of 6, seeds 6401 and 6405, at 247319 and
+3034389 calls.
+The retry rows hit on 3 of 6, seeds 6402, 6404, and 6405.
+Seed 6401 is a hit the retry rows miss.
+Seeds 6402 and 6404 are hits the retry rows record and this arm misses.
+
+The second arm, after a rigid stall, chooses a missing-contact site
+by Thompson sampling from a streaming ridge model inside a trust
+region.
+\cite{erikssonTurbo2019}
+The region grows after a lower quenched energy and shrinks after a
+failure.
+On seeds 0--5, \((\mathrm{H_2O})_{15}\) hit on 0 of 6 at
+\(5\times 10^{5}\) calls, and \((\mathrm{H_2O})_{20}\) hit on 0 of 6
+at \(2\times 10^{6}\) calls.
+The rate file records 1 of 6 at each of those budgets.
+Seed 3 of the fifteen-molecule file, and seed 2 of the
+twenty-molecule file, are the hits this arm misses.
+The best twenty-molecule energy under the arm is
+\(-869.439249\)~kJ/mol, which is \(3.550\)~kJ/mol above the
+Wales--Hodges reference.
+
+Neither arm is part of the recommended preset.
+
 \section{Conclusions}
 One basin-hopping setting, with the moves of Section~\ref{sec:moves}
 and \(T=0.8\), is the search reported here.
@@ -862,9 +924,17 @@ number of seeds at LJ\(_{38}\), LJ\(_{55}\), and LJ\(_{98}\).
 At LJ\(_{75}\) the counts are 6 of 6 and 4 of 6.
 Before the pentagonal retry, the comparison with GMIN is 5 of 6 against
 0 of 6 on LJ\(_{98}\), and a 2 of 6 tie on LJ\(_{104}\).
-The LJ\(_{104}\) rerun after that retry is still running.
-On TIP4P, 10 molecules hit on 6 of 6 seeds and 15 and 20 molecules hit
-on none, at the tolerance in equation~\ref{eq:tip4p-hit}.
+The retry rows stored for that leave hit 3 of 6 on LJ\(_{104}\).
+Section~\ref{sec:cross-field} rescales that leave on the same seeds.
+It hit 2 of 6 and was not kept.
+On the rate-file seeds a trust region over oxygen-cage sites hit 0 of
+6 for 15 and for 20 molecules, where the file records 1 of 6, and
+that arm was not kept.
+On TIP4P, 10 molecules hit on 6 of 6 seeds.
+At \(5\times 10^{5}\) calls the TIP4P subsection hits 15 and 20
+molecules on none, at the tolerance in equation~\ref{eq:tip4p-hit}.
+The rate file records 1 of 6 for 15 molecules at that budget and 1 of
+6 for 20 molecules at \(2\times 10^{6}\) calls.
 At GFN2-xTB the polished hexamer gaps hold on xtb 6.7.1 and on
 xtb 6.8.0.
 On xtb 6.7.1, five of six seeds lie within \(1\times 10^{-7}\)~Eh.
