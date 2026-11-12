@@ -1,0 +1,3 @@
+n,budget,anneal_hits,gmin_hits,anneal_evals_median,gmin_evals_median,anneal_wall_median_s,gmin_wall_median_s,wall_ratio,anneal_pot_median_s,anneal_outside_median_s,gmin_pot_median_s
+15,2000000,4,0,988080.5,2000000.0,8.035403,40.212250,5.004385,5.563991,2.471412,36.866077
+20,2000000,3,0,1396031.5,2000000.0,18.767924,68.305450,3.639478,12.895707,5.851351,64.712991
