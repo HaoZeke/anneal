@@ -55,6 +55,19 @@ rule gmin_h2h:
         """
 
 
+# Depth-posterior ablation on LJ38, LJ55, LJ75, LJ98, and LJ104.
+# Not part of `rule all`. One serial session, both arms, paper budgets:
+#   snakemake -s workflow/Snakefile depth_posterior_ablation
+rule depth_posterior_ablation:
+    output:
+        "bench/depth-posterior-ablation/results.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/depth_posterior_ablation/enter_bench.sh
+        """
+
+
 # Lennard-Jones head-to-head against the published bonobo initialiser.
 # Not part of `rule all`. Run it by name:
 #   snakemake -s workflow/Snakefile lj_bonobo_h2h

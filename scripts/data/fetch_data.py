@@ -24,6 +24,7 @@ sha256. The dataset layout is those same paths. Groups:
 - ``paper/jctc/logs/lj75-source-37535ec1.tar.xz`` and its ``.lst``
 - ``paper/jctc/logs/lj*-seed*.log`` raw Lennard-Jones seed logs
 - ``paper/jctc/logs/cuh2_fcc_rec_*.out`` raw copper runs
+- ``bench/depth-posterior-ablation/logs/`` raw depth-posterior ablation logs
 
 Small summary CSVs, ``tests/fixtures``, rendered figures, and source
 stay in git. This script checks every manifest row. When the working

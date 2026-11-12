@@ -53,7 +53,9 @@ mod packing_bank;
 mod preset;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
-pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, SoapProposalMode};
+pub use config::{
+    ArmSelection, Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, SoapProposalMode,
+};
 pub use moves::*;
 
 #[cfg(test)]
@@ -1500,6 +1502,36 @@ const GROWTH_RETRY_LEAVES: u32 = 8;
 /// and a retry would move the call clock those hits were measured on.
 fn growth_held(held: Option<f64>, incumbent: f64, skipped: u32, n_points: usize) -> bool {
     stall_growth_waits(held, incumbent) && (n_points < 98 || skipped < GROWTH_RETRY_LEAVES)
+}
+
+/// The arm a hop plays.
+///
+/// A contextual decision, when one was built, stays in front of this choice:
+/// the paper preset does not build one. [`ArmSelection::Uniform`] replaces
+/// the depth posterior and the floored Thompson draw with one uniform index
+/// and consumes nothing else from the generator.
+fn choose_arm<R: Rng + ?Sized>(
+    cfg: &Config,
+    context: Option<ArrayView1<f64>>,
+    contextual: &mut ContextualAllocator,
+    depth_allocator: &crate::allocate::DepthAllocator,
+    allocator: &mut FlooredThompson,
+    n_arms: usize,
+    rng: &mut R,
+) -> usize {
+    if let Some(features) = context {
+        return contextual.select(features, rng);
+    }
+    if cfg.arm_selection == ArmSelection::Uniform {
+        return rng.random_range(0..n_arms);
+    }
+    if cfg.allocate_moves && cfg.depth_reward {
+        return depth_allocator.select(rng);
+    }
+    if cfg.allocate_moves {
+        return allocator.select(rng);
+    }
+    rng.random_range(0..n_arms)
 }
 
 /// Kernels the chain actually draws, including the energy-lattice arm.
@@ -3969,12 +4001,15 @@ where
                 break HopStop::of_closed(ledger);
             }
         }
-        let mut k = match (&context, cfg.allocate_moves) {
-            (Some(c), _) => contextual.select(c.view(), rng),
-            (None, true) if cfg.depth_reward => depth_allocator.select(rng),
-            (None, true) => allocator.select(rng),
-            (None, false) => rng.random_range(0..kernels.len()),
-        };
+        let mut k = choose_arm(
+            cfg,
+            context.as_ref().map(|value| value.view()),
+            &mut contextual,
+            &depth_allocator,
+            &mut allocator,
+            kernels.len(),
+            rng,
+        );
         if hops == 0
             && let Some(swap_at) = kernels.iter().position(|kernel| kernel.name() == "swap")
         {
@@ -4322,12 +4357,15 @@ where
         {
             let mut swapped = false;
             for _ in 0..kernels.len() {
-                let k2 = match (&context, cfg.allocate_moves) {
-                    (Some(c), _) => contextual.select(c.view(), rng),
-                    (None, true) if cfg.depth_reward => depth_allocator.select(rng),
-                    (None, true) => allocator.select(rng),
-                    (None, false) => rng.random_range(0..kernels.len()),
-                };
+                let k2 = choose_arm(
+                    cfg,
+                    context.as_ref().map(|value| value.view()),
+                    &mut contextual,
+                    &depth_allocator,
+                    &mut allocator,
+                    kernels.len(),
+                    rng,
+                );
                 if may_idle(&kernels[k2].name()) {
                     continue;
                 }
@@ -7330,6 +7368,93 @@ mod group_move_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Uniform selection is one `random_range` over the preset's arms, and
+    /// the untouched preset still draws from the depth posterior.
+    #[test]
+    fn uniform_arm_selection_matches_a_uniform_draw() {
+        let preset = Config::recommended(38);
+        assert_eq!(preset.arm_selection, ArmSelection::Posterior);
+        assert!(preset.depth_reward && preset.allocate_moves);
+        let n_arms = search_kernels(&preset).len();
+        assert!(n_arms >= 2, "the paper preset needs more than one arm");
+        let mut depth = crate::allocate::DepthAllocator::new(n_arms);
+        for _ in 0..40 {
+            depth.update(0, 8.0);
+            for arm in 1..n_arms {
+                depth.update(arm, -8.0);
+            }
+        }
+        let mut thompson = FlooredThompson::new(n_arms);
+        let mut contextual = ContextualAllocator::new(n_arms, 3, preset.contextual_floor);
+        let mut uniform_cfg = preset.clone();
+        uniform_cfg.arm_selection = ArmSelection::Uniform;
+        assert!(uniform_cfg.depth_reward && uniform_cfg.allocate_moves);
+        let mut rng = StdRng::seed_from_u64(20261111);
+        let mut twin = StdRng::seed_from_u64(20261111);
+        let mut counts = vec![0usize; n_arms];
+        for _ in 0..4_000 {
+            let got = choose_arm(
+                &uniform_cfg,
+                None,
+                &mut contextual,
+                &depth,
+                &mut thompson,
+                n_arms,
+                &mut rng,
+            );
+            let expect = twin.random_range(0..n_arms);
+            assert_eq!(got, expect);
+            counts[got] += 1;
+        }
+        let low = 4_000 / n_arms / 2;
+        let high = 4_000 / n_arms + 4_000 / n_arms / 2;
+        for count in &counts {
+            assert!(
+                *count > low && *count < high,
+                "uniform draws were {counts:?}, expected each arm near {}",
+                4_000 / n_arms
+            );
+        }
+        let mut posterior_rng = StdRng::seed_from_u64(7);
+        let mut direct_rng = posterior_rng.clone();
+        let mut posterior_counts = vec![0usize; n_arms];
+        for _ in 0..400 {
+            let via_preset = choose_arm(
+                &preset,
+                None,
+                &mut contextual,
+                &depth,
+                &mut thompson,
+                n_arms,
+                &mut posterior_rng,
+            );
+            let via_posterior = depth.select(&mut direct_rng);
+            assert_eq!(via_preset, via_posterior);
+            posterior_counts[via_preset] += 1;
+        }
+        assert!(
+            posterior_counts[0] > 300,
+            "the depth posterior did not keep the deep arm: {posterior_counts:?}"
+        );
+        let mut uniform_seq = Vec::new();
+        let mut posterior_seq = Vec::new();
+        let mut left = StdRng::seed_from_u64(99);
+        let mut right = StdRng::seed_from_u64(99);
+        for _ in 0..64 {
+            uniform_seq.push(choose_arm(
+                &uniform_cfg,
+                None,
+                &mut contextual,
+                &depth,
+                &mut thompson,
+                n_arms,
+                &mut left,
+            ));
+            posterior_seq.push(depth.select(&mut right));
+        }
+        assert_ne!(uniform_seq, posterior_seq);
+    }
 
     #[test]
     fn recommended_offers_the_energy_lattice_and_the_baseline_does_not() {
