@@ -2480,6 +2480,35 @@ fn rigid_factor_cap(n_bodies: usize) -> f64 {
 /// escape instead. Without the `rgsaddle` feature that escape is not
 /// compiled, the run stops, and [`Outcome::nve_unavailable`] is set.
 /// The library kick is not substituted.
+fn species_count(species: &[u32]) -> usize {
+    let mut labels = species.to_vec();
+    labels.sort_unstable();
+    labels.dedup();
+    labels.len()
+}
+
+fn species_groups(species: &[u32]) -> (Vec<usize>, Vec<usize>) {
+    let mut labels = Vec::new();
+    for label in species {
+        if !labels.contains(label) {
+            labels.push(*label);
+        }
+    }
+    let a = labels.first().copied().unwrap_or(0);
+    let b = labels.get(1).copied().unwrap_or(a);
+    let group_a: Vec<usize> = species
+        .iter()
+        .enumerate()
+        .filter_map(|(index, label)| (*label == a).then_some(index))
+        .collect();
+    let group_b: Vec<usize> = species
+        .iter()
+        .enumerate()
+        .filter_map(|(index, label)| (*label == b).then_some(index))
+        .collect();
+    (group_a, group_b)
+}
+
 fn large_diameter_ratio(cfg: &Config) -> bool {
     let Some(sigma) = cfg.species_sigma.as_ref() else {
         return false;
@@ -3328,6 +3357,9 @@ where
     let mut next_checkpoint = checkpoint_interval;
     let mut next_reoccupy = cfg.reoccupy_interval;
     let mut best_seen = ledger.best;
+    // Energy last polished by an unlike-pair quench. `NaN` until the first
+    // binary incumbent, so a one-species chain never enters the sweep.
+    let mut polished_best = f64::NAN;
     let mut charged_at_best = ledger.spent();
     // Minima separated by common-neighbour fractions. A stall in the
     // icosahedral packing can return to a lower minimum of another packing
@@ -3391,6 +3423,72 @@ where
             csm_reseed_stamp = hops;
             cage_edit = false;
             new_incumbent = true;
+        }
+        // Every unlike pair, quenched, kept when it is lower. One random
+        // exchange every fourth hop does not finish the ordering. Absent
+        // unless two labels are present, so an unlabelled chain is unchanged.
+        if let Some(species) = cfg.species.as_deref()
+            && species_count(species) >= 2
+            && ledger.best.is_finite()
+            && (polished_best.is_nan() || ledger.best < polished_best - 1e-8)
+            && let Some(best_state) = ledger.best_state.clone()
+        {
+            let mut current = best_state;
+            let mut current_e = ledger.best;
+            let (group_a, group_b) = species_groups(species);
+            for _round in 0..3 {
+                if ledger.remaining() == 0 {
+                    break;
+                }
+                let mut gained = false;
+                let mut tried = 0usize;
+                'pairs: for &i in &group_a {
+                    for &j in &group_b {
+                        if ledger.remaining() == 0 || tried >= 800 {
+                            break 'pairs;
+                        }
+                        tried += 1;
+                        let mut swapped = current.clone();
+                        for axis in 0..3 {
+                            swapped.swap(3 * i + axis, 3 * j + axis);
+                        }
+                        let (eq, xq) = relax(ledger, swapped.view(), cfg.relax_steps);
+                        if !quench_is_sane(cfg, eq, xq.view()) || !(eq < current_e - 1e-6) {
+                            continue;
+                        }
+                        let gradient = record_quenched_answer(
+                            cfg,
+                            ledger,
+                            &mut grad,
+                            eq,
+                            xq.view(),
+                            &mut unconverged_records,
+                        );
+                        if gradient.is_none() && grad.is_some() {
+                            continue;
+                        }
+                        let from_basin = identity.basin_of(current.view());
+                        let reached = identity.basin_of(xq.view());
+                        adopt_minimum!(
+                            eq,
+                            xq,
+                            gradient,
+                            Some(reached),
+                            AdoptionHistory::Fresh,
+                            Some((Some(from_basin), reached)),
+                            Some("homotop"),
+                            hops
+                        );
+                        current = x.clone();
+                        current_e = e;
+                        gained = true;
+                    }
+                }
+                if !gained {
+                    break;
+                }
+            }
+            polished_best = ledger.best;
         }
         if cfg.move_library.is_rigid_body()
             && crate::methods::rigid_quench::stalled(hops, hops_at_lowest)
@@ -4134,10 +4232,25 @@ where
             best_seen = ledger.best;
             csm_reseed_stamp = hops;
         }
+        // Unlabelled clusters keep the icosahedral test alone. A labelled
+        // one-species cluster is not on that path (`packing_cna_applies` is
+        // false once labels exist), so the same reseed also runs on a
+        // fivefold plateau whose nearest neighbour is outside the
+        // Lennard-Jones scale. The unlabelled test is evaluated first and
+        // unchanged.
+        let mono_ih = cfg.packing_cna_applies()
+            && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default());
+        let labelled_fivefold = !cfg.packing_cna_applies()
+            && cfg
+                .species
+                .as_ref()
+                .is_some_and(|labels| species_count(labels) == 1)
+            && crate::soap::extended_scale(x.view())
+            && (crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+                || crate::soap::fivefold_plateau(x.view()));
         if csm_reseed_hops > 0
             && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
-            && cfg.packing_cna_applies()
-            && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+            && (mono_ih || labelled_fivefold)
             && ledger.remaining() > 0
         {
             csm_reseed_stamp = hops;

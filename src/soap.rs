@@ -1420,6 +1420,58 @@ pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
     c.fraction((5, 5, 5)) > 0.12
 }
 
+/// A fivefold plateau: icosahedral `555` or decahedral `422`, and not fcc `421`.
+///
+/// The bond cutoff is the Lennard-Jones value when the nearest neighbour is
+/// on that scale, and 1.2 times the nearest neighbour otherwise.
+pub fn fivefold_plateau(x: ArrayView1<f64>) -> bool {
+    let n = x.len() / 3;
+    if n < 7 {
+        return false;
+    }
+    let c = crate::structure::cna(x, n, bond_cutoff(x));
+    let five = c.fraction((5, 5, 5)) + c.fraction((4, 2, 2));
+    five > 0.15 && c.fraction((4, 2, 1)) < 0.20
+}
+
+/// True when the nearest neighbour is far outside the Lennard-Jones scale.
+///
+/// An unlabelled reduced-unit cluster stays at cutoff 1.35, so this is false
+/// there and the caller does not take the labelled reseed.
+pub fn extended_scale(x: ArrayView1<f64>) -> bool {
+    bond_cutoff(x) > 1.35 + 1e-9
+}
+
+fn bond_cutoff(x: ArrayView1<f64>) -> f64 {
+    let n = x.len() / 3;
+    if n < 2 {
+        return 1.35;
+    }
+    let mut nearest = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut best = f64::MAX;
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let mut d = 0.0;
+            for k in 0..3 {
+                let delta = x[3 * i + k] - x[3 * j + k];
+                d += delta * delta;
+            }
+            best = best.min(d);
+        }
+        nearest.push(best.sqrt());
+    }
+    nearest.sort_by(|a, b| a.total_cmp(b));
+    let nn = nearest[n / 2];
+    if !(nn.is_finite()) || nn < 2.0 {
+        1.35
+    } else {
+        1.20 * nn
+    }
+}
+
 /// Oracle target: 555 atoms toward 421 (occupied mean, else fcc prototype).
 ///
 /// Invents a close-packed class when the observed cloud has none. Same
