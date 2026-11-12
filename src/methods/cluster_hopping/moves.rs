@@ -219,7 +219,14 @@ impl MoveLibrary {
                     )
                 };
                 let mobile = mobile_atoms(cfg, groups);
-                if cfg.soap_mode != SoapProposalMode::Off {
+                // The flexible SOAP leftover is an atomic packing pullback.
+                // On a water cluster larger than the hexamer it spends the
+                // quench inside the spherical-harmonic expansion and never
+                // calls the potential. The group moves already carry the
+                // search; the hexamer keeps the arm it was measured with.
+                let large_water = groups.len() > crate::catalog::molecular::WATER_HEXAMER_MOLECULES
+                    && super::cycles::is_water_groups(groups);
+                if cfg.soap_mode != SoapProposalMode::Off && !large_water {
                     kernels.push(soap_arm(cfg, mobile, Some(groups.clone())));
                 }
                 if *reverse_cycles && super::cycles::is_water_groups(groups) {
@@ -2687,6 +2694,32 @@ mod move_scaling_tests {
                 "SOAP packing merge is {}, got {}",
                 crate::featomic_hop::SOAP_PACK_MERGE,
                 pack.merge_radius
+            );
+        }
+    }
+
+    #[test]
+    fn a_large_water_cluster_does_not_draw_the_atomic_soap_pullback() {
+        let molecules = 20;
+        let species: Vec<u32> = (0..molecules).flat_map(|_| [8, 1, 1]).collect();
+        let groups: Vec<Vec<usize>> = (0..molecules)
+            .map(|index| vec![3 * index, 3 * index + 1, 3 * index + 2])
+            .collect();
+        let rec = Config::recommended_molecular(species, groups, 1.0);
+        let names: Vec<_> = rec
+            .move_library
+            .kernels(&rec)
+            .iter()
+            .map(|kernel| kernel.name())
+            .collect();
+        assert!(
+            !names.iter().any(|name| *name == "soap"),
+            "atomic SOAP pullback is still drawn for (H2O)20: {names:?}"
+        );
+        for required in ["gshake", "gsurface", "gburst", "gcycle"] {
+            assert!(
+                names.iter().any(|name| *name == required),
+                "missing {required} on (H2O)20: {names:?}"
             );
         }
     }
