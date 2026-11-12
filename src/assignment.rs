@@ -347,6 +347,48 @@ fn adjust_one(
     }
 }
 
+/// A permutation that gives every row its own strict nearest column.
+///
+/// Each row minimum is strictly smaller than the other entries of that
+/// row, and the columns are all different. That matching meets the
+/// row-minimum lower bound, so it is the only optimal assignment and
+/// the same permutation successive shortest paths returns. A tie or a
+/// shared column returns `None` and the solver runs.
+pub(crate) fn strict_unique_row_minima(costs: &[f64], n: usize) -> Option<Vec<usize>> {
+    if n == 0 || n.checked_mul(n) != Some(costs.len()) {
+        return None;
+    }
+    let mut assignment = vec![0usize; n];
+    let mut taken = vec![false; n];
+    for row in 0..n {
+        let base = row * n;
+        let mut best_column = 0usize;
+        let mut best = costs[base];
+        if !best.is_finite() {
+            return None;
+        }
+        for column in 1..n {
+            let cost = costs[base + column];
+            if !cost.is_finite() {
+                return None;
+            }
+            if cost < best {
+                best = cost;
+                best_column = column;
+            }
+        }
+        let winners = (0..n)
+            .filter(|&column| !(costs[base + column] > best))
+            .count();
+        if winners != 1 || taken[best_column] {
+            return None;
+        }
+        taken[best_column] = true;
+        assignment[row] = best_column;
+    }
+    Some(assignment)
+}
+
 pub(crate) fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     successive_shortest_paths_scanned(costs, n).map(|(assignment, unique)| {
         ASSIGNMENT_IS_UNIQUE.with(|cell| cell.set(unique));
@@ -636,9 +678,42 @@ fn augment_tight(
 #[cfg(test)]
 mod tests {
     use super::{
-        kuhn_munkres, minimum_cost_assignment, successive_shortest_paths,
+        kuhn_munkres, minimum_cost_assignment, strict_unique_row_minima, successive_shortest_paths,
         successive_shortest_paths_scanned,
     };
+
+    #[test]
+    fn a_strict_row_minimum_permutation_matches_the_solver() {
+        let n = 4;
+        let mut costs = vec![0.0; n * n];
+        for row in 0..n {
+            for column in 0..n {
+                let matched = (row + 1) % n;
+                costs[row * n + column] = if column == matched {
+                    0.25 * row as f64
+                } else {
+                    5.0 + column as f64
+                };
+            }
+        }
+        let perm = strict_unique_row_minima(&costs, n).expect("unique row minima");
+        let solved = successive_shortest_paths(&costs, n).expect("solver");
+        assert_eq!(perm, solved);
+        assert_eq!(cost_of(&costs, n, &perm), brute(&costs, n));
+    }
+
+    #[test]
+    fn a_tied_row_minimum_is_left_to_the_solver() {
+        let costs = [0.0, 0.0, 1.0, 2.0];
+        assert!(strict_unique_row_minima(&costs, 2).is_none());
+        assert!(successive_shortest_paths(&costs, 2).is_some());
+    }
+
+    #[test]
+    fn colliding_row_minima_are_left_to_the_solver() {
+        let costs = [0.0, 5.0, 1.0, 4.0];
+        assert!(strict_unique_row_minima(&costs, 2).is_none());
+    }
 
     fn brute(costs: &[f64], n: usize) -> f64 {
         fn walk(costs: &[f64], n: usize, row: usize, used: &mut [bool], acc: f64, best: &mut f64) {

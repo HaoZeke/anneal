@@ -1757,6 +1757,11 @@ fn optimal_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
             cost[i * n + j] = distance;
         }
     }
+    // The strict row-minimum matching is the only optimum, so the
+    // shortest-path permutation would be this one.
+    if let Some(perm) = crate::assignment::strict_unique_row_minima(&cost, n) {
+        return perm;
+    }
     hungarian(&cost, n)
 }
 

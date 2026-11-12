@@ -192,17 +192,17 @@ impl Cloud {
     #[target_feature(enable = "avx2")]
     unsafe fn nearest_squared_avx2(&self, image: [f64; 3]) -> f64 {
         use std::arch::x86_64::{
-            _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd, _mm256_storeu_pd,
-            _mm256_sub_pd,
+            _mm256_add_pd, _mm256_loadu_pd, _mm256_min_pd, _mm256_mul_pd, _mm256_set1_pd,
+            _mm256_storeu_pd, _mm256_sub_pd,
         };
         let ix = _mm256_set1_pd(image[0]);
         let iy = _mm256_set1_pd(image[1]);
         let iz = _mm256_set1_pd(image[2]);
-        let mut best = f64::INFINITY;
         let n = self.xs.len();
         let mut index = 0usize;
+        let mut best_lanes = _mm256_set1_pd(f64::INFINITY);
         while index + 4 <= n {
-            let lane = unsafe {
+            unsafe {
                 let dx = _mm256_sub_pd(_mm256_loadu_pd(self.xs.as_ptr().add(index)), ix);
                 let dy = _mm256_sub_pd(_mm256_loadu_pd(self.ys.as_ptr().add(index)), iy);
                 let dz = _mm256_sub_pd(_mm256_loadu_pd(self.zs.as_ptr().add(index)), iz);
@@ -210,16 +210,21 @@ impl Cloud {
                     _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
                     _mm256_mul_pd(dz, dz),
                 );
-                let mut lane = [0.0; 4];
-                _mm256_storeu_pd(lane.as_mut_ptr(), distance);
-                lane
-            };
-            for distance in lane {
-                if distance < best {
-                    best = distance;
-                }
+                best_lanes = _mm256_min_pd(best_lanes, distance);
             }
             index += 4;
+        }
+        let mut lane = [0.0; 4];
+        unsafe { _mm256_storeu_pd(lane.as_mut_ptr(), best_lanes) };
+        let mut best = lane[0];
+        if lane[1] < best {
+            best = lane[1];
+        }
+        if lane[2] < best {
+            best = lane[2];
+        }
+        if lane[3] < best {
+            best = lane[3];
         }
         while index < n {
             let dx = image[0] - self.xs[index];
@@ -1299,6 +1304,28 @@ pub fn symmetrise_detected(
 mod tests {
     use super::*;
     use ndarray::Array1;
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn the_vector_nearest_image_matches_the_scalar_scan() {
+        let cloud = Cloud::from_view(octahedron(1.3).view(), 6);
+        for query in [[0.2, -0.4, 1.1], [3.0, 0.0, 0.0], [0.0, 0.0, 0.0]] {
+            let scalar = cloud.nearest_squared_scalar(query);
+            // The cloud length is the test fixture, and AVX2 is what this host runs.
+            let vector = unsafe { cloud.nearest_squared_avx2(query) };
+            assert_eq!(scalar, vector);
+        }
+        let wide = Cloud::from_view(
+            Array1::from((0..30).map(|i| (i as f64) * 0.17).collect::<Vec<_>>()).view(),
+            10,
+        );
+        let query = [1.0, 2.0, 3.0];
+        assert_eq!(
+            wide.nearest_squared_scalar(query),
+            // Ten points so the scan has a vector body and a scalar tail.
+            unsafe { wide.nearest_squared_avx2(query) }
+        );
+    }
 
     fn octahedron(scale: f64) -> Array1<f64> {
         Array1::from(
