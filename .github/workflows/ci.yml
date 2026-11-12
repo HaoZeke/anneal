@@ -143,14 +143,36 @@ jobs:
           fi
           cog check "$COG_FROM..$COG_TO"
 
+      # A pull-request checkout is the merge of the base into the head, so
+      # `git rev-list --objects HEAD` also lists blobs the base already has.
+      # Those still fail a push of the base, which audits HEAD. A pull request
+      # audits the objects its own commits add, at the same 1 MiB bar.
       - name: Audit for large files
         shell: bash
+        env:
+          AUDIT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          AUDIT_HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
-          oversized=$(
-            git rev-list --objects HEAD |
-              git cat-file --batch-check='%(objecttype) %(objectsize) %(objectname) %(rest)' |
-              awk '$1 == "blob" && $2 > 1048576'
-          )
+          if [[ -n "$AUDIT_BASE" ]] && git cat-file -e "$AUDIT_BASE^{commit}" \
+              && git cat-file -e "$AUDIT_HEAD^{commit}"; then
+            range="$AUDIT_BASE..$AUDIT_HEAD"
+          else
+            range=HEAD
+          fi
+          if [[ "$range" == HEAD ]]; then
+            objects=$(git rev-list --objects HEAD)
+          else
+            objects=$(git rev-list --objects "$range")
+          fi
+          if [[ -z "$objects" ]]; then
+            oversized=
+          else
+            oversized=$(
+              printf '%s\n' "$objects" |
+                git cat-file --batch-check='%(objecttype) %(objectsize) %(objectname) %(rest)' |
+                awk '$1 == "blob" && $2 > 1048576'
+            )
+          fi
           if [[ -n "$oversized" ]]; then
             printf 'Git history contains blobs larger than 1 MiB:\n%s\n' "$oversized" >&2
             exit 1
