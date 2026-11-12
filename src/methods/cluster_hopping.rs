@@ -4606,6 +4606,12 @@ where
             },
         );
         if ledger.stopped() {
+            // The caller already stopped. This screen paid for `e_screen`,
+            // and dropping it returns an older minimum above an energy the
+            // run computed.
+            if e_screen.is_finite() {
+                ledger.record(e_screen, x_screen.view());
+            }
             break HopStop::of_closed(ledger);
         }
         let entry_snapshot = if cfg.trail_on_stall {
@@ -4752,6 +4758,9 @@ where
             out
         };
         if ledger.stopped() {
+            if e_new.is_finite() {
+                ledger.record(e_new, x_new.view());
+            }
             break HopStop::of_closed(ledger);
         }
         if !quench_is_sane(cfg, e_new, x_new.view()) {

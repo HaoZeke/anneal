@@ -177,7 +177,17 @@ where
         if !led.charge() {
             return None;
         }
-        finite_gradient(objective, x)
+        // `grad` on the test double-counts because it calls
+        // `value_and_gradient`. One call here is the charge.
+        let (energy, gradient) = objective.value_and_gradient(x);
+        // The evaluation that raises the caller stop is already paid. A
+        // line search that has not accepted it yet would otherwise return
+        // the previous minimum, above an energy this call just computed.
+        if led.stopped() && energy.is_finite() && energy < led.best {
+            led.record(energy, x);
+        }
+        (gradient.len() == x.len() && gradient.iter().all(|value| value.is_finite()))
+            .then_some(gradient)
     }
 }
 
@@ -392,6 +402,11 @@ where
         // convergence check below does not pay for it again. A synthetic
         // uphill rejection is not that point.
         let last: RefCell<Option<Check>> = RefCell::new(None);
+        // Lowest physical energy this descent paid for. A caller stop can
+        // cut the line search after that point and before the solver
+        // accepts it, and the run would otherwise return the previous
+        // minimum.
+        let best_physical: RefCell<Option<(f64, Array1<f64>)>> = RefCell::new(None);
         let remember =
             |point: ArrayView1<f64>, energy: f64, gradient: &Array1<f64>, physical: bool| {
                 if physical {
@@ -400,6 +415,14 @@ where
                         energy,
                         gradient: gradient.clone(),
                     });
+                    if energy.is_finite()
+                        && best_physical
+                            .borrow()
+                            .as_ref()
+                            .is_none_or(|(held, _)| energy < *held)
+                    {
+                        *best_physical.borrow_mut() = Some((energy, point.to_owned()));
+                    }
                 } else {
                     *last.borrow_mut() = None;
                 }
@@ -545,6 +568,19 @@ where
             pred.stopped_energy(target, f)
         } else {
             f
+        };
+        // The call that raises the stop has already been paid. If it is
+        // below the solver's accepted point, that point is the best state
+        // the run found.
+        let (f, xr) = if led.stopped()
+            && let Some((energy, state)) = best_physical.borrow().clone()
+            && energy < f
+            && state.iter().all(|value| value.is_finite())
+        {
+            led.record(energy, state.view());
+            (energy, state)
+        } else {
+            (f, xr)
         };
         if let Some(portfolio) = surfaces.as_mut() {
             portfolio.observe(screening, f, target);
