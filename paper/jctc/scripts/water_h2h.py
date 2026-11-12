@@ -4,10 +4,13 @@
 
 CREST runs at its documented default, Geometries, Frequencies, and
 Noncovalent interactions version 2, on one thread.
-The fair anneal budget for that seed is the number of xtb energy
-evaluations CREST produced.
+The driver-count anneal budget for that seed is the number of xtb
+energy evaluations CREST produced: dynamics steps plus optimization
+steps.
+The matched anneal budget is CREST's total number of energy and
+gradient calls for that same start.
 The start geometry is the anneal rigid repack for that seed.
-A second anneal uses the named paper budget of 4000 evaluations.
+A third anneal uses the named paper budget of 4000 evaluations.
 
 Scoring follows the Papers B' bar. Every final, CREST and anneal alike,
 is relaxed with the same xtb --opt vtight before the energies are
@@ -30,12 +33,31 @@ import subprocess
 import time
 from pathlib import Path
 
+from crest_engrad import require_split
 from water_census import HBOND_OO_A, label_free_rmsd, molecules, read_xyz
 
 ROOT = Path("paper/jctc")
-LOGS = ROOT / "logs" / "water"
-SCRATCH = ROOT / "logs" / "scratch" / "water"
-SEEDS = range(6)
+LOGS = Path(os.environ.get("H2H_LOG_DIR", "paper/jctc/logs/water"))
+SCRATCH = Path(os.environ.get("H2H_SCRATCH_DIR", "paper/jctc/logs/scratch/water"))
+
+
+def selected_seeds():
+    raw = os.environ.get("H2H_SEEDS", "")
+    if not raw:
+        return list(range(6))
+    return [int(part) for part in raw.split(",") if part]
+
+
+def write_heartbeat(seed, arm):
+    path = os.environ.get("H2H_HEARTBEAT", "")
+    if not path:
+        return
+    stamp = subprocess.check_output(["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"], text=True).strip()
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(f"{stamp} seed {seed} {arm}\n")
+
+
 MOLECULES = 6
 PAPER_BUDGET = 4000
 FORCE_BAR = 0.0514221
@@ -159,6 +181,12 @@ def scrub(text):
         if value:
             text = text.replace(value, key.lower())
     return text
+
+
+def log_prefix(arm):
+    if arm == "driver-count budget":
+        return "driver_count"
+    return arm
 
 
 def child_env():
@@ -642,6 +670,7 @@ def anneal_raw(log_path, xyz, crest_xyz, crest_energy, sp_path):
     force, force_pass = parse_force(text)
     found = {
         "calls": finite_number(log_field(text, "energy_calls")),
+        "final_best": finite_number(log_field(text, "final_best_evaluation")),
         "wall": finite_number(log_field(text, "wall_s")),
         "exit": log_field(text, "exit_code"),
         "objective": finite_number(log_field(text, "objective_best_eV")),
@@ -752,8 +781,9 @@ def arm_row(seed, arm, raw, polished, reference, rule, success, energy_pass, sig
 
 
 def write_numbers(rows):
+    seeds = len({row[0] for row in rows})
     lines = [
-        "# n=6 serial same host no best-of",
+        f"# n={seeds} serial same host no best-of",
         "# quartile=Hyndman-Fan type 7",
         "# bar=Papers B': success = exit + energy + force; force is the reported answer's maximum force at 0.001 Eh/bohr",
         "# polish=xtb " + " ".join(POLISH_ARGS) + " on every final, CREST and anneal alike",
@@ -772,7 +802,7 @@ def write_numbers(rows):
     for row in rows:
         by_arm.setdefault(row[1], []).append(row)
     lines.append("# summary arm n calls_median calls_iqr wall_median wall_iqr success_median success_iqr success_rate passes")
-    for arm in ("crest", "fair", "paper4000"):
+    for arm in ("crest", "driver-count budget", "paper4000", "engrad_matched"):
         group = by_arm.get(arm, [])
         calls = [float(item[2]) for item in group if item[2] != "nan"]
         walls = [float(item[3]) for item in group if item[3] != "nan"]
@@ -845,7 +875,8 @@ def main():
     )
     rows = []
     try:
-        for seed in SEEDS:
+        for seed in selected_seeds():
+            write_heartbeat(seed, "start")
             fair_dir = LOGS / f"anneal-seed{seed}"
             paper_dir = LOGS / f"anneal-paper4000-seed{seed}"
             crest_audit_dir = LOGS / f"crest-audit-seed{seed}"
@@ -859,7 +890,14 @@ def main():
             paper_log = LOGS / f"anneal-paper4000-seed{seed}.log"
             crest_force_log = LOGS / f"crest-force-seed{seed}.log"
             work = SCRATCH / f"crest-seed{seed}"
-            if not finished_log(crest_log, "best=crest_best.xyz") or not (fair_dir / "crest_best.xyz").exists():
+            crest_failed = (
+                crest_log.exists()
+                and "exit_code=" in crest_log.read_text(errors="ignore")
+                and not finished_log(crest_log, "best=crest_best.xyz")
+            )
+            if crest_failed:
+                print(f"crest seed {seed} kept failed log", flush=True)
+            elif not finished_log(crest_log, "best=crest_best.xyz") or not (fair_dir / "crest_best.xyz").exists():
                 if work.exists():
                     shutil.rmtree(work)
                 work.mkdir(parents=True)
@@ -870,6 +908,13 @@ def main():
                     shutil.copy(best, fair_dir / "crest_best.xyz")
             crest_text = crest_log.read_text(errors="ignore") if crest_log.exists() else ""
             calls = finite_number(log_field(crest_text, "calls"))
+            engrad_budget = None
+            if crest_text:
+                try:
+                    _driver_n, engrad_budget = require_split(crest_text)
+                except ValueError as exc:
+                    print(f"seed {seed}: {exc}", flush=True)
+                    engrad_budget = None
             best_xyz = fair_dir / "crest_best.xyz"
             if best_xyz.exists() and not finished_log(crest_force_log, "FORCE_AUDIT"):
                 audit_geometry(binary, seed, best_xyz, crest_audit_dir, crest_force_log)
@@ -887,6 +932,7 @@ def main():
                 "signed": None,
                 "rmsd": None,
                 "free_rmsd": None,
+                "engrad": engrad_budget,
             }
             scf = None
             if best_xyz.exists():
@@ -899,8 +945,10 @@ def main():
             if not fair_ran:
                 print(f"fair seed {seed} skipped, crest calls missing", flush=True)
             elif not finished_log(fair_log, "FORCE_AUDIT"):
-                status, awall = anneal_run(binary, seed, int(calls), fair_dir, fair_log, "fair")
-                print(f"anneal fair seed {seed} exit {status} budget {int(calls)} wall {awall:.1f}", flush=True)
+                status, awall = anneal_run(
+                    binary, seed, int(calls), fair_dir, fair_log, "driver-count budget"
+                )
+                print(f"anneal driver-count seed {seed} exit {status} budget {int(calls)} wall {awall:.1f}", flush=True)
             fair = anneal_raw(fair_log, fair_dir / "best.xyz", best_xyz, crest["energy"], LOGS / f"anneal-sp-seed{seed}.txt")
             if not finished_log(paper_log, "FORCE_AUDIT"):
                 status, pwall = anneal_run(binary, seed, PAPER_BUDGET, paper_dir, paper_log, "paper4000")
@@ -908,11 +956,44 @@ def main():
             paper = anneal_raw(
                 paper_log, paper_dir / "best.xyz", best_xyz, crest["energy"], LOGS / f"anneal-paper-sp-seed{seed}.txt"
             )
+            engrad_dir = LOGS / f"anneal-engrad-seed{seed}"
+            engrad_log = LOGS / f"anneal-engrad-seed{seed}.log"
+            engrad_dir.mkdir(parents=True, exist_ok=True)
+            engrad_ran = engrad_budget is not None
+            if not engrad_ran:
+                print(f"engrad_matched seed {seed} skipped, crest energy+grad total missing", flush=True)
+            elif not finished_log(engrad_log, "FORCE_AUDIT"):
+                status, ewall = anneal_run(
+                    binary, seed, engrad_budget, engrad_dir, engrad_log, "engrad_matched"
+                )
+                print(
+                    f"anneal engrad seed {seed} exit {status} budget {engrad_budget} wall {ewall:.1f}",
+                    flush=True,
+                )
+            engrad = anneal_raw(
+                engrad_log,
+                engrad_dir / "best.xyz",
+                best_xyz,
+                crest["energy"],
+                LOGS / f"anneal-engrad-sp-seed{seed}.txt",
+            )
+            engrad["engrad"] = engrad_budget
 
-            raws = {"crest": crest, "fair": fair, "paper4000": paper}
+            raws = {
+                "crest": crest,
+                "driver-count budget": fair,
+                "paper4000": paper,
+                "engrad_matched": engrad,
+            }
+            ran = {
+                "crest": True,
+                "driver-count budget": fair_ran,
+                "paper4000": True,
+                "engrad_matched": engrad_ran,
+            }
             candidates = {}
             for arm, raw in raws.items():
-                if raw["xyz"] is not None and (arm != "fair" or fair_ran):
+                if raw["xyz"] is not None and ran[arm]:
                     candidates[arm] = polish_candidate(binary, seed, arm, raw["xyz"])
             crest_intact = crest["exit"] == "0" and "crest" in candidates and candidates["crest"]["intact"]
             reference, rule = choose_reference(candidates, crest_intact)
@@ -926,8 +1007,8 @@ def main():
                     else:
                         verdict = crest_verdict(crest, polished, energy_pass, reason)
                     success = verdict.startswith("pass: ")
-                elif arm == "fair" and not fair_ran:
-                    verdict = "skipped, crest calls missing"
+                elif not ran[arm]:
+                    verdict = "skipped, crest cost missing"
                     success = False
                 else:
                     verdict = anneal_verdict(raw, energy_pass, reason)
@@ -944,18 +1025,34 @@ def main():
                 write_header(handle, f"pair-seed {seed}")
                 handle.write(f"seed={seed}\n")
                 for arm, raw in raws.items():
+                    prefix = log_prefix(arm)
                     polished = candidates.get(arm) or {}
                     success, energy_pass, signed, verdict = outcome[arm]
                     for key in ("calls", "wall", "exit", "objective", "force", "energy", "signed", "rmsd", "free_rmsd"):
                         value = raw.get(key)
-                        handle.write(f"{arm}_{key}={value if value is not None else 'nan'}\n")
+                        handle.write(f"{prefix}_{key}={value if value is not None else 'nan'}\n")
                     for key in ("converged", "raw_intact", "raw_nearest_oo_A", "intact", "energy", "force", "imaginary", "lowest_cm1", "xtb_imaginary", "confirmed"):
                         value = polished.get(key)
-                        handle.write(f"{arm}_polished_{key}={value if value is not None else 'nan'}\n")
-                    handle.write(f"{arm}_signed_dE_polished_Eh={signed if signed is not None else 'nan'}\n")
-                    handle.write(f"{arm}_energy_pass={int(energy_pass)}\n")
-                    handle.write(f"{arm}_success={int(success)}\n")
-                    handle.write(f"{arm}_verdict={verdict}\n")
+                        handle.write(f"{prefix}_polished_{key}={value if value is not None else 'nan'}\n")
+                    handle.write(f"{prefix}_signed_dE_polished_Eh={signed if signed is not None else 'nan'}\n")
+                    handle.write(f"{prefix}_energy_pass={int(energy_pass)}\n")
+                    handle.write(f"{prefix}_success={int(success)}\n")
+                    handle.write(f"{prefix}_verdict={verdict}\n")
+                    final_best = raw.get("final_best")
+                    handle.write(
+                        f"{prefix}_final_best_evaluations="
+                        f"{int(final_best) if final_best is not None else 'nan'}\n"
+                    )
+                    if arm == "crest":
+                        engine = raw.get("engrad")
+                    elif raw.get("calls") is not None and final_best is not None:
+                        engine = int(raw["calls"]) + int(final_best)
+                    else:
+                        engine = None
+                    handle.write(f"{prefix}_engine_calls={engine if engine is not None else 'nan'}\n")
+                    handle.write(
+                        f"{prefix}_engrad={raw.get('engrad') if raw.get('engrad') is not None else 'nan'}\n"
+                    )
                 handle.write(f"reference_arm={reference['arm'] if reference is not None else 'none'}\n")
                 handle.write(f"reference_rule={rule}\n")
                 handle.write(f"reference_Eh={reference['energy'] if reference is not None else 'nan'}\n")
@@ -966,22 +1063,31 @@ def main():
                 handle.write("score=xtb --gfn 2 --sp --acc 0.01 --iterations 500\n")
                 handle.write(f"gfn2_accuracy={GFN2_ACCURACY}\n")
                 handle.write(f"force_bar={FORCE_BAR}\n")
-                fair_start = fair_dir / "start.xyz"
-                paper_start = paper_dir / "start.xyz"
-                if fair_start.exists() and paper_start.exists():
-                    handle_note = "1" if fair_start.read_bytes() == paper_start.read_bytes() else "0"
+                starts = [
+                    fair_dir / "start.xyz",
+                    paper_dir / "start.xyz",
+                    engrad_dir / "start.xyz",
+                ]
+                if all(path.exists() for path in starts):
+                    blobs = [path.read_bytes() for path in starts]
+                    handle_note = "1" if blobs[0] == blobs[1] == blobs[2] else "0"
                 else:
                     handle_note = "missing"
                 handle.write("rmsd_definition=Kabsch alignment of all atoms; polished against the polished reference, raw against crest_best.xyz\n")
                 handle.write(f"shared_start={handle_note}\n")
                 handle.write("exit_code=0\n")
             print(
-                "pair seed {} crest {} fair {} paper {} reference {}".format(
-                    seed, int(outcome["crest"][0]), int(outcome["fair"][0]), int(outcome["paper4000"][0]),
+                "pair seed {} crest {} driver {} paper {} engrad {} reference {}".format(
+                    seed,
+                    int(outcome["crest"][0]),
+                    int(outcome["driver-count budget"][0]),
+                    int(outcome["paper4000"][0]),
+                    int(outcome["engrad_matched"][0]),
                     reference["arm"] if reference is not None else "none",
                 ),
                 flush=True,
             )
+            write_heartbeat(seed, "done")
             write_numbers(rows)
     finally:
         watcher.terminate()

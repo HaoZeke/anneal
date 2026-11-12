@@ -479,9 +479,13 @@ fn main() {
         outcome.best_state = Some(x);
     }
     let wall_s = wall.elapsed().as_secs_f64();
+    // Search ledger plus polish ledger. Each charge is one
+    // value_and_gradient. The reported-geometry evaluation below is not
+    // part of this sum.
     let spent = ledger.spent() + polish.spent();
     writeln!(meta, "wall_s: {wall_s:.6}").ok();
     writeln!(meta, "energy_calls: {spent}").ok();
+    writeln!(meta, "energy_calls_basis: search_ledger+polish_ledger").ok();
     writeln!(meta, "search_calls: {}", ledger.spent()).ok();
     writeln!(meta, "polish_calls: {}", polish.spent()).ok();
     writeln!(meta, "polish_component_tolerance_eV_per_A: {tolerance:.6e}").ok();
@@ -503,6 +507,7 @@ fn main() {
             writeln!(meta, "best_intact: false").ok();
             let line = force_audit_line(seed, f64::INFINITY);
             writeln!(meta, "{line}").ok();
+            writeln!(meta, "final_best_evaluation: 0").ok();
             println!("{line}");
             return;
         }
@@ -546,6 +551,9 @@ fn main() {
         let coords = state.as_slice().expect("best contiguous");
         let (wall_e, _) = oh_wall(coords, m);
         let (engine_e, gradient) = objective.value_and_gradient(state.view());
+        // One energy-and-gradient of the reported geometry, after energy_calls
+        // was written. It is not added to that count.
+        writeln!(meta, "final_best_evaluation: 1").ok();
         // The objective includes the wall. The engine energy is that total
         // minus the wall, which is zero when every covalent O-H is inside
         // the onset.
@@ -569,6 +577,7 @@ fn main() {
     } else {
         writeln!(meta, "engine_best_eV: nan").ok();
         writeln!(meta, "best_intact: false").ok();
+        writeln!(meta, "final_best_evaluation: 0").ok();
         let line = force_audit_line(seed, f64::INFINITY);
         writeln!(meta, "{line}").ok();
         println!("{line}");
