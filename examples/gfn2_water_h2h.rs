@@ -455,7 +455,9 @@ fn main() {
 
     let atmnrs: Vec<i32> = (0..m).flat_map(|_| [8, 1, 1]).collect();
     let box_ = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];
-    let pot = RgpotObjective::xtb(&atmnrs, box_);
+    let mut pot = RgpotObjective::xtb(&atmnrs, box_);
+    // One pot for the seed. A search starts with the engine's own guess.
+    pot.restart();
     let n_molecules = m;
     let objective = ForceObjective::new(3 * atmnrs.len(), n_molecules, move |coordinates| {
         let (energy, gradient) = pot
