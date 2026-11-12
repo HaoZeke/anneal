@@ -93,6 +93,10 @@ fn ci_audits_large_blobs_without_a_deprecated_action_runtime() {
     let workflow = include_str!("../.github/workflows/ci.yml");
 
     assert!(workflow.contains("git rev-list --objects HEAD"));
+    assert!(workflow.contains("git rev-list --objects \"$range\""));
+    assert!(workflow.contains("github.event.pull_request.base.sha"));
+    assert!(workflow.contains("github.event.pull_request.head.sha"));
+    assert!(workflow.contains("$2 > 1048576"));
     assert!(workflow.contains("git cat-file --batch-check"));
     assert!(!workflow.contains("HaoZeke/large-file-auditor"));
 }
