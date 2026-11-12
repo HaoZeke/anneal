@@ -32,10 +32,12 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 /// Linux held `0x9acd`. Scalar dots, the SOAP cutoff and the screen stop
 /// did not move `0x9204`. Surface and symmetry proposals still drew their
 /// axis from `rand_distr`'s ziggurat, and that tail calls host `exp` and
-/// `ln`. The axis is now Box-Muller through the `libm` crate, so the
-/// same uniforms name the same direction on every target. The masks
-/// below are that walk. The `ira` feature replaces the permutation and
-/// has its own mask.
+/// `ln`. The axis is now Box-Muller through the `libm` crate. The move
+/// draw was still Marsaglia-Tsang gamma through host `ln` and `cos`,
+/// which left macOS on plain mask `0x513a` while Linux stayed on
+/// `0xb74a`. That sampler, and the bias deposit, now use the `libm`
+/// crate too. The Linux masks did not move. The `ira` feature replaces
+/// the permutation and has its own mask.
 #[test]
 fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not() {
     const SEEDS: u64 = 16;
