@@ -1624,7 +1624,17 @@ pub fn fivefold_axis_count(x: ArrayView1<f64>) -> usize {
 pub fn fivefold_axis_table(x: ArrayView1<f64>) -> Vec<([f64; 3], f64)> {
     let mut rows: Vec<([f64; 3], f64)> = candidate_axes(x)
         .into_iter()
-        .map(|ax| (ax, residual_about(x, ax).0))
+        .map(|ax| {
+            // An axis whose nearest-image residual already misses the cut
+            // cannot enter the good set, so the assignment is not run.
+            let bound = rotation_row_min_rms(x, ax);
+            let length = if bound >= FIVEFOLD_AXIS + 1.0e-6 * (1.0 + FIVEFOLD_AXIS) {
+                bound
+            } else {
+                residual_about(x, ax).0
+            };
+            (ax, length)
+        })
         .collect();
     rows.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
     rows
@@ -1685,29 +1695,12 @@ fn hungarian(cost: &[f64], n: usize) -> Vec<usize> {
 #[cfg_attr(feature = "ira", allow(dead_code))]
 fn optimal_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
     let n = x.len() / 3;
-    if y.len() < 3 * n {
-        return (0..n).collect();
-    }
-    let mut left = Vec::with_capacity(n);
-    let mut right = Vec::with_capacity(n);
-    for atom in 0..n {
-        left.push([x[3 * atom], x[3 * atom + 1], x[3 * atom + 2]]);
-        right.push([y[3 * atom], y[3 * atom + 1], y[3 * atom + 2]]);
-    }
-    // Below 98 atoms the dense scan is the one this matching was measured
-    // with. At and above that size the duals are reduced before the scan,
-    // and a tie still keeps the lowest column index.
-    if n >= crate::assignment::SHORTEST_PATH_FROM
-        && let Some(permutation) = crate::assignment::minimum_cost_squared_distance(&left, &right)
-    {
-        return permutation;
-    }
     let mut cost = vec![0.0; n * n];
     for i in 0..n {
         for j in 0..n {
             let mut distance = 0.0;
             for axis in 0..3 {
-                let delta = left[i][axis] - right[j][axis];
+                let delta = x[3 * i + axis] - y[3 * j + axis];
                 distance += delta * delta;
             }
             cost[i * n + j] = distance;
@@ -1798,7 +1791,112 @@ fn candidate_axes(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
     axes
 }
 
+fn row_min_rms_clears(x: ArrayView1<f64>, axis: [f64; 3], cap: f64) -> bool {
+    let bound = rotation_row_min_rms(x, axis);
+    bound >= cap + 1.0e-6 * (1.0 + cap)
+}
+
+/// Root-mean-square of each atom's nearest image under a fivefold turn.
+///
+/// This is at most the minimum-cost assignment residual: the assignment
+/// cannot beat giving every atom its own nearest image.
+fn rotation_row_min_rms(x: ArrayView1<f64>, axis: [f64; 3]) -> f64 {
+    let n = x.len() / 3;
+    if n == 0 {
+        return 0.0;
+    }
+    let com = com_of(x);
+    let turn = rotation_about(axis, 2.0 * PI / 5.0);
+    let mut centred = Vec::with_capacity(n);
+    let mut turned = Vec::with_capacity(n);
+    for atom in 0..n {
+        let point = [
+            x[3 * atom] - com[0],
+            x[3 * atom + 1] - com[1],
+            x[3 * atom + 2] - com[2],
+        ];
+        centred.push(point);
+        turned.push(rot_apply(&turn, point));
+    }
+    let mut total = 0.0;
+    for point in &centred {
+        let mut nearest = f64::INFINITY;
+        for image in &turned {
+            let dx = point[0] - image[0];
+            let dy = point[1] - image[1];
+            let dz = point[2] - image[2];
+            nearest = nearest.min(dx * dx + dy * dy + dz * dz);
+        }
+        total += nearest;
+    }
+    (total / n as f64).sqrt()
+}
+
+struct ResidualMemo {
+    coordinates: Vec<u64>,
+    entries: Vec<([u64; 3], f64, Vec<f64>)>,
+}
+
+std::thread_local! {
+    static RESIDUAL_MEMO: std::cell::RefCell<ResidualMemo> = const {
+        std::cell::RefCell::new(ResidualMemo {
+            coordinates: Vec::new(),
+            entries: Vec::new(),
+        })
+    };
+}
+
+fn axis_bits(axis: [f64; 3]) -> [u64; 3] {
+    [axis[0].to_bits(), axis[1].to_bits(), axis[2].to_bits()]
+}
+
+fn same_coordinate_bits(cached: &[u64], x: ArrayView1<f64>) -> bool {
+    cached.len() == x.len()
+        && cached
+            .iter()
+            .zip(x.iter())
+            .all(|(bits, value)| *bits == value.to_bits())
+}
+
+fn remembered_residual(x: ArrayView1<f64>, axis: [f64; 3]) -> Option<(f64, Array1<f64>)> {
+    let bits = axis_bits(axis);
+    RESIDUAL_MEMO.with(|slot| {
+        let slot = slot.borrow();
+        if !same_coordinate_bits(&slot.coordinates, x) {
+            return None;
+        }
+        slot.entries
+            .iter()
+            .find(|entry| entry.0 == bits)
+            .map(|entry| (entry.1, Array1::from_vec(entry.2.clone())))
+    })
+}
+
+fn remember_residual(x: ArrayView1<f64>, axis: [f64; 3], rms: f64, displacement: &Array1<f64>) {
+    RESIDUAL_MEMO.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if !same_coordinate_bits(&slot.coordinates, x) {
+            slot.coordinates = x.iter().map(|value| value.to_bits()).collect();
+            slot.entries.clear();
+        }
+        let bits = axis_bits(axis);
+        if slot.entries.iter().any(|entry| entry.0 == bits) {
+            return;
+        }
+        slot.entries.push((bits, rms, displacement.to_vec()));
+    });
+}
+
 fn residual_about(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
+    if let Some(saved) = remembered_residual(x, axis) {
+        return saved;
+    }
+    let computed = residual_about_fresh(x, axis);
+    remember_residual(x, axis, computed.0, &computed.1);
+    computed
+}
+
+fn residual_about_fresh(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
     let n = x.len() / 3;
     let com = com_of(x);
     let angle = 2.0 * PI / 5.0;
@@ -1868,6 +1966,9 @@ fn fivefold_residual(x: ArrayView1<f64>) -> (f64, [f64; 3], Array1<f64>) {
     let mut best_ax = [0.0, 0.0, 1.0];
     let mut best_dr = Array1::zeros(x.len());
     for ax in candidate_axes(x) {
+        if best_d.is_finite() && row_min_rms_clears(x, ax, best_d) {
+            continue;
+        }
         let (d5, dr) = residual_about(x, ax);
         if d5 < best_d {
             best_d = d5;
@@ -2027,6 +2128,12 @@ pub fn fivefold_probe(x: ArrayView1<f64>, rmsd: f64) -> FivefoldProbe {
 /// [`FIVEFOLD_GATE`]. This is the hop that produced the LJ38 58/72
 /// campaign. The multi-axis gated hop is [`step_away_fivefold`].
 pub fn step_away_fivefold_measured(x: ArrayView1<f64>, rmsd: f64) -> Array1<f64> {
+    if candidate_axes(x)
+        .iter()
+        .all(|axis| row_min_rms_clears(x, *axis, FIVEFOLD_GATE))
+    {
+        return x.to_owned();
+    }
     let (d5, axis, mut dr) = fivefold_residual(x);
     if d5 > FIVEFOLD_GATE {
         return x.to_owned();
@@ -3646,6 +3753,23 @@ mod tests {
         }
         let atom_rms = (d2 / 13.0).sqrt();
         assert!((atom_rms - 0.4).abs() < 1e-8, "fivefold hop rms {atom_rms}");
+        let mut shifted = ico.clone();
+        shifted[0] += 0.35;
+        for axis in candidate_axes(shifted.view()) {
+            let bound = rotation_row_min_rms(shifted.view(), axis);
+            let exact = residual_about_fresh(shifted.view(), axis).0;
+            assert!(
+                bound <= exact + 1.0e-8,
+                "row-min {bound} above assignment {exact}"
+            );
+        }
+        let table = fivefold_axis_table(shifted.view());
+        for (axis, length) in &table {
+            if *length + 1.0e-8 < FIVEFOLD_AXIS {
+                let exact = residual_about_fresh(shifted.view(), *axis).0;
+                assert!((length - exact).abs() < 1.0e-9, "{length} vs {exact}");
+            }
+        }
         let cub = cuboct13();
         let d_ico = fivefold_length(ico.view());
         let d_cub = fivefold_length(cub.view());
