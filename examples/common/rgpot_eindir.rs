@@ -27,9 +27,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// Pair distance below which a geometry is an overlap, not a physical contact.
 /// Same threshold the cluster walk uses before it will record a molecular quench.
 const OVERLAP_SEPARATION_A: f64 = 0.35;
-/// Same shell as `OVERLAP_CALL_LIMIT`: SCC still aborts just above 0.35 Å,
-/// including the probes that print as 0.351. 0.40 Å is below a covalent O–H.
-const OVERLAP_CALL_LIMIT_A: f64 = OVERLAP_SEPARATION_A + 0.05;
+/// Same gate as `OVERLAP_CALL_LIMIT`. Below a covalent O–H, above the shell
+/// where xtb's SCC fails.
+const OVERLAP_CALL_LIMIT_A: f64 = 0.90;
 
 static SCC_REJECTED: AtomicUsize = AtomicUsize::new(0);
 static GEOMETRY_REJECTED: AtomicUsize = AtomicUsize::new(0);

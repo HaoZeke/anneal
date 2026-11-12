@@ -2213,6 +2213,7 @@ mod tests {
             "H-H 0.74 Å must clear the overlap floor {OVERLAP_SEPARATION}",
         );
         const { assert!(OVERLAP_SEPARATION < 0.74) };
+        const { assert!(OVERLAP_CALL_LIMIT < 0.96) };
     }
 
     #[cfg(feature = "bank-rpc")]
