@@ -83,3 +83,35 @@ A full-budget call on (H₂O)₂₁ costs 9.68 µs inside the potential and 3.55
 LJ38, LJ75, LJ98 and LJ104 keep the same evaluation counts as on `4fdc37e8`, including on the outside-cut at `2d00f044`. LJ38 is 6/6, LJ75 is 6/6, LJ98 is 5/6, and LJ104 is 6/6.
 
 The new rows are in `rows.csv`. The medians of those rows are `summary-shell.csv`.
+
+## Contact swing
+
+`scripts/tip4p_h2h/enter_bond.sh` appends `anneal-bond` and a fixed-step GMIN arm for (H₂O)₁₅, (H₂O)₂₀ and (H₂O)₂₁ in one session. (H₂O)₂₂ is not in the Wales–Hodges table, and (H₂O)₂₁ did not hit, so it was not added.
+
+At an oxygen cutoff of 3.2 Å the chordless rings of the references and of the misses are:
+
+| Structure | Bonds | Squares | Pentagons | Hexagons | Coordination |
+| --- | --- | --- | --- | --- | --- |
+| (H₂O)₂₀ reference | 34 | 12 | 6 | 0 | twelve 3, eight 4 |
+| (H₂O)₂₀ seed 2000 | 34 | 9 | 11 | 7 | a 5-coordinate water |
+| (H₂O)₂₀ seed 2003 | 33 | 6 | 15 | 7 | fourteen 3, six 4 |
+| (H₂O)₂₀ seed 2005 | 35 | 14 | 4 | 11 | ten 3, ten 4 |
+| (H₂O)₂₁ reference | 37 | 14 | 7 | 10 | one 5-coordinate water |
+| (H₂O)₂₁ seed 2000 | 34 | 0 | 18 | 12 | sixteen 3, five 4 |
+
+The reference cages are square-rich fused prisms. Seed 2000 of (H₂O)₂₁, the best anneal result at −915.230 against −916.707, is a pentagonal cage with no square and three fewer contacts. Closing a near-square, or sitting a molecule on a square face, quenches back into that cage. Swinging one contact through a right angle about its midpoint leaves the cage, and the late stall walk now starts from that swung bond. The new basin is higher, and inside this budget it does not beat the incumbent.
+
+(H₂O)₁₅ stays 6/6. The three (H₂O)₂₀ misses stay at −864.746, −859.404 and −863.975. (H₂O)₂₁ stays 0/6 on both arms. A full-budget (H₂O)₂₁ call is 10.10 µs inside the potential and 3.53 µs outside it for anneal, and 35.68 µs inside and 1.92 µs outside for GMIN.
+
+| Size | Arm | Hits | Median evals | Median wall (s) | Ratio | Inside (s) | Outside (s) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| (H₂O)₁₅ | anneal-bond | 6/6 | 1158631 | 8.496 | 4.725 | 6.515 | 1.980 |
+| (H₂O)₁₅ | GMIN, fixed step | 0/6 | 2000000 | 40.145 | 4.725 | 36.854 | 3.333 |
+| (H₂O)₂₀ | anneal-bond | 3/6 | 1696341 | 20.463 | 3.360 | 15.660 | 4.802 |
+| (H₂O)₂₀ | GMIN, fixed step | 0/6 | 2000000 | 68.754 | 3.360 | 65.139 | 3.602 |
+| (H₂O)₂₁ | anneal-bond | 0/6 | 2000000 | 27.314 | 2.753 | 20.205 | 7.069 |
+| (H₂O)₂₁ | GMIN, fixed step | 0/6 | 2000000 | 75.189 | 2.753 | 71.355 | 3.843 |
+
+LJ38, LJ75, LJ98 and LJ104 keep the same evaluation counts. (H₂O)₂₂ was not run.
+
+The new rows are in `rows.csv`. The medians of those rows are `summary-bond.csv`.
