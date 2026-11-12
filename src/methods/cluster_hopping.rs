@@ -2958,6 +2958,11 @@ where
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
     let mut continuous_symmetry_attempts = 0usize;
+    // Project when the interval is due and the ledger has a new lowest
+    // energy. Repeating the projection on a basin that is not the
+    // incumbent spends the force budget and, on the six-seed panel,
+    // finds fewer Cambridge minima.
+    let mut new_incumbent = true;
     let mut continuous_symmetry_quenches = 0usize;
     let mut continuous_symmetry_gain = 0.0_f64;
     let mut quiet = 0usize;
@@ -3285,6 +3290,7 @@ where
             hops_at_lowest = hops;
             csm_reseed_stamp = hops;
             cage_edit = false;
+            new_incumbent = true;
         }
         if cfg.move_library.is_rigid_body()
             && crate::methods::rigid_quench::stalled(hops, hops_at_lowest)
@@ -3932,7 +3938,13 @@ where
                         .map(|projected| projected.coordinates)
                 }
                 ContinuousSymmetry::Measure { .. } => {
-                    crate::csm::propose(x.view(), classes).map(|projected| projected.coordinates)
+                    if !new_incumbent {
+                        None
+                    } else {
+                        new_incumbent = false;
+                        crate::csm::propose(x.view(), classes)
+                            .map(|projected| projected.coordinates)
+                    }
                 }
                 ContinuousSymmetry::Off => None,
             };
@@ -4029,9 +4041,6 @@ where
             && ledger.remaining() > 0
         {
             csm_reseed_stamp = hops;
-            let classes = continuous_symmetry_classes
-                .as_deref()
-                .expect("a CSM reseed has equivalence classes");
             let mut fresh = random_cluster(n, 0.7, cfg.min_separation, rng);
             if let Some(closed) = crate::packing::on_new_basin(
                 fresh.view(),
@@ -4042,9 +4051,6 @@ where
                 cfg.min_separation,
             ) {
                 fresh = closed;
-            }
-            if let Some(projected) = crate::csm::propose(fresh.view(), classes) {
-                fresh = projected.coordinates;
             }
             let (reseed_energy, reseed_state) = relax(ledger, fresh.view(), cfg.relax_steps);
             let reseed_gradient = record_quenched_answer(
