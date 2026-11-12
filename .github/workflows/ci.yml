@@ -113,10 +113,10 @@ jobs:
       # 235683cf30fc3cff9d3be5f92ac26b5a046483e1 is the commit of #50 on
       # develop. Its subject, "cluster_hopping: reverse hydrogen-bond cycles
       # in rigid water (#50)", does not parse as a conventional commit, and
-      # develop keeps it as it is. cog skips only merge and fixup commits,
-      # so a range that holds this one is checked in two parts: up to its
-      # parent, and from it to the tip. The second part also walks the
-      # commits of the base branch that 235683cf does not reach.
+      # develop keeps it as it is. cog check of exempt..tip also walks base
+      # commits that exempt does not reach, because the pull-request checkout
+      # is a merge. Check each commit the pull request adds, and leave that
+      # one subject out.
       - name: Conventional commits check
         shell: bash
         env:
@@ -128,29 +128,56 @@ jobs:
              ! git cat-file -e "$COG_FROM^{commit}"; then
             COG_FROM=$(git rev-parse "$COG_TO^")
           fi
-          if git merge-base --is-ancestor "$COG_EXEMPT" "$COG_TO" &&
-             ! git merge-base --is-ancestor "$COG_EXEMPT" "$COG_FROM"; then
+          if git cat-file -e "$COG_EXEMPT^{commit}" \
+             && git merge-base --is-ancestor "$COG_EXEMPT" "$COG_TO" \
+             && ! git merge-base --is-ancestor "$COG_EXEMPT" "$COG_FROM"; then
             status=0
-            for range in "$COG_FROM..$COG_EXEMPT^" "$COG_EXEMPT..$COG_TO"; do
-              # cog check A..A checks commit A, so an empty part is left out.
-              count=$(git rev-list --count "$range")
-              if ((count > 0)); then
-                echo "cog check $range"
-                cog check "$range" || status=1
+            while read -r commit; do
+              if [[ "$commit" == "$COG_EXEMPT" ]]; then
+                continue
               fi
-            done
+              # A merge's first-parent range also contains the other parent's
+              # commits. Those commits are checked on their own, and cog
+              # already ignores the merge subject.
+              if git rev-parse --verify --quiet "${commit}^2" >/dev/null; then
+                continue
+              fi
+              cog check "$commit^..$commit" || status=1
+            done < <(git rev-list --reverse "$COG_FROM..$COG_TO")
             exit "$status"
           fi
           cog check "$COG_FROM..$COG_TO"
 
+      # A pull-request checkout is the merge of the base into the head, so
+      # `git rev-list --objects HEAD` also lists blobs the base already has.
+      # Those still fail a push of the base, which audits HEAD. A pull request
+      # audits the objects its own commits add, at the same 1 MiB bar.
       - name: Audit for large files
         shell: bash
+        env:
+          AUDIT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          AUDIT_HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
-          oversized=$(
-            git rev-list --objects HEAD |
-              git cat-file --batch-check='%(objecttype) %(objectsize) %(objectname) %(rest)' |
-              awk '$1 == "blob" && $2 > 1048576'
-          )
+          if [[ -n "$AUDIT_BASE" ]] && git cat-file -e "$AUDIT_BASE^{commit}" \
+              && git cat-file -e "$AUDIT_HEAD^{commit}"; then
+            range="$AUDIT_BASE..$AUDIT_HEAD"
+          else
+            range=HEAD
+          fi
+          if [[ "$range" == HEAD ]]; then
+            objects=$(git rev-list --objects HEAD)
+          else
+            objects=$(git rev-list --objects "$range")
+          fi
+          if [[ -z "$objects" ]]; then
+            oversized=
+          else
+            oversized=$(
+              printf '%s\n' "$objects" |
+                git cat-file --batch-check='%(objecttype) %(objectsize) %(objectname) %(rest)' |
+                awk '$1 == "blob" && $2 > 1048576'
+            )
+          fi
           if [[ -n "$oversized" ]]; then
             printf 'Git history contains blobs larger than 1 MiB:\n%s\n' "$oversized" >&2
             exit 1
