@@ -31,6 +31,11 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 /// -173.252378. The bars sit above those two plain counts and under a full
 /// miss of the cutoff walk: at least 15 cutoff hits, at most 10 plain hits,
 /// and a gap of at least 5. The measured gaps are 10 and 11.
+///
+/// Those counts are for a 200-step quench. `recommended` now quenches for
+/// 1000 steps, and at that length the plain walk reaches the octahedron on
+/// 14 of 16 seeds, so this comparison keeps the 200-step quench the bars
+/// were measured on.
 #[test]
 fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not() {
     const SEEDS: u64 = 16;
@@ -38,6 +43,8 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
     let mut plain = Config::recommended(38);
     // The surface comparison is the LeanBurst walk. Stall exits are a
     // different measurement, and this walk does not grow a named template.
+    // The 30_000-call bars above were measured at a 200-step quench.
+    plain.relax_steps = 200;
     plain.move_library = MoveLibrary::LeanBurst;
     plain.trail_on_stall = false;
     plain.escape_on_stall = false;
