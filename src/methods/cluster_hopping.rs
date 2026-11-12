@@ -913,6 +913,19 @@ impl Ledger {
     }
 }
 
+/// How often one move type was drawn, accepted, and below the incumbent.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArmCount {
+    /// Short name of the proposal kernel.
+    pub move_type: String,
+    /// Proposals handed to the quench.
+    pub proposed: usize,
+    /// Proposals the acceptance test kept, after a tabu veto.
+    pub accepted: usize,
+    /// Proposals whose quenched energy was below the incumbent.
+    pub improved: usize,
+}
+
 /// What a run produced.
 #[derive(Debug, Clone, Default)]
 pub struct Outcome {
@@ -1097,6 +1110,8 @@ pub struct Outcome {
     pub unconverged_records: usize,
     /// Per-arm draws, accepts and best quenched value, in library order.
     pub arms: Vec<(String, usize, usize, f64)>,
+    /// Every quenched proposal, by move type, in first-seen order.
+    pub proposal_counts: Vec<ArmCount>,
     /// Delayed acceptance: first stages run, first-stage rejections (each a
     /// quench not paid), second stages run, and second-stage rejections (the
     /// surrogate's mistakes).
@@ -1487,6 +1502,31 @@ fn record_quenched_answer(
 /// keeps it at every size.
 fn stall_growth_waits(held: Option<f64>, incumbent: f64) -> bool {
     held.is_some_and(|energy| incumbent >= energy - 1e-9)
+}
+
+fn arm_row<'a>(arms: &'a mut Vec<ArmCount>, name: &str) -> &'a mut ArmCount {
+    if let Some(index) = arms.iter().position(|arm| arm.move_type == name) {
+        return &mut arms[index];
+    }
+    arms.push(ArmCount {
+        move_type: name.to_owned(),
+        ..ArmCount::default()
+    });
+    arms.last_mut().expect("the row was just pushed")
+}
+
+fn begin_arm(arms: &mut Vec<ArmCount>, name: &str) {
+    arm_row(arms, name).proposed += 1;
+}
+
+fn finish_arm(arms: &mut Vec<ArmCount>, name: &str, accepted: bool, improved: bool) {
+    let row = arm_row(arms, name);
+    if accepted {
+        row.accepted += 1;
+    }
+    if improved {
+        row.improved += 1;
+    }
 }
 
 /// Leaves skipped while the incumbent stays at the held energy before the
@@ -2987,6 +3027,7 @@ where
     let mut returned = 0usize;
     let mut descent = ScreenDescent::default();
     let mut accepted = 0usize;
+    let mut arm_counts: Vec<ArmCount> = Vec::new();
     // A rigid chart is not in the preset's reduced energy unit. Charts of
     // ten bodies or fewer start at the top of the acceptance window and let
     // the rate pull the factor down. A chart with more bodies stays at the
@@ -4447,6 +4488,7 @@ where
         } else {
             kernels[k].name().to_owned()
         };
+        begin_arm(&mut arm_counts, &proposal_action);
         // Stage one of the staged quench: settle the moved atoms against the
         // frozen environment at fractional price, before recentring shifts
         // every coordinate and hides which atoms the move touched.
@@ -5311,6 +5353,7 @@ where
                 tabu_hits += 1;
             }
         }
+        finish_arm(&mut arm_counts, &proposal_action, accept, improved);
         // The quench was recorded before this test. The minima file already
         // has the line; this sets the acceptance column.
         if recordable {
@@ -6975,6 +7018,7 @@ where
             .enumerate()
             .map(|(i, k)| (k.name(), arm_draws[i], arm_accepts[i], arm_best[i]))
             .collect(),
+        proposal_counts: arm_counts,
         swaps_accepted,
         paths: paths_run,
         path_escapes,
@@ -7385,6 +7429,24 @@ mod group_move_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_arm_count_separates_proposals_from_accepts_and_improvements() {
+        let mut arms = Vec::new();
+        begin_arm(&mut arms, "gshake");
+        finish_arm(&mut arms, "gshake", false, false);
+        begin_arm(&mut arms, "gburst");
+        finish_arm(&mut arms, "gburst", true, true);
+        begin_arm(&mut arms, "gshake");
+        finish_arm(&mut arms, "gshake", true, false);
+        assert_eq!(arms[0].move_type, "gshake");
+        assert_eq!(arms[0].proposed, 2);
+        assert_eq!(arms[0].accepted, 1);
+        assert_eq!(arms[0].improved, 0);
+        assert_eq!(arms[1].proposed, 1);
+        assert_eq!(arms[1].accepted, 1);
+        assert_eq!(arms[1].improved, 1);
+    }
 
     /// Uniform selection is one `random_range` over the preset's arms, and
     /// the untouched preset still draws from the depth posterior.

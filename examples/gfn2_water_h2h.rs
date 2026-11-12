@@ -548,6 +548,16 @@ fn main() {
     for &(hops, charged, basins, energy) in &outcome.improvements {
         writeln!(trace, "{hops} {charged} {basins} {energy:.10}").ok();
     }
+    let mut arms = fs::File::create(outdir.join("arms.txt")).expect("arms");
+    writeln!(arms, "move proposed accepted improved").ok();
+    for row in &outcome.proposal_counts {
+        writeln!(
+            arms,
+            "{} {} {} {}",
+            row.move_type, row.proposed, row.accepted, row.improved
+        )
+        .ok();
+    }
     let fallback = outcome
         .final_state
         .as_ref()
