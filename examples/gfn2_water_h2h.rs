@@ -365,6 +365,7 @@ fn main() {
     let species = water_species(m).expect("species");
     let groups = water_groups(m).expect("groups");
     let mut cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
+    cfg.capped_lindh_quench = true;
     configure_water_arm(&mut cfg, WaterSearchArm::Recommended);
     cfg.target_energy = target_energy;
     cfg.move_library = MoveLibrary::Molecular {
@@ -468,7 +469,45 @@ fn main() {
     let tolerance = component_gradient_tolerance(3 * atmnrs.len()).expect("polish tolerance");
     let mut ledger = Ledger::new(budget);
     let wall = Instant::now();
-    let searched = search_from(&objective, &cfg, &mut ledger, start.view(), seed);
+    // Opt-in two-level search. TIP4P is the cheap water model. GFN-FF is
+    // not on this objective. Four distinct cages are polished, and those
+    // GFN2 calls come out of the same budget. `H2O_SURROGATE=0` is the
+    // single-level search.
+    let surrogate_on = std::env::var("H2O_SURROGATE").ok().as_deref() != Some("0");
+    let mut search_start = start.clone();
+    if surrogate_on {
+        let charged_before = ledger.spent();
+        let report = anneal_core::methods::surrogate_level::polish_tip4p_minima(
+            &objective,
+            &mut ledger,
+            start.view(),
+            m,
+            4,
+            seed,
+            cfg.record_gradient,
+            cfg.relax_steps,
+        );
+        writeln!(meta, "surrogate: tip4p").ok();
+        writeln!(meta, "surrogate_calls: {}", report.calls).ok();
+        writeln!(meta, "surrogate_wall_s: {:.6}", report.wall_s).ok();
+        writeln!(meta, "surrogate_polished: {}", report.polished).ok();
+        writeln!(
+            meta,
+            "surrogate_gfn2_calls: {}",
+            ledger.spent() - charged_before
+        )
+        .ok();
+        if let Some(state) = report.best_state {
+            search_start = state;
+        }
+    } else {
+        writeln!(meta, "surrogate: off").ok();
+        writeln!(meta, "surrogate_calls: 0").ok();
+        writeln!(meta, "surrogate_wall_s: 0").ok();
+        writeln!(meta, "surrogate_polished: 0").ok();
+        writeln!(meta, "surrogate_gfn2_calls: 0").ok();
+    }
+    let searched = search_from(&objective, &cfg, &mut ledger, search_start.view(), seed);
     let polished_from = ledger
         .answer_seats()
         .first()
@@ -550,6 +589,17 @@ fn main() {
     .ok();
     writeln!(meta, "quenches_converged: {}", stats.converged).ok();
     writeln!(meta, "quenches_capped: {}", stats.capped).ok();
+    writeln!(meta, "full_charged: {}", stats.full_charged).ok();
+    writeln!(meta, "check_charged: {}", stats.check_charged).ok();
+    let quench_calls = stats.full_charged + stats.check_charged;
+    let per = if stats.converged > 0 {
+        quench_calls as f64 / stats.converged as f64
+    } else if stats.capped > 0 {
+        quench_calls as f64 / stats.capped as f64
+    } else {
+        f64::NAN
+    };
+    writeln!(meta, "calls_per_quench: {per:.3}").ok();
     writeln!(
         meta,
         "best_record: converged quench at the preset record gradient"
