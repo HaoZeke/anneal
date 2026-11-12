@@ -19,9 +19,9 @@ use anneal_core::potentials::PairPotential;
 use ndarray::ArrayView1;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::io::Write;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
 const N: usize = 55;
@@ -39,7 +39,11 @@ fn first_line(path: &str) -> String {
 fn main() {
     let hostname = first_line("/proc/sys/kernel/hostname");
     let boot_id = first_line("/proc/sys/kernel/random/boot_id");
-    let uptime_s = first_line("/proc/uptime").split_whitespace().next().unwrap_or("absent").to_string();
+    let uptime_s = first_line("/proc/uptime")
+        .split_whitespace()
+        .next()
+        .unwrap_or("absent")
+        .to_string();
     let mut stdout = std::io::stdout();
     writeln!(stdout, "hostname={hostname}").unwrap();
     writeln!(stdout, "boot_id={boot_id}").unwrap();
@@ -170,7 +174,10 @@ fn main() {
     println!("board_hit={}", u8::from(board_hit));
     println!("energy_calls={}", energy_calls.load(Ordering::Relaxed));
     println!("grad_calls={}", grad_calls.load(Ordering::Relaxed));
-    println!("potential_calls={}", potential_calls.load(Ordering::Relaxed));
+    println!(
+        "potential_calls={}",
+        potential_calls.load(Ordering::Relaxed)
+    );
     println!("charged={}", outcome.charged);
     println!("first_calls={first_calls}");
     println!("hops={}", outcome.hops);
