@@ -80,6 +80,20 @@ rule gmin_h2h:
         """
 
 
+# GrowPAL against the paper preset at the paper evaluation budgets.
+# Not part of `rule all`. One serial session, both arms, core 0:
+#   snakemake -s workflow/Snakefile growpal_h2h
+rule growpal_h2h:
+    output:
+        "bench/growpal-h2h/results.csv",
+        "bench/growpal-h2h/seeds.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/growpal_h2h/enter_bench.sh
+        """
+
+
 # Depth-posterior ablation on LJ38, LJ55, LJ75, LJ98, and LJ104.
 # Not part of `rule all`. One serial session, both arms, paper budgets:
 #   snakemake -s workflow/Snakefile depth_posterior_ablation
