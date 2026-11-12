@@ -411,6 +411,9 @@ CREST is the native xtb binary at GFN2, legacy mode, length 0.2.
 A hit is a vtight GFN2 energy within 0.01~eV of \(-2768.551087\)~eV.
 Anneal hits 3 of 6 and CREST hits 1 of 6.
 The mean walls are 1203.0~s and 690.9~s, so anneal is slower by a factor 1.74 while it hits more seeds.
+The charged calls to the first in-window energy are 12426, 9004 and 7813 on the three anneal hits.
+CREST's log has no evaluation count.
+Only seed 15005 enters the window, at the tight optimisation of metadynamics iteration 5.
 Before a quench, a pair closer than 0.90~\AA\ is not handed to xtb, because that distance aborts the self-consistent charge.
 A non-bonded pair closer than 1.40~\AA\ is opened to 2.20~\AA.
 A covalent contact is restored to the sum of the covalent radii.
