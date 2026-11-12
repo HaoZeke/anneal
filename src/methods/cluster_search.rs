@@ -16,7 +16,7 @@
 //! and neither the driver nor this function can tell them apart.
 
 use crate::methods::cluster_hopping::OVERLAP_CALL_LIMIT;
-#[cfg(test)]
+#[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 use crate::methods::cluster_hopping::min_pair_distance;
 #[cfg(any(feature = "bank-rpc", test))]

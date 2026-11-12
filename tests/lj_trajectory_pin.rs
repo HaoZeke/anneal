@@ -2,6 +2,8 @@
 //!
 //! The accepted-transition sequence and the final energies are part of the
 //! search result. A faster evaluation path has to leave them unchanged.
+//! The recommended full quench is 1000 steps, so this pin is that
+//! trajectory, not the earlier 200-step one.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, random_cluster_in_radius, run_with_gradient,
@@ -74,7 +76,7 @@ fn trajectory_hash() -> String {
 fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     let hash = trajectory_hash();
     assert_eq!(
-        hash, "efc93d1d504ca8e9e80fe9b11a3c27465f8228b0a88aa6cc23ba5ac121601f4d",
+        hash, "31a8df4a366b0323077240a516769f208b23377549479f9a2ceb9dbd6be92b0f",
         "trajectory hash changed: {hash}"
     );
 }
