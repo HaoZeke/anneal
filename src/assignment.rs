@@ -208,6 +208,145 @@ unsafe fn scan_avx2(
     (delta, next_column)
 }
 
+/// Subtract `delta` from the unused reduced costs, and from the column
+/// dual of every used column. One subtraction per updated lane, matching
+/// the scalar loop.
+fn adjust_reduced(
+    delta: f64,
+    n: usize,
+    used: &[u8],
+    min_reduced: &mut [f64],
+    column_potential: &mut [f64],
+    column_match: &[usize],
+    row_potential: &mut [f64],
+) {
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") {
+        unsafe {
+            adjust_reduced_avx2(
+                delta,
+                n,
+                used,
+                min_reduced,
+                column_potential,
+                column_match,
+                row_potential,
+            );
+        }
+        return;
+    }
+    adjust_reduced_scalar(
+        delta,
+        n,
+        used,
+        min_reduced,
+        column_potential,
+        column_match,
+        row_potential,
+    );
+}
+
+fn adjust_reduced_scalar(
+    delta: f64,
+    n: usize,
+    used: &[u8],
+    min_reduced: &mut [f64],
+    column_potential: &mut [f64],
+    column_match: &[usize],
+    row_potential: &mut [f64],
+) {
+    for index in 0..=n {
+        if used[index] == 1 {
+            row_potential[column_match[index]] += delta;
+            column_potential[index] -= delta;
+        } else {
+            min_reduced[index] -= delta;
+        }
+    }
+}
+
+/// # Safety
+///
+/// AVX2 must be enabled. `used`, `min_reduced`, `column_potential`, and
+/// `column_match` are addressable at `0..=n`.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn adjust_reduced_avx2(
+    delta: f64,
+    n: usize,
+    used: &[u8],
+    min_reduced: &mut [f64],
+    column_potential: &mut [f64],
+    column_match: &[usize],
+    row_potential: &mut [f64],
+) {
+    use std::arch::x86_64::{
+        _mm_cmpeq_epi8, _mm_cvtsi32_si128, _mm_setzero_si128, _mm256_blendv_pd,
+        _mm256_castsi256_pd, _mm256_cvtepi8_epi64, _mm256_loadu_pd, _mm256_set1_pd,
+        _mm256_storeu_pd, _mm256_sub_pd,
+    };
+    adjust_one(
+        0,
+        delta,
+        used,
+        min_reduced,
+        column_potential,
+        column_match,
+        row_potential,
+    );
+    let step = _mm256_set1_pd(delta);
+    let zero = _mm_setzero_si128();
+    let mut index = 1usize;
+    while index + 3 <= n {
+        let packed = unsafe { std::ptr::read_unaligned(used.as_ptr().add(index) as *const i32) };
+        let unused = _mm_cmpeq_epi8(_mm_cvtsi32_si128(packed), zero);
+        let open = _mm256_castsi256_pd(_mm256_cvtepi8_epi64(unused));
+        unsafe {
+            let previous = _mm256_loadu_pd(min_reduced.as_ptr().add(index));
+            let subtracted = _mm256_sub_pd(previous, step);
+            let updated = _mm256_blendv_pd(previous, subtracted, open);
+            _mm256_storeu_pd(min_reduced.as_mut_ptr().add(index), updated);
+        }
+        for offset in 0..4 {
+            if used[index + offset] == 1 {
+                let at = index + offset;
+                row_potential[column_match[at]] += delta;
+                column_potential[at] -= delta;
+            }
+        }
+        index += 4;
+    }
+    while index <= n {
+        adjust_one(
+            index,
+            delta,
+            used,
+            min_reduced,
+            column_potential,
+            column_match,
+            row_potential,
+        );
+        index += 1;
+    }
+}
+
+fn adjust_one(
+    index: usize,
+    delta: f64,
+    used: &[u8],
+    min_reduced: &mut [f64],
+    column_potential: &mut [f64],
+    column_match: &[usize],
+    row_potential: &mut [f64],
+) {
+    if used[index] == 1 {
+        row_potential[column_match[index]] += delta;
+        column_potential[index] -= delta;
+    } else {
+        min_reduced[index] -= delta;
+    }
+}
+
 pub(crate) fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     successive_shortest_paths_scanned(costs, n).map(|(assignment, unique)| {
         ASSIGNMENT_IS_UNIQUE.with(|cell| cell.set(unique));
@@ -263,14 +402,15 @@ fn successive_shortest_paths_scanned(costs: &[f64], n: usize) -> Option<(Vec<usi
             if !delta.is_finite() {
                 return None;
             }
-            for index in 0..=n {
-                if used[index] == 1 {
-                    row_potential[column_match[index]] += delta;
-                    column_potential[index] -= delta;
-                } else {
-                    min_reduced[index] -= delta;
-                }
-            }
+            adjust_reduced(
+                delta,
+                n,
+                &used,
+                &mut min_reduced,
+                &mut column_potential,
+                &column_match,
+                &mut row_potential,
+            );
             column = next_column;
             if column_match[column] == 0 {
                 break;

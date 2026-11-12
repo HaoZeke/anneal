@@ -118,21 +118,7 @@ fn deviation_under(
     if n == 0 || order < 2 {
         return None;
     }
-    let (points, _centroid) = centred(x, n);
-    let angle = 2.0 * std::f64::consts::PI / order as f64;
-    let mut total = 0.0;
-    let stop = cap.is_finite();
-    for point in &points {
-        let w = rotate(*point, axis, angle);
-        total += nearest_squared(&points, w);
-        if stop && total > cap * cap * n as f64 {
-            let partial = (total / n as f64).sqrt();
-            if partial >= cap * (1.0 + 1.0e-6) {
-                return None;
-            }
-        }
-    }
-    Some((total / n as f64).sqrt())
+    Cloud::from_view(x, n).rotation_deviation(axis, order, cap)
 }
 
 /// How far `x` is from being symmetric under the plane whose normal is `axis`.
@@ -148,53 +134,152 @@ fn plane_deviation_under(x: ArrayView1<f64>, n: usize, axis: [f64; 3], cap: f64)
     if n == 0 {
         return None;
     }
-    let (points, _centroid) = centred(x, n);
-    let m = mirror_matrix(axis);
-    let mut total = 0.0;
-    let stop = cap.is_finite();
-    for point in &points {
-        let v = *point;
-        let w = [
-            m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
-            m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
-            m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
-        ];
-        total += nearest_squared(&points, w);
-        if stop && total > cap * cap * n as f64 {
-            let partial = (total / n as f64).sqrt();
-            if partial >= cap * (1.0 + 1.0e-6) {
-                return None;
+    Cloud::from_view(x, n).plane_deviation(axis, cap)
+}
+
+/// Centred coordinates in separate arrays, so a nearest-image scan reads
+/// contiguous columns.
+struct Cloud {
+    xs: Vec<f64>,
+    ys: Vec<f64>,
+    zs: Vec<f64>,
+}
+
+impl Cloud {
+    fn from_view(x: ArrayView1<f64>, n: usize) -> Self {
+        let c = centroid(x, n);
+        let mut xs = Vec::with_capacity(n);
+        let mut ys = Vec::with_capacity(n);
+        let mut zs = Vec::with_capacity(n);
+        for atom in 0..n {
+            xs.push(x[3 * atom] - c[0]);
+            ys.push(x[3 * atom + 1] - c[1]);
+            zs.push(x[3 * atom + 2] - c[2]);
+        }
+        Self { xs, ys, zs }
+    }
+
+    fn point(&self, index: usize) -> [f64; 3] {
+        [self.xs[index], self.ys[index], self.zs[index]]
+    }
+
+    fn nearest_squared(&self, image: [f64; 3]) -> f64 {
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("avx2") {
+            return unsafe { self.nearest_squared_avx2(image) };
+        }
+        self.nearest_squared_scalar(image)
+    }
+
+    fn nearest_squared_scalar(&self, image: [f64; 3]) -> f64 {
+        let mut best = f64::INFINITY;
+        for index in 0..self.xs.len() {
+            let dx = image[0] - self.xs[index];
+            let dy = image[1] - self.ys[index];
+            let dz = image[2] - self.zs[index];
+            let distance = dx * dx + dy * dy + dz * dz;
+            if distance < best {
+                best = distance;
             }
         }
+        best
     }
-    Some((total / n as f64).sqrt())
-}
 
-fn centred(x: ArrayView1<f64>, n: usize) -> (Vec<[f64; 3]>, [f64; 3]) {
-    let c = centroid(x, n);
-    let mut points = Vec::with_capacity(n);
-    for atom in 0..n {
-        points.push([
-            x[3 * atom] - c[0],
-            x[3 * atom + 1] - c[1],
-            x[3 * atom + 2] - c[2],
-        ]);
-    }
-    (points, c)
-}
-
-fn nearest_squared(points: &[[f64; 3]], image: [f64; 3]) -> f64 {
-    let mut best = f64::INFINITY;
-    for point in points {
-        let dx = image[0] - point[0];
-        let dy = image[1] - point[1];
-        let dz = image[2] - point[2];
-        let distance = dx * dx + dy * dy + dz * dz;
-        if distance < best {
-            best = distance;
+    /// # Safety
+    ///
+    /// AVX2 must be enabled.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn nearest_squared_avx2(&self, image: [f64; 3]) -> f64 {
+        use std::arch::x86_64::{
+            _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd, _mm256_storeu_pd,
+            _mm256_sub_pd,
+        };
+        let ix = _mm256_set1_pd(image[0]);
+        let iy = _mm256_set1_pd(image[1]);
+        let iz = _mm256_set1_pd(image[2]);
+        let mut best = f64::INFINITY;
+        let n = self.xs.len();
+        let mut index = 0usize;
+        while index + 4 <= n {
+            let lane = unsafe {
+                let dx = _mm256_sub_pd(_mm256_loadu_pd(self.xs.as_ptr().add(index)), ix);
+                let dy = _mm256_sub_pd(_mm256_loadu_pd(self.ys.as_ptr().add(index)), iy);
+                let dz = _mm256_sub_pd(_mm256_loadu_pd(self.zs.as_ptr().add(index)), iz);
+                let distance = _mm256_add_pd(
+                    _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
+                    _mm256_mul_pd(dz, dz),
+                );
+                let mut lane = [0.0; 4];
+                _mm256_storeu_pd(lane.as_mut_ptr(), distance);
+                lane
+            };
+            for distance in lane {
+                if distance < best {
+                    best = distance;
+                }
+            }
+            index += 4;
         }
+        while index < n {
+            let dx = image[0] - self.xs[index];
+            let dy = image[1] - self.ys[index];
+            let dz = image[2] - self.zs[index];
+            let distance = dx * dx + dy * dy + dz * dz;
+            if distance < best {
+                best = distance;
+            }
+            index += 1;
+        }
+        best
     }
-    best
+
+    fn rotation_deviation(&self, axis: [f64; 3], order: usize, cap: f64) -> Option<f64> {
+        let n = self.xs.len();
+        if n == 0 || order < 2 {
+            return None;
+        }
+        let angle = 2.0 * std::f64::consts::PI / order as f64;
+        let mut total = 0.0;
+        let stop = cap.is_finite();
+        for index in 0..n {
+            let image = rotate(self.point(index), axis, angle);
+            total += self.nearest_squared(image);
+            if stop && total > cap * cap * n as f64 {
+                let partial = (total / n as f64).sqrt();
+                if partial >= cap * (1.0 + 1.0e-6) {
+                    return None;
+                }
+            }
+        }
+        Some((total / n as f64).sqrt())
+    }
+
+    fn plane_deviation(&self, axis: [f64; 3], cap: f64) -> Option<f64> {
+        let n = self.xs.len();
+        if n == 0 {
+            return None;
+        }
+        let m = mirror_matrix(axis);
+        let mut total = 0.0;
+        let stop = cap.is_finite();
+        for index in 0..n {
+            let v = self.point(index);
+            let image = [
+                m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+                m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+                m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+            ];
+            total += self.nearest_squared(image);
+            if stop && total > cap * cap * n as f64 {
+                let partial = (total / n as f64).sqrt();
+                if partial >= cap * (1.0 + 1.0e-6) {
+                    return None;
+                }
+            }
+        }
+        Some((total / n as f64).sqrt())
+    }
 }
 
 /// Axes worth testing, taken from the structure rather than at random.
@@ -244,9 +329,10 @@ fn candidate_axes(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
 /// structure along one operation.
 pub fn detect(x: ArrayView1<f64>, n: usize, orders: &[usize], tolerance: f64) -> Option<Candidate> {
     let mut best: Option<Candidate> = None;
+    let cloud = Cloud::from_view(x, n);
     for axis in candidate_axes(x, n) {
         for &order in orders {
-            let Some(d) = deviation_under(x, n, axis, order, tolerance) else {
+            let Some(d) = cloud.rotation_deviation(axis, order, tolerance) else {
                 continue;
             };
             if d < tolerance && best.map(|b| d < b.deviation).unwrap_or(true) {
@@ -275,9 +361,10 @@ pub fn detect_all(
     tolerance: f64,
 ) -> Vec<Candidate> {
     let mut out = Vec::new();
+    let cloud = Cloud::from_view(x, n);
     for axis in candidate_axes(x, n) {
         for &order in orders {
-            let Some(d) = deviation_under(x, n, axis, order, tolerance) else {
+            let Some(d) = cloud.rotation_deviation(axis, order, tolerance) else {
                 continue;
             };
             if d < tolerance {
@@ -289,7 +376,7 @@ pub fn detect_all(
                 });
             }
         }
-        let Some(d) = plane_deviation_under(x, n, axis, tolerance) else {
+        let Some(d) = cloud.plane_deviation(axis, tolerance) else {
             continue;
         };
         if d < tolerance {
