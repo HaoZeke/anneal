@@ -2,9 +2,9 @@
 # Copyright (c) anneal developers
 """Fetch the paper dumps from the Hugging Face dataset anneal-paper-data.
 
-The dataset owner is not chosen. ``HF_REPO`` stays
-``PLACEHOLDER/anneal-paper-data`` until it is. ``HF_REVISION`` is the
-pinned dataset commit. Replace ``PINNED_REVISION`` after the upload.
+The dataset repository is ``rgoswami/anneal-paper-data`` (repo type
+dataset). ``HF_REVISION`` is the pinned dataset commit. Replace
+``PINNED_REVISION`` after the upload.
 An environment variable of the same name overrides either value, so
 another machine can point at the uploaded snapshot without editing
 this file.
@@ -44,8 +44,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "data" / "hf-files.csv"
 
-# Owner is undecided. The dataset repository name is anneal-paper-data.
-HF_REPO = os.environ.get("HF_REPO", "PLACEHOLDER/anneal-paper-data")
+# Dataset repository rgoswami/anneal-paper-data, repo type dataset.
+HF_REPO = os.environ.get("HF_REPO", "rgoswami/anneal-paper-data")
 # Pin the dataset git revision after upload.
 HF_REVISION = os.environ.get("HF_REVISION", "PINNED_REVISION")
 
@@ -106,12 +106,13 @@ def ensure(root: Path = ROOT) -> None:
     ]
     if not missing:
         return
-    if HF_REPO.startswith("PLACEHOLDER/") or HF_REVISION == "PINNED_REVISION":
+    if HF_REVISION == "PINNED_REVISION":
         sample = missing[0]["path"]
         raise SystemExit(
             f"{len(missing)} file(s) do not match {MANIFEST.name}, "
             f"including {sample}. HF_REPO is {HF_REPO} and HF_REVISION is "
-            f"{HF_REVISION}. Set both to the uploaded dataset before downloading."
+            f"{HF_REVISION}. Set HF_REVISION to the uploaded dataset commit "
+            "before downloading."
         )
     try:
         from huggingface_hub import snapshot_download

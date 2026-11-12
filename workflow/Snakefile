@@ -87,6 +87,7 @@ rule water_h2o20_goat:
 
 
 # Paper minima dumps, xyz dumps, and raw runs listed in data/hf-files.csv.
+# Dataset: rgoswami/anneal-paper-data (repo type dataset).
 # Not part of `rule all`. Scripts that read those files call the same
 # program before they open them.
 #   snakemake -s workflow/Snakefile fetch_paper_data

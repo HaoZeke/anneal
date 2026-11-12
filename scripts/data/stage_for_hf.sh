@@ -2,8 +2,8 @@
 # Copyright (c) anneal developers
 # Copy the files named in data/hf-files.csv into a staging directory.
 # The staging layout is the Hugging Face dataset layout for
-# anneal-paper-data: each path is relative to the anneal repository
-# root. HF_REPO in scripts/data/fetch_data.py is the owner placeholder.
+# rgoswami/anneal-paper-data (repo type dataset). Each path is
+# relative to the anneal repository root.
 # Upload that directory from another machine. This script does not
 # authenticate.
 #
@@ -50,6 +50,7 @@ count=0
 cat > "$staging/README.md" << 'EOF'
 # anneal-paper-data
 
+Dataset repository: rgoswami/anneal-paper-data (repo type dataset).
 Paper dumps for HaoZeke/anneal. Paths are relative to the anneal
 repository root and match `data/hf-files.csv` in that repository
 (`path,size,sha256`). The manifest itself stays in git.
