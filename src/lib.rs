@@ -261,6 +261,9 @@ pub mod universal_coverage;
 pub mod variant;
 /// Package version metadata.
 pub mod version;
+/// Persistent GFN2-xTB calculator. The wavefunction is reused across a quench.
+#[cfg(feature = "rgpot-ex")]
+pub mod xtb_session;
 
 /// C ABI surface (cargo-c builds).
 #[cfg(feature = "capi")]

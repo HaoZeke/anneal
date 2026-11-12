@@ -499,6 +499,19 @@ fn main() {
     let spent = ledger.spent() + polish.spent();
     writeln!(meta, "wall_s: {wall_s:.6}").ok();
     writeln!(meta, "energy_calls: {spent}").ok();
+    let inside_s = rgpot_eindir::potential_inside_ns() as f64 / 1.0e9;
+    let potential_calls = rgpot_eindir::potential_calls();
+    let per_call_ms = if potential_calls == 0 {
+        0.0
+    } else {
+        inside_s * 1.0e3 / potential_calls as f64
+    };
+    let outside_s = (wall_s - inside_s).max(0.0);
+    writeln!(meta, "potential_s: {inside_s:.6}").ok();
+    writeln!(meta, "outside_s: {outside_s:.6}").ok();
+    writeln!(meta, "potential_calls: {potential_calls}").ok();
+    writeln!(meta, "per_call_ms: {per_call_ms:.3}").ok();
+    writeln!(meta, "warm_calls: {}", rgpot_eindir::warm_calls()).ok();
     writeln!(meta, "search_calls: {}", ledger.spent()).ok();
     writeln!(meta, "polish_calls: {}", polish.spent()).ok();
     writeln!(meta, "polish_component_tolerance_eV_per_A: {tolerance:.6e}").ok();

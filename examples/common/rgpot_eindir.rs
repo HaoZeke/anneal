@@ -7,7 +7,6 @@
 #![allow(dead_code)]
 
 use anneal_core::catalog::FreshEvaluation;
-use anneal_core::catalog::molecular::{GFN2_ACCURACY, GFN2_MAX_ITERATIONS};
 use anneal_core::compatibility::{AbiStamp, EngineDescriptor, ProtocolVersion};
 use eindir_core::ffi::{EindirObjectiveWrapper, eindir_core_abi_compatible, eindir_objective_t};
 use eindir_core::gradient::DifferentiableObjective;
@@ -22,7 +21,7 @@ use std::ffi::c_void;
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 /// Pair distance below which a geometry is an overlap, not a physical contact.
 /// Same threshold the cluster walk uses before it will record a molecular quench.
@@ -33,6 +32,9 @@ const OVERLAP_CALL_LIMIT_A: f64 = 0.90;
 
 static SCC_REJECTED: AtomicUsize = AtomicUsize::new(0);
 static GEOMETRY_REJECTED: AtomicUsize = AtomicUsize::new(0);
+static INSIDE_NS: AtomicU64 = AtomicU64::new(0);
+static POTENTIAL_CALLS: AtomicUsize = AtomicUsize::new(0);
+static WARM_CALLS: AtomicUsize = AtomicUsize::new(0);
 
 /// How many xtb calls were rejected because the SCC did not return a finite result.
 pub(crate) fn scc_rejected_count() -> usize {
@@ -42,6 +44,21 @@ pub(crate) fn scc_rejected_count() -> usize {
 /// How many calls were refused before xtb because two atoms occupied the same place.
 pub(crate) fn geometry_rejected_count() -> usize {
     GEOMETRY_REJECTED.load(Ordering::Relaxed)
+}
+
+/// Time spent inside `xtb_singlepoint`, summed over this process.
+pub(crate) fn potential_inside_ns() -> u64 {
+    INSIDE_NS.load(Ordering::Relaxed)
+}
+
+/// Single points that reached xtb, including those whose SCC was rejected.
+pub(crate) fn potential_calls() -> usize {
+    POTENTIAL_CALLS.load(Ordering::Relaxed)
+}
+
+/// Single points that reused the previous SCC wavefunction.
+pub(crate) fn warm_calls() -> usize {
+    WARM_CALLS.load(Ordering::Relaxed)
 }
 
 fn note_scc_rejected(min_pair_a: f64) {
@@ -73,8 +90,6 @@ fn min_pair_distance_a(positions: &[f64]) -> f64 {
     best
 }
 
-const GFN2: i32 = 3;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,28 +119,6 @@ mod tests {
     }
 }
 
-#[repr(C)]
-struct XtbConfig {
-    method: i32,
-    accuracy: f64,
-    electronic_temperature: f64,
-    max_iterations: i32,
-    charge: f64,
-    uhf: i32,
-}
-
-type XtbCreate = unsafe extern "C" fn(*const XtbConfig, *mut u8, usize) -> *mut c_void;
-type XtbDestroy = unsafe extern "C" fn(*mut c_void);
-type XtbForce = unsafe extern "C" fn(
-    *mut c_void,
-    i64,
-    *const f64,
-    *const i32,
-    *mut f64,
-    *mut f64,
-    *mut f64,
-    *const f64,
-) -> i32;
 type Cuh2Force =
     unsafe extern "C" fn(i32, *const f64, *const i32, *const f64, *mut f64, *mut f64) -> i32;
 
@@ -170,7 +163,17 @@ fn read_full(fd: i32, bytes: &mut [u8]) -> bool {
 }
 
 /// Child side of one xtb evaluator. `ERROR STOP` ends this process only.
-unsafe fn xtb_worker_main(force: XtbForce, pot: *mut c_void, incoming: i32, outgoing: i32) -> ! {
+///
+/// The calculator is created here, after the fork, and kept for every
+/// geometry this child sees.
+unsafe fn xtb_worker_main(incoming: i32, outgoing: i32) -> ! {
+    let mut session = match anneal_core::xtb_session::XtbSession::open() {
+        Ok(session) => session,
+        Err(err) => {
+            eprintln!("xtb session: {err}");
+            unsafe { _exit(1) };
+        }
+    };
     loop {
         let mut n_bytes = [0u8; 8];
         if !read_full(incoming, &mut n_bytes) {
@@ -202,24 +205,21 @@ unsafe fn xtb_worker_main(force: XtbForce, pot: *mut c_void, incoming: i32, outg
             unsafe { _exit(0) };
         }
         let mut gradient = vec![0.0f64; 3 * n_atoms];
-        let mut energy = 0.0f64;
-        let mut variance = 0.0f64;
-        let rc = unsafe {
-            force(
-                pot,
-                n as i64,
-                positions.as_ptr(),
-                atomic_numbers.as_ptr(),
-                gradient.as_mut_ptr(),
-                &mut energy,
-                &mut variance,
-                cell.as_ptr(),
-            )
+        let answered = session.evaluate(&positions, &atomic_numbers, &cell, &mut gradient);
+        let (rc, energy, singlepoint_ns, warm): (i32, f64, u64, u64) = match answered {
+            Ok(point) => (
+                0,
+                point.energy_ev,
+                point.singlepoint_ns,
+                u64::from(point.reused_wavefunction),
+            ),
+            Err(err) => (-2, f64::NAN, err.singlepoint_ns, 0),
         };
-        let mut message = Vec::with_capacity(4 + 8 + 8 + gradient.len() * 8);
+        let mut message = Vec::with_capacity(4 + 8 + 8 + 8 + gradient.len() * 8);
         message.extend_from_slice(&rc.to_ne_bytes());
         message.extend_from_slice(&energy.to_ne_bytes());
-        message.extend_from_slice(&variance.to_ne_bytes());
+        message.extend_from_slice(&singlepoint_ns.to_ne_bytes());
+        message.extend_from_slice(&warm.to_ne_bytes());
         let grad_bytes = unsafe {
             std::slice::from_raw_parts(gradient.as_ptr() as *const u8, gradient.len() * 8)
         };
@@ -239,12 +239,10 @@ struct XtbWorker {
     pid: i32,
     to_child: i32,
     from_child: i32,
-    force: XtbForce,
-    pot: *mut c_void,
 }
 
 impl XtbWorker {
-    fn spawn(force: XtbForce, pot: *mut c_void) -> Self {
+    fn spawn() -> Self {
         unsafe {
             let mut to_child = [0i32; 2];
             let mut from_child = [0i32; 2];
@@ -258,7 +256,7 @@ impl XtbWorker {
             if pid == 0 {
                 close(to_child[1]);
                 close(from_child[0]);
-                xtb_worker_main(force, pot, to_child[0], from_child[1]);
+                xtb_worker_main(to_child[0], from_child[1]);
             }
             close(to_child[0]);
             close(from_child[1]);
@@ -266,8 +264,6 @@ impl XtbWorker {
                 pid,
                 to_child: to_child[1],
                 from_child: from_child[0],
-                force,
-                pot,
             }
         }
     }
@@ -304,10 +300,8 @@ impl XtbWorker {
             Ok(answer) => Ok(answer),
             Err(WorkerFail::Rejected) => Err(WorkerFail::Rejected),
             Err(WorkerFail::Dead) => {
-                let force = self.force;
-                let pot = self.pot;
                 self.shutdown();
-                *self = Self::spawn(force, pot);
+                *self = Self::spawn();
                 Err(WorkerFail::Dead)
             }
         }
@@ -340,13 +334,20 @@ impl XtbWorker {
         if !write_full(self.to_child, &request) {
             return Err(WorkerFail::Dead);
         }
-        let mut header = [0u8; 4 + 8 + 8];
+        let mut header = [0u8; 4 + 8 + 8 + 8];
         if !read_full(self.from_child, &mut header) {
             return Err(WorkerFail::Dead);
         }
         let rc = i32::from_ne_bytes(header[0..4].try_into().unwrap());
         let energy = f64::from_ne_bytes(header[4..12].try_into().unwrap());
-        let variance = f64::from_ne_bytes(header[12..20].try_into().unwrap());
+        let singlepoint_ns = u64::from_ne_bytes(header[12..20].try_into().unwrap());
+        let warm = u64::from_ne_bytes(header[20..28].try_into().unwrap());
+        INSIDE_NS.fetch_add(singlepoint_ns, Ordering::Relaxed);
+        POTENTIAL_CALLS.fetch_add(1, Ordering::Relaxed);
+        if warm == 1 {
+            WARM_CALLS.fetch_add(1, Ordering::Relaxed);
+        }
+        let variance = 0.0;
         let grad_bytes = unsafe {
             std::slice::from_raw_parts_mut(gradient.as_mut_ptr() as *mut u8, gradient.len() * 8)
         };
@@ -362,10 +363,6 @@ impl XtbWorker {
 }
 
 struct XtbKernel {
-    _lib: Library,
-    pot: *mut c_void,
-    force: Symbol<'static, XtbForce>,
-    destroy: Symbol<'static, XtbDestroy>,
     worker: XtbWorker,
     evaluations: usize,
     /// Force buffer reused across calls. The owned DLPack tensor copies
@@ -376,7 +373,6 @@ struct XtbKernel {
 impl Drop for XtbKernel {
     fn drop(&mut self) {
         self.worker.shutdown();
-        unsafe { (self.destroy)(self.pot) };
     }
 }
 
@@ -587,43 +583,8 @@ impl RgpotObjective {
     }
 
     pub(crate) fn xtb(atmnrs: &[i32], box_: [f64; 9]) -> Self {
-        let path = first_existing(&[
-            env_path("RGPOT_XTB_ENGINE").unwrap_or_default(),
-            PathBuf::from("libxtb_engine.so"),
-        ]);
-        let lib = unsafe { Library::new(&path) }
-            .unwrap_or_else(|e| panic!("dlopen {}: {e}", path.display()));
-        let create: Symbol<XtbCreate> =
-            unsafe { lib.get(b"rgpot_xtb_create\0") }.expect("rgpot_xtb_create");
-        let destroy: Symbol<XtbDestroy> =
-            unsafe { lib.get(b"rgpot_xtb_destroy\0") }.expect("rgpot_xtb_destroy");
-        let force: Symbol<XtbForce> =
-            unsafe { lib.get(b"rgpot_xtb_force\0") }.expect("rgpot_xtb_force");
-        let cfg = XtbConfig {
-            method: GFN2,
-            accuracy: GFN2_ACCURACY,
-            electronic_temperature: 300.0,
-            max_iterations: GFN2_MAX_ITERATIONS,
-            charge: 0.0,
-            uhf: 0,
-        };
-        let mut err = [0u8; 256];
-        let pot = unsafe { create(&cfg, err.as_mut_ptr(), err.len()) };
-        if pot.is_null() {
-            panic!("rgpot_xtb_create failed: {}", String::from_utf8_lossy(&err));
-        }
-        let force =
-            unsafe { std::mem::transmute::<Symbol<XtbForce>, Symbol<'static, XtbForce>>(force) };
-        let destroy = unsafe {
-            std::mem::transmute::<Symbol<XtbDestroy>, Symbol<'static, XtbDestroy>>(destroy)
-        };
-        let force_fn: XtbForce = *force;
-        let worker = XtbWorker::spawn(force_fn, pot);
+        let worker = XtbWorker::spawn();
         let kernel = Box::new(XtbKernel {
-            _lib: lib,
-            pot,
-            force,
-            destroy,
             worker,
             evaluations: 0,
             scratch: Vec::new(),
@@ -644,7 +605,7 @@ impl RgpotObjective {
             )
         };
         assert!(!handle.is_null(), "rgpot_potential_new_eindir xtb");
-        println!("  eindir objective from rgpot xtb ({})", path.display());
+        println!("  eindir objective from libxtb");
         let _ = std::io::Write::flush(&mut std::io::stdout());
         Self {
             pot: handle,

@@ -272,3 +272,7 @@ required-features = ["bank-rpc"]
 [[example]]
 name = "lj_board_row"
 required-features = []
+
+[[test]]
+name = "xtb_warm_start"
+required-features = ["rgpot-ex"]
