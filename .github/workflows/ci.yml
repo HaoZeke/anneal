@@ -332,9 +332,13 @@ jobs:
 
       # The tests that drive a real ChemFit Fitter skip without ChemFit. It
       # pins numpy<2.4, so it goes in only after the steps above have run on
-      # the newest numpy. Its next branch has no release, hence the commit.
-      # The ChemFit tests hold array-API rows too, so each step checks again
-      # that array-api-strict imports after ChemFit has moved numpy.
+      # the newest numpy. 3.1.1 speaks ask/tell and keeps the incumbent on
+      # FitContext.opt_params. 4.0.0, the current release, speaks
+      # evaluate/step and keeps it on FitContext.opt_context. main is
+      # installed from git: at 2c2d58b it matches the 4.0.0 Fitter apart from
+      # the README, and a later protocol change fails this step. The ChemFit
+      # tests hold array-API rows too, so each step checks again that
+      # array-api-strict imports after ChemFit has moved numpy.
       - name: pytest (ChemFit 3.1.1, ask/tell)
         run: |
           .venv/bin/python -m pip install "chemfit==3.1.1"
@@ -342,11 +346,20 @@ jobs:
           .venv/bin/python -c "import array_api_strict"
           .venv/bin/python -m pytest pytest/test_chemfit*.py
 
-      - name: pytest (ChemFit next, evaluate/step)
+      - name: pytest (ChemFit 4.0.0, evaluate/step)
+        run: |
+          .venv/bin/python -m pip uninstall --yes chemfit
+          .venv/bin/python -m pip install "chemfit==4.0.0"
+          .venv/bin/python -c "from chemfit.fitter import Fitter; assert hasattr(Fitter, 'step')"
+          .venv/bin/python -c "from chemfit.fitter import FitContext; assert hasattr(FitContext, 'parameters')"
+          .venv/bin/python -c "import array_api_strict"
+          .venv/bin/python -m pytest pytest/test_chemfit*.py
+
+      - name: pytest (ChemFit main, evaluate/step)
         run: |
           .venv/bin/python -m pip uninstall --yes chemfit
           .venv/bin/python -m pip install \
-            "chemfit @ git+https://github.com/MSallermann/chemfit@37dcfe69c118419d040a0d7f3bf8304d52b569e2"
+            "chemfit @ git+https://github.com/MSallermann/chemfit@main"
           .venv/bin/python -c "from chemfit.fitter import Fitter; assert hasattr(Fitter, 'step')"
           .venv/bin/python -c "import array_api_strict"
           .venv/bin/python -m pytest pytest/test_chemfit*.py
