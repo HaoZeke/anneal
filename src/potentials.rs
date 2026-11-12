@@ -187,6 +187,13 @@ impl PairPotential {
         let mut g = Array1::zeros(x.len());
         if let Some(coordinates) = x.as_slice() {
             let gradient = g.as_slice_mut().expect("owned gradient is contiguous");
+            if coordinates.len() == 3 * n
+                && gradient.len() == 3 * n
+                && matches!(self.kind, PairKind::LennardJones)
+            {
+                e = lennard_jones_pairs(coordinates, gradient);
+                return (e, g);
+            }
             for i in 0..n {
                 let base_i = 3 * i;
                 let mut gradient_i = [gradient[base_i], gradient[base_i + 1], gradient[base_i + 2]];
@@ -232,6 +239,118 @@ impl PairPotential {
             }
         }
         (e, g)
+    }
+}
+
+/// Lennard-Jones energy and gradient, pair order `(i, j)` with `j > i`.
+///
+/// Two separations are inverted before either force is written. The
+/// reciprocal is the long dependency in the pair, and the following pair
+/// does not need its result. Forces are then applied in the same order as
+/// one pair at a time, so the sum is unchanged. A separation that the
+/// ordered reference skips stays on the cold path, off this schedule.
+fn lennard_jones_pairs(coordinates: &[f64], gradient: &mut [f64]) -> f64 {
+    let n = coordinates.len() / 3;
+    let coords = coordinates.as_ptr();
+    let grad = gradient.as_mut_ptr();
+    let mut energy = 0.0;
+    for i in 0..n {
+        // `i < n` and both slices hold `3n` lanes, so every point is in range.
+        let pi = unsafe { read_point(coords, i) };
+        let mut gi = unsafe { read_point(grad, i) };
+        let mut j = i + 1;
+        while j + 1 < n {
+            let d0 = displacement(pi, unsafe { read_point(coords, j) });
+            let d1 = displacement(pi, unsafe { read_point(coords, j + 1) });
+            let r0 = squared_distance(d0);
+            let r1 = squared_distance(d1);
+            if !(r0 <= 0.0) && !(r1 <= 0.0) {
+                let inverse0 = 1.0 / r0;
+                let inverse1 = 1.0 / r1;
+                let (value0, coefficient0) = lj_from_inverse(inverse0);
+                let (value1, coefficient1) = lj_from_inverse(inverse1);
+                energy += value0;
+                unsafe { scatter_pair(&mut gi, grad, j, d0, coefficient0) };
+                energy += value1;
+                unsafe { scatter_pair(&mut gi, grad, j + 1, d1, coefficient1) };
+            } else {
+                if let Some(value) = lj_one_pair(&mut gi, grad, j, d0, r0) {
+                    energy += value;
+                }
+                if let Some(value) = lj_one_pair(&mut gi, grad, j + 1, d1, r1) {
+                    energy += value;
+                }
+            }
+            j += 2;
+        }
+        if j < n {
+            let d = displacement(pi, unsafe { read_point(coords, j) });
+            if let Some(value) = lj_one_pair(&mut gi, grad, j, d, squared_distance(d)) {
+                energy += value;
+            }
+        }
+        unsafe { write_point(grad, i, gi) };
+    }
+    energy
+}
+
+/// Lennard-Jones value and `(dV/dr) / r` from an inverse squared separation.
+///
+/// The same products as [`PairKind::pair`] for [`PairKind::LennardJones`].
+/// The inverse is an argument so two pairs can form both reciprocals before
+/// either product chain runs.
+#[inline(always)]
+fn lj_from_inverse(inverse: f64) -> (f64, f64) {
+    let inv6 = inverse * inverse * inverse;
+    let inv12 = inv6 * inv6;
+    (4.0 * (inv12 - inv6), -24.0 * inverse * (2.0 * inv12 - inv6))
+}
+
+/// One pair, or nothing when `r2 <= 0`, matching the ordered reference.
+#[inline(never)]
+#[cold]
+fn lj_one_pair(gi: &mut [f64; 3], grad: *mut f64, j: usize, d: [f64; 3], r2: f64) -> Option<f64> {
+    if r2 <= 0.0 {
+        return None;
+    }
+    let (value, coefficient) = PairKind::LennardJones.pair(r2);
+    unsafe { scatter_pair(gi, grad, j, d, coefficient) };
+    Some(value)
+}
+
+#[inline(always)]
+unsafe fn read_point(data: *const f64, index: usize) -> [f64; 3] {
+    let base = unsafe { data.add(3 * index) };
+    unsafe { [*base, *base.add(1), *base.add(2)] }
+}
+
+#[inline(always)]
+unsafe fn write_point(data: *mut f64, index: usize, point: [f64; 3]) {
+    let base = unsafe { data.add(3 * index) };
+    unsafe {
+        *base = point[0];
+        *base.add(1) = point[1];
+        *base.add(2) = point[2];
+    }
+}
+
+#[inline(always)]
+fn displacement(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+}
+
+#[inline(always)]
+fn squared_distance(d: [f64; 3]) -> f64 {
+    d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+}
+
+#[inline(always)]
+unsafe fn scatter_pair(gi: &mut [f64; 3], grad: *mut f64, j: usize, d: [f64; 3], coefficient: f64) {
+    let base = unsafe { grad.add(3 * j) };
+    for k in 0..3 {
+        let force = coefficient * d[k];
+        gi[k] += force;
+        unsafe { *base.add(k) -= force };
     }
 }
 
@@ -325,20 +444,27 @@ mod tests {
             (energy, gradient)
         }
 
-        let x = Array1::from_shape_fn(21, |index| {
-            let point = index / 3;
-            let axis = index % 3;
-            ((point * 17 + axis * 11 + 3) as f64).sin() + point as f64 * 0.37
-        });
-        for potential in [
-            PairPotential::lennard_jones(7),
-            PairPotential::morse(7, 6.0),
-        ] {
+        let mut cases = Vec::new();
+        for n in [7usize, 75, 98] {
+            let mut x = Array1::from_shape_fn(3 * n, |index| {
+                let point = index / 3;
+                let axis = index % 3;
+                ((point * 17 + axis * 11 + 3) as f64).sin() + point as f64 * 0.37
+            });
+            cases.push((PairPotential::lennard_jones(n), x.clone()));
+            cases.push((PairPotential::morse(n, 6.0), x.clone()));
+            // A repeated point takes the r^2 <= 0 skip, including an odd tail.
+            x[0] = x[3];
+            x[1] = x[4];
+            x[2] = x[5];
+            cases.push((PairPotential::lennard_jones(n), x));
+        }
+        for (potential, x) in cases {
             let expected = reference(&potential, x.view());
             let observed = potential.value_and_gradient(x.view());
             assert_eq!(observed.0.to_bits(), expected.0.to_bits());
-            for (actual, reference) in observed.1.iter().zip(expected.1.iter()) {
-                assert_eq!(actual.to_bits(), reference.to_bits());
+            for (actual, reference_value) in observed.1.iter().zip(expected.1.iter()) {
+                assert_eq!(actual.to_bits(), reference_value.to_bits());
             }
         }
     }
