@@ -6081,10 +6081,9 @@ where
                     (Vec::new(), Vec::new())
                 };
                 let mut best_alt: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
-                // The probe is not the chain ledger. A higher seed must not
-                // spend the budget the descent is still using, or the hops
-                // after the miss are a different search.
-                let mut probe = Ledger::new(65_536);
+                // Every probe call is charged, adopted or not, so the
+                // probe is capped at what the chain has left.
+                let mut probe = Ledger::new(ledger.remaining().min(65_536));
                 for source in sources {
                     if probe.remaining() == 0 {
                         break;
@@ -6148,8 +6147,7 @@ where
                 // A decahedral signature is also offered a stacking twin of
                 // the incumbent. The twin is a reflection in one dense
                 // plane, which is how fivefold packing becomes close
-                // packed. Adopted only when the quench is lower, so a
-                // miss leaves the chain and its later calls where they were.
+                // packed. Adopted only when the quench is lower.
                 if frac_422 >= 0.15 && frac_421 < 0.20 {
                     for _ in 0..4 {
                         if probe.remaining() == 0 {
@@ -6178,6 +6176,7 @@ where
                         }
                     }
                 }
+                ledger.charge_many(probe.spent());
                 if let Some((eq, xq, gradient)) = best_alt
                     && eq < ledger.best - 1e-6
                 {
@@ -6188,7 +6187,6 @@ where
                             "prior motif {eq:.6} 555 {frac_555:.3} 421 {frac_421:.3} 422 {frac_422:.3}"
                         );
                     }
-                    ledger.charge_many(probe.spent());
                     let from_basin = identity.basin_of(best_state.view());
                     let reached = identity.basin_of(xq.view());
                     adopt_minimum!(
