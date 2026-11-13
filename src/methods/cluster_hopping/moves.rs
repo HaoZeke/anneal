@@ -140,7 +140,7 @@ impl MoveLibrary {
                     n_points: cfg.n_points,
                     neighbour_cutoff: cfg.neighbour_cutoff,
                 });
-                if cfg.soap_mode != SoapProposalMode::Off {
+                if cfg.soap_mode != SoapProposalMode::Off && cfg.prior_soap {
                     kernels.push(soap_arm(cfg, None, None));
                 }
                 if matches!(self, Self::LeanBurstHollow) {
@@ -226,7 +226,7 @@ impl MoveLibrary {
                 // search; the hexamer keeps the arm it was measured with.
                 let large_water = groups.len() > crate::catalog::molecular::WATER_HEXAMER_MOLECULES
                     && super::cycles::is_water_groups(groups);
-                if cfg.soap_mode != SoapProposalMode::Off && !large_water {
+                if cfg.soap_mode != SoapProposalMode::Off && cfg.prior_soap && !large_water {
                     kernels.push(soap_arm(cfg, mobile, Some(groups.clone())));
                 }
                 if *reverse_cycles && super::cycles::is_water_groups(groups) {
@@ -3232,6 +3232,37 @@ mod move_scaling_tests {
         assert!(
             !small_names.iter().any(|name| *name == "hbrewire"),
             "the hexamer library gained a rewire arm: {small_names:?}"
+        );
+    }
+
+    #[test]
+    fn a_priors_off_library_builds_no_fivefold_soap_arm() {
+        let mut cfg = Config::recommended(38);
+        cfg.prior_soap = false;
+        assert!(
+            cfg.move_library
+                .kernels(&cfg)
+                .iter()
+                .all(|kernel| !matches!(kernel, ClusterMove::Soap { .. })),
+            "the fivefold SOAP arm is still built when the prior is off"
+        );
+        cfg.general_collective = true;
+        assert!(
+            cfg.move_library
+                .kernels(&cfg)
+                .iter()
+                .all(|kernel| !matches!(kernel, ClusterMove::Soap { .. }))
+        );
+        let mut binary = Config::recommended(38)
+            .with_species(vec![29; 12].into_iter().chain(vec![79; 26]).collect(), None);
+        binary.prior_soap = false;
+        binary.soap_mode = SoapProposalMode::Off;
+        assert!(
+            binary
+                .move_library
+                .kernels(&binary)
+                .iter()
+                .all(|kernel| !matches!(kernel, ClusterMove::Soap { .. }))
         );
     }
 

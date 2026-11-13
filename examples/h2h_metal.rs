@@ -256,6 +256,7 @@ fn config(spec: &Spec) -> Config {
         let listed = |name: &str| all_off || text.split(',').any(|token| token.trim() == name);
         if listed("soap") {
             cfg.prior_soap = false;
+            cfg.soap_mode = anneal_core::methods::cluster_hopping::SoapProposalMode::Off;
         }
         if listed("reseed") {
             cfg.prior_reseed = false;

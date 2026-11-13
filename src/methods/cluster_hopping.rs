@@ -5762,12 +5762,15 @@ where
                 // statistics stay aligned across the per-hop rebuild.
                 // A connectivity change can drop the cycle arm. That
                 // shorter list would make the next draw index off the end.
-                let rebuilt = MoveLibrary::Molecular {
+                let mut rebuilt = MoveLibrary::Molecular {
                     groups: movable,
                     reactive: *reactive,
                     reverse_cycles: *reverse_cycles,
                 }
                 .kernels(cfg);
+                if !cfg.prior_soap {
+                    rebuilt.retain(|kernel| !matches!(kernel, ClusterMove::Soap { .. }));
+                }
                 if rebuilt.len() == allocator.len() {
                     kernels = rebuilt;
                 }
