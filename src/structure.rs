@@ -371,11 +371,7 @@ fn named_class(adj: &[Vec<bool>], i: usize, j: usize, common: &mut Vec<usize>) -
     }
     if r == 5 && s == 5 {
         let t = trail_from_edges(5, &edges[..5]);
-        if t == 5 {
-            1
-        } else {
-            0
-        }
+        if t == 5 { 1 } else { 0 }
     } else if r == 4 && s == 2 {
         let (a, b) = edges[0];
         let (c, d) = edges[1];
