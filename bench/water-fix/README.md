@@ -2,9 +2,12 @@
 
 The `water_gmin` panel on develop leaves (H₂O)₁₆ at 2/12 and (H₂O)₂₁ at 0/12.
 This directory holds the structures behind those misses, the step that fails,
-and the same-session panel of the fix against develop `7192e9f8`. The rows
-are in `bench/water-gmin/rows.csv` under each arm's `code_revision`; the
-GMIN rows are the `water_gmin` ones, reused because every start sha1 matches.
+the side-walk hand-back that addresses it, and same-session panels of the
+hand-back against develop `7192e9f8`, `fde4f076` and `91f835fe`. The
+hand-back does not reach significance at 36 seeds, so it ships off by
+default as `Config::rigid_side_walk_hand_back`. The rows are in
+`bench/water-gmin/rows.csv` under each arm's `code_revision`; the GMIN rows
+are the `water_gmin` ones, reused because every start sha1 matches.
 
 ## The misses are other oxygen frameworks
 
@@ -71,7 +74,10 @@ walker's own minimum by the rigid new-lowest margin (0.05 kJ/mol). The
 shell-turn walk comes round after each further quiet stretch of the same
 patience (40 windows of `restart_patience`) instead of once per run. No
 step, size or water constant is added; the change is on the rigid-body path
-only.
+only. After the 36-seed panels below, `refactor(hop)` puts it behind
+`Config::rigid_side_walk_hand_back`, off on every preset, and
+`ANNEAL_PROFILE_SET=rigid_side_walk_hand_back=1` turns it on in
+`globalopt_profile`.
 
 Variants screened on scratch builds of `92bc5805` (seeds 2000–2011, 2M
 calls, (H₂O)₁₆ unless noted) and not kept:
@@ -91,50 +97,65 @@ calls, (H₂O)₁₆ unless noted) and not kept:
 The twist arm and the shorter legs cost (H₂O)₂₀ hits; the kept variant is
 the one that loses none.
 
-## Same-session panel against develop `7192e9f8`
+## Same-session panel against develop `91f835fe`, 36 seeds at 16 and 21
 
-`scripts/tip4p_h2h/enter_water_fix.sh`, Snakemake rule `water_fix`: the
-`water_gmin` harness on a `7192e9f8` worktree and then on this branch,
-back to back in one session, serial, `taskset -c 0`, `sudo unshare --uts`
-with hostname `bench`, working directory `/work`, twelve seeds, 2_000_000
-calls, stop at the Cambridge header plus 0.001 kJ/mol. Rows are
-`compare.csv`; `p(F)` is the two-sided Fisher exact test on hits and `p(U)`
-the two-sided Mann–Whitney U test on calls, branch against develop. Times
-are medians in seconds.
+`scripts/tip4p_h2h/enter_water_fix.sh 91f835fe… panel`, Snakemake rule
+`water_fix`: the `water_gmin` harness on a `91f835fe` worktree and then on
+this branch at `259628af`, where the hand-back is on by default, back to
+back in one session, serial, `taskset -c 0`, `sudo unshare --uts` with
+hostname `bench`, working directory `/work`, 2_000_000 calls, stop at the
+Cambridge header plus 0.001 kJ/mol. (H₂O)₈, ₁₂ and ₂₀ take seeds 2000–2011,
+(H₂O)₁₆ and ₂₁ seeds 2000–2035; GMIN is the first twelve. Rows are
+`compare.csv`; `p(F)` is the two-sided Fisher exact test on hits, `p(U)` the
+two-sided Mann–Whitney U test on calls and `p(out)` the same test on time
+outside the potential per charged call, branch against develop. Times are
+medians in seconds, "in" inside the potential and "out" outside it.
 
-| Size | develop | branch | GMIN | calls develop / branch | wall develop / branch | out develop / branch | p(F) | p(U) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| (H₂O)₈ | 12/12 | 12/12 | 8/12 | 6_339 / 6_339 | 0.020 / 0.020 | 0.008 / 0.008 | 1.00 | 1.00 |
-| (H₂O)₁₂ | 12/12 | 12/12 | 5/12 | 41_418.5 / 41_418.5 | 0.224 / 0.220 | 0.070 / 0.070 | 1.00 | 1.00 |
-| (H₂O)₁₆ | 2/12 | 5/12 | 0/12 | 2_000_000 / 2_000_000 | 15.9 / 14.6 | 4.16 / 2.90 | 0.37 | 0.28 |
-| (H₂O)₂₀ | 6/12 | 6/12 | 0/12 | 1_686_249.5 / 1_811_777 | 18.7 / 18.8 | 4.09 / 3.09 | 1.00 | 0.98 |
-| (H₂O)₂₁ | 0/12 | 1/12 | 0/12 | 2_000_000 / 2_000_000 | 25.0 / 23.0 | 6.01 / 4.11 | 1.00 | 0.32 |
+| Size | Seeds | develop | branch | GMIN | calls develop / branch | in develop / branch | out develop / branch | p(F) | p(U) | p(out) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| (H₂O)₈ | 12 | 12/12 | 12/12 | 8/12 | 6_339 / 6_339 | 0.012 / 0.012 | 0.0078 / 0.0079 | 1.00 | 1.00 | 0.065 |
+| (H₂O)₁₂ | 12 | 12/12 | 12/12 | 5/12 | 41_418.5 / 41_418.5 | 0.149 / 0.150 | 0.070 / 0.070 | 1.00 | 1.00 | 0.64 |
+| (H₂O)₁₆ | 36 | 14/36 | 19/36 | 0/12 | 2_000_000 / 1_697_248.5 | 11.7 / 10.1 | 3.74 / 2.66 | 0.34 | 0.48 | 0.0001 |
+| (H₂O)₂₀ | 12 | 6/12 | 6/12 | 0/12 | 1_686_249.5 / 1_811_777 | 14.7 / 15.8 | 4.10 / 3.09 | 1.00 | 0.98 | 0.12 |
+| (H₂O)₂₁ | 36 | 1/36 | 2/36 | 0/12 | 2_000_000 / 2_000_000 | 19.0 / 19.2 | 5.90 / 4.34 | 1.00 | 0.57 | <1e-6 |
 
-The branch loses no hit at any size and gains three at (H₂O)₁₆ and one at
-(H₂O)₂₁, the first (H₂O)₂₁ hit of these panels: seed 2007 goes on from the
-37-bond −915.7735 cage to the minimum's framework (`diag-h2o21-branch.csv`).
-No difference is significant at twelve seeds. At 8 and 12 every row is the
-same call for call: no side walk starts before a 200_000-call quiet stretch.
-Time outside the potential falls by about 30% from 16 up, where the side
-walk now takes a larger share of the calls. Against GMIN the
-branch has p(F) 0.037 at (H₂O)₁₆, where develop had 0.48.
+At (H₂O)₁₆ the hand-back gains seeds 2003, 2005, 2011, 2016, 2019 and 2025
+and loses 2023; at (H₂O)₂₀ it gains 2000 and loses 2002; at (H₂O)₂₁ it adds
+2007 to 2012. At 8 and 12 every row is the same call for call: no side walk
+starts before a 200_000-call quiet stretch. Time outside the potential per
+call falls at 16 and 21, where the repeated side walk takes a larger share
+of the calls. No hit count differs significantly.
 
-The change is on by default: it wins at 16 and 21 and regresses nowhere,
-and the atomic and Morse traces are untouched (below).
+The same panel against `fde4f076` (branch `b5289b57` before the rebase,
+rows under those revisions) gave the same hit counts and median calls at
+every size:
+14/36 against 19/36 at (H₂O)₁₆ and 1/36 against 2/36 at (H₂O)₂₁. The
+twelve-seed panel against `7192e9f8` (branch `e1c98f8c`) had 2/12 against
+5/12 and 0/12 against 1/12.
 
-## Other potentials and checks
+## Off by default
 
-`identity.txt` is `scripts/generic_alloy/trace_identity.sh` on `7192e9f8`
-and on the fix commit, serial on one core. All 63 rows are the same: LJ 38,
-55, 75–77, 98, 102–104 and 150, Morse 80 at ρ = 6 and 14 (`h2h_seed` traces
-and `h2h_morse` rows), (H₂O)₈, ₁₂ and ₂₀ at 100_000 calls, seeds 2000–2002,
-and Au55 `h2h_metal` seeds 2000–2011. The traces hash every new lowest
-energy with its call index and the lowest geometry.
+Neither (H₂O)₁₆ nor (H₂O)₂₁ is significant at 36 seeds, so the hand-back is
+opt-in: `Config::rigid_side_walk_hand_back`, false on every preset and
+absent from the resolved JSON while false. With it false a search is
+develop's: the shell-turn side walk runs once per run and no side-walk
+minimum is handed back.
+
+## Identity and checks
+
+All on the opt-in HEAD against `91f835fe`, `enter_water_fix.sh … identity`,
+serial on one core under `unshare --uts` with hostname `bench`.
+`identity.txt` is `scripts/generic_alloy/trace_identity.sh`: all 63 rows are
+the same, LJ 38, 55, 75–77, 98, 102–104 and 150, Morse 80 at ρ = 6 and 14
+(`h2h_seed` traces and `h2h_morse` rows), (H₂O)₈, ₁₂ and ₂₀ at 100_000
+calls, seeds 2000–2002, and Au55 `h2h_metal` seeds 2000–2011. The traces
+hash every new lowest energy with its call index and the lowest geometry.
+`identity-h2o16.txt` hashes the same trace for (H₂O)₁₆ at 2_000_000 calls,
+where the side walks run, on seeds 2002, 2011, 2027 and 2031: all four are
+the same. The revision named is the opt-in commit; the doc commit after it
+changes a comment only.
 
 ChemFit: `pytest/test_chemfit*.py` 1005 passed and 4 skipped, and
 `examples/chemfit_anneal.py` gives best loss 2.347665788572983.
-`cargo clippy --all-targets -- -D warnings` is clean. `cargo test --release`
-passes except `the_dual_orbit_core_is_opt_in` and
-`a_held_core_cut_is_stamped_with_the_probe_call_that_found_it`, which fail
-the same way on `7192e9f8`. `cargo fmt --check` reports only `src/soap.rs`
-and `tests/surface_hop.rs`, the same as on `7192e9f8`.
+`cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` are clean,
+and `cargo test --release` passes, 182 result blocks with no failure.
