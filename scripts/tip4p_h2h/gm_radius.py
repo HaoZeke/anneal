@@ -72,8 +72,8 @@ def gmin_block(molecules: np.ndarray) -> tuple[str, float]:
         rot = vt.T @ np.diag([1.0, 1.0, d]) @ u.T
         worst = max(worst, float(np.abs(body @ rot.T + com - mol).max()))
         centres.append(com)
-        # NEWTIP turns the opposite way to the Rodrigues map.
-        axes.append(-rotation_vector(rot))
+        # NEWTIP places sites by the Rodrigues map of the vector as written.
+        axes.append(rotation_vector(rot))
     text = "".join(f"{x:.10f} {y:.10f} {z:.10f}\n" for x, y, z in centres + axes)
     return text, worst
 
