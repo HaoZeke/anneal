@@ -1,0 +1,4 @@
+arm,hits,n,fisher_p_vs_scaled,mannwhitney_p_evals,mannwhitney_p_wall,evals_median,wall_median_s,pot_median_s,outside_median_s
+anneal_scaled,9,12,,,,569484.000000,26.685751,17.431664,9.254087
+anneal_default,5,12,0.213757,,,1000000.000000,,,
+gmin,0,12,0.000336519,0.000383392,0.506721,1000000.000000,34.716150,31.881166,2.834985
