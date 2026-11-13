@@ -4683,7 +4683,17 @@ where
                     &mut side_rng,
                 ));
             }
-            let mut probe = Ledger::new(ledger.remaining().max(1));
+            // A feature build compiles the escape, so the walk after the
+            // cuts still has moves to spend calls on and keeps half of what
+            // is left. A default build offers the probe the whole remainder,
+            // which is what its binary pins measure.
+            let room = ledger.remaining().max(1);
+            let room = if cfg!(feature = "rgsaddle") {
+                room.div_ceil(2)
+            } else {
+                room
+            };
+            let mut probe = Ledger::new(room);
             struct Side<'a> {
                 probe: &'a mut Ledger,
                 relax: Relax<'a>,
