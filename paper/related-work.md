@@ -677,3 +677,43 @@ Gong, Liu, Shen, Dong, Liu, Yuan, and Lu, Crystals 16, 243 (2026), doi:10.3390/c
 Modak and Chaudhury, Journal of the Indian Chemical Society 103, 102611 (2026), doi:10.1016/j.jics.2026.102611, title a gradient-directed parallel tempering strategy for global optimisation, applied to sulfur dioxide water clusters. The Crossref record gives the title, the volume, the issue, and the page, and no energy. The clusters contain sulfur dioxide. They are not the bare hexamer. The title does not contradict 121 of 192 or 97 of 192. A comparison, if it is run, is one of their sulfur dioxide water clusters. Do not retarget the CREST table.
 
 Cite `modakSulfurDioxide2026`.
+
+## 2026-11-13 — A diffusion search on a supported platinum cluster
+
+Rønne, Vegge, and Bhowmik, arXiv:2510.13448 (15 October 2025), introduce GO-Diff. A diffusion model is trained from scratch on the energy function, with no prior structures and no relaxation inside the generator. The tests use MACE-MP0. One task places a platinum addatom on a stepped platinum surface. The other searches for a platinum heptamer on Pt(111). They compare that search with random structure search. GO-Diff finds the heptamer within 2560 energy evaluations. A model transferred from the addatom task finds it in 7 of 8 runs, at about 600 evaluations on average. The note cites basin hopping and does not run it. The record has no DOI.
+
+The heptamer is a supported platinum cluster on MACE-MP0. It is not LJ38 through LJ104, and it is not the water hexamer, so the note does not contradict the Cambridge hit targets, 121 of 192, or 97 of 192. An energy evaluation on MACE-MP0 is not the force-call count the hop charges. A comparison, if it is run, is the supported heptamer against random structure search. It does not warrant a head-to-head on the sealed Lennard-Jones maps or on the CREST table.
+
+Cite `ronneGoDiff2025`.
+
+## 2026-11-13 — RPA+rSE geometries leave the hexamer spacing almost unchanged
+
+Tahir, Shang, and Ren, arXiv:2505.07357 (12 May 2025), give analytical gradients for the renormalized single-excitation correction on top of the random-phase approximation. On water hexamers the energy difference between the low-energy isomers is almost unchanged when the geometries change from RPA to RPA+rSE. On the WATER27 set the mean absolute error of RPA+rSE falls from 0.91 kcal/mol on RPA geometries to 0.70 kcal/mol on RPA+rSE geometries. The record has no DOI.
+
+These authors already relaxed water clusters with RPA forces, filed as `tahirRpaWater2024`. That preprint said the hexamer does not show the reordering they report for the 25-molecule cluster. This letter is the gradient of the correction, and the hexamer spacing stays almost the same. It does not report 121 of 192 or 97 of 192, and it does not quote a TIP4P energy or a GFN2-xTB energy. Cite `tahirRpaRse2025` beside that preprint. Leave the CREST table on GFN2-xTB with xtb 6.7.1.
+
+## 2026-11-13 — Confined Lennard-Jones melting at 55 and 147 atoms
+
+Rocha, Dias, and Costa, Physical Review E 112, 014112 (2025), doi:10.1103/n6vd-ttx4, also arXiv:2502.00999, use parametric curves of the microcanonical entropy to classify phase transitions. One example is a Lennard-Jones cluster confined to a sphere. The sizes in that example are 55 and 147 particles. The quantities they report are a transition temperature and a latent heat. The low-temperature solid they describe is the Mackay icosahedron. The paper does not quote a Cambridge potential energy.
+
+The 55-atom cluster is confined. It is not the free LJ55 minimum used as a hit target. The 147-atom cluster is outside the manuscript sizes. This does not contradict the Cambridge energies, and a melting temperature is not a hop hit rate. No head-to-head at the manuscript sizes.
+
+Cite `rochaInflection2025`.
+
+## 2026-11-13 — Girifalco fullerenes, an interface hop, and a crystal-search platform
+
+Ren, Liang, Chen, and Wang, The Journal of Physical Chemistry Letters 16, 5855--5861 (2025), doi:10.1021/acs.jpclett.5c01355, search fullerene clusters with unbiased fuzzy global optimisation on the Girifalco potential. The cluster size runs from 11 to 400 molecules, and the fullerene size runs through C28, C36, C40, C60, C76, C84, and C96. Against the literature for (C60)N with N at most 150, they report new structures of lower energy at 129, 138, and 145 molecules.
+
+Chen, Liang, Chen, and Wang already search (C60)N on the PPR surface, filed as `chenFullerene2026`. This letter is the Girifalco potential. The 129, 138, and 145 count fullerene molecules. They are not Lennard-Jones atoms, so the new energies do not contradict the Cambridge hit targets, 121 of 192, or 97 of 192. Keep them out of the Lennard-Jones table. A comparison, if it is run, is (C60)N on the Girifalco potential.
+
+Chou, Patel, Amsler, and Wolverton, Physical Review Materials 9, 113801 (2025), doi:10.1103/zg25-qf5p, adapt minima hopping to tilt grain boundaries in SrTiO3. An empirical search proposes candidates, and density-functional calculations refine the lower ones. The abstract says the search finds more stable interfacial structures than earlier genetic-algorithm studies of several of those boundaries. The limitation they name is a Buckingham potential. The system is an oxide interface. It does not report a Lennard-Jones energy or a water energy. A head-to-head would be one of those grain boundaries. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST table.
+
+Song, She, Song, Shi, Xuan, and Cao, Computational Materials Science 275, 115049 (2026), doi:10.1016/j.commatsci.2026.115049, also arXiv:2604.21401, release GEWUM. The platform runs selective random structure search with universal machine-learning potentials. The case studies are Al--Sc--N, a P-62c phase of U3Si5, and ThH10 at 150 GPa. The selective-search paper is already filed as `songSelectiveSearch2026`. GEWUM is the workflow. The tests are crystals. They do not contradict the Cambridge hit targets or the sealed hexamer counts.
+
+Cite `renGirifalco2025`, `chouInterface2025`, and `songGewum2026`.
+
+## 2026-11-13 — The ASE tip moved, and the release tags did not
+
+ASE tag 3.29.0, dated 21 June 2026, is still the newest tag. The master tip moved on 13 November 2026 to a merge of a GUI performance branch. That commit does not change basin hopping, and it is not a release. AGOX tag v3.11.1, dated 4 February 2026, is still the newest tag. The dev tip is still the 5 May 2026 import fix for ASE 3.28. CREST's newest numbered release is still v3.0.2, and the master tip is still the 16 June 2026 CMake fix. pele is still v0.1.2, dated 12 October 2026. xtb v6.8.0, dated 5 November 2026, is still the newest release.
+
+Pin the open arms to ASE 3.29.0, AGOX v3.11.1, CREST 3.0.2, and pele 0.1.2. No bibliographic entry for this check: a tag date is not a DOI.
