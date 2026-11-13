@@ -115,3 +115,24 @@ At 8 molecules four control seeds stop at −297.794 kJ/mol and the radius arm h
 Until this fix `h2h_seed` wrote each angle-axis vector negated. NEWTIP places sites by the same active Rodrigues map as the chart, so a Wales–Hodges minimum written without the negation quenches in zero steps, at −628.3735 kJ/mol for (H₂O)₁₅. Every GMIN row above, and the `gmin-control` and `gmin-radius` rows, opened anneal's centres with each orientation inverted. On (H₂O)₁₅ seed 2000, GMIN's `CHECKD 0` gives −5.7538 kJ/mol for that block, against anneal's −13.1929. `h2h_seed` now writes the chart's vectors unchanged, and GMIN gives −13.192905 for anneal's −13.192876; the difference is the Coulomb prefactor.
 
 The new rows are in `rows.csv`. The medians of those rows are `summary-radius.csv`.
+
+## Same start
+
+`scripts/tip4p_h2h/enter_start.sh` reruns both GMIN arms from anneal's rigid start and adds anneal at 4 and 8 molecules. `h2h_seed` is built from `bf8c3fe1` with the start fix above; the anneal rows are code `anneal-bf8c3fe1`. The GMIN arms are `gmin-control-same-start` and `gmin-radius-same-start`, on the same GMIN binary and data files as the container-radius rows. Seeds, budget, references, hit rule, core, hostname and the `unshare --uts` session are as in that section, and everything ran in one session.
+
+For every size and seed, GMIN first evaluates the start block once with `CHECKD 0`, and the run stops if that energy is more than 0.001 kJ/mol from anneal's first evaluation. The largest difference over the 24 starts is 8.0e-5 kJ/mol. Both energies are in `starts-same-start.csv`. Each anneal run at 4 and 8 rewrites a start byte-identical to the one GMIN read. The (H₂O)₁₅ and (H₂O)₂₀ anneal column is the `anneal-shell` rows above. Their starts come from the same `random_tip4p_cluster` draw, unchanged since `1ba7417e`.
+
+| Size | anneal | `gmin-control-same-start` | `gmin-radius-same-start` | Control best, median | Radius best, median |
+| --- | --- | --- | --- | --- | --- |
+| (H₂O)₄ | 6/6 | 6/6 | 6/6 | −116.591 | −116.591 |
+| (H₂O)₈ | 6/6 | 5/6 | 3/6 | −305.519 | −305.465 |
+| (H₂O)₁₅ | 6/6 | 0/6 | 0/6 | −618.704 | −613.454 |
+| (H₂O)₂₀ | 3/6 | 0/6 | 0/6 | −851.472 | −848.055 |
+
+Anneal at 4 and 8 is `anneal-bf8c3fe1`, median 278.5 and 6526 calls. At 15 and 20 it is `anneal-shell`.
+
+At 8 molecules the inverted starts gave the control 1/6 and the radius arm 6/6. Anneal's starts give 5/6 and 3/6, and the misses stop at −297.794 or −305.411 kJ/mol in either arm. Six seeds do not separate the two containers at 8. At 15 and 20 the control's lowest energy is below the radius arm's on 10 of 12 seeds. With the start fixed, the radius still does not lift GMIN off 0/6 at 15 or 20.
+
+Some (H₂O)₁₅ walls in this session are 46–61 s against about 41 s elsewhere, with the same 2_000_000 calls. The counts and energies do not depend on wall time.
+
+The new rows are in `rows.csv`. The medians of those rows are `summary-same-start.csv`.
