@@ -619,3 +619,61 @@ Nikolaeva, Kulik, and Stein, ChemRxiv (21 October 2026), doi:10.26434/chemrxiv.1
 The hexamer table is unmodified GFN2-xTB in xtb 6.7.1. This preprint is a different parameter set, aimed at liquid densities. It does not recompute 121 of 192, 97 of 192, or the polished gaps, so it does not contradict those numbers. It does contradict any reading in which a refit of GFN2 for liquid water is the surface in that table. Keep the table on 6.7.1. Do not start a new CREST search on the refit.
 
 Cite `nikolaevaGfn2Water2026`.
+
+## 2026-11-13 — Journal version of the TIP4P water-cluster search
+
+Bhatt, Chacko, Bijewar, and Nagare, The European Physical Journal B 98, 31 (2025), doi:10.1140/epjb/s10051-025-00881-x, is the journal version of the preprint already filed as `bhattWaterClusters2024`. The arXiv record still has no journal-ref line. The DOI, the volume, and the article number were read from the Crossref record, and that record names the same four authors. The landing page says the search is an artificial bee colony, optimised first with TIP4P, then at least ten of the lowest structures relaxed with density functional theory. It says they found new lowest-energy structures for every size from 2 to 20 molecules, against structures reported earlier.
+
+The earlier note said the hexamer is outside the list of sizes where stacked pentagonal and cage-like structures lie below the stacked cubes. That list was the stacked-cube comparison. The journal sentence covers every size from 2 to 20, including the hexamer. It still does not quote a TIP4P energy below the Wales--Hodges minima, and it does not report 121 of 192 or 97 of 192. The new structures are the density-functional relaxations. Keep TIP4P, GFN2-xTB, and that density functional apart. Leave the CREST table on GFN2-xTB.
+
+The key `bhattWaterClusters2024` now carries the journal DOI beside the arXiv id.
+
+## 2026-11-13 — Coupled-cluster energies of small water clusters
+
+Petty, Fowler, Ryu, Glick, Rock, Wang, Tschumper, and Shields, The Journal of Physical Chemistry A 129, 9291--9302 (2025), doi:10.1021/acs.jpca.5c04923, benchmark relative energies of water clusters from the trimer through the heptamer. The geometries are a CCSD(T):MP2 many-body optimisation. The reference single points are CCSD(T)-F12b. Those structures then test DLPNO-CCSD(T). Rock and Tschumper are authors of the argon-tagged hexamer already filed as `rockArgonHexamer2026`.
+
+The abstract does not report 121 of 192 or 97 of 192, and it does not quote a TIP4P energy or a GFN2-xTB energy. A CCSD(T)-F12 ranking is another surface. Cite `pettyWaterClusters2025` beside the water section. Leave the CREST table on GFN2-xTB with xtb 6.7.1. A comparison counts only if both sides use these coupled-cluster geometries.
+
+## 2026-11-13 — Quantum heat capacity on MB-pol
+
+Hernández-Rojas, Calvo, and Wales, The Journal of Physical Chemistry Letters 17, 9231--9236 (2026), doi:10.1021/acs.jpclett.6c02032, study melting of water clusters on MB-pol. The abstract says the databases hold more than 800000 local minima for the 20-molecule cluster. Quantum effects change the main canonical melting features only weakly, and they suppress premelting. The octamer develops a convex intruder on the quantum microcanonical caloric curve that is absent classically.
+
+These authors already surveyed the hexamer and the octamer on MB-pol and on TIP4P/2005, filed as `hernandezRojasWater2026`. This paper is the heat capacity. It does not report a new global minimum, a TIP4P energy, or the sealed hit counts. Cite `hernandezRojasMelting2026` beside that landscape paper. An MB-pol caloric curve is not the GFN2 motif table.
+
+## 2026-11-13 — Gupta searches at 38, 55, and 98 atoms
+
+Wu, Lin, He, Chen, and Shi, Nanoscale 18, 14001--14012 (2026), doi:10.1039/d6nr01123c, compare the Gupta, Sutton-Chen, and Finnis-Sinclair potentials for Pt--Cu clusters at 13, 23, and 38 atoms. The abstract calls the search CDE. At 13 atoms the three potentials meet on one icosahedron. In their density-functional comparison the Gupta and Sutton-Chen candidates are nearly degenerate, and the Finnis-Sinclair candidate lies 0.665 eV higher. At 38 atoms a Sutton-Chen Pt19Cu19 structure is the lowest of the single points they report, and Finnis-Sinclair reaches a different compact basin. They say the empirical ranking and the density-functional ranking do not collapse into one order.
+
+The 38 in that comparison counts platinum and copper atoms. It is not the Lennard-Jones truncated octahedron. The 0.665 eV gap is a Pt--Cu density-functional difference. It does not contradict the Cambridge LJ38 energy. A head-to-head would be Pt--Cu at one of these sizes, on one of the three potentials, and not on LJ38.
+
+Wu and Zhang, Journal of Nanoparticle Research 27, 205 (2025), doi:10.1007/s11051-025-06399-8, compare two Gupta parameter sets for Co--Pt. The landing page says the optimisations cover 38-atom clusters, 98-atom clusters, and part of the 147-atom series, with an adaptive immune optimisation algorithm. At 98 atoms one parameter set favours truncated octahedra and Leary tetrahedra. The other favours Leary tetrahedra and icosahedra. Those sizes are Co--Pt on the Gupta potential. They do not contradict the Cambridge Lennard-Jones energies. A head-to-head would be Co--Pt on one Gupta parameter set, against that immune optimisation, and not on LJ38 or LJ98.
+
+Tsasse, Keyampi, Nana, and Zekeng, SPIN 15, 2550014 (2025), doi:10.1142/s2010324725500146, minimise molybdenum clusters on the Gupta potential and on the Sutton-Chen potential by quenching molecular dynamics. The abstract says most structures agree in point group, and that the dimer matches experiment. It gives no Lennard-Jones energy and no water energy. A head-to-head would be a molybdenum cluster on one of those potentials. It does not warrant a head-to-head on the Lennard-Jones preset.
+
+Yusuf, Duan, Chen, Ouyang, and Wang, Physical Chemistry Chemical Physics (2026), doi:10.1039/d6cp02742c, run molecular dynamics of 55-atom pure and bimetallic copper, silver, and gold clusters on the Gupta potential. The abstract is a melting study. The record has no volume or pages yet. The 55-atom cluster is a noble-metal cluster, not the Lennard-Jones icosahedron. The abstract does not report a new global-minimum energy. It does not contradict the Cambridge energy at 55 atoms, and it does not warrant a head-to-head on the hop.
+
+Cite `wuPtcu2026`, `wuCopt2026`, `tsasseMolybdenum2025`, and `yusufGuptaMelting2026`.
+
+## 2026-11-13 — Ordering and gold searches away from the preset
+
+Neumann, Margraf, Telari, Reuter, and Bruix, The Journal of Chemical Physics 164, 074104 (2026), doi:10.1063/5.0304275, add an optimal-exchange step to a global optimisation of PtAu nanoparticles. The abstract says the lowest chemical ordering changes the preferred shape, from high symmetry in the pure particles to distorted shapes at intermediate composition. The energy is an empirical surrogate. Telari is an author of the silver--copper chart filed as `settemAgcu2026`. This paper is platinum--gold. It gives no Lennard-Jones energy. A head-to-head would be a PtAu particle on that surrogate. It does not warrant a head-to-head on LJ38.
+
+Elsborg, Hovmand, and Bhowmik, ACS Materials Au 6, 696--704 (2026), doi:10.1021/acsmaterialsau.5c00224, train a reinforcement-learning agent to swap atoms on a fixed icosahedron. The abstract says the agent recovers a previously established Ag--Au ground state, and that the same policy can be tried at an unseen size. The shape is held fixed. This is not the manuscript's geometric move library. It does not contradict the Cambridge hit targets, and it does not warrant a head-to-head on the Lennard-Jones preset.
+
+Rodríguez-Kessler, Rodríguez-Domínguez, and Muñoz-Castro, Journal of Nanoparticle Research 28, 59 (2026), doi:10.1007/s11051-026-06580-7, search Pt\(_n\)V\(^-\) by basin hopping, for \(n\) from 1 to 13, and relax the candidates with density functional theory. The landing page names a \(C_{3v}\) pyramid as the global minimum of Pt\(_{10}\)V\(^-\). These authors already have the doped-cluster searches on file. This one is platinum--vanadium. It gives no Lennard-Jones energy and no water energy. A head-to-head would be this anion on one shared surface. It does not warrant a head-to-head on the sealed maps.
+
+Aguado, Álvarez-Zapatero, Kostko, and von Issendorff, Nature Communications 17, 5099 (2026), doi:10.1038/s41467-026-71649-9, assign structures of gold cluster anions from 17 to 69 atoms. The abstract says extensive structural searches, then a comparison of measured and simulated photoelectron spectra. Many of the structures are highly symmetric. The searches are gold anions. They do not contradict the Cambridge hit targets, 121 of 192, or 97 of 192. A head-to-head would be one of these anions. The minima-hopping gold papers already on file use other sizes and another potential.
+
+Li, Wang, Tian, Yang, Lei, Xu, Xu, and Gu, RSC Advances 16, 17470--17479 (2026), doi:10.1039/d5ra09961g, report an octahedral Au32 cage beside the icosahedral Au32 fullerene. The abstract says the cage can hold up to four extra gold atoms, and that a scan over the elements finds 30 stable hollow cages of that symmetry, including gold, silver, copper, boron, and silicon. It does not describe a basin hop, and it gives no Cambridge energy. Keep the cage out of the Lennard-Jones table. No head-to-head at the manuscript sizes.
+
+Cite `neumannPtAu2026`, `elsborgOrdering2026`, `rodriguezKesslerPtv2026`, `aguadoGoldAnions2026`, and `liAu32Cage2026`.
+
+## 2026-11-13 — A survey, iridium clusters, and sulfur-dioxide water
+
+Sanchez Alvarez and Calaminici, Journal of Computational Chemistry 46, e70243 (2025), doi:10.1002/jcc.70243, review global optimisation of molecular structures. The abstract covers conformations, crystal polymorphs, reaction pathways, and cluster structure prediction, and it separates stochastic methods from deterministic ones. It gives no Lennard-Jones hit rate and no water-hexamer count. Cite `sanchezAlvarezReview2025` as the survey. It does not contradict 121 of 192, 97 of 192, or the Cambridge energies, and it does not warrant a new head-to-head.
+
+Gong, Liu, Shen, Dong, Liu, Yuan, and Lu, Crystals 16, 243 (2026), doi:10.3390/cryst16040243, search iridium clusters from 9 to 30 atoms with CALYPSO. The abstract says the Lennard-Jones potential is then used to compute the binding energy. Those energies belong to the iridium clusters. They are not the Cambridge Lennard-Jones minima. The search stops at 30 atoms, so 38, 55, 75, 98, and 104 are absent. Cite `gongIridium2026`. Keep the binding energies out of the Lennard-Jones table. No head-to-head at the manuscript sizes.
+
+Modak and Chaudhury, Journal of the Indian Chemical Society 103, 102611 (2026), doi:10.1016/j.jics.2026.102611, title a gradient-directed parallel tempering strategy for global optimisation, applied to sulfur dioxide water clusters. The Crossref record gives the title, the volume, the issue, and the page, and no energy. The clusters contain sulfur dioxide. They are not the bare hexamer. The title does not contradict 121 of 192 or 97 of 192. A comparison, if it is run, is one of their sulfur dioxide water clusters. Do not retarget the CREST table.
+
+Cite `modakSulfurDioxide2026`.
