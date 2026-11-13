@@ -35,3 +35,19 @@ Anneal's `pot_s` is time inside `value_and_gradient`. CREST's inside time
 is the sum of the real xtb process walls. A CREST call is an MD step from
 the log plus one `* total energy` line from each `--opt` invocation.
 `outside_s` is the wall minus the inside time.
+
+Seeds 17001 and 17002 are the anneal arm after the covalent call wall.
+Their first anneal rows are kept and are not the rows below. Every CREST
+row is the original arm. All twelve geometries are intact. All twelve hit.
+
+| seed | anneal E / Eh | anneal wall / s | anneal inside / call | anneal outside / call | CREST E / Eh | CREST wall / s | CREST inside / call | CREST outside / call |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 17000 | −17.729688698035 | 10.476 | 2.608 ms | 0.012 ms | −17.729688627818 | 460.043 | 2.703 ms | 0.465 ms |
+| 17001 | −17.729672551197 | 10.439 | 2.600 ms | 0.010 ms | −17.729688563018 | 436.973 | 2.449 ms | 0.418 ms |
+| 17002 | −17.729685512974 | 10.482 | 2.610 ms | 0.010 ms | −17.729688648400 | 434.564 | 2.512 ms | 0.452 ms |
+| 17003 | −17.729688700714 | 10.821 | 2.694 ms | 0.011 ms | −17.729688643040 | 435.635 | 2.544 ms | 0.420 ms |
+| 17004 | −17.729688671575 | 10.593 | 2.637 ms | 0.011 ms | −17.729688630353 | 446.662 | 2.479 ms | 0.418 ms |
+| 17005 | −17.729688660029 | 10.506 | 2.615 ms | 0.011 ms | −17.729688660593 | 414.636 | 2.446 ms | 0.433 ms |
+
+Anneal is 4000 charged calls on every seed. CREST calls are 145202, 152380,
+146611, 146979, 154197 and 144033.
