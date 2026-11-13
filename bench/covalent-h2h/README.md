@@ -158,7 +158,7 @@ random Cartesian step does not make.
 
 ## Fix
 
-`0555fd23` refuses a quench that has shed a free atom. A free atom has no
+`945f1575` refuses a quench that has shed a free atom. A free atom has no
 neighbour inside the configuration's neighbour cutoff, and its gradient is
 exactly zero. The gradient is the one the record test already charges, so the
 check costs no extra calls. The fix adds no constant. If the chain itself
@@ -213,6 +213,212 @@ Not implemented:
 The anneal binary is `8f627b2f`. GMIN and ASE are as before. At six seeds,
 C10 P dropping to 4/6 is within the spread of the 96-seed table.
 
+The first panel's binaries were built before its commits were rebased onto
+develop, so `93e43c60`, `fbec7090` and `8f627b2f` name the pre-merge trees.
+
+## Second panel
+
+The second panel targets three gaps without system constants: P and G on
+Si20, the quench tolerance on Si13, and C10 and C20 without the 0.8
+container. P and G now take three general mechanisms. R is unchanged, and
+so are the Lennard-Jones, Morse, Gupta and TIP4P pins.
+
+### Mechanisms
+
+- Orbit completion as an allocator arm (`Config::orbit_arm`,
+  `ClusterMove::OrbitComplete`). R completes orbits on every new basin,
+  and that is what makes R fast on Si20. P and G offer the same
+  symmetrise-and-quench move to the depth-reward Thompson allocator, which
+  draws it as often as it pays. When no orbit group moves an atom, the arm
+  takes a single-point step.
+- The budget-window temperature (`budget_window`) replaces the 0.8 ε
+  Lennard-Jones calibration in P and G. It clamps between an escape floor
+  and a descent ceiling. The floor is the barrier the chain failed to cross
+  over the log of the remaining budget, and the ceiling is twice the gap to
+  the incumbent per degree of freedom.
+- The measured pair reach (`Config::pair_range`, `PairRange::measure`).
+  The harness bisects the separation past which the dimer's energy and
+  force are exactly zero. The probe is charged and timed. When that reach is
+  shorter than the container's diameter, a hop gathers each part of the
+  trial back within reach of the largest part, one bond away, instead of
+  pressing it into the sphere. The reaches are the cutoffs, 1.8 σ for SW and
+  2.1 Å for Tersoff C. Both are inside the container's diameter at every
+  size here, so gathering replaces the sphere on every P and G row.
+  Lennard-Jones and Morse have no reach. No preset sets the field.
+
+`ANNEAL_ADAPTIVE_CORE` is not on develop and was not tried.
+
+### Method
+
+The protocol is that of the first panel, with these changes:
+
+- Twelve seeds (2000-2011) per code. ASE has six (2000-2005) because a
+  4e5-call ASE miss takes about 3.5 minutes.
+- R, P and G come from `f235b67d`, on develop `2ea8d834`. "P v1" and "G v1"
+  are develop's own P and G at `2ea8d834`. R is the same build in both.
+- The quench tolerance is reported at two settings. anneal quenches to a
+  largest gradient component of 1e-6. The "5e-3" rows set `H2H_GTOL=5e-3`,
+  which loosens anneal's quench and record gate to GMIN's `SLOPPYCONV`.
+  "GMIN 1e-6" sets `SLOPPYCONV` and `TIGHTCONV` to 1e-6 (RMS).
+- 510 runs, serial on core 0, in one session with nothing else on the
+  machine, under `sudo unshare --uts` with hostname `bench`.
+- p-values are two-sided: Mann-Whitney U on calls to the hit, with a miss
+  counted as the budget, and Fisher's exact test on hits. They come from
+  `scripts/covalent_h2h/tables.py panel`.
+
+| system | code | hits | median calls | IQR | best | pot_s | outside_s |
+|---|---|---|---|---|---|---|---|
+| Si10 | anneal R | 12/12 | 758 | 378 | -13.796580 | 0.012 | 0.001 |
+| Si10 | anneal P v1 | 12/12 | 966 | 948 | -13.796580 | 0.016 | 0.001 |
+| Si10 | anneal P | 12/12 | 1,782 | 1,282 | -13.796580 | 0.028 | 0.002 |
+| Si10 | anneal G v1 | 12/12 | 1,336 | 1,050 | -13.796580 | 0.020 | 0.001 |
+| Si10 | anneal G | 12/12 | 1,599 | 1,126 | -13.796580 | 0.024 | 0.001 |
+| Si10 | anneal R 5e-3 | 12/12 | 667 | 558 | -13.796579 | 0.011 | 0.001 |
+| Si10 | anneal P 5e-3 | 12/12 | 879 | 634 | -13.796580 | 0.012 | 0.001 |
+| Si10 | anneal G 5e-3 | 12/12 | 802 | 639 | -13.796580 | 0.011 | 0.001 |
+| Si10 | GMIN 5e-3 | 12/12 | 624 | 673 | -13.796577 | 0.003 | 0.001 |
+| Si10 | GMIN 1e-6 | 12/12 | 1,118 | 1,343 | -13.796580 | 0.006 | 0.001 |
+| Si10 | ASE BH | 5/6 | 33,946 | 45,537 | -13.796580 | 1.258 | 16.863 |
+| Si13 | anneal R | 12/12 | 1,166 | 908 | -18.503998 | 0.024 | 0.002 |
+| Si13 | anneal P v1 | 12/12 | 1,467 | 1,430 | -18.503998 | 0.030 | 0.002 |
+| Si13 | anneal P | 12/12 | 1,006 | 516 | -18.503998 | 0.018 | 0.001 |
+| Si13 | anneal G v1 | 12/12 | 2,234 | 1,901 | -18.503998 | 0.043 | 0.003 |
+| Si13 | anneal G | 12/12 | 1,016 | 477 | -18.503998 | 0.018 | 0.001 |
+| Si13 | anneal R 5e-3 | 12/12 | 636 | 732 | -18.503996 | 0.013 | 0.001 |
+| Si13 | anneal P 5e-3 | 12/12 | 837 | 521 | -18.503997 | 0.014 | 0.001 |
+| Si13 | anneal G 5e-3 | 12/12 | 850 | 552 | -18.503997 | 0.015 | 0.001 |
+| Si13 | GMIN 5e-3 | 12/12 | 683 | 332 | -18.503990 | 0.005 | 0.001 |
+| Si13 | GMIN 1e-6 | 12/12 | 2,225 | 2,950 | -18.503998 | 0.014 | 0.003 |
+| Si13 | ASE BH | 1/6 | 100,000 | 0 | -18.503998 | 3.958 | 48.986 |
+| Si20 | anneal R | 12/12 | 4,454 | 8,120 | -30.187252 | 0.140 | 0.010 |
+| Si20 | anneal P v1 | 12/12 | 105,620 | 92,918 | -30.187252 | 3.260 | 0.216 |
+| Si20 | anneal P | 12/12 | 9,230 | 8,470 | -30.187252 | 0.279 | 0.015 |
+| Si20 | anneal G v1 | 12/12 | 59,803 | 92,803 | -30.187252 | 1.827 | 0.107 |
+| Si20 | anneal G | 12/12 | 8,207 | 5,942 | -30.187252 | 0.250 | 0.015 |
+| Si20 | anneal R 5e-3 | 12/12 | 7,256 | 4,132 | -30.187249 | 0.234 | 0.017 |
+| Si20 | anneal P 5e-3 | 12/12 | 6,142 | 7,934 | -30.187248 | 0.189 | 0.011 |
+| Si20 | anneal G 5e-3 | 12/12 | 7,276 | 8,440 | -30.187249 | 0.231 | 0.013 |
+| Si20 | GMIN 5e-3 | 12/12 | 5,900 | 8,598 | -30.187223 | 0.097 | 0.010 |
+| Si20 | GMIN 1e-6 | 12/12 | 9,601 | 8,902 | -30.187252 | 0.148 | 0.016 |
+| Si20 | ASE BH | 1/6 | 400,000 | 0 | -30.187251 | 20.426 | 206.492 |
+| C10 | anneal R | 12/12 | 16,696 | 22,517 | -55.089795 | 0.249 | 0.013 |
+| C10 | anneal P v1 | 9/12 | 62,863 | 66,196 | -55.089795 | 0.927 | 0.044 |
+| C10 | anneal P | 12/12 | 13,788 | 12,108 | -55.089795 | 0.205 | 0.010 |
+| C10 | anneal G v1 | 11/12 | 55,243 | 43,848 | -55.089795 | 0.798 | 0.041 |
+| C10 | anneal G | 12/12 | 15,504 | 14,944 | -55.089795 | 0.231 | 0.011 |
+| C10 | ASE BH | 0/6 | 100,000 | 0 | -54.279110 | 3.589 | 36.895 |
+| C20 | anneal R | 0/12 | 400,000 | 0 | -119.689551 | 11.663 | 0.861 |
+| C20 | anneal P v1 | 0/12 | 400,000 | 0 | -119.370222 | 11.711 | 0.896 |
+| C20 | anneal P | 4/12 | 400,000 | 35,812 | -120.698891 | 11.335 | 0.648 |
+| C20 | anneal G v1 | 0/12 | 400,000 | 0 | -119.762363 | 11.231 | 0.813 |
+| C20 | anneal G | 3/12 | 400,000 | 30,903 | -120.698891 | 11.258 | 0.657 |
+| C20 | ASE BH | 0/6 | 400,000 | 0 | -114.398096 | 19.906 | 173.299 |
+
+| system | comparison | median calls | hits | Mann-Whitney p | Fisher p |
+|---|---|---|---|---|---|
+| Si10 | anneal P vs anneal P v1 | 1,782 vs 966 | 12/12 vs 12/12 | 0.29 | 1 |
+| Si10 | anneal G vs anneal G v1 | 1,599 vs 1,336 | 12/12 vs 12/12 | 0.8 | 1 |
+| Si10 | anneal P vs anneal R | 1,782 vs 758 | 12/12 vs 12/12 | 0.019 | 1 |
+| Si10 | anneal G vs anneal R | 1,599 vs 758 | 12/12 vs 12/12 | 0.019 | 1 |
+| Si10 | anneal R vs GMIN 1e-6 | 758 vs 1,118 | 12/12 vs 12/12 | 0.1 | 1 |
+| Si10 | anneal P vs GMIN 1e-6 | 1,782 vs 1,118 | 12/12 vs 12/12 | 0.67 | 1 |
+| Si10 | anneal G vs GMIN 1e-6 | 1,599 vs 1,118 | 12/12 vs 12/12 | 0.75 | 1 |
+| Si10 | anneal R 5e-3 vs GMIN 5e-3 | 667 vs 624 | 12/12 vs 12/12 | 0.84 | 1 |
+| Si10 | anneal P 5e-3 vs GMIN 5e-3 | 879 vs 624 | 12/12 vs 12/12 | 0.29 | 1 |
+| Si10 | anneal G 5e-3 vs GMIN 5e-3 | 802 vs 624 | 12/12 vs 12/12 | 0.31 | 1 |
+| Si13 | anneal P vs anneal P v1 | 1,006 vs 1,467 | 12/12 vs 12/12 | 0.14 | 1 |
+| Si13 | anneal G vs anneal G v1 | 1,016 vs 2,234 | 12/12 vs 12/12 | 0.019 | 1 |
+| Si13 | anneal P vs anneal R | 1,006 vs 1,166 | 12/12 vs 12/12 | 1 | 1 |
+| Si13 | anneal G vs anneal R | 1,016 vs 1,166 | 12/12 vs 12/12 | 0.98 | 1 |
+| Si13 | anneal R vs GMIN 1e-6 | 1,166 vs 2,225 | 12/12 vs 12/12 | 0.11 | 1 |
+| Si13 | anneal P vs GMIN 1e-6 | 1,006 vs 2,225 | 12/12 vs 12/12 | 0.13 | 1 |
+| Si13 | anneal G vs GMIN 1e-6 | 1,016 vs 2,225 | 12/12 vs 12/12 | 0.13 | 1 |
+| Si13 | anneal R 5e-3 vs GMIN 5e-3 | 636 vs 683 | 12/12 vs 12/12 | 0.98 | 1 |
+| Si13 | anneal P 5e-3 vs GMIN 5e-3 | 837 vs 683 | 12/12 vs 12/12 | 0.11 | 1 |
+| Si13 | anneal G 5e-3 vs GMIN 5e-3 | 850 vs 683 | 12/12 vs 12/12 | 0.11 | 1 |
+| Si20 | anneal P vs anneal P v1 | 9,230 vs 105,620 | 12/12 vs 12/12 | 0.00012 | 1 |
+| Si20 | anneal G vs anneal G v1 | 8,207 vs 59,803 | 12/12 vs 12/12 | 0.00031 | 1 |
+| Si20 | anneal P vs anneal R | 9,230 vs 4,454 | 12/12 vs 12/12 | 0.11 | 1 |
+| Si20 | anneal G vs anneal R | 8,207 vs 4,454 | 12/12 vs 12/12 | 0.29 | 1 |
+| Si20 | anneal R vs GMIN 1e-6 | 4,454 vs 9,601 | 12/12 vs 12/12 | 0.11 | 1 |
+| Si20 | anneal P vs GMIN 1e-6 | 9,230 vs 9,601 | 12/12 vs 12/12 | 0.84 | 1 |
+| Si20 | anneal G vs GMIN 1e-6 | 8,207 vs 9,601 | 12/12 vs 12/12 | 0.84 | 1 |
+| Si20 | anneal R 5e-3 vs GMIN 5e-3 | 7,256 vs 5,900 | 12/12 vs 12/12 | 0.89 | 1 |
+| Si20 | anneal P 5e-3 vs GMIN 5e-3 | 6,142 vs 5,900 | 12/12 vs 12/12 | 0.8 | 1 |
+| Si20 | anneal G 5e-3 vs GMIN 5e-3 | 7,276 vs 5,900 | 12/12 vs 12/12 | 0.75 | 1 |
+| C10 | anneal P vs anneal P v1 | 13,788 vs 62,863 | 12/12 vs 9/12 | 0.00089 | 0.22 |
+| C10 | anneal G vs anneal G v1 | 15,504 vs 55,243 | 12/12 vs 11/12 | 0.0051 | 1 |
+| C10 | anneal P vs anneal R | 13,788 vs 16,696 | 12/12 vs 12/12 | 0.58 | 1 |
+| C10 | anneal G vs anneal R | 15,504 vs 16,696 | 12/12 vs 12/12 | 0.98 | 1 |
+| C20 | anneal P vs anneal P v1 | 400,000 vs 400,000 | 4/12 vs 0/12 | 0.037 | 0.093 |
+| C20 | anneal G vs anneal G v1 | 400,000 vs 400,000 | 3/12 vs 0/12 | 0.079 | 0.22 |
+| C20 | anneal P vs anneal R | 400,000 vs 400,000 | 4/12 vs 0/12 | 0.037 | 0.093 |
+| C20 | anneal G vs anneal R | 400,000 vs 400,000 | 3/12 vs 0/12 | 0.079 | 0.22 |
+
+### Findings
+
+- Si20: P and G go from 106k and 60k calls to 9.2k and 8.2k, p ≤ 3e-4.
+  GMIN takes 9.6k at 1e-6 (p = 0.84) and 5.9k at 5e-3, against 6.1k-7.3k
+  for anneal at 5e-3 (p ≥ 0.75). R stays faster at 4.5k, but the gap to R
+  is not significant at n=12 (p = 0.11 and 0.29).
+- Si13: at the same tolerance, the codes are level. At 5e-3, R takes 636
+  calls and GMIN 683 (p = 0.98). At 1e-6, R takes 1,166 and GMIN 2,225
+  (p = 0.11). The first panel's 1,154 against 612 compared two different
+  quench tolerances. G improves from 2,234 to 1,016 (p = 0.019).
+- Si10: P rises from 966 to 1,782 calls. That change is not significant
+  (p = 0.29), but P and G at 1e-6 are now behind R (p = 0.019).
+- C10: P goes from 9/12 hits at 63k calls to 12/12 at 13.8k, and G from
+  11/12 at 55k to 12/12 at 15.5k. Both are level with R. No container
+  constant is involved.
+- C20: P reaches the corannulene bowl, -120.698891 eV, in 4 of 12 runs,
+  and G in 3. No other arm reaches it: R, P v1 and G v1 go 0/12 and ASE
+  0/6. No run went below the bowl. The best energy per arm is R
+  -119.689551, P v1 -119.370222, G v1 -119.762363, P and G -120.698891, and
+  ASE -114.398096 eV. Against develop's P, the Fisher p is 0.093 for P and
+  0.22 for G.
+
+### Exploration
+
+These runs used seeds 2000-2011, or 2000-2047 where marked, on cores 2-7 in
+parallel. They count calls only; the numbers are not from the timed panel.
+
+- Si20, P, without each mechanism and with each alone (48 seeds): base
+  90k; orbit arm 25.5k; window 19.9k; both 11.0k; both plus gather 8.9k.
+  For G: base 82k; orbit arm 20.3k; window 17.6k; both 12.3k; both plus
+  gather 11.1k. Taking the energy lattice out of R moves its median from
+  4.5k to 7.8k.
+- C10 container, G with the old flags (24 seeds): 1.0x 50k, 22/24 hits;
+  0.8x 22.7k, 24/24; gather into the measured reach 31.1k, 24/24. With the
+  orbit arm and the window, every container from 0.7x to 1.2x lands at
+  15k-22k calls, so the constant no longer matters.
+- C20, what was blocking the bowl: with the orbit arm and window but inside
+  the sphere, P goes 0/6. The sphere was the obstacle. Gathering alone, or
+  gathering with the window, reaches it in at most 1 of 12 runs, and the
+  orbit arm is needed with it.
+- C20, population: CSA (`csa_cluster`, 8 or 16 members, 20k or 50k calls
+  per member) gave P 0-2/12 and G 2-3/12, no better than one walk (4/12
+  and 3/12).
+- C20, plateau restarts (`restart_on_stall` with `escape_on_stall` off, at
+  2e4 or 6e4 stalled calls): P 1-2/12 and G 5/12, against 4/12 and 3/12
+  without restarts. The G gain is within noise (Fisher p = 0.67), so
+  restarts are not on.
+- C20, R with gather: 1/12.
+
+### Pins and tests
+
+`scripts/covalent_h2h/pins.sh` prints sha1
+`419b06def1a0e01a152c13ccdb24cbd9919551cc` on develop `2ea8d834` and on
+`f235b67d`. `tests/resolved_config.rs` is unchanged: the new fields leave
+the resolved JSON when unset.
+
+On `f235b67d`, `cargo test --release` passes everything except three tests in
+`tests/feedback_identity_namespaces.rs` and
+`tests/feedback_namespace_controls.rs`, which fail identically on develop
+`2ea8d834`. `pytest pytest/` gives 1306 passed and 19 skipped. With
+ChemFit 4.0.0, `pytest pytest/test_chemfit*.py` gives 1005 passed and 4
+skipped, and `examples/chemfit_anneal.py` prints best loss
+2.347665788572983.
+
 ## Pins
 
 `scripts/covalent_h2h/pins.sh` prints, with every clock column removed:
@@ -227,7 +433,8 @@ Before and after the fix, the output's sha1 is
 
 ## Files
 
-- `before/`, `after/`: per-seed rows and summaries.
+- `before/`, `after/`: per-seed rows and summaries of the first panel.
+- `v2/`: per-seed rows and summaries of the second panel.
 - `reference.csv`: the unstopped reference runs.
 - `tc20-bowl.xyz`, `tc20-flake.xyz`: the C20 bowl and the best unbiased flake.
 - `c10-96/`: the 96-seed C10 rows.
