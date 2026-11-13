@@ -138,7 +138,9 @@ def test_tip4p_configs_are_rigid():
     assert comm.n_points == 10
     assert comm.calibrated_screen
     assert comm.shared_visit_policy == "recognition"
-    assert rec.depth_reward and rec.tabu_on_stall
+    atomic = Config.recommended(10)
+    assert atomic.depth_reward and atomic.tabu_on_stall
+    assert not rec.depth_reward and not rec.tabu_on_stall
     assert not comm.orbit_complete_on_new
     with pytest.raises(ValueError, match="at least 2"):
         Config.communicating_tip4p(1)
