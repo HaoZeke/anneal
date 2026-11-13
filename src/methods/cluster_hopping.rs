@@ -48,8 +48,8 @@ use crate::screen::Screen;
 
 mod binary_geometry;
 mod config;
-mod general;
 mod cycles;
+mod general;
 #[cfg(test)]
 mod mackay_cap_tests;
 mod moves;
@@ -4620,9 +4620,7 @@ where
                 if energy.is_finite()
                     && relaxed.len() == x.len()
                     && quench_is_sane(cfg, energy, relaxed.view())
-                    && best_plane
-                        .as_ref()
-                        .is_none_or(|(held, _)| energy < *held)
+                    && best_plane.as_ref().is_none_or(|(held, _)| energy < *held)
                 {
                     best_plane = Some((energy, relaxed));
                 }
@@ -5610,7 +5608,9 @@ where
             ratios[rep]
         };
         let mut temperature = single * scale;
-        if cfg.general_collective && let Some(spread) = general_taboo.spread() {
+        if cfg.general_collective
+            && let Some(spread) = general_taboo.spread()
+        {
             let floor = 0.25 * cfg.temperature;
             let cap = 4.0 * cfg.temperature;
             temperature = spread.clamp(floor, cap);
@@ -6199,8 +6199,7 @@ where
                             break;
                         }
                         let (raw, _) = relax(ledger, candidate.view(), 0);
-                        if raw.is_finite()
-                            && best_swap.as_ref().is_none_or(|(held, _)| raw < *held)
+                        if raw.is_finite() && best_swap.as_ref().is_none_or(|(held, _)| raw < *held)
                         {
                             best_swap = Some((raw, candidate));
                         }
@@ -7436,7 +7435,10 @@ where
             }
         }
         if cfg.general_collective && accept && !unquenched {
-            let species = cfg.species.clone().unwrap_or_else(|| vec![0; x_new.len() / 3]);
+            let species = cfg
+                .species
+                .clone()
+                .unwrap_or_else(|| vec![0; x_new.len() / 3]);
             if general_taboo.forbids(e_new, x_new.view(), &species) {
                 accept = false;
             } else {

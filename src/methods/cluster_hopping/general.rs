@@ -173,16 +173,15 @@ impl FingerprintTaboo {
             }
             return;
         }
-        if self.seats.len() >= 24 {
-            if let Some(worst) = self
+        if self.seats.len() >= 24
+            && let Some(worst) = self
                 .seats
                 .iter()
                 .enumerate()
                 .max_by(|(_, left), (_, right)| left.energy.total_cmp(&right.energy))
                 .map(|(index, _)| index)
-            {
-                self.seats.remove(worst);
-            }
+        {
+            self.seats.remove(worst);
         }
         self.seats.push(Seat { energy, soap });
     }

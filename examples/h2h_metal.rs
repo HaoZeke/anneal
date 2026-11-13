@@ -250,7 +250,7 @@ fn config(spec: &Spec) -> Config {
     // Empty leaves every prior on. `0` turns the five priors off.
     // A comma list turns off the named ones: soap, reseed, growth,
     // core, motif. The plane move stays off unless H2H_GENERAL=1.
-    if let Some(text) = std::env::var("H2H_PRIORS").ok() {
+    if let Ok(text) = std::env::var("H2H_PRIORS") {
         let text = text.trim();
         let all_off = text == "0" || text == "none";
         let listed = |name: &str| all_off || text.split(',').any(|token| token.trim() == name);
@@ -270,7 +270,7 @@ fn config(spec: &Spec) -> Config {
             cfg.prior_motif = false;
         }
     }
-    if std::env::var("H2H_GENERAL").ok().as_deref() == Some("1") {
+    if std::env::var("H2H_GENERAL").is_ok_and(|value| value == "1") {
         cfg.general_collective = true;
     }
     cfg
