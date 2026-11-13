@@ -4750,8 +4750,12 @@ where
                     (Vec::new(), Vec::new())
                 };
                 let mut best_alt: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
+                // The probe is not the chain ledger. A higher seed must not
+                // spend the budget the descent is still using, or the hops
+                // after the miss are a different search.
+                let mut probe = Ledger::new(65_536);
                 for source in sources {
-                    if ledger.remaining() == 0 {
+                    if probe.remaining() == 0 {
                         break;
                     }
                     let grown = crate::lattice::candidate(source, best_state.view(), n_atoms, &mut side);
@@ -4760,17 +4764,17 @@ where
                     } else {
                         grown
                     };
-                    let (mut eq, mut xq) = relax(ledger, grown.view(), cfg.relax_steps);
+                    let (mut eq, mut xq) = relax(&mut probe, grown.view(), cfg.relax_steps);
                     if two && quench_is_sane(cfg, eq, xq.view()) {
                         let mut gained = true;
                         let mut passes = 0;
-                        while gained && passes < 2 && ledger.remaining() > 0 {
+                        while gained && passes < 2 && probe.remaining() > 0 {
                             gained = false;
                             passes += 1;
                             let mut tried = 0usize;
                             'pairs: for &i in &group_a {
                                 for &j in &group_b {
-                                    if ledger.remaining() == 0 || tried >= 400 {
+                                    if probe.remaining() == 0 || tried >= 400 {
                                         break 'pairs;
                                     }
                                     tried += 1;
@@ -4778,7 +4782,7 @@ where
                                     for axis in 0..3 {
                                         swapped.swap(3 * i + axis, 3 * j + axis);
                                     }
-                                    let (alt_e, alt_x) = relax(ledger, swapped.view(), cfg.relax_steps);
+                                    let (alt_e, alt_x) = relax(&mut probe, swapped.view(), cfg.relax_steps);
                                     if quench_is_sane(cfg, alt_e, alt_x.view()) && alt_e < eq - 1e-6 {
                                         eq = alt_e;
                                         xq = alt_x;
@@ -4793,7 +4797,7 @@ where
                     }
                     let gradient = record_quenched_answer(
                         cfg,
-                        ledger,
+                        &mut probe,
                         &mut grad,
                         eq,
                         xq.view(),
@@ -4816,7 +4820,7 @@ where
                 // miss leaves the chain and its later calls where they were.
                 if frac_422 >= 0.15 && frac_421 < 0.20 {
                     for _ in 0..4 {
-                        if ledger.remaining() == 0 {
+                        if probe.remaining() == 0 {
                             break;
                         }
                         let twisted = crate::packing::propose_twin(
@@ -4824,13 +4828,13 @@ where
                             n_atoms,
                             &mut side,
                         );
-                        let (eq, xq) = relax(ledger, twisted.view(), cfg.relax_steps);
+                        let (eq, xq) = relax(&mut probe, twisted.view(), cfg.relax_steps);
                         if !quench_is_sane(cfg, eq, xq.view()) {
                             continue;
                         }
                         let gradient = record_quenched_answer(
                             cfg,
-                            ledger,
+                            &mut probe,
                             &mut grad,
                             eq,
                             xq.view(),
@@ -4850,6 +4854,7 @@ where
                 if let Some((eq, xq, gradient)) = best_alt
                     && eq < ledger.best - 1e-6
                 {
+                    ledger.charge_many(probe.spent());
                     let from_basin = identity.basin_of(best_state.view());
                     let reached = identity.basin_of(xq.view());
                     adopt_minimum!(
