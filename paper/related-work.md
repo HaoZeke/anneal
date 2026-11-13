@@ -717,3 +717,40 @@ Cite `renGirifalco2025`, `chouInterface2025`, and `songGewum2026`.
 ASE tag 3.29.0, dated 21 June 2026, is still the newest tag. The master tip moved on 13 November 2026 to a merge of a GUI performance branch. That commit does not change basin hopping, and it is not a release. AGOX tag v3.11.1, dated 4 February 2026, is still the newest tag. The dev tip is still the 5 May 2026 import fix for ASE 3.28. CREST's newest numbered release is still v3.0.2, and the master tip is still the 16 June 2026 CMake fix. pele is still v0.1.2, dated 12 October 2026. xtb v6.8.0, dated 5 November 2026, is still the newest release.
 
 Pin the open arms to ASE 3.29.0, AGOX v3.11.1, CREST 3.0.2, and pele 0.1.2. No bibliographic entry for this check: a tag date is not a DOI.
+
+## 2026-11-13 — New lowest-energy silicon clusters at four sizes
+
+Salazar-Barrientos, McCabe, Cummings, Rocha-Rinza, and Guevara-Vela, Theoretical Chemistry Accounts 145, 76 (17 August 2026), doi:10.1007/s00214-026-03329-2, search medium silicon clusters with a genetic algorithm on machine-learned potentials, then reoptimise candidates at PBE0/def2-TZVP and score them with DLPNO-CCSD(T). The potentials were trained on TPSSh/def2-TZVP and on r2SCAN-D3/def2-TZVP. The abstract says the workflow finds new lowest-energy structures for Si18, Si20, Si30, and Si32. The gap from the previously reported minimum shifts by 0.1 to 5.4 kcal/mol between cc-pVDZ and cc-pVTZ, and the Si20 gaps are 14.7 and 11.5 kcal/mol. That shift does not change the order. Density-functional candidates for Si17, Si22, Si23, and Si29 sit up to 20 kcal/mol above the literature minima once the correlated energies are used. The search files are doi:10.5281/zenodo.19494378.
+
+Shukla already builds Stillinger--Weber silicon from 32 to 60 atoms, filed as `shuklaSilicon2026`. These four new structures are not Stillinger--Weber energies, and they are not Cambridge Lennard-Jones energies. They do not contradict the hit targets, 121 of 192, or 97 of 192. A head-to-head is Si18, Si20, Si30, and Si32 on the DLPNO-CCSD(T) ranking. The Stillinger--Weber comparison stays the one already asked for. Keep the silicon energies out of the Lennard-Jones table.
+
+Cite `salazarSilicon2026` and `guevaraVelaSiliconData2026`.
+
+## 2026-11-13 — Doped silicon isomers
+
+Liu, Yang, Hao, Yang, and Wu, International Journal of Quantum Chemistry 126, e70193 (17 April 2026), doi:10.1002/qua.70193, search AgSi\(_n^-\) for \(n\) from 3 to 20 with a global search at mPW2PLYP. Through ten silicon atoms the silver sits on the surface of the pure silicon cluster. From eleven silicon atoms the silver replaces one silicon atom in the pure Si\(_{n+1}\) structure. The abstract compares the simulated photoelectron spectra with experiment. It gives no Lennard-Jones energy and no water energy.
+
+Borshch, Condensed Matter and Interphases 28, 376--387 (22 September 2026), doi:10.17308/kcmf.2026.28/13966, proposes a modification of the Wade--Mingos rule for silicon clusters that enclose a fourth-period metal. The demonstration is MeSi\(_{15}^-\) with Me = Sc or V, at four density functionals, compared with an experimental photoelectron spectrum. The abstract does not name basin hopping. It gives no Lennard-Jones energy.
+
+Neither paper contradicts the Cambridge hit targets, 121 of 192, or 97 of 192. A head-to-head would be AgSi\(_n^-\) on mPW2PLYP, or MeSi\(_{15}^-\) on one of the four functionals. Neither warrants a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `liuSilverSilicon2026` and `borshchSiliconMetal2026`.
+
+## 2026-11-13 — Nickel clusters by basin hopping, and two small clusters by active learning
+
+Saha, University of Illinois Chicago (15 July 2026), doi:10.25417/uic.32991926, searches nickel clusters from 2 to 150 atoms by basin hopping on a Gaussian approximation potential. The abstract says the search returns low-energy candidates at 149 sizes and compares them with structures reported earlier. It does not say those candidates lie below the earlier reports, and it gives no Lennard-Jones energy.
+
+Wen, Jiang, Li, Zhang, and Wang, The Journal of Chemical Physics 165, 094301 (1 September 2026), doi:10.1063/5.0349333, test three uncertainty estimates for a graph network, then use Monte Carlo dropout to drive active learning. The cluster tests are Ta\(_2\)N\(_3^-\) and LaSi\(_{24}\). The abstract reports an error on the potential, not a new global-minimum energy.
+
+Neither contradicts the Cambridge hit targets or the sealed hexamer counts. A head-to-head would be one nickel size on that Gaussian approximation potential, or Ta\(_2\)N\(_3^-\) or LaSi\(_{24}\) on the surface they train. Neither fills the open ASE, AGOX, and GMIN kit, and neither warrants a head-to-head on the Lennard-Jones preset or on the CREST table.
+
+Cite `sahaNickel2026` and `wenClusterUncertainty2026`.
+
+## 2026-11-13 — Allegro on the same grain boundaries, and Ag--Pd with Ag--Cu
+
+Chou, Wang, Yang, van Aken, Perry, Kozinsky, and Wolverton, npj Computational Materials 12, 374 (15 July 2026), doi:10.1038/s41524-026-02214-7, run minima hopping with the Allegro potential on SrTiO\(_3\) tilt grain boundaries. Chou and Wolverton already search those boundaries with a Buckingham potential, filed as `chouInterface2025`. This paper names the \(\Sigma 3(112)[110]\) boundary and checks the \(\Sigma 5(310)[001]\) boundary against experiment. The potential is Allegro. It does not report a Lennard-Jones energy or a water energy. It does not fill the open ASE basin-hopping arm. A head-to-head would be one of those grain boundaries on Allegro. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST table.
+
+Mubeen and Chen, Surfaces and Interfaces 98, 110424 (October 2026), doi:10.1016/j.surfin.2026.110424, title a dual proximal-policy search, on empirical potentials, for the global minimum of Ag--Pd and Ag--Cu nanoalloys. The Crossref record gives the title, the volume, and the page, and no energy. Mubeen and Chen already search Ag--Ni and Pt--Co, filed as `mubeenDrLClusters2026`. Settem and co-workers already map 38-atom Ag--Cu at finite temperature, filed as `settemAgcu2026`. This record is Ag--Pd and Ag--Cu, and it does not quote a Cambridge Lennard-Jones energy, so it does not contradict the hit targets, 121 of 192, or 97 of 192. A head-to-head would be Ag--Pd or Ag--Cu on the empirical potential the title names. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `chouAllegro2026` and `mubeenAgpd2026`.
+
