@@ -5871,7 +5871,10 @@ where
             } else {
                 0.0
             };
-            let mut bank = crate::methods::bank::Bank::new(population.max(1), dcut.max(0.0));
+            // No spread means one fingerprint. A zero threshold is not a
+            // distance, and the chain is left to finish its own descent.
+            if dcut > 0.0 {
+            let mut bank = crate::methods::bank::Bank::new(population.max(1), dcut);
             for (energy, state) in &seeded {
                 bank.offer(state.view(), *energy, |left, right| {
                     crate::methods::csa_cluster::coordination_histogram_distance(left, right, r1, r2)
@@ -5935,6 +5938,7 @@ where
                         break HopStop::of_closed(ledger);
                     }
                 }
+            }
             }
         }
         // A fresh cluster on this clock returns to the Mackay icosahedron
