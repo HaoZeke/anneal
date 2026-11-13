@@ -46,6 +46,7 @@ use crate::movekernel::{
 use crate::path::{StallDetector, interpolate_path};
 use crate::screen::Screen;
 
+mod acceptance_control;
 mod binary_geometry;
 mod config;
 mod cycles;
@@ -1740,8 +1741,12 @@ fn choose_arm<R: Rng + ?Sized>(
     depth_allocator: &crate::allocate::DepthAllocator,
     allocator: &mut FlooredThompson,
     n_arms: usize,
+    success: Option<&mut acceptance_control::AcceptanceControl>,
     rng: &mut R,
 ) -> usize {
+    if let Some(success) = success {
+        return success.select_arm(n_arms, rng);
+    }
     if let Some(features) = context {
         return contextual.select(features, rng);
     }
@@ -3239,6 +3244,7 @@ where
     // The escape scale starts at the move library's own amplitude, so a run
     // without feedback and one with it begin identically.
     let mut feedback = EscapeFeedback::new(1.0, cfg.temperature.max(1e-6));
+    let mut acceptance = acceptance_control::AcceptanceControl::new();
     if cfg.move_library.is_rigid_body() {
         // The shrink on every accept otherwise closes the window below
         // the barriers between rigid cages. The preset temperature is
@@ -3288,6 +3294,10 @@ where
         let initial_basin = identity.basin_of(x.view());
         feedback.register_driver_local_initial(initial_basin);
         here = Some(initial_basin);
+    }
+    if cfg.acceptance_control && e.is_finite() {
+        let basin = identity.basin_of(x.view());
+        acceptance.observe_structure(basin, e, x.view(), ledger.spent());
     }
     // The history's identity of the occupied minimum, numbered by the history
     // and not by `identity`: under a shared history the numbering is the
@@ -4422,6 +4432,49 @@ where
                 });
             }
         }
+        if cfg.acceptance_control
+            && acceptance.restart_due(ledger.spent(), cfg.restart_patience)
+            && ledger.remaining() > 0
+            && !ledger.target_reached()
+        {
+            let current = identity.basin_of(x.view());
+            if let Some((energy, state)) = acceptance.diverse_member(current) {
+                let gradient = grad
+                    .as_deref_mut()
+                    .and_then(|evaluate| evaluate(ledger, state.view()));
+                let ok = gradient.as_ref().is_some_and(|values| {
+                    answer_gradient_ok(cfg, values.view(), state.len())
+                });
+                e = energy;
+                x = state;
+                current_validation_gradient = gradient.filter(|_| ok);
+                soft_cache = None;
+                here = Some(identity.basin_of(x.view()));
+                acceptance.acknowledge_restart(ledger.spent());
+            } else {
+                let fresh =
+                    random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
+                let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
+                if energy.is_finite() && quench_is_sane(cfg, energy, relaxed.view()) {
+                    let gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        energy,
+                        relaxed.view(),
+                        &mut unconverged_records,
+                    );
+                    e = energy;
+                    x = relaxed;
+                    current_validation_gradient = gradient;
+                    soft_cache = None;
+                    let basin = identity.basin_of(x.view());
+                    here = Some(basin);
+                    acceptance.observe_structure(basin, e, x.view(), ledger.spent());
+                    acceptance.acknowledge_restart(ledger.spent());
+                }
+            }
+        }
         // A fresh cluster on this clock returns to the Mackay icosahedron
         // (Doye, J. Chem. Phys. 111, 8417 (1999)). When the climb is on,
         // the same clock is one directed leave, not that redraw. The hop
@@ -4453,6 +4506,9 @@ where
             // due and the leave runs on every following hop.
             charged_at_best = ledger.spent();
             directed_leave = true;
+            if cfg.acceptance_control {
+                acceptance.on_quiet_best();
+            }
         }
         let checkpoint_due = matches!(
             (checkpoint_interval, next_checkpoint),
@@ -5390,6 +5446,11 @@ where
             // acceptance rate toward one half without editing the preset.
             temperature *= rigid_factor;
         }
+        if cfg.acceptance_control {
+            // The proposal amplitude is separate. Folding this factor into
+            // the kick froze a short run once the temperature fell.
+            temperature *= acceptance.temperature_scale();
+        }
         // The coldest rung's temperature from the state it holds, which the
         // energy bias is built and filled at. Read here, where that rung's own
         // hop reads its temperature, so the reading is the same whichever rung
@@ -5535,6 +5596,7 @@ where
             &depth_allocator,
             &mut allocator,
             kernels.len(),
+            cfg.acceptance_control.then_some(&mut acceptance),
             rng,
         );
         // One unlike-pair exchange on a fixed cadence. The depth allocator
@@ -5600,7 +5662,11 @@ where
         } else {
             1.0
         };
-        let proposal_scale = escape * orient_scale;
+        let proposal_scale = if cfg.acceptance_control {
+            escape * orient_scale * acceptance.step_scale()
+        } else {
+            escape * orient_scale
+        };
         // Ordinary hops: scale the library move by the escape feedback. Soft
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
@@ -5896,6 +5962,7 @@ where
                     &depth_allocator,
                     &mut allocator,
                     kernels.len(),
+                    cfg.acceptance_control.then_some(&mut acceptance),
                     rng,
                 );
                 if may_idle(&kernels[k2].name()) {
@@ -6824,6 +6891,14 @@ where
             if biased > e_new - e {
                 accept = false;
             }
+        }
+        if cfg.acceptance_control {
+            let _from_id = identity.basin_of(x.view());
+            let to_id = identity.basin_of(x_new.view());
+            acceptance.observe_acceptance(accept);
+            let novel = acceptance.observe_structure(to_id, e_new, x_new.view(), ledger.spent());
+            let improved = e_new < e - 1e-12;
+            acceptance.observe_arm(k, accept && (improved || novel));
         }
         if accept {
             accepted += 1;
@@ -9104,6 +9179,7 @@ mod tests {
                 &depth,
                 &mut thompson,
                 n_arms,
+                None,
                 &mut rng,
             );
             let expect = twin.random_range(0..n_arms);
@@ -9130,6 +9206,7 @@ mod tests {
                 &depth,
                 &mut thompson,
                 n_arms,
+                None,
                 &mut posterior_rng,
             );
             let via_posterior = depth.select(&mut direct_rng);
@@ -9152,6 +9229,7 @@ mod tests {
                 &depth,
                 &mut thompson,
                 n_arms,
+                None,
                 &mut left,
             ));
             posterior_seq.push(depth.select(&mut right));

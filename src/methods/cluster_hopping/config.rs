@@ -994,6 +994,13 @@ pub struct Config {
     /// one Mackay cap before the walk. Off for Lennard-Jones and for
     /// short-ranged Morse, which keeps those call counts unchanged.
     pub long_ranged: bool,
+    /// Adapt the step, the acceptance temperature, and the move choice from
+    /// the run's own acceptance, and restart from a deduplicated population
+    /// of basin fingerprints when that population stops growing.
+    ///
+    /// Off in the recommended preset. A search that leaves it off draws the
+    /// same numbers and charges the same evaluations.
+    pub acceptance_control: bool,
     /// Extra relaxation steps spent polishing a new best to share tolerance.
     ///
     /// Screened hopping's economy is that almost no hop is fully relaxed, so
@@ -1565,6 +1572,7 @@ impl Config {
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
             trace_quenched: false,
             long_ranged: false,
+            acceptance_control: false,
             polish_records: 0,
             surrogate_tolerance: 0.5,
             delayed_acceptance: false,

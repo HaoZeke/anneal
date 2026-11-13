@@ -2,7 +2,8 @@
 # Copyright (c) anneal developers
 """Serial GMIN against the recommended preset on Cambridge Morse clusters.
 
-Systems are M38 and M55 at rho = 6 and rho = 14, and M80 at rho = 14.
+Systems are the original M38, M55, and M80 rows, plus M30, M45, M60,
+M70, and M80 at rho = 3, 6, 10, and 14.
 Short range is the hard case, so rho = 14 is listed first. Six seeds,
 the same list on both arms. Within a system the (seed, arm) pairs are
 shuffled. A hit is a quenched energy within 0.001 of the Cambridge
@@ -32,6 +33,25 @@ SYSTEMS = (
     ("m80r14", 80, 14.0, 4_000_000, -340.811371),
     ("m38r6", 38, 6.0, 400_000, -157.477108),
     ("m55r6", 55, 6.0, 1_000_000, -250.286609),
+    ("m30r3", 30, 3.0, 400_000, -177.578647),
+    ("m30r6", 30, 6.0, 400_000, -118.432844),
+    ("m30r10", 30, 10.0, 400_000, -108.571179),
+    ("m30r14", 30, 14.0, 400_000, -106.835790),
+    ("m45r3", 45, 3.0, 1_000_000, -318.660653),
+    ("m45r6", 45, 6.0, 1_000_000, -192.954739),
+    ("m45r10", 45, 10.0, 1_000_000, -176.665997),
+    ("m45r14", 45, 14.0, 1_000_000, -174.511633),
+    ("m60r3", 60, 3.0, 1_000_000, -470.448485),
+    ("m60r6", 60, 6.0, 1_000_000, -273.341243),
+    ("m60r10", 60, 10.0, 1_000_000, -247.785988),
+    ("m60r14", 60, 14.0, 1_000_000, -244.579066),
+    ("m70r3", 70, 3.0, 1_000_000, -577.739782),
+    ("m70r6", 70, 6.0, 1_000_000, -325.887749),
+    ("m70r10", 70, 10.0, 1_000_000, -296.412149),
+    ("m70r14", 70, 14.0, 1_000_000, -292.462856),
+    ("m80r3", 80, 3.0, 4_000_000, -690.577890),
+    ("m80r6", 80, 6.0, 4_000_000, -378.333471),
+    ("m80r10", 80, 10.0, 4_000_000, -344.911381),
 )
 PAPER_BUDGETS = {name: budget for name, _n, _rho, budget, _ref in SYSTEMS}
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
