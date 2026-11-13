@@ -80,6 +80,19 @@ rule ptcu_h2h:
         """
 
 
+# GMIN against the recommended preset on Cambridge Morse clusters.
+# Not part of `rule all`. Run it by name:
+#   snakemake -s workflow/Snakefile morse_h2h
+rule morse_h2h:
+    output:
+        "bench/morse-h2h/results.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/morse_h2h/enter_bench.sh
+        """
+
+
 # GMIN against the paper preset at the paper force-call budgets.
 # Not part of `rule all`. Run it by name:
 #   snakemake -s workflow/Snakefile gmin_h2h
