@@ -1258,21 +1258,113 @@ fn repair(x: &mut Array1<f64>, n: usize, min_sep: f64) {
 }
 
 /// Shortest pair distance in a 3N Cartesian state.
+///
+/// The square root is taken once, on the smallest square. Square root is
+/// monotonic on the non-negative reals, and a NaN square does not replace a
+/// finite one, so this is the same value as taking the square root of every
+/// pair and keeping the lesser result.
 pub fn min_pair_distance(x: ArrayView1<f64>) -> f64 {
+    minimum_pair_square(x).sqrt()
+}
+
+/// Whether any pair is at most `limit` apart.
+///
+/// This is `min_pair_distance(x) <= limit`. The scan compares squares with
+/// the greatest finite square whose square root is still at most `limit`,
+/// and it stops at the first such pair. Callers that only branch on the
+/// overlap gate use this instead of materialising the minimum.
+pub fn any_pair_within(x: ArrayView1<f64>, limit: f64) -> bool {
+    // A negative or NaN bound excludes every distance. `+∞` admits every
+    // value this scan returns, including the infinite distance of a state
+    // with fewer than two atoms.
+    if !(limit >= 0.0) {
+        return false;
+    }
+    if limit.is_infinite() {
+        return true;
+    }
+    let cap = largest_square_at_most(limit);
+    pair_square_hits(x, |square| square <= cap)
+}
+
+/// Greatest finite square whose square root is at most `limit`.
+///
+/// `limit` is finite and non-negative. Hardware square root is monotonic, so
+/// `square <=` this value is the same test as `square.sqrt() <= limit`.
+pub(crate) fn largest_square_at_most(limit: f64) -> f64 {
+    if limit == 0.0 {
+        return 0.0;
+    }
+    let mut cap = limit * limit;
+    if !cap.is_finite() {
+        return f64::MAX;
+    }
+    if !(cap.sqrt() <= limit) {
+        while cap > 0.0 && !(cap.sqrt() <= limit) {
+            cap = f64::from_bits(cap.to_bits() - 1);
+        }
+        return cap;
+    }
+    loop {
+        let up = f64::from_bits(cap.to_bits() + 1);
+        if !up.is_finite() || !(up.sqrt() <= limit) {
+            return cap;
+        }
+        cap = up;
+    }
+}
+
+fn minimum_pair_square(x: ArrayView1<f64>) -> f64 {
     let n = x.len() / 3;
     if n < 2 {
         return f64::INFINITY;
     }
     let mut best = f64::INFINITY;
+    let _ = pair_square_hits(x, |square| {
+        if square < best {
+            best = square;
+        }
+        false
+    });
+    best
+}
+
+/// Walks pair squares. `hit` returns whether the scan is finished.
+fn pair_square_hits(x: ArrayView1<f64>, mut hit: impl FnMut(f64) -> bool) -> bool {
+    let n = x.len() / 3;
+    if let Some(coords) = x.as_slice() {
+        return pair_square_hits_slice(coords, n, &mut hit);
+    }
     for i in 0..n {
         for j in (i + 1)..n {
             let dx = x[3 * i] - x[3 * j];
             let dy = x[3 * i + 1] - x[3 * j + 1];
             let dz = x[3 * i + 2] - x[3 * j + 2];
-            best = best.min((dx * dx + dy * dy + dz * dz).sqrt());
+            if hit(dx * dx + dy * dy + dz * dz) {
+                return true;
+            }
         }
     }
-    best
+    false
+}
+
+fn pair_square_hits_slice(coords: &[f64], n: usize, hit: &mut impl FnMut(f64) -> bool) -> bool {
+    for i in 0..n {
+        let base_i = 3 * i;
+        let xi = coords[base_i];
+        let yi = coords[base_i + 1];
+        let zi = coords[base_i + 2];
+        for j in (i + 1)..n {
+            let base_j = 3 * j;
+            let dx = xi - coords[base_j];
+            let dy = yi - coords[base_j + 1];
+            let dz = zi - coords[base_j + 2];
+            if hit(dx * dx + dy * dy + dz * dz) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Whether a Cartesian state contains only finite, separated atoms.
@@ -3523,7 +3615,11 @@ where
     let mut archive_walked = false;
     if cfg.move_library.is_rigid_body() {
         stall_archive.offer(e, x.view());
-        cage_archive.offer_cage(e, x.view(), rigid_cage_key(x.view(), cfg.n_points, cage_quantum));
+        cage_archive.offer_cage(
+            e,
+            x.view(),
+            rigid_cage_key(x.view(), cfg.n_points, cage_quantum),
+        );
     }
 
     let stop = loop {
@@ -3649,7 +3745,10 @@ where
         // that remain are spent on another cage the chain already quenched.
         // A chain that is still descending never enters, so its proposals
         // and its evaluation count stay what they were.
-        let cage_patience = cfg.restart_patience.saturating_mul(RIGID_CAGE_WINDOWS).max(1);
+        let cage_patience = cfg
+            .restart_patience
+            .saturating_mul(RIGID_CAGE_WINDOWS)
+            .max(1);
         if cfg.move_library.is_rigid_body()
             && !cage_walked
             && !kernels.is_empty()
@@ -3700,26 +3799,21 @@ where
             // into the same cage; this turn does not.
             if !ledger.stopped() && ledger.remaining() > 0 {
                 let angle = match cfg.move_library {
-                    MoveLibrary::RigidBody { rotate_step, .. } => {
-                        RIGID_SHELL_STEPS * rotate_step
-                    }
+                    MoveLibrary::RigidBody { rotate_step, .. } => RIGID_SHELL_STEPS * rotate_step,
                     _ => 0.0,
                 };
                 let mut turned: Option<(f64, Array1<f64>)> = None;
                 if angle > 0.0 {
                     for axis in 0..3 {
                         let trial = rigid_shell_turn(side_state.view(), cfg.n_points, axis, angle);
-                        let (quenched, relaxed) =
-                            relax(ledger, trial.view(), cfg.relax_steps);
+                        let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                         if quenched.is_finite()
                             && rigid_centres_clear(
                                 relaxed.view(),
                                 cfg.n_points,
                                 0.5 * cfg.min_separation,
                             )
-                            && turned
-                                .as_ref()
-                                .is_none_or(|(held, _)| quenched < *held)
+                            && turned.as_ref().is_none_or(|(held, _)| quenched < *held)
                         {
                             turned = Some((quenched, relaxed));
                         }
@@ -3732,7 +3826,8 @@ where
                     side_state = state;
                     let twist_end = ledger.spent().saturating_add(cage_patience);
                     while ledger.spent() < twist_end && hop_side!(side_rng, side_energy, side_state)
-                    {}
+                    {
+                    }
                 }
             }
             // The shell of the walker is one leave. When it comes up short,
@@ -3788,8 +3883,7 @@ where
                         for axis in 0..3 {
                             let trial =
                                 rigid_shell_turn(side_state.view(), cfg.n_points, axis, angle);
-                            let (quenched, relaxed) =
-                                relax(ledger, trial.view(), cfg.relax_steps);
+                            let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                             if quenched.is_finite()
                                 && rigid_centres_clear(
                                     relaxed.view(),
@@ -3810,7 +3904,8 @@ where
                         let twist_end = ledger.spent().saturating_add(cage_patience);
                         while ledger.spent() < twist_end
                             && hop_side!(side_rng, side_energy, side_state)
-                        {}
+                        {
+                        }
                     }
                 }
             }
@@ -5228,12 +5323,7 @@ where
                     if matches!(kernels[k], ClusterMove::EnergyLattice) {
                         energy_lattice_proposal(cfg, ledger, x.view(), rng)
                     } else {
-                        kernels[k].propose_scaled(
-                            x.view(),
-                            cfg.temperature,
-                            proposal_scale,
-                            rng,
-                        )
+                        kernels[k].propose_scaled(x.view(), cfg.temperature, proposal_scale, rng)
                     }
                 }
             }
@@ -10465,9 +10555,12 @@ mod descriptor_reuse_tests {
 #[cfg(test)]
 mod geometry_guards {
     use super::{
-        contain, min_pair_distance, recentre, separate_to_overlap_rule, structure_is_sane,
+        OVERLAP_CALL_LIMIT, any_pair_within, contain, min_pair_distance, recentre,
+        separate_to_overlap_rule, structure_is_sane,
     };
     use ndarray::Array1;
+    use rand::Rng;
+    use rand::SeedableRng;
 
     #[test]
     fn recentre_puts_the_centre_of_mass_at_the_origin() {
@@ -10486,6 +10579,53 @@ mod geometry_guards {
         let radius = (x[0] * x[0] + x[1] * x[1] + x[2] * x[2]).sqrt();
         assert!((radius - 1.0).abs() < 1e-12);
         assert!((x[3] - 0.2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_overlap_gate_matches_the_per_pair_square_root() {
+        fn reference(coords: &[f64]) -> f64 {
+            let n = coords.len() / 3;
+            let mut best = f64::INFINITY;
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let dx = coords[3 * i] - coords[3 * j];
+                    let dy = coords[3 * i + 1] - coords[3 * j + 1];
+                    let dz = coords[3 * i + 2] - coords[3 * j + 2];
+                    best = best.min((dx * dx + dy * dy + dz * dz).sqrt());
+                }
+            }
+            best
+        }
+        let mut rng = rand::rngs::StdRng::seed_from_u64(19);
+        for n in [2usize, 3, 8, 16, 40] {
+            for _ in 0..30 {
+                let coords: Vec<f64> = (0..3 * n).map(|_| rng.random_range(-2.0..2.0)).collect();
+                let point = Array1::from_vec(coords.clone());
+                let expect = reference(&coords);
+                let got = min_pair_distance(point.view());
+                assert_eq!(got.to_bits(), expect.to_bits(), "n={n}");
+                for limit in [0.0, 0.35, 0.90, 1.0, 1.122462048309373] {
+                    assert_eq!(
+                        any_pair_within(point.view(), limit),
+                        expect <= limit,
+                        "n={n} limit={limit} min={expect}"
+                    );
+                }
+            }
+        }
+        let on_gate = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.90, 0.0, 0.0]);
+        assert!(any_pair_within(on_gate.view(), OVERLAP_CALL_LIMIT));
+        assert_eq!(
+            min_pair_distance(on_gate.view()).to_bits(),
+            0.90_f64.to_bits()
+        );
+        let clear = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.90 + 1.0e-6, 0.0, 0.0]);
+        assert!(!any_pair_within(clear.view(), OVERLAP_CALL_LIMIT));
+        assert!(min_pair_distance(Array1::zeros(0).view()).is_infinite());
+        assert!(!any_pair_within(
+            Array1::zeros(0).view(),
+            OVERLAP_CALL_LIMIT
+        ));
     }
 
     #[test]

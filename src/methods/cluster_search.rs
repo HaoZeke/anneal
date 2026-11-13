@@ -18,6 +18,8 @@
 use crate::methods::cluster_hopping::OVERLAP_CALL_LIMIT;
 #[cfg(test)]
 use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
+use crate::methods::cluster_hopping::any_pair_within;
+#[cfg(test)]
 use crate::methods::cluster_hopping::min_pair_distance;
 use crate::methods::cluster_hopping::separate_contacts;
 #[cfg(any(feature = "bank-rpc", test))]
@@ -223,6 +225,10 @@ fn overlap_rejection_step(
     // that step is handed to the potential.
     let n = point.len() / 3;
     let mut gradient = Array1::zeros(point.len());
+    // Far pairs cannot sit on the overlap gate. The cap is the greatest
+    // square whose root is still at most the call limit, so skipping them
+    // leaves the same gradient as the square-root test.
+    let overlap_cap = crate::methods::cluster_hopping::largest_square_at_most(OVERLAP_CALL_LIMIT);
     for i in 0..n {
         for j in (i + 1)..n {
             let mut delta = [0.0; 3];
@@ -230,6 +236,9 @@ fn overlap_rejection_step(
             for axis in 0..3 {
                 delta[axis] = point[3 * i + axis] - point[3 * j + axis];
                 square += delta[axis] * delta[axis];
+            }
+            if !(square <= overlap_cap) {
+                continue;
             }
             let distance = square.sqrt();
             if !distance.is_finite() || distance > OVERLAP_CALL_LIMIT {
@@ -300,7 +309,7 @@ where
         .iter()
         .zip(start.iter())
         .any(|(left, right)| (left - right).abs() > 1.0e-8);
-    if !moved || min_pair_distance(point.view()) <= OVERLAP_CALL_LIMIT {
+    if !moved || any_pair_within(point.view(), OVERLAP_CALL_LIMIT) {
         return None;
     }
     let answered = charge_or_refuse_overlap(objective, led, stats, point.view(), anchor, true)?;
@@ -322,7 +331,7 @@ fn charge_or_refuse_overlap<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    if refuse_overlap && min_pair_distance(point) <= OVERLAP_CALL_LIMIT {
+    if refuse_overlap && any_pair_within(point, OVERLAP_CALL_LIMIT) {
         stats.overlap_rejected += 1;
         return overlap_rejection_step(point, anchor.as_ref())
             .map(|(energy, gradient)| (energy, gradient, false));
@@ -557,7 +566,7 @@ where
                        energy: f64,
                        point: ArrayView1<f64>|
          -> Option<Array1<f64>> {
-            if refuse_overlap && min_pair_distance(point) <= OVERLAP_CALL_LIMIT {
+            if refuse_overlap && any_pair_within(point, OVERLAP_CALL_LIMIT) {
                 stats.overlap_rejected += 1;
                 return None;
             }
@@ -695,7 +704,7 @@ where
         let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
             // A validation gradient is an evaluation. An overlap is not one:
             // charging it spends the budget on a geometry the potential refuses.
-            if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+            if cfg.species.is_some() && any_pair_within(x, OVERLAP_CALL_LIMIT) {
                 return None;
             }
             if !led.charge() {
@@ -711,7 +720,7 @@ where
         let mut energy_anchor = None;
         let mut energy_grad =
             |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
-                if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+                if cfg.species.is_some() && any_pair_within(x, OVERLAP_CALL_LIMIT) {
                     return None;
                 }
                 if !led.charge() {
@@ -754,7 +763,7 @@ where
         let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
             // A validation gradient is an evaluation. An overlap is not one:
             // charging it spends the budget on a geometry the potential refuses.
-            if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+            if cfg.species.is_some() && any_pair_within(x, OVERLAP_CALL_LIMIT) {
                 return None;
             }
             if !led.charge() {
@@ -765,7 +774,7 @@ where
         let mut energy_anchor = None;
         let mut energy_grad =
             |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
-                if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+                if cfg.species.is_some() && any_pair_within(x, OVERLAP_CALL_LIMIT) {
                     return None;
                 }
                 if !led.charge() {
@@ -844,7 +853,7 @@ where
         let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
             // A validation gradient is an evaluation. An overlap is not one:
             // charging it spends the budget on a geometry the potential refuses.
-            if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+            if cfg.species.is_some() && any_pair_within(x, OVERLAP_CALL_LIMIT) {
                 return None;
             }
             if !led.charge() {
@@ -855,7 +864,7 @@ where
         let mut energy_anchor = None;
         let mut energy_grad =
             |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
-                if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+                if cfg.species.is_some() && any_pair_within(x, OVERLAP_CALL_LIMIT) {
                     return None;
                 }
                 if !led.charge() {
@@ -2261,7 +2270,7 @@ mod tests {
         impl DifferentiableObjective<f64> for Gate {
             fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
                 self.calls.fetch_add(1, Ordering::Relaxed);
-                if min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+                if any_pair_within(x, OVERLAP_CALL_LIMIT) {
                     self.boundary_calls.fetch_add(1, Ordering::Relaxed);
                 }
                 let mut energy = 0.0;
@@ -2336,7 +2345,7 @@ mod tests {
 
         impl DifferentiableObjective<f64> for Spike {
             fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
-                if min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+                if any_pair_within(x, OVERLAP_CALL_LIMIT) {
                     self.boundary_calls.fetch_add(1, Ordering::Relaxed);
                 }
                 let mut energy = 0.0;

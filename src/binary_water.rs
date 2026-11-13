@@ -301,6 +301,44 @@ mod tests {
         assert!(found.charged <= 6_000, "charged {}", found.charged);
     }
 
+    /// One narrow-ratio seed. The overlap gate and the homotop sweep both
+    /// run, and a later edit of that bookkeeping has to keep this record.
+    #[test]
+    fn a_narrow_binary_seed_keeps_its_minimum_and_its_charge() {
+        let mut rng = StdRng::seed_from_u64(19);
+        let start = random_cluster_in_radius(16, 2.2, 0.9, &mut rng);
+        let problem = BinaryLennardJonesProblem {
+            n_a: 8,
+            n_b: 8,
+            epsilon_aa: 1.0,
+            epsilon_ab: 1.0,
+            epsilon_bb: 1.0,
+            sigma_aa: 1.0,
+            sigma_ab: 1.025,
+            sigma_bb: 1.05,
+        };
+        let found = search_binary(&problem, start.view(), 4_000, f64::NEG_INFINITY, 19, false);
+        let state_bits = found
+            .state
+            .iter()
+            .fold(0u64, |acc, value| acc ^ value.to_bits());
+        assert!(
+            !found.nve_unavailable,
+            "a narrow ratio has the label exchange"
+        );
+        assert_eq!(found.charged, 4_000, "the seed spends the budget");
+        assert_eq!(
+            found.energy.to_bits(),
+            13_856_643_164_768_419_003,
+            "energy bits moved to {}",
+            found.energy.to_bits()
+        );
+        assert_eq!(
+            state_bits, 54_942_895_740_690_160,
+            "the recorded geometry moved"
+        );
+    }
+
     #[test]
     fn stock_presets_keep_their_temperature_after_adaptation() {
         let recommended = Config::recommended(10);
