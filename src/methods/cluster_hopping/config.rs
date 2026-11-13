@@ -558,7 +558,7 @@ pub struct Config {
     ///
     /// Off on every preset. On (H2O)16 at 2_000_000 calls it took 19 of 36
     /// seeds to the global minimum against 14 without, Fisher p 0.34, and
-    /// lost none at (H2O)8, 12, 20 or 21. Absent from the resolved JSON
+    /// hit no fewer at (H2O)8, 12, 20 or 21. Absent from the resolved JSON
     /// while off.
     #[serde(skip_serializing_if = "is_false")]
     pub rigid_side_walk_hand_back: bool,
