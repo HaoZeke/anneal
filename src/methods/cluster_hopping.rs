@@ -3357,6 +3357,8 @@ where
     let mut kernels = search_kernels(cfg);
     let mut general_taboo = general::FingerprintTaboo::default();
     let mut collective = general::CollectiveShare::default();
+    let mut regrow_share = general::CollectiveShare::patient();
+    let mut regrow_temperature = general::MoveTemperature::default();
     // Which kernel to propose from is learned rather than drawn uniformly. The
     // useful move changes as the search moves through the landscape, so the
     // evidence is discounted and a decaying floor keeps every kernel reachable.
@@ -5924,6 +5926,98 @@ where
             if ledger.remaining() == 0 || ledger.target_reached() {
                 break HopStop::of_closed(ledger);
             }
+        }
+        // The labelled cut wins by handing the quench a compact body and an
+        // ordering the energy itself prefers. The same two steps, without a
+        // named body: grow onto the holes of the best-coordinated atoms, then
+        // put one species on the sites an unrelaxed swap ranks lowest. The
+        // family waits, and a miss widens the wait, so a search that was
+        // already descending is not spent on it.
+        if cfg.general_collective
+            && !cfg.move_library.is_rigid_body()
+            && !cfg.move_library.is_molecular()
+            && hops as u64 >= u64::from(regrow_share.stride())
+            && regrow_share.due(hops as u64)
+            && ledger.remaining() > 32
+        {
+            let species = cfg.species.clone().unwrap_or_else(|| vec![0; n]);
+            let mut score = |point: ArrayView1<f64>| -> Option<f64> {
+                if ledger.remaining() == 0 {
+                    return None;
+                }
+                let (value, _) = relax(ledger, point, 0);
+                value.is_finite().then_some(value)
+            };
+            if let Some(grown) = general::regrow_by_energy(x.view(), &mut score) {
+                let (group_a, group_b) = species_groups(&species);
+                let ordered = if group_a.len().saturating_mul(group_b.len()) > 1
+                    && group_a.len() * group_b.len() <= 320
+                {
+                    binary_geometry::reassign_by_site_energy(
+                        grown.view(),
+                        &group_a,
+                        &group_b,
+                        &mut score,
+                    )
+                    .unwrap_or(grown)
+                } else {
+                    let mut best = grown.clone();
+                    let mut best_value = score(best.view()).unwrap_or(f64::INFINITY);
+                    for candidate in general::homotop_candidates(grown.view(), &species) {
+                        let Some(value) = score(candidate.view()) else {
+                            break;
+                        };
+                        if value < best_value {
+                            best_value = value;
+                            best = candidate;
+                        }
+                    }
+                    best
+                };
+                if ledger.remaining() > 0 {
+                    let (energy, state) = relax(ledger, ordered.view(), cfg.relax_steps);
+                    if energy.is_finite()
+                        && state.len() == x.len()
+                        && quench_is_sane(cfg, energy, state.view())
+                    {
+                        let recorded = energy < ledger.best - 1e-6;
+                        if recorded {
+                            ledger.record(energy, state.view());
+                        }
+                        let temperature = regrow_temperature.value(cfg.temperature);
+                        let draw = rng.random::<f64>();
+                        let accepted = regrow_temperature.accept(energy - e, temperature, draw);
+                        if recorded || (accepted && energy < e) {
+                            general_taboo.remember(energy, state.view(), &species);
+                            x = state;
+                            e = energy;
+                            here = None;
+                            soft_cache = None;
+                            current_validation_gradient = None;
+                        }
+                        regrow_share.observe(energy < e, recorded);
+                    } else {
+                        regrow_share.observe(false, false);
+                    }
+                }
+            } else {
+                regrow_share.observe(false, false);
+            }
+            if ledger.remaining() == 0 || ledger.target_reached() {
+                break HopStop::of_closed(ledger);
+            }
+        }
+        if cfg.general_collective
+            && call_due
+            && let Some((energy, state)) = general_taboo.lowest()
+            && energy < e - 1e-6
+            && state.len() == x.len()
+        {
+            x = state;
+            e = energy;
+            here = None;
+            soft_cache = None;
+            current_validation_gradient = None;
         }
         let mut k = choose_arm(
             cfg,
