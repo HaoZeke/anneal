@@ -2254,6 +2254,25 @@ fn growth_held(held: Option<f64>, incumbent: f64, skipped: u32, n_points: usize)
     stall_growth_waits(held, incumbent) && (n_points < 98 || skipped < GROWTH_RETRY_LEAVES)
 }
 
+/// The arm whose acceptance sits nearest one half.
+///
+/// Arms with fewer than four trials are still noise. The choice is the
+/// index, so it draws nothing from the generator.
+fn acceptance_arm(tried: &[u32], yes: &[u32]) -> Option<usize> {
+    let mut best: Option<(usize, f64)> = None;
+    for index in 0..tried.len().min(yes.len()) {
+        if tried[index] < 4 {
+            continue;
+        }
+        let rate = yes[index] as f64 / tried[index] as f64;
+        let miss = (rate - RIGID_ACCEPT_TARGET).abs();
+        if best.as_ref().is_none_or(|(_, held)| miss < *held) {
+            best = Some((index, miss));
+        }
+    }
+    best.map(|(index, _)| index)
+}
+
 /// The arm a hop plays.
 ///
 /// A contextual decision, when one was built, stays in front of this choice:
@@ -4634,6 +4653,21 @@ where
     let mut reorder_misses = 0u32;
     let mut reorder_from = 0usize;
     let mut charged_at_best = ledger.spent();
+    // Calls charged when the incumbent energy last fell. The stall clock
+    // above is reset by every directed leave, so a half-budget plateau is
+    // this stamp, not that one.
+    let mut spent_at_record = ledger.spent();
+    // Set once a long quiet stretch has restarted the chain from a
+    // diverse population. Move scale and temperature then follow the
+    // acceptance rate. Both stay at one until then, so a chain that
+    // hits first is unchanged.
+    let mut plateau_restarted = false;
+    let mut plateau_temp = 1.0_f64;
+    let mut plateau_step = 1.0_f64;
+    let mut plateau_window = 0usize;
+    let mut plateau_yes = 0usize;
+    let mut arm_tried: Vec<u32> = Vec::new();
+    let mut arm_yes: Vec<u32> = Vec::new();
     // Minima separated by common-neighbour fractions. A stall in the
     // icosahedral packing can return to a lower minimum of another packing
     // the chain already quenched, instead of redrawing inside the same one.
@@ -5234,6 +5268,7 @@ where
         if ledger.best < best_seen - new_lowest {
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
+            spent_at_record = ledger.spent();
             hops_at_lowest = hops;
             csm_reseed_stamp = hops;
             cage_edit = false;
@@ -5777,6 +5812,129 @@ where
                     action: "reoccupy".to_owned(),
                     external_calls: 0,
                 });
+            }
+        }
+        // A quiet stretch of three quarters of the budget has not been
+        // cured by the directed leave. Restart from a fingerprint-diverse
+        // population: fresh quenches, deduplicated by the coordination
+        // histogram at the potential's own contact length, and the chain
+        // continues from the lowest member that does not match the
+        // incumbent. The move scale and the temperature then follow the
+        // acceptance rate. Nothing here reads a lattice or a motif, and a
+        // chain that sets a new lowest before the gate never enters.
+        let plateau_gap = (ledger.budget().saturating_mul(3) / 4).max(cfg.restart_patience.max(1));
+        if !plateau_restarted
+            && hops > 0
+            && ledger.spent().saturating_sub(spent_at_record) >= plateau_gap
+            && ledger.remaining() > 0
+            && !ledger.stopped()
+        {
+            plateau_restarted = true;
+            let mut side = StdRng::seed_from_u64(
+                (hops as u64)
+                    .wrapping_mul(0x9E37_79B9)
+                    ^ ledger.best.to_bits()
+                    ^ 0xB45E_0E17,
+            );
+            let r1 = cfg.min_separation * (1.35 / 0.85);
+            let r2 = cfg.min_separation * (1.70 / 0.85);
+            let mut seeded: Vec<(f64, Array1<f64>)> = Vec::new();
+            if let Some(state) = ledger.best_state.clone() {
+                seeded.push((ledger.best, state));
+            }
+            let population = crate::methods::csa_cluster::BankConfig::default().seeding;
+            for _ in 0..population {
+                if ledger.remaining() == 0 || ledger.stopped() {
+                    break;
+                }
+                let fresh = random_cluster(x.len() / 3, 0.7, cfg.min_separation, &mut side);
+                let (energy, state) = relax(ledger, fresh.view(), cfg.relax_steps);
+                if quench_is_sane(cfg, energy, state.view()) && state.len() == x.len() {
+                    seeded.push((energy, state));
+                }
+            }
+            let mut pair_sum = 0.0;
+            let mut pairs = 0usize;
+            for i in 0..seeded.len() {
+                for j in (i + 1)..seeded.len() {
+                    pair_sum += crate::methods::csa_cluster::coordination_histogram_distance(
+                        seeded[i].1.view(),
+                        seeded[j].1.view(),
+                        r1,
+                        r2,
+                    );
+                    pairs += 1;
+                }
+            }
+            let dcut = if pairs > 0 {
+                0.5 * pair_sum / pairs as f64
+            } else {
+                0.0
+            };
+            let mut bank = crate::methods::bank::Bank::new(population.max(1), dcut.max(0.0));
+            for (energy, state) in &seeded {
+                bank.offer(state.view(), *energy, |left, right| {
+                    crate::methods::csa_cluster::coordination_histogram_distance(left, right, r1, r2)
+                });
+            }
+            let incumbent = ledger.best_state.clone();
+            let mut choice: Option<(f64, Array1<f64>)> = None;
+            for member in bank.members() {
+                let same = incumbent.as_ref().is_some_and(|state| {
+                    crate::methods::csa_cluster::coordination_histogram_distance(
+                        member.state.view(),
+                        state.view(),
+                        r1,
+                        r2,
+                    ) <= dcut
+                });
+                if same {
+                    continue;
+                }
+                let replace = choice
+                    .as_ref()
+                    .is_none_or(|(energy, _)| member.energy < *energy);
+                if replace {
+                    choice = Some((member.energy, member.state.clone()));
+                }
+            }
+            if let Some((energy, state)) = choice {
+                let found_at = ledger.spent();
+                let gradient = record_quenched_answer(
+                    cfg,
+                    ledger,
+                    &mut grad,
+                    energy,
+                    state.view(),
+                    &mut unconverged_records,
+                );
+                if grad.is_none() || gradient.is_some() {
+                    let improved = energy < ledger.best - 1e-9;
+                    adopt_minimum!(
+                        energy,
+                        state,
+                        gradient,
+                        None,
+                        AdoptionHistory::Fresh,
+                        None,
+                        Some("plateau-restart"),
+                        hops
+                    );
+                    if improved && improvements.len() < 512 {
+                        improvements.push((hops, found_at, bias.n_basins(), energy));
+                    }
+                    if improved {
+                        charged_at_best = ledger.spent();
+                        spent_at_record = ledger.spent();
+                        best_seen = ledger.best;
+                    }
+                    soft_cache = None;
+                    basin_entry = None;
+                    quiet = 0;
+                    if ledger.target_reached() {
+                        break HopStop::of_closed(ledger);
+                    }
+                }
             }
         }
         // A fresh cluster on this clock returns to the Mackay icosahedron
@@ -6804,6 +6962,9 @@ where
             let cap = 4.0 * cfg.temperature;
             temperature = spread.clamp(floor, cap);
         }
+        if plateau_restarted {
+            temperature *= plateau_temp;
+        }
         if cfg.move_library.is_rigid_body() {
             // The preset temperature stays in its own energy unit. A rigid
             // water chart is not that unit, so a local factor moves the
@@ -7043,15 +7204,22 @@ where
             soft_cache = None;
             current_validation_gradient = None;
         }
-        let mut k = choose_arm(
-            cfg,
-            context.as_ref().map(|value| value.view()),
-            &mut contextual,
-            &depth_allocator,
-            &mut allocator,
-            kernels.len(),
-            rng,
-        );
+        let mut k = if let Some(arm) = plateau_restarted
+            .then(|| acceptance_arm(&arm_tried, &arm_yes))
+            .flatten()
+        {
+            arm
+        } else {
+            choose_arm(
+                cfg,
+                context.as_ref().map(|value| value.view()),
+                &mut contextual,
+                &depth_allocator,
+                &mut allocator,
+                kernels.len(),
+                rng,
+            )
+        };
         // One unlike-pair exchange on a fixed cadence. The depth allocator
         // drops the homotop once geometry moves pay more, and a binary
         // minimum is a chemical ordering as well as a geometry. Absent on a
@@ -7121,7 +7289,11 @@ where
         } else {
             1.0
         };
-        let proposal_scale = escape * orient_scale;
+        let proposal_scale = if plateau_restarted {
+            escape * orient_scale * plateau_step
+        } else {
+            escape * orient_scale
+        };
         // Ordinary hops: scale the library move by the escape feedback. Soft
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
@@ -8496,6 +8668,38 @@ where
             bias.set_height(height.height());
         }
         dial.observe(accept);
+        if plateau_restarted && !kernels.is_empty() {
+            if arm_tried.len() < kernels.len() {
+                arm_tried.resize(kernels.len(), 0);
+                arm_yes.resize(kernels.len(), 0);
+            }
+            if k < arm_tried.len() {
+                arm_tried[k] += 1;
+                if accept {
+                    arm_yes[k] += 1;
+                }
+            }
+            plateau_window += 1;
+            if accept {
+                plateau_yes += 1;
+            }
+            if plateau_window >= RIGID_ACCEPT_BLOCK {
+                let ratio = plateau_yes as f64 / plateau_window as f64;
+                let step_factor = if ratio > RIGID_ACCEPT_TARGET {
+                    RIGID_STEP_FACTOR
+                } else {
+                    1.0 / RIGID_STEP_FACTOR
+                };
+                plateau_step = (plateau_step * step_factor).clamp(0.05, 4.0);
+                if ratio < 0.25 {
+                    plateau_temp = (plateau_temp * RIGID_STEP_FACTOR).min(4.0);
+                } else if ratio > 0.75 {
+                    plateau_temp = (plateau_temp / RIGID_STEP_FACTOR).max(0.25);
+                }
+                plateau_window = 0;
+                plateau_yes = 0;
+            }
+        }
         if accept {
             accepted += 1;
             // Every accepted quench within the window is a candidate stage
