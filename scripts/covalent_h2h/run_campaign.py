@@ -347,7 +347,7 @@ def summarise(rows, references, revision, heads):
 def write_csv(path: Path, fields, rows) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -469,7 +469,7 @@ def main(argv: list[str]) -> int:
     write_csv(args.rows, ROW_FIELDS, rows)
     summary = summarise(rows, references, revision, heads)
     write_csv(args.summary, SUMMARY_FIELDS, summary)
-    writer = csv.DictWriter(sys.stdout, fieldnames=SUMMARY_FIELDS)
+    writer = csv.DictWriter(sys.stdout, fieldnames=SUMMARY_FIELDS, lineterminator="\n")
     writer.writeheader()
     writer.writerows(summary)
     return 0
