@@ -46,6 +46,7 @@ use crate::movekernel::{
 use crate::path::{StallDetector, interpolate_path};
 use crate::screen::Screen;
 
+mod binary_geometry;
 mod config;
 mod cycles;
 mod moves;
@@ -3551,6 +3552,11 @@ where
     let cage_quantum = cfg.min_separation / 50.0;
     let mut cage_walked = false;
     let mut archive_walked = false;
+    let mut binary_core_offered = false;
+    // Held until the walk finishes. Accepting a packing cut at the raw
+    // start replaces the chain with a local minimum the later hops would
+    // have left. The cut is kept when it still beats that incumbent.
+    let mut pending_cut: Option<(f64, Array1<f64>)> = None;
     if cfg.move_library.is_rigid_body() {
         stall_archive.offer(e, x.view());
         cage_archive.offer_cage(
@@ -3589,6 +3595,144 @@ where
         // and most of them have just taken a hop.
         if !hop_room(hops) {
             break HopStop::MaxHops;
+        }
+        // Labelled atomic clusters are offered close-packed cuts once:
+        // the n sites of an fcc lattice nearest an atom, an octahedral
+        // hole and a tetrahedral hole, plus the packings the motif growth
+        // already knows. Two species are ordered by homonuclear distance
+        // and by the collective swap ranking. The quenched cut is held
+        // and compared with the incumbent the walk actually reaches.
+        // Every evaluation is charged. Unlabelled and rigid runs never enter.
+        if !binary_core_offered
+            && !cfg.move_library.is_molecular()
+            && !cfg.move_library.is_rigid_body()
+            && let Some(species) = cfg.species.as_deref()
+            && species.len() == x.len() / 3
+            && species.len() >= 2
+        {
+            binary_core_offered = true;
+            let n_atoms = species.len();
+            let sigma = cfg.species_sigma.as_deref();
+            let mut radius_sum = 0.0;
+            let mut radius_count = 0.0;
+            let mut seen_labels = Vec::new();
+            for label in species {
+                if !seen_labels.contains(label) {
+                    seen_labels.push(*label);
+                    radius_sum += binary_geometry::label_radius(species, sigma, *label);
+                    radius_count += 1.0;
+                }
+            }
+            let nearest = if radius_count > 0.0 {
+                (radius_sum / radius_count).max(1e-6)
+            } else {
+                crate::lattice::nearest_neighbour_scale(x.view()).max(1e-6)
+            };
+            let mut grown = Vec::new();
+            for centre in [
+                binary_geometry::FccCentre::Atom,
+                binary_geometry::FccCentre::Octahedral,
+                binary_geometry::FccCentre::Tetrahedral,
+            ] {
+                grown.push(binary_geometry::fcc_cut(n_atoms, centre, nearest));
+            }
+            let mut side_rng = StdRng::seed_from_u64(0x0C10_5ED0);
+            for source in [
+                crate::lattice::Source::Named(crate::structure::Template::FaceCentredCubic),
+                crate::lattice::Source::Named(crate::structure::Template::Icosahedral),
+                crate::lattice::Source::Pentagonal,
+            ] {
+                grown.push(crate::lattice::candidate(
+                    source,
+                    x.view(),
+                    n_atoms,
+                    &mut side_rng,
+                ));
+            }
+            let mut probe = Ledger::new(ledger.remaining().max(1));
+            struct Side<'a> {
+                probe: &'a mut Ledger,
+                relax: Relax<'a>,
+                steps: usize,
+            }
+            impl binary_geometry::QuenchProbe for Side<'_> {
+                fn energy(&mut self, point: ArrayView1<f64>) -> Option<f64> {
+                    if self.probe.remaining() == 0 {
+                        return None;
+                    }
+                    let (value, _) = (self.relax)(self.probe, point, 0);
+                    value.is_finite().then_some(value)
+                }
+
+                fn quench(&mut self, point: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+                    if self.probe.remaining() == 0 {
+                        return None;
+                    }
+                    let (value, relaxed) = (self.relax)(self.probe, point, self.steps);
+                    value.is_finite().then_some((value, relaxed))
+                }
+            }
+            let mut best_cut: Option<(f64, Array1<f64>)> = None;
+            {
+                let mut side = Side {
+                    probe: &mut probe,
+                    relax,
+                    steps: cfg.relax_steps,
+                };
+                let mut arranged = Vec::new();
+                for candidate in grown {
+                    if side.probe.remaining() == 0 {
+                        break;
+                    }
+                    let placed = binary_geometry::place_smaller_inside(
+                        candidate.view(),
+                        species,
+                        |label| binary_geometry::label_radius(species, sigma, label),
+                    );
+                    if let Some(seeded) = binary_geometry::arrange(placed, species, &mut side) {
+                        arranged.push(seeded);
+                    }
+                }
+                arranged.sort_by(|left, right| left.0.total_cmp(&right.0));
+                // Exchange polish moves the ordering, not the packing. A cut
+                // whose quenched energy already sits above the refined best by
+                // more than the largest exchange gain seen cannot overtake it.
+                let mut best_gain = 0.0_f64;
+                for (energy, state) in arranged {
+                    if best_gain > 0.0
+                        && let Some((held, _)) = &best_cut
+                        && energy - best_gain >= *held - 1e-9
+                    {
+                        break;
+                    }
+                    if side.probe.remaining() == 0 {
+                        if best_cut.as_ref().is_none_or(|(held, _)| energy < *held) {
+                            best_cut = Some((energy, state));
+                        }
+                        break;
+                    }
+                    let seeded_energy = energy;
+                    if let Some(refined) =
+                        binary_geometry::refine(energy, state, species, &mut side)
+                    {
+                        let gain = (seeded_energy - refined.0).max(0.0);
+                        if gain > best_gain {
+                            best_gain = gain;
+                        }
+                        if refined.0.is_finite()
+                            && best_cut.as_ref().is_none_or(|(held, _)| refined.0 < *held)
+                        {
+                            best_cut = Some(refined);
+                        }
+                    }
+                }
+            }
+            let before = ledger.spent();
+            ledger.charge_many(probe.spent());
+            // The probe is not a quiet stretch of the chain. The stall
+            // clock stays where the walker's own quenches left it.
+            charged_at_best = charged_at_best.saturating_add(ledger.spent().saturating_sub(before));
+            pending_cut = best_cut;
         }
         // A rigid quench creeps by far less than an isomer gap. Treating
         // that creep as a new lowest restarts the stall clock forever, so
@@ -8058,6 +8202,28 @@ where
             }
         }
     };
+
+    if let Some((energy, state)) = pending_cut
+        && energy < ledger.best - 1e-6
+        && quench_is_sane(cfg, energy, state.view())
+    {
+        let gradient = record_quenched_answer(
+            cfg,
+            ledger,
+            &mut grad,
+            energy,
+            state.view(),
+            &mut unconverged_records,
+        );
+        // The budget may already be spent, so the record tolerance cannot
+        // be checked. The polished energy is still an improvement.
+        if gradient.is_none() && energy < ledger.best {
+            ledger.record(energy, state.view());
+        }
+        if energy <= ledger.best + 1e-12 && improvements.len() < 512 {
+            improvements.push((hops, ledger.spent(), bias.n_basins(), energy));
+        }
+    }
 
     let n_basins = bias.n_basins();
     // Per-rung sampler diagnostics, with the active rung put back at its own

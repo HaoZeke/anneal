@@ -2506,7 +2506,6 @@ pub(crate) fn place_smaller_inside(positions: Array1<f64>, species: &[u32]) -> A
 /// with one B and leaves every other atom where it is. `None` when a second
 /// label does not exist. The caller supplies the draw, so a side generator
 /// can propose the pair without advancing the chain generator.
-
 pub(crate) fn doye_unlike_exchange<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     species: &[u32],

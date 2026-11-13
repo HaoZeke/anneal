@@ -187,6 +187,18 @@ impl Gupta {
         species
     }
 
+    /// Homonuclear nearest-neighbour distance of one element, in ångström.
+    ///
+    /// The like-pair `r0` of the potential. Unknown labels have none.
+    pub fn homonuclear_r0(label: u32) -> Option<f64> {
+        match label {
+            COPPER_Z => Some(COPPER.r0),
+            GOLD_Z => Some(GOLD.r0),
+            PLATINUM_Z => Some(PLATINUM.r0),
+            _ => None,
+        }
+    }
+
     /// Species labels parallel to the atoms, copper then gold.
     pub fn copper_gold_species(n_copper: usize, n_gold: usize) -> Vec<u32> {
         let mut species = vec![COPPER_Z; n_copper];
