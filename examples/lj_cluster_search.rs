@@ -322,7 +322,10 @@ mod option_tests {
         let mut cfg = Config::recommended(75);
         apply_boolean_options(&mut cfg, &["rec", "catalog"]);
         assert!(!cfg.adaptive_height);
-        assert!(!cfg.escape_on_stall);
+        // cfa4ae0c put the stall climb back on the measured recommended
+        // preset. `rec` and `catalog` do not name that mechanism, so they
+        // leave it on. The default pins record that climb.
+        assert!(cfg.escape_on_stall);
     }
 
     #[test]
