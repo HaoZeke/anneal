@@ -144,7 +144,7 @@ fn system_spec(name: &str) -> Option<Spec> {
             400_000,
             Kind::PlatinumCopper { n_platinum: 0 },
         ),
-        _ => return None,
+        _ => return composition_spec(name),
     };
     Some(Spec {
         n,
@@ -152,6 +152,59 @@ fn system_spec(name: &str) -> Option<Spec> {
         reference,
         kind,
     })
+}
+
+/// `cu{n}au{m}` and `pt{n}cu{m}` for compositions the named table does
+/// not list. The reference stays unset: the bench driver passes
+/// `H2H_REFERENCE` when a Cambridge energy exists. A size absent from
+/// the Lennard-Jones paper map spends the budget of the next tabulated
+/// size, so 34 atoms uses the 38-atom ceiling.
+fn composition_spec(name: &str) -> Option<Spec> {
+    if let Some((n_copper, n_gold)) = counted(name, "cu", "au") {
+        let n = n_copper + n_gold;
+        return Some(Spec {
+            n,
+            budget: paper_budget(n),
+            reference: f64::NEG_INFINITY,
+            kind: Kind::CopperGold { n_copper },
+        });
+    }
+    if let Some((n_platinum, n_copper)) = counted(name, "pt", "cu") {
+        let n = n_platinum + n_copper;
+        return Some(Spec {
+            n,
+            budget: paper_budget(n),
+            reference: f64::NEG_INFINITY,
+            kind: Kind::PlatinumCopper { n_platinum },
+        });
+    }
+    None
+}
+
+fn counted(name: &str, left: &str, right: &str) -> Option<(usize, usize)> {
+    let rest = name.strip_prefix(left)?;
+    let (n_left, rest) = leading_usize(rest)?;
+    let rest = rest.strip_prefix(right)?;
+    let (n_right, rest) = leading_usize(rest)?;
+    if !rest.is_empty() || n_left + n_right == 0 {
+        return None;
+    }
+    Some((n_left, n_right))
+}
+
+fn leading_usize(text: &str) -> Option<(usize, &str)> {
+    let end = text
+        .find(|ch: char| !ch.is_ascii_digit())
+        .unwrap_or(text.len());
+    if end == 0 {
+        return None;
+    }
+    let count = text[..end].parse().ok()?;
+    Some((count, &text[end..]))
+}
+
+fn paper_budget(n: usize) -> usize {
+    if n <= 38 { 400_000 } else { 1_000_000 }
 }
 
 fn potential(spec: &Spec) -> Gupta {
@@ -479,6 +532,15 @@ mod tests {
         assert!((system_spec("au55").unwrap().reference + 191.03085280).abs() < 1e-12);
         assert!((system_spec("cu27au28").unwrap().reference + 182.93136675).abs() < 1e-12);
         assert!(system_spec("zn31").is_none());
+        let cu3 = system_spec("cu3au35").unwrap();
+        assert_eq!(cu3.n, 38);
+        assert_eq!(cu3.budget, 400_000);
+        assert!(cu3.reference.is_infinite());
+        assert_eq!(system_spec("cu10au45").unwrap().budget, 1_000_000);
+        let pt34 = system_spec("pt8cu26").unwrap();
+        assert_eq!((pt34.n, pt34.budget), (34, 400_000));
+        assert!(system_spec("cu").is_none());
+        assert!(system_spec("ptcu").is_none());
     }
 
     #[test]
