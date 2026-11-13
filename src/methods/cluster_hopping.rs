@@ -3040,6 +3040,53 @@ fn outcome_when_start_was_stopped(ledger: &Ledger, x: &Array1<f64>, energy: f64)
     }
 }
 
+/// The preset sphere and neighbour shell are a reduced unit. After the
+/// opening quench, a nearest neighbour outside that unit means the cluster
+/// is physical. Containing every proposal in the reduced sphere erases the
+/// move, and a shell shorter than a bond counts every atom as isolated.
+/// Both grow by that neighbour. Move amplitudes stay on the preset:
+/// stretching those spends the budget inside each quench. A reduced-unit
+/// quench returns `None`, so its call counts stay put. A rigid body stores
+/// centres and rotations in one vector; that length is not a bond.
+fn lengths_of_quenched_cluster(cfg: &Config, x: ArrayView1<f64>) -> Option<Config> {
+    if cfg.move_library.is_rigid_body() || cfg.move_library.is_molecular() {
+        return None;
+    }
+    let n = x.len() / 3;
+    if n < 2 || cfg.length_scale <= 0.0 {
+        return None;
+    }
+    let mut nearest = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut best = f64::MAX;
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let mut distance = 0.0;
+            for k in 0..3 {
+                let delta = x[3 * i + k] - x[3 * j + k];
+                distance += delta * delta;
+            }
+            best = best.min(distance);
+        }
+        nearest.push(best.sqrt());
+    }
+    nearest.sort_by(|a, b| a.total_cmp(b));
+    let nn = nearest[n / 2];
+    if !nn.is_finite() || nn < 2.0 {
+        return None;
+    }
+    let factor = nn / cfg.length_scale;
+    if (factor - 1.0).abs() <= 1.0e-8 {
+        return None;
+    }
+    let mut scaled = cfg.clone();
+    scaled.container *= factor;
+    scaled.neighbour_cutoff *= factor;
+    Some(scaled)
+}
+
 fn run_full<'g, R, H>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -3184,6 +3231,17 @@ where
         ledger.mark_last_recorded(true);
     }
     let mut current_validation_gradient = initial_validation_gradient;
+    // The opening quench is the potential's own length. A reduced-unit
+    // cluster stays on the preset. A physical cluster would otherwise
+    // be packed back into a sphere built for σ = 1 before every hop,
+    // and the move would not survive to the quench.
+    let scaled_lengths;
+    let cfg = if let Some(scaled) = lengths_of_quenched_cluster(cfg, x.view()) {
+        scaled_lengths = scaled;
+        &scaled_lengths
+    } else {
+        cfg
+    };
     let canonical_reference = x.clone();
     let mut biases: Vec<BasinBias<ClusterFingerprint>> = ratios
         .iter()
@@ -9547,6 +9605,27 @@ mod tests {
         let binary = Config::recommended(6).with_species(vec![29, 29, 29, 79, 79, 79], None);
         assert!(polishes_unlike_pairs(&binary));
         assert!(!polishes_unlike_pairs(&Config::recommended(6)));
+    }
+
+    #[test]
+    fn a_physical_quench_widens_the_sphere_and_a_reduced_one_does_not() {
+        let cfg = Config::recommended(8);
+        let mut reduced = Array1::zeros(24);
+        for i in 0..8 {
+            reduced[3 * i] = i as f64;
+        }
+        assert!(lengths_of_quenched_cluster(&cfg, reduced.view()).is_none());
+        let mut physical = Array1::zeros(24);
+        for i in 0..8 {
+            physical[3 * i] = 2.8 * i as f64;
+        }
+        let scaled = lengths_of_quenched_cluster(&cfg, physical.view()).expect("angstrom cluster");
+        assert!(scaled.container > cfg.container * 2.0);
+        assert!(scaled.neighbour_cutoff > cfg.neighbour_cutoff * 2.0);
+        assert_eq!(scaled.length_scale, cfg.length_scale);
+        assert!(
+            lengths_of_quenched_cluster(&Config::recommended_tip4p(4), physical.view()).is_none()
+        );
     }
 
     #[test]
