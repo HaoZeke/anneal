@@ -121,12 +121,19 @@ jobs:
         shell: bash
         env:
           COG_FROM: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-          COG_TO: ${{ github.sha }}
+          COG_TO: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           COG_EXEMPT: 235683cf30fc3cff9d3be5f92ac26b5a046483e1
         run: |
           if [[ -z "$COG_FROM" || "$COG_FROM" =~ ^0+$ ]] || \
              ! git cat-file -e "$COG_FROM^{commit}"; then
             COG_FROM=$(git rev-parse "$COG_TO^")
+          fi
+          # The head already contains develop. A main base would re-check
+          # develop's history, including subjects this branch does not add.
+          if git cat-file -e origin/develop^{commit} \
+             && git merge-base --is-ancestor origin/develop "$COG_TO" \
+             && ! git merge-base --is-ancestor origin/develop "$COG_FROM"; then
+            COG_FROM=$(git rev-parse origin/develop)
           fi
           if git merge-base --is-ancestor "$COG_EXEMPT" "$COG_TO" &&
              ! git merge-base --is-ancestor "$COG_EXEMPT" "$COG_FROM"; then
@@ -146,8 +153,16 @@ jobs:
       - name: Audit for large files
         shell: bash
         run: |
+          # Blobs already on develop are that branch's history. A head that
+          # contains develop is audited for the objects it adds.
+          if git cat-file -e origin/develop^{commit} \
+             && git merge-base --is-ancestor origin/develop HEAD; then
+            objects=$(git rev-list --objects origin/develop..HEAD)
+          else
+            objects=$(git rev-list --objects HEAD)
+          fi
           oversized=$(
-            git rev-list --objects HEAD |
+            printf '%s\n' "$objects" |
               git cat-file --batch-check='%(objecttype) %(objectsize) %(objectname) %(rest)' |
               awk '$1 == "blob" && $2 > 1048576'
           )
