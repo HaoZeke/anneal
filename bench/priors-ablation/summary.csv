@@ -1,0 +1,60 @@
+system,arm,hits,n,evals_median,wall_median_s,inside_median_s,outside_median_s,times_from_per_call,fisher_p_on_off,source
+lj38,gmin,4,6,389399.0,3.654550,2.684603,0.969947,no,,bench/priors-ablation/gmin-rows.csv
+lj38,priors_on,6,6,10189.5,0.092865,0.034734,0.058648,no,1.000000,bench/priors-ablation/rows.csv
+lj38,priors_off,6,6,192321.5,1.340446,0.604480,0.735966,no,1.000000,bench/priors-ablation/rows.csv
+lj38,recorded_priors_on,6,6,10189.5,0.076948,,,no,,bench/growpal-h2h/results.csv anneal @ 14c2cdbc
+lj75,gmin,0,6,4000000.0,101.313500,86.351677,14.949635,no,,bench/lj-outside/results.csv gmin @ 2d00f044
+lj75,priors_on,6,6,979290.5,27.419731,11.734547,15.685185,no,0.060606,bench/priors-ablation/rows.csv
+lj75,priors_off,2,6,4000000.0,88.362684,47.074633,41.288050,no,0.060606,bench/priors-ablation/rows.csv
+lj75,recorded_priors_on,6,6,979290.5,25.466747,10.343459,15.123288,no,,bench/lj-outside/results.csv anneal @ 2d00f044
+lj98,gmin,0,6,4000000.0,166.002500,147.429852,18.590781,no,,bench/lj-outside/results.csv gmin @ 2d00f044
+lj98,priors_on,5,6,1387168.5,58.209933,25.362561,32.847371,no,1.000000,bench/priors-ablation/rows.csv
+lj98,priors_off,4,6,2520675.5,85.858847,46.506393,39.352455,no,1.000000,bench/priors-ablation/rows.csv
+lj98,recorded_priors_on,5,6,1387168.5,59.079868,25.071657,34.008211,no,,bench/lj-outside/results.csv anneal @ 2d00f044
+lj104,gmin,2,6,4000000.0,185.039500,165.317287,19.673522,no,,bench/lj-outside/results.csv gmin @ 2d00f044
+lj104,priors_on,6,6,1812258.0,79.079609,38.674415,40.405194,no,0.060606,bench/priors-ablation/rows.csv
+lj104,priors_off,2,6,4000000.0,148.684121,83.540265,64.051290,no,0.060606,bench/priors-ablation/rows.csv
+lj104,recorded_priors_on,6,6,1812258.0,82.246081,36.911023,45.335057,no,,bench/lj-outside/results.csv anneal @ 2d00f044
+lj150,gmin,4,6,3651960.5,337.591000,312.353464,25.237536,no,,bench/lj-large/results.csv gmin @ 3d5cbdee
+lj150,priors_on,1,6,4000000.0,338.878001,173.901732,164.974926,no,1.000000,bench/priors-ablation/rows.csv
+lj150,priors_off,2,6,4000000.0,315.688990,172.654250,137.243658,no,1.000000,bench/priors-ablation/rows.csv
+lj150,recorded_priors_on,1,6,4000000.0,390.020369,169.858678,220.083763,no,,bench/lj-large/results.csv anneal @ 3d5cbdee
+m55r6,gmin,6,6,23758.5,0.406112,0.361438,0.044674,no,,bench/morse-h2h/results.csv gmin @ 770121ac
+m55r6,priors_on,6,6,233.0,0.004345,0.003802,0.000557,no,1.000000,bench/priors-ablation/rows.csv
+m55r6,priors_off,6,6,16064.0,0.355860,0.253333,0.102527,no,1.000000,bench/priors-ablation/rows.csv
+m55r6,recorded_priors_on,6,6,232.5,0.003845,0.003338,0.000480,no,,bench/morse-h2h/seeds-rho6-cdb82168.csv anneal @ 9ff2850e
+m80r6,gmin,6,6,193538.5,7.895400,7.080281,0.815119,no,,bench/priors-ablation/gmin-rows.csv
+m80r6,priors_on,6,6,748774.5,17.343332,10.213456,7.537511,no,1.000000,bench/priors-ablation/rows.csv
+m80r6,priors_off,6,6,91487.0,3.795522,2.849552,0.945971,no,1.000000,bench/priors-ablation/rows.csv
+m55r14,gmin,0,6,1000000.0,16.922800,15.238791,1.656421,no,,bench/morse-h2h/results.csv gmin @ 770121ac
+m55r14,priors_on,4,6,537181.0,12.725664,7.787021,4.938643,no,1.000000,bench/priors-ablation/rows.csv
+m55r14,priors_off,5,6,271130.0,5.571684,3.873887,1.789948,no,1.000000,bench/priors-ablation/rows.csv
+m55r14,recorded_priors_on,5,6,446461.0,10.161021,6.249110,3.911912,no,,bench/morse-h2h/seeds-cdb82168.csv anneal @ c1fe8188
+m80r14,gmin,0,6,4000000.0,136.620500,128.279732,8.356316,no,,bench/morse-h2h/results.csv gmin @ 770121ac
+m80r14,priors_on,2,6,4000000.0,192.175839,124.728942,66.786735,no,1.000000,bench/priors-ablation/rows.csv
+m80r14,priors_off,3,6,3986685.5,186.423282,122.261947,64.161335,no,1.000000,bench/priors-ablation/rows.csv
+m80r14,recorded_priors_on,4,6,2387370.5,110.462388,71.080866,39.381521,no,,bench/morse-h2h/seeds-cdb82168.csv anneal @ c1fe8188
+au55,gmin,0,6,1000000.0,59.565400,56.656000,2.910000,yes,,bench/metal-cluster-h2h/gupta-binary-e2865427/summary-v2.csv gmin @ 3a8134db
+au55,priors_on,3,6,919460.0,45.738475,32.549965,13.514510,no,0.181818,bench/priors-ablation/rows.csv
+au55,priors_off,0,6,1000000.0,45.768579,34.632679,11.082653,no,0.181818,bench/priors-ablation/rows.csv
+au55,recorded_priors_on,0,6,1000000.0,73.372408,32.254000,41.054000,yes,,bench/metal-cluster-h2h/gupta-binary-e2865427/summary-v2.csv anneal @ 3a8134db
+cu6au32,gmin,0,6,400000.0,12.228400,11.330000,0.902800,yes,,bench/metal-cluster-h2h/gupta-binary-e2865427/summary-v2.csv gmin @ 3a8134db
+cu6au32,priors_on,6,6,400000.0,7.217545,6.692386,0.525158,no,0.002165,bench/priors-ablation/rows.csv
+cu6au32,priors_off,0,6,400000.0,8.199627,6.769675,1.482111,no,0.002165,bench/priors-ablation/rows.csv
+cu6au32,recorded_priors_on,6,6,400000.0,6.510090,6.038400,0.473400,yes,,bench/metal-cluster-h2h/gupta-binary-e2865427/spine-cu6-0b788212.csv spine @ 0b788212
+cu27au28,gmin,0,6,1000000.0,60.735350,57.790000,2.946000,yes,,bench/metal-cluster-h2h/gupta-binary-e2865427/summary-v2.csv gmin @ 3a8134db
+cu27au28,priors_on,6,6,1000000.0,39.406212,37.336798,2.064981,no,0.002165,bench/priors-ablation/rows.csv
+cu27au28,priors_off,0,6,1000000.0,42.990437,37.299606,6.198429,no,0.002165,bench/priors-ablation/rows.csv
+cu27au28,recorded_priors_on,6,6,1000000.0,33.246755,31.510000,1.743000,yes,,bench/metal-cluster-h2h/gupta-binary-e2865427/mackay-2bc5333d.csv mackay @ 0b788212
+tip4p4,gmin,6,6,209.5,0.000864,,,no,,bench/priors-ablation/gmin-rows.csv
+tip4p4,priors_on,6,6,278.5,0.000635,0.000282,0.000354,no,1.000000,bench/priors-ablation/rows.csv
+tip4p4,priors_off,6,6,278.5,0.000833,0.000309,0.000451,no,1.000000,bench/priors-ablation/rows.csv
+tip4p4,recorded_priors_on,6,6,278.5,0.000631,0.000281,0.000351,no,,bench/tip4p-h2h/rows.csv anneal-bf8c3fe1 @ 51523528
+tip4p8,gmin,5,6,240163.0,1.999330,,,no,,bench/priors-ablation/gmin-rows.csv
+tip4p8,priors_on,6,6,6526.0,0.026953,0.016302,0.010651,no,1.000000,bench/priors-ablation/rows.csv
+tip4p8,priors_off,6,6,6526.0,0.024987,0.015439,0.009548,no,1.000000,bench/priors-ablation/rows.csv
+tip4p8,recorded_priors_on,6,6,6526.0,0.024122,0.014882,0.009239,no,,bench/tip4p-h2h/rows.csv anneal-bf8c3fe1 @ 51523528
+tip4p15,gmin,0,6,2000000.0,50.017500,,,no,,bench/tip4p-h2h/rows.csv gmin-control-same-start @ 51523528
+tip4p15,priors_on,6,6,1158631.0,9.453049,7.206613,2.246437,no,1.000000,bench/priors-ablation/rows.csv
+tip4p15,priors_off,6,6,1158631.0,9.794744,7.442430,2.352315,no,1.000000,bench/priors-ablation/rows.csv
+tip4p15,recorded_priors_on,6,6,1158631.0,8.037944,6.148571,1.889373,no,,bench/tip4p-h2h/rows.csv anneal-79c13d53 @ 51523528

@@ -187,6 +187,10 @@ def main() -> int:
     for r in rows:
         r["hit"] = r["hit_binary"]
     gmin_rows = read(args.gmin_rows) if args.gmin_rows.is_file() else []
+    for r in gmin_rows:
+        # The GMIN build times the LJ and Morse kernels but not NEWTIP.
+        if r["system"].startswith("tip4p"):
+            r["pot_s"] = r["outside_s"] = ""
     lines = [
         "| system | GMIN | anneal priors on | anneal priors off | p (on vs off) | recorded priors on |",
         "|---|---|---|---|---|---|",
