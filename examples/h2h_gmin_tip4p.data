@@ -2,6 +2,8 @@
 ! constants match GminTip4p. STEPS is long so H2H_BUDGET is the stop.
 ! The driver appends one RANSEED line per run.
 ! CENTRE and SORT are omitted: they reorder a centre/angle-axis block.
+! RADIUS is unset, so io1.f90 applies the Lennard-Jones container.
+! h2h_gmin_tip4p_radius<n>.data set one that holds the global minimum.
 
 NTIP 4
 SLOPPYCONV 1.0D-3

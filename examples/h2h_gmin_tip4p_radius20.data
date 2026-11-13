@@ -1,0 +1,24 @@
+! Rigid TIP4P on NEWTIP for (H2O)20, h2h_gmin_tip4p.data plus a container.
+! With RADIUS unset, io1.f90 gives NTIP the Lennard-Jones default,
+! 4.3665 A here. takestep.f90 moves a molecular centre beyond the radius
+! across the origin by one diameter.
+! RADIUS is the largest oxygen distance from the oxygen centroid of the
+! Wales-Hodges minimum (-872.9887544952 kJ/mol), 4.5769 A, plus 3 A.
+! Every size uses that rule; scripts/tip4p_h2h/gm_radius.py prints it.
+! The centres of mass of that minimum reach 4.6099 A.
+! STEPS is long so H2H_BUDGET is the stop. The driver appends RANSEED.
+! CENTRE and SORT are omitted: they reorder a centre/angle-axis block.
+
+NTIP 4
+SLOPPYCONV 1.0D-3
+TIGHTCONV 1.0D-4
+EDIFF 0.01
+MAXIT 800 500
+SAVE 2
+RADIUS 7.5769
+
+TEMPERATURE 2.0
+FIXTEMP
+STEPS 90000000 1.0
+STEP 0.40 0.51
+FIXSTEP
