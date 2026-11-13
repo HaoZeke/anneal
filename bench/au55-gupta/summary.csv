@@ -1,0 +1,3 @@
+code,n,hits,median_evals,median_pot_s,median_outside_s,median_best
+anneal,12,5,1000000.0,31.436360,19.801960,-190.98001732
+gmin,12,0,1000000.0,31.881166,2.834985,-190.73682036
