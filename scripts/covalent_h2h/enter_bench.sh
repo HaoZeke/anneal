@@ -21,6 +21,10 @@ cp -a /work/gmin-h2h/bin/GMIN "$WORK/bin/GMIN"
 cp -a /work/gmin-h2h/gmin-source.txt "$WORK/gmin-source.txt"
 chmod +x "$WORK/bin/h2h_covalent" "$WORK/bin/GMIN"
 
+# HOME moves under /work, so the user site that holds ASE is named here.
+site=$(/usr/bin/python3 -m site --user-site)
+/usr/bin/python3 -c 'import ase, scipy' || { echo "ASE and SciPy are required" >&2; exit 1; }
+
 cat > "$WORK/bin/inside.sh" << EOF2
 #!/bin/bash
 set -eu
@@ -37,6 +41,7 @@ export OMP_PROC_BIND=TRUE
 export OMP_PLACES=cores
 export RAYON_NUM_THREADS=1
 export RGPOT_COVALENT_LIB=$WORK/lib/librgpot_covalent.so
+export PYTHONPATH=$site
 cd $WORK
 exec /usr/bin/python3 -u $WORK/bin/run_campaign.py \\
   --binary $WORK/bin/h2h_covalent \\
