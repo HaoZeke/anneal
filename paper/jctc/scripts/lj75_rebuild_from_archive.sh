@@ -15,24 +15,9 @@
 # 6887e36a368f9fa81eded591dcfa22904fa317fe2208b1bc58ba6500c8937118,
 # the same digest as the running binary.
 set -eu
+repo=$(CDPATH= cd -- "$(dirname "$0")/../../.." && pwd)
+python3 "$repo/scripts/data/fetch_data.py"
 archive=${1:-paper/jctc/logs/lj75-source-37535ec1.tar.xz}
-if [ ! -f "$archive" ]; then
-  # The archive is stored as sub-1 MiB parts so the git history stays under
-  # the 1 MiB blob bar. Concatenate them outside the work tree.
-  assembled=$(mktemp)
-  found=0
-  for part in "$archive".part[0-9][0-9][0-9]; do
-    if [ -f "$part" ]; then
-      cat "$part" >> "$assembled"
-      found=1
-    fi
-  done
-  if [ "$found" -eq 1 ]; then
-    archive=$assembled
-  else
-    rm -f "$assembled"
-  fi
-fi
 dest=${2:-lj75-source}
 log=${3:-paper/jctc/logs/lj75-rebuild-log.txt}
 if [ $# -ge 4 ] && [ -n "$4" ]; then

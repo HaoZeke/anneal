@@ -101,26 +101,25 @@ fn normalise(v: [f64; 3]) -> Option<[f64; 3]> {
 /// approximate symmetry rather than of exact symmetry: an exactly symmetric
 /// structure permutes onto itself and every distance is zero.
 pub fn deviation(x: ArrayView1<f64>, n: usize, axis: [f64; 3], order: usize) -> f64 {
+    deviation_under(x, n, axis, order, f64::INFINITY).unwrap_or(f64::INFINITY)
+}
+
+/// [`deviation`], or `None` once the partial sum already exceeds `cap`.
+///
+/// Callers that keep only a value strictly below `cap` get the same
+/// decision and the same bits. The early return is past `cap`, with a
+/// margin so a later addition cannot round the reported root back under it.
+fn deviation_under(
+    x: ArrayView1<f64>,
+    n: usize,
+    axis: [f64; 3],
+    order: usize,
+    cap: f64,
+) -> Option<f64> {
     if n == 0 || order < 2 {
-        return f64::INFINITY;
+        return None;
     }
-    let c = centroid(x, n);
-    let angle = 2.0 * std::f64::consts::PI / order as f64;
-    let mut total = 0.0;
-    for a in 0..n {
-        let v = [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]];
-        let w = rotate(v, axis, angle);
-        let mut best = f64::INFINITY;
-        for b in 0..n {
-            let u = [x[3 * b] - c[0], x[3 * b + 1] - c[1], x[3 * b + 2] - c[2]];
-            let d = (w[0] - u[0]).powi(2) + (w[1] - u[1]).powi(2) + (w[2] - u[2]).powi(2);
-            if d < best {
-                best = d;
-            }
-        }
-        total += best;
-    }
-    (total / n as f64).sqrt()
+    Cloud::from_view(x, n).rotation_deviation(axis, order, cap)
 }
 
 /// How far `x` is from being symmetric under the plane whose normal is `axis`.
@@ -129,30 +128,164 @@ pub fn deviation(x: ArrayView1<f64>, n: usize, axis: [f64; 3], order: usize) -> 
 /// and matched to its nearest partner, and the root-mean-square of those
 /// distances is what "approximately symmetric" means here.
 pub fn plane_deviation(x: ArrayView1<f64>, n: usize, axis: [f64; 3]) -> f64 {
+    plane_deviation_under(x, n, axis, f64::INFINITY).unwrap_or(f64::INFINITY)
+}
+
+fn plane_deviation_under(x: ArrayView1<f64>, n: usize, axis: [f64; 3], cap: f64) -> Option<f64> {
     if n == 0 {
-        return f64::INFINITY;
+        return None;
     }
-    let c = centroid(x, n);
-    let m = mirror_matrix(axis);
-    let mut total = 0.0;
-    for a in 0..n {
-        let v = [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]];
-        let w = [
-            m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
-            m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
-            m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
-        ];
+    Cloud::from_view(x, n).plane_deviation(axis, cap)
+}
+
+/// Centred coordinates in separate arrays, so a nearest-image scan reads
+/// contiguous columns.
+struct Cloud {
+    xs: Vec<f64>,
+    ys: Vec<f64>,
+    zs: Vec<f64>,
+}
+
+impl Cloud {
+    fn from_view(x: ArrayView1<f64>, n: usize) -> Self {
+        let c = centroid(x, n);
+        let mut xs = Vec::with_capacity(n);
+        let mut ys = Vec::with_capacity(n);
+        let mut zs = Vec::with_capacity(n);
+        for atom in 0..n {
+            xs.push(x[3 * atom] - c[0]);
+            ys.push(x[3 * atom + 1] - c[1]);
+            zs.push(x[3 * atom + 2] - c[2]);
+        }
+        Self { xs, ys, zs }
+    }
+
+    fn point(&self, index: usize) -> [f64; 3] {
+        [self.xs[index], self.ys[index], self.zs[index]]
+    }
+
+    fn nearest_squared(&self, image: [f64; 3]) -> f64 {
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("avx2") {
+            return unsafe { self.nearest_squared_avx2(image) };
+        }
+        self.nearest_squared_scalar(image)
+    }
+
+    fn nearest_squared_scalar(&self, image: [f64; 3]) -> f64 {
         let mut best = f64::INFINITY;
-        for b in 0..n {
-            let u = [x[3 * b] - c[0], x[3 * b + 1] - c[1], x[3 * b + 2] - c[2]];
-            let d = (w[0] - u[0]).powi(2) + (w[1] - u[1]).powi(2) + (w[2] - u[2]).powi(2);
-            if d < best {
-                best = d;
+        for index in 0..self.xs.len() {
+            let dx = image[0] - self.xs[index];
+            let dy = image[1] - self.ys[index];
+            let dz = image[2] - self.zs[index];
+            let distance = dx * dx + dy * dy + dz * dz;
+            if distance < best {
+                best = distance;
             }
         }
-        total += best;
+        best
     }
-    (total / n as f64).sqrt()
+
+    /// # Safety
+    ///
+    /// AVX2 must be enabled.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn nearest_squared_avx2(&self, image: [f64; 3]) -> f64 {
+        use std::arch::x86_64::{
+            _mm256_add_pd, _mm256_loadu_pd, _mm256_min_pd, _mm256_mul_pd, _mm256_set1_pd,
+            _mm256_storeu_pd, _mm256_sub_pd,
+        };
+        let ix = _mm256_set1_pd(image[0]);
+        let iy = _mm256_set1_pd(image[1]);
+        let iz = _mm256_set1_pd(image[2]);
+        let n = self.xs.len();
+        let mut index = 0usize;
+        let mut best_lanes = _mm256_set1_pd(f64::INFINITY);
+        while index + 4 <= n {
+            unsafe {
+                let dx = _mm256_sub_pd(_mm256_loadu_pd(self.xs.as_ptr().add(index)), ix);
+                let dy = _mm256_sub_pd(_mm256_loadu_pd(self.ys.as_ptr().add(index)), iy);
+                let dz = _mm256_sub_pd(_mm256_loadu_pd(self.zs.as_ptr().add(index)), iz);
+                let distance = _mm256_add_pd(
+                    _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
+                    _mm256_mul_pd(dz, dz),
+                );
+                best_lanes = _mm256_min_pd(best_lanes, distance);
+            }
+            index += 4;
+        }
+        let mut lane = [0.0; 4];
+        unsafe { _mm256_storeu_pd(lane.as_mut_ptr(), best_lanes) };
+        let mut best = lane[0];
+        if lane[1] < best {
+            best = lane[1];
+        }
+        if lane[2] < best {
+            best = lane[2];
+        }
+        if lane[3] < best {
+            best = lane[3];
+        }
+        while index < n {
+            let dx = image[0] - self.xs[index];
+            let dy = image[1] - self.ys[index];
+            let dz = image[2] - self.zs[index];
+            let distance = dx * dx + dy * dy + dz * dz;
+            if distance < best {
+                best = distance;
+            }
+            index += 1;
+        }
+        best
+    }
+
+    fn rotation_deviation(&self, axis: [f64; 3], order: usize, cap: f64) -> Option<f64> {
+        let n = self.xs.len();
+        if n == 0 || order < 2 {
+            return None;
+        }
+        let angle = 2.0 * std::f64::consts::PI / order as f64;
+        let mut total = 0.0;
+        let stop = cap.is_finite();
+        for index in 0..n {
+            let image = rotate(self.point(index), axis, angle);
+            total += self.nearest_squared(image);
+            if stop && total > cap * cap * n as f64 {
+                let partial = (total / n as f64).sqrt();
+                if partial >= cap * (1.0 + 1.0e-6) {
+                    return None;
+                }
+            }
+        }
+        Some((total / n as f64).sqrt())
+    }
+
+    fn plane_deviation(&self, axis: [f64; 3], cap: f64) -> Option<f64> {
+        let n = self.xs.len();
+        if n == 0 {
+            return None;
+        }
+        let m = mirror_matrix(axis);
+        let mut total = 0.0;
+        let stop = cap.is_finite();
+        for index in 0..n {
+            let v = self.point(index);
+            let image = [
+                m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+                m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+                m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+            ];
+            total += self.nearest_squared(image);
+            if stop && total > cap * cap * n as f64 {
+                let partial = (total / n as f64).sqrt();
+                if partial >= cap * (1.0 + 1.0e-6) {
+                    return None;
+                }
+            }
+        }
+        Some((total / n as f64).sqrt())
+    }
 }
 
 /// Axes worth testing, taken from the structure rather than at random.
@@ -202,9 +335,12 @@ fn candidate_axes(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
 /// structure along one operation.
 pub fn detect(x: ArrayView1<f64>, n: usize, orders: &[usize], tolerance: f64) -> Option<Candidate> {
     let mut best: Option<Candidate> = None;
+    let cloud = Cloud::from_view(x, n);
     for axis in candidate_axes(x, n) {
         for &order in orders {
-            let d = deviation(x, n, axis, order);
+            let Some(d) = cloud.rotation_deviation(axis, order, tolerance) else {
+                continue;
+            };
             if d < tolerance && best.map(|b| d < b.deviation).unwrap_or(true) {
                 best = Some(Candidate {
                     axis,
@@ -231,9 +367,12 @@ pub fn detect_all(
     tolerance: f64,
 ) -> Vec<Candidate> {
     let mut out = Vec::new();
+    let cloud = Cloud::from_view(x, n);
     for axis in candidate_axes(x, n) {
         for &order in orders {
-            let d = deviation(x, n, axis, order);
+            let Some(d) = cloud.rotation_deviation(axis, order, tolerance) else {
+                continue;
+            };
             if d < tolerance {
                 out.push(Candidate {
                     axis,
@@ -243,7 +382,9 @@ pub fn detect_all(
                 });
             }
         }
-        let d = plane_deviation(x, n, axis);
+        let Some(d) = cloud.plane_deviation(axis, tolerance) else {
+            continue;
+        };
         if d < tolerance {
             out.push(Candidate {
                 axis,
@@ -477,6 +618,19 @@ pub fn symmetrise_group(
     group: &[Rot],
     pair_cutoff: f64,
 ) -> Array1<f64> {
+    symmetrise_group_within(x, n, group, pair_cutoff, &[])
+}
+
+/// As [`symmetrise_group`], but an orbit may not pair atoms of different
+/// `classes`. An empty `classes` slice is the unlabelled group. A labelled
+/// orbit that cannot close inside one class is left unmoved.
+pub fn symmetrise_group_within(
+    x: ArrayView1<f64>,
+    n: usize,
+    group: &[Rot],
+    pair_cutoff: f64,
+    classes: &[u32],
+) -> Array1<f64> {
     let mut out = x.to_owned();
     if n == 0 || group.len() < 2 {
         return out;
@@ -490,7 +644,9 @@ pub fn symmetrise_group(
         if done[a] {
             continue;
         }
-        // Partner of `a` under each group element.
+        // Partner of `a` under each group element. Different classes
+        // cannot be images of each other: a species label is not a
+        // point-group orbit.
         let mut members: Vec<(usize, usize)> = Vec::with_capacity(group.len());
         let mut closed = true;
         for (gi, g) in group.iter().enumerate() {
@@ -498,6 +654,9 @@ pub fn symmetrise_group(
             let mut best = usize::MAX;
             let mut best_d = f64::INFINITY;
             for b in 0..n {
+                if classes.len() == n && classes[a] != classes[b] {
+                    continue;
+                }
                 let u = rel(b);
                 let d =
                     ((w[0] - u[0]).powi(2) + (w[1] - u[1]).powi(2) + (w[2] - u[2]).powi(2)).sqrt();
@@ -655,6 +814,19 @@ pub fn complete_orbits(
     complete_orbits_about(x, n, group, centroid(x, n), pair_cutoff, min_separation)
 }
 
+/// Squared distance is inside `pair_cutoff` after the same root test as a
+/// direct comparison. A value more than a few ulps above the squared
+/// cutoff cannot round back to a root at or below it, so the far pairs
+/// skip the root. The accepted site is unchanged.
+fn within_cutoff(d2: f64, pair_cutoff: f64) -> bool {
+    let limit = pair_cutoff * pair_cutoff;
+    let slack = limit * (64.0 * f64::EPSILON);
+    if d2 > limit + slack {
+        return false;
+    }
+    d2.sqrt() <= pair_cutoff
+}
+
 /// [`complete_orbits`] with the group acting about `c` rather than the
 /// centroid, for a group read off a core whose centre is not the
 /// centroid of the whole structure.
@@ -679,9 +851,11 @@ pub fn complete_orbits_about(
             let w = act(g, r);
             let mut hit = None;
             for (i, (p, _, _)) in sites.iter().enumerate() {
-                let d =
-                    ((w[0] - p[0]).powi(2) + (w[1] - p[1]).powi(2) + (w[2] - p[2]).powi(2)).sqrt();
-                if d <= pair_cutoff {
+                let dx = w[0] - p[0];
+                let dy = w[1] - p[1];
+                let dz = w[2] - p[2];
+                let d2 = dx * dx + dy * dy + dz * dz;
+                if within_cutoff(d2, pair_cutoff) {
                     hit = Some(i);
                     break;
                 }
@@ -1148,6 +1322,28 @@ mod tests {
     use super::*;
     use ndarray::Array1;
 
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn the_vector_nearest_image_matches_the_scalar_scan() {
+        let cloud = Cloud::from_view(octahedron(1.3).view(), 6);
+        for query in [[0.2, -0.4, 1.1], [3.0, 0.0, 0.0], [0.0, 0.0, 0.0]] {
+            let scalar = cloud.nearest_squared_scalar(query);
+            // The cloud length is the test fixture, and AVX2 is what this host runs.
+            let vector = unsafe { cloud.nearest_squared_avx2(query) };
+            assert_eq!(scalar, vector);
+        }
+        let wide = Cloud::from_view(
+            Array1::from((0..30).map(|i| (i as f64) * 0.17).collect::<Vec<_>>()).view(),
+            10,
+        );
+        let query = [1.0, 2.0, 3.0];
+        assert_eq!(
+            wide.nearest_squared_scalar(query),
+            // Ten points so the scan has a vector body and a scalar tail.
+            unsafe { wide.nearest_squared_avx2(query) }
+        );
+    }
+
     fn octahedron(scale: f64) -> Array1<f64> {
         Array1::from(
             [
@@ -1551,6 +1747,26 @@ mod tests {
 mod orbit_tests {
     use super::*;
     use ndarray::Array1;
+
+    #[test]
+    fn a_far_pair_skips_the_root_and_a_near_pair_keeps_it() {
+        let cutoff = 0.7;
+        let mut state = 1u64;
+        for _ in 0..4000 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let unit = (state >> 11) as f64 / (1u64 << 53) as f64;
+            let distance = cutoff * (0.2 + 2.2 * unit);
+            let d2 = distance * distance;
+            let fast = super::within_cutoff(d2, cutoff);
+            let slow = d2.sqrt() <= cutoff;
+            assert_eq!(fast, slow, "distance {distance}");
+        }
+        assert!(super::within_cutoff(cutoff * cutoff, cutoff));
+        assert!(!super::within_cutoff(
+            (cutoff * 2.0) * (cutoff * 2.0),
+            cutoff
+        ));
+    }
 
     /// A regular octahedron with one vertex pushed off its site is put back
     /// on it by orbit completion under the octahedron's own C4 axes, and a

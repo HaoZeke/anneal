@@ -1,0 +1,3 @@
+system,arm,n,planned,hits,hits_over_n,budget,evals_median,evals_iqr,wall_median_s,wall_iqr_s,wall_ratio,inside_us,outside_us,seeds,schedule_seed,rpqa_commit,rpqa_source,anneal_head
+lj38,anneal,6,6,6,6/6,400000,10189.500000,7036.000000,0.109401,0.099706,2705.599024,3.5884,5.4623,2000 2001 2002 2003 2004 2005,20261113,4e86f5fdc1583ef21f105fc2bed96a279b2430c1,https://github.com/afiorent/i-pi.git,456be5ffbc2b9c39d395394c646ab2578eb8ea26
+lj38,rpqa,6,6,0,0/6,400000,400000.000000,0.000000,295.993886,11.126001,2705.599024,236.8139,503.1707,2000 2001 2002 2003 2004 2005,20261113,4e86f5fdc1583ef21f105fc2bed96a279b2430c1,https://github.com/afiorent/i-pi.git,456be5ffbc2b9c39d395394c646ab2578eb8ea26

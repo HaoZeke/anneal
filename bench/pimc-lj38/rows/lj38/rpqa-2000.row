@@ -1,0 +1,2 @@
+system,arm,seed,budget,hit,evals_to_hit,charged,wall_s,pot_s,inside_us,outside_us,best,stop,reached
+lj38,rpqa,2000,400000,0,400000,400000,305.484567,99.026348,247.5659,516.1455,-172.19336789,budget,38

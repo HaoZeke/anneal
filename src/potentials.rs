@@ -60,6 +60,16 @@ impl PairKind {
         }
     }
 
+    /// Energy of a second neighbour in a close packing.
+    ///
+    /// The neighbour sits at √2 times the pair minimum. A long-ranged well
+    /// is still bound there; a short-ranged one is not. The threshold used
+    /// by a search is a fraction of the well depth, not a cluster size.
+    pub fn second_neighbour_energy(&self) -> f64 {
+        let distance = std::f64::consts::SQRT_2 * self.r_min();
+        self.pair(distance * distance).0
+    }
+
     /// Pair energy and `(dV/dr) / r` at squared separation `r2`.
     ///
     /// The derivative is returned divided by `r` because every caller
@@ -270,13 +280,16 @@ impl DifferentiableObjective<f64> for PairPotential {
 
 mod binary_lj;
 mod gmin_tip4p;
+mod gupta;
 mod tip4p;
 pub use binary_lj::BinaryLennardJones;
 pub use gmin_tip4p::{
-    C6 as GMIN_TIP4P_C6, C12 as GMIN_TIP4P_C12, COULOMB as GMIN_TIP4P_COULOMB, GminTip4p,
-    block_from_interleaved_gmin, energy_ohh, gmin_water_geometry, interleaved_gmin_from_block,
-    reference_sites as gmin_tip4p_sites, rigid_from_ohh,
+    C6 as GMIN_TIP4P_C6, C12 as GMIN_TIP4P_C12, COULOMB as GMIN_TIP4P_COULOMB, GminAngleAxisFile,
+    GminTip4p, block_from_gmin_file, block_from_interleaved_gmin, energy_ohh, gmin_coords_text,
+    gmin_water_geometry, interleaved_gmin_from_block, reference_sites as gmin_tip4p_sites,
+    rigid_from_ohh,
 };
+pub use gupta::{COPPER_Z, GOLD_Z, Gupta};
 // The rigid orientation move composes through this name. The helper
 // stays on the chart so that move and the potential share one Rodrigues
 // product. A target that does not include the move still has to compile.
@@ -408,6 +421,10 @@ mod tests {
         let e_hard = hard.eval(far.view());
         assert!(e_hard > e_soft, "short range should bind less at 1.4 r0");
         assert!(e_hard.abs() < 0.02, "at rho = 14 the pair is nearly free");
+        let long = PairKind::Morse { rho: 6.0 }.second_neighbour_energy();
+        let short = PairKind::Morse { rho: 14.0 }.second_neighbour_energy();
+        assert!(long < -0.05, "rho = 6 still binds a second neighbour");
+        assert!(short > -0.05, "rho = 14 does not");
     }
 
     /// Objective and Gradient have to agree with the fused routine, or a caller

@@ -18,13 +18,12 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-
-import sealed_parts
 from typing import NoReturn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import figstyle
+from paper_data import fetch_paper_data
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -76,9 +75,10 @@ def provenance(data: Path) -> tuple[dict[str, str], dict[str, str]]:
 
 
 def load(data: Path = DATA) -> tuple[dict[str, str], list[Map], list[str]]:
+    fetch_paper_data()
     keys, digests = provenance(data)
     for name, want in digests.items():
-        path = sealed_parts.materialize(data / name)
+        path = data / name
         if not path.is_file():
             continue
         if hashlib.sha256(path.read_bytes()).hexdigest() != want:
@@ -94,10 +94,7 @@ def load(data: Path = DATA) -> tuple[dict[str, str], list[Map], list[str]]:
                 skipped.append(f"{name} {kind}")
                 continue
             folder = data / job / kind
-            if (
-                not sealed_parts.materialize(folder / "landscape.ld").is_file()
-                and not (folder / "landscape.png").exists()
-            ):
+            if not (folder / "landscape.ld").exists() and not (folder / "landscape.png").exists():
                 die(f"{job}/{kind}: neither landscape.ld nor landscape.png is present")
             seeds = f"seed {seal['first_hit_seed']}" if kind == "representative" else f"{seal['seeds_finished']} seeds"
             maps.append(
@@ -182,7 +179,7 @@ def draw_panel(ax, entry: Map):
     import matplotlib.pyplot as plt
     from matplotlib.colors import Normalize
 
-    ld = sealed_parts.materialize(entry.folder / "landscape.ld")
+    ld = entry.folder / "landscape.ld"
     fes_path = entry.folder / "fes.csv"
     png = entry.folder / "landscape.png"
     ax.set_title(f"{entry.name}\n{entry.kind}, {entry.seeds}", fontsize=figstyle.SMALLEST, linespacing=1.1)

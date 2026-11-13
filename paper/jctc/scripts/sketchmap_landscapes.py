@@ -28,6 +28,9 @@ from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paper_data import fetch_paper_data
+
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
 CAP = 800
@@ -60,9 +63,6 @@ COLUMNS = ("landmark", "label", "source", "line", "energy", "x", "y")
 
 def rows_of(path: Path) -> list[tuple[int, float, np.ndarray]]:
     """Each minimum of a dump: its line, its energy and its flat coordinates."""
-    import sealed_parts
-
-    path = sealed_parts.materialize(path)
     out = []
     for number, line in enumerate(path.read_text().splitlines(), 1):
         fields = line.split()
@@ -84,6 +84,7 @@ def capped(rows: list, rng: np.random.Generator) -> list:
 
 
 def project(size: int, sketchmap_bin: Path, lapack_lib: Path, workdir: Path):
+    fetch_paper_data()
     from chemparseplot.plot.landscape import cn_matrix, run_sketchmap
 
     arms, refs = SIZES[size]

@@ -1,0 +1,19 @@
+! Rigid TIP4P on NEWTIP, the GMIN angle-axis potential whose
+! constants match GminTip4p. STEPS is long so H2H_BUDGET is the stop.
+! The driver appends one RANSEED line per run.
+! CENTRE and SORT are omitted: they reorder a centre/angle-axis block.
+! RADIUS is unset, so io1.f90 applies the Lennard-Jones container.
+! h2h_gmin_tip4p_radius<n>.data set one that holds the global minimum.
+
+NTIP 4
+SLOPPYCONV 1.0D-3
+TIGHTCONV 1.0D-4
+EDIFF 0.01
+MAXIT 800 500
+SAVE 2
+
+TEMPERATURE 2.0
+FIXTEMP
+STEPS 90000000 1.0
+STEP 0.40 0.51
+FIXSTEP

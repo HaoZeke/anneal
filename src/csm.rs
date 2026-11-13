@@ -102,31 +102,100 @@ pub struct GroupProjection {
 
 /// Projects onto the library group with the lowest measure.
 pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
+    if let Some(cached) = cached_propose(x, classes) {
+        return cached;
+    }
     let orientations = inertia_orientations(x, classes.len())?;
-    let mut best: Option<GroupProjection> = None;
-    for (name, ops) in [
-        ("C_i", inversion_ops()),
-        ("C_5", cyclic_about_z(5)),
-        ("D_5h", d5h_ops()),
+    // D_5h contains every C_5 turn, so it is solved first and those
+    // permutations are reused. Equal measures keep the earlier group
+    // in the published order C_i, C_5, D_5h.
+    clear_op_cache();
+    let mut best: Option<(usize, GroupProjection)> = None;
+    for (rank, name, ops) in [
+        (2, "D_5h", d5h_ops()),
+        (1, "C_5", cyclic_about_z(5)),
+        (0, "C_i", inversion_ops()),
     ] {
+        // Inversion is not a fivefold operation, so its permutations are
+        // not in the D_5h cache. The nearest-image residual is a lower
+        // bound on the assigned measure: the average of a point and its
+        // matched inverse sits halfway between them. A margin keeps a
+        // one-ulp overestimate from skipping a tie, which would prefer
+        // inversion. Above the margin, inversion cannot win the group.
+        if name == "C_i"
+            && let Some((_, incumbent)) = &best
+            && let Some((centred, _, _)) = centre_and_scale(x, classes.len())
+        {
+            let bound = inversion_lower_measure(&centred, &orientations);
+            let margin = 1.0e-6 * (1.0 + incumbent.measure);
+            if bound > incumbent.measure + margin {
+                continue;
+            }
+        }
         let Some((coordinates, measure)) = project(x, classes, &ops, &orientations) else {
             continue;
         };
         if closest_pair(&coordinates) < SINGULAR_PAIR {
             continue;
         }
-        if best
-            .as_ref()
-            .is_none_or(|incumbent| measure < incumbent.measure)
-        {
-            best = Some(GroupProjection {
-                coordinates,
-                measure,
-                group: name,
-            });
+        let replace = match &best {
+            None => true,
+            Some((incumbent_rank, incumbent)) => {
+                measure < incumbent.measure
+                    || (measure == incumbent.measure && rank < *incumbent_rank)
+            }
+        };
+        if replace {
+            best = Some((
+                rank,
+                GroupProjection {
+                    coordinates,
+                    measure,
+                    group: name,
+                },
+            ));
         }
     }
+    let best = best.map(|(_, projection)| projection);
+    store_propose(x, classes, best.as_ref());
     best
+}
+
+struct ProposeCache {
+    coordinates: Vec<u64>,
+    classes: Vec<u32>,
+    value: Option<GroupProjection>,
+}
+
+std::thread_local! {
+    static PROPOSE_CACHE: std::cell::RefCell<Option<ProposeCache>> = const { std::cell::RefCell::new(None) };
+}
+
+fn same_bits(cached: &[u64], x: ArrayView1<'_, f64>) -> bool {
+    cached.len() == x.len()
+        && cached
+            .iter()
+            .zip(x.iter())
+            .all(|(bits, value)| *bits == value.to_bits())
+}
+
+fn cached_propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<Option<GroupProjection>> {
+    PROPOSE_CACHE.with(|slot| {
+        let slot = slot.borrow();
+        let cached = slot.as_ref()?;
+        (same_bits(&cached.coordinates, x) && cached.classes == classes)
+            .then(|| cached.value.clone())
+    })
+}
+
+fn store_propose(x: ArrayView1<'_, f64>, classes: &[u32], value: Option<&GroupProjection>) {
+    PROPOSE_CACHE.with(|slot| {
+        *slot.borrow_mut() = Some(ProposeCache {
+            coordinates: x.iter().map(|value| value.to_bits()).collect(),
+            classes: classes.to_vec(),
+            value: value.cloned(),
+        });
+    });
 }
 
 pub(crate) fn inversion_ops() -> Vec<[[f64; 3]; 3]> {
@@ -182,6 +251,84 @@ fn is_identity(op: &[[f64; 3]; 3]) -> bool {
     true
 }
 
+struct SolvedOp {
+    y: Vec<u64>,
+    classes: Vec<u32>,
+    op: [[f64; 3]; 3],
+    perm: Vec<usize>,
+    unique: bool,
+}
+
+std::thread_local! {
+    static OP_CACHE: std::cell::RefCell<Vec<SolvedOp>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn clear_op_cache() {
+    OP_CACHE.with(|slot| slot.borrow_mut().clear());
+}
+
+fn coordinate_bits(y: &[[f64; 3]]) -> Vec<u64> {
+    y.iter().flatten().map(|value| value.to_bits()).collect()
+}
+
+fn same_matrix(left: &[[f64; 3]; 3], right: &[[f64; 3]; 3]) -> bool {
+    left.iter()
+        .flatten()
+        .zip(right.iter().flatten())
+        .all(|(left, right)| left.to_bits() == right.to_bits())
+}
+
+fn matrix_close(left: &[[f64; 3]; 3], right: &[[f64; 3]; 3]) -> bool {
+    left.iter()
+        .flatten()
+        .zip(right.iter().flatten())
+        .all(|(left, right)| (*left - *right).abs() <= 1.0e-8)
+}
+
+fn invert_perm(perm: &[usize]) -> Vec<usize> {
+    let mut inverse = vec![0; perm.len()];
+    for (row, &column) in perm.iter().enumerate() {
+        inverse[column] = row;
+    }
+    inverse
+}
+
+fn recall_op(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option<Vec<usize>> {
+    let bits = coordinate_bits(y);
+    let transposed = transpose(*op);
+    OP_CACHE.with(|slot| {
+        let slot = slot.borrow();
+        for saved in slot.iter().rev() {
+            if saved.y != bits || saved.classes != classes {
+                continue;
+            }
+            if same_matrix(&saved.op, op) {
+                return Some(saved.perm.clone());
+            }
+            if saved.unique && matrix_close(&saved.op, &transposed) {
+                return Some(invert_perm(&saved.perm));
+            }
+        }
+        None
+    })
+}
+
+fn remember_op(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3], perm: &[usize], unique: bool) {
+    OP_CACHE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.len() > 800 {
+            slot.clear();
+        }
+        slot.push(SolvedOp {
+            y: coordinate_bits(y),
+            classes: classes.to_vec(),
+            op: *op,
+            perm: perm.to_vec(),
+            unique,
+        });
+    });
+}
+
 fn match_operated(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option<Vec<usize>> {
     let n = classes.len();
     // The identity sends every atom to itself, so the diagonal is a minimum
@@ -189,12 +336,16 @@ fn match_operated(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option
     if is_identity(op) {
         return Some((0..n).collect());
     }
+    if let Some(saved) = recall_op(y, classes, op) {
+        return Some(saved);
+    }
     let images: Vec<[f64; 3]> = y.iter().map(|point| mul_vec(op, *point)).collect();
     let mut blocks: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
     for (atom, &class) in classes.iter().enumerate() {
         blocks.entry(class).or_default().push(atom);
     }
     let mut assignment = vec![usize::MAX; n];
+    let mut unique = true;
     for atoms in blocks.values() {
         let width = atoms.len();
         let mut costs = vec![0.0; width * width];
@@ -209,11 +360,19 @@ fn match_operated(y: &[[f64; 3]], classes: &[u32], op: &[[f64; 3]; 3]) -> Option
             }
         }
         let local = minimum_cost_assignment(&costs, width)?;
+        // Below 98 atoms the recorded permutation is Kuhn-Munkres. Its
+        // tie break is not the inverse of the transposed problem, so an
+        // inverse is reused only for a unique dense optimum.
+        unique &= width >= 98 && crate::assignment::last_dense_optimum_was_unique();
         for (row_i, &col_i) in local.iter().enumerate() {
             assignment[atoms[row_i]] = atoms[col_i];
         }
     }
-    (!assignment.contains(&usize::MAX)).then_some(assignment)
+    if assignment.contains(&usize::MAX) {
+        return None;
+    }
+    remember_op(y, classes, op, &assignment, unique);
+    Some(assignment)
 }
 
 pub(crate) fn identity() -> [[f64; 3]; 3] {
@@ -238,6 +397,43 @@ fn mul_vec(matrix: &[[f64; 3]; 3], vector: [f64; 3]) -> [f64; 3] {
 
 fn apply_all(matrix: &[[f64; 3]; 3], points: &[[f64; 3]]) -> Vec<[f64; 3]> {
     points.iter().map(|point| mul_vec(matrix, *point)).collect()
+}
+
+/// Lower bound on the inversion measure in every orientation.
+///
+/// The group is the identity and the central inversion. The residual is
+/// half the matched distance, so the measure is the assignment cost
+/// divided by four times the squared norm. Each atom's nearest inverse
+/// image is at most that assignment cost, whether or not the nearest
+/// images form a bijection.
+fn inversion_lower_measure(centred: &[[f64; 3]], orientations: &[[[f64; 3]; 3]]) -> f64 {
+    let mut best = f64::INFINITY;
+    for rotation in orientations {
+        let y = apply_all(rotation, centred);
+        let n = y.len();
+        let mut nearest = 0.0;
+        let mut norm = 0.0;
+        for atom in 0..n {
+            let mut closest = f64::INFINITY;
+            for image in 0..n {
+                let mut squared = 0.0;
+                for axis in 0..3 {
+                    let delta = y[atom][axis] + y[image][axis];
+                    squared += delta * delta;
+                }
+                closest = closest.min(squared);
+            }
+            nearest += closest;
+            for axis in 0..3 {
+                norm += y[atom][axis] * y[atom][axis];
+            }
+        }
+        if norm < 1e-18 {
+            continue;
+        }
+        best = best.min(nearest / (4.0 * norm));
+    }
+    best
 }
 
 fn cyclic_about_z(order: usize) -> Vec<[[f64; 3]; 3]> {
@@ -472,6 +668,97 @@ mod tests {
                 &[identity()]
             )
             .is_none()
+        );
+    }
+
+    fn ungated_projection(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
+        let orientations = inertia_orientations(x, classes.len())?;
+        clear_op_cache();
+        let mut best: Option<(usize, GroupProjection)> = None;
+        for (rank, name, ops) in [
+            (2, "D_5h", d5h_ops()),
+            (1, "C_5", cyclic_about_z(5)),
+            (0, "C_i", inversion_ops()),
+        ] {
+            let Some((coordinates, measure)) = project(x, classes, &ops, &orientations) else {
+                continue;
+            };
+            if closest_pair(&coordinates) < SINGULAR_PAIR {
+                continue;
+            }
+            let replace = match &best {
+                None => true,
+                Some((incumbent_rank, incumbent)) => {
+                    measure < incumbent.measure
+                        || (measure == incumbent.measure && rank < *incumbent_rank)
+                }
+            };
+            if replace {
+                best = Some((
+                    rank,
+                    GroupProjection {
+                        coordinates,
+                        measure,
+                        group: name,
+                    },
+                ));
+            }
+        }
+        best.map(|(_, projection)| projection)
+    }
+
+    fn assert_same_projection(gated: &GroupProjection, full: &GroupProjection) {
+        assert_eq!(gated.group, full.group);
+        assert_eq!(gated.measure.to_bits(), full.measure.to_bits());
+        assert_eq!(gated.coordinates.len(), full.coordinates.len());
+        for (left, right) in gated.coordinates.iter().zip(full.coordinates.iter()) {
+            assert_eq!(left.to_bits(), right.to_bits(), "{left} vs {right}");
+        }
+    }
+
+    #[test]
+    fn inversion_is_skipped_only_when_it_cannot_change_the_group() {
+        let octahedron = Array1::from_vec(vec![
+            1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            -1.0,
+        ]);
+        let mut noisy = bipyramid();
+        noisy[2] += 0.25;
+        let mut chiral = Array1::zeros(36);
+        for atom in 0..12 {
+            let angle = 0.47 * atom as f64;
+            chiral[3 * atom] = (0.4 + 0.05 * atom as f64) * angle.cos();
+            chiral[3 * atom + 1] = (0.35 + 0.04 * atom as f64) * angle.sin();
+            chiral[3 * atom + 2] = 0.15 * atom as f64 - 0.8;
+        }
+        for x in [octahedron, noisy, chiral] {
+            let classes = vec![0; x.len() / 3];
+            let full = ungated_projection(x.view(), &classes).expect("full");
+            clear_op_cache();
+            let gated = propose(x.view(), &classes).expect("gated");
+            assert_same_projection(&gated, &full);
+            let orientations = inertia_orientations(x.view(), classes.len()).expect("axes");
+            let (centred, _, _) = centre_and_scale(x.view(), classes.len()).expect("centre");
+            let bound = inversion_lower_measure(&centred, &orientations);
+            let (_, solved) =
+                project(x.view(), &classes, &inversion_ops(), &orientations).expect("inversion");
+            assert!(
+                bound <= solved + 1.0e-9 * (1.0 + solved),
+                "bound {bound} exceeds the solved inversion measure {solved}"
+            );
+        }
+        let mut noisy = bipyramid();
+        noisy[2] += 0.25;
+        let classes = vec![0; 7];
+        let orientations = inertia_orientations(noisy.view(), 7).expect("axes");
+        let (centred, _, _) = centre_and_scale(noisy.view(), 7).expect("centre");
+        let bound = inversion_lower_measure(&centred, &orientations);
+        let (_, fivefold) =
+            project(noisy.view(), &classes, &d5h_ops(), &orientations).expect("d5h");
+        let margin = 1.0e-6 * (1.0 + fivefold);
+        assert!(
+            bound > fivefold + margin,
+            "the noisy bipyramid should settle inversion without the assignment, bound {bound} fivefold {fivefold}"
         );
     }
 

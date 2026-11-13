@@ -239,6 +239,15 @@ pub struct Config {
     pub bias_height: f64,
     /// Well-tempered bias factor; must exceed one.
     pub bias_gamma: f64,
+    /// How often a proposal pays for the basin scan.
+    ///
+    /// One is every proposal: the biased Metropolis difference and the
+    /// deposit. A larger stride still checks every downhill proposal and
+    /// every accepted step exactly, and one proposal in `basin_stride`
+    /// even when the bare energy rose. The others are decided on the
+    /// bare energy and do not touch the index. Lennard-Jones and TIP4P
+    /// keep one, so their evaluation counts stay.
+    pub basin_stride: usize,
     /// Distance below which two states are the same basin.
     ///
     /// Its units are those of whichever metric keys the bias. Against a sorted
@@ -652,6 +661,16 @@ pub struct Config {
     ///
     /// See [`crate::allocate::DepthAllocator`].
     pub depth_reward: bool,
+    /// Which rule picks the move arm.
+    ///
+    /// [`ArmSelection::Posterior`] is the historical rule and the paper
+    /// preset: the Normal-Gamma depth posterior when [`Config::depth_reward`]
+    /// is on, otherwise the floored Thompson allocator when
+    /// [`Config::allocate_moves`] is on, otherwise a uniform draw.
+    /// [`ArmSelection::Uniform`] draws an arm uniformly and does not consult
+    /// that posterior. Rewards, screens, and the move library stay as they are.
+    #[serde(skip_serializing_if = "arm_selection_is_posterior")]
+    pub arm_selection: ArmSelection,
     /// Reward the move allocator only for accepted hops that land in a new
     /// basin, not for accepted returns.
     ///
@@ -974,6 +993,13 @@ pub struct Config {
     /// [`Config::screen_margin`], since the full relaxation runs only where
     /// the partial energy sits within the margin of the incumbent.
     pub trace_quenched: bool,
+    /// The pair potential is still bound at the second-neighbour distance.
+    ///
+    /// Set from [`crate::potentials::PairKind::second_neighbour_energy`],
+    /// not from the number of atoms. When it is set, the search quenches
+    /// one Mackay cap before the walk. Off for Lennard-Jones and for
+    /// short-ranged Morse, which keeps those call counts unchanged.
+    pub long_ranged: bool,
     /// Extra relaxation steps spent polishing a new best to share tolerance.
     ///
     /// Screened hopping's economy is that almost no hop is fully relaxed, so
@@ -1035,6 +1061,25 @@ pub struct Config {
     /// the hop nor names the minimum. One pass spends the calls on the
     /// descent. Off by default; the water arms turn it on.
     pub quench_once: bool,
+    /// Stop once a recorded energy is at or below this value.
+    ///
+    /// `None`, the default, leaves the budget as the only energy-blind
+    /// stop. A finite value is the harness equivalent of GMIN's TARGET:
+    /// the search ends at the first recorded minimum that reaches it, and
+    /// the walk is not steered before that. The library does not supply
+    /// a value; a benchmark that knows its reference passes one in.
+    /// Absent from the resolved JSON until it is set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_energy: Option<f64>,
+    /// Pay the move allocator only for an improvement of the incumbent.
+    ///
+    /// Off by default: an accepted step still counts. A molecular water
+    /// walk accepts nearly every proposal, so that reward keeps an
+    /// unproductive arm in the draw. On, the weight follows the
+    /// improvement rate, and a stalled chain restarts from a stored
+    /// low basin other than the one it is in.
+    #[serde(skip_serializing_if = "is_false")]
+    pub improvement_rewards: bool,
     /// Relaunch from the incumbent when the chain is this far above it.
     ///
     /// Zero leaves the walk where acceptance put it. A positive gap, in
@@ -1117,6 +1162,23 @@ pub struct Config {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+fn arm_selection_is_posterior(value: &ArmSelection) -> bool {
+    *value == ArmSelection::Posterior
+}
+
+/// How a hop picks its move arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArmSelection {
+    /// Depth posterior when [`Config::depth_reward`] is set, otherwise the
+    /// floored Thompson allocator when [`Config::allocate_moves`] is set,
+    /// otherwise a uniform draw.
+    #[default]
+    Posterior,
+    /// Draw one arm uniformly. The depth posterior is not consulted.
+    Uniform,
 }
 
 impl Config {
@@ -1280,11 +1342,23 @@ impl Config {
         cfg
     }
 
-    /// CNA 555 / Ih packing diagnostics apply only to a monoatomic
-    /// cluster. A molecule or a slab has species or a frozen frame;
-    /// those are not Honeycutt-Andersen environments.
+    /// True when every atom is the same element.
+    ///
+    /// No species vector is the unlabelled cluster. A vector that repeats
+    /// one label is that same cluster. Two distinct labels are a homotop.
+    pub fn monoatomic(&self) -> bool {
+        match self.species.as_deref() {
+            None => true,
+            Some(species) => species.windows(2).all(|pair| pair[0] == pair[1]),
+        }
+    }
+
+    /// CNA 555 / Ih packing diagnostics apply to a monoatomic cluster.
+    ///
+    /// A molecule, a slab, or two elements are not Honeycutt–Andersen
+    /// environments. One repeated label is the unlabelled cluster.
     pub fn packing_cna_applies(&self) -> bool {
-        self.species.is_none()
+        self.monoatomic()
             && self.active_region.is_none()
             && self.frozen.is_none()
             && !self.move_library.is_molecular()
@@ -1380,6 +1454,7 @@ impl Config {
             temperature: LennardJonesPreset::TEMPERATURE * energy_scale,
             bias_height: LennardJonesPreset::BIAS_HEIGHT * energy_scale,
             bias_gamma: 5.0,
+            basin_stride: 1,
             // Calibrated against the descriptor it is compared with, not
             // guessed. Over 75-point minima the sorted-pair distance between
             // independent minima is 0.9212 at the closest with a median of
@@ -1408,6 +1483,7 @@ impl Config {
             statistical_temperature: false,
             energy_bias: false,
             depth_reward: false,
+            arm_selection: ArmSelection::Posterior,
             novel_reward: false,
             soft_perturb: false,
             soft_modes: 6,
@@ -1495,6 +1571,7 @@ impl Config {
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
             precondition_bonds: false,
             trace_quenched: false,
+            long_ranged: false,
             polish_records: 0,
             surrogate_tolerance: 0.5,
             delayed_acceptance: false,
@@ -1503,6 +1580,8 @@ impl Config {
             quench_warmup: 4,
             quench_confidence: 2.0,
             quench_once: false,
+            target_energy: None,
+            improvement_rewards: false,
             incumbent_gap: 0.0,
             relax_steps: 200,
             two_phase: None,
@@ -1549,6 +1628,7 @@ impl Config {
             rotate_step: 0.40,
             local: false,
             reverse_cycles: true,
+            relocate: true,
         };
         cfg.rigid_body_geometry =
             Some(crate::potentials::Tip4pCluster::new(n_molecules).rigid_geometry());
@@ -1637,6 +1717,7 @@ impl Config {
             rotate_step: super::moves::RIGID_ORIENTATION_CAP,
             local: true,
             reverse_cycles: false,
+            relocate: true,
         };
         let contact = 4.0 * reach;
         let span = LennardJonesPreset::CONTAINER_RADIUS * contact * (self.n_points as f64).cbrt();
@@ -1681,10 +1762,15 @@ impl Config {
     /// [`Config::communicating_tip4p`].
     pub fn recommended_tip4p(n_molecules: usize) -> Self {
         let mut cfg = Self::for_tip4p(n_molecules);
+        // Depth reward, stall tabu and the return screen are the atomic
+        // Lennard-Jones controls. On rigid TIP4P they pin the walk in a
+        // cage about 5 kJ/mol above the Wales-Hodges minimum, and further
+        // calls do not leave it. The Wales-Hodges translation, rotation
+        // and cycle reversal already on `for_tip4p` do leave.
         cfg.allocate_moves = true;
-        cfg.depth_reward = true;
-        cfg.tabu_on_stall = true;
-        cfg.return_screen = true;
+        cfg.depth_reward = false;
+        cfg.tabu_on_stall = false;
+        cfg.return_screen = false;
         cfg
     }
 
@@ -1762,7 +1848,7 @@ impl Config {
 
 #[cfg(test)]
 mod coverage_behaviour {
-    use super::{Config, Keying};
+    use super::{ArmSelection, Config, Keying};
 
     #[test]
     fn morphology_keying_carries_its_own_deposition_width() {
@@ -1781,6 +1867,31 @@ mod coverage_behaviour {
     }
 
     #[test]
+    fn one_repeated_label_is_an_unlabelled_packing() {
+        let blank = Config::recommended(8);
+        assert!(blank.monoatomic());
+        assert!(blank.packing_cna_applies());
+        let pure = Config::recommended(8).with_species(vec![79; 8], None);
+        assert!(pure.monoatomic());
+        assert!(pure.packing_cna_applies());
+        let mixed = Config::recommended(8).with_species(vec![29, 29, 29, 29, 79, 79, 79, 79], None);
+        assert!(!mixed.monoatomic());
+        assert!(!mixed.packing_cna_applies());
+        assert!(!Config::recommended_tip4p(4).packing_cna_applies());
+        assert!(
+            !Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0)
+                .packing_cna_applies()
+        );
+    }
+
+    #[test]
+    fn lennard_jones_and_tip4p_scan_the_basin_every_step() {
+        assert_eq!(Config::recommended(13).basin_stride, 1);
+        assert_eq!(Config::recommended_tip4p(4).basin_stride, 1);
+        assert_eq!(Config::for_tip4p(4).basin_stride, 1);
+    }
+
+    #[test]
     fn a_resolved_preset_has_a_hex_digest() {
         let digest = Config::for_tip4p(2).resolved_sha256().expect("json");
         assert_eq!(digest.len(), 64);
@@ -1794,9 +1905,10 @@ mod coverage_behaviour {
         assert!(communicating.return_screen);
         assert_eq!(communicating.shared_deposits, 0);
         let recommended = Config::recommended_tip4p(4);
-        assert!(recommended.depth_reward);
-        assert!(recommended.tabu_on_stall);
-        assert!(recommended.return_screen);
+        assert!(!recommended.depth_reward);
+        assert_eq!(recommended.arm_selection, ArmSelection::Posterior);
+        assert!(!recommended.tabu_on_stall);
+        assert!(!recommended.return_screen);
         assert!(recommended.allocate_moves);
     }
 

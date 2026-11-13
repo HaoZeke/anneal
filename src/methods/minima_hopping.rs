@@ -771,6 +771,12 @@ pub struct EscapeFeedback {
     escape: f64,
     /// Current acceptance threshold on the energy rise.
     threshold: f64,
+    /// The threshold is not allowed to fall below this.
+    ///
+    /// A rigid chart's barriers are a few times the preset temperature.
+    /// The geometric shrink otherwise drops the window under them, and
+    /// later accepts never climb back. The default leaves the old floor.
+    threshold_floor: f64,
     /// Growth on returning to the current basin.
     pub beta_same: f64,
     /// Growth on reaching a basin already in the history.
@@ -847,6 +853,7 @@ impl EscapeFeedback {
             alpha_reject: 1.05,
             escape_ceiling: escape * 4.0,
             escape_floor: escape / 4.0,
+            threshold_floor: 1.0e-9,
             visits: HashMap::new(),
             driver_local_visits: HashMap::new(),
             n_same: 0,
@@ -922,10 +929,26 @@ impl EscapeFeedback {
 
     /// Apply local feedback without treating catalog IDs as local evidence.
     pub(crate) fn observe_driver_local(&mut self, current: Option<usize>, reached: usize) -> Visit {
+        self.observe_driver_local_scored(current, reached, true)
+    }
+
+    /// As [`Self::observe_driver_local`], but a new basin that is not
+    /// `competitive` grows the escape instead of shrinking it.
+    ///
+    /// A rigid search records a new basin on almost every kick that
+    /// breaks a contact. Those basins sit well above the incumbent.
+    /// Counting them as discoveries damps the kick, and the chain
+    /// stays in the cage.
+    pub(crate) fn observe_driver_local_scored(
+        &mut self,
+        current: Option<usize>,
+        reached: usize,
+        competitive: bool,
+    ) -> Visit {
         let prior_visits = self.driver_local_visits.get(&reached).copied();
         let visit = if current == Some(reached) {
             Visit::Same
-        } else if prior_visits.is_some() {
+        } else if prior_visits.is_some() || !competitive {
             Visit::Known
         } else {
             Visit::New
@@ -1020,8 +1043,19 @@ impl EscapeFeedback {
         }
         // Kept positive and finite; a threshold at zero rejects everything and
         // one that has run away accepts everything.
-        self.threshold = self.threshold.clamp(1e-9, 1e6);
+        self.threshold = self.threshold.clamp(self.threshold_floor, 1e6);
         ok
+    }
+
+    /// Keep the acceptance window at least `floor`.
+    ///
+    /// Used by a rigid chart, whose preset temperature is the smallest
+    /// rise the Metropolis rule of that chart was built to allow.
+    pub fn set_threshold_floor(&mut self, floor: f64) {
+        if floor.is_finite() && floor > 0.0 {
+            self.threshold_floor = floor;
+            self.threshold = self.threshold.max(floor);
+        }
     }
 
     /// Fraction of quenches that were discoveries.

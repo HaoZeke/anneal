@@ -1,0 +1,18 @@
+! Basin-hopping input taken from the Wales group LJ38 introduction.
+! The driver appends `MORSE <rho>` and one RANSEED line per run.
+! GMIN's MORSE keyword selects the native Morse pair and sets rho.
+! MONITOR, DUMPINT and TRACKDATA are omitted. They schedule output.
+
+SLOPPYCONV 5.0D-3
+TIGHTCONV 1.0D-3
+EDIFF 0.003
+MAXIT 600 500
+SAVE 2
+CENTRE
+SORT
+
+TEMPERATURE 1.0
+STEPS 90000000 1.0
+STEP 0.40 0.51
+NEWRESTART 40
+AVOID 4.0 20 F

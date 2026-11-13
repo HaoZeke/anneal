@@ -183,6 +183,24 @@ mod tests {
     use super::*;
     use ndarray::array;
 
+    struct Raw;
+    impl Fingerprint for Raw {
+        fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            x.to_owned()
+        }
+    }
+
+    #[test]
+    fn a_capped_index_reuses_the_latest_seat() {
+        let mut index = BasinIndex::new(Raw, 0.1).with_cap(2);
+        assert_eq!(index.basin_of(array![0.0].view()), 0);
+        assert_eq!(index.basin_of(array![1.0].view()), 1);
+        assert_eq!(index.n_basins(), 2);
+        assert_eq!(index.basin_of(array![5.0].view()), 1);
+        assert_eq!(index.n_basins(), 2);
+        assert!(index.seats_full());
+    }
+
     fn identity_projector_2d() -> WellTemperedBias {
         // 2D identity projector: CV is x itself.
         let projector = array![[1.0, 0.0], [0.0, 1.0]];
@@ -363,9 +381,17 @@ pub struct BasinIndex<F: Fingerprint> {
     metric: Box<dyn BasinMetric>,
     merge_radius: f64,
     centres: Vec<Array1<f64>>,
+    /// Last 32 components of each centre, packed in basin order.
+    ///
+    /// The suffix test is the one that separates most isomers, and it
+    /// only needs those components. Keeping them together means a miss
+    /// does not load the rest of the descriptor.
+    centre_suffix: Vec<f64>,
     /// Triangle-inequality keys, parallel to `centres`.
     keys: Vec<Option<f64>>,
     visits: Vec<u64>,
+    /// Most seats the index opens. `None` grows with every new region.
+    cap: Option<usize>,
 }
 
 impl<F: Fingerprint> BasinIndex<F> {
@@ -378,9 +404,32 @@ impl<F: Fingerprint> BasinIndex<F> {
             metric: Box::new(EuclideanMetric),
             merge_radius,
             centres: Vec::new(),
+            centre_suffix: Vec::new(),
             keys: Vec::new(),
             visits: Vec::new(),
+            cap: None,
         }
+    }
+
+    /// Stops opening seats once `cap` regions are registered.
+    ///
+    /// A lookup walks every seat that the triangle test cannot skip. An
+    /// uncapped index makes that walk longer on every later hop. Past the
+    /// cap a region that matches no seat reuses the latest one, so the
+    /// walk stops growing. The cap is at least one.
+    pub fn with_cap(mut self, cap: usize) -> Self {
+        self.cap = Some(cap.max(1));
+        self
+    }
+
+    /// Whether another seat would pass the cap.
+    pub fn seats_full(&self) -> bool {
+        self.cap.is_some_and(|cap| self.centres.len() >= cap)
+    }
+
+    /// Installs a seat cap on an index that was built uncapped.
+    pub fn set_cap(&mut self, cap: usize) {
+        self.cap = Some(cap.max(1));
     }
 
     /// Replaces the distance used to decide sameness.
@@ -399,6 +448,30 @@ impl<F: Fingerprint> BasinIndex<F> {
     /// Descriptor of a state.
     pub fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
         self.fingerprint.describe(x)
+    }
+
+    /// Whether the packed suffix of basin `i` is already past the radius.
+    ///
+    /// A sum of squares over any components is a lower bound on the
+    /// squared distance, so skipping here cannot hide a centre that is
+    /// inside the radius. The slack matches the packed full sum.
+    fn suffix_separates(&self, index: usize, d: ArrayView1<f64>) -> bool {
+        const SUFFIX: usize = 32;
+        if d.len() <= SUFFIX || self.centre_suffix.len() != self.centres.len() * SUFFIX {
+            return false;
+        }
+        let query = d.len() - SUFFIX;
+        let base = index * SUFFIX;
+        let limit = self.merge_radius * self.merge_radius + 1.0e-8;
+        let mut acc = 0.0;
+        for k in (0..SUFFIX).rev() {
+            let diff = d[query + k] - self.centre_suffix[base + k];
+            acc += diff * diff;
+            if acc > limit {
+                return true;
+            }
+        }
+        false
     }
 
     /// Index of the nearest registered basin within `merge_radius`.
@@ -431,6 +504,9 @@ impl<F: Fingerprint> BasinIndex<F> {
             {
                 continue;
             }
+            if self.suffix_separates(i, d) {
+                continue;
+            }
             if self.metric.distance_bounded(c.view(), d, self.merge_radius) <= self.merge_radius {
                 return Some(i);
             }
@@ -440,7 +516,14 @@ impl<F: Fingerprint> BasinIndex<F> {
 
     /// Registers a descriptor as a new basin and returns its index.
     pub fn push(&mut self, d: Array1<f64>) -> usize {
+        if self.seats_full() {
+            return self.centres.len().saturating_sub(1);
+        }
         self.keys.push(self.metric.key(d.view()));
+        if d.len() > 32 {
+            self.centre_suffix
+                .extend(d.iter().skip(d.len() - 32).copied());
+        }
         self.centres.push(d);
         self.visits.push(0);
         self.centres.len() - 1
@@ -457,6 +540,7 @@ impl<F: Fingerprint> BasinIndex<F> {
         let d = self.describe(x);
         let i = match self.lookup(d.view()) {
             Some(i) => i,
+            None if self.seats_full() => self.centres.len().saturating_sub(1),
             None => self.push(d),
         };
         self.bump(i);
@@ -556,6 +640,17 @@ impl BasinMetric for EuclideanMetric {
             return f64::INFINITY;
         }
         let limit = bound * bound;
+        // The lookup has already applied this same suffix test. Repeating
+        // it never returned, so the packed sum is the next test. A centre
+        // inside the radius still falls through to the block sum.
+        #[cfg(target_arch = "x86_64")]
+        if let (Some(left), Some(right)) = (a.as_slice(), b.as_slice())
+            && std::arch::is_x86_feature_detected!("avx2")
+            // SAFETY: AVX2 was just detected.
+            && unsafe { packed_squared_distance_exceeds(left, right, limit) }
+        {
+            return f64::INFINITY;
+        }
         let mut acc = 0.0;
         // Checked in blocks rather than per element: the branch costs more
         // than the arithmetic on a descriptor whose leading entries are nearly
@@ -574,6 +669,151 @@ impl BasinMetric for EuclideanMetric {
         }
         acc.sqrt()
     }
+}
+
+/// Packed squared distance. `true` only when a partial sum already exceeds
+/// `limit` by more than the rounding gap to the scalar block sum.
+///
+/// # Safety
+///
+/// AVX2 must be enabled. The caller checks it.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn packed_squared_distance_exceeds(a: &[f64], b: &[f64], limit: f64) -> bool {
+    use std::arch::x86_64::{
+        _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_setzero_pd, _mm256_sub_pd,
+    };
+    // The long pairs sit at the end of a sorted spectrum. A partial sum
+    // that is already far past the radius is a miss, and the forward sum
+    // below is what decides every closer comparison, so the answer stays
+    // the one the front-to-back sum returns.
+    if unsafe { long_end_separates(a, b, limit) } {
+        return true;
+    }
+    let n = a.len();
+    let mut acc0 = _mm256_setzero_pd();
+    let mut acc1 = _mm256_setzero_pd();
+    let mut acc2 = _mm256_setzero_pd();
+    let mut acc3 = _mm256_setzero_pd();
+    let mut index = 0usize;
+    while index + 16 <= n {
+        unsafe {
+            let d0 = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index)),
+                _mm256_loadu_pd(b.as_ptr().add(index)),
+            );
+            let d1 = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index + 4)),
+                _mm256_loadu_pd(b.as_ptr().add(index + 4)),
+            );
+            let d2 = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index + 8)),
+                _mm256_loadu_pd(b.as_ptr().add(index + 8)),
+            );
+            let d3 = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index + 12)),
+                _mm256_loadu_pd(b.as_ptr().add(index + 12)),
+            );
+            acc0 = _mm256_add_pd(acc0, _mm256_mul_pd(d0, d0));
+            acc1 = _mm256_add_pd(acc1, _mm256_mul_pd(d1, d1));
+            acc2 = _mm256_add_pd(acc2, _mm256_mul_pd(d2, d2));
+            acc3 = _mm256_add_pd(acc3, _mm256_mul_pd(d3, d3));
+        }
+        index += 16;
+        if index.is_multiple_of(64) {
+            let partial = unsafe {
+                horizontal(acc0) + horizontal(acc1) + horizontal(acc2) + horizontal(acc3)
+            };
+            if partial > limit + 1.0e-8 {
+                return true;
+            }
+        }
+    }
+    let mut sum =
+        unsafe { horizontal(acc0) + horizontal(acc1) + horizontal(acc2) + horizontal(acc3) };
+    while index + 4 <= n {
+        unsafe {
+            let difference = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index)),
+                _mm256_loadu_pd(b.as_ptr().add(index)),
+            );
+            let squared = _mm256_mul_pd(difference, difference);
+            sum += horizontal(squared);
+        }
+        index += 4;
+        if sum > limit + 1.0e-8 {
+            return true;
+        }
+    }
+    while index < n {
+        let difference = a[index] - b[index];
+        sum += difference * difference;
+        index += 1;
+    }
+    sum > limit + 1.0e-8
+}
+
+/// Whether the long end of a sorted spectrum is already past `limit`.
+///
+/// The margin is far wider than the rounding of a short vector sum, so a
+/// `true` here is also `true` for the front-to-back sum.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn long_end_separates(a: &[f64], b: &[f64], limit: f64) -> bool {
+    use std::arch::x86_64::{
+        _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_setzero_pd, _mm256_sub_pd,
+    };
+    let n = a.len();
+    let mut acc0 = _mm256_setzero_pd();
+    let mut acc1 = _mm256_setzero_pd();
+    let mut acc2 = _mm256_setzero_pd();
+    let mut acc3 = _mm256_setzero_pd();
+    let mut end = n;
+    let mut seen = 0usize;
+    while end >= 16 && seen < 256 {
+        let index = end - 16;
+        unsafe {
+            let d0 = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index)),
+                _mm256_loadu_pd(b.as_ptr().add(index)),
+            );
+            let d1 = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index + 4)),
+                _mm256_loadu_pd(b.as_ptr().add(index + 4)),
+            );
+            let d2 = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index + 8)),
+                _mm256_loadu_pd(b.as_ptr().add(index + 8)),
+            );
+            let d3 = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index + 12)),
+                _mm256_loadu_pd(b.as_ptr().add(index + 12)),
+            );
+            acc0 = _mm256_add_pd(acc0, _mm256_mul_pd(d0, d0));
+            acc1 = _mm256_add_pd(acc1, _mm256_mul_pd(d1, d1));
+            acc2 = _mm256_add_pd(acc2, _mm256_mul_pd(d2, d2));
+            acc3 = _mm256_add_pd(acc3, _mm256_mul_pd(d3, d3));
+        }
+        end = index;
+        seen += 16;
+        if seen.is_multiple_of(64) {
+            let partial = unsafe {
+                horizontal(acc0) + horizontal(acc1) + horizontal(acc2) + horizontal(acc3)
+            };
+            if partial > limit + 1.0e-4 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn horizontal(value: std::arch::x86_64::__m256d) -> f64 {
+    let mut lane = [0.0; 4];
+    unsafe { std::arch::x86_64::_mm256_storeu_pd(lane.as_mut_ptr(), value) };
+    lane[0] + lane[1] + lane[2] + lane[3]
 }
 
 /// Maps a state into descriptor space for coverage lookup and repulsion.
@@ -767,8 +1007,56 @@ impl Fingerprint for SiteEnergies {
     }
 }
 
+struct SortedPairCache {
+    n_points: usize,
+    bits: Vec<u64>,
+    distances: Vec<f64>,
+}
+
+std::thread_local! {
+    static SORTED_PAIR_CACHE: std::cell::RefCell<SortedPairCache> = const {
+        std::cell::RefCell::new(SortedPairCache {
+            n_points: 0,
+            bits: Vec::new(),
+            distances: Vec::new(),
+        })
+    };
+}
+
+fn cached_sorted_pairs(n_points: usize, x: ArrayView1<f64>) -> Option<Array1<f64>> {
+    SORTED_PAIR_CACHE.with(|slot| {
+        let slot = slot.borrow();
+        if slot.n_points != n_points || slot.bits.len() != x.len() {
+            return None;
+        }
+        if slot
+            .bits
+            .iter()
+            .zip(x.iter())
+            .any(|(bits, value)| *bits != value.to_bits())
+        {
+            return None;
+        }
+        Some(Array1::from(slot.distances.clone()))
+    })
+}
+
+fn remember_sorted_pairs(n_points: usize, x: ArrayView1<f64>, distances: &[f64]) {
+    SORTED_PAIR_CACHE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        slot.n_points = n_points;
+        slot.bits.clear();
+        slot.bits.extend(x.iter().map(|value| value.to_bits()));
+        slot.distances.clear();
+        slot.distances.extend_from_slice(distances);
+    });
+}
+
 impl Fingerprint for SortedPairs {
     fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        if let Some(cached) = cached_sorted_pairs(self.n_points, x) {
+            return cached;
+        }
         let n = self.n_points;
         let mut d = Vec::with_capacity(n * (n - 1) / 2);
         for i in 0..n {
@@ -780,6 +1068,7 @@ impl Fingerprint for SortedPairs {
             }
         }
         d.sort_unstable_by(f64::total_cmp);
+        remember_sorted_pairs(self.n_points, x, &d);
         Array1::from(d)
     }
 }
@@ -923,6 +1212,11 @@ impl<F: Fingerprint> BasinBias<F> {
             .collect()
     }
 
+    /// Caps the basin index this bias deposits into.
+    pub fn cap_basins(&mut self, cap: usize) {
+        self.index.set_cap(cap);
+    }
+
     /// DeGroot step toward another walker's wells.
     ///
     /// Every depth becomes `(1 - weight) * own + weight * theirs`, with a
@@ -968,7 +1262,7 @@ impl<F: Fingerprint> BasinBias<F> {
         }
         for (centre, depth) in opened {
             // Opened after the scan so a foreign well cannot match itself.
-            if self.lookup(centre.view()).is_none() {
+            if self.lookup(centre.view()).is_none() && !self.index.seats_full() {
                 self.index.push(centre);
                 self.v.push(depth);
                 self.deposit_counts.push(0);
@@ -991,11 +1285,12 @@ impl<F: Fingerprint> BasinBias<F> {
                     self.v[i] = height;
                 }
             }
-            None => {
+            None if !self.index.seats_full() => {
                 self.index.push(descriptor);
                 self.v.push(height);
                 self.deposit_counts.push(0);
             }
+            None => {}
         }
     }
 }
@@ -1037,6 +1332,47 @@ impl<F: Fingerprint> BasinBias<F> {
         self.deposit_counted(s, temp, scale, count, false);
     }
 
+    /// Height of `s` and the seat that holds it, with one scan.
+    ///
+    /// `None` means the descriptor is not inside the radius. The caller
+    /// can deposit on that seat without scanning again.
+    pub fn locate(&self, s: ArrayView1<f64>) -> (f64, Option<usize>) {
+        match self.lookup(s) {
+            Some(i) => (self.height_at(i), Some(i)),
+            None => (0.0, None),
+        }
+    }
+
+    /// Deposit height of seat `i`, or zero if the seat is absent.
+    pub fn height_at(&self, i: usize) -> f64 {
+        self.v.get(i).copied().unwrap_or(0.0)
+    }
+
+    /// One local deposit on a seat [`Self::locate`] already returned.
+    ///
+    /// A known seat is incremented in place. An unknown descriptor is
+    /// opened without a second scan. The seat after the deposit is what
+    /// the next lookup of this descriptor returns, until another seat
+    /// is opened.
+    pub fn deposit_at(&mut self, s: ArrayView1<f64>, known: Option<usize>, temp: f64) -> usize {
+        let denom = (self.gamma - 1.0) * temp;
+        if let Some(i) = known {
+            self.increment(i, denom, temp, 1.0, true);
+            return i;
+        }
+        if self.index.seats_full() {
+            let i = self.index.n_basins().saturating_sub(1);
+            self.increment(i, denom, temp, 1.0, true);
+            return i;
+        }
+        self.index.push(s.to_owned());
+        self.v.push(self.w0);
+        self.deposit_counts.push(1);
+        let i = self.index.n_basins() - 1;
+        self.index.bump(i);
+        i
+    }
+
     fn deposit_counted(
         &mut self,
         s: ArrayView1<f64>,
@@ -1051,6 +1387,7 @@ impl<F: Fingerprint> BasinBias<F> {
         let denom = (self.gamma - 1.0) * temp;
         let i = match self.lookup(s) {
             Some(i) => i,
+            None if self.index.seats_full() => self.index.n_basins().saturating_sub(1),
             None => {
                 self.index.push(s.to_owned());
                 self.v.push(scale * self.w0);
@@ -1214,6 +1551,18 @@ mod basin_bias_tests {
         for k in 0..da.len() {
             assert!((da[k] - db[k]).abs() < 1e-12, "component {k} differs");
         }
+    }
+
+    #[test]
+    fn a_repeated_distance_spectrum_keeps_the_same_values() {
+        let fp = SortedPairs { n_points: 4 };
+        let a = tetra(1.2);
+        let first = fp.describe(a.view());
+        assert_eq!(fp.describe(a.view()), first);
+        let mut moved = a.clone();
+        moved[0] += 0.3;
+        assert_ne!(fp.describe(moved.view()), first);
+        assert_eq!(fp.describe(a.view()), first);
     }
 
     #[test]

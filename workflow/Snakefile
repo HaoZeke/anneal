@@ -42,6 +42,124 @@ rule lj_seed:
         """
 
 
+# Gupta zinc and Cu19Au19 against the ASE genetic algorithm.
+# Not part of `rule all`. One serial session, both arms, Cambridge budgets:
+#   snakemake -s workflow/Snakefile metal_h2h
+rule metal_h2h:
+    output:
+        "bench/metal-cluster-h2h/results.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/metal_h2h/enter_bench.sh
+        """
+
+# Darby Cu-Au against GMIN's binary Gupta, at the paper call budgets.
+# Not part of `rule all`. Run it by name:
+#   snakemake -s workflow/Snakefile metal_darby_h2h
+rule metal_darby_h2h:
+    output:
+        "bench/metal-cluster-h2h/darby.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/metal_h2h/enter_darby.sh
+        """
+
+
+# Reduced Sutton–Chen against GMIN. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile sc_h2h
+rule sc_h2h:
+    output:
+        "bench/metal-cluster-h2h/sc-8e076b7f/results.csv",
+        "bench/metal-cluster-h2h/sc-8e076b7f/seeds.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/metal_h2h/enter_sc.sh
+        """
+
+
+# Cleri–Rosato Pt–Cu against GMIN. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile ptcu_h2h
+rule ptcu_h2h:
+    output:
+        "bench/metal-cluster-h2h/ptcu-b3d03061/results.csv",
+        "bench/metal-cluster-h2h/ptcu-b3d03061/seeds.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/metal_h2h/enter_ptcu.sh
+        """
+
+
+# GMIN against the recommended preset on Cambridge Morse clusters.
+# Not part of `rule all`. Run it by name:
+#   snakemake -s workflow/Snakefile morse_h2h
+rule morse_h2h:
+    output:
+        "bench/morse-h2h/results.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/morse_h2h/enter_bench.sh
+        """
+
+
+# GMIN against the paper preset at the paper force-call budgets.
+# Not part of `rule all`. Run it by name:
+#   snakemake -s workflow/Snakefile gmin_h2h
+rule gmin_h2h:
+    output:
+        "bench/gmin-h2h/results.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/gmin_h2h/enter_bench.sh
+        """
+
+
+# Fiorentino and Marzari RPQA against the paper preset on LJ38.
+# Not part of `rule all`. One serial session, both arms, core 0:
+#   snakemake -s workflow/Snakefile pimc_lj38
+rule pimc_lj38:
+    output:
+        "bench/pimc-lj38/results.csv",
+        "bench/pimc-lj38/seeds.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/pimc_lj38/enter_bench.sh
+        """
+
+
+# GrowPAL against the paper preset at the paper evaluation budgets.
+# Not part of `rule all`. One serial session, both arms, core 0:
+#   snakemake -s workflow/Snakefile growpal_h2h
+rule growpal_h2h:
+    output:
+        "bench/growpal-h2h/results.csv",
+        "bench/growpal-h2h/seeds.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/growpal_h2h/enter_bench.sh
+        """
+
+
+# Depth-posterior ablation on LJ38, LJ55, LJ75, LJ98, and LJ104.
+# Not part of `rule all`. One serial session, both arms, paper budgets:
+#   snakemake -s workflow/Snakefile depth_posterior_ablation
+rule depth_posterior_ablation:
+    output:
+        "bench/depth-posterior-ablation/results.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/depth_posterior_ablation/enter_bench.sh
+        """
+
+
 # Lennard-Jones head-to-head against the published bonobo initialiser.
 # Not part of `rule all`. Run it by name:
 #   snakemake -s workflow/Snakefile lj_bonobo_h2h
@@ -53,4 +171,50 @@ rule lj_bonobo_h2h:
         """
         set -euo pipefail
         bash scripts/lj_bonobo_h2h/enter_bench.sh
+        """
+
+
+# GFN2-xTB (H2O)20 anneal versus CREST. Not part of `rule all`.
+# Write bench/water-h2o20-goat/reference.csv with
+# scripts/h2o20_goat_reference.sh before this rule. GOAT rows are
+# skipped unless `orca` is on PATH.
+#   snakemake -s workflow/Snakefile water_h2o20_goat
+rule water_h2o20_goat:
+    input:
+        "bench/water-h2o20-goat/reference.csv",
+    output:
+        "bench/water-h2o20-goat/results.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/h2o20_goat_campaign.sh
+        """
+
+
+# Paper minima dumps, xyz dumps, and raw runs listed in data/hf-files.csv.
+# Dataset: rgoswami/anneal-paper-data (repo type dataset).
+# Not part of `rule all`. Scripts that read those files call the same
+# program before they open them.
+#   snakemake -s workflow/Snakefile fetch_paper_data
+rule fetch_paper_data:
+    output:
+        "build/hf-fetch.ok",
+    shell:
+        """
+        set -euo pipefail
+        python3 scripts/data/fetch_data.py
+        mkdir -p build
+        : > build/hf-fetch.ok
+        """
+
+
+# TIP4P (H2O)10, 15 and 20 on the paper preset. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile tip4p_rates
+rule tip4p_rates:
+    output:
+        "bench/tip4p-water-rates/rates.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/tip4p_rates/enter_bench.sh
         """

@@ -12,8 +12,9 @@
 //! each energy-and-gradient pair inside a quench, and one charge for each
 //! gradient the climb reads. The search stops when the quenched energy is
 //! at or below the published minimum plus 0.001, or when the budget is
-//! spent. A miss is reported as the full budget. The configuration is
-//! `Config::recommended` with no further change.
+//! spent. A miss is reported as the full budget. `pot_s` is the time
+//! spent inside the potential, summed over the charged evaluations.
+//! The configuration is `Config::recommended` with no further change.
 //!
 //! `coords` writes the start that `run` quenches, one Cartesian line per
 //! atom, so another code can open the same geometry.
@@ -61,7 +62,13 @@ fn cmd_run(args: &[String]) -> i32 {
         return 2;
     };
     let budget = env_budget().unwrap_or(spec.budget);
-    let cfg = Config::recommended(spec.n);
+    let mut cfg = Config::recommended(spec.n);
+    // Unset leaves the library stride of one.
+    if let Ok(text) = std::env::var("H2H_BASIN_STRIDE")
+        && let Ok(stride) = text.parse::<usize>()
+    {
+        cfg.basin_stride = stride.max(1);
+    }
     let start = start_of(&cfg, spec.n, seed);
     if let Some(path) = args.get(3)
         && let Err(err) = write_coords(path, &start)
@@ -69,7 +76,7 @@ fn cmd_run(args: &[String]) -> i32 {
         eprintln!("coords: {err}");
         return 1;
     }
-    let (outcome, wall) = search(&cfg, spec.n, &start, seed, budget, spec.reference);
+    let (outcome, wall, pot_s) = search(&cfg, spec.n, &start, seed, budget, spec.reference);
     let level = spec.reference + HIT_TOL;
     let hit = outcome.best <= level;
     let at_hit = outcome
@@ -78,9 +85,11 @@ fn cmd_run(args: &[String]) -> i32 {
         .find(|(_, _, _, energy)| *energy <= level)
         .map(|(_, spent, _, _)| *spent);
     let evals = evals_to_hit(hit, at_hit.or(hit.then_some(outcome.charged)), budget);
-    println!("system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,head,tree,cpu,pins");
     println!(
-        "{system},anneal,{seed},{},{hit},{evals},{},{wall:.6},{:.8},{},{},{},{}",
+        "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,head,tree,cpu,pins,pot_s"
+    );
+    println!(
+        "{system},anneal,{seed},{},{hit},{evals},{},{wall:.6},{:.8},{},{},{},{},{pot_s:.6}",
         budget,
         outcome.charged,
         outcome.best,
@@ -233,7 +242,10 @@ fn system_spec(name: &str) -> Option<Spec> {
         "lj55" => (55, -279.248470),
         "lj75" => (75, -397.492331),
         "lj98" => (98, -543.665361),
+        "lj102" => (102, -569.363652),
         "lj104" => (104, -582.086642),
+        "lj150" => (150, -893.310258),
+        "lj200" => (200, -1229.184776),
         _ => return None,
     };
     Some(Spec {
@@ -248,7 +260,7 @@ fn paper_budget(n: usize) -> Option<usize> {
     match n {
         38 => Some(400_000),
         55 => Some(1_000_000),
-        75 | 98 | 102 | 104 => Some(4_000_000),
+        75 | 98 | 102 | 104 | 150 | 200 => Some(4_000_000),
         _ => None,
     }
 }
@@ -265,18 +277,25 @@ fn search(
     seed: u64,
     budget: usize,
     reference: f64,
-) -> (Outcome, f64) {
+) -> (Outcome, f64, f64) {
     let potential = PairPotential::lennard_jones(n);
     let mut ledger = Ledger::new(budget);
     ledger.stop_below(reference + HIT_TOL);
     let mut optimiser = WarmLbfgs::default();
+    let pot_ns = std::sync::atomic::AtomicU64::new(0);
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
         optimiser.forget();
         let (value, relaxed, _) = optimiser.minimize(x, iterations, |v| {
             if !led.charge() {
                 return None;
             }
-            Some(potential.value_and_gradient(v))
+            let mark = Instant::now();
+            let evaluated = potential.value_and_gradient(v);
+            pot_ns.fetch_add(
+                mark.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            Some(evaluated)
         });
         (value, relaxed)
     };
@@ -284,7 +303,13 @@ fn search(
         if !led.charge() {
             return None;
         }
-        Some(potential.value_and_gradient(v).1)
+        let mark = Instant::now();
+        let gradient = potential.value_and_gradient(v).1;
+        pot_ns.fetch_add(
+            mark.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        Some(gradient)
     };
     let mut rng = StdRng::seed_from_u64(seed);
     let started = Instant::now();
@@ -297,7 +322,8 @@ fn search(
         &mut rng,
     )
     .expect("finite start");
-    (outcome, started.elapsed().as_secs_f64())
+    let pot_s = pot_ns.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1.0e9;
+    (outcome, started.elapsed().as_secs_f64(), pot_s)
 }
 
 /// A hit keeps the charged count at the first quenched record at or below
@@ -529,6 +555,8 @@ mod tests {
         assert_eq!(paper_budget(98), Some(4_000_000));
         assert_eq!(paper_budget(102), Some(4_000_000));
         assert_eq!(paper_budget(104), Some(4_000_000));
+        assert_eq!(paper_budget(150), Some(4_000_000));
+        assert_eq!(paper_budget(200), Some(4_000_000));
         assert_eq!(paper_budget(31), None);
     }
 
@@ -542,6 +570,9 @@ mod tests {
         assert_eq!(system_spec("lj98").unwrap().budget, 4_000_000);
         assert_eq!(system_spec("lj104").unwrap().budget, 4_000_000);
         assert!((system_spec("lj104").unwrap().reference + 582.086642).abs() < 1e-12);
+        assert!((system_spec("lj102").unwrap().reference + 569.363652).abs() < 1e-12);
+        assert!((system_spec("lj150").unwrap().reference + 893.310258).abs() < 1e-12);
+        assert!((system_spec("lj200").unwrap().reference + 1229.184776).abs() < 1e-12);
         assert!((HIT_TOL - 0.001).abs() < 1e-15);
         assert!(system_spec("lj31").is_none());
     }

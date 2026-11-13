@@ -22,8 +22,8 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 ///
 /// ```text
 /// matcher   cutoff   plain
-/// local     16/16    9/16
-/// ira       16/16    8/16
+/// local     16/16    7/16
+/// ira       16/16    4/16
 /// ```
 ///
 /// The hit pattern is exact, not a ceiling. Host `libm` is not one
@@ -34,8 +34,10 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 /// `libm` crate. Three calls were still the host: the fivefold turn
 /// (`2π/5` and `3π/5`), the continuous-symmetry orientation (`τ/5`),
 /// and the energy-lattice softmax. Those use the `libm` crate as well.
-/// On that walk Linux plain is `0x517b` (9 seeds). With `ira` the
-/// permutation is libira, and Linux plain is `0x76c2` (8 seeds).
+/// On that walk Linux plain was `0x517b` (9 seeds), and with `ira`
+/// `0x76c2` (8 seeds). Merging develop's stall-growth hold moves the
+/// plain masks to `0x91e4` (7 seeds) and, with glibc libira, `0x8142`
+/// (4 seeds).
 #[test]
 fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not() {
     const SEEDS: u64 = 16;
@@ -69,13 +71,15 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
             plain_mask |= 1 << seed;
         }
     }
-    // Without `ira`: cutoff 0xffff, plain 0x517b (9 seeds).
-    // With `ira`: cutoff 0xffff, plain 0x76c2 (8 seeds). libira's
-    // rotation is its own sincos, so this mask is the glibc build.
+    // Merging develop's stall-growth hold and proposal path moves which
+    // seeds reach the octahedron. The masks below are that walk, measured
+    // on this merge. Without `ira`: cutoff 0xffff, plain 0x91e4 (7 seeds).
+    // With `ira`: cutoff 0xffff, plain 0x8142 (4 seeds). libira's rotation
+    // is its own sincos, so the IRA mask is the glibc build.
     let plain_exact = if cfg!(feature = "ira") {
-        0x76c2
+        0x8142
     } else {
-        0x517b
+        0x91e4
     };
     assert_eq!(
         compact_mask, 0xffff,

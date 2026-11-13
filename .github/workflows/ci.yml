@@ -113,10 +113,10 @@ jobs:
       # 235683cf30fc3cff9d3be5f92ac26b5a046483e1 is the commit of #50 on
       # develop. Its subject, "cluster_hopping: reverse hydrogen-bond cycles
       # in rigid water (#50)", does not parse as a conventional commit, and
-      # develop keeps it as it is. cog check of exempt..tip also walks base
-      # commits that exempt does not reach, because the pull-request checkout
-      # is a merge. Check each commit the pull request adds, and leave that
-      # one subject out.
+      # develop keeps it as it is. cog skips only merge and fixup commits,
+      # so a range that holds this one is checked in two parts: up to its
+      # parent, and from it to the tip. The second part also walks the
+      # commits of the base branch that 235683cf does not reach.
       - name: Conventional commits check
         shell: bash
         env:
@@ -128,56 +128,29 @@ jobs:
              ! git cat-file -e "$COG_FROM^{commit}"; then
             COG_FROM=$(git rev-parse "$COG_TO^")
           fi
-          if git cat-file -e "$COG_EXEMPT^{commit}" \
-             && git merge-base --is-ancestor "$COG_EXEMPT" "$COG_TO" \
-             && ! git merge-base --is-ancestor "$COG_EXEMPT" "$COG_FROM"; then
+          if git merge-base --is-ancestor "$COG_EXEMPT" "$COG_TO" &&
+             ! git merge-base --is-ancestor "$COG_EXEMPT" "$COG_FROM"; then
             status=0
-            while read -r commit; do
-              if [[ "$commit" == "$COG_EXEMPT" ]]; then
-                continue
+            for range in "$COG_FROM..$COG_EXEMPT^" "$COG_EXEMPT..$COG_TO"; do
+              # cog check A..A checks commit A, so an empty part is left out.
+              count=$(git rev-list --count "$range")
+              if ((count > 0)); then
+                echo "cog check $range"
+                cog check "$range" || status=1
               fi
-              # A merge's first-parent range also contains the other parent's
-              # commits. Those commits are checked on their own, and cog
-              # already ignores the merge subject.
-              if git rev-parse --verify --quiet "${commit}^2" >/dev/null; then
-                continue
-              fi
-              cog check "$commit^..$commit" || status=1
-            done < <(git rev-list --reverse "$COG_FROM..$COG_TO")
+            done
             exit "$status"
           fi
           cog check "$COG_FROM..$COG_TO"
 
-      # A pull-request checkout is the merge of the base into the head, so
-      # `git rev-list --objects HEAD` also lists blobs the base already has.
-      # Those still fail a push of the base, which audits HEAD. A pull request
-      # audits the objects its own commits add, at the same 1 MiB bar.
       - name: Audit for large files
         shell: bash
-        env:
-          AUDIT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
-          AUDIT_HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
-          if [[ -n "$AUDIT_BASE" ]] && git cat-file -e "$AUDIT_BASE^{commit}" \
-              && git cat-file -e "$AUDIT_HEAD^{commit}"; then
-            range="$AUDIT_BASE..$AUDIT_HEAD"
-          else
-            range=HEAD
-          fi
-          if [[ "$range" == HEAD ]]; then
-            objects=$(git rev-list --objects HEAD)
-          else
-            objects=$(git rev-list --objects "$range")
-          fi
-          if [[ -z "$objects" ]]; then
-            oversized=
-          else
-            oversized=$(
-              printf '%s\n' "$objects" |
-                git cat-file --batch-check='%(objecttype) %(objectsize) %(objectname) %(rest)' |
-                awk '$1 == "blob" && $2 > 1048576'
-            )
-          fi
+          oversized=$(
+            git rev-list --objects HEAD |
+              git cat-file --batch-check='%(objecttype) %(objectsize) %(objectname) %(rest)' |
+              awk '$1 == "blob" && $2 > 1048576'
+          )
           if [[ -n "$oversized" ]]; then
             printf 'Git history contains blobs larger than 1 MiB:\n%s\n' "$oversized" >&2
             exit 1
@@ -294,23 +267,36 @@ jobs:
           echo "VESIN_SRC=$GITHUB_WORKSPACE/.ci/vesin" >> "$GITHUB_ENV"
           echo "IRA_LIB_DIR=$GITHUB_WORKSPACE/.ci/ira/lib" >> "$GITHUB_ENV"
 
-      # Do not pass `-undefined dynamic_lookup` on macOS. It applies to the
-      # test harness as well as the cdylib. With pyo3's `extension-module`
-      # feature the harness does not link libpython, and dyld then fails
-      # before any test with `_PyBaseObject_Type` missing in the flat
-      # namespace. build.rs links libpython for this invocation. Maturin
-      # still passes the lookup flag when it builds the wheel.
       - name: cargo test
+        if: runner.os != 'macOS'
         run: cargo test
+
+      - name: cargo test (macOS)
+        if: runner.os == 'macOS'
+        run: >-
+          cargo
+          --config 'target.x86_64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
+          --config 'target.aarch64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
+          test
 
       # Feature flags stamp new hashes on the same test binaries and
       # examples. Keeping the default-feature target filled the disk
       # during the second link.
       - name: cargo clean (before feature tests)
+        if: runner.os != 'macOS'
         run: cargo clean
 
       - name: cargo test (all satisfiable features)
+        if: runner.os != 'macOS'
         run: cargo test --features "$CI_FEATURES"
+
+      - name: cargo test (all satisfiable features, macOS)
+        if: runner.os == 'macOS'
+        run: >-
+          cargo
+          --config 'target.x86_64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
+          --config 'target.aarch64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
+          test --features "$CI_FEATURES"
 
       # maturin develop builds the dev profile and cannot reuse the
       # opt-level 2 test artifacts. Drop them before the wheel.
@@ -346,9 +332,13 @@ jobs:
 
       # The tests that drive a real ChemFit Fitter skip without ChemFit. It
       # pins numpy<2.4, so it goes in only after the steps above have run on
-      # the newest numpy. Its next branch has no release, hence the commit.
-      # The ChemFit tests hold array-API rows too, so each step checks again
-      # that array-api-strict imports after ChemFit has moved numpy.
+      # the newest numpy. 3.1.1 speaks ask/tell and keeps the incumbent on
+      # FitContext.opt_params. 4.0.0, the current release, speaks
+      # evaluate/step and keeps it on FitContext.opt_context. main is
+      # installed from git: at 2c2d58b it matches the 4.0.0 Fitter apart from
+      # the README, and a later protocol change fails this step. The ChemFit
+      # tests hold array-API rows too, so each step checks again that
+      # array-api-strict imports after ChemFit has moved numpy.
       - name: pytest (ChemFit 3.1.1, ask/tell)
         run: |
           .venv/bin/python -m pip install "chemfit==3.1.1"
@@ -356,11 +346,20 @@ jobs:
           .venv/bin/python -c "import array_api_strict"
           .venv/bin/python -m pytest pytest/test_chemfit*.py
 
-      - name: pytest (ChemFit next, evaluate/step)
+      - name: pytest (ChemFit 4.0.0, evaluate/step)
+        run: |
+          .venv/bin/python -m pip uninstall --yes chemfit
+          .venv/bin/python -m pip install "chemfit==4.0.0"
+          .venv/bin/python -c "from chemfit.fitter import Fitter; assert hasattr(Fitter, 'step')"
+          .venv/bin/python -c "from chemfit.fitter import FitContext; assert hasattr(FitContext, 'parameters')"
+          .venv/bin/python -c "import array_api_strict"
+          .venv/bin/python -m pytest pytest/test_chemfit*.py
+
+      - name: pytest (ChemFit main, evaluate/step)
         run: |
           .venv/bin/python -m pip uninstall --yes chemfit
           .venv/bin/python -m pip install \
-            "chemfit @ git+https://github.com/MSallermann/chemfit@37dcfe69c118419d040a0d7f3bf8304d52b569e2"
+            "chemfit @ git+https://github.com/MSallermann/chemfit@main"
           .venv/bin/python -c "from chemfit.fitter import Fitter; assert hasattr(Fitter, 'step')"
           .venv/bin/python -c "import array_api_strict"
           .venv/bin/python -m pytest pytest/test_chemfit*.py

@@ -61,7 +61,7 @@ binary = cluster_search(
 A rigid chart uses centre and Rodrigues coordinates.
 =n= is the number of bodies.
 =layout="block"= stores every centre, then every rotation.
-=layout="interleaved"= is centre then rotation vector per body, and the rotations are negated at the boundary.
+=layout="interleaved"= is centre then rotation vector per body, with the same rotation vectors as the block.
 The orientation step turns every body and leaves the centres where they are.
 On a chart of more than ten bodies the acceptance factor stays at 4.
 Its orientation amplitude is scaled toward an acceptance ratio of one half.

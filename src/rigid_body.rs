@@ -4,6 +4,8 @@
 //! Species-separated distance spectra retain orientation information without
 //! treating equivalent atoms or equivalent rotation charts as distinct states.
 
+use std::cell::RefCell;
+
 use ndarray::{Array1, ArrayView1};
 
 /// Site geometry relative to the center used by the objective's rigid-body chart.
@@ -116,40 +118,71 @@ impl RigidBodyGeometry {
     }
 
     /// Sorted site distances in stable species-pair blocks.
+    ///
+    /// The block buffers are reused. A hop asks for this spectrum several
+    /// times, and building a fresh vector of vectors on each ask was a
+    /// visible part of the time spent outside the potential.
     pub fn describe(&self, molecules: usize, state: ArrayView1<f64>) -> Array1<f64> {
+        // A hop asks for the spectrum of one minimum several times. The last
+        // answer is reused when the centres and rotations are unchanged.
+        thread_local! {
+            static LAST: RefCell<Option<(usize, usize, Vec<f64>, Vec<f64>)>> = const { RefCell::new(None) };
+        }
+        let marker = self as *const Self as usize;
+        let state_key = state
+            .as_slice()
+            .map(|slice| slice.to_vec())
+            .unwrap_or_else(|| state.iter().copied().collect());
+        if let Some(hit) = LAST.with(|cell| {
+            cell.borrow().as_ref().and_then(|cached| {
+                (cached.0 == marker && cached.1 == molecules && cached.2 == state_key)
+                    .then(|| cached.3.clone())
+            })
+        }) {
+            return Array1::from(hit);
+        }
         let points = self.expand(molecules, state);
         let sites_per_molecule = self.sites.len();
         let n = molecules * sites_per_molecule;
-        let mut blocks: Vec<Vec<f64>> = self
-            .block_keys
-            .iter()
-            .map(|&(a, b)| {
-                let count_a =
-                    molecules * self.species.iter().filter(|&&species| species == a).count();
-                let count_b =
-                    molecules * self.species.iter().filter(|&&species| species == b).count();
-                let capacity = if a == b {
-                    count_a * count_a.saturating_sub(1) / 2
-                } else {
-                    count_a * count_b
-                };
-                Vec::with_capacity(capacity)
-            })
-            .collect();
-        for i in 0..n {
-            for j in i + 1..n {
-                let distance = (0..3)
-                    .map(|k| (points[3 * i + k] - points[3 * j + k]).powi(2))
-                    .sum::<f64>()
-                    .sqrt();
-                let site_i = i % sites_per_molecule;
-                let site_j = j % sites_per_molecule;
-                blocks[self.block_of_pair[site_i * sites_per_molecule + site_j]].push(distance);
+        let nblocks = self.block_keys.len();
+        thread_local! {
+            static BLOCKS: RefCell<Vec<Vec<f64>>> = const { RefCell::new(Vec::new()) };
+        }
+        BLOCKS.with(|cell| {
+            let mut blocks = cell.borrow_mut();
+            if blocks.len() < nblocks {
+                blocks.resize_with(nblocks, Vec::new);
             }
-        }
-        for distances in &mut blocks {
-            distances.sort_unstable_by(f64::total_cmp);
-        }
-        Array1::from(blocks.into_iter().flatten().collect::<Vec<_>>())
+            for block in blocks.iter_mut().take(nblocks) {
+                block.clear();
+            }
+            for i in 0..n {
+                let pi = 3 * i;
+                for j in i + 1..n {
+                    let pj = 3 * j;
+                    let mut distance = 0.0;
+                    for k in 0..3 {
+                        let delta = points[pi + k] - points[pj + k];
+                        distance += delta * delta;
+                    }
+                    let site_i = i % sites_per_molecule;
+                    let site_j = j % sites_per_molecule;
+                    blocks[self.block_of_pair[site_i * sites_per_molecule + site_j]]
+                        .push(distance.sqrt());
+                }
+            }
+            for block in blocks.iter_mut().take(nblocks) {
+                block.sort_unstable_by(f64::total_cmp);
+            }
+            let total = blocks.iter().take(nblocks).map(|block| block.len()).sum();
+            let mut flat = Vec::with_capacity(total);
+            for block in blocks.iter().take(nblocks) {
+                flat.extend_from_slice(block);
+            }
+            LAST.with(|cell| {
+                *cell.borrow_mut() = Some((marker, molecules, state_key, flat.clone()));
+            });
+            Array1::from(flat)
+        })
     }
 }

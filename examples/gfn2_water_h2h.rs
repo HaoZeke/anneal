@@ -1,6 +1,10 @@
 //! One (H2O)m GFN2-xTB seed for the arm-3 head-to-head.
 //!
-//! Usage: gfn2_water_h2h <m_molecules> <budget> <seed> <outdir>
+//! Usage: gfn2_water_h2h <m_molecules> <budget> <seed> <outdir> [target_energy]
+//!
+//! `target_energy`, or `H2O_TARGET_EV` when the argument is omitted, is an
+//! optional stop in eV. Unset, the search runs out the budget. The binary
+//! has no built-in reference.
 //!
 //! The start is a rigid repack of the isolated-water template from
 //! `StdRng::seed_from_u64(seed)`, then the hexamer driver's overlap
@@ -358,6 +362,14 @@ fn main() {
     let budget: usize = args.get(1).and_then(|v| v.parse().ok()).expect("budget");
     let seed: u64 = args.get(2).and_then(|v| v.parse().ok()).expect("seed");
     let outdir = PathBuf::from(args.get(3).expect("outdir"));
+    let target_energy = args
+        .get(4)
+        .map(|v| v.parse::<f64>().expect("target_energy"))
+        .or_else(|| {
+            std::env::var("H2O_TARGET_EV")
+                .ok()
+                .map(|v| v.parse::<f64>().expect("H2O_TARGET_EV"))
+        });
     fs::create_dir_all(&outdir).expect("outdir");
     assert!(budget > 0 && m > 0, "budget and m must be positive");
     if let Ok(xyz) = std::env::var("H2H_AUDIT_XYZ") {
@@ -369,6 +381,7 @@ fn main() {
     let groups = water_groups(m).expect("groups");
     let mut cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
     configure_water_arm(&mut cfg, WaterSearchArm::Recommended);
+    cfg.target_energy = target_energy;
     cfg.move_library = MoveLibrary::Molecular {
         groups: groups.clone(),
         reactive: false,
@@ -425,6 +438,10 @@ fn main() {
     writeln!(meta, "molecules: {m}").ok();
     writeln!(meta, "seed: {seed}").ok();
     writeln!(meta, "budget: {budget}").ok();
+    match cfg.target_energy {
+        Some(energy) => writeln!(meta, "target_energy_eV: {energy:.6}").ok(),
+        None => writeln!(meta, "target_energy_eV: off").ok(),
+    };
     writeln!(meta, "spread_steps: {spread_steps}").ok();
     writeln!(meta, "start_intact: {intact}").ok();
     writeln!(meta, "crate: {}", env!("CARGO_PKG_VERSION")).ok();
@@ -438,7 +455,9 @@ fn main() {
 
     let atmnrs: Vec<i32> = (0..m).flat_map(|_| [8, 1, 1]).collect();
     let box_ = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];
-    let pot = RgpotObjective::xtb(&atmnrs, box_);
+    let mut pot = RgpotObjective::xtb(&atmnrs, box_);
+    // One pot for the seed. A search starts with the engine's own guess.
+    pot.restart();
     let n_molecules = m;
     let objective = ForceObjective::new(3 * atmnrs.len(), n_molecules, move |coordinates| {
         let (energy, gradient) = pot
@@ -501,6 +520,12 @@ fn main() {
             writeln!(meta, "objective_best_eV: nan").ok();
             writeln!(meta, "engine_best_eV: nan").ok();
             writeln!(meta, "best_intact: false").ok();
+            write_xyz(
+                &outdir.join("best.xyz"),
+                start_slice,
+                "search failed; start geometry kept",
+            )
+            .expect("best xyz");
             let line = force_audit_line(seed, f64::INFINITY);
             writeln!(meta, "{line}").ok();
             println!("{line}");
@@ -542,35 +567,47 @@ fn main() {
     for &(hops, charged, basins, energy) in &outcome.improvements {
         writeln!(trace, "{hops} {charged} {basins} {energy:.10}").ok();
     }
-    if let Some(state) = outcome.best_state.as_ref() {
-        let coords = state.as_slice().expect("best contiguous");
-        let (wall_e, _) = oh_wall(coords, m);
-        let (engine_e, gradient) = objective.value_and_gradient(state.view());
-        // The objective includes the wall. The engine energy is that total
-        // minus the wall, which is zero when every covalent O-H is inside
-        // the onset.
-        let engine_best = engine_e - wall_e;
-        let gnorm = gradient.iter().map(|v| v * v).sum::<f64>().sqrt();
-        let best_intact = monomers_intact(coords, m).unwrap_or(false);
-        writeln!(meta, "wall_at_best_eV: {wall_e:.10}").ok();
-        writeln!(meta, "engine_best_eV: {engine_best:.10}").ok();
-        writeln!(meta, "gradient_norm_eV_per_A: {gnorm:.6e}").ok();
-        let max_force = max_abs_force(gradient.as_slice().unwrap_or(&[]));
-        let line = force_audit_line(seed, max_force);
-        writeln!(meta, "{line}").ok();
-        println!("{line}");
-        writeln!(meta, "best_intact: {best_intact}").ok();
-        write_xyz(
-            &outdir.join("best.xyz"),
-            coords,
-            &format!("objective {engine_e:.10} eV wall {wall_e:.10} eV"),
+    let mut arms = fs::File::create(outdir.join("arms.txt")).expect("arms");
+    writeln!(arms, "move proposed accepted improved").ok();
+    for row in &outcome.proposal_counts {
+        writeln!(
+            arms,
+            "{} {} {} {}",
+            row.move_type, row.proposed, row.accepted, row.improved
         )
-        .expect("best xyz");
-    } else {
-        writeln!(meta, "engine_best_eV: nan").ok();
-        writeln!(meta, "best_intact: false").ok();
-        let line = force_audit_line(seed, f64::INFINITY);
-        writeln!(meta, "{line}").ok();
-        println!("{line}");
+        .ok();
     }
+    let fallback = outcome
+        .final_state
+        .as_ref()
+        .map(|state| state.to_owned())
+        .unwrap_or_else(|| start.clone());
+    let reported = outcome.best_state.as_ref().unwrap_or(&fallback);
+    let coords = reported.as_slice().expect("best contiguous");
+    let (wall_e, _) = oh_wall(coords, m);
+    let (engine_e, gradient) = objective.value_and_gradient(reported.view());
+    // The objective includes the wall. The engine energy is that total
+    // minus the wall, which is zero when every covalent O-H is inside
+    // the onset.
+    let engine_best = if engine_e.is_finite() {
+        engine_e - wall_e
+    } else {
+        f64::NAN
+    };
+    let gnorm = gradient.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let best_intact = monomers_intact(coords, m).unwrap_or(false);
+    writeln!(meta, "wall_at_best_eV: {wall_e:.10}").ok();
+    writeln!(meta, "engine_best_eV: {engine_best:.10}").ok();
+    writeln!(meta, "gradient_norm_eV_per_A: {gnorm:.6e}").ok();
+    let max_force = max_abs_force(gradient.as_slice().unwrap_or(&[]));
+    let line = force_audit_line(seed, max_force);
+    writeln!(meta, "{line}").ok();
+    println!("{line}");
+    writeln!(meta, "best_intact: {best_intact}").ok();
+    write_xyz(
+        &outdir.join("best.xyz"),
+        coords,
+        &format!("objective {engine_e:.10} eV wall {wall_e:.10} eV"),
+    )
+    .expect("best xyz");
 }

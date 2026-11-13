@@ -147,6 +147,94 @@ fn cmul(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
 
 /// ACE ν=3 scalars, length [`dim`].
 pub fn from_c(c: &[f64], n_max: usize, l_max: usize) -> Vec<f64> {
+    if l_max <= CG_CACHE_MAX {
+        from_c_cached(c, n_max, l_max)
+    } else {
+        from_c_general(c, n_max, l_max)
+    }
+}
+
+const CG_CACHE_MAX: usize = 8;
+
+/// One nonzero CG term. `i1`, `i2`, `i3` are `lm_index` offsets, so the
+/// contraction adds the same products in the same order as the `m` loops.
+struct CgTerm {
+    i1: usize,
+    i2: usize,
+    i3: usize,
+    g: f64,
+}
+
+fn nonzero_terms(l_max: usize) -> &'static [Vec<CgTerm>] {
+    use std::sync::OnceLock;
+    static TABLES: [OnceLock<Vec<Vec<CgTerm>>>; CG_CACHE_MAX + 1] =
+        [const { OnceLock::new() }; CG_CACHE_MAX + 1];
+    TABLES[l_max].get_or_init(|| {
+        triples(l_max)
+            .into_iter()
+            .map(|(l1, l2, l3)| {
+                let mut terms = Vec::new();
+                for m1 in -(l1 as i32)..=(l1 as i32) {
+                    for m2 in -(l2 as i32)..=(l2 as i32) {
+                        let m3 = m1 + m2;
+                        if m3.abs() > l3 as i32 {
+                            continue;
+                        }
+                        let g = cg(l1 as i32, m1, l2 as i32, m2, l3 as i32, m3);
+                        if g == 0.0 {
+                            continue;
+                        }
+                        terms.push(CgTerm {
+                            i1: lm_index(l1, m1),
+                            i2: lm_index(l2, m2),
+                            i3: lm_index(l3, m3),
+                            g,
+                        });
+                    }
+                }
+                terms
+            })
+            .collect()
+    })
+}
+
+fn from_c_cached(c: &[f64], n_max: usize, l_max: usize) -> Vec<f64> {
+    let n_lm = (l_max + 1) * (l_max + 1);
+    let trips = triples_cached(l_max);
+    let terms = nonzero_terms(l_max);
+    // Complex coefficients once per radial channel. The `m` loops used to
+    // rebuild each one for every triple that touches it.
+    let mut re = vec![0.0; n_max * n_lm];
+    let mut im = vec![0.0; n_max * n_lm];
+    for n in 0..n_max {
+        for l in 0..=l_max {
+            for m in -(l as i32)..=(l as i32) {
+                let (cr, ci) = coeff(c, n, l, m, n_lm);
+                let at = n * n_lm + lm_index(l, m);
+                re[at] = cr;
+                im[at] = ci;
+            }
+        }
+    }
+    let mut out = vec![0.0; n_max * trips.len()];
+    for n in 0..n_max {
+        let base = n * n_lm;
+        for (k, triple_terms) in terms.iter().enumerate() {
+            let mut acc = 0.0;
+            for term in triple_terms {
+                let a = (re[base + term.i1], im[base + term.i1]);
+                let b = (re[base + term.i2], im[base + term.i2]);
+                let d = (re[base + term.i3], im[base + term.i3]);
+                let p = cmul(cmul(a, b), (d.0, -d.1));
+                acc += term.g * p.0;
+            }
+            out[n * trips.len() + k] = acc;
+        }
+    }
+    out
+}
+
+fn from_c_general(c: &[f64], n_max: usize, l_max: usize) -> Vec<f64> {
     let n_lm = (l_max + 1) * (l_max + 1);
     let trips = triples(l_max);
     let mut out = vec![0.0; n_max * trips.len()];
@@ -177,6 +265,31 @@ pub fn from_c(c: &[f64], n_max: usize, l_max: usize) -> Vec<f64> {
         }
     }
     out
+}
+
+/// One complex coefficient, matching [`complex_c`] without the temporary.
+fn coeff(c: &[f64], n: usize, l: usize, m: i32, n_lm: usize) -> (f64, f64) {
+    let base = n * n_lm;
+    let at = |mm: i32| c[base + lm_index(l, mm)];
+    if m == 0 {
+        return (at(0), 0.0);
+    }
+    let am = m.abs();
+    let sign = if am % 2 == 0 { 1.0 } else { -1.0 };
+    let re = sign * at(am) / SQRT_2;
+    let im = sign * at(-am) / SQRT_2;
+    if m > 0 {
+        (re, im)
+    } else {
+        (sign * re, -sign * im)
+    }
+}
+
+fn triples_cached(l_max: usize) -> &'static [(usize, usize, usize)] {
+    use std::sync::OnceLock;
+    static TABLES: [OnceLock<Vec<(usize, usize, usize)>>; CG_CACHE_MAX + 1] =
+        [const { OnceLock::new() }; CG_CACHE_MAX + 1];
+    TABLES[l_max].get_or_init(|| triples(l_max)).as_slice()
 }
 
 /// `∂B/∂c` for one centre, shape `(ace_dim, n_max n_lm)`.
@@ -222,10 +335,45 @@ mod tests {
     }
 
     #[test]
+    fn the_cached_contraction_matches_the_direct_one() {
+        let c: Vec<f64> = (0..3 * 7 * 7)
+            .map(|i| ((i * 17) % 11) as f64 * 0.01)
+            .collect();
+        for l_max in [3usize, 6] {
+            let cached = from_c(&c, 3, l_max);
+            let direct = from_c_general(&c, 3, l_max);
+            assert_eq!(cached.len(), direct.len());
+            for (a, b) in cached.iter().zip(direct.iter()) {
+                assert!((a - b).abs() <= 1e-12, "{a} vs {b} at l_max {l_max}");
+            }
+        }
+    }
+
+    #[test]
     fn triples_at_lmax3_include_112() {
         let t = triples(3);
         assert!(t.contains(&(1, 1, 2)));
         assert!(t.contains(&(0, 0, 0)));
         assert!(!t.contains(&(1, 1, 1)));
+    }
+
+    /// The water SOAP pullback asks for this derivative once per atom per
+    /// channel. A finite-difference pass at l_max 6 is a few seconds each,
+    /// and sixty waters times two channels never returns to the quench.
+    #[test]
+    fn the_lmax6_derivative_returns_before_a_quench_could() {
+        let n_max = 3;
+        let l_max = 6;
+        let n_c = n_max * (l_max + 1) * (l_max + 1);
+        let c: Vec<f64> = (0..n_c).map(|i| ((i * 17) % 11) as f64 * 0.01).collect();
+        let started = std::time::Instant::now();
+        let j = d_from_c(&c, n_max, l_max);
+        let elapsed = started.elapsed();
+        assert_eq!(j.nrows(), dim(n_max, l_max));
+        assert_eq!(j.ncols(), n_c);
+        assert!(
+            elapsed.as_millis() < 200,
+            "ACE derivative took {elapsed:?}; a (H2O)20 pullback would not return"
+        );
     }
 }

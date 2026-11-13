@@ -14,6 +14,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paper_data import fetch_paper_data
+
 # Polished gap is anneal minus CREST, in hartree.
 # Label-free RMSD is in angstroms.
 # Wall time is in seconds.
@@ -45,6 +48,7 @@ def median_iqr(values: list[float]) -> tuple[float, float]:
 
 
 def _logs() -> Path:
+    fetch_paper_data()
     raw = os.environ.get("WATER_LOGS")
     if raw:
         path = Path(raw)

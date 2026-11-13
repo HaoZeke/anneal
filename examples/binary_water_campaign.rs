@@ -5,11 +5,17 @@
 //!
 //! ```text
 //! binary_water_campaign binary <coords-dir> <preset> <budget> <target> <out.jsonl> [limit]
-//! binary_water_campaign tip4p <aa-dir> <molecules> <preset> <budget> <target> <out.jsonl> [limit]
+//! binary_water_campaign tip4p <aa-dir> <molecules> <preset> <budget> <target> <out.jsonl> [limit] [--legacy-interleaved]
 //! ```
 //!
 //! `preset` is `recommended` or `communicating`. A positive `limit` keeps
 //! the first starts in index order. Each line of the output is one start.
+//!
+//! An optbench `.aa` start is GMIN's `coords`: every centre, then every
+//! angle-axis vector, which is the block chart unchanged.
+//! `--legacy-interleaved` instead reads each file as per-molecule rows with
+//! the rotations negated, the reading of anneal 0.12.0, so its rows can be
+//! reproduced.
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
@@ -18,7 +24,7 @@ use std::sync::Mutex;
 use std::thread;
 
 use anneal_core::binary_water::{BinaryLennardJonesProblem, search_binary, search_gmin_tip4p};
-use anneal_core::potentials::block_from_interleaved_gmin;
+use anneal_core::potentials::{GminAngleAxisFile, block_from_gmin_file};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -78,6 +84,14 @@ fn run_binary(args: &mut impl Iterator<Item = String>) {
 }
 
 fn run_tip4p(args: &mut impl Iterator<Item = String>) {
+    let (flags, rest): (Vec<String>, Vec<String>) =
+        args.partition(|arg| arg == "--legacy-interleaved");
+    let file_form = if flags.is_empty() {
+        GminAngleAxisFile::Coords
+    } else {
+        GminAngleAxisFile::LegacyInterleaved
+    };
+    let args = &mut rest.into_iter();
     let dir = args.next().expect("angle-axis directory");
     let molecules: usize = args.next().expect("molecules").parse().expect("molecules");
     let preset = args.next().expect("preset");
@@ -101,7 +115,8 @@ fn run_tip4p(args: &mut impl Iterator<Item = String>) {
                 .and_then(|text| text.to_str())
                 .unwrap_or("start")
                 .to_owned();
-            (*index, name, block_from_interleaved_gmin(&read_flat(path)))
+            let text = std::fs::read_to_string(path).expect("angle-axis");
+            (*index, name, block_from_gmin_file(&text, file_form))
         })
         .collect();
     stream_tip4p(
@@ -162,18 +177,6 @@ fn read_xyz_rows(path: &Path) -> Vec<f64> {
         }
         for token in line.split_whitespace().take(3) {
             coords.push(token.parse::<f64>().expect("coordinate"));
-        }
-    }
-    coords
-}
-
-fn read_flat(path: &Path) -> Vec<f64> {
-    let file = File::open(path).expect("angle-axis");
-    let mut coords = Vec::new();
-    for line in BufReader::new(file).lines() {
-        let line = line.expect("angle-axis line");
-        for token in line.split_whitespace() {
-            coords.push(token.parse::<f64>().expect("angle-axis value"));
         }
     }
     coords

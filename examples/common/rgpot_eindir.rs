@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 
 use anneal_core::catalog::FreshEvaluation;
-use anneal_core::catalog::molecular::{GFN2_ACCURACY, GFN2_MAX_ITERATIONS};
+use anneal_core::catalog::molecular::{GFN2_ACCURACY, GFN2_MAX_ITERATIONS, RGPOT_XTB_ENGINE_REV};
 use anneal_core::compatibility::{AbiStamp, EngineDescriptor, ProtocolVersion};
 use eindir_core::ffi::{EindirObjectiveWrapper, eindir_core_abi_compatible, eindir_objective_t};
 use eindir_core::gradient::DifferentiableObjective;
@@ -27,6 +27,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// Pair distance below which a geometry is an overlap, not a physical contact.
 /// Same threshold the cluster walk uses before it will record a molecular quench.
 const OVERLAP_SEPARATION_A: f64 = 0.35;
+/// Same gate as `OVERLAP_CALL_LIMIT`. Below a covalent O–H, above the shell
+/// where xtb's SCC fails.
+const OVERLAP_CALL_LIMIT_A: f64 = 0.90;
 
 static SCC_REJECTED: AtomicUsize = AtomicUsize::new(0);
 static GEOMETRY_REJECTED: AtomicUsize = AtomicUsize::new(0);
@@ -113,6 +116,7 @@ struct XtbConfig {
 
 type XtbCreate = unsafe extern "C" fn(*const XtbConfig, *mut u8, usize) -> *mut c_void;
 type XtbDestroy = unsafe extern "C" fn(*mut c_void);
+type XtbReset = unsafe extern "C" fn(*mut c_void);
 type XtbForce = unsafe extern "C" fn(
     *mut c_void,
     i64,
@@ -167,13 +171,31 @@ fn read_full(fd: i32, bytes: &mut [u8]) -> bool {
 }
 
 /// Child side of one xtb evaluator. `ERROR STOP` ends this process only.
-unsafe fn xtb_worker_main(force: XtbForce, pot: *mut c_void, incoming: i32, outgoing: i32) -> ! {
+///
+/// One pot serves every geometry. A restart drops the engine's stored
+/// guess; the engine decides when a later geometry may reuse it.
+unsafe fn xtb_worker_main(
+    force: XtbForce,
+    reset: XtbReset,
+    pot: *mut c_void,
+    incoming: i32,
+    outgoing: i32,
+) -> ! {
+    unsafe { reset(pot) };
     loop {
         let mut n_bytes = [0u8; 8];
         if !read_full(incoming, &mut n_bytes) {
             unsafe { _exit(0) };
         }
         let n = u64::from_ne_bytes(n_bytes);
+        if n == u64::MAX {
+            unsafe { reset(pot) };
+            let rc = 0i32;
+            if !write_full(outgoing, &rc.to_ne_bytes()) {
+                unsafe { _exit(0) };
+            }
+            continue;
+        }
         if n == 0 || n > 10_000 {
             unsafe { _exit(0) };
         }
@@ -237,11 +259,12 @@ struct XtbWorker {
     to_child: i32,
     from_child: i32,
     force: XtbForce,
+    reset: XtbReset,
     pot: *mut c_void,
 }
 
 impl XtbWorker {
-    fn spawn(force: XtbForce, pot: *mut c_void) -> Self {
+    fn spawn(force: XtbForce, reset: XtbReset, pot: *mut c_void) -> Self {
         unsafe {
             let mut to_child = [0i32; 2];
             let mut from_child = [0i32; 2];
@@ -255,7 +278,7 @@ impl XtbWorker {
             if pid == 0 {
                 close(to_child[1]);
                 close(from_child[0]);
-                xtb_worker_main(force, pot, to_child[0], from_child[1]);
+                xtb_worker_main(force, reset, pot, to_child[0], from_child[1]);
             }
             close(to_child[0]);
             close(from_child[1]);
@@ -264,6 +287,7 @@ impl XtbWorker {
                 to_child: to_child[1],
                 from_child: from_child[0],
                 force,
+                reset,
                 pot,
             }
         }
@@ -302,9 +326,10 @@ impl XtbWorker {
             Err(WorkerFail::Rejected) => Err(WorkerFail::Rejected),
             Err(WorkerFail::Dead) => {
                 let force = self.force;
+                let reset = self.reset;
                 let pot = self.pot;
                 self.shutdown();
-                *self = Self::spawn(force, pot);
+                *self = Self::spawn(force, reset, pot);
                 Err(WorkerFail::Dead)
             }
         }
@@ -356,12 +381,22 @@ impl XtbWorker {
         let _ = variance;
         Ok((energy, variance))
     }
+
+    /// A new search on this pot. The engine drops its stored guess.
+    fn restart(&mut self) -> bool {
+        if !write_full(self.to_child, &u64::MAX.to_ne_bytes()) {
+            return false;
+        }
+        let mut rc = [0u8; 4];
+        read_full(self.from_child, &mut rc)
+    }
 }
 
 struct XtbKernel {
     _lib: Library,
     pot: *mut c_void,
     force: Symbol<'static, XtbForce>,
+    reset: Symbol<'static, XtbReset>,
     destroy: Symbol<'static, XtbDestroy>,
     worker: XtbWorker,
     evaluations: usize,
@@ -453,7 +488,7 @@ unsafe extern "C" fn xtb_callback(
     let atomic_numbers = unsafe { std::slice::from_raw_parts(z, n) };
     let cell = unsafe { std::slice::from_raw_parts(boxp, 9) };
     let min_pair = min_pair_distance_a(positions);
-    if min_pair < OVERLAP_SEPARATION_A {
+    if min_pair <= OVERLAP_CALL_LIMIT_A {
         // xtb's SCC aborts when a trial step stacks two atoms. That geometry
         // is not an energy the search can record. The caller turns the error
         // into an uphill step and shortens it, so a finite quench stays eligible.
@@ -539,6 +574,8 @@ unsafe extern "C" fn drop_cuh2(p: *mut c_void) {
 /// An rgpot potential viewed as an eindir objective.
 pub(crate) struct RgpotObjective {
     pot: *mut rgpot_core::eindir::rgpot_potential_t,
+    /// The GFN2 kernel, when this handle is xtb. Null for CuH2.
+    xtb: *mut XtbKernel,
     dim: usize,
 }
 
@@ -596,6 +633,10 @@ impl RgpotObjective {
             unsafe { lib.get(b"rgpot_xtb_destroy\0") }.expect("rgpot_xtb_destroy");
         let force: Symbol<XtbForce> =
             unsafe { lib.get(b"rgpot_xtb_force\0") }.expect("rgpot_xtb_force");
+        let reset: Symbol<XtbReset> =
+            unsafe { lib.get(b"rgpot_xtb_reset\0") }.unwrap_or_else(|_| {
+                panic!("rgpot xtb engine {RGPOT_XTB_ENGINE_REV} is required for rgpot_xtb_reset")
+            });
         let cfg = XtbConfig {
             method: GFN2,
             accuracy: GFN2_ACCURACY,
@@ -611,27 +652,32 @@ impl RgpotObjective {
         }
         let force =
             unsafe { std::mem::transmute::<Symbol<XtbForce>, Symbol<'static, XtbForce>>(force) };
+        let reset =
+            unsafe { std::mem::transmute::<Symbol<XtbReset>, Symbol<'static, XtbReset>>(reset) };
         let destroy = unsafe {
             std::mem::transmute::<Symbol<XtbDestroy>, Symbol<'static, XtbDestroy>>(destroy)
         };
         let force_fn: XtbForce = *force;
-        let worker = XtbWorker::spawn(force_fn, pot);
+        let reset_fn: XtbReset = *reset;
+        let worker = XtbWorker::spawn(force_fn, reset_fn, pot);
         let kernel = Box::new(XtbKernel {
             _lib: lib,
             pot,
             force,
+            reset,
             destroy,
             worker,
             evaluations: 0,
             scratch: Vec::new(),
         });
+        let kernel_ptr = Box::into_raw(kernel);
         let n = atmnrs.len();
         let low = vec![-80.0; 3 * n];
         let high = vec![80.0; 3 * n];
         let handle = unsafe {
             rgpot_potential_new_eindir(
                 xtb_callback,
-                Box::into_raw(kernel) as *mut c_void,
+                kernel_ptr as *mut c_void,
                 Some(drop_xtb),
                 n,
                 atmnrs.as_ptr(),
@@ -645,7 +691,26 @@ impl RgpotObjective {
         let _ = std::io::Write::flush(&mut std::io::stdout());
         Self {
             pot: handle,
+            xtb: kernel_ptr,
             dim: 3 * n,
+        }
+    }
+
+    /// Drop the engine's stored guess. The calculator stays.
+    ///
+    /// A new search on this pot starts cold. The engine, not anneal,
+    /// decides whether a later geometry may reuse the previous guess.
+    pub(crate) fn restart(&mut self) {
+        if self.xtb.is_null() {
+            return;
+        }
+        let kernel = unsafe { &mut *self.xtb };
+        if !kernel.worker.restart() {
+            let force = kernel.worker.force;
+            let reset = kernel.worker.reset;
+            let pot = kernel.worker.pot;
+            kernel.worker.shutdown();
+            kernel.worker = XtbWorker::spawn(force, reset, pot);
         }
     }
 
@@ -681,6 +746,7 @@ impl RgpotObjective {
         let _ = std::io::Write::flush(&mut std::io::stdout());
         Self {
             pot: handle,
+            xtb: std::ptr::null_mut(),
             dim: 3 * n,
         }
     }

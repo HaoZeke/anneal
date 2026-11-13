@@ -27,6 +27,13 @@ use ndarray::{Array1, ArrayView1};
 /// Distinct minima the archive keeps.
 pub const SEATS: usize = 8;
 
+/// Distinct oxygen cages the rigid stall keeps.
+///
+/// Proton isomers of one cage share a seat, so this is a count of cages
+/// rather than of energies. Eight seats filled with isomers of the lowest
+/// cage and left the walker with no other cage to continue from.
+pub const CAGE_SEATS: usize = 32;
+
 /// Stalls for which a taken destination stays barred.
 pub const MEMORY: usize = 4;
 
@@ -42,6 +49,8 @@ pub fn same_minimum(a: f64, b: f64) -> bool {
 struct Seat {
     energy: f64,
     offered: usize,
+    /// Oxygen-cage key, when the seat was offered as a cage.
+    key: Option<u64>,
     state: Array1<f64>,
 }
 
@@ -92,14 +101,72 @@ impl StallArchive {
         let seat = Seat {
             energy,
             offered: self.offered,
+            key: None,
             state: state.to_owned(),
         };
+        self.insert(seat);
+    }
+
+    /// Keep the lowest structure of oxygen cage `key`.
+    ///
+    /// Two proton arrangements of one cage share `key` and one seat. A
+    /// different cage keeps its own seat even when its energy is higher,
+    /// until the archive is full and that energy is the worst one held.
+    pub fn offer_cage(&mut self, energy: f64, state: ArrayView1<f64>, key: u64) {
+        if !energy.is_finite() || state.is_empty() {
+            return;
+        }
+        self.offered += 1;
+        if let Some(seat) = self.seats.iter_mut().find(|seat| seat.key == Some(key)) {
+            if energy < seat.energy {
+                seat.energy = energy;
+                seat.state = state.to_owned();
+            }
+            return;
+        }
+        self.insert(Seat {
+            energy,
+            offered: self.offered,
+            key: Some(key),
+            state: state.to_owned(),
+        });
+    }
+
+    /// The lowest kept cage other than `key`.
+    ///
+    /// The chosen destination is barred for the next [`MEMORY`] stalls.
+    /// `None` means every other cage is barred, or the archive holds no
+    /// other cage, so the walker stays put.
+    pub fn escape_other_cage(&mut self, key: u64) -> Option<(f64, Array1<f64>)> {
+        let chosen = self
+            .seats
+            .iter()
+            .filter(|seat| seat.key != Some(key))
+            .filter(|seat| !self.recent.iter().any(|&e| same_minimum(e, seat.energy)))
+            .min_by(|a, b| {
+                a.energy
+                    .total_cmp(&b.energy)
+                    .then(a.offered.cmp(&b.offered))
+            })
+            .map(|seat| (seat.energy, seat.state.clone()));
+        if let Some((energy, _)) = chosen.as_ref()
+            && self.memory > 0
+        {
+            self.recent.push_back(*energy);
+            while self.recent.len() > self.memory {
+                self.recent.pop_front();
+            }
+        }
+        chosen
+    }
+
+    fn insert(&mut self, seat: Seat) {
         if self.seats.len() < self.capacity {
             self.seats.push(seat);
             return;
         }
         if let Some(highest) = self.highest()
-            && energy < self.seats[highest].energy
+            && seat.energy < self.seats[highest].energy
         {
             self.seats[highest] = seat;
         }
@@ -207,5 +274,16 @@ mod tests {
         tied.offer(-2.0, array![7.0].view());
         tied.offer(-2.0, array![8.0].view());
         assert_eq!(tied.escape(0.0).map(|(_, x)| x), Some(array![7.0]));
+    }
+
+    #[test]
+    fn proton_isomers_of_one_cage_share_a_seat_and_another_cage_is_kept() {
+        let mut kept = StallArchive::new(2, 0);
+        kept.offer_cage(-623.0, array![1.0].view(), 7);
+        kept.offer_cage(-623.4, array![2.0].view(), 7);
+        kept.offer_cage(-610.0, array![3.0].view(), 9);
+        assert_eq!(kept.seats.len(), 2);
+        assert_eq!(kept.escape_other_cage(7).map(|(e, _)| e), Some(-610.0));
+        assert_eq!(kept.escape_other_cage(9).map(|(e, _)| e), Some(-623.4));
     }
 }

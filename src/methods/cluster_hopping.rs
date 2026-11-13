@@ -81,6 +81,7 @@ use crate::movekernel::{
 use crate::path::{StallDetector, interpolate_path};
 use crate::screen::Screen;
 
+mod binary_geometry;
 mod config;
 mod cycles;
 mod moves;
@@ -88,7 +89,9 @@ mod packing_bank;
 mod preset;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
-pub use config::{Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, SoapProposalMode};
+pub use config::{
+    ArmSelection, Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, SoapProposalMode,
+};
 pub use moves::*;
 
 #[cfg(test)]
@@ -946,6 +949,19 @@ impl Ledger {
     }
 }
 
+/// How often one move type was drawn, accepted, and below the incumbent.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArmCount {
+    /// Short name of the proposal kernel.
+    pub move_type: String,
+    /// Proposals handed to the quench.
+    pub proposed: usize,
+    /// Proposals the acceptance test kept, after a tabu veto.
+    pub accepted: usize,
+    /// Proposals whose quenched energy was below the incumbent.
+    pub improved: usize,
+}
+
 /// What a run produced.
 #[derive(Debug, Clone, Default)]
 pub struct Outcome {
@@ -1130,6 +1146,8 @@ pub struct Outcome {
     pub unconverged_records: usize,
     /// Per-arm draws, accepts and best quenched value, in library order.
     pub arms: Vec<(String, usize, usize, f64)>,
+    /// Every quenched proposal, by move type, in first-seen order.
+    pub proposal_counts: Vec<ArmCount>,
     /// Delayed acceptance: first stages run, first-stage rejections (each a
     /// quench not paid), second stages run, and second-stage rejections (the
     /// surrogate's mistakes).
@@ -1326,18 +1344,279 @@ pub fn structure_is_sane(x: ArrayView1<f64>, min_sep: f64) -> bool {
 /// overlap artifact rather than a physical bond.
 pub const OVERLAP_SEPARATION: f64 = 0.35;
 
-/// Push pairs closer than `min_sep` apart until the geometry clears that rule.
+/// Distances this close still abort xtb's SCC, and the line search walks the
+/// gate one probe at a time. Each probe runs a full SCC that fails. 0.90 Å
+/// is below a covalent O–H and above that failing shell, so the first probe
+/// the potential sees is a bond, not a contact xtb cannot converge.
+pub const OVERLAP_CALL_LIMIT: f64 = 0.90;
+
+/// Fraction of the summed Cordero radii inside which a declared bond is not
+/// handed to the potential. One fraction for every element. The radii, not
+/// the species name, set the length. A contact that is not a declared bond
+/// is refused inside the full covalent sum: that sum is a single-bond length.
+pub const COVALENT_CALL_FRACTION: f64 = 0.95;
+
+/// Distance at or below which a molecular potential is not called.
 ///
-/// A declared group is translated as a rigid body when the close pair belongs
-/// to two groups, so the repair does not stretch a bond to cure a clash
-/// between molecules. A close pair inside one group, or a geometry with no
-/// groups, is pushed atom by atom. The function does not evaluate a potential.
-/// It returns whether every pair is now at least `min_sep` apart.
+/// Species-free searches keep [`OVERLAP_CALL_LIMIT`]. With species, a
+/// declared bond uses [`COVALENT_CALL_FRACTION`] of the covalent sum and any
+/// other pair uses the sum itself. The absolute limit remains a floor so a
+/// hydrogen pair is not treated more loosely than before.
+pub fn molecular_call_floor(za: u32, zb: u32, bonded: bool) -> f64 {
+    let sum = moves::covalent_radius(za) + moves::covalent_radius(zb);
+    if sum <= 0.0 {
+        return OVERLAP_CALL_LIMIT;
+    }
+    let scaled = if bonded {
+        COVALENT_CALL_FRACTION * sum
+    } else {
+        sum
+    };
+    scaled.max(OVERLAP_CALL_LIMIT)
+}
+
+/// Whether any pair is inside [`molecular_call_floor`].
+///
+/// `groups` marks declared bonds. Atoms that share a group are bonded; every
+/// other pair is a contact. This is geometry only. It does not call a potential.
+pub fn inside_molecular_call_wall(
+    x: ArrayView1<f64>,
+    species: &[u32],
+    groups: Option<&[Vec<usize>]>,
+) -> bool {
+    let n = x.len() / 3;
+    if n < 2 || species.len() < n {
+        return min_pair_distance(x) <= OVERLAP_CALL_LIMIT;
+    }
+    let mut owner = vec![usize::MAX; n];
+    if let Some(groups) = groups {
+        for (group, atoms) in groups.iter().enumerate() {
+            for &atom in atoms {
+                if atom < n {
+                    owner[atom] = group;
+                }
+            }
+        }
+    }
+    for a in 0..n {
+        for b in (a + 1)..n {
+            let mut square = 0.0;
+            for axis in 0..3 {
+                let delta = x[3 * a + axis] - x[3 * b + axis];
+                square += delta * delta;
+            }
+            let distance = square.sqrt();
+            let bonded = owner[a] != usize::MAX && owner[a] == owner[b];
+            if distance <= molecular_call_floor(species[a], species[b], bonded) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod call_wall_tests {
+    use super::{inside_molecular_call_wall, molecular_call_floor};
+    use ndarray::Array1;
+
+    #[test]
+    fn a_nonbonded_contact_inside_the_covalent_sum_is_refused() {
+        let mut coordinates = Array1::zeros(6);
+        coordinates[3] = 0.90;
+        let species = [7u32, 1];
+        assert!(inside_molecular_call_wall(
+            coordinates.view(),
+            &species,
+            None
+        ));
+        coordinates[3] = 1.05;
+        assert!(!inside_molecular_call_wall(
+            coordinates.view(),
+            &species,
+            None
+        ));
+    }
+
+    #[test]
+    fn a_declared_bond_near_its_covalent_length_is_allowed() {
+        let mut coordinates = Array1::zeros(6);
+        coordinates[3] = 1.012;
+        let species = [7u32, 1];
+        let groups = vec![vec![0usize, 1]];
+        assert!(!inside_molecular_call_wall(
+            coordinates.view(),
+            &species,
+            Some(&groups)
+        ));
+        coordinates[3] = 0.80;
+        assert!(inside_molecular_call_wall(
+            coordinates.view(),
+            &species,
+            Some(&groups)
+        ));
+    }
+
+    #[test]
+    fn hydrogen_pairs_keep_the_absolute_floor() {
+        assert!((molecular_call_floor(1, 1, false) - 0.90).abs() < 1.0e-12);
+        let oh = molecular_call_floor(8, 1, true);
+        let expected = (0.95_f64 * (0.66 + 0.31)).max(0.90);
+        assert!((oh - expected).abs() < 1.0e-12);
+        assert!((molecular_call_floor(7, 1, false) - 1.02).abs() < 1.0e-12);
+    }
+}
+
+/// How far past [`OVERLAP_CALL_LIMIT`] a non-bonded spike is opened.
+///
+/// Only pairs closer than [`OVERLAP_SPIKE`] move. 1.30 Å past the call limit
+/// puts such a pair at 2.20 Å, where the force is a contact the line search
+/// can follow. A hydrogen bond already longer than the spike is not moved.
+pub const OVERLAP_CLASH_CLEARANCE: f64 = 1.30;
+
+/// A non-bonded pair closer than this is a repulsive spike. Pairs already
+/// past it, including a hydrogen bond, are left where they stand.
+const OVERLAP_SPIKE: f64 = 1.40;
+
+/// Whether `a` and `b` are a covalent bond inside one declared group.
+///
+/// Judged on the geometry before any repair. A missing species treats the
+/// whole group as bonded, which is the rigid-body repair.
+fn pair_is_covalent_bond(
+    a: usize,
+    b: usize,
+    distance: f64,
+    left: usize,
+    right: usize,
+    species: Option<&[u32]>,
+    bond_tolerance: f64,
+) -> bool {
+    if left == usize::MAX || left != right {
+        return false;
+    }
+    // No species: a declared group is treated as bonded, which is what the
+    // rigid-body repair has always done.
+    let Some(species) = species else {
+        return true;
+    };
+    let za = species.get(a).copied().unwrap_or(0);
+    let zb = species.get(b).copied().unwrap_or(0);
+    let reach = bond_tolerance
+        * (crate::methods::cluster_hopping::moves::covalent_radius(za)
+            + crate::methods::cluster_hopping::moves::covalent_radius(zb));
+    reach > 0.0 && distance <= reach
+}
+
+fn open_target(
+    a: usize,
+    b: usize,
+    distance: f64,
+    left: usize,
+    right: usize,
+    bonded: bool,
+    species: Option<&[u32]>,
+    bond_target: f64,
+    clash_target: f64,
+) -> f64 {
+    if bonded {
+        // Classified once, at the geometry we were handed. A later stretch
+        // must not turn the bond into a clash or the repair dissociates it.
+        // A bond already near the covalent length is left alone, so a healthy
+        // molecule is not rewritten on the way past an unrelated spike.
+        let Some(species) = species else {
+            return if distance >= bond_target {
+                distance
+            } else {
+                bond_target
+            };
+        };
+        let reach = crate::methods::cluster_hopping::moves::covalent_radius(
+            species.get(a).copied().unwrap_or(0),
+        ) + crate::methods::cluster_hopping::moves::covalent_radius(
+            species.get(b).copied().unwrap_or(0),
+        );
+        let restore = bond_target.max(reach);
+        return if distance + 0.02 >= restore {
+            distance
+        } else {
+            restore
+        };
+    }
+    // A same-group pair that is not a bond is an angle, not a contact
+    // between molecules. Open it off the gate and no further.
+    if left != usize::MAX && left == right {
+        let angle = bond_target + 0.30;
+        return if distance >= angle { distance } else { angle };
+    }
+    if distance >= OVERLAP_SPIKE {
+        distance
+    } else {
+        clash_target
+    }
+}
+
+fn contacts_are_open(
+    x: ArrayView1<f64>,
+    owner: Option<&[usize]>,
+    species: Option<&[u32]>,
+    bonded: &[bool],
+    bond_target: f64,
+    clash_target: f64,
+) -> bool {
+    let n = x.len() / 3;
+    for a in 0..n {
+        for b in (a + 1)..n {
+            let mut square = 0.0;
+            for axis in 0..3 {
+                let delta = x[3 * a + axis] - x[3 * b + axis];
+                square += delta * delta;
+            }
+            let distance = square.sqrt();
+            let left = owner.map(|owner| owner[a]).unwrap_or(usize::MAX);
+            let right = owner.map(|owner| owner[b]).unwrap_or(usize::MAX);
+            let target = open_target(
+                a,
+                b,
+                distance,
+                left,
+                right,
+                bonded[a * n + b],
+                species,
+                bond_target,
+                clash_target,
+            );
+            if distance < target {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+#[cfg(test)]
 pub(crate) fn separate_to_overlap_rule(
     x: &mut Array1<f64>,
     groups: Option<&[Vec<usize>]>,
     min_sep: f64,
     frozen: Option<&[bool]>,
+) -> bool {
+    separate_contacts(x, groups, min_sep, 1.0e-8, frozen, None, 1.25)
+}
+
+/// Push clashing pairs apart.
+///
+/// A pair inside one declared group is a bond and is opened only to
+/// `min_sep`. Every other pair is opened to `min_sep + clash_clearance`,
+/// so a quench is not handed a contact sitting on the call limit. The
+/// clearance is `1e-8` for a repair that only has to clear the gate.
+pub(crate) fn separate_contacts(
+    x: &mut Array1<f64>,
+    groups: Option<&[Vec<usize>]>,
+    min_sep: f64,
+    clash_clearance: f64,
+    frozen: Option<&[bool]>,
+    species: Option<&[u32]>,
+    bond_tolerance: f64,
 ) -> bool {
     if !(min_sep.is_finite() && min_sep > 0.0) || x.iter().any(|value| !value.is_finite()) {
         return false;
@@ -1377,11 +1656,38 @@ pub(crate) fn separate_to_overlap_rule(
         }
     };
     // A fraction of an angstrom past the rule, so a later strict comparison
-    // does not reject the same pair on a rounding residue.
-    let target = min_sep + 1.0e-8;
+    // does not reject the same pair on a rounding residue. Bonds stay at
+    // the call limit. A clash between groups is opened by the clearance,
+    // which is the room a unit line-search step needs.
+    let bond_target = min_sep + 1.0e-8;
+    let clash_target = min_sep + clash_clearance.max(1.0e-8);
+    // Bond identity is fixed on the geometry we were handed. Reclassifying
+    // after a push turns a stretched O–H into a clash and dissociates it.
+    let mut bonded = vec![false; n * n];
+    for a in 0..n {
+        for b in (a + 1)..n {
+            let mut square = 0.0;
+            for axis in 0..3 {
+                let delta = x[3 * a + axis] - x[3 * b + axis];
+                square += delta * delta;
+            }
+            let left = owner.as_ref().map(|owner| owner[a]).unwrap_or(usize::MAX);
+            let right = owner.as_ref().map(|owner| owner[b]).unwrap_or(usize::MAX);
+            bonded[a * n + b] =
+                pair_is_covalent_bond(a, b, square.sqrt(), left, right, species, bond_tolerance);
+        }
+    }
     for _ in 0..64 {
-        if min_pair_distance(x.view()) >= min_sep {
-            return x.iter().all(|value| value.is_finite());
+        if contacts_are_open(
+            x.view(),
+            owner.as_deref(),
+            species,
+            &bonded,
+            bond_target,
+            clash_target,
+        ) {
+            return x.iter().all(|value| value.is_finite())
+                && min_pair_distance(x.view()) >= min_sep;
         }
         let mut group_shift = vec![[0.0_f64; 3]; n_groups];
         let mut atom_shift = vec![[0.0_f64; 3]; n];
@@ -1395,6 +1701,19 @@ pub(crate) fn separate_to_overlap_rule(
                     distance_squared += delta[axis] * delta[axis];
                 }
                 let distance = distance_squared.sqrt();
+                let left = owner.as_ref().map(|owner| owner[a]).unwrap_or(usize::MAX);
+                let right = owner.as_ref().map(|owner| owner[b]).unwrap_or(usize::MAX);
+                let target = open_target(
+                    a,
+                    b,
+                    distance,
+                    left,
+                    right,
+                    bonded[a * n + b],
+                    species,
+                    bond_target,
+                    clash_target,
+                );
                 if distance >= target {
                     continue;
                 }
@@ -1478,6 +1797,31 @@ fn quench_is_sane(cfg: &Config, energy: f64, x: ArrayView1<f64>) -> bool {
     energy.is_finite() && structure_is_sane(x, minimum)
 }
 
+/// Whether a quenched point cluster has shed an atom past the potential's range.
+///
+/// The atom has no neighbour within the neighbour cutoff and its gradient is
+/// exactly zero, so the potential acts on it not at all. No quench brings it
+/// back, and the hops that follow move it on a flat surface: on Tersoff
+/// carbon half the accepted hops of a ten-atom walk held such an atom. A
+/// tail that never reaches zero, as in Lennard-Jones and Morse, leaves some
+/// force on every atom and never meets the test. Rigid bodies and labelled
+/// species keep their own notion of contact and are not judged here.
+fn sheds_free_atom(cfg: &Config, x: ArrayView1<f64>, gradient: Option<ArrayView1<f64>>) -> bool {
+    let n = cfg.n_points;
+    if cfg.move_library.is_rigid_body()
+        || cfg.species.is_some()
+        || n < 2
+        || x.len() != 3 * n
+        || cfg.neighbour_cutoff <= 0.0
+    {
+        return false;
+    }
+    let free = |atom: usize| gradient.is_none_or(|g| (0..3).all(|k| g[3 * atom + k] == 0.0));
+    connectivity_groups(x, n, cfg.neighbour_cutoff)
+        .iter()
+        .any(|group| group.len() == 1 && free(group[0]))
+}
+
 fn gradient_is_converged(gradient: ArrayView1<f64>, dimensions: usize, tolerance: f64) -> bool {
     dimensions > 0
         && gradient.len() == dimensions
@@ -1538,6 +1882,82 @@ fn record_quenched_answer(
 /// keeps it at every size.
 fn stall_growth_waits(held: Option<f64>, incumbent: f64) -> bool {
     held.is_some_and(|energy| incumbent >= energy - 1e-9)
+}
+
+fn arm_row<'a>(arms: &'a mut Vec<ArmCount>, name: &str) -> &'a mut ArmCount {
+    if let Some(index) = arms.iter().position(|arm| arm.move_type == name) {
+        return &mut arms[index];
+    }
+    arms.push(ArmCount {
+        move_type: name.to_owned(),
+        ..ArmCount::default()
+    });
+    arms.last_mut().expect("the row was just pushed")
+}
+
+fn begin_arm(arms: &mut Vec<ArmCount>, name: &str) {
+    arm_row(arms, name).proposed += 1;
+}
+
+fn finish_arm(arms: &mut Vec<ArmCount>, name: &str, accepted: bool, improved: bool) {
+    let row = arm_row(arms, name);
+    if accepted {
+        row.accepted += 1;
+    }
+    if improved {
+        row.improved += 1;
+    }
+}
+
+/// Leaves skipped while the incumbent stays at the held energy before the
+/// crossing growth is allowed to run again.
+///
+/// One miss is not a proof that the other packing is absent. The paper leave
+/// is thousands of force calls apart, so eight skips is one retry about every
+/// forty thousand calls. A five-hop test never reaches the eighth skip, and
+/// the single growth it counts stays single.
+const GROWTH_RETRY_LEAVES: u32 = 8;
+
+/// True while a failed growth should stay idle.
+///
+/// The energy test is [`stall_growth_waits`]. At 98 atoms and above, after
+/// [`GROWTH_RETRY_LEAVES`] idle leaves the pentagonal order is due again.
+/// That is the leave the plateau was not taking: the live chain's 555
+/// fraction sits near 0.06, under the 0.12 icosahedral cut, so that branch
+/// never opened. Below 98 the displacement library still leaves the floor,
+/// and a retry would move the call clock those hits were measured on.
+fn growth_held(held: Option<f64>, incumbent: f64, skipped: u32, n_points: usize) -> bool {
+    stall_growth_waits(held, incumbent) && (n_points < 98 || skipped < GROWTH_RETRY_LEAVES)
+}
+
+/// The arm a hop plays.
+///
+/// A contextual decision, when one was built, stays in front of this choice:
+/// the paper preset does not build one. [`ArmSelection::Uniform`] replaces
+/// the depth posterior and the floored Thompson draw with one uniform index
+/// and consumes nothing else from the generator.
+fn choose_arm<R: Rng + ?Sized>(
+    cfg: &Config,
+    context: Option<ArrayView1<f64>>,
+    contextual: &mut ContextualAllocator,
+    depth_allocator: &crate::allocate::DepthAllocator,
+    allocator: &mut FlooredThompson,
+    n_arms: usize,
+    rng: &mut R,
+) -> usize {
+    if let Some(features) = context {
+        return contextual.select(features, rng);
+    }
+    if cfg.arm_selection == ArmSelection::Uniform {
+        return rng.random_range(0..n_arms);
+    }
+    if cfg.allocate_moves && cfg.depth_reward {
+        return depth_allocator.select(rng);
+    }
+    if cfg.allocate_moves {
+        return allocator.select(rng);
+    }
+    rng.random_range(0..n_arms)
 }
 
 /// Kernels the chain actually draws, including the energy-lattice arm.
@@ -2194,6 +2614,25 @@ const RIGID_FACTOR_CAP_LARGE: f64 = 4.0;
 const RIGID_ACCEPT_TARGET: f64 = 0.5;
 /// Quenched trials between orientation-amplitude updates.
 const RIGID_ACCEPT_BLOCK: usize = 50;
+/// Patience windows with no new lowest minimum before a second rigid chain
+/// walks another oxygen cage.
+///
+/// The main walker is not moved and its generator is not advanced. Forty
+/// windows is a quiet stretch long enough to be a stalled cage, and the
+/// walk itself is capped at the same length so the main chain resumes.
+const RIGID_CAGE_WINDOWS: usize = 40;
+
+/// Seats in a rigid basin index.
+///
+/// The lookup walks every seat the triangle test cannot skip, so an open
+/// list makes every later hop slower. Past this many seats a new region
+/// reuses the latest one. The cap is not applied to an atomic cluster.
+const RIGID_BASIN_CAP: usize = 2_048;
+/// Orientation steps in the shell turn that opens the second walk.
+///
+/// Two steps still quench back into the cage. Three steps, the preset
+/// orientation amplitude taken three times, land in a different basin.
+const RIGID_SHELL_STEPS: f64 = 3.0;
 /// Multiplier applied when a block misses [`RIGID_ACCEPT_TARGET`].
 const RIGID_STEP_FACTOR: f64 = 1.05;
 
@@ -2203,6 +2642,141 @@ const RIGID_STEP_FACTOR: f64 = 1.05;
 /// result stays inside `(1e-3, 1]`. One is the orientation cap already
 /// stored on the move: a larger kick is the regime the factor cap exists
 /// to keep a large water chart out of.
+/// True when some rigid centre has moved by more than `tol`.
+///
+/// A cycle reversal turns bodies about their own centres. That is a new
+/// proton arrangement of the same cage, not a new oxygen framework.
+fn rigid_centres_parted(
+    before: ArrayView1<f64>,
+    after: ArrayView1<f64>,
+    n: usize,
+    tol: f64,
+) -> bool {
+    if n == 0 || before.len() < 3 * n || after.len() < 3 * n {
+        return false;
+    }
+    let tol2 = tol * tol;
+    (0..n).any(|i| {
+        let mut d2 = 0.0;
+        for k in 0..3 {
+            let d = before[3 * i + k] - after[3 * i + k];
+            d2 += d * d;
+        }
+        d2 > tol2
+    })
+}
+
+fn rigid_cage_kernel(mv: &ClusterMove) -> bool {
+    matches!(
+        mv,
+        ClusterMove::RigidRelocate { .. }
+            | ClusterMove::RigidReorient { .. }
+            | ClusterMove::RigidTranslateOne { .. }
+            | ClusterMove::RigidKick { .. }
+    )
+}
+
+/// Quantised oxygen-oxygen distances, so proton isomers of one cage share a key.
+///
+/// The bin width is a fraction of the preset contact length. A rearrangement
+/// that changes a contact moves at least one distance by more than that bin.
+fn rigid_cage_key(state: ArrayView1<f64>, n: usize, quantum: f64) -> u64 {
+    let quantum = if quantum > 0.0 { quantum } else { 1.0 };
+    if n < 2 || state.len() < 3 * n {
+        return 0;
+    }
+    let mut bins = Vec::with_capacity(n * (n - 1) / 2);
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut distance = 0.0;
+            for k in 0..3 {
+                let delta = state[3 * i + k] - state[3 * j + k];
+                distance += delta * delta;
+            }
+            bins.push((distance.sqrt() / quantum).round() as i64);
+        }
+    }
+    bins.sort_unstable();
+    let mut hash = 0xcbf29ce484222325u64;
+    hash ^= n as u64;
+    hash = hash.wrapping_mul(0x100000001b3);
+    for bin in bins {
+        hash ^= bin as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+/// Turn the outer half of a rigid cage about its core.
+///
+/// The angle is a multiple of the preset orientation step. The inner half
+/// stays, so the turn is a rearrangement of the surface about the hollow
+/// rather than a rigid rotation of the whole cluster.
+fn rigid_shell_turn(state: ArrayView1<f64>, n: usize, axis: usize, angle: f64) -> Array1<f64> {
+    let mut y = state.to_owned();
+    if n < 4 || y.len() < 6 * n || !angle.is_finite() {
+        return y;
+    }
+    let mut com = [0.0; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            com[k] += y[3 * i + k];
+        }
+    }
+    for value in &mut com {
+        *value /= n as f64;
+    }
+    let mut radial = vec![0.0; n];
+    for i in 0..n {
+        let mut r = 0.0;
+        for k in 0..3 {
+            let d = y[3 * i + k] - com[k];
+            r += d * d;
+        }
+        radial[i] = r;
+    }
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| radial[a].total_cmp(&radial[b]));
+    let (sin, cos) = angle.sin_cos();
+    let a = (axis + 1) % 3;
+    let b = (axis + 2) % 3;
+    for &i in &order[n / 2..] {
+        let mut p = [0.0; 3];
+        for k in 0..3 {
+            p[k] = y[3 * i + k] - com[k];
+        }
+        let pa = cos * p[a] - sin * p[b];
+        let pb = sin * p[a] + cos * p[b];
+        p[a] = pa;
+        p[b] = pb;
+        for k in 0..3 {
+            y[3 * i + k] = com[k] + p[k];
+        }
+    }
+    y
+}
+
+/// True when every pair of rigid centres is at least `min_d` apart.
+fn rigid_centres_clear(state: ArrayView1<f64>, n: usize, min_d: f64) -> bool {
+    if n < 2 || state.len() < 3 * n || !(min_d > 0.0) {
+        return false;
+    }
+    let min2 = min_d * min_d;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut d2 = 0.0;
+            for k in 0..3 {
+                let d = state[3 * i + k] - state[3 * j + k];
+                d2 += d * d;
+            }
+            if d2 < min2 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 fn rigid_step_scale(scale: f64, accepted: usize, trials: usize) -> f64 {
     if trials == 0 {
         return scale;
@@ -2261,6 +2835,49 @@ fn rigid_factor_cap(n_bodies: usize) -> f64 {
 /// escape instead. Without the `rgsaddle` feature that escape is not
 /// compiled, the run stops, and [`Outcome::nve_unavailable`] is set.
 /// The library kick is not substituted.
+fn species_count(species: &[u32]) -> usize {
+    let mut labels = species.to_vec();
+    labels.sort_unstable();
+    labels.dedup();
+    labels.len()
+}
+
+/// The all-pairs quench is an atomic binary homotop.
+///
+/// Water carries oxygen and hydrogen labels too, and so does a rigid
+/// body. Swapping those atoms breaks the molecule. The polish belongs
+/// on an atomic library, where the labels are the sites being ordered.
+fn polishes_unlike_pairs(cfg: &Config) -> bool {
+    if cfg.move_library.is_molecular() || cfg.move_library.is_rigid_body() {
+        return false;
+    }
+    cfg.species
+        .as_deref()
+        .is_some_and(|species| species_count(species) >= 2)
+}
+
+fn species_groups(species: &[u32]) -> (Vec<usize>, Vec<usize>) {
+    let mut labels = Vec::new();
+    for label in species {
+        if !labels.contains(label) {
+            labels.push(*label);
+        }
+    }
+    let a = labels.first().copied().unwrap_or(0);
+    let b = labels.get(1).copied().unwrap_or(a);
+    let group_a: Vec<usize> = species
+        .iter()
+        .enumerate()
+        .filter_map(|(index, label)| (*label == a).then_some(index))
+        .collect();
+    let group_b: Vec<usize> = species
+        .iter()
+        .enumerate()
+        .filter_map(|(index, label)| (*label == b).then_some(index))
+        .collect();
+    (group_a, group_b)
+}
+
 fn large_diameter_ratio(cfg: &Config) -> bool {
     let Some(sigma) = cfg.species_sigma.as_ref() else {
         return false;
@@ -2366,6 +2983,50 @@ fn finish_improving(
 /// Continuations [`finish_improving`] grants one relaxation.
 const FINISH_ROUNDS: usize = 8;
 
+/// Keep relaxing a rigid trial until the root-mean-square force is at the
+/// record tolerance, or the block stops descending.
+///
+/// A fixed step cap on a rigid chart converges a small fraction of the
+/// quenches. A trial that has reached the global basin is then not a
+/// record, and the chain walks on. The continuation is the same block
+/// length, up to [`FINISH_ROUNDS`] more times, whether or not the trial
+/// is below the incumbent.
+fn finish_rigid<'g>(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: &mut Option<&mut GradFn<'g>>,
+    mut out: (f64, Array1<f64>),
+) -> (f64, Array1<f64>) {
+    if !cfg.move_library.is_rigid_body() {
+        return out;
+    }
+    for _ in 0..FINISH_ROUNDS {
+        if ledger.remaining() == 0 {
+            break;
+        }
+        let rms = match grad.as_deref_mut() {
+            Some(evaluate) => match evaluate(ledger, out.1.view()) {
+                Some(gradient) => crate::methods::rigid_quench::rms_force(gradient.view()),
+                None => break,
+            },
+            None => break,
+        };
+        if rms <= cfg.record_gradient {
+            break;
+        }
+        let more = relax(ledger, out.1.view(), cfg.relax_steps);
+        let descended = more.0 < out.0 - 1e-10 * (1.0 + out.0.abs());
+        if more.0 <= out.0 {
+            out = more;
+        }
+        if !descended {
+            break;
+        }
+    }
+    out
+}
+
 /// A caller stop during the opening quench is not a refused potential.
 ///
 /// The ledger may hold no finite minimum yet. The search still returns
@@ -2401,6 +3062,14 @@ where
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
     let _caller_stop = ledger.bind_stop();
+    // A target on the configuration is the same stop a caller can raise
+    // on the ledger. A ledger target already set is left alone, so an
+    // explicit `stop_below` still wins.
+    if ledger.target().is_none()
+        && let Some(energy) = cfg.target_energy
+    {
+        ledger.stop_below(energy);
+    }
     let n = cfg.n_points;
     let (continuous_symmetry_classes, csm_reseed_hops) = match cfg.continuous_symmetry {
         ContinuousSymmetry::Off => (None, 0),
@@ -2594,6 +3263,15 @@ where
     // useful move changes as the search moves through the landscape, so the
     // evidence is discounted and a decaying floor keeps every kernel reachable.
     let mut allocator = FlooredThompson::new(kernels.len());
+    // A water rewire is the move that improves the incumbent. The prior
+    // starts it ahead of the shake; the improvement rate takes over.
+    if cfg.improvement_rewards {
+        for (index, kernel) in kernels.iter().enumerate() {
+            if matches!(kernel, ClusterMove::GroupRewire { .. }) {
+                allocator.credit(index, crate::catalog::molecular::WATER_REWIRE_PRIOR);
+            }
+        }
+    }
     // Rewarded by the depth a move reaches rather than by whether it was
     // accepted. See [`crate::allocate::DepthAllocator`].
     let mut depth_allocator = crate::allocate::DepthAllocator::new(kernels.len());
@@ -2773,6 +3451,11 @@ where
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
     let mut continuous_symmetry_attempts = 0usize;
+    // Project when the interval is due and the ledger has a new lowest
+    // energy. Repeating the projection on a basin that is not the
+    // incumbent spends the force budget and, on the six-seed panel,
+    // finds fewer Cambridge minima.
+    let mut new_incumbent = true;
     let mut continuous_symmetry_quenches = 0usize;
     let mut continuous_symmetry_gain = 0.0_f64;
     let mut quiet = 0usize;
@@ -2790,6 +3473,12 @@ where
     // The escape scale starts at the move library's own amplitude, so a run
     // without feedback and one with it begin identically.
     let mut feedback = EscapeFeedback::new(1.0, cfg.temperature.max(1e-6));
+    if cfg.move_library.is_rigid_body() {
+        // The shrink on every accept otherwise closes the window below
+        // the barriers between rigid cages. The preset temperature is
+        // the floor, so a rise of that size stays acceptable.
+        feedback.set_threshold_floor(cfg.temperature.max(1e-6));
+    }
     // The entropy the chain accepts against, and the weight frozen for the
     // sweep in progress. Both stay empty until the first sweep has said what
     // range of quenched energies this problem occupies: the window is read off
@@ -2822,6 +3511,13 @@ where
         ClusterFingerprint::of_config(cfg, &canonical_reference),
         cfg.merge_radius,
     );
+    if cfg.move_library.is_rigid_body() {
+        identity.set_cap(RIGID_BASIN_CAP);
+        bias.cap_basins(RIGID_BASIN_CAP);
+        for parked in &mut biases {
+            parked.cap_basins(RIGID_BASIN_CAP);
+        }
+    }
     if cfg.minima_hopping {
         let initial_basin = identity.basin_of(x.view());
         feedback.register_driver_local_initial(initial_basin);
@@ -3018,6 +3714,7 @@ where
     let mut returned = 0usize;
     let mut descent = ScreenDescent::default();
     let mut accepted = 0usize;
+    let mut arm_counts: Vec<ArmCount> = Vec::new();
     // A rigid chart is not in the preset's reduced energy unit. Charts of
     // ten bodies or fewer start at the top of the acceptance window and let
     // the rate pull the factor down. A chart with more bodies stays at the
@@ -3045,6 +3742,9 @@ where
     let mut next_checkpoint = checkpoint_interval;
     let mut next_reoccupy = cfg.reoccupy_interval;
     let mut best_seen = ledger.best;
+    // Energy last polished by an unlike-pair quench. `NaN` until the first
+    // binary incumbent, so a one-species chain never enters the sweep.
+    let mut polished_best = f64::NAN;
     let mut charged_at_best = ledger.spent();
     // Minima separated by common-neighbour fractions. A stall in the
     // icosahedral packing can return to a lower minimum of another packing
@@ -3054,20 +3754,103 @@ where
     // Hops elapsed when the ledger last recorded a lower minimum.
     // A rigid stall measures 1000 hops from that hop count.
     let mut hops_at_lowest = 0usize;
+    // Water restarts from a stored basin on its own clock, and then
+    // stays there for a few hops before the incumbent gap applies.
+    let mut last_basin_restart = 0usize;
+    let mut basin_hold = 0usize;
+    // Set after a rigid stall when the preset relocates one molecule.
+    // Cleared when a new lowest minimum is recorded.
+    let mut cage_edit = false;
     let mut csm_reseed_stamp = 0usize;
+    // Calls spent when a labelled motif reseed last ran. Half a budget
+    // since the incumbent last improved, so a search that is still
+    // descending does not pay for it.
+    let mut motif_at_spent = 0usize;
     // Set when a stall growth fails to lower the incumbent. Later growth
-    // quenches wait until that energy drops, and the proposals until then
-    // are all-points displacements.
+    // quenches wait until that energy drops. Only the leave whose growth
+    // was skipped is an all-points displacement. The hops between leaves
+    // keep the move library: replacing every one of them locks the chain
+    // on the icosahedral floor (LJ75 about 1.21 above Marks, LJ98 about
+    // 0.022 above the Leary tetrahedron).
     let mut stall_growth_hold: Option<f64> = None;
+    let mut stall_growth_skips: u32 = 0;
     let hop_room = |hops: usize| cfg.max_hops.is_none_or(|cap| hops < cap);
     // Distinct minima a rigid chain has quenched. Its stall moves to one.
     let mut stall_archive = crate::methods::stall_archive::StallArchive::default();
+    // One seat per oxygen cage. The energy archive fills with proton
+    // isomers of the lowest cage and then has nowhere else to walk.
+    let mut cage_archive = crate::methods::stall_archive::StallArchive::new(
+        crate::methods::stall_archive::CAGE_SEATS,
+        crate::methods::stall_archive::MEMORY,
+    );
+    let cage_quantum = cfg.min_separation / 50.0;
+    let mut cage_walked = false;
+    let mut archive_walked = false;
+    let mut binary_core_offered = false;
+    // Energy of the incumbent whose close-packed sheet has already been slid.
+    let mut layer_slide_bits: Option<u64> = None;
+    // Held until the walk finishes. Accepting a packing cut at the raw
+    // start replaces the chain with a local minimum the later hops would
+    // have left. The cut is kept when it still beats that incumbent.
+    let mut pending_cut: Option<(f64, Array1<f64>)> = None;
     if cfg.move_library.is_rigid_body() {
+        stall_archive.offer(e, x.view());
+        cage_archive.offer_cage(
+            e,
+            x.view(),
+            rigid_cage_key(x.view(), cfg.n_points, cage_quantum),
+        );
+    } else if cfg.improvement_rewards {
         stall_archive.offer(e, x.view());
     }
 
+    // Descriptor and seat of the geometry the chain is standing on.
+    // A rejected proposal leaves both in place, so the next hop does
+    // not scan for them again. Opening any other seat drops the seat
+    // count out of agreement and the scan runs.
+    let mut held_bits: Vec<u64> = Vec::new();
+    let mut held_cv: Option<Array1<f64>> = None;
+    let mut held_seat: Option<usize> = None;
+    let mut held_count: usize = 0;
+    // A long-ranged well binds the second neighbour, and the Mackay
+    // icosahedron is then the minimum at the complete shell. One quench,
+    // charged like any other. A short-ranged run does not enter. The walk
+    // keeps the start it already has: the cut is only the recorded best
+    // when it is lower, and a target stops the loop before the first hop.
+    if cfg.long_ranged && !ledger.target_reached() && ledger.remaining() > 0 {
+        let mackay = binary_geometry::mackay_cap(n, cfg.length_scale.max(1e-6));
+        if mackay.len() == x.len() {
+            let (mackay_energy, mackay_state) = relax(ledger, mackay.view(), cfg.relax_steps);
+            if mackay_energy.is_finite() && quench_is_sane(cfg, mackay_energy, mackay_state.view())
+            {
+                let before = ledger.best;
+                let _gradient = record_quenched_answer(
+                    cfg,
+                    ledger,
+                    &mut grad,
+                    mackay_energy,
+                    mackay_state.view(),
+                    &mut unconverged_records,
+                );
+                if mackay_energy < before - 1e-12 && improvements.len() < 512 {
+                    improvements.push((0, ledger.spent(), bias.n_basins(), mackay_energy));
+                }
+            }
+        }
+    }
     let stop = loop {
-        if ledger.stopped() || ledger.target_reached() {
+        // A finished checkpoint interval is delivered before the budget
+        // exit. The loop otherwise returns here with nothing left to
+        // charge, and the callback that the last hop completed never runs.
+        let interval_finished = matches!(
+            (checkpoint_interval, next_checkpoint),
+            (Some(_), Some(threshold))
+                if hops > checkpoint_hops && ledger.spent() >= threshold
+        );
+        if ledger.stopped()
+            || ledger.target_reached()
+            || (ledger.remaining() == 0 && !interval_finished)
+        {
             break HopStop::of_closed(ledger);
         }
         // The cap is read here because every early `continue` returns here,
@@ -3075,11 +3858,716 @@ where
         if !hop_room(hops) {
             break HopStop::MaxHops;
         }
-        if ledger.best < best_seen - 1e-9 {
+        // A labelled single-species cluster that has settled into a
+        // close-packed sheet, rather than a fivefold plateau, can still be
+        // one lattice step inside that sheet away from the lower packing.
+        // The sheet that stands clear of the others is slid once for this
+        // incumbent, and a stacking fault in a smaller sheet is slipped in
+        // the plane. Two species, a rigid body, and an unlabelled cluster
+        // do not enter, so their call counts are unchanged.
+        if cfg.species.is_some()
+            && cfg.monoatomic()
+            && cfg.packing_cna_applies()
+            && layer_slide_bits != Some(ledger.best.to_bits())
+            && let Some(incumbent) = ledger.best_state.clone()
+        {
+            let (frac_555, frac_421, frac_422) = crate::soap::motif_fractions(incumbent.view());
+            let close_packed = !crate::soap::fivefold_plateau(incumbent.view())
+                && frac_421 > frac_422
+                && frac_421 > frac_555;
+            if close_packed {
+                layer_slide_bits = Some(ledger.best.to_bits());
+                for slide in crate::twin::dominant_layer_slides(incumbent.view()) {
+                    if ledger.remaining() == 0 || ledger.target_reached() {
+                        break;
+                    }
+                    let (candidate_energy, candidate) =
+                        relax(ledger, slide.view(), cfg.relax_steps);
+                    if ledger.stopped() {
+                        break;
+                    }
+                    let candidate_sane = quench_is_sane(cfg, candidate_energy, candidate.view());
+                    let candidate_gradient = candidate_sane.then(|| {
+                        grad.as_deref_mut().and_then(|gradient| {
+                            gradient(ledger, candidate.view()).filter(|values| {
+                                answer_gradient_ok(cfg, values.view(), candidate.len())
+                            })
+                        })
+                    });
+                    let candidate_gradient = candidate_gradient.flatten();
+                    let recordable =
+                        candidate_sane && (!gradient_required || candidate_gradient.is_some());
+                    let improved = recordable && candidate_energy < ledger.best - 1e-10;
+                    if recordable {
+                        ledger.record(candidate_energy, candidate.view());
+                    } else {
+                        unconverged_records += 1;
+                    }
+                    let adopted = recordable && candidate_energy < e - 1e-10;
+                    if recordable {
+                        ledger.mark_last_recorded(adopted);
+                    }
+                    if adopted {
+                        let from_basin = here.unwrap_or_else(|| identity.basin_of(x.view()));
+                        let reached = identity.basin_of(candidate.view());
+                        adopt_minimum!(
+                            candidate_energy,
+                            candidate.clone(),
+                            candidate_gradient.clone(),
+                            Some(reached),
+                            AdoptionHistory::Fresh,
+                            Some((Some(from_basin), reached)),
+                            Some("layer-slide"),
+                            hops
+                        );
+                        soft_cache = None;
+                        basin_entry = None;
+                        quiet = 0;
+                        if improved && improvements.len() < 512 {
+                            improvements.push((
+                                hops,
+                                ledger.spent(),
+                                bias.n_basins(),
+                                candidate_energy,
+                            ));
+                        }
+                    }
+                    if ledger.target_reached() {
+                        break;
+                    }
+                }
+                // The edge slide has its own funnel. What it does not move
+                // is a fault that slips inside the plane: a patch of a
+                // smaller sheet, or the sheet itself, by a Shockley partial
+                // and by a full lattice step. The first slip that actually
+                // lowers the incumbent is kept. The rest of that list is
+                // the same fault in other directions, and the next pass of
+                // the edge slide is what finishes a packing the partial has
+                // opened. A numerical quiver of the quench is not that.
+                if !ledger.target_reached() && !ledger.stopped() {
+                    let before = ledger.best;
+                    // One edge-slide follow-up per quenched energy. A later
+                    // partial can land above the best slip so far and still
+                    // be the packing the edge slide finishes.
+                    let mut followed: Vec<f64> = Vec::new();
+                    for slip in crate::twin::stacking_fault_slips(incumbent.view()) {
+                        if ledger.remaining() == 0 || ledger.target_reached() {
+                            break;
+                        }
+                        let (candidate_energy, candidate) =
+                            relax(ledger, slip.view(), cfg.relax_steps);
+                        if ledger.stopped() {
+                            break;
+                        }
+                        let candidate_sane =
+                            quench_is_sane(cfg, candidate_energy, candidate.view());
+                        let candidate_gradient = candidate_sane.then(|| {
+                            grad.as_deref_mut().and_then(|gradient| {
+                                gradient(ledger, candidate.view()).filter(|values| {
+                                    answer_gradient_ok(cfg, values.view(), candidate.len())
+                                })
+                            })
+                        });
+                        let candidate_gradient = candidate_gradient.flatten();
+                        let recordable =
+                            candidate_sane && (!gradient_required || candidate_gradient.is_some());
+                        let improved = recordable && candidate_energy < before - 1e-4;
+                        if !improved {
+                            if !recordable {
+                                unconverged_records += 1;
+                            }
+                            continue;
+                        }
+                        if followed
+                            .iter()
+                            .any(|prior| (prior - candidate_energy).abs() < 1e-4)
+                        {
+                            continue;
+                        }
+                        followed.push(candidate_energy);
+                        if candidate_energy < ledger.best - 1e-10 {
+                            ledger.record(candidate_energy, candidate.view());
+                            let adopted = candidate_energy < e - 1e-10;
+                            ledger.mark_last_recorded(adopted);
+                            if adopted {
+                                let from_basin =
+                                    here.unwrap_or_else(|| identity.basin_of(x.view()));
+                                let reached = identity.basin_of(candidate.view());
+                                adopt_minimum!(
+                                    candidate_energy,
+                                    candidate.clone(),
+                                    candidate_gradient.clone(),
+                                    Some(reached),
+                                    AdoptionHistory::Fresh,
+                                    Some((Some(from_basin), reached)),
+                                    Some("stacking-slip"),
+                                    hops
+                                );
+                                soft_cache = None;
+                                basin_entry = None;
+                                quiet = 0;
+                                if improvements.len() < 512 {
+                                    improvements.push((
+                                        hops,
+                                        ledger.spent(),
+                                        bias.n_basins(),
+                                        candidate_energy,
+                                    ));
+                                }
+                            }
+                        }
+                        if ledger.target_reached() {
+                            break;
+                        }
+                        // The opened sheet can sit so close to another face
+                        // that the factor-of-two test calls them a tie. The
+                        // most isolated sheet is still the one to move.
+                        let mut slides = crate::twin::dominant_layer_slides(candidate.view());
+                        if slides.is_empty() {
+                            slides = crate::twin::most_isolated_layer_slides(candidate.view());
+                        }
+                        for slide in slides {
+                            if ledger.remaining() == 0 || ledger.target_reached() {
+                                break;
+                            }
+                            let (slide_energy, slid) = relax(ledger, slide.view(), cfg.relax_steps);
+                            if ledger.stopped() {
+                                break;
+                            }
+                            let slide_sane = quench_is_sane(cfg, slide_energy, slid.view());
+                            let slide_gradient = slide_sane.then(|| {
+                                grad.as_deref_mut().and_then(|gradient| {
+                                    gradient(ledger, slid.view()).filter(|values| {
+                                        answer_gradient_ok(cfg, values.view(), slid.len())
+                                    })
+                                })
+                            });
+                            let slide_gradient = slide_gradient.flatten();
+                            let slide_recordable =
+                                slide_sane && (!gradient_required || slide_gradient.is_some());
+                            let slide_improved =
+                                slide_recordable && slide_energy < ledger.best - 1e-10;
+                            if slide_recordable {
+                                ledger.record(slide_energy, slid.view());
+                            } else {
+                                unconverged_records += 1;
+                            }
+                            let slide_adopted = slide_recordable && slide_energy < e - 1e-10;
+                            if slide_recordable {
+                                ledger.mark_last_recorded(slide_adopted);
+                            }
+                            if slide_adopted {
+                                let from_basin =
+                                    here.unwrap_or_else(|| identity.basin_of(x.view()));
+                                let reached = identity.basin_of(slid.view());
+                                adopt_minimum!(
+                                    slide_energy,
+                                    slid.clone(),
+                                    slide_gradient.clone(),
+                                    Some(reached),
+                                    AdoptionHistory::Fresh,
+                                    Some((Some(from_basin), reached)),
+                                    Some("layer-slide"),
+                                    hops
+                                );
+                                soft_cache = None;
+                                basin_entry = None;
+                                quiet = 0;
+                                if slide_improved && improvements.len() < 512 {
+                                    improvements.push((
+                                        hops,
+                                        ledger.spent(),
+                                        bias.n_basins(),
+                                        slide_energy,
+                                    ));
+                                }
+                            }
+                            if ledger.target_reached() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if ledger.target_reached() {
+            break HopStop::of_closed(ledger);
+        }
+        // Labelled atomic clusters are offered close-packed cuts once:
+        // the n sites of an fcc lattice nearest an atom, an octahedral
+        // hole and a tetrahedral hole, interpenetrating icosahedra, a
+        // Mackay icosahedron, and the packings the motif growth already
+        // knows. Two species are
+        // ordered by homonuclear distance
+        // and by the collective swap ranking. The quenched cut is held
+        // and compared with the incumbent the walk actually reaches.
+        // Every evaluation is charged. Unlabelled and rigid runs never enter.
+        if !binary_core_offered
+            && !cfg.move_library.is_molecular()
+            && !cfg.move_library.is_rigid_body()
+            && let Some(species) = cfg.species.as_deref()
+            && species.len() == x.len() / 3
+            && species.len() >= 2
+        {
+            binary_core_offered = true;
+            let n_atoms = species.len();
+            let sigma = cfg.species_sigma.as_deref();
+            let mut radius_sum = 0.0;
+            let mut radius_count = 0.0;
+            let mut seen_labels = Vec::new();
+            for label in species {
+                if !seen_labels.contains(label) {
+                    seen_labels.push(*label);
+                    radius_sum += binary_geometry::label_radius(species, sigma, *label);
+                    radius_count += 1.0;
+                }
+            }
+            let nearest = if radius_count > 0.0 {
+                (radius_sum / radius_count).max(1e-6)
+            } else {
+                crate::lattice::nearest_neighbour_scale(x.view()).max(1e-6)
+            };
+            let mut grown = Vec::new();
+            for centre in [
+                binary_geometry::FccCentre::Atom,
+                binary_geometry::FccCentre::Octahedral,
+                binary_geometry::FccCentre::Tetrahedral,
+            ] {
+                grown.push(binary_geometry::fcc_cut(n_atoms, centre, nearest));
+            }
+            for join in [
+                binary_geometry::IcosahedronJoin::Compact,
+                binary_geometry::IcosahedronJoin::Linear,
+            ] {
+                grown.push(binary_geometry::polyicosahedral_cut(n_atoms, join, nearest));
+            }
+            grown.push(binary_geometry::mackay_cut(n_atoms, nearest));
+            let mut side_rng = StdRng::seed_from_u64(0x0C10_5ED0);
+            for source in [
+                crate::lattice::Source::Named(crate::structure::Template::FaceCentredCubic),
+                crate::lattice::Source::Named(crate::structure::Template::Icosahedral),
+                crate::lattice::Source::Pentagonal,
+            ] {
+                grown.push(crate::lattice::candidate(
+                    source,
+                    x.view(),
+                    n_atoms,
+                    &mut side_rng,
+                ));
+            }
+            let mut probe = Ledger::new(ledger.remaining().max(1));
+            struct Side<'a> {
+                probe: &'a mut Ledger,
+                relax: Relax<'a>,
+                steps: usize,
+            }
+            impl binary_geometry::QuenchProbe for Side<'_> {
+                fn energy(&mut self, point: ArrayView1<f64>) -> Option<f64> {
+                    if self.probe.remaining() == 0 {
+                        return None;
+                    }
+                    let (value, _) = (self.relax)(self.probe, point, 0);
+                    value.is_finite().then_some(value)
+                }
+
+                fn quench(&mut self, point: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+                    if self.probe.remaining() == 0 {
+                        return None;
+                    }
+                    // The descent can record a lower physical point than the
+                    // one it returns when a later pass leaves that basin.
+                    let seen = self.probe.best;
+                    let (value, relaxed) = (self.relax)(self.probe, point, self.steps);
+                    if self.probe.best < seen
+                        && self.probe.best < value
+                        && let Some(state) = self.probe.best_state.clone()
+                    {
+                        return Some((self.probe.best, state));
+                    }
+                    value.is_finite().then_some((value, relaxed))
+                }
+            }
+            let mut best_cut: Option<(f64, Array1<f64>)> = None;
+            {
+                let mut side = Side {
+                    probe: &mut probe,
+                    relax,
+                    steps: cfg.relax_steps,
+                };
+                let mut arranged = Vec::new();
+                if species_count(species) >= 2
+                    && let Some(spine) = binary_geometry::axial_spine_cut(species, |label| {
+                        binary_geometry::label_radius(species, sigma, label)
+                    })
+                    && let Some(seeded) = binary_geometry::quench_as_placed(spine, &mut side)
+                {
+                    arranged.push(seeded);
+                }
+                for candidate in grown {
+                    if side.probe.remaining() == 0 {
+                        break;
+                    }
+                    let placed =
+                        binary_geometry::place_smaller_inside(candidate.view(), species, |label| {
+                            binary_geometry::label_radius(species, sigma, label)
+                        });
+                    if let Some(seeded) = binary_geometry::arrange(placed, species, &mut side) {
+                        arranged.push(seeded);
+                    }
+                }
+                arranged.sort_by(|left, right| left.0.total_cmp(&right.0));
+                // Ordering can lower a worse packing by more than it lowers
+                // the best one, so every cut is polished while the probe lasts.
+                for (energy, state) in arranged {
+                    if side.probe.remaining() == 0 {
+                        if best_cut.as_ref().is_none_or(|(held, _)| energy < *held) {
+                            best_cut = Some((energy, state));
+                        }
+                        break;
+                    }
+                    if let Some(refined) =
+                        binary_geometry::refine(energy, state, species, &mut side)
+                        && refined.0.is_finite()
+                        && best_cut.as_ref().is_none_or(|(held, _)| refined.0 < *held)
+                    {
+                        best_cut = Some(refined);
+                    }
+                }
+            }
+            let before = ledger.spent();
+            ledger.charge_many(probe.spent());
+            // The probe is not a quiet stretch of the chain. The stall
+            // clock stays where the walker's own quenches left it.
+            charged_at_best = charged_at_best.saturating_add(ledger.spent().saturating_sub(before));
+            pending_cut = best_cut;
+        }
+        // A rigid quench creeps by far less than an isomer gap. Treating
+        // that creep as a new lowest restarts the stall clock forever, so
+        // the chain never edits the cage.
+        let new_lowest = if cfg.move_library.is_rigid_body() {
+            5.0e-2
+        } else {
+            1e-9
+        };
+        if ledger.best < best_seen - new_lowest {
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
             hops_at_lowest = hops;
             csm_reseed_stamp = hops;
+            cage_edit = false;
+            new_incumbent = true;
+        }
+        // Every unlike pair, quenched, kept when it is lower. One random
+        // exchange every fourth hop does not finish the ordering. Absent
+        // unless two labels are present, so an unlabelled chain is unchanged.
+        // A molecular or rigid library keeps its atoms inside a body.
+        if polishes_unlike_pairs(cfg)
+            && ledger.best.is_finite()
+            && (polished_best.is_nan() || ledger.best < polished_best - 1e-8)
+            && let Some(best_state) = ledger.best_state.clone()
+        {
+            let species = cfg.species.as_deref().expect("a binary polish has species");
+            let mut current = best_state;
+            let mut current_e = ledger.best;
+            let (group_a, group_b) = species_groups(species);
+            for _round in 0..3 {
+                if ledger.remaining() == 0 {
+                    break;
+                }
+                let mut gained = false;
+                let mut tried = 0usize;
+                'pairs: for &i in &group_a {
+                    for &j in &group_b {
+                        if ledger.remaining() == 0 || tried >= 800 {
+                            break 'pairs;
+                        }
+                        tried += 1;
+                        let mut swapped = current.clone();
+                        for axis in 0..3 {
+                            swapped.swap(3 * i + axis, 3 * j + axis);
+                        }
+                        let (eq, xq) = relax(ledger, swapped.view(), cfg.relax_steps);
+                        if !quench_is_sane(cfg, eq, xq.view()) || !(eq < current_e - 1e-6) {
+                            continue;
+                        }
+                        let gradient = record_quenched_answer(
+                            cfg,
+                            ledger,
+                            &mut grad,
+                            eq,
+                            xq.view(),
+                            &mut unconverged_records,
+                        );
+                        if gradient.is_none() && grad.is_some() {
+                            continue;
+                        }
+                        let from_basin = identity.basin_of(current.view());
+                        let reached = identity.basin_of(xq.view());
+                        adopt_minimum!(
+                            eq,
+                            xq,
+                            gradient,
+                            Some(reached),
+                            AdoptionHistory::Fresh,
+                            Some((Some(from_basin), reached)),
+                            Some("homotop"),
+                            hops
+                        );
+                        current = x.clone();
+                        current_e = e;
+                        gained = true;
+                    }
+                }
+                if !gained {
+                    break;
+                }
+            }
+            polished_best = ledger.best;
+        }
+        // The main walker stays put and its generator is not advanced.
+        // After many patience windows with no new lowest minimum, the calls
+        // that remain are spent on another cage the chain already quenched.
+        // A chain that is still descending never enters, so its proposals
+        // and its evaluation count stay what they were.
+        let cage_patience = cfg
+            .restart_patience
+            .saturating_mul(RIGID_CAGE_WINDOWS)
+            .max(1);
+        if cfg.move_library.is_rigid_body()
+            && !cage_walked
+            && !kernels.is_empty()
+            && ledger.spent().saturating_sub(charged_at_best) >= cage_patience
+        {
+            cage_walked = true;
+            let shell_mark = ledger.spent();
+            // Start from the walker itself. Touching the shared cage archive
+            // here would change the later walk's destination.
+            let key = rigid_cage_key(x.view(), cfg.n_points, cage_quantum);
+            let (mut side_energy, mut side_state) = (e, x.clone());
+            // A fresh generator, not a draw on the walker's.
+            let mut side_rng = StdRng::seed_from_u64(
+                (hops as u64)
+                    .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    .wrapping_add(key)
+                    .wrapping_add(side_energy.to_bits()),
+            );
+            let side_scale = orient_scale;
+            macro_rules! hop_side {
+                ($rng:ident, $energy:ident, $state:ident) => {{
+                    let mut going = false;
+                    if ledger.remaining() > 0 && !ledger.stopped() {
+                        let arm = $rng.random_range(0..kernels.len());
+                        let mut trial = kernels[arm].propose_scaled(
+                            $state.view(),
+                            cfg.temperature,
+                            side_scale,
+                            &mut $rng,
+                        );
+                        recentre(&mut trial, cfg.n_points);
+                        contain(&mut trial, cfg.n_points, cfg.container);
+                        let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
+                        if quenched.is_finite() && relaxed.len() == $state.len() {
+                            let rise = (quenched - $energy) / cfg.temperature.max(1e-12);
+                            if rise <= 0.0 || $rng.random::<f64>() < (-rise).exp() {
+                                $energy = quenched;
+                                $state = relaxed;
+                            }
+                            going = true;
+                        }
+                    }
+                    going
+                }};
+            }
+            // The outer half turns about the core by three orientation
+            // steps. A single-molecule move into a hollow quenches back
+            // into the same cage; this turn does not.
+            if !ledger.stopped() && ledger.remaining() > 0 {
+                let angle = match cfg.move_library {
+                    MoveLibrary::RigidBody { rotate_step, .. } => RIGID_SHELL_STEPS * rotate_step,
+                    _ => 0.0,
+                };
+                let mut turned: Option<(f64, Array1<f64>)> = None;
+                if angle > 0.0 {
+                    for axis in 0..3 {
+                        let trial = rigid_shell_turn(side_state.view(), cfg.n_points, axis, angle);
+                        let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
+                        if quenched.is_finite()
+                            && rigid_centres_clear(
+                                relaxed.view(),
+                                cfg.n_points,
+                                0.5 * cfg.min_separation,
+                            )
+                            && turned.as_ref().is_none_or(|(held, _)| quenched < *held)
+                        {
+                            turned = Some((quenched, relaxed));
+                        }
+                    }
+                }
+                if let Some((energy, state)) = turned
+                    && (energy - side_energy).abs() > 1.0e-3
+                {
+                    side_energy = energy;
+                    side_state = state;
+                    let twist_end = ledger.spent().saturating_add(cage_patience);
+                    while ledger.spent() < twist_end && hop_side!(side_rng, side_energy, side_state)
+                    {
+                    }
+                }
+            }
+            // The shell of the walker is one leave. When it comes up short,
+            // walk a stored cage and turn that shell. The stored-cage turn
+            // is what reaches the contact the walker's own shell does not.
+            if !ledger.stopped() && ledger.remaining() > 0 {
+                cage_archive.offer_cage(e, x.view(), key);
+                if let Some(best) = ledger.best_state.as_ref() {
+                    cage_archive.offer_cage(
+                        ledger.best,
+                        best.view(),
+                        rigid_cage_key(best.view(), cfg.n_points, cage_quantum),
+                    );
+                }
+                if let Some((energy, state)) = cage_archive.escape_other_cage(key)
+                    && state.len() == x.len()
+                {
+                    side_energy = energy;
+                    side_state = state;
+                }
+                side_rng = StdRng::seed_from_u64(
+                    (hops as u64)
+                        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                        .wrapping_add(key)
+                        .wrapping_add(side_energy.to_bits()),
+                );
+                let stored_end = ledger.spent().saturating_add(cage_patience);
+                let mut stored_hops = 0usize;
+                while ledger.spent() < stored_end && hop_side!(side_rng, side_energy, side_state) {
+                    if stored_hops > 0
+                        && stored_hops.is_multiple_of(crate::methods::rigid_quench::STAGNATION_HOPS)
+                    {
+                        let next_key =
+                            rigid_cage_key(side_state.view(), cfg.n_points, cage_quantum);
+                        if let Some((energy, state)) = cage_archive.escape_other_cage(next_key)
+                            && state.len() == side_state.len()
+                        {
+                            side_energy = energy;
+                            side_state = state;
+                        }
+                    }
+                    stored_hops += 1;
+                }
+                if !ledger.stopped() && ledger.remaining() > 0 {
+                    let angle = match cfg.move_library {
+                        MoveLibrary::RigidBody { rotate_step, .. } => {
+                            RIGID_SHELL_STEPS * rotate_step
+                        }
+                        _ => 0.0,
+                    };
+                    let mut turned: Option<(f64, Array1<f64>)> = None;
+                    if angle > 0.0 {
+                        for axis in 0..3 {
+                            let trial =
+                                rigid_shell_turn(side_state.view(), cfg.n_points, axis, angle);
+                            let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
+                            if quenched.is_finite()
+                                && rigid_centres_clear(
+                                    relaxed.view(),
+                                    cfg.n_points,
+                                    0.5 * cfg.min_separation,
+                                )
+                                && turned.as_ref().is_none_or(|(held, _)| quenched < *held)
+                            {
+                                turned = Some((quenched, relaxed));
+                            }
+                        }
+                    }
+                    if let Some((energy, state)) = turned
+                        && (energy - side_energy).abs() > 1.0e-3
+                    {
+                        side_energy = energy;
+                        side_state = state;
+                        let twist_end = ledger.spent().saturating_add(cage_patience);
+                        while ledger.spent() < twist_end
+                            && hop_side!(side_rng, side_energy, side_state)
+                        {
+                        }
+                    }
+                }
+            }
+            // The calls just spent are not a new lowest of the main chain.
+            // Leaving them on the quiet clock would start the later walk
+            // before the main chain has actually stalled.
+            charged_at_best =
+                charged_at_best.saturating_add(ledger.spent().saturating_sub(shell_mark));
+        }
+        // The shell turn above is the early leave. A longer walk on a stored
+        // cage is what reaches the minimum when the shell lands short of it,
+        // and it waits out a longer quiet stretch so a chain that is still
+        // descending is not spent here.
+        let archive_patience = cfg
+            .restart_patience
+            .saturating_mul(RIGID_CAGE_WINDOWS.saturating_mul(4))
+            .max(1);
+        if cfg.move_library.is_rigid_body()
+            && !archive_walked
+            && !kernels.is_empty()
+            && ledger.spent().saturating_sub(charged_at_best) >= archive_patience
+        {
+            archive_walked = true;
+            let key = rigid_cage_key(x.view(), cfg.n_points, cage_quantum);
+            cage_archive.offer_cage(e, x.view(), key);
+            if let Some(best) = ledger.best_state.as_ref() {
+                cage_archive.offer_cage(
+                    ledger.best,
+                    best.view(),
+                    rigid_cage_key(best.view(), cfg.n_points, cage_quantum),
+                );
+            }
+            let (mut side_energy, mut side_state) = match cage_archive.escape_other_cage(key) {
+                Some((energy, state)) if state.len() == x.len() => (energy, state),
+                _ => (e, x.clone()),
+            };
+            // A fresh generator, not a draw on the walker's.
+            let mut side_rng = StdRng::seed_from_u64(
+                (hops as u64)
+                    .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    .wrapping_add(key)
+                    .wrapping_add(side_energy.to_bits()),
+            );
+            let side_scale = orient_scale;
+            let mut side_hops = 0usize;
+            let archive_end = ledger.spent().saturating_add(archive_patience);
+            while ledger.spent() < archive_end && ledger.remaining() > 0 && !ledger.stopped() {
+                if side_hops > 0
+                    && side_hops.is_multiple_of(crate::methods::rigid_quench::STAGNATION_HOPS)
+                {
+                    let next_key = rigid_cage_key(side_state.view(), cfg.n_points, cage_quantum);
+                    if let Some((energy, state)) = cage_archive.escape_other_cage(next_key)
+                        && state.len() == side_state.len()
+                    {
+                        side_energy = energy;
+                        side_state = state;
+                    }
+                }
+                side_hops += 1;
+                let arm = side_rng.random_range(0..kernels.len());
+                let mut trial = kernels[arm].propose_scaled(
+                    side_state.view(),
+                    cfg.temperature,
+                    side_scale,
+                    &mut side_rng,
+                );
+                recentre(&mut trial, cfg.n_points);
+                contain(&mut trial, cfg.n_points, cfg.container);
+                let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
+                if !quenched.is_finite() || relaxed.len() != side_state.len() {
+                    break;
+                }
+                let rise = (quenched - side_energy) / cfg.temperature.max(1e-12);
+                if rise <= 0.0 || side_rng.random::<f64>() < (-rise).exp() {
+                    side_energy = quenched;
+                    side_state = relaxed;
+                }
+            }
         }
         if cfg.move_library.is_rigid_body()
             && crate::methods::rigid_quench::stalled(hops, hops_at_lowest)
@@ -3103,6 +4591,40 @@ where
                 e = energy;
                 x = state;
                 current_validation_gradient = gradient.filter(|_| ok);
+            }
+            // Translation, rotation and cycle reversal leave the oxygen cage
+            // where it is. After a thousand hops with no new lowest minimum,
+            // the proposals that follow move one molecule onto a missing contact.
+            if matches!(
+                cfg.move_library,
+                MoveLibrary::RigidBody { relocate: true, .. }
+            ) {
+                cage_edit = true;
+            }
+        }
+        if cfg.improvement_rewards
+            && hops.saturating_sub(hops_at_lowest)
+                >= crate::catalog::molecular::WATER_BASIN_STALL_HOPS
+            && hops.saturating_sub(last_basin_restart)
+                >= crate::catalog::molecular::WATER_BASIN_STALL_HOPS
+        {
+            // The proposals have stopped lowering the best. Leave from
+            // another stored minimum instead of the basin the chain is in.
+            last_basin_restart = hops;
+            if let Some(state) = ledger.best_state.as_ref() {
+                stall_archive.offer(ledger.best, state.view());
+            }
+            if let Some((energy, state)) = stall_archive.escape(e)
+                && state.len() == x.len()
+            {
+                let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
+                let ok = gradient
+                    .as_ref()
+                    .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len()));
+                e = energy;
+                x = state;
+                current_validation_gradient = gradient.filter(|_| ok);
+                basin_hold = crate::catalog::molecular::WATER_BASIN_HOLD;
             }
         }
         // The reoccupation move runs inside the chain and charges the
@@ -3718,7 +5240,13 @@ where
                         .map(|projected| projected.coordinates)
                 }
                 ContinuousSymmetry::Measure { .. } => {
-                    crate::csm::propose(x.view(), classes).map(|projected| projected.coordinates)
+                    if !new_incumbent {
+                        None
+                    } else {
+                        new_incumbent = false;
+                        crate::csm::propose(x.view(), classes)
+                            .map(|projected| projected.coordinates)
+                    }
                 }
                 ContinuousSymmetry::Off => None,
             };
@@ -3808,13 +5336,21 @@ where
             best_seen = ledger.best;
             csm_reseed_stamp = hops;
         }
+        // Unlabelled clusters keep the icosahedral test alone. Counting
+        // common neighbours here would run on every hop of a labelled
+        // metal and was the Au38 slowdown: a fivefold pause of a few hops
+        // spent a reseed before the close-packed minimum.
+        let mono_ih = cfg.packing_cna_applies()
+            && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default());
         if csm_reseed_hops > 0
             && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
-            && cfg.packing_cna_applies()
-            && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
+            && mono_ih
             && ledger.remaining() > 0
         {
             csm_reseed_stamp = hops;
+            // Orbit completion stays. The fresh cluster keeps its atom order,
+            // so species labels stay put. Projection is the stall gate below,
+            // not every reseed.
             let classes = continuous_symmetry_classes
                 .as_deref()
                 .expect("a CSM reseed has equivalence classes");
@@ -3829,10 +5365,35 @@ where
             ) {
                 fresh = closed;
             }
-            if let Some(projected) = crate::csm::propose(fresh.view(), classes) {
-                fresh = projected.coordinates;
-            }
-            let (reseed_energy, reseed_state) = relax(ledger, fresh.view(), cfg.relax_steps);
+            // The unprojected reseed is the incumbent path. Projecting every
+            // reseed leaves the LJ75 icosahedral floor and also pulls LJ104
+            // off seeds that already hit. Project only when the best state
+            // is still icosahedral and the plain quench did not beat it.
+            let best_before = ledger.best;
+            let best_ih = ledger.best_state.as_ref().is_some_and(|state| {
+                crate::soap::ih_dominated(state.view(), crate::soap::SoapSpec::default())
+            });
+            // Successful LJ104 paths leave an icosahedral best within about
+            // thirty hops. The LJ75 Marks search sits on that best for the
+            // rest of the budget. Project only after the longer stall, and
+            // only when the plain quench did not already beat it.
+            let stalled = hops.saturating_sub(hops_at_lowest) >= csm_reseed_hops.saturating_mul(8);
+            let (plain_energy, plain_state) = relax(ledger, fresh.view(), cfg.relax_steps);
+            let (reseed_energy, reseed_state) = if best_ih
+                && stalled
+                && plain_energy >= best_before - 1e-10
+                && let Some(projected) = crate::csm::propose(fresh.view(), classes)
+            {
+                let (projected_energy, projected_state) =
+                    relax(ledger, projected.coordinates.view(), cfg.relax_steps);
+                if projected_energy < best_before - 1e-10 {
+                    (projected_energy, projected_state)
+                } else {
+                    (plain_energy, plain_state)
+                }
+            } else {
+                (plain_energy, plain_state)
+            };
             let reseed_gradient = record_quenched_answer(
                 cfg,
                 ledger,
@@ -3858,6 +5419,170 @@ where
                 soft_cache = None;
                 basin_entry = None;
                 quiet = 0;
+            }
+            if ledger.remaining() == 0 {
+                break HopStop::of_closed(ledger);
+            }
+        }
+        // A labelled incumbent whose energy has stood for half the budget
+        // is offered the motifs its common-neighbour signature lacks:
+        // close packing, a pentagonal (decahedral) seed, and an
+        // icosahedron. Smaller atoms take the inner sites, then one
+        // unlike-pair quench pass. The chain generator is not drawn.
+        // Unlabelled clusters never enter, so their evaluation counts stay.
+        let motif_gap = ledger.budget() / 2;
+        if motif_gap > 0
+            && ledger.spent().saturating_sub(charged_at_best) >= motif_gap
+            && ledger.spent().saturating_sub(motif_at_spent) >= motif_gap
+            && ledger.remaining() > 0
+            && let Some(species) = cfg.species.as_deref()
+            && let Some(best_state) = ledger.best_state.clone()
+        {
+            motif_at_spent = ledger.spent();
+            let (frac_555, frac_421, frac_422) = crate::soap::motif_fractions(best_state.view());
+            let mut sources = Vec::new();
+            if frac_421 < 0.20 {
+                sources.push(crate::lattice::Source::Named(
+                    crate::structure::Template::FaceCentredCubic,
+                ));
+            }
+            if frac_422 < 0.15 {
+                sources.push(crate::lattice::Source::Pentagonal);
+            }
+            if frac_555 < 0.20 {
+                sources.push(crate::lattice::Source::Named(
+                    crate::structure::Template::Icosahedral,
+                ));
+            }
+            if !sources.is_empty() {
+                let mut side = StdRng::seed_from_u64(
+                    (hops as u64).wrapping_mul(0x9E37_79B9) ^ ledger.best.to_bits() ^ 0xFCCC_0517,
+                );
+                let n_atoms = best_state.len() / 3;
+                let two = species_count(species) >= 2;
+                let (group_a, group_b) = if two {
+                    species_groups(species)
+                } else {
+                    (Vec::new(), Vec::new())
+                };
+                let mut best_alt: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
+                // The probe is not the chain ledger. A higher seed must not
+                // spend the budget the descent is still using, or the hops
+                // after the miss are a different search.
+                let mut probe = Ledger::new(65_536);
+                for source in sources {
+                    if probe.remaining() == 0 {
+                        break;
+                    }
+                    let grown =
+                        crate::lattice::candidate(source, best_state.view(), n_atoms, &mut side);
+                    let grown = if two {
+                        moves::place_smaller_inside(grown, species)
+                    } else {
+                        grown
+                    };
+                    let (mut eq, mut xq) = relax(&mut probe, grown.view(), cfg.relax_steps);
+                    if two && quench_is_sane(cfg, eq, xq.view()) {
+                        let mut gained = true;
+                        let mut passes = 0;
+                        while gained && passes < 2 && probe.remaining() > 0 {
+                            gained = false;
+                            passes += 1;
+                            let mut tried = 0usize;
+                            'pairs: for &i in &group_a {
+                                for &j in &group_b {
+                                    if probe.remaining() == 0 || tried >= 400 {
+                                        break 'pairs;
+                                    }
+                                    tried += 1;
+                                    let mut swapped = xq.clone();
+                                    for axis in 0..3 {
+                                        swapped.swap(3 * i + axis, 3 * j + axis);
+                                    }
+                                    let (alt_e, alt_x) =
+                                        relax(&mut probe, swapped.view(), cfg.relax_steps);
+                                    if quench_is_sane(cfg, alt_e, alt_x.view()) && alt_e < eq - 1e-6
+                                    {
+                                        eq = alt_e;
+                                        xq = alt_x;
+                                        gained = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !quench_is_sane(cfg, eq, xq.view()) {
+                        continue;
+                    }
+                    let gradient = record_quenched_answer(
+                        cfg,
+                        &mut probe,
+                        &mut grad,
+                        eq,
+                        xq.view(),
+                        &mut unconverged_records,
+                    );
+                    if gradient.is_none() && grad.is_some() {
+                        continue;
+                    }
+                    let replace = best_alt.as_ref().is_none_or(|(energy, _, _)| eq < *energy);
+                    if replace {
+                        best_alt = Some((eq, xq, gradient));
+                    }
+                }
+                // A decahedral signature is also offered a stacking twin of
+                // the incumbent. The twin is a reflection in one dense
+                // plane, which is how fivefold packing becomes close
+                // packed. Adopted only when the quench is lower, so a
+                // miss leaves the chain and its later calls where they were.
+                if frac_422 >= 0.15 && frac_421 < 0.20 {
+                    for _ in 0..4 {
+                        if probe.remaining() == 0 {
+                            break;
+                        }
+                        let twisted =
+                            crate::packing::propose_twin(best_state.view(), n_atoms, &mut side);
+                        let (eq, xq) = relax(&mut probe, twisted.view(), cfg.relax_steps);
+                        if !quench_is_sane(cfg, eq, xq.view()) {
+                            continue;
+                        }
+                        let gradient = record_quenched_answer(
+                            cfg,
+                            &mut probe,
+                            &mut grad,
+                            eq,
+                            xq.view(),
+                            &mut unconverged_records,
+                        );
+                        if gradient.is_none() && grad.is_some() {
+                            continue;
+                        }
+                        let replace = best_alt.as_ref().is_none_or(|(energy, _, _)| eq < *energy);
+                        if replace {
+                            best_alt = Some((eq, xq, gradient));
+                        }
+                    }
+                }
+                if let Some((eq, xq, gradient)) = best_alt
+                    && eq < ledger.best - 1e-6
+                {
+                    ledger.charge_many(probe.spent());
+                    let from_basin = identity.basin_of(best_state.view());
+                    let reached = identity.basin_of(xq.view());
+                    adopt_minimum!(
+                        eq,
+                        xq,
+                        gradient,
+                        Some(reached),
+                        AdoptionHistory::Fresh,
+                        Some((Some(from_basin), reached)),
+                        Some("motif-reseed"),
+                        hops
+                    );
+                    soft_cache = None;
+                    basin_entry = None;
+                    quiet = 0;
+                }
             }
             if ledger.remaining() == 0 {
                 break HopStop::of_closed(ledger);
@@ -4021,14 +5746,21 @@ where
                 break HopStop::of_closed(ledger);
             }
         }
-        let mut k = match (&context, cfg.allocate_moves) {
-            (Some(c), _) => contextual.select(c.view(), rng),
-            (None, true) if cfg.depth_reward => depth_allocator.select(rng),
-            (None, true) => allocator.select(rng),
-            (None, false) => rng.random_range(0..kernels.len()),
-        };
-        if hops == 0
-            && let Some(swap_at) = kernels.iter().position(|kernel| kernel.name() == "swap")
+        let mut k = choose_arm(
+            cfg,
+            context.as_ref().map(|value| value.view()),
+            &mut contextual,
+            &depth_allocator,
+            &mut allocator,
+            kernels.len(),
+            rng,
+        );
+        // One unlike-pair exchange on a fixed cadence. The depth allocator
+        // drops the homotop once geometry moves pay more, and a binary
+        // minimum is a chemical ordering as well as a geometry. Absent on a
+        // one-species library, so a monoatomic chain draws exactly as before.
+        if let Some(swap_at) = kernels.iter().position(|kernel| kernel.name() == "swap")
+            && hops.is_multiple_of(4)
         {
             k = swap_at;
         }
@@ -4078,11 +5810,15 @@ where
                 }
             }
         }
-        let escape = if cfg.minima_hopping {
+        // A rigid chart takes the preset step. The minima-hopping escape
+        // scale is in a reduced energy unit and either freezes the kick
+        // or throws the bodies apart.
+        let escape = if cfg.minima_hopping && !cfg.move_library.is_rigid_body() {
             feedback.escape()
         } else {
             1.0
         };
+        let proposal_scale = escape * orient_scale;
         // Ordinary hops: scale the library move by the escape feedback. Soft
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
@@ -4274,7 +6010,9 @@ where
         // A high accepted minimum is a poor place to spend the next
         // proposal. Water sets `incumbent_gap` so the hop leaves from
         // the best minimum once the chain has climbed past that gap.
-        if cfg.incumbent_gap > 0.0
+        if basin_hold > 0 {
+            basin_hold -= 1;
+        } else if cfg.incumbent_gap > 0.0
             && e > ledger.best + cfg.incumbent_gap
             && let Some(state) = ledger.best_state.clone()
             && state.len() == x.len()
@@ -4351,12 +6089,7 @@ where
                     if matches!(kernels[k], ClusterMove::EnergyLattice) {
                         energy_lattice_proposal(cfg, ledger, x.view(), rng)
                     } else {
-                        kernels[k].propose_scaled(
-                            x.view(),
-                            cfg.temperature,
-                            escape * orient_scale,
-                            rng,
-                        )
+                        kernels[k].propose_scaled(x.view(), cfg.temperature, proposal_scale, rng)
                     }
                 }
             }
@@ -4364,7 +6097,7 @@ where
         // Identity SOAP is not an arm. Thompson must not buy a no-op:
         // reselect a real kernel, or skip the hop.
         // A cycle reversal that finds no cycle returns the state unchanged too.
-        let may_idle = |name: &str| name == "soap" || name == "rcycle";
+        let may_idle = |name: &str| name == "soap" || name == "rcycle" || name == "hbrewire";
         if !species_escape_trial
             && !cov_fire
             && !soft_fire
@@ -4374,12 +6107,15 @@ where
         {
             let mut swapped = false;
             for _ in 0..kernels.len() {
-                let k2 = match (&context, cfg.allocate_moves) {
-                    (Some(c), _) => contextual.select(c.view(), rng),
-                    (None, true) if cfg.depth_reward => depth_allocator.select(rng),
-                    (None, true) => allocator.select(rng),
-                    (None, false) => rng.random_range(0..kernels.len()),
-                };
+                let k2 = choose_arm(
+                    cfg,
+                    context.as_ref().map(|value| value.view()),
+                    &mut contextual,
+                    &depth_allocator,
+                    &mut allocator,
+                    kernels.len(),
+                    rng,
+                );
                 if may_idle(&kernels[k2].name()) {
                     continue;
                 }
@@ -4397,7 +6133,7 @@ where
                             kernels[k].propose_scaled(
                                 x.view(),
                                 cfg.temperature,
-                                escape * orient_scale,
+                                proposal_scale,
                                 rng,
                             )
                         }
@@ -4410,14 +6146,34 @@ where
                 continue;
             }
         }
-        // A failed stall growth leaves the remaining proposals on the
-        // all-points displacement until the incumbent drops. The test is
-        // the incumbent energy, not the atom count.
-        let held_displacement =
-            stall_growth_waits(stall_growth_hold, ledger.best) && cfg.packing_cna_applies();
+        // A failed stall growth does not quench another lattice until the
+        // incumbent drops. The leave that would have grown is one all-points
+        // displacement. Other proposals keep the kernel they drew. The test
+        // is the incumbent energy, not the atom count.
+        let held_displacement = directed_leave
+            && growth_held(
+                stall_growth_hold,
+                ledger.best,
+                stall_growth_skips,
+                cfg.n_points,
+            )
+            && cfg.packing_cna_applies();
         if held_displacement {
             let step = preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale;
             trial = ClusterMove::AllPoints { step }.propose(x.view(), cfg.temperature, rng);
+        }
+        let editing_cage = cage_edit;
+        if editing_cage {
+            // One edit, then the library again. Replacing every later
+            // proposal locks the chain on the relocation and it never
+            // returns to the kick that was deepening the cage.
+            trial = ClusterMove::RigidRelocate {
+                n_molecules: cfg.n_points,
+                min_separation: cfg.min_separation,
+            }
+            .propose(x.view(), cfg.temperature, rng);
+            cage_edit = false;
+            hops_at_lowest = hops;
         }
         let proposal_action = if held_displacement {
             "all".to_owned()
@@ -4430,6 +6186,7 @@ where
         } else {
             kernels[k].name().to_owned()
         };
+        begin_arm(&mut arm_counts, &proposal_action);
         // Stage one of the staged quench: settle the moved atoms against the
         // frozen environment at fractional price, before recentring shifts
         // every coordinate and hides which atoms the move touched.
@@ -4490,13 +6247,16 @@ where
         // before it will compute an energy. The hop has to hand that potential
         // a geometry the rule already accepts. Separation is geometry only.
         // The raw overlapping proposal is not an energy call.
-        if cfg.species.is_some() && !structure_is_sane(trial.view(), OVERLAP_SEPARATION) {
+        if cfg.species.is_some() && !structure_is_sane(trial.view(), OVERLAP_CALL_LIMIT) {
             proposal_overlaps += 1;
-            let separated = separate_to_overlap_rule(
+            let separated = separate_contacts(
                 &mut trial,
                 cfg.move_library.declared_groups(),
-                OVERLAP_SEPARATION,
+                OVERLAP_CALL_LIMIT,
+                OVERLAP_CLASH_CLEARANCE,
                 hop_frozen.as_deref(),
+                cfg.species.as_deref(),
+                cfg.bond_tolerance,
             );
             if !separated {
                 hops += 1;
@@ -4710,7 +6470,13 @@ where
             e_screen >= ledger.best
                 && !screen.decide(feats.view(), ledger.best, rng.random::<f64>())
         } else if cfg.calibrated_screen {
-            e_screen - descent.allowance() > ledger.best + cfg.screen_margin && !descent.audit()
+            // A cage-changing proposal starts far above the incumbent. A
+            // short screen then refuses it, and the centres never move.
+            // That move is quenched in full.
+            let relocating = editing_cage || kernels.get(k).is_some_and(rigid_cage_kernel);
+            !relocating
+                && e_screen - descent.allowance() > ledger.best + cfg.screen_margin
+                && !descent.audit()
         } else {
             // A rigid partial quench sits far above the incumbent by an
             // absolute margin copied from a reduced-unit cluster. Skipping
@@ -4750,6 +6516,7 @@ where
             if cfg.finish_improving {
                 out = finish_improving(ledger, relax, out, cfg.relax_steps);
             }
+            out = finish_rigid(cfg, ledger, relax, &mut grad, out);
             if cfg.bayes_screen {
                 // The answer to the question the posterior was asked.
                 screen.observe(feats.view(), out.0);
@@ -4830,14 +6597,23 @@ where
         // as an answer, which is the one thing it cannot be.
         let hit_target = ledger.below_target(e_new);
         let gradient_required = grad.is_some();
-        let validation_gradient = if unquenched {
+        let quenched_gradient = if unquenched {
             None
         } else {
-            grad.as_deref_mut().and_then(|g| {
-                g(ledger, x_new.view())
-                    .filter(|values| answer_gradient_ok(cfg, values.view(), x_new.len()))
-            })
+            grad.as_deref_mut().and_then(|g| g(ledger, x_new.view()))
         };
+        // A chain already holding a free atom, as a random start can, still
+        // moves, so it is not held where every hop is refused. Without a
+        // gradient the current state is judged by its geometry alone.
+        if let Some(g) = quenched_gradient.as_ref()
+            && sheds_free_atom(cfg, x_new.view(), Some(g.view()))
+            && !sheds_free_atom(cfg, x.view(), None)
+        {
+            hops += 1;
+            continue;
+        }
+        let validation_gradient =
+            quenched_gradient.filter(|values| answer_gradient_ok(cfg, values.view(), x_new.len()));
         let recordable =
             hit_target || (!unquenched && (!gradient_required || validation_gradient.is_some()));
         // Every certified quench is reported, adopted or not: the history's
@@ -5014,12 +6790,42 @@ where
         } else {
             (0.0, 0.0)
         };
-        let s_old = if reusable_descriptor {
-            dc
+        // Uphill in the bare energy, and not a stride step. The basin
+        // scan is what those proposals were paying for. A downhill
+        // proposal is still described, because a filled destination can
+        // turn it back, and one step in `basin_stride` is exact either way.
+        let stride = cfg.basin_stride.max(1);
+        let skip_basin = stride > 1 && !hops.is_multiple_of(stride) && e_new > e;
+        let held_live = held_cv.as_ref().is_some_and(|_| {
+            held_count == bias.n_basins()
+                && held_bits.len() == x.len()
+                && held_bits
+                    .iter()
+                    .zip(x.iter())
+                    .all(|(bits, value)| *bits == value.to_bits())
+        });
+        let (s_old, v_old_held, seat_old) = if skip_basin {
+            (Array1::zeros(0), 0.0, None)
+        } else if held_live {
+            let cv = held_cv.clone().expect("held");
+            let height = held_seat.map(|i| bias.height_at(i)).unwrap_or(0.0);
+            (cv, height, held_seat)
+        } else if reusable_descriptor {
+            let cv = dc;
+            let (height, seat) = bias.locate(cv.view());
+            (cv, height, seat)
         } else {
-            bias.cv(x.view())
+            let cv = bias.cv(x.view());
+            let (height, seat) = bias.locate(cv.view());
+            (cv, height, seat)
         };
-        let s_new = bias.cv(x_new.view());
+        let (s_new, v_new_held, seat_new) = if skip_basin {
+            (Array1::zeros(0), 0.0, None)
+        } else {
+            let cv = bias.cv(x_new.view());
+            let (height, seat) = bias.locate(cv.view());
+            (cv, height, seat)
+        };
         // A draw from the region's density of states, recorded before the
         // acceptance rule reweights it towards the low tail.
         if let (Some(t), false) = (trace.as_mut(), unquenched) {
@@ -5050,16 +6856,24 @@ where
         // When track_funnels is on, the spectral term is well-tempered MetaD
         // on the Fiedler coordinate of the hop graph (SpectralBias): it fills
         // the *funnel* the chain is stuck in, not only the current basin.
-        let v_old = bias.potential(s_old.view())
-            + spectral
+        let spectral_old = if skip_basin {
+            0.0
+        } else {
+            spectral
                 .as_ref()
                 .map(|sp| sp.potential(sp.cv(x.view()).view()))
-                .unwrap_or(0.0);
-        let v_new = bias.potential(s_new.view())
-            + spectral
+                .unwrap_or(0.0)
+        };
+        let spectral_new = if skip_basin {
+            0.0
+        } else {
+            spectral
                 .as_ref()
                 .map(|sp| sp.potential(sp.cv(x_new.view()).view()))
-                .unwrap_or(0.0);
+                .unwrap_or(0.0)
+        };
+        let v_old = v_old_held + spectral_old;
+        let v_new = v_new_held + spectral_new;
         let delta = (e_new + v_new + pave_new) - (e + v_old + pave_old);
         // Unquenched trials are not answers. They still face Metropolis,
         // which is how the measured LJ38 run discovers basins from a
@@ -5097,7 +6911,21 @@ where
                     };
                     visit == Visit::New && feedback.accept(delta)
                 } else {
-                    feedback.observe_driver_local(Some(from), reached);
+                    // A rigid basin above the incumbent by more than the
+                    // preset temperature is not a discovery, and neither is
+                    // a proton rearrangement that leaves the centres put.
+                    // Counting either as a discovery shrinks the kick.
+                    let cage_changed = cfg.move_library.is_rigid_body()
+                        && rigid_centres_parted(
+                            x.view(),
+                            x_new.view(),
+                            cfg.n_points,
+                            0.5 * cfg.min_separation,
+                        );
+                    let competitive = !cfg.move_library.is_rigid_body()
+                        || (cage_changed && e_new <= ledger.best + cfg.temperature)
+                        || e_new < ledger.best - 5.0e-2;
+                    feedback.observe_driver_local_scored(Some(from), reached, competitive);
                     reached != from && feedback.accept(delta)
                 };
                 if ok {
@@ -5159,6 +6987,13 @@ where
             d < 0.0 || rng.random::<f64>() < portable_exp(-d)
         };
         let mut accept = accept;
+        if cfg.move_library.is_rigid_body() && !unquenched {
+            // Metropolis at the preset temperature. The threshold rule
+            // collapses under a run of small accepts and then cannot
+            // cross the gap between rigid cages.
+            let rise = (e_new - e) / cfg.temperature.max(1e-12);
+            accept = rise <= 0.0 || rng.random::<f64>() < (-rise).exp();
+        }
         if cfg.move_library.is_rigid_body() && cfg.n_points > RIGID_HOT_BODIES {
             orient_window += 1;
             if accept {
@@ -5217,6 +7052,18 @@ where
                 }
                 rigid_window = 0;
                 rigid_hits = 0;
+            }
+        }
+        // An uphill step the bare rule accepted is checked with the
+        // deposits before the chain moves. A filled destination can
+        // still refuse it. The random draw already happened.
+        if skip_basin && accept && !cfg.move_library.is_rigid_body() {
+            let old_cv = bias.cv(x.view());
+            let new_cv = bias.cv(x_new.view());
+            let biased =
+                (e_new + bias.potential(new_cv.view())) - (e + bias.potential(old_cv.view()));
+            if biased > e_new - e {
+                accept = false;
             }
         }
         if accept {
@@ -5302,6 +7149,7 @@ where
                 tabu_hits += 1;
             }
         }
+        finish_arm(&mut arm_counts, &proposal_action, accept, improved);
         // The quench was recorded before this test. The minima file already
         // has the line; this sets the acceptance column.
         if recordable {
@@ -5452,7 +7300,16 @@ where
                 // because its size says how deep rather than merely whether.
                 depth_allocator.update(k, -(e_new - ledger.best));
             }
-            allocator.update(k, improved || (accept && !(cfg.novel_reward && returning)));
+            // A rigid accept that only moves centres, or only turns a
+            // hydrogen-bond cycle, is not evidence the arm is useful.
+            // Paying for it fills the draw with that arm. An improvement
+            // of the incumbent is the payment.
+            let reward = if cfg.move_library.is_rigid_body() || cfg.improvement_rewards {
+                improved
+            } else {
+                improved || (accept && !(cfg.novel_reward && returning))
+            };
+            allocator.update(k, reward);
             arm_draws[k] += 1;
             if accept {
                 arm_accepts[k] += 1;
@@ -5502,8 +7359,13 @@ where
             if !unquenched && cfg.packing_cna_applies() {
                 packing.offer(e_new, x_new.view(), packing_cutoff);
             }
-            if !unquenched && cfg.move_library.is_rigid_body() {
+            if !unquenched && (cfg.move_library.is_rigid_body() || cfg.improvement_rewards) {
                 stall_archive.offer(e_new, x_new.view());
+                cage_archive.offer_cage(
+                    e_new,
+                    x_new.view(),
+                    rigid_cage_key(x_new.view(), cfg.n_points, cage_quantum),
+                );
             }
             // An accepted uphill step to a different basin samples the escape
             // distribution, which is the quantity the deposit height has to be
@@ -5620,13 +7482,18 @@ where
             // larger rises a hot rung declines would otherwise heat every rung.
             law.observe_rejection(delta / ratios[rep]);
         }
-        if reusable_descriptor {
-            bias.deposit(
-                if accept { s_new.view() } else { s_old.view() },
-                temperature,
-            );
-        } else {
-            bias.deposit(bias.cv(x.view()).view(), temperature);
+        if !skip_basin {
+            let (occupied, seat) = if accept {
+                (s_new.view(), seat_new)
+            } else {
+                (s_old.view(), seat_old)
+            };
+            let landed_seat = bias.deposit_at(occupied, seat, temperature);
+            held_bits.clear();
+            held_bits.extend(x.iter().map(|value| value.to_bits()));
+            held_cv = Some(if accept { s_new.clone() } else { s_old.clone() });
+            held_seat = Some(landed_seat);
+            held_count = bias.n_basins();
         }
         // Visits other chains made to the minimum this quench reached, paid
         // into this chain's bias as if it had made them. The count is under
@@ -5944,12 +7811,23 @@ where
                 }
                 let group = crate::symmetrise::generate_group(&cands, 60);
                 let symmetrised_state = if group.len() > 1 {
-                    Some(crate::symmetrise::symmetrise_group(
-                        x.view(),
-                        n,
-                        &group,
-                        cfg.symmetry_merge_radius,
-                    ))
+                    Some(match cfg.species.as_deref() {
+                        Some(species) if species.len() == n => {
+                            crate::symmetrise::symmetrise_group_within(
+                                x.view(),
+                                n,
+                                &group,
+                                cfg.symmetry_merge_radius,
+                                species,
+                            )
+                        }
+                        _ => crate::symmetrise::symmetrise_group(
+                            x.view(),
+                            n,
+                            &group,
+                            cfg.symmetry_merge_radius,
+                        ),
+                    })
                 } else {
                     crate::symmetrise::symmetrise_detected(
                         x.view(),
@@ -6148,46 +8026,103 @@ where
             // The budget window only cools a derived search. It does not
             // decide whether a non-icosahedral plateau may leave. Recommended
             // leaves that flag off, and the icosahedral test below is false
-            // for the LJ104 minima, so neither growth ran and the hold that
-            // switches later proposals to all-points stayed unset.
+            // for the LJ104 minima, so neither growth ran and the hold
+            // stayed unset.
             // The chain takes a growth only when it deepens the incumbent.
-            // A miss sets the hold. Later proposals are all-points
-            // displacements until that incumbent drops.
+            // A miss sets the hold. The leave that then skips growth is the
+            // all-points displacement above. The library keeps proposing
+            // until the incumbent drops.
             if directed_leave
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
                 && !crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
             {
                 let best_before_growth = ledger.best;
-                if stall_growth_waits(stall_growth_hold, best_before_growth) {
+                if growth_held(
+                    stall_growth_hold,
+                    best_before_growth,
+                    stall_growth_skips,
+                    cfg.n_points,
+                ) {
                     // The lattice quench already failed at this incumbent.
-                    // Further growth waits. The proposals below carry the
-                    // charge as all-points displacements.
+                    // Further growth waits. This leave's proposal is the
+                    // all-points displacement. After several idle leaves the
+                    // pentagonal order is tried again below.
+                    stall_growth_skips = stall_growth_skips.saturating_add(1);
                 } else {
+                    let retry = stall_growth_waits(stall_growth_hold, best_before_growth);
+                    stall_growth_skips = 0;
                     let mut best_growth: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
-                    for source in crate::lattice::Source::library() {
-                        if ledger.remaining() == 0 {
-                            break;
+                    // A flat incumbent whose live chain is under the
+                    // icosahedral cut never opened the pentagonal branch.
+                    // The retry writes that order, plus the two close
+                    // packings, from a side stream so a miss leaves the
+                    // chain's own draws where they were.
+                    let mut side = StdRng::seed_from_u64(
+                        (hops as u64).wrapping_mul(0x9E37_79B9)
+                            ^ best_before_growth.to_bits()
+                            ^ 0x0C05_11CE,
+                    );
+                    let crossing = [
+                        crate::lattice::Source::Named(crate::structure::Template::FaceCentredCubic),
+                        crate::lattice::Source::Named(
+                            crate::structure::Template::HexagonalClosePacked,
+                        ),
+                        crate::lattice::Source::Pentagonal,
+                    ];
+                    if retry {
+                        for source in crossing {
+                            if ledger.remaining() == 0 {
+                                break;
+                            }
+                            let grown =
+                                crate::lattice::candidate(source, x.view(), x.len() / 3, &mut side);
+                            let (grown_energy, grown_state) =
+                                relax(ledger, grown.view(), cfg.relax_steps);
+                            if grown_state.len() != x.len() || !grown_energy.is_finite() {
+                                continue;
+                            }
+                            let grown_gradient = record_quenched_answer(
+                                cfg,
+                                ledger,
+                                &mut grad,
+                                grown_energy,
+                                grown_state.view(),
+                                &mut unconverged_records,
+                            );
+                            let replace = best_growth
+                                .as_ref()
+                                .is_none_or(|(energy, _, _)| grown_energy < *energy);
+                            if replace {
+                                best_growth = Some((grown_energy, grown_state, grown_gradient));
+                            }
                         }
-                        let grown = crate::lattice::candidate(source, x.view(), x.len() / 3, rng);
-                        let (grown_energy, grown_state) =
-                            relax(ledger, grown.view(), cfg.relax_steps);
-                        if grown_state.len() != x.len() || !grown_energy.is_finite() {
-                            continue;
-                        }
-                        let grown_gradient = record_quenched_answer(
-                            cfg,
-                            ledger,
-                            &mut grad,
-                            grown_energy,
-                            grown_state.view(),
-                            &mut unconverged_records,
-                        );
-                        let replace = best_growth
-                            .as_ref()
-                            .is_none_or(|(energy, _, _)| grown_energy < *energy);
-                        if replace {
-                            best_growth = Some((grown_energy, grown_state, grown_gradient));
+                    } else {
+                        for source in crate::lattice::Source::library() {
+                            if ledger.remaining() == 0 {
+                                break;
+                            }
+                            let grown =
+                                crate::lattice::candidate(source, x.view(), x.len() / 3, rng);
+                            let (grown_energy, grown_state) =
+                                relax(ledger, grown.view(), cfg.relax_steps);
+                            if grown_state.len() != x.len() || !grown_energy.is_finite() {
+                                continue;
+                            }
+                            let grown_gradient = record_quenched_answer(
+                                cfg,
+                                ledger,
+                                &mut grad,
+                                grown_energy,
+                                grown_state.view(),
+                                &mut unconverged_records,
+                            );
+                            let replace = best_growth
+                                .as_ref()
+                                .is_none_or(|(energy, _, _)| grown_energy < *energy);
+                            if replace {
+                                best_growth = Some((grown_energy, grown_state, grown_gradient));
+                            }
                         }
                     }
                     if let Some((grown_energy, grown_state, grown_gradient)) = best_growth
@@ -6222,18 +8157,25 @@ where
             // stream seeded by the hop and the incumbent, so a growth that
             // does not win leaves the chain's own stream where it was. The
             // quench is kept only when it deepens the incumbent. A growth
-            // that fails holds the next one until the incumbent changes, and
-            // that stalled charge is an all-points displacement.
+            // that fails holds the next one until the incumbent changes.
+            // The skipped leave is one all-points displacement.
             if directed_leave
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
                 && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
             {
                 let best_before_growth = ledger.best;
-                if stall_growth_waits(stall_growth_hold, best_before_growth) {
-                    // Same wait as the other lattice growth. The proposals
-                    // are all-points displacements until the incumbent drops.
+                if growth_held(
+                    stall_growth_hold,
+                    best_before_growth,
+                    stall_growth_skips,
+                    cfg.n_points,
+                ) {
+                    // Same wait as the other lattice growth. This leave's
+                    // proposal is the all-points displacement.
+                    stall_growth_skips = stall_growth_skips.saturating_add(1);
                 } else {
+                    stall_growth_skips = 0;
                     let mut side = StdRng::seed_from_u64(
                         (hops as u64).wrapping_mul(0x9E37_79B9)
                             ^ best_before_growth.to_bits()
@@ -6789,6 +8731,28 @@ where
         }
     };
 
+    if let Some((energy, state)) = pending_cut
+        && energy < ledger.best - 1e-6
+        && quench_is_sane(cfg, energy, state.view())
+    {
+        let gradient = record_quenched_answer(
+            cfg,
+            ledger,
+            &mut grad,
+            energy,
+            state.view(),
+            &mut unconverged_records,
+        );
+        // The budget may already be spent, so the record tolerance cannot
+        // be checked. The polished energy is still an improvement.
+        if gradient.is_none() && energy < ledger.best {
+            ledger.record(energy, state.view());
+        }
+        if energy <= ledger.best + 1e-12 && improvements.len() < 512 {
+            improvements.push((hops, ledger.spent(), bias.n_basins(), energy));
+        }
+    }
+
     let n_basins = bias.n_basins();
     // Per-rung sampler diagnostics, with the active rung put back at its own
     // index so the report reads in ladder order.
@@ -6910,6 +8874,7 @@ where
             .enumerate()
             .map(|(i, k)| (k.name(), arm_draws[i], arm_accepts[i], arm_best[i]))
             .collect(),
+        proposal_counts: arm_counts,
         swaps_accepted,
         paths: paths_run,
         path_escapes,
@@ -7323,6 +9288,128 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_molecular_water_search_is_not_a_binary_homotop() {
+        let species = crate::catalog::molecular::water_species(4).expect("species");
+        let groups = crate::catalog::molecular::water_groups(4).expect("groups");
+        let mut water = Config::recommended_molecular(species, groups.clone(), 1.0);
+        water.move_library = MoveLibrary::Molecular {
+            groups,
+            reactive: false,
+            reverse_cycles: true,
+        };
+        assert!(!polishes_unlike_pairs(&water));
+        assert!(!polishes_unlike_pairs(&Config::for_tip4p(4)));
+        let binary = Config::recommended(6).with_species(vec![29, 29, 29, 79, 79, 79], None);
+        assert!(polishes_unlike_pairs(&binary));
+        assert!(!polishes_unlike_pairs(&Config::recommended(6)));
+    }
+
+    #[test]
+    fn an_arm_count_separates_proposals_from_accepts_and_improvements() {
+        let mut arms = Vec::new();
+        begin_arm(&mut arms, "gshake");
+        finish_arm(&mut arms, "gshake", false, false);
+        begin_arm(&mut arms, "gburst");
+        finish_arm(&mut arms, "gburst", true, true);
+        begin_arm(&mut arms, "gshake");
+        finish_arm(&mut arms, "gshake", true, false);
+        assert_eq!(arms[0].move_type, "gshake");
+        assert_eq!(arms[0].proposed, 2);
+        assert_eq!(arms[0].accepted, 1);
+        assert_eq!(arms[0].improved, 0);
+        assert_eq!(arms[1].proposed, 1);
+        assert_eq!(arms[1].accepted, 1);
+        assert_eq!(arms[1].improved, 1);
+    }
+
+    /// Uniform selection is one `random_range` over the preset's arms, and
+    /// the untouched preset still draws from the depth posterior.
+    #[test]
+    fn uniform_arm_selection_matches_a_uniform_draw() {
+        let preset = Config::recommended(38);
+        assert_eq!(preset.arm_selection, ArmSelection::Posterior);
+        assert!(preset.depth_reward && preset.allocate_moves);
+        let n_arms = search_kernels(&preset).len();
+        assert!(n_arms >= 2, "the paper preset needs more than one arm");
+        let mut depth = crate::allocate::DepthAllocator::new(n_arms);
+        for _ in 0..40 {
+            depth.update(0, 8.0);
+            for arm in 1..n_arms {
+                depth.update(arm, -8.0);
+            }
+        }
+        let mut thompson = FlooredThompson::new(n_arms);
+        let mut contextual = ContextualAllocator::new(n_arms, 3, preset.contextual_floor);
+        let mut uniform_cfg = preset.clone();
+        uniform_cfg.arm_selection = ArmSelection::Uniform;
+        assert!(uniform_cfg.depth_reward && uniform_cfg.allocate_moves);
+        let mut rng = StdRng::seed_from_u64(20261111);
+        let mut twin = StdRng::seed_from_u64(20261111);
+        let mut counts = vec![0usize; n_arms];
+        for _ in 0..4_000 {
+            let got = choose_arm(
+                &uniform_cfg,
+                None,
+                &mut contextual,
+                &depth,
+                &mut thompson,
+                n_arms,
+                &mut rng,
+            );
+            let expect = twin.random_range(0..n_arms);
+            assert_eq!(got, expect);
+            counts[got] += 1;
+        }
+        let low = 4_000 / n_arms / 2;
+        let high = 4_000 / n_arms + 4_000 / n_arms / 2;
+        for count in &counts {
+            assert!(
+                *count > low && *count < high,
+                "uniform draws were {counts:?}, expected each arm near {}",
+                4_000 / n_arms
+            );
+        }
+        let mut posterior_rng = StdRng::seed_from_u64(7);
+        let mut direct_rng = posterior_rng.clone();
+        let mut posterior_counts = vec![0usize; n_arms];
+        for _ in 0..400 {
+            let via_preset = choose_arm(
+                &preset,
+                None,
+                &mut contextual,
+                &depth,
+                &mut thompson,
+                n_arms,
+                &mut posterior_rng,
+            );
+            let via_posterior = depth.select(&mut direct_rng);
+            assert_eq!(via_preset, via_posterior);
+            posterior_counts[via_preset] += 1;
+        }
+        assert!(
+            posterior_counts[0] > 300,
+            "the depth posterior did not keep the deep arm: {posterior_counts:?}"
+        );
+        let mut uniform_seq = Vec::new();
+        let mut posterior_seq = Vec::new();
+        let mut left = StdRng::seed_from_u64(99);
+        let mut right = StdRng::seed_from_u64(99);
+        for _ in 0..64 {
+            uniform_seq.push(choose_arm(
+                &uniform_cfg,
+                None,
+                &mut contextual,
+                &depth,
+                &mut thompson,
+                n_arms,
+                &mut left,
+            ));
+            posterior_seq.push(depth.select(&mut right));
+        }
+        assert_ne!(uniform_seq, posterior_seq);
+    }
+
+    #[test]
     fn recommended_offers_the_energy_lattice_and_the_baseline_does_not() {
         let rec = search_kernels(&Config::recommended(104));
         assert!(
@@ -7332,6 +9419,15 @@ mod tests {
         );
         let base = search_kernels(&Config::for_cluster(104));
         assert!(base.iter().all(|kernel| kernel.name() != "dls-kernel"));
+        let pure = search_kernels(&Config::recommended(8).with_species(vec![79; 8], None));
+        assert!(
+            pure.iter().any(|kernel| kernel.name() == "dls-kernel"),
+            "one repeated label lost the unlabelled lattice exchange"
+        );
+        let mixed = search_kernels(
+            &Config::recommended(8).with_species(vec![29, 29, 29, 29, 79, 79, 79, 79], None),
+        );
+        assert!(mixed.iter().all(|kernel| kernel.name() != "dls-kernel"));
     }
 
     #[test]
@@ -8938,6 +11034,23 @@ mod tests {
             "stray centroid at {centroid}"
         );
         assert_eq!((x[0], x[3]), (-0.75, 0.75));
+    }
+
+    #[test]
+    fn an_atom_past_the_cutoff_with_no_force_is_shed() {
+        let cfg = Config::recommended(3);
+        let cut = cfg.neighbour_cutoff;
+        let bonded = Array1::from(vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0]);
+        assert!(!sheds_free_atom(&cfg, bonded.view(), None));
+        let apart = Array1::from(vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1 + cut, 0.0]);
+        assert!(sheds_free_atom(&cfg, apart.view(), None));
+        let mut gradient = Array1::from(vec![0.1, 0.0, 0.0, -0.1, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        assert!(sheds_free_atom(&cfg, apart.view(), Some(gradient.view())));
+        gradient[7] = 1.0e-300;
+        assert!(!sheds_free_atom(&cfg, apart.view(), Some(gradient.view())));
+        let mut labelled = cfg.clone();
+        labelled.species = Some(vec![29, 29, 79]);
+        assert!(!sheds_free_atom(&labelled, apart.view(), None));
     }
 
     #[test]

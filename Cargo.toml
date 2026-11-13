@@ -170,6 +170,14 @@ name    = "globalopt_hotpaths"
 harness = false
 
 [[example]]
+name = "h2h_sc"
+required-features = ["rgpot-ex"]
+
+[[example]]
+name = "h2h_covalent"
+required-features = ["rgpot-ex"]
+
+[[example]]
 name = "rgpot_minimize"
 required-features = ["capi", "rgpot-ex"]
 
@@ -179,6 +187,10 @@ required-features = ["rgpot-ex", "featomic", "bank-rpc"]
 
 [[example]]
 name = "gfn2_water_h2h"
+required-features = ["rgpot-ex"]
+
+[[example]]
+name = "gfn2_nh3_h2h"
 required-features = ["rgpot-ex"]
 
 [[example]]
@@ -212,11 +224,6 @@ required-features = ["bank-rpc", "ira", "rgpot-ex"]
 [[example]]
 name = "ttt_lj38"
 required-features = []
-
-[[example]]
-name = "conformer_search"
-required-features = []
-test = true
 
 [[example]]
 name = "catalog_journal_scan"

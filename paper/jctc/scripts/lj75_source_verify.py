@@ -14,6 +14,9 @@ import sys
 import tarfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paper_data import fetch_paper_data
+
 
 def blob_sha(path: Path) -> str:
     return subprocess.check_output(
@@ -59,6 +62,7 @@ def main() -> None:
             "usage: lj75_source_verify.py [--require-tree] ARCHIVE LISTING WORK"
         )
     archive, listing, work = map(Path, args)
+    fetch_paper_data()
     lines = [line for line in listing.read_text().splitlines() if line]
     present = tree_present()
     if not present:

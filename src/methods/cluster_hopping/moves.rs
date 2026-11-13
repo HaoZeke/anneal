@@ -67,6 +67,11 @@ pub enum MoveLibrary {
         /// arm. It needs a site geometry with one oxygen and two hydrogens.
         /// [`Config::for_tip4p`] turns it on.
         reverse_cycles: bool,
+        /// Move one body onto a vacant contact.
+        ///
+        /// On for every rigid preset. A collective kick does not change
+        /// which bodies are neighbours.
+        relocate: bool,
     },
 }
 
@@ -214,7 +219,14 @@ impl MoveLibrary {
                     )
                 };
                 let mobile = mobile_atoms(cfg, groups);
-                if cfg.soap_mode != SoapProposalMode::Off {
+                // The flexible SOAP leftover is an atomic packing pullback.
+                // On a water cluster larger than the hexamer it spends the
+                // quench inside the spherical-harmonic expansion and never
+                // calls the potential. The group moves already carry the
+                // search; the hexamer keeps the arm it was measured with.
+                let large_water = groups.len() > crate::catalog::molecular::WATER_HEXAMER_MOLECULES
+                    && super::cycles::is_water_groups(groups);
+                if cfg.soap_mode != SoapProposalMode::Off && !large_water {
                     kernels.push(soap_arm(cfg, mobile.clone(), Some(groups.clone())));
                 }
                 if let Some(species) = cfg.species.as_ref() {
@@ -223,11 +235,21 @@ impl MoveLibrary {
                         tolerance: cfg.bond_tolerance,
                         mobile,
                     });
+                } else {
+                    let _ = mobile;
                 }
                 if *reverse_cycles && super::cycles::is_water_groups(groups) {
                     kernels.push(ClusterMove::GroupCycleReverse {
                         groups: groups.clone(),
                     });
+                    // The hexamer library stays the one its arm was measured
+                    // with. A larger cage needs a turn onto a free oxygen; the
+                    // half-radian shake quenches back into the bond it left.
+                    if large_water {
+                        kernels.push(ClusterMove::GroupRewire {
+                            groups: groups.clone(),
+                        });
+                    }
                 }
                 kernels
             }
@@ -237,11 +259,15 @@ impl MoveLibrary {
                 rotate_step,
                 local,
                 reverse_cycles,
+                relocate,
             } => {
-                // A one-body spin and a collective centre kick both quench
-                // back into the hydrogen-bond basin they left. The local
-                // chart composes one orientation step onto every body and
-                // leaves the centres where they are.
+                // A collective kick and a cycle reversal leave every centre
+                // in the cage it started in. On the centre-and-rotation
+                // chart, one body moved onto a vacant contact or turned
+                // through a full orientation lets the quench land in a
+                // different cage. The contact length is the preset's
+                // minimum separation. The local chart stays one
+                // orientation step: that preset does not move centres.
                 let mut kernels = if *local {
                     vec![ClusterMove::RigidOrientAll {
                         n_molecules: *n_molecules,
@@ -249,6 +275,11 @@ impl MoveLibrary {
                     }]
                 } else {
                     vec![
+                        ClusterMove::RigidKick {
+                            n_molecules: *n_molecules,
+                            translate_step: *translate_step,
+                            rotate_step: *rotate_step,
+                        },
                         ClusterMove::RigidTranslate {
                             n_molecules: *n_molecules,
                             step: *translate_step,
@@ -257,8 +288,21 @@ impl MoveLibrary {
                             n_molecules: *n_molecules,
                             step: *rotate_step,
                         },
+                        ClusterMove::RigidTranslateOne {
+                            n_molecules: *n_molecules,
+                            step: cfg.min_separation.max(*translate_step),
+                        },
+                        ClusterMove::RigidReorient {
+                            n_molecules: *n_molecules,
+                        },
                     ]
                 };
+                if *relocate && !*local {
+                    kernels.push(ClusterMove::RigidRelocate {
+                        n_molecules: *n_molecules,
+                        min_separation: cfg.min_separation,
+                    });
+                }
                 if *reverse_cycles
                     && let Some(geometry) = cfg.rigid_body_geometry.as_ref()
                     && super::cycles::water_sites(geometry).is_some()
@@ -571,12 +615,35 @@ pub enum ClusterMove {
         /// Half-width of the per-coordinate displacement.
         step: f64,
     },
+    /// Translate and rotate every rigid body in one proposal.
+    ///
+    /// This is the basin-hopping move for a rigid chart: a centre step
+    /// and an orientation step together. Either one alone quenches
+    /// back into the cage it left.
+    RigidKick {
+        /// Rigid bodies in the state.
+        n_molecules: usize,
+        /// Half-width of the per-coordinate centre displacement.
+        translate_step: f64,
+        /// Half-width of the per-component rotation-vector increment, radians.
+        rotate_step: f64,
+    },
     /// Add a rotation-vector increment to every rigid body.
     RigidRotate {
         /// Rigid bodies in the state.
         n_molecules: usize,
         /// Half-width of the per-component rotation-vector increment, radians.
         step: f64,
+    },
+    /// Move one molecule to a new site in the oxygen cage and reorient it.
+    ///
+    /// The centre is drawn in the shell of the cluster, clear of the other
+    /// centres. The other molecules stay put, so the oxygen topology can change.
+    RigidRelocate {
+        /// Rigid bodies in the state.
+        n_molecules: usize,
+        /// Minimum centre-centre distance of the new site, in length units.
+        min_separation: f64,
     },
     /// Translate one rigid-body centre, leaving the others and every orientation fixed.
     RigidTranslateOne {
@@ -631,6 +698,16 @@ pub enum ClusterMove {
     /// coordinates with three-atom water groups (O, H, H). Each molecule on
     /// the cycle rotates about its oxygen so the cycle points the other way.
     GroupCycleReverse {
+        /// Atom indices of each three-atom water group: `[O, H, H]`.
+        groups: Vec<Vec<usize>>,
+    },
+    /// Turn one water about its oxygen onto a free neighbour oxygen.
+    ///
+    /// The turn is past the half-radian shake, so the quench does not fall
+    /// back into the hydrogen bond that was left. A cluster with no free
+    /// neighbour turns the molecule over instead. See
+    /// [`crate::methods::cluster_hopping::cycles::rewire_cartesian`].
+    GroupRewire {
         /// Atom indices of each three-atom water group: `[O, H, H]`.
         groups: Vec<Vec<usize>>,
     },
@@ -820,7 +897,7 @@ fn soap_arm(
     mobile: Option<Vec<usize>>,
     groups: Option<Vec<Vec<usize>>>,
 ) -> ClusterMove {
-    let packing = cfg.species.is_none() && cfg.active_region.is_none() && cfg.frozen.is_none();
+    let packing = cfg.monoatomic() && cfg.active_region.is_none() && cfg.frozen.is_none();
     // The Jacobian hop is a leftover step, a fraction of a bond, on
     // every system. Contact-scale amplitude was for a rigid group
     // translation; the pullback is not that move.
@@ -829,7 +906,9 @@ fn soap_arm(
         rmsd,
         cutoff: LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
         class: cfg.soap_class_residual && packing,
-        species: cfg.species.clone(),
+        // One element takes the unlabelled fivefold hop. The label is
+        // not a second species, so it is not a partition of the residual.
+        species: if packing { None } else { cfg.species.clone() },
         mobile,
         groups: if cfg.soap_mode == SoapProposalMode::Rigid {
             groups
@@ -1601,13 +1680,16 @@ impl ClusterMove {
             ClusterMove::Reseed { source, .. } => format!("grow:{}", source.name()),
             ClusterMove::SpeciesSwap { .. } => "swap".into(),
             ClusterMove::RigidTranslate { .. } => "rtrans".into(),
+            ClusterMove::RigidKick { .. } => "rkick".into(),
             ClusterMove::RigidRotate { .. } => "rrot".into(),
+            ClusterMove::RigidRelocate { .. } => "rreloc".into(),
             ClusterMove::RigidTranslateOne { .. } => "rtrans1".into(),
             ClusterMove::RigidRotateOne { .. } => "rrot1".into(),
             ClusterMove::RigidReorient { .. } => "rreor".into(),
             ClusterMove::RigidOrientAll { .. } => "rorient".into(),
             ClusterMove::RigidReverseCycle { .. } => "rcycle".into(),
             ClusterMove::GroupCycleReverse { .. } => "gcycle".into(),
+            ClusterMove::GroupRewire { .. } => "hbrewire".into(),
         }
     }
 
@@ -1915,6 +1997,31 @@ impl ClusterMove {
                 }
                 y
             }
+            ClusterMove::RigidKick {
+                n_molecules,
+                translate_step,
+                rotate_step,
+            } => {
+                let mut y = x.to_owned();
+                let n = *n_molecules;
+                let ht = translate_step * scale;
+                let hr = rotate_step * scale;
+                if n > 0 && y.len() >= 6 * n && ht > 0.0 {
+                    for i in 0..n {
+                        for k in 0..3 {
+                            y[3 * i + k] += rng.random_range(-ht..ht);
+                        }
+                        let base = 3 * n + 3 * i;
+                        for k in 0..3 {
+                            y[base + k] += rng.random_range(-hr..hr);
+                        }
+                    }
+                    if let Some(slice) = y.as_slice_mut() {
+                        crate::potentials::fold_rotation_vectors(n, slice);
+                    }
+                }
+                y
+            }
             ClusterMove::RigidRotate { n_molecules, step } => {
                 let mut y = x.to_owned();
                 let h = step * scale;
@@ -1927,6 +2034,190 @@ impl ClusterMove {
                 }
                 if let Some(slice) = y.as_slice_mut() {
                     crate::potentials::fold_rotation_vectors(n, slice);
+                }
+                y
+            }
+            ClusterMove::RigidRelocate {
+                n_molecules,
+                min_separation,
+            } => {
+                let _ = (t, scale);
+                let mut y = x.to_owned();
+                let n = *n_molecules;
+                if n >= 2 && y.len() >= 6 * n {
+                    // Neighbours lie inside 5/4 of the contact distance.
+                    // The new site sits one contact away. Both lengths
+                    // come from the preset, so a larger body moves further.
+                    let contact = (*min_separation).max(1.0e-6);
+                    let shell2 = (contact * 1.25) * (contact * 1.25);
+                    let reach = contact;
+                    let clearance = contact * 0.5;
+                    let mut centres = vec![[0.0; 3]; n];
+                    for i in 0..n {
+                        for k in 0..3 {
+                            centres[i][k] = y[3 * i + k];
+                        }
+                    }
+                    let mut coordination = vec![0usize; n];
+                    for i in 0..n {
+                        for j in (i + 1)..n {
+                            let mut d2 = 0.0;
+                            for k in 0..3 {
+                                let d = centres[i][k] - centres[j][k];
+                                d2 += d * d;
+                            }
+                            if d2 < shell2 {
+                                coordination[i] += 1;
+                                coordination[j] += 1;
+                            }
+                        }
+                    }
+                    let fewest = coordination.iter().copied().min().unwrap_or(0);
+                    let mut loose = Vec::new();
+                    for i in 0..n {
+                        if coordination[i] == fewest {
+                            loose.push(i);
+                        }
+                    }
+                    let body = loose[rng.random_range(0..loose.len())];
+                    let mut com = [0.0; 3];
+                    for centre in &centres {
+                        for k in 0..3 {
+                            com[k] += centre[k];
+                        }
+                    }
+                    let inv = 1.0 / n as f64;
+                    for value in &mut com {
+                        *value *= inv;
+                    }
+                    let mut outer = 0.0_f64;
+                    for centre in &centres {
+                        let mut d2 = 0.0;
+                        for k in 0..3 {
+                            let d = centre[k] - com[k];
+                            d2 += d * d;
+                        }
+                        outer = outer.max(d2.sqrt());
+                    }
+                    outer = outer.max(*min_separation);
+                    let clear_of = |candidate: [f64; 3]| {
+                        centres.iter().enumerate().all(|(j, centre)| {
+                            if j == body {
+                                return true;
+                            }
+                            let mut d2 = 0.0;
+                            for k in 0..3 {
+                                let d = candidate[k] - centre[k];
+                                d2 += d * d;
+                            }
+                            d2.sqrt() >= *min_separation
+                        })
+                    };
+                    // Sit the loose body on a missing contact, one
+                    // contact length out from an under-coordinated
+                    // non-neighbour.
+                    let mut anchors: Vec<usize> = (0..n)
+                        .filter(|&j| j != body)
+                        .filter(|&j| {
+                            let mut d2 = 0.0;
+                            for k in 0..3 {
+                                let d = centres[body][k] - centres[j][k];
+                                d2 += d * d;
+                            }
+                            d2 > shell2
+                        })
+                        .collect();
+                    anchors.sort_by_key(|&j| coordination[j]);
+                    let mut placed = None;
+                    for &anchor in anchors.iter().take(8) {
+                        let mut outward = [0.0; 3];
+                        for k in 0..3 {
+                            outward[k] = centres[anchor][k] - com[k];
+                        }
+                        let on = (outward[0] * outward[0]
+                            + outward[1] * outward[1]
+                            + outward[2] * outward[2])
+                            .sqrt()
+                            .max(1e-8);
+                        for value in &mut outward {
+                            *value /= on;
+                        }
+                        let helper = if outward[0].abs() < 0.9 {
+                            [1.0, 0.0, 0.0]
+                        } else {
+                            [0.0, 1.0, 0.0]
+                        };
+                        let mut tangent = [
+                            outward[1] * helper[2] - outward[2] * helper[1],
+                            outward[2] * helper[0] - outward[0] * helper[2],
+                            outward[0] * helper[1] - outward[1] * helper[0],
+                        ];
+                        let tn = (tangent[0] * tangent[0]
+                            + tangent[1] * tangent[1]
+                            + tangent[2] * tangent[2])
+                            .sqrt()
+                            .max(1e-8);
+                        for value in &mut tangent {
+                            *value /= tn;
+                        }
+                        let bitangent = [
+                            outward[1] * tangent[2] - outward[2] * tangent[1],
+                            outward[2] * tangent[0] - outward[0] * tangent[2],
+                            outward[0] * tangent[1] - outward[1] * tangent[0],
+                        ];
+                        for spoke in 0..8 {
+                            let angle = spoke as f64 * std::f64::consts::TAU / 8.0;
+                            let (s, c) = angle.sin_cos();
+                            let candidate = [
+                                centres[anchor][0]
+                                    + (outward[0] * 0.35
+                                        + (tangent[0] * c + bitangent[0] * s) * 0.94)
+                                        * reach,
+                                centres[anchor][1]
+                                    + (outward[1] * 0.35
+                                        + (tangent[1] * c + bitangent[1] * s) * 0.94)
+                                        * reach,
+                                centres[anchor][2]
+                                    + (outward[2] * 0.35
+                                        + (tangent[2] * c + bitangent[2] * s) * 0.94)
+                                        * reach,
+                            ];
+                            if clear_of(candidate) {
+                                placed = Some(candidate);
+                                break;
+                            }
+                        }
+                        if placed.is_some() {
+                            break;
+                        }
+                    }
+                    let placed = placed.unwrap_or_else(|| {
+                        let mut dir = [0.0; 3];
+                        let mut norm = 0.0;
+                        for k in 0..3 {
+                            let u1 = rng.random::<f64>().max(1e-12);
+                            let u2 = rng.random::<f64>();
+                            dir[k] = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
+                            norm += dir[k] * dir[k];
+                        }
+                        let norm = norm.sqrt().max(1e-12);
+                        [
+                            com[0] + dir[0] / norm * (outer + clearance),
+                            com[1] + dir[1] / norm * (outer + clearance),
+                            com[2] + dir[2] / norm * (outer + clearance),
+                        ]
+                    });
+                    for k in 0..3 {
+                        y[3 * body + k] = placed[k];
+                    }
+                    let base = 3 * n + 3 * body;
+                    let spun = crate::potentials::compose_rotation(
+                        haar_rotation(rng),
+                        [y[base], y[base + 1], y[base + 2]],
+                    );
+                    for k in 0..3 {
+                        y[base + k] = spun[k];
+                    }
                 }
                 y
             }
@@ -2016,6 +2307,11 @@ impl ClusterMove {
             ClusterMove::GroupCycleReverse { groups } => {
                 let mut y = x.to_owned();
                 super::cycles::reverse_cycle_cartesian(groups, &mut y, rng);
+                y
+            }
+            ClusterMove::GroupRewire { groups } => {
+                let mut y = x.to_owned();
+                super::cycles::rewire_cartesian(groups, &mut y, rng);
                 y
             }
             ClusterMove::SpeciesSwap {
@@ -2322,22 +2618,10 @@ fn species_swap<R: Rng + ?Sized>(
         }
         swapped = pair_limit;
     }
-    if swapped == 0 {
-        let draws = if sigma.is_some() {
-            1
-        } else {
-            1 + (n_points as f64).cbrt().round() as usize
-        };
-        for _ in 0..draws {
-            for _try in 0..16 {
-                let i = rng.random_range(0..n_points);
-                let j = rng.random_range(0..n_points);
-                if i != j && species[i] != species[j] {
-                    swap_atoms(&mut y, i, j);
-                    break;
-                }
-            }
-        }
+    if swapped == 0
+        && let Some(exchanged) = doye_unlike_exchange(y.view(), species, rng)
+    {
+        return exchanged;
     }
     y
 }
@@ -2346,6 +2630,66 @@ fn swap_atoms(y: &mut Array1<f64>, i: usize, j: usize) {
     for k in 0..3 {
         y.swap(3 * i + k, 3 * j + k);
     }
+}
+
+/// Puts smaller atoms on the inner sites.
+///
+/// One radius, or an element without a tabulated radius, leaves the
+/// order alone. The numbers are elemental radii, not a cluster size.
+pub(crate) fn place_smaller_inside(positions: Array1<f64>, species: &[u32]) -> Array1<f64> {
+    let n = species.len();
+    if positions.len() < 3 * n || n < 2 {
+        return positions;
+    }
+    let radius = |z: u32| match z {
+        29 => 1.32,
+        30 => 1.22,
+        47 => 1.44,
+        78 => 1.36,
+        79 => 1.44,
+        _ => 0.0,
+    };
+    let radii: Vec<f64> = species.iter().copied().map(radius).collect();
+    if radii.iter().any(|value| *value <= 0.0) {
+        return positions;
+    }
+    let mut ordered = radii.clone();
+    ordered.sort_by(|left, right| left.total_cmp(right));
+    ordered.dedup();
+    if ordered.len() < 2 {
+        return positions;
+    }
+    let mut centre = [0.0; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            centre[k] += positions[3 * i + k];
+        }
+    }
+    for value in &mut centre {
+        *value /= n as f64;
+    }
+    let source = positions.clone();
+    let mut sites: Vec<usize> = (0..n).collect();
+    sites.sort_by(|&left, &right| {
+        let dist = |index: usize| {
+            (0..3)
+                .map(|k| {
+                    let delta = source[3 * index + k] - centre[k];
+                    delta * delta
+                })
+                .sum::<f64>()
+        };
+        dist(left).total_cmp(&dist(right))
+    });
+    let mut atoms: Vec<usize> = (0..n).collect();
+    atoms.sort_by(|&left, &right| radii[left].total_cmp(&radii[right]).then(left.cmp(&right)));
+    let mut out = positions;
+    for (atom, site) in atoms.iter().zip(sites.iter()) {
+        for k in 0..3 {
+            out[3 * atom + k] = source[3 * site + k];
+        }
+    }
+    out
 }
 
 /// One random unlike-pair coordinate exchange.
@@ -2465,9 +2809,61 @@ mod move_scaling_tests {
             .iter()
             .map(|k| k.name())
             .collect();
-        assert_eq!(names, ["rtrans", "rrot", "rcycle"]);
+        assert_eq!(
+            names,
+            [
+                "rkick", "rtrans", "rrot", "rtrans1", "rreor", "rreloc", "rcycle"
+            ]
+        );
         assert!(cfg.move_library.is_rigid_body());
         assert_eq!(cfg.n_points, 6);
+    }
+
+    /// Depth reward, stall tabu and the return screen pin a rigid TIP4P
+    /// walk about 5 kJ/mol above the Wales-Hodges minimum. The paper
+    /// preset leaves those atomic controls off.
+    #[test]
+    fn recommended_tip4p_leaves_the_atomic_stall_controls_off() {
+        let recommended = Config::recommended_tip4p(15);
+        assert!(!recommended.depth_reward);
+        assert!(!recommended.tabu_on_stall);
+        assert!(!recommended.return_screen);
+        let plain = Config::for_tip4p(15);
+        assert_eq!(recommended.depth_reward, plain.depth_reward);
+        assert_eq!(recommended.tabu_on_stall, plain.tabu_on_stall);
+        assert_eq!(recommended.return_screen, plain.return_screen);
+    }
+
+    /// One centre leaves its site by more than a 0.35 Å kick. The other
+    /// centres stay. That is what changes an oxygen cage.
+    #[test]
+    fn relocation_moves_exactly_one_centre() {
+        let mv = ClusterMove::RigidRelocate {
+            n_molecules: 6,
+            min_separation: 2.7,
+        };
+        let mut x = Array1::zeros(36);
+        for i in 0..6 {
+            x[3 * i] = i as f64 * 2.8;
+        }
+        let mut rng = StdRng::seed_from_u64(3);
+        let y = mv.propose(x.view(), 2.0, &mut rng);
+        let mut moved = 0usize;
+        let mut far = false;
+        for i in 0..6 {
+            let mut d2 = 0.0;
+            for k in 0..3 {
+                let d = y[3 * i + k] - x[3 * i + k];
+                d2 += d * d;
+            }
+            let dist = d2.sqrt();
+            if dist > 1e-8 {
+                moved += 1;
+                far |= dist > 1.0;
+            }
+        }
+        assert_eq!(moved, 1);
+        assert!(far, "the molecule did not leave its site");
     }
 
     /// The escape scale has to reach the step, which is the whole mechanism.
@@ -2638,6 +3034,48 @@ mod move_scaling_tests {
     }
 
     #[test]
+    fn a_large_water_cluster_does_not_draw_the_atomic_soap_pullback() {
+        let molecules = 20;
+        let species: Vec<u32> = (0..molecules).flat_map(|_| [8, 1, 1]).collect();
+        let groups: Vec<Vec<usize>> = (0..molecules)
+            .map(|index| vec![3 * index, 3 * index + 1, 3 * index + 2])
+            .collect();
+        let rec = Config::recommended_molecular(species, groups, 1.0);
+        let names: Vec<_> = rec
+            .move_library
+            .kernels(&rec)
+            .iter()
+            .map(|kernel| kernel.name())
+            .collect();
+        assert!(
+            !names.iter().any(|name| *name == "soap"),
+            "atomic SOAP pullback is still drawn for (H2O)20: {names:?}"
+        );
+        for required in ["gshake", "gsurface", "gburst", "gcycle", "hbrewire"] {
+            assert!(
+                names.iter().any(|name| *name == required),
+                "missing {required} on (H2O)20: {names:?}"
+            );
+        }
+        let hexamer = 6;
+        let species: Vec<u32> = (0..hexamer).flat_map(|_| [8, 1, 1]).collect();
+        let groups: Vec<Vec<usize>> = (0..hexamer)
+            .map(|index| vec![3 * index, 3 * index + 1, 3 * index + 2])
+            .collect();
+        let small = Config::recommended_molecular(species, groups, 1.0);
+        let small_names: Vec<_> = small
+            .move_library
+            .kernels(&small)
+            .iter()
+            .map(|kernel| kernel.name())
+            .collect();
+        assert!(
+            !small_names.iter().any(|name| *name == "hbrewire"),
+            "the hexamer library gained a rewire arm: {small_names:?}"
+        );
+    }
+
+    #[test]
     fn recommended_molecular_offers_flexible_soap_with_species() {
         let rec = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
         assert_eq!(rec.soap_mode, SoapProposalMode::Flexible);
@@ -2662,6 +3100,31 @@ mod move_scaling_tests {
                 .iter()
                 .map(|k| k.name())
                 .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn one_repeated_label_takes_the_unlabelled_soap_hop() {
+        let pure = Config::recommended(8).with_species(vec![79; 8], None);
+        assert!(
+            pure.move_library
+                .kernels(&pure)
+                .iter()
+                .any(|kernel| matches!(kernel, ClusterMove::Soap { species: None, .. }))
+        );
+        let mixed = Config::recommended(8).with_species(vec![29, 29, 29, 29, 79, 79, 79, 79], None);
+        assert!(
+            mixed
+                .move_library
+                .kernels(&mixed)
+                .iter()
+                .any(|kernel| matches!(
+                    kernel,
+                    ClusterMove::Soap {
+                        species: Some(_),
+                        ..
+                    }
+                ))
         );
     }
 
@@ -2987,6 +3450,52 @@ mod move_scaling_tests {
         assert!(pairs.len() > 1, "every seed exchanged the same pair");
         let mut rng = StdRng::seed_from_u64(1);
         assert!(doye_unlike_exchange(x.view(), &[1, 1, 1, 1], &mut rng).is_none());
+    }
+
+    #[test]
+    fn recommended_binary_exchanges_unlike_coordinates() {
+        let n = 6;
+        let species = vec![29_u32, 29, 29, 79, 79, 79];
+        let bare = Config::recommended(n);
+        assert!(
+            bare.move_library
+                .kernels(&bare)
+                .iter()
+                .all(|kernel| kernel.name() != "swap"),
+            "a one-species preset has no homotop"
+        );
+        let cfg = Config::recommended(n).with_species(species.clone(), None);
+        let swap = cfg
+            .move_library
+            .kernels(&cfg)
+            .into_iter()
+            .find(|kernel| kernel.name() == "swap")
+            .expect("binary recommended library has no homotop");
+        let mut coords = vec![0.0; 3 * n];
+        for index in 0..n {
+            coords[3 * index] = index as f64;
+            coords[3 * index + 1] = (index * index) as f64;
+        }
+        let x = Array1::from_vec(coords);
+        let mut rng = StdRng::seed_from_u64(11);
+        let y = swap.propose(x.view(), 0.8, &mut rng);
+        let moved = (0..n)
+            .filter(|&index| (0..3).any(|axis| y[3 * index + axis] != x[3 * index + axis]))
+            .count();
+        assert_eq!(moved, 2, "one unlike pair, not a block exchange");
+        let mut crossed = false;
+        for index in 0..n {
+            let source =
+                (0..n).find(|&other| (0..3).all(|axis| y[3 * index + axis] == x[3 * other + axis]));
+            let source = source.expect("a homotop permutes the coordinates");
+            if species[index] != species[source] {
+                crossed = true;
+            }
+        }
+        assert!(
+            crossed,
+            "the recommended homotop left every species on its own site"
+        );
     }
 
     #[test]

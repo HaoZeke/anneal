@@ -1,0 +1,17 @@
+! Rigid TIP4P on NEWTIP. The step adapts to ACCRAT 0.5, which is
+! GMIN's default and the acceptance ratio Wales and Hodges held
+! for TIP4P. The temperature stays at 2 kJ/mol. STEPS is long so
+! H2H_BUDGET is the stop. The driver appends one RANSEED line.
+
+NTIP 4
+SLOPPYCONV 1.0D-3
+TIGHTCONV 1.0D-4
+EDIFF 0.01
+MAXIT 800 500
+SAVE 2
+
+TEMPERATURE 2.0
+FIXTEMP
+ACCEPTRATIO 0.5
+STEPS 90000000 1.0
+STEP 0.40 0.51

@@ -346,6 +346,23 @@ def _chemfit_fitter_type():
     return pytest.importorskip("chemfit.fitter").Fitter
 
 
+def _chemfit_incumbent(context):
+    """Parameters ChemFit stored for this slot's best evaluation.
+
+    ChemFit 3.1, and the evaluate/step ``Fitter`` before 4.0, keep that dict
+    on ``opt_params``. ChemFit 4.0 keeps a snapshot context and exposes the
+    dict as ``opt_context.parameters``. A Fitter with neither recorded nothing.
+    """
+    params = getattr(context, "opt_params", None)
+    if params is not None:
+        return params
+    snapshot = getattr(context, "opt_context", None)
+    params = getattr(snapshot, "parameters", None) if snapshot is not None else None
+    if params is None:
+        raise AssertionError("the installed ChemFit recorded no incumbent parameters")
+    return params
+
+
 @pytest.mark.parametrize("driver", ["portfolio", "boltzmann"])
 @pytest.mark.parametrize("entry", ENTRIES)
 def test_the_installed_chemfit_fitter_is_driven_through_its_protocol(entry, driver):
@@ -368,7 +385,7 @@ def test_the_installed_chemfit_fitter_is_driven_through_its_protocol(entry, driv
     assert 0 < len(calls) <= 80
     assert fitter.contexts[0].n_evals == len(calls)
     assert steps
-    assert np.array_equal(out["x"], fitter.contexts[0].opt_params["x"])
+    assert np.array_equal(out["x"], _chemfit_incumbent(fitter.contexts[0])["x"])
 
 
 @pytest.mark.parametrize("entry", ENTRIES)

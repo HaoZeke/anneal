@@ -116,6 +116,22 @@ fn an_opening_quench_at_the_target_ends_before_the_first_hop() {
 }
 
 #[test]
+fn a_configured_target_is_the_same_stop_and_stays_off_by_default() {
+    let mut cfg = bare(3);
+    assert!(cfg.target_energy.is_none());
+    cfg.target_energy = Some(1.0);
+    let mut ledger = Ledger::new(64);
+    let out = flat_run(&cfg, &mut ledger);
+    assert_eq!(out.stop, Some(HopStop::Target));
+    assert_eq!(out.hops, 0);
+    let mut open = bare(3);
+    open.target_energy = None;
+    let mut budget = Ledger::new(9);
+    let full = flat_run(&open, &mut budget);
+    assert_eq!(full.stop, Some(HopStop::Budget));
+}
+
+#[test]
 fn a_stop_raised_after_the_full_quench_ends_at_the_next_hop() {
     let stop = Arc::new(AtomicBool::new(false));
     let grads = AtomicUsize::new(0);
@@ -455,12 +471,22 @@ fn a_rigid_stall_reseeds_nothing_before_the_budget_ends_the_run() {
     let rest = array![-1.5, 0.0, 0.0, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
     let reseeds = AtomicUsize::new(0);
     let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _: usize| {
-        // A rigid move turns or translates. Only a reseed redraws both.
-        let moved = |part: ArrayView1<f64>, rest: ArrayView1<f64>| {
-            part.iter().zip(rest).any(|(a, b)| (a - b).abs() > 1e-9)
+        // A reseed puts every centre more than an angstrom from the
+        // incumbent. A rigid kick is a fraction of an angstrom, and a
+        // one-body relocation leaves the other centre where it was.
+        let scattered = |part: ArrayView1<f64>, rest: ArrayView1<f64>| {
+            let bodies = part.len() / 3;
+            (0..bodies).all(|i| {
+                let mut d2 = 0.0;
+                for k in 0..3 {
+                    let d = part[3 * i + k] - rest[3 * i + k];
+                    d2 += d * d;
+                }
+                d2 > 1.0
+            })
         };
-        if moved(x.slice(s![..6]), rest.slice(s![..6]))
-            && moved(x.slice(s![6..]), rest.slice(s![6..]))
+        if scattered(x.slice(s![..6]), rest.slice(s![..6]))
+            && scattered(x.slice(s![6..]), rest.slice(s![6..]))
         {
             reseeds.fetch_add(1, Ordering::Relaxed);
             drain(ledger);

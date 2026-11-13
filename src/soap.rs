@@ -170,30 +170,29 @@ pub fn local_nu3(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
 }
 
 /// Species-aware SOAP plus the same 4-body scalars (all neighbors).
+///
+/// The power spectrum and the ν=3 contraction share one spherical
+/// expansion per atom. A second expansion would repeat the same
+/// harmonics and return the same coefficients.
 pub fn local_nu3_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Array2<f64> {
-    let soap = local_spectra_z(x, spec, species);
-    let n_at = soap.nrows();
-    let d0 = soap.ncols();
+    let n_at = x.len() / 3;
+    let d0 = spec.feat_dim(species);
     let d1 = spec.nu3_feat_dim(species);
     let mut out = Array2::<f64>::zeros((n_at, d0 + d1));
+    let rcut = spec.rcut_nn;
+    if n_at < 2 || !(rcut > 0.0) {
+        return out;
+    }
+    let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
     let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
     let channels = neighbor_channels(species);
     let n_chan = channels.len();
     let ace1 = spec.nu3_dim();
-    let rcut = spec.rcut_nn;
-    let table = if n_at >= 2 && rcut > 0.0 {
-        Some(crate::neighbors::NeighborTable::build(x, n_at, rcut))
-    } else {
-        None
-    };
     for i in 0..n_at {
+        let (p, c) = atom_expand(x, i, n_at, rcut, spec, species, &table);
         for t in 0..d0 {
-            out[[i, t]] = soap[[i, t]];
+            out[[i, t]] = p[t];
         }
-        let Some(table) = table.as_ref() else {
-            continue;
-        };
-        let (_, c) = atom_expand(x, i, n_at, rcut, spec, species, table);
         for ch in 0..n_chan {
             let c0 = ch * spec.n_max * n_lm;
             let sl = &c[c0..c0 + spec.n_max * n_lm];
@@ -1421,6 +1420,75 @@ pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
     c.fraction((5, 5, 5)) > 0.12
 }
 
+/// A fivefold plateau: icosahedral `555` or decahedral `422`, and not fcc `421`.
+///
+/// The bond cutoff is the Lennard-Jones value when the nearest neighbour is
+/// on that scale, and 1.2 times the nearest neighbour otherwise.
+pub fn fivefold_plateau(x: ArrayView1<f64>) -> bool {
+    let n = x.len() / 3;
+    if n < 7 {
+        return false;
+    }
+    let c = crate::structure::cna(x, n, bond_cutoff(x));
+    let five = c.fraction((5, 5, 5)) + c.fraction((4, 2, 2));
+    five > 0.15 && c.fraction((4, 2, 1)) < 0.20
+}
+
+/// True when the nearest neighbour is far outside the Lennard-Jones scale.
+///
+/// An unlabelled reduced-unit cluster stays at cutoff 1.35, so this is false
+/// there and the caller does not take the labelled reseed.
+pub fn extended_scale(x: ArrayView1<f64>) -> bool {
+    bond_cutoff(x) > 1.35 + 1e-9
+}
+
+/// Fractions of icosahedral `555`, close-packed `421` and decahedral `422`.
+///
+/// Read when a labelled search has already stalled. Not called on the
+/// unlabelled hop, so a Lennard-Jones chain does not pay for it.
+pub fn motif_fractions(x: ArrayView1<f64>) -> (f64, f64, f64) {
+    let n = x.len() / 3;
+    if n < 2 {
+        return (0.0, 0.0, 0.0);
+    }
+    let counts = crate::structure::cna(x, n, bond_cutoff(x));
+    (
+        counts.fraction((5, 5, 5)),
+        counts.fraction((4, 2, 1)),
+        counts.fraction((4, 2, 2)),
+    )
+}
+
+fn bond_cutoff(x: ArrayView1<f64>) -> f64 {
+    let n = x.len() / 3;
+    if n < 2 {
+        return 1.35;
+    }
+    let mut nearest = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut best = f64::MAX;
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let mut d = 0.0;
+            for k in 0..3 {
+                let delta = x[3 * i + k] - x[3 * j + k];
+                d += delta * delta;
+            }
+            best = best.min(d);
+        }
+        nearest.push(best.sqrt());
+    }
+    nearest.sort_by(|a, b| a.total_cmp(b));
+    let nn = nearest[n / 2];
+    if !(nn.is_finite()) || nn < 2.0 {
+        1.35
+    } else {
+        1.20 * nn
+    }
+}
+
 /// Oracle target: 555 atoms toward 421 (occupied mean, else fcc prototype).
 ///
 /// Invents a close-packed class when the observed cloud has none. Same
@@ -1624,7 +1692,17 @@ pub fn fivefold_axis_count(x: ArrayView1<f64>) -> usize {
 pub fn fivefold_axis_table(x: ArrayView1<f64>) -> Vec<([f64; 3], f64)> {
     let mut rows: Vec<([f64; 3], f64)> = candidate_axes(x)
         .into_iter()
-        .map(|ax| (ax, residual_about(x, ax).0))
+        .map(|ax| {
+            // An axis whose nearest-image residual already misses the cut
+            // cannot enter the good set, so the assignment is not run.
+            let bound = rotation_row_min_rms(x, ax);
+            let length = if bound >= FIVEFOLD_AXIS + 1.0e-6 * (1.0 + FIVEFOLD_AXIS) {
+                bound
+            } else {
+                residual_about(x, ax).0
+            };
+            (ax, length)
+        })
         .collect();
     rows.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
     rows
@@ -1679,61 +1757,9 @@ fn ico_axes() -> [[f64; 3]; 6] {
 /// not change which points are matched. An index-order greedy pass does.
 #[cfg_attr(feature = "ira", allow(dead_code))]
 fn hungarian(cost: &[f64], n: usize) -> Vec<usize> {
-    let mut u = vec![0.0; n + 1];
-    let mut v = vec![0.0; n + 1];
-    let mut p = vec![0usize; n + 1];
-    let mut way = vec![0usize; n + 1];
-    for i in 1..=n {
-        p[0] = i;
-        let mut j0 = 0usize;
-        let mut minv = vec![f64::INFINITY; n + 1];
-        let mut used = vec![false; n + 1];
-        loop {
-            used[j0] = true;
-            let i0 = p[j0];
-            let mut delta = f64::INFINITY;
-            let mut j1 = 0usize;
-            for j in 1..=n {
-                if used[j] {
-                    continue;
-                }
-                let cur = cost[(i0 - 1) * n + (j - 1)] - u[i0] - v[j];
-                if cur < minv[j] {
-                    minv[j] = cur;
-                    way[j] = j0;
-                }
-                if minv[j] < delta {
-                    delta = minv[j];
-                    j1 = j;
-                }
-            }
-            for j in 0..=n {
-                if used[j] {
-                    u[p[j]] += delta;
-                    v[j] -= delta;
-                } else {
-                    minv[j] -= delta;
-                }
-            }
-            j0 = j1;
-            if p[j0] == 0 {
-                break;
-            }
-        }
-        loop {
-            let j1 = way[j0];
-            p[j0] = p[j1];
-            j0 = j1;
-            if j0 == 0 {
-                break;
-            }
-        }
-    }
-    let mut perm = vec![0usize; n];
-    for j in 1..=n {
-        perm[p[j] - 1] = j - 1;
-    }
-    perm
+    // Same column scan as the continuous-symmetry assignment. The scratch
+    // lives for the whole matrix instead of being allocated once per row.
+    crate::assignment::successive_shortest_paths(cost, n).unwrap_or_else(|| (0..n).collect())
 }
 
 /// Columns matched to each row of `x` under the minimum sum of squared distances.
@@ -1743,13 +1769,18 @@ fn optimal_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
     let mut cost = vec![0.0; n * n];
     for i in 0..n {
         for j in 0..n {
-            let mut d2 = 0.0;
-            for a in 0..3 {
-                let d = x[3 * i + a] - y[3 * j + a];
-                d2 += d * d;
+            let mut distance = 0.0;
+            for axis in 0..3 {
+                let delta = x[3 * i + axis] - y[3 * j + axis];
+                distance += delta * delta;
             }
-            cost[i * n + j] = d2;
+            cost[i * n + j] = distance;
         }
+    }
+    // The strict row-minimum matching is the only optimum, so the
+    // shortest-path permutation would be this one.
+    if let Some(perm) = crate::assignment::strict_unique_row_minima(&cost, n) {
+        return perm;
     }
     hungarian(&cost, n)
 }
@@ -1836,7 +1867,112 @@ fn candidate_axes(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
     axes
 }
 
+fn row_min_rms_clears(x: ArrayView1<f64>, axis: [f64; 3], cap: f64) -> bool {
+    let bound = rotation_row_min_rms(x, axis);
+    bound >= cap + 1.0e-6 * (1.0 + cap)
+}
+
+/// Root-mean-square of each atom's nearest image under a fivefold turn.
+///
+/// This is at most the minimum-cost assignment residual: the assignment
+/// cannot beat giving every atom its own nearest image.
+fn rotation_row_min_rms(x: ArrayView1<f64>, axis: [f64; 3]) -> f64 {
+    let n = x.len() / 3;
+    if n == 0 {
+        return 0.0;
+    }
+    let com = com_of(x);
+    let turn = rotation_about(axis, 2.0 * PI / 5.0);
+    let mut centred = Vec::with_capacity(n);
+    let mut turned = Vec::with_capacity(n);
+    for atom in 0..n {
+        let point = [
+            x[3 * atom] - com[0],
+            x[3 * atom + 1] - com[1],
+            x[3 * atom + 2] - com[2],
+        ];
+        centred.push(point);
+        turned.push(rot_apply(&turn, point));
+    }
+    let mut total = 0.0;
+    for point in &centred {
+        let mut nearest = f64::INFINITY;
+        for image in &turned {
+            let dx = point[0] - image[0];
+            let dy = point[1] - image[1];
+            let dz = point[2] - image[2];
+            nearest = nearest.min(dx * dx + dy * dy + dz * dz);
+        }
+        total += nearest;
+    }
+    (total / n as f64).sqrt()
+}
+
+struct ResidualMemo {
+    coordinates: Vec<u64>,
+    entries: Vec<([u64; 3], f64, Vec<f64>)>,
+}
+
+std::thread_local! {
+    static RESIDUAL_MEMO: std::cell::RefCell<ResidualMemo> = const {
+        std::cell::RefCell::new(ResidualMemo {
+            coordinates: Vec::new(),
+            entries: Vec::new(),
+        })
+    };
+}
+
+fn axis_bits(axis: [f64; 3]) -> [u64; 3] {
+    [axis[0].to_bits(), axis[1].to_bits(), axis[2].to_bits()]
+}
+
+fn same_coordinate_bits(cached: &[u64], x: ArrayView1<f64>) -> bool {
+    cached.len() == x.len()
+        && cached
+            .iter()
+            .zip(x.iter())
+            .all(|(bits, value)| *bits == value.to_bits())
+}
+
+fn remembered_residual(x: ArrayView1<f64>, axis: [f64; 3]) -> Option<(f64, Array1<f64>)> {
+    let bits = axis_bits(axis);
+    RESIDUAL_MEMO.with(|slot| {
+        let slot = slot.borrow();
+        if !same_coordinate_bits(&slot.coordinates, x) {
+            return None;
+        }
+        slot.entries
+            .iter()
+            .find(|entry| entry.0 == bits)
+            .map(|entry| (entry.1, Array1::from_vec(entry.2.clone())))
+    })
+}
+
+fn remember_residual(x: ArrayView1<f64>, axis: [f64; 3], rms: f64, displacement: &Array1<f64>) {
+    RESIDUAL_MEMO.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if !same_coordinate_bits(&slot.coordinates, x) {
+            slot.coordinates = x.iter().map(|value| value.to_bits()).collect();
+            slot.entries.clear();
+        }
+        let bits = axis_bits(axis);
+        if slot.entries.iter().any(|entry| entry.0 == bits) {
+            return;
+        }
+        slot.entries.push((bits, rms, displacement.to_vec()));
+    });
+}
+
 fn residual_about(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
+    if let Some(saved) = remembered_residual(x, axis) {
+        return saved;
+    }
+    let computed = residual_about_fresh(x, axis);
+    remember_residual(x, axis, computed.0, &computed.1);
+    computed
+}
+
+fn residual_about_fresh(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
     let n = x.len() / 3;
     let com = com_of(x);
     let angle = 2.0 * PI / 5.0;
@@ -1906,6 +2042,9 @@ fn fivefold_residual(x: ArrayView1<f64>) -> (f64, [f64; 3], Array1<f64>) {
     let mut best_ax = [0.0, 0.0, 1.0];
     let mut best_dr = Array1::zeros(x.len());
     for ax in candidate_axes(x) {
+        if best_d.is_finite() && row_min_rms_clears(x, ax, best_d) {
+            continue;
+        }
         let (d5, dr) = residual_about(x, ax);
         if d5 < best_d {
             best_d = d5;
@@ -2065,6 +2204,12 @@ pub fn fivefold_probe(x: ArrayView1<f64>, rmsd: f64) -> FivefoldProbe {
 /// [`FIVEFOLD_GATE`]. This is the hop that produced the LJ38 58/72
 /// campaign. The multi-axis gated hop is [`step_away_fivefold`].
 pub fn step_away_fivefold_measured(x: ArrayView1<f64>, rmsd: f64) -> Array1<f64> {
+    if candidate_axes(x)
+        .iter()
+        .all(|axis| row_min_rms_clears(x, *axis, FIVEFOLD_GATE))
+    {
+        return x.to_owned();
+    }
     let (d5, axis, mut dr) = fivefold_residual(x);
     if d5 > FIVEFOLD_GATE {
         return x.to_owned();
@@ -2606,7 +2751,14 @@ fn atom_expand(
         }
         let ch = neighbor_channel(species, j, &channels);
         let u = [d[0] / r, d[1] / r, d[2] / r];
-        let (ylm, _) = tesseral(u, l_max);
+        // Values only. The Cartesian derivatives in `tesseral` are for the
+        // pullback, and for `l > 3` they are six extra harmonic evaluations
+        // that this contraction discards.
+        let ylm = if l_max <= 3 {
+            tesseral(u, l_max).0
+        } else {
+            ylm_real(u, l_max)
+        };
         let fc = fcut(r, rcut);
         for n in 0..n_max {
             let w = radial(n, r, rcut) * fc;
@@ -2661,7 +2813,11 @@ pub(crate) fn central_spectrum_from_displacements(
             displacement[1] / distance,
             displacement[2] / distance,
         ];
-        let (harmonics, _) = tesseral(direction, spec.l_max);
+        let harmonics = if spec.l_max <= 3 {
+            tesseral(direction, spec.l_max).0
+        } else {
+            ylm_real(direction, spec.l_max)
+        };
         let cutoff = fcut(distance, spec.rcut_nn);
         for radial_index in 0..spec.n_max {
             let weight = neighbor_weight * radial(radial_index, distance, spec.rcut_nn) * cutoff;
@@ -3684,6 +3840,23 @@ mod tests {
         }
         let atom_rms = (d2 / 13.0).sqrt();
         assert!((atom_rms - 0.4).abs() < 1e-8, "fivefold hop rms {atom_rms}");
+        let mut shifted = ico.clone();
+        shifted[0] += 0.35;
+        for axis in candidate_axes(shifted.view()) {
+            let bound = rotation_row_min_rms(shifted.view(), axis);
+            let exact = residual_about_fresh(shifted.view(), axis).0;
+            assert!(
+                bound <= exact + 1.0e-8,
+                "row-min {bound} above assignment {exact}"
+            );
+        }
+        let table = fivefold_axis_table(shifted.view());
+        for (axis, length) in &table {
+            if *length + 1.0e-8 < FIVEFOLD_AXIS {
+                let exact = residual_about_fresh(shifted.view(), *axis).0;
+                assert!((length - exact).abs() < 1.0e-9, "{length} vs {exact}");
+            }
+        }
         let cub = cuboct13();
         let d_ico = fivefold_length(ico.view());
         let d_cub = fivefold_length(cub.view());

@@ -1,0 +1,29 @@
+--- a/source/potential.f90
++++ b/source/potential.f90
+@@ -104,7 +104,7 @@
+    USE PES_SHELL_DP, ONLY: POT_GRAD_DP
+ !yp297> end 
+    USE POWERLAW_MOD, ONLY: POWERLAW
+-   USE H2H_CAP, ONLY: H2H_REFUSE
++   USE H2H_CAP, ONLY: H2H_REFUSE, H2H_POT_ENTER, H2H_POT_LEAVE
+    IMPLICIT NONE
+    
+ ! gq208> Napshift energy and gradient
+@@ -126,6 +126,7 @@
+    LOGICAL, INTENT(IN) :: SECT
+ !src70
+    INTEGER :: NOPT, RMSDOF !Add in NOPT for machine learning 
++   INTEGER(KIND=8) :: H2H_SC_TICK
+ ! Variables
+ 
+ ! hk286 > generalised rigid body additions
+@@ -837,7 +838,9 @@
+       ENDIF ! end of block for guidespring potential
+    CASE (PSC)
+       CALL RAD(X, GRAD, EREAL, GRADT)
++      CALL H2H_POT_ENTER(H2H_SC_TICK)
+       CALL SC(X, GRAD, EREAL, GRADT)
++      CALL H2H_POT_LEAVE(H2H_SC_TICK)
+       IF (CPMD) EREAL=EREAL+1.0D6
+ 
+    CASE (PMSC)
