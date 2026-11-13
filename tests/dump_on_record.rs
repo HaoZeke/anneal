@@ -110,4 +110,5 @@ fn a_recorded_quench_the_chain_rejects_reaches_the_dump() {
         rows.iter().any(|(_, accepted)| accepted == "1"),
         "the starting minimum is marked accepted"
     );
+    let _ = std::fs::remove_file(path);
 }
