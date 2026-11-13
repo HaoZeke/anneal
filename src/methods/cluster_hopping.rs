@@ -3296,7 +3296,7 @@ where
         here = Some(initial_basin);
     }
     if cfg.acceptance_control && e.is_finite() {
-        let basin = identity.basin_of(x.view());
+        let basin = acceptance_control::fingerprint(x.view(), cfg.length_scale);
         acceptance.observe_structure(basin, e, x.view(), ledger.spent());
     }
     // The history's identity of the occupied minimum, numbered by the history
@@ -4437,7 +4437,7 @@ where
             && ledger.remaining() > 0
             && !ledger.target_reached()
         {
-            let current = identity.basin_of(x.view());
+            let current = acceptance_control::fingerprint(x.view(), cfg.length_scale);
             if let Some((energy, state)) = acceptance.diverse_member(current) {
                 let gradient = grad
                     .as_deref_mut()
@@ -4449,7 +4449,6 @@ where
                 x = state;
                 current_validation_gradient = gradient.filter(|_| ok);
                 soft_cache = None;
-                here = Some(identity.basin_of(x.view()));
                 acceptance.acknowledge_restart(ledger.spent());
             } else {
                 let fresh =
@@ -4468,8 +4467,7 @@ where
                     x = relaxed;
                     current_validation_gradient = gradient;
                     soft_cache = None;
-                    let basin = identity.basin_of(x.view());
-                    here = Some(basin);
+                    let basin = acceptance_control::fingerprint(x.view(), cfg.length_scale);
                     acceptance.observe_structure(basin, e, x.view(), ledger.spent());
                     acceptance.acknowledge_restart(ledger.spent());
                 }
@@ -6893,8 +6891,7 @@ where
             }
         }
         if cfg.acceptance_control {
-            let _from_id = identity.basin_of(x.view());
-            let to_id = identity.basin_of(x_new.view());
+            let to_id = acceptance_control::fingerprint(x_new.view(), cfg.length_scale);
             acceptance.observe_acceptance(accept);
             let novel = acceptance.observe_structure(to_id, e_new, x_new.view(), ledger.spent());
             let improved = e_new < e - 1e-12;

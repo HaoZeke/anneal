@@ -22,10 +22,43 @@ const TEMP_MAX: f64 = 8.0;
 const POPULATION_CAP: usize = 24;
 
 struct Member {
-    basin: usize,
+    basin: u64,
     energy: f64,
     coords: Array1<f64>,
     visits: usize,
+}
+
+/// A fingerprint of the pair-distance histogram, in units of `length`.
+///
+/// One pass over the pairs. The same geometry hashes the same way, and a
+/// different packing lands in different bins. It does not consult the basin
+/// index, so filing a structure does not scan every minimum the run has seen.
+pub fn fingerprint(coords: ArrayView1<f64>, length: f64) -> u64 {
+    let n = coords.len() / 3;
+    if n == 0 {
+        return 0;
+    }
+    let width = (0.05 * length).max(1e-9);
+    let mut bins = [0u64; 64];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut square = 0.0;
+            for axis in 0..3 {
+                let delta = coords[3 * i + axis] - coords[3 * j + axis];
+                square += delta * delta;
+            }
+            let bin = (square.sqrt() / width) as usize;
+            if bin < bins.len() {
+                bins[bin] += 1;
+            }
+        }
+    }
+    let mut hash = 0xcbf29ce484222325u64;
+    for count in bins {
+        hash ^= count;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 /// The four controls, inert until the search records what happened.
@@ -120,7 +153,7 @@ impl AcceptanceControl {
     /// and returns false.
     pub fn observe_structure(
         &mut self,
-        basin: usize,
+        basin: u64,
         energy: f64,
         coords: ArrayView1<f64>,
         spent: usize,
@@ -170,7 +203,7 @@ impl AcceptanceControl {
 
     /// A stored minimum whose fingerprint is not `current`, preferring one
     /// the chain has used least.
-    pub fn diverse_member(&mut self, current: usize) -> Option<(f64, Array1<f64>)> {
+    pub fn diverse_member(&mut self, current: u64) -> Option<(f64, Array1<f64>)> {
         let mut pick: Option<usize> = None;
         for (index, member) in self.members.iter().enumerate() {
             if member.basin == current {
