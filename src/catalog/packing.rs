@@ -973,6 +973,37 @@ pub fn remember_packing_reference(coordinates: &[f64]) {
     update_packing_reference(coordinates, true);
 }
 
+fn record_sub_decaf_reference(
+    held: Vec<PackingReference>,
+    coordinates: &[f64],
+    count_matching_arrival: bool,
+) {
+    for (index, reference) in held.iter().enumerate() {
+        if atom_moved(&reference.coordinates, coordinates, PACKING_REFERENCE_MERGE) {
+            continue;
+        }
+        if count_matching_arrival {
+            PACKING_REFERENCES.with(|slot| {
+                if let Some(reference) = slot.borrow_mut().get_mut(index) {
+                    reference.visits = reference.visits.saturating_add(1);
+                }
+            });
+        }
+        return;
+    }
+    let mut next = held;
+    next.push(PackingReference {
+        coordinates: coordinates.to_vec(),
+        visits: 1,
+        deposit: 0.0,
+    });
+    // Without histograms every well is its own community, so the cap
+    // drops the oldest the same way [`set_packing_references`] does.
+    let excess = next.len().saturating_sub(PACKING_REFERENCE_CAP);
+    next.drain(0..excess);
+    PACKING_REFERENCES.with(|slot| *slot.borrow_mut() = next);
+}
+
 fn update_packing_reference(coordinates: &[f64], count_matching_arrival: bool) {
     let held = packing_reference_book();
     let mut book = PackingBook::default();
@@ -980,6 +1011,16 @@ fn update_packing_reference(coordinates: &[f64], count_matching_arrival: bool) {
         book.observe(&reference.coordinates);
     }
     if book.observe(coordinates).is_none() {
+        // DECAF starts at [`MINIMUM_PACKING_ATOMS`]. A smaller well still
+        // belongs in the cloud: the Leave repels from positions, and a
+        // numerically identical copy is one well, not a missing one.
+        if !coordinates.is_empty()
+            && coordinates.len().is_multiple_of(3)
+            && coordinates.len() / 3 < MINIMUM_PACKING_ATOMS
+            && coordinates.iter().all(|value| value.is_finite())
+        {
+            record_sub_decaf_reference(held, coordinates, count_matching_arrival);
+        }
         return;
     }
     let Some(trial) = book.histogram(coordinates) else {
@@ -1095,8 +1136,15 @@ pub const INVERT_NEIGHBOR_DRAWS: usize = 4;
 /// A far packing is a hear, not an invert neighbour. The predicate
 /// names no morphology.
 pub fn nearby_packing(here: &[f64], other: &[f64]) -> bool {
-    if here.len() != other.len() || here.is_empty() {
+    if here.len() != other.len() || here.is_empty() || !here.len().is_multiple_of(3) {
         return false;
+    }
+    // DECAF histograms start at [`MINIMUM_PACKING_ATOMS`]. Below that the
+    // book has no cells, and a 0.01% copy would read as a different
+    // packing. The move epsilon is the displacement the book itself
+    // treats as the same structure.
+    if here.len() / 3 < MINIMUM_PACKING_ATOMS {
+        return !atom_moved(here, other, PACKING_MOVE_EPS);
     }
     let mut book = PackingBook::default();
     book.observe(here);

@@ -10,7 +10,8 @@
 //! ```
 //!
 //! The energy and the forces come from rgpot's `rgpot_sutton_chen_energy_forces`.
-//! `RGPOT_SC_LIB` is the shared library. The parameters are the reduced
+//! The library is `RGPOT_SC_LIB`, or rgpot's own candidate list
+//! (`RGPOT_LIBRARY`, `RGPOT_RGPOT_ENGINE`, `librgpot.so`). The parameters are the reduced
 //! Doye–Wales rows, ε = 1 and a = 1, with the c, n and m on the first line
 //! of the Cambridge point files. The search stops within 0.001 of the
 //! database energy. A miss is the full budget. `pot_s` is the time inside
@@ -107,12 +108,57 @@ fn system_spec(name: &str) -> Option<Spec> {
     })
 }
 
-fn library() -> libloading::Library {
-    let path = std::env::var("RGPOT_SC_LIB")
-        .unwrap_or_else(|_| "/work/rgpot/bdir-xtb/CppCore/librgpot.so".to_string());
-    unsafe { libloading::Library::new(&path) }.unwrap_or_else(|err| {
-        panic!("rgpot Sutton-Chen library {path}: {err}");
-    })
+fn sutton_chen_candidates() -> Vec<String> {
+    // Same order as rgpot's library lookup: an explicit path, then
+    // `RGPOT_LIBRARY` / `RGPOT_RGPOT_ENGINE`, then the bare soname. The
+    // profile module that implements that list is feature-gated, so the
+    // example keeps the list itself. The old absolute path is only one
+    // more place to try.
+    let mut candidates = Vec::new();
+    for key in ["RGPOT_SC_LIB", "RGPOT_LIBRARY", "RGPOT_RGPOT_ENGINE"] {
+        if let Ok(path) = std::env::var(key)
+            && !path.is_empty()
+            && !candidates.contains(&path)
+        {
+            candidates.push(path);
+        }
+    }
+    for path in [
+        "librgpot.so",
+        "./librgpot.so",
+        "librgpot.dylib",
+        "./librgpot.dylib",
+        "rgpot.dll",
+        "/work/rgpot/bdir-xtb/CppCore/librgpot.so",
+    ] {
+        if !candidates.iter().any(|candidate| candidate == path) {
+            candidates.push(path.to_string());
+        }
+    }
+    candidates
+}
+
+fn library() -> Result<libloading::Library, String> {
+    let mut failures = Vec::new();
+    for candidate in sutton_chen_candidates() {
+        match unsafe { libloading::Library::new(&candidate) } {
+            Ok(library) => {
+                let symbol: Result<libloading::Symbol<()>, _> =
+                    unsafe { library.get(b"rgpot_sutton_chen_energy_forces\0") };
+                if symbol.is_ok() {
+                    return Ok(library);
+                }
+                failures.push(format!(
+                    "{candidate}: missing rgpot_sutton_chen_energy_forces"
+                ));
+            }
+            Err(error) => failures.push(format!("{candidate}: {error}")),
+        }
+    }
+    Err(format!(
+        "rgpot Sutton-Chen library not found ({})",
+        failures.join("; ")
+    ))
 }
 
 fn evaluate(lib: &libloading::Library, family: &Family, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
@@ -180,7 +226,13 @@ fn cmd_run(args: &[String]) -> i32 {
         eprintln!("coords: {err}");
         return 1;
     }
-    let lib = library();
+    let lib = match library() {
+        Ok(lib) => lib,
+        Err(error) => {
+            eprintln!("{error}");
+            return 1;
+        }
+    };
     let (outcome, wall, pot_s) = search(&lib, &cfg, &spec, &start, seed, budget);
     report(
         &args[1],
@@ -230,7 +282,14 @@ fn cmd_energy(args: &[String]) -> i32 {
     let Some((spec, coords)) = geometry_of(args, "energy") else {
         return 2;
     };
-    let (energy, _) = evaluate(&library(), &spec.family, coords.view());
+    let lib = match library() {
+        Ok(lib) => lib,
+        Err(error) => {
+            eprintln!("{error}");
+            return 1;
+        }
+    };
+    let (energy, _) = evaluate(&lib, &spec.family, coords.view());
     println!("{energy:.12}");
     0
 }
@@ -239,7 +298,14 @@ fn cmd_grad(args: &[String]) -> i32 {
     let Some((spec, coords)) = geometry_of(args, "grad") else {
         return 2;
     };
-    let (energy, gradient) = evaluate(&library(), &spec.family, coords.view());
+    let lib = match library() {
+        Ok(lib) => lib,
+        Err(error) => {
+            eprintln!("{error}");
+            return 1;
+        }
+    };
+    let (energy, gradient) = evaluate(&lib, &spec.family, coords.view());
     println!("{energy:.12}");
     for atom in gradient.exact_chunks(3) {
         println!("{:.12} {:.12} {:.12}", atom[0], atom[1], atom[2]);
@@ -420,7 +486,10 @@ mod tests {
     /// is 1, so the energy is 1 − 2c.
     #[test]
     fn a_dimer_at_a_has_the_reduced_sutton_chen_energy() {
-        let lib = library();
+        let Ok(lib) = library() else {
+            eprintln!("rgpot Sutton-Chen library not found; skipping the dimer check");
+            return;
+        };
         for name in ["sc126-38", "sc108-38", "sc96-38"] {
             let spec = system_spec(name).unwrap();
             let x = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);

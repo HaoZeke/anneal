@@ -624,6 +624,20 @@ fn run_minima_hopping_with_history<'a>(
     )];
     let descriptor = Some(lj::descriptor_space());
     let context = StructureContext::new(Some(vec![18; n]), None, Some(format!("lj-reduced-n{n}")));
+    // The chain is already standing in a minimum. The local basin list
+    // numbers that minimum 0. The history has to admit it before the first
+    // escape, or the first new certificate is also numbered 0 and the
+    // controller treats a departure as a return.
+    if let (Some(history), Some(descriptor)) = (history, descriptor.as_ref()) {
+        observe_history(
+            history,
+            &ledger,
+            descriptor,
+            &context,
+            witness,
+            |_history, _observation| Ok(()),
+        )?;
+    }
     let mut local_basins: HashSet<usize> = HashSet::new();
     let mut accepted_visits: HashMap<usize, u64> = HashMap::new();
     let mut observed_visits: HashMap<usize, u64> = HashMap::new();

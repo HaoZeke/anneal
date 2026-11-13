@@ -1673,9 +1673,9 @@ const RECON_HI: f64 = 1.00;
 
 /// Fivefold length of `x` about the best candidate axis.
 ///
-/// SOFI/IRA when that feature is linked. Otherwise the length is the
-/// root-mean-square of the minimum-cost assignment, which does not
-/// depend on storage order.
+/// The length is the root-mean-square of the built-in minimum-cost
+/// assignment. Linking IRA does not change it, so a default search has
+/// one trajectory either way.
 pub fn fivefold_length(x: ArrayView1<f64>) -> f64 {
     fivefold_residual(x).0
 }
@@ -1755,7 +1755,6 @@ fn ico_axes() -> [[f64; 3]; 6] {
 /// The result is `perm[i] = column`. The optimum is a property of the
 /// costs, so a simultaneous permutation of the rows and columns does
 /// not change which points are matched. An index-order greedy pass does.
-#[cfg_attr(feature = "ira", allow(dead_code))]
 fn hungarian(cost: &[f64], n: usize) -> Vec<usize> {
     // Same column scan as the continuous-symmetry assignment. The scratch
     // lives for the whole matrix instead of being allocated once per row.
@@ -1763,7 +1762,6 @@ fn hungarian(cost: &[f64], n: usize) -> Vec<usize> {
 }
 
 /// Columns matched to each row of `x` under the minimum sum of squared distances.
-#[cfg_attr(feature = "ira", allow(dead_code))]
 fn optimal_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
     let n = x.len() / 3;
     let mut cost = vec![0.0; n * n];
@@ -1984,45 +1982,23 @@ fn residual_about_fresh(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>
             xc[3 * i + a] = x[3 * i + a] - com[a];
         }
     }
-    #[cfg(feature = "ira")]
-    let y_m = {
-        let xc_arr = Array1::from(xc.clone());
-        match crate::shape::symmetry_pair(xc_arr.view(), &rmat) {
-            Ok((_, perm)) => {
-                let mut y = vec![0.0; x.len()];
-                for i in 0..n {
-                    if perm[i] >= n {
-                        continue;
-                    }
-                    let p = [xc[3 * perm[i]], xc[3 * perm[i] + 1], xc[3 * perm[i] + 2]];
-                    let q = rot_apply(&rmat, p);
-                    y[3 * i] = q[0] + com[0];
-                    y[3 * i + 1] = q[1] + com[1];
-                    y[3 * i + 2] = q[2] + com[2];
-                }
-                y
-            }
-            Err(_) => return (f64::INFINITY, Array1::zeros(x.len())),
+    // The built-in assignment, with or without IRA. IRA's symmetry
+    // permutation is a different matching, and using it here moved the
+    // default Lennard-Jones trajectory.
+    let mut y = vec![0.0; x.len()];
+    for i in 0..n {
+        let q = rot_apply(&rmat, [xc[3 * i], xc[3 * i + 1], xc[3 * i + 2]]);
+        y[3 * i] = q[0];
+        y[3 * i + 1] = q[1];
+        y[3 * i + 2] = q[2];
+    }
+    let perm = optimal_perm(ArrayView1::from(xc.as_slice()), &y);
+    let mut y_m = vec![0.0; x.len()];
+    for i in 0..n {
+        for a in 0..3 {
+            y_m[3 * i + a] = y[3 * perm[i] + a] + com[a];
         }
-    };
-    #[cfg(not(feature = "ira"))]
-    let y_m = {
-        let mut y = vec![0.0; x.len()];
-        for i in 0..n {
-            let q = rot_apply(&rmat, [xc[3 * i], xc[3 * i + 1], xc[3 * i + 2]]);
-            y[3 * i] = q[0];
-            y[3 * i + 1] = q[1];
-            y[3 * i + 2] = q[2];
-        }
-        let perm = optimal_perm(ArrayView1::from(xc.as_slice()), &y);
-        let mut y_m = vec![0.0; x.len()];
-        for i in 0..n {
-            for a in 0..3 {
-                y_m[3 * i + a] = y[3 * perm[i] + a] + com[a];
-            }
-        }
-        y_m
-    };
+    }
     let mut d2 = 0.0;
     let mut dr = Array1::zeros(x.len());
     for i in 0..n {
@@ -2036,7 +2012,8 @@ fn residual_about_fresh(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>
 }
 
 /// Residual `x − R_5 x` under the best fivefold axis, and that axis's
-/// deviation length. SOFI/IRA when linked; Hungarian assignment otherwise.
+/// deviation length. The matching is the built-in minimum-cost assignment
+/// on every build.
 fn fivefold_residual(x: ArrayView1<f64>) -> (f64, [f64; 3], Array1<f64>) {
     let mut best_d = f64::INFINITY;
     let mut best_ax = [0.0, 0.0, 1.0];

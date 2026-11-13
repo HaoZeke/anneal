@@ -898,6 +898,22 @@ pub struct Config {
     /// solves the hard cluster sizes reliably anneals it. Held fixed, it is the
     /// quantity three separate calibrations here failed to pin down.
     pub anneal_diversity: bool,
+    /// Fivefold SOAP proposal. On in the paper preset.
+    pub prior_soap: bool,
+    /// Icosahedral symmetry reseed. On in the paper preset.
+    pub prior_reseed: bool,
+    /// Stall regrowth from a lattice order. On in the paper preset.
+    pub prior_growth: bool,
+    /// Labelled close-packed core cuts. On in the paper preset.
+    pub prior_core: bool,
+    /// Half-budget motif reseed. On in the paper preset.
+    pub prior_motif: bool,
+    /// Plane cap and slab moves, a temperature taken from the
+    /// population's energy spread, and a fingerprint taboo.
+    ///
+    /// Off in the paper preset, so a default chain draws the same calls.
+    /// The move does not name a packing or a composition.
+    pub general_collective: bool,
     /// Fraction of the starting radius the annealed threshold falls to.
     ///
     /// Bounded below by what basin identity needs, which is not what a
@@ -1567,6 +1583,12 @@ impl Config {
             stall_patience: 60,
             path_images: 9,
             anneal_diversity: false,
+            prior_soap: true,
+            prior_reseed: true,
+            prior_growth: true,
+            prior_core: true,
+            prior_motif: true,
+            general_collective: false,
             diversity_floor: 0.75,
             height_revisits: 4.0,
             screen_margin: LennardJonesPreset::SCREEN_MARGIN * energy_scale,

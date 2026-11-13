@@ -42,6 +42,7 @@ fn main() {
         "coords" => cmd_coords(&args),
         "energy" => cmd_energy(&args),
         "grad" => cmd_grad(&args),
+        "polish" => cmd_polish(&args),
         "budget" => cmd_budget(&args),
         _ => {
             eprintln!("unknown command {cmd}");
@@ -246,6 +247,32 @@ fn config(spec: &Spec) -> Config {
         .and_then(|text| text.parse().ok())
         .unwrap_or(8)
         .max(1);
+    // Empty leaves every prior on. `0` turns the five priors off.
+    // A comma list turns off the named ones: soap, reseed, growth,
+    // core, motif. The plane move stays off unless H2H_GENERAL=1.
+    if let Ok(text) = std::env::var("H2H_PRIORS") {
+        let text = text.trim();
+        let all_off = text == "0" || text == "none";
+        let listed = |name: &str| all_off || text.split(',').any(|token| token.trim() == name);
+        if listed("soap") {
+            cfg.prior_soap = false;
+        }
+        if listed("reseed") {
+            cfg.prior_reseed = false;
+        }
+        if listed("growth") {
+            cfg.prior_growth = false;
+        }
+        if listed("core") {
+            cfg.prior_core = false;
+        }
+        if listed("motif") {
+            cfg.prior_motif = false;
+        }
+    }
+    if std::env::var("H2H_GENERAL").is_ok_and(|value| value == "1") {
+        cfg.general_collective = true;
+    }
     cfg
 }
 
@@ -324,6 +351,34 @@ fn cmd_energy(args: &[String]) -> i32 {
     };
     let (energy, _) = potential(&spec).value_and_gradient(coords.view());
     println!("{energy:.12}");
+    0
+}
+
+fn cmd_polish(args: &[String]) -> i32 {
+    let Some((spec, coords)) = geometry_of(args, "polish") else {
+        return 2;
+    };
+    let evaluated = potential(&spec);
+    let mut optimiser = WarmLbfgs::default();
+    optimiser.gtol = 1e-12;
+    let (energy, relaxed, calls) = optimiser.minimize(coords.view(), 400, |v| {
+        Some(evaluated.value_and_gradient(v))
+    });
+    let (_, gradient) = evaluated.value_and_gradient(relaxed.view());
+    let mut norm = 0.0_f64;
+    let mut peak = 0.0_f64;
+    for value in gradient.iter() {
+        norm += value * value;
+        peak = peak.max(value.abs());
+    }
+    norm = norm.sqrt();
+    if let Some(path) = args.get(3)
+        && let Err(err) = write_coords(path, &relaxed)
+    {
+        eprintln!("polish: {err}");
+        return 1;
+    }
+    println!("energy={energy:.12} calls={calls} gnorm={norm:.3e} gmax={peak:.3e}");
     0
 }
 
