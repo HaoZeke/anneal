@@ -161,8 +161,14 @@ fn cmd_run(args: &[String]) -> i32 {
         .iter()
         .find(|(_, _, _, energy)| *energy <= level)
         .map(|(_, spent, _, _)| *spent);
+    // The hitting quench is sometimes polished into the ledger without a
+    // matching improvements row. The run has already stopped, so the
+    // charged count is the call index of that stop.
     let evals = if hit {
-        at_hit.unwrap_or(budget)
+        match at_hit {
+            Some(spent) if spent < budget => spent,
+            _ => outcome.charged.min(budget),
+        }
     } else {
         budget
     };
