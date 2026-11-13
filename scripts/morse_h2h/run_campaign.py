@@ -2,7 +2,7 @@
 # Copyright (c) anneal developers
 """Serial GMIN against the recommended preset on Cambridge Morse clusters.
 
-Systems are M38 and M55 at rho = 6 and rho = 14, and M80 at rho = 14.
+Systems are M38, M55 and M80 at rho = 6 and rho = 14.
 Short range is the hard case, so rho = 14 is listed first. Six seeds,
 the same list on both arms. Within a system the (seed, arm) pairs are
 shuffled. A hit is a quenched energy within 0.001 of the Cambridge
@@ -32,6 +32,7 @@ SYSTEMS = (
     ("m80r14", 80, 14.0, 4_000_000, -340.811371),
     ("m38r6", 38, 6.0, 400_000, -157.477108),
     ("m55r6", 55, 6.0, 1_000_000, -250.286609),
+    ("m80r6", 80, 6.0, 4_000_000, -378.333471),
 )
 PAPER_BUDGETS = {name: budget for name, _n, _rho, budget, _ref in SYSTEMS}
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
