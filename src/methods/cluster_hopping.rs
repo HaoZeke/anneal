@@ -8895,6 +8895,15 @@ mod tests {
         );
         let base = search_kernels(&Config::for_cluster(104));
         assert!(base.iter().all(|kernel| kernel.name() != "dls-kernel"));
+        let pure = search_kernels(&Config::recommended(8).with_species(vec![79; 8], None));
+        assert!(
+            pure.iter().any(|kernel| kernel.name() == "dls-kernel"),
+            "one repeated label lost the unlabelled lattice exchange"
+        );
+        let mixed = search_kernels(
+            &Config::recommended(8).with_species(vec![29, 29, 29, 29, 79, 79, 79, 79], None),
+        );
+        assert!(mixed.iter().all(|kernel| kernel.name() != "dls-kernel"));
     }
 
     #[test]

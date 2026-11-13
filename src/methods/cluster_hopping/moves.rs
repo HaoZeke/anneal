@@ -731,7 +731,7 @@ fn soap_arm(
     mobile: Option<Vec<usize>>,
     groups: Option<Vec<Vec<usize>>>,
 ) -> ClusterMove {
-    let packing = cfg.species.is_none() && cfg.active_region.is_none() && cfg.frozen.is_none();
+    let packing = cfg.monoatomic() && cfg.active_region.is_none() && cfg.frozen.is_none();
     // The Jacobian hop is a leftover step, a fraction of a bond, on
     // every system. Contact-scale amplitude was for a rigid group
     // translation; the pullback is not that move.
@@ -740,7 +740,9 @@ fn soap_arm(
         rmsd,
         cutoff: LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
         class: cfg.soap_class_residual && packing,
-        species: cfg.species.clone(),
+        // One element takes the unlabelled fivefold hop. The label is
+        // not a second species, so it is not a partition of the residual.
+        species: if packing { None } else { cfg.species.clone() },
         mobile,
         groups: if cfg.soap_mode == SoapProposalMode::Rigid {
             groups
@@ -2909,6 +2911,26 @@ mod move_scaling_tests {
                 .map(|k| k.name())
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn one_repeated_label_takes_the_unlabelled_soap_hop() {
+        let pure = Config::recommended(8).with_species(vec![79; 8], None);
+        assert!(pure.move_library.kernels(&pure).iter().any(|kernel| matches!(
+            kernel,
+            ClusterMove::Soap {
+                species: None,
+                ..
+            }
+        )));
+        let mixed = Config::recommended(8).with_species(vec![29, 29, 29, 29, 79, 79, 79, 79], None);
+        assert!(mixed.move_library.kernels(&mixed).iter().any(|kernel| matches!(
+            kernel,
+            ClusterMove::Soap {
+                species: Some(_),
+                ..
+            }
+        )));
     }
 
     #[test]

@@ -1329,11 +1329,23 @@ impl Config {
         cfg
     }
 
-    /// CNA 555 / Ih packing diagnostics apply only to a monoatomic
-    /// cluster. A molecule or a slab has species or a frozen frame;
-    /// those are not Honeycutt-Andersen environments.
+    /// True when every atom is the same element.
+    ///
+    /// No species vector is the unlabelled cluster. A vector that repeats
+    /// one label is that same cluster. Two distinct labels are a homotop.
+    pub fn monoatomic(&self) -> bool {
+        match self.species.as_deref() {
+            None => true,
+            Some(species) => species.windows(2).all(|pair| pair[0] == pair[1]),
+        }
+    }
+
+    /// CNA 555 / Ih packing diagnostics apply to a monoatomic cluster.
+    ///
+    /// A molecule, a slab, or two elements are not Honeycutt–Andersen
+    /// environments. One repeated label is the unlabelled cluster.
     pub fn packing_cna_applies(&self) -> bool {
-        self.species.is_none()
+        self.monoatomic()
             && self.active_region.is_none()
             && self.frozen.is_none()
             && !self.move_library.is_molecular()
@@ -1837,6 +1849,22 @@ mod coverage_behaviour {
         assert_eq!(Keying::Coordination.default_merge_radius(), Some(0.5));
         assert_eq!(Keying::Distances.default_merge_radius(), None);
         assert_eq!(Keying::SoapPacking.default_merge_radius(), None);
+    }
+
+    #[test]
+    fn one_repeated_label_is_an_unlabelled_packing() {
+        let blank = Config::recommended(8);
+        assert!(blank.monoatomic());
+        assert!(blank.packing_cna_applies());
+        let pure = Config::recommended(8).with_species(vec![79; 8], None);
+        assert!(pure.monoatomic());
+        assert!(pure.packing_cna_applies());
+        let mixed = Config::recommended(8).with_species(vec![29, 29, 29, 29, 79, 79, 79, 79], None);
+        assert!(!mixed.monoatomic());
+        assert!(!mixed.packing_cna_applies());
+        assert!(!Config::recommended_tip4p(4).packing_cna_applies());
+        assert!(!Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0)
+            .packing_cna_applies());
     }
 
     #[test]
