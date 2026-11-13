@@ -6,8 +6,8 @@
 //! That is the scalar ACE ν=3 / featomic λ=0 product of three expansions.
 //! Surface coordination is not this map: SOFI/IRA already return a length.
 
-use ndarray::ShapeBuilder;
 use ndarray::Array2;
+use ndarray::ShapeBuilder;
 use std::f64::consts::SQRT_2;
 
 /// Allowed `(l1, l2, l3)` with `l1 ≤ l2 ≤ l3`, triangle, and even parity.
@@ -479,6 +479,21 @@ fn cg_table(l_max: usize) -> &'static CgTable {
 
 /// `∂B/∂c` for one centre, shape `(ace_dim, n_max n_lm)`.
 pub fn d_from_c(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
+    if n_max == 3 && l_max <= CG_CACHE_MAX {
+        // The Pt(111) proposal spends this derivative inside every ACE
+        // Jacobian. n_max is 3 there, and each of the 2 n_c contractions was
+        // repeating products that do not read the perturbed coefficient.
+        d_from_c_reused(c, l_max)
+    } else {
+        d_from_c_rescan(c, n_max, l_max)
+    }
+}
+
+/// Finite-difference Jacobian. Two full contractions per coefficient.
+///
+/// Kept so the reused derivative can be checked against this scan, including
+/// the `n_max == 3` path the proposal runs.
+pub(crate) fn d_from_c_rescan(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
     let n_lm = (l_max + 1) * (l_max + 1);
     let n_c = n_max * n_lm;
     let n_b = dim(n_max, l_max);
@@ -507,6 +522,182 @@ pub fn d_from_c(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
         }
     }
     j
+}
+
+fn lm_parts(lm: usize) -> (usize, i32) {
+    let mut l = 0usize;
+    while (l + 1) * (l + 1) <= lm {
+        l += 1;
+    }
+    let m = lm as i32 - (l * l) as i32 - l as i32;
+    (l, m)
+}
+
+/// Complex `(l, m)` slots whose value changes when the real coefficient
+/// `slot` is perturbed. `m = 0` reads one real entry. Every other real
+/// entry is shared by `+m` and `-m`.
+fn complex_dependents(slot: usize) -> (usize, [usize; 2]) {
+    let (l, m) = lm_parts(slot);
+    if m == 0 {
+        (1, [slot, 0])
+    } else {
+        let am = if m < 0 { -m } else { m };
+        (2, [lm_index(l, am), lm_index(l, -am)])
+    }
+}
+
+fn term_depends(term: &Term, n_dep: usize, dep: [usize; 2]) -> bool {
+    let hit = |index: u16| {
+        let index = index as usize;
+        index == dep[0] || (n_dep == 2 && index == dep[1])
+    };
+    hit(term.a) || hit(term.b) || hit(term.d)
+}
+
+fn fill_complex(c: &[f64], n_max: usize, l_max: usize, n_lm: usize, cx: &mut [(f64, f64)]) {
+    for n in 0..n_max {
+        for l in 0..=l_max {
+            for m in -(l as i32)..=(l as i32) {
+                let lm = lm_index(l, m);
+                cx[n * n_lm + lm] = coeff(c, n, l, m, n_lm);
+            }
+        }
+    }
+}
+
+fn refresh_complex(
+    c: &[f64],
+    n: usize,
+    n_lm: usize,
+    n_dep: usize,
+    dep: [usize; 2],
+    cx: &mut [(f64, f64)],
+) {
+    for i in 0..n_dep {
+        let lm = dep[i];
+        let (l, m) = lm_parts(lm);
+        cx[n * n_lm + lm] = coeff(c, n, l, m, n_lm);
+    }
+}
+
+/// `(B(c+εe_k) - B(c-εe_k)) / 2ε` for `n_max = 3`, in the contraction's order.
+///
+/// A term whose three complex factors ignore `e_k` has the same product at
+/// `c`, `c+εe_k` and `c-εe_k`. That product is computed once and added with
+/// `acc += g * p`, which is the operation [`contract_three`] performs. Terms
+/// that read `e_k` are evaluated at the shifted coefficients. Spans with no
+/// such term differ by zero, and `(b - b) / 2ε` is `+0.0` for a finite `b`,
+/// so those entries are stored as `0.0`.
+fn d_from_c_reused(c: &[f64], l_max: usize) -> Array2<f64> {
+    let n_max = 3usize;
+    let plan = contraction_plan(l_max);
+    let n_lm = plan.n_lm;
+    let n_trips = plan.spans.len();
+    let n_c = n_max * n_lm;
+    let n_b = n_max * n_trips;
+    debug_assert_eq!(n_b, dim(n_max, l_max));
+    let mut j = Array2::<f64>::zeros((n_b, n_c).f());
+    let eps = 1e-7;
+    let mut cp = c.to_vec();
+    if cp.len() < n_c {
+        cp.resize(n_c, 0.0);
+    }
+    let mut cx = vec![(0.0, 0.0); n_c];
+    fill_complex(&cp, n_max, l_max, n_lm, &mut cx);
+    let mut cached = vec![0.0; plan.terms.len() * n_max];
+    for (ti, term) in plan.terms.iter().enumerate() {
+        for n in 0..n_max {
+            cached[ti * n_max + n] = product_at(&cx, n, n_lm, term);
+        }
+    }
+    // Unperturbed contraction, same `acc += g * p` order as `contract_three`.
+    // An output that ignores the perturbed coefficient has this value on both
+    // sides of the difference. Finite values cancel to +0; a non-finite value
+    // cancels to NaN, which is what subtracting the two contractions produces.
+    let mut base = vec![0.0; n_b];
+    for n in 0..n_max {
+        for (k, &(start, len)) in plan.spans.iter().enumerate() {
+            let terms = &plan.terms[start as usize..(start + len) as usize];
+            let mut acc = 0.0;
+            for (offset, term) in terms.iter().enumerate() {
+                let ti = start as usize + offset;
+                acc += term.g * cached[ti * n_max + n];
+            }
+            base[n * n_trips + k] = acc;
+        }
+    }
+    let mut spans_for_slot = Vec::with_capacity(n_lm);
+    for slot in 0..n_lm {
+        let (n_dep, dep) = complex_dependents(slot);
+        let mut spans = Vec::new();
+        for (k, &(start, len)) in plan.spans.iter().enumerate() {
+            let terms = &plan.terms[start as usize..(start + len) as usize];
+            if terms.iter().any(|term| term_depends(term, n_dep, dep)) {
+                spans.push(k);
+            }
+        }
+        spans_for_slot.push((n_dep, dep, spans));
+    }
+    let mut bp = vec![0.0; n_b];
+    let mut bm = vec![0.0; n_b];
+    for k in 0..n_c {
+        let n_star = k / n_lm;
+        let slot = k - n_star * n_lm;
+        let (n_dep, dep, spans) = &spans_for_slot[slot];
+        let old = cp[k];
+        cp[k] = old + eps;
+        refresh_complex(&cp, n_star, n_lm, *n_dep, *dep, &mut cx);
+        bp.fill(0.0);
+        accumulate_shifted(
+            &cx, &cached, plan, n_star, *n_dep, *dep, spans, n_lm, &mut bp,
+        );
+        cp[k] = old - eps;
+        refresh_complex(&cp, n_star, n_lm, *n_dep, *dep, &mut cx);
+        bm.fill(0.0);
+        accumulate_shifted(
+            &cx, &cached, plan, n_star, *n_dep, *dep, spans, n_lm, &mut bm,
+        );
+        cp[k] = old;
+        refresh_complex(&cp, n_star, n_lm, *n_dep, *dep, &mut cx);
+        for r in 0..n_b {
+            j[[r, k]] = (base[r] - base[r]) / (2.0 * eps);
+        }
+        for &span in spans.iter() {
+            let r = n_star * n_trips + span;
+            j[[r, k]] = (bp[r] - bm[r]) / (2.0 * eps);
+        }
+    }
+    j
+}
+
+fn accumulate_shifted(
+    cx: &[(f64, f64)],
+    cached: &[f64],
+    plan: &ContractionPlan,
+    n_star: usize,
+    n_dep: usize,
+    dep: [usize; 2],
+    spans: &[usize],
+    n_lm: usize,
+    out: &mut [f64],
+) {
+    let n_trips = plan.spans.len();
+    let n_max = 3usize;
+    for &k in spans {
+        let (start, len) = plan.spans[k];
+        let terms = &plan.terms[start as usize..(start + len) as usize];
+        let mut acc = 0.0;
+        for (offset, term) in terms.iter().enumerate() {
+            let ti = start as usize + offset;
+            let p = if term_depends(term, n_dep, dep) {
+                product_at(cx, n_star, n_lm, term)
+            } else {
+                cached[ti * n_max + n_star]
+            };
+            acc += term.g * p;
+        }
+        out[n_star * n_trips + k] = acc;
+    }
 }
 
 #[cfg(test)]
@@ -583,6 +774,41 @@ mod tests {
     /// The water SOAP pullback asks for this derivative once per atom per
     /// channel. A finite-difference pass at l_max 6 is a few seconds each,
     /// and sixty waters times two channels never returns to the quench.
+    #[test]
+    fn the_reused_derivative_matches_the_rescan_bit_for_bit() {
+        for l_max in 0..=CG_CACHE_MAX {
+            let n_max = 3;
+            let n_lm = (l_max + 1) * (l_max + 1);
+            let c: Vec<f64> = (0..n_max * n_lm)
+                .map(|i| ((i * 17 + l_max * 5) % 23) as f64 * 0.07 - 0.4)
+                .collect();
+            assert_derivative_bits(&c, l_max);
+            let mut shifted = c.clone();
+            let eps = 1e-7;
+            for k in [0usize, c.len() / 2, c.len() - 1] {
+                let old = shifted[k];
+                shifted[k] = old + eps;
+                assert_derivative_bits(&shifted, l_max);
+                shifted[k] = old - eps;
+                assert_derivative_bits(&shifted, l_max);
+                shifted[k] = old;
+            }
+        }
+    }
+
+    fn assert_derivative_bits(c: &[f64], l_max: usize) {
+        let reused = d_from_c(c, 3, l_max);
+        let rescan = d_from_c_rescan(c, 3, l_max);
+        assert_eq!(reused.dim(), rescan.dim());
+        for (i, (a, b)) in reused.iter().zip(rescan.iter()).enumerate() {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "l_max {l_max} entry {i}: {a} vs {b}"
+            );
+        }
+    }
+
     #[test]
     fn the_lmax6_derivative_returns_before_a_quench_could() {
         let n_max = 3;

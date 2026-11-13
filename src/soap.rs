@@ -567,6 +567,20 @@ fn accum_four(
 
 /// Analytic Jacobian of the ACE ν=3 block, shape `(N · nu3_feat, 3N)`.
 pub fn jacobian_ace(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Array2<f64> {
+    jacobian_ace_columns(x, spec, species, None)
+}
+
+/// [`jacobian_ace`], optionally leaving columns of `live == false` at zero.
+///
+/// The pullback zeros those columns before the solve. Not writing them leaves
+/// the columns that survive bit-identical, because each scatter adds into one
+/// column only.
+fn jacobian_ace_columns(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+    live: Option<&[bool]>,
+) -> Array2<f64> {
     let n_at = x.len() / 3;
     let channels = neighbor_channels(species);
     let n_chan = channels.len();
@@ -585,24 +599,36 @@ pub fn jacobian_ace(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>)
     let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
     let c_atom = n_chan * spec.n_max * n_lm;
     let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
+    let needed = centres_touching_live(x, n_at, rcut, live);
     let mut c = vec![vec![0.0; c_atom]; n_at];
     let mut dbdc = Vec::with_capacity(n_at * n_chan);
     for i in 0..n_at {
+        if !needed[i] {
+            for _ in 0..n_chan {
+                dbdc.push(None);
+            }
+            continue;
+        }
         let (_, ci) = atom_expand(x, i, n_at, rcut, spec, species, &table);
         c[i] = ci;
         for ch in 0..n_chan {
             let c0 = ch * spec.n_max * n_lm;
-            dbdc.push(crate::ace::d_from_c(
+            dbdc.push(Some(crate::ace::d_from_c(
                 &c[i][c0..c0 + spec.n_max * n_lm],
                 spec.n_max,
                 spec.l_max,
-            ));
+            )));
         }
     }
     for i in 0..n_at {
         let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
         for jj in 0..n_at {
             if jj == i {
+                continue;
+            }
+            let write_j = column_kept(live, jj);
+            let write_i = column_kept(live, i);
+            if !write_j && !write_i {
                 continue;
             }
             let d = [
@@ -619,7 +645,9 @@ pub fn jacobian_ace(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>)
             let (ylm, dylm) = tesseral(u, spec.l_max);
             let fc = fcut(r, rcut);
             let dfc = dfcut(r, rcut);
-            let db = &dbdc[i * n_chan + ch];
+            let db = dbdc[i * n_chan + ch]
+                .as_ref()
+                .expect("a centre that writes a live column has a derivative");
             for n in 0..spec.n_max {
                 let g = radial(n, r, rcut);
                 let dg = dradial(n, r, rcut);
@@ -640,13 +668,13 @@ pub fn jacobian_ace(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>)
                         let col_c = n * n_lm + lm;
                         let db_col = db.column(col_c);
                         let row0 = i * d1 + ch * ace1;
-                        {
+                        if write_j {
                             let mut dest = j.column_mut(3 * jj + a);
                             for t in 0..ace1 {
                                 dest[row0 + t] += db_col[t] * dc;
                             }
                         }
-                        {
+                        if write_i {
                             let mut dest = j.column_mut(3 * i + a);
                             for t in 0..ace1 {
                                 dest[row0 + t] -= db_col[t] * dc;
@@ -662,8 +690,17 @@ pub fn jacobian_ace(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>)
 
 /// Stacked Jacobian of SOAP power spectrum and ACE ν=3 scalars.
 pub fn jacobian_nu3(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Array2<f64> {
-    let js = jacobian_z(x, spec, species);
-    let ja = jacobian_ace(x, spec, species);
+    jacobian_nu3_columns(x, spec, species, None)
+}
+
+fn jacobian_nu3_columns(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+    live: Option<&[bool]>,
+) -> Array2<f64> {
+    let js = jacobian_z_columns(x, spec, species, live);
+    let ja = jacobian_ace_columns(x, spec, species, live);
     let n_at = x.len() / 3;
     let d0 = spec.feat_dim(species);
     let d1 = spec.nu3_feat_dim(species);
@@ -691,6 +728,15 @@ pub fn jacobian(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
 
 /// Analytic Jacobian of stacked local spectra, species channels included.
 pub fn jacobian_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Array2<f64> {
+    jacobian_z_columns(x, spec, species, None)
+}
+
+fn jacobian_z_columns(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+    live: Option<&[bool]>,
+) -> Array2<f64> {
     let n_at = x.len() / 3;
     let channels = neighbor_channels(species);
     let n_chan = channels.len();
@@ -707,8 +753,12 @@ pub fn jacobian_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -
     let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
     let c_atom = n_chan * spec.n_max * n_lm;
     let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
+    let needed = centres_touching_live(x, n_at, rcut, live);
     let mut c = vec![vec![0.0; c_atom]; n_at];
     for i in 0..n_at {
+        if !needed[i] {
+            continue;
+        }
         let (_, ci) = atom_expand(x, i, n_at, rcut, spec, species, &table);
         c[i] = ci;
     }
@@ -716,6 +766,11 @@ pub fn jacobian_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -
         let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
         for jj in 0..n_at {
             if jj == i {
+                continue;
+            }
+            let write_j = column_kept(live, jj);
+            let write_i = column_kept(live, i);
+            if !write_j && !write_i {
                 continue;
             }
             let d = [
@@ -752,8 +807,12 @@ pub fn jacobian_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -
                             s / r
                         };
                         let dc_j = dw * u[a] * y + w * dy;
-                        accumulate_dp(&mut j, row0, spec, n_lm, c_ch, n, lm, dc_j, 3 * jj + a);
-                        accumulate_dp(&mut j, row0, spec, n_lm, c_ch, n, lm, -dc_j, 3 * i + a);
+                        if write_j {
+                            accumulate_dp(&mut j, row0, spec, n_lm, c_ch, n, lm, dc_j, 3 * jj + a);
+                        }
+                        if write_i {
+                            accumulate_dp(&mut j, row0, spec, n_lm, c_ch, n, lm, -dc_j, 3 * i + a);
+                        }
                     }
                 }
             }
@@ -853,9 +912,13 @@ pub fn pullback_z(
     } else {
         return Array1::zeros(x.len());
     }
-    let mut j = jacobian_z(x, spec, species);
     let keep = mobile_mask(n_at, mobile);
     let all_mobile = keep.iter().all(|&b| b);
+    let mut j = if all_mobile {
+        jacobian_z(x, spec, species)
+    } else {
+        jacobian_z_columns(x, spec, species, Some(&keep))
+    };
     if !all_mobile {
         for i in 0..n_at {
             if !keep[i] {
@@ -905,9 +968,13 @@ pub fn pullback_nu3(
             dp[i * dim + t] = target[i * dim + t] - loc[[i, t]];
         }
     }
-    let mut j = jacobian_nu3(x, spec, species);
     let keep = mobile_mask(n_at, mobile);
     let all_mobile = keep.iter().all(|&b| b);
+    let mut j = if all_mobile {
+        jacobian_nu3(x, spec, species)
+    } else {
+        jacobian_nu3_columns(x, spec, species, Some(&keep))
+    };
     if !all_mobile {
         for i in 0..n_at {
             if !keep[i] {
@@ -3142,7 +3209,50 @@ fn solve3(a: [[f64; 3]; 3], b: [f64; 3]) -> Option<[f64; 3]> {
 }
 
 /// Solve `(J^T J + λ I) dr = J^T dp`.
+///
+/// A cpu-clock profile of the heptamer pullback put this solve at 16% of the
+/// run, after the ACE derivative. Frozen atoms are exact zero columns by the
+/// time the solve runs. A zero column has a zero right-hand side and a zero
+/// row off the diagonal, so it drops out of the Cholesky; subtracting those
+/// zeros does not change a finite accumulator. The remaining dots walk each
+/// column in the same feature order as the indexed scan.
 fn tikhonov_jtj(j: &Array2<f64>, dp: ArrayView1<f64>, lambda: f64) -> Array1<f64> {
+    let ncoord = j.ncols();
+    let lambda = lambda.max(1e-12);
+    let mut live_c = Vec::new();
+    let mut live_rhs = Vec::new();
+    for c in 0..ncoord {
+        let rhs = dot_feature(j, c, dp);
+        if column_is_structural_zero(j, c) && rhs == 0.0 {
+            continue;
+        }
+        live_c.push(c);
+        live_rhs.push(rhs);
+    }
+    let m = live_c.len();
+    let mut a = Array2::<f64>::zeros((m, m));
+    let mut rhs = Array1::<f64>::zeros(m);
+    for p in 0..m {
+        rhs[p] = live_rhs[p];
+        let c = live_c[p];
+        for q in 0..=p {
+            let s = dot_columns(j, c, live_c[q]);
+            a[[p, q]] = s;
+            a[[q, p]] = s;
+        }
+        a[[p, p]] += lambda;
+    }
+    let z = chol_solve(&a, &rhs).unwrap_or_else(|| Array1::zeros(m));
+    let mut full = Array1::zeros(ncoord);
+    for (p, &c) in live_c.iter().enumerate() {
+        full[c] = z[p];
+    }
+    full
+}
+
+/// The indexed normal-equation scan, kept for the bit-identity test.
+#[cfg(test)]
+fn tikhonov_jtj_scan(j: &Array2<f64>, dp: ArrayView1<f64>, lambda: f64) -> Array1<f64> {
     let nfeat = j.nrows();
     let ncoord = j.ncols();
     let mut a = Array2::<f64>::zeros((ncoord, ncoord));
@@ -3162,6 +3272,99 @@ fn tikhonov_jtj(j: &Array2<f64>, dp: ArrayView1<f64>, lambda: f64) -> Array1<f64
         a[[c, c]] += lambda.max(1e-12);
     }
     chol_solve(&a, &rhs).unwrap_or_else(|| Array1::zeros(ncoord))
+}
+
+fn dot_columns(j: &Array2<f64>, c: usize, d: usize) -> f64 {
+    let nfeat = j.nrows();
+    let left = j.column(c);
+    let right = j.column(d);
+    if let (Some(left), Some(right)) = (left.as_slice(), right.as_slice()) {
+        let mut s = 0.0;
+        for i in 0..left.len() {
+            s += left[i] * right[i];
+        }
+        s
+    } else {
+        let mut s = 0.0;
+        for i in 0..nfeat {
+            s += j[[i, c]] * j[[i, d]];
+        }
+        s
+    }
+}
+
+fn dot_feature(j: &Array2<f64>, c: usize, dp: ArrayView1<f64>) -> f64 {
+    let nfeat = j.nrows();
+    let column = j.column(c);
+    if let Some(column) = column.as_slice() {
+        let mut s = 0.0;
+        for i in 0..column.len() {
+            s += column[i] * dp[i];
+        }
+        s
+    } else {
+        let mut s = 0.0;
+        for i in 0..nfeat {
+            s += j[[i, c]] * dp[i];
+        }
+        s
+    }
+}
+
+fn column_kept(live: Option<&[bool]>, atom: usize) -> bool {
+    match live {
+        None => true,
+        Some(mask) => mask.get(atom).copied().unwrap_or(false),
+    }
+}
+
+/// Centres whose expansion reaches a column the pullback keeps.
+///
+/// The distance test is the pair loop's: `r >= rcut` or `r < 1e-12` does not
+/// write, so that neighbour does not make the centre necessary.
+fn centres_touching_live(
+    x: ArrayView1<f64>,
+    n_at: usize,
+    rcut: f64,
+    live: Option<&[bool]>,
+) -> Vec<bool> {
+    if live.is_none() {
+        return vec![true; n_at];
+    }
+    let mut needed = vec![false; n_at];
+    for i in 0..n_at {
+        if column_kept(live, i) {
+            needed[i] = true;
+            continue;
+        }
+        let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+        for jj in 0..n_at {
+            if jj == i || !column_kept(live, jj) {
+                continue;
+            }
+            let d = [
+                x[3 * jj] - xi[0],
+                x[3 * jj + 1] - xi[1],
+                x[3 * jj + 2] - xi[2],
+            ];
+            let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            if r >= rcut || r < 1e-12 {
+                continue;
+            }
+            needed[i] = true;
+            break;
+        }
+    }
+    needed
+}
+
+fn column_is_structural_zero(j: &Array2<f64>, c: usize) -> bool {
+    let column = j.column(c);
+    if let Some(column) = column.as_slice() {
+        column.iter().all(|value| *value == 0.0)
+    } else {
+        (0..j.nrows()).all(|i| j[[i, c]] == 0.0)
+    }
 }
 
 fn chol_solve(a: &Array2<f64>, b: &Array1<f64>) -> Option<Array1<f64>> {
@@ -4133,6 +4336,131 @@ mod tests {
         }
         compare_ace_paths(slab.view(), spec, Some(&species));
         compare_ace_paths(cluster.view(), spec, None);
+    }
+
+    #[test]
+    fn the_live_tikhonov_matches_the_indexed_scan_bit_for_bit() {
+        let mut dense = Array2::<f64>::zeros((4, 3).f());
+        dense[[0, 0]] = 1.25;
+        dense[[1, 0]] = -0.5;
+        dense[[2, 1]] = 0.75;
+        dense[[3, 1]] = 2.0;
+        dense[[0, 2]] = -1.0;
+        dense[[3, 2]] = 0.125;
+        let dp = Array1::from_vec(vec![0.3, -0.2, 1.5, -0.7]);
+        assert_tikhonov_bits(&dense, dp.view());
+
+        let mut holed = dense.clone();
+        for row in 0..holed.nrows() {
+            holed[[row, 1]] = 0.0;
+        }
+        assert_tikhonov_bits(&holed, dp.view());
+
+        let mut row_major = Array2::<f64>::zeros((4, 3));
+        row_major.assign(&dense);
+        assert_tikhonov_bits(&row_major, dp.view());
+        for row in 0..row_major.nrows() {
+            row_major[[row, 0]] = 0.0;
+            row_major[[row, 2]] = 0.0;
+        }
+        assert_tikhonov_bits(&row_major, dp.view());
+    }
+
+    fn assert_tikhonov_bits(j: &Array2<f64>, dp: ArrayView1<f64>) {
+        let live = tikhonov_jtj(j, dp, 1e-3);
+        let scan = tikhonov_jtj_scan(j, dp, 1e-3);
+        assert_eq!(live.len(), scan.len());
+        for (i, (a, b)) in live.iter().zip(scan.iter()).enumerate() {
+            assert_eq!(a.to_bits(), b.to_bits(), "coord {i}: {a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn the_masked_slab_jacobian_matches_the_zeroed_dense_one() {
+        let spec = SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: 3.5 * 2.0 * 1.36,
+        };
+        let (x, species) = pt111_heptamer();
+        let n_at = x.len() / 3;
+        let mut keep = vec![false; n_at];
+        for i in 32..n_at {
+            keep[i] = true;
+        }
+        let mut dense = jacobian_nu3(x.view(), spec, Some(&species));
+        let masked = jacobian_nu3_columns(x.view(), spec, Some(&species), Some(&keep));
+        for i in 0..n_at {
+            if keep[i] {
+                continue;
+            }
+            for a in 0..3 {
+                for row in 0..dense.nrows() {
+                    dense[[row, 3 * i + a]] = 0.0;
+                }
+            }
+        }
+        assert_eq!(dense.dim(), masked.dim());
+        for (i, (a, b)) in dense.iter().zip(masked.iter()).enumerate() {
+            assert_eq!(a.to_bits(), b.to_bits(), "jacobian entry {i}: {a} vs {b}");
+        }
+        let loc = local_nu3_z(x.view(), spec, Some(&species));
+        let dim = loc.ncols();
+        let mut dp = Array1::zeros(n_at * dim);
+        for i in 0..n_at {
+            for t in 0..dim {
+                dp[i * dim + t] = loc[[i, t]] * 0.0 + ((i + t) % 7) as f64 * 1e-4;
+            }
+        }
+        for i in 0..n_at {
+            if !keep[i] {
+                for t in 0..dim {
+                    dp[i * dim + t] = 0.0;
+                }
+            }
+        }
+        assert_tikhonov_bits(&dense, dp.view());
+
+        let mobile: Vec<usize> = (32..n_at).collect();
+        let mut target = Array1::zeros(n_at * dim);
+        for i in 0..n_at {
+            for t in 0..dim {
+                target[i * dim + t] = loc[[i, t]];
+            }
+        }
+        for t in dim - spec.nu3_feat_dim(Some(&species))..dim {
+            target[32 * dim + t] += 0.05;
+        }
+        let got = pullback_nu3(x.view(), target.view(), spec, Some(&species), Some(&mobile));
+        let mut reference_j = jacobian_nu3(x.view(), spec, Some(&species));
+        let mut reference_dp = Array1::zeros(n_at * dim);
+        for i in 0..n_at {
+            for t in 0..dim {
+                reference_dp[i * dim + t] = target[i * dim + t] - loc[[i, t]];
+            }
+            if !keep[i] {
+                for t in 0..dim {
+                    reference_dp[i * dim + t] = 0.0;
+                }
+                for a in 0..3 {
+                    for row in 0..reference_j.nrows() {
+                        reference_j[[row, 3 * i + a]] = 0.0;
+                    }
+                }
+            }
+        }
+        let mut reference = tikhonov_jtj_scan(&reference_j, reference_dp.view(), 1e-3);
+        for i in 0..n_at {
+            if !keep[i] {
+                reference[3 * i] = 0.0;
+                reference[3 * i + 1] = 0.0;
+                reference[3 * i + 2] = 0.0;
+            }
+        }
+        assert_eq!(got.len(), reference.len());
+        for (i, (a, b)) in got.iter().zip(reference.iter()).enumerate() {
+            assert_eq!(a.to_bits(), b.to_bits(), "pullback coord {i}: {a} vs {b}");
+        }
     }
 
     fn pt111_heptamer() -> (Array1<f64>, Vec<u32>) {
