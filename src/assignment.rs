@@ -144,32 +144,34 @@ unsafe fn scan_avx2(
     use std::arch::x86_64::{
         _CMP_LT_OQ, _mm_cmpeq_epi8, _mm_cvtsi32_si128, _mm_setzero_si128, _mm256_and_pd,
         _mm256_blendv_pd, _mm256_castsi256_pd, _mm256_cmp_pd, _mm256_cvtepi8_epi64,
-        _mm256_loadu_pd, _mm256_movemask_pd, _mm256_set1_pd, _mm256_storeu_pd, _mm256_sub_pd,
+        _mm256_loadu_pd, _mm256_movemask_pd, _mm256_set1_pd, _mm256_setr_pd, _mm256_setzero_pd,
+        _mm256_storeu_pd, _mm256_sub_pd,
     };
 
     let n = row.len();
-    let mut delta = f64::INFINITY;
-    let mut next_column = 0usize;
     let mut candidate = 1usize;
     let dual = _mm256_set1_pd(row_dual);
     let zero = _mm_setzero_si128();
+    let inf = _mm256_set1_pd(f64::INFINITY);
     // The column index is in range by the scan contract. Slice indexing
     // here was a bounds check on every lane, and that check was most of
     // the scan. The arithmetic is the scalar loop: subtract the dual,
     // then the column potential, keep a strict `<` improvement, and take
-    // the lowest unused column whose reduced cost is strictly smaller
-    // than the running minimum.
+    // the lowest unused column whose reduced cost is strictly smaller.
+    // The running minimum stays in registers. A used column is infinite
+    // and cannot win, and an equal reduced cost keeps the lower index.
     let row_ptr = row.as_ptr();
     let potential_ptr = column_potential.as_ptr();
     let min_ptr = min_reduced.as_mut_ptr();
     let pred_ptr = predecessor.as_mut_ptr();
     let used_ptr = used.as_ptr();
+    let mut best_val = inf;
+    let mut best_idx = _mm256_setzero_pd();
     while candidate + 3 <= n {
         let packed = unsafe { std::ptr::read_unaligned(used_ptr.add(candidate) as *const i32) };
         let bytes = _mm_cvtsi32_si128(packed);
         let eq = _mm_cmpeq_epi8(bytes, zero);
         let open = _mm256_castsi256_pd(_mm256_cvtepi8_epi64(eq));
-        let mut lanes = [0.0_f64; 4];
         unsafe {
             let cost = _mm256_loadu_pd(row_ptr.add(candidate - 1));
             let potential = _mm256_loadu_pd(potential_ptr.add(candidate));
@@ -178,7 +180,6 @@ unsafe fn scan_avx2(
             let lower = _mm256_and_pd(_mm256_cmp_pd(reduced, previous, _CMP_LT_OQ), open);
             let updated = _mm256_blendv_pd(previous, reduced, lower);
             _mm256_storeu_pd(min_ptr.add(candidate), updated);
-            _mm256_storeu_pd(lanes.as_mut_ptr(), updated);
             let improved = _mm256_movemask_pd(lower);
             if improved & 1 != 0 {
                 *pred_ptr.add(candidate) = column;
@@ -192,14 +193,36 @@ unsafe fn scan_avx2(
             if improved & 8 != 0 {
                 *pred_ptr.add(candidate + 3) = column;
             }
-            for offset in 0..4 {
-                if *used_ptr.add(candidate + offset) == 0 && lanes[offset] < delta {
-                    delta = lanes[offset];
-                    next_column = candidate + offset;
-                }
-            }
+            let eligible = _mm256_blendv_pd(inf, updated, open);
+            let indices = _mm256_setr_pd(
+                candidate as f64,
+                (candidate + 1) as f64,
+                (candidate + 2) as f64,
+                (candidate + 3) as f64,
+            );
+            let better = _mm256_cmp_pd(eligible, best_val, _CMP_LT_OQ);
+            best_val = _mm256_blendv_pd(best_val, eligible, better);
+            best_idx = _mm256_blendv_pd(best_idx, indices, better);
         }
         candidate += 4;
+    }
+    let mut values = [0.0_f64; 4];
+    let mut indices = [0.0_f64; 4];
+    unsafe {
+        _mm256_storeu_pd(values.as_mut_ptr(), best_val);
+        _mm256_storeu_pd(indices.as_mut_ptr(), best_idx);
+    }
+    let mut delta = f64::INFINITY;
+    let mut next_column = 0usize;
+    for lane in 0..4 {
+        let value = values[lane];
+        let index = indices[lane] as usize;
+        // Equal finite costs keep the lower column, matching a left-to-right
+        // strict `<`. Infinities are unused columns and do not win.
+        if value < delta || (delta.is_finite() && value == delta && index < next_column) {
+            delta = value;
+            next_column = index;
+        }
     }
     while candidate <= n {
         unsafe {
@@ -450,6 +473,9 @@ struct PathScratch {
     predecessor: Vec<usize>,
     min_reduced: Vec<f64>,
     used: Vec<u8>,
+    /// Rows whose tight column was free after the dual seed. Those rows
+    /// stay matched; an augmenting path only relabels them.
+    seeded_row: Vec<u8>,
 }
 
 std::thread_local! {
@@ -461,6 +487,7 @@ std::thread_local! {
             predecessor: Vec::new(),
             min_reduced: Vec::new(),
             used: Vec::new(),
+            seeded_row: Vec::new(),
         })
     };
 }
@@ -469,6 +496,29 @@ fn solve_shortest_paths(
     costs: &[f64],
     n: usize,
     report_unique: bool,
+) -> Option<(Vec<usize>, bool)> {
+    // A feasible column-minimum dual makes the short augmentations free.
+    // The result is kept only when complementary slackness and a single
+    // optimum both hold, which is the unseeded permutation. Anything else
+    // runs the unseeded scan.
+    if let Some((assignment, unique)) = solve_with_seed(costs, n, true, true) {
+        return Some((assignment, report_unique && unique));
+    }
+    solve_with_seed(costs, n, report_unique, false)
+}
+
+/// Column-minimum duals, then one tight matching, then the same scan.
+///
+/// Feasible duals make each augmenting path the equality-graph path
+/// instead of a search from the zero dual. A row whose tight column is
+/// free is already matched and is not searched. The permutation of a
+/// unique optimum does not depend on that seed; a tie falls back to the
+/// unseeded scan.
+fn solve_with_seed(
+    costs: &[f64],
+    n: usize,
+    report_unique: bool,
+    seed: bool,
 ) -> Option<(Vec<usize>, bool)> {
     // Column 0 is the dummy used to grow the matching. Rows and columns of
     // `costs` are 1-indexed in the dual update so the dummy sits at index 0.
@@ -484,6 +534,7 @@ fn solve_shortest_paths(
         scratch.predecessor.resize(width, 0);
         scratch.min_reduced.resize(width, 0.0);
         scratch.used.resize(width, 0);
+        scratch.seeded_row.resize(width, 0);
         let PathScratch {
             row_potential,
             column_potential,
@@ -491,36 +542,106 @@ fn solve_shortest_paths(
             predecessor,
             min_reduced,
             used,
+            seeded_row,
         } = scratch;
         row_potential[..width].fill(0.0);
         column_potential[..width].fill(0.0);
         column_match[..width].fill(0);
+        seeded_row[..width].fill(0);
         solve_shortest_paths_in(
             costs,
             n,
             report_unique,
+            seed,
             &mut row_potential[..width],
             &mut column_potential[..width],
             &mut column_match[..width],
             &mut predecessor[..width],
             &mut min_reduced[..width],
             &mut used[..width],
+            &mut seeded_row[..width],
         )
     })
+}
+
+/// Lowest-column tight matching under the column-minimum dual.
+///
+/// Each column potential is the minimum entry of that column. Each row
+/// potential is the minimum reduced cost of that row, so every reduced
+/// cost is non-negative in exact arithmetic and the winning column is
+/// tight. The row is matched only when that column is still free.
+fn seed_tight_matching(
+    costs: &[f64],
+    n: usize,
+    row_potential: &mut [f64],
+    column_potential: &mut [f64],
+    column_match: &mut [usize],
+    seeded_row: &mut [u8],
+) {
+    for column in 1..=n {
+        let mut best = costs[column - 1];
+        for row in 1..n {
+            let cost = costs[row * n + column - 1];
+            if cost < best {
+                best = cost;
+            }
+        }
+        column_potential[column] = best;
+    }
+    for row in 1..=n {
+        let base = (row - 1) * n;
+        let mut best = costs[base] - column_potential[1];
+        for column in 2..=n {
+            let reduced = costs[base + column - 1] - column_potential[column];
+            if reduced < best {
+                best = reduced;
+            }
+        }
+        row_potential[row] = best;
+        // Every column tied for that minimum is tight. The lowest free
+        // one is the same tie break as the scan.
+        let mut chosen = 0usize;
+        for column in 1..=n {
+            let reduced = costs[base + column - 1] - column_potential[column];
+            if reduced <= best && column_match[column] == 0 {
+                chosen = column;
+                break;
+            }
+        }
+        if chosen != 0 {
+            column_match[chosen] = row;
+            seeded_row[row] = 1;
+        }
+    }
 }
 
 fn solve_shortest_paths_in(
     costs: &[f64],
     n: usize,
     report_unique: bool,
+    seed: bool,
     row_potential: &mut [f64],
     column_potential: &mut [f64],
     column_match: &mut [usize],
     predecessor: &mut [usize],
     min_reduced: &mut [f64],
     used: &mut [u8],
+    seeded_row: &mut [u8],
 ) -> Option<(Vec<usize>, bool)> {
+    if seed {
+        seed_tight_matching(
+            costs,
+            n,
+            row_potential,
+            column_potential,
+            column_match,
+            seeded_row,
+        );
+    }
     for row in 1..=n {
+        if seeded_row[row] == 1 {
+            continue;
+        }
         column_match[0] = row;
         let mut column = 0usize;
         min_reduced.fill(f64::INFINITY);
@@ -579,9 +700,54 @@ fn solve_shortest_paths_in(
         seen[slot] = true;
         assignment[slot] = column - 1;
     }
+    if seed {
+        // Both checks are required. Slackness without uniqueness is a
+        // different optimal permutation, and uniqueness without slackness
+        // is a dual that does not prove this matching.
+        if !complementary_slack(costs, n, &assignment, row_potential, column_potential)
+            || !optimum_is_unique(costs, n, &assignment, row_potential, column_potential)
+        {
+            return None;
+        }
+        return Some((assignment, report_unique));
+    }
     let unique =
         report_unique && optimum_is_unique(costs, n, &assignment, row_potential, column_potential);
     Some((assignment, unique))
+}
+
+/// True when the duals are feasible and every matched edge is tight.
+///
+/// The tolerance is the uniqueness slack: a reduced cost inside it can
+/// belong to another optimum, and a matched edge outside it is not the
+/// optimum the shortest-path scan would return.
+fn complementary_slack(
+    costs: &[f64],
+    n: usize,
+    assignment: &[usize],
+    row_potential: &[f64],
+    column_potential: &[f64],
+) -> bool {
+    let mut scale = 1.0_f64;
+    for value in costs {
+        scale = scale.max(value.abs());
+    }
+    let slack = 1.0e-8 * (1.0 + scale);
+    for (row, &matched) in assignment.iter().enumerate() {
+        let base = row * n;
+        let row_dual = row_potential[row + 1];
+        for column in 0..n {
+            let reduced = costs[base + column] - row_dual - column_potential[column + 1];
+            if column == matched {
+                if reduced.abs() > slack {
+                    return false;
+                }
+            } else if reduced < -slack {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 fn optimum_is_unique(
