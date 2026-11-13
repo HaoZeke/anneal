@@ -334,28 +334,18 @@ fn main() {
     }
 }
 
-/// Centres, then angle-axis with the opposite sense of the Rodrigues chart.
-/// NEWTIP reads that block: `OFFSET = 3 NATOMS / 2`.
+/// Centres, then the Rodrigues vectors of the chart unchanged, three per
+/// line. NEWTIP reads that block (`OFFSET = 3 NATOMS / 2`) and places each
+/// site by the same active Rodrigues map, so its start energy is the chart's.
 fn gmin_block(n: usize, x: ArrayView1<f64>) -> String {
     let mut text = String::new();
-    for i in 0..n {
+    for i in 0..2 * n {
         writeln!(
             text,
             "{:.10} {:.10} {:.10}",
             x[3 * i],
             x[3 * i + 1],
             x[3 * i + 2]
-        )
-        .unwrap();
-    }
-    for i in 0..n {
-        let base = 3 * n + 3 * i;
-        writeln!(
-            text,
-            "{:.10} {:.10} {:.10}",
-            -x[base],
-            -x[base + 1],
-            -x[base + 2]
         )
         .unwrap();
     }

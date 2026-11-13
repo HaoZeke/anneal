@@ -6,7 +6,7 @@ The existing rate table stops three (H₂O)₁₅ seeds on one minimum, −623.8
 
 The rigid chart now proposes a centre step and a rotation together, accepts that quench by Metropolis at the preset temperature, and scales the step toward a one-half acceptance. A stalled chain relocates one body once, then returns to the library. A rigid quench continues until the root-mean-square force is at the record tolerance. The lengths are the preset step and the preset minimum separation.
 
-GMIN is NEWTIP with TIPID 4, temperature 2 kJ/mol, and step 0.40 / 0.51, with the step and the temperature held fixed. Both arms open the same rigid start. The Lennard-Jones kernel already times each evaluation. The same pair of calls was added around NEWTIP in the local GMIN build, which is what fills `pot_s` for that arm.
+GMIN is NEWTIP with TIPID 4, temperature 2 kJ/mol, and step 0.40 / 0.51, with the step and the temperature held fixed. Both arms open the same molecular centres. Until the start fix in the container-radius section, GMIN read each orientation inverted. The Lennard-Jones kernel already times each evaluation. The same pair of calls was added around NEWTIP in the local GMIN build, which is what fills `pot_s` for that arm.
 
 | Size | Arm | Hits | Median evals | Median wall (s) | Ratio | Inside (s) | Outside (s) |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -112,6 +112,6 @@ GMIN is `scripts/gmin_h2h/build_gmin.sh` at revision `aac1548a`, gfortran 13.3.0
 
 At 8 molecules four control seeds stop at −297.794 kJ/mol and the radius arm hits all six, median 367_389.5 calls. At 15 and 20 the control's lowest energy is below the radius arm's on all twelve seeds, by 0.11 to 20.72 kJ/mol. The (H₂O)₁₅ radius-arm minima are compact cages with 24 or 25 oxygen contacts, against 25 in the global minimum, and no molecule apart. Moving a centre by one diameter places a surface water on the far side of the cage; that may be the move the control is using. The earlier 0/6 at 15 and 20 is not the container.
 
-`h2h_seed` writes each angle-axis vector negated. NEWTIP's site placement is the Rodrigues map of the vector as written: a Wales–Hodges minimum written without the negation quenches in zero steps, at −628.3735 kJ/mol for (H₂O)₁₅. The GMIN arms therefore start from anneal's centres with each orientation inverted. On (H₂O)₁₅ seed 2000, on the GminTip4p constants, anneal's start is −13.193 kJ/mol and GMIN's is −5.754. These rows keep the existing start.
+Until this fix `h2h_seed` wrote each angle-axis vector negated. NEWTIP places sites by the same active Rodrigues map as the chart, so a Wales–Hodges minimum written without the negation quenches in zero steps, at −628.3735 kJ/mol for (H₂O)₁₅. Every GMIN row above, and the `gmin-control` and `gmin-radius` rows, opened anneal's centres with each orientation inverted. On (H₂O)₁₅ seed 2000, GMIN's `CHECKD 0` gives −5.7538 kJ/mol for that block, against anneal's −13.1929. `h2h_seed` now writes the chart's vectors unchanged, and GMIN gives −13.192905 for anneal's −13.192876; the difference is the Coulomb prefactor.
 
 The new rows are in `rows.csv`. The medians of those rows are `summary-radius.csv`.
