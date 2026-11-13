@@ -1,0 +1,2 @@
+system,arm,seed,budget,hit,evals_to_hit,charged,wall_s,pot_s,outside_s,inside_us,outside_us,process_s,best,stop,reached
+lj98,growpal,2000,4000000,0,4000000,4000000,96.401403,11.059091,85.342312,2.7648,21.3356,101.013386,,budget,28
