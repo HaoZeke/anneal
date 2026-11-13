@@ -205,6 +205,9 @@ def run_anneal(binary: Path, system: str, seed: int, budget: int, coords: Path, 
     env.update(
         {
             "H2H_BUDGET": str(budget),
+            # The recorded rows are the search before h2h_metal's stride
+            # override. On this base that override defaults to 8.
+            "H2H_BASIN_STRIDE": "1",
             "OMP_NUM_THREADS": "1",
             "RAYON_NUM_THREADS": "1",
         }
