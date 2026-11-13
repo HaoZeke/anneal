@@ -67,6 +67,11 @@ pub enum MoveLibrary {
         /// arm. It needs a site geometry with one oxygen and two hydrogens.
         /// [`Config::for_tip4p`] turns it on.
         reverse_cycles: bool,
+        /// Offer a directed hydrogen-bond chain reversal as one more arm.
+        ///
+        /// Off on the opening preset. A stalled search turns it on for a
+        /// fresh chain, so the proposals before that stall stay as they were.
+        chain_reversal: bool,
         /// Move one body onto a vacant contact.
         ///
         /// On for every rigid preset. A collective kick does not change
@@ -250,6 +255,7 @@ impl MoveLibrary {
                 rotate_step,
                 local,
                 reverse_cycles,
+                chain_reversal,
                 relocate,
             } => {
                 // A collective kick and a cycle reversal leave every centre
@@ -302,10 +308,12 @@ impl MoveLibrary {
                         n_molecules: *n_molecules,
                         geometry: geometry.clone(),
                     });
-                    kernels.push(ClusterMove::RigidReverseChain {
-                        n_molecules: *n_molecules,
-                        geometry: geometry.clone(),
-                    });
+                    if *chain_reversal {
+                        kernels.push(ClusterMove::RigidReverseChain {
+                            n_molecules: *n_molecules,
+                            geometry: geometry.clone(),
+                        });
+                    }
                 }
                 kernels
             }
@@ -2584,7 +2592,7 @@ mod move_scaling_tests {
             .collect();
         assert_eq!(
             names,
-            ["rkick", "rtrans", "rrot", "rtrans1", "rreor", "rreloc", "rcycle", "rchain"]
+            ["rkick", "rtrans", "rrot", "rtrans1", "rreor", "rreloc", "rcycle"]
         );
         assert!(cfg.move_library.is_rigid_body());
         assert_eq!(cfg.n_points, 6);

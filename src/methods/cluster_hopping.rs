@@ -3506,6 +3506,7 @@ where
     let cage_quantum = cfg.min_separation / 50.0;
     let mut cage_walked = false;
     let mut archive_walked = false;
+    let mut portfolio = false;
     if cfg.move_library.is_rigid_body() {
         stall_archive.offer(e, x.view());
         cage_archive.offer_cage(
@@ -3805,6 +3806,24 @@ where
             && !kernels.is_empty()
             && ledger.spent().saturating_sub(charged_at_best) >= archive_patience
         {
+            let chain_on = matches!(
+                cfg.move_library,
+                MoveLibrary::RigidBody {
+                    chain_reversal: true,
+                    ..
+                }
+            );
+            let water = cfg
+                .rigid_body_geometry
+                .as_ref()
+                .is_some_and(|geometry| cycles::water_sites(geometry).is_some());
+            // A water search that has not yet used the chain arm spends the
+            // rest of the budget on a fresh start with that arm, instead of
+            // walking a stored cage. The ledger keeps the best of both.
+            if water && !chain_on {
+                portfolio = true;
+                break HopStop::CallerStop;
+            }
             archive_walked = true;
             let key = rigid_cage_key(x.view(), cfg.n_points, cage_quantum);
             cage_archive.offer_cage(e, x.view(), key);
@@ -7779,6 +7798,28 @@ where
         *slot = bias;
     }
 
+    if portfolio && ledger.remaining() > 0 && !ledger.stopped() {
+        let mut second = cfg.clone();
+        if let MoveLibrary::RigidBody { chain_reversal, .. } = &mut second.move_library {
+            *chain_reversal = true;
+        }
+        let fresh = fresh_rigid_start(&second, rng);
+        return run_full(
+            &second,
+            fresh.view(),
+            ledger,
+            relax,
+            grad,
+            energy_grad,
+            None,
+            settle,
+            history,
+            checkpoint_interval,
+            checkpoint,
+            rng,
+        );
+    }
+
     Ok(Outcome {
         best: ledger.best,
         best_state: ledger.best_state.clone(),
@@ -8020,6 +8061,28 @@ fn hop_is_identity(x: ArrayView1<f64>, y: ArrayView1<f64>) -> bool {
         s += d * d;
     }
     (s / n).sqrt() < 1e-8
+}
+
+/// A new rigid start: non-overlapping centres inside the container, and a
+/// uniform orientation for each body. Lengths come from the preset.
+fn fresh_rigid_start<R: Rng + ?Sized>(cfg: &Config, rng: &mut R) -> Array1<f64> {
+    let n = cfg.n_points.max(1);
+    let radius = cfg.container.max(cfg.min_separation * 4.0);
+    let mut centres = random_cluster_in_radius(n, radius, cfg.min_separation, rng);
+    if centres.len() != 3 * n {
+        centres = random_cluster(n, 0.7, cfg.min_separation, rng);
+    }
+    let mut state = Array1::zeros(6 * n);
+    for (i, value) in centres.iter().take(3 * n).enumerate() {
+        state[i] = *value;
+    }
+    for body in 0..n {
+        let base = 3 * n + 3 * body;
+        for k in 0..3 {
+            state[base + k] = rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
+        }
+    }
+    state
 }
 
 /// Samples a non-overlapping cluster uniformly inside a sphere.

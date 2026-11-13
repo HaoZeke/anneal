@@ -1582,6 +1582,7 @@ impl Config {
             rotate_step: 0.40,
             local: false,
             reverse_cycles: true,
+            chain_reversal: false,
             relocate: true,
         };
         cfg.rigid_body_geometry =
@@ -1671,6 +1672,7 @@ impl Config {
             rotate_step: super::moves::RIGID_ORIENTATION_CAP,
             local: true,
             reverse_cycles: false,
+            chain_reversal: false,
             relocate: true,
         };
         let contact = 4.0 * reach;
