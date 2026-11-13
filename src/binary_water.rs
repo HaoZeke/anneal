@@ -302,6 +302,42 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "rgsaddle"))]
+    fn a_default_build_refuses_before_the_side_probes_spend_the_budget() {
+        let n_a = 6;
+        let n_b = 7;
+        let mut rng = StdRng::seed_from_u64(19);
+        let start = random_cluster_in_radius(n_a + n_b, 2.2, 0.9, &mut rng);
+        let problem = BinaryLennardJonesProblem {
+            n_a,
+            n_b,
+            epsilon_aa: 1.0,
+            epsilon_ab: 1.0,
+            epsilon_bb: 1.0,
+            sigma_aa: 1.0,
+            sigma_ab: 1.15,
+            sigma_bb: 1.3,
+        };
+        for communicating in [false, true] {
+            let found = search_binary(
+                &problem,
+                start.view(),
+                200_000,
+                f64::NEG_INFINITY,
+                19,
+                communicating,
+            );
+            assert!(found.nve_unavailable);
+            assert!(found.energy.is_finite());
+            assert!(
+                found.charged < 2_000,
+                "the refusal came after {} charged calls",
+                found.charged
+            );
+        }
+    }
+
+    #[test]
     fn stock_presets_keep_their_temperature_after_adaptation() {
         let recommended = Config::recommended(10);
         let water = recommended.clone().with_rigid_bodies(gmin_water_geometry());

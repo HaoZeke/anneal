@@ -427,6 +427,51 @@ mod tests {
         assert!(short > -0.05, "rho = 14 does not");
     }
 
+    /// The Morse second neighbour sits at √2, where the pair is
+    /// `a (a - 2)` with `a = e^{rho (1 - √2)}`. Bound by a twentieth of the
+    /// well up to `rho = ln(1 / (1 - √0.95)) / (√2 - 1) ≈ 8.875`.
+    #[test]
+    fn the_second_neighbour_gate_closes_near_rho_8_9() {
+        let energy = |rho: f64| PairKind::Morse { rho }.second_neighbour_energy();
+        assert!(energy(8.8) < -0.05);
+        assert!(energy(8.95) > -0.05);
+        assert!(
+            (energy(0.0) + 1.0).abs() < 1e-15,
+            "rho = 0 is flat at the well depth"
+        );
+        assert!(energy(f64::NAN).is_nan());
+        assert!(
+            !(energy(f64::NAN) < -0.05),
+            "an unknown range leaves the gate shut"
+        );
+    }
+
+    /// The gate on its own does not separate Lennard-Jones from long-ranged
+    /// Morse: the presets leave [`Config::long_ranged`] off for it.
+    ///
+    /// [`Config::long_ranged`]: crate::methods::cluster_hopping::Config::long_ranged
+    #[test]
+    fn lennard_jones_binds_its_second_neighbour() {
+        let lj = PairKind::LennardJones.second_neighbour_energy();
+        assert!((lj + 0.234_375).abs() < 1e-12, "4 (1/256 - 1/16), got {lj}");
+        assert!(lj < -0.05);
+        assert!(!crate::methods::cluster_hopping::Config::recommended(38).long_ranged);
+        assert!(!crate::methods::cluster_hopping::Config::for_cluster(38).long_ranged);
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn a_longer_morse_range_binds_the_second_neighbour_harder(
+            rho in 0.01f64..40.0,
+            step in 0.0f64..10.0,
+        ) {
+            let near = PairKind::Morse { rho }.second_neighbour_energy();
+            let far = PairKind::Morse { rho: rho + step }.second_neighbour_energy();
+            proptest::prop_assert!(near <= far, "rho {} at {}, rho {} at {}", rho, near, rho + step, far);
+            proptest::prop_assert!(near > -1.0 && near < 0.0);
+        }
+    }
+
     /// Objective and Gradient have to agree with the fused routine, or a caller
     /// reaching through the traits gets different numbers from one reaching
     /// through the struct.

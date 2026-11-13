@@ -247,6 +247,7 @@ pub struct Config {
     /// even when the bare energy rose. The others are decided on the
     /// bare energy and do not touch the index. Lennard-Jones and TIP4P
     /// keep one, so their evaluation counts stay.
+    #[serde(skip_serializing_if = "is_one")]
     pub basin_stride: usize,
     /// Distance below which two states are the same basin.
     ///
@@ -999,6 +1000,7 @@ pub struct Config {
     /// not from the number of atoms. When it is set, the search quenches
     /// one Mackay cap before the walk. Off for Lennard-Jones and for
     /// short-ranged Morse, which keeps those call counts unchanged.
+    #[serde(skip_serializing_if = "is_false")]
     pub long_ranged: bool,
     /// Extra relaxation steps spent polishing a new best to share tolerance.
     ///
@@ -1162,6 +1164,10 @@ pub struct Config {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+fn is_one(value: &usize) -> bool {
+    *value == 1
 }
 
 fn arm_selection_is_posterior(value: &ArmSelection) -> bool {

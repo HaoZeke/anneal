@@ -74,3 +74,41 @@ fn default_witness_ceiling_is_absent_from_the_resolved_json() {
         "a1bd030f28c13e57f6dbaa50302b8f1312139fc1684f2fa24801a361664cf5d2"
     );
 }
+
+#[test]
+fn a_long_ranged_pair_is_resolved_only_when_set() {
+    let cfg = Config::recommended(38);
+    assert!(!cfg.long_ranged);
+    assert!(!cfg.resolved_json().unwrap().contains("long_ranged"));
+    let mut bound = cfg.clone();
+    bound.long_ranged = true;
+    assert!(
+        bound
+            .resolved_json()
+            .unwrap()
+            .contains("\"long_ranged\":true")
+    );
+    assert_ne!(
+        bound.resolved_sha256().unwrap(),
+        cfg.resolved_sha256().unwrap()
+    );
+}
+
+#[test]
+fn a_basin_stride_is_resolved_only_off_its_default() {
+    let cfg = Config::recommended(38);
+    assert_eq!(cfg.basin_stride, 1);
+    assert!(!cfg.resolved_json().unwrap().contains("basin_stride"));
+    let mut strided = cfg.clone();
+    strided.basin_stride = 4;
+    assert!(
+        strided
+            .resolved_json()
+            .unwrap()
+            .contains("\"basin_stride\":4")
+    );
+    assert_ne!(
+        strided.resolved_sha256().unwrap(),
+        cfg.resolved_sha256().unwrap()
+    );
+}

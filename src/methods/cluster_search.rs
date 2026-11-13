@@ -20,14 +20,13 @@ use crate::methods::cluster_hopping::OVERLAP_CALL_LIMIT;
 #[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 use crate::methods::cluster_hopping::inside_molecular_call_wall;
-#[cfg(test)]
 use crate::methods::cluster_hopping::min_pair_distance;
 use crate::methods::cluster_hopping::molecular_call_floor;
 use crate::methods::cluster_hopping::separate_contacts;
 #[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::structure_is_sane;
 use crate::methods::cluster_hopping::{
-    ChainCheckpoint, CheckpointAction, Config, Ledger, Outcome, SearchError,
+    ChainCheckpoint, CheckpointAction, Config, Ledger, MoveLibrary, Outcome, SearchError,
     optimize_with_energy_gradient, run_with_energy_gradient_at_checkpoints,
 };
 use crate::methods::minima_hopping::HistoryHook;
@@ -275,8 +274,7 @@ where
 fn overlap_rejection_step(
     point: ArrayView1<f64>,
     anchor: Option<&Array1<f64>>,
-    species: Option<&[u32]>,
-    groups: Option<&[Vec<usize>]>,
+    wall: CallWall<'_>,
 ) -> Option<(f64, Array1<f64>)> {
     if point.iter().any(|value| !value.is_finite()) {
         return None;
@@ -285,16 +283,7 @@ fn overlap_rejection_step(
     // built only from the anchor leaves a step that lands on that boundary,
     // and that step is handed to the potential.
     let n = point.len() / 3;
-    let mut owner = vec![usize::MAX; n];
-    if let Some(groups) = groups {
-        for (group, atoms) in groups.iter().enumerate() {
-            for &atom in atoms {
-                if atom < n {
-                    owner[atom] = group;
-                }
-            }
-        }
-    }
+    let owner = wall.owners(n);
     let mut gradient = Array1::zeros(point.len());
     for i in 0..n {
         for j in (i + 1)..n {
@@ -305,13 +294,7 @@ fn overlap_rejection_step(
                 square += delta[axis] * delta[axis];
             }
             let distance = square.sqrt();
-            let floor = match species {
-                Some(species) if species.len() > i.max(j) => {
-                    let bonded = owner[i] != usize::MAX && owner[i] == owner[j];
-                    molecular_call_floor(species[i], species[j], bonded)
-                }
-                _ => OVERLAP_CALL_LIMIT,
-            };
+            let floor = wall.pair_floor(&owner, i, j);
             if !distance.is_finite() || distance > floor {
                 continue;
             }
@@ -358,62 +341,136 @@ fn retreat_from_overlap_wall<O>(
     led: &mut Ledger,
     stats: &mut RelaxStats,
     anchor: &mut Option<Array1<f64>>,
-    groups: Option<&[Vec<usize>]>,
-    species: Option<&[u32]>,
-    bond_tolerance: f64,
+    cfg: &Config,
     start: ArrayView1<f64>,
 ) -> Option<(f64, Array1<f64>)>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    let wall = CallWall::of(cfg);
     let mut point = start.to_owned();
     let _ = separate_contacts(
         &mut point,
-        groups,
+        cfg.move_library.declared_groups(),
         OVERLAP_CALL_LIMIT,
         crate::methods::cluster_hopping::OVERLAP_CLASH_CLEARANCE,
         None,
-        species,
-        bond_tolerance,
+        cfg.species.as_deref(),
+        cfg.bond_tolerance,
     );
     let moved = point
         .iter()
         .zip(start.iter())
         .any(|(left, right)| (left - right).abs() > 1.0e-8);
-    if !moved || geometry_is_inside_call_wall(species, groups, point.view()) {
+    if !moved || wall.refuses(point.view()) {
         return None;
     }
-    let answered = charge_or_refuse_overlap(
-        objective,
-        led,
-        stats,
-        point.view(),
-        anchor,
-        true,
-        species,
-        groups,
-    )?;
+    let answered =
+        charge_or_refuse_overlap(objective, led, stats, point.view(), anchor, true, wall)?;
     if !answered.2 || !answered.0.is_finite() {
         return None;
     }
     Some((answered.0, point))
 }
 
-/// A geometry the potential is not asked to evaluate.
-///
-/// Species-free searches use the absolute overlap length. With species the
-/// floor is a fraction of the summed covalent radii, so a contact just past
-/// one fixed length is still refused when that length is inside the bond.
-fn geometry_is_inside_call_wall(
-    species: Option<&[u32]>,
-    groups: Option<&[Vec<usize>]>,
-    point: ArrayView1<f64>,
-) -> bool {
-    match species {
-        Some(species) => inside_molecular_call_wall(point, species, groups),
-        // Species-free searches are not gated. LJ, TIP4P and Gupta stay on
-        // the path that never consulted a pair distance before the call.
-        None => false,
+/// Which geometries the potential is not asked to evaluate.
+#[derive(Debug, Clone, Copy)]
+enum CallWall<'a> {
+    /// No species. LJ, TIP4P and Gupta stay on the path that never
+    /// consulted a pair distance before the call.
+    Open,
+    /// Labelled atoms with no declared bonds: [`OVERLAP_CALL_LIMIT`].
+    ///
+    /// A metal's nearest neighbour sits inside its covalent sum (Cu–Cu
+    /// 2.55 Å against 2.64 Å), and a binary Lennard-Jones label is not an
+    /// element, so the covalent radii say nothing about these contacts.
+    Absolute,
+    /// A molecular library: [`molecular_call_floor`] over the declared groups.
+    ///
+    /// A reactive library breaks and forms bonds between groups, so every
+    /// pair there is held to the bond floor, not to the contact one.
+    Covalent {
+        species: &'a [u32],
+        groups: &'a [Vec<usize>],
+        reactive: bool,
+    },
+}
+
+impl<'a> CallWall<'a> {
+    fn of(cfg: &'a Config) -> Self {
+        match (cfg.species.as_deref(), &cfg.move_library) {
+            (None, _) => Self::Open,
+            (
+                Some(species),
+                MoveLibrary::Molecular {
+                    groups, reactive, ..
+                },
+            ) => Self::Covalent {
+                species,
+                groups,
+                reactive: *reactive,
+            },
+            (Some(_), _) => Self::Absolute,
+        }
+    }
+
+    /// Group of each of `n` atoms, `usize::MAX` for an atom in none.
+    fn owners(&self, n: usize) -> Vec<usize> {
+        let mut owner = vec![usize::MAX; n];
+        if let Self::Covalent { groups, .. } = self {
+            for (group, atoms) in groups.iter().enumerate() {
+                for &atom in atoms {
+                    if atom < n {
+                        owner[atom] = group;
+                    }
+                }
+            }
+        }
+        owner
+    }
+
+    /// Distance at or below which the pair `(i, j)` is refused.
+    fn pair_floor(&self, owner: &[usize], i: usize, j: usize) -> f64 {
+        match self {
+            Self::Covalent {
+                species, reactive, ..
+            } if species.len() > i.max(j) => {
+                let bonded = *reactive || (owner[i] != usize::MAX && owner[i] == owner[j]);
+                molecular_call_floor(species[i], species[j], bonded)
+            }
+            _ => OVERLAP_CALL_LIMIT,
+        }
+    }
+
+    /// Whether `point` is not handed to the potential.
+    ///
+    /// A non-finite coordinate is refused as well: the potential has no
+    /// answer there, and charging the call does not buy one.
+    fn refuses(&self, point: ArrayView1<f64>) -> bool {
+        match self {
+            Self::Open => false,
+            _ if point.iter().any(|value| !value.is_finite()) => true,
+            Self::Absolute => min_pair_distance(point) <= OVERLAP_CALL_LIMIT,
+            Self::Covalent {
+                species,
+                groups,
+                reactive: false,
+            } => inside_molecular_call_wall(point, species, Some(groups)),
+            Self::Covalent { .. } => {
+                let n = point.len() / 3;
+                let owner = self.owners(n);
+                (0..n).any(|i| {
+                    ((i + 1)..n).any(|j| {
+                        let mut square = 0.0;
+                        for axis in 0..3 {
+                            let delta = point[3 * i + axis] - point[3 * j + axis];
+                            square += delta * delta;
+                        }
+                        square.sqrt() <= self.pair_floor(&owner, i, j)
+                    })
+                })
+            }
+        }
     }
 }
 
@@ -428,15 +485,14 @@ fn charge_or_refuse_overlap<O>(
     point: ArrayView1<f64>,
     anchor: &mut Option<Array1<f64>>,
     refuse_overlap: bool,
-    species: Option<&[u32]>,
-    groups: Option<&[Vec<usize>]>,
+    wall: CallWall<'_>,
 ) -> Option<(f64, Array1<f64>, bool)>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    if refuse_overlap && geometry_is_inside_call_wall(species, groups, point) {
+    if refuse_overlap && wall.refuses(point) {
         stats.overlap_rejected += 1;
-        return overlap_rejection_step(point, anchor.as_ref(), species, groups)
+        return overlap_rejection_step(point, anchor.as_ref(), wall)
             .map(|(energy, gradient)| (energy, gradient, false));
     }
     if !led.charge() {
@@ -491,6 +547,7 @@ where
         .then(|| crate::methods::two_phase::SurfacePortfolio::new(&cfg.surfaces, seed));
     let mut anchor: Option<Array1<f64>> = None;
     let refuse_overlap = cfg.species.is_some();
+    let wall = CallWall::of(cfg);
     move |led, x, iters| {
         opt.forget();
         let polishing = polish_iters > 0
@@ -584,8 +641,7 @@ where
                         v,
                         &mut anchor,
                         refuse_overlap,
-                        cfg.species.as_deref(),
-                        cfg.move_library.declared_groups(),
+                        wall,
                     )?;
                     remember(v, e, &g, physical);
                     if !physical {
@@ -624,8 +680,7 @@ where
                 v,
                 &mut anchor,
                 refuse_overlap,
-                cfg.species.as_deref(),
-                cfg.move_library.declared_groups(),
+                wall,
             )?;
             remember(v, energy, &gradient, physical);
             Some((energy, gradient))
@@ -774,13 +829,7 @@ where
                        energy: f64,
                        point: ArrayView1<f64>|
          -> Option<Array1<f64>> {
-            if refuse_overlap
-                && geometry_is_inside_call_wall(
-                    cfg.species.as_deref(),
-                    cfg.move_library.declared_groups(),
-                    point,
-                )
-            {
+            if refuse_overlap && wall.refuses(point) {
                 stats.overlap_rejected += 1;
                 return None;
             }
@@ -824,16 +873,8 @@ where
                 break;
             }
             if refuse_overlap
-                && let Some((energy, walked)) = retreat_from_overlap_wall(
-                    objective,
-                    led,
-                    stats,
-                    &mut anchor,
-                    cfg.move_library.declared_groups(),
-                    cfg.species.as_deref(),
-                    cfg.bond_tolerance,
-                    xr.view(),
-                )
+                && let Some((energy, walked)) =
+                    retreat_from_overlap_wall(objective, led, stats, &mut anchor, cfg, xr.view())
             {
                 xr = walked;
                 if best_physical
@@ -853,8 +894,7 @@ where
                     v,
                     &mut anchor,
                     refuse_overlap,
-                    cfg.species.as_deref(),
-                    cfg.move_library.declared_groups(),
+                    wall,
                 )?;
                 remember(v, energy, &gradient, physical);
                 Some((energy, gradient))
@@ -927,6 +967,9 @@ where
         let mut energy_anchor = None;
         let mut energy_grad =
             |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if CallWall::of(cfg).refuses(x) {
+                    return None;
+                }
                 if !led.charge() {
                     return None;
                 }
@@ -1952,6 +1995,9 @@ where
     };
     Some((e, gmax))
 }
+
+#[cfg(test)]
+mod call_wall_tests;
 
 #[cfg(test)]
 mod tests {

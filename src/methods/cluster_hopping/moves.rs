@@ -897,7 +897,13 @@ fn soap_arm(
     mobile: Option<Vec<usize>>,
     groups: Option<Vec<Vec<usize>>>,
 ) -> ClusterMove {
-    let packing = cfg.monoatomic() && cfg.active_region.is_none() && cfg.frozen.is_none();
+    // A molecule or a rigid body with one repeated label is still bonded,
+    // not an atomic packing.
+    let atomic = cfg.species.is_none()
+        || (cfg.monoatomic()
+            && !cfg.move_library.is_molecular()
+            && !cfg.move_library.is_rigid_body());
+    let packing = atomic && cfg.active_region.is_none() && cfg.frozen.is_none();
     // The Jacobian hop is a leftover step, a fraction of a bond, on
     // every system. Contact-scale amplitude was for a rigid group
     // translation; the pullback is not that move.

@@ -84,6 +84,8 @@ use crate::screen::Screen;
 mod binary_geometry;
 mod config;
 mod cycles;
+#[cfg(test)]
+mod mackay_cap_tests;
 mod moves;
 mod packing_bank;
 mod preset;
@@ -3551,6 +3553,12 @@ where
     // exchange instead, and only if the unrelaxed energy stays near the
     // minimum. The preset temperature is the Metropolis temperature.
     let species_wide = large_diameter_ratio(cfg);
+    // A build without the escape stops at the first hop that asks for it.
+    // The labelled side probes would otherwise spend the budget first and
+    // the run would end without saying so.
+    let escape_refused = !cfg!(feature = "rgsaddle")
+        && ((species_wide && energy_grad.is_some())
+            || (cfg.minima_hopping && cfg.md_escape && grad.is_some()));
     let mut species_kinetic = (16.0 * cfg.energy_scale).max(f64::MIN_POSITIVE);
     let species_kinetic_floor = (4.0 * cfg.energy_scale).max(f64::MIN_POSITIVE);
     let species_kinetic_cap = (1.5 * n as f64 * cfg.energy_scale).max(species_kinetic);
@@ -3832,8 +3840,8 @@ where
                     mackay_state.view(),
                     &mut unconverged_records,
                 );
-                if mackay_energy < before - 1e-12 && improvements.len() < 512 {
-                    improvements.push((0, ledger.spent(), bias.n_basins(), mackay_energy));
+                if ledger.best < before - 1e-12 && improvements.len() < 512 {
+                    improvements.push((0, ledger.spent(), bias.n_basins(), ledger.best));
                 }
             }
         }
@@ -4103,6 +4111,7 @@ where
         // and compared with the incumbent the walk actually reaches.
         // Every evaluation is charged. Unlabelled and rigid runs never enter.
         if !binary_core_offered
+            && !escape_refused
             && !cfg.move_library.is_molecular()
             && !cfg.move_library.is_rigid_body()
             && let Some(species) = cfg.species.as_deref()
@@ -4262,6 +4271,7 @@ where
         // unless two labels are present, so an unlabelled chain is unchanged.
         // A molecular or rigid library keeps its atoms inside a body.
         if polishes_unlike_pairs(cfg)
+            && !escape_refused
             && ledger.best.is_finite()
             && (polished_best.is_nan() || ledger.best < polished_best - 1e-8)
             && let Some(best_state) = ledger.best_state.clone()
@@ -5430,8 +5440,12 @@ where
         // icosahedron. Smaller atoms take the inner sites, then one
         // unlike-pair quench pass. The chain generator is not drawn.
         // Unlabelled clusters never enter, so their evaluation counts stay.
+        // A lattice cut replaces every atom, so a molecular or rigid
+        // library, which keeps its atoms inside a body, never enters either.
         let motif_gap = ledger.budget() / 2;
         if motif_gap > 0
+            && !cfg.move_library.is_molecular()
+            && !cfg.move_library.is_rigid_body()
             && ledger.spent().saturating_sub(charged_at_best) >= motif_gap
             && ledger.spent().saturating_sub(motif_at_spent) >= motif_gap
             && ledger.remaining() > 0
