@@ -3571,6 +3571,11 @@ where
     let mut orient_yes = 0usize;
     let mut hops = 0usize;
     let mut proposal_overlaps = 0usize;
+    // The bond graph is a function of the incumbent coordinates. A rejected
+    // hop leaves those coordinates where they were, so the next hop reads
+    // the groups already built rather than scanning every pair again.
+    let mut bond_bits: Vec<u64> = Vec::new();
+    let mut bond_groups: Vec<Vec<usize>> = Vec::new();
     let mut checkpoint_hops = 0usize;
     let mut checkpoint_quench_start = 0usize;
     let mut checkpoint_transition_start = 0usize;
@@ -4893,9 +4898,21 @@ where
             ..
         } = &cfg.move_library
         {
-            let fresh = match cfg.species.as_ref() {
-                Some(z) => connectivity_groups_z(x.view(), z, cfg.bond_tolerance),
-                None => connectivity_groups(x.view(), n, cfg.covalent_cutoff),
+            let fresh = if bond_bits.len() == x.len()
+                && x.iter()
+                    .zip(bond_bits.iter())
+                    .all(|(value, bits)| value.to_bits() == *bits)
+            {
+                bond_groups.clone()
+            } else {
+                let fresh = match cfg.species.as_ref() {
+                    Some(z) => connectivity_groups_z(x.view(), z, cfg.bond_tolerance),
+                    None => connectivity_groups(x.view(), n, cfg.covalent_cutoff),
+                };
+                bond_bits.clear();
+                bond_bits.extend(x.iter().map(|value| value.to_bits()));
+                bond_groups.clone_from(&fresh);
+                fresh
             };
             let movable: Vec<Vec<usize>> = match hop_frozen.as_ref() {
                 Some(f) => fresh
