@@ -189,6 +189,10 @@ harness = false
 name    = "bookkeeping"
 harness = false
 
+[[bench]]
+name    = "assignment_hot"
+harness = false
+
 [[example]]
 name = "h2h_sc"
 required-features = ["rgpot-ex"]

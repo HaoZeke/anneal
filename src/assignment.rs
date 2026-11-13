@@ -153,54 +153,68 @@ unsafe fn scan_avx2(
     let mut candidate = 1usize;
     let dual = _mm256_set1_pd(row_dual);
     let zero = _mm_setzero_si128();
+    // The column index is in range by the scan contract. Slice indexing
+    // here was a bounds check on every lane, and that check was most of
+    // the scan. The arithmetic is the scalar loop: subtract the dual,
+    // then the column potential, keep a strict `<` improvement, and take
+    // the lowest unused column whose reduced cost is strictly smaller
+    // than the running minimum.
+    let row_ptr = row.as_ptr();
+    let potential_ptr = column_potential.as_ptr();
+    let min_ptr = min_reduced.as_mut_ptr();
+    let pred_ptr = predecessor.as_mut_ptr();
+    let used_ptr = used.as_ptr();
     while candidate + 3 <= n {
-        let packed =
-            unsafe { std::ptr::read_unaligned(used.as_ptr().add(candidate) as *const i32) };
+        let packed = unsafe { std::ptr::read_unaligned(used_ptr.add(candidate) as *const i32) };
         let bytes = _mm_cvtsi32_si128(packed);
         let eq = _mm_cmpeq_epi8(bytes, zero);
         let open = _mm256_castsi256_pd(_mm256_cvtepi8_epi64(eq));
-        let lower = unsafe {
-            let cost = _mm256_loadu_pd(row.as_ptr().add(candidate - 1));
-            let potential = _mm256_loadu_pd(column_potential.as_ptr().add(candidate));
+        let mut lanes = [0.0_f64; 4];
+        unsafe {
+            let cost = _mm256_loadu_pd(row_ptr.add(candidate - 1));
+            let potential = _mm256_loadu_pd(potential_ptr.add(candidate));
             let reduced = _mm256_sub_pd(_mm256_sub_pd(cost, dual), potential);
-            let previous = _mm256_loadu_pd(min_reduced.as_ptr().add(candidate));
+            let previous = _mm256_loadu_pd(min_ptr.add(candidate));
             let lower = _mm256_and_pd(_mm256_cmp_pd(reduced, previous, _CMP_LT_OQ), open);
             let updated = _mm256_blendv_pd(previous, reduced, lower);
-            _mm256_storeu_pd(min_reduced.as_mut_ptr().add(candidate), updated);
-            lower
-        };
-        let improved = _mm256_movemask_pd(lower);
-        if improved & 1 != 0 {
-            predecessor[candidate] = column;
-        }
-        if improved & 2 != 0 {
-            predecessor[candidate + 1] = column;
-        }
-        if improved & 4 != 0 {
-            predecessor[candidate + 2] = column;
-        }
-        if improved & 8 != 0 {
-            predecessor[candidate + 3] = column;
-        }
-        for offset in 0..4 {
-            let index = candidate + offset;
-            if used[index] == 0 && min_reduced[index] < delta {
-                delta = min_reduced[index];
-                next_column = index;
+            _mm256_storeu_pd(min_ptr.add(candidate), updated);
+            _mm256_storeu_pd(lanes.as_mut_ptr(), updated);
+            let improved = _mm256_movemask_pd(lower);
+            if improved & 1 != 0 {
+                *pred_ptr.add(candidate) = column;
+            }
+            if improved & 2 != 0 {
+                *pred_ptr.add(candidate + 1) = column;
+            }
+            if improved & 4 != 0 {
+                *pred_ptr.add(candidate + 2) = column;
+            }
+            if improved & 8 != 0 {
+                *pred_ptr.add(candidate + 3) = column;
+            }
+            for offset in 0..4 {
+                if *used_ptr.add(candidate + offset) == 0 && lanes[offset] < delta {
+                    delta = lanes[offset];
+                    next_column = candidate + offset;
+                }
             }
         }
         candidate += 4;
     }
     while candidate <= n {
-        if used[candidate] == 0 {
-            let reduced = row[candidate - 1] - row_dual - column_potential[candidate];
-            if reduced < min_reduced[candidate] {
-                min_reduced[candidate] = reduced;
-                predecessor[candidate] = column;
-            }
-            if min_reduced[candidate] < delta {
-                delta = min_reduced[candidate];
-                next_column = candidate;
+        unsafe {
+            if *used_ptr.add(candidate) == 0 {
+                let reduced =
+                    *row_ptr.add(candidate - 1) - row_dual - *potential_ptr.add(candidate);
+                let slot = &mut *min_ptr.add(candidate);
+                if reduced < *slot {
+                    *slot = reduced;
+                    *pred_ptr.add(candidate) = column;
+                }
+                if *slot < delta {
+                    delta = *slot;
+                    next_column = candidate;
+                }
             }
         }
         candidate += 1;
@@ -307,11 +321,18 @@ unsafe fn adjust_reduced_avx2(
             let updated = _mm256_blendv_pd(previous, subtracted, open);
             _mm256_storeu_pd(min_reduced.as_mut_ptr().add(index), updated);
         }
-        for offset in 0..4 {
-            if used[index + offset] == 1 {
+        unsafe {
+            let used_ptr = used.as_ptr();
+            let match_ptr = column_match.as_ptr();
+            let row_ptr = row_potential.as_mut_ptr();
+            let column_ptr = column_potential.as_mut_ptr();
+            for offset in 0..4 {
                 let at = index + offset;
-                row_potential[column_match[at]] += delta;
-                column_potential[at] -= delta;
+                if *used_ptr.add(at) == 1 {
+                    let matched = *match_ptr.add(at);
+                    *row_ptr.add(matched) += delta;
+                    *column_ptr.add(at) -= delta;
+                }
             }
         }
         index += 4;
@@ -396,6 +417,16 @@ pub(crate) fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<u
     })
 }
 
+/// Same permutation as [`successive_shortest_paths`] without the uniqueness scan.
+///
+/// A fivefold residual only uses the permutation. The alternating-cycle
+/// search that feeds the inverse-operation cache does not change it, and
+/// that cache reads the flag only after its own call to
+/// [`minimum_cost_assignment`].
+pub(crate) fn successive_shortest_paths_matching(costs: &[f64], n: usize) -> Option<Vec<usize>> {
+    solve_shortest_paths(costs, n, false).map(|(assignment, _)| assignment)
+}
+
 /// Whether the last successful dense scan had no other optimal edge.
 ///
 /// A Kuhn-Munkres result reports false: the smaller walks keep that
@@ -409,17 +440,86 @@ std::thread_local! {
 }
 
 fn successive_shortest_paths_scanned(costs: &[f64], n: usize) -> Option<(Vec<usize>, bool)> {
+    solve_shortest_paths(costs, n, true)
+}
+
+struct PathScratch {
+    row_potential: Vec<f64>,
+    column_potential: Vec<f64>,
+    column_match: Vec<usize>,
+    predecessor: Vec<usize>,
+    min_reduced: Vec<f64>,
+    used: Vec<u8>,
+}
+
+std::thread_local! {
+    static PATH_SCRATCH: std::cell::RefCell<PathScratch> = const {
+        std::cell::RefCell::new(PathScratch {
+            row_potential: Vec::new(),
+            column_potential: Vec::new(),
+            column_match: Vec::new(),
+            predecessor: Vec::new(),
+            min_reduced: Vec::new(),
+            used: Vec::new(),
+        })
+    };
+}
+
+fn solve_shortest_paths(
+    costs: &[f64],
+    n: usize,
+    report_unique: bool,
+) -> Option<(Vec<usize>, bool)> {
     // Column 0 is the dummy used to grow the matching. Rows and columns of
     // `costs` are 1-indexed in the dual update so the dummy sits at index 0.
     // `used` is a byte flag, not `Vec<bool>`: the bit-packed form turns this
-    // scan into a shift per column.
-    let mut row_potential = vec![0.0; n + 1];
-    let mut column_potential = vec![0.0; n + 1];
-    let mut column_match = vec![0usize; n + 1];
-    let mut predecessor = vec![0usize; n + 1];
-    let mut min_reduced = vec![0.0; n + 1];
-    let mut used = vec![0u8; n + 1];
+    // scan into a shift per column. The scratch is reused across calls on
+    // this thread. One solve does not call another.
+    PATH_SCRATCH.with(|cell| {
+        let scratch = &mut *cell.borrow_mut();
+        let width = n + 1;
+        scratch.row_potential.resize(width, 0.0);
+        scratch.column_potential.resize(width, 0.0);
+        scratch.column_match.resize(width, 0);
+        scratch.predecessor.resize(width, 0);
+        scratch.min_reduced.resize(width, 0.0);
+        scratch.used.resize(width, 0);
+        let PathScratch {
+            row_potential,
+            column_potential,
+            column_match,
+            predecessor,
+            min_reduced,
+            used,
+        } = scratch;
+        row_potential[..width].fill(0.0);
+        column_potential[..width].fill(0.0);
+        column_match[..width].fill(0);
+        solve_shortest_paths_in(
+            costs,
+            n,
+            report_unique,
+            &mut row_potential[..width],
+            &mut column_potential[..width],
+            &mut column_match[..width],
+            &mut predecessor[..width],
+            &mut min_reduced[..width],
+            &mut used[..width],
+        )
+    })
+}
 
+fn solve_shortest_paths_in(
+    costs: &[f64],
+    n: usize,
+    report_unique: bool,
+    row_potential: &mut [f64],
+    column_potential: &mut [f64],
+    column_match: &mut [usize],
+    predecessor: &mut [usize],
+    min_reduced: &mut [f64],
+    used: &mut [u8],
+) -> Option<(Vec<usize>, bool)> {
     for row in 1..=n {
         column_match[0] = row;
         let mut column = 0usize;
@@ -434,10 +534,10 @@ fn successive_shortest_paths_scanned(costs: &[f64], n: usize) -> Option<(Vec<usi
                 scan_columns(
                     &costs[row_base..row_base + n],
                     row_dual,
-                    &column_potential,
-                    &mut min_reduced,
-                    &mut predecessor,
-                    &used,
+                    column_potential,
+                    min_reduced,
+                    predecessor,
+                    used,
                     column,
                 )
             };
@@ -447,11 +547,11 @@ fn successive_shortest_paths_scanned(costs: &[f64], n: usize) -> Option<(Vec<usi
             adjust_reduced(
                 delta,
                 n,
-                &used,
-                &mut min_reduced,
-                &mut column_potential,
-                &column_match,
-                &mut row_potential,
+                used,
+                min_reduced,
+                column_potential,
+                column_match,
+                row_potential,
             );
             column = next_column;
             if column_match[column] == 0 {
@@ -479,7 +579,8 @@ fn successive_shortest_paths_scanned(costs: &[f64], n: usize) -> Option<(Vec<usi
         seen[slot] = true;
         assignment[slot] = column - 1;
     }
-    let unique = optimum_is_unique(costs, n, &assignment, &row_potential, &column_potential);
+    let unique =
+        report_unique && optimum_is_unique(costs, n, &assignment, row_potential, column_potential);
     Some((assignment, unique))
 }
 
@@ -545,6 +646,120 @@ fn optimum_is_unique(
     unique
 }
 
+/// Left-to-right minimum slack of the unseen columns of every seen row.
+///
+/// `delta.min(slack)` keeps the bits of a scalar scan: each slack is
+/// `(row potential + column potential) - weight`, and a later equal
+/// value does not replace an earlier one.
+fn phase_delta(
+    n: usize,
+    weights: &[f64],
+    row_potential: &[f64],
+    column_potential: &[f64],
+    rows_seen: &[bool],
+    columns_seen: &[bool],
+) -> f64 {
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") {
+        return unsafe {
+            phase_delta_avx2(
+                n,
+                weights,
+                row_potential,
+                column_potential,
+                rows_seen,
+                columns_seen,
+            )
+        };
+    }
+    phase_delta_scalar(
+        n,
+        weights,
+        row_potential,
+        column_potential,
+        rows_seen,
+        columns_seen,
+    )
+}
+
+fn phase_delta_scalar(
+    n: usize,
+    weights: &[f64],
+    row_potential: &[f64],
+    column_potential: &[f64],
+    rows_seen: &[bool],
+    columns_seen: &[bool],
+) -> f64 {
+    let mut delta = f64::INFINITY;
+    for row in 0..n {
+        if !rows_seen[row] {
+            continue;
+        }
+        let base = row * n;
+        for column in 0..n {
+            if columns_seen[column] {
+                continue;
+            }
+            let slack = row_potential[row] + column_potential[column] - weights[base + column];
+            delta = delta.min(slack);
+        }
+    }
+    delta
+}
+
+/// # Safety
+///
+/// AVX2 must be enabled. `weights` holds `n * n` entries and both
+/// potential slices hold `n`.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn phase_delta_avx2(
+    n: usize,
+    weights: &[f64],
+    row_potential: &[f64],
+    column_potential: &[f64],
+    rows_seen: &[bool],
+    columns_seen: &[bool],
+) -> f64 {
+    use std::arch::x86_64::{
+        _mm256_add_pd, _mm256_loadu_pd, _mm256_set1_pd, _mm256_storeu_pd, _mm256_sub_pd,
+    };
+    let mut delta = f64::INFINITY;
+    let weight_ptr = weights.as_ptr();
+    let column_ptr = column_potential.as_ptr();
+    for row in 0..n {
+        if !rows_seen[row] {
+            continue;
+        }
+        let base = row * n;
+        let dual = _mm256_set1_pd(row_potential[row]);
+        let mut column = 0usize;
+        while column + 4 <= n {
+            let mut lanes = [0.0_f64; 4];
+            unsafe {
+                let weight = _mm256_loadu_pd(weight_ptr.add(base + column));
+                let potential = _mm256_loadu_pd(column_ptr.add(column));
+                let slack = _mm256_sub_pd(_mm256_add_pd(dual, potential), weight);
+                _mm256_storeu_pd(lanes.as_mut_ptr(), slack);
+            }
+            for offset in 0..4 {
+                if !columns_seen[column + offset] {
+                    delta = delta.min(lanes[offset]);
+                }
+            }
+            column += 4;
+        }
+        while column < n {
+            if !columns_seen[column] {
+                let slack = row_potential[row] + column_potential[column] - weights[base + column];
+                delta = delta.min(slack);
+            }
+            column += 1;
+        }
+    }
+    delta
+}
+
 /// Column-first Kuhn-Munkres.
 /// The tight edge is the lowest column index within the scale tolerance,
 /// which is the permutation the smaller Lennard-Jones walks recorded.
@@ -566,12 +781,14 @@ fn kuhn_munkres(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     let mut column_potential = vec![0.0_f64; n];
     let mut row_match = vec![usize::MAX; n];
     let mut column_match = vec![usize::MAX; n];
+    let mut rows_seen = vec![false; n];
+    let mut columns_seen = vec![false; n];
 
     for root in 0..n {
         let mut augmented = false;
         for _ in 0..=n {
-            let mut rows_seen = vec![false; n];
-            let mut columns_seen = vec![false; n];
+            rows_seen.fill(false);
+            columns_seen.fill(false);
             if augment_tight(
                 root,
                 n,
@@ -588,20 +805,14 @@ fn kuhn_munkres(costs: &[f64], n: usize) -> Option<Vec<usize>> {
                 break;
             }
 
-            let mut delta = f64::INFINITY;
-            for row in 0..n {
-                if !rows_seen[row] {
-                    continue;
-                }
-                for column in 0..n {
-                    if columns_seen[column] {
-                        continue;
-                    }
-                    let slack =
-                        row_potential[row] + column_potential[column] - weights[row * n + column];
-                    delta = delta.min(slack);
-                }
-            }
+            let delta = phase_delta(
+                n,
+                &weights,
+                &row_potential,
+                &column_potential,
+                &rows_seen,
+                &columns_seen,
+            );
             if !(delta > 0.0) || !delta.is_finite() {
                 return None;
             }
@@ -643,12 +854,36 @@ fn augment_tight(
     columns_seen: &mut [bool],
 ) -> bool {
     rows_seen[row] = true;
-    for column in 0..n {
+    let mut column = 0usize;
+    while column < n {
+        // A group with no tight unseen column cannot change the first
+        // column the scalar walk would enter. The slack bits match that walk.
+        #[cfg(target_arch = "x86_64")]
+        if column + 4 <= n
+            && std::is_x86_feature_detected!("avx2")
+            && unsafe {
+                group_ineligible(
+                    row,
+                    column,
+                    n,
+                    weights,
+                    row_potential,
+                    column_potential,
+                    tight_tolerance,
+                    columns_seen,
+                )
+            }
+        {
+            column += 4;
+            continue;
+        }
         if columns_seen[column] {
+            column += 1;
             continue;
         }
         let slack = row_potential[row] + column_potential[column] - weights[row * n + column];
         if slack.abs() > tight_tolerance {
+            column += 1;
             continue;
         }
         columns_seen[column] = true;
@@ -671,14 +906,52 @@ fn augment_tight(
             column_match[column] = row;
             return true;
         }
+        column += 1;
     }
     false
 }
 
+/// Whether columns `start..start+4` are all seen or strictly outside the tolerance.
+///
+/// # Safety
+///
+/// AVX2 must be enabled. `start + 4 <= n`, and the slices cover the row.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn group_ineligible(
+    row: usize,
+    start: usize,
+    n: usize,
+    weights: &[f64],
+    row_potential: &[f64],
+    column_potential: &[f64],
+    tight_tolerance: f64,
+    columns_seen: &[bool],
+) -> bool {
+    use std::arch::x86_64::{
+        _mm256_add_pd, _mm256_loadu_pd, _mm256_set1_pd, _mm256_storeu_pd, _mm256_sub_pd,
+    };
+    let mut lanes = [0.0_f64; 4];
+    unsafe {
+        let dual = _mm256_set1_pd(row_potential[row]);
+        let weight = _mm256_loadu_pd(weights.as_ptr().add(row * n + start));
+        let potential = _mm256_loadu_pd(column_potential.as_ptr().add(start));
+        let slack = _mm256_sub_pd(_mm256_add_pd(dual, potential), weight);
+        _mm256_storeu_pd(lanes.as_mut_ptr(), slack);
+    }
+    lanes
+        .iter()
+        .enumerate()
+        .all(|(offset, slack)| columns_seen[start + offset] || slack.abs() > tight_tolerance)
+}
+
 #[cfg(test)]
 mod tests {
+    #[cfg(target_arch = "x86_64")]
+    use super::{group_ineligible, phase_delta_avx2};
     use super::{
-        kuhn_munkres, minimum_cost_assignment, strict_unique_row_minima, successive_shortest_paths,
+        kuhn_munkres, minimum_cost_assignment, phase_delta_scalar, strict_unique_row_minima,
+        successive_shortest_paths, successive_shortest_paths_matching,
         successive_shortest_paths_scanned,
     };
 
@@ -862,6 +1135,93 @@ mod tests {
             assert_eq!(scalar, legacy, "geometry n={n}");
             let chosen = successive_shortest_paths(&costs, n).expect("chosen geometry");
             assert_eq!(chosen, legacy, "geometry chosen n={n}");
+            let matching =
+                successive_shortest_paths_matching(&costs, n).expect("matching geometry");
+            assert_eq!(matching, legacy, "matching geometry n={n}");
+        }
+    }
+
+    #[test]
+    fn the_vector_slack_has_the_scalar_bits() {
+        #[cfg(target_arch = "x86_64")]
+        {
+            if !std::is_x86_feature_detected!("avx2") {
+                return;
+            }
+            let mut state = 0x51ed_u64;
+            let mut next = || {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                state
+            };
+            for n in [1usize, 3, 4, 7, 8, 55, 80] {
+                let weights: Vec<f64> = (0..n * n)
+                    .map(|_| ((next() % 1000) as f64 - 500.0) / 16.0)
+                    .collect();
+                let row_potential: Vec<f64> = (0..n)
+                    .map(|_| ((next() % 200) as f64 - 100.0) / 8.0)
+                    .collect();
+                let column_potential: Vec<f64> = (0..n)
+                    .map(|_| ((next() % 200) as f64 - 100.0) / 8.0)
+                    .collect();
+                let rows_seen: Vec<bool> = (0..n).map(|_| next() % 3 != 0).collect();
+                let columns_seen: Vec<bool> = (0..n).map(|_| next() % 4 == 0).collect();
+                let scalar = phase_delta_scalar(
+                    n,
+                    &weights,
+                    &row_potential,
+                    &column_potential,
+                    &rows_seen,
+                    &columns_seen,
+                );
+                let vector = unsafe {
+                    phase_delta_avx2(
+                        n,
+                        &weights,
+                        &row_potential,
+                        &column_potential,
+                        &rows_seen,
+                        &columns_seen,
+                    )
+                };
+                assert_eq!(
+                    scalar.to_bits(),
+                    vector.to_bits(),
+                    "n={n} slack bits diverged"
+                );
+                let tolerance = 1.0e-9
+                    * (1.0
+                        + weights
+                            .iter()
+                            .fold(0.0_f64, |acc, value| acc.max(value.abs())));
+                if n >= 4 {
+                    for row in 0..n {
+                        for start in (0..n - 3).step_by(4) {
+                            let skipped = unsafe {
+                                group_ineligible(
+                                    row,
+                                    start,
+                                    n,
+                                    &weights,
+                                    &row_potential,
+                                    &column_potential,
+                                    tolerance,
+                                    &columns_seen,
+                                )
+                            };
+                            let scalar_skip = (0..4).all(|offset| {
+                                let column = start + offset;
+                                if columns_seen[column] {
+                                    return true;
+                                }
+                                let slack = row_potential[row] + column_potential[column]
+                                    - weights[row * n + column];
+                                slack.abs() > tolerance
+                            });
+                            assert_eq!(skipped, scalar_skip, "n={n} row={row} start={start}");
+                        }
+                    }
+                }
+            }
         }
     }
 

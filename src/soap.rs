@@ -1797,7 +1797,11 @@ fn ico_axes() -> [[f64; 3]; 6] {
 fn hungarian(cost: &[f64], n: usize) -> Vec<usize> {
     // Same column scan as the continuous-symmetry assignment. The scratch
     // lives for the whole matrix instead of being allocated once per row.
-    crate::assignment::successive_shortest_paths(cost, n).unwrap_or_else(|| (0..n).collect())
+    // The residual uses the permutation only. The uniqueness scan that
+    // the inverse-operation cache reads is a separate pass over the
+    // same optimum and is not part of this matching.
+    crate::assignment::successive_shortest_paths_matching(cost, n)
+        .unwrap_or_else(|| (0..n).collect())
 }
 
 /// Columns matched to each row of `x` under the minimum sum of squared distances.
