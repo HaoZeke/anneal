@@ -33,4 +33,13 @@ GrowPAL took no hit on any system. Under every budget the cap arrived while it w
 | M38 rho 6 | anneal | 6/6 | 400000 | 297.5 | 297.5 | 0.0028 | 0.0022 | 0.0005 | 7.58 | 1.82 | 141683 | 38 |
 | M38 rho 6 | growpal | 0/6 | 400000 | 400000 | — | 393.312 | 198.690 | 194.622 | 496.72 | 486.55 | 141683 | 17 |
 
+## Uncapped GrowPAL
+
+`uncapped.csv` is a diagnostic beside the comparison, not part of it (rule `growpal_h2h_v2_uncapped`). The same deterministic GrowPAL loop ran once per size with a 5e8 safety ceiling, seed 2000, anneal tree `2b46484d`, in its own `unshare` session after the campaign.
+
+| System | Hit | Calls to hit | Times the paper budget | Wall (s) | Inside µs/call | Outside µs/call |
+| --- | --- | --- | --- | --- | --- | --- |
+| LJ38 | yes | 21038447 | 52.6 | 560.6 | 3.87 | 22.78 |
+| LJ55 | yes | 104093769 | 104.1 | 3409.8 | 5.90 | 26.85 |
+
 Per-seed rows are `seeds.csv` and `rows/<system>/<arm>-<seed>.row`; summaries are `results.csv`. All three are appended, never rewritten. No anneal source changed.
