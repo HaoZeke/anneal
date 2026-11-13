@@ -565,19 +565,75 @@ fn fill_complex(c: &[f64], n_max: usize, l_max: usize, n_lm: usize, cx: &mut [(f
     }
 }
 
-fn refresh_complex(
-    c: &[f64],
-    n: usize,
-    n_lm: usize,
+/// One radial block's trips that read a real coefficient, and which terms.
+struct SpanHits {
+    span: u16,
+    /// Offsets inside the span, ascending, of couplings that read the slot.
+    terms: Vec<u16>,
+}
+
+struct SlotSupport {
     n_dep: usize,
     dep: [usize; 2],
-    cx: &mut [(f64, f64)],
-) {
-    for i in 0..n_dep {
-        let lm = dep[i];
-        let (l, m) = lm_parts(lm);
-        cx[n * n_lm + lm] = coeff(c, n, l, m, n_lm);
+    spans: Vec<SpanHits>,
+}
+
+/// Which couplings a real tesseral slot enters. The pattern is the Clebsch
+/// table, not the geometry, so one plan serves every centre.
+fn derivative_support(l_max: usize) -> &'static [SlotSupport] {
+    use std::sync::OnceLock;
+    static TABLES: [OnceLock<Vec<SlotSupport>>; CG_CACHE_MAX + 1] =
+        [const { OnceLock::new() }; CG_CACHE_MAX + 1];
+    TABLES[l_max]
+        .get_or_init(|| {
+            let plan = contraction_plan(l_max);
+            let mut slots = Vec::with_capacity(plan.n_lm);
+            for slot in 0..plan.n_lm {
+                let (n_dep, dep) = complex_dependents(slot);
+                let mut spans = Vec::new();
+                for (k, &(start, len)) in plan.spans.iter().enumerate() {
+                    let terms = &plan.terms[start as usize..(start + len) as usize];
+                    let mut hits = Vec::new();
+                    for (offset, term) in terms.iter().enumerate() {
+                        if term_depends(term, n_dep, dep) {
+                            hits.push(offset as u16);
+                        }
+                    }
+                    if !hits.is_empty() {
+                        spans.push(SpanHits {
+                            span: k as u16,
+                            terms: hits,
+                        });
+                    }
+                }
+                slots.push(SlotSupport { n_dep, dep, spans });
+            }
+            slots
+        })
+        .as_slice()
+}
+
+/// Trip indexes, within one radial channel, that a real slot can move.
+///
+/// `None` when `l_max` is past the cached Clebsch table. A finite-difference
+/// entry outside these trips is `+0.0`.
+pub(crate) fn dependent_spans(l_max: usize) -> Option<&'static [Vec<u16>]> {
+    if l_max > CG_CACHE_MAX {
+        return None;
     }
+    use std::sync::OnceLock;
+    static TABLES: [OnceLock<Vec<Vec<u16>>>; CG_CACHE_MAX + 1] =
+        [const { OnceLock::new() }; CG_CACHE_MAX + 1];
+    Some(
+        TABLES[l_max]
+            .get_or_init(|| {
+                derivative_support(l_max)
+                    .iter()
+                    .map(|slot| slot.spans.iter().map(|hit| hit.span).collect())
+                    .collect()
+            })
+            .as_slice(),
+    )
 }
 
 /// `(B(c+εe_k) - B(c-εe_k)) / 2ε` for `n_max = 3`, in the contraction's order.
@@ -585,9 +641,10 @@ fn refresh_complex(
 /// A term whose three complex factors ignore `e_k` has the same product at
 /// `c`, `c+εe_k` and `c-εe_k`. That product is computed once and added with
 /// `acc += g * p`, which is the operation [`contract_three`] performs. Terms
-/// that read `e_k` are evaluated at the shifted coefficients. Spans with no
-/// such term differ by zero, and `(b - b) / 2ε` is `+0.0` for a finite `b`,
-/// so those entries are stored as `0.0`.
+/// that read `e_k` are evaluated at the shifted coefficients. Both shifts are
+/// summed in that same term order, in one walk. Spans with no such term differ
+/// by zero, and `(b - b) / 2ε` is `+0.0` for a finite `b`, so those entries
+/// stay the matrix's `+0.0`.
 fn d_from_c_reused(c: &[f64], l_max: usize) -> Array2<f64> {
     let n_max = 3usize;
     let plan = contraction_plan(l_max);
@@ -626,78 +683,92 @@ fn d_from_c_reused(c: &[f64], l_max: usize) -> Array2<f64> {
             base[n * n_trips + k] = acc;
         }
     }
-    let mut spans_for_slot = Vec::with_capacity(n_lm);
-    for slot in 0..n_lm {
-        let (n_dep, dep) = complex_dependents(slot);
-        let mut spans = Vec::new();
-        for (k, &(start, len)) in plan.spans.iter().enumerate() {
-            let terms = &plan.terms[start as usize..(start + len) as usize];
-            if terms.iter().any(|term| term_depends(term, n_dep, dep)) {
-                spans.push(k);
-            }
-        }
-        spans_for_slot.push((n_dep, dep, spans));
-    }
-    let mut bp = vec![0.0; n_b];
-    let mut bm = vec![0.0; n_b];
+    let support = derivative_support(l_max);
+    let finite_base = base.iter().all(|value| value.is_finite());
+    let mut row_p = vec![(0.0, 0.0); n_lm];
+    let mut row_m = vec![(0.0, 0.0); n_lm];
     for k in 0..n_c {
         let n_star = k / n_lm;
         let slot = k - n_star * n_lm;
-        let (n_dep, dep, spans) = &spans_for_slot[slot];
+        let info = &support[slot];
         let old = cp[k];
+        let src = n_star * n_lm;
+        row_p.copy_from_slice(&cx[src..src + n_lm]);
+        row_m.copy_from_slice(&cx[src..src + n_lm]);
         cp[k] = old + eps;
-        refresh_complex(&cp, n_star, n_lm, *n_dep, *dep, &mut cx);
-        bp.fill(0.0);
-        accumulate_shifted(
-            &cx, &cached, plan, n_star, *n_dep, *dep, spans, n_lm, &mut bp,
-        );
+        write_shifted(&cp, n_star, n_lm, info, &mut row_p);
         cp[k] = old - eps;
-        refresh_complex(&cp, n_star, n_lm, *n_dep, *dep, &mut cx);
-        bm.fill(0.0);
-        accumulate_shifted(
-            &cx, &cached, plan, n_star, *n_dep, *dep, spans, n_lm, &mut bm,
-        );
+        write_shifted(&cp, n_star, n_lm, info, &mut row_m);
         cp[k] = old;
-        refresh_complex(&cp, n_star, n_lm, *n_dep, *dep, &mut cx);
-        for r in 0..n_b {
-            j[[r, k]] = (base[r] - base[r]) / (2.0 * eps);
+        if !finite_base {
+            for r in 0..n_b {
+                j[[r, k]] = (base[r] - base[r]) / (2.0 * eps);
+            }
         }
-        for &span in spans.iter() {
-            let r = n_star * n_trips + span;
-            j[[r, k]] = (bp[r] - bm[r]) / (2.0 * eps);
+        for hit in &info.spans {
+            let (acc_p, acc_m) = span_pair(&row_p, &row_m, &cached, plan, n_star, hit);
+            let r = n_star * n_trips + hit.span as usize;
+            j[[r, k]] = (acc_p - acc_m) / (2.0 * eps);
         }
     }
     j
 }
 
-fn accumulate_shifted(
-    cx: &[(f64, f64)],
+fn write_shifted(c: &[f64], n: usize, n_lm: usize, info: &SlotSupport, row: &mut [(f64, f64)]) {
+    for i in 0..info.n_dep {
+        let lm = info.dep[i];
+        let (l, m) = lm_parts(lm);
+        row[lm] = coeff(c, n, l, m, n_lm);
+    }
+}
+
+/// Both shifts of one span, each added in the span's term order.
+fn span_pair(
+    row_p: &[(f64, f64)],
+    row_m: &[(f64, f64)],
     cached: &[f64],
     plan: &ContractionPlan,
     n_star: usize,
-    n_dep: usize,
-    dep: [usize; 2],
-    spans: &[usize],
-    n_lm: usize,
-    out: &mut [f64],
-) {
-    let n_trips = plan.spans.len();
+    hit: &SpanHits,
+) -> (f64, f64) {
     let n_max = 3usize;
-    for &k in spans {
-        let (start, len) = plan.spans[k];
-        let terms = &plan.terms[start as usize..(start + len) as usize];
-        let mut acc = 0.0;
-        for (offset, term) in terms.iter().enumerate() {
-            let ti = start as usize + offset;
-            let p = if term_depends(term, n_dep, dep) {
-                product_at(cx, n_star, n_lm, term)
-            } else {
-                cached[ti * n_max + n_star]
-            };
-            acc += term.g * p;
+    let k = hit.span as usize;
+    let (start, len) = plan.spans[k];
+    let terms = &plan.terms[start as usize..(start + len) as usize];
+    let mut acc_p = 0.0;
+    let mut acc_m = 0.0;
+    let mut dependent = 0usize;
+    for (offset, term) in terms.iter().enumerate() {
+        let ti = start as usize + offset;
+        let g = term.g;
+        if dependent < hit.terms.len() && hit.terms[dependent] as usize == offset {
+            acc_p += g * product_row(row_p, term);
+            acc_m += g * product_row(row_m, term);
+            dependent += 1;
+        } else {
+            let p = cached[ti * n_max + n_star];
+            acc_p += g * p;
+            acc_m += g * p;
         }
-        out[n_star * n_trips + k] = acc;
     }
+    (acc_p, acc_m)
+}
+
+fn product_row(row: &[(f64, f64)], term: &Term) -> f64 {
+    let ia = term.a as usize;
+    let ib = term.b as usize;
+    let id = term.d as usize;
+    debug_assert!(ia < row.len() && ib < row.len() && id < row.len());
+    // SAFETY: `term` stores `lm_index` values, each `< n_lm`, and `row` is one
+    // radial channel of that length. The assert above checks that in debug.
+    let (a, b, d) = unsafe {
+        (
+            *row.get_unchecked(ia),
+            *row.get_unchecked(ib),
+            *row.get_unchecked(id),
+        )
+    };
+    real_conj_product(a, b, d)
 }
 
 #[cfg(test)]

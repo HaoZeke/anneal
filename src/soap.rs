@@ -620,6 +620,7 @@ fn jacobian_ace_columns(
             )));
         }
     }
+    let mut dy_lm = vec![[0.0; 3]; n_lm];
     for i in 0..n_at {
         let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
         for jj in 0..n_at {
@@ -648,6 +649,22 @@ fn jacobian_ace_columns(
             let db = dbdc[i * n_chan + ch]
                 .as_ref()
                 .expect("a centre that writes a live column has a derivative");
+            // ∂Y/∂x does not depend on the radial channel. A coefficient moves
+            // only the trips in `dependent_spans`; every other derivative entry
+            // is +0, and adding it would not change a finite accumulator.
+            for lm in 0..n_lm {
+                for a in 0..3 {
+                    let mut s = 0.0;
+                    for b in 0..3 {
+                        let proj = if a == b { 1.0 } else { 0.0 } - u[b] * u[a];
+                        s += dylm[lm][b] * proj;
+                    }
+                    dy_lm[lm][a] = s / r;
+                }
+            }
+            let support = crate::ace::dependent_spans(spec.l_max);
+            let n_trips = ace1 / spec.n_max;
+            let row0 = i * d1 + ch * ace1;
             for n in 0..spec.n_max {
                 let g = radial(n, r, rcut);
                 let dg = dradial(n, r, rcut);
@@ -656,25 +673,36 @@ fn jacobian_ace_columns(
                 for lm in 0..n_lm {
                     let yv = ylm[lm];
                     for a in 0..3 {
-                        let dyv = {
-                            let mut s = 0.0;
-                            for b in 0..3 {
-                                let proj = if a == b { 1.0 } else { 0.0 } - u[b] * u[a];
-                                s += dylm[lm][b] * proj;
-                            }
-                            s / r
-                        };
-                        let dc = dw * u[a] * yv + w * dyv;
+                        let dc = dw * u[a] * yv + w * dy_lm[lm][a];
                         let col_c = n * n_lm + lm;
                         let db_col = db.column(col_c);
-                        let row0 = i * d1 + ch * ace1;
-                        if write_j {
+                        if let Some(table) = support {
+                            scatter_supported(
+                                &mut j,
+                                &db_col,
+                                &table[lm],
+                                n,
+                                n_trips,
+                                row0,
+                                dc,
+                                write_j,
+                                write_i,
+                                3 * jj + a,
+                                3 * i + a,
+                            );
+                        } else if write_j {
                             let mut dest = j.column_mut(3 * jj + a);
                             for t in 0..ace1 {
                                 dest[row0 + t] += db_col[t] * dc;
                             }
-                        }
-                        if write_i {
+                            if write_i {
+                                drop(dest);
+                                let mut dest = j.column_mut(3 * i + a);
+                                for t in 0..ace1 {
+                                    dest[row0 + t] -= db_col[t] * dc;
+                                }
+                            }
+                        } else if write_i {
                             let mut dest = j.column_mut(3 * i + a);
                             for t in 0..ace1 {
                                 dest[row0 + t] -= db_col[t] * dc;
@@ -686,6 +714,39 @@ fn jacobian_ace_columns(
         }
     }
     j
+}
+
+/// Add `db * dc` into the trips a real slot can move.
+///
+/// Other trips of this coefficient are `+0`. `dest += 0 * dc` leaves a finite
+/// entry alone, and the matrix starts at `+0`, so those trips are not written.
+fn scatter_supported(
+    j: &mut Array2<f64>,
+    db_col: &ndarray::ArrayView1<f64>,
+    spans: &[u16],
+    n: usize,
+    n_trips: usize,
+    row0: usize,
+    dc: f64,
+    write_j: bool,
+    write_i: bool,
+    col_j: usize,
+    col_i: usize,
+) {
+    if write_j {
+        let mut dest = j.column_mut(col_j);
+        for &span in spans {
+            let t = n * n_trips + span as usize;
+            dest[row0 + t] += db_col[t] * dc;
+        }
+    }
+    if write_i {
+        let mut dest = j.column_mut(col_i);
+        for &span in spans {
+            let t = n * n_trips + span as usize;
+            dest[row0 + t] -= db_col[t] * dc;
+        }
+    }
 }
 
 /// Stacked Jacobian of SOAP power spectrum and ACE ν=3 scalars.
@@ -706,16 +767,24 @@ fn jacobian_nu3_columns(
     let d1 = spec.nu3_feat_dim(species);
     let dim = d0 + d1;
     let mut j = Array2::<f64>::zeros((n_at * dim, n_at * 3).f());
-    for i in 0..n_at {
-        for t in 0..d0 {
-            for k in 0..n_at * 3 {
-                j[[i * dim + t, k]] = js[[i * d0 + t, k]];
-            }
-        }
-        for t in 0..d1 {
-            for k in 0..n_at * 3 {
-                j[[i * dim + d0 + t, k]] = ja[[i * d1 + t, k]];
-            }
+    // Each centre's SOAP block, then its ACE block. Copying a column slice
+    // moves the same bits the indexed scatter wrote.
+    let ncoord = n_at * 3;
+    for col in 0..ncoord {
+        let src_s = js.column(col);
+        let src_a = ja.column(col);
+        let mut dest = j.column_mut(col);
+        let (src_s, src_a, dest) = (
+            src_s.as_slice().expect("column-major SOAP block"),
+            src_a.as_slice().expect("column-major ACE block"),
+            dest.as_slice_mut().expect("column-major stacked block"),
+        );
+        for i in 0..n_at {
+            let soap = i * d0;
+            let ace = i * d1;
+            let at = i * dim;
+            dest[at..at + d0].copy_from_slice(&src_s[soap..soap + d0]);
+            dest[at + d0..at + dim].copy_from_slice(&src_a[ace..ace + d1]);
         }
     }
     j
@@ -762,6 +831,7 @@ fn jacobian_z_columns(
         let (_, ci) = atom_expand(x, i, n_at, rcut, spec, species, &table);
         c[i] = ci;
     }
+    let mut dy_lm = vec![[0.0; 3]; n_lm];
     for i in 0..n_at {
         let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
         for jj in 0..n_at {
@@ -790,6 +860,18 @@ fn jacobian_z_columns(
             let (ylm, dylm) = tesseral(u, spec.l_max);
             let fc = fcut(r, rcut);
             let dfc = dfcut(r, rcut);
+            // ∂Y/∂x does not depend on the radial index. Computing it once
+            // per (l, m) keeps the same dc and the same scatter order.
+            for lm in 0..n_lm {
+                for a in 0..3 {
+                    let mut s = 0.0;
+                    for b in 0..3 {
+                        let proj = if a == b { 1.0 } else { 0.0 } - u[b] * u[a];
+                        s += dylm[lm][b] * proj;
+                    }
+                    dy_lm[lm][a] = s / r;
+                }
+            }
             for n in 0..spec.n_max {
                 let g = radial(n, r, rcut);
                 let dg = dradial(n, r, rcut);
@@ -798,14 +880,7 @@ fn jacobian_z_columns(
                 for lm in 0..n_lm {
                     let y = ylm[lm];
                     for a in 0..3 {
-                        let dy = {
-                            let mut s = 0.0;
-                            for b in 0..3 {
-                                let proj = if a == b { 1.0 } else { 0.0 } - u[b] * u[a];
-                                s += dylm[lm][b] * proj;
-                            }
-                            s / r
-                        };
+                        let dy = dy_lm[lm][a];
                         let dc_j = dw * u[a] * y + w * dy;
                         if write_j {
                             accumulate_dp(&mut j, row0, spec, n_lm, c_ch, n, lm, dc_j, 3 * jj + a);
