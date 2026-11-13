@@ -3461,6 +3461,12 @@ where
     // exchange instead, and only if the unrelaxed energy stays near the
     // minimum. The preset temperature is the Metropolis temperature.
     let species_wide = large_diameter_ratio(cfg);
+    // A build without the escape stops at the first hop that asks for it.
+    // The labelled side probes would otherwise spend the budget first and
+    // the run would end without saying so.
+    let escape_refused = !cfg!(feature = "rgsaddle")
+        && ((species_wide && energy_grad.is_some())
+            || (cfg.minima_hopping && cfg.md_escape && grad.is_some()));
     let mut species_kinetic = (16.0 * cfg.energy_scale).max(f64::MIN_POSITIVE);
     let species_kinetic_floor = (4.0 * cfg.energy_scale).max(f64::MIN_POSITIVE);
     let species_kinetic_cap = (1.5 * n as f64 * cfg.energy_scale).max(species_kinetic);
@@ -3768,15 +3774,6 @@ where
         if !hop_room(hops) {
             break HopStop::MaxHops;
         }
-        // The side probes below can spend the whole budget before a hop
-        // reaches the escape, and the refusal would then never be reported.
-        if !cfg!(feature = "rgsaddle")
-            && ((species_wide && energy_grad.is_some())
-                || (cfg.minima_hopping && cfg.md_escape && grad.is_some()))
-        {
-            nve_unavailable = true;
-            break HopStop::NveUnavailable;
-        }
         // A labelled single-species cluster that has settled into a
         // close-packed sheet, rather than a fivefold plateau, can still be
         // one lattice step inside that sheet away from the lower packing.
@@ -4023,6 +4020,7 @@ where
         // and compared with the incumbent the walk actually reaches.
         // Every evaluation is charged. Unlabelled and rigid runs never enter.
         if !binary_core_offered
+            && !escape_refused
             && !cfg.move_library.is_molecular()
             && !cfg.move_library.is_rigid_body()
             && let Some(species) = cfg.species.as_deref()
@@ -4186,6 +4184,7 @@ where
         // unless two labels are present, so an unlabelled chain is unchanged.
         // A molecular or rigid library keeps its atoms inside a body.
         if polishes_unlike_pairs(cfg)
+            && !escape_refused
             && ledger.best.is_finite()
             && (polished_best.is_nan() || ledger.best < polished_best - 1e-8)
             && let Some(best_state) = ledger.best_state.clone()
