@@ -248,6 +248,11 @@ def run_gmin(args, name, seed, budget, target, radius, start, log) -> dict[str, 
 def normalise(row: dict[str, str]) -> dict[str, str]:
     out = {key: row[key] for key in ROW_FIELDS if key in row}
     out["hit"] = "true" if row["hit"] in ("1", "true", "True") else "false"
+    if out["hit"] == "true":
+        # The anneal ledger stops at the target. A hit recorded off the
+        # improvement list printed the budget, and the charged count is
+        # the call that reached it.
+        out["evals_to_hit"] = str(min(int(float(out["evals_to_hit"])), int(float(out["charged"]))))
     if "outside_s" not in out:
         out["outside_s"] = f"{max(float(row['wall_s']) - float(row['pot_s']), 0.0):.6f}"
     return out
@@ -344,6 +349,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--system", action="append")
     parser.add_argument("--code", action="append")
+    parser.add_argument("--summarise-only", action="store_true")
     args = parser.parse_args(argv[1:])
     names = tuple(args.system) if args.system else SYSTEMS
     wanted = set(args.code) if args.code else None
@@ -355,6 +361,14 @@ def main(argv: list[str]) -> int:
     def codes_of(name):
         return tuple(code for code in codes_for(name) if wanted is None or code in wanted)
 
+    if args.summarise_only:
+        rows = [normalise(row) for row in csv.DictReader(args.rows.read_text().splitlines())]
+        references = {
+            name: float(binary_lines(args.binary, "budget", name)[1]) for name in SYSTEMS
+        }
+        write_csv(args.rows, ROW_FIELDS, rows)
+        write_csv(args.summary, SUMMARY_FIELDS, summarise(rows, references, revision, head))
+        return 0
     order = schedule(names, SEEDS, codes_of, SCHEDULE_SEED)
     note(progress, f"head {head} schedule " + " ".join(f"{n}:{c}:{s}" for n, s, c in order))
     references = {}

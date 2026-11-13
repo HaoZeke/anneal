@@ -409,8 +409,10 @@ fn report(
         .iter()
         .find(|(_, _, _, energy)| *energy <= level)
         .map(|(_, spent, _, _)| *spent);
+    // The ledger stops at the target, so a hit recorded off the
+    // improvement list, such as an orbit completion, is the charged count.
     let evals = if hit {
-        at_hit.unwrap_or(budget)
+        at_hit.map_or(outcome.charged, |spent| spent.min(outcome.charged))
     } else {
         budget
     };
