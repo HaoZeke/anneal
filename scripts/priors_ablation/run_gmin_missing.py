@@ -48,7 +48,7 @@ def main() -> int:
     lj = load("lj_h2h", scripts / "gmin_h2h" / "run_campaign.py")
     morse = load("morse_h2h", scripts / "morse_h2h" / "run_campaign.py")
     tip4p = load("tip4p_h2h", scripts / "tip4p_h2h" / "run_campaign.py")
-    tip4p.REFERENCES.update({4: -116.59042, 8: -305.51832})
+    tip4p.REFERENCES.update({4: -116.5904186160, 8: -305.5183221676})
     examples = args.root / "examples"
     done = set()
     if args.rows.is_file():

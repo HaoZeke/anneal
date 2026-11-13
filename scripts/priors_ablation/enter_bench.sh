@@ -40,10 +40,9 @@ export OMP_PLACES=cores
 export RAYON_NUM_THREADS=1
 cd /work
 exec /usr/bin/python3 -u $WORK/bin/run_ablation.py \\
-  --bins $WORK/bin --runs $WORK/runs --rows $ROOT/bench/priors-ablation/rows.csv "\$@"
+  --bins $WORK/bin --runs $WORK/runs --rows $WORK/rows.csv "\$@"
 INNER
 chmod +x "$WORK/bin/inside.sh"
-mkdir -p "$ROOT/bench/priors-ablation"
 
 if ! grep -Eq '(^|[[:space:]])bench([[:space:]]|$)' /etc/hosts; then
   echo '127.0.0.1 bench' | sudo -n tee -a /etc/hosts >/dev/null

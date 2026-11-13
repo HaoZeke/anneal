@@ -55,8 +55,9 @@ SYSTEMS = (
     ("cu27au28", "h2h_metal", "cu27au28", 1_000_000, None, {}),
     ("pt12cu11", "h2h_metal", "pt12cu11", 200_000, None, {"H2H_BASIN_STRIDE": "1"}),
     ("pt6cu17", "h2h_metal", "pt6cu17", 200_000, None, {"H2H_BASIN_STRIDE": "1"}),
-    ("tip4p4", "h2h_seed", "4", 2_000_000, -116.59042, {}),
-    ("tip4p8", "h2h_seed", "8", 2_000_000, -305.51832, {}),
+    ("tip4p4", "h2h_seed", "4", 2_000_000, -116.5904186160, {}),
+    ("tip4p8", "h2h_seed", "8", 2_000_000, -305.5183221676, {}),
+    ("tip4p15", "h2h_seed", "15", 2_000_000, -628.3722525077, {}),
 )
 SESSION_BEST = {"cu38", "pt12cu11", "pt6cu17"}
 
@@ -158,11 +159,13 @@ def main() -> int:
     parser.add_argument("--runs", type=Path, required=True)
     parser.add_argument("--rows", type=Path, required=True)
     parser.add_argument("--systems", nargs="*")
+    parser.add_argument("--arms", nargs="*", choices=tuple(ARMS))
     args = parser.parse_args()
     if socket.gethostname() != "bench":
         print(f"hostname is {socket.gethostname()}, not bench", file=sys.stderr)
         return 2
     chosen = [s for s in SYSTEMS if not args.systems or s[0] in args.systems]
+    arms = tuple(a for a in ARMS if not args.arms or a in args.arms)
     done = set()
     if args.rows.is_file():
         with args.rows.open() as handle:
@@ -174,7 +177,7 @@ def main() -> int:
         if new_file:
             writer.writeheader()
         for spec in chosen:
-            jobs = [(seed, arm) for seed in SEEDS for arm in ARMS]
+            jobs = [(seed, arm) for seed in SEEDS for arm in arms]
             rng.shuffle(jobs)
             for seed, arm in jobs:
                 if (spec[0], arm, str(seed)) in done:

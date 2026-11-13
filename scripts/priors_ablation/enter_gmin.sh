@@ -31,7 +31,7 @@ cd /work
 exec /usr/bin/python3 -u $WORK/bin/run_gmin_missing.py \\
   --root $ROOT --gmin $WORK/bin/GMIN --bins $WORK/bin \\
   --ablation-runs $WORK/runs --work $WORK/gmin-runs \\
-  --rows $ROOT/bench/priors-ablation/gmin-rows.csv "\$@"
+  --rows $WORK/gmin-rows.csv "\$@"
 INNER
 chmod +x "$WORK/bin/inside-gmin.sh"
 
