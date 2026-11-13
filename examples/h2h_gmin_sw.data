@@ -1,0 +1,24 @@
+! Basin-hopping input taken from the Wales group LJ38 introduction.
+! The driver appends one RANSEED line per run.
+! GMIN's SW keyword selects the native Stillinger-Weber silicon in the
+! reduced units sigma and epsilon, the units of examples/h2h_covalent.
+! TEMPERATURE is the reduced 0.2 Yoo and Zeng used for basin hopping on
+! these clusters, J. Chem. Phys. 119, 1442 (2003). The 1.0 of the
+! Lennard-Jones file fragments them: the adaptive step grows past the
+! 1.8 sigma cutoff and quenches end on separated atoms.
+! MONITOR, DUMPINT and TRACKDATA are omitted. They schedule output.
+
+SLOPPYCONV 5.0D-3
+TIGHTCONV 1.0D-3
+EDIFF 0.003
+MAXIT 600 500
+SAVE 2
+CENTRE
+SORT
+
+TEMPERATURE 0.2
+STEPS 90000000 1.0
+STEP 0.40 0.51
+NEWRESTART 40
+AVOID 4.0 20 F
+SW
