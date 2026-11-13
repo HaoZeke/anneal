@@ -602,6 +602,24 @@ impl BasinMetric for EuclideanMetric {
             return f64::INFINITY;
         }
         let limit = bound * bound;
+        // The longest distances sit at the end of a sorted spectrum and are
+        // where two isomers differ. A suffix already past the bound means
+        // the whole distance is. The front-to-back sum below is unchanged
+        // when the suffix is not, so a distance inside the bound keeps its bits.
+        let tail = 32.min(a.len());
+        if tail < a.len() {
+            let mut tail_acc = 0.0;
+            for k in (a.len() - tail..a.len()).rev() {
+                let d = a[k] - b[k];
+                tail_acc += d * d;
+                // The slack covers the rounding gap between this suffix and
+                // the same terms inside the block sum. A centre inside the
+                // radius falls through and is decided there.
+                if tail_acc > limit + 1.0e-8 {
+                    return f64::INFINITY;
+                }
+            }
+        }
         let mut acc = 0.0;
         // Checked in blocks rather than per element: the branch costs more
         // than the arithmetic on a descriptor whose leading entries are nearly
