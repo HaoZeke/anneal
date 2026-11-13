@@ -1,0 +1,3 @@
+system,anneal_hits,anneal_n,gmin_hits,gmin_n,gmin_reused,fisher_p,mannwhitney_p_evals,mannwhitney_p_wall,anneal_evals_median,gmin_evals_median,anneal_wall_median_s,gmin_wall_median_s,anneal_pot_median_s,anneal_outside_median_s,gmin_pot_median_s,gmin_outside_median_s
+m55r14,8,12,0,6,2000 2001 2002 2003 2004 2005,0.0151515,0.00962172,0.393939,701625.500000,1000000.000000,15.826297,16.922800,9.773411,6.014237,15.238791,1.656421
+m80r14,5,12,0,6,2000 2001 2002 2003 2004 2005,0.0606061,0.0284407,1,4000000.000000,4000000.000000,175.561374,136.620500,117.679418,57.508763,128.279732,8.356316
