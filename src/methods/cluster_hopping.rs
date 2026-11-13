@@ -3768,6 +3768,15 @@ where
         if !hop_room(hops) {
             break HopStop::MaxHops;
         }
+        // The side probes below can spend the whole budget before a hop
+        // reaches the escape, and the refusal would then never be reported.
+        if !cfg!(feature = "rgsaddle")
+            && ((species_wide && energy_grad.is_some())
+                || (cfg.minima_hopping && cfg.md_escape && grad.is_some()))
+        {
+            nve_unavailable = true;
+            break HopStop::NveUnavailable;
+        }
         // A labelled single-species cluster that has settled into a
         // close-packed sheet, rather than a fivefold plateau, can still be
         // one lattice step inside that sheet away from the lower packing.
