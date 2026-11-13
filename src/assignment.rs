@@ -321,17 +321,21 @@ unsafe fn adjust_reduced_avx2(
             let updated = _mm256_blendv_pd(previous, subtracted, open);
             _mm256_storeu_pd(min_reduced.as_mut_ptr().add(index), updated);
         }
-        unsafe {
-            let used_ptr = used.as_ptr();
-            let match_ptr = column_match.as_ptr();
-            let row_ptr = row_potential.as_mut_ptr();
-            let column_ptr = column_potential.as_mut_ptr();
-            for offset in 0..4 {
-                let at = index + offset;
-                if *used_ptr.add(at) == 1 {
-                    let matched = *match_ptr.add(at);
-                    *row_ptr.add(matched) += delta;
-                    *column_ptr.add(at) -= delta;
+        // Every column in the group is unused, so no dual moves. The
+        // reduced costs were subtracted above, in the same lane order.
+        if packed != 0 {
+            unsafe {
+                let used_ptr = used.as_ptr();
+                let match_ptr = column_match.as_ptr();
+                let row_ptr = row_potential.as_mut_ptr();
+                let column_ptr = column_potential.as_mut_ptr();
+                for offset in 0..4 {
+                    let at = index + offset;
+                    if *used_ptr.add(at) == 1 {
+                        let matched = *match_ptr.add(at);
+                        *row_ptr.add(matched) += delta;
+                        *column_ptr.add(at) -= delta;
+                    }
                 }
             }
         }
