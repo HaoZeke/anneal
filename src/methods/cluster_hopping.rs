@@ -3553,6 +3553,8 @@ where
     let mut cage_walked = false;
     let mut archive_walked = false;
     let mut binary_core_offered = false;
+    // Energy of the incumbent whose close-packed sheet has already been slid.
+    let mut layer_slide_bits: Option<u64> = None;
     // Held until the walk finishes. Accepting a packing cut at the raw
     // start replaces the chain with a local minimum the later hops would
     // have left. The cut is kept when it still beats that incumbent.
@@ -3595,6 +3597,88 @@ where
         // and most of them have just taken a hop.
         if !hop_room(hops) {
             break HopStop::MaxHops;
+        }
+        // A labelled single-species cluster that has settled into a
+        // close-packed sheet, rather than a fivefold plateau, can still be
+        // one lattice step inside that sheet away from the lower packing.
+        // The sheet that stands clear of the others is slid once for this
+        // incumbent. Two species, a rigid body, and an unlabelled cluster
+        // do not enter, so their call counts are unchanged.
+        if cfg.species.is_some()
+            && cfg.monoatomic()
+            && cfg.packing_cna_applies()
+            && layer_slide_bits != Some(ledger.best.to_bits())
+            && let Some(incumbent) = ledger.best_state.clone()
+        {
+            let (frac_555, frac_421, frac_422) = crate::soap::motif_fractions(incumbent.view());
+            let close_packed = !crate::soap::fivefold_plateau(incumbent.view())
+                && frac_421 > frac_422
+                && frac_421 > frac_555;
+            if close_packed {
+                layer_slide_bits = Some(ledger.best.to_bits());
+                for slide in crate::twin::dominant_layer_slides(incumbent.view()) {
+                    if ledger.remaining() == 0 || ledger.target_reached() {
+                        break;
+                    }
+                    let (candidate_energy, candidate) =
+                        relax(ledger, slide.view(), cfg.relax_steps);
+                    if ledger.stopped() {
+                        break;
+                    }
+                    let candidate_sane = quench_is_sane(cfg, candidate_energy, candidate.view());
+                    let candidate_gradient = candidate_sane.then(|| {
+                        grad.as_deref_mut().and_then(|gradient| {
+                            gradient(ledger, candidate.view()).filter(|values| {
+                                answer_gradient_ok(cfg, values.view(), candidate.len())
+                            })
+                        })
+                    });
+                    let candidate_gradient = candidate_gradient.flatten();
+                    let recordable =
+                        candidate_sane && (!gradient_required || candidate_gradient.is_some());
+                    let improved = recordable && candidate_energy < ledger.best - 1e-10;
+                    if recordable {
+                        ledger.record(candidate_energy, candidate.view());
+                    } else {
+                        unconverged_records += 1;
+                    }
+                    let adopted = recordable && candidate_energy < e - 1e-10;
+                    if recordable {
+                        ledger.mark_last_recorded(adopted);
+                    }
+                    if adopted {
+                        let from_basin = here.unwrap_or_else(|| identity.basin_of(x.view()));
+                        let reached = identity.basin_of(candidate.view());
+                        adopt_minimum!(
+                            candidate_energy,
+                            candidate.clone(),
+                            candidate_gradient.clone(),
+                            Some(reached),
+                            AdoptionHistory::Fresh,
+                            Some((Some(from_basin), reached)),
+                            Some("layer-slide"),
+                            hops
+                        );
+                        soft_cache = None;
+                        basin_entry = None;
+                        quiet = 0;
+                        if improved && improvements.len() < 512 {
+                            improvements.push((
+                                hops,
+                                ledger.spent(),
+                                bias.n_basins(),
+                                candidate_energy,
+                            ));
+                        }
+                    }
+                    if ledger.target_reached() {
+                        break;
+                    }
+                }
+            }
+        }
+        if ledger.target_reached() {
+            break HopStop::of_closed(ledger);
         }
         // Labelled atomic clusters are offered close-packed cuts once:
         // the n sites of an fcc lattice nearest an atom, an octahedral

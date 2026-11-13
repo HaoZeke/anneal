@@ -293,6 +293,189 @@ pub fn twin(x: ArrayView1<f64>, n: usize, plane: &Plane, mode: Mode, layer: f64)
     y
 }
 
+/// In-plane slides of the one close-packed sheet that stands clear of the rest.
+///
+/// A sheet is the set of atoms within a tenth of a bond of one triangular
+/// face. It is dominant when the empty gap beyond it is at least twice the
+/// gap beyond every other sheet. The move slides a diamond of that sheet,
+/// two triangles sharing an edge, by `spacing / √2` along the in-plane
+/// normal of the shared edge, and slides one neighbouring atom of the edge
+/// by half a spacing along the edge. Both directions and both signs are
+/// returned. Nothing here depends on how many atoms the cluster has.
+pub fn dominant_layer_slides(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
+    let n = x.len() / 3;
+    if n < 8 {
+        return Vec::new();
+    }
+    let nn = spacing(x, n);
+    if !(nn.is_finite() && nn > 0.0) {
+        return Vec::new();
+    }
+    let cut2 = (1.25 * nn) * (1.25 * nn);
+    let mut adj = vec![Vec::new(); n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut d = 0.0;
+            for k in 0..3 {
+                let delta = x[3 * i + k] - x[3 * j + k];
+                d += delta * delta;
+            }
+            if d < cut2 && d > 1e-12 {
+                adj[i].push(j);
+                adj[j].push(i);
+            }
+        }
+    }
+    let mut layers: Vec<(f64, Vec<usize>, [f64; 3], [f64; 3])> = Vec::new();
+    let mut seen: Vec<Vec<usize>> = Vec::new();
+    for i in 0..n {
+        for &j in &adj[i] {
+            if j < i {
+                continue;
+            }
+            for &k in &adj[i] {
+                if k <= j || !adj[j].contains(&k) {
+                    continue;
+                }
+                let e1 = [
+                    x[3 * j] - x[3 * i],
+                    x[3 * j + 1] - x[3 * i + 1],
+                    x[3 * j + 2] - x[3 * i + 2],
+                ];
+                let e2 = [
+                    x[3 * k] - x[3 * i],
+                    x[3 * k + 1] - x[3 * i + 1],
+                    x[3 * k + 2] - x[3 * i + 2],
+                ];
+                let mut normal = [
+                    e1[1] * e2[2] - e1[2] * e2[1],
+                    e1[2] * e2[0] - e1[0] * e2[2],
+                    e1[0] * e2[1] - e1[1] * e2[0],
+                ];
+                let nl = (normal.iter().map(|v| v * v).sum::<f64>()).sqrt();
+                if nl < 1e-8 {
+                    continue;
+                }
+                for value in &mut normal {
+                    *value /= nl;
+                }
+                let origin = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+                let mut signed = vec![0.0; n];
+                for a in 0..n {
+                    for t in 0..3 {
+                        signed[a] += (x[3 * a + t] - origin[t]) * normal[t];
+                    }
+                }
+                let mut layer: Vec<usize> = (0..n)
+                    .filter(|&a| signed[a].abs() < 0.1 * nn)
+                    .collect();
+                if layer.len() < 6 || layer.len() * 2 >= n {
+                    continue;
+                }
+                layer.sort_unstable();
+                if seen.iter().any(|prev| prev == &layer) {
+                    continue;
+                }
+                let thick = layer.iter().map(|&a| signed[a].abs()).fold(0.0, f64::max);
+                let gap = (0..n)
+                    .filter(|a| layer.binary_search(a).is_err())
+                    .map(|a| signed[a].abs())
+                    .fold(f64::INFINITY, f64::min);
+                if !(gap.is_finite() && thick.is_finite()) {
+                    continue;
+                }
+                let ratio = gap / thick.max(1e-9);
+                seen.push(layer.clone());
+                layers.push((ratio, layer, normal, origin));
+            }
+        }
+    }
+    if layers.is_empty() {
+        return Vec::new();
+    }
+    layers.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let dominant = if layers.len() == 1 {
+        layers[0].0 >= 2.0
+    } else {
+        layers[0].0 >= 2.0 * layers[1].0
+    };
+    if !dominant {
+        return Vec::new();
+    }
+    let (_, layer, normal, _origin) = layers.remove(0);
+    let in_layer = |a: usize| layer.binary_search(&a).is_ok();
+    let mut slides = Vec::new();
+    for ai in 0..layer.len() {
+        let a = layer[ai];
+        for &b in &adj[a] {
+            if b < a || !in_layer(b) {
+                continue;
+            }
+            let wings: Vec<usize> = adj[a]
+                .iter()
+                .copied()
+                .filter(|&w| w != b && in_layer(w) && adj[b].contains(&w))
+                .collect();
+            for p in 0..wings.len() {
+                for q in (p + 1)..wings.len() {
+                    let atoms = [a, b, wings[p], wings[q]];
+                    let mut edge_u = [0.0; 3];
+                    for t in 0..3 {
+                        edge_u[t] = x[3 * b + t] - x[3 * a + t];
+                    }
+                    let el = (edge_u.iter().map(|v| v * v).sum::<f64>()).sqrt();
+                    if el < 1e-12 {
+                        continue;
+                    }
+                    for value in &mut edge_u {
+                        *value /= el;
+                    }
+                    let mut perp = [
+                        normal[1] * edge_u[2] - normal[2] * edge_u[1],
+                        normal[2] * edge_u[0] - normal[0] * edge_u[2],
+                        normal[0] * edge_u[1] - normal[1] * edge_u[0],
+                    ];
+                    let pl = (perp.iter().map(|v| v * v).sum::<f64>()).sqrt();
+                    if pl < 1e-12 {
+                        continue;
+                    }
+                    for value in &mut perp {
+                        *value /= pl;
+                    }
+                    let mut pendants = Vec::new();
+                    for &vertex in &[a, b] {
+                        for &pendant in &adj[vertex] {
+                            if !atoms.contains(&pendant) && in_layer(pendant) {
+                                pendants.push(pendant);
+                            }
+                        }
+                    }
+                    pendants.sort_unstable();
+                    pendants.dedup();
+                    for pendant in pendants {
+                        for s4 in [-1.0, 1.0] {
+                            for s5 in [-1.0, 1.0] {
+                                let mut y = x.to_owned();
+                                for &atom in &atoms {
+                                    for t in 0..3 {
+                                        y[3 * atom + t] +=
+                                            s4 * perp[t] * nn / std::f64::consts::SQRT_2;
+                                    }
+                                }
+                                for t in 0..3 {
+                                    y[3 * pendant + t] += s5 * edge_u[t] * nn / 2.0;
+                                }
+                                slides.push(y);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    slides
+}
+
 /// Twins `x` across one of its dense planes, chosen at random among the
 /// densest.
 ///
@@ -354,6 +537,15 @@ mod tests {
                     .count()
             })
             .collect()
+    }
+
+    #[test]
+    fn an_unlayered_chain_has_no_sheet_to_slide() {
+        let mut x = Array1::zeros(24);
+        for i in 0..8 {
+            x[3 * i] = i as f64;
+        }
+        assert!(dominant_layer_slides(x.view()).is_empty());
     }
 
     /// A close packing has dense planes, and they have to be found, or the
