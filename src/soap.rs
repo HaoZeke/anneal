@@ -2630,6 +2630,94 @@ pub fn step_away_fivefold_about(x: ArrayView1<f64>, rmsd: f64, axis: [f64; 3]) -
     }
 }
 
+/// One observed-cloud step. The direction does not draw from `rng`, so a
+/// second call on the same coordinates and the same mask is the same trial.
+#[cfg(not(feature = "featomic"))]
+struct CloudStep {
+    bits: Vec<u64>,
+    n_max: usize,
+    l_max: usize,
+    rcut: u64,
+    rmsd: u64,
+    species: Option<Vec<u32>>,
+    mobile: Option<Vec<usize>>,
+    groups: Option<Vec<Vec<usize>>>,
+    y: Array1<f64>,
+}
+
+#[cfg(not(feature = "featomic"))]
+std::thread_local! {
+    static CLOUD_STEP: std::cell::RefCell<Option<CloudStep>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(not(feature = "featomic"))]
+fn same_cloud_step(
+    saved: &CloudStep,
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    rmsd: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    groups: Option<&[Vec<usize>]>,
+) -> bool {
+    saved.n_max == spec.n_max
+        && saved.l_max == spec.l_max
+        && saved.rcut == spec.rcut_nn.to_bits()
+        && saved.rmsd == rmsd.to_bits()
+        && saved.bits.len() == x.len()
+        && saved
+            .bits
+            .iter()
+            .zip(x.iter())
+            .all(|(bits, value)| *bits == value.to_bits())
+        && saved.species.as_deref() == species
+        && saved.mobile.as_deref() == mobile
+        && saved.groups.as_deref() == groups
+}
+
+#[cfg(not(feature = "featomic"))]
+fn recall_cloud_step(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    rmsd: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    groups: Option<&[Vec<usize>]>,
+) -> Option<Array1<f64>> {
+    CLOUD_STEP.with(|slot| {
+        slot.borrow().as_ref().and_then(|saved| {
+            same_cloud_step(saved, x, spec, rmsd, species, mobile, groups).then(|| saved.y.clone())
+        })
+    })
+}
+
+#[cfg(not(feature = "featomic"))]
+fn remember_cloud_step(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    rmsd: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    groups: Option<&[Vec<usize>]>,
+    y: Array1<f64>,
+) -> Array1<f64> {
+    CLOUD_STEP.with(|slot| {
+        *slot.borrow_mut() = Some(CloudStep {
+            bits: x.iter().map(|value| value.to_bits()).collect(),
+            n_max: spec.n_max,
+            l_max: spec.l_max,
+            rcut: spec.rcut_nn.to_bits(),
+            rmsd: rmsd.to_bits(),
+            species: species.map(|values| values.to_vec()),
+            mobile: mobile.map(|values| values.to_vec()),
+            groups: groups.map(|values| values.to_vec()),
+            y: y.clone(),
+        });
+    });
+    y
+}
+
 /// Observed-cloud residual, partitioned by observed atomic number and
 /// restricted to the mobile set. Frozen atoms are neighbours, not movers.
 ///
@@ -2656,11 +2744,14 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
     }
     #[cfg(not(feature = "featomic"))]
     {
+        if let Some(saved) = recall_cloud_step(x, spec, rmsd, species, mobile, groups) {
+            return saved;
+        }
         let loc = local_nu3_z(x, spec, species);
         let n_at = loc.nrows();
         let dim = loc.ncols();
         if n_at == 0 || dim == 0 {
-            return x.to_owned();
+            return remember_cloud_step(x, spec, rmsd, species, mobile, groups, x.to_owned());
         }
         let keep = mobile_mask(n_at, mobile);
         let zi = |i: usize| species.and_then(|z| z.get(i).copied()).unwrap_or(0);
@@ -2728,13 +2819,21 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
         let nu3_rms = if nnu > 0.0 { (nu32 / nnu).sqrt() } else { 0.0 };
         let _ = rng;
         if nu3_rms < NU3_DEFECT {
-            return x.to_owned();
+            return remember_cloud_step(x, spec, rmsd, species, mobile, groups, x.to_owned());
         }
         // Direction is J⁺ of the observed leftover. Amplitude is the
         // caller's cap: Tikhonov otherwise leaves a near-identity.
         let dr = pullback_nu3_spectra(x, &loc, target.view(), spec, species, mobile);
         let y = scale_to_cap(x, dr, rmsd);
-        retract_rigid_groups(x, y, groups)
+        remember_cloud_step(
+            x,
+            spec,
+            rmsd,
+            species,
+            mobile,
+            groups,
+            retract_rigid_groups(x, y, groups),
+        )
     }
 }
 
