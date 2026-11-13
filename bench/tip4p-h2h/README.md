@@ -83,3 +83,37 @@ A full-budget call on (H₂O)₂₁ costs 9.68 µs inside the potential and 3.55
 LJ38, LJ75, LJ98 and LJ104 keep the same evaluation counts as on `4fdc37e8`, including on the outside-cut at `2d00f044`. LJ38 is 6/6, LJ75 is 6/6, LJ98 is 5/6, and LJ104 is 6/6.
 
 The new rows are in `rows.csv`. The medians of those rows are `summary-shell.csv`.
+
+## Twelve seeds
+
+Seeds 2000–2011, budget 2_000_000, serial, one core, hostname `bench`, working directory `/work`. The order is one shuffle, `Random(20261113)`. A hit is a quenched energy at or below the reference plus 0.001 kJ/mol. Medians are Hyndman–Fan type 7. GMIN is the fixed step. The shell arm is the rigid preset. `ungated` puts a hydrogen-bond chain reversal in the move library, and `mix` gives that move a fixed share of the proposals. `weight` turns on improvement-reward weighting with the chain competing, and `epoch` alternates the shell library and the chain at each stall. `exchange` is the contact-exchange polish on a stalled rigid basin: a beam of four candidates, four exchanges, a quench after each, the lowest kept. The contact graph is the neighbour shell of the preset separation.
+
+One polish of the saved shell cages does not reach the (H₂O)₂₁ reference. Seed 2007 stays at −915.774. Seeds 2000 and 2006 stay at −915.230.
+
+| Size | Arm | Hits |
+| --- | --- | --- |
+| (H₂O)₁₅ | shell | 9/12 |
+| (H₂O)₁₅ | ungated | 11/12 |
+| (H₂O)₁₅ | mix | 9/12 |
+| (H₂O)₁₅ | weight | 5/12 |
+| (H₂O)₁₅ | epoch | 5/12 |
+| (H₂O)₁₅ | exchange | 8/12 |
+| (H₂O)₁₅ | GMIN | 0/12 |
+| (H₂O)₂₀ | shell | 5/12 |
+| (H₂O)₂₀ | ungated | 2/12 |
+| (H₂O)₂₀ | mix | 3/12 |
+| (H₂O)₂₀ | weight | 0/12 |
+| (H₂O)₂₀ | epoch | 1/12 |
+| (H₂O)₂₀ | exchange | 4/12 |
+| (H₂O)₂₀ | GMIN | 0/12 |
+| (H₂O)₂₁ | shell | 0/12 |
+| (H₂O)₂₁ | ungated | 2/12 |
+| (H₂O)₂₁ | mix | 0/12 |
+| (H₂O)₂₁ | weight | 0/12 |
+| (H₂O)₂₁ | epoch | 0/12 |
+| (H₂O)₂₁ | exchange | 0/12 |
+| (H₂O)₂₁ | GMIN | 0/12 |
+
+The shell total is 14/36. The chain library is 15/36 but (H₂O)₂₀ falls from 5/12 to 2/12. The fixed share is 12/36. Weight is 5/36 and the restart portfolio is 6/36. The contact exchange is 12/36: (H₂O)₁₅ 8/12 and (H₂O)₂₀ 4/12, each one hit under the shell, and (H₂O)₂₁ still 0/12. Lennard-Jones counts on the exchange binary match the pinned lists, including LJ38 seed 2000 at 11_792.
+
+The rows are `rows-n12.csv`. The medians are `summary-n12.csv`.
