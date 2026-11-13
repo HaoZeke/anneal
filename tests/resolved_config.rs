@@ -57,7 +57,7 @@ fn default_witness_ceiling_is_absent_from_the_resolved_json() {
     );
     assert_eq!(
         cfg.resolved_sha256().unwrap(),
-        "f097f0eccd8d99f0b3d7ed7af3f23a83465736984acb136628dc482712814c17"
+        "a1bd030f28c13e57f6dbaa50302b8f1312139fc1684f2fa24801a361664cf5d2"
     );
     let mut uniform = cfg;
     uniform.arm_selection = ArmSelection::Uniform;
@@ -71,7 +71,7 @@ fn default_witness_ceiling_is_absent_from_the_resolved_json() {
     );
     assert_ne!(
         uniform.resolved_sha256().unwrap(),
-        "f097f0eccd8d99f0b3d7ed7af3f23a83465736984acb136628dc482712814c17"
+        "a1bd030f28c13e57f6dbaa50302b8f1312139fc1684f2fa24801a361664cf5d2"
     );
 }
 
