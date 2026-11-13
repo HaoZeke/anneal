@@ -2440,12 +2440,72 @@ fn swap_atoms(y: &mut Array1<f64>, i: usize, j: usize) {
     }
 }
 
+/// Puts smaller atoms on the inner sites.
+///
+/// One radius, or an element without a tabulated radius, leaves the
+/// order alone. The numbers are elemental radii, not a cluster size.
+pub(crate) fn place_smaller_inside(positions: Array1<f64>, species: &[u32]) -> Array1<f64> {
+    let n = species.len();
+    if positions.len() < 3 * n || n < 2 {
+        return positions;
+    }
+    let radius = |z: u32| match z {
+        29 => 1.32,
+        30 => 1.22,
+        47 => 1.44,
+        79 => 1.44,
+        _ => 0.0,
+    };
+    let radii: Vec<f64> = species.iter().copied().map(radius).collect();
+    if radii.iter().any(|value| *value <= 0.0) {
+        return positions;
+    }
+    let mut ordered = radii.clone();
+    ordered.sort_by(|left, right| left.total_cmp(right));
+    ordered.dedup();
+    if ordered.len() < 2 {
+        return positions;
+    }
+    let mut centre = [0.0; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            centre[k] += positions[3 * i + k];
+        }
+    }
+    for value in &mut centre {
+        *value /= n as f64;
+    }
+    let source = positions.clone();
+    let mut sites: Vec<usize> = (0..n).collect();
+    sites.sort_by(|&left, &right| {
+        let dist = |index: usize| {
+            (0..3)
+                .map(|k| {
+                    let delta = source[3 * index + k] - centre[k];
+                    delta * delta
+                })
+                .sum::<f64>()
+        };
+        dist(left).total_cmp(&dist(right))
+    });
+    let mut atoms: Vec<usize> = (0..n).collect();
+    atoms.sort_by(|&left, &right| radii[left].total_cmp(&radii[right]).then(left.cmp(&right)));
+    let mut out = positions;
+    for (atom, site) in atoms.iter().zip(sites.iter()) {
+        for k in 0..3 {
+            out[3 * atom + k] = source[3 * site + k];
+        }
+    }
+    out
+}
+
 /// One random unlike-pair coordinate exchange.
 ///
 /// Doye and Meyer's fixed-composition move swaps the coordinates of one A
 /// with one B and leaves every other atom where it is. `None` when a second
 /// label does not exist. The caller supplies the draw, so a side generator
 /// can propose the pair without advancing the chain generator.
+
 pub(crate) fn doye_unlike_exchange<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     species: &[u32],

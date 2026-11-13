@@ -3500,6 +3500,10 @@ where
     // Cleared when a new lowest minimum is recorded.
     let mut cage_edit = false;
     let mut csm_reseed_stamp = 0usize;
+    // Calls spent when a labelled motif reseed last ran. Half a budget
+    // since the incumbent last improved, so a search that is still
+    // descending does not pay for it.
+    let mut motif_at_spent = 0usize;
     // Set when a stall growth fails to lower the incumbent. Later growth
     // quenches wait until that energy drops. Only the leave whose growth
     // was skipped is an all-points displacement. The hops between leaves
@@ -4614,25 +4618,15 @@ where
             best_seen = ledger.best;
             csm_reseed_stamp = hops;
         }
-        // Unlabelled clusters keep the icosahedral test alone. A labelled
-        // one-species cluster is not on that path (`packing_cna_applies` is
-        // false once labels exist), so the same reseed also runs on a
-        // fivefold plateau whose nearest neighbour is outside the
-        // Lennard-Jones scale. The unlabelled test is evaluated first and
-        // unchanged.
+        // Unlabelled clusters keep the icosahedral test alone. Counting
+        // common neighbours here would run on every hop of a labelled
+        // metal and was the Au38 slowdown: a fivefold pause of a few hops
+        // spent a reseed before the close-packed minimum.
         let mono_ih = cfg.packing_cna_applies()
             && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default());
-        let labelled_fivefold = !cfg.packing_cna_applies()
-            && cfg
-                .species
-                .as_ref()
-                .is_some_and(|labels| species_count(labels) == 1)
-            && crate::soap::extended_scale(x.view())
-            && (crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
-                || crate::soap::fivefold_plateau(x.view()));
         if csm_reseed_hops > 0
             && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
-            && (mono_ih || labelled_fivefold)
+            && mono_ih
             && ledger.remaining() > 0
         {
             csm_reseed_stamp = hops;
@@ -4707,6 +4701,171 @@ where
                 soft_cache = None;
                 basin_entry = None;
                 quiet = 0;
+            }
+            if ledger.remaining() == 0 {
+                break HopStop::of_closed(ledger);
+            }
+        }
+        // A labelled incumbent whose energy has stood for half the budget
+        // is offered the motifs its common-neighbour signature lacks:
+        // close packing, a pentagonal (decahedral) seed, and an
+        // icosahedron. Smaller atoms take the inner sites, then one
+        // unlike-pair quench pass. The chain generator is not drawn.
+        // Unlabelled clusters never enter, so their evaluation counts stay.
+        let motif_gap = ledger.budget() / 2;
+        if motif_gap > 0
+            && ledger.spent().saturating_sub(charged_at_best) >= motif_gap
+            && ledger.spent().saturating_sub(motif_at_spent) >= motif_gap
+            && ledger.remaining() > 0
+            && let Some(species) = cfg.species.as_deref()
+            && let Some(best_state) = ledger.best_state.clone()
+        {
+            motif_at_spent = ledger.spent();
+            let (frac_555, frac_421, frac_422) = crate::soap::motif_fractions(best_state.view());
+            let mut sources = Vec::new();
+            if frac_421 < 0.20 {
+                sources.push(crate::lattice::Source::Named(
+                    crate::structure::Template::FaceCentredCubic,
+                ));
+            }
+            if frac_422 < 0.15 {
+                sources.push(crate::lattice::Source::Pentagonal);
+            }
+            if frac_555 < 0.20 {
+                sources.push(crate::lattice::Source::Named(
+                    crate::structure::Template::Icosahedral,
+                ));
+            }
+            if !sources.is_empty() {
+                let mut side = StdRng::seed_from_u64(
+                    (hops as u64).wrapping_mul(0x9E37_79B9)
+                        ^ ledger.best.to_bits()
+                        ^ 0xFCCC_0517,
+                );
+                let n_atoms = best_state.len() / 3;
+                let two = species_count(species) >= 2;
+                let (group_a, group_b) = if two {
+                    species_groups(species)
+                } else {
+                    (Vec::new(), Vec::new())
+                };
+                let mut best_alt: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
+                for source in sources {
+                    if ledger.remaining() == 0 {
+                        break;
+                    }
+                    let grown = crate::lattice::candidate(source, best_state.view(), n_atoms, &mut side);
+                    let grown = if two {
+                        moves::place_smaller_inside(grown, species)
+                    } else {
+                        grown
+                    };
+                    let (mut eq, mut xq) = relax(ledger, grown.view(), cfg.relax_steps);
+                    if two && quench_is_sane(cfg, eq, xq.view()) {
+                        let mut gained = true;
+                        let mut passes = 0;
+                        while gained && passes < 2 && ledger.remaining() > 0 {
+                            gained = false;
+                            passes += 1;
+                            let mut tried = 0usize;
+                            'pairs: for &i in &group_a {
+                                for &j in &group_b {
+                                    if ledger.remaining() == 0 || tried >= 400 {
+                                        break 'pairs;
+                                    }
+                                    tried += 1;
+                                    let mut swapped = xq.clone();
+                                    for axis in 0..3 {
+                                        swapped.swap(3 * i + axis, 3 * j + axis);
+                                    }
+                                    let (alt_e, alt_x) = relax(ledger, swapped.view(), cfg.relax_steps);
+                                    if quench_is_sane(cfg, alt_e, alt_x.view()) && alt_e < eq - 1e-6 {
+                                        eq = alt_e;
+                                        xq = alt_x;
+                                        gained = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !quench_is_sane(cfg, eq, xq.view()) {
+                        continue;
+                    }
+                    let gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        eq,
+                        xq.view(),
+                        &mut unconverged_records,
+                    );
+                    if gradient.is_none() && grad.is_some() {
+                        continue;
+                    }
+                    let replace = best_alt
+                        .as_ref()
+                        .is_none_or(|(energy, _, _)| eq < *energy);
+                    if replace {
+                        best_alt = Some((eq, xq, gradient));
+                    }
+                }
+                // A decahedral signature is also offered a stacking twin of
+                // the incumbent. The twin is a reflection in one dense
+                // plane, which is how fivefold packing becomes close
+                // packed. Adopted only when the quench is lower, so a
+                // miss leaves the chain and its later calls where they were.
+                if frac_422 >= 0.15 && frac_421 < 0.20 {
+                    for _ in 0..4 {
+                        if ledger.remaining() == 0 {
+                            break;
+                        }
+                        let twisted = crate::packing::propose_twin(
+                            best_state.view(),
+                            n_atoms,
+                            &mut side,
+                        );
+                        let (eq, xq) = relax(ledger, twisted.view(), cfg.relax_steps);
+                        if !quench_is_sane(cfg, eq, xq.view()) {
+                            continue;
+                        }
+                        let gradient = record_quenched_answer(
+                            cfg,
+                            ledger,
+                            &mut grad,
+                            eq,
+                            xq.view(),
+                            &mut unconverged_records,
+                        );
+                        if gradient.is_none() && grad.is_some() {
+                            continue;
+                        }
+                        let replace = best_alt
+                            .as_ref()
+                            .is_none_or(|(energy, _, _)| eq < *energy);
+                        if replace {
+                            best_alt = Some((eq, xq, gradient));
+                        }
+                    }
+                }
+                if let Some((eq, xq, gradient)) = best_alt
+                    && eq < ledger.best - 1e-6
+                {
+                    let from_basin = identity.basin_of(best_state.view());
+                    let reached = identity.basin_of(xq.view());
+                    adopt_minimum!(
+                        eq,
+                        xq,
+                        gradient,
+                        Some(reached),
+                        AdoptionHistory::Fresh,
+                        Some((Some(from_basin), reached)),
+                        Some("motif-reseed"),
+                        hops
+                    );
+                    soft_cache = None;
+                    basin_entry = None;
+                    quiet = 0;
+                }
             }
             if ledger.remaining() == 0 {
                 break HopStop::of_closed(ledger);

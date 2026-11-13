@@ -1442,6 +1442,23 @@ pub fn extended_scale(x: ArrayView1<f64>) -> bool {
     bond_cutoff(x) > 1.35 + 1e-9
 }
 
+/// Fractions of icosahedral `555`, close-packed `421` and decahedral `422`.
+///
+/// Read when a labelled search has already stalled. Not called on the
+/// unlabelled hop, so a Lennard-Jones chain does not pay for it.
+pub fn motif_fractions(x: ArrayView1<f64>) -> (f64, f64, f64) {
+    let n = x.len() / 3;
+    if n < 2 {
+        return (0.0, 0.0, 0.0);
+    }
+    let counts = crate::structure::cna(x, n, bond_cutoff(x));
+    (
+        counts.fraction((5, 5, 5)),
+        counts.fraction((4, 2, 1)),
+        counts.fraction((4, 2, 2)),
+    )
+}
+
 fn bond_cutoff(x: ArrayView1<f64>) -> f64 {
     let n = x.len() / 3;
     if n < 2 {
