@@ -381,6 +381,12 @@ pub struct BasinIndex<F: Fingerprint> {
     metric: Box<dyn BasinMetric>,
     merge_radius: f64,
     centres: Vec<Array1<f64>>,
+    /// Last 32 components of each centre, packed in basin order.
+    ///
+    /// The suffix test is the one that separates most isomers, and it
+    /// only needs those components. Keeping them together means a miss
+    /// does not load the rest of the descriptor.
+    centre_suffix: Vec<f64>,
     /// Triangle-inequality keys, parallel to `centres`.
     keys: Vec<Option<f64>>,
     visits: Vec<u64>,
@@ -398,6 +404,7 @@ impl<F: Fingerprint> BasinIndex<F> {
             metric: Box::new(EuclideanMetric),
             merge_radius,
             centres: Vec::new(),
+            centre_suffix: Vec::new(),
             keys: Vec::new(),
             visits: Vec::new(),
             cap: None,
@@ -443,6 +450,30 @@ impl<F: Fingerprint> BasinIndex<F> {
         self.fingerprint.describe(x)
     }
 
+    /// Whether the packed suffix of basin `i` is already past the radius.
+    ///
+    /// A sum of squares over any components is a lower bound on the
+    /// squared distance, so skipping here cannot hide a centre that is
+    /// inside the radius. The slack matches the packed full sum.
+    fn suffix_separates(&self, index: usize, d: ArrayView1<f64>) -> bool {
+        const SUFFIX: usize = 32;
+        if d.len() <= SUFFIX || self.centre_suffix.len() != self.centres.len() * SUFFIX {
+            return false;
+        }
+        let query = d.len() - SUFFIX;
+        let base = index * SUFFIX;
+        let limit = self.merge_radius * self.merge_radius + 1.0e-8;
+        let mut acc = 0.0;
+        for k in (0..SUFFIX).rev() {
+            let diff = d[query + k] - self.centre_suffix[base + k];
+            acc += diff * diff;
+            if acc > limit {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Index of the nearest registered basin within `merge_radius`.
     ///
     /// Most recently added first, returning the first centre inside the radius
@@ -473,6 +504,9 @@ impl<F: Fingerprint> BasinIndex<F> {
             {
                 continue;
             }
+            if self.suffix_separates(i, d) {
+                continue;
+            }
             if self.metric.distance_bounded(c.view(), d, self.merge_radius) <= self.merge_radius {
                 return Some(i);
             }
@@ -486,6 +520,10 @@ impl<F: Fingerprint> BasinIndex<F> {
             return self.centres.len().saturating_sub(1);
         }
         self.keys.push(self.metric.key(d.view()));
+        if d.len() > 32 {
+            self.centre_suffix
+                .extend(d.iter().skip(d.len() - 32).copied());
+        }
         self.centres.push(d);
         self.visits.push(0);
         self.centres.len() - 1
@@ -620,6 +658,17 @@ impl BasinMetric for EuclideanMetric {
                 }
             }
         }
+        // The suffix did not decide it. A packed sum rejects a centre that
+        // is clearly past the radius; a centre inside the radius falls
+        // through to the block sum and comes back with the same bits.
+        #[cfg(target_arch = "x86_64")]
+        if let (Some(left), Some(right)) = (a.as_slice(), b.as_slice())
+            && std::arch::is_x86_feature_detected!("avx2")
+            // SAFETY: AVX2 was just detected.
+            && unsafe { packed_squared_distance_exceeds(left, right, limit) }
+        {
+            return f64::INFINITY;
+        }
         let mut acc = 0.0;
         // Checked in blocks rather than per element: the branch costs more
         // than the arithmetic on a descriptor whose leading entries are nearly
@@ -638,6 +687,51 @@ impl BasinMetric for EuclideanMetric {
         }
         acc.sqrt()
     }
+}
+
+/// Packed squared distance. `true` only when the sum exceeds `limit` by
+/// more than the rounding gap to the scalar block sum.
+///
+/// # Safety
+///
+/// AVX2 must be enabled. The caller checks it.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn packed_squared_distance_exceeds(a: &[f64], b: &[f64], limit: f64) -> bool {
+    use std::arch::x86_64::{
+        _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_setzero_pd, _mm256_storeu_pd,
+        _mm256_sub_pd,
+    };
+    let n = a.len();
+    let mut acc = _mm256_setzero_pd();
+    let mut index = 0usize;
+    while index + 4 <= n {
+        unsafe {
+            let difference = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index)),
+                _mm256_loadu_pd(b.as_ptr().add(index)),
+            );
+            acc = _mm256_add_pd(acc, _mm256_mul_pd(difference, difference));
+        }
+        index += 4;
+        if index.is_multiple_of(64) {
+            let mut lane = [0.0; 4];
+            unsafe { _mm256_storeu_pd(lane.as_mut_ptr(), acc) };
+            let partial = lane[0] + lane[1] + lane[2] + lane[3];
+            if partial > limit + 1.0e-8 {
+                return true;
+            }
+        }
+    }
+    let mut lane = [0.0; 4];
+    unsafe { _mm256_storeu_pd(lane.as_mut_ptr(), acc) };
+    let mut sum = lane[0] + lane[1] + lane[2] + lane[3];
+    while index < n {
+        let difference = a[index] - b[index];
+        sum += difference * difference;
+        index += 1;
+    }
+    sum > limit + 1.0e-8
 }
 
 /// Maps a state into descriptor space for coverage lookup and repulsion.
