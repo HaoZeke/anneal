@@ -1,0 +1,54 @@
+diff --git a/src/calculator/calculator.F90 b/src/calculator/calculator.F90
+index 66157a1..635edd3 100644
+--- a/src/calculator/calculator.F90
++++ b/src/calculator/calculator.F90
+@@ -52,6 +52,8 @@ module crest_calculator
+ 
+ !>--- global engrad call counter
+   integer(int64),public :: engrad_total = 0
++!>--- global wall time inside potential_core, seconds
++  real(wp),public :: engrad_seconds = 0.0_wp
+ 
+ !>--- public module routines
+   public :: potential_core
+@@ -97,6 +99,7 @@ contains  !> MODULE PROCEDURES START HERE
+     type(coord),pointer :: molptr
+     integer :: pnat
+     logical :: useONIOM
++    integer(int64) :: tick0,tick1,tickrate
+ 
+ !>--- reset
+     call initsignal()
+@@ -177,7 +180,11 @@ contains  !> MODULE PROCEDURES START HERE
+         !==========================================!
+         !> the actual potential call
+         !==========================================!
++        call system_clock(tick0,tickrate)
+         call potential_core(molptr,calc,i,iostatus)
++        call system_clock(tick1)
++        !$omp atomic
++        engrad_seconds = engrad_seconds+real(tick1-tick0,wp)/real(tickrate,wp)
+         !==========================================!
+         !==========================================!
+ 
+diff --git a/src/eval_timer.f90 b/src/eval_timer.f90
+index 4d4b570..4bb1e8d 100644
+--- a/src/eval_timer.f90
++++ b/src/eval_timer.f90
+@@ -23,7 +23,7 @@ subroutine eval_timer(tim)
+ !********************************
+   use crest_parameters
+   use crest_data
+-  use crest_calculator,only: engrad_total
++  use crest_calculator,only: engrad_total,engrad_seconds
+   use crest_restartlog
+   implicit none
+   type(timer) :: tim
+@@ -38,6 +38,7 @@ subroutine eval_timer(tim)
+   write(atmp,'(f30.3)') time_total/real(engrad_total,wp)
+   write(stdout,'(" * Total number of energy+grad calls: ",i0)') & !,a,1x,a,a)') & 
+   &  engrad_total!,' (avg. wall-time',trim(adjustl(atmp)),' sec)'
++  write(stdout,'(" * Wall time inside energy+grad calls: ",f0.6," sec")') engrad_seconds
+   write(stdout,*)
+   call dump_restart() 
+   endif

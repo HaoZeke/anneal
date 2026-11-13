@@ -1,0 +1,9 @@
+name,set,pdb,ligand,rotatable,heavy,atoms,macrocycle,smiles
+rq3,iridium,1G9V,RQ3,6,25,48,no,Cc1cc(C)cc(NC(=O)Cc2ccc(OC(C)(C)C(=O)O)cc2)c1
+915,iridium,1YQY,915,5,23,42,no,Cc1cc(S(=O)(=O)N[C@@H](C(=O)NO)C2CCOCC2)ccc1F
+xld,iridium,1MQ6,XLD,7,36,56,no,COc1cc(Cl)cc(C(=O)Nc2ccc(Cl)cn2)c1NC(=O)c1scc(CN(C)C2=NCCO2)c1Cl
+fluvastatin,iridium,1HWI,115,8,30,56,no,CC(C)n1c(/C=C/[C@@H](O)C[C@@H](O)CC(=O)O)c(-c2ccc(F)cc2)c2ccccc21
+z34,iridium,1FJS,Z34,9,38,62,no,[H]/N=C(/N)c1ccc(O)c(Oc2nc(Oc3cccc(C4=NCCN4C)c3)c(F)c(N(C)CC(=O)O)c2F)c1
+amprenavir,pdb,1HPV,478,11,35,70,no,CC(C)CN(C[C@@H](O)[C@H](Cc1ccccc1)NC(=O)O[C@H]1CCOC1)S(=O)(=O)c1ccc(N)cc1
+lopinavir,pdb,1MUI,AB1,15,46,94,no,Cc1cccc(C)c1OCC(=O)N[C@@H](Cc1ccccc1)[C@@H](O)C[C@H](Cc1ccccc1)NC(=O)[C@H](C(C)C)N1CCCNC1=O
+lorlatinib,pdb,4CLI,5P8,0,30,49,yes,C[C@H]1Oc2cc(cnc2N)-c2c(nn(C)c2C#N)CN(C)C(=O)c2ccc(F)cc21

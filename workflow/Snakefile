@@ -94,6 +94,38 @@ rule sc_h2h_n12:
         """
 
 
+# anneal, openconf and CREST iMTD-GC on drug-like molecules, MMFF94 for the
+# two RDKit arms and GFN-FF for CREST. Not part of `rule all`. The budgets
+# come from the openconf pilot (`enter_bench.sh pilot`):
+#   snakemake -s workflow/Snakefile openconf_h2h
+rule openconf_h2h:
+    input:
+        "bench/openconf-h2h/molecules.csv",
+        "bench/openconf-h2h/budgets.csv",
+    output:
+        "bench/openconf-h2h/results.csv",
+        "bench/openconf-h2h/seeds.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/openconf_h2h/enter_bench.sh campaign
+        OPENCONF_H2H_SKIP_BUILD=1 bash scripts/openconf_h2h/enter_bench.sh score
+        """
+
+
+# Gradients per GFN2 quench: anneal L-BFGS and TRIC against geomeTRIC.
+# Not part of `rule all`:
+#   snakemake -s workflow/Snakefile tric_quench
+rule tric_quench:
+    output:
+        "bench/tric-quench/results.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/tric_quench/enter_bench.sh
+        """
+
+
 # Cleri–Rosato Pt–Cu against GMIN. Not part of `rule all`.
 #   snakemake -s workflow/Snakefile ptcu_h2h
 rule ptcu_h2h:
