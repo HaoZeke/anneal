@@ -133,6 +133,20 @@ rule morse14_h2h:
         """
 
 
+# Gupta Au55, twelve seeds, paper budget. The sphere and the neighbour
+# shell follow a physical opening quench. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile au55_scale
+rule au55_scale:
+    output:
+        "bench/au55-scale/seeds.csv",
+        "bench/au55-scale/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/au55_scale/enter_bench.sh
+        """
+
+
 # GMIN against the paper preset at the paper force-call budgets.
 # Not part of `rule all`. Run it by name:
 #   snakemake -s workflow/Snakefile gmin_h2h
