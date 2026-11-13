@@ -1223,6 +1223,289 @@ pub(crate) fn contain(x: &mut Array1<f64>, n: usize, radius: f64) {
     }
 }
 
+/// Exchanges in one stalled-basin polish.
+///
+/// Two is the shortest sequence that can change more than one contact.
+/// Four is as far as the polish looks. The length belongs to the search,
+/// not to a cluster size.
+const CONTACT_EXCHANGES: usize = 4;
+
+/// Quenched candidates kept, and proposed, at each step of that polish.
+const CONTACT_BEAM: usize = 4;
+
+/// Neighbour distance of a rigid centre: 5/4 of the preset separation.
+///
+/// The same shell the relocate move uses. A formed contact sits at the
+/// separation itself, inside this shell.
+fn rigid_neighbour_shell(min_separation: f64) -> f64 {
+    min_separation.max(1.0e-6) * 1.25
+}
+
+/// One oxygen-contact exchange: break `i`–`j`, form `i`–`k`.
+///
+/// `i` moves to the preset separation from `k`, on the far side of `k`
+/// from `j`, so the old pair leaves the neighbour shell. Every other
+/// centre and every orientation stay. Returns false when the new site
+/// overlaps another centre.
+fn apply_contact_exchange(
+    state: &mut Array1<f64>,
+    n: usize,
+    min_separation: f64,
+    centres: &[[f64; 3]],
+    i: usize,
+    j: usize,
+    k: usize,
+) -> bool {
+    let contact = min_separation.max(1.0e-6);
+    let shell = rigid_neighbour_shell(min_separation);
+    // Direction from k toward the centre that is moving. The new site
+    // lies on the sphere of one preset separation about k.
+    let mut toward_i = [0.0; 3];
+    let mut norm_i = 0.0;
+    for axis in 0..3 {
+        toward_i[axis] = centres[i][axis] - centres[k][axis];
+        norm_i += toward_i[axis] * toward_i[axis];
+    }
+    let norm_i = norm_i.sqrt();
+    if norm_i < 1.0e-8 {
+        return false;
+    }
+    for value in &mut toward_i {
+        *value /= norm_i;
+    }
+    // Tangent pointing from that ray toward the contact being broken.
+    // Rotating away from it is the shortest slide that can leave j.
+    let mut toward_j = [0.0; 3];
+    for axis in 0..3 {
+        toward_j[axis] = centres[j][axis] - centres[k][axis];
+    }
+    let parallel = toward_j
+        .iter()
+        .zip(toward_i.iter())
+        .map(|(left, right)| left * right)
+        .sum::<f64>();
+    let mut tangent = [0.0; 3];
+    let mut norm_t = 0.0;
+    for axis in 0..3 {
+        tangent[axis] = toward_j[axis] - parallel * toward_i[axis];
+        norm_t += tangent[axis] * tangent[axis];
+    }
+    let norm_t = norm_t.sqrt();
+    let site = if norm_t < 1.0e-8 {
+        // Colinear centres: sit one separation past k, away from j.
+        let mut away = [0.0; 3];
+        let mut norm = 0.0;
+        for axis in 0..3 {
+            away[axis] = centres[k][axis] - centres[j][axis];
+            norm += away[axis] * away[axis];
+        }
+        let norm = norm.sqrt();
+        if norm < 1.0e-8 {
+            return false;
+        }
+        let mut site = [0.0; 3];
+        for axis in 0..3 {
+            site[axis] = centres[k][axis] + contact * away[axis] / norm;
+        }
+        site
+    } else {
+        for value in &mut tangent {
+            *value /= norm_t;
+        }
+        let place = |theta: f64| {
+            let (sin, cos) = theta.sin_cos();
+            let mut site = [0.0; 3];
+            for axis in 0..3 {
+                site[axis] =
+                    centres[k][axis] + contact * (cos * toward_i[axis] - sin * tangent[axis]);
+            }
+            site
+        };
+        let gap = |site: [f64; 3]| {
+            let mut d2 = 0.0;
+            for axis in 0..3 {
+                let d = site[axis] - centres[j][axis];
+                d2 += d * d;
+            }
+            d2.sqrt()
+        };
+        if gap(place(std::f64::consts::PI)) <= shell {
+            return false;
+        }
+        let mut low = 0.0;
+        let mut high = std::f64::consts::PI;
+        for _ in 0..24 {
+            let mid = 0.5 * (low + high);
+            if gap(place(mid)) > shell {
+                high = mid;
+            } else {
+                low = mid;
+            }
+        }
+        // Just clearing the shell falls back into the same basin. Halfway
+        // from that angle to the far side of k is enough to leave, and
+        // still sits on the contact sphere.
+        place(0.5 * (high + std::f64::consts::PI))
+    };
+    let clearance = contact * 0.5;
+    for other in 0..n {
+        if other == i {
+            continue;
+        }
+        let mut d2 = 0.0;
+        for axis in 0..3 {
+            let d = site[axis] - centres[other][axis];
+            d2 += d * d;
+        }
+        if d2.sqrt() < clearance {
+            return false;
+        }
+    }
+    let mut moved = 0.0;
+    for axis in 0..3 {
+        let d = site[axis] - centres[i][axis];
+        moved += d * d;
+        state[3 * i + axis] = site[axis];
+    }
+    moved.sqrt() > 1.0e-6
+}
+
+/// The best few contact exchanges on one rigid state.
+///
+/// A candidate breaks a contact of a crowded centre and forms one on a
+/// sparser centre two contacts away. Ties prefer the centre nearer the
+/// centroid, which is the buried molecule when the extra contact sits there.
+fn contact_exchange_trials(
+    state: ArrayView1<f64>,
+    n: usize,
+    min_separation: f64,
+    limit: usize,
+) -> Vec<Array1<f64>> {
+    if n < 3 || state.len() < 6 * n || limit == 0 {
+        return Vec::new();
+    }
+    let shell = rigid_neighbour_shell(min_separation);
+    let shell2 = shell * shell;
+    let mut centres = vec![[0.0; 3]; n];
+    let mut com = [0.0; 3];
+    for i in 0..n {
+        for axis in 0..3 {
+            centres[i][axis] = state[3 * i + axis];
+            com[axis] += centres[i][axis];
+        }
+    }
+    let inv = 1.0 / n as f64;
+    for value in &mut com {
+        *value *= inv;
+    }
+    let mut neighbours = vec![Vec::new(); n];
+    let mut coordination = vec![0usize; n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut d2 = 0.0;
+            for axis in 0..3 {
+                let d = centres[i][axis] - centres[j][axis];
+                d2 += d * d;
+            }
+            if d2 < shell2 && d2 > 1.0e-12 {
+                neighbours[i].push(j);
+                neighbours[j].push(i);
+                coordination[i] += 1;
+                coordination[j] += 1;
+            }
+        }
+    }
+    let mut radius = vec![0.0; n];
+    for i in 0..n {
+        let mut d2 = 0.0;
+        for axis in 0..3 {
+            let d = centres[i][axis] - com[axis];
+            d2 += d * d;
+        }
+        radius[i] = d2.sqrt();
+    }
+    // (crowded - sparse, closer to the centroid, then stable indices).
+    let mut ranked: Vec<(i32, i64, usize, usize, usize)> = Vec::new();
+    for i in 0..n {
+        for &j in &neighbours[i] {
+            for &k in &neighbours[j] {
+                if k == i || neighbours[i].contains(&k) {
+                    continue;
+                }
+                let gain = coordination[i] as i32 - coordination[k] as i32;
+                let inner = (radius[i] / min_separation.max(1.0e-6) * 10.0).round() as i64;
+                ranked.push((gain, -inner, i, j, k));
+            }
+        }
+    }
+    ranked.sort_by(|a, b| b.cmp(a));
+    let mut used: Vec<(usize, usize)> = Vec::new();
+    let mut trials = Vec::new();
+    for &(_, _, i, j, k) in &ranked {
+        if trials.len() == limit {
+            break;
+        }
+        if used.contains(&(i, k)) {
+            continue;
+        }
+        let mut trial = state.to_owned();
+        if apply_contact_exchange(&mut trial, n, min_separation, &centres, i, j, k) {
+            used.push((i, k));
+            trials.push(trial);
+        }
+    }
+    trials
+}
+
+/// Beam of contact exchanges on a stalled rigid basin.
+///
+/// Each step proposes a few exchanges, quenches each, and keeps the
+/// lowest. The sequence is [`CONTACT_EXCHANGES`] long. The returned
+/// state is the lowest quench along that beam, or `state` when every
+/// exchange is refused.
+pub fn polish_rigid_contacts<F>(
+    state: ArrayView1<f64>,
+    energy: f64,
+    n: usize,
+    min_separation: f64,
+    container: f64,
+    relax_steps: usize,
+    mut relax: F,
+) -> (f64, Array1<f64>)
+where
+    F: FnMut(ArrayView1<f64>, usize) -> (f64, Array1<f64>),
+{
+    let mut best_energy = energy;
+    let mut best_state = state.to_owned();
+    let mut beam = vec![(energy, state.to_owned())];
+    for _ in 0..CONTACT_EXCHANGES {
+        let mut kids = Vec::new();
+        for (_, parent) in &beam {
+            for mut trial in contact_exchange_trials(parent.view(), n, min_separation, CONTACT_BEAM)
+            {
+                recentre(&mut trial, n);
+                contain(&mut trial, n, container);
+                let (quenched, relaxed) = relax(trial.view(), relax_steps);
+                if quenched.is_finite() && relaxed.len() == parent.len() {
+                    kids.push((quenched, relaxed));
+                }
+            }
+        }
+        if kids.is_empty() {
+            break;
+        }
+        kids.sort_by(|left, right| left.0.total_cmp(&right.0));
+        kids.dedup_by(|later, earlier| (later.0 - earlier.0).abs() < 1.0e-8);
+        if kids[0].0 < best_energy {
+            best_energy = kids[0].0;
+            best_state = kids[0].1.clone();
+        }
+        kids.truncate(CONTACT_BEAM);
+        beam = kids;
+    }
+    (best_energy, best_state)
+}
+
 /// Pushes overlapping points apart to `min_sep`.
 ///
 /// A configuration with two points on top of each other has an enormous value
@@ -3936,6 +4219,33 @@ where
                 e = energy;
                 x = state;
                 current_validation_gradient = gradient.filter(|_| ok);
+            }
+            // A short beam of oxygen-contact exchanges on the basin the
+            // stall is sitting on. The generator is not touched: the
+            // candidates are ordered by coordination. Each exchange is
+            // quenched, and the lowest one replaces the walker.
+            if ledger.remaining() > 0 && !ledger.stopped() {
+                let (polished, polished_state) = polish_rigid_contacts(
+                    x.view(),
+                    e,
+                    cfg.n_points,
+                    cfg.min_separation,
+                    cfg.container,
+                    cfg.relax_steps,
+                    |trial, steps| relax(ledger, trial, steps),
+                );
+                if polished < e - 1.0e-8
+                    && polished_state.len() == x.len()
+                    && quench_is_sane(cfg, polished, polished_state.view())
+                {
+                    e = polished;
+                    x = polished_state;
+                    current_validation_gradient = None;
+                    if e < ledger.best {
+                        ledger.record(e, x.view());
+                        hops_at_lowest = hops;
+                    }
+                }
             }
             // Translation, rotation and cycle reversal leave the oxygen cage
             // where it is. After a thousand hops with no new lowest minimum,
@@ -10689,7 +10999,8 @@ mod descriptor_reuse_tests {
 #[cfg(test)]
 mod geometry_guards {
     use super::{
-        contain, min_pair_distance, recentre, separate_to_overlap_rule, structure_is_sane,
+        contact_exchange_trials, contain, min_pair_distance, recentre, separate_to_overlap_rule,
+        structure_is_sane,
     };
     use ndarray::Array1;
 
@@ -10744,5 +11055,49 @@ mod geometry_guards {
             None
         ));
         assert!(min_pair_distance(grouped.view()) >= 0.4);
+    }
+
+    /// Three centres on a line. The end centre slides past the far one,
+    /// one preset separation beyond it, and leaves the neighbour shell
+    /// of the centre it used to touch. The other two centres stay.
+    #[test]
+    fn a_contact_exchange_slides_one_centre_onto_a_new_contact() {
+        let separation = 1.0;
+        let mut x = Array1::zeros(18);
+        x[0] = 0.0;
+        x[3] = 1.1;
+        x[6] = 2.2;
+        let trials = contact_exchange_trials(x.view(), 3, separation, 4);
+        assert!(!trials.is_empty());
+        let moved = &trials[0];
+        let mut which = None;
+        for i in 0..3 {
+            let mut d2 = 0.0;
+            for axis in 0..3 {
+                let d = moved[3 * i + axis] - x[3 * i + axis];
+                d2 += d * d;
+            }
+            if d2.sqrt() > 1.0e-8 {
+                assert!(which.is_none(), "more than one centre moved");
+                which = Some(i);
+            }
+        }
+        let i = which.expect("a centre moves");
+        assert!(
+            i == 0 || i == 2,
+            "the crowded middle centre has nowhere to slide"
+        );
+        let partner = if i == 0 { 2 } else { 0 };
+        let old = 1;
+        let mut to_partner = 0.0;
+        let mut to_old = 0.0;
+        for axis in 0..3 {
+            let d = moved[3 * i + axis] - x[3 * partner + axis];
+            to_partner += d * d;
+            let d = moved[3 * i + axis] - x[3 * old + axis];
+            to_old += d * d;
+        }
+        assert!((to_partner.sqrt() - separation).abs() < 1.0e-9);
+        assert!(to_old.sqrt() > separation * 1.25);
     }
 }
