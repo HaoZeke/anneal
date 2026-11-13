@@ -1577,8 +1577,8 @@ impl Config {
     /// per molecule (centre of mass plus an exponential-map rotation). The
     /// move library is Wales--Hodges translation and rotation, each with
     /// its own step, not the atomic Cartesian kernels.
-    /// One arm reverses a directed hydrogen-bond cycle. Another reverses a
-    /// directed chain, which moves a dangling hydrogen the cycle cannot.
+    /// One arm reverses a directed hydrogen-bond cycle. One proposal in
+    /// ten, fixed, is a chain reversal. The other nine are the arms below.
     pub fn for_tip4p(n_molecules: usize) -> Self {
         assert!(
             n_molecules >= 2,

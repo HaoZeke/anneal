@@ -302,10 +302,6 @@ impl MoveLibrary {
                         n_molecules: *n_molecules,
                         geometry: geometry.clone(),
                     });
-                    kernels.push(ClusterMove::RigidReverseChain {
-                        n_molecules: *n_molecules,
-                        geometry: geometry.clone(),
-                    });
                 }
                 kernels
             }
@@ -2644,7 +2640,7 @@ mod move_scaling_tests {
             .collect();
         assert_eq!(
             names,
-            ["rkick", "rtrans", "rrot", "rtrans1", "rreor", "rreloc", "rcycle", "rchain"]
+            ["rkick", "rtrans", "rrot", "rtrans1", "rreor", "rreloc", "rcycle"]
         );
         assert!(cfg.move_library.is_rigid_body());
         assert_eq!(cfg.n_points, 6);
