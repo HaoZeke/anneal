@@ -2,7 +2,8 @@
 # Copyright (c) anneal developers
 # The water_gmin panel for a develop revision and this checkout, back to
 # back in one session, then the branch-against-develop comparison and the
-# trace identity of the two builds on the other potentials.
+# trace identity of the two builds on the other potentials and on (H2O)16
+# at the full budget.
 # (H2O)8/12/20 take twelve seeds, (H2O)16/21 thirty-six; GMIN runs on the
 # first twelve. Both anneal arms append to bench/water-gmin/rows.csv; GMIN
 # rows are reused wherever the start sha1 matches.
@@ -57,6 +58,22 @@ cd /work
 JOBS=1 taskset -c 0 bash $ROOT/scripts/generic_alloy/trace_identity.sh \\
   $WORK/ti-develop/release/examples $develop_rev \\
   $WORK/ti-branch/release/examples $(git -C "$ROOT" rev-parse HEAD) > $OUT/identity.txt
+# (H2O)16 at the full budget, where the stall side walks run.
+mkdir -p $WORK/w16
+{
+  echo "# code_revision develop=$develop_rev branch=$(git -C "$ROOT" rev-parse HEAD) host=\$(uname -n)"
+  for seed in 2002 2011 2027 2031; do
+    for side in develop branch; do
+      taskset -c 0 $WORK/ti-\$side/release/examples/h2h_seed tip4p 16 0 2000000 \$seed \\
+        recommended -681.1915945898 $WORK/w16/\$side-\$seed > $WORK/w16/\$side-\$seed.log
+    done
+    a=\$(cat $WORK/w16/develop-\$seed.trace.csv $WORK/w16/develop-\$seed.xyz | sha1sum | cut -c1-16)
+    b=\$(cat $WORK/w16/branch-\$seed.trace.csv $WORK/w16/branch-\$seed.xyz | sha1sum | cut -c1-16)
+    verdict=differs
+    [ "\$a" = "\$b" ] && verdict=same
+    echo "h2h_seed tip4p 16 0 2000000 \$seed develop=\$a branch=\$b \$verdict"
+  done
+} > $OUT/identity-h2o16.txt
 EOF
 chmod +x "$WORK/identity.sh"
 sudo -n unshare --uts sh -c \
