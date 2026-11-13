@@ -73,6 +73,55 @@ pub fn homotop_candidates(x: ArrayView1<f64>, species: &[u32]) -> Vec<Array1<f64
     out
 }
 
+/// How often the collective plane family is forced onto the chain.
+///
+/// It starts on every eighth hop. A quenched cut that sets a new best
+/// keeps that share. A cut that only beats the chain, and a cut that
+/// beats neither, lower the rate, and the stride widens. The family
+/// then spends fewer evaluations, which leaves the moves that were
+/// already improving the chain in place. No size and no composition
+/// enters the rate.
+#[derive(Clone, Debug)]
+pub struct CollectiveShare {
+    ema: f64,
+    stride: u32,
+}
+
+impl Default for CollectiveShare {
+    fn default() -> Self {
+        Self {
+            ema: 1.0,
+            stride: 8,
+        }
+    }
+}
+
+impl CollectiveShare {
+    /// The hop interval on which the family is forced.
+    pub fn stride(&self) -> u32 {
+        self.stride
+    }
+
+    /// True on the hops where the family takes the proposal.
+    pub fn due(&self, hops: u64) -> bool {
+        self.stride > 0 && hops % u64::from(self.stride) == 2
+    }
+
+    /// One attempt. `accepted` beat the chain. `recorded` set a new best.
+    pub fn observe(&mut self, accepted: bool, recorded: bool) {
+        if recorded {
+            self.ema = 1.0;
+            self.stride = 8;
+            return;
+        }
+        let reward = if accepted { 0.25 } else { 0.0 };
+        self.ema = 0.5 * self.ema + 0.5 * reward;
+        let share = self.ema.clamp(1.0 / 32.0, 1.0);
+        let raw = (8.0 / share).round() as u32;
+        self.stride = raw.clamp(8, 256).next_power_of_two();
+    }
+}
+
 /// Structures already accepted, keyed by their SOAP spectrum.
 #[derive(Default)]
 pub struct FingerprintTaboo {
@@ -183,6 +232,37 @@ mod tests {
     use ndarray::Array1;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+
+    #[test]
+    fn a_fruitless_collective_family_gives_up_its_share() {
+        let mut share = CollectiveShare::default();
+        assert_eq!(share.stride(), 8);
+        assert!(share.due(2));
+        assert!(!share.due(3));
+        for _ in 0..4 {
+            share.observe(false, false);
+        }
+        assert!(share.stride() >= 64);
+    }
+
+    #[test]
+    fn a_new_best_restores_the_collective_share() {
+        let mut share = CollectiveShare::default();
+        share.observe(false, false);
+        share.observe(false, false);
+        assert!(share.stride() > 8);
+        share.observe(true, true);
+        assert_eq!(share.stride(), 8);
+        assert!(share.due(2));
+    }
+
+    #[test]
+    fn an_accepted_cut_that_is_not_a_new_best_shrinks_the_share() {
+        let mut share = CollectiveShare::default();
+        share.observe(true, false);
+        assert!(share.stride() > 8);
+        assert!(share.stride() < 256);
+    }
 
     #[test]
     fn a_repeated_fingerprint_is_refused_unless_it_is_lower() {

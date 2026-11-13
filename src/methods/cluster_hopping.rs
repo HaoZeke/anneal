@@ -3190,6 +3190,7 @@ where
 
     let mut kernels = search_kernels(cfg);
     let mut general_taboo = general::FingerprintTaboo::default();
+    let mut collective = general::CollectiveShare::default();
     // Which kernel to propose from is learned rather than drawn uniformly. The
     // useful move changes as the search moves through the landscape, so the
     // evidence is discounted and a decaying floor keeps every kernel reachable.
@@ -4607,6 +4608,7 @@ where
             && !cfg.move_library.is_rigid_body()
             && call_due
             && internal_action.is_none()
+            && collective.stride() <= 16
         {
             let mut best_plane: Option<(f64, Array1<f64>)> = None;
             for _ in 0..4 {
@@ -4626,14 +4628,25 @@ where
                 }
             }
             if let Some((energy, relaxed)) = best_plane {
-                if energy < ledger.best - 1e-6 {
+                let recorded = energy < ledger.best - 1e-6;
+                if recorded {
                     ledger.record(energy, relaxed.view());
                 }
-                x = relaxed;
-                e = energy;
-                here = None;
-                soft_cache = None;
-                current_validation_gradient = None;
+                // A cut that loses to the chain used to replace it anyway.
+                // That spends the plateau on a worse basin. The chain moves
+                // only when the quenched cut beats the incumbent.
+                if energy < e {
+                    collective.observe(true, recorded);
+                    x = relaxed;
+                    e = energy;
+                    here = None;
+                    soft_cache = None;
+                    current_validation_gradient = None;
+                } else {
+                    collective.observe(false, recorded);
+                }
+            } else {
+                collective.observe(false, false);
             }
         }
         if internal_action.is_none()
@@ -5766,7 +5779,7 @@ where
         }
         if cfg.general_collective
             && let Some(plane_at) = kernels.iter().position(|kernel| kernel.name() == "plane")
-            && hops % 8 == 2
+            && collective.due(hops as u64)
         {
             k = plane_at;
         }
@@ -6152,7 +6165,10 @@ where
                 continue;
             }
         }
-        if cfg.general_collective && matches!(kernels.get(k), Some(ClusterMove::Plane { .. })) {
+        if cfg.general_collective
+            && collective.due(hops as u64)
+            && matches!(kernels.get(k), Some(ClusterMove::Plane { .. }))
+        {
             let species = cfg.species.clone().unwrap_or_else(|| vec![0; x.len() / 3]);
             let cuts = moves::plane_cuts(x.view(), x.len() / 3, rng);
             let mut best_cut: Option<(f64, Array1<f64>)> = None;
@@ -6174,43 +6190,52 @@ where
                     best_cut = Some((energy, relaxed));
                 }
             }
-            if let Some((mut energy, mut state)) = best_cut
-                && energy < e
-            {
-                let mut best_swap: Option<(f64, Array1<f64>)> = None;
-                for candidate in general::homotop_candidates(state.view(), &species) {
-                    if ledger.remaining() == 0 {
-                        break;
+            if let Some((mut energy, mut state)) = best_cut {
+                let accepted = energy < e;
+                if accepted {
+                    let mut best_swap: Option<(f64, Array1<f64>)> = None;
+                    for candidate in general::homotop_candidates(state.view(), &species) {
+                        if ledger.remaining() == 0 {
+                            break;
+                        }
+                        let (raw, _) = relax(ledger, candidate.view(), 0);
+                        if raw.is_finite()
+                            && best_swap.as_ref().is_none_or(|(held, _)| raw < *held)
+                        {
+                            best_swap = Some((raw, candidate));
+                        }
                     }
-                    let (raw, _) = relax(ledger, candidate.view(), 0);
-                    if raw.is_finite() && best_swap.as_ref().is_none_or(|(held, _)| raw < *held) {
-                        best_swap = Some((raw, candidate));
-                    }
-                }
-                if let Some((_, candidate)) = best_swap
-                    && ledger.remaining() > 0
-                {
-                    let (swapped, swapped_state) =
-                        relax(ledger, candidate.view(), cfg.relax_steps);
-                    if swapped.is_finite()
-                        && swapped < energy
-                        && swapped_state.len() == x.len()
-                        && quench_is_sane(cfg, swapped, swapped_state.view())
-                        && !general_taboo.forbids(swapped, swapped_state.view(), &species)
+                    if let Some((_, candidate)) = best_swap
+                        && ledger.remaining() > 0
                     {
-                        energy = swapped;
-                        state = swapped_state;
+                        let (swapped, swapped_state) =
+                            relax(ledger, candidate.view(), cfg.relax_steps);
+                        if swapped.is_finite()
+                            && swapped < energy
+                            && swapped_state.len() == x.len()
+                            && quench_is_sane(cfg, swapped, swapped_state.view())
+                            && !general_taboo.forbids(swapped, swapped_state.view(), &species)
+                        {
+                            energy = swapped;
+                            state = swapped_state;
+                        }
                     }
                 }
-                if energy < ledger.best - 1e-6 {
+                let recorded = energy < ledger.best - 1e-6;
+                if recorded {
                     ledger.record(energy, state.view());
                 }
-                general_taboo.remember(energy, state.view(), &species);
-                x = state;
-                e = energy;
-                here = None;
-                soft_cache = None;
-                current_validation_gradient = None;
+                if accepted {
+                    general_taboo.remember(energy, state.view(), &species);
+                    x = state;
+                    e = energy;
+                    here = None;
+                    soft_cache = None;
+                    current_validation_gradient = None;
+                }
+                collective.observe(accepted, recorded);
+            } else {
+                collective.observe(false, false);
             }
             hops += 1;
             continue;

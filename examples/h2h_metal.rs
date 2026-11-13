@@ -42,6 +42,7 @@ fn main() {
         "coords" => cmd_coords(&args),
         "energy" => cmd_energy(&args),
         "grad" => cmd_grad(&args),
+        "polish" => cmd_polish(&args),
         "budget" => cmd_budget(&args),
         _ => {
             eprintln!("unknown command {cmd}");
@@ -350,6 +351,34 @@ fn cmd_energy(args: &[String]) -> i32 {
     };
     let (energy, _) = potential(&spec).value_and_gradient(coords.view());
     println!("{energy:.12}");
+    0
+}
+
+fn cmd_polish(args: &[String]) -> i32 {
+    let Some((spec, coords)) = geometry_of(args, "polish") else {
+        return 2;
+    };
+    let evaluated = potential(&spec);
+    let mut optimiser = WarmLbfgs::default();
+    optimiser.gtol = 1e-12;
+    let (energy, relaxed, calls) = optimiser.minimize(coords.view(), 400, |v| {
+        Some(evaluated.value_and_gradient(v))
+    });
+    let (_, gradient) = evaluated.value_and_gradient(relaxed.view());
+    let mut norm = 0.0_f64;
+    let mut peak = 0.0_f64;
+    for value in gradient.iter() {
+        norm += value * value;
+        peak = peak.max(value.abs());
+    }
+    norm = norm.sqrt();
+    if let Some(path) = args.get(3)
+        && let Err(err) = write_coords(path, &relaxed)
+    {
+        eprintln!("polish: {err}");
+        return 1;
+    }
+    println!("energy={energy:.12} calls={calls} gnorm={norm:.3e} gmax={peak:.3e}");
     0
 }
 
