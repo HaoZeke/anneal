@@ -284,3 +284,11 @@ required-features = ["bank-rpc"]
 [[example]]
 name = "lj_board_row"
 required-features = []
+
+# featomic's static metatensor core is built by cmake, and that cmake runs
+# `cargo rustc` while the parent cargo still holds the target-directory lock.
+# The crates.io build script inherits the lock. This copy gives the nested
+# cargo its own target directory. `[patch]` is dropped when the crate is
+# packaged, and the packaged check does not enable `featomic`.
+[patch.crates-io]
+metatensor-sys = { path = "vendor/metatensor-sys" }
