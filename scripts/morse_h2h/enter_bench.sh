@@ -7,6 +7,13 @@ ROOT=$(cd "$HERE/../.." && pwd)
 WORK=/work/morse-h2h
 
 bash "$HERE/build_anneal.sh"
+# Time Morse the way the Lennard-Jones kernel is timed. The public
+# GMIN build only brackets LJ and TIP4P.
+GMIN_SRC=/work/gmin-h2h/src/wales/GMIN/source/morsegh.f90
+if [[ -f $GMIN_SRC ]] && ! grep -q H2H_POT_ENTER "$GMIN_SRC"; then
+  patch -p1 --forward --batch -d /work/gmin-h2h/src/wales/GMIN < "$HERE/morse-timer.patch"
+  rm -f /work/gmin-h2h/bin/GMIN
+fi
 bash "$ROOT/scripts/gmin_h2h/build_gmin.sh"
 
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$WORK/starts"

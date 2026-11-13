@@ -1,0 +1,40 @@
+--- a/source/morsegh.f90
++++ b/source/morsegh.f90
+@@ -2,10 +2,12 @@
+ 
+       USE MODHESS
+       USE COMMONS, ONLY: NATOMS, RHO
+       USE PREC, ONLY: REAL64
++      USE H2H_CAP, ONLY: H2H_POT_ENTER, H2H_POT_LEAVE
+       IMPLICIT NONE
+ 
+       INTEGER             :: J1, J2, J3, J4
++      INTEGER(KIND=8)     :: H2H_TICK
+       REAL(KIND = REAL64) :: X(3*NATOMS), G(3*NATOMS)
+       REAL(KIND = REAL64) :: ENERGY, ABSRIJ, FCTR, R2, DUMMY
+       REAL(KIND = REAL64) :: RI(3), RJ(3), RIJ(3)
+@@ -13,6 +15,7 @@
+       LOGICAL             :: GTEST, HTEST
+ 
++      CALL H2H_POT_ENTER(H2H_TICK)
+       ENERGY  = 0.D0
+       IF (GTEST) G(:) = 0.D0
+       IF (HTEST) HESS(:,:) = 0.D0
+@@ -86,7 +89,10 @@
+          ENDDO
+       ENDDO
+ 
+-      IF (.NOT. HTEST) RETURN
++      IF (.NOT. HTEST) THEN
++         CALL H2H_POT_LEAVE(H2H_TICK)
++         RETURN
++      END IF
+ !     Symmetrise Hessian
+       DO J1 = 1, 3*NATOMS
+          DO J2 = J1+1, 3*NATOMS
+@@ -94,5 +100,6 @@
+          ENDDO
+       ENDDO
++      CALL H2H_POT_LEAVE(H2H_TICK)
+ 
+    END SUBROUTINE MORSEGH
