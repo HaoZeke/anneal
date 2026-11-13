@@ -246,6 +246,32 @@ fn config(spec: &Spec) -> Config {
         .and_then(|text| text.parse().ok())
         .unwrap_or(8)
         .max(1);
+    // Empty leaves every prior on. `0` turns the five priors off.
+    // A comma list turns off the named ones: soap, reseed, growth,
+    // core, motif. The plane move stays off unless H2H_GENERAL=1.
+    if let Some(text) = std::env::var("H2H_PRIORS").ok() {
+        let text = text.trim();
+        let all_off = text == "0" || text == "none";
+        let listed = |name: &str| all_off || text.split(',').any(|token| token.trim() == name);
+        if listed("soap") {
+            cfg.prior_soap = false;
+        }
+        if listed("reseed") {
+            cfg.prior_reseed = false;
+        }
+        if listed("growth") {
+            cfg.prior_growth = false;
+        }
+        if listed("core") {
+            cfg.prior_core = false;
+        }
+        if listed("motif") {
+            cfg.prior_motif = false;
+        }
+    }
+    if std::env::var("H2H_GENERAL").ok().as_deref() == Some("1") {
+        cfg.general_collective = true;
+    }
     cfg
 }
 

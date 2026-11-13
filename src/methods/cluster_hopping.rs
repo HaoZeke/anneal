@@ -48,6 +48,7 @@ use crate::screen::Screen;
 
 mod binary_geometry;
 mod config;
+mod general;
 mod cycles;
 #[cfg(test)]
 mod mackay_cap_tests;
@@ -1920,6 +1921,14 @@ fn search_kernels(cfg: &Config) -> Vec<ClusterMove> {
     } else if cfg.energy_lattice && cfg.packing_cna_applies() {
         kernels.push(ClusterMove::EnergyLattice);
     }
+    if !cfg.prior_soap {
+        kernels.retain(|kernel| !matches!(kernel, ClusterMove::Soap { .. }));
+    }
+    if cfg.general_collective {
+        kernels.push(ClusterMove::Plane {
+            n_points: cfg.n_points,
+        });
+    }
     kernels
 }
 
@@ -3180,6 +3189,7 @@ where
     );
 
     let mut kernels = search_kernels(cfg);
+    let mut general_taboo = general::FingerprintTaboo::default();
     // Which kernel to propose from is learned rather than drawn uniformly. The
     // useful move changes as the search moves through the landscape, so the
     // evidence is discounted and a decaying floor keeps every kernel reachable.
@@ -4031,6 +4041,7 @@ where
         // Every evaluation is charged. Unlabelled and rigid runs never enter.
         if !binary_core_offered
             && !escape_refused
+            && cfg.prior_core
             && !cfg.move_library.is_molecular()
             && !cfg.move_library.is_rigid_body()
             && let Some(species) = cfg.species.as_deref()
@@ -4168,6 +4179,15 @@ where
             // clock stays where the walker's own quenches left it.
             charged_at_best = charged_at_best.saturating_add(ledger.spent().saturating_sub(before));
             pending_cut = best_cut;
+            if std::env::var("H2H_PRIOR_TRACE").ok().as_deref() == Some("1")
+                && let Some((energy, state)) = pending_cut.as_ref()
+            {
+                let (before_555, before_421, before_422) = crate::soap::motif_fractions(x.view());
+                let (frac_555, frac_421, frac_422) = crate::soap::motif_fractions(state.view());
+                eprintln!(
+                    "prior core before 555 {before_555:.3} 421 {before_421:.3} 422 {before_422:.3} after {energy:.6} 555 {frac_555:.3} 421 {frac_421:.3} 422 {frac_422:.3}"
+                );
+            }
         }
         // A rigid quench creeps by far less than an isomer gap. Treating
         // that creep as a new lowest restarts the stall clock forever, so
@@ -4583,6 +4603,39 @@ where
         let call_due = hops > 0
             && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1);
         let mut directed_leave = false;
+        if cfg.general_collective
+            && !cfg.move_library.is_rigid_body()
+            && call_due
+            && internal_action.is_none()
+        {
+            let mut best_plane: Option<(f64, Array1<f64>)> = None;
+            for _ in 0..4 {
+                if ledger.remaining() == 0 {
+                    break;
+                }
+                let trial = moves::plane_rearrangement(x.view(), x.len() / 3, rng);
+                let (energy, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
+                if energy.is_finite()
+                    && relaxed.len() == x.len()
+                    && quench_is_sane(cfg, energy, relaxed.view())
+                    && best_plane
+                        .as_ref()
+                        .is_none_or(|(held, _)| energy < *held)
+                {
+                    best_plane = Some((energy, relaxed));
+                }
+            }
+            if let Some((energy, relaxed)) = best_plane {
+                if energy < ledger.best - 1e-6 {
+                    ledger.record(energy, relaxed.view());
+                }
+                x = relaxed;
+                e = energy;
+                here = None;
+                soft_cache = None;
+                current_validation_gradient = None;
+            }
+        }
         if internal_action.is_none()
             && cfg.restart_on_stall
             && !cfg.escape_on_stall
@@ -5272,6 +5325,7 @@ where
         let mono_ih = cfg.packing_cna_applies()
             && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default());
         if csm_reseed_hops > 0
+            && cfg.prior_reseed
             && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
             && mono_ih
             && ledger.remaining() > 0
@@ -5365,6 +5419,7 @@ where
         if motif_gap > 0
             && !cfg.move_library.is_molecular()
             && !cfg.move_library.is_rigid_body()
+            && cfg.prior_motif
             && ledger.spent().saturating_sub(charged_at_best) >= motif_gap
             && ledger.spent().saturating_sub(motif_at_spent) >= motif_gap
             && ledger.remaining() > 0
@@ -5499,6 +5554,13 @@ where
                 if let Some((eq, xq, gradient)) = best_alt
                     && eq < ledger.best - 1e-6
                 {
+                    if std::env::var("H2H_PRIOR_TRACE").ok().as_deref() == Some("1") {
+                        let (frac_555, frac_421, frac_422) =
+                            crate::soap::motif_fractions(xq.view());
+                        eprintln!(
+                            "prior motif {eq:.6} 555 {frac_555:.3} 421 {frac_421:.3} 422 {frac_422:.3}"
+                        );
+                    }
                     ledger.charge_many(probe.spent());
                     let from_basin = identity.basin_of(best_state.view());
                     let reached = identity.basin_of(xq.view());
@@ -5535,6 +5597,11 @@ where
             ratios[rep]
         };
         let mut temperature = single * scale;
+        if cfg.general_collective && let Some(spread) = general_taboo.spread() {
+            let floor = 0.25 * cfg.temperature;
+            let cap = 4.0 * cfg.temperature;
+            temperature = spread.clamp(floor, cap);
+        }
         if cfg.move_library.is_rigid_body() {
             // The preset temperature stays in its own energy unit. A rigid
             // water chart is not that unit, so a local factor moves the
@@ -5696,6 +5763,12 @@ where
             && hops.is_multiple_of(4)
         {
             k = swap_at;
+        }
+        if cfg.general_collective
+            && let Some(plane_at) = kernels.iter().position(|kernel| kernel.name() == "plane")
+            && hops % 8 == 2
+        {
+            k = plane_at;
         }
         // The move scale stays the configured temperature. The law's
         // temperature is an acceptance temperature: it governs which uphill
@@ -7274,6 +7347,14 @@ where
                 }
             }
         }
+        if cfg.general_collective && accept && !unquenched {
+            let species = cfg.species.clone().unwrap_or_else(|| vec![0; x_new.len() / 3]);
+            if general_taboo.forbids(e_new, x_new.view(), &species) {
+                accept = false;
+            } else {
+                general_taboo.remember(e_new, x_new.view(), &species);
+            }
+        }
         if accept {
             if !unquenched && cfg.packing_cna_applies() {
                 packing.offer(e_new, x_new.view(), packing_cutoff);
@@ -7952,6 +8033,7 @@ where
             // all-points displacement above. The library keeps proposing
             // until the incumbent drops.
             if directed_leave
+                && cfg.prior_growth
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
                 && !crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
@@ -9386,6 +9468,8 @@ mod tests {
         assert!(der.allocate_moves && der.depth_reward && der.tabu_on_stall);
         assert!(der.escape_on_stall && der.trail_on_stall && !der.restart_on_stall);
         assert!(rec.escape_on_stall && rec.trail_on_stall && !rec.restart_on_stall);
+        assert!(rec.prior_soap && rec.prior_reseed && rec.prior_growth);
+        assert!(rec.prior_core && rec.prior_motif && !rec.general_collective);
         assert!(der.budget_window);
         assert!(der.bayes_screen);
         assert!(!rec.budget_window);

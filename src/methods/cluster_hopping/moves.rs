@@ -702,6 +702,14 @@ pub enum ClusterMove {
         /// Atom indices of each three-atom water group: `[O, H, H]`.
         groups: Vec<Vec<usize>>,
     },
+    /// Rotate or reflect the atoms on one side of a random plane.
+    ///
+    /// The plane, the cap, and the angle are drawn. No packing is named.
+    /// A slab between two parallel planes is the other branch.
+    Plane {
+        /// Atoms in the state.
+        n_points: usize,
+    },
     /// Step in the SOAP power spectrum and pull back through \(J = \partial p/\partial R\).
     ///
     /// Concerted, not a one-atom hop. The featomic direction is the observed
@@ -1515,6 +1523,7 @@ impl ClusterMove {
             ClusterMove::Visit { .. } => "visit".into(),
             ClusterMove::Angular { .. } => "angular".into(),
             ClusterMove::Twin { .. } => "twin".into(),
+            ClusterMove::Plane { .. } => "plane".into(),
             ClusterMove::Soap { .. } => "soap".into(),
             ClusterMove::Reseed { source, .. } => format!("grow:{}", source.name()),
             ClusterMove::SpeciesSwap { .. } => "swap".into(),
@@ -2156,6 +2165,7 @@ impl ClusterMove {
                 species,
                 sigma,
             } => species_swap(x, *n_points, species, sigma.as_deref(), rng),
+            ClusterMove::Plane { n_points } => plane_rearrangement(x, *n_points, rng),
             ClusterMove::Soap {
                 rmsd,
                 cutoff,
@@ -2374,6 +2384,131 @@ fn haar_rotation<R: Rng + ?Sized>(rng: &mut R) -> [[f64; 3]; 3] {
             1.0 - 2.0 * (x * x + y * y),
         ],
     ]
+}
+
+/// Reflect or rotate the atoms on one side of a random plane.
+///
+/// The plane passes near the centre. A cap is the atoms on the positive
+/// side. A slab is the atoms between two offsets of the same normal.
+/// Either set is reflected through the plane or turned about the normal.
+/// Distances inside the moved set are unchanged. Nothing names a packing.
+pub(crate) fn plane_rearrangement<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    n_points: usize,
+    rng: &mut R,
+) -> Array1<f64> {
+    let n = n_points.min(x.len() / 3);
+    if n < 4 {
+        return x.to_owned();
+    }
+    let mut normal = [0.0; 3];
+    for component in &mut normal {
+        let u: f64 = rng.random::<f64>().max(1e-12);
+        let v: f64 = rng.random();
+        *component = (-2.0 * u.ln()).sqrt() * (std::f64::consts::TAU * v).cos();
+    }
+    let norm = (normal.iter().map(|value| value * value).sum::<f64>()).sqrt();
+    if norm < 1e-12 {
+        return x.to_owned();
+    }
+    for component in &mut normal {
+        *component /= norm;
+    }
+    let mut centre = [0.0; 3];
+    for index in 0..n {
+        for axis in 0..3 {
+            centre[axis] += x[3 * index + axis];
+        }
+    }
+    for component in &mut centre {
+        *component /= n as f64;
+    }
+    let mut extent = 0.0_f64;
+    for index in 0..n {
+        let mut along = 0.0;
+        for axis in 0..3 {
+            along += (x[3 * index + axis] - centre[axis]) * normal[axis];
+        }
+        extent = extent.max(along.abs());
+    }
+    extent = extent.max(1e-6);
+    let mut chosen = Vec::new();
+    let mut shift = 0.0;
+    for _ in 0..8 {
+        shift = (rng.random::<f64>() - 0.5) * extent;
+        let slab = rng.random::<bool>();
+        let half = 0.35 * extent;
+        chosen.clear();
+        for index in 0..n {
+            let mut along = 0.0;
+            for axis in 0..3 {
+                along += (x[3 * index + axis] - centre[axis]) * normal[axis];
+            }
+            let signed = along - shift;
+            if slab {
+                if signed.abs() <= half {
+                    chosen.push(index);
+                }
+            } else if signed > 0.0 {
+                chosen.push(index);
+            }
+        }
+        if (2..n.saturating_sub(1)).contains(&chosen.len()) {
+            break;
+        }
+    }
+    if !(2..n.saturating_sub(1)).contains(&chosen.len()) {
+        return x.to_owned();
+    }
+    let origin = [
+        centre[0] + shift * normal[0],
+        centre[1] + shift * normal[1],
+        centre[2] + shift * normal[2],
+    ];
+    let mut y = x.to_owned();
+    if rng.random::<bool>() {
+        for &index in &chosen {
+            let mut along = 0.0;
+            for axis in 0..3 {
+                along += (y[3 * index + axis] - origin[axis]) * normal[axis];
+            }
+            for axis in 0..3 {
+                y[3 * index + axis] -= 2.0 * along * normal[axis];
+            }
+        }
+    } else {
+        let angle = rng.random::<f64>() * std::f64::consts::TAU;
+        let (sine, cosine) = angle.sin_cos();
+        let mut pivot = [0.0; 3];
+        for &index in &chosen {
+            for axis in 0..3 {
+                pivot[axis] += y[3 * index + axis];
+            }
+        }
+        for component in &mut pivot {
+            *component /= chosen.len() as f64;
+        }
+        for &index in &chosen {
+            let v = [
+                y[3 * index] - pivot[0],
+                y[3 * index + 1] - pivot[1],
+                y[3 * index + 2] - pivot[2],
+            ];
+            let cross = [
+                normal[1] * v[2] - normal[2] * v[1],
+                normal[2] * v[0] - normal[0] * v[2],
+                normal[0] * v[1] - normal[1] * v[0],
+            ];
+            let dot = normal[0] * v[0] + normal[1] * v[1] + normal[2] * v[2];
+            for axis in 0..3 {
+                y[3 * index + axis] = pivot[axis]
+                    + v[axis] * cosine
+                    + cross[axis] * sine
+                    + normal[axis] * dot * (1.0 - cosine);
+            }
+        }
+    }
+    y
 }
 
 fn species_swap<R: Rng + ?Sized>(
