@@ -443,6 +443,95 @@ where
     evaluated_pair(objective, point, anchor)
 }
 
+/// One geometry where the potential itself failed, and how many such calls
+/// this descent has already paid for.
+///
+/// A non-finite answer used to come back as a finite stand-in. The line
+/// search treats that as a real value, so it zooms. On a potential that
+/// fails throughout a neighbourhood (xtb's SCC does, around one contact)
+/// every shorter probe fails too, and each probe pays the full call. The
+/// walker never leaves. A repeat of that geometry is not a new trial.
+struct FailedPotential {
+    at: Array1<f64>,
+    calls: u32,
+    /// The descent has been told to stop calling the potential.
+    closed: bool,
+}
+
+/// Coordinate change below which a trial is the geometry that just failed.
+///
+/// A line-search zoom of a step that landed on one contact moves by far
+/// less than this. A shorten that actually leaves the failure, as a step
+/// that only overshot a finite bowl does, moves by more and is evaluated.
+const SAME_FAILED_GEOMETRY_A: f64 = 1.0e-2;
+
+/// Distinct failed potential calls one descent may pay for.
+///
+/// The first failure is handed back as a penalty so a genuinely shorter
+/// step can still be tried. The next failure, or any repeat of the failed
+/// geometry, closes the descent. The bound is the calls, not the zoom.
+const MAX_FAILED_POTENTIAL_CALLS: u32 = 2;
+
+fn same_failed_geometry(point: ArrayView1<f64>, failed: &Array1<f64>) -> bool {
+    point.len() == failed.len()
+        && point
+            .iter()
+            .zip(failed.iter())
+            .all(|(left, right)| (left - right).abs() <= SAME_FAILED_GEOMETRY_A)
+}
+
+/// Charge one evaluation, and do not retry a potential failure in place.
+///
+/// An overlap refusal never called the potential, so the line search may
+/// still walk off that wall. A potential that returned no finite answer is
+/// a rejected trial: the penalty stands in for a different geometry, and
+/// the same geometry is not submitted again. `None` ends the line search.
+fn charge_rejecting_repeat_failure<O>(
+    objective: &O,
+    led: &mut Ledger,
+    stats: &mut RelaxStats,
+    point: ArrayView1<f64>,
+    anchor: &mut Option<Array1<f64>>,
+    refuse_overlap: bool,
+    wall: CallWall<'_>,
+    failure: &mut Option<FailedPotential>,
+) -> Option<(f64, Array1<f64>, bool)>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    if let Some(failed) = failure.as_mut()
+        && (failed.closed || same_failed_geometry(point, &failed.at))
+    {
+        failed.closed = true;
+        return None;
+    }
+    let overlap = refuse_overlap && wall.refuses(point);
+    let answered =
+        charge_or_refuse_overlap(objective, led, stats, point, anchor, refuse_overlap, wall)?;
+    if answered.2 {
+        *failure = None;
+        return Some(answered);
+    }
+    if overlap {
+        return Some(answered);
+    }
+    let calls = failure
+        .as_ref()
+        .map(|failed| failed.calls)
+        .unwrap_or(0)
+        .saturating_add(1);
+    let closed = calls >= MAX_FAILED_POTENTIAL_CALLS;
+    *failure = Some(FailedPotential {
+        at: point.to_owned(),
+        calls,
+        closed,
+    });
+    if closed {
+        return None;
+    }
+    Some(answered)
+}
+
 fn warm_relax<'a, O>(
     objective: &'a O,
     cfg: &'a Config,
@@ -475,7 +564,11 @@ where
     let mut anchor: Option<Array1<f64>> = None;
     let refuse_overlap = cfg.species.is_some();
     let wall = CallWall::of(cfg);
+    let mut failure: Option<FailedPotential> = None;
     move |led, x, iters| {
+        // A new quench. A failure closed the previous descent; this
+        // proposal is a different trial.
+        failure.take();
         opt.forget();
         let before = led.spent();
         let screening = iters <= screen_iters;
@@ -503,7 +596,7 @@ where
                 let cutoff = two.cutoff_for(x);
                 let shape = two.shape_for(x);
                 let (_, phase_one, _) = opt.minimize(x, iters, |v| {
-                    let (e, g, physical) = charge_or_refuse_overlap(
+                    let (e, g, physical) = charge_rejecting_repeat_failure(
                         objective,
                         led,
                         stats,
@@ -511,6 +604,7 @@ where
                         &mut anchor,
                         refuse_overlap,
                         wall,
+                        &mut failure,
                     )?;
                     if !physical {
                         return Some((e, g));
@@ -554,7 +648,7 @@ where
             x,
             iters,
             |v| {
-                let answered = charge_or_refuse_overlap(
+                let answered = charge_rejecting_repeat_failure(
                     objective,
                     led,
                     stats,
@@ -562,6 +656,7 @@ where
                     &mut anchor,
                     refuse_overlap,
                     wall,
+                    &mut failure,
                 )?;
                 if answered.2
                     && answered.0.is_finite()
@@ -694,7 +789,10 @@ where
             0
         };
         for _ in 0..continuation_rounds {
-            if converged || led.remaining() == 0 {
+            if converged
+                || led.remaining() == 0
+                || failure.as_ref().is_some_and(|failed| failed.closed)
+            {
                 break;
             }
             if refuse_overlap
@@ -711,7 +809,7 @@ where
             }
             let spent_at = led.spent();
             let (f2, xr2, _) = opt.minimize(xr.view(), iters, |v| {
-                let answered = charge_or_refuse_overlap(
+                let answered = charge_rejecting_repeat_failure(
                     objective,
                     led,
                     stats,
@@ -719,6 +817,7 @@ where
                     &mut anchor,
                     refuse_overlap,
                     wall,
+                    &mut failure,
                 )?;
                 if answered.2
                     && answered.0.is_finite()
@@ -1842,6 +1941,108 @@ mod tests {
             "best landed at {} instead of the finite minimum",
             best[3]
         );
+    }
+
+    /// A potential that fails throughout a neighbourhood must not be asked
+    /// for that neighbourhood again. The line search used to zoom there, and
+    /// every probe paid a full call, so a run sat on one contact until the
+    /// budget was gone.
+    #[test]
+    fn a_potential_that_fails_in_a_region_cannot_stall_the_run() {
+        use eindir_core::gradient::Gradient;
+        use eindir_core::{Bounds, Objective};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Trap {
+            bounds: Bounds<f64>,
+            failures: AtomicUsize,
+            calls: AtomicUsize,
+        }
+
+        impl Trap {
+            fn pair(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                let place = x.get(3).copied().unwrap_or(f64::NAN);
+                // A thick band, not a thin wall a shorten can step across.
+                if !place.is_finite() || (0.5..=1.5).contains(&place) {
+                    self.failures.fetch_add(1, Ordering::Relaxed);
+                    return (f64::NAN, Array1::from_elem(x.len(), f64::NAN));
+                }
+                let mut energy = 0.0;
+                let mut gradient = Array1::zeros(x.len());
+                for (i, coordinate) in x.iter().enumerate() {
+                    let aim = if i == 3 { 3.0 } else { 0.0 };
+                    let delta = coordinate - aim;
+                    energy += 0.5 * 10.0 * delta * delta;
+                    gradient[i] = 10.0 * delta;
+                }
+                (energy, gradient)
+            }
+        }
+
+        impl Objective<f64> for Trap {
+            fn dim(&self) -> usize {
+                6
+            }
+            fn bounds(&self) -> &Bounds<f64> {
+                &self.bounds
+            }
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                self.pair(x).0
+            }
+        }
+
+        impl Gradient<f64> for Trap {
+            fn dim(&self) -> usize {
+                6
+            }
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                self.pair(x).1
+            }
+        }
+
+        impl DifferentiableObjective<f64> for Trap {
+            fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+                self.pair(x)
+            }
+        }
+
+        let trap = Trap {
+            bounds: Bounds::new(Array1::from_elem(6, -8.0), Array1::from_elem(6, 8.0), 0.0),
+            failures: AtomicUsize::new(0),
+            calls: AtomicUsize::new(0),
+        };
+        let mut cfg = Config::for_cluster(2);
+        cfg.max_hops = Some(0);
+        cfg.bayes_screen = false;
+        cfg.adaptive_screen = false;
+        cfg.screen_steps = 0;
+        // Just outside the failing band. The first steepest step lands
+        // inside it, and so does the shorten.
+        let start = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.05, 0.0, 0.0]);
+        let mut ledger = Ledger::new(2_000);
+        let (out, _) = search_from(&trap, &cfg, &mut ledger, start.view(), 1)
+            .expect("a failing region ends the quench");
+        let failures = trap.failures.load(Ordering::Relaxed);
+        let calls = trap.calls.load(Ordering::Relaxed);
+        assert!(
+            failures <= 4,
+            "the failing region was retried {failures} times"
+        );
+        assert!(
+            failures < calls,
+            "every call failed, so the walker never left"
+        );
+        assert!(
+            ledger.spent() < 50,
+            "the stall spent {} calls",
+            ledger.spent()
+        );
+        assert!(
+            out.best.is_finite() || ledger.best.is_infinite(),
+            "a non-finite penalty was recorded as the best"
+        );
+        let _ = out;
     }
 
     /// The water Good-Turing arm retires only from quench boundaries. A search
