@@ -3138,31 +3138,97 @@ fn tesseral_al(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
 fn ylm_real(u: [f64; 3], l_max: usize) -> Vec<f64> {
     let n_lm = (l_max + 1) * (l_max + 1);
     let mut y = vec![0.0; n_lm];
+    with_harmonic_scale(l_max, |scale| {
+        let side = l_max + 1;
+        if l_max <= 8 {
+            let mut p = [0.0; 9 * 9];
+            let mut cosph = [1.0; 9];
+            let mut sinph = [0.0; 9];
+            ylm_one(u, l_max, scale, &mut p, &mut cosph, &mut sinph, &mut y);
+        } else {
+            let mut p = vec![0.0; side * side];
+            let mut cosph = vec![1.0; side];
+            let mut sinph = vec![0.0; side];
+            ylm_one(u, l_max, scale, &mut p, &mut cosph, &mut sinph, &mut y);
+        }
+    });
+    y
+}
+
+/// `n0(l)` and `n0(l) * sqrt(2 (l-m)!/(l+m)!)`.
+///
+/// The finite-difference shifts of one direction repeat this weight for every
+/// `(l, m)`. It does not depend on the direction, so one table serves the
+/// value and all six shifts.
+struct HarmonicScale {
+    n0: Vec<f64>,
+    /// `n_pos[l * side + m]` for `m >= 1`.
+    n_pos: Vec<f64>,
+    side: usize,
+}
+
+impl HarmonicScale {
+    fn build(l_max: usize) -> Self {
+        let side = l_max + 1;
+        let mut n0 = vec![0.0; side];
+        let mut n_pos = vec![0.0; side * side];
+        for l in 0..=l_max {
+            let n = ((2.0 * l as f64 + 1.0) / (4.0 * PI)).sqrt();
+            n0[l] = n;
+            for m in 1..=l {
+                let nf = fact_ratio(l - m, l + m);
+                n_pos[l * side + m] = n * (nf * 2.0).sqrt();
+            }
+        }
+        Self { n0, n_pos, side }
+    }
+}
+
+fn with_harmonic_scale<R>(l_max: usize, body: impl FnOnce(&HarmonicScale) -> R) -> R {
+    const MAX: usize = 16;
+    use std::sync::OnceLock;
+    static TABLES: [OnceLock<HarmonicScale>; MAX + 1] = [const { OnceLock::new() }; MAX + 1];
+    if l_max <= MAX {
+        body(TABLES[l_max].get_or_init(|| HarmonicScale::build(l_max)))
+    } else {
+        body(&HarmonicScale::build(l_max))
+    }
+}
+
+/// One direction. Diagonal, subdiagonal, then `(a z P_{l-1} - b P_{l-2}) / (l-m)`.
+fn ylm_one(
+    u: [f64; 3],
+    l_max: usize,
+    scale: &HarmonicScale,
+    p: &mut [f64],
+    cosph: &mut [f64],
+    sinph: &mut [f64],
+    y: &mut [f64],
+) {
+    let side = l_max + 1;
     let (x, yy, z) = (u[0], u[1], u[2]);
     let rho2 = x * x + yy * yy;
     let rho = rho2.sqrt();
-    // Associated Legendre P_l^m(z) on the unit sphere, sinθ = ρ.
-    let mut p = vec![vec![0.0; l_max + 1]; l_max + 1];
-    p[0][0] = 1.0;
+    p[0] = 1.0;
     for m in 1..=l_max {
-        p[m][m] = -(2.0 * m as f64 - 1.0) * rho * p[m - 1][m - 1];
+        let prev = p[(m - 1) * side + (m - 1)];
+        p[m * side + m] = -(2.0 * m as f64 - 1.0) * rho * prev;
     }
     for m in 0..l_max {
-        if m < l_max {
-            p[m + 1][m] = z * (2.0 * m as f64 + 1.0) * p[m][m];
-        }
+        let diag = p[m * side + m];
+        p[(m + 1) * side + m] = z * (2.0 * m as f64 + 1.0) * diag;
     }
     for l in 2..=l_max {
         for m in 0..=l.saturating_sub(2) {
             let a = 2.0 * l as f64 - 1.0;
             let b = (l + m - 1) as f64;
             let d = (l - m) as f64;
-            p[l][m] = (a * z * p[l - 1][m] - b * p[l - 2][m]) / d;
+            let p1 = p[(l - 1) * side + m];
+            let p2 = p[(l - 2) * side + m];
+            p[l * side + m] = (a * z * p1 - b * p2) / d;
         }
     }
-    let mut cosph = vec![1.0; l_max + 1];
-    let mut sinph = vec![0.0; l_max + 1];
-    if rho > 1e-14 {
+    if rho > 1e-14 && l_max >= 1 {
         cosph[1] = x / rho;
         sinph[1] = yy / rho;
         for m in 2..=l_max {
@@ -3171,16 +3237,15 @@ fn ylm_real(u: [f64; 3], l_max: usize) -> Vec<f64> {
         }
     }
     for l in 0..=l_max {
-        let n0 = ((2.0 * l as f64 + 1.0) / (4.0 * PI)).sqrt();
-        y[lm_index(l, 0)] = n0 * p[l][0];
+        let n0 = scale.n0[l];
+        y[lm_index(l, 0)] = n0 * p[l * side];
         for m in 1..=l {
-            let nf = fact_ratio(l - m, l + m);
-            let nlm = n0 * (nf * 2.0).sqrt();
-            y[lm_index(l, m as i32)] = nlm * p[l][m] * cosph[m];
-            y[lm_index(l, -(m as i32))] = nlm * p[l][m] * sinph[m];
+            let nlm = scale.n_pos[l * scale.side + m];
+            let p_lm = p[l * side + m];
+            y[lm_index(l, m as i32)] = nlm * p_lm * cosph[m];
+            y[lm_index(l, -(m as i32))] = nlm * p_lm * sinph[m];
         }
     }
-    y
 }
 
 fn fact_ratio(n_minus: usize, n_plus: usize) -> f64 {
@@ -4536,6 +4601,117 @@ mod tests {
         for (i, (a, b)) in got.iter().zip(reference.iter()).enumerate() {
             assert_eq!(a.to_bits(), b.to_bits(), "pullback coord {i}: {a} vs {b}");
         }
+    }
+
+    #[test]
+    fn the_shared_harmonic_weights_match_the_per_call_recurrence_bit_for_bit() {
+        let dirs = [
+            [0.36_f64, -0.48, 0.8],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+            [1.0, 0.0, 0.0],
+            [1e-16, -1e-16, 1.0],
+            [-0.2, 0.3, (1.0 - 0.04 - 0.09_f64).sqrt()],
+        ];
+        for l_max in [1usize, 3, 4, 6, 8, 9] {
+            for u in dirs {
+                let got = ylm_real(u, l_max);
+                let want = ylm_real_reference(u, l_max);
+                for (i, (a, b)) in got.iter().zip(&want).enumerate() {
+                    assert_eq!(a.to_bits(), b.to_bits(), "l {l_max} y {i}: {a} vs {b}");
+                }
+                if l_max > 3 {
+                    let (y, dy) = tesseral_al(u, l_max);
+                    let (ry, rdy) = tesseral_al_reference(u, l_max);
+                    for (i, (a, b)) in y.iter().zip(&ry).enumerate() {
+                        assert_eq!(a.to_bits(), b.to_bits(), "l {l_max} Y {i}");
+                    }
+                    for (i, (a, b)) in dy.iter().zip(&rdy).enumerate() {
+                        for k in 0..3 {
+                            assert_eq!(a[k].to_bits(), b[k].to_bits(), "l {l_max} dY {i} axis {k}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn ylm_real_reference(u: [f64; 3], l_max: usize) -> Vec<f64> {
+        let n_lm = (l_max + 1) * (l_max + 1);
+        let mut y = vec![0.0; n_lm];
+        let (x, yy, z) = (u[0], u[1], u[2]);
+        let rho2 = x * x + yy * yy;
+        let rho = rho2.sqrt();
+        let mut p = vec![vec![0.0; l_max + 1]; l_max + 1];
+        p[0][0] = 1.0;
+        for m in 1..=l_max {
+            p[m][m] = -(2.0 * m as f64 - 1.0) * rho * p[m - 1][m - 1];
+        }
+        for m in 0..l_max {
+            if m < l_max {
+                p[m + 1][m] = z * (2.0 * m as f64 + 1.0) * p[m][m];
+            }
+        }
+        for l in 2..=l_max {
+            for m in 0..=l.saturating_sub(2) {
+                let a = 2.0 * l as f64 - 1.0;
+                let b = (l + m - 1) as f64;
+                let d = (l - m) as f64;
+                p[l][m] = (a * z * p[l - 1][m] - b * p[l - 2][m]) / d;
+            }
+        }
+        let mut cosph = vec![1.0; l_max + 1];
+        let mut sinph = vec![0.0; l_max + 1];
+        if rho > 1e-14 {
+            cosph[1] = x / rho;
+            sinph[1] = yy / rho;
+            for m in 2..=l_max {
+                cosph[m] = cosph[1] * cosph[m - 1] - sinph[1] * sinph[m - 1];
+                sinph[m] = sinph[1] * cosph[m - 1] + cosph[1] * sinph[m - 1];
+            }
+        }
+        for l in 0..=l_max {
+            let n0 = ((2.0 * l as f64 + 1.0) / (4.0 * PI)).sqrt();
+            y[lm_index(l, 0)] = n0 * p[l][0];
+            for m in 1..=l {
+                let nf = fact_ratio(l - m, l + m);
+                let nlm = n0 * (nf * 2.0).sqrt();
+                y[lm_index(l, m as i32)] = nlm * p[l][m] * cosph[m];
+                y[lm_index(l, -(m as i32))] = nlm * p[l][m] * sinph[m];
+            }
+        }
+        y
+    }
+
+    fn tesseral_al_reference(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
+        let y = ylm_real_reference(u, l_max);
+        let n_lm = y.len();
+        let mut dy = vec![[0.0; 3]; n_lm];
+        let eps = 1e-7;
+        for a in 0..3 {
+            let mut up = u;
+            up[a] += eps;
+            let np = (up[0] * up[0] + up[1] * up[1] + up[2] * up[2]).sqrt();
+            if np > 1e-15 {
+                up[0] /= np;
+                up[1] /= np;
+                up[2] /= np;
+            }
+            let yp = ylm_real_reference(up, l_max);
+            let mut um = u;
+            um[a] -= eps;
+            let nm = (um[0] * um[0] + um[1] * um[1] + um[2] * um[2]).sqrt();
+            if nm > 1e-15 {
+                um[0] /= nm;
+                um[1] /= nm;
+                um[2] /= nm;
+            }
+            let ym = ylm_real_reference(um, l_max);
+            for i in 0..n_lm {
+                dy[i][a] = (yp[i] - ym[i]) / (2.0 * eps);
+            }
+        }
+        (y, dy)
     }
 
     fn pt111_heptamer() -> (Array1<f64>, Vec<u32>) {
