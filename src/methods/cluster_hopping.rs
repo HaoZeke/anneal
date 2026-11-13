@@ -1736,6 +1736,31 @@ fn quench_is_sane(cfg: &Config, energy: f64, x: ArrayView1<f64>) -> bool {
     energy.is_finite() && structure_is_sane(x, minimum)
 }
 
+/// Whether a quenched point cluster has shed an atom past the potential's range.
+///
+/// The atom has no neighbour within the neighbour cutoff and its gradient is
+/// exactly zero, so the potential acts on it not at all. No quench brings it
+/// back, and the hops that follow move it on a flat surface: on Tersoff
+/// carbon half the accepted hops of a ten-atom walk held such an atom. A
+/// tail that never reaches zero, as in Lennard-Jones and Morse, leaves some
+/// force on every atom and never meets the test. Rigid bodies and labelled
+/// species keep their own notion of contact and are not judged here.
+fn sheds_free_atom(cfg: &Config, x: ArrayView1<f64>, gradient: Option<ArrayView1<f64>>) -> bool {
+    let n = cfg.n_points;
+    if cfg.move_library.is_rigid_body()
+        || cfg.species.is_some()
+        || n < 2
+        || x.len() != 3 * n
+        || cfg.neighbour_cutoff <= 0.0
+    {
+        return false;
+    }
+    let free = |atom: usize| gradient.is_none_or(|g| (0..3).all(|k| g[3 * atom + k] == 0.0));
+    connectivity_groups(x, n, cfg.neighbour_cutoff)
+        .iter()
+        .any(|group| group.len() == 1 && free(group[0]))
+}
+
 fn gradient_is_converged(gradient: ArrayView1<f64>, dimensions: usize, tolerance: f64) -> bool {
     dimensions > 0
         && gradient.len() == dimensions
@@ -6472,14 +6497,23 @@ where
         // as an answer, which is the one thing it cannot be.
         let hit_target = ledger.below_target(e_new);
         let gradient_required = grad.is_some();
-        let validation_gradient = if unquenched {
+        let quenched_gradient = if unquenched {
             None
         } else {
-            grad.as_deref_mut().and_then(|g| {
-                g(ledger, x_new.view())
-                    .filter(|values| answer_gradient_ok(cfg, values.view(), x_new.len()))
-            })
+            grad.as_deref_mut().and_then(|g| g(ledger, x_new.view()))
         };
+        // A chain already holding a free atom, as a random start can, still
+        // moves, so it is not held where every hop is refused. Without a
+        // gradient the current state is judged by its geometry alone.
+        if let Some(g) = quenched_gradient.as_ref()
+            && sheds_free_atom(cfg, x_new.view(), Some(g.view()))
+            && !sheds_free_atom(cfg, x.view(), None)
+        {
+            hops += 1;
+            continue;
+        }
+        let validation_gradient =
+            quenched_gradient.filter(|values| answer_gradient_ok(cfg, values.view(), x_new.len()));
         let recordable =
             hit_target || (!unquenched && (!gradient_required || validation_gradient.is_some()));
         // Every certified quench is reported, adopted or not: the history's
@@ -10840,6 +10874,23 @@ mod tests {
             let r = (0..3).map(|k| x[3 * i + k].powi(2)).sum::<f64>().sqrt();
             assert!(r <= 1.0 + 1e-9, "point {i} left the container at {r}");
         }
+    }
+
+    #[test]
+    fn an_atom_past_the_cutoff_with_no_force_is_shed() {
+        let cfg = Config::recommended(3);
+        let cut = cfg.neighbour_cutoff;
+        let bonded = Array1::from(vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0]);
+        assert!(!sheds_free_atom(&cfg, bonded.view(), None));
+        let apart = Array1::from(vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1 + cut, 0.0]);
+        assert!(sheds_free_atom(&cfg, apart.view(), None));
+        let mut gradient = Array1::from(vec![0.1, 0.0, 0.0, -0.1, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        assert!(sheds_free_atom(&cfg, apart.view(), Some(gradient.view())));
+        gradient[7] = 1.0e-300;
+        assert!(!sheds_free_atom(&cfg, apart.view(), Some(gradient.view())));
+        let mut labelled = cfg.clone();
+        labelled.species = Some(vec![29, 29, 79]);
+        assert!(!sheds_free_atom(&labelled, apart.view(), None));
     }
 
     #[test]
