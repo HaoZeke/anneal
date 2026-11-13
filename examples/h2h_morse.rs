@@ -40,6 +40,8 @@ fn system_spec(name: &str) -> Option<Spec> {
     // at that range. Budgets follow the Lennard-Jones paper list: 4e5 at
     // 38, 1e6 at 55, and 4e6 at 75 and above.
     let (n, rho, reference) = match name {
+        "m30r6" => (30, 6.0, -118.432844),
+        "m30r14" => (30, 14.0, -106.835790),
         "m38r6" => (38, 6.0, -157.477108),
         "m38r14" => (38, 14.0, -144.321054),
         "m55r6" => (55, 6.0, -250.286609),
@@ -320,6 +322,11 @@ mod tests {
 
     #[test]
     fn the_cambridge_morse_table_is_the_hit_target() {
+        let m30_6 = system_spec("m30r6").unwrap();
+        assert_eq!((m30_6.n, m30_6.budget), (30, 400_000));
+        assert!((m30_6.reference + 118.432844).abs() < 1e-12);
+        let m30_14 = system_spec("m30r14").unwrap();
+        assert!((m30_14.reference + 106.835790).abs() < 1e-12);
         let m38_6 = system_spec("m38r6").unwrap();
         assert_eq!((m38_6.n, m38_6.budget), (38, 400_000));
         assert!((m38_6.rho - 6.0).abs() < 1e-12);
