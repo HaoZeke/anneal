@@ -408,9 +408,8 @@ fn isolated_layer_slides(x: ArrayView1<f64>, require_dominant: bool) -> Vec<Arra
                         signed[a] += (x[3 * a + t] - origin[t]) * normal[t];
                     }
                 }
-                let mut layer: Vec<usize> = (0..n)
-                    .filter(|&a| signed[a].abs() < 0.1 * nn)
-                    .collect();
+                let mut layer: Vec<usize> =
+                    (0..n).filter(|&a| signed[a].abs() < 0.1 * nn).collect();
                 if layer.len() < 6 || layer.len() * 2 >= n {
                     continue;
                 }
@@ -738,9 +737,7 @@ fn in_plane_directions(x: ArrayView1<f64>, p: usize, q: usize, normal: [f64; 3])
     for t in 0..3 {
         axis[t] = x[3 * q + t] - x[3 * p + t];
     }
-    let al = (axis.iter().map(|v| v * v).sum::<f64>())
-        .sqrt()
-        .max(1e-12);
+    let al = (axis.iter().map(|v| v * v).sum::<f64>()).sqrt().max(1e-12);
     for value in &mut axis {
         *value /= al;
     }

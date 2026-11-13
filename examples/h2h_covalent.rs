@@ -202,7 +202,10 @@ fn dimer_scales(potential: &Potential, mut charge: impl FnMut() -> bool) -> Opti
         }
         let e = potential.dimer(r);
         grid.push((r, e));
-        let lowest = grid.iter().map(|point| point.1).fold(f64::INFINITY, f64::min);
+        let lowest = grid
+            .iter()
+            .map(|point| point.1)
+            .fold(f64::INFINITY, f64::min);
         if lowest < 0.0 && e > 0.5 * lowest {
             break;
         }
@@ -477,7 +480,10 @@ fn cmd_scales(args: &[String]) -> i32 {
         dimer_scales(&Potential::open(spec.kind), || true).expect("a bound dimer");
     println!("{length:.12}");
     println!("{energy:.12}");
-    println!("{:.12}", Config::with_scales(spec.n, length, energy).container);
+    println!(
+        "{:.12}",
+        Config::with_scales(spec.n, length, energy).container
+    );
     0
 }
 

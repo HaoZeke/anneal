@@ -273,9 +273,7 @@ pub(crate) fn mackay_cap(n: usize, nearest: f64) -> Array1<f64> {
         return Array1::zeros(0);
     }
     let vertex = sites[1];
-    sites.sort_by(|left, right| {
-        dist2(left, &vertex).total_cmp(&dist2(right, &vertex))
-    });
+    sites.sort_by(|left, right| dist2(left, &vertex).total_cmp(&dist2(right, &vertex)));
     sites.truncate(n);
     scale_sites(&sites, nearest)
 }

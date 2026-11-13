@@ -2922,21 +2922,26 @@ mod move_scaling_tests {
     #[test]
     fn one_repeated_label_takes_the_unlabelled_soap_hop() {
         let pure = Config::recommended(8).with_species(vec![79; 8], None);
-        assert!(pure.move_library.kernels(&pure).iter().any(|kernel| matches!(
-            kernel,
-            ClusterMove::Soap {
-                species: None,
-                ..
-            }
-        )));
+        assert!(
+            pure.move_library
+                .kernels(&pure)
+                .iter()
+                .any(|kernel| matches!(kernel, ClusterMove::Soap { species: None, .. }))
+        );
         let mixed = Config::recommended(8).with_species(vec![29, 29, 29, 29, 79, 79, 79, 79], None);
-        assert!(mixed.move_library.kernels(&mixed).iter().any(|kernel| matches!(
-            kernel,
-            ClusterMove::Soap {
-                species: Some(_),
-                ..
-            }
-        )));
+        assert!(
+            mixed
+                .move_library
+                .kernels(&mixed)
+                .iter()
+                .any(|kernel| matches!(
+                    kernel,
+                    ClusterMove::Soap {
+                        species: Some(_),
+                        ..
+                    }
+                ))
+        );
     }
 
     #[test]

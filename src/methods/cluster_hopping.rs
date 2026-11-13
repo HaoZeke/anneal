@@ -3885,8 +3885,8 @@ where
                             })
                         });
                         let candidate_gradient = candidate_gradient.flatten();
-                        let recordable = candidate_sane
-                            && (!gradient_required || candidate_gradient.is_some());
+                        let recordable =
+                            candidate_sane && (!gradient_required || candidate_gradient.is_some());
                         let improved = recordable && candidate_energy < before - 1e-4;
                         if !improved {
                             if !recordable {
@@ -3946,8 +3946,7 @@ where
                             if ledger.remaining() == 0 || ledger.target_reached() {
                                 break;
                             }
-                            let (slide_energy, slid) =
-                                relax(ledger, slide.view(), cfg.relax_steps);
+                            let (slide_energy, slid) = relax(ledger, slide.view(), cfg.relax_steps);
                             if ledger.stopped() {
                                 break;
                             }
@@ -3960,8 +3959,8 @@ where
                                 })
                             });
                             let slide_gradient = slide_gradient.flatten();
-                            let slide_recordable = slide_sane
-                                && (!gradient_required || slide_gradient.is_some());
+                            let slide_recordable =
+                                slide_sane && (!gradient_required || slide_gradient.is_some());
                             let slide_improved =
                                 slide_recordable && slide_energy < ledger.best - 1e-10;
                             if slide_recordable {
@@ -4057,9 +4056,7 @@ where
                 binary_geometry::IcosahedronJoin::Compact,
                 binary_geometry::IcosahedronJoin::Linear,
             ] {
-                grown.push(binary_geometry::polyicosahedral_cut(
-                    n_atoms, join, nearest,
-                ));
+                grown.push(binary_geometry::polyicosahedral_cut(n_atoms, join, nearest));
             }
             grown.push(binary_geometry::mackay_cut(n_atoms, nearest));
             let mut side_rng = StdRng::seed_from_u64(0x0C10_5ED0);

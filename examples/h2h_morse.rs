@@ -161,10 +161,12 @@ fn cmd_run(args: &[String]) -> i32 {
         .iter()
         .find(|(_, _, _, energy)| *energy <= level)
         .map(|(_, spent, _, _)| *spent);
-    let evals = if hit { at_hit.unwrap_or(budget) } else { budget };
-    println!(
-        "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s"
-    );
+    let evals = if hit {
+        at_hit.unwrap_or(budget)
+    } else {
+        budget
+    };
+    println!("system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s");
     let outside = (wall - pot_s).max(0.0);
     println!(
         "{system},anneal,{seed},{budget},{hit},{evals},{},{wall:.6},{:.8},{pot_s:.6},{outside:.6}",

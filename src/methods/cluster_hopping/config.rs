@@ -1877,8 +1877,10 @@ mod coverage_behaviour {
         assert!(!mixed.monoatomic());
         assert!(!mixed.packing_cna_applies());
         assert!(!Config::recommended_tip4p(4).packing_cna_applies());
-        assert!(!Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0)
-            .packing_cna_applies());
+        assert!(
+            !Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0)
+                .packing_cna_applies()
+        );
     }
 
     #[test]
