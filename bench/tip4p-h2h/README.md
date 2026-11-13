@@ -136,3 +136,16 @@ At 8 molecules the inverted starts gave the control 1/6 and the radius arm 6/6. 
 Some (H₂O)₁₅ walls in this session are 46–61 s against about 41 s elsewhere, with the same 2_000_000 calls. The counts and energies do not depend on wall time.
 
 The new rows are in `rows.csv`. The medians of those rows are `summary-same-start.csv`.
+
+## Anneal on the same starts
+
+`scripts/tip4p_h2h/enter_anneal_start.sh` runs anneal at 15 and 20 molecules on the same-start harness, code `anneal-79c13d53`. `h2h_seed` is built from this branch on develop `79c13d53`, with the converter fix below. Each seed writes its start, checks GMIN's `CHECKD 0` energy of it against anneal's first evaluation, and runs from it at 2_000_000 calls with the stop at the reference plus 0.001 kJ/mol. In the same session GMIN reruns both same-start arms on those starts. The 12 starts are byte-identical to the ones the same-start GMIN rows read, and the largest start-energy difference is 8.0e-5 kJ/mol. All 24 GMIN reruns repeat their recorded hit, call count and lowest energy. They are in `gmin-recheck-same-start.csv`, beside the rows they repeat, and not in `rows.csv`.
+
+| Size | `gmin-control-same-start` | `gmin-radius-same-start` | `anneal-79c13d53` | anneal median calls |
+| --- | --- | --- | --- | --- |
+| (H₂O)₁₅ | 0/6 | 0/6 | 6/6 | 1158631 |
+| (H₂O)₂₀ | 0/6 | 0/6 | 3/6 | 1696341 |
+
+Every `anneal-79c13d53` row has the hit, call count, charged count, lowest energy and basin count of the `anneal-shell` row for its seed. At (H₂O)₂₀ the misses are seeds 2000, 2003 and 2005 in both, lowest −864.746, −859.404 and −863.975 kJ/mol. The medians are `summary-anneal-same-start.csv`.
+
+The interleaved converters `block_from_interleaved_gmin` and `interleaved_gmin_from_block` negated every rotation, on the claim that GMIN rotates the other way. GMIN's `NTIP` runs NEWTIP, which rotates like the chart, so they now only reorder. An optbench `.aa` start is GMIN's `coords`, every centre then every angle-axis vector. `binary_water_campaign` read it as interleaved rows and negated it, so it opened another start: 500_tip4p15/0.aa is 155.557 kJ/mol to GMIN's `CHECKD 0` and to the new reader. `--legacy-interleaved` keeps the old reading. The campaign writes energies only and none of its rows are in the tree. `h2h_seed` writes the same bytes as before. On seeds 2000–2005, 100_000-call `h2h_seed` runs on LJ38, Morse38 at ρ=6 and (H₂O)₁₅ and (H₂O)₂₀, and `h2h_metal` runs on Zn38 and Cu19Au19, give the same traces, and the same rows apart from timings, on this branch as on develop `79c13d53`. `tests/lj_trajectory_pin.rs` passes. Only develop's TIP4P `.gmin` files differ, by the sign of every rotation.

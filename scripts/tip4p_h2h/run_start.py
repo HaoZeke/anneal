@@ -83,7 +83,9 @@ def gmin_start_energy(gmin: Path, data: Path, n: int, seed: int, start: Path, wo
     return float(found.group(1))
 
 
-def run_anneal(binary: Path, n: int, seed: int, work: Path) -> dict[str, str]:
+def run_anneal(
+    binary: Path, n: int, seed: int, work: Path, code: str = ANNEAL_CODE
+) -> dict[str, str]:
     budget = PAPER_BUDGETS[n]
     prefix = work / f"anneal-tip4p{n}-s{seed}"
     log = work / f"tip4p{n}-s{seed}-anneal.log"
@@ -121,7 +123,7 @@ def run_anneal(binary: Path, n: int, seed: int, work: Path) -> dict[str, str]:
         raise RuntimeError(f"anneal budget {fields}")
     return {
         "system": f"tip4p{n}",
-        "code": ANNEAL_CODE,
+        "code": code,
         "seed": str(seed),
         "budget": str(budget),
         "hit": fields["hit"],
