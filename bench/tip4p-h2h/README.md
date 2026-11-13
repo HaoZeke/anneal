@@ -83,3 +83,35 @@ A full-budget call on (H₂O)₂₁ costs 9.68 µs inside the potential and 3.55
 LJ38, LJ75, LJ98 and LJ104 keep the same evaluation counts as on `4fdc37e8`, including on the outside-cut at `2d00f044`. LJ38 is 6/6, LJ75 is 6/6, LJ98 is 5/6, and LJ104 is 6/6.
 
 The new rows are in `rows.csv`. The medians of those rows are `summary-shell.csv`.
+
+## Container radius
+
+`examples/h2h_gmin_tip4p.data` sets no `RADIUS`. For `NTIP`, `io1.f90` then applies the Lennard-Jones container, \((2 + (3N/17.77)^{1/3})\,2^{1/6}\) with `NATOMS` counting the centre and angle-axis rows, two per water. GMIN prints `io1> Container radius=        4.1724973071` for (H₂O)₁₅, seed 2000. After every step `takestep.f90` moves any molecular centre beyond the radius one diameter toward the origin. The quench is not confined, because `NEWTIP` does not call `RAD`, and a hit is scored on the quenched energy.
+
+The (H₂O)₂₀ Wales–Hodges minimum has centres of mass 4.61 Å from its centroid, outside the 4.37 Å container. At 15 molecules the margin is 0.37 Å. On seed 2000, over 100_000 calls with `DEBUG`, every (H₂O)₁₅ and (H₂O)₂₀ step moved centres, 2140 times in 453 steps and 1718 times in 427. A quench took 221 and 234 calls. With the radius below it took 64 and 106, and no centre was moved.
+
+`examples/h2h_gmin_tip4p_radius<n>.data` add `RADIUS`: the largest oxygen distance from the oxygen centroid of the Wales–Hodges minimum, plus 3 Å, at every size. `scripts/tip4p_h2h/gm_radius.py` prints it from the Cambridge Cluster Database files, `radius/TIP4P-4.xyz`, `radius/TIP4P-8.xyz` and the 15 and 20 fixtures. With `--gmin` it writes each minimum as a NEWTIP block; GMIN scores all four as hits within two calls.
+
+| Size | LJ container (Å) | O extent (Å) | Centre-of-mass extent (Å) | `RADIUS` (Å) |
+| --- | --- | --- | --- | --- |
+| (H₂O)₄ | 3.4856 | 1.9229 | 1.9257 | 4.9229 |
+| (H₂O)₈ | 3.8081 | 2.4544 | 2.4791 | 5.4544 |
+| (H₂O)₁₅ | 4.1725 | 3.7744 | 3.8031 | 6.7744 |
+| (H₂O)₂₀ | 4.3665 | 4.5769 | 4.6099 | 7.5769 |
+
+`scripts/tip4p_h2h/enter_radius.sh` appends two fixed-step GMIN arms in one session. `gmin-radius` reads the radius file. `gmin-control` reads the unchanged data file. Seeds are 2000–2005, serial, `taskset -c 0`, hostname `bench` under `sudo unshare --uts`, working directory `/work`. The budget is 2_000_000 calls; 4 and 8 are not in `PAPER_BUDGETS` and use the (H₂O)₂₀ ceiling. References are the Cambridge headers, −116.5904186160 and −305.5183221676 kJ/mol for 4 and 8. A seed's two arms run back to back from the start `h2h_seed` writes for it, at `3cab6d7e`. That start is byte-identical to the one `1ba7417e` writes.
+
+GMIN is `scripts/gmin_h2h/build_gmin.sh` at revision `aac1548a`, gfortran 13.3.0, Ubuntu reference BLAS and LAPACK 3.12.0. This build does not time `NEWTIP`, so the inside and outside cells are blank. It does not reproduce the earlier GMIN rows: (H₂O)₁₅ seed 2000 ends at −619.701 kJ/mol here and −621.166 in the fixed-step row. The control arm is the comparison for the radius.
+
+| Size | GMIN, fixed step | `gmin-control` | `gmin-radius` | anneal-shell | Control best, median | Radius best, median |
+| --- | --- | --- | --- | --- | --- | --- |
+| (H₂O)₄ | | 6/6 | 6/6 | | −116.591 | −116.591 |
+| (H₂O)₈ | | 1/6 | 6/6 | | −297.794 | −305.519 |
+| (H₂O)₁₅ | 0/6 | 1/6 | 0/6 | 6/6 | −622.349 | −613.067 |
+| (H₂O)₂₀ | 0/6 | 0/6 | 0/6 | 3/6 | −853.324 | −838.325 |
+
+At 8 molecules four control seeds stop at −297.794 kJ/mol and the radius arm hits all six, median 367_389.5 calls. At 15 and 20 the control's lowest energy is below the radius arm's on all twelve seeds, by 0.11 to 20.72 kJ/mol. The (H₂O)₁₅ radius-arm minima are compact cages with 24 or 25 oxygen contacts, against 25 in the global minimum, and no molecule apart. Moving a centre by one diameter places a surface water on the far side of the cage; that may be the move the control is using. The earlier 0/6 at 15 and 20 is not the container.
+
+`h2h_seed` writes each angle-axis vector negated. NEWTIP's site placement is the Rodrigues map of the vector as written: a Wales–Hodges minimum written without the negation quenches in zero steps, at −628.3735 kJ/mol for (H₂O)₁₅. The GMIN arms therefore start from anneal's centres with each orientation inverted. On (H₂O)₁₅ seed 2000, on the GminTip4p constants, anneal's start is −13.193 kJ/mol and GMIN's is −5.754. These rows keep the existing start.
+
+The new rows are in `rows.csv`. The medians of those rows are `summary-radius.csv`.
