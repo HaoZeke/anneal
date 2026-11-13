@@ -1089,6 +1089,21 @@ pub fn pullback_nu3(
     mobile: Option<&[usize]>,
 ) -> Array1<f64> {
     let loc = local_nu3_z(x, spec, species);
+    pullback_nu3_spectra(x, &loc, target, spec, species, mobile)
+}
+
+/// [`pullback_nu3`] when the caller already holds `local_nu3_z` of `x`.
+///
+/// The residual is `target − loc`. Recomputing the spectra would repeat
+/// the same harmonics and the same ν=3 contraction.
+fn pullback_nu3_spectra(
+    x: ArrayView1<f64>,
+    loc: &Array2<f64>,
+    target: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+) -> Array1<f64> {
     let n_at = loc.nrows();
     let dim = loc.ncols();
     let mut dp = Array1::zeros(n_at * dim);
@@ -1206,7 +1221,7 @@ pub fn kick_packing_nu3<R: Rng + ?Sized>(
             target[i * dim + t] = loc[[i, t]] + u[t];
         }
     }
-    let dr = pullback_nu3(x, target.view(), spec, species, mobile);
+    let dr = pullback_nu3_spectra(x, &loc, target.view(), spec, species, mobile);
     scale_to_cap(x, dr, rmsd)
 }
 
@@ -1239,7 +1254,7 @@ pub fn packing_step_nu3(
             target[i * dim + t] = loc[[i, t]] + direction[t];
         }
     }
-    let dr = pullback_nu3(x, target.view(), spec, species, mobile);
+    let dr = pullback_nu3_spectra(x, &loc, target.view(), spec, species, mobile);
     scale_to_cap(x, dr, rmsd)
 }
 
@@ -2717,7 +2732,7 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
         }
         // Direction is J⁺ of the observed leftover. Amplitude is the
         // caller's cap: Tikhonov otherwise leaves a near-identity.
-        let dr = pullback_nu3(x, target.view(), spec, species, mobile);
+        let dr = pullback_nu3_spectra(x, &loc, target.view(), spec, species, mobile);
         let y = scale_to_cap(x, dr, rmsd);
         retract_rigid_groups(x, y, groups)
     }
