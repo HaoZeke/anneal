@@ -252,6 +252,89 @@ pub(crate) fn polyicosahedral_cut(n: usize, join: IcosahedronJoin, nearest: f64)
     out
 }
 
+/// Mackay icosahedron through two shells, then the sites nearest the centre.
+///
+/// Shell one is the twelve vertices. Shell two is those vertices again at
+/// twice the radius and one atom on each of the thirty edges. `n` below 55
+/// keeps the innermost sites. Larger `n` is that body; the growth does not
+/// invent a third shell.
+pub(crate) fn mackay_cut(n: usize, nearest: f64) -> Array1<f64> {
+    if n == 0 || !nearest.is_finite() || nearest <= 0.0 {
+        return Array1::zeros(0);
+    }
+    let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+    let vertices = [
+        [0.0, 1.0, phi],
+        [0.0, 1.0, -phi],
+        [0.0, -1.0, phi],
+        [0.0, -1.0, -phi],
+        [1.0, phi, 0.0],
+        [1.0, -phi, 0.0],
+        [-1.0, phi, 0.0],
+        [-1.0, -phi, 0.0],
+        [phi, 0.0, 1.0],
+        [-phi, 0.0, 1.0],
+        [phi, 0.0, -1.0],
+        [-phi, 0.0, -1.0],
+    ];
+    let mut sites = vec![[0.0, 0.0, 0.0]];
+    sites.extend(vertices);
+    for vertex in vertices {
+        sites.push([2.0 * vertex[0], 2.0 * vertex[1], 2.0 * vertex[2]]);
+    }
+    let edge = {
+        let mut best = f64::MAX;
+        for i in 0..vertices.len() {
+            for j in (i + 1)..vertices.len() {
+                best = best.min(dist2(&vertices[i], &vertices[j]));
+            }
+        }
+        best * 1.21
+    };
+    for i in 0..vertices.len() {
+        for j in (i + 1)..vertices.len() {
+            if dist2(&vertices[i], &vertices[j]) <= edge {
+                let mid = [
+                    vertices[i][0] + vertices[j][0],
+                    vertices[i][1] + vertices[j][1],
+                    vertices[i][2] + vertices[j][2],
+                ];
+                sites.push(mid);
+            }
+        }
+    }
+    let origin = [0.0, 0.0, 0.0];
+    sites.sort_by(|left, right| dist2(left, &origin).total_cmp(&dist2(right, &origin)));
+    let count = n.min(sites.len());
+    sites.truncate(count);
+    let scale = nearest / mean_nearest(&sites).max(1e-6);
+    let mut out = Array1::zeros(3 * sites.len());
+    for (index, site) in sites.iter().enumerate() {
+        for axis in 0..3 {
+            out[3 * index + axis] = scale * site[axis];
+        }
+    }
+    out
+}
+
+fn mean_nearest(sites: &[[f64; 3]]) -> f64 {
+    if sites.len() < 2 {
+        return 1.0;
+    }
+    let mut total = 0.0;
+    for site in sites {
+        let mut best = f64::MAX;
+        for other in sites {
+            let distance = dist2(site, other);
+            if distance > 1e-12 {
+                best = best.min(distance);
+            }
+        }
+        total += best.sqrt();
+    }
+    total / sites.len() as f64
+}
+
 fn next_icosahedron_centre(
     sites: &[[f64; 3]],
     centres: &[usize],
@@ -777,6 +860,23 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_mackay_cut_orders_to_cu27au28() {
+        let (labels, _) = load(include_str!(
+            "../../../tests/fixtures/ccd/cuau55/Cu27Au28.txt"
+        ));
+        let pot = Gupta::elements(&labels);
+        let nearest = (2.556 + 2.884) / 2.0;
+        let grown = mackay_cut(labels.len(), nearest);
+        assert_eq!(grown.len(), 3 * labels.len());
+        let placed = place_smaller_inside(grown.view(), &labels, radius);
+        let (energy, _) = polish(placed, &labels, &mut Direct { pot: &pot }).expect("polish");
+        assert!(
+            (energy + 182.93136675).abs() < 1e-3,
+            "mackay cut {energy:.6}"
+        );
     }
 
     #[test]

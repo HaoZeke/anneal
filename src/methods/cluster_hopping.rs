@@ -3682,8 +3682,9 @@ where
         }
         // Labelled atomic clusters are offered close-packed cuts once:
         // the n sites of an fcc lattice nearest an atom, an octahedral
-        // hole and a tetrahedral hole, interpenetrating icosahedra, and
-        // the packings the motif growth already knows. Two species are
+        // hole and a tetrahedral hole, interpenetrating icosahedra, a
+        // Mackay icosahedron, and the packings the motif growth already
+        // knows. Two species are
         // ordered by homonuclear distance
         // and by the collective swap ranking. The quenched cut is held
         // and compared with the incumbent the walk actually reaches.
@@ -3729,6 +3730,7 @@ where
                     n_atoms, join, nearest,
                 ));
             }
+            grown.push(binary_geometry::mackay_cut(n_atoms, nearest));
             let mut side_rng = StdRng::seed_from_u64(0x0C10_5ED0);
             for source in [
                 crate::lattice::Source::Named(crate::structure::Template::FaceCentredCubic),
