@@ -6,6 +6,7 @@
 //! That is the scalar ACE ν=3 / featomic λ=0 product of three expansions.
 //! Surface coordination is not this map: SOFI/IRA already return a length.
 
+use ndarray::ShapeBuilder;
 use ndarray::Array2;
 use std::f64::consts::SQRT_2;
 
@@ -147,16 +148,196 @@ fn cmul(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
 
 /// ACE ν=3 scalars, length [`dim`].
 pub fn from_c(c: &[f64], n_max: usize, l_max: usize) -> Vec<f64> {
-    if l_max <= CG_CACHE_MAX {
-        from_c_cached(c, n_max, l_max)
+    let n_trips = if l_max <= CG_CACHE_MAX {
+        triples_cached(l_max).len()
     } else {
-        from_c_general(c, n_max, l_max)
+        triples(l_max).len()
+    };
+    let mut out = vec![0.0; n_max * n_trips];
+    from_c_into(c, n_max, l_max, &mut out);
+    out
+}
+
+fn from_c_into(c: &[f64], n_max: usize, l_max: usize, out: &mut [f64]) {
+    if l_max <= CG_CACHE_MAX {
+        contract_cached(c, n_max, l_max, out);
+    } else {
+        let direct = from_c_general(c, n_max, l_max);
+        out.copy_from_slice(&direct);
     }
 }
 
 const CG_CACHE_MAX: usize = 8;
 
-fn from_c_cached(c: &[f64], n_max: usize, l_max: usize) -> Vec<f64> {
+/// One nonzero coupling, in the dense `(m1, m2)` scan order.
+#[derive(Clone, Copy)]
+struct Term {
+    g: f64,
+    a: u16,
+    b: u16,
+    d: u16,
+}
+
+/// Nonzero Clebsch–Gordan products for one `l_max`.
+///
+/// A cpu-clock profile of the Pt(111) heptamer proposal put 65% of the
+/// samples in `from_c`. The instructions were the index arithmetic into
+/// the dense table, the tesseral-to-complex conversion repeated for every
+/// magnetic pair, and `g * Re(C C conj C)`. Most table entries are zero.
+/// This list keeps the nonzero couplings, and the complex coefficients are
+/// converted once per call. Each scalar is still the sum of those products
+/// in the dense loop's order.
+struct ContractionPlan {
+    n_lm: usize,
+    spans: Vec<(u32, u32)>,
+    terms: Vec<Term>,
+}
+
+fn contraction_plan(l_max: usize) -> &'static ContractionPlan {
+    use std::sync::OnceLock;
+    static PLANS: [OnceLock<ContractionPlan>; CG_CACHE_MAX + 1] =
+        [const { OnceLock::new() }; CG_CACHE_MAX + 1];
+    PLANS[l_max].get_or_init(|| {
+        let n_lm = (l_max + 1) * (l_max + 1);
+        let trips = triples_cached(l_max);
+        let table = cg_table(l_max);
+        let mut spans = Vec::with_capacity(trips.len());
+        let mut terms = Vec::new();
+        for &(l1, l2, l3) in trips {
+            let start = terms.len();
+            for m1 in -(l1 as i32)..=(l1 as i32) {
+                for m2 in -(l2 as i32)..=(l2 as i32) {
+                    let m3 = m1 + m2;
+                    if m3.abs() > l3 as i32 {
+                        continue;
+                    }
+                    let g = table.get(l1, m1, l2, m2, l3, m3);
+                    if g == 0.0 {
+                        continue;
+                    }
+                    let a = lm_index(l1, m1);
+                    let b = lm_index(l2, m2);
+                    let d = lm_index(l3, m3);
+                    debug_assert!(a < n_lm && b < n_lm && d < n_lm);
+                    terms.push(Term {
+                        g,
+                        a: a as u16,
+                        b: b as u16,
+                        d: d as u16,
+                    });
+                }
+            }
+            let len = terms.len() - start;
+            spans.push((start as u32, len as u32));
+        }
+        ContractionPlan { n_lm, spans, terms }
+    })
+}
+
+/// `Re(a b conj(d))`, the same operations as `cmul(cmul(a, b), (d.0, -d.1)).0`.
+#[inline(always)]
+fn real_conj_product(a: (f64, f64), b: (f64, f64), d: (f64, f64)) -> f64 {
+    let ab0 = a.0 * b.0 - a.1 * b.1;
+    let ab1 = a.0 * b.1 + a.1 * b.0;
+    ab0 * d.0 - ab1 * (-d.1)
+}
+
+fn contract_cached(c: &[f64], n_max: usize, l_max: usize, out: &mut [f64]) {
+    let plan = contraction_plan(l_max);
+    let n_lm = plan.n_lm;
+    let n_trips = plan.spans.len();
+    debug_assert_eq!(out.len(), n_max * n_trips);
+    let slots = n_max * n_lm;
+    let mut heap = Vec::new();
+    let mut stack = [(0.0, 0.0); 256];
+    let cx = if slots <= stack.len() {
+        &mut stack[..slots]
+    } else {
+        heap.resize(slots, (0.0, 0.0));
+        &mut heap[..]
+    };
+    for n in 0..n_max {
+        for l in 0..=l_max {
+            for m in -(l as i32)..=(l as i32) {
+                let lm = lm_index(l, m);
+                cx[n * n_lm + lm] = coeff(c, n, l, m, n_lm);
+            }
+        }
+    }
+    if n_max == 3 {
+        contract_three(cx, n_lm, n_trips, plan, out);
+        return;
+    }
+    let mut acc = vec![0.0; n_max];
+    for (k, &(start, len)) in plan.spans.iter().enumerate() {
+        acc.fill(0.0);
+        let terms = &plan.terms[start as usize..(start + len) as usize];
+        for term in terms {
+            let g = term.g;
+            for n in 0..n_max {
+                let base = n * n_lm;
+                let a = cx[base + term.a as usize];
+                let b = cx[base + term.b as usize];
+                let d = cx[base + term.d as usize];
+                acc[n] += g * real_conj_product(a, b, d);
+            }
+        }
+        for n in 0..n_max {
+            out[n * n_trips + k] = acc[n];
+        }
+    }
+}
+
+fn contract_three(
+    cx: &[(f64, f64)],
+    n_lm: usize,
+    n_trips: usize,
+    plan: &ContractionPlan,
+    out: &mut [f64],
+) {
+    for (k, &(start, len)) in plan.spans.iter().enumerate() {
+        let mut a0 = 0.0;
+        let mut a1 = 0.0;
+        let mut a2 = 0.0;
+        let terms = &plan.terms[start as usize..(start + len) as usize];
+        for term in terms {
+            let g = term.g;
+            let p0 = product_at(cx, 0, n_lm, term);
+            let p1 = product_at(cx, 1, n_lm, term);
+            let p2 = product_at(cx, 2, n_lm, term);
+            a0 += g * p0;
+            a1 += g * p1;
+            a2 += g * p2;
+        }
+        out[k] = a0;
+        out[n_trips + k] = a1;
+        out[2 * n_trips + k] = a2;
+    }
+}
+
+#[inline(always)]
+fn product_at(cx: &[(f64, f64)], n: usize, n_lm: usize, term: &Term) -> f64 {
+    let base = n * n_lm;
+    let ia = base + term.a as usize;
+    let ib = base + term.b as usize;
+    let id = base + term.d as usize;
+    debug_assert!(ia < cx.len() && ib < cx.len() && id < cx.len());
+    // SAFETY: `term` stores `lm_index` values, each `< n_lm`, and `base` is
+    // `n * n_lm` for `n < n_max`. `cx` has `n_max * n_lm` entries, so the
+    // three indexes are inside it. The assert above checks that in debug.
+    let (a, b, d) = unsafe {
+        (
+            *cx.get_unchecked(ia),
+            *cx.get_unchecked(ib),
+            *cx.get_unchecked(id),
+        )
+    };
+    real_conj_product(a, b, d)
+}
+
+/// The dense cached contraction, kept so a test can require bit identity.
+#[cfg(test)]
+pub(crate) fn from_c_dense(c: &[f64], n_max: usize, l_max: usize) -> Vec<f64> {
     let n_lm = (l_max + 1) * (l_max + 1);
     let trips = triples_cached(l_max);
     let table = cg_table(l_max);
@@ -301,7 +482,9 @@ pub fn d_from_c(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
     let n_lm = (l_max + 1) * (l_max + 1);
     let n_c = n_max * n_lm;
     let n_b = dim(n_max, l_max);
-    let mut j = Array2::<f64>::zeros((n_b, n_c));
+    // Column-major so the contraction reads one coefficient's column
+    // contiguously. The entries match the row-major finite difference.
+    let mut j = Array2::<f64>::zeros((n_b, n_c).f());
     if n_c == 0 {
         return j;
     }
@@ -310,14 +493,14 @@ pub fn d_from_c(c: &[f64], n_max: usize, l_max: usize) -> Array2<f64> {
     if cp.len() < n_c {
         cp.resize(n_c, 0.0);
     }
-    let b0 = from_c(&cp, n_max, l_max);
-    let _ = b0;
+    let mut bp = vec![0.0; n_b];
+    let mut bm = vec![0.0; n_b];
     for k in 0..n_c {
         let old = cp[k];
         cp[k] = old + eps;
-        let bp = from_c(&cp, n_max, l_max);
+        from_c_into(&cp, n_max, l_max, &mut bp);
         cp[k] = old - eps;
-        let bm = from_c(&cp, n_max, l_max);
+        from_c_into(&cp, n_max, l_max, &mut bm);
         cp[k] = old;
         for r in 0..n_b {
             j[[r, k]] = (bp[r] - bm[r]) / (2.0 * eps);
@@ -336,6 +519,42 @@ mod tests {
         assert!((cg(1, 1, 1, 1, 2, 2) - 1.0).abs() < 1e-12);
         // ⟨1 0, 1 0 | 2 0⟩ = √(2/3)
         assert!((cg(1, 0, 1, 0, 2, 0) - (2.0_f64 / 3.0).sqrt()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_sparse_contraction_matches_the_dense_one_bit_for_bit() {
+        for l_max in 0..=CG_CACHE_MAX {
+            let n_lm = (l_max + 1) * (l_max + 1);
+            for n_max in [1usize, 3, 4] {
+                let c: Vec<f64> = (0..n_max * n_lm)
+                    .map(|i| ((i * 17 + l_max * 3) % 23) as f64 * 0.07 - 0.4)
+                    .collect();
+                assert_same_bits(&c, n_max, l_max);
+                let mut shifted = c.clone();
+                let eps = 1e-7;
+                for k in [0usize, c.len() / 2, c.len() - 1] {
+                    let old = shifted[k];
+                    shifted[k] = old + eps;
+                    assert_same_bits(&shifted, n_max, l_max);
+                    shifted[k] = old - eps;
+                    assert_same_bits(&shifted, n_max, l_max);
+                    shifted[k] = old;
+                }
+            }
+        }
+    }
+
+    fn assert_same_bits(c: &[f64], n_max: usize, l_max: usize) {
+        let sparse = from_c(c, n_max, l_max);
+        let dense = from_c_dense(c, n_max, l_max);
+        assert_eq!(sparse.len(), dense.len());
+        for (i, (a, b)) in sparse.iter().zip(&dense).enumerate() {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "l_max {l_max} n_max {n_max} slot {i}: {a} vs {b}"
+            );
+        }
     }
 
     #[test]

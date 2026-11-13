@@ -28,6 +28,7 @@
 //! coordination is SOFI/IRA (a length), not this map. The 555→421 /
 //! fcc-prototype residual is an oracle. Opt-in, cluster only.
 
+use ndarray::ShapeBuilder;
 use ndarray::{Array1, Array2, ArrayView1};
 use rand::Rng;
 use std::f64::consts::PI;
@@ -571,7 +572,9 @@ pub fn jacobian_ace(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>)
     let n_chan = channels.len();
     let ace1 = spec.nu3_dim();
     let d1 = ace1 * n_chan;
-    let mut j = Array2::<f64>::zeros((n_at * d1, n_at * 3));
+    // Column-major: each neighbour scatters down one column, and the
+    // pullback reads those columns. Logical entries are unchanged.
+    let mut j = Array2::<f64>::zeros((n_at * d1, n_at * 3).f());
     if n_at < 2 || ace1 == 0 {
         return j;
     }
@@ -635,10 +638,19 @@ pub fn jacobian_ace(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>)
                         };
                         let dc = dw * u[a] * yv + w * dyv;
                         let col_c = n * n_lm + lm;
-                        for t in 0..ace1 {
-                            let gij = db[[t, col_c]] * dc;
-                            j[[i * d1 + ch * ace1 + t, 3 * jj + a]] += gij;
-                            j[[i * d1 + ch * ace1 + t, 3 * i + a]] -= gij;
+                        let db_col = db.column(col_c);
+                        let row0 = i * d1 + ch * ace1;
+                        {
+                            let mut dest = j.column_mut(3 * jj + a);
+                            for t in 0..ace1 {
+                                dest[row0 + t] += db_col[t] * dc;
+                            }
+                        }
+                        {
+                            let mut dest = j.column_mut(3 * i + a);
+                            for t in 0..ace1 {
+                                dest[row0 + t] -= db_col[t] * dc;
+                            }
                         }
                     }
                 }
@@ -656,7 +668,7 @@ pub fn jacobian_nu3(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>)
     let d0 = spec.feat_dim(species);
     let d1 = spec.nu3_feat_dim(species);
     let dim = d0 + d1;
-    let mut j = Array2::<f64>::zeros((n_at * dim, n_at * 3));
+    let mut j = Array2::<f64>::zeros((n_at * dim, n_at * 3).f());
     for i in 0..n_at {
         for t in 0..d0 {
             for k in 0..n_at * 3 {
@@ -684,7 +696,7 @@ pub fn jacobian_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -
     let n_chan = channels.len();
     let dim1 = spec.dim();
     let dim = dim1 * n_chan;
-    let mut j = Array2::<f64>::zeros((n_at * dim, n_at * 3));
+    let mut j = Array2::<f64>::zeros((n_at * dim, n_at * 3).f());
     if n_at < 2 {
         return j;
     }
@@ -761,28 +773,29 @@ fn accumulate_dp(
     dc: f64,
     col: usize,
 ) {
-    // p_{n n' l} = Σ_m c_{n lm} c_{n' lm}. lm here is the packed (l,m) index.
+    // p_{n n' l} = Σ_m c_{n lm} c_{n' lm}. One (l, m) touches only the
+    // features of that l. The packed index of (na, np, l) is the same
+    // place the scan over every l used to write, and a zero derivative
+    // is still added so a signed zero does not survive.
     let l = lm_to_l(lm);
-    let mut t = 0usize;
+    let l_stride = spec.l_max + 1;
     for na in 0..spec.n_max {
+        let pairs_before = na * (2 * spec.n_max - na + 1) / 2;
         for np in na..spec.n_max {
-            for ll in 0..=spec.l_max {
-                if ll == l {
-                    let c_n = c[na * n_lm + lm];
-                    let c_np = c[np * n_lm + lm];
-                    let d = if na == n && np == n {
-                        2.0 * c_n * dc
-                    } else if na == n {
-                        dc * c_np
-                    } else if np == n {
-                        c_n * dc
-                    } else {
-                        0.0
-                    };
-                    j[[row0 + t, col]] += d;
-                }
-                t += 1;
-            }
+            let c_n = c[na * n_lm + lm];
+            let c_np = c[np * n_lm + lm];
+            let d = if na == n && np == n {
+                2.0 * c_n * dc
+            } else if na == n {
+                dc * c_np
+            } else if np == n {
+                c_n * dc
+            } else {
+                0.0
+            };
+            let pair = pairs_before + (np - na);
+            let t = pair * l_stride + l;
+            j[[row0 + t, col]] += d;
         }
     }
 }
@@ -4060,5 +4073,152 @@ mod tests {
         reversed.rotate_left(1);
         let rise = doorway(&permute_atoms(&quenched, &reversed));
         assert!((rise - deposited).abs() < 1e-4, "rotated rise {rise}");
+    }
+
+    /// The packed power-spectrum index of one `(n, n', l)` is where the scan
+    /// over every `l` used to write. A wrong offset would move the Jacobian.
+    #[test]
+    fn the_direct_power_spectrum_index_matches_the_l_scan() {
+        for n_max in 1..5 {
+            for l_max in 0..7 {
+                let l_stride = l_max + 1;
+                let n_lm = l_stride * l_stride;
+                for lm in 0..n_lm {
+                    let mut l = 0usize;
+                    while (l + 1) * (l + 1) <= lm {
+                        l += 1;
+                    }
+                    let mut t = 0usize;
+                    let mut expected = Vec::new();
+                    for na in 0..n_max {
+                        for _np in na..n_max {
+                            for ll in 0..=l_max {
+                                if ll == l {
+                                    expected.push(t);
+                                }
+                                t += 1;
+                            }
+                        }
+                    }
+                    let mut got = Vec::new();
+                    for na in 0..n_max {
+                        let pairs_before = na * (2 * n_max - na + 1) / 2;
+                        for np in na..n_max {
+                            let pair = pairs_before + (np - na);
+                            got.push(pair * l_stride + l);
+                        }
+                    }
+                    assert_eq!(got, expected, "n_max {n_max} l_max {l_max} lm {lm}");
+                }
+            }
+        }
+    }
+
+    /// The sparse ACE contraction has to reproduce the dense one on the
+    /// geometries the proposal actually sees: a Pt(111) slab with a mobile
+    /// heptamer, and a free 13-atom cluster. Finite-difference inputs, the
+    /// same `±1e-7` shift the Jacobian uses, are included.
+    #[test]
+    fn the_sparse_ace_coefficients_match_the_dense_path_on_a_slab_and_a_cluster() {
+        let spec = SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: 3.5 * 2.0 * 1.36,
+        };
+        let (slab, species) = pt111_heptamer();
+        let mut cluster = ico13();
+        let nn = 2.0_f64.powf(1.0 / 6.0);
+        for value in cluster.iter_mut() {
+            *value *= nn;
+        }
+        compare_ace_paths(slab.view(), spec, Some(&species));
+        compare_ace_paths(cluster.view(), spec, None);
+    }
+
+    fn pt111_heptamer() -> (Array1<f64>, Vec<u32>) {
+        let a = 2.74412_f64;
+        let s3 = 3.0_f64.sqrt();
+        let layer = a * (6.0_f64).sqrt() / 3.0;
+        let mut pts = Vec::with_capacity(39);
+        for iz in 0..2 {
+            let ox = if iz == 1 { a * 0.5 } else { 0.0 };
+            let oy = if iz == 1 { a * s3 / 6.0 } else { 0.0 };
+            for i in 0..4 {
+                for j in 0..4 {
+                    pts.push([
+                        ox + i as f64 * a + j as f64 * (a * 0.5),
+                        oy + j as f64 * (a * s3 * 0.5),
+                        iz as f64 * layer,
+                    ]);
+                }
+            }
+        }
+        let cx = 1.5 * a;
+        let cy = a * s3;
+        let hex = [
+            [0.0, 0.0],
+            [a, 0.0],
+            [0.5 * a, 0.5 * a * s3],
+            [-0.5 * a, 0.5 * a * s3],
+            [-a, 0.0],
+            [-0.5 * a, -0.5 * a * s3],
+            [0.5 * a, -0.5 * a * s3],
+        ];
+        for (k, [dx, dy]) in hex.iter().enumerate() {
+            let wobble = 0.08 * (k as f64 - 3.0);
+            pts.push([cx + dx + wobble, cy + dy - 0.5 * wobble, 2.0 * layer + 0.05]);
+        }
+        let mut x = Array1::zeros(pts.len() * 3);
+        for (i, p) in pts.iter().enumerate() {
+            x[3 * i] = p[0];
+            x[3 * i + 1] = p[1];
+            x[3 * i + 2] = p[2];
+        }
+        (x, vec![78u32; pts.len()])
+    }
+
+    fn compare_ace_paths(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) {
+        let n_at = x.len() / 3;
+        let table = crate::neighbors::NeighborTable::build(x, n_at, spec.rcut_nn);
+        let loc = local_nu3_z(x, spec, species);
+        let d0 = spec.feat_dim(species);
+        let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
+        for i in 0..n_at {
+            let (_, c) = atom_expand(x, i, n_at, spec.rcut_nn, spec, species, &table);
+            let width = spec.n_max * n_lm;
+            let n_chan = c.len() / width;
+            for ch in 0..n_chan {
+                let sl = &c[ch * width..ch * width + width];
+                let dense = crate::ace::from_c_dense(sl, spec.n_max, spec.l_max);
+                let block = d0 + ch * spec.nu3_dim();
+                for (t, value) in dense.iter().enumerate() {
+                    assert_eq!(
+                        loc[[i, block + t]].to_bits(),
+                        value.to_bits(),
+                        "centre {i} channel {ch} slot {t}"
+                    );
+                }
+                if i == 0 && ch == 0 {
+                    let mut shifted = sl.to_vec();
+                    let eps = 1e-7;
+                    for k in 0..shifted.len() {
+                        let old = shifted[k];
+                        for sign in [eps, -eps] {
+                            shifted[k] = old + sign;
+                            let sparse = crate::ace::from_c(&shifted, spec.n_max, spec.l_max);
+                            let again = crate::ace::from_c_dense(&shifted, spec.n_max, spec.l_max);
+                            for (t, (a, b)) in sparse.iter().zip(&again).enumerate() {
+                                assert_eq!(
+                                    a.to_bits(),
+                                    b.to_bits(),
+                                    "perturbed centre 0 k {k} sign {sign} slot {t}"
+                                );
+                            }
+                        }
+                        shifted[k] = old;
+                    }
+                }
+            }
+        }
     }
 }
