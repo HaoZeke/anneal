@@ -963,20 +963,26 @@ pub struct Config {
     /// quantity three separate calibrations here failed to pin down.
     pub anneal_diversity: bool,
     /// Fivefold SOAP proposal. On in the paper preset.
+    #[serde(skip_serializing_if = "is_true")]
     pub prior_soap: bool,
     /// Icosahedral symmetry reseed. On in the paper preset.
+    #[serde(skip_serializing_if = "is_true")]
     pub prior_reseed: bool,
     /// Stall regrowth from a lattice order. On in the paper preset.
+    #[serde(skip_serializing_if = "is_true")]
     pub prior_growth: bool,
     /// Labelled close-packed core cuts. On in the paper preset.
+    #[serde(skip_serializing_if = "is_true")]
     pub prior_core: bool,
     /// Half-budget motif reseed. On in the paper preset.
+    #[serde(skip_serializing_if = "is_true")]
     pub prior_motif: bool,
     /// Plane cap and slab moves, a temperature taken from the
     /// population's energy spread, and a fingerprint taboo.
     ///
     /// Off in the paper preset, so a default chain draws the same calls.
     /// The move does not name a packing or a composition.
+    #[serde(skip_serializing_if = "is_false")]
     pub general_collective: bool,
     /// Fraction of the starting radius the annealed threshold falls to.
     ///
@@ -1254,6 +1260,10 @@ pub struct Config {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 fn is_one(value: &usize) -> bool {
