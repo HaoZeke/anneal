@@ -38,6 +38,8 @@
 //! subproblem and is stated as such rather than claimed to be theirs. The
 //! classification and the residual are the parts anything downstream uses.
 
+use std::cell::RefCell;
+
 use ndarray::{Array1, ArrayView1};
 
 /// Unit vector, or `None` when the input has no direction.
@@ -117,24 +119,25 @@ pub const TRAIL_BOND_CAP: usize = 12;
 /// everything keyed on `555` reads zero.
 ///
 /// Returns zero past [`TRAIL_BOND_CAP`] bonds, which no traced set with a
-/// bond can give.
-fn longest_trail(sub: &[Vec<bool>]) -> usize {
-    let m = sub.len();
-    if m == 0 {
+/// bond can give. `edges` lists each bond once as a pair of local indices
+/// with the smaller index first, in the order a row-major scan of the common
+/// set meets them. The adjacency and the walk stack are reused across pairs
+/// of one structure; building them per pair was most of the trail's time.
+fn longest_trail(
+    m: usize,
+    edges: &[(usize, usize)],
+    incident: &mut Vec<Vec<(usize, usize)>>,
+    stack: &mut Vec<(usize, u64, usize)>,
+) -> usize {
+    if m == 0 || edges.is_empty() || edges.len() > TRAIL_BOND_CAP {
         return 0;
     }
-    let mut edges: Vec<(usize, usize)> = Vec::new();
-    for i in 0..m {
-        for j in (i + 1)..m {
-            if sub[i][j] {
-                edges.push((i, j));
-            }
-        }
+    if incident.len() < m {
+        incident.resize_with(m, Vec::new);
     }
-    if edges.is_empty() || edges.len() > TRAIL_BOND_CAP {
-        return 0;
+    for row in incident.iter_mut().take(m) {
+        row.clear();
     }
-    let mut incident: Vec<Vec<(usize, usize)>> = vec![Vec::new(); m];
     for (k, &(i, j)) in edges.iter().enumerate() {
         incident[i].push((k, j));
         incident[j].push((k, i));
@@ -142,12 +145,15 @@ fn longest_trail(sub: &[Vec<bool>]) -> usize {
     // Exhaustive over bonds, which the cap above keeps cheap.
     let mut best = 0usize;
     for start in 0..m {
-        let mut stack: Vec<(usize, u64, usize)> = vec![(start, 0, 0)];
+        stack.clear();
+        stack.push((start, 0, 0));
         while let Some((node, used, length)) = stack.pop() {
             if length > best {
                 best = length;
             }
-            for &(k, next) in &incident[node] {
+            let degree = incident[node].len();
+            for slot in 0..degree {
+                let (k, next) = incident[node][slot];
                 if k < 64 && (used >> k) & 1 == 0 {
                     stack.push((next, used | (1 << k), length + 1));
                 }
@@ -157,39 +163,154 @@ fn longest_trail(sub: &[Vec<bool>]) -> usize {
     best
 }
 
-/// Common-neighbour triplets over every bonded pair.
-///
-/// The default cutoff for a Lennard-Jones cluster sits between the first and
-/// second neighbour shells, where the radial distribution is near zero, so the
-/// bond set is insensitive to its exact value.
-pub fn cna(x: ArrayView1<f64>, n: usize, cutoff: f64) -> CnaCounts {
-    let adj = adjacency(x, n, cutoff);
-    let mut counts: Vec<((usize, usize, usize), usize)> = Vec::new();
-    let mut bonds = 0usize;
+/// One bit per atom. A bool matrix stores each row in its own allocation
+/// and the common-neighbour walk then visits every atom, bonded or not.
+/// The intersection of two rows is the common set, and only its set bits
+/// are read.
+fn bond_bits(x: ArrayView1<f64>, n: usize, cutoff: f64) -> (usize, Vec<u64>) {
+    let words = n.div_ceil(64);
+    if n == 0 || words == 0 {
+        return (0, Vec::new());
+    }
+    let mut bits = vec![0u64; n * words];
+    let limit = cutoff * cutoff;
     for i in 0..n {
         for j in (i + 1)..n {
-            if !adj[i][j] {
+            let dx = x[3 * i] - x[3 * j];
+            let dy = x[3 * i + 1] - x[3 * j + 1];
+            let dz = x[3 * i + 2] - x[3 * j + 2];
+            if dx * dx + dy * dy + dz * dz < limit {
+                bits[i * words + (j >> 6)] |= 1u64 << (j & 63);
+                bits[j * words + (i >> 6)] |= 1u64 << (i & 63);
+            }
+        }
+    }
+    (words, bits)
+}
+
+fn bonded(bits: &[u64], words: usize, i: usize, j: usize) -> bool {
+    debug_assert!(words > 0);
+    debug_assert!(i * words + (j >> 6) < bits.len());
+    (bits[i * words + (j >> 6)] >> (j & 63)) & 1 == 1
+}
+
+fn common_neighbours(bits: &[u64], words: usize, i: usize, j: usize, out: &mut Vec<usize>) {
+    out.clear();
+    let left = i * words;
+    let right = j * words;
+    for word in 0..words {
+        let mut chunk = bits[left + word] & bits[right + word];
+        while chunk != 0 {
+            let bit = chunk.trailing_zeros() as usize;
+            out.push((word << 6) + bit);
+            chunk &= chunk - 1;
+        }
+    }
+}
+
+/// Scratch that one structure's pairs share. Each pair used to allocate its
+/// common-neighbour list, the bond list among them, and the trail walk.
+struct TripletScratch {
+    common: Vec<usize>,
+    edges: Vec<(usize, usize)>,
+    incident: Vec<Vec<(usize, usize)>>,
+    stack: Vec<(usize, u64, usize)>,
+}
+
+/// `(r, s, t)` of one bonded pair. `common` is that pair's shared neighbours
+/// in ascending index order, which is the order a scan of the atoms meets them.
+fn pair_triplet(bits: &[u64], words: usize, scratch: &mut TripletScratch) -> (usize, usize, usize) {
+    let r = scratch.common.len();
+    if r == 0 {
+        return (0, 0, 0);
+    }
+    scratch.edges.clear();
+    for a in 0..r {
+        let left = scratch.common[a];
+        for b in (a + 1)..r {
+            if bonded(bits, words, left, scratch.common[b]) {
+                scratch.edges.push((a, b));
+            }
+        }
+    }
+    let s = scratch.edges.len();
+    let t = longest_trail(r, &scratch.edges, &mut scratch.incident, &mut scratch.stack);
+    (r, s, t)
+}
+
+struct CnaCache {
+    n: usize,
+    cutoff_bits: u64,
+    coords: Vec<u64>,
+    counts: CnaCounts,
+}
+
+impl CnaCache {
+    fn empty() -> Self {
+        Self {
+            n: usize::MAX,
+            cutoff_bits: 0,
+            coords: Vec::new(),
+            counts: CnaCounts::default(),
+        }
+    }
+
+    fn hit(&self, x: ArrayView1<f64>, n: usize, cutoff: f64) -> Option<CnaCounts> {
+        // A short view has to miss. The count then indexes the same way the
+        // uncached walk does, and a prefix of a cached structure is not that
+        // structure.
+        if self.n != n
+            || self.cutoff_bits != cutoff.to_bits()
+            || self.coords.len() != 3 * n
+            || x.len() < 3 * n
+        {
+            return None;
+        }
+        let same = self
+            .coords
+            .iter()
+            .zip(x.iter())
+            .all(|(bits, value)| *bits == value.to_bits());
+        same.then(|| self.counts.clone())
+    }
+
+    fn store(&mut self, x: ArrayView1<f64>, n: usize, cutoff: f64, counts: &CnaCounts) {
+        self.n = n;
+        self.cutoff_bits = cutoff.to_bits();
+        self.coords.clear();
+        self.coords
+            .extend(x.iter().take(3 * n).map(|value| value.to_bits()));
+        self.counts = counts.clone();
+    }
+}
+
+thread_local! {
+    static CNA_CACHE: RefCell<CnaCache> = RefCell::new(CnaCache::empty());
+}
+
+fn cna_counted(x: ArrayView1<f64>, n: usize, cutoff: f64) -> CnaCounts {
+    let (words, bits) = bond_bits(x, n, cutoff);
+    let mut counts: Vec<((usize, usize, usize), usize)> = Vec::new();
+    let mut bonds = 0usize;
+    if words == 0 {
+        return CnaCounts { counts, bonds };
+    }
+    let mut scratch = TripletScratch {
+        common: Vec::new(),
+        edges: Vec::new(),
+        incident: Vec::new(),
+        stack: Vec::new(),
+    };
+    for i in 0..n {
+        for j in (i + 1)..n {
+            if !bonded(&bits, words, i, j) {
                 continue;
             }
             bonds += 1;
-            let common: Vec<usize> = (0..n).filter(|&k| adj[i][k] && adj[j][k]).collect();
-            let r = common.len();
-            let key = if r == 0 {
-                (0, 0, 0)
-            } else {
-                let sub: Vec<Vec<bool>> = common
-                    .iter()
-                    .map(|&a| common.iter().map(|&b| adj[a][b]).collect())
-                    .collect();
-                let s: usize = sub
-                    .iter()
-                    .enumerate()
-                    .map(|(a, row)| row.iter().enumerate().filter(|&(b, &v)| v && b > a).count())
-                    .sum();
-                (r, s, longest_trail(&sub))
-            };
-            match counts.iter_mut().find(|(k, _)| *k == key) {
-                Some((_, v)) => *v += 1,
+            common_neighbours(&bits, words, i, j, &mut scratch.common);
+            let key = pair_triplet(&bits, words, &mut scratch);
+            match counts.iter_mut().find(|(stored, _)| *stored == key) {
+                Some((_, count)) => *count += 1,
                 None => counts.push((key, 1)),
             }
         }
@@ -197,36 +318,50 @@ pub fn cna(x: ArrayView1<f64>, n: usize, cutoff: f64) -> CnaCounts {
     CnaCounts { counts, bonds }
 }
 
+/// Common-neighbour triplets over every bonded pair.
+///
+/// The default cutoff for a Lennard-Jones cluster sits between the first and
+/// second neighbour shells, where the radial distribution is near zero, so the
+/// bond set is insensitive to its exact value.
+///
+/// The chain asks for the signature of the minimum it is standing on at
+/// every hop, and again when that minimum is offered to the packing bank.
+/// An unchanged coordinate vector is the same signature, so the last answer
+/// is kept and compared by the bits of the coordinates and the cutoff.
+pub fn cna(x: ArrayView1<f64>, n: usize, cutoff: f64) -> CnaCounts {
+    if let Some(hit) = CNA_CACHE.with(|slot| slot.borrow().hit(x, n, cutoff)) {
+        return hit;
+    }
+    let counts = cna_counted(x, n, cutoff);
+    CNA_CACHE.with(|slot| slot.borrow_mut().store(x, n, cutoff, &counts));
+    counts
+}
+
 /// Per-atom fractions of 555 / 421 / 422 among that atom's bonds.
 pub fn atom_triplet_fracs(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<[f64; 3]> {
-    let adj = adjacency(x, n, cutoff);
+    let (words, bits) = bond_bits(x, n, cutoff);
     let mut out = vec![[0.0; 3]; n];
+    if words == 0 {
+        return out;
+    }
+    let mut scratch = TripletScratch {
+        common: Vec::new(),
+        edges: Vec::new(),
+        incident: Vec::new(),
+        stack: Vec::new(),
+    };
     for i in 0..n {
         let mut n555 = 0usize;
         let mut n421 = 0usize;
         let mut n422 = 0usize;
         let mut nb = 0usize;
         for j in 0..n {
-            if j == i || !adj[i][j] {
+            if j == i || !bonded(&bits, words, i, j) {
                 continue;
             }
             nb += 1;
-            let common: Vec<usize> = (0..n).filter(|&k| adj[i][k] && adj[j][k]).collect();
-            let r = common.len();
-            if r == 0 {
-                continue;
-            }
-            let sub: Vec<Vec<bool>> = common
-                .iter()
-                .map(|&a| common.iter().map(|&b| adj[a][b]).collect())
-                .collect();
-            let s: usize = sub
-                .iter()
-                .enumerate()
-                .map(|(a, row)| row.iter().enumerate().filter(|&(b, &v)| v && b > a).count())
-                .sum();
-            let t = longest_trail(&sub);
-            match (r, s, t) {
+            common_neighbours(&bits, words, i, j, &mut scratch.common);
+            match pair_triplet(&bits, words, &mut scratch) {
                 (5, 5, 5) => n555 += 1,
                 (4, 2, 1) => n421 += 1,
                 (4, 2, 2) => n422 += 1,

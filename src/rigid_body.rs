@@ -172,7 +172,7 @@ impl RigidBodyGeometry {
                 }
             }
             for block in blocks.iter_mut().take(nblocks) {
-                block.sort_unstable_by(f64::total_cmp);
+                crate::bias::sort_distances(block);
             }
             let total = blocks.iter().take(nblocks).map(|block| block.len()).sum();
             let mut flat = Vec::with_capacity(total);

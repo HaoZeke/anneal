@@ -812,6 +812,25 @@ fn remember_sorted_pairs(n_points: usize, x: ArrayView1<f64>, distances: &[f64])
     });
 }
 
+/// Sort a block of distances into [`f64::total_cmp`] order.
+///
+/// A distance built from squared coordinate differences is non-negative.
+/// For every value whose sign bit is clear, including `+0`, `+∞` and a
+/// positive NaN, `total_cmp` is the unsigned order of the IEEE bits, so the
+/// sort compares integers. A sign bit is not one of those distances: `-0`
+/// would sort after every positive value as an unsigned integer and before
+/// `+0` under `total_cmp`, and that block uses `total_cmp` itself.
+pub(crate) fn sort_distances(values: &mut [f64]) {
+    let signed = values
+        .iter()
+        .any(|value| value.to_bits() & (1u64 << 63) != 0);
+    if signed {
+        values.sort_unstable_by(f64::total_cmp);
+    } else {
+        values.sort_unstable_by(|left, right| left.to_bits().cmp(&right.to_bits()));
+    }
+}
+
 impl Fingerprint for SortedPairs {
     fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
         if let Some(cached) = cached_sorted_pairs(self.n_points, x) {
@@ -827,7 +846,7 @@ impl Fingerprint for SortedPairs {
                 d.push((dx * dx + dy * dy + dz * dz).sqrt());
             }
         }
-        d.sort_unstable_by(f64::total_cmp);
+        sort_distances(&mut d);
         remember_sorted_pairs(self.n_points, x, &d);
         Array1::from(d)
     }
@@ -1250,6 +1269,30 @@ mod basin_bias_tests {
         array![
             0.0, 0.0, 0.0, scale, 0.0, 0.0, 0.0, scale, 0.0, 0.0, 0.0, scale
         ]
+    }
+
+    #[test]
+    fn distance_sort_matches_total_order_including_a_sign_bit() {
+        let mut values = vec![
+            1.0,
+            0.0,
+            f64::INFINITY,
+            2.5,
+            f64::from_bits(0x7ff8_0000_0000_0001),
+            0.5,
+            -0.0,
+            f64::NEG_INFINITY,
+        ];
+        let mut reference = values.clone();
+        reference.sort_unstable_by(f64::total_cmp);
+        sort_distances(&mut values);
+        let bits = |row: &[f64]| row.iter().map(|value| value.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&values), bits(&reference));
+        let mut plain = vec![3.0, 1.0, 2.0, 2.0, 0.0, 8.5];
+        let mut plain_reference = plain.clone();
+        plain_reference.sort_unstable_by(f64::total_cmp);
+        sort_distances(&mut plain);
+        assert_eq!(bits(&plain), bits(&plain_reference));
     }
 
     #[test]
