@@ -1152,10 +1152,70 @@ pub struct Config {
     /// its Esty upper bound is already 0 and its hatch is one quarter.
     #[serde(skip_serializing_if = "is_false")]
     pub witness_tripleton_ceiling: bool,
+    /// Whether the search may build a structure from a known packing, or
+    /// choose a move by classifying the packing it stands on.
+    ///
+    /// On is every preset's value. Off leaves the walk, its library, the
+    /// homotop exchange, symmetrisation and orbit completion, and removes:
+    /// the Mackay cap of a long-ranged pair; the close-packed sheet slide
+    /// and the flat-fault and Shockley slips; the labelled fcc,
+    /// interpenetrating-icosahedron, Mackay, lattice and axial-spine cuts
+    /// with their core-shell placement; the half-budget motif reseed and
+    /// its stacking twin; the continuous-symmetry fivefold projection and
+    /// icosahedral symmetry reseed; the stall lattice growth and the
+    /// packing-bank leave; the fivefold SOAP arm, the twin arm and the
+    /// lattice reseed arm; the inner-large/outer-small exchanges of a wide
+    /// size ratio; and the packing pile and seam bank. The icosahedral
+    /// withhold on stall symmetrisation is lifted, so that move runs as on
+    /// any cluster.
+    ///
+    /// Every preset reads `ANNEAL_STRUCTURAL_PRIORS` once at construction:
+    /// `0`, `false`, `off` or `no` turns it off, and `general_only` turns it and
+    /// [`Config::size_gates`] off.
+    #[serde(skip_serializing_if = "is_true")]
+    pub structural_priors: bool,
+    /// Whether a preset or a stall rule may switch on the number of points.
+    ///
+    /// On is every preset's value. Off, [`Config::recommended`] and
+    /// [`Config::communicating`] keep the plain surface at every size
+    /// instead of the two-phase one below 98 points, and a failed stall
+    /// growth retries after the same number of idle leaves at every size.
+    #[serde(skip_serializing_if = "is_true")]
+    pub size_gates: bool,
 }
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+/// The two-phase relative 0.7 surface below 98 points, or none at any size
+/// when the size gates are off.
+pub(crate) fn size_gated_surfaces(
+    n_points: usize,
+    size_gates: bool,
+) -> Vec<crate::methods::two_phase::TwoPhase> {
+    if size_gates && n_points < 98 {
+        vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)]
+    } else {
+        Vec::new()
+    }
+}
+
+/// [`Config::structural_priors`] and [`Config::size_gates`] as
+/// `ANNEAL_STRUCTURAL_PRIORS` sets them.
+pub(crate) fn priors_from(value: Option<&str>) -> (bool, bool) {
+    match value
+        .map(|text| text.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("0" | "false" | "off" | "no") => (false, true),
+        Some("general_only" | "general-only") => (false, false),
+        _ => (true, true),
+    }
 }
 
 fn arm_selection_is_posterior(value: &ArmSelection) -> bool {
@@ -1237,9 +1297,7 @@ impl Config {
         // global minima are not those packings, it is worse than none.
         // Installing it only at 38 atoms was per-system tuning, so the
         // preset keeps LeanBurst at every size.
-        if n_points < 98 {
-            cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
-        }
+        cfg.surfaces = size_gated_surfaces(n_points, cfg.size_gates);
         // GMIN calls SYMMETRYCSM every NSYMINTERVAL quenches, default 10.
         // The same paper's LJ75 table used a restart of about five basin
         // hopping steps once symmetrisation was on. Both run inside this
@@ -1272,9 +1330,7 @@ impl Config {
         cfg.orbit_complete_on_new = true;
         cfg.shared_deposits = 0;
         cfg.shared_visit_policy = crate::methods::minima_hopping::SharedVisitPolicy::Recognition;
-        if n_points < 98 {
-            cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
-        }
+        cfg.surfaces = size_gated_surfaces(n_points, cfg.size_gates);
         cfg.continuous_symmetry = ContinuousSymmetry::Measure {
             interval: 10,
             reseed_hops: 5,
@@ -1437,6 +1493,7 @@ impl Config {
             energy_scale.is_finite() && energy_scale > 0.0,
             "energy_scale must be finite and positive"
         );
+        let priors = priors_from(std::env::var("ANNEAL_STRUCTURAL_PRIORS").ok().as_deref());
         Self {
             n_points,
             length_scale,
@@ -1598,6 +1655,8 @@ impl Config {
             superbasin_features: false,
             hmc: None,
             witness_tripleton_ceiling: false,
+            structural_priors: priors.0,
+            size_gates: priors.1,
         }
     }
 
