@@ -255,11 +255,16 @@ pub(crate) fn polyicosahedral_cut(n: usize, join: IcosahedronJoin, nearest: f64)
 /// Mackay icosahedron through two shells, then the sites nearest the centre.
 ///
 /// Shell one is the twelve vertices. Shell two is those vertices again at
-/// twice the radius and one atom on each of the thirty edges. `n` below 55
-/// keeps the innermost sites. Larger `n` is that body; the growth does not
-/// invent a third shell.
+/// twice the radius and one atom on each of the thirty edges. `n` below the
+/// complete body keeps the innermost sites. A larger `n` does not fit, so
+/// the cut is empty. Returning the 55-site body for a bigger cluster is a
+/// different system, and quenching it asks the potential for the wrong length.
 pub(crate) fn mackay_cut(n: usize, nearest: f64) -> Array1<f64> {
-    scale_sites(&mackay_sites_centred(n), nearest)
+    let sites = mackay_sites_centred(n);
+    if sites.len() != n {
+        return Array1::zeros(0);
+    }
+    scale_sites(&sites, nearest)
 }
 
 /// The `n` sites of the two-shell Mackay icosahedron closest to one vertex.
@@ -1069,6 +1074,54 @@ mod tests {
             best < -130.79994836 + 1e-3,
             "axial spine {best:.6} from quench {energy:.6}"
         );
+    }
+
+    #[test]
+    fn a_mackay_cut_larger_than_the_body_is_not_quenched_as_gold() {
+        // 55 sites is 165 coordinates. Au75 must not be offered that body.
+        for n in [75usize, 98] {
+            let mackay = mackay_cut(n, 2.884);
+            assert!(
+                mackay.is_empty(),
+                "n {n}: two-shell Mackay returned {} coordinates",
+                mackay.len()
+            );
+            let pot = Gupta::copper_gold(0, n);
+            let mut best = f64::INFINITY;
+            let mut offered = 0usize;
+            let mut consider = |cut: Array1<f64>| {
+                if cut.is_empty() {
+                    return;
+                }
+                assert_eq!(
+                    cut.len(),
+                    3 * n,
+                    "n {n}: a core cut has {} coordinates",
+                    cut.len()
+                );
+                offered += 1;
+                let mut solver = WarmLbfgs::default();
+                let (energy, relaxed, _) =
+                    solver.minimize(cut.view(), 400, |v| Some(pot.value_and_gradient(v)));
+                assert_eq!(relaxed.len(), 3 * n);
+                if energy.is_finite() {
+                    best = best.min(energy);
+                }
+            };
+            for centre in [
+                FccCentre::Atom,
+                FccCentre::Octahedral,
+                FccCentre::Tetrahedral,
+            ] {
+                consider(fcc_cut(n, centre, 2.884));
+            }
+            for join in [IcosahedronJoin::Compact, IcosahedronJoin::Linear] {
+                consider(polyicosahedral_cut(n, join, 2.884));
+            }
+            consider(mackay);
+            assert!(offered > 0, "n {n}");
+            assert!(best.is_finite() && best < -100.0, "n {n} best {best}");
+        }
     }
 
     #[test]

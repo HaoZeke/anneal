@@ -4572,8 +4572,9 @@ where
                     if side.probe.remaining() == 0 {
                         break;
                     }
-                    // A cut that stops at a complete shell is shorter than
-                    // this cluster. Quenching it would be a different system.
+                    // A cut that cannot fill this cluster is a different
+                    // system. The two-shell Mackay body is empty in that
+                    // case; anything else short is refused here too.
                     if candidate.len() != 3 * n_atoms {
                         continue;
                     }
