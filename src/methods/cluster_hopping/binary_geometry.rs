@@ -939,7 +939,9 @@ pub(crate) fn refine<P: QuenchProbe>(
             point = relaxed;
             continue;
         }
-        break;
+        if !gained {
+            break;
+        }
     }
     Some((value, point))
 }
