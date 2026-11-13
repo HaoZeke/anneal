@@ -12,7 +12,7 @@ The Gupta rows are Cleri and Rosato, *Phys. Rev. B* **48**, 22 (1993), Table I, 
 
 The cross term is the arithmetic mean, equation (4) of Guedes-Sobrinho et al. at w = 0.5. The Cambridge Cluster Database Gupta pages list Zn, Cd, Pb, Na, Co and Ag. They do not list Pt–Cu.
 
-Wu et al. is closed and does not publish an open table of Gupta total energies. The `reference_eV` column is the lowest energy either arm reached for that system in this session, not a number copied from the paper. A hit is within 0.001 eV of that energy. Every seed spends its budget.
+Wu et al. is closed and does not publish an open table of Gupta total energies. The `reference_eV` column is the lowest energy either arm reached for that system in this session, not a number copied from the paper. A hit is within 0.001 eV of that energy. Every seed spends its budget. That session line is not a proved minimum: a later Pt6Cu17 seed reached −81.90409805, 0.009 eV below the −81.89514983 recorded here.
 
 `PAPER_BUDGETS` for 38 atoms is 400000, the LJ38 entry of `scripts/lj_board/boardlib.py`. 13 and 23 atoms are not in that map; they use 100000 and 200000. The LJ dict itself is unchanged.
 
