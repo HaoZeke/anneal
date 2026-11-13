@@ -257,6 +257,61 @@ impl PairPotential {
         let g = gradient
             .as_slice_mut()
             .expect("owned gradient is contiguous");
+        if let Some(h) = held_prefix(&cache.held) {
+            // Held atoms are a prefix, so each row is the cached held partners
+            // and then the mobile partners, which is the `i < j` order. A held
+            // atom's own gradient is left at zero: the caller discards it.
+            for i in 0..h {
+                let base_i = 3 * i;
+                for j in (i + 1)..h {
+                    if let Some(value) = cache.value_at(i, j) {
+                        energy += value;
+                    }
+                }
+                for j in h..n {
+                    let base_j = 3 * j;
+                    let d = [
+                        coordinates[base_i] - coordinates[base_j],
+                        coordinates[base_i + 1] - coordinates[base_j + 1],
+                        coordinates[base_i + 2] - coordinates[base_j + 2],
+                    ];
+                    let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+                    if r2 <= 0.0 {
+                        continue;
+                    }
+                    let (value, coefficient) = self.kind.pair(r2);
+                    energy += value;
+                    for k in 0..3 {
+                        g[base_j + k] -= coefficient * d[k];
+                    }
+                }
+            }
+            for i in h..n {
+                let base_i = 3 * i;
+                let mut gradient_i = [g[base_i], g[base_i + 1], g[base_i + 2]];
+                for j in (i + 1)..n {
+                    let base_j = 3 * j;
+                    let d = [
+                        coordinates[base_i] - coordinates[base_j],
+                        coordinates[base_i + 1] - coordinates[base_j + 1],
+                        coordinates[base_i + 2] - coordinates[base_j + 2],
+                    ];
+                    let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+                    if r2 <= 0.0 {
+                        continue;
+                    }
+                    let (value, coefficient) = self.kind.pair(r2);
+                    energy += value;
+                    for k in 0..3 {
+                        let delta = coefficient * d[k];
+                        gradient_i[k] += delta;
+                        g[base_j + k] -= delta;
+                    }
+                }
+                g[base_i..base_i + 3].copy_from_slice(&gradient_i);
+            }
+            return (energy, gradient);
+        }
         for i in 0..n {
             let base_i = 3 * i;
             let mut gradient_i = [g[base_i], g[base_i + 1], g[base_i + 2]];
@@ -281,8 +336,11 @@ impl PairPotential {
                 let (value, coefficient) = self.kind.pair(r2);
                 energy += value;
                 for k in 0..3 {
-                    gradient_i[k] += coefficient * d[k];
-                    g[base_j + k] -= coefficient * d[k];
+                    let delta = coefficient * d[k];
+                    if !cache.held[i] {
+                        gradient_i[k] += delta;
+                    }
+                    g[base_j + k] -= delta;
                 }
             }
             if !cache.held[i] {
@@ -290,6 +348,19 @@ impl PairPotential {
             }
         }
         (energy, gradient)
+    }
+}
+
+/// `held` is `true` for a leading run and then stays false.
+fn held_prefix(held: &[bool]) -> Option<usize> {
+    let mut h = 0;
+    while h < held.len() && held[h] {
+        h += 1;
+    }
+    if held[h..].iter().any(|flag| *flag) {
+        None
+    } else {
+        Some(h)
     }
 }
 
