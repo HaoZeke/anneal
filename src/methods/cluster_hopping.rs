@@ -3598,8 +3598,9 @@ where
         }
         // Labelled atomic clusters are offered close-packed cuts once:
         // the n sites of an fcc lattice nearest an atom, an octahedral
-        // hole and a tetrahedral hole, plus the packings the motif growth
-        // already knows. Two species are ordered by homonuclear distance
+        // hole and a tetrahedral hole, interpenetrating icosahedra, and
+        // the packings the motif growth already knows. Two species are
+        // ordered by homonuclear distance
         // and by the collective swap ranking. The quenched cut is held
         // and compared with the incumbent the walk actually reaches.
         // Every evaluation is charged. Unlabelled and rigid runs never enter.
@@ -3636,6 +3637,14 @@ where
             ] {
                 grown.push(binary_geometry::fcc_cut(n_atoms, centre, nearest));
             }
+            for join in [
+                binary_geometry::IcosahedronJoin::Compact,
+                binary_geometry::IcosahedronJoin::Linear,
+            ] {
+                grown.push(binary_geometry::polyicosahedral_cut(
+                    n_atoms, join, nearest,
+                ));
+            }
             let mut side_rng = StdRng::seed_from_u64(0x0C10_5ED0);
             for source in [
                 crate::lattice::Source::Named(crate::structure::Template::FaceCentredCubic),
@@ -3668,7 +3677,16 @@ where
                     if self.probe.remaining() == 0 {
                         return None;
                     }
+                    // The descent can record a lower physical point than the
+                    // one it returns when a later pass leaves that basin.
+                    let seen = self.probe.best;
                     let (value, relaxed) = (self.relax)(self.probe, point, self.steps);
+                    if self.probe.best < seen
+                        && self.probe.best < value
+                        && let Some(state) = self.probe.best_state.clone()
+                    {
+                        return Some((self.probe.best, state));
+                    }
                     value.is_finite().then_some((value, relaxed))
                 }
             }
@@ -3694,31 +3712,18 @@ where
                     }
                 }
                 arranged.sort_by(|left, right| left.0.total_cmp(&right.0));
-                // Exchange polish moves the ordering, not the packing. A cut
-                // whose quenched energy already sits above the refined best by
-                // more than the largest exchange gain seen cannot overtake it.
-                let mut best_gain = 0.0_f64;
+                // Ordering can lower a worse packing by more than it lowers
+                // the best one, so every cut is polished while the probe lasts.
                 for (energy, state) in arranged {
-                    if best_gain > 0.0
-                        && let Some((held, _)) = &best_cut
-                        && energy - best_gain >= *held - 1e-9
-                    {
-                        break;
-                    }
                     if side.probe.remaining() == 0 {
                         if best_cut.as_ref().is_none_or(|(held, _)| energy < *held) {
                             best_cut = Some((energy, state));
                         }
                         break;
                     }
-                    let seeded_energy = energy;
                     if let Some(refined) =
                         binary_geometry::refine(energy, state, species, &mut side)
                     {
-                        let gain = (seeded_energy - refined.0).max(0.0);
-                        if gain > best_gain {
-                            best_gain = gain;
-                        }
                         if refined.0.is_finite()
                             && best_cut.as_ref().is_none_or(|(held, _)| refined.0 < *held)
                         {

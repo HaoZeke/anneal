@@ -2,7 +2,7 @@
 //!
 //! A collective reassignment puts one species on the sites an unrelaxed
 //! swap ranks lowest, then quenched exchanges finish the ordering. The
-//! cores are a close-packed fragment and a dimer-centred icosahedron.
+//! cores are a close-packed fragment and interpenetrating icosahedra.
 //! Neither the fragment nor the polish names a cluster size or a target
 //! energy. A proposal is kept only when its quenched energy is lower.
 
@@ -171,6 +171,310 @@ pub(crate) fn fcc_cut(n: usize, centre: FccCentre, nearest: f64) -> Array1<f64> 
         }
     }
     out
+}
+
+/// How a second icosahedron is attached to one already grown.
+#[derive(Clone, Copy)]
+pub(crate) enum IcosahedronJoin {
+    /// The new centre is a site already bonded to as many centres as
+    /// possible, so the added shell shares a face and stays compact.
+    Compact,
+    /// The new centre is the site furthest from the centres already
+    /// placed, so the cluster grows as a chain of icosahedra.
+    Linear,
+}
+
+/// The `n` sites of interpenetrating icosahedra, scaled so the
+/// centre-to-vertex distance is `nearest`.
+///
+/// Growth starts from one icosahedron and keeps adding a shell about an
+/// existing site. A size that falls in the middle of a shell keeps the
+/// sites nearest the centres. Nothing here is a fixed cluster.
+pub(crate) fn polyicosahedral_cut(n: usize, join: IcosahedronJoin, nearest: f64) -> Array1<f64> {
+    if n == 0 || !nearest.is_finite() || nearest <= 0.0 {
+        return Array1::zeros(0);
+    }
+    let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+    let vertices = [
+        [0.0, 1.0, phi],
+        [0.0, 1.0, -phi],
+        [0.0, -1.0, phi],
+        [0.0, -1.0, -phi],
+        [1.0, phi, 0.0],
+        [1.0, -phi, 0.0],
+        [-1.0, phi, 0.0],
+        [-1.0, -phi, 0.0],
+        [phi, 0.0, 1.0],
+        [-phi, 0.0, 1.0],
+        [phi, 0.0, -1.0],
+        [-phi, 0.0, -1.0],
+    ];
+    let radial = (1.0 + phi * phi).sqrt();
+    let scale = nearest / radial;
+    let mut sites = vec![[0.0, 0.0, 0.0]];
+    for vertex in vertices {
+        sites.push([vertex[0] * scale, vertex[1] * scale, vertex[2] * scale]);
+    }
+    let mut centres = vec![0usize];
+    let bond = nearest * nearest * 1.35 * 1.35;
+    let merge = (0.35 * nearest) * (0.35 * nearest);
+    while sites.len() < n {
+        let Some(host) = next_icosahedron_centre(&sites, &centres, bond, join) else {
+            break;
+        };
+        let parent = nearest_centre(&sites, host, &centres);
+        let added = shell_about(&sites, host, parent, &vertices, radial);
+        centres.push(host);
+        for point in added {
+            if sites.iter().all(|have| dist2(have, &point) > merge) {
+                sites.push(point);
+            }
+        }
+    }
+    if sites.len() > n {
+        let origin = centroid(&sites, &centres);
+        let mut order: Vec<usize> = (0..sites.len()).collect();
+        order.sort_by(|&left, &right| {
+            dist2(&sites[left], &origin)
+                .total_cmp(&dist2(&sites[right], &origin))
+                .then(left.cmp(&right))
+        });
+        order.truncate(n);
+        order.sort_unstable();
+        sites = order.into_iter().map(|index| sites[index]).collect();
+    }
+    let mut out = Array1::zeros(3 * sites.len());
+    for (index, site) in sites.iter().enumerate() {
+        for axis in 0..3 {
+            out[3 * index + axis] = site[axis];
+        }
+    }
+    out
+}
+
+fn next_icosahedron_centre(
+    sites: &[[f64; 3]],
+    centres: &[usize],
+    bond: f64,
+    join: IcosahedronJoin,
+) -> Option<usize> {
+    let origin = centroid(sites, centres);
+    let mut best: Option<(usize, usize, f64)> = None;
+    for index in 0..sites.len() {
+        if centres.contains(&index) {
+            continue;
+        }
+        let parents = centres
+            .iter()
+            .filter(|centre| dist2(&sites[index], &sites[**centre]) <= bond)
+            .count();
+        if parents == 0 {
+            continue;
+        }
+        let reach = dist2(&sites[index], &origin);
+        let better = match join {
+            IcosahedronJoin::Compact => best.is_none_or(|(held_parents, _, held_reach)| {
+                parents > held_parents || (parents == held_parents && reach < held_reach - 1e-12)
+            }),
+            IcosahedronJoin::Linear => {
+                best.is_none_or(|(_, _, held_reach)| reach > held_reach + 1e-12)
+            }
+        };
+        if better {
+            best = Some((parents, index, reach));
+        }
+    }
+    best.map(|(_, index, _)| index)
+}
+
+fn nearest_centre(sites: &[[f64; 3]], host: usize, centres: &[usize]) -> usize {
+    centres
+        .iter()
+        .copied()
+        .filter(|centre| *centre != host)
+        .min_by(|&left, &right| {
+            dist2(&sites[host], &sites[left]).total_cmp(&dist2(&sites[host], &sites[right]))
+        })
+        .unwrap_or(0)
+}
+
+/// Twelve neighbours of `sites[host]`, one on `sites[parent]` and one
+/// turned onto another site already bonded to the host.
+fn shell_about(
+    sites: &[[f64; 3]],
+    host: usize,
+    parent: usize,
+    vertices: &[[f64; 3]; 12],
+    radial: f64,
+) -> Vec<[f64; 3]> {
+    let centre = sites[host];
+    let axis = [
+        sites[parent][0] - centre[0],
+        sites[parent][1] - centre[1],
+        sites[parent][2] - centre[2],
+    ];
+    let align = rotation_from_to(vertices[0], axis);
+    let length = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+    let scale = if length > 1e-12 { length / radial } else { 1.0 };
+    let adjacent = (1..vertices.len())
+        .min_by(|&left, &right| {
+            dist2(&vertices[0], &vertices[left]).total_cmp(&dist2(&vertices[0], &vertices[right]))
+        })
+        .unwrap_or(1);
+    let spoke = apply(align, vertices[adjacent]);
+    let anchor = sites
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != host && *index != parent)
+        .min_by(|(_, left), (_, right)| dist2(&centre, left).total_cmp(&dist2(&centre, right)))
+        .map(|(_, point)| {
+            [
+                point[0] - centre[0],
+                point[1] - centre[1],
+                point[2] - centre[2],
+            ]
+        });
+    let twist = anchor
+        .map(|target| rotation_around(axis, spoke, target))
+        .unwrap_or([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+    vertices
+        .iter()
+        .map(|vertex| {
+            let turned = apply(twist, apply(align, *vertex));
+            [
+                centre[0] + turned[0] * scale,
+                centre[1] + turned[1] * scale,
+                centre[2] + turned[2] * scale,
+            ]
+        })
+        .collect()
+}
+
+fn rotation_around(axis: [f64; 3], from: [f64; 3], to: [f64; 3]) -> [[f64; 3]; 3] {
+    let hat = unit(axis);
+    let left = reject(from, hat);
+    let right = reject(to, hat);
+    if norm2(left) < 1e-16 || norm2(right) < 1e-16 {
+        return [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    }
+    let u = unit(left);
+    let v = unit(right);
+    let dot = (u[0] * v[0] + u[1] * v[1] + u[2] * v[2]).clamp(-1.0, 1.0);
+    let sign = {
+        let crossed = cross(u, v);
+        let along = crossed[0] * hat[0] + crossed[1] * hat[1] + crossed[2] * hat[2];
+        if along < 0.0 { -1.0 } else { 1.0 }
+    };
+    let angle = sign * dot.acos();
+    let (sin, cos) = angle.sin_cos();
+    let mut out = [[0.0; 3]; 3];
+    for column in 0..3 {
+        let basis = [
+            if column == 0 { 1.0 } else { 0.0 },
+            if column == 1 { 1.0 } else { 0.0 },
+            if column == 2 { 1.0 } else { 0.0 },
+        ];
+        let crossed = cross(hat, basis);
+        let along = hat[0] * basis[0] + hat[1] * basis[1] + hat[2] * basis[2];
+        for row in 0..3 {
+            out[row][column] =
+                basis[row] * cos + crossed[row] * sin + hat[row] * along * (1.0 - cos);
+        }
+    }
+    out
+}
+
+fn reject(point: [f64; 3], axis: [f64; 3]) -> [f64; 3] {
+    let along = point[0] * axis[0] + point[1] * axis[1] + point[2] * axis[2];
+    [
+        point[0] - axis[0] * along,
+        point[1] - axis[1] * along,
+        point[2] - axis[2] * along,
+    ]
+}
+
+fn norm2(point: [f64; 3]) -> f64 {
+    point[0] * point[0] + point[1] * point[1] + point[2] * point[2]
+}
+
+fn rotation_from_to(from: [f64; 3], to: [f64; 3]) -> [[f64; 3]; 3] {
+    let u = unit(from);
+    let v = unit(to);
+    let dot = (u[0] * v[0] + u[1] * v[1] + u[2] * v[2]).clamp(-1.0, 1.0);
+    if dot > 1.0 - 1e-12 {
+        return [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    }
+    let axis = if dot < -1.0 + 1e-12 {
+        let mut ortho = [-u[1], u[0], 0.0];
+        if ortho[0] * ortho[0] + ortho[1] * ortho[1] < 1e-12 {
+            ortho = [0.0, -u[2], u[1]];
+        }
+        unit(ortho)
+    } else {
+        unit(cross(u, v))
+    };
+    let angle = dot.acos();
+    let (sin, cos) = angle.sin_cos();
+    let mut out = [[0.0; 3]; 3];
+    for column in 0..3 {
+        let basis = [
+            if column == 0 { 1.0 } else { 0.0 },
+            if column == 1 { 1.0 } else { 0.0 },
+            if column == 2 { 1.0 } else { 0.0 },
+        ];
+        let crossed = cross(axis, basis);
+        let along = axis[0] * basis[0] + axis[1] * basis[1] + axis[2] * basis[2];
+        for row in 0..3 {
+            out[row][column] =
+                basis[row] * cos + crossed[row] * sin + axis[row] * along * (1.0 - cos);
+        }
+    }
+    out
+}
+
+fn apply(matrix: [[f64; 3]; 3], point: [f64; 3]) -> [f64; 3] {
+    [
+        matrix[0][0] * point[0] + matrix[0][1] * point[1] + matrix[0][2] * point[2],
+        matrix[1][0] * point[0] + matrix[1][1] * point[1] + matrix[1][2] * point[2],
+        matrix[2][0] * point[0] + matrix[2][1] * point[1] + matrix[2][2] * point[2],
+    ]
+}
+
+fn cross(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    ]
+}
+
+fn unit(point: [f64; 3]) -> [f64; 3] {
+    let length = (point[0] * point[0] + point[1] * point[1] + point[2] * point[2]).sqrt();
+    if length < 1e-12 {
+        return [1.0, 0.0, 0.0];
+    }
+    [point[0] / length, point[1] / length, point[2] / length]
+}
+
+fn dist2(left: &[f64; 3], right: &[f64; 3]) -> f64 {
+    let dx = left[0] - right[0];
+    let dy = left[1] - right[1];
+    let dz = left[2] - right[2];
+    dx * dx + dy * dy + dz * dz
+}
+
+fn centroid(sites: &[[f64; 3]], indices: &[usize]) -> [f64; 3] {
+    if indices.is_empty() {
+        return [0.0, 0.0, 0.0];
+    }
+    let mut sum = [0.0, 0.0, 0.0];
+    for index in indices {
+        for axis in 0..3 {
+            sum[axis] += sites[*index][axis];
+        }
+    }
+    let scale = indices.len() as f64;
+    [sum[0] / scale, sum[1] / scale, sum[2] / scale]
 }
 
 /// Coordination, then distance from the centre. Higher coordination and
@@ -452,6 +756,58 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn a_polyicosahedron_has_one_site_per_atom() {
+        for n in [2usize, 13, 19, 23, 26, 38, 55] {
+            for join in [IcosahedronJoin::Compact, IcosahedronJoin::Linear] {
+                let cut = polyicosahedral_cut(n, join, 2.7);
+                assert_eq!(cut.len(), 3 * n, "n {n}");
+                for i in 0..n {
+                    for j in (i + 1)..n {
+                        let mut distance = 0.0;
+                        for axis in 0..3 {
+                            let delta = cut[3 * i + axis] - cut[3 * j + axis];
+                            distance += delta * delta;
+                        }
+                        assert!(distance > 1e-6, "duplicate n {n} {i} {j}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_compact_polyicosahedron_orders_to_the_ptcu_hits() {
+        let cases = [
+            (12usize, 11usize, -96.03443577),
+            (11, 12, -94.01575979),
+            (6, 17, -81.90409805),
+        ];
+        for (n_platinum, n_copper, reference) in cases {
+            let labels = Gupta::platinum_copper_species(n_platinum, n_copper);
+            let pot = Gupta::platinum_copper(n_platinum, n_copper);
+            let nearest = (2.775 + 2.556) / 2.0;
+            let mut best = f64::INFINITY;
+            let mut note = String::new();
+            for join in [IcosahedronJoin::Compact, IcosahedronJoin::Linear] {
+                let grown = polyicosahedral_cut(labels.len(), join, nearest);
+                let raw = crate::structure::cna(grown.view(), labels.len(), nearest * 1.2);
+                let placed = place_smaller_inside(grown.view(), &labels, |label| {
+                    Gupta::homonuclear_r0(label).unwrap_or(nearest)
+                });
+                let energy = polish(placed, &labels, &mut Direct { pot: &pot })
+                    .map(|(value, _)| value)
+                    .unwrap_or(f64::INFINITY);
+                note.push_str(&format!(" {energy:.4}/555:{}", raw.get((5, 5, 5))));
+                best = best.min(energy);
+            }
+            assert!(
+                best < reference + 1e-3,
+                "Pt{n_platinum}Cu{n_copper} {best:.6} against {reference:.6}{note}"
+            );
         }
     }
 
