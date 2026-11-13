@@ -253,6 +253,9 @@ impl PairPotential {
         let Some(coordinates) = x.as_slice() else {
             return self.value_and_gradient(x);
         };
+        if let Some(answer) = cache.recall_answer(coordinates) {
+            return answer;
+        }
         cache.refresh(self.kind, coordinates);
         let g = gradient
             .as_slice_mut()
@@ -310,6 +313,7 @@ impl PairPotential {
                 }
                 g[base_i..base_i + 3].copy_from_slice(&gradient_i);
             }
+            cache.remember_answer(coordinates, energy, gradient.as_slice().unwrap());
             return (energy, gradient);
         }
         for i in 0..n {
@@ -347,6 +351,7 @@ impl PairPotential {
                 g[base_i..base_i + 3].copy_from_slice(&gradient_i);
             }
         }
+        cache.remember_answer(coordinates, energy, gradient.as_slice().unwrap());
         (energy, gradient)
     }
 }
@@ -375,6 +380,10 @@ pub struct HeldPairCache {
     /// scalar loop would not add it.
     live: Vec<bool>,
     fresh: bool,
+    /// Last coordinates this cache answered, and that answer.
+    answer_bits: Vec<u64>,
+    answer_energy: f64,
+    answer_gradient: Vec<f64>,
 }
 
 impl HeldPairCache {
@@ -391,7 +400,37 @@ impl HeldPairCache {
             values: vec![0.0; n * n],
             live: vec![false; n * n],
             fresh: false,
+            answer_bits: Vec::new(),
+            answer_energy: 0.0,
+            answer_gradient: Vec::new(),
         }
+    }
+
+    fn recall_answer(&self, coordinates: &[f64]) -> Option<(f64, Array1<f64>)> {
+        if self.answer_bits.len() != coordinates.len() {
+            return None;
+        }
+        if self
+            .answer_bits
+            .iter()
+            .zip(coordinates.iter())
+            .any(|(bits, value)| *bits != value.to_bits())
+        {
+            return None;
+        }
+        Some((
+            self.answer_energy,
+            Array1::from(self.answer_gradient.clone()),
+        ))
+    }
+
+    fn remember_answer(&mut self, coordinates: &[f64], energy: f64, gradient: &[f64]) {
+        self.answer_bits.clear();
+        self.answer_bits
+            .extend(coordinates.iter().map(|value| value.to_bits()));
+        self.answer_energy = energy;
+        self.answer_gradient.clear();
+        self.answer_gradient.extend_from_slice(gradient);
     }
 
     fn value_at(&self, i: usize, j: usize) -> Option<f64> {
