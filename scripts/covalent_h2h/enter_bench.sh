@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Every code, one UTS namespace, hostname bench, working directory under /work.
 # Arguments go to run_campaign.py. BENCH_OUT names the output directory
-# under bench/covalent-h2h, default "before".
+# under bench/covalent-h2h, default "before". BEFORE_REV adds the arms of
+# that revision's build (build_anneal.sh).
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -24,6 +25,11 @@ chmod +x "$WORK/bin/h2h_covalent" "$WORK/bin/GMIN"
 # HOME moves under /work, so the user site that holds ASE is named here.
 site=$(/usr/bin/python3 -m site --user-site)
 /usr/bin/python3 -c 'import ase, scipy' || { echo "ASE and SciPy are required" >&2; exit 1; }
+
+before_args=
+if [ -n "${BEFORE_REV:-}" ]; then
+  before_args="--before-binary $WORK/bin/h2h_covalent_before --before-head-file $WORK/before-head"
+fi
 
 cat > "$WORK/bin/inside.sh" << EOF2
 #!/bin/bash
@@ -55,6 +61,7 @@ exec /usr/bin/python3 -u $WORK/bin/run_campaign.py \\
   --starts $RUN/starts \\
   --rows $OUT/seeds.csv \\
   --summary $OUT/results.csv \\
+  $before_args \\
   "\$@"
 EOF2
 chmod +x "$WORK/bin/inside.sh"

@@ -5,10 +5,14 @@
 Systems are Stillinger-Weber Si10, Si13 and Si20 in sigma and epsilon,
 and Tersoff C10 and C20 in Angstrom and eV. The anneal arms are
 ``Config::recommended``, the same with ``H2H_PRIORS=0``, and the general
-arm on dimer scales (``examples/h2h_covalent``). GMIN runs its ``SW``
-keyword on the silicon rows. ASE basin hopping runs every row, which
-makes it the only comparison on carbon, where GMIN has no Tersoff.
-Six seeds, the same list on every code and the same start for each seed.
+arm on dimer scales (``examples/h2h_covalent``). With ``--before-binary``
+the two prior-free arms also run on that build, coded ``@v1``. On silicon
+every anneal arm runs again with ``H2H_GTOL=5e-3``, coded ``-sloppy``, to
+quench as loosely as GMIN's data, and GMIN runs its ``SW`` keyword twice,
+on that data and as ``gmin-tight`` with every quench to 1e-6. ASE basin
+hopping runs every row, which makes it the only comparison on carbon,
+where GMIN has no Tersoff. Twelve seeds, six for ASE, the same list on
+every code and the same start for each seed.
 Within a system the (seed, code) pairs are shuffled. One budget per
 system for every code. A hit is a recorded minimum within 0.001 of the
 reference. A miss is the full budget. Medians are Hyndman-Fan type 7.
@@ -27,12 +31,28 @@ import sys
 from pathlib import Path
 
 SYSTEMS = ("sw10", "sw13", "sw20", "tc10", "tc20")
-SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
+SEEDS = tuple(range(2000, 2012))
+ASE_SEEDS = SEEDS[:6]
+RECOMMENDED = {"H2H_ARM": "recommended", "H2H_PRIORS": "1"}
+NO_PRIORS = {"H2H_ARM": "recommended", "H2H_PRIORS": "0"}
+GENERAL = {"H2H_ARM": "general", "H2H_PRIORS": "0"}
+SLOPPY = {"H2H_GTOL": "5e-3"}
+# code -> (binary, environment, code the binary prints). The before binary
+# is the head that recorded the first panel; Config::recommended is the same
+# in both, so only the two prior-free arms run on it.
 ANNEAL = {
-    "anneal": {"H2H_ARM": "recommended", "H2H_PRIORS": "1"},
-    "anneal-nopriors": {"H2H_ARM": "recommended", "H2H_PRIORS": "0"},
-    "anneal-general": {"H2H_ARM": "general", "H2H_PRIORS": "0"},
+    "anneal": ("binary", RECOMMENDED, "anneal"),
+    "anneal-nopriors": ("binary", NO_PRIORS, "anneal-nopriors"),
+    "anneal-general": ("binary", GENERAL, "anneal-general"),
+    "anneal-nopriors@v1": ("before_binary", NO_PRIORS, "anneal-nopriors"),
+    "anneal-general@v1": ("before_binary", GENERAL, "anneal-general"),
+    "anneal-sloppy": ("binary", RECOMMENDED | SLOPPY, "anneal-sloppy"),
+    "anneal-nopriors-sloppy": ("binary", NO_PRIORS | SLOPPY, "anneal-nopriors-sloppy"),
+    "anneal-general-sloppy": ("binary", GENERAL | SLOPPY, "anneal-general-sloppy"),
 }
+# GMIN's own data quenches to SLOPPYCONV 5e-3 RMS; gmin-tight converges
+# every quench to 1e-6 RMS, against anneal's 1e-6 largest component.
+GMIN = {"gmin": None, "gmin-tight": "1.0D-6"}
 SCHEDULE_SEED = 20261113
 HIT_TOL = 0.001
 
@@ -75,10 +95,15 @@ SUMMARY_FIELDS = [
 
 
 def codes_for(name: str) -> tuple[str, ...]:
-    base = tuple(ANNEAL)
+    base = tuple(code for code in ANNEAL if not code.endswith("-sloppy"))
     if name.startswith("sw"):
-        return base + ("gmin", "ase")
+        sloppy = tuple(code for code in ANNEAL if code.endswith("-sloppy"))
+        return base + sloppy + tuple(GMIN) + ("ase",)
     return base + ("ase",)
+
+
+def seeds_for(code: str) -> tuple[int, ...]:
+    return ASE_SEEDS if code == "ase" else SEEDS
 
 
 def type7(sorted_values: list[float], p: float) -> float:
@@ -105,7 +130,12 @@ def schedule(names, seeds, codes_of, rng_seed):
     rng = random.Random(rng_seed)
     order = []
     for name in names:
-        jobs = [(name, seed, code) for seed in seeds for code in codes_of(name)]
+        jobs = [
+            (name, seed, code)
+            for code in codes_of(name)
+            for seed in seeds
+            if seed in seeds_for(code)
+        ]
         rng.shuffle(jobs)
         order.extend(jobs)
     return order
@@ -165,11 +195,14 @@ def run_logged(command, env, log: Path, cwd=None) -> str:
 
 
 def run_anneal(args, name, seed, code, budget, log) -> dict[str, str]:
+    binary, settings, printed = ANNEAL[code]
     env = thread_env()
-    env.update(ANNEAL[code])
+    env.update(settings)
     env["H2H_BUDGET"] = str(budget)
-    text = run_logged([str(args.binary), "run", name, str(seed)], env, log)
-    return csv_row(text, code)
+    text = run_logged([str(getattr(args, binary)), "run", name, str(seed)], env, log)
+    row = csv_row(text, printed)
+    row["code"] = code
+    return row
 
 
 def run_ase(args, name, seed, budget, log) -> dict[str, str]:
@@ -195,11 +228,23 @@ def run_ase(args, name, seed, budget, log) -> dict[str, str]:
     return csv_row(text, "ase")
 
 
-def run_gmin(args, name, seed, budget, target, radius, start, log) -> dict[str, str]:
-    work = args.runs / name / f"gmin-{seed}"
+def gmin_data(text: str, conv: str | None) -> str:
+    if conv is None:
+        return text
+    lines = []
+    for line in text.splitlines():
+        if line.startswith(("SLOPPYCONV", "TIGHTCONV")):
+            line = f"{line.split()[0]} {conv}"
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+def run_gmin(args, name, seed, code, budget, target, radius, start, log) -> dict[str, str]:
+    work = args.runs / name / f"{code}-{seed}"
     work.mkdir(parents=True, exist_ok=True)
     (work / "data").write_text(
-        args.data.read_text() + f"RADIUS {radius:.10f}\nRANSEED {seed}\n"
+        gmin_data(args.data.read_text(), GMIN[code])
+        + f"RADIUS {radius:.10f}\nRANSEED {seed}\n"
     )
     (work / "coords").write_bytes(start.read_bytes())
     row_path = work / "row.txt"
@@ -232,7 +277,7 @@ def run_gmin(args, name, seed, budget, target, radius, start, log) -> dict[str, 
     pot = float(fields.get("pot_s") or 0.0)
     return {
         "system": name,
-        "code": "gmin",
+        "code": code,
         "seed": fields["seed"],
         "budget": fields["budget"],
         "hit": "true" if fields["hit"] in ("1", "true") else "false",
@@ -258,14 +303,14 @@ def normalise(row: dict[str, str]) -> dict[str, str]:
     return out
 
 
-def summarise(rows, references, revision, head):
-    seed_text = " ".join(str(seed) for seed in SEEDS)
+def summarise(rows, references, revision, heads):
     out = []
     for name in SYSTEMS:
         for code in codes_for(name):
             group = [row for row in rows if row["system"] == name and row["code"] == code]
             if not group:
                 continue
+            seed_text = " ".join(sorted({row["seed"] for row in group}, key=int))
             evals = median_iqr([float(row["evals_to_hit"]) for row in group])
             charged = [float(row["charged"]) for row in group]
             pot = [float(row["pot_s"]) for row in group]
@@ -293,7 +338,7 @@ def summarise(rows, references, revision, head):
                     "seeds": seed_text,
                     "schedule_seed": str(SCHEDULE_SEED),
                     "gmin_revision": revision,
-                    "anneal_head": head,
+                    "anneal_head": heads[ANNEAL.get(code, ("binary",))[0]],
                 }
             )
     return out
@@ -317,8 +362,11 @@ def self_test() -> None:
     if abs(type7([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 0.5) - 3.5) > 1e-12:
         raise SystemExit("type 7 median")
     order = schedule(SYSTEMS, SEEDS, codes_for, SCHEDULE_SEED)
-    if len(order) != 6 * (3 * 5 + 2 * 4):
+    if len(order) != 12 * (3 * 10 + 2 * 5) + 6 * 5:
         raise SystemExit(f"schedule length {len(order)}")
+    data = "SLOPPYCONV 5.0D-3\nTIGHTCONV 1.0D-3\nSW\n"
+    if gmin_data(data, "1.0D-6") != "SLOPPYCONV 1.0D-6\nTIGHTCONV 1.0D-6\nSW\n":
+        raise SystemExit("gmin-tight data")
     seen = []
     for name, _seed, _code in order:
         if not seen or seen[-1] != name:
@@ -337,12 +385,14 @@ def main(argv: list[str]) -> int:
         return 2
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", type=Path, required=True)
+    parser.add_argument("--before-binary", type=Path)
     parser.add_argument("--library", type=Path, required=True)
     parser.add_argument("--gmin", type=Path, required=True)
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--ase", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
+    parser.add_argument("--before-head-file", type=Path)
     parser.add_argument("--runs", type=Path, required=True)
     parser.add_argument("--starts", type=Path, required=True)
     parser.add_argument("--rows", type=Path, required=True)
@@ -355,11 +405,19 @@ def main(argv: list[str]) -> int:
     wanted = set(args.code) if args.code else None
     revision = load_source(args.source)
     head = args.head_file.read_text().strip()
+    heads = {"binary": head, "before_binary": ""}
+    if args.before_head_file:
+        heads["before_binary"] = args.before_head_file.read_text().strip()
     progress = args.runs.parent / "progress.txt"
     progress.parent.mkdir(parents=True, exist_ok=True)
 
     def codes_of(name):
-        return tuple(code for code in codes_for(name) if wanted is None or code in wanted)
+        return tuple(
+            code
+            for code in codes_for(name)
+            if (wanted is None or code in wanted)
+            and (args.before_binary or ANNEAL.get(code, ("",))[0] != "before_binary")
+        )
 
     if args.summarise_only:
         rows = [normalise(row) for row in csv.DictReader(args.rows.read_text().splitlines())]
@@ -367,7 +425,7 @@ def main(argv: list[str]) -> int:
             name: float(binary_lines(args.binary, "budget", name)[1]) for name in SYSTEMS
         }
         write_csv(args.rows, ROW_FIELDS, rows)
-        write_csv(args.summary, SUMMARY_FIELDS, summarise(rows, references, revision, head))
+        write_csv(args.summary, SUMMARY_FIELDS, summarise(rows, references, revision, heads))
         return 0
     order = schedule(names, SEEDS, codes_of, SCHEDULE_SEED)
     note(progress, f"head {head} schedule " + " ".join(f"{n}:{c}:{s}" for n, s, c in order))
@@ -396,7 +454,7 @@ def main(argv: list[str]) -> int:
         elif code == "ase":
             raw = run_ase(args, name, seed, budget, log)
         else:
-            raw = run_gmin(args, name, seed, budget, references[name], radius, start, log)
+            raw = run_gmin(args, name, seed, code, budget, references[name], radius, start, log)
         row = normalise(raw)
         write_csv(saved, ROW_FIELDS, [row])
         rows.append(row)
@@ -407,9 +465,9 @@ def main(argv: list[str]) -> int:
             f"outside_s={float(row['outside_s']):.3f}",
         )
         write_csv(args.rows, ROW_FIELDS, rows)
-        write_csv(args.summary, SUMMARY_FIELDS, summarise(rows, references, revision, head))
+        write_csv(args.summary, SUMMARY_FIELDS, summarise(rows, references, revision, heads))
     write_csv(args.rows, ROW_FIELDS, rows)
-    summary = summarise(rows, references, revision, head)
+    summary = summarise(rows, references, revision, heads)
     write_csv(args.summary, SUMMARY_FIELDS, summary)
     writer = csv.DictWriter(sys.stdout, fieldnames=SUMMARY_FIELDS)
     writer.writeheader()
