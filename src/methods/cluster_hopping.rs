@@ -1840,8 +1840,10 @@ const GROWTH_RETRY_LEAVES: u32 = 8;
 /// fraction sits near 0.06, under the 0.12 icosahedral cut, so that branch
 /// never opened. Below 98 the displacement library still leaves the floor,
 /// and a retry would move the call clock those hits were measured on.
-fn growth_held(held: Option<f64>, incumbent: f64, skipped: u32, n_points: usize) -> bool {
-    stall_growth_waits(held, incumbent) && (n_points < 98 || skipped < GROWTH_RETRY_LEAVES)
+/// Without [`Config::size_gates`] every size takes the retry.
+fn growth_held(held: Option<f64>, incumbent: f64, skipped: u32, cfg: &Config) -> bool {
+    let sized = cfg.size_gates && cfg.n_points < 98;
+    stall_growth_waits(held, incumbent) && (sized || skipped < GROWTH_RETRY_LEAVES)
 }
 
 /// The arm a hop plays.
@@ -1872,6 +1874,81 @@ fn choose_arm<R: Rng + ?Sized>(
         return allocator.select(rng);
     }
     rng.random_range(0..n_arms)
+}
+
+/// A path that builds a structure from a known packing, or picks what to
+/// do by classifying the packing the chain stands on. None of them runs
+/// when [`Config::structural_priors`] is off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PriorPath {
+    MackayCap,
+    LayerSlide,
+    StackingSlip,
+    LabelledCut,
+    FivefoldSymmetry,
+    IcosahedralReseed,
+    MotifReseed,
+    MotifTwin,
+    PackingLeave,
+    StallGrowth,
+    IcosahedralStallGrowth,
+    IcosahedralWithhold,
+    DoyeExchange,
+    WideExchange,
+    FivefoldSoap,
+    TwinArm,
+    ReseedArm,
+    ClassResidual,
+    PackingPave,
+    SeamBank,
+}
+
+/// Whether `path` may run. Each call sits after its path's own cheap
+/// conditions and before any classification or construction it pays for.
+#[inline]
+fn prior_gate(cfg: &Config, path: PriorPath) -> bool {
+    #[cfg(test)]
+    if !cfg.structural_priors {
+        prior_trace::note(path, false);
+    }
+    let _ = path;
+    cfg.structural_priors
+}
+
+/// Marks the first statement of a gated path's body.
+#[inline]
+fn prior_entered(path: PriorPath) {
+    #[cfg(test)]
+    prior_trace::note(path, true);
+    let _ = path;
+}
+
+#[cfg(test)]
+pub(crate) mod prior_trace {
+    use super::PriorPath;
+    use std::cell::RefCell;
+
+    thread_local! {
+        static NOTES: RefCell<Vec<(PriorPath, bool)>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub(crate) fn note(path: PriorPath, entered: bool) {
+        NOTES.with(|notes| notes.borrow_mut().push((path, entered)));
+    }
+
+    /// Paths entered and paths the switch declined since the last take.
+    pub(crate) fn take() -> (Vec<PriorPath>, Vec<PriorPath>) {
+        let notes = NOTES.with(|notes| std::mem::take(&mut *notes.borrow_mut()));
+        let mut entered = Vec::new();
+        let mut declined = Vec::new();
+        for (path, went) in notes {
+            let list = if went { &mut entered } else { &mut declined };
+            if !list.contains(&path) {
+                list.push(path);
+            }
+        }
+        (entered, declined)
+    }
 }
 
 /// Kernels the chain actually draws, including the energy-lattice arm.
@@ -2954,7 +3031,15 @@ where
         ledger.stop_below(energy);
     }
     let n = cfg.n_points;
-    let (continuous_symmetry_classes, csm_reseed_hops) = match cfg.continuous_symmetry {
+    // The measure projects onto the fivefold groups and reseeds on an
+    // icosahedral plateau. Inversion alone is not a packing.
+    let continuous_symmetry = match cfg.continuous_symmetry {
+        ContinuousSymmetry::Measure { .. } if !prior_gate(cfg, PriorPath::FivefoldSymmetry) => {
+            ContinuousSymmetry::Off
+        }
+        other => other,
+    };
+    let (continuous_symmetry_classes, csm_reseed_hops) = match continuous_symmetry {
         ContinuousSymmetry::Off => (None, 0),
         ContinuousSymmetry::Inversion { interval }
         | ContinuousSymmetry::Measure { interval, .. } => {
@@ -2972,7 +3057,7 @@ where
                 n,
                 "continuous-symmetry classes must match n_points"
             );
-            let reseed = match cfg.continuous_symmetry {
+            let reseed = match continuous_symmetry {
                 ContinuousSymmetry::Measure { reseed_hops, .. } => reseed_hops,
                 _ => 0,
             };
@@ -3276,18 +3361,20 @@ where
     // linkage test the first time each basin is seen, and on unless the
     // caller has a reason: the cell-grain pile alone has never taken an
     // LJ75 chain out of the icosahedral funnel.
-    let mut pave: Option<crate::catalog::PackingPave> = std::env::var("CATALOG_PACKING_PAVE")
+    let mut pave: Option<crate::catalog::PackingPave> = (std::env::var("CATALOG_PACKING_PAVE")
         .is_ok_and(|value| value == "1")
-        .then(crate::catalog::PackingPave::new);
+        && prior_gate(cfg, PriorPath::PackingPave))
+    .then(crate::catalog::PackingPave::new);
     // The seam bank. Shares partial progress along the road out of the
     // occupied packing: every accepted quench is offered by its DECAF
     // distance from the run's floor, and a stuck chain restarts from the
     // furthest banked structure instead of from the floor. Nothing here
     // touches the acceptance rule -- that is what Hop.road_priced
     // requires and what the community pile violated.
-    let mut seam: Option<crate::catalog::SeamBank> = std::env::var("CATALOG_SEAM_LADDER")
+    let mut seam: Option<crate::catalog::SeamBank> = (std::env::var("CATALOG_SEAM_LADDER")
         .is_ok_and(|value| value == "1")
-        .then(crate::catalog::SeamBank::new);
+        && prior_gate(cfg, PriorPath::SeamBank))
+    .then(crate::catalog::SeamBank::new);
     // How long a chain walks without improvement before it reseeds from
     // the frontier. The splitting gain is per round: n p arrivals per
     // stage only accumulates over repeated episodes, and a patience tied
@@ -3700,7 +3787,12 @@ where
     // charged like any other. A short-ranged run does not enter. The walk
     // keeps the start it already has: the cut is only the recorded best
     // when it is lower, and a target stops the loop before the first hop.
-    if cfg.long_ranged && !ledger.target_reached() && ledger.remaining() > 0 {
+    if cfg.long_ranged
+        && !ledger.target_reached()
+        && ledger.remaining() > 0
+        && prior_gate(cfg, PriorPath::MackayCap)
+    {
+        prior_entered(PriorPath::MackayCap);
         let mackay = binary_geometry::mackay_cap(n, cfg.length_scale.max(1e-6));
         if mackay.len() == x.len() {
             let (mackay_energy, mackay_state) = relax(ledger, mackay.view(), cfg.relax_steps);
@@ -3752,8 +3844,10 @@ where
             && cfg.monoatomic()
             && cfg.packing_cna_applies()
             && layer_slide_bits != Some(ledger.best.to_bits())
+            && prior_gate(cfg, PriorPath::LayerSlide)
             && let Some(incumbent) = ledger.best_state.clone()
         {
+            prior_entered(PriorPath::LayerSlide);
             let (frac_555, frac_421, frac_422) = crate::soap::motif_fractions(incumbent.view());
             let close_packed = !crate::soap::fivefold_plateau(incumbent.view())
                 && frac_421 > frac_422
@@ -3828,6 +3922,7 @@ where
                 // the edge slide is what finishes a packing the partial has
                 // opened. A numerical quiver of the quench is not that.
                 if !ledger.target_reached() && !ledger.stopped() {
+                    prior_entered(PriorPath::StackingSlip);
                     let before = ledger.best;
                     // One edge-slide follow-up per quenched energy. A later
                     // partial can land above the best slip so far and still
@@ -3992,7 +4087,9 @@ where
             && let Some(species) = cfg.species.as_deref()
             && species.len() == x.len() / 3
             && species.len() >= 2
+            && prior_gate(cfg, PriorPath::LabelledCut)
         {
+            prior_entered(PriorPath::LabelledCut);
             binary_core_offered = true;
             let n_atoms = species.len();
             let sigma = cfg.species_sigma.as_deref();
@@ -5107,7 +5204,7 @@ where
         if !hop_room(hops) {
             break HopStop::MaxHops;
         }
-        let continuous_symmetry_due = match cfg.continuous_symmetry {
+        let continuous_symmetry_due = match continuous_symmetry {
             ContinuousSymmetry::Off => false,
             ContinuousSymmetry::Inversion { interval }
             | ContinuousSymmetry::Measure { interval, .. } => {
@@ -5122,7 +5219,7 @@ where
             let classes = continuous_symmetry_classes
                 .as_deref()
                 .expect("enabled continuous symmetry has equivalence classes");
-            let projection = match cfg.continuous_symmetry {
+            let projection = match continuous_symmetry {
                 ContinuousSymmetry::Inversion { .. } => {
                     crate::continuous_symmetry::project_inversion(x.view(), classes)
                         .map(|projected| projected.coordinates)
@@ -5131,6 +5228,7 @@ where
                     if !new_incumbent {
                         None
                     } else {
+                        prior_entered(PriorPath::FivefoldSymmetry);
                         new_incumbent = false;
                         crate::csm::propose(x.view(), classes)
                             .map(|projected| projected.coordinates)
@@ -5138,7 +5236,7 @@ where
                 }
                 ContinuousSymmetry::Off => None,
             };
-            let symmetry_action = match cfg.continuous_symmetry {
+            let symmetry_action = match continuous_symmetry {
                 ContinuousSymmetry::Measure { .. } => "continuous-symmetry-csm",
                 _ => "continuous-symmetry-ci",
             };
@@ -5235,6 +5333,7 @@ where
             && mono_ih
             && ledger.remaining() > 0
         {
+            prior_entered(PriorPath::IcosahedralReseed);
             csm_reseed_stamp = hops;
             // Orbit completion stays. The fresh cluster keeps its atom order,
             // so species labels stay put. Projection is the stall gate below,
@@ -5324,8 +5423,10 @@ where
             && ledger.spent().saturating_sub(motif_at_spent) >= motif_gap
             && ledger.remaining() > 0
             && let Some(species) = cfg.species.as_deref()
+            && prior_gate(cfg, PriorPath::MotifReseed)
             && let Some(best_state) = ledger.best_state.clone()
         {
+            prior_entered(PriorPath::MotifReseed);
             motif_at_spent = ledger.spent();
             let (frac_555, frac_421, frac_422) = crate::soap::motif_fractions(best_state.view());
             let mut sources = Vec::new();
@@ -5424,6 +5525,7 @@ where
                 // packed. Adopted only when the quench is lower, so a
                 // miss leaves the chain and its later calls where they were.
                 if frac_422 >= 0.15 && frac_421 < 0.20 {
+                    prior_entered(PriorPath::MotifTwin);
                     for _ in 0..4 {
                         if probe.remaining() == 0 {
                             break;
@@ -5588,7 +5690,9 @@ where
         if species_wide
             && let Some(species) = cfg.species.as_deref()
             && species.len() == n
+            && prior_gate(cfg, PriorPath::DoyeExchange)
         {
+            prior_entered(PriorPath::DoyeExchange);
             let mut side = StdRng::seed_from_u64(
                 e.to_bits() ^ (hops as u64).wrapping_mul(0x9E37_79B9) ^ 0xD07E_5A4D,
             );
@@ -5796,9 +5900,11 @@ where
             && !angular
             && species_wide
             && hops.is_multiple_of(8)
+            && prior_gate(cfg, PriorPath::WideExchange)
             && let (Some(sigma), Some(eg)) =
                 (cfg.species_sigma.as_deref(), energy_grad.as_deref_mut())
         {
+            prior_entered(PriorPath::WideExchange);
             let ceiling = e + 15.0 * cfg.energy_scale;
             if let Some(swapped) = best_wide_exchange(x.view(), sigma, ceiling, |p| {
                 eg(ledger, p).map(|(energy, _)| energy)
@@ -6039,12 +6145,7 @@ where
         // displacement. Other proposals keep the kernel they drew. The test
         // is the incumbent energy, not the atom count.
         let held_displacement = directed_leave
-            && growth_held(
-                stall_growth_hold,
-                ledger.best,
-                stall_growth_skips,
-                cfg.n_points,
-            )
+            && growth_held(stall_growth_hold, ledger.best, stall_growth_skips, cfg)
             && cfg.packing_cna_applies();
         if held_displacement {
             let step = preset::LennardJonesPreset::ALL_POINTS_STEP * cfg.length_scale;
@@ -7635,10 +7736,13 @@ where
                 rcut_nn: 3.5 * cfg.length_scale,
                 ..Default::default()
             };
-            let withhold = (cfg.packing_cna_applies()
-                && crate::soap::ih_dominated(x.view(), soap_spec))
-                || cfg.active_region.is_some()
-                || cfg.frozen.is_some();
+            let ih_withhold = cfg.packing_cna_applies()
+                && prior_gate(cfg, PriorPath::IcosahedralWithhold)
+                && crate::soap::ih_dominated(x.view(), soap_spec);
+            if ih_withhold {
+                prior_entered(PriorPath::IcosahedralWithhold);
+            }
+            let withhold = ih_withhold || cfg.active_region.is_some() || cfg.frozen.is_some();
             if withhold {
                 // Withhold Ih-preserving symmetrise on a packing cluster,
                 // and never run CNA or point-group symmetrise on a slab.
@@ -7870,10 +7974,12 @@ where
             // move.
             if directed_leave
                 && cfg.packing_cna_applies()
+                && prior_gate(cfg, PriorPath::PackingLeave)
                 && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
                 && let Some((other_energy, other_state)) =
                     packing.better_other(x.view(), e, packing_cutoff)
             {
+                prior_entered(PriorPath::PackingLeave);
                 let other_gradient = record_quenched_answer(
                     cfg,
                     ledger,
@@ -7900,14 +8006,16 @@ where
             if directed_leave
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
+                && prior_gate(cfg, PriorPath::StallGrowth)
                 && !crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
             {
+                prior_entered(PriorPath::StallGrowth);
                 let best_before_growth = ledger.best;
                 if growth_held(
                     stall_growth_hold,
                     best_before_growth,
                     stall_growth_skips,
-                    cfg.n_points,
+                    cfg,
                 ) {
                     // The lattice quench already failed at this incumbent.
                     // Further growth waits. This leave's proposal is the
@@ -8027,14 +8135,16 @@ where
             if directed_leave
                 && hop_room(hops)
                 && cfg.packing_cna_applies()
+                && prior_gate(cfg, PriorPath::IcosahedralStallGrowth)
                 && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
             {
+                prior_entered(PriorPath::IcosahedralStallGrowth);
                 let best_before_growth = ledger.best;
                 if growth_held(
                     stall_growth_hold,
                     best_before_growth,
                     stall_growth_skips,
-                    cfg.n_points,
+                    cfg,
                 ) {
                     // Same wait as the other lattice growth. This leave's
                     // proposal is the all-points displacement.
@@ -11367,5 +11477,267 @@ mod geometry_guards {
             None
         ));
         assert!(min_pair_distance(grouped.view()) >= 0.4);
+    }
+}
+
+#[cfg(test)]
+mod structural_prior_tests {
+    use super::*;
+    use crate::methods::cluster_search::{search, search_from};
+    use crate::potentials::PairPotential;
+
+    /// Paths entered and paths the switch declined, priors on and then off,
+    /// on the same seed.
+    fn both(cfg: &Config, run: impl Fn(&Config)) -> [(Vec<PriorPath>, Vec<PriorPath>); 2] {
+        [true, false].map(|priors| {
+            let mut cfg = cfg.clone();
+            cfg.structural_priors = priors;
+            prior_trace::take();
+            run(&cfg);
+            prior_trace::take()
+        })
+    }
+
+    /// Priors on enter every one of `entered`. Priors off enter none at all,
+    /// and the switch is what declined each of `declined`. A path nested
+    /// under another gate is declined by that gate.
+    fn reaches(cfg: &Config, run: impl Fn(&Config), entered: &[PriorPath], declined: &[PriorPath]) {
+        let [(on, on_declined), (off, off_declined)] = both(cfg, run);
+        assert!(on_declined.is_empty(), "priors on declined {on_declined:?}");
+        assert!(off.is_empty(), "priors off entered {off:?}");
+        for path in entered {
+            assert!(
+                on.contains(path),
+                "priors on never entered {path:?}: {on:?}"
+            );
+        }
+        for path in declined {
+            assert!(
+                off_declined.contains(path),
+                "the switch never declined {path:?}: {off_declined:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_switch_reads_off_and_general_only_and_stays_out_of_the_resolved_json() {
+        assert_eq!(config::priors_from(None), (true, true));
+        assert_eq!(config::priors_from(Some("1")), (true, true));
+        for off in ["0", "false", "OFF", " no "] {
+            assert_eq!(config::priors_from(Some(off)), (false, true), "{off}");
+        }
+        assert_eq!(config::priors_from(Some("general_only")), (false, false));
+        let mut cfg = Config::recommended(38);
+        cfg.structural_priors = true;
+        cfg.size_gates = true;
+        assert!(!cfg.resolved_json().unwrap().contains("structural_priors"));
+        assert!(!cfg.resolved_json().unwrap().contains("size_gates"));
+        let on = cfg.resolved_sha256().unwrap();
+        cfg.structural_priors = false;
+        assert!(
+            cfg.resolved_json()
+                .unwrap()
+                .contains("\"structural_priors\":false")
+        );
+        let off = cfg.resolved_sha256().unwrap();
+        assert_ne!(off, on);
+        cfg.size_gates = false;
+        assert!(
+            cfg.resolved_json()
+                .unwrap()
+                .contains("\"size_gates\":false")
+        );
+        assert_ne!(cfg.resolved_sha256().unwrap(), off);
+    }
+
+    #[test]
+    fn general_only_keeps_one_surface_and_one_stall_rule_at_every_size() {
+        for n in [38, 75, 97, 98, 150] {
+            assert!(config::size_gated_surfaces(n, false).is_empty(), "{n}");
+            assert_eq!(
+                config::size_gated_surfaces(n, true).is_empty(),
+                n >= 98,
+                "{n}"
+            );
+        }
+        let held = Some(-10.0);
+        for n in [38, 98] {
+            let mut cfg = Config::for_cluster(n);
+            cfg.size_gates = false;
+            assert!(growth_held(held, -10.0, 0, &cfg));
+            assert!(!growth_held(held, -10.0, GROWTH_RETRY_LEAVES, &cfg), "{n}");
+            cfg.size_gates = true;
+            assert_eq!(growth_held(held, -10.0, GROWTH_RETRY_LEAVES, &cfg), n < 98);
+        }
+    }
+
+    #[test]
+    fn priors_off_drops_the_soap_twin_and_reseed_arms_and_keeps_the_general_ones() {
+        let mut cfg = Config::recommended(13)
+            .with_species((0..13).map(|i| if i < 7 { 29 } else { 79 }).collect(), None);
+        cfg.soap_class_residual = true;
+        for library in [
+            MoveLibrary::Twin,
+            MoveLibrary::Reseed,
+            MoveLibrary::SelfReseed,
+            MoveLibrary::GrowthAndTwin,
+            MoveLibrary::LeanBurst,
+        ] {
+            cfg.move_library = library;
+            let paths = match cfg.move_library {
+                MoveLibrary::Twin => vec![PriorPath::TwinArm],
+                MoveLibrary::GrowthAndTwin => vec![PriorPath::TwinArm, PriorPath::ReseedArm],
+                MoveLibrary::LeanBurst => vec![PriorPath::FivefoldSoap],
+                _ => vec![PriorPath::ReseedArm],
+            };
+            let [(_, on_declined), (off, declined)] = both(&cfg, |cfg| {
+                let kernels = search_kernels(cfg);
+                let motif = kernels.iter().any(|kernel| {
+                    matches!(
+                        kernel,
+                        ClusterMove::Twin { .. }
+                            | ClusterMove::Reseed { .. }
+                            | ClusterMove::Soap { .. }
+                    )
+                });
+                assert_eq!(motif, cfg.structural_priors, "{:?}", cfg.move_library);
+                assert!(kernels.iter().any(|kernel| kernel.name() == "swap"));
+            });
+            assert!(on_declined.is_empty() && off.is_empty());
+            for path in paths {
+                assert!(
+                    declined.contains(&path),
+                    "{path:?} not declined: {declined:?}"
+                );
+            }
+        }
+        let mut lattice = Config::recommended(13);
+        lattice.structural_priors = false;
+        assert!(
+            search_kernels(&lattice)
+                .iter()
+                .any(|kernel| matches!(kernel, ClusterMove::EnergyLattice))
+        );
+    }
+
+    #[test]
+    fn priors_off_skips_the_mackay_cap_and_the_fivefold_symmetry() {
+        let mut cfg = Config::recommended(13);
+        cfg.long_ranged = true;
+        cfg.restart_patience = 1_500;
+        let pot = PairPotential::morse(13, 6.0);
+        reaches(
+            &cfg,
+            |cfg| {
+                search(&pot, cfg, &mut Ledger::new(40_000), 1).expect("finite start");
+            },
+            &[
+                PriorPath::MackayCap,
+                PriorPath::FivefoldSymmetry,
+                PriorPath::IcosahedralReseed,
+                PriorPath::PackingLeave,
+                PriorPath::IcosahedralStallGrowth,
+            ],
+            &[
+                PriorPath::MackayCap,
+                PriorPath::FivefoldSymmetry,
+                PriorPath::FivefoldSoap,
+                PriorPath::PackingLeave,
+                PriorPath::IcosahedralStallGrowth,
+            ],
+        );
+    }
+
+    #[test]
+    fn priors_off_drops_the_icosahedral_withhold() {
+        let mut cfg = Config::recommended(13);
+        cfg.restart_patience = usize::MAX;
+        cfg.escape_stall_patience = 10;
+        cfg.escape_stall_factor = 1.0;
+        let pot = PairPotential::lennard_jones(13);
+        reaches(
+            &cfg,
+            |cfg| {
+                search(&pot, cfg, &mut Ledger::new(40_000), 5).expect("finite start");
+            },
+            &[PriorPath::IcosahedralWithhold],
+            &[PriorPath::IcosahedralWithhold],
+        );
+    }
+
+    #[test]
+    fn priors_off_skips_the_close_packed_stall_growth() {
+        let mut cfg = Config::recommended(7);
+        cfg.restart_patience = 1_500;
+        let pot = PairPotential::lennard_jones(7);
+        reaches(
+            &cfg,
+            |cfg| {
+                search(&pot, cfg, &mut Ledger::new(20_000), 2).expect("finite start");
+            },
+            &[PriorPath::StallGrowth],
+            &[PriorPath::StallGrowth],
+        );
+    }
+
+    #[test]
+    fn priors_off_skips_the_sheet_slide_slips_and_labelled_cuts() {
+        let cfg = Config::recommended(38).with_species(vec![79; 38], None);
+        let start = binary_geometry::fcc_cut(38, binary_geometry::FccCentre::Octahedral, 1.122_462);
+        let pot = PairPotential::lennard_jones(38);
+        reaches(
+            &cfg,
+            |cfg| {
+                search_from(&pot, cfg, &mut Ledger::new(400_000), start.view(), 3)
+                    .expect("finite start");
+            },
+            &[
+                PriorPath::LayerSlide,
+                PriorPath::StackingSlip,
+                PriorPath::LabelledCut,
+            ],
+            &[PriorPath::LayerSlide, PriorPath::LabelledCut],
+        );
+    }
+
+    #[test]
+    fn priors_off_skips_the_half_budget_motif_reseed() {
+        let mut cfg = Config::recommended(38).with_species(vec![79; 38], None);
+        cfg.restart_patience = usize::MAX;
+        let start = binary_geometry::fcc_cut(38, binary_geometry::FccCentre::Octahedral, 1.122_462);
+        let pot = PairPotential::lennard_jones(38);
+        reaches(
+            &cfg,
+            |cfg| {
+                search_from(&pot, cfg, &mut Ledger::new(200_000), start.view(), 6)
+                    .expect("finite start");
+            },
+            &[PriorPath::MotifReseed],
+            &[PriorPath::MotifReseed],
+        );
+    }
+
+    #[test]
+    fn priors_off_skips_the_wide_ratio_exchanges() {
+        let species: Vec<u32> = (0..13).map(|i| if i < 7 { 29 } else { 79 }).collect();
+        let sigma: Vec<f64> = species
+            .iter()
+            .map(|z| if *z == 29 { 1.0 } else { 1.3 })
+            .collect();
+        let cfg = Config::recommended(13).with_species(species, Some(sigma));
+        let pot = PairPotential::lennard_jones(13);
+        let paths = [
+            PriorPath::LabelledCut,
+            PriorPath::DoyeExchange,
+            PriorPath::WideExchange,
+        ];
+        reaches(
+            &cfg,
+            |cfg| {
+                search(&pot, cfg, &mut Ledger::new(200_000), 4).expect("finite start");
+            },
+            &paths,
+            &paths,
+        );
     }
 }
