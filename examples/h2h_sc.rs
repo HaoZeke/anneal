@@ -191,6 +191,13 @@ fn cmd_run(args: &[String]) -> i32 {
         pot_s,
         spec.reference,
     );
+    if let Ok(path) = std::env::var("H2H_BEST")
+        && let Some(state) = outcome.best_state.as_ref()
+        && let Err(err) = write_coords(&path, state)
+    {
+        eprintln!("best: {err}");
+        return 1;
+    }
     0
 }
 

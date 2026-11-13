@@ -2890,6 +2890,105 @@ fn finish_improving(
     out
 }
 
+/// Energy per atom, in configured wells, above which the well is not the
+/// potential's unit. Lennard-Jones bulk is under ten. The rigid water
+/// preset, whose energy is left in its own unit, stays under this. A
+/// Sutton-Chen cluster sits far above it.
+const STEEP_WELL_PER_ATOM: f64 = 64.0;
+
+/// Contacts inside 1.25 times the median nearest-neighbour distance.
+fn contact_count(x: ArrayView1<f64>, n: usize) -> usize {
+    if n < 2 || x.len() < 3 * n {
+        return 1;
+    }
+    let mut nearest = vec![f64::MAX; n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut distance = 0.0;
+            for k in 0..3 {
+                let delta = x[3 * i + k] - x[3 * j + k];
+                distance += delta * delta;
+            }
+            distance = distance.sqrt();
+            nearest[i] = nearest[i].min(distance);
+            nearest[j] = nearest[j].min(distance);
+        }
+    }
+    let mut ordered = nearest.clone();
+    ordered.sort_by(|left, right| left.total_cmp(right));
+    let cutoff = 1.25 * ordered[n / 2];
+    if !(cutoff > 0.0) {
+        return 1;
+    }
+    let mut bonds = 0usize;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut distance = 0.0;
+            for k in 0..3 {
+                let delta = x[3 * i + k] - x[3 * j + k];
+                distance += delta * delta;
+            }
+            if distance.sqrt() < cutoff {
+                bonds += 1;
+            }
+        }
+    }
+    bonds.max(1)
+}
+
+/// Rescale energy thresholds when a quench shows the configured well is
+/// not the potential's. The factor is the quenched energy per contact.
+/// Geometry steps are left alone. A potential already near one well per
+/// atom, which is the Lennard-Jones preset, is not touched.
+fn scale_contact_unit(cfg: &mut Config, energy: f64, x: ArrayView1<f64>) {
+    if cfg.move_library.is_rigid_body() || !energy.is_finite() || cfg.n_points < 2 {
+        return;
+    }
+    let per_atom = energy.abs() / cfg.n_points as f64;
+    if per_atom <= STEEP_WELL_PER_ATOM * cfg.energy_scale.max(1e-12) {
+        return;
+    }
+    let per_contact = energy.abs() / contact_count(x, cfg.n_points) as f64;
+    let factor = per_contact / cfg.energy_scale.max(1e-12);
+    if !(factor > 1.0) {
+        return;
+    }
+    cfg.temperature *= factor;
+    cfg.bias_height *= factor;
+    cfg.screen_margin *= factor;
+    cfg.record_gradient *= factor;
+    let longer = ((cfg.relax_steps as f64) * factor.sqrt().clamp(1.0, 16.0)).round();
+    cfg.relax_steps = longer.max(cfg.relax_steps as f64) as usize;
+}
+
+#[cfg(test)]
+mod contact_unit_tests {
+    use super::*;
+    use ndarray::Array1;
+
+    #[test]
+    fn a_lennard_jones_well_keeps_the_preset_temperature() {
+        let mut cfg = Config::recommended(4);
+        let before = cfg.temperature;
+        let steps = cfg.relax_steps;
+        let x = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.87, 0.0, 0.5, 0.29, 0.82]);
+        scale_contact_unit(&mut cfg, -8.0, x.view());
+        assert_eq!(cfg.temperature, before);
+        assert_eq!(cfg.relax_steps, steps);
+    }
+
+    #[test]
+    fn a_steep_quench_scales_temperature_by_the_energy_per_contact() {
+        let mut cfg = Config::recommended(4);
+        let before = cfg.temperature;
+        let x = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.87, 0.0, 0.5, 0.29, 0.82]);
+        scale_contact_unit(&mut cfg, -400.0, x.view());
+        assert!(cfg.temperature > before * 10.0, "temperature {}", cfg.temperature);
+        assert!(cfg.relax_steps > 200, "steps {}", cfg.relax_steps);
+        assert!(cfg.record_gradient > 1e-3);
+    }
+}
+
 /// Continuations [`finish_improving`] grants one relaxation.
 const FINISH_ROUNDS: usize = 8;
 
@@ -3092,6 +3191,13 @@ where
         }
         return Err(SearchError::NoFiniteStart { attempts });
     }
+    // The first quench is the potential's energy unit. Thresholds that
+    // were set for one well are multiplied by the energy per contact when
+    // that quench is far above the configured well. The call is pure
+    // arithmetic on coordinates already in hand.
+    let mut scaled = cfg.clone();
+    scale_contact_unit(&mut scaled, e, x.view());
+    let cfg = &scaled;
     if initial_recordable {
         ledger.record(e, x.view());
         ledger.mark_last_recorded(true);
