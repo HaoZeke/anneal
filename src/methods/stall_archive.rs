@@ -172,6 +172,36 @@ impl StallArchive {
         }
     }
 
+    /// Stall destination with the greatest `rank`.
+    ///
+    /// `None` from `rank` skips that seat. Ties keep the earlier offer.
+    /// The chosen destination is barred for the next [`MEMORY`] stalls,
+    /// the same bar as [`Self::escape`].
+    pub fn escape_ranked<F>(&mut self, mut rank: F) -> Option<(f64, Array1<f64>)>
+    where
+        F: FnMut(f64, ArrayView1<f64>) -> Option<i64>,
+    {
+        let chosen = self
+            .seats
+            .iter()
+            .filter_map(|seat| {
+                rank(seat.energy, seat.state.view()).map(|score| {
+                    (score, seat.offered, seat.energy, seat.state.clone())
+                })
+            })
+            .max_by(|left, right| left.0.cmp(&right.0).then(right.1.cmp(&left.1)))
+            .map(|(_, _, energy, state)| (energy, state));
+        if let Some((energy, _)) = chosen.as_ref()
+            && self.memory > 0
+        {
+            self.recent.push_back(*energy);
+            while self.recent.len() > self.memory {
+                self.recent.pop_front();
+            }
+        }
+        chosen
+    }
+
     /// The stall destination for a walker at `here`. The next [`MEMORY`]
     /// stalls bar the chosen destination.
     ///
@@ -285,5 +315,22 @@ mod tests {
         assert_eq!(kept.seats.len(), 2);
         assert_eq!(kept.escape_other_cage(7).map(|(e, _)| e), Some(-610.0));
         assert_eq!(kept.escape_other_cage(9).map(|(e, _)| e), Some(-623.4));
+    }
+
+    #[test]
+    fn a_ranked_escape_takes_the_highest_score_and_skips_a_refusal() {
+        let mut kept = StallArchive::new(8, 0);
+        kept.offer(-1.0, array![1.0].view());
+        kept.offer(-2.0, array![5.0].view());
+        kept.offer(-3.0, array![3.0].view());
+        let picked = kept
+            .escape_ranked(|_, state| Some(state[0] as i64))
+            .map(|(_, state)| state[0]);
+        assert_eq!(picked, Some(5.0));
+        let next = kept
+            .escape_ranked(|_, state| (state[0] < 5.0).then_some(state[0] as i64))
+            .map(|(_, state)| state[0]);
+        assert_eq!(next, Some(3.0));
+        assert!(kept.escape_ranked(|_, _| None).is_none());
     }
 }
