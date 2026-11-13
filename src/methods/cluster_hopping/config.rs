@@ -233,9 +233,9 @@ impl PairRange {
     /// `silent(r)` says whether the dimer at separation `r` has exactly zero
     /// energy and force, or `None` once the caller can pay for no more
     /// evaluations. The scan grows from `bond` by five per cent a step up
-    /// to `limit`, then bisects the bracket to a relative 1e-10. A tail that
-    /// never reaches zero before `limit`, such as Lennard-Jones, has no
-    /// range.
+    /// to `limit`, then bisects the bracket to a relative 1e-6, finer than
+    /// any connectivity cut the reach sets. A tail that never reaches zero
+    /// before `limit`, such as Lennard-Jones, has no range.
     pub fn measure(
         bond: f64,
         limit: f64,
@@ -256,7 +256,7 @@ impl PairRange {
             }
             lo = r;
         };
-        while hi - lo > 1.0e-10 * hi {
+        while hi - lo > 1.0e-6 * hi {
             let mid = 0.5 * (lo + hi);
             if silent(mid)? {
                 hi = mid;
@@ -1200,9 +1200,8 @@ pub struct Config {
     pub surfaces: Vec<crate::methods::two_phase::TwoPhase>,
     /// Container half-width, applied when a move is generated.
     ///
-    /// With a [`Config::pair_range`] whose reach is shorter than the
-    /// container's diameter, the reach replaces the sphere (see
-    /// [`Config::pair_range`]). The radius still sizes the start.
+    /// With a [`Config::pair_range`] the reach replaces the sphere on every
+    /// move (see [`Config::pair_range`]). The radius still sizes the start.
     pub container: f64,
     /// The pair force's measured reach, when it has one.
     ///
@@ -1210,10 +1209,9 @@ pub struct Config {
     /// largest part rather than inside the container sphere: a part out of
     /// reach is moved back to one bond from it. A cluster whose minimum
     /// spreads past the sphere, such as a carbon bowl or flake, is not
-    /// pressed back into it on every move. A reach at or beyond the
-    /// container's diameter holds every contained structure together
-    /// already, so the sphere applies as before. Absent from the resolved
-    /// JSON when unset.
+    /// pressed back into it on every move. The bound is the potential's own
+    /// at every size, the container plays no part, and the rigid side walks
+    /// gather the same way. Absent from the resolved JSON when unset.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pair_range: Option<PairRange>,
     /// Closest approach enforced before a trial is relaxed.

@@ -1281,13 +1281,10 @@ pub(crate) fn gather_into_reach(x: &mut Array1<f64>, n: usize, reach: f64, bond:
 
 /// Keeps a trial where the potential can still hold it together.
 ///
-/// The container sphere, or the pair's measured reach when it is shorter
-/// than the sphere's diameter.
+/// The pair's measured reach when there is one, so a ranged potential sets
+/// its own bound, and the container sphere otherwise.
 fn contain_trial(cfg: &Config, x: &mut Array1<f64>, n: usize) {
-    match cfg
-        .pair_range
-        .filter(|range| range.reach < 2.0 * cfg.container)
-    {
+    match cfg.pair_range {
         Some(range) => {
             gather_into_reach(x, n, range.reach, range.bond);
             recentre(x, n);
@@ -4385,7 +4382,7 @@ where
                             &mut $rng,
                         );
                         recentre(&mut trial, cfg.n_points);
-                        contain(&mut trial, cfg.n_points, cfg.container);
+                        contain_trial(cfg, &mut trial, cfg.n_points);
                         let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                         if quenched.is_finite() && relaxed.len() == $state.len() {
                             let rise = (quenched - $energy) / cfg.temperature.max(1e-12);
@@ -4578,7 +4575,7 @@ where
                     &mut side_rng,
                 );
                 recentre(&mut trial, cfg.n_points);
-                contain(&mut trial, cfg.n_points, cfg.container);
+                contain_trial(cfg, &mut trial, cfg.n_points);
                 let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                 if !quenched.is_finite() || relaxed.len() != side_state.len() {
                     break;
@@ -11316,33 +11313,29 @@ mod tests {
     }
 
     #[test]
-    fn a_reach_past_the_container_diameter_keeps_the_sphere() {
+    fn a_measured_reach_replaces_the_sphere_at_any_length() {
         let mut cfg = Config::recommended(3);
         cfg.container = 1.5;
         let start = Array1::from(vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 6.0, 0.0, 0.0]);
         let mut sphere = start.clone();
         contain(&mut sphere, 3, cfg.container);
-        cfg.pair_range = Some(PairRange {
-            reach: 2.0 * cfg.container,
-            bond: 1.1,
-        });
-        let mut ranged = start.clone();
-        contain_trial(&cfg, &mut ranged, 3);
-        assert_eq!(ranged, sphere);
-        cfg.pair_range = Some(PairRange {
-            reach: 2.0,
-            bond: 1.1,
-        });
-        let mut gathered = start.clone();
-        contain_trial(&cfg, &mut gathered, 3);
-        assert_eq!(connectivity_groups(gathered.view(), 3, 2.0).len(), 1);
+        let mut plain = start.clone();
+        contain_trial(&cfg, &mut plain, 3);
+        assert_eq!(plain, sphere);
+        for reach in [2.0, 4.0 * cfg.container] {
+            cfg.pair_range = Some(PairRange { reach, bond: 1.1 });
+            let mut gathered = start.clone();
+            contain_trial(&cfg, &mut gathered, 3);
+            assert_ne!(gathered, sphere);
+            assert_eq!(connectivity_groups(gathered.view(), 3, reach).len(), 1);
+        }
         assert!(cfg.resolved_json().unwrap().contains("\"pair_range\""));
     }
 
     #[test]
     fn a_cutoff_has_a_reach_and_a_tail_does_not() {
         let range = PairRange::measure(1.45, 1.0e3, |r| Some(r >= 2.1)).expect("a reach");
-        assert!((range.reach - 2.1).abs() < 1e-9);
+        assert!((range.reach - 2.1).abs() < 1e-5);
         assert_eq!(range.bond, 1.45);
         assert!(PairRange::measure(1.12, 1.0e3, |_| Some(false)).is_none());
         let mut left = 3;
