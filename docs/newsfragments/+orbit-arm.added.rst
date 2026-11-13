@@ -1,0 +1,1 @@
+``Config::orbit_arm`` offers orbit completion as a move-allocator arm, ``ClusterMove::OrbitComplete``, to a configuration that does not complete orbits on every new basin. It is off on every preset, and a preset with ``orbit_complete_on_new`` draws the same kernels with it on.

@@ -112,3 +112,46 @@ fn a_basin_stride_is_resolved_only_off_its_default() {
         cfg.resolved_sha256().unwrap()
     );
 }
+
+#[test]
+fn paper_preset_priors_stay_out_of_the_resolved_hash() {
+    let cfg = Config::recommended(38);
+    let json = cfg.resolved_json().unwrap();
+    for name in [
+        "prior_soap",
+        "prior_reseed",
+        "prior_growth",
+        "prior_core",
+        "prior_motif",
+        "general_collective",
+    ] {
+        assert!(
+            !json.contains(name),
+            "{name} at the paper preset stays out of the resolved JSON"
+        );
+    }
+    let mut dropped = cfg.clone();
+    dropped.prior_soap = false;
+    assert!(
+        dropped
+            .resolved_json()
+            .unwrap()
+            .contains("\"prior_soap\":false")
+    );
+    assert_ne!(
+        dropped.resolved_sha256().unwrap(),
+        cfg.resolved_sha256().unwrap()
+    );
+    let mut plane = cfg;
+    plane.general_collective = true;
+    assert!(
+        plane
+            .resolved_json()
+            .unwrap()
+            .contains("\"general_collective\":true")
+    );
+    assert_ne!(
+        plane.resolved_sha256().unwrap(),
+        "a1bd030f28c13e57f6dbaa50302b8f1312139fc1684f2fa24801a361664cf5d2"
+    );
+}

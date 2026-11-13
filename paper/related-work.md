@@ -754,3 +754,39 @@ Mubeen and Chen, Surfaces and Interfaces 98, 110424 (October 2026), doi:10.1016/
 
 Cite `chouAllegro2026` and `mubeenAgpd2026`.
 
+## 2026-11-13 — Two differential-evolution toolkits for metal clusters
+
+Wu, He, and Lin, Journal of Chemical Information and Modeling 66, 1950--1954 (4 February 2026), doi:10.1021/acs.jcim.5c02790, release a C++ toolkit for collaborative differential evolution. Three subpopulations split exploration, exploitation, and balance. The case studies are Pt--Pd, Cu--Au, and monometallic platinum. The abstract says the search converges 50 to 100 percent faster than the conventional methods in that comparison, and that the runs are more stable.
+
+The same three authors, Nanoscale 17, 26892--26906 (2025), doi:10.1039/d5nr03763h, describe adaptive multi-strategy differential evolution. Three populations again share exploration, exploitation, and diversity. The abstract says the search is faster and more stable than the traditional algorithms they compare, and that it reaches a lower energy on those tests. The clusters they then analyse are Pt--Ni, from 3 to 12 atoms and at the magic sizes 13, 19, and 23.
+
+Wu, Lin, and He are also authors of the Pt--Cu potential comparison already filed as `wuPtcu2026`, whose abstract calls that search CDE. This note is the toolkit paper under the same name. It does not replace that ranking of Gupta, Sutton-Chen, and Finnis-Sinclair. The adaptive paper is a second algorithm, on Pt--Ni. Usman and Chen already search platinum--nickel with a policy gradient, filed as `usmanPtni2026`. Tang and co-workers already say another search beats plain differential evolution on Au--Cu, filed as `tangAucur2026`. Neither new abstract names LJ38 through LJ104 or the water hexamer, and neither quotes a Cambridge energy, so neither contradicts the hit targets, 121 of 192, or 97 of 192. A convergence speed is not the force-call hit rate. A comparison would be Pt--Pd, Cu--Au, platinum, or Pt--Ni on the potential that code uses. Neither warrants a head-to-head on the Lennard-Jones preset or on the CREST hexamer table, and neither fills the open ASE, AGOX, and GMIN kit.
+
+Cite `wuCde2026` and `wuAmsde2025`.
+
+## 2026-11-13 — Global minima of platinum-doped and ruthenium-doped silicon
+
+Guevara-Vela, Rodríguez-Kessler, Muñoz-Castro, and Rocha-Rinza, Physical Chemistry Chemical Physics 28, 11107--11116 (2026), doi:10.1039/d6cp00681g, search neutral and anionic PtSi\(_n\) for \(n\) from 2 to 11. A genetic algorithm proposes the candidates, and PBE0/def2-TZVP refines them. The abstract reports the lowest structure at each size and the platinum coordination.
+
+Lu, The Journal of Physical Chemistry A 130, 670--681 (8 January 2026), doi:10.1021/acs.jpca.5c08131, assigns RuSi\(_n\) for \(n\) from 13 to 17. Anion photoelectron spectra at 266 nm give vertical detachment energies from 2.87 to 3.28 eV, and the calculated values differ from experiment by less than 0.11 eV. The global minima come from CALYPSO and ABCluster, refined at B3LYP/def2-TZVPD, with DLPNO-CCSD(T) single points. The abstract names anionic RuSi\(_{17}^-\) and neutral RuSi\(_{14}\) as the compact magic sizes. The motif is a ruthenium atom inside a distorted bicapped pentagonal prism.
+
+Guevara-Vela and Rocha-Rinza are authors of the pure-silicon search already filed as `salazarSilicon2026`, which reports new minima at Si18, Si20, Si30, and Si32. Shukla already builds Stillinger--Weber silicon from 32 to 60 atoms, filed as `shuklaSilicon2026`. Liu and co-workers already search AgSi\(_n^-\), filed as `liuSilverSilicon2026`. These two papers are platinum-doped and ruthenium-doped, and both stop at or below 17 silicon atoms. They give no Lennard-Jones energy and no Stillinger--Weber energy. The 0.11 eV figure is a detachment-energy residual, not a Cambridge gap. They do not contradict the Cambridge hit targets, the Salazar gaps, 121 of 192, or 97 of 192. A head-to-head would be PtSi\(_n\) on PBE0, or RuSi\(_n\) on the B3LYP ranking with the coupled-cluster single points. ABCluster is the microsolvation code already named beside CREST in `lauriaComplax2026`. This use is ruthenium-doped silicon. Neither paper warrants a head-to-head on the Lennard-Jones preset, on the Stillinger--Weber comparison, or on the CREST hexamer table.
+
+Cite `guevaraVelaPtsi2026` and `luRutheniumSilicon2026`.
+
+## 2026-11-13 — A modified basin hop on Y@Cu15
+
+Rodríguez-Kessler and Muñoz-Castro, Physical Chemistry Chemical Physics 28, 13118--13124 (2026), doi:10.1039/d6cp00667a, search Y@Cu\(_{15}\) with a modified basin hop. The abstract reports a yttrium atom inside a \(C_{2v}\) cage of fifteen copper atoms. The interaction energy of that encapsulation is \(-220.4\) kcal/mol.
+
+These authors already have the doped-cluster basin hops on file, including Pt\(_n\)V\(^-\) as `rodriguezKesslerPtv2026`. This cluster is yttrium in copper. The interaction energy is not a Cambridge Lennard-Jones energy, and the note gives no water energy, so it does not contradict the hit targets, 121 of 192, or 97 of 192. It does not fill the open ASE, AGOX, and GMIN kit. A head-to-head would be Y@Cu\(_{15}\) on the surface used for that hop. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `rodriguezKesslerYcu2026`.
+
+## 2026-11-13 — CREST on a cut-out binding pocket
+
+Fellinger, Sappl, Szabadi, Merget, Schleifer, and Langer, Journal of Chemical Information and Modeling 66, 3432--3436 (23 March 2026), doi:10.1021/acs.jcim.6c00569, release AutoPocket2CREST. The workflow finds the ligand in a protein complex, cuts a pocket around it, can freeze the backbone, and hands that pocket to CREST. The abstract says the sampling is semiempirical and is aimed at the bound ligand.
+
+The hexamer comparison is a bare cluster at GFN2-xTB in xtb 6.7.1, against CREST 3.0.2. This workflow does not report 121 of 192, 97 of 192, or the polished gaps. It does not mention a user seed, so the sentence that CREST 3.0.2 exposes no seed still stands. A pocket around a bound ligand is not the bare hexamer. Leave the CREST table on 3.0.2. It does not warrant a head-to-head on that table.
+
+Cite `fellingerAutopocket2026`.
+

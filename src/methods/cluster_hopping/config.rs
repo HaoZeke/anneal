@@ -214,6 +214,60 @@ impl OrbitCore {
     }
 }
 
+/// How far a pair force reaches, measured on the potential's own dimer.
+///
+/// A potential with a cutoff has exactly zero energy and force beyond some
+/// separation. Two atoms further apart than that do not interact, and a part
+/// of the cluster out of that reach of the rest feels nothing from it.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub struct PairRange {
+    /// Separation beyond which the dimer's energy and force are exactly zero.
+    pub reach: f64,
+    /// Dimer bond length.
+    pub bond: f64,
+}
+
+impl PairRange {
+    /// Bisects the separation at which a dimer first falls silent.
+    ///
+    /// `silent(r)` says whether the dimer at separation `r` has exactly zero
+    /// energy and force, or `None` once the caller can pay for no more
+    /// evaluations. The scan grows from `bond` by five per cent a step up
+    /// to `limit`, then bisects the bracket to a relative 1e-10. A tail that
+    /// never reaches zero before `limit`, such as Lennard-Jones, has no
+    /// range.
+    pub fn measure(
+        bond: f64,
+        limit: f64,
+        mut silent: impl FnMut(f64) -> Option<bool>,
+    ) -> Option<Self> {
+        if !(bond.is_finite() && bond > 0.0) {
+            return None;
+        }
+        let mut lo = bond;
+        let mut r = bond;
+        let mut hi = loop {
+            r *= 1.05;
+            if r >= limit {
+                return None;
+            }
+            if silent(r)? {
+                break r;
+            }
+            lo = r;
+        };
+        while hi - lo > 1.0e-10 * hi {
+            let mid = 0.5 * (lo + hi);
+            if silent(mid)? {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        Some(Self { reach: hi, bond })
+    }
+}
+
 /// Driver settings.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Config {
@@ -487,6 +541,16 @@ pub struct Config {
     /// quenched and offered to the acceptance rule. With
     /// [`Config::point_symmetrise_on_new`] both are attempted, core first.
     pub orbit_complete_on_new: bool,
+    /// Offer orbit completion as an allocator arm
+    /// ([`ClusterMove::OrbitComplete`]) when
+    /// [`Config::orbit_complete_on_new`] is off.
+    ///
+    /// The event form completes every new basin and pays for every
+    /// completion. The arm is drawn by the move allocator and keeps its
+    /// share only while the depth it reaches pays for it. Absent from the
+    /// resolved JSON while off.
+    #[serde(skip_serializing_if = "is_false")]
+    pub orbit_arm: bool,
     /// Which core an orbit completion reads its point group from. No
     /// preset leaves the fraction core; [`Config::with_dual_orbit_core`]
     /// opts in to both. Fraction is omitted from the resolved JSON, so a
@@ -899,20 +963,26 @@ pub struct Config {
     /// quantity three separate calibrations here failed to pin down.
     pub anneal_diversity: bool,
     /// Fivefold SOAP proposal. On in the paper preset.
+    #[serde(skip_serializing_if = "is_true")]
     pub prior_soap: bool,
     /// Icosahedral symmetry reseed. On in the paper preset.
+    #[serde(skip_serializing_if = "is_true")]
     pub prior_reseed: bool,
     /// Stall regrowth from a lattice order. On in the paper preset.
+    #[serde(skip_serializing_if = "is_true")]
     pub prior_growth: bool,
     /// Labelled close-packed core cuts. On in the paper preset.
+    #[serde(skip_serializing_if = "is_true")]
     pub prior_core: bool,
     /// Half-budget motif reseed. On in the paper preset.
+    #[serde(skip_serializing_if = "is_true")]
     pub prior_motif: bool,
     /// Plane cap and slab moves, a temperature taken from the
     /// population's energy spread, and a fingerprint taboo.
     ///
     /// Off in the paper preset, so a default chain draws the same calls.
     /// The move does not name a packing or a composition.
+    #[serde(skip_serializing_if = "is_false")]
     pub general_collective: bool,
     /// Fraction of the starting radius the annealed threshold falls to.
     ///
@@ -1135,7 +1205,23 @@ pub struct Config {
     /// sampling. Empty leaves the choice to `two_phase`.
     pub surfaces: Vec<crate::methods::two_phase::TwoPhase>,
     /// Container half-width, applied when a move is generated.
+    ///
+    /// With a [`Config::pair_range`] whose reach is shorter than the
+    /// container's diameter, the reach replaces the sphere (see
+    /// [`Config::pair_range`]). The radius still sizes the start.
     pub container: f64,
+    /// The pair force's measured reach, when it has one.
+    ///
+    /// A move then keeps every part of the trial within reach of the
+    /// largest part rather than inside the container sphere: a part out of
+    /// reach is moved back to one bond from it. A cluster whose minimum
+    /// spreads past the sphere, such as a carbon bowl or flake, is not
+    /// pressed back into it on every move. A reach at or beyond the
+    /// container's diameter holds every contained structure together
+    /// already, so the sphere applies as before. Absent from the resolved
+    /// JSON when unset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pair_range: Option<PairRange>,
     /// Closest approach enforced before a trial is relaxed.
     pub min_separation: f64,
     /// Cut the move library down to the uniform displacement alone: the
@@ -1180,6 +1266,10 @@ pub struct Config {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 fn is_one(value: &usize) -> bool {
@@ -1529,6 +1619,7 @@ impl Config {
             point_symmetrise: false,
             point_symmetrise_on_new: false,
             orbit_complete_on_new: false,
+            orbit_arm: false,
             orbit_core: OrbitCore::Fraction,
             soap_repel: false,
             exchange_metropolis: false,
@@ -1623,6 +1714,7 @@ impl Config {
             container: LennardJonesPreset::CONTAINER_RADIUS
                 * length_scale
                 * (n_points as f64).cbrt(),
+            pair_range: None,
             min_separation: LennardJonesPreset::MIN_SEPARATION * length_scale,
             displacement_only: false,
             superbasin_report: false,
@@ -1762,6 +1854,7 @@ impl Config {
         self.point_symmetrise = false;
         self.point_symmetrise_on_new = false;
         self.orbit_complete_on_new = false;
+        self.orbit_arm = false;
         self.orbit_core = OrbitCore::Fraction;
         self.angular_moves = false;
         self.continuous_symmetry = ContinuousSymmetry::Off;

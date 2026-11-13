@@ -7,10 +7,16 @@ fn main() {
     // setting DESTDIR when building with make will cause the install to be in a
     // different directory than the expected one ($OUT_DIR/lib)
     std::env::remove_var("DESTDIR");
-    // Cargo holds the build-directory lock for the whole invocation when
-    // CARGO_TARGET_DIR is set (trybuild sets it). The cmake probe below runs
-    // `cargo rustc` with no `--target-dir` and would wait on that same lock.
-    std::env::remove_var("CARGO_TARGET_DIR");
+    // cmake's Rust probe runs `cargo rustc --print=native-static-libs` in this
+    // process's environment. The parent cargo holds `<target>/.cargo-build-lock`
+    // for the whole invocation. An inherited target directory, or one a nested
+    // cargo finds by walking up to `.cargo/config.toml`, is that same lock, and
+    // the probe waits on it until the parent exits. The probe gets a directory
+    // of its own. The build-dir variables name that lock a second way.
+    let nested_target = PathBuf::from(std::env::var("OUT_DIR").expect("missing OUT_DIR"))
+        .join("nested-cargo-target");
+    std::fs::create_dir_all(&nested_target).expect("create the nested cargo target");
+    std::env::set_var("CARGO_TARGET_DIR", &nested_target);
     std::env::remove_var("CARGO_BUILD_DIR");
     std::env::remove_var("CARGO_BUILD_BUILD_DIR");
 

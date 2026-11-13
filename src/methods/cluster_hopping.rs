@@ -93,7 +93,8 @@ mod preset;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{
-    ArmSelection, Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, SoapProposalMode,
+    ArmSelection, Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, PairRange,
+    SoapProposalMode,
 };
 pub use moves::*;
 
@@ -1283,6 +1284,79 @@ pub(crate) fn contain_fragments(x: &mut Array1<f64>, species: &[u32], tolerance:
                 }
             }
         }
+    }
+}
+
+/// Moves every connected part of `x` out of `reach` of the largest part
+/// back to `bond` from it.
+///
+/// Parts are connected at `reach`. Each other part is translated along the
+/// line from its atom nearest the largest part to that atom's partner there,
+/// until the two are `bond` apart, and the parts are formed again. The
+/// largest part does not move; of equal parts, the one holding the lowest
+/// index stays.
+pub(crate) fn gather_into_reach(x: &mut Array1<f64>, n: usize, reach: f64, bond: f64) {
+    if !(reach.is_finite() && bond.is_finite() && bond > 0.0 && bond < reach) {
+        return;
+    }
+    for _ in 0..n {
+        let groups = connectivity_groups(x.view(), n, reach);
+        if groups.len() < 2 {
+            return;
+        }
+        let anchor = (0..groups.len())
+            .max_by(|&a, &b| groups[a].len().cmp(&groups[b].len()).then(b.cmp(&a)))
+            .unwrap_or(0);
+        let mut nearest: Option<(f64, usize, usize, usize)> = None;
+        for (g, group) in groups.iter().enumerate() {
+            if g == anchor {
+                continue;
+            }
+            for &i in group {
+                for &j in &groups[anchor] {
+                    let d2: f64 = (0..3).map(|k| (x[3 * i + k] - x[3 * j + k]).powi(2)).sum();
+                    if nearest.is_none_or(|(best, ..)| d2 < best) {
+                        nearest = Some((d2, g, i, j));
+                    }
+                }
+            }
+        }
+        let Some((d2, g, i, j)) = nearest else {
+            return;
+        };
+        let d = d2.sqrt();
+        if d <= 0.0 {
+            return;
+        }
+        let shift: [f64; 3] =
+            std::array::from_fn(|k| (x[3 * j + k] - x[3 * i + k]) * (d - bond) / d);
+        for &a in &groups[g] {
+            for (k, step) in shift.iter().enumerate() {
+                x[3 * a + k] += step;
+            }
+        }
+    }
+}
+
+/// Keeps a trial where the potential can still hold it together.
+///
+/// The container sphere, or the pair's measured reach when it is shorter
+/// than the sphere's diameter.
+fn contain_trial(cfg: &Config, x: &mut Array1<f64>, n: usize) {
+    let molecular = matches!(cfg.move_library, MoveLibrary::Molecular { .. });
+    if let Some(z) = cfg.species.as_deref().filter(|z| molecular && z.len() == n) {
+        contain_fragments(x, z, cfg.bond_tolerance, cfg.container);
+        return;
+    }
+    match cfg
+        .pair_range
+        .filter(|range| range.reach < 2.0 * cfg.container)
+    {
+        Some(range) => {
+            gather_into_reach(x, n, range.reach, range.bond);
+            recentre(x, n);
+        }
+        None => contain(x, n, cfg.container),
     }
 }
 
@@ -6393,11 +6467,7 @@ where
         match hop_frozen.as_ref() {
             None => {
                 recentre(&mut trial, n);
-                let molecular = matches!(cfg.move_library, MoveLibrary::Molecular { .. });
-                match cfg.species.as_deref().filter(|z| molecular && z.len() == n) {
-                    Some(z) => contain_fragments(&mut trial, z, cfg.bond_tolerance, cfg.container),
-                    None => contain(&mut trial, n, cfg.container),
-                }
+                contain_trial(cfg, &mut trial, n);
             }
             Some(f) => {
                 let mut lo = [f64::INFINITY; 3];
@@ -11250,6 +11320,112 @@ mod tests {
         let mut labelled = cfg.clone();
         labelled.species = Some(vec![29, 29, 79]);
         assert!(!sheds_free_atom(&labelled, apart.view(), None));
+    }
+
+    #[test]
+    fn orbit_arm_is_offered_only_without_completion_on_new_basins() {
+        let names = |cfg: &Config| -> Vec<String> {
+            search_kernels(cfg)
+                .iter()
+                .map(|kernel| kernel.name())
+                .collect()
+        };
+        let recommended = Config::recommended(13);
+        let mut armed = recommended.clone();
+        armed.orbit_arm = true;
+        assert_eq!(names(&recommended), names(&armed));
+        assert!(
+            armed
+                .resolved_json()
+                .unwrap()
+                .contains("\"orbit_arm\":true")
+        );
+        assert!(!recommended.resolved_json().unwrap().contains("orbit_arm"));
+        armed.orbit_complete_on_new = false;
+        let offered = names(&armed);
+        assert_eq!(offered.iter().filter(|name| *name == "orbit").count(), 1);
+        armed.orbit_arm = false;
+        assert!(!names(&armed).iter().any(|name| name == "orbit"));
+    }
+
+    #[test]
+    fn the_orbit_arm_steps_one_point_when_no_group_moves_anyone() {
+        let cfg = Config::for_cluster(3);
+        let kernel = ClusterMove::OrbitComplete {
+            n_points: 3,
+            tolerance: cfg.symmetry_tolerance,
+            merge_radius: cfg.symmetry_merge_radius,
+            core_fraction: cfg.symmetrise_core_fraction,
+            min_separation: cfg.min_separation,
+            fallback_step: 0.1,
+        };
+        let x = Array1::from(vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0]);
+        let mut rng = StdRng::seed_from_u64(7);
+        let y = kernel.propose(x.view(), cfg.temperature, &mut rng);
+        let moved: Vec<usize> = (0..3)
+            .filter(|&i| (0..3).any(|k| y[3 * i + k] != x[3 * i + k]))
+            .collect();
+        assert_eq!(moved.len(), 1);
+    }
+
+    #[test]
+    fn a_part_out_of_reach_comes_back_to_one_bond() {
+        let start = Array1::from(vec![
+            0.0, 0.0, 0.0, 1.4, 0.0, 0.0, 0.0, 1.4, 0.0, 9.0, 0.0, 0.0, 9.0, 1.4, 0.0,
+        ]);
+        let mut x = start.clone();
+        gather_into_reach(&mut x, 5, 2.1, 1.45);
+        assert_eq!(connectivity_groups(x.view(), 5, 2.1).len(), 1);
+        let d = |a: usize, b: usize| {
+            (0..3)
+                .map(|k| (x[3 * a + k] - x[3 * b + k]).powi(2))
+                .sum::<f64>()
+                .sqrt()
+        };
+        assert!((d(1, 3) - 1.45).abs() < 1e-12, "moved to {}", d(1, 3));
+        assert!((d(3, 4) - 1.4).abs() < 1e-12);
+        assert_eq!(x.slice(ndarray::s![0..9]), start.slice(ndarray::s![0..9]));
+    }
+
+    #[test]
+    fn a_reach_past_the_container_diameter_keeps_the_sphere() {
+        let mut cfg = Config::recommended(3);
+        cfg.container = 1.5;
+        let start = Array1::from(vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 6.0, 0.0, 0.0]);
+        let mut sphere = start.clone();
+        contain(&mut sphere, 3, cfg.container);
+        cfg.pair_range = Some(PairRange {
+            reach: 2.0 * cfg.container,
+            bond: 1.1,
+        });
+        let mut ranged = start.clone();
+        contain_trial(&cfg, &mut ranged, 3);
+        assert_eq!(ranged, sphere);
+        cfg.pair_range = Some(PairRange {
+            reach: 2.0,
+            bond: 1.1,
+        });
+        let mut gathered = start.clone();
+        contain_trial(&cfg, &mut gathered, 3);
+        assert_eq!(connectivity_groups(gathered.view(), 3, 2.0).len(), 1);
+        assert!(cfg.resolved_json().unwrap().contains("\"pair_range\""));
+    }
+
+    #[test]
+    fn a_cutoff_has_a_reach_and_a_tail_does_not() {
+        let range = PairRange::measure(1.45, 1.0e3, |r| Some(r >= 2.1)).expect("a reach");
+        assert!((range.reach - 2.1).abs() < 1e-9);
+        assert_eq!(range.bond, 1.45);
+        assert!(PairRange::measure(1.12, 1.0e3, |_| Some(false)).is_none());
+        let mut left = 3;
+        let starved = PairRange::measure(1.45, 1.0e3, |r| {
+            if left == 0 {
+                return None;
+            }
+            left -= 1;
+            Some(r >= 2.1)
+        });
+        assert!(starved.is_none());
     }
 
     #[test]
