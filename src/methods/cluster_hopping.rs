@@ -4144,12 +4144,10 @@ where
                     }
                     if let Some(refined) =
                         binary_geometry::refine(energy, state, species, &mut side)
+                        && refined.0.is_finite()
+                        && best_cut.as_ref().is_none_or(|(held, _)| refined.0 < *held)
                     {
-                        if refined.0.is_finite()
-                            && best_cut.as_ref().is_none_or(|(held, _)| refined.0 < *held)
-                        {
-                            best_cut = Some(refined);
-                        }
+                        best_cut = Some(refined);
                     }
                 }
             }
@@ -6706,7 +6704,7 @@ where
         // proposal is still described, because a filled destination can
         // turn it back, and one step in `basin_stride` is exact either way.
         let stride = cfg.basin_stride.max(1);
-        let skip_basin = stride > 1 && hops % stride != 0 && e_new > e;
+        let skip_basin = stride > 1 && !hops.is_multiple_of(stride) && e_new > e;
         let held_live = held_cv.as_ref().is_some_and(|_| {
             held_count == bias.n_basins()
                 && held_bits.len() == x.len()
