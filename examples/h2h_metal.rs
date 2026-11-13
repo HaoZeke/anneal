@@ -103,13 +103,23 @@ fn potential(spec: &Spec) -> Gupta {
 }
 
 fn config(spec: &Spec) -> Config {
-    match spec.kind {
+    let mut cfg = match spec.kind {
         Kind::Zinc => Config::recommended(spec.n),
         Kind::CopperGold { n_copper } => {
             let species = Gupta::copper_gold_species(n_copper, spec.n - n_copper);
             Config::recommended(spec.n).with_species(species, None)
         }
-    }
+    };
+    // The Gupta surface does not read the basin index. One exact step in
+    // eight, plus every downhill proposal, is enough to keep a deposit
+    // from being ignored on the way in. Lennard-Jones and TIP4P do not
+    // set this.
+    cfg.basin_stride = std::env::var("H2H_BASIN_STRIDE")
+        .ok()
+        .and_then(|text| text.parse().ok())
+        .unwrap_or(8)
+        .max(1);
+    cfg
 }
 
 fn cmd_run(args: &[String]) -> i32 {

@@ -239,6 +239,15 @@ pub struct Config {
     pub bias_height: f64,
     /// Well-tempered bias factor; must exceed one.
     pub bias_gamma: f64,
+    /// How often a proposal pays for the basin scan.
+    ///
+    /// One is every proposal: the biased Metropolis difference and the
+    /// deposit. A larger stride still checks every downhill proposal and
+    /// every accepted step exactly, and one proposal in `basin_stride`
+    /// even when the bare energy rose. The others are decided on the
+    /// bare energy and do not touch the index. Lennard-Jones and TIP4P
+    /// keep one, so their evaluation counts stay.
+    pub basin_stride: usize,
     /// Distance below which two states are the same basin.
     ///
     /// Its units are those of whichever metric keys the bias. Against a sorted
@@ -1420,6 +1429,7 @@ impl Config {
             temperature: LennardJonesPreset::TEMPERATURE * energy_scale,
             bias_height: LennardJonesPreset::BIAS_HEIGHT * energy_scale,
             bias_gamma: 5.0,
+            basin_stride: 1,
             // Calibrated against the descriptor it is compared with, not
             // guessed. Over 75-point minima the sorted-pair distance between
             // independent minima is 0.9212 at the closest with a median of
@@ -1827,6 +1837,13 @@ mod coverage_behaviour {
         assert_eq!(Keying::Coordination.default_merge_radius(), Some(0.5));
         assert_eq!(Keying::Distances.default_merge_radius(), None);
         assert_eq!(Keying::SoapPacking.default_merge_radius(), None);
+    }
+
+    #[test]
+    fn lennard_jones_and_tip4p_scan_the_basin_every_step() {
+        assert_eq!(Config::recommended(13).basin_stride, 1);
+        assert_eq!(Config::recommended_tip4p(4).basin_stride, 1);
+        assert_eq!(Config::for_tip4p(4).basin_stride, 1);
     }
 
     #[test]

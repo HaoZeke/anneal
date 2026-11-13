@@ -6119,12 +6119,24 @@ where
         } else {
             (0.0, 0.0)
         };
-        let s_old = if reusable_descriptor {
+        // Uphill in the bare energy, and not a stride step. The basin
+        // scan is what those proposals were paying for. A downhill
+        // proposal is still described, because a filled destination can
+        // turn it back, and one step in `basin_stride` is exact either way.
+        let stride = cfg.basin_stride.max(1);
+        let skip_basin = stride > 1 && hops % stride != 0 && e_new > e;
+        let s_old = if skip_basin {
+            Array1::zeros(0)
+        } else if reusable_descriptor {
             dc
         } else {
             bias.cv(x.view())
         };
-        let s_new = bias.cv(x_new.view());
+        let s_new = if skip_basin {
+            Array1::zeros(0)
+        } else {
+            bias.cv(x_new.view())
+        };
         // A draw from the region's density of states, recorded before the
         // acceptance rule reweights it towards the low tail.
         if let (Some(t), false) = (trace.as_mut(), unquenched) {
@@ -6155,16 +6167,24 @@ where
         // When track_funnels is on, the spectral term is well-tempered MetaD
         // on the Fiedler coordinate of the hop graph (SpectralBias): it fills
         // the *funnel* the chain is stuck in, not only the current basin.
-        let v_old = bias.potential(s_old.view())
-            + spectral
-                .as_ref()
-                .map(|sp| sp.potential(sp.cv(x.view()).view()))
-                .unwrap_or(0.0);
-        let v_new = bias.potential(s_new.view())
-            + spectral
-                .as_ref()
-                .map(|sp| sp.potential(sp.cv(x_new.view()).view()))
-                .unwrap_or(0.0);
+        let v_old = if skip_basin {
+            0.0
+        } else {
+            bias.potential(s_old.view())
+                + spectral
+                    .as_ref()
+                    .map(|sp| sp.potential(sp.cv(x.view()).view()))
+                    .unwrap_or(0.0)
+        };
+        let v_new = if skip_basin {
+            0.0
+        } else {
+            bias.potential(s_new.view())
+                + spectral
+                    .as_ref()
+                    .map(|sp| sp.potential(sp.cv(x_new.view()).view()))
+                    .unwrap_or(0.0)
+        };
         let delta = (e_new + v_new + pave_new) - (e + v_old + pave_old);
         // Unquenched trials are not answers. They still face Metropolis,
         // which is how the measured LJ38 run discovers basins from a
@@ -6342,6 +6362,18 @@ where
                 }
                 rigid_window = 0;
                 rigid_hits = 0;
+            }
+        }
+        // An uphill step the bare rule accepted is checked with the
+        // deposits before the chain moves. A filled destination can
+        // still refuse it. The random draw already happened.
+        if skip_basin && accept && !cfg.move_library.is_rigid_body() {
+            let old_cv = bias.cv(x.view());
+            let new_cv = bias.cv(x_new.view());
+            let biased = (e_new + bias.potential(new_cv.view()))
+                - (e + bias.potential(old_cv.view()));
+            if biased > e_new - e {
+                accept = false;
             }
         }
         if accept {
@@ -6760,13 +6792,15 @@ where
             // larger rises a hot rung declines would otherwise heat every rung.
             law.observe_rejection(delta / ratios[rep]);
         }
-        if reusable_descriptor {
-            bias.deposit(
-                if accept { s_new.view() } else { s_old.view() },
-                temperature,
-            );
-        } else {
-            bias.deposit(bias.cv(x.view()).view(), temperature);
+        if !skip_basin {
+            if reusable_descriptor {
+                bias.deposit(
+                    if accept { s_new.view() } else { s_old.view() },
+                    temperature,
+                );
+            } else {
+                bias.deposit(bias.cv(x.view()).view(), temperature);
+            }
         }
         // Visits other chains made to the minimum this quench reached, paid
         // into this chain's bias as if it had made them. The count is under
