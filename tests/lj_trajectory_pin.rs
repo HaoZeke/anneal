@@ -12,9 +12,8 @@
 //! depth-rewarded arm, and the pair force go through that `libm`, and
 //! this test forces rgmin's scalar dots.
 //!
-//! Without `ira` that hash is `6e277f86…`. With `ira` the permutation
-//! is libira, and libira calls host `sincos`, so the walk is the one
-//! linked against that library. On glibc it is `02c54952…`.
+//! The fivefold assignment is the built-in one on every build, so the
+//! hash is `6e277f86…` with and without IRA.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, random_cluster_in_radius, run_with_gradient,
@@ -89,11 +88,8 @@ fn trajectory_hash() -> String {
 #[test]
 fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     let hash = trajectory_hash();
-    let expected = if cfg!(feature = "ira") {
-        // libira calls host `sincos`. This is the glibc-linked walk.
-        "02c5495200f0e6b5ac1448f608cca733330a307675c1a97e27099f1bad9e7f55"
-    } else {
-        "6e277f8611c9988bbb95c72873fb5b044be414e9148ab9571b732f834e3dceb9"
-    };
+    // The fivefold residual uses the built-in assignment on every build,
+    // so linking IRA does not change this hash.
+    let expected = "6e277f8611c9988bbb95c72873fb5b044be414e9148ab9571b732f834e3dceb9";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }
