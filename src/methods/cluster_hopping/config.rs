@@ -801,6 +801,16 @@ pub struct Config {
     /// Charged calls without a new best before a stalled chain restarts
     /// from a fresh random cluster.
     pub restart_patience: usize,
+    /// Number of equal charged-call windows the budget is split into for a
+    /// rigid-chart multistart. The walker is relaunched from a fresh random
+    /// configuration (centres and orientations) only when a full window has
+    /// passed with no new lowest **and** the oxygen cage key has not changed
+    /// across that window, so a walker still wandering between cages is never
+    /// interrupted; the relaunch keeps the recorded best, so it can only help.
+    /// Zero disables it; it only acts on a rigid move library. The atomic
+    /// restart arm draws atomic centres, meaningless for a six-per-body chart,
+    /// so rigid charts otherwise have no multistart escape and churn one cage.
+    pub rigid_restart_windows: usize,
     /// Set the merge radius from how far an accepted hop actually reaches.
     ///
     /// A radius chosen by hand does not transfer: one calibrated at 38 points
@@ -1528,6 +1538,7 @@ impl Config {
             angular_target: 0.5,
             restart_on_stall: false,
             restart_patience: 5_000,
+            rigid_restart_windows: 0,
             calibrate_radius: false,
             calibrate_quantile: 0.9,
             calibrate_warmup: 200,
@@ -1641,6 +1652,14 @@ impl Config {
         cfg.allocate_moves = true;
         cfg.relax_steps = 80;
         cfg.screen_steps = 15;
+        // The translation, rotation and cycle-reversal arms reseat molecules
+        // inside the oxygen cage the walker first quenched into; they do not
+        // reach a different cage. Split the budget into equal call windows and
+        // relaunch from a fresh random cluster after a window with neither a
+        // new lowest nor a change of oxygen cage, so a cage the walker has
+        // truly saturated does not spend the rest of the budget while a walker
+        // still moving between cages runs on. The recorded best is preserved.
+        cfg.rigid_restart_windows = 3;
         cfg
     }
 
@@ -1731,6 +1750,11 @@ impl Config {
         self.angular_moves = false;
         self.continuous_symmetry = ContinuousSymmetry::Off;
         self.rigid_body_geometry = Some(geometry);
+        // A rigid chart has no multistart escape among its stall arms: the
+        // atomic restart draws atomic centres. Relaunch from a fresh random
+        // configuration after a call window with neither a new lowest nor a
+        // change of oxygen cage, keeping the recorded best.
+        self.rigid_restart_windows = 3;
         self
     }
 

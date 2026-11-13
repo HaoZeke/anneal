@@ -3637,6 +3637,21 @@ where
     // Hops elapsed when the ledger last recorded a lower minimum.
     // A rigid stall measures 1000 hops from that hop count.
     let mut hops_at_lowest = 0usize;
+    // Charged calls at the last genuine new lowest, untouched by the stall
+    // arms that reset `hops_at_lowest` / `charged_at_best`. Drives the rigid
+    // restart: a long call plateau here means one cage has been saturated.
+    let mut spent_at_best = 0usize;
+    // Charged-call mark until which a rigid restart's fresh launch owns the
+    // walker: the stall arms do not pull it back to the recorded incumbent
+    // cage before this. Zero means inactive.
+    let mut fresh_launch_until = 0usize;
+    // The oxygen cage the walker currently sits in, and the calls spent when it
+    // last changed. Proton-isomer churn keeps the same cage key; moving to a
+    // different cage resets the clock. A long spell in one cage with no new
+    // lowest is the churn the restart answers, told apart from a walker still
+    // exploring cages on its way down.
+    let mut last_cage_key: Option<u64> = None;
+    let mut spent_at_cage_change = 0usize;
     // Water restarts from a stored basin on its own clock, and then
     // stays there for a few hops before the incumbent gap applies.
     let mut last_basin_restart = 0usize;
@@ -4141,6 +4156,7 @@ where
             best_seen = ledger.best;
             charged_at_best = ledger.spent();
             hops_at_lowest = hops;
+            spent_at_best = ledger.spent();
             csm_reseed_stamp = hops;
             cage_edit = false;
             new_incumbent = true;
@@ -4307,7 +4323,9 @@ where
             // is what reaches the contact the walker's own shell does not.
             if !ledger.stopped() && ledger.remaining() > 0 {
                 cage_archive.offer_cage(e, x.view(), key);
-                if let Some(best) = ledger.best_state.as_ref() {
+                if ledger.spent() >= fresh_launch_until
+                    && let Some(best) = ledger.best_state.as_ref()
+                {
                     cage_archive.offer_cage(
                         ledger.best,
                         best.view(),
@@ -4403,7 +4421,9 @@ where
             archive_walked = true;
             let key = rigid_cage_key(x.view(), cfg.n_points, cage_quantum);
             cage_archive.offer_cage(e, x.view(), key);
-            if let Some(best) = ledger.best_state.as_ref() {
+            if ledger.spent() >= fresh_launch_until
+                && let Some(best) = ledger.best_state.as_ref()
+            {
                 cage_archive.offer_cage(
                     ledger.best,
                     best.view(),
@@ -4466,7 +4486,12 @@ where
             // ledger best is offered at every stall, so a walker away from
             // it goes back there unless it did so in the last few stalls.
             hops_at_lowest = hops;
-            if let Some(state) = ledger.best_state.as_ref() {
+            // While a fresh launch owns the walker, do not re-seed the archive
+            // with the recorded incumbent cage: that is what the restart is
+            // leaving behind. The fresh launch escapes among its own minima.
+            if ledger.spent() >= fresh_launch_until
+                && let Some(state) = ledger.best_state.as_ref()
+            {
                 stall_archive.offer(ledger.best, state.view());
             }
             if let Some((energy, state)) = stall_archive.escape(e)
@@ -4556,6 +4581,81 @@ where
                 internal_action = Some(CheckpointAction::ExternalAdopt {
                     state: relaxed,
                     action: "restart".to_owned(),
+                    external_calls: 0,
+                });
+            }
+        }
+        let rigid_restart_windows = cfg.rigid_restart_windows;
+        let rigid_restart_window = if rigid_restart_windows > 0 {
+            (ledger.spent().saturating_add(ledger.remaining()) / rigid_restart_windows).max(1)
+        } else {
+            0
+        };
+        if cfg.move_library.is_rigid_body() && rigid_restart_windows > 0 {
+            let key = rigid_cage_key(x.view(), cfg.n_points, cage_quantum);
+            if last_cage_key != Some(key) {
+                last_cage_key = Some(key);
+                spent_at_cage_change = ledger.spent();
+            }
+        }
+        if internal_action.is_none()
+            && cfg.move_library.is_rigid_body()
+            && rigid_restart_windows > 0
+            && rigid_restart_window > 0
+            && ledger.remaining() >= rigid_restart_window
+            && ledger.spent().saturating_sub(spent_at_best) >= rigid_restart_window
+            && ledger.spent().saturating_sub(spent_at_cage_change) >= rigid_restart_window
+        {
+            // A rigid walker that has held one oxygen cage for a whole call
+            // window (the budget split into `rigid_restart_windows` parts)
+            // without a new lowest has saturated it; its stall arms only reseat
+            // molecules inside it. Relaunch from a fresh random rigid cluster
+            // and quench it. The recorded best is preserved, so the multistart
+            // can only help. Reset the plateau clock so the relaunch gets a
+            // full window before another restart.
+            let n = x.len() / 6;
+            let fresh = random_rigid_cluster(n, cfg.min_separation, rng);
+            let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps.max(200));
+            hops_at_lowest = hops;
+            spent_at_best = ledger.spent();
+            spent_at_cage_change = ledger.spent();
+            last_cage_key = None;
+            charged_at_best = ledger.spent();
+            best_seen = ledger.best;
+            if energy.is_finite() && relaxed.len() == x.len() {
+                // Hold off the incumbent pull so the fresh cage is explored.
+                basin_hold = basin_hold.max(crate::catalog::molecular::WATER_BASIN_HOLD);
+                fresh_launch_until = ledger.spent() + rigid_restart_window;
+                // Drop the stored cages of the launch being left so the fresh
+                // launch builds and escapes among its own minima.
+                stall_archive = crate::methods::stall_archive::StallArchive::default();
+                cage_archive = crate::methods::stall_archive::StallArchive::new(
+                    crate::methods::stall_archive::CAGE_SEATS,
+                    crate::methods::stall_archive::MEMORY,
+                );
+                // A single-chain rigid relaunch is a fresh independent search:
+                // clear the learned exploration bias, the arm allocators and
+                // the adapted step scales so the new cage is not steered by what
+                // the saturated one taught. The recorded best is kept.
+                if n_rep == 1 && !cfg.shape_keyed {
+                    bias = BasinBias::new(
+                        ClusterFingerprint::of_config(cfg, &canonical_reference),
+                        cfg.merge_radius,
+                        rung_height(cfg, n_rep, ratios[0]),
+                        cfg.bias_gamma,
+                    );
+                    allocator = FlooredThompson::new(kernels.len());
+                    depth_allocator = crate::allocate::DepthAllocator::new(kernels.len());
+                    orient_scale = 1.0;
+                    orient_window = 0;
+                    orient_yes = 0;
+                    rigid_factor = rigid_factor_cap(cfg.n_points);
+                    rigid_window = 0;
+                    rigid_hits = 0;
+                }
+                internal_action = Some(CheckpointAction::ExternalAdopt {
+                    state: relaxed,
+                    action: "rigid-restart".to_owned(),
                     external_calls: 0,
                 });
             }
@@ -8804,6 +8904,33 @@ pub fn random_cluster<R: Rng + ?Sized>(
 ) -> Array1<f64> {
     let radius = (3.0 * n as f64 / (4.0 * std::f64::consts::PI * density)).cbrt();
     random_cluster_in_radius(n, radius, min_sep, rng)
+}
+
+/// A fresh rigid-chart configuration: `n` non-overlapping centres inside a
+/// sphere, each with a uniformly random exponential-map rotation.
+///
+/// The length of the result is `6 n`: centres, then rotation vectors, the
+/// same layout the rigid move library edits. Centres are placed at least
+/// `min_sep` apart inside a sphere whose radius scales with `min_sep` and
+/// `n^(1/3)`, so the body density matches a fresh search start; orientations
+/// are drawn in the folded cube and canonicalised. This is the rigid analogue
+/// of the atomic multistart draw and carries no body-specific geometry.
+pub fn random_rigid_cluster<R: Rng + ?Sized>(n: usize, min_sep: f64, rng: &mut R) -> Array1<f64> {
+    let radius = 1.35 * min_sep * (n.max(1) as f64).cbrt();
+    let centres = random_cluster_in_radius(n, radius, min_sep, rng);
+    let mut x = Array1::zeros(6 * n);
+    for i in 0..(3 * n).min(centres.len()) {
+        x[i] = centres[i];
+    }
+    for i in 0..n {
+        for k in 0..3 {
+            x[3 * n + 3 * i + k] = rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
+        }
+    }
+    if let Some(slice) = x.as_slice_mut() {
+        crate::potentials::fold_rotation_vectors(n, slice);
+    }
+    x
 }
 
 /// Seeds a non-overlapping configuration inside a declared sphere radius.
