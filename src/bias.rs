@@ -707,7 +707,8 @@ unsafe fn packed_squared_distance_exceeds(a: &[f64], b: &[f64], limit: f64) -> b
     // that is already far past the radius is a miss, and the forward sum
     // below is what decides every closer comparison, so the answer stays
     // the one the front-to-back sum returns.
-    if long_end_separates(a, b, limit) {
+    // SAFETY: this function runs with AVX2 enabled.
+    if unsafe { long_end_separates(a, b, limit) } {
         return true;
     }
     let n = a.len();
@@ -741,13 +742,18 @@ unsafe fn packed_squared_distance_exceeds(a: &[f64], b: &[f64], limit: f64) -> b
         }
         index += 16;
         if index.is_multiple_of(64) {
-            let partial = horizontal(acc0) + horizontal(acc1) + horizontal(acc2) + horizontal(acc3);
+            // SAFETY: this function runs with AVX2 enabled.
+            let partial = unsafe {
+                horizontal(acc0) + horizontal(acc1) + horizontal(acc2) + horizontal(acc3)
+            };
             if clearly_past(partial, limit, 1.0e-8) {
                 return true;
             }
         }
     }
-    let mut sum = horizontal(acc0) + horizontal(acc1) + horizontal(acc2) + horizontal(acc3);
+    // SAFETY: this function runs with AVX2 enabled.
+    let mut sum =
+        unsafe { horizontal(acc0) + horizontal(acc1) + horizontal(acc2) + horizontal(acc3) };
     while index + 4 <= n {
         unsafe {
             let difference = _mm256_sub_pd(
@@ -814,7 +820,10 @@ unsafe fn long_end_separates(a: &[f64], b: &[f64], limit: f64) -> bool {
         end = index;
         seen += 16;
         if seen.is_multiple_of(64) {
-            let partial = horizontal(acc0) + horizontal(acc1) + horizontal(acc2) + horizontal(acc3);
+            // SAFETY: this function runs with AVX2 enabled.
+            let partial = unsafe {
+                horizontal(acc0) + horizontal(acc1) + horizontal(acc2) + horizontal(acc3)
+            };
             if clearly_past(partial, limit, 1.0e-4) {
                 return true;
             }
