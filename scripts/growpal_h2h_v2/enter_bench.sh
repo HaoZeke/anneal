@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # Both arms, one UTS namespace, hostname bench, working directory under /work.
-# The campaign and every timed child are pinned to core 0. GrowPAL's
-# documented nproc is cpu_count-2; this session uses one core and one
-# worker, which their notes allow on a shared machine. The search
-# parameters stay the published defaults.
+# The campaign and every timed child are pinned to core 0. GrowPAL runs
+# with one worker and its published search parameters.
 #
 # Extra arguments go to run_campaign.py after the defaults, so --out and
 # --runs can point a single timed seed (the asv benchmark) at scratch.

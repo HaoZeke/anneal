@@ -9,16 +9,11 @@ reoptimisation rounds, USR deduplication at 0.99 and 0.1, the energy
 window ``5 N^(2/3)``, and Ward selection of ``round(N * 1.8)`` structures
 per cluster. After each size the loop compares the best structure with
 aegon's Lennard-Jones table and stops when it is more than 0.01 above it.
-aegon drops pairs past 18 (6.73 sigma) without a shift, so a candidate
-hit is scored again on the full pair sum.
+A candidate hit is scored on the full pair sum.
 
 Morse goes through aegon's generic ASE strategy with ASE's
-``MorsePotential``, the route aegon documents for a potential it does
-not implement. ``epsilon`` is 1 and ``rho0`` is the Cambridge range.
-``r0`` is 3, the pair distance of aegon's Lennard-Jones, so the Mo
-covalent radii and the 1.2 insertion expansion see the geometry they were
-tuned on. Energies are unchanged by that length. The ASE smooth cutoff
-starts at 1000 r0, so the pair sum is the full Cambridge form. Relaxation
+``MorsePotential``: ``epsilon`` 1, ``rho0`` the Cambridge range, ``r0`` 3,
+smooth cutoff from 1000 r0. Relaxation
 is aegon's ASE worker with its defaults: ASE LBFGS, ``fmax`` 0.01,
 500 steps. The LJ10 seeds are relaxed on the Morse surface first, and
 those calls are charged. aegon has no Morse table, so there is no
@@ -177,8 +172,7 @@ def morse_kwargs(rho: float) -> dict[str, float]:
 
 
 def one_thread() -> None:
-    """Ward clustering asks kneighbors_graph for every core. The graph is
-    the same with one worker, and the session is pinned to one core."""
+    """Ward clustering builds its k-NN graph with one worker."""
     import growpal.libclustering as clustering
     from sklearn.neighbors import kneighbors_graph
 
@@ -190,12 +184,7 @@ def one_thread() -> None:
 
 
 def warmup(kind: str, rho: float | None, warm_xyz: str | None = None) -> None:
-    """Compile the numba paths before the clock.
-
-    The symmetry step of the growth is molsympy, compiled per point group.
-    Growing the published LJ9 seeds once in this process compiles it before
-    the clock, and the growth workers fork from here with it compiled.
-    """
+    """Compile the numba paths before the clock, growing the LJ9 seeds once."""
     import numba
     import numpy as np
     from ase import Atoms
@@ -266,7 +255,7 @@ class LjRelax:
         return out
 
     def score(self, mol, energy: float) -> None:
-        """A candidate hit is scored on the full pair sum, not aegon's truncated one."""
+        """A candidate hit is scored on the full pair sum."""
         if len(mol) == self.meter.target and energy <= self.meter.level + EARLY_TOL:
             energy = lj_exact(mol.get_positions())
         self.meter.consider(len(mol), energy)
@@ -353,7 +342,7 @@ def morse_exact(positions, rho: float, r0: float) -> float:
 
 
 def lj_exact(positions, cutoff: float | None = None) -> float:
-    """Full Lennard-Jones sum at aegon's length. aegon drops pairs past 18."""
+    """Lennard-Jones sum at aegon's length, optionally cut at ``cutoff``."""
     r = _pair_distances(positions)
     if cutoff is not None:
         r = r[r < cutoff]

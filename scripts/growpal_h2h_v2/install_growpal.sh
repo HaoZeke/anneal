@@ -1,13 +1,8 @@
 #!/usr/bin/env bash
 # Build GrowPAL and aegon from their published source and install them.
 #
-# GrowPAL 0.1.6 is the newest release and exists only as the PyPI sdist.
-# GitHub main is 73952fa, a 0.1.4 tree that calls sort_by_energy(..., 1)
-# and, in examples/LJ, sort_by_energy(..., opt=1); aegon 1.3.15 rejects
-# both. Its LJ10 seeds are the ones the release documents, so they are
-# read from that commit. aegon's homepage repository is not public; the
-# 1.3.15 sdist is the source. Both sdists are checked by sha256 and built
-# into wheels here, without binary downloads for either package.
+# GrowPAL 0.1.6 and aegon 1.3.15 are built into wheels from their PyPI
+# sdists, checked by sha256. The LJ10 seeds come from GrowPAL commit 73952fa.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)

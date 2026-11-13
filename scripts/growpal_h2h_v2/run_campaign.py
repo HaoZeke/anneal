@@ -3,8 +3,7 @@
 """Serial GrowPAL against the recommended preset at the paper call budgets.
 
 Systems are LJ38, LJ55, LJ75, LJ98, and the Cambridge Morse M38 at
-rho = 6. Gupta Au55 is not run: neither GrowPAL nor aegon has a Gupta
-potential, and ASE has no Gupta calculator to route through. Six seeds,
+rho = 6. Gupta Au55 is not run: GrowPAL has no Gupta potential. Six seeds,
 the same list on both arms, one process pinned to core 0. Systems run in
 the listed order; inside a system the (seed, arm) pairs are shuffled.
 
@@ -51,9 +50,7 @@ ARMS = ("anneal", "growpal")
 SCHEDULE_SEED = 20261113
 HIT_TOL = 0.001
 IDENTITY_TOL = 1e-9
-# The uncapped diagnostic is not the head-to-head. It asks how many calls
-# the deterministic GrowPAL loop needs when nothing stops it, one run per
-# system, under this safety ceiling.
+# Ceiling of the uncapped GrowPAL run, one seed per system.
 UNCAPPED_CEILING = 500_000_000
 
 SEED_FIELDS = [
