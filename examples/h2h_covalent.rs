@@ -30,7 +30,9 @@
 //! `general` is the same search on scales measured from the potential's own
 //! dimer, the bond length over 2^(1/6) and the well depth, so the reduced
 //! constants mean what they mean for Lennard-Jones. The dimer and reach
-//! probes are charged to the ledger.
+//! probes are charged to the ledger: about 55 calls, a geometric scan and
+//! false position on the bond force for the dimer, and a bisection to a
+//! relative 1e-6 for the reach.
 //!
 //! `H2H_GTOL` sets the quench's gradient tolerance, an infinity norm, in
 //! place of 1e-6, and lets a quench at that tolerance be recorded. The row
@@ -196,9 +198,11 @@ impl Potential {
         )
     }
 
-    fn dimer(&self, r: f64) -> f64 {
-        self.evaluate(Array1::from_vec(vec![0.0, 0.0, 0.0, r, 0.0, 0.0]).view())
-            .0
+    /// Energy of the dimer at `r` and its slope along the bond.
+    fn dimer(&self, r: f64) -> (f64, f64) {
+        let (energy, gradient) =
+            self.evaluate(Array1::from_vec(vec![0.0, 0.0, 0.0, r, 0.0, 0.0]).view());
+        (energy, gradient[3])
     }
 
     /// Whether the dimer at `r` has exactly zero energy and force.
@@ -211,56 +215,51 @@ impl Potential {
 
 /// Bond length and well depth of the dimer.
 ///
-/// A geometric scan brackets the lowest pair energy, then golden-section
-/// search narrows it. `charge` is called before every evaluation and stops
+/// A geometric scan walks out until the bond force turns from repulsive to
+/// attractive inside the well, and false position on the force (Illinois)
+/// narrows that bracket. `charge` is called before every evaluation and stops
 /// the probe when it returns false.
 fn dimer_scales(potential: &Potential, mut charge: impl FnMut() -> bool) -> Option<(f64, f64)> {
-    let ratio = 1.05_f64;
-    let mut grid = Vec::new();
-    let mut r = 0.05;
-    while r < 1.0e3 {
-        if !charge() {
+    let mut probe = |r: f64| charge().then(|| potential.dimer(r));
+    let mut r = 0.05_f64;
+    let mut before = probe(r)?;
+    let (mut lo, mut hi, mut slope_lo, mut slope_hi) = loop {
+        let next = 1.2 * r;
+        if next >= 1.0e3 {
             return None;
         }
-        let e = potential.dimer(r);
-        grid.push((r, e));
-        let lowest = grid
-            .iter()
-            .map(|point| point.1)
-            .fold(f64::INFINITY, f64::min);
-        if lowest < 0.0 && e > 0.5 * lowest {
-            break;
+        let now = probe(next)?;
+        if before.1 < 0.0 && now.1 > 0.0 && before.0.min(now.0) < 0.0 {
+            break (r, next, before.1, now.1);
         }
-        r *= ratio;
-    }
-    let (at, _) = grid
-        .iter()
-        .enumerate()
-        .min_by(|a, b| a.1.1.total_cmp(&b.1.1))?;
-    if grid[at].1 >= 0.0 {
-        return None;
-    }
-    let mut lo = grid[at.saturating_sub(1)].0;
-    let mut hi = grid[(at + 1).min(grid.len() - 1)].0;
-    let golden = 0.5 * (5.0_f64.sqrt() - 1.0);
+        (r, before) = (next, now);
+    };
+    let mut kept = 0_i32;
     while hi - lo > 1.0e-10 * hi {
-        let a = hi - golden * (hi - lo);
-        let b = lo + golden * (hi - lo);
-        if !charge() || !charge() {
-            return None;
-        }
-        if potential.dimer(a) < potential.dimer(b) {
-            hi = b;
+        let mid = (lo * slope_hi - hi * slope_lo) / (slope_hi - slope_lo);
+        let (_, slope) = probe(mid)?;
+        if slope < 0.0 {
+            lo = mid;
+            slope_lo = slope;
+            kept = kept.min(0) - 1;
+            if kept <= -2 {
+                slope_hi *= 0.5;
+            }
+        } else if slope > 0.0 {
+            hi = mid;
+            slope_hi = slope;
+            kept = kept.max(0) + 1;
+            if kept >= 2 {
+                slope_lo *= 0.5;
+            }
         } else {
-            lo = a;
+            lo = mid;
+            hi = mid;
         }
     }
     let bond = 0.5 * (lo + hi);
-    if !charge() {
-        return None;
-    }
-    let depth = -potential.dimer(bond);
-    Some((bond / 2.0_f64.powf(1.0 / 6.0), depth))
+    let (energy, _) = probe(bond)?;
+    (energy < 0.0).then(|| (bond / 2.0_f64.powf(1.0 / 6.0), -energy))
 }
 
 /// The dimer's reach, probed from its bond out to a thousand bonds.
