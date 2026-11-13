@@ -640,27 +640,9 @@ impl BasinMetric for EuclideanMetric {
             return f64::INFINITY;
         }
         let limit = bound * bound;
-        // The longest distances sit at the end of a sorted spectrum and are
-        // where two isomers differ. A suffix already past the bound means
-        // the whole distance is. The front-to-back sum below is unchanged
-        // when the suffix is not, so a distance inside the bound keeps its bits.
-        let tail = 32.min(a.len());
-        if tail < a.len() {
-            let mut tail_acc = 0.0;
-            for k in (a.len() - tail..a.len()).rev() {
-                let d = a[k] - b[k];
-                tail_acc += d * d;
-                // The slack covers the rounding gap between this suffix and
-                // the same terms inside the block sum. A centre inside the
-                // radius falls through and is decided there.
-                if tail_acc > limit + 1.0e-8 {
-                    return f64::INFINITY;
-                }
-            }
-        }
-        // The suffix did not decide it. A packed sum rejects a centre that
-        // is clearly past the radius; a centre inside the radius falls
-        // through to the block sum and comes back with the same bits.
+        // The lookup has already applied this same suffix test. Repeating
+        // it never returned, so the packed sum is the next test. A centre
+        // inside the radius still falls through to the block sum.
         #[cfg(target_arch = "x86_64")]
         if let (Some(left), Some(right)) = (a.as_slice(), b.as_slice())
             && std::arch::is_x86_feature_detected!("avx2")
