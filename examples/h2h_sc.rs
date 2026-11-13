@@ -182,6 +182,13 @@ fn cmd_run(args: &[String]) -> i32 {
     }
     let lib = library();
     let (outcome, wall, pot_s) = search(&lib, &cfg, &spec, &start, seed, budget);
+    if let Ok(path) = std::env::var("H2H_BEST")
+        && let Some(state) = outcome.best_state.as_ref()
+        && let Err(err) = write_coords(&path, state)
+    {
+        eprintln!("best: {err}");
+        return 1;
+    }
     report(
         &args[1],
         seed,

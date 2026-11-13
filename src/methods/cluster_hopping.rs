@@ -2601,6 +2601,126 @@ fn rigid_factor_cap(n_bodies: usize) -> f64 {
 /// escape instead. Without the `rgsaddle` feature that escape is not
 /// compiled, the run stops, and [`Outcome::nve_unavailable`] is set.
 /// The library kick is not substituted.
+/// Acceptance window shared by every potential.
+///
+/// The temperature and the step stay at the preset until a block falls
+/// outside a quarter of the one-half target. A chain whose acceptance
+/// already sits in that band is not moved, so its proposals stay the
+/// ones the preset drew.
+struct SearchDial {
+    window: usize,
+    yes: usize,
+    heat: f64,
+    step: f64,
+}
+
+impl SearchDial {
+    const BLOCK: usize = 50;
+    const DEAD: f64 = 0.25;
+
+    fn new() -> Self {
+        Self {
+            window: 0,
+            yes: 0,
+            heat: 1.0,
+            step: 1.0,
+        }
+    }
+
+    fn observe(&mut self, accepted: bool) {
+        self.window += 1;
+        if accepted {
+            self.yes += 1;
+        }
+        if self.window < Self::BLOCK {
+            return;
+        }
+        let rate = self.yes as f64 / self.window as f64;
+        self.window = 0;
+        self.yes = 0;
+        if (rate - 0.5).abs() <= Self::DEAD {
+            return;
+        }
+        let factor = if rate < 0.5 { 1.05 } else { 1.0 / 1.05 };
+        self.heat = (self.heat * factor).clamp(1.0 / 20.0, 20.0);
+        self.step = (self.step * factor).clamp(1.0 / 20.0, 20.0);
+    }
+}
+
+/// Scale-free shape key: each atom's nearest-neighbour distance, in units
+/// of their mean, in bins of a twentieth.
+fn structure_fingerprint(x: ArrayView1<f64>) -> u64 {
+    let n = x.len() / 3;
+    if n < 2 {
+        return 0;
+    }
+    let mut nearest = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut best = f64::MAX;
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let mut distance = 0.0;
+            for k in 0..3 {
+                let delta = x[3 * i + k] - x[3 * j + k];
+                distance += delta * delta;
+            }
+            best = best.min(distance);
+        }
+        nearest.push(best.sqrt());
+    }
+    let mean = nearest.iter().copied().sum::<f64>() / n as f64;
+    nearest.sort_by(|left, right| left.total_cmp(right));
+    let mut hash = 0xcbf29ce484222325u64;
+    for value in nearest {
+        let bin = ((value / mean.max(1e-12)) * 20.0).round() as i64;
+        hash ^= bin as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn offer_population(population: &mut Vec<(u64, f64, Array1<f64>)>, x: ArrayView1<f64>, energy: f64) {
+    if !energy.is_finite() || x.len() < 6 {
+        return;
+    }
+    let key = structure_fingerprint(x);
+    if let Some(member) = population.iter_mut().find(|member| member.0 == key) {
+        if energy < member.1 {
+            member.1 = energy;
+            member.2 = x.to_owned();
+        }
+        return;
+    }
+    if population.len() >= 16 {
+        let worst = population
+            .iter()
+            .enumerate()
+            .max_by(|left, right| left.1 .1.total_cmp(&right.1 .1))
+            .map(|(index, _)| index);
+        if let Some(index) = worst {
+            if energy >= population[index].1 {
+                return;
+            }
+            population.remove(index);
+        }
+    }
+    population.push((key, energy, x.to_owned()));
+}
+
+fn diverse_restart(
+    population: &[(u64, f64, Array1<f64>)],
+    here: ArrayView1<f64>,
+) -> Option<Array1<f64>> {
+    let key = structure_fingerprint(here);
+    population
+        .iter()
+        .filter(|member| member.0 != key)
+        .min_by(|left, right| left.1.total_cmp(&right.1))
+        .map(|member| member.2.clone())
+}
+
 fn species_count(species: &[u32]) -> usize {
     let mut labels = species.to_vec();
     labels.sort_unstable();
@@ -3259,6 +3379,12 @@ where
     let mut soft_cache: Option<(f64, Vec<f64>, Vec<Array1<f64>>)> = None;
     // Ring buffer of accepted quenched displacements for the learned proposal.
     let mut cov_buf: Vec<Array1<f64>> = Vec::new();
+    // One acceptance dial and one shape population for every potential.
+    // The dial stays at one while a block of decisions sits near one half,
+    // and the population is only entered on a plateau after the dial has
+    // had to heat a frozen chain.
+    let mut dial = SearchDial::new();
+    let mut population: Vec<(u64, f64, Array1<f64>)> = Vec::new();
     let mut cov_next = 0usize;
     let mut soft_fired = 0usize;
     let mut soft_recomputes = 0usize;
@@ -4422,6 +4548,16 @@ where
                 });
             }
         }
+        if internal_action.is_none() && call_due && dial.heat > 1.0 {
+            if let Some(state) = diverse_restart(&population, x.view()) {
+                charged_at_best = ledger.spent();
+                internal_action = Some(CheckpointAction::ExternalAdopt {
+                    state,
+                    action: "diverse-restart".to_owned(),
+                    external_calls: 0,
+                });
+            }
+        }
         if internal_action.is_none() && cfg.escape_on_stall && call_due {
             // One response per plateau. Without the reset the clock stays
             // due and the leave runs on every following hop.
@@ -5357,7 +5493,7 @@ where
         } else {
             ratios[rep]
         };
-        let mut temperature = single * scale;
+        let mut temperature = single * scale * dial.heat;
         if cfg.move_library.is_rigid_body() {
             // The preset temperature stays in its own energy unit. A rigid
             // water chart is not that unit, so a local factor moves the
@@ -5574,7 +5710,7 @@ where
         } else {
             1.0
         };
-        let proposal_scale = escape * orient_scale;
+        let proposal_scale = escape * orient_scale * dial.step;
         // Ordinary hops: scale the library move by the escape feedback. Soft
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
@@ -6790,6 +6926,9 @@ where
         // An uphill step the bare rule accepted is checked with the
         // deposits before the chain moves. A filled destination can
         // still refuse it. The random draw already happened.
+        if e_new.is_finite() {
+            offer_population(&mut population, x_new.view(), e_new);
+        }
         if skip_basin && accept && !cfg.move_library.is_rigid_body() {
             let old_cv = bias.cv(x.view());
             let new_cv = bias.cv(x_new.view());
@@ -6799,6 +6938,7 @@ where
                 accept = false;
             }
         }
+        dial.observe(accept);
         if accept {
             accepted += 1;
             // Every accepted quench within the window is a candidate stage
@@ -9026,6 +9166,28 @@ mod tests {
         let binary = Config::recommended(6).with_species(vec![29, 29, 29, 79, 79, 79], None);
         assert!(polishes_unlike_pairs(&binary));
         assert!(!polishes_unlike_pairs(&Config::recommended(6)));
+    }
+
+    #[test]
+    fn a_frozen_block_heats_the_dial_and_an_even_block_does_not() {
+        let mut frozen = SearchDial::new();
+        for _ in 0..SearchDial::BLOCK {
+            frozen.observe(false);
+        }
+        assert!(frozen.heat > 1.0, "a block of refusals left the heat at {}", frozen.heat);
+        let mut even = SearchDial::new();
+        for i in 0..SearchDial::BLOCK {
+            even.observe(i % 2 == 0);
+        }
+        assert_eq!(even.heat, 1.0);
+        let here = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.866, 0.0]);
+        let other = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 3.0, 0.0, 0.0]);
+        let mut population = Vec::new();
+        offer_population(&mut population, here.view(), -1.0);
+        offer_population(&mut population, other.view(), -2.0);
+        let restart = diverse_restart(&population, here.view()).expect("another shape");
+        assert_eq!(restart, other);
+        assert!(diverse_restart(&[(structure_fingerprint(here.view()), -1.0, here.clone())], here.view()).is_none());
     }
 
     #[test]
