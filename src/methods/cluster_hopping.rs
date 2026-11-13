@@ -49,6 +49,7 @@ use crate::screen::Screen;
 mod binary_geometry;
 mod config;
 mod cycles;
+pub mod fingerprint;
 mod general;
 #[cfg(test)]
 mod mackay_cap_tests;
