@@ -1,13 +1,16 @@
-//! Reversal of directed hydrogen-bond cycles in rigid water.
+//! Reversal of directed hydrogen-bond cycles and chains in rigid water.
 //!
 //! On a fixed oxygen network the energy still depends on which way each
 //! hydrogen bond points. Turning one molecule alone breaks a bond, and the
-//! quench can turn the molecule straight back to the minimum it left. This move
-//! reverses a directed cycle of bonds instead, so every molecule on it still
-//! donates and accepts one bond along the cycle. The idea is the loop move
-//! for proton arrangements in ice (Rahman and Stillinger 1972). Here it is a
-//! minimiser's move: it has no proposal ratio, so a chain that uses it does
-//! not sample proton disorder at equilibrium.
+//! quench can turn the molecule straight back to the minimum it left. A cycle
+//! reversal turns every molecule on a directed loop, so each one still donates
+//! and accepts one bond along the loop (Rahman and Stillinger 1972). A cycle
+//! leaves the dangling hydrogens on the same molecules. A chain reversal walks
+//! a directed path that ends on a dangling hydrogen and turns that path
+//! around, so the dangling hydrogen moves to the other end and every interior
+//! molecule still donates one bond along the path. Neither move has a proposal
+//! ratio: a minimiser that uses them does not sample proton disorder at
+//! equilibrium.
 
 use ndarray::Array1;
 use rand::Rng;
@@ -131,7 +134,202 @@ pub(crate) fn reverse_cycle<R: Rng + ?Sized>(
         }
         turns.push((k, oxygen, frame_rotation((bonded, other), (target, other))));
     }
-    for (k, oxygen, turn) in turns {
+    apply_turns(n, x, &turns);
+    true
+}
+
+/// Reverses a directed hydrogen-bond chain, moving one dangling hydrogen.
+///
+/// A cycle reversal never changes which molecules carry a dangling hydrogen,
+/// so two ice-rule arrangements that differ there are disconnected. This walk
+/// starts at a molecule that still has a free hydrogen and steps backwards
+/// along donated bonds. The free hydrogen turns onto the molecule that was
+/// donating to it, each interior molecule turns its path hydrogen onto the
+/// previous oxygen, and the molecule at the far end turns its path hydrogen
+/// off that oxygen onto a direction that is not a hydrogen bond. The other
+/// hydrogen of the far end stays put, so a bond leaving the path is kept.
+/// The oxygen positions are unchanged. Returns `false`, with `x` unchanged,
+/// when no such chain exists or the turn would make or break a bond off the
+/// path.
+pub(crate) fn reverse_chain<R: Rng + ?Sized>(
+    geometry: &RigidBodyGeometry,
+    n: usize,
+    x: &mut Array1<f64>,
+    rng: &mut R,
+) -> bool {
+    let Some((o, h)) = water_sites(geometry) else {
+        return false;
+    };
+    if n < 2 || x.len() != 6 * n {
+        return false;
+    }
+    let saved = x.clone();
+    let sites = lab_sites(geometry, n, x);
+    let donated = donations(&sites, o, h);
+    let mut incoming = vec![Vec::new(); n];
+    for (i, out) in donated.iter().enumerate() {
+        for &(j, which) in out {
+            incoming[j].push((i, which));
+        }
+    }
+    let dangling: Vec<Vec<usize>> = (0..n)
+        .map(|i| {
+            let used: Vec<usize> = donated[i].iter().map(|&(_, which)| which).collect();
+            (0..2).filter(|which| !used.contains(which)).collect()
+        })
+        .collect();
+    let ends: Vec<usize> = (0..n)
+        .filter(|&i| !dangling[i].is_empty() && !incoming[i].is_empty())
+        .collect();
+    if ends.is_empty() {
+        return false;
+    }
+    let before = bond_set(&donated);
+    for _attempt in 0..8 {
+        *x = saved.clone();
+        let end = ends[rng.random_range(0..ends.len())];
+        let dangling_which = dangling[end][rng.random_range(0..dangling[end].len())];
+        let mut donors = Vec::new();
+        let mut seen = vec![false; n];
+        seen[end] = true;
+        let mut at = end;
+        loop {
+            let choices: Vec<(usize, usize)> = incoming[at]
+                .iter()
+                .copied()
+                .filter(|&(m, _)| !seen[m])
+                .collect();
+            if choices.is_empty() {
+                break;
+            }
+            let (prev, which) = choices[rng.random_range(0..choices.len())];
+            donors.push((prev, which));
+            seen[prev] = true;
+            at = prev;
+            if rng.random::<f64>() < 0.5 || donors.len() + 1 >= n {
+                break;
+            }
+        }
+        if donors.is_empty() {
+            continue;
+        }
+        // `donors[0]` donates to `end`. The far end is `donors[last]`.
+        donors.reverse();
+        let mut turns = Vec::with_capacity(donors.len() + 1);
+        let end_oxygen = sites[end][o];
+        let end_bonded = unit(sub(sites[end][h[dangling_which]], end_oxygen));
+        let end_other = unit(sub(sites[end][h[1 - dangling_which]], end_oxygen));
+        let onto = donors.last().expect("donors is not empty").0;
+        let end_target = unit(sub(sites[onto][o], end_oxygen));
+        if norm(cross(end_target, end_other)) < 1e-6 {
+            continue;
+        }
+        turns.push((
+            end,
+            end_oxygen,
+            frame_rotation((end_bonded, end_other), (end_target, end_other)),
+        ));
+        let mut interior_ok = true;
+        for i in 1..donors.len() {
+            let (k, which) = donors[i];
+            let oxygen = sites[k][o];
+            let bonded = unit(sub(sites[k][h[which]], oxygen));
+            let other = unit(sub(sites[k][h[1 - which]], oxygen));
+            let target = unit(sub(sites[donors[i - 1].0][o], oxygen));
+            if norm(cross(target, other)) < 1e-6 {
+                interior_ok = false;
+                break;
+            }
+            turns.push((k, oxygen, frame_rotation((bonded, other), (target, other))));
+        }
+        if !interior_ok {
+            continue;
+        }
+        let (start, start_which) = donors[0];
+        let start_oxygen = sites[start][o];
+        let start_bonded = unit(sub(sites[start][h[start_which]], start_oxygen));
+        let start_other = unit(sub(sites[start][h[1 - start_which]], start_oxygen));
+        let oh = norm(sub(sites[start][h[start_which]], start_oxygen));
+        let Some(start_turn) = turn_off_bond(
+            rng,
+            n,
+            &sites,
+            o,
+            start,
+            start_oxygen,
+            start_bonded,
+            start_other,
+            oh,
+        ) else {
+            continue;
+        };
+        turns.push((start, start_oxygen, start_turn));
+        apply_turns(n, x, &turns);
+        let after_sites = lab_sites(geometry, n, x);
+        let after = bond_set(&donations(&after_sites, o, h));
+        let mut expected = before.clone();
+        for i in 0..donors.len() {
+            let from = donors[i].0;
+            let to = if i + 1 < donors.len() {
+                donors[i + 1].0
+            } else {
+                end
+            };
+            expected.remove(&(from, to));
+        }
+        for i in 1..donors.len() {
+            expected.insert((donors[i].0, donors[i - 1].0));
+        }
+        expected.insert((end, onto));
+        if after == expected {
+            return true;
+        }
+    }
+    *x = saved;
+    false
+}
+
+/// A rotation about `other` that takes `bonded` off every neighbouring oxygen.
+///
+/// The axis is the other hydrogen, so that hydrogen does not move and a bond
+/// it was donating stays. Twelve angles around the axis are enough for a
+/// cage: the free hydrogen only has to miss the oxygens inside the bond cutoff.
+fn turn_off_bond<R: Rng + ?Sized>(
+    rng: &mut R,
+    n: usize,
+    sites: &[Vec<[f64; 3]>],
+    oxygen_site: usize,
+    molecule: usize,
+    oxygen: [f64; 3],
+    bonded: [f64; 3],
+    other: [f64; 3],
+    oh: f64,
+) -> Option<[[f64; 3]; 3]> {
+    let offset = rng.random::<f64>() * std::f64::consts::TAU;
+    for step in 0..12 {
+        let angle = offset + std::f64::consts::TAU * (step as f64) / 12.0;
+        let turn = rodrigues(other, angle);
+        let hydrogen = add(oxygen, scale(mat_vec(turn, bonded), oh));
+        let bonded_somewhere = (0..n)
+            .filter(|&j| j != molecule)
+            .any(|j| norm(sub(hydrogen, sites[j][oxygen_site])) < BOND);
+        if !bonded_somewhere {
+            return Some(turn);
+        }
+    }
+    None
+}
+
+fn bond_set(donated: &[Vec<(usize, usize)>]) -> std::collections::BTreeSet<(usize, usize)> {
+    donated
+        .iter()
+        .enumerate()
+        .flat_map(|(i, out)| out.iter().map(move |&(j, _)| (i, j)))
+        .collect()
+}
+
+fn apply_turns(n: usize, x: &mut Array1<f64>, turns: &[(usize, [f64; 3], [[f64; 3]; 3])]) {
+    for &(k, oxygen, turn) in turns {
         let centre = [x[3 * k], x[3 * k + 1], x[3 * k + 2]];
         let moved = add(oxygen, mat_vec(turn, sub(centre, oxygen)));
         let base = 3 * n + 3 * k;
@@ -141,7 +339,6 @@ pub(crate) fn reverse_cycle<R: Rng + ?Sized>(
             x[base + a] = w[a];
         }
     }
-    true
 }
 
 /// The rotation that takes the frame of `from` onto the frame of `to`.
@@ -516,8 +713,8 @@ fn rodrigues(axis: [f64; 3], angle: f64) -> [[f64; 3]; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
     use std::collections::BTreeSet;
 
     fn geometry() -> RigidBodyGeometry {
@@ -586,6 +783,56 @@ mod tests {
         assert_eq!(undirected_after, undirected);
         let backward: BTreeSet<(usize, usize)> = forward.iter().map(|&(i, j)| (j, i)).collect();
         assert_eq!(directed_after, backward);
+    }
+
+    #[test]
+    fn reversing_a_chain_moves_the_dangling_hydrogen() {
+        let n = 2;
+        let g = geometry();
+        let (o, h) = water_sites(&g).expect("water");
+        let body = g.sites();
+        let h1 = unit(sub(body[h[0]], body[o]));
+        let h2 = unit(sub(body[h[1]], body[o]));
+        let mut x = Array1::zeros(6 * n);
+        let place =
+            |state: &mut Array1<f64>, i: usize, at: [f64; 3], first: [f64; 3], second: [f64; 3]| {
+                let r = frame_rotation((h1, h2), (first, second));
+                let centre = sub(at, mat_vec(r, body[o]));
+                let w = crate::potentials::compose_rotation(r, [0.0; 3]);
+                for k in 0..3 {
+                    state[3 * i + k] = centre[k];
+                    state[3 * n + 3 * i + k] = w[k];
+                }
+            };
+        // Molecule 0 donates along +x. Molecule 1 points both hydrogens away
+        // from it, so the only bond is 0 → 1 and molecule 1 carries the dangling
+        // hydrogen the chain reversal has to move.
+        place(&mut x, 0, [0.0; 3], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        place(&mut x, 1, [2.8, 0.0, 0.0], [1.0, 0.2, 0.0], [0.3, 1.0, 0.2]);
+        let (directed, _) = bond_sets(n, &x);
+        assert_eq!(directed, BTreeSet::from([(0, 1)]));
+        let oxygens_before: Vec<[f64; 3]> = lab_sites(&g, n, &x).iter().map(|s| s[o]).collect();
+        let mut rng = StdRng::seed_from_u64(1);
+        assert!(reverse_chain(&g, n, &mut x, &mut rng));
+        let (directed_after, _) = bond_sets(n, &x);
+        assert_eq!(directed_after, BTreeSet::from([(1, 0)]));
+        let oxygens_after: Vec<[f64; 3]> = lab_sites(&g, n, &x).iter().map(|s| s[o]).collect();
+        for (before, after) in oxygens_before.iter().zip(oxygens_after.iter()) {
+            assert!(norm(sub(*before, *after)) < 1e-8);
+        }
+    }
+
+    #[test]
+    fn waters_with_no_hydrogen_bond_are_left_alone() {
+        let n = 2;
+        let mut x = Array1::zeros(6 * n);
+        x[3] = 10.0;
+        let (directed, _) = bond_sets(n, &x);
+        assert!(directed.is_empty());
+        let before = x.clone();
+        let mut rng = StdRng::seed_from_u64(1);
+        assert!(!reverse_chain(&geometry(), n, &mut x, &mut rng));
+        assert_eq!(x, before);
     }
 
     #[test]

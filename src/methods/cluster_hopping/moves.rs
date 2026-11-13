@@ -302,6 +302,10 @@ impl MoveLibrary {
                         n_molecules: *n_molecules,
                         geometry: geometry.clone(),
                     });
+                    kernels.push(ClusterMove::RigidReverseChain {
+                        n_molecules: *n_molecules,
+                        geometry: geometry.clone(),
+                    });
                 }
                 kernels
             }
@@ -678,6 +682,18 @@ pub enum ClusterMove {
     /// points the other way and the oxygen network stays. A cluster with no
     /// cycle comes back unchanged.
     RigidReverseCycle {
+        /// Rigid bodies in the state.
+        n_molecules: usize,
+        /// Site geometry of one water: one oxygen, two hydrogens.
+        geometry: crate::rigid_body::RigidBodyGeometry,
+    },
+    /// Reverse a directed chain of hydrogen bonds, moving one dangling hydrogen.
+    ///
+    /// A cycle reversal leaves every dangling hydrogen on the molecule that
+    /// held it. This walk ends on a free hydrogen and turns the path around,
+    /// so that hydrogen moves to the other end. See
+    /// [`crate::methods::cluster_hopping::cycles::reverse_chain`].
+    RigidReverseChain {
         /// Rigid bodies in the state.
         n_molecules: usize,
         /// Site geometry of one water: one oxygen, two hydrogens.
@@ -1519,6 +1535,7 @@ impl ClusterMove {
             ClusterMove::RigidReorient { .. } => "rreor".into(),
             ClusterMove::RigidOrientAll { .. } => "rorient".into(),
             ClusterMove::RigidReverseCycle { .. } => "rcycle".into(),
+            ClusterMove::RigidReverseChain { .. } => "rchain".into(),
             ClusterMove::GroupCycleReverse { .. } => "gcycle".into(),
             ClusterMove::GroupRewire { .. } => "hbrewire".into(),
         }
@@ -2133,6 +2150,14 @@ impl ClusterMove {
                 super::cycles::reverse_cycle(geometry, *n_molecules, &mut y, rng);
                 y
             }
+            ClusterMove::RigidReverseChain {
+                n_molecules,
+                geometry,
+            } => {
+                let mut y = x.to_owned();
+                super::cycles::reverse_chain(geometry, *n_molecules, &mut y, rng);
+                y
+            }
             ClusterMove::GroupCycleReverse { groups } => {
                 let mut y = x.to_owned();
                 super::cycles::reverse_cycle_cartesian(groups, &mut y, rng);
@@ -2584,8 +2609,8 @@ impl MoveKernel<f64> for ClusterProposal {
 #[cfg(test)]
 mod move_scaling_tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     #[test]
     fn energy_lattice_propose_is_unreachable() {
@@ -2619,7 +2644,7 @@ mod move_scaling_tests {
             .collect();
         assert_eq!(
             names,
-            ["rkick", "rtrans", "rrot", "rtrans1", "rreor", "rreloc", "rcycle"]
+            ["rkick", "rtrans", "rrot", "rtrans1", "rreor", "rreloc", "rcycle", "rchain"]
         );
         assert!(cfg.move_library.is_rigid_body());
         assert_eq!(cfg.n_points, 6);
@@ -3166,13 +3191,11 @@ mod move_scaling_tests {
             .map(|kernel| kernel.name())
             .collect();
         assert!(names.iter().any(|name| name == "swap"));
-        assert!(
-            Config::recommended(n)
-                .move_library
-                .kernels(&Config::recommended(n))
-                .iter()
-                .all(|kernel| kernel.name() != "swap")
-        );
+        assert!(Config::recommended(n)
+            .move_library
+            .kernels(&Config::recommended(n))
+            .iter()
+            .all(|kernel| kernel.name() != "swap"));
         let mv = ClusterMove::SpeciesSwap {
             n_points: n,
             species,
