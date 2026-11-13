@@ -25,6 +25,7 @@ MINIMA = {
     8: REPO / "bench" / "tip4p-h2h" / "radius" / "TIP4P-8.xyz",
     15: REPO / "tests" / "fixtures" / "tip4p-15.xyz",
     20: REPO / "tests" / "fixtures" / "tip4p-20.xyz",
+    21: REPO / "paper" / "jctc" / "data" / "system_visuals" / "ccd" / "TIP4P" / "xyz" / "TIP4P-21.xyz",
 }
 MARGIN = 3.0
 R_OH = 0.9572

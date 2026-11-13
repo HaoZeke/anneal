@@ -237,6 +237,21 @@ rule fetch_paper_data:
         """
 
 
+# GMIN's rigid-body TIP4P basin-hopping against anneal develop on the
+# Cambridge sizes (H2O)8, 15, 20, 21 and, scored against the pooled best,
+# (H2O)25. Twelve seeds, 2_000_000 charged evaluations, one serial session,
+# sudo unshare --uts with hostname bench. Not part of `rule all`:
+#   snakemake -s workflow/Snakefile tip4p_h2h
+rule tip4p_h2h:
+    output:
+        "bench/tip4p-h2h/h2h-summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/tip4p_h2h/enter_h2h.sh
+        """
+
+
 # TIP4P (H2O)10, 15 and 20 on the paper preset. Not part of `rule all`.
 #   snakemake -s workflow/Snakefile tip4p_rates
 rule tip4p_rates:
