@@ -13,6 +13,8 @@
 use ndarray::{Array1, Array2, ArrayView1};
 
 #[cfg(test)]
+mod distance_bound_tests;
+#[cfg(test)]
 mod pair_threshold_tests;
 
 #[cfg(test)]
@@ -462,12 +464,12 @@ impl<F: Fingerprint> BasinIndex<F> {
         }
         let query = d.len() - SUFFIX;
         let base = index * SUFFIX;
-        let limit = self.merge_radius * self.merge_radius + 1.0e-8;
+        let limit = self.merge_radius * self.merge_radius;
         let mut acc = 0.0;
         for k in (0..SUFFIX).rev() {
             let diff = d[query + k] - self.centre_suffix[base + k];
             acc += diff * diff;
-            if acc > limit {
+            if clearly_past(acc, limit, 1.0e-8) {
                 return true;
             }
         }
@@ -671,6 +673,24 @@ impl BasinMetric for EuclideanMetric {
     }
 }
 
+/// Relative rounding gap between two summation orders of the same squares.
+///
+/// A sum of `m` non-negative terms is within `(m - 1) u` of the exact sum,
+/// relative, with `u = 2^-53`. A 4753-entry spectrum, LJ98, puts two orders
+/// about `1e-12` apart. This is a hundred times that.
+const SUM_ORDER_GAP: f64 = 1.0e-10;
+
+/// Whether a partial sum of squares is past `limit` in every summation order.
+///
+/// `slack` is the absolute part, which is all a radius of order one needs.
+/// The relative part is what keeps the rule in force when the descriptor is
+/// in larger units: the rounding gap grows with `limit`, and an absolute
+/// slack stops covering it.
+#[inline]
+fn clearly_past(partial: f64, limit: f64, slack: f64) -> bool {
+    partial > limit + slack.max(SUM_ORDER_GAP * limit)
+}
+
 /// Packed squared distance. `true` only when a partial sum already exceeds
 /// `limit` by more than the rounding gap to the scalar block sum.
 ///
@@ -722,7 +742,7 @@ unsafe fn packed_squared_distance_exceeds(a: &[f64], b: &[f64], limit: f64) -> b
         index += 16;
         if index.is_multiple_of(64) {
             let partial = horizontal(acc0) + horizontal(acc1) + horizontal(acc2) + horizontal(acc3);
-            if partial > limit + 1.0e-8 {
+            if clearly_past(partial, limit, 1.0e-8) {
                 return true;
             }
         }
@@ -738,7 +758,7 @@ unsafe fn packed_squared_distance_exceeds(a: &[f64], b: &[f64], limit: f64) -> b
             sum += horizontal(squared);
         }
         index += 4;
-        if sum > limit + 1.0e-8 {
+        if clearly_past(sum, limit, 1.0e-8) {
             return true;
         }
     }
@@ -747,7 +767,7 @@ unsafe fn packed_squared_distance_exceeds(a: &[f64], b: &[f64], limit: f64) -> b
         sum += difference * difference;
         index += 1;
     }
-    sum > limit + 1.0e-8
+    clearly_past(sum, limit, 1.0e-8)
 }
 
 /// Whether the long end of a sorted spectrum is already past `limit`.
@@ -795,7 +815,7 @@ unsafe fn long_end_separates(a: &[f64], b: &[f64], limit: f64) -> bool {
         seen += 16;
         if seen.is_multiple_of(64) {
             let partial = horizontal(acc0) + horizontal(acc1) + horizontal(acc2) + horizontal(acc3);
-            if partial > limit + 1.0e-4 {
+            if clearly_past(partial, limit, 1.0e-4) {
                 return true;
             }
         }
