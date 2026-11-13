@@ -689,8 +689,8 @@ impl BasinMetric for EuclideanMetric {
     }
 }
 
-/// Packed squared distance. `true` only when the sum exceeds `limit` by
-/// more than the rounding gap to the scalar block sum.
+/// Packed squared distance. `true` only when a partial sum already exceeds
+/// `limit` by more than the rounding gap to the scalar block sum.
 ///
 /// # Safety
 ///
@@ -701,9 +701,14 @@ unsafe fn packed_squared_distance_exceeds(a: &[f64], b: &[f64], limit: f64) -> b
     use std::arch::x86_64::{
         _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_setzero_pd, _mm256_sub_pd,
     };
+    // The long pairs sit at the end of a sorted spectrum. A partial sum
+    // that is already far past the radius is a miss, and the forward sum
+    // below is what decides every closer comparison, so the answer stays
+    // the one the front-to-back sum returns.
+    if long_end_separates(a, b, limit) {
+        return true;
+    }
     let n = a.len();
-    // Four independent sums. One accumulator stalls on the add latency,
-    // and that latency is what the basin scan was spending.
     let mut acc0 = _mm256_setzero_pd();
     let mut acc1 = _mm256_setzero_pd();
     let mut acc2 = _mm256_setzero_pd();
@@ -761,6 +766,59 @@ unsafe fn packed_squared_distance_exceeds(a: &[f64], b: &[f64], limit: f64) -> b
         index += 1;
     }
     sum > limit + 1.0e-8
+}
+
+/// Whether the long end of a sorted spectrum is already past `limit`.
+///
+/// The margin is far wider than the rounding of a short vector sum, so a
+/// `true` here is also `true` for the front-to-back sum.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn long_end_separates(a: &[f64], b: &[f64], limit: f64) -> bool {
+    use std::arch::x86_64::{
+        _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_setzero_pd, _mm256_sub_pd,
+    };
+    let n = a.len();
+    let mut acc0 = _mm256_setzero_pd();
+    let mut acc1 = _mm256_setzero_pd();
+    let mut acc2 = _mm256_setzero_pd();
+    let mut acc3 = _mm256_setzero_pd();
+    let mut end = n;
+    let mut seen = 0usize;
+    while end >= 16 && seen < 256 {
+        let index = end - 16;
+        unsafe {
+            let d0 = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index)),
+                _mm256_loadu_pd(b.as_ptr().add(index)),
+            );
+            let d1 = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index + 4)),
+                _mm256_loadu_pd(b.as_ptr().add(index + 4)),
+            );
+            let d2 = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index + 8)),
+                _mm256_loadu_pd(b.as_ptr().add(index + 8)),
+            );
+            let d3 = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index + 12)),
+                _mm256_loadu_pd(b.as_ptr().add(index + 12)),
+            );
+            acc0 = _mm256_add_pd(acc0, _mm256_mul_pd(d0, d0));
+            acc1 = _mm256_add_pd(acc1, _mm256_mul_pd(d1, d1));
+            acc2 = _mm256_add_pd(acc2, _mm256_mul_pd(d2, d2));
+            acc3 = _mm256_add_pd(acc3, _mm256_mul_pd(d3, d3));
+        }
+        end = index;
+        seen += 16;
+        if seen.is_multiple_of(64) {
+            let partial = horizontal(acc0) + horizontal(acc1) + horizontal(acc2) + horizontal(acc3);
+            if partial > limit + 1.0e-4 {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[cfg(target_arch = "x86_64")]
