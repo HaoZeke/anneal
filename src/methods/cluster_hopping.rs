@@ -26,9 +26,9 @@
 //! stage is decided online rather than fixed.
 
 use ndarray::{Array1, ArrayView1};
+use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use rand::rngs::StdRng;
 
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
 use crate::bias::{
@@ -38,12 +38,12 @@ use crate::calibrate::StepCalibrator;
 use crate::contextual::ContextualAllocator;
 use crate::diversity::DiversityAnnealer;
 use crate::exchange::MetropolisExchange;
-use crate::methods::activation::{Activation, activate};
+use crate::methods::activation::{activate, Activation};
 use crate::methods::minima_hopping::{EscapeFeedback, HistoryHook, HistoryReport, Visit};
 use crate::movekernel::{
     HollowFill, HollowRelocate, MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise,
 };
-use crate::path::{StallDetector, interpolate_path};
+use crate::path::{interpolate_path, StallDetector};
 use crate::screen::Screen;
 
 mod config;
@@ -3724,26 +3724,21 @@ where
             // into the same cage; this turn does not.
             if !ledger.stopped() && ledger.remaining() > 0 {
                 let angle = match cfg.move_library {
-                    MoveLibrary::RigidBody { rotate_step, .. } => {
-                        RIGID_SHELL_STEPS * rotate_step
-                    }
+                    MoveLibrary::RigidBody { rotate_step, .. } => RIGID_SHELL_STEPS * rotate_step,
                     _ => 0.0,
                 };
                 let mut turned: Option<(f64, Array1<f64>)> = None;
                 if angle > 0.0 {
                     for axis in 0..3 {
                         let trial = rigid_shell_turn(side_state.view(), cfg.n_points, axis, angle);
-                        let (quenched, relaxed) =
-                            relax(ledger, trial.view(), cfg.relax_steps);
+                        let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                         if quenched.is_finite()
                             && rigid_centres_clear(
                                 relaxed.view(),
                                 cfg.n_points,
                                 0.5 * cfg.min_separation,
                             )
-                            && turned
-                                .as_ref()
-                                .is_none_or(|(held, _)| quenched < *held)
+                            && turned.as_ref().is_none_or(|(held, _)| quenched < *held)
                         {
                             turned = Some((quenched, relaxed));
                         }
@@ -3756,7 +3751,8 @@ where
                     side_state = state;
                     let twist_end = ledger.spent().saturating_add(cage_patience);
                     while ledger.spent() < twist_end && hop_side!(side_rng, side_energy, side_state)
-                    {}
+                    {
+                    }
                 }
             }
             // The shell of the walker is one leave. When it comes up short,
@@ -3812,8 +3808,7 @@ where
                         for axis in 0..3 {
                             let trial =
                                 rigid_shell_turn(side_state.view(), cfg.n_points, axis, angle);
-                            let (quenched, relaxed) =
-                                relax(ledger, trial.view(), cfg.relax_steps);
+                            let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                             if quenched.is_finite()
                                 && rigid_centres_clear(
                                     relaxed.view(),
@@ -3834,7 +3829,8 @@ where
                         let twist_end = ledger.spent().saturating_add(cage_patience);
                         while ledger.spent() < twist_end
                             && hop_side!(side_rng, side_energy, side_state)
-                        {}
+                        {
+                        }
                     }
                 }
             }
@@ -5448,7 +5444,9 @@ where
         // Identity SOAP is not an arm. Thompson must not buy a no-op:
         // reselect a real kernel, or skip the hop.
         // A cycle reversal that finds no cycle returns the state unchanged too.
-        let may_idle = |name: &str| name == "soap" || name == "rcycle" || name == "hbrewire";
+        let may_idle = |name: &str| {
+            name == "soap" || name == "rcycle" || name == "rchain" || name == "hbrewire"
+        };
         if !species_escape_trial
             && !cov_fire
             && !soft_fire
@@ -7824,7 +7822,11 @@ where
                                     ej + vj_xj,
                                     ek + vj_xk,
                                 );
-                                if log_a >= 0.0 { 1.0 } else { log_a.exp() }
+                                if log_a >= 0.0 {
+                                    1.0
+                                } else {
+                                    log_a.exp()
+                                }
                             })
                         };
                         for k in taken {
@@ -8452,8 +8454,8 @@ mod connectivity_tests {
 #[cfg(test)]
 mod group_move_tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     /// Six rigid three-atom groups in a blob.
     fn waterish() -> (Array1<f64>, Vec<Vec<usize>>) {
@@ -8833,11 +8835,10 @@ mod tests {
         assert!(dual.restart_on_stall);
         assert!(!dual.escape_on_stall);
         assert_eq!(dual.restart_patience, 4_000);
-        assert!(
-            dual.resolved_json()
-                .unwrap()
-                .contains(r#""orbit_core":{"both":"#)
-        );
+        assert!(dual
+            .resolved_json()
+            .unwrap()
+            .contains(r#""orbit_core":{"both":"#));
         assert_eq!(
             dual.resolved_json().unwrap(),
             Config::for_cluster(13)
@@ -9185,7 +9186,7 @@ mod tests {
     /// pays nothing on anyone's behalf, and one well is one identity.
     #[test]
     fn a_shared_history_pays_deposits_for_the_other_chains_visits() {
-        use crate::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
+        use crate::descriptor_space::{universal_descriptor_space, DescriptorGeometry};
         use crate::methods::minima_hopping::{
             HistoryHook, HistoryMembership, MinimumHistory, SerializedWitness, SharedMinimumHistory,
         };
@@ -9308,7 +9309,7 @@ mod tests {
 
     #[test]
     fn recognition_does_not_count_a_peer_well_as_known_escape() {
-        use crate::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
+        use crate::descriptor_space::{universal_descriptor_space, DescriptorGeometry};
         use crate::methods::minima_hopping::{
             HistoryHook, HistoryMembership, MinimumHistory, SerializedWitness, SharedMinimumHistory,
         };
@@ -9568,8 +9569,8 @@ mod tests {
 
     #[test]
     fn a_caller_stop_during_a_refused_start_returns_the_outcome() {
-        use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
 
         let mut cfg = Config::for_cluster(4);
         cfg.max_hops = Some(0);
@@ -9743,8 +9744,8 @@ mod tests {
 
     #[test]
     fn a_slice_closes_with_the_parent_stop() {
-        use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
 
         let stop = Arc::new(AtomicBool::new(false));
         let parent = Ledger::with_stop(100, Arc::clone(&stop));
@@ -10093,11 +10094,9 @@ mod tests {
     fn rung_heights_follow_the_rung_temperatures() {
         let mut cfg = Config::for_cluster(13);
         let ratios = rung_ratios(4, cfg.ladder_top);
-        assert!(
-            ratios
-                .iter()
-                .all(|&r| rung_height(&cfg, 4, r) == cfg.bias_height)
-        );
+        assert!(ratios
+            .iter()
+            .all(|&r| rung_height(&cfg, 4, r) == cfg.bias_height));
         cfg.bias_by_rung = true;
         assert_eq!(rung_height(&cfg, 1, 1.0), cfg.bias_height);
         let weight = |r: f64| {
@@ -10523,7 +10522,7 @@ impl Fingerprint for ClusterFingerprint {
 mod descriptor_reuse_tests {
     use super::*;
     use crate::methods::warm_lbfgs::WarmLbfgs;
-    use crate::potentials::{PairPotential, random_tip4p_cluster};
+    use crate::potentials::{random_tip4p_cluster, PairPotential};
 
     const POINTS: usize = 13;
     const WATERS: usize = 10;
