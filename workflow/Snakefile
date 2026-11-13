@@ -147,6 +147,35 @@ rule growpal_h2h:
         """
 
 
+# GrowPAL 0.1.6, built from source, against the recommended preset on
+# LJ38, LJ55, LJ75, LJ98, and Morse M38 at rho = 6, at the paper call
+# budgets. Rows are appended, never rewritten. Not part of `rule all`:
+#   snakemake -s workflow/Snakefile growpal_h2h_v2
+rule growpal_h2h_v2:
+    output:
+        "bench/growpal-h2h-v2/results.csv",
+        "bench/growpal-h2h-v2/seeds.csv",
+        "bench/growpal-h2h-v2/identity.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/growpal_h2h_v2/enter_bench.sh
+        """
+
+
+# Calls the deterministic GrowPAL loop needs with no budget, one run per
+# system. A diagnostic beside growpal_h2h_v2, not part of it:
+#   snakemake -s workflow/Snakefile growpal_h2h_v2_uncapped
+rule growpal_h2h_v2_uncapped:
+    output:
+        "bench/growpal-h2h-v2/uncapped.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/growpal_h2h_v2/enter_bench.sh --uncapped
+        """
+
+
 # Depth-posterior ablation on LJ38, LJ55, LJ75, LJ98, and LJ104.
 # Not part of `rule all`. One serial session, both arms, paper budgets:
 #   snakemake -s workflow/Snakefile depth_posterior_ablation

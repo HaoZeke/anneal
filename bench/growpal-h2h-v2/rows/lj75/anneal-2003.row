@@ -1,0 +1,2 @@
+system,arm,seed,budget,hit,evals_to_hit,charged,wall_s,pot_s,outside_s,inside_us,outside_us,process_s,best,stop,reached
+lj75,anneal,2003,4000000,1,1486000,1486000,38.562027,17.447960,21.114067,11.7416,14.2087,38.572437,-397.49233098,hit,75

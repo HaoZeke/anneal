@@ -1801,13 +1801,17 @@ fn quench_is_sane(cfg: &Config, energy: f64, x: ArrayView1<f64>) -> bool {
 
 /// Whether a quenched point cluster has shed an atom past the potential's range.
 ///
-/// The atom has no neighbour within the neighbour cutoff and its gradient is
-/// exactly zero, so the potential acts on it not at all. No quench brings it
-/// back, and the hops that follow move it on a flat surface: on Tersoff
-/// carbon half the accepted hops of a ten-atom walk held such an atom. A
-/// tail that never reaches zero, as in Lennard-Jones and Morse, leaves some
-/// force on every atom and never meets the test. Rigid bodies and labelled
-/// species keep their own notion of contact and are not judged here.
+/// The range is the neighbour cutoff. An atom with no neighbour inside it
+/// has left that range. It is shed when the potential has stopped acting on
+/// it and is still acting on the rest: its force is exactly zero while some
+/// other atom still feels one. A stationary point has no force anywhere, and
+/// that is not an atom past the range. With no gradient the geometry is the
+/// whole test, so a chain that already holds a free atom is not frozen.
+/// On Tersoff carbon half the accepted hops of a ten-atom walk held such an
+/// atom. A tail that never reaches zero, as in Lennard-Jones and Morse,
+/// leaves some force on every atom and never meets the test. Rigid bodies
+/// and labelled species keep their own notion of contact and are not judged
+/// here.
 fn sheds_free_atom(cfg: &Config, x: ArrayView1<f64>, gradient: Option<ArrayView1<f64>>) -> bool {
     let n = cfg.n_points;
     if cfg.move_library.is_rigid_body()
@@ -1818,7 +1822,14 @@ fn sheds_free_atom(cfg: &Config, x: ArrayView1<f64>, gradient: Option<ArrayView1
     {
         return false;
     }
-    let free = |atom: usize| gradient.is_none_or(|g| (0..3).all(|k| g[3 * atom + k] == 0.0));
+    let force = |g: ArrayView1<f64>, atom: usize| (0..3).any(|axis| g[3 * atom + axis] != 0.0);
+    let free = |atom: usize| match gradient {
+        None => true,
+        Some(g) if g.len() == 3 * n => {
+            !force(g, atom) && (0..n).any(|other| other != atom && force(g, other))
+        }
+        Some(_) => false,
+    };
     connectivity_groups(x, n, cfg.neighbour_cutoff)
         .iter()
         .any(|group| group.len() == 1 && free(group[0]))

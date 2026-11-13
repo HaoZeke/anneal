@@ -81,16 +81,14 @@ const PLATINUM: GuptaPair = GuptaPair {
 /// Guedes-Sobrinho et al. write the heteronuclear parameters as
 /// `w P(Cu) + (1 − w) P(Pt)`. The symmetric choice `w = 0.5` is the
 /// midpoint of that scan. `A = 0.1915` eV, `ξ = 1.9595` eV,
-/// `p = 10.786`, `q = 3.141`, `r0 = 2.6655` Å.
-///
-/// `q` is the published Darby value 3.141, not π. Replacing it with
-/// `f64::consts::PI` changes the potential.
-#[allow(clippy::approx_constant)]
+/// `p = 10.786`, `q = (2.278 + 4.004) / 2`, `r0 = 2.6655` Å.
+/// That `q` is the copper and platinum average, which prints as 3.141
+/// and is not π.
 const PLATINUM_COPPER: GuptaPair = GuptaPair {
     a: 0.1915,
     xi: 1.9595,
     p: 10.786,
-    q: 3.141,
+    q: (2.278 + 4.004) / 2.0,
     r0: 2.6655,
 };
 

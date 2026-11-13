@@ -1,0 +1,2 @@
+system,arm,seed,budget,hit,evals_to_hit,charged,wall_s,pot_s,outside_s,inside_us,outside_us,process_s,best,stop,reached,growpal_version,growpal_commit,aegon_version,ase_version,anneal_head,cpu
+lj55,growpal,2000,500000000,1,104093769,104093769,3409.813893,614.577151,2795.236742,5.9041,26.8531,3414.759501,-279.24847007,hit,55,0.1.6,73952fa3a33ca9a1b1618d79bd154fd1480df518,1.3.15,3.26.0,2b46484da27f932b64b687c04c848e6040db5777,Intel(R) Xeon(R) Processor

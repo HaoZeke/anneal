@@ -929,17 +929,16 @@ pub(crate) fn refine<P: QuenchProbe>(
                 }
             }
         }
-        if !gained
-            && let Some(moved) =
-                reassign_by_site_energy(point.view(), &group_a, &group_b, |p| probe.energy(p))
-            && let Some((next, relaxed)) = probe.quench(moved.view())
-            && next < value - 1e-6
-        {
-            value = next;
-            point = relaxed;
-            continue;
-        }
         if !gained {
+            if let Some(moved) =
+                reassign_by_site_energy(point.view(), &group_a, &group_b, |p| probe.energy(p))
+                && let Some((next, relaxed)) = probe.quench(moved.view())
+                && next < value - 1e-6
+            {
+                value = next;
+                point = relaxed;
+                continue;
+            }
             break;
         }
     }

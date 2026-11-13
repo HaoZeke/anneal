@@ -1,0 +1,2 @@
+system,arm,seed,budget,hit,evals_to_hit,charged,wall_s,pot_s,outside_s,inside_us,outside_us,process_s,best,stop,reached
+m38r6,anneal,2003,400000,1,297,297,0.003165,0.002508,0.000657,8.4444,2.2121,0.007218,-157.47710811,hit,38
