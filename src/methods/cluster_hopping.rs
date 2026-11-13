@@ -4732,9 +4732,18 @@ where
         // fivefold plateau whose nearest neighbour is outside the
         // Lennard-Jones scale. The unlabelled test is evaluated first and
         // unchanged.
-        let mono_ih = cfg.packing_cna_applies()
+        //
+        // The classification is the whole common-neighbour scan. It is an
+        // input of this reseed and of nothing else in the hop, so a hop
+        // that cannot reseed does not build it. The scan, when it runs, is
+        // the same call in the same order.
+        let reseed_due =
+            csm_reseed_hops > 0 && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops;
+        let mono_ih = reseed_due
+            && cfg.packing_cna_applies()
             && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default());
-        let labelled_fivefold = !cfg.packing_cna_applies()
+        let labelled_fivefold = reseed_due
+            && !cfg.packing_cna_applies()
             && cfg
                 .species
                 .as_ref()
@@ -4742,11 +4751,7 @@ where
             && crate::soap::extended_scale(x.view())
             && (crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
                 || crate::soap::fivefold_plateau(x.view()));
-        if csm_reseed_hops > 0
-            && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
-            && (mono_ih || labelled_fivefold)
-            && ledger.remaining() > 0
-        {
+        if reseed_due && (mono_ih || labelled_fivefold) && ledger.remaining() > 0 {
             csm_reseed_stamp = hops;
             // Orbit completion stays. The fresh cluster keeps its atom order,
             // so species labels stay put. Projection is the stall gate below,
