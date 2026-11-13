@@ -20,18 +20,28 @@
 //! `H2H_ARM` picks the search. `recommended` is `Config::recommended`.
 //! `H2H_PRIORS=0` with it, or `H2H_ARM=nopriors`, switches off the
 //! structure priors the preset carries for close-packed clusters: orbit
-//! completion, stall symmetrisation, the continuous-symmetry reseed, the
-//! Lennard-Jones energy lattice and the two-phase surface. `general` is the
-//! same search on scales measured from the potential's own dimer, the bond
-//! length over 2^(1/6) and the well depth, so the reduced constants mean
-//! what they mean for Lennard-Jones. That probe is charged to the ledger.
+//! completion on every new basin, stall symmetrisation, the
+//! continuous-symmetry reseed, the Lennard-Jones energy lattice and the
+//! two-phase surface. The fixed temperature, 0.8 of the Lennard-Jones well,
+//! goes with them, and the budget-window law sets it. Orbit completion
+//! stays as an allocator arm, and the search keeps parts of the cluster
+//! within the pair's measured reach of each other in place of the
+//! container sphere when that reach is shorter than the sphere's diameter.
+//! `general` is the same search on scales measured from the potential's own
+//! dimer, the bond length over 2^(1/6) and the well depth, so the reduced
+//! constants mean what they mean for Lennard-Jones. The dimer and reach
+//! probes are charged to the ledger.
+//!
+//! `H2H_GTOL` sets the quench's gradient tolerance, an infinity norm, in
+//! place of 1e-6, and lets a quench at that tolerance be recorded. The row
+//! names the arm with `-sloppy`.
 //!
 //! A hit is a recorded energy at or below the reference plus 0.001 in the
 //! system's energy unit. A miss is the full budget. `pot_s` is the time
 //! inside the library call.
 
 use anneal_core::methods::cluster_hopping::{
-    Config, ContinuousSymmetry, Ledger, MoveLibrary, Outcome, SoapProposalMode,
+    Config, ContinuousSymmetry, Ledger, MoveLibrary, Outcome, PairRange, SoapProposalMode,
     random_cluster_in_radius, run_with_gradient,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
@@ -76,11 +86,16 @@ impl Arm {
         }
     }
 
-    fn code(self) -> &'static str {
-        match self {
+    fn code(self) -> String {
+        let name = match self {
             Self::Recommended => "anneal",
             Self::NoPriors => "anneal-nopriors",
             Self::General => "anneal-general",
+        };
+        if env_f64("H2H_GTOL").is_some() {
+            format!("{name}-sloppy")
+        } else {
+            name.to_string()
         }
     }
 }
@@ -185,6 +200,13 @@ impl Potential {
         self.evaluate(Array1::from_vec(vec![0.0, 0.0, 0.0, r, 0.0, 0.0]).view())
             .0
     }
+
+    /// Whether the dimer at `r` has exactly zero energy and force.
+    fn silent(&self, r: f64) -> bool {
+        let (energy, gradient) =
+            self.evaluate(Array1::from_vec(vec![0.0, 0.0, 0.0, r, 0.0, 0.0]).view());
+        energy == 0.0 && gradient.iter().all(|g| *g == 0.0)
+    }
 }
 
 /// Bond length and well depth of the dimer.
@@ -241,13 +263,29 @@ fn dimer_scales(potential: &Potential, mut charge: impl FnMut() -> bool) -> Opti
     Some((bond / 2.0_f64.powf(1.0 / 6.0), depth))
 }
 
+/// The dimer's reach, probed from its bond out to a thousand bonds.
+fn pair_range(
+    potential: &Potential,
+    bond: f64,
+    mut charge: impl FnMut() -> bool,
+) -> Option<PairRange> {
+    PairRange::measure(bond, 1.0e3 * bond, |r| {
+        charge().then(|| potential.silent(r))
+    })
+}
+
 /// `Config::recommended` without its close-packed structure priors.
+///
+/// The temperature is a Lennard-Jones calibration too, so the budget-window
+/// law replaces it. Orbit completion stays, drawn by the allocator.
 fn without_priors(mut cfg: Config) -> Config {
     cfg.orbit_complete_on_new = false;
+    cfg.orbit_arm = true;
     cfg.symmetrise_on_stall = false;
     cfg.continuous_symmetry = ContinuousSymmetry::Off;
     cfg.energy_lattice = false;
     cfg.surfaces.clear();
+    cfg.budget_window = true;
     cfg
 }
 
@@ -349,21 +387,34 @@ fn search(
         pair
     };
     let started = Instant::now();
-    let cfg = match arm {
-        Arm::Recommended => Config::recommended(spec.n),
-        Arm::NoPriors => without_priors(Config::recommended(spec.n)),
-        Arm::General => {
-            let mark = Instant::now();
-            let scales = dimer_scales(potential, || ledger.charge());
-            pot_ns.fetch_add(
-                mark.elapsed().as_nanos() as u64,
-                std::sync::atomic::Ordering::Relaxed,
-            );
-            let (length, energy) = scales.expect("the dimer probe fits the budget");
-            general(spec.n, length, energy)
-        }
+    // Both arms without priors measure the dimer, the bond its reach is
+    // scanned from. Only the general arm takes its scales.
+    let mark = Instant::now();
+    let scales = (arm != Arm::Recommended).then(|| {
+        let (length, energy) =
+            dimer_scales(potential, || ledger.charge()).expect("the dimer probe fits the budget");
+        let bond = length * 2.0_f64.powf(1.0 / 6.0);
+        (
+            length,
+            energy,
+            pair_range(potential, bond, || ledger.charge()),
+        )
+    });
+    pot_ns.fetch_add(
+        mark.elapsed().as_nanos() as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    let mut cfg = match (arm, scales) {
+        (Arm::General, Some((length, energy, _))) => general(spec.n, length, energy),
+        (Arm::NoPriors, _) => without_priors(Config::recommended(spec.n)),
+        _ => Config::recommended(spec.n),
     };
+    cfg.pair_range = scales.and_then(|(_, _, range)| range);
     let mut optimiser = WarmLbfgs::default();
+    if let Some(gtol) = env_f64("H2H_GTOL") {
+        optimiser.gtol = gtol;
+        cfg.record_gradient = cfg.record_gradient.max(gtol);
+    }
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
         optimiser.forget();
         let (value, relaxed, _) = optimiser.minimize(x, iterations, |v| {
