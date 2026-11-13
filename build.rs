@@ -56,8 +56,27 @@ fn main() {
     // build input, and the rpath is emitted so a linked binary runs without the
     // caller having to set LD_LIBRARY_PATH by hand.
     if std::env::var("CARGO_FEATURE_GPR").is_ok() {
-        let dir = std::env::var("GPR_OPTIM_LIB_DIR")
-            .expect("feature `gpr` requires GPR_OPTIM_LIB_DIR pointing at libgpr_optim");
+        let dir = std::env::var("GPR_OPTIM_LIB_DIR").unwrap_or_default();
+        if dir.is_empty() {
+            panic!(
+                "feature `gpr` requires GPR_OPTIM_LIB_DIR pointing at the directory that contains libgpr_optim. The variable is unset, so the build stops before the linker is asked for that library."
+            );
+        }
+        let present = std::fs::read_dir(&dir)
+            .ok()
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|entry| {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                name.starts_with("libgpr_optim") || name.starts_with("gpr_optim")
+            });
+        if !present {
+            panic!(
+                "feature `gpr` requires GPR_OPTIM_LIB_DIR={dir} to contain libgpr_optim. That file is not there, so the build stops before the linker is asked for it."
+            );
+        }
         println!("cargo:rustc-link-search=native={dir}");
         println!("cargo:rustc-link-lib=dylib=gpr_optim");
         println!("cargo:rustc-link-arg=-Wl,-rpath,{dir}");
