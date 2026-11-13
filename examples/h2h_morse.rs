@@ -10,9 +10,11 @@
 //! The potential is the in-tree Morse pair, Doye and Wales' form with
 //! `epsilon = 1` and `r_0 = 1`. `rho` is the range. When a second neighbour
 //! is still bound, the search quenches one Mackay cap before the walk.
-//! Otherwise it is the recommended preset. A hit is a quenched energy at
-//! or below the Cambridge table plus 0.001. `pot_s` is the time inside
-//! the potential.
+//! Every Morse run also adapts the step, the acceptance temperature, and
+//! the move choice from the acceptance it sees, and restarts from a
+//! deduplicated population of basin fingerprints when that population
+//! stops growing. A hit is a quenched energy at or below the Cambridge
+//! table plus 0.001. `pot_s` is the time inside the potential.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, random_cluster_in_radius, run_with_gradient,
@@ -39,18 +41,39 @@ fn system_spec(name: &str) -> Option<Spec> {
     // at that range. Budgets follow the Lennard-Jones paper list: 4e5 at
     // 38, 1e6 at 55, and 4e6 at 75 and above.
     let (n, rho, reference) = match name {
+        "m30r3" => (30, 3.0, -177.578647),
+        "m30r6" => (30, 6.0, -118.432844),
+        "m30r10" => (30, 10.0, -108.571179),
+        "m30r14" => (30, 14.0, -106.835790),
         "m38r6" => (38, 6.0, -157.477108),
         "m38r14" => (38, 14.0, -144.321054),
+        "m45r3" => (45, 3.0, -318.660653),
+        "m45r6" => (45, 6.0, -192.954739),
+        "m45r10" => (45, 10.0, -176.665997),
+        "m45r14" => (45, 14.0, -174.511633),
         "m55r6" => (55, 6.0, -250.286609),
         "m55r14" => (55, 14.0, -220.646208),
+        "m60r3" => (60, 3.0, -470.448485),
+        "m60r6" => (60, 6.0, -273.341243),
+        "m60r10" => (60, 10.0, -247.785988),
+        "m60r14" => (60, 14.0, -244.579066),
+        "m70r3" => (70, 3.0, -577.739782),
+        "m70r6" => (70, 6.0, -325.887749),
+        "m70r10" => (70, 10.0, -296.412149),
+        "m70r14" => (70, 14.0, -292.462856),
+        "m80r3" => (80, 3.0, -690.577890),
+        "m80r6" => (80, 6.0, -378.333471),
+        "m80r10" => (80, 10.0, -344.911381),
         "m80r14" => (80, 14.0, -340.811371),
         _ => return None,
     };
-    let budget = match n {
-        38 => 400_000,
-        55 => 1_000_000,
-        80 => 4_000_000,
-        _ => return None,
+    // 4e5 at 38 and below, 1e6 through 74, 4e6 at 75 and above.
+    let budget = if n >= 75 {
+        4_000_000
+    } else if n > 38 {
+        1_000_000
+    } else {
+        400_000
     };
     Some(Spec {
         n,
@@ -135,9 +158,11 @@ fn cmd_run(args: &[String]) -> i32 {
     let mut cfg = Config::recommended(spec.n);
     // A second neighbour in an fcc shell. Bound by more than a twentieth of
     // the well, one Mackay cap is quenched before the walk. Rho = 14 is
-    // not, and the search is then the recommended one.
+    // not. The acceptance controller is on at every range: it reads the
+    // run, not the size.
     let kind = PairKind::Morse { rho: spec.rho };
     cfg.long_ranged = kind.second_neighbour_energy() < -0.05;
+    cfg.acceptance_control = true;
     let start = if let Some(path) = args.get(3) {
         match read_coords(path) {
             Ok(coords) if coords.len() == 3 * spec.n => coords,
@@ -161,7 +186,11 @@ fn cmd_run(args: &[String]) -> i32 {
         .iter()
         .find(|(_, _, _, energy)| *energy <= level)
         .map(|(_, spent, _, _)| *spent);
-    let evals = if hit { at_hit.unwrap_or(budget) } else { budget };
+    let evals = if hit {
+        at_hit.unwrap_or(outcome.charged.min(budget))
+    } else {
+        budget
+    };
     println!(
         "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s"
     );
@@ -287,5 +316,18 @@ mod tests {
         assert_eq!((m80.n, m80.budget), (80, 4_000_000));
         assert!((m80.reference + 340.811371).abs() < 1e-12);
         assert!(m80.n >= 6);
+        let m30 = system_spec("m30r14").unwrap();
+        assert_eq!((m30.n, m30.budget), (30, 400_000));
+        assert!((m30.reference + 106.835790).abs() < 1e-12);
+        let m45 = system_spec("m45r6").unwrap();
+        assert_eq!(m45.budget, 1_000_000);
+        assert!((m45.reference + 192.954739).abs() < 1e-12);
+        let m60 = system_spec("m60r10").unwrap();
+        assert_eq!(m60.budget, 1_000_000);
+        let m70 = system_spec("m70r6").unwrap();
+        assert!((m70.reference + 325.887749).abs() < 1e-12);
+        let m80_6 = system_spec("m80r6").unwrap();
+        assert_eq!(m80_6.budget, 4_000_000);
+        assert!((m80_6.reference + 378.333471).abs() < 1e-12);
     }
 }
