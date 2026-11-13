@@ -3602,7 +3602,8 @@ where
         // close-packed sheet, rather than a fivefold plateau, can still be
         // one lattice step inside that sheet away from the lower packing.
         // The sheet that stands clear of the others is slid once for this
-        // incumbent. Two species, a rigid body, and an unlabelled cluster
+        // incumbent, and a stacking fault in a smaller sheet is slipped in
+        // the plane. Two species, a rigid body, and an unlabelled cluster
         // do not enter, so their call counts are unchanged.
         if cfg.species.is_some()
             && cfg.monoatomic()
@@ -3673,6 +3674,159 @@ where
                     }
                     if ledger.target_reached() {
                         break;
+                    }
+                }
+                // The edge slide has its own funnel. What it does not move
+                // is a fault that slips inside the plane: a patch of a
+                // smaller sheet, or the sheet itself, by a Shockley partial
+                // and by a full lattice step. The first slip that actually
+                // lowers the incumbent is kept. The rest of that list is
+                // the same fault in other directions, and the next pass of
+                // the edge slide is what finishes a packing the partial has
+                // opened. A numerical quiver of the quench is not that.
+                if !ledger.target_reached() && !ledger.stopped() {
+                    let before = ledger.best;
+                    // One edge-slide follow-up per quenched energy. A later
+                    // partial can land above the best slip so far and still
+                    // be the packing the edge slide finishes.
+                    let mut followed: Vec<f64> = Vec::new();
+                    for slip in crate::twin::stacking_fault_slips(incumbent.view()) {
+                        if ledger.remaining() == 0 || ledger.target_reached() {
+                            break;
+                        }
+                        let (candidate_energy, candidate) =
+                            relax(ledger, slip.view(), cfg.relax_steps);
+                        if ledger.stopped() {
+                            break;
+                        }
+                        let candidate_sane =
+                            quench_is_sane(cfg, candidate_energy, candidate.view());
+                        let candidate_gradient = candidate_sane.then(|| {
+                            grad.as_deref_mut().and_then(|gradient| {
+                                gradient(ledger, candidate.view()).filter(|values| {
+                                    answer_gradient_ok(cfg, values.view(), candidate.len())
+                                })
+                            })
+                        });
+                        let candidate_gradient = candidate_gradient.flatten();
+                        let recordable = candidate_sane
+                            && (!gradient_required || candidate_gradient.is_some());
+                        let improved = recordable && candidate_energy < before - 1e-4;
+                        if !improved {
+                            if !recordable {
+                                unconverged_records += 1;
+                            }
+                            continue;
+                        }
+                        if followed
+                            .iter()
+                            .any(|prior| (prior - candidate_energy).abs() < 1e-4)
+                        {
+                            continue;
+                        }
+                        followed.push(candidate_energy);
+                        if candidate_energy < ledger.best - 1e-10 {
+                            ledger.record(candidate_energy, candidate.view());
+                            let adopted = candidate_energy < e - 1e-10;
+                            ledger.mark_last_recorded(adopted);
+                            if adopted {
+                                let from_basin =
+                                    here.unwrap_or_else(|| identity.basin_of(x.view()));
+                                let reached = identity.basin_of(candidate.view());
+                                adopt_minimum!(
+                                    candidate_energy,
+                                    candidate.clone(),
+                                    candidate_gradient.clone(),
+                                    Some(reached),
+                                    AdoptionHistory::Fresh,
+                                    Some((Some(from_basin), reached)),
+                                    Some("stacking-slip"),
+                                    hops
+                                );
+                                soft_cache = None;
+                                basin_entry = None;
+                                quiet = 0;
+                                if improvements.len() < 512 {
+                                    improvements.push((
+                                        hops,
+                                        ledger.spent(),
+                                        bias.n_basins(),
+                                        candidate_energy,
+                                    ));
+                                }
+                            }
+                        }
+                        if ledger.target_reached() {
+                            break;
+                        }
+                        // The opened sheet can sit so close to another face
+                        // that the factor-of-two test calls them a tie. The
+                        // most isolated sheet is still the one to move.
+                        let mut slides = crate::twin::dominant_layer_slides(candidate.view());
+                        if slides.is_empty() {
+                            slides = crate::twin::most_isolated_layer_slides(candidate.view());
+                        }
+                        for slide in slides {
+                            if ledger.remaining() == 0 || ledger.target_reached() {
+                                break;
+                            }
+                            let (slide_energy, slid) =
+                                relax(ledger, slide.view(), cfg.relax_steps);
+                            if ledger.stopped() {
+                                break;
+                            }
+                            let slide_sane = quench_is_sane(cfg, slide_energy, slid.view());
+                            let slide_gradient = slide_sane.then(|| {
+                                grad.as_deref_mut().and_then(|gradient| {
+                                    gradient(ledger, slid.view()).filter(|values| {
+                                        answer_gradient_ok(cfg, values.view(), slid.len())
+                                    })
+                                })
+                            });
+                            let slide_gradient = slide_gradient.flatten();
+                            let slide_recordable = slide_sane
+                                && (!gradient_required || slide_gradient.is_some());
+                            let slide_improved =
+                                slide_recordable && slide_energy < ledger.best - 1e-10;
+                            if slide_recordable {
+                                ledger.record(slide_energy, slid.view());
+                            } else {
+                                unconverged_records += 1;
+                            }
+                            let slide_adopted = slide_recordable && slide_energy < e - 1e-10;
+                            if slide_recordable {
+                                ledger.mark_last_recorded(slide_adopted);
+                            }
+                            if slide_adopted {
+                                let from_basin =
+                                    here.unwrap_or_else(|| identity.basin_of(x.view()));
+                                let reached = identity.basin_of(slid.view());
+                                adopt_minimum!(
+                                    slide_energy,
+                                    slid.clone(),
+                                    slide_gradient.clone(),
+                                    Some(reached),
+                                    AdoptionHistory::Fresh,
+                                    Some((Some(from_basin), reached)),
+                                    Some("layer-slide"),
+                                    hops
+                                );
+                                soft_cache = None;
+                                basin_entry = None;
+                                quiet = 0;
+                                if slide_improved && improvements.len() < 512 {
+                                    improvements.push((
+                                        hops,
+                                        ledger.spent(),
+                                        bias.n_basins(),
+                                        slide_energy,
+                                    ));
+                                }
+                            }
+                            if ledger.target_reached() {
+                                break;
+                            }
+                        }
                     }
                 }
             }

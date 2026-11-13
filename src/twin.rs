@@ -111,6 +111,34 @@ pub fn spacing(x: ArrayView1<f64>, n: usize) -> f64 {
     total / n as f64
 }
 
+/// Median nearest-neighbour distance.
+///
+/// A stretched contact pulls the mean, and a partial dislocation is a
+/// fraction of a typical bond, so the slip length is read from the median.
+fn median_spacing(x: ArrayView1<f64>, n: usize) -> f64 {
+    if n < 2 {
+        return 1.0;
+    }
+    let mut nearest = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut best = f64::INFINITY;
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let mut d = 0.0;
+            for k in 0..3 {
+                let delta = x[3 * i + k] - x[3 * j + k];
+                d += delta * delta;
+            }
+            best = best.min(d);
+        }
+        nearest.push(best.sqrt());
+    }
+    nearest.sort_by(|a, b| a.total_cmp(b));
+    nearest[n / 2]
+}
+
 /// Directions worth testing as plane normals, taken from the structure.
 ///
 /// The normals of a close packing's dense planes are the directions in which
@@ -303,6 +331,20 @@ pub fn twin(x: ArrayView1<f64>, n: usize, plane: &Plane, mode: Mode, layer: f64)
 /// by half a spacing along the edge. Both directions and both signs are
 /// returned. Nothing here depends on how many atoms the cluster has.
 pub fn dominant_layer_slides(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
+    isolated_layer_slides(x, true)
+}
+
+/// Edge slides of the most isolated sheet, without the factor-of-two test.
+///
+/// A slip leaves a packing whose two flattest sheets can sit within numerical
+/// noise of each other. The sheet that is still the most isolated is the one
+/// the edge slide has to finish. Callers that have not just opened a fault
+/// use [`dominant_layer_slides`], which stays quiet when the faces tie.
+pub fn most_isolated_layer_slides(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
+    isolated_layer_slides(x, false)
+}
+
+fn isolated_layer_slides(x: ArrayView1<f64>, require_dominant: bool) -> Vec<Array1<f64>> {
     let n = x.len() / 3;
     if n < 8 {
         return Vec::new();
@@ -399,7 +441,7 @@ pub fn dominant_layer_slides(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
     } else {
         layers[0].0 >= 2.0 * layers[1].0
     };
-    if !dominant {
+    if require_dominant && !dominant {
         return Vec::new();
     }
     let (_, layer, normal, _origin) = layers.remove(0);
@@ -476,6 +518,283 @@ pub fn dominant_layer_slides(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
     slides
 }
 
+/// In-plane slips of a stacking fault, once one sheet stands clear of the rest.
+///
+/// The diamond slide sends a patch along an edge. A fault leaves in the
+/// plane, along a `<112>` direction. For every small sheet, and for a
+/// connected patch of four atoms in it together with one neighbour, both
+/// signs of all six in-plane directions are tried: the Shockley length
+/// `spacing / √3` (the `a/√6` partial) and one full spacing. The list is
+/// empty unless one sheet is an order of magnitude more isolated than the
+/// next, so a tie and a near-tie produce nothing.
+pub fn stacking_fault_slips(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
+    let n = x.len() / 3;
+    if n < 8 {
+        return Vec::new();
+    }
+    let nn = median_spacing(x, n);
+    if !(nn.is_finite() && nn > 0.0) {
+        return Vec::new();
+    }
+    let cut2 = (1.25 * nn) * (1.25 * nn);
+    // A surface atom keeps at most two thirds of the twelve neighbours of a
+    // close-packed interior atom. The interior count is the lattice's, not a
+    // size of this cluster.
+    let surface = 12 * 2 / 3;
+    let mut adj = vec![Vec::new(); n];
+    let mut coord = vec![0usize; n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut d = 0.0;
+            for k in 0..3 {
+                let delta = x[3 * i + k] - x[3 * j + k];
+                d += delta * delta;
+            }
+            if d < cut2 && d > 1e-12 {
+                adj[i].push(j);
+                adj[j].push(i);
+                coord[i] += 1;
+                coord[j] += 1;
+            }
+        }
+    }
+    let mut sheets: Vec<(Vec<usize>, [f64; 3], f64)> = Vec::new();
+    let mut seen: Vec<Vec<usize>> = Vec::new();
+    for i in 0..n {
+        for &j in &adj[i] {
+            if j < i {
+                continue;
+            }
+            for &k in &adj[i] {
+                if k <= j || !adj[j].contains(&k) {
+                    continue;
+                }
+                let e1 = [
+                    x[3 * j] - x[3 * i],
+                    x[3 * j + 1] - x[3 * i + 1],
+                    x[3 * j + 2] - x[3 * i + 2],
+                ];
+                let e2 = [
+                    x[3 * k] - x[3 * i],
+                    x[3 * k + 1] - x[3 * i + 1],
+                    x[3 * k + 2] - x[3 * i + 2],
+                ];
+                let mut normal = [
+                    e1[1] * e2[2] - e1[2] * e2[1],
+                    e1[2] * e2[0] - e1[0] * e2[2],
+                    e1[0] * e2[1] - e1[1] * e2[0],
+                ];
+                let nl = (normal.iter().map(|v| v * v).sum::<f64>()).sqrt();
+                if nl < 1e-8 {
+                    continue;
+                }
+                for value in &mut normal {
+                    *value /= nl;
+                }
+                let mut layer = Vec::new();
+                for a in 0..n {
+                    let mut s = 0.0;
+                    for t in 0..3 {
+                        s += (x[3 * a + t] - x[3 * i + t]) * normal[t];
+                    }
+                    if s.abs() < 0.1 * nn {
+                        layer.push(a);
+                    }
+                }
+                if layer.len() < 6 || layer.len() * 2 >= n {
+                    continue;
+                }
+                layer.sort_unstable();
+                if seen.iter().any(|prev| prev == &layer) {
+                    continue;
+                }
+                let mut thick = 0.0_f64;
+                for &a in &layer {
+                    let mut s = 0.0;
+                    for t in 0..3 {
+                        s += (x[3 * a + t] - x[3 * i + t]) * normal[t];
+                    }
+                    thick = thick.max(s.abs());
+                }
+                let mut gap = f64::INFINITY;
+                for a in 0..n {
+                    if layer.binary_search(&a).is_ok() {
+                        continue;
+                    }
+                    let mut s = 0.0;
+                    for t in 0..3 {
+                        s += (x[3 * a + t] - x[3 * i + t]) * normal[t];
+                    }
+                    gap = gap.min(s.abs());
+                }
+                if !(gap.is_finite() && thick.is_finite()) {
+                    continue;
+                }
+                let ratio = gap / thick.max(1e-9);
+                seen.push(layer.clone());
+                sheets.push((layer, normal, ratio));
+            }
+        }
+    }
+    if sheets.is_empty() {
+        return Vec::new();
+    }
+    let mut ratios: Vec<f64> = sheets.iter().map(|sheet| sheet.2).collect();
+    ratios.sort_by(|a, b| b.total_cmp(a));
+    // The edge slide fires when one sheet is merely twice as isolated as
+    // the next. This enumeration quenches every patch, so it waits until
+    // the sheet is an order of magnitude clearer than every other: a flat
+    // fault, not two faces that both stand proud. A tie, and a near-tie,
+    // return nothing.
+    let fault = if ratios.len() == 1 {
+        ratios[0] >= 10.0
+    } else {
+        ratios[0] >= 10.0 * ratios[1]
+    };
+    if !fault {
+        return Vec::new();
+    }
+    let mut slips = Vec::new();
+    // A local fault is a patch in a sheet only a few atoms larger than the
+    // patch. A bigger sheet is a face; it is slipped as a whole below, and
+    // the diamond slide already moves its edges.
+    for (layer, normal, _) in sheets
+        .iter()
+        .filter(|(layer, _, _)| (6..10).contains(&layer.len()))
+    {
+        let m = layer.len();
+        for a in 0..m {
+            for b in (a + 1)..m {
+                for c in (b + 1)..m {
+                    for d in (c + 1)..m {
+                        let nodes = [layer[a], layer[b], layer[c], layer[d]];
+                        if nodes.iter().any(|&atom| coord[atom] > surface) {
+                            continue;
+                        }
+                        let mut got = vec![nodes[0]];
+                        let mut stack = vec![nodes[0]];
+                        while let Some(u) = stack.pop() {
+                            for &v in &nodes {
+                                if !got.contains(&v) && adj[u].contains(&v) {
+                                    got.push(v);
+                                    stack.push(v);
+                                }
+                            }
+                        }
+                        if got.len() != 4 {
+                            continue;
+                        }
+                        let mut bond = None;
+                        'bond: for &p in &nodes {
+                            for &q in &adj[p] {
+                                if got.contains(&q) {
+                                    bond = Some((p, q));
+                                    break 'bond;
+                                }
+                            }
+                        }
+                        let Some((p, q)) = bond else { continue };
+                        let dirs = in_plane_directions(x, p, q, *normal);
+                        let mut offs = Vec::new();
+                        for &atom in &nodes {
+                            for &v in &adj[atom] {
+                                if !got.contains(&v) && coord[v] <= surface {
+                                    offs.push(v);
+                                }
+                            }
+                        }
+                        offs.sort_unstable();
+                        offs.dedup();
+                        for off in offs {
+                            let who = [nodes[0], nodes[1], nodes[2], nodes[3], off];
+                            push_translations(&mut slips, x, &who, &dirs, nn);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (layer, normal, _) in &sheets {
+        let mut bond = None;
+        'face: for &p in layer {
+            for &q in &adj[p] {
+                if layer.binary_search(&q).is_ok() {
+                    bond = Some((p, q));
+                    break 'face;
+                }
+            }
+        }
+        let Some((p, q)) = bond else { continue };
+        let dirs = in_plane_directions(x, p, q, *normal);
+        push_translations(&mut slips, x, layer, &dirs, nn);
+    }
+    slips
+}
+
+/// Six in-plane directions: a bond and the two turns of 60°, then the three
+/// turns of 30° that lie along `<112>`.
+fn in_plane_directions(x: ArrayView1<f64>, p: usize, q: usize, normal: [f64; 3]) -> Vec<[f64; 3]> {
+    let mut axis = [0.0; 3];
+    for t in 0..3 {
+        axis[t] = x[3 * q + t] - x[3 * p + t];
+    }
+    let al = (axis.iter().map(|v| v * v).sum::<f64>())
+        .sqrt()
+        .max(1e-12);
+    for value in &mut axis {
+        *value /= al;
+    }
+    let mut dirs = Vec::with_capacity(6);
+    for deg in [0.0_f64, 60.0, 120.0, 30.0, 90.0, 150.0] {
+        let (s, c) = deg.to_radians().sin_cos();
+        let mut rotated = [0.0; 3];
+        for t in 0..3 {
+            let i1 = (t + 1) % 3;
+            let i2 = (t + 2) % 3;
+            let cross = normal[i1] * axis[i2] - normal[i2] * axis[i1];
+            rotated[t] = axis[t] * c + cross * s;
+        }
+        let mut along = 0.0;
+        for t in 0..3 {
+            along += rotated[t] * normal[t];
+        }
+        for t in 0..3 {
+            rotated[t] -= along * normal[t];
+        }
+        let rl = (rotated.iter().map(|v| v * v).sum::<f64>())
+            .sqrt()
+            .max(1e-12);
+        for value in &mut rotated {
+            *value /= rl;
+        }
+        dirs.push(rotated);
+    }
+    dirs
+}
+
+/// Both signs, full spacing first and the Shockley length `spacing / √3` after.
+fn push_translations(
+    slips: &mut Vec<Array1<f64>>,
+    x: ArrayView1<f64>,
+    who: &[usize],
+    dirs: &[[f64; 3]],
+    nn: f64,
+) {
+    for dir in dirs {
+        for &sign in &[-1.0, 1.0] {
+            for &length in &[nn, nn / 3.0_f64.sqrt()] {
+                let mut y = x.to_owned();
+                for &atom in who {
+                    for t in 0..3 {
+                        y[3 * atom + t] += sign * dir[t] * length;
+                    }
+                }
+                slips.push(y);
+            }
+        }
+    }
+}
+
 /// Twins `x` across one of its dense planes, chosen at random among the
 /// densest.
 ///
@@ -546,6 +865,7 @@ mod tests {
             x[3 * i] = i as f64;
         }
         assert!(dominant_layer_slides(x.view()).is_empty());
+        assert!(stacking_fault_slips(x.view()).is_empty());
     }
 
     /// A close packing has dense planes, and they have to be found, or the
