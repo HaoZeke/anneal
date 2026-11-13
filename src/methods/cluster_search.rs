@@ -20,6 +20,7 @@ use crate::methods::cluster_hopping::OVERLAP_CALL_LIMIT;
 #[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 use crate::methods::cluster_hopping::inside_molecular_call_wall;
+#[cfg(test)]
 use crate::methods::cluster_hopping::min_pair_distance;
 use crate::methods::cluster_hopping::molecular_call_floor;
 use crate::methods::cluster_hopping::separate_contacts;
