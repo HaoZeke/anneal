@@ -3384,7 +3384,7 @@ impl InterleavedChart<'_> {
         for molecule in 0..n {
             for k in 0..3 {
                 block[3 * molecule + k] = user[6 * molecule + k];
-                block[3 * n + 3 * molecule + k] = -user[6 * molecule + 3 + k];
+                block[3 * n + 3 * molecule + k] = user[6 * molecule + 3 + k];
             }
         }
         block
@@ -3515,8 +3515,8 @@ fn rigid_probe(
 ///     put. Nothing is drawn, the target is not read, and the lowest
 ///     minimum is kept.
 ///   layout: `block` (centres, then rotations) or `interleaved` (GMIN
-///     centre and angle-axis per body). Interleaved rotations are negated
-///     at the boundary because that angle-axis map is the opposite sense.
+///     centre and angle-axis per body). Both carry the same rotation
+///     vectors, in the sense GMIN's `NTIP` reads them.
 ///   target: stop once a recorded energy is at or below this value.
 ///   water_sites: optional flat 9-vector of the O, H, H positions of one
 ///     rigid water in its body frame, in angstrom, about the point its

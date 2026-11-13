@@ -23,7 +23,7 @@
 use anneal_core::methods::cluster_hopping::{Config, Ledger, Outcome, random_cluster_in_radius};
 use anneal_core::methods::cluster_search::search_from;
 use anneal_core::potentials::{
-    GminTip4p, PairPotential, energy_ohh, gmin_tip4p_sites, gmin_water_geometry,
+    GminTip4p, PairPotential, energy_ohh, gmin_coords_text, gmin_tip4p_sites, gmin_water_geometry,
     random_tip4p_cluster,
 };
 use eindir_core::Objective;
@@ -233,8 +233,11 @@ fn main() {
         (Model::Pair(pair), start)
     };
     if water {
-        std::fs::write(format!("{prefix}.start.gmin"), gmin_block(n, start.view()))
-            .expect("start");
+        std::fs::write(
+            format!("{prefix}.start.gmin"),
+            gmin_coords_text(&start.to_vec()),
+        )
+        .expect("start");
     }
     let stop = Arc::new(AtomicBool::new(false));
     let objective = Counted {
@@ -330,24 +333,10 @@ fn main() {
         out.basins,
     );
     if water {
-        std::fs::write(format!("{prefix}.gmin"), gmin_block(n, seen.at.view())).expect("gmin coords");
-    }
-}
-
-/// Centres, then the Rodrigues vectors of the chart unchanged, three per
-/// line. NEWTIP reads that block (`OFFSET = 3 NATOMS / 2`) and places each
-/// site by the same active Rodrigues map, so its start energy is the chart's.
-fn gmin_block(n: usize, x: ArrayView1<f64>) -> String {
-    let mut text = String::new();
-    for i in 0..2 * n {
-        writeln!(
-            text,
-            "{:.10} {:.10} {:.10}",
-            x[3 * i],
-            x[3 * i + 1],
-            x[3 * i + 2]
+        std::fs::write(
+            format!("{prefix}.gmin"),
+            gmin_coords_text(&seen.at.to_vec()),
         )
-        .unwrap();
+        .expect("gmin coords");
     }
-    text
 }

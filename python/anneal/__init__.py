@@ -292,7 +292,8 @@ def cluster_search(
         no kept minimum qualifies, the walker stays put. Nothing is drawn,
         the target is not read, and the lowest minimum is kept.
       layout: ``block`` or ``interleaved``. Interleaved is the per-body
-        centre and angle-axis order, with rotations negated at the boundary.
+        centre and angle-axis order. Both carry the same rotation vectors,
+        in the sense GMIN's ``NTIP`` reads them.
       target: stop once a recorded energy is at or below this value.
       water_sites: optional ``(3, 3)`` body-frame O, H, H positions of a
         rigid water, in angstrom, about its rotation centre. ``n`` then counts
