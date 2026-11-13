@@ -2386,6 +2386,16 @@ const RIGID_ACCEPT_BLOCK: usize = 50;
 /// windows is a quiet stretch long enough to be a stalled cage, and the
 /// walk itself is capped at the same length so the main chain resumes.
 const RIGID_CAGE_WINDOWS: usize = 40;
+
+/// Seats in the rigid basin index.
+///
+/// The lookup walks the seats the triangle test cannot skip, so an open
+/// list makes every later hop slower. A two-million-call TIP4P run opens
+/// about a thousand basins and a ten-million-call run opens past four
+/// thousand; past this many a new region reuses the latest seat. The cap
+/// is above the two-million-call runs, so those searches are unchanged,
+/// and it is not applied to an atomic cluster.
+const RIGID_BASIN_CAP: usize = 2_048;
 /// Orientation steps in the shell turn that opens the second walk.
 ///
 /// Two steps still quench back into the cage. Three steps, the preset
@@ -3246,6 +3256,13 @@ where
         ClusterFingerprint::of_config(cfg, &canonical_reference),
         cfg.merge_radius,
     );
+    if cfg.move_library.is_rigid_body() {
+        identity.set_cap(RIGID_BASIN_CAP);
+        bias.cap_basins(RIGID_BASIN_CAP);
+        for parked in &mut biases {
+            parked.cap_basins(RIGID_BASIN_CAP);
+        }
+    }
     if cfg.minima_hopping {
         let initial_basin = identity.basin_of(x.view());
         feedback.register_driver_local_initial(initial_basin);
@@ -3828,6 +3845,19 @@ where
             let side_scale = orient_scale;
             let mut side_hops = 0usize;
             let archive_end = ledger.spent().saturating_add(archive_patience);
+            // The proposals before this walk are the shell library. The chain
+            // reversal joins here, and a discounted Beta–Bernoulli posterior
+            // pays an arm only when the quench lowers the walk's minimum.
+            // The floor keeps the shell arms reachable.
+            let chain_arm = cfg.rigid_body_geometry.as_ref().and_then(|geometry| {
+                cycles::water_sites(geometry).map(|_| ClusterMove::RigidReverseChain {
+                    n_molecules: cfg.n_points,
+                    geometry: geometry.clone(),
+                })
+            });
+            let mut bandit = chain_arm
+                .as_ref()
+                .map(|_| FlooredThompson::new(kernels.len() + 1));
             while ledger.spent() < archive_end && ledger.remaining() > 0 && !ledger.stopped() {
                 if side_hops > 0
                     && side_hops.is_multiple_of(crate::methods::rigid_quench::STAGNATION_HOPS)
@@ -3841,13 +3871,26 @@ where
                     }
                 }
                 side_hops += 1;
-                let arm = side_rng.random_range(0..kernels.len());
-                let mut trial = kernels[arm].propose_scaled(
-                    side_state.view(),
-                    cfg.temperature,
-                    side_scale,
-                    &mut side_rng,
-                );
+                let arm = match bandit.as_mut() {
+                    Some(bandit) => bandit.select(&mut side_rng),
+                    None => side_rng.random_range(0..kernels.len()),
+                };
+                let before = side_energy;
+                let mut trial = if arm < kernels.len() {
+                    kernels[arm].propose_scaled(
+                        side_state.view(),
+                        cfg.temperature,
+                        side_scale,
+                        &mut side_rng,
+                    )
+                } else {
+                    chain_arm.as_ref().expect("the chain arm").propose_scaled(
+                        side_state.view(),
+                        cfg.temperature,
+                        side_scale,
+                        &mut side_rng,
+                    )
+                };
                 recentre(&mut trial, cfg.n_points);
                 contain(&mut trial, cfg.n_points, cfg.container);
                 let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
@@ -3858,6 +3901,9 @@ where
                 if rise <= 0.0 || side_rng.random::<f64>() < (-rise).exp() {
                     side_energy = quenched;
                     side_state = relaxed;
+                }
+                if let Some(bandit) = bandit.as_mut() {
+                    bandit.update(arm, quenched < before - 1e-10);
                 }
             }
         }
