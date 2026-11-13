@@ -2639,6 +2639,21 @@ fn large_diameter_ratio(cfg: &Config) -> bool {
     }
     smallest.is_finite() && largest / smallest >= 1.2
 }
+
+/// Atoms that stay put this hop: the static frozen mask, or everything
+/// outside the active region when that region names the movers.
+fn frozen_frame(cfg: &Config, x: ArrayView1<f64>) -> Option<Vec<bool>> {
+    match (&cfg.active_region, &cfg.species) {
+        (Some((seeds, shells)), Some(z)) => Some(
+            active_mask(x.view(), z, seeds, *shells, cfg.bond_tolerance)
+                .into_iter()
+                .map(|active| !active)
+                .collect(),
+        ),
+        _ => cfg.frozen.clone(),
+    }
+}
+
 /// How far a partial relaxation still had to descend, over the recent trials
 /// that went on to a full relaxation.
 ///
@@ -3550,12 +3565,25 @@ where
         // Every unlike pair, quenched, kept when it is lower. One random
         // exchange every fourth hop does not finish the ordering. Absent
         // unless two labels are present, so an unlabelled chain is unchanged.
-        if let Some(species) = cfg.species.as_deref()
+        // A wide ratio's proposal is the softened escape. Without that
+        // escape compiled, this sweep would spend the budget and the run
+        // would close the ledger instead of reporting the missing escape.
+        // A frozen atom is the frame: exchanging it moves the frame, and
+        // the quench then pins the frame to the swapped place.
+        let polish_homotops = cfg!(feature = "rgsaddle") || !species_wide;
+        if polish_homotops
+            && let Some(species) = cfg.species.as_deref()
             && species_count(species) >= 2
             && ledger.best.is_finite()
             && (polished_best.is_nan() || ledger.best < polished_best - 1e-8)
             && let Some(best_state) = ledger.best_state.clone()
         {
+            let frame = frozen_frame(cfg, x.view());
+            let held = |atom: usize| {
+                frame
+                    .as_ref()
+                    .is_some_and(|mask| mask.get(atom).copied().unwrap_or(false))
+            };
             let mut current = best_state;
             let mut current_e = ledger.best;
             let (group_a, group_b) = species_groups(species);
@@ -3569,6 +3597,9 @@ where
                     for &j in &group_b {
                         if ledger.remaining() == 0 || tried >= 800 {
                             break 'pairs;
+                        }
+                        if held(i) || held(j) {
+                            continue;
                         }
                         tried += 1;
                         let mut swapped = current.clone();
@@ -4755,15 +4786,7 @@ where
         // move library follows the structure rather than the declaration.
         // The frozen frame this hop: the static mask, or its dynamic form,
         // everything outside the active region around the seeds.
-        let hop_frozen: Option<Vec<bool>> = match (&cfg.active_region, &cfg.species) {
-            (Some((seeds, shells)), Some(z)) => Some(
-                active_mask(x.view(), z, seeds, *shells, cfg.bond_tolerance)
-                    .into_iter()
-                    .map(|a| !a)
-                    .collect(),
-            ),
-            _ => cfg.frozen.clone(),
-        };
+        let hop_frozen = frozen_frame(cfg, x.view());
         if let MoveLibrary::Molecular {
             reactive,
             reverse_cycles,
@@ -4855,6 +4878,14 @@ where
             if ledger.remaining() == 0 || ledger.target_reached() {
                 break HopStop::of_closed(ledger);
             }
+        }
+        // The fixed-composition draw above may close the ledger. What remains
+        // is the softened escape. It is not compiled, and a library kick is
+        // not put in its place.
+        #[cfg(not(feature = "rgsaddle"))]
+        if species_wide && energy_grad.is_some() && !cfg.angular_moves {
+            nve_unavailable = true;
+            break HopStop::NveUnavailable;
         }
         let mut k = choose_arm(
             cfg,
