@@ -170,6 +170,10 @@ name    = "globalopt_hotpaths"
 harness = false
 
 [[example]]
+name = "h2h_sc"
+required-features = ["rgpot-ex"]
+
+[[example]]
 name = "rgpot_minimize"
 required-features = ["capi", "rgpot-ex"]
 

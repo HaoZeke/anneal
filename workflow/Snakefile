@@ -67,6 +67,19 @@ rule metal_darby_h2h:
         """
 
 
+# Reduced Sutton–Chen against GMIN. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile sc_h2h
+rule sc_h2h:
+    output:
+        "bench/metal-cluster-h2h/sc-8e076b7f/results.csv",
+        "bench/metal-cluster-h2h/sc-8e076b7f/seeds.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/metal_h2h/enter_sc.sh
+        """
+
+
 # Cleri–Rosato Pt–Cu against GMIN. Not part of `rule all`.
 #   snakemake -s workflow/Snakefile ptcu_h2h
 rule ptcu_h2h:
