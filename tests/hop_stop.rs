@@ -224,9 +224,14 @@ fn wide(cfg: &mut Config) {
 fn a_budget_spent_by_the_species_exchange_ends_the_run() {
     let mut cfg = bare(3);
     wide(&mut cfg);
+    // A feature build quenches the binary cuts on side ledgers before the
+    // exchange, so the drained call is the second one on the chain's ledger.
     let calls = AtomicUsize::new(0);
+    let side_calls = AtomicUsize::new(0);
     let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
-        if calls.fetch_add(1, Ordering::Relaxed) == 1 {
+        if ledger.budget() != 64 {
+            side_calls.fetch_add(1, Ordering::Relaxed);
+        } else if calls.fetch_add(1, Ordering::Relaxed) == 1 {
             drain(ledger);
         }
         flat(ledger, x, steps)
@@ -246,6 +251,9 @@ fn a_budget_spent_by_the_species_exchange_ends_the_run() {
     .expect("finite start");
     assert_eq!(out.stop, Some(HopStop::Budget));
     assert_eq!((calls.load(Ordering::Relaxed), out.hops), (2, 0));
+    if !cfg!(feature = "rgsaddle") {
+        assert_eq!(side_calls.load(Ordering::Relaxed), 0);
+    }
     assert!(!out.nve_unavailable);
 }
 
