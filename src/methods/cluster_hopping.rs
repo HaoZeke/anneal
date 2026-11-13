@@ -2472,6 +2472,124 @@ fn rigid_cage_key(state: ArrayView1<f64>, n: usize, quantum: f64) -> u64 {
     hash
 }
 
+/// Neighbours inside 5/4 of the preset separation, the relocate move's shell.
+fn rigid_neighbours(state: ArrayView1<f64>, n: usize, min_separation: f64) -> Vec<Vec<usize>> {
+    let mut neighbours = vec![Vec::new(); n];
+    if n < 2 || state.len() < 3 * n {
+        return neighbours;
+    }
+    let shell = min_separation.max(1.0e-6) * 1.25;
+    let shell2 = shell * shell;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut distance = 0.0;
+            for axis in 0..3 {
+                let delta = state[3 * i + axis] - state[3 * j + axis];
+                distance += delta * delta;
+            }
+            if distance < shell2 && distance > 1.0e-12 {
+                neighbours[i].push(j);
+                neighbours[j].push(i);
+            }
+        }
+    }
+    neighbours
+}
+
+/// Canonical hash of the oxygen contact graph.
+///
+/// Colour refinement labels each centre by its degree and the degrees of
+/// its neighbours, then repeats until the partition stops splitting. The
+/// hash is that stable partition, so two numberings of one graph agree
+/// and a changed contact does not.
+fn contact_graph_key(state: ArrayView1<f64>, n: usize, min_separation: f64) -> u64 {
+    if n < 2 || state.len() < 3 * n {
+        return 0;
+    }
+    let neighbours = rigid_neighbours(state, n, min_separation);
+    let mut color: Vec<usize> = neighbours.iter().map(|row| row.len()).collect();
+    let mut signatures: Vec<(usize, Vec<usize>)> = Vec::with_capacity(n);
+    for _ in 0..n {
+        signatures.clear();
+        for i in 0..n {
+            let mut seen: Vec<usize> = neighbours[i].iter().map(|&j| color[j]).collect();
+            seen.sort_unstable();
+            signatures.push((color[i], seen));
+        }
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by(|&left, &right| signatures[left].cmp(&signatures[right]));
+        let mut next = vec![0usize; n];
+        let mut id = 0usize;
+        for (pos, &i) in order.iter().enumerate() {
+            if pos > 0 && signatures[i] != signatures[order[pos - 1]] {
+                id += 1;
+            }
+            next[i] = id;
+        }
+        if next == color {
+            break;
+        }
+        color = next;
+    }
+    let mut rows = signatures;
+    rows.sort();
+    let mut hash = 0xcbf29ce484222325u64;
+    hash ^= n as u64;
+    hash = hash.wrapping_mul(0x100000001b3);
+    for (label, seen) in rows {
+        hash ^= label as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+        for value in seen {
+            hash ^= value as u64;
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+/// How far two contact graphs are, as sorted local structure.
+///
+/// Each centre contributes its degree, the contacts among its neighbours,
+/// and the sum of its neighbours' degrees. Isomorphic graphs score zero.
+fn contact_graph_distance(
+    left: ArrayView1<f64>,
+    right: ArrayView1<f64>,
+    n: usize,
+    min_separation: f64,
+) -> i64 {
+    let profile = |state: ArrayView1<f64>| {
+        let neighbours = rigid_neighbours(state, n, min_separation);
+        let mut rows = Vec::with_capacity(n);
+        for i in 0..n {
+            let degree = neighbours[i].len();
+            let mut triangles = 0usize;
+            let mut neighbour_degrees = 0usize;
+            for (a, &j) in neighbours[i].iter().enumerate() {
+                neighbour_degrees += neighbours[j].len();
+                for &k in neighbours[i].iter().skip(a + 1) {
+                    if neighbours[j].contains(&k) {
+                        triangles += 1;
+                    }
+                }
+            }
+            rows.push((degree, triangles, neighbour_degrees));
+        }
+        rows.sort_unstable();
+        rows
+    };
+    let left = profile(left);
+    let right = profile(right);
+    let mut distance = 0i64;
+    for i in 0..n.min(left.len()).min(right.len()) {
+        distance += (left[i].0 as i64 - right[i].0 as i64).abs();
+        distance += (left[i].1 as i64 - right[i].1 as i64).abs();
+        distance += (left[i].2 as i64 - right[i].2 as i64).abs();
+    }
+    distance
+}
+
 /// Turn the outer half of a rigid cage about its core.
 ///
 /// The angle is a multiple of the preset orientation step. The inner half
@@ -3519,6 +3637,10 @@ where
     // Hops elapsed when the ledger last recorded a lower minimum.
     // A rigid stall measures 1000 hops from that hop count.
     let mut hops_at_lowest = 0usize;
+    // How many stalls have re-entered each oxygen contact graph.
+    // The archive memory is the revisit limit: past it, the stall
+    // refuses that graph and leaves for a more distant stored cage.
+    let mut graph_stalls: Vec<(u64, usize)> = Vec::new();
     // Water restarts from a stored basin on its own clock, and then
     // stays there for a few hops before the incumbent gap applies.
     let mut last_basin_restart = 0usize;
@@ -3932,6 +4054,46 @@ where
                 e = energy;
                 x = state;
                 current_validation_gradient = gradient.filter(|_| ok);
+            }
+            // Count this re-entry. Proton isomers share a contact graph,
+            // so a stall that returns to the same cage counts again.
+            // Past the archive's stall memory, that graph is refused and
+            // the walker restarts from the stored cage whose contacts
+            // differ most. No draw: the rank is the contact distance.
+            let graph = contact_graph_key(x.view(), cfg.n_points, cfg.min_separation);
+            let visits = if let Some(slot) = graph_stalls.iter_mut().find(|(key, _)| *key == graph)
+            {
+                slot.1 += 1;
+                slot.1
+            } else {
+                graph_stalls.push((graph, 1));
+                1
+            };
+            if visits >= crate::methods::stall_archive::MEMORY {
+                let separation = cfg.min_separation;
+                let bodies = cfg.n_points;
+                if let Some((energy, state)) = cage_archive.escape_ranked(|_, candidate| {
+                    let other = contact_graph_key(candidate, bodies, separation);
+                    if other == graph {
+                        None
+                    } else {
+                        Some(contact_graph_distance(
+                            x.view(),
+                            candidate,
+                            bodies,
+                            separation,
+                        ))
+                    }
+                }) && state.len() == x.len()
+                {
+                    let gradient = grad.as_deref_mut().and_then(|g| g(ledger, state.view()));
+                    let ok = gradient
+                        .as_ref()
+                        .is_some_and(|values| answer_gradient_ok(cfg, values.view(), state.len()));
+                    e = energy;
+                    x = state;
+                    current_validation_gradient = gradient.filter(|_| ok);
+                }
             }
             // Translation, rotation and cycle reversal leave the oxygen cage
             // where it is. After a thousand hops with no new lowest minimum,
@@ -10722,7 +10884,8 @@ mod descriptor_reuse_tests {
 #[cfg(test)]
 mod geometry_guards {
     use super::{
-        contain, min_pair_distance, recentre, separate_to_overlap_rule, structure_is_sane,
+        contact_graph_distance, contact_graph_key, contain, min_pair_distance, recentre,
+        separate_to_overlap_rule, structure_is_sane,
     };
     use ndarray::Array1;
 
@@ -10777,5 +10940,39 @@ mod geometry_guards {
             None
         ));
         assert!(min_pair_distance(grouped.view()) >= 0.4);
+    }
+
+    /// Two numberings of one contact graph share a key. A triangle does not
+    /// share it with a path, and the distance agrees.
+    #[test]
+    fn a_relabelled_contact_graph_keeps_its_key() {
+        let separation = 1.0;
+        let mut path = Array1::zeros(18);
+        path[0] = 0.0;
+        path[3] = 1.1;
+        path[6] = 2.2;
+        let mut flipped = Array1::zeros(18);
+        flipped[0] = 2.2;
+        flipped[3] = 1.1;
+        flipped[6] = 0.0;
+        let mut triangle = Array1::zeros(18);
+        triangle[0] = 0.0;
+        triangle[3] = 1.1;
+        triangle[4] = 0.0;
+        triangle[6] = 0.55;
+        triangle[7] = 0.95262794416;
+        assert_eq!(
+            contact_graph_key(path.view(), 3, separation),
+            contact_graph_key(flipped.view(), 3, separation)
+        );
+        assert_ne!(
+            contact_graph_key(path.view(), 3, separation),
+            contact_graph_key(triangle.view(), 3, separation)
+        );
+        assert_eq!(
+            contact_graph_distance(path.view(), flipped.view(), 3, separation),
+            0
+        );
+        assert!(contact_graph_distance(path.view(), triangle.view(), 3, separation) > 0);
     }
 }
