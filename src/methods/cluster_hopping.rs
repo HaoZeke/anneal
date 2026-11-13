@@ -5354,8 +5354,12 @@ where
         // icosahedron. Smaller atoms take the inner sites, then one
         // unlike-pair quench pass. The chain generator is not drawn.
         // Unlabelled clusters never enter, so their evaluation counts stay.
+        // A lattice cut replaces every atom, so a molecular or rigid
+        // library, which keeps its atoms inside a body, never enters either.
         let motif_gap = ledger.budget() / 2;
         if motif_gap > 0
+            && !cfg.move_library.is_molecular()
+            && !cfg.move_library.is_rigid_body()
             && ledger.spent().saturating_sub(charged_at_best) >= motif_gap
             && ledger.spent().saturating_sub(motif_at_spent) >= motif_gap
             && ledger.remaining() > 0
