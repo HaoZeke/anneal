@@ -259,6 +259,21 @@ rule morse_hop:
         """
 
 
+# Morse against GMIN: M30, M38, M55 and M80 at rho 6 and 14, plus
+# M80 at rho 3. Not part of `rule all`. Twelve seeds, paper budgets.
+# A stored GMIN row is kept when the source revision still matches.
+#   snakemake -s workflow/Snakefile morse_gmin
+rule morse_gmin:
+    output:
+        "bench/morse-gmin/seeds.csv",
+        "bench/morse-gmin/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/morse_gmin/enter_bench.sh
+        """
+
+
 # Morse rho = 14, M55 and M80, twelve seeds, paper budgets.
 # Not part of `rule all`. GMIN rows already stored at these budgets
 # are kept; missing seeds are appended.
