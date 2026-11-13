@@ -587,3 +587,35 @@ Kravatskiy, Khrulkov, and Oseledets, arXiv:2602.10233 (10 February 2026), evolve
 Barrón Romero, Pesquisa e Docência em Ciências Exatas e Naturais, pages 48--65 (27 June 2026), doi:10.37572/edart_2706261094, is the next chapter after `barronRomeroLennardJones2026`. The landing page calls the structures nano vehicles: shells of particles around a small core, on wells whose valley is narrower than a Lennard-Jones 12-6 well. The page says the shells remain minima when that well is varied. It gives no Cambridge energy. The sizes 38, 55, 75, 98, and 104 are not named. The Cambridge hit targets stand.
 
 Cite `kravatskiyImprovEvolve2026` and `barronRomeroShells2026`. No head-to-head at the manuscript sizes. ASE tag 3.29.0, AGOX tag v3.11.1, CREST v3.0.2, pele v0.1.2, xtb v6.8.0, and the GMIN page of 17 March 2022 were unchanged on this check.
+
+## 2026-11-13 — Quantum annealing on LJ13, LJ20, LJ25, and LJ38
+
+Fiorentino and Marzari, arXiv:2606.03405 (2 June 2026), anneal a path-integral molecular-dynamics trajectory. On Lennard-Jones clusters the reference energies are the Cambridge Cluster Database, and the note says a lower structure could still be found. The scored sizes are 13, 20, and 25 atoms, and the 38-atom cluster. Unpinned simulated annealing and unpinned quantum annealing leave LJ38 unsolved in runs out to \(10^{6}\) steps. A replica-pinned variant reaches the reference minimum. They compare that variant with Wales and Doye: about 80 percent success on LJ38 in about 5000 local minimisations, against a comparable success with 32 replicas and 40 local optimisation rounds, one round every \(10^{4}\) steps. They call the comparison qualitative, because one side is Monte Carlo and the other is molecular dynamics. They also call the icosahedral 55-atom cluster easy. They do not name LJ75, LJ98, or LJ104, and they give no energy below the Cambridge values.
+
+The manuscript's LJ38 map puts the recommended hop on the published truncated octahedron. This preprint does not report a lower potential energy, so it does not contradict the Cambridge hit targets. The 80 percent figure is their citation of Wales and Doye, not a printed anneal count. The article no longer prints an LJ38 hit count. A head-to-head on LJ38 has to charge the force calls the hop charges. Their count of local optimisation rounds is not that budget. Do not import the probabilities into the hit table.
+
+Cite `fiorentinoQuantumAnnealing2026`.
+
+## 2026-11-13 — Minima hopping on magic-size gold
+
+Rahmatizad Khajehpasha, Safa, Eyvazi, Krummenacher, and Goedecker, arXiv:2601.10434 (15 January 2026), search paths among cuboctahedra, Ino's decahedra, and icosahedra for Au55, Au147, Au309, and Au561 on a machine-learned potential. Minima hopping finds low-symmetry minima. The abstract says some of the new global minima for Au309 and Au561 lie up to 2.8 eV below global minima reported earlier. The same note says an icosahedron is the ground state of a magic-size Lennard-Jones cluster and is not the ground state of these gold clusters.
+
+Safa, Rahmatizad Khajehpasha, and Goedecker already search ionized gold from 22 to 100 atoms, filed as `safaGoldIons2026`. This preprint is the neutral magic sizes, and 309 and 561 sit outside that range. The 2.8 eV gaps are gold energies on their potential. They are not Cambridge Lennard-Jones energies, so they do not contradict the hit targets, 121 of 192, or 97 of 192. A head-to-head would be Au309 or Au561 on that potential. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `rahmatizadGold2026`.
+
+## 2026-11-13 — A charge-state search of NaPb12
+
+Guevara-Vela, Rodríguez-Kessler, Muñoz-Castro, and Rocha-Rinza, The Journal of Physical Chemistry A (8 November 2026), doi:10.1021/acs.jpca.6c05536, search NaPb12. The abstract says a global structure search, followed by a density-functional refinement, puts a crown on the neutral cluster, an endohedral sodium on the monoanion, and an exohedral sodium on the dianion. The record has no volume or pages yet.
+
+Rodríguez-Kessler and Muñoz-Castro are authors of the adaptive basin hop filed as `carmonaAbhDft2026` and of the boron-cluster preprints. This paper does not name that hop, and it does not name LJ38 through LJ104 or the water hexamer. It does not contradict those counts. A head-to-head would be NaPb12 on one shared surface. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST table.
+
+Cite `guevaraVelaNapb2026`.
+
+## 2026-11-13 — A refit of GFN2-xTB for liquid water
+
+Nikolaeva, Kulik, and Stein, ChemRxiv (21 October 2026), doi:10.26434/chemrxiv.15010774/v1, reparameterize GFN2-xTB for aqueous electrolytes. The abstract says the default parameters overestimate the density of liquid water and of aqueous sodium chloride, and underestimate the sodium--water distance. They fit a reduced parameter set to cluster and periodic revPBE0-D3 data, first for hydrogen and oxygen, then for sodium. The abstract says the new parameters improve those densities and move the hydration distance into the experimental range. The fit is not a search for the hexamer, and the abstract gives no hexamer energy.
+
+The hexamer table is unmodified GFN2-xTB in xtb 6.7.1. This preprint is a different parameter set, aimed at liquid densities. It does not recompute 121 of 192, 97 of 192, or the polished gaps, so it does not contradict those numbers. It does contradict any reading in which a refit of GFN2 for liquid water is the surface in that table. Keep the table on 6.7.1. Do not start a new CREST search on the refit.
+
+Cite `nikolaevaGfn2Water2026`.
