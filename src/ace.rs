@@ -156,30 +156,77 @@ pub fn from_c(c: &[f64], n_max: usize, l_max: usize) -> Vec<f64> {
 
 const CG_CACHE_MAX: usize = 8;
 
+/// One nonzero CG term. `i1`, `i2`, `i3` are `lm_index` offsets, so the
+/// contraction adds the same products in the same order as the `m` loops.
+struct CgTerm {
+    i1: usize,
+    i2: usize,
+    i3: usize,
+    g: f64,
+}
+
+fn nonzero_terms(l_max: usize) -> &'static [Vec<CgTerm>] {
+    use std::sync::OnceLock;
+    static TABLES: [OnceLock<Vec<Vec<CgTerm>>>; CG_CACHE_MAX + 1] =
+        [const { OnceLock::new() }; CG_CACHE_MAX + 1];
+    TABLES[l_max].get_or_init(|| {
+        triples(l_max)
+            .into_iter()
+            .map(|(l1, l2, l3)| {
+                let mut terms = Vec::new();
+                for m1 in -(l1 as i32)..=(l1 as i32) {
+                    for m2 in -(l2 as i32)..=(l2 as i32) {
+                        let m3 = m1 + m2;
+                        if m3.abs() > l3 as i32 {
+                            continue;
+                        }
+                        let g = cg(l1 as i32, m1, l2 as i32, m2, l3 as i32, m3);
+                        if g == 0.0 {
+                            continue;
+                        }
+                        terms.push(CgTerm {
+                            i1: lm_index(l1, m1),
+                            i2: lm_index(l2, m2),
+                            i3: lm_index(l3, m3),
+                            g,
+                        });
+                    }
+                }
+                terms
+            })
+            .collect()
+    })
+}
+
 fn from_c_cached(c: &[f64], n_max: usize, l_max: usize) -> Vec<f64> {
     let n_lm = (l_max + 1) * (l_max + 1);
     let trips = triples_cached(l_max);
-    let table = cg_table(l_max);
+    let terms = nonzero_terms(l_max);
+    // Complex coefficients once per radial channel. The `m` loops used to
+    // rebuild each one for every triple that touches it.
+    let mut re = vec![0.0; n_max * n_lm];
+    let mut im = vec![0.0; n_max * n_lm];
+    for n in 0..n_max {
+        for l in 0..=l_max {
+            for m in -(l as i32)..=(l as i32) {
+                let (cr, ci) = coeff(c, n, l, m, n_lm);
+                let at = n * n_lm + lm_index(l, m);
+                re[at] = cr;
+                im[at] = ci;
+            }
+        }
+    }
     let mut out = vec![0.0; n_max * trips.len()];
     for n in 0..n_max {
-        for (k, &(l1, l2, l3)) in trips.iter().enumerate() {
+        let base = n * n_lm;
+        for (k, triple_terms) in terms.iter().enumerate() {
             let mut acc = 0.0;
-            for m1 in -(l1 as i32)..=(l1 as i32) {
-                for m2 in -(l2 as i32)..=(l2 as i32) {
-                    let m3 = m1 + m2;
-                    if m3.abs() > l3 as i32 {
-                        continue;
-                    }
-                    let g = table.get(l1, m1, l2, m2, l3, m3);
-                    if g == 0.0 {
-                        continue;
-                    }
-                    let a = coeff(c, n, l1, m1, n_lm);
-                    let b = coeff(c, n, l2, m2, n_lm);
-                    let d = coeff(c, n, l3, m3, n_lm);
-                    let p = cmul(cmul(a, b), (d.0, -d.1));
-                    acc += g * p.0;
-                }
+            for term in triple_terms {
+                let a = (re[base + term.i1], im[base + term.i1]);
+                let b = (re[base + term.i2], im[base + term.i2]);
+                let d = (re[base + term.i3], im[base + term.i3]);
+                let p = cmul(cmul(a, b), (d.0, -d.1));
+                acc += term.g * p.0;
             }
             out[n * trips.len() + k] = acc;
         }
@@ -243,57 +290,6 @@ fn triples_cached(l_max: usize) -> &'static [(usize, usize, usize)] {
     static TABLES: [OnceLock<Vec<(usize, usize, usize)>>; CG_CACHE_MAX + 1] =
         [const { OnceLock::new() }; CG_CACHE_MAX + 1];
     TABLES[l_max].get_or_init(|| triples(l_max)).as_slice()
-}
-
-struct CgTable {
-    l_max: usize,
-    span: usize,
-    slots: usize,
-    values: Vec<f64>,
-}
-
-impl CgTable {
-    fn build(l_max: usize) -> Self {
-        let span = 2 * l_max + 1;
-        let slots = (l_max + 1) * span;
-        let mut values = vec![0.0; slots * slots * slots];
-        let index = |l: usize, m: i32| l * span + (m + l_max as i32) as usize;
-        for l1 in 0..=l_max {
-            for m1 in -(l1 as i32)..=l1 as i32 {
-                for l2 in 0..=l_max {
-                    for m2 in -(l2 as i32)..=l2 as i32 {
-                        for l3 in 0..=l_max {
-                            for m3 in -(l3 as i32)..=l3 as i32 {
-                                let g = cg(l1 as i32, m1, l2 as i32, m2, l3 as i32, m3);
-                                let i =
-                                    (index(l1, m1) * slots + index(l2, m2)) * slots + index(l3, m3);
-                                values[i] = g;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Self {
-            l_max,
-            span,
-            slots,
-            values,
-        }
-    }
-
-    fn get(&self, l1: usize, m1: i32, l2: usize, m2: i32, l3: usize, m3: i32) -> f64 {
-        let index = |l: usize, m: i32| l * self.span + (m + self.l_max as i32) as usize;
-        let i = (index(l1, m1) * self.slots + index(l2, m2)) * self.slots + index(l3, m3);
-        self.values[i]
-    }
-}
-
-fn cg_table(l_max: usize) -> &'static CgTable {
-    use std::sync::OnceLock;
-    static TABLES: [OnceLock<CgTable>; CG_CACHE_MAX + 1] =
-        [const { OnceLock::new() }; CG_CACHE_MAX + 1];
-    TABLES[l_max].get_or_init(|| CgTable::build(l_max))
 }
 
 /// `∂B/∂c` for one centre, shape `(ace_dim, n_max n_lm)`.
