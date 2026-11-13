@@ -106,6 +106,21 @@ rule morse_h2h:
         """
 
 
+# Morse rho = 14, M55 and M80, twelve seeds, paper budgets.
+# Not part of `rule all`. GMIN rows already stored at these budgets
+# are kept; missing seeds are appended.
+#   snakemake -s workflow/Snakefile morse14_h2h
+rule morse14_h2h:
+    output:
+        "bench/morse14-h2h/seeds.csv",
+        "bench/morse14-h2h/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/morse14_h2h/enter_bench.sh
+        """
+
+
 # GMIN against the paper preset at the paper force-call budgets.
 # Not part of `rule all`. Run it by name:
 #   snakemake -s workflow/Snakefile gmin_h2h
