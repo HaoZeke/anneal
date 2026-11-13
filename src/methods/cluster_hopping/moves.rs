@@ -2419,7 +2419,10 @@ impl ClusterMove {
                     l_max: 6,
                     rcut_nn: *cutoff,
                 };
-                let packing = species.is_none() && mobile.is_none();
+                // A declared rigid group is retracted, not replaced by the
+                // fivefold packing hop. One element without groups still
+                // takes that hop.
+                let packing = species.is_none() && mobile.is_none() && groups.is_none();
                 if *class && packing {
                     crate::soap::step_away(x, &[], spec, *rmsd, rng)
                 } else if packing {
