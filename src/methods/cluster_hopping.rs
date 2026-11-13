@@ -4433,6 +4433,21 @@ where
         // Every unlike pair, quenched, kept when it is lower. One random
         // exchange every fourth hop does not finish the ordering. Absent
         // unless two labels are present, so an unlabelled chain is unchanged.
+        // A frozen atom is the frame: exchanging it moves the substrate.
+        let frame_frozen: Option<Vec<bool>> = match (&cfg.active_region, &cfg.species) {
+            (Some((seeds, shells)), Some(z)) => Some(
+                active_mask(x.view(), z, seeds, *shells, cfg.bond_tolerance)
+                    .into_iter()
+                    .map(|active| !active)
+                    .collect(),
+            ),
+            _ => cfg.frozen.clone(),
+        };
+        let atom_is_frame = |atom: usize| {
+            frame_frozen
+                .as_ref()
+                .is_some_and(|mask| mask.get(atom).copied().unwrap_or(false))
+        };
         // A molecular or rigid library keeps its atoms inside a body.
         if polishes_unlike_pairs(cfg)
             && !escape_refused
@@ -4454,6 +4469,9 @@ where
                     for &j in &group_b {
                         if ledger.remaining() == 0 || tried >= 800 {
                             break 'pairs;
+                        }
+                        if atom_is_frame(i) || atom_is_frame(j) {
+                            continue;
                         }
                         tried += 1;
                         let mut swapped = current.clone();
@@ -6622,6 +6640,16 @@ where
                 contain_trial(cfg, &mut trial, n);
             }
             Some(f) => {
+                // The proposal may have moved the frame. Put those atoms
+                // back before the box is read, so a later quench pins them
+                // where the chain left them.
+                for i in 0..n {
+                    if f.get(i).copied().unwrap_or(false) {
+                        for k in 0..3 {
+                            trial[3 * i + k] = x[3 * i + k];
+                        }
+                    }
+                }
                 let mut lo = [f64::INFINITY; 3];
                 let mut hi = [f64::NEG_INFINITY; 3];
                 for i in 0..n {
