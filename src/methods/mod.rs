@@ -21,6 +21,8 @@ pub mod bank;
 pub mod box_hopping;
 /// Basin hopping over quenched minima with a basin-keyed bias.
 pub mod cluster_hopping;
+/// Step, move choice, and a fingerprint population shared by every potential.
+pub use cluster_hopping::acceptance_control;
 pub mod cluster_search;
 /// Population resampled by estimated probability of improvement.
 pub mod committor_pop;

@@ -246,6 +246,9 @@ fn config(spec: &Spec) -> Config {
         .and_then(|text| text.parse().ok())
         .unwrap_or(8)
         .max(1);
+    if std::env::var("H2H_ACCEPTANCE").ok().as_deref() == Some("1") {
+        cfg.acceptance_control = true;
+    }
     cfg
 }
 

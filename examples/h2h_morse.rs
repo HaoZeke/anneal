@@ -162,7 +162,9 @@ fn cmd_run(args: &[String]) -> i32 {
     // run, not the size.
     let kind = PairKind::Morse { rho: spec.rho };
     cfg.long_ranged = kind.second_neighbour_energy() < -0.05;
-    cfg.acceptance_control = true;
+    cfg.acceptance_control = std::env::var("H2H_ACCEPTANCE")
+        .map(|value| value != "0")
+        .unwrap_or(true);
     let start = if let Some(path) = args.get(3) {
         match read_coords(path) {
             Ok(coords) if coords.len() == 3 * spec.n => coords,

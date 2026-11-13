@@ -46,7 +46,7 @@ use crate::movekernel::{
 use crate::path::{StallDetector, interpolate_path};
 use crate::screen::Screen;
 
-mod acceptance_control;
+pub mod acceptance_control;
 mod binary_geometry;
 mod config;
 mod cycles;
@@ -3362,6 +3362,10 @@ where
     // without feedback and one with it begin identically.
     let mut feedback = EscapeFeedback::new(1.0, cfg.temperature.max(1e-6));
     let mut acceptance = acceptance_control::AcceptanceControl::new();
+    let mut reseed_kick = false;
+    if cfg.acceptance_control {
+        acceptance.prefer(kernels.len(), 32.0);
+    }
     if cfg.move_library.is_rigid_body() {
         // The shrink on every accept otherwise closes the window below
         // the barriers between rigid cages. The preset temperature is
@@ -4545,44 +4549,18 @@ where
             }
         }
         if cfg.acceptance_control
-            && acceptance.restart_due(ledger.spent(), cfg.restart_patience)
+            && acceptance.reseed_due()
             && ledger.remaining() > 0
             && !ledger.target_reached()
         {
-            let current = acceptance_control::fingerprint(x.view(), cfg.length_scale);
-            if let Some((energy, state)) = acceptance.diverse_member(current) {
-                let gradient = grad
-                    .as_deref_mut()
-                    .and_then(|evaluate| evaluate(ledger, state.view()));
-                let ok = gradient.as_ref().is_some_and(|values| {
-                    answer_gradient_ok(cfg, values.view(), state.len())
-                });
+            if let Some((energy, state)) = acceptance.best_state() {
                 e = energy;
                 x = state;
-                current_validation_gradient = gradient.filter(|_| ok);
+                current_validation_gradient = None;
                 soft_cache = None;
-                acceptance.acknowledge_restart(ledger.spent());
-            } else {
-                let fresh =
-                    random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
-                let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
-                if energy.is_finite() && quench_is_sane(cfg, energy, relaxed.view()) {
-                    let gradient = record_quenched_answer(
-                        cfg,
-                        ledger,
-                        &mut grad,
-                        energy,
-                        relaxed.view(),
-                        &mut unconverged_records,
-                    );
-                    e = energy;
-                    x = relaxed;
-                    current_validation_gradient = gradient;
-                    soft_cache = None;
-                    let basin = acceptance_control::fingerprint(x.view(), cfg.length_scale);
-                    acceptance.observe_structure(basin, e, x.view(), ledger.spent());
-                    acceptance.acknowledge_restart(ledger.spent());
-                }
+                let basin = acceptance_control::fingerprint(x.view(), cfg.length_scale);
+                acceptance.acknowledge_reseed(basin);
+                reseed_kick = true;
             }
         }
         // A fresh cluster on this clock returns to the Mackay icosahedron
@@ -4616,9 +4594,6 @@ where
             // due and the leave runs on every following hop.
             charged_at_best = ledger.spent();
             directed_leave = true;
-            if cfg.acceptance_control {
-                acceptance.on_quiet_best();
-            }
         }
         let checkpoint_due = matches!(
             (checkpoint_interval, next_checkpoint),
@@ -5693,16 +5668,21 @@ where
                 break HopStop::of_closed(ledger);
             }
         }
+        let n_choice = kernels.len() + usize::from(cfg.acceptance_control);
         let mut k = choose_arm(
             cfg,
             context.as_ref().map(|value| value.view()),
             &mut contextual,
             &depth_allocator,
             &mut allocator,
-            kernels.len(),
+            n_choice,
             cfg.acceptance_control.then_some(&mut acceptance),
             rng,
         );
+        if reseed_kick {
+            k = kernels.len();
+            reseed_kick = false;
+        }
         // One unlike-pair exchange on a fixed cadence. The depth allocator
         // drops the homotop once geometry moves pay more, and a binary
         // minimum is a chemical ordering as well as a geometry. Absent on a
@@ -6030,6 +6010,11 @@ where
                 energy_scale: cfg.energy_scale,
             }
             .propose(x.view(), cfg.temperature, rng)
+        } else if cfg.acceptance_control && k >= kernels.len() {
+            let step = preset::LennardJonesPreset::ALL_POINTS_STEP
+                * cfg.length_scale
+                * acceptance.step_scale();
+            ClusterMove::AllPoints { step }.propose(x.view(), cfg.temperature, rng)
         } else {
             match (&mut constructor, &kernels[k]) {
                 (Some(c), ClusterMove::Reseed { n_points, .. }) => {
@@ -6054,6 +6039,7 @@ where
             && !cov_fire
             && !soft_fire
             && !angular
+            && k < kernels.len()
             && may_idle(&kernels[k].name())
             && hop_is_identity(x.view(), trial.view())
         {
@@ -6136,6 +6122,8 @@ where
             "soft_mode".to_owned()
         } else if angular {
             "angular".to_owned()
+        } else if k >= kernels.len() {
+            "all".to_owned()
         } else {
             kernels[k].name().to_owned()
         };
@@ -6638,6 +6626,8 @@ where
                     "cov".to_string()
                 } else if angular {
                     "angular".to_string()
+                } else if k >= kernels.len() {
+                    "all".to_string()
                 } else {
                     kernels[k].name()
                 };
@@ -6998,6 +6988,9 @@ where
         }
         if cfg.acceptance_control {
             let to_id = acceptance_control::fingerprint(x_new.view(), cfg.length_scale);
+            if acceptance.blocks(to_id, e_new) {
+                accept = false;
+            }
             acceptance.observe_acceptance(accept);
             let novel = acceptance.observe_structure(to_id, e_new, x_new.view(), ledger.spent());
             let improved = e_new < e - 1e-12;
@@ -7228,7 +7221,7 @@ where
             // The context is the one the move was chosen in, not the one the
             // chain now stands in: the reward belongs to the decision.
             contextual.update(k, c.view(), if improved || accept { 1.0 } else { 0.0 });
-        } else if cfg.allocate_moves {
+        } else if cfg.allocate_moves && k < depth_allocator.arms() {
             // An angular step is not the allocator's, so it does not carry a
             // reward for whichever arm the allocator happened to pick.
             if cfg.depth_reward {
@@ -7362,6 +7355,8 @@ where
                     "cov".to_string()
                 } else if angular {
                     "angular".to_string()
+                } else if k >= kernels.len() {
+                    "all".to_string()
                 } else {
                     kernels[k].name()
                 };

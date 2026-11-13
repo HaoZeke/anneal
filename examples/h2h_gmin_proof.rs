@@ -63,6 +63,9 @@ fn cmd_run(args: &[String]) -> i32 {
     };
     let budget = env_budget().unwrap_or(spec.budget);
     let mut cfg = Config::recommended(spec.n);
+    if std::env::var("H2H_ACCEPTANCE").ok().as_deref() == Some("1") {
+        cfg.acceptance_control = true;
+    }
     // Unset leaves the library stride of one.
     if let Ok(text) = std::env::var("H2H_BASIN_STRIDE")
         && let Ok(stride) = text.parse::<usize>()

@@ -1,11 +1,13 @@
-//! Step, temperature, move choice, and a fingerprint population, from the run.
+//! Step, move choice, and a fingerprint population, from the run.
 //!
-//! Nothing here is a size or a reference energy. The step and the acceptance
-//! temperature move when the recent acceptance is off a half. Each move is
-//! drawn from the successes and failures it has produced. A basin fingerprint
-//! enters the population once, and a run of fingerprints the population
-//! already holds is a plateau: the chain restarts from a member it has not
-//! been standing on.
+//! Nothing here is a size or a reference energy. The all-atom step moves when
+//! the recent acceptance is off a half, and the acceptance temperature stays
+//! at the preset: a basin-hopping trace that finds the longer-ranged minima
+//! holds the temperature and only nudges the step. Each move, including that
+//! all-atom kick, is drawn from the successes and failures it has produced.
+//! A basin fingerprint enters the population once. After a run of quenches
+//! that do not lower the best, the chain is put back on that best and the
+//! fingerprint is avoided until something lower arrives.
 
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
@@ -13,13 +15,13 @@ use rand::Rng;
 const WINDOW: usize = 32;
 const TARGET: f64 = 0.5;
 const FACTOR: f64 = 1.05;
-const STEP_MIN: f64 = 0.25;
-const STEP_MAX: f64 = 4.0;
-const TEMP_MIN: f64 = 0.25;
-const TEMP_MAX: f64 = 8.0;
+const STEP_MIN: f64 = 0.5;
+const STEP_MAX: f64 = 2.0;
 /// Distinct fingerprints kept. A larger bank would only repeat the same
 /// deduplicated set.
 const POPULATION_CAP: usize = 24;
+/// Minima the reseed has just left. A return that is not a new best is refused.
+const AVOID_CAP: usize = 20;
 
 struct Member {
     basin: u64,
@@ -70,9 +72,10 @@ pub struct AcceptanceControl {
     success: Vec<f64>,
     failure: Vec<f64>,
     members: Vec<Member>,
-    streak: usize,
-    spent_at_novel: usize,
-    restarts: usize,
+    best_energy: f64,
+    best_coords: Option<Array1<f64>>,
+    quiet: usize,
+    avoid: Vec<u64>,
 }
 
 impl AcceptanceControl {
@@ -86,9 +89,10 @@ impl AcceptanceControl {
             success: Vec::new(),
             failure: Vec::new(),
             members: Vec::new(),
-            streak: 0,
-            spent_at_novel: 0,
-            restarts: 0,
+            best_energy: f64::INFINITY,
+            best_coords: None,
+            quiet: 0,
+            avoid: Vec::new(),
         }
     }
 
@@ -97,12 +101,13 @@ impl AcceptanceControl {
         self.step_scale
     }
 
-    /// Multiplier on the acceptance temperature. One until the first window closes.
+    /// The acceptance temperature stays at the preset. The acceptance ratio
+    /// is spent on the step, which is what a fixed-temperature hop adjusts.
     pub fn temperature_scale(&self) -> f64 {
         self.temperature_scale
     }
 
-    /// One proposal's acceptance, and a closed window retunes both scales.
+    /// One proposal's acceptance. A closed window moves only the step.
     pub fn observe_acceptance(&mut self, accepted: bool) {
         self.window_n += 1;
         if accepted {
@@ -114,13 +119,23 @@ impl AcceptanceControl {
         let rate = self.window_yes as f64 / self.window_n as f64;
         if rate > TARGET {
             self.step_scale = (self.step_scale * FACTOR).min(STEP_MAX);
-            self.temperature_scale = (self.temperature_scale / FACTOR).max(TEMP_MIN);
         } else if rate < TARGET {
             self.step_scale = (self.step_scale / FACTOR).max(STEP_MIN);
-            self.temperature_scale = (self.temperature_scale * FACTOR).min(TEMP_MAX);
         }
         self.window_n = 0;
         self.window_yes = 0;
+    }
+
+    /// A prior weight on one arm, before any quench has been seen.
+    ///
+    /// The all-atom kick is the move a fixed-temperature hop takes. It starts
+    /// ahead of the library so the first window is that kick, and a library
+    /// arm that then succeeds more often can overtake it.
+    pub fn prefer(&mut self, arm: usize, weight: f64) {
+        if weight > 0.0 {
+            self.ensure_arms(arm.saturating_add(1));
+            self.success[arm] += weight;
+        }
     }
 
     /// Draws a move by Thompson sampling on its success and failure counts.
@@ -158,17 +173,23 @@ impl AcceptanceControl {
         coords: ArrayView1<f64>,
         spent: usize,
     ) -> bool {
+        if energy < self.best_energy {
+            self.best_energy = energy;
+            self.best_coords = Some(coords.to_owned());
+            self.quiet = 0;
+            self.avoid.clear();
+        } else {
+            self.quiet += 1;
+        }
         if let Some(member) = self.members.iter_mut().find(|member| member.basin == basin) {
             member.visits += 1;
             if energy < member.energy {
                 member.energy = energy;
                 member.coords = coords.to_owned();
             }
-            self.streak += 1;
+            let _ = spent;
             return false;
         }
-        self.streak = 0;
-        self.spent_at_novel = spent;
         self.members.push(Member {
             basin,
             energy,
@@ -179,26 +200,32 @@ impl AcceptanceControl {
         true
     }
 
-    /// True when the population has stopped admitting fingerprints and the
-    /// best has been quiet for `patience` charges.
-    pub fn restart_due(&self, spent: usize, patience: usize) -> bool {
-        let bar = self.members.len().max(8);
-        self.streak >= bar && spent.saturating_sub(self.spent_at_novel) >= patience.max(1)
+    /// A return to a minimum the reseed just left, and not a new best.
+    pub fn blocks(&self, basin: u64, energy: f64) -> bool {
+        energy > self.best_energy + 1e-12 && self.avoid.contains(&basin)
     }
 
-    /// Forgets the duplicate run so the next plateau has to earn another restart.
-    pub fn acknowledge_restart(&mut self, spent: usize) {
-        self.streak = 0;
-        self.spent_at_novel = spent;
-        self.restarts += 1;
+    /// The best has not moved for a window of quenches.
+    pub fn reseed_due(&self) -> bool {
+        self.quiet >= WINDOW && self.best_coords.is_some()
     }
 
-    /// The record has not moved. Raise the acceptance temperature so a worse
-    /// minimum can be kept. The step is left to the acceptance window.
-    pub fn on_quiet_best(&mut self) {
-        self.temperature_scale = (self.temperature_scale * FACTOR * FACTOR).min(TEMP_MAX);
-        self.window_n = 0;
-        self.window_yes = 0;
+    /// The lowest structure filed so far.
+    pub fn best_state(&self) -> Option<(f64, Array1<f64>)> {
+        self.best_coords
+            .as_ref()
+            .map(|coords| (self.best_energy, coords.clone()))
+    }
+
+    /// The reseed has put the chain back on `basin`. Further returns are avoided.
+    pub fn acknowledge_reseed(&mut self, basin: u64) {
+        self.quiet = 0;
+        if !self.avoid.contains(&basin) {
+            self.avoid.push(basin);
+            if self.avoid.len() > AVOID_CAP {
+                self.avoid.remove(0);
+            }
+        }
     }
 
     /// A stored minimum whose fingerprint is not `current`, preferring one
@@ -308,14 +335,14 @@ mod tests {
         assert_eq!(control.step_scale(), 1.0);
         control.observe_acceptance(true);
         assert!((control.step_scale() - FACTOR).abs() < 1e-12);
-        assert!((control.temperature_scale() - 1.0 / FACTOR).abs() < 1e-12);
+        assert_eq!(control.temperature_scale(), 1.0);
 
         let mut cold = AcceptanceControl::new();
         for _ in 0..WINDOW {
             cold.observe_acceptance(false);
         }
         assert!((cold.step_scale() - 1.0 / FACTOR).abs() < 1e-12);
-        assert!((cold.temperature_scale() - FACTOR).abs() < 1e-12);
+        assert_eq!(cold.temperature_scale(), 1.0);
     }
 
     #[test]
@@ -338,26 +365,26 @@ mod tests {
         assert_eq!(control.members[0].visits, 2);
         assert!(control.observe_structure(4, -2.0, coords.view(), 30));
         assert_eq!(control.members.len(), 2);
-        assert!(!control.restart_due(30, 100));
+        assert!(!control.reseed_due());
     }
 
     #[test]
-    fn a_duplicate_run_with_a_quiet_best_is_a_plateau() {
+    fn a_quiet_best_reseeds_and_then_avoids_that_minimum() {
         let mut control = AcceptanceControl::new();
         let coords = Array1::from(vec![0.0, 0.0, 0.0]);
         control.observe_structure(1, -1.0, coords.view(), 0);
-        for spent in 1..9 {
-            control.observe_structure(1, -1.0, coords.view(), spent);
+        assert!(!control.reseed_due());
+        for spent in 1..=WINDOW {
+            control.observe_structure(1, -0.5, coords.view(), spent);
         }
-        assert!(!control.restart_due(8, 100));
-        assert!(control.restart_due(100, 100));
-        let other = Array1::from(vec![1.0, 0.0, 0.0]);
-        control.observe_structure(2, -0.5, other.view(), 100);
-        let (energy, state) = control.diverse_member(1).expect("a second fingerprint");
-        assert!((energy + 0.5).abs() < 1e-12);
-        assert_eq!(state[0], 1.0);
-        control.acknowledge_restart(100);
-        assert!(!control.restart_due(100, 100));
+        assert!(control.reseed_due());
+        let (energy, state) = control.best_state().expect("the best is kept");
+        assert!((energy + 1.0).abs() < 1e-12);
+        assert_eq!(state[0], 0.0);
+        control.acknowledge_reseed(1);
+        assert!(!control.reseed_due());
+        assert!(control.blocks(1, -0.5));
+        assert!(!control.blocks(1, -2.0));
     }
 
     #[test]
