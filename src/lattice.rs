@@ -416,6 +416,9 @@ pub fn candidate_keeping<R: Rng + ?Sized>(
         rng.random::<f64>() - 0.5,
         rng.random::<f64>() - 0.5,
     ];
+    // The centre is fixed for the peel, so each site's squared distance is
+    // one number. Recomputing it on every comparison picked the same site.
+    let centre_distance: Vec<f64> = sites.iter().map(|site| sq(site, &centre)).collect();
     let mut live = m;
     while live > n {
         // The least-coordinated survivor, ties going to the one furthest from a
@@ -430,7 +433,7 @@ pub fn candidate_keeping<R: Rng + ?Sized>(
             }
             if worst == usize::MAX
                 || count[i] < count[worst]
-                || (count[i] == count[worst] && sq(&sites[i], &centre) > sq(&sites[worst], &centre))
+                || (count[i] == count[worst] && centre_distance[i] > centre_distance[worst])
             {
                 worst = i;
             }

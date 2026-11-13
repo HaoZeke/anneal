@@ -193,6 +193,10 @@ harness = false
 name    = "assignment_hot"
 harness = false
 
+[[bench]]
+name    = "symmetrise_hot"
+harness = false
+
 [[example]]
 name = "h2h_sc"
 required-features = ["rgpot-ex"]

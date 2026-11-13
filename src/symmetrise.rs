@@ -166,14 +166,6 @@ impl Cloud {
         [self.xs[index], self.ys[index], self.zs[index]]
     }
 
-    fn nearest_squared(&self, image: [f64; 3]) -> f64 {
-        #[cfg(target_arch = "x86_64")]
-        if std::is_x86_feature_detected!("avx2") {
-            return unsafe { self.nearest_squared_avx2(image) };
-        }
-        self.nearest_squared_scalar(image)
-    }
-
     fn nearest_squared_scalar(&self, image: [f64; 3]) -> f64 {
         let mut best = f64::INFINITY;
         for index in 0..self.xs.len() {
@@ -242,6 +234,119 @@ impl Cloud {
         best
     }
 
+    fn nearest_one(&self, image: [f64; 3]) -> f64 {
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("avx2") {
+            return unsafe { self.nearest_squared_avx2(image) };
+        }
+        self.nearest_squared_scalar(image)
+    }
+
+    /// Nearest squared distance of every image.
+    ///
+    /// Each image keeps a four-wide minimum, then the lowest lane, then the
+    /// tail, which is the scalar scan's minimum for ordinary distances.
+    /// A deviation asks for one image per atom, and scanning the cloud once
+    /// per handful of images reads each coordinate a quarter as often.
+    fn nearest_squared_batch(&self, images: &[[f64; 3]], out: &mut [f64]) {
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("avx2") {
+            unsafe { self.nearest_squared_batch_avx2(images, out) };
+            return;
+        }
+        for (image, slot) in images.iter().zip(out.iter_mut()) {
+            *slot = self.nearest_squared_scalar(*image);
+        }
+    }
+
+    /// # Safety
+    ///
+    /// AVX2 must be enabled. `out` is at least as long as `images`.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn nearest_squared_batch_avx2(&self, images: &[[f64; 3]], out: &mut [f64]) {
+        use std::arch::x86_64::{
+            _mm256_add_pd, _mm256_loadu_pd, _mm256_min_pd, _mm256_mul_pd, _mm256_set1_pd,
+            _mm256_storeu_pd, _mm256_sub_pd,
+        };
+        let n = self.xs.len();
+        let mut base = 0usize;
+        while base < images.len() {
+            let width = (images.len() - base).min(4);
+            let mut best = [_mm256_set1_pd(f64::INFINITY); 4];
+            let mut index = 0usize;
+            while index + 4 <= n {
+                unsafe {
+                    let x = _mm256_loadu_pd(self.xs.as_ptr().add(index));
+                    let y = _mm256_loadu_pd(self.ys.as_ptr().add(index));
+                    let z = _mm256_loadu_pd(self.zs.as_ptr().add(index));
+                    for lane in 0..width {
+                        let image = images[base + lane];
+                        let dx = _mm256_sub_pd(x, _mm256_set1_pd(image[0]));
+                        let dy = _mm256_sub_pd(y, _mm256_set1_pd(image[1]));
+                        let dz = _mm256_sub_pd(z, _mm256_set1_pd(image[2]));
+                        let distance = _mm256_add_pd(
+                            _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
+                            _mm256_mul_pd(dz, dz),
+                        );
+                        best[lane] = _mm256_min_pd(best[lane], distance);
+                    }
+                }
+                index += 4;
+            }
+            for lane in 0..width {
+                let image = images[base + lane];
+                let mut packed = [0.0; 4];
+                unsafe { _mm256_storeu_pd(packed.as_mut_ptr(), best[lane]) };
+                let mut acc = packed[0];
+                if packed[1] < acc {
+                    acc = packed[1];
+                }
+                if packed[2] < acc {
+                    acc = packed[2];
+                }
+                if packed[3] < acc {
+                    acc = packed[3];
+                }
+                let mut tail = index;
+                while tail < n {
+                    let dx = image[0] - self.xs[tail];
+                    let dy = image[1] - self.ys[tail];
+                    let dz = image[2] - self.zs[tail];
+                    let distance = dx * dx + dy * dy + dz * dz;
+                    if distance < acc {
+                        acc = distance;
+                    }
+                    tail += 1;
+                }
+                out[base + lane] = acc;
+            }
+            base += width;
+        }
+    }
+
+    /// Adds these images onto `total` in order.
+    ///
+    /// Returns whether the running sum is still under `cap`. A finite cap
+    /// stops at the same atom a one-image scan would, after the batch that
+    /// contains it has been measured.
+    fn accumulate(&self, images: &[[f64; 3]], cap: f64, total: &mut f64) -> bool {
+        let n = self.xs.len();
+        let stop = cap.is_finite();
+        let mut distance = [0.0; 4];
+        self.nearest_squared_batch(images, &mut distance[..images.len()]);
+        for lane in 0..images.len() {
+            *total += distance[lane];
+            if stop && *total > cap * cap * n as f64 {
+                let partial = (*total / n as f64).sqrt();
+                if partial >= cap * (1.0 + 1.0e-6) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
     fn rotation_deviation(&self, axis: [f64; 3], order: usize, cap: f64) -> Option<f64> {
         let n = self.xs.len();
         if n == 0 || order < 2 {
@@ -250,15 +355,29 @@ impl Cloud {
         let angle = 2.0 * std::f64::consts::PI / order as f64;
         let mut total = 0.0;
         let stop = cap.is_finite();
-        for index in 0..n {
-            let image = rotate(self.point(index), axis, angle);
-            total += self.nearest_squared(image);
-            if stop && total > cap * cap * n as f64 {
-                let partial = (total / n as f64).sqrt();
-                if partial >= cap * (1.0 + 1.0e-6) {
-                    return None;
+        if stop {
+            for index in 0..n {
+                total += self.nearest_one(rotate(self.point(index), axis, angle));
+                if total > cap * cap * n as f64 {
+                    let partial = (total / n as f64).sqrt();
+                    if partial >= cap * (1.0 + 1.0e-6) {
+                        return None;
+                    }
                 }
             }
+            return Some((total / n as f64).sqrt());
+        }
+        let mut index = 0usize;
+        let mut stored = [[0.0; 3]; 4];
+        while index < n {
+            let width = (n - index).min(4);
+            for lane in 0..width {
+                stored[lane] = rotate(self.point(index + lane), axis, angle);
+            }
+            if !self.accumulate(&stored[..width], cap, &mut total) {
+                return None;
+            }
+            index += width;
         }
         Some((total / n as f64).sqrt())
     }
@@ -271,20 +390,39 @@ impl Cloud {
         let m = mirror_matrix(axis);
         let mut total = 0.0;
         let stop = cap.is_finite();
-        for index in 0..n {
-            let v = self.point(index);
-            let image = [
-                m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
-                m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
-                m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
-            ];
-            total += self.nearest_squared(image);
-            if stop && total > cap * cap * n as f64 {
-                let partial = (total / n as f64).sqrt();
-                if partial >= cap * (1.0 + 1.0e-6) {
-                    return None;
+        if stop {
+            for index in 0..n {
+                let v = self.point(index);
+                total += self.nearest_one([
+                    m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+                    m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+                    m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+                ]);
+                if total > cap * cap * n as f64 {
+                    let partial = (total / n as f64).sqrt();
+                    if partial >= cap * (1.0 + 1.0e-6) {
+                        return None;
+                    }
                 }
             }
+            return Some((total / n as f64).sqrt());
+        }
+        let mut index = 0usize;
+        let mut stored = [[0.0; 3]; 4];
+        while index < n {
+            let width = (n - index).min(4);
+            for lane in 0..width {
+                let v = self.point(index + lane);
+                stored[lane] = [
+                    m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+                    m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+                    m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+                ];
+            }
+            if !self.accumulate(&stored[..width], cap, &mut total) {
+                return None;
+            }
+            index += width;
         }
         Some((total / n as f64).sqrt())
     }
@@ -906,8 +1044,11 @@ pub fn complete_orbits_about(
     for a in 0..n {
         let r = rel(a);
         for (i, p) in chosen.iter().enumerate() {
-            let d = ((r[0] - p[0]).powi(2) + (r[1] - p[1]).powi(2) + (r[2] - p[2]).powi(2)).sqrt();
-            pairs.push((d, a, i));
+            // Squared length sorts in the same order as the length, and a
+            // stable sort keeps an equal pair where it was. The root is
+            // taken only for the pairs that are actually assigned.
+            let d2 = (r[0] - p[0]).powi(2) + (r[1] - p[1]).powi(2) + (r[2] - p[2]).powi(2);
+            pairs.push((d2, a, i));
         }
     }
     pairs.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -926,7 +1067,7 @@ pub fn complete_orbits_about(
         for k in 0..3 {
             out[3 * a + k] = c[k] + chosen[i][k];
         }
-        if d > 1e-9 {
+        if d.sqrt() > 1e-9 {
             moved = true;
         }
         if assigned == n {
@@ -1341,22 +1482,33 @@ mod tests {
     #[test]
     fn the_vector_nearest_image_matches_the_scalar_scan() {
         let cloud = Cloud::from_view(octahedron(1.3).view(), 6);
-        for query in [[0.2, -0.4, 1.1], [3.0, 0.0, 0.0], [0.0, 0.0, 0.0]] {
-            let scalar = cloud.nearest_squared_scalar(query);
-            // The cloud length is the test fixture, and AVX2 is what this host runs.
-            let vector = unsafe { cloud.nearest_squared_avx2(query) };
-            assert_eq!(scalar, vector);
+        let queries = [[0.2, -0.4, 1.1], [3.0, 0.0, 0.0], [0.0, 0.0, 0.0]];
+        let mut batched = [0.0; 3];
+        cloud.nearest_squared_batch(&queries, &mut batched);
+        for (query, got) in queries.iter().zip(batched) {
+            assert_eq!(
+                cloud.nearest_squared_scalar(*query).to_bits(),
+                got.to_bits()
+            );
         }
         let wide = Cloud::from_view(
             Array1::from((0..30).map(|i| (i as f64) * 0.17).collect::<Vec<_>>()).view(),
             10,
         );
-        let query = [1.0, 2.0, 3.0];
-        assert_eq!(
-            wide.nearest_squared_scalar(query),
-            // Ten points so the scan has a vector body and a scalar tail.
-            unsafe { wide.nearest_squared_avx2(query) }
-        );
+        // Ten points so the scan has a vector body and a scalar tail, and
+        // five images so one batch is full and one is a remainder.
+        let images = [
+            [1.0, 2.0, 3.0],
+            [0.0, 0.0, 0.0],
+            [-1.0, 0.5, 0.25],
+            [4.0, -2.0, 0.5],
+            [0.3, 0.3, 0.3],
+        ];
+        let mut wide_batched = [0.0; 5];
+        wide.nearest_squared_batch(&images, &mut wide_batched);
+        for (image, got) in images.iter().zip(wide_batched) {
+            assert_eq!(wide.nearest_squared_scalar(*image).to_bits(), got.to_bits());
+        }
     }
 
     fn octahedron(scale: f64) -> Array1<f64> {

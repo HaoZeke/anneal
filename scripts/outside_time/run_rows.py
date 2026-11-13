@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-ROWS = ROOT / "bench" / "outside-time" / "rows.csv"
+DEFAULT_ROWS = ROOT / "bench" / "outside-time" / "rows.csv"
 FIELDS = [
     "system",
     "seed",
@@ -44,6 +44,7 @@ FIELDS = [
 ]
 SEEDS = list(range(2000, 2012))
 LJ75_STOP = -397.492331 + 0.001
+LJ150_STOP = -893.310258 + 0.001
 
 
 def revision() -> str:
@@ -52,17 +53,17 @@ def revision() -> str:
     ).strip()
 
 
-def load_rows() -> list[dict[str, str]]:
-    if not ROWS.exists():
+def load_rows(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
         return []
-    with ROWS.open(newline="") as handle:
+    with path.open(newline="") as handle:
         return list(csv.DictReader(handle))
 
 
-def append_row(row: dict[str, str]) -> None:
-    ROWS.parent.mkdir(parents=True, exist_ok=True)
-    new_file = not ROWS.exists()
-    with ROWS.open("a", newline="") as handle:
+def append_row(path: Path, row: dict[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    new_file = not path.exists()
+    with path.open("a", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=FIELDS)
         if new_file:
             writer.writeheader()
@@ -190,6 +191,21 @@ def jobs(seed: int, bindir: Path, scratch: Path) -> list[tuple[str, list[str]]]:
             ],
         ),
         ("m80r3", [str(bindir / "h2h_morse"), "run", "m80r3", str(seed)]),
+        ("m80r6", [str(bindir / "h2h_morse"), "run", "m80r6", str(seed)]),
+        (
+            "lj150",
+            [
+                str(bindir / "h2h_seed"),
+                "lj",
+                "150",
+                "0",
+                "4000000",
+                str(seed),
+                "recommended",
+                f"{LJ150_STOP:.6f}",
+                str(scratch / f"lj150-{seed}"),
+            ],
+        ),
     ]
 
 
@@ -205,6 +221,7 @@ def main() -> None:
         default="/tmp/rgpot-build/CppCore/librgpot.so",
     )
     parser.add_argument("--systems", default="au98,au55,sc96-80,lj75,m80r3")
+    parser.add_argument("--rows", type=Path, default=DEFAULT_ROWS)
     parser.add_argument("--seeds", default="")
     args = parser.parse_args()
     wanted = set(args.systems.split(","))
@@ -214,7 +231,8 @@ def main() -> None:
     env = child_env(args.sc_lib)
     scratch = Path("/tmp/outside-time-traces")
     scratch.mkdir(parents=True, exist_ok=True)
-    rows = load_rows()
+    rows_path = args.rows
+    rows = load_rows(rows_path)
     for seed in seeds:
         for system, cmd in jobs(seed, args.bin_dir, scratch):
             if system not in wanted:
@@ -223,9 +241,11 @@ def main() -> None:
                 print(f"skip {system} {seed} {rev[:12]}", flush=True)
                 continue
             text = run(cmd, env)
-            parsed = parse_seed(text) if system == "lj75" else parse_csv_line(text, system)
+            parsed = (
+                parse_seed(text) if system in {"lj75", "lj150"} else parse_csv_line(text, system)
+            )
             row = one_row(system, seed, parsed, rev, host)
-            append_row(row)
+            append_row(rows_path, row)
             rows.append(row)
             print(
                 f"{system} seed {seed} outside {row['outside_us']} us/call "
