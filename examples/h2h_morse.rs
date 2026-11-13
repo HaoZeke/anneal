@@ -54,15 +54,27 @@ fn system_spec(name: &str) -> Option<Spec> {
         "m80r6" => (80, 6.0, -378.333471),
         "m80r10" => (80, 10.0, -344.911381),
         "m80r14" => (80, 14.0, -340.811371),
+        // Cambridge lists 147. 100 and 120 are the Cheng continuation of
+        // that table: 100A, 100D, 100F, 120E and 120H.
+        "m100r3" => (100, 3.0, -927.449542),
+        "m100r6" => (100, 6.0, -488.675685),
+        "m100r14" => (100, 14.0, -439.070547),
+        "m120r6" => (120, 6.0, -599.349084),
+        "m120r14" => (120, 14.0, -537.385657),
+        "m147r6" => (147, 6.0, -760.631007),
+        "m147r14" => (147, 14.0, -672.911144),
         _ => return None,
     };
-    // Lennard-Jones paper list: 4e5 up to 38, 1e6 below 75, 4e6 from 75.
+    // Lennard-Jones paper list through 80 atoms. Above that, 50_000 calls
+    // per atom, which is the M80 budget spread over the cluster.
     let budget = if n <= 38 {
         400_000
     } else if n < 75 {
         1_000_000
-    } else {
+    } else if n <= 80 {
         4_000_000
+    } else {
+        50_000 * n
     };
     Some(Spec {
         n,
@@ -196,6 +208,13 @@ fn cmd_run(args: &[String]) -> i32 {
         start_of(&cfg, spec.n, seed)
     };
     let (outcome, wall, pot_s) = search(&cfg, &spec, &start, seed, budget);
+    if let Ok(path) = std::env::var("H2H_BEST")
+        && let Some(state) = outcome.best_state.as_ref()
+        && let Err(err) = write_coords(&path, state)
+    {
+        eprintln!("best: {err}");
+        return 1;
+    }
     let level = spec.reference + HIT_TOL;
     let hit = outcome.best <= level;
     let at_hit = outcome
@@ -359,6 +378,23 @@ mod tests {
         let m80 = system_spec("m80r14").unwrap();
         assert_eq!((m80.n, m80.budget), (80, 4_000_000));
         assert!((m80.reference + 340.811371).abs() < 1e-12);
+        let m100_3 = system_spec("m100r3").unwrap();
+        assert_eq!((m100_3.n, m100_3.budget), (100, 5_000_000));
+        assert!((m100_3.reference + 927.449542).abs() < 1e-12);
+        let m100_6 = system_spec("m100r6").unwrap();
+        assert!((m100_6.reference + 488.675685).abs() < 1e-12);
+        let m100_14 = system_spec("m100r14").unwrap();
+        assert!((m100_14.reference + 439.070547).abs() < 1e-12);
+        let m120_6 = system_spec("m120r6").unwrap();
+        assert_eq!(m120_6.budget, 6_000_000);
+        assert!((m120_6.reference + 599.349084).abs() < 1e-12);
+        let m120_14 = system_spec("m120r14").unwrap();
+        assert!((m120_14.reference + 537.385657).abs() < 1e-12);
+        let m147_6 = system_spec("m147r6").unwrap();
+        assert_eq!(m147_6.budget, 7_350_000);
+        assert!((m147_6.reference + 760.631007).abs() < 1e-12);
+        let m147_14 = system_spec("m147r14").unwrap();
+        assert!((m147_14.reference + 672.911144).abs() < 1e-12);
         assert!(m80.n >= 6);
     }
 }

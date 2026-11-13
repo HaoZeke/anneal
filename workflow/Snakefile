@@ -300,8 +300,10 @@ rule morse_hop:
 
 
 # Morse against GMIN: M30, M38, M55 and M80 at rho 6 and 14, plus
-# M80 at rho 3. Not part of `rule all`. Twelve seeds, paper budgets.
-# A stored GMIN row is kept when the source revision still matches.
+# M80 at rho 3, and M100, M120 and M147 at rho 6 and 14, plus M100
+# at rho 3. Not part of `rule all`. Twelve seeds. Above 80 atoms the
+# budget is 50_000 calls per atom. A stored GMIN row is kept when
+# the source revision still matches.
 #   snakemake -s workflow/Snakefile morse_gmin
 rule morse_gmin:
     output:

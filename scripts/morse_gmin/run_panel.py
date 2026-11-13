@@ -2,7 +2,8 @@
 # Copyright (c) anneal developers
 """Morse head-to-head of the recommended preset against GMIN.
 
-Systems are M30, M38, M55 and M80 at rho 6 and 14, plus M80 at rho 3.
+Systems are M30, M38, M55 and M80 at rho 6 and 14, plus M80 at rho 3,
+and M100, M120 and M147 at rho 6 and 14, plus M100 at rho 3.
 Twelve seeds, 2000-2011, one core, hostname bench. Both arms use the
 paper budget. A hit is within 0.001 of the Cambridge table. A miss is
 entered at the budget. Medians are Hyndman-Fan type 7. Fisher is the
@@ -37,6 +38,15 @@ SYSTEMS = (
     ("m80r3", 80, 3.0, 4_000_000, -690.577890),
     ("m80r6", 80, 6.0, 4_000_000, -378.333471),
     ("m80r14", 80, 14.0, 4_000_000, -340.811371),
+    # 50_000 calls per atom, the M80 paper budget. Cambridge lists 147.
+    # 100 and 120 are the Cheng continuation of that table.
+    ("m100r3", 100, 3.0, 5_000_000, -927.449542),
+    ("m100r6", 100, 6.0, 5_000_000, -488.675685),
+    ("m100r14", 100, 14.0, 5_000_000, -439.070547),
+    ("m120r6", 120, 6.0, 6_000_000, -599.349084),
+    ("m120r14", 120, 14.0, 6_000_000, -537.385657),
+    ("m147r6", 147, 6.0, 7_350_000, -760.631007),
+    ("m147r14", 147, 14.0, 7_350_000, -672.911144),
 )
 SEEDS = tuple(range(2000, 2012))
 GMIN_REV = "aac1548a8aec13b53ad12a8d6904625081685d2e"
@@ -363,14 +373,20 @@ def write_summary(path: Path, rows: list[dict[str, str]]) -> None:
         writer.writerows(rows)
 
 
-def run_anneal(binary: Path, name: str, seed: int, budget: int, revision: str) -> dict[str, str]:
+def run_anneal(
+    binary: Path, name: str, seed: int, budget: int, revision: str, work: Path
+) -> dict[str, str]:
+    work.mkdir(parents=True, exist_ok=True)
+    env = run_env(budget)
+    env["H2H_BEST"] = str(work / "best.xyz")
     proc = subprocess.run(
         ["taskset", "-c", "0", str(binary), "run", name, str(seed)],
         check=False,
         capture_output=True,
         text=True,
-        env=run_env(budget),
+        env=env,
     )
+    (work / "log").write_text(proc.stdout + proc.stderr)
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr[-500:] or proc.stdout[-500:])
     return anneal_line(proc.stdout, name, revision)
@@ -452,10 +468,19 @@ def self_test() -> None:
         "m80r3",
         "m80r6",
         "m80r14",
+        "m100r3",
+        "m100r6",
+        "m100r14",
+        "m120r6",
+        "m120r14",
+        "m147r6",
+        "m147r14",
     ]:
         raise SystemExit(f"systems {names}")
     if spec("m30r6")[3] != 400_000 or spec("m80r3")[3] != 4_000_000:
         raise SystemExit("budgets")
+    if spec("m100r6")[3] != 5_000_000 or spec("m147r14")[3] != 7_350_000:
+        raise SystemExit("large budgets")
     print("ok")
 
 
@@ -509,7 +534,14 @@ def main() -> int:
         for seed in seeds:
             if args.arm in ("anneal", "both") and (name, "anneal", seed) not in done:
                 print(f"anneal {name} {seed}", flush=True)
-                row = run_anneal(binary, name, seed, budget, revision)
+                row = run_anneal(
+                    binary,
+                    name,
+                    seed,
+                    budget,
+                    revision,
+                    args.work / name / f"anneal-{seed}",
+                )
                 rows.append(row)
                 done[(name, "anneal", seed)] = row
                 write_rows(seeds_path, rows)
