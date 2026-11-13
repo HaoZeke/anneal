@@ -4459,7 +4459,7 @@ where
             let mut current = best_state;
             let mut current_e = ledger.best;
             let (group_a, group_b) = species_groups(species);
-            for _round in 0..3 {
+            'rounds: for _round in 0..3 {
                 if ledger.remaining() == 0 {
                     break;
                 }
@@ -4479,6 +4479,12 @@ where
                             swapped.swap(3 * i + axis, 3 * j + axis);
                         }
                         let (eq, xq) = relax(ledger, swapped.view(), cfg.relax_steps);
+                        if species_wide && !cfg!(feature = "rgsaddle") {
+                            // One exchange evaluation can spend the budget.
+                            // Further swaps are not a stand-in for the
+                            // missing constant-energy escape.
+                            break 'rounds;
+                        }
                         if !quench_is_sane(cfg, eq, xq.view()) || !(eq < current_e - 1e-6) {
                             continue;
                         }
@@ -6273,6 +6279,16 @@ where
                 hmc_trial = Some(swapped);
                 species_escape_trial = true;
             }
+        }
+        // The exchange above may have spent the budget. That end is a
+        // budget stop. When the budget remains, an uncompiled escape still
+        // stops the run: the exchange is not a kick that continues it.
+        if species_wide && !cfg!(feature = "rgsaddle") {
+            if ledger.remaining() == 0 || ledger.stopped() {
+                break HopStop::of_closed(ledger);
+            }
+            nve_unavailable = true;
+            break HopStop::NveUnavailable;
         }
         // A large diameter ratio makes an all-pairs identity exchange climb
         // out of the funnel (Sicher, Mohr, Goedecker). The ordinary proposal
