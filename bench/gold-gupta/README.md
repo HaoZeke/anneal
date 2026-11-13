@@ -29,3 +29,16 @@ The wall-time move is outside the potential. Median inside time at 75 atoms is 2
 Cambridge publishes pure Gupta gold at 38 and 55 only. The Gupta pages are Zn, Cd, Pb and Na. Garzón's Au75 binding near 272 eV and Schebarchov's 2018 landscape use other parameter rows (Au38 there is not −130.540). Xue, Xu, Wang and Chen, with this row (A 0.2061, ξ 1.790, p 10.229, q 4.036), tabulate N = 100–200 and not 75 or 98; their N = 100 minimum is −353.126772, −3.531 eV per atom, next to this Au98 value of −3.530 eV per atom. No published minimum with these parameters is lower than −263.27183577 or −345.98489186.
 
 The close-packed and polyicosahedral cuts, quenched on this potential, land at −263.04663180 for Au75 and −343.52066017 for Au98. Seed 2007 stops on that Au75 cut. The other eleven seeds reach −263.27183577, which those cuts do not. The shared value is a lower minimum than the cuts, not the cut itself.
+
+`b81e62a6e8fe` is that same search with the two-shell Mackay cut empty when it cannot hold the cluster, instead of returned and then skipped. Au75 and Au98 at 4_000_000 calls, seeds 2000–2011, hostname bench:
+
+| Revision | System | Hits | Median calls | Inside (s) | Outside (s) | Median best |
+| --- | --- | --- | --- | --- | --- | --- |
+| b81e62a6e8fe | Au75 | 0/12 | 4000000 | 239.913 | 10.679 | −263.27183577 |
+| b81e62a6e8fe | Au98 | 0/12 | 4000000 | 394.499 | 176.434 | −345.98489186 |
+
+There is no Cambridge energy at these sizes, so a hit is not scored. Eleven Au75 seeds are −263.27183577 and seed 2007 is −263.04663180. All twelve Au98 seeds are −345.98489186. Inside µs is 59.98 and 98.62; outside µs is 2.67 and 44.11.
+
+The Mackay offer runs only inside the labelled-core block, which requires `cfg.species`; Lennard-Jones, Morse and Sutton-Chen use `Config::recommended` and leave species unset, so that block never runs for them.
+
+`c21f052c020f1e2d7696fd89ce96e2b9ae8f2024` is `docs: the coarse Au55 taboo merge is doing useful work`. The Au75 outside time falls from 101.2 s on that commit to 9.9 s on `f2a628c0157b` in `8fe94689` (`fix: trace each common-neighbour trail once`), which expands each `(point, used bonds)` state once instead of pushing every continuation of the trail between quenches. That commit is already on this develop, the inside time stays about 232 s, and the Mackay cut does not touch it.
