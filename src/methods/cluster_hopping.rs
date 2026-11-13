@@ -2621,6 +2621,65 @@ fn polishes_unlike_pairs(cfg: &Config) -> bool {
         .is_some_and(|species| species_count(species) >= 2)
 }
 
+/// Downhill unlike-pair exchanges on a fixed geometry.
+///
+/// An accepted exchange keeps the swapped coordinates. Quenching each one
+/// moves the sites, and the ordering then leaves the geometry it was
+/// labelling: a scrambled homotop of a Pt–Cu minimum falls short of that
+/// minimum when every exchange is quenched, and the unrelaxed sweep
+/// returns to it. `evaluate` returns `None` when the budget is spent.
+/// The result is a permutation of the input sites.
+fn descend_unlike_labels<F>(
+    mut current: Array1<f64>,
+    mut energy: f64,
+    species: &[u32],
+    mut evaluate: F,
+) -> (f64, Array1<f64>)
+where
+    F: FnMut(ArrayView1<f64>) -> Option<f64>,
+{
+    let n = species.len();
+    if n < 2 || current.len() < 3 * n || !energy.is_finite() {
+        return (energy, current);
+    }
+    let mut distinct = false;
+    for label in species.iter().skip(1) {
+        if *label != species[0] {
+            distinct = true;
+            break;
+        }
+    }
+    if !distinct {
+        return (energy, current);
+    }
+    loop {
+        let mut gained = false;
+        for i in 0..n {
+            for j in (i + 1)..n {
+                if species[i] == species[j] {
+                    continue;
+                }
+                let mut swapped = current.clone();
+                for axis in 0..3 {
+                    swapped.swap(3 * i + axis, 3 * j + axis);
+                }
+                let Some(trial) = evaluate(swapped.view()) else {
+                    return (energy, current);
+                };
+                if trial < energy - 1e-6 {
+                    current = swapped;
+                    energy = trial;
+                    gained = true;
+                }
+            }
+        }
+        if !gained {
+            break;
+        }
+    }
+    (energy, current)
+}
+
 fn species_groups(species: &[u32]) -> (Vec<usize>, Vec<usize>) {
     let mut labels = Vec::new();
     for label in species {
@@ -3598,51 +3657,38 @@ where
             cage_edit = false;
             new_incumbent = true;
         }
-        // Every unlike pair, quenched, kept when it is lower. One random
-        // exchange every fourth hop does not finish the ordering. Absent
-        // unless two labels are present, so an unlabelled chain is unchanged.
-        // A molecular or rigid library keeps its atoms inside a body.
+        // Unlike-pair exchanges on the fixed sites of a new minimum, then
+        // one quench of that ordering. Quenching every exchange moves the
+        // sites and the sweep leaves the geometry. Absent unless two
+        // labels are present, so an unlabelled chain is unchanged. A
+        // molecular or rigid library keeps its atoms inside a body.
         if polishes_unlike_pairs(cfg)
             && ledger.best.is_finite()
             && (polished_best.is_nan() || ledger.best < polished_best - 1e-8)
             && let Some(best_state) = ledger.best_state.clone()
         {
             let species = cfg.species.as_deref().expect("a binary polish has species");
-            let mut current = best_state;
-            let mut current_e = ledger.best;
-            let (group_a, group_b) = species_groups(species);
-            for _round in 0..3 {
+            let held = ledger.best;
+            let (ordered_e, ordered) = descend_unlike_labels(best_state, held, species, |point| {
                 if ledger.remaining() == 0 {
-                    break;
+                    return None;
                 }
-                let mut gained = false;
-                let mut tried = 0usize;
-                'pairs: for &i in &group_a {
-                    for &j in &group_b {
-                        if ledger.remaining() == 0 || tried >= 800 {
-                            break 'pairs;
-                        }
-                        tried += 1;
-                        let mut swapped = current.clone();
-                        for axis in 0..3 {
-                            swapped.swap(3 * i + axis, 3 * j + axis);
-                        }
-                        let (eq, xq) = relax(ledger, swapped.view(), cfg.relax_steps);
-                        if !quench_is_sane(cfg, eq, xq.view()) || !(eq < current_e - 1e-6) {
-                            continue;
-                        }
-                        let gradient = record_quenched_answer(
-                            cfg,
-                            ledger,
-                            &mut grad,
-                            eq,
-                            xq.view(),
-                            &mut unconverged_records,
-                        );
-                        if gradient.is_none() && grad.is_some() {
-                            continue;
-                        }
-                        let from_basin = identity.basin_of(current.view());
+                let (raw, _) = relax(ledger, point, 0);
+                raw.is_finite().then_some(raw)
+            });
+            if ordered_e < held - 1e-6 && ledger.remaining() > 0 {
+                let (eq, xq) = relax(ledger, ordered.view(), cfg.relax_steps);
+                if quench_is_sane(cfg, eq, xq.view()) && eq < held - 1e-6 {
+                    let gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        eq,
+                        xq.view(),
+                        &mut unconverged_records,
+                    );
+                    if gradient.is_some() || !gradient_required {
+                        let from_basin = identity.basin_of(ordered.view());
                         let reached = identity.basin_of(xq.view());
                         adopt_minimum!(
                             eq,
@@ -3654,13 +3700,7 @@ where
                             Some("homotop"),
                             hops
                         );
-                        current = x.clone();
-                        current_e = e;
-                        gained = true;
                     }
-                }
-                if !gained {
-                    break;
                 }
             }
             polished_best = ledger.best;
@@ -8578,6 +8618,93 @@ mod tests {
         let binary = Config::recommended(6).with_species(vec![29, 29, 29, 79, 79, 79], None);
         assert!(polishes_unlike_pairs(&binary));
         assert!(!polishes_unlike_pairs(&Config::recommended(6)));
+    }
+
+    /// One exchange then a quench leaves the sites. The ordering step
+    /// itself only permutes them, and it stops at a single-swap minimum.
+    #[test]
+    fn an_unrelaxed_exchange_orders_a_scrambled_binary() {
+        let pot = crate::potentials::Gupta::platinum_copper(2, 2);
+        let sites = [
+            [0.0, 0.0, 0.0],
+            [2.55, 0.15, 0.0],
+            [1.10, 2.40, 0.20],
+            [0.35, 0.90, 2.45],
+        ];
+        let place = |perm: [usize; 4]| {
+            let mut x = Array1::zeros(12);
+            for (atom, &site) in perm.iter().enumerate() {
+                for k in 0..3 {
+                    x[3 * atom + k] = sites[site][k];
+                }
+            }
+            x
+        };
+        let energy = |x: ArrayView1<f64>| pot.value_and_gradient(x).0;
+        let mut perms = Vec::new();
+        let mut perm = [0usize, 1, 2, 3];
+        loop {
+            perms.push(perm);
+            let mut i = 3;
+            while i > 0 && perm[i - 1] > perm[i] {
+                i -= 1;
+            }
+            if i == 0 {
+                break;
+            }
+            let mut j = 3;
+            while perm[j] < perm[i - 1] {
+                j -= 1;
+            }
+            perm.swap(i - 1, j);
+            perm[i..].reverse();
+        }
+        let species = [78u32, 78, 29, 29];
+        let best = perms
+            .iter()
+            .map(|perm| energy(place(*perm).view()))
+            .fold(f64::INFINITY, f64::min);
+        let start = place([0, 2, 1, 3]);
+        let start_e = energy(start.view());
+        let mut calls = 0usize;
+        let (ordered_e, ordered) = descend_unlike_labels(start.clone(), start_e, &species, |x| {
+            calls += 1;
+            Some(energy(x))
+        });
+        assert!(calls > 0, "the scrambled labelling was not scored");
+        assert!(
+            (ordered_e - best).abs() < 1e-8,
+            "ordered {ordered_e} best {best}"
+        );
+        for atom in 0..4 {
+            let hit = (0..4).any(|other| {
+                (0..3).all(|k| (ordered[3 * atom + k] - start[3 * other + k]).abs() < 1e-12)
+            });
+            assert!(hit, "atom {atom} is not on an input site");
+        }
+        for i in 0..4 {
+            for j in (i + 1)..4 {
+                if species[i] == species[j] {
+                    continue;
+                }
+                let mut swapped = ordered.clone();
+                for k in 0..3 {
+                    swapped.swap(3 * i + k, 3 * j + k);
+                }
+                assert!(
+                    energy(swapped.view()) > ordered_e - 1e-6,
+                    "a single swap still improved the ordering"
+                );
+            }
+        }
+        let mut mono_calls = 0usize;
+        let mono = Array1::zeros(12);
+        let (_, mono_out) = descend_unlike_labels(mono.clone(), 0.0, &[8, 8, 8, 8], |_| {
+            mono_calls += 1;
+            Some(-1.0)
+        });
+        assert_eq!(mono_calls, 0);
+        assert_eq!(mono_out, mono);
     }
 
     #[test]
