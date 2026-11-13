@@ -1264,7 +1264,56 @@ fn repair(x: &mut Array1<f64>, n: usize, min_sep: f64) {
 /// finite one, so this is the same value as taking the square root of every
 /// pair and keeping the lesser result.
 pub fn min_pair_distance(x: ArrayView1<f64>) -> f64 {
-    minimum_pair_square(x).sqrt()
+    if let Some(distance) = recall_pair_distance(x) {
+        return distance;
+    }
+    let distance = minimum_pair_square(x).sqrt();
+    remember_pair_distance(x, distance);
+    distance
+}
+
+/// A hop asks for this distance several times on one geometry: the overlap
+/// gate, the separation repair, and the quench check. The square-root scan
+/// is the whole cost, and the coordinates have not moved between those asks.
+struct PairDistance {
+    bits: Vec<u64>,
+    distance: f64,
+}
+
+std::thread_local! {
+    static PAIR_DISTANCES: std::cell::RefCell<Vec<PairDistance>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn same_coordinates(bits: &[u64], x: ArrayView1<f64>) -> bool {
+    bits.len() == x.len()
+        && bits
+            .iter()
+            .zip(x.iter())
+            .all(|(bits, value)| *bits == value.to_bits())
+}
+
+fn recall_pair_distance(x: ArrayView1<f64>) -> Option<f64> {
+    PAIR_DISTANCES.with(|slot| {
+        slot.borrow()
+            .iter()
+            .rev()
+            .find(|saved| same_coordinates(&saved.bits, x))
+            .map(|saved| saved.distance)
+    })
+}
+
+fn remember_pair_distance(x: ArrayView1<f64>, distance: f64) {
+    PAIR_DISTANCES.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.len() == 8 {
+            slot.remove(0);
+        }
+        slot.push(PairDistance {
+            bits: x.iter().map(|value| value.to_bits()).collect(),
+            distance,
+        });
+    });
 }
 
 /// Whether any pair is at most `limit` apart.
