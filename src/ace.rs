@@ -672,12 +672,17 @@ fn d_from_c_reused(c: &[f64], l_max: usize) -> Array2<f64> {
     // sides of the difference. Finite values cancel to +0; a non-finite value
     // cancels to NaN, which is what subtracting the two contractions produces.
     let mut base = vec![0.0; n_b];
+    // Sum of each span up to, but not including, one term. A coefficient's
+    // first dependent coupling is where the two shifts diverge; everything
+    // before that is this prefix for both of them.
+    let mut before = vec![0.0; plan.terms.len() * n_max];
     for n in 0..n_max {
         for (k, &(start, len)) in plan.spans.iter().enumerate() {
             let terms = &plan.terms[start as usize..(start + len) as usize];
             let mut acc = 0.0;
             for (offset, term) in terms.iter().enumerate() {
                 let ti = start as usize + offset;
+                before[ti * n_max + n] = acc;
                 acc += term.g * cached[ti * n_max + n];
             }
             base[n * n_trips + k] = acc;
@@ -706,7 +711,7 @@ fn d_from_c_reused(c: &[f64], l_max: usize) -> Array2<f64> {
             }
         }
         for hit in &info.spans {
-            let (acc_p, acc_m) = span_pair(&row_p, &row_m, &cached, plan, n_star, hit);
+            let (acc_p, acc_m) = span_pair(&row_p, &row_m, &cached, &before, plan, n_star, hit);
             let r = n_star * n_trips + hit.span as usize;
             j[[r, k]] = (acc_p - acc_m) / (2.0 * eps);
         }
@@ -727,6 +732,7 @@ fn span_pair(
     row_p: &[(f64, f64)],
     row_m: &[(f64, f64)],
     cached: &[f64],
+    before: &[f64],
     plan: &ContractionPlan,
     n_star: usize,
     hit: &SpanHits,
@@ -735,10 +741,13 @@ fn span_pair(
     let k = hit.span as usize;
     let (start, len) = plan.spans[k];
     let terms = &plan.terms[start as usize..(start + len) as usize];
-    let mut acc_p = 0.0;
-    let mut acc_m = 0.0;
+    let first = hit.terms[0] as usize;
+    let ti0 = start as usize + first;
+    // Same running total the full walk would hold just before `first`.
+    let mut acc_p = before[ti0 * n_max + n_star];
+    let mut acc_m = acc_p;
     let mut dependent = 0usize;
-    for (offset, term) in terms.iter().enumerate() {
+    for (offset, term) in terms.iter().enumerate().skip(first) {
         let ti = start as usize + offset;
         let g = term.g;
         if dependent < hit.terms.len() && hit.terms[dependent] as usize == offset {

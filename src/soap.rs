@@ -907,6 +907,63 @@ fn accumulate_dp(
     dc: f64,
     col: usize,
 ) {
+    // n_max = 3 is the slab. A radial pair that does not read this n has
+    // derivative +0. The column starts at +0, so that pair is not added.
+    // The pairs that do read n are added in the scan's order.
+    if spec.n_max == 3 {
+        accumulate_dp_n3(j, row0, spec, n_lm, c, n, lm, dc, col);
+    } else {
+        accumulate_dp_scan(j, row0, spec, n_lm, c, n, lm, dc, col);
+    }
+}
+
+fn accumulate_dp_n3(
+    j: &mut Array2<f64>,
+    row0: usize,
+    spec: SoapSpec,
+    n_lm: usize,
+    c: &[f64],
+    n: usize,
+    lm: usize,
+    dc: f64,
+    col: usize,
+) {
+    let l = lm_to_l(lm);
+    let l_stride = spec.l_max + 1;
+    let c0 = c[lm];
+    let c1 = c[n_lm + lm];
+    let c2 = c[2 * n_lm + lm];
+    match n {
+        0 => {
+            j[[row0 + l, col]] += 2.0 * c0 * dc;
+            j[[row0 + l_stride + l, col]] += dc * c1;
+            j[[row0 + 2 * l_stride + l, col]] += dc * c2;
+        }
+        1 => {
+            j[[row0 + l_stride + l, col]] += c0 * dc;
+            j[[row0 + 3 * l_stride + l, col]] += 2.0 * c1 * dc;
+            j[[row0 + 4 * l_stride + l, col]] += dc * c2;
+        }
+        2 => {
+            j[[row0 + 2 * l_stride + l, col]] += c0 * dc;
+            j[[row0 + 4 * l_stride + l, col]] += c1 * dc;
+            j[[row0 + 5 * l_stride + l, col]] += 2.0 * c2 * dc;
+        }
+        _ => debug_assert!(false, "n_max 3 has radial index 0, 1, or 2"),
+    }
+}
+
+fn accumulate_dp_scan(
+    j: &mut Array2<f64>,
+    row0: usize,
+    spec: SoapSpec,
+    n_lm: usize,
+    c: &[f64],
+    n: usize,
+    lm: usize,
+    dc: f64,
+    col: usize,
+) {
     // p_{n n' l} = Σ_m c_{n lm} c_{n' lm}. One (l, m) touches only the
     // features of that l. The packed index of (na, np, l) is the same
     // place the scan over every l used to write, and a zero derivative
@@ -4712,6 +4769,33 @@ mod tests {
             }
         }
         (y, dy)
+    }
+
+    #[test]
+    fn the_three_radial_scatter_matches_the_pair_scan_bit_for_bit() {
+        let spec = SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: 1.0,
+        };
+        let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
+        let mut c = vec![0.0; spec.n_max * n_lm];
+        for (i, slot) in c.iter_mut().enumerate() {
+            *slot = ((i * 17) % 23) as f64 * 0.07 - 0.4;
+        }
+        c[0] = -0.0;
+        let mut fast = Array2::<f64>::zeros((spec.dim(), 3).f());
+        let mut scan = fast.clone();
+        for n in 0..3 {
+            for lm in 0..n_lm {
+                let dc = ((n * 50 + lm) % 11) as f64 * 0.01 - 0.03;
+                accumulate_dp_n3(&mut fast, 0, spec, n_lm, &c, n, lm, dc, n);
+                accumulate_dp_scan(&mut scan, 0, spec, n_lm, &c, n, lm, dc, n);
+            }
+        }
+        for (i, (a, b)) in fast.iter().zip(scan.iter()).enumerate() {
+            assert_eq!(a.to_bits(), b.to_bits(), "scatter {i}: {a} vs {b}");
+        }
     }
 
     fn pt111_heptamer() -> (Array1<f64>, Vec<u32>) {

@@ -233,6 +233,153 @@ impl PairPotential {
         }
         (e, g)
     }
+
+    /// Energy and gradient, reusing pair terms between atoms marked held.
+    ///
+    /// A held atom is one the caller pins. Its pairs with other held atoms
+    /// keep the value from the first time those coordinates appear, and that
+    /// value is added in the same `i < j` place as a fresh pair. The gradient
+    /// of a held atom is left at zero: the caller discards it. Every other
+    /// pair is the ordinary term, in the ordinary order.
+    pub fn value_and_gradient_held(
+        &self,
+        x: ArrayView1<f64>,
+        cache: &mut HeldPairCache,
+    ) -> (f64, Array1<f64>) {
+        let n = self.n_points;
+        debug_assert_eq!(cache.n, n);
+        let mut energy = 0.0;
+        let mut gradient = Array1::zeros(x.len());
+        let Some(coordinates) = x.as_slice() else {
+            return self.value_and_gradient(x);
+        };
+        cache.refresh(self.kind, coordinates);
+        let g = gradient
+            .as_slice_mut()
+            .expect("owned gradient is contiguous");
+        for i in 0..n {
+            let base_i = 3 * i;
+            let mut gradient_i = [g[base_i], g[base_i + 1], g[base_i + 2]];
+            for j in (i + 1)..n {
+                let held_pair = cache.held[i] && cache.held[j];
+                if held_pair {
+                    if let Some(value) = cache.value_at(i, j) {
+                        energy += value;
+                    }
+                    continue;
+                }
+                let base_j = 3 * j;
+                let d = [
+                    coordinates[base_i] - coordinates[base_j],
+                    coordinates[base_i + 1] - coordinates[base_j + 1],
+                    coordinates[base_i + 2] - coordinates[base_j + 2],
+                ];
+                let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+                if r2 <= 0.0 {
+                    continue;
+                }
+                let (value, coefficient) = self.kind.pair(r2);
+                energy += value;
+                for k in 0..3 {
+                    gradient_i[k] += coefficient * d[k];
+                    g[base_j + k] -= coefficient * d[k];
+                }
+            }
+            if !cache.held[i] {
+                g[base_i..base_i + 3].copy_from_slice(&gradient_i);
+            }
+        }
+        (energy, gradient)
+    }
+}
+
+/// Pair values between atoms the caller holds fixed.
+pub struct HeldPairCache {
+    n: usize,
+    held: Vec<bool>,
+    bits: Vec<u64>,
+    /// Upper triangle, index `i * n + j` for `j > i`, both held.
+    values: Vec<f64>,
+    /// False when the pair is inside the cutoff of a zero separation and the
+    /// scalar loop would not add it.
+    live: Vec<bool>,
+    fresh: bool,
+}
+
+impl HeldPairCache {
+    /// `held[i]` is true when atom `i` does not move.
+    pub fn new(n: usize, held: &[bool]) -> Self {
+        let mut mask = vec![false; n];
+        for (i, flag) in held.iter().take(n).enumerate() {
+            mask[i] = *flag;
+        }
+        Self {
+            n,
+            held: mask,
+            bits: vec![0; 3 * n],
+            values: vec![0.0; n * n],
+            live: vec![false; n * n],
+            fresh: false,
+        }
+    }
+
+    fn value_at(&self, i: usize, j: usize) -> Option<f64> {
+        let index = i * self.n + j;
+        self.live[index].then_some(self.values[index])
+    }
+
+    fn refresh(&mut self, kind: PairKind, coordinates: &[f64]) {
+        let n = self.n;
+        let mut moved = false;
+        if !self.fresh {
+            moved = true;
+        } else {
+            for i in 0..n {
+                if !self.held[i] {
+                    continue;
+                }
+                for k in 0..3 {
+                    if coordinates[3 * i + k].to_bits() != self.bits[3 * i + k] {
+                        moved = true;
+                        break;
+                    }
+                }
+                if moved {
+                    break;
+                }
+            }
+        }
+        if !moved {
+            return;
+        }
+        for i in 0..n {
+            if !self.held[i] {
+                continue;
+            }
+            for k in 0..3 {
+                self.bits[3 * i + k] = coordinates[3 * i + k].to_bits();
+            }
+            for j in (i + 1)..n {
+                if !self.held[j] {
+                    continue;
+                }
+                let d = [
+                    coordinates[3 * i] - coordinates[3 * j],
+                    coordinates[3 * i + 1] - coordinates[3 * j + 1],
+                    coordinates[3 * i + 2] - coordinates[3 * j + 2],
+                ];
+                let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+                let index = i * n + j;
+                if r2 <= 0.0 {
+                    self.live[index] = false;
+                } else {
+                    self.values[index] = kind.pair(r2).0;
+                    self.live[index] = true;
+                }
+            }
+        }
+        self.fresh = true;
+    }
 }
 
 impl Objective<f64> for PairPotential {
@@ -297,6 +444,57 @@ impl crate::pes_exploration::PesSurface for PairPotential {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn held_pairs_match_the_full_sum_after_the_held_gradient_is_cleared() {
+        let n = 39;
+        let potential = PairPotential::lennard_jones(n);
+        let mut held = vec![false; n];
+        for i in 0..32 {
+            held[i] = true;
+        }
+        let mut x = Array1::from_shape_fn(3 * n, |index| {
+            let point = index / 3;
+            let axis = index % 3;
+            ((point * 13 + axis * 5) as f64 * 0.17).sin() * 2.4 + point as f64 * 0.05
+        });
+        let mut cache = HeldPairCache::new(n, &held);
+        let (energy, mut gradient) = potential.value_and_gradient_held(x.view(), &mut cache);
+        let (full_energy, mut full_gradient) = potential.value_and_gradient(x.view());
+        assert_eq!(energy.to_bits(), full_energy.to_bits());
+        for i in 0..n {
+            if held[i] {
+                for k in 0..3 {
+                    gradient[3 * i + k] = 0.0;
+                    full_gradient[3 * i + k] = 0.0;
+                }
+            }
+        }
+        for (got, want) in gradient.iter().zip(full_gradient.iter()) {
+            assert_eq!(got.to_bits(), want.to_bits());
+        }
+        for i in 32..n {
+            x[3 * i] += 0.02 * (i as f64);
+        }
+        let (energy, mut gradient) = potential.value_and_gradient_held(x.view(), &mut cache);
+        let (full_energy, mut full_gradient) = potential.value_and_gradient(x.view());
+        assert_eq!(
+            energy.to_bits(),
+            full_energy.to_bits(),
+            "moved mobile atoms"
+        );
+        for i in 0..n {
+            if held[i] {
+                for k in 0..3 {
+                    gradient[3 * i + k] = 0.0;
+                    full_gradient[3 * i + k] = 0.0;
+                }
+            }
+        }
+        for (got, want) in gradient.iter().zip(full_gradient.iter()) {
+            assert_eq!(got.to_bits(), want.to_bits(), "moved mobile gradient");
+        }
+    }
 
     #[test]
     fn contiguous_pair_kernel_matches_the_ordered_reference_bit_for_bit() {
