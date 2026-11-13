@@ -1610,6 +1610,10 @@ impl Config {
         cfg.soap_mode = SoapProposalMode::Off;
         cfg.angular_moves = false;
         cfg.allocate_moves = true;
+        // The shell arms and the chain reversal compete. Payment is an
+        // improvement of the incumbent, the allocator's floor keeps every
+        // arm in the draw, and a stall leaves from another stored basin.
+        cfg.improvement_rewards = true;
         cfg.relax_steps = 80;
         cfg.screen_steps = 15;
         cfg

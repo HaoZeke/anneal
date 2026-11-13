@@ -2646,6 +2646,8 @@ mod move_scaling_tests {
             names,
             ["rkick", "rtrans", "rrot", "rtrans1", "rreor", "rreloc", "rcycle", "rchain"]
         );
+        assert!(cfg.improvement_rewards);
+        assert!(!Config::with_scales(2, 1.0, 1.0).improvement_rewards);
         assert!(cfg.move_library.is_rigid_body());
         assert_eq!(cfg.n_points, 6);
     }
