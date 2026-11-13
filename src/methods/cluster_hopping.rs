@@ -1727,6 +1727,226 @@ fn growth_held(held: Option<f64>, incumbent: f64, skipped: u32, n_points: usize)
     stall_growth_waits(held, incumbent) && (n_points < 98 || skipped < GROWTH_RETRY_LEAVES)
 }
 
+/// Chains kept beside the live one.
+const POPULATION_SEATS: usize = 4;
+/// Hops a chain runs before the population looks at it.
+const POPULATION_SLICE: usize = 40;
+/// Histogram distance below which two chains count as the same funnel.
+const SAME_FUNNEL: f64 = 0.05;
+/// Stored histograms a plateau restart stays away from.
+const VISITED_CAP: usize = 32;
+
+struct PopulationSeat {
+    energy: f64,
+    state: Array1<f64>,
+    histogram: [f64; 6],
+}
+
+enum PopulationMove {
+    Stay,
+    Reseed,
+    Grow,
+    Rotate { state: Array1<f64>, energy: f64 },
+}
+
+fn histogram_distance(left: [f64; 6], right: [f64; 6]) -> f64 {
+    left.iter()
+        .zip(right)
+        .map(|(a, b)| (a - b) * (a - b))
+        .sum::<f64>()
+        .sqrt()
+}
+
+fn population_decision(
+    seats: &mut Vec<PopulationSeat>,
+    turn: &mut usize,
+    energy: f64,
+    here: ArrayView1<f64>,
+    histogram: [f64; 6],
+) -> PopulationMove {
+    if histogram.iter().all(|bin| *bin == 0.0) {
+        return PopulationMove::Stay;
+    }
+    if seats
+        .iter()
+        .any(|seat| histogram_distance(histogram, seat.histogram) < SAME_FUNNEL)
+    {
+        return PopulationMove::Reseed;
+    }
+    if seats.len() + 1 < POPULATION_SEATS {
+        seats.push(PopulationSeat {
+            energy,
+            state: here.to_owned(),
+            histogram,
+        });
+        return PopulationMove::Grow;
+    }
+    let index = *turn % seats.len();
+    *turn += 1;
+    let seat = &mut seats[index];
+    let state = std::mem::replace(&mut seat.state, here.to_owned());
+    let loaded = std::mem::replace(&mut seat.energy, energy);
+    seat.histogram = histogram;
+    PopulationMove::Rotate {
+        state,
+        energy: loaded,
+    }
+}
+
+fn scramble_state<R: Rng + ?Sized>(cfg: &Config, x: ArrayView1<f64>, rng: &mut R) -> Array1<f64> {
+    if cfg.move_library.is_rigid_body() {
+        ClusterMove::HalfSpace {
+            n: cfg.n_points,
+            bodies: cfg.n_points,
+            groups: Vec::new(),
+            angle: std::f64::consts::FRAC_PI_2 + rng.random::<f64>() * std::f64::consts::FRAC_PI_2,
+        }
+        .propose(x, cfg.temperature, rng)
+    } else {
+        random_cluster_in_radius(
+            cfg.n_points,
+            cfg.start_radius().max(cfg.min_separation),
+            cfg.min_separation,
+            rng,
+        )
+    }
+}
+
+/// Normalised counts of six bond signatures. The vector is a distance, not a
+/// label: no caller branches on which bin is largest.
+fn bond_histogram(x: ArrayView1<f64>, n_points: usize, rigid: bool) -> [f64; 6] {
+    let coords: Vec<[f64; 3]> = if rigid && x.len() >= 6 * n_points {
+        (0..n_points)
+            .map(|i| [x[3 * i], x[3 * i + 1], x[3 * i + 2]])
+            .collect()
+    } else if x.len() >= 3 * n_points && n_points >= 4 {
+        (0..n_points)
+            .map(|i| [x[3 * i], x[3 * i + 1], x[3 * i + 2]])
+            .collect()
+    } else {
+        return [0.0; 6];
+    };
+    let n = coords.len();
+    if n < 4 {
+        return [0.0; 6];
+    }
+    let mut nearest = vec![f64::MAX; n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut distance = 0.0;
+            for k in 0..3 {
+                let delta = coords[i][k] - coords[j][k];
+                distance += delta * delta;
+            }
+            distance = distance.sqrt();
+            nearest[i] = nearest[i].min(distance);
+            nearest[j] = nearest[j].min(distance);
+        }
+    }
+    let mut ordered = nearest.clone();
+    ordered.sort_by(|left, right| left.total_cmp(right));
+    let cutoff = 1.25 * ordered[n / 2];
+    if !(cutoff > 0.0) {
+        return [0.0; 6];
+    }
+    let mut neighbours: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut distance = 0.0;
+            for k in 0..3 {
+                let delta = coords[i][k] - coords[j][k];
+                distance += delta * delta;
+            }
+            if distance.sqrt() < cutoff {
+                neighbours[i].push(j);
+                neighbours[j].push(i);
+            }
+        }
+    }
+    let mut counts = [0.0; 6];
+    let mut bonds = 0.0;
+    for i in 0..n {
+        for &j in &neighbours[i] {
+            if j <= i {
+                continue;
+            }
+            bonds += 1.0;
+            let common: Vec<usize> = neighbours[i]
+                .iter()
+                .copied()
+                .filter(|k| neighbours[j].contains(k))
+                .collect();
+            counts[signature_bin(&common, &neighbours)] += 1.0;
+        }
+    }
+    if bonds > 0.0 {
+        for count in &mut counts {
+            *count /= bonds;
+        }
+    }
+    counts
+}
+
+fn signature_bin(common: &[usize], neighbours: &[Vec<usize>]) -> usize {
+    let rank = common.len();
+    if rank == 0 || rank > 12 {
+        return 5;
+    }
+    let mut degree = vec![Vec::new(); rank];
+    let mut bonds = 0usize;
+    for a in 0..rank {
+        for b in (a + 1)..rank {
+            if neighbours[common[a]].contains(&common[b]) {
+                bonds += 1;
+                degree[a].push(b);
+                degree[b].push(a);
+            }
+        }
+    }
+    let trail = longest_trail(&degree);
+    match (rank, bonds, trail) {
+        (5, 5, 5) => 0,
+        (4, 2, 1) => 1,
+        (4, 2, 2) => 2,
+        (3, 1, 1) => 3,
+        (2, 0, 0) => 4,
+        _ => 5,
+    }
+}
+
+fn longest_trail(degree: &[Vec<usize>]) -> usize {
+    let rank = degree.len();
+    let mut edges: Vec<(usize, usize)> = Vec::new();
+    for a in 0..rank {
+        for &b in &degree[a] {
+            if a < b {
+                edges.push((a, b));
+            }
+        }
+    }
+    if edges.len() > 16 {
+        return 0;
+    }
+    let mut incident: Vec<Vec<(usize, usize)>> = vec![Vec::new(); rank];
+    for (index, (a, b)) in edges.iter().copied().enumerate() {
+        incident[a].push((index, b));
+        incident[b].push((index, a));
+    }
+    let mut best = 0usize;
+    for start in 0..rank {
+        let mut stack = vec![(start, 0u32, 0usize)];
+        while let Some((node, used, length)) = stack.pop() {
+            best = best.max(length);
+            for &(index, next) in &incident[node] {
+                if (used & (1 << index)) == 0 {
+                    stack.push((next, used | (1 << index), length + 1));
+                }
+            }
+        }
+    }
+    best
+}
+
 /// The arm a hop plays.
 ///
 /// A contextual decision, when one was built, stays in front of this choice:
@@ -1748,6 +1968,11 @@ fn choose_arm<R: Rng + ?Sized>(
     if cfg.arm_selection == ArmSelection::Uniform {
         return rng.random_range(0..n_arms);
     }
+    // Improvement rate, not depth: an accepted step that does not lower the
+    // incumbent is not a payment. The same rule is used for every potential.
+    if cfg.improvement_rate_selection && cfg.allocate_moves {
+        return allocator.select(rng);
+    }
     if cfg.allocate_moves && cfg.depth_reward {
         return depth_allocator.select(rng);
     }
@@ -1764,6 +1989,23 @@ fn search_kernels(cfg: &Config) -> Vec<ClusterMove> {
         kernels = vec![ClusterMove::AllPoints { step: 0.38 }];
     } else if cfg.energy_lattice && cfg.packing_cna_applies() {
         kernels.push(ClusterMove::EnergyLattice);
+    }
+    if !cfg.displacement_only && (cfg.diverse_population || cfg.improvement_rate_selection) {
+        let bodies = if cfg.move_library.is_rigid_body() {
+            cfg.n_points
+        } else {
+            0
+        };
+        let groups = match &cfg.move_library {
+            MoveLibrary::Molecular { groups, .. } => groups.clone(),
+            _ => Vec::new(),
+        };
+        kernels.push(ClusterMove::HalfSpace {
+            n: cfg.n_points,
+            bodies,
+            groups,
+            angle: 0.4,
+        });
     }
     kernels
 }
@@ -3259,6 +3501,14 @@ where
     let mut soft_cache: Option<(f64, Vec<f64>, Vec<Array1<f64>>)> = None;
     // Ring buffer of accepted quenched displacements for the learned proposal.
     let mut cov_buf: Vec<Array1<f64>> = Vec::new();
+    // Several chains, a bond-histogram each. A chain whose histogram falls
+    // on another's is reseeded. The half-space angle moves with that arm's
+    // acceptance. Neither path reads a coordination label.
+    let mut seats: Vec<PopulationSeat> = Vec::new();
+    let mut seat_turn = 0usize;
+    let mut visited: Vec<[f64; 6]> = Vec::new();
+    let mut half_window = 0usize;
+    let mut half_yes = 0usize;
     let mut cov_next = 0usize;
     let mut soft_fired = 0usize;
     let mut soft_recomputes = 0usize;
@@ -3735,8 +3985,8 @@ where
                             })
                         });
                         let candidate_gradient = candidate_gradient.flatten();
-                        let recordable = candidate_sane
-                            && (!gradient_required || candidate_gradient.is_some());
+                        let recordable =
+                            candidate_sane && (!gradient_required || candidate_gradient.is_some());
                         let improved = recordable && candidate_energy < before - 1e-4;
                         if !improved {
                             if !recordable {
@@ -3796,8 +4046,7 @@ where
                             if ledger.remaining() == 0 || ledger.target_reached() {
                                 break;
                             }
-                            let (slide_energy, slid) =
-                                relax(ledger, slide.view(), cfg.relax_steps);
+                            let (slide_energy, slid) = relax(ledger, slide.view(), cfg.relax_steps);
                             if ledger.stopped() {
                                 break;
                             }
@@ -3810,8 +4059,8 @@ where
                                 })
                             });
                             let slide_gradient = slide_gradient.flatten();
-                            let slide_recordable = slide_sane
-                                && (!gradient_required || slide_gradient.is_some());
+                            let slide_recordable =
+                                slide_sane && (!gradient_required || slide_gradient.is_some());
                             let slide_improved =
                                 slide_recordable && slide_energy < ledger.best - 1e-10;
                             if slide_recordable {
@@ -3906,9 +4155,7 @@ where
                 binary_geometry::IcosahedronJoin::Compact,
                 binary_geometry::IcosahedronJoin::Linear,
             ] {
-                grown.push(binary_geometry::polyicosahedral_cut(
-                    n_atoms, join, nearest,
-                ));
+                grown.push(binary_geometry::polyicosahedral_cut(n_atoms, join, nearest));
             }
             grown.push(binary_geometry::mackay_cut(n_atoms, nearest));
             let mut side_rng = StdRng::seed_from_u64(0x0C10_5ED0);
@@ -3976,11 +4223,10 @@ where
                     if side.probe.remaining() == 0 {
                         break;
                     }
-                    let placed = binary_geometry::place_smaller_inside(
-                        candidate.view(),
-                        species,
-                        |label| binary_geometry::label_radius(species, sigma, label),
-                    );
+                    let placed =
+                        binary_geometry::place_smaller_inside(candidate.view(), species, |label| {
+                            binary_geometry::label_radius(species, sigma, label)
+                        });
                     if let Some(seeded) = binary_geometry::arrange(placed, species, &mut side) {
                         arranged.push(seeded);
                     }
@@ -4155,26 +4401,21 @@ where
             // into the same cage; this turn does not.
             if !ledger.stopped() && ledger.remaining() > 0 {
                 let angle = match cfg.move_library {
-                    MoveLibrary::RigidBody { rotate_step, .. } => {
-                        RIGID_SHELL_STEPS * rotate_step
-                    }
+                    MoveLibrary::RigidBody { rotate_step, .. } => RIGID_SHELL_STEPS * rotate_step,
                     _ => 0.0,
                 };
                 let mut turned: Option<(f64, Array1<f64>)> = None;
                 if angle > 0.0 {
                     for axis in 0..3 {
                         let trial = rigid_shell_turn(side_state.view(), cfg.n_points, axis, angle);
-                        let (quenched, relaxed) =
-                            relax(ledger, trial.view(), cfg.relax_steps);
+                        let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                         if quenched.is_finite()
                             && rigid_centres_clear(
                                 relaxed.view(),
                                 cfg.n_points,
                                 0.5 * cfg.min_separation,
                             )
-                            && turned
-                                .as_ref()
-                                .is_none_or(|(held, _)| quenched < *held)
+                            && turned.as_ref().is_none_or(|(held, _)| quenched < *held)
                         {
                             turned = Some((quenched, relaxed));
                         }
@@ -4187,7 +4428,8 @@ where
                     side_state = state;
                     let twist_end = ledger.spent().saturating_add(cage_patience);
                     while ledger.spent() < twist_end && hop_side!(side_rng, side_energy, side_state)
-                    {}
+                    {
+                    }
                 }
             }
             // The shell of the walker is one leave. When it comes up short,
@@ -4243,8 +4485,7 @@ where
                         for axis in 0..3 {
                             let trial =
                                 rigid_shell_turn(side_state.view(), cfg.n_points, axis, angle);
-                            let (quenched, relaxed) =
-                                relax(ledger, trial.view(), cfg.relax_steps);
+                            let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                             if quenched.is_finite()
                                 && rigid_centres_clear(
                                     relaxed.view(),
@@ -4265,7 +4506,8 @@ where
                         let twist_end = ledger.spent().saturating_add(cage_patience);
                         while ledger.spent() < twist_end
                             && hop_side!(side_rng, side_energy, side_state)
-                        {}
+                        {
+                        }
                     }
                 }
             }
@@ -4371,10 +4613,10 @@ where
             // Translation, rotation and cycle reversal leave the oxygen cage
             // where it is. After a thousand hops with no new lowest minimum,
             // the proposals that follow move one molecule onto a missing contact.
-            if matches!(
-                cfg.move_library,
-                MoveLibrary::RigidBody { relocate: true, .. }
-            ) {
+            if matches!(cfg.move_library, MoveLibrary::RigidBody {
+                relocate: true,
+                ..
+            }) {
                 cage_edit = true;
             }
         }
@@ -4422,6 +4664,33 @@ where
                 });
             }
         }
+        if cfg.diverse_population && hops > 0 && hops.is_multiple_of(POPULATION_SLICE) {
+            let histogram =
+                bond_histogram(x.view(), cfg.n_points, cfg.move_library.is_rigid_body());
+            match population_decision(&mut seats, &mut seat_turn, e, x.view(), histogram) {
+                PopulationMove::Stay => {}
+                PopulationMove::Reseed | PopulationMove::Grow => {
+                    let fresh = scramble_state(cfg, x.view(), rng);
+                    let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
+                    if energy.is_finite() && relaxed.len() == x.len() {
+                        e = energy;
+                        x = relaxed;
+                        current_validation_gradient = None;
+                        here = None;
+                        quiet = 0;
+                    }
+                }
+                PopulationMove::Rotate { state, energy } => {
+                    if state.len() == x.len() && energy.is_finite() {
+                        e = energy;
+                        x = state;
+                        current_validation_gradient = None;
+                        here = None;
+                        quiet = 0;
+                    }
+                }
+            }
+        }
         // A fresh cluster on this clock returns to the Mackay icosahedron
         // (Doye, J. Chem. Phys. 111, 8417 (1999)). When the climb is on,
         // the same clock is one directed leave, not that redraw. The hop
@@ -4446,6 +4715,50 @@ where
                     action: "restart".to_owned(),
                     external_calls: 0,
                 });
+            }
+        }
+        if internal_action.is_none() && cfg.diverse_population && call_due {
+            let here_hist =
+                bond_histogram(x.view(), cfg.n_points, cfg.move_library.is_rigid_body());
+            if here_hist.iter().any(|bin| *bin > 0.0) {
+                if visited.len() == VISITED_CAP {
+                    visited.remove(0);
+                }
+                visited.push(here_hist);
+                let mut farthest: Option<(f64, Array1<f64>)> = None;
+                for _ in 0..3 {
+                    if ledger.remaining() == 0 || ledger.stopped() {
+                        break;
+                    }
+                    let fresh = scramble_state(cfg, x.view(), rng);
+                    let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
+                    if !energy.is_finite() || relaxed.len() != x.len() {
+                        continue;
+                    }
+                    let hist = bond_histogram(
+                        relaxed.view(),
+                        cfg.n_points,
+                        cfg.move_library.is_rigid_body(),
+                    );
+                    let distance = visited
+                        .iter()
+                        .map(|known| histogram_distance(hist, *known))
+                        .fold(f64::MAX, f64::min);
+                    if distance < SAME_FUNNEL {
+                        continue;
+                    }
+                    if farthest.as_ref().is_none_or(|best| distance > best.0) {
+                        farthest = Some((distance, relaxed));
+                    }
+                }
+                if let Some((_, state)) = farthest {
+                    charged_at_best = ledger.spent();
+                    internal_action = Some(CheckpointAction::ExternalAdopt {
+                        state,
+                        action: "far-restart".to_owned(),
+                        external_calls: 0,
+                    });
+                }
             }
         }
         if internal_action.is_none() && cfg.escape_on_stall && call_due {
@@ -5232,9 +5545,7 @@ where
             }
             if !sources.is_empty() {
                 let mut side = StdRng::seed_from_u64(
-                    (hops as u64).wrapping_mul(0x9E37_79B9)
-                        ^ ledger.best.to_bits()
-                        ^ 0xFCCC_0517,
+                    (hops as u64).wrapping_mul(0x9E37_79B9) ^ ledger.best.to_bits() ^ 0xFCCC_0517,
                 );
                 let n_atoms = best_state.len() / 3;
                 let two = species_count(species) >= 2;
@@ -5252,7 +5563,8 @@ where
                     if probe.remaining() == 0 {
                         break;
                     }
-                    let grown = crate::lattice::candidate(source, best_state.view(), n_atoms, &mut side);
+                    let grown =
+                        crate::lattice::candidate(source, best_state.view(), n_atoms, &mut side);
                     let grown = if two {
                         moves::place_smaller_inside(grown, species)
                     } else {
@@ -5276,8 +5588,10 @@ where
                                     for axis in 0..3 {
                                         swapped.swap(3 * i + axis, 3 * j + axis);
                                     }
-                                    let (alt_e, alt_x) = relax(&mut probe, swapped.view(), cfg.relax_steps);
-                                    if quench_is_sane(cfg, alt_e, alt_x.view()) && alt_e < eq - 1e-6 {
+                                    let (alt_e, alt_x) =
+                                        relax(&mut probe, swapped.view(), cfg.relax_steps);
+                                    if quench_is_sane(cfg, alt_e, alt_x.view()) && alt_e < eq - 1e-6
+                                    {
                                         eq = alt_e;
                                         xq = alt_x;
                                         gained = true;
@@ -5300,9 +5614,7 @@ where
                     if gradient.is_none() && grad.is_some() {
                         continue;
                     }
-                    let replace = best_alt
-                        .as_ref()
-                        .is_none_or(|(energy, _, _)| eq < *energy);
+                    let replace = best_alt.as_ref().is_none_or(|(energy, _, _)| eq < *energy);
                     if replace {
                         best_alt = Some((eq, xq, gradient));
                     }
@@ -5317,11 +5629,8 @@ where
                         if probe.remaining() == 0 {
                             break;
                         }
-                        let twisted = crate::packing::propose_twin(
-                            best_state.view(),
-                            n_atoms,
-                            &mut side,
-                        );
+                        let twisted =
+                            crate::packing::propose_twin(best_state.view(), n_atoms, &mut side);
                         let (eq, xq) = relax(&mut probe, twisted.view(), cfg.relax_steps);
                         if !quench_is_sane(cfg, eq, xq.view()) {
                             continue;
@@ -5337,9 +5646,7 @@ where
                         if gradient.is_none() && grad.is_some() {
                             continue;
                         }
-                        let replace = best_alt
-                            .as_ref()
-                            .is_none_or(|(energy, _, _)| eq < *energy);
+                        let replace = best_alt.as_ref().is_none_or(|(energy, _, _)| eq < *energy);
                         if replace {
                             best_alt = Some((eq, xq, gradient));
                         }
@@ -6819,8 +7126,8 @@ where
         if skip_basin && accept && !cfg.move_library.is_rigid_body() {
             let old_cv = bias.cv(x.view());
             let new_cv = bias.cv(x_new.view());
-            let biased = (e_new + bias.potential(new_cv.view()))
-                - (e + bias.potential(old_cv.view()));
+            let biased =
+                (e_new + bias.potential(new_cv.view())) - (e + bias.potential(old_cv.view()));
             if biased > e_new - e {
                 accept = false;
             }
@@ -7063,7 +7370,10 @@ where
             // hydrogen-bond cycle, is not evidence the arm is useful.
             // Paying for it fills the draw with that arm. An improvement
             // of the incumbent is the payment.
-            let reward = if cfg.move_library.is_rigid_body() || cfg.improvement_rewards {
+            let reward = if cfg.improvement_rate_selection
+                || cfg.move_library.is_rigid_body()
+                || cfg.improvement_rewards
+            {
                 improved
             } else {
                 improved || (accept && !(cfg.novel_reward && returning))
@@ -7074,6 +7384,22 @@ where
                 arm_accepts[k] += 1;
             }
             arm_best[k] = arm_best[k].min(e_new);
+            if let ClusterMove::HalfSpace { angle, .. } = &mut kernels[k] {
+                half_window += 1;
+                if accept {
+                    half_yes += 1;
+                }
+                if half_window >= 20 {
+                    let rate = half_yes as f64 / half_window as f64;
+                    if rate < 0.25 {
+                        *angle = (*angle * 0.8).max(0.05);
+                    } else if rate > 0.6 {
+                        *angle = (*angle * 1.25).min(std::f64::consts::PI);
+                    }
+                    half_window = 0;
+                    half_yes = 0;
+                }
+            }
             // The quench the construction actually reached, which is the only
             // feedback the posterior gets and the reason it costs nothing
             // extra: this relaxation was paid for by the move regardless.
@@ -8191,18 +8517,15 @@ where
                 // that one active. Each rung keeps its own bias and its own
                 // temperature; only the states move, so a hot rung's crossing
                 // lands in a cold rung that can polish it.
-                chains.insert(
-                    rep,
-                    OccupiedMinimum {
-                        energy: e,
-                        coordinates: x.clone(),
-                        gradient: current_validation_gradient.take(),
-                        history_minimum: history_here,
-                        local_minimum: here,
-                        generation: occupancy_generation,
-                        pending_initial: false,
-                    },
-                );
+                chains.insert(rep, OccupiedMinimum {
+                    energy: e,
+                    coordinates: x.clone(),
+                    gradient: current_validation_gradient.take(),
+                    history_minimum: history_here,
+                    local_minimum: here,
+                    generation: occupancy_generation,
+                    pending_initial: false,
+                });
                 // A placeholder only; the destination rung's own bias is taken
                 // below, so this is never deposited into.
                 biases.insert(
@@ -8871,6 +9194,57 @@ pub fn optimize_with_energy_gradient<'g>(
         energy_grad,
         &mut rng,
     )
+}
+
+#[cfg(test)]
+mod population_tests {
+    use super::*;
+
+    #[test]
+    fn a_half_space_turn_moves_one_side_only() {
+        let points = Array1::from_vec(vec![
+            1.0, 0.1, 0.0, 1.2, 0.2, 0.0, -1.0, 0.1, 0.0, -1.2, -0.2, 0.0,
+        ]);
+        let turned = super::moves::rotate_half(
+            points.view(),
+            4,
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            std::f64::consts::FRAC_PI_2,
+            &[],
+        );
+        for i in 2..4 {
+            for k in 0..3 {
+                assert!(
+                    (turned[3 * i + k] - points[3 * i + k]).abs() < 1e-12,
+                    "the negative half moved"
+                );
+            }
+        }
+        assert!(
+            (turned[0] - points[0]).abs() > 0.1,
+            "the positive half stayed put"
+        );
+    }
+
+    #[test]
+    fn a_chain_on_another_histogram_is_reseeded() {
+        let mut seats = Vec::new();
+        let here = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.9, 0.0, 0.2, 0.2, 0.8,
+        ]);
+        let histogram = [0.2, 0.3, 0.1, 0.1, 0.2, 0.1];
+        assert!(matches!(
+            population_decision(&mut seats, &mut 0, -1.0, here.view(), histogram),
+            PopulationMove::Grow
+        ));
+        assert!(matches!(
+            population_decision(&mut seats, &mut 0, -1.0, here.view(), histogram),
+            PopulationMove::Reseed
+        ));
+        let other = [0.0, 0.8, 0.0, 0.1, 0.1, 0.0];
+        assert!(histogram_distance(histogram, other) > SAME_FUNNEL);
+    }
 }
 
 #[cfg(test)]

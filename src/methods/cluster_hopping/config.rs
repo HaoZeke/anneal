@@ -1074,6 +1074,20 @@ pub struct Config {
     /// low basin other than the one it is in.
     #[serde(skip_serializing_if = "is_false")]
     pub improvement_rewards: bool,
+    /// Draw moves with probability proportional to their improvement rate.
+    ///
+    /// Off by default, where the depth posterior still chooses. On, an arm
+    /// is paid only when it lowers the incumbent, and the floored Thompson
+    /// draw follows that rate. The same switch is used for every potential.
+    #[serde(skip_serializing_if = "is_false")]
+    pub improvement_rate_selection: bool,
+    /// Keep several chains and reseed one that falls into another's basin.
+    ///
+    /// The basin is a bond-histogram distance, not a coordination label.
+    /// A call plateau also restarts from a draw far from the histograms
+    /// already stored. Off by default.
+    #[serde(skip_serializing_if = "is_false")]
+    pub diverse_population: bool,
     /// Relaunch from the incumbent when the chain is this far above it.
     ///
     /// Zero leaves the walk where acceptance put it. A positive gap, in
@@ -1253,6 +1267,8 @@ impl Config {
         // highest-energy occupied site moves onto a vacant site of the
         // lattice the current structure defines. One arm, at every size.
         cfg.energy_lattice = true;
+        cfg.improvement_rate_selection = true;
+        cfg.diverse_population = true;
         cfg
     }
 
@@ -1575,6 +1591,8 @@ impl Config {
             quench_once: false,
             target_energy: None,
             improvement_rewards: false,
+            improvement_rate_selection: false,
+            diverse_population: false,
             incumbent_gap: 0.0,
             relax_steps: 200,
             two_phase: None,
@@ -1641,6 +1659,8 @@ impl Config {
         cfg.allocate_moves = true;
         cfg.relax_steps = 80;
         cfg.screen_steps = 15;
+        cfg.improvement_rate_selection = true;
+        cfg.diverse_population = true;
         cfg
     }
 
@@ -1820,6 +1840,8 @@ impl Config {
         // GFN-class force is eV per angstrom, and an iteration-capped
         // quasi-Newton step leaves a maximum component near 1e-2.
         cfg.record_gradient = 5.0e-2;
+        cfg.improvement_rate_selection = true;
+        cfg.diverse_population = true;
         #[cfg(feature = "featomic")]
         {
             cfg.keying = Keying::SoapPacking;
@@ -1871,8 +1893,10 @@ mod coverage_behaviour {
         assert!(!mixed.monoatomic());
         assert!(!mixed.packing_cna_applies());
         assert!(!Config::recommended_tip4p(4).packing_cna_applies());
-        assert!(!Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0)
-            .packing_cna_applies());
+        assert!(
+            !Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0)
+                .packing_cna_applies()
+        );
     }
 
     #[test]

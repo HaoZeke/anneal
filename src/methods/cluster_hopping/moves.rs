@@ -481,6 +481,22 @@ pub enum ClusterMove {
     EnergyLattice,
     /// Rotate the outer shell against the core.
     ShellRotate(ShellRotate),
+    /// Rotate one random half of the cluster about a random axis.
+    ///
+    /// The half is whichever side of a random plane through the centre the
+    /// atom, declared group, or rigid body falls on. The angle starts at
+    /// the preset and the search shrinks or grows it from this arm's
+    /// acceptance. Nothing here reads a coordination label.
+    HalfSpace {
+        /// Atoms, or rigid bodies when [`Self::HalfSpace::bodies`] is set.
+        n: usize,
+        /// Rigid bodies in a `6 n` chart. Zero means Cartesian atoms.
+        bodies: usize,
+        /// Declared groups that must turn together. Empty rotates atoms.
+        groups: Vec<Vec<usize>>,
+        /// Rotation angle in radians.
+        angle: f64,
+    },
     /// Enforce an approximate rotational symmetry.
     Symmetrise(Symmetrise),
     /// Push the structure onto the point group it nearly has, as a proposal.
@@ -1211,6 +1227,149 @@ fn group_centroid(x: ArrayView1<f64>, atoms: &[usize]) -> [f64; 3] {
     c
 }
 
+/// Turn the points on one side of `normal` about `axis` by `angle`.
+///
+/// Both axes pass through the centre of mass. A point on the plane stays.
+pub(crate) fn rotate_half(
+    x: ArrayView1<f64>,
+    n: usize,
+    normal: [f64; 3],
+    axis: [f64; 3],
+    angle: f64,
+    groups: &[Vec<usize>],
+) -> Array1<f64> {
+    let mut y = x.to_owned();
+    if n < 2 || y.len() < 3 * n || !angle.is_finite() {
+        return y;
+    }
+    let mut com = [0.0; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            com[k] += y[3 * i + k];
+        }
+    }
+    for value in &mut com {
+        *value /= n as f64;
+    }
+    let member = |point: [f64; 3]| {
+        (point[0] - com[0]) * normal[0]
+            + (point[1] - com[1]) * normal[1]
+            + (point[2] - com[2]) * normal[2]
+            >= 0.0
+    };
+    let mut turn = vec![false; n];
+    if groups.is_empty() {
+        for i in 0..n {
+            turn[i] = member([y[3 * i], y[3 * i + 1], y[3 * i + 2]]);
+        }
+    } else {
+        for group in groups {
+            if group.is_empty() {
+                continue;
+            }
+            let mut centre = [0.0; 3];
+            for &atom in group {
+                if atom >= n {
+                    continue;
+                }
+                for k in 0..3 {
+                    centre[k] += y[3 * atom + k];
+                }
+            }
+            let count = group.iter().filter(|atom| **atom < n).count().max(1) as f64;
+            for value in &mut centre {
+                *value /= count;
+            }
+            if member(centre) {
+                for &atom in group {
+                    if atom < n {
+                        turn[atom] = true;
+                    }
+                }
+            }
+        }
+    }
+    let (sin, cos) = angle.sin_cos();
+    for i in 0..n {
+        if !turn[i] {
+            continue;
+        }
+        let v = [
+            y[3 * i] - com[0],
+            y[3 * i + 1] - com[1],
+            y[3 * i + 2] - com[2],
+        ];
+        let dot = v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2];
+        let cross = [
+            axis[1] * v[2] - axis[2] * v[1],
+            axis[2] * v[0] - axis[0] * v[2],
+            axis[0] * v[1] - axis[1] * v[0],
+        ];
+        for k in 0..3 {
+            y[3 * i + k] = com[k] + v[k] * cos + cross[k] * sin + axis[k] * dot * (1.0 - cos);
+        }
+    }
+    y
+}
+
+fn random_axis<R: rand::Rng + ?Sized>(rng: &mut R) -> [f64; 3] {
+    let z: f64 = rng.random_range(-1.0..1.0);
+    let phi = rng.random_range(0.0..std::f64::consts::TAU);
+    let rho = ((1.0_f64 - z * z).max(0.0)).sqrt();
+    [rho * phi.cos(), rho * phi.sin(), z]
+}
+
+fn rodrigues(v: [f64; 3], axis: [f64; 3], angle: f64) -> [f64; 3] {
+    let (sin, cos) = angle.sin_cos();
+    let dot = v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2];
+    let cross = [
+        axis[1] * v[2] - axis[2] * v[1],
+        axis[2] * v[0] - axis[0] * v[2],
+        axis[0] * v[1] - axis[1] * v[0],
+    ];
+    [
+        v[0] * cos + cross[0] * sin + axis[0] * dot * (1.0 - cos),
+        v[1] * cos + cross[1] * sin + axis[1] * dot * (1.0 - cos),
+        v[2] * cos + cross[2] * sin + axis[2] * dot * (1.0 - cos),
+    ]
+}
+
+fn half_space_proposal<R: rand::Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    n: usize,
+    bodies: usize,
+    groups: &[Vec<usize>],
+    angle: f64,
+    rng: &mut R,
+) -> Array1<f64> {
+    let normal = random_axis(rng);
+    let axis = random_axis(rng);
+    if bodies > 0 && x.len() >= 6 * bodies {
+        let centres: Vec<f64> = x.iter().take(3 * bodies).copied().collect();
+        let turned = rotate_half(ArrayView1::from(&centres), bodies, normal, axis, angle, &[]);
+        let mut y = x.to_owned();
+        for i in 0..bodies {
+            let moved = (0..3).any(|k| (turned[3 * i + k] - centres[3 * i + k]).abs() > 1e-12);
+            for k in 0..3 {
+                y[3 * i + k] = turned[3 * i + k];
+            }
+            if moved {
+                let w = [
+                    y[3 * bodies + 3 * i],
+                    y[3 * bodies + 3 * i + 1],
+                    y[3 * bodies + 3 * i + 2],
+                ];
+                let turned_w = rodrigues(w, axis, angle);
+                for k in 0..3 {
+                    y[3 * bodies + 3 * i + k] = turned_w[k];
+                }
+            }
+        }
+        return y;
+    }
+    rotate_half(x, n, normal, axis, angle, groups)
+}
+
 impl ClusterMove {
     /// The move library, configured for `n` points.
     ///
@@ -1503,6 +1662,7 @@ impl ClusterMove {
             ClusterMove::GroupBurst { .. } => "gburst".into(),
             ClusterMove::Burst { .. } => "burst".into(),
             ClusterMove::ShellRotate(_) => "shell".into(),
+            ClusterMove::HalfSpace { .. } => "half".into(),
             ClusterMove::Symmetrise(_) => "sym".into(),
             ClusterMove::PointSymmetrise { .. } => "psym".into(),
             ClusterMove::SoapRepel { .. } => "repel".into(),
@@ -1762,6 +1922,12 @@ impl ClusterMove {
                 unreachable!("the exchange is drawn on the search ledger")
             }
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
+            ClusterMove::HalfSpace {
+                n,
+                bodies,
+                groups,
+                angle,
+            } => half_space_proposal(x, *n, *bodies, groups, *angle, rng),
             ClusterMove::Symmetrise(k) => k.propose(x, t, rng),
             ClusterMove::PointSymmetrise {
                 n_points,
@@ -2042,10 +2208,11 @@ impl ClusterMove {
                         y[3 * body + k] = placed[k];
                     }
                     let base = 3 * n + 3 * body;
-                    let spun = crate::potentials::compose_rotation(
-                        haar_rotation(rng),
-                        [y[base], y[base + 1], y[base + 2]],
-                    );
+                    let spun = crate::potentials::compose_rotation(haar_rotation(rng), [
+                        y[base],
+                        y[base + 1],
+                        y[base + 2],
+                    ]);
                     for k in 0..3 {
                         y[base + k] = spun[k];
                     }
@@ -2619,12 +2786,9 @@ mod move_scaling_tests {
             .iter()
             .map(|k| k.name())
             .collect();
-        assert_eq!(
-            names,
-            [
-                "rkick", "rtrans", "rrot", "rtrans1", "rreor", "rreloc", "rcycle"
-            ]
-        );
+        assert_eq!(names, [
+            "rkick", "rtrans", "rrot", "rtrans1", "rreor", "rreloc", "rcycle"
+        ]);
         assert!(cfg.move_library.is_rigid_body());
         assert_eq!(cfg.n_points, 6);
     }
@@ -2895,15 +3059,15 @@ mod move_scaling_tests {
         );
         assert!(!rec.symmetrise_on_stall);
         assert!(
-            rec.move_library.kernels(&rec).iter().any(|k| matches!(
-                k,
-                ClusterMove::Soap {
+            rec.move_library
+                .kernels(&rec)
+                .iter()
+                .any(|k| matches!(k, ClusterMove::Soap {
                     class: false,
                     species: Some(_),
                     groups: None,
                     ..
-                }
-            )),
+                })),
             "recommended_molecular missing flexible species-aware SOAP: {:?}",
             rec.move_library
                 .kernels(&rec)
@@ -2916,21 +3080,23 @@ mod move_scaling_tests {
     #[test]
     fn one_repeated_label_takes_the_unlabelled_soap_hop() {
         let pure = Config::recommended(8).with_species(vec![79; 8], None);
-        assert!(pure.move_library.kernels(&pure).iter().any(|kernel| matches!(
-            kernel,
-            ClusterMove::Soap {
-                species: None,
-                ..
-            }
-        )));
+        assert!(
+            pure.move_library
+                .kernels(&pure)
+                .iter()
+                .any(|kernel| matches!(kernel, ClusterMove::Soap { species: None, .. }))
+        );
         let mixed = Config::recommended(8).with_species(vec![29, 29, 29, 29, 79, 79, 79, 79], None);
-        assert!(mixed.move_library.kernels(&mixed).iter().any(|kernel| matches!(
-            kernel,
-            ClusterMove::Soap {
-                species: Some(_),
-                ..
-            }
-        )));
+        assert!(
+            mixed
+                .move_library
+                .kernels(&mixed)
+                .iter()
+                .any(|kernel| matches!(kernel, ClusterMove::Soap {
+                    species: Some(_),
+                    ..
+                }))
+        );
     }
 
     #[test]
@@ -3058,12 +3224,9 @@ mod move_scaling_tests {
             false, false, false, false, false, false, true, true, true, true, true, true,
         ]);
         let proto = [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
-        let origins = [
-            [0.0, 0.0, 3.3],
-            [1.7, 1.7, 4.1],
-            [0.0, 0.0, 0.0],
-            [3.4, 0.0, 0.0],
-        ];
+        let origins = [[0.0, 0.0, 3.3], [1.7, 1.7, 4.1], [0.0, 0.0, 0.0], [
+            3.4, 0.0, 0.0,
+        ]];
         let mut coordinates = Vec::with_capacity(36);
         for origin in &origins {
             for point in &proto {
@@ -3160,18 +3323,12 @@ mod move_scaling_tests {
         sigma.extend(std::iter::repeat_n(1.3, 4));
         let mut coords = vec![0.0; 3 * n];
         // Small atoms (sigma 1) sit outside; large atoms sit in the core.
-        let outer = [
-            [3.0, 0.0, 0.0],
-            [-3.0, 0.0, 0.0],
-            [0.0, 3.0, 0.0],
-            [0.0, -3.0, 0.0],
-        ];
-        let inner = [
-            [0.4, 0.0, 0.0],
-            [-0.4, 0.0, 0.0],
-            [0.0, 0.4, 0.0],
-            [0.0, -0.4, 0.0],
-        ];
+        let outer = [[3.0, 0.0, 0.0], [-3.0, 0.0, 0.0], [0.0, 3.0, 0.0], [
+            0.0, -3.0, 0.0,
+        ]];
+        let inner = [[0.4, 0.0, 0.0], [-0.4, 0.0, 0.0], [0.0, 0.4, 0.0], [
+            0.0, -0.4, 0.0,
+        ]];
         for i in 0..4 {
             for k in 0..3 {
                 coords[3 * i + k] = outer[i][k];
