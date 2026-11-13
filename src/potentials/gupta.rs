@@ -62,6 +62,37 @@ const GOLD: GuptaPair = GuptaPair {
     r0: 2.884,
 };
 
+/// Platinum parameters from Cleri and Rosato, Phys. Rev. B 48, 22 (1993).
+///
+/// The row is the one reproduced by Guedes-Sobrinho, Freire, da Silva and
+/// Galvão, Eur. Phys. J. B 91, 170 (2018), Table 1, and by the Pele
+/// documentation of the same table. `A`, `ξ`, `p`, `q`, `r0` are in eV
+/// and Å.
+const PLATINUM: GuptaPair = GuptaPair {
+    a: 0.2975,
+    xi: 2.695,
+    p: 10.612,
+    q: 4.004,
+    r0: 2.775,
+};
+
+/// Platinum–copper cross term, the arithmetic mean of the pure rows.
+///
+/// Guedes-Sobrinho et al. write the heteronuclear parameters as
+/// `w P(Cu) + (1 − w) P(Pt)`. The symmetric choice `w = 0.5` is the
+/// midpoint of that scan. `A = 0.1915` eV, `ξ = 1.9595` eV,
+/// `p = 10.786`, `q = 3.141`, `r0 = 2.6655` Å.
+const PLATINUM_COPPER: GuptaPair = GuptaPair {
+    a: 0.1915,
+    xi: 1.9595,
+    p: 10.786,
+    q: 3.141,
+    r0: 2.6655,
+};
+
+/// Atomic number used for platinum in the species vector.
+pub const PLATINUM_Z: u32 = 78;
+
 /// Copper–gold cross term from the same Darby set.
 ///
 /// `r0` is the copper nearest-neighbour distance. With the two pure rows
@@ -126,6 +157,34 @@ impl Gupta {
             .map(|label| u8::from(*label == GOLD_Z))
             .collect();
         Self::from_slots(slot, 2, vec![COPPER, COPPER_GOLD, COPPER_GOLD, GOLD])
+    }
+
+    /// Platinum atoms followed by copper atoms.
+    ///
+    /// The species labels are [`PLATINUM_Z`] then [`COPPER_Z`]. A homotop
+    /// keeps that labelling and exchanges coordinates.
+    pub fn platinum_copper(n_platinum: usize, n_copper: usize) -> Self {
+        Self::from_slots(
+            {
+                let mut slot = vec![0; n_platinum];
+                slot.extend(std::iter::repeat_n(1, n_copper));
+                slot
+            },
+            2,
+            vec![PLATINUM, PLATINUM_COPPER, PLATINUM_COPPER, COPPER],
+        )
+    }
+
+    /// A pure platinum cluster.
+    pub fn platinum(n_points: usize) -> Self {
+        Self::platinum_copper(n_points, 0)
+    }
+
+    /// Species labels parallel to the atoms, platinum then copper.
+    pub fn platinum_copper_species(n_platinum: usize, n_copper: usize) -> Vec<u32> {
+        let mut species = vec![PLATINUM_Z; n_platinum];
+        species.extend(std::iter::repeat_n(COPPER_Z, n_copper));
+        species
     }
 
     /// Species labels parallel to the atoms, copper then gold.
@@ -303,6 +362,29 @@ mod tests {
         assert!(
             (energy - closed).abs() < 1e-12,
             "dimer {energy} against {closed}"
+        );
+    }
+
+    #[test]
+    fn a_platinum_dimer_at_r0_has_the_cleri_rosato_energy() {
+        // At r = r0 the Cleri–Rosato sum for one pair is 2A − 2ξ.
+        // Platinum: 2×0.2975 − 2×2.695 = −4.795 eV.
+        let pot = Gupta::platinum(2);
+        let x = Array1::from_vec(vec![0.0, 0.0, 0.0, PLATINUM.r0, 0.0, 0.0]);
+        let energy = pot.eval(x.view());
+        let closed = 2.0 * PLATINUM.a - 2.0 * PLATINUM.xi;
+        assert!((closed + 4.795).abs() < 1e-12);
+        assert!(
+            (energy - closed).abs() < 1e-12,
+            "platinum dimer {energy} against {closed}"
+        );
+        let mixed = Gupta::platinum_copper(1, 1);
+        let y = Array1::from_vec(vec![0.0, 0.0, 0.0, PLATINUM_COPPER.r0, 0.0, 0.0]);
+        let mixed_energy = mixed.eval(y.view());
+        let mixed_closed = 2.0 * PLATINUM_COPPER.a - 2.0 * PLATINUM_COPPER.xi;
+        assert!(
+            (mixed_energy - mixed_closed).abs() < 1e-12,
+            "Pt–Cu dimer {mixed_energy} against {mixed_closed}"
         );
     }
 

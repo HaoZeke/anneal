@@ -2453,6 +2453,7 @@ pub(crate) fn place_smaller_inside(positions: Array1<f64>, species: &[u32]) -> A
         29 => 1.32,
         30 => 1.22,
         47 => 1.44,
+        78 => 1.36,
         79 => 1.44,
         _ => 0.0,
     };
@@ -2619,7 +2620,9 @@ mod move_scaling_tests {
             .collect();
         assert_eq!(
             names,
-            ["rkick", "rtrans", "rrot", "rtrans1", "rreor", "rreloc", "rcycle"]
+            [
+                "rkick", "rtrans", "rrot", "rtrans1", "rreor", "rreloc", "rcycle"
+            ]
         );
         assert!(cfg.move_library.is_rigid_body());
         assert_eq!(cfg.n_points, 6);

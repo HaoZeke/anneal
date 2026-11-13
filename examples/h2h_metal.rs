@@ -55,6 +55,7 @@ fn main() {
 enum Kind {
     Zinc,
     CopperGold { n_copper: usize },
+    PlatinumCopper { n_platinum: usize },
 }
 
 struct Spec {
@@ -85,6 +86,64 @@ fn system_spec(name: &str) -> Option<Spec> {
             1_000_000,
             Kind::CopperGold { n_copper: 27 },
         ),
+        // Pt–Cu sizes from Wu, Lin, He, Chen and Shi, Nanoscale 18, 14001
+        // (2026). The Gupta total energies of that paper are not compiled
+        // here. `H2H_REFERENCE`, when set by the bench driver, is the stop.
+        // Without it the search spends the budget.
+        "pt13" => (
+            13,
+            f64::NEG_INFINITY,
+            100_000,
+            Kind::PlatinumCopper { n_platinum: 13 },
+        ),
+        "cu13" => (
+            13,
+            f64::NEG_INFINITY,
+            100_000,
+            Kind::PlatinumCopper { n_platinum: 0 },
+        ),
+        "pt7cu6" => (
+            13,
+            f64::NEG_INFINITY,
+            100_000,
+            Kind::PlatinumCopper { n_platinum: 7 },
+        ),
+        "pt12cu11" => (
+            23,
+            f64::NEG_INFINITY,
+            200_000,
+            Kind::PlatinumCopper { n_platinum: 12 },
+        ),
+        "pt11cu12" => (
+            23,
+            f64::NEG_INFINITY,
+            200_000,
+            Kind::PlatinumCopper { n_platinum: 11 },
+        ),
+        "pt6cu17" => (
+            23,
+            f64::NEG_INFINITY,
+            200_000,
+            Kind::PlatinumCopper { n_platinum: 6 },
+        ),
+        "pt38" => (
+            38,
+            f64::NEG_INFINITY,
+            400_000,
+            Kind::PlatinumCopper { n_platinum: 38 },
+        ),
+        "pt19cu19" => (
+            38,
+            f64::NEG_INFINITY,
+            400_000,
+            Kind::PlatinumCopper { n_platinum: 19 },
+        ),
+        "cu38" => (
+            38,
+            f64::NEG_INFINITY,
+            400_000,
+            Kind::PlatinumCopper { n_platinum: 0 },
+        ),
         _ => return None,
     };
     Some(Spec {
@@ -99,7 +158,18 @@ fn potential(spec: &Spec) -> Gupta {
     match spec.kind {
         Kind::Zinc => Gupta::zinc(spec.n),
         Kind::CopperGold { n_copper } => Gupta::copper_gold(n_copper, spec.n - n_copper),
+        Kind::PlatinumCopper { n_platinum } => {
+            Gupta::platinum_copper(n_platinum, spec.n - n_platinum)
+        }
     }
+}
+
+fn reference_of(spec: &Spec) -> f64 {
+    std::env::var("H2H_REFERENCE")
+        .ok()
+        .and_then(|text| text.parse::<f64>().ok())
+        .filter(|value| value.is_finite())
+        .unwrap_or(spec.reference)
 }
 
 fn config(spec: &Spec) -> Config {
@@ -107,6 +177,10 @@ fn config(spec: &Spec) -> Config {
         Kind::Zinc => Config::recommended(spec.n),
         Kind::CopperGold { n_copper } => {
             let species = Gupta::copper_gold_species(n_copper, spec.n - n_copper);
+            Config::recommended(spec.n).with_species(species, None)
+        }
+        Kind::PlatinumCopper { n_platinum } => {
+            let species = Gupta::platinum_copper_species(n_platinum, spec.n - n_platinum);
             Config::recommended(spec.n).with_species(species, None)
         }
     };
@@ -154,7 +228,7 @@ fn cmd_run(args: &[String]) -> i32 {
         &outcome,
         wall,
         pot_s,
-        spec.reference,
+        reference_of(&spec),
     );
     0
 }
@@ -187,7 +261,7 @@ fn cmd_budget(args: &[String]) -> i32 {
         return 2;
     };
     println!("{}", spec.budget);
-    println!("{:.10}", spec.reference);
+    println!("{:.10}", reference_of(&spec));
     0
 }
 
@@ -264,7 +338,7 @@ fn search(
 ) -> (Outcome, f64, f64) {
     let evaluated = potential(spec);
     let mut ledger = Ledger::new(budget);
-    ledger.stop_below(spec.reference + HIT_TOL);
+    ledger.stop_below(reference_of(spec) + HIT_TOL);
     let mut optimiser = WarmLbfgs::default();
     let pot_ns = std::sync::atomic::AtomicU64::new(0);
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
