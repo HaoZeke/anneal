@@ -2511,6 +2511,145 @@ pub(crate) fn plane_rearrangement<R: Rng + ?Sized>(
     y
 }
 
+/// Several plane cuts of one cluster, at fixed fractions of its extent.
+///
+/// Four reflections and one half-turn. The caller quenches them and keeps
+/// a cut only when its energy beats the chain. No packing is named.
+pub(crate) fn plane_cuts<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    n_points: usize,
+    rng: &mut R,
+) -> Vec<Array1<f64>> {
+    let n = n_points.min(x.len() / 3);
+    if n < 4 {
+        return Vec::new();
+    }
+    let mut normal = [0.0_f64; 3];
+    for component in &mut normal {
+        let u: f64 = rng.random::<f64>().max(1e-12);
+        let v: f64 = rng.random();
+        *component = (-2.0 * u.ln()).sqrt() * (std::f64::consts::TAU * v).cos();
+    }
+    let norm = (normal.iter().map(|value| value * value).sum::<f64>()).sqrt();
+    if norm < 1e-12 {
+        return Vec::new();
+    }
+    for component in &mut normal {
+        *component /= norm;
+    }
+    let mut centre = [0.0_f64; 3];
+    for index in 0..n {
+        for axis in 0..3 {
+            centre[axis] += x[3 * index + axis];
+        }
+    }
+    for component in &mut centre {
+        *component /= n as f64;
+    }
+    let mut extent = 0.0_f64;
+    for index in 0..n {
+        let mut along = 0.0;
+        for axis in 0..3 {
+            along += (x[3 * index + axis] - centre[axis]) * normal[axis];
+        }
+        extent = extent.max(along.abs());
+    }
+    extent = extent.max(1e-6);
+    let mut cuts = Vec::new();
+    for offset in [-0.4_f64, -0.15, 0.15, 0.4] {
+        if let Some(cut) = plane_cut(x, n, &normal, &centre, extent, offset, true, 0.0) {
+            cuts.push(cut);
+        }
+    }
+    if let Some(cut) = plane_cut(
+        x,
+        n,
+        &normal,
+        &centre,
+        extent,
+        0.0,
+        false,
+        std::f64::consts::PI,
+    ) {
+        cuts.push(cut);
+    }
+    cuts
+}
+
+fn plane_cut(
+    x: ArrayView1<f64>,
+    n: usize,
+    normal: &[f64; 3],
+    centre: &[f64; 3],
+    extent: f64,
+    offset: f64,
+    reflect: bool,
+    angle: f64,
+) -> Option<Array1<f64>> {
+    let shift = offset * extent;
+    let mut chosen = Vec::new();
+    for index in 0..n {
+        let mut along = 0.0;
+        for axis in 0..3 {
+            along += (x[3 * index + axis] - centre[axis]) * normal[axis];
+        }
+        if along - shift > 0.0 {
+            chosen.push(index);
+        }
+    }
+    if !(2..n.saturating_sub(1)).contains(&chosen.len()) {
+        return None;
+    }
+    let origin = [
+        centre[0] + shift * normal[0],
+        centre[1] + shift * normal[1],
+        centre[2] + shift * normal[2],
+    ];
+    let mut y = x.to_owned();
+    if reflect {
+        for &index in &chosen {
+            let mut along = 0.0;
+            for axis in 0..3 {
+                along += (y[3 * index + axis] - origin[axis]) * normal[axis];
+            }
+            for axis in 0..3 {
+                y[3 * index + axis] -= 2.0 * along * normal[axis];
+            }
+        }
+    } else {
+        let (sine, cosine) = angle.sin_cos();
+        let mut pivot = [0.0_f64; 3];
+        for &index in &chosen {
+            for axis in 0..3 {
+                pivot[axis] += y[3 * index + axis];
+            }
+        }
+        for component in &mut pivot {
+            *component /= chosen.len() as f64;
+        }
+        for &index in &chosen {
+            let v = [
+                y[3 * index] - pivot[0],
+                y[3 * index + 1] - pivot[1],
+                y[3 * index + 2] - pivot[2],
+            ];
+            let cross = [
+                normal[1] * v[2] - normal[2] * v[1],
+                normal[2] * v[0] - normal[0] * v[2],
+                normal[0] * v[1] - normal[1] * v[0],
+            ];
+            let dot = normal[0] * v[0] + normal[1] * v[1] + normal[2] * v[2];
+            for axis in 0..3 {
+                y[3 * index + axis] = pivot[axis]
+                    + v[axis] * cosine
+                    + cross[axis] * sine
+                    + normal[axis] * dot * (1.0 - cosine);
+            }
+        }
+    }
+    Some(y)
+}
+
 fn species_swap<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     n_points: usize,

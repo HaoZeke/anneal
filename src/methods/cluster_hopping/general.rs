@@ -4,13 +4,73 @@
 //! unless it is lower than that structure. The spread of the stored
 //! energies is the temperature of a later hop. No packing is named.
 
-use ndarray::ArrayView1;
+use ndarray::{Array1, ArrayView1};
 
 use crate::soap::{SoapSpec, local_spectra_z};
 
 struct Seat {
     energy: f64,
     soap: Vec<f64>,
+}
+
+/// Unlike-pair coordinate exchanges of one geometry.
+///
+/// The smaller label is paired with the larger one. Each candidate swaps
+/// one inner atom of the smaller label with one outer atom of the larger
+/// label. Species counts stay on the indices. More than two labels uses
+/// the two most common.
+pub fn homotop_candidates(x: ArrayView1<f64>, species: &[u32]) -> Vec<Array1<f64>> {
+    let n = species.len().min(x.len() / 3);
+    if n < 2 {
+        return Vec::new();
+    }
+    let mut labels: Vec<u32> = species[..n].to_vec();
+    labels.sort_unstable();
+    labels.dedup();
+    if labels.len() < 2 {
+        return Vec::new();
+    }
+    let count = |label: u32| species[..n].iter().filter(|item| **item == label).count();
+    labels.sort_by_key(|&label| std::cmp::Reverse(count(label)));
+    let majority = labels[0];
+    let minority = labels[1];
+    let mut centre = [0.0_f64; 3];
+    for index in 0..n {
+        for axis in 0..3 {
+            centre[axis] += x[3 * index + axis];
+        }
+    }
+    for component in &mut centre {
+        *component /= n as f64;
+    }
+    let radius = |index: usize| {
+        (0..3)
+            .map(|axis| {
+                let delta = x[3 * index + axis] - centre[axis];
+                delta * delta
+            })
+            .sum::<f64>()
+    };
+    let mut inner: Vec<usize> = (0..n).filter(|&index| species[index] == minority).collect();
+    let mut outer: Vec<usize> = (0..n).filter(|&index| species[index] == majority).collect();
+    inner.sort_by(|&left, &right| radius(left).total_cmp(&radius(right)));
+    outer.sort_by(|&left, &right| radius(right).total_cmp(&radius(left)));
+    inner.truncate(4);
+    outer.truncate(3);
+    let mut out = Vec::new();
+    for &left in &inner {
+        for &right in &outer {
+            let mut y = x.to_owned();
+            for axis in 0..3 {
+                y.swap(3 * left + axis, 3 * right + axis);
+            }
+            out.push(y);
+            if out.len() >= 8 {
+                return out;
+            }
+        }
+    }
+    out
 }
 
 /// Structures already accepted, keyed by their SOAP spectrum.

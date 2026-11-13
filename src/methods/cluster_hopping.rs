@@ -6152,6 +6152,69 @@ where
                 continue;
             }
         }
+        if cfg.general_collective && matches!(kernels.get(k), Some(ClusterMove::Plane { .. })) {
+            let species = cfg.species.clone().unwrap_or_else(|| vec![0; x.len() / 3]);
+            let cuts = moves::plane_cuts(x.view(), x.len() / 3, rng);
+            let mut best_cut: Option<(f64, Array1<f64>)> = None;
+            for cut in cuts {
+                if ledger.remaining() == 0 {
+                    break;
+                }
+                let (energy, relaxed) = relax(ledger, cut.view(), cfg.relax_steps);
+                if !(energy.is_finite()
+                    && relaxed.len() == x.len()
+                    && quench_is_sane(cfg, energy, relaxed.view()))
+                {
+                    continue;
+                }
+                if general_taboo.forbids(energy, relaxed.view(), &species) {
+                    continue;
+                }
+                if best_cut.as_ref().is_none_or(|(held, _)| energy < *held) {
+                    best_cut = Some((energy, relaxed));
+                }
+            }
+            if let Some((mut energy, mut state)) = best_cut
+                && energy < e
+            {
+                let mut best_swap: Option<(f64, Array1<f64>)> = None;
+                for candidate in general::homotop_candidates(state.view(), &species) {
+                    if ledger.remaining() == 0 {
+                        break;
+                    }
+                    let (raw, _) = relax(ledger, candidate.view(), 0);
+                    if raw.is_finite() && best_swap.as_ref().is_none_or(|(held, _)| raw < *held) {
+                        best_swap = Some((raw, candidate));
+                    }
+                }
+                if let Some((_, candidate)) = best_swap
+                    && ledger.remaining() > 0
+                {
+                    let (swapped, swapped_state) =
+                        relax(ledger, candidate.view(), cfg.relax_steps);
+                    if swapped.is_finite()
+                        && swapped < energy
+                        && swapped_state.len() == x.len()
+                        && quench_is_sane(cfg, swapped, swapped_state.view())
+                        && !general_taboo.forbids(swapped, swapped_state.view(), &species)
+                    {
+                        energy = swapped;
+                        state = swapped_state;
+                    }
+                }
+                if energy < ledger.best - 1e-6 {
+                    ledger.record(energy, state.view());
+                }
+                general_taboo.remember(energy, state.view(), &species);
+                x = state;
+                e = energy;
+                here = None;
+                soft_cache = None;
+                current_validation_gradient = None;
+            }
+            hops += 1;
+            continue;
+        }
         // A failed stall growth does not quench another lattice until the
         // incumbent drops. The leave that would have grown is one all-points
         // displacement. Other proposals keep the kernel they drew. The test
