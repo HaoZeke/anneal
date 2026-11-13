@@ -4572,6 +4572,11 @@ where
                     if side.probe.remaining() == 0 {
                         break;
                     }
+                    // A cut that stops at a complete shell is shorter than
+                    // this cluster. Quenching it would be a different system.
+                    if candidate.len() != 3 * n_atoms {
+                        continue;
+                    }
                     let placed =
                         binary_geometry::place_smaller_inside(candidate.view(), species, |label| {
                             binary_geometry::label_radius(species, sigma, label)
