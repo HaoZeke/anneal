@@ -3527,6 +3527,17 @@ fn rigid_probe(
 ///     `Config.for_tip4p(n)` when both are false, with these sites as the
 ///     rigid geometry. Needs `start`. Excludes `ras`, `derived`,
 ///     `length_scale`, `rigid`, `species`, `sigmas`, and a non-block layout.
+///   groups: optional atom indices of each rigid group of a molecular
+///     search. The presets become `Config::recommended_molecular` or, with
+///     `recommended=False`, `Config::for_molecular`, at energy scale one.
+///     Needs `species` and `start`. Excludes `ras`, `derived`,
+///     `communicating`, `length_scale`, `rigid`, `sigmas`, `water_sites`
+///     and a non-block layout.
+///   local_step: `lbfgs`, `tric` or `auto`, `Config::local_step` of a
+///     `groups` search. Unset keeps the preset's: `auto` for
+///     `recommended=True`, L-BFGS otherwise. The result's `local_step` is
+///     the quench in force at the end, and `quench_seconds` the measured
+///     seconds per potential call and per TRIC step under `auto`.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
@@ -3551,6 +3562,8 @@ fn rigid_probe(
     layout = "block",
     target = None,
     water_sites = None,
+    groups = None,
+    local_step = None,
 ))]
 fn cluster_search(
     py: Python<'_>,
@@ -3571,9 +3584,52 @@ fn cluster_search(
     layout: &str,
     target: Option<f64>,
     water_sites: Option<PyReadonlyArray1<'_, f64>>,
+    groups: Option<Vec<Vec<usize>>>,
+    local_step: Option<&str>,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::cluster_hopping::Config;
+    use crate::methods::tric_opt::LocalStep;
 
+    let local_step = match local_step {
+        None => None,
+        Some("lbfgs") => Some(LocalStep::Lbfgs),
+        Some(name @ ("tric" | "auto")) if groups.is_none() => {
+            return Err(PyValueError::new_err(format!(
+                "local_step={name:?} needs groups"
+            )));
+        }
+        Some("tric") => Some(LocalStep::Tric),
+        Some("auto") => Some(LocalStep::Auto),
+        Some(other) => {
+            return Err(PyValueError::new_err(format!(
+                "local_step must be \"lbfgs\", \"tric\" or \"auto\", got {other:?}"
+            )));
+        }
+    };
+
+    if let Some(groups) = groups.as_ref() {
+        if ras || derived || communicating || length_scale.is_some() {
+            return Err(PyValueError::new_err(
+                "groups excludes ras, derived, communicating and length_scale",
+            ));
+        }
+        if rigid || sigmas.is_some() || water_sites.is_some() || layout != "block" {
+            return Err(PyValueError::new_err(
+                "groups excludes rigid, sigmas, water_sites and a non-block layout",
+            ));
+        }
+        if species.as_ref().is_none_or(|labels| labels.len() != n) {
+            return Err(PyValueError::new_err(
+                "groups needs one species label per atom",
+            ));
+        }
+        if start.is_none() {
+            return Err(PyValueError::new_err("groups needs a start"));
+        }
+        if groups.iter().flatten().any(|&atom| atom >= n) {
+            return Err(PyValueError::new_err("a group names an atom past n"));
+        }
+    }
     if n < 2 {
         return Err(PyValueError::new_err("n must be at least 2"));
     }
@@ -3655,9 +3711,21 @@ fn cluster_search(
         None => None,
     };
     let scale = length_scale.unwrap_or(1.0);
-    let stock = species.is_some() || rigid;
+    let molecular = groups.is_some();
+    let stock = (species.is_some() || rigid) && !molecular;
     let has_water = water.is_some();
-    let mut cfg = if let Some(geometry) = water {
+    let mut cfg = if let Some(groups) = groups {
+        let labels = species.clone().unwrap_or_default();
+        let mut cfg = if recommended {
+            Config::recommended_molecular(labels, groups, 1.0)
+        } else {
+            Config::for_molecular(labels, groups, 1.0)
+        };
+        if let Some(step) = local_step {
+            cfg.local_step = step;
+        }
+        cfg
+    } else if let Some(geometry) = water {
         let mut cfg = if communicating {
             Config::communicating_tip4p(n)
         } else if recommended {
@@ -3712,7 +3780,7 @@ fn cluster_search(
         ledger.stop_below(limit);
     }
     let gradient_scale = if budget >= 4 {
-        let probe_owned = if rigid_chart {
+        let probe_owned = if rigid_chart || molecular {
             Some(match start.as_ref() {
                 Some(start) => start.clone(),
                 None => Array1::from_vec(rigid_probe(&cfg, seed, interleaved)),
@@ -3743,6 +3811,8 @@ fn cluster_search(
             Array1::from_elem(dim, extent),
             0.0,
         )
+    } else if molecular {
+        cluster_bounds(n, dim, cfg.length_scale)
     } else {
         cluster_bounds(n, dim, scale)
     };
@@ -3758,7 +3828,7 @@ fn cluster_search(
         errors.finish(py)?;
         return out;
     }
-    let (out, _) = if interleaved {
+    let (out, stats) = if interleaved {
         let chart = InterleavedChart {
             inner: &obj,
             n_molecules: n,
@@ -3799,7 +3869,96 @@ fn cluster_search(
     dict.set_item("best_energy", out.best)?;
     dict.set_item("hops", out.hops)?;
     dict.set_item("nve_unavailable", out.nve_unavailable)?;
+    let quench = match stats.local_step {
+        LocalStep::Tric => "tric",
+        _ => "lbfgs",
+    };
+    dict.set_item("local_step", quench)?;
+    dict.set_item("quench_seconds", stats.quench_seconds)?;
     Ok(dict.into())
+}
+
+/// Relaxes `x0` with the quench a molecular cluster search runs.
+///
+/// With `method="lbfgs"` that quench is `WarmLbfgs` with an empty memory and
+/// the 64-probe line search of a species search; with `method="tric"` it is
+/// `TricOpt` over the atomic numbers `species`. Both stop when the largest
+/// gradient component is below `gtol`. `fg_fn(x)` returns
+/// `(energy, gradient)`; each call is one evaluation. Returns
+/// `{x, energy, calls}`.
+#[pyfunction]
+#[pyo3(signature = (fg_fn, x0, gtol, max_iter = 10000, method = "lbfgs", species = None))]
+fn quench(
+    py: Python<'_>,
+    fg_fn: Py<PyAny>,
+    x0: PyReadonlyArray1<'_, f64>,
+    gtol: f64,
+    max_iter: usize,
+    method: &str,
+    species: Option<Vec<u32>>,
+) -> PyResult<Py<PyDict>> {
+    if !gtol.is_finite() || gtol <= 0.0 {
+        return Err(PyValueError::new_err("gtol must be finite and positive"));
+    }
+    let start = Array1::from_vec(x0.as_slice()?.to_vec());
+    let dim = start.len();
+    let tric = match (method, species) {
+        ("lbfgs", _) => None,
+        ("tric", Some(labels)) if 3 * labels.len() == dim => {
+            let mut tric = crate::methods::tric_opt::TricOpt::new(labels);
+            tric.gtol = gtol;
+            Some(tric)
+        }
+        ("tric", _) => {
+            return Err(PyValueError::new_err(
+                "method=\"tric\" needs one species label per atom of x0",
+            ));
+        }
+        (other, _) => {
+            return Err(PyValueError::new_err(format!(
+                "method must be \"lbfgs\" or \"tric\", got {other:?}"
+            )));
+        }
+    };
+    let mut failure: Option<PyErr> = None;
+    let mut calls = 0usize;
+    let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+    opt.max_line_evals = 64;
+    opt.gtol = gtol;
+    let fg = |v: ArrayView1<f64>| {
+        if failure.is_some() {
+            return None;
+        }
+        calls += 1;
+        let out = fg_fn
+            .call1(py, (PyArray1::from_vec(py, v.to_vec()),))
+            .and_then(|value| value.extract::<(f64, Vec<f64>)>(py));
+        match out {
+            Ok((e, g)) if g.len() == dim => Some((e, Array1::from_vec(g))),
+            Ok(_) => {
+                failure = Some(PyValueError::new_err(format!(
+                    "fg_fn must return a gradient of {dim} numbers"
+                )));
+                None
+            }
+            Err(err) => {
+                failure = Some(err);
+                None
+            }
+        }
+    };
+    let (energy, x, _) = match tric.as_ref() {
+        Some(tric) => tric.minimize(start.view(), max_iter, fg),
+        None => opt.minimize(start.view(), max_iter, fg),
+    };
+    if let Some(err) = failure {
+        return Err(err);
+    }
+    let out = PyDict::new(py);
+    out.set_item("x", PyArray1::from_vec(py, x.to_vec()))?;
+    out.set_item("energy", energy)?;
+    out.set_item("calls", calls)?;
+    Ok(out.into())
 }
 
 // ---------------------------------------------------------------------------
@@ -3822,6 +3981,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<EindirPyBounds>()?;
     m.add_class::<PyObjective>()?;
     m.add_function(wrap_pyfunction!(cluster_search, m)?)?;
+    m.add_function(wrap_pyfunction!(quench, m)?)?;
     m.add_function(wrap_pyfunction!(low_discrepancy_points, m)?)?;
     m.add_function(wrap_pyfunction!(osa_acceptance_rate, m)?)?;
     m.add_function(wrap_pyfunction!(pilot_draws_qmc, m)?)?;

@@ -51,6 +51,7 @@ from anneal._core import (
     low_discrepancy_points as _core_low_discrepancy_points,
     pilot_draws_qmc as _core_pilot_draws_qmc,
     polish as _core_polish,
+    quench as _core_quench,
     qmc_best1bin_scout as _core_qmc_best1bin_scout,
     qmc_best1bin_scout_objective as _core_qmc_best1bin_scout_objective,
     qmc_gsa_global_search as _core_qmc_gsa_global_search,
@@ -250,6 +251,8 @@ def cluster_search(
     layout: str = "block",
     target: float | None = None,
     water_sites=None,
+    groups=None,
+    local_step: str | None = None,
 ):
     """Run the measured cluster-search layer.
 
@@ -303,15 +306,30 @@ def cluster_search(
         both false, ``Config.for_tip4p``. Requires ``start``. Excludes
         ``ras``, ``derived``, ``length_scale``, ``rigid``, ``species``,
         ``sigmas``, and a non-block layout.
+      groups: optional list of atom-index lists, one per rigid group of a
+        molecular search. The presets become ``recommended_molecular`` and,
+        with ``recommended=False``, ``for_molecular``, at energy scale one.
+        Requires ``species`` and ``start``. Excludes ``ras``, ``derived``,
+        ``communicating``, ``length_scale``, ``rigid``, ``sigmas``,
+        ``water_sites`` and a non-block layout.
+      local_step: ``lbfgs``, ``tric`` or ``auto``, the optimizer of every
+        quench of a ``groups`` search. ``tric`` relaxes in translation-rotation
+        internal coordinates, in electronvolt and angstrom. ``auto`` times the
+        opening Cartesian quench and keeps TRIC only when a potential call
+        costs more than a TRIC step. ``None`` keeps the preset's: ``auto`` for
+        ``recommended=True``, ``lbfgs`` otherwise. The result's
+        ``local_step`` names the quench in force at the end.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
     The best geometry found is kept, and the exception is re-raised here.
 
     Returns a dict with ``best`` (flat coordinates in the state layout),
-    ``best_energy``, ``hops``, and ``nve_unavailable``. The last is true
-    when a constant-energy (NVE) escape was requested and that escape is
-    not compiled. The ``python`` feature compiles it.
+    ``best_energy``, ``hops``, ``nve_unavailable``, ``local_step`` and
+    ``quench_seconds``. ``nve_unavailable`` is true when a constant-energy
+    (NVE) escape was requested and that escape is not compiled; the
+    ``python`` feature compiles it. ``quench_seconds`` is ``None`` unless
+    ``local_step="auto"`` timed a potential call and a TRIC step, in seconds.
     """
     start_arr = None if start is None else np.asarray(start, dtype=np.float64).reshape(-1)
     args = (
@@ -337,8 +355,41 @@ def cluster_search(
         kwargs["target"] = float(target)
     if water_sites is not None:
         kwargs["water_sites"] = np.asarray(water_sites, dtype=np.float64).reshape(-1)
+    if groups is not None:
+        kwargs["groups"] = [[int(atom) for atom in group] for group in groups]
+    if local_step is not None:
+        kwargs["local_step"] = str(local_step)
     out = _core_cluster_search(*args, **kwargs)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
+    return out
+
+
+def quench(fg_fn, x0, gtol: float, max_iter: int = 10000, *, method: str = "lbfgs", species=None):
+    """Relax ``x0`` with the quench a molecular cluster search runs.
+
+    ``fg_fn(x)`` returns ``(energy, gradient)``. The descent stops when the
+    largest gradient component is below ``gtol``. ``method`` is ``lbfgs``,
+    the search's Cartesian L-BFGS, or ``tric``, translation-rotation internal
+    coordinates over the atomic numbers ``species`` (electronvolt and
+    angstrom). ``max_iter`` caps iterations for ``lbfgs`` and calls for
+    ``tric``. Returns a dict with ``x``, ``energy`` and ``calls``, the number
+    of ``fg_fn`` evaluations.
+    """
+
+    def fg(x):
+        energy, gradient = fg_fn(np.asarray(x, dtype=np.float64))
+        return float(energy), np.asarray(gradient, dtype=np.float64).reshape(-1).tolist()
+
+    labels = None if species is None else [int(value) for value in species]
+    out = _core_quench(
+        fg,
+        np.asarray(x0, dtype=np.float64).reshape(-1),
+        float(gtol),
+        int(max_iter),
+        str(method),
+        labels,
+    )
+    out["x"] = np.asarray(out["x"], dtype=np.float64)
     return out
 
 
@@ -1492,6 +1543,7 @@ __all__ = [
     "low_discrepancy_points",
     "pilot_draws_qmc",
     "polish",
+    "quench",
     "qmc_best1bin_scout",
     "qmc_best1bin_scout_objective",
     "qmc_gsa_global_search",

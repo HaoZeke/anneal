@@ -1075,6 +1075,15 @@ pub struct Config {
     /// [`Config::species`]; without it the quench is unpreconditioned.
     #[serde(skip_serializing_if = "is_false")]
     pub precondition_bonds: bool,
+    /// Optimizer of every search quench.
+    ///
+    /// [`LocalStep::Tric`](crate::methods::tric_opt::LocalStep::Tric) and
+    /// [`LocalStep::Auto`](crate::methods::tric_opt::LocalStep::Auto) need
+    /// `species` and a Cartesian state with one label per atom; on any other
+    /// state the search keeps L-BFGS. Serialized only when it is not L-BFGS,
+    /// so the resolved digest of every preset that keeps L-BFGS is unchanged.
+    #[serde(skip_serializing_if = "crate::methods::tric_opt::LocalStep::is_lbfgs")]
+    pub local_step: crate::methods::tric_opt::LocalStep,
     /// Whether every quenched energy is kept, not only the improving ones:
     /// the sample [`crate::tail`] fits an endpoint to. Truncated by
     /// [`Config::screen_margin`], since the full relaxation runs only where
@@ -1687,6 +1696,7 @@ impl Config {
             adaptive_screen: false,
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
             precondition_bonds: false,
+            local_step: crate::methods::tric_opt::LocalStep::Lbfgs,
             trace_quenched: false,
             long_ranged: false,
             polish_records: 0,
@@ -1946,6 +1956,10 @@ impl Config {
         // GFN-class force is eV per angstrom, and an iteration-capped
         // quasi-Newton step leaves a maximum component near 1e-2.
         cfg.record_gradient = 5.0e-2;
+        // A TRIC quench takes about half the calls of a Cartesian one, and
+        // its steps cost more than a cheap force field's call. The opening
+        // quench times both.
+        cfg.local_step = crate::methods::tric_opt::LocalStep::Auto;
         #[cfg(feature = "featomic")]
         {
             cfg.keying = Keying::SoapPacking;
@@ -1968,6 +1982,26 @@ impl Config {
 #[cfg(test)]
 mod coverage_behaviour {
     use super::{ArmSelection, Config, Keying};
+
+    #[test]
+    fn the_recommended_molecular_preset_chooses_its_quench() {
+        use crate::methods::tric_opt::LocalStep;
+        let groups = vec![vec![0, 1, 2], vec![3, 4, 5]];
+        let species = vec![8, 1, 1, 8, 1, 1];
+        let recommended = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
+        assert_eq!(recommended.local_step, LocalStep::Auto);
+        assert!(
+            recommended
+                .resolved_json()
+                .unwrap()
+                .contains("\"local_step\":\"auto\"")
+        );
+        assert_eq!(
+            Config::for_molecular(species, groups, 1.0).local_step,
+            LocalStep::Lbfgs
+        );
+        assert_eq!(Config::recommended(13).local_step, LocalStep::Lbfgs);
+    }
 
     #[test]
     fn morphology_keying_carries_its_own_deposition_width() {

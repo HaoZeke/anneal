@@ -270,3 +270,99 @@ def test_cluster_search_ras_true_uses_archive_outcome():
     assert out["nve_unavailable"] is False
     assert out["charged"] > 0
     assert out["floors"] >= 1
+
+
+def flexible_water(x: np.ndarray, molecules: int):
+    """Harmonic O-H and H-H springs and an O-O Lennard-Jones term, in eV and angstrom."""
+    p = np.asarray(x, dtype=np.float64).reshape(-1, 3)
+    energy = 0.0
+    grad = np.zeros_like(p)
+
+    def pair(i, j, e_de):
+        nonlocal energy
+        d = p[i] - p[j]
+        r = float(np.linalg.norm(d))
+        e, de = e_de(r)
+        energy += e
+        grad[i] += de * d / r
+        grad[j] -= de * d / r
+
+    def spring(k, r0):
+        return lambda r: (0.5 * k * (r - r0) ** 2, k * (r - r0))
+
+    def lj(r, sigma=3.15, eps=0.0067):
+        s6 = (sigma / r) ** 6
+        return 4 * eps * (s6 * s6 - s6), 4 * eps * (6 * s6 - 12 * s6 * s6) / r
+
+    for m in range(molecules):
+        o = 3 * m
+        pair(o, o + 1, spring(45.0, 0.96))
+        pair(o, o + 2, spring(45.0, 0.96))
+        pair(o + 1, o + 2, spring(20.0, 1.52))
+        for other in range(m + 1, molecules):
+            pair(o, 3 * other, lj)
+    return energy, grad.reshape(-1)
+
+
+WATER_DIMER = np.array(
+    [0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0,
+     3.10, 0.15, 0.08, 3.98, 0.40, -0.05, 2.82, 1.05, 0.18]
+)
+
+
+@pytest.mark.parametrize("method", ["lbfgs", "tric"])
+def test_quench_methods_reach_the_gate(method):
+    from anneal import quench
+
+    rng = np.random.default_rng(4)
+    x0 = WATER_DIMER + rng.normal(scale=0.08, size=WATER_DIMER.size)
+    out = quench(lambda x: flexible_water(x, 2), x0, 1e-3, method=method, species=[8, 1, 1] * 2)
+    _, g = flexible_water(out["x"], 2)
+    assert np.max(np.abs(g)) < 1e-3
+    assert out["calls"] > 0
+
+
+def test_quench_tric_needs_one_label_per_atom():
+    from anneal import quench
+
+    with pytest.raises(ValueError, match="species"):
+        quench(lambda x: flexible_water(x, 2), WATER_DIMER, 1e-3, method="tric", species=[8, 1, 1])
+    with pytest.raises(ValueError, match="method"):
+        quench(lambda x: flexible_water(x, 2), WATER_DIMER, 1e-3, method="bfgs")
+
+
+def test_cluster_search_tric_local_step():
+    def energy(x):
+        return flexible_water(x, 2)[0]
+
+    def grad(x):
+        return flexible_water(x, 2)[1]
+
+    kwargs = dict(start=WATER_DIMER, species=[8, 1, 1] * 2, groups=[[0, 1, 2], [3, 4, 5]], seed=2)
+    lbfgs = cluster_search(energy, grad, 6, 600, local_step="lbfgs", **kwargs)
+    tric = cluster_search(energy, grad, 6, 600, local_step="tric", **kwargs)
+    assert (lbfgs["local_step"], tric["local_step"]) == ("lbfgs", "tric")
+    assert lbfgs["quench_seconds"] is None
+    assert np.isfinite(tric["best_energy"])
+    assert tric["best_energy"] <= lbfgs["best_energy"] + 1e-3
+    with pytest.raises(ValueError, match="groups"):
+        cluster_search(energy, grad, 6, 600, start=WATER_DIMER, species=[8, 1, 1] * 2, local_step="tric")
+    with pytest.raises(ValueError, match="auto"):
+        cluster_search(energy, grad, 6, 600, local_step="bfgs", **kwargs)
+
+
+def test_cluster_search_auto_quench_takes_tric_for_a_slow_gradient():
+    import time
+
+    def energy(x):
+        return flexible_water(x, 2)[0]
+
+    def grad(x):
+        time.sleep(0.003)
+        return flexible_water(x, 2)[1]
+
+    kwargs = dict(start=WATER_DIMER, species=[8, 1, 1] * 2, groups=[[0, 1, 2], [3, 4, 5]], seed=2)
+    out = cluster_search(energy, grad, 6, 120, **kwargs)
+    call, step = out["quench_seconds"]
+    assert out["local_step"] == "tric", (call, step)
+    assert call > step

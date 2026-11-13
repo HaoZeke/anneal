@@ -80,6 +80,8 @@ pub mod routing_probe;
 pub mod sketchmap;
 pub mod tpe;
 pub mod tps_shoot;
+/// Quasi-Newton relaxation in translation-rotation internal coordinates.
+pub mod tric_opt;
 /// Quasi-Newton relaxation whose curvature persists between calls.
 ///
 /// Handle around [`rgmin::Lbfgs`].

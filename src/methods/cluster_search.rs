@@ -86,6 +86,13 @@ pub struct RelaxStats {
     /// Against `screens * screen_steps` this is what stopping on a decision
     /// bought, and it is the only number that says whether it bought anything.
     pub screen_steps_taken: usize,
+    /// The quench in force when the search ended: TRIC or L-BFGS, never
+    /// [`LocalStep::Auto`](crate::methods::tric_opt::LocalStep::Auto).
+    pub local_step: crate::methods::tric_opt::LocalStep,
+    /// Under [`LocalStep::Auto`](crate::methods::tric_opt::LocalStep::Auto),
+    /// the wall seconds per potential call of the opening quench and of one
+    /// TRIC step outside the potential, once measured.
+    pub quench_seconds: Option<(f64, f64)>,
 }
 
 impl RelaxStats {
@@ -641,6 +648,22 @@ where
     let refuse_overlap = cfg.species.is_some();
     let wall = CallWall::of(cfg);
     let mut failure: Option<FailedPotential> = None;
+    use crate::methods::tric_opt::LocalStep;
+    let mut tric = match (cfg.local_step, cfg.species.as_ref()) {
+        (LocalStep::Tric | LocalStep::Auto, Some(species))
+            if !cfg.move_library.is_rigid_body() && species.len() == cfg.n_points =>
+        {
+            Some(crate::methods::tric_opt::TricOpt::new(species.clone()))
+        }
+        _ => None,
+    };
+    let mut use_tric = tric.is_some() && cfg.local_step == LocalStep::Tric;
+    // Under `Auto` the opening quench is Cartesian and timed; the choice is
+    // made once, from its calls.
+    let mut deciding = tric.is_some() && cfg.local_step == LocalStep::Auto;
+    if use_tric {
+        stats.local_step = LocalStep::Tric;
+    }
     move |led, x, iters| {
         // A new quench. A failure closed the previous descent; this
         // proposal is a different trial.
@@ -764,13 +787,16 @@ where
         // A descent from where the previous one ended, the full pass after
         // a screen among them, opens by asking for an answer already paid.
         let mut opening = prior.clone();
+        let mut call_seconds = 0.0_f64;
+        let mut timed_calls = 0usize;
         let mut evaluate = |v: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
             if let Some(check) = opening.take_if(|check| check.at == v) {
                 let answer = (check.energy, check.gradient.clone());
                 *last.borrow_mut() = Some(check);
                 return Some(answer);
             }
-            let (energy, gradient, physical) = charge_rejecting_repeat_failure(
+            let clock = deciding.then(|| (led.spent(), std::time::Instant::now()));
+            let answered = charge_rejecting_repeat_failure(
                 objective,
                 led,
                 stats,
@@ -779,7 +805,14 @@ where
                 refuse_overlap,
                 wall,
                 &mut failure,
-            )?;
+            );
+            if let Some((spent, started)) = clock
+                && led.spent() > spent
+            {
+                call_seconds += started.elapsed().as_secs_f64();
+                timed_calls += led.spent() - spent;
+            }
+            let (energy, gradient, physical) = answered?;
             remember(v, energy, &gradient, physical);
             Some((energy, gradient))
         };
@@ -814,12 +847,20 @@ where
             false
         };
         let preconditioner = species.and_then(|z| BondPreconditioner::new(x, z));
-        let (f, xr) = match preconditioner {
-            None => {
+        let quench_tric = tric
+            .as_mut()
+            .filter(|tric| use_tric && tric.atoms() * 3 == x.len());
+        let (f, xr) = match (quench_tric, preconditioner) {
+            (Some(tric), _) => {
+                tric.gtol = opt.gtol;
+                let (f, xr, _) = tric.minimize_watched(x, iters, &mut evaluate, &mut watch);
+                (f, xr)
+            }
+            (None, None) => {
                 let (f, xr, _) = opt.minimize_watched(x, iters, &mut evaluate, &mut watch);
                 (f, xr)
             }
-            Some(pre) => {
+            (None, Some(pre)) => {
                 // The reduced gradient has other units, so the solver's own
                 // test is off and the stop reads the Cartesian one.
                 let origin = x.to_owned();
@@ -844,6 +885,24 @@ where
                 (f, pre.expand(origin.view(), zr.view()))
             }
         };
+        // A quench of a few calls times the start, not the potential.
+        if deciding
+            && timed_calls >= 3
+            && let Some(tric) = tric.as_ref()
+            && let Some(check) = last.borrow().as_ref()
+            && check.at.len() == 3 * tric.atoms()
+        {
+            let per_call = call_seconds / timed_calls as f64;
+            let per_step = tric.step_seconds(check.at.view(), check.energy, check.gradient.view());
+            use_tric = per_call > per_step;
+            deciding = false;
+            stats.quench_seconds = Some((per_call, per_step));
+            stats.local_step = if use_tric {
+                LocalStep::Tric
+            } else {
+                LocalStep::Lbfgs
+            };
+        }
         if let Some((at, claim)) = probe_at {
             stats.probe_stops += 1;
             stats.probe_steps += at;
