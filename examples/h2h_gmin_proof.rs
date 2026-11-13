@@ -236,7 +236,10 @@ fn system_spec(name: &str) -> Option<Spec> {
         "lj55" => (55, -279.248470),
         "lj75" => (75, -397.492331),
         "lj98" => (98, -543.665361),
+        "lj102" => (102, -569.363652),
         "lj104" => (104, -582.086642),
+        "lj150" => (150, -893.310258),
+        "lj200" => (200, -1229.184776),
         _ => return None,
     };
     Some(Spec {
@@ -251,7 +254,7 @@ fn paper_budget(n: usize) -> Option<usize> {
     match n {
         38 => Some(400_000),
         55 => Some(1_000_000),
-        75 | 98 | 102 | 104 => Some(4_000_000),
+        75 | 98 | 102 | 104 | 150 | 200 => Some(4_000_000),
         _ => None,
     }
 }
@@ -546,6 +549,8 @@ mod tests {
         assert_eq!(paper_budget(98), Some(4_000_000));
         assert_eq!(paper_budget(102), Some(4_000_000));
         assert_eq!(paper_budget(104), Some(4_000_000));
+        assert_eq!(paper_budget(150), Some(4_000_000));
+        assert_eq!(paper_budget(200), Some(4_000_000));
         assert_eq!(paper_budget(31), None);
     }
 
@@ -559,6 +564,9 @@ mod tests {
         assert_eq!(system_spec("lj98").unwrap().budget, 4_000_000);
         assert_eq!(system_spec("lj104").unwrap().budget, 4_000_000);
         assert!((system_spec("lj104").unwrap().reference + 582.086642).abs() < 1e-12);
+        assert!((system_spec("lj102").unwrap().reference + 569.363652).abs() < 1e-12);
+        assert!((system_spec("lj150").unwrap().reference + 893.310258).abs() < 1e-12);
+        assert!((system_spec("lj200").unwrap().reference + 1229.184776).abs() < 1e-12);
         assert!((HIT_TOL - 0.001).abs() < 1e-15);
         assert!(system_spec("lj31").is_none());
     }

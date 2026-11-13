@@ -2,9 +2,9 @@
 # Copyright (c) anneal developers
 """Serial GMIN against the paper preset, at the paper force-call budgets.
 
-Sizes are LJ75, LJ98 and LJ104. Six seeds, the same list on both arms.
-Within a size the (seed, arm) pairs are shuffled. LJ75 runs before
-LJ98, and LJ98 runs before LJ104. A hit is a quenched energy within
+Sizes are LJ102, LJ150 and LJ200. Six seeds, the same list on both arms.
+Within a size the (seed, arm) pairs are shuffled. LJ102 runs before
+LJ150, and LJ150 runs before LJ200. A hit is a quenched energy within
 0.001 of the Cambridge minimum. A miss is stored as the full budget, and the median and
 interquartile range use Hyndman-Fan type 7 on that column. The wall
 ratio is the GMIN median wall divided by the anneal median wall.
@@ -25,11 +25,11 @@ import sys
 from pathlib import Path
 
 PAPER_BUDGETS = {
-    75: 4_000_000,
-    98: 4_000_000,
-    104: 4_000_000,
+    102: 4_000_000,
+    150: 4_000_000,
+    200: 4_000_000,
 }
-SIZES = (75, 98, 104)
+SIZES = (102, 150, 200)
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
 ARMS = ("anneal", "gmin")
 SCHEDULE_SEED = 20261111
@@ -350,9 +350,9 @@ def self_test() -> None:
     median, iqr = median_iqr(sample)
     if abs(median - 3.5) > 1e-12 or abs(iqr - 2.5) > 1e-12:
         raise SystemExit("median iqr")
-    if any(PAPER_BUDGETS[n] != 4_000_000 for n in (75, 98, 104)):
+    if any(PAPER_BUDGETS[n] != 4_000_000 for n in (102, 150, 200)):
         raise SystemExit("paper budgets")
-    if set(PAPER_BUDGETS) != {75, 98, 104}:
+    if set(PAPER_BUDGETS) != {102, 150, 200}:
         raise SystemExit("sizes")
     order = schedule(SIZES, SEEDS, ARMS, SCHEDULE_SEED)
     seen: list[int] = []
