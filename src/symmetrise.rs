@@ -812,6 +812,19 @@ pub fn complete_orbits(
     complete_orbits_about(x, n, group, centroid(x, n), pair_cutoff, min_separation)
 }
 
+/// Squared distance is inside `pair_cutoff` after the same root test as a
+/// direct comparison. A value more than a few ulps above the squared
+/// cutoff cannot round back to a root at or below it, so the far pairs
+/// skip the root. The accepted site is unchanged.
+fn within_cutoff(d2: f64, pair_cutoff: f64) -> bool {
+    let limit = pair_cutoff * pair_cutoff;
+    let slack = limit * (64.0 * f64::EPSILON);
+    if d2 > limit + slack {
+        return false;
+    }
+    d2.sqrt() <= pair_cutoff
+}
+
 /// [`complete_orbits`] with the group acting about `c` rather than the
 /// centroid, for a group read off a core whose centre is not the
 /// centroid of the whole structure.
@@ -836,9 +849,11 @@ pub fn complete_orbits_about(
             let w = act(g, r);
             let mut hit = None;
             for (i, (p, _, _)) in sites.iter().enumerate() {
-                let d =
-                    ((w[0] - p[0]).powi(2) + (w[1] - p[1]).powi(2) + (w[2] - p[2]).powi(2)).sqrt();
-                if d <= pair_cutoff {
+                let dx = w[0] - p[0];
+                let dy = w[1] - p[1];
+                let dz = w[2] - p[2];
+                let d2 = dx * dx + dy * dy + dz * dz;
+                if within_cutoff(d2, pair_cutoff) {
                     hit = Some(i);
                     break;
                 }
@@ -1730,6 +1745,26 @@ mod tests {
 mod orbit_tests {
     use super::*;
     use ndarray::Array1;
+
+    #[test]
+    fn a_far_pair_skips_the_root_and_a_near_pair_keeps_it() {
+        let cutoff = 0.7;
+        let mut state = 1u64;
+        for _ in 0..4000 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let unit = (state >> 11) as f64 / (1u64 << 53) as f64;
+            let distance = cutoff * (0.2 + 2.2 * unit);
+            let d2 = distance * distance;
+            let fast = super::within_cutoff(d2, cutoff);
+            let slow = d2.sqrt() <= cutoff;
+            assert_eq!(fast, slow, "distance {distance}");
+        }
+        assert!(super::within_cutoff(cutoff * cutoff, cutoff));
+        assert!(!super::within_cutoff(
+            (cutoff * 2.0) * (cutoff * 2.0),
+            cutoff
+        ));
+    }
 
     /// A regular octahedron with one vertex pushed off its site is put back
     /// on it by orbit completion under the octahedron's own C4 axes, and a
