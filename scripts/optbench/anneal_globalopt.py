@@ -16,9 +16,11 @@ budget check and the call count at the hit is the start's cost.
 
 Lennard-Jones and binary Lennard-Jones reach anneal as the atom positions.
 Rigid TIP4P reaches it as a rigid-body state through ``water_sites``: the
-centres of mass, then exponential-map rotations, which are GMIN's angle-axis
-vectors with the sign flipped because GMIN rotates passively and anneal
-actively. The harness only ever sees GMIN's chart.
+centres of mass, then exponential-map rotations. That is GMIN's ``coords``
+for ``NTIP`` number for number, so an archive ``.aa`` start opens unchanged
+and GMIN's ``CHECKD`` energy of it is anneal's. ``optbench.tip4p`` rotates
+passively (its docstring cites ``tip.f90``, GMIN's older ``TIP`` keyword), so
+the harness is handed every state with its rotations negated.
 
 Run from the optbench checkout's environment::
 
@@ -178,7 +180,7 @@ def run_start(job: dict) -> dict:
         rigid["water_sites"] = reference_sites()[:3]
 
     def chart(x):
-        """GMIN's rotation is passive and anneal's active: the rotation block flips sign.
+        """anneal's state to ``optbench.tip4p``'s passive chart: the rotation block flips sign.
 
         The map is its own inverse and applies to a gradient the same way.
         """
@@ -222,7 +224,7 @@ def run_start(job: dict) -> dict:
             seed=int(job["seed"]),
             communicating=job["preset"] == "communicating",
             recommended=job["preset"] == "recommended",
-            start=chart(start),
+            start=start,
             **rigid,
         )
     except _Stop:
