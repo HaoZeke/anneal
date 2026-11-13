@@ -22,7 +22,7 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 
 const OPTBENCH_START: &str = include_str!("fixtures/tip4p15-optbench-0.aa");
-const OPTBENCH_CHECKD: f64 = 155.557_211_980_144_59;
+const OPTBENCH_CHECKD: f64 = 155.557_211_980_144_6;
 const LEGACY_START: &str = include_str!("fixtures/tip4p15-seed2000.legacy-interleaved");
 const SEED_2000_CHECKD: f64 = -13.192_905_420_423_074;
 const GMIN_TOLERANCE: f64 = 1.0e-3;
