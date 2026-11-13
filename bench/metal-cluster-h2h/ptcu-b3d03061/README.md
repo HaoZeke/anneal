@@ -18,6 +18,8 @@ Wu et al. is closed and does not publish an open table of Gupta total energies. 
 
 Six seeds, 2000–2005. The (system, seed, arm) list is shuffled with schedule seed 20261113. One job at a time, `taskset -c 0`, `sudo unshare --uts`, hostname `bench`, working directory `/work`. `pot_per_eval_s` is potential time per charged call. `outside_per_eval_s` is the rest of the wall on the same denominator. The wall ratio is the GMIN median wall divided by the anneal median wall.
 
+`h2h_metal` reads `H2H_BASIN_STRIDE` and otherwise takes 8. These rows were recorded at stride 1, which is what the driver sets. Lennard-Jones and TIP4P do not set the stride.
+
 ```text
 snakemake -s workflow/Snakefile ptcu_h2h
 ```
