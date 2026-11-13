@@ -12,8 +12,9 @@ Seeds 2000–2011, budget 2_000_000 charged evaluations, serial, one core, hostn
 | weight | `a48ae427167c9b3e0c59aa71382e874a406a212d` | chain and shell compete, weighted by improvement | 5/12 | 0/12 | 0/12 | 5/36 |
 | epoch | `8fb186e21c3e445d4acd2efcc5767554c5534e7e` | shell and chain alternate at each stall, then the lower best is kept | 5/12 | 1/12 | 0/12 | 6/36 |
 | exchange | `63a0d1513d3460983db3f337fb488f63742b66aa` | contact-exchange polish on a stalled basin | 8/12 | 4/12 | 0/12 | 12/36 |
+| chain-tabu | `cba385f31deafcbe5a6c58eb2fd25725a3275c18` + `eabbd99921db70e2a463a3a8618960fe7c4a2061` | ungated chain library, plus contact-graph tabu on stall | 10/12 | 2/12 | 2/12 | 14/36 |
 | gmin | — | fixed step | 0/12 | 0/12 | 0/12 | 0/36 |
 
-The shell total is 14/36. The chain library reaches 15/36 and drops (H₂O)₂₀ from 5/12 to 2/12. No other arm beats 14/36 without a larger drop.
+The shell total is 14/36. The chain library reaches 15/36 and drops (H₂O)₂₀ from 5/12 to 2/12. Chain-tabu keeps those two (H₂O)₂₁ hits (seeds 2002 and 2005) and raises (H₂O)₁₅ to 10/12, and (H₂O)₂₀ stays at 2/12. The total ties the shell. Rebased onto `bef67611d21ad1b77c8909a61371604c71f612a8`, the same seeds spend the same number of evaluations (tip4p21 seed 2005 is 43431, tip4p15 seeds 2001, 2006, 2008 and 2011 match). LJ38 seed 2000 stays 11792.
 
 Per-seed rows are `rows-n12.csv`.
