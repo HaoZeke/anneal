@@ -330,6 +330,22 @@ impl MoveLibrary {
                 cutoff: LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
             });
         }
+        // A configuration that completes orbits on every new basin already
+        // runs the operator, so the arm is offered only to one that does not.
+        if cfg.orbit_arm
+            && !cfg.orbit_complete_on_new
+            && !self.is_rigid_body()
+            && !self.is_molecular()
+        {
+            kernels.push(ClusterMove::OrbitComplete {
+                n_points: cfg.n_points,
+                tolerance: cfg.symmetry_tolerance,
+                merge_radius: cfg.symmetry_merge_radius,
+                core_fraction: cfg.symmetrise_core_fraction,
+                min_separation: cfg.min_separation,
+                fallback_step: LennardJonesPreset::SINGLE_POINT_STEP * cfg.length_scale,
+            });
+        }
         if cfg.point_symmetrise {
             kernels.push(ClusterMove::PointSymmetrise {
                 n_points: cfg.n_points,
@@ -483,6 +499,29 @@ pub enum ClusterMove {
     ShellRotate(ShellRotate),
     /// Enforce an approximate rotational symmetry.
     Symmetrise(Symmetrise),
+    /// Orbit completion of the incumbent, as a proposal.
+    ///
+    /// The completion [`Config::orbit_complete_on_new`] runs once per new
+    /// basin: the point group of the core is applied to the whole cluster
+    /// and the surface points move onto the empty orbit positions
+    /// ([`crate::packing::on_new_basin`]). Here the allocator draws it like
+    /// any other arm and pays for it only when the depth it reaches earns
+    /// the draws. A structure whose core has no group that moves anyone
+    /// falls back to a single-point displacement.
+    OrbitComplete {
+        /// Points in a state.
+        n_points: usize,
+        /// Largest RMS deviation at which an operation counts as approximate.
+        tolerance: f64,
+        /// Largest separation at which a point and an image are partners.
+        merge_radius: f64,
+        /// Fraction of points, by distance from the centroid, in the core.
+        core_fraction: f64,
+        /// Closest approach of a point placed on an orbit.
+        min_separation: f64,
+        /// Half-width of the fallback single-point displacement.
+        fallback_step: f64,
+    },
     /// Push the structure onto the point group it nearly has, as a proposal.
     ///
     /// Oakley, Johnston and Wales, Phys. Chem. Chem. Phys. 15, 3965 (2013):
@@ -1519,6 +1558,7 @@ impl ClusterMove {
             ClusterMove::ShellRotate(_) => "shell".into(),
             ClusterMove::Symmetrise(_) => "sym".into(),
             ClusterMove::PointSymmetrise { .. } => "psym".into(),
+            ClusterMove::OrbitComplete { .. } => "orbit".into(),
             ClusterMove::SoapRepel { .. } => "repel".into(),
             ClusterMove::Visit { .. } => "visit".into(),
             ClusterMove::Angular { .. } => "angular".into(),
@@ -1778,6 +1818,36 @@ impl ClusterMove {
             }
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
             ClusterMove::Symmetrise(k) => k.propose(x, t, rng),
+            ClusterMove::OrbitComplete {
+                n_points,
+                tolerance,
+                merge_radius,
+                core_fraction,
+                min_separation,
+                fallback_step,
+            } => {
+                let n = *n_points;
+                if let Some(y) = crate::packing::on_new_basin(
+                    x,
+                    n,
+                    *tolerance,
+                    *merge_radius,
+                    *core_fraction,
+                    *min_separation,
+                ) && y.iter().zip(x.iter()).any(|(a, b)| (a - b).abs() > 1e-9)
+                {
+                    return y;
+                }
+                let mut y = x.to_owned();
+                if n > 0 {
+                    let i = rng.random_range(0..n);
+                    let h = fallback_step * scale;
+                    for k in 0..3 {
+                        y[3 * i + k] += rng.random_range(-h..h);
+                    }
+                }
+                y
+            }
             ClusterMove::PointSymmetrise {
                 n_points,
                 tolerance,

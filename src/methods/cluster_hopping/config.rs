@@ -487,6 +487,16 @@ pub struct Config {
     /// quenched and offered to the acceptance rule. With
     /// [`Config::point_symmetrise_on_new`] both are attempted, core first.
     pub orbit_complete_on_new: bool,
+    /// Offer orbit completion as an allocator arm
+    /// ([`ClusterMove::OrbitComplete`]) when
+    /// [`Config::orbit_complete_on_new`] is off.
+    ///
+    /// The event form completes every new basin and pays for every
+    /// completion. The arm is drawn by the move allocator and keeps its
+    /// share only while the depth it reaches pays for it. Absent from the
+    /// resolved JSON while off.
+    #[serde(skip_serializing_if = "is_false")]
+    pub orbit_arm: bool,
     /// Which core an orbit completion reads its point group from. No
     /// preset leaves the fraction core; [`Config::with_dual_orbit_core`]
     /// opts in to both. Fraction is omitted from the resolved JSON, so a
@@ -1523,6 +1533,7 @@ impl Config {
             point_symmetrise: false,
             point_symmetrise_on_new: false,
             orbit_complete_on_new: false,
+            orbit_arm: false,
             orbit_core: OrbitCore::Fraction,
             soap_repel: false,
             exchange_metropolis: false,
@@ -1755,6 +1766,7 @@ impl Config {
         self.point_symmetrise = false;
         self.point_symmetrise_on_new = false;
         self.orbit_complete_on_new = false;
+        self.orbit_arm = false;
         self.orbit_core = OrbitCore::Fraction;
         self.angular_moves = false;
         self.continuous_symmetry = ContinuousSymmetry::Off;

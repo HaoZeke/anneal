@@ -11088,6 +11088,52 @@ mod tests {
     }
 
     #[test]
+    fn orbit_arm_is_offered_only_without_completion_on_new_basins() {
+        let names = |cfg: &Config| -> Vec<String> {
+            search_kernels(cfg)
+                .iter()
+                .map(|kernel| kernel.name())
+                .collect()
+        };
+        let recommended = Config::recommended(13);
+        let mut armed = recommended.clone();
+        armed.orbit_arm = true;
+        assert_eq!(names(&recommended), names(&armed));
+        assert!(
+            armed
+                .resolved_json()
+                .unwrap()
+                .contains("\"orbit_arm\":true")
+        );
+        assert!(!recommended.resolved_json().unwrap().contains("orbit_arm"));
+        armed.orbit_complete_on_new = false;
+        let offered = names(&armed);
+        assert_eq!(offered.iter().filter(|name| *name == "orbit").count(), 1);
+        armed.orbit_arm = false;
+        assert!(!names(&armed).iter().any(|name| name == "orbit"));
+    }
+
+    #[test]
+    fn the_orbit_arm_steps_one_point_when_no_group_moves_anyone() {
+        let cfg = Config::for_cluster(3);
+        let kernel = ClusterMove::OrbitComplete {
+            n_points: 3,
+            tolerance: cfg.symmetry_tolerance,
+            merge_radius: cfg.symmetry_merge_radius,
+            core_fraction: cfg.symmetrise_core_fraction,
+            min_separation: cfg.min_separation,
+            fallback_step: 0.1,
+        };
+        let x = Array1::from(vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0]);
+        let mut rng = StdRng::seed_from_u64(7);
+        let y = kernel.propose(x.view(), cfg.temperature, &mut rng);
+        let moved: Vec<usize> = (0..3)
+            .filter(|&i| (0..3).any(|k| y[3 * i + k] != x[3 * i + k]))
+            .collect();
+        assert_eq!(moved.len(), 1);
+    }
+
+    #[test]
     fn repair_enforces_the_separation() {
         let n = 2;
         let mut x = Array1::from(vec![0.0, 0.0, 0.0, 0.01, 0.0, 0.0]);
