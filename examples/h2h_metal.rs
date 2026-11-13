@@ -81,6 +81,21 @@ fn system_spec(name: &str) -> Option<Spec> {
             1_000_000,
             Kind::CopperGold { n_copper: 0 },
         ),
+        // Pure gold at the Lennard-Jones paper sizes. The Cambridge Cu–Au
+        // Gupta archives publish the pure-gold limit at 38 and 55 only, so
+        // 75 and 98 keep an unset reference and spend 4_000_000 calls.
+        "au75" => (
+            75,
+            f64::NEG_INFINITY,
+            4_000_000,
+            Kind::CopperGold { n_copper: 0 },
+        ),
+        "au98" => (
+            98,
+            f64::NEG_INFINITY,
+            4_000_000,
+            Kind::CopperGold { n_copper: 0 },
+        ),
         "cu27au28" => (
             55,
             -182.93136675,
@@ -586,6 +601,10 @@ mod tests {
         assert!((system_spec("au38").unwrap().reference + 130.54001708).abs() < 1e-12);
         assert!((system_spec("cu6au32").unwrap().reference + 130.79994836).abs() < 1e-12);
         assert!((system_spec("au55").unwrap().reference + 191.03085280).abs() < 1e-12);
+        assert_eq!(system_spec("au75").unwrap().budget, 4_000_000);
+        assert_eq!(system_spec("au98").unwrap().budget, 4_000_000);
+        assert!(system_spec("au75").unwrap().reference.is_infinite());
+        assert!(system_spec("au98").unwrap().reference.is_infinite());
         assert!((system_spec("cu27au28").unwrap().reference + 182.93136675).abs() < 1e-12);
         assert!(system_spec("zn31").is_none());
         let cu3 = system_spec("cu3au35").unwrap();

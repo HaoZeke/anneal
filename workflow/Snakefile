@@ -176,6 +176,19 @@ rule covalent_gfn2_crest:
         """
 
 
+# Gupta gold against GMIN at 38, 75 and 98.
+# Not part of `rule all`. One serial session, hostname bench:
+#   snakemake -s workflow/Snakefile gold_gupta_h2h
+rule gold_gupta_h2h:
+    output:
+        "bench/gold-gupta/seeds.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/metal_h2h/enter_gold.sh
+        """
+
+
 # GMIN against the paper preset at the paper force-call budgets.
 # Not part of `rule all`. Run it by name:
 #   snakemake -s workflow/Snakefile gmin_h2h
