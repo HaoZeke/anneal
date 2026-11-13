@@ -19,14 +19,14 @@
 //!
 //! `H2H_ARM` picks the search. `recommended` is `Config::recommended`.
 //! `H2H_PRIORS=0` with it, or `H2H_ARM=nopriors`, switches off the
-//! structure priors the preset carries for close-packed clusters: orbit
-//! completion on every new basin, stall symmetrisation, the
-//! continuous-symmetry reseed, the Lennard-Jones energy lattice and the
-//! two-phase surface. The fixed temperature, 0.8 of the Lennard-Jones well,
-//! goes with them, and the budget-window law sets it. Orbit completion
-//! stays as an allocator arm, and the search keeps parts of the cluster
-//! within the pair's measured reach of each other in place of the
-//! container sphere when that reach is shorter than the sphere's diameter.
+//! structure priors the preset carries for close-packed clusters: stall
+//! symmetrisation, the continuous-symmetry reseed, the Lennard-Jones energy
+//! lattice, the two-phase surface and the five prior gates (fivefold SOAP,
+//! icosahedral reseed, lattice regrowth, labelled core, motif reseed). The
+//! fixed temperature, 0.8 of the Lennard-Jones well, goes with them, and the
+//! budget-window law sets it. Orbit completion stays, on every new basin and
+//! as an allocator arm, and the search keeps parts of the cluster within the
+//! pair's measured reach of each other in place of the container sphere.
 //! `general` is the same search on scales measured from the potential's own
 //! dimer, the bond length over 2^(1/6) and the well depth, so the reduced
 //! constants mean what they mean for Lennard-Jones. The dimer and reach
@@ -276,10 +276,18 @@ fn pair_range(
 /// `Config::recommended` without its close-packed structure priors.
 ///
 /// The temperature is a Lennard-Jones calibration too, so the budget-window
-/// law replaces it. Orbit completion stays, drawn by the allocator.
+/// law replaces it. Orbit completion is symmetry the structure itself
+/// carries, so it stays, on every new basin and as an allocator arm. The
+/// five prior gates go: the fivefold SOAP move, the icosahedral reseed,
+/// lattice regrowth, the labelled core and the motif reseed.
 fn without_priors(mut cfg: Config) -> Config {
-    cfg.orbit_complete_on_new = false;
+    cfg.orbit_complete_on_new = true;
     cfg.orbit_arm = true;
+    cfg.prior_soap = false;
+    cfg.prior_reseed = false;
+    cfg.prior_growth = false;
+    cfg.prior_core = false;
+    cfg.prior_motif = false;
     cfg.symmetrise_on_stall = false;
     cfg.continuous_symmetry = ContinuousSymmetry::Off;
     cfg.energy_lattice = false;
