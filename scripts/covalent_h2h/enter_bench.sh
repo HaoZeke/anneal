@@ -11,16 +11,18 @@ WORK=/work/covalent-h2h
 OUT=$ROOT/bench/covalent-h2h/${BENCH_OUT:-before}
 
 bash "$HERE/build_anneal.sh"
-bash "$HERE/build_gmin.sh"
+bash "$HERE/build_gmin_tersoff.sh" "$WORK/lib/librgpot_covalent.so"
 
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$OUT"
 RUN=$WORK/${BENCH_OUT:-before}
 mkdir -p "$RUN/runs" "$RUN/starts"
 cp -a "$HERE/run_campaign.py" "$HERE/ase_bh.py" "$WORK/bin/"
 cp -a "$ROOT/examples/h2h_gmin_sw.data" "$WORK/bin/h2h_gmin_sw.data"
+cp -a "$ROOT/examples/h2h_gmin_tc.data" "$WORK/bin/h2h_gmin_tc.data"
 cp -a /work/gmin-h2h/bin/GMIN "$WORK/bin/GMIN"
+cp -a /work/gmin-h2h/bin/GMIN-tersoff "$WORK/bin/GMIN-tersoff"
 cp -a /work/gmin-h2h/gmin-source.txt "$WORK/gmin-source.txt"
-chmod +x "$WORK/bin/h2h_covalent" "$WORK/bin/GMIN"
+chmod +x "$WORK/bin/h2h_covalent" "$WORK/bin/GMIN" "$WORK/bin/GMIN-tersoff"
 
 # HOME moves under /work, so the user site that holds ASE is named here.
 site=$(/usr/bin/python3 -m site --user-site)
@@ -54,6 +56,8 @@ exec /usr/bin/python3 -u $WORK/bin/run_campaign.py \\
   --library $WORK/lib/librgpot_covalent.so \\
   --gmin $WORK/bin/GMIN \\
   --data $WORK/bin/h2h_gmin_sw.data \\
+  --gmin-tersoff $WORK/bin/GMIN-tersoff \\
+  --carbon-data $WORK/bin/h2h_gmin_tc.data \\
   --ase $WORK/bin/ase_bh.py \\
   --source $WORK/gmin-source.txt \\
   --head-file $WORK/anneal-head \\

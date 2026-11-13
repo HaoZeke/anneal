@@ -2,7 +2,7 @@
 # Copyright (c) anneal developers
 """One seeded ASE basin hopping run on a Stillinger-Weber or Tersoff cluster.
 
-GMIN has no Tersoff potential, so the carbon rows compare with
+The second competitor on both elements is
 ``ase.optimize.basin.BasinHopping``. The calculator is the same
 ``librgpot_covalent.so`` the anneal example loads, in the same units. The
 start is anneal's start for that seed. Each quench is ASE's L-BFGS to a

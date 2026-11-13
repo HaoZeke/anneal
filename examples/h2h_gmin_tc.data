@@ -1,0 +1,22 @@
+! examples/h2h_gmin_sw.data on the Tersoff carbon dimer scales, for the
+! GMIN binary scripts/covalent_h2h/build_gmin_tersoff.sh links to rgpot.
+! The dimer bond is 1.2892326 Angstrom and its energy 5.1661751 eV, the
+! scales examples/h2h_covalent prints. Every length, energy and gradient
+! in the silicon file is multiplied by them, SW's sigma and epsilon read
+! as one dimer length and one dimer energy.
+! The driver appends one RANSEED line per run.
+
+SLOPPYCONV 2.0036D-2
+TIGHTCONV 4.0072D-3
+EDIFF 0.015499
+MAXIT 600 500
+SAVE 2
+CENTRE
+SORT
+
+TEMPERATURE 1.0332
+STEPS 90000000 1.0
+STEP 0.51569 0.65751
+NEWRESTART 40
+AVOID 5.1569 20 F
+USERPOT
