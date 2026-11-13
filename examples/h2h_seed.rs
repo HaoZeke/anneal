@@ -123,8 +123,17 @@ impl DifferentiableObjective<f64> for Counted {
     }
 }
 
+fn apply_stride(mut cfg: Config) -> Config {
+    if let Ok(text) = std::env::var("H2H_BASIN_STRIDE")
+        && let Ok(stride) = text.parse::<usize>()
+    {
+        cfg.basin_stride = stride.max(1);
+    }
+    cfg
+}
+
 fn atomic_config(arm: &str, n: usize) -> Config {
-    match arm {
+    let cfg = match arm {
         "recommended" => Config::recommended(n),
         "base" => Config::for_cluster(n),
         "temperature-1.5" => {
@@ -138,7 +147,8 @@ fn atomic_config(arm: &str, n: usize) -> Config {
             cfg
         }
         other => panic!("no atomic arm {other}"),
-    }
+    };
+    apply_stride(cfg)
 }
 
 fn water_config(arm: &str, n: usize) -> Config {
@@ -148,7 +158,7 @@ fn water_config(arm: &str, n: usize) -> Config {
         other => panic!("no TIP4P arm {other}"),
     };
     cfg.rigid_body_geometry = Some(gmin_water_geometry());
-    cfg
+    apply_stride(cfg)
 }
 
 /// Rodrigues rotation of `v` by the rotation vector `w`.

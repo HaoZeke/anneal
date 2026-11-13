@@ -62,7 +62,13 @@ fn cmd_run(args: &[String]) -> i32 {
         return 2;
     };
     let budget = env_budget().unwrap_or(spec.budget);
-    let cfg = Config::recommended(spec.n);
+    let mut cfg = Config::recommended(spec.n);
+    // Unset leaves the library stride of one.
+    if let Ok(text) = std::env::var("H2H_BASIN_STRIDE")
+        && let Ok(stride) = text.parse::<usize>()
+    {
+        cfg.basin_stride = stride.max(1);
+    }
     let start = start_of(&cfg, spec.n, seed);
     if let Some(path) = args.get(3)
         && let Err(err) = write_coords(path, &start)

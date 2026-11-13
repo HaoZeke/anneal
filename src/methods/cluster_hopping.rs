@@ -3562,6 +3562,14 @@ where
         stall_archive.offer(e, x.view());
     }
 
+    // Descriptor and seat of the geometry the chain is standing on.
+    // A rejected proposal leaves both in place, so the next hop does
+    // not scan for them again. Opening any other seat drops the seat
+    // count out of agreement and the scan runs.
+    let mut held_bits: Vec<u64> = Vec::new();
+    let mut held_cv: Option<Array1<f64>> = None;
+    let mut held_seat: Option<usize> = None;
+    let mut held_count: usize = 0;
     let stop = loop {
         // A finished checkpoint interval is delivered before the budget
         // exit. The loop otherwise returns here with nothing left to
@@ -6125,17 +6133,35 @@ where
         // turn it back, and one step in `basin_stride` is exact either way.
         let stride = cfg.basin_stride.max(1);
         let skip_basin = stride > 1 && hops % stride != 0 && e_new > e;
-        let s_old = if skip_basin {
-            Array1::zeros(0)
+        let held_live = held_cv.as_ref().is_some_and(|_| {
+            held_count == bias.n_basins()
+                && held_bits.len() == x.len()
+                && held_bits
+                    .iter()
+                    .zip(x.iter())
+                    .all(|(bits, value)| *bits == value.to_bits())
+        });
+        let (s_old, v_old_held, seat_old) = if skip_basin {
+            (Array1::zeros(0), 0.0, None)
+        } else if held_live {
+            let cv = held_cv.clone().expect("held");
+            let height = held_seat.map(|i| bias.height_at(i)).unwrap_or(0.0);
+            (cv, height, held_seat)
         } else if reusable_descriptor {
-            dc
+            let cv = dc;
+            let (height, seat) = bias.locate(cv.view());
+            (cv, height, seat)
         } else {
-            bias.cv(x.view())
+            let cv = bias.cv(x.view());
+            let (height, seat) = bias.locate(cv.view());
+            (cv, height, seat)
         };
-        let s_new = if skip_basin {
-            Array1::zeros(0)
+        let (s_new, v_new_held, seat_new) = if skip_basin {
+            (Array1::zeros(0), 0.0, None)
         } else {
-            bias.cv(x_new.view())
+            let cv = bias.cv(x_new.view());
+            let (height, seat) = bias.locate(cv.view());
+            (cv, height, seat)
         };
         // A draw from the region's density of states, recorded before the
         // acceptance rule reweights it towards the low tail.
@@ -6167,24 +6193,24 @@ where
         // When track_funnels is on, the spectral term is well-tempered MetaD
         // on the Fiedler coordinate of the hop graph (SpectralBias): it fills
         // the *funnel* the chain is stuck in, not only the current basin.
-        let v_old = if skip_basin {
+        let spectral_old = if skip_basin {
             0.0
         } else {
-            bias.potential(s_old.view())
-                + spectral
-                    .as_ref()
-                    .map(|sp| sp.potential(sp.cv(x.view()).view()))
-                    .unwrap_or(0.0)
+            spectral
+                .as_ref()
+                .map(|sp| sp.potential(sp.cv(x.view()).view()))
+                .unwrap_or(0.0)
         };
-        let v_new = if skip_basin {
+        let spectral_new = if skip_basin {
             0.0
         } else {
-            bias.potential(s_new.view())
-                + spectral
-                    .as_ref()
-                    .map(|sp| sp.potential(sp.cv(x_new.view()).view()))
-                    .unwrap_or(0.0)
+            spectral
+                .as_ref()
+                .map(|sp| sp.potential(sp.cv(x_new.view()).view()))
+                .unwrap_or(0.0)
         };
+        let v_old = v_old_held + spectral_old;
+        let v_new = v_new_held + spectral_new;
         let delta = (e_new + v_new + pave_new) - (e + v_old + pave_old);
         // Unquenched trials are not answers. They still face Metropolis,
         // which is how the measured LJ38 run discovers basins from a
@@ -6793,14 +6819,17 @@ where
             law.observe_rejection(delta / ratios[rep]);
         }
         if !skip_basin {
-            if reusable_descriptor {
-                bias.deposit(
-                    if accept { s_new.view() } else { s_old.view() },
-                    temperature,
-                );
+            let (occupied, seat) = if accept {
+                (s_new.view(), seat_new)
             } else {
-                bias.deposit(bias.cv(x.view()).view(), temperature);
-            }
+                (s_old.view(), seat_old)
+            };
+            let landed_seat = bias.deposit_at(occupied, seat, temperature);
+            held_bits.clear();
+            held_bits.extend(x.iter().map(|value| value.to_bits()));
+            held_cv = Some(if accept { s_new.clone() } else { s_old.clone() });
+            held_seat = Some(landed_seat);
+            held_count = bias.n_basins();
         }
         // Visits other chains made to the minimum this quench reached, paid
         // into this chain's bias as if it had made them. The count is under

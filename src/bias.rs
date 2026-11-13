@@ -699,39 +699,76 @@ impl BasinMetric for EuclideanMetric {
 #[target_feature(enable = "avx2")]
 unsafe fn packed_squared_distance_exceeds(a: &[f64], b: &[f64], limit: f64) -> bool {
     use std::arch::x86_64::{
-        _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_setzero_pd, _mm256_storeu_pd,
-        _mm256_sub_pd,
+        _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_setzero_pd, _mm256_sub_pd,
     };
     let n = a.len();
-    let mut acc = _mm256_setzero_pd();
+    // Four independent sums. One accumulator stalls on the add latency,
+    // and that latency is what the basin scan was spending.
+    let mut acc0 = _mm256_setzero_pd();
+    let mut acc1 = _mm256_setzero_pd();
+    let mut acc2 = _mm256_setzero_pd();
+    let mut acc3 = _mm256_setzero_pd();
     let mut index = 0usize;
+    while index + 16 <= n {
+        unsafe {
+            let d0 = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index)),
+                _mm256_loadu_pd(b.as_ptr().add(index)),
+            );
+            let d1 = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index + 4)),
+                _mm256_loadu_pd(b.as_ptr().add(index + 4)),
+            );
+            let d2 = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index + 8)),
+                _mm256_loadu_pd(b.as_ptr().add(index + 8)),
+            );
+            let d3 = _mm256_sub_pd(
+                _mm256_loadu_pd(a.as_ptr().add(index + 12)),
+                _mm256_loadu_pd(b.as_ptr().add(index + 12)),
+            );
+            acc0 = _mm256_add_pd(acc0, _mm256_mul_pd(d0, d0));
+            acc1 = _mm256_add_pd(acc1, _mm256_mul_pd(d1, d1));
+            acc2 = _mm256_add_pd(acc2, _mm256_mul_pd(d2, d2));
+            acc3 = _mm256_add_pd(acc3, _mm256_mul_pd(d3, d3));
+        }
+        index += 16;
+        if index.is_multiple_of(64) {
+            let partial = horizontal(acc0) + horizontal(acc1) + horizontal(acc2) + horizontal(acc3);
+            if partial > limit + 1.0e-8 {
+                return true;
+            }
+        }
+    }
+    let mut sum = horizontal(acc0) + horizontal(acc1) + horizontal(acc2) + horizontal(acc3);
     while index + 4 <= n {
         unsafe {
             let difference = _mm256_sub_pd(
                 _mm256_loadu_pd(a.as_ptr().add(index)),
                 _mm256_loadu_pd(b.as_ptr().add(index)),
             );
-            acc = _mm256_add_pd(acc, _mm256_mul_pd(difference, difference));
+            let squared = _mm256_mul_pd(difference, difference);
+            sum += horizontal(squared);
         }
         index += 4;
-        if index.is_multiple_of(64) {
-            let mut lane = [0.0; 4];
-            unsafe { _mm256_storeu_pd(lane.as_mut_ptr(), acc) };
-            let partial = lane[0] + lane[1] + lane[2] + lane[3];
-            if partial > limit + 1.0e-8 {
-                return true;
-            }
+        if sum > limit + 1.0e-8 {
+            return true;
         }
     }
-    let mut lane = [0.0; 4];
-    unsafe { _mm256_storeu_pd(lane.as_mut_ptr(), acc) };
-    let mut sum = lane[0] + lane[1] + lane[2] + lane[3];
     while index < n {
         let difference = a[index] - b[index];
         sum += difference * difference;
         index += 1;
     }
     sum > limit + 1.0e-8
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn horizontal(value: std::arch::x86_64::__m256d) -> f64 {
+    let mut lane = [0.0; 4];
+    unsafe { std::arch::x86_64::_mm256_storeu_pd(lane.as_mut_ptr(), value) };
+    lane[0] + lane[1] + lane[2] + lane[3]
 }
 
 /// Maps a state into descriptor space for coverage lookup and repulsion.
@@ -1248,6 +1285,47 @@ impl<F: Fingerprint> BasinBias<F> {
     /// without incrementing this owner's local arrival counts.
     pub fn deposit_scaled_n(&mut self, s: ArrayView1<f64>, temp: f64, scale: f64, count: u64) {
         self.deposit_counted(s, temp, scale, count, false);
+    }
+
+    /// Height of `s` and the seat that holds it, with one scan.
+    ///
+    /// `None` means the descriptor is not inside the radius. The caller
+    /// can deposit on that seat without scanning again.
+    pub fn locate(&self, s: ArrayView1<f64>) -> (f64, Option<usize>) {
+        match self.lookup(s) {
+            Some(i) => (self.height_at(i), Some(i)),
+            None => (0.0, None),
+        }
+    }
+
+    /// Deposit height of seat `i`, or zero if the seat is absent.
+    pub fn height_at(&self, i: usize) -> f64 {
+        self.v.get(i).copied().unwrap_or(0.0)
+    }
+
+    /// One local deposit on a seat [`Self::locate`] already returned.
+    ///
+    /// A known seat is incremented in place. An unknown descriptor is
+    /// opened without a second scan. The seat after the deposit is what
+    /// the next lookup of this descriptor returns, until another seat
+    /// is opened.
+    pub fn deposit_at(&mut self, s: ArrayView1<f64>, known: Option<usize>, temp: f64) -> usize {
+        let denom = (self.gamma - 1.0) * temp;
+        if let Some(i) = known {
+            self.increment(i, denom, temp, 1.0, true);
+            return i;
+        }
+        if self.index.seats_full() {
+            let i = self.index.n_basins().saturating_sub(1);
+            self.increment(i, denom, temp, 1.0, true);
+            return i;
+        }
+        self.index.push(s.to_owned());
+        self.v.push(self.w0);
+        self.deposit_counts.push(1);
+        let i = self.index.n_basins() - 1;
+        self.index.bump(i);
+        i
     }
 
     fn deposit_counted(
