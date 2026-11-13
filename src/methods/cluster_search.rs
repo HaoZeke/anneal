@@ -18,7 +18,9 @@
 use crate::methods::cluster_hopping::OVERLAP_CALL_LIMIT;
 #[cfg(test)]
 use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
+use crate::methods::cluster_hopping::inside_molecular_call_wall;
 use crate::methods::cluster_hopping::min_pair_distance;
+use crate::methods::cluster_hopping::molecular_call_floor;
 use crate::methods::cluster_hopping::separate_contacts;
 #[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::structure_is_sane;
@@ -214,14 +216,26 @@ where
 fn overlap_rejection_step(
     point: ArrayView1<f64>,
     anchor: Option<&Array1<f64>>,
+    species: Option<&[u32]>,
+    groups: Option<&[Vec<usize>]>,
 ) -> Option<(f64, Array1<f64>)> {
     if point.iter().any(|value| !value.is_finite()) {
         return None;
     }
-    // Push every pair that is on or inside the boundary apart. A gradient
-    // built only from the anchor leaves a step that lands on 0.35 Å, and
-    // that step is handed to the potential.
+    // Push every pair that is on or inside its own boundary apart. A gradient
+    // built only from the anchor leaves a step that lands on that boundary,
+    // and that step is handed to the potential.
     let n = point.len() / 3;
+    let mut owner = vec![usize::MAX; n];
+    if let Some(groups) = groups {
+        for (group, atoms) in groups.iter().enumerate() {
+            for &atom in atoms {
+                if atom < n {
+                    owner[atom] = group;
+                }
+            }
+        }
+    }
     let mut gradient = Array1::zeros(point.len());
     for i in 0..n {
         for j in (i + 1)..n {
@@ -232,10 +246,17 @@ fn overlap_rejection_step(
                 square += delta[axis] * delta[axis];
             }
             let distance = square.sqrt();
-            if !distance.is_finite() || distance > OVERLAP_CALL_LIMIT {
+            let floor = match species {
+                Some(species) if species.len() > i.max(j) => {
+                    let bonded = owner[i] != usize::MAX && owner[i] == owner[j];
+                    molecular_call_floor(species[i], species[j], bonded)
+                }
+                _ => OVERLAP_CALL_LIMIT,
+            };
+            if !distance.is_finite() || distance > floor {
                 continue;
             }
-            let gap = (OVERLAP_CALL_LIMIT + 1.0e-3 - distance).max(1.0e-3);
+            let gap = (floor + 1.0e-3 - distance).max(1.0e-3);
             let (direction, scale) = if distance < 1.0e-8 {
                 ([1.0, 0.0, 0.0], gap)
             } else {
@@ -300,17 +321,47 @@ where
         .iter()
         .zip(start.iter())
         .any(|(left, right)| (left - right).abs() > 1.0e-8);
-    if !moved || min_pair_distance(point.view()) <= OVERLAP_CALL_LIMIT {
+    if !moved || geometry_is_inside_call_wall(species, groups, point.view()) {
         return None;
     }
-    let answered = charge_or_refuse_overlap(objective, led, stats, point.view(), anchor, true)?;
+    let answered = charge_or_refuse_overlap(
+        objective,
+        led,
+        stats,
+        point.view(),
+        anchor,
+        true,
+        species,
+        groups,
+    )?;
     if !answered.2 || !answered.0.is_finite() {
         return None;
     }
     Some((answered.0, point))
 }
 
+/// A geometry the potential is not asked to evaluate.
+///
+/// Species-free searches use the absolute overlap length. With species the
+/// floor is a fraction of the summed covalent radii, so a contact just past
+/// one fixed length is still refused when that length is inside the bond.
+fn geometry_is_inside_call_wall(
+    species: Option<&[u32]>,
+    groups: Option<&[Vec<usize>]>,
+    point: ArrayView1<f64>,
+) -> bool {
+    match species {
+        Some(species) => inside_molecular_call_wall(point, species, groups),
+        // Species-free searches are not gated. LJ, TIP4P and Gupta stay on
+        // the path that never consulted a pair distance before the call.
+        None => false,
+    }
+}
+
 /// Charge a physical evaluation, or refuse an overlap without charging it.
+///
+/// A refusal does not charge the ledger and does not call `objective`. The
+/// time spent on it is outside the potential.
 fn charge_or_refuse_overlap<O>(
     objective: &O,
     led: &mut Ledger,
@@ -318,13 +369,15 @@ fn charge_or_refuse_overlap<O>(
     point: ArrayView1<f64>,
     anchor: &mut Option<Array1<f64>>,
     refuse_overlap: bool,
+    species: Option<&[u32]>,
+    groups: Option<&[Vec<usize>]>,
 ) -> Option<(f64, Array1<f64>, bool)>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    if refuse_overlap && min_pair_distance(point) <= OVERLAP_CALL_LIMIT {
+    if refuse_overlap && geometry_is_inside_call_wall(species, groups, point) {
         stats.overlap_rejected += 1;
-        return overlap_rejection_step(point, anchor.as_ref())
+        return overlap_rejection_step(point, anchor.as_ref(), species, groups)
             .map(|(energy, gradient)| (energy, gradient, false));
     }
     if !led.charge() {
@@ -399,6 +452,8 @@ where
                         v,
                         &mut anchor,
                         refuse_overlap,
+                        cfg.species.as_deref(),
+                        cfg.move_library.declared_groups(),
                     )?;
                     if !physical {
                         return Some((e, g));
@@ -458,6 +513,8 @@ where
                     v,
                     &mut anchor,
                     refuse_overlap,
+                    cfg.species.as_deref(),
+                    cfg.move_library.declared_groups(),
                 )?;
                 if answered.2
                     && answered.0.is_finite()
@@ -557,7 +614,13 @@ where
                        energy: f64,
                        point: ArrayView1<f64>|
          -> Option<Array1<f64>> {
-            if refuse_overlap && min_pair_distance(point) <= OVERLAP_CALL_LIMIT {
+            if refuse_overlap
+                && geometry_is_inside_call_wall(
+                    cfg.species.as_deref(),
+                    cfg.move_library.declared_groups(),
+                    point,
+                )
+            {
                 stats.overlap_rejected += 1;
                 return None;
             }
@@ -622,6 +685,8 @@ where
                     v,
                     &mut anchor,
                     refuse_overlap,
+                    cfg.species.as_deref(),
+                    cfg.move_library.declared_groups(),
                 )?;
                 if answered.2
                     && answered.0.is_finite()
@@ -695,7 +760,11 @@ where
         let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
             // A validation gradient is an evaluation. An overlap is not one:
             // charging it spends the budget on a geometry the potential refuses.
-            if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+            if geometry_is_inside_call_wall(
+                cfg.species.as_deref(),
+                cfg.move_library.declared_groups(),
+                x,
+            ) {
                 return None;
             }
             if !led.charge() {
@@ -711,7 +780,11 @@ where
         let mut energy_anchor = None;
         let mut energy_grad =
             |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
-                if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+                if geometry_is_inside_call_wall(
+                    cfg.species.as_deref(),
+                    cfg.move_library.declared_groups(),
+                    x,
+                ) {
                     return None;
                 }
                 if !led.charge() {
@@ -754,7 +827,11 @@ where
         let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
             // A validation gradient is an evaluation. An overlap is not one:
             // charging it spends the budget on a geometry the potential refuses.
-            if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+            if geometry_is_inside_call_wall(
+                cfg.species.as_deref(),
+                cfg.move_library.declared_groups(),
+                x,
+            ) {
                 return None;
             }
             if !led.charge() {
@@ -765,7 +842,11 @@ where
         let mut energy_anchor = None;
         let mut energy_grad =
             |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
-                if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+                if geometry_is_inside_call_wall(
+                    cfg.species.as_deref(),
+                    cfg.move_library.declared_groups(),
+                    x,
+                ) {
                     return None;
                 }
                 if !led.charge() {
@@ -844,7 +925,11 @@ where
         let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
             // A validation gradient is an evaluation. An overlap is not one:
             // charging it spends the budget on a geometry the potential refuses.
-            if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+            if geometry_is_inside_call_wall(
+                cfg.species.as_deref(),
+                cfg.move_library.declared_groups(),
+                x,
+            ) {
                 return None;
             }
             if !led.charge() {
@@ -855,7 +940,11 @@ where
         let mut energy_anchor = None;
         let mut energy_grad =
             |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
-                if cfg.species.is_some() && min_pair_distance(x) <= OVERLAP_CALL_LIMIT {
+                if geometry_is_inside_call_wall(
+                    cfg.species.as_deref(),
+                    cfg.move_library.declared_groups(),
+                    x,
+                ) {
                     return None;
                 }
                 if !led.charge() {

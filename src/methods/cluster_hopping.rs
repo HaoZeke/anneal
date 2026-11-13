@@ -1291,6 +1291,123 @@ pub const OVERLAP_SEPARATION: f64 = 0.35;
 /// the potential sees is a bond, not a contact xtb cannot converge.
 pub const OVERLAP_CALL_LIMIT: f64 = 0.90;
 
+/// Fraction of the summed Cordero radii inside which a declared bond is not
+/// handed to the potential. One fraction for every element. The radii, not
+/// the species name, set the length. A contact that is not a declared bond
+/// is refused inside the full covalent sum: that sum is a single-bond length.
+pub const COVALENT_CALL_FRACTION: f64 = 0.95;
+
+/// Distance at or below which a molecular potential is not called.
+///
+/// Species-free searches keep [`OVERLAP_CALL_LIMIT`]. With species, a
+/// declared bond uses [`COVALENT_CALL_FRACTION`] of the covalent sum and any
+/// other pair uses the sum itself. The absolute limit remains a floor so a
+/// hydrogen pair is not treated more loosely than before.
+pub fn molecular_call_floor(za: u32, zb: u32, bonded: bool) -> f64 {
+    let sum = moves::covalent_radius(za) + moves::covalent_radius(zb);
+    if sum <= 0.0 {
+        return OVERLAP_CALL_LIMIT;
+    }
+    let scaled = if bonded {
+        COVALENT_CALL_FRACTION * sum
+    } else {
+        sum
+    };
+    scaled.max(OVERLAP_CALL_LIMIT)
+}
+
+/// Whether any pair is inside [`molecular_call_floor`].
+///
+/// `groups` marks declared bonds. Atoms that share a group are bonded; every
+/// other pair is a contact. This is geometry only. It does not call a potential.
+pub fn inside_molecular_call_wall(
+    x: ArrayView1<f64>,
+    species: &[u32],
+    groups: Option<&[Vec<usize>]>,
+) -> bool {
+    let n = x.len() / 3;
+    if n < 2 || species.len() < n {
+        return min_pair_distance(x) <= OVERLAP_CALL_LIMIT;
+    }
+    let mut owner = vec![usize::MAX; n];
+    if let Some(groups) = groups {
+        for (group, atoms) in groups.iter().enumerate() {
+            for &atom in atoms {
+                if atom < n {
+                    owner[atom] = group;
+                }
+            }
+        }
+    }
+    for a in 0..n {
+        for b in (a + 1)..n {
+            let mut square = 0.0;
+            for axis in 0..3 {
+                let delta = x[3 * a + axis] - x[3 * b + axis];
+                square += delta * delta;
+            }
+            let distance = square.sqrt();
+            let bonded = owner[a] != usize::MAX && owner[a] == owner[b];
+            if distance <= molecular_call_floor(species[a], species[b], bonded) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod call_wall_tests {
+    use super::{inside_molecular_call_wall, molecular_call_floor};
+    use ndarray::Array1;
+
+    #[test]
+    fn a_nonbonded_contact_inside_the_covalent_sum_is_refused() {
+        let mut coordinates = Array1::zeros(6);
+        coordinates[3] = 0.90;
+        let species = [7u32, 1];
+        assert!(inside_molecular_call_wall(
+            coordinates.view(),
+            &species,
+            None
+        ));
+        coordinates[3] = 1.05;
+        assert!(!inside_molecular_call_wall(
+            coordinates.view(),
+            &species,
+            None
+        ));
+    }
+
+    #[test]
+    fn a_declared_bond_near_its_covalent_length_is_allowed() {
+        let mut coordinates = Array1::zeros(6);
+        coordinates[3] = 1.012;
+        let species = [7u32, 1];
+        let groups = vec![vec![0usize, 1]];
+        assert!(!inside_molecular_call_wall(
+            coordinates.view(),
+            &species,
+            Some(&groups)
+        ));
+        coordinates[3] = 0.80;
+        assert!(inside_molecular_call_wall(
+            coordinates.view(),
+            &species,
+            Some(&groups)
+        ));
+    }
+
+    #[test]
+    fn hydrogen_pairs_keep_the_absolute_floor() {
+        assert!((molecular_call_floor(1, 1, false) - 0.90).abs() < 1.0e-12);
+        let oh = molecular_call_floor(8, 1, true);
+        let expected = (0.95_f64 * (0.66 + 0.31)).max(0.90);
+        assert!((oh - expected).abs() < 1.0e-12);
+        assert!((molecular_call_floor(7, 1, false) - 1.02).abs() < 1.0e-12);
+    }
+}
+
 /// How far past [`OVERLAP_CALL_LIMIT`] a non-bonded spike is opened.
 ///
 /// Only pairs closer than [`OVERLAP_SPIKE`] move. 1.30 Å past the call limit
@@ -3976,11 +4093,10 @@ where
                     if side.probe.remaining() == 0 {
                         break;
                     }
-                    let placed = binary_geometry::place_smaller_inside(
-                        candidate.view(),
-                        species,
-                        |label| binary_geometry::label_radius(species, sigma, label),
-                    );
+                    let placed =
+                        binary_geometry::place_smaller_inside(candidate.view(), species, |label| {
+                            binary_geometry::label_radius(species, sigma, label)
+                        });
                     if let Some(seeded) = binary_geometry::arrange(placed, species, &mut side) {
                         arranged.push(seeded);
                     }
@@ -4155,26 +4271,21 @@ where
             // into the same cage; this turn does not.
             if !ledger.stopped() && ledger.remaining() > 0 {
                 let angle = match cfg.move_library {
-                    MoveLibrary::RigidBody { rotate_step, .. } => {
-                        RIGID_SHELL_STEPS * rotate_step
-                    }
+                    MoveLibrary::RigidBody { rotate_step, .. } => RIGID_SHELL_STEPS * rotate_step,
                     _ => 0.0,
                 };
                 let mut turned: Option<(f64, Array1<f64>)> = None;
                 if angle > 0.0 {
                     for axis in 0..3 {
                         let trial = rigid_shell_turn(side_state.view(), cfg.n_points, axis, angle);
-                        let (quenched, relaxed) =
-                            relax(ledger, trial.view(), cfg.relax_steps);
+                        let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                         if quenched.is_finite()
                             && rigid_centres_clear(
                                 relaxed.view(),
                                 cfg.n_points,
                                 0.5 * cfg.min_separation,
                             )
-                            && turned
-                                .as_ref()
-                                .is_none_or(|(held, _)| quenched < *held)
+                            && turned.as_ref().is_none_or(|(held, _)| quenched < *held)
                         {
                             turned = Some((quenched, relaxed));
                         }
@@ -4187,7 +4298,8 @@ where
                     side_state = state;
                     let twist_end = ledger.spent().saturating_add(cage_patience);
                     while ledger.spent() < twist_end && hop_side!(side_rng, side_energy, side_state)
-                    {}
+                    {
+                    }
                 }
             }
             // The shell of the walker is one leave. When it comes up short,
@@ -4243,8 +4355,7 @@ where
                         for axis in 0..3 {
                             let trial =
                                 rigid_shell_turn(side_state.view(), cfg.n_points, axis, angle);
-                            let (quenched, relaxed) =
-                                relax(ledger, trial.view(), cfg.relax_steps);
+                            let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                             if quenched.is_finite()
                                 && rigid_centres_clear(
                                     relaxed.view(),
@@ -4265,7 +4376,8 @@ where
                         let twist_end = ledger.spent().saturating_add(cage_patience);
                         while ledger.spent() < twist_end
                             && hop_side!(side_rng, side_energy, side_state)
-                        {}
+                        {
+                        }
                     }
                 }
             }
@@ -5232,9 +5344,7 @@ where
             }
             if !sources.is_empty() {
                 let mut side = StdRng::seed_from_u64(
-                    (hops as u64).wrapping_mul(0x9E37_79B9)
-                        ^ ledger.best.to_bits()
-                        ^ 0xFCCC_0517,
+                    (hops as u64).wrapping_mul(0x9E37_79B9) ^ ledger.best.to_bits() ^ 0xFCCC_0517,
                 );
                 let n_atoms = best_state.len() / 3;
                 let two = species_count(species) >= 2;
@@ -5252,7 +5362,8 @@ where
                     if probe.remaining() == 0 {
                         break;
                     }
-                    let grown = crate::lattice::candidate(source, best_state.view(), n_atoms, &mut side);
+                    let grown =
+                        crate::lattice::candidate(source, best_state.view(), n_atoms, &mut side);
                     let grown = if two {
                         moves::place_smaller_inside(grown, species)
                     } else {
@@ -5276,8 +5387,10 @@ where
                                     for axis in 0..3 {
                                         swapped.swap(3 * i + axis, 3 * j + axis);
                                     }
-                                    let (alt_e, alt_x) = relax(&mut probe, swapped.view(), cfg.relax_steps);
-                                    if quench_is_sane(cfg, alt_e, alt_x.view()) && alt_e < eq - 1e-6 {
+                                    let (alt_e, alt_x) =
+                                        relax(&mut probe, swapped.view(), cfg.relax_steps);
+                                    if quench_is_sane(cfg, alt_e, alt_x.view()) && alt_e < eq - 1e-6
+                                    {
                                         eq = alt_e;
                                         xq = alt_x;
                                         gained = true;
@@ -5300,9 +5413,7 @@ where
                     if gradient.is_none() && grad.is_some() {
                         continue;
                     }
-                    let replace = best_alt
-                        .as_ref()
-                        .is_none_or(|(energy, _, _)| eq < *energy);
+                    let replace = best_alt.as_ref().is_none_or(|(energy, _, _)| eq < *energy);
                     if replace {
                         best_alt = Some((eq, xq, gradient));
                     }
@@ -5317,11 +5428,8 @@ where
                         if probe.remaining() == 0 {
                             break;
                         }
-                        let twisted = crate::packing::propose_twin(
-                            best_state.view(),
-                            n_atoms,
-                            &mut side,
-                        );
+                        let twisted =
+                            crate::packing::propose_twin(best_state.view(), n_atoms, &mut side);
                         let (eq, xq) = relax(&mut probe, twisted.view(), cfg.relax_steps);
                         if !quench_is_sane(cfg, eq, xq.view()) {
                             continue;
@@ -5337,9 +5445,7 @@ where
                         if gradient.is_none() && grad.is_some() {
                             continue;
                         }
-                        let replace = best_alt
-                            .as_ref()
-                            .is_none_or(|(energy, _, _)| eq < *energy);
+                        let replace = best_alt.as_ref().is_none_or(|(energy, _, _)| eq < *energy);
                         if replace {
                             best_alt = Some((eq, xq, gradient));
                         }
@@ -6819,8 +6925,8 @@ where
         if skip_basin && accept && !cfg.move_library.is_rigid_body() {
             let old_cv = bias.cv(x.view());
             let new_cv = bias.cv(x_new.view());
-            let biased = (e_new + bias.potential(new_cv.view()))
-                - (e + bias.potential(old_cv.view()));
+            let biased =
+                (e_new + bias.potential(new_cv.view())) - (e + bias.potential(old_cv.view()));
             if biased > e_new - e {
                 accept = false;
             }
