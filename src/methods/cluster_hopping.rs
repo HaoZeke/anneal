@@ -11682,7 +11682,7 @@ mod structural_prior_tests {
 
     #[test]
     fn priors_off_skips_the_sheet_slide_slips_and_labelled_cuts() {
-        let cfg = Config::recommended(38).with_species(vec![79; 38], None);
+        let cfg = Config::recommended(38).with_species(vec![1; 38], None);
         let start = binary_geometry::fcc_cut(38, binary_geometry::FccCentre::Octahedral, 1.122_462);
         let pot = PairPotential::lennard_jones(38);
         reaches(
@@ -11702,7 +11702,7 @@ mod structural_prior_tests {
 
     #[test]
     fn priors_off_skips_the_half_budget_motif_reseed() {
-        let mut cfg = Config::recommended(38).with_species(vec![79; 38], None);
+        let mut cfg = Config::recommended(38).with_species(vec![1; 38], None);
         cfg.restart_patience = usize::MAX;
         let start = binary_geometry::fcc_cut(38, binary_geometry::FccCentre::Octahedral, 1.122_462);
         let pot = PairPotential::lennard_jones(38);
