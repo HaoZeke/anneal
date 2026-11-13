@@ -366,6 +366,41 @@ pub struct BasinIndex<F: Fingerprint> {
     /// Triangle-inequality keys, parallel to `centres`.
     keys: Vec<Option<f64>>,
     visits: Vec<u64>,
+    /// Last answer of [`Self::lookup`] for one descriptor.
+    ///
+    /// The scan is a pure function of that descriptor, the centres, the
+    /// metric and the radius. A chain asks it again for a descriptor it
+    /// just asked, and the centres have not grown, so the answer is the
+    /// one already returned.
+    previous_lookup: std::sync::Mutex<PreviousLookup>,
+    /// Last answer for one coordinate vector.
+    ///
+    /// The fingerprint and the scan are pure functions of those coordinates
+    /// while the centres, the metric and the radius stay put. The vector is
+    /// shorter than the descriptor it produces, and a search asks the same
+    /// incumbent again many times.
+    previous_state: std::sync::Mutex<PreviousLookup>,
+}
+
+/// One cached [`BasinIndex::lookup`].
+struct PreviousLookup {
+    bits: Vec<u64>,
+    n_centres: usize,
+    radius_bits: u64,
+    answer: Option<usize>,
+    filled: bool,
+}
+
+impl PreviousLookup {
+    const fn empty() -> Self {
+        Self {
+            bits: Vec::new(),
+            n_centres: 0,
+            radius_bits: 0,
+            answer: None,
+            filled: false,
+        }
+    }
 }
 
 impl<F: Fingerprint> BasinIndex<F> {
@@ -380,6 +415,16 @@ impl<F: Fingerprint> BasinIndex<F> {
             centres: Vec::new(),
             keys: Vec::new(),
             visits: Vec::new(),
+            previous_lookup: std::sync::Mutex::new(PreviousLookup::empty()),
+            previous_state: std::sync::Mutex::new(PreviousLookup::empty()),
+        }
+    }
+
+    fn forget_previous(&self) {
+        for slot in [&self.previous_lookup, &self.previous_state] {
+            slot.lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .filled = false;
         }
     }
 
@@ -393,6 +438,7 @@ impl<F: Fingerprint> BasinIndex<F> {
             .iter()
             .map(|c| self.metric.key(c.view()))
             .collect();
+        self.forget_previous();
         self
     }
 
@@ -418,6 +464,23 @@ impl<F: Fingerprint> BasinIndex<F> {
     /// comparison it is the difference between one call and one per basin, and
     /// the exhaustive version did not finish an LJ38 run.
     pub fn lookup(&self, d: ArrayView1<f64>) -> Option<usize> {
+        if let Some(answer) = self.recall_lookup(d) {
+            return answer;
+        }
+        let answer = self.scan_lookup(d);
+        self.remember_lookup(d, answer);
+        answer
+    }
+
+    fn recall_lookup(&self, d: ArrayView1<f64>) -> Option<Option<usize>> {
+        self.recall(&self.previous_lookup, d)
+    }
+
+    fn remember_lookup(&self, d: ArrayView1<f64>, answer: Option<usize>) {
+        self.remember(&self.previous_lookup, d, answer);
+    }
+
+    fn scan_lookup(&self, d: ArrayView1<f64>) -> Option<usize> {
         let dk = self.metric.key(d);
         for (i, c) in self.centres.iter().enumerate().rev() {
             if c.len() != d.len() {
@@ -451,14 +514,73 @@ impl<F: Fingerprint> BasinIndex<F> {
         self.visits[i] += 1;
     }
 
+    /// [`Self::lookup`] of the descriptor of `x`, remembering that state.
+    ///
+    /// A repeated state returns the stored answer without building the
+    /// descriptor again. Opening a basin is [`Self::basin_of`]'s job: a
+    /// stored miss stays a miss here.
+    pub fn lookup_state(&self, x: ArrayView1<f64>) -> Option<usize> {
+        if let Some(answer) = self.recall(&self.previous_state, x) {
+            return answer;
+        }
+        let described = self.describe(x);
+        let answer = self.lookup(described.view());
+        self.remember(&self.previous_state, x, answer);
+        answer
+    }
+
+    fn recall(
+        &self,
+        slot: &std::sync::Mutex<PreviousLookup>,
+        values: ArrayView1<f64>,
+    ) -> Option<Option<usize>> {
+        let slot = slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !slot.filled
+            || slot.n_centres != self.centres.len()
+            || slot.radius_bits != self.merge_radius.to_bits()
+            || slot.bits.len() != values.len()
+        {
+            return None;
+        }
+        if slot
+            .bits
+            .iter()
+            .zip(values.iter())
+            .any(|(bits, value)| *bits != value.to_bits())
+        {
+            return None;
+        }
+        Some(slot.answer)
+    }
+
+    fn remember(
+        &self,
+        slot: &std::sync::Mutex<PreviousLookup>,
+        values: ArrayView1<f64>,
+        answer: Option<usize>,
+    ) {
+        let mut slot = slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        slot.bits.clear();
+        slot.bits.extend(values.iter().map(|value| value.to_bits()));
+        slot.n_centres = self.centres.len();
+        slot.radius_bits = self.merge_radius.to_bits();
+        slot.answer = answer;
+        slot.filled = true;
+    }
+
     /// Index of the basin holding `x`, opening one if it is new, and counting
     /// the visit.
     pub fn basin_of(&mut self, x: ArrayView1<f64>) -> usize {
+        if let Some(Some(i)) = self.recall(&self.previous_state, x) {
+            self.bump(i);
+            return i;
+        }
         let d = self.describe(x);
         let i = match self.lookup(d.view()) {
             Some(i) => i,
             None => self.push(d),
         };
+        self.remember(&self.previous_state, x, Some(i));
         self.bump(i);
         i
     }
@@ -482,6 +604,7 @@ impl<F: Fingerprint> BasinIndex<F> {
     pub fn set_merge_radius(&mut self, radius: f64) {
         assert!(radius > 0.0, "merge_radius must be > 0");
         self.merge_radius = radius;
+        self.forget_previous();
     }
 
     /// Current merge radius.
@@ -940,6 +1063,14 @@ impl<F: Fingerprint> BasinBias<F> {
     /// Index of the nearest registered basin within `merge_radius`.
     fn lookup(&self, d: ArrayView1<f64>) -> Option<usize> {
         self.index.lookup(d)
+    }
+
+    /// [`Self::potential`] of [`Self::cv`] of `x`.
+    ///
+    /// The state is what the caller holds. Asking with it skips building a
+    /// second descriptor when this index already answered `x`.
+    pub fn potential_at(&self, x: ArrayView1<f64>) -> f64 {
+        self.index.lookup_state(x).map(|i| self.v[i]).unwrap_or(0.0)
     }
 
     /// Number of distinct basins registered so far.

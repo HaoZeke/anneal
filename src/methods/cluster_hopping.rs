@@ -4585,8 +4585,8 @@ where
                 // search diversity, not by the number of copied minima.
                 let exchange_accept = if published_prize && cfg.exchange_metropolis && proposal_sane
                 {
-                    let v_here = bias.potential(bias.cv(from_state.view()).view());
-                    let v_there = bias.potential(bias.cv(proposal_state.view()).view());
+                    let v_here = bias.potential_at(from_state.view());
+                    let v_there = bias.potential_at(proposal_state.view());
                     let d = ((proposal_energy + v_there) - (from_energy + v_here))
                         / cfg.temperature.max(1e-12);
                     d <= 0.0 || rng.random::<f64>() < (-d).exp()
@@ -6109,12 +6109,12 @@ where
         // When track_funnels is on, the spectral term is well-tempered MetaD
         // on the Fiedler coordinate of the hop graph (SpectralBias): it fills
         // the *funnel* the chain is stuck in, not only the current basin.
-        let v_old = bias.potential(s_old.view())
+        let v_old = bias.potential_at(x.view())
             + spectral
                 .as_ref()
                 .map(|sp| sp.potential(sp.cv(x.view()).view()))
                 .unwrap_or(0.0);
-        let v_new = bias.potential(s_new.view())
+        let v_new = bias.potential_at(x_new.view())
             + spectral
                 .as_ref()
                 .map(|sp| sp.potential(sp.cv(x_new.view()).view()))
@@ -7732,10 +7732,10 @@ where
                             l.offer(&mut *rng, |k| {
                                 let (ek, xk) = (ch[k].energy, ch[k].coordinates.view());
                                 let (ej, xj) = (ch[k + 1].energy, ch[k + 1].coordinates.view());
-                                let vk_xk = bi[k].potential(bi[k].cv(xk).view());
-                                let vk_xj = bi[k].potential(bi[k].cv(xj).view());
-                                let vj_xj = bi[k + 1].potential(bi[k + 1].cv(xj).view());
-                                let vj_xk = bi[k + 1].potential(bi[k + 1].cv(xk).view());
+                                let vk_xk = bi[k].potential_at(xk);
+                                let vk_xj = bi[k].potential_at(xj);
+                                let vj_xj = bi[k + 1].potential_at(xj);
+                                let vj_xk = bi[k + 1].potential_at(xk);
                                 let log_a = crate::tempering::biased_swap_log_ratio(
                                     tp[k],
                                     tp[k + 1],
@@ -7786,10 +7786,10 @@ where
                         // Laio), which is what biased_swap_log_ratio does.
                         let (ek, xk) = (chains[k].energy, chains[k].coordinates.clone());
                         let (ej, xj) = (chains[j].energy, chains[j].coordinates.clone());
-                        let vk_xk = biases[k].potential(biases[k].cv(xk.view()).view());
-                        let vk_xj = biases[k].potential(biases[k].cv(xj.view()).view());
-                        let vj_xj = biases[j].potential(biases[j].cv(xj.view()).view());
-                        let vj_xk = biases[j].potential(biases[j].cv(xk.view()).view());
+                        let vk_xk = biases[k].potential_at(xk.view());
+                        let vk_xj = biases[k].potential_at(xj.view());
+                        let vj_xj = biases[j].potential_at(xj.view());
+                        let vj_xk = biases[j].potential_at(xk.view());
                         let log_a = crate::tempering::biased_swap_log_ratio(
                             temps[k],
                             temps[j],
