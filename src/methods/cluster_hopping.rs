@@ -2386,6 +2386,13 @@ const RIGID_ACCEPT_BLOCK: usize = 50;
 /// windows is a quiet stretch long enough to be a stalled cage, and the
 /// walk itself is capped at the same length so the main chain resumes.
 const RIGID_CAGE_WINDOWS: usize = 40;
+
+/// Seats in a rigid basin index.
+///
+/// The lookup walks every seat the triangle test cannot skip, so an open
+/// list makes every later hop slower. Past this many seats a new region
+/// reuses the latest one. The cap is not applied to an atomic cluster.
+const RIGID_BASIN_CAP: usize = 2_048;
 /// Orientation steps in the shell turn that opens the second walk.
 ///
 /// Two steps still quench back into the cage. Three steps, the preset
@@ -3246,6 +3253,13 @@ where
         ClusterFingerprint::of_config(cfg, &canonical_reference),
         cfg.merge_radius,
     );
+    if cfg.move_library.is_rigid_body() {
+        identity.set_cap(RIGID_BASIN_CAP);
+        bias.cap_basins(RIGID_BASIN_CAP);
+        for parked in &mut biases {
+            parked.cap_basins(RIGID_BASIN_CAP);
+        }
+    }
     if cfg.minima_hopping {
         let initial_basin = identity.basin_of(x.view());
         feedback.register_driver_local_initial(initial_basin);

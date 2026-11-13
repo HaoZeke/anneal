@@ -183,6 +183,24 @@ mod tests {
     use super::*;
     use ndarray::array;
 
+    struct Raw;
+    impl Fingerprint for Raw {
+        fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            x.to_owned()
+        }
+    }
+
+    #[test]
+    fn a_capped_index_reuses_the_latest_seat() {
+        let mut index = BasinIndex::new(Raw, 0.1).with_cap(2);
+        assert_eq!(index.basin_of(array![0.0].view()), 0);
+        assert_eq!(index.basin_of(array![1.0].view()), 1);
+        assert_eq!(index.n_basins(), 2);
+        assert_eq!(index.basin_of(array![5.0].view()), 1);
+        assert_eq!(index.n_basins(), 2);
+        assert!(index.seats_full());
+    }
+
     fn identity_projector_2d() -> WellTemperedBias {
         // 2D identity projector: CV is x itself.
         let projector = array![[1.0, 0.0], [0.0, 1.0]];
@@ -366,6 +384,8 @@ pub struct BasinIndex<F: Fingerprint> {
     /// Triangle-inequality keys, parallel to `centres`.
     keys: Vec<Option<f64>>,
     visits: Vec<u64>,
+    /// Most seats the index opens. `None` grows with every new region.
+    cap: Option<usize>,
 }
 
 impl<F: Fingerprint> BasinIndex<F> {
@@ -380,7 +400,29 @@ impl<F: Fingerprint> BasinIndex<F> {
             centres: Vec::new(),
             keys: Vec::new(),
             visits: Vec::new(),
+            cap: None,
         }
+    }
+
+    /// Stops opening seats once `cap` regions are registered.
+    ///
+    /// A lookup walks every seat that the triangle test cannot skip. An
+    /// uncapped index makes that walk longer on every later hop. Past the
+    /// cap a region that matches no seat reuses the latest one, so the
+    /// walk stops growing. The cap is at least one.
+    pub fn with_cap(mut self, cap: usize) -> Self {
+        self.cap = Some(cap.max(1));
+        self
+    }
+
+    /// Whether another seat would pass the cap.
+    pub fn seats_full(&self) -> bool {
+        self.cap.is_some_and(|cap| self.centres.len() >= cap)
+    }
+
+    /// Installs a seat cap on an index that was built uncapped.
+    pub fn set_cap(&mut self, cap: usize) {
+        self.cap = Some(cap.max(1));
     }
 
     /// Replaces the distance used to decide sameness.
@@ -440,6 +482,9 @@ impl<F: Fingerprint> BasinIndex<F> {
 
     /// Registers a descriptor as a new basin and returns its index.
     pub fn push(&mut self, d: Array1<f64>) -> usize {
+        if self.seats_full() {
+            return self.centres.len().saturating_sub(1);
+        }
         self.keys.push(self.metric.key(d.view()));
         self.centres.push(d);
         self.visits.push(0);
@@ -457,6 +502,7 @@ impl<F: Fingerprint> BasinIndex<F> {
         let d = self.describe(x);
         let i = match self.lookup(d.view()) {
             Some(i) => i,
+            None if self.seats_full() => self.centres.len().saturating_sub(1),
             None => self.push(d),
         };
         self.bump(i);
@@ -972,6 +1018,11 @@ impl<F: Fingerprint> BasinBias<F> {
             .collect()
     }
 
+    /// Caps the basin index this bias deposits into.
+    pub fn cap_basins(&mut self, cap: usize) {
+        self.index.set_cap(cap);
+    }
+
     /// DeGroot step toward another walker's wells.
     ///
     /// Every depth becomes `(1 - weight) * own + weight * theirs`, with a
@@ -1017,7 +1068,7 @@ impl<F: Fingerprint> BasinBias<F> {
         }
         for (centre, depth) in opened {
             // Opened after the scan so a foreign well cannot match itself.
-            if self.lookup(centre.view()).is_none() {
+            if self.lookup(centre.view()).is_none() && !self.index.seats_full() {
                 self.index.push(centre);
                 self.v.push(depth);
                 self.deposit_counts.push(0);
@@ -1040,11 +1091,12 @@ impl<F: Fingerprint> BasinBias<F> {
                     self.v[i] = height;
                 }
             }
-            None => {
+            None if !self.index.seats_full() => {
                 self.index.push(descriptor);
                 self.v.push(height);
                 self.deposit_counts.push(0);
             }
+            None => {}
         }
     }
 }
@@ -1100,6 +1152,7 @@ impl<F: Fingerprint> BasinBias<F> {
         let denom = (self.gamma - 1.0) * temp;
         let i = match self.lookup(s) {
             Some(i) => i,
+            None if self.index.seats_full() => self.index.n_basins().saturating_sub(1),
             None => {
                 self.index.push(s.to_owned());
                 self.v.push(scale * self.w0);
