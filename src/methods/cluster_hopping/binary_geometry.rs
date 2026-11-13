@@ -317,6 +317,160 @@ pub(crate) fn mackay_cut(n: usize, nearest: f64) -> Array1<f64> {
     out
 }
 
+/// Homonuclear dimer through a ring of the minority species, then majority
+/// rings along the axis.
+///
+/// The ring has one site per minority atom. The dimer and the caps are
+/// the majority. Bond lengths are the homonuclear distances and their
+/// mean, so the shape follows the composition rather than the cluster size.
+/// Coordinates are already written onto the species indices.
+pub(crate) fn axial_spine_cut(species: &[u32], radius: impl Fn(u32) -> f64) -> Option<Array1<f64>> {
+    let n = species.len();
+    if n < 5 {
+        return None;
+    }
+    let mut labels = Vec::new();
+    for label in species {
+        if !labels.contains(label) {
+            labels.push(*label);
+        }
+    }
+    if labels.len() != 2 {
+        return None;
+    }
+    let count = |label: u32| species.iter().filter(|item| **item == label).count();
+    let (minority, majority) = {
+        let (a, b) = (labels[0], labels[1]);
+        let (na, nb) = (count(a), count(b));
+        if na < nb {
+            (a, b)
+        } else if nb < na {
+            (b, a)
+        } else if radius(a) <= radius(b) {
+            (a, b)
+        } else {
+            (b, a)
+        }
+    };
+    let k = count(minority);
+    let n_majority = count(majority);
+    if k < 3 || n_majority < 2 {
+        return None;
+    }
+    let ring = radius(minority);
+    let cap = radius(majority);
+    if !(ring.is_finite() && cap.is_finite() && ring > 0.0 && cap > 0.0) {
+        return None;
+    }
+    let rho = ring / (2.0 * (std::f64::consts::PI / k as f64).sin());
+    let spoke = 0.5 * (ring + cap);
+    let half = if spoke > rho {
+        (spoke * spoke - rho * rho).sqrt()
+    } else {
+        0.5 * cap
+    };
+    let mut spine = Vec::with_capacity(n);
+    spine.push([0.0, 0.0, half]);
+    spine.push([0.0, 0.0, -half]);
+    push_ring(&mut spine, k, rho, 0.0, 0.0);
+    let mut left = n_majority - 2;
+    let outer = ring_radius_outside(rho, k, cap);
+    let equatorial = left.min(k);
+    push_ring_partial(
+        &mut spine,
+        equatorial,
+        k,
+        outer,
+        0.0,
+        std::f64::consts::PI / k as f64,
+    );
+    left -= equatorial;
+    let layer = cap * (2.0 / 3.0_f64).sqrt();
+    let mut shell = 1usize;
+    while left > 0 && shell < 6 {
+        let twist = if shell % 2 == 1 {
+            0.0
+        } else {
+            std::f64::consts::PI / k as f64
+        };
+        let radius = if shell % 2 == 1 { outer } else { rho };
+        for side in [-1.0, 1.0] {
+            if left == 0 {
+                break;
+            }
+            let take = left.min(k);
+            push_ring_partial(
+                &mut spine,
+                take,
+                k,
+                radius,
+                side * shell as f64 * layer,
+                twist,
+            );
+            left -= take;
+        }
+        shell += 1;
+    }
+    if spine.len() != n {
+        return None;
+    }
+    let mut minority_sites = Vec::new();
+    let mut majority_sites = Vec::new();
+    // The first two sites are the dimer, the next k are the ring, the rest caps.
+    majority_sites.push(spine[0]);
+    majority_sites.push(spine[1]);
+    minority_sites.extend_from_slice(&spine[2..2 + k]);
+    majority_sites.extend_from_slice(&spine[2 + k..]);
+    let mut out = Array1::zeros(3 * n);
+    let mut minor_at = 0usize;
+    let mut major_at = 0usize;
+    for (index, label) in species.iter().enumerate() {
+        let site = if *label == minority {
+            let site = minority_sites[minor_at];
+            minor_at += 1;
+            site
+        } else {
+            let site = majority_sites[major_at];
+            major_at += 1;
+            site
+        };
+        for axis in 0..3 {
+            out[3 * index + axis] = site[axis];
+        }
+    }
+    Some(out)
+}
+
+fn ring_radius_outside(inner: f64, k: usize, bond: f64) -> f64 {
+    let cosine = (std::f64::consts::PI / k as f64).cos();
+    let linear = -2.0 * inner * cosine;
+    let constant = inner * inner - bond * bond;
+    let disc = linear * linear - 4.0 * constant;
+    if disc <= 0.0 {
+        return inner + bond;
+    }
+    let root = (-linear + disc.sqrt()) * 0.5;
+    if root > inner { root } else { inner + bond }
+}
+
+fn push_ring(sites: &mut Vec<[f64; 3]>, k: usize, radius: f64, height: f64, twist: f64) {
+    push_ring_partial(sites, k, k, radius, height, twist);
+}
+
+fn push_ring_partial(
+    sites: &mut Vec<[f64; 3]>,
+    take: usize,
+    k: usize,
+    radius: f64,
+    height: f64,
+    twist: f64,
+) {
+    for index in 0..take {
+        let angle = twist + 2.0 * std::f64::consts::PI * index as f64 / k as f64;
+        sites.push([radius * angle.cos(), radius * angle.sin(), height]);
+    }
+}
+
 fn mean_nearest(sites: &[[f64; 3]]) -> f64 {
     if sites.len() < 2 {
         return 1.0;
@@ -685,6 +839,16 @@ pub(crate) trait QuenchProbe {
 }
 
 /// Site ranking, when two species are present, and one quench.
+/// Quench without reordering. The spine cut is already written onto the
+/// species indices, and a coordination sort would move the minority ring.
+pub(crate) fn quench_as_placed<P: QuenchProbe>(
+    coords: Array1<f64>,
+    probe: &mut P,
+) -> Option<(f64, Array1<f64>)> {
+    let (value, point) = probe.quench(coords.view())?;
+    value.is_finite().then_some((value, point))
+}
+
 pub(crate) fn arrange<P: QuenchProbe>(
     mut coords: Array1<f64>,
     species: &[u32],
@@ -860,6 +1024,24 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn an_axial_spine_orders_to_cu6au32() {
+        let (labels, _) = load(include_str!(
+            "../../../tests/fixtures/ccd/cuau38/Cu6Au32.txt"
+        ));
+        let pot = Gupta::elements(&labels);
+        let spine = axial_spine_cut(&labels, radius).expect("spine");
+        assert_eq!(spine.len(), 3 * labels.len());
+        let (energy, point) = quench_as_placed(spine, &mut Direct { pot: &pot }).expect("quench");
+        let best = refine(energy, point, &labels, &mut Direct { pot: &pot })
+            .map(|(value, _)| value)
+            .unwrap_or(energy);
+        assert!(
+            best < -130.79994836 + 1e-3,
+            "axial spine {best:.6} from quench {energy:.6}"
+        );
     }
 
     #[test]

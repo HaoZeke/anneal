@@ -3784,6 +3784,14 @@ where
                     steps: cfg.relax_steps,
                 };
                 let mut arranged = Vec::new();
+                if species_count(species) >= 2
+                    && let Some(spine) = binary_geometry::axial_spine_cut(species, |label| {
+                        binary_geometry::label_radius(species, sigma, label)
+                    })
+                    && let Some(seeded) = binary_geometry::quench_as_placed(spine, &mut side)
+                {
+                    arranged.push(seeded);
+                }
                 for candidate in grown {
                     if side.probe.remaining() == 0 {
                         break;
