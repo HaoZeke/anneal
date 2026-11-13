@@ -49,6 +49,8 @@ use crate::screen::Screen;
 mod binary_geometry;
 mod config;
 mod cycles;
+#[cfg(test)]
+mod mackay_cap_tests;
 mod moves;
 mod packing_bank;
 mod preset;
@@ -3740,8 +3742,8 @@ where
                     mackay_state.view(),
                     &mut unconverged_records,
                 );
-                if mackay_energy < before - 1e-12 && improvements.len() < 512 {
-                    improvements.push((0, ledger.spent(), bias.n_basins(), mackay_energy));
+                if ledger.best < before - 1e-12 && improvements.len() < 512 {
+                    improvements.push((0, ledger.spent(), bias.n_basins(), ledger.best));
                 }
             }
         }
