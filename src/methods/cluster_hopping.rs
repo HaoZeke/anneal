@@ -3519,6 +3519,19 @@ where
     // Hops elapsed when the ledger last recorded a lower minimum.
     // A rigid stall measures 1000 hops from that hop count.
     let mut hops_at_lowest = 0usize;
+    // Shell library versus a chain reversal. Each stall closes an epoch.
+    // Until both arms have an epoch they alternate, shell first. After
+    // that the search keeps the arm whose epochs reached the lower best.
+    // The opening collapse is shell's, so the chain stays only when its
+    // own epoch improves that best.
+    let chain_available = cfg.adaptive_chain
+        && cfg
+            .rigid_body_geometry
+            .as_ref()
+            .is_some_and(|geometry| cycles::water_sites(geometry).is_some());
+    let mut epoch_best = [f64::INFINITY; 2];
+    let mut epoch_count = [0usize; 2];
+    let mut epoch_arm = 0usize;
     // Water restarts from a stored basin on its own clock, and then
     // stays there for a few hops before the incumbent gap applies.
     let mut last_basin_restart = 0usize;
@@ -3941,6 +3954,15 @@ where
                 MoveLibrary::RigidBody { relocate: true, .. }
             ) {
                 cage_edit = true;
+            }
+            if chain_available {
+                epoch_best[epoch_arm] = epoch_best[epoch_arm].min(ledger.best);
+                epoch_count[epoch_arm] += 1;
+                epoch_arm = if epoch_count[0] > 0 && epoch_count[1] > 0 {
+                    usize::from(epoch_best[1] < epoch_best[0])
+                } else {
+                    1 - epoch_arm
+                };
             }
         }
         if cfg.improvement_rewards
@@ -5093,15 +5115,20 @@ where
                 break HopStop::of_closed(ledger);
             }
         }
-        let mut k = choose_arm(
-            cfg,
-            context.as_ref().map(|value| value.view()),
-            &mut contextual,
-            &depth_allocator,
-            &mut allocator,
-            kernels.len(),
-            rng,
-        );
+        let mut chain_hop = chain_available && epoch_arm == 1;
+        let mut k = if chain_hop {
+            0
+        } else {
+            choose_arm(
+                cfg,
+                context.as_ref().map(|value| value.view()),
+                &mut contextual,
+                &depth_allocator,
+                &mut allocator,
+                kernels.len(),
+                rng,
+            )
+        };
         // One unlike-pair exchange on a fixed cadence. The depth allocator
         // drops the homotop once geometry moves pay more, and a binary
         // minimum is a chemical ordering as well as a geometry. Absent on a
@@ -5425,6 +5452,15 @@ where
                 energy_scale: cfg.energy_scale,
             }
             .propose(x.view(), cfg.temperature, rng)
+        } else if chain_hop {
+            ClusterMove::RigidReverseChain {
+                n_molecules: n,
+                geometry: cfg
+                    .rigid_body_geometry
+                    .clone()
+                    .expect("a chain epoch needs the water geometry"),
+            }
+            .propose_scaled(x.view(), cfg.temperature, proposal_scale, rng)
         } else {
             match (&mut constructor, &kernels[k]) {
                 (Some(c), ClusterMove::Reseed { n_points, .. }) => {
@@ -5447,6 +5483,25 @@ where
         let may_idle = |name: &str| {
             name == "soap" || name == "rcycle" || name == "rchain" || name == "hbrewire"
         };
+        if chain_hop
+            && !species_escape_trial
+            && !cov_fire
+            && !soft_fire
+            && !angular
+            && hop_is_identity(x.view(), trial.view())
+        {
+            chain_hop = false;
+            k = choose_arm(
+                cfg,
+                context.as_ref().map(|value| value.view()),
+                &mut contextual,
+                &depth_allocator,
+                &mut allocator,
+                kernels.len(),
+                rng,
+            );
+            trial = kernels[k].propose_scaled(x.view(), cfg.temperature, proposal_scale, rng);
+        }
         if !species_escape_trial
             && !cov_fire
             && !soft_fire
@@ -5532,6 +5587,8 @@ where
             "soft_mode".to_owned()
         } else if angular {
             "angular".to_owned()
+        } else if chain_hop {
+            "rchain".to_owned()
         } else {
             kernels[k].name().to_owned()
         };
@@ -6567,7 +6624,7 @@ where
             // The context is the one the move was chosen in, not the one the
             // chain now stands in: the reward belongs to the decision.
             contextual.update(k, c.view(), if improved || accept { 1.0 } else { 0.0 });
-        } else if cfg.allocate_moves {
+        } else if cfg.allocate_moves && !chain_hop {
             // An angular step is not the allocator's, so it does not carry a
             // reward for whichever arm the allocator happened to pick.
             if cfg.depth_reward {

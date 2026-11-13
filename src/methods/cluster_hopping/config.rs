@@ -1058,6 +1058,13 @@ pub struct Config {
     /// low basin other than the one it is in.
     #[serde(skip_serializing_if = "is_false")]
     pub improvement_rewards: bool,
+    /// Choose between the shell library and a hydrogen-bond chain reversal
+    /// at each stall, then keep the one whose stalls reached the lower best.
+    ///
+    /// Off by default. A rigid water preset turns it on. Other presets never
+    /// draw on it, so their generators stay as they were.
+    #[serde(skip_serializing_if = "is_false")]
+    pub adaptive_chain: bool,
     /// Relaunch from the incumbent when the chain is this far above it.
     ///
     /// Zero leaves the walk where acceptance put it. A positive gap, in
@@ -1545,6 +1552,7 @@ impl Config {
             quench_once: false,
             target_energy: None,
             improvement_rewards: false,
+            adaptive_chain: false,
             incumbent_gap: 0.0,
             relax_steps: 200,
             two_phase: None,
@@ -1610,6 +1618,9 @@ impl Config {
         cfg.soap_mode = SoapProposalMode::Off;
         cfg.angular_moves = false;
         cfg.allocate_moves = true;
+        // At each stall the search alternates the shell library and a chain
+        // reversal, then keeps the one whose stalls reached the lower best.
+        cfg.adaptive_chain = true;
         cfg.relax_steps = 80;
         cfg.screen_steps = 15;
         cfg
