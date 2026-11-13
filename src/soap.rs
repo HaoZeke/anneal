@@ -2608,6 +2608,85 @@ pub fn opening_left(current: f64, opened: f64) -> bool {
     rise.is_finite() && rise > DOORWAY_LO && rise < DOORWAY_HI
 }
 
+/// Smallest `|residual - target|` still allowed by a nearest-image lower bound.
+///
+/// The assignment residual is at least `lower`, and it is drawn only when it
+/// is below [`FIVEFOLD_AXIS`]. A gap of zero means `target` is still reachable.
+fn possible_gap(lower: f64, target: f64) -> f64 {
+    if !(lower < FIVEFOLD_AXIS) {
+        return f64::INFINITY;
+    }
+    if target < lower {
+        return lower - target;
+    }
+    0.0
+}
+
+/// The two fivefold axes the hop draws, or nothing when fewer than
+/// [`FIVEFOLD_MIN_AXES`] axes can sit below [`FIVEFOLD_AXIS`].
+///
+/// A nearest-image length is a lower bound on the assignment residual.
+/// Once two residuals are known to clear the cut, an axis whose nearest
+/// image is already farther from both reconstruction lengths than the
+/// axes in hand cannot change the draw, and its assignment is not run.
+/// The draw is the same pair the full table would hand to `min_by`:
+/// smallest gap, then smallest length, then the earlier candidate.
+fn fivefold_targets(x: ArrayView1<f64>) -> Option<([f64; 3], [f64; 3])> {
+    let targets = [RECON_LO + 0.01, RECON_HI - 0.01];
+    let cut = FIVEFOLD_AXIS + 1.0e-6 * (1.0 + FIVEFOLD_AXIS);
+    let mut ranked: Vec<(usize, [f64; 3], f64)> = candidate_axes(x)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, axis)| {
+            let lower = rotation_row_min_rms_until(x, axis, cut);
+            (lower < FIVEFOLD_AXIS).then_some((index, axis, lower))
+        })
+        .collect();
+    if ranked.len() < FIVEFOLD_MIN_AXES {
+        return None;
+    }
+    ranked.sort_by(|left, right| {
+        left.2
+            .partial_cmp(&right.2)
+            .unwrap()
+            .then(left.0.cmp(&right.0))
+    });
+    let mut best_gap = [f64::INFINITY; 2];
+    let mut best_len = [f64::INFINITY; 2];
+    let mut best_index = [usize::MAX; 2];
+    let mut best_axis = [ranked[0].1; 2];
+    let mut inside = 0usize;
+    for (index, axis, lower) in ranked {
+        let need_count = inside < FIVEFOLD_MIN_AXES;
+        let can_win = targets
+            .iter()
+            .enumerate()
+            .any(|(slot, target)| possible_gap(lower, *target) <= best_gap[slot]);
+        if !need_count && !can_win {
+            continue;
+        }
+        let residual = residual_about(x, axis).0;
+        if !(residual < FIVEFOLD_AXIS) {
+            continue;
+        }
+        inside += 1;
+        for (slot, target) in targets.iter().enumerate() {
+            let gap = (residual - *target).abs();
+            let closer = gap < best_gap[slot]
+                || (gap == best_gap[slot]
+                    && (residual < best_len[slot]
+                        || (residual == best_len[slot] && index < best_index[slot])));
+            if closer {
+                best_gap[slot] = gap;
+                best_len[slot] = residual;
+                best_index[slot] = index;
+                best_axis[slot] = axis;
+            }
+        }
+    }
+    (inside >= FIVEFOLD_MIN_AXES).then_some((best_axis[0], best_axis[1]))
+}
+
 /// Leave the fivefold funnel: amplify the SOFI C5 residual on the
 /// high-mismatch shell, or break a perfect pentagon. Yields unless
 /// at least two candidate axes are still fivefold. On an open shell
@@ -2628,30 +2707,12 @@ pub fn step_away_fivefold<R: Rng + ?Sized>(
     if n <= 13 {
         return fivefold_probe(x, rmsd).y;
     }
-    let table = fivefold_axis_table(x);
-    let good: Vec<([f64; 3], f64)> = table
-        .into_iter()
-        .filter(|(_, d)| *d < FIVEFOLD_AXIS)
-        .collect();
-    if good.len() < FIVEFOLD_MIN_AXES {
+    let Some((low, high)) = fivefold_targets(x) else {
         return x.to_owned();
-    }
+    };
     // The tightest axes snap back into the ico basin. The two
     // openings that leave sit near d5 = 0.90 and 0.99. Draw one.
-    let closest = |target: f64| {
-        good.iter()
-            .min_by(|a, b| {
-                (a.1 - target)
-                    .abs()
-                    .partial_cmp(&(b.1 - target).abs())
-                    .unwrap()
-            })
-            .map(|r| r.0)
-            .unwrap_or(good[0].0)
-    };
-    let a = closest(RECON_LO + 0.01);
-    let b = closest(RECON_HI - 0.01);
-    let axis = if rng.random::<bool>() { a } else { b };
+    let axis = if rng.random::<bool>() { low } else { high };
     step_away_fivefold_about(x, rmsd.max(PENTAGON_CAP), axis)
 }
 
@@ -3547,6 +3608,67 @@ mod tests {
         let n3 = local_nu3(x.view(), spec);
         assert_eq!(n3.ncols(), p.ncols() + spec.nu3_dim());
         assert_eq!(n3.nrows(), p.nrows());
+    }
+
+    fn targets_from_table(x: ArrayView1<f64>) -> Option<([f64; 3], [f64; 3])> {
+        let good: Vec<([f64; 3], f64)> = fivefold_axis_table(x)
+            .into_iter()
+            .filter(|(_, length)| *length < FIVEFOLD_AXIS)
+            .collect();
+        if good.len() < FIVEFOLD_MIN_AXES {
+            return None;
+        }
+        let closest = |target: f64| {
+            good.iter()
+                .min_by(|left, right| {
+                    (left.1 - target)
+                        .abs()
+                        .partial_cmp(&(right.1 - target).abs())
+                        .unwrap()
+                })
+                .map(|row| row.0)
+                .unwrap()
+        };
+        Some((closest(RECON_LO + 0.01), closest(RECON_HI - 0.01)))
+    }
+
+    #[test]
+    fn pruned_fivefold_targets_match_the_full_table() {
+        let mut state = 0x5f1d_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 11) as f64 / ((1u64 << 53) as f64) - 0.5
+        };
+        for n in [14usize, 20, 38, 55, 80] {
+            for _ in 0..4 {
+                let radius = 1.2 * (n as f64).cbrt();
+                let coords: Vec<f64> = (0..3 * n).map(|_| radius * next()).collect();
+                let x = Array1::from(coords);
+                RESIDUAL_MEMO.with(|slot| {
+                    let mut memo = slot.borrow_mut();
+                    memo.coordinates.clear();
+                    memo.entries.clear();
+                });
+                AXIS_TABLE.with(|slot| {
+                    let mut table = slot.borrow_mut();
+                    table.bits.clear();
+                    table.rows.clear();
+                });
+                let pruned = fivefold_targets(x.view());
+                RESIDUAL_MEMO.with(|slot| {
+                    let mut memo = slot.borrow_mut();
+                    memo.coordinates.clear();
+                    memo.entries.clear();
+                });
+                AXIS_TABLE.with(|slot| {
+                    let mut table = slot.borrow_mut();
+                    table.bits.clear();
+                    table.rows.clear();
+                });
+                let full = targets_from_table(x.view());
+                assert_eq!(pruned, full, "n={n}");
+            }
+        }
     }
 
     fn cuboct13() -> Array1<f64> {
