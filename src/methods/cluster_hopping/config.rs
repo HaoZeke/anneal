@@ -987,6 +987,13 @@ pub struct Config {
     /// [`Config::screen_margin`], since the full relaxation runs only where
     /// the partial energy sits within the margin of the incumbent.
     pub trace_quenched: bool,
+    /// The pair potential is still bound at the second-neighbour distance.
+    ///
+    /// Set from [`crate::potentials::PairKind::second_neighbour_energy`],
+    /// not from the number of atoms. When it is set, the search quenches
+    /// one Mackay cap before the walk. Off for Lennard-Jones and for
+    /// short-ranged Morse, which keeps those call counts unchanged.
+    pub long_ranged: bool,
     /// Extra relaxation steps spent polishing a new best to share tolerance.
     ///
     /// Screened hopping's economy is that almost no hop is fully relaxed, so
@@ -1557,6 +1564,7 @@ impl Config {
             adaptive_screen: false,
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
             trace_quenched: false,
+            long_ranged: false,
             polish_records: 0,
             surrogate_tolerance: 0.5,
             delayed_acceptance: false,

@@ -259,9 +259,37 @@ pub(crate) fn polyicosahedral_cut(n: usize, join: IcosahedronJoin, nearest: f64)
 /// keeps the innermost sites. Larger `n` is that body; the growth does not
 /// invent a third shell.
 pub(crate) fn mackay_cut(n: usize, nearest: f64) -> Array1<f64> {
-    if n == 0 || !nearest.is_finite() || nearest <= 0.0 {
+    scale_sites(&mackay_sites_centred(n), nearest)
+}
+
+/// The `n` sites of the two-shell Mackay icosahedron closest to one vertex.
+///
+/// At the complete two-shell body this is every site. Below that it is the
+/// fivefold cap: the sites nearest one vertex. The construction does not
+/// branch on a size.
+pub(crate) fn mackay_cap(n: usize, nearest: f64) -> Array1<f64> {
+    let mut sites = mackay_sites();
+    if n == 0 || sites.len() < n {
         return Array1::zeros(0);
     }
+    let vertex = sites[1];
+    sites.sort_by(|left, right| {
+        dist2(left, &vertex).total_cmp(&dist2(right, &vertex))
+    });
+    sites.truncate(n);
+    scale_sites(&sites, nearest)
+}
+
+fn mackay_sites_centred(n: usize) -> Vec<[f64; 3]> {
+    let mut sites = mackay_sites();
+    let origin = [0.0, 0.0, 0.0];
+    sites.sort_by(|left, right| dist2(left, &origin).total_cmp(&dist2(right, &origin)));
+    let count = n.min(sites.len());
+    sites.truncate(count);
+    sites
+}
+
+fn mackay_sites() -> Vec<[f64; 3]> {
     let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
     let vertices = [
         [0.0, 1.0, phi],
@@ -303,11 +331,14 @@ pub(crate) fn mackay_cut(n: usize, nearest: f64) -> Array1<f64> {
             }
         }
     }
-    let origin = [0.0, 0.0, 0.0];
-    sites.sort_by(|left, right| dist2(left, &origin).total_cmp(&dist2(right, &origin)));
-    let count = n.min(sites.len());
-    sites.truncate(count);
-    let scale = nearest / mean_nearest(&sites).max(1e-6);
+    sites
+}
+
+fn scale_sites(sites: &[[f64; 3]], nearest: f64) -> Array1<f64> {
+    if sites.is_empty() || !nearest.is_finite() || nearest <= 0.0 {
+        return Array1::zeros(0);
+    }
+    let scale = nearest / mean_nearest(sites).max(1e-6);
     let mut out = Array1::zeros(3 * sites.len());
     for (index, site) in sites.iter().enumerate() {
         for axis in 0..3 {

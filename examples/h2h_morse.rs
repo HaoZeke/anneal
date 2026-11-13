@@ -8,16 +8,17 @@
 //! ```
 //!
 //! The potential is the in-tree Morse pair, Doye and Wales' form with
-//! `epsilon = 1` and `r_0 = 1`. `rho` is the range. The search is the
-//! Lennard-Jones recommended preset with no further change. A hit is a
-//! quenched energy at or below the Cambridge table plus 0.001. `pot_s`
-//! is the time inside the potential.
+//! `epsilon = 1` and `r_0 = 1`. `rho` is the range. When a second neighbour
+//! is still bound, the search quenches one Mackay cap before the walk.
+//! Otherwise it is the recommended preset. A hit is a quenched energy at
+//! or below the Cambridge table plus 0.001. `pot_s` is the time inside
+//! the potential.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, random_cluster_in_radius, run_with_gradient,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
-use anneal_core::potentials::PairPotential;
+use anneal_core::potentials::{PairKind, PairPotential};
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -131,7 +132,12 @@ fn cmd_run(args: &[String]) -> i32 {
         return 2;
     };
     let budget = env_budget().unwrap_or(spec.budget);
-    let cfg = Config::recommended(spec.n);
+    let mut cfg = Config::recommended(spec.n);
+    // A second neighbour in an fcc shell. Bound by more than a twentieth of
+    // the well, one Mackay cap is quenched before the walk. Rho = 14 is
+    // not, and the search is then the recommended one.
+    let kind = PairKind::Morse { rho: spec.rho };
+    cfg.long_ranged = kind.second_neighbour_energy() < -0.05;
     let start = if let Some(path) = args.get(3) {
         match read_coords(path) {
             Ok(coords) if coords.len() == 3 * spec.n => coords,

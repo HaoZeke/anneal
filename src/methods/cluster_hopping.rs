@@ -3578,6 +3578,32 @@ where
     let mut held_cv: Option<Array1<f64>> = None;
     let mut held_seat: Option<usize> = None;
     let mut held_count: usize = 0;
+    // A long-ranged well binds the second neighbour, and the Mackay
+    // icosahedron is then the minimum at the complete shell. One quench,
+    // charged like any other. A short-ranged run does not enter. The walk
+    // keeps the start it already has: the cut is only the recorded best
+    // when it is lower, and a target stops the loop before the first hop.
+    if cfg.long_ranged && !ledger.target_reached() && ledger.remaining() > 0 {
+        let mackay = binary_geometry::mackay_cap(n, cfg.length_scale.max(1e-6));
+        if mackay.len() == x.len() {
+            let (mackay_energy, mackay_state) = relax(ledger, mackay.view(), cfg.relax_steps);
+            if mackay_energy.is_finite() && quench_is_sane(cfg, mackay_energy, mackay_state.view())
+            {
+                let before = ledger.best;
+                let _gradient = record_quenched_answer(
+                    cfg,
+                    ledger,
+                    &mut grad,
+                    mackay_energy,
+                    mackay_state.view(),
+                    &mut unconverged_records,
+                );
+                if mackay_energy < before - 1e-12 && improvements.len() < 512 {
+                    improvements.push((0, ledger.spent(), bias.n_basins(), mackay_energy));
+                }
+            }
+        }
+    }
     let stop = loop {
         // A finished checkpoint interval is delivered before the budget
         // exit. The loop otherwise returns here with nothing left to
