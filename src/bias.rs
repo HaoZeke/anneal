@@ -1107,6 +1107,14 @@ std::thread_local! {
 }
 
 fn fresh_pairs(n: usize, x: ArrayView1<f64>) -> Vec<f64> {
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") {
+        return unsafe { fresh_pairs_avx2(n, x) };
+    }
+    fresh_pairs_scalar(n, x)
+}
+
+fn fresh_pairs_scalar(n: usize, x: ArrayView1<f64>) -> Vec<f64> {
     let mut d = Vec::with_capacity(n * (n - 1) / 2);
     for i in 0..n {
         for j in (i + 1)..n {
@@ -1114,6 +1122,64 @@ fn fresh_pairs(n: usize, x: ArrayView1<f64>) -> Vec<f64> {
         }
     }
     d
+}
+
+/// Four pair lengths at a time. Each length is `sqrt(dx² + dy² + dz²)`
+/// with the scalar association, so the sorted spectrum is unchanged.
+///
+/// # Safety
+///
+/// AVX2 must be enabled. `x` holds `3 * n` finite coordinates.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn fresh_pairs_avx2(n: usize, x: ArrayView1<f64>) -> Vec<f64> {
+    use std::arch::x86_64::{
+        _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd, _mm256_sqrt_pd,
+        _mm256_storeu_pd, _mm256_sub_pd,
+    };
+    let mut distances = Vec::with_capacity(n * (n - 1) / 2);
+    let coords = x.as_ptr();
+    for i in 0..n {
+        let (xi, yi, zi) = unsafe {
+            (
+                *coords.add(3 * i),
+                *coords.add(3 * i + 1),
+                *coords.add(3 * i + 2),
+            )
+        };
+        let mut j = i + 1;
+        while j + 4 <= n {
+            let mut xs = [0.0; 4];
+            let mut ys = [0.0; 4];
+            let mut zs = [0.0; 4];
+            for lane in 0..4 {
+                let at = 3 * (j + lane);
+                unsafe {
+                    xs[lane] = *coords.add(at);
+                    ys[lane] = *coords.add(at + 1);
+                    zs[lane] = *coords.add(at + 2);
+                }
+            }
+            let mut packed = [0.0; 4];
+            unsafe {
+                let dx = _mm256_sub_pd(_mm256_set1_pd(xi), _mm256_loadu_pd(xs.as_ptr()));
+                let dy = _mm256_sub_pd(_mm256_set1_pd(yi), _mm256_loadu_pd(ys.as_ptr()));
+                let dz = _mm256_sub_pd(_mm256_set1_pd(zi), _mm256_loadu_pd(zs.as_ptr()));
+                let squared = _mm256_add_pd(
+                    _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
+                    _mm256_mul_pd(dz, dz),
+                );
+                _mm256_storeu_pd(packed.as_mut_ptr(), _mm256_sqrt_pd(squared));
+            }
+            distances.extend_from_slice(&packed);
+            j += 4;
+        }
+        while j < n {
+            distances.push(pair_distance(x, i, j));
+            j += 1;
+        }
+    }
+    distances
 }
 
 fn store_pairs(n: usize, x: ArrayView1<f64>, unsorted: Vec<f64>, sorted: Vec<f64>) {
@@ -1185,7 +1251,11 @@ impl Fingerprint for SortedPairs {
         });
         let unsorted = edited.unwrap_or_else(|| fresh_pairs(n, x));
         let mut sorted = unsorted.clone();
-        sorted.sort_unstable_by(f64::total_cmp);
+        // The spectrum is a multiset of lengths. `total_cmp` ties are the
+        // same bits, so a stable sort and an unstable sort print the same
+        // vector. The stable sort is the one that finishes a nearly ordered
+        // spectrum, which is what a one-atom edit leaves.
+        sorted.sort_by(f64::total_cmp);
         let out = Array1::from(sorted.clone());
         store_pairs(n, x, unsorted, sorted);
         out
@@ -2020,6 +2090,19 @@ mod pair_cache_tests {
                 fresh_moved.as_slice(),
                 "a one-atom edit disagreed with a full pair loop"
             );
+        }
+    }
+
+    #[test]
+    fn vector_pair_lengths_match_the_scalar_loop_bit_for_bit() {
+        for (n, salt) in [(7usize, 1u64), (55, 2), (98, 3), (150, 4)] {
+            let x = cluster(n, salt);
+            let scalar = fresh_pairs_scalar(n, x.view());
+            let wide = fresh_pairs(n, x.view());
+            assert_eq!(scalar.len(), wide.len());
+            for (index, (left, right)) in scalar.iter().zip(&wide).enumerate() {
+                assert_eq!(left.to_bits(), right.to_bits(), "n={n} pair {index}");
+            }
         }
     }
 }

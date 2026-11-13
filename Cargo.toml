@@ -197,6 +197,10 @@ harness = false
 name    = "symmetrise_hot"
 harness = false
 
+[[bench]]
+name    = "fingerprint_soap"
+harness = false
+
 [[example]]
 name = "h2h_sc"
 required-features = ["rgpot-ex"]

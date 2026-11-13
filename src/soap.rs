@@ -1835,10 +1835,20 @@ fn hungarian(cost: &[f64], n: usize) -> Vec<usize> {
         .unwrap_or_else(|| (0..n).collect())
 }
 
-/// Columns matched to each row of `x` under the minimum sum of squared distances.
-fn optimal_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
-    let n = x.len() / 3;
-    let mut cost = vec![0.0; n * n];
+/// Squared distances, `cost[i * n + j] = Σ_a (x[i,a] - y[j,a])²`.
+///
+/// The sum starts at zero and adds one axis at a time, which is the
+/// scalar loop. Four columns share that sum.
+fn fill_squared_cost(x: ArrayView1<f64>, y: &[f64], n: usize, cost: &mut [f64]) {
+    #[cfg(target_arch = "x86_64")]
+    if x.as_slice().is_some() && std::is_x86_feature_detected!("avx2") {
+        unsafe { fill_squared_cost_avx2(x, y, n, cost) };
+        return;
+    }
+    fill_squared_cost_scalar(x, y, n, cost);
+}
+
+fn fill_squared_cost_scalar(x: ArrayView1<f64>, y: &[f64], n: usize, cost: &mut [f64]) {
     for i in 0..n {
         for j in 0..n {
             let mut distance = 0.0;
@@ -1849,6 +1859,67 @@ fn optimal_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
             cost[i * n + j] = distance;
         }
     }
+}
+
+/// # Safety
+///
+/// AVX2 must be enabled and `x` is contiguous.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn fill_squared_cost_avx2(x: ArrayView1<f64>, y: &[f64], n: usize, cost: &mut [f64]) {
+    use std::arch::x86_64::{
+        _mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd, _mm256_storeu_pd,
+        _mm256_sub_pd,
+    };
+    let flat = x.as_slice().unwrap_or(&[]);
+    for i in 0..n {
+        let xi = flat[3 * i];
+        let yi = flat[3 * i + 1];
+        let zi = flat[3 * i + 2];
+        let mut j = 0usize;
+        let row = i * n;
+        while j + 4 <= n {
+            let mut xs = [0.0; 4];
+            let mut ys = [0.0; 4];
+            let mut zs = [0.0; 4];
+            for lane in 0..4 {
+                let at = 3 * (j + lane);
+                xs[lane] = y[at];
+                ys[lane] = y[at + 1];
+                zs[lane] = y[at + 2];
+            }
+            let mut packed = [0.0; 4];
+            unsafe {
+                let dx = _mm256_sub_pd(_mm256_set1_pd(xi), _mm256_loadu_pd(xs.as_ptr()));
+                let dy = _mm256_sub_pd(_mm256_set1_pd(yi), _mm256_loadu_pd(ys.as_ptr()));
+                let dz = _mm256_sub_pd(_mm256_set1_pd(zi), _mm256_loadu_pd(zs.as_ptr()));
+                // `((0 + dx²) + dy²) + dz²`, the scalar running sum.
+                let sum = _mm256_add_pd(
+                    _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
+                    _mm256_mul_pd(dz, dz),
+                );
+                _mm256_storeu_pd(packed.as_mut_ptr(), sum);
+            }
+            cost[row + j..row + j + 4].copy_from_slice(&packed);
+            j += 4;
+        }
+        while j < n {
+            let mut distance = 0.0;
+            for axis in 0..3 {
+                let delta = flat[3 * i + axis] - y[3 * j + axis];
+                distance += delta * delta;
+            }
+            cost[row + j] = distance;
+            j += 1;
+        }
+    }
+}
+
+/// Columns matched to each row of `x` under the minimum sum of squared distances.
+fn optimal_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
+    let n = x.len() / 3;
+    let mut cost = vec![0.0; n * n];
+    fill_squared_cost(x, y, n, &mut cost);
     // The strict row-minimum matching is the only optimum, so the
     // shortest-path permutation would be this one.
     if let Some(perm) = crate::assignment::strict_unique_row_minima(&cost, n) {
@@ -3398,6 +3469,26 @@ mod tests {
         Array1::from_vec(vec![
             1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0,
         ])
+    }
+
+    #[test]
+    fn vector_squared_costs_match_the_scalar_sum_bit_for_bit() {
+        for n in [1usize, 3, 4, 7, 55, 98] {
+            let mut state = 0x1234_u64.wrapping_mul(n as u64);
+            let mut next = || {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                (state >> 11) as f64 / ((1u64 << 53) as f64) - 0.5
+            };
+            let x = Array1::from((0..3 * n).map(|_| next()).collect::<Vec<_>>());
+            let y = (0..3 * n).map(|_| next()).collect::<Vec<_>>();
+            let mut scalar = vec![0.0; n * n];
+            let mut wide = vec![0.0; n * n];
+            fill_squared_cost_scalar(x.view(), &y, n, &mut scalar);
+            fill_squared_cost(x.view(), &y, n, &mut wide);
+            for (index, (left, right)) in scalar.iter().zip(&wide).enumerate() {
+                assert_eq!(left.to_bits(), right.to_bits(), "n={n} cost {index}");
+            }
+        }
     }
 
     fn squashed() -> Array1<f64> {

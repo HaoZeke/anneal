@@ -45,6 +45,7 @@ FIELDS = [
 SEEDS = list(range(2000, 2012))
 LJ75_STOP = -397.492331 + 0.001
 LJ150_STOP = -893.310258 + 0.001
+TIP4P20_STOP = -872.9887544952 + 0.001
 
 
 def revision() -> str:
@@ -206,6 +207,20 @@ def jobs(seed: int, bindir: Path, scratch: Path) -> list[tuple[str, list[str]]]:
                 str(scratch / f"lj150-{seed}"),
             ],
         ),
+        (
+            "tip4p20",
+            [
+                str(bindir / "h2h_seed"),
+                "tip4p",
+                "20",
+                "0",
+                "2000000",
+                str(seed),
+                "recommended",
+                f"{TIP4P20_STOP:.10f}",
+                str(scratch / f"tip4p20-{seed}"),
+            ],
+        ),
     ]
 
 
@@ -242,7 +257,9 @@ def main() -> None:
                 continue
             text = run(cmd, env)
             parsed = (
-                parse_seed(text) if system in {"lj75", "lj150"} else parse_csv_line(text, system)
+                parse_seed(text)
+                if system.startswith("lj") or system.startswith("tip4p")
+                else parse_csv_line(text, system)
             )
             row = one_row(system, seed, parsed, rev, host)
             append_row(rows_path, row)
