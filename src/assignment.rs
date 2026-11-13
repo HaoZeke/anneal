@@ -410,6 +410,222 @@ pub(crate) fn strict_unique_row_minima(costs: &[f64], n: usize) -> Option<Vec<us
     Some(assignment)
 }
 
+/// Jonker-Volgenant assignment, not used by the default solver.
+///
+/// Column reduction, one transfer, and two augmenting-row passes leave a
+/// partial matching. Shortest paths finish it. The result is returned only
+/// when a feasible dual and the uniqueness test both hold, which is the case
+/// where this permutation is the one successive shortest paths returns.
+/// On the squared-distance matrices of a fivefold residual the initializer
+/// leaves about half the rows free, and the scalar paths that finish them
+/// are slower than the vector scan, so the default stays that scan.
+#[allow(dead_code)]
+pub(crate) fn jonker_unique(costs: &[f64], n: usize) -> Option<Vec<usize>> {
+    if n < 2 {
+        return None;
+    }
+    let mut x = vec![usize::MAX; n];
+    let mut y = vec![usize::MAX; n];
+    let mut v = vec![0.0; n];
+    let mut times = vec![0u16; n];
+    for column in (0..n).rev() {
+        let mut i_min = 0usize;
+        let mut best = costs[column];
+        for row in 1..n {
+            let cost = costs[row * n + column];
+            if cost < best {
+                best = cost;
+                i_min = row;
+            }
+        }
+        v[column] = best;
+        times[i_min] = times[i_min].saturating_add(1);
+        if x[i_min] == usize::MAX {
+            x[i_min] = column;
+            y[column] = i_min;
+        }
+    }
+    let mut free = Vec::with_capacity(n);
+    for row in 0..n {
+        if times[row] == 0 {
+            free.push(row);
+        } else if times[row] == 1 {
+            let matched = x[row];
+            let mut second = f64::INFINITY;
+            let base = row * n;
+            for column in 0..n {
+                if column == matched {
+                    continue;
+                }
+                second = second.min(costs[base + column] - v[column]);
+            }
+            v[matched] -= second;
+        }
+    }
+    for _ in 0..2 {
+        let mut todo = std::collections::VecDeque::from(std::mem::take(&mut free));
+        let mut bids = 0usize;
+        while let Some(row) = todo.pop_front() {
+            if bids >= 2 * n {
+                free.push(row);
+                continue;
+            }
+            bids += 1;
+            let base = row * n;
+            let mut j1 = 0usize;
+            let mut j2 = 1usize;
+            let mut first = costs[base] - v[0];
+            let mut second = costs[base + 1] - v[1];
+            if second < first {
+                std::mem::swap(&mut j1, &mut j2);
+                std::mem::swap(&mut first, &mut second);
+            }
+            for column in 2..n {
+                let reduced = costs[base + column] - v[column];
+                if reduced < first {
+                    second = first;
+                    j2 = j1;
+                    first = reduced;
+                    j1 = column;
+                } else if reduced < second {
+                    second = reduced;
+                    j2 = column;
+                }
+            }
+            let mut displaced = y[j1];
+            if first < second {
+                v[j1] -= second - first;
+            } else if displaced != usize::MAX {
+                j1 = j2;
+                displaced = y[j1];
+            }
+            x[row] = j1;
+            y[j1] = row;
+            if displaced != usize::MAX {
+                x[displaced] = usize::MAX;
+                if first < second {
+                    todo.push_front(displaced);
+                } else {
+                    free.push(displaced);
+                }
+            }
+        }
+    }
+    let mut distance = vec![0.0; n];
+    let mut predecessor = vec![0usize; n];
+    let mut order = vec![0usize; n];
+    for &start in &free {
+        for column in 0..n {
+            distance[column] = costs[start * n + column] - v[column];
+            predecessor[column] = start;
+            order[column] = column;
+        }
+        let mut low = 0usize;
+        let mut high = 0usize;
+        let mut mu = 0.0;
+        let mut end = usize::MAX;
+        while end == usize::MAX {
+            if low == high {
+                mu = f64::INFINITY;
+                for slot in low..n {
+                    mu = mu.min(distance[order[slot]]);
+                }
+                let mut cursor = low;
+                for slot in low..n {
+                    let column = order[slot];
+                    if distance[column] == mu {
+                        order[slot] = order[cursor];
+                        order[cursor] = column;
+                        cursor += 1;
+                    }
+                }
+                high = cursor;
+                for slot in low..high {
+                    if y[order[slot]] == usize::MAX {
+                        end = order[slot];
+                        break;
+                    }
+                }
+                if end != usize::MAX {
+                    break;
+                }
+            }
+            if low >= n {
+                return None;
+            }
+            let held = order[low];
+            low += 1;
+            let row = y[held];
+            if row == usize::MAX {
+                return None;
+            }
+            let base = row * n;
+            let offset = costs[base + held] - v[held] - mu;
+            let mut slot = high;
+            while slot < n {
+                let column = order[slot];
+                let next = costs[base + column] - v[column] - offset;
+                if next < distance[column] {
+                    distance[column] = next;
+                    predecessor[column] = row;
+                    if next == mu {
+                        if y[column] == usize::MAX {
+                            end = column;
+                            break;
+                        }
+                        order[slot] = order[high];
+                        order[high] = column;
+                        high += 1;
+                    }
+                }
+                slot += 1;
+            }
+        }
+        for slot in 0..low {
+            let column = order[slot];
+            v[column] += distance[column] - mu;
+        }
+        let mut column = end;
+        loop {
+            let row = predecessor[column];
+            y[column] = row;
+            let previous = x[row];
+            x[row] = column;
+            if row == start {
+                break;
+            }
+            column = previous;
+        }
+    }
+    let mut scale = 1.0_f64;
+    for value in costs {
+        scale = scale.max(value.abs());
+    }
+    let tolerance = 1.0e-8 * (1.0 + scale);
+    let mut row_potential = vec![0.0; n + 1];
+    let mut column_potential = vec![0.0; n + 1];
+    for row in 0..n {
+        let column = x[row];
+        if column >= n || y[column] != row {
+            return None;
+        }
+        let matched = costs[row * n + column];
+        row_potential[row + 1] = matched - v[column];
+        column_potential[column + 1] = v[column];
+    }
+    for row in 0..n {
+        let base = row * n;
+        let dual = row_potential[row + 1];
+        for column in 0..n {
+            let reduced = costs[base + column] - dual - v[column];
+            if reduced < -tolerance {
+                return None;
+            }
+        }
+    }
+    optimum_is_unique(costs, n, &x, &row_potential, &column_potential).then_some(x)
+}
+
 pub(crate) fn successive_shortest_paths(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     successive_shortest_paths_scanned(costs, n).map(|(assignment, unique)| {
         ASSIGNMENT_IS_UNIQUE.with(|cell| cell.set(unique));
@@ -950,8 +1166,8 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     use super::{group_ineligible, phase_delta_avx2};
     use super::{
-        kuhn_munkres, minimum_cost_assignment, phase_delta_scalar, strict_unique_row_minima,
-        successive_shortest_paths, successive_shortest_paths_matching,
+        jonker_unique, kuhn_munkres, minimum_cost_assignment, phase_delta_scalar,
+        strict_unique_row_minima, successive_shortest_paths, successive_shortest_paths_matching,
         successive_shortest_paths_scanned,
     };
 
@@ -1084,6 +1300,51 @@ mod tests {
     #[test]
     fn a_non_finite_reduced_cost_has_no_shortest_path() {
         assert!(successive_shortest_paths(&[f64::NAN], 1).is_none());
+    }
+
+    /// The initializer is not the default. Where it certifies a unique
+    /// optimum, that permutation is the shortest-path one.
+    #[test]
+    fn jonker_matches_the_unique_shortest_path_permutation() {
+        let mut state = 0x51ed_2701_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 11) as f64 / ((1u64 << 53) as f64)
+        };
+        let mut agreed = 0usize;
+        let mut fell_back = 0usize;
+        for n in [8usize, 32, 98, 150] {
+            for _ in 0..6 {
+                let points: Vec<[f64; 3]> = (0..n)
+                    .map(|_| [next() * 4.0, next() * 4.0, next() * 4.0])
+                    .collect();
+                let angle = 2.0 * std::f64::consts::PI / 5.0;
+                let (s, c) = angle.sin_cos();
+                let mut costs = vec![0.0; n * n];
+                for row in 0..n {
+                    let turned = [
+                        c * points[row][0] - s * points[row][1],
+                        s * points[row][0] + c * points[row][1],
+                        points[row][2],
+                    ];
+                    for column in 0..n {
+                        let dx = turned[0] - points[column][0];
+                        let dy = turned[1] - points[column][1];
+                        let dz = turned[2] - points[column][2];
+                        costs[row * n + column] = dx * dx + dy * dy + dz * dz;
+                    }
+                }
+                let cold = successive_shortest_paths(&costs, n).expect("cold");
+                match jonker_unique(&costs, n) {
+                    Some(warm) => {
+                        assert_eq!(warm, cold, "n={n}");
+                        agreed += 1;
+                    }
+                    None => fell_back += 1,
+                }
+            }
+        }
+        assert!(agreed > fell_back, "agreed {agreed} fell back {fell_back}");
     }
 
     /// The byte-flag scan and the AVX2 scan have to pick the same column

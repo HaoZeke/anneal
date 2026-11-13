@@ -1916,15 +1916,17 @@ unsafe fn fill_squared_cost_avx2(x: ArrayView1<f64>, y: &[f64], n: usize, cost: 
 }
 
 /// Columns matched to each row of `x` under the minimum sum of squared distances.
-fn optimal_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
+fn optimal_perm(x: ArrayView1<f64>, y: &[f64], axis: [f64; 3]) -> Vec<usize> {
     let n = x.len() / 3;
     let mut cost = vec![0.0; n * n];
     fill_squared_cost(x, y, n, &mut cost);
     // The strict row-minimum matching is the only optimum, so the
     // shortest-path permutation would be this one.
     if let Some(perm) = crate::assignment::strict_unique_row_minima(&cost, n) {
+        note_unique_row();
         return perm;
     }
+    note_solver(&cost, n, axis);
     hungarian(&cost, n)
 }
 
@@ -2233,10 +2235,126 @@ fn remember_residual(x: ArrayView1<f64>, axis: [f64; 3], rms: f64, displacement:
     });
 }
 
+/// Counts residual-memo hits and, for each solved axis, whether a later
+/// geometry repeated the cost matrix or the permutation. Off unless a test
+/// turns it on. The default search does not read it.
+struct AssignDiag {
+    residual_hit: u64,
+    residual_miss: u64,
+    unique_row: u64,
+    solver: u64,
+    unique_opt: u64,
+    repeat_axis: u64,
+    exact: u64,
+    same_perm: u64,
+    rows_changed_sum: u64,
+    delta_sum: f64,
+    delta_small: u64,
+    axes: std::collections::HashMap<[u64; 3], (Vec<f64>, Vec<usize>)>,
+}
+
+std::thread_local! {
+    static ASSIGN_DIAG: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static ASSIGN_TALLY: std::cell::RefCell<AssignDiag> = std::cell::RefCell::new(AssignDiag {
+        residual_hit: 0,
+        residual_miss: 0,
+        unique_row: 0,
+        solver: 0,
+        unique_opt: 0,
+        repeat_axis: 0,
+        exact: 0,
+        same_perm: 0,
+        rows_changed_sum: 0,
+        delta_sum: 0.0,
+        delta_small: 0,
+        axes: std::collections::HashMap::new(),
+    });
+}
+
+fn diag_on() -> bool {
+    ASSIGN_DIAG.with(std::cell::Cell::get)
+}
+
+fn note_residual(hit: bool) {
+    if !diag_on() {
+        return;
+    }
+    ASSIGN_TALLY.with(|slot| {
+        let mut tally = slot.borrow_mut();
+        if hit {
+            tally.residual_hit += 1;
+        } else {
+            tally.residual_miss += 1;
+        }
+    });
+}
+
+fn note_unique_row() {
+    if !diag_on() {
+        return;
+    }
+    ASSIGN_TALLY.with(|slot| slot.borrow_mut().unique_row += 1);
+}
+
+fn note_solver(cost: &[f64], n: usize, axis: [f64; 3]) {
+    if !diag_on() {
+        return;
+    }
+    let perm =
+        crate::assignment::successive_shortest_paths(cost, n).unwrap_or_else(|| (0..n).collect());
+    let unique = crate::assignment::last_dense_optimum_was_unique();
+    let key = axis_bits(axis);
+    ASSIGN_TALLY.with(|slot| {
+        let mut tally = slot.borrow_mut();
+        tally.solver += 1;
+        if unique {
+            tally.unique_opt += 1;
+        }
+        let revisit = tally.axes.get(&key).map(|(prev_cost, prev_perm)| {
+            let mut changed = 0usize;
+            let mut exact = true;
+            let mut dmax = 0.0_f64;
+            for row in 0..n {
+                let base = row * n;
+                let mut row_changed = false;
+                for column in 0..n {
+                    let gap = (cost[base + column] - prev_cost[base + column]).abs();
+                    if gap > 0.0 {
+                        row_changed = true;
+                        exact = false;
+                        dmax = dmax.max(gap);
+                    }
+                }
+                if row_changed {
+                    changed += 1;
+                }
+            }
+            (changed, exact, dmax, prev_perm == &perm)
+        });
+        if let Some((changed, exact, dmax, same)) = revisit {
+            tally.repeat_axis += 1;
+            if exact {
+                tally.exact += 1;
+            }
+            tally.rows_changed_sum += changed as u64;
+            tally.delta_sum += dmax;
+            if dmax < 1.0e-3 {
+                tally.delta_small += 1;
+            }
+            if same {
+                tally.same_perm += 1;
+            }
+        }
+        tally.axes.insert(key, (cost.to_vec(), perm));
+    });
+}
+
 fn residual_about(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>) {
     if let Some(saved) = remembered_residual(x, axis) {
+        note_residual(true);
         return saved;
     }
+    note_residual(false);
     let computed = residual_about_fresh(x, axis);
     remember_residual(x, axis, computed.0, &computed.1);
     computed
@@ -2264,7 +2382,7 @@ fn residual_about_fresh(x: ArrayView1<f64>, axis: [f64; 3]) -> (f64, Array1<f64>
         y[3 * i + 1] = q[1];
         y[3 * i + 2] = q[2];
     }
-    let perm = optimal_perm(ArrayView1::from(xc.as_slice()), &y);
+    let perm = optimal_perm(ArrayView1::from(xc.as_slice()), &y, axis);
     let mut y_m = vec![0.0; x.len()];
     for i in 0..n {
         for a in 0..3 {
@@ -2559,7 +2677,7 @@ fn interior_opening(x: ArrayView1<f64>, axis: [f64; 3], sign: f64) -> Array1<f64
             turned[3 * i + axis_i] = image[axis_i];
         }
     }
-    let perm = optimal_perm(ArrayView1::from(centred.as_slice()), &turned);
+    let perm = optimal_perm(ArrayView1::from(centred.as_slice()), &turned, axis);
     let mut dr = Array1::zeros(x.len());
     for i in 0..n {
         for axis_i in 0..3 {
@@ -3463,6 +3581,52 @@ mod tests {
     use super::*;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+
+    #[test]
+    fn the_assignment_diag_counts_a_memo_hit_and_an_axis_revisit() {
+        ASSIGN_DIAG.with(|cell| cell.set(true));
+        ASSIGN_TALLY.with(|slot| {
+            let mut tally = slot.borrow_mut();
+            tally.residual_hit = 0;
+            tally.residual_miss = 0;
+            tally.unique_row = 0;
+            tally.solver = 0;
+            tally.unique_opt = 0;
+            tally.repeat_axis = 0;
+            tally.exact = 0;
+            tally.same_perm = 0;
+            tally.rows_changed_sum = 0;
+            tally.delta_sum = 0.0;
+            tally.delta_small = 0;
+            tally.axes.clear();
+        });
+        RESIDUAL_MEMO.with(|slot| {
+            let mut memo = slot.borrow_mut();
+            memo.coordinates.clear();
+            memo.entries.clear();
+        });
+        let x = tetra();
+        let axis = [0.0, 0.0, 1.0];
+        let _ = residual_about(x.view(), axis);
+        let _ = residual_about(x.view(), axis);
+        let mut moved = x.clone();
+        moved[0] += 0.25;
+        let _ = residual_about(moved.view(), axis);
+        let n = 3usize;
+        let cost = vec![0.0, 1.0, 3.0, 4.0, 0.0, 1.0, 2.0, 5.0, 0.0];
+        note_solver(&cost, n, axis);
+        let mut changed = cost.clone();
+        changed[2] += 0.5;
+        note_solver(&changed, n, axis);
+        ASSIGN_TALLY.with(|slot| {
+            let tally = slot.borrow();
+            assert_eq!(tally.residual_hit, 1);
+            assert_eq!(tally.residual_miss, 2);
+            assert_eq!(tally.repeat_axis, 1);
+            assert!(tally.rows_changed_sum >= 1);
+        });
+        ASSIGN_DIAG.with(|cell| cell.set(false));
+    }
 
     fn tetra() -> Array1<f64> {
         // Regular tetrahedron, edge ~√8.
