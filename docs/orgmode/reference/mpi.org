@@ -41,13 +41,16 @@ calculator groups.
 =shareFromCalculator= broadcasts one group's bytes to every rank.
 When more than one rank is bound, a rank that cannot enter that broadcast prints
 the error on every rank and calls =MPI_Abort= on =MPI_COMM_WORLD=.
-The same abort runs when one rank leaves =CPMDPot::forceImpl= by an exception.
+The same abort runs when one rank leaves =CPMDPot::forceImpl= or
+=CP2KPot::forceImpl= by an exception, with one exception for CP2K: an
+unconverged SCF is agreed over the calculator's communicator, and every rank of
+that calculator throws =rgpot::CP2KScfError= without aborting.
 =MPI_Finalize= at process exit runs when =bindCalculators= called =MPI_Init=.
 A host that called =MPI_Init= finalizes itself.
 
-=CPMDPot= reports =PotCaps::groupCollective=: every rank of a calculator enters
-each of its force calls together, and the call's collectives stay on that
-calculator's communicator.
+=CPMDPot= and =CP2KPot= report =PotCaps::groupCollective=: every rank of a
+calculator enters each of its force calls together, and the call's collectives
+stay on that calculator's communicator.
 A host may hand calculators an uneven batch, with some calculators making no
 call at all, and then share results with =shareFromCalculator=.
 A failure inside the call prints on every rank of the failing calculator, then
@@ -58,3 +61,12 @@ A geometry that any rank of the calculator misses is computed on all of its
 ranks, so no rank waits alone inside the call.
 Give each rank its own cache directory: RocksDB locks a directory to one
 process.
+
+=CP2KPot::bindCalculators= splits the world as =CPMDPot::bindCalculators= does
+and hands the shim the calculator communicator through
+=cp2kc_adopt_calculator_comm=.
+Each force environment runs on that communicator, or on =MPI_COMM_WORLD= when no
+split exists.
+When MPI is initialised before the first session, the shim calls
+=cp2k_init_without_mpi=; otherwise =cp2k_init= starts MPI and the shim finalises
+CP2K and MPI at exit.

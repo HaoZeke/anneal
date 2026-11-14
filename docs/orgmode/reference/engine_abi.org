@@ -45,8 +45,54 @@ The Metatomic and XTB engines keep their own tables
 NWChem and CPMD also keep the prefix-parameterized profile ABI that =NWChemPot=
 and =CPMDPot= load, and MOPAC keeps =mopac_c_abi.h=.
 The plugin interface in =rgpot/plugin.h= is a separate family.
-The remaining backends (tblite, dftd3, dftd4, ExprPot, XcKernel, CPMD) have no
-engine library.
+The remaining backends (tblite, dftd3, dftd4, ExprPot, XcKernel, CPMD, CP2K)
+have no engine library.
+
+** CP2K shim
+
+=CP2KPot= drives CP2K through
+=libcp2kc_rgpot=, a shim over libcp2k declared in =CppCore/rgpot/CP2KPot/cp2kc_abi.h=
+(=CP2KC_ABI_VERSION= 1).
+The shim is the only target that links libcp2k and MPI; =CP2KPot= opens it with
+=dlopen=, so =librgpot= gains neither dependency.
+Meson builds it with
+=-Dwith_cp2k=enabled= from the =libcp2k= pkg-config module (CMake: =-DRGPOT_WITH_CP2K=ON=).
+Without it =librgpot= contains no CP2K code, =potserv CP2K= exits with an error
+naming the option, and every other backend refuses the =cp2k= arm in
+=configure()=.
+=CP2KPot= searches =CP2KParams.enginePath=, then
+=CP2KC_LIBRARY=, then =RGPOT_CP2K_ENGINE=, then =libcp2kc_rgpot.so= on the
+loader path.
+
+| symbol | purpose |
+|--------+---------|
+| =cp2kc_abi_version=, =cp2kc_version=, =cp2kc_available= | identity |
+| =cp2kc_adopt_calculator_comm= | borrow the calculator's =MPI_Comm= |
+| =cp2kc_session_create= | write the deck to =dir/input.inp=, initialise libcp2k once |
+| =cp2kc_session_select_orbitals= | name the key whose force environment the next call uses |
+| =cp2kc_session_calculate= | positions and cell in Bohr in, Hartree and Hartree/Bohr forces out |
+| =cp2kc_session_destroy= | destroy the session's force environments |
+
+The shim speaks CP2K's atomic units and takes no Cap'n Proto.
+=CP2KPot= renders the deck from =CP2KParams= and the first geometry, multiplies
+positions and cell rows by =ANGSTROM_TO_BOHR=, and returns the energy times
+=HARTREE_TO_EV= and the forces times =HARTREE_BOHR_TO_EV_ANGSTROM=. libcp2k
+returns forces, so no sign changes.
+The cell rows are the cell vectors: =cp2k_set_cell= reshapes the nine values
+column-wise into CP2K's =hmat=, whose columns are the vectors.
+
+=cp2kc_session_calculate= returns 0 on success, 1 for a bad argument (including
+an atom count that differs from the deck), 2 when the SCF did not converge, and
+a negative value on a fatal error.
+The rendered deck sets =IGNORE_CONVERGENCE_FAILURE=, so CP2K warns instead of
+calling =MPI_ABORT=.
+After each evaluation the first rank of the calculator reads the new part of
+=cp2k.out= for =SCF run NOT converged= and broadcasts the result, so every rank
+returns 2 for the same call.
+=CP2KPot= turns that code into =rgpot::CP2KScfError= on every rank without the
+error exchange, and an engine-table host maps it to its recoverable code 2.
+Any other failure takes the abort path described in [[file:mpi.org][MPI]].
+libcp2k has no stress getter, so =has_stress= is 0.
 
 ** Symbols
 
