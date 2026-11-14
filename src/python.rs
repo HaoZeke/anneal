@@ -3868,6 +3868,7 @@ fn cluster_search(
     dict.set_item("best", PyArray1::from_vec(py, best))?;
     dict.set_item("best_energy", out.best)?;
     dict.set_item("hops", out.hops)?;
+    dict.set_item("accepted", out.accepted)?;
     dict.set_item("nve_unavailable", out.nve_unavailable)?;
     let quench = match stats.local_step {
         LocalStep::Tric => "tric",
