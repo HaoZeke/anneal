@@ -432,6 +432,8 @@ enum CallWall<'a> {
     /// No species. LJ, TIP4P and Gupta stay on the path that never
     /// consulted a pair distance before the call.
     Open,
+    /// No species, and the objective declares [`Config::call_floor`].
+    Floor(f64),
     /// Labelled atoms with no declared bonds: [`OVERLAP_CALL_LIMIT`].
     ///
     /// A metal's nearest neighbour sits inside its covalent sum (Cu–Cu
@@ -454,7 +456,7 @@ enum CallWall<'a> {
 impl<'a> CallWall<'a> {
     fn of(cfg: &'a Config) -> Self {
         match (cfg.species.as_deref(), &cfg.move_library) {
-            (None, _) => Self::Open,
+            (None, _) => cfg.call_floor.map_or(Self::Open, Self::Floor),
             (
                 Some(species),
                 MoveLibrary::Molecular {
@@ -525,6 +527,7 @@ impl<'a> CallWall<'a> {
         match self {
             Self::Open => false,
             _ if point.iter().any(|value| !value.is_finite()) => true,
+            Self::Floor(floor) => min_pair_distance(point) <= *floor,
             Self::Absolute => min_pair_distance(point) <= OVERLAP_CALL_LIMIT,
             Self::Covalent {
                 species,
