@@ -250,6 +250,7 @@ fn main() {
             report.push_str(&run_arm(engine, arm, smoke));
         }
     }
+    let failed = report_failed(&report);
     print!("{report}");
     if let Ok(path) = std::env::var("PAPER_OUT") {
         if smoke && !path.contains("SMOKE") {
@@ -259,6 +260,13 @@ fn main() {
     } else if smoke {
         std::fs::write("water-hexamer-SMOKE.txt", &report).expect("smoke file");
     }
+    if failed {
+        std::process::exit(2);
+    }
+}
+
+fn report_failed(report: &str) -> bool {
+    report.lines().any(|line| line == "status: failed")
 }
 
 fn selection(arg: &str, choices: &[(&str, &str)]) -> Vec<String> {
@@ -745,7 +753,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                     (outcome, stats)
                 }
                 Err(error) => {
-                    text.push_str(&format!("search_error: {error}\n"));
+                    text.push_str(&format!("status: failed\nsearch_error: {error}\n"));
                     return text;
                 }
             }
@@ -864,7 +872,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
                     result
                 }
                 Err(error) => {
-                    text.push_str(&format!("search_error: {error}\n"));
+                    text.push_str(&format!("status: failed\nsearch_error: {error}\n"));
                     return text;
                 }
             }
@@ -872,7 +880,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             match search_from(&objective, &cfg, &mut ledger, start.view(), seed) {
                 Ok(result) => result,
                 Err(error) => {
-                    text.push_str(&format!("search_error: {error}\n"));
+                    text.push_str(&format!("status: failed\nsearch_error: {error}\n"));
                     return text;
                 }
             }
@@ -1033,7 +1041,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
             .map(|value| format!("{value:.6}"))
             .unwrap_or_else(|| "none".to_owned());
         text.push_str(&format!(
-            "seed: {seed}\nstart_monomers_intact: {start_intact}\nstart_spread_steps: {spread_steps}\nstart_oh_min_A: {start_oh_min:.6}\nstart_oh_max_A: {start_oh_max:.6}\nbest_energy: {best}\nbest_monomers_intact: {intact}\nbest_oh_min_A: {best_oh_min:.6}\nbest_oh_max_A: {best_oh_max:.6}\nisomer: {isomer_name}\nisomer_rmsd_A: {isomer_rmsd}\nisomer_gate_A: {gate_text}\nisomer_reason: {isomer_reason}\nfirst_hit_calls: {first_hit_calls_text}\nfirst_hit_wall_seconds: {first_hit_wall_text}\nfirst_hit_isomer: {first_hit_isomer_text}\nfirst_prism_calls: {first_prism_calls_text}\nfirst_prism_wall_seconds: {first_prism_wall_text}\nforce_calls: {}\nwall_seconds: {wall_s:.6}\nforce_calls_per_second: {per_second:.6}\nhops: {}\nhop_stop: {}\nbasins: {}\nconverged: {}\nquenches: {}\nhit: {hit}\n",
+            "status: ok\nseed: {seed}\nstart_monomers_intact: {start_intact}\nstart_spread_steps: {spread_steps}\nstart_oh_min_A: {start_oh_min:.6}\nstart_oh_max_A: {start_oh_max:.6}\nbest_energy: {best}\nbest_monomers_intact: {intact}\nbest_oh_min_A: {best_oh_min:.6}\nbest_oh_max_A: {best_oh_max:.6}\nisomer: {isomer_name}\nisomer_rmsd_A: {isomer_rmsd}\nisomer_gate_A: {gate_text}\nisomer_reason: {isomer_reason}\nfirst_hit_calls: {first_hit_calls_text}\nfirst_hit_wall_seconds: {first_hit_wall_text}\nfirst_hit_isomer: {first_hit_isomer_text}\nfirst_prism_calls: {first_prism_calls_text}\nfirst_prism_wall_seconds: {first_prism_wall_text}\nforce_calls: {}\nwall_seconds: {wall_s:.6}\nforce_calls_per_second: {per_second:.6}\nhops: {}\nhop_stop: {}\nbasins: {}\nconverged: {}\nquenches: {}\nhit: {hit}\n",
             ledger.spent(),
             outcome.hops,
             outcome.stop.as_ref().map_or("none", |stop| stop.code()),
@@ -1886,5 +1894,12 @@ mod tests {
             assert_eq!(from_builtin, from_grid);
             assert_ne!(from_builtin, from_other);
         }
+    }
+
+    #[test]
+    fn non_finite_search_is_user_visible_as_failure() {
+        let report = "status: failed\nsearch_error: no finite minimum after 3000 evaluations\nbest_energy: inf\n";
+        assert!(report_failed(report));
+        assert!(!report_failed("status: ok\nbest_energy: -46.0\n"));
     }
 }

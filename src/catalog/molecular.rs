@@ -1510,7 +1510,7 @@ mod water_hexamer_tests {
                     .unwrap_or("continuing")
                     .to_owned(),
             };
-        let (_out, _stats) = search_from_with_checkpoint(
+        let result = search_from_with_checkpoint(
             &objective,
             &cfg,
             &mut ledger,
@@ -1518,8 +1518,11 @@ mod water_hexamer_tests {
             5100,
             GOOD_TURING_CHECKPOINT_INTERVAL,
             &mut checkpoint,
-        )
-        .expect("finite start");
+        );
+        assert!(matches!(
+            result,
+            Err(crate::methods::cluster_hopping::SearchError::NoFiniteMinimum { .. })
+        ));
         assert!(
             ledger.spent() < budget / 2,
             "retire spent {} of {budget}",

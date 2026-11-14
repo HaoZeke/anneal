@@ -431,9 +431,16 @@ fn the_auto_quench_follows_the_cost_of_a_call() {
     let start = Array1::from_vec(start);
     let species = [8, 1, 1].repeat(3);
     let groups = vec![vec![0, 1, 2], vec![3, 4, 5], vec![6, 7, 8]];
-    let cfg = Config::recommended_molecular(species, groups, 1.0);
-    assert_eq!(cfg.local_step, LocalStep::Auto);
+    let mut cfg = Config::recommended_molecular(species, groups, 1.0);
+    assert_eq!(cfg.local_step, LocalStep::Lbfgs);
 
+    let slow = SlowWater(FlexibleWater::new(3));
+    let mut ledger = Ledger::new(150);
+    let (_, stats) = search_from(&slow, &cfg, &mut ledger, start.view(), 3).expect("finite start");
+    assert_eq!(stats.local_step, LocalStep::Lbfgs);
+    assert!(stats.quench_seconds.is_none());
+
+    cfg.local_step = LocalStep::Auto;
     let fast = FlexibleWater::new(3);
     let mut ledger = Ledger::new(600);
     let (_, stats) = search_from(&fast, &cfg, &mut ledger, start.view(), 3).expect("finite start");
@@ -444,7 +451,6 @@ fn the_auto_quench_follows_the_cost_of_a_call() {
         "{call} s a call, {step} s a step"
     );
 
-    let slow = SlowWater(FlexibleWater::new(3));
     let mut ledger = Ledger::new(150);
     let (_, stats) = search_from(&slow, &cfg, &mut ledger, start.view(), 3).expect("finite start");
     let (call, step) = stats.quench_seconds.expect("the opening quench was timed");

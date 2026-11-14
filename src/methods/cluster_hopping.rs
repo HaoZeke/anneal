@@ -516,6 +516,12 @@ pub enum SearchError {
         /// Quenches tried before the search stopped.
         attempts: usize,
     },
+    /// The search spent its work without validating a finite minimum.
+    #[error("no finite minimum after {charged} evaluations")]
+    NoFiniteMinimum {
+        /// Evaluations charged before the search stopped.
+        charged: usize,
+    },
 }
 
 /// Why a search returned an [`Outcome`].

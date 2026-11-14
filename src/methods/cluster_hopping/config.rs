@@ -2534,7 +2534,7 @@ impl Config {
     /// use anneal_core::methods::tric_opt::LocalStep;
     /// let cfg = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
     /// assert!(cfg.ring_moves && cfg.hold_stereocentres && cfg.measured_energy_scale);
-    /// assert_eq!(cfg.local_step, LocalStep::Auto);
+    /// assert_eq!(cfg.local_step, LocalStep::Lbfgs);
     /// ```
     pub fn recommended_molecular(
         species: Vec<u32>,
@@ -2553,10 +2553,10 @@ impl Config {
         // GFN-class force is eV per angstrom, and an iteration-capped
         // quasi-Newton step leaves a maximum component near 1e-2.
         cfg.record_gradient = 5.0e-2;
-        // A TRIC quench takes about half the calls of a Cartesian one, and
-        // its steps cost more than a cheap force field's call. The opening
-        // quench times both.
-        cfg.local_step = crate::methods::tric_opt::LocalStep::Auto;
+        // Under a fixed call budget, saved TRIC calls fund more quenches
+        // while still paying coordinate overhead on every step. Automatic
+        // TRIC (`LocalStep::Auto`) and unconditional TRIC (`LocalStep::Tric`)
+        // are therefore opt-in; the preset keeps Cartesian L-BFGS.
         // Without crankshafts every quench keeps the start's ring pucker and
         // macrocycle backbone. A molecule without a flexible ring draws the
         // same hops either way.
@@ -2744,14 +2744,25 @@ mod coverage_behaviour {
         let groups = vec![vec![0, 1, 2], vec![3, 4, 5]];
         let species = vec![8, 1, 1, 8, 1, 1];
         let recommended = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
-        assert_eq!(recommended.local_step, LocalStep::Auto);
+        assert_eq!(recommended.local_step, LocalStep::Lbfgs);
         assert!(recommended.hold_stereocentres);
         assert!(recommended.measured_energy_scale);
         assert!(
-            recommended
+            !recommended
                 .resolved_json()
                 .unwrap()
+                .contains("\"local_step\"")
+        );
+        let mut auto = recommended.clone();
+        auto.local_step = LocalStep::Auto;
+        assert!(
+            auto.resolved_json()
+                .unwrap()
                 .contains("\"local_step\":\"auto\"")
+        );
+        assert_ne!(
+            auto.resolved_sha256().unwrap(),
+            recommended.resolved_sha256().unwrap()
         );
         assert_eq!(
             Config::for_molecular(species, groups, 1.0).local_step,

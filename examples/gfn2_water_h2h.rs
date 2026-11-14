@@ -571,6 +571,19 @@ fn main() {
     };
     writeln!(meta, "hops: {}", outcome.hops).ok();
     writeln!(meta, "basins: {}", outcome.basins).ok();
+    let local_step = match stats.local_step {
+        anneal_core::methods::tric_opt::LocalStep::Tric => "tric",
+        _ => "lbfgs",
+    };
+    writeln!(meta, "local_step: {local_step}").ok();
+    if let Some((potential_call_s, tric_step_s)) = stats.quench_seconds {
+        writeln!(
+            meta,
+            "auto_potential_call_s: {potential_call_s:.9}\nauto_tric_step_s: {tric_step_s:.9}\nauto_outside_fraction: {:.6}",
+            tric_step_s / potential_call_s
+        )
+        .ok();
+    }
     let overlap_rejected = stats.overlap_rejected + outcome.overlap_rejected;
     writeln!(meta, "overlap_rejected: {overlap_rejected}").ok();
     writeln!(

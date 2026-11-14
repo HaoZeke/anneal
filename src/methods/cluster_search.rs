@@ -39,6 +39,10 @@ use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+fn auto_uses_tric(per_call: f64, per_step: f64) -> bool {
+    per_call > per_step
+}
+
 /// Search time and the Euclidean answer polish that follows it.
 ///
 /// The printed seed wall includes both. Callers that compare that wall
@@ -1122,7 +1126,7 @@ where
         {
             let per_call = call_seconds / timed_calls as f64;
             let per_step = tric.step_seconds(check.at.view(), check.energy, check.gradient.view());
-            use_tric = per_call > per_step;
+            use_tric = auto_uses_tric(per_call, per_step);
             deciding = false;
             stats.quench_seconds = Some((per_call, per_step));
             stats.local_step = if use_tric {
@@ -1496,6 +1500,17 @@ where
     (outcome, stats)
 }
 
+fn require_finite_minimum(
+    result: (Outcome, RelaxStats),
+    charged: usize,
+) -> Result<(Outcome, RelaxStats), SearchError> {
+    if result.0.best.is_finite() && result.0.best_state.is_some() {
+        Ok(result)
+    } else {
+        Err(SearchError::NoFiniteMinimum { charged })
+    }
+}
+
 /// Runs a cluster search on `objective` under `ledger`.
 ///
 /// The relaxation is this crate's warm-started quasi-Newton one, and its
@@ -1559,14 +1574,10 @@ where
     if reserve > 0 {
         finish_molecular_answers(objective, cfg, ledger, &mut stats, &mut out);
     }
-    Ok(finish_search(
-        objective,
-        cfg,
-        ledger,
-        out,
-        stats,
-        search_started,
-    ))
+    require_finite_minimum(
+        finish_search(objective, cfg, ledger, out, stats, search_started),
+        ledger.spent(),
+    )
 }
 
 /// [`search`] of a [`crate::potentials::PairPotential`], instantiated in this crate.
@@ -1643,14 +1654,10 @@ where
     if reserve > 0 {
         finish_molecular_answers(objective, cfg, ledger, &mut stats, &mut out);
     }
-    Ok(finish_search(
-        objective,
-        cfg,
-        ledger,
-        out,
-        stats,
-        search_started,
-    ))
+    require_finite_minimum(
+        finish_search(objective, cfg, ledger, out, stats, search_started),
+        ledger.spent(),
+    )
 }
 
 /// Calls kept back from a molecular hop for the final polish.
@@ -1839,14 +1846,10 @@ where
             checkpoint,
         )?
     };
-    Ok(finish_search(
-        objective,
-        cfg,
-        ledger,
-        out,
-        stats,
-        search_started,
-    ))
+    require_finite_minimum(
+        finish_search(objective, cfg, ledger, out, stats, search_started),
+        ledger.spent(),
+    )
 }
 
 /// As [`search_from`], reporting every certified quench to `history`.
@@ -1887,7 +1890,7 @@ where
             &mut rng,
         )?
     };
-    Ok((out, stats))
+    require_finite_minimum((out, stats), ledger.spent())
 }
 
 /// A minimum descended further than a search quench goes.
@@ -2546,14 +2549,10 @@ where
         improvements,
         ..Outcome::default()
     };
-    Ok(finish_search(
-        objective,
-        cfg,
-        ledger,
-        out,
-        stats,
-        search_started,
-    ))
+    require_finite_minimum(
+        finish_search(objective, cfg, ledger, out, stats, search_started),
+        ledger.spent(),
+    )
 }
 
 #[cfg(any(feature = "bank-rpc", test))]
@@ -2735,6 +2734,37 @@ mod tests {
     use super::*;
     use crate::potentials::PairPotential;
     use ndarray::Array1;
+
+    #[test]
+    fn automatic_tric_compares_call_and_step_without_a_fraction_cap() {
+        assert!(auto_uses_tric(1.0, 0.5));
+        assert!(!auto_uses_tric(1.0, 1.0));
+        assert!(!auto_uses_tric(0.5, 1.0));
+    }
+
+    #[test]
+    fn recommended_molecular_keeps_automatic_tric_opt_in() {
+        let cfg = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
+        assert_eq!(cfg.local_step, crate::methods::tric_opt::LocalStep::Lbfgs);
+    }
+
+    #[test]
+    fn a_non_finite_incumbent_is_a_search_failure() {
+        let result = (
+            Outcome {
+                best: f64::INFINITY,
+                best_state: None,
+                ..Outcome::default()
+            },
+            RelaxStats::default(),
+        );
+        let error = require_finite_minimum(result, 3_000).unwrap_err();
+        assert_eq!(error, SearchError::NoFiniteMinimum { charged: 3_000 });
+        assert_eq!(
+            error.to_string(),
+            "no finite minimum after 3000 evaluations"
+        );
+    }
 
     #[test]
     fn quench_watch_rejects_negative_infinity() {
@@ -3062,8 +3092,7 @@ mod tests {
         // inside it, and so does the shorten.
         let start = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.05, 0.0, 0.0]);
         let mut ledger = Ledger::new(2_000);
-        let (out, _) = search_from(&trap, &cfg, &mut ledger, start.view(), 1)
-            .expect("a failing region ends the quench");
+        let result = search_from(&trap, &cfg, &mut ledger, start.view(), 1);
         let failures = trap.failures.load(Ordering::Relaxed);
         let calls = trap.calls.load(Ordering::Relaxed);
         assert!(
@@ -3079,11 +3108,7 @@ mod tests {
             "the stall spent {} calls",
             ledger.spent()
         );
-        assert!(
-            out.best.is_finite() || ledger.best.is_infinite(),
-            "a non-finite penalty was recorded as the best"
-        );
-        let _ = out;
+        assert!(matches!(result, Err(SearchError::NoFiniteMinimum { .. })));
     }
 
     /// The water Good-Turing arm retires only from quench boundaries. A search
