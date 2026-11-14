@@ -12,7 +12,8 @@ One =ExprPot= is one =Potential=, so
 eindir objective for rgmin, rgsaddle, and anneal.
 See [[file:eindir-anneal.org][rgpot potentials as eindir objectives]].
 
-There is no =PotentialConfig.expr= arm.
+=PotentialConfig.expr= is in the schema, but =potserv= does not apply it.
+=configure= refuses it by name.
 The C++ constructor is the first-slice API.
 RPC/config names the same tree as recursive =ExprParams= / =PotSpec= (expression
 plus named =ExprTerm= children), not a =configure= union.

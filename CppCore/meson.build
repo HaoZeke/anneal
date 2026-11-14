@@ -1800,6 +1800,16 @@ if get_option('with_tests')
         test_deps += dependency('capnp-rpc')
         test_deps += ptlrpc_dep
         test_array += [['RPCTest', 'test_rpc', 'CapnpAdapterTest.cc', '']]
+        if not get_option('with_rpc_client_only')
+            test_array += [
+                [
+                    'MorseConfigureTest',
+                    'morse_configure_test',
+                    'MorseConfigureTest.cc',
+                    '',
+                ],
+            ]
+        endif
         if get_option('with_rpc_client_only')
             test_deps += pot_bridge_dep
             test_array += [

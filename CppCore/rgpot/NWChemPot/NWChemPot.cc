@@ -9,6 +9,7 @@
 
 #include "rgpot/NWChemPot/DynLib.hpp"
 #include "rgpot/NWChemPot/nwchem_c_abi.h"
+#include "rgpot/rpc/PotentialConfigArm.hpp"
 #include "rgpot/units.hpp"
 
 #include <cstdlib>
@@ -358,8 +359,8 @@ bool NWChemPot::setPotentialConfig(const ::PotentialConfig::Reader &cfg,
   }
   default:
     if (message_out)
-      *message_out =
-          "rgpot params arm not handled by NWChemPot (use matching backend pot)";
+      *message_out = "rgpot params arm " + rgpot::rpc::potentialConfigArm(cfg) +
+                     " not handled by NWChemPot (use matching backend pot)";
     return false;
   }
 }

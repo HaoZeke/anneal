@@ -26,7 +26,8 @@ the XC kernel.
 
 =ExprPot= (meson =-Dwith_expr=true=) compiles a Lepton energy string over
 named child =Potential= objects. The parser is vendored OpenMM Lepton;
-there is no pixi muparser feature and no =PotentialConfig.expr= arm.
+there is no pixi muparser feature. The schema carries =PotentialConfig.expr=,
+but =potserv= does not apply it and refuses it by name.
 
 In-process =LJPot= vs pyeonclient =Matter= on the same LJ fixture is
 =scripts/time_lj_rgpot_vs_pyeonclient.py= (on a host listed in
@@ -129,7 +130,7 @@ ctest --test-dir build_client --output-on-failure
 | =TBLitePot= | =TBLite=, =TBLiteGFN1=, =TBLiteIPEA1= | Enable with =-Dwith_tblite=true=; use pixi env =tblitebld= or =tbbld= |
 | =D3Pot= | =D3= | In-process Potential summand. Enable with =-Dwith_dftd3=true=; use pixi env =dftd3= or =dftd=. BJ/zero damping, functional key, explicit ATM flag. No =PotentialConfig.d3=. Goldens: =meson test --suite dftd= |
 | =D4Pot= | =D4= | In-process Potential summand. Enable with =-Dwith_dftd4=true=; use pixi env =dftd4= or =dftd=. Functional key, charge, explicit ATM/many-body flag. No =PotentialConfig.d4=. Goldens: =meson test --suite dftd= |
-| =ExprPot= | in-process | Enable with =-Dwith_expr=true=. Vendored OpenMM Lepton (no pixi muparser). Named =Potential= children; construct-time fail-closed names. No =PotentialConfig.expr=. |
+| =ExprPot= | in-process | Enable with =-Dwith_expr=true=. Vendored OpenMM Lepton (no pixi muparser). Named =Potential= children; construct-time fail-closed names. =potserv= refuses =PotentialConfig.expr=. |
 | =MetatomicPot= | =Metatomic:<model_path>= | Enable with =-Dwith_metatomic=true=; use pixi env =metatomicbld=. Pip engines: torch 2.7+ |
 | =NWChemPot= | =NWChem= | Frontend always builds; load =libnwchemc= from the split =nwchemc= project at runtime |
 | =CPMDPot= | =CPMD= | Frontend always builds; load =libcpmdc= from the split =cpmdc= project at runtime |

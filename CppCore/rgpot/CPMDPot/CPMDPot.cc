@@ -11,6 +11,7 @@
 #include "rgpot/CPMDPot/cpmd_c_abi.h"
 #include "rgpot/NWChemPot/DynLib.hpp"
 #include "rgpot/ParamHash.hpp"
+#include "rgpot/rpc/PotentialConfigArm.hpp"
 #include "rgpot/units.hpp"
 
 #include <algorithm>
@@ -532,8 +533,8 @@ bool CPMDPot::setPotentialConfig(const ::PotentialConfig::Reader &cfg,
   }
   default:
     if (message_out)
-      *message_out =
-          "rgpot params arm not handled by CPMDPot (use matching backend pot)";
+      *message_out = "rgpot params arm " + rgpot::rpc::potentialConfigArm(cfg) +
+                     " not handled by CPMDPot (use matching backend pot)";
     return false;
   }
 }

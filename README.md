@@ -32,7 +32,8 @@ the XC kernel.
 
 `ExprPot` (meson `-Dwith_expr=true`) compiles a Lepton energy string over
 named child `Potential` objects. The parser is vendored OpenMM Lepton;
-there is no pixi muparser feature and no `PotentialConfig.expr` arm.
+there is no pixi muparser feature. The schema carries `PotentialConfig.expr`,
+but `potserv` does not apply it and refuses it by name.
 
 In-process `LJPot` vs pyeonclient `Matter` on the same LJ fixture is
 `scripts/time_lj_rgpot_vs_pyeonclient.py` (on a host listed in
@@ -185,7 +186,7 @@ RPC client types:
 <tr>
 <td class="org-left"><code>ExprPot</code></td>
 <td class="org-left">in-process</td>
-<td class="org-left">Enable with <code>-Dwith_expr=true</code>. Vendored OpenMM Lepton (no pixi muparser). Named <code>Potential</code> children; construct-time fail-closed names. No <code>PotentialConfig.expr</code>.</td>
+<td class="org-left">Enable with <code>-Dwith_expr=true</code>. Vendored OpenMM Lepton (no pixi muparser). Named <code>Potential</code> children; construct-time fail-closed names. <code>potserv</code> refuses <code>PotentialConfig.expr</code>.</td>
 </tr>
 
 <tr>

@@ -30,11 +30,18 @@ Both names are extremely common in computational chemistry codebases.
 *** rgpot user parameters (=PotentialConfig=) over RPC
 
 Backend knobs for a live =Potential= use Cap'n Proto =PotentialConfig=: an
-extensible union (=none=, =nwchem=, =cpmd=, =metatomic=; later =xtb= / …).
+extensible union whose arms and ordinals come from potentials-schema
+(=none= @0, =nwchem= @1, =cpmd= @2, =metatomic= @4, =lammps= @5, =xtb= @6,
+=tblite= @7, =uma= @8, =lj= @9, =morse= @10, =zbl= @11, =d3= @12, =d4= @13,
+=mopac= @14, =skala= @15, =expr= @16).
 Geometry stays on =ForceInput=; =configure(config)= applies method/backend setup
 only.
-=D3Pot= and =D4Pot= stay in-process =Potential= summands.
-There is no =PotentialConfig.d3= or =PotentialConfig.d4= arm.
+=potserv= applies =nwchem=, =cpmd= and =morse= on the matching backend.
+=none= is a no-op on every backend.
+Every other arm, and an arm from a newer schema, gets =ok=false= with a message
+that names the arm.
+=D3Pot= and =D4Pot= stay in-process =Potential= summands; =potserv= refuses the
+=d3= and =d4= arms.
 A DFT host that wants XcKernel + VV10 + D4 sums those terms itself; do not fold
 dispersion into the XC kernel.
 
@@ -49,6 +56,17 @@ language.
 Python: =tests/nwchem_params.py= builds =PotentialConfig= + =nwchem=.
 BLYP: =theory="dft"=, =scfType="blyp"=. Embed =.so= still required for
 =calculate=.
+
+*** Morse arm (=PotentialConfig.morse= / =MorseParams=)
+
+With =potserv <port> Morse=, pass =configure= with the =morse= arm set.
+=MorseParams= carries =de=, =a=, =re= and =cutoff=, with the platinum defaults
+of =MorseConfig=.
+The server rebuilds its =MorsePot= from those values and keeps its switch width,
+so the next =calculate= uses them.
+A non-finite value, a cutoff that is not positive, or a cutoff below the switch
+width gets =ok=false= and leaves the pot as it was.
+=tests/rpc_integ.py= doubles =de= and checks the energy at =re= doubles.
 
 *** CPMD arm (=PotentialConfig.cpmd= / =CPMDParams=)
 

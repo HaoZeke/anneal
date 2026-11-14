@@ -602,6 +602,9 @@ if(RGPOT_BUILD_TESTS)
 
     if(RGPOT_WITH_RPC)
       add_pot_test(CapnpAdapterTest CppCore/tests/CapnpAdapterTest.cc)
+      if(NOT RGPOT_RPC_CLIENT_ONLY)
+        add_pot_test(MorseConfigureTest CppCore/tests/MorseConfigureTest.cc)
+      endif()
       find_package(Python3 COMPONENTS Interpreter REQUIRED)
       add_library(nwchemc_lifetime_engine SHARED
                   CppCore/tests/nwchemc_lifetime_engine.cc)
