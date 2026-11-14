@@ -136,17 +136,6 @@ impl PairKind {
     }
 }
 
-unsafe extern "C" {
-    fn rgpot_cambridge_morse(
-        x: *const f64,
-        n: usize,
-        rho: f64,
-        energy: *mut f64,
-        gradient: *mut f64,
-    );
-    fn rgpot_cluster_lj(x: *const f64, n: usize, energy: *mut f64, gradient: *mut f64);
-}
-
 impl PairPotential {
     /// A potential over `n_points` points, in a box of half-width `extent`.
     ///
@@ -213,25 +202,12 @@ impl PairPotential {
                 let mut gradient = vec![0.0; 3 * n];
                 // The slice is exactly 3n coordinates. The kernel writes one
                 // energy and 3n force slots.
-                unsafe {
-                    match self.kind {
-                        PairKind::LennardJones => {
-                            rgpot_cluster_lj(
-                                coordinates.as_ptr(),
-                                n,
-                                &mut energy,
-                                gradient.as_mut_ptr(),
-                            );
-                        }
-                        PairKind::Morse { rho } => {
-                            rgpot_cambridge_morse(
-                                coordinates.as_ptr(),
-                                n,
-                                rho,
-                                &mut energy,
-                                gradient.as_mut_ptr(),
-                            );
-                        }
+                match self.kind {
+                    PairKind::LennardJones => {
+                        rgpot_pair::cluster_lj(coordinates, &mut energy, &mut gradient);
+                    }
+                    PairKind::Morse { rho } => {
+                        rgpot_pair::cambridge_morse(coordinates, rho, &mut energy, &mut gradient);
                     }
                 }
                 return (energy, Array1::from_vec(gradient));

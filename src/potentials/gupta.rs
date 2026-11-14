@@ -236,58 +236,43 @@ impl Gupta {
         self.n_points
     }
 
-    fn pair(&self, i: usize, j: usize) -> GuptaPair {
-        let row = self.slot[i] as usize;
-        let column = self.slot[j] as usize;
-        self.pairs[row * self.n_species + column]
-    }
-
     /// Energy and Cartesian gradient in one pair pass.
+    ///
+    /// The walk is the rgpot kernel: every pair, density in label order,
+    /// force from the stored pair derivative. There is no cutoff.
     pub fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let n = self.n_points;
         assert_eq!(x.len(), 3 * n, "Gupta state is 3 coordinates per atom");
         let coordinates = x.as_slice().expect("Gupta state is contiguous");
+        let ns = self.n_species;
+        let mut aa = vec![0.0; ns * ns];
+        let mut xi = vec![0.0; ns * ns];
+        let mut pp = vec![0.0; ns * ns];
+        let mut qq = vec![0.0; ns * ns];
+        let mut r0 = vec![0.0; ns * ns];
+        for (index, pair) in self.pairs.iter().enumerate() {
+            aa[index] = pair.a;
+            xi[index] = pair.xi;
+            pp[index] = pair.p;
+            qq[index] = pair.q;
+            r0[index] = pair.r0;
+        }
         let mut energy = 0.0;
-        let mut rho = vec![0.0; n];
-        let mut stored = Vec::with_capacity(n * (n - 1) / 2);
-        for i in 0..n {
-            let base_i = 3 * i;
-            for j in (i + 1)..n {
-                let base_j = 3 * j;
-                let d = [
-                    coordinates[base_i] - coordinates[base_j],
-                    coordinates[base_i + 1] - coordinates[base_j + 1],
-                    coordinates[base_i + 2] - coordinates[base_j + 2],
-                ];
-                let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                if r2 <= 0.0 {
-                    return (f64::INFINITY, Array1::zeros(x.len()));
-                }
-                let pair = self.pair(i, j);
-                let r = r2.sqrt();
-                let u = r / pair.r0 - 1.0;
-                let phi = 2.0 * pair.a * (-pair.p * u).exp();
-                let psi = pair.xi * pair.xi * (-2.0 * pair.q * u).exp();
-                energy += phi;
-                rho[i] += psi;
-                rho[j] += psi;
-                let dphi_dr = -(pair.p / pair.r0) * phi;
-                let dpsi_dr = -(2.0 * pair.q / pair.r0) * psi;
-                stored.push((i, j, d, r, dphi_dr, dpsi_dr));
-            }
-        }
-        for density in &rho {
-            energy -= density.sqrt();
-        }
         let mut gradient = vec![0.0; 3 * n];
-        for (i, j, d, r, dphi_dr, dpsi_dr) in stored {
-            let embed = -0.5 * (rho[i].sqrt().recip() + rho[j].sqrt().recip());
-            let coef = (dphi_dr + embed * dpsi_dr) / r;
-            for k in 0..3 {
-                gradient[3 * i + k] += coef * d[k];
-                gradient[3 * j + k] -= coef * d[k];
-            }
-        }
+        // `slot` is one species index per atom and the parameter rows are
+        // the square table. The kernel writes one energy and 3n forces.
+        rgpot_pair::gupta(
+            coordinates,
+            &self.slot,
+            ns,
+            &aa,
+            &xi,
+            &pp,
+            &qq,
+            &r0,
+            &mut energy,
+            &mut gradient,
+        );
         (energy, Array1::from_vec(gradient))
     }
 }
