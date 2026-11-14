@@ -59,7 +59,7 @@ fn unsettled_objective_calls(charged: usize, recorded: usize) -> Option<u64> {
     (remainder > 0).then(|| u64::try_from(remainder).expect("objective charge must fit u64"))
 }
 
-#[cfg(all(feature = "ira", any(test, not(feature = "bank-rpc"))))]
+#[cfg(all(feature = "ira", any(test, not(feature = "featomic"))))]
 use anneal_core::shape::IraMetric;
 #[cfg(feature = "ira")]
 use anneal_core::shape::IraStructureWitness;
@@ -378,7 +378,7 @@ mod option_tests {
         assert_eq!(energy, -9.25);
     }
 
-    #[cfg(feature = "bank-rpc")]
+    #[cfg(all(feature = "bank-rpc", feature = "ira"))]
     #[test]
     fn only_the_coordinator_saddle_role_runs_a_ride() {
         use anneal_core::discovery_roster::DiscoveryRole;
@@ -504,7 +504,7 @@ mod option_tests {
         assert_eq!(applied["anchor_basin"], 29);
     }
 
-    #[cfg(feature = "bank-rpc")]
+    #[cfg(all(feature = "bank-rpc", feature = "ira"))]
     #[test]
     fn external_mechanism_charge_is_bounded_by_live_ledger_room() {
         assert_eq!(settled_external_calls(140, 200), 140);
@@ -578,7 +578,7 @@ mod option_tests {
         assert_eq!(slices[0].charged_work, 7);
     }
 
-    #[cfg(feature = "bank-rpc")]
+    #[cfg(all(feature = "bank-rpc", feature = "ira"))]
     #[test]
     fn certified_duplicate_ride_enters_the_live_chain_as_a_counted_proposal() {
         use anneal_core::cooperative_search::RideReportOutcome;
@@ -608,7 +608,7 @@ mod option_tests {
         );
     }
 
-    #[cfg(feature = "bank-rpc")]
+    #[cfg(all(feature = "bank-rpc", feature = "ira"))]
     #[test]
     fn uncertified_ride_charges_the_receiver_without_proposing_a_transition() {
         use anneal_core::cooperative_search::RideReportOutcome;
@@ -633,7 +633,7 @@ mod option_tests {
         );
     }
 
-    #[cfg(feature = "bank-rpc")]
+    #[cfg(all(feature = "bank-rpc", feature = "ira"))]
     #[test]
     fn rejected_ride_report_charges_only_known_producer_work() {
         use anneal_core::cooperative_search::RideReportOutcome;
@@ -646,7 +646,7 @@ mod option_tests {
         );
     }
 
-    #[cfg(feature = "bank-rpc")]
+    #[cfg(all(feature = "bank-rpc", feature = "ira"))]
     #[test]
     fn typed_ride_failures_have_stage_specific_trace_reasons() {
         use anneal_core::ride_ledger::RideFailure;
@@ -691,7 +691,7 @@ mod option_tests {
         }
     }
 
-    #[cfg(feature = "bank-rpc")]
+    #[cfg(all(feature = "bank-rpc", feature = "ira"))]
     #[test]
     fn ride_budget_reserves_receiver_certification_and_the_live_quench() {
         assert_eq!(ride_producer_budget(10_000, 453, 4_002, 5_000), Some(5_000));
@@ -3430,7 +3430,7 @@ fn snapshot_index_cost(coordinate_dim: usize) -> usize {
         .expect("receiving ride certification cost must fit usize")
 }
 
-#[cfg(feature = "bank-rpc")]
+#[cfg(all(feature = "bank-rpc", feature = "ira"))]
 fn ride_producer_budget(
     remaining: usize,
     receiver_reserve: usize,
@@ -3443,7 +3443,7 @@ fn ride_producer_budget(
     (available > 0).then_some(available.min(configured_cap))
 }
 
-#[cfg(feature = "bank-rpc")]
+#[cfg(all(feature = "bank-rpc", feature = "ira"))]
 fn ride_failure_reason(failure: anneal_core::ride_ledger::RideFailure) -> &'static str {
     use anneal_core::ride_ledger::RideFailure;
 
@@ -3465,7 +3465,7 @@ fn ride_failure_reason(failure: anneal_core::ride_ledger::RideFailure) -> &'stat
     }
 }
 
-#[cfg(feature = "bank-rpc")]
+#[cfg(all(feature = "bank-rpc", feature = "ira"))]
 fn discovery_role_allows_ride(role: Option<anneal_core::discovery_roster::DiscoveryRole>) -> bool {
     matches!(
         role,
@@ -3552,12 +3552,12 @@ fn decree_anchor_action(
     }
 }
 
-#[cfg(feature = "bank-rpc")]
+#[cfg(all(feature = "bank-rpc", feature = "ira"))]
 fn settled_external_calls(requested: u64, remaining: usize) -> u64 {
     requested.min(u64::try_from(remaining).unwrap_or(u64::MAX))
 }
 
-#[cfg(feature = "bank-rpc")]
+#[cfg(all(feature = "bank-rpc", feature = "ira"))]
 fn ride_total_charged_calls(
     report: anneal_core::cooperative_search::RideReportOutcome,
     producer_calls: u64,
@@ -3572,7 +3572,7 @@ fn ride_total_charged_calls(
     }
 }
 
-#[cfg(feature = "bank-rpc")]
+#[cfg(all(feature = "bank-rpc", feature = "ira"))]
 fn ride_checkpoint_action(
     report: anneal_core::cooperative_search::RideReportOutcome,
     destination: Option<Array1<f64>>,

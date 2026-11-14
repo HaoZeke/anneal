@@ -382,7 +382,7 @@ impl HistoryNngClient {
                 return Ok(None);
             };
             let reply = self.request(&frame)?;
-            if &reply[..] == [TAG_NONE] {
+            if reply[..] == [TAG_NONE] {
                 return Ok(None);
             }
             if reply.len() != 22 {
@@ -424,7 +424,7 @@ impl HistoryNngClient {
         let mut frame = vec![TAG_ACCEPT];
         frame.extend_from_slice(&minimum.to_le_bytes());
         let reply = self.request(&frame)?;
-        if &reply[..] != [TAG_OK] {
+        if reply[..] != [TAG_OK] {
             return Err(HistoryNngError("acceptance was not acknowledged".into()));
         }
         Ok(())
