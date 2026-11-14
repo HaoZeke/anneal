@@ -106,6 +106,20 @@ rule morse_h2h:
         """
 
 
+# M55, M70 and M80 against GMIN at rho 3, 6, 10 and 14.
+# Not part of `rule all`. Twelve seeds, paper budgets:
+#   snakemake -s workflow/Snakefile morse_panel
+rule morse_panel:
+    output:
+        "bench/morse-panel/seeds.csv",
+        "bench/morse-panel/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/morse_panel/enter_bench.sh
+        """
+
+
 # Time spent between quenches on M80 at rho = 3. Not part of `rule all`.
 #   snakemake -s workflow/Snakefile morse_hop
 rule morse_hop:
