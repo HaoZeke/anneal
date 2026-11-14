@@ -1138,7 +1138,7 @@ void test_cuda_and_periodic_mbd() {
   for (int i = 0; i < 12; ++i) {
     check_close(Fc[i], serialF[i], 1e-8, "cuda PME matches the serial force");
   }
-  check(rgpot::lr::cuda_device_count() == 0, "this host has no CUDA device");
+  check(rgpot::lr::cuda_device_count() > 0 || used == 0, "without a device the host kernel runs");
   const double c6[] = {12.0, 4.0};
   const double r0[] = {3.0, 2.5};
   const double rr[] = {3.4, 2.8};

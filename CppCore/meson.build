@@ -934,6 +934,11 @@ if get_option('with_tests')
             ['D4test', 'd4_test', 'D4PotTest.cc', ''],
         ]
     endif
+    if has_long_range and not get_option('with_rpc_client_only')
+        test_array += [
+            ['LongRangeTest', 'lr_phys_test', 'lr_phys_test.cc', ''],
+        ]
+    endif
     if not get_option('with_rpc_client_only')
         test(
             'FoldDegenerateTest',
@@ -2738,6 +2743,33 @@ if get_option('with_tests')
             workdir: meson.source_root(),
             timeout: 0,
         )
+        # tools/lr_physics drives these. The bench pins workers with
+        # sched_setaffinity, which only Linux has.
+        if has_long_range and host_machine.system() == 'linux'
+            foreach _lr : ['lr_phys_bench', 'lr_sets', 'lr_d4_periodic']
+                set_variable(
+                    _lr,
+                    executable(
+                        _lr,
+                        sources: ['tests/' + _lr + '.cc'],
+                        dependencies: test_deps,
+                        include_directories: _incdirs + ['.'],
+                        cpp_args: test_args,
+                        link_with: _linkto,
+                        link_language: 'cpp',
+                        build_rpath: _metatomic_build_rpath,
+                        install: false,
+                    ),
+                )
+            endforeach
+            benchmark(
+                'lr_phys_bench',
+                lr_phys_bench,
+                args: ['6'],
+                env: {'LR_LOG': meson.current_build_dir() / 'lr_phys_bench.log'},
+                timeout: 0,
+            )
+        endif
         # One child process per row, via fork and waitpid, and the peak
         # resident set is read from /proc. Windows has neither.
         if host_machine.system() != 'windows'
