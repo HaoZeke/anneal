@@ -91,7 +91,23 @@ if cppc.has_argument('-fsanitize=thread') and get_option('b_sanitize') == 'none'
         dependencies: thread_dep,
         link_language: 'cpp',
     )
-    test('capi_threads_tsan', capi_tsan, timeout: 120)
+    # GCC's runtime (14 through 16) aborts with "unexpected memory
+    # mapping" when the kernel randomises mmap with more than 28 bits, as
+    # Ubuntu 24.04 and later do. LLVM's runtime re-executes itself with
+    # ASLR off; setarch -R does that for GCC's. A sandbox may refuse the
+    # personality call, so the wrapper is used only when it works here.
+    tsan_cmd = capi_tsan
+    tsan_args = []
+    setarch = find_program('setarch', required: false)
+    if (
+        not meson.is_cross_build()
+        and setarch.found()
+        and run_command(setarch, '-R', 'true', check: false).returncode() == 0
+    )
+        tsan_cmd = setarch
+        tsan_args = ['-R', capi_tsan]
+    endif
+    test('capi_threads_tsan', tsan_cmd, args: tsan_args, timeout: 120)
 endif
 
 python3_engines = find_program('python3', required: false)
