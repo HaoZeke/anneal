@@ -663,11 +663,13 @@ its legacy xtb driver. Silicon clusters have no gap and the SCC fails at
 (`RGPOT_XTB_ETEMP`, 300 K when unset).
 
 - Anneal is the panel's G arm (`examples/gfn2_covalent_h2h`, the
-  `general` configuration of `examples/h2h_covalent.rs` on develop
-  `bb486bfd`) on scales from the GFN2 dimer, which costs 46 calls on
-  silicon and 17 on carbon. It has no pair-range cut, because dispersion
-  has no finite reach. The budget is the paper's 1e5 calls, and the run
-  stops at the reference.
+  `general` configuration of `examples/h2h_covalent.rs`) on scales from
+  the GFN2 dimer, which costs 46 calls on silicon and 17 on carbon. It has
+  no pair-range cut, because dispersion has no finite reach. Its call
+  floor is the handle's 0.90 Å: a trial pair inside it is opened to
+  0.945 Å before the quench, and a probe the handle would refuse is not
+  charged. The budget is the paper's 1e5 calls, and the run stops at the
+  reference.
 - CREST is `crest start.xyz --gfn2 -T 1 --legacy -notopo -nocross -shake 0
   -tstep 2`, given the same start after one xtb `--opt` of it. With its
   defaults it does not search a cluster. On the start it stops because its
@@ -689,37 +691,38 @@ its legacy xtb driver. Silicon clusters have no gap and the SCC fails at
 
 | system | code | hits | median calls | IQR | best / eV | median wall / s | inside / call | outside / call |
 |---|---|---|---|---|---|---|---|---|
-| Si10 | anneal G | 12/12 | 666 | 268 | -460.683738 | 33.2 | 58.43 ms | 0.010 ms |
+| Si10 | anneal G | 12/12 | 666 | 296 | -460.683738 | 36.1 | 70.88 ms | 0.044 ms |
 | Si10 | CREST | 4/4 | 99,300 | 7,900 | -460.683718 | 2699.1 | 26.76 ms | 0.252 ms |
-| C10 | anneal G | 11/12 | 6,350 | 6,077 | -571.322738 | 14.6 | 1.18 ms | 0.002 ms |
+| C10 | anneal G | 12/12 | 2,517 | 1,908 | -571.322738 | 10.9 | 4.43 ms | 0.005 ms |
 | C10 | CREST | 4/12 | 78,367 | 2,880 | -571.322711 | 439.5 | 5.10 ms | 0.288 ms |
 
 CREST's calls are the calls of its whole run, which does not stop at the
 reference.
 
 - Si10: both codes reach the minimum on every seed they ran. On seeds
-  2000-2003 anneal takes 620, 505, 520 and 2,581 calls, and CREST
+  2000-2003 anneal takes 619, 563, 520 and 2,611 calls, and CREST
   108,264, 96,365, 102,236 and 94,277 (Mann-Whitney p = 0.0011 over all
-  rows). Anneal's calls cost more inside xtb, 58 ms against 27 ms,
+  rows). Anneal's calls cost more inside xtb, 71 ms against 27 ms,
   because its quenches start from random clusters where the SCC
   struggles.
-- C10: anneal reaches the ring on 11 of 12 seeds and CREST on 4 (Fisher p
-  = 0.0094, Mann-Whitney p = 0.0005). Seven CREST runs end in a compact
+- C10: anneal reaches the ring on all 12 seeds and CREST on 4 (Fisher p
+  = 0.0013, Mann-Whitney p = 4e-5). Seven CREST runs end in a compact
   cage with four three-coordinated atoms at -566.877 eV, and its eighth
-  miss, seed 2004, in the linear chain at -568.818 eV. Anneal's one miss,
-  seed 2003 at the full 1e5 calls, ends in a bicyclic ring with two
-  three-coordinated atoms at -566.959 eV. 97,170 of its calls are trial
-  geometries with two atoms inside 0.90 Å, which the handle refuses
-  before xtb. The example prints the handle's refusals as
-  `geometry_rejected`, two to a call because the energy and the gradient
-  each reach the handle.
+  miss, seed 2004, in the linear chain at -568.818 eV.
+- Without the call floor anneal missed C10 seed 2003 at the full 1e5
+  calls, in a bicyclic ring with two three-coordinated atoms at
+  -566.959 eV: 97,152 of its calls were the screen and the quench each
+  starting from a trial with a pair at 0.6-0.8 Å, which the handle
+  refuses, drawn by every move kind. With the floor that seed takes
+  3,123 calls, the C10 median falls from 6,350 to 2,517, Si10's stays at
+  666, and no charged call is refused (`geometry_rejected`, which the
+  example prints, is 0 on every Si10 and C10 seed). A refused call took
+  no time in xtb, so the inside time per call rises on both.
 
 `scripts/covalent_h2h/gfn2_enter_bench.sh` builds the example and runs
 both codes; `GFN2_CODES=anneal-general` reruns anneal alone and keeps the
 CREST rows. The CREST rows were measured on `8b4a2592` from starts that
-are identical byte for byte on `bb486bfd`. On `f2a628c0` anneal takes
-the same calls on Si10 seeds 2002, 2006 and 2011 and C10 seeds 2000,
-2002 and 2004.
+are identical byte for byte on `f2a628c0`.
 
 ## Pins
 
