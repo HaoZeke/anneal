@@ -158,6 +158,23 @@ rule sc_chain_summary:
         """
 
 
+# Medians of the record-share portfolio. Reads the twelve-seed anneal
+# rows and the portfolio runs; it does not launch a search. Not part of
+# `rule all`.
+#   snakemake -s workflow/Snakefile sc_portfolio_summary
+rule sc_portfolio_summary:
+    input:
+        "bench/metal-cluster-h2h/sc-n12/seeds.csv",
+        "bench/metal-cluster-h2h/sc-portfolio/rows.csv",
+    output:
+        "bench/metal-cluster-h2h/sc-portfolio/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        python3 scripts/metal_h2h/summarise_sc_portfolio.py
+        """
+
+
 # anneal, openconf and CREST iMTD-GC on drug-like molecules, MMFF94 for the
 # two RDKit arms and GFN-FF for CREST. Not part of `rule all`. The budgets
 # come from the openconf pilot (`enter_bench.sh pilot`):
