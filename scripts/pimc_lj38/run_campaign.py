@@ -392,6 +392,7 @@ def run_rpqa(
     start_step: int = START_STEP,
     ramp_steps: int = RAMP_STEPS,
     expect_pins: int | None = None,
+    code_revision: str = "",
 ) -> dict[str, str]:
     work.mkdir(parents=True, exist_ok=True)
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -514,7 +515,7 @@ def run_rpqa(
         "best": best,
         "stop": stop,
         "reached": "38",
-        "code_revision": "4e86f5fdc1583ef21f105fc2bed96a279b2430c1",
+        "code_revision": code_revision,
         "_pins": str(n_pins),
     }
     rated = with_rates(row)
@@ -667,10 +668,11 @@ def upsert_summary(path: Path, fields: list[str], row: dict[str, str]) -> None:
     path.write_text("".join(kept) + buffer.getvalue())
 
 
-def anneal_wall_median(summary_path: Path) -> float:
+def anneal_reference(summary_path: Path) -> tuple[float, str]:
+    """Wall median and anneal commit of the LJ38 anneal row the ratio divides by."""
     for row in load_table(summary_path):
         if row.get("arm") == "anneal" and row.get("system") == "lj38":
-            return float(row["wall_median_s"])
+            return float(row["wall_median_s"]), row["anneal_head"]
     raise RuntimeError(f"{summary_path} has no LJ38 anneal row")
 
 
@@ -679,7 +681,7 @@ def summarise_paper(
     planned: int,
     anneal_wall: float,
     source: dict[str, str],
-    head: str,
+    anneal_head: str,
 ) -> list[dict[str, str]]:
     if not rows:
         return []
@@ -705,11 +707,11 @@ def summarise_paper(
             "wall_ratio": ratio,
             "inside_us": f"{inside_median:.4f}",
             "outside_us": f"{outside_median:.4f}",
-            "seeds": " ".join(item["seed"] for item in rows),
+            "seeds": " ".join(sorted((item["seed"] for item in rows), key=int)),
             "schedule_seed": str(PAPER_SCHEDULE_SEED),
             "rpqa_commit": source["rpqa_commit"],
             "rpqa_source": source["rpqa_source"],
-            "anneal_head": head,
+            "anneal_head": anneal_head,
             "code_revision": source["rpqa_commit"],
         }
     ]
@@ -756,6 +758,15 @@ def self_test() -> None:
     random.Random(PAPER_SCHEDULE_SEED).shuffle(paper_jobs)
     if sorted(paper_jobs) != list(SEEDS) or paper_jobs == list(SEEDS):
         raise SystemExit("paper seed order")
+    timed = [
+        {"seed": str(seed), "evals_to_hit": "1", "wall_s": "2.0", "inside_us": "1", "outside_us": "1", "hit": "0"}
+        for seed in paper_jobs
+    ]
+    paper_row = summarise_paper(timed, len(SEEDS), 0.5, {"rpqa_commit": "r", "rpqa_source": "s"}, "a")[0]
+    if paper_row["seeds"] != " ".join(str(seed) for seed in SEEDS):
+        raise SystemExit("paper summary seed order")
+    if (paper_row["anneal_head"], paper_row["code_revision"], paper_row["wall_ratio"]) != ("a", "r", "4.000000"):
+        raise SystemExit("paper summary provenance")
     print("ok")
 
 
@@ -773,7 +784,6 @@ def run_paper(args: argparse.Namespace, seeds: tuple[int, ...]) -> int:
         if seed not in SEEDS:
             raise SystemExit(f"seed {seed} is outside 2000-2005")
     source = load_source(args.source)
-    head = args.head_file.read_text().strip()
     here = Path(__file__).resolve().parent
     if str(here) not in sys.path:
         sys.path.insert(0, str(here))
@@ -784,7 +794,7 @@ def run_paper(args: argparse.Namespace, seeds: tuple[int, ...]) -> int:
     check_potential(args.binary, args.runs / "check")
     if args.summary is None:
         raise SystemExit("the paper schedule needs --summary so the old rows can be kept")
-    anneal_wall = anneal_wall_median(args.summary)
+    anneal_wall, anneal_head = anneal_reference(args.summary)
     order = list(seeds)
     random.Random(PAPER_SCHEDULE_SEED).shuffle(order)
     if seeds != SEEDS:
@@ -824,6 +834,7 @@ def run_paper(args: argparse.Namespace, seeds: tuple[int, ...]) -> int:
             start_step=PAPER_START,
             ramp_steps=PAPER_RAMP_STEPS,
             expect_pins=PAPER_ROUNDS,
+            code_revision=source["rpqa_commit"],
         )
         pins = row.pop("_pins")
         write_seed(saved, row)
@@ -838,12 +849,12 @@ def run_paper(args: argparse.Namespace, seeds: tuple[int, ...]) -> int:
             append_missing(args.seeds_out, SEED_FIELDS, rows, ("arm", "seed"))
         if args.paper_seeds:
             write_table(args.paper_seeds, SEED_FIELDS, rows)
-        summary = summarise_paper(rows, len(SEEDS), anneal_wall, source, head)
+        summary = summarise_paper(rows, len(SEEDS), anneal_wall, source, anneal_head)
         if args.summary and summary:
             upsert_summary(args.summary, SUMMARY_FIELDS, summary[0])
         if args.paper_summary:
             write_table(args.paper_summary, SUMMARY_FIELDS, summary)
-    summary = summarise_paper(rows, len(SEEDS), anneal_wall, source, head)
+    summary = summarise_paper(rows, len(SEEDS), anneal_wall, source, anneal_head)
     writer = csv.DictWriter(sys.stdout, fieldnames=SUMMARY_FIELDS)
     writer.writeheader()
     writer.writerows(summary)
@@ -925,6 +936,7 @@ def main(argv: list[str]) -> int:
                 here,
                 args.runs / "lj38" / f"rpqa-{seed}",
                 log,
+                code_revision=source["rpqa_commit"],
             )
         write_seed(saved, row)
         produced = True
