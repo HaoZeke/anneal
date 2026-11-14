@@ -285,6 +285,9 @@ fn search(
     let mut ledger = Ledger::new(budget);
     ledger.stop_below(reference + HIT_TOL);
     let mut optimiser = WarmLbfgs::default();
+    // The same stop the library's own search uses. A tighter default
+    // spends the budget polishing a minimum the hop will not read.
+    optimiser.gtol = cfg.record_gradient;
     let pot_ns = std::sync::atomic::AtomicU64::new(0);
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
         optimiser.forget();

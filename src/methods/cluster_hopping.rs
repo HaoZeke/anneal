@@ -6313,16 +6313,23 @@ where
         // The escape scale multiplies the move amplitude. A chain that keeps
         // returning proposes further each time until it leaves.
         // The angular move takes the step when a point is loose enough for the
-        // criterion to fire, whatever the allocator picked.
-        let angular = cfg.angular_moves
-            && worst_bound_scaled(
-                x.view(),
-                n,
-                angular_ratio,
-                cfg.length_scale,
-                cfg.energy_scale,
-            )
-            .is_some();
+        // criterion to fire, whatever the allocator picked. That leaves the
+        // close-packed basin the library otherwise quenches and keeps.
+        // An icosahedral plateau is handed back to the library: replacing
+        // those hops holds LJ75 on the Mackay icosahedron. The plateau is
+        // the same call patience as the other stall leaves.
+        let loose = worst_bound_scaled(
+            x.view(),
+            n,
+            angular_ratio,
+            cfg.length_scale,
+            cfg.energy_scale,
+        )
+        .is_some();
+        let icosahedral_plateau = cfg.packing_cna_applies()
+            && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1)
+            && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default());
+        let angular = cfg.angular_moves && loose && !icosahedral_plateau;
         // The soft-subspace arm competes uniformly with the library's arms.
         // The subspace is cached per incumbent and recomputed when the chain
         // moves, since it is a property of the point the chain stands on.
@@ -6766,6 +6773,7 @@ where
         // displacement. Other proposals keep the kernel they drew. The test
         // is the incumbent energy, not the atom count.
         let held_displacement = directed_leave
+            && !angular
             && growth_held(
                 stall_growth_hold,
                 ledger.best,
