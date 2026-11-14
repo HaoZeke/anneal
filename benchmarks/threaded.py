@@ -36,11 +36,34 @@ _FCC = (
 )
 
 
-def _set_threads(threads: int) -> None:
-    os.environ["OMP_NUM_THREADS"] = str(threads)
+def _pin_cores(threads: int) -> None:
+    """Keep this team on a fixed core set the parent is not using.
+
+    One thread takes the last core, two take the last two, four take
+    the last four. Eight threads need every core, so the parent stays
+    on core 0 and shares it. Places are set before the runtime starts.
+    """
+    ncpu = os.cpu_count() or 1
+    count = int(threads)
+    if count >= ncpu:
+        worker = list(range(ncpu))
+        other = [0]
+    else:
+        worker = list(range(ncpu - count, ncpu))
+        other = list(range(0, ncpu - count))
+    try:
+        os.sched_setaffinity(0, set(worker))
+        os.sched_setaffinity(os.getppid(), set(other))
+    except (AttributeError, OSError, ProcessLookupError):
+        pass
+    os.environ["OMP_NUM_THREADS"] = str(count)
     os.environ["OMP_DYNAMIC"] = "false"
     os.environ["OMP_PROC_BIND"] = "close"
-    os.environ["OMP_PLACES"] = "cores"
+    os.environ["OMP_PLACES"] = ",".join(f"{{{cpu}}}" for cpu in worker)
+
+
+def _set_threads(threads: int) -> None:
+    _pin_cores(threads)
     lib = ctypes.CDLL("libgomp.so.1")
     lib.omp_set_dynamic(0)
     lib.omp_set_num_threads(int(threads))
@@ -116,9 +139,12 @@ class _Timed:
     params = (list(ATOMS), list(THREADS))
     param_names = ["atoms", "threads"]
     repeat = REPEAT
-    sample_time = 0.01
+    # One sample is lengthened until it reaches this, so a short call
+    # is not a single timer reading. About 20 ms is the floor.
+    sample_time = 0.02
     min_run_count = 1
     timeout = 600
+    rounds = 4
 
     def time_energy_force(self, atoms: int, threads: int) -> None:
         _energy_force(self.pot, self.positions, self.atom_types, self.box)
@@ -163,6 +189,8 @@ class RayLJCluster(_Tracked):
 class StillingerWeber(_Timed):
     """Stillinger-Weber silicon at 256, 1024 and 4096 atoms."""
 
+    rounds = 8
+
     def setup(self, atoms: int, threads: int) -> None:
         import rgpot
 
@@ -180,6 +208,8 @@ class RayStillingerWeber(_Tracked):
 
 class Tersoff(_Timed):
     """Tersoff silicon kernel at 256, 1024 and 4096 atoms."""
+
+    rounds = 8
 
     def setup(self, atoms: int, threads: int) -> None:
         import rgpot
