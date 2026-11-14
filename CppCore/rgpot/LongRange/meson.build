@@ -11,7 +11,8 @@ lr_src = files(
     'SumPot.cc',
     'CudaPath.cc',
 )
-lr_deps = _deps
+# The thread teams are OpenMP. Without it every summand runs serially.
+lr_deps = _deps + [dependency('openmp', required: false)]
 if get_option('with_cuda')
     nvcc = find_program('nvcc', required: true)
     lr_src += custom_target(
