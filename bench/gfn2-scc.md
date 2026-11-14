@@ -28,7 +28,7 @@ The search does not close the descent. A failed potential call is
 already closed by the stall on a repeated geometry. This gate only
 keeps the call from being made.
 
-The wavefunction work is in rgpot `b4154a4df8f98325f5d2d29c67a11d16b6579649`
+The wavefunction work is in rgpot `8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e`
 (`XTBPot::rescueUnconvergedScc`). The first single point stops at 48
 iterations, several times a converged GFN2 count of about ten, so a
 geometry that was going to finish is unchanged. Past that, the charge

@@ -2272,7 +2272,7 @@ dependencies = [
 [[package]]
 name = "rgpot-pair"
 version = "3.7.0"
-source = "git+https://github.com/OmniPotentRPC/rgpot?rev=1c1b4ed214c92860f7fbcdc2d4ac62aecbd9ceb7#1c1b4ed214c92860f7fbcdc2d4ac62aecbd9ceb7"
+source = "git+https://github.com/OmniPotentRPC/rgpot?rev=8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e#8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e"
 dependencies = [
  "cc",
 ]
