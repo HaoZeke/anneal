@@ -754,7 +754,12 @@ if get_option('with_tests')
     if not get_option('with_rpc_client_only')
         test_array += [
             ['MorsePotTest', 'morse_pot_test', 'MorsePotTest.cc', ''],
-            ['CambridgeMorseTest', 'cambridge_morse_test', 'CambridgeMorseTest.cc', ''],
+            [
+                'CambridgeMorseTest',
+                'cambridge_morse_test',
+                'CambridgeMorseTest.cc',
+                '',
+            ],
             ['GuptaTest', 'gupta_test', 'GuptaTest.cc', ''],
             ['SWSiTest', 'sw_si_test', 'SWSiTest.cc', ''],
             ['TersoffSiCTest', 'tersoff_sic_test', 'TersoffSiCTest.cc', ''],
