@@ -444,6 +444,43 @@ fn report(
         pot_s / calls,
         outside / calls,
     );
+    // After the search. The row above is the result; these lines are the
+    // funnel and the arms that produced it.
+    if let Ok(path) = std::env::var("H2H_BEST")
+        && let Some(state) = outcome.best_state.as_ref()
+        && let Err(err) = write_coords(&path, state)
+    {
+        eprintln!("best: {err}");
+    }
+    if let Ok(path) = std::env::var("H2H_FINAL")
+        && let Some(state) = outcome.final_state.as_ref()
+        && let Err(err) = write_coords(&path, state)
+    {
+        eprintln!("final: {err}");
+    }
+    eprintln!(
+        "diag final={:.8} hops={} accepted={} screened={} returned={} restarts={} stall_escapes={} trail_escapes={} paths={} path_improvements={} stall_gain={:.6}",
+        outcome.final_energy,
+        outcome.hops,
+        outcome.accepted,
+        outcome.screened_out,
+        outcome.returned,
+        outcome.restarts,
+        outcome.stall_escapes,
+        outcome.trail_escapes,
+        outcome.paths,
+        outcome.path_improvements,
+        outcome.stall_escape_gain,
+    );
+    for (name, draws, accepts, best) in &outcome.arms {
+        eprintln!("arm {name} draws {draws} accepts {accepts} best {best:.8}");
+    }
+    for count in &outcome.proposal_counts {
+        eprintln!(
+            "move {} proposed {} accepted {} improved {}",
+            count.move_type, count.proposed, count.accepted, count.improved
+        );
+    }
 }
 
 fn write_coords(path: &str, coords: &Array1<f64>) -> std::io::Result<()> {
