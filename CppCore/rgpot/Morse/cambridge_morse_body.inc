@@ -22,7 +22,9 @@
       double r;
       double a;
       double coef;
-      if (!(r2 > 0.0)) {
+      /* A coincidence has no direction. NaN is not <= 0, so it falls
+       * through and the energy and the forces become NaN. */
+      if (r2 <= 0.0) {
         continue;
       }
       r = sqrt(r2);

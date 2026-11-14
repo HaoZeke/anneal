@@ -19,7 +19,9 @@
       double inv6;
       double inv12;
       double coef;
-      if (!(r2 > 0.0)) {
+      /* A coincidence has no direction. NaN is not <= 0, so it falls
+       * through and the energy and the forces become NaN. */
+      if (r2 <= 0.0) {
         continue;
       }
       inv2 = 1.0 / r2;

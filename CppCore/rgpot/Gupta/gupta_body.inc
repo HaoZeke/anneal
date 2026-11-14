@@ -34,7 +34,9 @@
       const double d1 = x[base_i + 1] - x[base_j + 1];
       const double d2 = x[base_i + 2] - x[base_j + 2];
       const double r2 = d0 * d0 + d1 * d1 + d2 * d2;
-      if (!(r2 > 0.0)) {
+      /* A coincidence is not differentiable. NaN is not <= 0, so it
+       * falls through and the energy and the forces become NaN. */
+      if (r2 <= 0.0) {
         *energy = INFINITY;
         return;
       }

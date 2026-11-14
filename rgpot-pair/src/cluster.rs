@@ -99,6 +99,39 @@ mod tests {
     }
 
     #[test]
+    fn a_nan_coordinate_returns_nan_energy_and_forces() {
+        let x = [f64::NAN, 0.0, 0.0, 1.0, 0.0, 0.0, 0.2, 1.1, 0.0];
+        let mut energy = 0.0;
+        let mut gradient = [0.0; 9];
+        cambridge_morse(&x, 6.0, &mut energy, &mut gradient);
+        assert!(energy.is_nan());
+        assert!(gradient.iter().all(|component| component.is_nan()));
+
+        energy = 0.0;
+        gradient = [0.0; 9];
+        cluster_lj(&x, &mut energy, &mut gradient);
+        assert!(energy.is_nan());
+        assert!(gradient.iter().all(|component| component.is_nan()));
+
+        energy = 0.0;
+        gradient = [0.0; 9];
+        gupta(
+            &x,
+            &[0, 0, 0],
+            1,
+            &[0.2061],
+            &[1.790],
+            &[10.229],
+            &[4.036],
+            &[2.884],
+            &mut energy,
+            &mut gradient,
+        );
+        assert!(energy.is_nan());
+        assert!(gradient.iter().all(|component| component.is_nan()));
+    }
+
+    #[test]
     fn lj_dimer_at_one_has_force_24() {
         let x = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
         let mut energy = 0.0;
