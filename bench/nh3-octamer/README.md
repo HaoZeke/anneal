@@ -35,6 +35,10 @@ from the global-minimum cage after the heavy atoms are aligned. Seed
 minimum, 3.64e-5 Eh above it. Starting the search on the global minimum
 records that energy, so the gap is not a loose quench of the same well.
 
+The `cb248286` rows are the same starts at 16000 calls with the TRIC
+quench develop selects for this preset. Every seed still finishes above
+CREST. Seeds 17000 and 17002 remain 3.5e-5 and 3.6e-5 Eh high.
+
 `ladder.csv` repeats the same starts at 16000, 64000 and the CREST call
 count. Seed 17001 is 2.09e-3 Eh high at 4000, 4.27e-4 at 64000, and
 3.54e-5 at 221579 calls. A longer budget is a different trajectory, so

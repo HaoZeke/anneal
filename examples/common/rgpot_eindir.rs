@@ -639,7 +639,8 @@ impl RgpotObjective {
             });
         // A dissociated monomer is refused before this call. A bound
         // geometry whose SCC does not converge is smeared and cooled inside
-        // the engine (rgpot b4154a4d) and the energy stays on this surface.
+        // the engine at `RGPOT_XTB_ENGINE_REV`, and the energy stays on
+        // this surface.
         let cfg = XtbConfig {
             method: GFN2,
             accuracy: GFN2_ACCURACY,

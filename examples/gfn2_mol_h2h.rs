@@ -575,6 +575,11 @@ fn main() {
             return;
         }
     };
+    writeln!(meta, "quench: {:?}", stats.local_step).ok();
+    if let Some((per_call, per_step)) = stats.quench_seconds {
+        writeln!(meta, "quench_call_s: {per_call:.6e}").ok();
+        writeln!(meta, "quench_step_s: {per_step:.6e}").ok();
+    }
     writeln!(meta, "hops: {}", outcome.hops).ok();
     writeln!(meta, "basins: {}", outcome.basins).ok();
     writeln!(meta, "quenches_converged: {}", stats.converged).ok();

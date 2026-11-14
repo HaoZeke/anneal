@@ -23,4 +23,7 @@ seed. Anneal reaches it on 17001 and is within 0.1 meH on 17002.
 through the 127141 calls CREST used. On the rebased tree seed 17001 is
 9.03e-5 Eh high at 16000 calls and at the CREST energy at 64000. Seeds
 17002 and 17003 are at the CREST energy at 16000 calls. Seed 17004 stays
-9.04e-5 Eh high at 16000, 64000 and the 151738 calls CREST used.
+9.04e-5 Eh high at 16000, 64000 and the 151738 calls CREST used on the
+Cartesian quench. The `cb248286` rows are 16000 calls with the TRIC
+quench. Seeds 17000, 17001, 17002, 17004 and 17005 reach the CREST
+energy. Seed 17003 holds the minimum 9.03e-5 Eh above it.
