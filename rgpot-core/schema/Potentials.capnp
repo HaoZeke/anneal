@@ -1909,6 +1909,38 @@ struct CPMDParams {
   # Long-tail options: use CPMDInputSection.raw, inputBlocks, or set.
 }
 
+# @struct CP2KParams
+# @brief CP2K Quickstep backend arm (libcp2k through a thin rgpot shim).
+#
+# Typed fields render a default GPW deck; inputTemplate carries a verbatim
+# deck instead. A template must contain the @RGPOT_COORD@ token (one &COORD
+# row per atom, Angstrom) and the @RGPOT_CELL@ token (&CELL A/B/C rows,
+# Angstrom). Geometry for each evaluation is ForceInput.
+struct CP2KParams {
+  inputTemplate   @0 :Text = "";        # Verbatim deck with @RGPOT_COORD@ and @RGPOT_CELL@.
+  functional      @1 :Text = "PBE";     # &XC_FUNCTIONAL name.
+  basisSet        @2 :Text = "DZVP-MOLOPT-SR-GTH"; # &KIND BASIS_SET for every element.
+  pseudopotential @3 :Text = "GTH-PBE"; # &KIND POTENTIAL for every element.
+  basisSetFile    @4 :Text = "BASIS_MOLOPT";   # &DFT BASIS_SET_FILE_NAME.
+  potentialFile   @5 :Text = "GTH_POTENTIALS"; # &DFT POTENTIAL_FILE_NAME.
+  cutoffRy        @6 :Float64 = 650.0;  # &MGRID CUTOFF (Rydberg).
+  relCutoffRy     @7 :Float64 = 70.0;   # &MGRID REL_CUTOFF (Rydberg).
+  charge          @8 :Int32 = 0;
+  multiplicity    @9 :Int32 = 1;        # 2S+1.
+  uks             @10 :Bool = false;    # Spin-unrestricted Kohn-Sham.
+  periodic        @11 :Text = "XYZ";    # &CELL PERIODIC.
+  epsScf          @12 :Float64 = 1.0e-6; # &SCF EPS_SCF.
+  maxScf          @13 :Int32 = 50;      # &SCF MAX_SCF.
+  outerMaxScf     @14 :Int32 = 0;       # &OUTER_SCF MAX_SCF; 0 => no &OUTER_SCF.
+  ot              @15 :Bool = true;     # &OT DIIS with FULL_SINGLE_INVERSE.
+  dataDir         @16 :Text = "";       # CP2K_DATA_DIR override; empty => environment.
+  workDir         @17 :Text = "";       # Parent of the per-rank run directory; empty => TMPDIR.
+  keepWorkDir     @18 :Bool = false;    # Keep the run directory after the session ends.
+  enginePath      @19 :Text = "";       # Shim library (libcp2kc_rgpot.so) path hint.
+  extraDftSections       @20 :List(Text); # Raw blocks appended inside &DFT.
+  extraForceEvalSections @21 :List(Text); # Raw blocks appended inside &FORCE_EVAL.
+}
+
 # @struct CommonMethodSpec
 # @brief NOMAD-metainfo-aligned normalized method overlay (the thin Esperanto).
 #
@@ -2036,6 +2068,7 @@ struct PotentialSpec {
     # Backends whose configuration is entirely a library path plus the
     # geometry on ForceInput carry no params struct of their own.
     builtin    @5 :BuiltinParams;
+    cp2k       @6 :CP2KParams;
   }
 }
 
@@ -2628,6 +2661,7 @@ struct PotentialConfig {
     mopac     @14 :MOPACParams;
     skala     @15 :SkalaParams;
     expr      @16 :ExprParams;
+    cp2k      @17 :CP2KParams;    # CP2KPot / libcp2k shim
   }
   # Normalized overlay applied BEFORE the native arm; native settings win.
   common @3 :CommonMethodSpec;

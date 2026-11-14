@@ -52,7 +52,7 @@ fn morse_arm_defaults_are_the_platinum_parameters() {
 
 /// potentials-schema's arm ordinals, shared with gpridge and every other
 /// consumer. A renumbered arm would decode as another backend on the wire.
-const UPSTREAM_ARMS: [(&str, u16); 16] = [
+const UPSTREAM_ARMS: [(&str, u16); 17] = [
     ("none", 0),
     ("nwchem", 1),
     ("cpmd", 2),
@@ -69,6 +69,7 @@ const UPSTREAM_ARMS: [(&str, u16); 16] = [
     ("mopac", 14),
     ("skala", 15),
     ("expr", 16),
+    ("cp2k", 17),
 ];
 
 #[test]

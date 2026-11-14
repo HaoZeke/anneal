@@ -1,7 +1,9 @@
 [wrap-git]
-directory = potentials-schema-7fa9046d2f0d
+directory = potentials-schema-190fee68f3fb
 url = https://github.com/OmniPotentRPC/potentials-schema.git
-revision = 7fa9046d2f0ddff47e4cb9fbbd11b321e35078c6
+revision = 190fee68f3fb99e0b99ac200d25c7d484b7dac9e
+# 190fee6 is upstream feat/cp2k-arm: main 7fa9046 plus the CP2K arm
+# (CP2KParams, PotentialSpec.cp2k @6, PotentialConfig.cp2k @17).
 # rgpot-local neighbour chunk: ForceInput.neighbors @9,
 # PotentialResult.neighborList @28, Potential.neighbours @13 and the
 # NeighborRequest, NeighborSystem and NeighborList structs. Upstream has

@@ -33,7 +33,7 @@ Backend knobs for a live =Potential= use Cap'n Proto =PotentialConfig=: an
 extensible union whose arms and ordinals come from potentials-schema (=none= @0,
 =nwchem= @1, =cpmd= @2, =metatomic= @4, =lammps= @5, =xtb= @6, =tblite= @7,
 =uma= @8, =lj= @9, =morse= @10, =zbl= @11, =d3= @12, =d4= @13, =mopac= @14,
-=skala= @15, =expr= @16).
+=skala= @15, =expr= @16, =cp2k= @17).
 Geometry stays on =ForceInput=; =configure(config)= applies method/backend setup
 only.
 =potserv= applies =nwchem=, =cpmd= and =morse= on the matching backend.

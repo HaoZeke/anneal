@@ -173,8 +173,8 @@ TEST_CASE("configure on the Morse backend refuses other arms", "[morse][rpc]") {
     ++refused;
   }
   // nwchem, cpmd, metatomic, lammps, xtb, tblite, uma, lj, zbl, d3, d4,
-  // mopac, skala and expr at the 7fa9046 pin.
-  REQUIRE(refused >= 14);
+  // mopac, skala, expr and cp2k at the 190fee6 pin.
+  REQUIRE(refused >= 15);
 }
 
 TEST_CASE("an arm from a newer schema is refused by its discriminant", "[morse][rpc]") {
