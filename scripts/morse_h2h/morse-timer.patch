@@ -13,7 +13,7 @@
        REAL(KIND = REAL64) :: X(3*NATOMS), G(3*NATOMS)
        REAL(KIND = REAL64) :: ENERGY, ABSRIJ, FCTR, R2, DUMMY
        REAL(KIND = REAL64) :: RI(3), RJ(3), RIJ(3)
-@@ -13,6 +15,7 @@
+@@ -13,5 +15,6 @@
        LOGICAL             :: GTEST, HTEST
  
 +      CALL H2H_POT_ENTER(H2H_TICK)
@@ -32,7 +32,7 @@
  !     Symmetrise Hessian
        DO J1 = 1, 3*NATOMS
           DO J2 = J1+1, 3*NATOMS
-@@ -94,5 +100,6 @@
+@@ -94,4 +100,5 @@
           ENDDO
        ENDDO
 +      CALL H2H_POT_LEAVE(H2H_TICK)
