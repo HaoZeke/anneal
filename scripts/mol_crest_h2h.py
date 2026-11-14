@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Serial GFN2 CREST head-to-head.
 
 Anneal uses Config::recommended_molecular at GFN2_HEXAMER_BUDGET (4000),
