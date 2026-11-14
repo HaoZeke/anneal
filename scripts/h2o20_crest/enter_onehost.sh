@@ -6,16 +6,16 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
-WORK=${H2O20_WORK:-/work/h2o20-fix}
-STARTS=${H2O20_STARTS:-/work/h2o20-onehost/runs/starts}
+WORK=${H2O20_WORK:-/work/h2o20-fix2}
+STARTS=${H2O20_STARTS:-/work/h2o20-fix2/starts}
 CREST=${CREST_BIN:-/work/bin/crest}
 XTB=${XTB_BIN:-/work/bin/xtb}
 # The shell may already export an older engine that has no rgpot_xtb_reset.
 ENGINE=${H2O20_ENGINE:-/work/lib/engine/libxtb_engine.so}
 PYTHON=${H2O20_PYTHON:-$(command -v python3)}
-ANNEAL=${H2O20_ANNEAL:-/work/h2o20-fix-build/release/examples/gfn2_water_h2h}
-DRIVER=${H2O20_DRIVER:-/work/h2o20-fix-build/release/examples/gfn2_water_crest_driver}
-CODE_REVISION=${H2O20_CODE_REVISION:-746ec03fc290730a35d5478f14505222f3296e77}
+ANNEAL=${H2O20_ANNEAL:-/work/h2o20-fix2-build/release/examples/gfn2_water_h2h}
+DRIVER=${H2O20_DRIVER:-/work/h2o20-fix2-build/release/examples/gfn2_water_crest_driver}
+CODE_REVISION=${H2O20_CODE_REVISION:-$(git -C "$ROOT" rev-parse HEAD)}
 CORE=${H2O20_CORE:-0}
 
 for need in "$CREST" "$XTB" "$ENGINE" "$ANNEAL" "$DRIVER" "$STARTS"; do

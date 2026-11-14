@@ -14,10 +14,12 @@ ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "scripts" / "h2o20_crest" / "run_onehost.py"
 SUMMARY = ROOT / "bench" / "h2o20-crest" / "summary.csv"
 PAPER_BUDGETS = {"h2o20": 28000}
+SEEDS = tuple(range(2000, 2012))
 
 
 class H2o20Crest:
     PAPER_BUDGETS = PAPER_BUDGETS
+    SEEDS = SEEDS
     ARMS = ("anneal", "anneal-capped-lindh", "crest")
 
 

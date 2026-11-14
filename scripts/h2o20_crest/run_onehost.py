@@ -4,9 +4,10 @@
 
 Both arms evaluate rgpot GFN2 plus the one-sided O-H wall. Anneal does
 that in process. CREST 3.0.2 reaches it through xtb ``--driver`` into
-``examples/gfn2_water_crest_driver``. Each seed reuses the exact random
-rigid-water placement from the original panel, shared by all arms. It is
-not a motif, a lattice, or a shell built from a group index.
+``examples/gfn2_water_crest_driver``. Each seed reuses one persisted random
+rigid-water placement, shared by all arms. Seeds 2000--2005 retain the
+original panel's byte-identical starts. It is not a motif, a lattice, or a
+shell built from a group index.
 
 ``PAPER_BUDGETS`` is the charged-call cap, the 28000 calls already used
 for GFN2 (H2O)20. A pair already in the rows file at that budget is not
@@ -45,7 +46,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ROWS = ROOT / "bench" / "h2o20-crest" / "seeds.csv"
 SUMMARY = ROOT / "bench" / "h2o20-crest" / "summary.csv"
 PAPER_BUDGETS = {"h2o20": 28000}
-SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
+SEEDS = tuple(range(2000, 2012))
 ARMS = ("anneal", "anneal-capped-lindh", "crest")
 MOLECULES = 20
 SYSTEM = "h2o20"
@@ -503,12 +504,12 @@ def main() -> None:
     for seed in SEEDS:
         source = args.starts / f"{seed}.xyz"
         if not source.is_file():
-            raise SystemExit(f"missing original start {source}")
+            raise SystemExit(f"missing persisted start {source}")
         path = starts / f"{seed}.xyz"
         if not path.is_file():
             shutil.copyfile(source, path)
         elif path.read_bytes() != source.read_bytes():
-            raise SystemExit(f"{path} differs from original start {source}")
+            raise SystemExit(f"{path} differs from persisted start {source}")
     finished = {
         (int(row["seed"]), row["arm"], int(row["budget"]), row["code_revision"])
         for row in load_rows(args.rows)
