@@ -6,13 +6,14 @@ Systems are Stillinger-Weber Si10, Si13 and Si20 in sigma and epsilon,
 and Tersoff C10 and C20 in Angstrom and eV. The anneal arms are
 ``Config::recommended``, the same with ``H2H_PRIORS=0``, and the general
 arm on dimer scales (``examples/h2h_covalent``). With ``--before-binary``
-the two prior-free arms also run on that build, coded ``@v1``. On silicon
+the two prior-free arms also run on that build, coded ``@v2``. On silicon
 every anneal arm runs again with ``H2H_GTOL=5e-3``, coded ``-sloppy``, to
-quench as loosely as GMIN's data, and GMIN runs its ``SW`` keyword twice,
-on that data and as ``gmin-tight`` with every quench to 1e-6. ASE basin
-hopping runs every row, which makes it the only comparison on carbon,
-where GMIN has no Tersoff. Twelve seeds, six for ASE, the same list on
-every code and the same start for each seed.
+quench as loosely as GMIN's data. GMIN runs twice, on its data and as
+``gmin-tight`` with every quench to 1e-6: the ``SW`` keyword on silicon,
+and on carbon a second build whose ``USERPOT`` is rgpot's Tersoff
+(``build_gmin_tersoff.sh``) with the silicon data on the carbon dimer
+scales. ASE basin hopping runs every system. Twelve seeds, the same list
+on every code and the same start for each seed.
 Within a system the (seed, code) pairs are shuffled. One budget per
 system for every code. A hit is a recorded minimum within 0.001 of the
 reference. A miss is the full budget. Medians are Hyndman-Fan type 7.
@@ -32,26 +33,30 @@ from pathlib import Path
 
 SYSTEMS = ("sw10", "sw13", "sw20", "tc10", "tc20")
 SEEDS = tuple(range(2000, 2012))
-ASE_SEEDS = SEEDS[:6]
+ASE_SEEDS = SEEDS
+# The budgets of examples/h2h_covalent, which the panel refuses to differ
+# from.
+PAPER_BUDGETS = {"sw10": 100000, "sw13": 100000, "sw20": 400000, "tc10": 100000, "tc20": 400000}
 RECOMMENDED = {"H2H_ARM": "recommended", "H2H_PRIORS": "1"}
 NO_PRIORS = {"H2H_ARM": "recommended", "H2H_PRIORS": "0"}
 GENERAL = {"H2H_ARM": "general", "H2H_PRIORS": "0"}
 SLOPPY = {"H2H_GTOL": "5e-3"}
 # code -> (binary, environment, code the binary prints). The before binary
-# is the head that recorded the first panel; Config::recommended is the same
-# in both, so only the two prior-free arms run on it.
+# is the head that recorded the second panel; Config::recommended is the
+# same in both, so only the two prior-free arms run on it.
 ANNEAL = {
     "anneal": ("binary", RECOMMENDED, "anneal"),
     "anneal-nopriors": ("binary", NO_PRIORS, "anneal-nopriors"),
     "anneal-general": ("binary", GENERAL, "anneal-general"),
-    "anneal-nopriors@v1": ("before_binary", NO_PRIORS, "anneal-nopriors"),
-    "anneal-general@v1": ("before_binary", GENERAL, "anneal-general"),
+    "anneal-nopriors@v2": ("before_binary", NO_PRIORS, "anneal-nopriors"),
+    "anneal-general@v2": ("before_binary", GENERAL, "anneal-general"),
     "anneal-sloppy": ("binary", RECOMMENDED | SLOPPY, "anneal-sloppy"),
     "anneal-nopriors-sloppy": ("binary", NO_PRIORS | SLOPPY, "anneal-nopriors-sloppy"),
     "anneal-general-sloppy": ("binary", GENERAL | SLOPPY, "anneal-general-sloppy"),
 }
-# GMIN's own data quenches to SLOPPYCONV 5e-3 RMS; gmin-tight converges
-# every quench to 1e-6 RMS, against anneal's 1e-6 largest component.
+# GMIN's own data quenches to SLOPPYCONV 5e-3 RMS, 2.0e-2 eV/A on carbon;
+# gmin-tight converges every quench to 1e-6 RMS, against anneal's 1e-6
+# largest component.
 GMIN = {"gmin": None, "gmin-tight": "1.0D-6"}
 SCHEDULE_SEED = 20261113
 HIT_TOL = 0.001
@@ -99,7 +104,7 @@ def codes_for(name: str) -> tuple[str, ...]:
     if name.startswith("sw"):
         sloppy = tuple(code for code in ANNEAL if code.endswith("-sloppy"))
         return base + sloppy + tuple(GMIN) + ("ase",)
-    return base + ("ase",)
+    return base + tuple(GMIN) + ("ase",)
 
 
 def seeds_for(code: str) -> tuple[int, ...]:
@@ -242,8 +247,9 @@ def gmin_data(text: str, conv: str | None) -> str:
 def run_gmin(args, name, seed, code, budget, target, radius, start, log) -> dict[str, str]:
     work = args.runs / name / f"{code}-{seed}"
     work.mkdir(parents=True, exist_ok=True)
+    carbon = name.startswith("tc")
     (work / "data").write_text(
-        gmin_data(args.data.read_text(), GMIN[code])
+        gmin_data((args.carbon_data if carbon else args.data).read_text(), GMIN[code])
         + f"RADIUS {radius:.10f}\nRANSEED {seed}\n"
     )
     (work / "coords").write_bytes(start.read_bytes())
@@ -262,7 +268,7 @@ def run_gmin(args, name, seed, code, budget, target, radius, start, log) -> dict
     )
     with log.open("w") as handle:
         subprocess.run(
-            ["taskset", "-c", "0", str(args.gmin)],
+            ["taskset", "-c", "0", str(args.gmin_tersoff if carbon else args.gmin)],
             check=False,
             stdout=handle,
             stderr=subprocess.STDOUT,
@@ -362,7 +368,7 @@ def self_test() -> None:
     if abs(type7([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 0.5) - 3.5) > 1e-12:
         raise SystemExit("type 7 median")
     order = schedule(SYSTEMS, SEEDS, codes_for, SCHEDULE_SEED)
-    if len(order) != 12 * (3 * 10 + 2 * 5) + 6 * 5:
+    if len(order) != 12 * (3 * 11 + 2 * 8):
         raise SystemExit(f"schedule length {len(order)}")
     data = "SLOPPYCONV 5.0D-3\nTIGHTCONV 1.0D-3\nSW\n"
     if gmin_data(data, "1.0D-6") != "SLOPPYCONV 1.0D-6\nTIGHTCONV 1.0D-6\nSW\n":
@@ -389,6 +395,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--library", type=Path, required=True)
     parser.add_argument("--gmin", type=Path, required=True)
     parser.add_argument("--data", type=Path, required=True)
+    parser.add_argument("--gmin-tersoff", type=Path, required=True)
+    parser.add_argument("--carbon-data", type=Path, required=True)
     parser.add_argument("--ase", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
@@ -427,6 +435,10 @@ def main(argv: list[str]) -> int:
         write_csv(args.rows, ROW_FIELDS, rows)
         write_csv(args.summary, SUMMARY_FIELDS, summarise(rows, references, revision, heads))
         return 0
+    for name in names:
+        budget = int(binary_lines(args.binary, "budget", name)[0])
+        if budget != PAPER_BUDGETS[name]:
+            raise SystemExit(f"{name} budget {budget} is not {PAPER_BUDGETS[name]}")
     order = schedule(names, SEEDS, codes_of, SCHEDULE_SEED)
     note(progress, f"head {head} schedule " + " ".join(f"{n}:{c}:{s}" for n, s, c in order))
     references = {}

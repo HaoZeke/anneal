@@ -1,0 +1,32 @@
+--- a/source/newtip.f90
++++ b/source/newtip.f90
+@@ -20,11 +20,13 @@
+ ! RMDRVT: subroutine to calculate the rotation matrix and its derivatives from the angle axis.
+       USE RIGIDBAA_MOD, ONLY: RMDRVT
+       USE PREC, ONLY: REAL64
++      USE H2H_CAP, ONLY: H2H_POT_ENTER, H2H_POT_LEAVE
+       IMPLICIT NONE
+ 
+ !     I, J, J1-J8 = counters to iterate over and site indices
+ !     OFFSET = the offset to the start of orientations in X array
+       INTEGER          :: I, J, J1, J2, J3, J4, J5, J6, J7, J8, OFFSET 
++      INTEGER(KIND=8)  :: H2H_TICK
+ 
+ !     CHARGE = the charges on each site in the water molecule
+       REAL(KIND = REAL64) :: X(3*NATOMS), G(3*NATOMS), CHARGE(NRBSITES)
+@@ -68,6 +70,7 @@
+ 
+ !     Set up the specific potentials for different TIPID
+ !     Subroutines are at the bottom of this file
++      CALL H2H_POT_ENTER(H2H_TICK)
+       IF (.NOT.ALLOCATED(VTVT)) ALLOCATE(VTVT(NATOMS/2,NATOMS/2))
+       IF (.NOT.ALLOCATED(WATERDEGREE)) ALLOCATE(WATERDEGREE(2,NATOMS/2))
+       IF (TIPID == 1) THEN
+@@ -293,6 +296,7 @@
+ 
+       
+ 
++      CALL H2H_POT_LEAVE(H2H_TICK)
+       END SUBROUTINE NEWTIP 
+ 
+ !     ----------------------------------------------------------------------------------------------

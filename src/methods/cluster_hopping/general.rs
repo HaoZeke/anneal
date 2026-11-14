@@ -6,8 +6,6 @@
 
 use ndarray::{Array1, ArrayView1};
 
-use crate::soap::{SoapSpec, local_spectra_z};
-
 struct Seat {
     energy: f64,
     soap: Vec<f64>,
@@ -475,30 +473,7 @@ impl FingerprintTaboo {
 }
 
 fn spectrum(coords: ArrayView1<f64>, species: &[u32]) -> Option<Vec<f64>> {
-    let n = coords.len() / 3;
-    if n < 2 || species.len() != n {
-        return None;
-    }
-    let spec = SoapSpec {
-        n_max: 3,
-        l_max: 3,
-        rcut_nn: 6.0,
-    };
-    let local = local_spectra_z(coords, spec, Some(species));
-    if local.nrows() == 0 || local.ncols() == 0 {
-        return None;
-    }
-    let mut mean = vec![0.0; local.ncols()];
-    for row in 0..local.nrows() {
-        for col in 0..local.ncols() {
-            mean[col] += local[[row, col]];
-        }
-    }
-    let scale = local.nrows() as f64;
-    for value in &mut mean {
-        *value /= scale;
-    }
-    Some(mean)
+    super::fingerprint::mean_soap(coords, Some(species))
 }
 
 fn soap_distance(left: &[f64], right: &[f64]) -> f64 {

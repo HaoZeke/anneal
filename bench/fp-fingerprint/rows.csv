@@ -1,0 +1,5 @@
+system,minima,requenches,energy_width,soap_width,radial_width,hist_width,sorted_width,pairs_gt_0p1,soap_lt_0p02,soap_within_requench,radial_within_requench,hist_within_requench,sorted_within_requench,pairs_gt_0p5,soap_lt_0p02_gt_0p5,min_soap_gt_0p1,min_radial_gt_0p1,min_hist_gt_0p1,min_sorted_gt_0p1
+au55,12,12,1.503118e-3,2.319804e-4,2.173085e-2,5.553004e-3,1.324509e-1,55,55,0,0,0,0,28,28,2.063355e-3,1.114788e-1,1.472270e-2,1.909608e-1
+lj38,12,12,3.716938e-2,1.130902e-1,4.385798e-2,1.908451e-2,5.449915e0,15,0,0,0,0,0,15,0,1.041848e0,2.489406e-1,2.302477e-2,1.515452e1
+lj75,12,10,9.819503e-2,2.997235e-2,4.488056e-2,8.404976e-3,1.311140e1,3,0,0,0,0,0,3,0,3.023174e0,2.953794e-1,1.522922e-2,4.773256e1
+tip4p15,12,2,7.175111e-2,9.406601e-4,2.240410e-2,1.346870e-2,1.067766e-2,54,21,0,0,0,0,54,21,7.844962e-3,1.989293e-1,4.467063e-2,1.326105e-1

@@ -24,7 +24,11 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
+
+/// Nanoseconds spent inside the potential, for the wall split.
+static POTENTIAL_NS: AtomicU64 = AtomicU64::new(0);
 
 use anneal_core::catalog::molecular::{
     WaterSearchArm, component_gradient_tolerance, configure_water_arm, monomers_intact,
@@ -460,9 +464,11 @@ fn main() {
     pot.restart();
     let n_molecules = m;
     let objective = ForceObjective::new(3 * atmnrs.len(), n_molecules, move |coordinates| {
+        let pot_at = Instant::now();
         let (energy, gradient) = pot
             .wrapper()
             .value_and_gradient(ArrayView1::from(coordinates));
+        POTENTIAL_NS.fetch_add(pot_at.elapsed().as_nanos() as u64, Ordering::Relaxed);
         let values = if gradient.is_standard_layout() {
             gradient.to_vec()
         } else {
@@ -499,7 +505,11 @@ fn main() {
     }
     let wall_s = wall.elapsed().as_secs_f64();
     let spent = ledger.spent() + polish.spent();
+    let potential_s = POTENTIAL_NS.load(Ordering::Relaxed) as f64 / 1e9;
+    let outside_s = (wall_s - potential_s).max(0.0);
     writeln!(meta, "wall_s: {wall_s:.6}").ok();
+    writeln!(meta, "potential_s: {potential_s:.6}").ok();
+    writeln!(meta, "outside_s: {outside_s:.6}").ok();
     writeln!(meta, "energy_calls: {spent}").ok();
     writeln!(meta, "search_calls: {}", ledger.spent()).ok();
     writeln!(meta, "polish_calls: {}", polish.spent()).ok();

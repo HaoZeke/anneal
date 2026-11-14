@@ -24,8 +24,10 @@ CODES = ("anneal", "anneal-nopriors", "anneal-general", "gmin", "ase")
 PANEL = (
     "anneal",
     "anneal-nopriors@v1",
+    "anneal-nopriors@v2",
     "anneal-nopriors",
     "anneal-general@v1",
+    "anneal-general@v2",
     "anneal-general",
     "anneal-sloppy",
     "anneal-nopriors-sloppy",
@@ -40,6 +42,8 @@ NAMES = {
     "anneal-general": "anneal G",
     "anneal-nopriors@v1": "anneal P v1",
     "anneal-general@v1": "anneal G v1",
+    "anneal-nopriors@v2": "anneal P v2",
+    "anneal-general@v2": "anneal G v2",
     "anneal-sloppy": "anneal R 5e-3",
     "anneal-nopriors-sloppy": "anneal P 5e-3",
     "anneal-general-sloppy": "anneal G 5e-3",
@@ -52,6 +56,8 @@ NAMES = {
 PAIRS = (
     ("anneal-nopriors", "anneal-nopriors@v1"),
     ("anneal-general", "anneal-general@v1"),
+    ("anneal-nopriors", "anneal-nopriors@v2"),
+    ("anneal-general", "anneal-general@v2"),
     ("anneal-nopriors", "anneal"),
     ("anneal-general", "anneal"),
     ("anneal", "gmin-tight"),
@@ -60,6 +66,8 @@ PAIRS = (
     ("anneal-sloppy", "gmin"),
     ("anneal-nopriors-sloppy", "gmin"),
     ("anneal-general-sloppy", "gmin"),
+    ("anneal-nopriors", "ase"),
+    ("anneal-general", "ase"),
 )
 
 
