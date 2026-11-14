@@ -888,3 +888,29 @@ The release tags recorded earlier on 14 November 2026 are unchanged. ASE 3.29.0,
 
 The ASE master tip is not that tag. It moved on 14 November 2026 to a merge of an MPI mechanism branch. The files are the parallel hook, the command-line entry, and the parallel documentation. That commit does not change basin hopping, and it is not a release. Pin the open arms to ASE 3.29.0, AGOX v3.11.1, CREST 3.0.2, and pele 0.1.2. No bibliographic entry for this check: a tag date is not a DOI.
 
+## 2026-11-14 — Multi-cage water clusters, and pentagonal ice bilayers
+
+Kirov, The Journal of Chemical Physics 164, 184110 (12 May 2026), doi:10.1063/5.0324777, identifies polyhedral and multi-cage water clusters from the structural graph. The abstract gives explicit formulas for the n-membered cycles and a generalization of the Euler formula for adjacent polyhedra. The dataset is the Database of Water Cluster Minima. The abstract does not report a new global-minimum energy.
+
+The manuscript's water clusters are the 1998 Wales--Hodges TIP4P minima and the GFN2-xTB hexamer. This paper does not quote a TIP4P energy or a GFN2 energy, so it does not contradict those references, 121 of 192, or 97 of 192. A topological label is not a hop hit. It does not warrant a head-to-head on the sealed maps or on the CREST table.
+
+Gudkovskikh and Kirov, Acta Crystallographica Section A 82, 454--463 (6 October 2026), doi:10.1107/s2053273326009629, compare two-layer ices whose layers are mostly pentagons. The potential is AMOEBA. The abstract says the spread in stabilization energy from proton disorder, per water molecule, is comparable with the heat of fusion of ice, and it discusses which self-assembly routes give the most stable bilayers. The supporting coordinates are AMOEBA cells of those bilayers. The bilayers are not the gas-phase hexamer. They do not contradict 121 of 192, 97 of 192, or the Cambridge energies. An AMOEBA bilayer is not the TIP4P table and not the CREST table.
+
+Cite `kirovMulticage2026` and `gudkovskikhBilayer2026`.
+
+## 2026-11-14 — CREST samples a side chain apart from the core
+
+Rindt and Pracht, Journal of Chemical Theory and Computation (3 November 2026), doi:10.1021/acs.jctc.6c01611, detach flexible side chains from the molecular core, sample the pieces, and rebuild an approximate ensemble. A limiting variant leaves the side chains in extended reference conformations. The abstract says folded alkyl chains become competitive only past well-defined lengths, and that the method is implemented within CREST. The record has no volume or pages yet.
+
+The hexamer comparison is a bare cluster at GFN2-xTB in xtb 6.7.1, against CREST 3.0.2. A water hexamer has no alkyl substituent, so this sampler does not run on that table. The abstract does not report 121 of 192, 97 of 192, or a user seed. The sentence that CREST 3.0.2 exposes no seed still stands. Leave the CREST table on 3.0.2. It does not warrant a head-to-head on that table.
+
+Cite `rindtCrestSubstructure2026`.
+
+## 2026-11-14 — Finite-temperature ensembles of phosphine gold clusters
+
+McCandler, Sanwal, and Rogal, arXiv:2608.19404 (19 August 2026), build Markov state models from molecular dynamics on a machine-learned potential for phosphine-stabilized gold nanoclusters. The abstract says crystal structures from single-crystal diffraction are often minor metastable states or transient configurations, rather than the dominant finite-temperature structures. Increasing the ligand coverage drives the structures from planar toward three-dimensional. The record has no DOI.
+
+Those populations are ligand-protected gold at finite temperature. They are not Lennard-Jones energies and not the water hexamer, so they do not contradict the Cambridge hit targets, 121 of 192, or 97 of 192. A Markov state model is not the basin-hopping preset. It does not fill the open ASE, AGOX, and GMIN kit. It does not warrant a head-to-head on the sealed maps or on the CREST table.
+
+Cite `mccandlerGold2026`.
+
