@@ -84,6 +84,7 @@ use crate::screen::Screen;
 mod binary_geometry;
 mod config;
 mod cycles;
+mod exchange;
 pub mod fingerprint;
 mod general;
 #[cfg(test)]
@@ -3113,6 +3114,26 @@ fn polishes_unlike_pairs(cfg: &Config) -> bool {
         .is_some_and(|species| species_count(species) >= 2)
 }
 
+/// Atoms an exchange must not move: the inactive part of an active region,
+/// otherwise the frozen mask.
+fn frame_atoms(cfg: &Config, x: ArrayView1<f64>) -> Option<Vec<bool>> {
+    match (&cfg.active_region, &cfg.species) {
+        (Some((seeds, shells)), Some(z)) => Some(
+            active_mask(x, z, seeds, *shells, cfg.bond_tolerance)
+                .into_iter()
+                .map(|active| !active)
+                .collect(),
+        ),
+        _ => cfg.frozen.clone(),
+    }
+}
+
+/// Energy reads one exchange descent may spend after a full quench.
+const HOMOTOP_READS: usize = 96;
+
+/// Exchanges a ranked polish quenches per round.
+const HOMOTOP_RANKED: usize = 48;
+
 fn species_groups(species: &[u32]) -> (Vec<usize>, Vec<usize>) {
     let mut labels = Vec::new();
     for label in species {
@@ -3676,6 +3697,9 @@ where
     // the preset and moves only while acceptance is outside a quarter of
     // one half, and never above one contact.
     let mut scaled = cfg.clone();
+    if scaled.homotop_window && polishes_unlike_pairs(&scaled) {
+        scaled.budget_window = true;
+    }
     let contact = contact_factor(&scaled, e, x.view());
     apply_contact_convergence(&mut scaled, contact);
     let mut dial = AcceptDial::new(scaled.temperature, contact);
@@ -4813,15 +4837,7 @@ where
         // exchange every fourth hop does not finish the ordering. Absent
         // unless two labels are present, so an unlabelled chain is unchanged.
         // A frozen atom is the frame: exchanging it moves the substrate.
-        let frame_frozen: Option<Vec<bool>> = match (&cfg.active_region, &cfg.species) {
-            (Some((seeds, shells)), Some(z)) => Some(
-                active_mask(x.view(), z, seeds, *shells, cfg.bond_tolerance)
-                    .into_iter()
-                    .map(|active| !active)
-                    .collect(),
-            ),
-            _ => cfg.frozen.clone(),
-        };
+        let frame_frozen = frame_atoms(cfg, x.view());
         let atom_is_frame = |atom: usize| {
             frame_frozen
                 .as_ref()
@@ -4843,57 +4859,62 @@ where
                     break;
                 }
                 let mut gained = false;
-                let mut tried = 0usize;
-                'pairs: for &i in &group_a {
-                    for &j in &group_b {
-                        if ledger.remaining() == 0 || tried >= 800 {
-                            break 'pairs;
-                        }
-                        if atom_is_frame(i) || atom_is_frame(j) {
-                            continue;
-                        }
-                        tried += 1;
-                        let mut swapped = current.clone();
-                        for axis in 0..3 {
-                            swapped.swap(3 * i + axis, 3 * j + axis);
-                        }
-                        let (eq, xq) = relax(ledger, swapped.view(), cfg.relax_steps);
-                        if species_wide && !cfg!(feature = "rgsaddle") {
-                            // One exchange evaluation can spend the budget.
-                            // Further swaps are not a stand-in for the
-                            // missing constant-energy escape.
-                            break 'rounds;
-                        }
-                        if !quench_is_sane(cfg, eq, xq.view()) || !(eq < current_e - 1e-6) {
-                            continue;
-                        }
-                        let gradient = record_quenched_answer(
-                            cfg,
-                            ledger,
-                            &mut grad,
-                            eq,
-                            xq.view(),
-                            &mut unconverged_records,
-                        );
-                        if gradient.is_none() && grad.is_some() {
-                            continue;
-                        }
-                        let from_basin = identity.basin_of(current.view());
-                        let reached = identity.basin_of(xq.view());
-                        adopt_minimum!(
-                            eq,
-                            xq,
-                            gradient,
-                            Some(reached),
-                            AdoptionHistory::Fresh,
-                            Some((Some(from_basin), reached)),
-                            Some("homotop"),
-                            hops
-                        );
-                        current = x.clone();
-                        current_e = e;
-                        gained = true;
+                let order: Vec<(usize, usize)> = if cfg.homotop_ranked {
+                    let pairs = exchange::unlike_pairs(species, atom_is_frame);
+                    exchange::ranked_exchanges(current.view(), &pairs, HOMOTOP_RANKED, |y| {
+                        (ledger.remaining() > 0).then(|| relax(ledger, y, 0).0)
+                    })
+                } else {
+                    group_a
+                        .iter()
+                        .flat_map(|&i| group_b.iter().map(move |&j| (i, j)))
+                        .filter(|&(i, j)| !atom_is_frame(i) && !atom_is_frame(j))
+                        .collect()
+                };
+                for &(i, j) in order.iter().take(800) {
+                    if ledger.remaining() == 0 {
+                        break;
                     }
+                    let mut swapped = current.clone();
+                    for axis in 0..3 {
+                        swapped.swap(3 * i + axis, 3 * j + axis);
+                    }
+                    let (eq, xq) = relax(ledger, swapped.view(), cfg.relax_steps);
+                    if species_wide && !cfg!(feature = "rgsaddle") {
+                        // One exchange evaluation can spend the budget.
+                        // Further swaps are not a stand-in for the
+                        // missing constant-energy escape.
+                        break 'rounds;
+                    }
+                    if !quench_is_sane(cfg, eq, xq.view()) || !(eq < current_e - 1e-6) {
+                        continue;
+                    }
+                    let gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
+                        eq,
+                        xq.view(),
+                        &mut unconverged_records,
+                    );
+                    if gradient.is_none() && grad.is_some() {
+                        continue;
+                    }
+                    let from_basin = identity.basin_of(current.view());
+                    let reached = identity.basin_of(xq.view());
+                    adopt_minimum!(
+                        eq,
+                        xq,
+                        gradient,
+                        Some(reached),
+                        AdoptionHistory::Fresh,
+                        Some((Some(from_basin), reached)),
+                        Some("homotop"),
+                        hops
+                    );
+                    current = x.clone();
+                    current_e = e;
+                    gained = true;
                 }
                 if !gained {
                     break;
@@ -7346,6 +7367,37 @@ where
             let mut out = relax(ledger, x_screen.view(), cfg.relax_steps);
             if cfg.finish_improving {
                 out = finish_improving(ledger, relax, out, cfg.relax_steps);
+            }
+            if cfg.homotop_descent
+                && polishes_unlike_pairs(cfg)
+                && out.0.is_finite()
+                && let Some(species) = cfg.species.as_deref()
+            {
+                let fixed = frame_atoms(cfg, out.1.view());
+                let pairs = exchange::unlike_pairs(species, |atom| {
+                    fixed
+                        .as_ref()
+                        .is_some_and(|mask| mask.get(atom).copied().unwrap_or(false))
+                });
+                let (found, _) = exchange::exchange_descent(
+                    out.1.view(),
+                    out.0,
+                    &pairs,
+                    HOMOTOP_READS,
+                    (hops as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ out.0.to_bits(),
+                    |y| (ledger.remaining() > 0).then(|| relax(ledger, y, 0).0),
+                );
+                if let Some((_, reordered)) = found
+                    && ledger.remaining() > 0
+                {
+                    let mut again = relax(ledger, reordered.view(), cfg.relax_steps);
+                    if cfg.finish_improving {
+                        again = finish_improving(ledger, relax, again, cfg.relax_steps);
+                    }
+                    if again.0 < out.0 {
+                        out = again;
+                    }
+                }
             }
             out = finish_rigid(cfg, ledger, relax, &mut grad, out);
             if cfg.bayes_screen {
