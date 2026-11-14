@@ -142,6 +142,22 @@ rule sc_pop_summary:
         """
 
 
+# Medians of the half-budget chain. Reads the twelve-seed anneal rows
+# and the chain runs; it does not launch a search. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile sc_chain_summary
+rule sc_chain_summary:
+    input:
+        "bench/metal-cluster-h2h/sc-n12/seeds.csv",
+        "bench/metal-cluster-h2h/sc-chain/rows.csv",
+    output:
+        "bench/metal-cluster-h2h/sc-chain/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        python3 scripts/metal_h2h/summarise_sc_chain.py
+        """
+
+
 # anneal, openconf and CREST iMTD-GC on drug-like molecules, MMFF94 for the
 # two RDKit arms and GFN-FF for CREST. Not part of `rule all`. The budgets
 # come from the openconf pilot (`enter_bench.sh pilot`):
