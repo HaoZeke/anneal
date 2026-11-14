@@ -51,3 +51,18 @@ row is the original arm. All twelve geometries are intact. All twelve hit.
 
 Anneal is 4000 charged calls on every seed. CREST calls are 145202, 152380,
 146611, 146979, 154197 and 144033.
+
+The rows marked `polish` are a later anneal arm. The search keeps the eight
+lowest distinct quenches and tightens them with at most a quarter of the
+budget, because a quench stopped at the record gradient can rank a distorted
+stationary point above another rotamer. Seeds 17000 and 17002 finished.
+17000's vtight energy is −17.729688547245 Eh, 8.1e-8 above CREST. 17002's
+is −17.729673900069 Eh, 1.5e-5 above CREST; that seed's recorded seats did
+not include the CREST stationary point. Seeds 17001 and 17003–17005 did not
+finish within 240 s. Each accumulated on the order of 130 xtb SCC aborts.
+Those rows are not in the table. CREST was not rerun.
+
+The `v4` rows are after the dissociated-monomer screen. All six seeds
+finish, with no SCC abort, at 4000 calls. CREST is still the original arm.
+The `3141987e` rows are the same starts and the same CREST arm after the
+rebase onto that develop.
