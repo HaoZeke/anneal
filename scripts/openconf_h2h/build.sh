@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # The anneal wheel, the RDKit call counter, and CREST 3.0.2 with a timer
 # around its potential call. Everything lands in /work/openconf-h2h/bin.
 set -euo pipefail

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # anneal, openconf and CREST on drug-like molecules. One UTS namespace,
 # hostname bench, working directory /work, every job on core 0.
 #   enter_bench.sh pilot | campaign [--only MOLECULE SEED ARM] | score

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Gradients per quench on GFN2-xTB: anneal L-BFGS, anneal TRIC, geomeTRIC
 # TRIC and Cartesian. One UTS namespace, hostname bench, working directory
 # /work, one core.
