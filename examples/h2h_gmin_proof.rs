@@ -241,7 +241,10 @@ fn system_spec(name: &str) -> Option<Spec> {
         "lj38" => (38, -173.928427),
         "lj55" => (55, -279.248470),
         "lj75" => (75, -397.492331),
+        "lj76" => (76, -402.894866),
+        "lj77" => (77, -409.083517),
         "lj98" => (98, -543.665361),
+        "lj103" => (103, -575.766131),
         "lj102" => (102, -569.363652),
         "lj104" => (104, -582.086642),
         "lj150" => (150, -893.310258),
@@ -260,7 +263,7 @@ fn paper_budget(n: usize) -> Option<usize> {
     match n {
         38 => Some(400_000),
         55 => Some(1_000_000),
-        75 | 98 | 102 | 104 | 150 | 200 => Some(4_000_000),
+        75 | 76 | 77 | 98 | 102 | 103 | 104 | 150 | 200 => Some(4_000_000),
         _ => None,
     }
 }
@@ -552,7 +555,10 @@ mod tests {
         assert_eq!(paper_budget(38), Some(400_000));
         assert_eq!(paper_budget(55), Some(1_000_000));
         assert_eq!(paper_budget(75), Some(4_000_000));
+        assert_eq!(paper_budget(76), Some(4_000_000));
+        assert_eq!(paper_budget(77), Some(4_000_000));
         assert_eq!(paper_budget(98), Some(4_000_000));
+        assert_eq!(paper_budget(103), Some(4_000_000));
         assert_eq!(paper_budget(102), Some(4_000_000));
         assert_eq!(paper_budget(104), Some(4_000_000));
         assert_eq!(paper_budget(150), Some(4_000_000));

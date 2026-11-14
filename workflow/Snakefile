@@ -362,6 +362,19 @@ rule ase_mh_h2h:
         """
 
 
+# Twelve-seed Lennard-Jones anneal arm. GMIN rows are reused.
+# Not part of `rule all`:
+#   snakemake -s workflow/Snakefile lj_sweep
+rule lj_sweep:
+    output:
+        "bench/lj-sweep/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/lj_sweep/enter_bench.sh
+        """
+
+
 # Deposited Guided Adaptive Diffusion figures against the recommended
 # preset and GMIN, on LJ31 and LJ38. The zip is downloaded here and is
 # not a committed output. Not part of `rule all`:

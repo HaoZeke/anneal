@@ -1339,6 +1339,12 @@ impl Config {
         cfg.move_library = MoveLibrary::LeanBurst;
         cfg.allocate_moves = true;
         cfg.depth_reward = true;
+        // Wales and Doye, J. Phys. Chem. A 101, 5111 (1997): the angular
+        // move is what their unbiased search used to reach the decahedral
+        // minima. The local library builds one packing and then spends the
+        // rest of the budget inside it. The move fires only when a point is
+        // loose, at every size and on every potential that uses this preset.
+        cfg.angular_moves = true;
         cfg.tabu_on_stall = true;
         cfg.return_screen = true;
         cfg.symmetrise_on_stall = true;
@@ -2050,6 +2056,18 @@ mod coverage_behaviour {
             super::MoveLibrary::Molecular { reverse_cycles, .. } => assert!(reverse_cycles),
             other => panic!("molecular library, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn recommended_asks_for_the_angular_move_at_every_size() {
+        for n in [13usize, 38, 75, 102, 150] {
+            assert!(
+                Config::recommended(n).angular_moves,
+                "recommended({n}) dropped the angular move"
+            );
+        }
+        assert!(!Config::for_cluster(38).angular_moves);
+        assert!(!Config::recommended_tip4p(8).angular_moves);
     }
 
     #[test]
