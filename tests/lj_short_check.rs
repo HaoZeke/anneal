@@ -12,6 +12,11 @@
 //! The fivefold residual uses the built-in assignment on every build
 //! (`81d6bffc`). Linking IRA no longer changes this walk, so the
 //! feature build keeps the Hungarian record.
+//!
+//! The communicating quench reuses a gradient it has already paid for.
+//! On this 1000-step walk that leaves room for two more capped LJ38
+//! hops inside the same 2500 calls. The minima are the ones above.
+//! LJ98's counts are unchanged.
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger};
 use anneal_core::methods::cluster_search::search;
@@ -21,7 +26,7 @@ use anneal_core::potentials::PairPotential;
 fn lj38_and_lj98_short_searches_stay_put() {
     // (n, seed, budget, best, hops, converged, capped)
     let cases: &[(usize, u64, usize, f64, usize, usize, usize)] = &[
-        (38, 1, 2500, -170.260_483_558_385_52, 23, 16, 21),
+        (38, 1, 2500, -170.260_483_558_385_52, 25, 16, 23),
         (98, 7, 2500, -520.107_879_491_539_2, 10, 9, 9),
     ];
     let mut records = Vec::new();
@@ -57,7 +62,7 @@ fn lj38_and_lj98_short_searches_stay_put() {
         assert_eq!(stats.capped, *capped);
     }
     let expected = "\
-LJ38 -170.2604835583855163 23 16 21 2500
+LJ38 -170.2604835583855163 25 16 23 2500
 LJ98 -520.1078794915391654 10 9 9 2500";
     assert_eq!(records.join("\n"), expected);
 }
