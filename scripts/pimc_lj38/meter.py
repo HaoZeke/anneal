@@ -47,16 +47,21 @@ class Meter:
         return struct.unpack_from("<d", self.mm, 32)[0]
 
     def charge(self, dt_ns: int, budget: int) -> bool:
-        """Count one finished evaluation. False means the budget is now full."""
+        """Count one finished evaluation. False means a positive budget is full.
+
+        A budget of zero is the uncapped paper schedule.
+        """
         calls, pot = struct.unpack_from("<QQ", self.mm, 0)
-        if calls >= budget:
+        if budget > 0 and calls >= budget:
             return False
         calls += 1
         struct.pack_into("<QQ", self.mm, 0, calls, pot + dt_ns)
+        if budget <= 0:
+            return True
         return calls < budget
 
     def at_budget(self, budget: int) -> bool:
-        return self.calls() >= budget
+        return budget > 0 and self.calls() >= budget
 
     def note_pin(self, energy_ha: float) -> None:
         n_pins = self.n_pins() + 1

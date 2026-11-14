@@ -1,0 +1,2 @@
+system,arm,seed,budget,hit,evals_to_hit,charged,wall_s,pot_s,inside_us,outside_us,best,stop,reached,code_revision
+lj38,rpqa_paper,2002,0,0,12940224,12940224,7761.070833,2720.450367,210.2321,389.5312,-170.99005171,schedule,38,4e86f5fdc1583ef21f105fc2bed96a279b2430c1

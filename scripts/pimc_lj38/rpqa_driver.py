@@ -71,7 +71,7 @@ def main() -> None:
             recv_data(sock, np.empty(initlen, dtype="S1"))
             ready = True
         elif header == Message("POSDATA"):
-            if meter.at_budget(budget):
+            if budget > 0 and meter.at_budget(budget):
                 return
             cell = recv_data(sock, cell)
             icell = recv_data(sock, icell)
@@ -84,7 +84,7 @@ def main() -> None:
             pot, force, vir = evaluate(cell, pos)
             under = meter.charge(time.perf_counter_ns() - mark, budget)
             have = True
-            if not under:
+            if budget > 0 and not under:
                 # The evaluation is counted. Reply so the server is not left
                 # in a 60 s select, then stop before the next geometry.
                 stop_after_reply = True

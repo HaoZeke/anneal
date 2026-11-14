@@ -1,12 +1,18 @@
 # LJ38 path-integral annealing
 
-Anneal `456be5ff` against Fiorentino and Marzari's replica-pinned path-integral annealing, one serial session. The driver is `scripts/pimc_lj38/enter_bench.sh`: `sudo unshare --uts`, hostname `bench`, working directory `/work`, `taskset -c 0`. The twelve (seed, arm) pairs are shuffled with schedule seed 20261113. The budget is the LJ38 entry of `PAPER_BUDGETS`, 400_000 force calls. A hit is a quenched energy within 0.001 of the Cambridge minimum, −173.928427. A miss is stored as the full budget. Wall, evaluation, and per-evaluation medians are Hyndman–Fan type 7. The ratio is the RPQA median wall divided by the anneal median wall. Inside microseconds are potential time divided by charged evaluations. Outside microseconds are the rest of the wall on the same denominator.
+32 replicas. 40 local-optimisation rounds. One round every 10000 steps. Last round at step 400000. Input length 400001. Code revision `4e86f5fd`.
 
-The RPQA code is the public tree `https://github.com/afiorent/i-pi` at `4e86f5fd` (`feature/rpqa-reset-momenta`). The paper's data-availability note points at GitHub on publication and at a Materials Cloud DOI that is still a placeholder. The runnable Lennard-Jones protocol in that tree is `examples/features/quantum_annealing/RPQA/LJ_cluster`: 16 beads, 50 K, a 1 fs Langevin step with `tau` 20 fs, `lambdaqkin` ramped from 19 to 0.01 with `sqrtscale`, a 5000-step delocalisation, and an LBFGS relax of every bead every 5000 steps. The cluster size here is 38. The initial geometry is the start `h2h_gmin_proof coords` writes for the same seed, scaled by their σ = 5.270446 bohr, and read as an angstrom xyz. One force client serves the unix socket. Every POSDATA is one charged evaluation, including the evaluations inside those LBFGS rounds. Each seed completed 4 pinning rounds inside the 400_000 calls. The run stops when a finished relax is within 0.001 ε of the Cambridge minimum, or when the call count reaches the budget. The pair potential is the driver's `LJ_functions` plus its volume tail. ε = 0.00367493 Ha.
+| Arm | Hits | Median calls | Median wall (s) | Inside us | Outside us | Code revision |
+| --- | --- | --- | --- | --- | --- | --- |
+| anneal | 12/12 | 13469.5 | 0.224667 | 11.9589 | 4.8309 | f2a628c0 |
+| gmin | 7/12 | 389399 | 3.792015 | 7.1525 | 2.5612 | aac1548a |
+| rpqa_paper | 0/6 | 12925808 | 7751.411038 | 210.4986 | 389.3438 | 4e86f5fd |
 
-| Size | Arm | Hits | Median evals | Median wall (s) | Ratio | Inside µs | Outside µs |
+| Seed | Hit | Best energy | Force calls | Wall (s) | Inside us | Outside us | Code revision |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| LJ38 | anneal | 6/6 | 10189.500000 | 0.109401 | 2705.599024 | 3.5884 | 5.4623 |
-| LJ38 | rpqa | 0/6 | 400000.000000 | 295.993886 | 2705.599024 | 236.8139 | 503.1707 |
-
-Per-seed rows are `seeds.csv` and `rows/lj38/<arm>-<seed>.row`.
+| 2000 | 0 | -173.13450824 | 12904608 | 7741.751243 | 210.7652 | 389.1563 | 4e86f5fd |
+| 2001 | 0 | -173.13450824 | 14748672 | 8713.107052 | 212.6269 | 378.1454 | 4e86f5fd |
+| 2002 | 0 | -170.99005171 | 12940224 | 7761.070833 | 210.2321 | 389.5312 | 4e86f5fd |
+| 2003 | 0 | -170.99005171 | 12926720 | 7723.013968 | 209.1776 | 388.2682 | 4e86f5fd |
+| 2004 | 0 | -170.99005171 | 12924896 | 8137.186797 | 222.9327 | 406.6420 | 4e86f5fd |
+| 2005 | 0 | -171.35753078 | 12923520 | 7725.678026 | 208.1988 | 389.6010 | 4e86f5fd |

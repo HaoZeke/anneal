@@ -44,3 +44,19 @@ class PimcLj38:
             ],
             check=True,
         )
+
+
+class PimcLj38Paper:
+    """One seed of the published 32-bead, 40-round LJ38 schedule."""
+
+    timeout = 86400
+
+    def setup(self):
+        if not ENTER.is_file():
+            raise RuntimeError(f"missing {ENTER}")
+
+    def time_seed(self):
+        subprocess.run(
+            ["bash", str(ENTER), "paper", "--seed", "2000"],
+            check=True,
+        )

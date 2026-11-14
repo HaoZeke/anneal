@@ -59,5 +59,12 @@ chmod +x "$WORK/bin/inside.sh"
 if ! grep -Eq '(^|[[:space:]])bench([[:space:]]|$)' /etc/hosts; then
   echo '127.0.0.1 bench' | sudo -n tee -a /etc/hosts >/dev/null
 fi
+if [[ "${1:-}" == "paper" ]]; then
+  shift
+  set -- --arm rpqa_paper \
+    --summary "$ROOT/bench/pimc-lj38/results.csv" \
+    --seeds-out "$ROOT/bench/pimc-lj38/seeds.csv" \
+    "$@"
+fi
 exec sudo -n unshare --uts sh -c \
   'hostname bench; exec sudo -u ubuntu /work/pimc-lj38/bin/inside.sh "$@"' _ "$@"

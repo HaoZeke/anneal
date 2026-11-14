@@ -230,6 +230,24 @@ rule pimc_lj38:
         """
 
 
+# LJ38 RPQA at the published 32-replica, 40-round schedule.
+# Not part of `rule all`. Does not replace the 400_000-call rows:
+#   snakemake -s workflow/Snakefile pimc_lj38_paper
+rule pimc_lj38_paper:
+    output:
+        "bench/pimc-lj38/rows/lj38/rpqa_paper-2000.row",
+        "bench/pimc-lj38/rows/lj38/rpqa_paper-2001.row",
+        "bench/pimc-lj38/rows/lj38/rpqa_paper-2002.row",
+        "bench/pimc-lj38/rows/lj38/rpqa_paper-2003.row",
+        "bench/pimc-lj38/rows/lj38/rpqa_paper-2004.row",
+        "bench/pimc-lj38/rows/lj38/rpqa_paper-2005.row",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/pimc_lj38/enter_bench.sh paper
+        """
+
+
 # GrowPAL against the paper preset at the paper evaluation budgets.
 # Not part of `rule all`. One serial session, both arms, core 0:
 #   snakemake -s workflow/Snakefile growpal_h2h

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import os
 import random
 import subprocess
@@ -45,6 +46,21 @@ TOTAL_STEPS = 30000
 PIN_INTERVAL = 5000
 START_STEP = 5000
 RAMP_STEPS = 25000
+# Fiorentino and Marzari, arXiv:2606.03405, the LJ38 comparison with
+# basin-hopping: "32 replicas and only 40 local optimization rounds,
+# performed once every 10^4 steps." Also paper/related-work.md.
+# Forty rounds, one every 10_000 steps, the first after the opening
+# interval: steps 10000, 20000, ..., 400000. i-PI's loop is
+# range(total_steps), so the input length is the last step plus one.
+PAPER_NBEADS = 32
+PAPER_ROUNDS = 40
+PAPER_PIN_INTERVAL = 10_000
+PAPER_START = 10_000
+PAPER_LAST_PIN = PAPER_START + (PAPER_ROUNDS - 1) * PAPER_PIN_INTERVAL
+PAPER_TOTAL_STEPS = PAPER_LAST_PIN + 1
+PAPER_RAMP_STEPS = PAPER_LAST_PIN
+PAPER_ARM = "rpqa_paper"
+PAPER_SCHEDULE_SEED = 20261114
 
 SUMMARY_FIELDS = [
     "system",
@@ -66,6 +82,7 @@ SUMMARY_FIELDS = [
     "rpqa_commit",
     "rpqa_source",
     "anneal_head",
+    "code_revision",
 ]
 
 SEED_FIELDS = [
@@ -83,6 +100,7 @@ SEED_FIELDS = [
     "best",
     "stop",
     "reached",
+    "code_revision",
 ]
 
 
@@ -269,23 +287,33 @@ def write_init(binary: Path, seed: int, path: Path) -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
-def write_input(path: Path, seed: int, address: str) -> None:
+def write_input(
+    path: Path,
+    seed: int,
+    address: str,
+    nbeads: int = NBEADS,
+    total_steps: int = TOTAL_STEPS,
+    pin_interval: int = PIN_INTERVAL,
+    start_step: int = START_STEP,
+    ramp_steps: int = RAMP_STEPS,
+    checkpoint: int = 30000,
+) -> None:
     path.write_text(
         f"""<simulation mode='static' verbosity='low'>
   <output prefix='rpqa'>
     <properties stride='5000' filename='out'> [ step, time{{picosecond}}, potential{{electronvolt}}, lambdaqkin ] </properties>
-    <checkpoint stride='30000'/>
+    <checkpoint stride='{checkpoint}'/>
   </output>
   <prng>
     <seed>{seed}</seed>
   </prng>
-  <total_steps>{TOTAL_STEPS}</total_steps>
+  <total_steps>{total_steps}</total_steps>
   <ffsocket mode='unix' name='lj_driver' pbc='False'>
     <address>{address}</address>
     <latency>0.0001</latency>
   </ffsocket>
   <system>
-    <initialize nbeads='{NBEADS}'>
+    <initialize nbeads='{nbeads}'>
       <file mode='xyz' units='angstrom'> init.xyz </file>
       <velocities mode='thermal' units='kelvin'> 50 </velocities>
       <cell mode='abc'> [300.0, 300.0, 300.0] </cell>
@@ -312,7 +340,7 @@ def write_input(path: Path, seed: int, address: str) -> None:
         <qkin_ramp>
           <lambda_start> 19.0 </lambda_start>
           <lambda_end> 0.01 </lambda_end>
-          <total_steps> {RAMP_STEPS} </total_steps>
+          <total_steps> {ramp_steps} </total_steps>
           <logscale> False </logscale>
           <sqrtscale> True </sqrtscale>
         </qkin_ramp>
@@ -321,8 +349,8 @@ def write_input(path: Path, seed: int, address: str) -> None:
   </system>
   <smotion mode='rpqa'>
     <rpqa>
-      <pinning_interval> {PIN_INTERVAL} </pinning_interval>
-      <start_step> {START_STEP} </start_step>
+      <pinning_interval> {pin_interval} </pinning_interval>
+      <start_step> {start_step} </start_step>
       <max_relax_steps> 5000 </max_relax_steps>
       <optimizer mode='lbfgs'>
         <tolerances>
@@ -357,15 +385,32 @@ def run_rpqa(
     script_dir: Path,
     work: Path,
     log: Path,
+    arm: str = "rpqa",
+    nbeads: int = NBEADS,
+    total_steps: int = TOTAL_STEPS,
+    pin_interval: int = PIN_INTERVAL,
+    start_step: int = START_STEP,
+    ramp_steps: int = RAMP_STEPS,
+    expect_pins: int | None = None,
 ) -> dict[str, str]:
     work.mkdir(parents=True, exist_ok=True)
     log.parent.mkdir(parents=True, exist_ok=True)
-    address = f"rpqa_lj38_{seed}"
+    address = f"{arm}_lj38_{seed}"
     socket_path = Path(f"/tmp/ipi_{address}")
     if socket_path.exists():
         socket_path.unlink()
     write_init(binary, seed, work / "init.xyz")
-    write_input(work / "input.xml", seed, address)
+    write_input(
+        work / "input.xml",
+        seed,
+        address,
+        nbeads=nbeads,
+        total_steps=total_steps,
+        pin_interval=pin_interval,
+        start_step=start_step,
+        ramp_steps=ramp_steps,
+        checkpoint=100000 if arm == PAPER_ARM else 30000,
+    )
     meter_path = work / "meter.bin"
     if meter_path.exists():
         meter_path.unlink()
@@ -407,7 +452,8 @@ def run_rpqa(
         )
         watch = Meter(str(meter_path))
         while True:
-            if watch.calls() >= budget or watch.hit_calls() > 0:
+            capped = budget > 0 and watch.calls() >= budget
+            if capped or watch.hit_calls() > 0:
                 time.sleep(0.05)
                 _terminate(ipi)
                 _terminate(driver)
@@ -430,33 +476,50 @@ def run_rpqa(
     meter.close()
     if socket_path.exists():
         socket_path.unlink()
-    if charged < 1 or charged > budget:
+    if charged < 1 or (budget > 0 and charged > budget):
         raise RuntimeError(f"RPQA seed {seed} charged {charged} outside 1..{budget}\n{log.read_text()[-800:]}")
     hit = hit_calls > 0
     if hit and (hit_calls > charged or best_ha > (REFERENCE + HIT_TOL) * EPSILON):
         raise RuntimeError(f"RPQA seed {seed} hit record is inconsistent")
-    if not hit and charged != budget:
+    if budget > 0 and not hit and charged != budget:
         raise RuntimeError(
             f"RPQA seed {seed} stopped at {charged} calls without a hit\n{log.read_text()[-800:]}"
+        )
+    if budget == 0 and not hit and (expect_pins is None or n_pins != expect_pins):
+        raise RuntimeError(
+            f"RPQA seed {seed} finished {n_pins} pinning rounds, expected {expect_pins}\n{log.read_text()[-800:]}"
         )
     best = ""
     if n_pins:
         best = f"{best_ha / EPSILON:.8f}"
+    if hit:
+        stop = "hit"
+        evals = hit_calls
+    elif budget > 0:
+        stop = "budget"
+        evals = budget
+    else:
+        stop = "schedule"
+        evals = charged
     row = {
         "system": "lj38",
-        "arm": "rpqa",
+        "arm": arm,
         "seed": str(seed),
-        "budget": str(budget),
+        "budget": str(budget if budget > 0 else 0),
         "hit": "1" if hit else "0",
-        "evals_to_hit": str(hit_calls if hit else budget),
+        "evals_to_hit": str(evals),
         "charged": str(charged),
         "wall_s": f"{wall:.6f}",
         "pot_s": f"{pot_s:.6f}",
         "best": best,
-        "stop": "hit" if hit else "budget",
+        "stop": stop,
         "reached": "38",
+        "code_revision": "4e86f5fdc1583ef21f105fc2bed96a279b2430c1",
+        "_pins": str(n_pins),
     }
-    return with_rates(row)
+    rated = with_rates(row)
+    rated["_pins"] = row["_pins"]
+    return rated
 
 
 def check_potential(binary: Path, work: Path) -> None:
@@ -523,6 +586,7 @@ def summarise(rows: list[dict[str, str]], seeds: tuple[int, ...], source: dict[s
                 "rpqa_commit": source["rpqa_commit"],
                 "rpqa_source": source["rpqa_source"],
                 "anneal_head": head,
+                "code_revision": source["rpqa_commit"],
             }
         )
     return out
@@ -543,6 +607,112 @@ def note(progress: Path, line: str) -> None:
     progress.parent.mkdir(parents=True, exist_ok=True)
     with progress.open("a") as handle:
         handle.write(line + "\n")
+
+
+def paper_pin_steps() -> list[int]:
+    """Step indices at which the published LJ38 schedule pins a replica."""
+    return [
+        step
+        for step in range(PAPER_TOTAL_STEPS)
+        if step >= PAPER_START and (step - PAPER_START) % PAPER_PIN_INTERVAL == 0
+    ]
+
+
+def load_table(path: Path) -> list[dict[str, str]]:
+    if not path.is_file() or path.stat().st_size == 0:
+        return []
+    with path.open(newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def append_missing(
+    path: Path,
+    fields: list[str],
+    updates: list[dict[str, str]],
+    key_fields: tuple[str, ...],
+) -> None:
+    """Append paper rows that are not already in ``path``. Existing lines stay byte for byte."""
+    existing = load_table(path)
+    have = {tuple(row[key] for key in key_fields) for row in existing}
+    fresh = []
+    for row in updates:
+        if row["arm"] != PAPER_ARM:
+            raise RuntimeError(f"refusing to write arm {row['arm']}")
+        stored = {key: row[key] for key in fields}
+        key = tuple(stored[name] for name in key_fields)
+        if key in have:
+            continue
+        fresh.append(stored)
+        have.add(key)
+    if not fresh:
+        return
+    with path.open("a", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        if not existing:
+            writer.writeheader()
+        writer.writerows(fresh)
+
+
+def upsert_summary(path: Path, fields: list[str], row: dict[str, str]) -> None:
+    """Replace only the paper-arm summary line. Other lines are copied unchanged."""
+    raw = path.read_text() if path.is_file() else ""
+    kept = [line for line in raw.splitlines(keepends=True) if not line.startswith(f"lj38,{PAPER_ARM},")]
+    if kept and not kept[-1].endswith("\n"):
+        kept[-1] += "\n"
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fields)
+    if not raw:
+        writer.writeheader()
+    writer.writerow({key: row[key] for key in fields})
+    path.write_text("".join(kept) + buffer.getvalue())
+
+
+def anneal_wall_median(summary_path: Path) -> float:
+    for row in load_table(summary_path):
+        if row.get("arm") == "anneal" and row.get("system") == "lj38":
+            return float(row["wall_median_s"])
+    raise RuntimeError(f"{summary_path} has no LJ38 anneal row")
+
+
+def summarise_paper(
+    rows: list[dict[str, str]],
+    planned: int,
+    anneal_wall: float,
+    source: dict[str, str],
+    head: str,
+) -> list[dict[str, str]]:
+    if not rows:
+        return []
+    evals_median, evals_iqr = median_iqr([float(item["evals_to_hit"]) for item in rows])
+    wall_median, wall_iqr = median_iqr([float(item["wall_s"]) for item in rows])
+    inside_median, _inside_iqr = median_iqr([float(item["inside_us"]) for item in rows])
+    outside_median, _outside_iqr = median_iqr([float(item["outside_us"]) for item in rows])
+    hits = sum(item["hit"] == "1" for item in rows)
+    ratio = f"{wall_median / anneal_wall:.6f}" if anneal_wall > 0.0 else ""
+    return [
+        {
+            "system": "lj38",
+            "arm": PAPER_ARM,
+            "n": str(len(rows)),
+            "planned": str(planned),
+            "hits": str(hits),
+            "hits_over_n": f"{hits}/{len(rows)}",
+            "budget": "0",
+            "evals_median": f"{evals_median:.6f}",
+            "evals_iqr": f"{evals_iqr:.6f}",
+            "wall_median_s": f"{wall_median:.6f}",
+            "wall_iqr_s": f"{wall_iqr:.6f}",
+            "wall_ratio": ratio,
+            "inside_us": f"{inside_median:.4f}",
+            "outside_us": f"{outside_median:.4f}",
+            "seeds": " ".join(item["seed"] for item in rows),
+            "schedule_seed": str(PAPER_SCHEDULE_SEED),
+            "rpqa_commit": source["rpqa_commit"],
+            "rpqa_source": source["rpqa_source"],
+            "anneal_head": head,
+            "code_revision": source["rpqa_commit"],
+        }
+    ]
 
 
 def self_test() -> None:
@@ -577,11 +747,107 @@ def self_test() -> None:
     level = (REFERENCE + HIT_TOL) * EPSILON
     if not (REFERENCE * EPSILON < level < 0.0):
         raise SystemExit("hit level is on the wrong side of the minimum")
+    pins = paper_pin_steps()
+    if (len(pins), pins[0], pins[-1], PAPER_TOTAL_STEPS) != (40, 10_000, 400_000, 400_001):
+        raise SystemExit(f"paper schedule {len(pins)} {pins[:1]} {pins[-1:]} {PAPER_TOTAL_STEPS}")
+    if PAPER_NBEADS != 32 or PAPER_LAST_PIN != 400_000:
+        raise SystemExit("paper replicas or last pin")
+    paper_jobs = list(SEEDS)
+    random.Random(PAPER_SCHEDULE_SEED).shuffle(paper_jobs)
+    if sorted(paper_jobs) != list(SEEDS) or paper_jobs == list(SEEDS):
+        raise SystemExit("paper seed order")
     print("ok")
 
 
 def seed_path(rows: Path, seed: int, arm: str) -> Path:
     return rows / "lj38" / f"{arm}-{seed}.row"
+
+
+def run_paper(args: argparse.Namespace, seeds: tuple[int, ...]) -> int:
+    """One serial session of the published LJ38 step schedule.
+
+    Existing anneal and capped-RPQA rows stay on disk. This writes only
+    ``rpqa_paper`` rows and appends that arm to the summary tables.
+    """
+    for seed in seeds:
+        if seed not in SEEDS:
+            raise SystemExit(f"seed {seed} is outside 2000-2005")
+    source = load_source(args.source)
+    head = args.head_file.read_text().strip()
+    here = Path(__file__).resolve().parent
+    if str(here) not in sys.path:
+        sys.path.insert(0, str(here))
+    calls, reference = binary_budget(args.binary)
+    budget = PAPER_BUDGETS[38]
+    if calls != budget or abs(reference - REFERENCE) > 1e-12:
+        raise SystemExit(f"binary budget {calls} {reference} != paper {budget} {REFERENCE}")
+    check_potential(args.binary, args.runs / "check")
+    if args.summary is None:
+        raise SystemExit("the paper schedule needs --summary so the old rows can be kept")
+    anneal_wall = anneal_wall_median(args.summary)
+    order = list(seeds)
+    random.Random(PAPER_SCHEDULE_SEED).shuffle(order)
+    if seeds != SEEDS:
+        full = list(SEEDS)
+        random.Random(PAPER_SCHEDULE_SEED).shuffle(full)
+        order = [seed for seed in full if seed in seeds]
+    progress = args.runs.parent / "progress-paper.txt"
+    note(
+        progress,
+        "paper schedule "
+        f"beads={PAPER_NBEADS} rounds={PAPER_ROUNDS} every={PAPER_PIN_INTERVAL} "
+        f"last_pin={PAPER_LAST_PIN} total_steps={PAPER_TOTAL_STEPS} "
+        + " ".join(f"lj38:{PAPER_ARM}:{seed}" for seed in order),
+    )
+    rows: list[dict[str, str]] = []
+    for seed in order:
+        saved = seed_path(args.rows, seed, PAPER_ARM)
+        log = args.runs / "lj38" / f"{PAPER_ARM}-{seed}.log"
+        existing = load_seed(saved)
+        if existing is not None:
+            rows.append(existing)
+            note(progress, f"skip arm={PAPER_ARM} seed={seed} hit={existing['hit']} evals={existing['evals_to_hit']}")
+            continue
+        note(progress, f"start arm={PAPER_ARM} seed={seed} steps={PAPER_TOTAL_STEPS}")
+        row = run_rpqa(
+            args.binary,
+            seed,
+            0,
+            args.ipi_root,
+            here,
+            args.runs / "lj38" / f"{PAPER_ARM}-{seed}",
+            log,
+            arm=PAPER_ARM,
+            nbeads=PAPER_NBEADS,
+            total_steps=PAPER_TOTAL_STEPS,
+            pin_interval=PAPER_PIN_INTERVAL,
+            start_step=PAPER_START,
+            ramp_steps=PAPER_RAMP_STEPS,
+            expect_pins=PAPER_ROUNDS,
+        )
+        pins = row.pop("_pins")
+        write_seed(saved, row)
+        rows.append(row)
+        note(
+            progress,
+            f"done arm={PAPER_ARM} seed={seed} hit={row['hit']} "
+            f"evals={row['evals_to_hit']} charged={row['charged']} "
+            f"wall_s={row['wall_s']} best={row['best']} stop={row['stop']} pins={pins}",
+        )
+        if args.seeds_out:
+            append_missing(args.seeds_out, SEED_FIELDS, rows, ("arm", "seed"))
+        if args.paper_seeds:
+            write_table(args.paper_seeds, SEED_FIELDS, rows)
+        summary = summarise_paper(rows, len(SEEDS), anneal_wall, source, head)
+        if args.summary and summary:
+            upsert_summary(args.summary, SUMMARY_FIELDS, summary[0])
+        if args.paper_summary:
+            write_table(args.paper_summary, SUMMARY_FIELDS, summary)
+    summary = summarise_paper(rows, len(SEEDS), anneal_wall, source, head)
+    writer = csv.DictWriter(sys.stdout, fieldnames=SUMMARY_FIELDS)
+    writer.writeheader()
+    writer.writerows(summary)
+    return 0
 
 
 def main(argv: list[str]) -> int:
@@ -602,12 +868,18 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--seeds-out", type=Path)
     parser.add_argument("--size", type=int, action="append")
     parser.add_argument("--seed", type=int, action="append")
-    parser.add_argument("--arm", choices=("anneal", "rpqa", "both"), default="both")
+    parser.add_argument("--arm", choices=("anneal", "rpqa", "both", PAPER_ARM), default="both")
     parser.add_argument("--budget", type=int)
+    parser.add_argument("--paper-summary", type=Path)
+    parser.add_argument("--paper-seeds", type=Path)
     args = parser.parse_args(argv[1:])
     if args.size is not None and args.size != [38]:
         raise SystemExit(f"this bench is LJ38, not {args.size}")
     seeds = tuple(args.seed) if args.seed else SEEDS
+    if args.arm == PAPER_ARM:
+        if args.budget is not None:
+            raise SystemExit("the LJ38 paper schedule is not call-capped")
+        return run_paper(args, seeds)
     arms = ARMS if args.arm == "both" else (args.arm,)
     budget = PAPER_BUDGETS[38]
     if args.budget is not None and args.budget != budget:
