@@ -69,6 +69,7 @@ dependencies = [
  "readcon-db",
  "rgmin",
  "rgpot-core",
+ "rgpot-pair",
  "rgsaddle",
  "serde",
  "serde_json",
@@ -2267,6 +2268,14 @@ checksum = "df34626c5c9d888c234e6a0921e7e6c0335561ec50460fcf74e4b77772c89ede"
 dependencies = [
  "dlpk",
  "eindir-core",
+]
+
+[[package]]
+name = "rgpot-pair"
+version = "3.7.0"
+source = "git+https://github.com/OmniPotentRPC/rgpot?rev=1c1b4ed214c92860f7fbcdc2d4ac62aecbd9ceb7#1c1b4ed214c92860f7fbcdc2d4ac62aecbd9ceb7"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

@@ -73,6 +73,9 @@ linkcell    = { version = "=0.3.11", default-features = false }
 # eindir-core 0.6.0 on crates.io matches the previous git pin's sources.
 eindir-core = { version = "0.6.0", features = ["capi"] }
 rgmin = "0.5.0"
+# Free-cluster Morse, Lennard-Jones, and Gupta. This revision carries
+# both kernels; the crate compiles them and anneal calls that build.
+rgpot-pair = { git = "https://github.com/OmniPotentRPC/rgpot", rev = "1c1b4ed214c92860f7fbcdc2d4ac62aecbd9ceb7" }
 rgsaddle = { version = "0.3.0", optional = true }
 readcon-core = "=0.14.8"
 readcon-db = "=0.1.5"
