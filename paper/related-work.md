@@ -790,3 +790,59 @@ The hexamer comparison is a bare cluster at GFN2-xTB in xtb 6.7.1, against CREST
 
 Cite `fellingerAutopocket2026`.
 
+## 2026-11-14 — Gupta ordering of a 55-atom icosahedron, and copper--palladium at 19 atoms
+
+Eryürek and Garip, Physica Scripta 100, 035406 (12 February 2025), doi:10.1088/1402-4896/adb10e, search the chemical ordering of 55-atom Au\(_N\)Al\(_{(N-42)}\)Ni\(_{13}\) nanoalloys. The geometry is a Mackay icosahedron. Monte Carlo basin hopping on the Gupta potential relaxes the ordering. In the lowest structures the nickel atoms occupy the icosahedral core, and gold and aluminium stay on the surface. The abstract identifies Au\(_{17}\)Al\(_{25}\)Ni\(_{13}\) as the lowest mixing energy at the Gupta level. The nickel core is under compression.
+
+The 55 in that search counts gold, aluminium, and nickel. It is not the Lennard-Jones icosahedron. The mixing energy is a Gupta energy, so it does not contradict the Cambridge energy at 55 atoms, 121 of 192, or 97 of 192. The shape is held fixed, so the search is the ordering. It does not fill the open ASE, AGOX, and GMIN kit. A head-to-head would be this composition on the Gupta potential. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Yıldırım, Afyon Kocatepe University Journal of Sciences and Engineering 25, 1053--1061 (18 September 2025), doi:10.35414/akufemubid.1643569, treats every composition of the 19-atom Cu\(_n\)Pd\(_{19-n}\) series. The abstract combines the Gupta potential with density-functional calculations. It says the site preference, core or surface, follows the atomic radius, and that the excess energy at both levels favours mixing. The number of copper--palladium bonds is tied to that excess energy. The abstract does not name basin hopping, and it gives no Lennard-Jones energy.
+
+Nineteen atoms sits outside 38, 55, 75, 98, and 104. This series does not contradict the Cambridge hit targets or the sealed hexamer counts. A head-to-head would be one of these 19-atom clusters on the Gupta potential. It does not warrant a head-to-head on the Lennard-Jones preset.
+
+Cite `eryurekAuAlNi2025` and `yildirimCupd2025`.
+
+## 2026-11-14 — Gupta basin hopping inside a palladium-covered truncated octahedron
+
+Göcen, Nanomaterials 15, 1895 (17 December 2025), doi:10.3390/nano15241895, studies Pd\(_{60}\)Ir\(_n\)Rh\(_{19-n}\) clusters held in a truncated octahedron. Basin hopping on the Gupta potential searches the global optimisation of that family, and density-functional calculations check the configurations. The surface is only palladium and is held fixed. Iridium and rhodium occupy the 19-atom core. The abstract says Pd\(_{60}\)Ir\(_{6}\)Rh\(_{13}\) has the lowest mixing energy. The melting temperature is not monotonic in the iridium count, and the iridium-rich clusters are the most resistant to melting.
+
+The formula fixes the size at 79 atoms. That is not LJ75 or LJ98. The mixing energies are Gupta energies, so they do not contradict the Cambridge hit targets, 121 of 192, or 97 of 192. The outer shape and the palladium surface are held fixed, so the search is the core ordering. It does not fill the open ASE, AGOX, and GMIN kit. A head-to-head would be this composition on the Gupta potential. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `gocenPdirrh2025`.
+
+## 2026-11-14 — Identity, existence, and extra coordinates in one search
+
+Larsen, Kaappa, Vishart, Bligaard, and Jacobsen, npj Computational Materials 11, 222 (10 July 2025), doi:10.1038/s41524-025-01656-9, add three kinds of coordinates to a global optimisation: the chemical identity of an atom, its degree of existence, and its position in four to six dimensions. A machine-learning model with a vectorial fingerprint is trained on density-functional energies and forces. The abstract says the extra coordinates let the search pass barriers on the ordinary landscape. The tests include clusters and periodic cells, with the cell vectors free, and a closing example of an iron--cobalt pair in nitrogen-doped graphene.
+
+These authors already describe fractional existence on copper clusters, filed as `larsenFractional2023`. This paper adds the chemical identity and the higher-dimensional coordinates. The abstract does not name LJ38 through LJ104 or the water hexamer, so it does not contradict the Cambridge hit targets, 121 of 192, or 97 of 192. The iron--cobalt pair is not the sealed map. A comparison that uses this search has to name the extra coordinates and the learned surface. It does not warrant a new head-to-head on the Lennard-Jones preset. The shared-potential comparison already asked for the 2023 paper stays that comparison.
+
+Cite `larsenExtraDimensions2025`.
+
+## 2026-11-14 — Shell rules for multi-component icosahedra, and a 2869-atom ordering
+
+Canestrari, Nelli, and Ferrando, Nature Communications 16, 1655 (15 February 2025), doi:10.1038/s41467-025-56952-1, give a construction for multi-component icosahedra. Concentric shells of different chiral and achiral types, built from particles of different sizes, are assembled into one aggregate. Shell sequences become paths on the hexagonal lattice, and the rules name magic icosahedra and the size mismatch between shells. The abstract says molecular dynamics and density-functional calculations confirm the rules for several multi-component atomic clusters and nanoparticles.
+
+The manuscript clusters are one component. The abstract does not quote a Cambridge Lennard-Jones energy, so it does not contradict the hit targets, 121 of 192, or 97 of 192. The construction installs a shell sequence. That is not the manuscript's move library. It does not warrant a head-to-head on the unary preset or on the CREST hexamer table.
+
+Alkhatib, Salem, Hesselink, and Mpourmpakis, ACS Omega 10, 30996--31008 (14 July 2025), doi:10.1021/acsomega.5c04082, order the atoms of multimetallic nanoparticles with a bond-centric model and a genetic algorithm. Weighting factors turn a monometallic bond strength into a bimetallic one. The abstract reports the ordering of 2869-atom cuboctahedra across 15 bimetallic combinations, compared with experiment and with other calculations.
+
+The size 2869 is outside 38, 55, 75, 98, and 104. The shape is held as a cuboctahedron, and the energy is the bond-centric cohesive energy. The abstract gives no Cambridge Lennard-Jones energy and no water energy, so it does not contradict the hit targets or the sealed hexamer counts. It does not fill the open ASE, AGOX, and GMIN kit. It does not warrant a head-to-head on the Lennard-Jones preset.
+
+Cite `canestrariIcosahedra2025` and `alkhatibOrdering2025`.
+
+## 2026-11-14 — A reinforcement-learning search of Ag15
+
+Mubeen, Chen, and Ur Rehman, Journal of Chemistry and Environment, pages 1--17 (11 January 2025), doi:10.56946/jce.v4i1.589, search Ag\(_{15}\) with deep reinforcement learning. The record has no volume. The abstract says genetic algorithms and basin hopping usually perform poorly on complex surfaces, and that the reinforcement-learning search finds stable configurations more efficiently.
+
+Mubeen and Chen already search Ag--Ni, Pt--Co, Ag--Pd, and Ag--Cu, filed as `mubeenDrLClusters2026` and `mubeenAgpd2026`. This cluster is fifteen silver atoms. The abstract gives no Lennard-Jones energy and no water energy, so it does not contradict the Cambridge hit targets, 121 of 192, or 97 of 192. It does not fill the open ASE, AGOX, and GMIN kit. A head-to-head would be Ag\(_{15}\) on the surface used for that search. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `mubeenAg152025`.
+
+## 2026-11-14 — RAFFLE searches interfaces, and the named release tags did not move
+
+Taylor, Pitfield, Davies, and Hepplestone, npj Computational Materials 11, 258 (8 August 2025), doi:10.1038/s41524-025-01749-5, release RAFFLE. The package searches low-energy interfaces between a pair of crystals. A genetic algorithm places atoms with two-body, three-body, and four-body distributions, and active learning updates those distributions. The abstract says the search recovers the known bulk phases of aluminium and of MoS\(_2\), and that it treats intercalation compounds, grain boundaries, and the silicon--germanium interface.
+
+Pitfield is an author of the active delta-learning search already filed as `pitfieldActiveDelta2026`. RAFFLE is not AGOX and not GOFEE. On 14 November 2026 the release tags were unchanged: ASE 3.29.0 on the GitLab tag list and on PyPI, AGOX v3.11.1 on the GitLab tag list and on PyPI, CREST v3.0.2 on the GitHub release list, pele v0.1.2 on the GitHub release list and on PyPI, and xtb v6.8.0 on the GitHub release list. The interface search gives no Lennard-Jones energy and no hexamer count, so it does not contradict the Cambridge hit targets, 121 of 192, or 97 of 192. It does not fill the open ASE, AGOX, and GMIN kit. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `taylorRaffle2025`.
+
