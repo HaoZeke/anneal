@@ -6085,10 +6085,10 @@ where
                     (Vec::new(), Vec::new())
                 };
                 let mut best_alt: Option<(f64, Array1<f64>, Option<Array1<f64>>)> = None;
-                // The probe is not the chain ledger. A higher seed must not
-                // spend the budget the descent is still using, or the hops
-                // after the miss are a different search.
-                let mut probe = Ledger::new(65_536);
+                // The probe keeps its records off the chain ledger, so a miss
+                // leaves the incumbent where it was. Its calls are the
+                // search's, charged hit or miss, and it has only what is left.
+                let mut probe = ledger.slice(ledger.remaining());
                 for source in sources {
                     if probe.remaining() == 0 {
                         break;
@@ -6182,6 +6182,12 @@ where
                         }
                     }
                 }
+                let before = ledger.spent();
+                ledger.charge_many(probe.spent());
+                // As with the binary-core probe, the stall clock stays where
+                // the walker's own quenches left it.
+                charged_at_best =
+                    charged_at_best.saturating_add(ledger.spent().saturating_sub(before));
                 if let Some((eq, xq, gradient)) = best_alt
                     && eq < ledger.best - 1e-6
                 {
@@ -6192,7 +6198,6 @@ where
                             "prior motif {eq:.6} 555 {frac_555:.3} 421 {frac_421:.3} 422 {frac_422:.3}"
                         );
                     }
-                    ledger.charge_many(probe.spent());
                     let from_basin = identity.basin_of(best_state.view());
                     let reached = identity.basin_of(xq.view());
                     adopt_minimum!(
@@ -10760,6 +10765,52 @@ mod tests {
             after_n >= 1,
             "return_polish never fired after {after}; returned {}",
             out.returned
+        );
+    }
+
+    /// Every evaluation a labelled search makes is charged to its ledger,
+    /// the motif reseed's quenches among them, whether or not a motif wins.
+    ///
+    /// The energy never improves, so the incumbent stands for half the
+    /// budget and the motif reseed runs, with its unlike-pair passes, and
+    /// misses.
+    #[test]
+    fn a_missed_motif_reseed_is_charged() {
+        let n = 13;
+        let species = (0..n).map(|i| if i < 6 { 29 } else { 79 }).collect();
+        let mut cfg = Config::recommended(n).with_species(species, None);
+        cfg.relax_steps = 16;
+        // The binary-core probe settles on its own ledger as well. Off, every
+        // call away from the search ledger is the motif probe's.
+        cfg.prior_core = false;
+        assert!(cfg.prior_motif);
+        let mut rng = StdRng::seed_from_u64(5);
+        let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+        let budget = 6_000;
+        let mut ledger = Ledger::new(budget);
+        let main = &ledger as *const Ledger as usize;
+        let mut on_main = 0usize;
+        let mut off_main = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            for _ in 0..steps.max(1) {
+                if !led.charge() {
+                    break;
+                }
+                if led as *const Ledger as usize == main {
+                    on_main += 1;
+                } else {
+                    off_main += 1;
+                }
+            }
+            (-1.0, x.to_owned())
+        };
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
+        assert!(off_main > 0, "no motif quench ran");
+        assert!(out.charged <= budget);
+        assert!(
+            out.charged >= on_main + off_main,
+            "{on_main} search and {off_main} motif evaluations, {} charged",
+            out.charged
         );
     }
 
