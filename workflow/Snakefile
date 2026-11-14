@@ -308,6 +308,24 @@ rule tip4p_h2h:
         """
 
 
+# (H2O)21 against GMIN on anneal develop's default preset across a budget
+# sweep: 2M, 4M and 8M charged evaluations, twelve seeds, the same serial arm
+# as tip4p_h2h. GMIN at a (budget, seed) pair is deterministic, so the rows
+# the 2M head-to-head and the 4M/8M runs already stored are reused through
+# H2H_GMIN_ROWS; GMIN only runs for pairs they are missing. Not part of
+# `rule all`:
+#   snakemake -s workflow/Snakefile tip4p21_budget_h2h
+rule tip4p21_budget_h2h:
+    output:
+        "bench/tip4p-h2h/rows-budget21.csv",
+        "bench/tip4p-h2h/summary-budget21.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/tip4p_h2h/enter_budget.sh
+        """
+
+
 # TIP4P (H2O)10, 15 and 20 on the paper preset. Not part of `rule all`.
 #   snakemake -s workflow/Snakefile tip4p_rates
 rule tip4p_rates:

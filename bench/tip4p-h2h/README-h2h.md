@@ -81,3 +81,32 @@ there is no accompanying fix.
 
 Per-seed rows and logs stay in `/work`; only the summary and verification
 rows are committed.
+
+## (H₂O)₂₁ budget sweep
+
+(H₂O)₂₁ is the one Cambridge size neither arm reaches in 2 M calls, so it is
+run again on anneal develop's default preset at 2 M, 4 M and 8 M charged
+evaluations, the same twelve seeds and the same serial arm. The driver is
+`scripts/tip4p_h2h/enter_budget.sh`, the Snakemake rule is
+`tip4p21_budget_h2h`, and the asv class is `Tip4p21BudgetHeadToHead`. GMIN at
+a (budget, seed) pair is deterministic, so the rows the panel above and the
+4 M/8 M runs already stored are reused. Summary rows are `summary-budget21.csv`
+and per-seed rows are `rows-budget21.csv`. `p(U)` is the two-sided
+Mann–Whitney U test on the per-seed best energies; the hit counts are 0/12 on
+both arms at every budget, so the Fisher exact p is 1.000 throughout.
+
+| Budget | anneal | GMIN | anneal best / median | GMIN best / median | wall (a/g s) | p(U) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2 M | 0/12 | 0/12 | −915.774 / −914.368 | −903.760 / −895.593 | 24.70 / 75.15 | 3.2e-05 |
+| 4 M | 0/12 | 0/12 | −915.774 / −914.889 | −905.330 / −897.861 | 49.48 / 150.16 | 3.2e-05 |
+| 8 M | 0/12 | 0/12 | −915.774 / −915.143 | −905.330 / −899.538 | 102.45 / 299.73 | 3.2e-05 |
+
+Four times the budget does not reach the global minimum on either arm. Anneal's
+best holds at −915.7735 kJ/mol, 0.93 kJ/mol short of the −916.7074 header,
+from 2 M through 8 M: the same seed plateaus one hydrogen bond short and more
+calls from that incumbent do not complete the network. The median does climb,
+from −914.37 to −915.14, as the slower seeds reach that plateau. GMIN's best
+improves from −903.76 to −905.33 and then holds, 11.4 kJ/mol short. Anneal's
+per-seed best distribution stays below GMIN's at every budget, Mann–Whitney p
+3.2e-05, at a third of the wall. Lifting (H₂O)₂₁ is left to later work; the
+default preset is unchanged here.
