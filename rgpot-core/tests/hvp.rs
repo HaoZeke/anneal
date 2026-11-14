@@ -644,17 +644,22 @@ fn the_analytic_scheme_matches_the_closed_form_and_can_be_bypassed() {
     unsafe { rgpot_force_input_free(&mut input) };
 }
 
+/// Forward displaces along `+v / |v|` whatever the length, so it scales
+/// with a positive factor. A negative one moves the displacement to the
+/// other side, where the `O(h)` term keeps its sign; central is odd.
 #[test]
-fn products_are_linear_in_the_direction() {
+fn products_scale_with_the_direction() {
     let mut system = System::octahedron();
     let mut input = system.input();
     let handle = Handle::new();
     let v = direction(system.pos.len(), 2);
-    let hv = handle.hvp(&input, &v, 0.0, FORWARD);
-    let scaled: Vec<f64> = v.iter().map(|x| 1e3 * x).collect();
-    let hv_scaled = handle.hvp(&input, &scaled, 0.0, FORWARD);
-    for (a, b) in hv.iter().zip(&hv_scaled) {
-        assert!((1e3 * a - b).abs() <= 1e-9 * b.abs().max(1.0), "{a} {b}");
+    for (scheme, c) in [(FORWARD, 1e3), (CENTRAL, -3.0)] {
+        let hv = handle.hvp(&input, &v, 0.0, scheme);
+        let scaled: Vec<f64> = v.iter().map(|x| c * x).collect();
+        let hv_scaled = handle.hvp(&input, &scaled, 0.0, scheme);
+        for (a, b) in hv.iter().zip(&hv_scaled) {
+            assert!((c * a - b).abs() <= 1e-9 * b.abs().max(1.0), "{c}: {a} {b}");
+        }
     }
     unsafe { rgpot_force_input_free(&mut input) };
 }
