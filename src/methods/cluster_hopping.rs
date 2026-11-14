@@ -3077,6 +3077,189 @@ fn finish_improving(
 /// Continuations [`finish_improving`] grants one relaxation.
 const FINISH_ROUNDS: usize = 8;
 
+/// Energy per atom, in configured wells, above which that well is not the
+/// potential's unit. Lennard-Jones bulk is under ten. Rigid water stays
+/// under this. A Sutton-Chen cluster sits far above it.
+const STEEP_WELL_PER_ATOM: f64 = 64.0;
+
+/// Contacts inside 1.25 times the median nearest-neighbour distance.
+fn contact_count(x: ArrayView1<f64>, n: usize) -> usize {
+    if n < 2 || x.len() < 3 * n {
+        return 1;
+    }
+    let mut nearest = vec![f64::MAX; n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut distance = 0.0;
+            for k in 0..3 {
+                let delta = x[3 * i + k] - x[3 * j + k];
+                distance += delta * delta;
+            }
+            distance = distance.sqrt();
+            nearest[i] = nearest[i].min(distance);
+            nearest[j] = nearest[j].min(distance);
+        }
+    }
+    let mut ordered = nearest;
+    ordered.sort_by(|left, right| left.total_cmp(right));
+    let cutoff = 1.25 * ordered[n / 2];
+    if !(cutoff > 0.0) {
+        return 1;
+    }
+    let mut bonds = 0usize;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let mut distance = 0.0;
+            for k in 0..3 {
+                let delta = x[3 * i + k] - x[3 * j + k];
+                distance += delta * delta;
+            }
+            if distance.sqrt() < cutoff {
+                bonds += 1;
+            }
+        }
+    }
+    bonds.max(1)
+}
+
+/// Quenched energy per contact, in units of the configured well.
+/// One when the quench is already on that scale, or the chart is rigid.
+fn contact_factor(cfg: &Config, energy: f64, x: ArrayView1<f64>) -> f64 {
+    if cfg.move_library.is_rigid_body() || !energy.is_finite() || cfg.n_points < 2 {
+        return 1.0;
+    }
+    let per_atom = energy.abs() / cfg.n_points as f64;
+    if per_atom <= STEEP_WELL_PER_ATOM * cfg.energy_scale.max(1e-12) {
+        return 1.0;
+    }
+    let per_contact = energy.abs() / contact_count(x, cfg.n_points) as f64;
+    (per_contact / cfg.energy_scale.max(1e-12)).max(1.0)
+}
+
+/// Convergence and the return screen follow the contact energy.
+/// Temperature and the bias height do not: a bias as tall as a contact
+/// inverts a funnel whose rival sits only a few units higher.
+fn apply_contact_convergence(cfg: &mut Config, factor: f64) {
+    if !(factor > 1.0) {
+        return;
+    }
+    cfg.screen_margin *= factor;
+    cfg.record_gradient *= factor;
+    let longer = ((cfg.relax_steps as f64) * factor.sqrt().clamp(1.0, 16.0)).round();
+    cfg.relax_steps = longer.max(cfg.relax_steps as f64) as usize;
+}
+
+/// Moves the temperature toward one half acceptance.
+///
+/// A block inside a quarter of one half leaves the temperature bit for
+/// bit. The ceiling is the contact energy when the configured well is
+/// wrong, and the preset itself when it is not, so a matched unit cannot move.
+struct AcceptDial {
+    window: usize,
+    yes: usize,
+    temperature: f64,
+    floor: f64,
+    cap: f64,
+}
+
+impl AcceptDial {
+    const BLOCK: usize = 40;
+
+    fn new(temperature: f64, contact: f64) -> Self {
+        let floor = temperature;
+        let cap = temperature * contact.max(1.0);
+        Self {
+            window: 0,
+            yes: 0,
+            temperature,
+            floor,
+            cap,
+        }
+    }
+
+    fn temperature(&self) -> f64 {
+        self.temperature
+    }
+
+    fn observe(&mut self, accepted: bool) {
+        if self.cap <= self.floor * (1.0 + 1e-12) {
+            return;
+        }
+        self.window += 1;
+        if accepted {
+            self.yes += 1;
+        }
+        if self.window < Self::BLOCK {
+            return;
+        }
+        let rate = self.yes as f64 / self.window as f64;
+        self.window = 0;
+        self.yes = 0;
+        if (rate - 0.5).abs() <= 0.25 {
+            return;
+        }
+        let factor = if rate < 0.5 { 1.25 } else { 0.8 };
+        self.temperature = (self.temperature * factor).clamp(self.floor, self.cap);
+    }
+}
+
+#[cfg(test)]
+mod contact_unit_tests {
+    use super::*;
+    use ndarray::Array1;
+
+    fn tetrahedron() -> Array1<f64> {
+        Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.87, 0.0, 0.5, 0.29, 0.82,
+        ])
+    }
+
+    #[test]
+    fn a_lennard_jones_well_does_not_move_temperature_or_bias() {
+        let mut cfg = Config::recommended(4);
+        let temperature = cfg.temperature;
+        let bias = cfg.bias_height;
+        let steps = cfg.relax_steps;
+        let factor = contact_factor(&cfg, -8.0, tetrahedron().view());
+        assert_eq!(factor, 1.0);
+        apply_contact_convergence(&mut cfg, factor);
+        assert_eq!(cfg.temperature, temperature);
+        assert_eq!(cfg.bias_height, bias);
+        assert_eq!(cfg.relax_steps, steps);
+        let mut dial = AcceptDial::new(cfg.temperature, factor);
+        for _ in 0..AcceptDial::BLOCK {
+            dial.observe(false);
+        }
+        assert_eq!(dial.temperature(), temperature);
+    }
+
+    #[test]
+    fn a_steep_quench_lengthens_the_descent_and_acceptance_sets_the_temperature() {
+        let mut cfg = Config::recommended(4);
+        let temperature = cfg.temperature;
+        let bias = cfg.bias_height;
+        let factor = contact_factor(&cfg, -400.0, tetrahedron().view());
+        assert!(factor > 10.0, "factor {factor}");
+        apply_contact_convergence(&mut cfg, factor);
+        assert_eq!(cfg.temperature, temperature);
+        assert_eq!(cfg.bias_height, bias);
+        assert!(cfg.relax_steps > 200, "steps {}", cfg.relax_steps);
+        assert!(cfg.record_gradient > 1e-3);
+        assert!(cfg.screen_margin > 2.0);
+        let mut dial = AcceptDial::new(temperature, factor);
+        for _ in 0..AcceptDial::BLOCK {
+            dial.observe(false);
+        }
+        assert!(dial.temperature() > temperature);
+        assert!(dial.temperature() <= temperature * factor + 1e-9);
+        let mut even = AcceptDial::new(temperature, factor);
+        for i in 0..AcceptDial::BLOCK {
+            even.observe(i % 2 == 0);
+        }
+        assert_eq!(even.temperature(), temperature);
+    }
+}
+
 /// Keep relaxing a rigid trial until the root-mean-square force is at the
 /// record tolerance, or the block stops descending.
 ///
@@ -3323,6 +3506,17 @@ where
         }
         return Err(SearchError::NoFiniteStart { attempts });
     }
+    // Convergence and the return screen take the contact energy when the
+    // quench is far above the configured well. The bias stays at the
+    // preset: a deposit as large as a contact pushes a face-centred
+    // minimum aside for a twin a few units higher. Temperature starts at
+    // the preset and moves only while acceptance is outside a quarter of
+    // one half, and never above one contact.
+    let mut scaled = cfg.clone();
+    let contact = contact_factor(&scaled, e, x.view());
+    apply_contact_convergence(&mut scaled, contact);
+    let mut dial = AcceptDial::new(scaled.temperature, contact);
+    let cfg = &mut scaled;
     if initial_recordable {
         ledger.record(e, x.view());
         ledger.mark_last_recorded(true);
@@ -7473,6 +7667,8 @@ where
                 accept = false;
             }
         }
+        dial.observe(accept);
+        cfg.temperature = dial.temperature();
         if accept {
             accepted += 1;
             // Every accepted quench within the window is a candidate stage
