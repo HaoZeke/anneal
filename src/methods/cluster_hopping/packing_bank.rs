@@ -16,8 +16,6 @@
 
 use ndarray::{Array1, ArrayView1};
 
-use crate::structure::cna;
-
 /// L1 gap above which two common-neighbour vectors are different packings.
 pub const GAP: f64 = 0.12;
 
@@ -48,12 +46,8 @@ impl PackingBank {
         if n < 3 || state.len() != 3 * n || !(cutoff.is_finite() && cutoff > 0.0) {
             return [0.0; 3];
         }
-        let counts = cna(state, n, cutoff);
-        [
-            counts.fraction((5, 5, 5)),
-            counts.fraction((4, 2, 1)),
-            counts.fraction((4, 2, 2)),
-        ]
+        let (f555, f421, f422) = crate::structure::named_triplet_fractions(state, n, cutoff);
+        [f555, f421, f422]
     }
 
     /// Insert `state` under the population rule.
