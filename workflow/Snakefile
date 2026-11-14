@@ -452,3 +452,18 @@ rule agox_gofee_h2h:
         set -euo pipefail
         bash scripts/ase_gofee_h2h/enter_bench.sh --comparison agox_gofee
         """
+
+
+# Paired (H2O)16 rows. Not part of `rule all`. The script rewrites the
+# summary from the committed seeds and does not start a search.
+#   snakemake -s workflow/Snakefile h2o16_crest
+rule h2o16_crest:
+    input:
+        "bench/h2o16-crest/seeds.csv",
+    output:
+        "bench/h2o16-crest/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        python3 scripts/h2o16_crest/summarize.py
+        """
