@@ -1,4 +1,17 @@
 fn main() {
+    // Cambridge Morse and reduced Lennard-Jones. The sources are the rgpot
+    // kernel: every pair, one fused pass. fp-contract stays off so a product
+    // that is not an fma rounds on its own, which is the Rust walk.
+    cc::Build::new()
+        .file("native/rgpot_cambridge_morse.c")
+        .include("native")
+        .flag("-ffp-contract=off")
+        .compile("rgpot_cambridge_morse");
+    println!("cargo:rerun-if-changed=native/rgpot_cambridge_morse.c");
+    println!("cargo:rerun-if-changed=native/cambridge_morse.h");
+    println!("cargo:rerun-if-changed=native/cambridge_morse_body.inc");
+    println!("cargo:rerun-if-changed=native/cluster_lj_body.inc");
+
     // The `vesin-nl` feature compiles vesin's own cell-list sources rather
     // than reimplementing them. VESIN_SRC points at a checkout of
     // https://github.com/Luthaf/vesin.

@@ -136,6 +136,17 @@ impl PairKind {
     }
 }
 
+unsafe extern "C" {
+    fn rgpot_cambridge_morse(
+        x: *const f64,
+        n: usize,
+        rho: f64,
+        energy: *mut f64,
+        gradient: *mut f64,
+    );
+    fn rgpot_cluster_lj(x: *const f64, n: usize, energy: *mut f64, gradient: *mut f64);
+}
+
 impl PairPotential {
     /// A potential over `n_points` points, in a box of half-width `extent`.
     ///
@@ -190,40 +201,41 @@ impl PairPotential {
     ///
     /// Fused because a cluster search spends its budget here: the pair loop is
     /// the same for both, so computing them separately doubles the cost of
-    /// every relaxation step.
+    /// every relaxation step. A contiguous cluster uses the rgpot all-pairs
+    /// kernel, which is that walk with no cutoff.
     pub fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let n = self.n_points;
         let mut e = 0.0;
         let mut g = Array1::zeros(x.len());
         if let Some(coordinates) = x.as_slice() {
-            let gradient = g.as_slice_mut().expect("owned gradient is contiguous");
-            for i in 0..n {
-                let base_i = 3 * i;
-                let mut gradient_i = [gradient[base_i], gradient[base_i + 1], gradient[base_i + 2]];
-                for j in (i + 1)..n {
-                    let base_j = 3 * j;
-                    let d = [
-                        coordinates[base_i] - coordinates[base_j],
-                        coordinates[base_i + 1] - coordinates[base_j + 1],
-                        coordinates[base_i + 2] - coordinates[base_j + 2],
-                    ];
-                    let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                    if r2 <= 0.0 {
-                        continue;
-                    }
-                    let (v, coef) = self.kind.pair(r2);
-                    e += v;
-                    for k in 0..3 {
-                        // One rounding, the IEEE fused product-sum, on every
-                        // target. A contracted `+=` follows the inlining
-                        // context and is not the same walk.
-                        gradient_i[k] = coef.mul_add(d[k], gradient_i[k]);
-                        gradient[base_j + k] = (-coef).mul_add(d[k], gradient[base_j + k]);
+            if coordinates.len() == 3 * n {
+                let mut energy = 0.0;
+                let mut gradient = vec![0.0; 3 * n];
+                // The slice is exactly 3n coordinates. The kernel writes one
+                // energy and 3n force slots.
+                unsafe {
+                    match self.kind {
+                        PairKind::LennardJones => {
+                            rgpot_cluster_lj(
+                                coordinates.as_ptr(),
+                                n,
+                                &mut energy,
+                                gradient.as_mut_ptr(),
+                            );
+                        }
+                        PairKind::Morse { rho } => {
+                            rgpot_cambridge_morse(
+                                coordinates.as_ptr(),
+                                n,
+                                rho,
+                                &mut energy,
+                                gradient.as_mut_ptr(),
+                            );
+                        }
                     }
                 }
-                gradient[base_i..base_i + 3].copy_from_slice(&gradient_i);
+                return (energy, Array1::from_vec(gradient));
             }
-            return (e, g);
         }
         for i in 0..n {
             for j in (i + 1)..n {
