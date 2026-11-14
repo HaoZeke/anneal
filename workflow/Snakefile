@@ -344,6 +344,27 @@ rule ase_mh_h2h:
         """
 
 
+# Deposited Guided Adaptive Diffusion figures against the recommended
+# preset and GMIN, on LJ31 and LJ38. The zip is downloaded here and is
+# not a committed output. Not part of `rule all`:
+#   snakemake -s workflow/Snakefile gad_published
+rule gad_published:
+    output:
+        "bench/gad-published/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        mkdir -p /work/gad-published
+        zip=/work/gad-published/supplementary_data.zip
+        if [[ ! -s $zip ]]; then
+          curl -fL --retry 3 -o "$zip" \\
+            https://zenodo.org/api/records/19001618/files/supplementary_data.zip/content
+        fi
+        echo "e140fde0c62c71f08b326b12ac50d77e  $zip" | md5sum -c -
+        bash scripts/gad_published/enter_bench.sh --summary bench/gad-published/summary.csv --zip "$zip"
+        """
+
+
 # Paper preset against AGOX GOFEE. Not part of `rule all`.
 #   snakemake -s workflow/Snakefile agox_gofee_h2h
 rule agox_gofee_h2h:
