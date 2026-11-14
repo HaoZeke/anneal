@@ -4046,7 +4046,14 @@ where
     // recorded, and keeps its validation gradient for the first step the rung
     // takes from it.
     for _ in 1..n_rep {
-        let s0 = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
+        // A rigid chart holds six coordinates per body, not the three a plain
+        // centre draw gives; its rungs start from a fresh rigid cluster, or the
+        // six-per-body potential rejects the three-per-body length.
+        let s0 = if cfg.move_library.is_rigid_body() {
+            random_rigid_cluster(n, cfg.min_separation, rng)
+        } else {
+            random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng)
+        };
         let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
         let gradient = record_quenched_answer(
             cfg,
@@ -9564,6 +9571,31 @@ pub fn random_cluster<R: Rng + ?Sized>(
 ) -> Array1<f64> {
     let radius = portable_cbrt(3.0 * n as f64 / (4.0 * std::f64::consts::PI * density));
     random_cluster_in_radius(n, radius, min_sep, rng)
+}
+
+/// A fresh centre-and-rotation configuration: `n` non-overlapping centres in a
+/// sphere, each with a uniformly random exponential-map rotation.
+///
+/// The length is `6 n`: centres, then rotation vectors, the layout the rigid
+/// move library edits. Centres are at least `min_sep` apart inside a sphere
+/// whose radius scales with `min_sep` and `n^(1/3)`, the rigid analogue of the
+/// atomic multistart draw. It carries no body-specific geometry.
+pub fn random_rigid_cluster<R: Rng + ?Sized>(n: usize, min_sep: f64, rng: &mut R) -> Array1<f64> {
+    let radius = 1.35 * min_sep * (n.max(1) as f64).cbrt();
+    let centres = random_cluster_in_radius(n, radius, min_sep, rng);
+    let mut x = Array1::zeros(6 * n);
+    for i in 0..(3 * n).min(centres.len()) {
+        x[i] = centres[i];
+    }
+    for i in 0..n {
+        for k in 0..3 {
+            x[3 * n + 3 * i + k] = rng.random_range(-std::f64::consts::PI..std::f64::consts::PI);
+        }
+    }
+    if let Some(slice) = x.as_slice_mut() {
+        crate::potentials::fold_rotation_vectors(n, slice);
+    }
+    x
 }
 
 /// Seeds a non-overlapping configuration inside a declared sphere radius.
