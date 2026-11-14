@@ -312,17 +312,36 @@ def call(pot, positions, atom_types, box):
         raise SystemExit("energy is not finite")
 
 
+def _cpus(token):
+    found = set()
+    for part in token.split(","):
+        if not part:
+            continue
+        if "-" in part:
+            lo, hi = part.split("-", 1)
+            found.update(range(int(lo), int(hi) + 1))
+        else:
+            found.add(int(part))
+    return found
+
+
 def cores_collapsed(requested):
+    # A short call may occupy only the first core of its set. That is
+    # not a collapsed team. Fail when a thread leaves the set, or when
+    # several bound threads share one core.
     wanted = set(int(part) for part in os.environ["BENCH_CORES"].split(",") if part)
-    seen = set()
+    singles = []
     for name in os.listdir("/proc/self/task"):
         status = open("/proc/self/task/%s/status" % name, encoding="ascii", errors="replace").read()
         for line in status.splitlines():
-            if line.startswith("Cpus_allowed_list:"):
-                token = line.split()[-1]
-                if token.isdigit():
-                    seen.add(int(token))
-    if requested > 1 and not wanted.issubset(seen):
+            if not line.startswith("Cpus_allowed_list:"):
+                continue
+            allowed = _cpus(line.split()[-1])
+            if not allowed or not allowed.issubset(wanted):
+                return True
+            if len(allowed) == 1:
+                singles.append(next(iter(allowed)))
+    if requested > 1 and len(singles) >= 2 and len(set(singles)) == 1:
         return True
     return False
 '''
