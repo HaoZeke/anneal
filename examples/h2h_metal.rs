@@ -349,7 +349,7 @@ fn cmd_run(args: &[String]) -> i32 {
         eprintln!("best: {err}");
         return 1;
     }
-    report(
+    let valid = report(
         &args[1],
         seed,
         budget,
@@ -358,7 +358,7 @@ fn cmd_run(args: &[String]) -> i32 {
         pot_s,
         reference_of(&spec),
     );
-    0
+    if valid { 0 } else { 1 }
 }
 
 fn cmd_coords(args: &[String]) -> i32 {
@@ -554,26 +554,33 @@ fn report(
     wall: f64,
     pot_s: f64,
     reference: f64,
-) {
-    let hit = anneal_core::energy_hits(outcome.best, reference, HIT_TOL);
+) -> bool {
+    let valid = outcome.best.is_finite() && outcome.best_state.is_some();
+    let hit = reference_hit(outcome.best, reference);
     let at_hit = outcome
         .improvements
         .iter()
-        .find(|(_, _, _, energy)| anneal_core::energy_hits(*energy, reference, HIT_TOL))
+        .find(|(_, _, _, energy)| reference_hit(*energy, reference))
         .map(|(_, spent, _, _)| *spent);
     let evals = evals_to_hit(hit, at_hit.or(hit.then_some(outcome.charged)), budget);
     let outside = (wall - pot_s).max(0.0);
     let calls = outcome.charged.max(1) as f64;
+    let status = if valid { "ok" } else { "failed" };
     println!(
-        "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s,pot_per_eval_s,outside_per_eval_s"
+        "system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s,pot_per_eval_s,outside_per_eval_s,status"
     );
     println!(
-        "{system},anneal,{seed},{budget},{hit},{evals},{},{wall:.6},{:.8},{pot_s:.6},{outside:.6},{:.9},{:.9}",
+        "{system},anneal,{seed},{budget},{hit},{evals},{},{wall:.6},{:.8},{pot_s:.6},{outside:.6},{:.9},{:.9},{status}",
         outcome.charged,
         outcome.best,
         pot_s / calls,
         outside / calls,
     );
+    valid
+}
+
+fn reference_hit(energy: f64, reference: f64) -> bool {
+    anneal_core::target_tol::energy_matches_reference(energy, reference, HIT_TOL)
 }
 
 fn evals_to_hit(hit: bool, calls_at_hit: Option<usize>, budget: usize) -> usize {
@@ -616,7 +623,7 @@ fn read_coords(path: &str) -> std::io::Result<Array1<f64>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{evals_to_hit, system_spec};
+    use super::{evals_to_hit, reference_hit, system_spec};
     use anneal_core::methods::cluster_hopping::Config;
     use anneal_core::potentials::Gupta;
 
@@ -653,6 +660,14 @@ mod tests {
         assert_eq!((pt34.n, pt34.budget), (34, 400_000));
         assert!(system_spec("cu").is_none());
         assert!(system_spec("ptcu").is_none());
+    }
+
+    #[test]
+    fn hits_require_a_finite_energy_at_the_reference() {
+        let reference = system_spec("au38").unwrap().reference;
+        assert!(!reference_hit(f64::INFINITY, reference));
+        assert!(!reference_hit(-130.320_1, reference));
+        assert!(reference_hit(reference, reference));
     }
 
     #[test]
