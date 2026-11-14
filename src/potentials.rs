@@ -196,22 +196,22 @@ impl PairPotential {
         let n = self.n_points;
         let mut e = 0.0;
         let mut g = Array1::zeros(x.len());
-        if let Some(coordinates) = x.as_slice() {
-            if coordinates.len() == 3 * n {
-                let mut energy = 0.0;
-                let mut gradient = vec![0.0; 3 * n];
-                // The slice is exactly 3n coordinates. The kernel writes one
-                // energy and 3n force slots.
-                match self.kind {
-                    PairKind::LennardJones => {
-                        rgpot_pair::cluster_lj(coordinates, &mut energy, &mut gradient);
-                    }
-                    PairKind::Morse { rho } => {
-                        rgpot_pair::cambridge_morse(coordinates, rho, &mut energy, &mut gradient);
-                    }
+        if let Some(coordinates) = x.as_slice()
+            && coordinates.len() == 3 * n
+        {
+            let mut energy = 0.0;
+            let mut gradient = vec![0.0; 3 * n];
+            // The slice is exactly 3n coordinates. The kernel writes one
+            // energy and 3n force slots.
+            match self.kind {
+                PairKind::LennardJones => {
+                    rgpot_pair::cluster_lj(coordinates, &mut energy, &mut gradient);
                 }
-                return (energy, Array1::from_vec(gradient));
+                PairKind::Morse { rho } => {
+                    rgpot_pair::cambridge_morse(coordinates, rho, &mut energy, &mut gradient);
+                }
             }
+            return (energy, Array1::from_vec(gradient));
         }
         for i in 0..n {
             for j in (i + 1)..n {

@@ -519,11 +519,12 @@ impl Tric {
         // Bonds and angles alone lose the umbrella of a centre with three
         // neighbours as it flattens; an improper torsion keeps it.
         for j in 0..n {
-            if let [i, k, l, ..] = neighbours[j][..] {
-                if cos_angle(&x, i, k, j) > LINEAR_COS && cos_angle(&x, k, j, l) > LINEAR_COS {
-                    primitives.push(Primitive::Dihedral(i, k, j, l));
-                    stiffness.push(0.045 * HARTREE_EV);
-                }
+            if let [i, k, l, ..] = neighbours[j][..]
+                && cos_angle(&x, i, k, j) > LINEAR_COS
+                && cos_angle(&x, k, j, l) > LINEAR_COS
+            {
+                primitives.push(Primitive::Dihedral(i, k, j, l));
+                stiffness.push(0.045 * HARTREE_EV);
             }
         }
         let mut label = vec![usize::MAX; n];

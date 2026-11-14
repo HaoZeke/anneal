@@ -121,7 +121,6 @@ tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 
 [build-dependencies]
-cbindgen = "0.29"
 cc = "1"
 
 [package.metadata.capi]

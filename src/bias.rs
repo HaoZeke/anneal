@@ -1078,7 +1078,7 @@ fn same_bits(bits: &[u64], x: ArrayView1<f64>) -> bool {
 
 /// The single atom whose three coordinates differ, when every other atom matches.
 fn moved_atom(bits: &[u64], x: ArrayView1<f64>) -> Option<usize> {
-    if bits.len() != x.len() || x.len() % 3 != 0 {
+    if bits.len() != x.len() || !x.len().is_multiple_of(3) {
         return None;
     }
     let n = x.len() / 3;
