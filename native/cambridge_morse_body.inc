@@ -22,7 +22,7 @@
       double r;
       double a;
       double coef;
-      if (!(r2 > 0.0)) {
+      if (r2 <= 0.0) {
         continue;
       }
       r = sqrt(r2);

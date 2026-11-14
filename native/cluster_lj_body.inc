@@ -19,7 +19,7 @@
       double inv6;
       double inv12;
       double coef;
-      if (!(r2 > 0.0)) {
+      if (r2 <= 0.0) {
         continue;
       }
       inv2 = 1.0 / r2;
