@@ -43,7 +43,7 @@ pub struct rgpot_abi_stamp_t {
 /// ABI major of this build.
 pub const RGPOT_ABI_VERSION_MAJOR: u16 = 1;
 /// ABI minor of this build.
-pub const RGPOT_ABI_VERSION_MINOR: u16 = 1;
+pub const RGPOT_ABI_VERSION_MINOR: u16 = 2;
 /// Layout revision of this build.
 pub const RGPOT_ABI_LAYOUT_REVISION: u16 = 1;
 
@@ -249,8 +249,22 @@ mod tests {
             "rgpot_version_patch(void)",
             "rgpot_abi_stamp(void)",
             "rgpot_abi_compatible(const struct rgpot_abi_stamp_t *stamp)",
+            "rgpot_potential_hvp(const struct rgpot_potential_t *pot,",
+            "rgpot_potential_hvp_centre(const struct rgpot_potential_t *pot,",
+            "rgpot_potential_set_hvp_callback(const struct rgpot_potential_t *pot,",
+            "rgpot_potential_hvp_invalidate(const struct rgpot_potential_t *pot)",
+            "rgpot_potential_hvp_counts(const struct rgpot_potential_t *pot,",
+            "rgpot_potential_reset_hvp_counts(const struct rgpot_potential_t *pot)",
+            "(*HessianVectorCallback)(void *user_data,",
+            "typedef enum rgpot_hvp_scheme_t {",
+            "typedef struct rgpot_hvp_counts_t {",
         ] {
             assert!(header.contains(f), "rgpot.h lacks {f}");
         }
+        let default_step = format!(
+            "#define RGPOT_HVP_DEFAULT_STEP {:.1e}",
+            crate::hvp::RGPOT_HVP_DEFAULT_STEP
+        );
+        assert!(header.contains(&default_step), "rgpot.h lacks {default_step}");
     }
 }

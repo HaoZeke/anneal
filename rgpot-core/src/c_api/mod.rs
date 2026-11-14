@@ -23,11 +23,14 @@
 //! - [`potential`] — Lifecycle functions for
 //!   [`rgpot_potential_t`](crate::potential::rgpot_potential_t): create,
 //!   calculate, free.
+//! - [`hvp`] — Hessian-vector products of a potential handle: the product,
+//!   the cached centre, the analytic callback and the counters.
 //! - [`rpc`] — RPC client functions (feature-gated on `rpc`): connect,
 //!   calculate, disconnect.
 
 pub mod types;
 pub mod potential;
+pub mod hvp;
 
 #[cfg(feature = "rpc")]
 pub mod rpc;

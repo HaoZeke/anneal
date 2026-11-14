@@ -29,6 +29,11 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
 /* [[[end]]] */
 
 /**
+ * Displacement length used when a caller passes a step of 0.
+ */
+#define RGPOT_HVP_DEFAULT_STEP 1.0e-3
+
+/**
  * ABI major of this build.
  */
 #define RGPOT_ABI_VERSION_MAJOR 1
@@ -36,7 +41,7 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
 /**
  * ABI minor of this build.
  */
-#define RGPOT_ABI_VERSION_MINOR 1
+#define RGPOT_ABI_VERSION_MINOR 2
 
 /**
  * Layout revision of this build.
@@ -52,6 +57,28 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
  * Additive protocol revision.
  */
 #define PROTOCOL_MINOR 0
+
+/**
+ * How a Hessian-vector product is computed.
+ */
+typedef enum rgpot_hvp_scheme_t {
+  /**
+   * The analytic callback when one is registered, otherwise forward.
+   */
+  RGPOT_HVP_AUTO = 0,
+  /**
+   * One displaced force call against the cached centre forces.
+   */
+  RGPOT_HVP_FORWARD = 1,
+  /**
+   * Two displaced force calls, one on each side of the centre.
+   */
+  RGPOT_HVP_CENTRAL = 2,
+  /**
+   * The registered callback. Refused when none is registered.
+   */
+  RGPOT_HVP_ANALYTIC = 3,
+} rgpot_hvp_scheme_t;
 
 /**
  * Status codes returned by all C API functions.
@@ -201,7 +228,7 @@ typedef struct rgpot_potential_t {
   int32_t *atomic_numbers;
   /**
    * Box matrix copied at construction. Nine doubles, lattice vectors as
-   * rows: ax ay az bx by bz cx cy cz. Same layout as ForceInput.box.
+   * rows: ax ay az bx by bz cx cy cz. Same layout as `ForceInput.box`.
    */
   double box_matrix[9];
   /**
@@ -222,6 +249,28 @@ typedef struct rgpot_eval_counts_t {
   uint64_t computed;
   uint64_t served;
 } rgpot_eval_counts_t;
+
+/**
+ * Work done by the Hessian-vector entry points of one handle.
+ */
+typedef struct rgpot_hvp_counts_t {
+  /**
+   * Products answered, a zero direction's zero product included.
+   */
+  uint64_t products;
+  /**
+   * Force callback invocations made for products and centres.
+   */
+  uint64_t force_calls;
+  /**
+   * Requests answered from the cached centre without a force call.
+   */
+  uint64_t centre_reused;
+  /**
+   * Products answered by the analytic callback.
+   */
+  uint64_t analytic;
+} rgpot_hvp_counts_t;
 
 #if (defined(RGPOT_HAS_RPC) && defined(RGPOT_HAS_RPC))
 /**
@@ -250,6 +299,20 @@ typedef struct rgpot_abi_stamp_t {
    */
   uint16_t layout_revision;
 } rgpot_abi_stamp_t;
+
+/**
+ * Analytic Hessian-vector product of a potential.
+ *
+ * The callback receives the `user_data` of the potential handle, the
+ * geometry, a direction of `3 * n_atoms` doubles and room for as many
+ * doubles of output. It writes `H direction` to `hv_out` and returns
+ * `RGPOT_SUCCESS`, or an error status code. `direction` and `hv_out` do
+ * not overlap.
+ */
+typedef enum rgpot_status_t (*HessianVectorCallback)(void *user_data,
+                                                     const struct rgpot_force_input_t *input,
+                                                     const double *direction,
+                                                     double *hv_out);
 
 /**
  * Create a non-owning 2-D f64 tensor on CPU wrapping an existing buffer.
@@ -558,6 +621,119 @@ enum rgpot_status_t rgpot_potential_calculate(const struct rgpot_potential_t *po
  * that has not been freed yet. The pointer is invalid after the call.
  */
 void rgpot_potential_free(struct rgpot_potential_t *pot);
+
+/**
+ * Register `callback` as the analytic Hessian-vector product of `pot`, or
+ * clear it with NULL.
+ *
+ * The callback receives the `user_data` the handle was created with, so a
+ * potential object supplies its forces and its Hessian through one
+ * pointer. With a callback registered, `RGPOT_HVP_AUTO` products call it
+ * and make no force call.
+ *
+ * # Safety
+ *
+ * `pot` must be NULL or a live handle. A NULL `pot` returns
+ * `RGPOT_INVALID_PARAMETER`. `callback` must be safe to call with the
+ * handle's `user_data` for as long as it stays registered.
+ */
+enum rgpot_status_t rgpot_potential_set_hvp_callback(const struct rgpot_potential_t *pot,
+                                                     enum rgpot_status_t (*callback)(void *user_data,
+                                                                                     const struct rgpot_force_input_t *input,
+                                                                                     const double *direction,
+                                                                                     double *hv_out));
+
+/**
+ * Write the Hessian-vector product `H direction` at the geometry of
+ * `input` to `hv_out`.
+ *
+ * `H` is the Hessian of the energy with respect to the `3 * n_atoms`
+ * positions. `direction` and `hv_out` hold `3 * n_atoms` doubles laid out
+ * like the positions and must not overlap. `scheme` is a
+ * `rgpot_hvp_scheme_t` value:
+ *
+ * - `RGPOT_HVP_AUTO`: the analytic callback when one is registered,
+ *   otherwise `RGPOT_HVP_FORWARD`.
+ * - `RGPOT_HVP_FORWARD`: `(F(x) - F(x + h u)) |v| / h` with `u = v / |v|`.
+ *   `F(x)` comes from the handle's cached centre when the positions,
+ *   atomic numbers and cell carry the same bits as the last centre, so
+ *   `k` products at one geometry make `k + 1` force calls. Error `O(h)`.
+ * - `RGPOT_HVP_CENTRAL`: `(F(x - h u) - F(x + h u)) |v| / (2 h)`, two
+ *   force calls, error `O(h^2)`.
+ * - `RGPOT_HVP_ANALYTIC`: the registered callback; `RGPOT_INVALID_PARAMETER`
+ *   when none is registered.
+ *
+ * `step` is `h`, a length in the units of the positions; 0 selects
+ * `RGPOT_HVP_DEFAULT_STEP`. A zero direction writes zeros without a call.
+ * A failing force callback's status is returned with its own
+ * `rgpot_last_error` message.
+ *
+ * # Safety
+ *
+ * NULL pointers, an unknown scheme, a non-positive step and overlapping
+ * buffers return `RGPOT_INVALID_PARAMETER`. Otherwise `pot` must be a live
+ * handle, `input` must point to a valid `rgpot_force_input_t` whose tensors
+ * stay alive for the call, and `direction` and `hv_out` must point to
+ * `3 * n_atoms` readable and writable doubles.
+ */
+enum rgpot_status_t rgpot_potential_hvp(const struct rgpot_potential_t *pot,
+                                        const struct rgpot_force_input_t *input,
+                                        const double *direction,
+                                        double step,
+                                        int32_t scheme,
+                                        double *hv_out);
+
+/**
+ * Energy and forces at the geometry of `input`, from the cached centre of
+ * `pot` when it matches, otherwise from one force call that becomes the
+ * cached centre.
+ *
+ * `output->forces` is set to a new owning `[n_atoms, 3]` tensor; free it
+ * with `rgpot_tensor_free`. A search that needs the centre forces calls
+ * this instead of `rgpot_potential_calculate`, so the forward products at
+ * that centre share the evaluation.
+ *
+ * # Safety
+ *
+ * A NULL `pot`, `input` or `output` returns `RGPOT_INVALID_PARAMETER`.
+ * Otherwise the pointers follow `rgpot_potential_calculate`.
+ */
+enum rgpot_status_t rgpot_potential_hvp_centre(const struct rgpot_potential_t *pot,
+                                               const struct rgpot_force_input_t *input,
+                                               struct rgpot_force_out_t *output);
+
+/**
+ * Drop the cached centre of `pot`.
+ *
+ * A centre is keyed on positions, atomic numbers and cell, not on the
+ * state behind the callback's `user_data`. Call this after changing that
+ * state at a fixed geometry. NULL is a no-op.
+ *
+ * # Safety
+ *
+ * `pot` must be NULL or a live handle.
+ */
+void rgpot_potential_hvp_invalidate(const struct rgpot_potential_t *pot);
+
+/**
+ * Read the Hessian-vector counters of `pot` into `out`.
+ *
+ * # Safety
+ *
+ * `pot` must be NULL or a live handle, and `out` NULL or writable. NULL
+ * for either returns `RGPOT_INVALID_PARAMETER`.
+ */
+enum rgpot_status_t rgpot_potential_hvp_counts(const struct rgpot_potential_t *pot,
+                                               struct rgpot_hvp_counts_t *out);
+
+/**
+ * Zero the Hessian-vector counters of `pot`. The cached centre stays.
+ *
+ * # Safety
+ *
+ * `pot` must be NULL or a live handle. NULL is a no-op.
+ */
+void rgpot_potential_reset_hvp_counts(const struct rgpot_potential_t *pot);
 
 #if (defined(RGPOT_HAS_RPC) && defined(RGPOT_HAS_RPC))
 /**

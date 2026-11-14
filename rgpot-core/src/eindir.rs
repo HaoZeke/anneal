@@ -23,6 +23,7 @@ use std::sync::Mutex;
 
 use dlpk::sys::DLManagedTensorVersioned;
 
+use crate::hvp::HvpState;
 use crate::potential::PotentialCallback;
 use crate::status::{rgpot_status_t, set_last_error};
 use crate::tensor::{
@@ -113,6 +114,11 @@ impl rgpot_potential_t {
     pub(crate) fn fused_cache_peer_refusal(&self) -> Option<String> {
         self.fused_cache.peer_refusal()
     }
+
+    /// Hessian-vector state: the analytic callback and the cached centre.
+    pub(crate) fn hvp_state(&self) -> &HvpState {
+        &self.fused_cache.hvp
+    }
 }
 
 /// Opaque cache of the last fused energy and gradient evaluation.
@@ -123,6 +129,9 @@ pub struct rgpot_fused_cache_t {
     /// Why the peer behind this handle was refused, once capabilities were
     /// installed and found incompatible. Evaluations fail while it is set.
     peer_refusal: Mutex<Option<String>>,
+    /// Lives here, behind the pointer, so `rgpot_potential_t` keeps its C
+    /// layout.
+    hvp: HvpState,
 }
 
 impl rgpot_fused_cache_t {
@@ -132,6 +141,7 @@ impl rgpot_fused_cache_t {
             computed: AtomicU64::new(0),
             served: AtomicU64::new(0),
             peer_refusal: Mutex::new(None),
+            hvp: HvpState::default(),
         }
     }
 
@@ -152,6 +162,7 @@ impl rgpot_fused_cache_t {
             .last
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        self.hvp.invalidate();
     }
 }
 
@@ -288,7 +299,7 @@ fn reject(msg: &str) -> eindir_status_t {
 /// Forces returned by a callback that reported success: shape, dtype and
 /// finiteness are checked before any element is read, and the energy must be
 /// finite.
-fn validated_result(output: &rgpot_force_out_t, n: usize) -> Result<Vec<f64>, String> {
+pub(crate) fn validated_result(output: &rgpot_force_out_t, n: usize) -> Result<Vec<f64>, String> {
     let forces = copy_f64_tensor(output.forces, "callback forces", n, true)?;
     if !output.energy.is_finite() {
         return Err("callback energy is not finite".into());

@@ -330,6 +330,25 @@ pub(crate) fn checked_f64_data(
     label: &str,
     expected_len: usize,
 ) -> Result<*mut f64, String> {
+    checked_data::<f64>(tensor, label, expected_len, dtype_f64(), "f64")
+}
+
+/// [`checked_f64_data`] for an i32 tensor.
+pub(crate) fn checked_i32_data(
+    tensor: *const DLManagedTensorVersioned,
+    label: &str,
+    expected_len: usize,
+) -> Result<*mut i32, String> {
+    checked_data::<i32>(tensor, label, expected_len, dtype_i32(), "i32")
+}
+
+fn checked_data<T>(
+    tensor: *const DLManagedTensorVersioned,
+    label: &str,
+    expected_len: usize,
+    dtype: DLDataType,
+    dtype_name: &str,
+) -> Result<*mut T, String> {
     if tensor.is_null() {
         return Err(format!("{label}: tensor is NULL"));
     }
@@ -337,8 +356,8 @@ pub(crate) fn checked_f64_data(
     if t.data.is_null() {
         return Err(format!("{label}: data pointer is NULL"));
     }
-    if t.dtype != dtype_f64() {
-        return Err(format!("{label}: expected f64, got {:?}", t.dtype));
+    if t.dtype != dtype {
+        return Err(format!("{label}: expected {dtype_name}, got {:?}", t.dtype));
     }
     if t.device.device_type != DLDeviceType::kDLCPU {
         return Err(format!("{label}: expected a CPU tensor"));
@@ -379,11 +398,22 @@ pub(crate) fn checked_f64_data(
     if t.byte_offset > isize::MAX as u64 {
         return Err(format!("{label}: byte_offset out of range"));
     }
-    let ptr = unsafe { base.add(t.byte_offset as usize) }.cast::<f64>();
-    if (ptr as usize) % std::mem::align_of::<f64>() != 0 {
-        return Err(format!("{label}: data is not 8-byte aligned"));
+    let ptr = unsafe { base.add(t.byte_offset as usize) }.cast::<T>();
+    let align = std::mem::align_of::<T>();
+    if (ptr as usize) % align != 0 {
+        return Err(format!("{label}: data is not {align}-byte aligned"));
     }
     Ok(ptr)
+}
+
+/// Copy a validated i32 tensor into a `Vec`; see [`checked_f64_data`].
+pub(crate) fn copy_i32_tensor(
+    tensor: *const DLManagedTensorVersioned,
+    label: &str,
+    expected_len: usize,
+) -> Result<Vec<i32>, String> {
+    let ptr = checked_i32_data(tensor, label, expected_len)?;
+    Ok(unsafe { std::slice::from_raw_parts(ptr, expected_len) }.to_vec())
 }
 
 /// Copy a validated f64 tensor into a `Vec`; see [`checked_f64_data`].

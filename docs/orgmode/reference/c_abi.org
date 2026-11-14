@@ -300,6 +300,12 @@ The coverage check fails when one of them disappears from this book.
   =rgpot_potential_free= and =rgpot_potential_free_eindir= release it.
   Do not call both on one pointer.
 - =rgpot_potential_calculate= :: one energy and force evaluation.
+- =rgpot_potential_hvp=, =rgpot_potential_hvp_centre= :: a Hessian-vector
+  product and the centre forces it reuses.
+- =rgpot_potential_set_hvp_callback= :: register or clear an analytic product.
+- =rgpot_potential_hvp_invalidate=, =rgpot_potential_hvp_counts=,
+  =rgpot_potential_reset_hvp_counts= :: drop the centre, read and zero the
+  counters.
 - =rgpot_rpc_client_new=, =rgpot_rpc_calculate=, =rgpot_rpc_client_free=,
   =rgpot_rpc_server_start= :: the Cap'n Proto client and the blocking server.
   They are compiled only when the library was built with RPC.
