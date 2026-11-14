@@ -350,7 +350,10 @@ mod tests {
     /// geometry as a finite energy.
     #[test]
     fn a_nan_coordinate_gives_a_nan_energy() {
-        for potential in [PairPotential::lennard_jones(3), PairPotential::morse(3, 6.0)] {
+        for potential in [
+            PairPotential::lennard_jones(3),
+            PairPotential::morse(3, 6.0),
+        ] {
             let mut x = Array1::from(vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0]);
             x[4] = f64::NAN;
             let (energy, gradient) = potential.value_and_gradient(x.view());

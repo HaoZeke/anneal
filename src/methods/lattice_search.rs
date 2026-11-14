@@ -1662,7 +1662,16 @@ impl Lattice {
             self.boltzmann_offers(x, &vacant, well, temperature, &movable, k)?;
         let sum: f64 = weights.iter().sum();
         let charge = 1.0 + ((m * n) + (k * m)) as f64 / pairs;
-        exchange_cache_store(self, x, temperature, charge, &offers, &weights, sum, &vacant);
+        exchange_cache_store(
+            self,
+            x,
+            temperature,
+            charge,
+            &offers,
+            &weights,
+            sum,
+            &vacant,
+        );
         draw_exchange(x, &offers, &weights, sum, &vacant, rng)
     }
 
@@ -2584,7 +2593,13 @@ mod tests {
         for n in [16usize, 40, 70, 90] {
             let radius = 1.1 * (n as f64).cbrt();
             let atoms: Vec<[f64; 3]> = (0..n)
-                .map(|_| [2.0 * radius * next(), 2.0 * radius * next(), 2.0 * radius * next()])
+                .map(|_| {
+                    [
+                        2.0 * radius * next(),
+                        2.0 * radius * next(),
+                        2.0 * radius * next(),
+                    ]
+                })
                 .collect();
             let cut2 = 1.6 * 1.6;
             let lists = neighbours_within(&atoms, cut2);
@@ -2621,7 +2636,10 @@ mod tests {
         for n in [1usize, 2, 17, 79, 80] {
             let values: Vec<f64> = (0..n).map(|_| next()).collect();
             for value in &values {
-                assert_eq!(energy_from_key(total_key(*value)).to_bits(), value.to_bits());
+                assert_eq!(
+                    energy_from_key(total_key(*value)).to_bits(),
+                    value.to_bits()
+                );
             }
             let mut stable = values.clone();
             stable.sort_by(|a, b| a.total_cmp(b));
@@ -2643,9 +2661,7 @@ mod tests {
             let scale = kind.r_min() / well.max(1e-6);
             let mut bits = 0x1234_5678_9ABCu64;
             for _ in 0..64 {
-                bits = bits
-                    .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-                    .wrapping_add(1);
+                bits = bits.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(1);
                 let r2 = (bits >> 11) as f64 / ((1u64 << 53) as f64) * 3.0 + 0.25;
                 let per_pair = {
                     let scale_i = kind.r_min() / well.max(1e-6);

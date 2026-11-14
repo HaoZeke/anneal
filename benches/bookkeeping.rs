@@ -27,7 +27,11 @@ fn cluster(n: usize, salt: u64) -> Array1<f64> {
         (s >> 11) as f64 / ((1u64 << 53) as f64) - 0.5
     };
     let radius = 1.15 * (n as f64).cbrt();
-    Array1::from((0..3 * n).map(|_| 2.0 * radius * next()).collect::<Vec<_>>())
+    Array1::from(
+        (0..3 * n)
+            .map(|_| 2.0 * radius * next())
+            .collect::<Vec<_>>(),
+    )
 }
 
 fn kernels(c: &mut Criterion) {
