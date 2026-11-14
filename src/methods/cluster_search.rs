@@ -454,8 +454,8 @@ impl<'a> CallWall<'a> {
     ///
     /// The potential is not asked to converge a charge on a bare atom.
     /// A reactive library breaks bonds on purpose, so it is not refused
-    /// here. No finite stand-in is returned: that is what the line search
-    /// zooms on. A call that was made and failed is closed by
+    /// here. The refused step backs off toward the last finite geometry. A
+    /// call that was made and failed is closed by
     /// [`charge_rejecting_repeat_failure`].
     fn lost_a_bond(&self, point: ArrayView1<f64>) -> bool {
         match self {
@@ -521,13 +521,14 @@ where
         return overlap_rejection_step(point, anchor.as_ref(), wall)
             .map(|(energy, gradient)| (energy, gradient, false));
     }
-    // A broken monomer is not a call. A finite stand-in here is what makes
-    // the line search zoom, which is the failure the stall already refuses
-    // to retry. Returning no step leaves that closer as the only one, and
-    // it applies when a call was actually made.
+    // A broken monomer is not a call. The step backs off toward the last
+    // finite geometry and the descent goes on: returning no step would end
+    // it at its start whenever the first trial step stretches a bond. The
+    // stall closes a repeated geometry only when a call was actually made.
     if refuse_overlap && wall.lost_a_bond(point) {
         stats.overlap_rejected += 1;
-        return None;
+        return failed_step(point, anchor.as_ref())
+            .map(|(energy, gradient)| (energy, gradient, false));
     }
     if !led.charge() {
         return None;
@@ -2331,6 +2332,55 @@ mod tests {
     use super::*;
     use crate::potentials::PairPotential;
     use ndarray::Array1;
+
+    #[test]
+    fn a_lost_bond_backs_off_toward_the_last_call_without_charging() {
+        let species = [8u32, 1, 1];
+        let groups = vec![vec![0usize, 1, 2]];
+        let wall = CallWall::Covalent {
+            species: &species,
+            groups: &groups,
+            reactive: false,
+        };
+        let objective = PairPotential::lennard_jones(3);
+        let bonded = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0]);
+        let mut stretched = bonded.clone();
+        stretched[3] = 1.84;
+        let mut led = Ledger::new(10);
+        let mut stats = RelaxStats::default();
+
+        let mut anchor = Some(bonded.clone());
+        let (energy, gradient, called) = charge_or_refuse_overlap(
+            &objective,
+            &mut led,
+            &mut stats,
+            stretched.view(),
+            &mut anchor,
+            true,
+            wall,
+        )
+        .expect("a refused step with a finite anchor backs off");
+        assert!(!called);
+        assert_eq!(energy, FAILED_STEP_ENERGY);
+        assert!(gradient.dot(&(&stretched - &bonded)) > 0.0);
+        assert_eq!(led.spent(), 0);
+
+        let mut no_anchor = None;
+        assert!(
+            charge_or_refuse_overlap(
+                &objective,
+                &mut led,
+                &mut stats,
+                stretched.view(),
+                &mut no_anchor,
+                true,
+                wall,
+            )
+            .is_none()
+        );
+        assert_eq!(led.spent(), 0);
+        assert_eq!(stats.overlap_rejected, 2);
+    }
 
     #[test]
     fn a_molecular_polish_reserves_at_most_a_quarter_and_a_free_search_reserves_none() {
