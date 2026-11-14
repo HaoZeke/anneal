@@ -170,7 +170,7 @@ impl QuenchPredictor {
             let d = self.energies[k] - self.energies[k + 1];
             if d > 0.0 {
                 ks.push(k as f64);
-                ls.push(d.ln());
+                ls.push(libm::log(d));
             }
         }
         if ks.len() < 3 {
@@ -194,7 +194,7 @@ impl QuenchPredictor {
         if !(slope < 0.0) {
             return None;
         }
-        let ratio = slope.exp();
+        let ratio = libm::exp(slope);
         if !(ratio < 1.0) {
             return None;
         }
@@ -214,7 +214,7 @@ impl QuenchPredictor {
         // last observed step rather than the observed one, so a single noisy
         // step does not set the whole extrapolation.
         let last_k = (n - 2) as f64;
-        let d_fit = (intercept + slope * last_k).exp();
+        let d_fit = libm::exp(intercept + slope * last_k);
         let tail = d_fit * ratio / (1.0 - ratio);
         let current = self.energies[n - 1];
         let limit = current - tail;

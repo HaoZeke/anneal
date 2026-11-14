@@ -1792,7 +1792,7 @@ impl Lattice {
             .fold(f64::INFINITY, |lo, offer| lo.min(offer.0));
         let weights: Vec<f64> = offers
             .iter()
-            .map(|offer| (-(offer.0 - best) / temp).exp())
+            .map(|offer| libm::exp(-(offer.0 - best) / temp))
             .collect();
         let sum: f64 = weights.iter().sum();
         if !(sum > 0.0) {

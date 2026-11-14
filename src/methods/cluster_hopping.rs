@@ -30,6 +30,41 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
+/// Host `sin`/`exp` are glibc on one runner and libSystem on another, and
+/// they are not the same function. A seeded walk that calls them starts
+/// from a different geometry and accepts a different trial. The `libm`
+/// crate is one implementation on every target, so a seed names one
+/// trajectory.
+#[inline]
+pub(crate) fn portable_exp(x: f64) -> f64 {
+    libm::exp(x)
+}
+
+#[inline]
+pub(crate) fn portable_ln(x: f64) -> f64 {
+    libm::log(x)
+}
+
+#[inline]
+pub(crate) fn portable_sin(x: f64) -> f64 {
+    libm::sin(x)
+}
+
+#[inline]
+pub(crate) fn portable_cos(x: f64) -> f64 {
+    libm::cos(x)
+}
+
+#[inline]
+pub(crate) fn portable_sqrt(x: f64) -> f64 {
+    libm::sqrt(x)
+}
+
+#[inline]
+pub(crate) fn portable_cbrt(x: f64) -> f64 {
+    libm::cbrt(x)
+}
+
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
 use crate::bias::{
     AdaptiveHeight, BasinBias, BasinIndex, Bias, Fingerprint, SiteEnergies, SortedPairs,
@@ -1229,6 +1264,30 @@ pub(crate) fn contain(x: &mut Array1<f64>, n: usize, radius: f64) {
     }
 }
 
+/// Pulls each covalent fragment whose centroid has left the container back
+/// until the centroid sits on its surface. Bond lengths are unchanged.
+///
+/// [`contain`] scales every far atom onto the sphere, which shortens the bonds
+/// of anything that spans more than the sphere. A flexible molecule can, so
+/// under the molecular move library with species known the wall acts on
+/// whole fragments instead: a molecule
+/// centred on the origin is left alone, and a fragment that drifted off is
+/// translated back rigidly.
+pub(crate) fn contain_fragments(x: &mut Array1<f64>, species: &[u32], tolerance: f64, radius: f64) {
+    for fragment in connectivity_groups_z(x.view(), species, tolerance) {
+        let c = moves::group_centroid(x.view(), &fragment);
+        let r = (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt();
+        if r > radius && r > 0.0 {
+            let shift = 1.0 - radius / r;
+            for &a in &fragment {
+                for k in 0..3 {
+                    x[3 * a + k] -= c[k] * shift;
+                }
+            }
+        }
+    }
+}
+
 /// Moves every connected part of `x` out of `reach` of the largest part
 /// back to `bond` from it.
 ///
@@ -1285,6 +1344,11 @@ pub(crate) fn gather_into_reach(x: &mut Array1<f64>, n: usize, reach: f64, bond:
 /// The pair's measured reach when there is one, so a ranged potential sets
 /// its own bound, and the container sphere otherwise.
 fn contain_trial(cfg: &Config, x: &mut Array1<f64>, n: usize) {
+    let molecular = matches!(cfg.move_library, MoveLibrary::Molecular { .. });
+    if let Some(z) = cfg.species.as_deref().filter(|z| molecular && z.len() == n) {
+        contain_fragments(x, z, cfg.bond_tolerance, cfg.container);
+        return;
+    }
     match cfg.pair_range {
         Some(range) => {
             gather_into_reach(x, n, range.reach, range.bond);
@@ -1734,6 +1798,8 @@ pub(crate) fn separate_contacts(
                     let push = 0.5 * (target - distance) / distance;
                     (delta, push)
                 };
+                let left = owner.as_ref().map(|owner| owner[a]).unwrap_or(usize::MAX);
+                let right = owner.as_ref().map(|owner| owner[b]).unwrap_or(usize::MAX);
                 let left_held = side_held(a, left);
                 let right_held = side_held(b, right);
                 if left_held && right_held {
@@ -2240,6 +2306,37 @@ where
         None,
         Some(checkpoint_interval),
         checkpoint,
+        rng,
+    )
+}
+
+/// As [`run_with_gradient`], reporting every certified quench and every
+/// adoption to a minimum history.
+///
+/// [`run_with_history_at_checkpoints`] without the observations, for a
+/// chain whose only channel to its peers is the history itself.
+pub fn run_with_history<'g, R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    history: Option<&mut dyn HistoryHook>,
+    rng: &mut R,
+) -> Result<Outcome, SearchError> {
+    let mut checkpoint = continue_without_checkpoint;
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        None,
+        None,
+        None,
+        history,
+        None,
+        &mut checkpoint,
         rng,
     )
 }
@@ -5265,7 +5362,7 @@ where
                     let v_there = bias.potential(bias.cv(proposal_state.view()).view());
                     let d = ((proposal_energy + v_there) - (from_energy + v_here))
                         / cfg.temperature.max(1e-12);
-                    d <= 0.0 || rng.random::<f64>() < (-d).exp()
+                    d <= 0.0 || rng.random::<f64>() < portable_exp(-d)
                 } else {
                     true
                 };
@@ -6273,7 +6370,7 @@ where
             let mut gauss = || {
                 let u1: f64 = rng.random::<f64>().max(1e-12);
                 let u2: f64 = rng.random::<f64>();
-                (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+                portable_sqrt(-2.0 * portable_ln(u1)) * portable_cos(std::f64::consts::TAU * u2)
             };
             let iso = (1.0 - gamma).sqrt() * sigma0;
             for i in 0..dim {
@@ -6300,7 +6397,7 @@ where
                 let z = {
                     let u1: f64 = rng.random::<f64>().max(1e-12);
                     let u2: f64 = rng.random::<f64>();
-                    (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+                    portable_sqrt(-2.0 * portable_ln(u1)) * portable_cos(std::f64::consts::TAU * u2)
                 };
                 let c = z * (cfg.temperature / lam.max(0.05)).sqrt() * escape;
                 for i in 0..t.len() {
@@ -6676,6 +6773,12 @@ where
             },
         );
         if ledger.stopped() {
+            // The caller already stopped. This screen paid for `e_screen`,
+            // and dropping it returns an older minimum above an energy the
+            // run computed.
+            if e_screen.is_finite() {
+                ledger.record(e_screen, x_screen.view());
+            }
             break HopStop::of_closed(ledger);
         }
         let entry_snapshot = if cfg.trail_on_stall {
@@ -6829,6 +6932,9 @@ where
             out
         };
         if ledger.stopped() {
+            if e_new.is_finite() {
+                ledger.record(e_new, x_new.view());
+            }
             break HopStop::of_closed(ledger);
         }
         if !quench_is_sane(cfg, e_new, x_new.view()) {
@@ -7143,7 +7249,7 @@ where
                 let a = if e_new <= e {
                     1.0
                 } else {
-                    (-(e_new - e) / temperature.max(1e-12)).exp()
+                    portable_exp(-(e_new - e) / temperature.max(1e-12))
                 };
                 sb.observe(from, identity.lookup(x_new.view()), a);
             }
@@ -7273,7 +7379,8 @@ where
                 // against, so the first sweep runs the rule it is replacing and
                 // its energies are what set the window.
                 None => {
-                    delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp()
+                    delta < 0.0
+                        || rng.random::<f64>() < portable_exp(-delta / temperature.max(1e-12))
                 }
             }
         } else {
@@ -7284,7 +7391,7 @@ where
                 .map(|b| b.delta(e, e_new, temperature))
                 .unwrap_or(0.0);
             let d = delta / temperature.max(1e-12) + eb;
-            d < 0.0 || rng.random::<f64>() < (-d).exp()
+            d < 0.0 || rng.random::<f64>() < portable_exp(-d)
         };
         let mut accept = accept;
         if cfg.move_library.is_rigid_body() && !unquenched {
@@ -7867,7 +7974,7 @@ where
                 hops += 1;
                 symmetrised += 1;
                 let d = (es - e) / temperature.max(1e-12);
-                if d < 0.0 || rng.random::<f64>() < (-d).exp() {
+                if d < 0.0 || rng.random::<f64>() < portable_exp(-d) {
                     if es < e {
                         symmetry_gain += e - es;
                     }
@@ -7927,7 +8034,7 @@ where
         }
         if let Some((es, xs, sym_gradient)) = orbit_offer {
             let d = (es - e) / temperature.max(1e-12);
-            if d < 0.0 || rng.random::<f64>() < (-d).exp() {
+            if d < 0.0 || rng.random::<f64>() < portable_exp(-d) {
                 if es < e {
                     orbit_gain += e - es;
                 }
@@ -8829,7 +8936,11 @@ where
                                     ej + vj_xj,
                                     ek + vj_xk,
                                 );
-                                if log_a >= 0.0 { 1.0 } else { log_a.exp() }
+                                if log_a >= 0.0 {
+                                    1.0
+                                } else {
+                                    portable_exp(log_a)
+                                }
                             })
                         };
                         for k in taken {
@@ -8883,7 +8994,11 @@ where
                             ej + vj_xj,
                             ek + vj_xk,
                         );
-                        let p = if log_a >= 0.0 { 1.0 } else { log_a.exp() };
+                        let p = if log_a >= 0.0 {
+                            1.0
+                        } else {
+                            portable_exp(log_a)
+                        };
                         if rng.random::<f64>() < p {
                             swaps_accepted += 1;
                             chains.swap(k, j);
@@ -9249,7 +9364,7 @@ pub fn random_cluster<R: Rng + ?Sized>(
     min_sep: f64,
     rng: &mut R,
 ) -> Array1<f64> {
-    let radius = (3.0 * n as f64 / (4.0 * std::f64::consts::PI * density)).cbrt();
+    let radius = portable_cbrt(3.0 * n as f64 / (4.0 * std::f64::consts::PI * density));
     random_cluster_in_radius(n, radius, min_sep, rng)
 }
 
@@ -9280,7 +9395,7 @@ pub fn repack_rigid_groups<R: Rng + ?Sized>(
         let th = rng.random::<f64>() * std::f64::consts::TAU;
         let ct = 2.0 * rng.random::<f64>() - 1.0;
         let st = (1.0 - ct * ct).sqrt();
-        let new_c = [r * st * th.cos(), r * st * th.sin(), r * ct];
+        let new_c = [r * st * portable_cos(th), r * st * portable_sin(th), r * ct];
         let n = atoms.len() as f64;
         let mut com = [0.0; 3];
         for &i in atoms {
@@ -9334,11 +9449,12 @@ pub fn random_cluster_in_radius<R: Rng + ?Sized>(
             // Box-Muller from two uniforms, avoiding a distribution dependency.
             let u1: f64 = rng.random::<f64>().max(1e-12);
             let u2: f64 = rng.random::<f64>();
-            v[k] = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+            v[k] = portable_sqrt(-2.0 * portable_ln(u1))
+                * portable_cos(2.0 * std::f64::consts::PI * u2);
             norm += v[k] * v[k];
         }
-        let norm = norm.sqrt().max(1e-12);
-        let r = radius * rng.random::<f64>().cbrt();
+        let norm = portable_sqrt(norm).max(1e-12);
+        let r = radius * portable_cbrt(rng.random::<f64>());
         let p = [v[0] / norm * r, v[1] / norm * r, v[2] / norm * r];
         if pts.iter().all(|q| {
             ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()
@@ -11310,6 +11426,56 @@ mod tests {
             let r = (0..3).map(|k| x[3 * i + k].powi(2)).sum::<f64>().sqrt();
             assert!(r <= 1.0 + 1e-9, "point {i} left the container at {r}");
         }
+    }
+
+    fn pair_distance(x: &Array1<f64>, i: usize, j: usize) -> f64 {
+        (0..3)
+            .map(|k| (x[3 * i + k] - x[3 * j + k]).powi(2))
+            .sum::<f64>()
+            .sqrt()
+    }
+
+    /// A six-carbon chain spans 7.5 Å, more than a 2 Å container. Scaling
+    /// atoms onto the sphere shortens its bonds; containing the fragment
+    /// leaves every bond where it was.
+    #[test]
+    fn fragment_containment_keeps_a_long_chain_intact() {
+        let n = 6usize;
+        let mut x = Array1::zeros(3 * n);
+        for i in 0..n {
+            x[3 * i] = 1.5 * i as f64;
+        }
+        recentre(&mut x, n);
+        let mut crushed = x.clone();
+        contain(&mut crushed, n, 2.0);
+        let crushed_bond = pair_distance(&crushed, 0, 1);
+        assert!(
+            (crushed_bond - 1.5).abs() > 0.2,
+            "per-atom containment left the end bond at {crushed_bond}"
+        );
+        let species = vec![6u32; n];
+        let mut kept = x.clone();
+        contain_fragments(&mut kept, &species, 1.25, 2.0);
+        assert_eq!(kept, x, "a centred molecule was moved");
+    }
+
+    /// A fragment that drifted off comes back as a rigid body with its
+    /// centroid on the sphere; the fragment at the centre is untouched.
+    #[test]
+    fn fragment_containment_returns_a_stray_fragment_rigidly() {
+        let species = vec![6u32, 6, 6, 6];
+        let mut x = Array1::from(vec![
+            -0.75, 0.0, 0.0, 0.75, 0.0, 0.0, 20.0, 0.0, 0.0, 21.5, 0.0, 0.0,
+        ]);
+        let stray_bond = pair_distance(&x, 2, 3);
+        contain_fragments(&mut x, &species, 1.25, 5.0);
+        assert!((pair_distance(&x, 2, 3) - stray_bond).abs() < 1e-12);
+        let centroid = (x[6] + x[9]) / 2.0;
+        assert!(
+            (centroid - 5.0).abs() < 1e-12,
+            "stray centroid at {centroid}"
+        );
+        assert_eq!((x[0], x[3]), (-0.75, 0.75));
     }
 
     #[test]

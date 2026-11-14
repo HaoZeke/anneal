@@ -71,7 +71,8 @@ fn centroid(x: ArrayView1<f64>, n: usize) -> [f64; 3] {
 
 /// Rotates `v` about a unit `axis` by `angle`, by Rodrigues' formula.
 fn rotate(v: [f64; 3], axis: [f64; 3], angle: f64) -> [f64; 3] {
-    let (s, co) = angle.sin_cos();
+    let s = libm::sin(angle);
+    let co = libm::cos(angle);
     let dot = v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2];
     let cross = [
         axis[1] * v[2] - axis[2] * v[1],
@@ -504,7 +505,8 @@ pub fn symmetrise(x: ArrayView1<f64>, n: usize, cand: &Candidate, pair_cutoff: f
 pub type Rot = [[f64; 3]; 3];
 
 fn rot_matrix(axis: [f64; 3], angle: f64) -> Rot {
-    let (s, c) = angle.sin_cos();
+    let s = libm::sin(angle);
+    let c = libm::cos(angle);
     let t = 1.0 - c;
     [
         [
@@ -1203,7 +1205,7 @@ pub fn shell_core_group(x: ArrayView1<f64>, n: usize, spec: &ShellCore) -> Optio
         let mut num = [0.0; 3];
         let mut den = 0.0;
         for a in 0..n {
-            let w = (-spec.decay * distance(point(x, a), c)).exp();
+            let w = libm::exp(-spec.decay * distance(point(x, a), c));
             for k in 0..3 {
                 num[k] += w * x[3 * a + k];
             }

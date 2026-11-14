@@ -78,6 +78,9 @@ fn a_shared_numeric_id_does_not_make_a_distinct_local_fallback_basin_known() {
         array![-2.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 4.0, 0.0],
     ];
     let mut cfg = Config::for_cluster(3);
+    // The later wells sit further apart than the Lennard-Jones neighbour
+    // shell. A free-atom refusal is about that shell, not about these basins.
+    cfg.neighbour_cutoff = 6.0;
     cfg.minima_hopping = true;
     cfg.replicas = 1;
     cfg.max_hops = Some(2);

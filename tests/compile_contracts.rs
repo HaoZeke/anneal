@@ -147,6 +147,7 @@ fn expect_compile_fail(facts: &ProbeFacts, relative: &str, fragments: &[&str]) {
         .arg("--manifest-path")
         .arg(root.path().join("Cargo.toml"))
         .env("CARGO_TARGET_DIR", probe_target())
+        .env("CARGO_TERM_COLOR", "never")
         .output()
         .expect("cargo check");
     let text = format!(

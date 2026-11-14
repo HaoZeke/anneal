@@ -125,12 +125,21 @@ jobs:
         shell: bash
         env:
           COG_FROM: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-          COG_TO: ${{ github.sha }}
+          COG_TO: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           COG_EXEMPT: 235683cf30fc3cff9d3be5f92ac26b5a046483e1
         run: |
           if [[ -z "$COG_FROM" || "$COG_FROM" =~ ^0+$ ]] || \
              ! git cat-file -e "$COG_FROM^{commit}"; then
             COG_FROM=$(git rev-parse "$COG_TO^")
+          fi
+          # The pull-request checkout does not have origin/develop. The
+          # latest develop merge records that tip as its second parent. A
+          # main base would otherwise re-check develop's history.
+          develop_merge=$(git log -1 --format=%H --grep="Merge remote-tracking branch 'origin/develop'" "$COG_TO" || true)
+          if [[ -n "$develop_merge" ]] \
+             && git rev-parse --verify --quiet "${develop_merge}^2" >/dev/null \
+             && ! git merge-base --is-ancestor "${develop_merge}^2" "$COG_FROM"; then
+            COG_FROM=$(git rev-parse "${develop_merge}^2")
           fi
           if git merge-base --is-ancestor "$COG_EXEMPT" "$COG_TO" &&
              ! git merge-base --is-ancestor "$COG_EXEMPT" "$COG_FROM"; then
@@ -150,8 +159,17 @@ jobs:
       - name: Audit for large files
         shell: bash
         run: |
+          # Blobs already on the merged develop tip are that branch's
+          # history. Audit the objects this head adds after that merge.
+          develop_merge=$(git log -1 --format=%H --grep="Merge remote-tracking branch 'origin/develop'" HEAD || true)
+          if [[ -n "$develop_merge" ]] \
+             && git rev-parse --verify --quiet "${develop_merge}^2" >/dev/null; then
+            objects=$(git rev-list --objects "${develop_merge}^2"..HEAD)
+          else
+            objects=$(git rev-list --objects HEAD)
+          fi
           oversized=$(
-            git rev-list --objects HEAD |
+            printf '%s\n' "$objects" |
               git cat-file --batch-check='%(objecttype) %(objectsize) %(objectname) %(rest)' |
               awk '$1 == "blob" && $2 > 1048576'
           )

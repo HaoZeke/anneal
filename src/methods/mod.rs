@@ -17,6 +17,8 @@ pub mod activation;
 #[cfg(feature = "graphkey")]
 pub mod archive_search;
 pub mod bank;
+/// Covalent bond-graph preconditioner for molecular quenches.
+pub mod bond_preconditioner;
 /// Box search split on gradient (hop-and-quench vs values-only portfolio).
 pub mod box_hopping;
 /// Basin hopping over quenched minima with a basin-keyed bias.

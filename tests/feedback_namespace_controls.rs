@@ -84,6 +84,9 @@ fn run_trace(
 ) -> (Outcome, Vec<(usize, Array1<f64>)>) {
     let hops = (sequence.len() - 1) / 2;
     let mut cfg = Config::for_cluster(3);
+    // The wells sit further apart than the Lennard-Jones neighbour shell.
+    // A free-atom refusal is about that shell, not about these basins.
+    cfg.neighbour_cutoff = 6.0;
     cfg.minima_hopping = true;
     cfg.temperature = 10.0;
     cfg.replicas = 1;

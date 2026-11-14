@@ -1,5 +1,5 @@
 use anneal_core::methods::cluster_hopping::{Config, Ledger, MoveLibrary};
-use anneal_core::methods::cluster_search::search;
+use anneal_core::methods::cluster_search::search_lennard_jones;
 use anneal_core::methods::two_phase::TwoPhase;
 use anneal_core::potentials::PairPotential;
 
@@ -8,7 +8,7 @@ const LJ38_OCTAHEDRON: f64 = -173.928427;
 fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
     let pot = PairPotential::lennard_jones(cfg.n_points);
     let mut ledger = Ledger::new(budget);
-    let (out, _) = search(&pot, cfg, &mut ledger, seed).expect("finite start");
+    let (out, _) = search_lennard_jones(&pot, cfg, &mut ledger, seed).expect("finite start");
     (out.best, out.hops, ledger.spent())
 }
 
@@ -22,15 +22,22 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 ///
 /// ```text
 /// matcher   cutoff   plain
-/// local     16/16    6/16
-/// ira       16/16    5/16
+/// local     16/16    7/16
+/// ira       16/16    7/16
 /// ```
 ///
-/// Hop counts are not that comparison. Seed 0 with IRA spends 435 hops and
-/// reaches the octahedron while the plain walk spends 414 and stops at
-/// -173.252378. The bars sit above those two plain counts and under a full
-/// miss of the cutoff walk: at least 15 cutoff hits, at most 10 plain hits,
-/// and a gap of at least 5. The measured gaps are 10 and 11.
+/// The hit pattern is exact, not a ceiling. Host `libm` is not one
+/// function: macOS reported 11 of 16 plain hits, then 13 of 16, then
+/// `0x9204`, then `0x513a`, while Linux held a different mask on the
+/// same seeds. Proposal axes, the gamma sampler, the depth-rewarded
+/// Student-t draw, and the symmetry rotation already go through the
+/// `libm` crate. Three calls were still the host: the fivefold turn
+/// (`2π/5` and `3π/5`), the continuous-symmetry orientation (`τ/5`),
+/// and the energy-lattice softmax. Those use the `libm` crate as well.
+/// On that walk Linux plain was `0x517b` (9 seeds). Merging develop's
+/// stall-growth hold moves it to `0x91e4` (7 seeds). The fivefold
+/// residual keeps the built-in assignment when IRA is linked, so the
+/// IRA build has the same mask.
 #[test]
 fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not() {
     const SEEDS: u64 = 16;
@@ -48,29 +55,33 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
     compacted.two_phase = Some(TwoPhase::relative(0.7, 1.0));
     let mut compact_hits = 0usize;
     let mut plain_hits = 0usize;
+    let mut compact_mask = 0u16;
+    let mut plain_mask = 0u16;
     for seed in 0..SEEDS {
         let (best, _, spent) = run(&compacted, budget, seed);
         assert!(spent <= budget, "the ledger overspent: {spent} of {budget}");
         if best < LJ38_OCTAHEDRON + 1e-4 {
             compact_hits += 1;
+            compact_mask |= 1 << seed;
         }
         let (plain_best, _, plain_spent) = run(&plain, budget, seed);
         assert!(plain_spent <= budget);
         if plain_best < LJ38_OCTAHEDRON + 1e-4 {
             plain_hits += 1;
+            plain_mask |= 1 << seed;
         }
     }
-    assert!(
-        compact_hits >= 15,
-        "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds"
+    // Merging develop's stall-growth hold moves which seeds reach the
+    // octahedron. Cutoff 0xffff, plain 0x91e4 (7 seeds), with and
+    // without IRA.
+    let plain_exact = 0x91e4;
+    assert_eq!(
+        compact_mask, 0xffff,
+        "the cutoff walk reached the octahedron on {compact_hits} of {SEEDS} seeds (mask {compact_mask:#06x})"
     );
-    assert!(
-        plain_hits <= 10,
-        "the plain walk reached the octahedron on {plain_hits} of {SEEDS} seeds"
-    );
-    assert!(
-        compact_hits - plain_hits >= 5,
-        "the cutoff walk reached {compact_hits} seeds and the plain walk {plain_hits}"
+    assert_eq!(
+        plain_mask, plain_exact,
+        "the plain walk reached the octahedron on {plain_hits} of {SEEDS} seeds (mask {plain_mask:#06x})"
     );
 }
 

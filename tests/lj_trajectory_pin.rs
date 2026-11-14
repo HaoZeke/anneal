@@ -2,6 +2,8 @@
 //!
 //! The accepted-transition sequence and the final energies are part of the
 //! search result. A faster evaluation path has to leave them unchanged.
+//! The develop merge's stall-growth hold moves this hash. Both builds
+//! print the same one.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, random_cluster_in_radius, run_with_gradient,
@@ -74,7 +76,7 @@ fn trajectory_hash() -> String {
 fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     let hash = trajectory_hash();
     assert_eq!(
-        hash, "efc93d1d504ca8e9e80fe9b11a3c27465f8228b0a88aa6cc23ba5ac121601f4d",
+        hash, "66e98eb2c3289531c9b7e339555f5041d9deb313dbe9a2064cc60c066b1ba665",
         "trajectory hash changed: {hash}"
     );
 }

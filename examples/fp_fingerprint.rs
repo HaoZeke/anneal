@@ -75,14 +75,15 @@ fn survey_atomic(system: &str, n: usize, seeds: usize, kind: Kind) -> String {
         };
         let shaken = jitter(&quenched, 0.02, &mut rng);
         let (again, requenched) = quench_atomic(shaken.view(), &kind);
-        if again.is_finite() && same_geometry(quenched.view(), requenched.view()) {
-            if let Some(second) = fingerprints(requenched.view(), Some(&species), None) {
-                same_energy.push((again - energy).abs());
-                same_soap.push(l2(&first.soap, &second.soap));
-                same_radial.push(l2(&first.radial, &second.radial));
-                same_hist.push(l2(&first.hist, &second.hist));
-                same_sorted.push(l2(&first.sorted, &second.sorted));
-            }
+        if again.is_finite()
+            && same_geometry(quenched.view(), requenched.view())
+            && let Some(second) = fingerprints(requenched.view(), Some(&species), None)
+        {
+            same_energy.push((again - energy).abs());
+            same_soap.push(l2(&first.soap, &second.soap));
+            same_radial.push(l2(&first.radial, &second.radial));
+            same_hist.push(l2(&first.hist, &second.hist));
+            same_sorted.push(l2(&first.sorted, &second.sorted));
         }
         minima.push(Minimum { energy, ..first });
     }
@@ -118,14 +119,15 @@ fn survey_tip4p(seeds: usize) -> String {
         let (again, requenched) = quench_tip4p(shaken.view());
         let centres = points_of(quenched.view(), Some(15));
         let centres_again = points_of(requenched.view(), Some(15));
-        if again.is_finite() && same_geometry(centres.view(), centres_again.view()) {
-            if let Some(second) = fingerprints(requenched.view(), None, Some(15)) {
-                same_energy.push((again - energy).abs());
-                same_soap.push(l2(&first.soap, &second.soap));
-                same_radial.push(l2(&first.radial, &second.radial));
-                same_hist.push(l2(&first.hist, &second.hist));
-                same_sorted.push(l2(&first.sorted, &second.sorted));
-            }
+        if again.is_finite()
+            && same_geometry(centres.view(), centres_again.view())
+            && let Some(second) = fingerprints(requenched.view(), None, Some(15))
+        {
+            same_energy.push((again - energy).abs());
+            same_soap.push(l2(&first.soap, &second.soap));
+            same_radial.push(l2(&first.radial, &second.radial));
+            same_hist.push(l2(&first.hist, &second.hist));
+            same_sorted.push(l2(&first.sorted, &second.sorted));
         }
         minima.push(Minimum { energy, ..first });
     }

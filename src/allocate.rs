@@ -461,22 +461,23 @@ fn sample_gamma<R: Rng + ?Sized>(shape: f64, rng: &mut R) -> f64 {
         // Boosting: if G ~ Gamma(a+1) and U ~ Uniform, then G * U^(1/a) is
         // Gamma(a). The direct method is invalid below one.
         let u: f64 = rng.random::<f64>().max(1e-300);
-        return sample_gamma(shape + 1.0, rng) * u.powf(1.0 / shape);
+        return sample_gamma(shape + 1.0, rng) * libm::pow(u, 1.0 / shape);
     }
     let d = shape - 1.0 / 3.0;
-    let c = 1.0 / (9.0 * d).sqrt();
+    let c = 1.0 / libm::sqrt(9.0 * d);
     loop {
-        // Standard normal by Box-Muller, so no distribution crate is needed.
+        // Box-Muller through `libm`. Host `ln` and `cos` are not the same
+        // function on glibc and libSystem, and this draw picks the move.
         let u1: f64 = rng.random::<f64>().max(1e-300);
         let u2: f64 = rng.random::<f64>();
-        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+        let z = libm::sqrt(-2.0 * libm::log(u1)) * libm::cos(2.0 * std::f64::consts::PI * u2);
         let v = 1.0 + c * z;
         if v <= 0.0 {
             continue;
         }
         let v3 = v * v * v;
         let u: f64 = rng.random::<f64>().max(1e-300);
-        if u.ln() < 0.5 * z * z + d - d * v3 + d * v3.ln() {
+        if libm::log(u) < 0.5 * z * z + d - d * v3 + d * libm::log(v3) {
             return d * v3;
         }
     }
@@ -880,14 +881,17 @@ fn student_t<R: Rng + ?Sized>(nu: f64, rng: &mut R) -> f64 {
     let z = {
         let u1: f64 = rng.random::<f64>().max(1e-12);
         let u2: f64 = rng.random::<f64>();
-        (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+        // Host `ln` and `cos` pick a different arm on libSystem than on
+        // glibc. The recommended walk rewards depth, so this draw is the
+        // move.
+        libm::sqrt(-2.0 * libm::log(u1)) * libm::cos(std::f64::consts::TAU * u2)
     };
     // Chi-square with nu degrees of freedom is Gamma(nu/2, 2).
     let g = sample_gamma(nu * 0.5, rng) * 2.0;
     if g <= 0.0 {
         return z;
     }
-    z / (g / nu).sqrt()
+    z / libm::sqrt(g / nu)
 }
 
 #[cfg(test)]

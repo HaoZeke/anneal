@@ -47,7 +47,7 @@ pub trait Bias: Send + Sync {
     /// Reweighting factor `exp(+V(s) / T)` for post-hoc unbiasing of
     /// observables computed under the biased ensemble.
     fn reweight(&self, s: ArrayView1<f64>, temp: f64) -> f64 {
-        (self.potential(s) / temp).exp()
+        libm::exp(self.potential(s) / temp)
     }
 }
 
@@ -165,7 +165,7 @@ impl Bias for WellTemperedBias {
 
     fn deposit(&mut self, s: ArrayView1<f64>, temp: f64) {
         let v_at_s = self.potential(s);
-        let w = self.w0 * (-v_at_s / ((self.gamma - 1.0) * temp)).exp();
+        let w = self.w0 * libm::exp(-v_at_s / ((self.gamma - 1.0) * temp));
         let dx = (self.high[0] - self.low[0]) / (self.grid_n as f64 - 1.0);
         let dy = (self.high[1] - self.low[1]) / (self.grid_n as f64 - 1.0);
         let two_sigma2 = 2.0 * self.sigma * self.sigma;
@@ -174,7 +174,7 @@ impl Bias for WellTemperedBias {
             for j in 0..self.grid_n {
                 let gy = self.low[1] + j as f64 * dy;
                 let dx2 = (gx - s[0]).powi(2) + (gy - s[1]).powi(2);
-                self.v[[i, j]] += w * (-dx2 / two_sigma2).exp();
+                self.v[[i, j]] += w * libm::exp(-dx2 / two_sigma2);
             }
         }
     }
@@ -1438,11 +1438,11 @@ impl<F: Fingerprint> BasinBias<F> {
     fn increment(&mut self, i: usize, denom: f64, temp: f64, scale: f64, local: bool) {
         let arrivals = self.deposit_counts[i].max(1);
         let entropy = if self.entropic && temp > 0.0 {
-            temp * (arrivals as f64).ln()
+            temp * libm::log(arrivals as f64)
         } else {
             0.0
         };
-        let w = scale * (self.w0 + entropy) * (-self.v[i] / denom).exp();
+        let w = scale * (self.w0 + entropy) * libm::exp(-self.v[i] / denom);
         self.v[i] += w;
         self.deposit_counts[i] += 1;
         if local {
