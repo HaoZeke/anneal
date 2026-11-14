@@ -2631,6 +2631,10 @@ fn stall_arms(cfg: &Config) -> Vec<&'static str> {
             && !cfg.move_library.is_rigid_body()
             && !std::env::var("RESTART_STALL_ARM").is_ok_and(|v| v == "0"))
         .then_some("restart"),
+        (cfg.angular_restart
+            && !cfg.move_library.is_rigid_body()
+            && !cfg.move_library.is_molecular())
+        .then_some("angular"),
     ]
     .into_iter()
     .flatten()
@@ -9699,6 +9703,50 @@ where
                 }
             }
         }
+        // One angular relocation, and only while the stall allocator asks
+        // for it. The quench is kept when it is lower. A trial that is not
+        // lower leaves the chain on the hop it was on, and the allocator
+        // records a zero gain, so the arm is dropped once the other leaves
+        // pay more. It is not the loose-point replacement: that one runs
+        // during the descent and held the icosahedral and decahedral
+        // searches on a competing minimum.
+        if stall_response.map(|arm| stall_arms[arm] == "angular") == Some(true) && hop_room(hops) {
+            quiet = 0;
+            longest_quiet = 0;
+            let trial = ClusterMove::Angular {
+                n_points: n,
+                length_scale: cfg.length_scale,
+                energy_scale: cfg.energy_scale,
+            }
+            .propose(x.view(), cfg.temperature, rng);
+            let (ea, xa) = relax(ledger, trial.view(), cfg.relax_steps);
+            hops += 1;
+            angular_tried += 1;
+            let sane = ea.is_finite() && xa.len() == x.len() && quench_is_sane(cfg, ea, xa.view());
+            let gain = if sane && ea < e { e - ea } else { 0.0 };
+            if sane && ea < e {
+                angular_accepted += 1;
+                let angular_gradient = record_quenched_answer(
+                    cfg,
+                    ledger,
+                    &mut grad,
+                    ea,
+                    xa.view(),
+                    &mut unconverged_records,
+                );
+                adopt_minimum!(
+                    ea,
+                    xa,
+                    angular_gradient,
+                    None,
+                    AdoptionHistory::Fresh,
+                    None,
+                    Some("stall-angular"),
+                    hops
+                );
+            }
+            stall_outcome = Some(gain);
+        }
         if let (Some(arm), Some(gain)) = (stall_response, stall_outcome) {
             stall_allocator.update(arm, gain);
         }
@@ -11145,10 +11193,14 @@ mod tests {
         let mut atomic = Config::recommended(6);
         assert!(!atomic.restart_on_stall);
         atomic.restart_on_stall = true;
-        assert_eq!(stall_arms(&atomic), ["trail", "climb", "restart"]);
+        assert_eq!(
+            stall_arms(&atomic),
+            ["trail", "climb", "restart", "angular"]
+        );
         let rigid = atomic.with_rigid_bodies(crate::potentials::gmin_water_geometry());
         assert!(rigid.restart_on_stall);
         assert!(!stall_arms(&rigid).contains(&"restart"));
+        assert!(!stall_arms(&rigid).contains(&"angular"));
     }
 
     #[test]

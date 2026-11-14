@@ -681,3 +681,16 @@ rule h2o16_crest:
         set -euo pipefail
         python3 scripts/h2o16_crest/summarize.py
         """
+
+
+# Twelve-seed Lennard-Jones panel on the recommended preset.
+# Not part of `rule all`. Rows are appended.
+#   snakemake -s workflow/Snakefile lj_sweep2
+rule lj_sweep2:
+    output:
+        "bench/lj-sweep2/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/lj_sweep2/enter_bench.sh
+        """

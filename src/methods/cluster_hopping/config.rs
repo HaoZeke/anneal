@@ -634,6 +634,14 @@ pub struct Config {
     /// than being one arm among many, because the criterion decides when it is
     /// the right move.
     pub angular_moves: bool,
+    /// Offer the angular move as one stall arm, chosen with the others by
+    /// the stall allocator's improvement posterior.
+    ///
+    /// It does not replace a hop. A loose point during an ordinary descent
+    /// stays on the arm the depth allocator picked. The stall arm is
+    /// quenched and kept only when that quench is lower, so a trial that
+    /// does not help leaves the chain where it was.
+    pub angular_restart: bool,
     /// Acceptance rate the pair-energy ratio is tuned to.
     ///
     /// "R was adjusted to give an acceptance ratio for angular moves of 0.5 and
@@ -1478,6 +1486,11 @@ impl Config {
         // 6603 [3344, 16285.25]. The Bayes threshold keeps its 200-step
         // value.
         cfg.relax_steps = 1000;
+        // The angular move is a stall arm. Replacing every loose-point hop
+        // with it held LJ75 on the Mackay icosahedron and dropped seeds at
+        // 76 and 104. The stall allocator already picks among the leave
+        // arms by the improvement each one has produced.
+        cfg.angular_restart = true;
         // GMIN calls SYMMETRYCSM every NSYMINTERVAL quenches, default 10.
         // The same paper's LJ75 table used a restart of about five basin
         // hopping steps once symmetrisation was on. Both run inside this
@@ -1774,6 +1787,7 @@ impl Config {
             tabu_on_stall: false,
             tabu_capacity: 8,
             angular_moves: false,
+            angular_restart: false,
             angular_target: 0.5,
             restart_on_stall: false,
             restart_patience: 5_000,
@@ -1950,6 +1964,10 @@ impl Config {
         }
         self.species = Some(species);
         self.species_sigma = sigma;
+        // The stall arm ranks atoms by a one-species pair sum. A labelled
+        // cluster does not take it, so a binary or Gupta preset keeps the
+        // stall draw it had.
+        self.angular_restart = false;
         self
     }
 
@@ -1995,6 +2013,7 @@ impl Config {
         self.orbit_arm = false;
         self.orbit_core = OrbitCore::Fraction;
         self.angular_moves = false;
+        self.angular_restart = false;
         self.continuous_symmetry = ContinuousSymmetry::Off;
         self.rigid_body_geometry = Some(geometry);
         self
@@ -2395,6 +2414,16 @@ mod coverage_behaviour {
         assert!(!recommended.tabu_on_stall);
         assert!(!recommended.return_screen);
         assert!(recommended.allocate_moves);
+        assert!(!recommended.angular_restart);
+    }
+
+    #[test]
+    fn the_angular_restart_is_a_stall_arm_on_one_species_only() {
+        let cfg = Config::recommended(75);
+        assert!(cfg.angular_restart);
+        assert!(!cfg.angular_moves);
+        let labelled = cfg.clone().with_species(vec![1; 75], None);
+        assert!(!labelled.angular_restart);
     }
 
     #[test]
