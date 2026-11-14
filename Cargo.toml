@@ -147,6 +147,7 @@ name = "anneal_core"
 # anneal-core.h includes, and what `pkg-config --cflags` puts on the
 # compiler's search path.
 asset = [
+    { from = "include/anneal-version.h", to = "." },
     { from = "include/anneal-core.hpp", to = "." },
     { from = "include/dlpack/dlpack.h", to = "dlpack" },
 ]

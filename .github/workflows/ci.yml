@@ -476,3 +476,28 @@ jobs:
             --track-origins=yes \
             --error-exitcode=1 \
             ./ffi_smoke
+
+  version-sot:
+    name: Version source of truth
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install cogapp
+        run: python -m pip install 'cogapp==3.6.0' 'towncrier==26.9.0'
+
+      # cog.toml is the cocogitto config, so the bare cog binary is not cogapp.
+      # scripts/version_cog.py passes one shared prologue. https://nedbatchelder.com/code/cog/
+      - name: cog --check
+        run: python scripts/version_cog.py --check @scripts/cogfiles
+
+      - name: Compare version strings
+        run: python3 scripts/check_version_sot.py
+
+      # https://towncrier.readthedocs.io/en/stable/
+      - name: towncrier build --draft
+        run: towncrier build --draft
