@@ -56,6 +56,14 @@ manifest-path = "crates/anneal-python/Cargo.toml"
 features      = ["python"]
 module-name   = "anneal._core"
 python-source = "python"
+# cargo resolves every path in the root manifest for any build: the
+# [patch.crates-io] target and the optional nng crates the wheel does not
+# enable. maturin packs neither.
+include       = [
+    { path = "vendor/metatensor-sys/**/*", format = "sdist" },
+    { path = "vendor/nng/**/*", format = "sdist" },
+    { path = "vendor/nng-sys/**/*", format = "sdist" },
+]
 
 [tool.pytest.ini_options]
 markers = [

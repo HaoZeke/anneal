@@ -409,6 +409,43 @@ jobs:
           .venv/bin/python -c "import array_api_strict"
           .venv/bin/python -m pytest pytest/test_chemfit*.py
 
+  # pip builds the release sdist from its own files only. Installing it in a
+  # fresh virtualenv catches a path the sdist leaves out. pytest runs from
+  # the checkout but imports the installed package: `python/` is not on the
+  # path.
+  sdist:
+    name: Build and install the sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build the sdist
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "maturin>=1.5,<2"
+          python -m maturin sdist --out dist
+
+      - name: Install from the sdist
+        shell: bash
+        run: |
+          python -m venv .sdist-venv
+          .sdist-venv/bin/python -m pip install --upgrade pip
+          .sdist-venv/bin/python -m pip install dist/anneal-*.tar.gz pytest
+
+      - name: pytest against the installed sdist
+        shell: bash
+        run: |
+          test "$(.sdist-venv/bin/python -c 'import anneal, os; print(os.path.relpath(anneal.__file__))')" \
+            != python/anneal/__init__.py
+          .sdist-venv/bin/python -m pytest pytest/test_cluster_search.py
+
   ffi-smoke:
     name: FFI smoke (linux + cargo-c + valgrind)
     runs-on: ubuntu-latest

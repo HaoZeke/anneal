@@ -160,3 +160,26 @@ fn every_example_installs_the_rgpot_kernels() {
     }
     assert!(mains > 0);
 }
+
+// pip builds the sdist from its own files. cargo resolves every path the
+// root manifest names, including [patch] targets and optional crates that
+// the wheel does not enable, and maturin packs neither.
+#[test]
+fn the_sdist_packs_every_vendored_path_the_manifest_names() {
+    let manifest = include_str!("../Cargo.toml");
+    let pyproject = include_str!("../pyproject.toml");
+    let mut vendored = 0;
+    for piece in manifest.split("path = \"vendor/").skip(1) {
+        let name = piece.split('"').next().expect("closing quote");
+        vendored += 1;
+        let entry = format!("{{ path = \"vendor/{name}/**/*\", format = \"sdist\" }}");
+        assert!(
+            pyproject.contains(&entry),
+            "pyproject.toml does not pack vendor/{name}"
+        );
+    }
+    assert!(vendored > 0);
+    let workflow = include_str!("../.github/workflows/ci.yml");
+    assert!(workflow.contains("python -m maturin sdist --out dist"));
+    assert!(workflow.contains("pip install dist/anneal-*.tar.gz pytest"));
+}
