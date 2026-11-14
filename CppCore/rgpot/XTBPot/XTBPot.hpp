@@ -79,6 +79,11 @@ private:
   void loadParametrisation() const;
   void freshResults() const;
   void discardAfterFailure() const;
+  /// A failed SCC on a rearranged cluster is retried with smeared
+  /// occupation, then evaluated again at the configured temperature.
+  /// The hot single point is only a guess. False leaves the caller to
+  /// discard the handles.
+  bool rescueUnconvergedScc() const;
 };
 
 } // namespace rgpot

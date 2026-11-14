@@ -139,6 +139,38 @@ void XTBPot::freshResults() const {
   m_has_wavefunction = false;
 }
 
+bool XTBPot::rescueUnconvergedScc() const {
+  // A dissociated or rearranged cluster can have a gap of a few tenths
+  // of an eV. The charge iterator then runs out its budget at the
+  // configured temperature. Smearing the levels converges that density
+  // in a few iterations, and the cooled single point uses it as the
+  // guess. The energy handed back is the configured-temperature one.
+  xtb_setMaxIter(m_env, m_calc, m_config.max_iterations);
+  const double configured = m_config.electronic_temperature;
+  const double ladder[] = {1000.0, 3000.0, 5000.0};
+  for (double hot : ladder) {
+    if (!(hot > configured))
+      continue;
+    xtb_setElectronicTemp(m_env, m_calc, hot);
+    xtb_singlepoint(m_env, m_mol, m_calc, m_res);
+    if (xtb_checkEnvironment(m_env) != 0) {
+      char ignored[512];
+      int ignored_len = static_cast<int>(sizeof(ignored));
+      xtb_getError(m_env, ignored, &ignored_len);
+      continue;
+    }
+    xtb_setElectronicTemp(m_env, m_calc, configured);
+    xtb_singlepoint(m_env, m_mol, m_calc, m_res);
+    if (xtb_checkEnvironment(m_env) == 0)
+      return true;
+    char ignored[512];
+    int ignored_len = static_cast<int>(sizeof(ignored));
+    xtb_getError(m_env, ignored, &ignored_len);
+  }
+  xtb_setElectronicTemp(m_env, m_calc, configured);
+  return false;
+}
+
 void XTBPot::discardAfterFailure() const {
   // A failed SCC leaves the environment in an error state and the
   // wavefunction is not a guess. Replace the handle set.
@@ -221,14 +253,26 @@ void XTBPot::forceImpl(const ForceInput &in, ForceOut *out) const {
       freshResults();
   }
 
+  // A bound cluster converges in about ten iterations. One that has
+  // not done so by a few times that is the near-zero-gap case, and
+  // spending the rest of the iteration budget only delays the rescue.
+  const int first_pass =
+      m_config.max_iterations < 48 ? m_config.max_iterations : 48;
+  xtb_setMaxIter(m_env, m_calc, first_pass);
   xtb_singlepoint(m_env, m_mol, m_calc, m_res);
 
   if (xtb_checkEnvironment(m_env) != 0) {
     char err_msg[512];
-    xtb_getError(m_env, err_msg, nullptr);
+    int err_len = static_cast<int>(sizeof(err_msg));
+    xtb_getError(m_env, err_msg, &err_len);
     const std::string message = std::string("xTB Error: ") + err_msg;
-    discardAfterFailure();
-    throw std::runtime_error(message);
+    const bool unconverged =
+        message.find("did not converge") != std::string::npos ||
+        message.find("Self consistent") != std::string::npos;
+    if (!unconverged || !rescueUnconvergedScc()) {
+      discardAfterFailure();
+      throw std::runtime_error(message);
+    }
   }
 
   double energy_hartree;

@@ -478,3 +478,48 @@ TEST_CASE("XTBDlopen reuses the GFN2 wavefunction inside the move guard",
     return std::make_unique<rgpot::XTBDlopen>(dlopen_cfg(cfg));
   });
 }
+
+// A dissociated ammonia tetramer. One nitrogen has no hydrogen inside
+// 1.3 Å. GFN2 at 300 K does not converge the SCC; the gap is 0.29 eV.
+// The rescue smears the occupation and returns the cooled 300 K energy.
+TEST_CASE("XTBPot cools a nonconverged SCC back to the configured temperature",
+          "[xtb][linked][scc]") {
+  const int z[16] = {7, 1, 1, 1, 7, 1, 1, 1, 7, 1, 1, 1, 7, 1, 1, 1};
+  const double xyz[16][3] = {
+      {-1.66532428, 0.54889027, -2.03940010},
+      {0.11165024, 2.04946110, 1.43904553},
+      {-0.42884806, 2.72524649, 0.30972045},
+      {1.43338889, 2.19082068, 0.90531718},
+      {0.53411760, 1.59058476, -4.48817656},
+      {-0.62302497, 2.69900828, -3.26741719},
+      {1.34429373, 3.32407404, -1.22950979},
+      {-0.35527480, 1.88804157, -4.87298828},
+      {1.47996713, 0.55484625, 3.71752121},
+      {1.28956128, -0.72444169, 2.95951158},
+      {-0.20031872, 0.12475055, 3.35919321},
+      {1.70295493, -0.38386526, 4.03334277},
+      {-2.71341888, -5.98849237, 1.22333256},
+      {-1.72758892, -6.21046903, 1.63826395},
+      {-1.69113306, -6.08127583, -0.32892162},
+      {-2.20633610, -6.61433582, 0.61469530},
+  };
+  rgpot::XTBConfig cfg;
+  cfg.method = rgpot::GFNMethod::GFN2xTB;
+  cfg.accuracy = 0.01;
+  cfg.electronic_temperature = 300.0;
+  cfg.max_iterations = 500;
+  rgpot::XTBPot pot(cfg);
+  AtomMatrix positions(16, 3);
+  std::vector<int> atmtypes(z, z + 16);
+  for (int i = 0; i < 16; ++i)
+    for (int j = 0; j < 3; ++j)
+      positions(i, j) = xyz[i][j];
+  std::array<std::array<double, 3>, 3> box{};
+  box[0][0] = box[1][1] = box[2][2] = 60.0;
+
+  auto [energy, forces, variance] = pot(positions, atmtypes, box);
+  (void)variance;
+  // Cooled 300 K result, not the 1000 K single point (−448.36 eV).
+  REQUIRE_THAT(energy, WithinAbs(-447.8814, 1.0e-3));
+  require_finite_forces(forces, 16);
+}
