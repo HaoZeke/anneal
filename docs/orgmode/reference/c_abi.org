@@ -22,7 +22,7 @@ typedef struct rgpot_abi_stamp_t {
 } rgpot_abi_stamp_t;
 
 #define RGPOT_ABI_VERSION_MAJOR 1
-#define RGPOT_ABI_VERSION_MINOR 1
+#define RGPOT_ABI_VERSION_MINOR 2
 #define RGPOT_ABI_LAYOUT_REVISION 1
 
 rgpot_abi_stamp_t rgpot_abi_stamp(void);
@@ -83,6 +83,20 @@ a C caller relinks when the C++ SONAME moves even if these numbers stay.
 A caller built against minor 0 still matches, and a caller that needs the new
 function is refused by a 3.5 library.
 No exported C struct in =rgpot.h= changed layout.
+3.7.0 still carries 1, 1 and 1.
+The next release carries 1, 2 and 1: the Hessian-vector entry points below are
+additions, and their state lives behind the opaque cache pointer of the handle,
+so =rgpot_potential_t= keeps its layout.
+A caller that needs them is refused by a 3.7 library.
+
+=scripts/abi_core_baseline.txt= lists the =rgpot_*= functions the =rgpot-core=
+shared library exports in a default build.
+The meson test =abi_core_symbols= fails when one of them is no longer exported,
+and the crate test =the_abi_baseline_is_declared_by_the_header= when the
+committed header stops declaring one.
+The list only grows: append a new function with the minor bump that adds it.
+=scripts/abi_baseline.txt= is the same check for the neighbour-list and
+fast-list exports of =librgpot= (meson test =abi_symbols=).
 The neighbour-list C ABI is separate.
 3.6.0 sets it to version 4 (=RGPOT_NLIST_ABI= in =rgpot_nlist.h=).
 =rgpot_nlist_request_init= sets the defaults, =bytes= is the struct size, and =rgpot_nlist_strerror=
@@ -273,6 +287,98 @@ lacks.
 A null pointer returns 0.
 A caller that links only =librgpot= uses it instead of resolving
 =eindir_core_abi_compatible= itself.
+
+** Hessian-vector products
+
+A minimum-mode search (Lanczos, dimer) applies the Hessian =H= of the energy
+to many directions =v= at one geometry.
+With only a force callback each product is a difference of two force
+evaluations, and one of them is the centre the search has not moved from.
+A potential handle answers =H v= itself and keeps the forces of that centre.
+
+#+begin_src c
+typedef enum rgpot_hvp_scheme_t {
+  RGPOT_HVP_AUTO = 0,     /* analytic if registered, else forward */
+  RGPOT_HVP_FORWARD = 1,  /* (F(x) - F(x + h u)) |v| / h */
+  RGPOT_HVP_CENTRAL = 2,  /* (F(x - h u) - F(x + h u)) |v| / 2h */
+  RGPOT_HVP_ANALYTIC = 3, /* the registered callback */
+} rgpot_hvp_scheme_t;
+
+#define RGPOT_HVP_DEFAULT_STEP 1.0e-3
+
+rgpot_status_t rgpot_potential_hvp(const rgpot_potential_t *pot,
+                                   const rgpot_force_input_t *input,
+                                   const double *direction, double step,
+                                   int32_t scheme, double *hv_out);
+rgpot_status_t rgpot_potential_hvp_centre(const rgpot_potential_t *pot,
+                                          const rgpot_force_input_t *input,
+                                          rgpot_force_out_t *output);
+#+end_src
+
+=direction= and =hv_out= hold =3 * n_atoms= doubles laid out like the positions
+and must not overlap.
+=u = v / |v|= and =step= is the displacement =h= along it, in the units of
+the positions; 0 selects =RGPOT_HVP_DEFAULT_STEP=.
+The difference is scaled back by =|v|=, so the product does not depend on the
+length of =direction= beyond that factor.
+A zero direction writes zeros and makes no call.
+
+| Scheme               | Force calls per product      | Error          |
+|----------------------+------------------------------+----------------|
+| =RGPOT_HVP_FORWARD=  | 1, and 1 for each new centre | =O(h)=         |
+| =RGPOT_HVP_CENTRAL=  | 2                            | =O(h^2)=       |
+| =RGPOT_HVP_ANALYTIC= | 0                            | the callback's |
+
+=k= forward products at one centre therefore cost =k + 1= force calls
+instead of =2k=.
+No finite difference makes one call per product at =O(h^2)=.
+The forward error is =(h/2) T(u, u) |v|=, with =T= the third derivative of the
+energy, and cancelling it takes the second evaluation that the central scheme
+makes.
+A search that needs second-order products at one call each registers an
+analytic product.
+The forward product is positively homogeneous in =direction= but not odd: the
+=O(h)= term keeps its sign when =v= does not.
+
+The centre is keyed on the bits of the positions, the atomic numbers and the
+cell, so moving one coordinate by one ulp, changing the cell or a species, or
+passing =-0.0= for =0.0= computes a new centre.
+=rgpot_potential_hvp_centre= returns the energy and an owning forces tensor
+from the same cache, and makes the force call when the centre is new.
+A search that needs the centre forces asks there instead of
+=rgpot_potential_calculate=, so the products after it make one call each.
+=rgpot_potential_hvp_invalidate= drops the centre, for a potential whose
+parameters changed while the geometry did not.
+The cache is per handle and holds one centre.
+It is safe to share between threads, and the last centre computed wins; whether
+the force callback may run concurrently is up to the potential, as for
+=rgpot_potential_calculate=.
+
+#+begin_src c
+typedef rgpot_status_t (*HessianVectorCallback)(void *user_data,
+                                                const rgpot_force_input_t *input,
+                                                const double *direction,
+                                                double *hv_out);
+rgpot_status_t rgpot_potential_set_hvp_callback(const rgpot_potential_t *pot,
+                                                HessianVectorCallback callback);
+#+end_src
+
+A potential that knows its Hessian registers the product with
+=rgpot_potential_set_hvp_callback=; it receives the handle's =user_data=.
+A null callback clears it.
+=RGPOT_HVP_AUTO= then uses it and makes no force call, and =RGPOT_HVP_ANALYTIC=
+without one is =RGPOT_INVALID_PARAMETER=.
+A non-finite value in the callback's output is refused.
+=rgpot::PotentialHandle::from_impl= registers it for a C++ potential with a
+=hessianVectorImpl(const ForceInput&, const double*, double*) const= member,
+=MorsePot= among them.
+
+=rgpot_potential_hvp_counts= fills =rgpot_hvp_counts_t= with the products
+answered, the force calls made, the requests served from the centre and the
+analytic products; =rgpot_potential_reset_hvp_counts= zeroes them and keeps the
+centre.
+The C++ potentials used without the Rust core, the Python module among them,
+get the same schemes, step, cache and counts from =rgpot/HessianVector.hpp=.
 
 ** Entry points
 

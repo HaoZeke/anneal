@@ -27,6 +27,35 @@ The worker count is not part of the result.
 See the [[file:../howto/ase.org][ASE how-to]] and the
 [[file:../explanation/thread-safety.org][thread-safety]] page.
 
+** Hessian-vector products
+
+Every potential object has
+=hvp(positions, atom_types, box, direction, step=0.0, scheme="auto")=, which
+returns =H v= with the shape of =positions=.
+=scheme= is ="forward"=, ="central"=, ="analytic"= or ="auto"=, and =step= 0 is
+1e-3 Angstrom.
+="forward"= reuses the forces of the last geometry the object evaluated, so a
+Lanczos loop of =k= products at one geometry costs =k + 1= force calls, at
+first order in =step=.
+="central"= costs two calls a product, at second order.
+="auto"= is ="analytic"= when =has_analytic_hvp()= is true, as for =MorsePot=,
+and ="forward"= otherwise.
+
+#+begin_src python
+pot = rgpot.MorsePot()
+energy, forces, _ = pot.hvp_centre(positions, types, box)
+for v in directions:
+    hv = pot.hvp(positions, types, box, v, scheme="forward")
+pot.hvp_counts()  # {"products": k, "force_calls": k + 1, ...}
+#+end_src
+
+=hvp_centre= returns the energy and forces of that centre.
+The centre is keyed on the bits of the positions, types and cell; another
+geometry is a new centre, and =invalidate_hvp()= drops it.
+=hvp_counts()= and =reset_hvp_counts()= read and zero the call counters.
+The products follow =rgpot_potential_hvp=; see the
+[[file:c_abi.org][C ABI reference]] for the error terms of each scheme.
+
 ** Engine constructors
 
 =rgpot.rgpot_lammps_potential=, =rgpot.rgpot_gromacs_potential= and
