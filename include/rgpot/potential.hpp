@@ -45,6 +45,7 @@
 #include <utility>
 #include <vector>
 
+#include "rgpot/HessianVector.hpp"
 #include "rgpot/c_api.hpp"
 #include "rgpot/errors.hpp"
 #include "rgpot/types.hpp"
@@ -128,6 +129,67 @@ public:
   }
 
   /**
+   * @brief Write @f$H v@f$ at @a input to @a hv_out.
+   *
+   * See @c rgpot_potential_hvp. @a direction and @a hv_out hold
+   * @c 3*n_atoms doubles and must not overlap. With @c RGPOT_HVP_FORWARD,
+   * @c k products at one geometry cost @c k+1 force calls.
+   *
+   * @param step Displacement length; 0 selects @c RGPOT_HVP_DEFAULT_STEP.
+   * @throws rgpot::Error on a malformed request or a failing callback.
+   */
+  void hvp(const InputSpec &input, const double *direction, double *hv_out,
+           double step = 0.0, rgpot_hvp_scheme_t scheme = RGPOT_HVP_AUTO) const {
+    details::check_status(rgpot_potential_hvp(
+        handle_, &input.c_struct(), direction, step,
+        static_cast<int32_t>(scheme), hv_out));
+  }
+
+  /// @c hvp() into a new vector of @c 3*n_atoms doubles.
+  std::vector<double> hvp(const InputSpec &input,
+                          const std::vector<double> &direction,
+                          double step = 0.0,
+                          rgpot_hvp_scheme_t scheme = RGPOT_HVP_AUTO) const {
+    if (direction.size() != 3 * input.n_atoms()) {
+      throw Error("invalid parameter: direction must hold 3 * n_atoms values");
+    }
+    std::vector<double> out(direction.size());
+    hvp(input, direction.data(), out.data(), step, scheme);
+    return out;
+  }
+
+  /**
+   * @brief Energy and forces at @a input, from the centre the products use.
+   *
+   * See @c rgpot_potential_hvp_centre. A search that needs the centre
+   * forces asks here instead of @c calculate(), so the forward products
+   * that follow make one force call each.
+   */
+  CalcResult hvp_centre(const InputSpec &input) const {
+    CalcResult result;
+    details::check_status(rgpot_potential_hvp_centre(
+        handle_, &input.c_struct(), &result.c_struct()));
+    return result;
+  }
+
+  /// Register or clear (@c nullptr) the analytic product of this handle.
+  void set_hvp_callback(HessianVectorCallback callback) const {
+    details::check_status(rgpot_potential_set_hvp_callback(handle_, callback));
+  }
+
+  /// Drop the cached centre, for a potential that changed in place.
+  void invalidate_hvp() const { rgpot_potential_hvp_invalidate(handle_); }
+
+  /// Products, force calls, centre reuses and analytic products so far.
+  rgpot_hvp_counts_t hvp_counts() const {
+    rgpot_hvp_counts_t counts{};
+    details::check_status(rgpot_potential_hvp_counts(handle_, &counts));
+    return counts;
+  }
+
+  void reset_hvp_counts() const { rgpot_potential_reset_hvp_counts(handle_); }
+
+  /**
    * @brief Create a handle from a legacy C++ potential implementation.
    *
    * Registers a template trampoline that extracts raw CPU pointers from
@@ -146,13 +208,16 @@ public:
    * The handle is one @c rgpot_potential_t and therefore one
    * @c eindir_objective_t (first-member IS-A). Child terms stay inside
    * @a impl; this factory does not build a list of objectives.
+   *
+   * When @a Impl has @c hessianVectorImpl (see HessianVector.hpp), it is
+   * registered as the analytic product of the handle.
    */
   template <typename Impl> static PotentialHandle from_impl(Impl &impl) {
     auto *handle = rgpot_potential_new_eindir(&trampoline_callback<Impl>,
                                               static_cast<void *>(&impl),
                                               nullptr, 0, nullptr, nullptr,
                                               nullptr, nullptr);
-    return PotentialHandle(handle);
+    return with_analytic_hvp<Impl>(PotentialHandle(handle));
   }
 
   /**
@@ -172,7 +237,7 @@ public:
     auto *handle = rgpot_potential_new_eindir(
         &trampoline_callback<Impl>, static_cast<void *>(&impl), nullptr,
         n_atoms, atomic_numbers, box_matrix, bounds_low, bounds_high);
-    return PotentialHandle(handle);
+    return with_analytic_hvp<Impl>(PotentialHandle(handle));
   }
 
   /**
@@ -207,6 +272,21 @@ private:
   rgpot_potential_t *handle_; //!< Owned opaque handle (may be @c nullptr
                               //!< after move).
 
+  /// Raw CPU pointers of the DLPack tensors in @a input, as a legacy
+  /// @c ForceInput. The positions tensor must be present.
+  static ::rgpot::ForceInput legacy_input(const rgpot_force_input_t *input) {
+    auto *pos_tensor = &input->positions->dl_tensor;
+    return ::rgpot::ForceInput{
+        .nAtoms = static_cast<size_t>(pos_tensor->shape[0]),
+        .pos = static_cast<const double *>(pos_tensor->data),
+        .atmnrs = input->atomic_numbers ? static_cast<const int *>(
+                                              input->atomic_numbers->dl_tensor.data)
+                                        : nullptr,
+        .box = input->box_matrix
+                   ? static_cast<const double *>(input->box_matrix->dl_tensor.data)
+                   : nullptr};
+  }
+
   /**
    * @brief Template trampoline bridging DLPack-based C ABI types to legacy
    *        C++ types.
@@ -230,28 +310,11 @@ private:
                                             rgpot_force_out_t *output) {
     try {
       auto *self = static_cast<Impl *>(user_data);
-
-      // Extract n_atoms from the positions tensor shape[0]
       if (!input->positions) {
         return RGPOT_INVALID_PARAMETER;
       }
-      auto *pos_tensor = &input->positions->dl_tensor;
-      size_t n_atoms = static_cast<size_t>(pos_tensor->shape[0]);
-
-      // Extract raw CPU pointers from DLPack tensors
-      const double *pos = static_cast<const double *>(pos_tensor->data);
-      const int *atmnrs =
-          input->atomic_numbers
-              ? static_cast<const int *>(input->atomic_numbers->dl_tensor.data)
-              : nullptr;
-      const double *box =
-          input->box_matrix
-              ? static_cast<const double *>(input->box_matrix->dl_tensor.data)
-              : nullptr;
-
-      // Construct legacy ForceInput
-      ::rgpot::ForceInput fi{
-          .nAtoms = n_atoms, .pos = pos, .atmnrs = atmnrs, .box = box};
+      const ::rgpot::ForceInput fi = legacy_input(input);
+      const size_t n_atoms = fi.nAtoms;
 
       // Temporary buffer for forces
       std::vector<double> forces(n_atoms * 3, 0.0);
@@ -276,6 +339,34 @@ private:
     } catch (...) {
       return RGPOT_INTERNAL_ERROR;
     }
+  }
+
+  /// @c HessianVectorCallback over @c Impl::hessianVectorImpl.
+  template <typename Impl>
+  static rgpot_status_t hvp_trampoline(void *user_data,
+                                       const rgpot_force_input_t *input,
+                                       const double *direction,
+                                       double *hv_out) {
+    try {
+      if (!input->positions) {
+        return RGPOT_INVALID_PARAMETER;
+      }
+      const auto *self = static_cast<const Impl *>(user_data);
+      self->hessianVectorImpl(legacy_input(input), direction, hv_out);
+      return RGPOT_SUCCESS;
+    } catch (...) {
+      return RGPOT_INTERNAL_ERROR;
+    }
+  }
+
+  template <typename Impl>
+  static PotentialHandle with_analytic_hvp(PotentialHandle handle) {
+    if constexpr (::rgpot::AnalyticHessianVector<Impl>) {
+      if (handle.raw() != nullptr) {
+        handle.set_hvp_callback(&hvp_trampoline<Impl>);
+      }
+    }
+    return handle;
   }
 };
 

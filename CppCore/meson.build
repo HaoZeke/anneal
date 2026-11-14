@@ -2027,6 +2027,17 @@ if get_option('with_tests')
         )
     endif
 
+    if get_option('with_rust_core') and not get_option('with_rpc_client_only')
+        test_array += [
+            [
+                'PotentialHvpTest',
+                'potential_hvp_test',
+                'PotentialHvpTest.cc',
+                '',
+            ],
+        ]
+    endif
+
     calculator_group_test_exe = disabler()
     foreach test : test_array
         # The fused-scan oracles are plain multiplies and adds, the same
