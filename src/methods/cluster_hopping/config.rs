@@ -1968,6 +1968,83 @@ impl Config {
         cfg
     }
 
+    /// The same search with each flexible molecule as one group, when
+    /// declared groups are covalently bonded to one another in `start`.
+    ///
+    /// A molecular library treats its groups as molecules: only atoms that
+    /// share a group are bonded, the rest are contacts. Groups cut from one
+    /// molecule at its rotatable bonds then hold every such bond to a
+    /// contact floor longer than the bond, and the call wall refuses the
+    /// molecule as it stands. The returned configuration merges the groups
+    /// of each covalent fragment of `start` into one group, whose torsions
+    /// the molecular library turns. `None` when no two declared groups share
+    /// a fragment, so a molecular cluster keeps its configuration unchanged.
+    pub fn with_flexible_molecules(&self, start: ArrayView1<f64>) -> Option<Self> {
+        let MoveLibrary::Molecular {
+            groups,
+            reactive: false,
+            reverse_cycles,
+        } = &self.move_library
+        else {
+            return None;
+        };
+        let species = self.species.as_deref()?;
+        if groups.len() < 2 || start.len() != 3 * species.len() {
+            return None;
+        }
+        let mut fragment_of = vec![usize::MAX; species.len()];
+        for (f, atoms) in connectivity_groups_z(start, species, self.bond_tolerance)
+            .iter()
+            .enumerate()
+        {
+            for &a in atoms {
+                fragment_of[a] = f;
+            }
+        }
+        let mut molecules: Vec<(usize, Vec<usize>)> = Vec::new();
+        for atoms in groups {
+            let fragment = atoms
+                .iter()
+                .find_map(|&a| fragment_of.get(a).copied())
+                .unwrap_or(usize::MAX);
+            match molecules
+                .iter_mut()
+                .find(|(f, _)| *f == fragment && fragment != usize::MAX)
+            {
+                Some((_, molecule)) => molecule.extend_from_slice(atoms),
+                None => molecules.push((fragment, atoms.clone())),
+            }
+        }
+        if molecules.len() == groups.len() {
+            return None;
+        }
+        let mut cfg = self.clone();
+        let groups: Vec<Vec<usize>> = molecules
+            .into_iter()
+            .map(|(_, mut molecule)| {
+                molecule.sort_unstable();
+                molecule
+            })
+            .collect();
+        // One free molecule turns its torsions, which check their own
+        // contacts. The SOAP pullback moves atoms along the descriptor
+        // gradient regardless of their bonds, or, retracted onto the one
+        // group, carries the molecule whole, and pays for the expansion
+        // before the overlap gate sees the proposal.
+        if groups.len() == 1
+            && groups[0].len() >= 4
+            && super::moves::mobile_atoms(&cfg, &groups).is_none()
+        {
+            cfg.prior_soap = false;
+        }
+        cfg.move_library = MoveLibrary::Molecular {
+            groups,
+            reactive: false,
+            reverse_cycles: *reverse_cycles,
+        };
+        Some(cfg)
+    }
+
     /// Radius of the preset's initial cluster sphere.
     pub fn start_radius(&self) -> f64 {
         self.container
@@ -2035,6 +2112,30 @@ mod coverage_behaviour {
             !Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0)
                 .packing_cna_applies()
         );
+    }
+
+    #[test]
+    fn bonded_groups_search_as_one_molecule() {
+        let cfg = Config::recommended_molecular(vec![6, 6, 6], vec![vec![0], vec![1, 2]], 1.0);
+        let x = ndarray::array![0.0, 0.0, 0.0, 1.5, 0.0, 0.0, 2.2, 1.2, 0.0];
+        let flexible = cfg
+            .with_flexible_molecules(x.view())
+            .expect("bonded groups");
+        assert_eq!(
+            flexible.move_library.declared_groups(),
+            Some(&[vec![0usize, 1, 2]][..])
+        );
+        assert!(flexible.with_flexible_molecules(x.view()).is_none());
+        let water = Config::recommended_molecular(
+            vec![8, 1, 1, 8, 1, 1],
+            vec![vec![0, 1, 2], vec![3, 4, 5]],
+            1.0,
+        );
+        let dimer = ndarray::array![
+            0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0, 3.10, 0.15, 0.08, 3.98, 0.40, -0.05,
+            2.82, 1.05, 0.18
+        ];
+        assert!(water.with_flexible_molecules(dimer.view()).is_none());
     }
 
     #[test]

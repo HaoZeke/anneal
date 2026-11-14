@@ -219,6 +219,27 @@ impl MoveLibrary {
                     )
                 };
                 let mobile = mobile_atoms(cfg, groups);
+                // One free group: a group shake, relocation or burst carries
+                // it whole, the quench returns the conformer it started from,
+                // and the hop pays a quench for it. A rotatable bond has two
+                // atoms on each side, so a group of three or fewer keeps the
+                // rigid arms. Whether the SOAP arm stays is
+                // [`Config::with_flexible_molecules`]'s call: only it knows
+                // the group is one covalent molecule.
+                let lone_molecule = groups.len() == 1
+                    && groups[0].len() >= 4
+                    && mobile.is_none()
+                    && cfg.species.is_some();
+                if lone_molecule {
+                    kernels.retain(|kernel| {
+                        !matches!(
+                            kernel,
+                            ClusterMove::GroupShake { .. }
+                                | ClusterMove::GroupRelocate { .. }
+                                | ClusterMove::GroupBurst { .. }
+                        )
+                    });
+                }
                 // The flexible SOAP leftover is an atomic packing pullback.
                 // On a water cluster larger than the hexamer it spends the
                 // quench inside the spherical-harmonic expansion and never
@@ -902,6 +923,8 @@ fn atom_distance(x: ArrayView1<f64>, i: usize, j: usize) -> f64 {
 }
 
 /// Turns `bond.side` by `angle` radians about the axis from `fixed` to `pivot`.
+///
+/// The pivot is on the axis and keeps its coordinates exactly.
 pub fn turn_bond(x: &mut Array1<f64>, bond: &RotatableBond, angle: f64) {
     let origin = [
         x[3 * bond.fixed],
@@ -921,7 +944,7 @@ pub fn turn_bond(x: &mut Array1<f64>, bond: &RotatableBond, angle: f64) {
         *v /= norm;
     }
     let (sa, ca) = angle.sin_cos();
-    for &a in &bond.side {
+    for &a in bond.side.iter().filter(|&&a| a != bond.pivot) {
         let p = [
             x[3 * a] - origin[0],
             x[3 * a + 1] - origin[1],
@@ -2458,23 +2481,8 @@ impl ClusterMove {
                 species,
                 tolerance,
                 mobile,
-            } => {
-                let mut y = x.to_owned();
-                let bonds: Vec<RotatableBond> = rotatable_bonds(x, species, *tolerance)
-                    .into_iter()
-                    .filter(|bond| {
-                        mobile
-                            .as_ref()
-                            .is_none_or(|free| bond.side.iter().all(|a| free.contains(a)))
-                    })
-                    .collect();
-                if bonds.is_empty() {
-                    return y;
-                }
-                let bond = &bonds[rng.random_range(0..bonds.len())];
-                turn_bond(&mut y, bond, rng.random::<f64>() * std::f64::consts::TAU);
-                y
-            }
+            } => super::torsion::Topology::of(x, species, *tolerance, mobile.as_deref())
+                .propose(x, rng),
         }
     }
 }
@@ -2491,7 +2499,7 @@ impl ClusterMove {
 /// `active_region` first because it names the movers directly, then
 /// the complement of `frozen`, and only then the grouped atoms, which
 /// is the free-cluster case where all three agree anyway.
-fn mobile_atoms(cfg: &Config, groups: &[Vec<usize>]) -> Option<Vec<usize>> {
+pub(super) fn mobile_atoms(cfg: &Config, groups: &[Vec<usize>]) -> Option<Vec<usize>> {
     if let Some((seeds, _)) = cfg.active_region.as_ref()
         && !seeds.is_empty()
         && seeds.len() != cfg.n_points
@@ -4217,5 +4225,28 @@ mod torsion_tests {
             .map(|k| k.name())
             .collect();
         assert!(names.iter().any(|n| n == "torsion"), "{names:?}");
+    }
+
+    #[test]
+    fn a_lone_molecule_keeps_only_its_torsion() {
+        use crate::methods::cluster_hopping::search_kernels;
+        let names = |cfg: &Config| -> Vec<String> {
+            search_kernels(cfg).iter().map(|k| k.name()).collect()
+        };
+        let mut x = Array1::zeros(18);
+        for atom in 0..6 {
+            x[3 * atom] = 1.5 * atom as f64;
+        }
+        let cut =
+            Config::recommended_molecular(vec![6; 6], vec![vec![0, 1, 2], vec![3, 4, 5]], 0.05);
+        assert!(names(&cut).len() > 1);
+        let chain = cut.with_flexible_molecules(x.view()).expect("one chain");
+        assert_eq!(names(&chain), vec!["torsion".to_string()]);
+        let mut held = cut.clone();
+        held.frozen = Some(vec![true, false, false, false, false, false]);
+        let held = held.with_flexible_molecules(x.view()).expect("one chain");
+        assert!(names(&held).iter().any(|name| name == "soap"));
+        let declared = Config::recommended_molecular(vec![6; 6], vec![(0..6).collect()], 0.05);
+        assert!(names(&declared).iter().any(|name| name == "soap"));
     }
 }

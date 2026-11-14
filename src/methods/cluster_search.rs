@@ -1184,6 +1184,8 @@ pub fn search_from<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    let flexible = cfg.with_flexible_molecules(start);
+    let cfg = flexible.as_ref().unwrap_or(cfg);
     let mut stats = RelaxStats::default();
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let out = {
@@ -1262,6 +1264,8 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
+    let flexible = cfg.with_flexible_molecules(start);
+    let cfg = flexible.as_ref().unwrap_or(cfg);
     let mut stats = RelaxStats::default();
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let out = {
@@ -1312,6 +1316,8 @@ pub fn search_from_with_history<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    let flexible = cfg.with_flexible_molecules(start);
+    let cfg = flexible.as_ref().unwrap_or(cfg);
     let mut stats = RelaxStats::default();
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let paid = PaidCheck::default();
@@ -1701,6 +1707,8 @@ pub fn search_from_bank<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    let flexible = cfg.with_flexible_molecules(start);
+    let cfg = flexible.as_ref().unwrap_or(cfg);
     let _caller_stop = ledger.bind_stop();
     use crate::bank_rpc::BankClient;
     use crate::bias::BasinBias;

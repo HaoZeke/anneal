@@ -450,3 +450,134 @@ fn the_auto_quench_follows_the_cost_of_a_call() {
     assert!(ledger.spent() <= 150);
 }
 
+/// A ten-carbon chain in eV and angstrom: 1.50 Å bonds, 1-3 springs for the
+/// 120° angles, and a Lennard-Jones attraction between atoms three or more
+/// bonds apart, so a folded chain lies below the zigzag.
+struct BondedChain {
+    atoms: usize,
+    bounds: eindir_core::bounds::Bounds<f64>,
+}
+
+impl BondedChain {
+    const BOND: f64 = 1.50;
+
+    fn new(atoms: usize) -> Self {
+        let bounds = eindir_core::bounds::Bounds::new(
+            Array1::from_elem(3 * atoms, -30.0),
+            Array1::from_elem(3 * atoms, 30.0),
+            0.0,
+        );
+        Self { atoms, bounds }
+    }
+
+    fn zigzag(&self) -> Array1<f64> {
+        let mut x = Array1::zeros(3 * self.atoms);
+        for i in 0..self.atoms {
+            x[3 * i] = 1.299 * i as f64;
+            x[3 * i + 1] = if i % 2 == 0 { 0.0 } else { 0.75 };
+        }
+        x
+    }
+}
+
+impl eindir_core::Objective<f64> for BondedChain {
+    fn dim(&self) -> usize {
+        3 * self.atoms
+    }
+
+    fn bounds(&self) -> &eindir_core::bounds::Bounds<f64> {
+        &self.bounds
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        eindir_core::gradient::DifferentiableObjective::value_and_gradient(self, x).0
+    }
+}
+
+impl eindir_core::gradient::Gradient<f64> for BondedChain {
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        eindir_core::gradient::DifferentiableObjective::value_and_gradient(self, x).1
+    }
+
+    fn dim(&self) -> usize {
+        3 * self.atoms
+    }
+}
+
+impl eindir_core::gradient::DifferentiableObjective<f64> for BondedChain {
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let mut energy = 0.0;
+        let mut grad = Array1::zeros(x.len());
+        for i in 0..self.atoms {
+            for j in i + 1..self.atoms {
+                let d: Vec<f64> = (0..3).map(|k| x[3 * i + k] - x[3 * j + k]).collect();
+                let r = d.iter().map(|v| v * v).sum::<f64>().sqrt();
+                let (e, de) = match j - i {
+                    1 => (20.0 * (r - Self::BOND).powi(2), 40.0 * (r - Self::BOND)),
+                    2 => (5.0 * (r - 2.598).powi(2), 10.0 * (r - 2.598)),
+                    _ => {
+                        let s6 = (3.4 / r).powi(6);
+                        (
+                            0.04 * (s6 * s6 - s6),
+                            0.04 * (6.0 * s6 - 12.0 * s6 * s6) / r,
+                        )
+                    }
+                };
+                energy += e;
+                for k in 0..3 {
+                    grad[3 * i + k] += de * d[k] / r;
+                    grad[3 * j + k] -= de * d[k] / r;
+                }
+            }
+        }
+        (energy, grad)
+    }
+}
+
+#[test]
+fn a_flexible_molecule_spends_its_budget_on_torsion_quenches() {
+    use anneal_core::methods::cluster_search::search_from;
+    let chain = BondedChain::new(10);
+    let species = vec![6; 10];
+    // One fragment per atom: every bond joins two declared groups.
+    let groups: Vec<Vec<usize>> = (0..10).map(|i| vec![i]).collect();
+    let cfg = Config::recommended_molecular(species, groups, 0.05);
+    let start = chain.zigzag();
+    let budget = 3000;
+    let mut ledger = Ledger::new(budget);
+    let (out, _) = search_from(&chain, &cfg, &mut ledger, start.view(), 11).expect("finite start");
+    assert!(
+        out.charged + 50 >= budget,
+        "{} of {budget} calls charged in {} hops, {} overlaps",
+        out.charged,
+        out.hops,
+        out.overlap_rejected
+    );
+    assert!(
+        out.hops < budget,
+        "{} hops on {} calls",
+        out.hops,
+        out.charged
+    );
+    let torsion = out
+        .arms
+        .iter()
+        .find(|(name, ..)| name == "torsion")
+        .expect("a torsion arm");
+    assert!(torsion.1 > 0, "{:?}", out.arms);
+    let best = out.best_state.expect("a recorded minimum");
+    for i in 0..9 {
+        let r = (0..3)
+            .map(|k| (best[3 * i + k] - best[3 * i + 3 + k]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        assert!((r - BondedChain::BOND).abs() < 0.05, "bond {i} at {r}");
+    }
+    let zigzag =
+        eindir_core::gradient::DifferentiableObjective::value_and_gradient(&chain, start.view()).0;
+    assert!(
+        out.best < zigzag - 0.05,
+        "best {} zigzag {zigzag}",
+        out.best
+    );
+}

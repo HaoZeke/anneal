@@ -91,6 +91,7 @@ mod mackay_cap_tests;
 mod moves;
 mod packing_bank;
 mod preset;
+mod torsion;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{
@@ -1429,7 +1430,13 @@ pub const OVERLAP_CALL_LIMIT: f64 = 0.90;
 /// handed to the potential. One fraction for every element. The radii, not
 /// the species name, set the length. A contact that is not a declared bond
 /// is refused inside the full covalent sum: that sum is a single-bond length.
-pub const COVALENT_CALL_FRACTION: f64 = 0.95;
+///
+/// The radii are single-bond radii, and a multiple bond is shorter: an
+/// aromatic C–C is 0.91 of the sum, C=O 0.86, C≡C and C≡N 0.79. A bonded
+/// floor above those refuses every aromatic molecule as it stands, and the
+/// refusal step pulls its bonds out to single-bond length. 0.70 is below a
+/// triple bond; hydrogen pairs keep [`OVERLAP_CALL_LIMIT`] either way.
+pub const COVALENT_CALL_FRACTION: f64 = 0.70;
 
 /// Distance at or below which a molecular potential is not called.
 ///
@@ -1536,9 +1543,22 @@ mod call_wall_tests {
     fn hydrogen_pairs_keep_the_absolute_floor() {
         assert!((molecular_call_floor(1, 1, false) - 0.90).abs() < 1.0e-12);
         let oh = molecular_call_floor(8, 1, true);
-        let expected = (0.95_f64 * (0.66 + 0.31)).max(0.90);
+        let expected = (super::COVALENT_CALL_FRACTION * (0.66 + 0.31)).max(0.90);
         assert!((oh - expected).abs() < 1.0e-12);
         assert!((molecular_call_floor(7, 1, false) - 1.02).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn aromatic_carbonyl_and_nitrile_bonds_are_not_refused() {
+        for (za, zb, length) in [(6u32, 6u32, 1.39), (6, 8, 1.21), (6, 7, 1.16), (6, 6, 1.20)] {
+            let mut coordinates = Array1::zeros(6);
+            coordinates[3] = length;
+            let groups = vec![vec![0usize, 1]];
+            assert!(
+                !inside_molecular_call_wall(coordinates.view(), &[za, zb], Some(&groups)),
+                "{za}-{zb} at {length}"
+            );
+        }
     }
 }
 

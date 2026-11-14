@@ -1,0 +1,3 @@
+The molecular torsion turns one to three rotatable bonds and checks the proposal for non-bonded contacts before anything pays for it; a contact is repaired by descent in torsion space, which keeps every bond length and angle.
+A lone free group of four or more atoms drops the whole-group moves, which only carried it; when that group is one molecule joined from bonded groups, the torsion replaces the SOAP pullback as well.
+A molecular search whose declared groups are bonded to each other at the start searches each covalent fragment as one molecule; libraries of unbonded molecules, such as water clusters, search as before.
