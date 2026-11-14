@@ -2,8 +2,18 @@
 //!
 //! The accepted-transition sequence and the final energies are part of the
 //! search result. A faster evaluation path has to leave them unchanged.
-//! The develop merge's stall-growth hold moves this hash. Both builds
-//! print the same one.
+//! The recommended full quench is 1000 steps, so this pin is that
+//! trajectory, not the earlier 200-step one.
+//!
+//! The hash is the scalar walk through one `libm`. Host `exp`, `sin`,
+//! and `cos`, and the NEON dot product, are a different trajectory.
+//! Proposals, the acceptance test, the SOAP cutoff, the fivefold turn,
+//! the continuous-symmetry orientation, the energy-lattice softmax, the
+//! depth-rewarded arm, and the pair force go through that `libm`, and
+//! this test forces rgmin's scalar dots.
+//!
+//! The fivefold assignment is the built-in one on every build, so the
+//! hash is `6e277f86…` with and without IRA.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, random_cluster_in_radius, run_with_gradient,
@@ -19,6 +29,9 @@ const ATOMS: usize = 98;
 const BUDGET: usize = 5_000;
 
 fn trajectory_hash() -> String {
+    // AVX2, AVX-512 and NEON dots are not the same quench. Scalar `mul_add`
+    // is the path every target can run.
+    let _ = rgmin::vecops::force_simd_path("scalar");
     let cfg = Config::recommended(ATOMS);
     let potential = PairPotential::lennard_jones(ATOMS);
     let mut rng = StdRng::seed_from_u64(SEED);
@@ -75,8 +88,8 @@ fn trajectory_hash() -> String {
 #[test]
 fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     let hash = trajectory_hash();
-    assert_eq!(
-        hash, "66e98eb2c3289531c9b7e339555f5041d9deb313dbe9a2064cc60c066b1ba665",
-        "trajectory hash changed: {hash}"
-    );
+    // The fivefold residual uses the built-in assignment on every build,
+    // so linking IRA does not change this hash.
+    let expected = "6e277f8611c9988bbb95c72873fb5b044be414e9148ab9571b732f834e3dceb9";
+    assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }

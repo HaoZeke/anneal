@@ -29,6 +29,9 @@ fn fresh_bias(cfg: &Config) -> BasinBias<ClusterFingerprint> {
 
 fn stalling_config(trail: bool) -> Config {
     let mut cfg = Config::recommended(6);
+    // The toy relaxer charges every step, and the 3000-call ledger is sized
+    // for 200-step quenches.
+    cfg.relax_steps = 200;
     // The toy landscape contracts everything toward the origin, so
     // improvement dries up almost immediately and the stall trigger is
     // exercised early and often.

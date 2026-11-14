@@ -156,23 +156,36 @@ jobs:
           fi
           cog check "$COG_FROM..$COG_TO"
 
+      # A pull-request checkout is the merge of the base into the head, so
+      # `git rev-list --objects HEAD` also lists blobs the base already has.
+      # Those still fail a push of the base, which audits HEAD. A pull request
+      # audits the objects its own commits add, at the same 1 MiB bar.
       - name: Audit for large files
         shell: bash
+        env:
+          AUDIT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          AUDIT_HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
-          # Blobs already on the merged develop tip are that branch's
-          # history. Audit the objects this head adds after that merge.
-          develop_merge=$(git log -1 --format=%H --grep="Merge remote-tracking branch 'origin/develop'" HEAD || true)
-          if [[ -n "$develop_merge" ]] \
-             && git rev-parse --verify --quiet "${develop_merge}^2" >/dev/null; then
-            objects=$(git rev-list --objects "${develop_merge}^2"..HEAD)
+          if [[ -n "$AUDIT_BASE" ]] && git cat-file -e "$AUDIT_BASE^{commit}" \
+              && git cat-file -e "$AUDIT_HEAD^{commit}"; then
+            range="$AUDIT_BASE..$AUDIT_HEAD"
           else
-            objects=$(git rev-list --objects HEAD)
+            range=HEAD
           fi
-          oversized=$(
-            printf '%s\n' "$objects" |
-              git cat-file --batch-check='%(objecttype) %(objectsize) %(objectname) %(rest)' |
-              awk '$1 == "blob" && $2 > 1048576'
-          )
+          if [[ "$range" == HEAD ]]; then
+            objects=$(git rev-list --objects HEAD)
+          else
+            objects=$(git rev-list --objects "$range")
+          fi
+          if [[ -z "$objects" ]]; then
+            oversized=
+          else
+            oversized=$(
+              printf '%s\n' "$objects" |
+                git cat-file --batch-check='%(objecttype) %(objectsize) %(objectname) %(rest)' |
+                awk '$1 == "blob" && $2 > 1048576'
+            )
+          fi
           if [[ -n "$oversized" ]]; then
             printf 'Git history contains blobs larger than 1 MiB:\n%s\n' "$oversized" >&2
             exit 1
@@ -291,23 +304,19 @@ jobs:
           echo "VESIN_SRC=$GITHUB_WORKSPACE/.ci/vesin" >> "$GITHUB_ENV"
           echo "IRA_LIB_DIR=$GITHUB_WORKSPACE/.ci/ira/lib" >> "$GITHUB_ENV"
 
+      # Do not pass `-undefined dynamic_lookup` on macOS. It applies to the
+      # test harness as well as the cdylib. With pyo3's `extension-module`
+      # feature the harness does not link libpython, and dyld then fails
+      # before any test with `_PyBaseObject_Type` missing in the flat
+      # namespace. build.rs links libpython for this invocation. Maturin
+      # still passes the lookup flag when it builds the wheel.
       - name: cargo test
-        if: runner.os != 'macOS'
         run: cargo test
-
-      - name: cargo test (macOS)
-        if: runner.os == 'macOS'
-        run: >-
-          cargo
-          --config 'target.x86_64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
-          --config 'target.aarch64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
-          test
 
       # Feature flags stamp new hashes on the same test binaries and
       # examples. Keeping the default-feature target filled the disk
       # during the second link.
       - name: cargo clean (before feature tests)
-        if: runner.os != 'macOS'
         run: cargo clean
 
       - name: cargo test (all satisfiable features)
@@ -316,11 +325,7 @@ jobs:
 
       - name: cargo test (all satisfiable features, macOS)
         if: runner.os == 'macOS'
-        run: >-
-          cargo
-          --config 'target.x86_64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
-          --config 'target.aarch64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
-          test --features "$CI_FEATURES"
+        run: cargo test --features "$CI_FEATURES"
 
       # maturin develop builds the dev profile and cannot reuse the
       # opt-level 2 test artifacts. Drop them before the wheel.

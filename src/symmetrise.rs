@@ -71,6 +71,8 @@ fn centroid(x: ArrayView1<f64>, n: usize) -> [f64; 3] {
 
 /// Rotates `v` about a unit `axis` by `angle`, by Rodrigues' formula.
 fn rotate(v: [f64; 3], axis: [f64; 3], angle: f64) -> [f64; 3] {
+    // Host `sin` and `cos` of the same angle are not one function on glibc
+    // and libSystem, and this rotation places the symmetrised points.
     let s = libm::sin(angle);
     let co = libm::cos(angle);
     let dot = v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2];
