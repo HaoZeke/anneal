@@ -2282,7 +2282,8 @@ impl ClusterMove {
                         for k in 0..3 {
                             let u1 = rng.random::<f64>().max(1e-12);
                             let u2 = rng.random::<f64>();
-                            dir[k] = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
+                            dir[k] = super::portable_sqrt(-2.0 * super::portable_ln(u1))
+                                * super::portable_cos(std::f64::consts::TAU * u2);
                             norm += dir[k] * dir[k];
                         }
                         let norm = norm.sqrt().max(1e-12);
@@ -2418,7 +2419,10 @@ impl ClusterMove {
                     l_max: 6,
                     rcut_nn: *cutoff,
                 };
-                let packing = species.is_none() && mobile.is_none();
+                // A declared rigid group is retracted, not replaced by the
+                // fivefold packing hop. One element without groups still
+                // takes that hop.
+                let packing = species.is_none() && mobile.is_none() && groups.is_none();
                 if *class && packing {
                     crate::soap::step_away(x, &[], spec, *rmsd, rng)
                 } else if packing {

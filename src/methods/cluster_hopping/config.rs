@@ -1328,6 +1328,8 @@ impl Config {
     /// Orbit completion runs on every new basin, and below 98 points the
     /// relaxation draws between the plain surface and the two-phase
     /// relative 0.7 surface, the same rule as [`Config::communicating`].
+    /// A full quench runs up to 1000 steps, against 200 in
+    /// [`Config::for_cluster`].
     /// On optbench archive starts at development seeds, without them this
     /// stack needed a median 1.4e5 force calls on 32 LJ38 starts and solved
     /// 2 of 16 LJ75 starts in 1e6; with them, 4.9e3 and 16 of 16.
@@ -1356,6 +1358,15 @@ impl Config {
         if n_points < 98 {
             cfg.surfaces = vec![crate::methods::two_phase::TwoPhase::relative(0.7, 1.0)];
         }
+        // At 200 steps at least 27 per cent of the full quenches of LJ98
+        // runs stop above the record gradient, and the chain accepts on
+        // their energies. GMIN's LJ98 deck sets MAXIT 1000 1000. At 1000,
+        // LJ98 seeds 0-63 at 2e6 calls reach the Leary tetrahedron on 61
+        // of 64 against 53 of 64. LJ55 gets slower, with calls to hit as
+        // median [IQR] (n=64) of 10200.5 [4292.5, 19646.75] against
+        // 6603 [3344, 16285.25]. The Bayes threshold keeps its 200-step
+        // value.
+        cfg.relax_steps = 1000;
         // GMIN calls SYMMETRYCSM every NSYMINTERVAL quenches, default 10.
         // The same paper's LJ75 table used a restart of about five basin
         // hopping steps once symmetrisation was on. Both run inside this

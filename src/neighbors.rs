@@ -350,7 +350,13 @@ mod vesin_ffi {
                 return None;
             }
             let mut lists = vec![Vec::new(); n];
-            let pairs = unsafe { core::slice::from_raw_parts(list.pairs, list.length) };
+            // An empty list is a null pointer. `from_raw_parts` rejects that
+            // even when the length is zero.
+            let pairs = if list.length == 0 || list.pairs.is_null() {
+                &[]
+            } else {
+                unsafe { core::slice::from_raw_parts(list.pairs, list.length) }
+            };
             for p in pairs {
                 let (a, b) = (p[0], p[1]);
                 if a < n && b < n && a != b {
@@ -424,9 +430,17 @@ mod vesin_ffi {
         if status != 0 {
             return None;
         }
-        let pairs = unsafe { core::slice::from_raw_parts(list.pairs, list.length) };
-        let returned = unsafe { core::slice::from_raw_parts(list.vectors, list.length) };
-        let distances = unsafe { core::slice::from_raw_parts(list.distances, list.length) };
+        fn slice<T>(ptr: *mut T, len: usize) -> &'static [T] {
+            if len == 0 || ptr.is_null() {
+                &[]
+            } else {
+                // SAFETY: vesin allocated `len` elements at `ptr` for this list.
+                unsafe { core::slice::from_raw_parts(ptr, len) }
+            }
+        }
+        let pairs = slice(list.pairs, list.length);
+        let returned = slice(list.vectors, list.length);
+        let distances = slice(list.distances, list.length);
         let limit = cutoff * cutoff;
         let mut best = vec![vec![None; n]; n];
         for (pair, (vector, distance)) in pairs.iter().zip(returned.iter().zip(distances.iter())) {

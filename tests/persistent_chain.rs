@@ -276,11 +276,24 @@ fn checkpoint_probe_is_recorded_without_becoming_the_live_chain() {
 
 #[test]
 fn failed_diagnostic_probe_stays_off_the_live_chain() {
-    let mut cfg = Config::recommended(6);
+    // `recommended` screens, symmetrises and redraws a lattice, and each of
+    // those spends the ledger before the checkpoint. The probe only needs
+    // a one-step quench.
+    let mut cfg = Config::for_cluster(6);
     cfg.relax_steps = 1;
+    cfg.screen_steps = 1;
+    cfg.return_screen = false;
+    cfg.bayes_screen = false;
+    // An improving toy quench is lower every time, so the finish loop
+    // would spend the rest of the ledger on that hop and the checkpoint
+    // would never run.
+    cfg.finish_improving = false;
     let mut rng = StdRng::seed_from_u64(0xfeed_600e);
     let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
-    let mut ledger = Ledger::new(2);
+    // Opening quench and one hop, then the checkpoint's probe. The hop
+    // is a one-step screen plus a one-step quench, so the probe is the
+    // fourth charge and nothing remains after it.
+    let mut ledger = Ledger::new(4);
     let mut bias = fresh_bias(&cfg);
     let mut relax = toy_relax;
     let proposed = start.mapv(|value| value + 4.0);

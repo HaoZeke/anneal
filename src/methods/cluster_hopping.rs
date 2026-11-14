@@ -4433,6 +4433,21 @@ where
         // Every unlike pair, quenched, kept when it is lower. One random
         // exchange every fourth hop does not finish the ordering. Absent
         // unless two labels are present, so an unlabelled chain is unchanged.
+        // A frozen atom is the frame: exchanging it moves the substrate.
+        let frame_frozen: Option<Vec<bool>> = match (&cfg.active_region, &cfg.species) {
+            (Some((seeds, shells)), Some(z)) => Some(
+                active_mask(x.view(), z, seeds, *shells, cfg.bond_tolerance)
+                    .into_iter()
+                    .map(|active| !active)
+                    .collect(),
+            ),
+            _ => cfg.frozen.clone(),
+        };
+        let atom_is_frame = |atom: usize| {
+            frame_frozen
+                .as_ref()
+                .is_some_and(|mask| mask.get(atom).copied().unwrap_or(false))
+        };
         // A molecular or rigid library keeps its atoms inside a body.
         if polishes_unlike_pairs(cfg)
             && !escape_refused
@@ -4444,7 +4459,7 @@ where
             let mut current = best_state;
             let mut current_e = ledger.best;
             let (group_a, group_b) = species_groups(species);
-            for _round in 0..3 {
+            'rounds: for _round in 0..3 {
                 if ledger.remaining() == 0 {
                     break;
                 }
@@ -4455,12 +4470,21 @@ where
                         if ledger.remaining() == 0 || tried >= 800 {
                             break 'pairs;
                         }
+                        if atom_is_frame(i) || atom_is_frame(j) {
+                            continue;
+                        }
                         tried += 1;
                         let mut swapped = current.clone();
                         for axis in 0..3 {
                             swapped.swap(3 * i + axis, 3 * j + axis);
                         }
                         let (eq, xq) = relax(ledger, swapped.view(), cfg.relax_steps);
+                        if species_wide && !cfg!(feature = "rgsaddle") {
+                            // One exchange evaluation can spend the budget.
+                            // Further swaps are not a stand-in for the
+                            // missing constant-energy escape.
+                            break 'rounds;
+                        }
                         if !quench_is_sane(cfg, eq, xq.view()) || !(eq < current_e - 1e-6) {
                             continue;
                         }
@@ -6256,6 +6280,16 @@ where
                 species_escape_trial = true;
             }
         }
+        // The exchange above may have spent the budget. That end is a
+        // budget stop. When the budget remains, an uncompiled escape still
+        // stops the run: the exchange is not a kick that continues it.
+        if species_wide && !cfg!(feature = "rgsaddle") {
+            if ledger.remaining() == 0 || ledger.stopped() {
+                break HopStop::of_closed(ledger);
+            }
+            nve_unavailable = true;
+            break HopStop::NveUnavailable;
+        }
         // A large diameter ratio makes an all-pairs identity exchange climb
         // out of the funnel (Sicher, Mohr, Goedecker). The ordinary proposal
         // is a softened constant-energy (NVE) escape that has to travel
@@ -6622,6 +6656,16 @@ where
                 contain_trial(cfg, &mut trial, n);
             }
             Some(f) => {
+                // The proposal may have moved the frame. Put those atoms
+                // back before the box is read, so a later quench pins them
+                // where the chain left them.
+                for i in 0..n {
+                    if f.get(i).copied().unwrap_or(false) {
+                        for k in 0..3 {
+                            trial[3 * i + k] = x[3 * i + k];
+                        }
+                    }
+                }
                 let mut lo = [f64::INFINITY; 3];
                 let mut hi = [f64::NEG_INFINITY; 3];
                 for i in 0..n {
@@ -9932,7 +9976,8 @@ mod tests {
         ));
         let want = crate::screen::cost_asymmetric_threshold(der.screen_steps, der.relax_steps);
         assert!((der.bayes_threshold - want).abs() < 1e-12);
-        assert!((der.bayes_threshold - 7.0 / 15.0).abs() < 1e-12);
+        assert!((der.bayes_threshold - 39.0 / 79.0).abs() < 1e-12);
+        assert!((rec.bayes_threshold - 7.0 / 15.0).abs() < 1e-12);
     }
 
     #[test]
