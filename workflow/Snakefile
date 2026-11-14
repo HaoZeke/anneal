@@ -80,6 +80,20 @@ rule sc_h2h:
         """
 
 
+# Twelve-seed Sutton–Chen against GMIN. Appends rows. The six-seed
+# table above is left as it is. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile sc_h2h_n12
+rule sc_h2h_n12:
+    output:
+        "bench/metal-cluster-h2h/sc-n12/results.csv",
+        "bench/metal-cluster-h2h/sc-n12/seeds.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/metal_h2h/enter_sc_n12.sh
+        """
+
+
 # Cleri–Rosato Pt–Cu against GMIN. Not part of `rule all`.
 #   snakemake -s workflow/Snakefile ptcu_h2h
 rule ptcu_h2h:
