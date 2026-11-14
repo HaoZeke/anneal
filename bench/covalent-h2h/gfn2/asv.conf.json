@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "project": "anneal",
+  "project_url": "https://github.com/HaoZeke/anneal",
+  "repo": "../../..",
+  "branches": ["develop"],
+  "environment_type": "existing",
+  "build_command": ["python3", "-c", "import pathlib; pathlib.Path('build').touch()"],
+  "benchmarks": "benchmarks"
+}

@@ -640,7 +640,10 @@ impl RgpotObjective {
         let cfg = XtbConfig {
             method: GFN2,
             accuracy: GFN2_ACCURACY,
-            electronic_temperature: 300.0,
+            electronic_temperature: std::env::var("RGPOT_XTB_ETEMP")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(300.0),
             max_iterations: GFN2_MAX_ITERATIONS,
             charge: 0.0,
             uhf: 0,

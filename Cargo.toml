@@ -190,6 +190,10 @@ name = "gfn2_water_h2h"
 required-features = ["rgpot-ex"]
 
 [[example]]
+name = "gfn2_covalent_h2h"
+required-features = ["rgpot-ex"]
+
+[[example]]
 name = "gfn2_nh3_h2h"
 required-features = ["rgpot-ex"]
 

@@ -1,0 +1,5 @@
+system,code,runs,hits,median_evals_to_hit,median_wall_s
+si10,anneal-general,12,12,666.0,33.2
+si10,crest,4,4,99300.5,2699.1
+c10,anneal-general,12,11,6350.0,14.6
+c10,crest,12,4,78367.0,439.5

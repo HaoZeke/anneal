@@ -147,6 +147,21 @@ rule au55_scale:
         """
 
 
+# GFN2-xTB Si10 and C10, anneal's general arm against CREST 3.0.2, twelve
+# seeds, 1e5 calls, 3000 K electronic temperature. Needs xtb 6.7.1, CREST
+# and rgpot's libxtb_engine.so (paths in the script). Not part of `rule all`.
+#   snakemake -s workflow/Snakefile covalent_gfn2_crest
+rule covalent_gfn2_crest:
+    output:
+        "bench/covalent-h2h/gfn2/seeds.csv",
+        "bench/covalent-h2h/gfn2/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/covalent_h2h/gfn2_enter_bench.sh
+        """
+
+
 # GMIN against the paper preset at the paper force-call budgets.
 # Not part of `rule all`. Run it by name:
 #   snakemake -s workflow/Snakefile gmin_h2h

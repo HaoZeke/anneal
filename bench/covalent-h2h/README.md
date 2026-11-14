@@ -651,6 +651,76 @@ and 19 skipped. With ChemFit 4.0.0, `pytest pytest/test_chemfit*.py` gives
 1005 passed and 4 skipped, and `examples/chemfit_anneal.py` prints best
 loss 2.347665788572983.
 
+## GFN2-xTB against CREST
+
+GFN-FF runs on both clusters, but it is a bonded force field whose
+topology is fixed from the input geometry, so a search on it cannot
+rearrange the cluster. GFN2-xTB has no topology. Both codes search it with
+real xtb 6.7.1 (conda-forge build): anneal through rgpot's
+`libxtb_engine.so` at the pinned engine revision, and CREST 3.0.2 through
+its legacy xtb driver. Silicon clusters have no gap and the SCC fails at
+300 K, so both run at an electronic temperature of 3000 K
+(`RGPOT_XTB_ETEMP`, 300 K when unset).
+
+- Anneal is the panel's G arm (`examples/gfn2_covalent_h2h`, the
+  `general` configuration of `examples/h2h_covalent.rs` on develop
+  `bb486bfd`) on scales from the GFN2 dimer, which costs 46 calls on
+  silicon and 17 on carbon. It has no pair-range cut, because dispersion
+  has no finite reach. The budget is the paper's 1e5 calls, and the run
+  stops at the reference.
+- CREST is `crest start.xyz --gfn2 -T 1 --legacy -notopo -nocross -shake 0
+  -tstep 2`, given the same start after one xtb `--opt` of it. With its
+  defaults it does not search a cluster. On the start it stops because its
+  first optimisation changed the topology. From the optimised start,
+  CREGEN removed 36 of 49 structures as topology changes and the genetic
+  crossing crashed on the one left, at -20.73008 Eh against the ring's
+  -20.99572. Its default SHAKE also holds every bond during the
+  metadynamics. `-shake 0` with a 1 fs step reached -566.88 eV on seed 2000
+  in 146,476 calls, and 2 fs is the step the panel uses.
+- A CREST call is an MD step (the `max steps` of each xtb MD) or an
+  optimisation cycle (each `* total energy` line). `inside` is the summed
+  wall of the xtb processes for CREST, and the time in the handle for
+  anneal.
+- The reference is the lowest minimum any run reached: -460.68373809 eV
+  for Si10, and for C10 -571.32273783 eV, the cumulenic ring with every
+  bond at 1.285 Å. A hit is within 1e-3 eV. Seeds 2000-2011 on C10 for
+  both codes. On Si10, anneal runs all twelve seeds and CREST, at about
+  45 minutes a run, seeds 2000-2003. Serial on core 0, hostname `bench`.
+
+| system | code | hits | median calls | IQR | best / eV | median wall / s | inside / call | outside / call |
+|---|---|---|---|---|---|---|---|---|
+| Si10 | anneal G | 12/12 | 666 | 268 | -460.683738 | 33.2 | 58.43 ms | 0.010 ms |
+| Si10 | CREST | 4/4 | 99,300 | 7,900 | -460.683718 | 2699.1 | 26.76 ms | 0.252 ms |
+| C10 | anneal G | 11/12 | 6,350 | 6,077 | -571.322738 | 14.6 | 1.18 ms | 0.002 ms |
+| C10 | CREST | 4/12 | 78,367 | 2,880 | -571.322711 | 439.5 | 5.10 ms | 0.288 ms |
+
+CREST's calls are the calls of its whole run, which does not stop at the
+reference.
+
+- Si10: both codes reach the minimum on every seed they ran. On seeds
+  2000-2003 anneal takes 620, 505, 520 and 2,581 calls, and CREST
+  108,264, 96,365, 102,236 and 94,277 (Mann-Whitney p = 0.0011 over all
+  rows). Anneal's calls cost more inside xtb, 58 ms against 27 ms,
+  because its quenches start from random clusters where the SCC
+  struggles.
+- C10: anneal reaches the ring on 11 of 12 seeds and CREST on 4 (Fisher p
+  = 0.0094, Mann-Whitney p = 0.0005). Seven CREST runs end in a compact
+  cage with four three-coordinated atoms at -566.877 eV, and its eighth
+  miss, seed 2004, in the linear chain at -568.818 eV. Anneal's one miss,
+  seed 2003 at the full 1e5 calls, ends in a bicyclic ring with two
+  three-coordinated atoms at -566.959 eV. 97,170 of its calls are trial
+  geometries with two atoms inside 0.90 Å, which the handle refuses
+  before xtb. The example prints the handle's refusals as
+  `geometry_rejected`, two to a call because the energy and the gradient
+  each reach the handle.
+
+`scripts/covalent_h2h/gfn2_enter_bench.sh` builds the example and runs
+both codes; `GFN2_CODES=anneal-general` reruns anneal alone and keeps the
+CREST rows. The CREST rows were measured on `8b4a2592` from starts that
+are identical byte for byte on `bb486bfd`. On `f2a628c0` anneal takes
+the same calls on Si10 seeds 2002, 2006 and 2011 and C10 seeds 2000,
+2002 and 2004.
+
 ## Pins
 
 `scripts/covalent_h2h/pins.sh` prints, with every clock column removed:
@@ -671,3 +741,5 @@ Before and after the fix, the output's sha1 is
 - `reference.csv`: the unstopped reference runs.
 - `tc20-bowl.xyz`, `tc20-flake.xyz`: the C20 bowl and the best unbiased flake.
 - `c10-96/`: the 96-seed C10 rows.
+- `gfn2/`: per-seed rows and summary of GFN2-xTB Si10 and C10, anneal
+  against CREST.
