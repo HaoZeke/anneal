@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 pub(crate) const OVERLAP_SEPARATION_A: f64 = 0.35;
 /// Same gate as `OVERLAP_CALL_LIMIT`. Below a covalent O–H, above the shell
 /// where xtb's SCC fails.
-const OVERLAP_CALL_LIMIT_A: f64 = 0.90;
+pub(crate) const OVERLAP_CALL_LIMIT_A: f64 = 0.90;
 
 static SCC_REJECTED: AtomicUsize = AtomicUsize::new(0);
 static GEOMETRY_REJECTED: AtomicUsize = AtomicUsize::new(0);
@@ -54,6 +54,14 @@ fn note_geometry_rejected(min_pair_a: f64) {
     let n = GEOMETRY_REJECTED.fetch_add(1, Ordering::Relaxed) + 1;
     eprintln!("geometry_rejected {n} min_pair_A {min_pair_a:.6}");
     let _ = io::stderr().flush();
+}
+
+/// Whether the xtb handle refuses `positions` before it reaches xtb.
+///
+/// A caller that charges per call asks this first, so a geometry the handle
+/// will not evaluate costs nothing.
+pub(crate) fn refuses_geometry(positions: &[f64]) -> bool {
+    min_pair_distance_a(positions) <= OVERLAP_CALL_LIMIT_A
 }
 
 fn min_pair_distance_a(positions: &[f64]) -> f64 {

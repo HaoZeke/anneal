@@ -1551,6 +1551,111 @@ pub fn structure_is_sane(x: ArrayView1<f64>, min_sep: f64) -> bool {
     x.iter().all(|value| value.is_finite()) && min_pair_distance(x) >= min_sep
 }
 
+/// Whether every coordinate is finite and every pair lies past `floor`.
+pub fn clears_call_floor(x: ArrayView1<f64>, floor: f64) -> bool {
+    x.iter().all(|value| value.is_finite()) && min_pair_distance(x) > floor
+}
+
+/// Sweeps [`open_call_floor`] makes before it gives a trial up.
+const CALL_FLOOR_SWEEPS: usize = 32;
+
+/// An opened pair stands this far past the floor, as a multiple of it.
+///
+/// The least opening that leaves the pair off the floor keeps the trial the
+/// move drew. Opening to [`Config::min_separation`], 1.7 Å on GFN2 silicon,
+/// turned a refusal that cost two calls into a full quench of a rewritten
+/// trial and slowed Si10.
+const CALL_FLOOR_OPENING: f64 = 1.05;
+
+/// Opens every pair at or inside `floor` to `target` along its own axis.
+///
+/// Pairs past the floor are not touched, so a bond keeps its length while
+/// the two atoms stacked beside it are pulled apart. A frozen atom stays
+/// put and its partner takes the whole step. Geometry only: no potential
+/// is called. Returns whether the result clears the floor.
+pub fn open_call_floor(
+    x: &mut Array1<f64>,
+    floor: f64,
+    target: f64,
+    frozen: Option<&[bool]>,
+) -> bool {
+    if !(floor.is_finite() && floor > 0.0) || x.iter().any(|value| !value.is_finite()) {
+        return false;
+    }
+    let target = if target.is_finite() && target > floor {
+        target
+    } else {
+        floor * (1.0 + 1.0e-6)
+    };
+    let held = |atom: usize| frozen.and_then(|f| f.get(atom).copied()).unwrap_or(false);
+    let n = x.len() / 3;
+    for _ in 0..CALL_FLOOR_SWEEPS {
+        let mut moved = false;
+        for a in 0..n {
+            for b in (a + 1)..n {
+                let mut delta = [0.0; 3];
+                let mut square = 0.0;
+                for axis in 0..3 {
+                    delta[axis] = x[3 * b + axis] - x[3 * a + axis];
+                    square += delta[axis] * delta[axis];
+                }
+                let distance = square.sqrt();
+                if distance > floor || (held(a) && held(b)) {
+                    continue;
+                }
+                // Two coincident atoms have no axis of their own; any fixed
+                // one separates them, and a later sweep settles the rest.
+                let unit = if distance > 1.0e-12 {
+                    [
+                        delta[0] / distance,
+                        delta[1] / distance,
+                        delta[2] / distance,
+                    ]
+                } else {
+                    [1.0, 0.0, 0.0]
+                };
+                let gap = target - distance;
+                let (step_a, step_b) = match (held(a), held(b)) {
+                    (true, _) => (0.0, gap),
+                    (_, true) => (gap, 0.0),
+                    _ => (0.5 * gap, 0.5 * gap),
+                };
+                for axis in 0..3 {
+                    x[3 * a + axis] -= step_a * unit[axis];
+                    x[3 * b + axis] += step_b * unit[axis];
+                }
+                moved = true;
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+    clears_call_floor(x.view(), floor)
+}
+
+/// Opens a trial for an objective that refuses pairs at or inside `floor`.
+///
+/// Declared species keep the group-aware [`separate_contacts`]. A point set
+/// without them opens only the offending pairs, to [`CALL_FLOOR_OPENING`]
+/// times the floor, because every pair of an atomic cluster may be a bond
+/// and the group repair would stretch it.
+fn open_for_call(cfg: &Config, x: &mut Array1<f64>, floor: f64, frozen: Option<&[bool]>) -> bool {
+    if cfg.species.is_some() {
+        separate_contacts(
+            x,
+            cfg.move_library.declared_groups(),
+            floor,
+            OVERLAP_CLASH_CLEARANCE,
+            frozen,
+            cfg.species.as_deref(),
+            cfg.bond_tolerance,
+        )
+    } else {
+        open_call_floor(x, floor, CALL_FLOOR_OPENING * floor, frozen)
+    }
+}
+
 /// Pair distance below which an external molecular potential is observing an
 /// overlap artifact rather than a physical bond.
 pub const OVERLAP_SEPARATION: f64 = 0.35;
@@ -3896,6 +4001,21 @@ where
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
     let _caller_stop = ledger.bind_stop();
+    // Every relaxation, not only the hop's own proposal, starts from a
+    // geometry the objective will answer. A start it cannot open is a
+    // refusal the ledger never sees.
+    let mut floored = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| match cfg.call_floor {
+        Some(floor) if !clears_call_floor(x, floor) => {
+            let mut opened = x.to_owned();
+            if open_for_call(cfg, &mut opened, floor, cfg.frozen.as_deref()) {
+                relax(led, opened.view(), steps)
+            } else {
+                (f64::NAN, x.to_owned())
+            }
+        }
+        _ => relax(led, x, steps),
+    };
+    let relax: Relax<'_> = &mut floored;
     // A target on the configuration is the same stop a caller can raise
     // on the ledger. A ledger target already set is left alone, so an
     // explicit `stop_below` still wins.
@@ -7640,17 +7760,16 @@ where
         // before it will compute an energy. The hop has to hand that potential
         // a geometry the rule already accepts. Separation is geometry only.
         // The raw overlapping proposal is not an energy call.
-        if cfg.species.is_some() && !structure_is_sane(trial.view(), OVERLAP_CALL_LIMIT) {
+        // [`Config::call_floor`] is the same rule for an objective that
+        // declares its own floor, with or without species.
+        let overlapping = match cfg.call_floor {
+            Some(floor) => !clears_call_floor(trial.view(), floor),
+            None => cfg.species.is_some() && !structure_is_sane(trial.view(), OVERLAP_CALL_LIMIT),
+        };
+        if overlapping {
             proposal_overlaps += 1;
-            let separated = separate_contacts(
-                &mut trial,
-                cfg.move_library.declared_groups(),
-                OVERLAP_CALL_LIMIT,
-                OVERLAP_CLASH_CLEARANCE,
-                hop_frozen.as_deref(),
-                cfg.species.as_deref(),
-                cfg.bond_tolerance,
-            );
+            let floor = cfg.call_floor.unwrap_or(OVERLAP_CALL_LIMIT);
+            let separated = open_for_call(cfg, &mut trial, floor, hop_frozen.as_deref());
             if !separated {
                 hops += 1;
                 bias.deposit(x.view(), temperature);
@@ -13618,5 +13737,89 @@ mod geometry_guards {
             None
         ));
         assert!(min_pair_distance(grouped.view()) >= 0.4);
+    }
+}
+
+#[cfg(test)]
+mod call_floor_tests {
+    use super::*;
+    use crate::methods::warm_lbfgs::WarmLbfgs;
+    use crate::potentials::PairPotential;
+
+    const POINTS: usize = 13;
+    const FLOOR: f64 = 0.9;
+
+    fn distance(x: &Array1<f64>, a: usize, b: usize) -> f64 {
+        (0..3)
+            .map(|axis| (x[3 * a + axis] - x[3 * b + axis]).powi(2))
+            .sum::<f64>()
+            .sqrt()
+    }
+
+    /// Relaxations started inside [`FLOOR`], and the charged calls.
+    fn starts_inside_the_floor(floor: Option<f64>) -> (usize, usize) {
+        let mut cfg = Config::for_cluster(POINTS);
+        cfg.call_floor = floor;
+        let potential = PairPotential::lennard_jones(POINTS);
+        let mut inside = 0usize;
+        let mut optimiser = WarmLbfgs::default();
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if min_pair_distance(x) <= FLOOR {
+                inside += 1;
+            }
+            optimiser.forget();
+            let (value, relaxed, _) = optimiser.minimize(x, steps, |v| {
+                led.charge().then(|| potential.value_and_gradient(v))
+            });
+            (value, relaxed)
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let start =
+            random_cluster_in_radius(POINTS, cfg.start_radius(), cfg.min_separation, &mut rng);
+        let mut ledger = Ledger::new(20_000);
+        let outcome =
+            run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
+        (inside, outcome.charged)
+    }
+
+    #[test]
+    fn a_declared_floor_keeps_every_relaxation_off_it() {
+        let (bare, _) = starts_inside_the_floor(None);
+        assert!(
+            bare > 0,
+            "the moves never reach the floor, so nothing is tested"
+        );
+        let (floored, charged) = starts_inside_the_floor(Some(FLOOR));
+        assert_eq!(floored, 0, "{floored} relaxations started inside the floor");
+        assert!(charged > 0);
+    }
+
+    #[test]
+    fn opening_moves_only_the_pairs_on_the_floor() {
+        let mut x = Array1::from(vec![
+            0.0, 0.0, 0.0, 1.3, 0.0, 0.0, 0.0, 5.0, 0.0, 0.2, 5.0, 0.0,
+        ]);
+        let before = x.clone();
+        let frozen = [false, false, true, false];
+        assert!(open_call_floor(&mut x, FLOOR, 1.1, Some(&frozen)));
+        assert_eq!(
+            distance(&x, 0, 1).to_bits(),
+            distance(&before, 0, 1).to_bits()
+        );
+        assert!((distance(&x, 2, 3) - 1.1).abs() < 1.0e-12);
+        assert_eq!(
+            &x.as_slice().unwrap()[6..9],
+            &before.as_slice().unwrap()[6..9]
+        );
+        assert!(clears_call_floor(x.view(), FLOOR));
+    }
+
+    #[test]
+    fn coincident_atoms_are_opened_and_two_frozen_ones_are_refused() {
+        let mut x = Array1::from(vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+        assert!(open_call_floor(&mut x, FLOOR, 1.0, None));
+        assert!((distance(&x, 0, 1) - 1.0).abs() < 1.0e-12);
+        let mut held = Array1::from(vec![0.0, 0.0, 0.0, 0.5, 0.0, 0.0]);
+        assert!(!open_call_floor(&mut held, FLOOR, 1.0, Some(&[true, true])));
     }
 }
