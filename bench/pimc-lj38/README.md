@@ -2,7 +2,9 @@
 
 32 replicas. 40 local-optimisation rounds. One round every 10000 steps. Last round at step 400000. Input length 400001. Code revision `4e86f5fd`.
 
-The paper gives no LJ55 or LJ75 schedule; it says larger clusters need longer annealing times for the same success probability, so those sizes scale the 40 LJ38 rounds by N/38, which is 58 rounds ending at step 580000 for LJ55 and 79 rounds ending at step 790000 for LJ75, with the same 32 replicas and 10000-step interval.
+The LJ38 length above is the published schedule. LJ55 and LJ75 are derived, not published: the paper says larger clusters need longer annealing times for the same success probability, so those sizes scale the 40 LJ38 rounds by N/38, which is 58 rounds ending at step 580000 for LJ55 and 79 rounds ending at step 790000 for LJ75, with the same 32 replicas and 10000-step interval. The summary column `schedule` is `published` or `derived`.
+
+`wall_ratio` on an `rpqa` row divides by the anneal median wall at the newest code revision. That revision is the row's `anneal_head`. Older anneal rows stay in the table.
 
 | Arm | Hits | Median calls | Median wall (s) | Inside us | Outside us | Code revision |
 | --- | --- | --- | --- | --- | --- | --- |

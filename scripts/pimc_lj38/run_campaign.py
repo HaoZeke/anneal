@@ -68,13 +68,23 @@ PAPER_SCHEDULE_SEED = 20261114
 def paper_length(n: int) -> tuple[int, int, int]:
     """Rounds, last pin step, and i-PI total_steps.
 
-    The paper publishes no LJ55 or LJ75 schedule. It says larger clusters
-    require longer annealing times for the same success probability, so the
-    40 LJ38 rounds are scaled by N/38. The interval stays 10000 steps.
+    LJ38 is the published schedule. LJ55 and LJ75 are derived, not published:
+    the paper says larger clusters need longer annealing times for the same
+    success probability, so the 40 LJ38 rounds are scaled by N/38. The
+    interval stays 10000 steps.
     """
     rounds = int(round(PAPER_ROUNDS * n / 38))
     last = PAPER_START + (rounds - 1) * PAPER_PIN_INTERVAL
     return rounds, last, last + 1
+
+
+def schedule_kind(n: int) -> str:
+    """``published`` for the paper's LJ38 length, ``derived`` for an N/38 stretch."""
+    if n == 38:
+        return "published"
+    if n in (55, 75):
+        return "derived"
+    raise RuntimeError(f"no schedule kind for LJ{n}")
 
 SUMMARY_FIELDS = [
     "system",
@@ -97,6 +107,7 @@ SUMMARY_FIELDS = [
     "rpqa_source",
     "anneal_head",
     "code_revision",
+    "schedule",
 ]
 
 SEED_FIELDS = [
@@ -608,6 +619,7 @@ def summarise(rows: list[dict[str, str]], seeds: tuple[int, ...], source: dict[s
                 "rpqa_source": source["rpqa_source"],
                 "anneal_head": head,
                 "code_revision": head if arm == "anneal" else source["rpqa_commit"],
+                "schedule": "",
             }
         )
     return out
@@ -674,9 +686,26 @@ def append_missing(
         writer.writerows(fresh)
 
 
+def align_summary(raw: str) -> str:
+    """Give an existing summary the current columns. Missing cells stay empty."""
+    if not raw:
+        return ""
+    lines = raw.splitlines()
+    header = ",".join(SUMMARY_FIELDS)
+    if lines[0] == header:
+        return raw if raw.endswith("\n") else raw + "\n"
+    rows = list(csv.DictReader(io.StringIO(raw)))
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=SUMMARY_FIELDS, lineterminator="\n")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({key: row.get(key, "") for key in SUMMARY_FIELDS})
+    return buffer.getvalue()
+
+
 def upsert_summary(path: Path, fields: list[str], row: dict[str, str]) -> None:
     """Replace only the paper-arm summary line. Other lines are copied unchanged."""
-    raw = path.read_text() if path.is_file() else ""
+    raw = align_summary(path.read_text() if path.is_file() else "")
     prefix = f"{row['system']},{row['arm']},"
     kept = [line for line in raw.splitlines(keepends=True) if not line.startswith(prefix)]
     if kept and not kept[-1].endswith("\n"):
@@ -719,6 +748,7 @@ def summarise_paper(
     anneal_wall: float,
     source: dict[str, str],
     anneal_head: str,
+    schedule: str,
 ) -> list[dict[str, str]]:
     if not rows:
         return []
@@ -750,6 +780,7 @@ def summarise_paper(
             "rpqa_source": source["rpqa_source"],
             "anneal_head": anneal_head,
             "code_revision": source["rpqa_commit"],
+            "schedule": schedule,
         }
     ]
 
@@ -799,11 +830,17 @@ def self_test() -> None:
         {"seed": str(seed), "evals_to_hit": "1", "wall_s": "2.0", "inside_us": "1", "outside_us": "1", "hit": "0"}
         for seed in paper_jobs
     ]
-    paper_row = summarise_paper(timed, len(SEEDS), 0.5, {"rpqa_commit": "r", "rpqa_source": "s"}, "a")[0]
+    paper_row = summarise_paper(
+        timed, len(SEEDS), 0.5, {"rpqa_commit": "r", "rpqa_source": "s"}, "a", "published"
+    )[0]
     if paper_row["seeds"] != " ".join(str(seed) for seed in SEEDS):
         raise SystemExit("paper summary seed order")
     if (paper_row["anneal_head"], paper_row["code_revision"], paper_row["wall_ratio"]) != ("a", "r", "4.000000"):
         raise SystemExit("paper summary provenance")
+    if paper_row["schedule"] != "published":
+        raise SystemExit("LJ38 schedule label")
+    if schedule_kind(38) != "published" or schedule_kind(55) != "derived" or schedule_kind(75) != "derived":
+        raise SystemExit("schedule kind")
     if paper_length(38) != (40, 400_000, 400_001):
         raise SystemExit("LJ38 length")
     if paper_length(55) != (58, 580_000, 580_001):
@@ -938,12 +975,13 @@ def append_seed_rows(path: Path, rows: list[dict[str, str]]) -> None:
 
 def upsert_revision(path: Path, row: dict[str, str]) -> None:
     """Replace one system, arm, and code revision. Every other line is copied."""
-    raw = path.read_text() if path.is_file() else ""
+    raw = align_summary(path.read_text() if path.is_file() else "")
     kept = []
     for line in raw.splitlines(keepends=True):
         if line.startswith(f"{row['system']},{row['arm']},"):
             cells = next(csv.reader([line.rstrip("\r\n")]))
-            if cells and cells[-1] == row["code_revision"]:
+            rev_at = SUMMARY_FIELDS.index("code_revision")
+            if len(cells) > rev_at and cells[rev_at] == row["code_revision"]:
                 continue
         kept.append(line)
     if kept and not kept[-1].endswith("\n"):
@@ -956,10 +994,31 @@ def upsert_revision(path: Path, row: dict[str, str]) -> None:
     path.write_text("".join(kept) + buffer.getvalue())
 
 
+def newest_revision(repo: Path, revisions: list[str]) -> str:
+    """Latest commit among anneal revisions. Older rows stay in the table."""
+    if not revisions:
+        raise RuntimeError("no anneal revision")
+    dated = []
+    for rev in revisions:
+        proc = subprocess.run(
+            ["git", "-C", str(repo), "log", "-1", "--format=%ct", rev],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        dated.append((int(proc.stdout.strip()), rev))
+    dated.sort()
+    return dated[-1][1]
+
+
 def publish_anneal_revisions(args: argparse.Namespace, source: dict[str, str]) -> list[dict[str, str]]:
-    """Write one summary line per anneal revision. Other arms are left in place."""
+    """Write one summary line per anneal revision. Other arms are left in place.
+
+    The capped RPQA ``wall_ratio`` divides by the anneal median wall at the
+    newest code revision. ``anneal_head`` on that row names the revision.
+    """
     revisions = load_anneal_revisions(args.rows, 38, args.seeds_out)
-    legacy_rev = next(iter(revisions), "") if load_seed(seed_path(args.rows, SEEDS[0], "anneal")) else ""
+    newest = newest_revision(Path(__file__).resolve().parents[2], list(revisions))
     rpqa_rows = [load_seed(seed_path(args.rows, seed, "rpqa")) for seed in SEEDS]
     rpqa_wall = None
     if all(row is not None for row in rpqa_rows):
@@ -973,7 +1032,7 @@ def publish_anneal_revisions(args: argparse.Namespace, source: dict[str, str]) -
         upsert_revision(args.summary, summary)
         append_seed_rows(args.seeds_out, group)
         written.append(summary)
-        if revision == legacy_rev and rpqa_wall is not None and all(row is not None for row in rpqa_rows):
+        if revision == newest and rpqa_wall is not None and all(row is not None for row in rpqa_rows):
             paired = summarise(
                 group + [row for row in rpqa_rows if row is not None],
                 SEEDS,
@@ -1002,7 +1061,10 @@ def comparison_anneal(summary: Path, n: int, rows_dir: Path | None = None) -> tu
 
 
 def run_paper(args: argparse.Namespace, seeds: tuple[int, ...]) -> int:
-    """Serial published-length RPQA. Existing rows are skipped, not replaced."""
+    """Serial RPQA. LJ38 uses the published length. LJ55 and LJ75 use the derived length.
+
+    Existing rows are skipped, not replaced.
+    """
     for seed in seeds:
         if seed not in SEEDS:
             raise SystemExit(f"seed {seed} is outside 2000-2005")
@@ -1082,7 +1144,9 @@ def run_paper(args: argparse.Namespace, seeds: tuple[int, ...]) -> int:
         if len(rows) != len(SEEDS):
             continue
         anneal_wall, anneal_head = comparison_anneal(args.summary, n, args.rows)
-        summary = summarise_paper(rows, len(SEEDS), anneal_wall, source, anneal_head)
+        summary = summarise_paper(
+            rows, len(SEEDS), anneal_wall, source, anneal_head, schedule_kind(n)
+        )
         if summary:
             summary[0]["system"] = f"lj{n}"
         if args.summary and summary:
