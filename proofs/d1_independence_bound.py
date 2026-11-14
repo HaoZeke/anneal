@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """D1: Metropolis-independence acceptance lower bound.
 
 An independence sampler proposes ``y ~ q`` with ``q(x) propto exp(-s(x)/T)``

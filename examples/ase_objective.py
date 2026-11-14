@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Persistent objective server for molecular-cluster searches.
 
 Speaks a line protocol on stdin/stdout so the Rust driver pays engine startup

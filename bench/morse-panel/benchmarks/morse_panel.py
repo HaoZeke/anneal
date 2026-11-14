@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Airspeed Velocity timing of one Morse panel seed.
 
 The comparison is ``bench/morse-panel/summary.csv``. This times the

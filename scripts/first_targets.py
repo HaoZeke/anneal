@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Print one first-target value per seed from a hist campaign arm, for
 first_passage_fit: the forces at which the ensemble first reached the
 target, or `-` for a seed that did not.

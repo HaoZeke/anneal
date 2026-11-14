@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """anneal.minimize is the SciPy/ChemFit box entry."""
 
 import numpy as np

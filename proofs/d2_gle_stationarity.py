@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """D2: GLE move-kernel stationarity at fixed temperature.
 
 The GLE thermostat (eindir/src/gle.rs) evolves the augmented momentum state

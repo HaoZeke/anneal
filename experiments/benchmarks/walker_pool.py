@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Process-pool multi-walker evaluation for non-reentrant objectives (CUTEst).
 
 Each worker process loads its own CUTEst problem instance so Fortran/global

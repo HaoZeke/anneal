@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 # Record one command with the head, the tree, and the machine clock.
 # Usage: sh scripts/h2h_receipt.sh <log> -- <command>
 log=$1

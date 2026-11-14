@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Moré-Wild convergence test for the CUTEst benchmark profiles.
 
 A problem-seed-solver cell is converged at tolerance ``tau`` when

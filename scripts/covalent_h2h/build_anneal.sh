@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Release build of the covalent head-to-head example and its rgpot library.
 # BEFORE_REV, when set, also builds the example at that revision as
 # h2h_covalent_before, from a detached worktree under /work.

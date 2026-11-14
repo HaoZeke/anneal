@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Release builds of the Lennard-Jones and Morse head-to-head examples.
 # Their paper_budget maps are the shared call ceilings. Paths in the
 # binaries are remapped so the timed run is not labelled with this checkout.

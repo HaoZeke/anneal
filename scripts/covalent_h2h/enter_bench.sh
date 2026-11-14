@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Every code, one UTS namespace, hostname bench, working directory under /work.
 # Arguments go to run_campaign.py. BENCH_OUT names the output directory
 # under bench/covalent-h2h, default "before". BEFORE_REV adds the arms of

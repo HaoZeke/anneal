@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Head-to-head test of the D6 gap-proportional cooling law.
 
 One Metropolis chain per (schedule, problem, dimension, seed): identical

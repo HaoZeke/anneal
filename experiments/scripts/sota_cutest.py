@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Budget-matched SOTA comparison on the CUTEst set.
 
 The ``hybrid_de`` entry is the anneal comparison point. It uses QMC seeding,

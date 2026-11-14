@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Occupancy tests and per-replica brain build via `pixi run -e cluster`.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then

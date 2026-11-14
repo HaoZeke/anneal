@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Release build of the deposited-GAD comparison example.
 # The binary runs Config::recommended and charges the LJ38 ceiling.
 set -euo pipefail

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Terra compute-node build of lj_cluster_search + catalog_server.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then

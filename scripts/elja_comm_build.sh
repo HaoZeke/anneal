@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Compute-node build of lj_cluster_search for the communicating paper arm.
 # Does not touch ~/anneal-build.
 set -euo pipefail

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Build Wales's public GMIN and the in-tree evaluator cap.
 # The public drop is the group tarball. GMIN/source/SVNREV is the revision.
 # ALIGN and OpenMP stay off: the Lennard-Jones comparison is serial, and

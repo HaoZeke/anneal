@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Box-search unify: pad gone; search splits on gradient.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then

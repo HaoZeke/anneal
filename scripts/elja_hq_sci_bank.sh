@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Shared-bank remesure: recommended hop + SOAP Dcut bank. No cut-and-splice.
 # Budget is split across the bank, not multiplied.
 # Does not touch HQ jobs 2, 87, 89-91.

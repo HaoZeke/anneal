@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Adaptive GMIN, the 4fdc37e8 anneal arm, and the LJ75/LJ104 check.
 # One UTS namespace, hostname bench, one core. Rows are appended.
 set -euo pipefail

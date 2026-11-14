@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Accuracy-vs-cost Pareto plot, MLIP-paper convention.
 
 Each solver run is a point in `(cost, accuracy)` space. The Pareto front

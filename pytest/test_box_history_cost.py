@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """History elapsed time and refusals are visible without spending PES calls."""
 
 import hashlib

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # FCC Cu(100) slab + H2 through in-process rgpot CuH2 EAM. Not potserv.
 # 128 Cu frozen, 2 H free (PotBench geometry). Not cuh2_tiny.
 set -euo pipefail

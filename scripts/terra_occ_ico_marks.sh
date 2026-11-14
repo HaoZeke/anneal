@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Occupancy recommended hop from the sealed LJ75 ico well until Marks.
 # One replica, local catalog control, Walk on a one-community book.
 set -euo pipefail

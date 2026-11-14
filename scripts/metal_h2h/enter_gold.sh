@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Gupta gold against GMIN at 38, 75 and 98.
 #
 # Serial, one core, hostname bench. Paper budgets: 38 -> 400000,

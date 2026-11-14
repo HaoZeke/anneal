@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Gradient-free ChemFit fitting with anneal (corrected review-response driver).
 
 The snippet in the bug report drove ``fitter.evaluate`` / ``fitter.step``,

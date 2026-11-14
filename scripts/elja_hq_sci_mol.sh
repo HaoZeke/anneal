@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Paper water budgets through in-process rgpot GFN2-xTB. Not potserv.
 # (H2O)4 at 2500 x 8; (H2O)6 at 4000 x 8. Does not cancel running HQ jobs.
 set -euo pipefail

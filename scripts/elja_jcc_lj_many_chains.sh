@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Many short LJ catalog replicas in one Slurm allocation.
 # Workers launch in waves so one 32-core node does not OOM.
 set -euo pipefail

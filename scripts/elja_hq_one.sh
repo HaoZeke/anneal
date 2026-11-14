@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # One seed inside a HyperQueue worker. The worker is one Slurm allocation.
 # HQ_TASK_ID is the seed. The program runs on /scratch/users/$USER.
 # One log is copied back when the seed finishes.

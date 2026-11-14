@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # One LJ75 seed at the frozen paper budget on Config::communicating.
 # Same 4e6 one-chain budget as tbl:comb recommended 4/48 and o75-orbit 31/48.
 set -euo pipefail

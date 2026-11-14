@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 import csv
 
 import numpy as np

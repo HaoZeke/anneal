@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # One isolated four-replica molecule or slab ensemble inside an Elja allocation.
 set -euo pipefail
 

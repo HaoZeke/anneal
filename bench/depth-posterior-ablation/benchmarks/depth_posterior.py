@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Airspeed Velocity timing of one paper-budget Lennard-Jones seed.
 
 The clock is the same serial binary the Snakemake rule runs, inside

@@ -1,4 +1,5 @@
 #!/usr/bin/env -S uv run --script
+# Copyright (c) anneal developers
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [

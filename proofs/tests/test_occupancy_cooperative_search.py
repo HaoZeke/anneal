@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """TDD assertions for occupancy cooperative-search identities.
 
 Each test names one algebraic identity or inequality. The SymPy module

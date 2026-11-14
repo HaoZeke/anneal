@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 r"""Tensor-train surrogate and the Rosenblatt independence sampler that it
 enables -- the shared object that the SymPy derivation
 (`tensor_surrogate_derivation.py`) proves is sound.

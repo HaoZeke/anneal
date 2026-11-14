@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Empirical witness for Theorem 7 (q-coherent MetaD effective heating).
 
 Theorem 7 (design pass 18): the q-coherent well-tempered MetaD chain

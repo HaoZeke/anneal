@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """ChemFit session adapter: nested parameters, a hard box, and a supplied start."""
 
 import numpy as np

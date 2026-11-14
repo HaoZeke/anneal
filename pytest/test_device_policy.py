@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Conformance of native policies through the device-array binding."""
 
 import numpy as np

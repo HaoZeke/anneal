@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Rebuild libira.so on a Terra Slurm allocation using in-tree lap_local.
 # Does not link MKL. Requires SLURM_JOB_ID.
 set -euo pipefail

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Pytest harness for the manuscript theorems plus the sign-convention
 negative test for Theorem 1."""
 

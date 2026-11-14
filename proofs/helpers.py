@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Shared sympy setup and witness helper for the IISE-manuscript theorems.
 
 Each theorem under proofs/thmN_*.py exposes a module-level WITNESS Boolean

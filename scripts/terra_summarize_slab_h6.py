@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Summarize the Cu(111)+H6 plain / recommended / random-relax comparison."""
 
 from __future__ import annotations

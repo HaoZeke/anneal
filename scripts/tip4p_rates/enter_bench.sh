@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) anneal developers
 # TIP4P success rates for (H2O)10, 15 and 20.
 # Paper preset, one budget, serial, one UTS namespace, hostname bench.
 # Wales and Hodges, Chem. Phys. Lett. 286, 65 (1998), doi:10.1016/S0009-2614(98)00065-7.

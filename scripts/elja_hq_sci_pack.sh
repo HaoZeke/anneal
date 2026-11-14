@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Production of the packing-mean SOAP hop (Config::recommended).
 # Paper budgets. Does not cancel any running HQ job.
 set -euo pipefail

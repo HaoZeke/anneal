@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Calls anneal 0.10.0 accepted, and what each of them does now.
 
 An argument 0.10.0 took and ignored still runs. It gives one FutureWarning,

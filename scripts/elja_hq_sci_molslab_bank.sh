@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Paired bank vs no-bank on water and the FCC Cu–H slab.
 # Same binary, same seeds, same budget. BANK_RPC is the only difference.
 # First-encounter charged evaluations are the comparison, not finish rate.

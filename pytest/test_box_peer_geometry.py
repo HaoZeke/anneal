@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Distinguish occupied-chain crowding from proposed-position crowding."""
 
 import anneal

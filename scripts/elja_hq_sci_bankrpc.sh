@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # The LJ production path: one SOAP bank per N, no cut-and-splice.
 # Chains share wells over Cap'n; a raised class is left by archive-null
 # hop, not a random cluster.

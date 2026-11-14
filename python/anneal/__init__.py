@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """anneal: simulated annealing on the eindir typed primitives.
 
 Search splits on geometry, then on gradient:

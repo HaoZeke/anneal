@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """GPU vs CPU benchmark for batched ensemble simulated annealing.
 
 Runs ``anneal.run_ensemble`` over an ensemble of independent chains on the CPU

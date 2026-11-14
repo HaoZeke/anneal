@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Anneal-native helpers for fixed-budget benchmark comparisons."""
 
 from __future__ import annotations

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # One cooperative LJ ensemble on one Elja node: a catalog coordinator and
 # CATALOG_REPLICAS worker processes, each with its own charged budget.
 #

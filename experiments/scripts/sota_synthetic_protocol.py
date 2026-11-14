@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Regenerable work-unit protocol (CUTEst-spirit) without Fortran CUTEst.
 
 Same accounting as sota_cutest.py: shared budget, objective+grad units,

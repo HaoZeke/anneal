@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Paired exp3-vs-exp4 statistical test for the manuscript's compensated
 log-domain precision ablation.
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Live proof: one LJ75 seed, paper 4e6, thompson,rscreen,orbit.
 # Same argv the o75-orbit dumps used. No invented tolerances.
 set -euo pipefail

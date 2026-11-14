@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Tests for the native Thompson-allocated portfolio driver."""
 
 import math

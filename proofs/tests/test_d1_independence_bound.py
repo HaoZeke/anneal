@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Pytest harness for D1: Metropolis-independence acceptance lower bound."""
 
 import numpy as np

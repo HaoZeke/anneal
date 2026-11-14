@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Shell-turn anneal arm, (H2O)21 against fixed-step GMIN, and the LJ check.
 # One UTS namespace, hostname bench, one core. Rows are appended.
 set -euo pipefail

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Airspeed Velocity timing of one deposited-GAD comparison run.
 
 The clock is the same serial arm the Snakemake rule runs, inside

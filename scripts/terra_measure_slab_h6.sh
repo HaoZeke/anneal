@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Multi-site Cu(111)+H6 comparison: plain hop, recommended hop, and the
 # random-relaxation baseline at the same total charged evaluations.
 #

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Recommended remesure: featomic leftover + stall tabu + Lanczos climb.
 # No random redraw on tabu. Does not touch HQ job 2 or job 87.
 #   LJ38: 4e5 x 72

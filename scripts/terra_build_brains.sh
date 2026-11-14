@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Terra compute-node test and occupancy build of the per-replica brain tree.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Experiment 4: compensated/log-domain DeltaE ablation (manuscript Section 5.4).
 
 Same as exp3 but with `compensated_delta_e=True` and log-domain

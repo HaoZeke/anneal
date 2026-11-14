@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """SOTA validation: the Tsallis (GenSA) visiting kernel implemented in the Rust
 ``TsallisVisit`` matches SciPy ``dual_annealing``'s ``VisitingDistribution``.
 

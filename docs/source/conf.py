@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 import os
 import sys
 

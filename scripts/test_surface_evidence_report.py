@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Small fixture checks for evaluation-matched surface comparisons."""
 
 import tempfile

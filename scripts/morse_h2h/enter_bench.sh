@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Both arms, one UTS namespace, hostname bench, working directory under /work.
 set -euo pipefail
 

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Cross-landscape benchmark figure for the IISE / unifier manuscript.
 
 Reads the three demo_bgsa CSVs (Rastrigin 5D, Rosenbrock 5D,

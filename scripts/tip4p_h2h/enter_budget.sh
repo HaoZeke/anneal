@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # (H2O)21 budget sweep, anneal against GMIN, twelve seeds, one core.
 # One UTS namespace, hostname bench, working directory /work. Same build and
 # arm as enter_h2h.sh, but for one size at 2M, 4M and 8M charged evaluations.

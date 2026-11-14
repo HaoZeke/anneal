@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Deposited GAD figures, anneal, and GMIN. One UTS namespace, hostname bench.
 set -euo pipefail
 

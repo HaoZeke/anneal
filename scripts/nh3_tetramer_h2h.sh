@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) anneal developers
 # (NH3)4 head-to-head. Anneal is recommended_molecular at the catalog
 # GFN2 molecular budget. CREST is native xtb. Both arms share one rigid
 # repack. Scoring is the H2O16 vtight command. A hit is at or below the

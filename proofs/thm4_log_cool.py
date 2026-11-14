@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Theorem 4: The q_v -> 1 limit of the Tsallis cooling schedule is the
 classical Boltzmann logarithmic schedule T_0 * log(2) / log(1 + t).
 

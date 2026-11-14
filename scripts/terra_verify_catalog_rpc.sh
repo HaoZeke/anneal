@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 set -euo pipefail
 
 catalog_rpc_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

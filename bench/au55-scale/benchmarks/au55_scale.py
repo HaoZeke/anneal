@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Airspeed Velocity timing of one Gupta Au55 seed.
 
 The scientific comparison is ``bench/au55-scale/summary.csv``. This

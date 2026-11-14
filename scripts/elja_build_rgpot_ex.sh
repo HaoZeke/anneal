@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Build in-process rgpot engines (libxtb_engine.so, librgpot_cuh2.so) and
 # the molecular_cluster / slab_adsorption examples. Not potserv.
 #

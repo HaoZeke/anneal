@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """ensemble_optimize must return from a Python objective callback."""
 
 import contextlib

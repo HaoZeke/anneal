@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Experiment 2: cancellation table (manuscript Section 5.2).
 
 Computes `delta_e = f(x + h e0) - f(x)` on the Rosenbrock 2D objective at

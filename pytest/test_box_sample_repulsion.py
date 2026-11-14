@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Bindings expose native sampled-peer separation without counting extra work."""
 
 import anneal

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Leftover RMS of featomic calculators on ico75, water, and a slab."""
 
 from __future__ import annotations

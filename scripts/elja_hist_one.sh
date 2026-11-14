@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # One HyperQueue task: one seed of an ensemble campaign, or one chain when
 # HISTORY_REPLICAS is unset. HQ sets HQ_TASK_ID; the arm is the mechanism
 # list; every channel is read from the environment by the driver.

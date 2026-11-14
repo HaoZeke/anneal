@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Airspeed Velocity timing of one GFN2-xTB Si10 and one C10 anneal seed.
 
 The scientific comparison with CREST is ``bench/covalent-h2h/gfn2``. This

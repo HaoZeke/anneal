@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # conformer_cost.sh [CPU]: rerun the two peptide cost runs of the
 # conformer_search benchmark from examples/fixtures/ac-ala3-nhme-s9743.xyz.
 #

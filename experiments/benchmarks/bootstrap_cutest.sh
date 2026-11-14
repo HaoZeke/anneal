@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # bootstrap_cutest.sh: clone + build the CUTEst stack into .bench/.
 #
 # Run from the anneal repo root via:

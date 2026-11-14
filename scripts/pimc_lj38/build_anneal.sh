@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Release build of the GMIN head-to-head example.
 # Its paper_budget map is the shared evaluation ceiling.
 set -euo pipefail

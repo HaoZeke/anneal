@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """What the ChemFit bridges promise about leaves, bounds, arguments and the budget.
 
 The doubles speak ChemFit 3.1's ``ask`` / ``tell`` unless the protocol is

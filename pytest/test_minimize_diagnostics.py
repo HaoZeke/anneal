@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """The common box entry retains work and coverage from its search engine."""
 
 import anneal

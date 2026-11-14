@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Build the python extension on terra and probe ChemFit jac=False replicas.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then

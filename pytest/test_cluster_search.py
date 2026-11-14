@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Pytest for Config, Ledger, and cluster_search on the pyo3 surface."""
 
 import numpy as np

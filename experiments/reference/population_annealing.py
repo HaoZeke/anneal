@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Population annealing on the same Lennard-Jones ledger as basin hopping.
 
 Hukushima and Iba, Phys. Rev. E 67, 066106 (2003), with the adaptive

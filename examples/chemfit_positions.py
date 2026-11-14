@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """ChemFit review-response pattern: fit per-atom positions with anneal.
 
 This is the corrected form of the ``run_anneal(benchmark_context)`` snippet

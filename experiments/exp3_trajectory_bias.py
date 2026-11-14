@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Experiment 3: paired finite-run best-position shift (manuscript Section 5.3).
 
 Runs 32-seed paired f16 vs f64 SA on Styblinski-Tang 2D. Reports the

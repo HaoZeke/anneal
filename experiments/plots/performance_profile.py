@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Dolan-Moré performance profile (doi:10.1007/s101070100263).
 
 For solver `s` and problem `p`, define `t_{p,s}` as the cost

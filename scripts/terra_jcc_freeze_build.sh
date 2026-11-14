@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Build the LJ cluster search binary for the frozen-recommended JCC campaign.
 #
 # The freeze is `Config::recommended` = for_cluster + Thompson + return screen

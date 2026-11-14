@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Link rgpot's tracked CuH2 C entry point into a narrow dlopen engine.
 set -euo pipefail
 

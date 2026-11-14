@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Airspeed Velocity timing of the Morse hop outside the potential.
 
 The comparison is ``bench/morse-hop/summary.csv``. This benchmark times

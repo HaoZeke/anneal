@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Morse rho = 14, twelve seeds, one UTS namespace, hostname bench.
 # Anneal is run serially. GMIN rows already stored at the paper budget
 # are copied and not run again.

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Submit paired shared/control molecule and slab ensemble arrays on Elja.
 set -euo pipefail
 

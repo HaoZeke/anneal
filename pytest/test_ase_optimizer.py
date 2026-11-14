@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """ASE-shaped Anneal: DummyAtoms uses ASE force sign. Optional real ASE."""
 
 from __future__ import annotations

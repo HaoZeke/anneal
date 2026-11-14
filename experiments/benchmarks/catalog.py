@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Benchmark problem catalog.
 
 Bundles the four built-in objectives (StybTang, Rosenbrock, Rastrigin,

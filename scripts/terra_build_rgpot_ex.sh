@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Build and seal the molecular and CuH2 campaign artifacts on Terra.
 set -euo pipefail
 

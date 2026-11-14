@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Both arms, one UTS namespace, hostname bench, working directory under /work.
 # The timed process is pinned to core 0. GrowPAL's documented nproc is
 # cpu_count-2; this session uses one core, which is the setting their

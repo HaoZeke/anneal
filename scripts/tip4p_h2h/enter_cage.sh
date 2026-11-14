@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Cage-archive anneal arm and the LJ38/75/98/104 check.
 # One UTS namespace, hostname bench, one core. Rows are appended.
 set -euo pipefail

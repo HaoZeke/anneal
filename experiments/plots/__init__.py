@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Publication plots for the IISE manuscript benchmarks.
 
 Imports here force the chemparseplot ruhi theme to register its colormaps

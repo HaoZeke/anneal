@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """First-encounter comparison of a bank arm against its no-bank control.
 
 Reads the improve / seed lines written by molecular_cluster and

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Twelve-seed Sutton–Chen head-to-head. One UTS namespace, hostname bench.
 # Finished seeds already in the table are kept. The six-seed table is not
 # opened.

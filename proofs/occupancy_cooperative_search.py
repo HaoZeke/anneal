@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Occupancy cooperative-search identities (SymPy).
 
 Algebra for the inverted Gelman--Rubin certificate, the Good--Turing

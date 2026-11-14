@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """A missing or failed task is not a search miss in paired comparisons."""
 
 import contextlib

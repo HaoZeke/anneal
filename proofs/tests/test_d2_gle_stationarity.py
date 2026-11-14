@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Pytest harness for D2: GLE move-kernel stationarity at fixed temperature."""
 
 from proofs.d2_gle_stationarity import (

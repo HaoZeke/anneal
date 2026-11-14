@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Scalar-only parameter fitting can share coverage without minimum certificates."""
 
 import anneal

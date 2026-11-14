@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Submit LJ38 occupancy ensemble 0003 on the complete occupancy
 # binary. Refuses any other SOURCE_COMMIT.
 set -euo pipefail

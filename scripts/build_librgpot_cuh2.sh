@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Build librgpot_cuh2.so from an OmniPotentRPC/rgpot checkout.
 # This script pins commit 25c759da82eececa8897e4634046fab27409c81a.
 set -euo pipefail

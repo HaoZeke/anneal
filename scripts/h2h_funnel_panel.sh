@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Interleaved base and tip Lennard-Jones panel.
 # One process, pinned to CPU 0. For each seed the base binary runs, then
 # the tip binary. Budgets come from the base binary's budget command,

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Airspeed Velocity timing of one seeded TIP4P run.
 
 The clock is the same serial paper preset the Snakemake rule runs,

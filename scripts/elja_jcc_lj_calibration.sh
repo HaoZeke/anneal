@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Generate one immutable hard-LJ development calibration pool on an Elja compute node.
 set -euo pipefail
 

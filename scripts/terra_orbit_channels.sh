@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Matched native-thread orbit campaign. `plan` is read-only; `submit` takes
 # a source packet with bin/lj_cluster_search and its checksum manifests.
 set -euo pipefail

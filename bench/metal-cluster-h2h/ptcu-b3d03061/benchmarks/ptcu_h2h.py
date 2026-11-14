@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Airspeed Velocity timing of one seeded Pt–Cu Gupta run.
 
 The clock is the same serial arm the Snakemake rule runs, inside

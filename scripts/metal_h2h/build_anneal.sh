@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Release build of the Gupta head-to-head example.
 # Paths in the binary are remapped so the timed run is not labelled
 # with this checkout.

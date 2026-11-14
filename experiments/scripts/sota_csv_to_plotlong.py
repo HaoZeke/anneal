@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Map sota_cutest long CSV rows to the schema expected by render_plots."""
 
 from __future__ import annotations

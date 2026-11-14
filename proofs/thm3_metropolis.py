@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Theorem 3: The Q_a -> 1 limit of the GSA acceptance rule is the Metropolis
 exp(-beta * dE) form.
 

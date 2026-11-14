@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Submit one ensemble campaign to HyperQueue on Elja from an arm table.
 #
 # Usage: elja_hist_campaign.sh <campaign-dir> <n> <arms.tsv> [seeds=48]

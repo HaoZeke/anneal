@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """GOFEE baseline through AGOX, configured from the current documentation.
 
 The search block follows the documented GOFEE example

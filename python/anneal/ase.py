@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """ASE-shaped optimizer: ``from anneal.ase import Anneal``.
 
 A local quench uses the same call site as ASE ``BFGS``::

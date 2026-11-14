@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Anneal against GMIN on reduced Sutton–Chen. One UTS namespace, hostname
 # bench, working directory /work. The potential call is rgpot.
 set -euo pipefail

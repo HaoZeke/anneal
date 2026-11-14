@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Pytest suite for the new Python algebra surface (Boltzmann / Fast / Gsa
 preset constructors plus run() driver). Replaces the legacy
 test_funcs / test_mcsamplers / test_quench suites."""

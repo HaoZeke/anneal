@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) anneal developers
 # LJ38 at the paper's population and iteration cap, then LJ75 at 20000
 # relaxations. One process list, so both arms share the bench namespace.
 set -eu

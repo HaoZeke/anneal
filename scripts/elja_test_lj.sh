@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Compute-node Elja run of the library tests under the build toolchain.
 # rustup lives in ~/.cargo/bin and is off the non-interactive PATH.
 set -euo pipefail

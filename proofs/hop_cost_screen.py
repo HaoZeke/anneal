@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Cost-asymmetric screen: a derived hop rule, not a hand-set margin.
 
 The measured recommended hop uses a constant discard window

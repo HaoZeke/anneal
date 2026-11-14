@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Raw-quench leftover hollow / fill / surface / shell from the sealed ico well.
 set -euo pipefail
 export PATH="/usr/bin:${HOME}/.cargo/bin:${PATH}"

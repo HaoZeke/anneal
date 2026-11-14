@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Values-only communicating replicas: cargo test box_hopping on terra.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 r"""Why colored noise helps: the optimal-sampling theory behind the GLE driver.
 
 Reference derivation (numpy/sympy) for the generalized Langevin equation

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """A positive portfolio budget must return an evaluated feasible incumbent."""
 
 import math

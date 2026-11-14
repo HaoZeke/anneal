@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Prove multi-walker process-pool scaling (no CUTEst required).
 
 Simulates an expensive objective with time.sleep, evaluates a batch of

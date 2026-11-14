@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Demonstration: MCMC-SA (multi-chain + Gelman-Rubin termination) vs
 classical SA (fixed inner-loop K) on Rastrigin 5D, a standard hard
 multimodal benchmark.

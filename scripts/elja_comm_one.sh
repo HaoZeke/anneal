@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # One LJ seed at a frozen paper budget on Config::communicating.
 # N and budget are arguments so 38/55/75/98 share one driver.
 set -euo pipefail

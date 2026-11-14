@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # GMIN with the shared evaluator cap and timing inside binary Gupta.
 # The tarball and revision are the ones scripts/gmin_h2h/build_gmin.sh pins.
 set -euo pipefail

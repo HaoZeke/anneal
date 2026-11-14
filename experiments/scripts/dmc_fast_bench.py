@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Wall-clock and best-value comparison for anneal.dmc_population_optimize.
 
 Equal evaluation budget, shared random non-optimal starts, vs SciPy

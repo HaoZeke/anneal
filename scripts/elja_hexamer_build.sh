@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Build molecular_cluster with the communicating kernel. Reuses the
 # already-staged xtb engine; does not touch ~/anneal-build.
 set -euo pipefail

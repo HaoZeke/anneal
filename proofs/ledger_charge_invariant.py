@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Verification for ledger_charge_invariant.org — integer Ledger contract."""
 from __future__ import annotations
 

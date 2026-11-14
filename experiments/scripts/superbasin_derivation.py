@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Symbolic checks for the absorbing-chain escape algebra.
 
 Every identity the Rust module relies on is verified here before it is coded.

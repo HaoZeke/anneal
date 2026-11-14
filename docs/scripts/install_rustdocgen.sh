@@ -1,4 +1,5 @@
 #!/bin/sh
+# Copyright (c) anneal developers
 # Install sphinx-rustdocgen 1.3.0 with the module-path fix.
 # `#[path]` is resolved from the directory of the file that contains it.
 # The published 1.3.0 binary joins that attribute onto the file itself.

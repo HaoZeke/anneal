@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Executable witnesses for D27 target-free catalog differentials."""
 
 import numpy as np

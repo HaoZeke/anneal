@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Dimension-collapse + Chebyshev surrogate for the CUTEst drivers.
 
 This is the Python side of the typed objective transform. A high-dimensional

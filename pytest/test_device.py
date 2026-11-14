@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 import numpy as np
 import pytest
 import array_api_compat

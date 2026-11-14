@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Baseline and two-phase water / CuH2 measurements on Terra.
 #
 # 8 seeds in parallel. Water hexamer through decamer at the paper hexamer

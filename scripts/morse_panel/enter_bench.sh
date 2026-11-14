@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # M55, M70 and M80 Morse panel. Hostname bench, one core.
 set -euo pipefail
 

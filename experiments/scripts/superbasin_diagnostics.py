@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """What the escape mechanism itself did, per arm.
 
 A success count cannot tell a mechanism that works poorly from one that never

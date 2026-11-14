@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Read the Leave contract off a finished occupancy run.
 #
 #     terra_leave_check_report.sh ENSEMBLE_DIR

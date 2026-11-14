@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Submit independent hard-LJ calibration tasks and their validator.
 set -euo pipefail
 

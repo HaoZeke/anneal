@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Airspeed Velocity timing of one Gupta gold seed.
 
 The clock is the serial arm in ``scripts/metal_h2h/enter_gold.sh``,

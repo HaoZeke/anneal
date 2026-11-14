@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Anneal against GMIN on Cleri–Rosato Pt–Cu. One UTS namespace, hostname
 # bench, working directory /work.
 set -euo pipefail

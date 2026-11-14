@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Render Dolan-Moré, Moré-Wild, and Pareto figures from a benchmark CSV.
 
 Reads the long-form CSV emitted by `run_benchmarks.py` (one row per

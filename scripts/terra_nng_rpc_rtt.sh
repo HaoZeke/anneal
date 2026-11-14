@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Compare nng catalog carrier RTT against the TCP vat on packing-gt-stop.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then

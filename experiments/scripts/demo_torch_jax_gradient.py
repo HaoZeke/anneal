@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Ceres-style gradient plug-in demo for `anneal.run_hmc`.
 
 The Rust HMC sampler accepts ANY Python callable returning the

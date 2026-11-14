@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 from experiments.benchmarks.cutest_runner import (
     _configure_pycutest_linux_link_libraries,
 )

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Bounds, x0, and ChemFit-bridge regression tests.
 
 Covers the ChemFit bug report: classical `run` chains escaped

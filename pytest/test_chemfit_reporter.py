@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """The reported ChemFit fit, run against the installed ChemFit ``Fitter``.
 
 Thirteen Lennard-Jones atoms with their positions flattened into the

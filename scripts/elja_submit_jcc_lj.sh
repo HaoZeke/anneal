@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Submit matched shared/control LJ ensemble arrays on Elja.
 set -euo pipefail
 

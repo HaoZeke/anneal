@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Serial head-to-head of the lean preset and the published bonobo initialiser.
 
 Lennard-Jones sizes 38, 75, 76 and 77. Six seeds on each arm. One local

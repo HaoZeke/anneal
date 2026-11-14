@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Occupancy ensemble that talks: one catalog coordinator, shared bias,
 # every replica starts on the sealed LJ75 ico well.
 set -euo pipefail

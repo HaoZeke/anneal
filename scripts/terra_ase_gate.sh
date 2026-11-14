@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Rebuild the python extension and run the ASE / cluster_search tests.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then

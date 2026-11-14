@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Submit the SOTA guard campaign on Elja: the arms that carry the method's
 # numbers (LJ75 one orbit chain of 4e6: 31/48 on 2026-09-07; LJ98 two orbit
 # chains of 2e6: 33/48). Run after any change to the hop loop, the moves,

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Summarises exp3 (and exp4) trajectory CSVs: paired f16-vs-f64
 best-position shift plus bootstrap CI. Used to verify the manuscript
 Section 5.3/5.4 precision claims at run time."""

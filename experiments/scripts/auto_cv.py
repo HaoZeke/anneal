@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Automatic collective-variable discovery for black-box samplers.
 
 A black-box sampler cannot ask the user to hand-pick CVs. This module

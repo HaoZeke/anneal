@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Trimmed Terra measure: (H2O)7 and (H2O)8, plain vs kappa 0.7, four seeds.
 #
 # GFN2 wall on the hexamer sweep: median 7848 us, max 20336 us per

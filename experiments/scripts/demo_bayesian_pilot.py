@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Demonstration: Bayesian-pilot SA (Method A) vs hand-tuned grid SA.
 
 Pipeline:

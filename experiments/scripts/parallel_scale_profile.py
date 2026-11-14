@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Profile multi-start / population paths under RAYON_NUM_THREADS.
 
 Runs anneal.dmc_population_optimize and qmc_polish (when available) at fixed

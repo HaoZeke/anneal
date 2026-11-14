@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Frozen hist98 communicating dump: 4 replicas, 1.6e7 aggregate, comm preset.
 # Same split as the orbit98 shared-history table (private 10/48, shared 10/48).
 set -euo pipefail

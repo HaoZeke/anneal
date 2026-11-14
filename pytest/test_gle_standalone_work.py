@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Standalone GLE charges callbacks through the installed native objective handle."""
 
 import hashlib

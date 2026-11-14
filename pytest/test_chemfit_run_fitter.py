@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """``run_fitter``: the options it passes on to ``fit_anneal``, and no others."""
 
 import numpy as np

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Two-sided Fisher exact tests for posterior against uniform arm draws.
 
 Seeds 2000-2005 are bench/depth-posterior-ablation/results.csv.

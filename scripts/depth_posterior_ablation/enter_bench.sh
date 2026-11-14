@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) anneal developers
 # Depth-posterior ablation from /work, hostname bench.
 # The release binary is built with --remap-path-prefix. The search itself
 # runs inside one UTS namespace, one seed at a time.

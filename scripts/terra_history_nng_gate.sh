@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Prove MinimumHistory observe/mark over nng Req/Rep. No catalog vat, no pump.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then

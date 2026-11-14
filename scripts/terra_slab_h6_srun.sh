@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Gate and H6 measurement inside one Slurm allocation.
 # Invoked as: srun -p cpu -c 16 --mem=24G -t 03:00:00 scripts/terra_slab_h6_srun.sh
 set -euo pipefail

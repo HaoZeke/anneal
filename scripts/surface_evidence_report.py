@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Validate a surface-evidence pair directory and report ensemble outcomes.
 
 Usage: python3 scripts/surface_evidence_report.py RESULT_DIRECTORY

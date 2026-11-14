@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Release build of the Morse head-to-head example.
 set -euo pipefail
 

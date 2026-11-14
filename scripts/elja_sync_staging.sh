@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Sync this checkout's sources to the Elja staging tree and stamp it.
 #
 # Usage: elja_sync_staging.sh [host=elja] [staging=~/anneal-psym]

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Pytest harness for D3: Portfolio convergence preservation."""
 
 from proofs.d3_portfolio_convergence import (

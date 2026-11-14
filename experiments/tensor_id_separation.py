@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Reproduces the separation table in the docs for `anneal_core::tensor_id`.
 
 Two questions, in order.

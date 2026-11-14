@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Verification for warm_lbfgs_wolfe.org — strong Wolfe ⇒ curvature.
 
 Mirrors the mathematical claims used by src/methods/warm_lbfgs.rs.

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Scalar clients select the native coverage graph without derivative callbacks."""
 
 import inspect

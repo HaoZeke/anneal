@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Optimized Stochastic Annealing acceptance under noise.
 
 Implements the sequential acceptance rule of Ball, Branke, and Meisel,

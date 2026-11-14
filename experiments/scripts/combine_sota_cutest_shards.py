@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Combine sota_cutest.py shards. Keys are problem, method, seed."""
 
 from __future__ import annotations

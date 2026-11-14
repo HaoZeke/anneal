@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Fixed-step GMIN on TIP4P with and without a container radius, n = 4, 8,
 # 15, 20. One UTS namespace, hostname bench, one core. Rows are appended.
 # H2H_SEED_BIN is an h2h_seed build; it only writes each seed's start.

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Theorem 1: The q_v -> 1 limit of the GSA visiting distribution is the
 Boltzmann (Gaussian) form.
 

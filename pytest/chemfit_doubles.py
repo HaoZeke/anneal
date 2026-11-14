@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Recording doubles for the two ChemFit ``Fitter`` session protocols.
 
 ``NextFitter`` speaks current ChemFit's ``init`` / ``evaluate`` / ``step`` /

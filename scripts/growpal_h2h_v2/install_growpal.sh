@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Build GrowPAL and aegon from their published source and install them.
 #
 # GrowPAL 0.1.6 and aegon 1.3.15 are built into wheels from their PyPI

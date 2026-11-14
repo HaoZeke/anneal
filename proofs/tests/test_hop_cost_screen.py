@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Pytest harness for the derived cost-asymmetric screen."""
 
 from proofs.hop_cost_screen import (

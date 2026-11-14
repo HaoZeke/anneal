@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Submit occupancy hop jobs against anneal-stop after BUILD_OK.
 set -euo pipefail
 ROOT=${LJ_ROOT:-$HOME/anneal-stop}

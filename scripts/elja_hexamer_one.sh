@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # One water-hexamer seed at the frozen 4000-eval paper budget, comm kernel.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then

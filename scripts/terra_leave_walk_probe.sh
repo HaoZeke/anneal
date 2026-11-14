@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Shell+two-phase and a 32-hop packing walk from the sealed LJ75 ico well.
 set -euo pipefail
 export PATH="/usr/bin:${HOME}/.cargo/bin:${PATH}"

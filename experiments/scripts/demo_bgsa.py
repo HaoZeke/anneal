@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """bGSA demonstration: unified Method A (Bayesian-pilot) + Method B (HMC kernel).
 
 The bGSA sampler runs a pilot phase with random (T_init, epsilon, L)

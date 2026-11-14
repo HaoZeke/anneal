@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 set -euo pipefail
 anneal_script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 anneal_plan=$(bash "$anneal_script_dir/terra_orbit_channels.sh" plan)

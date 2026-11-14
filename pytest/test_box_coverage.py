@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Coverage telemetry describes evaluated regions, not certified minima."""
 
 import anneal

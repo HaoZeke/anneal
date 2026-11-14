@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Run anneal drivers across a PyCUTEst-selected benchmark suite.
 
 The runner enumerates unconstrained and bound-constrained CUTEst

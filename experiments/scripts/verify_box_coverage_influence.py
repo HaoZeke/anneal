@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Verify direct peer-height diagnostics from a matched box comparison file."""
 
 import argparse

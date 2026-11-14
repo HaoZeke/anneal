@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Gupta Au55, twelve seeds, one UTS namespace, hostname bench.
 set -euo pipefail
 

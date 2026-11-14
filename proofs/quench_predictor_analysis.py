@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Verification for quench_predictor_analysis.org (TOMS-style, real algorithm).
 
 Mirrors src/quench.rs QuenchPredictor math:

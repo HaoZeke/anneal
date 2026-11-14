@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Serial anneal versus GMIN board.
 # One thread, pinned to CPU 0. Anneal then GMIN for each seed.
 # Usage: scripts/h2h_gmin_board.sh <system>

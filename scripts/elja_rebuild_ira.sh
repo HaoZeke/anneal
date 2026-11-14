@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Rebuild libira.so on an Elja compute node. Login-node gfortran
 # -march=native is Sapphire Rapids and SIGILLs on amd-compute.
 # Uses IRA's in-tree lap_local and OHPC gcc 12, with rpath so tasks

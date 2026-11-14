@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """The values-only ensemble preserves an explicitly supplied starting point."""
 
 import numpy as np

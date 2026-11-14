@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Compute-node scratch on Elja is /scratch/users/$USER.
 # IRHPC: https://irhpcwiki.hi.is/docs/elja/scratch_disk/
 # Each compute node has its own /scratch disk. The job copies its inputs

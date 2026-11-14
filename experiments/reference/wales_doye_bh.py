@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Wales and Doye's basin hopping, counted on the same ledger as anneal.
 
 The point is a comparison the crate cannot flatter itself in. Every number

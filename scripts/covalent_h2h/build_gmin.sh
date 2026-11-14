@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Wales's public GMIN with the evaluator cap and a Stillinger-Weber timer.
 # The public build brackets LJ and TIP4P only. SWTWO is timed the way the
 # Morse bench times MORSEGH, so pot_s is the time inside the potential.

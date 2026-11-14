@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Smoke tests for proofs.helpers.witness."""
 
 import sympy as sp

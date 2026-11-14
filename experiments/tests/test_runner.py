@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Sanity tests for `experiments.shared.runner.sa_run`."""
 
 import numpy as np

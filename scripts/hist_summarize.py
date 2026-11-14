@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Summarise an ensemble campaign directory written by elja_hist_campaign.sh.
 
 Usage: hist_summarize.py <campaign-dir> [--org] [<control-arm> <treatment-arm>]

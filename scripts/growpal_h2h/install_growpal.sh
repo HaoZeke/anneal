@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Install the published GrowPAL release and the example LJ10 seeds.
 # PyPI 0.1.6 is the release whose documented LJ script matches the
 # diversity-preserving search (selection_count = round(N * 1.8), five

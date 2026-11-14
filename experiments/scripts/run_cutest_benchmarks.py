@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Run the three SA drivers (classical, dense MCMC-SA, sparse MCMC-SA)
 across the 12-problem CUTEst manifest and emit the long-form CSV
 consumed by the Dolan-Moré / Pareto plotters.

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Moré-Wild data profile (doi:10.1137/080724083).
 
 For solver `s` and problem `p`, define a "solved at budget kappa" predicate

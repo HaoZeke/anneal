@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Smoke tests for benchmark catalog + plot helpers (Dolan-More, More-Wild, Pareto)."""
 
 import csv

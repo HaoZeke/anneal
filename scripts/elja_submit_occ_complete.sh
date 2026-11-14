@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Submit LJ75 ensemble 0007 and LJ98 ensemble 0005 on the complete
 # occupancy binary (Leave only into a new DECAF family; no invented
 # n_occupied_families). Refuses any other SOURCE_COMMIT.

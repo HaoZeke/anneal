@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """D4: Thompson allocation over algebra points.
 
 K arms; each slice of size b produces an improvement event (the incumbent

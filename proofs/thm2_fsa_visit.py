@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Theorem 2: At q_v = 2 the GSA visiting distribution specializes to a
 Cauchy of the form g_2 propto T / (T^2 + dx^2)^{(D+1)/2}.
 

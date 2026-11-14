@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """An additive objective constant does not change the search landscape."""
 
 import anneal

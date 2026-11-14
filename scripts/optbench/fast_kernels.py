@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """ctypes front for ``kernels.c``, checked against optbench's Python kernels.
 
 The library is compiled on first use with optbench's own native flags

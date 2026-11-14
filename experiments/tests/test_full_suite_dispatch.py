@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 from __future__ import annotations
 
 import types

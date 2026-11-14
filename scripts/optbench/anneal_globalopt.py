@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Score anneal's cluster search on an optbench global-optimisation problem.
 
 The harness is optbench's lane-B one, imported from an optbench checkout:

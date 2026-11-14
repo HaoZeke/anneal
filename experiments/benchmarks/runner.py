@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Benchmark runner: drive every (solver, problem, seed) combination
 and emit a long-form CSV consumed by the Dolan-Moré / Moré-Wild
 profile and Pareto plotters.

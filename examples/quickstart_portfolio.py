@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Minimal stand-alone entry: budget-only portfolio + classical preset.
 
 Run after: pip install anneal

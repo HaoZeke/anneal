@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Budget-matched comparison: Bayesian-allocated SA + local polish vs the field.
 
 The bayesian-mixing driver wins among the SA variants but has no local

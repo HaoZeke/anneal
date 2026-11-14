@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Airspeed Velocity timing of one seeded TIP4P head-to-head pair.
 
 The clock is the same serial arm the Snakemake rule ``tip4p_h2h`` runs,

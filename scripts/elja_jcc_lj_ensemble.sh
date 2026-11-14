@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # One isolated four-replica LJ ensemble inside an Elja Slurm allocation.
 set -euo pipefail
 

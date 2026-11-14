@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Submit scientific recommended vs for_cluster on the live Elja HyperQueue
 # server at paper budgets. One HQ task = one seed.
 #

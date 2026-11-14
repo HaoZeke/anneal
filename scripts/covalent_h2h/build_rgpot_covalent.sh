@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Build librgpot_covalent.so from an OmniPotentRPC/rgpot checkout.
 # This script pins commit 20c58fe5a2859cd0a79a3e06d64d567f96d0ccbe (3.6.0).
 # The library is rgpot's StillingerWeberSi and TersoffSiC behind the two

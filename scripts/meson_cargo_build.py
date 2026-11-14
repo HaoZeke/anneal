@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Build the anneal-core static archive with its C ABI and localize foreign C symbols."""
 from __future__ import annotations
 

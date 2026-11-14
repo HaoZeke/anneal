@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # TIP4P15 and TIP4P20 against GMIN. One UTS namespace, hostname bench, one core.
 set -euo pipefail
 

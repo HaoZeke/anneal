@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 from proofs.ledger_charge_invariant import WITNESS as LEDGER_OK
 from proofs.warm_lbfgs_wolfe import WITNESS as WOLFE_OK
 

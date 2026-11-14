@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Compute images have the glibc DSOs but no startfiles and no
 # libm.so / libc.so linker scripts (those pull libc_nonshared.a).
 # Copy crti from login and write scripts that only GROUP the DSOs.

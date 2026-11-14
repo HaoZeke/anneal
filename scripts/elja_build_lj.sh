@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Compute-node Elja build of LJ search and coordinator executables.
 # rustup lives in ~/.cargo/bin and is off the non-interactive PATH.
 set -euo pipefail

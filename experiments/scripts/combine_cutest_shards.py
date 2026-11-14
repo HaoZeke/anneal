@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Combine sharded CUTEst benchmark CSVs into one long-form CSV."""
 
 from __future__ import annotations

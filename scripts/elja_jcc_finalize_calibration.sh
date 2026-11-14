@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Validate all hard-LJ development pools and materialize fixed census radii.
 set -euo pipefail
 

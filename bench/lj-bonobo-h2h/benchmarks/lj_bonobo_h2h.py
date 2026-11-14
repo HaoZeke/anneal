@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Airspeed Velocity timing of one seeded Lennard-Jones run.
 
 The clock is the same serial arm the Snakemake rule runs, inside

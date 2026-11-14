@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Both arms, one UTS namespace, hostname bench, working directory under /work.
 # The campaign and every timed child are pinned to core 0. GrowPAL runs
 # with one worker and its published search parameters.

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Drive the benchmark catalog across the three preset variants and write
 the long-form CSV consumed by the plot scripts."""
 

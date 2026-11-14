@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # TIP4P head-to-head, anneal against GMIN, twelve seeds, one core.
 # One UTS namespace, hostname bench, working directory /work.
 set -euo pipefail

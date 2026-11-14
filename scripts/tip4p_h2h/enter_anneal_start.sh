@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # anneal TIP4P at 15 and 20 on the same-start harness, with GMIN rerunning
 # both same-start arms beside it as a check. One UTS namespace,
 # hostname bench, one core. Rows are appended.

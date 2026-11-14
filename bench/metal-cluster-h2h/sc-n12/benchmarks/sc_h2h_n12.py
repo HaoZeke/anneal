@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Airspeed Velocity timing of one seeded Sutton–Chen head-to-head run.
 
 The clock is the twelve-seed serial arm. The stored table is the

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Declared finite-box contracts for the device controller."""
 
 import numpy as np

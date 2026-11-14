@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Paired comparison: the two arms share a seed and a random stream.
 
 Control and treatment diverge only at a jump, so the seeds where they disagree

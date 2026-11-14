@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Executable witnesses for D21 regularized descriptor pullback."""
 
 import numpy as np

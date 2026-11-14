@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Pin Fiorentino's public RPQA tree. The LJ example and the rpqa smotion
 # are on feature/rpqa-reset-momenta at this commit.
 set -euo pipefail

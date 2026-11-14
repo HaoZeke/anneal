@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # CuH2 fcc slab baseline: four seeds, plain surface, paper budget 2500.
 # The EAM evaluation is cheap against the hexamer GFN2 8 ms floor; 2500
 # charged evaluations on four parallel seeds finish well inside 30 minutes.

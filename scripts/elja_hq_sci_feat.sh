@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Scientific recommended remesure of the featomic patch leftover.
 # Paper budgets. Rec only: for_cluster is unchanged (Atomic, no SOAP).
 #   LJ38: 4e5 x 72

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """One seeded run of the published bonobo optimiser.
 
 The search is ``bonobo_optimizer`` from

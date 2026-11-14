@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Release build of the Sutton-Chen head-to-head example.
 # The potential is rgpot. This build only enables the loader.
 set -euo pipefail

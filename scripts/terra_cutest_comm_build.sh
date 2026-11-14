@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Build the communicating-chain CUTEst driver on terra and bootstrap CUTEst.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then

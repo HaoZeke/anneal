@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # One M80 rho=3 seed, hostname bench, serial. Rewrites the summary with
 # the parent rows measured on this VM and a fresh row from the current
 # binary. Pass --budget to time a single budget and leave the summary.

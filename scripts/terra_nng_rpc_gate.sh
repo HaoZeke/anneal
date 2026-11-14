@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Compile and gate the Cap'n-on-nng transport swap.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then

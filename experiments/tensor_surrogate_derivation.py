@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 r"""Symbolic derivation: a low-rank functional-tensor surrogate is the single
 object that unifies simulated annealing (SA) and Markov-chain Monte Carlo
 (MCMC), and the lever that makes the unified sampler dimension-robust.

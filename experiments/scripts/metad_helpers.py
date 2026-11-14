@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Well-tempered metadynamics primitives (Barducci/Bussi/Parrinello 2008).
 
 A bias potential V(s) = sum_k w_k * exp(-|s - s_k|^2 / (2 sigma^2))

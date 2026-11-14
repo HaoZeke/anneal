@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Recognition communicating arm compiles and its unit tests hold.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then

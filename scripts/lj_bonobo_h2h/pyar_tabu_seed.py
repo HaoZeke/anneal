@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Launch the historical pyar-tabu script with a campaign seed.
 
 Chakraborty and Anoop call ``pyar-tabu`` and do not pass a seed. That script

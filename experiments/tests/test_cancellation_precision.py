@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 import numpy as np
 
 from experiments.exp2_cancellation import rosenbrock

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Tests for the Optimized Stochastic Annealing acceptance rule (Ball et al. 2018)."""
 
 import math

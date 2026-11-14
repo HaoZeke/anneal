@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Submit LJ75 Marks occupancy on packing-gt-stop 9dde60d after BUILD_OK.
 # Isolated tree. Does not write sealed ensembles 0002 or 0003, or anneal-stop.
 set -euo pipefail

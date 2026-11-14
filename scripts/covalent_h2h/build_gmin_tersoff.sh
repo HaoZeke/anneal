@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # A second GMIN binary whose USERPOT is rgpot's Tersoff carbon.
 # The public GMIN has no Tersoff keyword. Its USERPOT keyword calls the
 # userpot_* routines, which a standard build takes from dummy_userpot.f90.

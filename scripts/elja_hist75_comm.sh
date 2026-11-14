@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Frozen hist75 communicating dump: 4 replicas, 4e6 aggregate, comm preset.
 # Same split as Elja HQ 5617-5621 (private 10/48, shared 12-14/48, single 16/48).
 set -euo pipefail

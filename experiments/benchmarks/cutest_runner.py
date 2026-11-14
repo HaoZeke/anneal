@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """CUTEst-driven benchmark runner. Wraps pycutest problems as the
 shared-runner Problem dataclass so the existing experiments infra
 (MCMC-SA, classical SA, sparse skip) drives them without changes.

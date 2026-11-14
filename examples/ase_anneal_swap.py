@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Compare local ASE opts to an explicit anneal hop on EMT Cu7.
 
 Default ``Anneal(atoms)`` is ``mode="local"``: a quench, same call site

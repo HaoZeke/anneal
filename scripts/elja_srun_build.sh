@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # One short-partition allocation: rebuild portable libira, then the
 # featomic+ira+bank-rpc examples, then smoke on the same node.
 set -euo pipefail

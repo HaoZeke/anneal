@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Repair generated rustdoc RST before Sphinx reads it.
 
 sphinx-rustdoc-postprocess converts markdown inline code, and its pattern

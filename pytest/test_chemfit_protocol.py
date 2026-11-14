@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Both ChemFit session protocols through every bridge, and the first error.
 
 Current ChemFit drives a ``Fitter`` with ``evaluate`` / ``step``; ChemFit 3.1

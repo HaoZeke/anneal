@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 r"""What is novel in the typed-algebra SA+MCMC core, stated as executable proofs.
 
 Framed for an operations-research / INFORMS reading and against the SOTA in

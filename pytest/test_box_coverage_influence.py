@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Delivered coverage and direct influence on search decisions are distinct."""
 
 import anneal

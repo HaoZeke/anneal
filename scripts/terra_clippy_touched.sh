@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Clippy -D warnings, failing only on diagnostics in the named files.
 set -euo pipefail
 

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """The public portfolio wrapper keeps scalar-only cooperation in native code."""
 
 import json

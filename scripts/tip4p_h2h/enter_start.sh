@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # TIP4P with GMIN opening anneal's rigid start: anneal at 4 and 8, GMIN with
 # and without a container radius at 4, 8, 15, 20. One UTS namespace,
 # hostname bench, one core. Rows are appended.

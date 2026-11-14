@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Production: SOAP packing superbasin (CV-GO) + packing-mean hop.
 # Paper budgets. Does not cancel running HQ jobs. Uses LJ_BIN if set.
 set -euo pipefail

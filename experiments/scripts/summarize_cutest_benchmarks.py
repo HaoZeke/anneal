@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Summarize a long-form CUTEst benchmark CSV."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Shared finite-precision SA runner used by experiments 1-4.
 
 Why a separate Python loop (vs `anneal.run`)? The published Rust kernel

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Serial recommended CuH2 slab on the FCC fixture.
 # Budget 2500, seeds 0 through 7, one process at a time.
 set -euo pipefail

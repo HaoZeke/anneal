@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """TOMS-style checks for the shipped QuenchPredictor math."""
 
 from proofs import quench_predictor_analysis as qpa

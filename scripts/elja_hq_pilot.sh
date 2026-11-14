@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # One HyperQueue server and one Slurm node.
 # QCG-PilotJob is the same shape (many tasks inside one allocation) and is
 # not installed here. HyperQueue 0.19 is. Tasks do not use the home filer

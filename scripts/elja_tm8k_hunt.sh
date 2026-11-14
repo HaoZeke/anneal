@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Communicating hunt unit tests on an Elja short-partition node.
 # Does not touch ~/anneal-build. Staging tree is ~/build/anneal-hunt.
 set -euo pipefail

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Pytest harness for D4: Thompson allocation over algebra points."""
 
 from proofs.d4_thompson_allocation import (

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Tests for the ChemFit adapter (``anneal.chemfit``).
 
 ChemFit itself is not a test dependency: a duck-typed stub implements the

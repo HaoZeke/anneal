@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """ChemFit bridges for the gradient-free drivers.
 
 ChemFit's ``Fitter`` runs a session that the caller drives: ``init``, one

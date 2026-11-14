@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Serial depth-posterior ablation on the paper Lennard-Jones sizes.
 
 Both arms share the seed list and PAPER_BUDGETS. The schedule is one

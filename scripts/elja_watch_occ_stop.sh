@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # One-shot occupancy harvest for anneal-stop ensembles.
 set -euo pipefail
 echo "=== jobs ==="

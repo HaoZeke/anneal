@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Experiment 1: underflow grid (manuscript Section 5.1).
 
 Sweeps the Metropolis acceptance kernel `p = exp(-delta_e / T)` over a grid

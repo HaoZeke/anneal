@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Head-to-head: pure dmc_pop vs classical SA, portfolio_legacy, dual_annealing.
 
 Protocol (fixed; primary metric = cell-best win rate over cells):

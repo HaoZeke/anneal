@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Measure occupancy-general Leave starts on the sealed LJ75 ico well.
 # SHS, farthest-point cover, SC-AFIR push/peel, AV-restricted rungs.
 set -euo pipefail

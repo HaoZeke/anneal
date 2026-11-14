@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Development build of the molecular and slab examples on Terra.
 #
 # Deviation from scripts/terra_build_rgpot_ex.sh: no EXPECTED_COMMIT,

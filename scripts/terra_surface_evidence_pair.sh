@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Evaluation-matched independent ensembles with surface evidence as the only
 # communication channel. This runner executes existing binaries; it builds none.
 set -euo pipefail

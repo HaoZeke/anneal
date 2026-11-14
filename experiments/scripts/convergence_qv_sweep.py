@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Empirical convergence-rate sweep for the Tsallis-coherence
 corollary (design pass 16 Corollary 2). Runs bGSA-q_v at a sweep of
 q_v values and records the per-feval best_val trajectory; produces

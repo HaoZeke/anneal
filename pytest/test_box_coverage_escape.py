@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Bindings retain native coverage-return actions, separately from delivery."""
 
 import anneal

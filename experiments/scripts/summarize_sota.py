@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Aggregate sharded SOTA comparison CSVs and report dominance metrics.
 
 Reads the per-shard CSVs written by ``sota_cutest.py`` and reports, per

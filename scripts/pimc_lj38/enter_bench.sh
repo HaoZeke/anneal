@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Both arms, one UTS namespace, hostname bench, working directory under /work.
 # The timed process is pinned to core 0. RPQA uses one force client.
 set -euo pipefail

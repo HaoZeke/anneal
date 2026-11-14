@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Communicating box hops share a Euclidean history, not a cluster move."""
 
 import math

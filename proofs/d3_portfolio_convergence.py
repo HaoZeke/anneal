@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """D3: Portfolio convergence preservation.
 
 A portfolio driver interleaves slices of member arms. At least one arm performs

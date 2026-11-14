@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Write an rgpot FCC Cu slab plus hydrogen as an eOn .con.
 
 The default path is the CuH2 bench in rgpot CppCore/tests/PotBench.cc:

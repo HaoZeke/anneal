@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # GMIN with the shared call cap and timing inside Sutton-Chen.
 # The binary Gupta build is left where it is. This one is separate.
 set -euo pipefail

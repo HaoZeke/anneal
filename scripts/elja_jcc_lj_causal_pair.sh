@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Matched shared-catalog and private-catalog LJ ensembles in one allocation.
 set -euo pipefail
 

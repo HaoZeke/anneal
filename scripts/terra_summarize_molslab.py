@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Summarize terra_measure_molslab.sh seed logs into the campaign tables."""
 
 from __future__ import annotations

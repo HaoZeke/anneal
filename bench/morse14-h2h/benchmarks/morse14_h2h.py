@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Airspeed Velocity timing of one Morse rho = 14 head-to-head seed.
 
 The scientific comparison is ``bench/morse14-h2h/summary.csv``. This
