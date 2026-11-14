@@ -369,6 +369,20 @@ mod tests {
         }
     }
 
+    /// A coordinate that is not a number makes the energy not a number, as
+    /// the ordered walk does. Skipping that pair would score a broken
+    /// geometry as a finite energy.
+    #[test]
+    fn a_nan_coordinate_gives_a_nan_energy() {
+        for potential in [PairPotential::lennard_jones(3), PairPotential::morse(3, 6.0)] {
+            let mut x = Array1::from(vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0]);
+            x[4] = f64::NAN;
+            let (energy, gradient) = potential.value_and_gradient(x.view());
+            assert!(energy.is_nan(), "{:?} energy {energy}", potential.kind);
+            assert!(gradient[3].is_nan());
+        }
+    }
+
     /// Two points at the pair minimum: energy is minus the well depth and the
     /// force vanishes. Fixes depth, position and the sign of the derivative
     /// together, for both forms.
