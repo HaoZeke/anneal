@@ -441,7 +441,9 @@ def geometric_quench(eng, numbers, x0, gate, coordsys, max_iter):
         convergence_drms=unreachable,
         convergence_dmax=unreachable,
     )
-    with tempfile.TemporaryDirectory() as tmp:
+    scratch = ROOT / "build" / "tric_quench"
+    scratch.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=scratch) as tmp:
         try:
             Optimize(x0.reshape(-1) * ang2bohr, mol, ic, engine, tmp, params, print_info=False)
             reached = False
