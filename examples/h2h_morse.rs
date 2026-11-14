@@ -43,14 +43,20 @@ fn system_spec(name: &str) -> Option<Spec> {
         "m38r14" => (38, 14.0, -144.321054),
         "m55r6" => (55, 6.0, -250.286609),
         "m55r14" => (55, 14.0, -220.646208),
+        "m70r3" => (70, 3.0, -577.739782),
+        "m70r6" => (70, 6.0, -325.887749),
+        "m80r3" => (80, 3.0, -690.577890),
+        "m80r6" => (80, 6.0, -378.333471),
         "m80r14" => (80, 14.0, -340.811371),
         _ => return None,
     };
-    let budget = match n {
-        38 => 400_000,
-        55 => 1_000_000,
-        80 => 4_000_000,
-        _ => return None,
+    // Lennard-Jones paper list: 4e5 up to 38, 1e6 below 75, 4e6 from 75.
+    let budget = if n <= 38 {
+        400_000
+    } else if n < 75 {
+        1_000_000
+    } else {
+        4_000_000
     };
     Some(Spec {
         n,
@@ -291,6 +297,16 @@ mod tests {
         assert!((m55_6.reference + 250.286609).abs() < 1e-12);
         let m55_14 = system_spec("m55r14").unwrap();
         assert!((m55_14.reference + 220.646208).abs() < 1e-12);
+        let m70_3 = system_spec("m70r3").unwrap();
+        assert_eq!((m70_3.n, m70_3.budget), (70, 1_000_000));
+        assert!((m70_3.reference + 577.739782).abs() < 1e-12);
+        let m70_6 = system_spec("m70r6").unwrap();
+        assert!((m70_6.reference + 325.887749).abs() < 1e-12);
+        let m80_3 = system_spec("m80r3").unwrap();
+        assert_eq!((m80_3.n, m80_3.budget), (80, 4_000_000));
+        assert!((m80_3.reference + 690.577890).abs() < 1e-12);
+        let m80_6 = system_spec("m80r6").unwrap();
+        assert!((m80_6.reference + 378.333471).abs() < 1e-12);
         let m80 = system_spec("m80r14").unwrap();
         assert_eq!((m80.n, m80.budget), (80, 4_000_000));
         assert!((m80.reference + 340.811371).abs() < 1e-12);
