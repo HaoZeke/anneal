@@ -1443,6 +1443,8 @@ pub fn class_masses(x: ArrayView1<f64>, spec: SoapSpec) -> [f64; 3] {
 /// symmetrise. Does not name a destination packing. The bond cutoff is
 /// [`contact_cutoff`], so `spec` has to be written at the structure's length.
 pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
+    #[cfg(test)]
+    crate::structure_probe::note("soap::ih_dominated");
     let n = x.len() / 3;
     if n == 0 {
         return false;
@@ -1456,6 +1458,8 @@ pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
 /// The bond cutoff is the Lennard-Jones value when the nearest neighbour is
 /// on that scale, and 1.2 times the nearest neighbour otherwise.
 pub fn fivefold_plateau(x: ArrayView1<f64>) -> bool {
+    #[cfg(test)]
+    crate::structure_probe::note("soap::fivefold_plateau");
     let n = x.len() / 3;
     if n < 7 {
         return false;
@@ -1478,6 +1482,8 @@ pub fn extended_scale(x: ArrayView1<f64>) -> bool {
 /// Read when a labelled search has already stalled. Not called on the
 /// unlabelled hop, so a Lennard-Jones chain does not pay for it.
 pub fn motif_fractions(x: ArrayView1<f64>) -> (f64, f64, f64) {
+    #[cfg(test)]
+    crate::structure_probe::note("soap::motif_fractions");
     let n = x.len() / 3;
     if n < 2 {
         return (0.0, 0.0, 0.0);
@@ -2453,6 +2459,8 @@ pub fn fivefold_probe(x: ArrayView1<f64>, rmsd: f64) -> FivefoldProbe {
 /// `FIVEFOLD_GATE`. This is the hop that produced the LJ38 58/72
 /// campaign. The multi-axis gated hop is [`step_away_fivefold`].
 pub fn step_away_fivefold_measured(x: ArrayView1<f64>, rmsd: f64) -> Array1<f64> {
+    #[cfg(test)]
+    crate::structure_probe::note("soap::step_away_fivefold_measured");
     if candidate_axes(x)
         .iter()
         .all(|axis| row_min_rms_clears(x, *axis, FIVEFOLD_GATE))
@@ -2624,6 +2632,8 @@ pub fn step_away_fivefold<R: Rng + ?Sized>(
     rmsd: f64,
     rng: &mut R,
 ) -> Array1<f64> {
+    #[cfg(test)]
+    crate::structure_probe::note("soap::step_away_fivefold");
     let n = x.len() / 3;
     if n <= 13 {
         return fivefold_probe(x, rmsd).y;
@@ -2658,6 +2668,8 @@ pub fn step_away_fivefold<R: Rng + ?Sized>(
 /// Fivefold residual hop about one named axis. Used to probe which
 /// pentagon opening leaves the icosahedral shelf.
 pub fn step_away_fivefold_about(x: ArrayView1<f64>, rmsd: f64, axis: [f64; 3]) -> Array1<f64> {
+    #[cfg(test)]
+    crate::structure_probe::note("soap::step_away_fivefold_about");
     let (d5, mut dr) = residual_about(x, axis);
     if d5 < 1e-8 {
         dr = pentagon_break(x, axis);

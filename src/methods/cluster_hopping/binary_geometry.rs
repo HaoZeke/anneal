@@ -123,6 +123,8 @@ pub(crate) enum FccCentre {
 /// Ties at a shell boundary break by coordinate order, which does not
 /// depend on `n`. Every size gets a cut; nothing here is a fixed cluster.
 pub(crate) fn fcc_cut(n: usize, centre: FccCentre, nearest: f64) -> Array1<f64> {
+    #[cfg(test)]
+    crate::structure_probe::note("binary_geometry::fcc_cut");
     if n == 0 || !nearest.is_finite() || nearest <= 0.0 {
         return Array1::zeros(0);
     }
@@ -191,6 +193,8 @@ pub(crate) enum IcosahedronJoin {
 /// existing site. A size that falls in the middle of a shell keeps the
 /// sites nearest the centres. Nothing here is a fixed cluster.
 pub(crate) fn polyicosahedral_cut(n: usize, join: IcosahedronJoin, nearest: f64) -> Array1<f64> {
+    #[cfg(test)]
+    crate::structure_probe::note("binary_geometry::polyicosahedral_cut");
     if n == 0 || !nearest.is_finite() || nearest <= 0.0 {
         return Array1::zeros(0);
     }
@@ -259,6 +263,8 @@ pub(crate) fn polyicosahedral_cut(n: usize, join: IcosahedronJoin, nearest: f64)
 /// keeps the innermost sites. Larger `n` is that body; the growth does not
 /// invent a third shell.
 pub(crate) fn mackay_cut(n: usize, nearest: f64) -> Array1<f64> {
+    #[cfg(test)]
+    crate::structure_probe::note("binary_geometry::mackay_cut");
     scale_sites(&mackay_sites_centred(n), nearest)
 }
 
@@ -268,6 +274,8 @@ pub(crate) fn mackay_cut(n: usize, nearest: f64) -> Array1<f64> {
 /// fivefold cap: the sites nearest one vertex. The construction does not
 /// branch on a size.
 pub(crate) fn mackay_cap(n: usize, nearest: f64) -> Array1<f64> {
+    #[cfg(test)]
+    crate::structure_probe::note("binary_geometry::mackay_cap");
     let mut sites = mackay_sites();
     if n == 0 || sites.len() < n {
         return Array1::zeros(0);
@@ -354,6 +362,8 @@ fn scale_sites(sites: &[[f64; 3]], nearest: f64) -> Array1<f64> {
 /// mean, so the shape follows the composition rather than the cluster size.
 /// Coordinates are already written onto the species indices.
 pub(crate) fn axial_spine_cut(species: &[u32], radius: impl Fn(u32) -> f64) -> Option<Array1<f64>> {
+    #[cfg(test)]
+    crate::structure_probe::note("binary_geometry::axial_spine_cut");
     let n = species.len();
     if n < 5 {
         return None;
@@ -834,6 +844,8 @@ pub(crate) fn place_smaller_inside(
     species: &[u32],
     radius: impl Fn(u32) -> f64,
 ) -> Array1<f64> {
+    #[cfg(test)]
+    crate::structure_probe::note("binary_geometry::place_smaller_inside");
     let n = species.len();
     if coords.len() != 3 * n || n < 2 {
         return coords.to_owned();

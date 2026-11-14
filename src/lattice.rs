@@ -295,6 +295,8 @@ pub fn candidate<R: Rng + ?Sized>(
     n: usize,
     rng: &mut R,
 ) -> Array1<f64> {
+    #[cfg(test)]
+    crate::structure_probe::note("lattice::candidate");
     candidate_keeping(source, x, n, 0.0, rng)
 }
 

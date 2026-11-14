@@ -140,7 +140,7 @@ impl MoveLibrary {
                     n_points: cfg.n_points,
                     neighbour_cutoff: cfg.neighbour_cutoff,
                 });
-                if cfg.soap_mode != SoapProposalMode::Off && cfg.prior_soap {
+                if cfg.soap_mode != SoapProposalMode::Off && prior_gate(cfg, PriorPath::Soap) {
                     kernels.push(soap_arm(cfg, None, None));
                 }
                 if matches!(self, Self::LeanBurstHollow) {
@@ -247,7 +247,10 @@ impl MoveLibrary {
                 // search; the hexamer keeps the arm it was measured with.
                 let large_water = groups.len() > crate::catalog::molecular::WATER_HEXAMER_MOLECULES
                     && super::cycles::is_water_groups(groups);
-                if cfg.soap_mode != SoapProposalMode::Off && cfg.prior_soap && !large_water {
+                if cfg.soap_mode != SoapProposalMode::Off
+                    && prior_gate(cfg, PriorPath::Soap)
+                    && !large_water
+                {
                     kernels.push(soap_arm(cfg, mobile.clone(), Some(groups.clone())));
                 }
                 if let Some(species) = cfg.species.as_ref() {
@@ -385,6 +388,11 @@ impl MoveLibrary {
                 fallback_step: LennardJonesPreset::SINGLE_POINT_STEP * cfg.length_scale,
             });
         }
+        kernels.retain(|kernel| match kernel {
+            ClusterMove::Twin { .. } => prior_gate(cfg, PriorPath::TwinArm),
+            ClusterMove::Reseed { .. } => prior_gate(cfg, PriorPath::ReseedArm),
+            _ => true,
+        });
         kernels
     }
 
@@ -1169,7 +1177,7 @@ fn soap_arm(
     ClusterMove::Soap {
         rmsd,
         cutoff: LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
-        class: cfg.soap_class_residual && packing,
+        class: cfg.soap_class_residual && packing && prior_gate(cfg, PriorPath::ClassResidual),
         // One element takes the unlabelled fivefold hop. The label is
         // not a second species, so it is not a partition of the residual.
         species: if packing { None } else { cfg.species.clone() },
@@ -2625,6 +2633,7 @@ impl ClusterMove {
                 mobile,
                 groups,
             } => {
+                prior_entered(PriorPath::Soap);
                 let spec = crate::soap::SoapSpec {
                     n_max: 3,
                     l_max: 6,

@@ -238,6 +238,8 @@ pub mod soap_gp;
 pub mod source_escape;
 pub mod spectral;
 pub mod structure;
+#[cfg(test)]
+pub(crate) mod structure_probe;
 pub mod superbasin;
 /// Source-keyed relaxation-surface rewards exchanged between chains.
 pub mod surface_evidence;
