@@ -914,3 +914,63 @@ Those populations are ligand-protected gold at finite temperature. They are not 
 
 Cite `mccandlerGold2026`.
 
+## 2026-11-14 — EquiformerV2 on Mo2C nanoclusters
+
+Helmendach, Bitter, and Li, Advanced Theory and Simulations 9, e70473 (2026), doi:10.1002/adts.70473, couple a genetic algorithm to a retrained EquiformerV2 potential and search Mo\(_2\)C nanoclusters in the gas phase and on graphene. The record has no page numbers. The abstract says the fine-tuned potential accelerates that search when the model is judged by energetic order, Kendall's \(\tau\), against density-functional data for those clusters.
+
+The manuscript sizes are Lennard-Jones. The abstract gives no Cambridge energy and no water energy, so it does not contradict the hit targets, 121 of 192, or 97 of 192. It does not fill the open ASE, AGOX, and GMIN kit. A head-to-head would be Mo\(_2\)C in the gas phase or on graphene, on the density-functional ordering they use. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `helmendachMo2c2026`.
+
+## 2026-11-14 — Anionic gold through twenty atoms
+
+An, Du, and Cao, Frontiers in Physics 14, 2012169 (10 November 2026), doi:10.3389/fphy.2026.2012169, benchmark functionals and basis sets for Au\(_n^-\) with \(n\) from 1 to 20 against photoelectron spectra. The abstract says revTPSS/SDD and revTPSS/LANL2DZ recover the literature ground states of Au\(_5^-\), Au\(_{10}^-\), and Au\(_{12}^-\), and that the same revTPSS scheme then assigns the ground state at each size through 20. The simulated spectra follow the experimental size trend.
+
+Aguado and co-workers already report motifs for gold cluster anions from 17 to 69 atoms, filed as `aguadoGoldAnions2026`. This paper stops at 20 and ranks isomers by a density-functional vertical detachment energy. It gives no Cambridge Lennard-Jones energy and no hexamer count, so it does not contradict the hit targets, 121 of 192, or 97 of 192. It does not fill the open ASE, AGOX, and GMIN kit. A head-to-head would be Au\(_n^-\) on revTPSS against that photoelectron assignment. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `anGoldAnions2026`.
+
+## 2026-11-14 — Fan-shaped minima of CBe4S3
+
+Zhang, Cheng, Orozco-Ic, and Guo, Chemistry 8, 113 (20 August 2026), doi:10.3390/chemistry8080113, report fan-shaped global minima for CBe\(_4\)S\(_3^{2-}\) and CBe\(_4\)S\(_3^-\), each with a planar tetracoordinate carbon. The abstract says an extensive search and high-level calculations place both structures at the global minimum, and that Born--Oppenheimer molecular dynamics finds them dynamically stable.
+
+Eight atoms sits outside 38, 55, 75, 98, and 104. The energy is not a Lennard-Jones energy, so it does not contradict the Cambridge hit targets, 121 of 192, or 97 of 192. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `zhangCbe4s2026`.
+
+## 2026-11-14 — Lower Thomson minima on a disk
+
+Lavrov and Nikonov, arXiv:2609.20777 (17 September 2026), report energies below the previous records for the Thomson problem on a disk, at 60, 61, 92, and 99 charges. The search is quenched molecular dynamics with the fixed-border construction of Amore and Zarate. The energies they give are 2159.3584240930, 2237.19264190, 5358.35353314, and 6254.83029083. At 60 charges the Voronoi diagram differs from the earlier record. At 92 charges they report axial symmetry of the defects.
+
+Amore and Wales already search the Thomson problem on a sphere, filed as `amoreThomson2026`. A disk with a fixed border is not that sphere, and these four sizes are not the manuscript's Lennard-Jones sizes. The energies are Coulomb energies on a disk. They do not contradict the Cambridge hit targets, 121 of 192, or 97 of 192, and they do not replace the sphere energies. It does not warrant a head-to-head on the Lennard-Jones preset or on that sphere campaign.
+
+Cite `lavrovThomsonDisk2026`.
+
+## 2026-11-14 — Torsionator, and torsional bin strings
+
+Brosio, Triveri, Vidossich, Decherchi, and De Vivo, Journal of Chemical Theory and Computation 22, 10419--10427 (9 September 2026), doi:10.1021/acs.jctc.6c01006, release Torsionator. It minimizes small molecules with the MACE, OBIWAN, and UMA neural-network potentials and fits dihedral parameters from a selected conformer set. The benchmark is MACE on TorsionNet500, 500 molecules with quantum-mechanical torsional profiles. The abstract describes dihedral parameterization of conformers that are already chosen. It does not report a water-hexamer hit rate.
+
+Braun, Ruijsenaars, Schiebroek, Lamei, Katzberger, Landrum, and Riniker, ChemRxiv (12 October 2026), doi:10.26434/chemrxiv.15010276/v1, extend torsion angular bin strings so the bins follow the torsional distribution of a given ensemble rather than crystal-structure preferences. The abstract says the string counts distinct conformational states and groups conformers without a distance cutoff. It discretizes an ensemble that already exists. It is not a generator.
+
+Neither paper reports 121 of 192, 97 of 192, or a user seed. Leave the CREST table on 3.0.2. Neither warrants a head-to-head on that table or on the Lennard-Jones maps.
+
+Cite `brosioTorsionator2026` and `braunCustomTabs2026`.
+
+## 2026-11-14 — OpenConf 0.0.19
+
+OpenConf generates conformers of drug-like molecules. The v0.0.19 README says the moves are torsional Monte Carlo and the relaxation is RDKit with MMFF94s. Release v0.0.19 is dated 10 October 2026, and the notes for that tag are stereochemistry fixes. The citation block in that tag is a software entry with a GitHub URL and no DOI or arXiv id.
+
+No bibliographic entry: this release has no verified DOI or arXiv id. The hexamer comparison is GFN2-xTB against CREST 3.0.2. OpenConf does not report 121 of 192 or 97 of 192, and it does not run on that surface. It does not contradict those counts. A comparison that uses this generator has to name MMFF94s and tag v0.0.19. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+## 2026-11-14 — SO3LR Tauri, and a GFN1 refit for ionic liquids
+
+Kabylda, Brünig, Gallegos, Frank, Moerman, Unke, Chmiela, Müller, and Tkatchenko, arXiv:2611.06237 (4 November 2026), release SO3LR Tauri. Brünig, Gallegos, and Tkatchenko are authors of MARS, already filed as `suarezDouMars2026`, which samples on SO3LR. Tauri couples an SO3krates network to pair repulsion, dispersion, and electrostatics, and is trained on 148 million structures spanning 85 elements. Against coupled-cluster references the abstract says the models reproduce nucleobase-pair and charged protein-ligand interactions, carbohydrate conformer ordering, and molecular dipoles. Molecular dynamics recovers experimental densities of water and of organic solvents, without a system-specific fit. The models come in three sizes. The abstract names four items still to be done: predictive accuracy for static and dynamic liquid properties, reaction barriers, coverage of chemical and conformational space, and the sampling speed biomolecular processes need.
+
+The hexamer comparison is GFN2-xTB, not SO3LR. Carbohydrate conformer ordering is not 121 of 192 or 97 of 192. A bulk water density is not the TIP4P hexamer. Tauri does not contradict those counts. It does not warrant a head-to-head on the CREST hexamer table. The MARS comparison stays the one already named.
+
+Stavarache, Calero, and Vicent-Luna, arXiv:2610.15190 (10 October 2026), reparameterize GFN1-xTB for ionic liquids. The database has more than 14,000 conformations. They report two fits, CXMIM-xTB for imidazolium liquids and IL-xTB across cation and anion families, and say both reduce the systematic errors of the original GFN1-xTB on that set. CXMIM-xTB is then used for electrochemical windows.
+
+This is not the GFN2 refit already filed as `nikolaevaGfn2Water2026`. xtb v6.8.0, dated 5 November 2026, is still the newest release on the GitHub release list, and these two fits are not that release. The hexamer single points stay on xtb 6.7.1 at GFN2. The sentence that CREST 3.0.2 exposes no seed is unchanged. It does not warrant a head-to-head on the CREST hexamer table.
+
+Cite `kabyldaSo3lrTauri2026` and `stavaracheGfn1Ionic2026`.
+
