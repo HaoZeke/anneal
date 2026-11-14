@@ -42,7 +42,7 @@ let P = S.pins in
         },
         {
           name = "Upload release notes for gh-release job",
-          uses = P.upload_artifact_v4,
+          uses = P.upload_artifact,
           with = {
             name = "release-notes-${{ github.sha }}",
             path = "${{ runner.temp }}/release_notes.md",

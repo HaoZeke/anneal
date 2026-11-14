@@ -6,17 +6,15 @@
   pixi_version = "v0.70.2",
 
   # --- GitHub Actions (third-party / first-party) ---
-  checkout = "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803", # v6
-  setup_pixi = "prefix-dev/setup-pixi@a0af7a228712d6121d37aba47adf55c1332c9c2e", # v0.9.4
-  cache = "actions/cache@caa296126883cff596d87d8935842f9db880ef25", # v5
-  install_action = "taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7", # v2
+  checkout = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+  setup_pixi = "prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94", # v0.11.2
+  cache = "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", # v6.1.0
+  install_action = "taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32", # v2
   rust_toolchain = "dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d", # stable
-  rust_cache = "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6", # v2
-  upload_artifact_v4 = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", # v4
-  upload_artifact_v6 = "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f", # v6
-  download_artifact = "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093", # v4
-  download_artifact_v6 = "actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53", # v6
-  gh_release = "softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65", # v2
+  rust_cache = "Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0", # v2
+  upload_artifact = "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9", # v7.0.2
+  download_artifact = "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333", # v8.0.2
+  gh_release = "softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64", # v3.0.3
   gh_pages = "peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453", # v4
   lychee = "lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8", # v2
   doc_previewer = "HaoZeke/doc-previewer@0e1094735b4f7ee9a2c60a18a34d7a7e5bc6bb63", # v0.0.1

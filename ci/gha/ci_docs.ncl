@@ -33,7 +33,7 @@ let P = S.pins in
         & { name = "Generate Docs" },
         {
           name = "Upload artifact",
-          uses = P.upload_artifact_v6,
+          uses = P.upload_artifact,
           with = { name = "documentation", path = "docs/build" },
         },
       ],
@@ -53,7 +53,7 @@ let P = S.pins in
         { uses = P.checkout, with = { "persist-credentials" = false } },
         {
           name = "Download documentation",
-          uses = P.download_artifact_v6,
+          uses = P.download_artifact,
           with = { name = "documentation", path = "docs/build" },
         },
         {

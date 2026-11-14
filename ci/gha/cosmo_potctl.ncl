@@ -192,7 +192,7 @@ in
         {
           name = "Upload potctl.com APE artifact",
           "if" = "success()",
-          uses = P.upload_artifact_v4,
+          uses = P.upload_artifact,
           with = {
             name = "potctl-cosmo-ape",
             path = "potctl/cosmo/out/potctl.com",
