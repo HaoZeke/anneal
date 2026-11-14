@@ -79,8 +79,14 @@ capi_threads = executable(
 test('capi_threads', capi_threads, timeout: 60)
 # A second binary built only with the thread sanitizer. b_sanitize is
 # already on every compile line, and -fsanitize=thread cannot be combined
-# with address or undefined.
-if cppc.has_argument('-fsanitize=thread') and get_option('b_sanitize') == 'none'
+# with address or undefined. It is a test binary, so it follows
+# with_tests: gcc-toolset-14 in the manylinux images that build the wheel
+# accepts -fsanitize=thread when compiling but has no libtsan to link.
+if (
+    get_option('with_tests')
+    and cppc.has_argument('-fsanitize=thread')
+    and get_option('b_sanitize') == 'none'
+)
     capi_tsan = executable(
         'capi_threads_tsan',
         files('capi_threads.c'),
