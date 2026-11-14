@@ -9,10 +9,16 @@
 #define RGPOT_TARGET_AVX2
 #endif
 
-static _Thread_local double *rho_buf;
-static _Thread_local size_t rho_cap;
-static _Thread_local double *pack_buf;
-static _Thread_local size_t pack_cap;
+#if defined(_MSC_VER) && !defined(__clang__)
+#define RGPOT_THREAD_LOCAL __declspec(thread)
+#else
+#define RGPOT_THREAD_LOCAL _Thread_local
+#endif
+
+static RGPOT_THREAD_LOCAL double *rho_buf;
+static RGPOT_THREAD_LOCAL size_t rho_cap;
+static RGPOT_THREAD_LOCAL double *pack_buf;
+static RGPOT_THREAD_LOCAL size_t pack_cap;
 
 static int rgpot_gupta_ensure(size_t n, size_t pairs) {
   if (rho_cap < n) {
