@@ -71,7 +71,7 @@ hooks = [
     entry = "pixi",
     language = "system",
     pass_filenames = false,
-    files = '^(ci/gha/.*\\.ncl|\\.github/workflows/.*\\.yml)$',
+    files = '^(ci/gha/.*\.ncl|\.github/workflows/.*\.yml)$',
     args = ["r", "-e", "cigen", "gha-drift"],
   },
   {
