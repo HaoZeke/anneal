@@ -102,6 +102,8 @@ pub struct GroupProjection {
 
 /// Projects onto the library group with the lowest measure.
 pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
+    #[cfg(test)]
+    crate::structure_probe::note("csm::propose");
     if let Some(cached) = cached_propose(x, classes) {
         return cached;
     }

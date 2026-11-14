@@ -1006,6 +1006,8 @@ pub fn cna_descriptor(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Array1<f64> 
 /// Ordered as face-centred cubic, hexagonal close packed, icosahedral, simple
 /// cubic, other, so it can be compared by distance like any other fingerprint.
 pub fn ptm_fractions(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Array1<f64> {
+    #[cfg(test)]
+    crate::structure_probe::note("structure::ptm_fractions");
     let m = ptm(x, n, cutoff);
     let mut out = Array1::zeros(5);
     for e in &m {

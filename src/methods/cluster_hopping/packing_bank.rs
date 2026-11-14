@@ -114,6 +114,8 @@ impl PackingBank {
         energy: f64,
         cutoff: f64,
     ) -> Option<(f64, Array1<f64>)> {
+        #[cfg(test)]
+        crate::structure_probe::note("packing_bank::better_other");
         let order = Self::order(here, cutoff);
         self.seats
             .iter()

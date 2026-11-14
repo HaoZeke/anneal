@@ -16,6 +16,8 @@ pub fn propose_twin<R: Rng + ?Sized>(
     n_points: usize,
     rng: &mut R,
 ) -> Array1<f64> {
+    #[cfg(test)]
+    crate::structure_probe::note("packing::propose_twin");
     crate::twin::propose(x, n_points, rng)
 }
 
