@@ -143,7 +143,7 @@ fn library() -> Result<libloading::Library, String> {
     for candidate in sutton_chen_candidates() {
         match unsafe { libloading::Library::new(&candidate) } {
             Ok(library) => {
-                let symbol: Result<libloading::Symbol<()>, _> =
+                let symbol: Result<libloading::Symbol<*mut std::ffi::c_void>, _> =
                     unsafe { library.get(b"rgpot_sutton_chen_energy_forces\0") };
                 if symbol.is_ok() {
                     return Ok(library);
