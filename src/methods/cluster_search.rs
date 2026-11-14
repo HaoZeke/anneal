@@ -383,7 +383,8 @@ fn overlap_rejection_step(
 /// refusal gradient is not that spike, so the line search accepts nothing.
 /// The energy and the geometry are unchanged when the iteration cap is
 /// reported. Opening a non-bonded spike, and restoring a compressed bond to
-/// the covalent length, hands the same solver a geometry it can descend.
+/// the shortest length its pair bonds at, hands the same solver a geometry
+/// it can descend.
 /// The repair does not run when nothing was on that spike.
 ///
 /// `None` leaves the caller on its input. `Some` is a point no higher than
