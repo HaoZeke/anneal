@@ -111,11 +111,37 @@ def fisher(hits_a: int, n_a: int, hits_b: int, n_b: int) -> float:
 
 
 def mann_whitney(left: list[float], right: list[float]) -> float:
-    from scipy.stats import mannwhitneyu
+    """Two-sided Mann–Whitney, normal approximation with the tie correction."""
+    import math
 
-    if not left or not right:
+    n1 = len(left)
+    n2 = len(right)
+    if n1 == 0 or n2 == 0:
         return float("nan")
-    return float(mannwhitneyu(left, right, alternative="two-sided").pvalue)
+    combined = [(value, 0) for value in left] + [(value, 1) for value in right]
+    combined.sort(key=lambda item: item[0])
+    ranks = [0.0] * len(combined)
+    tie_term = 0.0
+    index = 0
+    while index < len(combined):
+        end = index
+        while end < len(combined) and combined[end][0] == combined[index][0]:
+            end += 1
+        average = 0.5 * ((index + 1) + end)
+        for slot in range(index, end):
+            ranks[slot] = average
+        width = end - index
+        if width > 1:
+            tie_term += width**3 - width
+        index = end
+    rank_sum = sum(rank for rank, (_, group) in zip(ranks, combined) if group == 0)
+    u1 = rank_sum - n1 * (n1 + 1) / 2.0
+    total = n1 + n2
+    var = n1 * n2 / 12.0 * ((total + 1) - tie_term / (total * (total - 1)))
+    if var <= 0.0:
+        return 1.0
+    z = (abs(u1 - n1 * n2 / 2.0) - 0.5) / math.sqrt(var)
+    return min(1.0, math.erfc(z / math.sqrt(2.0)))
 
 
 def jobs() -> list[tuple[str, int, str]]:
