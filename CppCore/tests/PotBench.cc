@@ -22,6 +22,7 @@
 #include <catch2/catch_all.hpp>
 
 #include "rgpot/ForceStructs.hpp"
+#include "rgpot/HessianVector.hpp"
 #include "rgpot/LennardJones/LJClusterPot.hpp"
 #include "rgpot/EAM/EAMPot.hpp"
 #include "rgpot/EMT/EMTPot.hpp"
@@ -241,6 +242,59 @@ TEST_CASE("Benchmark: MorsePot force, warm pair list",
   BENCHMARK("Morse force, 500 atoms, pair list hit") {
     wobble(base, kWarmOffset, step++, pos);
     return evalPot(pot, pos, types, box, forces);
+  };
+}
+
+TEST_CASE("Benchmark: MorsePot Hessian-vector products at one centre",
+          "[.][benchmark][morse][hvp]") {
+  // The work of a minimum-mode search between two steps: kProducts
+  // products at one geometry along different directions. Forward against
+  // the cached centre makes kProducts + 1 force calls, the naive loop and
+  // central 2 kProducts, the analytic product none.
+  constexpr std::size_t kProducts = 16;
+  const auto pos = fccPositions();
+  const std::vector<int> types(kNAtoms, kAtomicNumber);
+  const auto box = cubicBox(kBoxSide);
+  const rgpot::ForceInput in{.nAtoms = kNAtoms,
+                             .pos = pos.data(),
+                             .atmnrs = types.data(),
+                             .box = box.data()};
+  std::vector<std::vector<double>> directions(kProducts,
+                                              std::vector<double>(pos.size()));
+  for (std::size_t d = 0; d < kProducts; ++d) {
+    for (std::size_t k = 0; k < pos.size(); ++k) {
+      directions[d][k] = std::sin(0.61 * static_cast<double>(k) +
+                                  1.9 * static_cast<double>(d));
+    }
+  }
+  std::vector<double> hv(pos.size());
+  rgpot::MorsePot pot;
+  std::vector<double> forces(pos.size(), 0.0);
+  evalPot(pot, pos, types, box, forces);
+
+  auto loop = [&](rgpot::HvpScheme scheme, bool fresh_centre) {
+    rgpot::HessianVectorCache cache;
+    double acc = 0.0;
+    for (const auto &v : directions) {
+      if (fresh_centre) {
+        cache.invalidate();
+      }
+      cache.apply(pot, in, v.data(), hv.data(), 0.0, scheme);
+      acc += hv[0];
+    }
+    return acc;
+  };
+  BENCHMARK("Morse 16 HVPs, 500 atoms, forward, cached centre") {
+    return loop(rgpot::HvpScheme::Forward, false);
+  };
+  BENCHMARK("Morse 16 HVPs, 500 atoms, forward, centre per product") {
+    return loop(rgpot::HvpScheme::Forward, true);
+  };
+  BENCHMARK("Morse 16 HVPs, 500 atoms, central") {
+    return loop(rgpot::HvpScheme::Central, false);
+  };
+  BENCHMARK("Morse 16 HVPs, 500 atoms, analytic") {
+    return loop(rgpot::HvpScheme::Analytic, false);
   };
 }
 
