@@ -4,17 +4,23 @@
 
 The archive is Zenodo 10.5281/zenodo.19001618. Each Lennard-Jones file
 holds one evolutionary run. A generation stores one fitness per sample.
-Fitness is the negated potential when the run maximises. The relaxer
-string records a FIRE step cap. No dataset records the number of steps
-a sample actually took. One generation therefore costs
+Fitness is the negated potential when the run maximises. ``model_loss``
+is the diffusion training loss and is not an energy evaluation. The
+Lennard-Jones XYZ files are one frame each and do not record a step
+count.
 
-    samples * recorded relaxation steps
+A generation dataset named ``relax_steps``, ``nsteps``, ``n_steps``, or
+``relaxation_steps`` is the number of potential calls in that
+relaxation. The deposited files have no such dataset. The relaxer
+string records only the FIRE cap, ``steps=1000``. That cap is an upper
+bound. The lower bound charges one evaluation per sample and treats
+the relaxation as free. Through the first generation whose best energy
+is within 0.001 of the Cambridge value,
 
-potential evaluations, and the run costs that quantity times the number
-of generations up to and including the first generation whose best
-energy is within 0.001 of the Cambridge value. ``model_loss`` is the
-diffusion training loss and is not included. These figures are read
-from the deposit. They are not a rerun.
+    lower = generations * samples
+    upper = generations * samples * cap
+
+These figures are read from the deposit. They are not a rerun.
 """
 
 from __future__ import annotations
@@ -108,8 +114,8 @@ def read_run(handle, n_atoms: int) -> dict:
             raise ValueError(f"{run_name} generations are not 0..{len(indexes) - 1}")
         best = None
         hit_index = None
-        evals_to_hit = None
         spent = 0
+        used = 0
         step_source = None
         n_samples = None
         for index, name in zip(indexes, order):
@@ -126,30 +132,38 @@ def read_run(handle, n_atoms: int) -> dict:
                 step_source = source
             elif source != step_source:
                 raise ValueError(f"{run_name} mixes step records")
-            spent += calls
             energy = -fitness if negate else fitness
             generation_best = float(np.min(energy))
             if best is None or generation_best < best:
                 best = generation_best
-            if hit_index is None and generation_best <= level:
-                hit_index = index
-                evals_to_hit = spent
-        if best is None or n_samples is None or step_source is None:
+            if hit_index is None:
+                spent += calls
+                used += 1
+                if generation_best <= level:
+                    hit_index = index
+        if best is None or n_samples is None or step_source is None or used < 1:
             raise ValueError(f"{run_name} has no generations")
         reached = hit_index is not None
+        if step_source == "relaxer cap":
+            lower = used * n_samples
+            upper = lower * cap
+        else:
+            lower = spent
+            upper = spent
         parsed.append(
             {
                 "system": f"lj{n_atoms}",
                 "n_atoms": n_atoms,
                 "run": run_name,
                 "generations": len(indexes),
+                "generations_charged": used,
                 "samples": n_samples,
                 "relax_steps": cap,
                 "step_source": step_source,
                 "reached": reached,
                 "hit_generation": "" if hit_index is None else str(hit_index),
-                "evals_to_hit": spent if evals_to_hit is None else evals_to_hit,
-                "charged": spent,
+                "evals_lower": lower,
+                "evals_upper": upper,
                 "best": best,
                 "reference": reference,
             }
@@ -161,6 +175,27 @@ def read_run(handle, n_atoms: int) -> dict:
     }
 
 
+def lj_xyz_has_step_counts(archive: zipfile.ZipFile) -> bool:
+    """True when a Lennard-Jones XYZ records a relaxation length."""
+    found = False
+    for name in archive.namelist():
+        if not name.startswith("lj-") or not name.endswith(".xyz"):
+            continue
+        found = True
+        lines = archive.read(name).decode().splitlines()
+        if len(lines) < 2:
+            raise ValueError(f"{name} has no comment line")
+        count = int(lines[0].split()[0])
+        if len(lines) != count + 2:
+            raise ValueError(f"{name} is not one frame")
+        comment = lines[1]
+        if any(token in comment.lower() for token in ("step", "force", "call", "iter")):
+            return True
+    if not found:
+        raise ValueError("the archive has no Lennard-Jones XYZ")
+    return False
+
+
 def read_zip(path: Path) -> list[dict]:
     digest = md5_file(path)
     if digest != ZENODO_MD5:
@@ -168,6 +203,8 @@ def read_zip(path: Path) -> list[dict]:
     found = []
     with zipfile.ZipFile(path) as archive:
         names = set(archive.namelist())
+        if lj_xyz_has_step_counts(archive):
+            raise SystemExit(f"{path} XYZ files record relaxation steps")
         for n_atoms, member in MEMBERS.items():
             if member not in names:
                 raise SystemExit(f"{path} has no {member}")
@@ -203,18 +240,16 @@ def self_test() -> None:
             parsed = read_run(handle, 31)
     runs = {row["run"]: row for row in parsed["runs"]}
     cap_run = runs["run_0"]
-    # Generation 1 is the first whose negated fitness reaches -133.586422 + 0.001.
-    # Fitness 12 negates to -12, which is not the Cambridge energy. The synthetic
-    # reference is the real LJ31 value, so this run does not hit. Charged is
-    # 3 generations * 2 samples * cap 4.
-    if cap_run["reached"] or cap_run["charged"] != 24 or cap_run["step_source"] != "relaxer cap":
+    # Fitness 12 negates to -12, short of the Cambridge energy, so the run
+    # misses. Three generations and two samples give a lower bound of 6.
+    # The cap of 4 makes the upper bound 24.
+    if cap_run["reached"] or cap_run["step_source"] != "relaxer cap":
         raise SystemExit(f"cap run {cap_run}")
-    if cap_run["best"] != -12.0 or cap_run["evals_to_hit"] != 24:
+    if cap_run["evals_lower"] != 6 or cap_run["evals_upper"] != 24 or cap_run["best"] != -12.0:
         raise SystemExit(f"cap energy {cap_run}")
     varied = runs["run_1"]
-    # Energies are already the potential. The per-sample record sums to 7,
-    # and -2 is within 0.001 of nothing near -133, so this run also misses.
-    if varied["step_source"] != "relax_steps" or varied["charged"] != 7:
+    # The per-sample record sums to 7, so the two bounds agree.
+    if varied["step_source"] != "relax_steps" or varied["evals_lower"] != 7 or varied["evals_upper"] != 7:
         raise SystemExit(f"varied run {varied}")
     # A file whose reference is the stored energy does hit on generation 0.
     with tempfile.TemporaryDirectory() as tmp:
@@ -237,7 +272,7 @@ def self_test() -> None:
         finally:
             REFERENCES[31] = saved
     # 133.5860 is 0.000422 below 133.586422, inside the 0.001 band.
-    if hit["hit_generation"] != "0" or hit["evals_to_hit"] != 20 or not hit["reached"]:
+    if hit["hit_generation"] != "0" or hit["evals_lower"] != 2 or hit["evals_upper"] != 20 or not hit["reached"]:
         raise SystemExit(f"hit run {hit}")
     print("ok")
 
@@ -252,10 +287,10 @@ def main(argv: list[str]) -> int:
     for size in read_zip(args.zip):
         for run in size["runs"]:
             print(
-                "{system} {run} generations={generations} samples={samples} "
+                "{system} {run} generations_charged={generations_charged} samples={samples} "
                 "relax_steps={relax_steps} source={step_source} "
                 "reached={reached} hit_generation={hit_generation} "
-                "evals_to_hit={evals_to_hit} best={best:.10f}".format(**run)
+                "lower={evals_lower} upper={evals_upper} best={best:.10f}".format(**run)
             )
     return 0
 

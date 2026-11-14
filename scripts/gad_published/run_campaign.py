@@ -8,9 +8,14 @@ public binary with the evaluator cap. Both stop at 400000 potential
 calls, the LJ38 entry of the elja map, used here for LJ31 as well.
 Seeds are 2000 through 2011, one process at a time. A rerun that
 misses is stored as the full ceiling. Medians are Hyndman-Fan type 7.
-Fisher is the two-sided exact test on hits inside that ceiling, against
-anneal. Mann-Whitney is two-sided on evaluations to the Cambridge
-energy. This process refuses to run unless the UTS hostname is bench.
+The deposit does not record how many FIRE steps a sample took. GAD
+comparisons use two bounds: generations times samples, and that product
+times the recorded cap. Fisher is the two-sided exact test against
+anneal, and against GMIN, on whether that bound is at or below 400000
+calls. Mann-Whitney is two-sided on the same bound against the rerun
+call counts. A rerun that misses is stored as the full ceiling, and
+its Fisher and Mann-Whitney columns compare that count with anneal.
+This process refuses to run unless the UTS hostname is bench.
 """
 
 from __future__ import annotations
@@ -37,14 +42,25 @@ SUMMARY_FIELDS = [
     "provenance",
     "n",
     "reached",
+    "hit_generation",
     "hits",
     "budget",
+    "evals_lower",
+    "evals_upper",
     "evals_median",
     "evals_iqr",
     "best",
     "wall_median_s",
     "inside_us",
     "outside_us",
+    "fisher_anneal_lower",
+    "mw_anneal_lower",
+    "fisher_anneal_upper",
+    "mw_anneal_upper",
+    "fisher_gmin_lower",
+    "mw_gmin_lower",
+    "fisher_gmin_upper",
+    "mw_gmin_upper",
     "fisher_p",
     "mannwhitney_p",
     "seeds",
@@ -195,9 +211,9 @@ def gad_rows(zip_path: Path) -> list[dict]:
     rows = []
     for size in read_zip(zip_path):
         for run in size["runs"]:
-            evals = int(run["evals_to_hit"])
             reached = bool(run["reached"])
-            within = reached and evals <= BUDGET
+            lower = int(run["evals_lower"])
+            upper = int(run["evals_upper"])
             rows.append(
                 {
                     "system": run["system"],
@@ -206,8 +222,9 @@ def gad_rows(zip_path: Path) -> list[dict]:
                     "seed": run["run"],
                     "budget": BUDGET,
                     "reached": int(reached),
-                    "hit": int(within),
-                    "evals": float(evals),
+                    "hit": "",
+                    "evals_lower": lower,
+                    "evals_upper": upper,
                     "best": float(run["best"]),
                     "wall_s": "",
                     "inside_us": "",
@@ -216,7 +233,7 @@ def gad_rows(zip_path: Path) -> list[dict]:
                     "relax_steps": run["relax_steps"],
                     "step_source": run["step_source"],
                     "hit_generation": run["hit_generation"],
-                    "generations": run["generations"],
+                    "generations_charged": run["generations_charged"],
                 }
             )
     return rows
@@ -261,6 +278,9 @@ def rerun_record(n: int, arm: str, row: dict[str, str]) -> dict:
         "budget": BUDGET,
         "reached": int(hit),
         "hit": int(hit),
+        "hit_generation": "",
+        "evals_lower": "",
+        "evals_upper": "",
         "evals": float(row["evals_to_hit"]),
         "best": float(row["best"]),
         "wall_s": wall_s,
@@ -338,6 +358,12 @@ def run_gmin(
     return parse_gmin(row_path.read_text())
 
 
+def _pair(bound: float, within: int, other: list[dict]) -> tuple[str, str]:
+    fisher = fisher_exact_two_sided(within, 1, sum(item["hit"] for item in other), len(other))
+    mann = mann_whitney_two_sided([bound], [item["evals"] for item in other])
+    return f"{fisher:.6g}", f"{mann:.6g}"
+
+
 def summarise(rows: list[dict], head: str, revision: str) -> list[dict[str, str]]:
     by_system: dict[str, dict[str, list[dict]]] = {}
     for row in rows:
@@ -348,20 +374,58 @@ def summarise(rows: list[dict], head: str, revision: str) -> list[dict[str, str]
         system = f"lj{n}"
         arms = by_system.get(system, {})
         anneal = arms.get("anneal", [])
+        gmin = arms.get("gmin", [])
         for arm in ARMS:
             group = arms.get(arm, [])
             if not group:
                 continue
-            evals_median, evals_iqr = median_iqr([item["evals"] for item in group])
             best_median, _best_iqr = median_iqr([item["best"] for item in group])
             walls = [item["wall_s"] for item in group if item["wall_s"] != ""]
             insides = [item["inside_us"] for item in group if item["inside_us"] != ""]
             outsides = [item["outside_us"] for item in group if item["outside_us"] != ""]
+            recorded = [item for item in group if item.get("evals", "") != ""]
+            if recorded:
+                evals_median, evals_iqr = median_iqr([item["evals"] for item in recorded])
+                evals_median_text = f"{evals_median:.6f}"
+                evals_iqr_text = f"{evals_iqr:.6f}"
+            else:
+                evals_median_text = ""
+                evals_iqr_text = ""
+            lower_text = ""
+            upper_text = ""
+            generation = ""
+            hits = ""
+            bound_p = {key: "" for key in (
+                "fisher_anneal_lower",
+                "mw_anneal_lower",
+                "fisher_anneal_upper",
+                "mw_anneal_upper",
+                "fisher_gmin_lower",
+                "mw_gmin_lower",
+                "fisher_gmin_upper",
+                "mw_gmin_upper",
+            )}
             fisher = ""
             mann = ""
-            if arm != "anneal" and anneal:
-                fisher = f"{fisher_exact_two_sided(sum(item['hit'] for item in group), len(group), sum(item['hit'] for item in anneal), len(anneal)):.6g}"
-                mann = f"{mann_whitney_two_sided([item['evals'] for item in group], [item['evals'] for item in anneal]):.6g}"
+            if arm == "gad":
+                lower = float(group[0]["evals_lower"])
+                upper = float(group[0]["evals_upper"])
+                lower_text = f"{lower:.0f}"
+                upper_text = f"{upper:.0f}"
+                generation = str(group[0]["hit_generation"])
+                within_lower = int(group[0]["reached"] and lower <= BUDGET)
+                within_upper = int(group[0]["reached"] and upper <= BUDGET)
+                if anneal:
+                    bound_p["fisher_anneal_lower"], bound_p["mw_anneal_lower"] = _pair(lower, within_lower, anneal)
+                    bound_p["fisher_anneal_upper"], bound_p["mw_anneal_upper"] = _pair(upper, within_upper, anneal)
+                if gmin:
+                    bound_p["fisher_gmin_lower"], bound_p["mw_gmin_lower"] = _pair(lower, within_lower, gmin)
+                    bound_p["fisher_gmin_upper"], bound_p["mw_gmin_upper"] = _pair(upper, within_upper, gmin)
+            else:
+                hits = str(sum(item["hit"] for item in group))
+                if arm != "anneal" and anneal:
+                    fisher = f"{fisher_exact_two_sided(sum(item['hit'] for item in group), len(group), sum(item['hit'] for item in anneal), len(anneal)):.6g}"
+                    mann = f"{mann_whitney_two_sided([item['evals'] for item in group], [item['evals'] for item in anneal]):.6g}"
             out.append(
                 {
                     "system": system,
@@ -369,14 +433,18 @@ def summarise(rows: list[dict], head: str, revision: str) -> list[dict[str, str]
                     "provenance": group[0]["provenance"],
                     "n": str(len(group)),
                     "reached": str(sum(item["reached"] for item in group)),
-                    "hits": str(sum(item["hit"] for item in group)),
+                    "hit_generation": generation,
+                    "hits": hits,
                     "budget": str(BUDGET),
-                    "evals_median": f"{evals_median:.6f}",
-                    "evals_iqr": f"{evals_iqr:.6f}",
+                    "evals_lower": lower_text,
+                    "evals_upper": upper_text,
+                    "evals_median": evals_median_text,
+                    "evals_iqr": evals_iqr_text,
                     "best": f"{best_median:.8f}",
                     "wall_median_s": "" if not walls else f"{median_iqr([float(v) for v in walls])[0]:.6f}",
                     "inside_us": "" if not insides else f"{median_iqr([float(v) for v in insides])[0]:.4f}",
                     "outside_us": "" if not outsides else f"{median_iqr([float(v) for v in outsides])[0]:.4f}",
+                    **bound_p,
                     "fisher_p": fisher,
                     "mannwhitney_p": mann,
                     "seeds": seed_text,
@@ -500,6 +568,9 @@ def main(argv: list[str]) -> int:
                 f"LJ deposit {row['system']} {row['run']} is not 64 samples at the recorded cap 1000 "
                 f"({row['step_source']}, steps={row['relax_steps']}, samples={row['samples']})"
             )
+        charged = int(row["generations_charged"])
+        if row["evals_lower"] != charged * 64 or row["evals_upper"] != charged * 64 * 1000:
+            raise SystemExit(f"LJ deposit bounds {row}")
     rows: list[dict] = []
     order = jobs(sizes, seeds, arms)
     note(progress, "schedule " + " ".join(
@@ -515,8 +586,8 @@ def main(argv: list[str]) -> int:
                 note(
                     progress,
                     f"deposited n={n} run={row['seed']} reached={row['reached']} "
-                    f"within_budget={row['hit']} evals={row['evals']:.0f} "
-                    f"best={row['best']:.8f} generation={row['hit_generation']}",
+                    f"generation={row['hit_generation']} lower={row['evals_lower']} "
+                    f"upper={row['evals_upper']} best={row['best']:.8f}",
                 )
             continue
         saved = args.runs / f"lj{n}" / f"{arm}-{seed}.row"
