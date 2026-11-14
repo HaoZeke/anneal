@@ -318,6 +318,8 @@ fn main() {
     println!("best: {:.10}", out.best);
     println!("hops: {}", out.hops);
     println!("basins: {}", out.basins);
+    let (v_return, v_known, v_new) = out.visit_counts;
+    println!("visits: return {v_return} known {v_known} new {v_new}");
     println!("wall_seconds: {wall:.6}");
     println!("pot_s: {pot_s:.6}");
     println!("outside_s: {outside_s:.6}");

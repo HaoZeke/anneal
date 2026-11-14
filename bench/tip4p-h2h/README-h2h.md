@@ -125,6 +125,8 @@ are chordless cycles of the contact graph. The budget columns come from the
 search's own counters: `accepted` sums the arm accepts, `rejected` is hops
 minus accepted, and `quench_return/known/new` is the minima-hopping visit
 classification of every quench. Per-seed rows are `diag-h2o21.csv`.
+`scripts/tip4p_h2h/diag21.py run --binary <h2h_seed> --runs <dir>` writes the
+twelve runs, and `diag21.py diag --runs <dir>` writes the rows from them.
 
 Every miss is an oxygen-framework miss. No seed's contact graph is isomorphic
 to the minimum's, so none is a proton isomer of the right cage. The twelve
@@ -170,4 +172,6 @@ calls, 2011 at 215,380 for the downhill form). That is the first anneal hit on
 (H₂O)₂₁. The downhill form loses one seed at (H₂O)₁₅ and three at (H₂O)₂₀, so
 no variant is made default. Baseline (H₂O)₈, ₁₅ and ₂₀ rows are the same arm
 run on f0dfa206; seeds 2000 at 15 and 2001 at 20 reproduce on 3141987e call
-for call.
+for call. The variants were scratch builds that are not committed. The
+summary is `diag21.py mechanisms` over their run directories, one
+`variant:n:dir` argument per row in table order.
