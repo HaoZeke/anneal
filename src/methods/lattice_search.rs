@@ -1734,28 +1734,41 @@ impl Lattice {
         let n = x.len() / 3;
         let m = vacant.len();
         let atoms: Vec<[f64; 3]> = (0..n).map(|i| position(x, i)).collect();
-        let mut terms = Vec::with_capacity(n);
+        // `r_min` is a pure function of the pair. Computing the well scale
+        // once keeps `r2 * scale * scale` bit for bit with the per-pair call.
+        // The pair energy is symmetric. Filling each atom's row as the pairs
+        // are visited writes the same label order as the `j != i` scan, and
+        // each term is evaluated once. `total_cmp` puts equal bits in one
+        // class, so an unstable sort writes the sequence a stable sort would.
+        let scale = self.kind.r_min() / well.max(1e-6);
+        let width = n.saturating_sub(1);
+        let mut packed = vec![0_i64; n * width];
+        let mut fill = vec![0usize; n];
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let energy = total_key(ranked_pair(self, pair_dist2(atoms[i], atoms[j]), scale));
+                packed[i * width + fill[i]] = energy;
+                fill[i] += 1;
+                packed[j * width + fill[j]] = energy;
+                fill[j] += 1;
+            }
+        }
         let mut atom_energy = vec![0.0; n];
         for i in 0..n {
-            terms.clear();
-            for j in 0..n {
-                if i == j {
-                    continue;
-                }
-                terms.push(ranked_pair(self, pair_dist2(atoms[i], atoms[j]), well));
-            }
-            terms.sort_by(|a, b| a.total_cmp(b));
-            atom_energy[i] = terms.iter().sum();
+            let row = &mut packed[i * width..(i + 1) * width];
+            row.sort_unstable();
+            atom_energy[i] = row.iter().copied().map(energy_from_key).sum();
         }
+        let mut terms = Vec::with_capacity(n);
         let site_energy: Vec<f64> = vacant
             .iter()
             .map(|&p| {
                 terms.clear();
                 for q in &atoms {
-                    terms.push(ranked_pair(self, pair_dist2(p, *q), well));
+                    terms.push(total_key(ranked_pair(self, pair_dist2(p, *q), scale)));
                 }
-                terms.sort_by(|a, b| a.total_cmp(b));
-                terms.iter().sum()
+                terms.sort_unstable();
+                terms.iter().copied().map(energy_from_key).sum()
             })
             .collect();
         let ranked = highest_energy(&atom_energy, &atoms, movable, k);
@@ -1766,7 +1779,7 @@ impl Lattice {
                 if r2 < 1e-8 {
                     continue;
                 }
-                let own = ranked_pair(self, r2, well);
+                let own = ranked_pair(self, r2, scale);
                 let delta = site_energy[s] - own - atom_energy[i];
                 offers.push((delta, i, s));
             }
@@ -1911,14 +1924,30 @@ fn draw_exchange<R: Rng + ?Sized>(
     Some(state)
 }
 
+/// Integer image of [`f64::total_cmp`]'s ordering, and its inverse.
+///
+/// Sorting the keys sorts the energies. The transform is an involution, so
+/// the energy is recovered bit for bit and the sum matches a stable
+/// `total_cmp` sort.
+fn total_key(value: f64) -> i64 {
+    let mut bits = value.to_bits() as i64;
+    bits ^= (((bits >> 63) as u64) >> 1) as i64;
+    bits
+}
+
+fn energy_from_key(key: i64) -> f64 {
+    let mut bits = key;
+    bits ^= (((bits >> 63) as u64) >> 1) as i64;
+    f64::from_bits(bits as u64)
+}
+
 /// Pair energy with the well moved onto `well`.
 ///
 /// [`PairKind::r_min`] is the well of the formula. Dividing distances by
 /// `well` and multiplying by that minimum puts a contact at the
 /// structure's own bond length on the bottom of the well, for whatever
 /// pair `lattice` carries.
-fn ranked_pair(lattice: &Lattice, r2: f64, well: f64) -> f64 {
-    let scale = lattice.kind.r_min() / well.max(1e-6);
+fn ranked_pair(lattice: &Lattice, r2: f64, scale: f64) -> f64 {
     lattice.pair_energy(r2 * scale * scale)
 }
 
@@ -2576,6 +2605,58 @@ mod tests {
             let once = lattice.sites(&flat);
             let twice = lattice.sites(&flat);
             assert_eq!(once, twice);
+        }
+    }
+
+    #[test]
+    fn the_ranked_key_sums_like_total_cmp() {
+        let mut bits = 0xC0FF_EE00_u64;
+        let mut next = || {
+            bits ^= bits << 13;
+            bits ^= bits >> 7;
+            bits ^= bits << 17;
+            let unit = (bits >> 11) as f64 / ((1u64 << 53) as f64);
+            (unit - 0.5) * 20.0
+        };
+        for n in [1usize, 2, 17, 79, 80] {
+            let values: Vec<f64> = (0..n).map(|_| next()).collect();
+            for value in &values {
+                assert_eq!(energy_from_key(total_key(*value)).to_bits(), value.to_bits());
+            }
+            let mut stable = values.clone();
+            stable.sort_by(|a, b| a.total_cmp(b));
+            let mut keys: Vec<i64> = values.iter().copied().map(total_key).collect();
+            keys.sort_unstable();
+            for (left, key) in stable.iter().zip(keys.iter()) {
+                assert_eq!(left.to_bits(), energy_from_key(*key).to_bits());
+            }
+            let slow: f64 = stable.iter().sum();
+            let fast: f64 = keys.iter().copied().map(energy_from_key).sum();
+            assert_eq!(slow.to_bits(), fast.to_bits());
+        }
+    }
+
+    #[test]
+    fn the_hoisted_well_scale_matches_the_per_pair_product() {
+        for kind in [PairKind::LennardJones, PairKind::Morse { rho: 6.0 }] {
+            let well = 1.05_f64;
+            let scale = kind.r_min() / well.max(1e-6);
+            let mut bits = 0x1234_5678_9ABCu64;
+            for _ in 0..64 {
+                bits = bits
+                    .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    .wrapping_add(1);
+                let r2 = (bits >> 11) as f64 / ((1u64 << 53) as f64) * 3.0 + 0.25;
+                let per_pair = {
+                    let scale_i = kind.r_min() / well.max(1e-6);
+                    r2 * scale_i * scale_i
+                };
+                assert_eq!(
+                    (r2 * scale * scale).to_bits(),
+                    per_pair.to_bits(),
+                    "hoisted scale drifted for {kind:?} at r2={r2}"
+                );
+            }
         }
     }
 }

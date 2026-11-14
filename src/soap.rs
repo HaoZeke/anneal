@@ -1718,13 +1718,18 @@ pub fn fivefold_axis_table(x: ArrayView1<f64>) -> Vec<([f64; 3], f64)> {
     if let Some(rows) = cached {
         return rows;
     }
-    let mut rows: Vec<([f64; 3], f64)> = candidate_axes(x)
+    let axes = candidate_axes(x);
+    let mut rows: Vec<([f64; 3], f64)> = axes
         .into_iter()
         .map(|ax| {
-            // An axis whose nearest-image residual already misses the cut
-            // cannot enter the good set, so the assignment is not run.
-            let bound = rotation_row_min_rms(x, ax);
-            let length = if bound >= FIVEFOLD_AXIS + 1.0e-6 * (1.0 + FIVEFOLD_AXIS) {
+            // Every omitted nearest-image term is non-negative, so a partial
+            // scan that has already passed the cut is a lower bound. The
+            // axis cannot enter the good set, and the assignment is not run.
+            // An axis that stays under the cut is scanned in full, and its
+            // stored length is the assignment residual, as before.
+            let cut = FIVEFOLD_AXIS + 1.0e-6 * (1.0 + FIVEFOLD_AXIS);
+            let bound = rotation_row_min_rms_until(x, ax, cut);
+            let length = if bound >= cut {
                 bound
             } else {
                 residual_about(x, ax).0
@@ -1900,8 +1905,8 @@ fn candidate_axes(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
 }
 
 fn row_min_rms_clears(x: ArrayView1<f64>, axis: [f64; 3], cap: f64) -> bool {
-    let bound = rotation_row_min_rms(x, axis);
-    bound >= cap + 1.0e-6 * (1.0 + cap)
+    let cut = cap + 1.0e-6 * (1.0 + cap);
+    rotation_row_min_rms_until(x, axis, cut) >= cut
 }
 
 /// Root-mean-square of each atom's nearest image under a fivefold turn.
@@ -1909,20 +1914,36 @@ fn row_min_rms_clears(x: ArrayView1<f64>, axis: [f64; 3], cap: f64) -> bool {
 /// This is at most the minimum-cost assignment residual: the assignment
 /// cannot beat giving every atom its own nearest image.
 struct RmsScratch {
-    centred: Vec<[f64; 3]>,
-    turned: Vec<[f64; 3]>,
+    cx: Vec<f64>,
+    cy: Vec<f64>,
+    cz: Vec<f64>,
+    tx: Vec<f64>,
+    ty: Vec<f64>,
+    tz: Vec<f64>,
 }
 
 std::thread_local! {
     static RMS_SCRATCH: std::cell::RefCell<RmsScratch> = const {
         std::cell::RefCell::new(RmsScratch {
-            centred: Vec::new(),
-            turned: Vec::new(),
+            cx: Vec::new(),
+            cy: Vec::new(),
+            cz: Vec::new(),
+            tx: Vec::new(),
+            ty: Vec::new(),
+            tz: Vec::new(),
         })
     };
 }
 
-fn rotation_row_min_rms(x: ArrayView1<f64>, axis: [f64; 3]) -> f64 {
+/// Nearest-image root-mean-square, stopping once a partial sum clears `cut`.
+///
+/// Terms are visited in atom order. A finite `cut` may return the partial
+/// root-mean-square as soon as it is at least `cut`: every later term is
+/// non-negative, so the full scan would clear `cut` as well. The partial
+/// value is not the full scan. Callers that keep an axis use it only when
+/// the scan stayed under `cut`, and that path adds every term. An infinite
+/// `cut` is that full scan.
+fn rotation_row_min_rms_until(x: ArrayView1<f64>, axis: [f64; 3], cut: f64) -> f64 {
     let n = x.len() / 3;
     if n == 0 {
         return 0.0;
@@ -1931,34 +1952,124 @@ fn rotation_row_min_rms(x: ArrayView1<f64>, axis: [f64; 3]) -> f64 {
     let turn = rotation_about(axis, 2.0 * PI / 5.0);
     RMS_SCRATCH.with(|slot| {
         let mut scratch = slot.borrow_mut();
-        scratch.centred.clear();
-        scratch.turned.clear();
-        scratch.centred.reserve(n);
-        scratch.turned.reserve(n);
+        scratch.cx.clear();
+        scratch.cy.clear();
+        scratch.cz.clear();
+        scratch.tx.clear();
+        scratch.ty.clear();
+        scratch.tz.clear();
+        scratch.cx.reserve(n);
+        scratch.cy.reserve(n);
+        scratch.cz.reserve(n);
+        scratch.tx.reserve(n);
+        scratch.ty.reserve(n);
+        scratch.tz.reserve(n);
         for atom in 0..n {
             let point = [
                 x[3 * atom] - com[0],
                 x[3 * atom + 1] - com[1],
                 x[3 * atom + 2] - com[2],
             ];
-            scratch.centred.push(point);
-            scratch.turned.push(rot_apply(&turn, point));
+            let image = rot_apply(&turn, point);
+            scratch.cx.push(point[0]);
+            scratch.cy.push(point[1]);
+            scratch.cz.push(point[2]);
+            scratch.tx.push(image[0]);
+            scratch.ty.push(image[1]);
+            scratch.tz.push(image[2]);
         }
+        let finite = cut.is_finite();
+        let stop = if finite {
+            cut * cut * n as f64
+        } else {
+            f64::INFINITY
+        };
         let mut total = 0.0;
-        let count = scratch.centred.len();
-        for index in 0..count {
-            let point = scratch.centred[index];
-            let mut nearest = f64::INFINITY;
-            for image in &scratch.turned {
-                let dx = point[0] - image[0];
-                let dy = point[1] - image[1];
-                let dz = point[2] - image[2];
-                nearest = nearest.min(dx * dx + dy * dy + dz * dz);
-            }
+        for index in 0..n {
+            let nearest = nearest_image(
+                scratch.cx[index],
+                scratch.cy[index],
+                scratch.cz[index],
+                &scratch.tx,
+                &scratch.ty,
+                &scratch.tz,
+            );
             total += nearest;
+            if finite && total >= stop {
+                let rms = (total / n as f64).sqrt();
+                if rms >= cut {
+                    return rms;
+                }
+            }
         }
         (total / n as f64).sqrt()
     })
+}
+
+/// Smallest squared distance from one centred atom to a turned image.
+///
+/// Images are visited in atom order. The running minimum is the minimum of
+/// those squared distances, which does not depend on the order the minimum
+/// is taken, so a vector reduction matches the scalar scan bit for bit.
+fn nearest_image(px: f64, py: f64, pz: f64, tx: &[f64], ty: &[f64], tz: &[f64]) -> f64 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if std::arch::is_x86_feature_detected!("avx") {
+            // The host has AVX, and each slice is read for `tx.len()` lanes.
+            return unsafe { nearest_image_avx(px, py, pz, tx, ty, tz) };
+        }
+    }
+    nearest_image_scalar(px, py, pz, tx, ty, tz)
+}
+
+fn nearest_image_scalar(px: f64, py: f64, pz: f64, tx: &[f64], ty: &[f64], tz: &[f64]) -> f64 {
+    let mut nearest = f64::INFINITY;
+    for j in 0..tx.len() {
+        let dx = px - tx[j];
+        let dy = py - ty[j];
+        let dz = pz - tz[j];
+        nearest = nearest.min(dx * dx + dy * dy + dz * dz);
+    }
+    nearest
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx")]
+unsafe fn nearest_image_avx(px: f64, py: f64, pz: f64, tx: &[f64], ty: &[f64], tz: &[f64]) -> f64 {
+    use std::arch::x86_64::{
+        _mm256_add_pd, _mm256_loadu_pd, _mm256_min_pd, _mm256_mul_pd, _mm256_set1_pd,
+        _mm256_storeu_pd, _mm256_sub_pd,
+    };
+    unsafe {
+        let n = tx.len();
+        let pxv = _mm256_set1_pd(px);
+        let pyv = _mm256_set1_pd(py);
+        let pzv = _mm256_set1_pd(pz);
+        let mut acc = _mm256_set1_pd(f64::INFINITY);
+        let mut j = 0;
+        while j + 4 <= n {
+            let dx = _mm256_sub_pd(pxv, _mm256_loadu_pd(tx.as_ptr().add(j)));
+            let dy = _mm256_sub_pd(pyv, _mm256_loadu_pd(ty.as_ptr().add(j)));
+            let dz = _mm256_sub_pd(pzv, _mm256_loadu_pd(tz.as_ptr().add(j)));
+            let d2 = _mm256_add_pd(
+                _mm256_add_pd(_mm256_mul_pd(dx, dx), _mm256_mul_pd(dy, dy)),
+                _mm256_mul_pd(dz, dz),
+            );
+            acc = _mm256_min_pd(acc, d2);
+            j += 4;
+        }
+        let mut tmp = [0.0_f64; 4];
+        _mm256_storeu_pd(tmp.as_mut_ptr(), acc);
+        let mut nearest = tmp[0].min(tmp[1]).min(tmp[2]).min(tmp[3]);
+        while j < n {
+            let dx = px - tx[j];
+            let dy = py - ty[j];
+            let dz = pz - tz[j];
+            nearest = nearest.min(dx * dx + dy * dy + dz * dz);
+            j += 1;
+        }
+        nearest
+    }
 }
 
 struct ResidualMemo {
@@ -3875,7 +3986,7 @@ mod tests {
         let mut shifted = ico.clone();
         shifted[0] += 0.35;
         for axis in candidate_axes(shifted.view()) {
-            let bound = rotation_row_min_rms(shifted.view(), axis);
+            let bound = rotation_row_min_rms_until(shifted.view(), axis, f64::INFINITY);
             let exact = residual_about_fresh(shifted.view(), axis).0;
             assert!(
                 bound <= exact + 1.0e-8,
@@ -4160,13 +4271,36 @@ mod tests {
             let coords: Vec<f64> = (0..3 * n).map(|_| 2.0 * radius * next()).collect();
             let x = Array1::from(coords);
             for axis in candidate_axes(x.view()) {
-                let fast = rotation_row_min_rms(x.view(), axis);
+                let fast = rotation_row_min_rms_until(x.view(), axis, f64::INFINITY);
                 let slow = direct_row_min(x.view(), axis);
                 assert_eq!(
                     fast.to_bits(),
                     slow.to_bits(),
                     "n={n} fast {fast} slow {slow}"
                 );
+            }
+            let cut = FIVEFOLD_AXIS + 1.0e-6 * (1.0 + FIVEFOLD_AXIS);
+            let table = fivefold_axis_table(x.view());
+            for axis in candidate_axes(x.view()) {
+                let row = direct_row_min(x.view(), axis);
+                let stored = table
+                    .iter()
+                    .find(|(found, _)| *found == axis)
+                    .map(|(_, length)| *length)
+                    .expect("every candidate axis is tabulated");
+                if row >= cut {
+                    assert!(
+                        stored >= cut,
+                        "n={n} partial {stored} kept an axis whose scan is {row}"
+                    );
+                } else {
+                    let residual = residual_about_fresh(x.view(), axis).0;
+                    assert_eq!(
+                        stored.to_bits(),
+                        residual.to_bits(),
+                        "n={n} axis under the cut stored {stored}, residual {residual}"
+                    );
+                }
             }
             let first = fivefold_axis_table(x.view());
             let second = fivefold_axis_table(x.view());

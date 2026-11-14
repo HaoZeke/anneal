@@ -4,6 +4,8 @@
 //! proposal, the sorted pair spectrum, and the common-neighbour fractions.
 //! `sorted_pairs_cold` changes the geometry every call. `sorted_pairs_hot`
 //! repeats one geometry, which is what a chain does with its incumbent.
+//! The lattice draw and the fivefold table also change geometry every
+//! call: a repeated geometry is served from the basin cache.
 
 use anneal_core::bias::{Fingerprint, SortedPairs};
 use anneal_core::methods::cluster_hopping::Ledger;
@@ -51,23 +53,38 @@ fn kernels(c: &mut Criterion) {
             b.iter(|| black_box(named_triplet_fractions(x.view(), n, 1.35)))
         });
 
-        let flat = x.to_vec();
         let lattice = Lattice::default();
+        let mut lattice_salt = 20u64;
         g.bench_function("dynamic_lattice", |b| {
             b.iter(|| {
+                lattice_salt = lattice_salt.wrapping_add(1);
+                let y = cluster(n, lattice_salt);
                 let mut ledger = Ledger::new(1_000_000);
                 let mut rng = StdRng::seed_from_u64(7);
-                black_box(lattice.propose_energy_exchange(&flat, &mut ledger, 0.8, &mut rng))
+                black_box(lattice.propose_energy_exchange(
+                    y.as_slice().unwrap(),
+                    &mut ledger,
+                    0.8,
+                    &mut rng,
+                ))
             })
         });
 
+        let mut soap_salt = 30u64;
         g.bench_function("soap_fivefold_table", |b| {
-            b.iter(|| black_box(fivefold_axis_table(x.view())))
+            b.iter(|| {
+                soap_salt = soap_salt.wrapping_add(1);
+                let y = cluster(n, soap_salt);
+                black_box(fivefold_axis_table(y.view()))
+            })
         });
+        let mut proposal_salt = 40u64;
         g.bench_function("soap_proposal", |b| {
             b.iter(|| {
+                proposal_salt = proposal_salt.wrapping_add(1);
+                let y = cluster(n, proposal_salt);
                 let mut rng = StdRng::seed_from_u64(11);
-                black_box(step_away_fivefold(x.view(), 0.2, &mut rng))
+                black_box(step_away_fivefold(y.view(), 0.2, &mut rng))
             })
         });
 
