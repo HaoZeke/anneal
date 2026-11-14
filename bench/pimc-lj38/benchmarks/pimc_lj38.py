@@ -47,16 +47,20 @@ class PimcLj38:
 
 
 class PimcLj38Paper:
-    """One seed of the published 32-bead, 40-round LJ38 schedule."""
+    """One seed of the published-length schedule at 38, 55, or 75 atoms."""
 
+    params = [38, 55, 75]
+    param_names = ["size"]
     timeout = 86400
 
-    def setup(self):
+    def setup(self, size):
+        if size not in (38, 55, 75):
+            raise RuntimeError(f"no schedule for {size}")
         if not ENTER.is_file():
             raise RuntimeError(f"missing {ENTER}")
 
-    def time_seed(self):
+    def time_seed(self, size):
         subprocess.run(
-            ["bash", str(ENTER), "paper", "--seed", "2000"],
+            ["bash", str(ENTER), "paper", "--size", str(size), "--seed", "2000"],
             check=True,
         )

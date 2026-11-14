@@ -241,6 +241,18 @@ rule pimc_lj38_paper:
         "bench/pimc-lj38/rows/lj38/rpqa_paper-2003.row",
         "bench/pimc-lj38/rows/lj38/rpqa_paper-2004.row",
         "bench/pimc-lj38/rows/lj38/rpqa_paper-2005.row",
+        "bench/pimc-lj38/rows/lj55/rpqa_paper-2000.row",
+        "bench/pimc-lj38/rows/lj55/rpqa_paper-2001.row",
+        "bench/pimc-lj38/rows/lj55/rpqa_paper-2002.row",
+        "bench/pimc-lj38/rows/lj55/rpqa_paper-2003.row",
+        "bench/pimc-lj38/rows/lj55/rpqa_paper-2004.row",
+        "bench/pimc-lj38/rows/lj55/rpqa_paper-2005.row",
+        "bench/pimc-lj38/rows/lj75/rpqa_paper-2000.row",
+        "bench/pimc-lj38/rows/lj75/rpqa_paper-2001.row",
+        "bench/pimc-lj38/rows/lj75/rpqa_paper-2002.row",
+        "bench/pimc-lj38/rows/lj75/rpqa_paper-2003.row",
+        "bench/pimc-lj38/rows/lj75/rpqa_paper-2004.row",
+        "bench/pimc-lj38/rows/lj75/rpqa_paper-2005.row",
     shell:
         """
         set -euo pipefail

@@ -41,6 +41,8 @@ ARMS = ("anneal", "rpqa")
 SCHEDULE_SEED = 20261113
 HIT_TOL = 0.001
 REFERENCE = -173.928427
+REFERENCES = {38: REFERENCE, 55: -279.248470, 75: -397.492331}
+PAPER_SIZES = (38, 55, 75)
 NBEADS = 16
 TOTAL_STEPS = 30000
 PIN_INTERVAL = 5000
@@ -61,6 +63,18 @@ PAPER_TOTAL_STEPS = PAPER_LAST_PIN + 1
 PAPER_RAMP_STEPS = PAPER_LAST_PIN
 PAPER_ARM = "rpqa_paper"
 PAPER_SCHEDULE_SEED = 20261114
+
+
+def paper_length(n: int) -> tuple[int, int, int]:
+    """Rounds, last pin step, and i-PI total_steps.
+
+    The paper publishes no LJ55 or LJ75 schedule. It says larger clusters
+    require longer annealing times for the same success probability, so the
+    40 LJ38 rounds are scaled by N/38. The interval stays 10000 steps.
+    """
+    rounds = int(round(PAPER_ROUNDS * n / 38))
+    last = PAPER_START + (rounds - 1) * PAPER_PIN_INTERVAL
+    return rounds, last, last + 1
 
 SUMMARY_FIELDS = [
     "system",
@@ -151,16 +165,16 @@ def load_source(path: Path) -> dict[str, str]:
     return fields
 
 
-def binary_budget(binary: Path) -> tuple[int, float]:
+def binary_budget(binary: Path, n: int = 38) -> tuple[int, float]:
     proc = subprocess.run(
-        [str(binary), "budget", "lj38"],
+        [str(binary), "budget", f"lj{n}"],
         check=True,
         capture_output=True,
         text=True,
     )
     lines = [line for line in proc.stdout.splitlines() if line.strip()]
     if len(lines) < 2:
-        raise SystemExit(f"budget for LJ38 returned {proc.stdout!r}")
+        raise SystemExit(f"budget for LJ{n} returned {proc.stdout!r}")
     return int(lines[0]), float(lines[1])
 
 
@@ -240,7 +254,7 @@ def load_seed(path: Path) -> dict[str, str] | None:
     return rows[0]
 
 
-def run_anneal(binary: Path, seed: int, budget: int, log: Path) -> dict[str, str]:
+def run_anneal(binary: Path, seed: int, budget: int, log: Path, code_revision: str) -> dict[str, str]:
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("w") as handle:
         proc = subprocess.run(
@@ -257,28 +271,30 @@ def run_anneal(binary: Path, seed: int, budget: int, log: Path) -> dict[str, str
     row = parse_anneal(text)
     if int(row["budget"]) != budget:
         raise RuntimeError(f"anneal budget {row['budget']} != {budget}")
-    return with_rates(row)
+    row = with_rates(row)
+    row["code_revision"] = code_revision
+    return row
 
 
-def read_reduced(path: Path) -> list[list[float]]:
+def read_reduced(path: Path, n: int = 38) -> list[list[float]]:
     atoms = []
     for line in path.read_text().splitlines():
         parts = line.split()
         if len(parts) != 3:
             continue
         atoms.append([float(part) for part in parts])
-    if len(atoms) != 38:
+    if len(atoms) != n:
         raise RuntimeError(f"{path} has {len(atoms)} atoms")
     return atoms
 
 
-def write_init(binary: Path, seed: int, path: Path) -> None:
+def write_init(binary: Path, seed: int, path: Path, n: int = 38) -> None:
     reduced_path = path.with_suffix(".reduced")
     subprocess.run(
-        [str(binary), "coords", "lj38", str(seed), str(reduced_path)],
+        [str(binary), "coords", f"lj{n}", str(seed), str(reduced_path)],
         check=True,
     )
-    atoms = read_reduced(reduced_path)
+    atoms = read_reduced(reduced_path, n)
     lines = [str(len(atoms)), "# angstrom, anneal start times the RPQA sigma"]
     for x, y, z in atoms:
         lines.append(
@@ -393,14 +409,18 @@ def run_rpqa(
     ramp_steps: int = RAMP_STEPS,
     expect_pins: int | None = None,
     code_revision: str = "",
+    n: int = 38,
+    reference: float = REFERENCE,
 ) -> dict[str, str]:
+    if not code_revision:
+        raise RuntimeError("RPQA code revision comes from the source file")
     work.mkdir(parents=True, exist_ok=True)
     log.parent.mkdir(parents=True, exist_ok=True)
-    address = f"{arm}_lj38_{seed}"
+    address = f"{arm}_lj{n}_{seed}"
     socket_path = Path(f"/tmp/ipi_{address}")
     if socket_path.exists():
         socket_path.unlink()
-    write_init(binary, seed, work / "init.xyz")
+    write_init(binary, seed, work / "init.xyz", n)
     write_input(
         work / "input.xml",
         seed,
@@ -420,7 +440,7 @@ def run_rpqa(
     env["IPI_ROOT"] = str(ipi_root)
     env["RPQA_METER"] = str(meter_path)
     env["RPQA_BUDGET"] = str(budget)
-    env["RPQA_LEVEL_HA"] = f"{(REFERENCE + HIT_TOL) * EPSILON:.16e}"
+    env["RPQA_LEVEL_HA"] = f"{(reference + HIT_TOL) * EPSILON:.16e}"
     env["RPQA_ADDRESS"] = address
     env["RPQA_SOCKET_PREFIX"] = "/tmp/ipi_"
     env["PYTHONPATH"] = str(script_dir)
@@ -480,7 +500,7 @@ def run_rpqa(
     if charged < 1 or (budget > 0 and charged > budget):
         raise RuntimeError(f"RPQA seed {seed} charged {charged} outside 1..{budget}\n{log.read_text()[-800:]}")
     hit = hit_calls > 0
-    if hit and (hit_calls > charged or best_ha > (REFERENCE + HIT_TOL) * EPSILON):
+    if hit and (hit_calls > charged or best_ha > (reference + HIT_TOL) * EPSILON):
         raise RuntimeError(f"RPQA seed {seed} hit record is inconsistent")
     if budget > 0 and not hit and charged != budget:
         raise RuntimeError(
@@ -503,7 +523,7 @@ def run_rpqa(
         stop = "schedule"
         evals = charged
     row = {
-        "system": "lj38",
+        "system": f"lj{n}",
         "arm": arm,
         "seed": str(seed),
         "budget": str(budget if budget > 0 else 0),
@@ -514,7 +534,7 @@ def run_rpqa(
         "pot_s": f"{pot_s:.6f}",
         "best": best,
         "stop": stop,
-        "reached": "38",
+        "reached": str(n),
         "code_revision": code_revision,
         "_pins": str(n_pins),
     }
@@ -587,7 +607,7 @@ def summarise(rows: list[dict[str, str]], seeds: tuple[int, ...], source: dict[s
                 "rpqa_commit": source["rpqa_commit"],
                 "rpqa_source": source["rpqa_source"],
                 "anneal_head": head,
-                "code_revision": source["rpqa_commit"],
+                "code_revision": head if arm == "anneal" else source["rpqa_commit"],
             }
         )
     return out
@@ -657,7 +677,8 @@ def append_missing(
 def upsert_summary(path: Path, fields: list[str], row: dict[str, str]) -> None:
     """Replace only the paper-arm summary line. Other lines are copied unchanged."""
     raw = path.read_text() if path.is_file() else ""
-    kept = [line for line in raw.splitlines(keepends=True) if not line.startswith(f"lj38,{PAPER_ARM},")]
+    prefix = f"{row['system']},{row['arm']},"
+    kept = [line for line in raw.splitlines(keepends=True) if not line.startswith(prefix)]
     if kept and not kept[-1].endswith("\n"):
         kept[-1] += "\n"
     buffer = io.StringIO()
@@ -668,12 +689,28 @@ def upsert_summary(path: Path, fields: list[str], row: dict[str, str]) -> None:
     path.write_text("".join(kept) + buffer.getvalue())
 
 
-def anneal_reference(summary_path: Path) -> tuple[float, str]:
-    """Wall median and anneal commit of the LJ38 anneal row the ratio divides by."""
-    for row in load_table(summary_path):
-        if row.get("arm") == "anneal" and row.get("system") == "lj38":
-            return float(row["wall_median_s"]), row["anneal_head"]
-    raise RuntimeError(f"{summary_path} has no LJ38 anneal row")
+def anneal_reference(summary_path: Path, rows_dir: Path | None = None) -> tuple[float, str]:
+    """Wall median and anneal commit of the LJ38 anneal row the ratio divides by.
+
+    A revision directory is a rerun kept beside the original rows. When one
+    is present, the ratio divides by that rerun. The original row stays listed.
+    """
+    anneal_rows = [
+        row
+        for row in load_table(summary_path)
+        if row.get("arm") == "anneal" and row.get("system") == "lj38"
+    ]
+    if not anneal_rows:
+        raise RuntimeError(f"{summary_path} has no LJ38 anneal row")
+    if rows_dir is not None:
+        root = rows_dir / "lj38"
+        named = []
+        if root.is_dir():
+            named = [path.name for path in root.iterdir() if path.is_dir() and is_revision(path.name)]
+        preferred = [row for row in anneal_rows if row.get("code_revision") in named]
+        if len(preferred) == 1:
+            return float(preferred[0]["wall_median_s"]), preferred[0]["anneal_head"]
+    return float(anneal_rows[0]["wall_median_s"]), anneal_rows[0]["anneal_head"]
 
 
 def summarise_paper(
@@ -767,97 +804,293 @@ def self_test() -> None:
         raise SystemExit("paper summary seed order")
     if (paper_row["anneal_head"], paper_row["code_revision"], paper_row["wall_ratio"]) != ("a", "r", "4.000000"):
         raise SystemExit("paper summary provenance")
+    if paper_length(38) != (40, 400_000, 400_001):
+        raise SystemExit("LJ38 length")
+    if paper_length(55) != (58, 580_000, 580_001):
+        raise SystemExit(f"LJ55 length {paper_length(55)}")
+    if paper_length(75) != (79, 790_000, 790_001):
+        raise SystemExit(f"LJ75 length {paper_length(75)}")
     print("ok")
 
 
-def seed_path(rows: Path, seed: int, arm: str) -> Path:
-    return rows / "lj38" / f"{arm}-{seed}.row"
+def seed_path(rows: Path, seed: int, arm: str, n: int = 38) -> Path:
+    return rows / f"lj{n}" / f"{arm}-{seed}.row"
+
+
+def is_revision(name: str) -> bool:
+    return len(name) == 40 and not name.strip("0123456789abcdef")
+
+
+def anneal_revision_path(rows: Path, n: int, revision: str, seed: int) -> Path:
+    """New anneal measurements sit beside the original row file, keyed by revision."""
+    if not is_revision(revision):
+        raise RuntimeError(f"anneal revision {revision!r} is not a commit")
+    return rows / f"lj{n}" / revision / f"anneal-{seed}.row"
+
+
+def revision_from_seeds(
+    path: Path,
+    n: int,
+    seed: int,
+    row: dict[str, str],
+) -> str:
+    """Revision of a legacy anneal row, from the seed line with the same measurement."""
+    matches = []
+    for item in load_table(path):
+        if item.get("system") != f"lj{n}" or item.get("arm") != "anneal":
+            continue
+        if item.get("seed") != str(seed):
+            continue
+        if item.get("evals_to_hit") != row["evals_to_hit"] or item.get("best") != row["best"]:
+            continue
+        revision = item.get("code_revision", "")
+        if is_revision(revision):
+            matches.append(revision)
+    if len(set(matches)) != 1:
+        raise RuntimeError(f"LJ{n} anneal seed {seed} matches revisions {matches}")
+    return matches[0]
+
+
+def load_anneal_revisions(
+    rows: Path,
+    n: int,
+    seeds_file: Path | None,
+) -> dict[str, list[dict[str, str]]]:
+    """Legacy ``anneal-<seed>.row`` files plus ``<revision>/anneal-<seed>.row``."""
+    found: dict[str, list[dict[str, str]]] = {}
+    root = rows / f"lj{n}"
+    legacy = []
+    for seed in SEEDS:
+        row = load_seed(seed_path(rows, seed, "anneal", n))
+        if row is None:
+            legacy = []
+            break
+        if not is_revision(row.get("code_revision", "")):
+            if seeds_file is None:
+                raise RuntimeError(f"legacy anneal seed {seed} has no revision")
+            row["code_revision"] = revision_from_seeds(seeds_file, n, seed, row)
+        legacy.append(row)
+    if len(legacy) == len(SEEDS):
+        named = {row["code_revision"] for row in legacy}
+        if len(named) != 1:
+            raise RuntimeError(f"legacy anneal rows name {named}")
+        found[legacy[0]["code_revision"]] = legacy
+    if root.is_dir():
+        for child in sorted(root.iterdir()):
+            if not child.is_dir() or not is_revision(child.name):
+                continue
+            group = []
+            for seed in SEEDS:
+                row = load_seed(child / f"anneal-{seed}.row")
+                if row is None:
+                    group = []
+                    break
+                row["code_revision"] = child.name
+                group.append(row)
+            if len(group) == len(SEEDS):
+                found[child.name] = group
+    return found
+
+
+def replace_lines(
+    path: Path,
+    prefixes: tuple[str, ...],
+    fields: list[str],
+    rows: list[dict[str, str]],
+) -> None:
+    """Replace lines with these prefixes. Every other line is copied unchanged."""
+    raw = path.read_text() if path.is_file() else ""
+    kept = [line for line in raw.splitlines(keepends=True) if not line.startswith(prefixes)]
+    if kept and not kept[-1].endswith("\n"):
+        kept[-1] += "\n"
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fields)
+    if not raw:
+        writer.writeheader()
+    writer.writerows({key: row[key] for key in fields} for row in rows)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(kept) + buffer.getvalue())
+
+
+def append_seed_rows(path: Path, rows: list[dict[str, str]]) -> None:
+    """Append seed lines whose revision is not already recorded. Existing lines stay."""
+    existing = load_table(path)
+    have = {
+        (row.get("system"), row.get("arm"), row.get("seed"), row.get("code_revision", ""))
+        for row in existing
+    }
+    fresh = []
+    for row in rows:
+        stored = {key: row[key] for key in SEED_FIELDS}
+        key = (stored["system"], stored["arm"], stored["seed"], stored["code_revision"])
+        if key in have:
+            continue
+        fresh.append(stored)
+        have.add(key)
+    if not fresh:
+        return
+    with path.open("a", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=SEED_FIELDS)
+        if not existing:
+            writer.writeheader()
+        writer.writerows(fresh)
+
+
+def upsert_revision(path: Path, row: dict[str, str]) -> None:
+    """Replace one system, arm, and code revision. Every other line is copied."""
+    raw = path.read_text() if path.is_file() else ""
+    kept = []
+    for line in raw.splitlines(keepends=True):
+        if line.startswith(f"{row['system']},{row['arm']},"):
+            cells = next(csv.reader([line.rstrip("\r\n")]))
+            if cells and cells[-1] == row["code_revision"]:
+                continue
+        kept.append(line)
+    if kept and not kept[-1].endswith("\n"):
+        kept[-1] += "\n"
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=SUMMARY_FIELDS)
+    if not raw:
+        writer.writeheader()
+    writer.writerow({key: row[key] for key in SUMMARY_FIELDS})
+    path.write_text("".join(kept) + buffer.getvalue())
+
+
+def publish_anneal_revisions(args: argparse.Namespace, source: dict[str, str]) -> list[dict[str, str]]:
+    """Write one summary line per anneal revision. Other arms are left in place."""
+    revisions = load_anneal_revisions(args.rows, 38, args.seeds_out)
+    legacy_rev = next(iter(revisions), "") if load_seed(seed_path(args.rows, SEEDS[0], "anneal")) else ""
+    rpqa_rows = [load_seed(seed_path(args.rows, seed, "rpqa")) for seed in SEEDS]
+    rpqa_wall = None
+    if all(row is not None for row in rpqa_rows):
+        rpqa_wall = median_iqr([float(row["wall_s"]) for row in rpqa_rows if row is not None])[0]
+    written = []
+    for revision, group in revisions.items():
+        anneal_wall = median_iqr([float(row["wall_s"]) for row in group])[0]
+        summary = summarise(group, SEEDS, source, revision)[0]
+        if rpqa_wall is not None and anneal_wall > 0.0:
+            summary["wall_ratio"] = f"{rpqa_wall / anneal_wall:.6f}"
+        upsert_revision(args.summary, summary)
+        append_seed_rows(args.seeds_out, group)
+        written.append(summary)
+        if revision == legacy_rev and rpqa_wall is not None and all(row is not None for row in rpqa_rows):
+            paired = summarise(
+                group + [row for row in rpqa_rows if row is not None],
+                SEEDS,
+                source,
+                revision,
+            )
+            capped = [row for row in paired if row["arm"] == "rpqa"]
+            if capped:
+                upsert_revision(args.summary, capped[0])
+    return written
+
+
+def comparison_anneal(summary: Path, n: int, rows_dir: Path | None = None) -> tuple[float, str]:
+    """Wall and anneal commit the paper ratio divides by.
+
+    LJ38 uses the anneal row in this table. LJ55 and LJ75 use the committed
+    twelve-seed panel.
+    """
+    if n == 38:
+        return anneal_reference(summary, rows_dir)
+    path = Path(__file__).resolve().parents[2] / "bench/lj-n12-500aaf65/summary.csv"
+    for row in load_table(path):
+        if row.get("system") == f"lj{n}" and row.get("arm") == "anneal":
+            return float(row["wall_median_s"]), row["anneal_head"]
+    raise RuntimeError(f"{path} has no LJ{n} anneal row")
 
 
 def run_paper(args: argparse.Namespace, seeds: tuple[int, ...]) -> int:
-    """One serial session of the published LJ38 step schedule.
-
-    Existing anneal and capped-RPQA rows stay on disk. This writes only
-    ``rpqa_paper`` rows and appends that arm to the summary tables.
-    """
+    """Serial published-length RPQA. Existing rows are skipped, not replaced."""
     for seed in seeds:
         if seed not in SEEDS:
             raise SystemExit(f"seed {seed} is outside 2000-2005")
+    sizes = tuple(args.size) if args.size else PAPER_SIZES
     source = load_source(args.source)
     here = Path(__file__).resolve().parent
     if str(here) not in sys.path:
         sys.path.insert(0, str(here))
-    calls, reference = binary_budget(args.binary)
-    budget = PAPER_BUDGETS[38]
-    if calls != budget or abs(reference - REFERENCE) > 1e-12:
-        raise SystemExit(f"binary budget {calls} {reference} != paper {budget} {REFERENCE}")
     check_potential(args.binary, args.runs / "check")
     if args.summary is None:
         raise SystemExit("the paper schedule needs --summary so the old rows can be kept")
-    anneal_wall, anneal_head = anneal_reference(args.summary)
-    order = list(seeds)
-    random.Random(PAPER_SCHEDULE_SEED).shuffle(order)
-    if seeds != SEEDS:
-        full = list(SEEDS)
-        random.Random(PAPER_SCHEDULE_SEED).shuffle(full)
-        order = [seed for seed in full if seed in seeds]
     progress = args.runs.parent / "progress-paper.txt"
-    note(
-        progress,
-        "paper schedule "
-        f"beads={PAPER_NBEADS} rounds={PAPER_ROUNDS} every={PAPER_PIN_INTERVAL} "
-        f"last_pin={PAPER_LAST_PIN} total_steps={PAPER_TOTAL_STEPS} "
-        + " ".join(f"lj38:{PAPER_ARM}:{seed}" for seed in order),
-    )
-    rows: list[dict[str, str]] = []
-    for seed in order:
-        saved = seed_path(args.rows, seed, PAPER_ARM)
-        log = args.runs / "lj38" / f"{PAPER_ARM}-{seed}.log"
-        existing = load_seed(saved)
-        if existing is not None:
-            rows.append(existing)
-            note(progress, f"skip arm={PAPER_ARM} seed={seed} hit={existing['hit']} evals={existing['evals_to_hit']}")
-            continue
-        note(progress, f"start arm={PAPER_ARM} seed={seed} steps={PAPER_TOTAL_STEPS}")
-        row = run_rpqa(
-            args.binary,
-            seed,
-            0,
-            args.ipi_root,
-            here,
-            args.runs / "lj38" / f"{PAPER_ARM}-{seed}",
-            log,
-            arm=PAPER_ARM,
-            nbeads=PAPER_NBEADS,
-            total_steps=PAPER_TOTAL_STEPS,
-            pin_interval=PAPER_PIN_INTERVAL,
-            start_step=PAPER_START,
-            ramp_steps=PAPER_RAMP_STEPS,
-            expect_pins=PAPER_ROUNDS,
-            code_revision=source["rpqa_commit"],
-        )
-        pins = row.pop("_pins")
-        write_seed(saved, row)
-        rows.append(row)
+    summaries: list[dict[str, str]] = []
+    for n in sizes:
+        rounds, last, total = paper_length(n)
+        calls, reference = binary_budget(args.binary, n)
+        if abs(reference - REFERENCES[n]) > 1e-12:
+            raise SystemExit(f"binary LJ{n} reference {reference} != {REFERENCES[n]}")
+        if n == 38 and calls != PAPER_BUDGETS[38]:
+            raise SystemExit(f"binary LJ38 budget {calls}")
+        order = [seed for seed in SEEDS if seed in seeds]
         note(
             progress,
-            f"done arm={PAPER_ARM} seed={seed} hit={row['hit']} "
-            f"evals={row['evals_to_hit']} charged={row['charged']} "
-            f"wall_s={row['wall_s']} best={row['best']} stop={row['stop']} pins={pins}",
+            f"paper lj{n} beads={PAPER_NBEADS} rounds={rounds} every={PAPER_PIN_INTERVAL} "
+            f"last_pin={last} total_steps={total} "
+            + " ".join(f"lj{n}:{PAPER_ARM}:{seed}" for seed in order),
         )
-        if args.seeds_out:
-            append_missing(args.seeds_out, SEED_FIELDS, rows, ("arm", "seed"))
-        if args.paper_seeds:
-            write_table(args.paper_seeds, SEED_FIELDS, rows)
+        rows: list[dict[str, str]] = []
+        for seed in order:
+            saved = seed_path(args.rows, seed, PAPER_ARM, n)
+            log = args.runs / f"lj{n}" / f"{PAPER_ARM}-{seed}.log"
+            existing = load_seed(saved)
+            if existing is not None:
+                recorded = existing.get("code_revision", "")
+                if recorded and recorded != source["rpqa_commit"]:
+                    raise SystemExit(
+                        f"{saved} records {recorded} but the source file names {source['rpqa_commit']}"
+                    )
+                rows.append(existing)
+                note(
+                    progress,
+                    f"skip n={n} arm={PAPER_ARM} seed={seed} hit={existing['hit']} "
+                    f"evals={existing['evals_to_hit']}",
+                )
+                continue
+            note(progress, f"start n={n} arm={PAPER_ARM} seed={seed} steps={total}")
+            row = run_rpqa(
+                args.binary,
+                seed,
+                0,
+                args.ipi_root,
+                here,
+                args.runs / f"lj{n}" / f"{PAPER_ARM}-{seed}",
+                log,
+                arm=PAPER_ARM,
+                nbeads=PAPER_NBEADS,
+                total_steps=total,
+                pin_interval=PAPER_PIN_INTERVAL,
+                start_step=PAPER_START,
+                ramp_steps=last,
+                expect_pins=rounds,
+                code_revision=source["rpqa_commit"],
+                n=n,
+                reference=REFERENCES[n],
+            )
+            pins = row.pop("_pins")
+            write_seed(saved, row)
+            rows.append(row)
+            note(
+                progress,
+                f"done n={n} arm={PAPER_ARM} seed={seed} hit={row['hit']} "
+                f"evals={row['evals_to_hit']} charged={row['charged']} "
+                f"wall_s={row['wall_s']} best={row['best']} stop={row['stop']} pins={pins}",
+            )
+            if args.seeds_out:
+                append_missing(args.seeds_out, SEED_FIELDS, [row], ("system", "arm", "seed"))
+        if len(rows) != len(SEEDS):
+            continue
+        anneal_wall, anneal_head = comparison_anneal(args.summary, n, args.rows)
         summary = summarise_paper(rows, len(SEEDS), anneal_wall, source, anneal_head)
+        if summary:
+            summary[0]["system"] = f"lj{n}"
         if args.summary and summary:
             upsert_summary(args.summary, SUMMARY_FIELDS, summary[0])
-        if args.paper_summary:
-            write_table(args.paper_summary, SUMMARY_FIELDS, summary)
-    summary = summarise_paper(rows, len(SEEDS), anneal_wall, source, anneal_head)
+        summaries.extend(summary)
     writer = csv.DictWriter(sys.stdout, fieldnames=SUMMARY_FIELDS)
     writer.writeheader()
-    writer.writerows(summary)
+    writer.writerows(summaries)
     return 0
 
 
@@ -884,8 +1117,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--paper-summary", type=Path)
     parser.add_argument("--paper-seeds", type=Path)
     args = parser.parse_args(argv[1:])
-    if args.size is not None and args.size != [38]:
-        raise SystemExit(f"this bench is LJ38, not {args.size}")
+    if args.size is not None and any(n not in PAPER_SIZES for n in args.size):
+        raise SystemExit(f"size must be one of {PAPER_SIZES}")
     seeds = tuple(args.seed) if args.seed else SEEDS
     if args.arm == PAPER_ARM:
         if args.budget is not None:
@@ -915,18 +1148,21 @@ def main(argv: list[str]) -> int:
     ]
     note(progress, "schedule " + " ".join(f"lj38:{arm}:{seed}" for seed, arm in order))
     rows: list[dict[str, str]] = []
-    produced = False
     for seed, arm in order:
-        saved = seed_path(args.rows, seed, arm)
+        if arm == "anneal":
+            saved = anneal_revision_path(args.rows, 38, head, seed)
+        else:
+            saved = seed_path(args.rows, seed, arm)
         log = args.runs / "lj38" / f"{arm}-{seed}.log"
         existing = load_seed(saved)
         if existing is not None:
+            existing["code_revision"] = head if arm == "anneal" else existing.get("code_revision", "")
             rows.append(existing)
             note(progress, f"skip arm={arm} seed={seed} hit={existing['hit']} evals={existing['evals_to_hit']}")
             continue
         note(progress, f"start arm={arm} seed={seed} budget={budget}")
         if arm == "anneal":
-            row = run_anneal(args.binary, seed, budget, log)
+            row = run_anneal(args.binary, seed, budget, log, head)
         else:
             row = run_rpqa(
                 args.binary,
@@ -939,7 +1175,6 @@ def main(argv: list[str]) -> int:
                 code_revision=source["rpqa_commit"],
             )
         write_seed(saved, row)
-        produced = True
         rows.append(row)
         note(
             progress,
@@ -948,15 +1183,19 @@ def main(argv: list[str]) -> int:
             f"best={row['best']} stop={row['stop']} inside_us={row['inside_us']} "
             f"outside_us={row['outside_us']}",
         )
-        if args.seeds_out:
-            write_table(args.seeds_out, SEED_FIELDS, rows)
-        if args.summary:
-            write_table(args.summary, SUMMARY_FIELDS, summarise(rows, seeds, source, head))
-    text_rows = summarise(rows, seeds, source, head)
-    if args.seeds_out:
-        write_table(args.seeds_out, SEED_FIELDS, rows)
-    if args.summary and (produced or not args.summary.exists()):
-        write_table(args.summary, SUMMARY_FIELDS, text_rows)
+    if args.seeds_out and rows:
+        append_seed_rows(args.seeds_out, rows)
+    text_rows: list[dict[str, str]] = []
+    if "anneal" in arms and args.summary and args.seeds_out:
+        text_rows = publish_anneal_revisions(args, source)
+    elif args.summary and rows:
+        text_rows = summarise(rows, seeds, source, head)
+        replace_lines(
+            args.summary,
+            tuple(f"lj38,{row['arm']}," for row in text_rows),
+            SUMMARY_FIELDS,
+            text_rows,
+        )
     writer = csv.DictWriter(sys.stdout, fieldnames=SUMMARY_FIELDS)
     writer.writeheader()
     writer.writerows(text_rows)
