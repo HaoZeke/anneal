@@ -566,12 +566,16 @@ fn kuhn_munkres(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     let mut column_potential = vec![0.0_f64; n];
     let mut row_match = vec![usize::MAX; n];
     let mut column_match = vec![usize::MAX; n];
+    // One pair of masks for the whole solve. Filling them is the same
+    // state the per-phase allocation started from.
+    let mut rows_seen = vec![false; n];
+    let mut columns_seen = vec![false; n];
 
     for root in 0..n {
         let mut augmented = false;
         for _ in 0..=n {
-            let mut rows_seen = vec![false; n];
-            let mut columns_seen = vec![false; n];
+            rows_seen.fill(false);
+            columns_seen.fill(false);
             if augment_tight(
                 root,
                 n,
@@ -588,20 +592,14 @@ fn kuhn_munkres(costs: &[f64], n: usize) -> Option<Vec<usize>> {
                 break;
             }
 
-            let mut delta = f64::INFINITY;
-            for row in 0..n {
-                if !rows_seen[row] {
-                    continue;
-                }
-                for column in 0..n {
-                    if columns_seen[column] {
-                        continue;
-                    }
-                    let slack =
-                        row_potential[row] + column_potential[column] - weights[row * n + column];
-                    delta = delta.min(slack);
-                }
-            }
+            let delta = minimum_slack(
+                n,
+                &weights,
+                &row_potential,
+                &column_potential,
+                &rows_seen,
+                &columns_seen,
+            );
             if !(delta > 0.0) || !delta.is_finite() {
                 return None;
             }
@@ -629,7 +627,56 @@ fn kuhn_munkres(costs: &[f64], n: usize) -> Option<Vec<usize>> {
     Some(row_match)
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Minimum slack over seen rows and unseen columns.
+///
+/// The value is the minimum of `row + column - weight` on that set. Equal
+/// slacks are the same bits, so the order of the minimum does not change it.
+#[allow(clippy::ptr_arg)]
+fn minimum_slack(
+    n: usize,
+    weights: &[f64],
+    row_potential: &[f64],
+    column_potential: &[f64],
+    rows_seen: &Vec<bool>,
+    columns_seen: &Vec<bool>,
+) -> f64 {
+    minimum_slack_scalar(
+        n,
+        weights,
+        row_potential,
+        column_potential,
+        rows_seen,
+        columns_seen,
+    )
+}
+
+#[allow(clippy::ptr_arg)]
+fn minimum_slack_scalar(
+    n: usize,
+    weights: &[f64],
+    row_potential: &[f64],
+    column_potential: &[f64],
+    rows_seen: &Vec<bool>,
+    columns_seen: &Vec<bool>,
+) -> f64 {
+    let mut delta = f64::INFINITY;
+    for row in 0..n {
+        if !rows_seen[row] {
+            continue;
+        }
+        let base = row * n;
+        let row_dual = row_potential[row];
+        for column in 0..n {
+            if columns_seen[column] {
+                continue;
+            }
+            let slack = row_dual + column_potential[column] - weights[base + column];
+            delta = delta.min(slack);
+        }
+    }
+    delta
+}
+
 fn augment_tight(
     row: usize,
     n: usize,
