@@ -215,7 +215,9 @@ def test_paper_budgets(entry):
 def test_seeds(entry):
     if "seeds" in entry:
         seeds = constants(ROOT / entry["seeds"]["source"])[entry["seeds"]["name"]]
-        assert len(set(seeds)) >= MIN_SEEDS, f"{entry['seeds']} has {len(set(seeds))} seeds"
+        tables = seeds.values() if isinstance(seeds, dict) else [seeds]
+        fewest = min(len(set(table)) for table in tables)
+        assert fewest >= MIN_SEEDS, f"{entry['seeds']} has {fewest} seeds"
     counts: dict[tuple[str, str], int] = {}
     for table in entry["rows"]:
         groups: dict[tuple[str, str, str], set | int] = {}

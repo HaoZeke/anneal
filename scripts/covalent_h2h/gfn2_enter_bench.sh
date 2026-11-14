@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Copyright (c) anneal developers
-# GFN2-xTB Si10 and C10, anneal's general arm against CREST, one UTS
-# namespace, hostname bench, one core (GFN2_CORE, default 0), working
-# directory under /work. Arguments go to gfn2_crest.py; GFN2_CODES picks
-# the arms. Rows and summaries are appended to rows.csv and summaries.csv,
-# never rewritten, and seeds.csv is read as history. GFN2_ROWS and
-# GFN2_SUMMARY move them off bench/covalent-h2h/gfn2. A tree with
-# uncommitted changes to the build is refused, so the revision names the
-# binary.
+# GFN2-xTB silicon and carbon clusters, anneal's general arm against
+# CREST, one UTS namespace, hostname bench, one core (GFN2_CORE, default
+# 0), working directory under /work. Arguments go to gfn2_crest.py;
+# GFN2_CODES picks the arms. Rows and summaries are appended to rows.csv
+# and summaries.csv, never rewritten, and seeds.csv is read as history.
+# GFN2_ROWS and GFN2_SUMMARY move them off bench/covalent-h2h/gfn2. A tree
+# with uncommitted changes to the build is refused, so the revision names
+# the binary.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
