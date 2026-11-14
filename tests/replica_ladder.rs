@@ -92,6 +92,7 @@ fn assert_the_hot_rung_climbs(base: &Config, factor: usize) {
 
 #[test]
 fn a_hot_rung_adopts_more_large_rises_than_a_flat_ladder() {
+    anneal_core::install_rgpot_kernels!();
     let mut cfg = Config::recommended(13);
     assert!(!cfg.budget_window && !cfg.statistical_temperature);
     cfg.temperature = 0.2;
@@ -102,6 +103,7 @@ fn a_hot_rung_adopts_more_large_rises_than_a_flat_ladder() {
 /// ratio times it, so the ladder survives the budget window.
 #[test]
 fn the_ladder_multiplies_the_budget_window_temperature() {
+    anneal_core::install_rgpot_kernels!();
     let cfg = Config::derived(13);
     assert!(cfg.budget_window);
     assert_the_hot_rung_climbs(&cfg, 3);
@@ -128,6 +130,7 @@ fn the_ladder_multiplies_the_budget_window_temperature() {
 /// over the hot count, so the factor here is two: `2 * 74` is 148.
 #[test]
 fn the_ladder_multiplies_the_statistical_temperature() {
+    anneal_core::install_rgpot_kernels!();
     let mut cfg = Config::recommended(13);
     // The rise counts below were measured with the Bayes screen off.
     // `recommended` now inherits that screen from `for_cluster`.
@@ -143,6 +146,7 @@ fn the_ladder_multiplies_the_statistical_temperature() {
 /// it left, including the first step after a switch.
 #[test]
 fn a_rung_switch_brings_each_state_its_own_gradient() {
+    anneal_core::install_rgpot_kernels!();
     let mut cfg = Config::recommended(13);
     cfg.replicas = 3;
     cfg.swap_period = 10;
@@ -194,6 +198,7 @@ fn returns(cfg: &Config) -> (f64, usize, usize) {
 /// before it 0.30.
 #[test]
 fn a_rung_switch_brings_each_state_its_own_basin() {
+    anneal_core::install_rgpot_kernels!();
     let mut cfg = Config::for_cluster(13);
     // The measured ladder wants every trial quenched. `for_cluster` now
     // starts with the Bayes screen on, so this case turns that screen off.
@@ -230,6 +235,7 @@ fn a_rung_switch_brings_each_state_its_own_basin() {
 /// neighbours hold and a switch changes the state.
 #[test]
 fn a_resumed_rung_measures_returns_against_its_own_basin() {
+    anneal_core::install_rgpot_kernels!();
     let mut cfg = Config::for_cluster(6);
     cfg.bayes_screen = false;
     cfg.replicas = 3;
@@ -303,6 +309,7 @@ fn gyration(x: ArrayView1<f64>) -> f64 {
 /// and `(gamma - 1) T` is the sample's spread.
 #[test]
 fn the_energy_bias_tempers_alike_whichever_rung_fills_its_sample() {
+    anneal_core::install_rgpot_kernels!();
     let mut cfg = Config::recommended(13);
     assert!(!cfg.budget_window && !cfg.statistical_temperature);
     cfg.replicas = 2;
@@ -338,6 +345,7 @@ fn the_energy_bias_tempers_alike_whichever_rung_fills_its_sample() {
 /// rounding, where the filling rung's temperatures are up to 2.2 times apart.
 #[test]
 fn the_energy_bias_tempers_at_the_coldest_rung_under_the_budget_window() {
+    anneal_core::install_rgpot_kernels!();
     let mut cfg = Config::derived(13);
     assert!(cfg.budget_window && !cfg.statistical_temperature && !cfg.flat_histogram);
     cfg.replicas = 2;
@@ -385,6 +393,7 @@ fn the_energy_bias_tempers_at_the_coldest_rung_under_the_budget_window() {
 /// it before the ledger is charged.
 #[test]
 fn a_ladder_refuses_delayed_acceptance() {
+    anneal_core::install_rgpot_kernels!();
     let mut cfg = Config::recommended(13);
     cfg.delayed_acceptance = true;
     let single = lj_run_with(&cfg, 0, 2_000, false);

@@ -16,6 +16,7 @@ use rand::rngs::StdRng;
 use std::fmt::Write as _;
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
     assert_eq!(args.len(), 6, "see the usage line in the source");
     let n: usize = args[0].parse().expect("n");

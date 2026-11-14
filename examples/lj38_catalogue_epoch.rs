@@ -35,6 +35,7 @@ const SYSTEMATIC_OFFSET: f64 = 0.125;
 const MAX_OFFSPRING: usize = 2;
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let smoke = std::env::var("PAPER_SMOKE").ok().as_deref() == Some("1");
     let per_replica = if smoke {
         SMOKE_CALLS

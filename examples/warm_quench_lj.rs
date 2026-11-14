@@ -85,6 +85,7 @@ fn repair(x: &mut Array1<f64>, min_sep: f64) {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let n: usize = std::env::args()
         .nth(1)
         .and_then(|v| v.parse().ok())

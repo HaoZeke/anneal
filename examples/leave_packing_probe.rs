@@ -125,6 +125,7 @@ fn report(label: &str, tally: &Tally, leaves: usize) {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let leaves: usize = std::env::args()
         .nth(1)
         .and_then(|value| value.parse().ok())

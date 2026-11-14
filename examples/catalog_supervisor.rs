@@ -9,6 +9,7 @@
 
 #[cfg(feature = "bank-rpc")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    anneal_core::install_rgpot_kernels!();
     use anneal_core::catalog_rpc::CatalogIdentity;
     use anneal_core::catalog_rpc::client::{CatalogClient, ClientConfig};
     use std::collections::BTreeSet;
@@ -104,6 +105,7 @@ fn hex_nibble(value: u8) -> Result<u8, String> {
 
 #[cfg(not(feature = "bank-rpc"))]
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     eprintln!("catalog_supervisor requires the bank-rpc feature");
     std::process::exit(2);
 }

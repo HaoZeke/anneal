@@ -564,6 +564,7 @@ impl ChainReport {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let opt = options();
     let (symbols, x0, species) = read_xyz(&opt.xyz);
     let n = symbols.len();

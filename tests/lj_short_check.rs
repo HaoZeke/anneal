@@ -24,6 +24,7 @@ use anneal_core::potentials::PairPotential;
 
 #[test]
 fn lj38_and_lj98_short_searches_stay_put() {
+    anneal_core::install_rgpot_kernels!();
     // (n, seed, budget, best, hops, converged, capped)
     let cases: &[(usize, u64, usize, f64, usize, usize, usize)] = &[
         (38, 1, 2500, -170.260_483_558_385_52, 25, 16, 23),

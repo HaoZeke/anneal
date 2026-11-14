@@ -113,3 +113,48 @@ fn c_abi_installs_the_dlpack_header_the_generated_include_names() {
     assert!(header.contains("#define DLPACK_MINOR_VERSION 3"));
     assert!(header.contains("typedef struct DLManagedTensorVersioned"));
 }
+
+#[test]
+fn rgpot_pair_stays_out_of_the_published_dependencies() {
+    let manifest = include_str!("../Cargo.toml");
+    let dependencies = manifest
+        .split("\n[dependencies]\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n[").next())
+        .expect("[dependencies] table");
+    assert!(!dependencies.contains("git ="));
+    assert!(manifest.contains("members = [\"crates/anneal-python\"]"));
+    let pyproject = include_str!("../pyproject.toml");
+    assert!(pyproject.contains("manifest-path = \"crates/anneal-python/Cargo.toml\""));
+    let wheel = include_str!("../crates/anneal-python/src/lib.rs");
+    assert!(wheel.contains("anneal_core::install_rgpot_kernels!();"));
+}
+
+// An example that skips the installation runs Lennard-Jones and Morse on the
+// pair loop and cannot evaluate Gupta.
+#[test]
+fn every_example_installs_the_rgpot_kernels() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+    let mut mains = 0;
+    for entry in std::fs::read_dir(dir).expect("examples") {
+        let path = entry.expect("entry").path();
+        if path.extension().is_none_or(|ext| ext != "rs") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).expect("example source");
+        let lines: Vec<&str> = source.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
+            if line.starts_with("fn main(") {
+                mains += 1;
+                assert_eq!(
+                    lines.get(i + 1).map(|next| next.trim()),
+                    Some("anneal_core::install_rgpot_kernels!();"),
+                    "{} line {}",
+                    path.display(),
+                    i + 1
+                );
+            }
+        }
+    }
+    assert!(mains > 0);
+}

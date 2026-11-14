@@ -11,6 +11,7 @@ use anneal_core::md_engine::engine_by_name;
 use ndarray::Array1;
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let arguments: Vec<String> = std::env::args().collect();
     let [_, engine_name, binary, xyz, rest @ ..] = arguments.as_slice() else {
         eprintln!("usage: md_segment_check ENGINE BINARY XYZ [STEPS] [TEMP]");

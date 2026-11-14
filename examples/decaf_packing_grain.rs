@@ -113,6 +113,7 @@ fn report(label: &str, rows: &[Sample]) {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let isomers: usize = std::env::args()
         .nth(1)
         .and_then(|value| value.parse().ok())

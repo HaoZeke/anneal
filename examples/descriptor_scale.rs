@@ -50,6 +50,7 @@ impl Rng {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let n = 75;
     let fp = SortedPairs { n_points: n };
     let mut rng = Rng(7);

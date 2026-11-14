@@ -28,6 +28,7 @@ fn cluster(n: usize) -> Array1<f64> {
 }
 
 fn descriptors(c: &mut Criterion) {
+    anneal_core::install_rgpot_kernels!();
     for n in [38_usize, 75, 98] {
         let x = cluster(n);
         let mut g = c.benchmark_group(format!("descriptor/n{n}"));

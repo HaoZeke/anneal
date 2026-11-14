@@ -314,6 +314,7 @@ fn force_audit_line(seed: u64, max_force: f64) -> String {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let m: usize = args
         .first()

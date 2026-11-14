@@ -428,6 +428,7 @@ fn read_xyz(path: &std::path::Path) -> Vec<f64> {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let name = args.first().expect("system");
     let budget: usize = args.get(1).and_then(|v| v.parse().ok()).expect("budget");

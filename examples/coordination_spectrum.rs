@@ -25,6 +25,7 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().collect();
     let n: usize = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(38);
     let samples: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(400);

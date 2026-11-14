@@ -49,6 +49,7 @@ fn cluster_search(n: usize, budget: usize, seed: u64, recommended: bool) -> Sear
 
 #[test]
 fn cluster_search_reports_best_energy_and_hops() {
+    anneal_core::install_rgpot_kernels!();
     let out = cluster_search(13, 8_000, 0, true);
     assert_eq!(out.best.len(), 3 * 13);
     assert!(
@@ -61,6 +62,7 @@ fn cluster_search_reports_best_energy_and_hops() {
 
 #[test]
 fn cluster_search_for_cluster_also_hops() {
+    anneal_core::install_rgpot_kernels!();
     let out = cluster_search(13, 4_000, 1, false);
     assert_eq!(out.best.len(), 3 * 13);
     assert!(out.best_energy.is_finite());
@@ -69,6 +71,7 @@ fn cluster_search_for_cluster_also_hops() {
 
 #[test]
 fn ledger_exposes_the_budget() {
+    anneal_core::install_rgpot_kernels!();
     let ledger = Ledger::new(400_000);
     assert_eq!(ledger.budget(), 400_000);
     assert_eq!(ledger.spent(), 0);
@@ -77,6 +80,7 @@ fn ledger_exposes_the_budget() {
 
 #[test]
 fn recommended_differs_from_for_cluster() {
+    anneal_core::install_rgpot_kernels!();
     let rec = Config::recommended(38);
     let base = Config::for_cluster(38);
     assert_eq!(rec.n_points, 38);
@@ -114,6 +118,7 @@ fn recommended_differs_from_for_cluster() {
 
 #[test]
 fn recommended_draws_the_compacted_surface_below_98() {
+    anneal_core::install_rgpot_kernels!();
     let rec = Config::recommended(75);
     assert!(rec.two_phase.is_none());
     assert_eq!(rec.surfaces, Config::communicating(75).surfaces);

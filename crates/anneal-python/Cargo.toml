@@ -1,0 +1,22 @@
+[package]
+name = "anneal-python"
+version = "0.12.0"
+edition = "2024"
+rust-version = "1.88"
+description = "The anneal._core extension module, with the rgpot cluster kernels installed"
+license = "MIT"
+publish = false
+
+[lib]
+name = "anneal_python"
+crate-type = ["cdylib"]
+
+[features]
+# maturin and CI pass `--features python`; the module is always the
+# Python build of anneal-core.
+python = []
+
+[dependencies]
+anneal-core = { path = "../..", features = ["python-host"] }
+pyo3 = { version = "0.26", features = ["extension-module", "abi3-py310"] }
+rgpot-pair = { git = "https://github.com/OmniPotentRPC/rgpot", rev = "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e" }

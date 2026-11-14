@@ -203,6 +203,7 @@ impl Drop for PetKernel {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let engines = selection(
         args.first().map(String::as_str).unwrap_or("all"),

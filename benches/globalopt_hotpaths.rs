@@ -42,6 +42,7 @@ fn point_rows(x: &Array1<f64>) -> Vec<[f64; 3]> {
 }
 
 fn bench_pair_kernels(c: &mut Criterion) {
+    anneal_core::install_rgpot_kernels!();
     let mut group = c.benchmark_group("pair_value_and_gradient");
     for n in [75, 98] {
         let potential = PairPotential::lennard_jones(n);
@@ -99,6 +100,7 @@ fn bench_tip4p_kernels(c: &mut Criterion) {
 }
 
 fn bench_local_minimizer(c: &mut Criterion) {
+    anneal_core::install_rgpot_kernels!();
     let n = 75;
     let potential = PairPotential::lennard_jones(n);
     let coordinates = point_fixture(n);

@@ -55,6 +55,7 @@ fn field_num(rec: &str, key: &str) -> Option<f64> {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "py_trace.json".into());

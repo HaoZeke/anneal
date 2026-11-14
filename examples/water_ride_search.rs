@@ -248,6 +248,7 @@ fn minimum_pair_distance(coordinates: &[f64]) -> f64 {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    anneal_core::install_rgpot_kernels!();
     let arguments = std::env::args().collect::<Vec<_>>();
     let molecule_count = arguments
         .get(1)

@@ -45,6 +45,7 @@ fn cluster_energies(energies: &[f64]) -> Vec<(f64, usize)> {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().collect();
     let con = args
         .get(1)

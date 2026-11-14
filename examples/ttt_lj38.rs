@@ -125,6 +125,7 @@ fn report(label: &str, runs: &[RunTime], processors: usize) -> usize {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().collect();
     let runs: usize = args.get(1).and_then(|a| a.parse().ok()).unwrap_or(32);
     let budget: usize = args.get(2).and_then(|a| a.parse().ok()).unwrap_or(25_000);

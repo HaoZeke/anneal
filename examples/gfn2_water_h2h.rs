@@ -354,6 +354,7 @@ fn audit_geometry(path: &std::path::Path, molecules: usize, seed: u64, outdir: &
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("overlap") {
         overlap_self_check();

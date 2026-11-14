@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::io::Read;
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let path = std::env::args()
         .nth(1)
         .expect("usage: catalog_journal_scan JOURNAL.bin");

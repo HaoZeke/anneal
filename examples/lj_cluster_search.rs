@@ -1301,6 +1301,7 @@ fn reference(n: usize) -> Option<f64> {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     // Campaign file first, before any thread exists: the TOML is the
     // single written source of the CATALOG_* environment, and a dark
     // channel is a parse error there, not a silent default here.

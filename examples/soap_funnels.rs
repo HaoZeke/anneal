@@ -154,6 +154,7 @@ fn report(label: &str, x: ArrayView1<f64>, spec: SoapSpec) {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = env::args().collect();
     let marks_path = args.get(1).map(String::as_str).unwrap_or("points/75");
     let ico_path = args.get(2).map(String::as_str).unwrap_or("points/75i");

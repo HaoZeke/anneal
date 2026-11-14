@@ -70,6 +70,7 @@ fn system_spec(name: &str) -> Option<Spec> {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = args.first().map(String::as_str).unwrap_or("run");
     let status = match cmd {

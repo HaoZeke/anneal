@@ -6,6 +6,7 @@ use anneal_core::catalog_rpc::{CatalogOperation, decode_request};
 use std::io::Read;
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let path = std::env::args()
         .nth(1)
         .expect("usage: catalog_leave_audit JOURNAL.bin");

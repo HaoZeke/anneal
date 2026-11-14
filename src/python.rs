@@ -3967,8 +3967,14 @@ fn quench(
 // ---------------------------------------------------------------------------
 
 /// pyo3 module initialiser. Exposed to Python as `anneal._core`.
+#[cfg(not(feature = "python-host"))]
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    register(m)
+}
+
+/// Fill `anneal._core`. A host crate's module entry calls this.
+pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", crate::version::ANNEAL_VERSION)?;
     device::register(m)?;
     m.add_class::<PyBasinBias>()?;

@@ -37,6 +37,7 @@ fn first_line(path: &str) -> String {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let hostname = first_line("/proc/sys/kernel/hostname");
     let boot_id = first_line("/proc/sys/kernel/random/boot_id");
     let uptime_s = first_line("/proc/uptime")

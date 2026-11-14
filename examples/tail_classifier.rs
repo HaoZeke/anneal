@@ -311,6 +311,7 @@ fn report_ladder(name: &str, rungs: &[Rung], pick: usize, reference: f64) {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().collect();
     let reference: f64 = args
         .get(1)

@@ -371,6 +371,7 @@ fn portfolio_peer_record(
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().collect();
     let number = |index: usize, default: usize| {
         args.get(index)

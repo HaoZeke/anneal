@@ -209,6 +209,7 @@ fn spearman(a: &[f64], b: &[f64]) -> f64 {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let n = 38;
     let pot = PairPotential::lennard_jones(n);
     let kind = PairKind::LennardJones;

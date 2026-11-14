@@ -94,6 +94,7 @@ fn share_l1(left: [f64; 3], right: [f64; 3]) -> f64 {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let isomers: usize = std::env::args()
         .nth(1)
         .and_then(|value| value.parse().ok())

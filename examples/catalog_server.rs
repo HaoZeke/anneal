@@ -27,6 +27,7 @@ use anneal_core::transition_graph::AttractionRegionConfig;
 use std::io::Write;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    anneal_core::install_rgpot_kernels!();
     if let Some(cfg) = anneal_core::campaign::CampaignConfig::bootstrap()? {
         print!("{}", cfg.banner());
     }

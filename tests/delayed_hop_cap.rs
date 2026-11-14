@@ -44,6 +44,7 @@ fn lj_run(cfg: &Config, seed: u64) -> Outcome {
 
 #[test]
 fn a_stage_one_reject_counts_against_the_hop_cap() {
+    anneal_core::install_rgpot_kernels!();
     let mut cfg = Config::for_cluster(13);
     cfg.delayed_acceptance = true;
     // A surrogate that never abstains decides every hop after its warmup, so
@@ -72,6 +73,7 @@ fn a_stage_one_reject_counts_against_the_hop_cap() {
 /// quench, inside the same iteration, so the cap is checked before each one.
 #[test]
 fn a_stall_move_after_the_last_hop_is_not_taken() {
+    anneal_core::install_rgpot_kernels!();
     let mut cfg = Config::recommended(13);
     for cap in 80..=140 {
         cfg.max_hops = Some(cap);
@@ -138,6 +140,7 @@ fn climb_run(
 /// deepens the incumbent takes the last one and the activation waits.
 #[test]
 fn a_climb_with_one_hop_left_takes_one_hop() {
+    anneal_core::install_rgpot_kernels!();
     // The opening quench and two ordinary hops stay on the incumbent, so
     // every later quench is a growth or an activation that deepens it.
     let mut calls = 0usize;
@@ -159,6 +162,7 @@ fn a_climb_with_one_hop_left_takes_one_hop() {
 /// same climb, which is a second hop before the activation.
 #[test]
 fn an_icosahedral_growth_with_one_hop_left_takes_one_hop() {
+    anneal_core::install_rgpot_kernels!();
     let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
     let radius = 1.1 / (1.0 + phi * phi).sqrt();
     let mut ico = vec![0.0; 3];

@@ -81,6 +81,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "anneal-python"
+version = "0.12.0"
+dependencies = [
+ "anneal-core",
+ "pyo3",
+ "rgpot-pair",
+]
+
+[[package]]
 name = "anstream"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

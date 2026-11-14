@@ -121,6 +121,7 @@ fn announce_host() {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let threads = std::env::var("RAYON_NUM_THREADS").unwrap_or_default();
     if threads != "1" {
         eprintln!("RAYON_NUM_THREADS must be 1, got {threads:?}");

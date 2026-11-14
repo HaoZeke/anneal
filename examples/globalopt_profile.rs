@@ -328,6 +328,7 @@ fn read_floats(path: &str) -> Vec<f64> {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
     assert!(args.len() >= 6, "see the usage line in the source");
     let preset = args[0].clone();

@@ -22,6 +22,59 @@ use eindir_core::Objective;
 use eindir_core::bounds::Bounds;
 use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use ndarray::{Array1, ArrayView1};
+use std::sync::OnceLock;
+
+/// The rgpot free-cluster kernels, in the signatures of `rgpot_pair`.
+///
+/// `rgpot_pair` is a git dependency, and crates.io refuses a published crate
+/// that names one, so the library takes the kernels at run time instead.
+/// Every binary in this repository installs them with
+/// [`install_rgpot_kernels!`](crate::install_rgpot_kernels); the wheel
+/// installs them when the module loads. Without them, Lennard-Jones and
+/// Morse run the pair loop in [`PairPotential::value_and_gradient`] and
+/// [`gupta::Gupta`] refuses to evaluate.
+#[derive(Debug, Clone, Copy)]
+pub struct ClusterKernels {
+    /// `rgpot_pair::cluster_lj`.
+    pub cluster_lj: fn(&[f64], &mut f64, &mut [f64]),
+    /// `rgpot_pair::cambridge_morse`.
+    pub cambridge_morse: fn(&[f64], f64, &mut f64, &mut [f64]),
+    /// `rgpot_pair::gupta`.
+    #[allow(clippy::type_complexity)]
+    pub gupta:
+        fn(&[f64], &[u8], usize, &[f64], &[f64], &[f64], &[f64], &[f64], &mut f64, &mut [f64]),
+}
+
+static CLUSTER_KERNELS: OnceLock<ClusterKernels> = OnceLock::new();
+
+/// Install the kernels for this process. The first installation wins.
+pub fn install_cluster_kernels(kernels: ClusterKernels) {
+    let _ = CLUSTER_KERNELS.set(kernels);
+}
+
+/// The installed kernels, if any. The crate's own tests take `rgpot_pair`.
+pub fn cluster_kernels() -> Option<&'static ClusterKernels> {
+    #[cfg(test)]
+    install_cluster_kernels(ClusterKernels {
+        cluster_lj: rgpot_pair::cluster_lj,
+        cambridge_morse: rgpot_pair::cambridge_morse,
+        gupta: rgpot_pair::gupta,
+    });
+    CLUSTER_KERNELS.get()
+}
+
+/// Install the `rgpot_pair` kernels. The calling crate depends on
+/// `rgpot_pair`.
+#[macro_export]
+macro_rules! install_rgpot_kernels {
+    () => {
+        $crate::potentials::install_cluster_kernels($crate::potentials::ClusterKernels {
+            cluster_lj: ::rgpot_pair::cluster_lj,
+            cambridge_morse: ::rgpot_pair::cambridge_morse,
+            gupta: ::rgpot_pair::gupta,
+        })
+    };
+}
 
 /// A pairwise cluster potential over `n` free points in three dimensions.
 ///
@@ -191,13 +244,15 @@ impl PairPotential {
     /// Fused because a cluster search spends its budget here: the pair loop is
     /// the same for both, so computing them separately doubles the cost of
     /// every relaxation step. A contiguous cluster uses the rgpot all-pairs
-    /// kernel, which is that walk with no cutoff.
+    /// kernel, which is that walk with no cutoff, when [`ClusterKernels`]
+    /// are installed.
     pub fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let n = self.n_points;
         let mut e = 0.0;
         let mut g = Array1::zeros(x.len());
         if let Some(coordinates) = x.as_slice()
             && coordinates.len() == 3 * n
+            && let Some(kernels) = cluster_kernels()
         {
             let mut energy = 0.0;
             let mut gradient = vec![0.0; 3 * n];
@@ -205,10 +260,10 @@ impl PairPotential {
             // energy and 3n force slots.
             match self.kind {
                 PairKind::LennardJones => {
-                    rgpot_pair::cluster_lj(coordinates, &mut energy, &mut gradient);
+                    (kernels.cluster_lj)(coordinates, &mut energy, &mut gradient);
                 }
                 PairKind::Morse { rho } => {
-                    rgpot_pair::cambridge_morse(coordinates, rho, &mut energy, &mut gradient);
+                    (kernels.cambridge_morse)(coordinates, rho, &mut energy, &mut gradient);
                 }
             }
             return (energy, Array1::from_vec(gradient));

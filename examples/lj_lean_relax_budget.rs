@@ -35,6 +35,7 @@ fn hostname() -> String {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     if hostname() != "bench" {
         eprintln!("uts hostname is not bench");
         std::process::exit(2);

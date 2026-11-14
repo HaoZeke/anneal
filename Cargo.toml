@@ -6,6 +6,9 @@
 # Vendored path dependencies live in this tree. Cargo would otherwise adopt
 # them as workspace members, and `cargo fmt --all` would rewrite them with
 # stable rustfmt.
+# crates/anneal-python builds the wheel. It links rgpot-pair, which is a
+# git dependency, so it is not published.
+members = ["crates/anneal-python"]
 exclude = ["vendor/nng", "vendor/nng-sys", "vendor/metatensor-sys"]
 
 [package]
@@ -56,6 +59,9 @@ rgsaddle = ["dep:rgsaddle"]
 gpr = []
 capi = ["eindir-core/capi"]
 python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective", "rgsaddle"]
+# The crate that links this one supplies the `anneal._core` entry point;
+# crates/anneal-python does, after it installs the rgpot kernels.
+python-host = ["python"]
 # Examples using an in-process rgpot eindir handle (xtb / CuH2 via
 # libloading). Off by default so LJ builds do not pull rgpot-core.
 # Do not enable rgpot-core/rpc: that needs a host capnp compiler.
@@ -73,9 +79,6 @@ linkcell    = { version = "=0.3.11", default-features = false }
 # eindir-core 0.6.0 on crates.io matches the previous git pin's sources.
 eindir-core = { version = "0.6.0", features = ["capi"] }
 rgmin = "0.5.0"
-# Free-cluster Morse, Lennard-Jones, and Gupta. This revision carries
-# both kernels; the crate compiles them and anneal calls that build.
-rgpot-pair = { git = "https://github.com/OmniPotentRPC/rgpot", rev = "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e" }
 rgsaddle = { version = "0.3.0", optional = true }
 readcon-core = "=0.14.8"
 readcon-db = "=0.1.5"
@@ -111,6 +114,11 @@ metatensor = { version = "=0.2.3", optional = true }
 libm = { version = "0.2.16", default-features = false }
 
 [dev-dependencies]
+# Free-cluster Morse, Lennard-Jones, and Gupta. This revision carries
+# the kernels; binaries here install them through
+# anneal_core::install_rgpot_kernels!. Not on crates.io, so it is a
+# dev-dependency, which cargo package drops.
+rgpot-pair = { git = "https://github.com/OmniPotentRPC/rgpot", rev = "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e" }
 criterion = { version = "0.6", features = ["html_reports"] }
 proptest  = "1"
 tempfile = "3"

@@ -107,6 +107,7 @@ fn group_of(x: ArrayView1<f64>, n: usize) -> Vec<SiteSymmetry> {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let cases: Vec<(&str, Array1<f64>)> = vec![
         ("icosahedron (Ih)", icosahedron()),
         ("cuboctahedron + centre (Oh)", centred_cuboctahedron()),

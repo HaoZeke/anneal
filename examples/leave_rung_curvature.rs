@@ -86,6 +86,7 @@ fn report(label: &str, potential: &PairPotential, start: ArrayView1<f64>) {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let potential = PairPotential::new(75, PairKind::LennardJones, 40.0);
     report(
         "lj75_ico",

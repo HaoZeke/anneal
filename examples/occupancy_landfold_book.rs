@@ -61,6 +61,7 @@ fn load(path: &Path) -> Vec<(f64, Vec<f64>)> {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let mut label = String::from("book");
     let mut dump_hist = None;
     let mut dump_oos = None;

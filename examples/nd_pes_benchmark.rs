@@ -171,6 +171,7 @@ fn parse_argument<T: std::str::FromStr>(index: usize, default: T) -> T {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    anneal_core::install_rgpot_kernels!();
     let dimension = parse_argument(1, 5usize);
     let budget = parse_argument(2, 50_000u64);
     let seeds = parse_argument(3, 8u64);

@@ -261,7 +261,9 @@ impl Gupta {
         let mut gradient = vec![0.0; 3 * n];
         // `slot` is one species index per atom and the parameter rows are
         // the square table. The kernel writes one energy and 3n forces.
-        rgpot_pair::gupta(
+        let kernels = super::cluster_kernels()
+            .expect("Gupta needs the rgpot kernels: call anneal_core::install_rgpot_kernels!()");
+        (kernels.gupta)(
             coordinates,
             &self.slot,
             ns,

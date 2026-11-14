@@ -52,6 +52,7 @@ struct Probe {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().collect();
     let n: usize = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(75);
     let probes: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(200);

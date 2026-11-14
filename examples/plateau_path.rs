@@ -173,6 +173,7 @@ fn seed(n: usize, family: &str, scale: f64, rng: &mut Rng) -> Option<Array1<f64>
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let n = 75;
     let plateau_target = -396.282247;
     let reference = -397.492331;

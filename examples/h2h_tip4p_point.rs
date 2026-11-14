@@ -12,6 +12,7 @@ use eindir_core::Objective;
 use ndarray::Array1;
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
     assert_eq!(args.len(), 2, "see the usage line in the source");
     let n: usize = args[0].parse().expect("n");

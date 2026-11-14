@@ -109,6 +109,7 @@ fn escape_table(label: &str, start: ArrayView1<f64>, trials: usize, class: bool)
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let spec = SoapSpec::default();
     let x13 = ico13();
     let (e13, x13) = relax(x13.view(), 400);

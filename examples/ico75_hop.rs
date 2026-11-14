@@ -218,6 +218,7 @@ fn run_floor_search(hops: usize, seeds: u64) {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     if std::env::args().nth(1).as_deref() == Some("search") {
         let hops = std::env::args()
             .nth(2)

@@ -12,6 +12,7 @@ use anneal_core::first_passage::{EmpiricalFirstPassage, ExponentialMixture, Firs
 use std::io::Read;
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let budget: f64 = args
         .first()

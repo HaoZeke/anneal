@@ -35,6 +35,7 @@ fn cluster(n: usize, salt: u64) -> Array1<f64> {
 }
 
 fn kernels(c: &mut Criterion) {
+    anneal_core::install_rgpot_kernels!();
     for n in [38_usize, 70, 80, 98] {
         let x = cluster(n, 1);
         let mut g = c.benchmark_group(format!("bookkeeping/n{n}"));

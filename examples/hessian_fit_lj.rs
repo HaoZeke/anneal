@@ -137,6 +137,7 @@ fn relative_errors(samples: &[Descent], params: ModelParams, iters: usize) -> Ve
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let n: usize = std::env::args()
         .nth(1)
         .and_then(|v| v.parse().ok())

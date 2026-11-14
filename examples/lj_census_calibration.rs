@@ -90,6 +90,7 @@ fn required<T: std::str::FromStr>(args: &[String], index: usize, name: &str) -> 
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    anneal_core::install_rgpot_kernels!();
     let args = env::args().collect::<Vec<_>>();
     if args.len() != 7 {
         return Err(format!(

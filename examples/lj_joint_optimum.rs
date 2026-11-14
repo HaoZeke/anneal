@@ -1050,6 +1050,7 @@ fn start_protocol_name(optbench: bool, fixed: bool) -> Result<&'static str, Stri
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    anneal_core::install_rgpot_kernels!();
     let arguments = std::env::args().collect::<Vec<_>>();
     let n = arguments
         .get(1)

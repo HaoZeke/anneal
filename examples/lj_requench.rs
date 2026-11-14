@@ -28,6 +28,7 @@ fn load(path: &str) -> Array1<f64> {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let path = std::env::args().nth(1).expect("xyz path");
     let x = load(&path);
     let n = x.len() / 3;

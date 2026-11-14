@@ -86,6 +86,7 @@ fn read_journal(path: &str) -> Vec<Structure> {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let mut arguments: Vec<String> = std::env::args().skip(1).collect();
     let mut radius = None;
     if let Some(index) = arguments.iter().position(|a| a == "--radius") {

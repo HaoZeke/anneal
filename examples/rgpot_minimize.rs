@@ -131,6 +131,7 @@ fn minimize_rgpot_with_anneal(
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     // Moderate budget for the standalone demo (runs in a few seconds).
     let (best_val, best_pos) = minimize_rgpot_with_anneal(42, 24, 300, 200);
 

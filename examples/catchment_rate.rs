@@ -71,6 +71,7 @@ fn community_of(ico: &[f64], marks: &[f64], trial: &[f64]) -> usize {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let starts: usize = std::env::args()
         .nth(1)
         .and_then(|value| value.parse().ok())

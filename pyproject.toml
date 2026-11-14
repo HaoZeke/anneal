@@ -50,6 +50,9 @@ cutest = [
 "Bug Tracker" = "https://github.com/HaoZeke/anneal/issues"
 
 [tool.maturin]
+# The wheel crate installs the rgpot kernels, which anneal-core cannot
+# depend on from crates.io.
+manifest-path = "crates/anneal-python/Cargo.toml"
 features      = ["python"]
 module-name   = "anneal._core"
 python-source = "python"

@@ -227,6 +227,7 @@ fn rec_off(species: Vec<u32>, groups: Vec<Vec<usize>>) -> Config {
 
 #[test]
 fn soap_on_vs_off_water4_eight_seeds() {
+    anneal_core::install_rgpot_kernels!();
     const M: usize = 4;
     const SEEDS: u64 = 8;
     const BUDGET: usize = 2_500;
@@ -311,6 +312,7 @@ fn soap_on_vs_off_water4_eight_seeds() {
 
 #[test]
 fn soap_on_vs_off_slab_water4_eight_seeds() {
+    anneal_core::install_rgpot_kernels!();
     // Thirty-two rather than eight. A success rate of two or three in
     // eight is one seed of difference, which is inside the spread of a
     // rate that size, so at eight seeds this comparison cannot tell the
@@ -409,6 +411,7 @@ fn rec_cluster(n: usize, soap: bool) -> Config {
 
 #[test]
 fn soap_on_vs_off_lj38_eight_seeds() {
+    anneal_core::install_rgpot_kernels!();
     const N: usize = 38;
     const SEEDS: u64 = 8;
     const BUDGET: usize = 25_000;

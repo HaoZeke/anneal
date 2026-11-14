@@ -13,6 +13,7 @@ use ndarray::ArrayView1;
 
 #[test]
 fn larger_lj_signatures_scale_without_changing_the_descriptor_contract() {
+    anneal_core::install_rgpot_kernels!();
     let lj75 = system_signature(75).unwrap();
     let lj104 = system_signature(104).unwrap();
 
@@ -25,6 +26,7 @@ fn larger_lj_signatures_scale_without_changing_the_descriptor_contract() {
 
 #[test]
 fn lj_catalog_uses_the_configured_invariant_descriptor_with_reduced_unit_geometry() {
+    anneal_core::install_rgpot_kernels!();
     let descriptor = descriptor_space();
     let signature = system_signature(75).unwrap();
 
@@ -73,6 +75,7 @@ fn lj_catalog_uses_the_configured_invariant_descriptor_with_reduced_unit_geometr
 
 #[test]
 fn lj_preset_descriptor_validator_and_engine_agree() {
+    anneal_core::install_rgpot_kernels!();
     let r = 2.0_f64.powf(1.0 / 6.0);
     let coordinates = vec![0.0, 0.0, 0.0, r, 0.0, 0.0];
     let signature = system_signature(2).unwrap();
@@ -93,6 +96,7 @@ fn lj_preset_descriptor_validator_and_engine_agree() {
 
 #[test]
 fn invalid_lj_sizes_and_reference_dimensions_are_rejected() {
+    anneal_core::install_rgpot_kernels!();
     assert!(system_signature(0).is_err());
     assert!(fresh_evaluation(3, &[0.0; 6]).is_err());
     assert!(validator_config(&[0.0; 5], 8).is_err());
@@ -100,6 +104,7 @@ fn invalid_lj_sizes_and_reference_dimensions_are_rejected() {
 
 #[test]
 fn development_reference_parser_requires_one_finite_xyz_row_per_site() {
+    anneal_core::install_rgpot_kernels!();
     let coordinates = parse_reference_coordinates("1.0 2.0 3.0\n-1.0 -2.0 -3.0\n", 2).unwrap();
     assert_eq!(coordinates, vec![1.0, 2.0, 3.0, -1.0, -2.0, -3.0]);
 
@@ -110,6 +115,7 @@ fn development_reference_parser_requires_one_finite_xyz_row_per_site() {
 
 #[test]
 fn calibration_identity_requires_energy_gradient_and_ira_evidence() {
+    anneal_core::install_rgpot_kernels!();
     assert!(accepts_repeated_quench(
         -397.492331,
         -397.492331 + 5e-8,
@@ -139,6 +145,7 @@ fn calibration_identity_requires_energy_gradient_and_ira_evidence() {
 
 #[test]
 fn discovered_minimum_identity_uses_only_search_evidence() {
+    anneal_core::install_rgpot_kernels!();
     let identity = discovered_minimum_id(75, 7_500_123, -381.25);
     assert_eq!(identity, "lj75-search-seed-7500123-energy-c077d40000000000");
     assert!(!identity.contains("global"));
@@ -148,6 +155,7 @@ fn discovered_minimum_identity_uses_only_search_evidence() {
 
 #[test]
 fn calibration_perturbations_are_seeded_independent_and_centred() {
+    anneal_core::install_rgpot_kernels!();
     let reference = vec![-1.0, 0.5, 0.25, 0.0, -0.5, 0.5, 1.0, 0.0, -0.75];
     let left = perturb_reference(&reference, 3, 17, 0.01).unwrap();
     let replay = perturb_reference(&reference, 3, 17, 0.01).unwrap();

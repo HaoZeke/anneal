@@ -20,6 +20,7 @@ fn signature_digest(text: &str) -> Result<[u8; 32], &'static str> {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 5 {
         eprintln!("usage: minima_report <root> <signature-hex> <system> <temperature> [tolerance]");

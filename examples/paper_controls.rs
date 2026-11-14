@@ -58,6 +58,7 @@ struct Campaign {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let system = args.first().map(String::as_str).unwrap_or("lj38");
     let arm_name = args.get(1).map(String::as_str).unwrap_or("recommended");

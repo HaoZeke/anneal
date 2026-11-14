@@ -64,6 +64,7 @@ fn charged_relax<'a>(
 
 #[test]
 fn hop_shape_from_shipped_constructors() {
+    anneal_core::install_rgpot_kernels!();
     let rec = Config::recommended(13);
     let soap = rec
         .move_library
@@ -128,6 +129,7 @@ fn hop_shape_from_shipped_constructors() {
 
 #[test]
 fn recommended_molecular_search_hops_on_water_dimer() {
+    anneal_core::install_rgpot_kernels!();
     let (start, species, groups) = water_dimer();
     let n = species.len();
     let cfg = Config::recommended_molecular(species, groups, 1.0);
@@ -161,6 +163,7 @@ fn recommended_molecular_search_hops_on_water_dimer() {
 
 #[test]
 fn recommended_molecular_slab_keeps_frozen_coords() {
+    anneal_core::install_rgpot_kernels!();
     let (start, species, groups) = water_dimer();
     let n = species.len();
     let mut cfg = Config::recommended_molecular(species, groups, 1.0);
@@ -204,6 +207,7 @@ fn recommended_molecular_slab_keeps_frozen_coords() {
 
 #[test]
 fn recommended_molecular_spends_no_potential_call_past_the_budget() {
+    anneal_core::install_rgpot_kernels!();
     let (start, species, groups) = water_dimer();
     let n = species.len();
     let cfg = Config::recommended_molecular(species, groups, 1.0);
@@ -320,6 +324,7 @@ impl eindir_core::gradient::DifferentiableObjective<f64> for FlexibleWater {
 
 #[test]
 fn tric_local_step_relaxes_a_molecular_search_within_budget() {
+    anneal_core::install_rgpot_kernels!();
     use anneal_core::methods::cluster_search::search_from;
     use anneal_core::methods::tric_opt::LocalStep;
 
@@ -412,6 +417,7 @@ impl eindir_core::gradient::DifferentiableObjective<f64> for SlowWater {
 
 #[test]
 fn the_auto_quench_follows_the_cost_of_a_call() {
+    anneal_core::install_rgpot_kernels!();
     use anneal_core::methods::cluster_search::search_from;
     use anneal_core::methods::tric_opt::LocalStep;
 
@@ -536,6 +542,7 @@ impl eindir_core::gradient::DifferentiableObjective<f64> for BondedChain {
 
 #[test]
 fn a_flexible_molecule_spends_its_budget_on_torsion_quenches() {
+    anneal_core::install_rgpot_kernels!();
     use anneal_core::methods::cluster_search::search_from;
     let chain = BondedChain::new(10);
     let species = vec![6; 10];

@@ -34,6 +34,7 @@ struct Minimum {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let mut args = std::env::args().skip(1);
     let system = args.next().unwrap_or_else(|| "au55".to_string());
     let seeds: usize = args.next().and_then(|text| text.parse().ok()).unwrap_or(16);

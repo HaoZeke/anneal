@@ -60,6 +60,7 @@ fn system(name: &str) -> Option<(usize, Kind, f64, f64)> {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let name = args.first().map(String::as_str).unwrap_or("lj38");
     let arm = args.get(1).map(String::as_str).unwrap_or("default");

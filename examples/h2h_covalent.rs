@@ -315,6 +315,7 @@ fn general(n: usize, length: f64, energy: f64) -> Config {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = args.first().map(String::as_str).unwrap_or("run");
     let status = match cmd {

@@ -19,6 +19,7 @@ use rand::rngs::StdRng;
 use std::io::{self, Write};
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().collect();
     let n: usize = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(6);
     let budget: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(20_000);

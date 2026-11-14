@@ -50,6 +50,7 @@ fn write_resolved_config(cfg: &Config) {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().collect();
     let m: usize = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(2);
     let budget: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(400);

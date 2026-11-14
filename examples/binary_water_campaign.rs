@@ -27,6 +27,7 @@ use anneal_core::binary_water::{BinaryLennardJonesProblem, search_binary, search
 use anneal_core::potentials::{GminAngleAxisFile, block_from_gmin_file};
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let mut args = std::env::args().skip(1);
     let kind = args.next().expect("binary or tip4p");
     match kind.as_str() {

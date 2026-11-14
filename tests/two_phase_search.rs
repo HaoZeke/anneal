@@ -45,6 +45,7 @@ fn run(cfg: &Config, budget: usize, seed: u64) -> (f64, usize, usize) {
 /// quench the masks were measured on.
 #[test]
 fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not() {
+    anneal_core::install_rgpot_kernels!();
     const SEEDS: u64 = 16;
     let budget = 30_000;
     let mut plain = Config::recommended(38);
@@ -94,6 +95,7 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
 
 #[test]
 fn a_surface_portfolio_runs_to_the_end_of_its_ledger() {
+    anneal_core::install_rgpot_kernels!();
     let mut cfg = Config::recommended(13);
     cfg.surfaces = vec![
         TwoPhase::relative(0.7, 1.0),

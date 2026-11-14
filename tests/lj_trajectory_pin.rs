@@ -87,6 +87,7 @@ fn trajectory_hash() -> String {
 
 #[test]
 fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
+    anneal_core::install_rgpot_kernels!();
     let hash = trajectory_hash();
     // The fivefold residual uses the built-in assignment on every build,
     // so linking IRA does not change this hash.

@@ -32,6 +32,7 @@ use std::time::Instant;
 const HIT_TOL: f64 = 0.001;
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = args.first().map(String::as_str).unwrap_or("run");
     let status = match cmd {

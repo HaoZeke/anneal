@@ -480,6 +480,7 @@ fn configure(species: &[u32], island: &[usize], base: &Array1<f64>, arm: &str) -
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     #[cfg(not(feature = "rgsaddle"))]
     {
         eprintln!("pt111_heptamer requires the rgsaddle feature");

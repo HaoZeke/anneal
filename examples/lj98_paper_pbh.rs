@@ -380,6 +380,7 @@ fn self_test() {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("self-test") {
         self_test();

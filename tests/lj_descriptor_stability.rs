@@ -62,6 +62,7 @@ fn block_diagnostics(left: &DescriptorVector, right: &DescriptorVector) -> Strin
 
 #[test]
 fn exact_same_lj38_minimum_has_a_stable_universal_descriptor() {
+    anneal_core::install_rgpot_kernels!();
     const POINTS: usize = 38;
     const SOURCE_SEED: u64 = 3_891_067;
     let potential = PairPotential::lennard_jones(POINTS);

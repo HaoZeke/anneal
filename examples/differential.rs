@@ -26,6 +26,7 @@ fn close(a: f64, b: f64, tol: f64) -> bool {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let mut failures = 0usize;
 
     // 1. Budget-window temperature.

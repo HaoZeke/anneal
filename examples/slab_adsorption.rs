@@ -68,6 +68,7 @@ fn arm_from_args(args: &[String]) -> &'static str {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().collect();
     let con = args
         .get(1)

@@ -448,6 +448,7 @@ fn confinement(
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().collect();
     let spec = args.get(1).cloned().unwrap_or_else(|| "lj".into());
     let n: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(38);

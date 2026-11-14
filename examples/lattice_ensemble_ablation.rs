@@ -294,6 +294,7 @@ fn fmt_opt(value: f64) -> String {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().collect();
     let which = args.get(1).map(String::as_str).unwrap_or("all");
     let smoke = std::env::var("PAPER_SMOKE").ok().as_deref() == Some("1");

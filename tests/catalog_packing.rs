@@ -31,6 +31,7 @@ fn load_xyz(text: &str) -> Array1<f64> {
 
 #[test]
 fn decaf_histogram_separates_lj38_oh_from_the_icosahedral_competitor() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
     let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
     let mut book = PackingBook::default();
@@ -54,11 +55,13 @@ fn decaf_histogram_separates_lj38_oh_from_the_icosahedral_competitor() {
 
 #[test]
 fn dimer_coordinates_have_no_packing_fingerprint() {
+    anneal_core::install_rgpot_kernels!();
     assert!(packing_fingerprint(&[0.0, 0.0, 0.0, 1.2, 0.0, 0.0]).is_none());
 }
 
 #[test]
 fn different_decaf_family_is_ico_versus_marks_not_an_ico_isomer() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
     let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
     let ico = ico.as_slice().unwrap();
@@ -69,6 +72,7 @@ fn different_decaf_family_is_ico_versus_marks_not_an_ico_isomer() {
 
 #[test]
 fn ape_queue_highlights_ico_atoms_by_decaf_class() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
     let ico = ico.as_slice().unwrap();
     let queue = ape_highlight_queue(ico);
@@ -100,6 +104,7 @@ fn ape_queue_highlights_ico_atoms_by_decaf_class() {
 
 #[test]
 fn invert_neighbours_are_nearby_in_the_packing_map() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
     let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
     let ico = ico.as_slice().unwrap();
@@ -113,6 +118,7 @@ fn invert_neighbours_are_nearby_in_the_packing_map() {
 
 #[test]
 fn catalog_reference_refresh_does_not_count_a_well_arrival() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
     let ico = ico.as_slice().unwrap();
     set_packing_references(Vec::new());
@@ -132,6 +138,7 @@ fn catalog_reference_refresh_does_not_count_a_well_arrival() {
 
 #[test]
 fn decaf_histogram_separates_lj75_marks_from_the_icosahedral_floor() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
     let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
     let mut book = PackingBook::default();
@@ -170,6 +177,7 @@ fn decaf_histogram_separates_lj75_marks_from_the_icosahedral_floor() {
 
 #[test]
 fn leftover_first_wave_arrivals_are_not_saturated() {
+    anneal_core::install_rgpot_kernels!();
     use anneal_core::catalog::{GoodTuringSample, leftover_arrivals_saturated};
     assert!(!leftover_arrivals_saturated(std::iter::repeat_n(1u64, 48)));
     assert!(leftover_arrivals_saturated(std::iter::repeat_n(2u64, 20)));
@@ -183,6 +191,7 @@ fn leftover_first_wave_arrivals_are_not_saturated() {
 
 #[test]
 fn packing_chao1_needs_no_singletons() {
+    anneal_core::install_rgpot_kernels!();
     use anneal_core::catalog::GoodTuringSample;
     // n=20, n1=3, n2=0: leftover p0=0.15 is under the ceiling,
     // Chao1 is unbounded, packing is not complete.
@@ -212,6 +221,7 @@ fn packing_chao1_needs_no_singletons() {
 
 #[test]
 fn leftover_soap_gt_plus_two_singleton_packings_is_not_a_certificate() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
     let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
     let mut book = PackingBook::default();
@@ -225,6 +235,7 @@ fn leftover_soap_gt_plus_two_singleton_packings_is_not_a_certificate() {
 
 #[test]
 fn packing_good_turing_uses_the_census_production_floor() {
+    anneal_core::install_rgpot_kernels!();
     use anneal_core::catalog::PRODUCTION_MINIMUM_VISITS;
     let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
     let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
@@ -256,6 +267,7 @@ fn packing_good_turing_uses_the_census_production_floor() {
 
 #[test]
 fn landfold_floor_separates_lj75_marks_from_ico() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
     let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
     let mut book = PackingBook::default();
@@ -290,6 +302,7 @@ fn landfold_floor_separates_lj75_marks_from_ico() {
 
 #[test]
 fn landfold_floor_on_the_book_sees_oh_after_live_ico_only() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
     let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
     let mut book = PackingBook::default();
@@ -308,6 +321,7 @@ fn landfold_floor_on_the_book_sees_oh_after_live_ico_only() {
 
 #[test]
 fn landfold_two_means_bipartitions_a_leftover_decaf_chain() {
+    anneal_core::install_rgpot_kernels!();
     let mut hists = Vec::new();
     let mut fams = Vec::new();
     for i in 0..8 {
@@ -330,6 +344,7 @@ fn landfold_two_means_bipartitions_a_leftover_decaf_chain() {
 
 #[test]
 fn landfold_floor_separates_lj38_oh_from_ico() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
     let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
     let mut book = PackingBook::default();
@@ -353,6 +368,7 @@ fn landfold_floor_separates_lj38_oh_from_ico() {
 
 #[test]
 fn landfold_floor_does_not_split_leftover_ico() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
     let mut book = PackingBook::default();
     let h = {
@@ -373,6 +389,7 @@ fn landfold_floor_does_not_split_leftover_ico() {
 
 #[test]
 fn landfold_sparsify_collapses_leftover_ico_and_keeps_oh_as_a_hole() {
+    anneal_core::install_rgpot_kernels!();
     use anneal_core::catalog::PRODUCTION_MINIMUM_VISITS;
     let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
     let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
@@ -421,6 +438,7 @@ fn rings(x: &Array1<f64>) -> (usize, usize, usize) {
 
 #[test]
 fn primitive_rings_separate_packings_and_keep_leftover_ico() {
+    anneal_core::install_rgpot_kernels!();
     let ico38 = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
     let oh38 = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
     let ico75 = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
@@ -466,6 +484,7 @@ fn primitive_rings_separate_packings_and_keep_leftover_ico() {
 
 #[test]
 fn ring_leave_lens_sees_pentagon_atoms_on_ico_not_oh() {
+    anneal_core::install_rgpot_kernels!();
     let ico38 = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
     let oh38 = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
     let ico = occupancy_ring_census(ico38.as_slice().unwrap()).unwrap();
@@ -518,6 +537,7 @@ fn ring_leave_lens_sees_pentagon_atoms_on_ico_not_oh() {
 
 #[test]
 fn leftover_waiver_uses_book_families_not_live_rematch() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
     let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
     let mut book = PackingBook::default();
@@ -551,6 +571,7 @@ fn leftover_waiver_uses_book_families_not_live_rematch() {
 
 #[test]
 fn throwaway_fingerprint_is_not_the_shared_book() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
     let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
     let ico = ico.as_slice().unwrap();
@@ -568,6 +589,7 @@ fn throwaway_fingerprint_is_not_the_shared_book() {
 
 #[test]
 fn a_second_look_at_the_same_ico_does_not_open_a_family() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
     let mut book = PackingBook::default();
     let first = book.observe(ico.as_slice().unwrap()).unwrap();
@@ -586,6 +608,7 @@ fn a_second_look_at_the_same_ico_does_not_open_a_family() {
 
 #[test]
 fn a_sub_threshold_displacement_reuses_the_decaf_histogram() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
     let mut book = PackingBook::default();
     book.observe(ico.as_slice().unwrap()).unwrap();
@@ -598,6 +621,7 @@ fn a_sub_threshold_displacement_reuses_the_decaf_histogram() {
 
 #[test]
 fn a_query_histogram_does_not_change_what_the_book_learns() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
     let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
     let ico = ico.as_slice().unwrap();
@@ -631,6 +655,7 @@ fn a_query_histogram_does_not_change_what_the_book_learns() {
 
 #[test]
 fn a_query_inherits_the_cached_packing_community() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
     let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
     let ico = ico.as_slice().unwrap();
@@ -657,6 +682,7 @@ fn a_query_inherits_the_cached_packing_community() {
 
 #[test]
 fn switch_saturates_far_l1_asinh_does_not() {
+    anneal_core::install_rgpot_kernels!();
     let a = vec![1.0, 0.0, 0.0, 0.0];
     let b = vec![0.0, 1.0, 0.0, 0.0];
     let c = vec![0.0, 0.0, 0.0, 1.0];
@@ -734,6 +760,7 @@ fn lj75_ico_isomer() -> Array1<f64> {
 
 #[test]
 fn a_packing_is_what_its_cells_chain_into_not_a_radius() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
     let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
     let isomer = lj75_ico_isomer();
@@ -775,6 +802,7 @@ fn a_packing_is_what_its_cells_chain_into_not_a_radius() {
 
 #[test]
 fn leave_accepts_marks_and_refuses_an_ico_isomer() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
     let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
     let isomer = lj75_ico_isomer();
@@ -800,6 +828,7 @@ fn leave_accepts_marks_and_refuses_an_ico_isomer() {
 
 #[test]
 fn the_cell_grain_adopts_the_isomer_the_packing_grain_refuses() {
+    anneal_core::install_rgpot_kernels!();
     let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
     let isomer = lj75_ico_isomer();
     let ico = ico.as_slice().unwrap();

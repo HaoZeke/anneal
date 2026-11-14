@@ -3,6 +3,7 @@
 //! Usage: bank_peek [host:port]
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let addr = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "127.0.0.1:7426".into());

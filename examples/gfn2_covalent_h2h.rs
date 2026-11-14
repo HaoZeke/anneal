@@ -170,6 +170,7 @@ fn write_xyz(path: &str, symbol: &str, x: &[f64], comment: &str) -> std::io::Res
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some(sys) = args.first().and_then(|name| system(name)) else {
         eprintln!("usage: gfn2_covalent_h2h <si10|c10> <seed> <budget> [target_eV] [best.xyz]");

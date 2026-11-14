@@ -38,6 +38,7 @@ fn quench(steps: usize, start: &Array1<f64>, pot: &PairPotential) -> (f64, Array
 
 #[test]
 fn release_rates_for_quench_screen_fingerprint_and_bank() {
+    anneal_core::install_rgpot_kernels!();
     let pot = PairPotential::lennard_jones(38);
     let start = lattice(38, 1.2);
     let mut quench_calls = 0usize;
