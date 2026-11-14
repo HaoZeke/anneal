@@ -2,10 +2,10 @@
 # Copyright (c) anneal developers
 """Run the Sutton–Chen binary and append the raw rows.
 
-`restart` and `pop` are the tables under bench/metal-cluster-h2h.
-A finished seed is left as it was written. `code_revision` is the
-git revision the binary was built from, and `host` is the UTS
-hostname. The campaign runs on hostname bench.
+`restart`, `pop`, `chain`, and `portfolio` are the tables under
+bench/metal-cluster-h2h. A finished seed is left as it was written.
+`code_revision` is the git revision the binary was built from, and
+`host` is the UTS hostname. The campaign runs on hostname bench.
 """
 
 from __future__ import annotations
@@ -84,6 +84,14 @@ def jobs(
             ("chain", system, seed, {"H2H_POP": "2"}) for system in SYSTEMS for seed in SEEDS
         ]
         return path, POP_FIELDS, planned
+    if campaign == "portfolio":
+        path = root / "bench/metal-cluster-h2h/sc-portfolio/rows.csv"
+        planned = [
+            ("portfolio", system, seed, {"H2H_PORTFOLIO": "1"})
+            for system in SYSTEMS
+            for seed in SEEDS
+        ]
+        return path, POP_FIELDS, planned
     raise SystemExit(f"unknown campaign {campaign}")
 
 
@@ -155,7 +163,7 @@ def run_one(
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("campaign", choices=("restart", "pop", "chain"))
+    parser.add_argument("campaign", choices=("restart", "pop", "chain", "portfolio"))
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument(
