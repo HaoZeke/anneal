@@ -51,8 +51,10 @@ def _assert_expr_potspec(schema_path: Path, lines: list[str]) -> None:
         raise AssertionError(f"{rel} PotSpec must not invent dummy leaf arms")
 
     cfg = "\n".join(_struct_body(lines, "PotentialConfig", rel))
-    if re.search(r"^\s+(expr|sum|list)\s+@", cfg, re.MULTILINE):
-        raise AssertionError(f"{rel} PotentialConfig must not grow expr/sum/list arms")
+    if not re.search(r"^\s+expr\s+@16\s*:\s*ExprParams;", cfg, re.MULTILINE):
+        raise AssertionError(f"{rel} PotentialConfig.expr must be ExprParams @16")
+    if re.search(r"^\s+(sum|list)\s+@", cfg, re.MULTILINE):
+        raise AssertionError(f"{rel} PotentialConfig must not grow sum/list arms")
 
 
 def _regenerate(root: Path, capnp: str, schema: Path, out: Path) -> dict[str, bytes]:

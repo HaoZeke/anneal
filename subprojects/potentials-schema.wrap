@@ -1,6 +1,9 @@
 [wrap-git]
-directory = potentials-schema-2a1d127c2dd0
+directory = potentials-schema-7fa9046d2f0d
 url = https://github.com/OmniPotentRPC/potentials-schema.git
-revision = 2a1d127c2dd0172fc4ea3412f267faebc942b46f
-# Same ExprParams/PotSpec tree as the vendored copies, on top of the UMA pin.
-diff_files = expr-potspec.diff
+revision = 7fa9046d2f0ddff47e4cb9fbbd11b321e35078c6
+# rgpot-local neighbour chunk: ForceInput.neighbors @9,
+# PotentialResult.neighborList @28, Potential.neighbours @13 and the
+# NeighborRequest, NeighborSystem and NeighborList structs. Upstream has
+# none of these yet, and rgpot 3.6.0 already ships them.
+diff_files = neighbour-chunk.diff
