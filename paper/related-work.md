@@ -974,3 +974,83 @@ This is not the GFN2 refit already filed as `nikolaevaGfn2Water2026`. xtb v6.8.0
 
 Cite `kabyldaSo3lrTauri2026` and `stavaracheGfn1Ionic2026`.
 
+## 2026-11-14 — Amorphous Au55 and Au147 at density-functional theory
+
+Zhang, Robinson, and Fichthorn, The Journal of Chemical Physics 163, 094501 (3 September 2025), doi:10.1063/5.0285359, compare three embedded-atom force fields for Au55 and Au147 by parallel tempering. The abstract says those fields disagree on the temperature-dependent shapes and on the melting temperatures. The lowest candidates from those fields, from an artificial neural network, from a Gaussian-process force field, from density-functional tight binding, from the Gupta potential, and from density-functional theory are then reoptimised with density-functional theory. At that level the lowest structures of both sizes are amorphous, and the abstract says those structures were predicted by the neural network and by density-functional theory. Most of the 30 lowest structures at each size are hollow or disordered, and not icosahedral.
+
+Rahmatizad Khajehpasha and co-workers already search Au55 and Au147 by minima hopping on a machine-learned potential, filed as `rahmatizadGold2026`. That note says an icosahedron is not the ground state of these gold clusters. This paper agrees for the density-functional ranking. It does not recompute the 2.8 eV gaps at Au309 and Au561. The amorphous energies are gold energies. They do not contradict the Cambridge hit targets, 121 of 192, or 97 of 192. The embedded-atom shape distributions are not the density-functional minimum. A head-to-head is Au55 or Au147 on one shared surface. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `zhangAuShapes2025`.
+
+## 2026-11-14 — A genetic algorithm checked on known Lennard-Jones minima
+
+Junior, Lourenço, and Galvão, Journal of Molecular Modeling 31, 244 (13 August 2025), doi:10.1007/s00894-025-06457-x, add a gradient step inside each local optimisation of a genetic algorithm. The abstract says the test is how efficiently the search finds the global minima of Lennard-Jones clusters, whose solutions are well known, against a random search and a standard genetic algorithm. The same algorithm then predicts sodium nanoclusters through 100 atoms with a density-functional tight-binding model tuned for sodium.
+
+The abstract does not name LJ38, LJ75, LJ98, or LJ104, and it does not report an energy below the known Lennard-Jones solutions, so it does not contradict the Cambridge hit targets. An efficiency comparison is not the force-call hit rate. The sodium structures are tight-binding energies. They do not contradict 121 of 192 or 97 of 192. Because the abstract does not name the manuscript sizes, it does not yet warrant a head-to-head on the sealed maps. A comparison that uses this search has to name the Lennard-Jones sizes it actually ran.
+
+Cite `juniorGenetic2025`.
+
+## 2026-11-14 — Machine-learned searches away from the preset
+
+Shi, Ren, and Gao, The Journal of Physical Chemistry A 129, 2190--2199 (25 February 2025), doi:10.1021/acs.jpca.4c07840, train a high-dimensional neural network during an active-learning global optimisation of cerium oxide clusters, Ce\(_n\)O\(_{2n+x}\), for \(n\) from 2 to 18. The abstract says the lowest structures change with size, from compact, to multilayer, to pyramidal, and that the pyramid is the core once \(n\) is larger than 14.
+
+Wang, Lv, and Wu, Chemical Science 16, 7320--7328 (2025), doi:10.1039/d4sc08616c, run an exhaustive global structure search on a neural-network potential for borophene on Ag(100). The abstract says the search captures large mixed phases. The record has no day. The system is a supported sheet, not a free cluster.
+
+Sankaranarayanan, Banik, Aggarwal, Manna, and Dutta, Research Square (18 August 2025), doi:10.21203/rs.3.rs-7106351/v1, fit Gaussian approximation potentials for nanoclusters of 54 elements. The abstract says the training set has more than 170000 density-functional configurations, and that the potentials match those energies and forces. It does not report a new global-minimum energy.
+
+None of the three quotes a Cambridge Lennard-Jones energy or a hexamer hit rate, so none contradicts the hit targets, 121 of 192, or 97 of 192. None fills the open ASE, AGOX, and GMIN kit. A head-to-head would be one cerium oxide size on the neural-network potential, or borophene on Ag(100). The Gaussian approximation potentials are not that search. None warrants a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `shiCeria2025`, `wangBorophene2025`, and `sankaranarayananNanoclusters2025`.
+
+## 2026-11-14 — Gold--copper at thirteen atoms, and strained nickel--platinum
+
+Pal and Priyakumar, Chemistry--An Asian Journal 20, e01926 (16 June 2025), doi:10.1002/asia.202401926, dope a 13-atom gold cluster with copper, one composition at a time. A genetic algorithm based on the artificial bee colony proposes the isomers, and PBE ranks them. The abstract says each composition has a minimum-energy isomer, and that copper raises both the stability and the reactivity. Thirteen atoms sits outside 38, 55, 75, 98, and 104.
+
+Tang and co-workers already search Au--Cu on the Gupta potential at 13, 19, 23, and 38 atoms, filed as `tangAucur2026`. This paper is a density-functional ranking at 13 atoms. It does not replace that Gupta comparison, and it does not quote a Cambridge energy.
+
+Wang, Chen, Toulkeridou, Kioseoglou, and Grammatikopoulos, Nano Letters 26, 15022--15029 (11 September 2026), doi:10.1021/acs.nanolett.6c03772, strain NiPt nanoparticles through an anchored interface. The abstract says the chemical order of the truncated octahedra stays in place under large strain, while the icosahedra move nickel to the surface under tension. Those particles are NiPt. They are not the Lennard-Jones truncated octahedron.
+
+Neither contradicts the Cambridge hit targets, 121 of 192, or 97 of 192. A head-to-head would be Au\(_m\)Cu\(_n\) at 13 atoms on PBE, or NiPt on the potential used for the strain. Neither warrants a head-to-head on the Lennard-Jones preset or on the CREST table.
+
+Cite `palGoldCopper2025` and `wangNiptStrain2026`.
+
+## 2026-11-14 — racerTS against CREST and GOAT on transition states
+
+Schmid, Seng, Kläy, and Jorner, Journal of Chemical Information and Modeling 66, 2777--2790 (12 February 2026), doi:10.1021/acs.jcim.5c02794, release racerTS. Constrained distance geometry builds a transition-state conformer ensemble. The abstract says CREST and GOAT are the established generators for that ensemble. On 20 reactions, racerTS covers the space similarly to CREST and slightly less completely than GOAT. After a density-functional optimisation of selected conformers, the abstract gives a median error of 0.17 kcal/mol in the low-energy region. The GOAT in that comparison is the molecular global optimiser, not the analytic Goat Optimization Algorithm already filed as `nozariGoatAlgorithm2025`.
+
+The missing hexamer comparison with de Souza's GOAT stays open. This paper does not report 121 of 192, 97 of 192, or the polished gaps. A transition-state ensemble is not the bare hexamer. Leave the CREST table on 3.0.2. It does not warrant a head-to-head on that table.
+
+Cite `schmidRacer2026`.
+
+## 2026-11-14 — A hexamer pathway, prism tunneling, and the undecamer
+
+Li, Kong, Wang, Lan, Su, and Zhao, The Journal of Physical Chemistry Letters 16, 3004--3011 (17 March 2025), doi:10.1021/acs.jpclett.5c00336, run quantum simulations of neutral water clusters from the dimer through the decamer on a many-body potential. The abstract says nuclear quantum effects push the finite-temperature pentamer from planar structures toward three-dimensional ones. For the hexamer it reports a lower-energy path from a prism to a book through a cage-like intermediate, and says that path is absent from the classical simulations. The path is a rearrangement. It is not a new static global minimum.
+
+Tokić and Cvitaš, The Journal of Physical Chemistry A 129, 11834--11847 (11 December 2025), doi:10.1021/acs.jpca.5c06786, compute tunneling splittings in two prism hexamers built from stacked trimers. The abstract calls the clockwise--counterclockwise stacking the more stable of the two. The rearrangements are flips, bifurcations, and monomer rotations among symmetry copies of the same prism. They are not a ranking of prism, cage, book, and chair.
+
+Wang and co-workers, Nature Communications 16, 11517 (13 December 2025), doi:10.1038/s41467-025-66717-5, assign interference-free (H\(_2\)O)\(_{11}\). The abstract names three low-energy families, 515, 43\('\)4, and 55\('\)1, and says 515 dominates. The size is eleven molecules. The hexamer is outside that assignment.
+
+None of the three quotes a TIP4P energy, a GFN2-xTB energy, 121 of 192, or 97 of 192. A many-body path, a tunneling pattern inside one prism, and an undecamer motif are not the CREST table. Keep TIP4P, GFN2-xTB, and these surfaces apart.
+
+Cite `liWaterQuantum2025`, `tokicPrism2025`, and `wangUndecamer2025`.
+
+## 2026-11-14 — A local certificate for a Lennard-Jones crystal, and a surrogate through seven atoms
+
+Ayala, Choksi, and Wirth, Multiscale Modeling and Simulation 24, 1399--1425 (10 September 2026), doi:10.1137/25m1772824, prove that a numerical approximation sits near a true critical point. One case is a finite Lennard-Jones crystal on a face-centred cubic lattice. The abstract proves a local minimiser of the perfect crystal, a local minimiser with one vacancy, and a saddle between two vacancy configurations. It does not prove a global minimum of a free cluster.
+
+The manuscript says Lecomte leaves every case of 38 atoms and larger unproved. These certificates are local, and they are a crystal, so that sentence stands. They give no energy below the Cambridge values.
+
+Wasnik, SSRN (2026), doi:10.2139/ssrn.6502101, fits a neural surrogate to Lennard-Jones clusters. The record has no month or pages. The abstract reports a four-atom landscape and a seven-atom trajectory, and says the surrogate reproduces the known basins. It gives no energy at 38, 55, 75, 98, or 104.
+
+Seven atoms are the pentagonal bipyramid already proved by Shen. This preprint does not replace that proof or the Cambridge hit targets. No head-to-head at the manuscript sizes.
+
+Cite `ayalaLennardJones2026` and `wasnikSurrogate2026`.
+
+## 2026-11-14 — A genetic algorithm inside ASE for crystals
+
+Semeniuk and Feia, Ukrainian Journal of Physics 71, 554 (22 May 2026), doi:10.15407/ujpe71.6.554, put a genetic algorithm in the Atomic Simulation Environment and recover global and local minima of silica polymorphs. The abstract also names MACE and AIMNet2 as neural-network relaxers. The search is a crystal, not basin hopping.
+
+The missing ASE arm is basin hopping on tag 3.29.0. This paper does not run that arm, and it publishes no basin-hopping hit rate. It does not contradict the open count, because no ASE number is printed. A comparison that uses this code has to be named as a crystal genetic algorithm.
+
+Cite `semeniukAseGenetic2026`.
+
