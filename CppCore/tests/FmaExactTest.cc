@@ -163,3 +163,35 @@ TEST_CASE("exact fma matches hardware fma", "[fma]") {
     }
   }
 }
+
+// exp_hw_n is the body exp() runs on an FMA machine. exp_fast<true> called
+// from this file lowers its fma to a libm call, so only this case reaches
+// the target("fma") code.
+TEST_CASE("exp_hw_n gives the bits of the software exp", "[fma][exp]") {
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+  if (!rgpot::simd::detail::fma_hw_active()) {
+    SKIP("no hardware FMA, exp_hw_n is not called");
+  }
+#endif
+  std::vector<double> in = {
+      0.0, -0.0, 1.0, -1.0, 0.5, -0.5,
+      std::numeric_limits<double>::min(),
+      std::numeric_limits<double>::denorm_min(),
+      std::numeric_limits<double>::infinity(),
+      -std::numeric_limits<double>::infinity(),
+      std::numeric_limits<double>::quiet_NaN(),
+      700.0, 709.8, 710.0, -745.2, -800.0, 0x1p-40, -0x1p-40, 20.0, -20.0,
+  };
+  for (int i = 0; i < 4001; ++i) {
+    in.push_back((static_cast<double>(i) / 4000.0) * 40.0 - 20.0);
+  }
+  const std::size_t widths[] = {0, 1, 2, 3, in.size()};
+  for (std::size_t n : widths) {
+    std::vector<double> out(n, 0.0);
+    rgpot::simd::exp_hw_n(in.data(), out.data(), n);
+    for (std::size_t i = 0; i < n; ++i) {
+      INFO("n=" << n << " x=" << bits_of(in[i]));
+      REQUIRE(bits_of(out[i]) == bits_of(rgpot::simd::exp_fast<false>(in[i])));
+    }
+  }
+}
