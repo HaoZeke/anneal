@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Conda prefix for the openconf head-to-head and the TRIC quench measurement.
 # RDKit, xtb, tblite and geomeTRIC from conda-forge; openconf from PyPI.
 set -euo pipefail
@@ -8,9 +9,11 @@ MAMBA=${MAMBA_EXE:-/work/bin/micromamba}
 export MAMBA_ROOT_PREFIX=${MAMBA_ROOT_PREFIX:-/work/mamba}
 
 if [[ ! -x $MAMBA ]]; then
-  mkdir -p "$(dirname "$MAMBA")"
-  curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xj -C /tmp bin/micromamba
-  cp /tmp/bin/micromamba "$MAMBA"
+  unpack="$(dirname "$MAMBA")/micromamba-unpack"
+  mkdir -p "$unpack"
+  curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xj -C "$unpack" bin/micromamba
+  mv "$unpack/bin/micromamba" "$MAMBA"
+  rm -rf "$unpack"
 fi
 if [[ ! -x $PREFIX/bin/python ]]; then
   "$MAMBA" create -y -p "$PREFIX" -c conda-forge \
