@@ -1,0 +1,54 @@
+recorded
+  driver_revision c1c02d1646a71267e0f6c02cfcfcc07d5b88d9b4
+  engine_revision 04aceaa79e2336060269bc4ee988397e102f74f1
+  engine_tree c27e227c1d802d0fd76cceee31f4414d8ff23ea1
+  engine_sha256
+    ccce2a80e3aaf64eb6abdcf8f0dd9a4ccca231a9645f07c04d10fd764860e515
+  seed 2005
+  budget 100000
+  target_eV -599.34546694
+  stop_call 2481
+  best_eV -617.18016907
+
+replay
+  engine_origin_ref origin/main
+  engine_build release
+  engine_target_build_status success
+  full_tree_build_status failed
+  full_tree_build_error rgpot_fastnlist requires rustc 1.89
+  locked_rustc 1.88.0
+  rebuilt_engine_sha256
+    1be587720301b67cecc36cdf76b390747dd2ad392c973041c46542e106df445c
+  xtb_version 6.7.1
+  stop_call 2948
+  best_eV -617.68988566
+  probe_calls 59
+  scc_rejected 38
+  geometry_rejected 0
+  result not-reproduced
+
+replay_command
+  RGPOT_XTB_ETEMP=3000 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+  OPENBLAS_NUM_THREADS=1 RAYON_NUM_THREADS=1 taskset -c 0 \
+  gfn2_covalent_h2h si13 2005 100000 -599.34546694 replay-stop.xyz
+
+replay_output
+  system si13
+  code anneal-general
+  seed 2005
+  budget 100000
+  hit true
+  evals_to_hit 2948
+  charged 2948
+  probe_calls 59
+  best_eV -617.68988566
+  scc_rejected 38
+  geometry_rejected 0
+
+fresh_commands
+  xtb replay-stop.xyz --gfn 2 --sp --etemp 3000 --acc 0.01 \
+  --iterations 500
+  xtb replay-stop.xyz --gfn 2 --opt tight --etemp 3000 --acc 0.01 \
+  --iterations 500
+  xtb tight-relax-last.xyz --gfn 2 --sp --etemp 3000 --acc 0.01 \
+  --iterations 500

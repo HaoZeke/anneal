@@ -1,0 +1,4 @@
+geometry,calculation,status,xtb_version,energy_Eh,energy_eV,gradient_norm_Eh_a0,detail
+replay-stop.xyz,single-point,converged,6.7.1,-22.699684612803,-617.68985851,0.086844853205,fresh process
+replay-stop.xyz,tight-relax,failed,6.7.1,,,,geometry optimization failed
+tight-relax-last.xyz,single-point,failed,6.7.1,,,,SCC did not converge in 500 iterations
