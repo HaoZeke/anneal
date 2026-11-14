@@ -1416,8 +1416,8 @@ pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
         return false;
     }
     let _ = spec;
-    let c = crate::structure::cna(x, n, 1.35);
-    c.fraction((5, 5, 5)) > 0.12
+    let (f555, _, _) = crate::structure::named_triplet_fractions(x, n, 1.35);
+    f555 > 0.12
 }
 
 /// A fivefold plateau: icosahedral `555` or decahedral `422`, and not fcc `421`.
@@ -1429,9 +1429,9 @@ pub fn fivefold_plateau(x: ArrayView1<f64>) -> bool {
     if n < 7 {
         return false;
     }
-    let c = crate::structure::cna(x, n, bond_cutoff(x));
-    let five = c.fraction((5, 5, 5)) + c.fraction((4, 2, 2));
-    five > 0.15 && c.fraction((4, 2, 1)) < 0.20
+    let (f555, f421, f422) = crate::structure::named_triplet_fractions(x, n, bond_cutoff(x));
+    let five = f555 + f422;
+    five > 0.15 && f421 < 0.20
 }
 
 /// True when the nearest neighbour is far outside the Lennard-Jones scale.
@@ -1451,12 +1451,7 @@ pub fn motif_fractions(x: ArrayView1<f64>) -> (f64, f64, f64) {
     if n < 2 {
         return (0.0, 0.0, 0.0);
     }
-    let counts = crate::structure::cna(x, n, bond_cutoff(x));
-    (
-        counts.fraction((5, 5, 5)),
-        counts.fraction((4, 2, 1)),
-        counts.fraction((4, 2, 2)),
-    )
+    crate::structure::named_triplet_fractions(x, n, bond_cutoff(x))
 }
 
 fn bond_cutoff(x: ArrayView1<f64>) -> f64 {

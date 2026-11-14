@@ -118,43 +118,110 @@ pub const TRAIL_BOND_CAP: usize = 12;
 ///
 /// Returns zero past [`TRAIL_BOND_CAP`] bonds, which no traced set with a
 /// bond can give.
+///
+/// A trail's length is the number of bonds it has used, so two ways of
+/// arriving at the same point with the same bonds carry the same length.
+/// Each `(point, used bonds)` state is expanded once. That is the same set
+/// of trails as a search that pushes every continuation, and it stays cheap
+/// when a compressed cluster puts close to [`TRAIL_BOND_CAP`] bonds among
+/// one pair's common neighbours.
+#[cfg(test)]
 fn longest_trail(sub: &[Vec<bool>]) -> usize {
     let m = sub.len();
     if m == 0 {
         return 0;
     }
-    let mut edges: Vec<(usize, usize)> = Vec::new();
+    let mut edges = [(0usize, 0usize); TRAIL_BOND_CAP];
+    let mut n_edges = 0usize;
     for i in 0..m {
         for j in (i + 1)..m {
-            if sub[i][j] {
-                edges.push((i, j));
+            if !sub[i][j] {
+                continue;
             }
+            if n_edges == TRAIL_BOND_CAP {
+                return 0;
+            }
+            edges[n_edges] = (i, j);
+            n_edges += 1;
         }
     }
-    if edges.is_empty() || edges.len() > TRAIL_BOND_CAP {
+    if n_edges == 0 {
         return 0;
     }
-    let mut incident: Vec<Vec<(usize, usize)>> = vec![Vec::new(); m];
-    for (k, &(i, j)) in edges.iter().enumerate() {
-        incident[i].push((k, j));
-        incident[j].push((k, i));
-    }
-    // Exhaustive over bonds, which the cap above keeps cheap.
-    let mut best = 0usize;
-    for start in 0..m {
-        let mut stack: Vec<(usize, u64, usize)> = vec![(start, 0, 0)];
-        while let Some((node, used, length)) = stack.pop() {
+    trail_from_edges(m, &edges[..n_edges])
+}
+
+struct TrailScratch {
+    seen: Vec<u32>,
+    stamp: u32,
+    stack: Vec<(u32, u32)>,
+}
+
+std::thread_local! {
+    static TRAIL_SCRATCH: std::cell::RefCell<TrailScratch> = const {
+        std::cell::RefCell::new(TrailScratch {
+            seen: Vec::new(),
+            stamp: 0,
+            stack: Vec::new(),
+        })
+    };
+}
+
+/// Longest trail on an edge list no longer than [`TRAIL_BOND_CAP`].
+fn trail_from_edges(m: usize, edges: &[(usize, usize)]) -> usize {
+    let n_edges = edges.len();
+    debug_assert!(n_edges > 0 && n_edges <= TRAIL_BOND_CAP);
+    let states = m * (1usize << n_edges);
+    TRAIL_SCRATCH.with(|cell| {
+        let mut scratch = cell.borrow_mut();
+        scratch.stamp = scratch.stamp.wrapping_add(1);
+        if scratch.stamp == 0 {
+            scratch.seen.fill(0);
+            scratch.stamp = 1;
+        }
+        if scratch.seen.len() < states {
+            scratch.seen.resize(states, 0);
+        }
+        let stamp = scratch.stamp;
+        scratch.stack.clear();
+        // Bonds that leave each point. Scanning the whole edge list at
+        // every state repeats the bonds that do not touch it.
+        let mut incident: Vec<Vec<(u32, u32)>> = vec![Vec::new(); m];
+        for (k, &(a, b)) in edges.iter().enumerate() {
+            let k = k as u32;
+            incident[a].push((k, b as u32));
+            incident[b].push((k, a as u32));
+        }
+        for start in 0..m {
+            if scratch.seen[start] != stamp {
+                scratch.seen[start] = stamp;
+                scratch.stack.push((start as u32, 0));
+            }
+        }
+        let mut best = 0usize;
+        while let Some((node, used)) = scratch.stack.pop() {
+            let length = used.count_ones() as usize;
             if length > best {
                 best = length;
+                // A trail that uses every bond is as long as a trail can be.
+                if best == n_edges {
+                    break;
+                }
             }
-            for &(k, next) in &incident[node] {
-                if k < 64 && (used >> k) & 1 == 0 {
-                    stack.push((next, used | (1 << k), length + 1));
+            for &(k, next) in &incident[node as usize] {
+                if used & (1u32 << k) != 0 {
+                    continue;
+                }
+                let next_used = used | (1u32 << k);
+                let idx = (next_used as usize) * m + next as usize;
+                if scratch.seen[idx] != stamp {
+                    scratch.seen[idx] = stamp;
+                    scratch.stack.push((next, next_used));
                 }
             }
         }
-    }
-    best
+        best
+    })
 }
 
 /// Common-neighbour triplets over every bonded pair.
@@ -166,28 +233,16 @@ pub fn cna(x: ArrayView1<f64>, n: usize, cutoff: f64) -> CnaCounts {
     let adj = adjacency(x, n, cutoff);
     let mut counts: Vec<((usize, usize, usize), usize)> = Vec::new();
     let mut bonds = 0usize;
+    let mut common = Vec::new();
+    let mut edges = [(0usize, 0usize); TRAIL_BOND_CAP];
     for i in 0..n {
         for j in (i + 1)..n {
             if !adj[i][j] {
                 continue;
             }
             bonds += 1;
-            let common: Vec<usize> = (0..n).filter(|&k| adj[i][k] && adj[j][k]).collect();
-            let r = common.len();
-            let key = if r == 0 {
-                (0, 0, 0)
-            } else {
-                let sub: Vec<Vec<bool>> = common
-                    .iter()
-                    .map(|&a| common.iter().map(|&b| adj[a][b]).collect())
-                    .collect();
-                let s: usize = sub
-                    .iter()
-                    .enumerate()
-                    .map(|(a, row)| row.iter().enumerate().filter(|&(b, &v)| v && b > a).count())
-                    .sum();
-                (r, s, longest_trail(&sub))
-            };
+            let (r, s, t) = pair_triplet(&adj, i, j, &mut common, &mut edges);
+            let key = (r, s, t);
             match counts.iter_mut().find(|(k, _)| *k == key) {
                 Some((_, v)) => *v += 1,
                 None => counts.push((key, 1)),
@@ -197,10 +252,148 @@ pub fn cna(x: ArrayView1<f64>, n: usize, cutoff: f64) -> CnaCounts {
     CnaCounts { counts, bonds }
 }
 
+/// Shares of `(5,5,5)`, `(4,2,1)` and `(4,2,2)` among bonded pairs.
+///
+/// Those signatures have four or five common neighbours, so a pair that
+/// already has a sixth is none of them and its trail is not counted. The
+/// three shares match [`cna`].
+pub fn named_triplet_fractions(x: ArrayView1<f64>, n: usize, cutoff: f64) -> (f64, f64, f64) {
+    if n < 2 {
+        return (0.0, 0.0, 0.0);
+    }
+    let adj = adjacency(x, n, cutoff);
+    let mut bonds = 0usize;
+    let mut n555 = 0usize;
+    let mut n421 = 0usize;
+    let mut n422 = 0usize;
+    let mut common = Vec::new();
+    for i in 0..n {
+        for j in (i + 1)..n {
+            if !adj[i][j] {
+                continue;
+            }
+            bonds += 1;
+            match named_class(&adj, i, j, &mut common) {
+                1 => n555 += 1,
+                2 => n421 += 1,
+                3 => n422 += 1,
+                _ => {}
+            }
+        }
+    }
+    if bonds == 0 {
+        return (0.0, 0.0, 0.0);
+    }
+    // Divide, as [`CnaCounts::fraction`] does. Multiplying by the
+    // reciprocal differs in the last bit and can move a share across
+    // the packing gap.
+    let scale = bonds as f64;
+    (
+        n555 as f64 / scale,
+        n421 as f64 / scale,
+        n422 as f64 / scale,
+    )
+}
+
+/// `(r, s, t)` for one bonded pair. `t` is zero past [`TRAIL_BOND_CAP`].
+fn pair_triplet(
+    adj: &[Vec<bool>],
+    i: usize,
+    j: usize,
+    common: &mut Vec<usize>,
+    edges: &mut [(usize, usize); TRAIL_BOND_CAP],
+) -> (usize, usize, usize) {
+    common.clear();
+    let n = adj.len();
+    for k in 0..n {
+        if adj[i][k] && adj[j][k] {
+            common.push(k);
+        }
+    }
+    let r = common.len();
+    if r == 0 {
+        return (0, 0, 0);
+    }
+    let mut s = 0usize;
+    let mut stored = 0usize;
+    for a in 0..r {
+        for b in (a + 1)..r {
+            if adj[common[a]][common[b]] {
+                if stored < TRAIL_BOND_CAP {
+                    edges[stored] = (a, b);
+                    stored += 1;
+                }
+                s += 1;
+            }
+        }
+    }
+    let t = if s == 0 || s > TRAIL_BOND_CAP {
+        0
+    } else {
+        trail_from_edges(r, &edges[..s])
+    };
+    (r, s, t)
+}
+
+/// `1` for 555, `2` for 421, `3` for 422, `0` otherwise.
+///
+/// A sixth common neighbour rules the pair out. Two bonds are a trail of
+/// length two when they share a point and of length one when they do not.
+fn named_class(adj: &[Vec<bool>], i: usize, j: usize, common: &mut Vec<usize>) -> u8 {
+    common.clear();
+    let n = adj.len();
+    for k in 0..n {
+        if adj[i][k] && adj[j][k] {
+            common.push(k);
+            if common.len() > 5 {
+                return 0;
+            }
+        }
+    }
+    let r = common.len();
+    if r != 4 && r != 5 {
+        return 0;
+    }
+    let mut edges = [(0usize, 0usize); 5];
+    let mut s = 0usize;
+    for a in 0..r {
+        for b in (a + 1)..r {
+            if adj[common[a]][common[b]] {
+                if s < edges.len() {
+                    edges[s] = (a, b);
+                }
+                s += 1;
+                if (r == 4 && s > 2) || (r == 5 && s > 5) {
+                    return 0;
+                }
+            }
+        }
+    }
+    if r == 5 && s == 5 {
+        let t = trail_from_edges(5, &edges[..5]);
+        if t == 5 {
+            1
+        } else {
+            0
+        }
+    } else if r == 4 && s == 2 {
+        let (a, b) = edges[0];
+        let (c, d) = edges[1];
+        if a == c || a == d || b == c || b == d {
+            3
+        } else {
+            2
+        }
+    } else {
+        0
+    }
+}
+
 /// Per-atom fractions of 555 / 421 / 422 among that atom's bonds.
 pub fn atom_triplet_fracs(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<[f64; 3]> {
     let adj = adjacency(x, n, cutoff);
     let mut out = vec![[0.0; 3]; n];
+    let mut common = Vec::new();
     for i in 0..n {
         let mut n555 = 0usize;
         let mut n421 = 0usize;
@@ -211,25 +404,10 @@ pub fn atom_triplet_fracs(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<[f64
                 continue;
             }
             nb += 1;
-            let common: Vec<usize> = (0..n).filter(|&k| adj[i][k] && adj[j][k]).collect();
-            let r = common.len();
-            if r == 0 {
-                continue;
-            }
-            let sub: Vec<Vec<bool>> = common
-                .iter()
-                .map(|&a| common.iter().map(|&b| adj[a][b]).collect())
-                .collect();
-            let s: usize = sub
-                .iter()
-                .enumerate()
-                .map(|(a, row)| row.iter().enumerate().filter(|&(b, &v)| v && b > a).count())
-                .sum();
-            let t = longest_trail(&sub);
-            match (r, s, t) {
-                (5, 5, 5) => n555 += 1,
-                (4, 2, 1) => n421 += 1,
-                (4, 2, 2) => n422 += 1,
+            match named_class(&adj, i, j, &mut common) {
+                1 => n555 += 1,
+                2 => n421 += 1,
+                3 => n422 += 1,
                 _ => {}
             }
         }
@@ -780,6 +958,199 @@ mod tests {
             "centre atom 555 fraction {}, counts {:?}",
             fr[0][0],
             c.counts
+        );
+        let (f555, f421, f422) = named_triplet_fractions(x.view(), 13, 1.2);
+        assert_eq!(f555, c.fraction((5, 5, 5)));
+        assert_eq!(f421, c.fraction((4, 2, 1)));
+        assert_eq!(f422, c.fraction((4, 2, 2)));
+    }
+
+    #[test]
+    fn named_fractions_match_the_full_triplet_count() {
+        let mut state = 2000u64;
+        for n in [13usize, 38, 80] {
+            for _ in 0..20 {
+                let mut x = Array1::zeros(3 * n);
+                for value in x.iter_mut() {
+                    state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    *value = (state >> 33) as f64 / (1u32 << 31) as f64 * 3.0 - 1.5;
+                }
+                for cutoff in [0.8, 1.2, 1.35, 1.8, 2.5] {
+                    let c = cna(x.view(), n, cutoff);
+                    let (f555, f421, f422) = named_triplet_fractions(x.view(), n, cutoff);
+                    assert!(
+                        f555 == c.fraction((5, 5, 5))
+                            && f421 == c.fraction((4, 2, 1))
+                            && f422 == c.fraction((4, 2, 2)),
+                        "n {n} cutoff {cutoff} named ({f555}, {f421}, {f422}) cna ({}, {}, {}) counts {:?}",
+                        c.fraction((5, 5, 5)),
+                        c.fraction((4, 2, 1)),
+                        c.fraction((4, 2, 2)),
+                        c.counts
+                    );
+                }
+            }
+        }
+        let mut pts = vec![[0.0, 0.0, 0.0]];
+        pts.extend(Template::FaceCentredCubic.points());
+        let n = pts.len();
+        let mut x = Array1::zeros(3 * n);
+        for (i, p) in pts.iter().enumerate() {
+            for k in 0..3 {
+                x[3 * i + k] = p[k];
+            }
+        }
+        let c = cna(x.view(), n, 1.2);
+        let (f555, f421, f422) = named_triplet_fractions(x.view(), n, 1.2);
+        assert!(
+            c.get((4, 2, 1)) > 0,
+            "fcc produced no 421, counts {:?}",
+            c.counts
+        );
+        assert_eq!(f421, c.fraction((4, 2, 1)));
+        assert_eq!(f422, c.fraction((4, 2, 2)));
+        assert_eq!(f555, c.fraction((5, 5, 5)));
+    }
+
+    fn adj(pairs: &[(usize, usize)], m: usize) -> Vec<Vec<bool>> {
+        let mut sub = vec![vec![false; m]; m];
+        for &(i, j) in pairs {
+            sub[i][j] = true;
+            sub[j][i] = true;
+        }
+        sub
+    }
+
+    /// The search the memoized trail replaced, kept here as the oracle.
+    /// Vertex reuse is allowed; each bond is used once. Graphs past eight
+    /// bonds are not asked: that search enumerates trails, and this oracle
+    /// exists to check the answer, not to time it.
+    fn trail_oracle(sub: &[Vec<bool>]) -> usize {
+        let m = sub.len();
+        let mut edges = Vec::new();
+        for i in 0..m {
+            for j in (i + 1)..m {
+                if sub[i][j] {
+                    edges.push((i, j));
+                }
+            }
+        }
+        assert!(edges.len() <= 8, "oracle is for short graphs");
+        let mut incident = vec![Vec::new(); m];
+        for (k, &(i, j)) in edges.iter().enumerate() {
+            incident[i].push((k, j));
+            incident[j].push((k, i));
+        }
+        let mut best = 0usize;
+        for start in 0..m {
+            let mut stack = vec![(start, 0u64, 0usize)];
+            while let Some((node, used, length)) = stack.pop() {
+                best = best.max(length);
+                for &(k, next) in &incident[node] {
+                    if (used >> k) & 1 == 0 {
+                        stack.push((next, used | (1 << k), length + 1));
+                    }
+                }
+            }
+        }
+        best
+    }
+
+    #[test]
+    fn the_longest_trail_matches_the_unmemoized_search() {
+        let five = adj(&[(0, 1), (1, 2), (2, 3), (3, 4), (4, 0)], 5);
+        assert_eq!(longest_trail(&five), 5, "a five-ring is a trail of five");
+        assert_eq!(trail_oracle(&five), 5);
+        // Two triangles joined at a point. A trail may pass the joint twice
+        // and use every bond; a simple path cannot.
+        let bow = adj(&[(0, 1), (1, 2), (2, 0), (0, 3), (3, 4), (4, 0)], 5);
+        assert_eq!(longest_trail(&bow), 6);
+        assert_eq!(trail_oracle(&bow), 6);
+        let mut drawn = 0u64;
+        for word in 0u32..256 {
+            let mut pairs = Vec::new();
+            let mut bit = 0usize;
+            for i in 0..5 {
+                for j in (i + 1)..5 {
+                    if word & (1 << bit) != 0 {
+                        pairs.push((i, j));
+                    }
+                    bit += 1;
+                }
+            }
+            if pairs.len() > 8 {
+                continue;
+            }
+            let sub = adj(&pairs, 5);
+            let got = longest_trail(&sub);
+            let expect = if pairs.is_empty() {
+                0
+            } else {
+                trail_oracle(&sub)
+            };
+            assert_eq!(got, expect, "pairs {pairs:?}");
+            drawn += 1;
+        }
+        assert!(drawn > 200, "sampled {drawn} graphs");
+        // Four common neighbours and two bonds: disjoint bonds are 421,
+        // bonds that share a point are 422.
+        let mut graph = vec![vec![false; 6]; 6];
+        for k in 2..6 {
+            graph[0][k] = true;
+            graph[k][0] = true;
+            graph[1][k] = true;
+            graph[k][1] = true;
+        }
+        graph[0][1] = true;
+        graph[1][0] = true;
+        graph[2][3] = true;
+        graph[3][2] = true;
+        graph[4][5] = true;
+        graph[5][4] = true;
+        assert_eq!(
+            named_class(&graph, 0, 1, &mut Vec::new()),
+            2,
+            "disjoint bonds are 421"
+        );
+        graph[4][5] = false;
+        graph[5][4] = false;
+        graph[3][4] = true;
+        graph[4][3] = true;
+        assert_eq!(
+            named_class(&graph, 0, 1, &mut Vec::new()),
+            3,
+            "a path of two bonds is 422"
+        );
+        // Twelve bonds, a path: the answer is the path, and the state search
+        // finishes. The cap still reports a thirteenth bond as zero.
+        let path: Vec<(usize, usize)> = (0..12).map(|i| (i, i + 1)).collect();
+        assert_eq!(longest_trail(&adj(&path, 13)), 12);
+        let mut over = path.clone();
+        over.push((0, 2));
+        assert_eq!(longest_trail(&adj(&over, 13)), 0);
+    }
+
+    #[test]
+    fn a_dense_twelve_bond_trail_stays_within_the_state_space() {
+        // Six points, every bond except three. Twelve bonds, degrees high
+        // enough that enumerating trails does not finish promptly. The
+        // answer cannot exceed the bond count.
+        let mut pairs = Vec::new();
+        for i in 0..6 {
+            for j in (i + 1)..6 {
+                pairs.push((i, j));
+            }
+        }
+        assert_eq!(pairs.len(), 15);
+        pairs.truncate(12);
+        let started = std::time::Instant::now();
+        let length = longest_trail(&adj(&pairs, 6));
+        let elapsed = started.elapsed();
+        assert!(length <= 12, "length {length}");
+        assert!(length >= 5, "length {length}");
+        assert!(
+            elapsed.as_millis() < 200,
+            "twelve-bond trail took {elapsed:?}"
         );
     }
 

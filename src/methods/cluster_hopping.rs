@@ -5398,16 +5398,15 @@ where
             best_seen = ledger.best;
             csm_reseed_stamp = hops;
         }
-        // Unlabelled clusters keep the icosahedral test alone. Counting
-        // common neighbours here would run on every hop of a labelled
-        // metal and was the Au38 slowdown: a fivefold pause of a few hops
-        // spent a reseed before the close-packed minimum.
-        let mono_ih = cfg.packing_cna_applies()
-            && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default());
+        // Unlabelled clusters keep the icosahedral test alone. It counts
+        // common neighbours, so it runs only when a reseed can fire.
+        // Counting on every hop was the Au38 slowdown, and with the
+        // reseed interval still ahead the result cannot change the branch.
         if csm_reseed_hops > 0
             && cfg.prior_reseed
             && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
-            && mono_ih
+            && cfg.packing_cna_applies()
+            && crate::soap::ih_dominated(x.view(), crate::soap::SoapSpec::default())
             && ledger.remaining() > 0
         {
             csm_reseed_stamp = hops;
