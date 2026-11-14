@@ -103,10 +103,71 @@ both arms at every budget, so the Fisher exact p is 1.000 throughout.
 
 Four times the budget does not reach the global minimum on either arm. Anneal's
 best holds at −915.7735 kJ/mol, 0.93 kJ/mol short of the −916.7074 header,
-from 2 M through 8 M: the same seed plateaus one hydrogen bond short and more
-calls from that incumbent do not complete the network. The median does climb,
+from 2 M through 8 M: the same seed plateaus in another oxygen cage with as
+many hydrogen bonds (next section), and more calls from that incumbent do not
+leave it. The median does climb,
 from −914.37 to −915.14, as the slower seeds reach that plateau. GMIN's best
 improves from −903.76 to −905.33 and then holds, 11.4 kJ/mol short. Anneal's
 per-seed best distribution stays below GMIN's at every budget, Mann–Whitney p
 3.2e-05, at a third of the wall. Lifting (H₂O)₂₁ is left to later work; the
 default preset is unchanged here.
+
+## (H₂O)₂₁ misses at 2 M
+Each of the twelve 2 M rows above is rerun with the panel's stop target and
+its final structure compared with the Cambridge minimum
+(`paper/jctc/data/system_visuals/ccd/TIP4P/xyz/TIP4P-21.xyz`). The oxygen
+framework is the O–O contact graph at 3.0 Å, which falls in the empty 2.9–3.1
+Å band of every structure here. The proton topology is the directed
+hydrogen-bond graph (H···O below 2.5 Å, O–H···O at least 130°). Both graphs
+are tested for isomorphism with the minimum's graphs. `o_rmsd_gm_a` is the
+oxygen RMSD after the optimal permutation, rotation and reflection. The rings
+are chordless cycles of the contact graph. The budget columns come from the
+search's own counters: `accepted` sums the arm accepts, `rejected` is hops
+minus accepted, and `quench_return/known/new` is the minima-hopping visit
+classification of every quench. Per-seed rows are `diag-h2o21.csv`.
+
+Every miss is an oxygen-framework miss. No seed's contact graph is isomorphic
+to the minimum's, so none is a proton isomer of the right cage. The twelve
+seeds end in eleven different frameworks: seeds 2000 and 2006 share one basin,
+F1. The plateau at −915.7735 (seed 2007, 0.934 kJ/mol short) has the same 37
+contacts and 37 hydrogen bonds as the minimum and the same coordination counts
+(11 three-, 9 four- and 1 five-coordinate). But its rings are 16/3/9 four-,
+five- and six-membered, against the minimum's 14/7/10, at 0.99 Å oxygen RMSD.
+That is a different cage, not a missing bond. The other seeds fall in two
+families. 2000, 2001, 2002, 2003, 2006 and 2009 are pentagon-rich with 34 to
+36 contacts. 2004, 2005, 2008, 2010 and 2011 are square-rich but arranged
+differently.
+
+A hop costs 105 to 184 calls, nearly all of them in its quench. Of those
+quenches, 61 to 87% fall back into the basin they started from, and only 20 to
+47 per run are new to the minima-hopping classifier. Most accepts are those
+returns: the translation, rotation and all-body kick arms show about 100%
+acceptance and almost never change the basin. Relocation, the one move that
+rewires the framework, is accepted on 0.5 to 4.4% of its draws. The Thompson
+allocator pays a rigid arm only for a new incumbent, so its draws stay near
+uniform. The best stops improving between 1% (seed 2007) and 90% (seed 2009)
+of the budget.
+
+General mechanisms tried against that, n = 12 at 2 M with the same stop target
+(`summary-h2o21-mechanisms.csv`):
+
+| Variant | (H₂O)₂₁ hits / median | (H₂O)₁₅ | (H₂O)₂₀ | (H₂O)₈ |
+| --- | --- | --- | --- | --- |
+| baseline | 0/12 / −914.368 | 7/12 / −628.371 | 6/12 / −868.867 | 12/12 |
+| fresh rigid restart at every stall | 0/12 / −914.123 | | | |
+| fresh rigid restart at every other stall | 0/12 / −914.552 | | | |
+| Metropolis temperature from basin-changing acceptance, factor cap 4 | 0/12 / −912.563 | | | |
+| the same, cap 24 at every size | 0/12 / −913.079 | | | |
+| arm reward for an accepted basin change | 1/12 / −911.748 | | | |
+| arm reward for an accepted downhill basin change | 1/12 / −914.117 | 6/12 / −626.124 | 3/12 / −863.852 | 12/12 |
+
+The restarts keep the bias and replace the stored-minimum stall escape with a
+fresh random rigid cluster. They change neither the hits nor the median beyond
+noise. Raising the Metropolis temperature only raises the return fraction and
+lowers the median. Paying the allocator for basin changes moves draws off the
+returning arms and reaches the minimum once in twelve seeds (2010 at 735,589
+calls, 2011 at 215,380 for the downhill form). That is the first anneal hit on
+(H₂O)₂₁. The downhill form loses one seed at (H₂O)₁₅ and three at (H₂O)₂₀, so
+no variant is made default. Baseline (H₂O)₈, ₁₅ and ₂₀ rows are the same arm
+run on f0dfa206; seeds 2000 at 15 and 2001 at 20 reproduce on 3141987e call
+for call.
