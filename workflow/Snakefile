@@ -94,6 +94,20 @@ rule sc_h2h_n12:
         """
 
 
+# Raw Sutton-Chen rows from the anneal binary. Finished seeds are kept.
+# Not part of `rule all`.
+#   snakemake -s workflow/Snakefile sc_search_rows
+rule sc_search_rows:
+    output:
+        "bench/metal-cluster-h2h/sc-restart/rows.csv",
+        "bench/metal-cluster-h2h/sc-pop/rows.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/metal_h2h/enter_sc_rows.sh restart pop
+        """
+
+
 # Medians of the whole-walk restart trials. Reads the twelve-seed anneal
 # rows and the restart runs; it does not launch a search. Not part of
 # `rule all`.
