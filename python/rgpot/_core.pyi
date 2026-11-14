@@ -58,6 +58,30 @@ class LJPot:
         One detached BatchEvaluator call. results[i] matches a serial call on inputs[i], bit for bit. n_threads 0 uses the hardware concurrency.
         """
 
+    def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
+        """
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        """
+
+    def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
+        """
+        (energy, forces, variance) at the geometry, from the centre that hvp() reuses. A search that needs the centre forces asks here so the forward products that follow make one force call each.
+        """
+
+    def invalidate_hvp(self) -> None:
+        """Drop the centre hvp() reuses."""
+
+    def hvp_counts(self) -> dict:
+        """
+        Products, force calls, centre reuses and analytic products of hvp() and hvp_centre() so far.
+        """
+
+    def reset_hvp_counts(self) -> None:
+        """Zero hvp_counts(). The centre stays."""
+
+    def has_analytic_hvp(self) -> bool:
+        """Whether hvp(scheme='auto') uses the kernel's own product."""
+
 class LJClusterPot:
     def __init__(self, u0: float = 1.0, cutoff: float = 15.0, psi: float = 1.0, switch_width: float = 0.0) -> None:
         """
@@ -79,6 +103,30 @@ class LJClusterPot:
         """
         One detached BatchEvaluator call. results[i] matches a serial call on inputs[i], bit for bit. n_threads 0 uses the hardware concurrency.
         """
+
+    def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
+        """
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        """
+
+    def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
+        """
+        (energy, forces, variance) at the geometry, from the centre that hvp() reuses. A search that needs the centre forces asks here so the forward products that follow make one force call each.
+        """
+
+    def invalidate_hvp(self) -> None:
+        """Drop the centre hvp() reuses."""
+
+    def hvp_counts(self) -> dict:
+        """
+        Products, force calls, centre reuses and analytic products of hvp() and hvp_centre() so far.
+        """
+
+    def reset_hvp_counts(self) -> None:
+        """Zero hvp_counts(). The centre stays."""
+
+    def has_analytic_hvp(self) -> bool:
+        """Whether hvp(scheme='auto') uses the kernel's own product."""
 
 class MorsePot:
     def __init__(self, De: float = 0.7102, a: float = 1.6047, re: float = 2.897, cutoff: float = 9.5, switch_width: float = 0.0) -> None:
@@ -102,6 +150,30 @@ class MorsePot:
         One detached BatchEvaluator call. results[i] matches a serial call on inputs[i], bit for bit. n_threads 0 uses the hardware concurrency.
         """
 
+    def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
+        """
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        """
+
+    def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
+        """
+        (energy, forces, variance) at the geometry, from the centre that hvp() reuses. A search that needs the centre forces asks here so the forward products that follow make one force call each.
+        """
+
+    def invalidate_hvp(self) -> None:
+        """Drop the centre hvp() reuses."""
+
+    def hvp_counts(self) -> dict:
+        """
+        Products, force calls, centre reuses and analytic products of hvp() and hvp_centre() so far.
+        """
+
+    def reset_hvp_counts(self) -> None:
+        """Zero hvp_counts(). The centre stays."""
+
+    def has_analytic_hvp(self) -> bool:
+        """Whether hvp(scheme='auto') uses the kernel's own product."""
+
 class SWPot:
     def __init__(self) -> None: ...
 
@@ -118,6 +190,30 @@ class SWPot:
         """
         One detached BatchEvaluator call. results[i] matches a serial call on inputs[i], bit for bit. n_threads 0 uses the hardware concurrency.
         """
+
+    def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
+        """
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        """
+
+    def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
+        """
+        (energy, forces, variance) at the geometry, from the centre that hvp() reuses. A search that needs the centre forces asks here so the forward products that follow make one force call each.
+        """
+
+    def invalidate_hvp(self) -> None:
+        """Drop the centre hvp() reuses."""
+
+    def hvp_counts(self) -> dict:
+        """
+        Products, force calls, centre reuses and analytic products of hvp() and hvp_centre() so far.
+        """
+
+    def reset_hvp_counts(self) -> None:
+        """Zero hvp_counts(). The centre stays."""
+
+    def has_analytic_hvp(self) -> bool:
+        """Whether hvp(scheme='auto') uses the kernel's own product."""
 
 class EDIPPot:
     def __init__(self) -> None: ...
@@ -136,6 +232,30 @@ class EDIPPot:
         One detached BatchEvaluator call. results[i] matches a serial call on inputs[i], bit for bit. n_threads 0 uses the hardware concurrency.
         """
 
+    def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
+        """
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        """
+
+    def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
+        """
+        (energy, forces, variance) at the geometry, from the centre that hvp() reuses. A search that needs the centre forces asks here so the forward products that follow make one force call each.
+        """
+
+    def invalidate_hvp(self) -> None:
+        """Drop the centre hvp() reuses."""
+
+    def hvp_counts(self) -> dict:
+        """
+        Products, force calls, centre reuses and analytic products of hvp() and hvp_centre() so far.
+        """
+
+    def reset_hvp_counts(self) -> None:
+        """Zero hvp_counts(). The centre stays."""
+
+    def has_analytic_hvp(self) -> bool:
+        """Whether hvp(scheme='auto') uses the kernel's own product."""
+
 class LenoskyPot:
     def __init__(self) -> None: ...
 
@@ -152,6 +272,30 @@ class LenoskyPot:
         """
         One detached BatchEvaluator call. results[i] matches a serial call on inputs[i], bit for bit. n_threads 0 uses the hardware concurrency.
         """
+
+    def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
+        """
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        """
+
+    def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
+        """
+        (energy, forces, variance) at the geometry, from the centre that hvp() reuses. A search that needs the centre forces asks here so the forward products that follow make one force call each.
+        """
+
+    def invalidate_hvp(self) -> None:
+        """Drop the centre hvp() reuses."""
+
+    def hvp_counts(self) -> dict:
+        """
+        Products, force calls, centre reuses and analytic products of hvp() and hvp_centre() so far.
+        """
+
+    def reset_hvp_counts(self) -> None:
+        """Zero hvp_counts(). The centre stays."""
+
+    def has_analytic_hvp(self) -> bool:
+        """Whether hvp(scheme='auto') uses the kernel's own product."""
 
 class TersoffPot:
     def __init__(self) -> None: ...
@@ -170,6 +314,30 @@ class TersoffPot:
         One detached BatchEvaluator call. results[i] matches a serial call on inputs[i], bit for bit. n_threads 0 uses the hardware concurrency.
         """
 
+    def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
+        """
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        """
+
+    def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
+        """
+        (energy, forces, variance) at the geometry, from the centre that hvp() reuses. A search that needs the centre forces asks here so the forward products that follow make one force call each.
+        """
+
+    def invalidate_hvp(self) -> None:
+        """Drop the centre hvp() reuses."""
+
+    def hvp_counts(self) -> dict:
+        """
+        Products, force calls, centre reuses and analytic products of hvp() and hvp_centre() so far.
+        """
+
+    def reset_hvp_counts(self) -> None:
+        """Zero hvp_counts(). The centre stays."""
+
+    def has_analytic_hvp(self) -> bool:
+        """Whether hvp(scheme='auto') uses the kernel's own product."""
+
 class EAMAlPot:
     def __init__(self) -> None: ...
 
@@ -186,6 +354,30 @@ class EAMAlPot:
         """
         One detached BatchEvaluator call. results[i] matches a serial call on inputs[i], bit for bit. n_threads 0 uses the hardware concurrency.
         """
+
+    def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
+        """
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        """
+
+    def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
+        """
+        (energy, forces, variance) at the geometry, from the centre that hvp() reuses. A search that needs the centre forces asks here so the forward products that follow make one force call each.
+        """
+
+    def invalidate_hvp(self) -> None:
+        """Drop the centre hvp() reuses."""
+
+    def hvp_counts(self) -> dict:
+        """
+        Products, force calls, centre reuses and analytic products of hvp() and hvp_centre() so far.
+        """
+
+    def reset_hvp_counts(self) -> None:
+        """Zero hvp_counts(). The centre stays."""
+
+    def has_analytic_hvp(self) -> bool:
+        """Whether hvp(scheme='auto') uses the kernel's own product."""
 
 class FeHePot:
     def __init__(self) -> None: ...
@@ -204,6 +396,30 @@ class FeHePot:
         One detached BatchEvaluator call. results[i] matches a serial call on inputs[i], bit for bit. n_threads 0 uses the hardware concurrency.
         """
 
+    def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
+        """
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        """
+
+    def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
+        """
+        (energy, forces, variance) at the geometry, from the centre that hvp() reuses. A search that needs the centre forces asks here so the forward products that follow make one force call each.
+        """
+
+    def invalidate_hvp(self) -> None:
+        """Drop the centre hvp() reuses."""
+
+    def hvp_counts(self) -> dict:
+        """
+        Products, force calls, centre reuses and analytic products of hvp() and hvp_centre() so far.
+        """
+
+    def reset_hvp_counts(self) -> None:
+        """Zero hvp_counts(). The centre stays."""
+
+    def has_analytic_hvp(self) -> bool:
+        """Whether hvp(scheme='auto') uses the kernel's own product."""
+
 class CuH2Pot:
     def __init__(self) -> None: ...
 
@@ -221,6 +437,30 @@ class CuH2Pot:
         One detached BatchEvaluator call. results[i] matches a serial call on inputs[i], bit for bit. n_threads 0 uses the hardware concurrency.
         """
 
+    def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
+        """
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        """
+
+    def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
+        """
+        (energy, forces, variance) at the geometry, from the centre that hvp() reuses. A search that needs the centre forces asks here so the forward products that follow make one force call each.
+        """
+
+    def invalidate_hvp(self) -> None:
+        """Drop the centre hvp() reuses."""
+
+    def hvp_counts(self) -> dict:
+        """
+        Products, force calls, centre reuses and analytic products of hvp() and hvp_centre() so far.
+        """
+
+    def reset_hvp_counts(self) -> None:
+        """Zero hvp_counts(). The centre stays."""
+
+    def has_analytic_hvp(self) -> bool:
+        """Whether hvp(scheme='auto') uses the kernel's own product."""
+
 class WaterHPot:
     def __init__(self) -> None: ...
 
@@ -237,6 +477,30 @@ class WaterHPot:
         """
         One detached BatchEvaluator call. results[i] matches a serial call on inputs[i], bit for bit. n_threads 0 uses the hardware concurrency.
         """
+
+    def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
+        """
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        """
+
+    def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
+        """
+        (energy, forces, variance) at the geometry, from the centre that hvp() reuses. A search that needs the centre forces asks here so the forward products that follow make one force call each.
+        """
+
+    def invalidate_hvp(self) -> None:
+        """Drop the centre hvp() reuses."""
+
+    def hvp_counts(self) -> dict:
+        """
+        Products, force calls, centre reuses and analytic products of hvp() and hvp_centre() so far.
+        """
+
+    def reset_hvp_counts(self) -> None:
+        """Zero hvp_counts(). The centre stays."""
+
+    def has_analytic_hvp(self) -> bool:
+        """Whether hvp(scheme='auto') uses the kernel's own product."""
 
 class StillingerWeberSi:
     def __init__(self) -> None:
@@ -294,6 +558,30 @@ class D3Pot:
         One detached BatchEvaluator call. results[i] matches a serial call on inputs[i], bit for bit. n_threads 0 uses the hardware concurrency.
         """
 
+    def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
+        """
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        """
+
+    def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
+        """
+        (energy, forces, variance) at the geometry, from the centre that hvp() reuses. A search that needs the centre forces asks here so the forward products that follow make one force call each.
+        """
+
+    def invalidate_hvp(self) -> None:
+        """Drop the centre hvp() reuses."""
+
+    def hvp_counts(self) -> dict:
+        """
+        Products, force calls, centre reuses and analytic products of hvp() and hvp_centre() so far.
+        """
+
+    def reset_hvp_counts(self) -> None:
+        """Zero hvp_counts(). The centre stays."""
+
+    def has_analytic_hvp(self) -> bool:
+        """Whether hvp(scheme='auto') uses the kernel's own product."""
+
 class D4Pot:
     def __init__(self, functional: str = 'pbe', charge: float = 0.0, atm: bool = True) -> None: ...
 
@@ -310,6 +598,30 @@ class D4Pot:
         """
         One detached BatchEvaluator call. results[i] matches a serial call on inputs[i], bit for bit. n_threads 0 uses the hardware concurrency.
         """
+
+    def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
+        """
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        """
+
+    def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
+        """
+        (energy, forces, variance) at the geometry, from the centre that hvp() reuses. A search that needs the centre forces asks here so the forward products that follow make one force call each.
+        """
+
+    def invalidate_hvp(self) -> None:
+        """Drop the centre hvp() reuses."""
+
+    def hvp_counts(self) -> dict:
+        """
+        Products, force calls, centre reuses and analytic products of hvp() and hvp_centre() so far.
+        """
+
+    def reset_hvp_counts(self) -> None:
+        """Zero hvp_counts(). The centre stays."""
+
+    def has_analytic_hvp(self) -> bool:
+        """Whether hvp(scheme='auto') uses the kernel's own product."""
 
 class ExprPot:
     def __init__(self, expression: str, terms: dict) -> None:
@@ -335,6 +647,30 @@ class ExprPot:
         """
         One detached BatchEvaluator call. results[i] matches a serial call on inputs[i], bit for bit. n_threads 0 uses the hardware concurrency.
         """
+
+    def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
+        """
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        """
+
+    def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
+        """
+        (energy, forces, variance) at the geometry, from the centre that hvp() reuses. A search that needs the centre forces asks here so the forward products that follow make one force call each.
+        """
+
+    def invalidate_hvp(self) -> None:
+        """Drop the centre hvp() reuses."""
+
+    def hvp_counts(self) -> dict:
+        """
+        Products, force calls, centre reuses and analytic products of hvp() and hvp_centre() so far.
+        """
+
+    def reset_hvp_counts(self) -> None:
+        """Zero hvp_counts(). The centre stays."""
+
+    def has_analytic_hvp(self) -> bool:
+        """Whether hvp(scheme='auto') uses the kernel's own product."""
 
 class IPIPot:
     def __init__(self, address: str, timeout_s: float = 30.0) -> None:

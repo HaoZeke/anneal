@@ -29,6 +29,7 @@
 
 #include "rgpot/BatchEvaluator.hpp"
 #include "rgpot/ForceStructs.hpp"
+#include "rgpot/HessianVector.hpp"
 #include "rgpot/Potential.hpp"
 #include "rgpot/pot_caps.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
@@ -208,16 +209,22 @@ struct FullResult {
   double stress[9]{};
 };
 
+/// The cell of @a g, row-major.
+inline std::array<double, 9> flat_box(const Geom &g) {
+  std::array<double, 9> flat{};
+  for (size_t i = 0; i < 3; ++i) {
+    for (size_t j = 0; j < 3; ++j) {
+      flat[i * 3 + j] = g.box[i][j];
+    }
+  }
+  return flat;
+}
+
 /// forceImpl while the caller is already detached (F4).
 template <typename Pot>
 FullResult run_force(Pot &pot, const Geom &g) {
   AtomMatrix forces = AtomMatrix::Zero(g.pos.rows(), 3);
-  double flat[9];
-  for (int i = 0; i < 3; ++i) {
-    for (int j = 0; j < 3; ++j) {
-      flat[i * 3 + j] = g.box[static_cast<size_t>(i)][static_cast<size_t>(j)];
-    }
-  }
+  const std::array<double, 9> flat = flat_box(g);
   ForceOut fo{.F = forces.data(),
               .energy = 0.0,
               .variance = 0.0,
@@ -226,7 +233,7 @@ FullResult run_force(Pot &pot, const Geom &g) {
   ForceInput in{.nAtoms = g.pos.rows(),
                 .pos = g.pos.data(),
                 .atmnrs = g.types.data(),
-                .box = flat};
+                .box = flat.data()};
   pot.forceImpl(in, &fo);
   if (!std::isfinite(fo.energy)) {
     throw rgbind::NumericalError("energy is not finite");
@@ -325,6 +332,10 @@ public:
 
   std::unique_ptr<Pot> make() const { return make_(); }
 
+  /// Centre and counters of hvp(). Every instance comes from one factory,
+  /// so a centre computed on one thread's instance serves the others.
+  HessianVectorCache &hvp() { return hvp_; }
+
 private:
   void clear() noexcept {
     std::lock_guard<std::mutex> lock(mu_);
@@ -338,7 +349,37 @@ private:
   bool shared_ = false;
   std::mutex mu_;
   std::unordered_map<std::thread::id, std::unique_ptr<Pot>> extra_;
+  HessianVectorCache hvp_;
 };
+
+inline HvpScheme parse_hvp_scheme(const std::string &name) {
+  if (name == "auto") {
+    return HvpScheme::Auto;
+  }
+  if (name == "forward") {
+    return HvpScheme::Forward;
+  }
+  if (name == "central") {
+    return HvpScheme::Central;
+  }
+  if (name == "analytic") {
+    return HvpScheme::Analytic;
+  }
+  const std::string msg = "scheme: expected 'auto', 'forward', 'central' or "
+                          "'analytic', got '" + name + "'";
+  throw nb::value_error(msg.c_str());
+}
+
+/// HessianVectorCache::apply or centre while the caller is detached (F4).
+/// A non-finite kernel value is a NumericalError, as for evaluate().
+template <typename Fn> auto detached_hvp(Fn &&fn) {
+  nb::gil_scoped_release release;
+  try {
+    return fn();
+  } catch (const std::domain_error &e) {
+    throw rgbind::NumericalError(e.what());
+  }
+}
 
 template <typename Pot>
 void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
@@ -439,6 +480,85 @@ void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
       "One detached BatchEvaluator call. results[i] matches a serial "
       "call on inputs[i], bit for bit. n_threads 0 uses the hardware "
       "concurrency.");
+  cls.def(
+      "hvp",
+      [](PotHolder<Pot> &self, const F64 &positions, nb::handle atom_types,
+         const F64 &box, const F64 &direction, double step,
+         const std::string &scheme) {
+        Geom geom = read_geom(positions, atom_types, box);
+        const size_t n = static_cast<size_t>(geom.pos.rows());
+        rgbind::check_f64_2d(direction, n, 3, "direction");
+        const HvpScheme parsed = parse_hvp_scheme(scheme);
+        std::vector<double> v(direction.data(), direction.data() + 3 * n);
+        AtomMatrix hv = AtomMatrix::Zero(geom.pos.rows(), 3);
+        detached_hvp([&] {
+          const std::array<double, 9> flat = flat_box(geom);
+          const ForceInput in{.nAtoms = n,
+                              .pos = geom.pos.data(),
+                              .atmnrs = geom.types.data(),
+                              .box = flat.data()};
+          self.hvp().apply(self.slot(), in, v.data(), hv.data(), step, parsed);
+          return 0;
+        });
+        return matrix_to_numpy(hv);
+      },
+      nb::arg("positions").noconvert(), nb::arg("atom_types"),
+      nb::arg("box").noconvert(), nb::arg("direction").noconvert(),
+      nb::arg("step") = 0.0, nb::arg("scheme") = "auto",
+      "Hessian-vector product H @ direction, shape (N, 3). 'forward' "
+      "reuses the forces of the last geometry this object evaluated, so k "
+      "products at one geometry cost k + 1 force calls; 'central' costs 2 "
+      "a product and is second order in step; 'analytic' uses the "
+      "kernel's own product; 'auto' is analytic where the kernel has one, "
+      "otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs "
+      "detached.");
+  cls.def(
+      "hvp_centre",
+      [](PotHolder<Pot> &self, const F64 &positions, nb::handle atom_types,
+         const F64 &box) {
+        Geom geom = read_geom(positions, atom_types, box);
+        const HvpCentre centre = detached_hvp([&] {
+          const std::array<double, 9> flat = flat_box(geom);
+          const ForceInput in{.nAtoms = static_cast<size_t>(geom.pos.rows()),
+                              .pos = geom.pos.data(),
+                              .atmnrs = geom.types.data(),
+                              .box = flat.data()};
+          return self.hvp().centre(self.slot(), in);
+        });
+        AtomMatrix forces(geom.pos.rows(), 3);
+        std::copy(centre.forces.begin(), centre.forces.end(), forces.data());
+        return nb::make_tuple(centre.energy, matrix_to_numpy(forces),
+                              centre.variance);
+      },
+      nb::arg("positions").noconvert(), nb::arg("atom_types"),
+      nb::arg("box").noconvert(),
+      "(energy, forces, variance) at the geometry, from the centre that "
+      "hvp() reuses. A search that needs the centre forces asks here so "
+      "the forward products that follow make one force call each.");
+  cls.def(
+      "invalidate_hvp",
+      [](PotHolder<Pot> &self) { self.hvp().invalidate(); },
+      "Drop the centre hvp() reuses.");
+  cls.def(
+      "hvp_counts",
+      [](PotHolder<Pot> &self) {
+        const HvpCounts c = self.hvp().counts();
+        nb::dict out;
+        out["products"] = c.products;
+        out["force_calls"] = c.forceCalls;
+        out["centre_reused"] = c.centreReused;
+        out["analytic"] = c.analytic;
+        return out;
+      },
+      "Products, force calls, centre reuses and analytic products of "
+      "hvp() and hvp_centre() so far.");
+  cls.def(
+      "reset_hvp_counts", [](PotHolder<Pot> &self) { self.hvp().resetCounts(); },
+      "Zero hvp_counts(). The centre stays.");
+  cls.def(
+      "has_analytic_hvp",
+      [](const PotHolder<Pot> &) { return AnalyticHessianVector<Pot>; },
+      "Whether hvp(scheme='auto') uses the kernel's own product.");
 }
 
 } // namespace rgpot::pybind
