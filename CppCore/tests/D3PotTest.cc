@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <regex>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -135,7 +136,7 @@ CapiDisp capi_d3_bj_pbe(const Octamer &g, bool atm, bool pass_sigma) {
   return out;
 }
 
-TEST_CASE("D3Pot is a Potential with no PotentialConfig.d3 arm",
+TEST_CASE("D3Pot is a Potential and PotentialConfig.d3 keeps its defaults",
           "[d3][schema]") {
   STATIC_REQUIRE(
       std::is_base_of_v<rgpot::Potential<rgpot::D3Pot>, rgpot::D3Pot>);
@@ -143,8 +144,22 @@ TEST_CASE("D3Pot is a Potential with no PotentialConfig.d3 arm",
   REQUIRE(in);
   const std::string schema((std::istreambuf_iterator<char>(in)),
                            std::istreambuf_iterator<char>());
-  REQUIRE(schema.find("d3 @") == std::string::npos);
-  REQUIRE(schema.find("d4 @") == std::string::npos);
+  // Upstream aligns the arm columns, so match any run of blanks.
+  REQUIRE(std::regex_search(schema, std::regex(R"(\bd3\s+@12\s*:D3Params;)")));
+  const auto begin = schema.find("struct D3Params {");
+  REQUIRE(begin != std::string::npos);
+  const std::string params =
+      schema.substr(begin, schema.find('}', begin) - begin);
+  const rgpot::D3Config defaults;
+  REQUIRE(defaults.functional == "pbe");
+  REQUIRE(std::regex_search(
+      params, std::regex(R"(functional\s+@0\s*:Text\s*=\s*"pbe";)")));
+  REQUIRE(defaults.damping == rgpot::D3Damping::BJ);
+  REQUIRE(std::regex_search(params,
+                            std::regex(R"(damping\s+@1\s*:Text\s*=\s*"bj";)")));
+  REQUIRE(defaults.atm);
+  REQUIRE(
+      std::regex_search(params, std::regex(R"(atm\s+@2\s*:Bool\s*=\s*true;)")));
 }
 
 TEST_CASE("D3Pot default is BJ PBE with ATM on", "[d3][config]") {

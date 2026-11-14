@@ -13,6 +13,7 @@
 #include <cmath>
 #include <fstream>
 #include <iterator>
+#include <regex>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -42,7 +43,7 @@ static void fill_water(AtomMatrix &positions, std::vector<int> &atmtypes,
   box = {{{100.0, 0.0, 0.0}, {0.0, 100.0, 0.0}, {0.0, 0.0, 100.0}}};
 }
 
-TEST_CASE("D4Pot is a Potential with no PotentialConfig.d4 arm",
+TEST_CASE("D4Pot is a Potential and PotentialConfig.d4 keeps its defaults",
           "[d4][schema]") {
   STATIC_REQUIRE(
       std::is_base_of_v<rgpot::Potential<rgpot::D4Pot>, rgpot::D4Pot>);
@@ -50,8 +51,22 @@ TEST_CASE("D4Pot is a Potential with no PotentialConfig.d4 arm",
   REQUIRE(in);
   const std::string schema((std::istreambuf_iterator<char>(in)),
                            std::istreambuf_iterator<char>());
-  REQUIRE(schema.find("d3 @") == std::string::npos);
-  REQUIRE(schema.find("d4 @") == std::string::npos);
+  // Upstream aligns the arm columns, so match any run of blanks.
+  REQUIRE(std::regex_search(schema, std::regex(R"(\bd4\s+@13\s*:D4Params;)")));
+  const auto begin = schema.find("struct D4Params {");
+  REQUIRE(begin != std::string::npos);
+  const std::string params =
+      schema.substr(begin, schema.find('}', begin) - begin);
+  const rgpot::D4Config defaults;
+  REQUIRE(defaults.functional == "pbe");
+  REQUIRE(std::regex_search(
+      params, std::regex(R"(functional\s+@0\s*:Text\s*=\s*"pbe";)")));
+  REQUIRE(defaults.charge == 0.0);
+  REQUIRE(std::regex_search(
+      params, std::regex(R"(charge\s+@1\s*:Float64\s*=\s*0\.0;)")));
+  REQUIRE(defaults.atm);
+  REQUIRE(
+      std::regex_search(params, std::regex(R"(atm\s+@2\s*:Bool\s*=\s*true;)")));
 }
 
 TEST_CASE("D4Pot default is PBE charge 0 with ATM on", "[d4][config]") {

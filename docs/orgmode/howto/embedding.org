@@ -49,8 +49,8 @@ Enable only what the host project needs:
 |--------------+----------+---------|
 | =-Dwith_xtb=true= | =xtbbld= / =tbbld= | =XTBPot= (GFNFF, GFN0/1/2-xTB) |
 | =-Dwith_tblite=true= | =tblitebld= / =tbbld= | =TBLitePot= (GFN1, GFN2, IPEA1) |
-| =-Dwith_dftd3=true= | =dftd3= / =dftd= | =D3Pot= in-process Potential summand (DFT-D3 BJ/zero, explicit ATM; no =PotentialConfig.d3=; goldens =meson test --suite dftd=) |
-| =-Dwith_dftd4=true= | =dftd4= / =dftd= | =D4Pot= in-process Potential summand (DFT-D4 functional/charge, explicit ATM; no =PotentialConfig.d4=; goldens =meson test --suite dftd=) |
+| =-Dwith_dftd3=true= | =dftd3= / =dftd= | =D3Pot= in-process Potential summand (DFT-D3 BJ/zero, explicit ATM; =PotentialConfig.d3= is not applied and every =potserv= backend refuses it; goldens =meson test --suite dftd=) |
+| =-Dwith_dftd4=true= | =dftd4= / =dftd= | =D4Pot= in-process Potential summand (DFT-D4 functional/charge, explicit ATM; =PotentialConfig.d4= is not applied and every =potserv= backend refuses it; goldens =meson test --suite dftd=) |
 | =-Dwith_expr=true= | none (vendored OpenMM Lepton; no pixi muparser) | =ExprPot= named-child PES algebra (=potserv= refuses =PotentialConfig.expr=) |
 | =-Dwith_metatomic=true= | =metatomicbld= (linux-64) | =MetatomicPot= (TorchScript models) |
 

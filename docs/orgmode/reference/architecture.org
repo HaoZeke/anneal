@@ -237,8 +237,11 @@ Lighter weight than xtb but fewer methods.
 an explicit =atm= flag for the Axilrod-Teller-Muto E(3) term (default on).
 In-process =Potential= summand: construct it and evaluate =ForceInput= to
 energy+forces.
-Not an XC kernel and not a =PotentialConfig= arm.
-There is no =PotentialConfig.d3=.
+Not an XC kernel.
+The schema has =PotentialConfig.d3= @12, and its =D3Params= mirror =D3Config=.
+Nothing applies that arm yet.
+The =potserv= =D3= backend runs the default =D3Config=.
+=configure()= refuses the =d3= arm by name on every =potserv= backend.
 A DFT host adds this as the Edisp summand next to XcKernel and VV10; do not fold
 D3 into the kernel.
 
@@ -250,8 +253,11 @@ D3 into the kernel.
 Charge scaling stays inside dftd4.
 In-process =Potential= summand: construct it and evaluate =ForceInput= to
 energy+forces.
-Not an XC kernel and not a =PotentialConfig= arm.
-There is no =PotentialConfig.d4=.
+Not an XC kernel.
+The schema has =PotentialConfig.d4= @13, and its =D4Params= mirror =D4Config=.
+Nothing applies that arm yet.
+The =potserv= =D4= backend runs the default =D4Config=.
+=configure()= refuses the =d4= arm by name on every =potserv= backend.
 A DFT host adds this as the Edisp summand next to XcKernel and VV10; do not fold
 D4 into the kernel.
 

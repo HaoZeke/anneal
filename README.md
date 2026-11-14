@@ -26,7 +26,11 @@ conda-forge `libxc` package via `pixi install -e xckernel`.
 
 `D3Pot` and `D4Pot` (meson `-Dwith_dftd3` / `-Dwith_dftd4`) are in-process
 `Potential` summands: construct them and evaluate `ForceInput` to energy and
-forces. There is no `PotentialConfig.d3` or `PotentialConfig.d4` arm.
+forces.
+The schema has `PotentialConfig.d3` @12 and `PotentialConfig.d4` @13 arms.
+Nothing applies them yet.
+The `potserv` `D3` and `D4` backends run the default configuration.
+`configure()` refuses both arms by name on every `potserv` backend.
 A DFT host sums XcKernel + VV10 + D4 itself; dispersion is not folded into
 the XC kernel.
 
@@ -174,13 +178,13 @@ RPC client types:
 <tr>
 <td class="org-left"><code>D3Pot</code></td>
 <td class="org-left"><code>D3</code></td>
-<td class="org-left">In-process Potential summand. Enable with <code>-Dwith_dftd3=true</code>; use pixi env <code>dftd3</code> or <code>dftd</code>. BJ/zero damping, functional key, explicit ATM flag. No <code>PotentialConfig.d3</code>. Goldens: <code>meson test --suite dftd</code></td>
+<td class="org-left">In-process Potential summand. Enable with <code>-Dwith_dftd3=true</code>; use pixi env <code>dftd3</code> or <code>dftd</code>. BJ/zero damping, functional key, explicit ATM flag. <code>PotentialConfig.d3</code> is not applied; every <code>potserv</code> backend refuses it. Goldens: <code>meson test --suite dftd</code></td>
 </tr>
 
 <tr>
 <td class="org-left"><code>D4Pot</code></td>
 <td class="org-left"><code>D4</code></td>
-<td class="org-left">In-process Potential summand. Enable with <code>-Dwith_dftd4=true</code>; use pixi env <code>dftd4</code> or <code>dftd</code>. Functional key, charge, explicit ATM/many-body flag. No <code>PotentialConfig.d4</code>. Goldens: <code>meson test --suite dftd</code></td>
+<td class="org-left">In-process Potential summand. Enable with <code>-Dwith_dftd4=true</code>; use pixi env <code>dftd4</code> or <code>dftd</code>. Functional key, charge, explicit ATM/many-body flag. <code>PotentialConfig.d4</code> is not applied; every <code>potserv</code> backend refuses it. Goldens: <code>meson test --suite dftd</code></td>
 </tr>
 
 <tr>

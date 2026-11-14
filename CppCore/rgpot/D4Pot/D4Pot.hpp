@@ -32,9 +32,12 @@ struct D4Config {
  * Grimme DFT-D4 dispersion via the dftd4 ISO C API (``dftd4.h``).
  *
  * In-process Potential summand: ForceInput in, energy+forces out. Do not
- * fold this into XcKernel::contract or applyFxc. No PotentialConfig.d4
- * arm until a DFT host sums XcKernel + VV10 + D4 on the wire
- * (rgpot-8mse; rgpot-uw9w / rgpot-eipa add this as Edisp from rgpot-2ftk).
+ * fold this into XcKernel::contract or applyFxc. The schema carries
+ * PotentialConfig.d4 @13, whose D4Params mirror D4Config, but nothing
+ * applies it: potserv's D4 backend runs the default D4Config, and
+ * configure() refuses the d4 arm on every backend. Wiring it waits on a DFT
+ * host summing XcKernel + VV10 + D4 on the wire (rgpot-8mse; rgpot-uw9w /
+ * rgpot-eipa add this as Edisp from rgpot-2ftk).
  *
  * Each instance owns ``dftd4_error`` / ``dftd4_structure`` / ``dftd4_model``
  * / ``dftd4_param`` handles. First force builds the structure and model;
