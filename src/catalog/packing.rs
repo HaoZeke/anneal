@@ -1384,6 +1384,8 @@ pub const FIVEFOLD_TEMPLATE_CUTOFF: f64 = 1.6;
 /// and the icosahedral template share is strictly below the floor's share.
 /// A DECAF gap and an energy doorway are not inputs.
 pub fn fivefold_channel(energy: f64, floor_energy: f64, ico_share: f64, floor_share: f64) -> bool {
+    #[cfg(test)]
+    crate::structure_probe::note("catalog::fivefold_channel");
     energy.is_finite()
         && floor_energy.is_finite()
         && ico_share.is_finite()
@@ -1394,6 +1396,8 @@ pub fn fivefold_channel(energy: f64, floor_energy: f64, ico_share: f64, floor_sh
 
 /// Icosahedral template share of one structure.
 pub fn icosahedral_share(x: ArrayView1<f64>) -> f64 {
+    #[cfg(test)]
+    crate::structure_probe::note("catalog::icosahedral_share");
     let n = x.len() / 3;
     if n == 0 || x.len() != 3 * n {
         return f64::NAN;

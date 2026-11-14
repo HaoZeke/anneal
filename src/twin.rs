@@ -331,6 +331,8 @@ pub fn twin(x: ArrayView1<f64>, n: usize, plane: &Plane, mode: Mode, layer: f64)
 /// by half a spacing along the edge. Both directions and both signs are
 /// returned. Nothing here depends on how many atoms the cluster has.
 pub fn dominant_layer_slides(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
+    #[cfg(test)]
+    crate::structure_probe::note("twin::dominant_layer_slides");
     isolated_layer_slides(x, true)
 }
 
@@ -341,6 +343,8 @@ pub fn dominant_layer_slides(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
 /// the edge slide has to finish. Callers that have not just opened a fault
 /// use [`dominant_layer_slides`], which stays quiet when the faces tie.
 pub fn most_isolated_layer_slides(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
+    #[cfg(test)]
+    crate::structure_probe::note("twin::most_isolated_layer_slides");
     isolated_layer_slides(x, false)
 }
 
@@ -527,6 +531,8 @@ fn isolated_layer_slides(x: ArrayView1<f64>, require_dominant: bool) -> Vec<Arra
 /// empty unless one sheet is an order of magnitude more isolated than the
 /// next, so a tie and a near-tie produce nothing.
 pub fn stacking_fault_slips(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
+    #[cfg(test)]
+    crate::structure_probe::note("twin::stacking_fault_slips");
     let n = x.len() / 3;
     if n < 8 {
         return Vec::new();
