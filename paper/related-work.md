@@ -846,3 +846,11 @@ Pitfield is an author of the active delta-learning search already filed as `pitf
 
 Cite `taylorRaffle2025`.
 
+## 2026-11-14 — OCCat searches global minima of cluster catalysts
+
+Wang, Xu, and Cheng, Journal of Computational Chemistry 47, e70583 (13 November 2026), doi:10.1002/jcc.70583, release OCCat. The record gives issue 30 and no page numbers. The abstract says the package searches the global minimum of nanoalloy and oxide clusters and then scores catalytic properties in the same workflow. The search is a revised particle swarm optimisation with a centered binary adjustment that keeps interatomic distances inside a constraint. The potentials it names are Lennard-Jones, Gupta, VASP density-functional calculations, and a LASP neural-network potential. The abstract says the benchmarks are Lennard-Jones clusters, transition-metal systems at the Gupta and density-functional levels, and oxidized silver at the neural-network potential, and that those benchmarks support the structures and the efficiency. It gives no size, no energy, and no hit rate. A later analyzer scores adsorption from a generalized coordination number and a turnover frequency from a microkinetic model. That score is not a basin-hopping hit rate. The demonstrations it names are CO oxidation, hydrogen evolution, and oxygen reduction on sub-nanometer clusters.
+
+The manuscript sizes 38, 55, 75, 98, and 104 are not named. The release repository ships a Lennard-Jones example directory named LJ21. That name is not a reported hit rate, and 21 atoms is outside those sizes. The abstract does not quote a Cambridge energy, so it does not contradict the hit targets, 121 of 192, or 97 of 192. OCCat is not ASE, AGOX, or GMIN, so it does not fill that open kit. It is a cluster global-optimisation code whose abstract already benchmarks Lennard-Jones clusters and Gupta metal clusters. The manuscript has no OCCat arm. A head-to-head is those benchmarks, at one shared potential and one relaxation budget. Because the abstract does not name the sealed sizes, that comparison is not yet the sealed maps, and it is not the CREST hexamer table. No bibliographic entry for the repository: it has no verified DOI or arXiv id.
+
+Cite `wangOccat2026`.
+
