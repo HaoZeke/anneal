@@ -80,6 +80,21 @@ impl StallArchive {
         }
     }
 
+    /// Lowest distinct minima, lowest energy first.
+    pub fn stored(&self) -> Vec<(f64, Array1<f64>)> {
+        let mut rows: Vec<(f64, Array1<f64>)> = self
+            .seats
+            .iter()
+            .map(|seat| (seat.energy, seat.state.clone()))
+            .collect();
+        rows.sort_by(|left, right| {
+            left.0
+                .partial_cmp(&right.0)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        rows
+    }
+
     /// Keep `state` when `state` is a new distinct minimum among the lowest,
     /// or a lower copy of a kept minimum.
     pub fn offer(&mut self, energy: f64, state: ArrayView1<f64>) {

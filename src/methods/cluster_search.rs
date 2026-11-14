@@ -19,6 +19,7 @@ use crate::methods::bond_preconditioner::BondPreconditioner;
 use crate::methods::cluster_hopping::OVERLAP_CALL_LIMIT;
 #[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
+use crate::methods::cluster_hopping::declared_group_lost_a_bond;
 use crate::methods::cluster_hopping::inside_molecular_call_wall;
 use crate::methods::cluster_hopping::min_pair_distance;
 use crate::methods::cluster_hopping::molecular_call_floor;
@@ -449,6 +450,24 @@ impl<'a> CallWall<'a> {
         }
     }
 
+    /// A declared group whose atoms no longer share a bond.
+    ///
+    /// The potential is not asked to converge a charge on a bare atom.
+    /// A reactive library breaks bonds on purpose, so it is not refused
+    /// here. No finite stand-in is returned: that is what the line search
+    /// zooms on. A call that was made and failed is closed by
+    /// [`charge_rejecting_repeat_failure`].
+    fn lost_a_bond(&self, point: ArrayView1<f64>) -> bool {
+        match self {
+            Self::Covalent {
+                species,
+                groups,
+                reactive: false,
+            } => declared_group_lost_a_bond(point, species, Some(groups), 1.25),
+            _ => false,
+        }
+    }
+
     /// Whether `point` is not handed to the potential.
     ///
     /// A non-finite coordinate is refused as well: the potential has no
@@ -501,6 +520,14 @@ where
         stats.overlap_rejected += 1;
         return overlap_rejection_step(point, anchor.as_ref(), wall)
             .map(|(energy, gradient)| (energy, gradient, false));
+    }
+    // A broken monomer is not a call. A finite stand-in here is what makes
+    // the line search zoom, which is the failure the stall already refuses
+    // to retry. Returning no step leaves that closer as the only one, and
+    // it applies when a call was actually made.
+    if refuse_overlap && wall.lost_a_bond(point) {
+        stats.overlap_rejected += 1;
+        return None;
     }
     if !led.charge() {
         return None;
@@ -570,6 +597,8 @@ where
         failed.closed = true;
         return None;
     }
+    // A compressed contact never called the potential, so the line search
+    // may still walk off it. A lost bond already returned no step.
     let overlap = refuse_overlap && wall.refuses(point);
     let answered =
         charge_or_refuse_overlap(objective, led, stats, point, anchor, refuse_overlap, wall)?;
@@ -986,7 +1015,7 @@ where
                        energy: f64,
                        point: ArrayView1<f64>|
          -> Option<Array1<f64>> {
-            if refuse_overlap && wall.refuses(point) {
+            if refuse_overlap && (wall.refuses(point) || wall.lost_a_bond(point)) {
                 stats.overlap_rejected += 1;
                 return None;
             }
@@ -1112,11 +1141,16 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     let mut stats = RelaxStats::default();
+    let reserve = molecular_answer_reserve(cfg, ledger);
+    if reserve > 0 {
+        ledger.keep_answer_seats(crate::methods::stall_archive::SEATS);
+        ledger.hold_tail(reserve);
+    }
 
     // Split deliberately: the relaxation needs the optimizer mutably, the
     // gradient needs only the objective. Sharing the objective by reference is
     // what lets both closures exist at once.
-    let out = {
+    let searched = {
         let paid = PaidCheck::default();
         let mut relax = warm_relax(objective, cfg, &mut stats, seed, &paid);
         let mut grad = gated_grad(objective, &paid);
@@ -1145,8 +1179,15 @@ where
             Some(&mut grad),
             Some(&mut energy_grad),
             seed,
-        )?
+        )
     };
+    if reserve > 0 {
+        ledger.release_tail();
+    }
+    let mut out = searched?;
+    if reserve > 0 {
+        finish_molecular_answers(objective, cfg, ledger, &mut stats, &mut out);
+    }
     Ok((out, stats))
 }
 
@@ -1187,8 +1228,13 @@ where
     let flexible = cfg.with_flexible_molecules(start);
     let cfg = flexible.as_ref().unwrap_or(cfg);
     let mut stats = RelaxStats::default();
+    let reserve = molecular_answer_reserve(cfg, ledger);
+    if reserve > 0 {
+        ledger.keep_answer_seats(crate::methods::stall_archive::SEATS);
+        ledger.hold_tail(reserve);
+    }
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-    let out = {
+    let searched = {
         let paid = PaidCheck::default();
         let mut relax = warm_relax(objective, cfg, &mut stats, seed, &paid);
         let mut grad = gated_grad(objective, &paid);
@@ -1209,9 +1255,121 @@ where
             Some(&mut grad),
             Some(&mut energy_grad),
             &mut rng,
-        )?
+        )
     };
+    if reserve > 0 {
+        ledger.release_tail();
+    }
+    let mut out = searched?;
+    if reserve > 0 {
+        finish_molecular_answers(objective, cfg, ledger, &mut stats, &mut out);
+    }
     Ok((out, stats))
+}
+
+/// Calls kept back from a molecular hop for the final polish.
+///
+/// A quench that stops at the record gradient can sit above its own minimum
+/// by more than the gap to another rotamer, so the lowest loose energy is
+/// not always the lowest minimum. The stall archive already keeps
+/// [`crate::methods::stall_archive::SEATS`] distinct minima. At most a
+/// quarter of the ledger is held so each seat can take a real quench.
+/// A shallower split adopted a half-relaxed geometry. Species-free
+/// searches reserve nothing, so their call sequence is unchanged.
+fn molecular_answer_reserve(cfg: &Config, ledger: &Ledger) -> usize {
+    if !cfg.move_library.is_molecular() || ledger.remaining() < 4 {
+        return 0;
+    }
+    let seats = crate::methods::stall_archive::SEATS;
+    seats
+        .saturating_mul(cfg.relax_steps)
+        .min(ledger.remaining() / 4)
+}
+
+/// Tighten every recorded seat and keep the lowest stationary energy.
+fn finish_molecular_answers<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    stats: &mut RelaxStats,
+    outcome: &mut Outcome,
+) where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let seats = ledger.answer_seats();
+    if seats.is_empty() || ledger.remaining() == 0 {
+        return;
+    }
+    let tolerance = crate::catalog::molecular::component_gradient_tolerance(cfg.n_points * 3)
+        .unwrap_or(cfg.record_gradient);
+    let each = (ledger.remaining() / seats.len()).max(1);
+    let before = ledger.spent();
+    let mut best_energy = outcome.best;
+    let mut best_state = outcome.best_state.clone();
+    let wall = CallWall::of(cfg);
+    for (_loose, state) in seats {
+        if ledger.remaining() == 0 {
+            break;
+        }
+        let steps = each.min(ledger.remaining());
+        if let Some((energy, polished)) = polish_answer_walled(
+            objective,
+            ledger,
+            stats,
+            state.view(),
+            tolerance,
+            steps,
+            wall,
+        ) && energy < best_energy
+            && polished.iter().all(|value| value.is_finite())
+        {
+            best_energy = energy;
+            best_state = Some(polished);
+        }
+    }
+    ledger.set_answer_polish_calls(ledger.spent().saturating_sub(before));
+    if best_energy < outcome.best
+        && let Some(state) = best_state
+    {
+        outcome.best = best_energy;
+        outcome.best_state = Some(state);
+    }
+    outcome.charged = ledger.spent();
+}
+
+/// [`polish_answer`] that refuses a compressed contact before the potential.
+fn polish_answer_walled<O>(
+    objective: &O,
+    ledger: &mut Ledger,
+    stats: &mut RelaxStats,
+    start: ArrayView1<f64>,
+    tolerance: f64,
+    max_iter: usize,
+    wall: CallWall<'_>,
+) -> Option<(f64, Array1<f64>)>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let mut opt = WarmLbfgs::default();
+    opt.gtol = tolerance;
+    let mut anchor = None;
+    let mut failure = None;
+    let mut evaluated = false;
+    let (energy, state, _) = opt.minimize(start, max_iter, |point| {
+        let answered = charge_rejecting_repeat_failure(
+            objective,
+            ledger,
+            stats,
+            point,
+            &mut anchor,
+            true,
+            wall,
+            &mut failure,
+        )?;
+        evaluated = true;
+        Some((answered.0, answered.1))
+    });
+    (evaluated && energy.is_finite()).then_some((energy, state))
 }
 
 /// Relaxes a reported answer until every gradient component is below
@@ -2173,6 +2331,19 @@ mod tests {
     use super::*;
     use crate::potentials::PairPotential;
     use ndarray::Array1;
+
+    #[test]
+    fn a_molecular_polish_reserves_at_most_a_quarter_and_a_free_search_reserves_none() {
+        let free = Config::recommended(13);
+        let free_ledger = Ledger::new(4_000);
+        assert_eq!(molecular_answer_reserve(&free, &free_ledger), 0);
+        let molecular = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
+        let ledger = Ledger::new(4_000);
+        let reserve = molecular_answer_reserve(&molecular, &ledger);
+        let capped = crate::methods::stall_archive::SEATS * molecular.relax_steps;
+        assert_eq!(reserve, capped.min(1_000));
+        assert!(reserve <= 4_000 / 4);
+    }
 
     #[test]
     fn convergence_uses_the_configured_recording_threshold() {

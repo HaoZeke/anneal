@@ -36,7 +36,7 @@ use anneal_core::catalog::molecular::{
 };
 use anneal_core::methods::cluster_hopping::Outcome;
 use anneal_core::methods::cluster_hopping::{Config, Ledger, MoveLibrary, repack_rigid_groups};
-use anneal_core::methods::cluster_search::{RelaxStats, polish_answer, search_from};
+use anneal_core::methods::cluster_search::{RelaxStats, search_from};
 use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use eindir_core::{Bounds, Objective};
 use ndarray::{Array1, ArrayView1};
@@ -477,42 +477,28 @@ fn main() {
         (energy, values)
     });
 
-    // The answer polish is paid from the same budget as the search, so the
-    // total stays at `budget`. One quench's iteration cap is set aside.
-    let search_budget = budget.saturating_sub(cfg.relax_steps).max(budget / 2);
+    // The search keeps at most a quarter of this budget to tighten the best
+    // few recorded minima. Passing the whole budget avoids reserving twice.
     let tolerance = component_gradient_tolerance(3 * atmnrs.len()).expect("polish tolerance");
-    let mut ledger = Ledger::new(search_budget);
+    let mut ledger = Ledger::new(budget);
     let wall = Instant::now();
-    let mut searched = search_from(&objective, &cfg, &mut ledger, start.view(), seed);
-    let mut polish = Ledger::new(budget - ledger.spent());
-    let mut polished_from = f64::NAN;
-    if let Ok((outcome, _)) = searched.as_mut()
-        && let Some(state) = outcome.best_state.as_ref()
-        && let Some((energy, x)) = polish_answer(
-            &objective,
-            &mut polish,
-            state.view(),
-            tolerance,
-            cfg.relax_steps,
-        )
-        && energy < outcome.best
-        && x.as_slice()
-            .is_some_and(|coords| monomers_intact(coords, m).unwrap_or(false))
-    {
-        polished_from = outcome.best;
-        outcome.best = energy;
-        outcome.best_state = Some(x);
-    }
+    let searched = search_from(&objective, &cfg, &mut ledger, start.view(), seed);
+    let polished_from = ledger
+        .answer_seats()
+        .first()
+        .map(|(energy, _)| *energy)
+        .unwrap_or(f64::NAN);
+    let polish_calls = ledger.answer_polish_calls();
     let wall_s = wall.elapsed().as_secs_f64();
-    let spent = ledger.spent() + polish.spent();
+    let spent = ledger.spent();
     let potential_s = POTENTIAL_NS.load(Ordering::Relaxed) as f64 / 1e9;
     let outside_s = (wall_s - potential_s).max(0.0);
     writeln!(meta, "wall_s: {wall_s:.6}").ok();
     writeln!(meta, "potential_s: {potential_s:.6}").ok();
     writeln!(meta, "outside_s: {outside_s:.6}").ok();
     writeln!(meta, "energy_calls: {spent}").ok();
-    writeln!(meta, "search_calls: {}", ledger.spent()).ok();
-    writeln!(meta, "polish_calls: {}", polish.spent()).ok();
+    writeln!(meta, "search_calls: {}", spent.saturating_sub(polish_calls)).ok();
+    writeln!(meta, "polish_calls: {polish_calls}").ok();
     writeln!(meta, "polish_component_tolerance_eV_per_A: {tolerance:.6e}").ok();
     writeln!(meta, "polished_from_eV: {polished_from:.10}").ok();
     writeln!(meta, "scc_rejected: {}", rgpot_eindir::scc_rejected_count()).ok();

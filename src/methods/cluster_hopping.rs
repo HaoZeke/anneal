@@ -600,6 +600,14 @@ pub struct Ledger {
     dump_disabled: bool,
     /// Byte offset of the acceptance mark on the line just written.
     dump_accept_at: Option<u64>,
+    /// Distinct recorded minima kept for a final tight polish. Zero leaves
+    /// [`Ledger::record`] on the path it had before the archive existed.
+    answer_limit: usize,
+    answers: crate::methods::stall_archive::StallArchive,
+    /// Calls the final polish charged after the hop returned.
+    answer_polish_calls: usize,
+    /// Calls hidden from the hop by [`Ledger::hold_tail`].
+    held_tail: usize,
 }
 
 struct DiagnosticQuench<'a> {
@@ -645,7 +653,56 @@ impl Ledger {
             dump_file: None,
             dump_disabled: false,
             dump_accept_at: None,
+            answer_limit: 0,
+            answers: crate::methods::stall_archive::StallArchive::default(),
+            answer_polish_calls: 0,
+            held_tail: 0,
         }
+    }
+
+    /// Keep up to `seats` distinct recorded minima for a later tight polish.
+    ///
+    /// The hop still ranks on the loose quench. The seats are the geometries
+    /// that polish is allowed to reorder. Zero seats leaves recording unchanged.
+    pub fn keep_answer_seats(&mut self, seats: usize) {
+        self.answer_limit = seats;
+        if seats > 0 {
+            self.answers = crate::methods::stall_archive::StallArchive::new(
+                seats,
+                crate::methods::stall_archive::MEMORY,
+            );
+        }
+    }
+
+    /// Lowest distinct recorded minima, lowest loose energy first.
+    pub fn answer_seats(&self) -> Vec<(f64, Array1<f64>)> {
+        self.answers.stored()
+    }
+
+    /// Hide `reserve` calls from the hop so a final polish can spend them.
+    ///
+    /// [`Ledger::release_tail`] puts them back. A reserve larger than the
+    /// room left is cut to that room.
+    pub fn hold_tail(&mut self, reserve: usize) {
+        let room = self.budget.saturating_sub(self.spent);
+        let reserve = reserve.min(room);
+        self.budget -= reserve;
+        self.held_tail = self.held_tail.saturating_add(reserve);
+    }
+
+    /// Restore calls hidden by [`Ledger::hold_tail`].
+    pub fn release_tail(&mut self) {
+        self.budget = self.budget.saturating_add(self.held_tail);
+        self.held_tail = 0;
+    }
+
+    /// Charged calls spent tightening recorded answers after the hop.
+    pub fn answer_polish_calls(&self) -> usize {
+        self.answer_polish_calls
+    }
+
+    pub(crate) fn set_answer_polish_calls(&mut self, calls: usize) {
+        self.answer_polish_calls = calls;
     }
 
     /// Initial quenches tried when the first evaluation is non-finite.
@@ -811,6 +868,9 @@ impl Ledger {
         if value.is_finite() && value < self.best {
             self.best = value;
             self.best_state = Some(state.to_owned());
+        }
+        if self.answer_limit > 0 {
+            self.answers.offer(value, state);
         }
         self.note_recorded_minimum(value, state);
     }
@@ -1497,9 +1557,65 @@ pub fn inside_molecular_call_wall(
     false
 }
 
+/// A declared group whose atoms no longer share a bond.
+///
+/// The bond tolerance is the molecular preset's: a pair inside one group
+/// counts when it is within that multiple of the summed covalent radii.
+/// A bare atom, or a fragment that has left its partners, has no such
+/// pair. The potential is not asked to converge a charge on it. Atoms
+/// in different groups are not compared, so an intermolecular contact
+/// is left to the call.
+pub fn declared_group_lost_a_bond(
+    x: ArrayView1<f64>,
+    species: &[u32],
+    groups: Option<&[Vec<usize>]>,
+    bond_tolerance: f64,
+) -> bool {
+    let Some(groups) = groups else {
+        return false;
+    };
+    let n = x.len() / 3;
+    if n < 2 || species.len() < n || !(bond_tolerance > 0.0) {
+        return false;
+    }
+    for atoms in groups {
+        if atoms.len() < 2 {
+            continue;
+        }
+        for &a in atoms {
+            if a >= n {
+                continue;
+            }
+            let mut bonded = false;
+            for &b in atoms {
+                if a == b || b >= n {
+                    continue;
+                }
+                let sum = moves::covalent_radius(species[a]) + moves::covalent_radius(species[b]);
+                if sum <= 0.0 {
+                    continue;
+                }
+                let mut square = 0.0;
+                for axis in 0..3 {
+                    let delta = x[3 * a + axis] - x[3 * b + axis];
+                    square += delta * delta;
+                }
+                if square.sqrt() <= bond_tolerance * sum {
+                    bonded = true;
+                    break;
+                }
+            }
+            if !bonded {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod call_wall_tests {
-    use super::{inside_molecular_call_wall, molecular_call_floor};
+    use super::{declared_group_lost_a_bond, inside_molecular_call_wall, molecular_call_floor};
     use ndarray::Array1;
 
     #[test]
@@ -1517,6 +1633,33 @@ mod call_wall_tests {
             coordinates.view(),
             &species,
             None
+        ));
+    }
+
+    #[test]
+    fn a_bare_atom_in_its_group_is_not_sent_to_the_potential() {
+        let mut coordinates = Array1::zeros(12);
+        // N at the origin, three H at a bound distance, then one H pulled away.
+        coordinates[3] = 1.01;
+        coordinates[6] = -0.50;
+        coordinates[7] = 0.87;
+        coordinates[9] = -0.50;
+        coordinates[10] = -0.87;
+        let species = [7u32, 1, 1, 1];
+        let groups = vec![vec![0usize, 1, 2, 3]];
+        assert!(!declared_group_lost_a_bond(
+            coordinates.view(),
+            &species,
+            Some(&groups),
+            1.25
+        ));
+        coordinates[9] = 4.0;
+        coordinates[10] = 0.0;
+        assert!(declared_group_lost_a_bond(
+            coordinates.view(),
+            &species,
+            Some(&groups),
+            1.25
         ));
     }
 
