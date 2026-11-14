@@ -10,18 +10,59 @@ The reference is wdbase-1, -81.396292669509 Eh.
 A hit is at or below that energy by 1e-6 Eh.
 
 `seeds.csv` keeps every row.
-The original seed 15000 row stays.
+The original seed 15000 row stays, recorded on vm-a.
 The rerun row is the one under hostname bench, from develop 8b4a2592.
-The hygienic panel uses that rerun in place of the original row.
-The other five seeds were already under hostname bench.
+Substituting that one row for the original moves the exact paired p from
+0.09375 to 0.03125.
+The one-host panel is the six rows named onehost.
+All six seeds of both arms were rerun together under hostname bench, at
+code revision ca6adf99d6d8c8e3d432c3ecc7e788242fc13f36.
+The earlier rows are unchanged.
 
-The hygienic gap, anneal minus CREST, has W+ 0, W- 21, exact two-sided p
-0.03125, rank-biserial -1, median -0.003035313706 Eh.
-The bootstrap of 10000 medians, seed 20261110, runs from -0.006444978869
-to -0.002255136597 Eh.
-Literature hits are 0/6 on both arms.
-The original panel, which still contains the first seed 15000 row, has p
-0.09375.
+Neither arm hits wdbase-1: 0/6 and 0/6.
+Fisher's exact two-sided test on those hit counts has p 1.
+The two-sided Mann-Whitney test on the six rescored energies, the normal
+approximation with the tie correction and the continuity correction, has
+p 0.2297662705.
+The paired gap, anneal minus CREST, has W+ 4, W- 17, exact two-sided p
+0.21875, rank-biserial -0.619047619, median -0.001204749507 Eh.
+The bootstrap of 10000 medians, seed 20261110, runs from -0.003286605418
+to 0.000687121629 Eh.
+Anneal is lower on seeds 15000, 15001, 15002 and 15003, and higher on
+15004 and 15005.
+Anneal's lowest energy is seed 15003, -81.388562844846 Eh.
+CREST's lowest energy is seed 15005, -81.388474624241 Eh.
+Anneal's lowest is below CREST's lowest.
+
+Anneal's time inside the potential, the six `potential_s` values, has
+median 7982.2247655 s.
+Time outside the potential, the six `outside_s` values, has median
+6.6909455 s.
+CREST's own runtime is the process wall in `crest_wall_s`.
+That log does not split the wall into time inside the potential and time
+outside it, so those two cells are empty.
+
+de Souza, Angewandte Chemie International Edition 64, e202500393 (2025),
+doi:10.1002/anie.202500393, reports an ice-derived (H2O)16 minimum on the
+GFN2-xTB surface that CREST misses by 1.45 kcal/mol over three runs.
+The supplement page lists that geometry in
+anie202500393-sup-0001-misc_information.pdf, 248.1 KB.
+The file was not obtained, so the structure was not relaxed and was not
+used as a start or a seed.
+Unpaywall and OpenAlex name only
+https://onlinelibrary.wiley.com/doi/pdfdirect/10.1002/anie.202500393
+and no repository copy.
+Crossref links the same publisher PDF.
+Semantic Scholar marks the paper closed and gives no PDF.
+Europe PMC has no PMCID.
+Requests for the pdfdirect URL, the epdf URL, the chemistry-europe and
+aces hosts, and
+`downloadSupplement` for anie202500393-sup-0001-misc_information.pdf
+returned Cloudflare HTTP 403.
+The Wayback Machine has only 403 captures and no copy of that file.
+A fetch of the supplement page listed the filename.
+A fetch of the PDF itself timed out.
+archive.ph timed out, and a reader proxy received the Cloudflare challenge.
 
 wdbase-1 is an open cage: oxygen radius of gyration 3.70 angstrom, eight
 3-coordinate and eight 4-coordinate oxygens, furthest hydrogen 5.62
