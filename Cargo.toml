@@ -222,6 +222,10 @@ name = "gfn2_water_h2h"
 required-features = ["rgpot-ex"]
 
 [[example]]
+name = "gfn2_water_audit"
+required-features = ["rgpot-ex"]
+
+[[example]]
 name = "gfn2_water_crest_driver"
 required-features = ["rgpot-ex"]
 
