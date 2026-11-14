@@ -23,7 +23,7 @@ ver=$("$LAUNCH" --version 2>&1 || true)
 OVER=
 case "$MODE" in
   missing) N=2 ;;
-  split|refused-hook|probe|instance-first|bound-static|bound-instance|refused-force) N=4 ;;
+  split|cp2k-split|refused-hook|probe|instance-first|bound-static|bound-instance|refused-force) N=4 ;;
   *)
     echo "unrecognized communicator test mode" >&2
     exit 2

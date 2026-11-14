@@ -81,10 +81,12 @@ def main() -> None:
     if mode != "rpc":
         raise ValueError(f"unknown MPI host test mode: {mode}")
     mpiexec, server, client, engine, backend, layout = sys.argv[2:8]
-    for key in ("NWCHEMC_LIBRARY", "RGPOT_NWCHEMC_ENGINE", "CPMDC_LIBRARY", "RGPOT_CPMDC_ENGINE"):
+    for key in ("NWCHEMC_LIBRARY", "RGPOT_NWCHEMC_ENGINE", "CPMDC_LIBRARY", "RGPOT_CPMDC_ENGINE",
+                "CP2KC_LIBRARY"):
         env.pop(key, None)
     env["RGPOT_NWCHEM_ENGINE"] = engine
     env["RGPOT_CPMD_ENGINE"] = engine
+    env["RGPOT_CP2K_ENGINE"] = engine
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]

@@ -1486,7 +1486,112 @@ if get_option('with_tests')
             workdir: meson.source_root(),
             suite: 'cpmd',
         )
+        if has_cp2k
+            cp2kc_fake_engine = shared_library(
+                'cp2kc_fake_engine',
+                sources: ['tests/cp2kc_fake_engine.cc'],
+                include_directories: _incdirs + ['.'],
+                install: false,
+            )
+            cp2kc_fake_env = environment()
+            cp2kc_fake_env.set('RGPOT_CP2K_ENGINE', cp2kc_fake_engine.full_path())
+            cp2kc_fake_env.set('CP2KC_LIBRARY', cp2kc_fake_engine.full_path())
+            test(
+                'CP2KPotFakeEngineTest',
+                executable(
+                    'cp2k_pot_fake_engine_test',
+                    sources: ['tests/CP2KPotFakeEngineTest.cc'],
+                    dependencies: test_deps + [ptlrpc_dep],
+                    include_directories: _incdirs + ['.'],
+                    cpp_args: test_args,
+                    link_with: _linkto,
+                    link_language: 'cpp',
+                    build_rpath: _metatomic_build_rpath,
+                ),
+                env: cp2kc_fake_env,
+                depends: cp2kc_fake_engine,
+                workdir: meson.source_root(),
+                suite: 'cp2k',
+            )
+            test(
+                'CP2KDeckTest',
+                executable(
+                    'cp2k_deck_test',
+                    sources: ['tests/CP2KDeckTest.cc'],
+                    dependencies: test_deps + [ptlrpc_dep],
+                    include_directories: _incdirs + ['.'],
+                    cpp_args: test_args,
+                    link_with: _linkto,
+                    link_language: 'cpp',
+                    build_rpath: _metatomic_build_rpath,
+                ),
+                suite: 'cp2k',
+            )
+        endif
         mpiexec = find_program('mpirun', 'mpiexec', required: false)
+        if has_cp2k
+            cp2k_smoke_env = environment()
+            cp2k_smoke_env.set('RGPOT_CP2K_ENGINE', cp2kc_shim.full_path())
+            cp2k_smoke_env.set('OMP_NUM_THREADS', '2')
+            _cp2k_prefix = cp2k_lib_dep.get_variable(
+                pkgconfig: 'prefix',
+                default_value: '',
+            )
+            if _cp2k_prefix != ''
+                cp2k_smoke_env.set(
+                    'CP2K_DATA_DIR',
+                    _cp2k_prefix / 'share' / 'cp2k' / 'data',
+                )
+            endif
+            cp2k_smoke = executable(
+                'cp2k_pot_smoke_test',
+                sources: ['tests/CP2KPotSmokeTest.cc'],
+                dependencies: test_deps + [ptlrpc_dep],
+                include_directories: _incdirs + ['.'],
+                cpp_args: test_args,
+                link_with: _linkto,
+                link_language: 'cpp',
+                build_rpath: _metatomic_build_rpath,
+            )
+            test(
+                'CP2KPotSmokeTest',
+                cp2k_smoke,
+                env: cp2k_smoke_env,
+                depends: cp2kc_shim,
+                timeout: 900,
+                is_parallel: false,
+                suite: 'cp2k',
+            )
+            if mpiexec.found()
+                _cp2k_mpi_args = ['-n', '2']
+                _mpiexec_version = run_command(
+                    mpiexec,
+                    '--version',
+                    check: false,
+                ).stdout()
+                if _mpiexec_version.contains('Open MPI') or _mpiexec_version.contains(
+                    'OpenRTE',
+                )
+                    _cp2k_mpi_args = ['--oversubscribe'] + _cp2k_mpi_args
+                endif
+                test(
+                    'CP2KPotSmokeMpi',
+                    mpiexec,
+                    # Every rank runs the test cases in declaration order:
+                    # their CP2K calls are collectives.
+                    args: _cp2k_mpi_args + [
+                        cp2k_smoke.full_path(),
+                        '--order',
+                        'decl',
+                    ],
+                    env: cp2k_smoke_env,
+                    depends: [cp2kc_shim, cp2k_smoke],
+                    timeout: 900,
+                    is_parallel: false,
+                    suite: 'cp2k',
+                )
+            endif
+        endif
         if _mpi_dep.found() and mpiexec.found()
             mpi_host_contract = executable(
                 'mpi_host_contract',
@@ -1540,7 +1645,7 @@ if get_option('with_tests')
                 timeout: 60,
                 suite: 'mpi-host',
             )
-            foreach backend : ['NWChem', 'CPMD']
+            foreach backend : has_cp2k ? ['NWChem', 'CPMD', 'CP2K'] : ['NWChem', 'CPMD']
                 foreach layout : ['serial', 'mpi']
                     rpc_server = layout == 'mpi' ? mpi_server : server
                     test(
@@ -1685,7 +1790,7 @@ if get_option('with_tests')
             adopt_comm_sh = find_program(
                 meson.current_source_dir() / 'tests/adopt_comm.sh',
             )
-            foreach entry : [
+            adopt_cases = [
                 ['AdoptCommMissing', 'missing', cpmdc_gradient_engine],
                 ['AdoptCommSplit', 'split', cpmdc_adopt_engine],
                 ['AdoptCommRefusedHook', 'refused-hook', cpmdc_adopt_engine],
@@ -1695,6 +1800,17 @@ if get_option('with_tests')
                 ['AdoptCommBoundInstance', 'bound-instance', cpmdc_adopt_engine],
                 ['AdoptCommRefusedForce', 'refused-force', cpmdc_adopt_engine],
             ]
+            if has_cp2k
+                cp2kc_adopt_engine = shared_library(
+                    'cp2kc_adopt_engine',
+                    sources: ['tests/cp2kc_adopt_engine.cc'],
+                    dependencies: [_mpi_dep],
+                    include_directories: _incdirs + ['.'],
+                    install: false,
+                )
+                adopt_cases += [['AdoptCommCP2K', 'cp2k-split', cp2kc_adopt_engine]]
+            endif
+            foreach entry : adopt_cases
                 test(
                     entry[0],
                     adopt_comm_sh,
@@ -1707,7 +1823,7 @@ if get_option('with_tests')
                     depends: [adopt_comm, entry[2], mpi_split_profile],
                     timeout: 60,
                     is_parallel: false,
-                    suite: 'cpmd',
+                    suite: entry[1].startswith('cp2k') ? 'cp2k' : 'cpmd',
                 )
             endforeach
             if get_option('with_cache')

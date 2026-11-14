@@ -1,6 +1,9 @@
 // MIT License
 // Copyright 2023--present rgpot developers
 
+#ifdef RGPOT_HAS_CP2K
+#include "rgpot/CP2KPot/CP2KPot.hpp"
+#endif
 #include "rgpot/CPMDPot/CPMDPot.hpp"
 #include "rgpot/CalculatorGroup.hpp"
 
@@ -48,7 +51,8 @@ int main(int argc, char **argv) {
     return 2;
   const char *mode = argv[1];
   const char *engine = argv[2];
-  if (setenv("RGPOT_CPMD_ENGINE", engine, 1) != 0)
+  if (setenv("RGPOT_CPMD_ENGINE", engine, 1) != 0 ||
+      setenv("RGPOT_CP2K_ENGINE", engine, 1) != 0)
     return 2;
 
   if (std::strcmp(mode, "probe") == 0) {
@@ -189,14 +193,21 @@ int main(int argc, char **argv) {
     return rc;
   }
 
-  if (std::strcmp(mode, "split") == 0) {
-    const int idx = rgpot::CPMDPot::bindCalculators(2);
+  // cp2k-split: the same contract through CP2KPot and the cp2kc shim ABI.
+  const bool cp2k = std::strcmp(mode, "cp2k-split") == 0;
+  if (std::strcmp(mode, "split") == 0 || cp2k) {
+#ifdef RGPOT_HAS_CP2K
+    const int idx = cp2k ? rgpot::CP2KPot::bindCalculators(2)
+                         : rgpot::CPMDPot::bindCalculators(2);
+#else
+    const int idx = cp2k ? -1 : rgpot::CPMDPot::bindCalculators(2);
+#endif
     const int splits = profile ? split_count(&profile) - splits_at_init : -1;
     MPI_Comm mine = MPI_COMM_NULL;
     const int got = rgpot::calculatorComm(&mine, sizeof(mine));
     using AdoptedFn = int (*)(void *, std::size_t);
-    auto *adopted =
-        reinterpret_cast<AdoptedFn>(dlsym(keep, "cpmdc_adopted_comm"));
+    auto *adopted = reinterpret_cast<AdoptedFn>(
+        dlsym(keep, cp2k ? "cp2kc_adopted_comm" : "cpmdc_adopted_comm"));
     MPI_Comm theirs = MPI_COMM_NULL;
     const int copied =
         adopted != nullptr ? adopted(&theirs, sizeof(theirs)) : -1;
@@ -205,8 +216,8 @@ int main(int argc, char **argv) {
       MPI_Comm_compare(mine, theirs, &cmp);
     const int ident = cmp == MPI_IDENT ? 1 : 0;
     const int expect = rank / 2;
-    std::printf("adopt-split rank %d index %d ident %d splits %d\n", rank, idx,
-                ident, splits);
+    std::printf("adopt-%s rank %d index %d ident %d splits %d\n", mode, rank,
+                idx, ident, splits);
     const int rc =
         (profile && idx == expect && ident == 1 && splits == 1) ? 0 : 5;
     MPI_Finalize();

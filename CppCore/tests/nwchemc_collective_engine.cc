@@ -2,9 +2,11 @@
 #if defined(_WIN32) || defined(_WIN64)
 #define RGPOT_NWCHEMC_BUILD
 #define RGPOT_CPMDC_BUILD
+#define RGPOT_CP2KC_BUILD
 #endif
 #include "rgpot/NWChemPot/nwchem_c_abi.h"
 #include "rgpot/CPMDPot/cpmd_c_abi.h"
+#include "rgpot/CP2KPot/cp2kc_abi.h"
 #include "rgpot/rpc/Potentials.capnp.h"
 #include <capnp/serialize.h>
 #include <mpi.h>
@@ -14,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace {
 constexpr CPMDCFeatureEntry kFeatures[] = {
@@ -146,3 +149,70 @@ extern "C" const CPMDCFeatureEntry *cpmdc_feature_find(const char *feature_id) {
   }
   return nullptr;
 }
+
+// cp2kc: the charge and the elements come from the deck CP2KPot renders.
+// Positions are turned back into the caller's Angstrom values so the one
+// oracle in MpiRpcContractClient covers every backend.
+struct CP2KCSession {
+  int charge = 0;
+  std::vector<int> numbers;
+};
+
+extern "C" int cp2kc_abi_version() { return CP2KC_ABI_VERSION; }
+extern "C" const char *cp2kc_version() { return "cp2k-collective-fixture"; }
+extern "C" int cp2kc_available() { return 1; }
+extern "C" CP2KCSession *cp2kc_session_create(const char *deck, const char *,
+                                              char *, size_t) {
+  setup();
+  auto *session = new CP2KCSession();
+  const std::string text = deck;
+  const auto at = text.find("CHARGE ");
+  if (at != std::string::npos)
+    session->charge = std::atoi(text.c_str() + at + 7);
+  const auto begin = text.find("&COORD\n");
+  const auto end = text.find("&END COORD");
+  for (auto line = begin; line != std::string::npos && line < end;) {
+    line = text.find('\n', line);
+    if (line == std::string::npos || ++line >= end)
+      break;
+    const auto first = text.find_first_not_of(' ', line);
+    if (first < end && text.compare(first, 2, "H ") == 0)
+      session->numbers.push_back(1);
+    else if (first < end && text.compare(first, 2, "O ") == 0)
+      session->numbers.push_back(8);
+  }
+  return session;
+}
+extern "C" int cp2kc_session_select_orbitals(CP2KCSession *, long long) {
+  return 0;
+}
+extern "C" int cp2kc_session_calculate(CP2KCSession *session, int n,
+                                       const double *pos_bohr, const double *,
+                                       double *e_ha, double *f_ha_bohr,
+                                       char *err, size_t err_len) {
+  if (static_cast<int>(session->numbers.size()) != n) {
+    std::snprintf(err, err_len, "deck has %zu atoms", session->numbers.size());
+    return CP2KC_BAD_ARGUMENT;
+  }
+  std::vector<double> positions(3 * static_cast<std::size_t>(n));
+  for (std::size_t i = 0; i < positions.size(); ++i) {
+    positions[i] = pos_bohr[i] * 0.529177210903;
+    const double rounded = std::round(positions[i] * 1e6) / 1e6;
+    if (std::abs(positions[i] - rounded) < 1e-9)
+      positions[i] = rounded;
+  }
+  charge = session->charge;
+  std::vector<double> gradient(positions.size());
+  const auto source =
+      nwchemc_energy_gradient(n, positions.data(), session->numbers.data(),
+                              nullptr, 0, gradient.data());
+  if (!source.ok) {
+    std::snprintf(err, err_len, "%s", source.message);
+    return CP2KC_FATAL;
+  }
+  *e_ha = source.energy_h;
+  for (std::size_t i = 0; i < gradient.size(); ++i)
+    f_ha_bohr[i] = -gradient[i];
+  return CP2KC_OK;
+}
+extern "C" void cp2kc_session_destroy(CP2KCSession *session) { delete session; }
