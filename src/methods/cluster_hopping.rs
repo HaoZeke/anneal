@@ -6474,8 +6474,12 @@ where
         // test. A trajectory that stays in the well falls through to the
         // library and the next launch is hotter. An escape that is not
         // compiled stops the run instead of falling through.
+        // The wide-diameter escape asks for the constant-energy step even
+        // when the angular move would have taken this hop. Without that
+        // step compiled, the run has to stop before the angular relocation
+        // spends the budget. A one-species cluster is not wide, so its
+        // angular move is unchanged.
         if hmc_trial.is_none()
-            && !angular
             && species_wide
             && let Some(eg) = energy_grad.as_deref_mut()
         {
