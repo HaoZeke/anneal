@@ -34,9 +34,9 @@ python3 CppCore/rgpot/rpc/schema_ledger.py check --fetch --base origin/develop
 #+end_src
 
 The ledger is append only.
-=check= fails when a line changes, moves or disappears relative to =--base=, when
-the unpatched pinned schema renumbers, retypes or drops a recorded ordinal, and
-when a vendored copy disagrees with the ledger.
+=check= fails when a line changes, moves or disappears relative to =--base=,
+when the unpatched pinned schema renumbers, retypes or drops a recorded ordinal,
+and when a vendored copy disagrees with the ledger.
 A wrap diff may not remove or rewrite a line that carries an =@N= ordinal, and
 every ordinal it adds must be a =local= ledger entry that upstream does not
 declare.
