@@ -854,3 +854,37 @@ The manuscript sizes 38, 55, 75, 98, and 104 are not named. The release reposito
 
 Cite `wangOccat2026`.
 
+## 2026-11-14 — Journal versions of the two gold minima-hopping searches
+
+Safa, Rahmatizad Khajehpasha, Finkler, and Goedecker, Nanoscale Advances 8, 3605--3612 (2026), doi:10.1039/d6na00102e, is the journal version of the preprint already filed as `safaGoldIons2026`. The arXiv record still has no journal-ref line. The DOI, the volume, and the pages were read from the Crossref record. That record adds Jonas A. Finkler to the three authors on the arXiv record, and the title is the same. The search is still minima hopping on gold clusters from 22 to 100 atoms, and a large enough positive charge still makes planar structures the ground states. Those energies are gold energies. They do not contradict the Cambridge hit targets, 121 of 192, or 97 of 192.
+
+Rahmatizad Khajehpasha, Safa, Eyvazi, Krummenacher, and Goedecker, Nanoscale Advances 8, 5146--5157 (2026), doi:10.1039/d6na00012f, is the journal version of the preprint already filed as `rahmatizadGold2026`. The arXiv record still has no journal-ref line. The DOI, the volume, and the pages were read from the Crossref record, and that record names the same five authors. The new global minima for Au309 and Au561 still lie up to 2.8 eV below global minima reported earlier. Those gaps are gold energies on their potential. They do not contradict the Cambridge hit targets.
+
+The keys `safaGoldIons2026` and `rahmatizadGold2026` now carry the journal DOI beside the arXiv id. Neither journal version warrants a new head-to-head. The comparisons already named stay Au ions from 22 to 100 atoms, and Au309 or Au561, each on the potential used in that search.
+
+## 2026-11-14 — Adaptive diffusion on Lennard-Jones clusters through forty atoms
+
+Adel, Szmitek, Hartl, Wanzenböck, and Madsen, Journal of Chemical Information and Modeling 66, 7414--7425 (25 June 2026), doi:10.1021/acs.jcim.6c00843, put a diffusion model inside an evolutionary search and relax the samples. The Lennard-Jones benchmark runs from 5 to 40 atoms, against CMA-ES. They say CMA-ES finds the global minimum only up to about 17 atoms, depending on the seed, and that one diffusion evolution finds the global minimum at every size they tried, with an energy difference below \(10^{-6}\) eV. Clusters smaller than 25 atoms are found in fewer than 10 generations. Larger clusters are found in fewer than 150 generations, except LJ34 and LJ38. They single out LJ31 and LJ38. For LJ38 they name the face-centred cubic truncated octahedron as the global minimum and an incomplete Mackay icosahedron as the second minimum. The same paper treats neutral gold clusters Au13, Au31, and Au38.
+
+The manuscript's LJ38 map puts the recommended hop on that truncated octahedron. This paper does not report a lower potential energy, so it does not contradict the Cambridge energy at 38 atoms. The search stops at 40 atoms, so LJ55, LJ75, LJ98, and LJ104 are absent. The cross-field section prints a BIPOP arm at 6 of 6 on LJ98. This CMA-ES comparison stops at 40 atoms and does not run that arm, so the 6 of 6 row stands. A generation count is not the force-call budget the hop charges. The article no longer prints an LJ38 hit count, so these runs contradict no printed number. The gold clusters are not the Lennard-Jones map. It does warrant a head-to-head on LJ38, at one force-call budget, against this diffusion search. Do not import the generation counts into the hit table.
+
+Cite `adelGuidedDiffusion2026`.
+
+## 2026-11-14 — CREST on vitamins, and GOAT with one explicit water
+
+Moshchenkov, Ryzhako, Rozov, Otlyotov, and Minenkov, Physical Chemistry Chemical Physics 28, 19708--19720 (2026), doi:10.1039/d6cp02127a, compare a systematic Uniconf search with CREST metadynamics on vitamins A, B1, B2, B3, B5, B6, B7, B9, and C. The semiempirical methods are GFN1-xTB, GFN2-xTB, and QM3. At the tightest settings both searches find the lowest conformer on a given semiempirical surface. When one semiempirical method misses the density-functional order, another can match it. Some CREST entropies are atypically large, and the abstract says every entropy they compute is an estimate.
+
+These authors already compare CREST with a systematic search on clinical drugs, filed as `moshchenkovCrestEntropy2026`. This paper is the vitamins. It does not report 121 of 192, 97 of 192, or the polished gaps. A CREST entropy on a vitamin is not the hexamer motif table. Leave the CREST table on 3.0.2 and on GFN2-xTB with xtb 6.7.1. It does not warrant a head-to-head on that table.
+
+Dooley and Vyas, Physical Chemistry Chemical Physics 28, 25271--25283 (2026), doi:10.1039/d6cp01697a, sample conformers with GOAT and with CENSO, with one explicit water. The abstract says that water breaks an intramolecular hydrogen bond and improves an openCOSMO-RS solvation energy. On hydrogen-bond donors in the SM8 set the root-mean-square error falls by 7.3 to 13.0 percent, depending on the workflow. The abstract calls GOAT the global optimisation algorithm and names it beside CENSO. That is the molecular GOAT, not the analytic Goat Optimization Algorithm already filed as `nozariGoatAlgorithm2025`.
+
+The missing hexamer comparison with de Souza's GOAT stays open. This paper does not report a water-cluster hit rate, so it does not contradict 121 of 192 or 97 of 192. One explicit water on a solute is not the bare hexamer. It does not warrant a head-to-head on the CREST table.
+
+Cite `moshchenkovVitamers2026` and `dooleyGoatMicrosolvation2026`.
+
+## 2026-11-14 — The ASE master tip moved to an MPI hook
+
+The release tags recorded earlier on 14 November 2026 are unchanged. ASE 3.29.0, dated 21 June 2026, is still the newest tag on the GitLab tag list and on PyPI. AGOX v3.11.1, dated 4 February 2026, is still the newest tag on the GitLab tag list and on PyPI, and the dev tip is still the 5 May 2026 import fix. CREST v3.0.2, published 25 August 2024, is still the newest numbered release on the crest-lab GitHub release list, and the master tip is still the 16 June 2026 CMake fix. pele v0.1.2, dated 12 October 2026, is still the newest release on the GitHub release list and on PyPI. xtb v6.8.0, dated 5 November 2026, is still the newest release on the GitHub release list. The GMIN directory page is still last modified on 17 March 2022.
+
+The ASE master tip is not that tag. It moved on 14 November 2026 to a merge of an MPI mechanism branch. The files are the parallel hook, the command-line entry, and the parallel documentation. That commit does not change basin hopping, and it is not a release. Pin the open arms to ASE 3.29.0, AGOX v3.11.1, CREST 3.0.2, and pele 0.1.2. No bibliographic entry for this check: a tag date is not a DOI.
+
