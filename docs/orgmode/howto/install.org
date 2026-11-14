@@ -1,9 +1,55 @@
-#+TITLE: Installation
+#+TITLE: Install anneal
 #+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
 
-* Installation
+* Install anneal
 
-See the [[file:../quickstart.org][quickstart]] for the three modes (pip core, pixi full stack, source).
-The docs profile itself is =pixi run -e docs docs-export && pixi run -e docs docs-build= (see =pixi.toml= =[feature.docs]= and =docs/export.el=).
+Pick the mode that matches what you need.
+The [[file:../quickstart.org][quickstart]] needs only the first.
 
-The Python package after =pip install anneal= or =maturin develop --features python= inside the workspace gives the full surface.
+** From the Python Package Index (PyPI)
+
+#+begin_src bash
+pip install anneal
+python -c "import anneal; print(anneal.__version__)"
+#+end_src
+
+This installs the latest release.
+The release can trail the development branch these pages describe, so check the printed version against the [[file:../changelog.org][changelog]].
+The quickstart needs no optional dependency.
+CuPy is needed only when you pass CuPy arrays to =run_device= or =run_ensemble=.
+
+** From source with pixi
+
+From a checkout of the repository:
+
+#+begin_src bash
+pixi install
+pixi run -e python python-build
+pixi run -e python python -c "import anneal; print(anneal.__version__)"
+#+end_src
+
+=pixi install= installs the pinned Rust toolchain and tools but not the package.
+The =python-build= task compiles the package into the =python= environment with =maturin develop=, together with the test dependencies.
+
+** From source with maturin
+
+From a checkout of the repository, with Rust 1.88 or newer on the path:
+
+#+begin_src bash
+python -m venv .venv
+source .venv/bin/activate
+pip install "maturin>=1.5,<2"
+maturin develop --release --features python
+python -c "import anneal; print(anneal.__version__)"
+#+end_src
+
+=--release= builds an optimized extension.
+
+** Build these pages
+
+#+begin_src bash
+pixi run -e docs docs-export
+pixi run -e docs docs-build
+#+end_src
+
+The Org sources are exported to reStructuredText by =docs/export.el= and built with Sphinx into =docs/build=.
