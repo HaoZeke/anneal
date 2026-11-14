@@ -13,7 +13,8 @@ exclude = """(?x)(
     ^subprojects/(?!.*\\.wrap$)|
     ^CppCore/tests/data/|
     ^third_party/libxckernel/|
-    ^third_party/lepton/
+    ^third_party/lepton/|
+    ^CppCore/rgpot/LongRange/pocketfft\\.hpp$
 )"""
 
 # Fast native implementations (no clone / no Python env).
