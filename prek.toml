@@ -116,7 +116,7 @@ hooks = [
     language = "system",
     pass_filenames = false,
     always_run = false,
-    files = '^(towncrier\\.toml|docs/newsfragments/)',
+    files = '^(towncrier\.toml|docs/newsfragments/)',
     args = ["-c", "test -f towncrier.toml && test -d docs/newsfragments"],
   },
 ]
