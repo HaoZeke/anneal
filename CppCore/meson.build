@@ -168,6 +168,9 @@ if _rpc_stack
     # Pure dlopen consumers of split nwchemc / cpmdc; need generated schema only.
     subdir('rgpot/NWChemPot')  # 'nwchempot' frontend + no-op ABI stub
     subdir('rgpot/CPMDPot')    # 'cpmdpot' frontend + no-op ABI stub
+    if has_cp2k
+        subdir('rgpot/CP2KPot')  # 'cp2kpot' frontend + libcp2k shim
+    endif
 endif
 
 # ------------------------ Main library
@@ -336,6 +339,9 @@ if not get_option('with_rpc_client_only')
     if _rpc_stack
         rgpotentials += [nwchempot]
         rgpotentials += [cpmdpot]
+        if has_cp2k
+            rgpotentials += [cp2kpot]
+        endif
         if has_skala
             subdir('rgpot/SkalaPot')
             rgpotentials += [skala]
@@ -2700,6 +2706,9 @@ if not meson.is_subproject()
         endif
         if has_dftd4
             _pc_cflags += ['-DRGPOT_HAS_DFTD4_POT=TRUE']
+        endif
+        if has_cp2k
+            _pc_cflags += ['-DRGPOT_HAS_CP2K=TRUE']
         endif
         if has_expr
             _pc_cflags += ['-DRGPOT_HAS_EXPR=TRUE']

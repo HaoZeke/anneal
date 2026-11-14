@@ -57,6 +57,8 @@ endif()
 option(RGPOT_WITH_EAM_TABLE
        "EAM and Finnis-Sinclair potentials read from LAMMPS tables" OFF)
 option(RGPOT_BUILD_TESTS "Build tests" ${RGPOT_IS_TOP_LEVEL})
+option(RGPOT_WITH_CP2K
+       "CP2KPot, the potserv CP2K backend and libcp2kc_rgpot against libcp2k (pkg-config libcp2k)" OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # librgpot's ELF soversion is kCxxSoversion in CxxLayout.hpp, the same
@@ -215,6 +217,17 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
   if(RGPOT_WITH_RPC)
     list(APPEND RGPOT_SOURCES CppCore/rgpot/NWChemPot/NWChemPot.cc
          CppCore/rgpot/CPMDPot/CPMDPot.cc)
+  endif()
+  # CP2KPot dlopens the libcp2k shim. It is built only with the shim, so a
+  # build without libcp2k compiles no CP2K code.
+  if(RGPOT_WITH_CP2K)
+    if(NOT RGPOT_WITH_RPC)
+      message(FATAL_ERROR "RGPOT_WITH_CP2K requires RGPOT_WITH_RPC")
+    endif()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBCP2K REQUIRED IMPORTED_TARGET libcp2k)
+    list(APPEND RGPOT_SOURCES CppCore/rgpot/CP2KPot/CP2KPot.cc
+         CppCore/rgpot/CP2KPot/CP2KDeck.cc)
   endif()
 
   if(RGPOT_WITH_HIGHWAY)
@@ -385,6 +398,20 @@ if(NOT RGPOT_RPC_CLIENT_ONLY)
   endif()
 
   add_library(rgpot::rgpot ALIAS rgpot)
+
+  # The libcp2k shim is the only target linking libcp2k and MPI; CP2KPot
+  # dlopens it.
+  if(RGPOT_WITH_CP2K)
+    target_compile_definitions(rgpot PUBLIC RGPOT_HAS_CP2K)
+    find_package(MPI REQUIRED COMPONENTS C)
+    add_library(cp2kc_rgpot SHARED CppCore/rgpot/CP2KPot/cp2kc_shim.c)
+    target_include_directories(cp2kc_rgpot
+                               PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/CppCore/rgpot/CP2KPot)
+    target_link_libraries(cp2kc_rgpot PRIVATE PkgConfig::LIBCP2K MPI::MPI_C)
+    set_target_properties(cp2kc_rgpot PROPERTIES BUILD_RPATH "${LIBCP2K_LIBDIR}"
+                                                 INSTALL_RPATH "${LIBCP2K_LIBDIR}")
+    install(TARGETS cp2kc_rgpot LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  endif()
 
   target_include_directories(
     rgpot PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/CppCore>

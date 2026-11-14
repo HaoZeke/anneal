@@ -59,7 +59,8 @@ enum class PotType {
   EAMTable,    //!<  EAM / Finnis-Sinclair tables. -Dwith_eam_table=true.
   Lammps,      //!<  Shifted Lennard-Jones via the engine plugin.
   Gromacs,     //!<  Shifted Lennard-Jones; nm and kJ/mol stored once.
-  OpenMM       //!<  Shifted Lennard-Jones; nm and kJ/mol stored once.
+  OpenMM,      //!<  Shifted Lennard-Jones; nm and kJ/mol stored once.
+  CP2K         //!<  CP2K Quickstep via the libcp2k shim. -Dwith_cp2k.
 };
 
 } // namespace rgpot

@@ -15,6 +15,12 @@ option(
     description: 'linkcell/minimage pair list. Auto when cargo and rustc 1.89 or newer are found; otherwise the C++ pair scan is used.',
 )
 option(
+    'with_cp2k',
+    type: 'feature',
+    value: 'disabled',
+    description: 'CP2KPot, the potserv CP2K backend and libcp2kc_rgpot.so against libcp2k (pkg-config libcp2k); needs with_rpc',
+)
+option(
     'with_mpi',
     type: 'feature',
     value: 'disabled',

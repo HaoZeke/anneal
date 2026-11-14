@@ -55,6 +55,9 @@ class MpiPefSession;
 #include "rgpot/SkalaPot/SkalaPot.hpp"
 #endif // RGPOT_HAS_UMA
 
+#ifdef RGPOT_HAS_CP2K
+#include "rgpot/CP2KPot/CP2KPot.hpp"
+#endif
 #include "rgpot/CPMDPot/CPMDPot.hpp"
 #include "rgpot/LennardJones/LJClusterPot.hpp"
 #include "rgpot/LennardJones/LJPot.hpp"
@@ -71,6 +74,19 @@ class MpiPefSession;
 #include "rgpot/types/AtomMatrix.hpp"
 #include "rgpot/types/adapters/capnp/capnp_adapter.hpp"
 #include "rgpot/units.hpp"
+
+#ifdef RGPOT_HAS_CP2K
+constexpr const char *kOwnArmBackends = "NWChem, CPMD, CP2K and Morse";
+#else
+constexpr const char *kOwnArmBackends = "NWChem, CPMD and Morse";
+#endif
+#ifdef RGPOT_POTSERV_MPI
+#ifdef RGPOT_HAS_CP2K
+constexpr const char *kCollectiveBackends = "NWChem, CPMD or CP2K";
+#else
+constexpr const char *kCollectiveBackends = "NWChem or CPMD";
+#endif
+#endif
 
 /**
  * @class GenericPotImpl
@@ -93,6 +109,10 @@ private:
   /// Set when the backend is the i-PI socket server. calculate copies the
   /// Cauchy stress stashed by the last force call.
   rgpot::IPIPot *m_ipi = nullptr;
+#endif
+#ifdef RGPOT_HAS_CP2K
+  /// Optional typed handle when backend is CP2K (for configure()).
+  rgpot::CP2KPot *m_cp2k = nullptr;
 #endif
   rgpot::tools::MpiPefSession *m_pef = nullptr;
 
@@ -124,6 +144,13 @@ public:
                  rgpot::tools::MpiPefSession *pef = nullptr)
       : m_potential(std::move(pot)),
         m_cpmd(static_cast<rgpot::CPMDPot *>(m_potential.get())), m_pef(pef) {}
+
+#ifdef RGPOT_HAS_CP2K
+  GenericPotImpl(std::unique_ptr<rgpot::CP2KPot> pot,
+                 rgpot::tools::MpiPefSession *pef = nullptr)
+      : m_potential(std::move(pot)),
+        m_cp2k(static_cast<rgpot::CP2KPot *>(m_potential.get())), m_pef(pef) {}
+#endif
 
   /**
    * @brief Reports what this server speaks, so a client can refuse an
@@ -237,6 +264,24 @@ public:
     return kj::READY_NOW;
   }
 
+  /// NWChem, CPMD and CP2K take every arm through setPotentialConfig.
+  [[nodiscard]] bool appliesOwnArm() const {
+#ifdef RGPOT_HAS_CP2K
+    if (m_cp2k)
+      return true;
+#endif
+    return m_nwchem || m_cpmd;
+  }
+
+  bool applyOwnArm(const ::PotentialConfig::Reader &cfg, std::string *msg) {
+#ifdef RGPOT_HAS_CP2K
+    if (m_cp2k)
+      return m_cp2k->setPotentialConfig(cfg, msg);
+#endif
+    return m_nwchem ? m_nwchem->setPotentialConfig(cfg, msg)
+                    : m_cpmd->setPotentialConfig(cfg, msg);
+  }
+
   kj::Promise<void> configure(ConfigureContext context) override {
     auto cfg = context.getParams().getConfig();
     auto results = context.getResults();
@@ -250,16 +295,17 @@ public:
       results.setMessage(applied.message);
       return kj::READY_NOW;
     }
-    if (!m_nwchem && !m_cpmd) {
+    if (!appliesOwnArm()) {
       if (cfg.which() == ::PotentialConfig::NONE) {
         results.setOk(true);
         results.setMessage("no-op (rgpot params: none)");
         return kj::READY_NOW;
       }
       results.setOk(false);
-      results.setMessage("configure() with the " + rgpot::rpc::potentialConfigArm(cfg) +
-                         " arm is not supported by this backend; only NWChem, CPMD "
-                         "and Morse apply their own arm");
+      results.setMessage("configure() with the " +
+                         rgpot::rpc::potentialConfigArm(cfg) +
+                         " arm is not supported by this backend; only " +
+                         kOwnArmBackends + " apply their own arm");
       return kj::READY_NOW;
     }
     std::string msg;
@@ -275,8 +321,7 @@ public:
     } else
 #endif
     {
-      ok = m_nwchem ? m_nwchem->setPotentialConfig(cfg, &msg)
-                   : m_cpmd->setPotentialConfig(cfg, &msg);
+      ok = applyOwnArm(cfg, &msg);
     }
     results.setOk(ok);
     results.setMessage(msg);
@@ -331,6 +376,9 @@ int runServer(int argc, char *argv[]
 #endif
               << ", NWChem[:basis[:theory[:xc]]]"
               << ", CPMD"
+#ifdef RGPOT_HAS_CP2K
+              << ", CP2K"
+#endif
               << std::endl;
     return 1;
   }
@@ -346,10 +394,14 @@ int runServer(int argc, char *argv[]
   std::string pot_type = argv[2];
 #ifdef RGPOT_POTSERV_MPI
   host.collective([&] {
-    const bool collective_backend = pot_type == "NWChem" ||
+    bool collective_backend = pot_type == "NWChem" ||
         pot_type.rfind("NWChem:", 0) == 0 || pot_type == "CPMD";
+#ifdef RGPOT_HAS_CP2K
+    collective_backend = collective_backend || pot_type == "CP2K";
+#endif
     if (host.size() > 1 && !collective_backend)
-      throw std::runtime_error("multi-rank RPC requires NWChem or CPMD");
+      throw std::runtime_error(std::string("multi-rank RPC requires ") +
+                               kCollectiveBackends);
   });
 #endif
   std::unique_ptr<rgpot::PotentialBase> potential_to_use;
@@ -556,6 +608,48 @@ int runServer(int argc, char *argv[]
               << " potential." << std::endl;
     kj::NEVER_DONE.wait(waitScope);
     return 0;
+  } else if (pot_type == "CP2K") {
+#ifdef RGPOT_HAS_CP2K
+    std::cout << "Loading CP2K potential (dlopen libcp2kc_rgpot)..."
+              << std::endl;
+    std::unique_ptr<rgpot::CP2KPot> cp;
+#ifdef RGPOT_POTSERV_MPI
+    host.collective([&] {
+      if (!rgpot::CP2KPot::probe_available())
+        throw std::runtime_error("CP2K shim is not available on every rank");
+    });
+    host.collective([&] { cp = std::make_unique<rgpot::CP2KPot>(); });
+#else
+    cp = std::make_unique<rgpot::CP2KPot>();
+#endif
+    if (!cp->available()) {
+      std::cerr << "Warning: libcp2kc_rgpot not loaded; calculate() will fail "
+                   "until the shim is available (configure() still accepted)."
+                << std::endl;
+    }
+    rgpot::tools::MpiPefSession *channel = nullptr;
+#ifdef RGPOT_POTSERV_MPI
+    rgpot::tools::MpiPefSession session(host, *cp);
+    if (host.rank() != 0) {
+      session.work();
+      return 0;
+    }
+    channel = &session;
+#endif
+    capnp::EzRpcServer server(kj::heap<GenericPotImpl>(std::move(cp), channel),
+                              "localhost", port);
+    auto &waitScope = server.getWaitScope();
+    std::cout << "Server running on port " << port << " with " << pot_type
+              << " potential." << std::endl;
+    kj::NEVER_DONE.wait(waitScope);
+    return 0;
+#else
+    std::cerr << "Error: this potserv was built without CP2K; rebuild with "
+                 "-Dwith_cp2k=enabled (CMake: -DRGPOT_WITH_CP2K=ON) against "
+                 "libcp2k."
+              << std::endl;
+    return 1;
+#endif
   } else if (pot_type == "CPMD") {
     std::cout << "Loading CPMD potential (dlopen libcpmdc)..." << std::endl;
     std::unique_ptr<rgpot::CPMDPot> cp;

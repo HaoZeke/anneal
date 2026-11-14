@@ -399,6 +399,19 @@ if get_option('with_dftd4')
     has_dftd4 = true
 endif
 
+# CP2KPot, potserv's CP2K backend and the libcp2k shim build together or
+# not at all, so a build without libcp2k compiles no CP2K code.
+has_cp2k = false
+if get_option('with_rpc')
+    cp2k_lib_dep = dependency('libcp2k', required: get_option('with_cp2k'))
+    has_cp2k = cp2k_lib_dep.found()
+elif get_option('with_cp2k').enabled()
+    error('with_cp2k needs with_rpc: CP2KPot reads CP2KParams from the generated schema')
+endif
+if has_cp2k
+    _args += ['-DRGPOT_HAS_CP2K=TRUE']
+endif
+
 has_expr = false
 if get_option('with_expr')
     subdir('third_party/lepton')
