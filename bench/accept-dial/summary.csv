@@ -1,0 +1,15 @@
+variant,signal,aim,floor,ceiling,au55_hits,au55_n,au55_fisher_vs_develop,au55_fresh_hits,au55_fresh_n,molecular_runs_identical_to_develop,molecular_dmin_wilcoxon_vs_develop,molecular_coverage_wilcoxon_vs_develop,m80r14_hits,sc126-80_hits,sc96-80_hits,sc108-55_hits,lj38_hits,lj75_hits,lj98_hits,panel_n,sc108-55_hits_36,verdict
+dev,accepted hops with deposits,one half,preset,preset x contact,22,36,,24,36,60,,,10,5,7,5,12,12,9,12,20,develop
+bare,bare acceptance,one half,none,preset x contact,13,36,0.059,,,0,0.0187,0.0007,,,,,,,,,,Au55 below 22/36
+a,bare acceptance,one half,preset,none,22,36,1.000,,,60,,,,,,,,,,,,molecules unchanged
+b,novel-basin acceptance,first window,none,none,23,36,1.000,,,59,0.3173,0.3173,,,,,,,,,,molecules unchanged but one run
+c,novel-basin acceptance,first window,preset,none,23,36,1.000,,,60,,,,,,,,,,,,molecules unchanged
+b2,novel-basin acceptance,half the novel share,none,none,11,36,0.017,,,0,,,,,,,,,,,,Au55 below 22/36
+c2,novel-basin acceptance,half the novel share,preset,none,22,36,1.000,,,60,,,,,,,,,,,,molecules unchanged
+b3,novel-basin acceptance,median of past windows,none,none,24,36,0.806,,,60,,,,,,,,,,,,molecules unchanged
+c3,novel-basin acceptance,median of past windows,preset,none,24,36,0.806,,,60,,,,,,,,,,,,molecules unchanged
+b4,novel-basin acceptance,q(1-q),none,none,19,36,0.634,,,0,0.0039,0.0002,,,,,,,,,,Au55 below 22/36
+c4,novel-basin acceptance,q(1-q),preset,none,22,36,1.000,,,60,,,,,,,,,,,,molecules unchanged
+b5,uphill novel acceptance,1-q,none,none,22,36,1.000,21,36,0,0.0054,0.0001,4,2,7,3,12,12,12,12,,m80r14 regresses
+c5,uphill novel acceptance,1-q,preset,none,21,36,1.000,,,60,,,,,,,,,,,,molecules unchanged; Au55 below 22/36
+b6,uphill novel acceptance,1-q,none,preset x contact,21,36,1.000,20,36,0,0.0054,0.0001,10,5,8,3,12,12,9,12,15,Au55 below 22/36; sc108-55 trails at n=36
