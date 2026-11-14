@@ -255,7 +255,7 @@ def write_summary(path: Path, rows: list[dict[str, str]]) -> None:
     chosen = [
         row
         for row in rows
-        if row["system"] == SYSTEM and int(row["budget"]) == BUDGET and int(row["seed"]) in SEEDS
+        if row["system"] == SYSTEM and int(row["budget"]) == BUDGET
     ]
     by_revision: dict[str, dict[int, dict[str, dict[str, str]]]] = {}
     for row in chosen:
@@ -264,29 +264,33 @@ def write_summary(path: Path, rows: list[dict[str, str]]) -> None:
         )[row["arm"]] = row
     summaries: list[dict[str, str]] = []
     for revision, by_seed in by_revision.items():
+        revision_seeds = sorted(by_seed)
         present = {
             arm
-            for seed in SEEDS
+            for seed in revision_seeds
             for arm in by_seed.get(seed, {})
         }
         anneal_arms = [arm for arm in ARMS if arm != "crest" and arm in present]
         complete_arms = [
             arm
             for arm in anneal_arms
-            if all(arm in by_seed.get(seed, {}) and "crest" in by_seed.get(seed, {}) for seed in SEEDS)
+            if all(
+                arm in by_seed.get(seed, {}) and "crest" in by_seed.get(seed, {})
+                for seed in revision_seeds
+            )
         ]
         if not complete_arms:
             continue
         reference = min(
             float(by_seed[seed][arm]["rescored_Eh"])
-            for seed in SEEDS
+            for seed in revision_seeds
             for arm in [*complete_arms, "crest"]
         )
-        crest_rows = [by_seed[seed]["crest"] for seed in SEEDS]
+        crest_rows = [by_seed[seed]["crest"] for seed in revision_seeds]
         crest = [float(row["rescored_Eh"]) for row in crest_rows]
         crest_hits = sum(energy_hits(value, reference, HIT_TOL_EH) for value in crest)
         for arm in complete_arms:
-            anneal_rows = [by_seed[seed][arm] for seed in SEEDS]
+            anneal_rows = [by_seed[seed][arm] for seed in revision_seeds]
             anneal = [float(row["rescored_Eh"]) for row in anneal_rows]
             anneal_hits = sum(
                 energy_hits(value, reference, HIT_TOL_EH) for value in anneal
@@ -297,12 +301,19 @@ def write_summary(path: Path, rows: list[dict[str, str]]) -> None:
                 {
                     "system": SYSTEM,
                     "anneal_arm": arm,
-                    "n": str(len(SEEDS)),
+                    "n": str(len(revision_seeds)),
                     "reference_Eh": f"{reference:.12f}",
                     "reference_source": "best_of_arms",
                     "anneal_hits": str(anneal_hits),
                     "crest_hits": str(crest_hits),
-                    "fisher_p": plain(fisher(anneal_hits, len(SEEDS), crest_hits, len(SEEDS))),
+                    "fisher_p": plain(
+                        fisher(
+                            anneal_hits,
+                            len(revision_seeds),
+                            crest_hits,
+                            len(revision_seeds),
+                        )
+                    ),
                     "mannwhitney_p": plain(mann_whitney(anneal, crest)),
                     "W_plus": f"{positive:.1f}",
                     "W_minus": f"{negative:.1f}",
