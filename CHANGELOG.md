@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
-## [0.12.0](https://github.com/HaoZeke/anneal/tree/v0.12.0) - 2026-10-31
+## [0.12.0](https://github.com/HaoZeke/anneal/tree/v0.12.0) - 2026-11-14
 
 ### Added
 
@@ -117,6 +117,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   ``HopStop`` is ``#[non_exhaustive]``, so a ``match`` on it outside the crate needs a wildcard arm, and a later reason is not a breaking change.
   The water hexamer record prints it as ``hop_stop``.
   Search results are unchanged.
+- A molecular quench can be preconditioned with the covalent bond graph (``Config::precondition_bonds``).
+  The preconditioner has the exponential form of Packwood and co-workers (2016).
+  It needs ``Config::species`` and is off by default.
+  On a 30-atom spring chain it settles a quench in fewer than half the calls of the plain descent.
+- The ``conformer_search`` example searches the conformers of a flexible molecule at a fixed call budget.
+  Its chains divide the budget and can share one minimum history.
+  The default is one chain with preconditioned quenches, and a tenth of the budget is kept back to settle the best minimum.
+  The validated minima go to a readcon-db corpus.
+- The molecular move library proposes a torsion.
+  It turns the smaller side of one rotatable covalent bond by a uniform angle.
+  The bonds come from covalent radii in the current geometry.
+- The molecular torsion turns one to three rotatable bonds and checks the proposal for non-bonded contacts before anything pays for it; a contact is repaired by descent in torsion space, which keeps every bond length and angle.
+  A lone free group of four or more atoms drops the whole-group moves, which only carried it; when that group is one molecule joined from bonded groups, the torsion replaces the SOAP pullback as well.
+  A molecular search whose declared groups are bonded to each other at the start searches each covalent fragment as one molecule; libraries of unbonded molecules, such as water clusters, search as before.
+- ``Config::local_step = LocalStep::Tric`` quenches a molecular search in translation-rotation internal coordinates (TRIC), with bonds, angles and dihedrals inside each covalent fragment and a translation and rotation per fragment.
+  ``anneal.quench(..., method="tric", species=...)`` and ``cluster_search(..., groups=..., local_step="tric")`` expose it in Python.
+  It is opt-in and left out of the resolved JSON when unset, so every existing preset resolves and searches as before.
+- ``Config::orbit_arm`` offers orbit completion as a move-allocator arm, ``ClusterMove::OrbitComplete``, to a configuration that does not complete orbits on every new basin. It is off on every preset, and a preset with ``orbit_complete_on_new`` draws the same kernels with it on.
+- ``Config::pair_range`` holds a pair force's reach, measured by ``PairRange::measure`` as the dimer separation past which energy and force are exactly zero. When the reach is shorter than the container's diameter, a hop moves every part of the trial back within reach of the largest part instead of into the container sphere. It is unset on every preset, so Lennard-Jones, Morse and every potential without a cutoff search as before.
+- ``Config::with_dual_orbit_core`` and the ``Config::for_cluster_dual_core`` preset complete each new basin on two cores and offer the lower quench (``OrbitCore::Both``).
+  One core is a shell core about a weighted centre, after the ``SYMMETRY`` routine of the Cambridge global minimisation program (GMIN), and the other is the fraction core.
+  They also restart a chain from a random cluster after 4000 calls without a new best.
+  Both are opt-in.
+  The fraction core is left out of the resolved JSON, so ``for_cluster``, ``recommended`` and every other preset resolve to the same configuration as before.
+- ``LocalStep::Auto`` times the opening Cartesian quench of a molecular search per potential call and one TRIC step outside the potential, and quenches with TRIC from then on only when the call costs more.
+  ``Config::recommended_molecular`` sets it, so a cheap force field keeps L-BFGS and an electronic-structure gradient gets TRIC; its resolved digest changes.
+  ``cluster_search(local_step=None)`` keeps the preset's quench, accepts ``"auto"``, and reports the quench in force and the two timings.
+- ``cluster_hopping::Config::for_tip4p`` and the presets built on it add a third move arm, ``rcycle``.
+  It reverses a directed hydrogen-bond cycle.
+  It borrows the loop move for proton arrangements in ice.
+  It has no proposal ratio, so it is a minimiser's move.
+  ``MoveLibrary::RigidBody`` turns it on and off with ``reverse_cycles``.
+- ``cluster_search::search_from_with_history`` reports every certified quench to a minimum history.
+  Chains with hooks over one history share minimum identity and visit counts.
+  ``cluster_hopping::run_with_history`` is the matching walk without checkpoints.
+- ``cluster_search::settle`` descends a minimum past ``Config::record_gradient`` on the caller's ledger.
+  It returns the lowest evaluated point whose gradient passes ``Config::record_gradient``.
+  A caller that reports energies can use calls kept back from the search to settle the best minimum.
+- ``conformer_search`` takes ``--arm communicating``, which lays the molecular communicating overlay of ``configure_water_arm`` over the preset.
+  ``--superbasin on`` turns on the superbasin report and escape, and each chain prints its superbasin census.
+  The run header prints the overlay and superbasin settings in force.
+- ``examples/h2h_seed`` runs one seed of the ABCluster head-to-head from its recorded start.
+  It writes the trace of lowest energies and the lowest geometry.
 
 ### Developer
 
@@ -139,6 +182,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   archive starts under harness-style counting, and
   ``scripts/optbench/anneal_globalopt.py`` scores them through optbench's
   lane-B harness with native kernels checked against optbench's own.
+- The ``PR title`` workflow runs ``cog verify`` on the title of each open pull request.
+  GitHub names the squash of a multi-commit pull request after its title.
+  A title that breaks the commit convention now fails before the merge.
+  The check reruns on every push to the pull request and on every edit of its title.
+  ``a_rigid_chain_has_no_restart_among_its_stall_arms`` turns ``restart_on_stall`` on in its own configuration.
+  The recommended preset leaves it off.
+  A rigid chain still drops the restart from its stall arms.
+  ``two_unreached_references_give_one_water_trajectory`` turns off the cycle reversal of ``Config::for_tip4p``.
+  Its chain then moves by translation and rotation alone and stalls inside the budget, as the test expects.
+  The reached-reference test keeps the full preset.
+- The heavy-atom root-mean-square deviation of the ``conformer_search`` example satisfies the deny set of clippy 1.88.
+  Its values are unchanged.
+- ``examples/conformer_cost.sh`` reruns the two peptide cost runs of the ``conformer_search`` benchmark.
+  Its start is ``examples/fixtures/ac-ala3-nhme-s9743.xyz``.
 
 ### Changed
 
@@ -212,6 +269,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   ``KeyboardInterrupt`` still stops the run. The C header is unchanged.
 - The manifest resolves rgmin 0.5.0 and rgsaddle 0.3.0 from crates.io. linkcell stays 0.3.11.
   The activation relaxation leaves the relative tolerance and the noise floor unset.
+- Cluster searches reuse pure structural descriptors, avoid stable-sort scratch allocation, build open neighbour rows from one distance calculation per pair, and share TIP4P rotation work while preserving seeded output bit for bit.
+- Dense assignments of 98 points or more are solved by successive shortest paths.
+  The continuous-symmetry projection skips the matching for the identity operation.
+  Smaller assignments keep the Kuhn-Munkres solver, so searches below 98 atoms follow the same trajectories as before.
+  From 98 atoms the solver finds a matching of the same minimum cost but can pick another among equal optima.
+  Seeded trajectories from 98 atoms therefore change.
+  On one thread, a 2e5-call search of the 98-atom Lennard-Jones cluster takes 15.7 to 18.3 s in place of 34.7 to 39.7 s.
+- ``Config::recommended`` no longer sets ``restart_on_stall``.
+  ``Config::derived`` and the binary Lennard-Jones and rigid-water stock presets inherit the change.
+  In those presets the random stall restart was never drawn.
+  The climb on each 5000-call plateau resets the count of quiet hops that the stall arms wait for.
+  Seeded searches follow the same trajectories as before, and the resolved configuration digest changes.
+  A caller that turns ``escape_on_stall`` off on these presets no longer gets a random redraw every ``restart_patience`` calls.
 
 ### Fixed
 
@@ -346,6 +416,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   The anonymous visit floor is unchanged.
 - An opt-in witnessed stop uses a one-third unseen-mass ceiling, so a clean tripleton can retire.
   The default ceiling stays one fifth.
+- A cluster-search quench no longer pays twice for one point.
+  The record check reuses the descent's last evaluation, and a descent that starts where the last one ended reuses that one too.
+  A record polish is now a descent to the solver's default tolerance rather than to ``Config::record_gradient``, so the best a run reports is settled.
+  ``Config::polish_records`` sets the length of the polish, and zero turns it off.
+- A molecular hop now proposes a geometry the 0.35 Å overlap rule accepts.
+  A refused geometry is counted apart from the energy calls and is not charged.
+  The recorded best stays a quench that met the preset gradient tolerance.
+- A molecular search no longer refuses an aromatic, carbonyl or triple bond as an overlap: the bonded call floor is 0.70 of the single-bond covalent sum, down from 0.95.
+- A non-finite evaluation no longer becomes the recorded cluster-search best.
+  The line search now shortens a failed call as an uphill step, so a finite quench stays eligible and keeps its geometry.
+  The xtb coupling refuses a pair closer than 0.35 Å before the Self-Consistent Charge (SCC) cycle starts, and an SCC abort stays in the child process.
+- A stalled rigid chain no longer reads the run target or draws a new cluster.
+  The chain keeps the eight lowest distinct minima of its quenched start, accepted quenches and lowest recorded minimum.
+  Each stall follows 1000 hops with no new lowest minimum.
+  At each stall the walker moves to the lowest kept minimum that is neither its own nor one of the last four stall destinations.
+  When no kept minimum qualifies, the walker stays put.
+  Two runs now follow one trajectory when their only difference is a target neither reaches.
+  The recommended preset no longer puts the random restart among a rigid chain's stall arms.
+  On a call plateau a rigid chain draws no fresh cluster even with ``restart_on_stall`` on and ``escape_on_stall`` off.
+- A water hop now relaxes once to the record gradient, and a chain more than 0.02 eV above its best minimum proposes the next hop from that minimum.
+  The split screen left a GFN2 hexamer hundreds of meV short of its basin, and the walk then spent the 4000-call budget in higher basins.
+- An adaptive screen can stop a quench early.
+  Its last paid evaluation is now kept, so a descent from that point does not pay for it again.
+- Compile-fail checks for sealed components follow the compiler error, so a change in rustc's help layout does not fail the suite.
+- The interleaved TIP4P converters keep GMIN's angle-axis vectors as they are: GMIN's ``NTIP`` places sites by the same active map as the rigid chart, and its ``CHECKD`` energy of a converted start is now anneal's.
+  ``binary_water_campaign`` reads optbench ``.aa`` starts as GMIN ``coords`` (centres, then angle-axis vectors); ``--legacy-interleaved`` keeps the earlier reading, and ``GminAngleAxisFile::LegacyInterleaved`` loads interleaved files written with negated rotations.
+  ``scripts/optbench/anneal_globalopt.py`` opens the archive start GMIN opens.
+- The macOS test harness links libpython and does not pass ``-undefined dynamic_lookup``.
+  With that flag and no libpython, dyld stops the feature tests before they start because ``_PyBaseObject_Type`` is missing from the flat namespace.
+  Maturin still builds the extension with that lookup. The interpreter that imports the extension provides the symbols.
+- The water arms now record and quench at ``catalog::molecular::WATER_RECORD_GRADIENT``, the xtb ``vtight`` gradient of 2e-4 Eh/bohr.
+  At the molecular preset's 5e-2 eV/Å a recorded energy could sit 0.3 eV above its own minimum, so the GFN2 hexamer search reached the CREST minimum and then ranked a higher basin first.
+  The ``gfn2_water_h2h`` comparison now polishes its answer with ``cluster_search::polish_answer`` toward the catalog's GFN2 stationary-point gate, inside the same evaluation budget, so the scored energy is the minimum's and not the quench's.
+- Under the molecular move library with species set, the container returns a whole covalent fragment as a rigid body.
+  It used to scale each far atom onto the sphere, which shortened the bonds of any molecule wider than that sphere.
+- When the two sides of a rotatable bond have the same size, the torsion move turns one that is not a symmetric top, so whether the bond is offered no longer depends on atom order.
 
 ### Miscellaneous
 
@@ -355,7 +461,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   member. The vendored crates' ``rustfmt.toml`` asks for nightly options.
   The ``ignore`` key is unstable on stable. ``cargo fmt --all`` would still
   walk a path dependency.
-
 
 ## [0.11.1](https://github.com/HaoZeke/anneal/tree/v0.11.1) - 2026-10-11
 
