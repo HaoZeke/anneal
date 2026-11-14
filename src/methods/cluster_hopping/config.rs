@@ -1297,6 +1297,15 @@ pub struct Config {
     pub pair_range: Option<PairRange>,
     /// Closest approach enforced before a trial is relaxed.
     pub min_separation: f64,
+    /// Pair distance at or below which the objective refuses to evaluate.
+    ///
+    /// A trial inside it has each such pair opened just past the floor
+    /// before the relaxation sees it, and is dropped uncharged when the
+    /// opening fails. Declared species
+    /// without a floor keep [`super::OVERLAP_CALL_LIMIT`]. Absent from the
+    /// resolved JSON when unset, and unset on every stock preset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call_floor: Option<f64>,
     /// Cut the move library down to the uniform displacement alone: the
     /// control a Hamiltonian proposal is measured against, since the default
     /// library also carries moves that change a packing rather than displace
@@ -1855,6 +1864,7 @@ impl Config {
                 * (n_points as f64).cbrt(),
             pair_range: None,
             min_separation: LennardJonesPreset::MIN_SEPARATION * length_scale,
+            call_floor: None,
             displacement_only: false,
             superbasin_report: false,
             superbasin_escape: false,
