@@ -285,6 +285,16 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(self.run_tool("check", "--base", "HEAD"), 1)
         self.assertIn("ledger entry moved", self.err.getvalue())
 
+        inserted = (
+            [ln for ln in lines if ln.startswith("#")] + ["Kind @2 enumerant third - upstream\n"] + body
+        )
+        self.ledger().write_text("".join(inserted), encoding="utf-8")
+        self.assertEqual(self.run_tool("check", "--base", "HEAD"), 1)
+        self.assertIn(
+            "ledger entry inserted before existing ones: Kind @2 enumerant third", self.err.getvalue()
+        )
+        self.assertNotIn("ledger entry moved", self.err.getvalue())
+
         self.ledger().write_text(original, encoding="utf-8")
         self.assertEqual(
             self.run_tool("check", "--base", "HEAD", "--upstream", str(self.upstream)), 0, self.err.getvalue()

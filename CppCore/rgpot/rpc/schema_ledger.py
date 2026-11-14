@@ -434,15 +434,22 @@ def base_ledger(root: Path, base: str) -> str | None:
 
 def check_append_only(base: list[Entry], current: list[Entry]) -> list[str]:
     errors = []
-    now = {e.key: e for e in current}
-    for i, old in enumerate(base):
-        new = now.get(old.key)
-        if new is None:
+    position = {e.key: i for i, e in enumerate(current)}
+    old_keys = {e.key for e in base}
+    last = -1
+    for old in base:
+        at = position.get(old.key)
+        if at is None:
             errors.append(f"ledger entry disappeared: {old.line()}")
-        elif new != old:
-            errors.append(f"ledger entry changed: {old.line()} is now {new.line()}")
-        elif i >= len(current) or current[i] != old:
-            errors.append(f"ledger entry moved: {old.line()} (append new entries at the end)")
+        elif current[at] != old:
+            errors.append(f"ledger entry changed: {old.line()} is now {current[at].line()}")
+        elif at < last:
+            errors.append(f"ledger entry moved: {old.line()}")
+        else:
+            last = at
+    for entry in current[: last + 1]:
+        if entry.key not in old_keys:
+            errors.append(f"ledger entry inserted before existing ones: {entry.line()} (append at the end)")
     return errors
 
 
