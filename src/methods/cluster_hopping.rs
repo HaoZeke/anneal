@@ -1677,10 +1677,34 @@ pub const OVERLAP_CALL_LIMIT: f64 = 0.90;
 /// triple bond; hydrogen pairs keep [`OVERLAP_CALL_LIMIT`] either way.
 pub const COVALENT_CALL_FRACTION: f64 = 0.70;
 
+/// Fraction of the summed Cordero radii at which a triple bond sits: N≡N
+/// is 0.77 of the sum, C≡C, C≡N and C≡O 0.79 to 0.80. No bond order is
+/// shorter.
+pub const TRIPLE_BOND_FRACTION: f64 = 0.77;
+
+/// Shortest length a covalent bond between `za` and `zb` takes at any
+/// bond order.
+///
+/// The Cordero radii are single-bond radii, so a double, aromatic or
+/// amide bond is shorter than their sum, and a triple bond shortest, at
+/// [`TRIPLE_BOND_FRACTION`] of it. Hydrogen bonds singly, so a pair with
+/// hydrogen keeps the whole sum. A declared bond shorter than this is
+/// compressed; one at or past it is a bond of some order and is left to
+/// the potential.
+pub fn shortest_bond_length(za: u32, zb: u32) -> f64 {
+    let sum = moves::covalent_radius(za) + moves::covalent_radius(zb);
+    if za == 1 || zb == 1 {
+        sum
+    } else {
+        TRIPLE_BOND_FRACTION * sum
+    }
+}
+
 /// Distance at or below which a molecular potential is not called.
 ///
 /// Species-free searches keep [`OVERLAP_CALL_LIMIT`]. With species, a
-/// declared bond uses [`COVALENT_CALL_FRACTION`] of the covalent sum and any
+/// declared bond uses [`COVALENT_CALL_FRACTION`] of the covalent sum, below
+/// the pair's [`shortest_bond_length`], and any
 /// other pair uses the sum itself. The absolute limit remains a floor so a
 /// hydrogen pair is not treated more loosely than before.
 pub fn molecular_call_floor(za: u32, zb: u32, bonded: bool) -> f64 {
@@ -1871,6 +1895,18 @@ mod call_wall_tests {
     }
 
     #[test]
+    fn a_bonded_floor_sits_below_the_shortest_bond_order() {
+        for za in 1..=96u32 {
+            for zb in za..=96u32 {
+                let shortest = super::shortest_bond_length(za, zb);
+                if shortest > super::OVERLAP_CALL_LIMIT {
+                    assert!(molecular_call_floor(za, zb, true) < shortest, "{za}-{zb}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn aromatic_carbonyl_and_nitrile_bonds_are_not_refused() {
         for (za, zb, length) in [(6u32, 6u32, 1.39), (6, 8, 1.21), (6, 7, 1.16), (6, 6, 1.20)] {
             let mut coordinates = Array1::zeros(6);
@@ -1938,8 +1974,9 @@ fn open_target(
     if bonded {
         // Classified once, at the geometry we were handed. A later stretch
         // must not turn the bond into a clash or the repair dissociates it.
-        // A bond already near the covalent length is left alone, so a healthy
-        // molecule is not rewritten on the way past an unrelated spike.
+        // A bond at a length some bond order takes is left alone, so a
+        // healthy molecule is not rewritten on the way past an unrelated
+        // spike, and a double bond is not pulled out to a single one.
         let Some(species) = species else {
             return if distance >= bond_target {
                 distance
@@ -1947,12 +1984,11 @@ fn open_target(
                 bond_target
             };
         };
-        let reach = crate::methods::cluster_hopping::moves::covalent_radius(
+        let shortest = shortest_bond_length(
             species.get(a).copied().unwrap_or(0),
-        ) + crate::methods::cluster_hopping::moves::covalent_radius(
             species.get(b).copied().unwrap_or(0),
         );
-        let restore = bond_target.max(reach);
+        let restore = bond_target.max(shortest);
         return if distance + 0.02 >= restore {
             distance
         } else {
