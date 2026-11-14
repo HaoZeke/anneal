@@ -63,9 +63,9 @@ python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective", "rgs
 # crates/anneal-python does, after it installs the rgpot kernels.
 python-host = ["python"]
 # Examples using an in-process rgpot eindir handle (xtb / CuH2 via
-# libloading). Off by default so LJ builds do not pull rgpot-core.
-# Do not enable rgpot-core/rpc: that needs a host capnp compiler.
-rgpot-ex = ["dep:rgpot-core", "dep:libloading"]
+# libloading). Only those examples link rgpot-core and libloading, so both
+# are dev-dependencies; the library never pulls them.
+rgpot-ex = []
 
 [dependencies]
 petgraph = { version = "0.8", optional = true }
@@ -92,11 +92,6 @@ toml        = "0.8"
 sha2        = "0.10"
 pyo3        = { version = "0.26", features = ["extension-module", "abi3-py310"], optional = true }
 numpy       = { version = "0.26", optional = true }
-# Registry 3.5.1 depends on eindir-core 0.6.0, the same crate the rest of
-# the workspace uses. A git pin of 3.0.2 packages as registry 3.0.2, and
-# that release depends on eindir-core 0.5.2.
-rgpot-core = { version = "=3.5.1", optional = true }
-libloading = { version = "0.8", optional = true }
 capnp = { version = "0.21", optional = true }
 capnp-rpc = { version = "0.21", optional = true }
 futures = { version = "0.3", optional = true }
@@ -127,6 +122,12 @@ capnp-rpc = "0.21"
 futures = "0.3"
 tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["compat"] }
+# Registry 3.5.1 depends on eindir-core 0.6.0, the same crate the rest of
+# the workspace uses. A git pin of 3.0.2 packages as registry 3.0.2, and
+# that release depends on eindir-core 0.5.2.
+# Do not enable rgpot-core/rpc: that needs a host capnp compiler.
+rgpot-core = { version = "=3.5.1" }
+libloading = "0.8"
 
 [build-dependencies]
 cc = "1"
