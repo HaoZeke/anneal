@@ -467,4 +467,36 @@ double damp_sum_host(const double *c6, const double *r0, const double *r, std::s
   return s;
 }
 
+#ifndef RGPOT_LR_HAS_CUDA
+// CudaPath.cu defines these when nvcc builds it. Without it no device is
+// ever seen, and each entry point is the host kernel behind the same
+// argument checks.
+int cuda_device_count() { return 0; }
+
+void coulomb_cuda(const CudaCoulombIn &in, double *energy, double *F, int *used_device) {
+  if (used_device == nullptr) {
+    throw std::invalid_argument("cuda status pointer is null");
+  }
+  *used_device = 0;
+  coulomb_host(in, energy, F);
+}
+
+double pair_sum_cuda(const double *pair, std::size_t n, int *used_device) {
+  if (used_device == nullptr) {
+    throw std::invalid_argument("cuda status pointer is null");
+  }
+  *used_device = 0;
+  return pair_sum_host(pair, n);
+}
+
+double damp_sum_cuda(const double *c6, const double *r0, const double *r, std::size_t n, double a1,
+                     double a2, int *used_device) {
+  if (used_device == nullptr) {
+    throw std::invalid_argument("cuda status pointer is null");
+  }
+  *used_device = 0;
+  return damp_sum_host(c6, r0, r, n, a1, a2);
+}
+#endif
+
 } // namespace rgpot::lr

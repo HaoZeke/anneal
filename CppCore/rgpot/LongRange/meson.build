@@ -13,8 +13,10 @@ lr_src = files(
 )
 # The thread teams are OpenMP. Without it every summand runs serially.
 lr_deps = _deps + [dependency('openmp', required: false)]
+lr_args = _args
 if get_option('with_cuda')
     nvcc = find_program('nvcc', required: true)
+    # The object lands in the shared umbrella library, so it is PIC.
     lr_src += custom_target(
         'lr_cuda',
         input: 'CudaPath.cu',
@@ -23,6 +25,8 @@ if get_option('with_cuda')
             nvcc,
             '-arch=sm_70',
             '-std=c++20',
+            '-Xcompiler',
+            '-fPIC',
             '-c',
             '@INPUT@',
             '-o',
@@ -31,13 +35,14 @@ if get_option('with_cuda')
             '-I' + meson.project_source_root() / 'include',
         ],
     )
-    lr_deps += find_library('cudart', required: true)
+    lr_deps += cppc.find_library('cudart', required: true)
+    lr_args += ['-DRGPOT_LR_HAS_CUDA']
 endif
 lr_phys = static_library(
     'lr_phys',
     lr_src,
     dependencies: lr_deps,
-    cpp_args: _args,
+    cpp_args: lr_args,
     include_directories: _incdirs,
     pic: true,
     install: false,
