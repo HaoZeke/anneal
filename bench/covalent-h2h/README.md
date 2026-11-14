@@ -733,6 +733,21 @@ the same calls on Si10 seeds 2002, 2006 and 2011 and C10 seeds 2000,
 Before and after the fix, the output's sha1 is
 `419b06def1a0e01a152c13ccdb24cbd9919551cc`. `tests/lj_trajectory_pin.rs` passes.
 
+On develop `35115269` the sha1 is `97677e2820a32d62d21c5b45e3a62138c69ec3ce`.
+Three first-parent commits changed it:
+
+- `b73ff6c3` (`7a2bfeb1…`): the ρ=14 Morse 55 hit on seed 2000 is
+  recorded at the charged stop, 255670 calls in place of 1000000.
+- `bb486bfd` (`254b635a…`, the squash of #59): every `h2h_seed` trace
+  and the Lennard-Jones and Morse lowest geometries change; TIP4P's do
+  not. On the branch, `9d670da6` charges each quench point once, and
+  `72e8d0d8`, `f70b5354` and `bc50572f` move the seeded draws and
+  rotations to portable libm. ρ=14 Morse 55 drops from 2 to 1 hit in 3
+  (seed 2000 misses) and Zn38 from 2 to 0.
+- `3c45b899` (`97677e28…`, merged in `9abb056e`): the recommended full
+  quench runs 1000 steps. ρ=14 Morse 55 hits on all 3 seeds. Zn38 stays
+  at 0 of 3.
+
 ## Files
 
 - `before/`, `after/`: per-seed rows and summaries of the first panel.
