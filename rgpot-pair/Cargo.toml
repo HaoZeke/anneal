@@ -6,4 +6,7 @@ description = "Inlinable unshifted cluster pair kernels for rgpot"
 license = "MIT"
 repository = "https://github.com/OmniPotentRPC/rgpot"
 
+[build-dependencies]
+cc = "=1.4.2"
+
 [dependencies]
