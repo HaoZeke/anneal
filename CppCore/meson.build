@@ -768,6 +768,12 @@ if get_option('with_tests')
                 '',
             ],
             ['GuptaTest', 'gupta_test', 'GuptaTest.cc', ''],
+            [
+                'HessianVectorTest',
+                'hessian_vector_test',
+                'HessianVectorTest.cc',
+                '',
+            ],
             ['SWSiTest', 'sw_si_test', 'SWSiTest.cc', ''],
             ['TersoffSiCTest', 'tersoff_sic_test', 'TersoffSiCTest.cc', ''],
             [

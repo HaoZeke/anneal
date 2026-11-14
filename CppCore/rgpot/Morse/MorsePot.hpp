@@ -100,6 +100,18 @@ public:
    */
   void forceImpl(const ForceInput &in, ForceOut *out) const override;
 
+  /**
+   * @brief Analytic Hessian-vector product @f$H v@f$.
+   *
+   * The pairs, minimum image, shift or switch of @c forceImpl, each pair
+   * adding @f$K (v_i - v_j)@f$ to atom @c i and its negative to @c j, with
+   * @f$K = \phi'' \hat d \hat d^T + (\phi' / r)(I - \hat d \hat d^T)@f$.
+   * @a v and @a hv hold @c 3*in.nAtoms doubles. @c HessianVectorCache
+   * (HessianVector.hpp) uses it in place of finite differences.
+   */
+  void hessianVectorImpl(const ForceInput &in, const double *v,
+                         double *hv) const;
+
   void setNeighbourMode(nlist::Mode mode) noexcept { mode_ = mode; }
 
   /// True when the last force call kept the Verlet list. Half the skin,
@@ -120,6 +132,9 @@ public:
 private:
   /// Bump when the kernel numerics change, so stale cache entries die.
   static constexpr uint64_t kKernelVersion = 2;
+
+  /// Bring neighbours_ to the positions of @a in.
+  void updateNeighbours(const ForceInput &in) const;
 
   double De;           //!< Well depth parameter.
   double a;            //!< Range parameter.
