@@ -35,8 +35,8 @@ returns =H v= with the shape of =positions=.
 =scheme= is ="forward"=, ="central"=, ="analytic"= or ="auto"=, and =step= 0 is
 1e-3 Angstrom.
 ="forward"= reuses the forces of the last geometry the object evaluated, so a
-Lanczos loop of =k= products at one geometry costs =k + 1= force calls, at
-first order in =step=.
+Lanczos loop of =k= products at one geometry costs =k + 1= force calls, at first
+order in =step=.
 ="central"= costs two calls a product, at second order.
 ="auto"= is ="analytic"= when =has_analytic_hvp()= is true, as for =MorsePot=,
 and ="forward"= otherwise.

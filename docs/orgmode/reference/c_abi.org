@@ -95,8 +95,7 @@ The meson test =abi_core_symbols= fails when one of them is no longer exported,
 and the crate test =the_abi_baseline_is_declared_by_the_header= when the
 committed header stops declaring one.
 The list only grows: append a new function with the minor bump that adds it.
-=scripts/abi_baseline.txt= is the same check for the neighbour-list and
-fast-list exports of =librgpot= (meson test =abi_symbols=).
+=scripts/abi_baseline.txt= is the same check for the neighbour-list and fast-list exports of =librgpot= (meson test =abi_symbols=).
 The neighbour-list C ABI is separate.
 3.6.0 sets it to version 4 (=RGPOT_NLIST_ABI= in =rgpot_nlist.h=).
 =rgpot_nlist_request_init= sets the defaults, =bytes= is the struct size, and =rgpot_nlist_strerror=
@@ -290,8 +289,8 @@ A caller that links only =librgpot= uses it instead of resolving
 
 ** Hessian-vector products
 
-A minimum-mode search (Lanczos, dimer) applies the Hessian =H= of the energy
-to many directions =v= at one geometry.
+A minimum-mode search (Lanczos, dimer) applies the Hessian =H= of the energy to
+many directions =v= at one geometry.
 With only a force callback each product is a difference of two force
 evaluations, and one of them is the centre the search has not moved from.
 A potential handle answers =H v= itself and keeps the forces of that centre.
@@ -317,8 +316,8 @@ rgpot_status_t rgpot_potential_hvp_centre(const rgpot_potential_t *pot,
 
 =direction= and =hv_out= hold =3 * n_atoms= doubles laid out like the positions
 and must not overlap.
-=u = v / |v|= and =step= is the displacement =h= along it, in the units of
-the positions; 0 selects =RGPOT_HVP_DEFAULT_STEP=.
+=u = v / |v|= and =step= is the displacement =h= along it, in the units of the
+positions; 0 selects =RGPOT_HVP_DEFAULT_STEP=.
 The difference is scaled back by =|v|=, so the product does not depend on the
 length of =direction= beyond that factor.
 A zero direction writes zeros and makes no call.
@@ -329,22 +328,22 @@ A zero direction writes zeros and makes no call.
 | =RGPOT_HVP_CENTRAL=  | 2                            | =O(h^2)=       |
 | =RGPOT_HVP_ANALYTIC= | 0                            | the callback's |
 
-=k= forward products at one centre therefore cost =k + 1= force calls
-instead of =2k=.
+=k= forward products at one centre therefore cost =k + 1= force calls instead of
+=2k=.
 No finite difference makes one call per product at =O(h^2)=.
 The forward error is =(h/2) T(u, u) |v|=, with =T= the third derivative of the
 energy, and cancelling it takes the second evaluation that the central scheme
 makes.
-A search that needs second-order products at one call each registers an
-analytic product.
+A search that needs second-order products at one call each registers an analytic
+product.
 The forward product is positively homogeneous in =direction= but not odd: the
 =O(h)= term keeps its sign when =v= does not.
 
 The centre is keyed on the bits of the positions, the atomic numbers and the
 cell, so moving one coordinate by one ulp, changing the cell or a species, or
 passing =-0.0= for =0.0= computes a new centre.
-=rgpot_potential_hvp_centre= returns the energy and an owning forces tensor
-from the same cache, and makes the force call when the centre is new.
+=rgpot_potential_hvp_centre= returns the energy and an owning forces tensor from
+the same cache, and makes the force call when the centre is new.
 A search that needs the centre forces asks there instead of
 =rgpot_potential_calculate=, so the products after it make one call each.
 =rgpot_potential_hvp_invalidate= drops the centre, for a potential whose
@@ -377,8 +376,8 @@ A non-finite value in the callback's output is refused.
 answered, the force calls made, the requests served from the centre and the
 analytic products; =rgpot_potential_reset_hvp_counts= zeroes them and keeps the
 centre.
-The C++ potentials used without the Rust core, the Python module among them,
-get the same schemes, step, cache and counts from =rgpot/HessianVector.hpp=.
+The C++ potentials used without the Rust core, the Python module among them, get
+the same schemes, step, cache and counts from =rgpot/HessianVector.hpp=.
 
 ** Entry points
 
