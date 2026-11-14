@@ -111,6 +111,23 @@ rule sc_restart_summary:
         """
 
 
+# Medians of the two-walker population. Reads the twelve-seed anneal
+# rows and the population runs; it does not launch a search. Not part
+# of `rule all`.
+#   snakemake -s workflow/Snakefile sc_pop_summary
+rule sc_pop_summary:
+    input:
+        "bench/metal-cluster-h2h/sc-n12/seeds.csv",
+        "bench/metal-cluster-h2h/sc-pop/rows.csv",
+    output:
+        "bench/metal-cluster-h2h/sc-pop/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        python3 scripts/metal_h2h/summarise_sc_pop.py
+        """
+
+
 # anneal, openconf and CREST iMTD-GC on drug-like molecules, MMFF94 for the
 # two RDKit arms and GFN-FF for CREST. Not part of `rule all`. The budgets
 # come from the openconf pilot (`enter_bench.sh pilot`):
