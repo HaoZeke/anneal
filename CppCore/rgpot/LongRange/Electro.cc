@@ -1265,20 +1265,30 @@ void spme_reciprocal(const CoulombConfig &cfg, const CellGeom &cell, const doubl
   static std::vector<double> seen_pos;
   static double seen_box[9];
   static int seen_grid[4];
+  // The lead thread rewrites the key on a miss, and the two branches below
+  // pass a different number of group gates. The team takes one decision.
+  static bool team_tables_hit = false;
   bool tables_hit = false;
-  if (mesh_float_now && gtab.size() == 3 * n * span && seen_pos.size() == 3 * n && seen_grid[0] == nx &&
-      seen_grid[1] == ny && seen_grid[2] == nz && seen_grid[3] == order) {
-    bool box_same = true;
-    for (int r = 0; r < 3 && box_same; ++r) {
-      for (int c = 0; c < 3; ++c) {
-        if (seen_box[3 * r + c] != cell.H[r][c]) {
-          box_same = false;
+  if (group_leader()) {
+    if (mesh_float_now && gtab.size() == 3 * n * span && seen_pos.size() == 3 * n &&
+        seen_grid[0] == nx && seen_grid[1] == ny && seen_grid[2] == nz && seen_grid[3] == order) {
+      bool box_same = true;
+      for (int r = 0; r < 3 && box_same; ++r) {
+        for (int c = 0; c < 3; ++c) {
+          if (seen_box[3 * r + c] != cell.H[r][c]) {
+            box_same = false;
+          }
         }
       }
+      if (box_same && std::memcmp(seen_pos.data(), pos, 3 * n * sizeof(double)) == 0) {
+        tables_hit = true;
+      }
     }
-    if (box_same && std::memcmp(seen_pos.data(), pos, 3 * n * sizeof(double)) == 0) {
-      tables_hit = true;
-    }
+    team_tables_hit = tables_hit;
+  }
+  if (in_group()) {
+    group_arrive();
+    tables_hit = team_tables_hit;
   }
   const auto t_spread0 = std::chrono::steady_clock::now();
   auto remember_tables = [&]() {
