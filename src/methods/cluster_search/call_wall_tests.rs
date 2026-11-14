@@ -245,3 +245,14 @@ proptest! {
         prop_assert_eq!(CallWall::of(&reactive_r).refuses(reversed.view()), bonding);
     }
 }
+
+#[test]
+fn a_declared_floor_walls_a_species_free_search() {
+    let mut cfg = Config::for_cluster(2);
+    cfg.call_floor = Some(0.9);
+    let wall = CallWall::of(&cfg);
+    assert!(matches!(wall, CallWall::Floor(_)));
+    assert!(wall.refuses(pair(0.9).view()));
+    assert!(!wall.refuses(pair(0.95).view()));
+    assert!(wall.refuses(pair(f64::NAN).view()));
+}

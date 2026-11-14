@@ -76,6 +76,13 @@ fn evaluate(pot: &RgpotObjective, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
     pair
 }
 
+/// The handle's answer to a geometry it refuses, without charging for it.
+///
+/// A line search reads the non-finite value as an uphill step and shortens it.
+fn refused(x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+    rgpot_eindir::refuses_geometry(&x.to_vec()).then(|| (f64::NAN, Array1::zeros(x.len())))
+}
+
 /// Bond length over 2^(1/6) and well depth of the homonuclear dimer.
 ///
 /// A geometric scan finds the sign change of the bond force and false
@@ -152,6 +159,7 @@ fn general(n: usize, length: f64, energy: f64) -> Config {
     cfg.energy_lattice = false;
     cfg.surfaces.clear();
     cfg.budget_window = true;
+    cfg.call_floor = Some(rgpot_eindir::OVERLAP_CALL_LIMIT_A);
     cfg
 }
 
@@ -215,6 +223,9 @@ fn main() {
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
         optimiser.forget();
         let (value, relaxed, _) = optimiser.minimize(x, iterations, |v| {
+            if let Some(refused) = refused(v) {
+                return Some(refused);
+            }
             if !led.charge() {
                 return None;
             }
@@ -223,6 +234,9 @@ fn main() {
         (value, relaxed)
     };
     let mut grad = |led: &mut Ledger, v: ArrayView1<f64>| {
+        if let Some((_, gradient)) = refused(v) {
+            return Some(gradient);
+        }
         if !led.charge() {
             return None;
         }
