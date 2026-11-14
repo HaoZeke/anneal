@@ -256,3 +256,72 @@ fn a_declared_floor_walls_a_species_free_search() {
     assert!(!wall.refuses(pair(0.95).view()));
     assert!(wall.refuses(pair(f64::NAN).view()));
 }
+
+fn fixture(name: &str) -> (Vec<u32>, Array1<f64>) {
+    let path = format!("{}/examples/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(path).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    let n: usize = lines[0].trim().parse().unwrap();
+    let mut species = Vec::with_capacity(n);
+    let mut coordinates = Vec::with_capacity(3 * n);
+    for line in &lines[2..2 + n] {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        species.push(match fields[0] {
+            "H" => 1,
+            "C" => 6,
+            "N" => 7,
+            "O" => 8,
+            other => panic!("unexpected element {other}"),
+        });
+        coordinates.extend(fields[1..4].iter().map(|v| v.parse::<f64>().unwrap()));
+    }
+    (species, Array1::from(coordinates))
+}
+
+/// The xtb-optimised Ac-Ala3-NHMe conformers hold carbonyl and amide bonds
+/// at 0.85 and 0.92 of the single-bond radius sum, and as one declared
+/// molecule every pair shares a group.
+#[test]
+fn an_equilibrium_peptide_is_neither_refused_nor_rewritten() {
+    for name in ["ac-ala3-nhme.xyz", "ac-ala3-nhme-s9743.xyz"] {
+        let (species, x) = fixture(name);
+        let groups =
+            crate::methods::cluster_hopping::connectivity_groups_z(x.view(), &species, 1.2);
+        assert_eq!(groups.len(), 1, "{name}");
+        let cfg = molecular(species.clone(), groups, false);
+        assert!(!CallWall::of(&cfg).refuses(x.view()), "{name}");
+        let mut repaired = x.clone();
+        assert!(separate_contacts(
+            &mut repaired,
+            cfg.move_library.declared_groups(),
+            OVERLAP_CALL_LIMIT,
+            crate::methods::cluster_hopping::OVERLAP_CLASH_CLEARANCE,
+            None,
+            Some(&species),
+            cfg.bond_tolerance,
+        ));
+        assert_eq!(repaired, x, "{name}");
+    }
+}
+
+#[test]
+fn a_compressed_bond_is_restored_to_its_shortest_bond_order() {
+    let species = [6u32, 8];
+    let groups = vec![vec![0usize, 1]];
+    let mut x = pair(0.95);
+    assert!(separate_contacts(
+        &mut x,
+        Some(&groups),
+        OVERLAP_CALL_LIMIT,
+        crate::methods::cluster_hopping::OVERLAP_CLASH_CLEARANCE,
+        None,
+        Some(&species),
+        1.25,
+    ));
+    let length = min_pair_distance(x.view());
+    let shortest = crate::methods::cluster_hopping::shortest_bond_length(6, 8);
+    assert!(
+        (length - shortest).abs() < 1.0e-6,
+        "{length} against {shortest}"
+    );
+}
