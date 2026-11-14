@@ -6016,7 +6016,10 @@ where
         let held = if cfg.budget_window {
             law.temperature(gap, ledger.remaining())
         } else {
-            cfg.temperature
+            // The dial matches `cfg.temperature` until a steep quench
+            // shows acceptance far from one half. Bias and proposal
+            // amplitudes keep the preset.
+            dial.temperature()
         };
         let single = single_chain_temperature(cfg, held, dos.as_ref(), e);
         let scale = if n_rep > 1 && cfg.ladder_mode.tempers() {
@@ -7668,7 +7671,6 @@ where
             }
         }
         dial.observe(accept);
-        cfg.temperature = dial.temperature();
         if accept {
             accepted += 1;
             // Every accepted quench within the window is a candidate stage
