@@ -1644,6 +1644,47 @@
       "missing_outputs": {
         "/work/gmin-losses2/stamps/panel.stamp": "a touch() stamp outside the tree that marks the rows written under /work/gmin-losses2; it is never committed"
       }
+    },
+    {
+      "rule": "h2o20_crest",
+      "competitors": [
+        "CREST"
+      ],
+      "runners": [
+        "scripts/h2o20_crest/run_onehost.py",
+        "scripts/h2o20_crest/enter_onehost.sh"
+      ],
+      "budgets": {
+        "source": "scripts/h2o20_crest/run_onehost.py",
+        "name": "PAPER_BUDGETS",
+        "keys": [
+          "h2o20"
+        ]
+      },
+      "seeds": {
+        "source": "scripts/h2o20_crest/run_onehost.py",
+        "name": "SEEDS"
+      },
+      "asv": "bench/h2o20-crest/benchmarks/h2o20_crest.py::H2o20Crest",
+      "rows": [
+        {
+          "path": "bench/h2o20-crest/seeds.csv",
+          "key": "system",
+          "arm": "arm",
+          "seed": "seed",
+          "budget": "budget",
+          "keys": [
+            "h2o20"
+          ],
+          "arms": [
+            "anneal",
+            "crest"
+          ]
+        }
+      ],
+      "missing_outputs": {
+        "/work/h2o20-onehost/stamps/panel.stamp": "a touch() stamp outside the tree that marks the rows appended to bench/h2o20-crest/seeds.csv; it is never committed"
+      }
     }
   ],
   "not_h2h": {

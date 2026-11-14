@@ -1,0 +1,2 @@
+system,anneal_arm,n,reference_Eh,reference_source,anneal_hits,crest_hits,fisher_p,mannwhitney_p,W_plus,W_minus,wilcoxon_p,rank_biserial,median_gap_Eh,anneal_potential_median_s,anneal_outside_median_s,crest_potential_median_s,crest_outside_median_s,code_revision,host
+h2o20,anneal,6,-101.748066515747,best_of_arms,1,0,1,0.005074868098,0.0,21.0,0.03125,-1,-0.007216007464,1236.023867,474.677276,1256.795367,78.7654125,c2de652dca0bc75e2b0cb4afffac91fd656404e4,bench
