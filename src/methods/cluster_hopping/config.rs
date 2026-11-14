@@ -984,6 +984,33 @@ pub struct Config {
     /// The move does not name a packing or a composition.
     #[serde(skip_serializing_if = "is_false")]
     pub general_collective: bool,
+    /// Exchange descent after every full quench of a labelled cluster.
+    ///
+    /// Unlike pairs are exchanged on the quenched geometry in a drawn
+    /// order, each exchange kept when the unrelaxed energy drops, for at
+    /// most 96 energy reads; a reordered geometry is quenched again and
+    /// the lower of the two is the trial. A geometry is then judged by an
+    /// ordering close to its own best rather than by the one the move
+    /// left behind. Acts only where the unlike-pair polish does: an atomic
+    /// library with two labels. On in the paper preset.
+    #[serde(skip_serializing_if = "is_true")]
+    pub homotop_descent: bool,
+    /// Rank the unlike-pair polish of a new best by unrelaxed energy.
+    ///
+    /// Every exchange is read once on the new best and only the 48 lowest
+    /// are quenched, where the unranked polish quenches up to 800 per
+    /// round. Same scope as [`Config::homotop_descent`]. On in the paper
+    /// preset.
+    #[serde(skip_serializing_if = "is_true")]
+    pub homotop_ranked: bool,
+    /// The budget-window law sets the temperature of a labelled cluster.
+    ///
+    /// The preset temperature is a Lennard-Jones well. A labelled cluster
+    /// has an ordering for every geometry, and at that temperature the
+    /// chain stands well above its best. Same scope as
+    /// [`Config::homotop_descent`]. On in the paper preset.
+    #[serde(skip_serializing_if = "is_true")]
+    pub homotop_window: bool,
     /// Fraction of the starting radius the annealed threshold falls to.
     ///
     /// Bounded below by what basin identity needs, which is not what a
@@ -1698,6 +1725,9 @@ impl Config {
             prior_core: true,
             prior_motif: true,
             general_collective: false,
+            homotop_descent: true,
+            homotop_ranked: true,
+            homotop_window: true,
             diversity_floor: 0.75,
             height_revisits: 4.0,
             screen_margin: LennardJonesPreset::SCREEN_MARGIN * energy_scale,
