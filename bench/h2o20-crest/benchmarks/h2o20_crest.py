@@ -1,8 +1,8 @@
 # Copyright (c) anneal developers
-"""Airspeed Velocity check of the (H2O)20 summary.
+"""Airspeed Velocity check of the corrected (H2O)20 summary.
 
 The clock is the rebuild of summary.csv from the committed rows. It does
-not start a search. ``PAPER_BUDGETS`` is the charged-call cap both arms
+not start a search. ``PAPER_BUDGETS`` is the charged-call cap all three arms
 share.
 """
 
@@ -18,6 +18,7 @@ PAPER_BUDGETS = {"h2o20": 28000}
 
 class H2o20Crest:
     PAPER_BUDGETS = PAPER_BUDGETS
+    ARMS = ("anneal", "anneal-capped-lindh", "crest")
 
 
 class Smoke:

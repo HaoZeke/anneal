@@ -4,11 +4,9 @@
 
 Both arms evaluate rgpot GFN2 plus the one-sided O-H wall. Anneal does
 that in process. CREST 3.0.2 reaches it through xtb ``--driver`` into
-``examples/gfn2_water_crest_driver``. Each seed starts from one random
-placement of rigid waters, shared by both arms. The placement draws
-centres uniformly in a ball and orientations from random quaternions,
-and refuses an intermolecular contact inside 2 angstrom. It is not a
-motif, a lattice, or a shell built from a group index.
+``examples/gfn2_water_crest_driver``. Each seed reuses the exact random
+rigid-water placement from the original panel, shared by all arms. It is
+not a motif, a lattice, or a shell built from a group index.
 
 ``PAPER_BUDGETS`` is the charged-call cap, the 28000 calls already used
 for GFN2 (H2O)20. A pair already in the rows file at that budget is not
@@ -48,7 +46,7 @@ ROWS = ROOT / "bench" / "h2o20-crest" / "seeds.csv"
 SUMMARY = ROOT / "bench" / "h2o20-crest" / "summary.csv"
 PAPER_BUDGETS = {"h2o20": 28000}
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
-ARMS = ("anneal", "crest")
+ARMS = ("anneal", "anneal-capped-lindh", "crest")
 MOLECULES = 20
 SYSTEM = "h2o20"
 BUDGET = PAPER_BUDGETS[SYSTEM]
@@ -57,9 +55,6 @@ HIT_TOL_EH = 1.0e-6
 UNREACHABLE_EV = -1.0e6
 SCHEDULE_SEED = 20261117
 DRIVER_PATH_MAX = 64
-BALL_RADIUS_A = 9.0
-CONTACT_A = 2.0
-WATER = ((0.0, 0.0, 0.0), (0.7572, 0.5865, 0.0), (-0.7572, 0.5865, 0.0))
 
 ROW_FIELDS = [
     "system",
@@ -76,6 +71,7 @@ ROW_FIELDS = [
 ]
 SUMMARY_FIELDS = [
     "system",
+    "anneal_arm",
     "n",
     "reference_Eh",
     "reference_source",
@@ -144,63 +140,6 @@ def rescore(xtb: Path, xyz: Path, out: Path, core: str) -> str:
         check=True,
     )
     return last_energy(out / "opt.out")
-
-
-def random_start(seed: int, path: Path) -> None:
-    """Rigid waters at random centres and orientations. Identical for both arms."""
-    rng = random.Random(seed)
-    placed: list[tuple[str, float, float, float]] = []
-
-    def quat() -> tuple[float, float, float, float]:
-        u, v, w = rng.random(), rng.random(), rng.random()
-        return (
-            math.sqrt(1 - u) * math.sin(2 * math.pi * v),
-            math.sqrt(1 - u) * math.cos(2 * math.pi * v),
-            math.sqrt(u) * math.sin(2 * math.pi * w),
-            math.sqrt(u) * math.cos(2 * math.pi * w),
-        )
-
-    def rotate(q, point):
-        x, y, z, w = q
-        vx, vy, vz = point
-        tx, ty, tz = 2 * (y * vz - z * vy), 2 * (z * vx - x * vz), 2 * (x * vy - y * vx)
-        return (
-            vx + w * tx + (y * tz - z * ty),
-            vy + w * ty + (z * tx - x * tz),
-            vz + w * tz + (x * ty - y * tx),
-        )
-
-    radius = BALL_RADIUS_A
-    for _molecule in range(MOLECULES):
-        for _attempt in range(20000):
-            while True:
-                centre = [rng.uniform(-1.0, 1.0) for _ in range(3)]
-                if sum(value * value for value in centre) <= 1.0:
-                    break
-            centre = [radius * value for value in centre]
-            turn = quat()
-            atoms = []
-            for index, site in enumerate(WATER):
-                rx, ry, rz = rotate(turn, site)
-                atoms.append(("O" if index == 0 else "H", centre[0] + rx, centre[1] + ry, centre[2] + rz))
-            clear = True
-            for _symbol, x, y, z in atoms:
-                for _other, ox, oy, oz in placed:
-                    dx, dy, dz = x - ox, y - oy, z - oz
-                    if dx * dx + dy * dy + dz * dz < CONTACT_A * CONTACT_A:
-                        clear = False
-                        break
-                if not clear:
-                    break
-            if clear:
-                placed.extend(atoms)
-                break
-        else:
-            raise SystemExit(f"seed {seed} did not place molecule {_molecule}")
-    lines = [str(len(placed)), f"(H2O){MOLECULES} seed {seed} random rigid waters"]
-    lines.extend(f"{symbol} {x:.8f} {y:.8f} {z:.8f}" for symbol, x, y, z in placed)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n")
 
 
 def append_row(path: Path, row: dict) -> None:
@@ -317,39 +256,90 @@ def write_summary(path: Path, rows: list[dict[str, str]]) -> None:
         for row in rows
         if row["system"] == SYSTEM and int(row["budget"]) == BUDGET and int(row["seed"]) in SEEDS
     ]
-    by_seed: dict[int, dict[str, dict[str, str]]] = {}
+    by_revision: dict[str, dict[int, dict[str, dict[str, str]]]] = {}
     for row in chosen:
-        by_seed.setdefault(int(row["seed"]), {})[row["arm"]] = row
-    paired = [by_seed[seed] for seed in SEEDS if set(by_seed.get(seed, {})) >= set(ARMS)]
-    if len(paired) != len(SEEDS):
-        path.write_text(",".join(SUMMARY_FIELDS) + "\n")
-        return
-    anneal = [float(pair["anneal"]["rescored_Eh"]) for pair in paired]
-    crest = [float(pair["crest"]["rescored_Eh"]) for pair in paired]
-    reference = min(anneal + crest)
-    anneal_hits = sum(energy_hits(value, reference, HIT_TOL_EH) for value in anneal)
-    crest_hits = sum(energy_hits(value, reference, HIT_TOL_EH) for value in crest)
-    gaps = [a - c for a, c in zip(anneal, crest)]
-    p_value, positive, negative, effect = wilcoxon(gaps)
-    text = ",".join(SUMMARY_FIELDS) + "\n"
-    text += (
-        f"{SYSTEM},{len(paired)},{reference:.12f},best_of_arms,"
-        f"{anneal_hits},{crest_hits},{plain(fisher(anneal_hits, len(paired), crest_hits, len(paired)))},"
-        f"{plain(mann_whitney(anneal, crest))},{positive:.1f},{negative:.1f},{plain(p_value)},"
-        f"{plain(effect)},{plain(median(gaps))},"
-        f"{plain(median([float(pair['anneal']['pot_s']) for pair in paired]))},"
-        f"{plain(median([float(pair['anneal']['outside_s']) for pair in paired]))},"
-        f"{plain(median([float(pair['crest']['pot_s']) for pair in paired]))},"
-        f"{plain(median([float(pair['crest']['outside_s']) for pair in paired]))},"
-        f"{paired[0]['anneal']['code_revision']},{paired[0]['anneal']['host']}\n"
-    )
+        by_revision.setdefault(row["code_revision"], {}).setdefault(
+            int(row["seed"]), {}
+        )[row["arm"]] = row
+    summaries: list[dict[str, str]] = []
+    for revision, by_seed in by_revision.items():
+        present = {
+            arm
+            for seed in SEEDS
+            for arm in by_seed.get(seed, {})
+        }
+        anneal_arms = [arm for arm in ARMS if arm != "crest" and arm in present]
+        complete_arms = [
+            arm
+            for arm in anneal_arms
+            if all(arm in by_seed.get(seed, {}) and "crest" in by_seed.get(seed, {}) for seed in SEEDS)
+        ]
+        if not complete_arms:
+            continue
+        reference = min(
+            float(by_seed[seed][arm]["rescored_Eh"])
+            for seed in SEEDS
+            for arm in [*complete_arms, "crest"]
+        )
+        crest_rows = [by_seed[seed]["crest"] for seed in SEEDS]
+        crest = [float(row["rescored_Eh"]) for row in crest_rows]
+        crest_hits = sum(energy_hits(value, reference, HIT_TOL_EH) for value in crest)
+        for arm in complete_arms:
+            anneal_rows = [by_seed[seed][arm] for seed in SEEDS]
+            anneal = [float(row["rescored_Eh"]) for row in anneal_rows]
+            anneal_hits = sum(
+                energy_hits(value, reference, HIT_TOL_EH) for value in anneal
+            )
+            gaps = [a - c for a, c in zip(anneal, crest)]
+            p_value, positive, negative, effect = wilcoxon(gaps)
+            summaries.append(
+                {
+                    "system": SYSTEM,
+                    "anneal_arm": arm,
+                    "n": str(len(SEEDS)),
+                    "reference_Eh": f"{reference:.12f}",
+                    "reference_source": "best_of_arms",
+                    "anneal_hits": str(anneal_hits),
+                    "crest_hits": str(crest_hits),
+                    "fisher_p": plain(fisher(anneal_hits, len(SEEDS), crest_hits, len(SEEDS))),
+                    "mannwhitney_p": plain(mann_whitney(anneal, crest)),
+                    "W_plus": f"{positive:.1f}",
+                    "W_minus": f"{negative:.1f}",
+                    "wilcoxon_p": plain(p_value),
+                    "rank_biserial": plain(effect),
+                    "median_gap_Eh": plain(median(gaps)),
+                    "anneal_potential_median_s": plain(
+                        median([float(row["pot_s"]) for row in anneal_rows])
+                    ),
+                    "anneal_outside_median_s": plain(
+                        median([float(row["outside_s"]) for row in anneal_rows])
+                    ),
+                    "crest_potential_median_s": plain(
+                        median([float(row["pot_s"]) for row in crest_rows])
+                    ),
+                    "crest_outside_median_s": plain(
+                        median([float(row["outside_s"]) for row in crest_rows])
+                    ),
+                    "code_revision": revision,
+                    "host": anneal_rows[0]["host"],
+                }
+            )
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(summaries)
 
 
-def run_anneal(binary: Path, seed: int, start: Path, out: Path, core: str) -> dict[str, str]:
+def run_anneal(
+    binary: Path, seed: int, start: Path, out: Path, core: str, capped_lindh: bool
+) -> dict[str, str]:
     out.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, H2H_START_XYZ=str(start))
+    if capped_lindh:
+        env["H2H_CAPPED_LINDH"] = "1"
+    else:
+        env.pop("H2H_CAPPED_LINDH", None)
     subprocess.run(
         ["taskset", "-c", core, str(binary), str(MOLECULES), str(BUDGET), str(seed), str(out)],
         env=env,
@@ -485,6 +475,7 @@ def main() -> None:
     parser.add_argument("--xtb", type=Path)
     parser.add_argument("--engine", type=Path)
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--starts", type=Path)
     parser.add_argument("--rows", type=Path, default=ROWS)
     parser.add_argument("--summary", type=Path, default=SUMMARY)
     parser.add_argument("--head-file", type=Path)
@@ -495,7 +486,7 @@ def main() -> None:
         return
     if socket.gethostname() != "bench":
         raise SystemExit("hostname is not bench")
-    for name in ("anneal", "driver", "crest", "xtb", "engine", "out", "head_file"):
+    for name in ("anneal", "driver", "crest", "xtb", "engine", "out", "starts", "head_file"):
         if getattr(args, name) is None:
             raise SystemExit(f"--{name.replace('_', '-')} is required")
     os.environ["OMP_NUM_THREADS"] = "1"
@@ -508,26 +499,39 @@ def main() -> None:
     revision = args.head_file.read_text().strip()
     host = socket.gethostname()
     starts = args.out / "starts"
+    starts.mkdir(parents=True, exist_ok=True)
     for seed in SEEDS:
+        source = args.starts / f"{seed}.xyz"
+        if not source.is_file():
+            raise SystemExit(f"missing original start {source}")
         path = starts / f"{seed}.xyz"
         if not path.is_file():
-            random_start(seed, path)
+            shutil.copyfile(source, path)
+        elif path.read_bytes() != source.read_bytes():
+            raise SystemExit(f"{path} differs from original start {source}")
     finished = {
-        (int(row["seed"]), row["arm"], int(row["budget"]))
+        (int(row["seed"]), row["arm"], int(row["budget"]), row["code_revision"])
         for row in load_rows(args.rows)
         if row["system"] == SYSTEM
     }
     pairs = [(seed, arm) for seed in SEEDS for arm in ARMS]
     random.Random(SCHEDULE_SEED).shuffle(pairs)
     for seed, arm in pairs:
-        if (seed, arm, BUDGET) in finished:
+        if (seed, arm, BUDGET, revision) in finished:
             print(f"skip {arm} {seed}", flush=True)
             continue
         print(f"start {arm} {seed} {datetime.datetime.now().isoformat(timespec='seconds')}", flush=True)
         start = starts / f"{seed}.xyz"
         where = args.out / arm / str(seed)
-        if arm == "anneal":
-            measured = run_anneal(args.anneal, seed, start, where, args.core)
+        if arm.startswith("anneal"):
+            measured = run_anneal(
+                args.anneal,
+                seed,
+                start,
+                where,
+                args.core,
+                arm == "anneal-capped-lindh",
+            )
         else:
             measured = run_crest(args.crest, args.xtb, args.driver, start, where, args.core)
         row = {

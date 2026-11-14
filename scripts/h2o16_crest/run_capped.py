@@ -150,7 +150,11 @@ def run_anneal(
 ) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     target = f"{REFERENCE_EV + HIT_TOL:.10f}"
-    env = dict(os.environ, H2H_START_XYZ=str(start))
+    env = dict(
+        os.environ,
+        H2H_START_XYZ=str(start),
+        H2H_CAPPED_LINDH="1",
+    )
     with (
         open(out / "stdout.txt", "w") as stdout,
         open(out / "stderr.txt", "w") as stderr,

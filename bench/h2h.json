@@ -1678,12 +1678,21 @@
           ],
           "arms": [
             "anneal",
+            "anneal-capped-lindh",
             "crest"
           ]
         }
       ],
+      "short": [
+        {
+          "key": "h2o20",
+          "arm": "anneal-capped-lindh",
+          "n": 0,
+          "reason": "the corrected capped campaign is configured here, before its rows are recorded"
+        }
+      ],
       "missing_outputs": {
-        "/work/h2o20-onehost/stamps/panel.stamp": "a touch() stamp outside the tree that marks the rows appended to bench/h2o20-crest/seeds.csv; it is never committed"
+        "/work/h2o20-fix/stamps/panel.stamp": "a touch() stamp outside the tree that marks the rows appended to bench/h2o20-crest/seeds.csv; it is never committed"
       }
     }
   ],
