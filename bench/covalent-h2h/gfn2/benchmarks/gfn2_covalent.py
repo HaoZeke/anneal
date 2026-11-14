@@ -1,5 +1,5 @@
 # Copyright (c) anneal developers
-"""Airspeed Velocity timing of one GFN2-xTB Si10 and one C10 anneal seed.
+"""Airspeed Velocity timing of one GFN2-xTB anneal seed per cluster.
 
 The scientific comparison with CREST is ``bench/covalent-h2h/gfn2``. This
 benchmark times the anneal arm the Snakemake rule runs, writing its rows to
@@ -19,12 +19,12 @@ ENTER = ROOT / "scripts" / "covalent_h2h" / "gfn2_enter_bench.sh"
 sys.path.insert(0, str(ROOT / "bench"))
 from h2h import need_env, smoke
 
-PAPER_BUDGETS = {"si10": 100_000, "c10": 100_000}
+PAPER_BUDGETS = {"si10": 100_000, "c10": 100_000, "si13": 100_000, "c20": 100_000, "si20": 100_000}
 
 
 class Gfn2Covalent:
     timeout = 86400
-    params: ClassVar[list[str]] = ["si10", "c10"]
+    params: ClassVar[list[str]] = ["si10", "c10", "c20"]
     param_names: ClassVar[list[str]] = ["system"]
 
     def setup(self, system):

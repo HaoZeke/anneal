@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Serial GFN2-xTB Si10 and C10 panel: anneal's general arm against CREST.
+"""Serial GFN2-xTB silicon and carbon panel: anneal's general arm against CREST.
 
 Both codes run real xtb 6.7.1 GFN2 at one electronic temperature,
 ``ETEMP`` K: anneal through rgpot's ``libxtb_engine.so``
@@ -27,13 +27,14 @@ that log.
 
 Each seed's start is anneal's random start for that seed, written before
 any search. The (seed, code) pairs of a system run in a shuffled order.
-``--codes`` and ``--crest-seeds`` select the arms and CREST's seeds.
+``--codes``, ``--seeds`` and ``--crest-seeds`` select the arms and the
+seeds, each system's defaults being ``SEEDS`` and ``CREST_SEEDS``.
 
 Rows are appended and never rewritten. Each carries ``code_revision``,
 the anneal revision in ``--head-file`` for anneal and ``CREST_REVISION``
-for CREST, and ``host``, the UTS hostname. ``--summary`` writes one line per system and code from the
-rows of that pair's newest revision, the one appended last, and runs
-alone when no binaries are given.
+for CREST, and ``host``, the UTS hostname. ``--summary`` writes one line
+per system and code from the rows of that pair's newest revision, the one
+appended last, and runs alone when no binaries are given.
 Anneal stops at the reference and its miss is the full budget. CREST runs
 to its own end; its energy is the first frame of ``crest_best.xyz``. A
 hit is an energy within ``HIT_TOL`` eV of the reference. This process
@@ -53,18 +54,37 @@ import subprocess
 import time
 from pathlib import Path
 
-SYSTEMS = ("si10", "c10")
+SYSTEMS = ("si10", "c10", "si13", "c20", "si20")
 CODES = ("anneal-general", "crest")
-SEEDS = tuple(range(2000, 2012))
+TWELVE = tuple(range(2000, 2012))
+# Si20 runs six seeds in both arms: a GFN2 call there costs 0.3-0.7 s.
+SEEDS = {
+    "si10": TWELVE,
+    "c10": TWELVE,
+    "si13": TWELVE,
+    "c20": TWELVE,
+    "si20": TWELVE[:6],
+}
+# CREST's seeds where its wall time does not allow twelve.
+CREST_SEEDS = {**SEEDS, "si10": TWELVE[:4], "si13": TWELVE[:6]}
 BUDGET = 100000
 ETEMP = 3000.0
 HIT_TOL = 0.001
 # eV per Hartree in xtb 6.7.1.
 AUTOEV = 27.21138505
-# The lowest minimum any run of either code reached at these settings:
-# anneal at 30000 calls on six seeds per system. The C10 minimum is the
-# cumulenic ring, every bond 1.285 angstrom.
-REFERENCE = {"si10": -460.68373809, "c10": -571.32273783}
+# The lowest minimum any run of either code reached at these settings,
+# each reproduced by xtb from a fresh SCC. Si10 and C10: anneal at 30000
+# calls on six seeds each; the C10 minimum is the cumulenic ring, every
+# bond 1.285 angstrom. C20: the cage, every atom three-coordinated, from
+# one anneal run without the call floor (seed 2006 at 1e5 calls); no
+# other run of either code has reached it. Si13 and Si20 have none yet:
+# the engine's reused wavefunction gives their clusters energies a fresh
+# SCC does not reproduce.
+REFERENCE = {
+    "si10": -460.68373809,
+    "c10": -571.32273783,
+    "c20": -1148.85383633,
+}
 SCHEDULE_SEED = 20261114
 
 ROW_FIELDS = [
@@ -252,8 +272,10 @@ def main() -> None:
     ap.add_argument("--xtb", type=Path)
     ap.add_argument("--out", type=Path)
     ap.add_argument("--rows", type=Path, required=True)
-    ap.add_argument("--systems", nargs="*", default=list(SYSTEMS))
-    ap.add_argument("--seeds", nargs="*", type=int, default=list(SEEDS))
+    ap.add_argument(
+        "--systems", nargs="*", default=[s for s in SYSTEMS if s in REFERENCE]
+    )
+    ap.add_argument("--seeds", nargs="*", type=int)
     ap.add_argument("--crest-seeds", nargs="*", type=int)
     ap.add_argument("--codes", nargs="*", default=list(CODES))
     ap.add_argument("--summary", type=Path)
@@ -266,23 +288,40 @@ def main() -> None:
         raise SystemExit("--anneal, --crest, --xtb and --out run the panel")
     if args.head_file is None:
         raise SystemExit("--head-file names the anneal revision of the rows")
+    for system in args.systems:
+        if system not in REFERENCE:
+            raise SystemExit(f"{system} has no reference")
     if socket.gethostname() != "bench":
         raise SystemExit("hostname is not bench")
     os.environ["RGPOT_XTB_ETEMP"] = f"{ETEMP}"
     os.environ["OMP_NUM_THREADS"] = "1"
     python = os.environ.get("PANEL_PYTHON", "/usr/bin/python3")
     rng = random.Random(SCHEDULE_SEED)
-    head = args.head_file.read_text().strip() if args.head_file else ""
+    head = args.head_file.read_text().strip()
     widen(args.rows)
     write_header = not args.rows.exists()
+    plan = {}
+    for system in args.systems:
+        seeds = SEEDS[system] if args.seeds is None else tuple(args.seeds)
+        crest_seeds = (
+            CREST_SEEDS[system] if args.crest_seeds is None else args.crest_seeds
+        )
+        pairs = [
+            (seed, code)
+            for seed in seeds
+            for code in CODES
+            if code in args.codes and (code != "crest" or seed in crest_seeds)
+        ]
+        rng.shuffle(pairs)
+        plan[system] = (seeds, pairs)
     with open(args.rows, "a", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
         if write_header:
             writer.writeheader()
-        for system in args.systems:
+        for system, (seeds, pairs) in plan.items():
             starts = args.out / system / "starts"
             starts.mkdir(parents=True, exist_ok=True)
-            for seed in args.seeds:
+            for seed in seeds:
                 subprocess.run(
                     [
                         str(args.anneal),
@@ -296,16 +335,6 @@ def main() -> None:
                     capture_output=True,
                     check=True,
                 )
-            crest_seeds = set(
-                args.seeds if args.crest_seeds is None else args.crest_seeds
-            )
-            pairs = [
-                (seed, code)
-                for seed in args.seeds
-                for code in CODES
-                if code in args.codes and (code != "crest" or seed in crest_seeds)
-            ]
-            rng.shuffle(pairs)
             for seed, code in pairs:
                 where = args.out / system / code / str(seed)
                 if code == "crest":
