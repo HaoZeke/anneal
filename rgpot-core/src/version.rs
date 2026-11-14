@@ -267,4 +267,32 @@ mod tests {
         );
         assert!(header.contains(&default_step), "rgpot.h lacks {default_step}");
     }
+
+    /// Every name in the rgpot-core ABI baseline is still declared by the
+    /// committed header. The meson test `abi_core_symbols` checks the same
+    /// list against the symbols the shared library exports.
+    #[test]
+    fn the_abi_baseline_is_declared_by_the_header() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let header = std::fs::read_to_string(format!("{root}/include/rgpot.h")).unwrap();
+        let Ok(baseline) =
+            std::fs::read_to_string(format!("{root}/../scripts/abi_core_baseline.txt"))
+        else {
+            // A packaged crate carries the header but not the repository scripts.
+            return;
+        };
+        for name in baseline.lines().filter(|l| !l.is_empty()) {
+            assert!(header.contains(&format!("{name}(")), "rgpot.h lacks {name}");
+        }
+        for name in [
+            "rgpot_potential_hvp",
+            "rgpot_potential_hvp_centre",
+            "rgpot_potential_set_hvp_callback",
+            "rgpot_potential_hvp_invalidate",
+            "rgpot_potential_hvp_counts",
+            "rgpot_potential_reset_hvp_counts",
+        ] {
+            assert!(baseline.lines().any(|l| l == name), "baseline lacks {name}");
+        }
+    }
 }

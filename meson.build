@@ -723,6 +723,24 @@ if get_option('with_rust_core')
 
     _deps += [rgpot_rust_lib, thread_dep, dl_dep]
 
+    # librgpot links the archive and keeps only the members it references,
+    # so the C ABI of rgpot-core is checked on the cdylib cargo builds
+    # next to it.
+    if host_machine.system() == 'linux'
+        test(
+            'abi_core_symbols',
+            find_program('scripts/abi_symbols.sh'),
+            args: [
+                '-p',
+                '^rgpot_',
+                _rust_target_dir / 'librgpot_core.so',
+                files('scripts/abi_core_baseline.txt'),
+            ],
+            depends: rgpot_rust_target,
+            timeout: 30,
+        )
+    endif
+
     # Include paths: generated C header + C++ RAII wrappers
     _incdirs += [
         include_directories('rgpot-core' / 'include'),  # rgpot.h (cbindgen)
