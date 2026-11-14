@@ -637,6 +637,9 @@ impl RgpotObjective {
             unsafe { lib.get(b"rgpot_xtb_reset\0") }.unwrap_or_else(|_| {
                 panic!("rgpot xtb engine {RGPOT_XTB_ENGINE_REV} is required for rgpot_xtb_reset")
             });
+        // A dissociated monomer is refused before this call. A bound
+        // geometry whose SCC does not converge is smeared and cooled inside
+        // the engine (rgpot b4154a4d) and the energy stays on this surface.
         let cfg = XtbConfig {
             method: GFN2,
             accuracy: GFN2_ACCURACY,
