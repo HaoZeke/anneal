@@ -295,8 +295,21 @@ def lj_cluster(atoms):
 def build(kind, atoms):
     if kind == "LJCluster":
         return lj_cluster(atoms), rgpot.LJClusterPot(cutoff=15.0)
+    if kind == "LJ":
+        # Nearest neighbour at the Lennard-Jones minimum. Cutoff 2 A
+        # plus the kernel's 1 A skin puts five bins on each axis of the
+        # 4096-atom cube, which is where the orthogonal reject used to run.
+        spacing = 2.0 ** (1.0 / 6.0) * math.sqrt(2.0)
+        return lattice(atoms, spacing, FCC, 1), rgpot.LJPot(cutoff=2.0)
     if kind == "Morse":
-        return lattice(atoms, 4.05, FCC, 1), rgpot.MorsePot()
+        # Cutoff 6 A on the 4.05 A FCC cube. The 4096-atom cell then has
+        # six bins on each axis.
+        return lattice(atoms, 4.05, FCC, 1), rgpot.MorsePot(cutoff=6.0)
+    if kind == "EAM":
+        pot = rgpot.EAMAlPot
+        if pot is None:
+            raise SystemExit("this build has no stored EAM potential")
+        return lattice(atoms, 4.05, FCC, 13), pot()
     if kind == "StillingerWeber":
         return lattice(atoms, 5.431, DIAMOND, 14), rgpot.StillingerWeberSi()
     if kind == "Tersoff":
@@ -423,6 +436,12 @@ class LJCluster(_Timed):
     kind = "LJCluster"
 
 
+class LJ(_Timed):
+    """Periodic Lennard-Jones FCC cell at 256, 1024 and 4096 atoms."""
+
+    kind = "LJ"
+
+
 class RayLJCluster(_Tracked):
     """Memray peak of one threaded Lennard-Jones cluster call."""
 
@@ -454,7 +473,7 @@ class Tersoff(_Timed):
 
 
 class Morse(_Timed):
-    """Morse pairs on an FCC cell at 256, 1024 and 4096 atoms."""
+    """Periodic Morse FCC cell at 256, 1024 and 4096 atoms."""
 
     kind = "Morse"
 
@@ -469,14 +488,9 @@ class RayTersoff(_Tracked):
 
 
 class StoredEAM(_Timed):
-    """Stored aluminium EAM at 256, 1024 and 4096 atoms."""
+    """Stored aluminium EAM on a periodic FCC cell."""
 
-    def setup(self, atoms: int, threads: int) -> None:
-        import rgpot
-
-        if rgpot.EAMAlPot is None:
-            raise RuntimeError("this build has no stored EAM potential")
-        _prepare(self, atoms, threads, _aluminium, rgpot.EAMAlPot())
+    kind = "EAM"
 
 
 class RayStoredEAM(_Tracked):
