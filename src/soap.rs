@@ -1683,8 +1683,41 @@ pub fn fivefold_axis_count(x: ArrayView1<f64>) -> usize {
         .count()
 }
 
+struct AxisTableCache {
+    bits: Vec<u64>,
+    rows: Vec<([f64; 3], f64)>,
+}
+
+std::thread_local! {
+    static AXIS_TABLE: std::cell::RefCell<AxisTableCache> = const {
+        std::cell::RefCell::new(AxisTableCache {
+            bits: Vec::new(),
+            rows: Vec::new(),
+        })
+    };
+}
+
+fn same_axis_geometry(bits: &[u64], x: ArrayView1<f64>) -> bool {
+    bits.len() == x.len()
+        && bits
+            .iter()
+            .zip(x.iter())
+            .all(|(bit, value)| *bit == value.to_bits())
+}
+
 /// Candidate axis and its fivefold length, best first.
 pub fn fivefold_axis_table(x: ArrayView1<f64>) -> Vec<([f64; 3], f64)> {
+    let cached = AXIS_TABLE.with(|slot| {
+        let slot = slot.borrow();
+        if same_axis_geometry(&slot.bits, x) {
+            Some(slot.rows.clone())
+        } else {
+            None
+        }
+    });
+    if let Some(rows) = cached {
+        return rows;
+    }
     let mut rows: Vec<([f64; 3], f64)> = candidate_axes(x)
         .into_iter()
         .map(|ax| {
@@ -1700,6 +1733,12 @@ pub fn fivefold_axis_table(x: ArrayView1<f64>) -> Vec<([f64; 3], f64)> {
         })
         .collect();
     rows.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+    AXIS_TABLE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        slot.bits.clear();
+        slot.bits.extend(x.iter().map(|value| value.to_bits()));
+        slot.rows.clone_from(&rows);
+    });
     rows
 }
 
@@ -1869,6 +1908,20 @@ fn row_min_rms_clears(x: ArrayView1<f64>, axis: [f64; 3], cap: f64) -> bool {
 ///
 /// This is at most the minimum-cost assignment residual: the assignment
 /// cannot beat giving every atom its own nearest image.
+struct RmsScratch {
+    centred: Vec<[f64; 3]>,
+    turned: Vec<[f64; 3]>,
+}
+
+std::thread_local! {
+    static RMS_SCRATCH: std::cell::RefCell<RmsScratch> = const {
+        std::cell::RefCell::new(RmsScratch {
+            centred: Vec::new(),
+            turned: Vec::new(),
+        })
+    };
+}
+
 fn rotation_row_min_rms(x: ArrayView1<f64>, axis: [f64; 3]) -> f64 {
     let n = x.len() / 3;
     if n == 0 {
@@ -1876,29 +1929,36 @@ fn rotation_row_min_rms(x: ArrayView1<f64>, axis: [f64; 3]) -> f64 {
     }
     let com = com_of(x);
     let turn = rotation_about(axis, 2.0 * PI / 5.0);
-    let mut centred = Vec::with_capacity(n);
-    let mut turned = Vec::with_capacity(n);
-    for atom in 0..n {
-        let point = [
-            x[3 * atom] - com[0],
-            x[3 * atom + 1] - com[1],
-            x[3 * atom + 2] - com[2],
-        ];
-        centred.push(point);
-        turned.push(rot_apply(&turn, point));
-    }
-    let mut total = 0.0;
-    for point in &centred {
-        let mut nearest = f64::INFINITY;
-        for image in &turned {
-            let dx = point[0] - image[0];
-            let dy = point[1] - image[1];
-            let dz = point[2] - image[2];
-            nearest = nearest.min(dx * dx + dy * dy + dz * dz);
+    RMS_SCRATCH.with(|slot| {
+        let mut scratch = slot.borrow_mut();
+        scratch.centred.clear();
+        scratch.turned.clear();
+        scratch.centred.reserve(n);
+        scratch.turned.reserve(n);
+        for atom in 0..n {
+            let point = [
+                x[3 * atom] - com[0],
+                x[3 * atom + 1] - com[1],
+                x[3 * atom + 2] - com[2],
+            ];
+            scratch.centred.push(point);
+            scratch.turned.push(rot_apply(&turn, point));
         }
-        total += nearest;
-    }
-    (total / n as f64).sqrt()
+        let mut total = 0.0;
+        let count = scratch.centred.len();
+        for index in 0..count {
+            let point = scratch.centred[index];
+            let mut nearest = f64::INFINITY;
+            for image in &scratch.turned {
+                let dx = point[0] - image[0];
+                let dy = point[1] - image[1];
+                let dz = point[2] - image[2];
+                nearest = nearest.min(dx * dx + dy * dy + dz * dz);
+            }
+            total += nearest;
+        }
+        (total / n as f64).sqrt()
+    })
 }
 
 struct ResidualMemo {
@@ -4052,5 +4112,69 @@ mod tests {
         reversed.rotate_left(1);
         let rise = doorway(&permute_atoms(&quenched, &reversed));
         assert!((rise - deposited).abs() < 1e-4, "rotated rise {rise}");
+    }
+
+    fn direct_row_min(x: ArrayView1<f64>, axis: [f64; 3]) -> f64 {
+        let n = x.len() / 3;
+        if n == 0 {
+            return 0.0;
+        }
+        let com = com_of(x);
+        let turn = rotation_about(axis, 2.0 * PI / 5.0);
+        let mut centred = Vec::with_capacity(n);
+        let mut turned = Vec::with_capacity(n);
+        for atom in 0..n {
+            let point = [
+                x[3 * atom] - com[0],
+                x[3 * atom + 1] - com[1],
+                x[3 * atom + 2] - com[2],
+            ];
+            centred.push(point);
+            turned.push(rot_apply(&turn, point));
+        }
+        let mut total = 0.0;
+        for point in &centred {
+            let mut nearest = f64::INFINITY;
+            for image in &turned {
+                let dx = point[0] - image[0];
+                let dy = point[1] - image[1];
+                let dz = point[2] - image[2];
+                nearest = nearest.min(dx * dx + dy * dy + dz * dz);
+            }
+            total += nearest;
+        }
+        (total / n as f64).sqrt()
+    }
+
+    #[test]
+    fn the_cell_nearest_image_matches_the_direct_scan() {
+        let mut s = 0x0F1E_2D3C_4B5Au64;
+        let mut next = || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            (s >> 11) as f64 / ((1u64 << 53) as f64) - 0.5
+        };
+        for n in [13usize, 38, 55, 80] {
+            let radius = 1.15 * (n as f64).cbrt();
+            let coords: Vec<f64> = (0..3 * n).map(|_| 2.0 * radius * next()).collect();
+            let x = Array1::from(coords);
+            for axis in candidate_axes(x.view()) {
+                let fast = rotation_row_min_rms(x.view(), axis);
+                let slow = direct_row_min(x.view(), axis);
+                assert_eq!(
+                    fast.to_bits(),
+                    slow.to_bits(),
+                    "n={n} fast {fast} slow {slow}"
+                );
+            }
+            let first = fivefold_axis_table(x.view());
+            let second = fivefold_axis_table(x.view());
+            assert_eq!(first.len(), second.len());
+            for (left, right) in first.iter().zip(second.iter()) {
+                assert_eq!(left.0, right.0);
+                assert_eq!(left.1.to_bits(), right.1.to_bits());
+            }
+        }
     }
 }

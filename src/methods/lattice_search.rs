@@ -1294,22 +1294,30 @@ fn norm2(a: [f64; 3]) -> f64 {
     a[0] * a[0] + a[1] * a[1] + a[2] * a[2]
 }
 
+fn neighbours_within(atoms: &[[f64; 3]], cut2: f64) -> Vec<Vec<usize>> {
+    let n = atoms.len();
+    let mut lists = vec![Vec::new(); n];
+    if n < 2 || !(cut2 > 0.0) || !cut2.is_finite() {
+        return lists;
+    }
+    for i in 0..n {
+        for j in (i + 1)..n {
+            if pair_dist2(atoms[i], atoms[j]) < cut2 {
+                lists[i].push(j);
+                lists[j].push(i);
+            }
+        }
+    }
+    lists
+}
+
 impl Lattice {
     /// Bonds per atom at [`Lattice::bond_cutoff`].
     pub fn coordination(&self, x: &[f64]) -> Vec<usize> {
         let n = x.len() / 3;
-        let cut2 = self.bond_cutoff * self.bond_cutoff;
-        let mut count = vec![0usize; n];
-        for i in 0..n {
-            let pi = position(x, i);
-            for j in (i + 1)..n {
-                if pair_dist2(pi, position(x, j)) < cut2 {
-                    count[i] += 1;
-                    count[j] += 1;
-                }
-            }
-        }
-        count
+        let atoms: Vec<[f64; 3]> = (0..n).map(|i| position(x, i)).collect();
+        let lists = neighbours_within(&atoms, self.bond_cutoff * self.bond_cutoff);
+        lists.into_iter().map(|list| list.len()).collect()
     }
 
     /// Vacant sites: hollows over the cluster's own triangles, clear of every
@@ -1328,19 +1336,11 @@ impl Lattice {
         let reach2 = reach * reach;
         let clear2 = self.clearance * self.clearance;
         let site2 = self.site_distance * self.site_distance;
-        let mut near: Vec<Vec<usize>> = vec![Vec::new(); n];
+        let near = neighbours_within(&atoms, reach2);
         let mut hollow: Vec<Vec<usize>> = vec![Vec::new(); n];
         for i in 0..n {
-            let pi = atoms[i];
-            for j in 0..n {
-                if j == i {
-                    continue;
-                }
-                let r2 = pair_dist2(pi, atoms[j]);
-                if r2 < reach2 {
-                    near[i].push(j);
-                }
-                if j > i && r2 < hollow2 {
+            for &j in &near[i] {
+                if j > i && pair_dist2(atoms[i], atoms[j]) < hollow2 {
                     hollow[i].push(j);
                 }
             }
@@ -1624,6 +1624,12 @@ impl Lattice {
         if n < 4 {
             return None;
         }
+        if let Some(hit) = exchange_cache_hit(self, x, temperature) {
+            if !charge_oracle(ledger, hit.charge) {
+                return None;
+            }
+            return draw_exchange(x, &hit.offers, &hit.weights, hit.sum, &hit.vacant, rng);
+        }
         let well = median_bond(x)
             .filter(|b| *b > 1e-6)
             .unwrap_or(self.site_distance);
@@ -1655,21 +1661,9 @@ impl Lattice {
         let (offers, weights, _atoms, vacant) =
             self.boltzmann_offers(x, &vacant, well, temperature, &movable, k)?;
         let sum: f64 = weights.iter().sum();
-        let mut draw = rng.random::<f64>() * sum;
-        let mut pick = offers.len() - 1;
-        for (index, weight) in weights.iter().enumerate() {
-            draw -= weight;
-            if draw <= 0.0 {
-                pick = index;
-                break;
-            }
-        }
-        let (_, atom, site) = offers[pick];
-        let mut state = x.to_vec();
-        state[3 * atom] = vacant[site][0];
-        state[3 * atom + 1] = vacant[site][1];
-        state[3 * atom + 2] = vacant[site][2];
-        Some(state)
+        let charge = 1.0 + ((m * n) + (k * m)) as f64 / pairs;
+        exchange_cache_store(self, x, temperature, charge, &offers, &weights, sum, &vacant);
+        draw_exchange(x, &offers, &weights, sum, &vacant, rng)
     }
 
     /// Boltzmann weights of one exchange, as `(atom, site, probability)`.
@@ -1740,9 +1734,10 @@ impl Lattice {
         let n = x.len() / 3;
         let m = vacant.len();
         let atoms: Vec<[f64; 3]> = (0..n).map(|i| position(x, i)).collect();
+        let mut terms = Vec::with_capacity(n);
         let mut atom_energy = vec![0.0; n];
         for i in 0..n {
-            let mut terms = Vec::with_capacity(n - 1);
+            terms.clear();
             for j in 0..n {
                 if i == j {
                     continue;
@@ -1755,10 +1750,10 @@ impl Lattice {
         let site_energy: Vec<f64> = vacant
             .iter()
             .map(|&p| {
-                let mut terms: Vec<f64> = atoms
-                    .iter()
-                    .map(|&q| ranked_pair(self, pair_dist2(p, q), well))
-                    .collect();
+                terms.clear();
+                for q in &atoms {
+                    terms.push(ranked_pair(self, pair_dist2(p, *q), well));
+                }
                 terms.sort_by(|a, b| a.total_cmp(b));
                 terms.iter().sum()
             })
@@ -1804,6 +1799,117 @@ impl Lattice {
 
 /// Exchanges offered to one dynamic-lattice draw.
 const ENERGY_EXCHANGE_POOL: usize = 8;
+
+struct ExchangeMemo {
+    bits: Vec<u64>,
+    temperature: u64,
+    kind: u64,
+    candidates: usize,
+    interior: usize,
+    charge: f64,
+    offers: Vec<(f64, usize, usize)>,
+    weights: Vec<f64>,
+    sum: f64,
+    vacant: Vec<[f64; 3]>,
+}
+
+std::thread_local! {
+    static EXCHANGE_MEMO: std::cell::RefCell<Option<ExchangeMemo>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn kind_tag(kind: PairKind) -> u64 {
+    match kind {
+        PairKind::LennardJones => 1,
+        PairKind::Morse { rho } => rho.to_bits() ^ 0x8000_0000_0000_0000,
+    }
+}
+
+fn exchange_cache_hit(lattice: &Lattice, x: &[f64], temperature: f64) -> Option<ExchangeMemo> {
+    EXCHANGE_MEMO.with(|slot| {
+        let slot = slot.borrow();
+        let memo = slot.as_ref()?;
+        if memo.temperature != temperature.to_bits()
+            || memo.kind != kind_tag(lattice.kind)
+            || memo.candidates != lattice.candidates
+            || memo.interior != lattice.interior_coordination
+            || memo.bits.len() != x.len()
+            || memo
+                .bits
+                .iter()
+                .zip(x.iter())
+                .any(|(bit, value)| *bit != value.to_bits())
+        {
+            return None;
+        }
+        Some(ExchangeMemo {
+            bits: Vec::new(),
+            temperature: memo.temperature,
+            kind: memo.kind,
+            candidates: memo.candidates,
+            interior: memo.interior,
+            charge: memo.charge,
+            offers: memo.offers.clone(),
+            weights: memo.weights.clone(),
+            sum: memo.sum,
+            vacant: memo.vacant.clone(),
+        })
+    })
+}
+
+fn exchange_cache_store(
+    lattice: &Lattice,
+    x: &[f64],
+    temperature: f64,
+    charge: f64,
+    offers: &[(f64, usize, usize)],
+    weights: &[f64],
+    sum: f64,
+    vacant: &[[f64; 3]],
+) {
+    EXCHANGE_MEMO.with(|slot| {
+        *slot.borrow_mut() = Some(ExchangeMemo {
+            bits: x.iter().map(|value| value.to_bits()).collect(),
+            temperature: temperature.to_bits(),
+            kind: kind_tag(lattice.kind),
+            candidates: lattice.candidates,
+            interior: lattice.interior_coordination,
+            charge,
+            offers: offers.to_vec(),
+            weights: weights.to_vec(),
+            sum,
+            vacant: vacant.to_vec(),
+        });
+    });
+}
+
+fn draw_exchange<R: Rng + ?Sized>(
+    x: &[f64],
+    offers: &[(f64, usize, usize)],
+    weights: &[f64],
+    sum: f64,
+    vacant: &[[f64; 3]],
+    rng: &mut R,
+) -> Option<Vec<f64>> {
+    if !(sum > 0.0) || offers.is_empty() {
+        return None;
+    }
+    let mut draw = rng.random::<f64>() * sum;
+    let mut pick = offers.len() - 1;
+    for (index, weight) in weights.iter().enumerate() {
+        draw -= weight;
+        if draw <= 0.0 {
+            pick = index;
+            break;
+        }
+    }
+    let (_, atom, site) = offers[pick];
+    let mut state = x.to_vec();
+    state[3 * atom] = vacant[site][0];
+    state[3 * atom + 1] = vacant[site][1];
+    state[3 * atom + 2] = vacant[site][2];
+    Some(state)
+}
 
 /// Pair energy with the well moved onto `well`.
 ///
@@ -2434,6 +2540,42 @@ mod tests {
                     "move probabilities moved under a relabelling"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn neighbour_lists_match_the_double_loop_and_sites_repeat() {
+        let mut s = 0xA5A5_F00Du64;
+        let mut next = || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            (s >> 11) as f64 / ((1u64 << 53) as f64) - 0.5
+        };
+        for n in [16usize, 40, 70, 90] {
+            let radius = 1.1 * (n as f64).cbrt();
+            let atoms: Vec<[f64; 3]> = (0..n)
+                .map(|_| [2.0 * radius * next(), 2.0 * radius * next(), 2.0 * radius * next()])
+                .collect();
+            let cut2 = 1.6 * 1.6;
+            let lists = neighbours_within(&atoms, cut2);
+            for i in 0..n {
+                let mut brute = Vec::new();
+                for j in 0..n {
+                    if i != j && pair_dist2(atoms[i], atoms[j]) < cut2 {
+                        brute.push(j);
+                    }
+                }
+                assert_eq!(lists[i], brute, "atom {i} at n={n}");
+            }
+            let mut flat = Vec::with_capacity(3 * n);
+            for atom in &atoms {
+                flat.extend_from_slice(atom);
+            }
+            let lattice = Lattice::default();
+            let once = lattice.sites(&flat);
+            let twice = lattice.sites(&flat);
+            assert_eq!(once, twice);
         }
     }
 }

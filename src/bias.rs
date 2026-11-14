@@ -1031,69 +1031,164 @@ impl Fingerprint for SiteEnergies {
     }
 }
 
-struct SortedPairCache {
+struct PairSlot {
     n_points: usize,
+    hash: u64,
     bits: Vec<u64>,
-    distances: Vec<f64>,
+    /// Pair distances in `(i, j)` loop order, `i < j`, before sorting.
+    unsorted: Vec<f64>,
+    sorted: Vec<f64>,
+}
+
+struct SortedPairCache {
+    slots: Vec<PairSlot>,
+    next: usize,
+}
+
+const PAIR_SLOTS: usize = 8;
+
+fn pair_hash(x: ArrayView1<f64>) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for value in x.iter() {
+        hash ^= value.to_bits();
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn pair_index(n: usize, i: usize, j: usize) -> usize {
+    debug_assert!(i < j && j < n);
+    i * (2 * n - i - 1) / 2 + (j - i - 1)
+}
+
+fn pair_distance(x: ArrayView1<f64>, i: usize, j: usize) -> f64 {
+    let dx = x[3 * i] - x[3 * j];
+    let dy = x[3 * i + 1] - x[3 * j + 1];
+    let dz = x[3 * i + 2] - x[3 * j + 2];
+    (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
+fn same_bits(bits: &[u64], x: ArrayView1<f64>) -> bool {
+    bits.len() == x.len()
+        && bits
+            .iter()
+            .zip(x.iter())
+            .all(|(bit, value)| *bit == value.to_bits())
+}
+
+/// The single atom whose three coordinates differ, when every other atom matches.
+fn moved_atom(bits: &[u64], x: ArrayView1<f64>) -> Option<usize> {
+    if bits.len() != x.len() || x.len() % 3 != 0 {
+        return None;
+    }
+    let n = x.len() / 3;
+    let mut moved = None;
+    for i in 0..n {
+        let changed = bits[3 * i] != x[3 * i].to_bits()
+            || bits[3 * i + 1] != x[3 * i + 1].to_bits()
+            || bits[3 * i + 2] != x[3 * i + 2].to_bits();
+        if changed {
+            if moved.is_some() {
+                return None;
+            }
+            moved = Some(i);
+        }
+    }
+    moved
 }
 
 std::thread_local! {
     static SORTED_PAIR_CACHE: std::cell::RefCell<SortedPairCache> = const {
         std::cell::RefCell::new(SortedPairCache {
-            n_points: 0,
-            bits: Vec::new(),
-            distances: Vec::new(),
+            slots: Vec::new(),
+            next: 0,
         })
     };
 }
 
-fn cached_sorted_pairs(n_points: usize, x: ArrayView1<f64>) -> Option<Array1<f64>> {
-    SORTED_PAIR_CACHE.with(|slot| {
-        let slot = slot.borrow();
-        if slot.n_points != n_points || slot.bits.len() != x.len() {
-            return None;
+fn fresh_pairs(n: usize, x: ArrayView1<f64>) -> Vec<f64> {
+    let mut d = Vec::with_capacity(n * (n - 1) / 2);
+    for i in 0..n {
+        for j in (i + 1)..n {
+            d.push(pair_distance(x, i, j));
         }
-        if slot
-            .bits
-            .iter()
-            .zip(x.iter())
-            .any(|(bits, value)| *bits != value.to_bits())
-        {
-            return None;
-        }
-        Some(Array1::from(slot.distances.clone()))
-    })
+    }
+    d
 }
 
-fn remember_sorted_pairs(n_points: usize, x: ArrayView1<f64>, distances: &[f64]) {
+fn store_pairs(n: usize, x: ArrayView1<f64>, unsorted: Vec<f64>, sorted: Vec<f64>) {
     SORTED_PAIR_CACHE.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        slot.n_points = n_points;
-        slot.bits.clear();
-        slot.bits.extend(x.iter().map(|value| value.to_bits()));
-        slot.distances.clear();
-        slot.distances.extend_from_slice(distances);
+        let mut cache = slot.borrow_mut();
+        if cache.slots.len() < PAIR_SLOTS {
+            cache.slots.push(PairSlot {
+                n_points: n,
+                hash: pair_hash(x),
+                bits: x.iter().map(|value| value.to_bits()).collect(),
+                unsorted,
+                sorted,
+            });
+            return;
+        }
+        let index = cache.next % cache.slots.len();
+        cache.next = cache.next.wrapping_add(1);
+        let entry = &mut cache.slots[index];
+        entry.n_points = n;
+        entry.hash = pair_hash(x);
+        entry.bits.clear();
+        entry.bits.extend(x.iter().map(|value| value.to_bits()));
+        entry.unsorted = unsorted;
+        entry.sorted = sorted;
     });
 }
 
 impl Fingerprint for SortedPairs {
     fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
-        if let Some(cached) = cached_sorted_pairs(self.n_points, x) {
-            return cached;
-        }
         let n = self.n_points;
-        let mut d = Vec::with_capacity(n * (n - 1) / 2);
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let dx = x[3 * i] - x[3 * j];
-                let dy = x[3 * i + 1] - x[3 * j + 1];
-                let dz = x[3 * i + 2] - x[3 * j + 2];
-                d.push((dx * dx + dy * dy + dz * dz).sqrt());
-            }
+        let hash = pair_hash(x);
+        let hit = SORTED_PAIR_CACHE.with(|slot| {
+            let cache = slot.borrow();
+            cache.slots.iter().find_map(|entry| {
+                if entry.n_points == n && entry.hash == hash && same_bits(&entry.bits, x) {
+                    Some(Array1::from(entry.sorted.clone()))
+                } else {
+                    None
+                }
+            })
+        });
+        if let Some(hit) = hit {
+            return hit;
         }
-        d.sort_unstable_by(f64::total_cmp);
-        remember_sorted_pairs(self.n_points, x, &d);
-        Array1::from(d)
+        // One atom moved: rewrite only the pairs that touch it. The unsorted
+        // sequence is the one a full pair loop would have pushed, so the
+        // unstable sort sees the same input.
+        let edited = SORTED_PAIR_CACHE.with(|slot| {
+            let cache = slot.borrow();
+            cache.slots.iter().rev().find_map(|entry| {
+                if entry.n_points != n || entry.unsorted.len() != n * (n - 1) / 2 {
+                    return None;
+                }
+                let atom = moved_atom(&entry.bits, x)?;
+                let mut distances = entry.unsorted.clone();
+                for other in 0..n {
+                    if other == atom {
+                        continue;
+                    }
+                    let (left, right) = if atom < other {
+                        (atom, other)
+                    } else {
+                        (other, atom)
+                    };
+                    distances[pair_index(n, left, right)] = pair_distance(x, left, right);
+                }
+                Some(distances)
+            })
+        });
+        let unsorted = edited.unwrap_or_else(|| fresh_pairs(n, x));
+        let mut sorted = unsorted.clone();
+        sorted.sort_unstable_by(f64::total_cmp);
+        let out = Array1::from(sorted.clone());
+        store_pairs(n, x, unsorted, sorted);
+        out
     }
 }
 
@@ -1868,5 +1963,59 @@ mod adaptive_tests {
         }
         assert_eq!(h.samples(), 0);
         assert_eq!(h.height(), 0.25);
+    }
+}
+
+#[cfg(test)]
+mod pair_cache_tests {
+    use super::*;
+    use ndarray::Array1;
+
+    fn cluster(n: usize, salt: u64) -> Array1<f64> {
+        let mut s = 0x9E37_79B9_7F4A_7C15u64 ^ salt;
+        let mut next = || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            (s >> 11) as f64 / ((1u64 << 53) as f64) - 0.5
+        };
+        let radius = 1.15 * (n as f64).cbrt();
+        Array1::from((0..3 * n).map(|_| 2.0 * radius * next()).collect::<Vec<_>>())
+    }
+
+    fn reference(x: ArrayView1<f64>, n: usize) -> Vec<f64> {
+        let mut d = Vec::new();
+        for i in 0..n {
+            for j in (i + 1)..n {
+                d.push(pair_distance(x, i, j));
+            }
+        }
+        d.sort_unstable_by(f64::total_cmp);
+        d
+    }
+
+    #[test]
+    fn the_cached_spectrum_matches_a_fresh_sort_including_one_moved_atom() {
+        let pairs = SortedPairs { n_points: 80 };
+        for salt in 0..6 {
+            let x = cluster(80, salt);
+            let fresh = reference(x.view(), 80);
+            let described = pairs.describe(x.view());
+            assert_eq!(described.as_slice().unwrap(), fresh.as_slice());
+            assert_eq!(
+                pairs.describe(x.view()).as_slice().unwrap(),
+                fresh.as_slice(),
+                "a repeated geometry left the cache"
+            );
+            let mut moved = x.clone();
+            moved[3 * 7] += 0.05;
+            moved[3 * 7 + 1] -= 0.02;
+            let fresh_moved = reference(moved.view(), 80);
+            assert_eq!(
+                pairs.describe(moved.view()).as_slice().unwrap(),
+                fresh_moved.as_slice(),
+                "a one-atom edit disagreed with a full pair loop"
+            );
+        }
     }
 }

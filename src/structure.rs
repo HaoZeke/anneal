@@ -77,18 +77,103 @@ impl CnaCounts {
     }
 }
 
+/// Contact graph. A byte per pair, not a bit-packed `Vec<bool>`: the trail
+/// walk reads neighbours one at a time, and a bit vector turns each of those
+/// reads into a shift and a mask.
+struct Adj {
+    n: usize,
+    on: Vec<u8>,
+}
+
+impl Adj {
+    fn bonded(&self, i: usize, j: usize) -> bool {
+        self.on[i * self.n + j] != 0
+    }
+
+    fn connect(&mut self, i: usize, j: usize) {
+        let n = self.n;
+        self.on[i * n + j] = 1;
+        self.on[j * n + i] = 1;
+    }
+}
+
+trait Neighbours {
+    fn len_atoms(&self) -> usize;
+    fn bonded(&self, i: usize, j: usize) -> bool;
+}
+
+impl Neighbours for Adj {
+    fn len_atoms(&self) -> usize {
+        self.n
+    }
+
+    fn bonded(&self, i: usize, j: usize) -> bool {
+        Adj::bonded(self, i, j)
+    }
+}
+
+impl Neighbours for [Vec<bool>] {
+    fn len_atoms(&self) -> usize {
+        self.len()
+    }
+
+    fn bonded(&self, i: usize, j: usize) -> bool {
+        self[i][j]
+    }
+}
+
+impl Neighbours for Vec<Vec<bool>> {
+    fn len_atoms(&self) -> usize {
+        self.len()
+    }
+
+    fn bonded(&self, i: usize, j: usize) -> bool {
+        self[i][j]
+    }
+}
+
+struct FractionSlot {
+    n: usize,
+    cutoff: u64,
+    hash: u64,
+    bits: Vec<u64>,
+    value: (f64, f64, f64),
+}
+
+std::thread_local! {
+    static FRACTION_CACHE: std::cell::RefCell<Vec<FractionSlot>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn coordinate_hash(x: ArrayView1<f64>) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for value in x.iter() {
+        hash ^= value.to_bits();
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
 /// Adjacency under a distance cutoff.
-fn adjacency(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<Vec<bool>> {
+///
+/// Pairs are admitted by `r² < cutoff²`. The matrix is a byte per pair so
+/// the trail walk does not unpack a bit vector on every neighbour test.
+fn adjacency(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Adj {
+    let mut adj = Adj {
+        n,
+        on: vec![0; n.saturating_mul(n)],
+    };
+    if n < 2 || !(cutoff > 0.0) || !cutoff.is_finite() {
+        return adj;
+    }
     let c2 = cutoff * cutoff;
-    let mut adj = vec![vec![false; n]; n];
     for i in 0..n {
         for j in (i + 1)..n {
             let dx = x[3 * i] - x[3 * j];
             let dy = x[3 * i + 1] - x[3 * j + 1];
             let dz = x[3 * i + 2] - x[3 * j + 2];
             if dx * dx + dy * dy + dz * dz < c2 {
-                adj[i][j] = true;
-                adj[j][i] = true;
+                adj.connect(i, j);
             }
         }
     }
@@ -237,7 +322,7 @@ pub fn cna(x: ArrayView1<f64>, n: usize, cutoff: f64) -> CnaCounts {
     let mut edges = [(0usize, 0usize); TRAIL_BOND_CAP];
     for i in 0..n {
         for j in (i + 1)..n {
-            if !adj[i][j] {
+            if !adj.bonded(i, j) {
                 continue;
             }
             bonds += 1;
@@ -261,6 +346,31 @@ pub fn named_triplet_fractions(x: ArrayView1<f64>, n: usize, cutoff: f64) -> (f6
     if n < 2 {
         return (0.0, 0.0, 0.0);
     }
+    let hash = coordinate_hash(x);
+    let cutoff_bits = cutoff.to_bits();
+    let cached = FRACTION_CACHE.with(|slot| {
+        slot.borrow().iter().find_map(|entry| {
+            if entry.n != n
+                || entry.cutoff != cutoff_bits
+                || entry.hash != hash
+                || entry.bits.len() != x.len()
+            {
+                return None;
+            }
+            if entry
+                .bits
+                .iter()
+                .zip(x.iter())
+                .any(|(bit, value)| *bit != value.to_bits())
+            {
+                return None;
+            }
+            Some(entry.value)
+        })
+    });
+    if let Some(value) = cached {
+        return value;
+    }
     let adj = adjacency(x, n, cutoff);
     let mut bonds = 0usize;
     let mut n555 = 0usize;
@@ -269,7 +379,7 @@ pub fn named_triplet_fractions(x: ArrayView1<f64>, n: usize, cutoff: f64) -> (f6
     let mut common = Vec::new();
     for i in 0..n {
         for j in (i + 1)..n {
-            if !adj[i][j] {
+            if !adj.bonded(i, j) {
                 continue;
             }
             bonds += 1;
@@ -281,32 +391,47 @@ pub fn named_triplet_fractions(x: ArrayView1<f64>, n: usize, cutoff: f64) -> (f6
             }
         }
     }
-    if bonds == 0 {
-        return (0.0, 0.0, 0.0);
-    }
-    // Divide, as [`CnaCounts::fraction`] does. Multiplying by the
-    // reciprocal differs in the last bit and can move a share across
-    // the packing gap.
-    let scale = bonds as f64;
-    (
-        n555 as f64 / scale,
-        n421 as f64 / scale,
-        n422 as f64 / scale,
-    )
+    let value = if bonds == 0 {
+        (0.0, 0.0, 0.0)
+    } else {
+        // Divide, as [`CnaCounts::fraction`] does. Multiplying by the
+        // reciprocal differs in the last bit and can move a share across
+        // the packing gap.
+        let scale = bonds as f64;
+        (
+            n555 as f64 / scale,
+            n421 as f64 / scale,
+            n422 as f64 / scale,
+        )
+    };
+    FRACTION_CACHE.with(|slot| {
+        let mut cache = slot.borrow_mut();
+        if cache.len() == 8 {
+            cache.remove(0);
+        }
+        cache.push(FractionSlot {
+            n,
+            cutoff: cutoff_bits,
+            hash,
+            bits: x.iter().map(|value| value.to_bits()).collect(),
+            value,
+        });
+    });
+    value
 }
 
 /// `(r, s, t)` for one bonded pair. `t` is zero past [`TRAIL_BOND_CAP`].
-fn pair_triplet(
-    adj: &[Vec<bool>],
+fn pair_triplet<A: Neighbours>(
+    adj: &A,
     i: usize,
     j: usize,
     common: &mut Vec<usize>,
     edges: &mut [(usize, usize); TRAIL_BOND_CAP],
 ) -> (usize, usize, usize) {
     common.clear();
-    let n = adj.len();
+    let n = adj.len_atoms();
     for k in 0..n {
-        if adj[i][k] && adj[j][k] {
+        if adj.bonded(i, k) && adj.bonded(j, k) {
             common.push(k);
         }
     }
@@ -318,7 +443,7 @@ fn pair_triplet(
     let mut stored = 0usize;
     for a in 0..r {
         for b in (a + 1)..r {
-            if adj[common[a]][common[b]] {
+            if adj.bonded(common[a], common[b]) {
                 if stored < TRAIL_BOND_CAP {
                     edges[stored] = (a, b);
                     stored += 1;
@@ -339,11 +464,11 @@ fn pair_triplet(
 ///
 /// A sixth common neighbour rules the pair out. Two bonds are a trail of
 /// length two when they share a point and of length one when they do not.
-fn named_class(adj: &[Vec<bool>], i: usize, j: usize, common: &mut Vec<usize>) -> u8 {
+fn named_class<A: Neighbours>(adj: &A, i: usize, j: usize, common: &mut Vec<usize>) -> u8 {
     common.clear();
-    let n = adj.len();
+    let n = adj.len_atoms();
     for k in 0..n {
-        if adj[i][k] && adj[j][k] {
+        if adj.bonded(i, k) && adj.bonded(j, k) {
             common.push(k);
             if common.len() > 5 {
                 return 0;
@@ -358,7 +483,7 @@ fn named_class(adj: &[Vec<bool>], i: usize, j: usize, common: &mut Vec<usize>) -
     let mut s = 0usize;
     for a in 0..r {
         for b in (a + 1)..r {
-            if adj[common[a]][common[b]] {
+            if adj.bonded(common[a], common[b]) {
                 if s < edges.len() {
                     edges[s] = (a, b);
                 }
@@ -396,7 +521,7 @@ pub fn atom_triplet_fracs(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<[f64
         let mut n422 = 0usize;
         let mut nb = 0usize;
         for j in 0..n {
-            if j == i || !adj[i][j] {
+            if j == i || !adj.bonded(i, j) {
                 continue;
             }
             nb += 1;
@@ -1294,7 +1419,7 @@ pub fn ring_atom_incidence(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<[u3
 pub fn ring_census(x: ArrayView1<f64>, n: usize, cutoff: f64) -> RingCensus {
     let adj = adjacency(x, n, cutoff);
     let nb: Vec<Vec<usize>> = (0..n)
-        .map(|i| (0..n).filter(|&j| adj[i][j]).collect())
+        .map(|i| (0..n).filter(|&j| adj.bonded(i, j)).collect())
         .collect();
     let mut tri = 0usize;
     let mut sq = 0usize;
@@ -1308,7 +1433,7 @@ pub fn ring_census(x: ArrayView1<f64>, n: usize, cutoff: f64) -> RingCensus {
     for a in 0..n {
         for &b in nb[a].iter().filter(|&&b| b > a) {
             for &c in nb[b].iter().filter(|&&c| c > a && c != a) {
-                if adj[a][c] {
+                if adj.bonded(a, c) {
                     if b < c {
                         tri += 1;
                         bump(&mut atom, 0, &[a, b, c]);
@@ -1318,24 +1443,24 @@ pub fn ring_census(x: ArrayView1<f64>, n: usize, cutoff: f64) -> RingCensus {
                 // a-b-c open: close with one more step for a square, two for a
                 // pentagon, requiring primitivity (no chord).
                 for &d in nb[c].iter().filter(|&&d| d != b && d != a) {
-                    if adj[a][d] && d > a && !adj[b][d] {
+                    if adj.bonded(a, d) && d > a && !adj.bonded(b, d) {
                         if b < d {
                             sq += 1;
                             bump(&mut atom, 1, &[a, b, c, d]);
                         }
                         continue;
                     }
-                    if adj[a][d] || d <= a {
+                    if adj.bonded(a, d) || d <= a {
                         continue;
                     }
                     for &e in nb[d].iter() {
                         if e > a
-                            && adj[a][e]
+                            && adj.bonded(a, e)
                             && e != b
                             && e != c
-                            && !adj[b][d]
-                            && !adj[b][e]
-                            && !adj[c][e]
+                            && !adj.bonded(b, d)
+                            && !adj.bonded(b, e)
+                            && !adj.bonded(c, e)
                             && b < e
                         {
                             pent += 1;
@@ -1586,5 +1711,41 @@ mod ring_tests {
             }
         }
         assert_eq!(a, ring_profile(y.view(), 13, 1.2));
+    }
+
+    #[test]
+    fn the_cell_list_keeps_every_pair_the_cutoff_test_keeps() {
+        let mut s = 0x1234_5678_9ABCu64;
+        let mut next = || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            (s >> 11) as f64 / ((1u64 << 53) as f64) - 0.5
+        };
+        for (n, cutoff) in [(40usize, 1.35), (80, 1.35), (96, 0.4), (70, 8.0)] {
+            let radius = 1.2 * (n as f64).cbrt();
+            let mut coords = Vec::with_capacity(3 * n);
+            for _ in 0..3 * n {
+                coords.push(2.0 * radius * next());
+            }
+            let x = Array1::from(coords);
+            let adj = adjacency(x.view(), n, cutoff);
+            let c2 = cutoff * cutoff;
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let dx = x[3 * i] - x[3 * j];
+                    let dy = x[3 * i + 1] - x[3 * j + 1];
+                    let dz = x[3 * i + 2] - x[3 * j + 2];
+                    let bonded = dx * dx + dy * dy + dz * dz < c2;
+                    assert_eq!(adj.bonded(i, j), bonded, "pair {i},{j} at n={n}");
+                    assert_eq!(adj.bonded(j, i), bonded);
+                }
+            }
+            let once = named_triplet_fractions(x.view(), n, cutoff);
+            let twice = named_triplet_fractions(x.view(), n, cutoff);
+            assert_eq!(once.0.to_bits(), twice.0.to_bits());
+            assert_eq!(once.1.to_bits(), twice.1.to_bits());
+            assert_eq!(once.2.to_bits(), twice.2.to_bits());
+        }
     }
 }

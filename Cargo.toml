@@ -169,6 +169,10 @@ harness = false
 name    = "globalopt_hotpaths"
 harness = false
 
+[[bench]]
+name    = "bookkeeping"
+harness = false
+
 [[example]]
 name = "h2h_sc"
 required-features = ["rgpot-ex"]
