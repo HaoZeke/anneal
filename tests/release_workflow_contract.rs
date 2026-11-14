@@ -32,6 +32,8 @@ fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
     assert!(!workflow.contains("tail -1"));
     assert!(!workflow.contains("cargo publish --dry-run --no-verify"));
     assert!(workflow.contains("cargo clippy --all-targets -- -D warnings"));
+    assert!(workflow.contains("cargo clippy --all-targets --features rgpot-ex -- -D warnings"));
+    assert!(workflow.contains("cargo clippy --all-targets --all-features -- -D warnings"));
     assert!(workflow.contains("rm -rf \"$pkg/.cargo\""));
     assert!(workflow.contains("cargo check --locked"));
     assert!(workflow.contains("cargo check --locked --features rgsaddle,python"));

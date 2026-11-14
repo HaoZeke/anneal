@@ -45,6 +45,11 @@ jobs:
       - name: cargo clippy (default features)
         run: cargo clippy --all-targets -- -D warnings
 
+      # The rgpot-ex examples load rgpot through libloading. They need no
+      # native dependency, so they are linted here on their own.
+      - name: cargo clippy (rgpot-ex)
+        run: cargo clippy --all-targets --features rgpot-ex -- -D warnings
+
       # `cargo package` writes anneal-core-${version}.crate and verifies
       # it. The next step extracts that crate, drops the development
       # cargo config and the lockfile, and checks the default features
@@ -108,6 +113,17 @@ jobs:
 
       - name: cargo clippy
         run: cargo clippy --features "$CI_FEATURES,lammps" --all-targets -- -D warnings
+
+      # `gpr` is linted with the rest. clippy type-checks and never links, so
+      # an empty file stands in for libgpr_optim, which a runner cannot fetch;
+      # build.rs only checks that the file is there.
+      - name: cargo clippy (all features)
+        shell: bash
+        run: |
+          mkdir -p .ci/gpr-optim
+          : > .ci/gpr-optim/libgpr_optim.so
+          GPR_OPTIM_LIB_DIR="$GITHUB_WORKSPACE/.ci/gpr-optim" \
+            cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Install Cocogitto
         uses: taiki-e/install-action@v2
