@@ -284,6 +284,10 @@ fn force_audit_line(seed: u64, max_force: f64) -> String {
     )
 }
 
+fn failure_status(error: impl std::fmt::Display) -> String {
+    format!("status: failed\nsearch_error: {error}")
+}
+
 fn read_xyz(path: &std::path::Path) -> Vec<f64> {
     let text =
         fs::read_to_string(path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
@@ -551,7 +555,7 @@ fn main() {
     let (outcome, stats): (Outcome, RelaxStats) = match searched {
         Ok(pair) => pair,
         Err(error) => {
-            writeln!(meta, "search_error: {error}").ok();
+            writeln!(meta, "{}", failure_status(error)).ok();
             writeln!(meta, "hops: 0").ok();
             writeln!(meta, "objective_best_eV: nan").ok();
             writeln!(meta, "engine_best_eV: nan").ok();
@@ -566,9 +570,10 @@ fn main() {
             writeln!(meta, "{line}").ok();
             writeln!(meta, "final_best_evaluation: 0").ok();
             println!("{line}");
-            return;
+            std::process::exit(2);
         }
     };
+    writeln!(meta, "status: ok").ok();
     writeln!(meta, "hops: {}", outcome.hops).ok();
     writeln!(meta, "basins: {}", outcome.basins).ok();
     let local_step = match stats.local_step {
@@ -671,4 +676,17 @@ fn main() {
         &format!("objective {engine_e:.10} eV wall {wall_e:.10} eV"),
     )
     .expect("best xyz");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::failure_status;
+
+    #[test]
+    fn non_finite_search_has_a_failed_user_status() {
+        assert_eq!(
+            failure_status("no finite minimum after 3000 evaluations"),
+            "status: failed\nsearch_error: no finite minimum after 3000 evaluations"
+        );
+    }
 }
