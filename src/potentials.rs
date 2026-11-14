@@ -18,10 +18,104 @@
 //! against each other. Two independent implementations agreeing to six decimals
 //! says more about both than either says alone.
 
+use std::cell::RefCell;
+
 use eindir_core::Objective;
 use eindir_core::bounds::Bounds;
 use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use ndarray::{Array1, ArrayView1};
+
+/// One fused evaluation. The buffers stay allocated so a miss copies into
+/// them instead of building a new pair on every call.
+struct CachedPair {
+    key: u64,
+    hash: u64,
+    bits: Vec<u64>,
+    energy: f64,
+    gradient: Vec<f64>,
+}
+
+struct PairCache {
+    slots: Vec<CachedPair>,
+    next: usize,
+}
+
+// Recent fused evaluations. The gradient asked for after a quench is a
+// point this buffer already holds, and the second kernel call is the same
+// arithmetic. Returning the stored pair keeps the energy and the gradient
+// bit for bit, while the caller still counts the lookup. A short ring is
+// enough: the point is one of the last line-search probes, and walking a
+// long history costs more than the kernel it would skip.
+const PAIR_CACHE_SLOTS: usize = 32;
+
+thread_local! {
+    static PAIR_CACHE: RefCell<PairCache> = RefCell::new(PairCache {
+        slots: Vec::with_capacity(PAIR_CACHE_SLOTS),
+        next: 0,
+    });
+    static PAIR_BITS: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
+}
+
+fn pair_hash(bits: &[u64]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for word in bits {
+        hash ^= *word;
+        hash = hash.wrapping_mul(0x100_0000_01b3);
+    }
+    hash
+}
+
+/// Return a stored pair for `(key, x)`, or compute one and remember it.
+pub(crate) fn cached_pair(
+    key: u64,
+    x: ArrayView1<f64>,
+    compute: impl FnOnce() -> (f64, Array1<f64>),
+) -> (f64, Array1<f64>) {
+    let (hash, hit) = PAIR_BITS.with(|bits| {
+        let mut bits = bits.borrow_mut();
+        bits.clear();
+        bits.extend(x.iter().map(|value| value.to_bits()));
+        let hash = pair_hash(&bits);
+        let hit = PAIR_CACHE.with(|cache| {
+            cache.borrow().slots.iter().find_map(|slot| {
+                (slot.key == key && slot.hash == hash && slot.bits == *bits)
+                    .then(|| (slot.energy, Array1::from_vec(slot.gradient.clone())))
+            })
+        });
+        (hash, hit)
+    });
+    if let Some(pair) = hit {
+        return pair;
+    }
+    let pair = compute();
+    PAIR_BITS.with(|bits| {
+        let bits = bits.borrow();
+        PAIR_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if cache.slots.len() < PAIR_CACHE_SLOTS {
+                cache.slots.push(CachedPair {
+                    key,
+                    hash,
+                    bits: bits.clone(),
+                    energy: pair.0,
+                    gradient: pair.1.to_vec(),
+                });
+                return;
+            }
+            let index = cache.next;
+            let slot = &mut cache.slots[index];
+            slot.key = key;
+            slot.hash = hash;
+            slot.bits.clear();
+            slot.bits.extend_from_slice(&bits);
+            slot.energy = pair.0;
+            slot.gradient.clear();
+            slot.gradient.extend(pair.1.iter().copied());
+            cache.next = (index + 1) % PAIR_CACHE_SLOTS;
+        });
+    });
+    pair
+}
 
 /// A pairwise cluster potential over `n` free points in three dimensions.
 ///
@@ -186,13 +280,26 @@ impl PairPotential {
         self.kind
     }
 
+    fn cache_key(&self) -> u64 {
+        let kind = match self.kind {
+            PairKind::LennardJones => 1,
+            PairKind::Morse { rho } => rho.to_bits().wrapping_mul(0x9E37_79B9),
+        };
+        ((self.n_points as u64) << 32) ^ kind ^ 0x5041_4952
+    }
+
     /// Energy and gradient in one pass.
     ///
     /// Fused because a cluster search spends its budget here: the pair loop is
     /// the same for both, so computing them separately doubles the cost of
     /// every relaxation step. A contiguous cluster uses the rgpot all-pairs
-    /// kernel, which is that walk with no cutoff.
+    /// kernel, which is that walk with no cutoff. A repeated point returns
+    /// the pair already computed for those coordinate bits.
     pub fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        cached_pair(self.cache_key(), x, || self.value_and_gradient_fresh(x))
+    }
+
+    fn value_and_gradient_fresh(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let n = self.n_points;
         let mut e = 0.0;
         let mut g = Array1::zeros(x.len());
@@ -343,6 +450,29 @@ mod tests {
                 assert_eq!(actual.to_bits(), reference.to_bits());
             }
         }
+    }
+
+    /// The second evaluation of the same bits is the pair the first one
+    /// stored, including a different pair form at those coordinates.
+    #[test]
+    fn a_repeated_point_returns_the_stored_pair() {
+        let x = Array1::from(vec![
+            0.0, 0.0, 0.0, 1.1, 0.2, 0.0, 0.3, 1.4, 0.1, 0.2, 0.2, 1.5,
+        ]);
+        let lennard = PairPotential::lennard_jones(4);
+        let (first_energy, first_gradient) = lennard.value_and_gradient(x.view());
+        let (second_energy, second_gradient) = lennard.value_and_gradient(x.view());
+        assert_eq!(first_energy.to_bits(), second_energy.to_bits());
+        for (first, second) in first_gradient.iter().zip(second_gradient.iter()) {
+            assert_eq!(first.to_bits(), second.to_bits());
+        }
+        let morse = PairPotential::morse(4, 6.0);
+        let (morse_energy, _) = morse.value_and_gradient(x.view());
+        assert_ne!(morse_energy.to_bits(), first_energy.to_bits());
+        let mut shifted = x.clone();
+        shifted[0] += 0.25;
+        let (shifted_energy, _) = lennard.value_and_gradient(shifted.view());
+        assert_ne!(shifted_energy.to_bits(), first_energy.to_bits());
     }
 
     /// A coordinate that is not a number makes the energy not a number, as

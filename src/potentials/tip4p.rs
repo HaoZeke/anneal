@@ -132,8 +132,14 @@ impl Tip4pCluster {
         sites
     }
 
-    /// Energy and rigid-body gradient in one pass.
+    /// Energy and rigid-body gradient in one pass. A repeated point returns
+    /// the pair already computed for those coordinate bits.
     pub fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let key = (self.n_molecules as u64) ^ 0x5449_5034;
+        crate::potentials::cached_pair(key, x, || self.value_and_gradient_fresh(x))
+    }
+
+    fn value_and_gradient_fresh(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let n = self.n_molecules;
         assert_eq!(x.len(), 6 * n, "TIP4P state is 6 coordinates per molecule");
         let mut placed = vec![

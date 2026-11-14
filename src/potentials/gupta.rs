@@ -236,11 +236,32 @@ impl Gupta {
         self.n_points
     }
 
+    fn cache_key(&self) -> u64 {
+        let mut key = ((self.n_points as u64) << 32) ^ (self.n_species as u64) ^ 0x4755_5054;
+        for (index, species) in self.slot.iter().enumerate() {
+            key = key
+                .wrapping_mul(0x9E37_79B9)
+                .wrapping_add(*species as u64)
+                .wrapping_add(index as u64);
+        }
+        for pair in &self.pairs {
+            for value in [pair.a, pair.xi, pair.p, pair.q, pair.r0] {
+                key = key.wrapping_mul(0x9E37_79B9).wrapping_add(value.to_bits());
+            }
+        }
+        key
+    }
+
     /// Energy and Cartesian gradient in one pair pass.
     ///
     /// The walk is the rgpot kernel: every pair, density in label order,
-    /// force from the stored pair derivative. There is no cutoff.
+    /// force from the stored pair derivative. There is no cutoff. A repeated
+    /// point returns the pair already computed for those coordinate bits.
     pub fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        crate::potentials::cached_pair(self.cache_key(), x, || self.value_and_gradient_fresh(x))
+    }
+
+    fn value_and_gradient_fresh(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let n = self.n_points;
         assert_eq!(x.len(), 3 * n, "Gupta state is 3 coordinates per atom");
         let coordinates = x.as_slice().expect("Gupta state is contiguous");
