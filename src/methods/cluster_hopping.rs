@@ -4746,6 +4746,9 @@ where
     // Cleared when a new lowest minimum is recorded.
     let mut cage_edit = false;
     let mut csm_reseed_stamp = 0usize;
+    // The reseed clock's own lowest. Sharing `best_seen` would let the
+    // reseed take a new lowest the stall clocks never see.
+    let mut csm_best_seen = ledger.best;
     // Calls spent when a labelled motif reseed last ran. Half a budget
     // since the incumbent last improved, so a search that is still
     // descending does not pay for it.
@@ -5945,6 +5948,7 @@ where
             let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
             charged_at_best = ledger.spent();
             best_seen = ledger.best;
+            csm_best_seen = ledger.best;
             if energy.is_finite() && relaxed.len() == x.len() {
                 internal_action = Some(CheckpointAction::ExternalAdopt {
                     state: relaxed,
@@ -6614,8 +6618,8 @@ where
         // above, restarts the short clock. The clock is not
         // `restart_patience`: that one is thousands of force calls and does
         // not match the five-step restart in the 2013 symmetry paper.
-        if ledger.best < best_seen - 1e-9 {
-            best_seen = ledger.best;
+        if ledger.best < csm_best_seen - 1e-9 {
+            csm_best_seen = ledger.best;
             csm_reseed_stamp = hops;
         }
         // Unlabelled clusters keep the icosahedral test alone. It counts
@@ -11791,6 +11795,77 @@ mod tests {
             "return_polish never fired after {after}; returned {}",
             out.returned
         );
+    }
+
+    /// A new lowest found by any quench of the hop restarts the restart
+    /// clock, wherever in the hop that quench ran.
+    ///
+    /// The energy is a staircase in the charged count, so the record lands on
+    /// whichever quench crosses the step, the continuous-symmetry projection
+    /// among them. The restart quench reads a fresh cluster, and the toy
+    /// relaxation returns its input, so the restart transition names the
+    /// call that started it.
+    #[test]
+    fn a_new_lowest_anywhere_in_the_hop_restarts_the_restart_clock() {
+        let mut cfg = Config::recommended(7);
+        cfg.restart_on_stall = true;
+        cfg.escape_on_stall = false;
+        cfg.restart_patience = 300;
+        cfg.relax_steps = 16;
+        cfg.continuous_symmetry = ContinuousSymmetry::Measure {
+            interval: 1,
+            reseed_hops: 0,
+        };
+        let stair = 997usize;
+        let mut rng = StdRng::seed_from_u64(3);
+        let start = random_cluster(7, 0.7, cfg.min_separation, &mut rng);
+        let mut ledger = Ledger::new(60_000);
+        let mut calls: Vec<(usize, Array1<f64>)> = Vec::new();
+        // The spend at the first call after each new ledger lowest.
+        let mut lowest_at: Vec<usize> = Vec::new();
+        let mut seen = f64::INFINITY;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            let before = led.spent();
+            if led.best < seen - 1e-9 {
+                seen = led.best;
+                lowest_at.push(before);
+            }
+            for _ in 0..steps.max(1) {
+                if !led.charge() {
+                    break;
+                }
+            }
+            let e = -((led.spent() / stair) as f64);
+            calls.push((before, x.to_owned()));
+            (e, x.to_owned())
+        };
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
+        let restarts: Vec<usize> = out
+            .accepted_transitions
+            .iter()
+            .filter(|t| t.action == "restart")
+            .map(|t| {
+                calls
+                    .iter()
+                    .find(|(_, x)| *x == t.to_state)
+                    .map(|(before, _)| *before)
+                    .expect("the restart quench is a logged call")
+            })
+            .collect();
+        assert!(restarts.len() >= 3, "{} restarts", restarts.len());
+        for at in restarts {
+            let last = lowest_at
+                .iter()
+                .copied()
+                .filter(|&s| s <= at)
+                .max()
+                .unwrap_or(0);
+            assert!(
+                at - last >= cfg.restart_patience,
+                "restart at {at} calls, {} after the lowest recorded at {last}",
+                at - last
+            );
+        }
     }
 
     /// A separable quadratic in the point coordinates: its minimum is every
