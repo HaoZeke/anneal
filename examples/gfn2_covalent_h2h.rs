@@ -2,7 +2,7 @@
 //! One seed of the general search on a GFN2-xTB silicon or carbon cluster.
 //!
 //! ```text
-//! gfn2_covalent_h2h <si10|c10> <seed> <budget> [target_eV] [best.xyz]
+//! gfn2_covalent_h2h <si10|si13|si20|c10|c20> <seed> <budget> [target_eV] [best.xyz]
 //! ```
 //!
 //! The energy and gradient are the rgpot GFN2 handle in eV and angstrom,
@@ -60,8 +60,23 @@ fn system(name: &str) -> Option<System> {
             z: 14,
             symbol: "Si",
         }),
+        "si13" => Some(System {
+            n: 13,
+            z: 14,
+            symbol: "Si",
+        }),
+        "si20" => Some(System {
+            n: 20,
+            z: 14,
+            symbol: "Si",
+        }),
         "c10" => Some(System {
             n: 10,
+            z: 6,
+            symbol: "C",
+        }),
+        "c20" => Some(System {
+            n: 20,
             z: 6,
             symbol: "C",
         }),
@@ -181,7 +196,9 @@ fn main() {
     anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some(sys) = args.first().and_then(|name| system(name)) else {
-        eprintln!("usage: gfn2_covalent_h2h <si10|c10> <seed> <budget> [target_eV] [best.xyz]");
+        eprintln!(
+            "usage: gfn2_covalent_h2h <si10|si13|si20|c10|c20> <seed> <budget> [target_eV] [best.xyz]"
+        );
         std::process::exit(2);
     };
     let seed: u64 = args.get(1).and_then(|v| v.parse().ok()).expect("seed");
