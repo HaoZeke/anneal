@@ -209,6 +209,30 @@ jobs:
       - name: Towncrier check vs base branch
         run: potctl ci towncrier-check --compare-with ${{ github.event.pull_request.base.sha }}
 
+  # Potentials.ordinals against the unpatched pinned potentials-schema commit,
+  # the wrap diffs and both vendored copies; append only against the base.
+  schema_ledger:
+    name: schema ordinal ledger
+    needs: [prepare]
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Ledger vs pinned schema, wrap diffs and base ledger
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          base=()
+          if [ -n "${BASE}" ] && git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            base=(--base "${BASE}")
+          fi
+          python3 CppCore/rgpot/rpc/schema_ledger.py check --fetch "${base[@]}"
+      - name: Ledger self-test
+        run: python3 CppCore/tests/test_schema_ledger.py
+
   # --- Stage 1: potctl tools ---
   ci-tools:
     name: ci-tools (potctl / ${{ matrix.os }})
@@ -835,6 +859,7 @@ jobs:
       - docs_snapper
       - docs_lychee
       - towncrier
+      - schema_ledger
       - ci-tools
       - build_and_test
       - build_windows_meson
@@ -870,6 +895,7 @@ jobs:
             "docs_snapper:${{ needs.docs_snapper.result }}" \
             "docs_lychee:${{ needs.docs_lychee.result }}" \
             "towncrier:${{ needs.towncrier.result }}" \
+            "schema_ledger:${{ needs.schema_ledger.result }}" \
             "ci-tools:${{ needs.ci-tools.result }}" \
             "build_and_test:${{ needs.build_and_test.result }}" \
             "build_windows_meson:${{ needs.build_windows_meson.result }}" \

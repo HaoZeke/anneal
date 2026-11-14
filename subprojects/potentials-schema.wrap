@@ -5,5 +5,7 @@ revision = 7fa9046d2f0ddff47e4cb9fbbd11b321e35078c6
 # rgpot-local neighbour chunk: ForceInput.neighbors @9,
 # PotentialResult.neighborList @28, Potential.neighbours @13 and the
 # NeighborRequest, NeighborSystem and NeighborList structs. Upstream has
-# none of these yet, and rgpot 3.6.0 already ships them.
+# none of these yet. The diff may only add lines; Potentials.ordinals
+# records what it adds, and the ledger check refuses a diff that edits
+# or removes an ordinal line.
 diff_files = neighbour-chunk.diff

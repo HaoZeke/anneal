@@ -7,6 +7,25 @@ python = find_program('python3', 'python')
 # vendored Potentials.capnp copies must stay byte-identical to it. The build
 # compiles the vendored copies, so the canonical one only feeds the sync
 # tests, and an offline build (--wrap-mode=nodownload) skips them.
+# The sync tests compare against the checkout after the wrap's diff_files,
+# so an edit made to a diff and to the vendored copies together passes them.
+# schema-ordinal-ledger holds both to Potentials.ordinals and to the
+# unpatched pinned schema instead.
+schema_ledger = files('schema_ledger.py')
+test(
+    'schema-ordinal-ledger-vendored',
+    python,
+    args: [schema_ledger, 'check', '--root', meson.project_source_root()],
+    suite: 'schema',
+)
+test(
+    'schema-ordinal-ledger-selftest',
+    python,
+    args: [
+        meson.project_source_root() / 'CppCore/tests/test_schema_ledger.py',
+    ],
+    suite: 'schema',
+)
 potentials_schema_proj = subproject('potentials-schema', required: false)
 if potentials_schema_proj.found()
     potentials_schema_canonical = potentials_schema_proj.get_variable(
@@ -29,6 +48,19 @@ if potentials_schema_proj.found()
         args: [
             schema_sync_check,
             meson.project_source_root() / 'rgpot-core/schema/Potentials.capnp',
+            potentials_schema_canonical,
+        ],
+        suite: 'schema',
+    )
+    test(
+        'schema-ordinal-ledger',
+        python,
+        args: [
+            schema_ledger,
+            'check',
+            '--root',
+            meson.project_source_root(),
+            '--subproject-schema',
             potentials_schema_canonical,
         ],
         suite: 'schema',

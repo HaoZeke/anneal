@@ -20,6 +20,30 @@ monorepo's =CppCore/= directory is not available.
 The =build.rs= tries the bundled copy first, then falls back to
 =CppCore/rgpot/ rpc/Potentials.capnp= in the monorepo.
 
+** How do I repin potentials-schema?
+
+Both vendored copies are the pinned upstream =Potentials.capnp= with the wrap's
+=diff_files= applied, byte for byte.
+Change =revision= and =directory= in =subprojects/potentials-schema.wrap=, copy
+the upstream file over both copies, and reapply the diffs.
+Then append the new ordinals to =CppCore/rgpot/rpc/Potentials.ordinals=:
+
+#+begin_src bash
+python3 CppCore/rgpot/rpc/schema_ledger.py append
+python3 CppCore/rgpot/rpc/schema_ledger.py check --fetch --base origin/develop
+#+end_src
+
+The ledger is append only.
+=check= fails when a line changes, moves or disappears relative to =--base=, when
+the unpatched pinned schema renumbers, retypes or drops a recorded ordinal, and
+when a vendored copy disagrees with the ledger.
+A wrap diff may not remove or rewrite a line that carries an =@N= ordinal, and
+every ordinal it adds must be a =local= ledger entry that upstream does not
+declare.
+Ordinals belong to potentials-schema: add a new field or arm there first, then
+repin.
+The =schema ledger= CI job runs this check against the pinned commit.
+
 ** Why is the crate README in org-mode?
 
 The source of truth is =rgpot-core/README.org=.

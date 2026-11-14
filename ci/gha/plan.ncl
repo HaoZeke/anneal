@@ -52,6 +52,12 @@ let P = S.pins in
       role = "fragment check (pull_request only)",
     },
     {
+      id = "schema_ledger",
+      runs_on = P.ubuntu,
+      needs = ["prepare"],
+      role = "Potentials.ordinals vs unpatched pinned potentials-schema, wrap diffs, base ledger",
+    },
+    {
       id = "ci-tools",
       runs_on_matrix = [P.ubuntu, P.macos],
       needs = ["prepare"],
@@ -160,6 +166,7 @@ let P = S.pins in
         "docs_snapper",
         "docs_lychee",
         "towncrier",
+        "schema_ledger",
         "ci-tools",
         "build_and_test",
         "build_windows_meson",

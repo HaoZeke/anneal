@@ -1,0 +1,2 @@
+`CppCore/rgpot/rpc/Potentials.ordinals` records every field, union arm, enumerant and method ordinal of `Potentials.capnp` with its name and type, append only.
+`schema_ledger.py check` (meson suite `schema`, CI job `schema ordinal ledger`) holds the unpatched pinned `potentials-schema` commit, the wrap diffs and both vendored copies to it, and refuses a wrap diff that removes or rewrites an `@N` line or adds an ordinal that is not a `local` ledger entry.
