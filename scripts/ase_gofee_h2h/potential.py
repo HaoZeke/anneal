@@ -117,3 +117,121 @@ class LjCalculator(Calculator):
                 f"progress calls={self.calls} best={self.best:.6f}",
                 flush=True,
             )
+
+
+class AnnealServer:
+    """One persistent ``asg_eval serve`` process.
+
+    Stdin is a geometry. Stdout is the energy, the seconds inside the
+    potential, and the gradient. The potential is the one anneal evaluates
+    for that system.
+    """
+
+    def __init__(self, binary: str, system: str):
+        import subprocess
+
+        self.proc = subprocess.Popen(
+            [binary, "serve", system],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+
+    def eval(self, coords: np.ndarray):
+        if self.proc.poll() is not None:
+            raise RuntimeError(f"asg_eval exited {self.proc.returncode}")
+        text = " ".join(f"{float(value):.16e}" for value in coords)
+        assert self.proc.stdin is not None
+        assert self.proc.stdout is not None
+        self.proc.stdin.write(text + "\n")
+        self.proc.stdin.flush()
+        line = self.proc.stdout.readline()
+        if not line:
+            raise RuntimeError("asg_eval closed stdout")
+        values = np.fromstring(line, sep=" ")
+        if values.size < 2:
+            raise RuntimeError(f"asg_eval reply {line!r}")
+        return float(values[0]), float(values[1]), values[2:]
+
+    def close(self):
+        if self.proc.poll() is None and self.proc.stdin is not None:
+            try:
+                self.proc.stdin.write("quit\n")
+                self.proc.stdin.flush()
+            except BrokenPipeError:
+                pass
+            self.proc.wait(timeout=5)
+
+
+class AnnealCalculator(Calculator):
+    """ASE view of an anneal potential.
+
+    ``scale`` is 1 for basin hopping and minima hopping, which stay in the
+    potential's own units. GOFEE passes the factor that puts the pair
+    minimum on the Angstrom length its repulsive prior expects. The energy
+    and the hit are always the native ones.
+    """
+
+    implemented_properties = ["energy", "forces"]
+
+    def __init__(
+        self,
+        server: AnnealServer,
+        budget: int,
+        reference: float,
+        tol: float,
+        fmax: float,
+        scale: float = 1.0,
+        deadline: float | None = None,
+    ):
+        super().__init__()
+        self.server = server
+        self.budget = budget
+        self.reference = reference
+        self.tol = tol
+        self.fmax = fmax
+        self.scale = scale
+        self.deadline = deadline
+        self.calls = 0
+        self.inside_s = 0.0
+        self.hit_calls = None
+        self.best = 1.0e300
+        self.best_quenched = 1.0e300
+
+    def calculate(self, atoms=None, properties=None, system_changes=None):
+        if self.deadline is not None and time.perf_counter() >= self.deadline:
+            raise CapReached()
+        if self.calls >= self.budget:
+            raise BudgetReached()
+        native = np.ascontiguousarray(atoms.positions.ravel(), dtype=np.float64) / self.scale
+        energy, inside, grad = self.server.eval(native)
+        self.inside_s += inside
+        self.calls += 1
+        if not np.isfinite(energy) or not np.all(np.isfinite(grad)):
+            energy = 1.0e8
+            grad = np.zeros_like(native)
+            native_energy = 1.0e300
+        else:
+            native_energy = float(energy)
+        # pos = native * scale and E_ase = E_native * scale, so the force
+        # ASE sees is the native gradient.
+        forces = (-np.asarray(grad, dtype=np.float64)).reshape(-1, 3)
+        self.results = {"energy": native_energy * self.scale, "forces": forces}
+        if native_energy < self.best:
+            self.best = native_energy
+        peak = float(np.max(np.abs(forces))) if forces.size else 0.0
+        if peak <= self.fmax and native_energy < self.best_quenched:
+            self.best_quenched = native_energy
+        if (
+            self.hit_calls is None
+            and peak <= self.fmax
+            and native_energy <= self.reference + self.tol
+        ):
+            self.hit_calls = self.calls
+            raise HitReached()
+        if self.calls % 20000 == 0:
+            print(
+                f"progress calls={self.calls} best={self.best:.6f}",
+                flush=True,
+            )

@@ -640,6 +640,18 @@ rule gad_published:
         """
 
 
+# Gupta, covalent and TIP4P against ASE and GOFEE. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile asg2_h2h
+rule asg2_h2h:
+    output:
+        "bench/ase-gofee-h2h/asg2-summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/ase_gofee_h2h/enter_bench.sh --panel asg2
+        """
+
+
 # Paper preset against AGOX GOFEE. Not part of `rule all`.
 #   snakemake -s workflow/Snakefile agox_gofee_h2h
 rule agox_gofee_h2h:

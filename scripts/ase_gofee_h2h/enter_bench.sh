@@ -7,7 +7,14 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 WORK=/work/ase-gofee-h2h
 BINARY=${H2H_BINARY:-/work/target/release/examples/h2h_gmin_proof}
+EVAL=${H2H_EVAL:-/work/target/release/examples/asg_eval}
 VENV=${H2H_VENV:-$WORK/venv}
+PANEL=0
+for arg in "$@"; do
+  if [[ $arg == "--panel" ]]; then
+    PANEL=1
+  fi
+done
 
 mkdir -p "$WORK/runs" "$WORK/home" "$WORK/tmp" "$WORK/mpl" "$WORK/numba" "$WORK/cache" \
   /work/scratch /work/target
@@ -17,10 +24,20 @@ if [[ ! -x "$VENV/bin/python" ]]; then
   exit 1
 fi
 
+export CARGO_TARGET_DIR=/work/target
+export RUSTFLAGS="--remap-path-prefix=/work/anneal=/src --remap-path-prefix=/agent/repos/anneal=/src --remap-path-prefix=/work/target=/src --remap-path-prefix=/work/scratch=/build"
 if [[ ! -x "$BINARY" ]]; then
-  export CARGO_TARGET_DIR=/work/target
-  export RUSTFLAGS="--remap-path-prefix=/work/anneal=/src --remap-path-prefix=/work/target=/src --remap-path-prefix=/work/scratch=/build"
   (cd /work/anneal && cargo +1.88 build --release --example h2h_gmin_proof)
+fi
+if [[ $PANEL == 1 ]]; then
+  if [[ ! -x "$EVAL" || /work/anneal/examples/asg_eval.rs -nt "$EVAL" ]]; then
+    (cd /work/anneal && cargo +1.88 build --release --example asg_eval)
+  fi
+  if [[ ! -f /work/covalent-h2h/lib/librgpot_covalent.so ]]; then
+    echo "missing librgpot_covalent.so" >&2
+    exit 1
+  fi
+  BINARY=$EVAL
 fi
 
 if ! grep -Eq '(^|[[:space:]])bench([[:space:]]|$)' /etc/hosts; then
@@ -47,10 +64,11 @@ exec sudo -n unshare --uts sh -c \
     OMP_PLACES=cores \
     RAYON_NUM_THREADS=1 \
     RAY_AUTH_MODE=disabled \
+    RGPOT_COVALENT_LIB=/work/covalent-h2h/lib/librgpot_covalent.so \
     PATH=/work/ase-gofee-h2h/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     taskset -c 0 \
     /work/ase-gofee-h2h/venv/bin/python -u /work/anneal/scripts/ase_gofee_h2h/campaign.py \
-      --binary /work/target/release/examples/h2h_gmin_proof \
+      --binary '"$BINARY"' \
       --repo /work/anneal \
       --runs /work/ase-gofee-h2h/runs \
       "$@"' _ "$@"

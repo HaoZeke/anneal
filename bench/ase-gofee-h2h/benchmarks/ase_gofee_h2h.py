@@ -37,3 +37,33 @@ class AseGofeeHeadToHead:
             ],
             check=True,
         )
+
+
+class Asg2HeadToHead:
+    params = (
+        ["au55", "cu38", "cu12au26", "sw10", "tc10", "tip4p8"],
+        ["ase_bh", "ase_mh", "agox_gofee"],
+    )
+    param_names = ["system", "arm"]
+    timeout = 86400
+
+    def setup(self, system, arm):
+        if not ENTER.is_file():
+            raise RuntimeError(f"missing {ENTER}")
+
+    def time_seed(self, system, arm):
+        subprocess.run(
+            [
+                "bash",
+                str(ENTER),
+                "--panel",
+                "asg2",
+                "--system",
+                system,
+                "--seed",
+                "2000",
+                "--arm",
+                arm,
+            ],
+            check=True,
+        )

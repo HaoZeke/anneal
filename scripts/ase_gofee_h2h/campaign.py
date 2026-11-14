@@ -650,10 +650,16 @@ def main() -> int:
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--runs", type=Path, required=True)
     parser.add_argument("--comparison", choices=["ase_bh", "ase_mh", "agox_gofee"])
+    parser.add_argument("--panel", choices=["asg2"])
+    parser.add_argument("--system")
     parser.add_argument("--size", type=int)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--arm", choices=ARMS)
     args = parser.parse_args()
+    if args.panel == "asg2":
+        from asg2 import main as asg2_main
+
+        return asg2_main(args)
     if not args.binary.is_file():
         print(f"missing binary {args.binary}", file=sys.stderr)
         return 2
