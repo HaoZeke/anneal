@@ -16,6 +16,7 @@
 //! and neither the driver nor this function can tell them apart.
 
 use crate::methods::bond_preconditioner::BondPreconditioner;
+use crate::methods::cluster_hopping::HeldHands;
 use crate::methods::cluster_hopping::OVERLAP_CALL_LIMIT;
 use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 use crate::methods::cluster_hopping::declared_group_lost_a_bond;
@@ -636,6 +637,7 @@ fn charge_rejecting_repeat_failure<O>(
     anchor: &mut Option<Array1<f64>>,
     refuse_overlap: bool,
     wall: CallWall<'_>,
+    held: &HeldHands,
     failure: &mut Option<FailedPotential>,
 ) -> Option<(f64, Array1<f64>, bool)>
 where
@@ -646,6 +648,13 @@ where
     {
         failed.closed = true;
         return None;
+    }
+    // A stereocentre turned over is refused as a compressed contact is:
+    // no call, and the line search may still shorten the step off it.
+    if refuse_overlap && held.turned_over(point) {
+        stats.overlap_rejected += 1;
+        return failed_step(point, anchor.as_ref())
+            .map(|(energy, gradient)| (energy, gradient, false));
     }
     // A compressed contact never called the potential, so the line search
     // may still walk off it. A lost bond already returned no step.
@@ -762,6 +771,7 @@ where
     if use_tric {
         stats.local_step = LocalStep::Tric;
     }
+    let mut centres: Option<HeldHands> = None;
     move |led, x, iters| {
         // A new quench. A failure closed the previous descent; this
         // proposal is a different trial.
@@ -796,6 +806,7 @@ where
                 &mut anchor,
                 refuse_overlap,
                 wall,
+                &HeldHands::default(),
                 &mut failure,
             );
             return match answered {
@@ -803,6 +814,24 @@ where
                 _ => (f64::INFINITY, x.to_owned()),
             };
         }
+        // The descent keeps the hands its start holds. The centres are read
+        // from the first start, the caller's geometry.
+        if centres.is_none()
+            && cfg.hold_stereocentres
+            && let (
+                Some(species),
+                MoveLibrary::Molecular {
+                    groups,
+                    reactive: false,
+                    ..
+                },
+            ) = (cfg.species.as_deref(), &cfg.move_library)
+        {
+            centres = Some(HeldHands::of(x, species, groups, cfg.bond_tolerance));
+        }
+        let held = centres
+            .as_ref()
+            .map_or_else(HeldHands::default, |centres| centres.at(x));
         let polishing = polish_iters > 0
             && iters == polish_iters
             && iters != cfg.relax_steps
@@ -895,6 +924,7 @@ where
                         &mut anchor,
                         refuse_overlap,
                         wall,
+                        &held,
                         &mut failure,
                     )?;
                     remember(v, e, &g, physical);
@@ -938,6 +968,7 @@ where
                 &mut anchor,
                 refuse_overlap,
                 wall,
+                &held,
                 &mut failure,
             );
             if let Some((spent, started)) = clock
@@ -1190,6 +1221,7 @@ where
                     &mut anchor,
                     refuse_overlap,
                     wall,
+                    &held,
                     &mut failure,
                 )?;
                 remember(v, energy, &gradient, physical);
@@ -1655,6 +1687,7 @@ where
             &mut anchor,
             true,
             wall,
+            &HeldHands::default(),
             &mut failure,
         )?;
         evaluated = true;
@@ -3841,6 +3874,131 @@ mod tests {
             }
             (e, g)
         }
+    }
+
+    /// A CHFClBr carbon whose hydrogen's own downhill swings it between
+    /// two halogens into the cone of all three: the mirror image, reached
+    /// as a near-planar centre's steep bond terms reach it.
+    struct Umbrella {
+        bounds: eindir_core::Bounds<f64>,
+    }
+
+    impl Umbrella {
+        const HALOGENS: [[f64; 3]; 3] = [
+            [1.45, 0.0, 0.5],
+            [-0.725, 1.256, 0.5],
+            [-0.725, -1.256, 0.5],
+        ];
+
+        fn new() -> Self {
+            Self {
+                bounds: eindir_core::Bounds::new(
+                    Array1::from_elem(15, -50.0),
+                    Array1::from_elem(15, 50.0),
+                    0.0,
+                ),
+            }
+        }
+
+        fn species() -> Vec<u32> {
+            vec![6, 9, 17, 35, 1]
+        }
+
+        fn start() -> Array1<f64> {
+            let mut x = vec![0.0; 3];
+            x.extend(Self::HALOGENS.iter().flatten());
+            x.extend([0.25, 0.433, -0.97]);
+            Array1::from_vec(x)
+        }
+    }
+
+    impl eindir_core::Objective<f64> for Umbrella {
+        fn dim(&self) -> usize {
+            15
+        }
+
+        fn bounds(&self) -> &eindir_core::Bounds<f64> {
+            &self.bounds
+        }
+
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.value_and_gradient(x).0
+        }
+    }
+
+    impl eindir_core::gradient::Gradient<f64> for Umbrella {
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.value_and_gradient(x).1
+        }
+
+        fn dim(&self) -> usize {
+            15
+        }
+    }
+
+    impl DifferentiableObjective<f64> for Umbrella {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let mut e = 0.0;
+            let mut g = Array1::zeros(15);
+            let mut well = |atom: usize, at: [f64; 3], k: f64, e: &mut f64| {
+                for c in 0..3 {
+                    let d = x[3 * atom + c] - at[c];
+                    *e += 0.5 * k * d * d;
+                    g[3 * atom + c] += k * d;
+                }
+            };
+            well(0, [0.0; 3], 5.0, &mut e);
+            for (h, at) in Self::HALOGENS.iter().enumerate() {
+                well(h + 1, *at, 5.0, &mut e);
+            }
+            well(4, [0.0, 0.0, 1.09], 0.3, &mut e);
+            let bonds = [
+                (1, 0.5, 1.534),
+                (2, 0.5, 1.534),
+                (3, 0.5, 1.534),
+                (4, 2.0, 1.09),
+            ];
+            for (j, k, r0) in bonds {
+                let d: Vec<f64> = (0..3).map(|c| x[c] - x[3 * j + c]).collect();
+                let r = d.iter().map(|v| v * v).sum::<f64>().sqrt();
+                e += 0.5 * k * (r - r0).powi(2);
+                for c in 0..3 {
+                    let f = k * (r - r0) * d[c] / r;
+                    g[c] += f;
+                    g[3 * j + c] -= f;
+                }
+            }
+            (e, g)
+        }
+    }
+
+    fn umbrella_quench(hold: bool) -> Array1<f64> {
+        let mut cfg = Config::for_molecular(Umbrella::species(), vec![(0..5).collect()], 1.0);
+        cfg.hold_stereocentres = hold;
+        let mut stats = RelaxStats::default();
+        let mut led = Ledger::new(5_000);
+        let (_, x) = warm_relax(&Umbrella::new(), &cfg, &mut stats, 0)(
+            &mut led,
+            Umbrella::start().view(),
+            cfg.relax_steps,
+        );
+        x
+    }
+
+    #[test]
+    fn a_held_quench_does_not_push_a_centre_through_its_plane() {
+        let start = Umbrella::start();
+        let centres = HeldHands::of(
+            start.view(),
+            &Umbrella::species(),
+            &[(0..5).collect()],
+            1.25,
+        );
+        assert!(
+            centres.turned_over(umbrella_quench(false).view()),
+            "the free descent should invert the carbon"
+        );
+        assert!(!centres.turned_over(umbrella_quench(true).view()));
     }
 
     fn chain_relax_cost(precondition: bool) -> (usize, f64) {

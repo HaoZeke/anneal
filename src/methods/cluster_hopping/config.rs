@@ -1345,6 +1345,14 @@ pub struct Config {
     /// [`Config::recommended_molecular`].
     #[serde(skip_serializing_if = "is_false")]
     pub ring_moves: bool,
+    /// Refuse a quench step that turns over a stereocentre of a declared
+    /// group, from the hand the quench started in.
+    ///
+    /// A non-reactive molecular quench is a conformer search; a centre
+    /// pushed through its plane leaves the molecule. The refused step is
+    /// not a call, and backs off as one into a compressed contact does.
+    #[serde(skip_serializing_if = "is_false")]
+    pub hold_stereocentres: bool,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -1865,6 +1873,7 @@ impl Config {
             hmc: None,
             witness_tripleton_ceiling: false,
             ring_moves: false,
+            hold_stereocentres: false,
         }
     }
 

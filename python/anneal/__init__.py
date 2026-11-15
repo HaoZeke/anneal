@@ -258,6 +258,7 @@ def cluster_search(
     groups=None,
     local_step: str | None = None,
     ring_moves: bool | None = None,
+    hold_stereocentres: bool | None = None,
 ):
     """Run the measured cluster-search layer.
 
@@ -329,6 +330,9 @@ def cluster_search(
         two ring atoms that bound it, which keeps every bond length.
         ``None`` keeps the preset's: on for ``recommended=True``, off
         otherwise.
+      hold_stereocentres: refuse a quench step of a ``groups`` search that
+        turns a four-bonded centre into its mirror image. ``None`` keeps the
+        preset's.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
@@ -372,6 +376,8 @@ def cluster_search(
         kwargs["local_step"] = str(local_step)
     if ring_moves is not None:
         kwargs["ring_moves"] = bool(ring_moves)
+    if hold_stereocentres is not None:
+        kwargs["hold_stereocentres"] = bool(hold_stereocentres)
     out = _core_cluster_search(*args, **kwargs)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
     return out

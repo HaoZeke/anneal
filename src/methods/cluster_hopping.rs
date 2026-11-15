@@ -93,6 +93,7 @@ mod moves;
 mod packing_bank;
 mod preset;
 mod torsion;
+pub(crate) use torsion::HeldHands;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{

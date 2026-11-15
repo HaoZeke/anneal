@@ -347,6 +347,90 @@ impl Topology {
     }
 }
 
+/// Four-bonded atoms of declared groups that may be stereocentres, each
+/// with its four neighbours, and the hand each holds in one geometry.
+///
+/// Bonds are read once, inside each group of `x`, at `tolerance` times the
+/// summed covalent radii. A geometry a quench is still distorting puts a
+/// hydrogen within that reach of the next heavy atom as well, so the
+/// centres are not reread from it. A centre with two lone atoms of one
+/// element is no centre, as in [`Topology::of`].
+#[derive(Debug, Clone, Default)]
+pub(crate) struct HeldHands {
+    centres: Vec<[usize; 5]>,
+    signs: Vec<[bool; 4]>,
+}
+
+impl HeldHands {
+    pub(crate) fn of(
+        x: ArrayView1<f64>,
+        species: &[u32],
+        groups: &[Vec<usize>],
+        tolerance: f64,
+    ) -> Self {
+        let n = species.len().min(x.len() / 3);
+        let mut centres = Vec::new();
+        for atoms in groups {
+            let atoms: Vec<usize> = atoms.iter().copied().filter(|&a| a < n).collect();
+            let nb: Vec<Vec<usize>> = atoms
+                .iter()
+                .map(|&a| {
+                    let ra = covalent_radius(species[a]);
+                    atoms
+                        .iter()
+                        .copied()
+                        .filter(|&b| {
+                            let cut = tolerance * (ra + covalent_radius(species[b]));
+                            b != a && cut > 0.0 && distance(x, a, b) < cut
+                        })
+                        .collect()
+                })
+                .collect();
+            let lone = |q: usize| {
+                atoms
+                    .iter()
+                    .position(|&a| a == q)
+                    .is_some_and(|i| nb[i].len() == 1)
+            };
+            for (i, &c) in atoms.iter().enumerate() {
+                let [a, b, d, e] = nb[i][..] else { continue };
+                let four = [a, b, d, e];
+                let twins = four.iter().enumerate().any(|(k, &p)| {
+                    lone(p)
+                        && four[k + 1..]
+                            .iter()
+                            .any(|&q| lone(q) && species[q] == species[p])
+                });
+                if !twins {
+                    centres.push([c, a, b, d, e]);
+                }
+            }
+        }
+        let signs = centres.iter().map(|h| hand(x, h)).collect();
+        Self { centres, signs }
+    }
+
+    /// The same centres, holding the hands of `x`.
+    pub(crate) fn at(&self, x: ArrayView1<f64>) -> Self {
+        Self {
+            centres: self.centres.clone(),
+            signs: self.centres.iter().map(|h| hand(x, h)).collect(),
+        }
+    }
+
+    /// Whether `y` holds a centre in the other hand.
+    ///
+    /// A centre pushed through the plane of its neighbours turns every
+    /// volume over. A distorted one can turn a single volume whose three
+    /// bonds are nearly coplanar, so three of the four must turn.
+    pub(crate) fn turned_over(&self, y: ArrayView1<f64>) -> bool {
+        self.centres.iter().zip(&self.signs).any(|(h, held)| {
+            let now = hand(y, h);
+            (0..4).filter(|&k| now[k] != held[k]).count() >= 3
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -409,6 +493,42 @@ mod tests {
             }
         }
         (Array1::from_vec(x), species)
+    }
+
+    #[test]
+    fn held_hands_see_a_centre_turn_over_and_nothing_else() {
+        let (x, z) = fluorocyclohexane();
+        let groups = vec![(0..z.len()).collect::<Vec<usize>>()];
+        let held = HeldHands::of(x.view(), &z, &groups, 1.25);
+        let centres: Vec<usize> = held.centres.iter().map(|h| h[0]).collect();
+        assert_eq!(centres, vec![0], "a CH2 is not a centre");
+        let mut mirrored = x.clone();
+        for k in 0..3 {
+            mirrored.swap(3 * 6 + k, 3 * 7 + k);
+        }
+        assert!(held.turned_over(mirrored.view()));
+        assert!(!held.at(mirrored.view()).turned_over(mirrored.view()));
+        let h = held.centres[0];
+        for &q in &h[1..] {
+            let mut through = x.clone();
+            for k in 0..3 {
+                through[3 * q + k] = 2.0 * x[3 * h[0] + k] - x[3 * q + k];
+            }
+            assert!(
+                held.turned_over(through.view()),
+                "neighbour {q} crossed unseen"
+            );
+        }
+        let turned = Array1::from_iter(
+            x.exact_chunks(3)
+                .into_iter()
+                .flat_map(|p| [-p[1], p[0], p[2]]),
+        );
+        assert!(!held.turned_over(turned.view()));
+        let mut nudged = x.clone();
+        nudged[3 * h[1]] += 0.2;
+        assert!(!held.turned_over(nudged.view()));
+        assert!(HeldHands::of(x.view(), &z, &[], 1.25).centres.is_empty());
     }
 
     #[test]

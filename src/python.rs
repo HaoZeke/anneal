@@ -3525,6 +3525,9 @@ fn rigid_probe(
 ///   ring_moves: `Config::ring_moves` of a `groups` search, ring crankshafts
 ///     beside the torsion move. Unset keeps the preset's: on for
 ///     `recommended=True`, off otherwise.
+///   hold_stereocentres: `Config::hold_stereocentres` of a `groups` search,
+///     a quench step that inverts a stereocentre is refused. Unset keeps
+///     the preset's.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
@@ -3552,6 +3555,7 @@ fn rigid_probe(
     groups = None,
     local_step = None,
     ring_moves = None,
+    hold_stereocentres = None,
 ))]
 fn cluster_search(
     py: Python<'_>,
@@ -3575,6 +3579,7 @@ fn cluster_search(
     groups: Option<Vec<Vec<usize>>>,
     local_step: Option<&str>,
     ring_moves: Option<bool>,
+    hold_stereocentres: Option<bool>,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::cluster_hopping::Config;
     use crate::methods::tric_opt::LocalStep;
@@ -3598,6 +3603,9 @@ fn cluster_search(
 
     if ring_moves.is_some() && groups.is_none() {
         return Err(PyValueError::new_err("ring_moves needs groups"));
+    }
+    if hold_stereocentres.is_some() && groups.is_none() {
+        return Err(PyValueError::new_err("hold_stereocentres needs groups"));
     }
     if let Some(groups) = groups.as_ref() {
         if ras || derived || communicating || length_scale.is_some() {
@@ -3718,6 +3726,9 @@ fn cluster_search(
         }
         if let Some(rings) = ring_moves {
             cfg.ring_moves = rings;
+        }
+        if let Some(hold) = hold_stereocentres {
+            cfg.hold_stereocentres = hold;
         }
         cfg
     } else if let Some(geometry) = water {
