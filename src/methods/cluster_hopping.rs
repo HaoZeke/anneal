@@ -895,6 +895,23 @@ impl Ledger {
         self.note_recorded_minimum(value, state);
     }
 
+    /// Moves the encounter of `value` to the call that found it.
+    ///
+    /// A core cut is charged as a block and recorded after that block.
+    /// [`record`](Self::record) would time it at the block's end.
+    /// [`improvements_from_encounters`] reports the encounter, so the
+    /// encounter keeps the probe call.
+    fn stamp_encounter(&mut self, value: f64, at: usize) {
+        if let Some((spent, _)) = self
+            .encounters
+            .iter_mut()
+            .rev()
+            .find(|(_, energy)| *energy == value)
+        {
+            *spent = at;
+        }
+    }
+
     /// Appends one recorded minimum. The acceptance column is 0 until
     /// [`Ledger::mark_last_recorded`] sets it.
     fn note_recorded_minimum(&mut self, value: f64, state: ArrayView1<f64>) {
@@ -5123,6 +5140,7 @@ where
                     pending_cut = None;
                     let improved = cut_energy < ledger.best - 1e-10;
                     ledger.record(cut_energy, cut_state.view());
+                    ledger.stamp_encounter(cut_energy, pending_cut_at);
                     let reached = identity.basin_of(cut_state.view());
                     adopt_minimum!(
                         cut_energy,
@@ -10212,9 +10230,12 @@ where
         );
         // The budget may already be spent, so the record tolerance cannot
         // be checked. The polished energy is still an improvement.
+        // The record itself lands after the probe was charged. The
+        // encounter keeps the probe call that found the cut.
         if gradient.is_none() && energy < ledger.best {
             ledger.record(energy, state.view());
         }
+        ledger.stamp_encounter(energy, pending_cut_at);
         if energy <= ledger.best + 1e-12 && improvements.len() < 512 {
             improvements.push((hops, pending_cut_at, bias.n_basins(), energy));
         }
