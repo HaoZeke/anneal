@@ -29,6 +29,7 @@ package; no file next to the package is read.
 | `z_max` | largest atomic number a composition-free package accepts |
 | `label`, `shapes`, `inputs`, `outputs` | recorded |
 | `model`, `torch_version`, `fairchem_version`, `export_path` | recorded |
+| `checkpoint_source`, `checkpoint_path`, `checkpoint_hf_repo`, `checkpoint_hf_filename`, `checkpoint_hf_revision`, `checkpoint_sha256` | recorded; `checkpointProvenance()` returns them (unset for older packages) |
 
 `UmaConfig.cutoff` / `max_neighbors` are defaults. The embedded
 values win when present.

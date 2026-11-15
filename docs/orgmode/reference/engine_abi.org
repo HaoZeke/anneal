@@ -165,6 +165,29 @@ way, for loaders that refuse an executable stack.
 A =.tmp-= sibling older than an hour, left by a process that died, is removed
 the next time that package is loaded.
 
+** UMA checkpoint provenance
+
+=rgpot_engine_model_digest= of =libuma_engine= is the SHA-256 of the =.pt2=.
+The digest of the weights inside it is package metadata, written by
+=scripts/export_uma_aoti.py=:
+
+| Key                      | Value                                                          |
+|--------------------------+----------------------------------------------------------------|
+| =checkpoint_source=      | =cli=, =env= or =hf=: where the exporter took the checkpoint from |
+| =checkpoint_path=        | the local checkpoint file (=cli= and =env=)                    |
+| =checkpoint_hf_repo=     | Hugging Face repository (=hf=)                                 |
+| =checkpoint_hf_filename= | file inside that repository (=hf=)                             |
+| =checkpoint_hf_revision= | commit the file was served from (=hf=)                         |
+| =checkpoint_sha256=      | SHA-256 of the checkpoint file, 64 lowercase hexadecimal digits |
+
+=UmaPot::checkpointProvenance()= returns them as a =UmaCheckpointProvenance=,
+whose fields are =std::optional= and unset for packages exported before the keys
+existed.
+The engine prints =UmaPot: checkpoint_sha256== on stderr when it loads the
+package (=unset= for those packages); the table exports no symbol for the keys.
+A malformed =checkpoint_sha256=, =checkpoint_hf_revision= or =checkpoint_source=
+fails the load.
+
 ** Thread safety of a handle
 
 Any thread may call =rgpot_engine_force= and =rgpot_engine_force_batch= on any

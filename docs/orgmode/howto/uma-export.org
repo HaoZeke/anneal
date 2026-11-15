@@ -28,6 +28,43 @@ pixi run -e umaexport export-uma-aoti -- \
 =--help= lists every option.
 Do not commit the checkpoint or the package.
 
+** Checkpoint provenance
+
+The exporter resolves the checkpoint once, before the first reference
+calculation, and every predict unit of the export loads that one file.
+A Hugging Face download goes into fairchem's cache and is loaded from there.
+The package metadata then names the weights it was built from:
+
+| Key                      | Written for     | Value                                                         |
+|--------------------------+-----------------+---------------------------------------------------------------|
+| =checkpoint_source=      | every export    | =cli= (=--checkpoint=), =env= (=RGPOT_UMA_CHECKPOINT=) or =hf= |
+| =checkpoint_path=        | =cli=, =env=    | absolute path of the checkpoint file                          |
+| =checkpoint_hf_repo=     | =hf=            | repository, =facebook/UMA= for =uma-s-1p1=                    |
+| =checkpoint_hf_filename= | =hf=            | file inside the repository, =checkpoints/uma-s-1p1.pt=        |
+| =checkpoint_hf_revision= | =hf=            | the 40-digit commit the file was served from, not a branch    |
+| =checkpoint_sha256=      | every export    | SHA-256 of the checkpoint file that was loaded                |
+
+The revision is the commit in the hub cache path (=snapshots/<commit>/=), so a
+download of =main= records the commit =main= pointed to.
+=checkpoint_sha256= is the digest of the weights.
+=rgpot_engine_model_digest= hashes the =.pt2= itself, which changes with the
+export options.
+
+=UmaPot::checkpointProvenance()= returns these keys, and the load line on stderr
+prints =checkpoint_sha256=.
+In Python, with =scripts/= on the path, read them without loading the package:
+
+#+begin_src python
+import export_uma_aoti as exp
+
+meta = exp.package_metadata("uma-omol.pt2")
+print(exp.checkpoint_provenance(meta)["checkpoint_sha256"])
+#+end_src
+
+Packages exported before these keys still load.
+=checkpointProvenance()= leaves every field unset for them, and
+=checkpoint_provenance= reports each key as =None=.
+
 ** Bounds
 
 | Symbol   | Inputs that share it                      | Default range            | Option        |
