@@ -129,6 +129,12 @@ option(
     description: 'GROMACS mdrun -plumed using the RGPOT collective variable.',
 )
 option(
+    'with_gromacs_dropin',
+    type: 'feature',
+    value: 'disabled',
+    description: 'librgpot_gromacs, the libcp2k API GROMACS -DGMX_CP2K=ON links, so mdrun takes QM/MM energies and forces from any rgpot potential',
+)
+option(
     'with_openmm',
     type: 'feature',
     value: 'auto',

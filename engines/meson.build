@@ -353,6 +353,10 @@ if gromacs_opt.allowed()
     endif
 endif
 
+if get_option('with_gromacs_dropin').allowed()
+    subdir('gromacs')
+endif
+
 if python3_engines.found()
     test(
         'c_symbols',

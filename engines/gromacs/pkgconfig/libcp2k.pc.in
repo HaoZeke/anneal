@@ -1,0 +1,8 @@
+libdir=@LIBDIR@
+includedir=@INCLUDEDIR@
+
+Name: libcp2k
+Description: rgpot potentials behind the libcp2k C API of the GROMACS QM/MM interface
+Version: @VERSION@
+Libs: -L${libdir} -Wl,-rpath,${libdir} -lrgpot_gromacs
+Cflags: -I${includedir}
