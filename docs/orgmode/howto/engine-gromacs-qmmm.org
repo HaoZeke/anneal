@@ -1,0 +1,247 @@
+#+TITLE: GROMACS QM/MM drop-in
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* GROMACS QM/MM drop-in
+
+=librgpot_gromacs= puts any rgpot potential behind the C API of the CP2K
+library.
+A GROMACS built with =-DGMX_CP2K=ON= against it evaluates the QM group of
+=gmx mdrun= with rgpot, in process, once per step, with no PLUMED.
+The =grompp -qmi= file chooses the potential.
+It is a =pot_spec= name with its options, such as =LJ=, =SuttonChen=, =EAMTable=
+or =TersoffSi=.
+Or it is an =rgpot_engine_*= library (UMA, Metatomic, XTB, ...) with its Cap'n
+Proto parameters.
+The elements come from the atomic numbers of the GROMACS atom types.
+
+The energy enters GROMACS as =Quantum En.=, part of the potential and the
+conserved energy.
+The forces enter the force buffer without a virial, so the pressure leaves the
+rgpot term out and NPT is not supported.
+For NPT, use the PLUMED route of :doc:`engine-gromacs`.
+
+** Why the CP2K interface
+
+GROMACS 2024 to 2026 has three in-process hooks for an external potential.
+
+- QM/MM through libcp2k (=-DGMX_CP2K=ON=) calls a fixed C API, in double
+  precision, every step, and passes the topology elements through a PDB file.
+  Its energy is a GROMACS energy term.
+  It carries no virial: =QMMMForceProvider= adds its forces without a virial
+  contribution.
+- NNPot (2025 and later) loads only TorchScript =.pt= models, converts positions
+  to single precision, and also carries no virial.
+- PLUMED applies a bias.
+  It carries the virial but keeps the energy out of the GROMACS energy terms.
+
+MiMiC serves CPMD only, and GROMACS has no i-PI client.
+The libcp2k API is the one that takes any potential without a model format and
+reports the energy as GROMACS' own, so the drop-in implements it.
+
+** Build
+
+Configure rgpot with the drop-in, which is off by default:
+
+#+begin_src bash
+meson setup bbdir -Dwith_gromacs_dropin=enabled
+meson compile -C bbdir
+#+end_src
+
+This builds =librgpot_gromacs.so=.
+It also writes =bbdir/engines/gromacs/pkgconfig/libcp2k.pc=, which GROMACS reads
+through =CP2K_DIR=.
+GROMACS needs no change, only these CMake options (it also enables Fortran, so a
+Fortran compiler must be present):
+
+#+begin_src bash
+cmake .. -DGMX_DOUBLE=ON -DGMX_MPI=OFF -DGMX_CP2K=ON \
+  -DCP2K_DIR=/path/to/bbdir/engines/gromacs
+#+end_src
+
+=engines/gromacs/build_gromacs.sh VERSION PREFIX BUILD= downloads a pinned
+GROMACS (2024.6, 2025.5 or 2026.4) and checks its sha256.
+It builds it this way into =PREFIX= and checks that
+=libgromacs_d= links =librgpot_gromacs=.
+After =meson install=, =CP2K_DIR= is =<prefix>/<libdir>/rgpot/gromacs=, where
+the installed =libcp2k.pc= lives.
+=gmx_d= finds the library without =LD_LIBRARY_PATH=, through the rpath that
+=libcp2k.pc= adds.
+
+** Input
+
+The run uses =qmmm-cp2k-qmmethod = INPUT= and a =-qmi= file with an =&RGPOT=
+section.
+The keys =grompp= checks stay as CP2K has them.
+
+#+begin_src text
+; md.mdp
+qmmm-cp2k-active   = true
+qmmm-cp2k-qmgroup  = QM
+qmmm-cp2k-qmmethod = INPUT
+#+end_src
+
+#+begin_src text
+&GLOBAL
+  RUN_TYPE ENERGY_FORCE
+&END GLOBAL
+&FORCE_EVAL
+  &DFT
+    CHARGE 0
+    MULTIPLICITY 1
+  &END DFT
+  &SUBSYS
+    &TOPOLOGY
+      COORD_FILE_NAME rgpot.pdb
+      COORD_FILE_FORMAT PDB
+      CHARGE_EXTENDED TRUE
+    &END TOPOLOGY
+  &END SUBSYS
+&END FORCE_EVAL
+&RGPOT
+  POTENTIAL SuttonChen
+  OPTIONS preset platinum cutoff 5.0
+&END
+#+end_src
+
+#+begin_src bash
+gmx_d grompp -f md.mdp -c conf.gro -p topol.top -n index.ndx -qmi rgpot.inp -o md.tpr
+gmx_d mdrun -deffnm md -ntmpi 1
+#+end_src
+
+=mdrun= writes the PDB file itself and passes its name in place of
+=COORD_FILE_NAME=.
+The =&RGPOT= keys are:
+
+| Key                     | Value                                                |
+|-------------------------+------------------------------------------------------|
+| =POTENTIAL= Name        | a name from :doc:`../reference/potential_names`      |
+| =OPTIONS= key value ... | its options in Angstrom and eV; may repeat           |
+| =ENGINE= path           | an =rgpot_engine_*= library, instead of =POTENTIAL=  |
+| =CONFIG= path           | the engine's Cap'n Proto parameters message          |
+| =CELL= PERIODIC or NONE | the GROMACS box as the cell, or an isolated region   |
+| =EMBEDDING= NONE        | accept charged MM atoms that do not act on QM atoms  |
+
+Exactly one of =POTENTIAL= and =ENGINE= is required.
+=OPTIONS= go with =POTENTIAL= and =CONFIG= with =ENGINE=.
+An engine's configuration is the flat message the engine ABI takes, for example:
+
+#+begin_src bash
+capnp encode CppCore/rgpot/rpc/Potentials.capnp BuiltinParams \
+  <<< '(name = "tersoff")' > tersoff.bin
+#+end_src
+
+The PDB file gives each atom its element and marks it QM or MM.
+Only QM atoms are passed to the potential; MM atoms get zero force from it and
+keep whatever the GROMACS force field gives them.
+=grompp= already removes the QM-QM nonbonded pairs and bonded terms, so the QM
+region interacts only through rgpot.
+A =POTENTIAL= needs =CHARGE 0= and =MULTIPLICITY 1=.
+An =ENGINE= gets both through =rgpot_engine_set_charge_spin=; one without that
+call needs =CHARGE 0= and =MULTIPLICITY 1= too.
+
+Nothing can be returned through the libcp2k API, so every error stops =mdrun=
+with status 1.
+The message starts with =rgpot-gromacs:= on standard error and is repeated in
+the =md_cp2k.out= file GROMACS names.
+Examples are an unknown potential or option, a missing =&RGPOT= section (as with
+a generated method such as =PBE=), a QM atom without an element, a =&LINK=
+section, a charged MM atom without =EMBEDDING NONE=, and a failed or non-finite
+evaluation at any step.
+
+** Units and cell
+
+GROMACS sends positions in Bohr and takes energies and forces in atomic units.
+It converts them with the constants of its =units.h=, which =qmmm_units.hpp=
+copies expression for expression.
+So GROMACS reports the rgpot energy times 96.48533212331002
+kJ/mol per eV and the forces times 964.8533212331002 kJ/(mol nm) per
+eV/Angstrom, up to rounding.
+
+With a periodic potential and =pbc = xyz=, the default is =CELL PERIODIC=: each
+step the QM atoms are wrapped into the GROMACS box, which goes to the potential
+as the cell, triclinic or not.
+GROMACS 2024 and 2025 send the box transposed and 2026 does not; a GROMACS box
+is lower triangular, so the library tells the two apart from the zeros.
+=CELL NONE=, the default for a potential with free boundaries, keeps each QM
+atom at the image nearest its previous position, so a molecule split by the box
+stays whole, and centres the region in a cube with sides of at least 100
+Angstrom and of twice the region's extent plus the cutoff plus 10 Angstrom.
+
+** Limits
+
+- No virial: pressure, NPT and =gmx energy= pressure terms exclude rgpot.
+- No electrostatic embedding: MM charges do not act on the QM region, and no
+  link atoms, so the QM group must be whole molecules or a whole crystal.
+- One thread-MPI rank (=-ntmpi 1=); OpenMP threads are fine.
+  =cp2k_create_force_env_comm= stops with an error.
+- Tested with double-precision GROMACS only.
+- The shim wraps atoms every step, as the LAMMPS pair style does.
+  A kernel whose neighbour list has a Verlet skin rebuilds it whenever an atom
+  crosses a cell face, so the cost per MD step exceeds that of repeated calls on
+  one geometry; the benchmark below measures both.
+
+** Tests
+
+=gromacs_dropin_api= calls the library through =ctypes= in both box layouts and
+compares the energy and forces with =rgpot-eval= and an engine library.
+It also checks the unit factors and that every malformed input stops with its
+message.
+=gromacs_dropin_mdrun= runs =gmx mdrun= when =gromacs_dropin_gmx= names a
+=gmx_d= built as above, or one is on =PATH=.
+It compares =Quantum En.= and the =.trr= forces with =rgpot-eval= on the same
+frame for Lennard-Jones argon, Sutton-Chen platinum in a triclinic box, Tersoff
+silicon and the CuNi =EAMTable= alloy (with =-Dwith_eam_table=true=).
+It also checks the engine route, a QM subset, an isolated cluster with
+=CELL NONE=, a run on four OpenMP threads and the conserved energy of 2500-step
+NVE runs, and that bad inputs stop =mdrun=.
+The NVE runs use switched Lennard-Jones, Tersoff and =EAMTable=: =SuttonChen= is
+truncated without a switch, so its energy jumps when a pair crosses the cutoff.
+
+#+begin_src bash
+meson setup bbdir -Dwith_tests=true -Dwith_gromacs_dropin=enabled \
+  -Dgromacs_dropin_gmx=/path/to/gmx_d
+meson test -C bbdir gromacs_dropin_api gromacs_dropin_mdrun
+#+end_src
+
+On GROMACS 2024.6, 2025.5 and 2026.4 the energies agree to better than
+\(10^{-15}\) relative and the forces to better than \(2 \times 10^{-13}\) of the
+largest component.
+
+** Benchmark
+
+=engines/gromacs/bench_dropin.py= runs a short MD trajectory with the drop-in,
+keeps every frame, and times on one thread:
+
+- fixed: =pot_spec='s evaluation of the first frame, repeated 200 times;
+- bare: =pot_spec='s evaluation of each frame, wrapped as the shim wraps it;
+- shim: the same frames through the libcp2k calls GROMACS makes each step;
+- off and on: =gmx mdrun= per step with the QM/MM interface off (free particles)
+  and with the drop-in, from the difference of a 1020-step and a 20-step run.
+
+The table gives microseconds per step or call, each the median of 5 fresh
+processes over 1000 frames or steps.
+It was measured on an 8-core "Intel(R) Xeon(R) Processor" virtual machine (one
+thread per core, 47 GiB), Linux 6.12, GCC 13.3, a release build of rgpot and
+GROMACS 2026.4 in double precision.
+
+| System              | Atoms |   fixed |    bare |    shim | off |      on |
+|---------------------+-------+---------+---------+---------+-----+---------|
+| LJ argon            |   864 |   711.7 |  4044.8 |  4056.8 |   7 |  4087.0 |
+| Tersoff silicon     |   512 |   320.2 |   841.5 |   850.2 |   4 |   865.0 |
+| Sutton-Chen Pt      |   864 |  1115.4 |  6448.8 |  6449.2 |   6 |  6479.0 |
+| EAMTable CuNi       |  2048 | 25243.8 | 25442.5 | 25390.1 |  15 | 25068.0 |
+
+The drop-in adds on minus off minus bare to each step: 35 microseconds for argon
+(0.9% of the step), 20 for silicon (2.3%) and 24 for platinum (0.4%).
+For CuNi =mdrun= was faster than the bare replay in each of the five repeats
+(1.5% in the medians), so the cost there is below what this measurement
+resolves.
+The gap between fixed and bare is the kernels' neighbour-list rebuilds when
+atoms cross a face of the cell (see Limits), which any per-step evaluation of
+wrapped positions pays.
+
+#+begin_src bash
+python3 engines/gromacs/bench_dropin.py --gmx /path/to/gmx_d --build bbdir \
+  --eam CppCore/tests/data/eam_table/CuNi.eam.alloy --json bench.json
+#+end_src

@@ -80,6 +80,7 @@ meson compile -C bbdir && meson test -C bbdir
    howto/ase
    howto/engine-lammps
    howto/engine-gromacs
+   howto/engine-gromacs-qmmm
    howto/engine-openmm
    howto/engine-plumed
    howto/engine-metatomic

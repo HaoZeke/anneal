@@ -11,6 +11,9 @@ evaluates any rgpot potential by name (see :doc:`engine-plumed`).
 =BIASVALUE= applies its energy, forces and virial.
 A topology with zero charge and zero Lennard-Jones leaves the bias as the only
 potential.
+A GROMACS built against =librgpot_gromacs= evaluates the potential without
+PLUMED and reports it as =Quantum En.=, but without a virial; see
+:doc:`engine-gromacs-qmmm`.
 
 #+begin_src text
 LOAD FILE=libRgpotPlumed.so
