@@ -461,6 +461,7 @@ fn main() {
     let scale = pot.kind().r_min() / 2.0_f64.powf(1.0 / 6.0);
     cfg.min_separation *= scale;
     cfg.container *= scale;
+    cfg.pair_minimum = Some(pot.kind().r_min());
 
     let opts: Vec<&str> = args
         .get(5)
