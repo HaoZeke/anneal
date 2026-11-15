@@ -138,6 +138,10 @@ void TBLitePot::forceImpl(const ForceInput &in, ForceOut *out) const {
   if (tblite_check_context(m_ctx) != 0) {
     char err_msg[512];
     tblite_get_context_error(m_ctx, err_msg, nullptr);
+    // The result keeps the wavefunction of the failed SCF, and tblite
+    // would start the next one from it.
+    tblite_delete_result(&m_res);
+    m_res = tblite_new_result();
     throw std::runtime_error(std::string("tblite SCF error: ") + err_msg);
   }
 

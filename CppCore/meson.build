@@ -2176,10 +2176,17 @@ if get_option('with_tests')
             # Two cluster relaxations, up to 2000 force calls each.
             _timeout = 120
         endif
+        _case_env = environment()
+        if test.get(0) == 'TBLitetest'
+            # OpenMP threads spin while waiting. Beside other tests they
+            # slow a hot cluster SCF by more than a hundredfold.
+            _case_env.set('OMP_NUM_THREADS', '1')
+        endif
         test(
             test.get(0),
             _test_exe,
             workdir: meson.source_root() + test.get(3),
+            env: _case_env,
             timeout: _timeout,
         )
         if test.get(1) == 'calculator_group_test'
