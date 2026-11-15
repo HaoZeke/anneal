@@ -11,8 +11,10 @@ if ! grep -Eq '(^|[[:space:]])bench([[:space:]]|$)' /etc/hosts; then
 fi
 
 PY=/usr/bin/python3
-if [ -x /tmp/anneal-venv/bin/python3 ]; then
-  PY=/tmp/anneal-venv/bin/python3
+if [ -n "${ANNEAL_VENV:-}" ] && [ -x "$ANNEAL_VENV/bin/python3" ]; then
+  PY=$ANNEAL_VENV/bin/python3
+elif [ -x "$ROOT/.venv/bin/python3" ]; then
+  PY=$ROOT/.venv/bin/python3
 fi
 exec sudo -n unshare --uts sh -c \
   "hostname bench; exec sudo -u ubuntu $PY -u $HERE/run_panel.py --root $ROOT \"\$@\"" _ "$@"

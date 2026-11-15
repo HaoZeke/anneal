@@ -25,6 +25,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = ROOT / "bench" / "au55-funnel2" / "seeds.csv"
+DEFAULT_LOGS = ROOT / "bench" / "au55-funnel2" / "logs"
 HIT_TOL = 0.001
 
 BINARIES = (
@@ -357,7 +358,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--arm", required=True)
     parser.add_argument("--suite", choices=("au55", "lj98", "binaries", "sc80"), required=True)
     parser.add_argument("--seeds-out", type=Path, default=DEFAULT_OUT)
-    parser.add_argument("--logs", type=Path, default=Path("/tmp/au55-funnel2-logs"))
+    parser.add_argument("--logs", type=Path, default=DEFAULT_LOGS)
     parser.add_argument("--sc-lib", default="")
     args = parser.parse_args(argv)
     host = require_bench()

@@ -19,7 +19,7 @@ fi
 
 if [[ ! -x "$BINARY" ]]; then
   export CARGO_TARGET_DIR=/work/target
-  export RUSTFLAGS="--remap-path-prefix=/work/anneal=/src --remap-path-prefix=/agent/repos/anneal=/src --remap-path-prefix=/work/target=/src --remap-path-prefix=/work/scratch=/build"
+  export RUSTFLAGS="--remap-path-prefix=/work/anneal=/src --remap-path-prefix=/work/target=/src --remap-path-prefix=/work/scratch=/build"
   (cd /work/anneal && cargo +1.88 build --release --example h2h_gmin_proof)
 fi
 

@@ -25,7 +25,7 @@ export RAYON_NUM_THREADS=1
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 BIN=${BIN:-$ROOT/target/release/examples/h2h_metal}
 GMIN=${GMIN:-/work/metal-darby/bin/GMIN}
-WORK=${WORK:-/tmp/gold-bench}
+WORK=${WORK:-$ROOT/bench/gold-gupta/work}
 REF38=-130.54001708
 REF55=-191.03085280
 REV=${GOLD_REVISION:-$(git -C "$ROOT" rev-parse --short=12 HEAD)}
