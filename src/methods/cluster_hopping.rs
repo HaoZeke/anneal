@@ -10882,8 +10882,16 @@ mod tests {
     #[test]
     fn the_dual_orbit_core_is_opt_in() {
         let plain = Config::for_cluster(13);
-        assert_eq!(plain.orbit_core, OrbitCore::Fraction);
-        assert!(!plain.resolved_json().unwrap().contains("orbit_core"));
+        assert!(
+            matches!(plain.orbit_core, OrbitCore::Both(_)),
+            "for_cluster offers both cores: {:?}",
+            plain.orbit_core
+        );
+        assert!(!plain.orbit_complete_on_new);
+        assert!(plain.resolved_json().unwrap().contains("orbit_core"));
+        let recommended = Config::recommended(13);
+        assert_eq!(recommended.orbit_core, OrbitCore::Fraction);
+        assert!(!recommended.resolved_json().unwrap().contains("orbit_core"));
         let dual = Config::for_cluster_dual_core(13);
         assert!(dual.packing_surface().orbit_on_new);
         assert_eq!(
@@ -12509,6 +12517,8 @@ mod tests {
         let mut cfg = Config::for_cluster(n);
         // The cap is read after the proposal hop has been counted, and
         // again before orbit completion. One leaves no room for the orbit.
+        // `for_cluster` offers both cores; this census scores one completion.
+        cfg.orbit_core = OrbitCore::Fraction;
         cfg.max_hops = Some(2);
         cfg.bayes_screen = false;
         cfg.calibrated_screen = false;
