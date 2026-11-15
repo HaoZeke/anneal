@@ -772,7 +772,39 @@ hit against anneal, a miss ranked after every hit. Neither file is rewritten, an
 under `/work`. The CREST rows were measured on `8b4a2592` from starts that
 are identical byte for byte on `bb486bfd`. On `f2a628c0` anneal takes
 the same calls on Si10 seeds 2002, 2006 and 2011 and C10 seeds 2000,
-2002 and 2004.
+2002 and 2004. A tree with uncommitted changes to the build is refused,
+so the revision names the binary.
+
+### With the call floor
+
+The rgpot handle refuses a call with a pair inside 0.90 Å. With the
+call floor that limit reaches the search: a trial pair inside it is
+opened to 0.945 Å before the quench, and a probe the handle would refuse
+is not charged. Anneal's Si10 and C10 rows with it were measured on
+`ce1e7a46` (the fix on `f2a628c0`, a local build head), serial on core 0
+with hostname `bench`, and are the anneal rows of `gfn2/rows.csv` at
+that revision. CREST's rows are those of the first table, from starts
+that are identical byte for byte.
+
+| system | code | hits | median calls | IQR | best / eV | median wall / s | inside / call | outside / call |
+|---|---|---|---|---|---|---|---|---|
+| Si10 | anneal G, `ce1e7a46` | 12/12 | 665.5 | 296 | -460.683738 | 36.1 | 70.88 ms | 0.044 ms |
+| Si10 | CREST | 11/12 | 97,521 | 8,524 | -460.683718 | 2646.6 | 26.72 ms | 0.244 ms |
+| C10 | anneal G, `ce1e7a46` | 12/12 | 2,516.5 | 1,908 | -571.322738 | 10.9 | 4.43 ms | 0.005 ms |
+| C10 | CREST | 4/12 | 78,367 | 2,880 | -571.322711 | 439.5 | 5.10 ms | 0.288 ms |
+
+- Si10: anneal reaches the minimum on 12 of 12 seeds and CREST on 11
+  (Fisher p = 1, Mann-Whitney p = 3.7e-5, a miss ranked after every
+  hit). On seeds 2000-2003 anneal takes 619, 563, 520 and 2,611 calls.
+- C10: anneal reaches the ring on 12 of 12 seeds and CREST on 4 (Fisher
+  p = 0.0013, Mann-Whitney p = 2.6e-5). Seed 2003, the miss of the first
+  table, takes 3,123 calls. There its refused calls were the screen and
+  the quench each starting from a trial with a pair at 0.6-0.8 Å, drawn
+  by every move kind. No call is refused on either system
+  (`geometry_rejected` is 0 on every seed). A refused call took no time
+  in xtb, so the inside time per call is higher than in the first table.
+- The summary lines are in `gfn2/summaries.csv`, with
+  `--anneal-revision ce1e7a46…`.
 
 ## Pins
 

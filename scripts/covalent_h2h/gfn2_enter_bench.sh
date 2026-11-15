@@ -5,7 +5,9 @@
 # directory under /work. Arguments go to gfn2_crest.py; GFN2_CODES picks
 # the arms. Rows and summaries are appended to rows.csv and summaries.csv,
 # never rewritten, and seeds.csv is read as history. GFN2_ROWS and
-# GFN2_SUMMARY move them off bench/covalent-h2h/gfn2.
+# GFN2_SUMMARY move them off bench/covalent-h2h/gfn2. A tree with
+# uncommitted changes to the build is refused, so the revision names the
+# binary.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -23,6 +25,10 @@ SUMMARY=${GFN2_SUMMARY:-$OUT/summaries.csv}
 CORE=${GFN2_CORE:-0}
 PY=${GFN2_PYTHON:-/usr/bin/python3}
 
+if [[ -n $(git -C "$ROOT" status --porcelain -- src examples Cargo.toml Cargo.lock build.rs) ]]; then
+  echo "uncommitted changes to the anneal build" >&2
+  exit 1
+fi
 for need in "$CREST" "$XTB" "$ENGINE"; do
   if [[ ! -e $need ]]; then
     echo "missing $need" >&2

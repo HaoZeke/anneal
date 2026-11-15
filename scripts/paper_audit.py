@@ -59,6 +59,8 @@ UNPUSHED = {
     "349523d3f5f42b748f3af1573166fd17155ac461": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
     "befbc3e8": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own; the row gives eight digits",
     "bf09f7a2b7a6bd6359898db675eeafefcd20548b": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
+    "ce1e7a46826cf51784ed26587c14b2747f5f48e1": "the GFN2 call-floor fix on f2a628c0, a local build head of the GFN2 "
+                                                "Si10 and C10 floor rows; the fix was pushed on another base",
 }
 
 KNOWN_GAPS = {
@@ -87,6 +89,7 @@ KNOWN_GAPS = {
     "bench/covalent-h2h/v3/seeds.csv": "no revision or host column",
     "bench/covalent-h2h/gfn2/seeds.csv": "no revision or host column",
     "bench/covalent-h2h/gfn2/false-hits.csv": "no host column",
+    "bench/covalent-h2h/gfn2/rows.csv": "revision ce1e7a46 is not in this repository",
     "bench/ase-gofee-h2h/results.csv": "no host column; head empty or unknown on some rows; revision 0f988569 is not in "
                                        "this repository; revision 349523d3 is not in this repository; revision befbc3e8 "
                                        "is not in this repository; revision bf09f7a2 is not in this repository",
@@ -1030,6 +1033,45 @@ def covalent_gfn2(audit: Audit) -> None:
     shown = [f"{int(r['evals_to_hit']):,}" for r in sorted(recorded, key=lambda r: int(r["seed"]))]
     audit.said(path, f"Anneal takes {', '.join(shown[:9])}, {shown[9]} (the false hit), {shown[10]} and {shown[11]} "
                      "calls on seeds 2000-2011")
+    gfn2_revision_tables(audit, path, header, paper[-1][0] + 1, rows, crest)
+
+
+GFN2_SYSTEMS = {"Si10": "si10", "C10": "c10"}
+# (system, anneal revision, Fisher p, Mann-Whitney p with a miss ranked after every hit, sentence that prints them)
+GFN2_REVISION_TESTS = (
+    ("Si10", "ce1e7a46", "1", "3.7e-5", "CREST on 11 (Fisher p = 1, Mann-Whitney p = 3.7e-5, a miss ranked after every hit)"),
+    ("C10", "ce1e7a46", "0.0013", "2.6e-5", "CREST on 4 (Fisher p = 0.0013, Mann-Whitney p = 2.6e-5)"),
+)
+
+
+def gfn2_revision_tables(audit: Audit, path: str, header: str, after: int, rows: list[dict[str, str]], crest) -> None:
+    """The GFN2 tables after the paper's Si10 one.
+
+    Anneal's rows are those of rows.csv at the revision its code cell names,
+    CREST's every CREST row of the system, as in the first table.
+    """
+    def anneal(system: str, revision: str) -> list[dict[str, str]]:
+        return [r for r in pick(rows, system=system, code="anneal-general") if r["code_revision"].startswith(revision)]
+
+    lines = audit.text(path).splitlines()
+    while any(line.startswith("| " + header) for line in lines[after:]):
+        table = md_table(audit, path, header, after=after)
+        groups = {}
+        for _, row in table:
+            system = GFN2_SYSTEMS[row["system"]]
+            if row["code"] == "CREST":
+                groups[(row["system"], row["code"])] = crest(system)
+            else:
+                revision = re.fullmatch(r"anneal G, `([0-9a-f]{7,40})`", row["code"]).group(1)
+                groups[(row["system"], row["code"])] = anneal(system, revision)
+        gfn2_table(audit, path, table, groups, "pooled")
+        after = table[-1][0] + 1
+    for system, revision, fisher_p, mw_p, sentence in GFN2_REVISION_TESTS:
+        a, c = anneal(GFN2_SYSTEMS[system], revision), crest(GFN2_SYSTEMS[system])
+        where = f"{path} {system} {revision}"
+        audit.cell(where, "GFN2 Fisher p", fisher_p, fisher(hits_of(a), len(a), hits_of(c), len(c)))
+        audit.cell(where, "GFN2 Mann-Whitney p", mw_p, mann_whitney(gfn2_ranked(a), gfn2_ranked(c), continuity=True))
+        audit.said(path, sentence)
 
 
 COVALENT_SYSTEMS = {"Si10": "sw10", "Si13": "sw13", "Si20": "sw20", "C10": "tc10", "C20": "tc20"}
