@@ -3535,7 +3535,7 @@ fn rigid_probe(
 ///   plateau_reheat: `Config::plateau_reheat` of a `groups` search, a
 ///     measured walk on a plateau in the second half of its budget returns
 ///     to the declared temperature until its next new incumbent. Unset
-///     keeps the preset's: off.
+///     keeps the preset's: on for `recommended=True`, off otherwise.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is

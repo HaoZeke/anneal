@@ -1376,7 +1376,7 @@ pub struct Config {
     /// landscape whose opening hops are all small steps inside one family
     /// measures a temperature that cannot leave the family, and the walk
     /// settles there for good. The deposit height stays measured. Needs
-    /// `measured_energy_scale`.
+    /// `measured_energy_scale`. On in [`Config::recommended_molecular`].
     #[serde(skip_serializing_if = "is_false")]
     pub plateau_reheat: bool,
 }
@@ -2143,6 +2143,7 @@ impl Config {
         // The binding declares an energy scale of one; a conformer
         // landscape in electronvolts is a few hundredths of that.
         cfg.measured_energy_scale = true;
+        cfg.plateau_reheat = true;
         #[cfg(feature = "featomic")]
         {
             cfg.keying = Keying::SoapPacking;
@@ -2323,6 +2324,7 @@ mod coverage_behaviour {
         assert_eq!(recommended.local_step, LocalStep::Auto);
         assert!(recommended.hold_stereocentres);
         assert!(recommended.measured_energy_scale);
+        assert!(recommended.plateau_reheat);
         assert!(
             recommended
                 .resolved_json()
