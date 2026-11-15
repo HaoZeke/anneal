@@ -1,0 +1,8 @@
+#+TITLE: External engine C ABI
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* External engine C ABI
+
+=CppCore/rgpot/ExternalPot/external_potentials.h= declares the C constructors of
+the LAMMPS, GROMACS and OpenMM shifted Lennard-Jones potentials.

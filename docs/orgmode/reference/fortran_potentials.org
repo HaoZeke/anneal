@@ -2,18 +2,8 @@
 #+OPTIONS: author:nil
 #+DESCRIPTION: How legacy potential kernels become Fortran 2018 modules in rgpot.
 
-* Why a port and not a wrapper
-
-The kernels absorbed from eOn were written between 1985 and 2010: fixed form,
-~implicit real*8 (a-h,o-z)~, COMMON blocks holding state across calls, ~goto~
-chains, and hand-rolled neighbour lists with fixed-size caps that overflow
-silently.
-Wrapping that in ~bind(c)~ preserves every one of those properties and adds a
-language boundary on top.
-
-Each kernel is instead rewritten as a Fortran 2018 module.
-The physics expressions carry over term by term; everything around them is
-replaced.
+Why kernels are ported and why they gather are explained in
+[[file:../explanation/fortran-kernels.org][Fortran kernels: port, not wrap]].
 
 * Rules
 
@@ -45,56 +35,6 @@ The C++ wrapper turns that into an exception.
 8. *Neighbours come from vesin* through ~rgpot_neighbors~.
 No pot builds its own list, and no pot repeats minimum-image arithmetic: the
 table carries pair vectors and distances.
-
-* Gather, not scatter
-
-Legacy pair loops update both atoms of a pair (~f(i) += g; f(j) -= g~), so the
-atom loop carries dependencies and cannot be parallelised as written.
-Every port restates the sum as a *gather*: with a full neighbour list, atom ~i~
-accumulates the entire force acting on it and writes only ~f(:, i)~.
-Iterations then touch disjoint memory:
-
-#+begin_src fortran
-do concurrent(i=1:natoms)
-   call atom_contribution(par, table, i, e_atom(i), forces(:, i))
-end do
-energy = sum(e_atom)
-#+end_src
-
-Energy reduces through a per-atom array rather than a shared accumulator,
-because ~do concurrent~ gained reduction clauses only in Fortran 2023.
-
-** What ~do concurrent~ actually buys
-
-Compilers are not obliged to run these iterations in parallel, and by default
-gfortran does not: without ~-ftree-parallelize-loops~ (or a compiler that maps
-the construct onto threads) it treats the construct as an assertion about
-independence.
-The assertion is still worth having.
-It licenses vectorisation, it documents the dependency structure for the next
-reader, and above all it forces the discipline that made the port correct: every
-procedure the loop body calls must be ~pure~, and every write must land in
-memory no other iteration touches.
-Turning the construct into real parallelism later is then a compiler flag rather
-than a rewrite.
-
-** Cost
-
-A gather evaluates each pair twice (once from each end).
-For three-body terms the atom also walks its neighbours' neighbour lists to
-collect the triplets it participates in without centring.
-The arithmetic roughly doubles; the loop becomes trivially parallel and cache-
-local per atom.
-
-** When the gather does not close
-
-Some kernels have terms whose force cannot be attributed to one atom without
-recomputing a large intermediate (bond-order derivatives that depend on a full
-coordination sum, for instance).
-Where restating the term would cost more than it saves, keep a structured
-scatter loop for that phase, run the independent phases under ~do concurrent~,
-and say so in a comment naming the dependency.
-Do not silently put a scatter inside ~do concurrent~.
 
 * Layout
 

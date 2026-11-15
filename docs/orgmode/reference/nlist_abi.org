@@ -1,0 +1,8 @@
+#+TITLE: Neighbour-list C ABI
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Neighbour-list C ABI
+
+=CppCore/rgpot/nlist/rgpot_nlist.h= declares the neighbour query of =librgpot=.
+Every function returns an =RGPOT_NLIST_*= code unless its entry says otherwise.

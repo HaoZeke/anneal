@@ -1,0 +1,10 @@
+#+TITLE: C++ API
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* C++ API
+
+The C++ API in =include/rgpot/= wraps the C ABI of =rgpot-core= in move-only
+handles.
+=rgpot/rgpot.hpp= includes every header below.
+A failed C call throws =rgpot::Error=.

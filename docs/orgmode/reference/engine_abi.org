@@ -264,44 +264,5 @@ The version covers the table and its conventions; it does not cover the Cap'n
 Proto params schema (versioned by the =potentials-schema= pin), the tensor
 runtime the engine links, or the model.
 
-** Opening an engine
-
-The header defines no search path: the host opens the path it was given.
-
-#+begin_src c
-void *h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
-int (*version)(void) = dlsym(h, "rgpot_engine_abi_version");
-if (!version || version() != RGPOT_ENGINE_ABI_VERSION) { /* refuse */ }
-#+end_src
-
-Do not =dlclose= an engine: the tensor runtime keeps process-wide state.
-=libuma_engine.so= is linked with =-z nodelete=, so a =dlclose= leaves it
-mapped.
-Destroy every handle before the process exits.
-
-** Building and testing the engines
-
-The engine libraries need the rpc stack; UMA and Metatomic also need the
-metatomic stack, which the =umaenginebld= pixi environment provides together
-with xtb:
-
-#+begin_src bash
-pixi run -e umaenginebld potctl ci metatomic-test --rpc --build-dir bbdir-uma-engine
-#+end_src
-
-=EngineAdapterTest= runs the table over a stand-in backend without rpc or torch,
-=EngineTableTest= opens each backend library, and =UmaEngineTest= opens the UMA
-engine as a host does.
-For the Metatomic engine =EngineTableTest= loads the models that
-=scripts/export_tiny_metatomic_model.py= writes into the build directory: they
-have no weights, and the energy moves by a known amount with the charge and
-multiplicity each one reads.
-With
-=RGPOT_UMA_OMOL_PT2= (and =RGPOT_UMA_OMOL_BAND_PT2= for the batch case) =UmaEngineTest= compares the engine with the directly compiled =UmaPot=, checks the model digest against the file and the runtime settings against libtorch, and =RGPOT_UMA_REQUIRE_FIXTURES=
-turns a missing fixture into a failure.
-=AotiUnpackTest= checks the unpack cache without torch on small fake packages:
-the order of the cache roots, reuse, replacement of a broken unpack, concurrent
-unpacks from threads and processes, and that the system temporary directory
-gains no entry.
-=UmaCacheDirTest= and =UmaEngineTest= load a built test package with
-=UmaConfig::cache_dir=, =RGPOT_CACHE_DIR= and =UmaParams.cacheDir=.
+To open, build and test an engine, see
+[[file:../howto/engine-plugins.org][Open, build and test engine plugins]].

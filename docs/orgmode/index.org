@@ -89,6 +89,8 @@ meson compile -C bbdir && meson test -C bbdir
    howto/exprpot
    howto/ipi
    howto/integration
+   howto/add-potential
+   howto/engine-plugins
    howto/eindir-anneal
    howto/eon-rgpot
    howto/sutton-chen-stress
@@ -106,12 +108,20 @@ meson compile -C bbdir && meson test -C bbdir
 
    reference/architecture
    reference/python_api
+   reference/cpp_api
+   reference/cpp_potentials
+   reference/build_options
+   reference/potential_config
    reference/sw_si
    reference/tersoff_sic
    reference/mpi
    reference/c_abi
+   reference/nlist_abi
    reference/fast_nlist
    reference/engine_abi
+   reference/gromacs_dropin
+   reference/plugin_abi
+   reference/external_abi
    reference/simd_exp
    reference/sutton_chen
    reference/eam_table

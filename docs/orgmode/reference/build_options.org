@@ -1,0 +1,75 @@
+#+TITLE: Build options
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Build options
+
+Meson is the primary build.
+CMake declares fewer options than Meson.
+Both tables list every option the build files declare.
+=docs/doccheck.py facts= fails when a row disagrees with =meson_options.txt= or
+=CMakeLists.txt=.
+
+** Meson
+
+Pass an option to =meson setup= as =-D<option>=<value>=.
+A =feature= option takes =enabled=, =disabled= or =auto=.
+
+| Option | Type | Default | Description |
+|-|-|-|-|
+| =with_tests= | boolean | =false= | Build and register the C++ tests (=meson test=). |
+| =with_examples= | boolean | =false= | Build the examples. Pulls in Eigen and fmt unless =with_rpc_client_only= is set. |
+| =with_xtensor= | boolean | =false= | Link xtensor and xtensor-blas and define =WITH_XTENSOR=. |
+| =with_eigen= | boolean | =false= | Link Eigen3. A missing Eigen3 is an error only when this option is true. |
+| =with_rpc= | boolean | =false= | Build the Cap'n Proto RPC stack and the =potserv= server. |
+| =with_rpc_client_only= | boolean | =false= | Build only the RPC client and the dlopen frontends. Implies the RPC stack; disables the server and the cache. |
+| =with_cache= | boolean | =false= | Link RocksDB and xxhash and build =PotentialCache=. |
+| =pure_lib= | boolean | =true= | When false, link fmt and define =NOT_PURE_LIB=. |
+| =with_rust_core= | boolean | =false= | Build =rgpot-core= with cargo and link the static library. cbindgen writes =rgpot.h=. |
+| =with_fast_nlist= | feature | =auto= | linkcell/minimage pair list. Auto when cargo and rustc 1.89 or newer are found; otherwise the C++ pair scan is used. |
+| =with_cp2k= | feature | =disabled= | CP2KPot, the potserv CP2K backend and libcp2kc_rgpot.so against libcp2k (pkg-config libcp2k); needs with_rpc |
+| =with_mpi= | feature | =disabled= | Link MPI so calculator groups can split and share across ranks |
+| =with_xtb= | boolean | =false= | Link xtb (=dependency('xtb')=) and build =XTBPot=. |
+| =with_xckernel= | boolean | =false= | In-process libxckernel XC Fock/fxc (generated C ABI; not a Potential) |
+| =with_dftd3= | boolean | =false= | Link conda-forge s-dftd3 (simple-dftd3) C API |
+| =with_dftd4= | boolean | =false= | Link conda-forge dftd4 C API |
+| =lapack= | combo | =auto= | LAPACK vendor for the dftd4 wrap and nested multicharge Choices: =auto=, =mkl=, =mkl-rt=, =openblas=, =netlib=, =custom=. |
+| =with_expr= | boolean | =false= | Compile vendored OpenMM Lepton (third_party/lepton) |
+| =with_tblite= | boolean | =false= | Link tblite and build =TBLitePot=. |
+| =with_metatomic= | boolean | =false= | Build the Metatomic potential and engine against torch and metatomic. |
+| =with_skala= | boolean | =false= | Skala XC via NWChemPot / libnwchemc (requires with_rpc) |
+| =with_python= | boolean | =false= | Build pip-installable Python package (rgpot._core) |
+| =with_fortran_pots= | feature | =auto= | Fortran-backed potentials (CuH2; grows with the eOn migration). Independent of the RPC options. |
+| =with_highway= | feature | =auto= | Google Highway runtime ISA dispatch for LJ, Morse, the analytical EAM kernel, and the orthorhombic fold. auto uses libhwy >= 1.2 or the wrap when that tree is already present. disabled keeps the scalar kernels. |
+| =with_ipi= | feature | =auto= | i-PI socket server Potential (POSIX sockets). auto is on except on Windows. |
+| =with_water= | boolean | =false= | Flexible TIP4P, SPC/E and TIP4P-Pt kernels. Defaults false, matching the eOn with_water option. |
+| =with_eam_table= | boolean | =false= | EAM and Finnis-Sinclair potentials read from LAMMPS funcfl, setfl and eam/fs tables. |
+| =with_lammps= | feature | =auto= | LAMMPS pair_style rgpot and the lj/cut comparison. Needs the lammps Python module. pair_style rgpot also needs lammps_src. |
+| =lammps_src= | string | =(empty)= | LAMMPS src directory that contains pair.h, matching the liblammps that will load the plugin. |
+| =lammps_exe= | string | =(empty)= | lmp built from lammps_src. When set, the LAMMPS test also runs pair_style rgpot. |
+| =with_gromacs= | feature | =auto= | GROMACS mdrun -plumed using the RGPOT collective variable. |
+| =with_gromacs_dropin= | feature | =disabled= | librgpot_gromacs, the libcp2k API that GROMACS built with =-DGMX_CP2K=ON= links, so mdrun takes QM/MM energies and forces from any rgpot potential. |
+| =gromacs_dropin_gmx= | string | =(empty)= | gmx of a double-precision GROMACS linked against librgpot_gromacs. Empty looks for gmx_d on PATH and skips the mdrun tests without it. |
+| =with_openmm= | feature | =auto= | OpenMM shifted Lennard-Jones comparison. |
+| =with_plumed= | feature | =auto= | PLUMED RGPOT collective variable. |
+| =with_long_range= | boolean | =false= | Ewald, PME, dispersion and NLH summands. |
+| =with_cuda= | boolean | =false= | Compile the Ewald, PME and pair-sum kernels with nvcc. |
+
+** CMake
+
+Pass an option as =-DNAME=ON= or =-DNAME=OFF= to =cmake=.
+
+| Option | Type | Default | Description |
+|-|-|-|-|
+| =RGPOT_RPC_CLIENT_ONLY= | BOOL | OFF | Build only the RPC client bridge. Uses C++17 and forces xtensor, Eigen, the cache and the examples off. |
+| =RGPOT_WITH_RPC= | BOOL | OFF (ON when =RGPOT_RPC_CLIENT_ONLY= is ON) | Build with Cap'n Proto RPC support. |
+| =RGPOT_WITH_XTENSOR= | BOOL | OFF | Build with xtensor support. |
+| =RGPOT_WITH_EIGEN= | BOOL | OFF | Build with Eigen3 support. |
+| =RGPOT_PURE_LIB= | BOOL | ON | When OFF, link fmt. |
+| =RGPOT_WITH_CACHE= | BOOL | ON | Build =PotentialCache= against RocksDB. Unlike Meson, the CMake default is ON, so a CMake build without RocksDB needs =-DRGPOT_WITH_CACHE=OFF=. |
+| =RGPOT_BUILD_EXAMPLES= | BOOL | ON when rgpot is the top-level project, else OFF | Build the examples. |
+| =RGPOT_WITH_HIGHWAY= | BOOL | ON | Google Highway runtime ISA dispatch. |
+| =RGPOT_WITH_IPI= | BOOL | ON (OFF on Windows) | i-PI socket server potential. Enabling it on Windows is a configure error. |
+| =RGPOT_WITH_EAM_TABLE= | BOOL | OFF | EAM and Finnis-Sinclair potentials read from LAMMPS tables. |
+| =RGPOT_BUILD_TESTS= | BOOL | ON when rgpot is the top-level project, else OFF | Build the tests. |
+| =RGPOT_WITH_CP2K= | BOOL | OFF | =CP2KPot=, the =potserv= CP2K backend and =libcp2kc_rgpot= against libcp2k. |

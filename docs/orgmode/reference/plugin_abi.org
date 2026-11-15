@@ -1,0 +1,9 @@
+#+TITLE: Plugin C ABI
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Plugin C ABI
+
+=include/rgpot/plugin.h= declares the descriptor a potential plugin exports.
+A plugin shared library exports one function, =rgpot_plugin_init=, of type
+=rgpot_plugin_init_fn=.

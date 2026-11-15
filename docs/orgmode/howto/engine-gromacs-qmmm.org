@@ -21,23 +21,10 @@ The forces enter the force buffer without a virial, so the pressure leaves the
 rgpot term out and NPT is not supported.
 For NPT, use the PLUMED route of :doc:`engine-gromacs`.
 
-** Why the CP2K interface
-
-GROMACS 2024 to 2026 has three in-process hooks for an external potential.
-
-- QM/MM through libcp2k (=-DGMX_CP2K=ON=) calls a fixed C API, in double
-  precision, every step, and passes the topology elements through a PDB file.
-  Its energy is a GROMACS energy term.
-  It carries no virial: =QMMMForceProvider= adds its forces without a virial
-  contribution.
-- NNPot (2025 and later) loads only TorchScript =.pt= models, converts positions
-  to single precision, and also carries no virial.
-- PLUMED applies a bias.
-  It carries the virial but keeps the energy out of the GROMACS energy terms.
-
-MiMiC serves CPMD only, and GROMACS has no i-PI client.
-The libcp2k API is the one that takes any potential without a model format and
-reports the energy as GROMACS' own, so the drop-in implements it.
+Why the drop-in implements the CP2K interface is in
+[[file:../explanation/gromacs-qmmm.org][GROMACS QM/MM through the CP2K interface]].
+The =&RGPOT= keys, the units, the cell, the errors and the limits are in
+[[file:../reference/gromacs_dropin.org][GROMACS QM/MM drop-in reference]].
 
 ** Build
 
@@ -111,75 +98,14 @@ gmx_d mdrun -deffnm md -ntmpi 1
 
 =mdrun= writes the PDB file itself and passes its name in place of
 =COORD_FILE_NAME=.
-The =&RGPOT= keys are:
-
-| Key                     | Value                                                |
-|-------------------------+------------------------------------------------------|
-| =POTENTIAL= Name        | a name from :doc:`../reference/potential_names`      |
-| =OPTIONS= key value ... | its options in Angstrom and eV; may repeat           |
-| =ENGINE= path           | an =rgpot_engine_*= library, instead of =POTENTIAL=  |
-| =CONFIG= path           | the engine's Cap'n Proto parameters message          |
-| =CELL= PERIODIC or NONE | the GROMACS box as the cell, or an isolated region   |
-| =EMBEDDING= NONE        | accept charged MM atoms that do not act on QM atoms  |
-
-Exactly one of =POTENTIAL= and =ENGINE= is required.
-=OPTIONS= go with =POTENTIAL= and =CONFIG= with =ENGINE=.
+To run an engine library instead, replace =POTENTIAL= and =OPTIONS= with
+=ENGINE= and =CONFIG=.
 An engine's configuration is the flat message the engine ABI takes, for example:
 
 #+begin_src bash
 capnp encode CppCore/rgpot/rpc/Potentials.capnp BuiltinParams \
   <<< '(name = "tersoff")' > tersoff.bin
 #+end_src
-
-The PDB file gives each atom its element and marks it QM or MM.
-Only QM atoms are passed to the potential; MM atoms get zero force from it and
-keep whatever the GROMACS force field gives them.
-=grompp= already removes the QM-QM nonbonded pairs and bonded terms, so the QM
-region interacts only through rgpot.
-A =POTENTIAL= needs =CHARGE 0= and =MULTIPLICITY 1=.
-An =ENGINE= gets both through =rgpot_engine_set_charge_spin=; one without that
-call needs =CHARGE 0= and =MULTIPLICITY 1= too.
-
-Nothing can be returned through the libcp2k API, so every error stops =mdrun=
-with status 1.
-The message starts with =rgpot-gromacs:= on standard error and is repeated in
-the =md_cp2k.out= file GROMACS names.
-Examples are an unknown potential or option, a missing =&RGPOT= section (as with
-a generated method such as =PBE=), a QM atom without an element, a =&LINK=
-section, a charged MM atom without =EMBEDDING NONE=, and a failed or non-finite
-evaluation at any step.
-
-** Units and cell
-
-GROMACS sends positions in Bohr and takes energies and forces in atomic units.
-It converts them with the constants of its =units.h=, which =qmmm_units.hpp=
-copies expression for expression.
-So GROMACS reports the rgpot energy times 96.48533212331002
-kJ/mol per eV and the forces times 964.8533212331002 kJ/(mol nm) per
-eV/Angstrom, up to rounding.
-
-With a periodic potential and =pbc = xyz=, the default is =CELL PERIODIC=: each
-step the QM atoms are wrapped into the GROMACS box, which goes to the potential
-as the cell, triclinic or not.
-GROMACS 2024 and 2025 send the box transposed and 2026 does not; a GROMACS box
-is lower triangular, so the library tells the two apart from the zeros.
-=CELL NONE=, the default for a potential with free boundaries, keeps each QM
-atom at the image nearest its previous position, so a molecule split by the box
-stays whole, and centres the region in a cube with sides of at least 100
-Angstrom and of twice the region's extent plus the cutoff plus 10 Angstrom.
-
-** Limits
-
-- No virial: pressure, NPT and =gmx energy= pressure terms exclude rgpot.
-- No electrostatic embedding: MM charges do not act on the QM region, and no
-  link atoms, so the QM group must be whole molecules or a whole crystal.
-- One thread-MPI rank (=-ntmpi 1=); OpenMP threads are fine.
-  =cp2k_create_force_env_comm= stops with an error.
-- Tested with double-precision GROMACS only.
-- The shim wraps atoms every step, as the LAMMPS pair style does.
-  A kernel whose neighbour list has a Verlet skin rebuilds it whenever an atom
-  crosses a cell face, so the cost per MD step exceeds that of repeated calls on
-  one geometry; the benchmark below measures both.
 
 ** Tests
 
@@ -238,8 +164,9 @@ For CuNi =mdrun= was faster than the bare replay in each of the five repeats
 (1.5% in the medians), so the cost there is below what this measurement
 resolves.
 The gap between fixed and bare is the kernels' neighbour-list rebuilds when
-atoms cross a face of the cell (see Limits), which any per-step evaluation of
-wrapped positions pays.
+atoms cross a face of the cell (see the limits in
+[[file:../reference/gromacs_dropin.org][GROMACS QM/MM drop-in reference]]),
+which any per-step evaluation of wrapped positions pays.
 
 #+begin_src bash
 python3 engines/gromacs/bench_dropin.py --gmx /path/to/gmx_d --build bbdir \

@@ -1,0 +1,103 @@
+#+TITLE: PotentialConfig arms
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* PotentialConfig arms
+
+** rgpot user parameters (=PotentialConfig=) over RPC
+
+Backend knobs for a live =Potential= use Cap'n Proto =PotentialConfig=: an
+extensible union whose arms and ordinals come from potentials-schema (=none= @0,
+=nwchem= @1, =cpmd= @2, =metatomic= @4, =lammps= @5, =xtb= @6, =tblite= @7,
+=uma= @8, =lj= @9, =morse= @10, =zbl= @11, =d3= @12, =d4= @13, =mopac= @14,
+=skala= @15, =expr= @16, =cp2k= @17).
+Geometry stays on =ForceInput=; =configure(config)= applies method/backend setup
+only.
+=potserv= applies =nwchem=, =cpmd= and =morse= on the matching backend.
+=none= is a no-op on every backend.
+Every other arm, and an arm from a newer schema, gets =ok=false= with a message
+that names the arm.
+=D3Pot= and =D4Pot= stay in-process =Potential= summands; =potserv= refuses the
+=d3= and =d4= arms.
+A DFT host that wants XcKernel + VV10 + D4 sums those terms itself; do not fold
+dispersion into the XC kernel.
+
+** NWChem arm (=PotentialConfig.nwchem= / =NWChemParams=)
+
+With =potserv <port> NWChem=, pass =configure= with the =nwchem= arm set.
+Payload fields (=basis=, =theory=, =scfType=, =charge=, =multiplicity=,
+=enginePath=, =nwchemRoot=) are NWChem-specific; the outer message is still
+generic rgpot params so other backends can add arms without a new config
+language.
+
+Python: =tests/nwchem_params.py= builds =PotentialConfig= + =nwchem=.
+BLYP: =theory="dft"=, =scfType="blyp"=. Embed =.so= still required for
+=calculate=.
+
+** Morse arm (=PotentialConfig.morse= / =MorseParams=)
+
+With =potserv <port> Morse=, pass =configure= with the =morse= arm set.
+=MorseParams= carries =de=, =a=, =re= and =cutoff=, with the platinum defaults
+of =MorseConfig=.
+The server rebuilds its =MorsePot= from those values and keeps its switch width,
+so the next =calculate= uses them.
+A non-finite value, a cutoff that is not positive, or a cutoff below the switch
+width gets =ok=false= and leaves the pot as it was.
+=tests/rpc_integ.py= doubles =de= and checks the energy at =re= doubles.
+
+** CPMD arm (=PotentialConfig.cpmd= / =CPMDParams=)
+
+With =potserv <port> CPMD=, pass =configure= with the =cpmd= arm set.
+=CPMDParams= is method/backend setup only; each =calculate()= call still carries
+geometry in =ForceInput=.
+
+The rgpot frontend loads =libcpmdc= at runtime and forwards serialized
+=CPMDParams= to that C ABI.
+Engine lookup checks =CPMDParams.enginePath=,
+=CPMDC_LIBRARY=, =RGPOT_CPMDC_ENGINE=, =RGPOT_CPMD_ENGINE=, and default
+shared-library names.
+=CPMDParams.cpmdRoot= is applied as =CPMD_ROOT= before loading the engine.
+
+Payload fields include method-level defaults (=functional=, =cutOffRy=,
+=charge=, =multiplicity=, =task=), frontend hints (=enginePath=, =cpmdRoot=),
+runtime file placement (=scratchDir=, =permanentDir=), raw =inputBlocks=, and
+structured =inputSections= for =SYSTEM=, =CPMD=, =DFT=, =ATOMS=, =SET=, and raw
+sections.
+The typed =cpmd= section covers wavefunction and geometry optimization,
+molecular dynamics, orbital and geometry convergence thresholds, iteration
+limits, timestep, electron mass, CP/BO/EH/PT/classical MD variants, MD file,
+Nose/Berendsen/Langevin/annealing/quench thermostat controls,
+RATTLE/SHAKE, constraints, Trotter factor, restart, print/store, center
+molecule, DIIS/ ODIIS/PCG/diagonalization, free-energy, interface, QMMM,
+bicanonical, CDFT, properties, and trajectory controls.
+The typed =dft= section covers functional, LSD, GC cutoff, XC driver, LIBXC, LR
+kernel, refunct, MTS
+high/low functionals, HFX, HFX screening, Hubbard, alpha, beta, old/new code
+selection, correlation, exchange, and Becke88 controls.
+
+Python: =tests/cpmd_params.py= builds =PotentialConfig= + =cpmd=.
+The helper uses =CPMD_ROOT= for =cpmdRoot= and =CPMDC_LIBRARY= /
+=RGPOT_CPMDC_ENGINE= / =RGPOT_CPMD_ENGINE= for =enginePath= when explicit values
+are not supplied.
+Use =input_sections= to build every structured =CPMDInputSection= arm
+(=generic=, =system=, =cpmd=, =dft=, =atoms=, =set=, and =raw=) without raw
+Cap'n Proto builder code in clients.
+
+Typed =atoms= sections carry pseudopotential entries keyed by element symbol.
+The engine groups =ForceInput= coordinates into =&ATOMS= and requires entries
+for every atomic number present in a step.
+Without an =atoms= section, built-in BLYP pseudopotential defaults cover H and O
+only.
+The same =atoms= section also accepts structured =directives= for ATOMS keywords
+that are not pseudopotential entries.
+
+The integration script exercises RPC =configure()= plumbing.
+The =cpmd= configure result is =ok=false= when no usable =libcpmdc= engine can
+be loaded or when the engine rejects the params:
+
+#+begin_src bash
+pixi run -e rpctest python tests/rpc_integ.py \
+  --server-bin ./bbdir/CppCore/potserv \
+  --cpmd-smoke
+#+end_src
+

@@ -12,7 +12,12 @@ Start with the RPC model, then use the architecture page for the layers.
 .. toctree::
    :maxdepth: 1
 
+   architecture
    rpc-model
+   abi-stamps
+   hessian-vector
+   fortran-kernels
+   gromacs-qmmm
    simd
    thread-safety
 #+end_export

@@ -1,0 +1,10 @@
+#+TITLE: C++ potentials
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* C++ potentials
+
+Every potential derives from =rgpot::Potential<Derived>=, which derives from
+=rgpot::PotentialBase=.
+Energies are eV, lengths are Angstrom and forces are eV/Angstrom unless an entry
+says otherwise.

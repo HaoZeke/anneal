@@ -1,0 +1,89 @@
+#+TITLE: GROMACS QM/MM drop-in reference
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* GROMACS QM/MM drop-in reference
+
+=librgpot_gromacs= implements the C API of the CP2K library, which GROMACS calls for its QM group when built with =-DGMX_CP2K=ON=.
+The steps are in
+[[file:../howto/engine-gromacs-qmmm.org][GROMACS QM/MM drop-in]], and why it
+implements the CP2K interface is in
+[[file:../explanation/gromacs-qmmm.org][GROMACS QM/MM through the CP2K interface]].
+
+** The =&RGPOT= section
+
+The run uses =qmmm-cp2k-qmmethod = INPUT= and a =-qmi= file with an =&RGPOT=
+section.
+The keys =grompp= checks stay as CP2K has them.
+The =&RGPOT= keys are:
+
+| Key                     | Value                                                |
+|-------------------------+------------------------------------------------------|
+| =POTENTIAL= Name        | a name from :doc:`potential_names`                   |
+| =OPTIONS= key value ... | its options in Angstrom and eV; may repeat           |
+| =ENGINE= path           | an =rgpot_engine_*= library, instead of =POTENTIAL=  |
+| =CONFIG= path           | the engine's Cap'n Proto parameters message          |
+| =CELL= PERIODIC or NONE | the GROMACS box as the cell, or an isolated region   |
+| =EMBEDDING= NONE        | accept charged MM atoms that do not act on QM atoms  |
+
+Exactly one of =POTENTIAL= and =ENGINE= is required.
+=OPTIONS= go with =POTENTIAL= and =CONFIG= with =ENGINE=.
+An engine's configuration is the flat message the engine ABI takes.
+
+** Atoms, charge and multiplicity
+
+=mdrun= writes the PDB file itself and passes its name in place of
+=COORD_FILE_NAME=.
+The PDB file gives each atom its element and marks it QM or MM.
+Only QM atoms are passed to the potential; MM atoms get zero force from it and
+keep whatever the GROMACS force field gives them.
+=grompp= already removes the QM-QM nonbonded pairs and bonded terms, so the QM
+region interacts only through rgpot.
+A =POTENTIAL= needs =CHARGE 0= and =MULTIPLICITY 1=.
+An =ENGINE= gets both through =rgpot_engine_set_charge_spin=; one without that
+call needs =CHARGE 0= and =MULTIPLICITY 1= too.
+
+** Errors
+
+Nothing can be returned through the libcp2k API, so every error stops =mdrun=
+with status 1.
+The message starts with =rgpot-gromacs:= on standard error and is repeated in
+the =md_cp2k.out= file GROMACS names.
+Examples are an unknown potential or option, a missing =&RGPOT= section (as with
+a generated method such as =PBE=), a QM atom without an element, a =&LINK=
+section, a charged MM atom without =EMBEDDING NONE=, and a failed or non-finite
+evaluation at any step.
+
+** Units and cell
+
+GROMACS sends positions in Bohr and takes energies and forces in atomic units.
+It converts them with the constants of its =units.h=, which =qmmm_units.hpp=
+copies expression for expression.
+So GROMACS reports the rgpot energy times 96.48533212331002
+kJ/mol per eV and the forces times 964.8533212331002 kJ/(mol nm) per
+eV/Angstrom, up to rounding.
+
+With a periodic potential and =pbc = xyz=, the default is =CELL PERIODIC=: each
+step the QM atoms are wrapped into the GROMACS box, which goes to the potential
+as the cell, triclinic or not.
+GROMACS 2024 and 2025 send the box transposed and 2026 does not; a GROMACS box
+is lower triangular, so the library tells the two apart from the zeros.
+=CELL NONE=, the default for a potential with free boundaries, keeps each QM
+atom at the image nearest its previous position, so a molecule split by the box
+stays whole, and centres the region in a cube with sides of at least 100
+Angstrom and of twice the region's extent plus the cutoff plus 10 Angstrom.
+
+** Limits
+
+- No virial: pressure, NPT and =gmx energy= pressure terms exclude rgpot.
+- No electrostatic embedding: MM charges do not act on the QM region, and no
+  link atoms, so the QM group must be whole molecules or a whole crystal.
+- One thread-MPI rank (=-ntmpi 1=); OpenMP threads are fine.
+  =cp2k_create_force_env_comm= stops with an error.
+- Tested with double-precision GROMACS only.
+- The shim wraps atoms every step, as the LAMMPS pair style does.
+  A kernel whose neighbour list has a Verlet skin rebuilds it whenever an atom
+  crosses a cell face, so the cost per MD step exceeds that of repeated calls on
+  one geometry; the benchmark in
+  [[file:../howto/engine-gromacs-qmmm.org][GROMACS QM/MM drop-in]] measures
+  both.

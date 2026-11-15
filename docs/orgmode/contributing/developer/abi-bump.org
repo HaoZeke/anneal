@@ -1,0 +1,175 @@
+#+TITLE: Bump the ABI numbers
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Bump the ABI numbers
+
+Each step below names the constant to change and the check that fails when it is
+stale.
+The meaning of each number is in
+[[file:../../explanation/abi-stamps.org][ABI stamps]].
+
+** Bumping the numbers
+
+The numbers live in =rgpot-core/src/version.rs= as
+=RGPOT_ABI_VERSION_MAJOR=, =RGPOT_ABI_VERSION_MINOR= and
+=RGPOT_ABI_LAYOUT_REVISION=.
+Regenerate the header with =pixi run gen-header= and commit it with the change.
+The crate test =committed_header_matches_the_crate= fails when the header and
+the source disagree.
+
+- =abi_major=: increment for a change a caller built against the old header
+  cannot survive: removing or renaming an exported function, changing a
+  signature, changing the meaning of an existing argument or status code.
+  Reset =abi_minor= to 0.
+- =abi_minor=: increment for an additive change that leaves every old call
+  valid: a new exported function, a new status code, a new enum value a caller
+  may ignore.
+  A caller built against minor N runs on any library of the same major and
+  layout revision whose minor is at least N.
+- =layout_revision=: increment when the size or field order of an exported
+  struct changes, or an existing field changes type, even when every function
+  keeps its name.
+  A caller and a library with different layout revisions never match, whatever
+  their minors.
+
+The ABI numbers do not follow the package version: a release that changes no
+exported symbol leaves them where they are.
+They are also not the ELF soversion of =librgpot=.
+The C API is exported from that library and has no shared library of its own, so
+a C caller relinks when the C++ SONAME moves even if these numbers stay.
+3.5.0 left them at 1, 0 and 1.
+3.6.0 carries 1, 1 and 1.
+=rgpot_eindir_abi_compatible= is the new exported function.
+A caller built against minor 0 still matches, and a caller that needs the new
+function is refused by a 3.5 library.
+No exported C struct in =rgpot.h= changed layout.
+3.7.0 still carries 1, 1 and 1.
+The next release carries 1, 2 and 1: the Hessian-vector entry points below are
+additions, and their state lives behind the opaque cache pointer of the handle,
+so =rgpot_potential_t= keeps its layout.
+A caller that needs them is refused by a 3.7 library.
+
+=scripts/abi_core_baseline.txt= lists the =rgpot_*= functions the =rgpot-core=
+shared library exports in a default build.
+The meson test =abi_core_symbols= fails when one of them is no longer exported,
+and the crate test =the_abi_baseline_is_declared_by_the_header= when the
+committed header stops declaring one.
+The list only grows: append a new function with the minor bump that adds it.
+=scripts/abi_baseline.txt= is the same check for the neighbour-list and fast-list exports of =librgpot= (meson test =abi_symbols=).
+The neighbour-list C ABI is separate.
+3.6.0 sets it to version 4 (=RGPOT_NLIST_ABI= in =rgpot_nlist.h=).
+=rgpot_nlist_request_init= sets the defaults, =bytes= is the struct size, and =rgpot_nlist_strerror=
+names a code.
+3.6.0 also bumps the ELF soversion of =librgpot= from the soversion 4 of 3.5.1.
+Soversion 5 records LJPot and MorsePot each holding a neighbour list and a
+cached pair table.
+Soversion 6 is what this release ships.
+LJ and Morse no longer keep a copied half-list, and ZBL and the open
+Lennard-Jones cluster hold a neighbour list.
+A caller built against soversion 4 does not load =librgpot.so.6=.
+=librgpot_mpi= stays at soversion 3.
+
+
+** Bump the C++ layout stamp
+
+
+- A change to the size, alignment or a field offset of a covered type moves the
+  hash by itself.
+  Bump =kCxxSoversion= in the same change.
+  That constant is the ELF soversion of =librgpot= (=librgpot.so.N=).
+  Meson and CMake read it, so the SONAME is not written down anywhere else.
+  The hash is not the SONAME.
+  It depends on the platform tag (=kCxxPlatformTag=): operating system,
+  architecture, standard library and data model.
+  It also folds pointer width and the cache feature bit, so two builds of one
+  revision do not share a hash.
+  Record each no-cache hash in =kCxxSoversionTable= in
+  =CppCore/rgpot/abi/CxxLayout.hpp=.
+  =CxxLayout.cc= static_asserts the row for the platform it is compiled on.
+  A platform with no row does not fail the build.
+  The compiler prints that the tag is unlisted.
+  =CppCore/tests/check_cxx_soversion.py= fails a live hash only when that tag is
+  in the table.
+  It fails when the fingerprint differs from
+  =CppCore/rgpot/abi/cxx_soversion_ledger.txt=, and when a shipped ledger line
+  changes under the same soversion.
+  Append a line to that ledger with the new soversion and the fingerprint the
+  check prints.
+  The fingerprint is platform-independent.
+  Do not edit a shipped line.
+- =kCxxLayoutRevision= in =CppCore/rgpot/abi/CxxLayout.hpp=: increment when a
+  change keeps every size and offset and still alters the ABI.
+  Reordering virtual functions, changing the meaning of a field, changing a base
+  class, changing a default member initializer a consumer inlines.
+  Bump =kCxxSoversion= in that change as well: the revision is an input of the
+  hash.
+- =kPotentialBaseVirtuals=, =kPotentialBaseCacheVirtuals= and
+  =kPotentialVirtuals= count the virtual functions of the polymorphic classes,
+  because the compiler hides a vtable change from =sizeof=.
+  =CppCore/tests/check_virtual_counts.py= counts the =virtual= declarations in
+  =Potential.hpp= and fails when a count is stale.
+  Update the constant and increment =kCxxLayoutRevision= together.
+- Adding a covered type changes the hash, so it needs no revision bump.
+  Add it to =detail::compute_hash()= in the same commit, and bump
+  =kCxxSoversion= with the hash.
+
+** Updating the platform table
+
+=kCxxSoversionTable= starts empty when the soversion changes, and is filled from
+CI.
+Do not copy a hash from another platform or from a local build.
+
+Each CI build of the printer prints one =RGPOT_CXX_LAYOUT_STAMP= line.
+It carries =tag=, =hash=, =hash_dec=, =features= and =revision=.
+
+=features= is 1 for a cache build.
+Ignore those lines.
+The no-cache hash is the one that goes in the table.
+
+The workflow "C++ layout stamp" compiles
+=CppCore/tests/print_cxx_layout_stamp.cc= on Linux x86_64, Linux aarch64, macOS
+arm64, macOS x86_64 and Windows MSVC.
+The Linux and macOS wheels print the same line from the compiler that builds the
+wheel.
+The Meson =CxxSoversion= test runs the printer too.
+There is no musl row unless a log prints a =linux-musl-= tag. librgpot wheels
+skip musllinux, and the musl potctl build does not compile this header.
+
+When the soversion is bumped:
+
+1. Increment =kCxxSoversion=.
+2. Leave =kCxxSoversionTable= empty and delete the listed-platform guards, so
+   every platform builds and the printers run.
+3. Read each =RGPOT_CXX_LAYOUT_STAMP= line whose =features= is 0.
+4. Add one table row per distinct tag, using that line's =hash= as
+   =0x<hash>ull=.
+   Add a matching guard.
+   The guard is an =#if=, then =#elif=, on =RGPOT_OS_*=, =RGPOT_ARCH_*=,
+   =RGPOT_STDLIB_*= and =RGPOT_MODEL_*=.
+   Inside the branch, define
+   =RGPOT_CXX_PLATFORM_LISTED= as 1 and =RGPOT_CXX_PLATFORM_LISTED_TAG= as that
+   same tag string.
+5. Append one ledger line: the new soversion and the fingerprint the check
+   prints.
+   Do not edit a shipped line.
+6. Push and wait until the jobs that printed the hashes are green.
+   A listed tag whose live hash differs fails the build.
+
+The fixture =CppCore/tests/layout_fixture.cc= is a shared object built from a
+header in which =ForceOut= gained a field; =CxxLayoutTest= requires that its
+stamp differs and that its compatibility check refuses the real stamp.
+
+=kCxxSoversion= applies to =librgpot= only.
+=librgpot_mpi= stays at soversion 3: its C ABI is =RGPOT_MPI_ABI_VERSION= 1.
+The engine plugins (=libclassical_engine.so=, =libmopac_engine.so=,
+=libnwchem_engine.so=, =libskala_engine.so=,
+=libxtb_engine.so=, =libmetatomic_engine.so=,
+=libuma_engine.so=) are opened by those unversioned names and keep =RGPOT_ENGINE_ABI_VERSION= 1.
+The =libpot_client_bridge= header did not change.
+=librgpot_cuh2= only added =rgpot_cuh2_force_ws=.
+The pair-potential types whose layouts changed are static objects inside
+=librgpot=, so they have no SONAME of their own.
+CMake's =libptlrpc= is the same: the schema it carries is the 3.5.0 schema, and
+Meson does not install it as a separate shared library.
+

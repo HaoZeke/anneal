@@ -133,5 +133,6 @@ separately by orchestrator =docs_lychee= (and weekly schedule).
 
      testing
      release
+     abi-bump
      faq
 #+end_export

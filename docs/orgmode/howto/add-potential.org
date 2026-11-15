@@ -1,0 +1,66 @@
+#+TITLE: Add a potential to the Rust core
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
+#+STARTUP: content
+
+* Add a potential to the Rust core
+
+** Adding a New Potential
+
+To register a new C++ potential with the Rust core:
+
+1. Implement the potential class inheriting from =Potential<MyPot>= as usual.
+The class must provide =void forceImpl(const ForceInput&, ForceOut*) const=.
+
+2. Use the RAII wrapper to create a handle:
+
+#+begin_src cpp
+#include "rgpot/potential.hpp"
+#include "my_pot/MyPot.hpp"
+
+rgpot::MyPot my_pot;
+auto handle = rgpot::PotentialHandle::from_impl(my_pot);
+auto result = handle.calculate(input_spec);
+double energy = result.energy();
+#+end_src
+
+3. Alternatively, write a standalone =extern "C"= trampoline and call
+=rgpot_potential_new()= directly from C:
+
+#+begin_src c
+rgpot_status_t my_trampoline(void *ud, const rgpot_force_input_t *in,
+                             rgpot_force_out_t *out) {
+    /* ... forward to your implementation ... */
+    return RGPOT_SUCCESS;
+}
+
+rgpot_potential_t *pot = rgpot_potential_new(my_trampoline, my_data, NULL);
+#+end_src
+
+** Build System Integration
+
+*** Meson
+
+The Rust crate is built via a
+=custom_target= in =meson.build=, gated behind the =with_rust_core= option:
+
+#+begin_src bash
+meson setup bbdir -Dwith_rust_core=true
+meson compile -C bbdir
+#+end_src
+
+Meson invokes =cargo build= and links the resulting =librgpot_core.a= into the
+project.
+The feature flags (=rpc=, =cache=) are forwarded from the corresponding Meson
+options.
+
+*** Standalone Rust
+
+The crate can also be built and tested independently:
+
+#+begin_src bash
+cd rgpot-core
+cargo build
+cargo test
+cargo build --features rpc  # with RPC support
+#+end_src
+
