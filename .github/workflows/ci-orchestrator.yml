@@ -836,13 +836,16 @@ jobs:
             -Dlammps_src="$GITHUB_WORKSPACE/lammps-src/src" \
             -Dlammps_exe="$GITHUB_WORKSPACE/lammps-src/build-lmp/lmp" \
             -Dwith_gromacs=enabled -Dwith_openmm=enabled -Dwith_plumed=enabled \
+            -Dwith_eam_table=true -Dwith_python=true \
             --buildtype=release
           pixi run -e engines meson compile -C build
           pixi run -e engines meson test -C build --print-errorlogs \
             lj_eval lj_engine capi_threads c_symbols abi_symbols \
-            lammps_lj plumed_driver gromacs_mdrun openmm_lj \
+            lammps_lj plumed_driver plumed_debug_forces plumed_box_derivatives \
+            plumed_units plumed_api gromacs_mdrun openmm_lj \
             | tee build/engine-tests.txt
-          for name in lj_eval lj_engine lammps_lj plumed_driver gromacs_mdrun openmm_lj; do
+          for name in lj_eval lj_engine lammps_lj plumed_driver plumed_debug_forces \
+            plumed_box_derivatives plumed_units plumed_api gromacs_mdrun openmm_lj; do
             if ! grep -E "${name}[[:space:]]+OK" build/engine-tests.txt >/dev/null; then
               echo "${name} did not pass" >&2
               exit 1
