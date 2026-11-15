@@ -22,9 +22,9 @@ The =build.rs= tries the bundled copy first, then falls back to
 
 ** How do I repin potentials-schema?
 
-Both vendored copies (=CppCore/rgpot/rpc/Potentials.capnp= and
-=rgpot-core/schema/Potentials.capnp=) are the pinned upstream =Potentials.capnp=
-byte for byte.
+Both vendored copies
+(=CppCore/rgpot/rpc/Potentials.capnp= and =rgpot-core/schema/Potentials.capnp=)
+are the pinned upstream =Potentials.capnp= byte for byte.
 A parent project such as gpridge resolves =potentials-schema= from its own wrap
 and compares the copies with that file, so the wrap carries no =diff_files=.
 Change =revision= and =directory= in =subprojects/potentials-schema.wrap= and
@@ -51,8 +51,8 @@ subproject checkout.
 
 Only when upstream cannot take it yet.
 Write a diff against the vendored copy that only adds lines, put it in
-=CppCore/rgpot/rpc/local/=, append its name to =local/series=, and copy both
-files to =rgpot-core/schema/local/=.
+=CppCore/rgpot/rpc/local/=, append its name to
+=local/series=, and copy both files to =rgpot-core/schema/local/=.
 Leave the vendored copies alone.
 =schema_ledger.py append= then records each new ordinal as =local=:
 
@@ -62,12 +62,11 @@ python3 CppCore/rgpot/rpc/schema_ledger.py check --fetch --base origin/develop
 python3 CppCore/rgpot/rpc/schema_ledger.py apply --out build/Potentials.capnp
 #+end_src
 
-A series diff may not remove or rewrite a line that carries an =@N= ordinal,
-and every ordinal it adds must be a =local= ledger entry that upstream does not
+A series diff may not remove or rewrite a line that carries an =@N= ordinal, and
+every ordinal it adds must be a =local= ledger entry that upstream does not
 declare.
 Meson, CMake and =rgpot-core/build.rs= compile, install and serve the effective
-schema, the vendored copy with the series applied; =apply= writes the same
-file.
+schema, the vendored copy with the series applied; =apply= writes the same file.
 When upstream later adopts the field unchanged, repin, drop it from the series
 and run =append=: the =local= line stays and a later =upstream= line for the
 same ordinal retires it.
