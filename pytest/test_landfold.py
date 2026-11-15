@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """anneal.landfold folds descriptor rows and minima books onto the plane."""
 
 from pathlib import Path

@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Sketch-map embedding of a minima book.
 
 ``landfold(rows)`` folds an ``(n, D)`` array of descriptor rows.
