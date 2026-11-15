@@ -291,6 +291,7 @@ fn apply_overrides(cfg: &mut Config) {
         let count = || value.parse::<usize>().expect("integer");
         match key {
             "orbit_complete_on_new" => cfg.orbit_complete_on_new = flag(),
+            "rigid_side_walk_hand_back" => cfg.rigid_side_walk_hand_back = flag(),
             "point_symmetrise_on_new" => cfg.point_symmetrise_on_new = flag(),
             "symmetrise_on_stall" => cfg.symmetrise_on_stall = flag(),
             "symmetrise_patience" => cfg.symmetrise_patience = count(),

@@ -4612,6 +4612,7 @@ where
         crate::methods::stall_archive::MEMORY,
     );
     let cage_quantum = cfg.min_separation / 50.0;
+    let mut cage_walked = false;
     let mut archive_walked = false;
     let mut binary_core_offered = false;
     // Energy of the incumbent whose close-packed sheet has already been slid.
@@ -5392,14 +5393,13 @@ where
                 }
             }
         }
-        // A side walk's lowest quench is a minimum like any other. It is
-        // recorded, and the walker continues from it when it is lower than
-        // the walker's own. Left in the side walk, it is dropped: on
-        // (H2O)16 a side walk reached the global minimum's neighbour cage
-        // and the chain ended 4 kJ/mol above it.
+        // With Config::rigid_side_walk_hand_back, a side walk's lowest
+        // quench is a minimum like any other. It is recorded, and the walker
+        // continues from it when it is lower than the walker's own.
         macro_rules! hand_back {
             ($low:ident) => {
-                if let Some((energy, state)) = $low.take()
+                if cfg.rigid_side_walk_hand_back
+                    && let Some((energy, state)) = $low.take()
                     && energy < e - new_lowest
                     && state.len() == x.len()
                 {
@@ -5420,16 +5420,19 @@ where
         // After many patience windows with no new lowest minimum, the calls
         // that remain are spent on another cage the chain already quenched.
         // A chain that is still descending never enters, so its proposals
-        // and its evaluation count stay what they were. The walk comes
-        // round again after each further quiet stretch of the same length.
+        // and its evaluation count stay what they were. With
+        // Config::rigid_side_walk_hand_back the walk comes round again after
+        // each further quiet stretch of the same length; without, once.
         let cage_patience = cfg
             .restart_patience
             .saturating_mul(RIGID_CAGE_WINDOWS)
             .max(1);
         if cfg.move_library.is_rigid_body()
+            && (cfg.rigid_side_walk_hand_back || !cage_walked)
             && !kernels.is_empty()
             && ledger.spent().saturating_sub(charged_at_best) >= cage_patience
         {
+            cage_walked = true;
             let shell_mark = ledger.spent();
             let mut side_low: Option<(f64, Array1<f64>)> = None;
             // Start from the walker itself. Touching the shared cage archive
@@ -5459,7 +5462,9 @@ where
                         contain_trial(cfg, &mut trial, cfg.n_points);
                         let (quenched, relaxed) = relax(ledger, trial.view(), cfg.relax_steps);
                         if quenched.is_finite() && relaxed.len() == $state.len() {
-                            if side_low.as_ref().is_none_or(|(held, _)| quenched < *held) {
+                            if cfg.rigid_side_walk_hand_back
+                                && side_low.as_ref().is_none_or(|(held, _)| quenched < *held)
+                            {
                                 side_low = Some((quenched, relaxed.clone()));
                             }
                             let rise = (quenched - $energy) / cfg.temperature.max(1e-12);
@@ -5659,7 +5664,9 @@ where
                 if !quenched.is_finite() || relaxed.len() != side_state.len() {
                     break;
                 }
-                if side_low.as_ref().is_none_or(|(held, _)| quenched < *held) {
+                if cfg.rigid_side_walk_hand_back
+                    && side_low.as_ref().is_none_or(|(held, _)| quenched < *held)
+                {
                     side_low = Some((quenched, relaxed.clone()));
                 }
                 let rise = (quenched - side_energy) / cfg.temperature.max(1e-12);
@@ -10882,6 +10889,15 @@ mod tests {
         let (_, at, _, energy) = *outcome.improvements.last().expect("an improvement");
         assert!(energy < reference + 1e-3);
         assert!(at < budget / 2, "stamped at {at}");
+    }
+
+    #[test]
+    fn the_rigid_side_walk_hand_back_is_opt_in() {
+        for cfg in [Config::for_tip4p(16), Config::recommended_tip4p(16)] {
+            assert!(!cfg.rigid_side_walk_hand_back);
+            let json = serde_json::to_string(&cfg).expect("json");
+            assert!(!json.contains("rigid_side_walk_hand_back"));
+        }
     }
 
     #[test]
