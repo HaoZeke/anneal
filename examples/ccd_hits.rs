@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! Hit counts against Cambridge Cluster Database minima at a fixed budget.
 //!
 //! Usage: `ccd_hits <problem> <budget> <first_seed> <last_seed> [arm]`

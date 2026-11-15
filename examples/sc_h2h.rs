@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! Arm 3 on a Sutton-Chen cluster from the head-to-head's shared start.
 //!
 //! `iso` is one chain. `ens` is `replicas` chains that share one exact

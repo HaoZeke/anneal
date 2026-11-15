@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 use anneal_core::landfold::{
     Landfold, LandfoldConfig, LandfoldMetric, book_descriptors, classical_mds, landfold, parse_book,
 };

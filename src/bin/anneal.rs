@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! `anneal` command line.
 //!
 //! ```text

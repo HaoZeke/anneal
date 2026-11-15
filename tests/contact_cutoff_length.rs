@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! The icosahedral contact test bonds the first shell at every length.
 //!
 //! The Cambridge Sutton-Chen tables are in units of the face-centred cubic

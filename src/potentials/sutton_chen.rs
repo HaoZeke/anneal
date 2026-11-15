@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! Sutton-Chen metal potential in the reduced units of the Cambridge tables.
 //!
 //! Doye and Wales set `eps = 1` and `a = 1` and use Sutton and Chen's

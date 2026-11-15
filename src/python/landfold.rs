@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! `landfold` and `landfold_book`: the sketch-map embedding of
 //! [`crate::landfold`] for Python.
 

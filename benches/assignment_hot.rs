@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! Minimum-cost assignment, the largest share of time outside the potential.
 //!
 //! `shortest_paths` is the scan used for a full point set of 98 atoms and

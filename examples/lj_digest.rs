@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! Bitwise digest of `Config::recommended` Lennard-Jones searches.
 //!
 //! Usage: `lj_digest [lj38|lj55|lj75|all]`. Each line hashes one seed's

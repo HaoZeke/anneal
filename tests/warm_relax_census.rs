@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 use anneal_core::catalog::{BasinCensus, PRODUCTION_MINIMUM_VISITS};
 use anneal_core::methods::cluster_hopping::{
     ChainCheckpoint, CheckpointAction, Config, Ledger, QuenchStatus, random_cluster,

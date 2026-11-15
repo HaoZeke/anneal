@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! Read the Sutton-Chen minima `sc_h2h` wrote to readcon-db and say what they are.
 //!
 //! Prints the distinct energies lowest first, how many runs reached each,

@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! Arm 3 on a Sutton-Chen cluster: `for_cluster`'s two-core orbit completion.
 //!
 //! One random start, one seed, one charged budget. The Cambridge energy is a

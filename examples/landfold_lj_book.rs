@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! Write a Lennard-Jones minima book for `anneal landfold`.
 //!
 //! ```text

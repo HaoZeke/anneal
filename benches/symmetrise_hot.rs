@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! Symmetrise, the largest outside-potential cost after assignment on LJ150.
 //!
 //! `deviation` is the nearest-image residual of one fivefold turn.

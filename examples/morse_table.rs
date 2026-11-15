@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! Morse clusters from the Cambridge table, scored against its global minima.
 //!
 //! `cargo run --release --example morse_table -- <table.csv> <rho> <sizes> <budget> <seed0> <seeds> [reduced]`
