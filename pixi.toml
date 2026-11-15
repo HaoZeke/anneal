@@ -254,7 +254,8 @@ check-eonviz-pins = { cmd = "bash scripts/check_eonviz_pins.sh", description = "
 eon-min-landscape = { cmd = "python tests/eon_min_landscape.py", description = "Run an EON LJ minimization and render the (s,d) optimization landscape (run with -e eonviz)" }
 pes-double-well = { cmd = "bash scripts/pes_double_well.sh", description = "Render the rgpot LJ double-well 2D PES: ASE local vs anneal global (run with -e rpctest)" }
 rust-test-all = { cmd = "cargo nextest run --manifest-path rgpot-core/Cargo.toml --all-features", description = "Run Rust core tests with all features enabled" }
-gen-header = { cmd = "cargo build --manifest-path rgpot-core/Cargo.toml --features gen-header", description = "Regenerate C header (include/rgpot.h) from Rust source" }
+gen-header = { cmd = "cargo build --manifest-path rgpot-core/Cargo.toml --features gen-header", description = "Regenerate C header (rgpot-core/include/rgpot.h) from Rust source" }
+doccheck = { cmd = "python docs/doccheck.py all", description = "Check reference entries, facts and code blocks in the docs against the source (add --build-dir DIR to run the examples)" }
 towncrier-draft = { cmd = "uvx towncrier build --draft", description = "Preview release notes" }
 towncrier-build = { cmd = "uvx towncrier build", description = "Build release notes into CHANGELOG.md" }
 
@@ -312,7 +313,7 @@ cmd = "emacs --batch --load export.el"
 description = "Generates XML via Doxygen and converts it to RST via Doxyrest"
 cwd = "docs/source"
 depends-on = ["patch-doxyrest"]
-cmd = "doxygen Doxyfile_potlib.cfg && doxyrest -c doxyrest-config.lua"
+cmd = "rm -rf api xml && doxygen Doxyfile_potlib.cfg && doxyrest -c doxyrest-config.lua"
 
 
 [feature.docs.tasks.setup-rustdocgen]
@@ -325,7 +326,7 @@ depends-on = [
 "setup-rustdocgen",
 ]
 cmd = """
-sphinx-build -d docs/doctrees docs/source/ docs/build
+sphinx-build -W --keep-going -d docs/doctrees docs/source/ docs/build
 """
 
 [feature.docs.tasks.docdel]

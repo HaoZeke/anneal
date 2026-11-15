@@ -984,3 +984,32 @@ endif
 if not get_option('with_python')
     install_headers('bind/include/rgbind/rgbind.hpp', subdir: 'rgbind')
 endif
+
+# Documentation against the source: reference entries, facts and code blocks
+# (static), then the run and compile blocks against this build.
+_doc_python = find_program('python3', required: false)
+if get_option('with_tests') and _doc_python.found()
+    _doccheck = files('docs/doccheck.py')
+    test(
+        'doccheck_static',
+        _doc_python,
+        args: [_doccheck, 'all', '--root', meson.project_source_root()],
+        suite: 'docs',
+        timeout: 120,
+    )
+    test(
+        'doccheck_examples',
+        _doc_python,
+        args: [
+            _doccheck,
+            'blocks',
+            '--root',
+            meson.project_source_root(),
+            '--build-dir',
+            meson.project_build_root(),
+        ],
+        suite: 'docs',
+        timeout: 1200,
+        priority: -10,
+    )
+endif

@@ -17,6 +17,11 @@ jobs:
         cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
         environments: docs
         pixi-version: v0.70.2
+    - name: Check docs against the source
+      run: |-
+        pixi r -e docs doccheck
+        pixi r -e docs python -m unittest discover -s tests/docs -p 'test_docs_*.py' -v
+      shell: pixi run bash -e {0}
     - name: Generate Docs
       run: pixi r docbld
       shell: pixi run bash -e {0}

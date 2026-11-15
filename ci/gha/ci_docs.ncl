@@ -28,6 +28,12 @@ let P = S.pins in
         },
         S.setup_pixi_cache_write_main "docs",
         S.run_pixi m%"
+          pixi r -e docs doccheck
+          pixi r -e docs python -m unittest discover -s tests/docs -p 'test_docs_*.py' -v
+        "%
+        & { name = "Check docs against the source" },
+        # sphinxbld runs sphinx-build -W, so a warning fails this step.
+        S.run_pixi m%"
           pixi r docbld
         "%
         & { name = "Generate Docs" },

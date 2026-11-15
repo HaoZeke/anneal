@@ -357,15 +357,6 @@ if get_option('with_gromacs_dropin').allowed()
     subdir('gromacs')
 endif
 
-if python3_engines.found()
-    test(
-        'c_symbols',
-        python3_engines,
-        args: [files('../docs/check_c_symbols.py')],
-        timeout: 30,
-    )
-endif
-
 # Configures a parent project around this tree, so it needs meson on PATH
 # and only runs from the top-level build.
 meson_prog = find_program('meson', required: false)

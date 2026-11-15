@@ -840,7 +840,7 @@ jobs:
             --buildtype=release
           pixi run -e engines meson compile -C build
           pixi run -e engines meson test -C build --print-errorlogs \
-            lj_eval lj_engine capi_threads c_symbols abi_symbols \
+            lj_eval lj_engine capi_threads abi_symbols \
             lammps_lj plumed_driver plumed_debug_forces plumed_box_derivatives \
             plumed_units plumed_api gromacs_mdrun openmm_lj \
             | tee build/engine-tests.txt

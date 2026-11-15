@@ -160,3 +160,22 @@ sitemap_url_scheme = "{link}"
 html_css_files = [
     "custom.css",
 ]
+
+
+def _doxyrest_unrendered(app, env, node, contnode):
+    """Render a Doxygen link to a page doxyrest does not write as plain text.
+
+    Doxyrest writes no page for source listings, Fortran derived types or
+    undocumented private members, but still links to them.
+    """
+    if node.get("refdomain") == "std" and node.get("reftarget", "").startswith("doxid-"):
+        return contnode
+    return None
+
+
+def setup(app):
+    from pygments.lexers.special import TextLexer
+
+    # Pygments has no LAMMPS input lexer.
+    app.add_lexer("lammps", TextLexer)
+    app.connect("missing-reference", _doxyrest_unrendered)

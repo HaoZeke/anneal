@@ -336,7 +336,9 @@ public:
  * physics engine and blocks until the server is terminated.
  *
  * # Usage
- * @c ./potserv <port> <PotentialType>
+ * @code
+ * ./potserv <port> <PotentialType>
+ * @endcode
  *
  * @param argc Argument count.
  * @param argv Argument vector.

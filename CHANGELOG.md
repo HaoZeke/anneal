@@ -98,7 +98,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The second extent is the traced edge count, and the neighbour list
   must match it.
   A published gpridge export records that list, for example
-  `edge_index` [2, 1332], and it used to be refused.
+  `edge_index` `[2, 1332]`, and it used to be refused.
   A package with only one of the two keys is still refused.
 
 - A debug or sanitizer build no longer aborts when a vesin neighbour
