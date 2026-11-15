@@ -53,6 +53,11 @@ class LJPot:
         Energy, forces, variance, and stress when the kernel writes it. F4: the kernel runs detached.
         """
 
+    def evaluate_per_atom(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
+        """
+        evaluate() plus energies, shape (N,), eV, summing to energy, and virials, shape (N, 6), eV, Voigt xx yy zz yz xz xy, summing to -volume * stress. A pair term goes half to each atom. F4: the kernel runs detached.
+        """
+
     def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:
         """
         One detached BatchEvaluator call. results[i] matches a serial call on inputs[i], bit for bit. n_threads 0 uses the hardware concurrency.
@@ -99,6 +104,11 @@ class LJClusterPot:
         Energy, forces, variance, and stress when the kernel writes it. F4: the kernel runs detached.
         """
 
+    def evaluate_per_atom(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
+        """
+        evaluate() plus energies, shape (N,), eV, summing to energy, and virials, shape (N, 6), eV, Voigt xx yy zz yz xz xy, summing to -volume * stress. A pair term goes half to each atom. F4: the kernel runs detached.
+        """
+
     def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:
         """
         One detached BatchEvaluator call. results[i] matches a serial call on inputs[i], bit for bit. n_threads 0 uses the hardware concurrency.
@@ -143,6 +153,11 @@ class MorsePot:
     def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
         Energy, forces, variance, and stress when the kernel writes it. F4: the kernel runs detached.
+        """
+
+    def evaluate_per_atom(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
+        """
+        evaluate() plus energies, shape (N,), eV, summing to energy, and virials, shape (N, 6), eV, Voigt xx yy zz yz xz xy, summing to -volume * stress. A pair term goes half to each atom. F4: the kernel runs detached.
         """
 
     def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:

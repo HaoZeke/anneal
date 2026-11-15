@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -30,6 +31,7 @@
 #include "rgpot/BatchEvaluator.hpp"
 #include "rgpot/ForceStructs.hpp"
 #include "rgpot/HessianVector.hpp"
+#include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
 #include "rgpot/pot_caps.hpp"
 #include "rgpot/types/AtomMatrix.hpp"
@@ -183,6 +185,18 @@ stress_to_numpy(const double stress[9]) {
   return nb::ndarray<nb::numpy, double, nb::c_contig>(buf, {3, 3}, owner);
 }
 
+inline nb::ndarray<nb::numpy, double, nb::c_contig>
+vector_to_numpy(const std::vector<double> &values,
+                std::initializer_list<size_t> shape) {
+  const size_t n = values.size();
+  double *buf = new double[n == 0 ? 1 : n];
+  if (n != 0) {
+    std::memcpy(buf, values.data(), n * sizeof(double));
+  }
+  nb::capsule owner(buf, [](void *p) noexcept { delete[] static_cast<double *>(p); });
+  return nb::ndarray<nb::numpy, double, nb::c_contig>(buf, shape, owner);
+}
+
 inline nb::dict caps_dict(const PotCaps &caps) {
   nb::dict out;
   const char *reentrancy = "shared";
@@ -244,6 +258,43 @@ FullResult run_force(Pot &pot, const Geom &g) {
   result.variance = fo.variance;
   result.has_stress = fo.has_stress != 0;
   std::memcpy(result.stress, fo.stress, sizeof(result.stress));
+  return result;
+}
+
+struct PerAtomResult {
+  FullResult total;
+  std::vector<double> energies;
+  std::vector<double> virials;
+};
+
+/// forcePerAtom while the caller is already detached (F4).
+template <PerAtomPotential Pot>
+PerAtomResult run_force_per_atom(Pot &pot, const Geom &g) {
+  const auto n = static_cast<size_t>(g.pos.rows());
+  PerAtomResult result;
+  result.energies.assign(n, 0.0);
+  result.virials.assign(6 * n, 0.0);
+  AtomMatrix forces = AtomMatrix::Zero(g.pos.rows(), 3);
+  const std::array<double, 9> flat = flat_box(g);
+  ForceOut fo{.F = forces.data(),
+              .energy = 0.0,
+              .variance = 0.0,
+              .stress = {},
+              .has_stress = 0};
+  ForceInput in{.nAtoms = g.pos.rows(),
+                .pos = g.pos.data(),
+                .atmnrs = g.types.data(),
+                .box = flat.data()};
+  pot.forcePerAtom(in, &fo,
+                   PerAtomOut{result.energies.data(), result.virials.data()});
+  if (!std::isfinite(fo.energy)) {
+    throw rgbind::NumericalError("energy is not finite");
+  }
+  result.total.energy = fo.energy;
+  result.total.forces = std::move(forces);
+  result.total.variance = fo.variance;
+  result.total.has_stress = fo.has_stress != 0;
+  std::memcpy(result.total.stress, fo.stress, sizeof(result.total.stress));
   return result;
 }
 
@@ -423,6 +474,30 @@ void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
       nb::arg("box").noconvert(),
       "Energy, forces, variance, and stress when the kernel writes it. "
       "F4: the kernel runs detached.");
+  if constexpr (PerAtomPotential<Pot>) {
+    cls.def(
+        "evaluate_per_atom",
+        [](PotHolder<Pot> &self, const F64 &positions, nb::handle atom_types,
+           const F64 &box) {
+          Geom geom = read_geom(positions, atom_types, box);
+          PerAtomResult result;
+          {
+            nb::gil_scoped_release release;
+            result = run_force_per_atom(self.slot(), geom);
+          }
+          const auto n = static_cast<size_t>(geom.pos.rows());
+          nb::dict out = result_dict(result.total);
+          out["energies"] = vector_to_numpy(result.energies, {n});
+          out["virials"] = vector_to_numpy(result.virials, {n, 6});
+          return out;
+        },
+        nb::arg("positions").noconvert(), nb::arg("atom_types"),
+        nb::arg("box").noconvert(),
+        "evaluate() plus energies, shape (N,), eV, summing to energy, and "
+        "virials, shape (N, 6), eV, Voigt xx yy zz yz xz xy, summing to "
+        "-volume * stress. A pair term goes half to each atom. F4: the "
+        "kernel runs detached.");
+  }
   cls.def(
       "evaluate_batch",
       [](PotHolder<Pot> &self, nb::list positions, nb::list atom_types,
