@@ -4,7 +4,7 @@
 // In-process engine plugin. Metatomic and UMA export the same
 // rgpot_engine_* names from their own libraries. A null config is the
 // default shifted Lennard-Jones potential (u0 = 1 eV, cutoff = 15 A,
-// psi = 1 A). A 32-byte config is three little-endian float64 values:
+// psi = 1 A). A 24-byte config is three little-endian float64 values:
 // u0, cutoff, psi.
 
 #include "rgpot/engine_c_abi.h"
@@ -111,9 +111,7 @@ size_t rgpot_engine_last_error(const RgpotEnginePot *pot, char *buf, size_t len)
     return 0;
   }
   const std::string &message = reinterpret_cast<const LjEngine *>(pot)->last_error;
-  if (len > 1) {
-    std::snprintf(buf, len, "%s", message.c_str());
-  }
+  std::snprintf(buf, len, "%s", message.c_str());
   return message.size();
 }
 
