@@ -15,7 +15,8 @@
 //! the potential.
 
 use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, random_cluster_in_radius, run_with_gradient,
+    Config, ContinuousSymmetry, Ledger, SoapProposalMode, random_cluster_in_radius,
+    run_with_gradient,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::{PairKind, PairPotential};
@@ -148,6 +149,35 @@ fn cmd_run(args: &[String]) -> i32 {
     // not, and the search is then the recommended one.
     let kind = PairKind::Morse { rho: spec.rho };
     cfg.long_ranged = kind.second_neighbour_energy() < -0.05;
+    // Unset leaves the preset's structure priors on. `0` turns off the
+    // fivefold SOAP move, the icosahedral reseed, lattice regrowth, the
+    // labelled core, the motif reseed, stall symmetrisation (and its
+    // Ih withholding) and the continuous-symmetry reseed.
+    if let Ok(text) = std::env::var("H2H_PRIORS") {
+        let text = text.trim();
+        let all_off = text == "0" || text == "none";
+        let listed = |name: &str| all_off || text.split(',').any(|token| token.trim() == name);
+        if listed("soap") {
+            cfg.prior_soap = false;
+            cfg.soap_mode = SoapProposalMode::Off;
+        }
+        if listed("reseed") {
+            cfg.prior_reseed = false;
+        }
+        if listed("growth") {
+            cfg.prior_growth = false;
+        }
+        if listed("core") {
+            cfg.prior_core = false;
+        }
+        if listed("motif") {
+            cfg.prior_motif = false;
+        }
+        if all_off {
+            cfg.symmetrise_on_stall = false;
+            cfg.continuous_symmetry = ContinuousSymmetry::Off;
+        }
+    }
     let start = if let Some(path) = args.get(3) {
         match read_coords(path) {
             Ok(coords) if coords.len() == 3 * spec.n => coords,
