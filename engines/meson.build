@@ -244,10 +244,14 @@ if python3_engines.found()
 endif
 
 abi_script = find_program('../scripts/abi_symbols.sh')
+abi_baselines = files('../scripts/abi_baseline.txt')
+if has_fast_nlist
+    abi_baselines += files('../scripts/abi_baseline_fast.txt')
+endif
 test(
     'abi_symbols',
     abi_script,
-    args: [rgpot.full_path(), files('../scripts/abi_baseline.txt')],
+    args: [rgpot.full_path(), abi_baselines],
     timeout: 30,
 )
 
