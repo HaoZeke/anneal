@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Summarise bench/decide/rows.csv against a reference arm.
+"""Summarize bench/decide/rows.csv against a reference arm.
 
 One line per (variant, system) and one ``total`` line per variant.
 ``--reference`` names the arm the others are tested against, ``develop``
@@ -100,7 +100,7 @@ def mann_whitney_two_sided(x: list[float], y: list[float]) -> float:
     return min(1.0, math.erfc(max(z, 0.0) / math.sqrt(2.0)))
 
 
-def summarise(rows: list[dict[str, str]], reference: str = "develop") -> list[dict[str, str]]:
+def summarize(rows: list[dict[str, str]], reference: str = "develop") -> list[dict[str, str]]:
     others = {"baseline", "develop"} - {reference}
     rows = [row for row in rows if row["variant"] not in others]
     groups: dict[tuple[str, str], list[dict[str, str]]] = {}
@@ -206,7 +206,7 @@ def main(argv: list[str]) -> int:
             for row in rows
             if any(row["code_revision"].startswith(prefix) for prefix in args.revision)
         ]
-    lines = summarise(rows, args.reference)
+    lines = summarize(rows, args.reference)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, FIELDS, lineterminator="\n")

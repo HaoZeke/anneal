@@ -121,7 +121,7 @@ rule sc_restart_summary:
     shell:
         """
         set -euo pipefail
-        python3 scripts/metal_h2h/summarise_sc_restart.py
+        python3 scripts/metal_h2h/summarize_sc_restart.py
         """
 
 
@@ -138,7 +138,7 @@ rule sc_pop_summary:
     shell:
         """
         set -euo pipefail
-        python3 scripts/metal_h2h/summarise_sc_pop.py
+        python3 scripts/metal_h2h/summarize_sc_pop.py
         """
 
 
@@ -154,7 +154,7 @@ rule sc_chain_summary:
     shell:
         """
         set -euo pipefail
-        python3 scripts/metal_h2h/summarise_sc_chain.py
+        python3 scripts/metal_h2h/summarize_sc_chain.py
         """
 
 
@@ -171,7 +171,7 @@ rule sc_portfolio_summary:
     shell:
         """
         set -euo pipefail
-        python3 scripts/metal_h2h/summarise_sc_portfolio.py
+        python3 scripts/metal_h2h/summarize_sc_portfolio.py
         """
 
 
@@ -720,6 +720,33 @@ rule decide_rows:
         """
 
 
+# The gate for the floored bandit: every panel system at seeds 2000-2011,
+# then seeds 2012-2023 on the systems the first pass moved, develop and
+# floor in one serial session. Same build rules as decide_rows. Not part
+# of `rule all`:
+#   snakemake -s workflow/Snakefile decide_gate --config decide_develop=<rev>
+rule decide_gate:
+    output:
+        "bench/decide/rows.csv",
+    params:
+        develop=config.get("decide_develop", ""),
+    shell:
+        """
+        set -euo pipefail
+        develop="{params.develop}"
+        if [ -z "$develop" ]; then
+          develop="$(git log --diff-filter=A --format=%H -1 -- src/methods/cluster_hopping/bandit.rs)^"
+        fi
+        more=""
+        for seed in $(seq 2012 2023); do more="$more --seed $seed"; done
+        moved="--system au55 --system m80r6 --system sc108-55 --system lj75 --system lj103"
+        DECIDE_REV="$develop" bash scripts/decide_bench/enter_bench.sh develop
+        bash scripts/decide_bench/enter_bench.sh floor
+        DECIDE_REV="$develop" bash scripts/decide_bench/enter_bench.sh develop $moved $more
+        bash scripts/decide_bench/enter_bench.sh floor $moved $more
+        """
+
+
 # Hits, median calls and the tests against develop, over the rows of the
 # revisions in `decide_revisions` (all when unset). Reads the rows;
 # it does not launch a search. Not part of `rule all`.
@@ -736,5 +763,5 @@ rule decide_summary:
     shell:
         """
         set -euo pipefail
-        python3 scripts/decide_bench/summarise.py {params.revisions}
+        python3 scripts/decide_bench/summarize.py {params.revisions}
         """
