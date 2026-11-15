@@ -43,11 +43,11 @@ engine_lib_candidates(const std::string &explicit_path) {
   std::vector<std::string> out;
   if (!explicit_path.empty())
     out.emplace_back(explicit_path);
-  if (const char *e = std::getenv("NWCHEMC_LIBRARY"))
+  if (const char *e = std::getenv("NWCHEMC_LIBRARY"); e && *e)
     out.emplace_back(e);
-  if (const char *e = std::getenv("RGPOT_NWCHEMC_ENGINE"))
+  if (const char *e = std::getenv("RGPOT_NWCHEMC_ENGINE"); e && *e)
     out.emplace_back(e);
-  if (const char *e = std::getenv("RGPOT_NWCHEM_ENGINE"))
+  if (const char *e = std::getenv("RGPOT_NWCHEM_ENGINE"); e && *e)
     out.emplace_back(e);
   out.emplace_back("libnwchemc.so");
   out.emplace_back("./libnwchemc.so");

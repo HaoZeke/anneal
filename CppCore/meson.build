@@ -2064,17 +2064,27 @@ if get_option('with_tests')
             'RGPOT_MOPACC_ENGINE',
             mopacc_fake_engine.full_path(),
         )
+        mopac_pot_test = executable(
+            'mopac_pot_test',
+            sources: ['tests/MOPACPotTest.cc'],
+            dependencies: test_deps,
+            include_directories: _incdirs + ['.'],
+            cpp_args: test_args,
+            link_with: _linkto,
+            link_language: 'cpp',
+        )
         test(
             'MOPACPotTest',
-            executable(
-                'mopac_pot_test',
-                sources: ['tests/MOPACPotTest.cc'],
-                dependencies: test_deps,
-                include_directories: _incdirs + ['.'],
-                cpp_args: test_args,
-                link_with: _linkto,
-                link_language: 'cpp',
-            ),
+            mopac_pot_test,
+            env: mopacc_fake_env,
+            depends: mopacc_fake_engine,
+            workdir: meson.source_root(),
+            suite: 'mopac',
+        )
+        test(
+            'MOPACPotEmptyVariable',
+            mopac_pot_test,
+            args: ['[empty-variable]'],
             env: mopacc_fake_env,
             depends: mopacc_fake_engine,
             workdir: meson.source_root(),

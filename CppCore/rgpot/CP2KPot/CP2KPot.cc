@@ -55,9 +55,9 @@ engine_lib_candidates(const std::string &explicit_path) {
   std::vector<std::string> out;
   if (!explicit_path.empty())
     out.emplace_back(explicit_path);
-  if (const char *e = std::getenv("CP2KC_LIBRARY"))
+  if (const char *e = std::getenv("CP2KC_LIBRARY"); e && *e)
     out.emplace_back(e);
-  if (const char *e = std::getenv("RGPOT_CP2K_ENGINE"))
+  if (const char *e = std::getenv("RGPOT_CP2K_ENGINE"); e && *e)
     out.emplace_back(e);
   out.emplace_back("libcp2kc_rgpot.so");
   out.emplace_back("./libcp2kc_rgpot.so");
