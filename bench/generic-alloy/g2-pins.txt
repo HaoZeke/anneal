@@ -1,0 +1,24 @@
+scripts/covalent_h2h/pins.sh on develop 92bc5805 and on a70f3371
+
+develop 92bc5805  97677e2820a32d62d21c5b45e3a62138c69ec3ce
+branch  a70f3371  9b509f56c55e4af1240b23622e16ad64938920c2
+
+Three lines move, all h2h_metal cu19au19 with the priors on:
+
+< cu19au19,anneal,2000,80000,true,80000,80000,-122.99148391
+< cu19au19,anneal,2001,80000,true,80000,80000,-122.99148391
+< cu19au19,anneal,2002,80000,true,80000,80000,-122.99148391
+---
+> cu19au19,anneal,2000,80000,true,11987,11987,-122.99148391
+> cu19au19,anneal,2001,80000,true,12033,12033,-122.99148391
+> cu19au19,anneal,2002,80000,true,12023,12023,-122.99148391
+
+Reason: prior_handover. On develop the core probe is offered the whole
+remainder, finds the reference and spends the rest of the 80000 calls,
+and the cut is adopted after the walk, so calls to hit read as the
+budget. With the handover the probe stops once it stalls, its best cut
+becomes the incumbent at the call that found it, and the run stops at
+the target. The energy and the hit are the same.
+
+The other lines, Lennard-Jones, Morse, TIP4P, zn38 and pt13, are
+unchanged.
