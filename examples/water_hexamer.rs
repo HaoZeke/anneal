@@ -1481,6 +1481,7 @@ struct HitMarks {
     first_prism_wall: Option<f64>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn witnessed_good_turing<O>(
     objective: &O,
     cfg: &Config,
@@ -1603,6 +1604,7 @@ where
     Ok((outcome, stats, trace, retired, marks))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn crest_then_library<O>(
     objective: &O,
     cfg: &Config,
