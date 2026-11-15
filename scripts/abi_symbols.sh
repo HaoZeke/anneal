@@ -14,7 +14,15 @@ baseline=${2:-}
 found=$(mktemp)
 want=$(mktemp)
 trap 'rm -f "$found" "$want"' EXIT
-nm -D --defined-only "$lib" | awk '$3 ~ /^rgpot_(nlist_|fast_)/ {print $3}' | sort -u > "$found"
+# Mach-O nm has no -D and prefixes C names with an underscore. An archive
+# has no dynamic symbol table, so its external symbols are read instead.
+if [ "$(uname -s)" = Darwin ]; then
+  nm -gU "$lib" | awk 'NF == 3 {sub(/^_/, "", $3); print $3}'
+elif [ "${lib%.a}" != "$lib" ]; then
+  nm -g --defined-only "$lib" | awk 'NF == 3 {print $3}'
+else
+  nm -D --defined-only "$lib" | awk 'NF == 3 {print $3}'
+fi | awk '/^rgpot_(nlist_|fast_)/' | sort -u > "$found"
 if [ -z "$baseline" ]; then
   cat "$found"
   exit 0
