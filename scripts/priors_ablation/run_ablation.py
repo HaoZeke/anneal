@@ -46,6 +46,7 @@ SYSTEMS = (
     ("lj150", "h2h_gmin_proof", "lj150", 4_000_000, None, {}),
     ("m38r6", "h2h_morse", "m38r6", 400_000, None, {}),
     ("m55r6", "h2h_morse", "m55r6", 1_000_000, None, {}),
+    ("m80r3", "h2h_morse", "m80r3", 4_000_000, None, {}),
     ("m80r6", "h2h_morse", "m80r6", 4_000_000, None, {}),
     ("m38r14", "h2h_morse", "m38r14", 400_000, None, {}),
     ("m55r14", "h2h_morse", "m55r14", 1_000_000, None, {}),

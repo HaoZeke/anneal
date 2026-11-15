@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Copyright (c) anneal developers
 # All three arms in one UTS namespace, hostname bench, working directory /work.
+# ABL_SRC names another checkout to build, so a develop commit runs under
+# this runner. Its HEAD is written to anneal-head.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-ROOT=$(cd "$HERE/../.." && pwd)
+ROOT=$(cd "${ABL_SRC:-$HERE/../..}" && pwd)
 WORK=${ABL_WORK:-/work/abl}
 LIB=${RGPOT_SC_LIB:-/work/rgpot/bdir/CppCore/librgpot.so}
 cargo_home=${CARGO_HOME:-$HOME/.cargo}
