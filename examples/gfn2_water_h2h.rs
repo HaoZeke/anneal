@@ -19,6 +19,8 @@
 
 #[path = "common/rgpot_eindir.rs"]
 mod rgpot_eindir;
+#[path = "common/water_oh_wall.rs"]
+mod water_oh_wall;
 
 use std::fs;
 use std::io::Write;
@@ -44,8 +46,7 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rgpot_eindir::RgpotObjective;
 
-const OH_WALL_ONSET_A: f64 = 1.15;
-const OH_WALL_EV_PER_A2: f64 = 200.0;
+use water_oh_wall::{OH_WALL_EV_PER_A2, OH_WALL_ONSET_A, oh_wall};
 
 /// Quenched maximum force bar. 0.001 Hartree per Bohr is 0.0514221 eV per angstrom.
 const FORCE_BAR_EV_PER_A: f64 = 0.0514221;
@@ -131,37 +132,6 @@ impl DifferentiableObjective<f64> for ForceObjective {
     fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         ForceObjective::value_and_gradient(self, x)
     }
-}
-
-fn oh_wall(coordinates: &[f64], n_molecules: usize) -> (f64, Vec<f64>) {
-    let mut energy = 0.0;
-    let mut gradient = vec![0.0; coordinates.len()];
-    if coordinates.len() != 9 * n_molecules {
-        return (0.0, gradient);
-    }
-    for molecule in 0..n_molecules {
-        let oxygen = 9 * molecule;
-        for hydrogen in [oxygen + 3, oxygen + 6] {
-            let mut square = 0.0;
-            for axis in 0..3 {
-                let delta = coordinates[hydrogen + axis] - coordinates[oxygen + axis];
-                square += delta * delta;
-            }
-            let distance = square.sqrt();
-            if !distance.is_finite() || distance <= OH_WALL_ONSET_A || distance < 1e-12 {
-                continue;
-            }
-            let excess = distance - OH_WALL_ONSET_A;
-            energy += OH_WALL_EV_PER_A2 * excess * excess;
-            let slope = 2.0 * OH_WALL_EV_PER_A2 * excess / distance;
-            for axis in 0..3 {
-                let delta = coordinates[hydrogen + axis] - coordinates[oxygen + axis];
-                gradient[oxygen + axis] -= slope * delta;
-                gradient[hydrogen + axis] += slope * delta;
-            }
-        }
-    }
-    (energy, gradient)
 }
 
 fn separate_overlapped_start(mut start: Array1<f64>, n_molecules: usize) -> (Array1<f64>, usize) {
