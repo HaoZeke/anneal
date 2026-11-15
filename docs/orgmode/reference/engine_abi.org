@@ -137,6 +137,34 @@ reason.
 The thread counts act on the process's libtorch, so two engines in one process
 share them.
 
+** UMA unpack cache
+
+=UmaParams.cacheDir= (=UmaConfig::cache_dir= for a directly compiled =UmaPot=)
+names the root of the persistent cache that the =.pt2= is unpacked into.
+When it is empty the root is =$RGPOT_CACHE_DIR=, then =$XDG_CACHE_HOME/rgpot=
+(absolute values only), then =.rgpot-cache= in the working directory. torch's
+=AOTIModelPackageLoader= is not used, because it unpacks into a new directory
+under the system temporary directory and leaves it behind when the process dies.
+
+| Path under the root                         | Contents                                             |
+|---------------------------------------------+------------------------------------------------------|
+| =aoti/<sha256>.model/=                      | the package's =data/aotinductor/model= files and constants, as torch lays them out |
+| =aoti/<sha256>.model/rgpot-unpack.manifest= | package digest, model name, and the size of every unpacked file |
+| =aoti/.<sha256>.model.tmp-*=                | an unpack in progress                                |
+
+=<sha256>= is the digest of the =.pt2= bytes, so two models never share a
+directory and a rewritten package gets a new one.
+An unpack is written into a private =.tmp-= sibling and renamed into place once
+its manifest is complete.
+Processes and threads that load the same package at once each build a sibling,
+one rename wins, and the others use the winner's directory.
+A directory whose manifest is missing or whose files have the wrong size is
+replaced.
+Shared libraries lose the executable-stack flag (=PT_GNU_STACK= =PF_X=) on the
+way, for loaders that refuse an executable stack.
+A =.tmp-= sibling older than an hour, left by a process that died, is removed
+the next time that package is loaded.
+
 ** Thread safety of a handle
 
 Any thread may call =rgpot_engine_force= and =rgpot_engine_force_batch= on any
@@ -212,3 +240,9 @@ engine as a host does.
 With
 =RGPOT_UMA_OMOL_PT2= (and =RGPOT_UMA_OMOL_BAND_PT2= for the batch case) =UmaEngineTest= compares the engine with the directly compiled =UmaPot=, checks the model digest against the file and the runtime settings against libtorch, and =RGPOT_UMA_REQUIRE_FIXTURES=
 turns a missing fixture into a failure.
+=AotiUnpackTest= checks the unpack cache without torch on small fake packages:
+the order of the cache roots, reuse, replacement of a broken unpack, concurrent
+unpacks from threads and processes, and that the system temporary directory
+gains no entry.
+=UmaCacheDirTest= and =UmaEngineTest= load a built test package with
+=UmaConfig::cache_dir=, =RGPOT_CACHE_DIR= and =UmaParams.cacheDir=.

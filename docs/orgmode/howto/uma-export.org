@@ -83,6 +83,37 @@ RGPOT_UMA_CHECKPOINT=path/to/uma-s-1p1.pt \
     pixi run -e umaexport python -m pytest tests/test_uma_dynamic_export.py -s
 #+end_src
 
+** Choose where the package is unpacked
+
+=UmaPot= and =libuma_engine= unpack the =.pt2= into a cache directory on the
+first force call and load the compiled library from there.
+The first of these that is set names the cache root:
+
+1. =UmaConfig::cache_dir=, or =cacheDir= in the engine's =UmaParams=,
+2. the =RGPOT_CACHE_DIR= environment variable,
+3. =$XDG_CACHE_HOME/rgpot= when =XDG_CACHE_HOME= is an absolute path,
+4. =.rgpot-cache= in the working directory.
+
+A relative root is resolved against the working directory when the model loads.
+Nothing is written to the system temporary directory.
+On a fresh machine or a batch node, point the root at fast local storage that
+outlives the job, for example a scratch directory:
+
+#+begin_src bash
+export RGPOT_CACHE_DIR="$SCRATCH/rgpot-cache"
+#+end_src
+
+#+begin_src cpp
+rgpot::UmaConfig cfg;
+cfg.model_path = "uma-omol.pt2";
+cfg.cache_dir = "/path/to/rgpot-cache";
+#+end_src
+
+The unpack is reused by every later run with the same package, so only the first
+run pays for it.
+It may be deleted when no process is using it.
+=reference/engine_abi= describes the layout.
+
 ** Limits
 
 - One system per call.
