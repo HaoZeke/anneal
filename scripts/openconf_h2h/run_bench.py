@@ -18,6 +18,11 @@ energy plus gradient calls openconf spent on that seed. anneal charges one
 budget unit per point and makes one energy and one gradient call there, so
 its budget is half that count.
 ``paired-score`` appends the scored rows (``paired_score.py``).
+
+With ``--baseline DIR`` a pair also runs the ``develop`` arm: anneal imported
+from ``DIR`` (``build.sh`` with ``OPENCONF_H2H_BASELINE`` installs it there),
+at the same budget as the ``anneal`` arm. The two anneal arms of a pair run
+in an order drawn from the schedule seed.
 """
 
 from __future__ import annotations
@@ -54,10 +59,12 @@ def job(arm: str, molecule: str, seed: int, out: Path, args, budget: int = 0) ->
         "taskset", "-c", str(args.core), sys.executable, "-u", str(HERE / "h2h_job.py"),
         arm, molecule, str(seed), "--out", str(out), "--crest", args.crest,
     ]
-    if arm == "anneal":
+    if arm in ("anneal", "develop"):
         cmd += ["--budget", str(budget)]
         if args.local_step:
             cmd += ["--local-step", args.local_step]
+    if arm == "develop":
+        cmd += ["--anneal-path", str(args.baseline)]
     out.mkdir(parents=True, exist_ok=True)
     with (out / "job.log").open("w") as log:
         proc = subprocess.run(cmd, env=env, stdout=log, stderr=subprocess.STDOUT, check=False)
@@ -147,45 +154,57 @@ def stamp(out: Path, info: dict, revision: str) -> dict:
 
 
 def paired(args) -> None:
-    revision = (args.work / "bin" / "anneal-head").read_text().strip()
+    revisions = {"anneal": (args.work / "bin" / "anneal-head").read_text().strip()}
+    revisions["openconf"] = revisions["anneal"]
+    if args.baseline:
+        revisions["develop"] = (args.work / "bin" / "baseline-head").read_text().strip()
     names = args.molecules or list(hc.molecules())
     pairs = [(name, seed) for name in hc.molecules() for seed in PAIRED_SEEDS]
-    random.Random(PAIRED_SCHEDULE_SEED).shuffle(pairs)
+    rng = random.Random(PAIRED_SCHEDULE_SEED)
+    rng.shuffle(pairs)
+    orders = {pair: rng.random() < 0.5 for pair in pairs}
     pairs = [p for p in pairs if p[0] in names and p[1] in args.seeds]
-    tree = args.work / "paired"
+    tree = args.work / args.tree
     if args.pair:
         pairs = [(args.pair[0], int(args.pair[1]))]
         tree = args.work / "asv-paired"
     for position, (name, seed) in enumerate(pairs, 1):
         base = tree / name / str(seed)
-        done = {arm: (base / arm / "job.json").is_file() and not args.pair for arm in ("openconf", "anneal")}
+        arms = ["anneal", "develop"] if args.baseline else ["anneal"]
+        if args.baseline and orders.get((name, seed), False):
+            arms.reverse()
+        done = {arm: (base / arm / "job.json").is_file() and not args.pair for arm in ["openconf", *arms]}
         if done["openconf"]:
             first = json.loads((base / "openconf" / "job.json").read_text())
         else:
-            first = stamp(base / "openconf", job("openconf", name, seed, base / "openconf", args), revision)
+            first = stamp(base / "openconf", job("openconf", name, seed, base / "openconf", args), revisions["openconf"])
         budget = search_calls(first) // 2
-        if not done["anneal"]:
-            second = stamp(base / "anneal", job("anneal", name, seed, base / "anneal", args, budget=budget), revision)
+        walls = []
+        for arm in arms:
+            if done[arm]:
+                continue
+            info = stamp(base / arm, job(arm, name, seed, base / arm, args, budget=budget), revisions[arm])
+            walls.append(f"{arm} {info['wall_s']:.2f} s calls {search_calls(info)}")
+        if walls:
             print(
                 f"PAIR {position}/{len(pairs)} {name} {seed} budget {budget} "
-                f"openconf {first['wall_s']:.2f} s anneal {second['wall_s']:.2f} s "
-                f"anneal calls {search_calls(second)}",
+                f"openconf {first['wall_s']:.2f} s " + " ".join(walls),
                 flush=True,
             )
 
 
 def paired_score(args) -> None:
-    out = BENCH / "paired"
-    subprocess.run(
-        [
-            sys.executable, str(HERE / "paired_score.py"),
-            "--runs", str(args.work / "paired"),
-            "--rows", str(out / "seeds.csv"),
-            "--summary", str(out / "summary.csv"),
-            "--stats", str(out / "stats.csv"),
-        ],
-        check=True,
-    )
+    out = args.results if args.results.is_absolute() else hc.ROOT / args.results
+    cmd = [
+        sys.executable, str(HERE / "paired_score.py"),
+        "--runs", str(args.work / args.tree),
+        "--rows", str(out / "seeds.csv"),
+        "--summary", str(out / "summary.csv"),
+        "--stats", str(out / "stats.csv"),
+    ]
+    if args.baseline:
+        cmd += ["--versus-develop", str(out / "stats-develop.csv")]
+    subprocess.run(cmd, check=True)
 
 
 def main() -> int:
@@ -203,6 +222,9 @@ def main() -> int:
     parser.add_argument("--only", nargs=3, metavar=("MOLECULE", "SEED", "ARM"))
     parser.add_argument("--pair", nargs=2, metavar=("MOLECULE", "SEED"), help="one paired job into asv-paired")
     parser.add_argument("--any-host", action="store_true", help="allow a hostname other than bench")
+    parser.add_argument("--baseline", type=Path, help="anneal install of the develop arm (paired)")
+    parser.add_argument("--results", type=Path, default=BENCH / "paired", help="paired-score output directory")
+    parser.add_argument("--tree", default="paired", help="paired runs directory under --work")
     args = parser.parse_args()
     if args.seeds is None:
         args.seeds = list(PAIRED_SEEDS if args.command.startswith("paired") else SEEDS)

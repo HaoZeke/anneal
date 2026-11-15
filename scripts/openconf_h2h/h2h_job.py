@@ -305,20 +305,28 @@ def run_crest(row: dict, seed: int, out: Path, crest: str) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("arm", choices=["anneal", "openconf", "crest"])
+    parser.add_argument("arm", choices=["anneal", "develop", "openconf", "crest"])
     parser.add_argument("molecule")
     parser.add_argument("seed", type=int)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--budget", type=int, default=0)
     parser.add_argument("--crest", default=os.environ.get("CREST_BIN", "crest"))
     parser.add_argument("--local-step", choices=["lbfgs", "tric", "auto"], help="anneal quench; default the preset's")
+    parser.add_argument("--anneal-path", type=Path, help="import anneal from this directory first (the develop arm)")
     args = parser.parse_args()
     row = hc.molecules()[args.molecule]
     args.out.mkdir(parents=True, exist_ok=True)
-    if args.arm == "anneal":
+    if args.arm == "develop" and args.anneal_path is None:
+        raise SystemExit("develop needs --anneal-path")
+    if args.anneal_path is not None:
+        sys.path.insert(0, str(args.anneal_path))
+    if args.arm in ("anneal", "develop"):
         if args.budget < 1:
             raise SystemExit("anneal needs --budget")
         info = run_anneal(row, args.seed, args.budget, args.out, args.local_step)
+        import anneal
+
+        info["anneal_module"] = str(Path(anneal.__file__).resolve().parent)
     elif args.arm == "openconf":
         info = run_openconf(row, args.seed, args.out)
     else:

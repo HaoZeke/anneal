@@ -3,7 +3,7 @@
 # anneal, openconf and CREST on drug-like molecules. One UTS namespace,
 # hostname bench, working directory /work, every job on core 0.
 #   enter_bench.sh pilot | campaign [--only MOLECULE SEED ARM] | score
-#   enter_bench.sh paired [--pair MOLECULE SEED] | paired-score
+#   enter_bench.sh paired [--pair MOLECULE SEED] [--baseline DIR] | paired-score
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)

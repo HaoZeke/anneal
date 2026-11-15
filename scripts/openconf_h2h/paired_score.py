@@ -1,10 +1,12 @@
 # Copyright (c) anneal developers
 """Score the paired anneal and openconf runs and append one row per run.
 
-Candidates are polished, checked and deduplicated by the rules of
-``h2h_score.py``. Per molecule the reference is the union of both arms over
-every seed: E_ref is its lowest polished energy and the lowest reference
-conformer is that geometry. Per run:
+A third arm, ``develop`` (anneal at the base revision, same budget), is
+scored with them when its runs are present. Candidates are polished, checked
+and deduplicated by the rules of ``h2h_score.py``. Per molecule the
+reference is the union of every arm over every seed: E_ref is its lowest
+polished energy and the lowest reference conformer is that geometry. Per
+run:
 
 - ``hit``: one of the run's reported conformers is the lowest reference
   conformer (heavy-atom RMSD under 0.25 Å, energy within 0.5 kcal/mol)
@@ -17,7 +19,8 @@ conformer is that geometry. Per run:
 Rows already in ``--rows`` (same molecule, arm and seed) are left as they
 are. The summary and the tests are rebuilt from every row in the file:
 Fisher's exact test on hits and the Mann-Whitney U test on calls to hit,
-both two-sided.
+both two-sided, anneal against openconf in ``--stats`` and anneal against
+develop in ``--versus-develop``.
 """
 
 from __future__ import annotations
@@ -38,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import h2h_common as hc  # noqa: E402
 from h2h_score import WINDOW, Molecule, _fmt  # noqa: E402
 
-ARMS = ("anneal", "openconf")
+ARMS = ("anneal", "openconf", "develop")
 ROW_FIELDS = [
     "molecule", "arm", "seed", "budget", "calls", "energy_calls", "grad_calls", "hit", "calls_to_hit",
     "delta_min_kcal", "n_3kcal", "reference_3kcal", "candidates", "invalid", "wall_s", "pot_s",
@@ -78,15 +81,15 @@ def polished_frames(name: str, job_dir: Path) -> tuple[np.ndarray, np.ndarray, n
 def first_hit(name: str, arm: str, job_dir: Path, lowest: tuple[np.ndarray, float]) -> int | None:
     """Calls spent at the first trace minimum that polishes to ``lowest``.
 
-    anneal's trace holds the same frames as its candidates, so their polished
-    geometries are reused.
+    An anneal arm's trace holds the same frames as its candidates, so their
+    polished geometries are reused.
     """
     m = _molecule(name)
     path = job_dir / "trace.xyz"
     if not path.is_file():
         return None
     trace = hc.read_xyz(path)
-    if arm == "anneal":
+    if arm in ("anneal", "develop"):
         xs, es, ok = polished_frames(name, job_dir)
         polished = zip(xs, es, ok, strict=True)
     else:
@@ -192,7 +195,7 @@ def _num(value: str) -> float | None:
     return float(value) if value != "" else None
 
 
-def summarise(rows_path: Path, summary_path: Path, stats_path: Path) -> None:
+def summarise(rows_path: Path, summary_path: Path, stats_path: Path, versus_path: Path | None = None) -> None:
     with rows_path.open(newline="") as handle:
         rows = list(csv.DictReader(handle))
     order = [name for name in hc.molecules() if any(r["molecule"] == name for r in rows)]
@@ -200,10 +203,6 @@ def summarise(rows_path: Path, summary_path: Path, stats_path: Path) -> None:
         "molecule", "arm", "n", "hits", "n_3kcal_median", "reference_3kcal", "calls_median",
         "calls_to_hit_median", "delta_min_median_kcal", "wall_median_s", "pot_median_s",
         "outside_median_s", "pot_share", "invalid_total", "errors",
-    ]
-    stats_fields = [
-        "molecule", "hits_anneal", "hits_openconf", "fisher_odds_ratio", "fisher_p",
-        "hit_runs_anneal", "hit_runs_openconf", "mannwhitney_u", "mannwhitney_p",
     ]
     by = {(name, arm): [r for r in rows if r["molecule"] == name and r["arm"] == arm] for name in order for arm in ARMS}
 
@@ -240,11 +239,23 @@ def summarise(rows_path: Path, summary_path: Path, stats_path: Path) -> None:
                         "errors": sum(r["error"] != "" for r in group),
                     }
                 )
-    with stats_path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=stats_fields, lineterminator="\n")
+    write_stats(stats_path, order, by, "openconf")
+    if versus_path is not None:
+        write_stats(versus_path, order, by, "develop")
+
+
+def write_stats(path: Path, order: list[str], by: dict, other: str) -> None:
+    fields = [
+        "molecule", "hits_anneal", f"hits_{other}", "fisher_odds_ratio", "fisher_p",
+        "hit_runs_anneal", f"hit_runs_{other}", "mannwhitney_u", "mannwhitney_p",
+    ]
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         for name in order:
-            a, o = by[(name, "anneal")], by[(name, "openconf")]
+            a, o = by[(name, "anneal")], by[(name, other)]
+            if not a or not o:
+                continue
             ha, ho = sum(int(r["hit"]) for r in a), sum(int(r["hit"]) for r in o)
             odds, p = fisher_exact([[ha, len(a) - ha], [ho, len(o) - ho]], alternative="two-sided")
             ca = [float(r["calls_to_hit"]) for r in a if r["calls_to_hit"] != ""]
@@ -257,11 +268,11 @@ def summarise(rows_path: Path, summary_path: Path, stats_path: Path) -> None:
                 {
                     "molecule": name,
                     "hits_anneal": f"{ha}/{len(a)}",
-                    "hits_openconf": f"{ho}/{len(o)}",
+                    f"hits_{other}": f"{ho}/{len(o)}",
                     "fisher_odds_ratio": _fmt(float(odds), 4),
                     "fisher_p": _fmt(float(p), 4),
                     "hit_runs_anneal": len(ca),
-                    "hit_runs_openconf": len(co),
+                    f"hit_runs_{other}": len(co),
                     "mannwhitney_u": _fmt(u, 1),
                     "mannwhitney_p": _fmt(mw_p, 4),
                 }
@@ -274,10 +285,11 @@ def main() -> int:
     parser.add_argument("--rows", type=Path, required=True)
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--stats", type=Path, required=True)
+    parser.add_argument("--versus-develop", type=Path, help="anneal against the develop arm")
     parser.add_argument("--workers", type=int, default=os.cpu_count())
     args = parser.parse_args()
     score_runs(args.runs, args.rows, args.workers)
-    summarise(args.rows, args.summary, args.stats)
+    summarise(args.rows, args.summary, args.stats, args.versus_develop)
     return 0
 
 

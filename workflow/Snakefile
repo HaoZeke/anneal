@@ -212,6 +212,28 @@ rule openconf_h2h_n12:
         """
 
 
+# The paired n=12 run with a third arm, anneal at develop 92bc5805, at the
+# same budget as the branch's anneal arm. Not part of `rule all`:
+#   snakemake -s workflow/Snakefile openconf_h2h_conf_fix
+rule openconf_h2h_conf_fix:
+    input:
+        "bench/openconf-h2h/molecules.csv",
+    output:
+        "bench/openconf-h2h/conf-fix/summary.csv",
+        "bench/openconf-h2h/conf-fix/stats.csv",
+        "bench/openconf-h2h/conf-fix/stats-develop.csv",
+    shell:
+        """
+        set -euo pipefail
+        OPENCONF_H2H_CREST=0 OPENCONF_H2H_BASELINE=92bc5805b476b529c90ab3b2c1db4b48c97ab93a \
+            bash scripts/openconf_h2h/enter_bench.sh paired --tree conf-fix \
+            --baseline /work/openconf-h2h/baseline
+        OPENCONF_H2H_SKIP_BUILD=1 bash scripts/openconf_h2h/enter_bench.sh paired-score \
+            --tree conf-fix --baseline /work/openconf-h2h/baseline \
+            --results bench/openconf-h2h/conf-fix
+        """
+
+
 # Gradients per GFN2 quench: anneal L-BFGS and TRIC against geomeTRIC.
 # Not part of `rule all`:
 #   snakemake -s workflow/Snakefile tric_quench

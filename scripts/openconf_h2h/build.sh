@@ -2,6 +2,8 @@
 # Copyright (c) anneal developers
 # The anneal wheel, the RDKit call counter, and CREST 3.0.2 with a timer
 # around its potential call. Everything lands in /work/openconf-h2h/bin.
+# OPENCONF_H2H_BASELINE=<revision> also builds anneal at that revision into
+# /work/openconf-h2h/baseline, the develop arm of a paired run.
 # OPENCONF_H2H_CREST=0 stops before CREST.
 set -euo pipefail
 
@@ -23,6 +25,22 @@ export PATH=$PREFIX/bin:$PATH
     "${CARGO_TARGET_DIR:-/work/target-py}"/wheels/anneal-*.whl
   git rev-parse HEAD > "$BIN/anneal-head"
 )
+
+if [[ -n ${OPENCONF_H2H_BASELINE:-} ]]; then
+  src=/work/openconf-h2h/baseline-src
+  target=${OPENCONF_H2H_BASELINE_TARGET:-/work/target-baseline}
+  rm -rf "$src" "$target/wheels" /work/openconf-h2h/baseline
+  mkdir -p "$src"
+  git -C "$ROOT" archive "$OPENCONF_H2H_BASELINE" | tar -x -C "$src"
+  (
+    cd "$src"
+    CARGO_TARGET_DIR=$target RUSTUP_TOOLCHAIN=1.88.0 \
+      maturin build --release --locked -i "$PREFIX/bin/python" -j 4
+  )
+  "$PREFIX/bin/pip" install -q --no-deps --target /work/openconf-h2h/baseline "$target"/wheels/anneal-*.whl
+  git -C "$ROOT" rev-parse "$OPENCONF_H2H_BASELINE^{commit}" > "$BIN/baseline-head"
+  rm -rf "$src"
+fi
 
 gcc -O2 -shared -fPIC -o "$BIN/librdff_count.so" "$HERE/rdff_count.c" -ldl
 
