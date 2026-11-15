@@ -5,6 +5,7 @@
 #include "rgpot/Potential.hpp"
 #include "rgpot/UmaPot/UmaConfig.hpp"
 #include "rgpot/UmaPot/UmaContract.hpp"
+#include "rgpot/UmaPot/UmaProvenance.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -55,6 +56,11 @@ public:
   /// Weight dtype recorded in the package. Same lifetime rules as
   /// posDtypeName().
   [[nodiscard]] const char *modelDtypeName() const;
+  /// Checkpoint the package was exported from and its SHA-256, read
+  /// from the package metadata. Every field is unset for a package
+  /// exported before the keys existed. Loads the package on the first
+  /// call; the reference lives as long as this UmaPot.
+  [[nodiscard]] const UmaCheckpointProvenance &checkpointProvenance() const;
 
   [[nodiscard]] uint64_t paramsKey() const noexcept override {
     return m_paramsKey;

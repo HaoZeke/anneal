@@ -228,6 +228,7 @@ struct UmaPot::Impl {
   // and a dynamic edge count. Chunks are not padded.
   bool batch_packed{false};
   UmaContract contract;
+  UmaCheckpointProvenance provenance;
   std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
   mutable std::mutex mutex;
 };
@@ -324,6 +325,10 @@ void UmaPot::ensureLoaded() const {
                m_impl->pos_dtype_name.c_str(),
                m_impl->model_dtype_name.c_str());
   m_impl->contract = UmaContract::fromMetadata(meta);
+  m_impl->provenance = UmaCheckpointProvenance::fromMetadata(meta);
+  std::fprintf(stderr, "UmaPot: checkpoint_sha256=%s\n",
+               m_impl->provenance.sha256 ? m_impl->provenance.sha256->c_str()
+                                         : "unset");
 }
 
 void UmaPot::checkContract(const ForceInput &in) const {
@@ -661,6 +666,12 @@ const char *UmaPot::modelDtypeName() const {
   std::lock_guard<std::mutex> lock(m_impl->mutex);
   ensureLoaded();
   return m_impl->model_dtype_name.c_str();
+}
+
+const UmaCheckpointProvenance &UmaPot::checkpointProvenance() const {
+  std::lock_guard<std::mutex> lock(m_impl->mutex);
+  ensureLoaded();
+  return m_impl->provenance;
 }
 
 } // namespace rgpot

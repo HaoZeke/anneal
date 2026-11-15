@@ -44,14 +44,21 @@ the trace and records ``pos_dtype`` and ``model_dtype`` as ``float64``.
 ``--dtype float32`` calls ``hydra.float()`` and records ``float32``.
 
 The checkpoint is --checkpoint, else $RGPOT_UMA_CHECKPOINT, else --model
-downloaded from Hugging Face. The path taken is embedded as export_path.
+downloaded from Hugging Face. It is resolved once and every predict unit
+loads that file. The package records checkpoint_source (cli, env or hf),
+checkpoint_path for a local file, or checkpoint_hf_repo,
+checkpoint_hf_filename and checkpoint_hf_revision (the commit the file
+was served from) for a download, and checkpoint_sha256 of the file.
 """
 
 from __future__ import annotations
 
 import argparse
+import functools
+import hashlib
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -501,23 +508,190 @@ def _settings(merge_mole: bool = True, precision=None):
     )
 
 
-def checkpoint_from_env(explicit: str | None = None) -> str | None:
-    """``explicit``, else ``RGPOT_UMA_CHECKPOINT``, else None (download)."""
-    raw = explicit if explicit else os.environ.get("RGPOT_UMA_CHECKPOINT", "")
-    raw = raw.strip()
-    if not raw:
-        return None
-    if not Path(raw).is_file():
-        raise SystemExit(f"UMA checkpoint not found: {raw}")
-    return raw
+PROVENANCE_KEYS = (
+    "checkpoint_source",
+    "checkpoint_path",
+    "checkpoint_hf_repo",
+    "checkpoint_hf_filename",
+    "checkpoint_hf_revision",
+    "checkpoint_sha256",
+)
 
 
-def predict_unit(model: str, device: str, settings, checkpoint: str | None = None):
-    """A fairchem predict unit from a local checkpoint or by model name.
+@dataclass(frozen=True)
+class CheckpointSource:
+    """The checkpoint file every predict unit of one export loads.
+
+    ``kind`` is ``cli`` (--checkpoint), ``env`` ($RGPOT_UMA_CHECKPOINT)
+    or ``hf`` (downloaded for --model). ``sha256`` is the digest of
+    ``path``. A download also names the repository, the file inside it
+    and the commit it was served from.
+    """
+
+    kind: str
+    path: Path
+    sha256: str
+    model: str = ""
+    hf_repo: str | None = None
+    hf_filename: str | None = None
+    hf_revision: str | None = None
+
+    def metadata(self) -> dict[str, str]:
+        """The ``checkpoint_*`` package metadata keys for this source."""
+        meta = {"checkpoint_source": self.kind}
+        if self.kind == "hf":
+            meta["checkpoint_hf_repo"] = str(self.hf_repo)
+            meta["checkpoint_hf_filename"] = str(self.hf_filename)
+            meta["checkpoint_hf_revision"] = str(self.hf_revision)
+        else:
+            meta["checkpoint_path"] = str(self.path)
+        meta["checkpoint_sha256"] = self.sha256
+        return meta
+
+
+def file_sha256(path: str | os.PathLike) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _hf_registry_entry(model: str) -> tuple[str, str, str | None, str | None]:
+    """Repository, file name, subfolder and revision fairchem pins for ``model``."""
+    from fairchem.core.calculate import pretrained_mlip
+
+    try:
+        entry = pretrained_mlip._MODEL_CKPTS.checkpoints[model]
+    except KeyError as err:
+        raise SystemExit(
+            f"--model {model} is not a fairchem pretrained model "
+            f"({', '.join(pretrained_mlip.available_models)}); pass --checkpoint"
+        ) from err
+    return entry.repo_id, entry.filename, entry.subfolder, entry.revision
+
+
+def _hf_download(repo_id: str, filename: str, subfolder: str | None,
+                 revision: str | None) -> str:
+    """The cached file, downloaded on a miss, as fairchem would fetch it."""
+    from fairchem.core._config import CACHE_DIR
+    from huggingface_hub import hf_hub_download
+
+    return hf_hub_download(
+        repo_id=repo_id,
+        filename=filename,
+        subfolder=subfolder,
+        revision=revision,
+        cache_dir=CACHE_DIR,
+    )
+
+
+def _hf_snapshot_commit(path: Path) -> str:
+    """Commit of a file in the Hugging Face cache: ``snapshots/<commit>/...``.
+
+    The cache names each snapshot directory after the commit it was
+    resolved to, so a branch or tag revision is recorded as that commit.
+    """
+    for parent in path.parents:
+        if parent.parent.name == "snapshots" and re.fullmatch(
+            r"[0-9a-f]{40}", parent.name
+        ):
+            return parent.name
+    raise SystemExit(
+        f"cannot tell the Hugging Face commit of {path}: it is not under "
+        "a snapshots/<commit> directory of the hub cache"
+    )
+
+
+def resolve_checkpoint(explicit: str | None, model: str,
+                       environ=None) -> CheckpointSource:
+    """``explicit``, else ``RGPOT_UMA_CHECKPOINT``, else ``model`` from Hugging Face.
+
+    Called once per export. Every predict unit then loads the returned
+    path, so the recorded digest is that of the weights in the package.
+    """
+    env = os.environ if environ is None else environ
+    local = [("cli", explicit or ""),
+             ("env", env.get("RGPOT_UMA_CHECKPOINT", ""))]
+    for kind, raw in local:
+        raw = raw.strip()
+        if not raw:
+            continue
+        path = Path(raw)
+        if not path.is_file():
+            raise SystemExit(f"UMA checkpoint not found: {raw}")
+        path = path.resolve()
+        return CheckpointSource(kind, path, file_sha256(path), model=model)
+    repo_id, filename, subfolder, revision = _hf_registry_entry(model)
+    # Not resolved: in the hub cache the snapshot entry is a link into
+    # blobs/, and only the snapshot path names the commit.
+    path = Path(_hf_download(repo_id, filename, subfolder, revision))
+    return CheckpointSource(
+        "hf",
+        path,
+        file_sha256(path),
+        model=model,
+        hf_repo=repo_id,
+        hf_filename=f"{subfolder}/{filename}" if subfolder else filename,
+        hf_revision=_hf_snapshot_commit(path),
+    )
+
+
+def checkpoint_provenance(meta) -> dict[str, str | None]:
+    """The ``checkpoint_*`` keys of package metadata; None where absent.
+
+    Packages exported before these keys existed report every one as None.
+    """
+    return {key: (meta.get(key) or None) for key in PROVENANCE_KEYS}
+
+
+def package_metadata(path: str | os.PathLike) -> dict[str, str]:
+    """``aot_inductor.metadata`` of a ``.pt2``, read without loading it."""
+    import zipfile
+
+    with zipfile.ZipFile(path) as archive:
+        names = sorted(
+            name for name in archive.namelist()
+            if "/data/aotinductor/" in name and name.endswith("metadata.json")
+        )
+        if not names:
+            raise ValueError(f"{path}: no AOTInductor metadata in the package")
+        wrapper = [name for name in names if name.endswith("wrapper_metadata.json")]
+        data = archive.read((wrapper or names)[0])
+    return {str(k): str(v) for k, v in json.loads(data or b"{}").items()}
+
+
+@functools.lru_cache(maxsize=None)
+def _hf_references(model: str):
+    """Isolated-atom and formation references fairchem loads with ``model``."""
+    from fairchem.core.calculate import pretrained_mlip
+
+    atom_refs = pretrained_mlip.get_reference_energies(model, "atom_refs")
+    form_elem_refs = None
+    if pretrained_mlip._MODEL_CKPTS.checkpoints[model].form_elem_refs is not None:
+        form_elem_refs = pretrained_mlip.get_reference_energies(
+            model, "form_elem_refs"
+        )["refs"]
+    return atom_refs, form_elem_refs
+
+
+def predict_unit(model: str, device: str, settings,
+                 checkpoint: CheckpointSource | str | None = None):
+    """A fairchem predict unit from a checkpoint source, a file or a model name.
 
     A local checkpoint carries no isolated-atom references; fairchem only
-    reads those for a one-atom system, which no export accepts.
+    reads those for a one-atom system, which no export accepts. A
+    downloaded source loads them as ``get_predict_unit`` does.
     """
+    if isinstance(checkpoint, CheckpointSource):
+        from fairchem.core.units import mlip_unit
+
+        refs = (None, None)
+        if checkpoint.kind == "hf":
+            refs = _hf_references(checkpoint.model)
+        return mlip_unit.load_predict_unit(
+            str(checkpoint.path), settings, None, device, *refs
+        )
     if checkpoint:
         from fairchem.core.units.mlip_unit import load_predict_unit
 
@@ -531,7 +705,8 @@ def predict_unit(model: str, device: str, settings, checkpoint: str | None = Non
     )
 
 
-def load_predictor(name: str, device: str, checkpoint: str | None = None,
+def load_predictor(name: str, device: str,
+                   checkpoint: CheckpointSource | str | None = None,
                    merge_mole: bool = True):
     return predict_unit(name, device, _settings(merge_mole), checkpoint)
 
@@ -542,7 +717,7 @@ def ase_reference(
     device: str,
     task_name: str = "omol",
     dtype_name: str = "float32",
-    checkpoint: str | None = None,
+    checkpoint: CheckpointSource | str | None = None,
 ):
     """ASE FAIRChemCalculator in ``dtype_name``, internal graph gen.
 
@@ -894,6 +1069,7 @@ def runtime_metadata(
     batch_max: int = 0,
     batch_packed: int = 0,
     model_dtype=None,
+    checkpoint: CheckpointSource | None = None,
 ):
     input_names = [
         "pos",
@@ -947,6 +1123,8 @@ def runtime_metadata(
         meta.pop("counts", None)
     if z_set is None:
         meta.pop("z_set", None)
+    if checkpoint is not None:
+        meta.update(checkpoint.metadata())
     return meta
 
 
@@ -1694,7 +1872,12 @@ def main() -> int:
         f"z_set={z_set} counts={counts} natoms={len(atoms)}",
         flush=True,
     )
-    args.checkpoint = checkpoint_from_env(args.checkpoint)
+    args.checkpoint = resolve_checkpoint(args.checkpoint, args.model)
+    print(
+        "checkpoint "
+        + " ".join(f"{k}={v}" for k, v in args.checkpoint.metadata().items()),
+        flush=True,
+    )
     molecular = bool(args.molecular_box and args.molecular_box > 0.0)
     dynamic = (
         not molecular
@@ -1778,6 +1961,7 @@ def main() -> int:
             model=args.model,
             molecular_box=float(args.molecular_box or 0.0),
             batch_max=max(0, int(args.batch_max)),
+            checkpoint=args.checkpoint,
         )
         pkg = load_aoti(out)
         e_a, f_a = run_aoti(pkg, example)
@@ -1864,6 +2048,7 @@ def main() -> int:
         molecular_box=float(args.molecular_box or 0.0),
         batch_max=max(0, int(args.batch_max)),
         batch_packed=1 if packed else 0,
+        checkpoint=args.checkpoint,
     )
     if args.eager_only:
         return 0
@@ -1944,7 +2129,8 @@ def main() -> int:
                 flush=True,
             )
             e_alt_ref, f_alt_ref, _alt_pred = ase_reference(
-                alt_atoms, args.model, args.device, task_name, dtype_name=args.dtype
+                alt_atoms, args.model, args.device, task_name,
+                dtype_name=args.dtype, checkpoint=args.checkpoint,
             )
             with torch.enable_grad():
                 e_eager_alt, f_eager_alt = wrap(*example_alt)
