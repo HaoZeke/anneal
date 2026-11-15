@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "rgpot/CP2KPot/CP2KPot.hpp"
+#include "rgpot/CalculatorGroup.hpp"
 #include "rgpot/NWChemPot/DynLib.hpp"
 #include "rgpot/rpc/Potentials.capnp.h"
 #include "rgpot/types/AtomMatrix.hpp"
