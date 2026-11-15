@@ -1388,6 +1388,44 @@ if get_option('with_tests')
             depends: _uma_fix_pkgs,
             workdir: meson.source_root(),
         )
+        _uma_provenance = custom_target(
+            'uma-provenance',
+            output: ['line-provenance.pt2', 'line-provenance-weights.pt'],
+            command: [
+                _uma_py,
+                _uma_export,
+                '--kind',
+                'provenance',
+                '--dtype',
+                'float64',
+                '--out',
+                '@OUTPUT0@',
+                '--checkpoint-out',
+                '@OUTPUT1@',
+            ],
+            build_by_default: false,
+        )
+        _uma_fix_env.set('UMA_PROVENANCE_PT2', _uma_provenance[0].full_path())
+        _uma_fix_env.set(
+            'UMA_PROVENANCE_WEIGHTS',
+            _uma_provenance[1].full_path(),
+        )
+        test(
+            'UmaProvenanceTest',
+            executable(
+                'uma_provenance_test',
+                sources: ['tests/UmaProvenanceTest.cc'],
+                dependencies: test_deps,
+                include_directories: _incdirs + ['.'],
+                cpp_args: test_args,
+                link_with: _linkto,
+                link_language: 'cpp',
+                build_rpath: _metatomic_build_rpath,
+            ),
+            env: _uma_fix_env,
+            depends: _uma_fix_pkgs + [_uma_provenance],
+            workdir: meson.source_root(),
+        )
     endif
     # NWChem/CPMD frontend tests (need ptlrpc + frontends from _rpc_stack)
     if _rpc_stack and not get_option('with_rpc_client_only')

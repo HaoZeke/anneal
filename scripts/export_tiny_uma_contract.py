@@ -27,6 +27,7 @@ import torch.nn as nn
 from export_uma_aoti import (  # noqa: E402
     aoti_package,
     apply_export_dtype,
+    resolve_checkpoint,
     runtime_metadata,
 )
 
@@ -288,7 +289,9 @@ def _enforce_metadata(path: Path, meta: dict) -> None:
     path.write_bytes(out.getvalue())
 
 
-def export_precision(path: Path, dtype_name: str, meta_mode: str) -> None:
+def export_precision(
+    path: Path, dtype_name: str, meta_mode: str, checkpoint=None
+) -> None:
     dtype = torch.float64 if dtype_name == "float64" else torch.float32
     example = _single_example(dtype, 6)
     module = apply_export_dtype(SumEnergy().eval(), dtype_name)
@@ -307,6 +310,7 @@ def export_precision(path: Path, dtype_name: str, meta_mode: str) -> None:
         counts={1: 1, 6: 1, 7: 1},
         label="line",
         model="tiny-sum",
+        checkpoint=checkpoint,
     )
     meta["nedges_min"] = 6
     meta["nedges_max"] = 6
@@ -314,6 +318,18 @@ def export_precision(path: Path, dtype_name: str, meta_mode: str) -> None:
     wanted = _apply_meta(meta, meta_mode)
     aoti_package(exported, path, metadata=wanted)
     _enforce_metadata(path, wanted)
+
+
+def export_provenance(path: Path, dtype_name: str, weights: Path) -> None:
+    """The precision line package, built from a stand-in checkpoint file.
+
+    The file is written next to the package and passed as --checkpoint
+    would be, so the package records its path and SHA-256.
+    """
+    weights.parent.mkdir(parents=True, exist_ok=True)
+    weights.write_bytes(b"rgpot tiny UMA stand-in checkpoint\n")
+    source = resolve_checkpoint(str(weights), "tiny-sum", environ={})
+    export_precision(path, dtype_name, "both", checkpoint=source)
 
 
 def _drop_metadata_keys(path: Path, keys: tuple[str, ...]) -> None:
@@ -821,8 +837,15 @@ def main() -> int:
             "guard-single",
             "guard-batch",
             "guard-periodic",
+            "provenance",
         ),
         required=True,
+    )
+    parser.add_argument(
+        "--checkpoint-out",
+        type=Path,
+        default=None,
+        help="provenance only: where to write the stand-in checkpoint",
     )
     parser.add_argument(
         "--dynamic",
@@ -869,6 +892,10 @@ def main() -> int:
         export_guard(args.out, args.dtype, "batch")
     elif args.kind == "guard-periodic":
         export_guard(args.out, args.dtype, "periodic")
+    elif args.kind == "provenance":
+        if args.checkpoint_out is None:
+            raise SystemExit("--kind provenance needs --checkpoint-out")
+        export_provenance(args.out, args.dtype, args.checkpoint_out)
     else:
         if args.meta != "both":
             raise SystemExit("cost packages always record both dtype keys")
