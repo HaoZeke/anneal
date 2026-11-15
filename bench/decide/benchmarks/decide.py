@@ -12,7 +12,12 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[3]
 BUILD = Path(os.environ.get("DECIDE_WORK", "/work/decide"))
-SPECS = {"baseline": None, "hyperband": "hyperband", "thompson": "thompson", "ducb": "ducb"}
+SPECS = {
+    "develop": None,
+    "ducb": "ducb",
+    "floor": "ducb,floor",
+    "floor-record": "ducb,floor,record,reset",
+}
 
 
 class DecideLJ38:

@@ -5,7 +5,7 @@
 #   [DECIDE_REV=<rev>] enter_bench.sh <variant> ... [--panel first]
 #                                     [--system NAME] [--seed N]
 #
-# Variants: develop, hyperband, thompson, ducb, adapt. The binaries are
+# Variants: develop, thompson, ducb, floor, floor-record. The binaries are
 # built at DECIDE_REV (HEAD when unset) from a detached worktree; the row
 # runner is always this tree's. Rows go to bench/decide/rows.csv; a
 # finished (variant, system, seed, revision) row is kept.

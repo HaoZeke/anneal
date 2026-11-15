@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Run the walker-allocation and move-bandit panel and append raw rows.
+"""Run the move-bandit panel and append raw rows.
 
 One row per (variant, system, seed). Seeds 2000-2011, the paper budget
 of each system, one core, hostname bench. A finished row is never
@@ -75,10 +75,10 @@ FIELDS = (
 VARIANTS = {
     "baseline": None,
     "develop": None,
-    "hyperband": "hyperband",
     "thompson": "thompson",
     "ducb": "ducb",
-    "adapt": "adapt",
+    "floor": "ducb,floor",
+    "floor-record": "ducb,floor,record,reset",
 }
 
 

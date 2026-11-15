@@ -695,7 +695,7 @@ rule h2o16_crest:
         """
 
 
-# Hyperband walkers and the discounted move bandit against develop.
+# The discounted move bandit, floored and not, against develop.
 # Appends raw rows; a finished (variant, system, seed, revision) row is
 # kept. One serial session on core 0, hostname bench, seeds 2000-2011,
 # the paper budgets, the first-pass panel. `decide_develop` is the
@@ -716,7 +716,7 @@ rule decide_rows:
           develop="$(git log --diff-filter=A --format=%H -1 -- src/methods/cluster_hopping/bandit.rs)^"
         fi
         DECIDE_REV="$develop" bash scripts/decide_bench/enter_bench.sh develop --panel first
-        bash scripts/decide_bench/enter_bench.sh hyperband thompson ducb --panel first
+        bash scripts/decide_bench/enter_bench.sh floor floor-record --panel first
         """
 
 
