@@ -344,6 +344,52 @@ test(
     args: [rgpot.full_path(), abi_baselines],
     timeout: 30,
 )
+# abi_symbols above reads only the kind of librgpot this build makes. A
+# small fixture built as a shared object, a lib*.a archive and a *.lib
+# archive runs the script's other nm modes in every build. The two
+# should_fail tests keep the check strict: a shared object hides hidden
+# names, and an archive still reports a missing one.
+if get_option('with_tests')
+    abi_fixture_src = files('abi_fixture.c')
+    abi_fixture_baseline = files('abi_fixture_baseline.txt')
+    abi_fixture_so = shared_library('rgpot_abi_fixture', abi_fixture_src)
+    abi_fixture_a = static_library('rgpot_abi_fixture_a', abi_fixture_src)
+    abi_fixture_lib = static_library(
+        'rgpot_abi_fixture_lib',
+        abi_fixture_src,
+        name_prefix: '',
+        name_suffix: 'lib',
+    )
+    foreach _kind : [
+        ['shared', abi_fixture_so],
+        ['archive_a', abi_fixture_a],
+        ['archive_lib', abi_fixture_lib],
+    ]
+        test(
+            'abi_symbols_fixture_' + _kind[0],
+            abi_script,
+            args: [_kind[1].full_path(), abi_fixture_baseline],
+            depends: _kind[1],
+            timeout: 30,
+        )
+    endforeach
+    test(
+        'abi_symbols_fixture_shared_hidden',
+        abi_script,
+        args: [abi_fixture_so.full_path(), files('abi_fixture_hidden.txt')],
+        depends: abi_fixture_so,
+        should_fail: true,
+        timeout: 30,
+    )
+    test(
+        'abi_symbols_fixture_archive_missing',
+        abi_script,
+        args: [abi_fixture_a.full_path(), abi_baselines],
+        depends: abi_fixture_a,
+        should_fail: true,
+        timeout: 30,
+    )
+endif
 
 openmm_opt = get_option('with_openmm')
 if openmm_opt.allowed() and python3_engines.found()

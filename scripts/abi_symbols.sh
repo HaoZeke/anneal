@@ -24,14 +24,18 @@ shift
 found=$(mktemp)
 want=$(mktemp)
 trap 'rm -f "$found" "$want"' EXIT
-# Mach-O nm has no -D and prefixes C names with an underscore. An archive
-# has no dynamic symbol table, so its external symbols are read instead.
+# Mach-O nm has no -D and prefixes C names with an underscore. A static
+# archive (lib*.a, or *.lib from an MSVC-style toolchain) has no dynamic
+# symbol table, so nm -D finds nothing in it; its defined external
+# symbols are read instead. A shared object keeps nm -D, so hidden
+# symbols stay out.
 if [ "$(uname -s)" = Darwin ]; then
   nm -gU "$lib" | awk 'NF == 3 {sub(/^_/, "", $3); print $3}'
-elif [ "${lib%.a}" != "$lib" ]; then
-  nm -g --defined-only "$lib" | awk 'NF == 3 {print $3}'
 else
-  nm -D --defined-only "$lib" | awk 'NF == 3 {print $3}'
+  case $lib in
+    *.a | *.lib) nm -g --defined-only "$lib" ;;
+    *) nm -D --defined-only "$lib" ;;
+  esac | awk 'NF == 3 {print $3}'
 fi | awk -v pat="$pattern" '$0 ~ pat' | sort -u > "$found"
 if [ "$#" -eq 0 ]; then
   cat "$found"
