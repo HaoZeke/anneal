@@ -194,6 +194,24 @@ rule openconf_h2h:
         """
 
 
+# anneal against openconf alone, seeds 2000-2011, MMFF94 for both. anneal
+# may make as many energy plus gradient calls as openconf made on the same
+# seed. Rows are appended with code_revision and host. Not part of `rule all`:
+#   snakemake -s workflow/Snakefile openconf_h2h_n12
+rule openconf_h2h_n12:
+    input:
+        "bench/openconf-h2h/molecules.csv",
+    output:
+        "bench/openconf-h2h/paired/summary.csv",
+        "bench/openconf-h2h/paired/stats.csv",
+    shell:
+        """
+        set -euo pipefail
+        OPENCONF_H2H_CREST=0 bash scripts/openconf_h2h/enter_bench.sh paired
+        OPENCONF_H2H_SKIP_BUILD=1 bash scripts/openconf_h2h/enter_bench.sh paired-score
+        """
+
+
 # Gradients per GFN2 quench: anneal L-BFGS and TRIC against geomeTRIC.
 # Not part of `rule all`:
 #   snakemake -s workflow/Snakefile tric_quench

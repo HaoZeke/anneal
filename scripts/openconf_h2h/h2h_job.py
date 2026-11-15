@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import importlib.metadata
 import json
 import os
 import re
@@ -40,31 +41,50 @@ class Harvest:
 
     A quench ends where its gradient first stays under the record gate; the
     next evaluation above the gate is a new proposal or a new quench.
+    ``found`` holds, per minimum, the energy plus gradient calls made up to
+    and including the gradient call that recorded it.
     """
 
     def __init__(self, gate: float) -> None:
         self.gate = gate
         self.minima: list[tuple[np.ndarray, float]] = []
-        self._run: tuple[np.ndarray, float] | None = None
+        self.found: list[int] = []
+        self.calls = 0
+        self._run: tuple[np.ndarray, float, int] | None = None
         self._last: tuple[bytes, float] | None = None
 
     def energy(self, x: np.ndarray, e: float) -> None:
+        self.calls += 1
         self._last = (x.tobytes(), e)
 
     def gradient(self, x: np.ndarray, g: np.ndarray) -> None:
+        self.calls += 1
         if self._last is None or self._last[0] != x.tobytes():
             return
         e = self._last[1]
         if np.max(np.abs(g)) < self.gate:
             if self._run is None or e < self._run[1]:
-                self._run = (x.copy(), e)
+                self._run = (x.copy(), e, self.calls)
         else:
             self.close()
 
     def close(self) -> None:
         if self._run is not None:
-            self.minima.append(self._run)
+            x, e, calls = self._run
+            self.minima.append((x, e))
+            self.found.append(calls)
             self._run = None
+
+
+def write_trace(path: Path, symbols: list[str], frames: list[tuple[np.ndarray, float, int]]) -> None:
+    """Every minimum an arm produced, in order, commented ``calls energy_kcal``."""
+    lines = []
+    for x, energy, calls in frames:
+        lines.append(str(len(symbols)))
+        lines.append(f"{int(calls)} {energy:.10f}")
+        for sym, (a, b, c) in zip(symbols, np.asarray(x).reshape(-1, 3), strict=True):
+            lines.append(f"{sym:2s} {a:16.10f} {b:16.10f} {c:16.10f}")
+    path.write_text("\n".join(lines) + "\n")
 
 
 def run_anneal(row: dict, seed: int, budget: int, out: Path, local_step: str | None = None) -> dict:
@@ -110,7 +130,10 @@ def run_anneal(row: dict, seed: int, budget: int, out: Path, local_step: str | N
     best = np.asarray(result["best"])
     frames.append((best, float(result["best_energy"]) * hc.KCAL_PER_EV))
     hc.write_xyz(out / "candidates.xyz", hc.symbols(mol), frames)
+    found = [*harvest.found, harvest.calls]
+    write_trace(out / "trace.xyz", hc.symbols(mol), [(x, e, c) for (x, e), c in zip(frames, found, strict=True)])
     return {
+        "callback_calls": harvest.calls,
         "wall_s": wall,
         **counts,
         "budget": budget,
@@ -157,10 +180,26 @@ def _phase_embedding():
         setattr(AllChem, name, wrapped)
 
 
+def _trace_pool(trace: list[tuple[np.ndarray, float, int]]):
+    """Record every conformer offered to openconf's pool, with the calls spent so far."""
+    from openconf.pool import ConformerPool
+
+    insert = ConformerPool.insert
+
+    def traced(self, conf_id, energy, *args, **kwargs):
+        counts = hc.counter().read()
+        x = self.mol.GetConformer(int(conf_id)).GetPositions()
+        trace.append((x, float(energy), counts["energy_calls"] + counts["grad_calls"]))
+        return insert(self, conf_id, energy, *args, **kwargs)
+
+    ConformerPool.insert = traced
+
+
 def run_openconf(row: dict, seed: int, out: Path) -> dict:
     _pin_mmff94()
     _phase_embedding()
-    import openconf
+    trace: list[tuple[np.ndarray, float, int]] = []
+    _trace_pool(trace)
     from openconf import generate_conformers
     from openconf.config import preset_config
 
@@ -187,12 +226,14 @@ def run_openconf(row: dict, seed: int, out: Path) -> dict:
         for cid, e in zip(ensemble.conf_ids, ensemble.energies, strict=True)
     ]
     hc.write_xyz(out / "candidates.xyz", hc.symbols(mol), frames)
+    write_trace(out / "trace.xyz", hc.symbols(mol), trace)
     return {
         "wall_s": wall,
         **counts,
         "candidates": len(frames),
+        "trace_frames": len(trace),
         "best_kcal": min((e for _, e in frames), default=float("nan")),
-        "settings": f"openconf {openconf.__version__ if hasattr(openconf, '__version__') else ''} "
+        "settings": f"openconf {importlib.metadata.version('openconf')} "
         f"preset {preset}, num_threads 1, dielectric 1, MMFF94",
     }
 

@@ -2,6 +2,7 @@
 # Copyright (c) anneal developers
 # The anneal wheel, the RDKit call counter, and CREST 3.0.2 with a timer
 # around its potential call. Everything lands in /work/openconf-h2h/bin.
+# OPENCONF_H2H_CREST=0 stops before CREST.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -25,6 +26,9 @@ export PATH=$PREFIX/bin:$PATH
 
 gcc -O2 -shared -fPIC -o "$BIN/librdff_count.so" "$HERE/rdff_count.c" -ldl
 
+if [[ ${OPENCONF_H2H_CREST:-1} == 0 ]]; then
+  exit 0
+fi
 if [[ ! -x $CREST_SRC/_build/crest ]]; then
   rm -rf "$CREST_SRC"
   git clone -q --depth 1 --branch v3.0.2 https://github.com/crest-lab/crest.git "$CREST_SRC"

@@ -11,6 +11,13 @@ seed and runs them one at a time on core 0. A job whose ``job.json``
 exists is skipped, so an interrupted session resumes.
 
 ``score`` polishes and scores every finished job (``h2h_score.py``).
+
+``paired`` is the two-arm run on seeds 2000-2011. Each (molecule, seed) pair
+is drawn in a shuffled order; openconf runs first, and anneal then gets the
+energy plus gradient calls openconf spent on that seed. anneal charges one
+budget unit per point and makes one energy and one gradient call there, so
+its budget is half that count.
+``paired-score`` appends the scored rows (``paired_score.py``).
 """
 
 from __future__ import annotations
@@ -34,6 +41,9 @@ SEEDS = tuple(range(2000, 2006))
 PILOT_SEEDS = (900, 901, 902)
 SCHEDULE_SEED = 20261113
 BENCH = hc.ROOT / "bench" / "openconf-h2h"
+PAIRED_SEEDS = tuple(range(2000, 2012))
+PAIRED_SCHEDULE_SEED = 20261115
+OPENCONF_REV = "e32c5fa7b6e6aac944bda31c851be42e14340235"
 
 
 def job(arm: str, molecule: str, seed: int, out: Path, args, budget: int = 0) -> dict:
@@ -126,9 +136,61 @@ def score(args) -> None:
     )
 
 
+def search_calls(info: dict) -> int:
+    return int(info["energy_calls"]) + int(info["grad_calls"])
+
+
+def stamp(out: Path, info: dict, revision: str) -> dict:
+    info.update(code_revision=revision, openconf_revision=OPENCONF_REV)
+    (out / "job.json").write_text(json.dumps(info, indent=1, sort_keys=True) + "\n")
+    return info
+
+
+def paired(args) -> None:
+    revision = (args.work / "bin" / "anneal-head").read_text().strip()
+    names = args.molecules or list(hc.molecules())
+    pairs = [(name, seed) for name in hc.molecules() for seed in PAIRED_SEEDS]
+    random.Random(PAIRED_SCHEDULE_SEED).shuffle(pairs)
+    pairs = [p for p in pairs if p[0] in names and p[1] in args.seeds]
+    tree = args.work / "paired"
+    if args.pair:
+        pairs = [(args.pair[0], int(args.pair[1]))]
+        tree = args.work / "asv-paired"
+    for position, (name, seed) in enumerate(pairs, 1):
+        base = tree / name / str(seed)
+        done = {arm: (base / arm / "job.json").is_file() and not args.pair for arm in ("openconf", "anneal")}
+        if done["openconf"]:
+            first = json.loads((base / "openconf" / "job.json").read_text())
+        else:
+            first = stamp(base / "openconf", job("openconf", name, seed, base / "openconf", args), revision)
+        budget = search_calls(first) // 2
+        if not done["anneal"]:
+            second = stamp(base / "anneal", job("anneal", name, seed, base / "anneal", args, budget=budget), revision)
+            print(
+                f"PAIR {position}/{len(pairs)} {name} {seed} budget {budget} "
+                f"openconf {first['wall_s']:.2f} s anneal {second['wall_s']:.2f} s "
+                f"anneal calls {search_calls(second)}",
+                flush=True,
+            )
+
+
+def paired_score(args) -> None:
+    out = BENCH / "paired"
+    subprocess.run(
+        [
+            sys.executable, str(HERE / "paired_score.py"),
+            "--runs", str(args.work / "paired"),
+            "--rows", str(out / "seeds.csv"),
+            "--summary", str(out / "summary.csv"),
+            "--stats", str(out / "stats.csv"),
+        ],
+        check=True,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["pilot", "campaign", "score"])
+    parser.add_argument("command", choices=["pilot", "campaign", "score", "paired", "paired-score"])
     parser.add_argument("--work", type=Path, default=Path("/work/openconf-h2h"))
     parser.add_argument("--budgets", type=Path, default=BENCH / "budgets.csv")
     parser.add_argument("--counter", default="/work/openconf-h2h/bin/librdff_count.so")
@@ -136,12 +198,16 @@ def main() -> int:
     parser.add_argument("--core", type=int, default=0)
     parser.add_argument("--arms", nargs="+", default=list(ARMS), choices=ARMS)
     parser.add_argument("--molecules", nargs="*")
-    parser.add_argument("--seeds", nargs="+", type=int, default=list(SEEDS))
+    parser.add_argument("--seeds", nargs="+", type=int)
     parser.add_argument("--local-step", choices=["lbfgs", "tric", "auto"], help="anneal quench; default the preset's")
     parser.add_argument("--only", nargs=3, metavar=("MOLECULE", "SEED", "ARM"))
+    parser.add_argument("--pair", nargs=2, metavar=("MOLECULE", "SEED"), help="one paired job into asv-paired")
     parser.add_argument("--any-host", action="store_true", help="allow a hostname other than bench")
     args = parser.parse_args()
-    {"pilot": pilot, "campaign": campaign, "score": score}[args.command](args)
+    if args.seeds is None:
+        args.seeds = list(PAIRED_SEEDS if args.command.startswith("paired") else SEEDS)
+    commands = {"pilot": pilot, "campaign": campaign, "score": score, "paired": paired, "paired-score": paired_score}
+    commands[args.command](args)
     return 0
 
 
