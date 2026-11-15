@@ -304,6 +304,13 @@ fn config(spec: &Spec) -> Config {
             cfg.homotop_window = false;
         }
     }
+    // `1` stops the core cuts once they stall and hands their best to the
+    // walk; `0` holds them to the end.
+    match std::env::var("H2H_HANDOVER").as_deref() {
+        Ok("1") => cfg.prior_handover = true,
+        Ok("0") => cfg.prior_handover = false,
+        _ => {}
+    }
     if std::env::var("H2H_GENERAL").is_ok_and(|value| value == "1") {
         cfg.general_collective = true;
     }
