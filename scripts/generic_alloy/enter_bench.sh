@@ -40,15 +40,19 @@ fi
 git -C "$WORK/develop-tree" checkout --detach -q "$develop_rev"
 build "$WORK/develop-tree" develop
 build "$ROOT" branch
-mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/logs" "$OUT"
+scratch=$ROOT/build/generic-alloy
+# Captured before HOME moves, so the campaign can import what the
+# operator already installed for this user.
+user_site=$(python3 -c 'import site; print(site.getusersitepackages())')
+mkdir -p "$WORK/bin" "$scratch/user" "$scratch/scratch" "$WORK/logs" "$OUT"
 cp -f "$HERE/run_ablation.py" "$WORK/bin/"
 
 cat > "$WORK/bin/inside.sh" << EOF
 #!/bin/bash
 set -eu
-export HOME=$WORK/home
-export TMPDIR=$WORK/tmp
-export PYTHONPATH=/home/ubuntu/.local/lib/python3.12/site-packages
+export HOME=$scratch/user
+export TMPDIR=$scratch/scratch
+export PYTHONPATH=$user_site\${PYTHONPATH:+:\$PYTHONPATH}
 cd $WORK
 exec /usr/bin/python3 -u $WORK/bin/run_ablation.py \\
   --campaign $campaign \\

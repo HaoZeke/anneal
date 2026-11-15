@@ -704,6 +704,42 @@ where
         // proposal is a different trial.
         failure.take();
         opt.forget();
+        if iters == 0 {
+            // A raw energy, not a quench. An exchange scan and a surrogate's
+            // first stage ask for the energy of the point they pass. Counting
+            // that read as a screen opened a surface-portfolio hop on every
+            // read and, where a two-phase surface is installed, also charged
+            // a penalty evaluation whose energy the caller never sees.
+            let certified = paid
+                .lock()
+                .expect("paid check")
+                .clone()
+                .filter(|check| check.at == x)
+                .filter(|check| {
+                    largest_component(check.gradient.view()) <= opt.gtol
+                        && gradient_is_converged(check.gradient.view(), opt.gtol)
+                });
+            if let Some(check) = certified {
+                return (check.energy, x.to_owned());
+            }
+            let wall = CallWall::of(cfg);
+            let refuse_overlap = cfg.species.is_some();
+            let mut anchor = None;
+            let answered = charge_rejecting_repeat_failure(
+                objective,
+                led,
+                stats,
+                x,
+                &mut anchor,
+                refuse_overlap,
+                wall,
+                &mut failure,
+            );
+            return match answered {
+                Some((energy, _, _)) if energy.is_finite() => (energy, x.to_owned()),
+                _ => (f64::INFINITY, x.to_owned()),
+            };
+        }
         let polishing = polish_iters > 0
             && iters == polish_iters
             && iters != cfg.relax_steps
@@ -2337,6 +2373,39 @@ mod tests {
     use super::*;
     use crate::potentials::PairPotential;
     use ndarray::Array1;
+
+    #[test]
+    fn a_zero_step_read_is_one_physical_energy_and_not_a_screen() {
+        let cfg = Config::recommended(8);
+        assert!(
+            !cfg.surfaces.is_empty(),
+            "the preset installs a two-phase surface below 98 points"
+        );
+        let objective = PairPotential::lennard_jones(8);
+        let mut x = Array1::zeros(24);
+        for i in 0..8 {
+            x[3 * i] = i as f64 * 1.2;
+        }
+        let (direct, _) = objective.value_and_gradient(x.view());
+        let mut stats = RelaxStats::default();
+        let paid = PaidCheck::default();
+        let mut led = Ledger::new(32);
+        {
+            let mut relax = warm_relax(&objective, &cfg, &mut stats, 1, &paid);
+            let (energy, point) = relax(&mut led, x.view(), 0);
+            assert!((energy - direct).abs() < 1e-12);
+            assert_eq!(point, x);
+            assert_eq!(
+                led.spent(),
+                1,
+                "one physical evaluation, not a penalty plus a physical one"
+            );
+            let _ = relax(&mut led, x.view(), 0);
+            assert_eq!(led.spent(), 2);
+        }
+        assert_eq!(stats.screens, 0);
+        assert!(led.quench_boundaries().is_empty());
+    }
 
     #[test]
     fn a_lost_bond_backs_off_toward_the_last_call_without_charging() {
