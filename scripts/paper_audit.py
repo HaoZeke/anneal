@@ -61,6 +61,8 @@ UNPUSHED = {
     "bf09f7a2b7a6bd6359898db675eeafefcd20548b": "an ASE/GOFEE campaign head before e09e0487, with no pushed commit of its own",
     "ce1e7a46826cf51784ed26587c14b2747f5f48e1": "the GFN2 call-floor fix on f2a628c0, a local build head of the GFN2 "
                                                 "Si10 and C10 floor rows; the fix was pushed on another base",
+    "5351f272370dc8c0d18b06149753effc99aeabd5": "eae26977 with the call floor and the C20 example, a local build head of "
+                                                "the GFN2 C20 rows; b4ddad0d on bench/covalent-cov6b has its tree",
 }
 
 KNOWN_GAPS = {
@@ -89,7 +91,8 @@ KNOWN_GAPS = {
     "bench/covalent-h2h/v3/seeds.csv": "no revision or host column",
     "bench/covalent-h2h/gfn2/seeds.csv": "no revision or host column",
     "bench/covalent-h2h/gfn2/false-hits.csv": "no host column",
-    "bench/covalent-h2h/gfn2/rows.csv": "revision ce1e7a46 is not in this repository",
+    "bench/covalent-h2h/gfn2/rows.csv": "revision 5351f272 is not in this repository; revision ce1e7a46 is not in "
+                                        "this repository",
     "bench/ase-gofee-h2h/results.csv": "no host column; head empty or unknown on some rows; revision 0f988569 is not in "
                                        "this repository; revision 349523d3 is not in this repository; revision befbc3e8 "
                                        "is not in this repository; revision bf09f7a2 is not in this repository",
@@ -1036,11 +1039,15 @@ def covalent_gfn2(audit: Audit) -> None:
     gfn2_revision_tables(audit, path, header, paper[-1][0] + 1, rows, crest)
 
 
-GFN2_SYSTEMS = {"Si10": "si10", "C10": "c10"}
-# (system, anneal revision, Fisher p, Mann-Whitney p with a miss ranked after every hit, sentence that prints them)
+GFN2_SYSTEMS = {"Si10": "si10", "C10": "c10", "C20": "c20"}
+# (system, anneal revision, Fisher p, Mann-Whitney p, its sample, sentence that prints them). The sample is
+# "calls", calls to the hit with a miss ranked after every hit, or "best", the best energies.
 GFN2_REVISION_TESTS = (
-    ("Si10", "ce1e7a46", "1", "3.7e-5", "CREST on 11 (Fisher p = 1, Mann-Whitney p = 3.7e-5, a miss ranked after every hit)"),
-    ("C10", "ce1e7a46", "0.0013", "2.6e-5", "CREST on 4 (Fisher p = 0.0013, Mann-Whitney p = 2.6e-5)"),
+    ("Si10", "ce1e7a46", "1", "3.7e-5", "calls",
+     "CREST on 11 (Fisher p = 1, Mann-Whitney p = 3.7e-5, a miss ranked after every hit)"),
+    ("C10", "ce1e7a46", "0.0013", "2.6e-5", "calls", "CREST on 4 (Fisher p = 0.0013, Mann-Whitney p = 2.6e-5)"),
+    ("C20", "5351f272", "1", "0.0004", "best",
+     "CREST's on 134 of the 144 pairs of seeds (Mann-Whitney p = 0.0004 on the best energies)"),
 )
 
 
@@ -1066,12 +1073,18 @@ def gfn2_revision_tables(audit: Audit, path: str, header: str, after: int, rows:
                 groups[(row["system"], row["code"])] = anneal(system, revision)
         gfn2_table(audit, path, table, groups, "pooled")
         after = table[-1][0] + 1
-    for system, revision, fisher_p, mw_p, sentence in GFN2_REVISION_TESTS:
+    for system, revision, fisher_p, mw_p, sample, sentence in GFN2_REVISION_TESTS:
         a, c = anneal(GFN2_SYSTEMS[system], revision), crest(GFN2_SYSTEMS[system])
         where = f"{path} {system} {revision}"
         audit.cell(where, "GFN2 Fisher p", fisher_p, fisher(hits_of(a), len(a), hits_of(c), len(c)))
-        audit.cell(where, "GFN2 Mann-Whitney p", mw_p, mann_whitney(gfn2_ranked(a), gfn2_ranked(c), continuity=True))
+        if sample == "best":
+            p = mann_whitney([float(r["best"]) for r in a], [float(r["best"]) for r in c], continuity=True)
+        else:
+            p = mann_whitney(gfn2_ranked(a), gfn2_ranked(c), continuity=True)
+        audit.cell(where, "GFN2 Mann-Whitney p", mw_p, p)
         audit.said(path, sentence)
+    below = sum(float(x["best"]) < float(y["best"]) for x in anneal("c20", "5351f272") for y in crest("c20"))
+    audit.cell(f"{path} C20 5351f272", "anneal below CREST seed pairs", "134", below)
 
 
 COVALENT_SYSTEMS = {"Si10": "sw10", "Si13": "sw13", "Si20": "sw20", "C10": "tc10", "C20": "tc20"}

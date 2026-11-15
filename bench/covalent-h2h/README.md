@@ -806,6 +806,46 @@ that are identical byte for byte.
 - The summary lines are in `gfn2/summaries.csv`, with
   `--anneal-revision ce1e7a46…`.
 
+### C20
+
+The rows are in `gfn2/rows.csv` with the anneal revision in the code
+cell. Anneal ran through engine `04aceaa7`, whose sha256 the rows give.
+Both codes ran seeds 2000-2011, serial on core 0 with hostname `bench`.
+
+- The C20 reference, -1148.85383633 eV, is a cage with every atom
+  three-coordinated and bonds from 1.449 Å. One run found it: anneal
+  without the call floor (`91a4aa70`, develop `f2a628c0` with these
+  systems), seed 2006 at 1e5 calls, in an untimed comparison. No other run
+  of either code has reached it: the 24 timed runs below, and six untimed
+  anneal runs on seeds 3000-3005, three at 1e5 calls and three at 3e5.
+  xtb 6.7.1 gives the cage the same energy from a fresh SCC, to 1e-9 Eh.
+
+| system | code | hits | median calls | IQR | best / eV | median wall / s | inside / call | outside / call |
+|---|---|---|---|---|---|---|---|---|
+| C20 | anneal G, `5351f272` | 0/12 | 100,000 | 0 | -1148.292908 | 1866.6 | 18.54 ms | 0.005 ms |
+| C20 | CREST | 0/12 | 78,581.5 | 4,776.8 | -1146.770080 | 1545.1 | 19.30 ms | 0.307 ms |
+
+- C20: neither code reaches the cage. Anneal's best is lower than
+  CREST's on 134 of the 144 pairs of seeds (Mann-Whitney p = 0.0004 on
+  the best energies): -1148.293 eV at best (seed 2000), and -1146.550 eV
+  on five seeds, against CREST's -1146.770 eV at best (seed 2004) and
+  median -1144.664. No anneal call was refused or failed its SCC. The
+  rows were measured on `5351f272` (develop `eae26977` with the call
+  floor and these systems, a local build head; `b4ddad0d` on
+  `bench/covalent-cov6b` has its tree) with untimed searches on the other
+  cores. The example of this series ends seeds 2005 and 2007 at the same
+  energies after the same 1e5 calls, and repeats seeds 2000 and 2001 over
+  their first 5000 calls.
+- Si13 and Si20 are pending. The engine hands a search's next SCC the
+  previous wavefunction as its guess, and on these clusters at 3000 K that
+  guess lands on another, lower solution. Anneal's Si13 minimum at
+  -601.12421 eV is -593.51232 eV from a fresh SCC in the same engine and
+  in xtb 6.7.1, which is what CREST's xtb processes see; CREST's best Si13
+  structure is -599.34544 eV either way. Si20 minima near -979 eV are near
+  -868 eV fresh. One Si13 search recorded a planar sheet at -640.659 eV
+  whose SCC does not converge from a fresh start. The Si10, C10 and C20
+  minima above evaluate to the same energy fresh, to 1e-10 eV.
+
 ## Pins
 
 `scripts/covalent_h2h/pins.sh` prints, with every clock column removed:
@@ -841,5 +881,5 @@ Three first-parent commits changed it:
 - `reference.csv`: the unstopped reference runs.
 - `tc20-bowl.xyz`, `tc20-flake.xyz`: the C20 bowl and the best unbiased flake.
 - `c10-96/`: the 96-seed C10 rows.
-- `gfn2/`: per-seed rows and summary of GFN2-xTB Si10 and C10, anneal
-  against CREST.
+- `gfn2/`: per-seed rows and summaries of GFN2-xTB Si10, C10 and C20,
+  anneal against CREST.
