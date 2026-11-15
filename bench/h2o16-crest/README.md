@@ -43,3 +43,34 @@ C10 seed 2000, which does not use the molecular sphere, finishes at
 An LJ13 pin, seed 2000, budget 20000, has the same trace and the same
 final geometry either way.
 The search library is unchanged.
+
+## Capped panel, seeds 2000-2011
+
+`scripts/h2o16_crest/enter_capped.sh` runs both arms on one objective
+with one call cap, serial on one core under hostname bench
+(`snakemake -s workflow/Snakefile h2o16_crest_capped`).
+The objective is GFN2 through rgpot's `libxtb_engine.so` plus the O-H wall
+above.
+Anneal is `examples/gfn2_water_h2h`.
+CREST 3.0.2 is
+`crest start.xyz --gfn2 -T 1 --legacy -notopo -nocross -shake 1 -tstep 2`,
+with its xtb run through `xtb --driver` into
+`examples/gfn2_water_crest_driver`, which evaluates the same objective in
+one handle.
+Both arms start from anneal's random start for the seed.
+CREST's run also starts with one optimisation of it through the driver,
+charged to CREST.
+The cap is 280305 calls for both arms, the anneal (H2O)16 budget.
+A hit is an objective call at or below wdbase-1 plus 0.001 eV,
+-2214.904861 eV, and both arms stop at their first hit.
+Calls to the hit count every objective call up to it; a miss counts the
+cap.
+Inside is the time in the handle and outside the rest of the wall.
+
+Rows are appended to `capped-rows.csv` with the anneal revision, the host
+and the CREST, xtb and engine sha256, and each run appends one line per
+arm to `capped-summary.csv`, with Fisher's exact test on hits and
+two-sided Mann-Whitney tests on calls to the hit and on the best energy
+against anneal.
+Neither file is rewritten; the Snakemake rule outputs a stamp under
+`/work`.
