@@ -15,7 +15,7 @@ export OMP_NUM_THREADS=1
 export RAYON_NUM_THREADS=1
 
 git -C "$ROOT" rev-parse HEAD > "$WORK/head-rev"
-git -C /tmp/anneal-develop rev-parse HEAD > "$WORK/develop-rev"
+git -C "$WORK/develop-src" rev-parse HEAD > "$WORK/develop-rev"
 
 if ! grep -Eq '(^|[[:space:]])bench([[:space:]]|$)' /etc/hosts; then
   echo '127.0.0.1 bench' | sudo -n tee -a /etc/hosts >/dev/null
