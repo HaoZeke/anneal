@@ -12206,7 +12206,9 @@ mod tests {
             *value += 0.08 * (((i * 37 + 11) % 17) as f64 / 8.0 - 1.0);
         }
         let mut cfg = Config::for_cluster(n);
-        cfg.max_hops = Some(1);
+        // The cap is read after the proposal hop has been counted, and
+        // again before orbit completion. One leaves no room for the orbit.
+        cfg.max_hops = Some(2);
         cfg.bayes_screen = false;
         cfg.calibrated_screen = false;
         cfg.finish_improving = false;
