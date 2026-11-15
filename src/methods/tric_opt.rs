@@ -48,6 +48,8 @@ const SINGULAR_FLOOR: f64 = 1.0e-7;
 const CURVATURE_FLOOR: f64 = 1.0e-4;
 // Off-axis share of a fragment's spread below which it rotates as a line.
 const LINEAR_SPREAD: f64 = 1.0e-2;
+/// Timed probes [`TricOpt::step_seconds`] takes the least of.
+const STEP_PROBES: usize = 3;
 
 /// The optimizer every quench of a search uses.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
@@ -946,13 +948,21 @@ impl TricOpt {
     /// primitives, the Wilson matrix and its delocalized frame, the Newton
     /// step and the back-transformation. `energy` and `gradient` stand in
     /// for the potential, which is not called.
+    ///
+    /// The least of `STEP_PROBES` probes is kept. A single wall-clock
+    /// sample is the cold first step of the process, and one preemption
+    /// inside it can exceed the potential call it is compared against.
     pub fn step_seconds(&self, x: ArrayView1<f64>, energy: f64, gradient: ArrayView1<f64>) -> f64 {
         let mut probe = self.clone();
         probe.gtol = 0.0;
         let answer = (energy, gradient.to_owned());
-        let started = std::time::Instant::now();
-        probe.minimize(x, 2, |_| Some(answer.clone()));
-        started.elapsed().as_secs_f64()
+        (0..STEP_PROBES)
+            .map(|_| {
+                let started = std::time::Instant::now();
+                probe.minimize(x, 2, |_| Some(answer.clone()));
+                started.elapsed().as_secs_f64()
+            })
+            .fold(f64::INFINITY, f64::min)
     }
 
     /// Relaxes `x0`; `fg` returning `None` ends the relaxation on the best
