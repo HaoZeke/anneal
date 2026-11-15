@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Run cogapp with one shared prologue.
 
 The prologue imports ``anneal_version``. Cog blocks only print.

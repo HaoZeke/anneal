@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Set the workspace package version and restamp the generated copies.
 
 Cocogitto calls this from ``pre_bump_hooks`` with the new triple.
@@ -30,9 +31,9 @@ def main() -> int:
     )
     if count != 1:
         raise SystemExit("Cargo.toml package version line was not found")
-    # The first column-0 `version = "` line is [package].version.
-    # The [workspace] table does not set a version, so this replacement
-    # and the CMake LIMIT_COUNT 1 read stay on that line.
+    # The first column-0 `version = "` line is [workspace.package].version.
+    # Member crates inherit it, so this replacement and the CMake
+    # LIMIT_COUNT 1 read stay on that one line.
     cargo.write_text(updated, encoding="utf-8")
     # https://doc.rust-lang.org/cargo/commands/cargo-update.html
     subprocess.run(

@@ -39,7 +39,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo_version=$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+          cargo_version=$(python -c 'import sys; sys.path.insert(0, "scripts"); import anneal_version; print(anneal_version.package_version())')
           python_version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
           citation_version=$(awk '$1 == "version:" { gsub(/"/, "", $2); print $2; exit }' CITATION.cff)
           test "$cargo_version" = "$python_version"
