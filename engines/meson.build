@@ -342,11 +342,14 @@ if gromacs_opt.allowed()
                 rgpot_lj.full_path(),
                 plumed_lib.full_path(),
                 meson.current_build_dir() / 'gromacs-work',
+                rgpot_eval.full_path(),
             ],
-            timeout: 180,
+            timeout: 300,
         )
     elif gromacs_opt.enabled()
         error('with_gromacs is enabled but gmx or the PLUMED module is missing')
+    else
+        message('GROMACS test skipped: needs gmx, the PLUMED module and python3')
     endif
 endif
 
