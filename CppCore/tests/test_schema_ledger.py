@@ -100,22 +100,26 @@ class LedgerTest(unittest.TestCase):
 
     def write_tree(self, upstream: str, *diffs: str) -> None:
         self.upstream.write_text(upstream, encoding="utf-8")
-        (self.root / L.PACKAGEFILES).mkdir(parents=True, exist_ok=True)
-        names = []
-        text = upstream
-        for i, diff in enumerate(diffs):
-            name = f"d{i}.diff"
-            (self.root / L.PACKAGEFILES / name).write_text(diff, encoding="utf-8")
-            hunks = L.parse_diff(diff, name)[L.SCHEMA_NAME]
-            text, _ = L.apply_hunks(text, hunks, name)
-            names.append(name)
+        names = [f"d{i}.diff" for i in range(len(diffs))]
+        for directory in L.SERIES_DIRS:
+            (self.root / directory).mkdir(parents=True, exist_ok=True)
+            for old in (self.root / directory).iterdir():
+                old.unlink()
+            for name, diff in zip(names, diffs):
+                (self.root / directory / name).write_text(diff, encoding="utf-8")
+            (self.root / directory / L.SERIES).write_text(
+                "# local series\n" + "".join(f"{n}\n" for n in names), encoding="utf-8"
+            )
         wrap = self.root / L.WRAP
+        wrap.parent.mkdir(parents=True, exist_ok=True)
         wrap.write_text(
-            "[wrap-git]\nurl = https://example.invalid/schema.git\n"
-            f"revision = {'0' * 40}\n" + (f"diff_files = {', '.join(names)}\n" if names else ""),
+            f"[wrap-git]\nurl = https://example.invalid/schema.git\nrevision = {'0' * 40}\n",
             encoding="utf-8",
         )
-        self.set_vendored(text)
+        self.set_vendored(upstream)
+
+    def effective(self) -> str:
+        return L.apply_series(self.vendored(), L.read_series(self.root / L.SERIES_DIRS[0]))
 
     def set_vendored(self, text: str) -> None:
         for rel in L.VENDORED:
@@ -192,7 +196,7 @@ class LedgerTest(unittest.TestCase):
         )
         err = self.err.getvalue()
         self.assertIn("pinned upstream no longer declares PotentialConfig @3 arm morse", err)
-        self.assertIn("has PotentialConfig @2 arm morse :MorseParams, ledger has", err)
+        self.assertIn("lacks PotentialConfig @2 arm xtb :XTBParams upstream", err)
 
     def test_diff_that_removes_an_ordinal_line(self) -> None:
         rewrite = textwrap.dedent(
@@ -224,9 +228,74 @@ class LedgerTest(unittest.TestCase):
         self.write_tree(UPSTREAM, reserve)
         self.assertRejected("d0.diff adds an ordinal outside a declaration: # spare @3 :Bool;")
 
-    def test_vendored_copy_is_not_upstream_plus_diffs(self) -> None:
+    def test_vendored_copy_diverges_from_the_pin(self) -> None:
         self.set_vendored(self.vendored().replace('"gfn2"', '"gfn1"'))
-        self.assertRejected("is not the pinned upstream schema plus the wrap diffs")
+        self.assertRejected(L.DIVERGES)
+        self.assertEqual(self.run_tool("check"), 0, self.err.getvalue())
+
+    def test_vendored_copy_carrying_a_local_field(self) -> None:
+        # eb357630's shape: the local field sits in the vendored copies, so a
+        # parent comparing them with its own checkout of the pin sees drift.
+        self.set_vendored(self.effective())
+        self.assertRejected(L.DIVERGES)
+        self.assertIn(
+            "carries local ForceInput @2 field tag :Text; it belongs in the local series", self.err.getvalue()
+        )
+        self.assertEqual(self.run_tool("check"), 1)
+        self.assertIn("carries local ForceInput @2 field tag", self.err.getvalue())
+
+    def test_vendored_copies_differ(self) -> None:
+        (self.root / L.VENDORED[1]).write_text(self.vendored() + "# drift\n", encoding="utf-8")
+        self.assertEqual(self.run_tool("check"), 1)
+        self.assertIn(f"{L.VENDORED[1]} differs from {L.VENDORED[0]}", self.err.getvalue())
+
+    def test_wrap_diff_files_are_refused(self) -> None:
+        wrap = self.root / L.WRAP
+        wrap.write_text(wrap.read_text(encoding="utf-8") + "diff_files = d0.diff\n", encoding="utf-8")
+        self.assertRejected("applies diff_files (d0.diff)")
+
+    def test_series_mirror_drift(self) -> None:
+        mirror = self.root / L.SERIES_DIRS[1] / "d0.diff"
+        mirror.write_text(mirror.read_text(encoding="utf-8").replace("tag", "tags"), encoding="utf-8")
+        self.assertRejected(f"{L.SERIES_DIRS[1] / 'd0.diff'} differs from {L.SERIES_DIRS[0] / 'd0.diff'}")
+        mirror.unlink()
+        self.assertRejected(f"{L.SERIES_DIRS[1] / 'd0.diff'} is missing")
+
+    def test_apply_writes_the_effective_schema(self) -> None:
+        out = self.root / "build" / L.SCHEMA_NAME
+        self.assertEqual(self.run_tool("apply", "--out", str(out)), 0, self.err.getvalue())
+        self.assertEqual(out.read_text(encoding="utf-8"), self.effective())
+        self.assertIn("  tag @2 :Text;\n", out.read_text(encoding="utf-8"))
+        self.assertNotIn("tag @2", self.vendored())
+        before = out.stat().st_mtime_ns
+        self.assertEqual(self.run_tool("apply", "--out", str(out)), 0)
+        self.assertEqual(out.stat().st_mtime_ns, before)
+
+    def test_local_field_lands_through_a_second_diff(self) -> None:
+        # The feat/uma-cache-dir shape: a new local field is a new diff at the
+        # end of the series plus one appended local ledger line; the vendored
+        # copies stay the pin.
+        cache = textwrap.dedent(
+            """\
+            diff --git a/Potentials.capnp b/Potentials.capnp
+            --- a/Potentials.capnp
+            +++ b/Potentials.capnp
+            @@ -11,4 +11,5 @@
+             struct MorseParams {
+               de @0 :Float64 = 0.7102;
+               re @1 :Float64 = 2.897;
+            +  cacheDir @2 :Text;
+             }
+            """
+        )
+        self.write_tree(UPSTREAM, LOCAL_DIFF, cache)
+        self.assertRejected("d1.diff adds MorseParams @2 field cacheDir :Text, not a local ledger entry")
+        self.assertEqual(self.run_tool("append", "--upstream", str(self.upstream)), 0)
+        self.assertTrue(
+            self.ledger().read_text(encoding="utf-8").endswith("MorseParams @2 field cacheDir :Text local\n")
+        )
+        self.assertEqual(self.check(), 0, self.err.getvalue())
+        self.assertEqual(self.vendored(), UPSTREAM)
 
     def test_new_upstream_entry_needs_append(self) -> None:
         grown = UPSTREAM.replace(
@@ -257,7 +326,7 @@ class LedgerTest(unittest.TestCase):
             self.ledger(),
             self.root / L.WRAP,
             self.upstream,
-            *sorted((self.root / L.PACKAGEFILES).glob("*.diff")),
+            *(p for d in L.SERIES_DIRS for p in sorted((self.root / d).iterdir())),
         ]
         for path in files:
             path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
@@ -289,7 +358,8 @@ class LedgerTest(unittest.TestCase):
         ).stdout.strip()
         wrap = self.root / L.WRAP
         wrap.write_text(wrap.read_text(encoding="utf-8").replace("0" * 40, head), encoding="utf-8")
-        (sub / L.SCHEMA_NAME).write_text(self.vendored(), encoding="utf-8")
+        # A parent may patch its own checkout; the pinned git object still wins.
+        (sub / L.SCHEMA_NAME).write_text(self.effective(), encoding="utf-8")
 
         env = {**os.environ, "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0", "LC_ALL": "C"}
         done = subprocess.run(
@@ -309,7 +379,7 @@ class LedgerTest(unittest.TestCase):
             errors="replace",
         )
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn("unpatched upstream: git object", done.stdout)
+        self.assertIn("pinned upstream: git object", done.stdout)
 
     def test_append_refuses_to_rewrite(self) -> None:
         self.set_vendored(self.vendored().replace("de @0 :Float64", "de @0 :Float32"))

@@ -1,7 +1,8 @@
 # Append-only ordinal ledger for Potentials.capnp (see schema_ledger.py).
 # <scope> @<ordinal> <kind> <name> <type> <origin>
-# upstream: in the pinned potentials-schema commit before any wrap diff.
-# local: added by a wrap diff. Never edit or delete a line; append only.
+# upstream: in the pinned potentials-schema commit.
+# local: added by a diff in the local series. Never edit or delete a line;
+# append only.
 ForceInput @0 field pos :List(Float64) upstream
 ForceInput @1 field atmnrs :List(Int32) upstream
 ForceInput @2 field box :List(Float64) upstream

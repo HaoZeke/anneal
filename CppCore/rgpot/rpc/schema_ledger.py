@@ -10,8 +10,14 @@ ordinal once as
     <scope> @<ordinal> <kind> <name> <type> <origin>
 
 kind is field, arm (union member), group, enumerant or method. origin is
-upstream (in the pinned potentials-schema commit, before any wrap diff) or
-local (added by a wrap diff and shipped by rgpot).
+upstream (in the pinned potentials-schema commit) or local (added by a diff
+in the local series and shipped by rgpot).
+
+The two vendored copies are the pinned upstream file, byte for byte, which
+is what a parent project such as gpridge compares them with. The local
+series (CppCore/rgpot/rpc/local/series, mirrored in rgpot-core/schema/local
+for the crate) lists add-only diffs that apply on top of the vendored copy;
+the result is the effective schema that rgpot compiles, installs and serves.
 
 check fails when
 
@@ -19,14 +25,18 @@ check fails when
 * the unpatched pinned upstream schema drops, renumbers or retypes an
   upstream entry, declares one the ledger lacks, or collides with a local
   entry,
-* a vendored copy differs from the ledger in any entry,
-* a wrap diff removes or rewrites a line carrying an @N ordinal, or adds
+* a vendored copy is not byte for byte the pinned upstream schema, or
+  declares anything but the upstream ledger entries,
+* the effective schema differs from the ledger in any entry,
+* a series diff removes or rewrites a line carrying an @N ordinal, or adds
   one that is not a local ledger entry,
-* the pinned upstream schema with the wrap diffs applied is not byte for
-  byte the vendored copies.
+* the series mirror differs from the series, or the wrap applies
+  diff_files to the pinned checkout.
 
-append adds the entries a vendored copy declares and the ledger lacks, at
-the end of the ledger. It never rewrites an existing line.
+append adds the entries the effective schema declares and the ledger lacks,
+at the end of the ledger. It never rewrites an existing line.
+
+apply writes the effective schema: the vendored copy plus the series.
 """
 
 from __future__ import annotations
@@ -47,8 +57,13 @@ VENDORED = (
     Path("rgpot-core/schema/Potentials.capnp"),
 )
 WRAP = Path("subprojects/potentials-schema.wrap")
-PACKAGEFILES = Path("subprojects/packagefiles")
+SERIES_DIRS = (
+    Path("CppCore/rgpot/rpc/local"),
+    Path("rgpot-core/schema/local"),
+)
+SERIES = "series"
 SCHEMA_NAME = "Potentials.capnp"
+DIVERGES = "vendored Potentials.capnp diverges from pinned potentials-schema release"
 
 ORDINAL = re.compile(r"@\d+\b")
 
@@ -290,8 +305,9 @@ def parse_ledger(text: str, label: str) -> list[Entry]:
 LEDGER_HEADER = """\
 # Append-only ordinal ledger for Potentials.capnp (see schema_ledger.py).
 # <scope> @<ordinal> <kind> <name> <type> <origin>
-# upstream: in the pinned potentials-schema commit before any wrap diff.
-# local: added by a wrap diff. Never edit or delete a line; append only.
+# upstream: in the pinned potentials-schema commit.
+# local: added by a diff in the local series. Never edit or delete a line;
+# append only.
 """
 
 
@@ -331,7 +347,7 @@ def parse_diff(text: str, label: str) -> dict[str, list[Hunk]]:
     return files
 
 
-def apply_hunks(text: str, hunks: list[Hunk], label: str, reverse: bool = False) -> tuple[str, list[int]]:
+def apply_hunks(text: str, hunks: list[Hunk], label: str) -> tuple[str, list[int]]:
     """Apply hunks like patch -p1 (exact context, any offset).
 
     Returns the new text and the 1-based new line number of every added line.
@@ -341,18 +357,17 @@ def apply_hunks(text: str, hunks: list[Hunk], label: str, reverse: bool = False)
     added: list[int] = []
     pos = 0
     for number, hunk in enumerate(hunks, 1):
-        old = [ln[1:] for ln in hunk.lines if ln[0] in (" ", "+" if reverse else "-")]
-        new_kinds = [(ln[0], ln[1:]) for ln in hunk.lines if ln[0] in (" ", "-" if reverse else "+")]
+        old = [ln[1:] for ln in hunk.lines if ln[0] in (" ", "-")]
+        new_kinds = [(ln[0], ln[1:]) for ln in hunk.lines if ln[0] in (" ", "+")]
         want = hunk.old_start - 1 if old else hunk.old_start
         candidates = sorted(range(pos, len(lines) - len(old) + 1), key=lambda i: abs(i - want))
         at = next((i for i in candidates if lines[i : i + len(old)] == old), None)
         if at is None:
             raise LedgerError(f"{label}: hunk {number} does not apply")
         out.extend(lines[pos:at])
-        add = "-" if reverse else "+"
         for kind, body in new_kinds:
             out.append(body)
-            if kind == add:
+            if kind == "+":
                 added.append(len(out))
         pos = at + len(old)
     out.extend(lines[pos:])
@@ -366,7 +381,7 @@ def apply_hunks(text: str, hunks: list[Hunk], label: str, reverse: bool = False)
 class Wrap:
     url: str
     revision: str
-    diffs: list[Path]
+    diff_files: list[str]
 
 
 def read_wrap(root: Path) -> Wrap:
@@ -374,7 +389,26 @@ def read_wrap(root: Path) -> Wrap:
     parser.read(root / WRAP, encoding="utf-8")
     section = parser["wrap-git"]
     names = [n.strip() for n in section.get("diff_files", "").split(",") if n.strip()]
-    return Wrap(section["url"], section["revision"], [root / PACKAGEFILES / n for n in names])
+    return Wrap(section["url"], section["revision"], names)
+
+
+def read_series(directory: Path) -> list[Path]:
+    """The diffs a series file lists, in order. No series file means none."""
+    path = directory / SERIES
+    if not path.is_file():
+        return []
+    names = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        name = raw.strip()
+        if name and not name.startswith("#"):
+            names.append(directory / name)
+    return names
+
+
+def apply_series(text: str, diffs: list[Path]) -> str:
+    for diff in diffs:
+        text, _ = apply_hunks(text, schema_hunks(diff), diff.name)
+    return text
 
 
 def schema_hunks(diff: Path) -> list[Hunk]:
@@ -411,7 +445,12 @@ def fetch_upstream(wrap: Wrap) -> str:
 
 
 def upstream_from_subproject(schema: Path, wrap: Wrap) -> tuple[str, str]:
-    """Unpatched upstream text from a meson checkout of the wrap."""
+    """Upstream text from a meson checkout of the wrap.
+
+    The git object at the pin is preferred, so a parent project that patches
+    its own checkout still yields the pinned file. Otherwise the file is read
+    as it is, and the canonical check compares the vendored copies with it.
+    """
     directory = schema.resolve().parent
     try:
         top = Path(_git("rev-parse", "--show-toplevel", cwd=directory).strip()).resolve()
@@ -419,10 +458,7 @@ def upstream_from_subproject(schema: Path, wrap: Wrap) -> tuple[str, str]:
             return _git("show", f"{wrap.revision}:{SCHEMA_NAME}", cwd=directory), "git object"
     except (OSError, subprocess.CalledProcessError):
         pass
-    text = schema.read_text(encoding="utf-8")
-    for diff in reversed(wrap.diffs):
-        text, _ = apply_hunks(text, schema_hunks(diff), diff.name, reverse=True)
-    return text, "patched checkout with the wrap diffs reversed"
+    return schema.read_text(encoding="utf-8"), str(schema)
 
 
 def base_ledger(root: Path, base: str) -> str | None:
@@ -500,14 +536,45 @@ def check_copy(ledger: list[Entry], copy: list[Entry], label: str) -> list[str]:
     return errors
 
 
-def check_diffs(upstream_text: str, wrap: Wrap, ledger: list[Entry]) -> tuple[list[str], str]:
+def check_vendored(ledger: list[Entry], copy: list[Entry], label: str) -> list[str]:
+    """A vendored copy holds the upstream entries and none of the local ones."""
+    errors = []
+    local = {e.key: e for e in ledger if e.origin == "local"}
+    rest = []
+    for entry in copy:
+        mine = local.get(entry.key)
+        if mine is not None and mine.same(entry):
+            errors.append(f"{label} carries local {mine.describe()}; it belongs in the local series")
+        else:
+            rest.append(entry)
+    return errors + check_copy([e for e in ledger if e.origin == "upstream"], rest, label)
+
+
+def check_series_mirror(root: Path) -> list[str]:
+    errors = []
+    main, mirror = (root / d for d in SERIES_DIRS)
+    names = {p.name for p in main.iterdir() if p.is_file()} if main.is_dir() else set()
+    copies = {p.name for p in mirror.iterdir() if p.is_file()} if mirror.is_dir() else set()
+    for name in sorted(names | copies):
+        if name not in copies:
+            errors.append(f"{SERIES_DIRS[1] / name} is missing; copy {SERIES_DIRS[0] / name}")
+        elif name not in names:
+            errors.append(f"{SERIES_DIRS[1] / name} has no counterpart in {SERIES_DIRS[0]}")
+        elif (main / name).read_bytes().replace(b"\r\n", b"\n") != (mirror / name).read_bytes().replace(
+            b"\r\n", b"\n"
+        ):
+            errors.append(f"{SERIES_DIRS[1] / name} differs from {SERIES_DIRS[0] / name}")
+    return errors
+
+
+def check_diffs(base_text: str, diffs: list[Path], ledger: list[Entry]) -> tuple[list[str], str]:
     errors = []
     local = {e.key: e for e in ledger if e.origin == "local"}
     by_key = {e.key: e for e in ledger}
-    text = upstream_text
-    for diff in wrap.diffs:
+    text = base_text
+    for diff in diffs:
         if not diff.is_file():
-            errors.append(f"wrap diff {diff.name} is missing")
+            errors.append(f"series diff {diff.name} is missing")
             continue
         hunks = schema_hunks(diff)
         for hunk in hunks:
@@ -546,6 +613,10 @@ def check_diffs(upstream_text: str, wrap: Wrap, ledger: list[Entry]) -> tuple[li
     return errors, text
 
 
+def _read(path: Path) -> str:
+    return path.read_text(encoding="utf-8").replace("\r\n", "\n")
+
+
 def run_check(args: argparse.Namespace) -> int:
     root = args.root.resolve()
     wrap = read_wrap(root)
@@ -561,29 +632,44 @@ def run_check(args: argparse.Namespace) -> int:
         else:
             errors += check_append_only(parse_ledger(old, f"{args.base}:{LEDGER}"), ledger)
 
-    for rel in VENDORED:
-        path = root / rel
-        errors += check_copy(ledger, schema_entries(path.read_text(encoding="utf-8"), str(rel)), str(rel))
+    if wrap.diff_files:
+        errors.append(
+            f"{WRAP} applies diff_files ({', '.join(wrap.diff_files)}); a parent project resolves "
+            f"the pin from its own wrap without them. List rgpot-local diffs in "
+            f"{(SERIES_DIRS[0] / SERIES).as_posix()} instead"
+        )
+    errors += check_series_mirror(root)
+
+    texts = {rel: _read(root / rel) for rel in VENDORED}
+    for rel, text in texts.items():
+        errors += check_vendored(ledger, schema_entries(text, str(rel)), str(rel))
+    first = texts[VENDORED[0]]
+    for rel in VENDORED[1:]:
+        if texts[rel] != first:
+            errors.append(f"{rel} differs from {VENDORED[0]}")
 
     upstream_text = None
     if args.upstream:
-        upstream_text, source = args.upstream.read_text(encoding="utf-8"), str(args.upstream)
+        upstream_text, source = _read(args.upstream), str(args.upstream)
     elif args.subproject_schema:
         upstream_text, source = upstream_from_subproject(args.subproject_schema, wrap)
     elif args.fetch:
         upstream_text, source = fetch_upstream(wrap), f"{wrap.url} at {wrap.revision}"
     if upstream_text is None:
-        notes.append("no unpatched upstream schema given; upstream and wrap diff checks skipped")
+        notes.append("no pinned upstream schema given; upstream and canonical checks skipped")
     else:
-        notes.append(f"unpatched upstream: {source}")
+        upstream_text = upstream_text.replace("\r\n", "\n")
+        notes.append(f"pinned upstream: {source}")
         errors += check_upstream(ledger, schema_entries(upstream_text, "pinned upstream"))
-        diff_errors, patched = check_diffs(upstream_text, wrap, ledger)
-        errors += diff_errors
-        if not diff_errors:
-            for rel in VENDORED:
-                vendored = (root / rel).read_text(encoding="utf-8").replace("\r\n", "\n")
-                if vendored != patched:
-                    errors.append(f"{rel} is not the pinned upstream schema plus the wrap diffs")
+        for rel, text in texts.items():
+            if text != upstream_text:
+                errors.append(f"{rel}: {DIVERGES} {wrap.revision[:8]}")
+
+    diffs = read_series(root / SERIES_DIRS[0])
+    diff_errors, effective = check_diffs(first if upstream_text is None else upstream_text, diffs, ledger)
+    errors += diff_errors
+    if not diff_errors:
+        errors += check_copy(ledger, schema_entries(effective, "effective schema"), "effective schema")
 
     for note in notes:
         print(f"note: {note}", flush=True)
@@ -605,14 +691,15 @@ def run_append(args: argparse.Namespace) -> int:
     upstream_text = args.upstream.read_text(encoding="utf-8") if args.upstream else fetch_upstream(wrap)
     upstream = {e.key: e for e in schema_entries(upstream_text, "pinned upstream")}
     known = {e.key: e for e in ledger}
-    copy = schema_entries((root / VENDORED[0]).read_text(encoding="utf-8"), str(VENDORED[0]))
+    effective = apply_series(_read(root / VENDORED[0]), read_series(root / SERIES_DIRS[0]))
+    copy = schema_entries(effective, "effective schema")
     fresh = []
     for entry in copy:
         old = known.get(entry.key)
         if old is not None:
             if not old.same(entry):
                 raise LedgerError(
-                    f"{VENDORED[0]} has {entry.describe()}, ledger has {old.line()}; "
+                    f"effective schema has {entry.describe()}, ledger has {old.line()}; "
                     "append will not rewrite it"
                 )
             continue
@@ -628,14 +715,31 @@ def run_append(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_apply(args: argparse.Namespace) -> int:
+    root = args.root.resolve()
+    schema = args.schema or root / VENDORED[0]
+    text = apply_series(_read(schema), read_series(args.series or root / SERIES_DIRS[0]))
+    # Rewriting identical bytes would make every capnp consumer rebuild.
+    if not args.out.is_file() or args.out.read_text(encoding="utf-8") != text:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(text, encoding="utf-8", newline="\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("check", "append"):
+    for name in ("check", "append", "apply"):
         cmd = sub.add_parser(name)
         cmd.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[3])
+    for name in ("check", "append"):
+        cmd = sub.choices[name]
         cmd.add_argument("--ledger", type=Path)
         cmd.add_argument("--upstream", type=Path, help="unpatched pinned Potentials.capnp")
+    apply = sub.choices["apply"]
+    apply.add_argument("--schema", type=Path, help="vendored Potentials.capnp (default: the C++ copy)")
+    apply.add_argument("--series", type=Path, help="directory holding the series file")
+    apply.add_argument("--out", type=Path, required=True, help="where to write the effective schema")
     check = sub.choices["check"]
     source = check.add_mutually_exclusive_group()
     source.add_argument(
@@ -647,7 +751,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "check" and args.upstream and (args.subproject_schema or args.fetch):
         parser.error("give one of --upstream, --subproject-schema and --fetch")
     try:
-        return run_check(args) if args.command == "check" else run_append(args)
+        return {"check": run_check, "append": run_append, "apply": run_apply}[args.command](args)
     except (LedgerError, OSError, subprocess.CalledProcessError, KeyError) as exc:
         detail = getattr(exc, "stderr", None)
         print(f"error: {exc}{': ' + detail.strip() if detail else ''}", file=sys.stderr)

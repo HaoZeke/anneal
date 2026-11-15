@@ -4,14 +4,36 @@ capnp = find_program('capnp')
 python = find_program('python3', 'python')
 
 # Canonical contract pinned via subprojects/potentials-schema.wrap; the two
-# vendored Potentials.capnp copies must stay byte-identical to it. The build
-# compiles the vendored copies, so the canonical one only feeds the sync
-# tests, and an offline build (--wrap-mode=nodownload) skips them.
-# The sync tests compare against the checkout after the wrap's diff_files,
-# so an edit made to a diff and to the vendored copies together passes them.
-# schema-ordinal-ledger holds both to Potentials.ordinals and to the
-# unpatched pinned schema instead.
+# vendored Potentials.capnp copies must stay byte-identical to it, which is
+# what the sync tests check here and in a parent such as gpridge that
+# resolves the subproject from its own wrap. An offline build
+# (--wrap-mode=nodownload) skips them.
+# rgpot-local fields are the add-only diffs in local/series. The build
+# compiles, installs and serves the effective schema: the vendored copy
+# with the series applied. schema-ordinal-ledger holds the copies, the
+# series and the effective schema to Potentials.ordinals.
 schema_ledger = files('schema_ledger.py')
+rgpot_effective_schema = custom_target(
+    'effective_schema',
+    input: 'Potentials.capnp',
+    output: 'Potentials.capnp',
+    command: [
+        python,
+        schema_ledger,
+        'apply',
+        '--root',
+        meson.project_source_root(),
+        '--schema',
+        '@INPUT@',
+        '--series',
+        meson.current_source_dir() / 'local',
+        '--out',
+        '@OUTPUT@',
+    ],
+    depend_files: rgpot_schema_inputs,
+    install: not meson.is_subproject(),
+    install_dir: get_option('includedir') / 'rgpot' / 'rpc',
+)
 test(
     'schema-ordinal-ledger-vendored',
     python,
@@ -69,14 +91,14 @@ endif
 
 gen_rpc = custom_target(
     'gen_rpc',
-    input: 'Potentials.capnp',
+    input: rgpot_effective_schema,
     output: ['Potentials.capnp.cpp', 'Potentials.capnp.h'],
     command: [
         python,
         meson.current_source_dir() / 'capnp_compile.py',
         capnp,
         '@OUTDIR@',
-        meson.current_source_dir(),
+        meson.current_build_dir(),
         '@INPUT@',
     ],
     # Install generated header next to vendored schema for pkg-config consumers.

@@ -162,6 +162,16 @@ rgpot_halfshell = static_library(
 # them in when RPC is on (server or client-only); lean -Dwith_rpc=false builds
 # (xtb/tblite/metatomic CI) must not require pkg-config 'capnp-rpc'.
 _rpc_stack = rpc_enabled or get_option('with_rpc_client_only')
+# Inputs of the effective schema (the vendored copy plus the rgpot-local
+# series in rgpot/rpc/local/series); every target that applies it depends
+# on them.
+rgpot_schema_inputs = files('rgpot/rpc/local/series')
+foreach _line : _fs.read('rgpot/rpc/local/series').split('\n')
+    _line = _line.strip()
+    if _line != '' and not _line.startswith('#')
+        rgpot_schema_inputs += files('rgpot/rpc/local' / _line)
+    endif
+endforeach
 _metatomic_build_rpath = ''
 if _rpc_stack
     subdir('rgpot/rpc')
@@ -2143,6 +2153,29 @@ if get_option('with_tests')
     _capnpc_dep = dependency('capnpc', required: false)
     # socketpair, fork and waitpid. Windows has no POSIX process pair.
     if _capnp_dep.found() and _capnpc_dep.found() and host_machine.system() != 'windows'
+        # The neighbour structs are rgpot-local: they exist only in the
+        # effective schema, not in the vendored copy.
+        if is_variable('rgpot_effective_schema')
+            _nlist_schema = rgpot_effective_schema
+        else
+            _nlist_schema = custom_target(
+                'nlist_effective_schema',
+                input: 'rgpot/rpc/Potentials.capnp',
+                output: 'Potentials.capnp',
+                command: [
+                    find_program('python3', 'python'),
+                    files('rgpot/rpc/schema_ledger.py'),
+                    'apply',
+                    '--root',
+                    meson.project_source_root(),
+                    '--schema',
+                    '@INPUT@',
+                    '--out',
+                    '@OUTPUT@',
+                ],
+                depend_files: rgpot_schema_inputs,
+            )
+        endif
         test(
             'nlist_stream',
             executable(
@@ -2153,10 +2186,23 @@ if get_option('with_tests')
                 dependencies: [_capnp_dep, _capnpc_dep],
                 link_with: _nlist_link,
             ),
-            args: [
-                meson.project_source_root() / 'CppCore' / 'rgpot' / 'rpc' / 'Potentials.capnp',
-            ],
+            args: [_nlist_schema.full_path()],
+            depends: _nlist_schema,
         )
+        _capnp_tool = find_program('capnp', required: false)
+        if _capnp_tool.found()
+            test(
+                'nlist_capnp_roundtrip',
+                find_program('python3', 'python'),
+                args: [
+                    meson.current_source_dir() / 'tests' / 'test_nlist_capnp.py',
+                    meson.project_source_root(),
+                    _capnp_tool.full_path(),
+                    _nlist_schema.full_path(),
+                ],
+                depends: _nlist_schema,
+            )
+        endif
     endif
     _rustc = find_program('rustc', required: false)
     if _rustc.found()
@@ -2829,7 +2875,7 @@ if not meson.is_subproject()
     install_subdir(
         'rgpot',
         install_dir: get_option('includedir'),
-        exclude_directories: ['__pycache__'],
+        exclude_directories: ['__pycache__', 'rpc/local'],
         exclude_files: [
             '*.o',
             '*.a',
@@ -2840,15 +2886,10 @@ if not meson.is_subproject()
             '*.f90',
             '*.F',
             '*.py',
+            # rpc/meson.build installs the effective schema in its place.
+            'rpc/Potentials.capnp',
         ],
     )
-    if _rpc_stack
-        # Schema source next to generated header (rpc meson installs .h).
-        install_data(
-            'rgpot/rpc/Potentials.capnp',
-            install_dir: get_option('includedir') / 'rgpot' / 'rpc',
-        )
-    endif
 
     # The .pc always ships: consumers discover whatever this build enabled
     # through the RGPOT_HAS_* cflags rather than by the file's absence.

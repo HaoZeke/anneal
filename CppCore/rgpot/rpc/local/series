@@ -1,0 +1,12 @@
+# rgpot-local additions to Potentials.capnp, applied in this order to the
+# vendored copy (the pinned potentials-schema file) to give the schema rgpot
+# compiles, installs and serves. Each diff may only add lines, and every
+# ordinal it adds is a local entry in CppCore/rgpot/rpc/Potentials.ordinals.
+# A new local field goes in a new diff appended here; see schema_ledger.py.
+# rgpot-core/schema/local mirrors this directory byte for byte for the crate.
+#
+# neighbour-chunk.diff: ForceInput.neighbors @9,
+# PotentialResult.neighborList @28, Potential.neighbours @13 and the
+# NeighborRequest, NeighborSystem and NeighborList structs. Upstream has
+# none of these yet.
+neighbour-chunk.diff

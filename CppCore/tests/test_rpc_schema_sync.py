@@ -134,11 +134,27 @@ def _assert_generated_in_sync(root: Path, capnp: str, build_dir: Path | None) ->
         tmp_path = Path(tmp)
         # Each copy sits alone in its own directory so the generated names and
         # the embedded source paths cannot differ for incidental reasons.
+        # Each copy gets its own local series applied, as the meson build
+        # and rgpot-core/build.rs do, so the comparison is of what compiles.
         cpp_copy = tmp_path / "cpp" / "Potentials.capnp"
         rust_copy = tmp_path / "rust" / "Potentials.capnp"
         for src, dst in ((cpp_schema, cpp_copy), (rust_schema, rust_copy)):
-            dst.parent.mkdir(parents=True)
-            shutil.copyfile(src, dst)
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(root / "CppCore" / "rgpot" / "rpc" / "schema_ledger.py"),
+                    "apply",
+                    "--root",
+                    str(root),
+                    "--schema",
+                    str(src),
+                    "--series",
+                    str(src.parent / "local"),
+                    "--out",
+                    str(dst),
+                ],
+                check=True,
+            )
 
         from_cpp = _regenerate(root, capnp, cpp_copy, tmp_path / "gen_cpp")
         from_rust = _regenerate(root, capnp, rust_copy, tmp_path / "gen_rust")
