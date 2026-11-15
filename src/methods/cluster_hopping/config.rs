@@ -1368,6 +1368,14 @@ pub struct Config {
     /// keeps its rungs. On in [`Config::recommended_molecular`].
     #[serde(skip_serializing_if = "is_false")]
     pub measured_energy_scale: bool,
+    /// Replace a chain that has been quiet for three quarters of its budget
+    /// with the lowest fingerprint-diverse member of a fresh population, then
+    /// adapt the step and the temperature from the acceptance rate.
+    ///
+    /// Off in [`Config::recommended`]. On 24 seeds the panel total rose by
+    /// three hits and Morse M55 fell by two.
+    #[serde(skip_serializing_if = "is_false")]
+    pub plateau_restart: bool,
 }
 
 /// Opening hops whose quenched energy changes set
@@ -1806,6 +1814,7 @@ impl Config {
             angular_target: 0.5,
             restart_on_stall: false,
             restart_patience: 5_000,
+            plateau_restart: false,
             calibrate_radius: false,
             calibrate_quantile: 0.9,
             calibrate_warmup: 200,
