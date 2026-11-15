@@ -11,7 +11,7 @@
  * Provides @c PotentialHandle, the primary C++ entry point for performing
  * force/energy calculations through the Rust core.  The handle owns an
  * opaque @c rgpot_potential_t pointer obtained from @c rgpot_potential_new()
- * and releases it via @c rgpot_potential_free() on destruction.
+ * or @c rgpot_potential_new_eindir() and releases it via @c rgpot_potential_free() on destruction.
  *
  * Two factory functions are offered:
  *
@@ -65,8 +65,8 @@ class PotentialHandle final {
 public:
   /**
    * @brief Adopt an existing raw handle.
-   * @pre @a handle was obtained from @c rgpot_potential_new() and has not
-   *      been freed.
+   * @pre @a handle was obtained from @c rgpot_potential_new() or
+   *      @c rgpot_potential_new_eindir() and has not been freed.
    * @param handle Raw pointer to the Rust-side potential object.
    */
   explicit PotentialHandle(rgpot_potential_t *handle) : handle_(handle) {}

@@ -172,9 +172,9 @@ void SWPot::forceBatchImpl(const ForceBatch &batch) const {
 }
 
 void TersoffPot::forceImpl(const ForceInput &in, ForceOut *out) const {
-  // The C++ kernel rebuilds its neighbour list on this call unless
-  // setHeldSkin was given a skin. On periodic cells of 512 and 4096 atoms
-  // a rebuild is slower than the warm Fortran gather, so all-silicon stays
+  // The C++ kernel searches with its internal skin unless setHeldSkin
+  // was given one. On periodic cells of 512 and 4096 atoms a rebuild is
+  // slower than the warm Fortran gather, so all-silicon stays
   // there. Any other Z needs the 1989 silicon-carbon parameters, which the
   // gather does not have.
   if (siliconOnly(in)) {

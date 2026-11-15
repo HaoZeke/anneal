@@ -26,7 +26,7 @@
  *
  * The covered types, the rule for @c kCxxLayoutRevision and the
  * virtual-function counters are documented in
- * @c docs/orgmode/reference/c_abi.org.
+ * @c docs/orgmode/explanation/abi-stamps.org.
  */
 
 #include <array>
@@ -164,7 +164,7 @@ inline constexpr std::uint32_t kCxxLayoutRevision = 1;
 /// did not increase.
 ///
 /// This is not `RGPOT_ABI_LAYOUT_REVISION`. The C ABI stamp in `rgpot.h`
-/// is major 1, minor 1, layout revision 1. Minor 1 adds
+/// is major 1, minor 2, layout revision 1. Minor 1 added
 /// `rgpot_eindir_abi_compatible`. No exported C struct of that header
 /// changed layout. The neighbour query is `RGPOT_NLIST_ABI` 4.
 /// The C API is exported from librgpot, so it has no shared library of
@@ -189,7 +189,7 @@ struct CxxSoversionEntry {
 /// No-cache `header_stamp().hash` for each platform ABI CI builds.
 /// Rows are copied from `RGPOT_CXX_LAYOUT_STAMP` lines. An unlisted
 /// platform still compiles. How to update the table:
-/// docs/orgmode/reference/c_abi.org.
+/// docs/orgmode/contributing/developer/abi-bump.org.
 inline constexpr std::array<CxxSoversionEntry, 1> kCxxSoversionTable{{
     {"linux-x86_64-libstdc++-lp64", 0x0bba2f6c8fb3f542ull},
 }};

@@ -30,7 +30,7 @@ def make_nwchem_params(
         scf_type: HF rhf/uhf, or DFT xc (blyp, b3lyp) when theory is dft/blyp.
         charge: molecular charge.
         multiplicity: 2S+1.
-        engine_path: libnwchemc.so (default: RGPOT_NWCHEMC_ENGINE env).
+        engine_path: libnwchemc.so (default: RGPOT_NWCHEM_ENGINE env).
         nwchem_root: NWCHEM_TOP (default: NWCHEM_TOP env).
     """
     p = pot_capnp.NWChemParams.new_message()

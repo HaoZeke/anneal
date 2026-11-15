@@ -27,7 +27,9 @@
 //!
 //! `h` is the length of the displacement along the unit direction
 //! `v / |v|`, in the units of the positions. The difference is scaled back
-//! by `|v|`, so the product is linear in `v`. Neither finite difference can
+//! by `|v|`, so the product is homogeneous in `|v|`; the forward scheme
+//! is not linear in `v`, because its `O(h)` term keeps its sign when `v`
+//! does. Neither finite difference can
 //! be `O(h^2)` and cost one call per product: the forward error is
 //! `(h / 2) T(u, u) |v|`, with `T` the third derivative, and cancelling it
 //! takes the second evaluation that the central scheme makes.

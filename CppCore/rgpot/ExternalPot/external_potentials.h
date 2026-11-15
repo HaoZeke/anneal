@@ -26,8 +26,9 @@ double rgpot_md_nm_per_angstrom(void);
 
 /*
  * Shifted 12-6 Lennard-Jones. u0 is eV, cutoff and psi are Angstrom.
- * engine_path NULL or "" searches liblammps_engine.so and then
- * liblj_engine.so. The plugin stays the backend: the constructor
+ * engine_path NULL or "" searches RGPOT_LAMMPS_ENGINE, then
+ * LAMMPS_ENGINE when they are set and not empty, then
+ * liblammps_engine.so and liblj_engine.so. The plugin stays the backend: the constructor
  * dlopens it and calls rgpot_engine_force. Returns NULL and writes
  * err on failure.
  */
@@ -39,8 +40,8 @@ rgpot_external_potential *rgpot_lammps_potential(const char *engine_path,
 /*
  * The same potential. The constructor stores u0 in kJ/mol and the
  * lengths in nanometres. engine_path NULL evaluates that potential
- * in process. A path is a library that exports rgpot_md_native_force
- * in those units.
+ * in process. A path is a library that exports rgpot_engine_create,
+ * rgpot_engine_destroy and rgpot_md_native_force in those units.
  */
 rgpot_external_potential *rgpot_gromacs_potential(const char *engine_path,
                                                  double u0, double cutoff,

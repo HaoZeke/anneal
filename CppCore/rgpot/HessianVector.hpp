@@ -29,8 +29,9 @@
  * | Analytic | 0                             | the kernel's |
  *
  * @c h is the displacement along the unit direction @f$v/|v|@f$; the
- * difference is scaled back by @f$|v|@f$, so the product is linear in
- * @f$v@f$. The forward error is @f$(h/2) T(u,u) |v|@f$ with @f$T@f$ the
+ * difference is scaled back by @f$|v|@f$, so the product scales with
+ * @f$|v|@f$; the forward scheme is not linear in @f$v@f$, because its
+ * @f$O(h)@f$ term keeps its sign when @f$v@f$ does. The forward error is @f$(h/2) T(u,u) |v|@f$ with @f$T@f$ the
  * third derivative; removing it takes the second evaluation that the
  * central scheme makes.
  *

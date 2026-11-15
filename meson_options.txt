@@ -84,7 +84,7 @@ option(
     'with_highway',
     type: 'feature',
     value: 'auto',
-    description: 'Google Highway runtime ISA dispatch for LJ, Morse, the analytical EAM kernel, and the orthorhombic fold. auto uses libhwy >= 1.2 or the wrap when that tree is already present. disabled keeps the scalar kernels.',
+    description: 'Google Highway runtime ISA dispatch for the rgpot::simd LJ, Morse, EAM and orthorhombic-fold kernels. auto uses libhwy >= 1.2 or the wrap when that tree is already present. disabled keeps the scalar kernels.',
 )
 option(
     'with_ipi',

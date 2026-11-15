@@ -2,9 +2,9 @@
 // MIT License
 // Copyright 2023--present rgpot developers
 //
-// C ABI of the linkcell / minimage static library. Orthorhombic and
-// general cells both go through that library. Callers do not keep a
-// scalar scan beside these entry points.
+// C ABI of the linkcell / minimage static library. rgpot_fast_pairs and
+// rgpot_fast_wrap_axes need an orthorhombic cell; rgpot_fast_wrap takes a
+// general cell. Callers do not keep a scalar scan beside these entry points.
 
 #include <stddef.h>
 #include <stdint.h>
@@ -20,6 +20,7 @@ extern "C" {
 /// `n * (n - 1) / 2`, and the call answers a short buffer from it without
 /// building the list. Self images are never included.
 ///
+/// The cell must be orthorhombic; any other cell returns a negative code.
 /// `cell9` is nine doubles, lattice vectors a, b, c packed as
 /// ax, ay, az, bx, by, bz, cx, cy, cz. `periodic` is three ints, nonzero
 /// when that axis folds. An open axis is padded inside the call so a
@@ -35,7 +36,10 @@ int rgpot_fast_pairs(const double *xyz, size_t n, const double *cell9,
                      int32_t *out_ij, size_t cap, size_t *out_count);
 
 /// Minimum-image wrap of `n` packed difference vectors. `cell9` is the
-/// same layout as `rgpot_fast_pairs`. Every axis folds.
+/// same layout as `rgpot_fast_pairs`. Every axis folds. A singular cell
+/// returns -1. On a sheared cell this is the fractional wrap, which is the
+/// minimum image only for vectors shorter than half the smallest face
+/// width.
 int rgpot_fast_wrap(const double *cell9, const double *diffs, size_t n,
                     double *out);
 

@@ -11,8 +11,8 @@
  * Provides @c rgpot::RpcClient, a thin C++ handle that connects to a
  * remote rgpot server and proxies @c calculate() calls over Cap'n Proto
  * RPC.  The class is only available when the Rust core is compiled with
- * the @c rpc feature (the @c RGPOT_HAS_RPC preprocessor macro is defined
- * in the auto-generated @c rgpot.h header).
+ * the @c rpc feature. The build defines the @c RGPOT_HAS_RPC preprocessor
+ * macro (Meson adds it with @c with_rust_core); @c rgpot.h only tests it.
  *
  * # Example
  * @code

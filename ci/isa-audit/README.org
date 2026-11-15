@@ -198,13 +198,12 @@ The glibc-gated FMA helpers in =librgpot= (=eam_fma=, =lj_hw=,
 with =target("fma")=.
 That attribute also emits AVX encodings.
 Each helper is entered only after
-=rgpot::simd::detail::glibc_fma_active()= reports a usable FMA, which
-follows glibc's hwcaps mask.
+=rgpot::simd::detail::fma_hw_active()= reports a usable FMA, which
+also follows glibc's hwcaps mask and =RGPOT_FMA=software=.
 These helpers are exported, so the dispatch proof cannot cover them.
 =__builtin_cpu_supports= pulls in GCC's =__cpu_indicator_init=, which
 reads XCR0 with =xgetbv= and is named for =xsave=.
-The same allowlist names the minimum-image and pair-list FMA bodies
-=fold_hardware= and =accumulateHw=.
+The same allowlist names the minimum-image FMA body =fold_hardware=.
 Those bodies run only when a usable FMA is reported.
 The =target("avx2")= Lennard-Jones cluster bodies (=lj_avx2= and the
 helpers it calls), the AVX2 Cambridge Morse, cluster Lennard-Jones and

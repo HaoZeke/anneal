@@ -15,8 +15,9 @@
 namespace rgpot {
 
 /// Parameters for the Asap effective-medium potential.
-/// `rasmussen` selects EMTRasmussenParameterProvider. The default is the
-/// Asap copper parameter set, which is what `emt_rasmussen = false` means.
+/// `rasmussen` selects EMTRasmussenParameterProvider (Al, Cu, Ag, Au). The
+/// default, `emt_rasmussen = false`, is the Asap default provider (H, Mg,
+/// Al, Ni, Cu, Pd, Ag, Pt, Au).
 struct EMTConfig {
   bool rasmussen = false;
 };

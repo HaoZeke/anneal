@@ -76,8 +76,8 @@ public:
    * @param energy Receives the potential energy, eV.
    * @param gradient Receives dE/dx, length 3 * n_atoms, eV/Angstrom.
    *        The library force is the negation of this gradient.
-   * @param neighbors Optional Verlet list. Null rebuilds the pairs on
-   *        every call. A list is reused while each atom has moved by at
+   * @param neighbors Optional Verlet list. Null uses the internal list,
+   *        with a skin of one fifth of the cutoff (none in Stream mode). A list is reused while each atom has moved by at
    *        most half its skin and the cell is unchanged.
    */
   void energyAndGradient(const double *positions, const int *atomic_numbers,

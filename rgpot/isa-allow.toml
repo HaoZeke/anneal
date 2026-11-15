@@ -18,7 +18,7 @@ baseline = "x86-64"
 [[allow]]
 symbol = "^rgpot::simd::(?:accept_row_hw|eam_fma|eam_hw|exact_fma_hw|exp2_hw|exp_hw_n|lj_hw_span|lj_hw|morse8_hw|morse_hw|r2_hw_n|r2_hw)(?:\\(|$)"
 features = ["avx", "fma"]
-reason = "target(\"fma\") bodies, entered only after glibc_fma_active()"
+reason = "target(\"fma\") bodies, entered only after fma_hw_active()"
 
 [[allow]]
 symbol = "^__cpu_indicator_init(?:\\(|$)"

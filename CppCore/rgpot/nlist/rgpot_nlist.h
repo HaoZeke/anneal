@@ -145,8 +145,9 @@ int32_t rgpot_nlist_build_systems(const double *positions, const int32_t *counts
 /* A builder keeps the last list and skips the search while every atom
  * has moved by at most half the skin. Skin 0 rebuilds unless the
  * coordinates match. open returns a code and writes *builder. update
- * fills out the same way rgpot_nlist_build does. *reused is 1 when the
- * stored list was kept. close frees the builder. */
+ * fills out the same way rgpot_nlist_build does after a search. When the
+ * stored list is kept, *reused is 1 and the vector and distance columns
+ * still describe the geometry of the last search. close frees the builder. */
 typedef struct rgpot_nlist_builder rgpot_nlist_builder;
 
 int32_t rgpot_nlist_builder_open(rgpot_nlist_builder **builder);

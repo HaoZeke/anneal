@@ -4,7 +4,7 @@
 
 // Electrostatics as an additive Potential.
 //   Ewald: tinfoil (conducting) boundary, orthorhombic and triclinic.
-//   SPME:  smooth particle-mesh Ewald, same split, B-spline order >= 2.
+//   SPME:  smooth particle-mesh Ewald, same split, B-spline order 3 to 16.
 //   DSF:   Fennell-Gezelter damped shifted force, gas phase.
 // Per-atom charges come from a ChargeSource (fixed, or filled by a
 // backend each call). The net charge is a separate input and must match
