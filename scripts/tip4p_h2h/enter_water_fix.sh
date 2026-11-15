@@ -7,12 +7,13 @@
 # first twelve. Both anneal arms append to bench/water-gmin/rows.csv; GMIN
 # rows are reused wherever the start sha1 matches.
 #
-#   enter_water_fix.sh <develop revision>
+#   enter_water_fix.sh <develop revision> [panel|identity|all]
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 DEVELOP=${1:?develop revision}
+STEP=${2:-all}
 OUT=$ROOT/bench/water-fix
 WORK=/work/water-fix
 TREE=$WORK/develop-tree
@@ -25,21 +26,23 @@ if [[ ! -d $TREE ]]; then
 fi
 git -C "$TREE" checkout --quiet --detach "$develop_rev"
 
-panel() {
+arm() {
   "$@" bash "$HERE/enter_water_gmin.sh" --sizes 8 12 20
   "$@" bash "$HERE/enter_water_gmin.sh" --sizes 16 21 --seeds "$WIDE" --gmin-seeds 12
 }
-panel env ANNEAL_ROOT="$TREE" WATER_GMIN_WORK="$WORK/develop" \
-  WATER_GMIN_SUMMARY="$OUT/summary-develop.csv"
-panel env WATER_GMIN_WORK="$WORK/branch" WATER_GMIN_SUMMARY="$OUT/summary-branch.csv"
-
-python3 "$HERE/compare_water_arms.py" \
-  --rows "$ROOT/bench/water-gmin/rows.csv" \
-  --develop "$develop_rev" \
-  --branch "$(cat "$WORK/branch/anneal-head")" \
-  --gmin "gmin-$(sed -n 's/^revision=//p' /work/gmin-h2h/gmin-source.txt)" \
-  --seeds 16="$WIDE" 21="$WIDE" \
-  --output "$OUT/compare.csv"
+if [[ $STEP == panel || $STEP == all ]]; then
+  arm env ANNEAL_ROOT="$TREE" WATER_GMIN_WORK="$WORK/develop" \
+    WATER_GMIN_SUMMARY="$OUT/summary-develop.csv"
+  arm env WATER_GMIN_WORK="$WORK/branch" WATER_GMIN_SUMMARY="$OUT/summary-branch.csv"
+  python3 "$HERE/compare_water_arms.py" \
+    --rows "$ROOT/bench/water-gmin/rows.csv" \
+    --develop "$develop_rev" \
+    --branch "$(cat "$WORK/branch/anneal-head")" \
+    --gmin "gmin-$(sed -n 's/^revision=//p' /work/gmin-h2h/gmin-source.txt)" \
+    --seeds 16="$WIDE" 21="$WIDE" \
+    --output "$OUT/compare.csv"
+fi
+[[ $STEP == identity || $STEP == all ]] || exit 0
 
 for side in develop branch; do
   tree=$ROOT
