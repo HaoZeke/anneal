@@ -375,7 +375,8 @@ void PairRgpot::compute(int eflag, int vflag) {
       mine.push_back(i);
     }
   }
-  const int nmine = static_cast<int>(mine.size());
+  // Not const: the serial LAMMPS STUBS declare MPI_Gather's send buffer void *.
+  int nmine = static_cast<int>(mine.size());
 
   std::vector<tagint> my_tag(static_cast<std::size_t>(nmine));
   std::vector<int> my_z(static_cast<std::size_t>(nmine));

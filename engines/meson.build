@@ -160,6 +160,29 @@ if lammps_opt.allowed() and python3_engines.found()
             # The plugin is loaded by an lmp built from the same headers.
             # A conda liblammps is a different build and is not that loader.
             lammps_dep = cppc.find_library('lammps', required: false)
+            lammps_exe = get_option('lammps_exe')
+            lammps_inc = lammps_src.startswith(project_root + '/') ? fs.relative_to(
+                lammps_src,
+                engines_here,
+            ) : lammps_src
+            # A serial lmp is built against src/STUBS/mpi.h and its library
+            # exports those MPI functions. The plugin's gather and scatter
+            # must use the same header, or they bind to the system MPI.
+            lammps_stubs = false
+            if lammps_exe != ''
+                lammps_probe_env = environment()
+                lammps_lib = fs.parent(lammps_exe) / 'liblammps.so'
+                if fs.exists(lammps_lib)
+                    lammps_probe_env.set('LD_PRELOAD', lammps_lib)
+                endif
+                lammps_help = run_command(
+                    lammps_exe,
+                    '-h',
+                    check: false,
+                    env: lammps_probe_env,
+                )
+                lammps_stubs = lammps_help.stdout().contains('LAMMPS MPI STUBS')
+            endif
             pair_plugin = shared_library(
                 'pair_rgpot',
                 files('lammps/pair_rgpot.cpp'),
@@ -168,10 +191,7 @@ if lammps_opt.allowed() and python3_engines.found()
                 ),
                 link_with: rgpot,
                 include_directories: include_directories(
-                    lammps_src.startswith(project_root + '/') ? fs.relative_to(
-                        lammps_src,
-                        engines_here,
-                    ) : lammps_src,
+                    (lammps_stubs ? [lammps_inc / 'STUBS'] : []) + [lammps_inc],
                 ),
                 # The MPI C++ bindings of Open MPI 4 would leave
                 # MPI::Win::Free undefined; LAMMPS skips them too.
@@ -182,7 +202,6 @@ if lammps_opt.allowed() and python3_engines.found()
                 ],
                 override_options: ['b_lundef=false'],
             )
-            lammps_exe = get_option('lammps_exe')
             if lammps_exe != ''
                 lammps_args += [pair_plugin.full_path(), lammps_exe]
                 lammps_pytest = run_command(

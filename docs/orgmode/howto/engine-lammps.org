@@ -27,8 +27,10 @@ The plugin was tested against =stable_22Jul2025_update2= built with
 and Open MPI 5, and with Open MPI 4.1 and GCC 13.
 MANYBODY only provides the =eam/alloy= reference used by the tests.
 The plugin includes =mpi.h= through the LAMMPS headers, so the C++ compiler has
-to find the same MPI headers LAMMPS used; an MPI-less LAMMPS uses its own
-=STUBS= header.
+to find the same MPI headers LAMMPS used.
+An MPI-less LAMMPS uses its own =STUBS= header: when =lmp -h= at =lammps_exe=
+reports the LAMMPS MPI STUBS, the build puts =src/STUBS= ahead of any system
+=mpi.h=, and the gather and scatter bind to the stubs in that =liblammps=.
 Like LAMMPS, the plugin is compiled with =OMPI_SKIP_MPICXX= and
 =MPICH_SKIP_MPICXX=, so the MPI C++ bindings of Open MPI 4 are not
 referenced.
