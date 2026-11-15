@@ -1030,6 +1030,17 @@ pub struct Config {
     /// [`Config::homotop_descent`]. On in the paper preset.
     #[serde(skip_serializing_if = "is_true")]
     pub homotop_window: bool,
+    /// A stalled labelled incumbent is reordered from its own packing.
+    ///
+    /// The smaller label goes on the innermost sites of the incumbent, or
+    /// of a step of the walk's moves relaxed under one pair well, and the
+    /// ordering is ranked by site energy and refined by quenched
+    /// exchanges. It runs when the calls since the last lowest exceed the
+    /// calls it took to reach it, and the walk then runs at least as long
+    /// as the reorder did. Same scope as [`Config::homotop_descent`]. Off
+    /// in the paper preset.
+    #[serde(skip_serializing_if = "is_false")]
+    pub homotop_reorder: bool,
     /// Fraction of the starting radius the annealed threshold falls to.
     ///
     /// Bounded below by what basin identity needs, which is not what a
@@ -1803,6 +1814,7 @@ impl Config {
             homotop_descent: true,
             homotop_ranked: true,
             homotop_window: true,
+            homotop_reorder: false,
             diversity_floor: 0.75,
             height_revisits: 4.0,
             screen_margin: LennardJonesPreset::SCREEN_MARGIN * energy_scale,

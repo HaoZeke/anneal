@@ -4552,6 +4552,10 @@ where
     // Energy last polished by an unlike-pair quench. `NaN` until the first
     // binary incumbent, so a one-species chain never enters the sweep.
     let mut polished_best = f64::NAN;
+    // Reorders of a stalled incumbent so far, and the call before which
+    // the walk runs on its own again.
+    let mut reorder_tries: u64 = 0;
+    let mut reorder_wait = 0usize;
     let mut charged_at_best = ledger.spent();
     // Minima separated by common-neighbour fractions. A stall in the
     // icosahedral packing can return to a lower minimum of another packing
@@ -5245,6 +5249,131 @@ where
                 }
             }
             polished_best = ledger.best;
+        }
+        // A stalled incumbent is reordered from its own packing: the
+        // smaller label on the innermost sites, ranked by site energy and
+        // refined by quenched exchanges. A stall is longer since the last
+        // lowest than it took to reach it. A reorder spends at most the
+        // stalled calls and half of what is left, and is followed by at
+        // least as many calls of the walk. After the first try the
+        // packing is a step of the walk's own moves, relaxed under one
+        // well, so a try does not repeat the last one.
+        let lowest_at = improvements.last().map_or(0, |improvement| improvement.1);
+        let stalled_for = ledger.spent().saturating_sub(lowest_at);
+        if cfg.homotop_reorder
+            && polishes_unlike_pairs(cfg)
+            && !escape_refused
+            && !kernels.is_empty()
+            && ledger.remaining() > 0
+            && !ledger.target_reached()
+            && ledger.best.is_finite()
+            && ledger.spent() >= reorder_wait
+            && lowest_at > 0
+            && stalled_for > lowest_at
+            && let Some(species) = cfg.species.as_deref()
+            && let Some(best_state) = ledger.best_state.clone()
+        {
+            let start = ledger.spent();
+            let mut side_rng = StdRng::seed_from_u64(
+                reorder_tries
+                    .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    .wrapping_add(ledger.best.to_bits()),
+            );
+            let packing = if reorder_tries == 0 {
+                best_state
+            } else {
+                let arm = side_rng.random_range(0..kernels.len());
+                let mut trial = kernels[arm].propose_scaled(
+                    best_state.view(),
+                    cfg.temperature,
+                    orient_scale,
+                    &mut side_rng,
+                );
+                recentre(&mut trial, cfg.n_points);
+                contain_trial(cfg, &mut trial, cfg.n_points);
+                binary_geometry::label_blind(trial.view())
+            };
+            reorder_tries += 1;
+            let sigma = cfg.species_sigma.as_deref();
+            let placed = binary_geometry::place_smaller_inside(packing.view(), species, |label| {
+                binary_geometry::label_radius(species, sigma, label)
+            });
+            struct Walk<'a> {
+                ledger: &'a mut Ledger,
+                relax: Relax<'a>,
+                steps: usize,
+                low: f64,
+                low_at: usize,
+            }
+            impl binary_geometry::QuenchProbe for Walk<'_> {
+                fn energy(&mut self, point: ArrayView1<f64>) -> Option<f64> {
+                    if self.ledger.remaining() == 0 || self.ledger.stopped() {
+                        return None;
+                    }
+                    let (value, _) = (self.relax)(self.ledger, point, 0);
+                    value.is_finite().then_some(value)
+                }
+
+                fn quench(&mut self, point: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+                    if self.ledger.remaining() == 0 || self.ledger.stopped() {
+                        return None;
+                    }
+                    let (value, relaxed) = (self.relax)(self.ledger, point, self.steps);
+                    if !value.is_finite() {
+                        return None;
+                    }
+                    if value < self.low - 1e-9 {
+                        self.low = value;
+                        self.low_at = self.ledger.spent();
+                    }
+                    Some((value, relaxed))
+                }
+            }
+            let mut side_ledger =
+                Ledger::new(stalled_for.min(ledger.remaining().div_ceil(2)).max(1));
+            let mut walk = Walk {
+                ledger: &mut side_ledger,
+                relax: &mut *relax,
+                steps: cfg.relax_steps,
+                low: f64::INFINITY,
+                low_at: 0,
+            };
+            let found = binary_geometry::polish(placed, species, &mut walk);
+            let found_at = start + walk.low_at;
+            ledger.charge_many(side_ledger.spent());
+            reorder_wait = ledger.spent().saturating_add(side_ledger.spent());
+            if let Some((found_energy, found_state)) = found
+                && found_energy < e - 1e-10
+                && quench_is_sane(cfg, found_energy, found_state.view())
+            {
+                let found_gradient = grad.as_deref_mut().and_then(|gradient| {
+                    gradient(ledger, found_state.view())
+                        .filter(|values| answer_gradient_ok(cfg, values.view(), found_state.len()))
+                });
+                if !gradient_required || found_gradient.is_some() {
+                    let improved = found_energy < ledger.best - 1e-10;
+                    ledger.record(found_energy, found_state.view());
+                    let reached = identity.basin_of(found_state.view());
+                    adopt_minimum!(
+                        found_energy,
+                        found_state,
+                        found_gradient,
+                        Some(reached),
+                        AdoptionHistory::Fresh,
+                        None,
+                        Some("reorder"),
+                        hops
+                    );
+                    soft_cache = None;
+                    basin_entry = None;
+                    quiet = 0;
+                    if improved && improvements.len() < 512 {
+                        improvements.push((hops, found_at, bias.n_basins(), found_energy));
+                    }
+                } else {
+                    unconverged_records += 1;
+                }
+            }
         }
         // The main walker stays put and its generator is not advanced.
         // After many patience windows with no new lowest minimum, the calls
