@@ -167,9 +167,10 @@ if _rpc_stack
     subdir('rgpot/rpc')
     # Pure dlopen consumers of split nwchemc / cpmdc; need generated schema only.
     subdir('rgpot/NWChemPot')  # 'nwchempot' frontend + no-op ABI stub
-    subdir('rgpot/CPMDPot')    # 'cpmdpot' frontend + no-op ABI stub
+    subdir('rgpot/CPMDPot')  # 'cpmdpot' frontend + no-op ABI stub
     if has_cp2k
-        subdir('rgpot/CP2KPot')  # 'cp2kpot' frontend + libcp2k shim
+        # 'cp2kpot' frontend + libcp2k shim
+        subdir('rgpot/CP2KPot')
     endif
 endif
 
@@ -1494,7 +1495,10 @@ if get_option('with_tests')
                 install: false,
             )
             cp2kc_fake_env = environment()
-            cp2kc_fake_env.set('RGPOT_CP2K_ENGINE', cp2kc_fake_engine.full_path())
+            cp2kc_fake_env.set(
+                'RGPOT_CP2K_ENGINE',
+                cp2kc_fake_engine.full_path(),
+            )
             cp2kc_fake_env.set('CP2KC_LIBRARY', cp2kc_fake_engine.full_path())
             test(
                 'CP2KPotFakeEngineTest',
@@ -1645,7 +1649,7 @@ if get_option('with_tests')
                 timeout: 60,
                 suite: 'mpi-host',
             )
-            foreach backend : has_cp2k ? ['NWChem', 'CPMD', 'CP2K'] : ['NWChem', 'CPMD']
+            foreach backend : ['NWChem', 'CPMD'] + (has_cp2k ? ['CP2K'] : [])
                 foreach layout : ['serial', 'mpi']
                     rpc_server = layout == 'mpi' ? mpi_server : server
                     test(
@@ -1808,7 +1812,9 @@ if get_option('with_tests')
                     include_directories: _incdirs + ['.'],
                     install: false,
                 )
-                adopt_cases += [['AdoptCommCP2K', 'cp2k-split', cp2kc_adopt_engine]]
+                adopt_cases += [
+                    ['AdoptCommCP2K', 'cp2k-split', cp2kc_adopt_engine],
+                ]
             endif
             foreach entry : adopt_cases
                 test(
