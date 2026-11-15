@@ -10,3 +10,7 @@
 # NeighborRequest, NeighborSystem and NeighborList structs. Upstream has
 # none of these yet.
 neighbour-chunk.diff
+#
+# uma-cache-dir.diff: UmaParams.cacheDir @10, the root of the persistent
+# cache a UMA .pt2 is unpacked into.
+uma-cache-dir.diff

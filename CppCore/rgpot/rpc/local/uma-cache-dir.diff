@@ -1,0 +1,16 @@
+diff --git a/Potentials.capnp b/Potentials.capnp
+index aa4a3a6..c8f1be3 100644
+--- a/Potentials.capnp
++++ b/Potentials.capnp
+@@ -2043,6 +2043,11 @@ struct UmaParams {
+   intraopThreads          @7 :Int32 = 1; # torch intra-op worker threads.
+   interopThreads          @8 :Int32 = 1; # torch inter-op worker threads (settable once per process).
+   deterministicAlgorithms @9 :Bool = false; # Request deterministic torch algorithms.
++
++  # Root of the persistent cache the .pt2 is unpacked into. Unset uses
++  # RGPOT_CACHE_DIR, then XDG_CACHE_HOME/rgpot, then .rgpot-cache in the
++  # working directory.
++  cacheDir @10 :Text;
+ }
+ 
+ # @struct PotentialSpec
