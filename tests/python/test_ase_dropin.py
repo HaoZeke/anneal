@@ -531,6 +531,10 @@ def test_lj_cluster_and_slab_match_ase_lennard_jones() -> None:
     _agree(slab, rgpot_lj(), ase_lj(), per_atom=True)
 
 
+# On free-threaded 3.13 a pass of ASE's MorsePotential slows down with every
+# thread that runs it. Twenty passes of the 256-atom cell on eight threads
+# exceed the 180s pytest timeout.
+@pytest.mark.iterations(1)
 @pytest.mark.parametrize("repeat", [1, 2, 4])
 def test_morse_matches_ase_morse_potential(repeat: int) -> None:
     atoms = sheared(bulk("Cu", "fcc", a=3.6, cubic=True).repeat(repeat))
