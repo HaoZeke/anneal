@@ -242,16 +242,32 @@ fn reference_of(spec: &Spec) -> f64 {
         .unwrap_or(spec.reference)
 }
 
+fn mean_r0(species: &[u32]) -> f64 {
+    let total: f64 = species
+        .iter()
+        .map(|&label| Gupta::homonuclear_r0(label).expect("tabulated element"))
+        .sum();
+    total / species.len() as f64
+}
+
 fn config(spec: &Spec) -> Config {
+    // Zinc is written in units of its r0. The alloys are in ångström, and
+    // their pair minimum is the composition mean of the like-pair r0.
     let mut cfg = match spec.kind {
-        Kind::Zinc => Config::recommended(spec.n),
+        Kind::Zinc => Config::recommended(spec.n).with_pair_minimum(1.0),
         Kind::CopperGold { n_copper } => {
             let species = Gupta::copper_gold_species(n_copper, spec.n - n_copper);
-            Config::recommended(spec.n).with_species(species, None)
+            let r0 = mean_r0(&species);
+            Config::recommended(spec.n)
+                .with_species(species, None)
+                .with_pair_minimum(r0)
         }
         Kind::PlatinumCopper { n_platinum } => {
             let species = Gupta::platinum_copper_species(n_platinum, spec.n - n_platinum);
-            Config::recommended(spec.n).with_species(species, None)
+            let r0 = mean_r0(&species);
+            Config::recommended(spec.n)
+                .with_species(species, None)
+                .with_pair_minimum(r0)
         }
     };
     // The Gupta surface does not read the basin index. One exact step in

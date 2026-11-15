@@ -320,6 +320,15 @@ pub struct Config {
     /// Lennard-Jones. Only the morphology keyings read it, since their
     /// cutoffs sit between the first and second neighbour shells.
     pub morphology_scale: f64,
+    /// Separation at the potential's pair minimum, when the caller declares
+    /// it.
+    ///
+    /// The common-neighbour contact test bonds pairs at a fixed multiple of
+    /// it, through [`Config::contact_length`]. Unset, the test is written at
+    /// `length_scale`, which is the Lennard-Jones minimum `2^(1/6)` times
+    /// that scale.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pair_minimum: Option<f64>,
     /// Design point for the budget-window temperature, as a fraction of the
     /// sphere-model descent boundary. Must lie strictly below two.
     pub theta: f64,
@@ -1735,6 +1744,28 @@ impl Config {
         self
     }
 
+    /// Declare the potential's pair-minimum separation.
+    pub fn with_pair_minimum(mut self, pair_minimum: f64) -> Self {
+        assert!(
+            pair_minimum.is_finite() && pair_minimum > 0.0,
+            "pair_minimum must be finite and positive"
+        );
+        self.pair_minimum = Some(pair_minimum);
+        self
+    }
+
+    /// Length the common-neighbour contact test is written at.
+    ///
+    /// The declared pair minimum in units of the Lennard-Jones `2^(1/6)`, so
+    /// a Morse cluster with its minimum at 1 bonds at about 1.2 and a gold
+    /// one at 2.884 Å at about 3.47 Å. Without a declaration it is
+    /// `length_scale`, and the contact cutoff stays 1.35 times that scale.
+    pub fn contact_length(&self) -> f64 {
+        self.pair_minimum.map_or(self.length_scale, |pair_minimum| {
+            pair_minimum / libm::pow(2.0, 1.0 / 6.0)
+        })
+    }
+
     /// Lennard-Jones preset expressed against declared physical scales.
     pub fn with_scales(n_points: usize, length_scale: f64, energy_scale: f64) -> Self {
         assert!(
@@ -1767,6 +1798,7 @@ impl Config {
             merge_radius: LennardJonesPreset::MERGE_RADIUS * length_scale,
             keying_sigma: 2.5 * length_scale,
             morphology_scale: length_scale,
+            pair_minimum: None,
             shape_keyed: false,
             theta: 0.5,
             budget_window: false,
