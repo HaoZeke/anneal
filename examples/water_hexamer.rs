@@ -1056,7 +1056,7 @@ fn run_arm(engine: &str, arm_name: &str, smoke: bool) -> String {
         // evaluations are deposited-isomer scoring and are not in this wall.
         // The final IRA assignment is phase_after_wall and is not in it.
         // CREST's matched wall is its process wall minus the post-cap
-        // ensemble optimisation, which this arm does not run.
+        // ensemble optimization, which this arm does not run.
         let matched_wall_s = before_wall_s - reference_eval_s + wall_s;
         text.push_str(&format!(
             "prism_rmsd_A: {prism_rmsd_text}\nprism_delta_eV: {prism_delta_text}\nanswer_gradient: {}\nexternal_polish: {external_status}\nexternal_polish_calls: {external_calls}\nexternal_polish_wall_seconds: {external_wall:.6}\nphase_before_wall_seconds: {before_wall_s:.6}\nphase_search_seconds: {search_s:.6}\nphase_lbfgs_seconds: {lbfgs_s:.6}\nphase_lbfgs_calls: {lbfgs_calls}\nphase_answer_polish: {answer_polish}\nphase_external_setup_seconds: {setup_s:.6}\nphase_crest_check_seconds: {check_s:.6}\nphase_crest_check_calls: {check_calls}\nphase_lbfgs2_seconds: {lbfgs2_s:.6}\nphase_lbfgs2_calls: {lbfgs2_calls}\nphase_after_wall_seconds: {after_wall_s:.6}\nphase_matched_wall_seconds: {matched_wall_s:.6}\n",

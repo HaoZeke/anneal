@@ -991,7 +991,7 @@ impl Ledger {
         &self.encounters
     }
 
-    /// Replace the incumbent with a reoptimised geometry and its energy.
+    /// Replace the incumbent with a reoptimized geometry and its energy.
     ///
     /// [`Ledger::record`] keeps a looser value when the tightened geometry
     /// comes back slightly higher. The reported answer is this pair, so
@@ -1005,7 +1005,7 @@ impl Ledger {
 
     /// Add `extra` charged evaluations after the search ceiling is spent.
     ///
-    /// The reported-minimum reoptimisation runs after the campaign budget.
+    /// The reported-minimum reoptimization runs after the campaign budget.
     /// Those calls are still counted in [`Ledger::spent`]. A default search
     /// does not grant anything.
     pub fn grant(&mut self, extra: usize) {
@@ -10818,10 +10818,10 @@ mod tests {
         let start = random_cluster_in_radius(38, cfg.start_radius(), cfg.min_separation, &mut rng);
         let mut ledger = Ledger::new(budget);
         ledger.stop_below(reference + 1e-3);
-        let mut optimiser = WarmLbfgs::default();
+        let mut optimizer = WarmLbfgs::default();
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
-            optimiser.forget();
-            let (value, relaxed, _) = optimiser.minimize(x, iterations, |v| {
+            optimizer.forget();
+            let (value, relaxed, _) = optimizer.minimize(x, iterations, |v| {
                 led.charge().then(|| pot.value_and_gradient(v))
             });
             (value, relaxed)

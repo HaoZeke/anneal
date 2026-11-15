@@ -97,10 +97,10 @@ pub const HARTREE_EV: f64 = 27.211386245988;
 /// Bohr in angstroms.
 pub const BOHR_ANGSTROM: f64 = 0.529177210903;
 
-/// Gradient convergence of the CREST `--opt extreme` reoptimisation, Eh/Bohr.
+/// Gradient convergence of the CREST `--opt extreme` reoptimization, Eh/Bohr.
 pub const PRISM_REOPT_GRADIENT_EH_PER_BOHR: f64 = 5.0e-5;
 
-/// Euclidean force tolerance used to reoptimise the reference prism, eV/Å.
+/// Euclidean force tolerance used to reoptimize the reference prism, eV/Å.
 ///
 /// CREST `--opt extreme` compares `norm2` of the gradient with
 /// 5e-5 Eh/Bohr. The same number as an infinity norm stops short of that

@@ -3,7 +3,7 @@
 
 The script writes the LJ38 book with the ``landfold_lj_book`` example,
 folds it with ``anneal landfold --seed 0`` and plots ``x`` against ``y``,
-coloured by energy. The PNG goes next to this script.
+colored by energy. The PNG goes next to this script.
 
 Usage, from the repository root:
 

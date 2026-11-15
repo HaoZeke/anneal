@@ -274,7 +274,7 @@ pub mod shape;
 pub mod shared_bias;
 
 // eindir-core builds pyo3 with `extension-module`, so no test executable
-// links libpython. The optimiser can inline a Python callback into a native
+// links libpython. The optimizer can inline a Python callback into a native
 // driver that a unit test calls, which then fails to link.
 #[cfg(all(feature = "python", not(test)))]
 pub mod python;

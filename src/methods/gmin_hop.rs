@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! Basin hopping with structural moves for short-range atomic clusters and
 //! rigid water.
 //!
@@ -18,7 +20,7 @@
 //! live structure and a member of a small pool of low distinct minima, which
 //! recombines well-formed halves the chain found at different times.
 //!
-//! Rigid TIP4P has a landscape organised by the hydrogen-bond network, and
+//! Rigid TIP4P has a landscape organized by the hydrogen-bond network, and
 //! the moves that matter turn molecules rather than shift them. Wales and
 //! Hodges (1998) located the TIP4P minima up to N = 21 with GMIN's rigid-body
 //! steps, rotating every molecule by up to 1.4 rad and letting the quench

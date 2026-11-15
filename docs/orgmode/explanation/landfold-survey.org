@@ -2,7 +2,7 @@
 #+OPTIONS: toc:nil todo:nil num:nil author:nil ^:nil
 #+STARTUP: content
 
-This note surveys methods that place the minima of a global-optimisation run on a plane.
+This note surveys methods that place the minima of a global-optimization run on a plane.
 It picks one for =anneal landfold= and records why.
 The benchmark numbers at the end come from the airspeed velocity (asv) suite of the anneal_repro workflow.
 
@@ -25,7 +25,7 @@ The map has to do three things for a figure of an energy landscape.
 1. Keep funnels and structural families apart.
    The 38-atom Lennard-Jones (LJ38) cluster has a face-centred cubic (fcc) funnel and an icosahedral funnel [[doye1999b]].
    LJ75 and LJ98 have decahedral and tetrahedral global minima far from the icosahedral bulk [[doye1999a]] [[leary1999]].
-2. Keep near neighbours together inside a funnel, so that colour by energy shows a gradient and not noise.
+2. Keep near neighbours together inside a funnel, so that color by energy shows a gradient and not noise.
 3. Accept minima found later without moving the old ones.
    A book grows as the search runs, and a figure series should not reshuffle.
 
@@ -53,7 +53,7 @@ The usual solver for that stress is scaling by majorizing a complicated function
 All three weight every pair alike.
 Distances between funnels are large and uninformative beyond "far", yet they dominate the stress.
 The map then spends its area on the gaps and crushes each funnel.
-Classical MDS is still the best start for any later optimisation, as it is unique and cheap on a few hundred landmarks.
+Classical MDS is still the best start for any later optimization, as it is unique and cheap on a few hundred landmarks.
 
 ** Landmark MDS and Nystrom extensions
 
@@ -169,7 +169,7 @@ Every step can run deterministically in parallel.
    It starts from the best of its nearest landmarks and their weighted centroid.
 
 Defaults are 400 landmarks, sigma half the median landmark distance, and switch exponents (2, 4) on both sides.
-These defaults were chosen on the LJ books below, so they may favour those books.
+These defaults were chosen on the LJ books below, so they may favor those books.
 Parallel loops write disjoint slots and reduce in index order.
 A seed therefore fixes the map at any thread count.
 

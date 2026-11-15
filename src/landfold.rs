@@ -1,3 +1,5 @@
+// Copyright (c) anneal developers
+
 //! Landfold: a sketch-map embedding of a minima book.
 //!
 //! A minima book is a set of quenched structures. [`book_descriptors`]
@@ -52,9 +54,9 @@ pub const DEFAULT_LOW: [f64; 2] = [2.0, 4.0];
 pub const DEFAULT_SIGMA_SCALE: f64 = 0.5;
 /// Default grid points per axis of the pointwise global search.
 pub const DEFAULT_GRID: usize = 21;
-/// Default L-BFGS iterations per optimisation stage.
+/// Default L-BFGS iterations per optimization stage.
 pub const DEFAULT_ITERATIONS: usize = 200;
-/// Default weights of the metric stress, one optimisation stage each.
+/// Default weights of the metric stress, one optimization stage each.
 pub const DEFAULT_MIX: [f64; 5] = [1.0, 0.5, 0.25, 0.1, 0.0];
 /// Default exponent on the Voronoi population of a landmark.
 pub const DEFAULT_WEIGHT_POWER: f64 = 0.5;
@@ -227,7 +229,7 @@ pub struct LandfoldConfig {
     pub low: [f64; 2],
     /// Grid points per axis of the pointwise global search. Zero skips it.
     pub grid: usize,
-    /// L-BFGS iterations per optimisation stage.
+    /// L-BFGS iterations per optimization stage.
     pub iterations: usize,
     /// Weight of the metric stress in each stage. The last stage should be
     /// zero so the map minimises the sketch-map stress alone.

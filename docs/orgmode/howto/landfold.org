@@ -73,7 +73,7 @@ It also gives lambda1 and lambda2 of the landmark multidimensional scaling (MDS)
 * Plot the map
 
 Any plotting tool can read the =x=, =y= and =energy= columns of the CSV.
-The figure below comes from =docs/figures/landfold/plot_map.py=, which writes the LJ38 book above, folds it with =anneal landfold --seed 0= and plots =x= against =y= coloured by =energy=.
+The figure below comes from =docs/figures/landfold/plot_map.py=, which writes the LJ38 book above, folds it with =anneal landfold --seed 0= and plots =x= against =y= colored by =energy=.
 Run it from the repository root, with matplotlib installed:
 
 #+begin_src sh
@@ -81,7 +81,7 @@ cargo build --release --bin anneal --example landfold_lj_book
 python docs/figures/landfold/plot_map.py
 #+end_src
 
-#+CAPTION: The LJ38 book folded by =anneal landfold --seed 0= and coloured by energy, with a star on the lowest minimum.
+#+CAPTION: The LJ38 book folded by =anneal landfold --seed 0= and colored by energy, with a star on the lowest minimum.
 [[file:../../figures/landfold/lj38-map.png]]
 
 * Python

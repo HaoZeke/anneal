@@ -1144,7 +1144,7 @@ pub struct Config {
     /// Euclidean-norm tolerance of the geometry the hop reports.
     ///
     /// Zero leaves that geometry at [`Config::record_gradient`]. A positive
-    /// value tighter than the record gate reoptimises the best geometry
+    /// value tighter than the record gate reoptimizes the best geometry
     /// once, after the search. Relaxations during the search still stop
     /// at [`Config::record_gradient`]. `WATER_POLISH_EXTERNAL=1` leaves
     /// the pass to the caller, so the default search does not tighten.

@@ -1233,7 +1233,7 @@ where
     }
 }
 
-/// Iterations available to the reported-minimum reoptimisation.
+/// Iterations available to the reported-minimum reoptimization.
 ///
 /// The search quench stops at [`Config::record_gradient`] and may also
 /// hit its iteration cap. This pass is the one that has to reach
@@ -1251,14 +1251,14 @@ fn gradient_euclidean_norm(gradient: ArrayView1<f64>) -> f64 {
     gradient.dot(&gradient).sqrt()
 }
 
-/// Reoptimise the geometry the hop reports, when a tighter tolerance is set.
+/// Reoptimize the geometry the hop reports, when a tighter tolerance is set.
 ///
 /// `WATER_POLISH_EXTERNAL=1` leaves this pass to the water driver. That
 /// driver runs it only when the recorded geometry is outside the IRA gate.
 /// Unset, the pass runs only when [`Config::answer_gradient`] is positive
 /// and tighter than the record gate. The default value is zero, so a
 /// default search does not tighten and does not spend extra calls.
-fn reoptimise_reported_minimum<O>(
+fn reoptimize_reported_minimum<O>(
     objective: &O,
     cfg: &Config,
     ledger: &mut Ledger,
@@ -1392,7 +1392,7 @@ where
     let search_seconds = search_started.elapsed().as_secs_f64();
     let spent = ledger.spent();
     let polish_started = Instant::now();
-    reoptimise_reported_minimum(objective, cfg, ledger, &mut outcome, &mut stats);
+    reoptimize_reported_minimum(objective, cfg, ledger, &mut outcome, &mut stats);
     remember_search_phase(SearchPhase {
         search_seconds,
         polish_seconds: polish_started.elapsed().as_secs_f64(),
