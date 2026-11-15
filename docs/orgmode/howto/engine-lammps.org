@@ -5,10 +5,10 @@
 * LAMMPS
 
 =pair_style rgpot= is a LAMMPS plugin that hands the whole periodic box to an
-rgpot potential and returns the energy, the forces and the global virial,
-and for the pair and EAM potentials the per-atom energy and virial.
-It runs under =fix nve=, =fix npt= and =fix box/relax= like a native pair
-style, and =compute pe/atom= and =compute stress/atom= work with those
+rgpot potential and returns the energy, the forces and the global virial, and
+for the pair and EAM potentials the per-atom energy and virial.
+It works under =fix nve=, =fix npt= and =fix box/relax= like a native style.
+=compute pe/atom= and =compute stress/atom= work with the pair and EAM
 potentials.
 It can use any of the potentials listed below, Lennard-Jones through its own
 coefficients, or a library that exports =rgpot_engine_force=.
@@ -20,8 +20,7 @@ loads it.
 A conda-forge =liblammps= does not ship =pair.h=, and a plugin built from a
 different tree will not see the coefficient arrays the library checks.
 
-Build LAMMPS with the PLUGIN package and shared libraries, with or without
-MPI.
+Build LAMMPS with the PLUGIN package and shared libraries, with or without MPI.
 The plugin was tested against =stable_22Jul2025_update2= built with
 =-D PKG_PLUGIN=on -D PKG_MANYBODY=on -D BUILD_MPI=on -D BUILD_SHARED_LIBS=on=
 and Open MPI 5, and with Open MPI 4.1 and GCC 13.
@@ -32,8 +31,7 @@ An MPI-less LAMMPS uses its own =STUBS= header: when =lmp -h= at =lammps_exe=
 reports the LAMMPS MPI STUBS, the build puts =src/STUBS= ahead of any system
 =mpi.h=, and the gather and scatter bind to the stubs in that =liblammps=.
 Like LAMMPS, the plugin is compiled with =OMPI_SKIP_MPICXX= and
-=MPICH_SKIP_MPICXX=, so the MPI C++ bindings of Open MPI 4 are not
-referenced.
+=MPICH_SKIP_MPICXX=, so the MPI C++ bindings of Open MPI 4 are not referenced.
 
 Then configure rgpot with the LAMMPS source tree and binary:
 
@@ -45,8 +43,7 @@ meson compile -C bld
 #+end_src
 
 This builds =bld/engines/libpair_rgpot.so= and the helper =rgpot-eval=.
-The integer layout is =LAMMPS_SMALLBIG=, which the plugin compile flag
-repeats.
+The integer layout is =LAMMPS_SMALLBIG=, which the plugin compile flag repeats.
 =with_eam_table= is only needed for the =EAMTable= potential.
 
 ** Load it
@@ -69,16 +66,16 @@ communication; the style does not request a neighbour list.
 
 All forms use =* *=; the style is set once for every type.
 
-- =pair_coeff * * u0 psi= is the shifted Lennard-Jones potential =LJ= with
-  well depth =u0= in eV and zero crossing =psi= in Angstrom, truncated at the
-  =pair_style= cutoff.
+- =pair_coeff * * u0 psi= is the shifted Lennard-Jones potential =LJ=.
+  =u0= is the well depth in eV and =psi= the zero crossing in Angstrom.
+  It is truncated at the =pair_style= cutoff.
   It matches =pair_style lj/cut= with =pair_modify shift yes=.
-- =pair_coeff * * engine /path/to/libengine.so [El ...]= dlopens an engine
-  plugin, for example Metatomic or the in-tree =liblj_engine.so=.
-  The element words are optional; without them the engine sees the LAMMPS
-  type numbers as atomic numbers.
-- =pair_coeff * * Name [key value ...] El ...= builds an rgpot potential by
-  name and maps each LAMMPS type to an element.
+- =pair_coeff * * engine /path/to/libengine.so [El ...]= dlopens an engine.
+  The engine is a plugin such as Metatomic or the in-tree =liblj_engine.so=.
+  The element words are optional; without them the engine sees the LAMMPS type
+  numbers as atomic numbers.
+- =pair_coeff * * Name [key value ...] El ...= builds an rgpot potential by name
+  and maps each LAMMPS type to an element.
 
 The names are matched without case:
 
@@ -93,19 +90,19 @@ The names are matched without case:
 | =EMT=        | =parameters= (=asap= or =rasmussen=)                       |
 | =EAMCell=    | none                                                       |
 
-A build with the Fortran potentials also accepts =SWSi=, =EDIP=,
-=LenoskySi=, =EAMAl=, =FeHe= and =CuH2=.
-=EAMTable= needs =-Dwith_eam_table=true=; its format follows the file
-extension unless =format= is given.
+A build with the Fortran potentials also accepts =SWSi=, =EDIP=, =LenoskySi=,
+=EAMAl=, =FeHe= and =CuH2=.
+=EAMTable= needs =-Dwith_eam_table=true=; its format follows the file extension
+unless =format= is given.
 =cutoff= defaults to the =pair_style= cutoff.
 An unknown name, option or element symbol stops the run with a message that
 lists what is accepted.
 
-After the options comes one word per LAMMPS type: an element symbol, or
-=NULL= for a type the style should not see.
+After the options comes one word per LAMMPS type: an element symbol, or =NULL=
+for a type the style should not see.
 The symbol sets the atomic number passed to the potential.
-=NULL= types are left out of the box the potential sees, so they are only
-useful under =pair_style hybrid/overlay=, where another style handles them.
+=NULL= types are left out of the box the potential sees, so they are only useful
+under =pair_style hybrid/overlay=, where another style handles them.
 
 #+begin_src lammps
 pair_style rgpot 6.0
@@ -129,37 +126,35 @@ The potential sees the true cell: rows =(xprd,0,0)=, =(xy,yprd,0)= and
 ** MPI
 
 Every rank sends its own atoms (tag, atomic number, position) to rank 0.
-Rank 0 sorts them by tag, evaluates the whole box once, and sends each rank
-the forces on its atoms.
+Rank 0 sorts them by tag, evaluates the whole box once, and sends each rank the
+forces on its atoms.
 The energy and the virial are tallied once, on rank 0.
-The result does not depend on the number of ranks or the domain
-decomposition.
+The result does not depend on the number of ranks or the domain decomposition.
 
-The cost is that of a serial evaluation plus a gather and a scatter of all
-atoms every step.
-More ranks do not make the potential faster; they only spread the rest of
-the LAMMPS work.
+The cost is that of a serial evaluation plus a gather and a scatter of all atoms
+every step.
+More ranks do not make the potential faster; they only spread the rest of the
+LAMMPS work.
 The atom count must fit in a 32-bit int.
 
 ** Pressure, NPT and box relaxation
 
-The style fills the global virial in the LAMMPS order =xx yy zz xy xz yz=,
-in eV, as \(W = -V\sigma\).
+The style fills the global virial in the LAMMPS order =xx yy zz xy xz yz=, in
+eV, as \(W = -V\sigma\).
 When the potential returns a stress, that stress is used.
-Otherwise, and always with =pair_style rgpot cutoff virial fd=, each
-component is a central difference of the energy under a strain of \(10^{-5}\)
-applied to the cell and the positions.
+Otherwise, and always with =pair_style rgpot cutoff virial fd=, each component
+is a central difference of the energy under a strain of \(10^{-5}\) applied to
+the cell and the positions.
 That costs twelve extra evaluations of the box on every step that needs the
 virial, which under NPT or =box/relax= is every step.
-The engine form, EMT and the other potentials without a stress take this
-path.
+The engine form, EMT and the other potentials without a stress take this path.
 =compute pressure=, =thermo_style= pressure columns, =fix npt= and
 =fix box/relax= then work unchanged.
 
 ** Per-atom energy and virial
 
-=compute pe/atom=, =compute stress/atom= and =compute centroid/stress/atom=
-work with the potentials that split their energy and virial over the atoms:
+=compute pe/atom=, =compute stress/atom= and =compute centroid/stress/atom= work
+with the potentials that split their energy and virial over the atoms:
 
 | Name                    | Per-atom energy                                           |
 |-------------------------+-----------------------------------------------------------|
@@ -172,15 +167,13 @@ The per-atom virial of every pair, with the force on atom \(i\) equal to
 \(f\,\mathbf{d}\otimes\mathbf{d}/2\) on each atom.
 For EAM \(f\) includes the embedding derivatives, so the split is that of
 =pair_style eam=, =eam/alloy= and =eam/fs=.
-Every force is a central pair force, so the centroid stress is the same
-tensor.
+Every force is a central pair force, so the centroid stress is the same tensor.
 
-Rank 0 fills the per-atom arrays on the gathered box and they are scattered
-by tag like the forces, so they do not depend on the number of ranks.
+Rank 0 fills the per-atom arrays on the gathered box and they are scattered by
+tag like the forces, so they do not depend on the number of ranks.
 They sum to the energy and to the global virial.
-With =virial fd= the global virial is the strain difference while the
-per-atom virial stays analytic, so the two agree only to the accuracy of the
-difference.
+With =virial fd= the global virial is the strain difference while the per-atom
+virial stays analytic, so the two agree only to the accuracy of the difference.
 
 The engine form and the other potentials (=SWSi1985=, =TersoffSi=, =EMT=,
 =EAMCell= and the Fortran potentials) have no per-atom split.
@@ -189,58 +182,59 @@ potential, for example
 =pair_style rgpot: the rgpot potential EMT has no per-atom energy or virial=.
 
 In C++ the split is the non-virtual member
-=forcePerAtom(const ForceInput &, ForceOut *, const PerAtomOut &)= of
-=LJPot=, =LJClusterPot=, =MorsePot=, =ZBLPot=, =SuttonChenPot= and
-=EAMTablePot=.
-It fills the =ForceOut= as =forceImpl= does and writes =PerAtomOut::energy=
-(one per atom) and =PerAtomOut::virial= (six per atom, =xx yy zz yz xz xy=,
-summing to \(-V\sigma\)); either pointer may be null.
+=forcePerAtom(const ForceInput &, ForceOut *, const PerAtomOut &)= of =LJPot=,
+=LJClusterPot=, =MorsePot=, =ZBLPot=, =SuttonChenPot= and =EAMTablePot=.
+It fills the =ForceOut= as =forceImpl= does and writes =PerAtomOut::energy= (one
+per atom) and =PerAtomOut::virial= (six per atom, =xx yy zz yz xz xy=, summing
+to \(-V\sigma\)); either pointer may be null.
 The concept =rgpot::PerAtomPotential= in =rgpot/PerAtom.hpp= tells whether a
 potential type has it.
 
 ** Tests
 
 The meson test =lammps_lj= runs LAMMPS =pair_style lj/cut= with
-=pair_modify shift yes= on a dimer and compares the energy and the forces
-with =rgpot-lj=.
+=pair_modify shift yes= on a dimer and compares the energy and the forces with
+=rgpot-lj=.
 
-When =lammps_exe= is set and pytest is installed, =lammps_pair_rgpot= runs
-=engines/lammps/test_pair_rgpot.py= against that binary.
+With =lammps_exe= set and pytest installed, the test =lammps_pair_rgpot= runs.
+It drives =engines/lammps/test_pair_rgpot.py= against that binary.
 The numbers below are from one run; the tests assert looser bounds.
 
-- Jiggled fcc Lennard-Jones (\(u_0 = 0.0104\) eV, \(\psi = 3.40\) Å, cutoff
-  8.5 Å) against =lj/cut= with shifted energy, orthogonal and triclinic:
-  energies within 5e-14 eV, forces within 3e-15 eV/Å, all six pressure
-  components within 7e-12 bar.
+- Jiggled fcc Lennard-Jones against =lj/cut= with shifted energy.
+  The parameters are \(u_0 = 0.0104\) eV, \(\psi = 3.40\) Å and an 8.5 Å cutoff.
+  In orthogonal and triclinic cells the energies agree within 5e-14 eV.
+  The forces agree within 3e-15 eV/Å.
+  All six pressure components agree within 7e-12 bar.
   With =virial fd= the pressure is within 8e-6 bar.
-- The same pressure against a finite-difference strain derivative of the
-  LAMMPS energy: within 2e-5 bar.
-- CuNi through =EAMTable= with the Cu and Ni mapping against native
-  =eam/alloy=: energy within 7e-12 eV, forces within 3e-14 eV/Å, pressure
-  within 3e-10 bar; against =rgpot-eval= on the same box, within 7e-13 eV.
-- Pt with =SuttonChen= and =Morse= against =rgpot-eval=: pressure within
-  2e-10 bar.
-- =mpirun -np 1, 2, 4= after 20 NVE steps, Lennard-Jones and CuNi: energies
-  within 3e-13 eV, forces by tag within 4e-14 eV/Å, pressure within 5e-11 bar.
+- A finite-difference strain derivative of the LAMMPS energy gives the same
+  pressure within 2e-5 bar.
+- CuNi through =EAMTable=, mapping Cu and Ni, against native =eam/alloy=.
+  The energy agrees within 7e-12 eV and the forces within 3e-14 eV/Å.
+  The pressure agrees within 3e-10 bar.
+  Against =rgpot-eval= on the same box the energy agrees within 7e-13 eV.
+- Pt with =SuttonChen= and =Morse=: pressure within 2e-10 bar of =rgpot-eval=.
+- Lennard-Jones and CuNi after 20 NVE steps under =mpirun -np 1, 2, 4=.
+  Energies agree within 3e-13 eV and forces by tag within 4e-14 eV/Å.
+  The pressure agrees within 5e-11 bar.
   These cases need an MPI =lmp= and skip against a serial one.
-- =fix box/relax= from a strained fcc cell, iso and with a triclinic tilt of
-  0.25, finds \(a = 5.26865164\) Å, the same as =lj/cut= and the analytic
-  lattice sum.
-- The engine form with =liblj_engine.so= (finite-difference virial) against
-  the named LJ (analytic stress): pressure within 3e-7 bar.
-- EMT Cu (finite-difference virial) against an independent difference from
-  =rgpot-eval=: within 7e-6 bar.
+- =fix box/relax= from a strained fcc cell, iso and with a 0.25 triclinic tilt.
+  It finds \(a = 5.26865164\) Å, as =lj/cut= and the analytic lattice sum do.
+- The engine form with =liblj_engine.so= uses the finite-difference virial.
+  Its pressure is within 3e-7 bar of the named LJ and its analytic stress.
+- EMT Cu also uses the finite-difference virial.
+  It is within 7e-6 bar of an independent difference from =rgpot-eval=.
 - A =NULL= type under =hybrid/overlay= with =lj/cut= matches =lj/cut= alone.
-- =compute pe/atom= and =compute stress/atom= against =lj/cut= and
-  =eam/alloy=, atom by atom in tag order, in orthogonal and triclinic cells
-  on 1, 2 and 4 ranks: Lennard-Jones per-atom energies within 2e-16 eV and
-  stress within 3e-9 bar Å^3 of values up to 9e4; CuNi per-atom energies
-  within 2e-14 eV and stress within 3e-8 bar Å^3 of values up to 2e6.
-  =Morse= against =pair_style morse= with =pair_modify shift yes=: 9e-15 eV
-  and 9e-8 bar Å^3 of 3.5e6.
-- The per-atom energies sum to the energy within 2e-13 eV for
-  Lennard-Jones and 2e-11 eV for CuNi, =SuttonChen= and =Morse=; the stress
-  per atom sums to \(-PV\) within 1e-13 of its largest component;
+- =compute pe/atom= and =compute stress/atom= against =lj/cut= and =eam/alloy=.
+  Atoms are compared in tag order, in both cell shapes, on 1, 2 and 4 ranks.
+  Lennard-Jones per-atom energies agree within 2e-16 eV.
+  Its per-atom stress agrees within 3e-9 bar Å^3 of values up to 9e4.
+  CuNi per-atom energies agree within 2e-14 eV.
+  Its per-atom stress agrees within 3e-8 bar Å^3 of values up to 2e6.
+  =Morse= is checked against =pair_style morse= with =pair_modify shift yes=.
+  It agrees within 9e-15 eV and 9e-8 bar Å^3 of 3.5e6.
+- The per-atom energies sum to the energy within 2e-13 eV for Lennard-Jones.
+  The bound is 2e-11 eV for CuNi, =SuttonChen= and =Morse=.
+  The per-atom stress sums to \(-PV\) within 1e-13 of its largest component.
   =centroid/stress/atom= equals =stress/atom=.
 - Other units, free boundaries, per-atom requests with =EMT= or an engine,
   unknown names and unknown symbols each stop with an error.
@@ -252,13 +246,12 @@ The numbers below are from one run; the tests assert looser bounds.
   =EAMTable=; see the per-atom section.
 - =units metal= and =boundary p p p= only.
 - The finite-difference virial is only as smooth as the potential's energy.
-  For EMT and =EAMAl= it changed by tens of bar when the strain step was
-  changed around \(10^{-5}\), so their pressure carries
-  that uncertainty.
+  For EMT and =EAMAl= it changed by tens of bar when the strain step was changed
+  around \(10^{-5}\), so their pressure carries that uncertainty.
 - =single= is not provided, so =pair_write= and =compute pair/local= do not
   work.
-- =SWSi1985=, =TersoffSi=, =EAMCell= and the Fortran potentials are accepted
-  but are not covered by the LAMMPS tests.
+- =SWSi1985=, =TersoffSi=, =EAMCell= and the Fortran potentials are accepted but
+  are not covered by the LAMMPS tests.
 
 ** Public constructor
 
