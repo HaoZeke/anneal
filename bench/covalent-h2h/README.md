@@ -801,6 +801,51 @@ Three first-parent commits changed it:
   quench runs 1000 steps. ρ=14 Morse 55 hits on all 3 seeds. Zn38 stays
   at 0 of 3.
 
+On develop `92bc5805` the sha1 is still `97677e28…`. On develop
+`7192e9f8` and on `98dcfb31` it is
+`a22093e707faa91d683813fa7cc507706c5265e6`, 6 lines on:
+
+- ρ=14 Morse 38 seeds 2000, 2001 and 2002: the hit is recorded at 20496,
+  12583 and 18128 calls in place of 21751, 13779 and 19088. The charged
+  calls are unchanged.
+- Cu19Au19 seeds 2000, 2001 and 2002: the core cuts' best is handed to
+  the walk, which stops at the reference after 11987, 12033 and 12023
+  calls in place of the whole 80000.
+
+Four commits on top of `98dcfb31` change it; the others leave every pin
+as it was. The series on `7192e9f8` gives the same sha1 after each:
+
+- `af36dcf5` (`5efbc4e09778b88975b6667261e3fc25ecaa0f4c`): 29 of 91 lines.
+  The icosahedral reseed's clock was reset by any lowest a stall clock
+  saw, and now only by a lowest of the search itself, so reseeds fire on
+  other hops:
+  - LJ75 seed 2000: the trace and the lowest geometry.
+  - LJ55 seed 2002: the lowest geometry only. The trace and the energy
+    are the same; `h2h_seed` replaces the stored geometry on improvements
+    below its 1e-7 trace step, and a later re-quench reaches a
+    differently oriented copy of the Mackay icosahedron.
+  - ρ=14 Morse 38 seeds 2000 and 2002: hit at 14433 and 19767 calls in
+    place of 20496 and 18128.
+  - ρ=14 Morse 55 seeds 2001 and 2002: miss, so 1 of 3.
+- `a7cd0a1b` (`9f5bc75084520689a0a6feb5ab933eceda1c5813`): 36 lines, all
+  `h2h_morse` and `h2h_metal` rows. The icosahedral test bonds at 1.2
+  pair minima, so Morse at 1.2 and Zn38, in units of its r0, at 1.2, in
+  place of 1.35:
+  - ρ=14 Morse 38 seeds 2001 and 2002: hit at 18155 and 12540 calls.
+  - ρ=14 Morse 55: every seed hits again, at 373439, 900371 and 926623
+    calls, so 3 of 3.
+  - Zn38 seeds 2001 and 2002: still miss, at other energies.
+  Cu19Au19 and Pt13 are labelled and do not read the test.
+- `d0feebd2` (`faf47fdcf321e07888a32e1ac8576fb017be5493`): 10 lines. The
+  icosahedral reseed waits for an incumbent as old in calls as the search
+  that found it:
+  - LJ75 seeds 2000 and 2002: the trace and the lowest geometry.
+  - LJ13 seed 2000: the lowest geometry only, as LJ55 above.
+  - ρ=14 Morse 38 seed 2002: hits at 13549 calls.
+- `d8e9bbbb` (`a98cf10ee8f24b2b5963e147c4e91ca8d71b2479`): 1 line.
+  `h2h_seed` declares the Morse pair minimum, and the ρ=14 Morse 38 seed
+  2001 trace moves.
+
 ## Files
 
 - `before/`, `after/`: per-seed rows and summaries of the first panel.
