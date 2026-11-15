@@ -80,7 +80,9 @@ use crate::movekernel::{
 };
 use crate::path::{StallDetector, interpolate_path};
 use crate::screen::Screen;
+use bandit::{BanditArm, DiscountedBandit};
 
+pub mod bandit;
 mod binary_geometry;
 mod config;
 mod cycles;
@@ -93,11 +95,12 @@ mod moves;
 mod packing_bank;
 mod preset;
 mod torsion;
+mod walkers;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{
     ArmSelection, Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, PairRange,
-    SoapProposalMode,
+    SoapProposalMode, WalkerSchedule,
 };
 pub use moves::*;
 
@@ -869,6 +872,15 @@ impl Ledger {
         let room = self.remaining();
         self.spent += n.min(room);
         n <= room
+    }
+
+    /// Settle work an inner run did on a [`Ledger::slice`], stopped or not.
+    ///
+    /// Unlike [`Ledger::charge_many`] a raised stop does not waive the
+    /// charge: the calls were made before the stop was seen.
+    pub(crate) fn settle_slice(&mut self, n: usize) {
+        let room = self.budget.saturating_sub(self.spent);
+        self.spent += n.min(room);
     }
 
     /// Records a value and its state when it improves the incumbent.
@@ -2266,6 +2278,17 @@ fn choose_arm<R: Rng + ?Sized>(
     rng.random_range(0..n_arms)
 }
 
+/// A kernel index from the bandit, for a hop whose decision was not a kernel.
+///
+/// Not held as a decision: the reward stays with the action that was taken.
+fn bandit_kernel<R: Rng + ?Sized>(chooser: &DiscountedBandit, rng: &mut R) -> usize {
+    let index = chooser.select(&|arm| matches!(arm, BanditArm::Kernel(_)), rng);
+    match chooser.arms()[index] {
+        BanditArm::Kernel(kernel) => kernel,
+        _ => 0,
+    }
+}
+
 /// Kernels the chain actually draws, including the energy-lattice arm.
 fn search_kernels(cfg: &Config) -> Vec<ClusterMove> {
     let mut kernels = cfg.move_library.kernels(cfg);
@@ -2342,7 +2365,7 @@ pub fn run_with_gradient_settle<'g, R: Rng + ?Sized>(
         relax,
         grad,
         None,
-        None,
+        BiasCarry::Fresh,
         settle,
         None,
         None,
@@ -2368,7 +2391,7 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
         relax,
         grad,
         None,
-        None,
+        BiasCarry::Fresh,
         None,
         None,
         None,
@@ -2396,7 +2419,7 @@ pub fn run_with_energy_gradient<'g, R: Rng + ?Sized>(
         relax,
         grad,
         energy_grad,
-        None,
+        BiasCarry::Fresh,
         None,
         None,
         None,
@@ -2435,7 +2458,7 @@ where
         relax,
         grad,
         energy_grad,
-        None,
+        BiasCarry::Fresh,
         None,
         None,
         Some(checkpoint_interval),
@@ -2479,7 +2502,7 @@ pub fn run_with_bias<'g, R: Rng + ?Sized>(
         relax,
         grad,
         None,
-        Some(bias),
+        BiasCarry::Replace(bias),
         None,
         None,
         None,
@@ -2521,7 +2544,7 @@ where
         relax,
         grad,
         None,
-        Some(bias),
+        BiasCarry::Replace(bias),
         None,
         None,
         Some(checkpoint_interval),
@@ -2552,7 +2575,7 @@ pub fn run_with_history<'g, R: Rng + ?Sized>(
         relax,
         grad,
         None,
-        None,
+        BiasCarry::Fresh,
         None,
         history,
         None,
@@ -2597,7 +2620,7 @@ where
         relax,
         grad,
         None,
-        None,
+        BiasCarry::Fresh,
         settle,
         history,
         Some(checkpoint_interval),
@@ -3806,6 +3829,21 @@ fn lengths_of_quenched_cluster(cfg: &Config, x: ArrayView1<f64>) -> Option<Confi
     Some(scaled)
 }
 
+/// Where a run's bias comes from and where it goes when the run ends.
+enum BiasCarry<'b> {
+    /// Built for this run and dropped with it.
+    Fresh,
+    /// The caller's bias is used and its slot holds the run's at the end.
+    Replace(&'b mut BasinBias<ClusterFingerprint>),
+    /// An empty slot is built fresh; the run's bias is left in the slot.
+    Fill(&'b mut Option<BasinBias<ClusterFingerprint>>),
+}
+
+enum BiasSlot<'b> {
+    Replace(&'b mut BasinBias<ClusterFingerprint>),
+    Fill(&'b mut Option<BasinBias<ClusterFingerprint>>),
+}
+
 fn run_full<'g, R, H>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -3813,7 +3851,7 @@ fn run_full<'g, R, H>(
     relax: Relax<'_>,
     mut grad: Option<&mut GradFn<'g>>,
     mut energy_grad: Option<&mut EnergyGradFn<'g>>,
-    external_bias: Option<&mut BasinBias<ClusterFingerprint>>,
+    external_bias: BiasCarry<'_>,
     mut settle: Option<Settle<'_>>,
     mut history: Option<&mut dyn HistoryHook>,
     checkpoint_interval: Option<usize>,
@@ -3824,6 +3862,23 @@ where
     R: Rng + ?Sized,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
+    // Walker allocation wraps whole chains, so it applies only where the run
+    // owns its bias and answers to no caller between hops.
+    if let WalkerSchedule::Hyperband { eta } = cfg.walkers
+        && matches!(external_bias, BiasCarry::Fresh)
+        && settle.is_none()
+        && history.is_none()
+        && checkpoint_interval.is_none()
+        && cfg.replicas <= 1
+    {
+        let _caller_stop = ledger.bind_stop();
+        if ledger.target().is_none()
+            && let Some(energy) = cfg.target_energy
+        {
+            ledger.stop_below(energy);
+        }
+        return walkers::hyperband(cfg, eta, start, ledger, relax, grad, energy_grad, rng);
+    }
     let _caller_stop = ledger.bind_stop();
     // A target on the configuration is the same stop a caller can raise
     // on the ledger. A ledger target already set is left alone, so an
@@ -4013,11 +4068,15 @@ where
     // A caller's bias is used in place of the first rung's, and put back when
     // the run ends, so the next chain starts where this one left off.
     let (mut bias, carried) = match external_bias {
-        Some(b) => {
+        BiasCarry::Replace(b) => {
             let fresh = biases.remove(0);
-            (std::mem::replace(b, fresh), Some(b))
+            (std::mem::replace(b, fresh), Some(BiasSlot::Replace(b)))
         }
-        None => (biases.remove(0), None),
+        BiasCarry::Fill(slot) => {
+            let fresh = biases.remove(0);
+            (slot.take().unwrap_or(fresh), Some(BiasSlot::Fill(slot)))
+        }
+        BiasCarry::Fresh => (biases.remove(0), None),
     };
     let mut chains: Vec<OccupiedMinimum> = Vec::new();
     // One sampler per rung, parked and taken alongside the bias.
@@ -4067,6 +4126,25 @@ where
     // Rewarded by the depth a move reaches rather than by whether it was
     // accepted. See [`crate::allocate::DepthAllocator`].
     let mut depth_allocator = crate::allocate::DepthAllocator::new(kernels.len());
+    // Kernels and stall actions as one discounted bandit, when selected.
+    let mut bandit = cfg.arm_selection.is_bandit().then(|| {
+        let mut arms: Vec<BanditArm> = (0..kernels.len()).map(BanditArm::Kernel).collect();
+        if !cfg.move_library.is_rigid_body() && !cfg.move_library.is_molecular() {
+            arms.push(BanditArm::Angular);
+        }
+        if continuous_symmetry_classes.is_some() && cfg.prior_reseed && cfg.packing_cna_applies() {
+            arms.push(BanditArm::Reseed);
+        }
+        if (cfg.escape_on_stall || cfg.restart_on_stall) && !cfg.move_library.is_rigid_body() {
+            arms.push(BanditArm::Leave);
+        }
+        let rule = if cfg.arm_selection == ArmSelection::DiscountedUcb {
+            bandit::Rule::Ucb
+        } else {
+            bandit::Rule::Thompson
+        };
+        DiscountedBandit::new(arms, rule)
+    });
     // Per-arm draws and accepts. The crate's own methods note says a solve
     // count cannot tell a mechanism that works poorly from one that does not
     // run, and a move set is exactly where that applies: an arm the allocator
@@ -4671,6 +4749,15 @@ where
         if !hop_room(hops) {
             break HopStop::MaxHops;
         }
+        let bandit_pick = bandit.as_mut().map(|chooser| {
+            chooser.settle(ledger.spent(), ledger.best);
+            chooser.choose(
+                ledger.spent(),
+                ledger.best,
+                |arm| arm != BanditArm::Leave || hops > 0,
+                rng,
+            )
+        });
         // A labelled single-species cluster that has settled into a
         // close-packed sheet, rather than a fivefold plateau, can still be
         // one lattice step inside that sheet away from the lower packing.
@@ -5704,6 +5791,10 @@ where
         // force budget, so this call plateau is the leave that runs.
         let call_due = hops > 0
             && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1);
+        let leave_due = match bandit_pick {
+            Some(pick) => pick == BanditArm::Leave,
+            None => call_due,
+        };
         let mut directed_leave = false;
         if cfg.general_collective
             && !cfg.move_library.is_rigid_body()
@@ -5752,7 +5843,7 @@ where
             && cfg.restart_on_stall
             && !cfg.escape_on_stall
             && !cfg.move_library.is_rigid_body()
-            && call_due
+            && leave_due
         {
             let fresh = random_cluster(x.len() / 3, 0.7, cfg.min_separation, rng);
             let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
@@ -5766,7 +5857,7 @@ where
                 });
             }
         }
-        if internal_action.is_none() && cfg.escape_on_stall && call_due {
+        if internal_action.is_none() && cfg.escape_on_stall && leave_due {
             // One response per plateau. Without the reset the clock stays
             // due and the leave runs on every following hop.
             charged_at_best = ledger.spent();
@@ -6434,16 +6525,20 @@ where
         // common neighbours, so it runs only when a reseed can fire.
         // Counting on every hop was the Au38 slowdown, and with the
         // reseed interval still ahead the result cannot change the branch.
-        if csm_reseed_hops > 0
-            && cfg.prior_reseed
-            && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
-            && cfg.packing_cna_applies()
-            && crate::soap::ih_dominated(
-                x.view(),
-                crate::soap::SoapSpec::at_length(cfg.length_scale),
-            )
-            && ledger.remaining() > 0
-        {
+        let reseed_due = match bandit_pick {
+            Some(pick) => pick == BanditArm::Reseed,
+            None => {
+                csm_reseed_hops > 0
+                    && cfg.prior_reseed
+                    && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
+                    && cfg.packing_cna_applies()
+                    && crate::soap::ih_dominated(
+                        x.view(),
+                        crate::soap::SoapSpec::at_length(cfg.length_scale),
+                    )
+            }
+        };
+        if reseed_due && ledger.remaining() > 0 {
             csm_reseed_stamp = hops;
             // Orbit completion stays. The fresh cluster keeps its atom order,
             // so species labels stay put. Projection is the stall gate below,
@@ -6522,6 +6617,9 @@ where
             }
             if ledger.remaining() == 0 {
                 break HopStop::of_closed(ledger);
+            }
+            if bandit_pick.is_some() {
+                continue;
             }
         }
         // A labelled incumbent whose energy has stood for half the budget
@@ -6961,25 +7059,31 @@ where
             soft_cache = None;
             current_validation_gradient = None;
         }
-        let mut k = choose_arm(
-            cfg,
-            context.as_ref().map(|value| value.view()),
-            &mut contextual,
-            &depth_allocator,
-            &mut allocator,
-            kernels.len(),
-            rng,
-        );
+        let mut k = match (bandit_pick, bandit.as_ref()) {
+            (Some(BanditArm::Kernel(index)), _) => index,
+            (Some(_), Some(chooser)) => bandit_kernel(chooser, rng),
+            _ => choose_arm(
+                cfg,
+                context.as_ref().map(|value| value.view()),
+                &mut contextual,
+                &depth_allocator,
+                &mut allocator,
+                kernels.len(),
+                rng,
+            ),
+        };
         // One unlike-pair exchange on a fixed cadence. The depth allocator
         // drops the homotop once geometry moves pay more, and a binary
         // minimum is a chemical ordering as well as a geometry. Absent on a
         // one-species library, so a monoatomic chain draws exactly as before.
-        if let Some(swap_at) = kernels.iter().position(|kernel| kernel.name() == "swap")
+        if bandit_pick.is_none()
+            && let Some(swap_at) = kernels.iter().position(|kernel| kernel.name() == "swap")
             && hops.is_multiple_of(4)
         {
             k = swap_at;
         }
         if cfg.general_collective
+            && bandit_pick.is_none()
             && let Some(plane_at) = kernels.iter().position(|kernel| kernel.name() == "plane")
             && collective.due(hops as u64)
         {
@@ -6994,15 +7098,20 @@ where
         // returning proposes further each time until it leaves.
         // The angular move takes the step when a point is loose enough for the
         // criterion to fire, whatever the allocator picked.
-        let angular = cfg.angular_moves
-            && worst_bound_scaled(
-                x.view(),
-                n,
-                angular_ratio,
-                cfg.length_scale,
-                cfg.energy_scale,
-            )
-            .is_some();
+        let angular = match bandit_pick {
+            Some(pick) => pick == BanditArm::Angular,
+            None => {
+                cfg.angular_moves
+                    && worst_bound_scaled(
+                        x.view(),
+                        n,
+                        angular_ratio,
+                        cfg.length_scale,
+                        cfg.energy_scale,
+                    )
+                    .is_some()
+            }
+        };
         // The soft-subspace arm competes uniformly with the library's arms.
         // The subspace is cached per incumbent and recomputed when the chain
         // moves, since it is a property of the point the chain stands on.
@@ -7338,15 +7447,18 @@ where
         {
             let mut swapped = false;
             for _ in 0..kernels.len() {
-                let k2 = choose_arm(
-                    cfg,
-                    context.as_ref().map(|value| value.view()),
-                    &mut contextual,
-                    &depth_allocator,
-                    &mut allocator,
-                    kernels.len(),
-                    rng,
-                );
+                let k2 = match bandit.as_ref() {
+                    Some(chooser) => bandit_kernel(chooser, rng),
+                    None => choose_arm(
+                        cfg,
+                        context.as_ref().map(|value| value.view()),
+                        &mut contextual,
+                        &depth_allocator,
+                        &mut allocator,
+                        kernels.len(),
+                        rng,
+                    ),
+                };
                 if may_idle(&kernels[k2].name()) {
                     continue;
                 }
@@ -10236,9 +10348,11 @@ where
         None => Vec::new(),
     };
     let final_radius = bias.merge_radius();
-    if let Some(slot) = carried {
-        // Handed back so the next chain inherits what this one learned.
-        *slot = bias;
+    // Handed back so the next chain inherits what this one learned.
+    match carried {
+        Some(BiasSlot::Replace(slot)) => *slot = bias,
+        Some(BiasSlot::Fill(slot)) => *slot = Some(bias),
+        None => {}
     }
 
     Ok(Outcome {
@@ -11253,6 +11367,93 @@ mod tests {
         assert!(
             bias.n_basins() >= after_first,
             "the bias came back smaller than it went in"
+        );
+    }
+
+    #[test]
+    fn hyperband_charges_the_whole_budget_and_reports_its_records_in_order() {
+        let mut cfg = Config::for_cluster(8);
+        cfg.apply_decisions("hyperband").unwrap();
+        assert_eq!(cfg.walkers, WalkerSchedule::Hyperband { eta: 3 });
+        let mut rng = StdRng::seed_from_u64(9);
+        let start = random_cluster(8, 0.7, cfg.min_separation, &mut rng);
+        let mut ledger = Ledger::new(60_000);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, n: usize| toy_relax(led, x, n);
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
+        assert_eq!(ledger.spent(), 60_000);
+        assert_eq!(out.charged, 60_000);
+        assert!(out.best.is_finite());
+        assert_eq!(out.best, ledger.best);
+        assert!(!out.improvements.is_empty());
+        for pair in out.improvements.windows(2) {
+            assert!(pair[1].1 >= pair[0].1, "records out of call order");
+            assert!(pair[1].3 < pair[0].3, "a record that did not improve");
+        }
+        assert!(out.improvements.last().unwrap().3 <= out.best + 1e-12);
+    }
+
+    #[test]
+    fn hyperband_stops_on_the_ledger_target() {
+        let mut cfg = Config::for_cluster(8);
+        cfg.walkers = WalkerSchedule::Hyperband { eta: 3 };
+        let mut rng = StdRng::seed_from_u64(9);
+        let start = random_cluster(8, 0.7, cfg.min_separation, &mut rng);
+        let mut ledger = Ledger::new(60_000);
+        ledger.stop_below(f64::MAX);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, n: usize| toy_relax(led, x, n);
+        run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
+        assert!(ledger.target_reached());
+        assert!(ledger.spent() < 60_000);
+    }
+
+    #[test]
+    fn the_bandit_rules_spend_the_budget_and_repeat_on_a_seed() {
+        for rule in ["thompson", "ducb"] {
+            let mut cfg = Config::for_cluster(8);
+            cfg.allocate_moves = true;
+            cfg.escape_on_stall = true;
+            cfg.apply_decisions(rule).unwrap();
+            assert!(cfg.arm_selection.is_bandit());
+            let once = |seed: u64| {
+                let mut rng = StdRng::seed_from_u64(seed);
+                let start = random_cluster(8, 0.7, cfg.min_separation, &mut rng);
+                let mut ledger = Ledger::new(20_000);
+                let mut relax =
+                    |led: &mut Ledger, x: ArrayView1<f64>, n: usize| toy_relax(led, x, n);
+                let out =
+                    run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("finite");
+                (ledger.spent(), out.best.to_bits(), out.hops)
+            };
+            let first = once(5);
+            assert_eq!(first.0, 20_000, "{rule}");
+            assert!(first.2 > 0, "{rule}");
+            assert_eq!(first, once(5), "{rule}");
+        }
+    }
+
+    #[test]
+    fn the_decision_switches_stay_out_of_the_resolved_json_when_off() {
+        let preset = Config::recommended(38);
+        assert_eq!(preset.walkers, WalkerSchedule::Single);
+        assert_eq!(preset.arm_selection, ArmSelection::Posterior);
+        let json = preset.resolved_json().unwrap();
+        assert!(!json.contains("walkers"));
+        let mut on = preset.clone();
+        on.apply_decisions("hyperband, thompson").unwrap();
+        let json = on.resolved_json().unwrap();
+        assert!(
+            json.contains(r#""walkers":{"hyperband":{"eta":3}}"#),
+            "{json}"
+        );
+        assert!(json.contains(r#""arm_selection":"thompson""#));
+        assert!(on.apply_decisions("ducb").is_ok());
+        assert_eq!(on.arm_selection, ArmSelection::DiscountedUcb);
+        assert!(on.apply_decisions("motif").is_err());
+        let mut empty = Config::recommended(38);
+        empty.apply_decisions("").unwrap();
+        assert_eq!(
+            empty.resolved_json().unwrap(),
+            preset.resolved_json().unwrap()
         );
     }
 

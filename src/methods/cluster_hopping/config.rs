@@ -746,6 +746,13 @@ pub struct Config {
     /// that posterior. Rewards, screens, and the move library stay as they are.
     #[serde(skip_serializing_if = "arm_selection_is_posterior")]
     pub arm_selection: ArmSelection,
+    /// How the budget is shared between walkers.
+    ///
+    /// [`WalkerSchedule::Single`] is one chain over the whole ledger.
+    /// [`WalkerSchedule::Hyperband`] splits it into successive-halving
+    /// brackets of independent chains; see [`WalkerSchedule`].
+    #[serde(skip_serializing_if = "WalkerSchedule::is_single")]
+    pub walkers: WalkerSchedule,
     /// Reward the move allocator only for accepted hops that land in a new
     /// basin, not for accepted returns.
     ///
@@ -1378,9 +1385,76 @@ pub enum ArmSelection {
     Posterior,
     /// Draw one arm uniformly. The depth posterior is not consulted.
     Uniform,
+    /// Discounted Gaussian Thompson sampling over the move kernels and the
+    /// stall actions together.
+    ///
+    /// The arms are every kernel, the angular relocation, the symmetry
+    /// reseed and the plateau leave, each where the chain can play it. The
+    /// reward of a decision is the drop in the ledger's best divided by the
+    /// charged calls it took, and every statistic is discounted by
+    /// [`crate::methods::cluster_hopping::bandit::DISCOUNT`] per decision.
+    /// The patience and cadence gates of those actions are not consulted.
+    Thompson,
+    /// The same arms and reward as [`ArmSelection::Thompson`], chosen by
+    /// discounted UCB (Garivier and Moulines, ALT 2011).
+    DiscountedUcb,
+}
+
+impl ArmSelection {
+    /// Whether a discounted bandit over kernels and stall actions decides.
+    pub fn is_bandit(self) -> bool {
+        matches!(self, Self::Thompson | Self::DiscountedUcb)
+    }
+}
+
+/// How one ledger is shared between walkers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WalkerSchedule {
+    /// One chain spends the whole budget.
+    #[default]
+    Single,
+    /// Hyperband brackets of successive halving (Li et al., JMLR 18, 2018).
+    ///
+    /// The budget is split evenly over brackets `s = s_max, ..., 0`.
+    /// Bracket `s` opens `eta^s` independent chains and halves them `s`
+    /// times, keeping the best `1/eta` by best energy less the last rung's
+    /// improvement, without keeping two walkers on one minimum. Every rung
+    /// spends the same share of its bracket, so a survivor's slice grows by
+    /// `eta`. A survivor resumes from its live state with its own bias.
+    /// `s_max` is the largest bracket whose first slice is still a hundred
+    /// opening quenches. Every call is charged to the caller's ledger.
+    Hyperband {
+        /// Halving ratio.
+        eta: usize,
+    },
+}
+
+impl WalkerSchedule {
+    /// True for [`WalkerSchedule::Single`].
+    pub fn is_single(&self) -> bool {
+        *self == Self::Single
+    }
 }
 
 impl Config {
+    /// Apply a comma-separated list of decision switches.
+    ///
+    /// `hyperband` sets [`WalkerSchedule::Hyperband`] at `eta = 3`.
+    /// `thompson` and `ducb` set [`ArmSelection::Thompson`] and
+    /// [`ArmSelection::DiscountedUcb`]. An empty list changes nothing.
+    pub fn apply_decisions(&mut self, spec: &str) -> Result<(), String> {
+        for token in spec.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+            match token {
+                "hyperband" => self.walkers = WalkerSchedule::Hyperband { eta: 3 },
+                "thompson" => self.arm_selection = ArmSelection::Thompson,
+                "ducb" => self.arm_selection = ArmSelection::DiscountedUcb,
+                other => return Err(format!("unknown decision switch {other}")),
+            }
+        }
+        Ok(())
+    }
+
     /// Canonical, versioned JSON for the fully resolved configuration.
     pub fn resolved_json(&self) -> Result<String, serde_json::Error> {
         #[derive(serde::Serialize)]
@@ -1725,6 +1799,7 @@ impl Config {
             energy_bias: false,
             depth_reward: false,
             arm_selection: ArmSelection::Posterior,
+            walkers: WalkerSchedule::Single,
             novel_reward: false,
             soft_perturb: false,
             soft_modes: 6,
