@@ -401,6 +401,8 @@ enum CallWall<'a> {
         species: &'a [u32],
         groups: &'a [Vec<usize>],
         reactive: bool,
+        /// [`Config::bond_tolerance`], which a declared start may widen.
+        bond_tolerance: f64,
     },
 }
 
@@ -417,6 +419,7 @@ impl<'a> CallWall<'a> {
                 species,
                 groups,
                 reactive: *reactive,
+                bond_tolerance: cfg.bond_tolerance,
             },
             (Some(_), _) => Self::Absolute,
         }
@@ -463,7 +466,8 @@ impl<'a> CallWall<'a> {
                 species,
                 groups,
                 reactive: false,
-            } => declared_group_lost_a_bond(point, species, Some(groups), 1.25),
+                bond_tolerance,
+            } => declared_group_lost_a_bond(point, species, Some(groups), *bond_tolerance),
             _ => false,
         }
     }
@@ -481,6 +485,7 @@ impl<'a> CallWall<'a> {
                 species,
                 groups,
                 reactive: false,
+                ..
             } => inside_molecular_call_wall(point, species, Some(groups)),
             Self::Covalent { .. } => {
                 let n = point.len() / 3;
@@ -2341,6 +2346,7 @@ mod tests {
             species: &species,
             groups: &groups,
             reactive: false,
+            bond_tolerance: 1.25,
         };
         let objective = PairPotential::lennard_jones(3);
         let bonded = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0]);
@@ -3642,6 +3648,85 @@ mod tests {
             out.best_state.is_some(),
             "a finite geometry was visited and not kept"
         );
+    }
+
+    /// An ETKDG start without force-field cleanup held a lorlatinib C–H at
+    /// 1.30 of the radii sum. The bond screen called that hydrogen lost,
+    /// refused the caller's start before any call, and every redraw was a
+    /// random cloud: "no finite start after 8 attempts" after the three
+    /// probe calls.
+    #[test]
+    fn a_declared_start_with_a_long_bond_is_quenched() {
+        use eindir_core::gradient::Gradient;
+        use eindir_core::{Bounds, Objective};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Bonds {
+            bounds: Bounds<f64>,
+            calls: AtomicUsize,
+        }
+
+        impl Objective<f64> for Bonds {
+            fn dim(&self) -> usize {
+                9
+            }
+            fn bounds(&self) -> &Bounds<f64> {
+                &self.bounds
+            }
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                self.value_and_gradient(x).0
+            }
+        }
+
+        impl Gradient<f64> for Bonds {
+            fn dim(&self) -> usize {
+                9
+            }
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                self.value_and_gradient(x).1
+            }
+        }
+
+        // Harmonic C–H bonds at 1.09 Å and an H···H spring at 1.78 Å.
+        impl DifferentiableObjective<f64> for Bonds {
+            fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                let mut energy = 0.0;
+                let mut gradient = Array1::zeros(9);
+                for (a, b, length) in [(0usize, 1usize, 1.09), (0, 2, 1.09), (1, 2, 1.78)] {
+                    let d: Vec<f64> = (0..3).map(|k| x[3 * a + k] - x[3 * b + k]).collect();
+                    let r = d.iter().map(|v| v * v).sum::<f64>().sqrt();
+                    energy += 0.5 * (r - length).powi(2);
+                    for k in 0..3 {
+                        let g = (r - length) * d[k] / r;
+                        gradient[3 * a + k] += g;
+                        gradient[3 * b + k] -= g;
+                    }
+                }
+                (energy, gradient)
+            }
+        }
+
+        let bonds = Bonds {
+            bounds: Bounds::new(Array1::from_elem(9, -8.0), Array1::from_elem(9, 8.0), 0.0),
+            calls: AtomicUsize::new(0),
+        };
+        let cfg = Config::recommended_molecular(vec![6, 1, 1], vec![vec![0, 1, 2]], 1.0);
+        let start = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.09, 0.0, 0.0, -0.35, 1.355, 0.0]);
+        assert!(
+            crate::methods::cluster_hopping::declared_group_lost_a_bond(
+                start.view(),
+                &[6, 1, 1],
+                Some(&[vec![0, 1, 2]]),
+                cfg.bond_tolerance,
+            ),
+            "the start no longer reproduces the refusal"
+        );
+        let mut ledger = Ledger::new(400);
+        let (out, _) =
+            search_from(&bonds, &cfg, &mut ledger, start.view(), 2009).expect("a finite start");
+        assert!(bonds.calls.load(Ordering::Relaxed) > 0);
+        assert!(out.best < 1.0e-3, "best {}", out.best);
     }
 
     /// Separation parks a clash one ulp outside the call limit. The force

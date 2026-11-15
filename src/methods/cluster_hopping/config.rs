@@ -2018,8 +2018,14 @@ impl Config {
     /// contact floor longer than the bond, and the call wall refuses the
     /// molecule as it stands. The returned configuration merges the groups
     /// of each covalent fragment of `start` into one group, whose torsions
-    /// the molecular library turns. `None` when no two declared groups share
-    /// a fragment, so a molecular cluster keeps its configuration unchanged.
+    /// the molecular library turns.
+    ///
+    /// A declared start whose own bonds are longer than
+    /// [`Config::bond_tolerance`] widens the tolerance to hold them (see
+    /// [`start_bond_tolerance`]); otherwise the bond screen would refuse the
+    /// caller's geometry before its first call. `None` when the tolerance
+    /// stands and no two declared groups share a fragment, so a molecular
+    /// cluster keeps its configuration unchanged.
     pub fn with_flexible_molecules(&self, start: ArrayView1<f64>) -> Option<Self> {
         let MoveLibrary::Molecular {
             groups,
@@ -2030,11 +2036,20 @@ impl Config {
             return None;
         };
         let species = self.species.as_deref()?;
-        if groups.len() < 2 || start.len() != 3 * species.len() {
+        if start.len() != 3 * species.len() {
             return None;
         }
+        let tolerance = start_bond_tolerance(start, species, groups, self.bond_tolerance);
+        let widened = tolerance > self.bond_tolerance;
+        if groups.len() < 2 {
+            return widened.then(|| {
+                let mut cfg = self.clone();
+                cfg.bond_tolerance = tolerance;
+                cfg
+            });
+        }
         let mut fragment_of = vec![usize::MAX; species.len()];
-        for (f, atoms) in connectivity_groups_z(start, species, self.bond_tolerance)
+        for (f, atoms) in connectivity_groups_z(start, species, tolerance)
             .iter()
             .enumerate()
         {
@@ -2057,9 +2072,14 @@ impl Config {
             }
         }
         if molecules.len() == groups.len() {
-            return None;
+            return widened.then(|| {
+                let mut cfg = self.clone();
+                cfg.bond_tolerance = tolerance;
+                cfg
+            });
         }
         let mut cfg = self.clone();
+        cfg.bond_tolerance = tolerance;
         let groups: Vec<Vec<usize>> = molecules
             .into_iter()
             .map(|(_, mut molecule)| {
@@ -2095,6 +2115,57 @@ impl Config {
     pub fn proposal_kernel(&self) -> ClusterProposal {
         ClusterProposal::new(self.move_library.kernels(self))
     }
+}
+
+/// Widest bond-matrix tolerance a start may claim for its declared bonds.
+///
+/// A tetrahedral 1-3 C···C contact sits at 1.64 of the summed single-bond
+/// radii, the shortest non-bond the rule must not link; 1.5 stays below it.
+pub const MAX_START_BOND_TOLERANCE: f64 = 1.5;
+
+/// Bond-matrix tolerance that keeps every declared atom of `start` bonded.
+///
+/// Each atom of a declared group of two or more is bonded to its nearest
+/// partner in that group. An embedder that skips force-field cleanup can
+/// leave such a bond past `tolerance`: an ETKDG start of a macrocycle held a
+/// C–H at 1.30 of the radii sum, finite on the force field, and the bond
+/// screen refused that start without a call. The result is the largest such
+/// ratio, a hair above it, when that exceeds `tolerance`. A start that needs
+/// more than [`MAX_START_BOND_TOLERANCE`] is broken as given and keeps
+/// `tolerance`.
+pub fn start_bond_tolerance(
+    start: ArrayView1<f64>,
+    species: &[u32],
+    groups: &[Vec<usize>],
+    tolerance: f64,
+) -> f64 {
+    let n = species.len().min(start.len() / 3);
+    let mut needed = tolerance;
+    for atoms in groups.iter().filter(|atoms| atoms.len() >= 2) {
+        for &a in atoms.iter().filter(|&&a| a < n) {
+            let nearest = atoms
+                .iter()
+                .filter(|&&b| b != a && b < n)
+                .filter_map(|&b| {
+                    let sum = super::moves::covalent_radius(species[a])
+                        + super::moves::covalent_radius(species[b]);
+                    (sum > 0.0).then(|| {
+                        let square: f64 = (0..3)
+                            .map(|k| (start[3 * a + k] - start[3 * b + k]).powi(2))
+                            .sum();
+                        square.sqrt() / sum
+                    })
+                })
+                .fold(f64::INFINITY, f64::min);
+            if nearest.is_finite() && nearest > needed {
+                needed = nearest;
+            }
+        }
+    }
+    if needed <= tolerance || needed > MAX_START_BOND_TOLERANCE {
+        return tolerance;
+    }
+    needed * (1.0 + 1.0e-6)
 }
 
 #[cfg(test)]
@@ -2177,6 +2248,32 @@ mod coverage_behaviour {
             2.82, 1.05, 0.18
         ];
         assert!(water.with_flexible_molecules(dimer.view()).is_none());
+    }
+
+    #[test]
+    fn a_long_declared_bond_widens_the_tolerance_up_to_the_cap() {
+        use super::{MAX_START_BOND_TOLERANCE, start_bond_tolerance};
+        let groups = vec![vec![0usize, 1, 2], vec![3usize]];
+        // C–H at 1.40 Å, 1.308 of the 1.07 Å radii sum.
+        let long = ndarray::array![0.0, 0.0, 0.0, 1.09, 0.0, 0.0, 0.0, 1.40, 0.0, 6.0, 0.0, 0.0];
+        let widened = start_bond_tolerance(long.view(), &[6, 1, 1, 6], &groups, 1.25);
+        assert!((widened - 1.40 / 1.07).abs() < 1.0e-5, "{widened}");
+        let cfg = Config::recommended_molecular(vec![6, 1, 1, 6], groups.clone(), 1.0);
+        let fitted = cfg.with_flexible_molecules(long.view()).expect("widened");
+        assert!((fitted.bond_tolerance - widened).abs() < 1.0e-12);
+        assert_eq!(fitted.move_library.declared_groups(), Some(&groups[..]));
+        let normal = ndarray::array![0.0, 0.0, 0.0, 1.09, 0.0, 0.0, 0.0, 1.09, 0.0, 6.0, 0.0, 0.0];
+        assert_eq!(
+            start_bond_tolerance(normal.view(), &[6, 1, 1, 6], &groups, 1.25),
+            1.25
+        );
+        assert!(cfg.with_flexible_molecules(normal.view()).is_none());
+        let broken = ndarray::array![0.0, 0.0, 0.0, 1.09, 0.0, 0.0, 0.0, 1.70, 0.0, 6.0, 0.0, 0.0];
+        assert!(1.70 / 1.07 > MAX_START_BOND_TOLERANCE);
+        assert_eq!(
+            start_bond_tolerance(broken.view(), &[6, 1, 1, 6], &groups, 1.25),
+            1.25
+        );
     }
 
     #[test]
