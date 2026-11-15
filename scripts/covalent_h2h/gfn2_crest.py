@@ -114,11 +114,11 @@ SUMMARY_FIELDS = [
 ]
 
 WRAPPER = """#!/bin/sh
-start=$(date +%s.%N)
+read -r start _ < /proc/uptime
 tmp=$(mktemp)
 "{xtb}" "$@" --etemp {etemp} >"$tmp" 2>&1
 rc=$?
-end=$(date +%s.%N)
+read -r end _ < /proc/uptime
 cat "$tmp"
 "{python}" - "$tmp" "{log}" "$start" "$end" "$*" << 'PY'
 import re, sys

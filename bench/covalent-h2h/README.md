@@ -679,8 +679,8 @@ its legacy xtb driver. Silicon clusters have no gap and the SCC fails at
   in 146,476 calls, and 2 fs is the step the panel uses.
 - A CREST call is an MD step (the `max steps` of each xtb MD) or an
   optimisation cycle (each `* total energy` line). `inside` is the summed
-  wall of the xtb processes for CREST, and the time in the handle for
-  anneal.
+  wall of the xtb processes for CREST (from `/proc/uptime` for rows.csv,
+  which stops with the machine), and the time in the handle for anneal.
 - The reference is the lowest minimum any run reached: -460.68373809 eV
   for Si10, and for C10 -571.32273783 eV, the cumulenic ring with every
   bond at 1.285 Å. A hit is within 1e-3 eV. Seeds 2000-2011 on C10 for
