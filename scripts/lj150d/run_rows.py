@@ -8,7 +8,7 @@ same system, arm, seed and code revision is left in place.
 
 The thirteen systems use the paper budgets. Seeds 2000–2011 are the
 twelve-seed panel. Seeds 2012–2023 extend LJ76, LJ98, LJ102, LJ150 and
-Morse M55 at rho 14 to twenty-four. Develop is 30a4ea88. The restart
+Morse M55 at rho 14 to twenty-four. Develop is 92bc5805. The restart
 arm is the binary built with the plateau restart on.
 """
 
