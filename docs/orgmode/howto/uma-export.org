@@ -7,8 +7,8 @@
 (=.pt2=) that =UmaPot= and =libuma_engine= load.
 Without =--molecular-box= and =--batch-max= it exports a dynamic package.
 The atom count and the edge count are =torch.export.Dim= symbols.
-One package then follows a nudged elastic band or a dimer walk when atoms
-enter or leave the 6 Angstrom cutoff.
+One package then follows a nudged elastic band or a dimer walk when atoms enter
+or leave the 6 Angstrom cutoff.
 It also evaluates other molecules for the same task head.
 
 ** Run it
@@ -35,10 +35,10 @@ Do not commit the checkpoint or the package.
 | =natoms= | =pos= rows, =atomic_numbers=, =batch=     | 2 to 1024                | =--max-atoms= |
 | =nedges= | =edge_index= columns, =cell_offsets= rows | 1 to =max_atoms= x 300 | =--max-edges= |
 
-300 is the per-atom neighbour cap of UMA, so the default edge bound covers
-every atom at that cap.
-The exporter reads the ranges back from the exported program and embeds them
-as =natoms_min=, =natoms_max=, =nedges_min= and =nedges_max=.
+300 is the per-atom neighbour cap of UMA, so the default edge bound covers every
+atom at that cap.
+The exporter reads the ranges back from the exported program and embeds them as
+=natoms_min=, =natoms_max=, =nedges_min= and =nedges_max=.
 It also writes =pos_shape= =natoms,3= and =edge_index_shape= =2,nedges=.
 =UmaPot= checks every call against them and throws =UmaShapeError= outside them.
 That check runs before the compiled graph.
@@ -73,8 +73,8 @@ A package that fails any of these is deleted.
 It then compares HCN, HCN with the hydrogen past the nitrogen cutoff, ethane
 before and after its methyl groups are pulled apart, and water against
 =FAIRChemCalculator=.
-The bounds are 1e-5 eV and 1e-4 eV/Angstrom.
-The measured errors are at most 1.3e-7 eV and 6.4e-6 eV/Angstrom.
+The bounds are 1e-5 eV and 1e-4 eV per Angstrom.
+The measured errors are at most 1.3e-7 eV and 6.4e-6 eV per Angstrom.
 That is the size of fairchem's own random edge-frame roll in float64.
 The test skips when fairchem, vesin or the checkpoint is missing.
 
@@ -85,17 +85,17 @@ RGPOT_UMA_CHECKPOINT=path/to/uma-s-1p1.pt \
 
 ** Limits
 
-- One system per call. =--batch-max= and =--molecular-box= keep the static
-  graphs and =merge_mole=.
+- One system per call.
+  =--batch-max= and =--molecular-box= keep the static graphs and =merge_mole=.
 - At least two atoms and one edge. fairchem answers a lone atom from
   isolated-atom references, not from the network.
-- Charge, spin and task are graph inputs, but the package records and checks
-  the exported values.
+- Charge, spin and task are graph inputs, but the package records and checks the
+  exported values.
 - The tracer gives every input axis a symbol and merges axes of equal size.
-  An example with 1 to 3 atoms or edges, or as many atoms as edges, would
-  merge with a fixed axis.
-  For such an input, for example HCN with 3 atoms, the exporter traces
-  ethanol, then checks the input as usual.
+  An example with 1 to 3 atoms or edges, or as many atoms as edges, would merge
+  with a fixed axis.
+  For such an input, for example HCN with 3 atoms, the exporter traces ethanol,
+  then checks the input as usual.
 - The kernels are compiled for the CPU instruction set of the export host
   (=AOTI_CPU_ISA= in the metadata).
 - A float64 =uma-s-1p1= package keeps all 32 experts and is about 1.2 GB.
