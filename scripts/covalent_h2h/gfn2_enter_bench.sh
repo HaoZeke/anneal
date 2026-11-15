@@ -2,8 +2,10 @@
 # Copyright (c) anneal developers
 # GFN2-xTB Si10 and C10, anneal's general arm against CREST, one UTS
 # namespace, hostname bench, core 0, working directory under /work.
-# Arguments go to gfn2_crest.py. GFN2_CODES=anneal-general reruns the
-# anneal arm alone and keeps the CREST rows already in the rows file.
+# Arguments go to gfn2_crest.py, which appends rows under the revision
+# built here and never rewrites one. GFN2_CODES=anneal-general reruns the
+# anneal arm alone. A tree with uncommitted changes to the build is
+# refused, so the revision names the binary.
 # GFN2_ROWS and GFN2_SUMMARY move the rows and the summary off
 # bench/covalent-h2h/gfn2.
 set -euo pipefail
@@ -21,6 +23,10 @@ CODES=${GFN2_CODES:-anneal-general crest}
 ROWS=${GFN2_ROWS:-$OUT/seeds.csv}
 SUMMARY=${GFN2_SUMMARY:-$OUT/summary.csv}
 
+if [[ -n $(git -C "$ROOT" status --porcelain -- src examples Cargo.toml Cargo.lock build.rs) ]]; then
+  echo "uncommitted changes to the anneal build" >&2
+  exit 1
+fi
 for need in "$CREST" "$XTB" "$ENGINE"; do
   if [[ ! -e $need ]]; then
     echo "missing $need" >&2
@@ -33,20 +39,6 @@ done
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$(dirname "$ROWS")" "$(dirname "$SUMMARY")"
 cp -a "$TARGET/release/examples/gfn2_covalent_h2h" "$WORK/bin/gfn2_covalent_h2h"
 git -C "$ROOT" rev-parse HEAD > "$WORK/anneal-head"
-if [[ $CODES == anneal-general && -s $ROWS ]]; then
-  /usr/bin/python3 - "$ROWS" << 'PY'
-import csv, sys
-path = sys.argv[1]
-with open(path, newline="") as handle:
-    reader = csv.DictReader(handle)
-    rows = [row for row in reader if row["code"] != "anneal-general"]
-    fields = reader.fieldnames
-with open(path, "w", newline="") as handle:
-    writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
-    writer.writeheader()
-    writer.writerows(rows)
-PY
-fi
 
 cat > "$WORK/bin/inside.sh" << EOF
 #!/bin/bash
@@ -59,7 +51,7 @@ cd $WORK
 exec taskset -c 0 /usr/bin/python3 -u $HERE/gfn2_crest.py \\
   --anneal $WORK/bin/gfn2_covalent_h2h --crest $CREST --xtb $XTB \\
   --out $WORK/runs --rows $ROWS --summary $SUMMARY \\
-  --codes $CODES "\$@"
+  --revision \$(cat $WORK/anneal-head) --codes $CODES "\$@"
 EOF
 chmod +x "$WORK/bin/inside.sh"
 

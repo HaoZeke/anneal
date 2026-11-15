@@ -27,9 +27,13 @@ that log.
 
 Each seed's start is anneal's random start for that seed, written before
 any search. The (seed, code) pairs of a system run in a shuffled order.
-``--codes`` and ``--crest-seeds`` select the arms and CREST's seeds, and
-``--summary`` writes one line per system and code, alone when no binaries
-are given.
+``--codes`` and ``--crest-seeds`` select the arms and CREST's seeds.
+
+Rows are appended and never rewritten. Each carries ``code_revision``,
+the anneal revision the panel ran at (``--revision``), and ``host``, the
+UTS hostname. ``--summary`` writes one line per system and code from the
+rows of that pair's newest revision, the one appended last, and runs
+alone when no binaries are given.
 Anneal stops at the reference and its miss is the full budget. CREST runs
 to its own end; its energy is the first frame of ``crest_best.xyz``. A
 hit is an energy within ``HIT_TOL`` eV of the reference. This process
@@ -75,6 +79,8 @@ ROW_FIELDS = [
     "best",
     "pot_s",
     "outside_s",
+    "code_revision",
+    "host",
 ]
 SUMMARY_FIELDS = [
     "system",
@@ -83,6 +89,7 @@ SUMMARY_FIELDS = [
     "hits",
     "median_evals_to_hit",
     "median_wall_s",
+    "code_revision",
 ]
 
 WRAPPER = """#!/bin/sh
@@ -232,19 +239,27 @@ def main() -> None:
     ap.add_argument("--crest-seeds", nargs="*", type=int)
     ap.add_argument("--codes", nargs="*", default=list(CODES))
     ap.add_argument("--summary", type=Path)
+    ap.add_argument("--revision")
     args = ap.parse_args()
     if args.summary is not None and not any((args.anneal, args.crest, args.xtb)):
         summarise(args.rows, args.summary)
         return
     if None in (args.anneal, args.crest, args.xtb, args.out):
         raise SystemExit("--anneal, --crest, --xtb and --out run the panel")
+    if not args.revision:
+        raise SystemExit("--revision names the anneal revision of the rows")
     if socket.gethostname() != "bench":
         raise SystemExit("hostname is not bench")
     os.environ["RGPOT_XTB_ETEMP"] = f"{ETEMP}"
     os.environ["OMP_NUM_THREADS"] = "1"
     python = os.environ.get("PANEL_PYTHON", "/usr/bin/python3")
     rng = random.Random(SCHEDULE_SEED)
-    write_header = not args.rows.exists()
+    write_header = not args.rows.exists() or args.rows.stat().st_size == 0
+    if not write_header:
+        with open(args.rows, newline="") as handle:
+            if next(csv.reader(handle), None) != ROW_FIELDS:
+                raise SystemExit(f"{args.rows} does not have the columns {ROW_FIELDS}")
+    host = socket.gethostname()
     with open(args.rows, "a", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
         if write_header:
@@ -290,6 +305,8 @@ def main() -> None:
                     )
                 else:
                     row = run_anneal(args.anneal, system, seed, where)
+                row["code_revision"] = args.revision
+                row["host"] = host
                 writer.writerow(row)
                 handle.flush()
                 print(",".join(str(row[k]) for k in ROW_FIELDS), flush=True)
@@ -298,7 +315,11 @@ def main() -> None:
 
 
 def summarise(rows: Path, summary: Path) -> None:
-    """One line per system and code: hits, median calls and wall time."""
+    """One line per system and code: hits, median calls and wall time.
+
+    Only the rows of the pair's newest revision, the last one appended,
+    are counted.
+    """
     with open(rows, newline="") as handle:
         table = list(csv.DictReader(handle))
     with open(summary, "w", newline="") as handle:
@@ -306,13 +327,15 @@ def summarise(rows: Path, summary: Path) -> None:
         writer.writeheader()
         for system in SYSTEMS:
             for code in CODES:
-                runs = [
+                pair = [
                     row
                     for row in table
                     if row["system"] == system and row["code"] == code
                 ]
-                if not runs:
+                if not pair:
                     continue
+                newest = pair[-1]["code_revision"]
+                runs = [row for row in pair if row["code_revision"] == newest]
                 writer.writerow(
                     {
                         "system": system,
@@ -323,6 +346,7 @@ def summarise(rows: Path, summary: Path) -> None:
                             int(row["evals_to_hit"]) for row in runs
                         ),
                         "median_wall_s": f"{statistics.median(float(row['wall_s']) for row in runs):.1f}",
+                        "code_revision": newest,
                     }
                 )
 
