@@ -12,9 +12,8 @@ call fairchem at evaluate time.
 
 One `.pt2` per composition, charge and spin. The exporter embeds the
 runtime contract in the package itself
-(`aot_inductor.metadata`). `UmaPot` reads it with
-`AOTIModelPackageLoader::get_metadata()`; no file next to the
-package is read.
+(`aot_inductor.metadata`). `UmaPot` reads it from the unpacked
+package; no file next to the package is read.
 
 | Key | Use at runtime |
 | --- | --- |
@@ -133,7 +132,7 @@ python scripts/export_uma_aoti.py \
   --task omol \
   --charge 0 \
   --spin 1 \
-  --out /tmp/geometry-b8.pt2
+  --out geometry-b8.pt2
 ```
 
 `pixi run -e umaexport export-uma-aoti -- --molecular-box 30 --batch-max 8`
@@ -155,13 +154,25 @@ python scripts/export_uma_aoti.py \
   --batch-style packed \
   --batch-max 8 \
   --dtype float32 \
-  --out /tmp/geometry-packed.pt2
+  --out geometry-packed.pt2
 ```
 
 The CPU GEMM kernel is compiled for `torch.get_num_threads()` at export
 time. Set `OMP_NUM_THREADS` (and the same `MKL_NUM_THREADS` and
 `OPENBLAS_NUM_THREADS`) to the count the package will run with. The
 exporter applies `OMP_NUM_THREADS` to torch before the compile.
+
+## Unpack cache
+
+The first force call unpacks the `.pt2` (`aoti_unpack.hpp`) into
+`<root>/aoti/<sha256 of the .pt2>.model/` and builds the AOTI runner
+from there. `<root>` is `UmaConfig.cache_dir` (`UmaParams.cacheDir`
+for the engine), else `$RGPOT_CACHE_DIR`, else `$XDG_CACHE_HOME/rgpot`,
+else `.rgpot-cache` in the working directory. The unpack is built in a
+private sibling and renamed into place, so concurrent processes share
+one copy, and later runs reuse it. Nothing is written to the system
+temporary directory. `docs/orgmode/reference/engine_abi.org` has the
+layout.
 
 ## potserv
 
@@ -181,5 +192,6 @@ never links torch. Config is a Cap'n Proto `UmaParams` message.
 Molecular graphs use a large constant box so the neighbor list
 shape is stable. Do not treat that box as a periodic crystal.
 
-Elja / some HPC loaders need the AOTI execstack rewrite in
-`aoti_execstack.hpp` (`docs/newsfragments/+uma-elja-execstack.fixed.md`).
+Elja / some HPC loaders refuse an executable stack. The unpack
+clears `PT_GNU_STACK` `PF_X` in every shared library
+(`aoti_execstack.hpp`).

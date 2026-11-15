@@ -22,6 +22,11 @@ struct UmaConfig {
   /// when present; no sidecar file is read.
   double cutoff = 6.0;
   int max_neighbors = 300;
+  /// Root of the persistent cache the package is unpacked into, under
+  /// `aoti/<sha256 of the .pt2>.model/`. Empty means `$RGPOT_CACHE_DIR`,
+  /// then `$XDG_CACHE_HOME/rgpot`, then `.rgpot-cache` in the working
+  /// directory. Nothing is written to the system temporary directory.
+  std::string cache_dir;
 };
 
 } // namespace rgpot

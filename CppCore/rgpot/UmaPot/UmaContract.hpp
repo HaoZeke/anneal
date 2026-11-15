@@ -78,7 +78,7 @@ private:
 /**
  * @brief Charge, spin, task and composition embedded in a ``.pt2``.
  *
- * Built from ``AOTIModelPackageLoader::get_metadata()``. Every field is
+ * Built from the package's embedded metadata JSON. Every field is
  * optional: a key the exporter did not write is not checked.
  * ``scripts/export_uma_aoti.py`` writes ``task_name``, ``charge``,
  * ``spin``, ``z_set`` (a list such as ``[1, 6, 7]``), ``natoms`` and

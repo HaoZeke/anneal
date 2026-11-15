@@ -5,12 +5,12 @@
 
 #include "rgpot/nlist/NeighbourList.hpp"
 #include "rgpot/UmaPot/UmaContract.hpp"
-#include "rgpot/UmaPot/aoti_execstack.hpp"
+#include "rgpot/UmaPot/aoti_unpack.hpp"
 
 #include <array>
 #include <vector>
 
-#include <torch/csrc/inductor/aoti_package/model_package_loader.h>
+#include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/torch.h>
 
 #include <algorithm>
@@ -228,7 +228,7 @@ struct UmaPot::Impl {
   // and a dynamic edge count. Chunks are not padded.
   bool batch_packed{false};
   UmaContract contract;
-  std::unique_ptr<torch::inductor::AOTIModelPackageLoader> loader;
+  std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
   mutable std::mutex mutex;
 };
 
@@ -244,16 +244,36 @@ void UmaPot::recomputeParamsKey() {
 }
 
 void UmaPot::ensureLoaded() const {
-  if (m_impl->loader)
+  if (m_impl->runner)
     return;
   c10::InferenceMode guard;
-  const std::string load_path =
-      aoti_execstack::prepare_pt2_for_load(m_config.model_path);
-  m_impl->loader =
-      std::make_unique<torch::inductor::AOTIModelPackageLoader>(load_path);
+  // torch's AOTIModelPackageLoader would unpack into a fresh directory
+  // under the system temporary path; the same runner is built here from
+  // a persistent unpack under the configured cache root.
+  const auto root = aoti_unpack::resolve_cache_root(m_config.cache_dir);
+  const auto unpacked = aoti_unpack::unpack(m_config.model_path, root.path);
+  std::fprintf(stderr, "UmaPot: %s unpack %s (cache root from %s)\n",
+               unpacked.reused ? "reusing" : "created",
+               unpacked.dir.string().c_str(), root.source.c_str());
   // The package's embedded metadata is the runtime contract: one
   // producer (scripts/export_uma_aoti.py), the .pt2 self-describing.
-  const auto meta = m_impl->loader->get_metadata();
+  const auto meta = aoti_unpack::read_metadata(unpacked.metadata_json);
+  const auto device_key = meta.find("AOTI_DEVICE_KEY");
+  if (device_key == meta.end() || device_key->second.empty())
+    throw std::runtime_error("UmaPot: AOTI package " + m_config.model_path +
+                             " records no AOTI_DEVICE_KEY");
+  auto &registry = torch::inductor::getAOTIModelRunnerRegistry();
+  const auto create = registry.find(device_key->second);
+  if (create == registry.end())
+    throw std::runtime_error("UmaPot: this torch has no AOTI runner for "
+                             "device '" + device_key->second + "'");
+  c10::Device device(device_key->second);
+  device.set_index(-1);
+  m_impl->runner =
+      create->second(unpacked.so.string(), 1, device.str(),
+                     unpacked.model_dir.string(), false);
+  if (!unpacked.blob.empty())
+    m_impl->runner->update_constant_buffer_from_blob(unpacked.blob.string());
   auto num = [&](const char *key, double fallback) {
     const auto it = meta.find(key);
     if (it == meta.end() || it->second.empty())
@@ -433,7 +453,7 @@ void UmaPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   std::lock_guard<std::mutex> lock(m_impl->mutex);
   ensureLoaded();
   c10::InferenceMode guard;
-  auto outputs = m_impl->loader->run(inputs);
+  auto outputs = m_impl->runner->run(inputs);
   if (outputs.size() < 2)
     throw std::runtime_error("UmaPot: AOTI package returned <2 tensors");
 
@@ -612,7 +632,7 @@ void UmaPot::forceBatchImpl(const ForceBatch &batch) const {
 
     std::lock_guard<std::mutex> lock(m_impl->mutex);
     c10::InferenceMode guard;
-    auto outputs = m_impl->loader->run(inputs);
+    auto outputs = m_impl->runner->run(inputs);
     if (outputs.size() < 2)
       throw std::runtime_error("UmaPot: AOTI package returned <2 tensors");
     auto energies = outputs[0].to(torch::kFloat64).cpu().contiguous();

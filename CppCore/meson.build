@@ -739,10 +739,24 @@ if get_option('with_tests')
     if has_metatomic
         test_deps += _mta_engine_deps
     endif
-    test_deps += dependency(
+    catch2_dep = dependency(
         'Catch2',
         method: 'cmake',
         modules: ['Catch2::Catch2WithMain'],
+    )
+    test_deps += catch2_dep
+    # Not parallel: it asserts the system temporary directory gains no entry.
+    test(
+        'AotiUnpackTest',
+        executable(
+            'aoti_unpack_test',
+            'tests/AotiUnpackTest.cc',
+            include_directories: ['.'],
+            dependencies: [catch2_dep, dependency('threads')],
+            override_options: ['cpp_std=c++20'],
+        ),
+        workdir: meson.current_build_dir(),
+        is_parallel: false,
     )
     test_args = _args
     test_args += ['-DRGPOTTEST']
@@ -1060,13 +1074,6 @@ if get_option('with_tests')
                 link_language: 'cpp',
                 build_rpath: _metatomic_build_rpath,
             )
-            test(
-                'UmaEngineTest',
-                uma_engine_test,
-                env: uma_engine_env,
-                depends: [uma_engine],
-                workdir: meson.source_root(),
-            )
         endif
         if _rpc_stack
             executable(
@@ -1083,6 +1090,8 @@ if get_option('with_tests')
         _uma_export = meson.project_source_root() / 'scripts' / 'export_tiny_uma_contract.py'
         _uma_fix_pkgs = []
         _uma_fix_env = environment()
+        _uma_cache_dir = meson.current_build_dir() / 'uma-cache'
+        _uma_fix_env.set('RGPOT_CACHE_DIR', _uma_cache_dir)
         foreach _spec : [
             ['float64', 'both', 'UMA_FLOAT64_PT2', 'line-float64.pt2'],
             ['float32', 'both', 'UMA_FLOAT32_PT2', 'line-float32.pt2'],
@@ -1114,6 +1123,9 @@ if get_option('with_tests')
             )
             _uma_fix_pkgs += [_pkg]
             _uma_fix_env.set(_spec[2], _pkg.full_path())
+            if _spec[2] == 'UMA_FLOAT64_PT2'
+                _uma_float64 = _pkg
+            endif
         endforeach
         _uma_batch = custom_target(
             'uma-line-batch',
@@ -1301,8 +1313,18 @@ if get_option('with_tests')
             workdir: meson.source_root(),
         )
         if _rpc_stack
+            uma_engine_env.set('RGPOT_CACHE_DIR', _uma_cache_dir)
+            uma_engine_env.set('UMA_FLOAT64_PT2', _uma_float64.full_path())
+            test(
+                'UmaEngineTest',
+                uma_engine_test,
+                env: uma_engine_env,
+                depends: [uma_engine, _uma_float64],
+                workdir: meson.source_root(),
+            )
             _uma_harness_env = environment()
             _uma_harness_env.prepend('LD_LIBRARY_PATH', _torch_libdir)
+            _uma_harness_env.set('RGPOT_CACHE_DIR', _uma_cache_dir)
             test(
                 'UmaEngineHarness',
                 _uma_py,
@@ -1332,6 +1354,24 @@ if get_option('with_tests')
                 workdir: meson.source_root(),
             )
         endif
+        # Not parallel: it asserts the system temporary directory gains no entry.
+        test(
+            'UmaCacheDirTest',
+            executable(
+                'uma_cache_dir_test',
+                sources: ['tests/UmaCacheDirTest.cc'],
+                dependencies: test_deps,
+                include_directories: _incdirs + ['.'],
+                cpp_args: test_args,
+                link_with: _linkto,
+                link_language: 'cpp',
+                build_rpath: _metatomic_build_rpath,
+            ),
+            env: _uma_fix_env,
+            depends: _uma_fix_pkgs,
+            workdir: meson.current_build_dir(),
+            is_parallel: false,
+        )
         test(
             'UmaFloat64Test',
             executable(

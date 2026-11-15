@@ -991,9 +991,9 @@ def aoti_package(exported, path: Path, metadata=None):
     )
     kwargs = {"package_path": str(path)}
     if metadata:
-        # Bake the runtime contract into the package itself: the C++
-        # loader reads it via AOTIModelPackageLoader::get_metadata(),
-        # so the .pt2 is self-describing and needs no sidecar.
+        # Bake the runtime contract into the package itself: UmaPot
+        # reads it from the package's metadata JSON, so the .pt2 is
+        # self-describing and needs no sidecar.
         kwargs["inductor_configs"] = {
             "aot_inductor.metadata": {
                 str(k): str(v) for k, v in metadata.items()
