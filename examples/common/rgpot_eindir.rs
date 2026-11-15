@@ -44,6 +44,26 @@ pub(crate) fn geometry_rejected_count() -> usize {
     GEOMETRY_REJECTED.load(Ordering::Relaxed)
 }
 
+fn apply_warm_min_gap(pot: *mut c_void, lib: &Library) {
+    // Off unless the caller asks. On C10 the 1 eV guard kept a wavefunction
+    // and the search missed a minimum the fresh guess found, so this is not
+    // the default.
+    let Ok(text) = std::env::var("RGPOT_XTB_WARM_MIN_GAP") else {
+        return;
+    };
+    let Ok(gap) = text.parse::<f64>() else {
+        return;
+    };
+    if !gap.is_finite() {
+        return;
+    }
+    type SetGap = unsafe extern "C" fn(*mut c_void, f64);
+    let Ok(set_gap) = (unsafe { lib.get::<SetGap>(b"rgpot_xtb_set_warm_min_gap\0") }) else {
+        return;
+    };
+    unsafe { set_gap(pot, gap) };
+}
+
 fn note_scc_rejected(min_pair_a: f64) {
     let n = SCC_REJECTED.fetch_add(1, Ordering::Relaxed) + 1;
     eprintln!("scc_rejected {n} min_pair_A {min_pair_a:.6}");
@@ -657,6 +677,10 @@ impl RgpotObjective {
         if pot.is_null() {
             panic!("rgpot_xtb_create failed: {}", String::from_utf8_lossy(&err));
         }
+        // Optional. `RGPOT_XTB_WARM_MIN_GAP` is the gap, in eV, below which
+        // a stored wavefunction is not the next guess. Unset leaves the
+        // engine's own policy. The setter is absent on older engines.
+        apply_warm_min_gap(pot, &lib);
         let force =
             unsafe { std::mem::transmute::<Symbol<XtbForce>, Symbol<'static, XtbForce>>(force) };
         let reset =
