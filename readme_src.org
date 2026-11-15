@@ -41,6 +41,11 @@ B (in-process pyeonclient =Matter.forces=, not potserv) was 687 to 791
 ns/call. =XcKernel= is not a =Potential= and is not part of that race.
 See =docs/orgmode/howto/exprpot.org=.
 
+From Python, =rgpot.ase.RgpotCalculator= is an ASE calculator over any bound
+potential:
+~atoms.calc = RgpotCalculator("lj", u0=0.0104, psi=3.4, cutoff=8.5)~.
+See =docs/orgmode/howto/ase.org=.
+
 The public wire schema lives in ~CppCore/rgpot/rpc/Potentials.capnp~ and is
 shared by the C++ server, Python integration tests, and the Rust core crate.
 That file is the pinned potentials-schema release byte for byte; the build
