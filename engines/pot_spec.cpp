@@ -155,6 +155,12 @@ template <typename P, typename... A> Built own(A &&...args) {
   out.eval = [kernel](const ForceInput &in, ForceOut *res) {
     kernel->forceImpl(in, res);
   };
+  if constexpr (PerAtomPotential<P>) {
+    out.perAtom = [kernel](const ForceInput &in, ForceOut *res,
+                           const PerAtomOut &atoms) {
+      kernel->forcePerAtom(in, res, atoms);
+    };
+  }
   out.pot = std::move(pot);
   return out;
 }

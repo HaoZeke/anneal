@@ -9,8 +9,8 @@
 //   pair_coeff * * engine /path/to/libengine.so [El ...]
 //   pair_coeff * * Name [key value ...] El ...
 //
-// The first form is the shifted 12-6 Lennard-Jones of rgpot_lj_eval with
-// well depth u0 and zero crossing psi, truncated at the pair_style cutoff.
+// The first form is the shifted 12-6 Lennard-Jones potential LJ with well
+// depth u0 and zero crossing psi, truncated at the pair_style cutoff.
 // The second dlopens an rgpot_engine_* plugin. The third builds the rgpot
 // potential Name (a PotType name such as LJ, Morse, SuttonChen, EAMTable;
 // see engines/pot_spec.cpp) with its options. In the last two forms the
@@ -31,8 +31,14 @@
 // W_ij = -dE/de_ij over the six lower-triangular strains e of the cell
 // and the atoms, step kStrain: twelve more evaluations on each step that
 // LAMMPS asks for the virial (the setup of every run, thermo steps that
-// print a pressure, and every step of a barostat). Per-atom energy and
-// virial are not available from any backend and stop the run when
+// print a pressure, and every step of a barostat).
+//
+// Per-atom energy and virial (compute pe/atom, stress/atom and
+// centroid/stress/atom) come from potentials with forcePerAtom
+// (rgpot/PerAtom.hpp): the pair potentials split each pair term half to
+// each atom and EAM gives each atom its embedding term. Rank 0 fills them
+// on the gathered box and they are scattered by tag like the forces. A
+// potential without them, or an engine plugin, stops the run when they are
 // requested.
 
 #include "pair.h"
@@ -63,7 +69,7 @@ using namespace LAMMPS_NS;
 
 namespace {
 
-enum class Backend { LennardJones, Engine, Potential };
+enum class Backend { Engine, Potential };
 
 constexpr int kWhyLen = 512;
 constexpr double kStrain = 1.0e-5;
@@ -82,19 +88,23 @@ class PairRgpot : public Pair {
 
  protected:
   double cut_global = 0.0;
-  double u0 = 1.0;
-  double psi = 1.0;
-  Backend backend = Backend::LennardJones;
+  Backend backend = Backend::Potential;
   std::string engine_path;
   rgpot::spec::Built built;
+  // What the error names when per-atom output is requested but missing.
+  std::string pot_name;
+  // Known on every rank; only rank 0 keeps the kernel.
+  bool per_atom = false;
   bool virial_fd = false;
   // Atomic number per LAMMPS type, index 1..ntypes. 0 leaves the type out.
   std::vector<int> type_z;
 
   void allocate();
   void map_elements(int narg, char **arg, int first);
+  void use_potential(const char *name, const rgpot::spec::Options &options);
   int evaluate(std::size_t n, const double *xyz, const int *z, const double *box, double *forces,
-               double *energy, double *stress, int *has_stress, char *why);
+               double *energy, double *stress, int *has_stress, char *why,
+               const rgpot::PerAtomOut *atoms = nullptr);
   int strain_virial(std::size_t n, const double *xyz, const int *z, const double *box, double *w,
                     char *why);
 };
@@ -191,6 +201,8 @@ void PairRgpot::coeff(int narg, char **arg) {
   }
   const int ntypes = atom->ntypes;
   built = rgpot::spec::Built{};
+  per_atom = false;
+  centroidstressflag = CENTROID_NOTAVAIL;
 
   if (strcmp(arg[2], "engine") == 0) {
     if (narg != 4 && narg != 4 + ntypes) {
@@ -198,17 +210,17 @@ void PairRgpot::coeff(int narg, char **arg) {
     }
     backend = Backend::Engine;
     engine_path = arg[3];
+    pot_name = "the engine " + engine_path;
     map_elements(narg, arg, narg == 4 ? -1 : 4);
     return;
   }
 
   if (narg == 4 && utils::is_double(arg[2]) && utils::is_double(arg[3])) {
-    backend = Backend::LennardJones;
-    u0 = utils::numeric(FLERR, arg[2], false, lmp);
-    psi = utils::numeric(FLERR, arg[3], false, lmp);
+    const double psi = utils::numeric(FLERR, arg[3], false, lmp);
     if (!(psi > 0.0)) {
       error->all(FLERR, "pair_style rgpot psi must be positive");
     }
+    use_potential("LJ", {{"u0", arg[2]}, {"psi", arg[3]}});
     map_elements(narg, arg, -1);
     return;
   }
@@ -224,8 +236,13 @@ void PairRgpot::coeff(int narg, char **arg) {
   for (int k = 3; k < first_element; k += 2) {
     options.emplace_back(arg[k], arg[k + 1]);
   }
+  use_potential(arg[2], options);
+  map_elements(narg, arg, first_element);
+}
+
+void PairRgpot::use_potential(const char *name, const rgpot::spec::Options &options) {
   // Every rank checks the line; only rank 0 keeps the kernel it evaluates.
-  built = rgpot::spec::build(arg[2], options, cut_global);
+  built = rgpot::spec::build(name, options, cut_global);
   if (!built.pot) {
     error->all(FLERR, "pair_coeff rgpot: {}", built.error);
   }
@@ -234,13 +251,16 @@ void PairRgpot::coeff(int narg, char **arg) {
     error->all(FLERR,
                "rgpot potential {} has free boundaries; pair_style rgpot needs a "
                "periodic one",
-               arg[2]);
+               name);
   }
+  backend = Backend::Potential;
+  pot_name = std::string("the rgpot potential ") + name;
+  per_atom = static_cast<bool>(built.perAtom);
+  // Every force is a central pair force, so the centroid stress is vatom.
+  centroidstressflag = per_atom ? CENTROID_SAME : CENTROID_NOTAVAIL;
   if (comm->me != 0) {
     built = rgpot::spec::Built{};
   }
-  backend = Backend::Potential;
-  map_elements(narg, arg, first_element);
 }
 
 void PairRgpot::init_style() {
@@ -264,16 +284,9 @@ double PairRgpot::init_one(int, int) {
 
 int PairRgpot::evaluate(std::size_t n, const double *xyz, const int *z, const double *box,
                         double *forces, double *energy, double *stress, int *has_stress,
-                        char *why) {
+                        char *why, const rgpot::PerAtomOut *atoms) {
   *has_stress = 0;
   switch (backend) {
-  case Backend::LennardJones:
-    if (rgpot_lj_eval(xyz, z, n, box, u0, cut_global, psi, forces, energy, has_stress, stress) !=
-        0) {
-      std::snprintf(why, kWhyLen, "rgpot Lennard-Jones evaluation failed");
-      return 1;
-    }
-    return 0;
   case Backend::Engine:
     return rgpot_engine_eval(engine_path.c_str(), nullptr, 0, xyz, z, n, box, forces, energy, why,
                              kWhyLen);
@@ -282,7 +295,11 @@ int PairRgpot::evaluate(std::size_t n, const double *xyz, const int *z, const do
     rgpot::ForceInput in{n, xyz, z, box};
     rgpot::ForceOut out{forces, 0.0, 0.0, {}, 0};
     try {
-      built.eval(in, &out);
+      if (atoms != nullptr) {
+        built.perAtom(in, &out, *atoms);
+      } else {
+        built.eval(in, &out);
+      }
     } catch (const std::exception &e) {
       std::snprintf(why, kWhyLen, "%s", e.what());
       return 1;
@@ -335,9 +352,12 @@ int PairRgpot::strain_virial(std::size_t n, const double *xyz, const int *z, con
 
 void PairRgpot::compute(int eflag, int vflag) {
   ev_init(eflag, vflag);
-  if (eflag_atom || vflag_atom || cvflag_atom) {
-    error->all(FLERR, "pair_style rgpot has no per-atom energy or virial; no rgpot backend "
-                      "provides them");
+  const bool want_atoms = eflag_atom || vflag_atom;
+  if (want_atoms && !per_atom) {
+    error->all(FLERR,
+               "pair_style rgpot: {} has no per-atom energy or virial, so compute pe/atom "
+               "and stress/atom cannot be used with it",
+               pot_name);
   }
 
   const int me = comm->me;
@@ -376,6 +396,8 @@ void PairRgpot::compute(int eflag, int vflag) {
   std::vector<int> displs(static_cast<std::size_t>(nprocs), 0);
   std::vector<int> counts3(static_cast<std::size_t>(nprocs));
   std::vector<int> displs3(static_cast<std::size_t>(nprocs));
+  std::vector<int> counts6(static_cast<std::size_t>(nprocs));
+  std::vector<int> displs6(static_cast<std::size_t>(nprocs));
   int total = 0;
   if (me == 0) {
     for (int r = 0; r < nprocs; ++r) {
@@ -385,6 +407,8 @@ void PairRgpot::compute(int eflag, int vflag) {
     for (int r = 0; r < nprocs; ++r) {
       counts3[static_cast<std::size_t>(r)] = 3 * counts[static_cast<std::size_t>(r)];
       displs3[static_cast<std::size_t>(r)] = 3 * displs[static_cast<std::size_t>(r)];
+      counts6[static_cast<std::size_t>(r)] = 6 * counts[static_cast<std::size_t>(r)];
+      displs6[static_cast<std::size_t>(r)] = 6 * displs[static_cast<std::size_t>(r)];
     }
   }
   const auto n = static_cast<std::size_t>(total);
@@ -392,6 +416,8 @@ void PairRgpot::compute(int eflag, int vflag) {
   std::vector<int> all_z(std::max<std::size_t>(n, 1));
   std::vector<double> all_x(std::max<std::size_t>(3 * n, 1));
   std::vector<double> all_f(std::max<std::size_t>(3 * n, 1), 0.0);
+  std::vector<double> all_e(eflag_atom ? std::max<std::size_t>(n, 1) : 0, 0.0);
+  std::vector<double> all_v(vflag_atom ? std::max<std::size_t>(6 * n, 1) : 0, 0.0);
   MPI_Gatherv(my_tag.data(), nmine, MPI_LMP_TAGINT, all_tag.data(), counts.data(), displs.data(),
               MPI_LMP_TAGINT, 0, world);
   MPI_Gatherv(my_z.data(), nmine, MPI_INT, all_z.data(), counts.data(), displs.data(), MPI_INT, 0,
@@ -421,10 +447,14 @@ void PairRgpot::compute(int eflag, int vflag) {
       }
     }
     std::vector<double> forces(3 * n, 0.0);
+    std::vector<double> atom_e(eflag_atom ? n : 0);
+    std::vector<double> atom_v(vflag_atom ? 6 * n : 0);
+    rgpot::PerAtomOut atoms{eflag_atom ? atom_e.data() : nullptr,
+                            vflag_atom ? atom_v.data() : nullptr};
     double stress[9] = {};
     int has_stress = 0;
-    status =
-        evaluate(n, xyz.data(), z.data(), box, forces.data(), &energy, stress, &has_stress, why);
+    status = evaluate(n, xyz.data(), z.data(), box, forces.data(), &energy, stress, &has_stress,
+                      why, want_atoms ? &atoms : nullptr);
     if (status == 0 && vflag_global) {
       if (has_stress != 0 && !virial_fd) {
         // W = -dE/d(strain) = -V sigma, LAMMPS order xx yy zz xy xz yz.
@@ -437,9 +467,19 @@ void PairRgpot::compute(int eflag, int vflag) {
         status = strain_virial(n, xyz.data(), z.data(), box, w, why);
       }
     }
+    // rgpot Voigt xx yy zz yz xz xy to LAMMPS xx yy zz xy xz yz.
+    const int to_lammps[6] = {0, 1, 2, 5, 4, 3};
     for (std::size_t k = 0; k < n && status == 0; ++k) {
       for (int d = 0; d < 3; ++d) {
         all_f[3 * order[k] + d] = forces[3 * k + d];
+      }
+      if (eflag_atom) {
+        all_e[order[k]] = atom_e[k];
+      }
+      if (vflag_atom) {
+        for (int c = 0; c < 6; ++c) {
+          all_v[6 * order[k] + c] = atom_v[6 * k + to_lammps[c]];
+        }
       }
     }
   }
@@ -457,6 +497,25 @@ void PairRgpot::compute(int eflag, int vflag) {
     const int i = mine[static_cast<std::size_t>(k)];
     for (int d = 0; d < 3; ++d) {
       f[i][d] += my_f[3 * static_cast<std::size_t>(k) + d];
+    }
+  }
+  if (eflag_atom) {
+    std::vector<double> my_e(std::max(nmine, 1));
+    MPI_Scatterv(all_e.data(), counts.data(), displs.data(), MPI_DOUBLE, my_e.data(), nmine,
+                 MPI_DOUBLE, 0, world);
+    for (int k = 0; k < nmine; ++k) {
+      eatom[mine[static_cast<std::size_t>(k)]] += my_e[static_cast<std::size_t>(k)];
+    }
+  }
+  if (vflag_atom) {
+    std::vector<double> my_v(std::max<std::size_t>(6 * static_cast<std::size_t>(nmine), 1));
+    MPI_Scatterv(all_v.data(), counts6.data(), displs6.data(), MPI_DOUBLE, my_v.data(),
+                 6 * nmine, MPI_DOUBLE, 0, world);
+    for (int k = 0; k < nmine; ++k) {
+      const int i = mine[static_cast<std::size_t>(k)];
+      for (int c = 0; c < 6; ++c) {
+        vatom[i][c] += my_v[6 * static_cast<std::size_t>(k) + static_cast<std::size_t>(c)];
+      }
     }
   }
 

@@ -7,6 +7,7 @@
 // Names are the PotType enumerators, matched without case. Lengths are
 // Angstrom and energies eV.
 
+#include "rgpot/PerAtom.hpp"
 #include "rgpot/Potential.hpp"
 
 #include <functional>
@@ -24,6 +25,9 @@ struct Built {
   /// The kernel's own forceImpl, which writes the stress when caps().stress
   /// is set. ForceOut and its force buffer must arrive zeroed.
   std::function<void(const ForceInput &, ForceOut *)> eval;
+  /// The kernel's forcePerAtom (PerAtom.hpp), which also fills the per-atom
+  /// energies and virials. Empty when the potential cannot split them.
+  std::function<void(const ForceInput &, ForceOut *, const PerAtomOut &)> perAtom;
   std::string error; ///< Reason when pot is null.
 };
 
