@@ -247,6 +247,7 @@ fn run_seed(problem: Problem, arm: &str, budget: usize, seed: u64) -> (Outcome, 
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().skip(1).collect();
     assert!(args.len() >= 4, "see the usage line in the source");
     let problem = parse_problem(&args[0]);
