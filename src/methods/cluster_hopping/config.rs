@@ -2283,8 +2283,8 @@ mod coverage_behaviour {
             1.25
         );
         assert!(cfg.with_flexible_molecules(normal.view()).is_none());
-        let broken = ndarray::array![0.0, 0.0, 0.0, 1.09, 0.0, 0.0, 0.0, 1.70, 0.0, 6.0, 0.0, 0.0];
-        assert!(1.70 / 1.07 > MAX_START_BOND_TOLERANCE);
+        let far = (MAX_START_BOND_TOLERANCE + 0.1) * 1.07;
+        let broken = ndarray::array![0.0, 0.0, 0.0, 1.09, 0.0, 0.0, 0.0, far, 0.0, 6.0, 0.0, 0.0];
         assert_eq!(
             start_bond_tolerance(broken.view(), &[6, 1, 1, 6], &groups, 1.25),
             1.25

@@ -88,14 +88,14 @@ impl Topology {
         };
         let mut torsions: Vec<RotatableBond> = rotatable_bonds(x, species, tolerance)
             .into_iter()
-            .filter(|bond| inside(bond))
+            .filter(&inside)
             .collect();
         let bonds = torsions.len();
         let mut ring_dof = 0;
         if rings {
             let (cranks, dof) = ring_crankshafts(x, species, tolerance);
             let before = torsions.len();
-            torsions.extend(cranks.into_iter().filter(|crank| inside(crank)));
+            torsions.extend(cranks.into_iter().filter(&inside));
             if torsions.len() > before {
                 ring_dof = dof;
             }
@@ -147,7 +147,10 @@ impl Topology {
                 let four = [a, b, d, e];
                 let lone = |q: usize| nb[q].len() == 1;
                 let twins = four.iter().enumerate().any(|(k, &p)| {
-                    lone(p) && four[k + 1..].iter().any(|&q| lone(q) && species[q] == species[p])
+                    lone(p)
+                        && four[k + 1..]
+                            .iter()
+                            .any(|&q| lone(q) && species[q] == species[p])
                 });
                 if !twins {
                     hands.push([c, a, b, d, e]);
@@ -399,7 +402,9 @@ mod tests {
             ]);
             let first = if i == 0 { (9, 1.35) } else { (1, 1.09) };
             for ((z, length), side) in [(first, 1.0), ((1, 1.09), -1.0)] {
-                x.extend([0, 1, 2].map(|k| c[k] + length * (0.577 * bis[k] + side * 0.816 * perp[k])));
+                x.extend(
+                    [0, 1, 2].map(|k| c[k] + length * (0.577 * bis[k] + side * 0.816 * perp[k])),
+                );
                 species.push(z);
             }
         }
@@ -423,11 +428,22 @@ mod tests {
             for k in 0..3 {
                 through[3 * q + k] = 2.0 * x[3 * h[0] + k] - x[3 * q + k];
             }
-            assert!(top.inverts(x.view(), through.view()), "neighbour {q} crossed unseen");
+            assert!(
+                top.inverts(x.view(), through.view()),
+                "neighbour {q} crossed unseen"
+            );
         }
-        let turned = Array1::from_iter(x.exact_chunks(3).into_iter().flat_map(|p| [-p[1], p[0], p[2]]));
+        let turned = Array1::from_iter(
+            x.exact_chunks(3)
+                .into_iter()
+                .flat_map(|p| [-p[1], p[0], p[2]]),
+        );
         assert!(!top.inverts(x.view(), turned.view()));
-        assert!(Topology::of(x.view(), &z, 1.25, None, false).hands.is_empty());
+        assert!(
+            Topology::of(x.view(), &z, 1.25, None, false)
+                .hands
+                .is_empty()
+        );
         let mut rng = StdRng::seed_from_u64(11);
         for _ in 0..100 {
             assert!(!top.inverts(x.view(), top.propose(x.view(), &mut rng).view()));
