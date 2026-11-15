@@ -1612,10 +1612,6 @@ impl Config {
         cfg.bayes_screen = true;
         cfg.bayes_threshold =
             crate::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
-        // Arm 3: each orbit completion relaxes a shell-core candidate and a
-        // fraction-core candidate and offers the lower. Callers that keep the
-        // fraction core set it back after this preset.
-        cfg.orbit_core = OrbitCore::Both(crate::symmetrise::ShellCore::scaled(cfg.length_scale));
         cfg
     }
 
@@ -1627,11 +1623,17 @@ impl Config {
     /// hand-set pair, screen off and threshold `0.05`, is not a second
     /// default.
     pub fn for_cluster(n_points: usize) -> Self {
-        Self::screened_with_scales(
+        let mut cfg = Self::screened_with_scales(
             n_points,
             LennardJonesPreset::REDUCED_SCALE,
             LennardJonesPreset::REDUCED_SCALE,
-        )
+        );
+        // Arm 3: each orbit completion relaxes a shell-core candidate and a
+        // fraction-core candidate and offers the lower. Callers that keep the
+        // fraction core set it back after this preset. `derived` does not:
+        // it is `recommended`, which keeps the fraction core.
+        cfg.orbit_core = OrbitCore::Both(crate::symmetrise::ShellCore::scaled(cfg.length_scale));
+        cfg
     }
 
     fn screened_with_scales(n_points: usize, length_scale: f64, energy_scale: f64) -> Self {
