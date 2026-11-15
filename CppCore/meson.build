@@ -2684,6 +2684,9 @@ if get_option('with_tests')
         # Tells XTBDlopenTest to require that the bare soname resolves, so a
         # broken loader path cannot skip the module-load regression.
         xtb_test_env.set('RGPOT_XTB_EXPECT_BARE_SONAME', '1')
+        # OpenMP threads spin while waiting. Beside other tests they slow a
+        # hot cluster SCC by more than a hundredfold.
+        xtb_test_env.set('OMP_NUM_THREADS', '1')
         # Glibc and dyld snapshot the loader path at exec. setenv inside a
         # Catch process does not make the bare soname visible, so the test
         # environment (and the binary rpath below) publish xtb_engine_dir
@@ -2716,6 +2719,8 @@ if get_option('with_tests')
             depends: [xtb_engine],
             workdir: meson.source_root(),
             suite: 'xtb',
+            # Hot Si13 frames whose SCC runs out its iterations, twice.
+            timeout: 120,
         )
         test(
             'XTBDlopenTest',

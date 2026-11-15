@@ -119,10 +119,30 @@ uses xtb's own guess. `reusedWavefunction()` reports which guess the last
 successful call used. `setWarmMove` changes the guard on a live handle.
 Zero and negative values disable reuse.
 
+The guess is also dropped when the HOMO-LUMO gap is below
+`XTBConfig::warm_min_gap` electronvolts. The default is 1. With
+near-degenerate frontier orbitals the GFN SCC can have several
+self-consistent solutions. On hot Si13 a carried-over guess settles about
+5 eV below the solution that xtb reaches from its own guess. Below the
+gap, then, the energy comes from xtb's guess and does not depend on the
+call history. A previous wavefunction under the gap is not reused. A
+reused one that converges under it is solved again from xtb's guess.
+`setWarmMinGap` changes the guard on a live handle. Zero and negative
+values reuse at any gap.
+
+An SCC that does not converge never seeds another one. A reused guess
+that fails is retried from xtb's guess. Each rung of the smeared-occupation
+rescue also starts from xtb's guess. The last iterate of a near-zero-gap
+SCC can carry several electrons per atom. Seeded from it, GFN2 settles on
+a self-consistent state tens of eV below the physical one. `TBLitePot`
+replaces its result object after a failed SCF for the same reason.
+
 ```c
 void rgpot_xtb_reset(RgpotXtbPot *pot);
 void rgpot_xtb_set_warm_move(RgpotXtbPot *pot, double angstrom);
 double rgpot_xtb_warm_move(const RgpotXtbPot *pot);
+void rgpot_xtb_set_warm_min_gap(RgpotXtbPot *pot, double ev);
+double rgpot_xtb_warm_min_gap(const RgpotXtbPot *pot);
 int rgpot_xtb_reused_wavefunction(const RgpotXtbPot *pot);
 ```
 

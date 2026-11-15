@@ -177,10 +177,14 @@ XTBDlopen::XTBDlopen(const XTBDlopenConfig &config) {
       reinterpret_cast<set_warm_fn>(sym(m_lib, "rgpot_xtb_set_warm_move"));
   m_warm_move =
       reinterpret_cast<warm_move_fn>(sym(m_lib, "rgpot_xtb_warm_move"));
+  m_set_min_gap =
+      reinterpret_cast<set_warm_fn>(sym(m_lib, "rgpot_xtb_set_warm_min_gap"));
+  m_min_gap =
+      reinterpret_cast<warm_move_fn>(sym(m_lib, "rgpot_xtb_warm_min_gap"));
   m_reused =
       reinterpret_cast<reused_fn>(sym(m_lib, "rgpot_xtb_reused_wavefunction"));
   if (!abi || !m_create || !m_destroy || !m_force || !m_reset || !m_set_warm ||
-      !m_warm_move || !m_reused) {
+      !m_warm_move || !m_set_min_gap || !m_min_gap || !m_reused) {
     close_lib(m_lib);
     m_lib = nullptr;
     // The opened library is the one we selected. Do not resume the
@@ -209,6 +213,7 @@ XTBDlopen::XTBDlopen(const XTBDlopenConfig &config) {
     throw std::runtime_error(std::string("XTBDlopen: create failed: ") + err);
   }
   m_set_warm(m_pot, config.xtb.warm_move);
+  m_set_min_gap(m_pot, config.xtb.warm_min_gap);
 }
 
 void XTBDlopen::reset() {
@@ -227,6 +232,18 @@ double XTBDlopen::warmMove() const {
   if (!m_warm_move || !m_pot)
     throw std::runtime_error("XTBDlopen: engine not available");
   return m_warm_move(m_pot);
+}
+
+void XTBDlopen::setWarmMinGap(double ev) {
+  if (!m_set_min_gap || !m_pot)
+    throw std::runtime_error("XTBDlopen: engine not available");
+  m_set_min_gap(m_pot, ev);
+}
+
+double XTBDlopen::warmMinGap() const {
+  if (!m_min_gap || !m_pot)
+    throw std::runtime_error("XTBDlopen: engine not available");
+  return m_min_gap(m_pot);
 }
 
 bool XTBDlopen::reusedWavefunction() const {

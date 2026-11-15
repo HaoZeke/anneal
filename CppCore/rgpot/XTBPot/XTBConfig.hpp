@@ -26,6 +26,15 @@ struct XTBConfig {
    * negative value disables reuse.
    */
   double warm_move = 1.0;
+  /**
+   * Smallest HOMO-LUMO gap, in eV, at which the previous SCC wavefunction
+   * is still the next guess. Below it the GFN SCC can have several
+   * self-consistent solutions, and a carried-over guess can land on a
+   * different one than xtb's own guess. Such a geometry is solved from
+   * xtb's guess, so the energy does not depend on the call history. Zero
+   * or a negative value reuses the wavefunction at any gap.
+   */
+  double warm_min_gap = 1.0;
 };
 
 /** Optional engine path for the dlopen frontend (also RGPOT_XTB_ENGINE). */

@@ -56,12 +56,20 @@ bool sccUnconverged(const std::string &message) {
          message.find("Self consistent") != std::string::npos;
 }
 
+// Reading the log is what clears an xtb environment.
+void clearError(xtb_TEnvironment env) {
+  char ignored[512];
+  int ignored_len = static_cast<int>(sizeof(ignored));
+  xtb_getError(env, ignored, &ignored_len);
+}
+
 } // namespace
 
 XTBPot::XTBPot() : XTBPot(XTBConfig{}) {}
 
 XTBPot::XTBPot(const XTBConfig &config)
-    : Potential(PotType::XTB), m_config(config), m_warm_move(config.warm_move) {
+    : Potential(PotType::XTB), m_config(config), m_warm_move(config.warm_move),
+      m_warm_min_gap(config.warm_min_gap) {
   initHandles();
 }
 
@@ -75,6 +83,10 @@ void XTBPot::reset() {
 void XTBPot::setWarmMove(double angstrom) { m_warm_move = angstrom; }
 
 double XTBPot::warmMove() const noexcept { return m_warm_move; }
+
+void XTBPot::setWarmMinGap(double ev) { m_warm_min_gap = ev; }
+
+double XTBPot::warmMinGap() const noexcept { return m_warm_min_gap; }
 
 bool XTBPot::reusedWavefunction() const noexcept { return m_last_reused; }
 
@@ -142,6 +154,37 @@ void XTBPot::freshResults() const {
   if (!m_res)
     throw std::runtime_error("Failed to create xtb results");
   m_has_wavefunction = false;
+}
+
+double XTBPot::frontierGap() const {
+  // GFN-FF has no orbitals, and asking for them logs an xtb error.
+  if (m_config.method == GFNMethod::GFNFF)
+    return std::numeric_limits<double>::infinity();
+  int nao = 0;
+  xtb_getNao(m_env, m_res, &nao);
+  if (xtb_checkEnvironment(m_env) != 0 || nao <= 0) {
+    clearError(m_env);
+    return std::numeric_limits<double>::infinity();
+  }
+  m_orbital_buffer.resize(2 * static_cast<size_t>(nao));
+  double *emo = m_orbital_buffer.data();
+  double *occ = emo + nao;
+  xtb_getOrbitalEigenvalues(m_env, m_res, emo);
+  xtb_getOrbitalOccupations(m_env, m_res, occ);
+  if (xtb_checkEnvironment(m_env) != 0) {
+    clearError(m_env);
+    return std::numeric_limits<double>::infinity();
+  }
+  double electrons = 0.0;
+  for (int i = 0; i < nao; ++i)
+    electrons += occ[i];
+  // Occupations are summed over spin. The highest occupied level holds
+  // the last electron, smeared or not.
+  const long nel = std::lround(electrons);
+  const long homo = (nel + 1) / 2 - 1;
+  if (homo < 0 || homo + 1 >= nao)
+    return std::numeric_limits<double>::infinity();
+  return (emo[homo + 1] - emo[homo]) * HARTREE_TO_EV;
 }
 
 bool XTBPot::singlepoint(std::string *error) const {
@@ -244,8 +287,14 @@ void XTBPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   // The results object holds the previous SCC wavefunction. xtb reads it
   // as the guess. Past warm_move that guess is slower than xtb's own, so
   // the results object is replaced before the single point.
+  //
+  // With near-degenerate frontier orbitals the SCC can have more than one
+  // self-consistent solution, and a guess carried over from another
+  // geometry can settle on a different one than xtb's own guess does.
+  // Below warm_min_gap the energy therefore comes from xtb's guess.
   bool reuse = !composition_changed && m_has_wavefunction &&
-               m_warm_move > 0.0 && moved <= m_warm_move;
+               m_warm_move > 0.0 && moved <= m_warm_move &&
+               !(m_gap < m_warm_min_gap);
 
   if (composition_changed) {
     if (m_mol) {
@@ -276,7 +325,7 @@ void XTBPot::forceImpl(const ForceInput &in, ForceOut *out) const {
   xtb_setMaxIter(m_env, m_calc, first_pass);
   std::string message;
   bool converged = singlepoint(&message);
-  if (reuse && !converged) {
+  if (reuse && (!converged || frontierGap() < m_warm_min_gap)) {
     // What follows is a fresh call.
     reuse = false;
     freshResults();
@@ -286,6 +335,7 @@ void XTBPot::forceImpl(const ForceInput &in, ForceOut *out) const {
     discardAfterFailure();
     throw std::runtime_error(message);
   }
+  m_gap = frontierGap();
 
   double energy_hartree;
   xtb_getEnergy(m_env, m_res, &energy_hartree);
