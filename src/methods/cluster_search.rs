@@ -35,7 +35,7 @@ use eindir_core::gradient::DifferentiableObjective;
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use std::cell::{Cell, RefCell};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 /// Search time and the Euclidean answer polish that follows it.
@@ -181,7 +181,21 @@ struct Check {
     gradient: Array1<f64>,
 }
 
-type PaidCheck = Mutex<Option<Check>>;
+/// Gradient already charged by a relaxation, shared with the driver's check.
+#[derive(Clone)]
+struct PaidCheck(Arc<Mutex<Option<Check>>>);
+
+impl Default for PaidCheck {
+    fn default() -> Self {
+        Self(Arc::new(Mutex::new(None)))
+    }
+}
+
+impl PaidCheck {
+    fn lock(&self) -> std::sync::LockResult<std::sync::MutexGuard<'_, Option<Check>>> {
+        self.0.lock()
+    }
+}
 
 fn largest_component(gradient: ArrayView1<f64>) -> f64 {
     gradient
@@ -670,7 +684,19 @@ pub fn warm_relax<'a, O>(
     cfg: &'a Config,
     stats: &'a mut RelaxStats,
     seed: u64,
-    paid: &'a PaidCheck,
+) -> impl FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + 'a
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    warm_relax_with(objective, cfg, stats, seed, PaidCheck::default())
+}
+
+fn warm_relax_with<'a, O>(
+    objective: &'a O,
+    cfg: &'a Config,
+    stats: &'a mut RelaxStats,
+    seed: u64,
+    paid: PaidCheck,
 ) -> impl FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + 'a
 where
     O: DifferentiableObjective<f64> + ?Sized,
@@ -1396,7 +1422,7 @@ where
     // what lets both closures exist at once.
     let searched = {
         let paid = PaidCheck::default();
-        let mut relax = warm_relax(objective, cfg, &mut stats, seed, &paid);
+        let mut relax = warm_relax_with(objective, cfg, &mut stats, seed, paid.clone());
         let mut grad = gated_grad(objective, &paid);
 
         // Value and gradient in one charge, which is what a Hamiltonian leapfrog
@@ -1488,7 +1514,7 @@ where
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let searched = {
         let paid = PaidCheck::default();
-        let mut relax = warm_relax(objective, cfg, &mut stats, seed, &paid);
+        let mut relax = warm_relax_with(objective, cfg, &mut stats, seed, paid.clone());
         let mut grad = gated_grad(objective, &paid);
         let mut energy_anchor = None;
         let mut energy_grad =
@@ -1688,7 +1714,7 @@ where
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let out = {
         let paid = PaidCheck::default();
-        let mut relax = warm_relax(objective, cfg, &mut stats, seed, &paid);
+        let mut relax = warm_relax_with(objective, cfg, &mut stats, seed, paid.clone());
         let mut grad = gated_grad(objective, &paid);
         let mut energy_anchor = None;
         let mut energy_grad =
@@ -1747,7 +1773,7 @@ where
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let paid = PaidCheck::default();
     let out = {
-        let mut relax = warm_relax(objective, cfg, &mut stats, seed, &paid);
+        let mut relax = warm_relax_with(objective, cfg, &mut stats, seed, paid.clone());
         let mut grad = gated_grad(objective, &paid);
         crate::methods::cluster_hopping::run_with_history(
             cfg,
@@ -1815,7 +1841,7 @@ where
     };
     let paid = PaidCheck::default();
     let mut stats = RelaxStats::default();
-    let _ = warm_relax(&watched, &tight, &mut stats, 0, &paid)(ledger, x, iters);
+    let _ = warm_relax_with(&watched, &tight, &mut stats, 0, paid)(ledger, x, iters);
     watched.best.into_inner().expect("lowest point")
 }
 
@@ -2145,7 +2171,7 @@ where
     let mut stats = RelaxStats::default();
     let mut bank_validation_charged = 0usize;
     let paid = PaidCheck::default();
-    let mut relax = warm_relax(objective, cfg, &mut stats, seed, &paid);
+    let mut relax = warm_relax_with(objective, cfg, &mut stats, seed, paid.clone());
     let mut grad = gated_grad(objective, &paid);
 
     let mut cfg = cfg.clone();
@@ -3820,7 +3846,7 @@ mod tests {
         let paid = PaidCheck::default();
         let mut stats = RelaxStats::default();
         let mut led = Ledger::new(20_000);
-        let mut relax = warm_relax(&chain, &cfg, &mut stats, 0, &paid);
+        let mut relax = warm_relax_with(&chain, &cfg, &mut stats, 0, paid);
         let (_, x) = relax(&mut led, chain.start().view(), 5_000);
         (
             led.spent(),
@@ -3875,7 +3901,7 @@ mod tests {
         let paid = PaidCheck::default();
         let mut stats = RelaxStats::default();
         let mut led = Ledger::new(20_000);
-        let mut relax = warm_relax(&logged, &cfg, &mut stats, 0, &paid);
+        let mut relax = warm_relax_with(&logged, &cfg, &mut stats, 0, paid);
         let (_, x) = relax(&mut led, chain.start().view(), 5_000);
         drop(relax);
         let points = log.lock().unwrap();
@@ -3895,7 +3921,7 @@ mod tests {
         let mut stats = RelaxStats::default();
         let mut led = Ledger::new(20_000);
         led.best = -1.0e6;
-        let mut relax = warm_relax(&chain, &cfg, &mut stats, 0, &paid);
+        let mut relax = warm_relax_with(&chain, &cfg, &mut stats, 0, paid.clone());
         let (_, x) = relax(&mut led, chain.start().view(), cfg.screen_steps);
         drop(relax);
         assert_eq!(stats.capped, 1);
@@ -3925,7 +3951,7 @@ mod tests {
         let paid = PaidCheck::default();
         let mut stats = RelaxStats::default();
         let mut led = Ledger::new(20_000);
-        let mut relax = warm_relax(&chain, &cfg, &mut stats, 0, &paid);
+        let mut relax = warm_relax_with(&chain, &cfg, &mut stats, 0, paid);
         let (quenched, x) = relax(&mut led, chain.start().view(), cfg.relax_steps);
         let (polished, y) = relax(&mut led, x.view(), cfg.polish_records);
         drop(relax);
@@ -3943,7 +3969,7 @@ mod tests {
         let mut stats = RelaxStats::default();
         let mut led = Ledger::new(20_000);
         let (quenched, x) =
-            warm_relax(&chain, &cfg, &mut stats, 0, &paid)(&mut led, chain.start().view(), 500);
+            warm_relax_with(&chain, &cfg, &mut stats, 0, paid)(&mut led, chain.start().view(), 500);
         let mut tail = Ledger::new(400);
         let settled = settle(&chain, &cfg, &mut tail, x.view(), 1e-4, 1_000).expect("settled");
         assert!(settled.energy < quenched, "{} {quenched}", settled.energy);
