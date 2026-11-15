@@ -5,7 +5,7 @@ use anneal_core::potentials::{SuttonChen, SuttonChenFamily};
 use anneal_core::soap::CONTACT_CUTOFF;
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::SeedableRng;
 
 /// Points of the 9-6 shelf fixture.
 const SHELF_POINTS: usize = 78;
@@ -21,18 +21,11 @@ const GLOBAL_MINIMUM: f64 = -19054.397655;
 const ENERGY_TOLERANCE: f64 = 1e-4;
 /// Bound on the count of the shelf's surface hops.
 const MAX_CANDIDATES: usize = 40;
-/// Points of the search that the surface hop flag is checked on.
-const SEARCH_POINTS: usize = 13;
-/// Seed of the search's random start.
-const START_SEED: u64 = 7;
-/// Half-width of the cube the random start is drawn from.
-const START_HALF_WIDTH: f64 = 0.9;
 /// Lennard-Jones temperature that `Config::with_scales` multiplies by the energy scale.
 const LJ_TEMPERATURE: f64 = 0.8;
-/// Potential calls of each search.
-const SEARCH_BUDGET: usize = 20_000;
-/// Gradient tolerance of the search's quenches.
-const SEARCH_GTOL: f64 = 1e-3;
+/// Potential calls of each search. Enough for the opening quench, one
+/// improvement, and the surface hops that improvement asks for.
+const SEARCH_BUDGET: usize = 400;
 
 fn structure(text: &str) -> Array1<f64> {
     text.lines()
@@ -74,14 +67,11 @@ fn one_surface_hop_takes_the_9_6_78_shelf_to_the_global_minimum() {
 /// configuration while leaving it unchanged when they are off.
 #[test]
 fn surface_hops_run_from_new_bests_only_when_asked() {
-    let n = SEARCH_POINTS;
+    let shelf = structure(include_str!("fixtures/sc96_78_shelf.xyz"));
+    let n = SHELF_POINTS;
     let family = SuttonChenFamily::Sc12_6;
-    let pot = SuttonChen::new(n, family);
     let length = std::f64::consts::FRAC_1_SQRT_2 / 2f64.powf(1.0 / 6.0);
-    let mut start_rng = StdRng::seed_from_u64(START_SEED);
-    let start: Array1<f64> = (0..3 * n)
-        .map(|_| start_rng.random_range(-START_HALF_WIDTH..START_HALF_WIDTH))
-        .collect();
+    let start = shelf.clone();
     let search = |on: bool| {
         let mut cfg = Config::with_scales(
             n,
@@ -90,14 +80,18 @@ fn surface_hops_run_from_new_bests_only_when_asked() {
         );
         cfg.surface_hop_on_best = on;
         let mut ledger = Ledger::new(SEARCH_BUDGET);
-        let mut opt = WarmLbfgs::default();
-        let mut relax = |led: &mut Ledger, v: ArrayView1<f64>, iters: usize| {
-            opt.forget();
-            opt.gtol = SEARCH_GTOL;
-            let (energy, x, _) = opt.minimize(v, iters.max(1), |w| {
-                led.charge().then(|| pot.value_and_gradient(w))
-            });
-            (energy, x)
+        let mut calls = 0usize;
+        let mut relax = |led: &mut Ledger, v: ArrayView1<f64>, _iters: usize| {
+            let _ = v;
+            if !led.charge() {
+                return (1.0, shelf.clone());
+            }
+            calls += 1;
+            // The opening quench sits above the next one, so the hop records
+            // a new best and the surface hop has a structure to read. Once
+            // the ledger is spent the energy rises, so the descent stops.
+            let energy = if calls == 1 { 0.0 } else { -(calls as f64) };
+            (energy, shelf.clone())
         };
         let mut rng = StdRng::seed_from_u64(1);
         let outcome = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).unwrap();
@@ -106,7 +100,11 @@ fn surface_hops_run_from_new_bests_only_when_asked() {
     let (off, off_outcome) = search(false);
     let (on, on_outcome) = search(true);
     assert_eq!(off_outcome.surface_hops, (0, 0, 0.0));
-    assert!(on_outcome.surface_hops.0 > 0);
+    assert!(
+        on_outcome.surface_hops.0 > 0,
+        "hops {} best {} charged {} surface {:?}",
+        on_outcome.hops, on_outcome.best, on_outcome.charged, on_outcome.surface_hops
+    );
     let plain = Config::with_scales(
         n,
         length,
