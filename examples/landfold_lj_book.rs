@@ -78,6 +78,7 @@ fn chain(n: usize, steps: usize, seed: u64, start: Option<Vec<f64>>) -> Vec<(f64
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = env::args().skip(1).collect();
     assert!(
         args.len() >= 4,
