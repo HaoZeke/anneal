@@ -390,6 +390,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
+    parser.add_argument("--only", nargs=3, metavar=("SYSTEM", "SEED", "ARM"))
     args = parser.parse_args(argv)
     if os.uname().nodename != "bench":
         print("uts hostname is not bench", file=sys.stderr)
@@ -402,8 +403,14 @@ def main(argv: list[str]) -> int:
     head = args.head_file.read_text().strip()
     revision = load_source(args.source)
     check_potentials(args.binary, args.gmin, args.fixtures, args.runs)
+    jobs = schedule()
+    if args.only:
+        system, seed_text, arm = args.only
+        if system not in PAPER_BUDGETS or arm not in ARMS:
+            raise SystemExit(f"unknown job {system} {arm}")
+        jobs = [(system, int(seed_text), arm)]
     rows: list[dict] = []
-    for system, seed, arm in schedule():
+    for system, seed, arm in jobs:
         budget = PAPER_BUDGETS[system]
         log = args.logs / system / f"{arm}-{seed}.log"
         log.parent.mkdir(parents=True, exist_ok=True)
@@ -446,6 +453,8 @@ def main(argv: list[str]) -> int:
             f"wall={result['wall_s']:.3f}",
             flush=True,
         )
+    if args.only:
+        return 0
     summary = summarise(rows, head, revision)
     args.summary.parent.mkdir(parents=True, exist_ok=True)
     with args.summary.open("w", newline="") as handle:

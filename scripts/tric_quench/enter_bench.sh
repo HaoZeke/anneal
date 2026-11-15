@@ -4,6 +4,7 @@
 # TRIC and Cartesian. One UTS namespace, hostname bench, working directory
 # /work, one core.
 #   enter_bench.sh [run options]   replay the quenches, then summarise
+#                                  (TRIC_QUENCH_ROWS, TRIC_QUENCH_SUMMARY)
 #   enter_bench.sh search          whole searches with each anneal quench
 set -euo pipefail
 
@@ -13,6 +14,8 @@ WORK=/work/tric-quench
 BASE=${OPENCONF_H2H_ENV:-/work/env}
 PREFIX=${TRIC_QUENCH_ENV:-/work/env-dev}
 CORE=${TRIC_QUENCH_CORE:-0}
+ROWS=${TRIC_QUENCH_ROWS:-$WORK/quenches.csv}
+SUMMARY=${TRIC_QUENCH_SUMMARY:-$ROOT/bench/tric-quench/results.csv}
 
 # The head-to-head campaign imports anneal from the base environment; this
 # bench installs the checkout into a venv layered over it.
@@ -47,8 +50,8 @@ if [ "\${1:-}" = search ]; then
   exit 0
 fi
 [ -f $WORK/starts.npz ] || \$run starts
-\$run run "\$@"
-\$run summary
+\$run run --out $ROWS "\$@"
+\$run summary --out $ROWS --summary $SUMMARY
 EOF
 chmod +x "$WORK/inside.sh"
 

@@ -16,7 +16,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 REF=$ROOT/bench/water-h2o20-goat/reference.csv
-OUT_CSV=$ROOT/bench/water-h2o20-goat/results.csv
+OUT_CSV=${H2O_OUT_CSV:-$ROOT/bench/water-h2o20-goat/results.csv}
 BIN=${ANNEAL_BIN:-/work/gfn2_water_h2h}
 CREST=${CREST_BIN:-/work/crestenv/.pixi/envs/default/bin/crest}
 XTB=${XTB_BIN:-/work/xtb-gfn2}

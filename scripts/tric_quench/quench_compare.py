@@ -59,6 +59,7 @@ WALL_EV_PER_A2 = 200.0
 SCC_FAILURE_EV = 1.0e6
 ARMS = ("anneal", "tric", "cart", "anneal_tric")
 SAME_EV = 1e-3
+MAX_ITER = 3000
 SAME_RMSD = 0.1
 
 WATER = (np.array([[0.0, 0.0, 0.1173], [0.0, 0.7572, -0.4692], [0.0, -0.7572, -0.4692]]), [8, 1, 1])
@@ -657,7 +658,7 @@ def main():
     parser.add_argument("--searches", type=Path, default=Path("/work/tric-quench/searches.csv"))
     parser.add_argument("--take", type=int, default=10)
     parser.add_argument("--drugs", type=int, default=50)
-    parser.add_argument("--max-iter", type=int, default=3000)
+    parser.add_argument("--max-iter", type=int, default=MAX_ITER)
     parser.add_argument("--only", nargs="*")
     parser.add_argument("--arms", nargs="*", default=list(ARMS), choices=ARMS)
     args = parser.parse_args()
