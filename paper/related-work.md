@@ -1088,3 +1088,11 @@ The search is a surface. It gives no Lennard-Jones energy and no hexamer count, 
 
 Cite `kurodaSurface2026`.
 
+## 2026-11-15 — A quantile gap on random Lennard-Jones minima
+
+Wu, Chen, and Molodtsova, doi:10.5281/zenodo.18731033 (22 February 2026), compare a low empirical energy quantile with the reference minimum of a Lennard-Jones cluster. The public description says each of four sizes is 20,000 local minimisations from blind starts, and that the quantile gap grows approximately linearly with the particle count. It calls the note descriptive. It does not state an asymptotic law, and it does not offer a proof for the large-system limit. The public description does not name the four sizes. The reference list on the deposit includes Wales and Doye on basin hopping, and Doye, Miller, and Wales on the double funnel of the 38-atom cluster.
+
+The manuscript scores 38, 55, 75, 98, and 104 atoms against the published Cambridge energies. This deposit measures a quantile of random local minima against a reference minimum. It does not report an energy below that reference, so it does not contradict the Cambridge hit targets, 121 of 192, or 97 of 192. A count of blind local minimisations is not the force-call hit rate. Because the public description does not name the manuscript sizes, it does not warrant a head-to-head on the sealed maps or on the CREST hexamer table.
+
+Cite `wuQuantileGap2026`.
+
