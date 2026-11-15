@@ -1,0 +1,8 @@
+baseline = "x86-64"
+
+# The dispatch fixtures have no entry for their clones: the auditor has to
+# prove them. libgcc's CPU model initialiser is linked in for the checks.
+[[allow]]
+symbol = '^__cpu_indicator_init$'
+features = ["xsave"]
+reason = "libgcc __builtin_cpu_supports initializer; xgetbv reads XCR0"

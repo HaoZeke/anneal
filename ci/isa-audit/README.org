@@ -9,7 +9,8 @@ A binary built on an AVX-512 host, or with a stray ~-mavx2~ or
 instruction set.
 This gate decodes every executable section and rejects an instruction
 outside the baseline unless the instruction sits in a function the
-allowlist names for that feature.
+allowlist names for that feature, or in a dispatched clone the gate
+proves from the binary (see [[*Dispatched clones]]).
 
 The baseline is x86-64 on x86_64 files and armv8-a on aarch64 files.
 ~--baseline x86-64-v2~ also accepts SSE3, SSSE3, SSE4.1, SSE4.2 and
@@ -73,6 +74,64 @@ A file with no function symbols fails closed (~no symbols~).
 Release jobs must audit unstripped artefacts.
 ~.symtab~ is used when it contains functions, otherwise ~.dynsym~.
 
+* Dispatched clones
+
+=dispatch.py= finds, in a linked x86_64 ELF (=ET_DYN=: a shared library
+or a PIE), the functions that run only after a CPU check, so a new
+clone needs no allowlist entry and a renamed one cannot leave a stale
+entry behind.
+A function is a dispatched clone for a feature set when all of these
+hold:
+
+- its symbol is =STB_LOCAL=, no global, weak, ifunc or dynamic symbol
+  points into it, and no relocation targets it (a function pointer in
+  data, =.init_array=, a vtable), so no code outside the file can enter
+  it;
+- it has at least one code reference, and every code reference (a
+  call, a jump, a conditional tail jump, or a RIP-relative =lea=) is
+  inside a function symbol with no computed jump;
+- on every path from that function's entry to the reference, a
+  conditional branch proved the libgcc CPU-model bits for the features.
+  The bits are read from =__cpu_model= or =__cpu_features2= (direct,
+  through =lea= or through a GOT slot) and tested with =test=, =and=,
+  =not=/=and= (all of a mask), =and=/=cmp=, =bt= or a sign test.
+  An address taken with =lea= is followed through register copies and
+  =cmov=, so a =target_clones= resolver that selects with =cmovne= is
+  understood. A test can sit in a probe the compiler did not inline
+  (=-O0=, =noinline=): a small function called directly counts as a
+  guard for the features in force wherever it returns a value other
+  than a constant zero, following =setcc=, =movzx=, a masked feature
+  bit and per-path constants into =eax=;
+- or the reference comes from another dispatched clone, which passes on
+  its own proof (a helper called only from an AVX2 body).
+
+The features allowed in the clone are the proven bits closed under
+GCC's =-m= implications (=-mavx2= also enables AVX, SSE3 to SSE4.2,
+POPCNT and XSAVE), plus the VEX FMA and F16C forms GNU as uses inside an
+AVX-512F body.
+A block that no direct edge reaches, such as a landing pad, starts with
+nothing proven.
+A stripped file proves nothing.
+=tests/test_dispatch.py= checks the bit table and the implications
+against the installed GCC.
+
+This covers =__builtin_cpu_supports= dispatch and the
+=target_clones= resolvers GCC emits, optimised or at =-O0=.
+It does not cover an exported function (any caller may enter it), a
+guard on a cached flag such as =rgpot::simd::detail::fma_hw_active()=,
+whose meaning the binary does not show, Clang's =target_clones= (Clang
+gives the clones global symbols), a probe result kept in a stack slot
+(Clang at =-O0=), aarch64, or Mach-O.
+Those still need an allowlist entry.
+The report lists each proven clone with the features it used and its
+dispatchers:
+
+: DISPATCHED file symbol [features] via dispatcher
+
+=tests/plant.py= overwrites one instruction of a named function with
+=vzeroupper=, which the audit must then report unless the function is a
+dispatched clone.
+
 * Running it
 
 Python 3.10 or newer.
@@ -127,7 +186,8 @@ Rust v0 and legacy names and Itanium C++ names are demangled before
 the match.
 Crate disambiguators are omitted.
 
-=rgpot/isa-allow.toml= names two kinds of exception.
+=rgpot/isa-allow.toml= names two kinds of exception that the proof
+cannot see.
 Vendored libraries that auditwheel or delocate copy into the wheel
 (OpenBLAS with =DYNAMIC_ARCH=, libgfortran matmul variants, libgomp,
 and libquadmath copied in with libgfortran) select kernels inside
@@ -140,19 +200,16 @@ That attribute also emits AVX encodings.
 Each helper is entered only after
 =rgpot::simd::detail::glibc_fma_active()= reports a usable FMA, which
 follows glibc's hwcaps mask.
-The tight Lennard-Jones cluster kernel's =target("avx2")= bodies
-(=lj_avx2=, =eval_quad=, and =acc_quad=) are named for =avx= and
-=avx2=.
-=lj_cluster_direct= calls =lj_avx2= only after
-=__builtin_cpu_supports("avx2")=.
-That builtin pulls in GCC's =__cpu_indicator_init=, which reads XCR0
-with =xgetbv= and is named for =xsave=.
+These helpers are exported, so the dispatch proof cannot cover them.
+=__builtin_cpu_supports= pulls in GCC's =__cpu_indicator_init=, which
+reads XCR0 with =xgetbv= and is named for =xsave=.
 The same allowlist names the minimum-image and pair-list FMA bodies
 =fold_hardware= and =accumulateHw=.
 Those bodies run only when a usable FMA is reported.
-=exp_fixed_n= and =morse_row= clones for AVX2 and AVX-512F are named
-because function multiversioning emits them, and each clone returns the
-baseline bits.
+The =target("avx2")= Lennard-Jones cluster bodies (=lj_avx2= and the
+helpers it calls), the AVX2 Cambridge Morse, cluster Lennard-Jones and
+Gupta bodies, and the =target_clones= clones of =exp_fixed_n= are not
+named: the gate proves them as dispatched clones.
 =cpuid_fma_usable= reads XCR0 with =xgetbv= after CPUID reports OSXSAVE,
 and is named for =xsave= together with =__cpu_indicator_init=.
 An above-baseline instruction in any other =librgpot= or =_core=
