@@ -1,5 +1,5 @@
-system,code,runs,hits,median_evals_to_hit,median_wall_s
-si10,anneal-general,12,12,666.0,33.2
-si10,crest,4,4,99300.5,2699.1
-c10,anneal-general,12,11,6350.0,14.6
-c10,crest,12,4,78367.0,439.5
+system,code,runs,hits,median_evals_to_hit,median_wall_s,code_revision
+si10,anneal-general,12,12,665.5,36.1,ce1e7a46826cf51784ed26587c14b2747f5f48e1
+si10,crest,4,4,99300.5,2699.1,8b4a2592a087d85c458ca67ed2c47fed08814be8
+c10,anneal-general,12,12,2516.5,10.9,ce1e7a46826cf51784ed26587c14b2747f5f48e1
+c10,crest,12,4,78367.0,439.5,8b4a2592a087d85c458ca67ed2c47fed08814be8

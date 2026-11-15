@@ -27,9 +27,13 @@ that log.
 
 Each seed's start is anneal's random start for that seed, written before
 any search. The (seed, code) pairs of a system run in a shuffled order.
-``--codes`` and ``--crest-seeds`` select the arms and CREST's seeds, and
-``--summary`` writes one line per system and code, alone when no binaries
-are given.
+``--codes`` and ``--crest-seeds`` select the arms and CREST's seeds.
+
+Rows are appended and never rewritten. Each carries ``code_revision``,
+the anneal revision in ``--head-file`` for anneal and ``CREST_REVISION``
+for CREST, and ``host``, the UTS hostname. ``--summary`` writes one line per system and code from the
+rows of that pair's newest revision, the one appended last, and runs
+alone when no binaries are given.
 Anneal stops at the reference and its miss is the full budget. CREST runs
 to its own end; its energy is the first frame of ``crest_best.xyz``. A
 hit is an energy within ``HIT_TOL`` eV of the reference. This process
@@ -86,6 +90,7 @@ SUMMARY_FIELDS = [
     "hits",
     "median_evals_to_hit",
     "median_wall_s",
+    "code_revision",
 ]
 
 WRAPPER = """#!/bin/sh
@@ -259,6 +264,8 @@ def main() -> None:
         return
     if None in (args.anneal, args.crest, args.xtb, args.out):
         raise SystemExit("--anneal, --crest, --xtb and --out run the panel")
+    if args.head_file is None:
+        raise SystemExit("--head-file names the anneal revision of the rows")
     if socket.gethostname() != "bench":
         raise SystemExit("hostname is not bench")
     os.environ["RGPOT_XTB_ETEMP"] = f"{ETEMP}"
@@ -323,7 +330,11 @@ def main() -> None:
 
 
 def summarise(rows: Path, summary: Path) -> None:
-    """One line per system and code: hits, median calls and wall time."""
+    """One line per system and code: hits, median calls and wall time.
+
+    Only the rows of the pair's newest revision, the last one appended,
+    are counted.
+    """
     with open(rows, newline="") as handle:
         table = list(csv.DictReader(handle))
     with open(summary, "w", newline="") as handle:
@@ -331,13 +342,15 @@ def summarise(rows: Path, summary: Path) -> None:
         writer.writeheader()
         for system in SYSTEMS:
             for code in CODES:
-                runs = [
+                pair = [
                     row
                     for row in table
                     if row["system"] == system and row["code"] == code
                 ]
-                if not runs:
+                if not pair:
                     continue
+                newest = pair[-1]["code_revision"]
+                runs = [row for row in pair if row["code_revision"] == newest]
                 writer.writerow(
                     {
                         "system": system,
@@ -348,6 +361,7 @@ def summarise(rows: Path, summary: Path) -> None:
                             int(row["evals_to_hit"]) for row in runs
                         ),
                         "median_wall_s": f"{statistics.median(float(row['wall_s']) for row in runs):.1f}",
+                        "code_revision": newest,
                     }
                 )
 
