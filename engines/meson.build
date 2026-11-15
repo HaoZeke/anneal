@@ -51,7 +51,7 @@ rgpot_lj = executable(
     link_with: rgpot,
     include_directories: rgpot_inc,
     cpp_args: _args,
-    install: true,
+    install: not meson.is_subproject(),
 )
 test(
     'lj_eval',
@@ -72,7 +72,7 @@ lj_engine = shared_library(
     link_with: rgpot,
     include_directories: rgpot_inc,
     cpp_args: _args + ['-DRGPOT_ENGINE_BUILD'],
-    install: true,
+    install: not meson.is_subproject(),
 )
 test(
     'lj_engine',
@@ -288,7 +288,7 @@ if plumed_opt.allowed()
             include_directories: [engines_inc, rgpot_inc],
             cpp_args: _args,
             name_prefix: 'lib',
-            install: true,
+            install: not meson.is_subproject(),
         )
         if python3_engines.found() and find_program('plumed', required: false).found()
             test(
@@ -330,6 +330,27 @@ if python3_engines.found()
         python3_engines,
         args: [files('../docs/check_c_symbols.py')],
         timeout: 30,
+    )
+endif
+
+# Configures a parent project around this tree, so it needs meson on PATH
+# and only runs from the top-level build.
+meson_prog = find_program('meson', required: false)
+if (
+    get_option('with_tests')
+    and not meson.is_subproject()
+    and python3_engines.found()
+    and meson_prog.found()
+)
+    test(
+        'optional_engine_install',
+        python3_engines,
+        args: [
+            files('test_optional_engine_install.py'),
+            meson.project_source_root(),
+            meson_prog.full_path(),
+        ],
+        timeout: 300,
     )
 endif
 
@@ -423,7 +444,7 @@ native_lj_engine = shared_library(
     link_with: rgpot,
     include_directories: rgpot_inc,
     cpp_args: _args + ['-DRGPOT_ENGINE_BUILD'],
-    install: true,
+    install: not meson.is_subproject(),
 )
 external_pot_test = executable(
     'test_external_potentials',
@@ -467,7 +488,7 @@ if openmm_opt.allowed() and python3_engines.found()
                 cpp_args: _args + ['-DRGPOT_ENGINE_BUILD'],
                 build_rpath: openmm_libdir,
                 install_rpath: openmm_libdir,
-                install: true,
+                install: not meson.is_subproject(),
             )
             external_env.set('RGPOT_OPENMM_ENGINE', openmm_engine.full_path())
             external_env.set('OPENMM_PLUGIN_DIR', openmm_libdir / 'plugins')
