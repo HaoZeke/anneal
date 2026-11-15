@@ -227,7 +227,9 @@ if lammps_opt.allowed() and python3_engines.found()
                         'mpiexec',
                         required: false,
                     )
-                    if lammps_mpirun.found()
+                    # Each rank of a serial lmp is a world of one, so the
+                    # MPI cases skip instead of comparing rank counts.
+                    if lammps_mpirun.found() and not lammps_stubs
                         pair_env.set('RGPOT_MPIRUN', lammps_mpirun.full_path())
                     endif
                     test(
