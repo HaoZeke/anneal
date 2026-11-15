@@ -34,7 +34,10 @@ check fails when
   diff_files to the pinned checkout.
 
 append adds the entries the effective schema declares and the ledger lacks,
-at the end of the ledger. It never rewrites an existing line.
+at the end of the ledger. It never rewrites an existing line. When the pin
+adopts a local entry unchanged, append retires it by adding the same entry
+again as upstream; the later line wins, and check then wants the entry gone
+from the series.
 
 apply writes the effective schema: the vendored copy plus the series.
 """
@@ -298,8 +301,29 @@ def parse_ledger(text: str, label: str) -> list[Entry]:
             raise LedgerError(f"{label}:{lineno}: malformed ledger line {raw!r}")
         scope, ordinal, kind, name, kind_type, origin = m.groups()
         entries.append(Entry(scope, int(ordinal), kind, name, kind_type, origin))
-    _unique(entries, label)
+    seen: dict[tuple[str, int], Entry] = {}
+    for entry in entries:
+        old = seen.get(entry.key)
+        if old is not None and not _retires(old, entry):
+            raise LedgerError(f"{label}: {entry.line()} reuses the ordinal of {old.line()}")
+        seen[entry.key] = entry
+    _unique(resolve_ledger(entries), label)
     return entries
+
+
+def _retires(old: Entry, new: Entry) -> bool:
+    """A later upstream line for a local entry retires it once upstream adopts it."""
+    return old.origin == "local" and new.origin == "upstream" and old.same(new)
+
+
+def resolve_ledger(entries: list[Entry]) -> list[Entry]:
+    """One entry per ordinal: the last line for it, at the place of the first."""
+    latest = {e.key: e for e in entries}
+    out = []
+    for entry in entries:
+        if latest.get(entry.key) is not None:
+            out.append(latest.pop(entry.key))
+    return out
 
 
 LEDGER_HEADER = """\
@@ -477,11 +501,17 @@ def base_ledger(root: Path, base: str) -> str | None:
 
 def check_append_only(base: list[Entry], current: list[Entry]) -> list[str]:
     errors = []
-    position = {e.key: i for i, e in enumerate(current)}
-    old_keys = {e.key for e in base}
+
+    def ident(e: Entry) -> tuple[tuple[str, int], str]:
+        return (e.key, e.origin)
+
+    position = {ident(e): i for i, e in enumerate(current)}
+    old_keys = {ident(e) for e in base}
     last = -1
     for old in base:
-        at = position.get(old.key)
+        at = position.get(ident(old))
+        if at is None:
+            at = position.get((old.key, "upstream" if old.origin == "local" else "local"))
         if at is None:
             errors.append(f"ledger entry disappeared: {old.line()}")
         elif current[at] != old:
@@ -491,7 +521,7 @@ def check_append_only(base: list[Entry], current: list[Entry]) -> list[str]:
         else:
             last = at
     for entry in current[: last + 1]:
-        if entry.key not in old_keys:
+        if ident(entry) not in old_keys:
             errors.append(f"ledger entry inserted before existing ones: {entry.line()} (append at the end)")
     return errors
 
@@ -509,7 +539,12 @@ def check_upstream(ledger: list[Entry], upstream: list[Entry]) -> list[str]:
             elif not theirs.same(entry):
                 errors.append(f"pinned upstream has {theirs.describe()}, ledger has {entry.line()}")
         else:
-            if theirs is not None and not theirs.same(entry):
+            if theirs is not None and theirs.same(entry):
+                errors.append(
+                    f"pinned upstream now declares local {entry.describe()}; drop it from the local "
+                    "series and run append to retire it"
+                )
+            elif theirs is not None:
                 errors.append(f"local {entry.describe()} collides with upstream {theirs.describe()}")
             other = up_name.get((entry.scope, entry.name))
             if other is not None and other.ordinal != entry.ordinal:
@@ -621,7 +656,8 @@ def run_check(args: argparse.Namespace) -> int:
     root = args.root.resolve()
     wrap = read_wrap(root)
     ledger_path = args.ledger or root / LEDGER
-    ledger = parse_ledger(ledger_path.read_text(encoding="utf-8"), str(ledger_path))
+    lines = parse_ledger(ledger_path.read_text(encoding="utf-8"), str(ledger_path))
+    ledger = resolve_ledger(lines)
     errors: list[str] = []
     notes: list[str] = []
 
@@ -630,7 +666,7 @@ def run_check(args: argparse.Namespace) -> int:
         if old is None:
             notes.append(f"{LEDGER} does not exist at {args.base}; append-only check skipped")
         else:
-            errors += check_append_only(parse_ledger(old, f"{args.base}:{LEDGER}"), ledger)
+            errors += check_append_only(parse_ledger(old, f"{args.base}:{LEDGER}"), lines)
 
     if wrap.diff_files:
         errors.append(
@@ -687,7 +723,7 @@ def run_append(args: argparse.Namespace) -> int:
     wrap = read_wrap(root)
     ledger_path = args.ledger or root / LEDGER
     text = ledger_path.read_text(encoding="utf-8") if ledger_path.exists() else LEDGER_HEADER
-    ledger = parse_ledger(text, str(ledger_path))
+    ledger = resolve_ledger(parse_ledger(text, str(ledger_path)))
     upstream_text = args.upstream.read_text(encoding="utf-8") if args.upstream else fetch_upstream(wrap)
     upstream = {e.key: e for e in schema_entries(upstream_text, "pinned upstream")}
     known = {e.key: e for e in ledger}
@@ -696,14 +732,16 @@ def run_append(args: argparse.Namespace) -> int:
     fresh = []
     for entry in copy:
         old = known.get(entry.key)
+        theirs = upstream.get(entry.key)
         if old is not None:
             if not old.same(entry):
                 raise LedgerError(
                     f"effective schema has {entry.describe()}, ledger has {old.line()}; "
                     "append will not rewrite it"
                 )
+            if old.origin == "local" and theirs is not None and theirs.same(entry):
+                fresh.append(dataclasses.replace(entry, origin="upstream"))
             continue
-        theirs = upstream.get(entry.key)
         origin = "upstream" if theirs is not None and theirs.same(entry) else "local"
         fresh.append(dataclasses.replace(entry, origin=origin))
     if fresh:

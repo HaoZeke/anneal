@@ -382,6 +382,28 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("pinned upstream: git object", done.stdout)
 
+    @unittest.skipIf(shutil.which("git") is None, "git is not installed")
+    def test_upstream_adopting_a_local_field_retires_it(self) -> None:
+        _git(self.root, "init", "-q")
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-q", "-m", "base")
+        adopted = self.effective()
+
+        self.upstream.write_text(adopted, encoding="utf-8")
+        self.assertRejected("pinned upstream now declares local ForceInput @2 field tag :Text")
+
+        self.write_tree(adopted)
+        self.assertRejected("carries local ForceInput @2 field tag :Text")
+        self.assertEqual(self.run_tool("append", "--upstream", str(self.upstream)), 0)
+        lines = self.ledger().read_text(encoding="utf-8")
+        self.assertIn("ForceInput @2 field tag :Text local\n", lines)
+        self.assertTrue(lines.endswith("ForceInput @2 field tag :Text upstream\n"))
+        self.assertEqual(self.check("--base", "HEAD"), 0, self.err.getvalue())
+
+        self.ledger().write_text(lines + "ForceInput @2 field tag :Text local\n", encoding="utf-8")
+        self.assertEqual(self.check(), 1)
+        self.assertIn("reuses the ordinal of", self.err.getvalue())
+
     def test_append_refuses_to_rewrite(self) -> None:
         self.set_vendored(self.vendored().replace("de @0 :Float64", "de @0 :Float32"))
         self.assertEqual(self.run_tool("append", "--upstream", str(self.upstream)), 1)
