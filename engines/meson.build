@@ -163,7 +163,7 @@ if lammps_opt.allowed() and python3_engines.found()
             pair_plugin = shared_library(
                 'pair_rgpot',
                 files('lammps/pair_rgpot.cpp'),
-                dependencies: [lj_dep] + (
+                dependencies: [lj_dep, pot_spec_dep] + (
                     lammps_dep.found() ? [lammps_dep] : []
                 ),
                 link_with: rgpot,
