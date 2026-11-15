@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Summarise bench/decide/rows.csv against the baseline rows.
+"""Summarise bench/decide/rows.csv against a reference arm.
 
 One line per (variant, system) and one ``total`` line per variant.
-Hits use a two-sided Fisher exact test against the baseline; calls to
+``--reference`` names the arm the others are tested against, ``develop``
+by default; the other unswitched arm is left out. Hits use a two-sided
+Fisher exact test against the reference; calls to
 hit, with a miss at the full budget, use a two-sided Mann-Whitney U
 with the normal approximation, tie and continuity corrections. Medians
 and interquartile ranges are Hyndman-Fan type 7. ``pot`` is time inside
@@ -96,7 +98,9 @@ def mann_whitney_two_sided(x: list[float], y: list[float]) -> float:
     return min(1.0, math.erfc(max(z, 0.0) / math.sqrt(2.0)))
 
 
-def summarise(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+def summarise(rows: list[dict[str, str]], reference: str = "develop") -> list[dict[str, str]]:
+    others = {"baseline", "develop"} - {reference}
+    rows = [row for row in rows if row["variant"] not in others]
     groups: dict[tuple[str, str], list[dict[str, str]]] = {}
     systems: list[str] = []
     variants: list[str] = []
@@ -106,15 +110,15 @@ def summarise(rows: list[dict[str, str]]) -> list[dict[str, str]]:
             systems.append(row["system"])
         if row["variant"] not in variants:
             variants.append(row["variant"])
-    if "baseline" in variants:
-        variants.remove("baseline")
-        variants.insert(0, "baseline")
+    if reference in variants:
+        variants.remove(reference)
+        variants.insert(0, reference)
     out = []
     for variant in variants:
         total_hits = total_base = total_n = 0
         for system in systems:
             mine = groups.get((variant, system))
-            base = groups.get(("baseline", system))
+            base = groups.get((reference, system))
             if not mine:
                 continue
             seeds = {r["seed"] for r in mine}
@@ -138,7 +142,7 @@ def summarise(rows: list[dict[str, str]]) -> list[dict[str, str]]:
                 "baseline_calls_median": "",
                 "mannwhitney_p": "",
             }
-            if base and variant != "baseline":
+            if base and variant != reference:
                 base_hits = sum(r["hit"] == "1" for r in base)
                 base_calls = [float(r["evals_to_hit"]) for r in base]
                 line["baseline_hits"] = str(base_hits)
@@ -155,7 +159,7 @@ def summarise(rows: list[dict[str, str]]) -> list[dict[str, str]]:
                 "system": "total",
                 "n": str(total_n),
                 "hits": str(total_hits),
-                "baseline_hits": "" if variant == "baseline" else str(total_base),
+                "baseline_hits": "" if variant == reference else str(total_base),
                 "fisher_p": "",
                 "calls_median": "",
                 "calls_iqr": "",
@@ -175,6 +179,8 @@ def lands(lines: list[dict[str, str]], variant: str) -> bool:
     if not mine:
         return False
     for line in mine:
+        if not line["baseline_hits"]:
+            return False
         lost = int(line["hits"]) < int(line["baseline_hits"])
         if lost and float(line["fisher_p"]) < ALPHA:
             return False
@@ -188,15 +194,16 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rows", type=Path, default=ROOT / "bench/decide/rows.csv")
     parser.add_argument("--out", type=Path, default=ROOT / "bench/decide/summary.csv")
+    parser.add_argument("--reference", default="develop")
     args = parser.parse_args(argv)
     rows = list(csv.DictReader(args.rows.open()))
-    lines = summarise(rows)
+    lines = summarise(rows, args.reference)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, FIELDS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(lines)
-    for variant in sorted({l["variant"] for l in lines} - {"baseline"}):
+    for variant in sorted({l["variant"] for l in lines} - {args.reference}):
         print(f"{variant}: {'lands' if lands(lines, variant) else 'stays off'}")
     return 0
 
