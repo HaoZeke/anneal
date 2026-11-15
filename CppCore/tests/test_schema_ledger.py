@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import configparser
 import contextlib
 import io
 import os
@@ -433,7 +434,42 @@ class LedgerTest(unittest.TestCase):
         )
 
 
+def _pinned_upstream(tmp: Path) -> Path:
+    """The pinned Potentials.capnp: meson's checkout of the wrap, else a fetch."""
+    wrap = L.read_wrap(ROOT)
+    parser = configparser.ConfigParser()
+    parser.read(ROOT / L.WRAP, encoding="utf-8")
+    checkout = ROOT / "subprojects" / parser["wrap-git"]["directory"] / L.SCHEMA_NAME
+    if checkout.is_file():
+        text, _ = L.upstream_from_subproject(checkout, wrap)
+    else:
+        try:
+            text = L.fetch_upstream(wrap)
+        except (OSError, subprocess.CalledProcessError) as exc:
+            if os.environ.get("CI"):
+                raise
+            raise unittest.SkipTest(f"cannot fetch {wrap.url} at {wrap.revision}: {exc}") from exc
+    path = tmp / L.SCHEMA_NAME
+    path.write_text(text, encoding="utf-8", newline="\n")
+    return path
+
+
 class RepositoryTest(unittest.TestCase):
+    def test_vendored_copies_are_the_pinned_release(self) -> None:
+        # The comparison a parent project (gpridge) runs as
+        # schema-sync-canonical-rpc and schema-sync-canonical-core.
+        sync = ROOT / "CppCore" / "rgpot" / "rpc" / "schema_sync_check.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            pinned = _pinned_upstream(Path(tmp))
+            for rel in L.VENDORED:
+                done = subprocess.run(
+                    [sys.executable, str(sync), str(ROOT / rel), str(pinned)],
+                    capture_output=True,
+                    check=False,
+                    encoding="utf-8",
+                )
+                self.assertEqual(done.returncode, 0, f"{rel}: {done.stderr.strip()}")
+
     def test_vendored_copies_match_the_ledger(self) -> None:
         err = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
