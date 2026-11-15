@@ -35,6 +35,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let pick = std::env::args().nth(1).unwrap_or_else(|| "all".to_owned());
     let mut total = Sha256::new();
     for (name, n, budget) in SYSTEMS {
