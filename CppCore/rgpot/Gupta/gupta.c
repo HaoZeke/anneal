@@ -3,10 +3,11 @@
 #include <math.h>
 #include <stdlib.h>
 
-#if defined(__GNUC__)
+// The AVX2 clone and its CPU probe are x86 only. Other targets build the
+// scalar kernel alone.
+#if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
+#define RGPOT_AVX2_CLONE 1
 #define RGPOT_TARGET_AVX2 __attribute__((target("avx2,fma")))
-#else
-#define RGPOT_TARGET_AVX2
 #endif
 
 #if defined(_MSC_VER) && !defined(__clang__)
@@ -51,6 +52,7 @@ static void gupta_scalar(const double *x, size_t n, const unsigned char *slot,
 #include "gupta_body.inc"
 }
 
+#ifdef RGPOT_AVX2_CLONE
 RGPOT_TARGET_AVX2
 static void gupta_avx2(const double *x, size_t n, const unsigned char *slot, size_t n_species,
                        const double *a, const double *xi, const double *p, const double *q,
@@ -59,19 +61,18 @@ static void gupta_avx2(const double *x, size_t n, const unsigned char *slot, siz
 }
 
 static int have_avx2_fma(void) {
-#if defined(__GNUC__)
   return __builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma");
-#else
-  return 0;
-#endif
 }
+#endif
 
 void rgpot_gupta(const double *x, size_t n, const unsigned char *slot, size_t n_species,
                  const double *a, const double *xi, const double *p, const double *q,
                  const double *r0, double *energy, double *gradient) {
+#ifdef RGPOT_AVX2_CLONE
   if (have_avx2_fma()) {
     gupta_avx2(x, n, slot, n_species, a, xi, p, q, r0, energy, gradient);
     return;
   }
+#endif
   gupta_scalar(x, n, slot, n_species, a, xi, p, q, r0, energy, gradient);
 }
