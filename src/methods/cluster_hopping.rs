@@ -10870,6 +10870,100 @@ mod tests {
     }
 
     #[test]
+    fn exchange_scans_read_raw_energies_only_for_two_labels() {
+        // A zero-step call is not charged, so it does not move the budget.
+        // Sum of squares is unchanged by a permutation, so a scan that only
+        // reads does not move the chain. The extra reads are the scan.
+        fn count_raw_reads(cfg: &Config) -> usize {
+            let mut rng = StdRng::seed_from_u64(11);
+            let start = random_cluster(
+                cfg.n_points,
+                cfg.start_radius(),
+                cfg.min_separation,
+                &mut rng,
+            );
+            let mut ledger = Ledger::new(240);
+            let mut raw = 0usize;
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+                if steps == 0 {
+                    raw += 1;
+                } else {
+                    for _ in 0..steps {
+                        if !led.charge() {
+                            break;
+                        }
+                    }
+                }
+                (
+                    x.iter().map(|value| value * value).sum::<f64>(),
+                    x.to_owned(),
+                )
+            };
+            let mut rng = StdRng::seed_from_u64(11);
+            run(cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("search");
+            raw
+        }
+
+        let mut binary = Config::recommended(6).with_species(vec![29, 29, 29, 79, 79, 79], None);
+        binary.homotop_ranked = false;
+        binary.homotop_window = false;
+        binary.return_screen = false;
+        binary.bayes_screen = false;
+        binary.screen_margin = 1.0e9;
+        binary.screen_steps = 2;
+        binary.relax_steps = 4;
+        binary.escape_on_stall = false;
+        binary.trail_on_stall = false;
+        binary.tabu_on_stall = false;
+        binary.symmetrise_on_stall = false;
+        binary.prior_soap = false;
+        binary.prior_reseed = false;
+        binary.prior_growth = false;
+        binary.prior_core = false;
+        binary.prior_motif = false;
+        binary.energy_lattice = false;
+        binary.orbit_complete_on_new = false;
+        binary.continuous_symmetry = ContinuousSymmetry::Off;
+        binary.soap_mode = SoapProposalMode::Off;
+        let with_descent = count_raw_reads(&binary);
+        binary.homotop_descent = false;
+        let without_descent = count_raw_reads(&binary);
+        assert!(
+            with_descent > without_descent,
+            "a two-label quench scores unlike exchanges at the raw energy ({with_descent} against {without_descent})"
+        );
+
+        binary.homotop_ranked = true;
+        let with_ranked = count_raw_reads(&binary);
+        binary.homotop_ranked = false;
+        assert!(
+            with_ranked > count_raw_reads(&binary),
+            "a new best ranks unlike exchanges by the raw energy ({with_ranked})"
+        );
+
+        let mut plain = Config::recommended(6);
+        plain.homotop_ranked = false;
+        plain.homotop_window = false;
+        plain.return_screen = false;
+        plain.bayes_screen = false;
+        plain.screen_margin = 1.0e9;
+        plain.screen_steps = 2;
+        plain.relax_steps = 4;
+        plain.escape_on_stall = false;
+        plain.trail_on_stall = false;
+        plain.continuous_symmetry = ContinuousSymmetry::Off;
+        plain.energy_lattice = false;
+        plain.soap_mode = SoapProposalMode::Off;
+        let plain_on = count_raw_reads(&plain);
+        plain.homotop_descent = false;
+        assert_eq!(
+            count_raw_reads(&plain),
+            plain_on,
+            "one label has nothing to exchange"
+        );
+    }
+
+    #[test]
     fn a_physical_quench_widens_the_sphere_and_a_reduced_one_does_not() {
         let cfg = Config::recommended(8);
         let mut reduced = Array1::zeros(24);
