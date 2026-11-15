@@ -579,6 +579,22 @@ rule agox_gofee_h2h:
         """
 
 
+# LJ98 current AGOX, documented AGOX, and anneal. Not part of `rule all`.
+# The script rewrites the summary from the committed rows and does not
+# start a search.
+#   snakemake -s workflow/Snakefile agox_lj98
+rule agox_lj98:
+    input:
+        "bench/agox-lj98/rows.csv",
+    output:
+        "bench/agox-lj98/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        bash scripts/agox_lj98/enter_bench.sh
+        """
+
+
 # Paired (H2O)16 rows. Not part of `rule all`. The script rewrites the
 # summary from the committed seeds and does not start a search.
 #   snakemake -s workflow/Snakefile h2o16_crest

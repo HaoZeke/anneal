@@ -2,9 +2,9 @@
 # Copyright (c) anneal developers
 """Run one ASE or AGOX arm of the Lennard-Jones board.
 
-Usage: python3 scripts/lj_board/run_arm.py CODE SIZE SEED
-CODE is ase or agox.
-The budget is the paper ceiling for that size. It is not an argument.
+Usage: python3 scripts/lj_board/run_arm.py CODE SIZE SEED [BUDGET]
+CODE is ase, agox, or agox-documented.
+The budget defaults to the paper ceiling for that size.
 Exit 75 means a wall stopped the run. The log keeps the charged count.
 """
 
@@ -47,6 +47,12 @@ from boardlib import (
 import numpy as np
 
 WALL = {"stop": False}
+
+# Both AGOX arms. The documented arm keeps stock BoxConstraint.adjust_forces
+# and the stock generator distance check. The current arm replaces both.
+AGOX_VERSION = "3.11.1"
+AGOX_COMMIT = "0a5136605161aaff2610584cd93ae6e9564fda46"
+AGOX_WHEEL_SHA256 = "f8b4f49b0e5a053c1b69205633c8b19523cd188b4001a12f093aaaa7f6250457"
 _STDERR = os.dup(2)
 
 
@@ -130,7 +136,24 @@ def out_dir() -> Path:
     return root
 
 
-def prepare_agox_import():
+def require_agox_pin() -> str:
+    """Refuse an AGOX install that is not the wheel both arms ran."""
+    import importlib.metadata as metadata
+    import json
+
+    version = metadata.version("agox")
+    if version != AGOX_VERSION:
+        raise SystemExit(f"agox {version} is not {AGOX_VERSION}")
+    raw = metadata.distribution("agox").read_text("direct_url.json")
+    if not raw:
+        raise SystemExit("agox direct_url.json is missing")
+    digest = json.loads(raw).get("archive_info", {}).get("hashes", {}).get("sha256", "")
+    if digest != AGOX_WHEEL_SHA256:
+        raise SystemExit("agox wheel sha256 does not match the pin")
+    return version
+
+
+def prepare_agox_import(documented=False):
     import ase.constraints as ase_constraints
     from ase.constraints.constraint import IndexedConstraint, slice2enlist
 
@@ -143,6 +166,10 @@ def prepare_agox_import():
     from agox.utils.constraints.box_constraint import BoxConstraint
     from ase.data import covalent_radii
 
+    # Documented cluster scripts attach environment.get_constraints() and
+    # leave BoxConstraint.adjust_forces and the position check unchanged.
+    if documented:
+        return
     if getattr(BoxConstraint, "_board_fast", False):
         return
     original_check = GeneratorBaseClass.check_new_position
@@ -356,11 +383,10 @@ def run_ase(n, budget, reference, seed, work: Path):
     return calc, note, "ase-basinhopping"
 
 
-def run_agox(n, budget, reference, seed, work: Path):
+def run_agox(n, budget, reference, seed, work: Path, documented=False):
     install_fast_bfgs()
-    prepare_agox_import()
+    prepare_agox_import(documented=documented)
     import contextlib
-    import importlib.metadata as metadata
 
     from ase import Atoms
     from ase.optimize import BFGS
@@ -373,9 +399,7 @@ def run_agox(n, budget, reference, seed, work: Path):
     from agox.samplers import MetropolisSampler
     from ase.calculators.singlepoint import SinglePointCalculator
 
-    version = metadata.version("agox")
-    if version != "3.11.1":
-        raise SystemExit(f"agox {version} is not 3.11.1")
+    version = require_agox_pin()
     radius = (3.0 * n / (4.0 * np.pi * 0.7)) ** (1.0 / 3.0)
     span = max(2.0 * radius + 4.0, 8.0)
     margin = 1.0
@@ -460,8 +484,12 @@ def run_agox(n, budget, reference, seed, work: Path):
         f"agox={version} AGOX+Database+Environment+RattleGenerator+"
         "MetropolisSampler+LocalOptimizationEvaluator "
         f"temperature={WALES_TEMPERATURE} rattle_amplitude={WALES_STEP} "
-        f"n_rattle={n} c1={c1:.6f} use_mic=0 position_check=array "
-        f"fmax={FORCE_BAR} steps={200} "
+        f"n_rattle={n} c1={c1:.6f} use_mic=0 "
+        f"position_check={'stock' if documented else 'array'} "
+        f"box_adjust={'stock' if documented else 'patched'} "
+        f"constraints=environment.get_constraints() documented={int(documented)} "
+        f"commit={AGOX_COMMIT} wheel={AGOX_WHEEL_SHA256} "
+        f"fmax={FORCE_BAR} steps=200 "
         f"seed={seed} "
         "citation=Christiansen,Ronne,Hammer,J.Chem.Phys.157,054701,2022;"
         "Wales,Doye,J.Phys.Chem.A,101,5111,1997"
@@ -561,7 +589,7 @@ def main() -> int:
         raise SystemExit(f"seed {seed} is not in the frozen held-out list")
     if n not in PAPER_BUDGETS:
         raise SystemExit(f"size {n} has no paper budget")
-    if code not in {"ase", "agox"}:
+    if code not in {"ase", "agox", "agox-documented"}:
         raise SystemExit(f"unknown arm {code}")
     if len(sys.argv) == 5:
         budget = int(sys.argv[4])
@@ -592,7 +620,9 @@ def main() -> int:
         if code == "ase":
             calc, note, native = run_ase(n, budget, reference, seed, work)
         else:
-            calc, note, native = run_agox(n, budget, reference, seed, work)
+            calc, note, native = run_agox(
+                n, budget, reference, seed, work, documented=(code == "agox-documented")
+            )
         payload = finish_calculator(calc, note, native, reference, budget, work)
         payload.update(
             {"code": code, "n": n, "seed": seed, "budget": budget, "reference": reference}
