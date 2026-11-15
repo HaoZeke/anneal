@@ -175,3 +175,50 @@ run on f0dfa206; seeds 2000 at 15 and 2001 at 20 reproduce on 3141987e call
 for call. The variants were scratch builds that are not committed. The
 summary is `diag21.py mechanisms` over their run directories, one
 `variant:n:dir` argument per row in table order.
+
+## Novel-basin reward and basin-archive taboo
+
+The misses above spend 61 to 87% of their quenches returning to the basin they
+left, and the allocator pays a rigid arm only for a new incumbent. Two general
+mechanisms address that. Each is tried alone and the two are tried together,
+at n = 12 on every chart, with nothing set by size.
+
+- **(a) Novel-basin reward.** An arm is paid when its quench lowers the
+  incumbent, or when the quench's fingerprint is not yet in this run's basin
+  archive (`bias.locate` finds no seat). On the Bernoulli allocator that is
+  the reward. On the depth allocator (Lennard-Jones and Sutton-Chen
+  `recommended`), a revisit earns the shallowest depth any arm has reached so
+  far in the run, instead of its own depth. Stride-skipped uphill proposals
+  have no lookup and keep the old reward.
+- **(b) Basin-archive taboo.** For each archive seat, count the quenches from
+  that seat that land on a basin already in the archive, and reset the count
+  when one lands on a new basin. The proposal step from that seat is
+  multiplied by √(1 + count / k). Here k is the run's own trials per accept,
+  hops over accepted hops.
+
+TIP4P runs are `h2h_seed` at 2 M calls with the panel's stop target. LJ38 and
+LJ75 are `h2h_gmin_proof` at the paper budgets from the GMIN-shared starts.
+sc96-80 is `h2h_sc` at 1 M calls. All runs are serial on one core. Every run is
+on df550674: the baseline on develop, the variants on scratch builds. The
+same baseline seeds give identical calls and best on ca6adf99, but only the
+clock changes there, so the times are those of df550674. Per-seed rows are
+`rows-novel-basins.csv`. Hits, medians, median time inside and outside the
+potential, Fisher p and the lost and gained seeds are in
+`summary-novel-basins.csv`. Both are written from the run logs by
+`scripts/tip4p_h2h/novel_basins.py rows` and `summary`.
+
+| Variant | (H₂O)₂₁ | (H₂O)₂₀ | (H₂O)₁₅ | (H₂O)₈ | LJ38 | LJ75 | sc96-80 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| baseline | 0/12 −914.368 | 6/12 −868.867 | 7/12 −628.371 | 12/12 | 12/12 | 10/12 | 7/12 |
+| (a) | 0/12 −912.261 | 0/12 −862.394 | 8/12 −628.371 | 12/12 | 12/12 | 11/12 | 7/12 |
+| (b) | 0/12 −913.767 | 1/12 −864.080 | 8/12 −628.371 | 12/12 | 12/12 | 12/12 | 7/12 |
+| (a)+(b) | 1/12 −913.679 | 2/12 −862.095 | 5/12 −623.877 | 12/12 | 12/12 | 12/12 | 5/12 |
+
+Water cells give hits and the median best in kJ/mol. None of the three is made
+default. (a) and (b) do not raise (H₂O)₂₁, and the median falls. (a)+(b)
+reaches the minimum once (seed 2011) with a lower median. Every variant loses
+five or six of the six (H₂O)₂₀ hits: Fisher p 0.014 for (a), 0.069 for (b) and
+0.19 for (a)+(b). (a)+(b) also loses three (H₂O)₁₅ seeds and four sc96-80
+seeds. LJ75 gains one or two seeds under each variant (Fisher p 0.48 for (b)
+and (a)+(b)), LJ38 and (H₂O)₈ stay at 12/12, and sc96-80 under (a) or (b) loses
+three seeds and gains three.
