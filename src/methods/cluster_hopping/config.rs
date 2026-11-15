@@ -746,6 +746,10 @@ pub struct Config {
     /// that posterior. Rewards, screens, and the move library stay as they are.
     #[serde(skip_serializing_if = "arm_selection_is_posterior")]
     pub arm_selection: ArmSelection,
+    /// How a bandit [`Config::arm_selection`] is held to the preset's
+    /// schedule and rewarded. Ignored by the other selections.
+    #[serde(skip_serializing_if = "BanditShaping::is_plain")]
+    pub bandit: BanditShaping,
     /// Reward the move allocator only for accepted hops that land in a new
     /// basin, not for accepted returns.
     ///
@@ -1400,16 +1404,45 @@ impl ArmSelection {
     }
 }
 
+/// Constraints and reward of the move bandit. All off is the plain bandit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+pub struct BanditShaping {
+    /// Keep the preset's schedule as a floor under the bandit.
+    ///
+    /// The reseed, plateau leave and angular relocation still run whenever
+    /// the preset's own gates call for them, and each kernel keeps at least
+    /// [`crate::methods::cluster_hopping::bandit::FLOOR_SHARE`] of the draws
+    /// the preset's allocator gives it. The bandit chooses the rest, and may
+    /// add stall actions the gates did not call for.
+    pub floor: bool,
+    /// Reward a decision for reaching a new lowest basin, one per charged
+    /// call, instead of for the energy it took off the best.
+    pub record_reward: bool,
+    /// Forget every arm's statistics when the chain leaves a plateau.
+    pub reset_on_leave: bool,
+}
+
+impl BanditShaping {
+    /// True when nothing is set.
+    pub fn is_plain(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 impl Config {
     /// Apply a comma-separated list of decision switches.
     ///
     /// `thompson` and `ducb` set [`ArmSelection::Thompson`] and
-    /// [`ArmSelection::DiscountedUcb`]. An empty list changes nothing.
+    /// [`ArmSelection::DiscountedUcb`]. `floor`, `record` and `reset` set
+    /// the fields of [`BanditShaping`]. An empty list changes nothing.
     pub fn apply_decisions(&mut self, spec: &str) -> Result<(), String> {
         for token in spec.split(',').map(str::trim).filter(|t| !t.is_empty()) {
             match token {
                 "thompson" => self.arm_selection = ArmSelection::Thompson,
                 "ducb" => self.arm_selection = ArmSelection::DiscountedUcb,
+                "floor" => self.bandit.floor = true,
+                "record" => self.bandit.record_reward = true,
+                "reset" => self.bandit.reset_on_leave = true,
                 other => return Err(format!("unknown decision switch {other}")),
             }
         }
@@ -1762,6 +1795,7 @@ impl Config {
             energy_bias: false,
             depth_reward: false,
             arm_selection: ArmSelection::Posterior,
+            bandit: BanditShaping::default(),
             novel_reward: false,
             soft_perturb: false,
             soft_modes: 6,

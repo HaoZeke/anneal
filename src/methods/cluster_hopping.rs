@@ -98,8 +98,8 @@ mod torsion;
 
 pub use crate::methods::minima_hopping::SharedVisitPolicy;
 pub use config::{
-    ArmSelection, Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore, PairRange,
-    SoapProposalMode,
+    ArmSelection, BanditShaping, Config, ContinuousSymmetry, Keying, LadderMode, OrbitCore,
+    PairRange, SoapProposalMode,
 };
 pub use moves::*;
 
@@ -4114,8 +4114,15 @@ where
         } else {
             bandit::Rule::Thompson
         };
-        DiscountedBandit::new(arms, rule)
+        let reward = if cfg.bandit.record_reward {
+            bandit::Reward::Record
+        } else {
+            bandit::Reward::Gain
+        };
+        DiscountedBandit::new(arms, rule).with_reward(reward)
     });
+    let mut kernel_floor =
+        (bandit.is_some() && cfg.bandit.floor).then(|| bandit::KernelFloor::new(kernels.len()));
     // Per-arm draws and accepts. The crate's own methods note says a solve
     // count cannot tell a mechanism that works poorly from one that does not
     // run, and a move set is exactly where that applies: an arm the allocator
@@ -5764,7 +5771,7 @@ where
         let call_due = hops > 0
             && ledger.spent().saturating_sub(charged_at_best) >= cfg.restart_patience.max(1);
         let leave_due = match bandit_pick {
-            Some(pick) => pick == BanditArm::Leave,
+            Some(pick) => pick == BanditArm::Leave || (cfg.bandit.floor && call_due),
             None => call_due,
         };
         let mut directed_leave = false;
@@ -5821,6 +5828,11 @@ where
             let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
             charged_at_best = ledger.spent();
             best_seen = ledger.best;
+            if cfg.bandit.reset_on_leave
+                && let Some(chooser) = bandit.as_mut()
+            {
+                chooser.reset();
+            }
             if energy.is_finite() && relaxed.len() == x.len() {
                 internal_action = Some(CheckpointAction::ExternalAdopt {
                     state: relaxed,
@@ -5834,6 +5846,11 @@ where
             // due and the leave runs on every following hop.
             charged_at_best = ledger.spent();
             directed_leave = true;
+            if cfg.bandit.reset_on_leave
+                && let Some(chooser) = bandit.as_mut()
+            {
+                chooser.reset();
+            }
         }
         let checkpoint_due = matches!(
             (checkpoint_interval, next_checkpoint),
@@ -6497,18 +6514,19 @@ where
         // common neighbours, so it runs only when a reseed can fire.
         // Counting on every hop was the Au38 slowdown, and with the
         // reseed interval still ahead the result cannot change the branch.
+        let reseed_gate = || {
+            csm_reseed_hops > 0
+                && cfg.prior_reseed
+                && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
+                && cfg.packing_cna_applies()
+                && crate::soap::ih_dominated(
+                    x.view(),
+                    crate::soap::SoapSpec::at_length(cfg.length_scale),
+                )
+        };
         let reseed_due = match bandit_pick {
-            Some(pick) => pick == BanditArm::Reseed,
-            None => {
-                csm_reseed_hops > 0
-                    && cfg.prior_reseed
-                    && hops.saturating_sub(csm_reseed_stamp) >= csm_reseed_hops
-                    && cfg.packing_cna_applies()
-                    && crate::soap::ih_dominated(
-                        x.view(),
-                        crate::soap::SoapSpec::at_length(cfg.length_scale),
-                    )
-            }
+            Some(pick) => pick == BanditArm::Reseed || (cfg.bandit.floor && reseed_gate()),
+            None => reseed_gate(),
         };
         if reseed_due && ledger.remaining() > 0 {
             csm_reseed_stamp = hops;
@@ -6590,7 +6608,7 @@ where
             if ledger.remaining() == 0 {
                 break HopStop::of_closed(ledger);
             }
-            if bandit_pick.is_some() {
+            if bandit_pick == Some(BanditArm::Reseed) {
                 continue;
             }
         }
@@ -7031,36 +7049,56 @@ where
             soft_cache = None;
             current_validation_gradient = None;
         }
-        let mut k = match (bandit_pick, bandit.as_ref()) {
-            (Some(BanditArm::Kernel(index)), _) => index,
-            (Some(_), Some(chooser)) => bandit_kernel(chooser, rng),
-            _ => choose_arm(
+        let preset_kernel = |rng: &mut R,
+                             contextual: &mut ContextualAllocator,
+                             allocator: &mut FlooredThompson| {
+            let mut k = choose_arm(
                 cfg,
                 context.as_ref().map(|value| value.view()),
-                &mut contextual,
+                contextual,
                 &depth_allocator,
-                &mut allocator,
+                allocator,
                 kernels.len(),
                 rng,
-            ),
+            );
+            // One unlike-pair exchange on a fixed cadence. The depth allocator
+            // drops the homotop once geometry moves pay more, and a binary
+            // minimum is a chemical ordering as well as a geometry. Absent on a
+            // one-species library, so a monoatomic chain draws exactly as before.
+            if let Some(swap_at) = kernels.iter().position(|kernel| kernel.name() == "swap")
+                && hops.is_multiple_of(4)
+            {
+                k = swap_at;
+            }
+            if cfg.general_collective
+                && let Some(plane_at) = kernels.iter().position(|kernel| kernel.name() == "plane")
+                && collective.due(hops as u64)
+            {
+                k = plane_at;
+            }
+            k
         };
-        // One unlike-pair exchange on a fixed cadence. The depth allocator
-        // drops the homotop once geometry moves pay more, and a binary
-        // minimum is a chemical ordering as well as a geometry. Absent on a
-        // one-species library, so a monoatomic chain draws exactly as before.
-        if bandit_pick.is_none()
-            && let Some(swap_at) = kernels.iter().position(|kernel| kernel.name() == "swap")
-            && hops.is_multiple_of(4)
-        {
-            k = swap_at;
-        }
-        if cfg.general_collective
-            && bandit_pick.is_none()
-            && let Some(plane_at) = kernels.iter().position(|kernel| kernel.name() == "plane")
-            && collective.due(hops as u64)
-        {
-            k = plane_at;
-        }
+        let mut k = match (bandit_pick, bandit.as_mut()) {
+            (Some(pick), Some(chooser)) => {
+                let wanted = match pick {
+                    BanditArm::Kernel(index) => index,
+                    _ => bandit_kernel(chooser, rng),
+                };
+                match kernel_floor.as_mut() {
+                    Some(floor) => {
+                        floor.owe(preset_kernel(rng, &mut contextual, &mut allocator));
+                        let k = floor.due().unwrap_or(wanted);
+                        floor.drew(k);
+                        if matches!(pick, BanditArm::Kernel(_)) && k != wanted {
+                            chooser.retarget(BanditArm::Kernel(k));
+                        }
+                        k
+                    }
+                    None => wanted,
+                }
+            }
+            _ => preset_kernel(rng, &mut contextual, &mut allocator),
+        };
         // The move scale stays the configured temperature. The law's
         // temperature is an acceptance temperature: it governs which uphill
         // steps are taken, not how far a proposal reaches. Feeding it to the
@@ -7070,19 +7108,20 @@ where
         // returning proposes further each time until it leaves.
         // The angular move takes the step when a point is loose enough for the
         // criterion to fire, whatever the allocator picked.
+        let angular_gate = || {
+            cfg.angular_moves
+                && worst_bound_scaled(
+                    x.view(),
+                    n,
+                    angular_ratio,
+                    cfg.length_scale,
+                    cfg.energy_scale,
+                )
+                .is_some()
+        };
         let angular = match bandit_pick {
-            Some(pick) => pick == BanditArm::Angular,
-            None => {
-                cfg.angular_moves
-                    && worst_bound_scaled(
-                        x.view(),
-                        n,
-                        angular_ratio,
-                        cfg.length_scale,
-                        cfg.energy_scale,
-                    )
-                    .is_some()
-            }
+            Some(pick) => pick == BanditArm::Angular || (cfg.bandit.floor && angular_gate()),
+            None => angular_gate(),
         };
         // The soft-subspace arm competes uniformly with the library's arms.
         // The subspace is cached per incumbent and recomputed when the chain
@@ -11439,7 +11478,7 @@ mod tests {
 
     #[test]
     fn the_bandit_rules_spend_the_budget_and_repeat_on_a_seed() {
-        for rule in ["thompson", "ducb"] {
+        for rule in ["thompson", "ducb", "ducb,floor", "ducb,floor,record,reset"] {
             let mut cfg = Config::for_cluster(8);
             cfg.allocate_moves = true;
             cfg.escape_on_stall = true;
@@ -11474,6 +11513,14 @@ mod tests {
         assert!(json.contains(r#""arm_selection":"thompson""#));
         assert!(on.apply_decisions("ducb").is_ok());
         assert_eq!(on.arm_selection, ArmSelection::DiscountedUcb);
+        assert!(!json.contains("record_reward"));
+        on.apply_decisions("floor, record, reset").unwrap();
+        assert!(on.bandit.floor && on.bandit.record_reward && on.bandit.reset_on_leave);
+        let json = on.resolved_json().unwrap();
+        assert!(
+            json.contains(r#""bandit":{"floor":true,"record_reward":true,"reset_on_leave":true}"#),
+            "{json}"
+        );
         assert!(on.apply_decisions("hyperband").is_err());
         assert!(on.apply_decisions("motif").is_err());
         let mut empty = Config::recommended(38);
