@@ -27,3 +27,45 @@ A host that only calls =rgpot_engine_abi_version= keeps working across a minor
 bump.
 The stamp and =rgpot_engine_abi_compatible= refuse a different major or a
 different layout.
+
+** Charge and spin
+
+A metatomic model receives the total charge and the spin multiplicity as system
+data it declares in =requested_inputs=:
+
+| name | value |
+|------+-------|
+| =rgpot::charge= | total charge |
+| =rgpot::spin_multiplicity= | spin multiplicity, 1 for a singlet |
+| =rgpot::spin= | the same multiplicity, under the UMA and fairchem name |
+
+Each is a =TensorMap= with one block, one sample (=system=) and one property
+named after the value: =charge=, =spin_multiplicity= or =spin=.
+A model declares the names it reads and nothing else:
+
+#+begin_src python
+def requested_inputs(self) -> Dict[str, ModelOutput]:
+    return {
+        "rgpot::charge": ModelOutput(
+            quantity="charge", unit="e", per_atom=False
+        ),
+        "rgpot::spin_multiplicity": ModelOutput(per_atom=False),
+    }
+#+end_src
+
+=forward= then reads each one with =system.get_data(name)=.
+=MetatomicParams.charge= and =spin= are the values at =rgpot_engine_create=, and
+=rgpot_engine_set_charge_spin= changes them for the next calls.
+A value the model does not read must stay at its default, charge 0 or
+multiplicity 1.
+=rgpot_engine_create= fails for another, and =rgpot_engine_set_charge_spin=
+returns 3 and changes nothing.
+A model that reads neither has no charge or spin, so
+=rgpot_engine_set_charge_spin= returns 3 for any value.
+
+=MetatomicParams.attachSystemExtras= attaches all three names to every system,
+for a model that reads them without declaring them.
+It needs =checkConsistency= off, because metatomic then rejects data the model
+does not declare.
+=scripts/export_tiny_metatomic_model.py= exports the small models the engine
+tests use, each reading some of the three.

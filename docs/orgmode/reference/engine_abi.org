@@ -118,7 +118,7 @@ Every engine built on the table exports all of them down to
 =rgpot_engine_set_charge_spin=.
 =rgpot_engine_set_num_threads= returns 3 for a backend without a tensor runtime,
 and =rgpot_engine_set_charge_spin= returns 3 for a backend without a charge or
-spin.
+spin and for a value the backend cannot take.
 
 ** Tensor runtime parameters
 
@@ -136,6 +136,38 @@ value afterwards fails =create= (or =rgpot_engine_set_num_threads=) with the
 reason.
 The thread counts act on the process's libtorch, so two engines in one process
 share them.
+
+** Charge and spin
+
+=rgpot_engine_set_charge_spin= sets the total charge and the spin multiplicity
+of the next calls on a handle, and a multiplicity below 1 returns 1.
+A value the backend cannot take returns 3, keeps the values in force and leaves
+the reason in =rgpot_engine_last_error=.
+No engine returns 0 for a value its model does not receive.
+
+| library | charge and multiplicity |
+|---------+-------------------------|
+| =libuma_engine= | graph inputs of every call; =UmaParams.charge= and =spin= at create |
+| =libmetatomic_engine= | system data the model declares; =MetatomicParams.charge= and =spin= at create |
+| =libskala_engine= | the NWChem input of the next call; =NWChemParams.charge= and =multiplicity= at create |
+| =libclassical_engine=, =libmopac_engine=, =libnwchem_engine=, =libxtb_engine= | none, so 3 for any value |
+
+A UMA package records the charge and spin it was exported for, and the next
+force call reports a mismatch.
+A Metatomic model reads the charge as =rgpot::charge= and the multiplicity as
+=rgpot::spin_multiplicity= or =rgpot::spin=.
+Each system carries the names the model declares in =requested_inputs=.
+A model that declares none of them gets 3 from =rgpot_engine_set_charge_spin=.
+A value the model does not read must stay at its default, charge 0 or
+multiplicity 1.
+=rgpot_engine_set_charge_spin= returns 3 for another, and =create= fails for one
+in =MetatomicParams=.
+=MetatomicParams.attachSystemExtras= attaches all three names and accepts any
+value, for a model that reads them without declaring them.
+It needs =checkConsistency= off, because metatomic then rejects data the model
+does not declare.
+[[file:../howto/engine-metatomic.org][Metatomic and the engine ABI]] shows the
+declaration.
 
 ** UMA unpack cache
 
@@ -260,6 +292,10 @@ pixi run -e umaenginebld potctl ci metatomic-test --rpc --build-dir bbdir-uma-en
 =EngineAdapterTest= runs the table over a stand-in backend without rpc or torch,
 =EngineTableTest= opens each backend library, and =UmaEngineTest= opens the UMA
 engine as a host does.
+For the Metatomic engine =EngineTableTest= loads the models that
+=scripts/export_tiny_metatomic_model.py= writes into the build directory: they
+have no weights, and the energy moves by a known amount with the charge and
+multiplicity each one reads.
 With
 =RGPOT_UMA_OMOL_PT2= (and =RGPOT_UMA_OMOL_BAND_PT2= for the batch case) =UmaEngineTest= compares the engine with the directly compiled =UmaPot=, checks the model digest against the file and the runtime settings against libtorch, and =RGPOT_UMA_REQUIRE_FIXTURES=
 turns a missing fixture into a failure.
