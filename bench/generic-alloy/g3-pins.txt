@@ -1,0 +1,9 @@
+scripts/covalent_h2h/pins.sh on develop 7192e9f8 and on 95c27427
+
+develop 7192e9f8  a22093e707faa91d683813fa7cc507706c5265e6
+branch  95c27427  a22093e707faa91d683813fa7cc507706c5265e6
+
+No line moves. The reorder that records is opt-in, for_cluster and
+derived build no pinned run, and the held-cut stamp moves the calls to
+hit only where a core cut is recorded after the call that found it,
+which none of the pinned runs does.
