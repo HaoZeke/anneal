@@ -13,9 +13,14 @@ LJ75 hit is a call below the Cambridge energy plus 1e-4. A miss is stored
 as the full budget. Within a system the (seed, arm) pairs are shuffled,
 so a slow stretch of the host falls on every arm. One core.
 
-Rows are appended to a new CSV, one line per run, with the revision of
-the build and the host. A row already in that file is kept and its run
-is skipped. The summary compares every arm with the control: Fisher's
+The panel campaign runs develop and the full branch with the priors off
+on the six alloys and Au55, and LJ75, which has no prior switch, on its
+preset.
+
+Rows are appended to a CSV, one line per run, with the revision of the
+build and the host. A row already in that file for the same build
+revision is kept and its run is skipped; the summary reads only the rows
+of the two revisions being compared. The summary compares every arm with the control: Fisher's
 exact test on hits, and Mann-Whitney on calls (misses at the budget),
 wall, time inside the potential and time outside it.
 
@@ -59,6 +64,22 @@ CAMPAIGNS = {
             ("develop", "develop", "0", None),
             ("descent", "branch", "0", "ranked,window"),
             ("descent-ranked", "branch", "0", "window"),
+            ("full", "branch", "0", None),
+        ),
+    },
+    "priors-off-panel": {
+        "systems": (
+            "cu6au32",
+            "cu19au19",
+            "cu27au28",
+            "pt12cu11",
+            "cu10au45",
+            "cu30au8",
+            "au55",
+            "lj75",
+        ),
+        "arms": (
+            ("develop", "develop", "0", None),
             ("full", "branch", "0", None),
         ),
     },
@@ -430,16 +451,16 @@ def main(argv: list[str]) -> int:
     args.rows.parent.mkdir(parents=True, exist_ok=True)
     args.logs.mkdir(parents=True, exist_ok=True)
     done = {
-        (row["system"], row["arm"], row["seed"])
+        (row["system"], row["arm"], row["seed"], row["code_revision"])
         for row in read_rows(args.rows)
         if row["campaign"] == args.campaign
     }
     order = schedule(systems, SEEDS, tuple(arms), SCHEDULE_SEED)
     for index, (system, seed, arm) in enumerate(order, start=1):
-        if (system, arm, str(seed)) in done:
-            continue
         build, priors, homotop = arms[arm]
         directory, revision = builds[build]
+        if (system, arm, str(seed), revision) in done:
+            continue
         log = args.logs / f"{args.campaign}-{index:03d}-{system}-{arm}-{seed}.log"
         if system == "lj75":
             result = run_lj75(directory / "h2h_seed", seed, log)
@@ -452,7 +473,7 @@ def main(argv: list[str]) -> int:
             "seed": seed,
             "budget": result["budget"],
             "reference": f"{result['reference']:.8f}",
-            "priors": "off" if priors == "0" else "on",
+            "priors": "preset" if system == "lj75" else "off" if priors == "0" else "on",
             "homotop": (
                 "absent" if build == "develop" else "all" if homotop is None else f"off:{homotop}"
             ),
@@ -473,7 +494,9 @@ def main(argv: list[str]) -> int:
             f"evals {row['evals_to_hit']} wall {row['wall_s']} best {row['best']}",
             flush=True,
         )
-    write_summary(args.summary, summarise(args.campaign, read_rows(args.rows)))
+    current = {args.develop_revision, args.branch_revision}
+    rows = [row for row in read_rows(args.rows) if row["code_revision"] in current]
+    write_summary(args.summary, summarise(args.campaign, rows))
     return 0
 
 
