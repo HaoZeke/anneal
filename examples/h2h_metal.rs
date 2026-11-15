@@ -311,6 +311,12 @@ fn config(spec: &Spec) -> Config {
         Ok("0") => cfg.prior_handover = false,
         _ => {}
     }
+    // `1` reorders a stalled incumbent from its own packing; `0` does not.
+    match std::env::var("H2H_REORDER").as_deref() {
+        Ok("1") => cfg.homotop_reorder = true,
+        Ok("0") => cfg.homotop_reorder = false,
+        _ => {}
+    }
     if std::env::var("H2H_GENERAL").is_ok_and(|value| value == "1") {
         cfg.general_collective = true;
     }

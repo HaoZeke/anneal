@@ -862,6 +862,33 @@ pub(crate) fn place_smaller_inside(
     assign_sites(coords, small, large, &order[..small.len()])
 }
 
+/// The geometry relaxed under one pair well at its own nearest-neighbour
+/// distance.
+///
+/// A quenched alloy is shaped by its ordering: every site has relaxed
+/// around the atom on it, so an exchange read on that geometry is ranked
+/// against the ordering it already has. One well for every atom removes
+/// that bias and keeps the packing.
+pub(crate) fn label_blind(coords: ArrayView1<f64>) -> Array1<f64> {
+    let nearest = crate::lattice::nearest_neighbour_scale(coords);
+    if coords.len() < 6 || !(nearest > 0.0) || !nearest.is_finite() {
+        return coords.to_owned();
+    }
+    let scale = 2f64.powf(1.0 / 6.0) / nearest;
+    let reduced = coords.mapv(|value| value * scale);
+    let mut solver = crate::methods::warm_lbfgs::WarmLbfgs::default();
+    let (energy, relaxed, _) = solver.minimize(reduced.view(), 4 * coords.len(), |point| {
+        let values = point.as_slice()?;
+        let mut gradient = vec![0.0; values.len()];
+        let energy = crate::methods::lattice_search::lj_value_gradient(values, &mut gradient);
+        Some((energy, Array1::from_vec(gradient)))
+    });
+    if !energy.is_finite() || relaxed.iter().any(|value| !value.is_finite()) {
+        return coords.to_owned();
+    }
+    relaxed.mapv(|value| value / scale)
+}
+
 pub(crate) trait QuenchProbe {
     fn energy(&mut self, point: ArrayView1<f64>) -> Option<f64>;
     fn quench(&mut self, point: ArrayView1<f64>) -> Option<(f64, Array1<f64>)>;
@@ -1007,6 +1034,16 @@ mod tests {
                 solver.minimize(point, 80, |v| Some(self.pot.value_and_gradient(v)));
             energy.is_finite().then_some((energy, relaxed))
         }
+    }
+
+    #[test]
+    fn a_label_blind_pair_keeps_its_own_distance() {
+        let pair = Array1::from_vec(vec![0.0, 0.0, 0.0, 2.7, 0.0, 0.0]);
+        let blind = label_blind(pair.view());
+        let distance = (blind[3] - blind[0])
+            .hypot(blind[4] - blind[1])
+            .hypot(blind[5] - blind[2]);
+        assert!((distance - 2.7).abs() < 1e-6, "distance {distance}");
     }
 
     #[test]
