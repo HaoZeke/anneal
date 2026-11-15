@@ -1378,9 +1378,44 @@ pub enum ArmSelection {
     Posterior,
     /// Draw one arm uniformly. The depth posterior is not consulted.
     Uniform,
+    /// Discounted Gaussian Thompson sampling over the move kernels and the
+    /// stall actions together.
+    ///
+    /// The arms are every kernel, the angular relocation, the symmetry
+    /// reseed and the plateau leave, each where the chain can play it. The
+    /// reward of a decision is the drop in the ledger's best divided by the
+    /// charged calls it took, and every statistic is discounted by
+    /// [`crate::methods::cluster_hopping::bandit::DISCOUNT`] per decision.
+    /// The patience and cadence gates of those actions are not consulted.
+    Thompson,
+    /// The same arms and reward as [`ArmSelection::Thompson`], chosen by
+    /// discounted UCB (Garivier and Moulines, ALT 2011).
+    DiscountedUcb,
+}
+
+impl ArmSelection {
+    /// Whether a discounted bandit over kernels and stall actions decides.
+    pub fn is_bandit(self) -> bool {
+        matches!(self, Self::Thompson | Self::DiscountedUcb)
+    }
 }
 
 impl Config {
+    /// Apply a comma-separated list of decision switches.
+    ///
+    /// `thompson` and `ducb` set [`ArmSelection::Thompson`] and
+    /// [`ArmSelection::DiscountedUcb`]. An empty list changes nothing.
+    pub fn apply_decisions(&mut self, spec: &str) -> Result<(), String> {
+        for token in spec.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+            match token {
+                "thompson" => self.arm_selection = ArmSelection::Thompson,
+                "ducb" => self.arm_selection = ArmSelection::DiscountedUcb,
+                other => return Err(format!("unknown decision switch {other}")),
+            }
+        }
+        Ok(())
+    }
+
     /// Canonical, versioned JSON for the fully resolved configuration.
     pub fn resolved_json(&self) -> Result<String, serde_json::Error> {
         #[derive(serde::Serialize)]

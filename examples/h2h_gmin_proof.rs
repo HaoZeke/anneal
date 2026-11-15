@@ -64,6 +64,7 @@ fn cmd_run(args: &[String]) -> i32 {
     };
     let budget = env_budget().unwrap_or(spec.budget);
     let mut cfg = Config::recommended(spec.n);
+    decide(&mut cfg);
     // Unset leaves the library stride of one.
     if let Ok(text) = std::env::var("H2H_BASIN_STRIDE")
         && let Ok(stride) = text.parse::<usize>()
@@ -100,6 +101,16 @@ fn cmd_run(args: &[String]) -> i32 {
         cpu_pins(),
     );
     0
+}
+
+/// Decision switches named by `H2H_DECIDE`, as [`Config::apply_decisions`].
+fn decide(cfg: &mut Config) {
+    if let Ok(spec) = std::env::var("H2H_DECIDE")
+        && let Err(err) = cfg.apply_decisions(&spec)
+    {
+        eprintln!("H2H_DECIDE: {err}");
+        std::process::exit(2);
+    }
 }
 
 fn cmd_coords(args: &[String]) -> i32 {

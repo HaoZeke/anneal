@@ -180,6 +180,7 @@ fn cmd_run(args: &[String]) -> i32 {
             cfg.continuous_symmetry = ContinuousSymmetry::Off;
         }
     }
+    decide(&mut cfg);
     let start = if let Some(path) = args.get(3) {
         match read_coords(path) {
             Ok(coords) if coords.len() == 3 * spec.n => coords,
@@ -230,6 +231,16 @@ fn env_budget() -> Option<usize> {
     let text = std::env::var("H2H_BUDGET").ok()?;
     let budget = text.parse::<usize>().ok()?;
     (budget > 0).then_some(budget)
+}
+
+/// Decision switches named by `H2H_DECIDE`, as [`Config::apply_decisions`].
+fn decide(cfg: &mut Config) {
+    if let Ok(spec) = std::env::var("H2H_DECIDE")
+        && let Err(err) = cfg.apply_decisions(&spec)
+    {
+        eprintln!("H2H_DECIDE: {err}");
+        std::process::exit(2);
+    }
 }
 
 fn start_of(cfg: &Config, n: usize, seed: u64) -> Array1<f64> {

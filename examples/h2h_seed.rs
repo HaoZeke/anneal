@@ -132,6 +132,21 @@ fn apply_stride(mut cfg: Config) -> Config {
     cfg
 }
 
+/// Decision switches named by `H2H_DECIDE`, as [`Config::apply_decisions`].
+fn decide(cfg: &mut Config) {
+    if let Ok(spec) = std::env::var("H2H_DECIDE")
+        && let Err(err) = cfg.apply_decisions(&spec)
+    {
+        eprintln!("H2H_DECIDE: {err}");
+        std::process::exit(2);
+    }
+}
+
+fn decided(mut cfg: Config) -> Config {
+    decide(&mut cfg);
+    cfg
+}
+
 fn atomic_config(arm: &str, n: usize) -> Config {
     let cfg = match arm {
         "recommended" => Config::recommended(n),
@@ -260,7 +275,7 @@ fn main() {
         (true, _) => {
             search_from(
                 &objective,
-                &water_config(arm, n),
+                &decided(water_config(arm, n)),
                 &mut ledger,
                 start.view(),
                 seed,
@@ -271,7 +286,7 @@ fn main() {
         (false, _) => {
             search_from(
                 &objective,
-                &atomic_config(arm, n),
+                &decided(atomic_config(arm, n)),
                 &mut ledger,
                 start.view(),
                 seed,
