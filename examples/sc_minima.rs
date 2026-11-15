@@ -61,6 +61,7 @@ fn coordination(x: ArrayView1<f64>, cutoff: f64) -> [usize; MAX_COORDINATION + 1
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 6 {
         eprintln!(

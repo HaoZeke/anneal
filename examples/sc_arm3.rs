@@ -70,6 +70,7 @@ fn rms(g: &[f64]) -> f64 {
 }
 
 fn main() {
+    anneal_core::install_rgpot_kernels!();
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("check") {
         check_points(&args);
