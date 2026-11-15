@@ -18,6 +18,10 @@ target, or the budget for a miss. ``calls_median`` takes all twelve seeds,
 misses at the budget; ``calls_hit_median`` takes hits only. ``fisher_p`` is
 the two-sided Fisher exact test on hits, ``mwu_calls_p`` the two-sided
 Mann-Whitney U test on ``calls``. Medians are Hyndman-Fan type 7.
+
+``--sizes`` and ``--seeds`` (seeds 2000 up) widen or narrow the panel, and
+``--gmin-seeds`` runs GMIN on the first that many seeds only. The summary
+takes the first twelve seeds of each arm.
 """
 
 from __future__ import annotations
@@ -210,6 +214,9 @@ def main() -> int:
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--size", type=int, choices=SIZES)
     parser.add_argument("--seed", type=int)
+    parser.add_argument("--sizes", type=int, nargs="+", choices=SIZES)
+    parser.add_argument("--seeds", type=int, default=len(SEEDS))
+    parser.add_argument("--gmin-seeds", type=int)
     args = parser.parse_args()
     if socket.gethostname() != "bench":
         print(f"hostname is {socket.gethostname()}, not bench", file=sys.stderr)
@@ -224,8 +231,10 @@ def main() -> int:
 
     host, cpu = socket.gethostname(), cpu_model()
     stored = read_rows(args.rows)
-    sizes = (args.size,) if args.size else SIZES
-    seeds = (args.seed,) if args.seed is not None else SEEDS
+    sizes = (args.size,) if args.size else tuple(args.sizes or SIZES)
+    first = SEEDS[0]
+    seeds = (args.seed,) if args.seed is not None else tuple(range(first, first + args.seeds))
+    gmin_last = first + args.gmin_seeds if args.gmin_seeds is not None else None
     for n in sizes:
         for seed in seeds:
             system = f"tip4p{n}"
@@ -242,6 +251,8 @@ def main() -> int:
             else:
                 print(f"anneal n={n} seed={seed} reused", flush=True)
             start_sha = sha1(start)
+            if gmin_last is not None and seed >= gmin_last:
+                continue
             gmin = find(stored, system=system, code="gmin", seed=str(seed),
                         code_revision=args.gmin_revision, start_sha1=start_sha)
             if gmin is None:

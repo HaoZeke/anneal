@@ -3,7 +3,8 @@
 # (H2O)8/12/16/20/21 head-to-head, anneal's default preset against GMIN's
 # rigid-body TIP4P basin-hopping, twelve seeds, one core.
 # One UTS namespace, hostname bench, working directory /work.
-# With --size/--seed (the asv suite) rows go to scratch files under WORK.
+# With --size/--seed (the asv suite) rows go to scratch files under WORK;
+# other arguments (--sizes, --seeds, --gmin-seeds) pass to run_water_gmin.py.
 # ANNEAL_ROOT builds the anneal arm from another checkout, WATER_GMIN_WORK
 # moves the scratch tree and WATER_GMIN_SUMMARY the summary, so two anneal
 # revisions append to the same rows and reuse the same GMIN rows.
@@ -38,7 +39,11 @@ cp -a /work/gmin-h2h/bin/GMIN "$WORK/bin/GMIN"
 cp -a /work/gmin-h2h/gmin-source.txt "$WORK/gmin-source.txt"
 chmod +x "$WORK/bin/GMIN" "$WORK/bin/h2h_seed" "$WORK/bin/h2h_tip4p_point"
 
-if [[ $# -gt 0 ]]; then
+scratch=0
+for arg in "$@"; do
+  case $arg in --size | --seed) scratch=1 ;; esac
+done
+if [[ $scratch == 1 ]]; then
   ROWS=$WORK/scratch-rows.csv
   SUMMARY=$WORK/scratch-summary.csv
   VERIFY=$WORK/scratch-verify.csv
