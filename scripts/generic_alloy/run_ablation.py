@@ -17,6 +17,11 @@ The panel campaign runs develop and the full branch with the priors off
 on the six alloys and Au55, and LJ75, which has no prior switch, on its
 preset.
 
+The two g2 campaigns run develop and the branch on the six alloys, Au55
+and M80 at rho = 6 through ``h2h_morse``, one with the priors off and one
+on. The priors-off campaign adds the branch with the stalled-incumbent
+reorder (``H2H_REORDER=1``) and LJ75 on its preset.
+
 Rows are appended to a CSV, one line per run, with the revision of the
 build and the host. A row already in that file for the same build
 revision is kept and its run is skipped; the summary reads only the rows
@@ -44,6 +49,7 @@ SEEDS = tuple(range(2000, 2012))
 SCHEDULE_SEED = 20261114
 LJ75_REFERENCE = -397.492331
 LJ75_BUDGET = 4_000_000
+MORSE = {"m80r6": (4_000_000, -378.333471)}
 LJ_HIT_TOL = 1.0e-4
 
 ALLOYS = {
@@ -56,15 +62,16 @@ ALLOYS = {
     "au55": (1_000_000, -191.03085280),
 }
 
-# Name, build, priors, H2H_HOMOTOP. The first arm of a campaign is its control.
+# Name, build, priors, H2H_HOMOTOP, further environment. The first arm of
+# a campaign is its control.
 CAMPAIGNS = {
     "priors-off": {
         "systems": ("cu6au32", "cu19au19", "cu27au28", "pt12cu11", "cu10au45", "cu30au8"),
         "arms": (
-            ("develop", "develop", "0", None),
-            ("descent", "branch", "0", "ranked,window"),
-            ("descent-ranked", "branch", "0", "window"),
-            ("full", "branch", "0", None),
+            ("develop", "develop", "0", None, {}),
+            ("descent", "branch", "0", "ranked,window", {}),
+            ("descent-ranked", "branch", "0", "window", {}),
+            ("full", "branch", "0", None, {}),
         ),
     },
     "priors-off-panel": {
@@ -79,8 +86,8 @@ CAMPAIGNS = {
             "lj75",
         ),
         "arms": (
-            ("develop", "develop", "0", None),
-            ("full", "branch", "0", None),
+            ("develop", "develop", "0", None, {}),
+            ("full", "branch", "0", None, {}),
         ),
     },
     "priors-on": {
@@ -95,8 +102,42 @@ CAMPAIGNS = {
             "lj75",
         ),
         "arms": (
-            ("develop", "develop", None, None),
-            ("full", "branch", None, None),
+            ("develop", "develop", None, None, {}),
+            ("full", "branch", None, None, {}),
+        ),
+    },
+    "g2-priors-off": {
+        "systems": (
+            "cu6au32",
+            "cu19au19",
+            "cu27au28",
+            "pt12cu11",
+            "cu10au45",
+            "cu30au8",
+            "au55",
+            "lj75",
+            "m80r6",
+        ),
+        "arms": (
+            ("develop", "develop", "0", None, {}),
+            ("branch", "branch", "0", None, {}),
+            ("reorder", "branch", "0", None, {"H2H_REORDER": "1"}),
+        ),
+    },
+    "g2-priors-on": {
+        "systems": (
+            "cu6au32",
+            "cu19au19",
+            "cu27au28",
+            "pt12cu11",
+            "cu10au45",
+            "cu30au8",
+            "au55",
+            "m80r6",
+        ),
+        "arms": (
+            ("develop", "develop", None, None, {}),
+            ("branch", "branch", None, None, {}),
         ),
     },
 }
@@ -198,20 +239,34 @@ def single_thread_env() -> dict[str, str]:
         "RAYON_NUM_THREADS",
     ):
         env[key] = "1"
-    for key in ("H2H_PRIORS", "H2H_HOMOTOP", "H2H_GENERAL", "H2H_BEST"):
+    for key in (
+        "H2H_PRIORS",
+        "H2H_HOMOTOP",
+        "H2H_GENERAL",
+        "H2H_BEST",
+        "H2H_BUDGET",
+        "H2H_REFERENCE",
+        "H2H_HANDOVER",
+        "H2H_REORDER",
+    ):
         env.pop(key, None)
     return env
 
 
-def run_gupta(binary: Path, system: str, seed: int, priors, homotop, log: Path) -> dict:
-    budget, reference = ALLOYS[system]
+def run_gupta(
+    binary: Path, system: str, seed: int, priors, homotop, extra: dict, log: Path
+) -> dict:
+    morse = system in MORSE
+    budget, reference = MORSE[system] if morse else ALLOYS[system]
     env = single_thread_env()
-    env["H2H_BUDGET"] = str(budget)
-    env["H2H_REFERENCE"] = repr(reference)
+    if not morse:
+        env["H2H_BUDGET"] = str(budget)
+        env["H2H_REFERENCE"] = repr(reference)
+        if homotop is not None:
+            env["H2H_HOMOTOP"] = homotop
+        env.update(extra)
     if priors is not None:
         env["H2H_PRIORS"] = priors
-    if homotop is not None:
-        env["H2H_HOMOTOP"] = homotop
     command = ["taskset", "-c", "0", str(binary), "run", system, str(seed)]
     proc = subprocess.run(command, env=env, capture_output=True, text=True, check=False)
     log.write_text(proc.stdout + proc.stderr)
@@ -381,6 +436,8 @@ def self_test() -> None:
     if abs(type7(sample, 0.25) - 2.25) > 1e-12 or abs(type7(sample, 0.5) - 3.5) > 1e-12:
         raise SystemExit("type 7")
     for campaign, spec in CAMPAIGNS.items():
+        if any(len(arm) != 5 for arm in spec["arms"]):
+            raise SystemExit(f"{campaign} arm fields")
         names = tuple(arm for arm, *_ in spec["arms"])
         order = schedule(spec["systems"], SEEDS, names, SCHEDULE_SEED)
         if len(order) != len(spec["systems"]) * len(SEEDS) * len(names):
@@ -445,7 +502,9 @@ def main(argv: list[str]) -> int:
         "develop": (args.develop, args.develop_revision),
         "branch": (args.branch, args.branch_revision),
     }
-    arms = {name: (build, priors, homotop) for name, build, priors, homotop in spec["arms"]}
+    arms = {
+        name: (build, priors, homotop, extra) for name, build, priors, homotop, extra in spec["arms"]
+    }
     host = os.uname().nodename
     cpu = cpu_model()
     args.rows.parent.mkdir(parents=True, exist_ok=True)
@@ -457,15 +516,17 @@ def main(argv: list[str]) -> int:
     }
     order = schedule(systems, SEEDS, tuple(arms), SCHEDULE_SEED)
     for index, (system, seed, arm) in enumerate(order, start=1):
-        build, priors, homotop = arms[arm]
+        build, priors, homotop, extra = arms[arm]
         directory, revision = builds[build]
         if (system, arm, str(seed), revision) in done:
             continue
         log = args.logs / f"{args.campaign}-{index:03d}-{system}-{arm}-{seed}.log"
         if system == "lj75":
             result = run_lj75(directory / "h2h_seed", seed, log)
+        elif system in MORSE:
+            result = run_gupta(directory / "h2h_morse", system, seed, priors, None, {}, log)
         else:
-            result = run_gupta(directory / "h2h_metal", system, seed, priors, homotop, log)
+            result = run_gupta(directory / "h2h_metal", system, seed, priors, homotop, extra, log)
         row = {
             "campaign": args.campaign,
             "system": system,
@@ -475,7 +536,10 @@ def main(argv: list[str]) -> int:
             "reference": f"{result['reference']:.8f}",
             "priors": "preset" if system == "lj75" else "off" if priors == "0" else "on",
             "homotop": (
-                "absent" if build == "develop" else "all" if homotop is None else f"off:{homotop}"
+                "absent"
+                if build == "develop" or system in MORSE or system == "lj75"
+                else ("all" if homotop is None else f"off:{homotop}")
+                + "".join(f" {key}={value}" for key, value in sorted(extra.items()))
             ),
             "hit": int(result["hit"]),
             "evals_to_hit": result["evals_to_hit"],
