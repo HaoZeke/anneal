@@ -1,7 +1,7 @@
 # librgpot_gromacs: the libcp2k C API that GROMACS built with -DGMX_CP2K=ON
 # links, served by any rgpot potential. GROMACS is built after this library,
 # against build/engines/gromacs/pkgconfig/libcp2k.pc, so the library needs
-# no GROMACS.
+# no GROMACS; the mdrun tests run once gromacs_dropin_gmx names that build.
 gmx_dropin = shared_library(
     'rgpot_gromacs',
     files('rgpot_gromacs.cpp'),
@@ -63,6 +63,34 @@ if gmx_dropin_pytest
         workdir: meson.current_build_dir(),
         timeout: 300,
     )
+
+    gmx_dropin_gmx = get_option('gromacs_dropin_gmx')
+    if gmx_dropin_gmx == ''
+        gmx_dropin_gmx_d = find_program('gmx_d', required: false)
+        gmx_dropin_gmx = gmx_dropin_gmx_d.found() ? gmx_dropin_gmx_d.full_path() : ''
+    endif
+    if gmx_dropin_gmx != ''
+        gmx_dropin_env.set('RGPOT_GMX', gmx_dropin_gmx)
+        if has_eam_table
+            gmx_dropin_env.set(
+                'RGPOT_EAM_ALLOY',
+                project_root / 'CppCore/tests/data/eam_table/CuNi.eam.alloy',
+            )
+        endif
+        test(
+            'gromacs_dropin_mdrun',
+            python3_engines,
+            args: gmx_dropin_pytest_args + ['-s', files('test_dropin_mdrun.py')],
+            env: gmx_dropin_env,
+            depends: gmx_dropin_depends,
+            workdir: meson.current_build_dir(),
+            timeout: 1800,
+        )
+    else
+        message(
+            'GROMACS drop-in mdrun tests skipped: set gromacs_dropin_gmx to a gmx_d built by engines/gromacs/build_gromacs.sh',
+        )
+    endif
 else
     message('GROMACS drop-in tests skipped: needs python3 with pytest and numpy')
 endif

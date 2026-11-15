@@ -135,6 +135,12 @@ option(
     description: 'librgpot_gromacs, the libcp2k API GROMACS -DGMX_CP2K=ON links, so mdrun takes QM/MM energies and forces from any rgpot potential',
 )
 option(
+    'gromacs_dropin_gmx',
+    type: 'string',
+    value: '',
+    description: 'gmx of a double-precision GROMACS linked against librgpot_gromacs; empty looks for gmx_d on PATH and skips the mdrun tests without it',
+)
+option(
     'with_openmm',
     type: 'feature',
     value: 'auto',
