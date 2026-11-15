@@ -663,6 +663,7 @@ def export_gather(path: Path, dtype_name: str, dynamic: bool) -> None:
         meta["natoms_max"] = 64
         meta["pos_shape"] = "natoms,3"
         meta["edge_index_shape"] = "2,nedges"
+        meta["z_max"] = 99
         meta["export_path"] = "tiny-gather-dynamic"
     else:
         meta["natoms"] = 8

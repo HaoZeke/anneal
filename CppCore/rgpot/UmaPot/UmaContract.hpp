@@ -87,6 +87,12 @@ private:
  * the edge-count range the exported graph accepts (equal for a static
  * package, whose graph is traced at one edge count); packages from older
  * exporters carry the first four only.
+ *
+ * A dynamic package declares ``pos_shape`` ``natoms,3`` with
+ * ``natoms_min`` and ``natoms_max``, and ``edge_index_shape``
+ * ``2,nedges``. When it keeps the MoLE experts it records no ``z_set``,
+ * ``natoms`` or ``counts``; ``z_max`` then bounds the atomic numbers the
+ * element embeddings can index.
  */
 struct UmaContract {
   std::optional<std::string> task_name;
@@ -99,6 +105,7 @@ struct UmaContract {
   std::optional<int64_t> natoms_max;
   std::optional<int64_t> nedges_min;
   std::optional<int64_t> nedges_max;
+  std::optional<int64_t> z_max;
 
   /// One axis of a declared tensor shape. A symbolic axis is a name
   /// such as ``nedges`` with an inclusive range; a fixed axis is one
@@ -233,6 +240,7 @@ struct UmaContract {
     }
     c.natoms_min = one_int("natoms_min");
     c.natoms_max = one_int("natoms_max");
+    c.z_max = one_int("z_max");
     c.pos_decl = c.parseShape(get("pos_shape"));
     c.edge_decl = c.parseShape(get("edge_index_shape"));
     if (!c.pos_decl.known && c.natoms) {
@@ -462,6 +470,14 @@ struct UmaContract {
     if (natoms && *natoms != static_cast<int64_t>(nAtoms))
       throw UmaContractError("natoms", std::to_string(*natoms),
                              std::to_string(nAtoms), "input");
+    if (z_max) {
+      for (size_t i = 0; i < nAtoms; ++i) {
+        if (atmnrs[i] >= 1 && atmnrs[i] <= *z_max)
+          continue;
+        throw UmaContractError("z_max", "1 to " + std::to_string(*z_max),
+                               std::to_string(atmnrs[i]), "input atomic number");
+      }
+    }
     if (!z_set && !counts)
       return;
     std::map<int64_t, int64_t> have;

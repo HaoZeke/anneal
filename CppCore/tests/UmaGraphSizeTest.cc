@@ -160,6 +160,72 @@ TEST_CASE("a dynamic package still loads", "[uma][graph]") {
   REQUIRE_THAT(out.energy, Catch::Matchers::WithinAbs(468.0, 1e-6));
 }
 
+TEST_CASE("one dynamic package takes several atom counts", "[uma][graph]") {
+  // The gather energy of a complete graph is (n - 1) times the sum of
+  // the coordinates, and each atom's force component is -(n - 1). Six
+  // atoms one angstrom apart stay inside the 6 angstrom cutoff.
+  rgpot::UmaPot pot = open_pot(package_path("UMA_GATHER_DYNAMIC_PT2"));
+  const Eval four = run(pot, line(4, 1.0));
+  const Eval six = run(pot, line(6, 1.0));
+  REQUIRE_THAT(four.energy, Catch::Matchers::WithinAbs(468.0, 1e-6));
+  REQUIRE_THAT(six.energy, Catch::Matchers::WithinAbs(1200.0, 1e-6));
+  REQUIRE(six.force.size() == 18);
+  for (double component : six.force)
+    REQUIRE_THAT(component, Catch::Matchers::WithinAbs(-5.0, 1e-6));
+}
+
+TEST_CASE("a dynamic package refuses an atomic number past z_max",
+          "[uma][graph]") {
+  rgpot::UmaPot pot = open_pot(package_path("UMA_GATHER_DYNAMIC_PT2"));
+  std::vector<double> pos = line(4, 1.0);
+  std::vector<int> z = {6, 6, 6, 120};
+  const double box[9] = {40, 0, 0, 0, 40, 0, 0, 0, 40};
+  std::vector<double> force(pos.size(), 0.0);
+  rgpot::ForceOut slot{force.data(), 0.0, 0.0};
+  const rgpot::ForceInput in{4, pos.data(), z.data(), box};
+  try {
+    pot.forceImpl(in, &slot);
+    FAIL("an atomic number past z_max reached the compiled graph");
+  } catch (const rgpot::UmaContractError &err) {
+    REQUIRE(err.field() == "z_max");
+    REQUIRE(err.actual() == "120");
+  }
+}
+
+TEST_CASE("a dynamic contract checks atoms and edges against its ranges",
+          "[uma][contract]") {
+  // The metadata scripts/export_uma_aoti.py writes for a dynamic
+  // package that keeps the MoLE experts: no natoms, counts or z_set.
+  auto meta = std::unordered_map<std::string, std::string>{
+      {"pos_shape", "natoms,3"},
+      {"natoms_min", "2"},
+      {"natoms_max", "1024"},
+      {"edge_index_shape", "2,nedges"},
+      {"nedges_min", "1"},
+      {"nedges_max", "307200"},
+      {"z_max", "99"},
+  };
+  const auto contract = rgpot::UmaContract::fromMetadata(meta);
+  REQUIRE_NOTHROW(contract.checkCallShapes(3, 6));
+  REQUIRE_NOTHROW(contract.checkCallShapes(3, 4));
+  REQUIRE_NOTHROW(contract.checkCallShapes(8, 56));
+  REQUIRE_NOTHROW(contract.checkCallShapes(8, 24));
+  REQUIRE_NOTHROW(contract.checkCallShapes(1024, 307200));
+  REQUIRE_THROWS_WITH(contract.checkCallShapes(1, 1),
+                      Catch::Matchers::ContainsSubstring("pos shape is [1, 3]") &&
+                          Catch::Matchers::ContainsSubstring("[2, 1024]"));
+  REQUIRE_THROWS_AS(contract.checkCallShapes(1025, 6), rgpot::UmaShapeError);
+  REQUIRE_THROWS_AS(contract.checkCallShapes(8, 307201), rgpot::UmaShapeError);
+  const int64_t one[1] = {24};
+  REQUIRE_NOTHROW(contract.checkEachSystem(1, one));
+  const int hcn[3] = {6, 7, 1};
+  const int ethanol[9] = {6, 6, 8, 1, 1, 1, 1, 1, 1};
+  REQUIRE_NOTHROW(contract.checkSystem(3, hcn));
+  REQUIRE_NOTHROW(contract.checkSystem(9, ethanol));
+  const int ghost[2] = {6, 0};
+  REQUIRE_THROWS_AS(contract.checkSystem(2, ghost), rgpot::UmaContractError);
+}
+
 TEST_CASE("tetrazine past the 10 angstrom cutoff names the fixed edge shape",
           "[uma][graph]") {
   // Control packages omit nedges_min and nedges_max. shapes records

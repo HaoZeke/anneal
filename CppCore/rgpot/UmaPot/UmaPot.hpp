@@ -18,9 +18,11 @@ namespace rgpot {
  * Each force call builds a fairchem-convention edge list with the neighbour query and
  * runs the compiled graph. Charge and spin are per-call tensor inputs.
  *
- * The package was merged for one composition, charge, spin and task.
- * Every force call checks the config and the input against the
- * metadata embedded in the package and throws UmaContractError on a
+ * A package is exported for one charge, spin and task, and either one
+ * composition (merged MoLE) or any composition up to ``z_max``. A
+ * dynamic package accepts a range of atom and edge counts. Every force
+ * call checks the config and the input against the metadata embedded
+ * in the package and throws UmaContractError or UmaShapeError on a
  * mismatch (see UmaContract).
  */
 class UmaPot : public Potential<UmaPot> {
