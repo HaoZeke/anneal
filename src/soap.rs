@@ -3550,6 +3550,22 @@ mod tests {
         y
     }
 
+    /// An icosahedron written at its potential's pair minimum is icosahedral
+    /// in any units: Morse at 1, Lennard-Jones at `2^(1/6)`, Gupta gold at
+    /// 2.884 Å. Read at unit length, the gold one has no bonds and is not.
+    #[test]
+    fn ih_dominated_reads_an_icosahedron_at_its_pair_minimum() {
+        let lennard_jones = 2.0_f64.powf(1.0 / 6.0);
+        for pair_minimum in [1.0, lennard_jones, 2.884] {
+            let x = ico13() * pair_minimum;
+            assert!(
+                ih_dominated(x.view(), SoapSpec::at_length(pair_minimum / lennard_jones)),
+                "ico13 at pair minimum {pair_minimum} is not Ih-dominated"
+            );
+        }
+        assert!(!ih_dominated((ico13() * 2.884).view(), SoapSpec::default()));
+    }
+
     #[test]
     fn nu3_adds_two_scalars_per_radial_channel() {
         let spec = SoapSpec::default();

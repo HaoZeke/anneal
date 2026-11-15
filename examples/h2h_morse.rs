@@ -151,6 +151,7 @@ fn cmd_run(args: &[String]) -> i32 {
     // not, and the search is then the recommended one.
     let kind = PairKind::Morse { rho: spec.rho };
     cfg.long_ranged = kind.second_neighbour_energy() < -0.05;
+    cfg.pair_minimum = Some(kind.r_min());
     // Unset leaves the preset's structure priors on. `0` turns off the
     // fivefold SOAP move, the icosahedral reseed, lattice regrowth, the
     // labelled core, the motif reseed, stall symmetrisation (and its

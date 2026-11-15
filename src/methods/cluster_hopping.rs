@@ -6631,7 +6631,7 @@ where
             && cfg.packing_cna_applies()
             && crate::soap::ih_dominated(
                 x.view(),
-                crate::soap::SoapSpec::at_length(cfg.length_scale),
+                crate::soap::SoapSpec::at_length(cfg.contact_length()),
             )
             && ledger.remaining() > 0
             && prior_gate(cfg, PriorPath::IcosahedralReseed)
@@ -6663,7 +6663,7 @@ where
             let best_ih = ledger.best_state.as_ref().is_some_and(|state| {
                 crate::soap::ih_dominated(
                     state.view(),
-                    crate::soap::SoapSpec::at_length(cfg.length_scale),
+                    crate::soap::SoapSpec::at_length(cfg.contact_length()),
                 )
             });
             // Successful LJ104 paths leave an icosahedral best within about
@@ -9353,7 +9353,7 @@ where
             continue;
         }
         if cfg.symmetrise_on_stall && stuck && hop_room(hops) {
-            let soap_spec = crate::soap::SoapSpec::at_length(cfg.length_scale);
+            let soap_spec = crate::soap::SoapSpec::at_length(cfg.contact_length());
             let ih_withhold = cfg.packing_cna_applies()
                 && prior_gate(cfg, PriorPath::IcosahedralWithhold)
                 && crate::soap::ih_dominated(x.view(), soap_spec);
@@ -9595,7 +9595,7 @@ where
                 && prior_gate(cfg, PriorPath::PackingLeave)
                 && crate::soap::ih_dominated(
                     x.view(),
-                    crate::soap::SoapSpec::at_length(cfg.length_scale),
+                    crate::soap::SoapSpec::at_length(cfg.contact_length()),
                 )
                 && let Some((other_energy, other_state)) =
                     packing.better_other(x.view(), e, packing_cutoff)
@@ -9630,7 +9630,7 @@ where
                 && prior_gate(cfg, PriorPath::StallGrowth)
                 && !crate::soap::ih_dominated(
                     x.view(),
-                    crate::soap::SoapSpec::at_length(cfg.length_scale),
+                    crate::soap::SoapSpec::at_length(cfg.contact_length()),
                 )
             {
                 prior_entered(PriorPath::StallGrowth);
@@ -9762,7 +9762,7 @@ where
                 && prior_gate(cfg, PriorPath::IcosahedralStallGrowth)
                 && crate::soap::ih_dominated(
                     x.view(),
-                    crate::soap::SoapSpec::at_length(cfg.length_scale),
+                    crate::soap::SoapSpec::at_length(cfg.contact_length()),
                 )
             {
                 prior_entered(PriorPath::IcosahedralStallGrowth);
@@ -9975,7 +9975,7 @@ where
         // product while it goes down. Bounded by the improvement events.
         if cfg.surface_hop_on_best && ledger.best < best_before_iteration - STRICT_IMPROVEMENT {
             let cutoff =
-                crate::soap::contact_cutoff(crate::soap::SoapSpec::at_length(cfg.length_scale));
+                crate::soap::contact_cutoff(crate::soap::SoapSpec::at_length(cfg.contact_length()));
             let mut from = ledger.best_state.clone().map(|s| (ledger.best, s));
             while let Some((from_energy, base)) = from.take() {
                 let mut lowest: Option<(f64, Array1<f64>, Option<Array1<f64>>, _)> = None;
