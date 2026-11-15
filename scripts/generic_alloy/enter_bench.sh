@@ -29,9 +29,12 @@ build() {
     cd "$tree"
     CARGO_TARGET_DIR=$WORK/target-$name TMPDIR=$WORK/rustc-tmp \
       RUSTFLAGS="--remap-path-prefix=${tree}=/src --remap-path-prefix=${HOME}=/user --remap-path-prefix=${cargo_home}=/cargo" \
-      cargo +1.88.0 build --release --locked --example h2h_metal --example h2h_seed -j 4
+      cargo +1.88.0 build --release --locked --example h2h_metal --example h2h_seed \
+        --example h2h_morse -j 4
   )
-  cp -f "$WORK/target-$name/release/examples/h2h_metal" "$WORK/target-$name/release/examples/h2h_seed" "$WORK/$name/"
+  for example in h2h_metal h2h_seed h2h_morse; do
+    cp -f "$WORK/target-$name/release/examples/$example" "$WORK/$name/"
+  done
 }
 
 if [ ! -d "$WORK/develop-tree" ]; then
