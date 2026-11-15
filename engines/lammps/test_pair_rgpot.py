@@ -78,11 +78,14 @@ def mpirun_prefix(nprocs: int) -> list[str]:
     return prefix
 
 
-def run_case(tmp_path: Path, commands: list[str], strains=(), nprocs: int = 1) -> dict:
+def run_case(tmp_path: Path, commands: list[str], strains=(), nprocs: int = 1,
+             peratom: dict | None = None) -> dict:
     tag = f"case{len(list(tmp_path.glob('case*.json')))}"
     case = tmp_path / f"{tag}.json"
     out = tmp_path / f"{tag}.out.json"
-    case.write_text(json.dumps({"commands": commands, "strains": list(strains)}))
+    case.write_text(json.dumps(
+        {"commands": commands, "strains": list(strains), "peratom": peratom or {}}
+    ))
     cmd = [sys.executable, str(CASE), str(case), str(out)]
     if nprocs > 1:
         cmd = mpirun_prefix(nprocs) + cmd
@@ -338,6 +341,102 @@ def test_mpi_ranks_agree(tmp_path, system):
         assert dp <= 1e-8 * max(1.0, max(abs(p) for p in base["press"]))
 
 
+PER_ATOM = [
+    "compute eatom all pe/atom",
+    "compute vatom all stress/atom NULL virial",
+    "compute cvatom all centroid/stress/atom NULL virial",
+]
+# centroid/stress/atom adds yx zx zy after the six of stress/atom.
+PER_ATOM_COLUMNS = {"eatom": 1, "vatom": 6, "cvatom": 9}
+
+
+def per_atom_case(tmp_path, start: list[str], pair: list[str], nprocs: int = 1) -> dict:
+    return ok(run_case(tmp_path, start + pair + PER_ATOM + THERMO + ["run 0"],
+                       nprocs=nprocs, peratom=PER_ATOM_COLUMNS))
+
+
+def flat(rows) -> list[float]:
+    return [v for row in rows for v in row]
+
+
+def check_per_atom_sums(label: str, got: dict) -> None:
+    """pe/atom sums to pe, stress/atom to -P V of the global virial, and
+    centroid/stress/atom equals stress/atom."""
+    de = abs(sum(flat(got["eatom"])) - got["pe"])
+    total = [sum(row[k] for row in got["vatom"]) for k in range(6)]
+    want = [-p * got["volume"] for p in got["press"]]
+    scale = max(abs(w) for w in want)
+    dw = max_abs_diff(total, want)
+    dc = max_abs_diff(
+        flat(row[:6] + row[3:6] for row in got["vatom"]), flat(got["cvatom"])
+    )
+    print(f"{label} sums: |sum pe/atom - pe| {de:.3e} eV, "
+          f"max|sum stress/atom + PV| {dw:.3e} of {scale:.3e} bar A^3, "
+          f"max|centroid - stress/atom| {dc:.3e}")
+    assert de < 1e-12 * max(1.0, abs(got["pe"])) * len(got["eatom"])
+    assert dw < 1e-10 * scale
+    assert dc == 0.0
+
+
+def per_atom_systems(system: str, triclinic: bool):
+    if system == "lj":
+        return fcc(A_LJ, triclinic), lj_rgpot("named"), LJ_CUT
+    if not EAM_ALLOY:
+        pytest.skip("needs RGPOT_EAM_ALLOY")
+    return cuni(triclinic), EAM_RGPOT, EAM_NATIVE
+
+
+@pytest.mark.parametrize("nprocs", [1, 2, 4], ids=["np1", "np2", "np4"])
+@pytest.mark.parametrize("triclinic", [False, True], ids=["orthogonal", "triclinic"])
+@pytest.mark.parametrize("system", ["lj", "eam"])
+def test_per_atom_matches_native(tmp_path, system, triclinic, nprocs):
+    """compute pe/atom and stress/atom against lj/cut and eam/alloy atom by
+    atom in tag order, with the same ranks for both."""
+    if nprocs > 1 and not MPIRUN:
+        pytest.skip("needs RGPOT_MPIRUN")
+    start, pair, native = per_atom_systems(system, triclinic)
+    ref = per_atom_case(tmp_path, start, native, nprocs)
+    got = per_atom_case(tmp_path, start, pair, nprocs)
+    assert got["nprocs"] == nprocs
+    de = max_abs_diff(flat(got["eatom"]), flat(ref["eatom"]))
+    dv = max_abs_diff(flat(got["vatom"]), flat(ref["vatom"]))
+    scale = max(abs(v) for v in flat(ref["vatom"]))
+    print(f"{system} np {nprocs} triclinic={triclinic}: max|d pe/atom| {de:.3e} eV, "
+          f"max|d stress/atom| {dv:.3e} of {scale:.3e} bar A^3")
+    assert de < 1e-11
+    assert dv < 1e-10 * scale
+    check_per_atom_sums(f"{system} np {nprocs} triclinic={triclinic}", got)
+
+
+def test_per_atom_morse_matches_native(tmp_path):
+    """The default (platinum) Morse against pair_style morse, shifted."""
+    lattice, cutoff, coeff, _ = NAMED["Morse"]
+    start = fcc(lattice, True)
+    pair = [f"plugin load {PLUGIN}", f"pair_style rgpot {cutoff}", f"pair_coeff * * {coeff}"]
+    native = [f"pair_style morse {cutoff}", "pair_modify shift yes",
+              "pair_coeff * * 0.7102 1.6047 2.8970"]
+    ref = per_atom_case(tmp_path, start, native)
+    got = per_atom_case(tmp_path, start, pair)
+    de = max_abs_diff(flat(got["eatom"]), flat(ref["eatom"]))
+    dv = max_abs_diff(flat(got["vatom"]), flat(ref["vatom"]))
+    scale = max(abs(v) for v in flat(ref["vatom"]))
+    print(f"morse: max|d pe/atom| {de:.3e} eV, max|d stress/atom| {dv:.3e} of {scale:.3e}")
+    assert de < 1e-11
+    assert dv < 1e-10 * scale
+
+
+@pytest.mark.parametrize("name", ["u0psi", "SuttonChen", "Morse"])
+def test_per_atom_sums_of_other_forms(tmp_path, name):
+    if name == "u0psi":
+        start, pair = fcc(A_LJ, True), lj_rgpot("u0psi")
+    else:
+        lattice, cutoff, coeff, _ = NAMED[name]
+        start = fcc(lattice, True)
+        pair = [f"plugin load {PLUGIN}", f"pair_style rgpot {cutoff}",
+                f"pair_coeff * * {coeff}"]
+    check_per_atom_sums(name, per_atom_case(tmp_path, start, pair))
+
+
 def test_null_type_under_hybrid_overlay(tmp_path):
     """NULL leaves type 2 out; lj/cut adds the pairs that involve it."""
     start = fcc(A_LJ, True, ["set type 1 type/fraction 2 0.3 77"])
@@ -445,14 +544,30 @@ def test_refuses_other_units(tmp_path):
 
 
 @pytest.mark.parametrize("compute", ["pe/atom", "stress/atom NULL"])
-def test_refuses_per_atom_requests(tmp_path, compute):
-    commands = fcc(A_LJ, False) + lj_rgpot("named") + [
+def test_refuses_per_atom_requests_without_them(tmp_path, compute):
+    """EMT has no per-atom split; the error names it."""
+    commands = fcc(3.61, False) + [
+        f"plugin load {PLUGIN}", "pair_style rgpot 6.0", "pair_coeff * * EMT Cu Cu",
         f"compute peratom all {compute}",
         "compute total all reduce sum c_peratom" + ("[1]" if "stress" in compute else ""),
         "thermo_style custom step pe c_total",
         "run 0",
     ]
-    assert "no per-atom energy or virial" in error_of(tmp_path, commands)
+    message = error_of(tmp_path, commands)
+    assert "the rgpot potential EMT has no per-atom energy or virial" in message
+
+
+@pytest.mark.skipif(not LJ_ENGINE, reason="needs RGPOT_LJ_ENGINE")
+def test_refuses_per_atom_requests_from_an_engine(tmp_path):
+    commands = dilute_lj([f"plugin load {PLUGIN}", "pair_style rgpot 15.0",
+                          f"pair_coeff * * engine {LJ_ENGINE} H"])
+    commands[-1:-1] = [
+        "compute peratom all pe/atom",
+        "compute total all reduce sum c_peratom",
+        "thermo_style custom step pe c_total",
+    ]
+    message = error_of(tmp_path, commands)
+    assert f"the engine {LJ_ENGINE} has no per-atom energy or virial" in message
 
 
 def dilute_lj(pair: list[str]) -> list[str]:

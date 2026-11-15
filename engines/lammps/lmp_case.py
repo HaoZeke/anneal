@@ -8,7 +8,9 @@ optionally "strains", a list of lower-triangular 3x3 displacement
 gradients e. After the commands, "run 0" is not issued again; the
 script reads the potential energy, the pressure tensor of the compute
 named "rgpress" when the commands define it, the forces in atom-ID
-order and the cell. For each strain the cell rows and the positions go
+order and the cell. "peratom" maps per-atom compute IDs to their column
+count; each is reported in atom-ID order, one row per atom. For each
+strain the cell rows and the positions go
 to r (I + e) and the energy of that cell is recorded, then the
 original cell is restored.
 
@@ -89,6 +91,11 @@ def main() -> None:
         if any(c.startswith("compute rgpress ") for c in case["commands"]):
             press = lmp.numpy.extract_compute("rgpress", 0, 1)
             result["press"] = [float(v) for v in press[:6]]
+        for name, count in case.get("peratom", {}).items():
+            values = lmp.gather(f"c_{name}", 1, count)
+            result[name] = [
+                [float(values[count * a + c]) for c in range(count)] for a in range(natoms)
+            ]
         strains = case.get("strains", [])
         if strains and not lmp.extract_global("triclinic"):
             lmp.command("change_box all triclinic")
