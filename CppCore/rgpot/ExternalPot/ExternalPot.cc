@@ -31,9 +31,10 @@ using NativeForce = int (*)(void *, long, const double *, const int *, double *,
                             double *, double *, const double *);
 
 void require_lj(const ExternalLjConfig &config) {
-  if (!(config.u0 > 0.0) || !(config.cutoff > 0.0) || !(config.psi > 0.0)) {
+  const auto usable = [](double v) { return v > 0.0 && std::isfinite(v); };
+  if (!usable(config.u0) || !usable(config.cutoff) || !usable(config.psi)) {
     throw std::invalid_argument(
-        "u0, cutoff and psi must be positive (eV and Angstrom)");
+        "u0, cutoff and psi must be positive and finite (eV and Angstrom)");
   }
 }
 
@@ -444,8 +445,9 @@ int rgpot_external_potential_energy_forces(rgpot_external_potential *pot,
                                            double *energy, char *err,
                                            size_t err_len) {
   if (pot == nullptr || pot->pot == nullptr || energy == nullptr ||
+      box9 == nullptr ||
       (n > 0 && (xyz == nullptr || atomic_numbers == nullptr ||
-                 box9 == nullptr || forces == nullptr))) {
+                 forces == nullptr))) {
     write_err(err, err_len, "energy_forces needs a potential and a geometry");
     return 1;
   }

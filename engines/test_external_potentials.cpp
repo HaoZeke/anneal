@@ -162,7 +162,28 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "in-process gromacs %.16e\n", bare);
     return 1;
   }
+  err[0] = '\0';
+  if (rgpot_external_potential_energy_forces(in_process, nullptr, nullptr, 0,
+                                             nullptr, nullptr, &bare, err,
+                                             sizeof(err)) != 1 ||
+      std::strstr(err, "needs a potential and a geometry") == nullptr) {
+    std::fprintf(stderr, "empty geometry with a null box: %s\n", err);
+    return 1;
+  }
   rgpot_external_potential_free(in_process);
+
+  const double inf = HUGE_VAL;
+  const double bad_lj[3][3] = {{inf, 8.0, 1.0}, {1.0, inf, 1.0}, {1.0, 8.0, inf}};
+  for (const auto &cfg : bad_lj) {
+    err[0] = '\0';
+    rgpot_external_potential *rejected =
+        rgpot_gromacs_potential(nullptr, cfg[0], cfg[1], cfg[2], err, sizeof(err));
+    if (rejected != nullptr || std::strstr(err, "u0, cutoff and psi") == nullptr) {
+      std::fprintf(stderr, "infinite LJ parameter was accepted: %s\n", err);
+      rgpot_external_potential_free(rejected);
+      return 1;
+    }
+  }
 
   const char *openmm = std::getenv("RGPOT_OPENMM_ENGINE");
   if (openmm == nullptr || openmm[0] == '\0') {
