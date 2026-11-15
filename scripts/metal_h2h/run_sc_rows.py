@@ -2,10 +2,12 @@
 # Copyright (c) anneal developers
 """Run the Sutton–Chen binary and append the raw rows.
 
-`restart` and `pop` are the tables under bench/metal-cluster-h2h.
-A finished seed is left as it was written. `code_revision` is the
-git revision the binary was built from, and `host` is the UTS
-hostname. The campaign runs on hostname bench.
+`restart`, `pop`, `chain`, `portfolio`, and `session` are the tables
+under bench/metal-cluster-h2h. A finished seed is left as it was written.
+`session` appends a same-session baseline and portfolio for seeds
+2000-2023 and does not touch the other tables.
+`code_revision` is the git revision the binary was built from, and
+`host` is the UTS hostname. The campaign runs on hostname bench.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SYSTEMS = ("sc126-80", "sc96-80", "sc108-80", "sc108-55")
 SEEDS = tuple(range(2000, 2012))
+SESSION_SEEDS = tuple(range(2000, 2024))
 PROBE_SEEDS = (2000, 2007, 2003)
 
 RESTART_FIELDS = (
@@ -84,6 +87,25 @@ def jobs(
             ("chain", system, seed, {"H2H_POP": "2"}) for system in SYSTEMS for seed in SEEDS
         ]
         return path, POP_FIELDS, planned
+    if campaign == "portfolio":
+        path = root / "bench/metal-cluster-h2h/sc-portfolio/rows.csv"
+        planned = [
+            ("portfolio", system, seed, {"H2H_PORTFOLIO": "1"})
+            for system in SYSTEMS
+            for seed in SEEDS
+        ]
+        return path, POP_FIELDS, planned
+    if campaign == "session":
+        path = root / "bench/metal-cluster-h2h/sc-session/rows.csv"
+        planned = []
+        for variant, env in (
+            ("baseline", {}),
+            ("portfolio", {"H2H_PORTFOLIO": "1"}),
+        ):
+            for system in SYSTEMS:
+                for seed in SESSION_SEEDS:
+                    planned.append((variant, system, seed, env))
+        return path, ("variant",) + POP_FIELDS, planned
     raise SystemExit(f"unknown campaign {campaign}")
 
 
@@ -92,7 +114,7 @@ def load_done(path: Path, campaign: str) -> set[tuple[str, str]]:
         return set()
     done = set()
     for row in csv.DictReader(path.open()):
-        if campaign == "restart":
+        if campaign in ("restart", "session"):
             done.add((row["variant"], f"{row['system']}:{row['seed']}"))
         else:
             done.add((row["system"], row["seed"]))
@@ -130,6 +152,8 @@ def run_one(
     extra: dict[str, str],
 ) -> dict[str, str]:
     env = os.environ.copy()
+    if "H2H_PORTFOLIO" not in extra:
+        env.pop("H2H_PORTFOLIO", None)
     env.update(
         {
             "OMP_NUM_THREADS": "1",
@@ -155,7 +179,9 @@ def run_one(
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("campaign", choices=("restart", "pop", "chain"))
+    parser.add_argument(
+        "campaign", choices=("restart", "pop", "chain", "portfolio", "session")
+    )
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument(
@@ -175,7 +201,7 @@ def main(argv: list[str]) -> int:
     for variant, system, seed, extra in planned:
         key = (
             (variant, f"{system}:{seed}")
-            if args.campaign == "restart"
+            if args.campaign in ("restart", "session")
             else (system, str(seed))
         )
         if key in done:
