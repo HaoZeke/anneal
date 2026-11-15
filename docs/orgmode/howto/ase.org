@@ -28,8 +28,8 @@ print(atoms.get_potential_energy(), atoms.get_stress())
 #+end_src
 
 =RgpotCalculator= is an =ase.calculators.calculator.Calculator=.
-Any ASE code that takes a calculator takes it: the optimizers, the cell
-filters, molecular dynamics, =ase.mep.NEB=, =ase.vibrations=, and
+Any ASE code that takes a calculator takes it: the optimizers, the cell filters,
+molecular dynamics, =ase.mep.NEB=, =ase.vibrations=, and
 =ase.calculators.mixing.SumCalculator=.
 =tests/python/test_ase_dropin.py= runs each of them.
 
@@ -37,17 +37,15 @@ filters, molecular dynamics, =ase.mep.NEB=, =ase.vibrations=, and
 
 The first argument is an rgpot potential object or a kind string.
 A kind string names any potential class of the build: the class name in any
-case, with or without the =Pot= suffix, with =_=, =-=, =.= and spaces
-ignored.
+case, with or without the =Pot= suffix, with =_=, =-=, =.= and spaces ignored.
 =lj=, =LJPot=, =morse=, =ljcluster=, =eam_al=, =sw=, =stillingerwebersi=,
 =tersoffsic= and =lennard-jones= all resolve.
 =rgpot.ase.available_kinds()= lists the strings this build accepts.
 
-The other keyword arguments, apart from ASE's =label=, =directory=,
-=restart=, =ignore_bad_restart_file= and =atoms=, go to that class's
-constructor.
-A name the constructor does not take raises =ValueError= and lists the
-names it does take.
+The other keyword arguments, apart from ASE's =label=, =directory=, =restart=,
+=ignore_bad_restart_file= and =atoms=, go to that class's constructor.
+A name the constructor does not take raises =ValueError= and lists the names it
+does take.
 
 #+begin_src python
 RgpotCalculator("morse", De=0.3429, a=1.3588, re=2.866, cutoff=7.7)
@@ -67,39 +65,36 @@ parameterised for their own elements.
 | =RgpotCalculator("morse", De=e, a=r/r0, re=r0, cutoff=c2*r0, switch_width=(c2-c1)*r0)= | =MorsePotential(epsilon=e, rho0=r, r0=r0, rcut1=c1, rcut2=c2)= |
 | =RgpotCalculator("eam_al")=                                       | =EAM= with the closed form of =tests/python/eam_al_reference.py=      |
 
-With those arguments LJ and Morse agree with ASE to better than 1e-13
-relative in energy, forces and stress, and LJ also in per-atom energies and
-stresses, on bulk, slab and cluster geometries, including cells narrower
-than twice the cutoff.
+With those arguments LJ and Morse agree with ASE to better than 1e-13 relative
+in energy, forces and stress, and LJ also in per-atom energies and stresses, on
+bulk, slab and cluster geometries, including cells narrower than twice the
+cutoff.
 The tests assert 1e-10.
 
-Both Lennard-Jones forms shift every pair term by its value at the cutoff,
-so the force jumps there.
-ASE's =smooth=True= multiplies by a cutoff function in \(r^2\) between =ro=
-and =rc=; rgpot has no equivalent.
-=switch_width= instead multiplies the unshifted pair term by the quintic
-switch \(S(t) = 1 - 10t^3 + 15t^4 - 6t^5\), \(t = (r - r_\mathrm{on}) / w\),
-over \([r_c - w, r_c]\).
+Both Lennard-Jones forms shift every pair term by its value at the cutoff, so
+the force jumps there.
+ASE's =smooth=True= multiplies by a cutoff function in \(r^2\) between =ro= and
+=rc=; rgpot has no equivalent.
+=switch_width= instead multiplies the unshifted pair term by the quintic switch \(S(t) = 1 - 10t^3 + 15t^4 - 6t^5\), \(t = (r - r_\mathrm{on})
+/ w\), over \([r_c - w, r_c]\).
 
 ASE's =MorsePotential= is unshifted and always uses its =fcut=, which is the
-same quintic in \(1 - t\).
-rgpot's =MorsePot= with =switch_width= 0 instead subtracts the pair energy
-at the cutoff from every pair inside it and does not taper.
-The energies then differ by that shift for each pair and by ASE's taper
-between =rcut1 * r0= and =rcut2 * r0=.
+same quintic in \(1 - t\). rgpot's =MorsePot= with =switch_width= 0 instead
+subtracts the pair energy at the cutoff from every pair inside it and does not
+taper.
+The energies then differ by that shift for each pair and by ASE's taper between
+=rcut1 * r0= and =rcut2 * r0=.
 
 ASE ships no EAM-Al table for the kernel's double-exponential aluminium.
-ASE's =EAM= accepts callables for the embedding, density and pair functions
-and their derivatives, so the reference passes the closed form and no
-spline.
+ASE's =EAM= accepts callables for the embedding, density and pair functions and
+their derivatives, so the reference passes the closed form and no spline.
 It agrees with =eam_al= to better than 1e-12 relative in energy and forces.
 
 ** Properties and units
 
 Energies are eV, forces are eV/Angstrom, and stress is eV/Angstrom^3 in ASE
-Voigt order (xx, yy, zz, yz, xz, xy) with the ASE sign,
-\(\sigma = V^{-1} \partial E / \partial \varepsilon\): a compressed crystal
-has a negative stress.
+Voigt order (xx, yy, zz, yz, xz, xy) with the ASE sign, \(\sigma = V^{-1}
+\partial E / \partial \varepsilon\): a compressed crystal has a negative stress.
 
 =implemented_properties= depends on the kernel:
 
@@ -110,97 +105,92 @@ has a negative stress.
 | =energies=               | kernels with =evaluate_per_atom=: LJ, LJ cluster, Morse    |
 | =stresses=               | kernels with both: LJ, Morse                               |
 
-=free_energy= equals =energy=: these potentials have no electronic entropy
-term.
+=free_energy= equals =energy=: these potentials have no electronic entropy term.
 A pair term goes half to each atom in =energies=.
-=stresses= is the per-atom virial over the cell volume, the convention of
-ASE's =LennardJones=; it sums to =stress=.
+=stresses= is the per-atom virial over the cell volume, the convention of ASE's
+=LennardJones=; it sums to =stress=.
 Per-atom values are computed only when asked for, so the first
-=get_potential_energies()= after =get_potential_energy()= costs one more
-kernel call.
+=get_potential_energies()= after =get_potential_energy()= costs one more kernel
+call.
 
-=numerical_stress=True= adds =stress= for a kernel that writes none (EAM-Al,
-EDIP, Lenosky, Tersoff, FeHe, CuH2, WaterH) from a central difference over six cell strains of
-=stress_step= (default 1e-6).
+=numerical_stress=True= adds =stress= for a kernel that writes none (EAM-Al, EDIP, Lenosky, Tersoff, FeHe, CuH2, WaterH) from a central difference over six cell strains of =stress_step=
+(default 1e-6).
 That is twelve energy calls a stress.
-=get_hessian= raises =NotImplementedError=: no bound potential has an
-analytic Hessian.
-=ase.vibrations= uses finite differences of the forces and does not need
-one.
+=get_hessian= raises =NotImplementedError=: no bound potential has an analytic
+Hessian.
+=ase.vibrations= uses finite differences of the forces and does not need one.
 
 ** Periodic boundaries
 
 The kernels are fully periodic and take the minimum image of each pair.
-The calculator turns every ASE geometry into a kernel call with the same
-energy as the infinite system:
+The calculator turns every ASE geometry into a kernel call with the same energy
+as the infinite system:
 
-- A periodic cell whose perpendicular width along a periodic axis is at
-  most twice the kernel cutoff is tiled into a supercell that is wider.
-  The energy is divided by the number of copies and the forces of the first
-  copy are returned.
+- A periodic cell whose perpendicular width along a periodic axis is at most
+  twice the kernel cutoff is tiled into a supercell that is wider.
+  The energy is divided by the number of copies and the forces of the first copy
+  are returned.
   An 8.5 Angstrom LJ cutoff tiles a 32-atom argon cell four times.
 - =pbc= false on every axis is a cluster.
-  The kernel sees a cube whose side is at least 100 Angstrom and at least
-  the cluster extent plus twice the cutoff, so no image enters the cutoff.
+  The kernel sees a cube whose side is at least 100 Angstrom and at least the
+  cluster extent plus twice the cutoff, so no image enters the cutoff.
   Energy and forces ignore the caller's cell.
-- A mixed =pbc= (a slab or a wire) keeps the periodic cell vectors and
-  replaces each non-periodic one with a padded vector orthogonal to them.
+- A mixed =pbc= (a slab or a wire) keeps the periodic cell vectors and replaces
+  each non-periodic one with a padded vector orthogonal to them.
 
 Stress is the virial over the caller's cell volume, which is the cell
 =calculate_numerical_stress= strains.
 A cluster or slab with no volume keeps the padded box's stress.
 
-The cutoff is =config()["cutoff"]= where the binding has one, and otherwise
-the kernel's published cutoff.
-A kernel with no known cutoff (=ExprPot=, D3, D4, WaterH) is not tiled and
-its cluster box is the 100 Angstrom cube.
+The cutoff is =config()["cutoff"]= where the binding has one, and otherwise the
+kernel's published cutoff.
+A kernel with no known cutoff (=ExprPot=, D3, D4, WaterH) is not tiled and its
+cluster box is the 100 Angstrom cube.
 =ljcluster= has free boundaries and raises =ValueError= for a periodic
 structure.
 
 ** Caching
 
 ASE's =check_state= decides when to call the kernel.
-A change of positions, cell, =pbc=, atomic numbers, initial charges or
-initial magnetic moments recomputes; anything else returns the stored
-results.
+A change of positions, cell, =pbc=, atomic numbers, initial charges or initial
+magnetic moments recomputes; anything else returns the stored results.
 One kernel call fills energy, forces and stress together, so
-=get_potential_energy()=, =get_forces()= and =get_stress()= on unchanged
-atoms cost one call.
+=get_potential_energy()=, =get_forces()= and =get_stress()= on unchanged atoms
+cost one call.
 
 ** Copies, pickling and parameters
 
-=pickle=, =copy.copy= and =copy.deepcopy= rebuild the potential from its
-class name and parameters.
+=pickle=, =copy.copy= and =copy.deepcopy= rebuild the potential from its class
+name and parameters.
 The copy has its own kernel instance and the same results.
-A calculator over a bound object is rebuilt from that object's =config()=,
-or from its no-argument constructor.
+A calculator over a bound object is rebuilt from that object's =config()=, or
+from its no-argument constructor.
 A calculator over anything else, or over a bound object that has neither
-(=ExprPot=, the engine potentials), raises =TypeError= when pickled; build
-it from a kind string with its parameters instead.
+(=ExprPot=, the engine potentials), raises =TypeError= when pickled; build it
+from a kind string with its parameters instead.
 =Atoms.copy()= does not copy a calculator, as everywhere in ASE.
 
-=calc.set(u0=...)= rebuilds the potential with the new parameter and resets
-the results.
+=calc.set(u0=...)= rebuilds the potential with the new parameter and resets the
+results.
 =calc.todict()= holds the class name under =potential= and the parameters.
 
 NEB images may each carry their own calculator, or share one with
 =NEB(..., allow_shared_calculator=True)=.
 
 =protocol_reentrant= is True for =__rg_evaluate__= only.
-=calculate= stores =atoms= and =results= on the calculator, so two threads
-need two calculators.
+=calculate= stores =atoms= and =results= on the calculator, so two threads need
+two calculators.
 
 ** Timings
 
-=scripts/bench_ase_calculators.py= times =atoms.get_forces()= under each
-pair of calculators above, on fcc crystals displaced by fresh Gaussian noise
-(0.02 Angstrom) before every call.
-Each round times both calculators once in random order; the table is the
-median of 21 rounds.
-rgpot ran with =OMP_NUM_THREADS= unset, which is one thread, on an 8-CPU
-x86_64 Xeon with Python 3.12 and NumPy 2.5.
-The last column is the largest relative energy or force difference between
-the pair at one geometry.
+=scripts/bench_ase_calculators.py= times =atoms.get_forces()= under each pair of
+calculators above, on fcc crystals displaced by fresh Gaussian noise (0.02
+Angstrom) before every call.
+Each round times both calculators once in random order; the table is the median
+of 21 rounds. rgpot ran with =OMP_NUM_THREADS= unset, which is one thread, on an
+8-CPU x86_64 Xeon with Python 3.12 and NumPy 2.5.
+The last column is the largest relative energy or force difference between the
+pair at one geometry.
 
 | Atoms | Potential  | ASE reference    | rgpot ms |    ASE ms | ASE / rgpot | Max rel. diff. |
 |-------+------------+------------------+----------+-----------+-------------+----------------|
@@ -215,8 +205,8 @@ the pair at one geometry.
 |  8192 | EAM-Al     | =EAM= (analytic) |   71.224 | 14602.657 |       205.0 |        4.8e-13 |
 
 Some cells are narrower than twice the cutoff, so rgpot evaluates a tiled
-supercell where ASE's neighbour list walks the images: at 64 atoms LJ, Morse
-and EAM-Al run 4, 18 and 4 copies, and at 1024 atoms Morse runs 2.
+supercell where ASE's neighbour list walks the images: at 64 atoms LJ, Morse and
+EAM-Al run 4, 18 and 4 copies, and at 1024 atoms Morse runs 2.
 The rgpot column includes that cost.
 
 ** Batches
