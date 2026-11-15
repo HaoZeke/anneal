@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) anneal developers
 """Score the paired anneal and openconf runs and append one row per run.
 
