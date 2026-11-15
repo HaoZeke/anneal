@@ -9,6 +9,9 @@
 //! `RGPOT_XTB_ENGINE` naming `libxtb_engine.so`. Silicon clusters have a
 //! vanishing gap and the SCC does not converge at 300 K, so the bench sets
 //! `RGPOT_XTB_ETEMP` and passes the same electronic temperature to CREST.
+//! Each call's SCC starts fresh, as in each of CREST's xtb processes: on
+//! Si13 and Si20 the previous call's wavefunction as the guess converges
+//! to lower SCC solutions that a fresh SCC does not reproduce.
 //!
 //! The search is the covalent panel's `general` arm: the recommended flags,
 //! priors off, on scales from this potential's own dimer, the bond over
@@ -105,7 +108,7 @@ fn refused(x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
 /// pair at `FAR_A`.
 fn dimer_scales(z: i32, mut charge: impl FnMut() -> bool) -> Option<(f64, f64)> {
     let box_ = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];
-    let mut pot = RgpotObjective::xtb(&[z, z], box_);
+    let mut pot = RgpotObjective::xtb_fresh(&[z, z], box_);
     pot.restart();
     let at = |r: f64| {
         let x = Array1::from(vec![0.0, 0.0, 0.0, r, 0.0, 0.0]);
@@ -234,7 +237,7 @@ fn main() {
     }
 
     let box_ = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];
-    let mut pot = RgpotObjective::xtb(&vec![sys.z; sys.n], box_);
+    let mut pot = RgpotObjective::xtb_fresh(&vec![sys.z; sys.n], box_);
     pot.restart();
     let pot = Mutex::new(pot);
     let mut optimiser = WarmLbfgs::default();
