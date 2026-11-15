@@ -5835,10 +5835,7 @@ where
         {
             plateau_restarted = true;
             let mut side = StdRng::seed_from_u64(
-                (hops as u64)
-                    .wrapping_mul(0x9E37_79B9)
-                    ^ ledger.best.to_bits()
-                    ^ 0xB45E_0E17,
+                (hops as u64).wrapping_mul(0x9E37_79B9) ^ ledger.best.to_bits() ^ 0xB45E_0E17,
             );
             let r1 = cfg.min_separation * (1.35 / 0.85);
             let r2 = cfg.min_separation * (1.70 / 0.85);
@@ -5878,71 +5875,73 @@ where
             // No spread means one fingerprint. A zero threshold is not a
             // distance, and the chain is left to finish its own descent.
             if dcut > 0.0 {
-            let mut bank = crate::methods::bank::Bank::new(population.max(1), dcut);
-            for (energy, state) in &seeded {
-                bank.offer(state.view(), *energy, |left, right| {
-                    crate::methods::csa_cluster::coordination_histogram_distance(left, right, r1, r2)
-                });
-            }
-            let incumbent = ledger.best_state.clone();
-            let mut choice: Option<(f64, Array1<f64>)> = None;
-            for member in bank.members() {
-                let same = incumbent.as_ref().is_some_and(|state| {
-                    crate::methods::csa_cluster::coordination_histogram_distance(
-                        member.state.view(),
-                        state.view(),
-                        r1,
-                        r2,
-                    ) <= dcut
-                });
-                if same {
-                    continue;
+                let mut bank = crate::methods::bank::Bank::new(population.max(1), dcut);
+                for (energy, state) in &seeded {
+                    bank.offer(state.view(), *energy, |left, right| {
+                        crate::methods::csa_cluster::coordination_histogram_distance(
+                            left, right, r1, r2,
+                        )
+                    });
                 }
-                let replace = choice
-                    .as_ref()
-                    .is_none_or(|(energy, _)| member.energy < *energy);
-                if replace {
-                    choice = Some((member.energy, member.state.clone()));
+                let incumbent = ledger.best_state.clone();
+                let mut choice: Option<(f64, Array1<f64>)> = None;
+                for member in bank.members() {
+                    let same = incumbent.as_ref().is_some_and(|state| {
+                        crate::methods::csa_cluster::coordination_histogram_distance(
+                            member.state.view(),
+                            state.view(),
+                            r1,
+                            r2,
+                        ) <= dcut
+                    });
+                    if same {
+                        continue;
+                    }
+                    let replace = choice
+                        .as_ref()
+                        .is_none_or(|(energy, _)| member.energy < *energy);
+                    if replace {
+                        choice = Some((member.energy, member.state.clone()));
+                    }
                 }
-            }
-            if let Some((energy, state)) = choice {
-                let found_at = ledger.spent();
-                let gradient = record_quenched_answer(
-                    cfg,
-                    ledger,
-                    &mut grad,
-                    energy,
-                    state.view(),
-                    &mut unconverged_records,
-                );
-                if grad.is_none() || gradient.is_some() {
-                    let improved = energy < ledger.best - 1e-9;
-                    adopt_minimum!(
+                if let Some((energy, state)) = choice {
+                    let found_at = ledger.spent();
+                    let gradient = record_quenched_answer(
+                        cfg,
+                        ledger,
+                        &mut grad,
                         energy,
-                        state,
-                        gradient,
-                        None,
-                        AdoptionHistory::Fresh,
-                        None,
-                        Some("plateau-restart"),
-                        hops
+                        state.view(),
+                        &mut unconverged_records,
                     );
-                    if improved && improvements.len() < 512 {
-                        improvements.push((hops, found_at, bias.n_basins(), energy));
-                    }
-                    if improved {
-                        charged_at_best = ledger.spent();
-                        spent_at_record = ledger.spent();
-                        best_seen = ledger.best;
-                    }
-                    soft_cache = None;
-                    basin_entry = None;
-                    quiet = 0;
-                    if ledger.target_reached() {
-                        break HopStop::of_closed(ledger);
+                    if grad.is_none() || gradient.is_some() {
+                        let improved = energy < ledger.best - 1e-9;
+                        adopt_minimum!(
+                            energy,
+                            state,
+                            gradient,
+                            None,
+                            AdoptionHistory::Fresh,
+                            None,
+                            Some("plateau-restart"),
+                            hops
+                        );
+                        if improved && improvements.len() < 512 {
+                            improvements.push((hops, found_at, bias.n_basins(), energy));
+                        }
+                        if improved {
+                            charged_at_best = ledger.spent();
+                            spent_at_record = ledger.spent();
+                            best_seen = ledger.best;
+                        }
+                        soft_cache = None;
+                        basin_entry = None;
+                        quiet = 0;
+                        if ledger.target_reached() {
+                            break HopStop::of_closed(ledger);
+                        }
                     }
                 }
-            }
             }
         }
         // A fresh cluster on this clock returns to the Mackay icosahedron
