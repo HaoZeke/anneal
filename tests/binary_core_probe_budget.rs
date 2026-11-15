@@ -45,9 +45,10 @@ fn tetrahedron() -> Array1<f64> {
 
 /// The budget of the first side ledger, with the calls the chain's own
 /// ledger had spent when it opened.
-fn first_side_ledger() -> (usize, usize) {
+fn first_side_ledger(handover: bool) -> (usize, usize) {
     let mut cfg = quiet(4);
     cfg.species = Some(vec![29, 29, 79, 79]);
+    cfg.prior_handover = handover;
     let chain_spent = AtomicUsize::new(0);
     let side = Mutex::new(None);
     let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
@@ -78,9 +79,17 @@ fn first_side_ledger() -> (usize, usize) {
 }
 
 #[test]
+fn a_handover_leaves_the_walk_half_of_what_is_left() {
+    let (probe, spent) = first_side_ledger(true);
+    let left = BUDGET - spent;
+    assert!(probe <= left.div_ceil(2), "probe {probe} of {left} left");
+    assert!(probe > 0);
+}
+
+#[test]
 #[cfg(feature = "rgsaddle")]
 fn a_feature_build_leaves_the_walk_half_of_what_is_left() {
-    let (probe, spent) = first_side_ledger();
+    let (probe, spent) = first_side_ledger(false);
     let left = BUDGET - spent;
     assert!(probe <= left.div_ceil(2), "probe {probe} of {left} left");
     assert!(probe > 0);
@@ -88,7 +97,7 @@ fn a_feature_build_leaves_the_walk_half_of_what_is_left() {
 
 #[test]
 #[cfg(not(feature = "rgsaddle"))]
-fn a_default_build_offers_the_probe_what_is_left() {
-    let (probe, spent) = first_side_ledger();
+fn a_default_build_without_a_handover_offers_the_probe_what_is_left() {
+    let (probe, spent) = first_side_ledger(false);
     assert_eq!(probe, BUDGET - spent);
 }
