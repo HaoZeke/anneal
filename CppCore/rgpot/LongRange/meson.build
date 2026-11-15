@@ -2,14 +2,14 @@
 # The CUDA translation unit is optional. The host fallback in
 # CudaPath.cc is always part of the library.
 lr_src = files(
-    'Pairs.cc',
-    'Electro.cc',
+    'CudaPath.cc',
     'Dispersion.cc',
+    'Electro.cc',
     'FastD3.cc',
     'FastD4.cc',
     'Nlh.cc',
+    'Pairs.cc',
     'SumPot.cc',
-    'CudaPath.cc',
 )
 # The thread teams are OpenMP. Without it every summand runs serially.
 lr_deps = _deps + [dependency('openmp', required: false)]
