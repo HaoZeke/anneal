@@ -41,6 +41,9 @@ TEST_CASE("One process is one calculator", "[CalculatorGroup]") {
     REQUIRE(rgpot::shareFromCalculator(1, buf.data(), sizeof(buf)) == 0);
 
     REQUIRE(rgpot::bindCalculators(1).index == 0);
+    // 0 or less is one calculator for the whole world, the split above.
+    REQUIRE(rgpot::bindCalculators(0).index == 0);
+    REQUIRE(rgpot::bindCalculators(-1).index == 0);
     REQUIRE(rgpot::bindCalculators(2).index == -1);
   } else {
     rgpot::finalizeMpiAtExit();
@@ -54,6 +57,8 @@ TEST_CASE("One process is one calculator", "[CalculatorGroup]") {
 #ifdef RGPOT_HAS_MPI
     REQUIRE(rgpot::calculatorsUseMpi() == 1);
 #endif
+    REQUIRE(rgpot::bindCalculators(1).index == g.index);
+    REQUIRE(rgpot::bindCalculators(0).index == -1);
 
     const char *bad = std::getenv("RGPOT_CALCULATOR_BAD_OWNER");
     if (bad != nullptr && bad[0] == '1' && bad[1] == '\0') {
