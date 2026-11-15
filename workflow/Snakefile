@@ -308,6 +308,28 @@ rule openconf_h2h_conf_fix4_n24:
             --results bench/openconf-h2h/conf-fix4/n24
         """
 
+
+# The plateau reheat against develop with the measured energy scale, all
+# eight molecules at 24 seeds in one session. Not part of `rule all`:
+#   snakemake -s workflow/Snakefile openconf_h2h_conf_fix5
+rule openconf_h2h_conf_fix5:
+    input:
+        "bench/openconf-h2h/conf-fix4/n24/stats-develop.csv",
+    output:
+        "bench/openconf-h2h/conf-fix5/summary.csv",
+        "bench/openconf-h2h/conf-fix5/stats.csv",
+        "bench/openconf-h2h/conf-fix5/stats-develop.csv",
+    shell:
+        """
+        set -euo pipefail
+        OPENCONF_H2H_CREST=0 OPENCONF_H2H_BASELINE=93c14173e433ad7deacc97992d3bc6a2a5fae395 \
+            bash scripts/openconf_h2h/enter_bench.sh paired --tree conf-fix5 \
+            --baseline /work/openconf-h2h/baseline --seeds $(seq 2000 2023)
+        OPENCONF_H2H_SKIP_BUILD=1 bash scripts/openconf_h2h/enter_bench.sh paired-score \
+            --tree conf-fix5 --baseline /work/openconf-h2h/baseline \
+            --results bench/openconf-h2h/conf-fix5
+        """
+
 # Gradients per GFN2 quench: anneal L-BFGS and TRIC against geomeTRIC.
 # Not part of `rule all`:
 #   snakemake -s workflow/Snakefile tric_quench
