@@ -14,8 +14,11 @@ ROOT = Path(__file__).resolve().parents[3]
 ENTER = ROOT / "scripts" / "morse_h2h" / "enter_bench.sh"
 
 PAPER_BUDGETS = {
-    "m38r6": 400_000,
     "m38r14": 400_000,
+    "m55r14": 1_000_000,
+    "m80r14": 4_000_000,
+    "m38r6": 400_000,
+    "m55r6": 1_000_000,
 }
 
 
