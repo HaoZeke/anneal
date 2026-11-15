@@ -292,6 +292,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- A declared group that has lost a bond is not evaluated. The line search
+  receives an uphill step back toward the last finite geometry, so a descent
+  that already has a finite start does not end there when the first trial
+  stretches a bond. The refusal is not charged.
+- The sdist includes ``vendor/metatensor-sys``, ``vendor/nng`` and
+  ``vendor/nng-sys``. The root manifest names the first as a
+  ``[patch.crates-io]`` target and ``vendor/nng`` as an optional path
+  dependency, and the sdist was packing neither, so ``cargo metadata``
+  failed on ``pip install``.
+- The published ``anneal-core`` crate does not depend on ``rgpot-pair``.
+  Free-cluster kernels are installed at run time through
+  ``install_cluster_kernels``. Without them, Lennard-Jones and Morse use
+  the pair loop and Gupta refuses. The wheel crate installs the kernels
+  before it registers ``anneal._core``.
+- A labelled motif reseed is charged for every probe call, and the probe
+  stops at the calls the chain has left.
+- With the ``rgsaddle`` feature, the labelled binary-core probe takes half
+  of the calls the chain has left. A default build still offers the probe
+  the whole remainder.
 - ``Config::recommended`` at 38 points grows the named lattices (face-centred,
   hexagonal, icosahedral, simple cubic, and the observed cloud) instead of
   the LeanBurst displacement stack. That stack left 17 of 72 seeds on the
