@@ -162,7 +162,9 @@ TEST_CASE("RGPOT_CACHE_DIR places the unpack when the config has none",
     rgpot::UmaPot pot(line_config(""));
     REQUIRE_THAT(line_energy(pot), Catch::Matchers::WithinAbs(112.5, 1e-9));
   }
-  REQUIRE(fs::last_write_time(dir / unpack::kManifest) == when);
+  // libc++ file_time_type counts in __int128, which Catch2 cannot print.
+  const bool untouched = fs::last_write_time(dir / unpack::kManifest) == when;
+  REQUIRE(untouched);
   REQUIRE(listing(variable / "aoti") ==
           std::set<std::string>{dir.filename().string()});
 

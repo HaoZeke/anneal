@@ -324,7 +324,9 @@ TEST_CASE("unpack lays out the model as torch does and reuses it",
   const auto again = unpack::unpack(pkg, root);
   REQUIRE(again.reused);
   REQUIRE(again.dir == first.dir);
-  REQUIRE(fs::last_write_time(again.so) == when);
+  // libc++ file_time_type counts in __int128, which Catch2 cannot print.
+  const bool untouched = fs::last_write_time(again.so) == when;
+  REQUIRE(untouched);
   REQUIRE(listing(root / "aoti") == std::set<std::string>{sha + ".model"});
 
   // Other bytes are another model, in another directory.
