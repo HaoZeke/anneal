@@ -381,6 +381,16 @@ if (
         ],
         timeout: 300,
     )
+    test(
+        'eigen_subproject_fallback',
+        python3_engines,
+        args: [
+            files('test_eigen_subproject_fallback.py'),
+            meson.project_source_root(),
+            meson_prog.full_path(),
+        ],
+        timeout: 300,
+    )
 endif
 
 abi_script = find_program('../scripts/abi_symbols.sh')

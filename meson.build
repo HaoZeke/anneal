@@ -304,7 +304,7 @@ if get_option('with_eigen') or (
     if not eigen_dep.found()
         eigen_dep = dependency(
             'eigen3',
-            subproject: subproject('eigen'),
+            fallback: ['eigen', 'eigen_dep'],
             required: get_option('with_eigen'),
         )
     endif
