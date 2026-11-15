@@ -28,11 +28,14 @@ struct Built {
   /// The kernel's forcePerAtom (PerAtom.hpp), which also fills the per-atom
   /// energies and virials. Empty when the potential cannot split them.
   std::function<void(const ForceInput &, ForceOut *, const PerAtomOut &)> perAtom;
+  /// Cutoff of a potential that takes one (LJ, Morse, SuttonChen), in
+  /// Angstrom. 0 for a kernel with a fixed range.
+  double cutoff = 0.0;
   std::string error; ///< Reason when pot is null.
 };
 
 /// cutoff is used when the potential has a cutoff and the options do
-/// not name one.
+/// not name one. A cutoff <= 0 keeps the potential's own default.
 Built build(const std::string &name, const Options &options, double cutoff);
 
 /// Names build() accepts in this build, separated by spaces.

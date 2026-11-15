@@ -165,23 +165,29 @@ template <typename P, typename... A> Built own(A &&...args) {
   return out;
 }
 
-Built make(const std::string &key, Reader &r, double cutoff) {
+template <typename P, typename C> Built ownCut(const C &c) {
+  Built out = own<P>(c);
+  out.cutoff = c.cutoff;
+  return out;
+}
+
+Built make(const std::string &key, Reader &r, double fallback) {
   if (key == "lj") {
     LJConfig c;
     c.u0 = r.real("u0", c.u0);
     c.psi = r.real("psi", c.psi);
-    c.cutoff = r.real("cutoff", cutoff);
+    c.cutoff = r.real("cutoff", fallback > 0.0 ? fallback : c.cutoff);
     c.switch_width = r.real("switch_width", c.switch_width);
-    return own<LJPot>(c);
+    return ownCut<LJPot>(c);
   }
   if (key == "morse") {
     MorseConfig c;
     c.De = r.real("de", c.De);
     c.a = r.real("a", c.a);
     c.re = r.real("re", c.re);
-    c.cutoff = r.real("cutoff", cutoff);
+    c.cutoff = r.real("cutoff", fallback > 0.0 ? fallback : c.cutoff);
     c.switch_width = r.real("switch_width", c.switch_width);
-    return own<MorsePot>(c);
+    return ownCut<MorsePot>(c);
   }
   if (key == "suttonchen") {
     const std::string preset = lower(r.text("preset", ""));
@@ -199,10 +205,10 @@ Built make(const std::string &key, Reader &r, double cutoff) {
     c.a = r.real("a", c.a);
     c.n = r.integer("n", c.n);
     c.m = r.integer("m", c.m);
-    c.cutoff = r.real("cutoff", cutoff);
+    c.cutoff = r.real("cutoff", fallback > 0.0 ? fallback : c.cutoff);
     c.periodic = true;
     c.stress = true;
-    return own<SuttonChenPot>(c);
+    return ownCut<SuttonChenPot>(c);
   }
 #ifdef RGPOT_HAS_EAM_TABLE
   if (key == "eamtable") {
