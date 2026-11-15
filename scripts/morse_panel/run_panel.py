@@ -43,6 +43,8 @@ FIELDS = [
     "pot_s",
     "outside_s",
 ]
+ROW_FIELDS = FIELDS + ["code_revision", "host"]
+GMIN_REV = "aac1548a8aec13b53ad12a8d6904625081685d2e"
 SUMMARY_FIELDS = [
     "system",
     "anneal_hits",
@@ -112,6 +114,8 @@ def have(rows: list[dict[str, str]], system: str, code: str, seed: int) -> bool:
 def canonical(row: dict[str, str]) -> dict[str, str]:
     out = {key: row[key] for key in FIELDS}
     out["hit"] = "1" if str(row["hit"]) in ("1", "true") else "0"
+    out["code_revision"] = row.get("code_revision", "")
+    out["host"] = row.get("host", "")
     return out
 
 
@@ -122,7 +126,7 @@ def write_rows(path: Path, rows: list[dict[str, str]]) -> None:
         key=lambda row: (row["system"], row["code"], int(row["seed"])),
     )
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=FIELDS)
+        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS)
         writer.writeheader()
         writer.writerows(ordered)
 
@@ -142,7 +146,7 @@ def reuse_gmin(root: Path) -> list[dict[str, str]]:
                 continue
             if int(row["seed"]) not in SEEDS:
                 continue
-            found.append({key: row[key] for key in FIELDS if key in row})
+            found.append({key: row[key] for key in ROW_FIELDS if key in row})
     # First file wins on a duplicate.
     kept = []
     seen = set()
@@ -353,28 +357,38 @@ def main() -> None:
     )
     binary = target / "release" / "examples" / "h2h_morse"
     data = (root / "examples/h2h_gmin_morse.data").read_text()
+    head = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    host = socket.gethostname()
     for name, _n, rho, budget, ref in systems:
         for seed in seeds:
             if args.arm in ("anneal", "both") and not have(rows, name, "anneal", seed):
                 print(f"anneal {name} {seed}", file=sys.stderr, flush=True)
-                rows.append(run_anneal(binary, name, seed, budget))
+                rows.append(
+                    {**run_anneal(binary, name, seed, budget), "code_revision": head, "host": host}
+                )
                 write_rows(seeds_path, rows)
             if args.arm == "anneal":
                 continue
             if not have(rows, name, "gmin", seed):
                 print(f"gmin {name} {seed}", file=sys.stderr, flush=True)
                 rows.append(
-                    run_gmin(
-                        binary,
-                        args.gmin,
-                        data,
-                        name,
-                        rho,
-                        seed,
-                        budget,
-                        ref,
-                        work / "gmin" / name / str(seed),
-                    )
+                    {
+                        **run_gmin(
+                            binary,
+                            args.gmin,
+                            data,
+                            name,
+                            rho,
+                            seed,
+                            budget,
+                            ref,
+                            work / "gmin" / name / str(seed),
+                        ),
+                        "code_revision": GMIN_REV,
+                        "host": host,
+                    }
                 )
                 write_rows(seeds_path, rows)
 

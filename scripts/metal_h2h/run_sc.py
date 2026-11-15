@@ -80,6 +80,8 @@ SUMMARY_FIELDS = (
     "schedule_seed",
     "anneal_head",
     "gmin_revision",
+    "code_revision",
+    "host",
 )
 SEED_FIELDS = (
     "system",
@@ -93,6 +95,8 @@ SEED_FIELDS = (
     "wall_s",
     "pot_per_eval_s",
     "outside_per_eval_s",
+    "code_revision",
+    "host",
 )
 
 
@@ -287,6 +291,8 @@ def summarise(rows: list[dict], head: str, revision: str) -> list[dict[str, str]
                     "schedule_seed": str(SCHEDULE_SEED),
                     "anneal_head": head,
                     "gmin_revision": revision,
+                    "code_revision": head if arm == "anneal" else revision,
+                    "host": os.uname().nodename,
                 }
             )
     return out
@@ -384,6 +390,8 @@ def main(argv: list[str]) -> int:
                     "wall_s": f"{row['wall_s']:.6f}",
                     "pot_per_eval_s": f"{row['pot_per']:.9f}",
                     "outside_per_eval_s": f"{row['out_per']:.9f}",
+                    "code_revision": head if row["arm"] == "anneal" else revision,
+                    "host": os.uname().nodename,
                 }
             )
     print(f"wrote {args.summary}", flush=True)

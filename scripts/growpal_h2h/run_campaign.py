@@ -58,6 +58,8 @@ SUMMARY_FIELDS = [
     "aegon_version",
     "growpal_source",
     "anneal_head",
+    "code_revision",
+    "host",
 ]
 
 SEED_FIELDS = [
@@ -75,6 +77,8 @@ SEED_FIELDS = [
     "best",
     "stop",
     "reached",
+    "code_revision",
+    "host",
 ]
 
 
@@ -312,6 +316,8 @@ def summarise(rows: list[dict[str, str]], seeds: tuple[int, ...], source: dict[s
                     "aegon_version": source["aegon_version"],
                     "growpal_source": source["growpal_source"],
                     "anneal_head": head,
+                    "code_revision": head if arm == "anneal" else source["growpal_version"],
+                    "host": os.uname().nodename,
                 }
             )
     return out
@@ -449,6 +455,11 @@ def main(argv: list[str]) -> int:
             row = run_anneal(args.binary, n, seed, budget, log)
         else:
             row = run_growpal_seed(n, seed, budget, reference, str(args.seeds_xyz), log)
+        row = {
+            **row,
+            "code_revision": head if arm == "anneal" else source["growpal_version"],
+            "host": os.uname().nodename,
+        }
         write_seed(saved, row)
         produced = True
         rows.append(row)

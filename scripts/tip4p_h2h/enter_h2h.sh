@@ -28,6 +28,7 @@ cp -a "$ROOT/examples/h2h_gmin_tip4p.data" "$WORK/bin/h2h_gmin_tip4p.data"
   > "$WORK/bin/h2h_gmin_tip4p_verify.data"
 cp -a /work/gmin-h2h/bin/GMIN "$WORK/bin/GMIN"
 cp -a /work/gmin-h2h/gmin-source.txt "$WORK/gmin-source.txt"
+git -C "$ROOT" rev-parse HEAD > "$WORK/anneal-head"
 chmod +x "$WORK/bin/GMIN" "$WORK/bin/h2h_seed" "$WORK/bin/run_h2h.py"
 
 # Published minima as NEWTIP centre/angle-axis blocks for the check.
@@ -60,6 +61,8 @@ exec /usr/bin/python3 -u $WORK/bin/run_h2h.py \\
   --work $WORK/runs \\
   --rows $WORK/rows.csv \\
   --summary $ROOT/bench/tip4p-h2h/h2h-summary.csv \\
+  --head-file $WORK/anneal-head \\
+  --gmin-source $WORK/gmin-source.txt \\
   "\$@"
 EOF
 chmod +x "$WORK/bin/inside.sh"

@@ -32,6 +32,11 @@ if [[ ! -x "$WORK/venv/bin/python" ]]; then
     'ase==3.23.0' pandas scikit-learn hdbscan dscribe
 fi
 
+ANNEAL_REVISION=$(git -C "$ROOT" rev-parse HEAD)
+if ! BONOBO_REVISION=$(git -C "$BONOBO_SRC" rev-parse HEAD 2>/dev/null); then
+  BONOBO_REVISION=sha256:$(sha256sum "$BONOBO_SRC/bo.py" | cut -d' ' -f1)
+fi
+
 rm -rf "$WORK/upstream/pyar-tree/pyar"
 mkdir -p "$WORK/upstream/pyar-tree"
 cp -a "$PYAR_SRC/pyar" "$WORK/upstream/pyar-tree/pyar"
@@ -82,6 +87,8 @@ exec $WORK/venv/bin/python -u $WORK/bin/run_campaign.py \\
   --upstream $WORK/upstream/bonobo \\
   --runs $WORK/runs \\
   --summary $ROOT/bench/lj-bonobo-h2h/summary.tsv \\
+  --anneal-revision $ANNEAL_REVISION \\
+  --bonobo-revision $BONOBO_REVISION \\
   "\$@"
 EOF
 chmod +x "$WORK/bin/inside.sh"

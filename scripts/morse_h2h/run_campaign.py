@@ -61,6 +61,8 @@ SUMMARY_FIELDS = [
     "gmin_url",
     "gmin_revision",
     "anneal_head",
+    "code_revision",
+    "host",
 ]
 
 
@@ -305,6 +307,8 @@ def summarise(rows, seeds, url, revision, head):
                     "gmin_url": url,
                     "gmin_revision": revision,
                     "anneal_head": head,
+                    "code_revision": head if arm == "anneal" else revision,
+                    "host": os.uname().nodename,
                 }
             )
     return out

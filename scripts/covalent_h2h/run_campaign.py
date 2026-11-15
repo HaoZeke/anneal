@@ -73,6 +73,8 @@ ROW_FIELDS = [
     "best",
     "pot_s",
     "outside_s",
+    "code_revision",
+    "host",
 ]
 
 SUMMARY_FIELDS = [
@@ -96,6 +98,8 @@ SUMMARY_FIELDS = [
     "schedule_seed",
     "gmin_revision",
     "anneal_head",
+    "code_revision",
+    "host",
 ]
 
 
@@ -345,6 +349,8 @@ def summarise(rows, references, revision, heads):
                     "schedule_seed": str(SCHEDULE_SEED),
                     "gmin_revision": revision,
                     "anneal_head": heads[ANNEAL.get(code, ("binary",))[0]],
+                    "code_revision": heads[ANNEAL[code][0]] if code in ANNEAL else revision if code in GMIN else heads["binary"],
+                    "host": os.uname().nodename,
                 }
             )
     return out
@@ -468,6 +474,10 @@ def main(argv: list[str]) -> int:
         else:
             raw = run_gmin(args, name, seed, code, budget, references[name], radius, start, log)
         row = normalise(raw)
+        row["code_revision"] = (
+            heads[ANNEAL[code][0]] if code in ANNEAL else revision if code in GMIN else head
+        )
+        row["host"] = os.uname().nodename
         write_csv(saved, ROW_FIELDS, [row])
         rows.append(row)
         note(

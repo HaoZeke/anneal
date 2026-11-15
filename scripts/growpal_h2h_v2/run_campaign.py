@@ -70,6 +70,8 @@ SEED_FIELDS = [
     "best",
     "stop",
     "reached",
+    "code_revision",
+    "host",
 ]
 
 SUMMARY_FIELDS = [
@@ -104,6 +106,8 @@ SUMMARY_FIELDS = [
     "ase_version",
     "anneal_head",
     "cpu",
+    "code_revision",
+    "host",
 ]
 
 IDENTITY_FIELDS = [
@@ -298,7 +302,12 @@ def read_rows(path: Path) -> list[dict[str, str]]:
 
 
 def append_rows(path: Path, fields: list[str], rows: list[dict[str, str]]) -> None:
-    """Append under the existing header. Never rewrites what is there."""
+    """Append under the existing header. Never rewrites a stored value.
+
+    A header whose columns are all in ``fields`` is widened once to
+    ``fields``; the stored rows keep their values and leave the new
+    columns empty.
+    """
     if not rows:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -306,6 +315,14 @@ def append_rows(path: Path, fields: list[str], rows: list[dict[str, str]]) -> No
     if not fresh:
         with path.open(newline="") as handle:
             header = next(csv.reader(handle))
+        if header != fields and set(header) <= set(fields):
+            stored = read_rows(path)
+            with path.open("w", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fields)
+                writer.writeheader()
+                for row in stored:
+                    writer.writerow({key: row.get(key, "") for key in fields})
+            header = fields
         if header != fields:
             raise RuntimeError(f"{path} header {header} != {fields}")
     with path.open("a", newline="") as handle:
@@ -374,6 +391,8 @@ def summarise(
                 "ase_version": source["ase_version"],
                 "anneal_head": head,
                 "cpu": cpu,
+                "code_revision": head if arm == "anneal" else source["growpal_commit"],
+                "host": os.uname().nodename,
             }
         )
     return out
@@ -511,6 +530,8 @@ def uncapped(args) -> int:
                 "ase_version": source["ase_version"],
                 "anneal_head": head,
                 "cpu": cpu,
+                "code_revision": source["growpal_commit"],
+                "host": os.uname().nodename,
             }
         )
         write_once(args.out / "rows" / system / f"growpal-uncapped-{seed}.row", UNCAPPED_FIELDS, row)
@@ -596,6 +617,8 @@ def main(argv: list[str]) -> int:
                 row = run_anneal(binary_of[system], system, seed, budget, log)
             else:
                 row = run_growpal(args.python, arm_script, system, seed, budget, args.seeds_xyz, log)
+            row["code_revision"] = head if arm == "anneal" else source["growpal_commit"]
+            row["host"] = os.uname().nodename
             write_once(saved, SEED_FIELDS, row)
             note(
                 progress,

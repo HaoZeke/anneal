@@ -291,6 +291,18 @@ def summarise(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     return out
 
 
+def read_provenance(head_file: Path | None, source: Path | None) -> tuple[str, str]:
+    """The anneal head and the GMIN revision recorded by the entry script."""
+    head = head_file.read_text().strip() if head_file else ""
+    revision = ""
+    if source and source.is_file():
+        for line in source.read_text().splitlines():
+            key, _, value = line.partition("=")
+            if key.strip() == "revision":
+                revision = value.strip()
+    return head, revision
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", type=Path, required=True)
@@ -305,6 +317,8 @@ def main() -> int:
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--size", type=int)
     parser.add_argument("--seed", type=int)
+    parser.add_argument("--head-file", type=Path)
+    parser.add_argument("--gmin-source", type=Path)
     args = parser.parse_args()
     if socket.gethostname() != "bench":
         print(f"hostname is {socket.gethostname()}, not bench", file=sys.stderr)
@@ -313,6 +327,8 @@ def main() -> int:
         print(f"cwd is {Path.cwd()}, not /work", file=sys.stderr)
         return 2
     args.work.mkdir(parents=True, exist_ok=True)
+    head, revision = read_provenance(args.head_file, args.gmin_source)
+    host = os.uname().nodename
     whole = args.size is None and args.seed is None
     if whole and args.point and args.verify_data and args.gm_dir and args.verify_out:
         verify(args.point, args.gmin, args.verify_data, args.gm_dir, args.verify_out, args.work)
@@ -328,6 +344,8 @@ def main() -> int:
             start = args.work / f"tip4p{n}-s{seed}.start.gmin"
             print(f"gmin n={n} seed={seed}", flush=True)
             gmin = run_gmin(args.gmin, args.data, n, seed, start, args.work)
+            anneal.update(code_revision=head, host=host)
+            gmin.update(code_revision=revision, host=host)
             rows.extend([anneal, gmin])
             with args.rows.open("a") as handle:
                 writer = csv.DictWriter(handle, fieldnames=sorted({*anneal, *gmin}))
@@ -336,7 +354,7 @@ def main() -> int:
                 writer.writerow(anneal)
                 writer.writerow(gmin)
     if whole:
-        summary = summarise(rows)
+        summary = [dict(row, code_revision=head, host=host) for row in summarise(rows)]
         with args.summary.open("w") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(summary[0].keys()))
             writer.writeheader()

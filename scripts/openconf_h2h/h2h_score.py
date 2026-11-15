@@ -148,7 +148,8 @@ def score(runs: Path, seeds_out: Path, summary_out: Path, polish_cache: Path) ->
                 "seed": seed,
                 "candidates": int(len(es)),
                 "invalid": int((~ok).sum()) if len(es) else 0,
-                **{k: info.get(k) for k in ("wall_s", "pot_s", "outside_s", "grad_calls", "energy_calls", "embed_s", "budget", "hostname")},
+                **{k: info.get(k) for k in ("wall_s", "pot_s", "outside_s", "grad_calls", "energy_calls", "embed_s", "budget", "hostname", "openconf_revision", "code_revision")},
+                "host": info.get("hostname"),
             }
         )
     references = {}
@@ -176,7 +177,7 @@ def score(runs: Path, seeds_out: Path, summary_out: Path, polish_cache: Path) ->
     fields = [
         "molecule", "arm", "seed", "delta_min_kcal", "n_3kcal", "reference_3kcal", "coverage",
         "candidates", "invalid", "grad_calls", "energy_calls", "budget", "wall_s", "pot_s",
-        "outside_s", "embed_s", "e_ref_kcal", "hostname",
+        "outside_s", "embed_s", "e_ref_kcal", "hostname", "openconf_revision", "code_revision", "host",
     ]
     with seeds_out.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore", lineterminator="\n")
@@ -187,7 +188,7 @@ def score(runs: Path, seeds_out: Path, summary_out: Path, polish_cache: Path) ->
         "molecule", "arm", "n", "e_ref_kcal", "delta_min_median_kcal", "delta_min_best_kcal",
         "hits_0p1", "n_3kcal_median", "reference_3kcal", "coverage_median", "grad_calls_median",
         "wall_median_s", "pot_median_s", "outside_median_s", "pot_per_grad_s", "outside_per_grad_s",
-        "invalid_total",
+        "invalid_total", "code_revision", "host",
     ]
     order = list(mols)
     extra = sorted({r["arm"] for r in per_run} - {"anneal", "openconf", "crest"})
@@ -227,8 +228,14 @@ def score(runs: Path, seeds_out: Path, summary_out: Path, polish_cache: Path) ->
                         "pot_per_grad_s": _fmt(pot_total / grad_total if grad_total and pot_total else None, 9),
                         "outside_per_grad_s": _fmt(out_total / grad_total if grad_total and out_total else None, 9),
                         "invalid_total": sum(r["invalid"] for r in rows),
+                        "code_revision": joined(rows, "code_revision"),
+                        "host": joined(rows, "host"),
                     }
                 )
+
+
+def joined(rows, key):
+    return " ".join(sorted({r.get(key) or "" for r in rows} - {""}))
 
 
 def _fmt(value, digits: int = 6):

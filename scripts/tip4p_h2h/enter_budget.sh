@@ -25,6 +25,8 @@ cp -a "$HERE/run_budget.py" "$WORK/bin/run_budget.py"
 cp -a "$ROOT/examples/h2h_gmin_tip4p.data" "$WORK/bin/h2h_gmin_tip4p.data"
 cp -a /work/gmin-h2h/bin/GMIN "$WORK/bin/GMIN"
 chmod +x "$WORK/bin/GMIN" "$WORK/bin/h2h_seed" "$WORK/bin/run_budget.py"
+cp -a /work/gmin-h2h/gmin-source.txt "$WORK/gmin-source.txt"
+git -C "$ROOT" rev-parse HEAD > "$WORK/anneal-head"
 
 REUSE=${H2H_GMIN_ROWS:-}
 
@@ -62,6 +64,8 @@ exec /usr/bin/python3 -u $WORK/bin/run_budget.py \\
   --rows $ROWS \\
   --summary $SUMMARY \\
   ${REUSE:+--gmin-rows $REUSE} \\
+  --head-file $WORK/anneal-head \\
+  --gmin-source $WORK/gmin-source.txt \\
   "\$@"
 EOF
 chmod +x "$WORK/bin/inside_budget.sh"

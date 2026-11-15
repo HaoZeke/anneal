@@ -75,7 +75,10 @@ ROW_FIELDS = [
     "best",
     "pot_s",
     "outside_s",
+    "code_revision",
+    "host",
 ]
+CREST_REVISION = "3.0.2"
 SUMMARY_FIELDS = [
     "system",
     "code",
@@ -220,6 +223,23 @@ def run_crest(
     }
 
 
+def widen(rows: Path) -> None:
+    """Give a stored rows file the current header. Stored values are kept."""
+    if not rows.is_file() or rows.stat().st_size == 0:
+        return
+    with rows.open(newline="") as handle:
+        stored = list(csv.DictReader(handle))
+        header = list(stored[0]) if stored else []
+    if not header or header == ROW_FIELDS:
+        return
+    if not set(header) <= set(ROW_FIELDS):
+        raise SystemExit(f"{rows} header {header} is not a subset of {ROW_FIELDS}")
+    with rows.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows({key: row.get(key, "") for key in ROW_FIELDS} for row in stored)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--anneal", type=Path)
@@ -232,6 +252,7 @@ def main() -> None:
     ap.add_argument("--crest-seeds", nargs="*", type=int)
     ap.add_argument("--codes", nargs="*", default=list(CODES))
     ap.add_argument("--summary", type=Path)
+    ap.add_argument("--head-file", type=Path)
     args = ap.parse_args()
     if args.summary is not None and not any((args.anneal, args.crest, args.xtb)):
         summarise(args.rows, args.summary)
@@ -244,6 +265,8 @@ def main() -> None:
     os.environ["OMP_NUM_THREADS"] = "1"
     python = os.environ.get("PANEL_PYTHON", "/usr/bin/python3")
     rng = random.Random(SCHEDULE_SEED)
+    head = args.head_file.read_text().strip() if args.head_file else ""
+    widen(args.rows)
     write_header = not args.rows.exists()
     with open(args.rows, "a", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
@@ -290,6 +313,8 @@ def main() -> None:
                     )
                 else:
                     row = run_anneal(args.anneal, system, seed, where)
+                row["code_revision"] = CREST_REVISION if code == "crest" else head
+                row["host"] = socket.gethostname()
                 writer.writerow(row)
                 handle.flush()
                 print(",".join(str(row[k]) for k in ROW_FIELDS), flush=True)

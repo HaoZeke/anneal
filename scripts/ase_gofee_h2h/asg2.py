@@ -425,6 +425,8 @@ def run_job(binary, runs, specs, system, seed, arm, head) -> dict:
     )
     if not row.get("head"):
         row["head"] = head
+    row["code_revision"] = {"agox_gofee": AGOX_VERSION}.get(arm, ASE_VERSION)
+    row["host"] = os.uname().nodename
     return row
 
 

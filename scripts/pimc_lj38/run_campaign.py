@@ -108,6 +108,7 @@ SUMMARY_FIELDS = [
     "anneal_head",
     "code_revision",
     "schedule",
+    "host",
 ]
 
 SEED_FIELDS = [
@@ -126,6 +127,7 @@ SEED_FIELDS = [
     "stop",
     "reached",
     "code_revision",
+    "host",
 ]
 
 
@@ -252,7 +254,7 @@ def write_seed(path: Path, row: dict[str, str]) -> None:
     with path.open("x", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=SEED_FIELDS)
         writer.writeheader()
-        writer.writerow({key: row[key] for key in SEED_FIELDS})
+        writer.writerow({key: row.get(key, "") for key in SEED_FIELDS})
 
 
 def load_seed(path: Path) -> dict[str, str] | None:
@@ -547,6 +549,7 @@ def run_rpqa(
         "stop": stop,
         "reached": str(n),
         "code_revision": code_revision,
+        "host": os.uname().nodename,
         "_pins": str(n_pins),
     }
     rated = with_rates(row)
@@ -620,6 +623,7 @@ def summarise(rows: list[dict[str, str]], seeds: tuple[int, ...], source: dict[s
                 "anneal_head": head,
                 "code_revision": head if arm == "anneal" else source["rpqa_commit"],
                 "schedule": "",
+                "host": os.uname().nodename,
             }
         )
     return out
@@ -658,20 +662,38 @@ def load_table(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def widen(path: Path, fields: list[str]) -> None:
+    """Give a stored table a newer header once. Stored values are kept; new cells are empty."""
+    if not path.is_file() or path.stat().st_size == 0:
+        return
+    with path.open(newline="") as handle:
+        header = next(csv.reader(handle))
+    if header == fields:
+        return
+    if not set(header) <= set(fields):
+        raise RuntimeError(f"{path} header {header} is not a subset of {fields}")
+    rows = load_table(path)
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows({key: row.get(key, "") for key in fields} for row in rows)
+
+
 def append_missing(
     path: Path,
     fields: list[str],
     updates: list[dict[str, str]],
     key_fields: tuple[str, ...],
 ) -> None:
-    """Append paper rows that are not already in ``path``. Existing lines stay byte for byte."""
+    """Append paper rows that are not already in ``path``. Existing values stay as they are."""
+    widen(path, fields)
     existing = load_table(path)
     have = {tuple(row[key] for key in key_fields) for row in existing}
     fresh = []
     for row in updates:
         if row["arm"] != PAPER_ARM:
             raise RuntimeError(f"refusing to write arm {row['arm']}")
-        stored = {key: row[key] for key in fields}
+        stored = {key: row.get(key, "") for key in fields}
         key = tuple(stored[name] for name in key_fields)
         if key in have:
             continue
@@ -714,7 +736,7 @@ def upsert_summary(path: Path, fields: list[str], row: dict[str, str]) -> None:
     writer = csv.DictWriter(buffer, fieldnames=fields)
     if not raw:
         writer.writeheader()
-    writer.writerow({key: row[key] for key in fields})
+    writer.writerow({key: row.get(key, "") for key in fields})
     path.write_text("".join(kept) + buffer.getvalue())
 
 
@@ -781,6 +803,7 @@ def summarise_paper(
             "anneal_head": anneal_head,
             "code_revision": source["rpqa_commit"],
             "schedule": schedule,
+            "host": os.uname().nodename,
         }
     ]
 
@@ -935,7 +958,8 @@ def replace_lines(
     fields: list[str],
     rows: list[dict[str, str]],
 ) -> None:
-    """Replace lines with these prefixes. Every other line is copied unchanged."""
+    """Replace lines with these prefixes. Every other row keeps its values."""
+    widen(path, fields)
     raw = path.read_text() if path.is_file() else ""
     kept = [line for line in raw.splitlines(keepends=True) if not line.startswith(prefixes)]
     if kept and not kept[-1].endswith("\n"):
@@ -944,13 +968,14 @@ def replace_lines(
     writer = csv.DictWriter(buffer, fieldnames=fields)
     if not raw:
         writer.writeheader()
-    writer.writerows({key: row[key] for key in fields} for row in rows)
+    writer.writerows({key: row.get(key, "") for key in fields} for row in rows)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(kept) + buffer.getvalue())
 
 
 def append_seed_rows(path: Path, rows: list[dict[str, str]]) -> None:
-    """Append seed lines whose revision is not already recorded. Existing lines stay."""
+    """Append seed lines whose revision is not already recorded. Existing values stay."""
+    widen(path, SEED_FIELDS)
     existing = load_table(path)
     have = {
         (row.get("system"), row.get("arm"), row.get("seed"), row.get("code_revision", ""))
@@ -958,7 +983,7 @@ def append_seed_rows(path: Path, rows: list[dict[str, str]]) -> None:
     }
     fresh = []
     for row in rows:
-        stored = {key: row[key] for key in SEED_FIELDS}
+        stored = {key: row.get(key, "") for key in SEED_FIELDS}
         key = (stored["system"], stored["arm"], stored["seed"], stored["code_revision"])
         if key in have:
             continue

@@ -59,7 +59,7 @@ cd $WORK
 exec taskset -c 0 /usr/bin/python3 -u $HERE/gfn2_crest.py \\
   --anneal $WORK/bin/gfn2_covalent_h2h --crest $CREST --xtb $XTB \\
   --out $WORK/runs --rows $ROWS --summary $SUMMARY \\
-  --codes $CODES "\$@"
+  --head-file $WORK/anneal-head --codes $CODES "\$@"
 EOF
 chmod +x "$WORK/bin/inside.sh"
 

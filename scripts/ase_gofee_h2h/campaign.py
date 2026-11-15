@@ -477,6 +477,8 @@ def run_job(binary, repo, runs, system, seed, arm, head) -> dict:
     )
     if not row.get("head"):
         row["head"] = head
+    row["code_revision"] = {"paper": row["head"], "agox_gofee": AGOX_VERSION}.get(arm, ASE_VERSION)
+    row["host"] = os.uname().nodename
     return row
 
 
@@ -497,6 +499,8 @@ COLUMNS = [
     "agox",
     "head",
     "stop",
+    "code_revision",
+    "host",
 ]
 
 
@@ -522,6 +526,8 @@ def format_results(rows: list[dict]) -> str:
                     row["agox"],
                     row["head"],
                     row.get("stop") or ("hit" if row["hit"] else "budget"),
+                    row.get("code_revision", ""),
+                    row.get("host", ""),
                 ]
             )
         )

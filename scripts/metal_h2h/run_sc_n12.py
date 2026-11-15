@@ -49,6 +49,8 @@ SEED_FIELDS = (
     "restarts",
     "paths",
     "path_improvements",
+    "code_revision",
+    "host",
 )
 SUMMARY_FIELDS = (
     "system",
@@ -73,6 +75,8 @@ SUMMARY_FIELDS = (
     "schedule_seed",
     "anneal_head",
     "gmin_revision",
+    "code_revision",
+    "host",
 )
 ARM_FIELDS = (
     "system",
@@ -343,6 +347,8 @@ def summarise(rows: list[dict[str, str]], head: str, revision: str) -> list[dict
                     "schedule_seed": SCHEDULE_SEED,
                     "anneal_head": head,
                     "gmin_revision": revision,
+                    "code_revision": head if arm == "anneal" else revision,
+                    "host": os.uname().nodename,
                 }
             )
     return out
@@ -418,6 +424,11 @@ def main(argv: list[str]) -> int:
         key = (seed_row["system"], seed_row["seed"], seed_row["arm"])
         if key in done:
             return
+        seed_row = {
+            **seed_row,
+            "code_revision": head if seed_row["arm"] == "anneal" else revision,
+            "host": os.uname().nodename,
+        }
         rows.append(seed_row)
         done.add(key)
         arm_rows.extend(extra_arms)

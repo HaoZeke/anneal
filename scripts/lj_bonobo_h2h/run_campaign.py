@@ -175,7 +175,9 @@ def summarise(rows: list[dict], budget: int) -> str:
 
 
 def seed_table(rows: list[dict]) -> str:
-    lines = ["n\tarm\tseed\thit\trelaxations\trelaxations_to_hit\twall_s\tbest\tscreens"]
+    header = ("n", "arm", "seed", "hit", "relaxations", "relaxations_to_hit", "wall_s", "best",
+              "screens", "code_revision", "host")
+    lines = ["\t".join(header)]
     for row in rows:
         lines.append(
             "\t".join(
@@ -189,6 +191,8 @@ def seed_table(rows: list[dict]) -> str:
                     f"{row['wall_s']:.6f}",
                     f"{float(row['best']):.6f}",
                     str(row.get("screens", "")),
+                    row.get("code_revision", ""),
+                    row.get("host", ""),
                 ]
             )
         )
@@ -212,6 +216,8 @@ def main() -> int:
     parser.add_argument("--upstream", type=Path, required=True)
     parser.add_argument("--runs", type=Path, required=True)
     parser.add_argument("--summary", type=Path)
+    parser.add_argument("--anneal-revision", default="")
+    parser.add_argument("--bonobo-revision", default="")
     args = parser.parse_args()
     targets = load_fixture(args.fixture)
     sizes = tuple(args.size) if args.size else SIZES
@@ -244,6 +250,8 @@ def main() -> int:
                         args.population,
                         args.max_iter,
                     )
+                row["code_revision"] = args.anneal_revision if arm == "lean" else args.bonobo_revision
+                row["host"] = os.uname().nodename
                 rows.append(row)
                 print(
                     f"done n={n} arm={arm} seed={seed} hit={row['hit']} "

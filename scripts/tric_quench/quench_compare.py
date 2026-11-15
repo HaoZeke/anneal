@@ -36,6 +36,7 @@ import ctypes
 import logging
 import os
 import statistics
+import subprocess
 import sys
 import tempfile
 import time
@@ -401,6 +402,33 @@ class GateReached(Exception):
     pass
 
 
+def revisions():
+    """The code each arm runs: this checkout for anneal, the installed geomeTRIC."""
+    head = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True,
+                          text=True, check=True).stdout.strip()
+    import geometric
+
+    return {arm: head if arm.startswith("anneal") else f"geomeTRIC {geometric.__version__}" for arm in ARMS}
+
+
+def widen(path, fields):
+    """Give a stored CSV the current header. Stored values are kept."""
+    if not path.is_file() or path.stat().st_size == 0:
+        return
+    with path.open(newline="") as handle:
+        reader = csv.DictReader(handle)
+        header = reader.fieldnames or []
+        rows = list(reader)
+    if header == fields:
+        return
+    if not set(header) <= set(fields):
+        raise SystemExit(f"{path} header {header} is not a subset of {fields}")
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows({key: row.get(key, "") for key in fields} for row in rows)
+
+
 def geometric_quench(eng, numbers, x0, gate, coordsys, max_iter):
     from geometric.engine import Engine
     from geometric.internal import CartesianCoordinates, DelocalizedInternalCoordinates
@@ -515,7 +543,10 @@ def cmd_run(args):
             done = {(r["start"], r["gate"], r["arm"]) for r in csv.DictReader(handle)}
     fields = ["system", "start", "atoms", "gate", "arm", "calls", "wall_s", "pot_s", "outside_s",
               "energy_eV", "reached", "scc_failures", "search_calls", "same_as_anneal", "de_vs_anneal_eV",
-              "rmsd_vs_anneal"]
+              "rmsd_vs_anneal", "code_revision", "host"]
+    widen(args.out, fields)
+    revision = revisions()
+    host = os.uname().nodename
     new = not args.out.is_file()
     with args.out.open("a", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
@@ -557,11 +588,16 @@ def cmd_run(args):
                             "search_calls": "" if search_calls is None else search_calls,
                             "same_as_anneal": int(abs(de) <= SAME_EV and rmsd <= SAME_RMSD),
                             "de_vs_anneal_eV": f"{de:.6f}", "rmsd_vs_anneal": f"{rmsd:.4f}",
+                            "code_revision": revision[arm], "host": host,
                         }
                     )
                     handle.flush()
                     print(f"{label} gate {gate:g} {arm}: {eng.calls} calls {wall:.2f} s "
                           f"dE {de:+.4f} rmsd {rmsd:.3f} reached {reached}", flush=True)
+
+
+def joined(rows, key):
+    return " ".join(sorted({r.get(key) or "" for r in rows} - {""}))
 
 
 def cmd_summary(args):
@@ -573,7 +609,7 @@ def cmd_summary(args):
     fields = ["system", "gate", "arm", "starts", "reached", "calls_total", "calls_median",
               "saving_total_vs_anneal", "saving_median_ratio_vs_anneal", "wall_total_s",
               "pot_total_s", "outside_total_s", "same_as_anneal", "lower_than_anneal",
-              "search_calls_median"]
+              "search_calls_median", "code_revision", "host"]
     out = []
     for (system, gate), rs in sorted(groups.items()):
         arms = [arm for arm in ARMS if any(r["arm"] == arm for r in rs)]
@@ -598,6 +634,8 @@ def cmd_summary(args):
                     "same_as_anneal": sum(int(r["same_as_anneal"]) for r in sel),
                     "lower_than_anneal": sum(float(r["de_vs_anneal_eV"]) < -SAME_EV for r in sel),
                     "search_calls_median": statistics.median(search) if search else "",
+                    "code_revision": joined(sel, "code_revision"),
+                    "host": joined(sel, "host"),
                 }
             )
     with args.summary.open("w", newline="") as handle:

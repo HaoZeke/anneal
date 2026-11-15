@@ -38,6 +38,7 @@ SEED_FIELDS = [
     "pot_s",
     "outside_s",
 ]
+ROW_FIELDS = SEED_FIELDS + ["code_revision", "host"]
 
 
 def type7(ordered: list[float], p: float) -> float:
@@ -168,13 +169,13 @@ def run_anneal(binary: Path, system: str, seed: int) -> dict[str, str]:
 
 
 def gmin_row(stored: dict[str, str]) -> dict[str, str]:
-    return {field: stored[field] for field in SEED_FIELDS}
+    return {field: stored.get(field, "") for field in ROW_FIELDS}
 
 
 def write_rows(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=SEED_FIELDS)
+        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS)
         writer.writeheader()
         writer.writerows(rows)
 
@@ -243,10 +244,14 @@ def summarise(rows: list[dict[str, str]], path: Path) -> None:
 def panel(root: Path) -> list[dict[str, str]]:
     archive = load_gmin(root / "bench" / "morse-h2h" / "seeds.csv")
     binary = binary_path(root)
+    head = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
     rows: list[dict[str, str]] = []
     for system in SYSTEMS:
         for seed in SEEDS:
             anneal = run_anneal(binary, system, seed)
+            anneal.update({"code_revision": head, "host": os.uname().nodename})
             print(",".join(anneal[field] for field in SEED_FIELDS), flush=True)
             rows.append(anneal)
             stored = archive.get((system, seed))

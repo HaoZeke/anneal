@@ -119,11 +119,12 @@ def campaign(args) -> None:
         name, seed, arm = args.only[0], int(args.only[1]), args.only[2]
         jobs = [(name, seed, arm)]
     tree = args.work / ("asv" if args.only else "runs")
+    revision = (args.work / "bin" / "anneal-head").read_text().strip()
     for position, (name, seed, arm) in enumerate(jobs, 1):
         out = tree / name / str(seed) / arm
         if (out / "job.json").is_file() and not args.only:
             continue
-        info = job(arm, name, seed, out, args, budget=table[name])
+        info = stamp(out, job(arm, name, seed, out, args, budget=table[name]), revision)
         print(
             f"JOB {position}/{len(jobs)} {name} {seed} {arm} wall {info['wall_s']:.2f} "
             f"grad {info.get('grad_calls')} candidates {info.get('candidates')}",

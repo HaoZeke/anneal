@@ -220,6 +220,18 @@ def summarise(rows: list[dict[str, str]], budget: int, n: int) -> dict[str, str]
     }
 
 
+def read_provenance(head_file: Path | None, source: Path | None) -> tuple[str, str]:
+    """The anneal head and the GMIN revision recorded by the entry script."""
+    head = head_file.read_text().strip() if head_file else ""
+    revision = ""
+    if source and source.is_file():
+        for line in source.read_text().splitlines():
+            key, _, value = line.partition("=")
+            if key.strip() == "revision":
+                revision = value.strip()
+    return head, revision
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", type=Path, required=True)
@@ -232,6 +244,8 @@ def main() -> int:
     parser.add_argument("--size", type=int, default=SIZE)
     parser.add_argument("--budget", type=int, help="one budget instead of the full sweep")
     parser.add_argument("--seed", type=int, help="one seed instead of all twelve")
+    parser.add_argument("--head-file", type=Path)
+    parser.add_argument("--gmin-source", type=Path)
     args = parser.parse_args()
     if socket.gethostname() != "bench":
         print(f"hostname is {socket.gethostname()}, not bench", file=sys.stderr)
@@ -240,13 +254,15 @@ def main() -> int:
         print(f"cwd is {Path.cwd()}, not /work", file=sys.stderr)
         return 2
     args.work.mkdir(parents=True, exist_ok=True)
+    head, revision = read_provenance(args.head_file, args.gmin_source)
+    host = os.uname().nodename
     reuse = load_reuse(args.gmin_rows)
     n = args.size
     budgets = (args.budget,) if args.budget else BUDGETS
     seeds = (args.seed,) if args.seed is not None else SEEDS
     whole = args.budget is None and args.seed is None
     fields = ["system", "code", "budget", "seed", "hit", "evals_to_hit", "charged",
-              "best", "wall_s", "pot_s", "outside_s", "basins"]
+              "best", "wall_s", "pot_s", "outside_s", "basins", "code_revision", "host"]
     rows: list[dict[str, str]] = []
     with args.rows.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
@@ -267,7 +283,9 @@ def main() -> int:
                     out = {"system": f"tip4p{n}", "code": code, "budget": str(budget), "seed": str(seed),
                            "hit": row["hit"], "evals_to_hit": row["evals_to_hit"], "charged": row["charged"],
                            "best": row["best"], "wall_s": row["wall_s"], "pot_s": row["pot_s"],
-                           "outside_s": f"{outside_of(row):.6f}", "basins": row.get("basins", "")}
+                           "outside_s": f"{outside_of(row):.6f}", "basins": row.get("basins", ""),
+                           "code_revision": head if code == "anneal" else row.get("code_revision") or revision,
+                           "host": host if code == "anneal" or carried is None else row.get("host", "")}
                     rows.append(out)
                     writer.writerow(out)
                     handle.flush()

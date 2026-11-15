@@ -45,6 +45,8 @@ SUMMARY_FIELDS = [
     "seeds",
     "schedule_seed",
     "anneal_head",
+    "code_revision",
+    "host",
 ]
 
 ROW_FIELDS = [
@@ -250,6 +252,8 @@ def summarise(rows: list[dict], seeds: tuple[int, ...], head: str) -> list[dict[
                     "seeds": seed_text,
                     "schedule_seed": str(SCHEDULE_SEED),
                     "anneal_head": head,
+                    "code_revision": head,
+                    "host": os.uname().nodename,
                 }
             )
     return out
