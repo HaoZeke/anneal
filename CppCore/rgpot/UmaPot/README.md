@@ -26,6 +26,8 @@ package is read.
 | `model_dtype` | weight dtype recorded by the exporter (`float32` or `float64`) |
 | `task_name`, `charge`, `spin` | must equal `UmaConfig` |
 | `z_set`, `natoms`, `counts` | must match the input atoms |
+| `natoms_min`, `natoms_max`, `nedges_min`, `nedges_max` | atom and edge counts the graph accepts |
+| `z_max` | largest atomic number a composition-free package accepts |
 | `label`, `shapes`, `inputs`, `outputs` | recorded |
 | `model`, `torch_version`, `fairchem_version`, `export_path` | recorded |
 
@@ -89,16 +91,26 @@ and spin.
 
 ## Export path
 
-`export_uma_aoti.py` tries a symbolic edge count, then a dynamic
-export, then a static one, then `make_fx(tracing_mode="real")`.
-Every path that is kept records the traced edge count as both
-`nedges_min` and `nedges_max`, plus the molecular box and a
-molecular flag. A path does not record 1 to 65536. `symbolic-nedges`,
-`dynamic-nonstrict` and `make_fx-nonstrict` without a molecular box
-are refused and write no package. A static path with no box records
-the traced count, so a later call whose edge list changed size
-throws `UmaShapeError` and names both shapes. The atom count stays
-the traced size.
+Without `--molecular-box` and `--batch-max`, `export_uma_aoti.py`
+writes a dynamic package (`export_path` `dynamic`). The atom count
+and the edge count are `torch.export.Dim` symbols, by default
+`natoms` in [2, 1024] and `nedges` in [1, 1024 * 300]
+(`--max-atoms`, `--max-edges`). The package records `natoms_min`,
+`natoms_max`, `nedges_min`, `nedges_max`, `pos_shape` `natoms,3` and
+`edge_index_shape` `2,nedges`, and UmaPot checks each call against
+those ranges. The MoLE experts stay in the graph, so the package
+covers every composition of its task head: it records no `z_set`,
+`natoms` or `counts`, and `z_max` bounds the atomic numbers.
+`--merge-mole` folds one composition into the weights instead. The
+package is kept only after it matches FAIRChemCalculator on the input,
+on the input with one atom moved past the cutoff, and on a second
+molecule. `docs/orgmode/howto/uma-export.org` lists the bounds and
+limits.
+
+With `--molecular-box` the exporter tries a dynamic export, then a
+static one, then `make_fx(tracing_mode="real")`, and records the
+traced edge count as both `nedges_min` and `nedges_max`, plus the
+molecular box and a molecular flag.
 
 ## Band export
 

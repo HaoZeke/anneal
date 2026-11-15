@@ -83,6 +83,7 @@ meson compile -C bbdir && meson test -C bbdir
    howto/engine-openmm
    howto/engine-plumed
    howto/engine-metatomic
+   howto/uma-export
    howto/embedding
    howto/exprpot
    howto/ipi
