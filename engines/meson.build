@@ -179,6 +179,50 @@ if lammps_opt.allowed() and python3_engines.found()
             lammps_exe = get_option('lammps_exe')
             if lammps_exe != ''
                 lammps_args += [pair_plugin.full_path(), lammps_exe]
+                lammps_pytest = run_command(
+                    python3_engines,
+                    '-c',
+                    'import pytest',
+                    check: false,
+                )
+                if lammps_pytest.returncode() == 0
+                    pair_env = environment()
+                    pair_env.set('RGPOT_PAIR_PLUGIN', pair_plugin.full_path())
+                    pair_env.set('RGPOT_LMP', lammps_exe)
+                    pair_env.set('RGPOT_EVAL', rgpot_eval.full_path())
+                    pair_env.set('RGPOT_LJ_ENGINE', lj_engine.full_path())
+                    if has_eam_table
+                        pair_env.set(
+                            'RGPOT_EAM_ALLOY',
+                            project_root / 'CppCore/tests/data/eam_table/CuNi.eam.alloy',
+                        )
+                    endif
+                    lammps_mpirun = find_program(
+                        'mpirun',
+                        'mpiexec',
+                        required: false,
+                    )
+                    if lammps_mpirun.found()
+                        pair_env.set('RGPOT_MPIRUN', lammps_mpirun.full_path())
+                    endif
+                    test(
+                        'lammps_pair_rgpot',
+                        python3_engines,
+                        args: [
+                            '-m',
+                            'pytest',
+                            '-q',
+                            '-p',
+                            'no:cacheprovider',
+                            '--rootdir',
+                            engines_here / 'lammps',
+                            files('lammps/test_pair_rgpot.py'),
+                        ],
+                        env: pair_env,
+                        workdir: meson.current_build_dir(),
+                        timeout: 900,
+                    )
+                endif
             endif
         elif lammps_opt.enabled()
             error(

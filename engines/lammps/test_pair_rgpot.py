@@ -1,0 +1,529 @@
+"""pair_style rgpot against native LAMMPS styles and rgpot itself.
+
+Meson runs this file with pytest when the plugin is built
+(-Dlammps_src and -Dlammps_exe). The environment names the inputs:
+
+    RGPOT_PAIR_PLUGIN  libpair_rgpot.so
+    RGPOT_LMP          the lmp built from lammps_src; its liblammps is
+                       preloaded so the Python module matches the plugin
+    RGPOT_EVAL         rgpot-eval
+    RGPOT_LJ_ENGINE    liblj_engine.so
+    RGPOT_EAM_ALLOY    CuNi.eam.alloy
+    RGPOT_MPIRUN       mpirun; the MPI cases are skipped without it
+
+Every LAMMPS case runs in a subprocess through lmp_case.py.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+HERE = Path(__file__).resolve().parent
+CASE = HERE / "lmp_case.py"
+
+PLUGIN = os.environ.get("RGPOT_PAIR_PLUGIN", "")
+LMP = os.environ.get("RGPOT_LMP", "")
+EVAL = os.environ.get("RGPOT_EVAL", "")
+LJ_ENGINE = os.environ.get("RGPOT_LJ_ENGINE", "")
+EAM_ALLOY = os.environ.get("RGPOT_EAM_ALLOY", "")
+MPIRUN = os.environ.get("RGPOT_MPIRUN", "")
+
+pytestmark = pytest.mark.skipif(
+    not (PLUGIN and LMP), reason="needs RGPOT_PAIR_PLUGIN and RGPOT_LMP"
+)
+
+# Argon-like Lennard-Jones in metal units.
+U0 = 0.0104
+PSI = 3.40
+CUT = 8.5
+A_LJ = 5.26
+A_CUNI = 3.6
+
+THERMO = [
+    "compute rgpress all pressure NULL virial",
+    "thermo_style custom step pe press "
+    + " ".join(f"c_rgpress[{k}]" for k in range(1, 7)),
+]
+
+
+def liblammps_env() -> dict:
+    env = os.environ.copy()
+    env.pop("LD_PRELOAD", None)
+    exe = Path(LMP).resolve()
+    for libdir in (exe.parent, exe.parent.parent / "lib"):
+        lib = libdir / "liblammps.so"
+        if lib.exists():
+            env["LD_PRELOAD"] = str(lib)
+            env["LD_LIBRARY_PATH"] = ":".join(
+                p for p in (str(libdir), env.get("LD_LIBRARY_PATH", "")) if p
+            )
+            break
+    return env
+
+
+def mpirun_prefix(nprocs: int) -> list[str]:
+    prefix = [MPIRUN, "-np", str(nprocs)]
+    version = subprocess.run(
+        [MPIRUN, "--version"], capture_output=True, text=True, check=False
+    )
+    if "Open MPI" in version.stdout + version.stderr:
+        prefix += ["--oversubscribe"]
+    return prefix
+
+
+def run_case(tmp_path: Path, commands: list[str], strains=(), nprocs: int = 1) -> dict:
+    tag = f"case{len(list(tmp_path.glob('case*.json')))}"
+    case = tmp_path / f"{tag}.json"
+    out = tmp_path / f"{tag}.out.json"
+    case.write_text(json.dumps({"commands": commands, "strains": list(strains)}))
+    cmd = [sys.executable, str(CASE), str(case), str(out)]
+    if nprocs > 1:
+        cmd = mpirun_prefix(nprocs) + cmd
+    proc = subprocess.run(
+        cmd, env=liblammps_env(), cwd=tmp_path, capture_output=True, text=True,
+        timeout=600, check=False,
+    )
+    if not out.exists():
+        raise AssertionError(f"no result from {cmd}\n{proc.stdout}\n{proc.stderr}")
+    return json.loads(out.read_text())
+
+
+def ok(result: dict) -> dict:
+    assert "error" not in result, result.get("error")
+    return result
+
+
+def fcc(a: float, triclinic: bool, extra: list[str] = ()) -> list[str]:
+    region = (
+        "region box prism 0 4 0 4 0 4 1 1 1"
+        if triclinic
+        else "region box block 0 4 0 4 0 4"
+    )
+    lines = [
+        "units metal",
+        "atom_style atomic",
+        "atom_modify map array",
+        "boundary p p p",
+        f"lattice fcc {a}",
+        region,
+        "create_box 2 box",
+        "create_atoms 1 box",
+        "mass * 39.948",
+    ]
+    if triclinic:
+        lines.append("change_box all xy delta 0.4 xz delta -0.3 yz delta 0.2 remap units box")
+    lines += jiggle(0.08) + list(extra)
+    return lines
+
+
+def jiggle(amplitude: float) -> list[str]:
+    """Displacements that depend on the atom ID only, not on the ranks."""
+    return [
+        f"variable jx atom {amplitude}*sin(1.37*id)",
+        f"variable jy atom {amplitude}*sin(2.11*id+0.5)",
+        f"variable jz atom {amplitude}*cos(0.73*id)",
+        "displace_atoms all move v_jx v_jy v_jz units box",
+    ]
+
+
+def lj_rgpot(form: str) -> list[str]:
+    style = f"pair_style rgpot {CUT}"
+    if form == "u0psi":
+        coeff = f"pair_coeff * * {U0} {PSI}"
+    else:
+        coeff = f"pair_coeff * * LJ u0 {U0} psi {PSI} cutoff {CUT} Ar Ar"
+    if form == "named-fd":
+        style += " virial fd"
+    return [f"plugin load {PLUGIN}", style, coeff]
+
+
+LJ_CUT = [f"pair_style lj/cut {CUT}", "pair_modify shift yes", f"pair_coeff * * {U0} {PSI}"]
+
+
+def max_abs_diff(a, b) -> float:
+    return max(abs(x - y) for x, y in zip(a, b, strict=True))
+
+
+def lower_strains(h: float) -> list[list[list[float]]]:
+    """+h and -h for xx, yy, zz and the lower entries yx, zx, zy."""
+    out = []
+    for i, j in ((0, 0), (1, 1), (2, 2), (1, 0), (2, 0), (2, 1)):
+        for sign in (1.0, -1.0):
+            e = [[0.0] * 3 for _ in range(3)]
+            e[i][j] = sign * h
+            out.append(e)
+    return out
+
+
+def fd_pressure(result: dict, h: float) -> list[float]:
+    """-(1/V) dE/de nktv2p, ordered xx yy zz xy xz yz like compute pressure."""
+    energies = result["strained"]
+    scale = -result["nktv2p"] / result["volume"]
+    return [scale * (energies[2 * k] - energies[2 * k + 1]) / (2 * h) for k in range(6)]
+
+
+@pytest.mark.parametrize("triclinic", [False, True], ids=["orthogonal", "triclinic"])
+@pytest.mark.parametrize("form", ["u0psi", "named", "named-fd"])
+def test_lj_matches_lj_cut(tmp_path, triclinic, form):
+    ref = ok(run_case(tmp_path, fcc(A_LJ, triclinic) + LJ_CUT + THERMO + ["run 0"]))
+    got = ok(run_case(tmp_path, fcc(A_LJ, triclinic) + lj_rgpot(form) + THERMO + ["run 0"]))
+    de = abs(got["pe"] - ref["pe"])
+    df = max_abs_diff(got["forces"], ref["forces"])
+    dp = max_abs_diff(got["press"], ref["press"])
+    print(f"lj/cut {form} triclinic={triclinic}: |dE| {de:.3e} eV, "
+          f"max|dF| {df:.3e} eV/A, max|dP| {dp:.3e} bar, P {ref['press']}")
+    assert de < 1e-9
+    assert df < 1e-9
+    # The strain difference has a truncation and a rounding error.
+    rtol = 1e-5 if form == "named-fd" else 1e-6
+    assert dp < rtol * max(1.0, max(abs(p) for p in ref["press"]))
+    if triclinic:
+        assert max(abs(p) for p in ref["press"][3:]) > 10.0
+
+
+@pytest.mark.parametrize("triclinic", [False, True], ids=["orthogonal", "triclinic"])
+def test_lj_pressure_is_the_strain_derivative(tmp_path, triclinic):
+    h = 1e-6
+    got = ok(run_case(
+        tmp_path, fcc(A_LJ, triclinic) + lj_rgpot("named") + THERMO + ["run 0"],
+        strains=lower_strains(h),
+    ))
+    fd = fd_pressure(got, h)
+    dp = max_abs_diff(got["press"], fd)
+    print(f"strain derivative triclinic={triclinic}: max|dP| {dp:.3e} bar, "
+          f"P {got['press']}, FD {fd}")
+    assert dp < 1e-3 * max(1.0, max(abs(p) for p in fd))
+
+
+def cuni(triclinic: bool) -> list[str]:
+    return fcc(A_CUNI, triclinic, ["set type 1 type/fraction 2 0.5 9137", "mass * 60.0"])
+
+
+EAM_RGPOT = [
+    f"plugin load {PLUGIN}",
+    "pair_style rgpot 6.5",
+    f"pair_coeff * * EAMTable file {EAM_ALLOY} Cu Ni",
+]
+EAM_NATIVE = ["pair_style eam/alloy", f"pair_coeff * * {EAM_ALLOY} Cu Ni"]
+
+
+def rgpot_eval(result: dict, z_by_type: dict[int, int], spec: list[str], e=None) -> dict:
+    """rgpot-eval on the cell and atoms of a LAMMPS result, strained by e."""
+    m = [[(1.0 if i == j else 0.0) + (e[i][j] if e else 0.0) for j in range(3)]
+         for i in range(3)]
+
+    def apply(r):
+        return [sum(r[k] * m[k][j] for k in range(3)) for j in range(3)]
+
+    lines = [str(len(result["types"]))]
+    lines.append(" ".join(f"{v:.17g}" for row in result["cell"] for v in apply(row)))
+    lo = result["boxlo"]
+    for t, x in zip(result["types"], result["x"], strict=True):
+        r = apply([x[0] - lo[0], x[1] - lo[1], x[2] - lo[2]])
+        lines.append(f"{z_by_type[t]} {r[0]:.17g} {r[1]:.17g} {r[2]:.17g}")
+    text = subprocess.run(
+        [EVAL, *spec], input="\n".join(lines) + "\n",
+        capture_output=True, text=True, check=True,
+    ).stdout
+    out = {"forces": [], "stress": None}
+    for line in text.splitlines():
+        parts = line.split()
+        if parts[0] == "energy":
+            out["pe"] = float(parts[1])
+        elif parts[0] == "force":
+            out["forces"] += [float(v) for v in parts[2:5]]
+        elif parts[0] == "stress":
+            out["stress"] = [float(v) for v in parts[1:]]
+    return out
+
+
+@pytest.mark.skipif(not EAM_ALLOY, reason="needs RGPOT_EAM_ALLOY")
+@pytest.mark.parametrize("triclinic", [False, True], ids=["orthogonal", "triclinic"])
+def test_eam_alloy_element_map(tmp_path, triclinic):
+    dump = ["run 0"]
+    ref = ok(run_case(tmp_path, cuni(triclinic) + EAM_NATIVE + THERMO + dump))
+    got = ok(run_case(tmp_path, cuni(triclinic) + EAM_RGPOT + THERMO + dump))
+    de = abs(got["pe"] - ref["pe"])
+    df = max_abs_diff(got["forces"], ref["forces"])
+    dp = max_abs_diff(got["press"], ref["press"])
+    print(f"eam/alloy triclinic={triclinic}: |dE| {de:.3e} eV, max|dF| {df:.3e} eV/A, "
+          f"max|dP| {dp:.3e} bar, P {ref['press']}")
+    assert de < 1e-8
+    assert df < 1e-8
+    assert dp < 1e-6 * max(1.0, max(abs(p) for p in ref["press"]))
+
+    if EVAL:
+        own = rgpot_eval(got, {1: 29, 2: 28}, ["EAMTable", "file", EAM_ALLOY])
+        s = own["stress"]
+        virial_p = [-got["nktv2p"] * s[k] for k in (0, 4, 8, 1, 2, 5)]
+        de = abs(own["pe"] - got["pe"])
+        df = max_abs_diff(own["forces"], got["forces"])
+        dp = max_abs_diff(virial_p, got["press"])
+        print(f"rgpot-eval triclinic={triclinic}: |dE| {de:.3e} eV, max|dF| {df:.3e} eV/A, "
+              f"max|dP| {dp:.3e} bar")
+        assert de < 1e-9
+        assert df < 1e-9
+        assert dp < 1e-6 * max(1.0, max(abs(p) for p in virial_p))
+
+
+NAMED = {
+    # name: (lattice, pair_style cutoff, pair_coeff words, rgpot-eval words)
+    "SuttonChen": (3.92, 7.0, "SuttonChen preset platinum cutoff 7.0 Pt Pt",
+                   ["SuttonChen", "preset", "platinum", "cutoff", "7.0"]),
+    "Morse": (3.92, 7.0, "Morse cutoff 7.0 Pt Pt", ["Morse", "cutoff", "7.0"]),
+}
+
+
+@pytest.mark.skipif(not EVAL, reason="needs RGPOT_EVAL")
+@pytest.mark.parametrize("name", sorted(NAMED))
+def test_named_potential_matches_rgpot_eval(tmp_path, name):
+    lattice, cutoff, coeff, spec = NAMED[name]
+    pair = [f"plugin load {PLUGIN}", f"pair_style rgpot {cutoff}", f"pair_coeff * * {coeff}"]
+    got = ok(run_case(tmp_path, fcc(lattice, True) + pair + THERMO + ["run 0"]))
+    own = rgpot_eval(got, {1: 78}, spec)
+    s = own["stress"]
+    virial_p = [-got["nktv2p"] * s[k] for k in (0, 4, 8, 1, 2, 5)]
+    de = abs(own["pe"] - got["pe"])
+    df = max_abs_diff(own["forces"], got["forces"])
+    dp = max_abs_diff(virial_p, got["press"])
+    print(f"{name} vs rgpot-eval: |dE| {de:.3e} eV, max|dF| {df:.3e} eV/A, "
+          f"max|dP| {dp:.3e} bar, P {got['press']}")
+    assert de < 1e-9
+    assert df < 1e-9
+    assert dp < 1e-6 * max(abs(p) for p in virial_p)
+
+
+@pytest.mark.skipif(not MPIRUN, reason="needs RGPOT_MPIRUN")
+@pytest.mark.parametrize("system", ["lj", "eam"])
+def test_mpi_ranks_agree(tmp_path, system):
+    # create_atoms numbers atoms by rank, so every run reads one data file.
+    if system == "lj":
+        start, pair = fcc(A_LJ, True), lj_rgpot("named")
+    else:
+        if not EAM_ALLOY:
+            pytest.skip("needs RGPOT_EAM_ALLOY")
+        start, pair = cuni(True), EAM_RGPOT
+    ok(run_case(tmp_path, start + ["pair_style zero 1.0", "pair_coeff * *", "run 0",
+                                   "write_data start.data nocoeff"]))
+    commands = [
+        "units metal",
+        "atom_style atomic",
+        "atom_modify map array",
+        "boundary p p p",
+        "read_data start.data",
+        *pair,
+        *THERMO,
+        "velocity all create 300 7741 dist gaussian",
+        "fix 1 all nve",
+        "run 20",
+    ]
+    results = {n: ok(run_case(tmp_path, commands, nprocs=n)) for n in (1, 2, 4)}
+    assert [results[n]["nprocs"] for n in (1, 2, 4)] == [1, 2, 4]
+    base = results[1]
+    for n in (2, 4):
+        de = abs(results[n]["pe"] - base["pe"])
+        df = max_abs_diff(results[n]["forces"], base["forces"])
+        dp = max_abs_diff(results[n]["press"], base["press"])
+        print(f"{system} np {n} vs 1 after 20 steps: |dE| {de:.3e} eV, max|dF| {df:.3e} eV/A, "
+              f"max|dP| {dp:.3e} bar")
+        assert de <= 1e-10 * max(1.0, abs(base["pe"]))
+        assert df <= 1e-10
+        assert dp <= 1e-8 * max(1.0, max(abs(p) for p in base["press"]))
+
+
+def test_null_type_under_hybrid_overlay(tmp_path):
+    """NULL leaves type 2 out; lj/cut adds the pairs that involve it."""
+    start = fcc(A_LJ, True, ["set type 1 type/fraction 2 0.3 77"])
+    hybrid = [
+        f"plugin load {PLUGIN}",
+        f"pair_style hybrid/overlay rgpot {CUT} lj/cut {CUT}",
+        "pair_modify shift yes",
+        f"pair_coeff * * rgpot LJ u0 {U0} psi {PSI} cutoff {CUT} Ar NULL",
+        f"pair_coeff 1 2 lj/cut {U0} {PSI}",
+        f"pair_coeff 2 2 lj/cut {U0} {PSI}",
+    ]
+    got = ok(run_case(tmp_path, start + hybrid + THERMO + ["run 0"]))
+    ref = ok(run_case(tmp_path, start + LJ_CUT + THERMO + ["run 0"]))
+    de = abs(got["pe"] - ref["pe"])
+    df = max_abs_diff(got["forces"], ref["forces"])
+    dp = max_abs_diff(got["press"], ref["press"])
+    print(f"hybrid/overlay NULL: |dE| {de:.3e} eV, max|dF| {df:.3e} eV/A, max|dP| {dp:.3e} bar")
+    assert de < 1e-9
+    assert df < 1e-9
+    assert dp < 1e-6 * max(abs(p) for p in ref["press"])
+
+
+def lj_fcc_zero_pressure_lattice() -> float:
+    """a where the static fcc lattice sum of the truncated pair has dE/da = 0."""
+    nmax = int(math.ceil(2 * CUT / A_LJ)) + 1
+    sites = []
+    for i in range(-2 * nmax, 2 * nmax + 1):
+        for j in range(-2 * nmax, 2 * nmax + 1):
+            for k in range(-2 * nmax, 2 * nmax + 1):
+                if (i + j + k) % 2 == 0 and (i, j, k) != (0, 0, 0):
+                    sites.append(math.sqrt(i * i + j * j + k * k) / 2.0)
+
+    def virial(a: float) -> float:
+        total = 0.0
+        for s in sites:
+            r = s * a
+            if r < CUT:
+                sr6 = (PSI / r) ** 6
+                total += r * 24.0 * U0 * (2.0 * sr6 * sr6 - sr6) / r
+        return total
+
+    lo, hi = 5.0, 5.6
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if virial(mid) > 0.0:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+def relax(triclinic: bool, pair: list[str]) -> list[str]:
+    lines = [
+        "units metal",
+        "atom_style atomic",
+        "atom_modify map array",
+        "boundary p p p",
+        "lattice fcc 5.45",
+        "region box prism 0 4 0 4 0 4 1 1 1" if triclinic else "region box block 0 4 0 4 0 4",
+        "create_box 2 box",
+        "create_atoms 1 box",
+        "mass * 39.948",
+    ]
+    if triclinic:
+        lines.append("change_box all xy delta 0.5 xz delta -0.4 yz delta 0.3 remap units box")
+    lines += pair + THERMO
+    lines += [
+        f"fix relax all box/relax {'tri' if triclinic else 'iso'} 0.0 vmax 0.001",
+        "min_modify line quadratic",
+        "minimize 0.0 1.0e-12 20000 200000",
+        "unfix relax",
+        "run 0",
+    ]
+    return lines
+
+
+@pytest.mark.parametrize("triclinic", [False, True], ids=["iso", "tri"])
+def test_box_relax_finds_the_lattice(tmp_path, triclinic):
+    a0 = lj_fcc_zero_pressure_lattice()
+    got = ok(run_case(tmp_path, relax(triclinic, lj_rgpot("named"))))
+    ref = ok(run_case(tmp_path, relax(triclinic, LJ_CUT)))
+    h = got["cell"]
+    a_got = h[0][0] / 4.0
+    tilt = [h[1][0] / h[1][1], h[2][0] / h[2][2], h[2][1] / h[2][2]]
+    print(f"box/relax triclinic={triclinic}: a {a_got:.8f} A, lattice sum {a0:.8f} A, "
+          f"lj/cut {ref['cell'][0][0] / 4.0:.8f} A, tilt/length {tilt}, "
+          f"P {got['press']}")
+    assert abs(a_got - a0) < 1e-4
+    assert max_abs_diff(sum(h, []), sum(ref["cell"], [])) < 1e-6
+    assert max(abs(p) for p in got["press"]) < 1.0
+    if triclinic:
+        assert max(abs(t - 0.25) for t in tilt) < 1e-5
+
+
+def error_of(tmp_path, commands: list[str]) -> str:
+    result = run_case(tmp_path, commands)
+    assert "error" in result, "the case ran without an error"
+    return result["error"]
+
+
+def test_refuses_other_units(tmp_path):
+    commands = fcc(A_LJ, False) + lj_rgpot("named") + ["run 0"]
+    commands[0] = "units real"
+    assert "needs units metal" in error_of(tmp_path, commands)
+
+
+@pytest.mark.parametrize("compute", ["pe/atom", "stress/atom NULL"])
+def test_refuses_per_atom_requests(tmp_path, compute):
+    commands = fcc(A_LJ, False) + lj_rgpot("named") + [
+        f"compute peratom all {compute}",
+        "compute total all reduce sum c_peratom" + ("[1]" if "stress" in compute else ""),
+        "thermo_style custom step pe c_total",
+        "run 0",
+    ]
+    assert "no per-atom energy or virial" in error_of(tmp_path, commands)
+
+
+def dilute_lj(pair: list[str]) -> list[str]:
+    """A dilute triclinic gas for the engine's default LJ, cutoff 15 A."""
+    return [
+        "units metal",
+        "atom_style atomic",
+        "atom_modify map array",
+        "boundary p p p",
+        "lattice sc 4.0",
+        "region box prism 0 8 0 8 0 8 1 0 1",
+        "create_box 1 box",
+        "create_atoms 1 box",
+        "mass 1 1.0",
+        "change_box all xy delta 0.6 xz delta -0.4 yz delta 0.3 remap units box",
+        *jiggle(0.4),
+        *pair,
+        *THERMO,
+        "run 0",
+    ]
+
+
+@pytest.mark.skipif(not LJ_ENGINE, reason="needs RGPOT_LJ_ENGINE")
+def test_engine_virial_from_strain_difference(tmp_path):
+    """The engine has no stress; its pressure is the strain difference."""
+    engine = [f"plugin load {PLUGIN}", "pair_style rgpot 15.0",
+              f"pair_coeff * * engine {LJ_ENGINE} H"]
+    named = [f"plugin load {PLUGIN}", "pair_style rgpot 15.0",
+             "pair_coeff * * LJ u0 1.0 psi 1.0 cutoff 15.0 H"]
+    got = ok(run_case(tmp_path, dilute_lj(engine)))
+    ref = ok(run_case(tmp_path, dilute_lj(named)))
+    de = abs(got["pe"] - ref["pe"])
+    df = max_abs_diff(got["forces"], ref["forces"])
+    dp = max_abs_diff(got["press"], ref["press"])
+    print(f"engine vs LJ stress: |dE| {de:.3e} eV, max|dF| {df:.3e} eV/A, "
+          f"max|dP| {dp:.3e} bar, P {ref['press']}")
+    assert de < 1e-10
+    assert df < 1e-10
+    assert dp < 1e-5 * max(abs(p) for p in ref["press"])
+
+
+@pytest.mark.skipif(not EVAL, reason="needs RGPOT_EVAL")
+def test_potential_without_stress_uses_strain_difference(tmp_path):
+    """EMT reports no stress. Its pressure is the same strain difference
+    taken outside LAMMPS with rgpot-eval, at the plugin's step 1e-5.
+    EMT is not smooth enough for a step-independent comparison."""
+    h = 1e-5
+    emt = [f"plugin load {PLUGIN}", "pair_style rgpot 6.0", "pair_coeff * * EMT Cu Cu"]
+    got = ok(run_case(tmp_path, fcc(3.61, True) + emt + THERMO + ["run 0"]))
+    fd = []
+    for k in range(6):
+        energies = [rgpot_eval(got, {1: 29}, ["EMT"], e)["pe"]
+                    for e in lower_strains(h)[2 * k: 2 * k + 2]]
+        fd.append(-got["nktv2p"] / got["volume"] * (energies[0] - energies[1]) / (2 * h))
+    dp = max_abs_diff(got["press"], fd)
+    print(f"EMT strain difference: max|dP| {dp:.3e} bar, P {got['press']}")
+    assert dp < 1e-6 * max(abs(p) for p in fd)
+
+
+def test_refuses_unknown_names_and_symbols(tmp_path):
+    base = fcc(A_LJ, False) + [f"plugin load {PLUGIN}", f"pair_style rgpot {CUT}"]
+    assert "unknown rgpot potential" in error_of(tmp_path, base + ["pair_coeff * * Nope Ar Ar"])
+    assert "not an element symbol" in error_of(
+        tmp_path, base + [f"pair_coeff * * LJ u0 {U0} Ar Xx"]
+    )
+    assert "takes no option" in error_of(
+        tmp_path, base + [f"pair_coeff * * LJ depth {U0} Ar Ar"]
+    )
+
+
+def test_refuses_free_boundaries(tmp_path):
+    commands = fcc(A_LJ, False) + lj_rgpot("named") + ["run 0"]
+    commands[3] = "boundary p p f"
+    assert "needs boundary p p p" in error_of(tmp_path, commands)
