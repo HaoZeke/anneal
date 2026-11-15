@@ -175,6 +175,21 @@ rule sc_portfolio_summary:
         """
 
 
+# Same-session baseline against the record-share portfolio. Reads only
+# the session rows. Not part of `rule all`.
+#   snakemake -s workflow/Snakefile sc_session_summary
+rule sc_session_summary:
+    input:
+        "bench/metal-cluster-h2h/sc-session/rows.csv",
+    output:
+        "bench/metal-cluster-h2h/sc-session/summary.csv",
+    shell:
+        """
+        set -euo pipefail
+        python3 scripts/metal_h2h/summarise_sc_session.py
+        """
+
+
 # anneal, openconf and CREST iMTD-GC on drug-like molecules, MMFF94 for the
 # two RDKit arms and GFN-FF for CREST. Not part of `rule all`. The budgets
 # come from the openconf pilot (`enter_bench.sh pilot`):
