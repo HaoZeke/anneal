@@ -4,6 +4,8 @@
 
 // The AVX2 clones and their CPU probe are x86 only. Other targets build the
 // scalar kernels alone.
+// The clones stay static and reached only behind have_avx2_fma(): the ISA
+// audit accepts their AVX only after proving that from the library.
 #if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
 #define RGPOT_AVX2_CLONE 1
 #define RGPOT_TARGET_AVX2 __attribute__((target("avx2,fma")))

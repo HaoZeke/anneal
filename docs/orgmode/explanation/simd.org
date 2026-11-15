@@ -62,8 +62,9 @@ reach them.
 A Lennard-Jones cluster whose bounding-box diagonal sits on the cutoff uses
 =lj_cluster_direct= instead of the Highway kernel.
 On x86-64 that walk calls =lj_avx2= only after =__builtin_cpu_supports("avx2")=.
-=lj_avx2=, =eval_quad=, and =acc_quad= are =target("avx2")=, and the allowlist
-names them for =avx= and =avx2=.
+=lj_avx2=, =eval_quad=, and =acc_quad= are =target("avx2")=.
+The ISA audit proves from the linked library that they are reached only behind
+that check, so the allowlist does not name them.
 The same builtin's initializer, =__cpu_indicator_init=, is named for =xsave=
 because it reads XCR0 with =xgetbv=.
 A larger cluster stays on =simd::lj_force=.
@@ -71,8 +72,10 @@ A larger cluster stays on =simd::lj_force=.
 The static gate in =ci/isa-audit= is what stops a later =-march=native=, a stray
 =-mavx2=, or an intrinsic outside a dispatched function from shipping.
 An instruction above the baseline is allowed only when =rgpot/isa-allow.toml=
-names the function and the feature, or names the vendored file that contains a
-third-party dispatcher.
+names the function and the feature, names the vendored file that contains a
+third-party dispatcher, or the audit proves the function is a dispatched clone:
+a local function entered only behind a libgcc CPU check or from a
+=target_clones= resolver, for the features that check covers.
 On a macOS arm64 slice, ~lse~ and ~rcpc~ are baseline: they are the platform
 atomics, and no other CPU can load that binary.
 The gate does not execute the instruction.
