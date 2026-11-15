@@ -1,0 +1,2 @@
+molecule,hits_anneal,hits_openconf,fisher_odds_ratio,fisher_p,hit_runs_anneal,hit_runs_openconf,mannwhitney_u,mannwhitney_p
+xld,16/24,2/24,22.0000,0.0001,16,2,29.0,0.0784

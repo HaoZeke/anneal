@@ -1,0 +1,2 @@
+molecule,hits_anneal,hits_develop,fisher_odds_ratio,fisher_p,hit_runs_anneal,hit_runs_develop,mannwhitney_u,mannwhitney_p
+xld,16/24,16/24,1.0000,1.0000,16,16,128.0,1.0000

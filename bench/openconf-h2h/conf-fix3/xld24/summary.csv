@@ -1,0 +1,4 @@
+molecule,arm,n,hits,n_3kcal_median,reference_3kcal,calls_median,calls_to_hit_median,delta_min_median_kcal,wall_median_s,pot_median_s,outside_median_s,pot_share,invalid_total,errors
+xld,anneal,24,16/24,16.000000,66,85306.500000,33966.000000,0.000000,4.217709,2.522581,1.695129,0.5996,0,0
+xld,openconf,24,2/24,4.000000,66,85326.000000,10363.000000,2.744289,4.972353,2.237438,2.671197,0.4534,0,0
+xld,develop,24,16/24,16.000000,66,85306.500000,33966.000000,0.000000,4.183209,2.503825,1.685383,0.6002,0,0
