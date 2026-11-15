@@ -1096,3 +1096,15 @@ The manuscript scores 38, 55, 75, 98, and 104 atoms against the published Cambri
 
 Cite `wuQuantileGap2026`.
 
+## 2026-11-15 — Explicit water around small acceptors, and a basin hop for drug carriers
+
+Romero-Montalvo, Salazar-Barrientos, Guevara-Vela, García-García, Francisco, Rocha-Rinza, and Pendás, Molecules 31, 3583 (9 October 2026), doi:10.3390/molecules31203583, search clusters of two to twelve water molecules around five small polar hydrogen-bond acceptors. The abstract names conformational searches, electronic-structure calculations, and an Interacting Quantum Atoms decomposition. Binding and water-deformation energies converge at about ten water molecules. Solute--water contacts sit in the first shell, within about 3.5 Å of the heteroatom. Except for trimethylamine, the strongest solute--water contact is weaker than the average hydrogen bond among the water molecules. Multiacceptor sites form a water network around one acceptor.
+
+Guevara-Vela, Salazar-Barrientos, and Rocha-Rinza are authors of the silicon and NaPb12 searches already filed as `salazarSilicon2026` and `guevaraVelaNapb2026`. This paper is explicit water around an organic acceptor. It gives no TIP4P energy and no GFN2-xTB hexamer count, so it does not contradict the Wales--Hodges references, 121 of 192, or 97 of 192. Ten water molecules around a solute is not the bare hexamer. It does not warrant a head-to-head on the Lennard-Jones maps or on the CREST table.
+
+Soliman, International Journal of Molecular Sciences 27, 9832 (2 November 2026), doi:10.3390/ijms27219832, releases a module of Drug Design Studio for drug--nanocarrier and drug--drug complexes. From a SMILES string the module builds conformers and runs a geometry-aware global search. The abstract names that search as regime-adaptive random restart and basin-hopping Monte Carlo minimisation. The energy is a molecular-mechanics interaction, in the gas phase or in implicit water, split into van der Waals, electrostatic, and non-polar terms. On twenty-nine complexes across four association regimes the search recovers the experimental association geometry. The regimes named are cyclodextrin inclusion, dendrimer-surface complexation, carbon-nanomaterial adsorption, and carrier-free cocrystals.
+
+The manuscript's basin hop is a free Lennard-Jones or water cluster, and the hexamer comparison is GFN2-xTB against CREST 3.0.2. This module does not report those energies, 121 of 192, or 97 of 192. A molecular-mechanics carrier complex is not the bare hexamer and not a Cambridge cluster. It does not fill the open ASE, AGOX, and GMIN kit. It does not warrant a head-to-head on the sealed maps or on the CREST table.
+
+Cite `romeroHydration2026` and `solimanDds2026`.
+
