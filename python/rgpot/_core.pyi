@@ -352,6 +352,27 @@ class IPIPot:
     @property
     def endpoint(self) -> str: ...
 
+class XcKernel:
+    def __init__(self, name: str) -> None: ...
+
+    @staticmethod
+    def catalog() -> list[str]: ...
+
+    @property
+    def name(self) -> str: ...
+
+    def scal_names(self) -> list[str]: ...
+
+    def contract(self, chi: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], dchi: object | None = None, scal: dict | None = None, lapl_chi: object | None = None, hess_chi: object | None = None) -> Annotated[NDArray[numpy.float64], dict(order='C')]: ...
+
+    @staticmethod
+    def fields_from_density(chi: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], dchi: object, density: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], lapl_chi: object | None = None, hess_chi: object | None = None) -> dict: ...
+
+def neighbor_list(positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], cell: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], cutoff: float, quantities: str = 'ijd', full: bool = False, offsets: bool = False) -> object:
+    """
+    Neighbour arrays selected by quantities. i and j are indices, d is the distance, D is r_j - r_i with shape (npairs, 3), S is the integer shift with that shape. offsets=True appends a CSR row pointer of length natoms + 1 after sorting pairs by i, then j. `i, j, d = rgpot.neighbor_list(positions, cell, cutoff)`.
+    """
+
 class LammpsPot:
     def __call__(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
         """Energy, forces and variance. Positions are Angstrom, energy is eV."""
@@ -383,31 +404,16 @@ class OpenMMPot:
         """Zero crossing stored for OpenMM, nanometres."""
 
 def rgpot_lammps_potential(u0: float = 1.0, cutoff: float = 8.0, psi: float = 1.0, engine_path: str = '') -> LammpsPot:
-    """Shifted 12-6 Lennard-Jones. The constructor dlopens liblj_engine.so (or liblammps_engine.so) and that plugin stays the backend."""
+    """
+    Shifted 12-6 Lennard-Jones. The constructor dlopens liblj_engine.so (or liblammps_engine.so) and that plugin stays the backend. engine_path empty searches those names. u0 is eV; cutoff and psi are Angstrom.
+    """
 
 def rgpot_gromacs_potential(u0: float = 1.0, cutoff: float = 8.0, psi: float = 1.0, engine_path: str = '') -> GromacsPot:
-    """Shifted 12-6 Lennard-Jones. Nanometres and kJ/mol are stored once."""
+    """
+    Shifted 12-6 Lennard-Jones. Nanometres and kJ/mol are stored once. An empty engine_path evaluates in process. A path is a library whose rgpot_md_native_force uses those units.
+    """
 
 def rgpot_openmm_potential(u0: float = 1.0, cutoff: float = 8.0, psi: float = 1.0, engine_path: str = '') -> OpenMMPot:
-    """Shifted 12-6 Lennard-Jones. Nanometres and kJ/mol are stored once."""
-
-class XcKernel:
-    def __init__(self, name: str) -> None: ...
-
-    @staticmethod
-    def catalog() -> list[str]: ...
-
-    @property
-    def name(self) -> str: ...
-
-    def scal_names(self) -> list[str]: ...
-
-    def contract(self, chi: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], dchi: object | None = None, scal: dict | None = None, lapl_chi: object | None = None, hess_chi: object | None = None) -> Annotated[NDArray[numpy.float64], dict(order='C')]: ...
-
-    @staticmethod
-    def fields_from_density(chi: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], dchi: object, density: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], lapl_chi: object | None = None, hess_chi: object | None = None) -> dict: ...
-
-def neighbor_list(positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], cell: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], cutoff: float, quantities: str = 'ijd', full: bool = False, offsets: bool = False) -> object:
     """
-    Neighbour arrays selected by quantities. i and j are indices, d is the distance, D is r_j - r_i with shape (npairs, 3), S is the integer shift with that shape. offsets=True appends a CSR row pointer of length natoms + 1 after sorting pairs by i, then j. `i, j, d = rgpot.neighbor_list(positions, cell, cutoff)`.
+    Shifted 12-6 Lennard-Jones. Nanometres and kJ/mol are stored once. An empty engine_path evaluates in process. A path is a library whose rgpot_md_native_force uses those units, such as libopenmm_engine.so.
     """
