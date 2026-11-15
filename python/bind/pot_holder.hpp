@@ -315,10 +315,11 @@ inline nb::dict result_dict(const FullResult &result) {
 /**
  * One potential object, reentrant (F2, F3).
  *
- * SharedInstance kernels (LJ) keep a single instance: concurrent calls
- * are the same calls the GIL used to serialise. Every other kernel gets
- * one instance per calling thread, created on first use under mu_ while
- * the caller is detached, and destroyed with this object.
+ * A kernel whose caps() report Reentrancy::SharedInstance keeps a single
+ * instance: concurrent calls are the same calls the GIL used to serialise.
+ * Every other kernel gets one instance per calling thread, created on
+ * first use under mu_ while the caller is detached, and destroyed with
+ * this object.
  *
  * The Calculator path does not use this as a session claim. Only the
  * RPC client claims its connection.
@@ -432,6 +433,23 @@ template <typename Fn> auto detached_hvp(Fn &&fn) {
   }
 }
 
+/// (energy, forces, variance) of one call on a bare potential, made
+/// detached (F4). A non-finite energy is a NumericalError, as for the
+/// PotHolder __call__.
+template <typename Pot> nb::tuple call_detached(Pot &pot, const Geom &geom) {
+  double energy = 0.0;
+  double variance = 0.0;
+  AtomMatrix forces;
+  {
+    nb::gil_scoped_release release;
+    std::tie(energy, forces, variance) = pot(geom.pos, geom.types, geom.box);
+  }
+  if (!std::isfinite(energy)) {
+    throw rgbind::NumericalError("energy is not finite");
+  }
+  return nb::make_tuple(energy, matrix_to_numpy(forces), variance);
+}
+
 template <typename Pot>
 void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
   cls.def("caps", [](const PotHolder<Pot> &self) {
@@ -473,7 +491,7 @@ void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
       nb::arg("positions").noconvert(), nb::arg("atom_types"),
       nb::arg("box").noconvert(),
       "Energy, forces, variance, and stress when the kernel writes it. "
-      "F4: the kernel runs detached.");
+      "The kernel runs with the interpreter released.");
   if constexpr (PerAtomPotential<Pot>) {
     cls.def(
         "evaluate_per_atom",
@@ -495,8 +513,8 @@ void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
         nb::arg("box").noconvert(),
         "evaluate() plus energies, shape (N,), eV, summing to energy, and "
         "virials, shape (N, 6), eV, Voigt xx yy zz yz xz xy, summing to "
-        "-volume * stress. A pair term goes half to each atom. F4: the "
-        "kernel runs detached.");
+        "-volume * stress. A pair term goes half to each atom. The kernel "
+        "runs with the interpreter released.");
   }
   cls.def(
       "evaluate_batch",
@@ -512,9 +530,22 @@ void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
         }
         std::vector<BatchInput> inputs;
         inputs.reserve(positions.size());
+        // F6. A wrong dtype or order is a TypeError, not nb::cast_error.
+        auto f64_item = [](nb::handle item, const char *what, size_t i) {
+          try {
+            return nb::cast<F64>(item, false);
+          } catch (const nb::cast_error &) {
+            PyErr_Clear();
+            throw nb::type_error(
+                ("evaluate_batch: " + std::string(what) + "[" +
+                 std::to_string(i) +
+                 "] must be a C-contiguous float64 array")
+                    .c_str());
+          }
+        };
         for (size_t i = 0; i < positions.size(); ++i) {
-          auto pos = nb::cast<F64>(positions[i], false);
-          auto box = nb::cast<F64>(boxes[i], false);
+          auto pos = f64_item(positions[i], "positions", i);
+          auto box = f64_item(boxes[i], "box", i);
           Geom geom = read_geom(pos, atom_types[i], box);
           BatchInput item;
           item.positions = std::move(geom.pos);
@@ -585,8 +616,8 @@ void bind_calls(nb::class_<PotHolder<Pot>> &cls) {
       "products at one geometry cost k + 1 force calls; 'central' costs 2 "
       "a product and is second order in step; 'analytic' uses the "
       "kernel's own product; 'auto' is analytic where the kernel has one, "
-      "otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs "
-      "detached.");
+      "otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the "
+      "interpreter released.");
   cls.def(
       "hvp_centre",
       [](PotHolder<Pot> &self, const F64 &positions, nb::handle atom_types,

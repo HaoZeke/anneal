@@ -1,5 +1,5 @@
 """
-rgpot Python bindings (nanobind): LJ, Fortran kernels, Metatomic dlopen, ExprPot, D3Pot, D4Pot, and XcKernel when the build flags are on. Evaluations release the thread (F4).
+rgpot Python bindings (nanobind). Classes that need a build option, such as ExprPot, D3Pot, D4Pot, XcKernel and the Fortran kernels, are absent when the build left them out. Evaluations release the interpreter while the kernel runs.
 """
 
 from typing import Annotated
@@ -33,7 +33,7 @@ def evaluate_lj(positions: Annotated[NDArray[numpy.float64], dict(order='C', dev
 
 def evaluate_metatomic_dlopen(positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], model_path: str, engine_path: str = '', device: str = 'cpu') -> tuple:
     """
-    Evaluate forces via MetatomicDlopen (dlopen libmetatomic_engine.so). engine_path may be empty to use RGPOT_METATOMIC_ENGINE / package-bundled multi-ABI engine under rgpot/lib/torch-X.Y/. Each call builds its own frontend (F4).
+    Evaluate forces through a Metatomic engine opened with dlopen. With an empty engine_path the search is RGPOT_METATOMIC_ENGINE, METATOMIC_ENGINE, libmetatomic_engine.so on the loader path, then the directories in EON_POTENTIALS_PATH and RGPOT_ENGINE_PATH. rgpot.evaluate_metatomic also tries the engines bundled with the package. Each call builds its own frontend.
     """
 
 class LJPot:
@@ -50,12 +50,12 @@ class LJPot:
 
     def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
-        Energy, forces, variance, and stress when the kernel writes it. F4: the kernel runs detached.
+        Energy, forces, variance, and stress when the kernel writes it. The kernel runs with the interpreter released.
         """
 
     def evaluate_per_atom(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
-        evaluate() plus energies, shape (N,), eV, summing to energy, and virials, shape (N, 6), eV, Voigt xx yy zz yz xz xy, summing to -volume * stress. A pair term goes half to each atom. F4: the kernel runs detached.
+        evaluate() plus energies, shape (N,), eV, summing to energy, and virials, shape (N, 6), eV, Voigt xx yy zz yz xz xy, summing to -volume * stress. A pair term goes half to each atom. The kernel runs with the interpreter released.
         """
 
     def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:
@@ -65,7 +65,7 @@ class LJPot:
 
     def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
         """
-        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
         """
 
     def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
@@ -101,12 +101,12 @@ class LJClusterPot:
 
     def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
-        Energy, forces, variance, and stress when the kernel writes it. F4: the kernel runs detached.
+        Energy, forces, variance, and stress when the kernel writes it. The kernel runs with the interpreter released.
         """
 
     def evaluate_per_atom(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
-        evaluate() plus energies, shape (N,), eV, summing to energy, and virials, shape (N, 6), eV, Voigt xx yy zz yz xz xy, summing to -volume * stress. A pair term goes half to each atom. F4: the kernel runs detached.
+        evaluate() plus energies, shape (N,), eV, summing to energy, and virials, shape (N, 6), eV, Voigt xx yy zz yz xz xy, summing to -volume * stress. A pair term goes half to each atom. The kernel runs with the interpreter released.
         """
 
     def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:
@@ -116,7 +116,7 @@ class LJClusterPot:
 
     def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
         """
-        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
         """
 
     def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
@@ -152,12 +152,12 @@ class MorsePot:
 
     def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
-        Energy, forces, variance, and stress when the kernel writes it. F4: the kernel runs detached.
+        Energy, forces, variance, and stress when the kernel writes it. The kernel runs with the interpreter released.
         """
 
     def evaluate_per_atom(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
-        evaluate() plus energies, shape (N,), eV, summing to energy, and virials, shape (N, 6), eV, Voigt xx yy zz yz xz xy, summing to -volume * stress. A pair term goes half to each atom. F4: the kernel runs detached.
+        evaluate() plus energies, shape (N,), eV, summing to energy, and virials, shape (N, 6), eV, Voigt xx yy zz yz xz xy, summing to -volume * stress. A pair term goes half to each atom. The kernel runs with the interpreter released.
         """
 
     def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:
@@ -167,7 +167,7 @@ class MorsePot:
 
     def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
         """
-        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
         """
 
     def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
@@ -198,7 +198,7 @@ class SWPot:
 
     def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
-        Energy, forces, variance, and stress when the kernel writes it. F4: the kernel runs detached.
+        Energy, forces, variance, and stress when the kernel writes it. The kernel runs with the interpreter released.
         """
 
     def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:
@@ -208,7 +208,7 @@ class SWPot:
 
     def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
         """
-        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
         """
 
     def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
@@ -239,7 +239,7 @@ class EDIPPot:
 
     def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
-        Energy, forces, variance, and stress when the kernel writes it. F4: the kernel runs detached.
+        Energy, forces, variance, and stress when the kernel writes it. The kernel runs with the interpreter released.
         """
 
     def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:
@@ -249,7 +249,7 @@ class EDIPPot:
 
     def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
         """
-        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
         """
 
     def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
@@ -280,7 +280,7 @@ class LenoskyPot:
 
     def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
-        Energy, forces, variance, and stress when the kernel writes it. F4: the kernel runs detached.
+        Energy, forces, variance, and stress when the kernel writes it. The kernel runs with the interpreter released.
         """
 
     def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:
@@ -290,7 +290,7 @@ class LenoskyPot:
 
     def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
         """
-        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
         """
 
     def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
@@ -321,7 +321,7 @@ class TersoffPot:
 
     def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
-        Energy, forces, variance, and stress when the kernel writes it. F4: the kernel runs detached.
+        Energy, forces, variance, and stress when the kernel writes it. The kernel runs with the interpreter released.
         """
 
     def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:
@@ -331,7 +331,7 @@ class TersoffPot:
 
     def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
         """
-        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
         """
 
     def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
@@ -362,7 +362,7 @@ class EAMAlPot:
 
     def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
-        Energy, forces, variance, and stress when the kernel writes it. F4: the kernel runs detached.
+        Energy, forces, variance, and stress when the kernel writes it. The kernel runs with the interpreter released.
         """
 
     def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:
@@ -372,7 +372,7 @@ class EAMAlPot:
 
     def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
         """
-        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
         """
 
     def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
@@ -403,7 +403,7 @@ class FeHePot:
 
     def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
-        Energy, forces, variance, and stress when the kernel writes it. F4: the kernel runs detached.
+        Energy, forces, variance, and stress when the kernel writes it. The kernel runs with the interpreter released.
         """
 
     def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:
@@ -413,7 +413,7 @@ class FeHePot:
 
     def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
         """
-        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
         """
 
     def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
@@ -444,7 +444,7 @@ class CuH2Pot:
 
     def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
-        Energy, forces, variance, and stress when the kernel writes it. F4: the kernel runs detached.
+        Energy, forces, variance, and stress when the kernel writes it. The kernel runs with the interpreter released.
         """
 
     def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:
@@ -454,7 +454,7 @@ class CuH2Pot:
 
     def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
         """
-        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
         """
 
     def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
@@ -485,7 +485,7 @@ class WaterHPot:
 
     def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
-        Energy, forces, variance, and stress when the kernel writes it. F4: the kernel runs detached.
+        Energy, forces, variance, and stress when the kernel writes it. The kernel runs with the interpreter released.
         """
 
     def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:
@@ -495,7 +495,7 @@ class WaterHPot:
 
     def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
         """
-        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
         """
 
     def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
@@ -565,7 +565,7 @@ class D3Pot:
 
     def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
-        Energy, forces, variance, and stress when the kernel writes it. F4: the kernel runs detached.
+        Energy, forces, variance, and stress when the kernel writes it. The kernel runs with the interpreter released.
         """
 
     def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:
@@ -575,7 +575,7 @@ class D3Pot:
 
     def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
         """
-        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
         """
 
     def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
@@ -606,7 +606,7 @@ class D4Pot:
 
     def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
-        Energy, forces, variance, and stress when the kernel writes it. F4: the kernel runs detached.
+        Energy, forces, variance, and stress when the kernel writes it. The kernel runs with the interpreter released.
         """
 
     def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:
@@ -616,7 +616,7 @@ class D4Pot:
 
     def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
         """
-        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
         """
 
     def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
@@ -655,7 +655,7 @@ class ExprPot:
 
     def evaluate(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> dict:
         """
-        Energy, forces, variance, and stress when the kernel writes it. F4: the kernel runs detached.
+        Energy, forces, variance, and stress when the kernel writes it. The kernel runs with the interpreter released.
         """
 
     def evaluate_batch(self, positions: list, atom_types: list, box: list, n_threads: int = 0) -> list:
@@ -665,7 +665,7 @@ class ExprPot:
 
     def hvp(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], direction: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], step: float = 0.0, scheme: str = 'auto') -> Annotated[NDArray[numpy.float64], dict(order='C')]:
         """
-        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. F4: the kernel runs detached.
+        Hessian-vector product H @ direction, shape (N, 3). 'forward' reuses the forces of the last geometry this object evaluated, so k products at one geometry cost k + 1 force calls; 'central' costs 2 a product and is second order in step; 'analytic' uses the kernel's own product; 'auto' is analytic where the kernel has one, otherwise forward. step 0 is 1e-3 Angstrom. The kernel runs with the interpreter released.
         """
 
     def hvp_centre(self, positions: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)], atom_types: object, box: Annotated[NDArray[numpy.float64], dict(order='C', device='cpu', writable=False)]) -> tuple:
@@ -756,7 +756,7 @@ class OpenMMPot:
 
 def rgpot_lammps_potential(u0: float = 1.0, cutoff: float = 8.0, psi: float = 1.0, engine_path: str = '') -> LammpsPot:
     """
-    Shifted 12-6 Lennard-Jones. The constructor dlopens liblj_engine.so (or liblammps_engine.so) and that plugin stays the backend. engine_path empty searches those names. u0 is eV; cutoff and psi are Angstrom.
+    Shifted 12-6 Lennard-Jones. The constructor dlopens an engine plugin, which stays the backend. engine_path empty searches RGPOT_LAMMPS_ENGINE, LAMMPS_ENGINE, liblammps_engine.so, then liblj_engine.so. u0 is eV; cutoff and psi are Angstrom.
     """
 
 def rgpot_gromacs_potential(u0: float = 1.0, cutoff: float = 8.0, psi: float = 1.0, engine_path: str = '') -> GromacsPot:

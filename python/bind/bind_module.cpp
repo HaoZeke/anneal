@@ -82,6 +82,19 @@ void translate_invalid_argument(const std::exception_ptr &ptr, void *) {
   }
 }
 
+#ifdef RGPOT_HAS_DFTD3
+rgpot::D3Damping d3_damping(const std::string &name) {
+  if (name == "bj" || name == "BJ") {
+    return rgpot::D3Damping::BJ;
+  }
+  if (name == "zero" || name == "Zero") {
+    return rgpot::D3Damping::Zero;
+  }
+  throw std::invalid_argument("D3 damping must be 'bj' or 'zero', got '" +
+                              name + "'");
+}
+#endif
+
 #ifdef RGPOT_HAS_EXPR
 struct ChildSpec {
   std::string name;
@@ -216,9 +229,7 @@ std::unique_ptr<rgpot::PotentialBase> child_from_spec(const ChildSpec &spec) {
     rgpot::D3Config cfg;
     cfg.functional = spec.functional;
     cfg.atm = spec.atm;
-    cfg.damping = (spec.damping == "zero" || spec.damping == "Zero")
-                      ? rgpot::D3Damping::Zero
-                      : rgpot::D3Damping::BJ;
+    cfg.damping = d3_damping(spec.damping);
     return std::make_unique<rgpot::D3Pot>(cfg);
   }
 #endif
@@ -452,9 +463,10 @@ NB_MODULE(_core, m) {
   rgbind::install_policy(m);
   nb::register_exception_translator(translate_invalid_argument);
 
-  m.doc() = "rgpot Python bindings (nanobind): LJ, Fortran kernels, Metatomic "
-            "dlopen, ExprPot, D3Pot, D4Pot, and XcKernel when the build flags "
-            "are on. Evaluations release the thread (F4).";
+  m.doc() = "rgpot Python bindings (nanobind). Classes that need a build "
+            "option, such as ExprPot, D3Pot, D4Pot, XcKernel and the Fortran "
+            "kernels, are absent when the build left them out. Evaluations "
+            "release the interpreter while the kernel runs.";
   m.attr("__version__") = RGPOT_PY_VERSION;
 #ifdef RGPOT_HAS_METATOMIC
   m.attr("has_metatomic_dlopen") = true;
@@ -566,10 +578,12 @@ NB_MODULE(_core, m) {
       nb::arg("positions").noconvert(), nb::arg("atom_types"),
       nb::arg("box").noconvert(), nb::arg("model_path"),
       nb::arg("engine_path") = "", nb::arg("device") = "cpu",
-      "Evaluate forces via MetatomicDlopen (dlopen libmetatomic_engine.so). "
-      "engine_path may be empty to use RGPOT_METATOMIC_ENGINE / "
-      "package-bundled multi-ABI engine under rgpot/lib/torch-X.Y/. "
-      "Each call builds its own frontend (F4).");
+      "Evaluate forces through a Metatomic engine opened with dlopen. With "
+      "an empty engine_path the search is RGPOT_METATOMIC_ENGINE, "
+      "METATOMIC_ENGINE, libmetatomic_engine.so on the loader path, then "
+      "the directories in EON_POTENTIALS_PATH and RGPOT_ENGINE_PATH. "
+      "rgpot.evaluate_metatomic also tries the engines bundled with the "
+      "package. Each call builds its own frontend.");
 #endif
 
 #ifdef RGPOT_HAS_CACHE
@@ -717,10 +731,7 @@ NB_MODULE(_core, m) {
           [](rgpot::StillingerWeberSi &self, const F64 &positions,
              nb::handle atom_types, const F64 &box) {
             auto geom = rgpot::pybind::read_geom(positions, atom_types, box);
-            const auto [energy, forces, variance] =
-                self(geom.pos, geom.types, geom.box);
-            return nb::make_tuple(
-                energy, rgpot::pybind::matrix_to_numpy(forces), variance);
+            return rgpot::pybind::call_detached(self, geom);
           },
           nb::arg("positions").noconvert(), nb::arg("atom_types"),
           nb::arg("box").noconvert(),
@@ -767,10 +778,7 @@ NB_MODULE(_core, m) {
           [](rgpot::TersoffSiC &self, const F64 &positions,
              nb::handle atom_types, const F64 &box) {
             auto geom = rgpot::pybind::read_geom(positions, atom_types, box);
-            const auto [energy, forces, variance] =
-                self(geom.pos, geom.types, geom.box);
-            return nb::make_tuple(
-                energy, rgpot::pybind::matrix_to_numpy(forces), variance);
+            return rgpot::pybind::call_detached(self, geom);
           },
           nb::arg("positions").noconvert(), nb::arg("atom_types"),
           nb::arg("box").noconvert(),
@@ -789,13 +797,12 @@ NB_MODULE(_core, m) {
       "__init__",
       [](PotHolder<rgpot::D3Pot> *self, const std::string &damping,
          const std::string &functional, bool atm) {
+        const rgpot::D3Damping form = d3_damping(damping);
         new (self) PotHolder<rgpot::D3Pot>([=] {
           rgpot::D3Config cfg;
           cfg.functional = functional;
           cfg.atm = atm;
-          cfg.damping = (damping == "zero" || damping == "Zero")
-                            ? rgpot::D3Damping::Zero
-                            : rgpot::D3Damping::BJ;
+          cfg.damping = form;
           return std::make_unique<rgpot::D3Pot>(cfg);
         });
       },
@@ -877,16 +884,7 @@ NB_MODULE(_core, m) {
           [](rgpot::IPIPot &self, const F64 &positions, nb::handle atom_types,
              const F64 &box) {
             auto geom = rgpot::pybind::read_geom(positions, atom_types, box);
-            double energy = 0.0;
-            double variance = 0.0;
-            AtomMatrix forces;
-            {
-              nb::gil_scoped_release release;
-              std::tie(energy, forces, variance) =
-                  self(geom.pos, geom.types, geom.box);
-            }
-            return nb::make_tuple(
-                energy, rgpot::pybind::matrix_to_numpy(forces), variance);
+            return rgpot::pybind::call_detached(self, geom);
           },
           nb::arg("positions").noconvert(), nb::arg("atom_types"),
           nb::arg("box").noconvert())
@@ -1224,10 +1222,10 @@ NB_MODULE(_core, m) {
       nb::rv_policy::take_ownership,
       nb::arg("u0") = 1.0, nb::arg("cutoff") = 8.0, nb::arg("psi") = 1.0,
       nb::arg("engine_path") = "",
-      "Shifted 12-6 Lennard-Jones. The constructor dlopens liblj_engine.so "
-      "(or liblammps_engine.so) and that plugin stays the backend. "
-      "engine_path empty searches those names. u0 is eV; cutoff and psi "
-      "are Angstrom.");
+      "Shifted 12-6 Lennard-Jones. The constructor dlopens an engine "
+      "plugin, which stays the backend. engine_path empty searches "
+      "RGPOT_LAMMPS_ENGINE, LAMMPS_ENGINE, liblammps_engine.so, then "
+      "liblj_engine.so. u0 is eV; cutoff and psi are Angstrom.");
   m.def(
       "rgpot_gromacs_potential",
       [&](double u0, double cutoff, double psi,
