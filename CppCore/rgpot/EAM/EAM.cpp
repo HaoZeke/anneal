@@ -20,6 +20,7 @@
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #if defined(_OPENMP)
@@ -56,7 +57,8 @@ EAM::element_parameters EAM::get_element_parameters(int atomic_number) const {
       return el_params[i];
     }
   }
-  throw 14324;
+  throw std::invalid_argument("EAM: no parameters for atomic number " +
+                              std::to_string(atomic_number));
 }
 
 void EAM::prepare(long N, const double *R, const double *box) {
@@ -459,7 +461,8 @@ const rgpot::eam::ElementSpline &EAM::splineFor(int Z) {
     }
   }
   if (raw == nullptr) {
-    throw 14324;
+    throw std::invalid_argument("EAM: no parameters for atomic number " +
+                                std::to_string(Z));
   }
   tables.push_back(rgpot::eam::makeElementSpline(raw->Z, raw->Dm, raw->alphaM, raw->Rm,
                                                  raw->beta1, raw->beta2, raw->r_cut,
